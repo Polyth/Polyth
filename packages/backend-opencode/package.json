@@ -1,0 +1,12 @@
+{
+  "name": "@polyth/backend-opencode",
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./plugin": "./src/plugin.ts"
+  },
+  "dependencies": {
+    "@polyth/contracts": "0.1.0"
+  }
+}

@@ -1,0 +1,30 @@
+{
+  "name": "polyth",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
+  "scripts": {
+    "build:web": "node apps/web/build.ts",
+    "build": "npm run build:web",
+    "start": "node packages/server/src/index.ts",
+    "dev": "npm run build:web && node packages/server/src/index.ts",
+    "test": "node --test packages/*/test/*.test.ts apps/*/test/*.test.ts"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@types/ws": "^8.5.10",
+    "esbuild": "^0.24.0",
+    "typescript": "^5.7.0"
+  },
+  "dependencies": {
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "ws": "^8.18.0"
+  }
+}
