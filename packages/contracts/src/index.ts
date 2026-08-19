@@ -38,7 +38,7 @@ export interface AssistantChunkData { partId: string; text: string }
 export interface AssistantReasoningChunkData { partId: string; text: string }
 export interface AssistantMessageData { partId: string; text: string; reasoning?: string; tokens?: TokenUsage; cost?: number }
 export interface ToolCallData { callId: string; tool: string; input: JsonObject; partId?: string }
-export interface ToolResultData { callId: string; tool: string; output: string; title?: string; metadata?: JsonObject; attachments?: AttachmentRef[] }
+export interface ToolResultData { callId: string; tool: string; output: string; title?: string; metadata?: JsonObject; attachments?: AttachmentRef[]; input?: JsonObject }
 export interface ToolErrorData { callId: string; tool: string; error: string }
 export interface PermissionRequestData { requestId: string; permission: string; patterns: string[]; metadata?: JsonObject; tool?: string }
 export interface PermissionResolvedData { requestId: string; reply: "once" | "always" | "reject" }
@@ -49,6 +49,33 @@ export interface TokenUsage { input: number; output: number; reasoning?: number;
 export interface UsageRecordedData { model: ModelRef; tokens: TokenUsage; cost?: number }
 export interface GoalAttachedData { objective: string; budgetTokens?: number; maxContinuations?: number }
 export interface GoalAuditData { verdict: "keep" | "done" | "stuck"; consecutiveStuck: number; note?: string }
+
+// ---------------------------------------------------------------- M3 workflows: multirun / fusion / walkthrough
+
+export type MultirunRunStatus = "pending" | "running" | "completed" | "failed";
+export interface MultirunRunDto {
+  id: string; model?: ModelRef; agent?: string; status: MultirunRunStatus;
+  output: string; tokens?: TokenUsage; cost?: number; error?: string;
+}
+export interface MultirunDto { id: string; prompt: string; runs: MultirunRunDto[]; pickedRunId?: string }
+
+export interface MultirunStartedData { multirunId: string; prompt: string; runs: Array<{ runId: string; model?: ModelRef; agent?: string }> }
+export interface MultirunRunProgressData { multirunId: string; runId: string; status: MultirunRunStatus; output: string; tokens?: TokenUsage; cost?: number; error?: string }
+export interface MultirunCompletedData { multirunId: string }
+export interface MultirunPickedData { multirunId: string; runId: string }
+
+export interface FusionWeightDto { model: string; weight: number }
+export type FusionStatus = "running" | "completed" | "failed";
+export interface FusionDto { id: string; answer: string; weights: FusionWeightDto[]; disagreements: string[]; status: FusionStatus; error?: string }
+
+export interface FusionStartedData { fusionId: string; prompt: string; models: string[] }
+export interface FusionCompletedData { fusionId: string; status: FusionStatus; answer: string; weights: FusionWeightDto[]; disagreements: string[]; error?: string }
+
+export type WalkthroughStepStatus = "pending" | "approved" | "rejected";
+export interface WalkthroughStepDto { file: string; explanation: string; diff: string; status: WalkthroughStepStatus }
+
+export interface WalkthroughStepApprovedData { stepIndex: number; file: string }
+export interface WalkthroughStepRejectedData { stepIndex: number; file: string }
 
 export interface AttachmentRef { id: string; name: string; mime: string; size: number; url?: string }
 export interface ModelRef { providerID: string; modelID: string }
@@ -85,6 +112,8 @@ export interface CreateSessionInput {
   worktreeId?: string;
   /** absolute path of a git worktree; when set the session's runtime uses it as cwd */
   worktreePath?: string;
+  /** Existing OpenCode session to adopt rather than create. Internal adapter seam. */
+  backendSessionId?: string;
 }
 export interface SessionRef { id: string }
 export interface TurnRef { turnId: string }
@@ -99,6 +128,7 @@ export interface SessionProjection {
   createdAt: number; updatedAt: number;
   lastTurnAt?: number; tokenTotals?: TokenUsage; costTotal?: number;
   worktreePath?: string;
+  backendSessionId?: string;
   goal?: { objective: string; status: string };
 }
 
@@ -110,6 +140,7 @@ export interface SessionService {
   archive(sessionId: string): Promise<void>;
   restore(sessionId: string): Promise<void>;
   list(projectId?: string): Promise<SessionProjection[]>;
+  sync(projectId: string): Promise<SessionProjection[]>;
   snapshot(sessionId: string): Promise<SessionProjection>;
   events(sessionId: string, afterSeq?: number): Promise<SessionEvent[]>;
   replyPermission(sessionId: string, requestId: string, reply: "once" | "always" | "reject"): Promise<void>;
@@ -134,6 +165,8 @@ export interface SessionPersistence {
 export interface ModelDescriptor { providerID: string; modelID: string; name: string; context?: number; cost?: { input: number; output: number }; capabilities?: string[] }
 export interface AgentDescriptor { name: string; description?: string; mode: "primary" | "subagent" | "all" }
 export interface RuntimeCapabilities { streaming: boolean; permissions: boolean; questions: boolean; compaction: boolean; subagents: boolean }
+export interface RuntimeSession { id: string; title: string; parentId?: string; createdAt: number; updatedAt: number }
+export interface RuntimeSessionMessage { role: "user" | "assistant"; text: string; reasoning?: string }
 
 export interface CanonicalTurnRequest {
   sessionId: string;       // canonical session id; adapter maps to backend id
@@ -160,7 +193,9 @@ export interface AgentRuntime {
   capabilities(): Promise<RuntimeCapabilities>;
   models(): Promise<ModelDescriptor[]>;
   agents(): Promise<AgentDescriptor[]>;
-  ensureSession(canonical: CreateSessionInput & { sessionId: string; cwd: string }): Promise<void>;
+  ensureSession(canonical: CreateSessionInput & { sessionId: string; cwd: string }): Promise<string>;
+  sessions(): Promise<RuntimeSession[]>;
+  history(sessionId: string): Promise<RuntimeSessionMessage[]>;
   startTurn(req: CanonicalTurnRequest): Promise<void>; // events flow via onEvent
   abort(sessionId: string): Promise<void>;
   replyPermission(sessionId: string, requestId: string, reply: "once" | "always" | "reject"): Promise<void>;
@@ -253,6 +288,61 @@ export interface PluginContext {
 export interface Plugin<TConfig = JsonObject> {
   manifest: PluginManifest;
   setup(ctx: PluginContext, config: TConfig): void | Promise<void>;
+}
+
+// ---------------------------------------------------------------- terminal (M3)
+
+export interface TerminalCreateInput {
+  projectId: string;
+  /** override cwd; defaults to the project path (UI passes a session's worktreePath here) */
+  cwd?: string;
+  /** command to run; omitted = interactive shell */
+  cmd?: string;
+  /** when set, terminal/created|closed events are appended to this session's log */
+  sessionId?: string;
+  cols?: number;
+  rows?: number;
+}
+
+export interface TerminalInfo {
+  id: string;
+  title: string;
+  cwd: string;
+  projectId: string;
+  createdAt: number;
+  running: boolean;
+}
+
+export interface TerminalCreatedData {
+  terminalId: string;
+  projectId: string;
+  cwd: string;
+  cmd?: string;
+}
+
+export interface TerminalClosedData {
+  terminalId: string;
+  projectId: string;
+  exitCode: number | null;
+}
+
+// ---------------------------------------------------------------- preview (M3)
+
+export type PreviewStatus = "off" | "starting" | "running";
+
+export interface PreviewState {
+  url: string | null;
+  status: PreviewStatus;
+  port?: number;
+  command?: string;
+}
+
+export interface PreviewStartInput {
+  projectId: string;
+  /** override detected script; run as a shell command with PORT env set */
+  command?: string;
+  /** explicit port; omitted = OS-assigned free port */
+  port?: number;
 }
 
 // Well-known capability keys

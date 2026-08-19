@@ -1,0 +1,149 @@
+// Project-scoped terminal sessions. Pure host logic (no HTTP/WS — the server
+// maps routes onto this, like git/files). Each session is a spawned user
+// shell; stdin/stdout/stderr are piped, so bidirectional I/O works for line
+// commands.
+//
+// ponytail: no real PTY (node-pty is not installed). Full-screen apps (vim,
+// htop) will misrender and resize only forwards SIGWINCH. Upgrade path: `npm i
+// node-pty`, spawn via pty.spawn(shell, ["-i"], {cwd, cols, rows, env}) and
+// wire onData/onExit — the service surface below stays identical.
+import { spawn, type ChildProcess } from "node:child_process";
+import { randomUUID } from "node:crypto";
+import { basename } from "node:path";
+import type { Disposable, TerminalCreateInput, TerminalInfo } from "@polyth/contracts";
+
+interface TermSession {
+  id: string;
+  projectId: string;
+  cwd: string;
+  title: string;
+  cmd?: string;
+  proc: ChildProcess;
+  createdAt: number;
+  running: boolean;
+}
+
+export interface TerminalService {
+  create(input: TerminalCreateInput): Promise<{ id: string }>;
+  write(id: string, data: string): void;
+  resize(id: string, cols: number, rows: number): void;
+  close(id: string): Promise<void>;
+  list(projectId?: string): TerminalInfo[];
+  get(id: string): TerminalInfo | undefined;
+  /** child output (stdout+stderr merged) */
+  onData(cb: (id: string, data: string) => void): Disposable;
+  /** fired on process exit (also after close()); last callback wins for an id */
+  onExit(cb: (id: string, exitCode: number | null) => void): Disposable;
+}
+
+const defaultShell = (): string => process.env.SHELL || "/bin/sh";
+
+export function createTerminalService(): TerminalService {
+  const sessions = new Map<string, TermSession>();
+  const dataCbs = new Set<(id: string, data: string) => void>();
+  const exitCbs = new Set<(id: string, exitCode: number | null) => void>();
+
+  const killGroup = (proc: ChildProcess, signal: NodeJS.Signals) => {
+    if (proc.pid === undefined) return;
+    try { process.kill(-proc.pid, signal); } catch { /* already gone */ }
+    try { proc.kill(signal); } catch { /* already gone */ }
+  };
+
+  const emitExit = (s: TermSession, exitCode: number | null) => {
+    if (!s.running) return;
+    s.running = false;
+    for (const cb of exitCbs) cb(s.id, exitCode);
+  };
+
+  const service: TerminalService = {
+    async create(input) {
+      const id = randomUUID();
+      const cwd = input.cwd ?? input.projectId; // route resolves projectId -> path
+      const title = basename(cwd) || cwd;
+      const env = { ...process.env, TERM: "xterm-256color" };
+      const proc = input.cmd
+        ? spawn(input.cmd, { cwd, shell: true, env })
+        : spawn(defaultShell(), ["-i"], { cwd, env });
+      proc.on("error", () => emitExit(s, null));
+      proc.on("exit", (code) => emitExit(s, typeof code === "number" ? code : null));
+      // no real tty -> bash -i prints a "cannot set terminal process group"
+      // warning to stderr; harmless, forwarded to the client like any output
+      const push = (chunk: Buffer) => {
+        if (!s.running) return;
+        for (const cb of dataCbs) cb(id, chunk.toString("utf8"));
+      };
+      proc.stdout?.on("data", push);
+      proc.stderr?.on("data", push);
+      const s: TermSession = {
+        id, projectId: input.projectId, cwd, title, cmd: input.cmd,
+        proc, createdAt: Date.now(), running: true,
+      };
+      sessions.set(id, s);
+      return { id };
+    },
+
+    write(id, data) {
+      const s = sessions.get(id);
+      if (!s || !s.running) return;
+      try { s.proc.stdin?.write(data); } catch { /* process gone */ }
+    },
+
+    resize(id, cols, rows) {
+      const s = sessions.get(id);
+      if (!s || !s.running) return;
+      // ponytail: no PTY means no real terminal size; SIGWINCH at least wakes
+      // the shell (bash re-reads LINES/COLUMNS). node-pty gives true resize.
+      try { killGroup(s.proc, "SIGWINCH"); } catch { /* ignore */ }
+    },
+
+    async close(id) {
+      const s = sessions.get(id);
+      if (!s) return;
+      killGroup(s.proc, "SIGTERM");
+      const grace = setTimeout(() => killGroup(s.proc, "SIGKILL"), 1000);
+      const onExit = () => { clearTimeout(grace); sessions.delete(id); };
+      if (!s.running) { onExit(); return; }
+      // wait for the exit event, with a hard fallback
+      const wait = new Promise<void>((res) => {
+        const timer = setTimeout(() => { sessions.delete(id); res(); }, 2000);
+        const sub = service.onExit((exitedId) => {
+          if (exitedId !== id) return;
+          clearTimeout(timer);
+          sub.dispose();
+          sessions.delete(id);
+          res();
+        });
+      });
+      await wait;
+      if (!sessions.has(id)) return;
+      onExit();
+    },
+
+    list(projectId) {
+      const out: TerminalInfo[] = [];
+      for (const s of sessions.values()) {
+        if (projectId && s.projectId !== projectId) continue;
+        out.push({ id: s.id, title: s.title, cwd: s.cwd, projectId: s.projectId, createdAt: s.createdAt, running: s.running });
+      }
+      return out;
+    },
+
+    get(id) {
+      const s = sessions.get(id);
+      if (!s) return undefined;
+      return { id: s.id, title: s.title, cwd: s.cwd, projectId: s.projectId, createdAt: s.createdAt, running: s.running };
+    },
+
+    onData(cb) {
+      dataCbs.add(cb);
+      return { dispose: () => { dataCbs.delete(cb); } };
+    },
+
+    onExit(cb) {
+      exitCbs.add(cb);
+      return { dispose: () => { exitCbs.delete(cb); } };
+    },
+  };
+
+  return service;
+}

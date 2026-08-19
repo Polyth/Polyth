@@ -100,6 +100,19 @@ test("mkdir creates a project-relative folder and rejects escapes", async () => 
   });
 });
 
+test("rename and remove stay inside the project", async () => {
+  await withRoot(async (root) => {
+    await files.write(root, "old.txt", "hello");
+    await files.rename(root, "old.txt", "new.txt");
+    assert.equal((await files.read(root, "new.txt")).content, "hello");
+    await files.remove(root, "new.txt");
+    await assert.rejects(() => files.read(root, "new.txt"));
+    await assert.rejects(() => files.rename(root, "../old", "new"), /escapes/i);
+    await files.write(root, "source.txt", "x");
+    await assert.rejects(() => files.rename(root, "source.txt", "../new"), /escapes/i);
+  });
+});
+
 test("search matches filename substring, skips .git and node_modules, respects limit", async () => {
   await withRoot(async (root) => {
     await mkdir(path.join(root, "src"));

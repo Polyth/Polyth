@@ -180,6 +180,7 @@ const startFake = async () => {
       return json(200, { id: `ses_fake_${sessionSeq}`, title: "t", directory: "/tmp" });
     }
     if (req.method === "GET" && path === "/session") return json(200, []);
+    if (req.method === "GET" && path.match(/^\/session\/[^/]+\/message$/)) return json(200, []);
     const msg = path.match(/^\/session\/([^/]+)\/(message|prompt_async)$/);
     if (req.method === "POST" && msg) {
       const sessionID = msg[1]!;
@@ -284,6 +285,8 @@ test("models/agents flatten from verified /provider and /agent shapes", async ()
     const caps = await runtime.capabilities();
     assert.equal(caps.streaming, true);
     assert.equal(caps.questions, true);
+    assert.deepEqual(await runtime.sessions(), []);
+    assert.deepEqual(await runtime.history("ses_fake_1"), []);
   } finally {
     await runtime.dispose();
     fake.server.close();

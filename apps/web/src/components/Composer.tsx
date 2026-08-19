@@ -27,6 +27,7 @@ export default function Composer() {
   const [agentValue, setAgentValue] = useState("");
   const models = useStore((s) => s.models);
   const agents = useStore((s) => s.agents);
+  const session = useStore((s) => s.sessions.find((x) => x.id === s.activeSessionId) ?? null);
   const model = useActiveModel();
   const working = model.turn?.status === "working";
 
@@ -191,7 +192,7 @@ export default function Composer() {
       </div>
       <div className="composer-row">
         <select value={modelValue} onChange={(e) => setModelValue(e.target.value)} title="Model">
-          <option value="">Model: Default</option>
+          <option value="">{session?.model ? session.model.modelID : "Model: Default"}</option>
           {[...groups.entries()].map(([provider, ms]) => (
             <optgroup key={provider} label={provider}>
               {ms.map((m) => (
@@ -203,7 +204,7 @@ export default function Composer() {
           ))}
         </select>
         <select value={agentValue} onChange={(e) => setAgentValue(e.target.value)} title="Agent">
-          <option value="">Agent: Default</option>
+          <option value="">{session?.agent ? `${session.agent} agent` : "Agent: Default"}</option>
           {agents.map((a) => (
             <option key={a.name} value={a.name}>
               {a.name}

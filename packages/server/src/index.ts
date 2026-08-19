@@ -11,12 +11,22 @@ import { createGoalService, type GoalService } from "@polyth/goals";
 import { createFileService } from "@polyth/files";
 import { createCommandService } from "@polyth/commands";
 import { createGitService } from "@polyth/git";
+import { createTerminalService } from "@polyth/terminal";
+import { createPreviewService } from "@polyth/preview";
+import { createMultirunService } from "@polyth/multirun";
+import { createFusionService, synthesisPrompt } from "@polyth/fusion";
 import { createProjectService } from "./projects.ts";
 import { createSessionService, type Broadcaster, type RuntimePool } from "./sessions.ts";
 import { createHttpServer, type RouteHandler } from "./http.ts";
 import { goalRoutes } from "./routes/goals.ts";
 import { workspaceRoutes } from "./routes/workspace.ts";
 import { gitRoutes } from "./routes/git.ts";
+import { terminalRoutes, attachTerminalWs } from "./routes/terminal.ts";
+import { previewRoutes } from "./routes/preview.ts";
+import { multirunRoutes } from "./routes/multirun.ts";
+import { fusionRoutes } from "./routes/fusion.ts";
+import { walkthroughRoutes } from "./routes/walkthrough.ts";
+import { createMultirunRunOne } from "./multirunRunner.ts";
 import { oneShot } from "./oneshot.ts";
 import { attachWs } from "./ws.ts";
 
@@ -92,6 +102,8 @@ export async function boot(opts: BootOptions = {}) {
   const files = createFileService();
   const git = createGitService();
   const commands = createCommandService();
+  const terminals = createTerminalService();
+  const preview = createPreviewService();
   const parseModel = (raw?: string) => {
     if (!raw || !raw.includes("/")) return undefined;
     const i = raw.indexOf("/");
@@ -140,6 +152,43 @@ export async function boot(opts: BootOptions = {}) {
     },
   });
 
+  // --- multirun/fusion (M3): both resolve the parent session's project/runtime
+  // lazily, the same way goals.complete does, so they work for any session.
+  const resolveSessionRuntime = async (sessionId: string) => {
+    const proj = await store.projection(sessionId);
+    const project = proj ? await projects.get(proj.projectId) : null;
+    const rt = await runtimes.forProject(proj?.projectId ?? "__default__");
+    return { rt, cwd: project?.path ?? process.cwd(), model: proj?.model, agent: proj?.agent };
+  };
+
+  const multirun = createMultirunService({
+    append: async (sessionId, type, data) => {
+      const ev = await store.append(sessionId, type, data, { ignorable: true });
+      broadcast.event(ev);
+      return ev;
+    },
+    runOne: createMultirunRunOne(resolveSessionRuntime),
+  });
+
+  const fusion = createFusionService({
+    append: async (sessionId, type, data) => {
+      const ev = await store.append(sessionId, type, data, { ignorable: true });
+      broadcast.event(ev);
+      return ev;
+    },
+    runModel: async ({ sessionId, model, prompt }) => {
+      const { rt, cwd } = await resolveSessionRuntime(sessionId);
+      return oneShot(rt, { cwd, prompt, ...(parseModel(model) ? { model: parseModel(model)! } : {}) });
+    },
+    synthesize: async ({ sessionId, prompt, answers }) => {
+      const { rt, cwd, model } = await resolveSessionRuntime(sessionId);
+      return oneShot(rt, {
+        cwd, prompt: synthesisPrompt(prompt, answers),
+        ...(smallModel() ? { model: smallModel()! } : model ? { model } : {}),
+      });
+    },
+  });
+
   const routes: RouteHandler[] = [
     async (rc) => {
       // lazily rehydrate goal state from the log before the goals routes answer
@@ -173,20 +222,40 @@ export async function boot(opts: BootOptions = {}) {
         return text.replace(/^```[a-z]*\n?|```$/g, "").trim();
       },
     }),
+    terminalRoutes({
+      projects, terminals,
+      // invariant #4: terminals spawned from a session context are logged
+      events: {
+        append: async (sessionId, type, data) => {
+          const ev = await store.append(sessionId, type, data, { ignorable: true, producerPlugin: "terminal" });
+          broadcast.event(ev);
+          return ev;
+        },
+      },
+    }),
+    previewRoutes({ projects, preview }),
+    multirunRoutes(multirun),
+    fusionRoutes(fusion),
+    walkthroughRoutes({ store, broadcast }),
   ];
 
   const server = createHttpServer({
     sessions, projects, runtimes, routes,
-    capabilities: () => ["polyth.sessions", "polyth.sessionPersistence", "polyth.projects", "polyth.agentRuntime", "polyth.goals", "polyth.files", "polyth.commands", "polyth.git", "polyth.worktrees"],
+    capabilities: () => ["polyth.sessions", "polyth.sessionPersistence", "polyth.projects", "polyth.agentRuntime", "polyth.goals", "polyth.files", "polyth.commands", "polyth.git", "polyth.worktrees", "polyth.terminal", "polyth.preview", "polyth.multirun", "polyth.fusion", "polyth.walkthrough"],
     webDist: resolve(__dirname, "../../../apps/web/dist"),
     version: "0.1.0",
   });
+  // order matters: /ws (session gateway) aborts upgrades whose path it does
+  // not match, so the terminal channel must claim /ws/terminal/:id first
+  attachTerminalWs(server, { terminals });
   live = attachWs(server, sessions);
 
   await new Promise<void>((res) => server.listen(port, res));
   console.log(`[polyth] server on http://127.0.0.1:${port}  data=${dataDir}`);
 
   const shutdown = async () => {
+    for (const t of terminals.list()) await terminals.close(t.id).catch(() => {});
+    for (const p of await projects.list()) await preview.stop(p.id).catch(() => {});
     for (const p of runtimesByProject.values()) await (await p.catch(() => null))?.dispose().catch(() => {});
     await root.dispose();
     await store.close();

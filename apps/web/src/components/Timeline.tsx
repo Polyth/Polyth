@@ -3,16 +3,6 @@ import { renderMarkdown } from "../markdown.tsx";
 import { fmtCost, fmtMs, fmtTokens } from "../format.ts";
 import type { RenderModel, RenderMessage, ToolMsg, AssistantMsg } from "../reduce.ts";
 
-function StreamText({ text }: { text: string }) {
-  if (!text) return <span className="caret" />;
-  return (
-    <span>
-      {text}
-      <span className="caret" />
-    </span>
-  );
-}
-
 function AssistantView({ m }: { m: AssistantMsg }) {
   return (
     <div className="msg assistant">
@@ -22,7 +12,7 @@ function AssistantView({ m }: { m: AssistantMsg }) {
           <div className="reasoning-body">{m.reasoning}</div>
         </details>
       )}
-      <div className="bubble">{m.finalized ? renderMarkdown(m.text, m.id) : <StreamText text={m.text} />}</div>
+      <div className="bubble">{renderMarkdown(m.text || "", m.id)}{!m.finalized && <span className="caret" />}</div>
     </div>
   );
 }

@@ -5,7 +5,8 @@ import type { JsonObject, SessionEvent } from "@polyth/contracts";
 import { buildModel, emptyModel, reduceEvent, type GoalState } from "../src/reduce.ts";
 import { createSeqDedupe } from "../src/sync.ts";
 import { registerSlot, listSlots, renderSlot } from "../src/slots.ts";
-import { filterCommands, filterSnippets, parseDiffLines } from "../src/utils.ts";
+import { applyTerminalChunk, filterCommands, filterSnippets, goalChecklist, parseDiffLines } from "../src/utils.ts";
+import { modelBadge, providerColor } from "../src/format.ts";
 
 let seqCounter = 0;
 function ev(type: string, data: JsonObject, sessionId = "s1"): SessionEvent {
@@ -329,4 +330,65 @@ test("parseDiffLines classifies additions, deletions, hunks, context", () => {
 
 test("parseDiffLines returns empty array for empty string", () => {
   assert.deepEqual(parseDiffLines(""), []);
+});
+
+test("multirun events reconstruct runs, output, and pick from the log", () => {
+  const m = buildModel([
+    ev("multirun/started", {
+      multirunId: "mr1",
+      prompt: "compare",
+      runs: [
+        { runId: "r1", model: { providerID: "openai", modelID: "gpt-x" }, agent: "build" },
+        { runId: "r2", model: { providerID: "anthropic", modelID: "sonnet" } },
+      ],
+    }),
+    ev("multirun/run-progress", { multirunId: "mr1", runId: "r1", status: "completed", output: "alpha", tokens: { input: 3, output: 4 }, cost: 0.01 }),
+    ev("multirun/run-progress", { multirunId: "mr1", runId: "r2", status: "completed", output: "beta" }),
+    ev("multirun/completed", { multirunId: "mr1" }),
+    ev("multirun/picked", { multirunId: "mr1", runId: "r2" }),
+  ]);
+  assert.equal(m.multirun?.id, "mr1");
+  assert.equal(m.multirun?.prompt, "compare");
+  assert.equal(m.multirun?.runs.length, 2);
+  assert.equal(m.multirun?.runs[0]?.output, "alpha");
+  assert.equal(m.multirun?.runs[1]?.output, "beta");
+  assert.equal(m.multirun?.pickedRunId, "r2");
+});
+
+test("fusion events reconstruct answer, weights, and disagreements from the log", () => {
+  const m = buildModel([
+    ev("fusion/started", { fusionId: "f1", prompt: "merge me", models: ["openai/gpt-x", "anthropic/sonnet"] }),
+    ev("fusion/completed", {
+      fusionId: "f1",
+      status: "completed",
+      answer: "fused",
+      weights: [{ model: "openai/gpt-x", weight: 0.7 }, { model: "anthropic/sonnet", weight: 0.3 }],
+      disagreements: ["tone"],
+    }),
+  ]);
+  assert.equal(m.fusionPrompt, "merge me");
+  assert.equal(m.fusion?.answer, "fused");
+  assert.equal(m.fusion?.weights[0]?.weight, 0.7);
+  assert.deepEqual(m.fusion?.disagreements, ["tone"]);
+});
+
+test("goalChecklist splits lines and strikes completed items", () => {
+  const open = goalChecklist("1. one\n2. two", "active");
+  assert.equal(open.length, 2);
+  assert.equal(open[0]!.text, "one");
+  assert.equal(open[0]!.done, false);
+  const done = goalChecklist("- a\n- b", "completed");
+  assert.equal(done[1]!.done, true);
+});
+
+test("applyTerminalChunk strips CSI, honours CR/BS, and caps buffer", () => {
+  assert.equal(applyTerminalChunk("", "hi\x1b[31m!\x1b[0m"), "hi!");
+  assert.equal(applyTerminalChunk("abc", "\b\bX"), "aX");
+  assert.equal(applyTerminalChunk("one\nxx", "\rYY"), "one\nYY");
+});
+
+test("providerColor maps known vendors; modelBadge splits provider/id", () => {
+  assert.equal(providerColor("anthropic"), "#f49b5b");
+  assert.equal(modelBadge("openai/gpt-4o").label, "gpt-4o");
+  assert.equal(modelBadge({ providerID: "xai", modelID: "grok" }).color, "#c4a7ee");
 });

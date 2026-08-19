@@ -10,6 +10,8 @@ import type {
 } from "@polyth/contracts";
 import { buildModel, type RenderModel } from "./reduce.ts";
 
+export type AppView = "session" | "goals" | "multirun" | "fusion" | "walkthrough" | "preview" | "git" | "terminal";
+
 export interface AppState {
   projects: Project[];
   sessions: SessionProjection[];
@@ -18,6 +20,8 @@ export interface AppState {
   agents: AgentDescriptor[];
   activeProjectId: string | null;
   activeSessionId: string | null;
+  activeView: AppView;
+  gitBranch: string;
 }
 
 let state: AppState = {
@@ -28,6 +32,8 @@ let state: AppState = {
   agents: [],
   activeProjectId: null,
   activeSessionId: null,
+  activeView: "session",
+  gitBranch: "",
 };
 
 const listeners = new Set<() => void>();
@@ -75,7 +81,13 @@ export function setAgents(agents: AgentDescriptor[]): void {
 }
 export function activateProject(id: string | null): void {
   localStorage.setItem("polyth.activeProjectId", id ?? "");
-  set({ activeProjectId: id, activeSessionId: null });
+  set({ activeProjectId: id, activeSessionId: null, gitBranch: "" });
+}
+export function setActiveView(view: AppView): void {
+  set({ activeView: view });
+}
+export function setGitBranch(branch: string): void {
+  set({ gitBranch: branch });
 }
 export function activateSession(id: string | null): void {
   localStorage.setItem("polyth.activeSessionId", id ?? "");

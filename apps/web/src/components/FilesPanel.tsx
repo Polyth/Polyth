@@ -18,6 +18,9 @@ export default function FilesPanel() {
   const [newName, setNewName] = useState("");
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
+  const [renaming, setRenaming] = useState(false);
+  const [renamePath, setRenamePath] = useState("");
+  const [confirmDelete, setConfirmDelete] = useState(false);
   const projectId = activeProjectId;
 
   const loadTree = useCallback(
@@ -103,6 +106,36 @@ export default function FilesPanel() {
     }
   };
 
+  const renameFile = async () => {
+    if (!projectId || !viewFile || !renamePath.trim()) return;
+    setSaving(true);
+    try {
+      await api.filesRename(projectId, viewFile.path, renamePath.trim());
+      await loadTree(currentPath);
+      await onFileClick(renamePath.trim());
+      setRenaming(false);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const deleteFile = async () => {
+    if (!projectId || !viewFile) return;
+    setSaving(true);
+    try {
+      await api.filesDelete(projectId, viewFile.path);
+      setViewFile(null);
+      setConfirmDelete(false);
+      await loadTree(currentPath);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setSaving(false);
+    }
+  };
+
   if (!projectId) return <div className="empty">Select a project first.</div>;
 
   return (
@@ -157,6 +190,13 @@ export default function FilesPanel() {
             <span className="files-viewer-name">{viewFile.path}</span>
             <button className="small-btn" onClick={() => setViewFile(null)}>✕</button>
           </div>
+          {renaming && (
+            <div className="files-create">
+              <input autoFocus value={renamePath} onChange={(e) => setRenamePath(e.target.value)} onKeyDown={(e) => { if (e.key === "Enter") void renameFile(); }} />
+              <button className="small-btn" disabled={saving} onClick={() => void renameFile()}>Rename</button>
+              <button className="small-btn" onClick={() => setRenaming(false)}>Cancel</button>
+            </div>
+          )}
           <div className="files-viewer-wrap">
             {viewFile.tooLarge || viewFile.truncated ? (
               <pre className="files-viewer-content">{viewFile.content}</pre>
@@ -169,6 +209,10 @@ export default function FilesPanel() {
           <div className="files-viewer-actions">
             {!viewFile.tooLarge && !viewFile.truncated && <button className="small-btn" disabled={saving || content === viewFile.content} onClick={() => void saveFile()}>Save</button>}
             <button className="small-btn" onClick={() => attachToChat(viewFile.path)}>Attach to chat</button>
+            <button className="small-btn" onClick={() => { setRenamePath(viewFile.path); setRenaming(true); }}>Rename</button>
+            {confirmDelete ? (
+              <><button className="small-btn danger-btn" disabled={saving} onClick={() => void deleteFile()}>Delete permanently</button><button className="small-btn" onClick={() => setConfirmDelete(false)}>Cancel</button></>
+            ) : <button className="small-btn danger-btn" onClick={() => setConfirmDelete(true)}>Delete</button>}
           </div>
         </div>
       ) : searchResults !== null ? (

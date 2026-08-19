@@ -16,6 +16,28 @@ export function fmtCost(c: number): string {
   return `$${c.toFixed(4)}`;
 }
 
+export function providerColor(provider: string): string {
+  const p = provider.toLowerCase();
+  if (p.includes("anthropic") || p.includes("claude")) return "#f49b5b";
+  if (p.includes("openai") || p.includes("gpt")) return "#8bcf6b";
+  if (p.includes("google") || p.includes("gemini")) return "#82bff4";
+  if (p.includes("xai") || p.includes("grok")) return "#c4a7ee";
+  if (p.includes("mistral")) return "#82bff4";
+  if (p.includes("meta") || p.includes("llama")) return "#e4bb62";
+  return "#a19e96";
+}
+
+export function modelBadge(model?: { providerID: string; modelID: string } | string): { label: string; color: string } {
+  if (!model) return { label: "default", color: "#a19e96" };
+  if (typeof model === "string") {
+    const slash = model.lastIndexOf("/");
+    const prov = slash >= 0 ? model.slice(0, slash) : "";
+    const id = slash >= 0 ? model.slice(slash + 1) : model;
+    return { label: id || model, color: providerColor(prov || model) };
+  }
+  return { label: model.modelID, color: providerColor(model.providerID) };
+}
+
 // Export a session's render model as a downloadable .md transcript.
 export function modelToMarkdown(model: RenderModel): string {
   const lines: string[] = [];

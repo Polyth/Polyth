@@ -1,15 +1,15 @@
-// Goal strip above the timeline: objective, status pill, stats, pause/resume/stop.
+// Goal strip above the timeline: collapsible objective + progress checklist.
 import { useState, useEffect, useCallback } from "react";
 import { api, type GoalState } from "../api.ts";
 import { useStore } from "../store.ts";
+import { goalChecklist } from "../utils.ts";
 
-export function GoalStrip() {
+export function GoalStrip({ forceOpen = false }: { forceOpen?: boolean }) {
   const activeSessionId = useStore((s) => s.activeSessionId);
   const model = useStore((s) => {
     if (!s.activeSessionId) return null;
     const evts = s.events[s.activeSessionId];
     if (!evts) return null;
-    // Find the last goal state from events
     for (let i = evts.length - 1; i >= 0; i--) {
       const e = evts[i]!;
       if (e.type.startsWith("goal/")) return e;
@@ -17,9 +17,9 @@ export function GoalStrip() {
     return null;
   });
 
-  // We use the API-returned goal state for the strip; refresh on WS events
   const [goal, setGoal] = useState<GoalState | null>(null);
   const [busy, setBusy] = useState(false);
+  const [open, setOpen] = useState(true);
 
   const refresh = useCallback(async () => {
     if (!activeSessionId) { setGoal(null); return; }
@@ -32,52 +32,66 @@ export function GoalStrip() {
   }, [activeSessionId]);
 
   useEffect(() => { void refresh(); }, [refresh]);
-  // Refresh on any goal/* event
   useEffect(() => {
     if (model && model.type.startsWith("goal/")) void refresh();
   }, [model, refresh]);
 
-  if (!goal) return null;
+  if (!goal) return forceOpen ? <div className="view-empty">No goal attached to this session.</div> : null;
 
   const pause = async () => { setBusy(true); await api.goalPause(activeSessionId!); setBusy(false); void refresh(); };
   const resume = async () => { setBusy(true); await api.goalResume(activeSessionId!); setBusy(false); void refresh(); };
   const stop = async () => { setBusy(true); await api.goalStop(activeSessionId!); setBusy(false); void refresh(); };
 
   const isActive = goal.status === "active";
+  const items = goalChecklist(goal.objective, goal.status);
+  const doneCount = items.filter((i) => i.done).length;
+  const expanded = forceOpen || open;
   const objective = goal.objective.length > 80 ? goal.objective.slice(0, 77) + "…" : goal.objective;
 
   return (
-    <div className="goal-strip">
-      <div className="goal-row">
+    <div className={`goal-strip ${expanded ? "open" : "collapsed"}`}>
+      <button className="goal-toggle" onClick={() => setOpen((v) => !v)} disabled={forceOpen}>
         <span className="goal-label">Goal</span>
         <span className={`goal-pill goal-pill-${goal.status}`}>{goal.status}</span>
         <span className="goal-objective">{objective}</span>
-      </div>
-      <div className="goal-stats">
-        <span className="goal-stat">cont {goal.continuations}/{goal.maxContinuations}</span>
-        <span className="goal-stat">
-          tok {goal.tokensUsed > 0 ? `${fmtK(goal.tokensUsed)}` : "0"}
-          {goal.budgetTokens > 0 ? `/${fmtK(goal.budgetTokens)}` : ""}
-        </span>
-        {goal.lastVerdict && (
-          <span className={`goal-stat goal-verdict-${goal.lastVerdict}`}>verdict: {goal.lastVerdict}</span>
-        )}
-      </div>
-      <div className="goal-actions">
-        {isActive ? (
-          <button className="small-btn" onClick={() => void pause()} disabled={busy}>Pause</button>
-        ) : goal.status === "paused" ? (
-          <button className="small-btn" onClick={() => void resume()} disabled={busy}>Resume</button>
-        ) : null}
-        {(isActive || goal.status === "paused") && (
-          <button className="small-btn danger-btn" onClick={() => void stop()} disabled={busy}>Stop</button>
-        )}
-      </div>
+        <span className="goal-progress">{doneCount}/{items.length || 1}</span>
+        {!forceOpen && <span className="goal-chevron">{expanded ? "▾" : "▸"}</span>}
+      </button>
+      {expanded && (
+        <>
+          {items.length > 0 && (
+            <ul className="goal-check">
+              {items.map((it, i) => (
+                <li key={i} className={it.done ? "done" : ""}>{it.text}</li>
+              ))}
+            </ul>
+          )}
+          <div className="goal-stats">
+            <span className="goal-stat">cont {goal.continuations}/{goal.maxContinuations}</span>
+            <span className="goal-stat">
+              tok {goal.tokensUsed > 0 ? `${fmtK(goal.tokensUsed)}` : "0"}
+              {goal.budgetTokens > 0 ? `/${fmtK(goal.budgetTokens)}` : ""}
+            </span>
+            {goal.lastVerdict && (
+              <span className={`goal-stat goal-verdict-${goal.lastVerdict}`}>verdict: {goal.lastVerdict}</span>
+            )}
+          </div>
+          <div className="goal-actions">
+            {isActive ? (
+              <button className="small-btn" onClick={() => void pause()} disabled={busy}>Pause</button>
+            ) : goal.status === "paused" ? (
+              <button className="small-btn" onClick={() => void resume()} disabled={busy}>Resume</button>
+            ) : null}
+            {(isActive || goal.status === "paused") && (
+              <button className="small-btn danger-btn" onClick={() => void stop()} disabled={busy}>Stop</button>
+            )}
+          </div>
+        </>
+      )}
     </div>
   );
 }
 
-// Goal attach form, shown inline from the header
 export function GoalAttachForm({ onDone }: { onDone: () => void }) {
   const activeSessionId = useStore((s) => s.activeSessionId);
   const [objective, setObjective] = useState("");
@@ -106,7 +120,7 @@ export function GoalAttachForm({ onDone }: { onDone: () => void }) {
     <div className="goal-attach">
       <textarea
         rows={2}
-        placeholder="Objective…"
+        placeholder="Objective… (one item per line for a checklist)"
         value={objective}
         onChange={(e) => setObjective(e.target.value)}
       />

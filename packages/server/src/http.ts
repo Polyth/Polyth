@@ -70,7 +70,9 @@ export function createHttpServer(deps: HttpDeps): Server {
       if (m && method === "DELETE") { await projects.remove(m[1]!); return json(res, 200, { ok: true }); }
 
       if (path === "/api/sessions" && method === "GET") {
-        return json(res, 200, await sessions.list(url.searchParams.get("projectId") ?? undefined));
+        const projectId = url.searchParams.get("projectId") ?? undefined;
+        if (projectId) await sessions.sync(projectId).catch((err) => console.warn("[polyth] OpenCode session sync failed", err));
+        return json(res, 200, await sessions.list(projectId));
       }
       if (path === "/api/sessions" && method === "POST") {
         const b = await readBody(req);

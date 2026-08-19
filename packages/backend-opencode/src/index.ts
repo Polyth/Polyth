@@ -42,6 +42,9 @@ SSE event names observed live (JSON `data:` objects, field `id` = evt_…; no SS
 
 import { spawn, type ChildProcess } from "node:child_process";
 import { createServer as createNetServer } from "node:net";
+import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type {
   AgentDescriptor,
   AgentRuntime,
@@ -50,6 +53,8 @@ import type {
   Disposable,
   JsonObject,
   ModelDescriptor,
+  RuntimeSession,
+  RuntimeSessionMessage,
   RuntimeCapabilities,
   RuntimeEvent,
 } from "@polyth/contracts";
@@ -126,6 +131,18 @@ interface CreatedSession {
   id: string;
 }
 
+interface OpenCodeSession {
+  id: string;
+  title?: string;
+  parentID?: string;
+  time?: { created?: number; updated?: number };
+}
+
+interface OpenCodeMessage {
+  info?: { role?: string };
+  parts?: Array<{ type?: string; text?: string }>;
+}
+
 const flattenModels = (body: ProviderList): ModelDescriptor[] => {
   const out: ModelDescriptor[] = [];
   for (const provider of body.all ?? []) {
@@ -179,11 +196,43 @@ const freePort = (hostname: string): Promise<number> =>
     });
   });
 
+// One `opencode serve` per project cwd. A hard kill of the polyth process
+// (crash, SIGKILL) leaves the child reparented to init — it never dies on
+// its own. Track it in a pidfile keyed by cwd so the next spawn for that
+// cwd reaps its orphaned predecessor instead of leaking forever.
+const pidFileFor = (cwd: string): string => {
+  let h = 0;
+  for (let i = 0; i < cwd.length; i++) h = (h * 31 + cwd.charCodeAt(i)) | 0;
+  const dir = join(tmpdir(), "polyth-opencode");
+  mkdirSync(dir, { recursive: true });
+  return join(dir, `${(h >>> 0).toString(36)}.pid`);
+};
+
+const reapOrphan = (pidFile: string): void => {
+  let raw: string;
+  try {
+    raw = readFileSync(pidFile, "utf8");
+  } catch {
+    return;
+  }
+  const pid = Number(raw.trim());
+  if (Number.isFinite(pid) && pid > 0) {
+    try {
+      process.kill(pid, "SIGKILL");
+    } catch {
+      /* already dead */
+    }
+  }
+  rmSync(pidFile, { force: true });
+};
+
 const spawnServe = async (
   opts: OpenCodeAdapterOptions,
 ): Promise<{ child: ChildProcess; port: number; hostname: string }> => {
   const hostname = opts.hostname ?? "127.0.0.1";
   const port = opts.port ?? (await freePort(hostname));
+  const pidFile = pidFileFor(opts.cwd);
+  reapOrphan(pidFile);
   return new Promise((resolve, reject) => {
     const bin = opts.bin ?? "opencode";
     const env = { ...process.env };
@@ -207,6 +256,7 @@ const spawnServe = async (
       if (m && !settled) {
         settled = true;
         clearTimeout(timeout);
+        if (child.pid) writeFileSync(pidFile, String(child.pid));
         resolve({ child, port: Number(m[1]), hostname });
       }
     };
@@ -227,7 +277,8 @@ const spawnServe = async (
   });
 };
 
-const killChild = async (child: ChildProcess | undefined): Promise<void> => {
+const killChild = async (child: ChildProcess | undefined, cwd?: string): Promise<void> => {
+  if (cwd) rmSync(pidFileFor(cwd), { force: true });
   if (!child || child.killed) return;
   child.kill("SIGTERM");
   const exited = await Promise.race([
@@ -241,6 +292,7 @@ export interface OpenCodeRuntimeExtras {
   client?: OpenCodeClient;
   sessionIdMap?: Map<string, string>;
   log?: (level: "debug" | "info" | "warn" | "error", msg: string, data?: JsonObject) => void;
+  cwd?: string;
 }
 
 export const createOpenCodeRuntimeWithClient = (
@@ -357,17 +409,43 @@ export const createOpenCodeRuntimeWithClient = (
         }),
       );
     },
+    async sessions(): Promise<RuntimeSession[]> {
+      const rows = await client.get<OpenCodeSession[]>("/session");
+      return (rows ?? []).map((session) => ({
+        id: session.id,
+        title: session.title || "Untitled session",
+        ...(session.parentID ? { parentId: session.parentID } : {}),
+        createdAt: session.time?.created ?? Date.now(),
+        updatedAt: session.time?.updated ?? session.time?.created ?? Date.now(),
+      }));
+    },
+    async history(sessionId: string): Promise<RuntimeSessionMessage[]> {
+      const rows = await client.get<OpenCodeMessage[]>(`/session/${sessionId}/message?limit=50`);
+      return (rows ?? []).flatMap((message) => {
+        const role = message.info?.role;
+        if (role !== "user" && role !== "assistant") return [];
+        const text = (message.parts ?? []).filter((part) => part.type === "text").map((part) => part.text ?? "").join("\n").slice(0, 20_000);
+        const reasoning = (message.parts ?? []).filter((part) => part.type === "reasoning").map((part) => part.text ?? "").join("\n").slice(0, 5_000);
+        return text || reasoning ? [{ role, text, ...(reasoning ? { reasoning } : {}) }] : [];
+      });
+    },
     async ensureSession(canonical: CreateSessionInput & { sessionId: string; cwd: string }) {
       const existing = maps.forward.get(canonical.sessionId);
       if (existing) {
         maps.reverse.set(existing, canonical.sessionId);
-        return;
+        return existing;
+      }
+      if (canonical.backendSessionId) {
+        maps.forward.set(canonical.sessionId, canonical.backendSessionId);
+        maps.reverse.set(canonical.backendSessionId, canonical.sessionId);
+        return canonical.backendSessionId;
       }
       const created = await client.post<CreatedSession>("/session", {
         title: canonical.title ?? canonical.sessionId,
       });
       maps.forward.set(canonical.sessionId, created.id);
       maps.reverse.set(created.id, canonical.sessionId);
+      return created.id;
     },
     async startTurn(req: CanonicalTurnRequest) {
       const backendId = backendOf(req.sessionId);
@@ -415,7 +493,7 @@ export const createOpenCodeRuntimeWithClient = (
     async dispose() {
       disposed = true;
       sseAbort?.abort();
-      await killChild(child);
+      await killChild(child, extras.cwd);
     },
   };
 };
@@ -431,7 +509,7 @@ export const createOpenCodeRuntime = async (
   try {
     await waitReady(client, 20_000);
   } catch (err) {
-    await killChild(child);
+    await killChild(child, opts.cwd);
     throw err;
   }
   return createOpenCodeRuntimeWithClient(client, opts, child);

@@ -50,6 +50,20 @@ export function workspaceRoutes(deps: {
       json(200, { ok: true });
       return true;
     }
+    if (path === "/api/files/delete" && method === "POST") {
+      const b = await body();
+      const root = await rootOf(String(b.projectId ?? ""));
+      await deps.files.remove(root, String(b.path ?? ""));
+      json(200, { ok: true });
+      return true;
+    }
+    if (path === "/api/files/rename" && method === "POST") {
+      const b = await body();
+      const root = await rootOf(String(b.projectId ?? ""));
+      await deps.files.rename(root, String(b.from ?? ""), String(b.to ?? ""));
+      json(200, { ok: true });
+      return true;
+    }
     if (path === "/api/files/search" && method === "GET") {
       const root = await rootOf(q("projectId"));
       json(200, await deps.files.search(root, q("q") ?? "", Number(q("limit") ?? 50)));

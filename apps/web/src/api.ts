@@ -1,13 +1,19 @@
 // Typed fetch wrappers for every REST endpoint in PLAN.md §5.
 import type {
   AgentDescriptor,
+  FusionDto,
   JsonObject,
   ModelDescriptor,
+  ModelRef,
+  MultirunDto,
+  PreviewState,
   Project,
   SessionEvent,
   SessionProjection,
   SessionRef,
+  TerminalInfo,
   TurnRef,
+  WalkthroughStepDto,
 } from "@polyth/contracts";
 
 async function jfetch<T>(path: string, init?: RequestInit): Promise<T> {
@@ -206,6 +212,10 @@ export const api = {
     jfetch<{ ok: true }>(`/api/files/write`, json("POST", { projectId, path: relPath, content })),
   filesMkdir: (projectId: string, relPath: string) =>
     jfetch<{ ok: true }>(`/api/files/mkdir`, json("POST", { projectId, path: relPath })),
+  filesDelete: (projectId: string, relPath: string) =>
+    jfetch<{ ok: true }>(`/api/files/delete`, json("POST", { projectId, path: relPath })),
+  filesRename: (projectId: string, from: string, to: string) =>
+    jfetch<{ ok: true }>(`/api/files/rename`, json("POST", { projectId, from, to })),
   filesSearch: (projectId: string, q: string, limit = 50) =>
     jfetch<string[]>(`/api/files/search?projectId=${encodeURIComponent(projectId)}&q=${encodeURIComponent(q)}&limit=${limit}`).catch(
       (): string[] => [],
@@ -243,4 +253,48 @@ export const api = {
     jfetch<GoalState>(`/api/sessions/${sessionId}/goal/resume`, { method: "POST" }),
   goalStop: (sessionId: string) =>
     jfetch<{ ok: true }>(`/api/sessions/${sessionId}/goal/stop`, { method: "POST" }),
+
+  // ---- M3: multirun --------------------------------------------------------
+  startMultirun: (sessionId: string, text: string, runs: Array<{ model?: ModelRef; agent?: string }>) =>
+    jfetch<{ multirunId: string }>(`/api/sessions/${sessionId}/multirun`, json("POST", { text, runs })),
+  getMultirun: (multirunId: string) =>
+    jfetch<MultirunDto>(`/api/multiruns/${multirunId}`),
+  pickMultirun: (multirunId: string, runId: string) =>
+    jfetch<{ ok: true }>(`/api/multiruns/${multirunId}/pick`, json("POST", { runId })),
+
+  // ---- M3: fusion ----------------------------------------------------------
+  startFusion: (sessionId: string, text: string, models: string[]) =>
+    jfetch<{ fusionId: string }>(`/api/sessions/${sessionId}/fuse`, json("POST", { text, models })),
+  getFusion: (fusionId: string) =>
+    jfetch<FusionDto>(`/api/fusions/${fusionId}`),
+
+  // ---- M3: walkthrough -----------------------------------------------------
+  getWalkthrough: (sessionId: string) =>
+    jfetch<{ steps: WalkthroughStepDto[] }>(`/api/sessions/${sessionId}/walkthrough`).catch(
+      (): { steps: WalkthroughStepDto[] } => ({ steps: [] }),
+    ),
+  walkthroughDecide: (sessionId: string, stepIndex: number, decision: "approve" | "reject") =>
+    jfetch<{ ok: true }>(`/api/sessions/${sessionId}/walkthrough/${stepIndex}/${decision}`, { method: "POST" }),
+
+  // ---- M3: terminal (FIXED protocol; POST :id is the live input seam — /input is aliased in comments) ----
+  listTerminals: (projectId: string) =>
+    jfetch<TerminalInfo[]>(`/api/terminals?projectId=${encodeURIComponent(projectId)}`).catch(
+      (): TerminalInfo[] => [],
+    ),
+  createTerminal: (projectId: string, opts?: { sessionId?: string; cwd?: string; cols?: number; rows?: number }) =>
+    jfetch<{ terminalId: string }>(`/api/terminals`, json("POST", { projectId, ...opts })),
+  terminalInput: (terminalId: string, data: string) =>
+    jfetch<{ ok: true }>(`/api/terminals/${terminalId}`, json("POST", { data })),
+  closeTerminal: (terminalId: string) =>
+    jfetch<{ ok: true }>(`/api/terminals/${terminalId}`, { method: "DELETE" }),
+
+  // ---- M3: preview ---------------------------------------------------------
+  previewStart: (projectId: string, command?: string) =>
+    jfetch<{ url: string; port: number }>(`/api/preview/start`, json("POST", { projectId, command })),
+  previewGet: (projectId: string) =>
+    jfetch<PreviewState>(`/api/preview?projectId=${encodeURIComponent(projectId)}`).catch(
+      (): PreviewState => ({ url: null, status: "off" }),
+    ),
+  previewStop: (projectId: string) =>
+    jfetch<{ ok: true }>(`/api/preview/stop`, json("POST", { projectId })),
 };

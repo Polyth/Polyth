@@ -1,6 +1,6 @@
 // Project-scoped filesystem. Every path is relative to a project root;
 // escapes (`..`, absolute, symlink-out) are rejected.
-import { mkdir, open, readFile, readdir, lstat, realpath, writeFile } from "node:fs/promises";
+import { mkdir, open, readFile, readdir, lstat, realpath, rename as move, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 const MAX_READ = 512 * 1024;
@@ -25,6 +25,8 @@ export interface FileService {
   read(root: string, rel: string): Promise<FileReadResult>;
   write(root: string, rel: string, content: string): Promise<void>;
   mkdir(root: string, rel: string): Promise<void>;
+  remove(root: string, rel: string): Promise<void>;
+  rename(root: string, from: string, to: string): Promise<void>;
   search(root: string, q: string, limit: number): Promise<string[]>;
 }
 
@@ -98,6 +100,22 @@ export function createFileService(): FileService {
       const abs = await resolveInside(root, rel, { forWrite: true });
       await mkdir(abs, { recursive: true });
       await resolveInside(root, rel);
+    },
+
+    async remove(root, rel) {
+      const abs = await resolveInside(root, rel);
+      await rm(abs, { recursive: true });
+    },
+
+    async rename(root, from, to) {
+      const source = await resolveInside(root, from);
+      const target = await resolveInside(root, to, { forWrite: true });
+      await lstat(target).then(() => { throw new Error(`Path already exists: ${to}`); }).catch((err: unknown) => {
+        if (err instanceof Error && "code" in err && err.code === "ENOENT") return;
+        throw err;
+      });
+      await move(source, target);
+      await resolveInside(root, to);
     },
 
     async search(root, q, limit) {

@@ -21,7 +21,12 @@ export function init(): void {
     }
     if (s.activeProjectId !== lastProject) {
       lastProject = s.activeProjectId;
-      if (s.activeProjectId) void refreshSessions(s.activeProjectId);
+      if (s.activeProjectId) {
+        void refreshSessions(s.activeProjectId);
+        void api.gitStatus(s.activeProjectId).then((st) => store.setGitBranch(st.branch)).catch(() => store.setGitBranch(""));
+      } else {
+        store.setGitBranch("");
+      }
     }
   });
 }
@@ -81,7 +86,8 @@ export async function refreshSessions(projectId: string): Promise<void> {
 
 export async function addProject(path: string, name?: string): Promise<void> {
   const p = await api.addProject(path, name);
-  store.setProjects([...store.getState().projects, p]);
+  const projects = store.getState().projects;
+  store.setProjects(projects.some((project) => project.id === p.id) ? projects : [...projects, p]);
   store.activateProject(p.id);
 }
 

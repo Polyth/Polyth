@@ -152,6 +152,7 @@ export function createSessionService(deps: {
       rt = await runtimes.forProject(proj.projectId, cwd);
       await rt.ensureSession({
         projectId: proj.projectId, title: proj.title, sessionId, cwd,
+        ...(proj.backendSessionId ? { backendSessionId: proj.backendSessionId } : {}),
         ...(proj.model ? { model: proj.model } : {}), ...(proj.agent ? { agent: proj.agent } : {}),
       });
       wire(sessionId, rt);
@@ -166,7 +167,7 @@ export function createSessionService(deps: {
       const sessionId = randomUUID();
       const cwd = input.worktreePath ?? project.path;
       const rt = await runtimes.forProject(project.id, cwd);
-      await rt.ensureSession({ ...input, sessionId, cwd });
+      const backendSessionId = await rt.ensureSession({ ...input, sessionId, cwd });
       wire(sessionId, rt);
       const now = Date.now();
       const projection: SessionProjection = {
@@ -176,6 +177,7 @@ export function createSessionService(deps: {
         ...(input.worktreePath ? { worktreePath: input.worktreePath } : {}),
         ...(input.model ? { model: input.model } : {}),
         ...(input.agent ? { agent: input.agent } : {}),
+        backendSessionId,
         createdAt: now, updatedAt: now,
       };
       await store.upsertProjection(projection);
@@ -241,13 +243,14 @@ export function createSessionService(deps: {
       const project = await projects.get(proj.projectId);
       const forkCwd = proj.worktreePath ?? project?.path ?? process.cwd();
       const rt = await runtimes.forProject(proj.projectId, forkCwd);
-      await rt.ensureSession({ projectId: proj.projectId, title: `${proj.title} (fork)`, sessionId: forkId, cwd: forkCwd });
+      const backendSessionId = await rt.ensureSession({ projectId: proj.projectId, title: `${proj.title} (fork)`, sessionId: forkId, cwd: forkCwd });
       wire(forkId, rt);
       await store.copyTo(sessionId, forkId, atSeq);
       const now = Date.now();
       const projection: SessionProjection = {
         ...proj, id: forkId, parentId: sessionId,
         title: `${proj.title} (fork)`, status: "idle", createdAt: now, updatedAt: now,
+        backendSessionId,
       };
       await store.upsertProjection(projection);
       await appendAndBroadcast(forkId, "session/forked", { fromSessionId: sessionId, ...(atSeq ? { atSeq } : {}) }, { ignorable: true });
@@ -265,12 +268,65 @@ export function createSessionService(deps: {
     },
 
     list: (projectId) => store.projections(projectId),
+    async sync(projectId) {
+      const project = await projects.get(projectId);
+      if (!project) throw Object.assign(new Error("project not found"), { code: "not-found" });
+      const runtime = await runtimes.forProject(projectId, project.path);
+      const known = await store.projections(projectId);
+      const byBackend = new Map(known.filter((session) => session.backendSessionId).map((session) => [session.backendSessionId!, session]));
+      for (const remote of await runtime.sessions()) {
+        if (byBackend.has(remote.id)) continue;
+        const id = randomUUID();
+        const projection: SessionProjection = {
+          id, projectId, title: remote.title, status: "idle", backendSessionId: remote.id,
+          createdAt: remote.createdAt, updatedAt: remote.updatedAt,
+        };
+        // History is NOT fetched here — importing full histories for every
+        // remote session at once is what OOM'd the server. It is imported
+        // lazily in events() the first time the session is opened.
+        await runtime.ensureSession({ projectId, title: remote.title, sessionId: id, cwd: project.path, backendSessionId: remote.id });
+        wire(id, runtime);
+        await store.upsertProjection(projection);
+        await appendAndBroadcast(id, "session/imported", { backendSessionId: remote.id }, { ignorable: true });
+        broadcast.projection(projection);
+      }
+      return store.projections(projectId);
+    },
     async snapshot(sessionId) {
       const p = await store.projection(sessionId);
       if (!p) throw Object.assign(new Error("session not found"), { code: "not-found" });
       return p;
     },
-    events: (sessionId, afterSeq) => store.events(sessionId, afterSeq),
+    async events(sessionId, afterSeq) {
+      // Lazy history import: one-time, bounded, only for sessions adopted
+      // from OpenCode. Importing all histories eagerly at sync time is what
+      // OOM'd the server, so history arrives the first time a session opens.
+      if (afterSeq === 0) {
+        const proj = await store.projection(sessionId);
+        if (proj?.backendSessionId) {
+          const all = await store.events(sessionId);
+          const imported = all.some((e) => e.type === "session/imported");
+          const fetched = all.some((e) => e.type === "session/history-imported");
+          if (imported && !fetched) {
+            try {
+              const rt = await ensureWired(sessionId, proj);
+              for (const message of await rt.history(proj.backendSessionId)) {
+                await appendAndBroadcast(sessionId, message.role === "user" ? "user/message" : "assistant/message", {
+                  partId: `import_${randomUUID()}`, text: message.text,
+                  ...(message.reasoning ? { reasoning: message.reasoning } : {}),
+                });
+              }
+            } catch (err) {
+              console.warn(`[polyth] failed to import history for ${sessionId}`, err);
+            } finally {
+              // marker even on failure so we never retry in a hot loop
+              await appendAndBroadcast(sessionId, "session/history-imported", {}, { ignorable: true });
+            }
+          }
+        }
+      }
+      return store.events(sessionId, afterSeq);
+    },
 
     async replyPermission(sessionId, requestId, reply) {
       await appendAndBroadcast(sessionId, "permission/resolved", { requestId, reply }, { ignorable: true });

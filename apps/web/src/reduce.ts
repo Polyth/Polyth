@@ -2,8 +2,12 @@
 // the store, the views and tests. Replaying the same event list in order
 // reconstructs an identical model (session log invariant).
 import type {
+  FusionDto,
+  FusionWeightDto,
   JsonObject,
   ModelRef,
+  MultirunDto,
+  MultirunRunDto,
   SessionEvent,
   TokenUsage,
 } from "@polyth/contracts";
@@ -104,6 +108,9 @@ export interface RenderModel {
   totals: Totals;
   turn: TurnState | null;
   goal: GoalState | null;
+  multirun: MultirunDto | null;
+  fusion: FusionDto | null;
+  fusionPrompt: string;
   version: number; // bumps on every applied event (cheap change signal)
 }
 
@@ -115,6 +122,9 @@ export function emptyModel(): RenderModel {
     totals: { input: 0, output: 0, reasoning: 0, cacheRead: 0, cacheWrite: 0, cost: 0 },
     turn: null,
     goal: null,
+    multirun: null,
+    fusion: null,
+    fusionPrompt: "",
     version: 0,
   };
 }
@@ -358,8 +368,94 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
       }
       break;
     }
+    case "multirun/started": {
+      const runsRaw = Array.isArray(d.runs) ? d.runs : [];
+      const runs: MultirunRunDto[] = runsRaw.map((raw) => {
+        const r = (raw && typeof raw === "object" ? raw : {}) as JsonObject;
+        const modelRef = obj(r, "model") as ModelRef | undefined;
+        return {
+          id: str(r, "runId") ?? str(r, "id") ?? "",
+          status: "pending",
+          output: "",
+          ...(modelRef ? { model: modelRef } : {}),
+          ...(str(r, "agent") ? { agent: str(r, "agent") } : {}),
+        };
+      });
+      model.multirun = {
+        id: str(d, "multirunId") ?? "",
+        prompt: str(d, "prompt") ?? "",
+        runs,
+      };
+      break;
+    }
+    case "multirun/run-progress": {
+      const mr = model.multirun;
+      if (mr && mr.id === (str(d, "multirunId") ?? mr.id)) {
+        const runId = str(d, "runId") ?? "";
+        let run = mr.runs.find((x) => x.id === runId);
+        if (!run) {
+          run = { id: runId, status: "pending", output: "" };
+          mr.runs.push(run);
+        }
+        const status = str(d, "status");
+        if (status === "pending" || status === "running" || status === "completed" || status === "failed") {
+          run.status = status;
+        }
+        const output = str(d, "output");
+        if (output !== undefined) run.output = output;
+        const tokens = obj(d, "tokens") as TokenUsage | undefined;
+        if (tokens) run.tokens = tokens;
+        const cost = num(d, "cost");
+        if (cost !== undefined) run.cost = cost;
+        const error = str(d, "error");
+        if (error !== undefined) run.error = error;
+      }
+      break;
+    }
+    case "multirun/completed": {
+      // terminal marker — individual run statuses already applied
+      break;
+    }
+    case "multirun/picked": {
+      if (model.multirun && model.multirun.id === (str(d, "multirunId") ?? model.multirun.id)) {
+        const runId = str(d, "runId");
+        if (runId) model.multirun.pickedRunId = runId;
+      }
+      break;
+    }
+    case "fusion/started": {
+      model.fusionPrompt = str(d, "prompt") ?? "";
+      const models = strArr(d, "models");
+      model.fusion = {
+        id: str(d, "fusionId") ?? "",
+        answer: "",
+        weights: models.map((m) => ({ model: m, weight: 0 })),
+        disagreements: [],
+        status: "running",
+      };
+      break;
+    }
+    case "fusion/completed": {
+      const weightsRaw = Array.isArray(d.weights) ? d.weights : [];
+      const weights: FusionWeightDto[] = weightsRaw
+        .map((raw) => {
+          const w = (raw && typeof raw === "object" ? raw : {}) as JsonObject;
+          return { model: str(w, "model") ?? "", weight: num(w, "weight") ?? 0 };
+        })
+        .filter((w) => w.model);
+      const status = str(d, "status");
+      model.fusion = {
+        id: str(d, "fusionId") ?? model.fusion?.id ?? "",
+        answer: str(d, "answer") ?? "",
+        weights,
+        disagreements: strArr(d, "disagreements"),
+        status: status === "failed" || status === "running" || status === "completed" ? status : "completed",
+        ...(str(d, "error") ? { error: str(d, "error") } : {}),
+      };
+      break;
+    }
     default:
-      break; // session/*, context/*, compaction/*, git/snapshot, etc: ignore
+      break; // session/*, context/*, compaction/*, git/snapshot, walkthrough/*, etc: ignore
   }
   model.version += 1;
   return model;
