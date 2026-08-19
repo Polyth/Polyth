@@ -3,6 +3,7 @@ import type { WalkthroughStepDto } from "@polyth/contracts";
 import { api } from "../api.ts";
 import { useStore } from "../store.ts";
 import { parseDiffLines } from "../utils.ts";
+import EmptyState from "./EmptyState.tsx";
 
 export default function WalkthroughView() {
   const sessionId = useStore((s) => s.activeSessionId);
@@ -28,9 +29,6 @@ export default function WalkthroughView() {
   }, [steps.length, index]);
 
   const step = steps[index];
-  const approved = steps.filter((s) => s.status === "approved").length;
-  const rejected = steps.filter((s) => s.status === "rejected").length;
-  const pending = steps.length - approved - rejected;
   const decide = async (decision: "approve" | "reject") => {
     if (!sessionId || !step) return;
     setBusy(true);
@@ -44,15 +42,12 @@ export default function WalkthroughView() {
     <div className="view-page walkthrough-page">
       <div className="wt-header">
         <div>
-          <h1 className="view-title">Guided Changes Walkthrough</h1>
-          <p className="view-sub">Review each file edit in order — approve or reject one step at a time.</p>
+          <h1 className="view-title">Changes walkthrough</h1>
+          <p className="view-sub">
+            {steps.length ? `Step ${index + 1} of ${steps.length}` : "Review file edits one step at a time"}
+          </p>
         </div>
         <span className="header-spacer" />
-        {steps.length > 0 && (
-          <span className="muted" style={{ fontSize: 12, marginRight: 8, whiteSpace: "nowrap" }}>
-            Step {index + 1}/{steps.length} · {approved} ✓ · {rejected} ✕
-          </span>
-        )}
         <div className="step-dots">
           {steps.map((s, i) => (
             <button
@@ -65,24 +60,18 @@ export default function WalkthroughView() {
         </div>
       </div>
 
-      {!sessionId && <div className="view-empty">Open a session to review file edits.</div>}
+      {!sessionId && <EmptyState title="No session open" description="Open a session to review its file edits." />}
       {sessionId && steps.length === 0 && (
-        <div className="view-empty">Write or patch a file in this session to generate walkthrough steps.</div>
-      )}
-
-      {steps.length > 0 && pending === 0 && (
-        <div className="prompt-echo">
-          ✓ Reviewed {steps.length} {steps.length === 1 ? "change" : "changes"} · {approved} approved · {rejected} rejected — continue in Git to commit.
-        </div>
+        <EmptyState
+          title="No file edits yet"
+          description="Write or patch a file in this session to generate a walkthrough."
+        />
       )}
 
       {step && (
         <>
           <div className="wt-card">
-            <div className="wt-file" title={step.file}>
-              {step.file}
-              <span className="ctx-badge" style={{ marginLeft: 8 }}>{step.status}</span>
-            </div>
+            <div className="wt-file" title={step.file}>{step.file}</div>
             <pre className="wt-diff">
               {parseDiffLines(step.diff).map((line, i) => (
                 <div key={i} className={`wt-diff-line ${line.kind}`}>

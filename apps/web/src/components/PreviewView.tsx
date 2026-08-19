@@ -2,8 +2,15 @@ import { useEffect, useState } from "react";
 import type { PreviewState } from "@polyth/contracts";
 import { api } from "../api.ts";
 import { useStore } from "../store.ts";
+import EmptyState from "./EmptyState.tsx";
 
-type InspectorTab = "console" | "network";
+type InspectorTab = "console" | "elements" | "network";
+
+const STATUS_LABEL: Record<string, string> = {
+  off: "Inactive",
+  starting: "Starting",
+  running: "Live",
+};
 
 export default function PreviewView() {
   const projectId = useStore((s) => s.activeProjectId);
@@ -50,16 +57,11 @@ export default function PreviewView() {
     setBusy(false);
   };
 
-  if (!projectId) return <div className="view-empty">Select a project to start a live preview.</div>;
+  if (!projectId) {
+    return <EmptyState title="No project selected" description="Open a project to start a live preview." />;
+  }
 
   const frameSrc = urlInput || state.url || "";
-  // Mockup shows the short authority (localhost:5173), not the full URL.
-  const host = (() => {
-    try { return frameSrc ? new URL(frameSrc).host : ""; } catch { return frameSrc; }
-  })();
-  const statusCopy = state.status === "running"
-    ? `running · ${host || (state.port ? `:${state.port}` : "")}`
-    : state.status === "starting" ? "starting…" : "off";
 
   return (
     <div className="preview-view">
@@ -71,26 +73,20 @@ export default function PreviewView() {
             setState((s) => ({ ...s, url: urlInput || s.url }));
           }}
         >
-          <input value={urlInput} onChange={(e) => setUrlInput(e.target.value)} placeholder="localhost:5173" />
+          <input value={urlInput} onChange={(e) => setUrlInput(e.target.value)} placeholder="http://127.0.0.1:…" aria-label="Preview URL" />
         </form>
-        <button className="small-btn" title="Refresh" onClick={() => void refresh()}>↻</button>
-        {frameSrc && (
-          <a className="small-btn" href={frameSrc} target="_blank" rel="noreferrer" title="Open in a new tab">↗</a>
-        )}
+        <button className="small-btn" title="Refresh" aria-label="Refresh preview" onClick={() => void refresh()}>↻</button>
         {state.status === "off" ? (
           <button className="primary-btn" onClick={() => void start()} disabled={busy}>Start</button>
         ) : (
           <button className="small-btn danger-btn" onClick={() => void stop()} disabled={busy}>Stop</button>
         )}
-        <span className={`preview-status ${state.status}`}>{statusCopy}</span>
+        <span className={`preview-status ${state.status}`}>{STATUS_LABEL[state.status] ?? state.status}</span>
         <button
-          className="small-btn"
+          className={`small-btn ${inspectorOpen ? "toggled" : ""}`}
           aria-pressed={inspectorOpen}
-          title="Toggle inspector"
           onClick={() => setInspectorOpen((v) => !v)}
-        >
-          Inspector
-        </button>
+        >Inspector</button>
       </div>
       {error && <div className="form-error" style={{ padding: "6px 12px" }}>{error}</div>}
       <div className="preview-body">
@@ -98,24 +94,27 @@ export default function PreviewView() {
           {frameSrc ? (
             <iframe title="Preview" src={frameSrc} className="preview-frame" />
           ) : (
-            <div className="view-empty">Live preview — Start boots this project's dev server and mirrors it here.</div>
+            <EmptyState
+              title="Preview is inactive"
+              description="Start a preview to load the project in this pane."
+              actionLabel="Start"
+              onAction={() => void start()}
+            />
           )}
         </div>
         {inspectorOpen && (
           <aside className="inspector">
             <div className="inspector-tabs">
-              {(["console", "network"] as const).map((t) => (
+              {(["console", "elements", "network"] as const).map((t) => (
                 <button key={t} className={`tab ${tab === t ? "active" : ""}`} onClick={() => setTab(t)}>
                   {t[0]!.toUpperCase() + t.slice(1)}
                 </button>
               ))}
             </div>
             <div className="inspector-body">
-              <div className="stat-row"><span className="k">URL</span><span className="mono">{host || "—"}</span></div>
-              <div className="stat-row"><span className="k">Port</span><span className="mono">{state.port ?? "—"}</span></div>
-              <div className="stat-row"><span className="k">Status</span><span>{statusCopy}</span></div>
-              {tab === "console" && <div className="muted">Console needs page logs proxied through the preview server.</div>}
-              {tab === "network" && <div className="muted">Network needs request capture in GET /api/preview.</div>}
+              {tab === "console" && <div className="muted">Page logs are not captured yet.</div>}
+              {tab === "elements" && <div className="muted">Element picking is not available in this preview yet.</div>}
+              {tab === "network" && <div className="muted">Network capture is not available yet.</div>}
             </div>
           </aside>
         )}

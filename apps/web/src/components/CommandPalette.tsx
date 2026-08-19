@@ -1,84 +1,150 @@
-import { Fragment, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
-import { filterPalette, listCommands, type PaletteCommand } from "../commands.ts";
-import { api } from "../api.ts";
-import { openEditorFile, setOverlay, useStore } from "../store.ts";
-import { pluginOn } from "../prefs.ts";
+// Cmd/Ctrl+K command palette: fuzzy filter, arrow keys + Enter, Escape closes.
+import { useEffect, useMemo, useRef, useState } from "react";
+import { getState, setActiveView, type AppView } from "../store.ts";
+import { createSession, exportSessionMarkdown, forkSession } from "../init.ts";
+import { shortcutLabel } from "../settings.ts";
 
-type Entry =
-  | { kind: "cmd"; id: string; cmd: PaletteCommand }
-  | { kind: "file"; id: string; path: string };
+interface Command {
+  id: string;
+  label: string;
+  hint?: string;
+  run: () => void;
+}
 
-export default function CommandPalette() {
-  const [q, setQ] = useState("");
-  const [i, setI] = useState(0);
-  const [files, setFiles] = useState<string[]>([]);
-  const input = useRef<HTMLInputElement>(null);
-  const projectId = useStore((s) => s.activeProjectId);
-  const cmds = useMemo(() => filterPalette(listCommands(), q), [q]);
-  useEffect(() => { input.current?.focus(); }, []);
-  useEffect(() => { setI(0); }, [q]);
+// Loose subsequence match: every query char appears in order.
+function fuzzyMatch(query: string, target: string): boolean {
+  const q = query.toLowerCase();
+  const t = target.toLowerCase();
+  let i = 0;
+  for (const ch of t) {
+    if (ch === q[i]) i++;
+    if (i === q.length) return true;
+  }
+  return q.length === 0;
+}
 
-  // File search: same box, debounced against /api/files/search (files plugin).
+const VIEWS: Array<[AppView, string]> = [
+  ["session", "Chat"],
+  ["git", "Git"],
+  ["terminal", "Terminal"],
+  ["preview", "Preview"],
+  ["goals", "Goals"],
+  ["multirun", "Multi-run"],
+  ["fusion", "Fusion"],
+  ["walkthrough", "Walkthrough"],
+];
+
+function buildCommands(onToggleRail: () => void, close: () => void): Command[] {
+  const wrap = (fn: () => void) => () => { close(); fn(); };
+  const cmds: Command[] = [
+    {
+      id: "new-session",
+      label: "New session",
+      run: wrap(() => {
+        const pid = getState().activeProjectId;
+        if (pid) void createSession(pid);
+      }),
+    },
+    {
+      id: "open-project",
+      label: "Open project",
+      run: wrap(() => window.dispatchEvent(new CustomEvent("polyth:open-project"))),
+    },
+    {
+      id: "open-settings",
+      label: "Open settings",
+      hint: shortcutLabel(","),
+      run: wrap(() => window.dispatchEvent(new CustomEvent("polyth:open-settings"))),
+    },
+    ...VIEWS.map(([view, label]): Command => ({
+      id: `view-${view}`,
+      label: `Go to ${label}`,
+      hint: "View",
+      run: wrap(() => setActiveView(view)),
+    })),
+    { id: "toggle-rail", label: "Toggle right rail", run: wrap(onToggleRail) },
+    {
+      id: "fork",
+      label: "Fork session",
+      run: wrap(() => {
+        const sid = getState().activeSessionId;
+        if (sid) void forkSession(sid).catch(() => {});
+      }),
+    },
+    { id: "export", label: "Export session as Markdown", run: wrap(exportSessionMarkdown) },
+    {
+      id: "focus-composer",
+      label: "Focus composer",
+      run: wrap(() => {
+        setActiveView("session");
+        window.dispatchEvent(new CustomEvent("polyth:composer-focus"));
+      }),
+    },
+  ];
+  return cmds;
+}
+
+export default function CommandPalette({ onToggleRail }: { onToggleRail: () => void }) {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const [index, setIndex] = useState(0);
+  const inputRef = useRef<HTMLInputElement>(null);
+
   useEffect(() => {
-    const query = q.trim();
-    if (!projectId || query.length < 2 || !pluginOn("files")) { setFiles([]); return; }
-    const h = setTimeout(() => {
-      void api.filesSearch(projectId, query, 8).then(setFiles);
-    }, 150);
-    return () => clearTimeout(h);
-  }, [q, projectId]);
+    const onKey = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        setOpen((v) => !v);
+        setQuery("");
+        setIndex(0);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
-  const entries = useMemo<Entry[]>(
-    () => [
-      ...cmds.map((c): Entry => ({ kind: "cmd", id: c.id, cmd: c })),
-      ...files.map((p): Entry => ({ kind: "file", id: `file:${p}`, path: p })),
-    ],
-    [cmds, files],
+  useEffect(() => {
+    if (open) inputRef.current?.focus();
+  }, [open]);
+
+  const commands = useMemo(() => buildCommands(onToggleRail, () => setOpen(false)), [onToggleRail]);
+  const filtered = useMemo(
+    () => commands.filter((c) => fuzzyMatch(query.trim(), c.label)),
+    [commands, query],
   );
 
-  const run = (entry: Entry) => {
-    setOverlay(null);
-    if (entry.kind === "cmd") entry.cmd.run();
-    else openEditorFile(entry.path);
-  };
-  const onKey = (e: KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === "ArrowDown") { e.preventDefault(); setI((n) => (n + 1) % Math.max(entries.length, 1)); }
-    else if (e.key === "ArrowUp") { e.preventDefault(); setI((n) => (n - 1 + entries.length) % Math.max(entries.length, 1)); }
-    else if (e.key === "Enter" && entries[i]) { e.preventDefault(); run(entries[i]!); }
-    else if (e.key === "Escape") setOverlay(null);
-  };
+  if (!open) return null;
 
-  const groupOf = (entry: Entry): string => (entry.kind === "cmd" ? entry.cmd.group ?? "" : "Files");
+  const onKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === "Escape") { setOpen(false); return; }
+    if (e.key === "ArrowDown") { e.preventDefault(); setIndex((i) => (i + 1) % Math.max(1, filtered.length)); return; }
+    if (e.key === "ArrowUp") { e.preventDefault(); setIndex((i) => (i - 1 + Math.max(1, filtered.length)) % Math.max(1, filtered.length)); return; }
+    if (e.key === "Enter") { e.preventDefault(); filtered[Math.min(index, filtered.length - 1)]?.run(); }
+  };
 
   return (
-    <div className="overlay" onClick={() => setOverlay(null)}>
-      <div className="palette" onClick={(e) => e.stopPropagation()} role="dialog" aria-label="Command palette">
-        <input ref={input} value={q} placeholder="Run a command or search files…" onChange={(e) => setQ(e.target.value)} onKeyDown={onKey} />
+    <div className="palette-overlay" onMouseDown={(e) => { if (e.target === e.currentTarget) setOpen(false); }}>
+      <div className="palette" role="dialog" aria-label="Command palette">
+        <input
+          ref={inputRef}
+          className="palette-input"
+          value={query}
+          placeholder="Type a command…"
+          onChange={(e) => { setQuery(e.target.value); setIndex(0); }}
+          onKeyDown={onKeyDown}
+        />
         <div className="palette-list">
-          {entries.length === 0 && <div className="palette-empty">No matches</div>}
-          {entries.map((entry, n) => (
-            <Fragment key={entry.id}>
-              {groupOf(entry) && (n === 0 || groupOf(entries[n - 1]!) !== groupOf(entry)) && (
-                <div className="palette-group">{groupOf(entry)}</div>
-              )}
-              <button
-                className={`palette-item ${n === i ? "active" : ""}`}
-                ref={n === i ? (el) => el?.scrollIntoView({ block: "nearest" }) : null}
-                onClick={() => run(entry)}
-              >
-                {entry.kind === "cmd" ? (
-                  <>
-                    <span className="palette-label">{entry.cmd.label}</span>
-                    {entry.cmd.hint && <kbd>{entry.cmd.hint}</kbd>}
-                  </>
-                ) : (
-                  <>
-                    <span className="palette-label mono">{entry.path}</span>
-                    <span className="palette-meta">open in editor</span>
-                  </>
-                )}
-              </button>
-            </Fragment>
+          {filtered.length === 0 && <div className="palette-empty">No matching commands.</div>}
+          {filtered.map((c, i) => (
+            <button
+              key={c.id}
+              className={`palette-item ${i === Math.min(index, filtered.length - 1) ? "active" : ""}`}
+              onMouseEnter={() => setIndex(i)}
+              onClick={() => c.run()}
+            >
+              <span>{c.label}</span>
+              {c.hint && <span className="palette-hint">{c.hint}</span>}
+            </button>
           ))}
         </div>
       </div>

@@ -24,17 +24,6 @@ export function fmtCost(c: number): string {
   return `$${c.toFixed(4)}`;
 }
 
-/** Compact "time ago" for session rows: 45s, 3m, 6h, 2d. */
-export function ago(ts: number, now = Date.now()): string {
-  const s = Math.max(0, Math.floor((now - ts) / 1000));
-  if (s < 60) return `${s}s`;
-  const m = Math.floor(s / 60);
-  if (m < 60) return `${m}m`;
-  const h = Math.floor(m / 60);
-  if (h < 24) return `${h}h`;
-  return `${Math.floor(h / 24)}d`;
-}
-
 /** Platform modifier key label: ⌘ on Apple platforms, Ctrl elsewhere. */
 export function modKey(platform: string): string {
   return /mac|iphone|ipad|ipod/i.test(platform) ? "⌘" : "Ctrl";
@@ -61,6 +50,41 @@ export function providerColor(provider: string): string {
   if (p.includes("mistral")) return "#82bff4";
   if (p.includes("meta") || p.includes("llama")) return "#e4bb62";
   return "#a19e96";
+}
+
+// ---- session title display --------------------------------------------------
+
+const PLACEHOLDER_TITLES = new Set(["", "new session", "untitled session", "untitled", "(untitled)", "(untitled session)"]);
+
+export function isPlaceholderTitle(title: string, sessionId?: string): boolean {
+  const t = title.trim();
+  if (PLACEHOLDER_TITLES.has(t.toLowerCase())) return true;
+  if (sessionId !== undefined && t === sessionId) return true;
+  if (t.startsWith("ses_")) return true;
+  if (/^[0-9a-f-]{8,}$/i.test(t)) return true;
+  return false;
+}
+
+export function titleFromPrompt(text: string, max = 48): string {
+  const firstLine = text.split("\n").find((l) => l.trim() !== "") ?? "";
+  const collapsed = firstLine.replace(/\s+/g, " ").trim();
+  if (collapsed.length <= max) return collapsed;
+  return collapsed.slice(0, max - 1).trimEnd() + "…";
+}
+
+export function displaySessionTitle(title: string, sessionId?: string, firstUserText?: string): string {
+  if (!isPlaceholderTitle(title, sessionId)) return title.trim();
+  if (firstUserText !== undefined && firstUserText.trim() !== "") return titleFromPrompt(firstUserText);
+  return "New session";
+}
+
+export function ago(ms: number, now = Date.now()): string {
+  const diff = now - ms;
+  if (diff < 60_000) return "just now";
+  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m ago`;
+  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h ago`;
+  if (diff < 7 * 86_400_000) return `${Math.floor(diff / 86_400_000)}d ago`;
+  return new Date(ms).toLocaleDateString();
 }
 
 export function modelBadge(model?: { providerID: string; modelID: string } | string): { label: string; color: string } {

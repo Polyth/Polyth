@@ -1,35 +1,59 @@
-import { useActiveModel, useStore } from "../store.ts";
-import { PERSONAS, isCustomized, usePrefs } from "../prefs.ts";
-import { fmtCost } from "../format.ts";
+import { Fragment } from "react";
+import { useStore, type AppView } from "../store.ts";
+
+const VIEW_LABEL: Record<AppView, string> = {
+  session: "Chat",
+  goals: "Goals",
+  multirun: "Multi-run",
+  fusion: "Fusion",
+  walkthrough: "Walkthrough",
+  preview: "Preview",
+  git: "Git",
+  terminal: "Terminal",
+  files: "Files",
+  schedule: "Schedule",
+  github: "GitHub",
+};
 
 export default function StatusBar() {
   const branch = useStore((s) => s.gitBranch);
-  const session = useStore((s) => s.sessions.find((x) => x.id === s.activeSessionId) ?? null);
   const project = useStore((s) => s.projects.find((p) => p.id === s.activeProjectId) ?? null);
-  const model = useActiveModel();
-  const prefs = usePrefs();
-  const persona = prefs.persona ? PERSONAS[prefs.persona] : null;
-  const custom = isCustomized(prefs);
+  const session = useStore((s) => s.sessions.find((x) => x.id === s.activeSessionId) ?? null);
+  const view = useStore((s) => s.activeView);
 
-  let left: string;
-  if (persona?.id === "creator") {
-    // No model jargon for creators — just what the workspace is doing.
-    left = "Preview updates as you chat";
-  } else if (persona?.id === "manager") {
-    left = model.totals.cost > 0 ? `session spend ${fmtCost(model.totals.cost)}` : "no spend yet";
-  } else {
-    left = [
-      prefs.plugins.includes("git") ? branch : "",
-      session?.model ? `${session.model.providerID}/${session.model.modelID}` : "",
-      session?.agent ?? "",
-    ].filter(Boolean).join(" · ") || project?.name || project?.path || "polyth";
+  const segments: Array<{ key: string; node: React.ReactNode }> = [];
+  segments.push({
+    key: "project",
+    node: (
+      <span className="sb">
+        <span className="sb-live" aria-hidden />
+        {project?.name || project?.path || "Polyth"}
+      </span>
+    ),
+  });
+  if (branch) {
+    segments.push({ key: "branch", node: <span className="sb"><span className="mono">{branch}</span></span> });
+  }
+  if (project) {
+    segments.push({
+      key: "model",
+      node: <span className="sb"><span className="mono">{session?.model?.modelID ?? "No model"}</span></span>,
+    });
+  }
+  if (session?.agent) {
+    segments.push({ key: "agent", node: <span className="sb">{session.agent} agent</span> });
   }
 
   return (
     <div className="statusbar">
-      <span className="statusbar-left">{left}</span>
+      {segments.map((s, i) => (
+        <Fragment key={s.key}>
+          {i > 0 && <span className="sb-sep" aria-hidden />}
+          {s.node}
+        </Fragment>
+      ))}
       <span className="header-spacer" />
-      {persona && <span className="statusbar-persona">{persona.label} workspace{custom ? " · custom" : ""}</span>}
+      <span className="sb">{VIEW_LABEL[view]}</span>
     </div>
   );
 }

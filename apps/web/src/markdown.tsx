@@ -1,6 +1,5 @@
 // Markdown-lite: fenced code, headers, bold, italic, inline code, lists, horizontal rules. No dependency.
 import type { ReactNode } from "react";
-import CopyButton from "./components/CopyButton.tsx";
 
 // Process inline formatting within a single line: **bold**, *italic*, `code`, ~~strike~~
 function inline(text: string, keyBase: string): ReactNode[] {
@@ -50,7 +49,7 @@ function renderLines(text: string, keyBase: string): ReactNode[] {
   };
 
   for (const line of lines) {
-    const hrMatch = /^\s*([-*_])(?:\s*\1){2,}\s*$/.exec(line);
+    const hrMatch = /^\s*([-*_])\s*\1\s*\1(?:\s|\1)*$/.exec(line);
     const headerMatch = /^(#{1,6})\s+(.+)$/.exec(line);
     const listMatch = /^\s*[-*+]\s+(.+)$/.exec(line);
     const numListMatch = /^\s*\d+\.\s+(.+)$/.exec(line);
@@ -86,12 +85,9 @@ export function renderMarkdown(text: string, keyBase = "md"): ReactNode[] {
   blocks.forEach((b, i) => {
     if (i % 2 === 1) {
       out.push(
-        <div key={`${keyBase}-p${i}`} className="copy-wrap">
-          <pre>
-            <code>{b.trim()}</code>
-          </pre>
-          <CopyButton text={b.trim()} />
-        </div>,
+        <pre key={`${keyBase}-p${i}`}>
+          <code>{b.trim()}</code>
+        </pre>,
       );
     } else {
       out.push(...renderLines(b, `${keyBase}-${i}`));

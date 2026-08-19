@@ -4,7 +4,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createContext } from "@polyth/kernel";
 import { createStore } from "@polyth/session";
-import { CAP, type AgentRuntime, type SessionEvent, type SessionProjection } from "@polyth/contracts";
+import { CAP, type AgentRuntime, type RuntimeEvent, type SessionEvent, type SessionProjection } from "@polyth/contracts";
 import { createOpenCodeRuntime, type OpenCodeAdapterOptions } from "@polyth/backend-opencode";
 import { createPermissionService } from "@polyth/permissions";
 import { createGoalService, type GoalService } from "@polyth/goals";
@@ -68,19 +68,82 @@ export async function boot(opts: BootOptions = {}) {
   // --- per-project opencode runtime pool (lazy spawn, one serve process per project)
   const runtimesByProject = new Map<string, Promise<AgentRuntime>>();
   const sessionIdMap = new Map<string, string>(); // canonical -> backend
+
+  const isTransportError = (err: unknown): boolean =>
+    /fetch failed|terminated|ECONNRESET|ECONNREFUSED/i.test(
+      err instanceof Error ? `${err.message} ${String(err.cause ?? "")}` : String(err),
+    );
+
+  const spawnRuntime = async (projectId: string, cwd?: string): Promise<AgentRuntime> => {
+    const project = await projects.get(projectId);
+    return createOpenCodeRuntime({
+      cwd: cwd ?? project?.path ?? process.cwd(), sessionIdMap,
+      ...(opts.opencode?.port ? { port: opts.opencode.port } : {}),
+      ...(opts.opencode?.bin ? { bin: opts.opencode.bin } : {}),
+      ...(opts.opencode?.hostname ? { hostname: opts.opencode.hostname } : {}),
+    });
+  };
+
+  // Stable facade per pool key: when ensureSession dies with a transport error
+  // (serve process gone / poisoned socket), drop the cached promise, respawn,
+  // and retry once. Callers keep the same handle, so listeners wired against
+  // it keep receiving events from the fresh runtime.
+  const facadeFor = (key: string, projectId: string, cwd: string | undefined, first: AgentRuntime): AgentRuntime => {
+    let inner = first;
+    const listeners = new Set<(sessionId: string, ev: RuntimeEvent) => void>();
+    const fanout = (sessionId: string, ev: RuntimeEvent) => { for (const cb of listeners) cb(sessionId, ev); };
+    let innerSub = inner.onEvent(fanout);
+
+    const respawn = async (): Promise<void> => {
+      runtimesByProject.delete(key);
+      innerSub.dispose();
+      void inner.dispose().catch(() => {});
+      inner = await spawnRuntime(projectId, cwd);
+      innerSub = inner.onEvent(fanout);
+      runtimesByProject.set(key, Promise.resolve(facade));
+    };
+
+    const facade: AgentRuntime = {
+      capabilities: () => inner.capabilities(),
+      models: () => inner.models(),
+      agents: () => inner.agents(),
+      sessions: () => inner.sessions(),
+      history: (sessionId) => inner.history(sessionId),
+      async ensureSession(canonical) {
+        try {
+          return await inner.ensureSession(canonical);
+        } catch (err) {
+          if (!isTransportError(err)) throw err;
+          console.warn(`[polyth] opencode transport error for ${key}; respawning`, err);
+          await respawn();
+          return inner.ensureSession(canonical);
+        }
+      },
+      startTurn: (req) => inner.startTurn(req),
+      abort: (sessionId) => inner.abort(sessionId),
+      replyPermission: (sessionId, requestId, reply) => inner.replyPermission(sessionId, requestId, reply),
+      replyQuestion: (sessionId, requestId, answers) => inner.replyQuestion(sessionId, requestId, answers),
+      onEvent(cb) {
+        listeners.add(cb);
+        return { dispose: () => { listeners.delete(cb); } };
+      },
+      dispose: () => { runtimesByProject.delete(key); return inner.dispose(); },
+    };
+    return facade;
+  };
+
   const runtimes: RuntimePool = {
     forProject(projectId, cwd) {
       const key = cwd ? `${projectId}::${cwd}` : projectId;
       let p = runtimesByProject.get(key);
       if (!p) {
         p = (async () => {
-          const project = await projects.get(projectId);
-          return createOpenCodeRuntime({
-            cwd: cwd ?? project?.path ?? process.cwd(), sessionIdMap,
-            ...(opts.opencode?.port ? { port: opts.opencode.port } : {}),
-            ...(opts.opencode?.bin ? { bin: opts.opencode.bin } : {}),
-            ...(opts.opencode?.hostname ? { hostname: opts.opencode.hostname } : {}),
-          });
+          try {
+            return facadeFor(key, projectId, cwd, await spawnRuntime(projectId, cwd));
+          } catch (err) {
+            if (!isTransportError(err)) throw err;
+            return facadeFor(key, projectId, cwd, await spawnRuntime(projectId, cwd)); // one respawn retry
+          }
         })();
         runtimesByProject.set(key, p);
         p.catch(() => runtimesByProject.delete(key)); // allow retry

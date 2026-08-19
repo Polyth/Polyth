@@ -2,9 +2,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { api, type GoalState } from "../api.ts";
 import { useStore } from "../store.ts";
-import { usePrefs } from "../prefs.ts";
 import { goalChecklist } from "../utils.ts";
-import { useEscape } from "../useEscape.ts";
 
 export function GoalStrip({ forceOpen = false }: { forceOpen?: boolean }) {
   const activeSessionId = useStore((s) => s.activeSessionId);
@@ -19,11 +17,9 @@ export function GoalStrip({ forceOpen = false }: { forceOpen?: boolean }) {
     return null;
   });
 
-  const prefs = usePrefs();
   const [goal, setGoal] = useState<GoalState | null>(null);
   const [busy, setBusy] = useState(false);
   const [open, setOpen] = useState(true);
-  const [attaching, setAttaching] = useState(false);
 
   const refresh = useCallback(async () => {
     if (!activeSessionId) { setGoal(null); return; }
@@ -40,17 +36,7 @@ export function GoalStrip({ forceOpen = false }: { forceOpen?: boolean }) {
     if (model && model.type.startsWith("goal/")) void refresh();
   }, [model, refresh]);
 
-  if (!goal) {
-    if (forceOpen) return <div className="view-empty">No goal attached to this session.</div>;
-    if (!activeSessionId || !prefs.plugins.includes("goals")) return null;
-    // Dashed ghost invites attaching a goal without stealing timeline space.
-    if (attaching) return <GoalAttachForm onDone={() => { setAttaching(false); void refresh(); }} />;
-    return (
-      <button className="goal-ghost" onClick={() => setAttaching(true)}>
-        + Attach a goal so Polyth can work toward it on its own
-      </button>
-    );
-  }
+  if (!goal) return forceOpen ? <div className="view-empty">No goal attached to this session.</div> : null;
 
   const pause = async () => { setBusy(true); await api.goalPause(activeSessionId!); setBusy(false); void refresh(); };
   const resume = async () => { setBusy(true); await api.goalResume(activeSessionId!); setBusy(false); void refresh(); };
@@ -112,7 +98,6 @@ export function GoalAttachForm({ onDone }: { onDone: () => void }) {
   const [budget, setBudget] = useState("");
   const [maxCont, setMaxCont] = useState("");
   const [busy, setBusy] = useState(false);
-  useEscape(true, onDone);
 
   const submit = async () => {
     if (!activeSessionId || !objective.trim()) return;
@@ -132,28 +117,41 @@ export function GoalAttachForm({ onDone }: { onDone: () => void }) {
   };
 
   return (
-    <div className="goal-attach project-form">
-      <label>Objective <span>one item per line becomes a checklist</span>
+    <div className="goal-attach">
+      <label className="goal-attach-label">
+        Objective
         <textarea
-          autoFocus
           rows={2}
-          placeholder="Ship the login flow…"
+          placeholder="What should this session accomplish? One item per line becomes a checklist."
           value={objective}
           onChange={(e) => setObjective(e.target.value)}
         />
       </label>
       <div className="goal-attach-row">
-        <label>Budget tokens <span>optional</span>
-          <input type="number" placeholder="500000" value={budget} onChange={(e) => setBudget(e.target.value)} style={{ width: 120 }} />
+        <label className="goal-attach-label">
+          Token budget
+          <input
+            type="number"
+            placeholder="e.g. 500000"
+            value={budget}
+            onChange={(e) => setBudget(e.target.value)}
+            style={{ width: 130 }}
+          />
         </label>
-        <label>Max continuations <span>optional</span>
-          <input type="number" placeholder="12" value={maxCont} onChange={(e) => setMaxCont(e.target.value)} style={{ width: 130 }} />
+        <label className="goal-attach-label">
+          Max continuations
+          <input
+            type="number"
+            placeholder="e.g. 12"
+            value={maxCont}
+            onChange={(e) => setMaxCont(e.target.value)}
+            style={{ width: 130 }}
+          />
         </label>
-      </div>
-      <div className="form-actions">
+        <span className="header-spacer" />
         <button className="small-btn" onClick={onDone}>Cancel</button>
-        <button className="primary-btn small-btn" onClick={() => void submit()} disabled={busy || !objective.trim()}>
-          Attach goal
+        <button className="primary-btn goal-attach-submit" onClick={() => void submit()} disabled={busy || !objective.trim()}>
+          Attach
         </button>
       </div>
     </div>

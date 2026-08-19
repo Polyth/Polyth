@@ -9,6 +9,7 @@ import type {
   SessionProjection,
 } from "@polyth/contracts";
 import { buildModel, type RenderModel } from "./reduce.ts";
+import { applySettingsToDom, loadSettings, saveSettings, type PolythSettings } from "./settings.ts";
 
 export type AppView = "session" | "files" | "goals" | "multirun" | "fusion" | "walkthrough" | "preview" | "git" | "terminal" | "schedule" | "github";
 export type Overlay = "onboarding" | "palette" | "search" | "settings" | null;
@@ -24,6 +25,8 @@ export interface AppState {
   activeSessionId: string | null;
   activeView: AppView;
   gitBranch: string;
+  settings: PolythSettings;
+  uiError: string | null;
   overlay: Overlay;
   railPlugin: RailPlugin | null;
   moreOpen: boolean;
@@ -42,6 +45,8 @@ let state: AppState = {
   activeSessionId: null,
   activeView: "session",
   gitBranch: "",
+  settings: loadSettings(),
+  uiError: null,
   overlay: null,
   railPlugin: null,
   moreOpen: false,
@@ -126,6 +131,28 @@ export function openEditorFile(path: string | null): void {
 export function activateSession(id: string | null): void {
   localStorage.setItem("polyth.activeSessionId", id ?? "");
   set({ activeSessionId: id });
+}
+
+// Merge + persist local UI preferences and apply the visual ones to <html>.
+export function updateSettings(patch: Partial<PolythSettings>): void {
+  const settings = { ...state.settings, ...patch };
+  saveSettings(settings);
+  applySettingsToDom(settings);
+  set({ settings });
+}
+
+let uiErrorTimer: ReturnType<typeof setTimeout> | undefined;
+
+// Inline error banner (never window.alert). Auto-dismisses after 12s.
+export function setUiError(message: string): void {
+  if (uiErrorTimer !== undefined) clearTimeout(uiErrorTimer);
+  uiErrorTimer = setTimeout(() => set({ uiError: null }), 12_000);
+  set({ uiError: message });
+}
+
+export function clearUiError(): void {
+  if (uiErrorTimer !== undefined) clearTimeout(uiErrorTimer);
+  set({ uiError: null });
 }
 
 export function upsertSession(p: SessionProjection): void {

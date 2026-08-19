@@ -2,7 +2,8 @@
 import { api } from "./api.ts";
 import { SyncClient } from "./sync.ts";
 import { buildModel } from "./reduce.ts";
-import { modelToMarkdown } from "./format.ts";
+import { displaySessionTitle, isPlaceholderTitle, modelToMarkdown, titleFromPrompt } from "./format.ts";
+import { friendlyError } from "./settings.ts";
 import * as store from "./store.ts";
 import type { JsonObject } from "@polyth/contracts";
 
@@ -63,6 +64,7 @@ async function boot(): Promise<void> {
     }
   } catch (err) {
     console.error("initial load failed", err);
+    store.setUiError(friendlyError("Couldn’t reach the Polyth server", err));
   }
 }
 
@@ -136,10 +138,18 @@ export async function restoreSession(sessionId: string): Promise<void> {
 export async function sendMessage(text: string, model?: JsonObject, agent?: string): Promise<void> {
   const id = store.getState().activeSessionId;
   if (!id) return;
+  // If the stored title is still a placeholder, derive one from the first
+  // prompt so the sidebar/header update immediately (display-only upsert).
+  const session = store.getState().sessions.find((s) => s.id === id);
+  if (store.getState().settings.autoTitleSessions && session && isPlaceholderTitle(session.title, session.id)) {
+    const derived = titleFromPrompt(text);
+    if (derived) store.upsertSession({ ...session, title: derived, updatedAt: Date.now() });
+  }
   try {
     await api.sendMessage(id, { text, model, agent });
   } catch (err) {
     console.error("send message failed", err);
+    store.setUiError(friendlyError("Couldn’t send the message", err));
   }
 }
 
@@ -175,7 +185,9 @@ export function exportSessionMarkdown(): void {
   const s = store.getState();
   if (!s.activeSessionId) return;
   const model = buildModel(s.events[s.activeSessionId] ?? []);
-  const title = s.sessions.find((x) => x.id === s.activeSessionId)?.title ?? s.activeSessionId;
+  const stored = s.sessions.find((x) => x.id === s.activeSessionId)?.title ?? "";
+  const firstUser = model.messages.find((m) => m.kind === "user");
+  const title = displaySessionTitle(stored, s.activeSessionId, firstUser?.kind === "user" ? firstUser.text : undefined);
   const blob = new Blob([modelToMarkdown(model)], { type: "text/markdown" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");

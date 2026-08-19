@@ -12,60 +12,77 @@ import GitView from "./GitView.tsx";
 import GoalsView from "./GoalsView.tsx";
 import WalkthroughView from "./WalkthroughView.tsx";
 import TerminalView from "./TerminalView.tsx";
-import EditorView from "./EditorView.tsx";
-import ScheduleView from "./ScheduleView.tsx";
-import GithubView from "./GithubView.tsx";
-import { useState } from "react";
 import { useActiveModel, useStore } from "../store.ts";
-import { addProject, createProject, createSession } from "../init.ts";
-import { dragKind, dropIntoSession } from "../dnd.ts";
+import { addProject, createProject } from "../init.ts";
+import { shortcutLabel } from "../settings.ts";
+
+// Large polyth-style hero for a fresh session (or no session yet):
+// centered headline, the composer as an elevated card, and suggestion chips.
+function SessionHero() {
+  const project = useStore((s) => s.projects.find((p) => p.id === s.activeProjectId) ?? null);
+  const branch = useStore((s) => s.gitBranch);
+  const name = project?.name || project?.path || "this project";
+  return (
+    <div className="stage">
+      <div className="hero">
+        <div className="hero-mark">p</div>
+        <h2>What are we working on in {name}?</h2>
+        <p className="hero-sub">
+          Polyth is attached to <b>{name}</b>
+          {branch ? <> on <span className="mono">{branch}</span></> : null}.
+          {" "}Describe a task, or start from one of the suggestions below.
+        </p>
+        <Composer variant="hero" />
+        <div className="hero-foot">
+          <span className="kbd">{shortcutLabel("K")}</span> commands
+          <span className="hero-sep">·</span>
+          <span className="kbd">{shortcutLabel("N")}</span> new session
+          <span className="hero-sep">·</span>
+          <span className="kbd">{shortcutLabel(",")}</span> settings
+        </div>
+      </div>
+    </div>
+  );
+}
 
 export default function Main() {
   const sessionId = useStore((s) => s.activeSessionId);
   const projectId = useStore((s) => s.activeProjectId);
   const view = useStore((s) => s.activeView);
   const model = useActiveModel();
-  const [dropHint, setDropHint] = useState<"path" | "files" | null>(null);
 
   // Project-level views work without an open session.
-  if (!sessionId && (view === "preview" || view === "git" || view === "terminal" || view === "files" || view === "schedule" || view === "github")) {
+  if (!sessionId && (view === "preview" || view === "git" || view === "terminal")) {
     return (
       <main className="main">
         <Header />
         {view === "preview" && <PreviewView />}
         {view === "git" && <GitView />}
         {view === "terminal" && <TerminalView />}
-        {view === "files" && <EditorView />}
-        {view === "schedule" && <ScheduleView />}
-        {view === "github" && <GithubView />}
       </main>
     );
   }
 
-  if (!sessionId) {
+  if (!projectId) {
     return (
       <main className="main">
-        {projectId && <Header />}
-        <div className="center-empty">
-          <div className="welcome">
-            <span className="welcome-mark">p</span>
-            <h1>{projectId ? "Start a focused session" : "Open a project"}</h1>
-            <p>{projectId ? "Create a session to explore, build, or review." : "Open an existing folder, or create one for a new project."}</p>
-            {projectId ? (
-              <button className="primary-btn welcome-action" onClick={() => void createSession(projectId)}>New session</button>
-            ) : (
+        <div className="stage">
+          <div className="hero">
+            <div className="hero-mark">p</div>
+            <h2>Open a project</h2>
+            <p className="hero-sub">Point Polyth at a folder, or create a new one.</p>
+            <div className="hero-project-form">
               <ProjectForm onSubmit={async (path, name, create) => {
                 if (create) await createProject(path, name || undefined);
                 else await addProject(path, name || undefined);
               }} />
-            )}
+            </div>
           </div>
         </div>
       </main>
     );
   }
 
-  if (view === "files") return <main className="main"><Header /><EditorView /></main>;
   if (view === "goals") return <main className="main"><Header /><GoalsView /></main>;
   if (view === "multirun") return <main className="main"><Header /><MultiRunView /></main>;
   if (view === "fusion") return <main className="main"><Header /><FusionView /></main>;
@@ -73,8 +90,16 @@ export default function Main() {
   if (view === "preview") return <main className="main"><Header /><PreviewView /></main>;
   if (view === "git") return <main className="main"><Header /><GitView /></main>;
   if (view === "terminal") return <main className="main"><Header /><TerminalView /></main>;
-  if (view === "schedule") return <main className="main"><Header /><ScheduleView /></main>;
-  if (view === "github") return <main className="main"><Header /><GithubView /></main>;
+
+  // Fresh state: no session yet, or an open session with nothing sent.
+  if (!sessionId || model.messages.length === 0) {
+    return (
+      <main className="main">
+        <Header />
+        <SessionHero />
+      </main>
+    );
+  }
 
   const pendingPermissions = model.permissions.filter((p) => p.status === "pending");
   const pendingQuestions = model.questions.filter((q) => q.status === "pending");
@@ -82,21 +107,7 @@ export default function Main() {
   return (
     <main className="main">
       <Header />
-      <div
-        className="timeline-wrap"
-        onDragOver={(e) => { const k = dragKind(e.dataTransfer); if (k) { e.preventDefault(); setDropHint(k); } }}
-        onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setDropHint(null); }}
-        onDrop={(e) => {
-          const k = dragKind(e.dataTransfer);
-          setDropHint(null);
-          if (!k || !projectId) return;
-          e.preventDefault();
-          void dropIntoSession(e.dataTransfer, projectId);
-        }}
-      >
-        {dropHint && (
-          <div className="drop-hint">{dropHint === "path" ? "Attach to session" : "Drop to upload"}</div>
-        )}
+      <div className="timeline-wrap">
         <GoalStrip />
         <Timeline model={model} />
       </div>

@@ -1,20 +1,8 @@
 import { useState } from "react";
-import type { SessionProjection } from "@polyth/contracts";
 import { GoalAttachForm } from "./GoalStrip.tsx";
-import { getState, useActiveModel, useStore } from "../store.ts";
-import { registerSlot } from "../slots.ts";
+import { useActiveModel, useStore } from "../store.ts";
 import { api } from "../api.ts";
-import { goalChecklist } from "../utils.ts";
-
-// Sessions carrying a goal get a pill in the session list.
-registerSlot("session.list.badges", "builtin.goal", (props) => {
-  const session = props.session as SessionProjection | undefined;
-  if (!session) return null;
-  const evs = getState().events[session.id] ?? [];
-  if (!evs.some((e) => e.type === "goal/attached")) return null;
-  const closed = evs.some((e) => e.type === "goal/completed" || e.type === "goal/stopped");
-  return <span className={`goal-pill goal-pill-${closed ? "completed" : "active"}`}>goal</span>;
-}, 10);
+import EmptyState from "./EmptyState.tsx";
 
 function fmtK(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
@@ -38,7 +26,9 @@ export default function GoalsView() {
   const [form, setForm] = useState(false);
   const [busy, setBusy] = useState(false);
 
-  if (!sessionId) return <div className="view-empty">Open a session to attach a goal.</div>;
+  if (!sessionId) {
+    return <EmptyState title="No session open" description="Open a session to attach a goal." />;
+  }
 
   const audits = events
     .filter((e) => e.type === "goal/audit")
@@ -56,21 +46,27 @@ export default function GoalsView() {
   };
 
   const pct = goal && goal.budgetTokens > 0 ? Math.min(100, Math.round((goal.tokensUsed / goal.budgetTokens) * 100)) : 0;
-  const checklist = goal ? goalChecklist(goal.objective, goal.status) : [];
 
   return (
     <div className="view-page goals-page">
       <div className="goals-head">
         <div>
-          <h1 className="view-title">Session Goals</h1>
-          <p className="view-sub">Autonomous loop: attach an objective, let the auditor drive continuations to completion.</p>
+          <h1 className="view-title">Session goals</h1>
+          <p className="view-sub">Attach an objective and let the auditor drive continuations to completion.</p>
         </div>
         <span className="header-spacer" />
         {!goal && !form && <button className="small-btn" onClick={() => setForm(true)}>Attach goal</button>}
       </div>
 
       {form && <GoalAttachForm onDone={() => setForm(false)} />}
-      {!goal && !form && <div className="view-empty">No goal attached to this session.</div>}
+      {!goal && !form && (
+        <EmptyState
+          title="No goal yet"
+          description="Give this session an objective — Polyth keeps working until it is met."
+          actionLabel="Attach goal"
+          onAction={() => setForm(true)}
+        />
+      )}
 
       {goal && (
         <>
@@ -80,21 +76,10 @@ export default function GoalsView() {
               <span className={`goal-pill goal-pill-${goal.status}`}>{goal.status}</span>
             </div>
             <div className="goal-card-objective">{goal.objective}</div>
-            {checklist.length > 1 && (
-              <>
-                <div className="goal-budget-row">
-                  <span>Progress</span>
-                  <span className="goal-progress">{checklist.filter((c) => c.done).length}/{checklist.length}</span>
-                </div>
-                <ul className="goal-check">
-                  {checklist.map((c, i) => <li key={i} className={c.done ? "done" : ""}>{c.text}</li>)}
-                </ul>
-              </>
-            )}
             <div>
               <div className="goal-budget-row">
                 <span>Token budget</span>
-                <span className="mono">{fmtK(goal.tokensUsed)}{goal.budgetTokens > 0 ? ` / ${fmtK(goal.budgetTokens)}` : ""} tok</span>
+                <span className="mono">{fmtK(goal.tokensUsed)}{goal.budgetTokens > 0 ? ` / ${fmtK(goal.budgetTokens)}` : ""}</span>
               </div>
               <div className="goal-budget-track">
                 <div className="goal-budget-fill" style={{ width: `${pct}%` }} />

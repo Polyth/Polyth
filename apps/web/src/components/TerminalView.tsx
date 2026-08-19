@@ -3,6 +3,7 @@ import type { TerminalInfo } from "@polyth/contracts";
 import { api } from "../api.ts";
 import { useStore } from "../store.ts";
 import { applyTerminalChunk } from "../utils.ts";
+import EmptyState from "./EmptyState.tsx";
 
 interface Tab {
   id: string;
@@ -21,7 +22,7 @@ export default function TerminalView() {
   const sessionId = useStore((s) => s.activeSessionId);
   const [tabs, setTabs] = useState<Tab[]>([]);
   const [active, setActive] = useState<string | null>(null);
-  const [focused, setFocused] = useState(false);
+  const [line, setLine] = useState("");
   const sockets = useRef(new Map<string, WebSocket>());
   const preRef = useRef<HTMLPreElement>(null);
 
@@ -94,9 +95,9 @@ export default function TerminalView() {
     preRef.current?.scrollTo(0, preRef.current.scrollHeight);
   }, [tabs, active]);
 
-  // The pre is the terminal input — focus it whenever a tab opens or switches (UX-16).
+  // Focus the terminal whenever the active tab changes (incl. first open).
   useEffect(() => {
-    preRef.current?.focus();
+    if (active) preRef.current?.focus();
   }, [active]);
 
   const send = (id: string, data: string) => {
@@ -123,16 +124,28 @@ export default function TerminalView() {
     if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) send(active, e.key);
   };
 
+  const submitLine = () => {
+    if (!active || !line) return;
+    send(active, line + "\r");
+    setLine("");
+  };
+
   const tab = tabs.find((t) => t.id === active) ?? tabs[0];
 
   return (
     <div className="term-view">
       <div className="term-tabs">
         {tabs.map((t) => (
-          <span key={t.id} className={`term-tab ${t.id === tab?.id ? "active" : ""}`}>
-            <button className="term-tab-btn" onClick={() => setActive(t.id)}>{t.title}</button>
+          <span key={t.id} className={`term-tab-group ${t.id === tab?.id ? "active" : ""}`}>
+            <button
+              className={`term-tab ${t.id === tab?.id ? "active" : ""}`}
+              onClick={() => setActive(t.id)}
+            >
+              {t.title}
+            </button>
             <button
               className="term-tab-x"
+              title={`Close ${t.title}`}
               aria-label={`Close ${t.title}`}
               onClick={() => void closeTab(t.id)}
             >×</button>
@@ -142,22 +155,36 @@ export default function TerminalView() {
         <button className="term-new" onClick={() => void spawn()} disabled={!projectId}>+ New</button>
       </div>
 
-      {!projectId && <div className="view-empty">Select a project to open a terminal.</div>}
+      {!projectId && <EmptyState title="No project selected" description="Open a project to use the terminal." />}
       {projectId && !tab && (
-        <div className="view-empty">
-          <button className="primary-btn" onClick={() => void spawn()}>New terminal</button>
-        </div>
+        <EmptyState
+          title="No terminal yet"
+          description="Open a shell in the project folder."
+          actionLabel="New terminal"
+          onAction={() => void spawn()}
+        />
       )}
       {tab && (
-        <pre
-          ref={preRef}
-          className="term-body"
-          tabIndex={0}
-          onKeyDown={onKey}
-          onFocus={() => setFocused(true)}
-          onBlur={() => setFocused(false)}
-          onClick={() => preRef.current?.focus()}
-        >{tab.buf || " "}{focused && <span className="term-caret" />}</pre>
+        <>
+          <pre
+            ref={preRef}
+            className="term-body"
+            tabIndex={0}
+            onKeyDown={onKey}
+            onClick={() => preRef.current?.focus()}
+          >{tab.buf || " "}<span className="term-caret" /></pre>
+          <div className="term-input-row">
+            <span className="term-prompt">❯</span>
+            <input
+              className="term-input"
+              value={line}
+              placeholder="Type a command…"
+              onChange={(e) => setLine(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); submitLine(); } }}
+            />
+            <span className="term-caret" />
+          </div>
+        </>
       )}
     </div>
   );

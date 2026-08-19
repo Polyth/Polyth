@@ -168,6 +168,11 @@ export function createHttpServer(deps: HttpDeps): Server {
       res.end(data);
     } catch (err) {
       const e = err as Error & { code?: string };
+      // opencode transport hiccup: the runtime pool respawns on the next call,
+      // so tell the client to retry instead of surfacing a raw "fetch failed".
+      if (/fetch failed|terminated|ECONNREFUSED/i.test(`${e.message ?? ""} ${String(e.cause ?? "")}`)) {
+        return json(res, 503, { error: "unavailable", message: "OpenCode is reconnecting. Try again in a moment." });
+      }
       json(res, e.code === "not-found" ? 404 : e.code === "invalid-path" ? 400 : 500, {
         error: e.code ?? "internal", message: e.message,
       });

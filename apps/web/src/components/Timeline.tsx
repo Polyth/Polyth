@@ -1,52 +1,19 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
 import { renderMarkdown } from "../markdown.tsx";
-import { fmtCost, fmtDuration, fmtMs, fmtTokens } from "../format.ts";
-import { groupWork, toolSummary, type WorkGroup } from "../utils.ts";
-import { sendMessage } from "../init.ts";
-import { requestComposerInsert } from "../composerInsert.ts";
-import CopyButton from "./CopyButton.tsx";
+import { fmtCost, fmtMs, fmtTokens } from "../format.ts";
 import type { RenderModel, RenderMessage, ToolMsg, AssistantMsg } from "../reduce.ts";
-
-// Thinking collapses to its first line — the mockup's italic preview.
-function Thinking({ m }: { m: AssistantMsg }) {
-  const [open, setOpen] = useState(!m.finalized);
-  const preview = m.reasoning.split("\n").find((l) => l.trim()) ?? "";
-  return (
-    <details className="reasoning" open={open}>
-      <summary
-        onClick={(e) => { e.preventDefault(); setOpen((v) => !v); }}
-        style={{ display: "flex", gap: 8, alignItems: "baseline" }}
-      >
-        <span>Thinking{m.finalized ? "" : "…"}</span>
-        {!open && <span className="muted" style={{ fontStyle: "italic", flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{preview}</span>}
-      </summary>
-      {open && <div className="reasoning-body">{m.reasoning}</div>}
-    </details>
-  );
-}
+import EmptyState from "./EmptyState.tsx";
 
 function AssistantView({ m }: { m: AssistantMsg }) {
   return (
     <div className="msg assistant">
-      {m.reasoning !== "" && <Thinking m={m} />}
-      <div className="bubble">{renderMarkdown(m.text || "", m.id)}{!m.finalized && <span className="caret" />}</div>
-    </div>
-  );
-}
-
-// Long tool output stays clamped until "Show all" (UX-37).
-function ClampedPre({ cls, text }: { cls: string; text: string }) {
-  const [full, setFull] = useState(false);
-  const long = text.split("\n").length > 24 || text.length > 2400;
-  return (
-    <div className="copy-wrap">
-      <pre className={`${cls}${full ? " full" : ""}`}>{text}</pre>
-      <CopyButton text={text} />
-      {long && (
-        <button className="small-btn show-all" onClick={() => setFull((v) => !v)}>
-          {full ? "Collapse" : "Show all"}
-        </button>
+      {m.reasoning !== "" && (
+        <details className="reasoning" open={!m.finalized}>
+          <summary>Reasoning{m.finalized ? "" : "…"}</summary>
+          <div className="reasoning-body">{m.reasoning}</div>
+        </details>
       )}
+      <div className="bubble">{renderMarkdown(m.text || "", m.id)}{!m.finalized && <span className="caret" />}</div>
     </div>
   );
 }
@@ -54,7 +21,6 @@ function ClampedPre({ cls, text }: { cls: string; text: string }) {
 function ToolCard({ m }: { m: ToolMsg }) {
   const done = m.status !== "pending";
   const inputJson = JSON.stringify(m.input, null, 2);
-  const summary = toolSummary(m.input);
   return (
     <details className={`tool-card ${m.status === "error" ? "error" : ""}`} open={!done}>
       <summary className="tool-head">
@@ -67,46 +33,28 @@ function ToolCard({ m }: { m: ToolMsg }) {
             <span className="err">✕</span>
           )}
         </span>
-        <span className="tool-name">{m.title || m.tool}</span>
-        {summary && <span className="mono muted" style={{ fontSize: 11, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{summary}</span>}
-        <span className="tool-dur">{m.finishTime !== undefined ? fmtMs(m.finishTime - m.time) : "running…"}</span>
+        <span className="tool-name">{m.tool}</span>
+        <span className="tool-dur">{m.finishTime !== undefined ? fmtMs(m.finishTime - m.time) : ""}</span>
       </summary>
       <div className="tool-body">
         <div className="tool-section">
-          <div className="tool-label">{m.tool} input</div>
-          <ClampedPre cls="json" text={inputJson} />
+          <div className="tool-label">Input</div>
+          <pre className="json">{inputJson}</pre>
         </div>
         {m.error !== undefined && (
           <div className="tool-section error">
             <div className="tool-label">Error</div>
-            <ClampedPre cls="json" text={m.error} />
+            <pre className="json">{m.error}</pre>
           </div>
         )}
         {m.output !== undefined && (
           <div className="tool-section">
             <div className="tool-label">Output</div>
-            <ClampedPre cls="out" text={m.output} />
+            <pre className="out">{m.output}</pre>
           </div>
         )}
       </div>
     </details>
-  );
-}
-
-// Consecutive tool calls fold behind one "Worked for 3m 1s · 4 steps" row.
-function WorkedGroup({ g }: { g: WorkGroup }) {
-  const failed = g.tools.some((t) => t.status === "error");
-  const running = g.tools.some((t) => t.status === "pending");
-  const [open, setOpen] = useState(running || failed);
-  return (
-    <div className="msg assistant">
-      <button className="goal-toggle muted" style={{ fontSize: 11.5, marginBottom: 6 }} onClick={() => setOpen((v) => !v)}>
-        <span className="goal-chevron">{open ? "▾" : "▸"}</span>
-        {running ? "Working" : "Worked"} for {fmtDuration(g.ms)} · {g.tools.length} steps
-        {failed && <span style={{ color: "var(--red)" }}>· {g.tools.filter((t) => t.status === "error").length} failed</span>}
-      </button>
-      {open && g.tools.map((t) => <ToolCard key={t.id} m={t} />)}
-    </div>
   );
 }
 
@@ -129,26 +77,21 @@ function MessageView({ m }: { m: RenderMessage }) {
   return <ToolCard m={m} />;
 }
 
-// Footer under the last message once the turn ended and usage exists.
-// Failed/aborted turns keep their footer too — the error card carries the rest (UX-01).
+// Footer under the last assistant message once the turn finished with usage.
 function turnFooter(model: RenderModel): string | null {
   const t = model.turn;
+  const last = model.messages[model.messages.length - 1];
   const hasUsage = model.totals.input + model.totals.output + model.totals.cost > 0;
-  if (!t || t.status === "working" || !hasUsage) return null;
+  if (!t || t.status !== "stopped" || last?.kind !== "assistant" || !last.finalized || !hasUsage) return null;
   const bits: string[] = [];
   if (t.model) bits.push(`${t.model.providerID}/${t.model.modelID}`);
   if (t.agent) bits.push(t.agent);
-  const last = model.messages[model.messages.length - 1];
-  const lastUser = [...model.messages].reverse().find((m) => m.kind === "user");
-  if (last && lastUser) bits.push(`worked ${fmtDuration(last.time - lastUser.time)}`);
   if (model.totals.input + model.totals.output > 0) {
     bits.push(`${fmtTokens(model.totals.input)} in · ${fmtTokens(model.totals.output)} out`);
   }
   if (model.totals.cost > 0) bits.push(fmtCost(model.totals.cost));
   return bits.join(" · ");
 }
-
-const STARTERS = ["Explain this codebase", "Fix a failing test", "Review my latest changes"];
 
 export default function Timeline({ model }: { model: RenderModel }) {
   const ref = useRef<HTMLDivElement>(null);
@@ -166,38 +109,23 @@ export default function Timeline({ model }: { model: RenderModel }) {
   };
 
   const footer = turnFooter(model);
-  const rows = useMemo(() => groupWork(model.messages), [model.version]);
-  const turn = model.turn;
-  const turnBroken = turn && (turn.status === "failed" || turn.status === "aborted");
-  const lastUser = [...model.messages].reverse().find((m) => m.kind === "user");
 
   return (
     <div className="timeline" ref={ref} onScroll={onScroll}>
       {model.messages.length === 0 && (
-        <div className="empty">
-          <div>No messages yet — say hi below.</div>
-          <div className="chip-row" style={{ justifyContent: "center", marginTop: 12 }}>
-            {STARTERS.map((s) => (
-              <button key={s} className="chip" onClick={() => requestComposerInsert(s)}>{s}</button>
-            ))}
-          </div>
-        </div>
+        <EmptyState
+          title="Start a conversation"
+          description="Ask Polyth to explore, build, or review."
+          mark={
+            <svg width="22" height="22" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round">
+              <path d="M2.5 3.5h11v7h-6l-2.8 2.6v-2.6h-2.2z" />
+            </svg>
+          }
+        />
       )}
-      {rows.map((r) => (
-        r.kind === "work" ? <WorkedGroup key={r.id} g={r} /> : <MessageView key={r.id} m={r} />
+      {model.messages.map((m) => (
+        <MessageView key={m.id} m={m} />
       ))}
-      {turnBroken && (
-        <div className="turn-error" role="alert">
-          <span className="turn-error-text">
-            {turn.status === "aborted" ? "Turn aborted" : "Turn failed"}
-            {turn.error ? ` — ${turn.error}` : ""}
-          </span>
-          {turn.error && <CopyButton text={turn.error} />}
-          {lastUser && (
-            <button className="small-btn" onClick={() => void sendMessage(lastUser.text)}>Retry</button>
-          )}
-        </div>
-      )}
       {footer && <div className="turn-footer">{footer}</div>}
     </div>
   );

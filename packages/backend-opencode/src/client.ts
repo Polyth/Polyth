@@ -1,3 +1,6 @@
+import { get as httpGet } from "node:http";
+import { get as httpsGet } from "node:https";
+import type { IncomingMessage } from "node:http";
 import type { JsonObject } from "@polyth/contracts";
 
 export interface OpenCodeClient {
@@ -28,6 +31,50 @@ const withDirectory = (path: string, directory?: string): string => {
   return `${path}${joiner}directory=${encodeURIComponent(directory)}`;
 };
 
+/** undici fetch wraps every network failure in `TypeError: fetch failed`
+ *  (cause: ECONNRESET / "other side closed" / "terminated"). These are
+ *  transient — the serve process is alive but the pooled socket died —
+ *  so REST calls retry; anything else propagates untouched. */
+const isTransientNetworkError = (err: unknown): boolean => {
+  if (err instanceof TypeError) return true;
+  if (!(err instanceof Error)) return false;
+  const text = `${err.message} ${String(err.cause ?? "")}`;
+  return /fetch failed|terminated|ECONNRESET/i.test(text);
+};
+
+const abortError = (): Error => {
+  const err = new Error("aborted");
+  err.name = "AbortError";
+  return err;
+};
+
+/** Consume complete SSE frames from `buf`, invoke `onEvent` per frame, and
+ *  return the unconsumed tail. Same frame grammar the fetch version parsed. */
+const drainSseFrames = (
+  buf: string,
+  onEvent: (evt: { id?: string; data: unknown }) => void,
+): string => {
+  for (;;) {
+    const sep = buf.indexOf("\n\n");
+    if (sep < 0) return buf;
+    const frame = buf.slice(0, sep);
+    buf = buf.slice(sep + 2);
+    let id: string | undefined;
+    const dataLines: string[] = [];
+    for (const line of frame.split("\n")) {
+      if (line.startsWith("id:")) id = line.slice(3).trim();
+      else if (line.startsWith("data:")) dataLines.push(line.slice(5).trimStart());
+    }
+    if (dataLines.length === 0) continue;
+    const raw = dataLines.join("\n");
+    try {
+      onEvent({ id, data: JSON.parse(raw) as JsonObject });
+    } catch {
+      onEvent({ id, data: raw });
+    }
+  }
+};
+
 export const createOpenCodeClient = (
   baseUrl: string,
   opts: OpenCodeClientOptions = {},
@@ -35,7 +82,7 @@ export const createOpenCodeClient = (
   const root = baseUrl.replace(/\/$/, "");
   const headers = { ...authHeaders(), ...opts.headers };
 
-  const request = async <T>(method: string, path: string, body?: unknown): Promise<T> => {
+  const requestOnce = async <T>(method: string, path: string, body?: unknown): Promise<T> => {
     const url = `${root}${withDirectory(path, opts.directory)}`;
     const res = await fetch(url, {
       method,
@@ -60,48 +107,70 @@ export const createOpenCodeClient = (
     }
   };
 
+  const request = async <T>(method: string, path: string, body?: unknown): Promise<T> => {
+    const attempts = 3;
+    let lastErr: unknown;
+    for (let attempt = 1; attempt <= attempts; attempt++) {
+      try {
+        return await requestOnce<T>(method, path, body);
+      } catch (err) {
+        lastErr = err;
+        if (attempt === attempts || !isTransientNetworkError(err)) throw err;
+        await new Promise((r) => setTimeout(r, 200 * attempt));
+      }
+    }
+    throw lastErr;
+  };
+
   return {
     baseUrl: root,
     get: (path) => request("GET", path),
     post: (path, body) => request("POST", path, body ?? {}),
-    async streamEvents(signal, onEvent) {
-      const url = `${root}${withDirectory("/event", opts.directory)}`;
-      const res = await fetch(url, {
-        method: "GET",
-        headers: { ...headers, accept: "text/event-stream" },
-        signal,
+    // node:http, NOT fetch: undici aborts long-idle /event bodies
+    // ("TypeError: terminated") and poisons the pooled connection, which then
+    // fails later POSTs with "fetch failed".
+    streamEvents(signal, onEvent) {
+      const url = new URL(`${root}${withDirectory("/event", opts.directory)}`);
+      const getFn = url.protocol === "https:" ? httpsGet : httpGet;
+      return new Promise<void>((resolve, reject) => {
+        let settled = false;
+        const settle = (err?: Error) => {
+          if (settled) return;
+          settled = true;
+          signal.removeEventListener("abort", onAbort);
+          if (err) reject(err);
+          else resolve();
+        };
+        const req = getFn(
+          url,
+          { headers: { ...headers, accept: "text/event-stream" } },
+          (res: IncomingMessage) => {
+            if (res.statusCode !== 200) {
+              res.resume();
+              req.destroy();
+              settle(new Error(`opencode GET /event → ${res.statusCode ?? 0}`));
+              return;
+            }
+            res.setEncoding("utf8");
+            let buf = "";
+            res.on("data", (chunk: string) => {
+              buf += chunk;
+              buf = buf.replace(/\r\n/g, "\n");
+              buf = drainSseFrames(buf, onEvent);
+            });
+            res.on("end", () => settle());
+            res.on("error", (err) => settle(err));
+          },
+        );
+        const onAbort = () => {
+          const err = abortError();
+          req.destroy(err);
+          settle(err);
+        };
+        req.on("error", (err) => settle(err));
+        if (signal.aborted) onAbort();
+        else signal.addEventListener("abort", onAbort, { once: true });
       });
-      if (!res.ok || !res.body) {
-        throw new Error(`opencode GET /event → ${res.status}`);
-      }
-      const reader = res.body.getReader();
-      const decoder = new TextDecoder();
-      let buf = "";
-      for (;;) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buf += decoder.decode(value, { stream: true });
-        buf = buf.replace(/\r\n/g, "\n");
-        for (;;) {
-          const sep = buf.indexOf("\n\n");
-          if (sep < 0) break;
-          const frame = buf.slice(0, sep);
-          buf = buf.slice(sep + 2);
-          let id: string | undefined;
-          const dataLines: string[] = [];
-          for (const line of frame.split("\n")) {
-            if (line.startsWith("id:")) id = line.slice(3).trim();
-            else if (line.startsWith("data:")) dataLines.push(line.slice(5).trimStart());
-          }
-          if (dataLines.length === 0) continue;
-          const raw = dataLines.join("\n");
-          try {
-            onEvent({ id, data: JSON.parse(raw) as JsonObject });
-          } catch {
-            onEvent({ id, data: raw });
-          }
-        }
-      }
     },
   };
 };
