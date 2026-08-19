@@ -6,6 +6,14 @@ export function fmtMs(ms: number): string {
   return `${(ms / 1000).toFixed(1)}s`;
 }
 
+/** Wall-clock span for "Worked for …" labels: 46s, 3m 1s, 1h 4m. */
+export function fmtDuration(ms: number): string {
+  const s = Math.max(0, Math.round(ms / 1000));
+  if (s < 60) return `${s}s`;
+  if (s < 3600) return `${Math.floor(s / 60)}m ${s % 60}s`;
+  return `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m`;
+}
+
 export function fmtTokens(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
   if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
@@ -14,6 +22,34 @@ export function fmtTokens(n: number): string {
 
 export function fmtCost(c: number): string {
   return `$${c.toFixed(4)}`;
+}
+
+/** Compact "time ago" for session rows: 45s, 3m, 6h, 2d. */
+export function ago(ts: number, now = Date.now()): string {
+  const s = Math.max(0, Math.floor((now - ts) / 1000));
+  if (s < 60) return `${s}s`;
+  const m = Math.floor(s / 60);
+  if (m < 60) return `${m}m`;
+  const h = Math.floor(m / 60);
+  if (h < 24) return `${h}h`;
+  return `${Math.floor(h / 24)}d`;
+}
+
+/** Platform modifier key label: ⌘ on Apple platforms, Ctrl elsewhere. */
+export function modKey(platform: string): string {
+  return /mac|iphone|ipad|ipod/i.test(platform) ? "⌘" : "Ctrl";
+}
+
+export const MOD = modKey(typeof navigator === "undefined" ? "" : navigator.platform ?? "");
+
+/** Auto-title placeholder sessions from their first user message (UX-43). */
+export function deriveSessionTitle(title: string, firstUserText?: string): string {
+  const t = title.trim();
+  const isPlaceholder = t === "" || /^new session$/i.test(t) || /^\(untitled/.test(t);
+  if (!isPlaceholder || !firstUserText) return t || "(untitled)";
+  const line = firstUserText.split("\n").find((l) => l.trim())?.trim() ?? "";
+  if (!line) return t || "(untitled)";
+  return line.length > 48 ? `${line.slice(0, 47)}…` : line;
 }
 
 export function providerColor(provider: string): string {

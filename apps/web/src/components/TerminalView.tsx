@@ -21,7 +21,7 @@ export default function TerminalView() {
   const sessionId = useStore((s) => s.activeSessionId);
   const [tabs, setTabs] = useState<Tab[]>([]);
   const [active, setActive] = useState<string | null>(null);
-  const [line, setLine] = useState("");
+  const [focused, setFocused] = useState(false);
   const sockets = useRef(new Map<string, WebSocket>());
   const preRef = useRef<HTMLPreElement>(null);
 
@@ -94,6 +94,11 @@ export default function TerminalView() {
     preRef.current?.scrollTo(0, preRef.current.scrollHeight);
   }, [tabs, active]);
 
+  // The pre is the terminal input — focus it whenever a tab opens or switches (UX-16).
+  useEffect(() => {
+    preRef.current?.focus();
+  }, [active]);
+
   const send = (id: string, data: string) => {
     const ws = sockets.current.get(id);
     if (ws && ws.readyState === WebSocket.OPEN) {
@@ -118,29 +123,20 @@ export default function TerminalView() {
     if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) send(active, e.key);
   };
 
-  const submitLine = () => {
-    if (!active || !line) return;
-    send(active, line + "\r");
-    setLine("");
-  };
-
   const tab = tabs.find((t) => t.id === active) ?? tabs[0];
 
   return (
     <div className="term-view">
       <div className="term-tabs">
         {tabs.map((t) => (
-          <button
-            key={t.id}
-            className={`term-tab ${t.id === tab?.id ? "active" : ""}`}
-            onClick={() => setActive(t.id)}
-          >
-            <span>{t.title}</span>
-            <span
+          <span key={t.id} className={`term-tab ${t.id === tab?.id ? "active" : ""}`}>
+            <button className="term-tab-btn" onClick={() => setActive(t.id)}>{t.title}</button>
+            <button
               className="term-tab-x"
-              onClick={(e) => { e.stopPropagation(); void closeTab(t.id); }}
-            >×</span>
-          </button>
+              aria-label={`Close ${t.title}`}
+              onClick={() => void closeTab(t.id)}
+            >×</button>
+          </span>
         ))}
         <span className="header-spacer" />
         <button className="term-new" onClick={() => void spawn()} disabled={!projectId}>+ New</button>
@@ -153,26 +149,15 @@ export default function TerminalView() {
         </div>
       )}
       {tab && (
-        <>
-          <pre
-            ref={preRef}
-            className="term-body"
-            tabIndex={0}
-            onKeyDown={onKey}
-            onClick={() => preRef.current?.focus()}
-          >{tab.buf || " "}<span className="term-caret" /></pre>
-          <div className="term-input-row">
-            <span className="term-prompt">❯</span>
-            <input
-              className="term-input"
-              value={line}
-              placeholder="Type a command…"
-              onChange={(e) => setLine(e.target.value)}
-              onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); submitLine(); } }}
-            />
-            <span className="term-caret" />
-          </div>
-        </>
+        <pre
+          ref={preRef}
+          className="term-body"
+          tabIndex={0}
+          onKeyDown={onKey}
+          onFocus={() => setFocused(true)}
+          onBlur={() => setFocused(false)}
+          onClick={() => preRef.current?.focus()}
+        >{tab.buf || " "}{focused && <span className="term-caret" />}</pre>
       )}
     </div>
   );

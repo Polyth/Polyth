@@ -3,6 +3,8 @@
 import { useState, useEffect, useCallback } from "react";
 import { api, type GitStatus, type GitFileEntry } from "../api.ts";
 import { useStore } from "../store.ts";
+import { diffStat } from "../utils.ts";
+import CopyButton from "./CopyButton.tsx";
 
 const EMPTY_STAGED: never[] = [];
 const EMPTY_UNSTAGED: never[] = [];
@@ -15,10 +17,11 @@ function fileRow(
   onUnstage?: (p: string) => void,
   onDiscard?: (p: string) => void,
   onClick?: (p: string) => void,
+  selected?: boolean,
 ) {
   const letter = f.staged ? "+" : f.status === "conflict" ? "!" : f.status === "untracked" ? "?" : "-";
   return (
-    <div className="git-file-row" key={f.path} onClick={() => onClick?.(f.path)}>
+    <div className={`git-file-row ${selected ? "selected" : ""}`} key={f.path} onClick={() => onClick?.(f.path)}>
       <span className={`git-file-letter ${f.staged ? "staged" : f.status === "conflict" ? "conflict" : "unstaged"}`}>
         {letter}
       </span>
@@ -37,26 +40,30 @@ function DiffViewer({ diff }: { diff: string }) {
   if (!diff) return <div className="empty" style={{ padding: 8 }}>No changes.</div>;
   const lines = diff.split("\n");
   return (
-    <pre className="git-diff">
-      {lines.map((line, i) => {
-        let cls = "";
-        if (line.startsWith("+") && !line.startsWith("+++")) cls = "diff-add";
-        else if (line.startsWith("-") && !line.startsWith("---")) cls = "diff-del";
-        else if (line.startsWith("@@")) cls = "diff-hunk";
-        return (
-          <div key={i} className={`git-diff-line ${cls}`}>
-            <span className="git-diff-ln">{i + 1}</span>
-            <span>{line}</span>
-          </div>
-        );
-      })}
-    </pre>
+    <div className="copy-wrap">
+      <pre className="git-diff">
+        {lines.map((line, i) => {
+          let cls = "";
+          if (line.startsWith("+") && !line.startsWith("+++")) cls = "diff-add";
+          else if (line.startsWith("-") && !line.startsWith("---")) cls = "diff-del";
+          else if (line.startsWith("@@")) cls = "diff-hunk";
+          return (
+            <div key={i} className={`git-diff-line ${cls}`}>
+              <span className="git-diff-ln">{i + 1}</span>
+              <span>{line}</span>
+            </div>
+          );
+        })}
+      </pre>
+      <CopyButton text={diff} />
+    </div>
   );
 }
 
 export default function ChangesPanel() {
   const activeProjectId = useStore((s) => s.activeProjectId);
   const [status, setStatus] = useState<GitStatus | null>(null);
+  const [worktrees, setWorktrees] = useState(0);
   const [diffPath, setDiffPath] = useState<string | null>(null);
   const [diffText, setDiffText] = useState("");
   const [commitMsg, setCommitMsg] = useState("");
@@ -67,6 +74,7 @@ export default function ChangesPanel() {
   const refresh = useCallback(() => {
     if (!projectId) return;
     void api.gitStatus(projectId).then(setStatus);
+    void api.listWorktrees(projectId).then((w) => setWorktrees(w.length));
   }, [projectId]);
 
   useEffect(() => { refresh(); }, [refresh]);
@@ -144,18 +152,20 @@ export default function ChangesPanel() {
             {status.behind > 0 && <span className="behind">↓{status.behind}</span>}
           </span>
         )}
+        <span className="header-spacer" />
+        {worktrees > 1 && <span className="ctx-badge" title="Linked worktrees">{worktrees} worktrees</span>}
       </div>
 
       {status.conflicted.length > 0 && (
         <>
           <div className="stat-label" style={{ color: "var(--red)" }}>Conflicts ({status.conflicted.length})</div>
-          {status.conflicted.map((f) => fileRow(f, undefined, undefined, undefined, loadDiff))}
+          {status.conflicted.map((f) => fileRow(f, undefined, undefined, undefined, loadDiff, f.path === diffPath))}
         </>
       )}
 
       <div className="stat-label">Staged ({status.staged.length})</div>
       {status.staged.length === 0 && <div className="empty" style={{ padding: "4px 0" }}>No staged files.</div>}
-      {status.staged.map((f) => fileRow(f, undefined, unstage, undefined, loadDiff))}
+      {status.staged.map((f) => fileRow(f, undefined, unstage, undefined, loadDiff, f.path === diffPath))}
 
       <div className="stat-label" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <span>Unstaged ({status.unstaged.length + status.untracked.length})</span>
@@ -163,15 +173,20 @@ export default function ChangesPanel() {
           <button className="small-btn" onClick={() => void stageAll()} disabled={busy}>Stage all</button>
         )}
       </div>
-      {status.unstaged.map((f) => fileRow(f, stage, undefined, discard, loadDiff))}
-      {status.untracked.map((f) => fileRow(f, stage, undefined, undefined, loadDiff))}
+      {status.unstaged.map((f) => fileRow(f, stage, undefined, discard, loadDiff, f.path === diffPath))}
+      {status.untracked.map((f) => fileRow(f, stage, undefined, undefined, loadDiff, f.path === diffPath))}
       {status.unstaged.length === 0 && status.untracked.length === 0 && (
         <div className="empty" style={{ padding: "4px 0" }}>Working tree clean.</div>
       )}
 
       {diffPath !== null && (
         <>
-          <div className="stat-label">Diff: {diffPath}</div>
+          <div className="stat-label" style={{ display: "flex", gap: 8 }}>
+            <span className="git-subj">Diff: {diffPath}</span>
+            <span className="header-spacer" />
+            <span style={{ color: "var(--green)" }}>+{diffStat(diffText).add}</span>
+            <span style={{ color: "var(--red)" }}>−{diffStat(diffText).del}</span>
+          </div>
           <DiffViewer diff={diffText} />
         </>
       )}

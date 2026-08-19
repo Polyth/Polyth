@@ -1,4 +1,5 @@
 import { useState, type FormEvent } from "react";
+import { useEscape } from "../useEscape.ts";
 
 export default function ProjectForm({
   onSubmit,
@@ -12,6 +13,7 @@ export default function ProjectForm({
   const [create, setCreate] = useState(false);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  useEscape(!!onCancel, () => onCancel?.());
 
   const submit = async (event: FormEvent) => {
     event.preventDefault();
@@ -29,9 +31,13 @@ export default function ProjectForm({
 
   return (
     <form className="project-form" onSubmit={(event) => void submit(event)}>
-      <label>Project folder<input autoFocus value={path} placeholder="/workspace/my-project" onChange={(e) => setPath(e.target.value)} /></label>
-      <label className="project-name">Name <span>optional</span><input value={name} placeholder="My project" onChange={(e) => setName(e.target.value)} /></label>
-      <label className="project-create"><input type="checkbox" checked={create} onChange={(e) => setCreate(e.target.checked)} /> Create the folder if it does not exist</label>
+      <label>Project folder <span>absolute path on this machine</span>
+        <input autoFocus value={path} placeholder="/workspace/my-project" onChange={(e) => setPath(e.target.value)} />
+      </label>
+      <label className="project-name">Display name <span>optional — defaults to the folder name</span>
+        <input value={name} placeholder="My project" onChange={(e) => setName(e.target.value)} />
+      </label>
+      <label className="project-create"><input type="checkbox" checked={create} onChange={(e) => setCreate(e.target.checked)} /> Create the folder if it doesn't exist yet</label>
       {error && <div className="form-error">{error}</div>}
       <div className="form-actions">
         {onCancel && <button type="button" onClick={onCancel}>Cancel</button>}

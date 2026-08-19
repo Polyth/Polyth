@@ -1,7 +1,20 @@
 import { useState } from "react";
+import type { SessionProjection } from "@polyth/contracts";
 import { GoalAttachForm } from "./GoalStrip.tsx";
-import { useActiveModel, useStore } from "../store.ts";
+import { getState, useActiveModel, useStore } from "../store.ts";
+import { registerSlot } from "../slots.ts";
 import { api } from "../api.ts";
+import { goalChecklist } from "../utils.ts";
+
+// Sessions carrying a goal get a pill in the session list.
+registerSlot("session.list.badges", "builtin.goal", (props) => {
+  const session = props.session as SessionProjection | undefined;
+  if (!session) return null;
+  const evs = getState().events[session.id] ?? [];
+  if (!evs.some((e) => e.type === "goal/attached")) return null;
+  const closed = evs.some((e) => e.type === "goal/completed" || e.type === "goal/stopped");
+  return <span className={`goal-pill goal-pill-${closed ? "completed" : "active"}`}>goal</span>;
+}, 10);
 
 function fmtK(n: number): string {
   if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
@@ -43,6 +56,7 @@ export default function GoalsView() {
   };
 
   const pct = goal && goal.budgetTokens > 0 ? Math.min(100, Math.round((goal.tokensUsed / goal.budgetTokens) * 100)) : 0;
+  const checklist = goal ? goalChecklist(goal.objective, goal.status) : [];
 
   return (
     <div className="view-page goals-page">
@@ -66,10 +80,21 @@ export default function GoalsView() {
               <span className={`goal-pill goal-pill-${goal.status}`}>{goal.status}</span>
             </div>
             <div className="goal-card-objective">{goal.objective}</div>
+            {checklist.length > 1 && (
+              <>
+                <div className="goal-budget-row">
+                  <span>Progress</span>
+                  <span className="goal-progress">{checklist.filter((c) => c.done).length}/{checklist.length}</span>
+                </div>
+                <ul className="goal-check">
+                  {checklist.map((c, i) => <li key={i} className={c.done ? "done" : ""}>{c.text}</li>)}
+                </ul>
+              </>
+            )}
             <div>
               <div className="goal-budget-row">
                 <span>Token budget</span>
-                <span className="mono">{fmtK(goal.tokensUsed)}{goal.budgetTokens > 0 ? ` / ${fmtK(goal.budgetTokens)}` : ""}</span>
+                <span className="mono">{fmtK(goal.tokensUsed)}{goal.budgetTokens > 0 ? ` / ${fmtK(goal.budgetTokens)}` : ""} tok</span>
               </div>
               <div className="goal-budget-track">
                 <div className="goal-budget-fill" style={{ width: `${pct}%` }} />

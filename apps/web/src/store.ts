@@ -10,7 +10,9 @@ import type {
 } from "@polyth/contracts";
 import { buildModel, type RenderModel } from "./reduce.ts";
 
-export type AppView = "session" | "goals" | "multirun" | "fusion" | "walkthrough" | "preview" | "git" | "terminal";
+export type AppView = "session" | "files" | "goals" | "multirun" | "fusion" | "walkthrough" | "preview" | "git" | "terminal" | "schedule" | "github";
+export type Overlay = "onboarding" | "palette" | "search" | "settings" | null;
+export type RailPlugin = "files" | "changes" | "context" | "usage" | "events";
 
 export interface AppState {
   projects: Project[];
@@ -22,6 +24,12 @@ export interface AppState {
   activeSessionId: string | null;
   activeView: AppView;
   gitBranch: string;
+  overlay: Overlay;
+  railPlugin: RailPlugin | null;
+  moreOpen: boolean;
+  sidebarOpen: boolean;
+  /** File open in the full-screen editor (files view); null = tree only. */
+  editorFile: string | null;
 }
 
 let state: AppState = {
@@ -34,6 +42,11 @@ let state: AppState = {
   activeSessionId: null,
   activeView: "session",
   gitBranch: "",
+  overlay: null,
+  railPlugin: null,
+  moreOpen: false,
+  sidebarOpen: false,
+  editorFile: null,
 };
 
 const listeners = new Set<() => void>();
@@ -81,13 +94,34 @@ export function setAgents(agents: AgentDescriptor[]): void {
 }
 export function activateProject(id: string | null): void {
   localStorage.setItem("polyth.activeProjectId", id ?? "");
-  set({ activeProjectId: id, activeSessionId: null, gitBranch: "" });
+  // Re-activating the current project must not drop the session or branch (UX-04).
+  if (id === state.activeProjectId) return;
+  set({ activeProjectId: id, activeSessionId: null, gitBranch: "", editorFile: null });
 }
 export function setActiveView(view: AppView): void {
   set({ activeView: view });
 }
 export function setGitBranch(branch: string): void {
   set({ gitBranch: branch });
+}
+export function setOverlay(overlay: Overlay): void {
+  set({ overlay, moreOpen: false });
+}
+export function setRailPlugin(railPlugin: RailPlugin | null): void {
+  set({ railPlugin });
+}
+export function toggleRailPlugin(id: RailPlugin): void {
+  set({ railPlugin: state.railPlugin === id ? null : id });
+}
+export function setMoreOpen(moreOpen: boolean): void {
+  set({ moreOpen });
+}
+export function setSidebarOpen(sidebarOpen: boolean): void {
+  set({ sidebarOpen });
+}
+/** Open a file in the full-screen editor; null keeps the view on the tree. */
+export function openEditorFile(path: string | null): void {
+  set({ editorFile: path, activeView: "files" });
 }
 export function activateSession(id: string | null): void {
   localStorage.setItem("polyth.activeSessionId", id ?? "");

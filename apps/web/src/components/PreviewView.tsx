@@ -3,13 +3,14 @@ import type { PreviewState } from "@polyth/contracts";
 import { api } from "../api.ts";
 import { useStore } from "../store.ts";
 
-type InspectorTab = "elements" | "console" | "network";
+type InspectorTab = "console" | "network";
 
 export default function PreviewView() {
   const projectId = useStore((s) => s.activeProjectId);
   const [state, setState] = useState<PreviewState>({ url: null, status: "off" });
   const [urlInput, setUrlInput] = useState("");
-  const [tab, setTab] = useState<InspectorTab>("elements");
+  const [tab, setTab] = useState<InspectorTab>("console");
+  const [inspectorOpen, setInspectorOpen] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
@@ -52,11 +53,17 @@ export default function PreviewView() {
   if (!projectId) return <div className="view-empty">Select a project to start a live preview.</div>;
 
   const frameSrc = urlInput || state.url || "";
+  // Mockup shows the short authority (localhost:5173), not the full URL.
+  const host = (() => {
+    try { return frameSrc ? new URL(frameSrc).host : ""; } catch { return frameSrc; }
+  })();
+  const statusCopy = state.status === "running"
+    ? `running · ${host || (state.port ? `:${state.port}` : "")}`
+    : state.status === "starting" ? "starting…" : "off";
 
   return (
     <div className="preview-view">
       <div className="browser-chrome">
-        <span className="chrome-dots" aria-hidden><i /><i /><i /></span>
         <form
           className="url-pill"
           onSubmit={(e) => {
@@ -64,15 +71,26 @@ export default function PreviewView() {
             setState((s) => ({ ...s, url: urlInput || s.url }));
           }}
         >
-          <input value={urlInput} onChange={(e) => setUrlInput(e.target.value)} placeholder="http://127.0.0.1:…" />
+          <input value={urlInput} onChange={(e) => setUrlInput(e.target.value)} placeholder="localhost:5173" />
         </form>
         <button className="small-btn" title="Refresh" onClick={() => void refresh()}>↻</button>
+        {frameSrc && (
+          <a className="small-btn" href={frameSrc} target="_blank" rel="noreferrer" title="Open in a new tab">↗</a>
+        )}
         {state.status === "off" ? (
           <button className="primary-btn" onClick={() => void start()} disabled={busy}>Start</button>
         ) : (
           <button className="small-btn danger-btn" onClick={() => void stop()} disabled={busy}>Stop</button>
         )}
-        <span className={`preview-status ${state.status}`}>{state.status}</span>
+        <span className={`preview-status ${state.status}`}>{statusCopy}</span>
+        <button
+          className="small-btn"
+          aria-pressed={inspectorOpen}
+          title="Toggle inspector"
+          onClick={() => setInspectorOpen((v) => !v)}
+        >
+          Inspector
+        </button>
       </div>
       {error && <div className="form-error" style={{ padding: "6px 12px" }}>{error}</div>}
       <div className="preview-body">
@@ -80,23 +98,27 @@ export default function PreviewView() {
           {frameSrc ? (
             <iframe title="Preview" src={frameSrc} className="preview-frame" />
           ) : (
-            <div className="view-empty">Start a preview to load the project in this pane.</div>
+            <div className="view-empty">Live preview — Start boots this project's dev server and mirrors it here.</div>
           )}
         </div>
-        <aside className="inspector">
-          <div className="inspector-tabs">
-            {(["elements", "console", "network"] as const).map((t) => (
-              <button key={t} className={`tab ${tab === t ? "active" : ""}`} onClick={() => setTab(t)}>
-                {t[0]!.toUpperCase() + t.slice(1)}
-              </button>
-            ))}
-          </div>
-          <div className="inspector-body">
-            {tab === "elements" && <div className="muted">Elements inspector is a UI seam — no CDP stream in the preview protocol yet.</div>}
-            {tab === "console" && <div className="muted">Console is a UI seam — page logs are not proxied.</div>}
-            {tab === "network" && <div className="muted">Network is a UI seam — request capture is not in GET /api/preview.</div>}
-          </div>
-        </aside>
+        {inspectorOpen && (
+          <aside className="inspector">
+            <div className="inspector-tabs">
+              {(["console", "network"] as const).map((t) => (
+                <button key={t} className={`tab ${tab === t ? "active" : ""}`} onClick={() => setTab(t)}>
+                  {t[0]!.toUpperCase() + t.slice(1)}
+                </button>
+              ))}
+            </div>
+            <div className="inspector-body">
+              <div className="stat-row"><span className="k">URL</span><span className="mono">{host || "—"}</span></div>
+              <div className="stat-row"><span className="k">Port</span><span className="mono">{state.port ?? "—"}</span></div>
+              <div className="stat-row"><span className="k">Status</span><span>{statusCopy}</span></div>
+              {tab === "console" && <div className="muted">Console needs page logs proxied through the preview server.</div>}
+              {tab === "network" && <div className="muted">Network needs request capture in GET /api/preview.</div>}
+            </div>
+          </aside>
+        )}
       </div>
     </div>
   );

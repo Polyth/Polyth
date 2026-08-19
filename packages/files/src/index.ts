@@ -24,6 +24,7 @@ export interface FileService {
   tree(root: string, opts?: { path?: string; hidden?: boolean }): Promise<FileEntry[]>;
   read(root: string, rel: string): Promise<FileReadResult>;
   write(root: string, rel: string, content: string): Promise<void>;
+  writeBytes(root: string, rel: string, data: Uint8Array): Promise<void>;
   mkdir(root: string, rel: string): Promise<void>;
   remove(root: string, rel: string): Promise<void>;
   rename(root: string, from: string, to: string): Promise<void>;
@@ -93,6 +94,13 @@ export function createFileService(): FileService {
       await mkdir(path.dirname(abs), { recursive: true });
       await writeFile(abs, content, "utf8");
       // Refuse if the written file (or a parent symlink) landed outside root.
+      await resolveInside(root, rel);
+    },
+
+    async writeBytes(root, rel, data) {
+      const abs = await resolveInside(root, rel, { forWrite: true });
+      await mkdir(path.dirname(abs), { recursive: true });
+      await writeFile(abs, data);
       await resolveInside(root, rel);
     },
 

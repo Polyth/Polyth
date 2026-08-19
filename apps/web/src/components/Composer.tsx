@@ -1,8 +1,17 @@
-import { useState, useRef, useEffect, useCallback, type KeyboardEvent } from "react";
-import { useActiveModel, useStore } from "../store.ts";
+import { Fragment, useState, useRef, useEffect, useCallback, type KeyboardEvent } from "react";
+import { useActiveModel, useStore, setActiveView } from "../store.ts";
 import { sendMessage, abortSession } from "../init.ts";
 import { api, type SlashCommand, type SnippetDef } from "../api.ts";
 import { filterCommands, filterSnippets, type AutocompleteItem } from "../utils.ts";
+import { PERSONAS, usePrefs } from "../prefs.ts";
+import { renderSlot } from "../slots.ts";
+import { dragKind, dropIntoSession } from "../dnd.ts";
+import { useDraft } from "../drafts.ts";
+import { COMPOSER_INSERT, drainInserts } from "../composerInsert.ts";
+import type { PickerItem } from "../picker.ts";
+import Picker from "./Picker.tsx";
+import { isFavorite, modelKey, sortModels } from "@polyth/models";
+import { noteModelUsed, useModelPrefs } from "../modelPrefs.ts";
 
 function modelRefFromValue(value: string): { providerID: string; modelID: string } | undefined {
   if (!value) return undefined;
@@ -22,14 +31,21 @@ const EMPTY_SLCMD: SlashCommand[] = [];
 const EMPTY_SNIP: SnippetDef[] = [];
 
 export default function Composer() {
-  const [text, setText] = useState("");
   const [modelValue, setModelValue] = useState("");
   const [agentValue, setAgentValue] = useState("");
   const models = useStore((s) => s.models);
   const agents = useStore((s) => s.agents);
   const session = useStore((s) => s.sessions.find((x) => x.id === s.activeSessionId) ?? null);
+  const { draft: text, setDraft: setText, clearDraft } = useDraft(session?.id ?? null);
   const model = useActiveModel();
   const working = model.turn?.status === "working";
+  const prefs = usePrefs();
+  // Creator persona: plain-language composer, no model/agent jargon.
+  const simple = (prefs.persona ? PERSONAS[prefs.persona].composer : "full") === "simple";
+  const noModels = models.length === 0;
+
+  // Drag-and-drop: tree paths attach as @path, desktop files upload first.
+  const [dropHint, setDropHint] = useState<"path" | "files" | null>(null);
 
   // Autocomplete state
   const [acItems, setAcItems] = useState<AutocompleteItem[]>(EMPTY_AC);
@@ -37,6 +53,20 @@ export default function Composer() {
   const [acOpen, setAcOpen] = useState(false);
   const [acType, setAcType] = useState<"cmd" | "snip">("cmd");
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // Explicit selections reset when the session changes (UX-30).
+  useEffect(() => {
+    setModelValue("");
+    setAgentValue("");
+  }, [session?.id]);
+
+  // Auto-grow up to 40vh; manual vertical resize stays possible (UX-11).
+  useEffect(() => {
+    const el = textareaRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight + 2, window.innerHeight * 0.4)}px`;
+  }, [text]);
 
   // Load commands and snippets from API (once per project change)
   const activeProjectId = useStore((s) => s.activeProjectId);
@@ -54,32 +84,30 @@ export default function Composer() {
     });
   }, [activeProjectId]);
 
-  // Listen for polyth:composer-insert events (from FilesPanel Attach to chat)
+  // Composer inserts (Files @, drag-drop, starter chips). preventDefault marks
+  // the event consumed; anything queued while unmounted drains now.
   useEffect(() => {
+    const insert = (detail: string) =>
+      setText((prev) => (prev ? `${prev} ${detail}` : detail));
+    for (const queued of drainInserts()) insert(queued);
     const handler = (e: Event) => {
       const detail = (e as CustomEvent).detail;
-      if (typeof detail === "string") {
-        setText((prev) => (prev ? prev + " " + detail : detail));
-      }
+      if (typeof detail !== "string") return;
+      e.preventDefault();
+      insert(detail);
+      textareaRef.current?.focus();
     };
-    window.addEventListener("polyth:composer-insert", handler);
-    return () => window.removeEventListener("polyth:composer-insert", handler);
+    window.addEventListener(COMPOSER_INSERT, handler);
+    return () => window.removeEventListener(COMPOSER_INSERT, handler);
   }, []);
-
-  const groups = new Map<string, typeof models>();
-  for (const m of models) {
-    const g = groups.get(m.providerID) ?? [];
-    g.push(m);
-    groups.set(m.providerID, g);
-  }
 
   const send = useCallback(() => {
     const t = text.trim();
-    if (!t) return;
+    if (!t || noModels) return;
     void sendMessage(t, modelRefFromValue(modelValue), agentValue || undefined);
-    setText("");
+    clearDraft();
     setAcOpen(false);
-  }, [text, modelValue, agentValue]);
+  }, [text, modelValue, agentValue, clearDraft, noModels]);
 
   const completeAutocomplete = useCallback(() => {
     if (!acOpen || acItems.length === 0) return false;
@@ -154,70 +182,130 @@ export default function Composer() {
     [commands, snippets],
   );
 
+  const leading = renderSlot("composer.leading", { sessionId: session?.id });
+  const trailing = renderSlot("composer.trailing", { sessionId: session?.id });
+
+  // Favorites float first (Settings > Providers & Models); picking records recency.
+  const modelPrefs = useModelPrefs();
+  const modelItems: PickerItem[] = [
+    { id: "", label: session?.model ? session.model.modelID : "Default", group: "" },
+    ...sortModels(models, modelPrefs).map((m) => {
+      const fav = isFavorite(modelPrefs, modelKey(m));
+      return {
+        id: JSON.stringify({ providerID: m.providerID, modelID: m.modelID }),
+        label: fav ? `★ ${m.name || m.modelID}` : m.name || m.modelID,
+        group: fav ? "Favorites" : m.providerID,
+        keywords: [m.providerID, m.modelID],
+      };
+    }),
+  ];
+  const pickModel = (value: string) => {
+    setModelValue(value);
+    const ref = modelRefFromValue(value);
+    if (ref) noteModelUsed(`${ref.providerID}/${ref.modelID}`);
+  };
+  const agentItems: PickerItem[] = [
+    { id: "", label: session?.agent ? `${session.agent}` : "Default", group: "" },
+    ...agents.map((a) => ({
+      id: a.name,
+      label: a.name,
+      group: "",
+      ...(a.description ? { detail: a.description } : {}),
+    })),
+  ];
+
   return (
-    <div className="composer">
+    <div
+      className="composer"
+      onDragOver={(e) => { const k = dragKind(e.dataTransfer); if (k) { e.preventDefault(); setDropHint(k); } }}
+      onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setDropHint(null); }}
+      onDrop={(e) => {
+        const k = dragKind(e.dataTransfer);
+        setDropHint(null);
+        if (!k || !activeProjectId) return;
+        e.preventDefault();
+        void dropIntoSession(e.dataTransfer, activeProjectId);
+      }}
+    >
+      {dropHint && (
+        <div className="drop-hint">{dropHint === "path" ? "Attach to session" : "Drop to upload"}</div>
+      )}
+      {simple && (prefs.plugins.includes("multirun") || prefs.plugins.includes("fusion")) && (
+        <div className="chip-row">
+          {prefs.plugins.includes("multirun") && (
+            <button className="chip" onClick={() => setActiveView("multirun")}>Try 3 directions</button>
+          )}
+          {prefs.plugins.includes("fusion") && (
+            <button className="chip" onClick={() => setActiveView("fusion")}>Combine the best parts</button>
+          )}
+        </div>
+      )}
+      {noModels && (
+        <div className="composer-note" role="status">
+          No models available — check that the backend is running and configured.
+        </div>
+      )}
       <div style={{ position: "relative" }}>
         <textarea
           ref={textareaRef}
           rows={3}
           value={text}
-          placeholder="Ask Polyth to explore, build, or review…"
+          placeholder={simple
+            ? "Describe what you want — it gets built as you watch…"
+            : "Ask Polyth to explore, build, or review — / for commands, # for snippets"}
           onChange={(e) => onTextChange(e.target.value)}
           onKeyDown={onKeyDown}
         />
         {acOpen && acItems.length > 0 && (
           <div className="ac-popup">
-            {acType === "cmd" && <div className="ac-header">Commands</div>}
-            {acType === "snip" && <div className="ac-header">Snippets</div>}
-            {acItems.map((item, i) => (
-              <div
-                key={i}
-                className={`ac-item ${i === acIndex ? "ac-active" : ""}`}
-                onMouseDown={(e) => {
-                  e.preventDefault();
-                  setAcIndex(i);
-                  // apply
-                  setText(item.value);
-                  setAcOpen(false);
-                  textareaRef.current?.focus();
-                }}
-                onMouseEnter={() => setAcIndex(i)}
-              >
-                <span className="ac-label">{item.label}</span>
-                <span className="ac-detail">{item.detail}</span>
-              </div>
-            ))}
+            <div className="ac-header">{acType === "cmd" ? "Commands" : "Snippets"}</div>
+            <div className="ac-list" role="listbox" aria-label={acType === "cmd" ? "Commands" : "Snippets"}>
+              {acItems.map((item, i) => (
+                <div
+                  key={i}
+                  role="option"
+                  aria-selected={i === acIndex}
+                  ref={i === acIndex ? (el) => el?.scrollIntoView({ block: "nearest" }) : null}
+                  className={`ac-item ${i === acIndex ? "ac-active" : ""}`}
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    setAcIndex(i);
+                    // apply
+                    setText(item.value);
+                    setAcOpen(false);
+                    textareaRef.current?.focus();
+                  }}
+                  onMouseEnter={() => setAcIndex(i)}
+                >
+                  <span className="ac-label">{item.label}</span>
+                  <span className="ac-detail">{item.detail}</span>
+                </div>
+              ))}
+            </div>
+            <div className="ac-footer">
+              <span><kbd>↑↓</kbd> navigate</span>
+              <span><kbd>↵</kbd> / <kbd>Tab</kbd> insert</span>
+              <span><kbd>Esc</kbd> dismiss</span>
+            </div>
           </div>
         )}
       </div>
       <div className="composer-row">
-        <select value={modelValue} onChange={(e) => setModelValue(e.target.value)} title="Model">
-          <option value="">{session?.model ? session.model.modelID : "Model: Default"}</option>
-          {[...groups.entries()].map(([provider, ms]) => (
-            <optgroup key={provider} label={provider}>
-              {ms.map((m) => (
-                <option key={m.modelID} value={JSON.stringify({ providerID: m.providerID, modelID: m.modelID })}>
-                  {m.name ?? m.modelID}
-                </option>
-              ))}
-            </optgroup>
-          ))}
-        </select>
-        <select value={agentValue} onChange={(e) => setAgentValue(e.target.value)} title="Agent">
-          <option value="">{session?.agent ? `${session.agent} agent` : "Agent: Default"}</option>
-          {agents.map((a) => (
-            <option key={a.name} value={a.name}>
-              {a.name}
-              {a.description ? ` — ${a.description}` : ""}
-            </option>
-          ))}
-        </select>
+        {leading.map((n, i) => <Fragment key={i}>{n}</Fragment>)}
+        {!simple && !noModels && (
+          <Picker label="Model" direction="up" items={modelItems} value={modelValue} onPick={pickModel} />
+        )}
+        {!simple && agents.length > 0 && (
+          <Picker label="Agent" direction="up" items={agentItems} value={agentValue} onPick={setAgentValue} />
+        )}
+        <span className="header-spacer" />
+        {trailing.map((n, i) => <Fragment key={i}>{n}</Fragment>)}
         {working ? (
           <button className="stop" onClick={() => void abortSession()}>
             Stop
           </button>
         ) : (
-          <button className="send" onClick={send} disabled={!text.trim()}>
+          <button className="send" onClick={send} disabled={!text.trim() || noModels}>
             Send <span className="send-key">↵</span>
           </button>
         )}

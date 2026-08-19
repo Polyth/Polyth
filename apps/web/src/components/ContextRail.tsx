@@ -1,32 +1,33 @@
-import { useState, Fragment } from "react";
-import { renderSlot, registerSlot } from "../slots.ts";
-import { useActiveModel, useStore } from "../store.ts";
+import { Fragment, useEffect, useState, type JSX } from "react";
+import { renderSlot } from "../slots.ts";
+import { useActiveModel, useStore, setActiveView, setOverlay, setRailPlugin, toggleRailPlugin, type AppView, type RailPlugin } from "../store.ts";
+import { PLUGIN_LABELS, togglePlugin, usePrefs, type PluginId } from "../prefs.ts";
 import { fmtCost, fmtTokens } from "../format.ts";
+import { api } from "../api.ts";
+import { Icon } from "../icons.tsx";
+import { useEscape } from "../useEscape.ts";
 import type { SessionProjection } from "@polyth/contracts";
 import ChangesPanel from "./ChangesPanel.tsx";
 import FilesPanel from "./FilesPanel.tsx";
 
-type TabId = "context" | "files" | "changes" | "events";
-
-// Built-in tabs register into the contextRail.tabs slot — proves the
-// extensibility path: a plugin adds a third tab via window.__polythSlots.
-const TAB_ORDER: Array<[TabId, string, number]> = [
-  ["context", "Context", 0],
-  ["files", "Files", 10],
-  ["changes", "Changes", 20],
-  ["events", "Events", 30],
+// Rail panels toggled in place; each is backed by a plugin toggle.
+const PANELS: Array<{ rail: RailPlugin; plugin: PluginId; label: string; icon: () => JSX.Element }> = [
+  { rail: "files", plugin: "files", label: "Files", icon: Icon.files },
+  { rail: "changes", plugin: "git", label: "Changes", icon: Icon.tree },
+  { rail: "context", plugin: "context", label: "Context", icon: Icon.context },
+  { rail: "usage", plugin: "usage", label: "Usage", icon: Icon.usage },
+  { rail: "events", plugin: "events", label: "Events", icon: Icon.events },
 ];
-for (const [id, label, prio] of TAB_ORDER) {
-  registerSlot("contextRail.tabs", `builtin.${id}`, (props) => {
-    const tab = props.tab as TabId;
-    const onSelect = props.onSelect as (t: TabId) => void;
-    return (
-      <button className={`tab ${tab === id ? "active" : ""}`} onClick={() => onSelect(id)}>
-        {label}
-      </button>
-    );
-  }, prio);
-}
+
+// Full-view jumps that live on the strip when their plugin is on.
+const JUMPS: Array<{ view: AppView; plugin: PluginId; label: string; icon: () => JSX.Element }> = [
+  { view: "preview", plugin: "preview", label: "Preview", icon: Icon.globe },
+  { view: "multirun", plugin: "multirun", label: "Compare models", icon: Icon.compare },
+  { view: "fusion", plugin: "fusion", label: "Fuse models", icon: Icon.fuse },
+  { view: "terminal", plugin: "terminal", label: "Terminal", icon: Icon.term },
+  { view: "schedule", plugin: "schedule", label: "Scheduled prompts", icon: Icon.clock },
+  { view: "github", plugin: "github", label: "GitHub", icon: Icon.github },
+];
 
 function ContextView({ session, model }: { session: SessionProjection | null; model: ReturnType<typeof useActiveModel> }) {
   const events = useStore((s) => (s.activeSessionId ? s.events[s.activeSessionId] : undefined) ?? NO_EVENTS);
@@ -74,6 +75,19 @@ function ContextView({ session, model }: { session: SessionProjection | null; mo
   );
 }
 
+function UsagePanel({ model }: { model: ReturnType<typeof useActiveModel> }) {
+  const total = model.totals.input + model.totals.output;
+  return (
+    <div>
+      <div className="stat-row"><span className="k">Input</span><span className="mono">{fmtTokens(model.totals.input)}</span></div>
+      <div className="stat-row"><span className="k">Output</span><span className="mono">{fmtTokens(model.totals.output)}</span></div>
+      <div className="stat-row"><span className="k">Total</span><span className="mono">{fmtTokens(total)}</span></div>
+      <div className="stat-row"><span className="k">Cost</span><span className="mono">{model.totals.cost > 0 ? fmtCost(model.totals.cost) : "—"}</span></div>
+      {total === 0 && <div className="rail-empty">Token and cost totals appear once the session runs.</div>}
+    </div>
+  );
+}
+
 function EventsView({ events }: { events: readonly import("@polyth/contracts").SessionEvent[] }) {
   if (events.length === 0) return <div className="empty">No events yet.</div>;
   return (
@@ -96,33 +110,108 @@ function EventsView({ events }: { events: readonly import("@polyth/contracts").S
 
 const NO_EVENTS: never[] = [];
 
-export default function ContextRail({ open, onToggle }: { open: boolean; onToggle: () => void }) {
-  const [tab, setTab] = useState<TabId>("context");
+// Small count badge on strip buttons (UX-33).
+function Badge({ n }: { n: number }) {
+  if (n <= 0) return null;
+  return <span className="strip-badge">{n > 9 ? "9+" : n}</span>;
+}
+
+export default function ContextRail() {
+  const rail = useStore((s) => s.railPlugin);
+  const view = useStore((s) => s.activeView);
+  const projectId = useStore((s) => s.activeProjectId);
+  const prefs = usePrefs();
   const session = useStore((s) => s.sessions.find((x) => x.id === s.activeSessionId) ?? null);
   const model = useActiveModel();
   const events = useStore((s) => (s.activeSessionId ? s.events[s.activeSessionId] : undefined) ?? NO_EVENTS);
+  const [picker, setPicker] = useState(false);
+  const [changeCount, setChangeCount] = useState(0);
+  useEscape(picker, () => setPicker(false));
 
-  if (!open) {
-    return (
-      <aside className="rail closed">
-        <button className="rail-toggle" onClick={onToggle} title="Open context rail">«</button>
-      </aside>
+  const gitOn = prefs.plugins.includes("git");
+  useEffect(() => {
+    if (!projectId || !gitOn) { setChangeCount(0); return; }
+    void api.gitStatus(projectId).then((s) =>
+      setChangeCount(s.staged.length + s.unstaged.length + s.untracked.length + s.conflicted.length),
     );
-  }
+  }, [projectId, gitOn]);
 
-  const tabs = renderSlot("contextRail.tabs", { tab, onSelect: setTab });
+  const panels = PANELS.filter((p) => prefs.plugins.includes(p.plugin));
+  const jumps = JUMPS.filter((j) => prefs.plugins.includes(j.plugin));
+  const open = panels.find((p) => p.rail === rail) ?? null;
+  const togglable = (Object.keys(PLUGIN_LABELS) as PluginId[]).filter((id) => id !== "session");
+  const slotTabs = renderSlot("contextRail.tabs", { tab: rail, onSelect: toggleRailPlugin });
+  const badgeOf = (railId: RailPlugin): number =>
+    railId === "changes" ? changeCount : railId === "events" ? events.length : 0;
 
   return (
-    <aside className="rail">
-      <div className="rail-head">
-        <div className="rail-tabs">{tabs.map((n, i) => <Fragment key={i}>{n}</Fragment>)}</div>
-        <button className="rail-toggle" onClick={onToggle} title="Close context rail">»</button>
-      </div>
-      <div className="rail-body">
-        {tab === "context" && <ContextView session={session} model={model} />}
-        {tab === "events" && <EventsView events={events} />}
-        {tab === "changes" && <ChangesPanel />}
-        {tab === "files" && <FilesPanel />}
+    <aside className="railbar">
+      {open && (
+        <div className="rail">
+          <div className="rail-head">
+            <span className="rail-title">{open.label}</span>
+            <span className="header-spacer" />
+            <div className="rail-tabs">{slotTabs.map((n, i) => <Fragment key={i}>{n}</Fragment>)}</div>
+            <button className="rail-toggle" onClick={() => setRailPlugin(null)} title="Close panel">»</button>
+          </div>
+          <div className="rail-body">
+            {open.rail === "context" && <ContextView session={session} model={model} />}
+            {open.rail === "usage" && <UsagePanel model={model} />}
+            {open.rail === "events" && <EventsView events={events} />}
+            {open.rail === "changes" && <ChangesPanel />}
+            {open.rail === "files" && <FilesPanel />}
+          </div>
+        </div>
+      )}
+      <div className="plugin-strip">
+        {panels.map((p) => (
+          <button
+            key={p.rail}
+            className={`strip-btn ${rail === p.rail ? "active" : ""}`}
+            title={p.label}
+            aria-pressed={rail === p.rail}
+            onClick={() => toggleRailPlugin(p.rail)}
+          >
+            <p.icon />
+            <Badge n={badgeOf(p.rail)} />
+          </button>
+        ))}
+        {jumps.length > 0 && <span className="strip-sep" />}
+        {jumps.map((j) => (
+          <button
+            key={j.view}
+            className={`strip-btn ${view === j.view ? "active" : ""}`}
+            title={j.label}
+            aria-pressed={view === j.view}
+            onClick={() => setActiveView(j.view)}
+          >
+            <j.icon />
+          </button>
+        ))}
+        <span className="strip-spacer" />
+        <button className="strip-btn" title="Add or remove plugins" aria-expanded={picker} onClick={() => setPicker((v) => !v)}>
+          <Icon.plus />
+        </button>
+        {picker && (
+          <>
+            <div className="menu-backdrop" onClick={() => setPicker(false)} />
+            <div className="strip-picker" role="menu">
+              <div className="strip-picker-label">Plugins</div>
+              {togglable.map((id) => {
+                const on = prefs.plugins.includes(id);
+                return (
+                  <button key={id} aria-pressed={on} onClick={() => togglePlugin(id)}>
+                    <span className="strip-picker-check">{on ? "✓" : ""}</span>
+                    {PLUGIN_LABELS[id]}
+                  </button>
+                );
+              })}
+              <button className="strip-picker-manage" onClick={() => { setPicker(false); setOverlay("settings"); }}>
+                Manage in settings…
+              </button>
+            </div>
+          </>
+        )}
       </div>
     </aside>
   );

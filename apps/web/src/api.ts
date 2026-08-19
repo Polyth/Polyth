@@ -109,6 +109,49 @@ export interface CommandListResult {
   snippets: SnippetDef[];
 }
 
+// ---- schedule types --------------------------------------------------------
+export interface ScheduleTaskDto {
+  id: string;
+  projectId: string;
+  sessionId?: string;
+  title?: string;
+  prompt: string;
+  kind: "at" | "every";
+  at?: number;
+  everyMinutes?: number;
+  enabled: boolean;
+  createdAt: number;
+  updatedAt: number;
+  lastRunAt?: number;
+  lastError?: string;
+  nextRunAt: number | null;
+  runs: number;
+}
+export interface ScheduleTaskInputDto {
+  projectId: string;
+  prompt: string;
+  kind: "at" | "every";
+  at?: number;
+  everyMinutes?: number;
+  sessionId?: string;
+  title?: string;
+  enabled?: boolean;
+}
+
+// ---- github types ----------------------------------------------------------
+export interface GithubRepoDto {
+  name: string; owner: string; url: string; description: string;
+  defaultBranch: string; isPrivate: boolean;
+}
+export interface GithubIssueDto {
+  number: number; title: string; state: string; author: string; updatedAt: string; url: string;
+}
+export interface GithubPrDto extends GithubIssueDto { isDraft: boolean; headRefName: string }
+export interface GithubStatusDto {
+  installed: boolean; authenticated: boolean; repo: GithubRepoDto | null; reason?: string;
+}
+export type GhListResult<T> = { ok: true; data: T } | { ok: false; reason: string };
+
 // ---- goal types (§12) ------------------------------------------------------
 export type GoalVerdict = "keep" | "done" | "stuck";
 export interface GoalState {
@@ -216,6 +259,13 @@ export const api = {
     jfetch<{ ok: true }>(`/api/files/delete`, json("POST", { projectId, path: relPath })),
   filesRename: (projectId: string, from: string, to: string) =>
     jfetch<{ ok: true }>(`/api/files/rename`, json("POST", { projectId, from, to })),
+  filesUpload: (projectId: string, relPath: string, bytes: Uint8Array) => {
+    let bin = "";
+    for (let i = 0; i < bytes.length; i += 0x8000) {
+      bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+    }
+    return jfetch<{ ok: true }>(`/api/files/upload`, json("POST", { projectId, path: relPath, base64: btoa(bin) }));
+  },
   filesSearch: (projectId: string, q: string, limit = 50) =>
     jfetch<string[]>(`/api/files/search?projectId=${encodeURIComponent(projectId)}&q=${encodeURIComponent(q)}&limit=${limit}`).catch(
       (): string[] => [],
@@ -287,6 +337,56 @@ export const api = {
     jfetch<{ ok: true }>(`/api/terminals/${terminalId}`, json("POST", { data })),
   closeTerminal: (terminalId: string) =>
     jfetch<{ ok: true }>(`/api/terminals/${terminalId}`, { method: "DELETE" }),
+
+  // ---- schedule --------------------------------------------------------------
+  scheduleList: (projectId?: string) =>
+    jfetch<ScheduleTaskDto[]>(`/api/schedule${projectId ? `?projectId=${encodeURIComponent(projectId)}` : ""}`).catch(
+      (): ScheduleTaskDto[] => [],
+    ),
+  scheduleCreate: (input: ScheduleTaskInputDto) =>
+    jfetch<ScheduleTaskDto>(`/api/schedule`, json("POST", input)),
+  scheduleUpdate: (id: string, patch: Partial<ScheduleTaskInputDto>) =>
+    jfetch<ScheduleTaskDto>(`/api/schedule/${encodeURIComponent(id)}`, json("PATCH", patch)),
+  scheduleDelete: (id: string) =>
+    jfetch<{ ok: boolean }>(`/api/schedule/${encodeURIComponent(id)}`, { method: "DELETE" }),
+  schedulePause: (id: string, pause: boolean) =>
+    jfetch<ScheduleTaskDto>(`/api/schedule/${encodeURIComponent(id)}/${pause ? "pause" : "resume"}`, { method: "POST" }),
+  scheduleRun: (id: string) =>
+    jfetch<ScheduleTaskDto>(`/api/schedule/${encodeURIComponent(id)}/run`, { method: "POST" }),
+
+  // ---- github (gh CLI; fail-soft) --------------------------------------------
+  githubStatus: (projectId: string) =>
+    jfetch<GithubStatusDto>(`/api/github/status?projectId=${encodeURIComponent(projectId)}`).catch(
+      (): GithubStatusDto => ({ installed: false, authenticated: false, repo: null, reason: "server unreachable" }),
+    ),
+  githubIssues: (projectId: string, limit = 30) =>
+    jfetch<GhListResult<GithubIssueDto[]>>(`/api/github/issues?projectId=${encodeURIComponent(projectId)}&limit=${limit}`).catch(
+      (): GhListResult<GithubIssueDto[]> => ({ ok: false, reason: "server unreachable" }),
+    ),
+  githubPrs: (projectId: string, limit = 30) =>
+    jfetch<GhListResult<GithubPrDto[]>>(`/api/github/prs?projectId=${encodeURIComponent(projectId)}&limit=${limit}`).catch(
+      (): GhListResult<GithubPrDto[]> => ({ ok: false, reason: "server unreachable" }),
+    ),
+
+  // ---- session control ---------------------------------------------------------
+  controlSessions: (projectId?: string) =>
+    jfetch<SessionProjection[]>(`/api/control/sessions${projectId ? `?projectId=${encodeURIComponent(projectId)}` : ""}`),
+  controlNew: (projectId: string, title?: string) =>
+    jfetch<SessionRef>(`/api/control/sessions`, json("POST", { projectId, title })),
+  controlFork: (sessionId: string, atSeq?: number) =>
+    jfetch<SessionRef>(`/api/control/sessions/${encodeURIComponent(sessionId)}/fork`, json("POST", atSeq === undefined ? {} : { atSeq })),
+  controlAbort: (sessionId: string) =>
+    jfetch<{ ok: true }>(`/api/control/sessions/${encodeURIComponent(sessionId)}/abort`, { method: "POST" }),
+
+  // ---- commands + snippets CRUD ------------------------------------------------
+  saveCommand: (projectId: string, scope: "user" | "project", cmd: { name: string; prompt: string; description?: string; agent?: string; model?: string }) =>
+    jfetch<{ ok: true }>(`/api/commands`, json("POST", { projectId, scope, ...cmd })),
+  deleteCommand: (projectId: string, scope: "user" | "project", name: string) =>
+    jfetch<{ ok: boolean }>(`/api/commands`, json("DELETE", { projectId, scope, name })),
+  saveSnippet: (projectId: string, scope: "user" | "project", snippet: { alias: string; text: string }) =>
+    jfetch<{ ok: true }>(`/api/snippets`, json("POST", { projectId, scope, ...snippet })),
+  deleteSnippet: (projectId: string, scope: "user" | "project", alias: string) =>
+    jfetch<{ ok: boolean }>(`/api/snippets`, json("DELETE", { projectId, scope, alias })),
 
   // ---- M3: preview ---------------------------------------------------------
   previewStart: (projectId: string, command?: string) =>

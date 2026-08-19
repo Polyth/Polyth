@@ -9,6 +9,12 @@ import type { JsonObject } from "@polyth/contracts";
 let sync: SyncClient | null = null;
 let lastSubSession: string | undefined;
 let lastProject: string | null | undefined;
+let branchFetchedFor: string | null = null;
+
+function fetchBranch(projectId: string): void {
+  branchFetchedFor = projectId;
+  void api.gitStatus(projectId).then((st) => store.setGitBranch(st.branch)).catch(() => store.setGitBranch(""));
+}
 
 export function init(): void {
   void boot();
@@ -23,10 +29,14 @@ export function init(): void {
       lastProject = s.activeProjectId;
       if (s.activeProjectId) {
         void refreshSessions(s.activeProjectId);
-        void api.gitStatus(s.activeProjectId).then((st) => store.setGitBranch(st.branch)).catch(() => store.setGitBranch(""));
+        fetchBranch(s.activeProjectId);
       } else {
+        branchFetchedFor = null;
         store.setGitBranch("");
       }
+    } else if (s.activeProjectId && !s.gitBranch && branchFetchedFor !== s.activeProjectId) {
+      // Project unchanged but branch missing (e.g. earlier fetch failed) — refetch once (UX-04).
+      fetchBranch(s.activeProjectId);
     }
   });
 }

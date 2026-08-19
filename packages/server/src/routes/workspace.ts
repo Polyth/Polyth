@@ -43,6 +43,13 @@ export function workspaceRoutes(deps: {
       json(200, { ok: true });
       return true;
     }
+    if (path === "/api/files/upload" && method === "POST") {
+      const b = await body();
+      const root = await rootOf(String(b.projectId ?? ""));
+      await deps.files.writeBytes(root, String(b.path ?? ""), Buffer.from(String(b.base64 ?? ""), "base64"));
+      json(200, { ok: true });
+      return true;
+    }
     if (path === "/api/files/mkdir" && method === "POST") {
       const b = await body();
       const root = await rootOf(String(b.projectId ?? ""));

@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtemp, mkdir, writeFile, symlink, rm } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, writeFile, symlink, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { createFileService } from "../src/index.ts";
@@ -89,6 +89,24 @@ test("write creates parent dirs and stays inside root", async () => {
     const got = await files.read(root, "a/b/c.txt");
     assert.equal(got.content, "hello");
     assert.equal(got.truncated, false);
+  });
+});
+
+test("writeBytes roundtrips binary data and creates parent dirs", async () => {
+  await withRoot(async (root) => {
+    const data = new Uint8Array([0, 1, 2, 128, 255, 0, 7]);
+    await files.writeBytes(root, "assets/blob.bin", data);
+    const raw = await readFile(path.join(root, "assets", "blob.bin"));
+    assert.deepEqual(new Uint8Array(raw), data);
+  });
+});
+
+test("writeBytes rejects path escapes", async () => {
+  await withRoot(async (root) => {
+    const data = new Uint8Array([1]);
+    await assert.rejects(() => files.writeBytes(root, "../evil.bin", data), /escapes/i);
+    await assert.rejects(() => files.writeBytes(root, "/abs.bin", data), /escapes/i);
+    await assert.rejects(() => files.writeBytes(root, "a/../../b.bin", data), /escapes/i);
   });
 });
 

@@ -1,9 +1,11 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { FusionDto } from "@polyth/contracts";
 import { api } from "../api.ts";
 import { useActiveModel, useStore } from "../store.ts";
 import { modelBadge } from "../format.ts";
 import { renderMarkdown } from "../markdown.tsx";
+import type { PickerItem } from "../picker.ts";
+import Picker from "./Picker.tsx";
 
 export default function FusionView() {
   const sessionId = useStore((s) => s.activeSessionId);
@@ -14,18 +16,19 @@ export default function FusionView() {
   const [live, setLive] = useState<FusionDto | null>(null);
   const [text, setText] = useState("");
   const [picked, setPicked] = useState<string[]>([]);
-  const [modelFilter, setModelFilter] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [expanded, setExpanded] = useState(false);
 
-  const q = modelFilter.toLowerCase();
-  const filteredModels = q ? models.filter((m) => (m.modelID + m.name + m.providerID).toLowerCase().includes(q)) : models;
-  const MAX_CHIPS = 36;
-  const visibleModels = filteredModels.slice(0, MAX_CHIPS);
-  const shownChips = [
-    ...models.filter((m) => picked.includes(`${m.providerID}/${m.modelID}`) && !visibleModels.includes(m)),
-    ...visibleModels,
-  ];
+  const modelItems: PickerItem[] = useMemo(
+    () =>
+      models.map((m) => ({
+        id: `${m.providerID}/${m.modelID}`,
+        label: m.name ?? m.modelID,
+        group: m.providerID,
+      })),
+    [models],
+  );
 
   const shown = live ?? fromLog;
   const running = shown?.status === "running";
@@ -72,6 +75,9 @@ export default function FusionView() {
   };
 
   if (!sessionId) return <div className="view-empty">Open a session to fuse answers from several models.</div>;
+  if (models.length === 0) {
+    return <div className="view-empty">No models available — connect a backend before fusing answers.</div>;
+  }
 
   const weights = shown?.weights ?? [];
   const total = weights.reduce((a, w) => a + w.weight, 0) || 1;
@@ -90,32 +96,22 @@ export default function FusionView() {
           onChange={(e) => setText(e.target.value)}
         />
         <div className="fusion-model-picks">
-          <input
-            className="model-filter-input"
-            type="text"
-            placeholder="Filter models…"
-            value={modelFilter}
-            onChange={(e) => setModelFilter(e.target.value)}
-          />
-          {shownChips.map((m) => {
-            const key = `${m.providerID}/${m.modelID}`;
-            const badge = modelBadge(m);
-            const on = picked.includes(key);
+          <Picker label="Models" items={modelItems} values={picked} placeholder="Choose models" onPick={toggle} />
+          {picked.map((key) => {
+            const badge = modelBadge(key);
             return (
               <button
                 key={key}
-                className={`model-chip ${on ? "on" : ""}`}
-                style={on ? { borderColor: badge.color } : undefined}
+                className="model-chip on"
+                style={{ borderColor: badge.color }}
+                title="Remove from fusion"
                 onClick={() => toggle(key)}
               >
                 <i style={{ background: badge.color }} />
-                {m.name ?? m.modelID}
+                {badge.label} ✕
               </button>
             );
           })}
-          {filteredModels.length > MAX_CHIPS && (
-            <span className="muted">{filteredModels.length - MAX_CHIPS} more — refine filter</span>
-          )}
         </div>
         <div className="view-toolbar-row">
           <button className="primary-btn" onClick={() => void start()} disabled={busy || !text.trim() || picked.length === 0}>
@@ -126,7 +122,8 @@ export default function FusionView() {
       </div>
 
       {shown && (
-        <div className="fusion-layout">
+        <div className={expanded ? "fusion-layout" : ""}>
+          {expanded && (
           <section className="fusion-contributors">
             <div className="stat-label">Contributors</div>
             {weights.map((w) => {
@@ -145,6 +142,7 @@ export default function FusionView() {
             })}
             {weights.length === 0 && <div className="empty" style={{ padding: 8 }}>Waiting for weights…</div>}
           </section>
+          )}
 
           <section className="fusion-answer">
             <div className="stat-label">Fused answer</div>
@@ -157,7 +155,11 @@ export default function FusionView() {
             <div className="fusion-answer-card">
               {shown.error ? <div className="run-error">{shown.error}</div> : shown.answer ? renderMarkdown(shown.answer, shown.id) : <span className="muted">Synthesizing…</span>}
             </div>
-            <div className="stat-label">Attribution</div>
+            <button className="goal-toggle" onClick={() => setExpanded((v) => !v)}>
+              {expanded
+                ? "Hide breakdown"
+                : `Synthesized from ${weights.length} ${weights.length === 1 ? "model" : "models"} — show breakdown`}
+            </button>
             <div className="attr-bar">
               {weights.map((w) => {
                 const badge = modelBadge(w.model);
@@ -171,18 +173,30 @@ export default function FusionView() {
                 );
               })}
             </div>
+            {expanded && (
+              <div className="muted" style={{ fontSize: 11.5, display: "flex", gap: 10, flexWrap: "wrap" }}>
+                {weights.map((w) => (
+                  <span key={w.model}>
+                    <i style={{ background: modelBadge(w.model).color, display: "inline-block", width: 7, height: 7, borderRadius: 2, marginRight: 5 }} />
+                    {modelBadge(w.model).label} · {Math.round((w.weight / total) * 100)}%
+                  </span>
+                ))}
+              </div>
+            )}
           </section>
 
+          {expanded && (
           <section className="fusion-disagreements">
             <div className="stat-label">Disagreements</div>
             {shown.disagreements.length === 0 ? (
               <div className="muted" style={{ fontSize: 12.5 }}>No disagreements recorded.</div>
             ) : (
               shown.disagreements.map((d, i) => (
-                <div key={i} className="disagree-card">{d}</div>
+                <div key={i} className="disagree-card">— {d}</div>
               ))
             )}
           </section>
+          )}
         </div>
       )}
       {!shown && <div className="view-empty">Select models and fuse a prompt into one weighted answer.</div>}

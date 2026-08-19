@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
-import { api, type GitBranches, type GitStatus, type Worktree } from "../api.ts";
+import { api, type GitBranches, type GitLogEntry, type GitStatus, type Worktree } from "../api.ts";
 import { useStore, setGitBranch } from "../store.ts";
+import { diffStat } from "../utils.ts";
+import CopyButton from "./CopyButton.tsx";
 
 function fileLetter(staged: boolean, status: string): { letter: string; cls: string } {
   if (status === "conflict") return { letter: "!", cls: "conflict" };
@@ -14,6 +16,7 @@ export default function GitView() {
   const [status, setStatus] = useState<GitStatus | null>(null);
   const [branches, setBranches] = useState<GitBranches>({ current: "", branches: [] });
   const [trees, setTrees] = useState<Worktree[]>([]);
+  const [log, setLog] = useState<GitLogEntry[]>([]);
   const [sel, setSel] = useState<string | null>(null);
   const [diff, setDiff] = useState("");
   const [commitMsg, setCommitMsg] = useState("");
@@ -26,14 +29,16 @@ export default function GitView() {
 
   const refresh = useCallback(async () => {
     if (!projectId) return;
-    const [s, b, w] = await Promise.all([
+    const [s, b, w, l] = await Promise.all([
       api.gitStatus(projectId),
       api.gitBranches(projectId),
       api.listWorktrees(projectId),
+      api.gitLog(projectId, 12),
     ]);
     setStatus(s);
     setBranches(b);
     setTrees(w);
+    setLog(l);
     if (b.current) setGitBranch(b.current);
   }, [projectId]);
 
@@ -55,8 +60,7 @@ export default function GitView() {
   };
 
   const all = status ? [...status.staged, ...status.unstaged, ...status.untracked, ...status.conflicted] : [];
-  const addCount = diff.split("\n").filter((l) => l.startsWith("+") && !l.startsWith("+++")).length;
-  const delCount = diff.split("\n").filter((l) => l.startsWith("-") && !l.startsWith("---")).length;
+  const { add: addCount, del: delCount } = diffStat(diff);
 
   return (
     <div className="view-page git-page">
@@ -98,21 +102,33 @@ export default function GitView() {
               </span>
             )}
           </div>
-          {branches.branches.filter((b) => !b.current).length > 0 && (
-            <div className="git-branch-list">
-              {branches.branches.filter((b) => !b.current).map((b) => (
-                <button key={b.name} className="git-branch-row" disabled={busy}
-                  onClick={() => void run(() => api.gitCheckout(projectId, b.name))}>
-                  <span className="mono">{b.name}</span>
-                </button>
-              ))}
-            </div>
-          )}
+          {(() => {
+            // LOCAL/REMOTE sections; bare remote refs (e.g. "origin") are dropped (UX-27).
+            const others = branches.branches.filter((b) => !b.current);
+            const local = others.filter((b) => !b.remote);
+            const remote = others.filter((b) => b.remote && b.name !== b.remote && !b.name.endsWith("/HEAD"));
+            const section = (label: string, list: typeof others) => list.length > 0 && (
+              <div className="git-branch-list">
+                <div className="stat-label">{label}</div>
+                {list.map((b) => (
+                  <button key={b.name} className="git-branch-row" disabled={busy} title={b.name}
+                    onClick={() => void run(() => api.gitCheckout(projectId, b.name))}>
+                    <span className="mono">{b.name}</span>
+                  </button>
+                ))}
+              </div>
+            );
+            return <>{section("Local", local)}{section("Remote", remote)}</>;
+          })()}
 
-          <div className="stat-label">Worktrees</div>
+          <div className="stat-label">Worktrees ({trees.length})</div>
+          {trees.length === 0 && <div className="muted" style={{ fontSize: 12.5 }}>No linked worktrees — sessions run in the project root.</div>}
           {trees.map((t) => (
             <div key={t.path} className="git-wt-card">
-              <div className="mono" style={{ fontWeight: 600 }}>{t.branch}</div>
+              <div className="mono" style={{ fontWeight: 600 }}>
+                {t.branch}
+                <span className={`ctx-badge ${t.isMain ? "green" : ""}`} style={{ marginLeft: 6 }}>{t.isMain ? "main" : "linked"}</span>
+              </div>
               <div className="muted" style={{ fontSize: 11 }}>{t.path} · {t.head.slice(0, 7)}</div>
               {!t.isMain && (
                 <button className="small-btn danger-btn git-wt-remove" disabled={busy}
@@ -123,8 +139,16 @@ export default function GitView() {
             </div>
           ))}
 
-          <div className="stat-label" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+          <div className="stat-label" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 6 }}>
             <span>Changes ({all.length})</span>
+            {status && all.length > 0 && (
+              <span className="git-ahead-behind">
+                {status.staged.length > 0 && <span className="ahead">{status.staged.length} staged</span>}
+                {status.unstaged.length + status.untracked.length > 0 && <span className="behind">{status.unstaged.length + status.untracked.length} unstaged</span>}
+                {status.conflicted.length > 0 && <span style={{ color: "var(--red)" }}>{status.conflicted.length} conflicted</span>}
+              </span>
+            )}
+            <span className="header-spacer" />
             {status && (status.unstaged.length + status.untracked.length) > 0 && (
               <button className="small-btn" disabled={busy}
                 onClick={() => void run(() => api.gitStage(projectId, [...status.unstaged, ...status.untracked].map((f) => f.path)))}>
@@ -154,28 +178,41 @@ export default function GitView() {
               );
             })}
           </div>
+
+          <div className="stat-label">History</div>
+          {log.length === 0 && <div className="muted" style={{ fontSize: 12.5 }}>No commits yet.</div>}
+          {log.map((c) => (
+            <div key={c.sha} className="git-file-row" title={`${c.author} · ${new Date(c.date).toLocaleString()}`}>
+              <span className="git-sha">{c.shortSha}</span>
+              <span className="git-subj">{c.subject}</span>
+            </div>
+          ))}
         </div>
 
         <div className="git-col git-col-right">
           {sel === null ? (
-            <div className="view-empty">Select a changed file to view its diff.</div>
+            // Nothing to pick from a clean tree — skip the prompt entirely (UX-27).
+            all.length > 0 && <div className="view-empty">Select a changed file to view its diff.</div>
           ) : (
             <>
               <div className="wt-file" title={sel}>{sel}</div>
-              <pre className="git-diff git-diff-page">
-                {diff.split("\n").map((line, i) => {
-                  let cls = "";
-                  if (line.startsWith("+") && !line.startsWith("+++")) cls = "diff-add";
-                  else if (line.startsWith("-") && !line.startsWith("---")) cls = "diff-del";
-                  else if (line.startsWith("@@")) cls = "diff-hunk";
-                  return (
-                    <div key={i} className={`git-diff-line ${cls}`}>
-                      <span className="git-diff-ln">{i + 1}</span>
-                      <span>{line}</span>
-                    </div>
-                  );
-                })}
-              </pre>
+              <div className="copy-wrap">
+                <pre className="git-diff git-diff-page">
+                  {diff.split("\n").map((line, i) => {
+                    let cls = "";
+                    if (line.startsWith("+") && !line.startsWith("+++")) cls = "diff-add";
+                    else if (line.startsWith("-") && !line.startsWith("---")) cls = "diff-del";
+                    else if (line.startsWith("@@")) cls = "diff-hunk";
+                    return (
+                      <div key={i} className={`git-diff-line ${cls}`}>
+                        <span className="git-diff-ln">{i + 1}</span>
+                        <span>{line}</span>
+                      </div>
+                    );
+                  })}
+                </pre>
+                <CopyButton text={diff} />
+              </div>
             </>
           )}
 

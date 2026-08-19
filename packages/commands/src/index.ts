@@ -1,6 +1,6 @@
 // Slash commands + snippets, polyth-style discovery and expansion.
 import { exec } from "node:child_process";
-import { readdir, readFile, realpath } from "node:fs/promises";
+import { mkdir, readdir, readFile, realpath, unlink, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { promisify } from "node:util";
 
@@ -42,9 +42,23 @@ export interface ExpandResult {
   model?: string;
 }
 
+export type WriteScope = "user" | "project";
+
+export interface CommandInput {
+  name: string;
+  prompt: string;
+  description?: string;
+  agent?: string;
+  model?: string;
+}
+
 export interface CommandService {
   list(root: string): Promise<CommandList>;
   expand(root: string, text: string, ctx?: ExpandContext): Promise<ExpandResult>;
+  saveCommand(root: string, scope: WriteScope, cmd: CommandInput): Promise<void>;
+  removeCommand(root: string, scope: WriteScope, name: string): Promise<boolean>;
+  saveSnippet(root: string, scope: WriteScope, snippet: { alias: string; text: string }): Promise<void>;
+  removeSnippet(root: string, scope: WriteScope, alias: string): Promise<boolean>;
 }
 
 export interface CommandServiceOptions {
@@ -82,8 +96,17 @@ const BUILTINS: SlashCommand[] = [
   },
 ];
 
+const NAME_RE = /^[A-Za-z0-9_-]+$/;
+
 export function createCommandService(opts: CommandServiceOptions = {}): CommandService {
   const homeOf = (): string => opts.home ?? process.env.HOME ?? "";
+  const dirFor = (root: string, scope: WriteScope, kind: "commands" | "snippets"): string =>
+    scope === "user" ? path.join(homeOf(), ".config", "polyth", kind) : path.join(root, ".polyth", kind);
+  const assertName = (name: string): void => {
+    if (!NAME_RE.test(name)) {
+      throw Object.assign(new Error("name must be letters, digits, - or _"), { code: "invalid-input" });
+    }
+  };
 
   return {
     async list(root) {
@@ -148,6 +171,51 @@ export function createCommandService(opts: CommandServiceOptions = {}): CommandS
       if (agent) result.agent = agent;
       if (model) result.model = model;
       return result;
+    },
+
+    async saveCommand(root, scope, cmd) {
+      assertName(cmd.name);
+      if (!cmd.prompt?.trim()) {
+        throw Object.assign(new Error("prompt is required"), { code: "invalid-input" });
+      }
+      const dir = dirFor(root, scope, "commands");
+      await mkdir(dir, { recursive: true });
+      const fm: string[] = [];
+      if (cmd.description) fm.push(`description: ${cmd.description}`);
+      if (cmd.agent) fm.push(`agent: ${cmd.agent}`);
+      if (cmd.model) fm.push(`model: ${cmd.model}`);
+      const head = fm.length > 0 ? `---\n${fm.join("\n")}\n---\n` : "";
+      await writeFile(path.join(dir, `${cmd.name}.md`), `${head}${cmd.prompt}\n`);
+    },
+
+    async removeCommand(root, scope, name) {
+      assertName(name);
+      try {
+        await unlink(path.join(dirFor(root, scope, "commands"), `${name}.md`));
+        return true;
+      } catch {
+        return false;
+      }
+    },
+
+    async saveSnippet(root, scope, snippet) {
+      assertName(snippet.alias);
+      if (!snippet.text?.trim()) {
+        throw Object.assign(new Error("text is required"), { code: "invalid-input" });
+      }
+      const dir = dirFor(root, scope, "snippets");
+      await mkdir(dir, { recursive: true });
+      await writeFile(path.join(dir, `${snippet.alias}.md`), snippet.text);
+    },
+
+    async removeSnippet(root, scope, alias) {
+      assertName(alias);
+      try {
+        await unlink(path.join(dirFor(root, scope, "snippets"), `${alias}.md`));
+        return true;
+      } catch {
+        return false;
+      }
     },
   };
 }

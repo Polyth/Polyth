@@ -1,9 +1,16 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import type { ModelRef, MultirunDto, MultirunRunDto } from "@polyth/contracts";
 import { api } from "../api.ts";
-import { useActiveModel, useStore } from "../store.ts";
+import { setActiveView, useActiveModel, useStore } from "../store.ts";
+import { registerSlot } from "../slots.ts";
 import { fmtCost, fmtTokens, modelBadge } from "../format.ts";
 import { renderMarkdown } from "../markdown.tsx";
+import type { PickerItem } from "../picker.ts";
+import Picker from "./Picker.tsx";
+
+registerSlot("composer.trailing", "builtin.multirun", () => (
+  <button className="small-btn" onClick={() => setActiveView("multirun")}>Compare models</button>
+), 10);
 
 function modelRefFromValue(value: string): ModelRef | undefined {
   if (!value) return undefined;
@@ -50,7 +57,7 @@ function RunCard({
         disabled={run.status !== "completed" || picked}
         onClick={onPick}
       >
-        {picked ? "Picked ✓" : "Pick this run"}
+        {picked ? "Picked ✓" : "Use this"}
       </button>
     </article>
   );
@@ -65,7 +72,6 @@ export default function MultiRunView() {
   const [text, setText] = useState("");
   const [slots, setSlots] = useState<string[]>(["", "", ""]);
   const [agent, setAgent] = useState("");
-  const [modelFilter, setModelFilter] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
 
@@ -95,21 +101,27 @@ export default function MultiRunView() {
     setLive(null);
   }, [sessionId]);
 
-  const q = modelFilter.toLowerCase();
-  const MAX_OPTIONS = 80;
-  const groups = new Map<string, typeof models>();
-  let shownCount = 0;
-  for (const m of models) {
-    const key = JSON.stringify({ providerID: m.providerID, modelID: m.modelID });
-    const selected = slots.includes(key);
-    const hit = !q || `${m.modelID} ${m.name ?? ""} ${m.providerID}`.toLowerCase().includes(q) || selected;
-    if (!hit) continue;
-    if (!selected && shownCount >= MAX_OPTIONS) continue;
-    shownCount += 1;
-    const g = groups.get(m.providerID) ?? [];
-    g.push(m);
-    groups.set(m.providerID, g);
-  }
+  const modelItems: PickerItem[] = useMemo(
+    () =>
+      models.map((m) => ({
+        id: JSON.stringify({ providerID: m.providerID, modelID: m.modelID }),
+        label: m.name ?? m.modelID,
+        group: m.providerID,
+      })),
+    [models],
+  );
+  const agentItems: PickerItem[] = useMemo(
+    () => [
+      { id: "", label: "Default", group: "" },
+      ...agents.map((a) => ({
+        id: a.name,
+        label: a.name,
+        group: "",
+        ...(a.description ? { detail: a.description } : {}),
+      })),
+    ],
+    [agents],
+  );
 
   const start = async () => {
     if (!sessionId || !text.trim()) return;
@@ -146,6 +158,9 @@ export default function MultiRunView() {
   };
 
   if (!sessionId) return <div className="view-empty">Open a session to run the same prompt across models.</div>;
+  if (models.length === 0) {
+    return <div className="view-empty">No models available — connect a backend before comparing runs.</div>;
+  }
 
   return (
     <div className="view-page">
@@ -160,34 +175,18 @@ export default function MultiRunView() {
           placeholder="Prompt to send to every run…"
           onChange={(e) => setText(e.target.value)}
         />
-        <input
-          className="model-filter-input"
-          type="text"
-          placeholder="Filter models…"
-          value={modelFilter}
-          onChange={(e) => setModelFilter(e.target.value)}
-        />
         <div className="view-toolbar-row">
           {slots.map((v, i) => (
-            <select key={i} value={v} onChange={(e) => setSlots((s) => s.map((x, j) => (j === i ? e.target.value : x)))}>
-              <option value="">Model {i + 1}</option>
-              {[...groups.entries()].map(([provider, ms]) => (
-                <optgroup key={provider} label={provider}>
-                  {ms.map((m) => (
-                    <option key={`${m.providerID}/${m.modelID}`} value={JSON.stringify({ providerID: m.providerID, modelID: m.modelID })}>
-                      {m.name ?? m.modelID}
-                    </option>
-                  ))}
-                </optgroup>
-              ))}
-            </select>
+            <Picker
+              key={i}
+              label={`Model ${i + 1}`}
+              items={modelItems}
+              value={v}
+              placeholder="None"
+              onPick={(id) => setSlots((s) => s.map((x, j) => (j === i ? (x === id ? "" : id) : x)))}
+            />
           ))}
-          <select value={agent} onChange={(e) => setAgent(e.target.value)}>
-            <option value="">Agent: Default</option>
-            {agents.map((a) => (
-              <option key={a.name} value={a.name}>{a.name}</option>
-            ))}
-          </select>
+          <Picker label="Agent" items={agentItems} value={agent} placeholder="Default" onPick={setAgent} />
           <button className="primary-btn" onClick={() => void start()} disabled={busy || !text.trim()}>
             {busy ? "Starting…" : "Run"}
           </button>
@@ -197,7 +196,13 @@ export default function MultiRunView() {
 
       {shown && (
         <>
-          <div className="prompt-echo mono">“{shown.prompt}”</div>
+          <div className="prompt-echo">
+            <span className="prompt-echo-label">
+              Comparing {shown.runs.length} {shown.runs.length === 1 ? "model" : "models"}
+              {running ? " · running" : shown.pickedRunId ? " · picked" : " · done"}
+            </span>
+            <span className="mono">{shown.prompt}</span>
+          </div>
           <div className="multirun-grid">
             {shown.runs.map((run) => (
               <RunCard

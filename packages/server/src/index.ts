@@ -15,6 +15,8 @@ import { createTerminalService } from "@polyth/terminal";
 import { createPreviewService } from "@polyth/preview";
 import { createMultirunService } from "@polyth/multirun";
 import { createFusionService, synthesisPrompt } from "@polyth/fusion";
+import { createScheduleService } from "@polyth/schedule";
+import { createGithubService } from "@polyth/github";
 import { createProjectService } from "./projects.ts";
 import { createSessionService, type Broadcaster, type RuntimePool } from "./sessions.ts";
 import { createHttpServer, type RouteHandler } from "./http.ts";
@@ -26,6 +28,10 @@ import { previewRoutes } from "./routes/preview.ts";
 import { multirunRoutes } from "./routes/multirun.ts";
 import { fusionRoutes } from "./routes/fusion.ts";
 import { walkthroughRoutes } from "./routes/walkthrough.ts";
+import { scheduleRoutes } from "./routes/schedule.ts";
+import { githubRoutes } from "./routes/github.ts";
+import { controlRoutes } from "./routes/control.ts";
+import { snippetRoutes } from "./routes/snippets.ts";
 import { createMultirunRunOne } from "./multirunRunner.ts";
 import { oneShot } from "./oneshot.ts";
 import { attachWs } from "./ws.ts";
@@ -189,6 +195,28 @@ export async function boot(opts: BootOptions = {}) {
     },
   });
 
+  // --- scheduled prompts: due tasks send into an existing session or spawn a
+  // fresh one in the target project (all model-visible flow stays in sessions)
+  const schedule = createScheduleService({
+    file: `${dataDir}/schedule.json`,
+    runner: {
+      run: async (task) => {
+        let sessionId = task.sessionId;
+        if (!sessionId) {
+          const ref = await sessions.create({
+            projectId: task.projectId,
+            title: task.title ?? `Scheduled: ${task.prompt.slice(0, 48)}`,
+          });
+          sessionId = ref.id;
+        }
+        await sessions.send(sessionId, { text: task.prompt });
+      },
+    },
+  });
+  schedule.start();
+
+  const github = createGithubService();
+
   const routes: RouteHandler[] = [
     async (rc) => {
       // lazily rehydrate goal state from the log before the goals routes answer
@@ -237,11 +265,15 @@ export async function boot(opts: BootOptions = {}) {
     multirunRoutes(multirun),
     fusionRoutes(fusion),
     walkthroughRoutes({ store, broadcast }),
+    scheduleRoutes(schedule),
+    githubRoutes({ projects, github }),
+    controlRoutes(sessions),
+    snippetRoutes({ projects, commands }),
   ];
 
   const server = createHttpServer({
     sessions, projects, runtimes, routes,
-    capabilities: () => ["polyth.sessions", "polyth.sessionPersistence", "polyth.projects", "polyth.agentRuntime", "polyth.goals", "polyth.files", "polyth.commands", "polyth.git", "polyth.worktrees", "polyth.terminal", "polyth.preview", "polyth.multirun", "polyth.fusion", "polyth.walkthrough"],
+    capabilities: () => ["polyth.sessions", "polyth.sessionPersistence", "polyth.projects", "polyth.agentRuntime", "polyth.goals", "polyth.files", "polyth.commands", "polyth.git", "polyth.worktrees", "polyth.terminal", "polyth.preview", "polyth.multirun", "polyth.fusion", "polyth.walkthrough", "polyth.schedule", "polyth.github", "polyth.control"],
     webDist: resolve(__dirname, "../../../apps/web/dist"),
     version: "0.1.0",
   });
@@ -254,6 +286,7 @@ export async function boot(opts: BootOptions = {}) {
   console.log(`[polyth] server on http://127.0.0.1:${port}  data=${dataDir}`);
 
   const shutdown = async () => {
+    schedule.stop();
     for (const t of terminals.list()) await terminals.close(t.id).catch(() => {});
     for (const p of await projects.list()) await preview.stop(p.id).catch(() => {});
     for (const p of runtimesByProject.values()) await (await p.catch(() => null))?.dispose().catch(() => {});
