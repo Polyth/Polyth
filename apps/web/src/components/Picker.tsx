@@ -1,7 +1,7 @@
 // Reusable searchable listbox replacing native <select>s: compact chip
 // trigger, type-to-filter popover, ↑↓ Enter Esc keyboard nav, grouped options
 // with a checkmark on the current one. Pass `values` for multi-select.
-import { Fragment, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { filterPickerItems, type PickerItem } from "../picker.ts";
 import { useEscape } from "../useEscape.ts";
 
@@ -19,6 +19,12 @@ export interface PickerProps {
   disabled?: boolean;
   /** Trailing per-row action (e.g. pin-to-profile). Never also picks the row. */
   trailingAction?: { label: string; title?: string; onAction: (id: string) => void };
+  /** Extra class on the root (responsive layout hooks, e.g. picker-profile). */
+  className?: string;
+  /** Accessible trigger name; keeps the full label when text is condensed. */
+  ariaLabel?: string;
+  /** Icon rendered in place of the uppercase label key (compact triggers). */
+  triggerIcon?: ReactNode;
 }
 
 export default function Picker({
@@ -31,6 +37,9 @@ export default function Picker({
   direction = "down",
   disabled,
   trailingAction,
+  className,
+  ariaLabel,
+  triggerIcon,
 }: PickerProps) {
   const multi = values !== undefined;
   const [open, setOpen] = useState(false);
@@ -85,12 +94,13 @@ export default function Picker({
     : current?.label ?? placeholder;
 
   return (
-    <span className="picker">
+    <span className={`picker${className ? ` ${className}` : ""}`}>
       <button
         ref={triggerRef}
         type="button"
         className="chip picker-chip"
-        title={label}
+        title={ariaLabel ?? label}
+        aria-label={ariaLabel}
         aria-haspopup="listbox"
         aria-expanded={open}
         disabled={disabled}
@@ -99,7 +109,9 @@ export default function Picker({
           setQ("");
         }}
       >
-        <span className="chip-k">{label}</span>
+        {triggerIcon
+          ? <span className="picker-trigger-icon" aria-hidden="true">{triggerIcon}</span>
+          : <span className="chip-k">{label}</span>}
         <span className="picker-chip-text">{chipText}</span>
         <span className="picker-caret">▾</span>
       </button>

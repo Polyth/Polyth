@@ -4,9 +4,12 @@
 // never enumerates panels. Visited panels stay mounted (keep-alive) so tree,
 // editor, and scroll state survive switching; per-surface width and the
 // last-open surface persist in polyth.railPrefs.
+// UX-A390: below 821px the inline rail/strip reserves zero workspace width.
+// The strip moves inside a modal panel sheet and the header hosts
+// NarrowPanelTrigger, which shares the exact same visibleSurfaces(...) model.
 import { Fragment, useEffect, useRef, useState, type CSSProperties, type JSX, type PointerEvent as ReactPointerEvent } from "react";
 import { renderSlot } from "../slots.ts";
-import { useActiveModel, useStore, setActiveView, setOverlay, setRailPlugin, toggleRailPlugin, type AppView } from "../store.ts";
+import { getState, useActiveModel, useStore, setActiveView, setOverlay, setRailPlugin, setSidebarOpen, toggleRailPlugin, type AppView } from "../store.ts";
 import { PLUGIN_LABELS, togglePlugin, usePrefs, type PluginId } from "../prefs.ts";
 import { Icon } from "../icons.tsx";
 import { useEscape } from "../useEscape.ts";
@@ -17,6 +20,8 @@ import {
   type RailSurface, type RailSurfaceContext,
 } from "../surfaces.ts";
 import { clampRailWidth, railWidthOf, setRailWidth } from "../railPrefs.ts";
+import { useShellMode } from "../responsiveShell.ts";
+import { useModalSurface } from "./a11y/Dialog.tsx";
 import "./railSurfaces.tsx";
 
 // Full-view jumps that live on the strip when their plugin is on.
@@ -38,16 +43,23 @@ function Badge({ n }: { n: number }) {
   return <span className="strip-badge">{n > 9 ? "9+" : n}</span>;
 }
 
-export default function ContextRail() {
+interface RailSurfaceModel {
+  rail: string | null;
+  surfaces: RailSurface[];
+  open: RailSurface | null;
+  ctx: RailSurfaceContext;
+}
+
+/** Shared surface model: the header trigger and the rail/sheet host derive
+ *  from the same registry + visibility result, so they can never disagree.
+ *  Reads only shared stores (git status is deduplicated) — no new poller. */
+export function useRailSurfaceModel(): RailSurfaceModel {
   const rail = useStore((s) => s.railPlugin);
-  const view = useStore((s) => s.activeView);
   const projectId = useStore((s) => s.activeProjectId);
   const prefs = usePrefs();
   const session = useStore((s) => s.sessions.find((x) => x.id === s.activeSessionId) ?? null);
   const model = useActiveModel();
   const events = useStore((s) => (s.activeSessionId ? s.events[s.activeSessionId] : undefined) ?? NO_EVENTS);
-  const [picker, setPicker] = useState(false);
-  useEscape(picker, () => setPicker(false));
 
   const gitOn = prefs.plugins.includes("git");
   const gitStatus = useGitStatus(gitOn ? projectId : null, model.turn?.status === "working", session?.id);
@@ -61,6 +73,55 @@ export default function ContextRail() {
   useSurfaceVersion(); // re-render when surfaces register/unregister
   const surfaces = visibleSurfaces([...listSurfaces(), ...slotSurfaces()], prefs.plugins, ctx);
   const open = surfaces.find((s) => s.id === rail) ?? null;
+  return { rail, surfaces, open, ctx };
+}
+
+const PANEL_ICON = (
+  <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+    <rect x="1.8" y="2.8" width="12.4" height="10.4" rx="2" />
+    <path d="M9.8 2.8v10.4" />
+  </svg>
+);
+
+/** UX-A390 header control: the only compact entry point to registered panels.
+ *  Selecting opens the first visible surface in registry order; when a panel
+ *  is open the same button truthfully names and closes it. Hidden in wide
+ *  mode (the inline strip exists there instead). */
+export function NarrowPanelTrigger() {
+  const { surfaces, open } = useRailSurfaceModel();
+  const label = open ? `Close ${open.title} panel` : "Open workspace panels";
+  return (
+    <button
+      className="icon-btn narrow-panel-trigger"
+      title={label}
+      aria-label={label}
+      aria-expanded={open !== null}
+      aria-controls="polyth-panel-sheet"
+      disabled={surfaces.length === 0}
+      onClick={() => {
+        if (open) {
+          setRailPlugin(null);
+          return;
+        }
+        // At most one shell-modal surface: opening a panel closes the drawer.
+        if (getState().sidebarOpen) setSidebarOpen(false);
+        const first = surfaces[0];
+        if (first) setRailPlugin(first.id);
+      }}
+    >
+      {PANEL_ICON}
+    </button>
+  );
+}
+
+export default function ContextRail() {
+  const mode = useShellMode();
+  const compact = mode !== "wide";
+  const { rail, surfaces, open, ctx } = useRailSurfaceModel();
+  const view = useStore((s) => s.activeView);
+  const prefs = usePrefs();
+  const [picker, setPicker] = useState(false);
+  useEscape(picker, () => setPicker(false));
 
   // Keep-alive: panels stay mounted once visited so their state survives
   // switching surfaces; unavailable surfaces (plugin off) unmount naturally.
@@ -77,7 +138,8 @@ export default function ContextRail() {
   }, [rail, known, open]);
   const kept = surfaces.filter((s) => s.id === rail || visited.includes(s.id));
 
-  // Per-surface width with a drag handle on the panel's left edge.
+  // Per-surface width with a drag handle on the panel's left edge (wide only;
+  // the compact sheet has a fixed CSS width and hides the separator).
   const [width, setWidth] = useState<number>(() => railWidthOf(rail));
   useEffect(() => { setWidth(railWidthOf(rail)); }, [rail]);
   const dragRef = useRef<{ startX: number; startW: number } | null>(null);
@@ -101,10 +163,117 @@ export default function ContextRail() {
     window.addEventListener("pointerup", up);
   };
 
+  // Compact sheet: modal focus behavior shared with Dialog and the drawer.
+  const sheetRef = useRef<HTMLDivElement>(null);
+  useModalSurface({
+    enabled: compact,
+    open: compact && open !== null,
+    onClose: () => setRailPlugin(null),
+    containerRef: sheetRef,
+  });
+
   const jumps = JUMPS.filter((j) => prefs.plugins.includes(j.plugin));
   const togglable = (Object.keys(PLUGIN_LABELS) as PluginId[]).filter((id) => id !== "session");
   const slotTabs = renderSlot("contextRail.tabs", { tab: rail, onSelect: toggleRailPlugin });
   const badgeOf = (s: RailSurface): number => s.badge?.(ctx) ?? 0;
+
+  const pluginPicker = (
+    <>
+      <button
+        className="rail-icon strip-btn"
+        title="Add or remove plugins"
+        aria-label="Add or remove plugins"
+        aria-expanded={picker}
+        onClick={() => setPicker((v) => !v)}
+      >
+        <Icon.plus />
+      </button>
+      {picker && (
+        <>
+          <div className="menu-backdrop" onClick={() => setPicker(false)} />
+          <div className="strip-picker" role="menu">
+            <div className="strip-picker-label">Plugins</div>
+            {togglable.map((id) => {
+              const on = prefs.plugins.includes(id);
+              return (
+                <button key={id} aria-pressed={on} onClick={() => togglePlugin(id)}>
+                  <span className="strip-picker-check">{on ? "✓" : ""}</span>
+                  {PLUGIN_LABELS[id]}
+                </button>
+              );
+            })}
+            <button className="strip-picker-manage" onClick={() => { setPicker(false); setOverlay("settings"); }}>
+              Manage in settings…
+            </button>
+          </div>
+        </>
+      )}
+    </>
+  );
+
+  if (compact) {
+    // The inline rail and strip are absent from layout and the accessibility
+    // tree; NarrowPanelTrigger in the header is the only entry point. The
+    // sheet stays mounted (hidden + inert) while closed so visited panels
+    // keep their state.
+    if (open === null && kept.length === 0) return null;
+    return (
+      <>
+        {open !== null && <div className="menu-backdrop sheet-backdrop" onClick={() => setRailPlugin(null)} />}
+        <div
+          ref={sheetRef}
+          id="polyth-panel-sheet"
+          className="panel-sheet"
+          role="dialog"
+          aria-modal="true"
+          aria-label={`${open?.title ?? "Workspace"} panel`}
+          style={open !== null ? undefined : { display: "none" }}
+        >
+          <div className="rail-head sheet-head">
+            <span className="rail-title">{open?.title ?? ""}</span>
+            <span className="header-spacer" />
+            <div className="rail-tabs">{slotTabs.map((n, i) => <Fragment key={i}>{n}</Fragment>)}</div>
+            <button className="rail-toggle sheet-close" onClick={() => setRailPlugin(null)} title="Close panel" aria-label="Close panel">×</button>
+          </div>
+          <div className="plugin-strip sheet-strip" aria-label="Workspace panels">
+            {surfaces.map((s) => (
+              <button
+                key={s.id}
+                className={`rail-icon strip-btn ${rail === s.id ? "active" : ""}`}
+                title={s.title}
+                aria-label={s.title}
+                aria-pressed={rail === s.id}
+                onClick={() => setRailPlugin(s.id)}
+              >
+                {s.icon ? <s.icon /> : <Icon.context />}
+                <Badge n={badgeOf(s)} />
+              </button>
+            ))}
+            {jumps.length > 0 && <span className="strip-sep" />}
+            {jumps.map((j) => (
+              <button
+                key={j.view}
+                className={`rail-icon strip-btn ${view === j.view ? "active" : ""}`}
+                title={j.label}
+                aria-label={j.label}
+                aria-pressed={view === j.view}
+                onClick={() => { setActiveView(j.view); setRailPlugin(null); }}
+              >
+                <j.icon />
+              </button>
+            ))}
+            <span className="strip-spacer" />
+            {pluginPicker}
+          </div>
+          {kept.map((s) => (
+            <div key={s.id} className="rail-body" style={s.id === rail ? undefined : { display: "none" }}>
+              <s.component />
+            </div>
+          ))}
+        </div>
+      </>
+    );
+  }
 
   return (
     <aside className="railbar">
@@ -155,35 +324,7 @@ export default function ContextRail() {
           </button>
         ))}
         <span className="strip-spacer" />
-        <button
-          className="rail-icon strip-btn"
-          title="Add or remove plugins"
-          aria-label="Add or remove plugins"
-          aria-expanded={picker}
-          onClick={() => setPicker((v) => !v)}
-        >
-          <Icon.plus />
-        </button>
-        {picker && (
-          <>
-            <div className="menu-backdrop" onClick={() => setPicker(false)} />
-            <div className="strip-picker" role="menu">
-              <div className="strip-picker-label">Plugins</div>
-              {togglable.map((id) => {
-                const on = prefs.plugins.includes(id);
-                return (
-                  <button key={id} aria-pressed={on} onClick={() => togglePlugin(id)}>
-                    <span className="strip-picker-check">{on ? "✓" : ""}</span>
-                    {PLUGIN_LABELS[id]}
-                  </button>
-                );
-              })}
-              <button className="strip-picker-manage" onClick={() => { setPicker(false); setOverlay("settings"); }}>
-                Manage in settings…
-              </button>
-            </div>
-          </>
-        )}
+        {pluginPicker}
       </div>
     </aside>
   );

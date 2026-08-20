@@ -1,9 +1,102 @@
 // Accessible modal dialog primitive (WP2): focus trap, Escape close, focus
 // restore to the opener, aria-modal semantics. Feature dialogs (focus editor,
 // image preview, mermaid fullscreen, question stepper) build on this.
-import { useEffect, useRef, type ReactNode } from "react";
+// UX-A390: the focus logic is exported as useModalSurface so the compact
+// session drawer (Sidebar) and panel sheet (ContextRail) share one
+// implementation instead of copying focus traps.
+import { useEffect, useRef, type ReactNode, type RefObject } from "react";
 
 const FOCUSABLE = 'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
+
+export interface ModalSurfaceOptions {
+  /** The surface is currently open and must behave as the active modal. */
+  open: boolean;
+  /**
+   * The surface participates in modal behavior at all. When false (e.g. the
+   * sidebar in wide mode) the hook removes inert/aria-hidden and does nothing,
+   * so a viewport change never steals or restores focus by itself.
+   */
+  enabled?: boolean;
+  onClose: () => void;
+  containerRef: RefObject<HTMLElement | null>;
+  /** CSS selector inside the container to receive initial focus. */
+  initialFocus?: string;
+}
+
+const visible = (el: HTMLElement): boolean => el.getClientRects().length > 0;
+
+/**
+ * Shared modal-surface focus contract:
+ * - focuses the requested initial target or first enabled control on open;
+ * - contains forward and reverse Tab traversal;
+ * - closes the active surface on Escape (one layer: transient popovers that
+ *   listen in the capture phase, e.g. useEscape, win and stop propagation);
+ * - restores a still-connected opener on close;
+ * - keeps hidden mounted content inert and aria-hidden while closed.
+ */
+export function useModalSurface({ open, enabled = true, onClose, containerRef, initialFocus }: ModalSurfaceOptions): void {
+  const closeRef = useRef(onClose);
+  closeRef.current = onClose;
+
+  // Hidden-but-mounted surfaces (keep-alive drawer/sheet) must not be
+  // reachable by focus, pointer, or assistive technology.
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    if (enabled && !open) {
+      el.setAttribute("aria-hidden", "true");
+      el.setAttribute("inert", "");
+    } else {
+      el.removeAttribute("aria-hidden");
+      el.removeAttribute("inert");
+    }
+    return () => {
+      el.removeAttribute("aria-hidden");
+      el.removeAttribute("inert");
+    };
+  }, [enabled, open, containerRef]);
+
+  useEffect(() => {
+    if (!enabled || !open) return;
+    const el = containerRef.current;
+    if (!el) return;
+    const opener = document.activeElement as HTMLElement | null;
+    const target = (initialFocus ? el.querySelector<HTMLElement>(initialFocus) : null)
+      ?? el.querySelector<HTMLElement>(FOCUSABLE)
+      ?? el;
+    target.focus();
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.stopPropagation();
+        closeRef.current();
+        return;
+      }
+      if (e.key !== "Tab") return;
+      const nodes = [...el.querySelectorAll<HTMLElement>(FOCUSABLE)]
+        .filter((n) => visible(n) || n === document.activeElement);
+      if (nodes.length === 0) {
+        e.preventDefault();
+        return;
+      }
+      const first = nodes[0]!;
+      const last = nodes[nodes.length - 1]!;
+      const active = document.activeElement;
+      if (e.shiftKey && (active === first || active === el)) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && active === last) {
+        e.preventDefault();
+        first.focus();
+      }
+    };
+    el.addEventListener("keydown", onKeyDown);
+    return () => {
+      el.removeEventListener("keydown", onKeyDown);
+      if (opener && opener.isConnected && visible(opener)) opener.focus();
+    };
+  }, [enabled, open, initialFocus, containerRef]);
+}
 
 export interface DialogProps {
   title: string;
@@ -17,43 +110,7 @@ export interface DialogProps {
 
 export default function Dialog({ title, onClose, children, className, size = "md", initialFocus }: DialogProps) {
   const panelRef = useRef<HTMLDivElement>(null);
-  const restoreRef = useRef<HTMLElement | null>(null);
-
-  useEffect(() => {
-    restoreRef.current = document.activeElement as HTMLElement | null;
-    const panel = panelRef.current;
-    if (panel) {
-      const target = (initialFocus ? panel.querySelector<HTMLElement>(initialFocus) : null)
-        ?? panel.querySelector<HTMLElement>(FOCUSABLE)
-        ?? panel;
-      target.focus();
-    }
-    return () => {
-      restoreRef.current?.focus?.();
-    };
-  }, [initialFocus]);
-
-  const onKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Escape") {
-      e.stopPropagation();
-      onClose();
-      return;
-    }
-    if (e.key !== "Tab") return;
-    const panel = panelRef.current;
-    if (!panel) return;
-    const nodes = [...panel.querySelectorAll<HTMLElement>(FOCUSABLE)].filter((n) => n.offsetParent !== null || n === document.activeElement);
-    if (nodes.length === 0) { e.preventDefault(); return; }
-    const first = nodes[0]!;
-    const last = nodes[nodes.length - 1]!;
-    if (e.shiftKey && document.activeElement === first) {
-      e.preventDefault();
-      last.focus();
-    } else if (!e.shiftKey && document.activeElement === last) {
-      e.preventDefault();
-      first.focus();
-    }
-  };
+  useModalSurface({ open: true, onClose, containerRef: panelRef, initialFocus });
 
   return (
     <div className="dialog-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
@@ -64,7 +121,6 @@ export default function Dialog({ title, onClose, children, className, size = "md
         aria-label={title}
         tabIndex={-1}
         className={`dialog-panel dialog-${size}${className ? ` ${className}` : ""}`}
-        onKeyDown={onKeyDown}
       >
         {children}
       </div>

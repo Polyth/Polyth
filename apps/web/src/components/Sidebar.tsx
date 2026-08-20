@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
-  useStore, activateProject, openWorktreeSessionDialog, setActiveView, setOverlay,
+  getState, useStore, activateProject, openWorktreeSessionDialog, setActiveView, setOverlay,
   setProjects, setSidebarOpen, setUiError,
 } from "../store.ts";
 import { createSession } from "../init.ts";
@@ -11,11 +11,19 @@ import { friendlyError } from "../settings.ts";
 import { Icon } from "../icons.tsx";
 import SessionList from "./sidebar/SessionList.tsx";
 import ImportSessionsDialog from "./ImportSessionsDialog.tsx";
+import { useShellMode } from "../responsiveShell.ts";
+import { useModalSurface } from "./a11y/Dialog.tsx";
 
 function projectGlyph(name: string): string {
   const words = name.trim().split(/[\s\-_/]+/).filter(Boolean);
   if (words.length >= 2) return `${words[0]![0]}${words[1]![0]}`.toUpperCase();
   return name.slice(0, 2).toUpperCase() || "P";
+}
+
+/** Close the drawer only when it is actually open (avoids no-op re-renders
+ *  in wide mode, where the sidebar is a plain inline column). */
+function closeDrawer(): void {
+  if (getState().sidebarOpen) setSidebarOpen(false);
 }
 
 export default function Sidebar() {
@@ -31,10 +39,31 @@ export default function Sidebar() {
   const [projectMenu, setProjectMenu] = useState<string | null>(null);
   const [importingProject, setImportingProject] = useState<string | null>(null);
 
+  // UX-A390: below 821px the sidebar is a modal drawer. It never opens by
+  // itself when the viewport shrinks — wide visibility is not a persisted
+  // drawer-open preference.
+  const mode = useShellMode();
+  const compact = mode !== "wide";
+  const navRef = useRef<HTMLElement>(null);
+  const prevCompact = useRef(compact);
+  useEffect(() => {
+    if (!prevCompact.current && compact) closeDrawer();
+    prevCompact.current = compact;
+  }, [compact]);
+  useModalSurface({
+    enabled: compact,
+    open: compact && drawerOpen,
+    onClose: () => setSidebarOpen(false),
+    containerRef: navRef,
+  });
+
   const onNewSession = () => {
     if (!activeProjectId) return;
-    setSidebarOpen(false);
-    void createSession(activeProjectId).catch((e) => setUiError(friendlyError("Couldn’t create a session", e)));
+    // Close the drawer only after the session actually exists; a failure
+    // leaves it open with the existing error path.
+    void createSession(activeProjectId)
+      .then(closeDrawer)
+      .catch((e) => setUiError(friendlyError("Couldn’t create a session", e)));
   };
   const saveProjectName = async (id: string) => {
     const name = projectName.trim();
@@ -51,8 +80,14 @@ export default function Sidebar() {
 
   return (
     <>
-      {drawerOpen && <div className="menu-backdrop sidebar-backdrop" onClick={() => setSidebarOpen(false)} />}
-      <nav className={`sidebar ${drawerOpen ? "open" : ""}`}>
+      {compact && drawerOpen && <div className="menu-backdrop sidebar-backdrop" onClick={() => setSidebarOpen(false)} />}
+      <nav
+        ref={navRef}
+        id="polyth-session-drawer"
+        className={`sidebar ${drawerOpen ? "open" : ""}`}
+        {...(compact ? { role: "dialog", "aria-modal": true, "aria-label": "Projects and sessions" } : {})}
+      >
+        <h2 className="sr-only">Projects and sessions</h2>
         <div className="sidebar-head">
           <span className="brand"><i>p</i> {productName.toLowerCase()}</span>
           <span className="side-icons">
@@ -61,6 +96,14 @@ export default function Sidebar() {
               <button className="icon-btn" title="Git & worktrees" onClick={() => setActiveView("git")}><Icon.tree /></button>
             )}
             <button className="icon-btn" title="Open project" onClick={() => setOverlay("project-picker")}><Icon.plus /></button>
+            {compact && (
+              <button
+                className="icon-btn drawer-close"
+                title="Close projects and sessions"
+                aria-label="Close projects and sessions"
+                onClick={() => setSidebarOpen(false)}
+              >×</button>
+            )}
           </span>
         </div>
         <div className="side-scroll">
@@ -91,6 +134,7 @@ export default function Sidebar() {
                 onClick={() => {
                   // Clicking the already-active project must not drop the session (UX-04).
                   if (p.id !== activeProjectId) activateProject(p.id);
+                  closeDrawer();
                 }}
                 onDoubleClick={() => { setRenamingProject(p.id); setProjectName(p.name); }}
               >
@@ -114,7 +158,9 @@ export default function Sidebar() {
                   <button role="menuitem" onClick={() => {
                     setProjectMenu(null);
                     if (p.id !== activeProjectId) activateProject(p.id);
-                    void createSession(p.id).catch((error) => setUiError(friendlyError("Couldn’t create a session", error)));
+                    void createSession(p.id)
+                      .then(closeDrawer)
+                      .catch((error) => setUiError(friendlyError("Couldn’t create a session", error)));
                   }}>New session</button>
                   <button role="menuitem" onClick={() => {
                     setProjectMenu(null);

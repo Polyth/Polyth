@@ -555,61 +555,73 @@ export default function Composer({ variant = "docked" }: { variant?: "docked" | 
           </div>
         )}
       </div>
+      {/* UX-A390 command surface: one composer, one send() path. The bar is
+          three semantic groups — selectors, extension slots, actions — which
+          stay on one row in wide mode and become the two-tier phone layout in
+          CSS. No controller logic forks. */}
       <div className="composer-bar composer-row">
-        {leading.map((n, i) => <Fragment key={i}>{n}</Fragment>)}
-        {!simple && !noModels && (
-          <Picker
-            label="Model" direction="up" items={modelItems} value={modelValue} onPick={pickModel}
-            trailingAction={{ label: "⚲", title: "Pin as profile (or edit the matching one)", onAction: pinModel }}
+        <div className="composer-selectors">
+          {!simple && !noModels && (
+            <Picker
+              className="picker-model"
+              label="Model" direction="up" items={modelItems} value={modelValue} onPick={pickModel}
+              trailingAction={{ label: "⚲", title: "Pin as profile (or edit the matching one)", onAction: pinModel }}
+            />
+          )}
+          {!simple && agents.length > 0 && (
+            <Picker className="picker-agent" label="Agent" direction="up" items={agentItems} value={agentValue} onPick={setAgentValue} />
+          )}
+          {!simple && profiles.length > 0 && (
+            <Picker className="picker-profile" label="Profile" direction="up" items={profileItems} value={profileValue} onPick={setProfileValue} placeholder="None" />
+          )}
+        </div>
+        <div className="composer-extensions">
+          {leading.map((n, i) => <Fragment key={i}>{n}</Fragment>)}
+          {trailing.map((n, i) => <Fragment key={i}>{n}</Fragment>)}
+        </div>
+        <div className="composer-actions">
+          <input
+            ref={fileInputRef}
+            type="file"
+            multiple
+            hidden
+            onChange={(e) => {
+              const files = Array.from(e.currentTarget.files ?? []);
+              e.currentTarget.value = "";
+              attachFiles(files);
+            }}
           />
-        )}
-        {!simple && agents.length > 0 && (
-          <Picker label="Agent" direction="up" items={agentItems} value={agentValue} onPick={setAgentValue} />
-        )}
-        {!simple && profiles.length > 0 && (
-          <Picker label="Profile" direction="up" items={profileItems} value={profileValue} onPick={setProfileValue} placeholder="None" />
-        )}
-        <input
-          ref={fileInputRef}
-          type="file"
-          multiple
-          hidden
-          onChange={(e) => {
-            const files = Array.from(e.currentTarget.files ?? []);
-            e.currentTarget.value = "";
-            attachFiles(files);
-          }}
-        />
-        <button
-          className="icon-btn"
-          title="Attach files"
-          aria-label="Attach files"
-          disabled={!activeProjectId}
-          onClick={() => fileInputRef.current?.click()}
-        >⊕</button>
-        <button
-          className="icon-btn"
-          title="Focused editor (Mod+Shift+Enter)"
-          aria-label="Open focused editor"
-          onClick={() => setFocusMode(true)}
-        >⤢</button>
-        <span className="header-spacer" />
-        {trailing.map((n, i) => <Fragment key={i}>{n}</Fragment>)}
-        {working ? (
-          <>
-            <button className="send composer-delivery" onClick={() => send()} disabled={(!text.trim() && attachments.length === 0) || (!shellMode && noModels)}
-              title={`Active turn — this message will ${followUp === "steer" ? "steer the current turn" : followUp === "interrupt" ? "interrupt, then send" : "queue until idle"}`}>
-              {shellMode ? "Run" : followUp === "steer" ? "Steer" : followUp === "interrupt" ? "Interrupt" : "Queue"} <span className="send-key">{settings.sendOnEnter ? "↵" : `${modKeyLabel()}↵`}</span>
-            </button>
-            <button className="stop" onClick={() => void abortSession()}>
-              Stop
-            </button>
-          </>
-        ) : (
-          <button className="send" onClick={() => send()} disabled={(!text.trim() && attachments.length === 0) || (!shellMode && noModels)}>
-            {shellMode ? "Run" : "Send"} <span className="send-key">{settings.sendOnEnter ? "↵" : `${modKeyLabel()}↵`}</span>
-          </button>
-        )}
+          <button
+            className="icon-btn composer-attach"
+            title="Attach files"
+            aria-label="Attach files"
+            disabled={!activeProjectId}
+            onClick={() => fileInputRef.current?.click()}
+          >⊕</button>
+          <button
+            className="icon-btn composer-expand"
+            title="Focused editor (Mod+Shift+Enter)"
+            aria-label="Open focused editor"
+            onClick={() => setFocusMode(true)}
+          >⤢</button>
+          <span className="composer-primary">
+            {working ? (
+              <>
+                <button className="send composer-delivery" onClick={() => send()} disabled={(!text.trim() && attachments.length === 0) || (!shellMode && noModels)}
+                  title={`Active turn — this message will ${followUp === "steer" ? "steer the current turn" : followUp === "interrupt" ? "interrupt, then send" : "queue until idle"}`}>
+                  {shellMode ? "Run" : followUp === "steer" ? "Steer" : followUp === "interrupt" ? "Interrupt" : "Queue"} <span className="send-key">{settings.sendOnEnter ? "↵" : `${modKeyLabel()}↵`}</span>
+                </button>
+                <button className="stop" onClick={() => void abortSession()}>
+                  Stop
+                </button>
+              </>
+            ) : (
+              <button className="send" onClick={() => send()} disabled={(!text.trim() && attachments.length === 0) || (!shellMode && noModels)}>
+                {shellMode ? "Run" : "Send"} <span className="send-key">{settings.sendOnEnter ? "↵" : `${modKeyLabel()}↵`}</span>
+              </button>
+            )}
+          </span>
+        </div>
       </div>
       {focusMode && (
         <ComposerFocusDialog

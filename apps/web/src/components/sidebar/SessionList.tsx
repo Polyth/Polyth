@@ -4,7 +4,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { SessionFolderDto, SessionProjection, WorkspaceLabel } from "@polyth/contracts";
 import { api } from "../../api.ts";
-import { setUiError, useStore } from "../../store.ts";
+import { getState, setSidebarOpen, setUiError, useStore } from "../../store.ts";
 import { openSession, archiveSession, restoreSession, forkSession, refreshSessions } from "../../init.ts";
 import { ago, deriveSessionTitle, fullSessionTitle } from "../../format.ts";
 import { friendlyError } from "../../settings.ts";
@@ -376,7 +376,11 @@ export default function SessionList({ projectId }: { projectId: string }) {
       selected={selected.has(s.id)}
       onToggleSelect={toggleSelect}
       onChanged={onChanged}
-      onOpen={(id) => void openSession(id)}
+      // UX-A390: the compact drawer closes only after activation resolves;
+      // a failure leaves it open with the existing error path.
+      onOpen={(id) => void openSession(id).then(() => {
+        if (getState().sidebarOpen) setSidebarOpen(false);
+      })}
       onTogglePin={(session) => void togglePin(session)}
       pinnedSection={pinnedSection}
       onPinDragStart={setDraggedPin}

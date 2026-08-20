@@ -1,11 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useActiveModel, useStore, setActiveView, setUiError, type AppView } from "../store.ts";
+import { getState, useActiveModel, useStore, setActiveView, setRailPlugin, setSidebarOpen, setUiError, type AppView } from "../store.ts";
 import { forkSession, exportSessionMarkdown } from "../init.ts";
 import { displaySessionTitle } from "../format.ts";
 import { friendlyError, shortcutLabel } from "../settings.ts";
 import { GoalAttachForm } from "./GoalStrip.tsx";
 import { contextGauge, type ContextGauge } from "../reduce.ts";
 import { api } from "../api.ts";
+import { useShellMode, type ShellMode } from "../responsiveShell.ts";
+import { NarrowPanelTrigger } from "./ContextRail.tsx";
+import Picker from "./Picker.tsx";
+import type { PickerItem } from "../picker.ts";
 
 const STROKE = { fill: "none", stroke: "currentColor", strokeWidth: 1.5, strokeLinecap: "round", strokeLinejoin: "round" } as const;
 
@@ -110,7 +114,9 @@ function ContextRing({ gauge }: { gauge: ContextGauge }) {
 
 /** F18: loud auto-accept indicator + toggle. The server owns the policy; the
  *  effective value rides the projection so an inherited "on" (subagent under
- *  an enabled parent) lights up too. Session-scoped only — never global. */
+ *  an enabled parent) lights up too. Session-scoped only — never global.
+ *  UX-A390: at phone the label is visually hidden (icon-only 44px target) but
+ *  the accessible name always carries the on/off state — never color alone. */
 function AutoAcceptChip({ sessionId, effective }: { sessionId: string; effective: boolean }) {
   const [busy, setBusy] = useState(false);
   const toggle = () => {
@@ -128,6 +134,7 @@ function AutoAcceptChip({ sessionId, effective }: { sessionId: string; effective
       title={effective
         ? "Auto-accept is ON: permission requests in this session are approved automatically. Click to turn off."
         : "Auto-accept permission requests in this session"}
+      aria-label={effective ? "Auto-accept on" : "Auto-accept off"}
       aria-pressed={effective}
       disabled={busy}
       onClick={toggle}
@@ -136,9 +143,94 @@ function AutoAcceptChip({ sessionId, effective }: { sessionId: string; effective
         <path d="M8 1.8 13.5 4v4.2c0 3.2-2.3 5.3-5.5 6-3.2-.7-5.5-2.8-5.5-6V4z" />
         {effective && <path d="M5.4 8.2 7.2 10l3.4-3.6" />}
       </svg>
-      {effective ? "Auto-accept on" : "Auto-accept"}
+      <span className="auto-accept-text">{effective ? "Auto-accept on" : "Auto-accept"}</span>
     </button>
   );
+}
+
+/** UX-A390: one bounded current-view trigger replacing the desktop switcher
+ *  in compact mode. Items derive from the same VIEW_GROUPS — no second view
+ *  list, no second router. The accessible name always carries the current
+ *  label even when the visible text condenses to the icon at phone width. */
+function CompactViewPicker({ view }: { view: AppView }) {
+  const groupNames = ["", "Workspace", "Workflows"];
+  const items: PickerItem[] = VIEW_GROUPS.flatMap((group, gi) =>
+    group.map(([id, label]) => ({ id, label, group: groupNames[gi] ?? "" })),
+  );
+  const current = items.find((i) => i.id === view)?.label ?? view;
+  return (
+    <Picker
+      className="header-view-picker"
+      label="View"
+      ariaLabel={`Change workspace view, current: ${current}`}
+      triggerIcon={ICONS[view]}
+      items={items}
+      value={view}
+      onPick={(id) => setActiveView(id as AppView)}
+    />
+  );
+}
+
+/** UX-A390: the drawer trigger is the compact-mode entry to projects and
+ *  sessions. Opening the drawer closes an open panel first — there is at most
+ *  one shell-modal surface. */
+function DrawerTrigger() {
+  const open = useStore((s) => s.sidebarOpen);
+  return (
+    <button
+      className="icon-btn header-drawer-btn"
+      title="Open projects and sessions"
+      aria-label="Open projects and sessions"
+      aria-controls="polyth-session-drawer"
+      aria-expanded={open}
+      onClick={() => {
+        if (open) {
+          setSidebarOpen(false);
+          return;
+        }
+        if (getState().railPlugin !== null) setRailPlugin(null);
+        setSidebarOpen(true);
+      }}
+    >
+      <svg width="16" height="16" viewBox="0 0 16 16" {...STROKE}>
+        <path d="M2.5 4.5h11M2.5 8h11M2.5 11.5h11" />
+      </svg>
+    </button>
+  );
+}
+
+/** A resize that hides the focused control moves focus to the equivalent
+ *  visible trigger; focus never remains in unmounted or hidden content. */
+function useResizeFocusHandoff(mode: ShellMode) {
+  const lastFocus = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    const remember = () => {
+      const el = document.activeElement;
+      if (el instanceof HTMLElement && el !== document.body) lastFocus.current = el;
+    };
+    document.addEventListener("focusin", remember);
+    remember();
+    return () => document.removeEventListener("focusin", remember);
+  }, []);
+
+  const prevMode = useRef(mode);
+  useEffect(() => {
+    if (prevMode.current === mode) return;
+    prevMode.current = mode;
+    const active = document.activeElement;
+    if (active instanceof HTMLElement && active !== document.body && active.getClientRects().length > 0) return;
+    const prev = lastFocus.current;
+    if (!prev) return;
+    const q = (sel: string) => document.querySelector<HTMLElement>(sel);
+    let target: HTMLElement | null = null;
+    if (prev.closest(".view-switcher")) target = q(".header-view-picker .picker-chip");
+    else if (prev.closest(".header-view-picker")) target = q(".view-switcher .view-icon.active") ?? q(".view-switcher .view-icon");
+    else if (prev.closest(".railbar")) target = q(".narrow-panel-trigger");
+    else if (prev.closest(".narrow-panel-trigger")) target = q(".plugin-strip .strip-btn.active") ?? q(".plugin-strip .strip-btn");
+    else if (prev.closest(".panel-sheet")) target = q(".plugin-strip .strip-btn.active") ?? q(".rail-toggle");
+    else if (prev.closest(".header-drawer-btn")) target = q(".sidebar .side-icons .icon-btn");
+    if (target && target.getClientRects().length > 0) target.focus();
+  }, [mode]);
 }
 
 function OverflowMenu({ sessionId, onGoal }: { sessionId: string | null; onGoal: () => void }) {
@@ -223,34 +315,44 @@ export default function Header() {
     : project?.name || project?.path || "Polyth";
   const subtitle = [project?.name || project?.path, branch].filter(Boolean).join(" · ");
 
+  const mode = useShellMode();
+  const compact = mode !== "wide";
+  useResizeFocusHandoff(mode);
+
   return (
     <>
-      <header className="header">
+      <header className={`header${compact ? " header-compact" : ""}`}>
+        {compact && <DrawerTrigger />}
         {ctx && <ContextRing gauge={ctx} />}
         <div className="header-session">
           <div className="header-title" title={title}>{title}</div>
           {subtitle && <div className="header-sub">{subtitle}</div>}
         </div>
         {session && <AutoAcceptChip sessionId={session.id} effective={!!session.autoAccept} />}
-        <nav className="view-switcher" aria-label="Views">
-          {VIEW_GROUPS.map((group, gi) => (
-            <span className="view-group" key={gi}>
-              {group.map(([id, label]) => (
-                <button
-                  key={id}
-                  className={`view-icon ${view === id ? "active" : ""}`}
-                  title={label}
-                  aria-label={label}
-                  aria-pressed={view === id}
-                  onClick={() => setActiveView(id)}
-                >
-                  {ICONS[id]}
-                </button>
-              ))}
-            </span>
-          ))}
-        </nav>
+        {compact ? (
+          <CompactViewPicker view={view} />
+        ) : (
+          <nav className="view-switcher" aria-label="Views">
+            {VIEW_GROUPS.map((group, gi) => (
+              <span className="view-group" key={gi}>
+                {group.map(([id, label]) => (
+                  <button
+                    key={id}
+                    className={`view-icon ${view === id ? "active" : ""}`}
+                    title={label}
+                    aria-label={label}
+                    aria-pressed={view === id}
+                    onClick={() => setActiveView(id)}
+                  >
+                    {ICONS[id]}
+                  </button>
+                ))}
+              </span>
+            ))}
+          </nav>
+        )}
         <OverflowMenu sessionId={session?.id ?? null} onGoal={() => setGoalFormOpen((v) => !v)} />
+        {compact && <NarrowPanelTrigger />}
       </header>
       {goalFormOpen && <GoalAttachForm onDone={() => setGoalFormOpen(false)} />}
     </>

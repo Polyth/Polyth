@@ -15,6 +15,11 @@ const VIEW_LABEL: Record<AppView, string> = {
   github: "GitHub",
 };
 
+// UX-A390: every segment carries a stable key/class so narrow widths can
+// prioritize deterministically in CSS: project identity/status stays at the
+// start, the current view at the end; branch/model/agent are visually
+// suppressed at phone width (they remain in the drawer/header/panels) instead
+// of being clipped half-visible. The bar itself never scrolls horizontally.
 export default function StatusBar() {
   const branch = useStore((s) => s.gitBranch);
   const project = useStore((s) => s.projects.find((p) => p.id === s.activeProjectId) ?? null);
@@ -25,23 +30,23 @@ export default function StatusBar() {
   segments.push({
     key: "project",
     node: (
-      <span className="sb">
+      <span className="sb sb-project">
         <span className="sb-live" aria-hidden />
-        {project?.name || project?.path || "Polyth"}
+        <span className="sb-text">{project?.name || project?.path || "Polyth"}</span>
       </span>
     ),
   });
   if (branch) {
-    segments.push({ key: "branch", node: <span className="sb"><span className="mono">{branch}</span></span> });
+    segments.push({ key: "branch", node: <span className="sb sb-branch"><span className="mono">{branch}</span></span> });
   }
   if (project) {
     segments.push({
       key: "model",
-      node: <span className="sb"><span className="mono">{session?.model?.modelID ?? "No model"}</span></span>,
+      node: <span className="sb sb-model"><span className="mono">{session?.model?.modelID ?? "No model"}</span></span>,
     });
   }
   if (session?.agent) {
-    segments.push({ key: "agent", node: <span className="sb">{session.agent} agent</span> });
+    segments.push({ key: "agent", node: <span className="sb sb-agent">{session.agent} agent</span> });
   }
 
   return (
@@ -53,7 +58,7 @@ export default function StatusBar() {
         </Fragment>
       ))}
       <span className="header-spacer" />
-      <span className="sb">{VIEW_LABEL[view]}</span>
+      <span className="sb sb-view">{VIEW_LABEL[view]}</span>
     </div>
   );
 }
