@@ -1,5 +1,5 @@
 import { PERSONAS, applyPersona, isCustomized, usePrefs, type PersonaId } from "../prefs.ts";
-import { getState, setOverlay } from "../store.ts";
+import { setOverlay } from "../store.ts";
 import { Icon } from "../icons.tsx";
 import type { JSX } from "react";
 
@@ -18,10 +18,13 @@ export default function Onboarding() {
       isCustomized(prefs) &&
       !window.confirm("Switching resets your plugin customizations to the persona defaults. Continue?")
     ) return;
+    // First visit: persona, then the folder picker — even if the server already
+    // has projects from a previous machine session. Returning visits skip this
+    // screen entirely (persona is already in localStorage). Overlay is set
+    // before applyPersona so App never paints the shell without the dialog.
+    const firstRun = !persona;
+    setOverlay(firstRun ? "project-picker" : null);
     applyPersona(id);
-    // First run continues straight into the folder picker: a fresh workspace
-    // has nowhere to work until a project folder is chosen.
-    setOverlay(getState().projects.length === 0 ? "project-picker" : null);
   };
   return (
     <div className="onboard">
