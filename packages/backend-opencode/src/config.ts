@@ -31,8 +31,9 @@ export interface BackendConfigApplier {
   /** Mirror provider/model visibility into the backend config, preserving all
    *  other keys (including unrelated per-provider options). */
   applyProviderVisibility(v: ProviderVisibilityApply): Promise<void>;
-  /** Read the backend config as parsed JSON ({} when the file is missing;
-   *  throws on corrupt JSON so callers never trust a torn read). */
+  /** Read the backend config ({} when the file is missing; throws on corrupt
+   *  content so callers never trust a torn read). OpenCode treats the file as
+   *  JSONC — it rewrites it with trailing commas — so parsing is lenient. */
   readConfig(): Promise<Record<string, unknown>>;
   /** Where behavior text lands (for the settings UI path label). */
   behaviorPath(): string;
@@ -44,6 +45,56 @@ const defaultConfigDir = (): string =>
   process.env.XDG_CONFIG_HOME
     ? join(process.env.XDG_CONFIG_HOME, "opencode")
     : join(homedir(), ".config", "opencode");
+
+// Reduce JSONC to strict JSON: drop line and block comments and trailing
+// commas, all outside string literals. OpenCode itself rewrites its config
+// in JSONC form (observed live: `{"$schema": …,}`), so a strict JSON.parse
+// would wrongly reject a healthy file.
+export function stripJsonc(raw: string): string {
+  let out = "";
+  let i = 0;
+  const n = raw.length;
+  const skipTrivia = (j: number): number => {
+    for (;;) {
+      const c = raw[j];
+      if (c === " " || c === "\t" || c === "\n" || c === "\r") { j += 1; continue; }
+      if (c === "/" && raw[j + 1] === "/") { while (j < n && raw[j] !== "\n") j += 1; continue; }
+      if (c === "/" && raw[j + 1] === "*") {
+        j += 2;
+        while (j < n && !(raw[j] === "*" && raw[j + 1] === "/")) j += 1;
+        j += 2;
+        continue;
+      }
+      return j;
+    }
+  };
+  while (i < n) {
+    const ch = raw[i]!;
+    if (ch === '"') {
+      out += ch;
+      i += 1;
+      while (i < n) {
+        const c = raw[i]!;
+        out += c;
+        i += 1;
+        if (c === "\\") { out += raw[i] ?? ""; i += 1; continue; }
+        if (c === '"') break;
+      }
+      continue;
+    }
+    if (ch === "/" && (raw[i + 1] === "/" || raw[i + 1] === "*")) {
+      i = skipTrivia(i);
+      continue;
+    }
+    if (ch === ",") {
+      const next = skipTrivia(i + 1);
+      if (raw[next] === "}" || raw[next] === "]") { i += 1; continue; }
+    }
+    out += ch;
+    i += 1;
+  }
+  return out;
+}
 
 async function atomicWrite(path: string, data: string): Promise<void> {
   const tmp = `${path}.tmp-${process.pid}-${Date.now()}`;
@@ -67,7 +118,7 @@ export function createConfigApplier(opts: { configDir?: string } = {}): BackendC
   const readExisting = async (): Promise<Record<string, unknown>> => {
     try {
       const raw = await readFile(configPath, "utf8");
-      const parsed = JSON.parse(raw) as unknown;
+      const parsed = JSON.parse(stripJsonc(raw)) as unknown;
       if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
         return parsed as Record<string, unknown>;
       }

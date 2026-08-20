@@ -5,7 +5,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createConfigApplier } from "../src/config.ts";
+import { createConfigApplier, stripJsonc } from "../src/config.ts";
 
 const tmp = () => mkdtempSync(join(tmpdir(), "polyth-cfg-"));
 
@@ -57,6 +57,37 @@ test("readConfig throws on corrupt JSON instead of returning garbage", async () 
   writeFileSync(join(dir, "opencode.json"), "{corrupt");
   const applier = createConfigApplier({ configDir: dir });
   await assert.rejects(() => applier.readConfig());
+});
+
+// OpenCode itself rewrites opencode.json as JSONC (observed live: it left
+// `{"$schema": …,}` behind). Strict parsing would wrongly reject the file
+// and break every visibility toggle, so the reader must tolerate JSONC.
+test("readConfig tolerates JSONC: trailing commas and comments", async () => {
+  const dir = tmp();
+  writeFileSync(join(dir, "opencode.json"), `{
+  // written by opencode
+  "$schema": "https://opencode.ai/config.json",
+  "provider": { "openai": { "blacklist": ["a", "b",], }, }, /* trailing */
+}`);
+  const applier = createConfigApplier({ configDir: dir });
+  const cfg = await applier.readConfig();
+  assert.equal(cfg.$schema, "https://opencode.ai/config.json");
+  assert.deepEqual(cfg.provider, { openai: { blacklist: ["a", "b"] } });
+});
+
+test("stripJsonc never mangles commas, braces, or slashes inside strings", () => {
+  const raw = JSON.stringify({ note: 'a,} // not-a-comment /* neither */ "quoted\\"', url: "https://x" });
+  assert.deepEqual(JSON.parse(stripJsonc(raw)), JSON.parse(raw));
+});
+
+test("applyProviderVisibility round-trips a JSONC config written by opencode", async () => {
+  const dir = tmp();
+  writeFileSync(join(dir, "opencode.json"), '{\n  "$schema": "https://opencode.ai/config.json",}');
+  const applier = createConfigApplier({ configDir: dir });
+  await applier.applyProviderVisibility({ disabledProviders: ["azure"], blacklists: {} });
+  const cfg = JSON.parse(readFileSync(join(dir, "opencode.json"), "utf8"));
+  assert.equal(cfg.$schema, "https://opencode.ai/config.json");
+  assert.deepEqual(cfg.disabled_providers, ["azure"]);
 });
 
 test("applyProviderVisibility merges disabled_providers and blacklists, preserving other keys", async () => {
