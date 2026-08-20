@@ -1629,15 +1629,20 @@ html[data-density="compact"] .set-row { padding: 9px 0; }
 .editor-path { font-family: var(--mono); font-size: 12.5px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .editor-dirty { color: var(--accent); font-size: 15px; }
 .editor-flash { color: var(--green); font-size: 11.5px; white-space: nowrap; }
+.editor-save-state { color: var(--muted); font-size: 11.5px; white-space: nowrap; }
 .editor-toolbar {
   display: flex; align-items: center; gap: 4px; flex-wrap: wrap;
   padding: 5px 14px; border-bottom: 1px solid var(--border-soft); background: var(--sunken);
 }
+.editor-preview-default { display: inline-flex; align-items: center; gap: 4px; color: var(--muted); font-size: 11px; }
+.editor-preview-default input { margin: 0; }
 .editor-rename { padding: 6px 14px; border-bottom: 1px solid var(--border-soft); }
 .editor-banner {
   padding: 5px 14px; font-size: 11.5px; color: var(--amber);
   background: rgba(var(--amber-rgb), 0.08); border-bottom: 1px solid var(--border-soft);
 }
+.editor-conflict { display: flex; align-items: center; gap: 7px; }
+.editor-conflict > span:first-child { flex: 1; }
 .editor-error { padding: 5px 14px; }
 .editor-body { flex: 1; min-height: 0; overflow: auto; background: var(--sunken); }
 .editor-empty { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 2px; }

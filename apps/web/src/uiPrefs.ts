@@ -157,3 +157,46 @@ export function useUiSettings(): UiSettings {
     getUiSettings,
   );
 }
+
+export interface EditorPrefs {
+  openInPreview: boolean;
+}
+
+export const EDITOR_PREFS_KEY = "polyth.editorPrefs";
+export const EDITOR_PREFS_DEFAULTS: EditorPrefs = { openInPreview: true };
+
+export function parseEditorPrefs(raw: string | null): EditorPrefs {
+  try {
+    const value = JSON.parse(raw ?? "") as Partial<EditorPrefs>;
+    return { openInPreview: value.openInPreview !== false };
+  } catch {
+    return { ...EDITOR_PREFS_DEFAULTS };
+  }
+}
+
+let editorPrefs = parseEditorPrefs(
+  (() => {
+    try { return localStorage.getItem(EDITOR_PREFS_KEY); } catch { return null; }
+  })(),
+);
+const editorPrefListeners = new Set<() => void>();
+
+export function getEditorPrefs(): EditorPrefs {
+  return editorPrefs;
+}
+
+export function setEditorPrefs(patch: Partial<EditorPrefs>): void {
+  editorPrefs = { ...editorPrefs, ...patch };
+  try { localStorage.setItem(EDITOR_PREFS_KEY, JSON.stringify(editorPrefs)); } catch { /* best-effort */ }
+  for (const listener of [...editorPrefListeners]) listener();
+}
+
+export function useEditorPrefs(): EditorPrefs {
+  return useSyncExternalStore(
+    (listener) => {
+      editorPrefListeners.add(listener);
+      return () => { editorPrefListeners.delete(listener); };
+    },
+    getEditorPrefs,
+  );
+}

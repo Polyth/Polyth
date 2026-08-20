@@ -41,6 +41,22 @@ export default function FilesPanel() {
   );
 
   useEffect(() => { loadTree(""); }, [loadTree]);
+  useEffect(() => {
+    if (!projectId) return;
+    const refreshCurrent = () => {
+      if (document.visibilityState === "hidden") return;
+      void api.filesTree(projectId, currentPath || undefined).then(setTree).catch(() => {});
+    };
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") refreshCurrent();
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    const timer = setInterval(refreshCurrent, 8_000);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibility);
+      clearInterval(timer);
+    };
+  }, [projectId, currentPath]);
 
   const onDirClick = (p: string) => {
     setSearchResults(null);
@@ -96,8 +112,8 @@ export default function FilesPanel() {
     if (!projectId || !viewFile) return;
     setSaving(true);
     try {
-      await api.filesWrite(projectId, viewFile.path, content);
-      setViewFile({ ...viewFile, content });
+      const result = await api.filesWrite(projectId, viewFile.path, content, viewFile.revision);
+      setViewFile({ ...viewFile, content, revision: result.revision });
       setError("");
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));

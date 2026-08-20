@@ -17,7 +17,22 @@ import { createSession } from "../init.ts";
 import { setDragPath } from "../dnd.ts";
 import { MOD } from "../format.ts";
 import { useEscape } from "../useEscape.ts";
-import { useUiSettings } from "../uiPrefs.ts";
+import { setEditorPrefs, useEditorPrefs, useUiSettings } from "../uiPrefs.ts";
+import {
+  autosaveDelay,
+  beginLiveFileSave,
+  checkLiveFile,
+  completeLiveFileSave,
+  conflictLiveFile,
+  dismissLiveFileNotice,
+  editLiveFile,
+  htmlPreviewDocument,
+  initialPreviewVisible,
+  loadedLiveFile,
+  previewKindForPath,
+  restoreLiveFileBuffer,
+  type LiveFileState,
+} from "../editor/liveFile.ts";
 import {
   activateTab, closeTab, cycleTab, deserializePane, emptyPane, markDirty, moveTab,
   openTab, serializePane, tabId, type PaneState, type PaneTab,
@@ -36,8 +51,8 @@ interface TabDoc {
   editing: boolean;
   loading: boolean;
   error: string;
-  /** Set when a save was rejected because the disk revision moved. */
-  conflict: string | null;
+  live: LiveFileState | null;
+  composing: boolean;
 }
 
 const parentOf = (p: string) => p.split("/").slice(0, -1).join("/");
@@ -47,14 +62,8 @@ const msg = (err: unknown) => (err instanceof Error ? err.message : String(err))
 const INLINE_FILE_CHARS = 4000;
 /** Above this many lines, fall back to a plain block (no per-line rows). */
 const MAX_ROWED_LINES = 8000;
-const AUTOSAVE_MS = 1400;
-
-const isMd = (p: string) => /\.(md|markdown)$/i.test(p);
-const isHtml = (p: string) => /\.(html?|xhtml)$/i.test(p);
-const isJson = (p: string) => /\.json$/i.test(p);
-
-/** Lock down HTML previews: no scripts, no network, inline styles only. */
-const PREVIEW_CSP = `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'">`;
+const AUTOSAVE_MS = 1_500;
+const FILE_REFRESH_MS = 8_000;
 
 interface CtxMenu {
   x: number;
@@ -67,6 +76,7 @@ export default function EditorView() {
   const filePath = useStore((s) => s.editorFile);
   const location = useStore((s) => s.editorLocation);
   const prefs = useUiSettings();
+  const editorPrefs = useEditorPrefs();
 
   // ---- tree ----------------------------------------------------------------
   const [kids, setKids] = useState<Record<string, FileEntry[]>>({});
@@ -78,7 +88,7 @@ export default function EditorView() {
   // ---- pane tabs -------------------------------------------------------------
   const [pane, setPane] = useState<PaneState>(emptyPane);
   const cacheRef = useRef(new Map<string, TabDoc>());
-  const [, setTick] = useState(0);
+  const [tick, setTick] = useState(0);
   const bump = () => setTick((n) => n + 1);
 
   // ---- transient editor chrome -------------------------------------------------
@@ -104,7 +114,7 @@ export default function EditorView() {
   const buf = td?.buf ?? "";
   const editing = td?.editing ?? false;
   const error = td?.error ?? "";
-  const conflict = td?.conflict ?? null;
+  const live = td?.live ?? null;
   const dirty = doc !== null && buf !== doc.content;
   const readOnly = doc ? doc.truncated || doc.tooLarge === true : false;
 
@@ -163,13 +173,22 @@ export default function EditorView() {
     if (!projectId || !activePath) return;
     const existing = cacheRef.current.get(activePath);
     if (existing && (existing.doc || existing.loading)) return;
-    const entry: TabDoc = { doc: null, buf: "", editing: false, loading: true, error: "", conflict: null };
+    const entry: TabDoc = {
+      doc: null,
+      buf: "",
+      editing: false,
+      loading: true,
+      error: "",
+      live: null,
+      composing: false,
+    };
     cacheRef.current.set(activePath, entry);
     bump();
     api.filesRead(projectId, activePath)
       .then((got) => {
         entry.doc = got;
         entry.buf = got.content;
+        entry.live = loadedLiveFile(got.revision);
         entry.loading = false;
         bump();
       })
@@ -186,8 +205,8 @@ export default function EditorView() {
     setConfirmDel(false);
     setHlRange(null);
     setGotoOpen(false);
-    setPreviewOn(true);
-  }, [pane.activeId]);
+    setPreviewOn(activePath ? initialPreviewVisible(activePath, editorPrefs.openInPreview) : false);
+  }, [pane.activeId, editorPrefs.openInPreview]);
 
   // Jump to a line/range: highlight it and center it in the scroll pane.
   const gotoLine = (start: number, end?: number) => {
@@ -260,8 +279,9 @@ export default function EditorView() {
     const e = cacheRef.current.get(path);
     if (!e) return;
     e.buf = text;
-    bump();
     const isDirty = !!e.doc && text !== e.doc.content;
+    if (e.live) e.live = isDirty ? editLiveFile(e.live) : restoreLiveFileBuffer(e.live);
+    bump();
     setPane((p) => markDirty(p, tabId("file", path), isDirty));
   };
 
@@ -320,29 +340,37 @@ export default function EditorView() {
   const attachPath = (fp: string) => insertToChat(`@${fp}`);
 
   // ---- file operations ---------------------------------------------------------
-  const save = async (opts: { force?: boolean } = {}) => {
-    const path = activePath;
-    const e = path ? cacheRef.current.get(path) : undefined;
+  const savePath = async (path: string, opts: { force?: boolean } = {}) => {
+    const e = cacheRef.current.get(path);
     if (!projectId || !path || !e?.doc || (e.doc.truncated || e.doc.tooLarge)) return;
-    setBusy(true);
+    const content = e.buf;
+    e.live = beginLiveFileSave(e.live ?? loadedLiveFile(e.doc.revision));
+    bump();
     try {
+      // This revision came from filesRead; only an explicit conflict overwrite
+      // omits it. Autosave can therefore never silently clobber an external edit.
       const base = opts.force ? undefined : e.doc.revision;
-      const res = await api.filesWrite(projectId, path, e.buf, base);
-      e.doc = { ...e.doc, content: e.buf, revision: res.revision };
-      e.conflict = null;
+      const res = await api.filesWrite(projectId, path, content, base);
+      const stillDirty = e.buf !== content;
+      e.doc = { ...e.doc, content, revision: res.revision };
+      e.live = completeLiveFileSave(e.live, res.revision, stillDirty);
       e.error = "";
-      setPane((p) => markDirty(p, tabId("file", path), false));
-      setFlash("Saved ✓");
+      setPane((p) => markDirty(p, tabId("file", path), stillDirty));
+      if (path === activePath && !stillDirty) setFlash("Saved ✓");
     } catch (err) {
       if (httpStatusOf(err) === 409) {
-        e.conflict = "File changed on disk since it was loaded.";
+        e.live = conflictLiveFile(e.live);
       } else {
         e.error = msg(err);
+        e.live = editLiveFile(e.live);
       }
     } finally {
-      setBusy(false);
       bump();
     }
+  };
+
+  const save = async (opts: { force?: boolean } = {}) => {
+    if (activePath) await savePath(activePath, opts);
   };
 
   const reloadActive = async () => {
@@ -353,7 +381,7 @@ export default function EditorView() {
       const got = await api.filesRead(projectId, path);
       e.doc = got;
       e.buf = got.content;
-      e.conflict = null;
+      e.live = loadedLiveFile(got.revision);
       e.error = "";
       setPane((p) => markDirty(p, tabId("file", path), false));
     } catch (err) {
@@ -362,14 +390,64 @@ export default function EditorView() {
     bump();
   };
 
-  // Revision-guarded autosave: never fires on read-only or conflicted docs, and
-  // a mid-flight disk change surfaces as the same conflict banner as manual save.
+  const checkActiveFile = async () => {
+    const path = activePath;
+    const e = path ? cacheRef.current.get(path) : undefined;
+    if (!projectId || !path || !e?.doc || !e.live) return;
+    try {
+      const stat = await api.filesStat(projectId, path);
+      e.live = checkLiveFile(e.live, { kind: "present", revision: stat.revision });
+    } catch (err) {
+      e.live = httpStatusOf(err) === 404
+        ? checkLiveFile(e.live, { kind: "deleted" })
+        : checkLiveFile(e.live, { kind: "failed", message: msg(err) });
+    }
+    bump();
+  };
+
+  // Every dirty editing tab owns its debounce. IME composition pauses that
+  // tab's timer; conflicted/deleted/check-failed states remain paused.
   useEffect(() => {
-    if (!prefs.editorAutosave || !editing || !dirty || readOnly || conflict || busy) return;
-    const t = setTimeout(() => { void save(); }, AUTOSAVE_MS);
-    return () => clearTimeout(t);
+    const timers: Array<ReturnType<typeof setTimeout>> = [];
+    for (const [path, entry] of cacheRef.current) {
+      if (!entry.doc || !entry.live) continue;
+      const delay = autosaveDelay(entry.live, {
+        enabled: prefs.editorAutosave,
+        editing: entry.editing,
+        composing: entry.composing,
+        readOnly: entry.doc.truncated || entry.doc.tooLarge === true,
+      }, AUTOSAVE_MS);
+      if (delay !== null) timers.push(setTimeout(() => void savePath(path), delay));
+    }
+    return () => {
+      for (const timer of timers) clearTimeout(timer);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [buf, editing, dirty, readOnly, conflict, busy, prefs.editorAutosave]);
+  }, [projectId, prefs.editorAutosave, tick]);
+
+  // One slow refresh owner: expanded directories plus the active file revision.
+  // Hidden browser tabs do no filesystem work.
+  useEffect(() => {
+    if (!projectId) return;
+    const refreshVisible = () => {
+      if (document.visibilityState === "hidden") return;
+      for (const path of new Set(["", ...open])) void loadDir(path);
+      void checkActiveFile();
+    };
+    const onFocus = () => refreshVisible();
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") refreshVisible();
+    };
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onVisibility);
+    const timer = setInterval(refreshVisible, FILE_REFRESH_MS);
+    return () => {
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onVisibility);
+      clearInterval(timer);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId, activePath, open]);
 
   const rename = async () => {
     const to = renameTo?.trim();
@@ -553,7 +631,7 @@ export default function EditorView() {
     [editing, buf],
   );
   const previewKind = doc && !editing && !readOnly
-    ? (isMd(doc.path) ? "md" : isHtml(doc.path) ? "html" : isJson(doc.path) ? "json" : null)
+    ? previewKindForPath(doc.path)
     : null;
   const jsonValue = useMemo(
     () => (previewKind === "json" && doc ? tryParseJson(doc.content) : undefined),
@@ -689,6 +767,8 @@ export default function EditorView() {
                 )}
               </span>
               <span className="header-spacer" />
+              {live?.kind === "saving" && <span className="editor-save-state">Saving…</span>}
+              {live?.kind === "saved" && <span className="editor-save-state">Saved</span>}
               {flash && <span className="editor-flash">{flash}</span>}
               <button className="small-btn" title="Close file (Esc)" onClick={() => active && requestClose(active.id)}>✕</button>
             </div>
@@ -699,9 +779,19 @@ export default function EditorView() {
               <button className="small-btn" onClick={addFile}>Add file to chat</button>
               <span className="header-spacer" />
               {previewKind && (
-                <button className="small-btn" aria-pressed={previewOn} onClick={() => setPreviewOn((v) => !v)}>
-                  {previewOn ? "Source" : previewKind === "json" ? "Tree" : "Preview"}
-                </button>
+                <>
+                  <button className="small-btn" aria-pressed={previewOn} onClick={() => setPreviewOn((v) => !v)}>
+                    {previewOn ? "Source" : previewKind === "json" ? "Tree" : "Preview"}
+                  </button>
+                  <label className="editor-preview-default" title="Open Markdown, HTML, and JSON files in preview mode">
+                    <input
+                      type="checkbox"
+                      checked={editorPrefs.openInPreview}
+                      onChange={(event) => setEditorPrefs({ openInPreview: event.target.checked })}
+                    />
+                    Preview by default
+                  </label>
+                </>
               )}
               {gotoOpen ? (
                 <span className="editor-goto">
@@ -733,7 +823,7 @@ export default function EditorView() {
               {!readOnly &&
                 (editing ? (
                   <>
-                    <button className="small-btn" disabled={busy || !dirty} title={`${MOD}S`} onClick={() => void save()}>
+                    <button className="small-btn" disabled={live?.kind === "saving" || !dirty} title={`${MOD}S`} onClick={() => void save()}>
                       Save
                     </button>
                     <button
@@ -776,11 +866,29 @@ export default function EditorView() {
                 <button className="small-btn" onClick={() => setRenameTo(null)}>Cancel</button>
               </div>
             )}
-            {conflict && (
+            {live && !live.noticeDismissed && (live.kind === "external-change" || live.kind === "conflict") && (
               <div className="editor-banner editor-conflict" role="alert">
-                <span>{conflict} Your unsaved buffer is preserved.</span>
+                <span>
+                  File changed on disk.
+                  {live.dirty ? " Your unsaved buffer is preserved." : " Reload to view the replacement."}
+                </span>
                 <button className="small-btn" onClick={() => void reloadActive()}>Reload from disk</button>
-                <button className="small-btn danger-btn" onClick={() => void save({ force: true })}>Overwrite</button>
+                {live.dirty && <button className="small-btn danger-btn" onClick={() => void save({ force: true })}>Overwrite</button>}
+                <button className="small-btn" aria-label="Dismiss file change notice" onClick={() => { if (td?.live) td.live = dismissLiveFileNotice(td.live); bump(); }}>×</button>
+              </div>
+            )}
+            {live && !live.noticeDismissed && live.kind === "deleted" && (
+              <div className="editor-banner editor-conflict" role="alert">
+                <span>File was deleted on disk.{live.dirty ? " Saving recreates it; your buffer is preserved." : ""}</span>
+                {live.dirty && <button className="small-btn danger-btn" onClick={() => void save({ force: true })}>Recreate</button>}
+                <button className="small-btn" aria-label="Dismiss deleted file notice" onClick={() => { if (td?.live) td.live = dismissLiveFileNotice(td.live); bump(); }}>×</button>
+              </div>
+            )}
+            {live && !live.noticeDismissed && live.kind === "check-failed" && (
+              <div className="editor-banner" role="alert">
+                <span>Couldn’t check for external changes: {live.message}</span>
+                <button className="small-btn" onClick={() => void checkActiveFile()}>Retry</button>
+                <button className="small-btn" aria-label="Dismiss file check notice" onClick={() => { if (td?.live) td.live = dismissLiveFileNotice(td.live); bump(); }}>×</button>
               </div>
             )}
             {doc.truncated && <div className="editor-banner">Truncated — file exceeds 512 KB. Read-only.</div>}
@@ -800,12 +908,18 @@ export default function EditorView() {
                   wrap={wrap ? "soft" : "off"}
                   spellCheck={false}
                   onChange={(e) => activePath && setBufFor(activePath, e.target.value)}
+                  onCompositionStart={() => {
+                    if (td) { td.composing = true; bump(); }
+                  }}
+                  onCompositionEnd={() => {
+                    if (td) { td.composing = false; bump(); }
+                  }}
                   onScroll={() => {
                     if (gutterRef.current && taRef.current) gutterRef.current.scrollTop = taRef.current.scrollTop;
                   }}
                 />
               </div>
-            ) : previewKind === "md" && previewOn ? (
+            ) : previewKind === "markdown" && previewOn ? (
               <div className="editor-body editor-md-preview" ref={bodyRef}>
                 <MarkdownDoc text={doc.content} keyBase={`md-${doc.path}`} />
               </div>
@@ -814,11 +928,11 @@ export default function EditorView() {
                 <iframe
                   className="html-preview-frame"
                   title={`Preview of ${doc.path}`}
-                  sandbox=""
-                  srcDoc={`${PREVIEW_CSP}\n${doc.content}`}
+                  sandbox="allow-scripts"
+                  srcDoc={htmlPreviewDocument(doc.content, `${window.location.origin}/`)}
                 />
                 <div className="html-preview-note muted">
-                  Sandboxed preview — scripts and network access are blocked.
+                  Sandboxed preview — scripts are isolated and network access is blocked.
                 </div>
               </div>
             ) : previewKind === "json" && previewOn ? (

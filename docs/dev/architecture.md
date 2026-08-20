@@ -173,13 +173,15 @@ a generic collapsed row (never crash).
   `PermissionBanner` (preview + scoped Always), `WorkStatus` (usage/tasks/agents
   sections + tracker pills), `ContextRail` (files/changes/context/usage/events/knowledge
   rail with `contextRail.tabs` slot), `CommandPalette` (commands/workspaces/files,
-  `Mod+P` file mode), `EditorView` (pane tabs via `workspace/paneStore.ts`, dirty
-  guard, revision-aware saves), `GitView`, `GithubView`/`PullRequestView`,
+  `Mod+P` file mode), `EditorView` (pane tabs via `workspace/paneStore.ts`, per-tab
+  IME-safe autosave, `editor/liveFile.ts` revision/conflict checks, sandboxed
+  Markdown/HTML previews), `GitView`, `GithubView`/`PullRequestView`,
   `ScheduleView`, `GoalsView`/`GoalStrip`, `MultiRunView`, `FusionView`,
   `WalkthroughView`/`GeneratedWalkthrough`, `PreviewView` (iframe + browser driving),
   `TerminalView`, `SettingsModal`/`SettingsView` + `settings/registry.ts`
   (item-level search), `Onboarding` (personas), `SessionSearch`.
-- Preferences: `settings.ts` (`polyth.settings`), `uiPrefs.ts`, `sidebarPrefs.ts`,
+- Preferences: `settings.ts` (`polyth.settings`), `uiPrefs.ts` (including
+  `polyth.editorPrefs`), `sidebarPrefs.ts`,
   `modelPrefs.ts`, `prefs.ts` (personas/enabled plugins), `drafts.ts`
   (`polyth.draft.<sessionId>`) — all browser-local. Server-owned settings go through
   `/api/settings/*` routes.
