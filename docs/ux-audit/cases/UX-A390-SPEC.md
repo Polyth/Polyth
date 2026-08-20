@@ -243,7 +243,8 @@ and `2px` offset; the focused element is never covered by a fixed surface.
 Names, pressed/current state, errors, auto-accept, live status, and badges do
 not rely on color alone.
 
-Use Ember's production `theme.ts` variables: `--bg`, `--panel`, `--elevated`,
+Use Ember's production `theme.ts` variables and target WCAG 2.2 AA where
+practical: `--bg`, `--panel`, `--elevated`,
 `--raised`, `--text`, `--text-dim`, `--muted`, `--accent`, `--accent-wash`,
 `--accent-ink`, borders, radii, and shadows. Do not import
 `docs/ux-audit/mockups/tokens.css` and do not hardcode an orange-only theme
