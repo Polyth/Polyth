@@ -55,6 +55,8 @@ import type {
   Disposable,
   JsonObject,
   ModelDescriptor,
+  ModelMessage,
+  RuntimeBranchRequest,
   RuntimeSession,
   RuntimeSessionMessage,
   RuntimeCapabilities,
@@ -148,9 +150,66 @@ interface OpenCodeSession {
 }
 
 interface OpenCodeMessage {
-  info?: { role?: string };
+  info?: { role?: string; id?: string };
   parts?: Array<{ type?: string; text?: string }>;
 }
+
+interface HistoryEntry {
+  role: "user" | "assistant";
+  text: string;
+}
+
+const mergeEntry = (out: HistoryEntry[], role: "user" | "assistant", text: string): void => {
+  if (!text) return;
+  const last = out[out.length - 1];
+  if (last && last.role === role) last.text = `${last.text}\n${text}`;
+  else out.push({ role, text });
+};
+
+/** Normalize canonical model history into the comparable view used to align a
+ *  branch request against backend messages: only user/assistant text, merged
+ *  across consecutive same-role records so a different part/message split of
+ *  the same content still compares equal. Tool records are invisible here. */
+export const normalizeModelHistory = (history: ModelMessage[]): HistoryEntry[] => {
+  const out: HistoryEntry[] = [];
+  for (const message of history) {
+    if (message.role !== "user" && message.role !== "assistant") continue;
+    const text = message.parts
+      .filter((part) => part.type === "text")
+      .map((part) => ("text" in part && typeof part.text === "string" ? part.text : ""))
+      .join("\n")
+      .trim();
+    mergeEntry(out, message.role, text);
+  }
+  return out;
+};
+
+/** Per-backend-message view (id + normalized text) in list order. */
+const backendMessageEntries = (
+  rows: OpenCodeMessage[],
+): Array<{ id: string; role: "user" | "assistant"; text: string }> =>
+  (rows ?? []).flatMap((message) => {
+    const role = message.info?.role;
+    const id = message.info?.id;
+    if ((role !== "user" && role !== "assistant") || typeof id !== "string") return [];
+    const text = (message.parts ?? [])
+      .filter((part) => part.type === "text")
+      .map((part) => part.text ?? "")
+      .join("\n")
+      .trim();
+    return [{ id, role, text }];
+  });
+
+const mergedEntries = (
+  entries: Array<{ role: "user" | "assistant"; text: string }>,
+): HistoryEntry[] => {
+  const out: HistoryEntry[] = [];
+  for (const entry of entries) mergeEntry(out, entry.role, entry.text);
+  return out;
+};
+
+const sameHistory = (a: HistoryEntry[], b: HistoryEntry[]): boolean =>
+  a.length === b.length && a.every((entry, i) => entry.role === b[i]!.role && entry.text === b[i]!.text);
 
 export const flattenModels = (body: ProviderList): ModelDescriptor[] => {
   const out: ModelDescriptor[] = [];
@@ -537,6 +596,84 @@ export const createOpenCodeRuntimeWithClient = (
       maps.forward.set(canonical.sessionId, created.id);
       maps.reverse.set(created.id, canonical.sessionId);
       return created.id;
+    },
+    // UX-MSG-ACTIONS: create a backend session holding EXACTLY the requested
+    // canonical prefix via OpenCode's native /session/{id}/fork. The fork
+    // boundary is resolved positionally (never by text search), the child is
+    // read back and verified, and the canonical↔backend mapping swaps only
+    // after verification — a mismatch or transport failure leaves every
+    // existing mapping untouched.
+    async branchSession(request: RuntimeBranchRequest): Promise<string> {
+      const wanted = normalizeModelHistory(request.history);
+      if (wanted.length === 0) {
+        // an empty prefix is just a fresh backend session — nothing to fork
+        const created = await client.post<CreatedSession>("/session", {
+          title: request.target.title ?? request.target.sessionId,
+        });
+        const prev = maps.forward.get(request.target.sessionId);
+        if (prev && prev !== created.id) maps.reverse.delete(prev);
+        maps.forward.set(request.target.sessionId, created.id);
+        maps.reverse.set(created.id, request.target.sessionId);
+        return created.id;
+      }
+      const sourceBackendId = maps.forward.get(request.sourceSessionId);
+      if (!sourceBackendId) {
+        throw Object.assign(new Error(`no opencode session mapped for ${request.sourceSessionId}`), { code: "not-found" });
+      }
+      const rows = await client.get<OpenCodeMessage[]>(`/session/${sourceBackendId}/message?limit=1000`);
+      const entries = backendMessageEntries(rows ?? []);
+      // Positional alignment: consume backend messages in order until the
+      // merged normalized view equals the requested prefix. Duplicate prompt
+      // text cannot select an earlier occurrence — the walk only ever stops at
+      // the FIRST index whose cumulative history matches the whole prefix.
+      let boundary = -1;
+      const acc: HistoryEntry[] = [];
+      for (let i = 0; i < entries.length; i++) {
+        mergeEntry(acc, entries[i]!.role, entries[i]!.text);
+        if (sameHistory(acc, wanted)) {
+          boundary = i + 1;
+          break;
+        }
+      }
+      if (boundary < 0) {
+        throw Object.assign(
+          new Error("requested history prefix is not present in the backend session"),
+          { code: "history-mismatch" },
+        );
+      }
+      // OpenCode copies messages strictly BEFORE messageID, so the boundary is
+      // the first EXCLUDED message; a full-history branch omits messageID.
+      const body: JsonObject = boundary < entries.length ? { messageID: entries[boundary]!.id } : {};
+      const forked = await client.post<CreatedSession>(`/session/${sourceBackendId}/fork`, body);
+      const childRows = await client.get<OpenCodeMessage[]>(`/session/${forked.id}/message?limit=1000`);
+      const got = mergedEntries(backendMessageEntries(childRows ?? []));
+      if (!sameHistory(got, wanted)) {
+        await client.del(`/session/${forked.id}`).catch(() => {});
+        throw Object.assign(
+          new Error("backend fork produced a different history than requested"),
+          { code: "history-mismatch" },
+        );
+      }
+      const prev = maps.forward.get(request.target.sessionId);
+      if (prev && prev !== forked.id) maps.reverse.delete(prev);
+      maps.forward.set(request.target.sessionId, forked.id);
+      maps.reverse.set(forked.id, request.target.sessionId);
+      if (request.target.sessionId === request.sourceSessionId) {
+        // revert replacement of the same canonical session: reset stream state
+        translate.delete(request.sourceSessionId);
+        activeTurn.delete(request.sourceSessionId);
+      }
+      return forked.id;
+    },
+    async discardSession(sessionId: string): Promise<void> {
+      // best-effort cleanup of an unreferenced branch; accepts the backend id
+      // branchSession returned (or a canonical id that still maps to one)
+      const backendId = maps.forward.get(sessionId) ?? sessionId;
+      for (const [canonical, backend] of maps.forward) {
+        if (backend === backendId) maps.forward.delete(canonical);
+      }
+      maps.reverse.delete(backendId);
+      await client.del(`/session/${backendId}`).catch(() => {});
     },
     async startTurn(req: CanonicalTurnRequest) {
       const backendId = backendOf(req.sessionId);
