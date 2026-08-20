@@ -6,7 +6,7 @@ import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { behaviorRevision, createBehaviorService } from "../src/behavior.ts";
-import { createMcpConfigService } from "../src/mcp.ts";
+import { createMcpConfigService, mcpEntriesFromBackendConfig } from "../src/mcp.ts";
 
 const tmp = () => mkdtempSync(join(tmpdir(), "polyth-set-"));
 
@@ -136,6 +136,39 @@ test("mcp: failed backend apply rolls the stored list back", async () => {
   });
   assert.ok(b.id);
   assert.deepEqual(applied.at(-1), ["alpha", "gamma"]);
+});
+
+test("mcp: seed parser maps opencode.json entries to creatable inputs", () => {
+  const entries = mcpEntriesFromBackendConfig({
+    theme: "dark",
+    mcp: {
+      ctx: { type: "local", command: ["ctx-server", "--stdio"], enabled: true, environment: { API_KEY: "secret-v" } },
+      web: { type: "remote", url: "https://x.example/mcp", enabled: false, headers: { Authorization: "Bearer t" } },
+      broken: { type: "local", command: [] },
+      junk: "nope",
+    },
+  });
+  assert.equal(entries.length, 2, "unparseable entries are skipped");
+  const ctx = entries.find((e) => e.name === "ctx")!;
+  assert.deepEqual(ctx.transport, { kind: "stdio", command: "ctx-server", args: ["--stdio"], envKeys: ["API_KEY"] });
+  assert.deepEqual(ctx.secrets, { API_KEY: "secret-v" });
+  assert.equal(ctx.enabled, true);
+  const web = entries.find((e) => e.name === "web")!;
+  assert.deepEqual(web.transport, { kind: "http", url: "https://x.example/mcp", headersSecretRefs: ["Authorization"] });
+  assert.equal(web.enabled, false);
+  assert.deepEqual(mcpEntriesFromBackendConfig({}), []);
+});
+
+test("mcp: seeded entries never expose secret values through the DTO", async () => {
+  const svc = createMcpConfigService({ file: join(tmp(), "mcp.json") });
+  for (const entry of mcpEntriesFromBackendConfig({
+    mcp: { ctx: { type: "local", command: ["ctx"], environment: { API_KEY: "super-secret" } } },
+  })) {
+    await svc.create(entry);
+  }
+  const dto = svc.list()[0]!;
+  assert.equal(JSON.stringify(dto).includes("super-secret"), false, "secret value never serialized");
+  assert.deepEqual((dto.transport as { envKeys: string[] }).envKeys, ["API_KEY"], "only the key name is visible");
 });
 
 test("mcp: stdio test reports command reachability honestly", async () => {

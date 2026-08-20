@@ -3,9 +3,10 @@ import { createServer, type IncomingMessage, type ServerResponse, type Server } 
 import { readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { extname, join, normalize } from "node:path";
-import type { JsonObject, SessionService } from "@polyth/contracts";
+import type { JsonObject, ModelDescriptor, SessionService } from "@polyth/contracts";
 import type { ProjectService } from "@polyth/contracts";
 import type { RuntimePool } from "./sessions.ts";
+import type { ModelVisibilityService } from "./modelVisibility.ts";
 
 const MIME: Record<string, string> = {
   ".html": "text/html", ".js": "text/javascript", ".css": "text/css",
@@ -45,10 +46,30 @@ export interface HttpDeps {
   webDist: string;
   version: string;
   routes?: RouteHandler[];
+  /** Provider/model visibility toggles (Providers & Models settings). */
+  visibility?: ModelVisibilityService;
 }
 
 export function createHttpServer(deps: HttpDeps): Server {
   const { sessions, projects } = deps;
+
+  // Aggregate across live runtimes (per-project pools may differ).
+  const aggregate = async <T>(fetch: (rt: Awaited<ReturnType<RuntimePool["forProject"]>>) => Promise<T[]>): Promise<T[]> => {
+    const projectList = await projects.list();
+    const out: T[] = [];
+    const seen = new Set<string>();
+    for (const p of projectList.length ? projectList : [{ id: "__default__" }]) {
+      try {
+        const rt = await deps.runtimes.forProject(p.id);
+        for (const it of await fetch(rt)) {
+          const key = JSON.stringify(it);
+          if (!seen.has(key)) { seen.add(key); out.push(it); }
+        }
+      } catch { /* runtime for that project unavailable */ }
+    }
+    return out;
+  };
+
   return createServer(async (req, res) => {
     const url = new URL(req.url ?? "/", "http://x");
     const path = url.pathname;
@@ -147,22 +168,35 @@ export function createHttpServer(deps: HttpDeps): Server {
         await sessions.replyQuestion(m[1]!, m[2]!, (b.answers ?? b) as JsonObject);
         return json(res, 200, { ok: true });
       }
+      // Provider/model visibility routes must win over the plain aggregate below.
+      if (deps.visibility) {
+        const vis = deps.visibility;
+        if (path === "/api/models" && method === "GET") {
+          const models = await aggregate<ModelDescriptor>((rt) => rt.models());
+          // ?all=1 → unfiltered catalog (settings); default → enabled + connected.
+          if (url.searchParams.get("all") === "1") return json(res, 200, models);
+          return json(res, 200, vis.filter(models));
+        }
+        if (path === "/api/providers" && method === "GET") {
+          const models = await aggregate<ModelDescriptor>((rt) => rt.models());
+          return json(res, 200, vis.catalog(models));
+        }
+        m = path.match(/^\/api\/providers\/([^/]+)\/enabled$/);
+        if (m && method === "POST") {
+          const b = await readBody(req);
+          const state = await vis.setProviderEnabled(decodeURIComponent(m[1]!), b.enabled !== false);
+          return json(res, 200, { ok: true, ...state });
+        }
+        if (path === "/api/models/enabled" && method === "POST") {
+          const b = await readBody(req);
+          const state = await vis.setModelEnabled(String(b.key ?? ""), b.enabled !== false);
+          return json(res, 200, { ok: true, ...state });
+        }
+      }
+
       m = path.match(/^\/api\/(models|agents)$/);
       if (m && method === "GET") {
-        // aggregate across live runtimes (per-project pools may differ)
-        const projectList = await projects.list();
-        const out: unknown[] = [];
-        const seen = new Set<string>();
-        for (const p of projectList.length ? projectList : [{ id: "__default__" }]) {
-          try {
-            const rt = await deps.runtimes.forProject(p.id);
-            const items = m[1] === "models" ? await rt.models() : await rt.agents();
-            for (const it of items) {
-              const key = JSON.stringify(it);
-              if (!seen.has(key)) { seen.add(key); out.push(it); }
-            }
-          } catch { /* runtime for that project unavailable */ }
-        }
+        const out = await aggregate<unknown>((rt) => (m![1] === "models" ? rt.models() : rt.agents()));
         return json(res, 200, out);
       }
 

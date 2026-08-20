@@ -45,6 +45,47 @@ export interface McpConfigService {
   test(id: string): Promise<{ ok: boolean; message: string }>;
 }
 
+/** Parse the `mcp` block of an opencode.json into creatable entries so a
+ *  fresh Polyth store can seed from what OpenCode already has configured.
+ *  Env/header values become write-only secrets — they are stored server-side
+ *  and never leave through any DTO. */
+export function mcpEntriesFromBackendConfig(cfg: Record<string, unknown>): McpCreateInput[] {
+  const block = cfg.mcp;
+  if (!block || typeof block !== "object" || Array.isArray(block)) return [];
+  const out: McpCreateInput[] = [];
+  for (const [name, raw] of Object.entries(block as Record<string, unknown>)) {
+    if (!name || !raw || typeof raw !== "object" || Array.isArray(raw)) continue;
+    const entry = raw as Record<string, unknown>;
+    const enabled = entry.enabled !== false;
+    if (entry.type === "local") {
+      const command = Array.isArray(entry.command) ? entry.command.map(String).filter(Boolean) : [];
+      if (command.length === 0) continue;
+      const env = entry.environment && typeof entry.environment === "object" && !Array.isArray(entry.environment)
+        ? Object.fromEntries(Object.entries(entry.environment as Record<string, unknown>).filter(([, v]) => typeof v === "string")) as Record<string, string>
+        : {};
+      out.push({
+        name,
+        transport: { kind: "stdio", command: command[0]!, args: command.slice(1), envKeys: Object.keys(env) },
+        ...(Object.keys(env).length ? { secrets: env } : {}),
+        enabled,
+      });
+    } else if (entry.type === "remote") {
+      const url = typeof entry.url === "string" ? entry.url : "";
+      if (!url) continue;
+      const headers = entry.headers && typeof entry.headers === "object" && !Array.isArray(entry.headers)
+        ? Object.fromEntries(Object.entries(entry.headers as Record<string, unknown>).filter(([, v]) => typeof v === "string")) as Record<string, string>
+        : {};
+      out.push({
+        name,
+        transport: { kind: "http", url, headersSecretRefs: Object.keys(headers) },
+        ...(Object.keys(headers).length ? { secrets: headers } : {}),
+        enabled,
+      });
+    }
+  }
+  return out;
+}
+
 interface StoredServer {
   id: string;
   name: string;

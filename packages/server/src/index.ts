@@ -46,9 +46,11 @@ import { snippetRoutes } from "./routes/snippets.ts";
 import { profileRoutes } from "./routes/profiles.ts";
 import { settingsRoutes } from "./routes/settings.ts";
 import { browserRoutes } from "./routes/browser.ts";
+import { browseRoutes } from "./routes/browse.ts";
 import { dictationRoutes } from "./routes/dictation.ts";
 import { createBehaviorService } from "./behavior.ts";
-import { createMcpConfigService } from "./mcp.ts";
+import { createMcpConfigService, mcpEntriesFromBackendConfig } from "./mcp.ts";
+import { createModelVisibilityService } from "./modelVisibility.ts";
 import { createWalkthroughJobService } from "./walkthroughs.ts";
 import { createReviewFlowService, createReviewService } from "./review.ts";
 import { createMultirunRunOne } from "./multirunRunner.ts";
@@ -237,6 +239,24 @@ export async function boot(opts: BootOptions = {}) {
     dir: `${dataDir}/plugins`,
     trustedDir: process.env.POLYTH_TRUSTED_PLUGIN_DIR ?? `${dataDir}/trusted-plugins`,
   });
+
+  // Provider/model visibility: seeds from opencode.json (disabled_providers +
+  // provider blacklists), then mirrors every toggle back to it.
+  const visibility = createModelVisibilityService({ file: `${dataDir}/model-visibility.json`, applier: configApplier });
+  await visibility.seed();
+
+  // An empty Polyth MCP store adopts whatever OpenCode already has configured,
+  // so the settings page reflects reality instead of an empty list.
+  if (mcp.list().length === 0) {
+    try {
+      for (const entry of mcpEntriesFromBackendConfig(await configApplier.readConfig())) {
+        await mcp.create(entry).catch((err: unknown) =>
+          console.warn(`[polyth] MCP seed skipped for "${entry.name}"`, err));
+      }
+    } catch (err) {
+      console.warn("[polyth] MCP seed from backend config skipped", err);
+    }
+  }
 
   const sessions = createSessionService({
     store, projects, permissions, runtimes, broadcast, queue: store, org: store, profiles: store, behavior,
@@ -520,8 +540,10 @@ export async function boot(opts: BootOptions = {}) {
         return out;
       },
     }),
+    browseRoutes(),
     settingsRoutes({
       behavior, mcp, plugins: pluginRegistry,
+      backendConfig: () => configApplier.readConfig(),
       systemInfo: (local) => ({
         version: "0.1.0",
         // Configured bind address only — never derived from the Host header.
@@ -536,7 +558,7 @@ export async function boot(opts: BootOptions = {}) {
   const allCapabilities = () => ["polyth.sessions", "polyth.sessionPersistence", "polyth.projects", "polyth.agentRuntime", "polyth.goals", "polyth.files", "polyth.commands", "polyth.git", "polyth.worktrees", "polyth.terminal", "polyth.preview", "polyth.multirun", "polyth.fusion", "polyth.walkthrough", "polyth.schedule", "polyth.github", "polyth.control", "polyth.agentProfiles", "polyth.settings", "polyth.mcp", "polyth.plugins", "polyth.knowledge", "polyth.review", "polyth.usage", "polyth.browser"];
 
   const server = createHttpServer({
-    sessions, projects, runtimes, routes,
+    sessions, projects, runtimes, routes, visibility,
     capabilities: allCapabilities,
     webDist: resolve(__dirname, "../../../apps/web/dist"),
     version: "0.1.0",

@@ -37,6 +37,14 @@ export function controlRoutes(sessions: SessionService): RouteHandler {
       }
       return true;
     }
+
+    // GET by id: lets agents/external tools open a session they know only by
+    // id (pairs with the /p/{projectId}/s/{sessionId} URLs in the web app).
+    const single = path.match(/^\/api\/control\/sessions\/([^/]+)$/);
+    if (single && method === "GET") {
+      json(200, await sessions.snapshot(decodeURIComponent(single[1]!)));
+      return true;
+    }
     return false;
   };
 }

@@ -379,7 +379,7 @@ test("SSE reconnect dedups by event id", async () => {
 });
 
 test("flattenModels marks connected providers; empty connected[] means all connected", () => {
-  const twoProviders = {
+  const twoProviders: Parameters<typeof flattenModels>[0] = {
     all: [
       { id: "openai", models: { "gpt-x": { id: "gpt-x", name: "GPT X" } } },
       { id: "ollama", models: { llama: { id: "llama", name: "Llama" } } },
