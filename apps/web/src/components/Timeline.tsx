@@ -8,6 +8,7 @@ import { requestComposerInsert, requestComposerReplace } from "../composerInsert
 import { openSettingsPage, setUiError, useStore } from "../store.ts";
 import { api } from "../api.ts";
 import { TIMELINE_CHUNK, TIMELINE_WINDOW, grownLimit, limitToInclude, windowStart } from "../timelineWindow.ts";
+import { captureTimelineAnchor, loadTimelineAnchor, saveTimelineAnchor, type TimelineAnchor } from "../timelineAnchor.ts";
 import CopyButton from "./CopyButton.tsx";
 import Dialog from "./a11y/Dialog.tsx";
 import AttachmentPills from "./AttachmentPills.tsx";
@@ -310,18 +311,54 @@ export default function Timeline({ model }: { model: RenderModel }) {
   const anchor = useRef<{ scrollTop: number; scrollHeight: number } | null>(null);
   const pendingJump = useRef<string | null>(null);
 
-  useEffect(() => { setLimit(TIMELINE_WINDOW); }, [sessionId]);
+  // UX-PANE-MODEL stable anchor: session switches adjust during render so the
+  // outgoing anchor is captured from the STILL-CURRENT DOM (before commit) and
+  // the incoming one is ready before the first paint of the new session.
+  // Pane dock/expand/full-screen transitions never remount this tree, so the
+  // live scroll position carries itself; this record covers reload + switch.
+  const restoreRef = useRef<TimelineAnchor | null>(null);
+  const [anchorSession, setAnchorSession] = useState<string | null | undefined>(undefined);
+  if (anchorSession !== sessionId) {
+    const el = ref.current;
+    if (anchorSession !== undefined && anchorSession !== null && el !== null) {
+      saveTimelineAnchor(anchorSession, captureTimelineAnchor(el, atBottom.current));
+    }
+    setAnchorSession(sessionId);
+    setLimit(TIMELINE_WINDOW);
+    const stored = sessionId !== null ? loadTimelineAnchor(sessionId) : null;
+    restoreRef.current = stored !== null && !stored.atBottom ? stored : null;
+    atBottom.current = stored?.atBottom ?? true;
+  }
 
   useEffect(() => {
     const el = ref.current;
     if (el && atBottom.current) el.scrollTop = el.scrollHeight;
   }, [model.version]);
 
+  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const onScroll = () => {
     const el = ref.current;
     if (!el) return;
     atBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+    if (sessionId === null) return;
+    if (saveTimer.current !== null) clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(() => {
+      saveTimer.current = null;
+      const now = ref.current;
+      if (now) saveTimelineAnchor(sessionId, captureTimelineAnchor(now, atBottom.current));
+    }, 200);
   };
+
+  // Debounce safety: a reload right after scrolling must not lose the anchor.
+  useEffect(() => {
+    if (sessionId === null) return;
+    const flush = () => {
+      const el = ref.current;
+      if (el) saveTimelineAnchor(sessionId, captureTimelineAnchor(el, atBottom.current));
+    };
+    window.addEventListener("pagehide", flush);
+    return () => window.removeEventListener("pagehide", flush);
+  }, [sessionId]);
 
   const footer = turnFooter(model);
   const visibleMessages = useMemo(() => model.messages.filter((message) => !message.undone), [model.version]);
@@ -357,6 +394,31 @@ export default function Timeline({ model }: { model: RenderModel }) {
     pendingJump.current = null;
     if (target) el?.querySelector(`[data-msg-id="${target}"]`)?.scrollIntoView({ block: "center" });
   }, [limit]);
+
+  // Reapply the stored stable anchor once its row exists: grow the window to
+  // include it if needed, then align the row to the remembered offset. Runs
+  // every commit but is a no-op unless a restore is pending.
+  useLayoutEffect(() => {
+    const a = restoreRef.current;
+    const el = ref.current;
+    if (a === null || a.id === null || el === null) return;
+    const node = el.querySelector(`[data-msg-id="${a.id}"]`);
+    if (node === null) {
+      const index = rows.findIndex((r) => r.kind !== "work" && r.id === a.id);
+      if (index >= 0) {
+        const next = limitToInclude(rows.length, limit, index);
+        if (next !== limit) {
+          setLimit(next);
+          return; // retry after the window grows
+        }
+      }
+      if (rows.length > 0) restoreRef.current = null; // anchor row is gone
+      return;
+    }
+    restoreRef.current = null;
+    const rowTop = node.getBoundingClientRect().top - el.getBoundingClientRect().top;
+    el.scrollTop += rowTop - a.offset;
+  });
   const jump = (id: string) => {
     const index = rows.findIndex((r) => r.kind !== "work" && r.id === id);
     const next = limitToInclude(rows.length, limit, index);
