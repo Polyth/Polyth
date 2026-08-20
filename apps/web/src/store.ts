@@ -11,10 +11,13 @@ import type {
 } from "@polyth/contracts";
 import { buildModel, type RenderModel } from "./reduce.ts";
 import { applySettingsToDom, loadSettings, saveSettings, type PolythSettings } from "./settings.ts";
+import { getRailPrefs, setRailLastOpen } from "./railPrefs.ts";
 
 export type AppView = "session" | "files" | "goals" | "multirun" | "fusion" | "walkthrough" | "preview" | "git" | "terminal" | "schedule" | "github";
 export type Overlay = "onboarding" | "palette" | "search" | "settings" | "worktree-session" | null;
-export type RailPlugin = "files" | "changes" | "context" | "usage" | "events" | "knowledge";
+/** Right-rail surface id (F17): a registry id such as "files" or a
+ *  plugin-contributed "slot:…" id — no longer a closed union. */
+export type RailPlugin = string;
 /** "all": commands+workspaces+files. "files": file-focused (Mod+P). */
 export type PaletteMode = "all" | "files";
 export interface WorktreeSessionRequest {
@@ -64,7 +67,7 @@ let state: AppState = {
   overlay: null,
   worktreeSessionRequest: null,
   paletteMode: "all",
-  railPlugin: null,
+  railPlugin: getRailPrefs().lastOpen, // F17: last-open surface survives reload
   moreOpen: false,
   sidebarOpen: false,
   editorFile: null,
@@ -161,12 +164,16 @@ export function consumePendingSettingsPage(): string | null {
   return v;
 }
 export function setRailPlugin(railPlugin: RailPlugin | null): void {
+  setRailLastOpen(railPlugin);
   set({ railPlugin });
 }
 export function toggleRailPlugin(id: RailPlugin): void {
-  set({ railPlugin: state.railPlugin === id ? null : id });
+  const railPlugin = state.railPlugin === id ? null : id;
+  setRailLastOpen(railPlugin);
+  set({ railPlugin });
 }
 export function openChanges(path?: string): void {
+  setRailLastOpen("changes");
   set({ railPlugin: "changes", ...(path !== undefined ? { gitDiffPath: path } : {}) });
 }
 export function setGitDiffPath(gitDiffPath: string | null): void {

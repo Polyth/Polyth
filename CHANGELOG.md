@@ -185,6 +185,23 @@ commits, and the L-queue packages started landing.
   values on theme change. Light mode's previously dark user bubble now derives
   from the accent over the panel surface and is readable.
 
+### Changed — L10: right-pane surface host (F17)
+
+- `ContextRail` no longer enumerates panels: a declarative surface registry
+  (`surfaces.ts`) drives the rail. Built-in panels (files, changes, context,
+  knowledge, usage, events) self-register in `railSurfaces.tsx`; plugins add
+  surfaces through the `workspace.right.tabs` slot or
+  `window.__polythSurfaces.registerSurface` — no `ContextRail` edits needed.
+- Keep-alive: visited panels stay mounted (hidden, not unmounted) when
+  switching surfaces or closing the rail, so tree/editor/scroll state
+  survives; surfaces whose plugin is toggled off unmount.
+- Per-surface panel width (drag handle on the panel edge) and the last-open
+  surface persist in browser-local `polyth.railPrefs` and are restored on
+  reload.
+- Content-driven visibility hooks (OC#2418): the usage surface stays hidden
+  for a session until it has spent tokens; badges (changes count, event count)
+  come from the same shared context — no second git-status poller.
+
 ### Removed — stale planning artifacts (`3928fe9`)
 
 - `docs/features/*` — the 19-file upstream research dump (polyth/Paseo PR

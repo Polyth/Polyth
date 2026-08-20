@@ -1,0 +1,85 @@
+// F17 right-pane surface host: registry ordering/replacement, plugin gating +
+// content-driven visibility, the workspace.right.tabs slot bridge, and
+// polyth.railPrefs parsing.
+import test from "node:test";
+import assert from "node:assert/strict";
+import {
+  listSurfaces, registerSurface, slotSurfaces, visibleSurfaces,
+  type RailSurface, type RailSurfaceContext,
+} from "../src/surfaces.ts";
+import { registerSlot } from "../src/slots.ts";
+import { RAIL_WIDTH_DEFAULT, clampRailWidth, parseRailPrefs } from "../src/railPrefs.ts";
+
+const surface = (id: string, order: number, extra: Partial<RailSurface> = {}): RailSurface => ({
+  id, title: id.toUpperCase(), order, component: () => null, ...extra,
+});
+
+const ctx = (over: Partial<RailSurfaceContext> = {}): RailSurfaceContext => ({
+  changeCount: 0, eventCount: 0, totalTokens: 0, hasSession: false, ...over,
+});
+
+test("registry orders by order then id, replaces by id, unregisters", () => {
+  registerSurface(surface("b-two", 20));
+  registerSurface(surface("a-one", 10));
+  registerSurface(surface("c-tie", 20));
+  assert.deepEqual(listSurfaces().map((s) => s.id), ["a-one", "b-two", "c-tie"]);
+
+  // re-registering the same id replaces the entry (new order applies)
+  const offA = registerSurface(surface("a-one", 30));
+  assert.deepEqual(listSurfaces().map((s) => s.id), ["b-two", "c-tie", "a-one"]);
+
+  // an off() from a superseded registration must not remove the replacement
+  const offB = registerSurface(surface("b-two", 20));
+  registerSurface(surface("b-two", 5)); // replaces again
+  offB();
+  assert.ok(listSurfaces().some((s) => s.id === "b-two" && s.order === 5));
+
+  offA();
+  registerSurface(surface("b-two", 5))();
+  registerSurface(surface("c-tie", 20))();
+  assert.deepEqual(listSurfaces(), []);
+});
+
+test("visibleSurfaces gates on plugin toggles then content-driven visibility", () => {
+  const list: RailSurface[] = [
+    surface("always", 1),
+    surface("gated", 2, { plugin: "git" }),
+    surface("content", 3, { visible: (c) => c.totalTokens > 0 }),
+  ];
+  assert.deepEqual(visibleSurfaces(list, [], ctx()).map((s) => s.id), ["always"]);
+  assert.deepEqual(visibleSurfaces(list, ["git"], ctx()).map((s) => s.id), ["always", "gated"]);
+  assert.deepEqual(
+    visibleSurfaces(list, ["git"], ctx({ totalTokens: 5 })).map((s) => s.id),
+    ["always", "gated", "content"],
+  );
+});
+
+test("workspace.right.tabs slot items become surfaces without registry edits", () => {
+  const off = registerSlot("workspace.right.tabs", "my-plugin", () => null, 2, { title: "My plugin" });
+  const off2 = registerSlot("workspace.right.tabs", "bare", () => null, 1);
+  try {
+    const bridged = slotSurfaces();
+    assert.deepEqual(bridged.map((s) => s.id), ["slot:bare", "slot:my-plugin"]);
+    assert.equal(bridged[1]!.title, "My plugin");
+    assert.equal(bridged[0]!.title, "bare"); // falls back to the slot id
+    assert.ok(bridged.every((s) => s.order >= 100)); // plugins sort after built-ins
+  } finally {
+    off();
+    off2();
+  }
+  assert.equal(slotSurfaces().length, 0);
+});
+
+test("parseRailPrefs round-trips, clamps widths, survives garbage", () => {
+  const prefs = parseRailPrefs(JSON.stringify({ lastOpen: "files", widths: { files: 400, changes: 9999, bogus: "x" } }));
+  assert.equal(prefs.lastOpen, "files");
+  assert.equal(prefs.widths.files, 400);
+  assert.equal(prefs.widths.changes, clampRailWidth(9999)); // clamped to max
+  assert.equal(prefs.widths.bogus, undefined);
+  assert.deepEqual(parseRailPrefs(null), { lastOpen: null, widths: {} });
+  assert.deepEqual(parseRailPrefs("junk"), { lastOpen: null, widths: {} });
+  assert.equal(parseRailPrefs(JSON.stringify({ lastOpen: "" })).lastOpen, null);
+  assert.equal(clampRailWidth(10), 240);
+  assert.equal(clampRailWidth(10_000), 640);
+  assert.equal(RAIL_WIDTH_DEFAULT, 344);
+});

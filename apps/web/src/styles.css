@@ -816,10 +816,17 @@ input.notification-preview { font-family: var(--mono); font-size: 12.5px; min-wi
 
 /* ---------- context rail ---------- */
 .rail {
-  width: 344px; min-width: 344px;
+  width: var(--rail-w, 344px); min-width: var(--rail-w, 344px);
   background: var(--panel); border-left: 1px solid var(--border-soft);
   display: flex; flex-direction: column;
+  position: relative;
 }
+/* F17: per-surface width drag handle on the panel's left edge */
+.rail-resize {
+  position: absolute; left: -3px; top: 0; bottom: 0; width: 6px;
+  cursor: col-resize; z-index: 3;
+}
+.rail-resize:hover { background: var(--accent-line); }
 .rail.closed { width: 48px; min-width: 48px; align-items: center; padding-top: 6px; }
 .rail-icon-col { display: flex; flex-direction: column; gap: 4px; margin-top: 6px; }
 .rail-icon {

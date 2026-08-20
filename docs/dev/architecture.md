@@ -210,8 +210,12 @@ a generic collapsed row (never crash).
   file references with go-to-line), `PendingChangesBar` (shared git-status source
   with edit-tool fallback), `QuestionCards` (multi-question stepper),
   `PermissionBanner` (preview + scoped Always), `WorkStatus` (usage/tasks/agents
-  sections + tracker pills), `ContextRail` (files/changes/context/usage/events/knowledge
-  rail with context-window estimate and `contextRail.tabs` slot), `CommandPalette` (commands/workspaces/files,
+  sections + tracker pills), `ContextRail` (F17 surface host: renders the
+  declarative registry in `surfaces.ts` — built-ins self-register in
+  `railSurfaces.tsx`, plugins contribute via the `workspace.right.tabs` slot or
+  `window.__polythSurfaces` — with keep-alive mounting for visited panels,
+  content-driven visibility, badges, and per-surface width + last-open persisted
+  in `polyth.railPrefs`; `contextRail.tabs` slot unchanged), `CommandPalette` (commands/workspaces/files,
   `Mod+P` file mode), `EditorView` (pane tabs via `workspace/paneStore.ts`, per-tab
   IME-safe autosave, `editor/liveFile.ts` revision/conflict checks, sandboxed
   Markdown/HTML previews), `GitView` + `WorktreeSessionDialog` (sidebar/Git/palette

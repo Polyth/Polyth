@@ -1,27 +1,23 @@
-import { Fragment, useState, type JSX } from "react";
+// F17 right-pane surface host. The rail renders whatever the surface registry
+// holds (built-ins register in railSurfaces.tsx; plugins arrive through the
+// "workspace.right.tabs" slot or window.__polythSurfaces) — this component
+// never enumerates panels. Visited panels stay mounted (keep-alive) so tree,
+// editor, and scroll state survive switching; per-surface width and the
+// last-open surface persist in polyth.railPrefs.
+import { Fragment, useEffect, useRef, useState, type CSSProperties, type JSX, type PointerEvent as ReactPointerEvent } from "react";
 import { renderSlot } from "../slots.ts";
-import { useActiveModel, useStore, setActiveView, setOverlay, setRailPlugin, toggleRailPlugin, type AppView, type RailPlugin } from "../store.ts";
+import { useActiveModel, useStore, setActiveView, setOverlay, setRailPlugin, toggleRailPlugin, type AppView } from "../store.ts";
 import { PLUGIN_LABELS, togglePlugin, usePrefs, type PluginId } from "../prefs.ts";
-import { fmtCost, fmtTokens } from "../format.ts";
 import { Icon } from "../icons.tsx";
 import { useEscape } from "../useEscape.ts";
-import type { ModelDescriptor, SessionProjection } from "@polyth/contracts";
-import { contextGauge } from "../reduce.ts";
-import ChangesPanel from "./ChangesPanel.tsx";
-import FilesPanel from "./FilesPanel.tsx";
-import KnowledgePanel from "./KnowledgePanel.tsx";
 import { useGitStatus } from "../gitStatusStore.ts";
 import { gitChangedFiles } from "../pendingChanges.ts";
-
-// Rail panels toggled in place; each is backed by a plugin toggle.
-const PANELS: Array<{ rail: RailPlugin; plugin: PluginId; label: string; icon: () => JSX.Element }> = [
-  { rail: "files", plugin: "files", label: "Files", icon: Icon.files },
-  { rail: "changes", plugin: "git", label: "Changes", icon: Icon.tree },
-  { rail: "context", plugin: "context", label: "Context", icon: Icon.context },
-  { rail: "knowledge", plugin: "knowledge", label: "Knowledge", icon: Icon.book },
-  { rail: "usage", plugin: "usage", label: "Usage", icon: Icon.usage },
-  { rail: "events", plugin: "events", label: "Events", icon: Icon.events },
-];
+import {
+  slotSurfaces, useSurfaceVersion, listSurfaces, visibleSurfaces,
+  type RailSurface, type RailSurfaceContext,
+} from "../surfaces.ts";
+import { clampRailWidth, railWidthOf, setRailWidth } from "../railPrefs.ts";
+import "./railSurfaces.tsx";
 
 // Full-view jumps that live on the strip when their plugin is on.
 const JUMPS: Array<{ view: AppView; plugin: PluginId; label: string; shortLabel: string; icon: () => JSX.Element }> = [
@@ -32,118 +28,6 @@ const JUMPS: Array<{ view: AppView; plugin: PluginId; label: string; shortLabel:
   { view: "schedule", plugin: "schedule", label: "Scheduled prompts", shortLabel: "Schedule", icon: Icon.clock },
   { view: "github", plugin: "github", label: "GitHub", shortLabel: "GitHub", icon: Icon.github },
 ];
-
-function ContextView({
-  session,
-  model,
-  models,
-}: {
-  session: SessionProjection | null;
-  model: ReturnType<typeof useActiveModel>;
-  models: ModelDescriptor[];
-}) {
-  const events = useStore((s) => (s.activeSessionId ? s.events[s.activeSessionId] : undefined) ?? NO_EVENTS);
-  if (!session) return <div className="rail-empty">Session status, usage, and pinned context will appear here.</div>;
-
-  // Pinned files = context/pinned minus context/unpinned (last event wins per path).
-  const pinned = new Map<string, boolean>();
-  for (const e of events) {
-    if (e.type === "context/pinned") pinned.set(String((e.data as Record<string, unknown>).path ?? ""), true);
-    if (e.type === "context/unpinned") pinned.set(String((e.data as Record<string, unknown>).path ?? ""), false);
-  }
-  const pinnedPaths = [...pinned.entries()].filter(([, v]) => v).map(([k]) => k);
-  const activeModel = model.contextUsage?.model ?? model.turn?.model ?? session.model;
-  const descriptor = activeModel
-    ? models.find((candidate) =>
-        candidate.providerID === activeModel.providerID && candidate.modelID === activeModel.modelID)
-    : undefined;
-  const gauge = contextGauge(model, descriptor?.context);
-
-  return (
-    <div>
-      <div className="stat-row">
-        <span className="k">Status</span>
-        <span className="status-line" style={{ padding: 0 }}>
-          <span className={`dot ${session.status}`} />
-          <span>{session.status}</span>
-        </span>
-      </div>
-      <div className="stat-row">
-        <span className="k">Model</span>
-        <span>{session.model ? `${session.model.providerID}/${session.model.modelID}` : "—"}</span>
-      </div>
-      <div className="stat-row">
-        <span className="k">Agent</span>
-        <span>{session.agent ?? "—"}</span>
-      </div>
-      <div className="stat-row">
-        <span className="k">Tokens</span>
-        <span className="mono">{fmtTokens(model.totals.input + model.totals.output)}</span>
-      </div>
-      <div className="stat-row context-estimate-row">
-        <span className="k">Context estimate</span>
-        <span className="mono">
-          {gauge.known
-            ? `${fmtTokens(gauge.inputTokens)} / ${fmtTokens(gauge.contextTokens)} (${gauge.percent}%)`
-            : "Unknown"}
-        </span>
-      </div>
-      <div
-        className={`context-meter ${gauge.level}`}
-        role="meter"
-        aria-label={gauge.known ? `${gauge.percent}% context estimate` : "Context estimate unknown"}
-        aria-valuemin={0}
-        aria-valuemax={100}
-        {...(gauge.known ? { "aria-valuenow": gauge.percent } : {})}
-      >
-        <span style={{ width: `${gauge.known ? gauge.percent : 0}%` }} />
-      </div>
-      {!gauge.known && <div className="muted context-estimate-note">Model context metadata is unavailable.</div>}
-      <div className="stat-row">
-        <span className="k">Cost</span>
-        <span className="mono">{model.totals.cost > 0 ? fmtCost(model.totals.cost) : "—"}</span>
-      </div>
-      <div className="stat-label">Pinned</div>
-      {pinnedPaths.length === 0 && <div className="muted" style={{ fontSize: 12.5 }}>Nothing pinned yet.</div>}
-      {pinnedPaths.map((p) => (
-        <div key={p} className="pinned-file mono">{p}</div>
-      ))}
-    </div>
-  );
-}
-
-function UsagePanel({ model }: { model: ReturnType<typeof useActiveModel> }) {
-  const total = model.totals.input + model.totals.output;
-  return (
-    <div>
-      <div className="stat-row"><span className="k">Input</span><span className="mono">{fmtTokens(model.totals.input)}</span></div>
-      <div className="stat-row"><span className="k">Output</span><span className="mono">{fmtTokens(model.totals.output)}</span></div>
-      <div className="stat-row"><span className="k">Total</span><span className="mono">{fmtTokens(total)}</span></div>
-      <div className="stat-row"><span className="k">Cost</span><span className="mono">{model.totals.cost > 0 ? fmtCost(model.totals.cost) : "—"}</span></div>
-      {total === 0 && <div className="rail-empty">Token and cost totals appear once the session runs.</div>}
-    </div>
-  );
-}
-
-function EventsView({ events }: { events: readonly import("@polyth/contracts").SessionEvent[] }) {
-  if (events.length === 0) return <div className="empty">No events yet.</div>;
-  return (
-    <div className="event-list">
-      {[...events].reverse().map((e) => (
-        <details key={e.id} className="event-row">
-          <summary>
-            <span className="e-seq">#{e.seq}</span>
-            <span className="e-type">{e.type}</span>
-            <span className="e-time">{new Date(e.time).toLocaleTimeString()}</span>
-          </summary>
-          <div className="event-json">
-            <pre>{JSON.stringify(e, null, 2)}</pre>
-          </div>
-        </details>
-      ))}
-    </div>
-  );
-}
 
 const NO_EVENTS: never[] = [];
 
@@ -157,7 +41,6 @@ export default function ContextRail() {
   const rail = useStore((s) => s.railPlugin);
   const view = useStore((s) => s.activeView);
   const projectId = useStore((s) => s.activeProjectId);
-  const models = useStore((s) => s.models);
   const prefs = usePrefs();
   const session = useStore((s) => s.sessions.find((x) => x.id === s.activeSessionId) ?? null);
   const model = useActiveModel();
@@ -167,49 +50,95 @@ export default function ContextRail() {
 
   const gitOn = prefs.plugins.includes("git");
   const gitStatus = useGitStatus(gitOn ? projectId : null, model.turn?.status === "working", session?.id);
-  const changeCount = gitStatus ? gitChangedFiles(gitStatus).length : 0;
+  const ctx: RailSurfaceContext = {
+    changeCount: gitStatus ? gitChangedFiles(gitStatus).length : 0,
+    eventCount: events.length,
+    totalTokens: model.totals.input + model.totals.output,
+    hasSession: session !== null,
+  };
 
-  const panels = PANELS.filter((p) => prefs.plugins.includes(p.plugin));
+  useSurfaceVersion(); // re-render when surfaces register/unregister
+  const surfaces = visibleSurfaces([...listSurfaces(), ...slotSurfaces()], prefs.plugins, ctx);
+  const open = surfaces.find((s) => s.id === rail) ?? null;
+
+  // Keep-alive: panels stay mounted once visited so their state survives
+  // switching surfaces; unavailable surfaces (plugin off) unmount naturally.
+  const [visited, setVisited] = useState<string[]>([]);
+  useEffect(() => {
+    if (rail !== null && !visited.includes(rail)) setVisited((v) => [...v, rail]);
+  }, [rail, visited]);
+  // A registered surface that became invisible (content gone / plugin off)
+  // closes the panel; an id that is merely not registered *yet* (a plugin
+  // still loading) is left alone so it opens once the surface arrives.
+  const known = rail !== null && [...listSurfaces(), ...slotSurfaces()].some((s) => s.id === rail);
+  useEffect(() => {
+    if (rail !== null && known && open === null) setRailPlugin(null);
+  }, [rail, known, open]);
+  const kept = surfaces.filter((s) => s.id === rail || visited.includes(s.id));
+
+  // Per-surface width with a drag handle on the panel's left edge.
+  const [width, setWidth] = useState<number>(() => railWidthOf(rail));
+  useEffect(() => { setWidth(railWidthOf(rail)); }, [rail]);
+  const dragRef = useRef<{ startX: number; startW: number } | null>(null);
+  const onHandleDown = (e: ReactPointerEvent) => {
+    if (open === null) return;
+    e.preventDefault();
+    dragRef.current = { startX: e.clientX, startW: width };
+    const surfaceId = open.id;
+    const move = (ev: PointerEvent) => {
+      const d = dragRef.current;
+      if (d) setWidth(clampRailWidth(d.startW + (d.startX - ev.clientX)));
+    };
+    const up = (ev: PointerEvent) => {
+      const d = dragRef.current;
+      dragRef.current = null;
+      if (d) setRailWidth(surfaceId, clampRailWidth(d.startW + (d.startX - ev.clientX)));
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  };
+
   const jumps = JUMPS.filter((j) => prefs.plugins.includes(j.plugin));
-  const open = panels.find((p) => p.rail === rail) ?? null;
   const togglable = (Object.keys(PLUGIN_LABELS) as PluginId[]).filter((id) => id !== "session");
   const slotTabs = renderSlot("contextRail.tabs", { tab: rail, onSelect: toggleRailPlugin });
-  const badgeOf = (railId: RailPlugin): number =>
-    railId === "changes" ? changeCount : railId === "events" ? events.length : 0;
+  const badgeOf = (s: RailSurface): number => s.badge?.(ctx) ?? 0;
 
   return (
     <aside className="railbar">
-      {open && (
-        <div className="rail">
+      {kept.length > 0 && (
+        <div
+          className="rail"
+          style={open ? ({ "--rail-w": `${width}px` } as CSSProperties) : { display: "none" }}
+        >
+          <div className="rail-resize" onPointerDown={onHandleDown} role="separator" aria-orientation="vertical" aria-label="Resize panel" />
           <div className="rail-head">
-            <span className="rail-title">{open.label}</span>
+            <span className="rail-title">{open?.title ?? ""}</span>
             <span className="header-spacer" />
             <div className="rail-tabs">{slotTabs.map((n, i) => <Fragment key={i}>{n}</Fragment>)}</div>
             <button className="rail-toggle" onClick={() => setRailPlugin(null)} title="Close panel" aria-label="Close panel">»</button>
           </div>
-          <div className="rail-body">
-            {open.rail === "context" && <ContextView session={session} model={model} models={models} />}
-            {open.rail === "usage" && <UsagePanel model={model} />}
-            {open.rail === "events" && <EventsView events={events} />}
-            {open.rail === "changes" && <ChangesPanel />}
-            {open.rail === "files" && <FilesPanel />}
-            {open.rail === "knowledge" && <KnowledgePanel />}
-          </div>
+          {kept.map((s) => (
+            <div key={s.id} className="rail-body" style={s.id === rail ? undefined : { display: "none" }}>
+              <s.component />
+            </div>
+          ))}
         </div>
       )}
       <div className="rail-icon-col plugin-strip" aria-label="Workspace panels">
-        {panels.map((p) => (
+        {surfaces.map((s) => (
           <button
-            key={p.rail}
-            className={`rail-icon strip-btn ${rail === p.rail ? "active" : ""}`}
-            title={p.label}
-            aria-label={p.label}
-            aria-pressed={rail === p.rail}
-            onClick={() => toggleRailPlugin(p.rail)}
+            key={s.id}
+            className={`rail-icon strip-btn ${rail === s.id ? "active" : ""}`}
+            title={s.title}
+            aria-label={s.title}
+            aria-pressed={rail === s.id}
+            onClick={() => toggleRailPlugin(s.id)}
           >
-            <p.icon />
-            <span className="strip-label">{p.label}</span>
-            <Badge n={badgeOf(p.rail)} />
+            {s.icon ? <s.icon /> : <Icon.context />}
+            <span className="strip-label">{s.shortLabel ?? s.title}</span>
+            <Badge n={badgeOf(s)} />
           </button>
         ))}
         {jumps.length > 0 && <span className="strip-sep" />}
