@@ -7,6 +7,7 @@
   <link rel="stylesheet" href="./tokens.css">
   <style>
     :root { --sidebar-w: 220px; --inspector-w: 720px; --rail-w: 96px; }
+    .app-shell { grid-template-columns: var(--sidebar-w) minmax(320px,1fr) var(--inspector-w) var(--rail-w); }
     .secondary-stage { opacity: .54; filter: saturate(.72); }
     .secondary-stage .hero { padding: 25px; }
     .secondary-stage .hero-inner { width: min(430px,100%); }
