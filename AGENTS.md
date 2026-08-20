@@ -1,5 +1,6 @@
 # Polyth agent rules
 
+- Developer docs live under `docs/dev/` (`README.md` feature workflow, `architecture.md`, `parity.md`, `new-features.md`, `implementation-order.md`, `HANDOFF.md`); the parity matrix is `docs/parity/polyth-parity.yaml`.
 - Node 22 runs TS directly (type stripping). **Erasable TS only**: no enums, namespaces, parameter properties. Local imports use explicit `.ts` extension.
 - OpenCode CLI (`opencode`, v1.18.x) and polyth (`polyth` from `@polyth/web`) are both required for feature-parity work. Put `$HOME/.opencode/bin` and the npm global bin (often `$HOME/.local/bin`) on `PATH`. Install: `curl -fsSL https://opencode.ai/install | bash` and `npm i -g @polyth/web`.
 - Cross-package imports use workspace names (`@polyth/contracts`), resolved via npm workspaces; each package's `package.json` has `"exports": {".": "./src/index.ts"}`.
