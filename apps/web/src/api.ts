@@ -139,6 +139,12 @@ export interface GitGraphEntry extends GitLogEntry {
   parents: string[];
   refs: string[];
 }
+export interface GitStash {
+  ref: string;
+  sha: string;
+  message: string;
+  date: string;
+}
 
 // ---- worktree types --------------------------------------------------------
 export interface Worktree {
@@ -482,10 +488,14 @@ export const api = {
     jfetch<GitStatus>(`/api/git/status?projectId=${encodeURIComponent(projectId)}`).catch((): GitStatus => ({
       branch: "", ahead: 0, behind: 0, staged: [], unstaged: [], untracked: [], conflicted: [],
     })),
-  gitDiff: (projectId: string, filePath: string, staged?: boolean) =>
+  gitDiff: (projectId: string, filePath: string, staged?: boolean, ignoreWhitespace?: boolean) =>
     jfetch<GitDiffResult>(
-      `/api/git/diff?projectId=${encodeURIComponent(projectId)}&path=${encodeURIComponent(filePath)}${staged ? "&staged=true" : ""}`,
+      `/api/git/diff?projectId=${encodeURIComponent(projectId)}&path=${encodeURIComponent(filePath)}${staged ? "&staged=true" : ""}${ignoreWhitespace ? "&ignoreWhitespace=true" : ""}`,
     ).catch((): GitDiffResult => ({ path: filePath, diff: "" })),
+  gitShow: (projectId: string, sha: string, ignoreWhitespace?: boolean) =>
+    jfetch<{ sha: string; diff: string }>(
+      `/api/git/show?projectId=${encodeURIComponent(projectId)}&sha=${encodeURIComponent(sha)}${ignoreWhitespace ? "&ignoreWhitespace=true" : ""}`,
+    ),
   gitStage: (projectId: string, paths: string[]) =>
     jfetch<{ ok: true }>(`/api/git/stage`, json("POST", { projectId, paths })),
   gitUnstage: (projectId: string, paths: string[]) =>
@@ -516,6 +526,20 @@ export const api = {
     ),
   gitFolder: (projectId: string, folder: string, op: "stage" | "unstage" | "discard") =>
     jfetch<{ ok: true }>(`/api/git/folder`, json("POST", { projectId, folder, op })),
+  gitStashes: (projectId: string) =>
+    jfetch<GitStash[]>(`/api/git/stashes?projectId=${encodeURIComponent(projectId)}`).catch((): GitStash[] => []),
+  gitStashPush: (projectId: string, message?: string) =>
+    jfetch<{ created: boolean }>(`/api/git/stash`, json("POST", { projectId, message })),
+  gitStashApply: (projectId: string, ref: string) =>
+    jfetch<{ ok: true }>(`/api/git/stash/apply`, json("POST", { projectId, ref })),
+  gitStashDrop: (projectId: string, ref: string) =>
+    jfetch<{ ok: true }>(`/api/git/stash/drop`, json("POST", { projectId, ref })),
+  gitFetch: (projectId: string, remote = "origin") =>
+    jfetch<{ ok: true }>(`/api/git/fetch`, json("POST", { projectId, remote })),
+  gitPull: (projectId: string, remote = "origin") =>
+    jfetch<{ ok: true }>(`/api/git/pull`, json("POST", { projectId, remote })),
+  gitPush: (projectId: string, remote = "origin") =>
+    jfetch<{ ok: true }>(`/api/git/push`, json("POST", { projectId, remote })),
 
   // ---- worktrees (§12) -----------------------------------------------------
   listWorktrees: (projectId: string) =>

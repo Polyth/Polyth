@@ -5,6 +5,7 @@ import { api, type GitStatus, type GitFileEntry } from "../api.ts";
 import { useStore } from "../store.ts";
 import { diffStat } from "../utils.ts";
 import CopyButton from "./CopyButton.tsx";
+import { setGitPrefs, splitDiffRows, useGitPrefs } from "../gitPrefs.ts";
 
 const EMPTY_STAGED: never[] = [];
 const EMPTY_UNSTAGED: never[] = [];
@@ -37,11 +38,27 @@ function fileRow(
 }
 
 function DiffViewer({ diff }: { diff: string }) {
+  const prefs = useGitPrefs();
   if (!diff) return <div className="empty" style={{ padding: 8 }}>No changes.</div>;
   const lines = diff.split("\n");
   return (
     <div className="copy-wrap">
-      <pre className="git-diff">
+      <div className="diff-prefs">
+        <button className={`small-btn ${prefs.layout === "unified" ? "active" : ""}`} onClick={() => setGitPrefs({ layout: "unified" })}>Unified</button>
+        <button className={`small-btn ${prefs.layout === "split" ? "active" : ""}`} onClick={() => setGitPrefs({ layout: "split" })}>Split</button>
+        <label><input type="checkbox" checked={prefs.ignoreWhitespace} onChange={(event) => setGitPrefs({ ignoreWhitespace: event.target.checked })} /> Ignore whitespace</label>
+        <label><input type="checkbox" checked={prefs.wrap} onChange={(event) => setGitPrefs({ wrap: event.target.checked })} /> Wrap</label>
+      </div>
+      {prefs.layout === "split" ? (
+        <div className={`split-diff${prefs.wrap ? " wrap" : ""}`}>
+          {splitDiffRows(diff).map((row, index) => (
+            <div className={`split-diff-row ${row.kind}`} key={index}>
+              <code className={row.left.startsWith("-") ? "diff-del" : ""}>{row.left}</code>
+              <code className={row.right.startsWith("+") ? "diff-add" : ""}>{row.right}</code>
+            </div>
+          ))}
+        </div>
+      ) : <pre className={`git-diff${prefs.wrap ? " wrap" : ""}`}>
         {lines.map((line, i) => {
           let cls = "";
           if (line.startsWith("+") && !line.startsWith("+++")) cls = "diff-add";
@@ -54,7 +71,7 @@ function DiffViewer({ diff }: { diff: string }) {
             </div>
           );
         })}
-      </pre>
+      </pre>}
       <CopyButton text={diff} />
     </div>
   );
@@ -69,6 +86,7 @@ export default function ChangesPanel() {
   const [commitMsg, setCommitMsg] = useState("");
   const [generating, setGenerating] = useState(false);
   const [busy, setBusy] = useState(false);
+  const prefs = useGitPrefs();
 
   const projectId = activeProjectId;
   const refresh = useCallback(() => {
@@ -78,6 +96,11 @@ export default function ChangesPanel() {
   }, [projectId]);
 
   useEffect(() => { refresh(); }, [refresh]);
+  useEffect(() => {
+    if (!projectId || !diffPath || !status) return;
+    const staged = status.staged.some((file) => file.path === diffPath);
+    void api.gitDiff(projectId, diffPath, staged, prefs.ignoreWhitespace).then((result) => setDiffText(result.diff));
+  }, [projectId, diffPath, status, prefs.ignoreWhitespace]);
 
   if (!projectId) return <div className="empty">Select a project first.</div>;
   if (!status) return <div className="empty">Loading git status…</div>;
@@ -89,7 +112,7 @@ export default function ChangesPanel() {
     setDiffPath(fp);
     if (!projectId) return;
     const staged = status.staged.some((f) => f.path === fp);
-    const got = await api.gitDiff(projectId, fp, staged);
+    const got = await api.gitDiff(projectId, fp, staged, prefs.ignoreWhitespace);
     setDiffText(got.diff);
   };
 

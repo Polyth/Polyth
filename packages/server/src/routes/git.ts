@@ -37,7 +37,15 @@ export function gitRoutes(deps: {
       json(200, await git.diff(root, {
         ...(q("path") ? { path: q("path")! } : {}),
         staged: q("staged") === "true",
+        ignoreWhitespace: q("ignoreWhitespace") === "true",
       }));
+      return true;
+    }
+    if (path === "/api/git/show" && method === "GET") {
+      const root = await rootOf(q("projectId"));
+      const sha = q("sha");
+      if (!sha) throw Object.assign(new Error("sha required"), { code: "invalid-input" });
+      json(200, await git.show(root, sha, { ignoreWhitespace: q("ignoreWhitespace") === "true" }));
       return true;
     }
     if (path === "/api/git/log" && method === "GET") {
@@ -56,6 +64,11 @@ export function gitRoutes(deps: {
     if (path === "/api/git/branches" && method === "GET") {
       const root = await rootOf(q("projectId"));
       json(200, await git.branches(root));
+      return true;
+    }
+    if (path === "/api/git/stashes" && method === "GET") {
+      const root = await rootOf(q("projectId"));
+      json(200, await git.stashList(root));
       return true;
     }
     if (path === "/api/worktrees" && method === "GET") {
@@ -95,6 +108,15 @@ export function gitRoutes(deps: {
         await git.createBranch(root, String(b.name ?? ""), b.from ? String(b.from) : undefined);
         break;
       case "/api/git/checkout": await git.checkout(root, String(b.name ?? "")); break;
+      case "/api/git/stash": {
+        json(200, await git.stashPush(root, b.message ? String(b.message) : undefined));
+        return true;
+      }
+      case "/api/git/stash/apply": await git.stashApply(root, b.ref ? String(b.ref) : undefined); break;
+      case "/api/git/stash/drop": await git.stashDrop(root, b.ref ? String(b.ref) : undefined); break;
+      case "/api/git/fetch": await git.fetch(root, b.remote ? String(b.remote) : undefined); break;
+      case "/api/git/pull": await git.pull(root, b.remote ? String(b.remote) : undefined); break;
+      case "/api/git/push": await git.push(root, b.remote ? String(b.remote) : undefined); break;
       case "/api/worktrees": {
         json(200, await git.worktrees.create(root, {
           branch: String(b.branch ?? ""),

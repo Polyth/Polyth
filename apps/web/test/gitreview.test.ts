@@ -3,6 +3,7 @@ import test from "node:test";
 import assert from "node:assert";
 import { layoutGraph } from "../src/git/graph.ts";
 import { commentState, hunkDigest, splitHunks, type ReviewComment } from "../src/review/anchors.ts";
+import { GIT_PREFS_KEY, getGitPrefs, parseGitPrefs, setGitPrefs, splitDiffRows } from "../src/gitPrefs.ts";
 
 test("graph: linear history stays in lane 0", () => {
   const rows = layoutGraph([
@@ -40,6 +41,28 @@ test("graph: unrelated roots get separate lanes", () => {
   assert.equal(rows[0]!.lane, 0);
   assert.equal(rows[1]!.lane, 1);
   assert.equal(rows[2]!.lane, 0);
+});
+
+test("git prefs parse, persist, and split diffs align replacement runs", () => {
+  const values = new Map<string, string>();
+  Object.defineProperty(globalThis, "localStorage", {
+    configurable: true,
+    value: {
+      getItem(key: string) { return values.get(key) ?? null; },
+      setItem(key: string, value: string) { values.set(key, value); },
+    },
+  });
+  assert.deepEqual(parseGitPrefs("bad"), {
+    layout: "unified", ignoreWhitespace: false, wrap: false, changesView: "tree",
+  });
+  setGitPrefs({ layout: "split", ignoreWhitespace: true, wrap: true, changesView: "flat" });
+  assert.deepEqual(parseGitPrefs(values.get(GIT_PREFS_KEY) ?? null), getGitPrefs());
+
+  const rows = splitDiffRows("@@ -1,2 +1,2 @@\n-old one\n-old two\n+new one\n context");
+  assert.deepEqual(rows.slice(1, 3), [
+    { left: "-old one", right: "+new one", kind: "change" },
+    { left: "-old two", right: "", kind: "change" },
+  ]);
 });
 
 const DIFF = `diff --git a/x.ts b/x.ts

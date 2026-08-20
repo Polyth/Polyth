@@ -28,7 +28,7 @@ packages/session (node:sqlite WAL: events + projections + queue/org/profiles)
 | `permissions` | Monotonic fail-closed rule engine; scopes user/project/session; deny beats allow; "always" persists a rule at the chosen scope. |
 | `goals` | Objective attach/audit loop: small-model auditor verdicts (`keep`/`done`/`stuck`), budgets, auto-continuation, pause/resume; rehydrates from the event log after restart. |
 | `files` | Path-jailed file service: tree/stat/read (revision = mtime+size), revision-guarded `write` (stale `baseRevision` → `conflict`), binary-overwrite refusal, mkdir/rename/delete/upload, scored file search (shared with palette + mentions). |
-| `git` | Porcelain wrapper: status/diff/stage/unstage/discard/commit/log/graph/branches/checkout/worktrees, diffHead/diffRange for review flows. |
+| `git` | Porcelain wrapper: status/diff/show/stage/unstage/discard/commit/log/graph/branches/checkout/stash/fetch/pull/push/worktrees, diffHead/diffRange for review flows. |
 | `commands` | Slash commands + `#alias` snippets: project (`.agents/commands`) and user scopes, `$ARGUMENTS`/`@file`/`!cmd` template expansion, CRUD for the settings UI. |
 | `terminal` | PTY sessions (`node-pty` when present) with create/list/close; `/ws/terminal/:id` byte stream. |
 | `preview` | Dev-server lifecycle per project: script detection, `PORT` injection, status events, URL for the iframe preview. |
@@ -93,8 +93,8 @@ Core: `/api/health`, `/api/projects` (+`/create`, DELETE), `/api/sessions`
 Feature routes: `/api/folders`, `/api/labels`, `/api/search/workspaces`,
 `/api/search/sessions` (metadata + transcript snippets), `/api/files/*`
 (tree/stat/read/raw/write/mkdir/rename/delete/upload/search), `/api/commands`,
-`/api/snippets`, `/api/git/*` (status/diff/stage/unstage/discard/commit/commit-message/
-log/graph/branch(es)/checkout/folder), `/api/worktrees` (+`/remove`), `/api/terminals`,
+`/api/snippets`, `/api/git/*` (status/diff/show/stage/unstage/discard/commit/commit-message/
+log/graph/branch(es)/checkout/folder/stash/stashes/fetch/pull/push), `/api/worktrees` (+`/remove`), `/api/terminals`,
 `/api/preview` (+start/stop), `/api/browser/*` (sessions/capability/approvals),
 `/api/dictation` (+capability), `/api/multiruns`, `/api/fusions`, `/api/walkthroughs`,
 `/api/schedule` (+preview/loops/loops/rescan), `/api/usage/quotas` (+refresh),
