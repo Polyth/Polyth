@@ -153,7 +153,10 @@ input, select, textarea {
 select { background-color: var(--elevated); }
 /* UX-A390 a11y contract: focus is visible with at least a 2px outline and
    2px offset on every surface. */
-:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+/* Focus ring in the text token: --text is contrast-validated against every
+   bundled surface (accent falls under 3:1 on the light themes) and it stays
+   identifiable in monochrome capture. */
+:focus-visible { outline: 2px solid var(--text); outline-offset: 2px; }
 
 code {
   font-family: var(--mono);
@@ -368,7 +371,10 @@ html.light .kbd { background: rgba(0, 0, 0, 0.04); }
   height: 52px; min-height: 52px; padding: 0 14px 0 18px; border-bottom: 1px solid var(--border-soft);
   background: linear-gradient(180deg, var(--panel), var(--bg));
 }
-.header-session { flex: 1; min-width: 120px; }
+/* The title column is the flexible one: it ellipsizes instead of forcing the
+   fixed controls around it to overlap or overflow when a rail squeezes the
+   chat column (UX-A390 geometry gate, persisted-panel state). */
+.header-session { flex: 1; min-width: 0; }
 .header-title { font-size: 13.5px; font-weight: 600; letter-spacing: -.014em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .header-sub { color: var(--faint); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .header-spacer { flex: 1; }
@@ -385,10 +391,16 @@ html.light .kbd { background: rgba(0, 0, 0, 0.04); }
 
 /* icon view switcher */
 .view-switcher {
-  display: flex; align-items: center; gap: 2px; flex-shrink: 0;
+  display: flex; align-items: center; gap: 2px;
+  /* Cramped wide columns (open rail on a ~850px viewport): the switcher
+     shrinks and scrolls within its own box rather than bleeding over the
+     rail; at normal widths every icon fits and nothing scrolls. */
+  flex-shrink: 1; min-width: 44px; overflow-x: auto; scrollbar-width: none;
   padding: 3px; background: var(--panel); border: 1px solid var(--hair); border-radius: 11px;
   box-shadow: var(--inset-hi);
 }
+.view-switcher::-webkit-scrollbar { display: none; }
+.view-switcher .view-group { flex: none; }
 .view-group { display: flex; align-items: center; gap: 2px; }
 .view-group + .view-group { margin-left: 4px; padding-left: 5px; border-left: 1px solid var(--hair-strong); }
 .view-icon {
@@ -676,14 +688,19 @@ html.light .composer-card { background: var(--elevated); box-shadow: 0 24px 60px
 .composer-bar {
   display: flex; align-items: center; gap: 7px; padding: 9px 10px 10px 12px;
   border-top: 1px solid var(--hair);
+  /* Groups stay on one row at normal wide widths; when an open rail squeezes
+     the chat column they tier instead of overflowing the workspace. */
+  flex-wrap: wrap;
 }
 /* UX-A390 semantic groups: selectors · extension slots · actions. One row in
    wide mode; the phone media block below turns them into the two-tier
    command surface. */
-.composer-selectors { display: flex; align-items: center; gap: 7px; min-width: 0; }
+.composer-selectors { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; min-width: 0; }
 .composer-extensions { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; min-width: 0; max-width: 100%; }
 .composer-selectors:empty, .composer-extensions:empty { display: none; }
-.composer-actions { display: flex; align-items: center; gap: 7px; flex: 1; min-width: 0; }
+/* flex-shrink 0: the action group never collapses below its buttons — in a
+   squeezed column it wraps onto its own bar row instead of bleeding out. */
+.composer-actions { display: flex; align-items: center; gap: 7px; flex: 1 0 auto; min-width: 0; }
 .composer-primary { margin-left: auto; display: flex; align-items: center; gap: 7px; flex: none; }
 
 /* model / agent pills (native selects dressed as pills) */
@@ -813,7 +830,11 @@ input.notification-preview { font-family: var(--mono); font-size: 12.5px; min-wi
 
 /* ---------- context rail ---------- */
 .rail {
-  width: var(--rail-w, 344px); min-width: var(--rail-w, 344px);
+  /* The preferred width yields when the chat column hits its minimum
+     (cramped wide viewports with an open rail), instead of pushing header
+     controls over the rail. 200px keeps panel content usable. */
+  width: var(--rail-w, 344px); min-width: min(var(--rail-w, 344px), 200px);
+  flex: 0 1 var(--rail-w, 344px);
   background: var(--panel); border-left: 1px solid var(--border-soft);
   display: flex; flex-direction: column;
   position: relative;
@@ -1566,6 +1587,8 @@ html.light .switch:hover { background: var(--border); }
 .plugin-strip {
   position: relative; width: 44px; min-width: 44px; min-height: 0;
   display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 10px 0;
+  /* Short viewports: surface icons scroll instead of clipping past the fold. */
+  overflow-y: auto;
   background: var(--panel); border-left: 1px solid var(--border-soft);
 }
 .strip-btn {
@@ -2744,7 +2767,9 @@ body[data-motion="reduced"] .settings-row.flash { animation: none; outline: 1px 
     border-right: 1px solid var(--border);
     box-shadow: var(--shadow-lg);
     transform: translateX(-102%); visibility: hidden;
-    transition: transform 150ms ease, visibility 150ms;
+    /* ≤160ms budget (spec): 120ms leaves frame-alignment headroom so geometry
+       is provably settled at the 160ms sample point. */
+    transition: transform 120ms ease, visibility 120ms;
   }
   .sidebar.open { transform: none; visibility: visible; }
   .sidebar-backdrop { position: fixed; inset: 0; z-index: 119; background: var(--scrim); }
@@ -2758,9 +2783,14 @@ body[data-motion="reduced"] .settings-row.flash { animation: none; outline: 1px 
   .header { gap: 8px; padding: 0 10px; }
   .header-session { flex: 1 1 0; min-width: 0; }
   .header-drawer-btn, .narrow-panel-trigger { width: 44px; height: 44px; flex: none; }
+  /* Icon boundaries at 3:1 in every bundled theme (muted misses in solar). */
+  .header-drawer-btn, .narrow-panel-trigger, .header .overflow-trigger { color: var(--text-dim); }
   .header .overflow-trigger { width: 44px; height: 44px; }
   .header-view-picker { flex: none; }
   .header-view-picker .picker-chip { height: 44px; max-width: 190px; }
+  /* Actionable text: the current-view label reads at 4.5:1 in every bundled
+     theme (muted/dim tokens fall short in the light themes). */
+  .header-view-picker .picker-chip-text { color: var(--text); }
   .header-view-picker .picker-pop { left: auto; right: 0; }
   .auto-accept-chip { min-height: 44px; }
 
