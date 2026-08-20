@@ -15,6 +15,25 @@ Polyth already has a distinctive warm Ember identity, but its core work surfaces
 
 This direction keeps Polyth’s dark, warm character while making it feel like a shipped local AI IDE: a confident start, one coherent composer, visible work status, grouped settings, a keyboard-first project picker, and a useful knowledge layer. Persona onboarding, actionable Context, and local knowledge notes move Polyth beyond parity instead of merely reproducing polyth.
 
+## Перелік змін
+
+| Пріоритет | Поверхня | Проблема в live Polyth | Що краще в polyth | Пропозиція Polyth-better |
+|---|---|---|---|---|
+| P0 | Новий чат | Пасивний технічний порожній стан | Починає з упевненого питання в контексті проєкту | Hero для конкретного проєкту, теплий тон, persona-aware дії та два ряди корисних стартових запитів |
+| P0 | Composer | Звичайний textarea; вибір моделі й агента виглядає доданим окремо | Inline-інструменти, model/mode chrome і чітка ієрархія Send | Єдина піднята command surface з `+`, `@`, `/`, `#`, `!`, моделлю, агентом, голосом і виразною Ember-дією Send |
+| P0 | Відкриття проєкту | Потрібно вводити точний шлях | Keyboard-first навігація папками | Нативний Ember folder picker з breadcrumbs, hidden toggle, clone flow, вибором рядка та keyboard legend |
+| P0 | Сесії | “No sessions.” не пропонує наступної дії | Останні сесії мають назви й легко скануються | Помітна New session, змістовні назви, відносний час і live-індикатор роботи |
+| P0 | Налаштування | Плоский список із 16 пунктів | Групує налаштування за ментальною моделлю | Пошукове modal-вікно з групами Interface, Workspace, Tools і Account та щільними спокійними контролами |
+| P1 | Права панель | Labels обрізаються, а значення icons доводиться вгадувати | Зрозуміла ієрархія панелей | Повні labels у спокійному стані, стійкий active state і точні hover tooltips |
+| P1 | Context | Порожній текст лише повідомляє про відсутність даних | Сильніше оформлення панелі | Наповнена work-status card для context, cost і files та actionable empty state для goal |
+| P1 | Files | File tree не має спокійного стану редактора | Tree та editor працюють як одна поверхня | Empty editor canvas з явною дією вибору файла та shortcut |
+| P1 | Browser / Preview | Немає інформації про запущені сервери | Running servers видимі | Виявлені localhost-сервіси зі status, open/copy actions і станом готовності Preview |
+| P1 | Knowledge | Notes, todos і plans відсутні в основному flow | Knowledge є повноцінною workspace-панеллю | Tabs Notes / Todo / Plans, корисні seeded notes і retrieval через `@note` у composer |
+| P2 | Status / help | Keyboard hints у footer схожі на debug UI | Chrome спокійніший | Компактний work-status bar для project, branch, model і mode; shortcuts сховані за discreet help |
+| P2 | Onboarding | Немає налаштування стилю роботи | У конкурента немає аналога | Persona onboarding для Engineer, Manager, Creator або Blank; defaults адаптуються без обмеження можливостей |
+| P2 | Git | Утилітарний стан не має product framing | Зрозуміла окрема Git-панель | Спокійний “Working tree clean”, branch context, refresh і помітне посилання на stashes |
+| P2 | Command palette | Навігація й команди розпорошені | Keyboard access узгоджений | Єдина ranked palette для Sessions, Commands і Files з контекстними результатами та key hints |
+
 ## Punch list
 
 | Priority | Surface | Problem in live Polyth | What polyth does better | Polyth-better proposal |
@@ -34,18 +53,18 @@ This direction keeps Polyth’s dark, warm character while making it feel like a
 | P2 | Git | Utility state lacks product framing | Clear dedicated Git panel | Calm “Working tree clean” state, branch context, refresh, and a discoverable stashes link |
 | P2 | Command palette | Navigation and commands are distributed | Keyboard access is coherent | One ranked palette across Sessions, Commands, and Files with context-rich results and direct key hints |
 
-## Mockup pages
+## Сторінки макетів / Mockup pages
 
-1. [`mockups/index.html`](mockups/index.html) — review gallery and navigation hub.
-2. [`mockups/01-onboarding-persona.html`](mockups/01-onboarding-persona.html) — persona-led first-run setup.
-3. [`mockups/02-open-project.html`](mockups/02-open-project.html) — keyboard-first folder picker over the workspace.
-4. [`mockups/03-chat-hero.html`](mockups/03-chat-hero.html) — complete new-session hero, composer, Context, rail, and status.
-5. [`mockups/04-composer-session.html`](mockups/04-composer-session.html) — active conversation with code response and docked composer.
-6. [`mockups/05-settings.html`](mockups/05-settings.html) — grouped, searchable Ember settings.
-7. [`mockups/06-files-git.html`](mockups/06-files-git.html) — interactive Files / Git / Preview tool workspace.
-8. [`mockups/07-command-palette.html`](mockups/07-command-palette.html) — cross-workspace keyboard command palette.
-9. [`mockups/08-knowledge-notes.html`](mockups/08-knowledge-notes.html) — Notes / Todo / Plans as reusable local context.
-10. [`mockups/tokens.css`](mockups/tokens.css) — shared Ember tokens and reusable application chrome.
+1. [`mockups/index.html`](mockups/index.html) — галерея для ревʼю та навігаційний хаб / review gallery and navigation hub.
+2. [`mockups/01-onboarding-persona.html`](mockups/01-onboarding-persona.html) — persona-led перший запуск / persona-led first-run setup.
+3. [`mockups/02-open-project.html`](mockups/02-open-project.html) — keyboard-first picker папок поверх workspace / keyboard-first folder picker over the workspace.
+4. [`mockups/03-chat-hero.html`](mockups/03-chat-hero.html) — повний new-session hero, composer, Context, rail і status / complete new-session hero, composer, Context, rail, and status.
+5. [`mockups/04-composer-session.html`](mockups/04-composer-session.html) — активний діалог із code response і docked composer / active conversation with code response and docked composer.
+6. [`mockups/05-settings.html`](mockups/05-settings.html) — згруповані пошукові Ember settings / grouped, searchable Ember settings.
+7. [`mockups/06-files-git.html`](mockups/06-files-git.html) — інтерактивна Files / Git / Preview surface.
+8. [`mockups/07-command-palette.html`](mockups/07-command-palette.html) — keyboard command palette для всього workspace / cross-workspace keyboard command palette.
+9. [`mockups/08-knowledge-notes.html`](mockups/08-knowledge-notes.html) — Notes / Todo / Plans як повторно використовуваний local context / reusable local context.
+10. [`mockups/tokens.css`](mockups/tokens.css) — спільні Ember tokens і reusable application chrome.
 
 ## Approval gate / Точка погодження
 
