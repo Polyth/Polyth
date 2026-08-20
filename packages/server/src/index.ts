@@ -124,22 +124,24 @@ export async function boot(opts: BootOptions = {}) {
       runtimesByProject.set(key, Promise.resolve(facade));
     };
 
+    const withRespawn = async <T>(fn: () => Promise<T>): Promise<T> => {
+      try {
+        return await fn();
+      } catch (err) {
+        if (!isTransportError(err)) throw err;
+        console.warn(`[polyth] opencode transport error for ${key}; respawning`, err);
+        await respawn();
+        return fn();
+      }
+    };
+
     const facade: AgentRuntime = {
       capabilities: () => inner.capabilities(),
-      models: () => inner.models(),
-      agents: () => inner.agents(),
-      sessions: () => inner.sessions(),
-      history: (sessionId) => inner.history(sessionId),
-      async ensureSession(canonical) {
-        try {
-          return await inner.ensureSession(canonical);
-        } catch (err) {
-          if (!isTransportError(err)) throw err;
-          console.warn(`[polyth] opencode transport error for ${key}; respawning`, err);
-          await respawn();
-          return inner.ensureSession(canonical);
-        }
-      },
+      models: () => withRespawn(() => inner.models()),
+      agents: () => withRespawn(() => inner.agents()),
+      sessions: () => withRespawn(() => inner.sessions()),
+      history: (sessionId) => withRespawn(() => inner.history(sessionId)),
+      ensureSession: (canonical) => withRespawn(() => inner.ensureSession(canonical)),
       startTurn: (req) => inner.startTurn(req),
       abort: (sessionId) => inner.abort(sessionId),
       replyPermission: (sessionId, requestId, reply) => inner.replyPermission(sessionId, requestId, reply),
