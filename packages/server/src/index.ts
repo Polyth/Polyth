@@ -93,21 +93,28 @@ export async function boot(opts: BootOptions = {}) {
       err instanceof Error ? `${err.message} ${String(err.cause ?? "")}` : String(err),
     );
 
-  const spawnRuntime = async (projectId: string, cwd?: string): Promise<AgentRuntime> => {
-    const project = await projects.get(projectId);
-    return createOpenCodeRuntime({
-      cwd: cwd ?? project?.path ?? process.cwd(), sessionIdMap,
+  // The pool key must be the *resolved* cwd, never the raw argument: callers
+  // that only know the project (`/api/models`) and callers that also pass the
+  // project path (session start) address the same working tree. Keying them
+  // apart spawned two `opencode serve` for one cwd, and the second spawn reaps
+  // the first through the cwd-keyed pidfile — leaving the surviving facade
+  // pointing at a killed process, so model/agent lookups came back empty.
+  const cwdFor = async (projectId: string, cwd?: string): Promise<string> =>
+    cwd ?? (await projects.get(projectId))?.path ?? process.cwd();
+
+  const spawnRuntime = async (projectId: string, cwd: string): Promise<AgentRuntime> =>
+    createOpenCodeRuntime({
+      cwd, sessionIdMap,
       ...(opts.opencode?.port ? { port: opts.opencode.port } : {}),
       ...(opts.opencode?.bin ? { bin: opts.opencode.bin } : {}),
       ...(opts.opencode?.hostname ? { hostname: opts.opencode.hostname } : {}),
     });
-  };
 
   // Stable facade per pool key: when ensureSession dies with a transport error
   // (serve process gone / poisoned socket), drop the cached promise, respawn,
   // and retry once. Callers keep the same handle, so listeners wired against
   // it keep receiving events from the fresh runtime.
-  const facadeFor = (key: string, projectId: string, cwd: string | undefined, first: AgentRuntime): AgentRuntime => {
+  const facadeFor = (key: string, projectId: string, cwd: string, first: AgentRuntime): AgentRuntime => {
     let inner = first;
     const listeners = new Set<(sessionId: string, ev: RuntimeEvent) => void>();
     const fanout = (sessionId: string, ev: RuntimeEvent) => { for (const cb of listeners) cb(sessionId, ev); };
@@ -122,10 +129,24 @@ export async function boot(opts: BootOptions = {}) {
       runtimesByProject.set(key, Promise.resolve(facade));
     };
 
+    // Read-only lookups are idempotent, so they get the same respawn-once
+    // recovery as ensureSession: a serve process that died between requests
+    // must not blank the model/agent pickers until the next session start.
+    const reviving = async <T>(what: string, call: () => Promise<T>): Promise<T> => {
+      try {
+        return await call();
+      } catch (err) {
+        if (!isTransportError(err)) throw err;
+        console.warn(`[polyth] opencode transport error for ${key} (${what}); respawning`, err);
+        await respawn();
+        return call();
+      }
+    };
+
     const facade: AgentRuntime = {
       capabilities: () => inner.capabilities(),
-      models: () => inner.models(),
-      agents: () => inner.agents(),
+      models: () => reviving("models", () => inner.models()),
+      agents: () => reviving("agents", () => inner.agents()),
       sessions: () => inner.sessions(),
       history: (sessionId) => inner.history(sessionId),
       async ensureSession(canonical) {
@@ -152,16 +173,17 @@ export async function boot(opts: BootOptions = {}) {
   };
 
   const runtimes: RuntimePool = {
-    forProject(projectId, cwd) {
-      const key = cwd ? `${projectId}::${cwd}` : projectId;
+    async forProject(projectId, cwd) {
+      const dir = await cwdFor(projectId, cwd);
+      const key = `${projectId}::${dir}`;
       let p = runtimesByProject.get(key);
       if (!p) {
         p = (async () => {
           try {
-            return facadeFor(key, projectId, cwd, await spawnRuntime(projectId, cwd));
+            return facadeFor(key, projectId, dir, await spawnRuntime(projectId, dir));
           } catch (err) {
             if (!isTransportError(err)) throw err;
-            return facadeFor(key, projectId, cwd, await spawnRuntime(projectId, cwd)); // one respawn retry
+            return facadeFor(key, projectId, dir, await spawnRuntime(projectId, dir)); // one respawn retry
           }
         })();
         runtimesByProject.set(key, p);
