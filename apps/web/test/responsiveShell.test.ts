@@ -94,8 +94,9 @@ test("header owns the drawer trigger, compact view picker, and panel trigger", a
   assert.ok(header.includes("Open projects and sessions"), "drawer trigger accessible name");
   assert.ok(header.includes("NarrowPanelTrigger"), "registry-backed panel trigger rendered from the header");
   assert.ok(header.includes("Change workspace view, current:"), "compact view trigger keeps the current label in its name");
-  assert.ok(header.includes("VIEW_GROUPS.flatMap"), "compact picker derives from VIEW_GROUPS");
-  assert.equal(header.match(/const VIEW_GROUPS/g)?.length, 1, "exactly one view list");
+  assert.ok(header.includes("const resolved = useResolvedCapabilities()"), "compact picker consumes the shared capability model");
+  assert.ok(header.includes("VIEW_OF_CAPABILITY[c.descriptor.id]"), "compact picker maps capability descriptors to views");
+  assert.ok(!header.includes("const VIEW_GROUPS"), "no duplicate hard-coded view list");
   assert.ok(header.includes('"Auto-accept on" : "Auto-accept off"'), "auto-accept state exposed as text, not color alone");
 });
 
