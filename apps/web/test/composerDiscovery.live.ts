@@ -191,6 +191,9 @@ async function openApp(opts: OpenOpts = {}): Promise<Page> {
         stop() { (this as unknown as { onend?: () => void }).onend?.(); }
         abort() { (this as unknown as { onend?: () => void }).onend?.(); }
       }
+      // Both names: headless Chromium may expose a native unprefixed
+      // SpeechRecognition, which the app prefers over the webkit alias.
+      Object.defineProperty(window, "SpeechRecognition", { value: FakeRecognition, configurable: true });
       Object.defineProperty(window, "webkitSpeechRecognition", { value: FakeRecognition, configurable: true });
     });
   }
@@ -251,13 +254,19 @@ test("add menu: truthful rows, four-state details, ARIA, and no invented capabil
   assert.equal(await trigger.getAttribute("aria-expanded"), "true");
   assert.equal(await addMenu(page).getAttribute("role"), "menu");
 
-  // Catalog details resolve to the authoritative counts (never a guess).
-  await page.waitForFunction(() =>
-    document.querySelector("#composer-add-menu")?.textContent?.includes("2 available"));
+  // Catalog details resolve to the authoritative endpoint's count (project
+  // commands plus built-ins) — never a guess.
+  const commandCount = (await fetch(
+    `${BASE}/api/commands?projectId=${PROJECT_ID}`,
+  ).then((r) => r.json()) as unknown[]).length;
+  assert.ok(commandCount >= 2, "fixture project commands are served");
+  await page.waitForFunction((n) =>
+    document.querySelector("#composer-add-menu")?.textContent?.includes(`${n} available`), commandCount);
 
+  // textContent: group headers are CSS-uppercased, which innerText reflects.
   const labels = await addMenu(page)
     .locator(".add-menu-group, .add-menu-label")
-    .allInnerTexts();
+    .allTextContents();
   assert.deepEqual(labels, [
     "Add context", "Upload files…", "Mention project file…",
     "Link GitHub issue or pull request…", "Attach goal…",
@@ -265,7 +274,7 @@ test("add menu: truthful rows, four-state details, ARIA, and no invented capabil
   ]);
 
   const menuText = (await addMenu(page).innerText()).toLowerCase();
-  assert.ok(menuText.includes("2 available"), "command catalog count");
+  assert.ok(menuText.includes(`${commandCount} available`), "command catalog count");
   assert.ok(menuText.includes("no snippets yet"), "successful-empty snippet catalog");
   assert.ok(menuText.includes("copies files into this project’s _inbox"), "upload outcome copy");
   assert.ok(menuText.includes("adds a link only"), "github link-only copy");
@@ -324,16 +333,22 @@ test("menu insertion equals typed sigils; the popup is an honest combobox", asyn
   assert.equal(await input.inputValue(), "@src/alpha.ts ");
   await page.waitForSelector(".ac-popup", { state: "detached" });
 
-  // Commands → "/" on its own valid line; both real commands are listed.
+  // Commands → "/" on its own valid line; the list is exactly what the
+  // authoritative endpoint serves (project commands plus built-ins).
+  const served = (await fetch(
+    `${BASE}/api/commands?projectId=${PROJECT_ID}`,
+  ).then((r) => r.json()) as Array<{ name: string }>).map((c) => `/${c.name}`);
   await openAddMenu(page);
   await menuItem(page, "Commands").click();
   await page.waitForSelector(".ac-item", { state: "visible" });
   assert.equal(await input.inputValue(), "@src/alpha.ts \n/");
-  assert.deepEqual(
-    await page.locator(".ac-item .ac-label").allInnerTexts(),
-    ["/plan", "/review"],
-  );
+  assert.deepEqual(await page.locator(".ac-item .ac-label").allInnerTexts(), served);
+  assert.ok(served.includes("/plan") && served.includes("/review"), "fixture commands listed");
   await shot(page, "ac_command_results.png");
+  // Filtering + Enter completes the fixture command with its trailing space.
+  await page.keyboard.type("pla");
+  await page.waitForFunction(() =>
+    document.querySelectorAll(".ac-item").length === 1);
   await page.keyboard.press("Enter");
   assert.equal(await input.inputValue(), "@src/alpha.ts \n/plan ");
 
@@ -415,7 +430,9 @@ test("shell entry: labeled mode and Run from an empty draft; a drafted prompt is
     await shellRow.locator(".add-menu-reason").innerText(),
     "Send or clear this draft before entering Shell mode",
   );
-  await shellRow.click();
+  // force: Playwright's actionability treats aria-disabled as not enabled;
+  // the raw click still reaches the app's own guard.
+  await shellRow.click({ force: true });
   assert.equal(await input.inputValue(), "deploy the app", "draft is never reinterpreted");
   await page.keyboard.press("Escape");
   await closePage(page);
@@ -447,9 +464,12 @@ test("github link: mismatch reports the exact error with no pill; a match create
   await page.locator(".github-link-dialog button", { hasText: "Add link" }).click();
   await page.waitForSelector(".github-link-dialog", { state: "detached" });
   await page.waitForSelector(".attachment-pill.att-url", { state: "visible" });
-  const link = page.locator(".attachment-pill.att-url .att-link");
-  assert.equal((await link.innerText()).trim(), "Issue #12", "pill is the reference only — no issue body");
-  assert.equal(await link.getAttribute("href"), match);
+  const pill = page.locator(".attachment-pill.att-url");
+  assert.equal(await pill.count(), 1, "exactly one link pill");
+  const name = pill.locator(".att-name");
+  assert.equal((await name.innerText()).trim(), "Issue #12", "pill is the reference only — no issue body");
+  assert.equal(await name.getAttribute("title"), match, "pill detail is the sanitized URL");
+  await pill.locator(".att-remove").waitFor({ state: "visible" });
   assert.equal(
     (await page.locator(".composer-attach-note").innerText()).trim(),
     "Attachment compatibility is not reported by this provider",
@@ -504,11 +524,10 @@ test("voice lifecycle: listening and failure are visible; transcripts stay draft
   assert.equal((await page.locator(".mic-status").innerText()).trim(), "Listening…");
   assert.equal(await page.locator(".mic-btn").getAttribute("aria-pressed"), "true");
   assert.equal((await page.locator(".mic-btn .mic-label").innerText()).trim(), "Stop dictation");
-  // One polite announcement carries the transition.
-  assert.equal(
-    await page.locator("[aria-live='polite']").innerText(),
-    "Listening…",
-  );
+  // One polite announcement carries the transition (textContent: the region
+  // is visually hidden, so innerText reports empty).
+  await page.waitForFunction(() =>
+    document.querySelector("[aria-live='polite']")?.textContent?.includes("Listening…"));
   await shot(page, "voice_listening.png");
 
   // A final result becomes draft text only — no send, no session event.
@@ -554,7 +573,8 @@ test("selectors: truthful names, contract-bounded model detail, profile at zero 
   assert.ok((await modelChip.getAttribute("aria-label"))?.startsWith("Select model, current "));
   await modelChip.click();
   await page.waitForSelector(".picker-pop", { state: "visible" });
-  const row = page.locator(".picker-item", { hasText: "Fable Mini" });
+  // The detail text distinguishes the model row from the "Default: …" row.
+  const row = page.locator(".picker-item", { hasText: "Synthetic · 128k context" });
   assert.equal(await row.locator(".palette-meta").innerText(), "Synthetic · 128k context");
   const popText = (await page.locator(".picker-pop").innerText()).toLowerCase();
   for (const banned of ["$", "cost", "variant", "attach", "vision", "image"]) {
@@ -684,11 +704,20 @@ test("coarse pointer: the 44px target contract holds at desktop width", async ()
 
 test("sequential focus order: editor → selectors → voice → Add → focused editor → primary action", async () => {
   const page = await openApp();
+  // A nonempty draft makes the primary action operable (a disabled Send is
+  // rightly skipped by sequential focus).
   await editor(page).click();
+  await page.keyboard.type("focus order probe");
   const visited: string[] = [];
   for (let i = 0; i < 14; i++) {
     await page.keyboard.press("Tab");
-    const cls = await page.evaluate(() => (document.activeElement as HTMLElement | null)?.className ?? "");
+    // Signature carries the wrapping .picker classes: the trigger button
+    // itself is a plain chip.
+    const cls = await page.evaluate(() => {
+      const el = document.activeElement as HTMLElement | null;
+      if (!el) return "";
+      return `${el.className} ${(el.closest(".picker") as HTMLElement | null)?.className ?? ""}`;
+    });
     visited.push(cls);
   }
   const order = [
