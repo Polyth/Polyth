@@ -12,6 +12,7 @@ import CopyButton from "./CopyButton.tsx";
 import Dialog from "./a11y/Dialog.tsx";
 import AttachmentPills from "./AttachmentPills.tsx";
 import SelectionMenu from "./SelectionMenu.tsx";
+import SlotHost from "./slots/SlotHost.ts";
 import type { RenderModel, RenderMessage, ToolMsg, AssistantMsg, TaskActivityMsg, UserMsg } from "../reduce.ts";
 
 // Merged thinking block (WP4): collapsible with a first-line preview, or a
@@ -44,6 +45,7 @@ function MessageActions({ m, onRewind, onFork }: {
   onFork?: (message: UserMsg) => void;
 }) {
   const [flash, setFlash] = useState("");
+  const sessionId = useStore((s) => s.activeSessionId);
   const doCopy = async (label: string, text: string) => {
     const ok = await copyText(text);
     setFlash(ok ? `${label} ✓` : "copy failed");
@@ -63,6 +65,10 @@ function MessageActions({ m, onRewind, onFork }: {
       {m.kind === "user" && onFork && (
         <button className="small-btn" title="Fork a new session from this prompt" onClick={() => onFork(m)}>Fork</button>
       )}
+      <SlotHost
+        slot="session.message.actions"
+        context={{ sessionId, kind: m.kind, messageId: m.id, eventSeq: m.eventSeq }}
+      />
     </div>
   );
 }
@@ -380,12 +386,22 @@ export default function Timeline({ model }: { model: RenderModel }) {
     );
   };
 
+  // Bounded, already-reduced summary for the timeline before/after hosts —
+  // contributions never receive live events or a mutable model reference.
+  const slotSummary = {
+    sessionId,
+    messageCount: model.messages.length,
+    promptCount: prompts.length,
+    turnStatus: turn?.status ?? null,
+  };
+
   return (
     <div className="timeline" ref={ref} onScroll={onScroll}>
       {showNav && <PromptNavigator prompts={prompts} onJump={jump} />}
       {promptMessages.length > 0 && (
         <button className="timeline-open small-btn" onClick={() => setTimelineOpen(true)}>Timeline</button>
       )}
+      <SlotHost slot="session.timeline.before" context={slotSummary} />
       {model.messages.length === 0 && (
         <div className="empty">
           <div>No messages yet — say hi below.</div>
@@ -442,6 +458,7 @@ export default function Timeline({ model }: { model: RenderModel }) {
         </div>
       )}
       {footer && <div className="turn-footer">{footer}</div>}
+      <SlotHost slot="session.timeline.after" context={slotSummary} />
       <SelectionMenu container={ref} />
       {timelineOpen && (
         <TimelineDialog

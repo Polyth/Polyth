@@ -1,10 +1,10 @@
-import { Fragment, useState, useRef, useEffect, useCallback, type ClipboardEvent, type KeyboardEvent } from "react";
+import { useState, useRef, useEffect, useCallback, type ClipboardEvent, type KeyboardEvent } from "react";
 import { getState, useActiveModel, useStore, setActiveView, setUiError } from "../store.ts";
 import { sendMessage, abortSession, createSession } from "../init.ts";
 import { api, type SlashCommand, type SnippetDef } from "../api.ts";
 import { filterCommands, filterSnippets, loadDraft, saveDraft, type AutocompleteItem } from "../utils.ts";
 import { PERSONAS, usePrefs } from "../prefs.ts";
-import { renderSlot } from "../slots.ts";
+import SlotHost from "./slots/SlotHost.ts";
 import { dragKind, dropIntoSession } from "../dnd.ts";
 import {
   attachUpload, parseGithubUrl, removeAttachment, takeAttachments,
@@ -392,8 +392,8 @@ export default function Composer({ variant = "docked" }: { variant?: "docked" | 
     [commands, snippets, activeProjectId],
   );
 
-  const leading = renderSlot("composer.leading", { sessionId: session?.id });
-  const trailing = renderSlot("composer.trailing", { sessionId: session?.id });
+  // Bounded context for the composer.leading/trailing hosts (EXTENSION-SEAMS).
+  const slotContext = { sessionId: session?.id, projectId: activeProjectId ?? undefined, variant, working };
 
   // Favorites float first (Settings > Providers & Models); picking records recency.
   const modelPrefs = useModelPrefs();
@@ -556,7 +556,7 @@ export default function Composer({ variant = "docked" }: { variant?: "docked" | 
         )}
       </div>
       <div className="composer-bar composer-row">
-        {leading.map((n, i) => <Fragment key={i}>{n}</Fragment>)}
+        <SlotHost slot="composer.leading" context={slotContext} />
         {!simple && !noModels && (
           <Picker
             label="Model" direction="up" items={modelItems} value={modelValue} onPick={pickModel}
@@ -594,7 +594,7 @@ export default function Composer({ variant = "docked" }: { variant?: "docked" | 
           onClick={() => setFocusMode(true)}
         >⤢</button>
         <span className="header-spacer" />
-        {trailing.map((n, i) => <Fragment key={i}>{n}</Fragment>)}
+        <SlotHost slot="composer.trailing" context={slotContext} />
         {working ? (
           <>
             <button className="send composer-delivery" onClick={() => send()} disabled={(!text.trim() && attachments.length === 0) || (!shellMode && noModels)}

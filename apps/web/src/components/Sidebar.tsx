@@ -11,6 +11,7 @@ import { friendlyError } from "../settings.ts";
 import { Icon } from "../icons.tsx";
 import SessionList from "./sidebar/SessionList.tsx";
 import ImportSessionsDialog from "./ImportSessionsDialog.tsx";
+import SlotHost from "./slots/SlotHost.ts";
 
 function projectGlyph(name: string): string {
   const words = name.trim().split(/[\s\-_/]+/).filter(Boolean);
@@ -21,6 +22,7 @@ function projectGlyph(name: string): string {
 export default function Sidebar() {
   const projects = useStore((s) => s.projects);
   const activeProjectId = useStore((s) => s.activeProjectId);
+  const activeSessionId = useStore((s) => s.activeSessionId);
   const drawerOpen = useStore((s) => s.sidebarOpen);
   const branch = useStore((s) => s.gitBranch);
   const productName = useStore((s) => s.settings.productName);
@@ -136,6 +138,7 @@ export default function Sidebar() {
                       setActiveView("git");
                     }}>Git &amp; worktrees</button>
                   )}
+                  <SlotHost slot="sidebar.project.actions" context={{ projectId: p.id }} />
                 </div>
               )}
             </div>
@@ -154,6 +157,10 @@ export default function Sidebar() {
               <SessionList projectId={project.id} />
             </div>
           )}
+          <SlotHost
+            slot="app.nav"
+            context={{ projectId: activeProjectId, sessionId: activeSessionId, expanded: drawerOpen }}
+          />
         </div>
         <div className="side-foot">
           <button className="new-session" onClick={onNewSession} disabled={!activeProjectId}>

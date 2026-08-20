@@ -4,8 +4,8 @@
 // never enumerates panels. Visited panels stay mounted (keep-alive) so tree,
 // editor, and scroll state survive switching; per-surface width and the
 // last-open surface persist in polyth.railPrefs.
-import { Fragment, useEffect, useRef, useState, type CSSProperties, type JSX, type PointerEvent as ReactPointerEvent } from "react";
-import { renderSlot } from "../slots.ts";
+import { useEffect, useRef, useState, type CSSProperties, type JSX, type PointerEvent as ReactPointerEvent } from "react";
+import SlotHost, { useSlotVersion } from "./slots/SlotHost.ts";
 import { useActiveModel, useStore, setActiveView, setOverlay, setRailPlugin, toggleRailPlugin, type AppView } from "../store.ts";
 import { PLUGIN_LABELS, togglePlugin, usePrefs, type PluginId } from "../prefs.ts";
 import { Icon } from "../icons.tsx";
@@ -59,6 +59,7 @@ export default function ContextRail() {
   };
 
   useSurfaceVersion(); // re-render when surfaces register/unregister
+  useSlotVersion(); // …and when workspace.right.tabs slot items arrive/leave
   const surfaces = visibleSurfaces([...listSurfaces(), ...slotSurfaces()], prefs.plugins, ctx);
   const open = surfaces.find((s) => s.id === rail) ?? null;
 
@@ -103,7 +104,6 @@ export default function ContextRail() {
 
   const jumps = JUMPS.filter((j) => prefs.plugins.includes(j.plugin));
   const togglable = (Object.keys(PLUGIN_LABELS) as PluginId[]).filter((id) => id !== "session");
-  const slotTabs = renderSlot("contextRail.tabs", { tab: rail, onSelect: toggleRailPlugin });
   const badgeOf = (s: RailSurface): number => s.badge?.(ctx) ?? 0;
 
   return (
@@ -117,7 +117,7 @@ export default function ContextRail() {
           <div className="rail-head">
             <span className="rail-title">{open?.title ?? ""}</span>
             <span className="header-spacer" />
-            <div className="rail-tabs">{slotTabs.map((n, i) => <Fragment key={i}>{n}</Fragment>)}</div>
+            <div className="rail-tabs"><SlotHost slot="contextRail.tabs" context={{ tab: rail, onSelect: toggleRailPlugin }} /></div>
             <button className="rail-toggle" onClick={() => setRailPlugin(null)} title="Close panel" aria-label="Close panel">»</button>
           </div>
           {kept.map((s) => (

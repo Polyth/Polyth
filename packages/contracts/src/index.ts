@@ -404,16 +404,25 @@ export interface ProjectService {
 
 // ---------------------------------------------------------------- UI contributions (host + client shared shapes)
 
-export type UiSlot =
-  | "app.nav" | "session.header.actions" | "session.list.badges"
-  | "composer.leading" | "composer.trailing" | "contextRail.tabs"
-  | "settings.pages" | "commandPalette.commands"
+/** Canonical slot vocabulary — the runtime list backs `UiSlot` so the
+ *  server-managed manifest boundary can reject unknown slot names. */
+export const UI_SLOTS = [
+  "app.nav", "session.header.actions", "session.list.badges",
+  "composer.leading", "composer.trailing", "contextRail.tabs",
+  "settings.pages", "commandPalette.commands",
   // parity slots (WP1): focused seams instead of mega-component imports
-  | "workspace.main.tabs" | "workspace.right.tabs"
-  | "session.timeline.before" | "session.timeline.after"
-  | "session.message.actions"
-  | "sidebar.project.actions" | "sidebar.session.actions"
-  | "workStatus.sections";
+  "workspace.main.tabs", "workspace.right.tabs",
+  "session.timeline.before", "session.timeline.after",
+  "session.message.actions",
+  "sidebar.project.actions", "sidebar.session.actions",
+  "workStatus.sections",
+] as const;
+
+export type UiSlot = (typeof UI_SLOTS)[number];
+
+export function isUiSlot(value: string): value is UiSlot {
+  return (UI_SLOTS as readonly string[]).includes(value);
+}
 
 export interface UiSlotItem {
   id: string;

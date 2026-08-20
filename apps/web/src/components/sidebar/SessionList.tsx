@@ -12,6 +12,7 @@ import { getUiSettings } from "../../uiPrefs.ts";
 import { firstUserText } from "../../utils.ts";
 import { announce } from "../a11y/live.tsx";
 import { worktreeLabel } from "../../worktreeSessions.ts";
+import SlotHost from "../slots/SlotHost.ts";
 import {
   groupSessions,
   listGroupings,
@@ -177,6 +178,10 @@ function SessionRow({
               {s.pinned && <span className="session-pin" title="Pinned" aria-label="Pinned">◆</span>}
               <LabelDots ids={s.labelIds} labels={labels} />
               <AttentionBadges s={s} />
+              <SlotHost
+                slot="session.list.badges"
+                context={{ sessionId: s.id, questions: s.attention?.questions ?? 0, permissions: s.attention?.permissions ?? 0 }}
+              />
             </span>
             <span className="session-sub">
               {s.worktreeState === "missing" ? "worktree missing" : s.status === "working" ? "Agent working" : s.status}
@@ -224,6 +229,7 @@ function SessionRow({
               <span className="label-dot" style={{ background: l.color }} /> {l.name} {(s.labelIds ?? []).includes(l.id) ? "✓" : ""}
             </button>
           ))}
+          <SlotHost slot="sidebar.session.actions" context={{ sessionId: s.id, status: s.status }} />
         </div>
       )}
     </div>

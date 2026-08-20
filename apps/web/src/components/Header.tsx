@@ -6,6 +6,7 @@ import { friendlyError, shortcutLabel } from "../settings.ts";
 import { GoalAttachForm } from "./GoalStrip.tsx";
 import { contextGauge, type ContextGauge } from "../reduce.ts";
 import { api } from "../api.ts";
+import SlotHost from "./slots/SlotHost.ts";
 
 const STROKE = { fill: "none", stroke: "currentColor", strokeWidth: 1.5, strokeLinecap: "round", strokeLinejoin: "round" } as const;
 
@@ -232,6 +233,12 @@ export default function Header() {
           {subtitle && <div className="header-sub">{subtitle}</div>}
         </div>
         {session && <AutoAcceptChip sessionId={session.id} effective={!!session.autoAccept} />}
+        {session && (
+          <SlotHost
+            slot="session.header.actions"
+            context={{ sessionId: session.id, status: session.status, working: model.turn?.status === "working" }}
+          />
+        )}
         <nav className="view-switcher" aria-label="Views">
           {VIEW_GROUPS.map((group, gi) => (
             <span className="view-group" key={gi}>
