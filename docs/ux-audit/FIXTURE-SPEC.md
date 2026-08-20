@@ -29,9 +29,11 @@ umask 077
 Before creating anything, require `POLYTH_SOURCE/package.json` and
 `POLYTH_SOURCE/packages/session/src/index.ts` to exist. Refuse to proceed if
 any of `FIXTURE_ROOT`, `WORKTREE_ROOT`, `FIXTURE_HOME`, or `FIXTURE_DATA`
-already exists. Do not delete or adopt a pre-existing path. Create each path
-with mode `0700`, and put a file named `.ux-fixture-sentinel` containing
-`UX-FIXTURE-SPEC 58a2` in `FIXTURE_ROOT`, `FIXTURE_HOME`, and `FIXTURE_DATA`.
+already exists. Do not delete or adopt a pre-existing path. Create
+`FIXTURE_ROOT`, `FIXTURE_HOME`, and `FIXTURE_DATA` with mode `0700`, and put a
+file named `.ux-fixture-sentinel` containing `UX-FIXTURE-SPEC 58a2` in each.
+Leave `WORKTREE_ROOT` absent until `git worktree add` creates it, then set that
+directory to mode `0700`.
 
 All names, messages, file contents, Git identity, browser input, and sessions
 are synthetic. The repository has no remote. No `.env`, token, key, cookie,
@@ -271,22 +273,25 @@ M  src/staged.ts
 ## Isolated session seed
 
 `scripts/seed-sessions.mjs` is a fixture-only offline seeder. It must fail
-unless all four root environment variables match the exact `/tmp/...-58a2`
-paths and both data/root sentinels are present. It dynamically imports
-`createStore` from
+unless `FIXTURE_ROOT`, `WORKTREE_ROOT`, and `FIXTURE_DATA` match their exact
+`/tmp/...-58a2` values, `POLYTH_SOURCE` contains the expected package files,
+and both data/root sentinels are present. It dynamically imports `createStore`
+from
 `$POLYTH_SOURCE/packages/session/src/index.ts`, writes only
 `$FIXTURE_DATA/projects.json` and `$FIXTURE_DATA/sessions.db`, and closes the
 store before exit. It performs no network requests and starts no backend.
 
-Write one project record:
+Write `projects.json` as an array containing exactly one project record:
 
 ```json
-{
-  "id": "ux-fixture-project",
-  "path": "/tmp/polyth-ux-fixture-58a2",
-  "name": "Disposable UX Fixture",
-  "createdAt": "<seed time>"
-}
+[
+  {
+    "id": "ux-fixture-project",
+    "path": "/tmp/polyth-ux-fixture-58a2",
+    "name": "Disposable UX Fixture",
+    "createdAt": "<numeric seed time>"
+  }
+]
 ```
 
 Append each session's events before upserting its projection. Use the fixed
@@ -295,11 +300,11 @@ seed time so the sidebar has useful recent ordering.
 
 | Session id | Title | Projection status | Required event tail / metadata |
 |---|---|---|---|
-| `fixture-idle` | `Idle — synthetic review complete` | `idle` | `session/created`, safe `user/message`, finalized `assistant/message`, `turn/stopped` with `reason:"completed"` |
+| `fixture-idle` | `Idle — synthetic review complete` | `idle` | `session/created`, safe `user/message`, `turn/started`, finalized `assistant/message`, `turn/stopped` with the same turn id and `reason:"completed"` |
 | `fixture-working` | `Working — synthetic analysis` | `working` | `session/created`, safe `user/message`, `turn/started`, then one `assistant/chunk` saying it is analyzing synthetic files; no stopped event |
 | `fixture-permission` | `Permission — read fixture guide` | `waiting` | `session/created`, `turn/started`, unresolved `permission/requested` |
 | `fixture-question` | `Question — choose sample view` | `waiting` | `session/created`, `turn/started`, unresolved `question/asked` |
-| `fixture-archived` | `Archived — completed synthetic task` | `archived` | completed safe exchange followed by `session/archived` |
+| `fixture-archived` | `Archived — completed synthetic task` | `archived` | the same complete turn sequence as idle, followed by `session/archived` |
 | `fixture-worktree` | `Worktree — isolated branch` | `idle` | `session/created` with worktree path; projection fields below |
 
 No projection may contain `backendSessionId`. The working and waiting states
