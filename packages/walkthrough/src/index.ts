@@ -7,6 +7,13 @@
 import type { JsonObject, SessionEvent, WalkthroughStepDto, WalkthroughStepStatus } from "@polyth/contracts";
 
 export type { WalkthroughStepDto, WalkthroughStepStatus } from "@polyth/contracts";
+export {
+  WALKTHROUGH_PROMPT_VERSION, buildWalkthroughPrompt, heuristicStages,
+  parseGeneratedStages, parseUnifiedDiffText, sourceDigestOf,
+} from "./generate.ts";
+export type { DiffFileSummary, DiffHunk, StageParse } from "./generate.ts";
+export { REVIEW_PROMPT_VERSION, buildReviewPrompt, parseReviewAssessment } from "./review.ts";
+export type { ReviewParse } from "./review.ts";
 
 const FILE_TOOLS = new Set(["write", "edit", "patch"]);
 const MAX_DIFF_LINES = 1500;

@@ -58,6 +58,9 @@ export interface PendingPermission {
   status: "pending" | "resolved";
   reply?: "once" | "always" | "reject";
   time: number;
+  /** Server-generated, secret-redacted preview (WP15; old events lack it). */
+  preview?: { title: string; lines: string[]; risk?: "low" | "medium" | "high" };
+  allowedScopes?: Array<"once" | "session" | "project">;
 }
 
 export interface PendingQuestion {
@@ -101,6 +104,17 @@ export interface TurnState {
   error?: string;
 }
 
+export interface TaskListState {
+  listId: string;
+  revision: number;
+  items: Array<{ id: string; text: string; status: "pending" | "active" | "done" | "failed" }>;
+}
+
+export interface SubagentState {
+  revision: number;
+  agents: Array<{ sessionId: string; label: string; status: string; currentTask?: string }>;
+}
+
 export interface RenderModel {
   messages: RenderMessage[];
   permissions: PendingPermission[];
@@ -111,6 +125,9 @@ export interface RenderModel {
   multirun: MultirunDto | null;
   fusion: FusionDto | null;
   fusionPrompt: string;
+  /** Latest revisioned task/subagent snapshots (WP8); replay-deterministic. */
+  tasks: TaskListState | null;
+  subagents: SubagentState | null;
   version: number; // bumps on every applied event (cheap change signal)
 }
 
@@ -125,6 +142,8 @@ export function emptyModel(): RenderModel {
     multirun: null,
     fusion: null,
     fusionPrompt: "",
+    tasks: null,
+    subagents: null,
     version: 0,
   };
 }
@@ -243,9 +262,39 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
       }
       break;
     }
+    case "task/snapshot": {
+      const revision = num(d, "revision") ?? 0;
+      // Snapshots are full state: apply only monotonically increasing revisions
+      // so out-of-order delivery can never regress the projection.
+      if (model.tasks && revision <= model.tasks.revision) break;
+      const items = Array.isArray(d.items) ? (d.items as TaskListState["items"]) : [];
+      model.tasks = { listId: str(d, "listId") ?? "todo", revision, items };
+      break;
+    }
+    case "subagent/snapshot": {
+      const revision = num(d, "revision") ?? 0;
+      if (model.subagents && revision <= model.subagents.revision) break;
+      const agents = Array.isArray(d.agents) ? (d.agents as SubagentState["agents"]) : [];
+      model.subagents = { revision, agents };
+      break;
+    }
     case "permission/requested": {
       const requestId = str(d, "requestId") ?? "";
       if (!model.permissions.some((p) => p.requestId === requestId)) {
+        const rawPreview = obj(d, "preview") as { title?: unknown; lines?: unknown; risk?: unknown } | undefined;
+        const riskRaw = rawPreview?.risk;
+        const risk: "low" | "medium" | "high" | undefined =
+          riskRaw === "low" || riskRaw === "medium" || riskRaw === "high" ? riskRaw : undefined;
+        const preview = rawPreview && typeof rawPreview.title === "string" && Array.isArray(rawPreview.lines)
+          ? {
+              title: rawPreview.title,
+              lines: rawPreview.lines.filter((l): l is string => typeof l === "string"),
+              ...(risk ? { risk } : {}),
+            }
+          : undefined;
+        const scopes = strArr(d, "allowedScopes").filter(
+          (s): s is "once" | "session" | "project" => s === "once" || s === "session" || s === "project",
+        );
         model.permissions.push({
           requestId,
           permission: str(d, "permission") ?? "",
@@ -253,6 +302,8 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
           tool: str(d, "tool"),
           status: "pending",
           time: ev.time,
+          ...(preview ? { preview } : {}),
+          ...(scopes.length > 0 ? { allowedScopes: scopes } : {}),
         });
       }
       break;

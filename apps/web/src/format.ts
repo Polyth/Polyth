@@ -31,14 +31,21 @@ export function modKey(platform: string): string {
 
 export const MOD = modKey(typeof navigator === "undefined" ? "" : navigator.platform ?? "");
 
-/** Auto-title placeholder sessions from their first user message (UX-43). */
-export function deriveSessionTitle(title: string, firstUserText?: string): string {
+/** Full title used by hover/focus affordances before visual truncation. */
+export function fullSessionTitle(title: string, firstUserText?: string): string {
   const t = title.trim();
   const isPlaceholder = t === "" || /^new session$/i.test(t) || /^\(untitled/.test(t);
   if (!isPlaceholder || !firstUserText) return t || "(untitled)";
   const line = firstUserText.split("\n").find((l) => l.trim())?.trim() ?? "";
-  if (!line) return t || "(untitled)";
-  return line.length > 48 ? `${line.slice(0, 47)}…` : line;
+  return line || t || "(untitled)";
+}
+
+/** Auto-title placeholder sessions from their first user message (UX-43). */
+export function deriveSessionTitle(title: string, firstUserText?: string): string {
+  const full = fullSessionTitle(title, firstUserText);
+  const t = title.trim();
+  const isPlaceholder = t === "" || /^new session$/i.test(t) || /^\(untitled/.test(t);
+  return isPlaceholder && full.length > 48 ? `${full.slice(0, 47)}…` : full;
 }
 
 export function providerColor(provider: string): string {
@@ -78,13 +85,15 @@ export function displaySessionTitle(title: string, sessionId?: string, firstUser
   return "New session";
 }
 
-export function ago(ms: number, now = Date.now()): string {
-  const diff = now - ms;
-  if (diff < 60_000) return "just now";
-  if (diff < 3_600_000) return `${Math.floor(diff / 60_000)}m ago`;
-  if (diff < 86_400_000) return `${Math.floor(diff / 3_600_000)}h ago`;
-  if (diff < 7 * 86_400_000) return `${Math.floor(diff / 86_400_000)}d ago`;
-  return new Date(ms).toLocaleDateString();
+/** Compact "time ago" for session rows: 45s, 3m, 6h, 2d. */
+export function ago(ts: number, now = Date.now()): string {
+  const seconds = Math.max(0, Math.floor((now - ts) / 1000));
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h`;
+  return `${Math.floor(hours / 24)}d`;
 }
 
 export function modelBadge(model?: { providerID: string; modelID: string } | string): { label: string; color: string } {

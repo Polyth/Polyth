@@ -1,7 +1,7 @@
 // DOM-free pure helpers extracted from components for testability.
 import type { SlashCommand, SnippetDef } from "./api.ts";
 import type { JsonObject, SessionEvent } from "@polyth/contracts";
-import type { RenderMessage, ToolMsg } from "./reduce.ts";
+import type { RenderMessage, ToolMsg, UserMsg } from "./reduce.ts";
 
 /** Text of the first user message in a session's event log, if any. */
 export function firstUserText(events: readonly SessionEvent[] | undefined): string | undefined {
@@ -76,6 +76,87 @@ export interface WorkGroup {
   id: string;
   tools: ToolMsg[];
   ms: number;
+}
+
+/** Merge runs of reasoning-only assistant parts into the next answer part so
+ *  one message shows a single Thinking block (WP4 merged thinking). A run cut
+ *  off by a tool call (or end of log) keeps its own block. */
+export function mergeThinking(messages: RenderMessage[]): RenderMessage[] {
+  const out: RenderMessage[] = [];
+  let pending: { texts: string[]; time: number; id: string; finalized: boolean } | null = null;
+  const flush = (midLog: boolean) => {
+    if (!pending) return;
+    out.push({
+      kind: "assistant",
+      id: pending.id,
+      partId: pending.id,
+      text: "",
+      reasoning: pending.texts.join("\n\n"),
+      // A later message proves this thinking finished even without a part-final.
+      finalized: midLog ? true : pending.finalized,
+      time: pending.time,
+    });
+    pending = null;
+  };
+  for (const m of messages) {
+    if (m.kind === "assistant" && m.text === "" && m.reasoning !== "") {
+      if (pending) {
+        pending.texts.push(m.reasoning);
+        pending.finalized = m.finalized;
+      } else {
+        pending = { texts: [m.reasoning], time: m.time, id: m.id, finalized: m.finalized };
+      }
+      continue;
+    }
+    if (m.kind === "assistant" && pending) {
+      const merged = [...pending.texts, m.reasoning].filter(Boolean).join("\n\n");
+      out.push({ ...m, reasoning: merged });
+      pending = null;
+      continue;
+    }
+    flush(true);
+    out.push(m);
+  }
+  flush(false);
+  return out;
+}
+
+/** Message as Markdown for the copy action. */
+export function messageMarkdown(m: RenderMessage): string {
+  if (m.kind === "tool") {
+    const parts = [`### ${m.title || m.tool}`, "```json", JSON.stringify(m.input, null, 2), "```"];
+    if (m.output) parts.push("", m.output);
+    if (m.error) parts.push("", `Error: ${m.error}`);
+    return parts.join("\n");
+  }
+  return m.text;
+}
+
+/** Message as structured JSON for the copy action. */
+export function messageJson(m: RenderMessage): string {
+  if (m.kind === "user") return JSON.stringify({ role: "user", text: m.text, time: m.time }, null, 2);
+  if (m.kind === "assistant") {
+    return JSON.stringify(
+      { role: "assistant", text: m.text, reasoning: m.reasoning || undefined, finalized: m.finalized, time: m.time },
+      null,
+      2,
+    );
+  }
+  return JSON.stringify(
+    { role: "tool", tool: m.tool, input: m.input, output: m.output, error: m.error, status: m.status, time: m.time },
+    null,
+    2,
+  );
+}
+
+/** User prompts with previews for the prompt navigator (WP4). */
+export function promptIndex(messages: RenderMessage[]): Array<{ id: string; preview: string }> {
+  return messages
+    .filter((m): m is UserMsg => m.kind === "user")
+    .map((m) => {
+      const first = m.text.split("\n").find((l) => l.trim()) ?? "";
+      return { id: m.id, preview: first.length > 64 ? `${first.slice(0, 61)}…` : first };
+    });
 }
 
 /** Collapse runs of ≥2 consecutive tool calls into one "Worked for …" group. */

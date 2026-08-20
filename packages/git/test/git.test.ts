@@ -4,7 +4,7 @@ import { execFileSync } from "node:child_process";
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createGitService } from "../src/index.ts";
+import { createGitService, pathsUnder } from "../src/index.ts";
 
 const git = createGitService();
 const dirs: string[] = [];
@@ -158,4 +158,60 @@ test("git errors surface a short message, not a stack of stderr", async () => {
     assert.ok(!err.message.startsWith("fatal:"));
     return true;
   });
+});
+
+test("graph returns parents, refs, merges, and paginates", async () => {
+  const dir = repo();
+  const g = (...args: string[]) => execFileSync("git", args, { cwd: dir, stdio: "pipe" });
+  writeFileSync(join(dir, "a.txt"), "a\n");
+  g("add", "."); g("commit", "-qm", "second");
+  g("checkout", "-qb", "feature");
+  writeFileSync(join(dir, "b.txt"), "b\n");
+  g("add", "."); g("commit", "-qm", "feature work");
+  g("checkout", "-q", "main");
+  writeFileSync(join(dir, "c.txt"), "c\n");
+  g("add", "."); g("commit", "-qm", "main work");
+  g("merge", "-q", "--no-ff", "-m", "merge feature", "feature");
+  g("tag", "v1");
+
+  const graph = await git.graph(dir);
+  assert.equal(graph.length, 5);
+  const merge = graph[0]!;
+  assert.equal(merge.subject, "merge feature");
+  assert.equal(merge.parents.length, 2);
+  assert.ok(merge.refs.includes("main"));
+  assert.ok(merge.refs.includes("tag: v1"));
+  assert.ok(graph.some((c) => c.refs.includes("feature")));
+  // every non-root commit's parents resolve to listed shas
+  const shas = new Set(graph.map((c) => c.sha));
+  for (const c of graph.slice(0, -1)) for (const p of c.parents) assert.ok(shas.has(p));
+
+  const page2 = await git.graph(dir, { limit: 2, skip: 2 });
+  assert.equal(page2.length, 2);
+  assert.equal(page2[0]!.sha, graph[2]!.sha);
+});
+
+test("pathsUnder expands folders from status without touching siblings", async () => {
+  const dir = repo();
+  const g = (...args: string[]) => execFileSync("git", args, { cwd: dir, stdio: "pipe" });
+  mkdirSync(join(dir, "src"));
+  mkdirSync(join(dir, "docs"));
+  writeFileSync(join(dir, "src", "a.ts"), "a\n");
+  writeFileSync(join(dir, "docs", "d.md"), "d\n");
+  writeFileSync(join(dir, "README.md"), "changed\n");
+  g("add", "src/a.ts");
+
+  const status = await git.status(dir);
+  const src = pathsUnder(status, "src");
+  assert.deepEqual(src.staged, ["src/a.ts"]);
+  assert.deepEqual(src.untracked, []);
+  const docs = pathsUnder(status, "docs");
+  assert.deepEqual(docs.untracked, ["docs/d.md"]);
+  assert.deepEqual(docs.staged, []);
+  const root = pathsUnder(status, "");
+  assert.deepEqual(root.unstaged, ["README.md"]);
+  assert.equal(root.staged.length + root.untracked.length, 2);
+  // a folder that is a name prefix (but not a path prefix) must not match
+  const srcx = pathsUnder(status, "sr");
+  assert.deepEqual([...srcx.staged, ...srcx.untracked, ...srcx.unstaged], []);
 });

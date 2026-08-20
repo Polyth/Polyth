@@ -6,10 +6,12 @@ import {
   isFavorite,
   modelKey,
   parseModelPrefs,
+  planFavoriteMigration,
   recordRecent,
   serializeModelPrefs,
   sortModels,
   toggleFavorite,
+  validateProfile,
   type ModelPrefs,
 } from "@polyth/models";
 
@@ -140,4 +142,48 @@ test("recent sorting falls back to provider order for unseen models", () => {
     "anthropic/claude-4",
     "anthropic/claude-haiku",
   ]);
+});
+
+// ---------------------------------------------------------------- WP8: profiles
+
+test("validateProfile proposes repairs but never silently mutates", () => {
+  const agents = [{ name: "build" }, { name: "review" }];
+
+  // Nothing checkable when the adapter reported no models.
+  const unchecked = validateProfile({ providerID: "gone", modelID: "x" }, [], agents);
+  assert.deepEqual(unchecked, { valid: true, checked: false, repairs: [] });
+
+  const ok = validateProfile(
+    { providerID: "openai", modelID: "gpt-5", agent: "build", thinking: "low" },
+    MODELS,
+    agents,
+  );
+  assert.equal(ok.valid, true);
+  assert.equal(ok.checked, true);
+
+  const broken = validateProfile(
+    { providerID: "gone", modelID: "dead", agent: "ghost", thinking: "ultra" },
+    MODELS,
+    agents,
+  );
+  assert.equal(broken.valid, false);
+  assert.deepEqual(broken.repairs.map((r) => r.field), ["model", "agent", "thinking"]);
+  assert.equal(broken.repairs[0]!.from, "gone/dead");
+  assert.equal(broken.repairs[1]!.to, "");
+  assert.equal(broken.repairs[2]!.to, "default");
+});
+
+test("planFavoriteMigration is idempotent and skips vanished models", () => {
+  const prefs: ModelPrefs = {
+    ...defaultModelPrefs(),
+    favorites: ["openai/gpt-5", "anthropic/claude-4", "gone/dead"],
+  };
+
+  const plan = planFavoriteMigration(prefs, MODELS, []);
+  assert.deepEqual(plan.map((p) => `${p.providerID}/${p.modelID}`), ["openai/gpt-5", "anthropic/claude-4"]);
+  assert.equal(plan[0]!.name, "GPT-5");
+
+  // Re-running with the created profiles present yields an empty plan.
+  const again = planFavoriteMigration(prefs, MODELS, plan);
+  assert.deepEqual(again, []);
 });

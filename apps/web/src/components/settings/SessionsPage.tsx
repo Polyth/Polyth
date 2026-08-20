@@ -2,15 +2,17 @@
 // /api/control surface — the same API agents and external tools can use.
 import { useState } from "react";
 import { api } from "../../api.ts";
-import { setOverlay, setActiveView, useStore } from "../../store.ts";
+import { setOverlay, setActiveView, setUiError, updateSettings, useStore } from "../../store.ts";
 import { openSession, refreshSessions } from "../../init.ts";
 import { ago } from "../../format.ts";
+import { friendlyError } from "../../settings.ts";
 import { pluginOn } from "../../prefs.ts";
-import { EmptyState, PageHead, Row } from "./parts.tsx";
+import { EmptyState, PageHead, Row, Toggle } from "./parts.tsx";
 
 export default function SessionsPage() {
   const projectId = useStore((s) => s.activeProjectId);
   const sessions = useStore((s) => s.sessions.filter((x) => x.projectId === s.activeProjectId));
+  const settings = useStore((s) => s.settings);
   const [busy, setBusy] = useState<string | null>(null);
 
   const act = async (id: string, fn: () => Promise<unknown>) => {
@@ -19,7 +21,7 @@ export default function SessionsPage() {
       await fn();
       if (projectId) await refreshSessions(projectId);
     } catch (e) {
-      window.alert(e instanceof Error ? e.message : String(e));
+      setUiError(friendlyError("Couldn’t update the session", e));
     } finally {
       setBusy(null);
     }
@@ -28,6 +30,12 @@ export default function SessionsPage() {
   return (
     <>
       <PageHead title="Sessions" blurb="Control sessions here or over the /api/control/sessions API — list, create, fork, abort." />
+      <Row label="Auto-title new sessions" hint="Derive a title from the first prompt." itemId="sessions.autoTitle">
+        <Toggle on={settings.autoTitleSessions} onChange={(autoTitleSessions) => updateSettings({ autoTitleSessions })} label="Auto-title sessions" />
+      </Row>
+      <Row label="Expand archived sessions" hint="Show archived sessions immediately in the sidebar." itemId="sessions.showArchived">
+        <Toggle on={settings.showArchived} onChange={(showArchived) => updateSettings({ showArchived })} label="Expand archived sessions" />
+      </Row>
       {!projectId && <EmptyState title="No active project" />}
       {projectId && (
         <>

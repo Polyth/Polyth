@@ -106,11 +106,11 @@ test("runNow fires immediately and persists across service reloads", async () =>
 });
 
 test("computeNextRun edge cases", () => {
-  assert.equal(computeNextRun({ kind: "at", at: 5, enabled: false, runs: 0 }, 0), null);
-  assert.equal(computeNextRun({ kind: "at", at: 5, enabled: true, runs: 1 }, 0), null);
-  assert.equal(computeNextRun({ kind: "every", everyMinutes: 2, enabled: true, runs: 3, lastRunAt: 100 }, 999), 100 + 120_000);
-  assert.equal(computeNextRun({ kind: "every", everyMinutes: 3, enabled: true, runs: 0 }, 500), 180_500);
-  assert.equal(computeNextRun({ kind: "at", enabled: true, runs: 0 }, 500), null);
+  assert.equal(computeNextRun({ cadence: { kind: "at", at: 5 }, enabled: false, runs: 0 }, 0), null);
+  assert.equal(computeNextRun({ cadence: { kind: "at", at: 5 }, enabled: true, runs: 1 }, 0), null);
+  assert.equal(computeNextRun({ cadence: { kind: "every", everyMinutes: 2 }, enabled: true, runs: 3, lastRunAt: 100 }, 999), 100 + 120_000);
+  assert.equal(computeNextRun({ cadence: { kind: "every", everyMinutes: 3 }, enabled: true, runs: 0 }, 500), 180_500);
+  assert.equal(computeNextRun({ cadence: { kind: "at", at: Number.NaN }, enabled: true, runs: 0 }, 500), null);
 });
 
 test("interval validation rejects non-finite values", () => {

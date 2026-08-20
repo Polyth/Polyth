@@ -5,6 +5,7 @@ import path from "node:path";
 
 const MAX_READ = 512 * 1024;
 const BINARY_SCAN = 8 * 1024;
+const MAX_RAW = 20 * 1024 * 1024;
 
 export interface FileEntry {
   name: string;
@@ -18,17 +19,74 @@ export interface FileReadResult {
   content: string;
   truncated: boolean;
   tooLarge?: boolean;
+  /** On-disk revision at read time; pass back as baseRevision to guard writes. */
+  revision?: string;
+}
+
+export interface FileStatResult {
+  path: string;
+  kind: "file" | "dir";
+  size: number;
+  mime?: string;
+  revision?: string;
+}
+
+export interface FileRawResult {
+  data: Uint8Array;
+  mime: string;
+  size: number;
+}
+
+// Only types the raw endpoint may serve inline. HTML/SVG/JS are deliberately
+// absent: model output must never become an executable document origin.
+const RAW_MIME: Record<string, string> = {
+  ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+  ".gif": "image/gif", ".webp": "image/webp", ".avif": "image/avif",
+  ".bmp": "image/bmp", ".ico": "image/x-icon",
+  ".pdf": "application/pdf",
+  ".txt": "text/plain", ".md": "text/plain", ".json": "text/plain",
+  ".csv": "text/plain", ".log": "text/plain",
+};
+
+export function rawMimeOf(rel: string): string {
+  return RAW_MIME[path.extname(rel).toLowerCase()] ?? "application/octet-stream";
+}
+
+export interface WriteOptions {
+  /** Revision the caller loaded (from stat/read). A mismatch with the on-disk
+   *  revision rejects the write with code "conflict" — autosave can never
+   *  clobber an externally changed file. */
+  baseRevision?: string;
+}
+
+export interface FileSearchHit {
+  path: string;
+  kind: "file" | "dir";
+  /** 0..1 — exact basename > basename prefix > substring > segment > fuzzy. */
+  score: number;
+  /** [start, end) ranges into `path` for highlight (empty for fuzzy/folded). */
+  matches: Array<[number, number]>;
+}
+
+export interface SearchOptions {
+  limit?: number;
+  includeDirs?: boolean;
 }
 
 export interface FileService {
   tree(root: string, opts?: { path?: string; hidden?: boolean }): Promise<FileEntry[]>;
   read(root: string, rel: string): Promise<FileReadResult>;
-  write(root: string, rel: string, content: string): Promise<void>;
+  stat(root: string, rel: string): Promise<FileStatResult>;
+  readRaw(root: string, rel: string): Promise<FileRawResult>;
+  write(root: string, rel: string, content: string, opts?: WriteOptions): Promise<{ revision: string }>;
   writeBytes(root: string, rel: string, data: Uint8Array): Promise<void>;
   mkdir(root: string, rel: string): Promise<void>;
   remove(root: string, rel: string): Promise<void>;
   rename(root: string, from: string, to: string): Promise<void>;
+  /** Legacy string results (paths only), ordered by relevance. */
   search(root: string, q: string, limit: number): Promise<string[]>;
+  /** Scored search over names and paths (WP13 palette/mentions). */
+  searchScored(root: string, q: string, opts?: SearchOptions): Promise<FileSearchHit[]>;
 }
 
 const posix = (p: string): string => p.split(path.sep).join("/");
@@ -69,32 +127,81 @@ export function createFileService(): FileService {
       const fh = await open(abs, "r");
       try {
         const st = await fh.stat();
+        const revision = `${st.mtimeMs.toString(36)}-${st.size.toString(36)}`;
         const scanLen = Math.min(BINARY_SCAN, st.size);
         if (scanLen > 0) {
           const head = Buffer.alloc(scanLen);
           await fh.read(head, 0, scanLen, 0);
           if (head.includes(0)) {
-            return { path: posix(rel), content: "", truncated: false, tooLarge: true };
+            return { path: posix(rel), content: "", truncated: false, tooLarge: true, revision };
           }
         }
         if (st.size > MAX_READ) {
           const buf = Buffer.alloc(MAX_READ);
           await fh.read(buf, 0, MAX_READ, 0);
-          return { path: posix(rel), content: buf.toString("utf8"), truncated: true };
+          return { path: posix(rel), content: buf.toString("utf8"), truncated: true, revision };
         }
+        const content = await readFile(abs, "utf8");
+        return { path: posix(rel), content, truncated: false, revision };
       } finally {
         await fh.close();
       }
-      const content = await readFile(abs, "utf8");
-      return { path: posix(rel), content, truncated: false };
     },
 
-    async write(root, rel, content) {
+    async stat(root, rel) {
+      const abs = await resolveInside(root, rel);
+      const st = await lstat(abs);
+      const kind = st.isDirectory() ? "dir" as const : "file" as const;
+      const out: FileStatResult = { path: posix(rel), kind, size: st.size };
+      if (kind === "file") {
+        out.mime = rawMimeOf(rel);
+        // Cheap revision token: changes whenever content plausibly changed.
+        out.revision = `${st.mtimeMs.toString(36)}-${st.size.toString(36)}`;
+      }
+      return out;
+    },
+
+    async readRaw(root, rel) {
+      const abs = await resolveInside(root, rel);
+      const st = await lstat(abs);
+      if (!st.isFile()) throw new Error(`Not a file: ${rel}`);
+      if (st.size > MAX_RAW) throw new Error(`File too large to serve raw: ${rel}`);
+      const data = await readFile(abs);
+      return { data, mime: rawMimeOf(rel), size: st.size };
+    },
+
+    async write(root, rel, content, opts = {}) {
       const abs = await resolveInside(root, rel, { forWrite: true });
+      let existing: Awaited<ReturnType<typeof lstat>> | null = null;
+      try {
+        existing = await lstat(abs);
+      } catch { /* new file */ }
+      if (existing?.isFile()) {
+        const currentRev = `${existing.mtimeMs.toString(36)}-${existing.size.toString(36)}`;
+        if (opts.baseRevision !== undefined && opts.baseRevision !== currentRev) {
+          throw Object.assign(new Error(`File changed on disk: ${rel}`), { code: "conflict", revision: currentRev });
+        }
+        // Text writes never overwrite binary content — that is upload territory.
+        const scanLen = Math.min(BINARY_SCAN, existing.size);
+        if (scanLen > 0) {
+          const fh = await open(abs, "r");
+          try {
+            const head = Buffer.alloc(scanLen);
+            await fh.read(head, 0, scanLen, 0);
+            if (head.includes(0)) {
+              throw Object.assign(new Error(`Refusing to overwrite binary file with text: ${rel}`), { code: "invalid-input" });
+            }
+          } finally {
+            await fh.close();
+          }
+        }
+      }
       await mkdir(path.dirname(abs), { recursive: true });
       await writeFile(abs, content, "utf8");
       // Refuse if the written file (or a parent symlink) landed outside root.
       await resolveInside(root, rel);
+      const st = await lstat(abs);
+      return { revision: `${st.mtimeMs.toString(36)}-${st.size.toString(36)}` };
     },
 
     async writeBytes(root, rel, data) {
@@ -127,11 +234,22 @@ export function createFileService(): FileService {
     },
 
     async search(root, q, limit) {
+      const hits = await this.searchScored(root, q, { limit });
+      return hits.map((h) => h.path);
+    },
+
+    async searchScored(root, q, opts = {}) {
+      const limit = Math.max(1, Math.min(opts.limit ?? 50, 200));
+      const includeDirs = opts.includeDirs === true;
       const rootAbs = path.resolve(root);
-      const found: string[] = [];
-      const query = q.toLowerCase();
+      const query = fold(q.trim());
+      const hits: FileSearchHit[] = [];
+      // Bounded traversal: heavy dirs skipped, entry and time caps enforced so
+      // one giant repo cannot stall the palette.
+      let visited = 0;
+      const deadline = Date.now() + SEARCH_TIME_BUDGET_MS;
       const walk = async (dirAbs: string, rel: string): Promise<void> => {
-        if (found.length >= limit) return;
+        if (visited >= SEARCH_MAX_ENTRIES || Date.now() > deadline) return;
         let entries;
         try {
           entries = await readdir(dirAbs, { withFileTypes: true });
@@ -139,33 +257,84 @@ export function createFileService(): FileService {
           return;
         }
         for (const ent of entries) {
-          if (found.length >= limit) return;
-          if (ent.name === ".git" || ent.name === "node_modules") continue;
+          if (visited >= SEARCH_MAX_ENTRIES || Date.now() > deadline) return;
+          visited++;
+          if (IGNORED_DIRS.has(ent.name)) continue;
           const childRel = rel ? `${rel}/${ent.name}` : ent.name;
-          const childAbs = path.join(dirAbs, ent.name);
+          // Symlinks are never followed: loops and root escapes stay impossible.
+          if (ent.isSymbolicLink()) continue;
           if (ent.isDirectory()) {
-            await walk(childAbs, childRel);
+            if (includeDirs) {
+              const scored = scorePath(childRel, query);
+              if (scored) hits.push({ path: posix(childRel), kind: "dir", ...scored });
+            }
+            await walk(path.join(dirAbs, ent.name), childRel);
             continue;
           }
-          if (fuzzyName(ent.name, query)) found.push(posix(childRel));
+          const scored = scorePath(childRel, query);
+          if (scored) hits.push({ path: posix(childRel), kind: "file", ...scored });
         }
       };
       await walk(rootAbs, "");
-      return found.slice(0, limit);
+      hits.sort((a, b) => (b.score - a.score) || (a.path.length - b.path.length) || a.path.localeCompare(b.path));
+      return hits.slice(0, limit);
     },
   };
 }
 
-function fuzzyName(name: string, query: string): boolean {
-  if (!query) return true;
-  const n = name.toLowerCase();
-  if (n.includes(query)) return true;
-  let i = 0;
-  for (const ch of n) {
-    if (ch === query[i]) i++;
-    if (i >= query.length) return true;
+const IGNORED_DIRS = new Set([
+  ".git", "node_modules", "dist", "build", "out", "coverage",
+  ".next", ".cache", "target", "__pycache__", ".venv",
+]);
+const SEARCH_MAX_ENTRIES = 20_000;
+const SEARCH_TIME_BUDGET_MS = 400;
+
+/** Case/diacritic fold for matching ("Café" → "cafe"). */
+function fold(s: string): string {
+  return s.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase();
+}
+
+/** Score a relative path against a folded query. Null = no match. */
+export function scorePath(relPath: string, query: string): { score: number; matches: Array<[number, number]> } | null {
+  const p = posix(relPath);
+  if (!query) return { score: 0.1, matches: [] };
+  const folded = fold(p);
+  const slash = folded.lastIndexOf("/");
+  const base = folded.slice(slash + 1);
+  const baseStart = slash + 1;
+  // Highlight ranges only when fold preserved offsets (pure-ASCII case fold).
+  const offsetsSafe = folded.length === p.length;
+  const range = (start: number): Array<[number, number]> =>
+    offsetsSafe ? [[start, start + query.length]] : [];
+
+  const noExt = base.replace(/\.[^.]+$/, "");
+  if (base === query || noExt === query) return { score: 1, matches: range(baseStart) };
+  if (base.startsWith(query)) return { score: 0.9, matches: range(baseStart) };
+  const inBase = base.indexOf(query);
+  if (inBase >= 0) return { score: 0.8, matches: range(baseStart + inBase) };
+  // Path-segment prefix ("comp" matches src/components/x.ts).
+  let segStart = 0;
+  for (const seg of folded.split("/")) {
+    if (seg.startsWith(query)) return { score: 0.7, matches: range(segStart) };
+    segStart += seg.length + 1;
   }
-  return false;
+  const inPath = folded.indexOf(query);
+  if (inPath >= 0) return { score: 0.6, matches: range(inPath) };
+  // Fuzzy subsequence over the whole path; density nudges tighter matches up.
+  let qi = 0;
+  let first = -1;
+  let last = -1;
+  for (let i = 0; i < folded.length && qi < query.length; i++) {
+    if (folded[i] === query[qi]) {
+      if (first < 0) first = i;
+      last = i;
+      qi++;
+    }
+  }
+  if (qi < query.length) return null;
+  const span = Math.max(1, last - first + 1);
+  const density = query.length / span; // 1 = contiguous
+  return { score: 0.2 + 0.2 * density, matches: [] };
 }
 
 function assertRelative(rel: string): void {

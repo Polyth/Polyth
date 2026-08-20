@@ -74,8 +74,8 @@ const ICONS: Record<AppView, React.ReactNode> = {
 // Groups separated by a thin divider: chat · workspace · workflows.
 const VIEW_GROUPS: Array<Array<[AppView, string]>> = [
   [["session", "Chat"]],
-  [["git", "Git"], ["terminal", "Terminal"], ["preview", "Preview"]],
-  [["goals", "Goals"], ["multirun", "Multi-run"], ["fusion", "Fusion"], ["walkthrough", "Walkthrough"]],
+  [["files", "Files"], ["git", "Git"], ["terminal", "Terminal"], ["preview", "Preview"]],
+  [["goals", "Goals"], ["multirun", "Multi-run"], ["fusion", "Fusion"], ["walkthrough", "Walkthrough"], ["schedule", "Schedule"], ["github", "GitHub"]],
 ];
 
 function contextUsage(

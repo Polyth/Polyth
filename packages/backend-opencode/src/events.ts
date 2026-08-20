@@ -76,6 +76,12 @@ export interface TranslateState {
   emittedUsage: Set<string>;
   lastTokens?: TokenUsage;
   lastCost?: number;
+  // WP8: revisioned full snapshots of tasks and delegated agents. Revisions
+  // are per-session monotonic so out-of-order application is detectable.
+  taskRevision: number;
+  lastTaskKey: string;
+  subagentRevision: number;
+  subagents: Map<string, { sessionId: string; label: string; status: string; currentTask?: string }>;
 }
 
 export const createTranslateState = (): TranslateState => ({
@@ -85,6 +91,41 @@ export const createTranslateState = (): TranslateState => ({
   partReasoning: new Map(),
   emittedAssistant: new Set(),
   emittedUsage: new Set(),
+  taskRevision: 0,
+  lastTaskKey: "",
+  subagentRevision: 0,
+  subagents: new Map(),
+});
+
+type TaskStatus = "pending" | "active" | "done" | "failed";
+const TASK_STATUS: Record<string, TaskStatus> = {
+  pending: "pending", in_progress: "active", active: "active",
+  completed: "done", done: "done", cancelled: "failed", failed: "failed",
+};
+
+/** Normalize a todowrite tool input into a full task snapshot (or undefined). */
+const taskItemsOf = (input: JsonObject): Array<{ id: string; text: string; status: TaskStatus }> | undefined => {
+  const todos = (input as { todos?: unknown }).todos;
+  if (!Array.isArray(todos)) return undefined;
+  const items: Array<{ id: string; text: string; status: TaskStatus }> = [];
+  for (let i = 0; i < todos.length; i++) {
+    const t = asRecord(todos[i]);
+    if (!t) continue;
+    const text = typeof t.content === "string" ? t.content : typeof t.text === "string" ? t.text : "";
+    if (!text) continue;
+    items.push({
+      id: typeof t.id === "string" ? t.id : String(i),
+      text,
+      status: TASK_STATUS[String(t.status ?? "pending")] ?? "pending",
+    });
+  }
+  return items;
+};
+
+const subagentSnapshot = (state: TranslateState): RuntimeEvent => ({
+  type: "subagent/snapshot",
+  revision: ++state.subagentRevision,
+  agents: [...state.subagents.values()],
 });
 
 export const translateOcEvent = (ev: OcEvent, state: TranslateState): RuntimeEvent[] => {
@@ -192,6 +233,45 @@ export const translateOcEvent = (ev: OcEvent, state: TranslateState): RuntimeEve
       const st = asRecord(part.state);
       const status = typeof st?.status === "string" ? st.status : "";
       const input = asJsonObject(st?.input);
+
+      // ---- WP8: todo tools become full task snapshots ----------------------
+      const toolLower = tool.toLowerCase().replace(/[^a-z]/g, "");
+      if (toolLower === "todowrite" || toolLower === "todo") {
+        const items = taskItemsOf(input);
+        if (items && items.length > 0) {
+          const key = JSON.stringify(items);
+          if (key !== state.lastTaskKey) {
+            state.lastTaskKey = key;
+            out.push({ type: "task/snapshot", listId: "todo", revision: ++state.taskRevision, items });
+          }
+        }
+        // fall through: the tool call/result itself still logs below
+      }
+
+      // ---- WP8: task tool = delegated subagent -----------------------------
+      if (toolLower === "task") {
+        const meta = asRecord(st?.metadata);
+        const label =
+          typeof input.description === "string" && input.description
+            ? String(input.description)
+            : typeof input.subagent_type === "string" ? String(input.subagent_type) : "subagent";
+        const childSession =
+          typeof meta?.sessionID === "string" ? String(meta.sessionID)
+          : typeof meta?.sessionId === "string" ? String(meta.sessionId) : callId;
+        const prev = state.subagents.get(callId);
+        const nextStatus = status === "completed" ? "done" : status === "error" ? "failed" : "running";
+        if (!prev || prev.status !== nextStatus || prev.sessionId !== childSession) {
+          state.subagents.set(callId, {
+            sessionId: childSession,
+            label,
+            status: nextStatus,
+            ...(typeof input.prompt === "string" && input.prompt
+              ? { currentTask: String(input.prompt).split("\n")[0]!.slice(0, 140) }
+              : {}),
+          });
+          out.push(subagentSnapshot(state));
+        }
+      }
       if ((status === "pending" || status === "running") && !state.toolCalls.has(callId)) {
         state.toolCalls.add(callId);
         out.push({ type: "tool/call", callId, tool, input });

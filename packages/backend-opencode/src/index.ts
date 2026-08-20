@@ -80,6 +80,8 @@ export interface OpenCodeAdapterOptions {
 
 export { createOpenCodeClient } from "./client.ts";
 export type { OpenCodeClient } from "./client.ts";
+export { createConfigApplier } from "./config.ts";
+export type { BackendConfigApplier, McpApplyEntry } from "./config.ts";
 
 const CAPABILITIES: RuntimeCapabilities = {
   streaming: true,
@@ -87,6 +89,9 @@ const CAPABILITIES: RuntimeCapabilities = {
   questions: true,
   compaction: true,
   subagents: true,
+  // live steering: a prompt posted to a busy session joins the active turn;
+  // steer() reports false on rejection so callers can fall back to queueing
+  steering: true,
 };
 
 const LISTEN_RE = /opencode server listening on https?:\/\/[^\s:]+:(\d+)/i;
@@ -465,6 +470,25 @@ export const createOpenCodeRuntimeWithClient = (
         await client.post(`/session/${backendId}/prompt_async`, body);
       } catch {
         await client.post(`/session/${backendId}/message`, body);
+      }
+    },
+    async steer(sessionId: string, text: string): Promise<boolean> {
+      // Only meaningful while a turn is active; posting to an idle session
+      // would start a fresh turn instead of steering.
+      if (!activeTurn.has(sessionId)) return false;
+      let backendId: string;
+      try {
+        backendId = backendOf(sessionId);
+      } catch {
+        return false;
+      }
+      try {
+        await client.post(`/session/${backendId}/prompt_async`, {
+          parts: [{ type: "text", text }],
+        });
+        return true;
+      } catch {
+        return false; // backend rejected live steering — caller queues
       }
     },
     async abort(sessionId: string) {

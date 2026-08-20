@@ -17,12 +17,34 @@ export function workspaceRoutes(deps: {
     return project.path;
   };
 
-  return async ({ path, method, url, body, json }) => {
+  return async ({ path, method, url, body, json, res }) => {
     if (!path.startsWith("/api/files") && !path.startsWith("/api/commands") && !path.startsWith("/api/snippets")) {
       return false;
     }
     const q = (k: string) => url.searchParams.get(k);
 
+    if (path === "/api/files/stat" && method === "GET") {
+      const root = await rootOf(q("projectId"));
+      json(200, await deps.files.stat(root, q("path") ?? ""));
+      return true;
+    }
+    if (path === "/api/files/raw" && method === "GET") {
+      const root = await rootOf(q("projectId"));
+      const raw = await deps.files.readRaw(root, q("path") ?? "");
+      // Never let served bytes become an executable document: nosniff + a
+      // whitelisted content type (html/svg/js are mapped to octet-stream) and
+      // attachment disposition for anything that is not an image or pdf.
+      const inline = raw.mime.startsWith("image/") || raw.mime === "application/pdf" || raw.mime === "text/plain";
+      res.writeHead(200, {
+        "content-type": raw.mime,
+        "content-length": String(raw.size),
+        "x-content-type-options": "nosniff",
+        "content-disposition": inline ? "inline" : "attachment",
+        "cache-control": "no-cache",
+      });
+      res.end(Buffer.from(raw.data));
+      return true;
+    }
     if (path === "/api/files/tree" && method === "GET") {
       const root = await rootOf(q("projectId"));
       json(200, await deps.files.tree(root, {
@@ -39,8 +61,10 @@ export function workspaceRoutes(deps: {
     if (path === "/api/files/write" && method === "POST") {
       const b = await body();
       const root = await rootOf(String(b.projectId ?? ""));
-      await deps.files.write(root, String(b.path ?? ""), String(b.content ?? ""));
-      json(200, { ok: true });
+      const result = await deps.files.write(root, String(b.path ?? ""), String(b.content ?? ""), {
+        ...(typeof b.baseRevision === "string" ? { baseRevision: b.baseRevision } : {}),
+      });
+      json(200, { ok: true, revision: result.revision });
       return true;
     }
     if (path === "/api/files/upload" && method === "POST") {
@@ -73,7 +97,11 @@ export function workspaceRoutes(deps: {
     }
     if (path === "/api/files/search" && method === "GET") {
       const root = await rootOf(q("projectId"));
-      json(200, await deps.files.search(root, q("q") ?? "", Number(q("limit") ?? 50)));
+      // Scored objects (WP13); clients still accepting plain strings read .path.
+      json(200, await deps.files.searchScored(root, q("q") ?? "", {
+        limit: Number(q("limit") ?? 50),
+        includeDirs: q("includeDirs") === "true",
+      }));
       return true;
     }
     if ((path === "/api/commands" || path === "/api/snippets") && method === "GET") {

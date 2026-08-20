@@ -1,11 +1,19 @@
-import { matchAction, formatCombo, type HotkeyAction } from "@polyth/hotkeys";
+import { HOTKEY_ACTIONS, matchAction, formatCombo, type HotkeyAction } from "@polyth/hotkeys";
 import { registerCommand } from "./commands.ts";
 import { createSession, exportSessionMarkdown, forkSession, abortSession } from "./init.ts";
 import { MOD } from "./format.ts";
 import { PERSONAS, applyPersona, pluginOn, type PersonaId } from "./prefs.ts";
 import { getKeymap } from "./hotkeys.ts";
 import { readLastReply, stopSpeaking } from "./voice.tsx";
-import { getState, setActiveView, setOverlay, toggleRailPlugin, type AppView, type RailPlugin } from "./store.ts";
+import {
+  getState, openPalette, openSettingsPage, setActiveView, setOverlay, toggleRailPlugin,
+  type AppView, type RailPlugin,
+} from "./store.ts";
+import {
+  getGroupingMode, listGroupings, registerGrouping, setGroupingMode,
+  type GroupingDescriptor,
+} from "./sidebarPrefs.ts";
+import { announce } from "./components/a11y/live.tsx";
 
 const VIEW: Array<[AppView, string]> = [
   ["session", "Open session"], ["files", "Files & editor"], ["goals", "Open goals"], ["multirun", "Compare models"],
@@ -18,7 +26,8 @@ const RAIL: Array<[RailPlugin, string]> = [
 ];
 
 const IS_MAC = MOD === "⌘";
-const hintOf = (action: HotkeyAction): string => formatCombo(getKeymap()[action], IS_MAC);
+// Live resolver: command hints must always reflect the current custom binding.
+const hintOf = (action: HotkeyAction) => (): string => formatCombo(getKeymap()[action], IS_MAC);
 
 export function focusComposer(): void {
   setActiveView("session");
@@ -28,8 +37,40 @@ export function focusComposer(): void {
   }, 0);
 }
 
+/** Register one Group-by palette command for a grouping descriptor. */
+function registerGroupingCommand(g: GroupingDescriptor): () => void {
+  return registerCommand({
+    id: `sidebar.group-by.${g.id}`,
+    label: `Group sessions by: ${g.label}`,
+    group: "Sidebar",
+    keywords: ["group by", "sidebar", "sort"],
+    checked: () => getGroupingMode() === g.id,
+    run: () => {
+      setGroupingMode(g.id);
+      announce(`Sessions grouped by ${g.label}`);
+    },
+  });
+}
+
+/** Plugin entry point: contribute a sidebar grouping + its palette command. */
+export function registerSidebarGrouping(desc: GroupingDescriptor): () => void {
+  const disposeGrouping = registerGrouping(desc);
+  const disposeCommand = registerGroupingCommand(desc);
+  return () => {
+    disposeCommand();
+    disposeGrouping();
+    // If the removed mode was active, getGroupingMode() already falls back.
+  };
+}
+
 export function installShell(): void {
-  registerCommand({ id: "cmd.palette", label: "Command palette", hint: hintOf("palette"), group: "Shell", run: () => setOverlay("palette") });
+  registerCommand({ id: "cmd.palette", label: "Command palette", hint: hintOf("palette"), group: "Shell", run: () => openPalette("all") });
+  registerCommand({
+    id: "cmd.searchFiles", label: "Search files", hint: hintOf("searchFiles"), group: "Shell",
+    keywords: ["quick open", "go to file"],
+    when: () => pluginOn("files"),
+    run: () => openPalette("files"),
+  });
   registerCommand({ id: "cmd.search", label: "Search sessions", hint: hintOf("searchSessions"), group: "Shell", run: () => setOverlay("search") });
   registerCommand({ id: "cmd.settings", label: "Settings", hint: hintOf("settings"), group: "Shell", run: () => setOverlay("settings") });
   registerCommand({ id: "cmd.customize", label: "Customize workspace", group: "Shell", run: () => setOverlay("onboarding") });
@@ -80,12 +121,27 @@ export function installShell(): void {
   for (const id of Object.keys(PERSONAS) as PersonaId[]) {
     registerCommand({ id: `persona.${id}`, label: `Persona: ${PERSONAS[id].label}`, group: "Workspace", run: () => applyPersona(id) });
   }
+  // Sidebar Group by (WP13): built-ins; plugins add via registerSidebarGrouping.
+  for (const g of listGroupings()) registerGroupingCommand(g);
+  // Searchable shortcut editing: one row per action, hint shows the binding,
+  // matching also works on the key itself ("ctrl+k" finds the palette row).
+  for (const { id, label } of HOTKEY_ACTIONS) {
+    registerCommand({
+      id: `shortcut.${id}`,
+      label: `Change shortcut: ${label}`,
+      group: "Shortcuts",
+      keywords: ["keybinding", "hotkey", "shortcut"],
+      hint: hintOf(id),
+      run: () => openSettingsPage("shortcuts"),
+    });
+  }
 
   window.addEventListener("keydown", onKey);
 }
 
 const ACTIONS: Record<HotkeyAction, () => void> = {
-  palette: () => setOverlay("palette"),
+  palette: () => openPalette("all"),
+  searchFiles: () => { if (pluginOn("files")) openPalette("files"); },
   searchSessions: () => setOverlay("search"),
   settings: () => setOverlay("settings"),
   newSession: () => {
@@ -99,6 +155,8 @@ const ACTIONS: Record<HotkeyAction, () => void> = {
 };
 
 function onKey(e: KeyboardEvent): void {
+  // IME composition keydowns (incl. legacy keyCode 229) never trigger shortcuts.
+  if (e.isComposing || e.keyCode === 229) return;
   if (e.key === "Escape") { setOverlay(null); return; }
   // The Shortcuts editor captures the next keydown itself.
   if ((e.target as HTMLElement | null)?.closest?.("[data-hotkey-capture]")) return;

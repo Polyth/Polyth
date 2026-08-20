@@ -1,10 +1,15 @@
-// Turn-completion notifications (Settings > Notifications). Watches session
-// status transitions in the store; fires a browser notification when a turn
-// finishes while the tab is hidden, and/or a short beep.
+// Notification router (WP15). Watches store snapshots, derives specs through
+// the pure diffNotifications, dedupes across replays, and routes native
+// notification clicks back to the owning project/session.
 import { getState, subscribeStore } from "./store.ts";
+import { openSession } from "./init.ts";
 import { getUiSettings } from "./uiPrefs.ts";
-
-const DONE = new Set(["idle", "finished", "failed", "waiting"]);
+import {
+  diffNotifications,
+  type NotificationSpec,
+  type NotifyKind,
+  type SessionSnapshot,
+} from "./notifications.ts";
 
 export function requestNotifyPermission(): void {
   if (typeof Notification !== "undefined" && Notification.permission === "default") {
@@ -30,28 +35,57 @@ function beep(): void {
   }
 }
 
+function showNative(spec: NotificationSpec): void {
+  if (typeof Notification === "undefined" || Notification.permission !== "granted") return;
+  const n = new Notification(`Polyth — ${spec.title}`, {
+    body: spec.body,
+    tag: `polyth-${spec.key}`,
+  });
+  n.onclick = () => {
+    // Activate the owning project+session (openSession switches atomically);
+    // an archived/deleted session fails quietly — the app is focused anyway.
+    window.focus();
+    void openSession(spec.sessionId).catch(() => {});
+    n.close();
+  };
+}
+
 export function installNotify(): void {
-  const prev = new Map<string, string>();
+  const prev = new Map<string, SessionSnapshot>();
+  const emitted = new Set<string>();
+
   subscribeStore(() => {
     const s = getState();
-    for (const session of s.sessions) {
-      const before = prev.get(session.id);
-      prev.set(session.id, session.status);
-      if (before !== "working" || !DONE.has(session.status)) continue;
-      const ui = getUiSettings();
-      if (ui.notifySound) beep();
-      if (
-        ui.notifyOnComplete &&
-        typeof Notification !== "undefined" &&
-        Notification.permission === "granted" &&
-        document.hidden
-      ) {
-        const title = session.title || "Session";
-        new Notification("Polyth — turn finished", {
-          body: session.status === "failed" ? `${title} failed` : `${title} is ready`,
-          tag: `polyth-${session.id}`,
-        });
-      }
+    const ui = getUiSettings();
+    const snapshots: SessionSnapshot[] = s.sessions.map((p) => ({
+      id: p.id,
+      projectId: p.projectId,
+      title: p.title,
+      status: p.status,
+      ...(p.parentId ? { parentId: p.parentId } : {}),
+      ...(p.attention ? { attention: { questions: p.attention.questions, permissions: p.attention.permissions } } : {}),
+    }));
+    const specs = diffNotifications(prev, snapshots, {
+      kinds: new Set<NotifyKind>(ui.notifyKinds),
+      template: ui.notifyTemplate,
+      projectNames: new Map(s.projects.map((p) => [p.id, p.name])),
+    });
+    prev.clear();
+    for (const snap of snapshots) prev.set(snap.id, snap);
+
+    for (const spec of specs) {
+      if (emitted.has(spec.key)) continue; // duplicate replay
+      emitted.add(spec.key);
+      if (emitted.size > 500) emitted.delete(emitted.values().next().value!);
+
+      if (ui.notifySound && (spec.kind === "completed" || spec.kind === "failed")) beep();
+      if (!ui.notifyOnComplete) continue;
+      // Foreground events on the active session stay quiet by default; with
+      // onlyWhenHidden off, other sessions may still notify in the foreground.
+      const hidden = typeof document !== "undefined" && document.hidden;
+      if (ui.notifyOnlyWhenHidden && !hidden) continue;
+      if (!hidden && spec.sessionId === s.activeSessionId) continue;
+      showNative(spec);
     }
   });
 }

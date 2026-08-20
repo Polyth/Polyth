@@ -1,6 +1,6 @@
 // HTTP face of the git + worktrees plugin (PLAN §12).
 import type { ProjectService } from "@polyth/contracts";
-import type { GitService } from "@polyth/git";
+import { pathsUnder, type GitService } from "@polyth/git";
 import type { RouteHandler } from "../http.ts";
 
 export function gitRoutes(deps: {
@@ -45,6 +45,14 @@ export function gitRoutes(deps: {
       json(200, await git.log(root, Number(q("limit") ?? 20)));
       return true;
     }
+    if (path === "/api/git/graph" && method === "GET") {
+      const root = await rootOf(q("projectId"));
+      json(200, await git.graph(root, {
+        limit: Number(q("limit") ?? 40),
+        skip: Number(q("skip") ?? 0),
+      }));
+      return true;
+    }
     if (path === "/api/git/branches" && method === "GET") {
       const root = await rootOf(q("projectId"));
       json(200, await git.branches(root));
@@ -64,6 +72,17 @@ export function gitRoutes(deps: {
       case "/api/git/stage": await git.stage(root, paths(b)); break;
       case "/api/git/unstage": await git.unstage(root, paths(b)); break;
       case "/api/git/discard": await git.discard(root, paths(b)); break;
+      case "/api/git/folder": {
+        // Folder actions expand against the *fresh* status, never a glob.
+        const op = String(b.op ?? "");
+        const folder = String(b.folder ?? "");
+        const expanded = pathsUnder(await git.status(root), folder);
+        if (op === "stage") await git.stage(root, [...expanded.unstaged, ...expanded.untracked, ...expanded.conflicted]);
+        else if (op === "unstage") await git.unstage(root, expanded.staged);
+        else if (op === "discard") await git.discard(root, [...expanded.unstaged, ...expanded.untracked]);
+        else { json(400, { error: "invalid-input", message: "op must be stage|unstage|discard" }); return true; }
+        break;
+      }
       case "/api/git/commit": {
         json(200, await git.commit(root, String(b.message ?? "")));
         return true;

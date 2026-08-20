@@ -135,8 +135,18 @@ export async function restoreSession(sessionId: string): Promise<void> {
   if (proj) void refreshSessions(proj);
 }
 
-export async function sendMessage(text: string, model?: JsonObject, agent?: string): Promise<void> {
-  const id = store.getState().activeSessionId;
+export interface SendOptions {
+  /** Captured at click time — project/session switches must never reroute a send. */
+  targetSessionId?: string | null;
+  delivery?: "normal" | "steer" | "queue" | "interrupt";
+  /** Atomically reject open questions / deny open permissions before admission. */
+  dismissPending?: boolean;
+  /** Reusable execution configuration resolved server-side (WP8). */
+  agentProfileId?: string;
+}
+
+export async function sendMessage(text: string, model?: JsonObject, agent?: string, opts?: SendOptions): Promise<void> {
+  const id = opts?.targetSessionId ?? store.getState().activeSessionId;
   if (!id) return;
   // If the stored title is still a placeholder, derive one from the first
   // prompt so the sidebar/header update immediately (display-only upsert).
@@ -146,7 +156,12 @@ export async function sendMessage(text: string, model?: JsonObject, agent?: stri
     if (derived) store.upsertSession({ ...session, title: derived, updatedAt: Date.now() });
   }
   try {
-    await api.sendMessage(id, { text, model, agent });
+    await api.sendMessage(id, {
+      text, model, agent,
+      ...(opts?.delivery ? { delivery: opts.delivery } : {}),
+      ...(opts?.dismissPending ? { dismissPending: true } : {}),
+      ...(opts?.agentProfileId ? { agentProfileId: opts.agentProfileId } : {}),
+    });
   } catch (err) {
     console.error("send message failed", err);
     store.setUiError(friendlyError("Couldn’t send the message", err));
@@ -163,10 +178,10 @@ export async function abortSession(): Promise<void> {
   }
 }
 
-export function replyPermission(requestId: string, reply: "once" | "always" | "reject"): void {
+export function replyPermission(requestId: string, reply: "once" | "always" | "reject", scope?: "session" | "project"): void {
   const id = store.getState().activeSessionId;
   if (!id) return;
-  void api.replyPermission(id, requestId, reply).catch((err) => console.error("permission reply failed", err));
+  void api.replyPermission(id, requestId, reply, scope).catch((err) => console.error("permission reply failed", err));
 }
 
 export function answerQuestion(requestId: string, answers: JsonObject): void {

@@ -1,13 +1,63 @@
-import { useCallback, useEffect, useState } from "react";
-import { api, type GitBranches, type GitStatus, type Worktree } from "../api.ts";
-import { useStore, setGitBranch } from "../store.ts";
+// Changes-first Git surface (WP7): grouped file changes with folder actions up
+// top, then branches/worktrees, then a commit graph with refs and pagination.
+// The right pane shows hunk-by-hunk diffs where local review comments anchor
+// by content digest and turn Outdated when the source moves on.
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { api, type GitBranches, type GitFileEntry, type GitGraphEntry, type GitStatus, type Worktree } from "../api.ts";
+import { useStore, setGitBranch, setUiError } from "../store.ts";
+import { diffStat } from "../utils.ts";
+import { friendlyError } from "../settings.ts";
+import { layoutGraph, type GraphRow } from "../git/graph.ts";
+import {
+  commentState, hunkDigest, loadComments, saveComments, splitHunks,
+  type DiffHunk, type ReviewComment,
+} from "../review/anchors.ts";
+import CopyButton from "./CopyButton.tsx";
 import EmptyState from "./EmptyState.tsx";
 
-function fileLetter(staged: boolean, status: string): { letter: string; cls: string } {
-  if (status === "conflict") return { letter: "!", cls: "conflict" };
-  if (status === "untracked") return { letter: "?", cls: "unstaged" };
-  if (staged) return { letter: "A", cls: "staged" };
-  return { letter: "M", cls: "unstaged" };
+const STATUS_LETTER: Record<string, { letter: string; cls: string; label: string }> = {
+  added: { letter: "A", cls: "staged", label: "Added" },
+  modified: { letter: "M", cls: "unstaged", label: "Modified" },
+  deleted: { letter: "D", cls: "unstaged", label: "Deleted" },
+  renamed: { letter: "R", cls: "staged", label: "Renamed" },
+  copied: { letter: "C", cls: "staged", label: "Copied" },
+  typechange: { letter: "T", cls: "unstaged", label: "Type changed" },
+  untracked: { letter: "?", cls: "unstaged", label: "Untracked" },
+  conflicted: { letter: "!", cls: "conflict", label: "Conflicted" },
+};
+
+function fileLetter(f: GitFileEntry): { letter: string; cls: string; label: string } {
+  const hit = STATUS_LETTER[f.status];
+  if (hit) return f.staged && f.status !== "conflicted" ? { ...hit, cls: "staged" } : hit;
+  return { letter: "M", cls: f.staged ? "staged" : "unstaged", label: "Modified" };
+}
+
+const dirOf = (p: string) => p.split("/").slice(0, -1).join("/");
+
+/** Typed confirmation for destructive bulk actions. */
+function confirmTyped(what: string): boolean {
+  const typed = window.prompt(`This cannot be undone. Type "discard" to ${what}:`);
+  return typed?.trim().toLowerCase() === "discard";
+}
+
+const GRAPH_PAGE = 30;
+const LANE_W = 12;
+
+function GraphSvg({ row }: { row: GraphRow }) {
+  const width = Math.max(row.width, 1) * LANE_W;
+  const cx = row.lane * LANE_W + LANE_W / 2;
+  return (
+    <svg className="graph-svg" width={width} height={24} aria-hidden="true">
+      {row.through.map((l) => (
+        <line key={`t${l}`} x1={l * LANE_W + LANE_W / 2} y1={0} x2={l * LANE_W + LANE_W / 2} y2={24} className="graph-line" />
+      ))}
+      {row.edges.map((l, i) => (
+        <line key={`e${i}`} x1={cx} y1={12} x2={l * LANE_W + LANE_W / 2} y2={24} className="graph-line" />
+      ))}
+      <line x1={cx} y1={0} x2={cx} y2={12} className="graph-line" opacity={row.lane === 0 && row.through.length === 0 && row.edges.length <= 1 ? 0.6 : 1} />
+      <circle cx={cx} cy={12} r={3.5} className={row.edges.length > 1 ? "graph-dot merge" : "graph-dot"} />
+    </svg>
+  );
 }
 
 export default function GitView() {
@@ -15,6 +65,8 @@ export default function GitView() {
   const [status, setStatus] = useState<GitStatus | null>(null);
   const [branches, setBranches] = useState<GitBranches>({ current: "", branches: [] });
   const [trees, setTrees] = useState<Worktree[]>([]);
+  const [graph, setGraph] = useState<GitGraphEntry[]>([]);
+  const [graphDone, setGraphDone] = useState(false);
   const [loadError, setLoadError] = useState(false);
   const [sel, setSel] = useState<string | null>(null);
   const [diff, setDiff] = useState("");
@@ -25,18 +77,25 @@ export default function GitView() {
   const [showTreeForm, setShowTreeForm] = useState(false);
   const [busy, setBusy] = useState(false);
   const [generating, setGenerating] = useState(false);
+  const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
+  const [comments, setComments] = useState<ReviewComment[]>([]);
+  const [draft, setDraft] = useState<{ digest: string; line: number } | null>(null);
+  const [draftText, setDraftText] = useState("");
 
   const refresh = useCallback(async () => {
     if (!projectId) return;
     try {
-      const [s, b, w] = await Promise.all([
+      const [s, b, w, g] = await Promise.all([
         api.gitStatus(projectId),
         api.gitBranches(projectId),
         api.listWorktrees(projectId),
+        api.gitGraph(projectId, GRAPH_PAGE, 0),
       ]);
       setStatus(s);
       setBranches(b);
       setTrees(w);
+      setGraph(g);
+      setGraphDone(g.length < GRAPH_PAGE);
       setLoadError(false);
       if (b.current) setGitBranch(b.current);
     } catch {
@@ -48,53 +107,64 @@ export default function GitView() {
   useEffect(() => { void refresh(); }, [refresh]);
 
   useEffect(() => {
+    setComments(projectId ? loadComments(projectId) : []);
+  }, [projectId]);
+
+  useEffect(() => {
     if (!projectId || !sel || !status) return;
     const staged = status.staged.some((f) => f.path === sel);
     void api.gitDiff(projectId, sel, staged).then((d) => setDiff(d.diff));
+    setDraft(null);
   }, [projectId, sel, status]);
 
-  if (!projectId) {
-    return <EmptyState title="No project selected" description="Open a project to inspect its git state." />;
-  }
-  if (loadError || (status && !status.branch && branches.branches.length === 0)) {
-    return (
-      <EmptyState
-        title="Not a git repository"
-        description="This project folder has no git history yet. Initialize one from the terminal."
-      />
-    );
-  }
+  const hunks = useMemo(() => splitHunks(diff), [diff]);
+  const graphRows = useMemo(() => layoutGraph(graph), [graph]);
+
+  if (!projectId) return <EmptyState title="No project selected" description="Open a project to inspect its git state." />;
+  if (loadError) return <EmptyState title="Not a git repository" description="Git data could not be loaded for this project." />;
 
   const run = async (fn: () => Promise<unknown>) => {
     setBusy(true);
-    await fn().catch((e) => window.alert(String(e)));
-    await refresh();
-    setBusy(false);
+    try {
+      await fn();
+      await refresh();
+    } catch (e) {
+      setUiError(friendlyError("Couldn’t update the repository", e));
+    } finally {
+      setBusy(false);
+    }
   };
 
   const all = status ? [...status.staged, ...status.unstaged, ...status.untracked, ...status.conflicted] : [];
-  const localBranches = branches.branches.filter((b) => !b.remote);
-  const remoteBranches = branches.branches.filter((b) => b.remote);
-  const addCount = diff.split("\n").filter((l) => l.startsWith("+") && !l.startsWith("+++")).length;
-  const delCount = diff.split("\n").filter((l) => l.startsWith("-") && !l.startsWith("---")).length;
+  const { add: addCount, del: delCount } = diffStat(diff);
 
-  const branchRow = (b: { name: string; current: boolean }) => (
-    <button
-      key={b.name}
-      className={`git-branch-row ${b.current ? "current" : ""}`}
-      disabled={busy || b.current}
-      aria-current={b.current ? "true" : undefined}
-      onClick={() => void run(() => api.gitCheckout(projectId, b.name))}
-    >
-      <span className="mono git-branch-name">{b.name}</span>
-      {b.current && <span className="git-branch-badge">current</span>}
-    </button>
-  );
+  // ---- folder grouping (changes-first surface) --------------------------------
+  const groups = new Map<string, GitFileEntry[]>();
+  for (const f of all) {
+    const d = dirOf(f.path);
+    const list = groups.get(d) ?? [];
+    list.push(f);
+    groups.set(d, list);
+  }
+  const groupKeys = [...groups.keys()].sort();
+
+  const persistComments = (next: ReviewComment[]) => {
+    setComments(next);
+    saveComments(projectId, next);
+  };
+
+  const fileComments = comments.filter((c) => c.path === sel);
+
+  const loadMoreGraph = async () => {
+    const more = await api.gitGraph(projectId, GRAPH_PAGE, graph.length);
+    setGraph((g) => [...g, ...more]);
+    if (more.length < GRAPH_PAGE) setGraphDone(true);
+  };
 
   return (
     <div className="view-page git-page">
       <div className="goals-head">
-        <h1 className="view-title">Git &amp; worktrees</h1>
+        <h1 className="view-title">Git &amp; Worktrees</h1>
         <span className="header-spacer" />
         <button className="small-btn" onClick={() => { setShowBranchForm((v) => !v); setShowTreeForm(false); }}>+ Branch</button>
         <button className="small-btn" onClick={() => { setShowTreeForm((v) => !v); setShowBranchForm(false); }}>+ Worktree</button>
@@ -121,9 +191,93 @@ export default function GitView() {
 
       <div className="git-grid">
         <div className="git-col">
+          {/* ---- changes first ------------------------------------------------ */}
+          <div className="stat-label" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 6 }}>
+            <span>Changes ({all.length})</span>
+            {status && all.length > 0 && (
+              <span className="git-ahead-behind">
+                {status.staged.length > 0 && <span className="ahead">{status.staged.length} staged</span>}
+                {status.unstaged.length + status.untracked.length > 0 && <span className="behind">{status.unstaged.length + status.untracked.length} unstaged</span>}
+                {status.conflicted.length > 0 && <span style={{ color: "var(--red)" }}>{status.conflicted.length} conflicted</span>}
+              </span>
+            )}
+            <span className="header-spacer" />
+            {status && (status.unstaged.length + status.untracked.length) > 0 && (
+              <button className="small-btn" disabled={busy}
+                onClick={() => void run(() => api.gitFolder(projectId, "", "stage"))}>
+                Stage all
+              </button>
+            )}
+            {status && status.staged.length > 0 && (
+              <button className="small-btn" disabled={busy}
+                onClick={() => void run(() => api.gitFolder(projectId, "", "unstage"))}>
+                Unstage all
+              </button>
+            )}
+          </div>
+          <div className="git-changes">
+            {all.length === 0 && <div className="muted" style={{ fontSize: 12.5, padding: "4px 0" }}>Working tree clean.</div>}
+            {groupKeys.map((dir) => {
+              const files = groups.get(dir)!;
+              const open = !collapsed.has(dir);
+              return (
+                <div key={dir || "."} className="git-folder-group">
+                  <div className="git-folder-row">
+                    <button
+                      className="git-folder-toggle"
+                      aria-expanded={open}
+                      onClick={() => setCollapsed((c) => {
+                        const n = new Set(c);
+                        if (n.has(dir)) n.delete(dir); else n.add(dir);
+                        return n;
+                      })}
+                    >
+                      {open ? "▾" : "▸"} <span className="mono">{dir || "(root)"}</span> <span className="muted">({files.length})</span>
+                    </button>
+                    <span className="git-file-actions">
+                      {files.some((f) => !f.staged && f.status !== "conflicted") && (
+                        <button className="small-btn" title="Stage folder" disabled={busy}
+                          onClick={() => void run(() => api.gitFolder(projectId, dir, "stage"))}>S</button>
+                      )}
+                      {files.some((f) => f.staged) && (
+                        <button className="small-btn" title="Unstage folder" disabled={busy}
+                          onClick={() => void run(() => api.gitFolder(projectId, dir, "unstage"))}>U</button>
+                      )}
+                      {files.some((f) => !f.staged) && (
+                        <button className="small-btn danger-btn" title="Discard folder changes" disabled={busy}
+                          onClick={() => { if (confirmTyped(`discard all changes under ${dir || "the repository root"}`)) void run(() => api.gitFolder(projectId, dir, "discard")); }}>✕</button>
+                      )}
+                    </span>
+                  </div>
+                  {open && files.map((f) => {
+                    const { letter, cls, label } = fileLetter(f);
+                    return (
+                      <div key={`${f.path}:${f.staged}`} className={`git-file-row ${sel === f.path ? "selected" : ""}`}
+                        onClick={() => setSel(f.path)}>
+                        <span className={`git-file-letter ${cls}`} title={label} aria-label={label}>{letter}</span>
+                        <span className="git-file-path" title={f.origPath ? `${f.origPath} → ${f.path}` : f.path}>
+                          {f.origPath ? <><span className="muted">{f.origPath} → </span>{f.path}</> : f.path}
+                        </span>
+                        <span className="git-file-actions" onClick={(e) => e.stopPropagation()}>
+                          {f.staged
+                            ? <button className="small-btn" title="Unstage" disabled={busy} onClick={() => void run(() => api.gitUnstage(projectId, [f.path]))}>U</button>
+                            : <button className="small-btn" title="Stage" disabled={busy} onClick={() => void run(() => api.gitStage(projectId, [f.path]))}>S</button>}
+                          {!f.staged && f.status !== "untracked" && (
+                            <button className="small-btn danger-btn" title="Discard" disabled={busy}
+                              onClick={() => { if (window.confirm(`Discard ${f.path}?`)) void run(() => api.gitDiscard(projectId, [f.path])); }}>✕</button>
+                          )}
+                        </span>
+                      </div>
+                    );
+                  })}
+                </div>
+              );
+            })}
+          </div>
+
           <div className="stat-label">Branch</div>
           <div className="git-branch-card">
-            <span className="mono git-branch-name" style={{ fontWeight: 650 }}>{status?.branch || "—"}</span>
+            <span className="mono" style={{ fontWeight: 650 }}>{status?.branch || "—"}</span>
             {status && (status.ahead > 0 || status.behind > 0) && (
               <span className="git-ahead-behind">
                 {status.ahead > 0 && <span className="ahead">↑{status.ahead}</span>}
@@ -131,23 +285,33 @@ export default function GitView() {
               </span>
             )}
           </div>
-          {localBranches.length > 0 && (
-            <>
-              <div className="stat-label">Local</div>
-              <div className="git-branch-list">{localBranches.map(branchRow)}</div>
-            </>
-          )}
-          {remoteBranches.length > 0 && (
-            <>
-              <div className="stat-label">Remote</div>
-              <div className="git-branch-list">{remoteBranches.map(branchRow)}</div>
-            </>
-          )}
+          {(() => {
+            // LOCAL/REMOTE sections; bare remote refs (e.g. "origin") are dropped (UX-27).
+            const others = branches.branches.filter((b) => !b.current);
+            const local = others.filter((b) => !b.remote);
+            const remote = others.filter((b) => b.remote && b.name !== b.remote && !b.name.endsWith("/HEAD"));
+            const section = (label: string, list: typeof others) => list.length > 0 && (
+              <div className="git-branch-list">
+                <div className="stat-label">{label}</div>
+                {list.map((b) => (
+                  <button key={b.name} className="git-branch-row" disabled={busy} title={b.name}
+                    onClick={() => void run(() => api.gitCheckout(projectId, b.name))}>
+                    <span className="mono">{b.name}</span>
+                  </button>
+                ))}
+              </div>
+            );
+            return <>{section("Local", local)}{section("Remote", remote)}</>;
+          })()}
 
-          <div className="stat-label">Worktrees</div>
+          <div className="stat-label">Worktrees ({trees.length})</div>
+          {trees.length === 0 && <div className="muted" style={{ fontSize: 12.5 }}>No linked worktrees — sessions run in the project root.</div>}
           {trees.map((t) => (
             <div key={t.path} className="git-wt-card">
-              <div className="mono" style={{ fontWeight: 600 }}>{t.branch}</div>
+              <div className="mono" style={{ fontWeight: 600 }}>
+                {t.branch}
+                <span className={`ctx-badge ${t.isMain ? "green" : ""}`} style={{ marginLeft: 6 }}>{t.isMain ? "main" : "linked"}</span>
+              </div>
               <div className="muted" style={{ fontSize: 11 }}>{t.path} · {t.head.slice(0, 7)}</div>
               {!t.isMain && (
                 <button className="small-btn danger-btn git-wt-remove" disabled={busy}
@@ -158,64 +322,97 @@ export default function GitView() {
             </div>
           ))}
 
-          <div className="stat-label" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-            <span>Changes ({all.length})</span>
-            {status && (status.unstaged.length + status.untracked.length) > 0 && (
-              <button className="small-btn" disabled={busy}
-                onClick={() => void run(() => api.gitStage(projectId, [...status.unstaged, ...status.untracked].map((f) => f.path)))}>
-                Stage all
-              </button>
-            )}
+          {/* ---- commit graph -------------------------------------------------- */}
+          <div className="stat-label">Graph</div>
+          {graph.length === 0 && <div className="muted" style={{ fontSize: 12.5 }}>No commits yet.</div>}
+          <div className="git-graph">
+            {graph.map((c, i) => (
+              <div key={c.sha} className="git-graph-row" title={`${c.author} · ${new Date(c.date).toLocaleString()}${c.parents.length > 1 ? " · merge" : ""}`}>
+                {graphRows[i] && <GraphSvg row={graphRows[i]!} />}
+                <span className="git-sha">{c.shortSha}</span>
+                {c.refs.map((r) => (
+                  <span key={r} className={`graph-ref${r.startsWith("tag: ") ? " tag" : ""}`}>{r.replace(/^tag: /, "⌂ ")}</span>
+                ))}
+                <span className="git-subj">{c.subject}</span>
+              </div>
+            ))}
           </div>
-          <div className="git-changes">
-            {all.length === 0 && <div className="muted" style={{ fontSize: 12.5, padding: "4px 0" }}>Working tree clean.</div>}
-            {all.map((f) => {
-              const { letter, cls } = fileLetter(f.staged, f.status);
-              return (
-                <div key={`${f.path}:${f.staged}`} className={`git-file-row ${sel === f.path ? "selected" : ""}`}
-                  onClick={() => setSel(f.path)}>
-                  <span className={`git-file-letter ${cls}`}>{letter}</span>
-                  <span className="git-file-path">{f.path}</span>
-                  <span className="git-file-actions" onClick={(e) => e.stopPropagation()}>
-                    {f.staged
-                      ? <button className="small-btn" title="Unstage" disabled={busy} onClick={() => void run(() => api.gitUnstage(projectId, [f.path]))}>U</button>
-                      : <button className="small-btn" title="Stage" disabled={busy} onClick={() => void run(() => api.gitStage(projectId, [f.path]))}>S</button>}
-                    {!f.staged && f.status !== "untracked" && (
-                      <button className="small-btn danger-btn" title="Discard" disabled={busy}
-                        onClick={() => { if (window.confirm(`Discard ${f.path}?`)) void run(() => api.gitDiscard(projectId, [f.path])); }}>✕</button>
-                    )}
-                  </span>
-                </div>
-              );
-            })}
-          </div>
+          {!graphDone && graph.length > 0 && (
+            <button className="small-btn" onClick={() => void loadMoreGraph()}>Load more…</button>
+          )}
         </div>
 
         <div className="git-col git-col-right">
           {all.length === 0 ? (
-            <EmptyState
-              title="No changes"
-              description="The working tree is clean. Edits in this project will show up here."
-            />
+            <EmptyState title="No changes" description="The working tree is clean. Edits in this project will show up here." />
           ) : sel === null ? (
             <EmptyState title="Pick a file" description="Select a changed file to view its diff." />
           ) : (
             <>
               <div className="wt-file" title={sel}>{sel}</div>
-              <pre className="git-diff git-diff-page">
-                {diff.split("\n").map((line, i) => {
-                  let cls = "";
-                  if (line.startsWith("+") && !line.startsWith("+++")) cls = "diff-add";
-                  else if (line.startsWith("-") && !line.startsWith("---")) cls = "diff-del";
-                  else if (line.startsWith("@@")) cls = "diff-hunk";
-                  return (
-                    <div key={i} className={`git-diff-line ${cls}`}>
+              <div className="copy-wrap">
+                <pre className="git-diff git-diff-page">
+                  {hunks.length === 0 && diff.split("\n").map((line, i) => (
+                    <div key={i} className="git-diff-line">
                       <span className="git-diff-ln">{i + 1}</span>
                       <span>{line}</span>
                     </div>
-                  );
-                })}
-              </pre>
+                  ))}
+                  {hunks.map((h, hi) => (
+                    <HunkBlock
+                      key={hi}
+                      hunk={h}
+                      onComment={() => { setDraft({ digest: hunkDigest(h), line: h.startNew }); setDraftText(""); }}
+                    />
+                  ))}
+                </pre>
+                <CopyButton text={diff} />
+              </div>
+
+              {draft && (
+                <div className="review-draft">
+                  <textarea
+                    autoFocus
+                    rows={2}
+                    placeholder={`Review note near line ${draft.line}…`}
+                    value={draftText}
+                    onChange={(e) => setDraftText(e.target.value)}
+                  />
+                  <div className="commit-row">
+                    <button className="small-btn" onClick={() => setDraft(null)}>Cancel</button>
+                    <button className="primary-btn" style={{ padding: "4px 12px", fontSize: 12 }} disabled={!draftText.trim()}
+                      onClick={() => {
+                        persistComments([
+                          ...comments,
+                          { id: `rc_${Date.now().toString(36)}`, path: sel, digest: draft.digest, line: draft.line, text: draftText.trim(), createdAt: Date.now() },
+                        ]);
+                        setDraft(null);
+                      }}>
+                      Add note
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {fileComments.length > 0 && (
+                <div className="review-list">
+                  <div className="stat-label">Review notes ({fileComments.length})</div>
+                  {fileComments.map((c) => {
+                    const state = commentState(c, hunks);
+                    return (
+                      <div key={c.id} className={`review-note${state === "outdated" ? " outdated" : ""}`}>
+                        <div className="review-note-head">
+                          <span className="mono">L{c.line}</span>
+                          {state === "outdated" && <span className="tag">Outdated</span>}
+                          <span className="header-spacer" />
+                          <button className="small-btn" onClick={() => persistComments(comments.filter((x) => x.id !== c.id))}>✕</button>
+                        </div>
+                        <div className="review-note-text">{c.text}</div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </>
           )}
 
@@ -241,7 +438,7 @@ export default function GitView() {
               </div>
             </div>
           )}
-          {sel && all.length > 0 && (addCount + delCount > 0) && (
+          {sel && (addCount + delCount > 0) && (
             <div className="muted" style={{ fontSize: 11.5 }}>
               <span style={{ color: "var(--green)" }}>+{addCount}</span>{" "}
               <span style={{ color: "var(--red)" }}>-{delCount}</span>
@@ -250,5 +447,31 @@ export default function GitView() {
         </div>
       </div>
     </div>
+  );
+}
+
+function HunkBlock({ hunk, onComment }: { hunk: DiffHunk; onComment: () => void }) {
+  let ln = hunk.startNew;
+  return (
+    <>
+      <div className="git-diff-line diff-hunk">
+        <span className="git-diff-ln" />
+        <span>{hunk.header}</span>
+        <button className="hunk-comment-btn" title="Add review note for this hunk" onClick={onComment}>💬</button>
+      </div>
+      {hunk.body.map((line, i) => {
+        let cls = "";
+        let shown = "";
+        if (line.startsWith("+")) { cls = "diff-add"; shown = String(ln++); }
+        else if (line.startsWith("-")) { cls = "diff-del"; }
+        else { shown = String(ln++); }
+        return (
+          <div key={i} className={`git-diff-line ${cls}`}>
+            <span className="git-diff-ln">{shown}</span>
+            <span>{line}</span>
+          </div>
+        );
+      })}
+    </>
   );
 }

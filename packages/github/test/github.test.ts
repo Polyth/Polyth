@@ -171,3 +171,123 @@ test("missing gh short-circuits status after the version probe", async () => {
     { installed: false, authenticated: false, repo: null },
   );
 });
+
+// ---- WP11: PR detail surfaces + guarded writes -----------------------------
+
+test("prDetail/prFiles/prChecks parse gh JSON and fail soft", async () => {
+  const exec: ExecFn = async (_bin, args) => {
+    const fields = args[args.indexOf("--json") + 1] ?? "";
+    if (fields.startsWith("number,")) {
+      return {
+        stdout: JSON.stringify({
+          number: 4, title: "T", state: "OPEN", isDraft: false, author: { login: "kat" },
+          url: "u", body: null, baseRefName: "main", headRefName: "feat", headRefOid: "abc123",
+          additions: 10, deletions: 2, changedFiles: 3, mergeable: "MERGEABLE",
+          createdAt: "c", updatedAt: "d",
+        }),
+        stderr: "",
+      };
+    }
+    if (fields === "files") {
+      return { stdout: JSON.stringify({ files: [{ path: "a.ts", additions: 5, deletions: 1 }] }), stderr: "" };
+    }
+    if (fields === "statusCheckRollup") {
+      return {
+        stdout: JSON.stringify({
+          statusCheckRollup: [
+            { name: "build", status: "COMPLETED", conclusion: "FAILURE", detailsUrl: "http://b" },
+            { context: "legacy", state: "PENDING" },
+          ],
+        }),
+        stderr: "",
+      };
+    }
+    throw Object.assign(new Error("exit 1"), { stderr: "unexpected" });
+  };
+  const svc = createGithubService({ exec });
+
+  const detail = await svc.prDetail("/repo", 4);
+  assert.ok(detail.ok);
+  if (detail.ok) {
+    assert.equal(detail.data.headRefOid, "abc123");
+    assert.equal(detail.data.body, "");
+    assert.equal(detail.data.author, "kat");
+  }
+
+  const files = await svc.prFiles("/repo", 4);
+  assert.ok(files.ok);
+  if (files.ok) assert.deepEqual(files.data, [{ path: "a.ts", additions: 5, deletions: 1 }]);
+
+  const checks = await svc.prChecks("/repo", 4);
+  assert.ok(checks.ok);
+  if (checks.ok) {
+    assert.equal(checks.data[0]?.status, "failure");
+    assert.equal(checks.data[1]?.status, "queued");
+  }
+
+  const broken = createGithubService({ exec: async () => enoent() });
+  const soft = await broken.prDetail("/repo", 4);
+  assert.equal(soft.ok, false);
+});
+
+test("prComments merges issue comments and reviews sorted by time", async () => {
+  const exec: ExecFn = async () => ({
+    stdout: JSON.stringify({
+      comments: [{ id: "c1", author: { login: "a" }, body: "hi", createdAt: "2026-01-02", url: "u1" }],
+      reviews: [
+        { id: "r1", author: { login: "b" }, body: "lgtm", submittedAt: "2026-01-01", state: "APPROVED" },
+        { id: "r2", author: null, body: "", state: "" },
+      ],
+    }),
+    stderr: "",
+  });
+  const r = await createGithubService({ exec }).prComments("/repo", 9);
+  assert.ok(r.ok);
+  if (r.ok) {
+    assert.equal(r.data.length, 2); // empty review dropped
+    assert.equal(r.data[0]?.id, "r1");
+    assert.equal(r.data[0]?.reviewState, "APPROVED");
+    assert.equal(r.data[1]?.kind, "issue");
+  }
+});
+
+test("submitReview posts JSON via stdin and is idempotent per content digest", async () => {
+  let posts = 0;
+  const exec: ExecFn = async (_bin, args, opts) => {
+    assert.equal(args[0], "api");
+    assert.match(args[1] ?? "", /pulls\/7\/reviews$/);
+    posts += 1;
+    const body = JSON.parse(opts.input ?? "{}") as { event: string };
+    assert.equal(body.event, "COMMENT");
+    return { stdout: JSON.stringify({ id: 555, html_url: "http://r" }), stderr: "" };
+  };
+  const svc = createGithubService({ exec });
+  const input = { number: 7, event: "COMMENT" as const, body: "note", comments: [{ path: "a.ts", line: 3, body: "x" }] };
+  const first = await svc.submitReview("/repo", input);
+  const retry = await svc.submitReview("/repo", input);
+  assert.equal(posts, 1);
+  assert.deepEqual(first, retry);
+  assert.ok(first.ok);
+  if (first.ok) assert.equal(first.data.id, "555");
+
+  // different payload posts again
+  await svc.submitReview("/repo", { ...input, body: "other" });
+  assert.equal(posts, 2);
+});
+
+test("addLabels enforces the risk/confidence policy before any gh call", async () => {
+  let calls = 0;
+  const svc = createGithubService({ exec: async () => { calls += 1; return { stdout: "", stderr: "" }; } });
+
+  const bad = await svc.addLabels("/repo", 3, ["risk:9"]);
+  assert.equal(bad.ok, false);
+  const injection = await svc.addLabels("/repo", 3, ["risk:3; rm -rf /"]);
+  assert.equal(injection.ok, false);
+  const empty = await svc.addLabels("/repo", 3, []);
+  assert.equal(empty.ok, false);
+  assert.equal(calls, 0);
+
+  const good = await svc.addLabels("/repo", 3, ["risk:3", "confidence:4"]);
+  assert.ok(good.ok);
+  assert.equal(calls, 1);
+});

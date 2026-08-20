@@ -1,6 +1,7 @@
 // Voice settings: dictation (speech→text) and read-aloud (text→speech).
 import { useEffect, useState } from "react";
 import { speechSupport } from "@polyth/dictation";
+import { api } from "../../api.ts";
 import { setVoicePrefs, speak, stopSpeaking, useVoicePrefs } from "../../voice.tsx";
 import { pluginOn, togglePlugin } from "../../prefs.ts";
 import { EmptyState, PageHead, Row, Toggle } from "./parts.tsx";
@@ -12,6 +13,11 @@ export default function VoicePage() {
   const support = speechSupport(typeof window !== "undefined" ? window : undefined);
   const pluginEnabled = pluginOn("dictation");
   const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
+  const [streaming, setStreaming] = useState<{ available: boolean; engine?: string; reason?: string } | null>(null);
+
+  useEffect(() => {
+    void api.dictationCapability().then(setStreaming);
+  }, []);
 
   useEffect(() => {
     if (!support.tts) return;
@@ -30,9 +36,20 @@ export default function VoicePage() {
       <Row label="Voice plugin" hint="Shows the mic button in the composer and voice commands in the palette.">
         <Toggle on={pluginEnabled} onChange={() => togglePlugin("dictation")} label="Voice plugin" />
       </Row>
-      <Row label="Dictation" hint={support.stt ? "Mic button inserts your speech into the composer." : "Not supported in this browser."}>
+      <Row label="Dictation" hint={support.stt ? "Mic button inserts your speech into the composer." : "Not supported in this browser."} itemId="voice.dictation">
         <Toggle on={prefs.dictation} onChange={(v) => setVoicePrefs({ dictation: v })} label="Dictation" />
       </Row>
+      {streaming && (
+        <Row
+          label="Streaming engine"
+          hint={streaming.available
+            ? `Server transcription via ${streaming.engine} with reconnect-safe audio replay.`
+            : streaming.reason ?? "No server speech-to-text engine; the browser engine is used."}
+          itemId="voice.streaming"
+        >
+          <span className={streaming.available ? "" : "muted"}>{streaming.available ? streaming.engine : "browser (Web Speech)"}</span>
+        </Row>
+      )}
       <Row label="Read replies aloud" hint={support.tts ? "Speaks each completed assistant reply in the active session." : "Not supported in this browser."}>
         <Toggle on={prefs.tts} onChange={(v) => setVoicePrefs({ tts: v })} label="Read replies aloud" />
       </Row>

@@ -1,9 +1,9 @@
 // Shared building blocks for settings pages.
 import type { ReactNode } from "react";
 
-export function Row({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) {
+export function Row({ label, hint, itemId, children }: { label: string; hint?: string; itemId?: string; children: ReactNode }) {
   return (
-    <div className="set-row">
+    <div className="set-row settings-row" {...(itemId ? { "data-settings-item": itemId } : {})}>
       <div className="set-row-text">
         <div className="set-row-label">{label}</div>
         {hint && <div className="set-row-hint">{hint}</div>}
@@ -15,10 +15,9 @@ export function Row({ label, hint, children }: { label: string; hint?: string; c
 
 export function Toggle({ on, onChange, label }: { on: boolean; onChange: (v: boolean) => void; label?: string }) {
   return (
-    <label className="set-toggle">
-      <input type="checkbox" checked={on} onChange={(e) => onChange(e.target.checked)} aria-label={label} />
-      <span className="set-toggle-track"><span className="set-toggle-knob" /></span>
-    </label>
+    <button className="switch set-toggle" role="switch" aria-checked={on} aria-label={label} onClick={() => onChange(!on)}>
+      <i />
+    </button>
   );
 }
 

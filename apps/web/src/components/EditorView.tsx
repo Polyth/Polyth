@@ -1,11 +1,15 @@
-// Full-screen IDE surface: file tree (~220px) on the left, editor filling the
-// rest. Preview mode is highlighted + line-numbered and selectable; edit mode
-// is a textarea with a synced gutter, Save/Cancel, dirty •, and Ctrl/Cmd+S.
-// "Add selection/file to chat" goes through the composer insert queue, so it
-// works even while the Composer is unmounted.
-import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
-import { api, type FileEntry, type FileReadResult } from "../api.ts";
-import { getState, openEditorFile, setActiveView, useStore } from "../store.ts";
+// Workspace pane host (WP6): file tree on the left, a keep-alive tab strip and
+// editor filling the rest. Each open file keeps its buffer (and dirty state)
+// alive across tab switches; dirty tabs block accidental close. Saves are
+// revision-guarded — a file changed on disk raises a conflict banner instead
+// of clobbering. Markdown/HTML/JSON previews, go-to-line, and tree context
+// menus round out the surface.
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent, type MouseEvent } from "react";
+import { api, httpStatusOf, type FileEntry, type FileReadResult } from "../api.ts";
+import { clearEditorLocation, getState, openEditorFile, setActiveView, useStore } from "../store.ts";
+import { MarkdownDoc } from "../markdown.tsx";
+import EmptyState from "./EmptyState.tsx";
+import JsonTree, { tryParseJson } from "../markdown/JsonTree.tsx";
 import { highlightLines, langOf } from "../highlight.ts";
 import { formatFileChat, formatSelectionChat, lineRangeOf } from "../chatclip.ts";
 import { requestComposerInsert } from "../composerInsert.ts";
@@ -13,46 +17,128 @@ import { createSession } from "../init.ts";
 import { setDragPath } from "../dnd.ts";
 import { MOD } from "../format.ts";
 import { useEscape } from "../useEscape.ts";
+import { useUiSettings } from "../uiPrefs.ts";
+import {
+  activateTab, closeTab, cycleTab, deserializePane, emptyPane, markDirty, moveTab,
+  openTab, serializePane, tabId, type PaneState, type PaneTab,
+} from "../workspace/paneStore.ts";
 
 interface Row {
   e: FileEntry;
   depth: number;
 }
 
+/** Per-file keep-alive document state. Lives outside React state identity so
+ *  hidden tabs keep their buffers verbatim. */
+interface TabDoc {
+  doc: FileReadResult | null;
+  buf: string;
+  editing: boolean;
+  loading: boolean;
+  error: string;
+  /** Set when a save was rejected because the disk revision moved. */
+  conflict: string | null;
+}
+
 const parentOf = (p: string) => p.split("/").slice(0, -1).join("/");
+const baseOf = (p: string) => p.split("/").pop() ?? p;
 const msg = (err: unknown) => (err instanceof Error ? err.message : String(err));
 /** Files at or below this size get inlined into "Add file to chat". */
 const INLINE_FILE_CHARS = 4000;
 /** Above this many lines, fall back to a plain block (no per-line rows). */
 const MAX_ROWED_LINES = 8000;
+const AUTOSAVE_MS = 1400;
+
+const isMd = (p: string) => /\.(md|markdown)$/i.test(p);
+const isHtml = (p: string) => /\.(html?|xhtml)$/i.test(p);
+const isJson = (p: string) => /\.json$/i.test(p);
+
+/** Lock down HTML previews: no scripts, no network, inline styles only. */
+const PREVIEW_CSP = `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'">`;
+
+interface CtxMenu {
+  x: number;
+  y: number;
+  entry: FileEntry;
+}
 
 export default function EditorView() {
   const projectId = useStore((s) => s.activeProjectId);
   const filePath = useStore((s) => s.editorFile);
+  const location = useStore((s) => s.editorLocation);
+  const prefs = useUiSettings();
 
   // ---- tree ----------------------------------------------------------------
   const [kids, setKids] = useState<Record<string, FileEntry[]>>({});
   const [open, setOpen] = useState<ReadonlySet<string>>(new Set());
   const [sel, setSel] = useState("");
   const [treeErr, setTreeErr] = useState("");
+  const [ctx, setCtx] = useState<CtxMenu | null>(null);
 
-  // ---- editor ----------------------------------------------------------------
-  const [doc, setDoc] = useState<FileReadResult | null>(null);
-  const [buf, setBuf] = useState("");
-  const [editing, setEditing] = useState(false);
+  // ---- pane tabs -------------------------------------------------------------
+  const [pane, setPane] = useState<PaneState>(emptyPane);
+  const cacheRef = useRef(new Map<string, TabDoc>());
+  const [, setTick] = useState(0);
+  const bump = () => setTick((n) => n + 1);
+
+  // ---- transient editor chrome -------------------------------------------------
   const [wrap, setWrap] = useState(true);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
   const [flash, setFlash] = useState("");
   const [renameTo, setRenameTo] = useState<string | null>(null);
   const [confirmDel, setConfirmDel] = useState(false);
+  const [hlRange, setHlRange] = useState<[number, number] | null>(null);
+  const [gotoOpen, setGotoOpen] = useState(false);
+  const [gotoVal, setGotoVal] = useState("");
+  const [previewOn, setPreviewOn] = useState(true);
+  const [dragTab, setDragTab] = useState<string | null>(null);
 
   const bodyRef = useRef<HTMLDivElement>(null);
   const taRef = useRef<HTMLTextAreaElement>(null);
   const gutterRef = useRef<HTMLPreElement>(null);
 
+  const active = pane.tabs.find((t) => t.id === pane.activeId) ?? null;
+  const activePath = active && active.kind === "file" && !active.unavailable ? active.resource : null;
+  const td = activePath ? cacheRef.current.get(activePath) : undefined;
+  const doc = td?.doc ?? null;
+  const buf = td?.buf ?? "";
+  const editing = td?.editing ?? false;
+  const error = td?.error ?? "";
+  const conflict = td?.conflict ?? null;
   const dirty = doc !== null && buf !== doc.content;
   const readOnly = doc ? doc.truncated || doc.tooLarge === true : false;
+
+  const isDirtyTab = (t: PaneTab): boolean => {
+    if (t.kind !== "file") return false;
+    const e = cacheRef.current.get(t.resource);
+    return !!e?.doc && e.buf !== e.doc.content;
+  };
+
+  // ---- pane persistence per project ------------------------------------------
+  const paneKey = projectId ? `polyth.pane.${projectId}` : null;
+  useEffect(() => {
+    cacheRef.current.clear();
+    setKids({});
+    setOpen(new Set());
+    setSel("");
+    setCtx(null);
+    if (!paneKey) {
+      setPane(emptyPane);
+      return;
+    }
+    let raw: string | null = null;
+    try { raw = localStorage.getItem(paneKey); } catch { /* private mode */ }
+    // Files stay resolvable (missing ones will error honestly on load); plugin
+    // tab providers are not registered yet, so those restore as unavailable.
+    setPane(deserializePane(raw, (kind) => kind === "file"));
+    if (projectId) void loadDir("");
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [paneKey]);
+
+  useEffect(() => {
+    if (!paneKey) return;
+    try { localStorage.setItem(paneKey, serializePane(pane)); } catch { /* full */ }
+  }, [pane, paneKey]);
 
   const loadDir = async (p: string) => {
     if (!projectId) return;
@@ -65,44 +151,64 @@ export default function EditorView() {
     }
   };
 
+  // Store-driven opens (file refs in chat, palette, files panel) become tabs.
   useEffect(() => {
-    setKids({});
-    setOpen(new Set());
-    setSel("");
-    if (projectId) void loadDir("");
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [projectId]);
+    if (!filePath) return;
+    setPane((p) => openTab(p, { id: tabId("file", filePath), kind: "file", resource: filePath, title: baseOf(filePath) }));
+    setSel(filePath);
+  }, [filePath]);
 
-  // Load the open file; keep the tree mounted and its expansion untouched.
+  // Load the active tab's document once (keep-alive afterwards).
   useEffect(() => {
-    if (!projectId || !filePath) {
-      setDoc(null);
-      setEditing(false);
-      return;
-    }
-    let stale = false;
-    api
-      .filesRead(projectId, filePath)
+    if (!projectId || !activePath) return;
+    const existing = cacheRef.current.get(activePath);
+    if (existing && (existing.doc || existing.loading)) return;
+    const entry: TabDoc = { doc: null, buf: "", editing: false, loading: true, error: "", conflict: null };
+    cacheRef.current.set(activePath, entry);
+    bump();
+    api.filesRead(projectId, activePath)
       .then((got) => {
-        if (stale) return;
-        setDoc(got);
-        setBuf(got.content);
-        setEditing(false);
-        setRenameTo(null);
-        setConfirmDel(false);
-        setError("");
+        entry.doc = got;
+        entry.buf = got.content;
+        entry.loading = false;
+        bump();
       })
       .catch((err) => {
-        if (!stale) setError(msg(err));
+        entry.error = msg(err);
+        entry.loading = false;
+        bump();
       });
-    return () => {
-      stale = true;
-    };
-  }, [projectId, filePath]);
+  }, [projectId, activePath]);
 
+  // Reset one-shot chrome when the active tab changes.
   useEffect(() => {
-    if (filePath) setSel(filePath);
-  }, [filePath]);
+    setRenameTo(null);
+    setConfirmDel(false);
+    setHlRange(null);
+    setGotoOpen(false);
+    setPreviewOn(true);
+  }, [pane.activeId]);
+
+  // Jump to a line/range: highlight it and center it in the scroll pane.
+  const gotoLine = (start: number, end?: number) => {
+    const last = end !== undefined && end >= start ? end : start;
+    setHlRange([start, last]);
+    requestAnimationFrame(() => {
+      const row = bodyRef.current?.querySelector(`[data-ln="${start}"]`);
+      row?.scrollIntoView({ block: "center" });
+    });
+  };
+
+  // Pending location from a file reference (chat) — consume once the doc is in.
+  useEffect(() => {
+    if (!doc || !location || location.path !== doc.path) return;
+    if (location.startLine !== undefined) {
+      setPreviewOn(false); // ranges need the line-numbered source view
+      gotoLine(location.startLine, location.endLine);
+    }
+    clearEditorLocation();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [doc, location]);
 
   useEffect(() => {
     if (!flash) return;
@@ -120,17 +226,43 @@ export default function EditorView() {
     });
   };
 
-  const confirmDiscard = () => !dirty || window.confirm("Discard unsaved changes?");
-
-  const openFile = (fp: string) => {
-    if (fp === filePath) return;
-    if (!confirmDiscard()) return;
-    openEditorFile(fp);
+  // ---- tab operations ----------------------------------------------------------
+  const syncStoreToActive = (state: PaneState) => {
+    const a = state.tabs.find((t) => t.id === state.activeId);
+    const next = a && a.kind === "file" && !a.unavailable ? a.resource : null;
+    if (getState().editorFile !== next) openEditorFile(next);
   };
 
-  const closeFile = () => {
-    if (!confirmDiscard()) return;
-    openEditorFile(null);
+  const activate = (id: string) => {
+    setPane((p) => {
+      const next = activateTab(p, id);
+      syncStoreToActive(next);
+      return next;
+    });
+  };
+
+  const requestClose = (id: string) => {
+    const t = pane.tabs.find((x) => x.id === id);
+    if (!t) return;
+    if (isDirtyTab(t) && !window.confirm(`Discard unsaved changes in ${t.title}?`)) return;
+    if (t.kind === "file") cacheRef.current.delete(t.resource);
+    const { state } = closeTab(markDirty(pane, id, false), id);
+    setPane(state);
+    syncStoreToActive(state);
+  };
+
+  const openFile = (fp: string) => {
+    setSel(fp);
+    openEditorFile(fp); // effect turns it into a tab
+  };
+
+  const setBufFor = (path: string, text: string) => {
+    const e = cacheRef.current.get(path);
+    if (!e) return;
+    e.buf = text;
+    bump();
+    const isDirty = !!e.doc && text !== e.doc.content;
+    setPane((p) => markDirty(p, tabId("file", path), isDirty));
   };
 
   // ---- chat inserts ----------------------------------------------------------
@@ -182,27 +314,62 @@ export default function EditorView() {
 
   const addFile = () => {
     if (!doc) return;
-    // Truncated/binary reads never inline — reference by path only.
     insertToChat(readOnly ? `@${doc.path}` : formatFileChat(doc.path, doc.content, INLINE_FILE_CHARS));
   };
 
   const attachPath = (fp: string) => insertToChat(`@${fp}`);
 
   // ---- file operations ---------------------------------------------------------
-  const save = async () => {
-    if (!projectId || !doc || readOnly) return;
+  const save = async (opts: { force?: boolean } = {}) => {
+    const path = activePath;
+    const e = path ? cacheRef.current.get(path) : undefined;
+    if (!projectId || !path || !e?.doc || (e.doc.truncated || e.doc.tooLarge)) return;
     setBusy(true);
     try {
-      await api.filesWrite(projectId, doc.path, buf);
-      setDoc({ ...doc, content: buf });
-      setError("");
+      const base = opts.force ? undefined : e.doc.revision;
+      const res = await api.filesWrite(projectId, path, e.buf, base);
+      e.doc = { ...e.doc, content: e.buf, revision: res.revision };
+      e.conflict = null;
+      e.error = "";
+      setPane((p) => markDirty(p, tabId("file", path), false));
       setFlash("Saved ✓");
     } catch (err) {
-      setError(msg(err));
+      if (httpStatusOf(err) === 409) {
+        e.conflict = "File changed on disk since it was loaded.";
+      } else {
+        e.error = msg(err);
+      }
     } finally {
       setBusy(false);
+      bump();
     }
   };
+
+  const reloadActive = async () => {
+    const path = activePath;
+    const e = path ? cacheRef.current.get(path) : undefined;
+    if (!projectId || !path || !e) return;
+    try {
+      const got = await api.filesRead(projectId, path);
+      e.doc = got;
+      e.buf = got.content;
+      e.conflict = null;
+      e.error = "";
+      setPane((p) => markDirty(p, tabId("file", path), false));
+    } catch (err) {
+      e.error = msg(err);
+    }
+    bump();
+  };
+
+  // Revision-guarded autosave: never fires on read-only or conflicted docs, and
+  // a mid-flight disk change surfaces as the same conflict banner as manual save.
+  useEffect(() => {
+    if (!prefs.editorAutosave || !editing || !dirty || readOnly || conflict || busy) return;
+    const t = setTimeout(() => { void save(); }, AUTOSAVE_MS);
+    return () => clearTimeout(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [buf, editing, dirty, readOnly, conflict, busy, prefs.editorAutosave]);
 
   const rename = async () => {
     const to = renameTo?.trim();
@@ -214,10 +381,18 @@ export default function EditorView() {
     try {
       await api.filesRename(projectId, doc.path, to);
       await Promise.all([loadDir(parentOf(doc.path)), loadDir(parentOf(to))]);
+      const old = doc.path;
+      const entry = cacheRef.current.get(old);
+      cacheRef.current.delete(old);
+      if (entry) cacheRef.current.set(to, entry);
+      setPane((p) => {
+        const without = closeTab(markDirty(p, tabId("file", old), false), tabId("file", old)).state;
+        return openTab(without, { id: tabId("file", to), kind: "file", resource: to, title: baseOf(to) });
+      });
       setRenameTo(null);
       openEditorFile(to);
     } catch (err) {
-      setError(msg(err));
+      if (td) { td.error = msg(err); bump(); }
     } finally {
       setBusy(false);
     }
@@ -230,17 +405,79 @@ export default function EditorView() {
       await api.filesDelete(projectId, doc.path);
       setConfirmDel(false);
       await loadDir(parentOf(doc.path));
-      openEditorFile(null);
+      const id = tabId("file", doc.path);
+      cacheRef.current.delete(doc.path);
+      const { state } = closeTab(markDirty(pane, id, false), id);
+      setPane(state);
+      syncStoreToActive(state);
     } catch (err) {
-      setError(msg(err));
+      if (td) { td.error = msg(err); bump(); }
     } finally {
       setBusy(false);
     }
   };
 
-  useEscape(renameTo !== null, () => setRenameTo(null));
+  // ---- tree context menu actions ------------------------------------------------
+  const ctxRename = async (entry: FileEntry) => {
+    if (!projectId) return;
+    const to = window.prompt("Rename / move to:", entry.path)?.trim();
+    if (!to || to === entry.path) return;
+    try {
+      await api.filesRename(projectId, entry.path, to);
+      await Promise.all([loadDir(parentOf(entry.path)), loadDir(parentOf(to))]);
+      if (!entry.dir && pane.tabs.some((t) => t.id === tabId("file", entry.path))) {
+        const entryDoc = cacheRef.current.get(entry.path);
+        cacheRef.current.delete(entry.path);
+        if (entryDoc) cacheRef.current.set(to, entryDoc);
+        setPane((p) => {
+          const without = closeTab(markDirty(p, tabId("file", entry.path), false), tabId("file", entry.path)).state;
+          return openTab(without, { id: tabId("file", to), kind: "file", resource: to, title: baseOf(to) });
+        });
+        openEditorFile(to);
+      }
+    } catch (err) {
+      setTreeErr(msg(err));
+    }
+  };
 
-  // ---- keyboard: Ctrl/Cmd+S save, Ctrl/Cmd+L selection→chat, Esc back ---------
+  const ctxDelete = async (entry: FileEntry) => {
+    if (!projectId) return;
+    if (!window.confirm(`Delete ${entry.path}${entry.dir ? " and its contents" : ""}?`)) return;
+    try {
+      await api.filesDelete(projectId, entry.path);
+      await loadDir(parentOf(entry.path));
+      if (!entry.dir) {
+        const id = tabId("file", entry.path);
+        cacheRef.current.delete(entry.path);
+        const { state } = closeTab(markDirty(pane, id, false), id);
+        setPane(state);
+        syncStoreToActive(state);
+      }
+    } catch (err) {
+      setTreeErr(msg(err));
+    }
+  };
+
+  const ctxNew = async (dirPath: string, kind: "file" | "folder") => {
+    if (!projectId) return;
+    const name = window.prompt(`New ${kind} name:`)?.trim();
+    if (!name) return;
+    const rel = dirPath ? `${dirPath}/${name}` : name;
+    try {
+      if (kind === "folder") await api.filesMkdir(projectId, rel);
+      else await api.filesWrite(projectId, rel, "");
+      await loadDir(dirPath);
+      setOpen((o) => new Set(o).add(dirPath));
+      if (kind === "file") openFile(rel);
+    } catch (err) {
+      setTreeErr(msg(err));
+    }
+  };
+
+  useEscape(renameTo !== null, () => setRenameTo(null));
+  useEscape(ctx !== null, () => setCtx(null));
+
+  // ---- keyboard: save, selection→chat, go-to-line, tab cycling, Esc ------------
   useEffect(() => {
     const h = (e: globalThis.KeyboardEvent) => {
       const mod = e.metaKey || e.ctrlKey;
@@ -250,10 +487,21 @@ export default function EditorView() {
       } else if (mod && e.key.toLowerCase() === "l") {
         e.preventDefault();
         addSelection();
+      } else if (mod && e.key.toLowerCase() === "g" && doc) {
+        e.preventDefault();
+        setGotoOpen(true);
+      } else if (e.ctrlKey && (e.key === "PageDown" || e.key === "PageUp")) {
+        e.preventDefault();
+        setPane((p) => {
+          const next = cycleTab(p, e.key === "PageDown" ? 1 : -1);
+          syncStoreToActive(next);
+          return next;
+        });
       } else if (e.key === "Escape") {
+        if (ctx) { setCtx(null); return; }
+        if (gotoOpen) { setGotoOpen(false); return; }
         if (renameTo !== null || confirmDel) return; // inner dialogs own Esc
-        if (dirty && !window.confirm("Discard unsaved changes?")) return;
-        if (filePath) openEditorFile(null);
+        if (pane.activeId) requestClose(pane.activeId);
         else setActiveView("session");
       }
     };
@@ -289,6 +537,12 @@ export default function EditorView() {
     }
   };
 
+  const onRowContext = (ev: MouseEvent, entry: FileEntry) => {
+    ev.preventDefault();
+    setSel(entry.path);
+    setCtx({ x: ev.clientX, y: ev.clientY, entry });
+  };
+
   // ---- render -----------------------------------------------------------------
   const lines = useMemo(
     () => (doc && !editing ? highlightLines(doc.content, langOf(doc.path)) : []),
@@ -298,8 +552,15 @@ export default function EditorView() {
     () => (editing ? Array.from({ length: buf.split("\n").length }, (_, i) => i + 1).join("\n") : ""),
     [editing, buf],
   );
+  const previewKind = doc && !editing && !readOnly
+    ? (isMd(doc.path) ? "md" : isHtml(doc.path) ? "html" : isJson(doc.path) ? "json" : null)
+    : null;
+  const jsonValue = useMemo(
+    () => (previewKind === "json" && doc ? tryParseJson(doc.content) : undefined),
+    [previewKind, doc],
+  );
 
-  if (!projectId) return <div className="view-empty">Open a project to browse and edit files.</div>;
+  if (!projectId) return <EmptyState title="No project selected" description="Open a project to browse and edit files." />;
 
   return (
     <div className="editor-view">
@@ -309,10 +570,11 @@ export default function EditorView() {
         {rows.map(({ e, depth }) => (
           <div
             key={e.path}
-            className={`ft-row${sel === e.path || filePath === e.path ? " sel" : ""}`}
+            className={`ft-row${sel === e.path || activePath === e.path ? " sel" : ""}`}
             style={{ paddingLeft: 6 + depth * 14 }}
             draggable
             onDragStart={(ev) => setDragPath(ev.dataTransfer, e.path)}
+            onContextMenu={(ev) => onRowContext(ev, e)}
             onClick={() => {
               setSel(e.path);
               if (e.dir) toggle(e.path);
@@ -337,8 +599,85 @@ export default function EditorView() {
         ))}
       </aside>
 
+      {ctx && (
+        <div className="ctx-backdrop" onClick={() => setCtx(null)} onContextMenu={(e) => { e.preventDefault(); setCtx(null); }}>
+          <div
+            className="ctx-menu"
+            role="menu"
+            style={{ left: Math.min(ctx.x, window.innerWidth - 200), top: Math.min(ctx.y, window.innerHeight - 220) }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {!ctx.entry.dir && (
+              <button role="menuitem" onClick={() => { openFile(ctx.entry.path); setCtx(null); }}>Open</button>
+            )}
+            <button role="menuitem" onClick={() => { attachPath(ctx.entry.path); setCtx(null); }}>Add to chat</button>
+            <button role="menuitem" onClick={() => { void navigator.clipboard?.writeText(ctx.entry.path); setCtx(null); }}>Copy path</button>
+            {ctx.entry.dir && (
+              <>
+                <button role="menuitem" onClick={() => { void ctxNew(ctx.entry.path, "file"); setCtx(null); }}>New file…</button>
+                <button role="menuitem" onClick={() => { void ctxNew(ctx.entry.path, "folder"); setCtx(null); }}>New folder…</button>
+              </>
+            )}
+            <button role="menuitem" onClick={() => { void ctxRename(ctx.entry); setCtx(null); }}>Rename / move…</button>
+            <button role="menuitem" className="danger" onClick={() => { void ctxDelete(ctx.entry); setCtx(null); }}>Delete…</button>
+          </div>
+        </div>
+      )}
+
       <section className="editor-pane">
-        {doc ? (
+        {pane.tabs.length > 0 && (
+          <div className="pane-tabs" role="tablist" aria-label="Open files">
+            {pane.tabs.map((t) => (
+              <div
+                key={t.id}
+                role="tab"
+                aria-selected={pane.activeId === t.id}
+                tabIndex={pane.activeId === t.id ? 0 : -1}
+                className={`pane-tab${pane.activeId === t.id ? " active" : ""}${t.unavailable ? " unavailable" : ""}`}
+                title={t.resource}
+                draggable
+                onDragStart={() => setDragTab(t.id)}
+                onDragOver={(e) => e.preventDefault()}
+                onDrop={(e) => {
+                  e.preventDefault();
+                  if (dragTab && dragTab !== t.id) {
+                    setPane((p) => moveTab(p, dragTab, p.tabs.findIndex((x) => x.id === t.id)));
+                  }
+                  setDragTab(null);
+                }}
+                onClick={() => activate(t.id)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" || e.key === " ") activate(t.id);
+                  else if (e.key === "Delete") requestClose(t.id);
+                }}
+                onAuxClick={(e) => { if (e.button === 1) requestClose(t.id); }}
+              >
+                <span className="pane-tab-title">{t.title}</span>
+                {isDirtyTab(t) && <span className="pane-tab-dirty" title="Unsaved changes">•</span>}
+                <button
+                  className="pane-tab-close"
+                  title="Close tab"
+                  aria-label={`Close ${t.title}`}
+                  onClick={(e) => { e.stopPropagation(); requestClose(t.id); }}
+                >
+                  ✕
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {active?.unavailable ? (
+          <div className="editor-empty">
+            <p className="muted">This tab is unavailable.</p>
+            <p className="muted editor-empty-hint">
+              It was contributed by a plugin that is no longer active. Close it, or re-enable the plugin.
+            </p>
+            <button className="small-btn" onClick={() => requestClose(active.id)}>Close tab</button>
+          </div>
+        ) : td?.loading ? (
+          <div className="editor-empty"><p className="muted">Loading {activePath}…</p></div>
+        ) : doc ? (
           <>
             <div className="editor-head">
               <span className="editor-path" title={doc.path}>
@@ -351,7 +690,7 @@ export default function EditorView() {
               </span>
               <span className="header-spacer" />
               {flash && <span className="editor-flash">{flash}</span>}
-              <button className="small-btn" title="Close file (Esc)" onClick={closeFile}>✕</button>
+              <button className="small-btn" title="Close file (Esc)" onClick={() => active && requestClose(active.id)}>✕</button>
             </div>
             <div className="editor-toolbar">
               <button className="small-btn" title={`Add selection to chat (${MOD}L)`} onClick={addSelection}>
@@ -359,6 +698,35 @@ export default function EditorView() {
               </button>
               <button className="small-btn" onClick={addFile}>Add file to chat</button>
               <span className="header-spacer" />
+              {previewKind && (
+                <button className="small-btn" aria-pressed={previewOn} onClick={() => setPreviewOn((v) => !v)}>
+                  {previewOn ? "Source" : previewKind === "json" ? "Tree" : "Preview"}
+                </button>
+              )}
+              {gotoOpen ? (
+                <span className="editor-goto">
+                  <input
+                    autoFocus
+                    placeholder="line[:end]"
+                    value={gotoVal}
+                    size={8}
+                    onChange={(e) => setGotoVal(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Escape") { setGotoOpen(false); return; }
+                      if (e.key !== "Enter") return;
+                      const m2 = /^(\d+)(?:[:-](\d+))?$/.exec(gotoVal.trim());
+                      if (m2) {
+                        setPreviewOn(false);
+                        gotoLine(Number(m2[1]), m2[2] ? Number(m2[2]) : undefined);
+                        setGotoOpen(false);
+                        setGotoVal("");
+                      }
+                    }}
+                  />
+                </span>
+              ) : (
+                <button className="small-btn" title={`Go to line (${MOD}G)`} onClick={() => setGotoOpen(true)}>Go to line</button>
+              )}
               <button className="small-btn" aria-pressed={wrap} onClick={() => setWrap((v) => !v)}>
                 {wrap ? "Wrap ✓" : "Wrap"}
               </button>
@@ -371,16 +739,16 @@ export default function EditorView() {
                     <button
                       className="small-btn"
                       onClick={() => {
-                        if (!confirmDiscard()) return;
-                        setBuf(doc.content);
-                        setEditing(false);
+                        if (dirty && !window.confirm("Discard unsaved changes?")) return;
+                        if (activePath) setBufFor(activePath, doc.content);
+                        if (td) { td.editing = false; bump(); }
                       }}
                     >
                       Cancel
                     </button>
                   </>
                 ) : (
-                  <button className="small-btn" onClick={() => setEditing(true)}>Edit</button>
+                  <button className="small-btn" onClick={() => { if (td) { td.editing = true; bump(); } }}>Edit</button>
                 ))}
               <button className="small-btn" onClick={() => setRenameTo(doc.path)}>Rename</button>
               {confirmDel ? (
@@ -408,6 +776,13 @@ export default function EditorView() {
                 <button className="small-btn" onClick={() => setRenameTo(null)}>Cancel</button>
               </div>
             )}
+            {conflict && (
+              <div className="editor-banner editor-conflict" role="alert">
+                <span>{conflict} Your unsaved buffer is preserved.</span>
+                <button className="small-btn" onClick={() => void reloadActive()}>Reload from disk</button>
+                <button className="small-btn danger-btn" onClick={() => void save({ force: true })}>Overwrite</button>
+              </div>
+            )}
             {doc.truncated && <div className="editor-banner">Truncated — file exceeds 512 KB. Read-only.</div>}
             {doc.tooLarge && <div className="editor-banner">Binary file detected. Read-only.</div>}
             {error && <div className="files-error editor-error">{error}</div>}
@@ -424,18 +799,49 @@ export default function EditorView() {
                   value={buf}
                   wrap={wrap ? "soft" : "off"}
                   spellCheck={false}
-                  onChange={(e) => setBuf(e.target.value)}
+                  onChange={(e) => activePath && setBufFor(activePath, e.target.value)}
                   onScroll={() => {
                     if (gutterRef.current && taRef.current) gutterRef.current.scrollTop = taRef.current.scrollTop;
                   }}
                 />
+              </div>
+            ) : previewKind === "md" && previewOn ? (
+              <div className="editor-body editor-md-preview" ref={bodyRef}>
+                <MarkdownDoc text={doc.content} keyBase={`md-${doc.path}`} />
+              </div>
+            ) : previewKind === "html" && previewOn ? (
+              <div className="editor-body editor-html-preview" ref={bodyRef}>
+                <iframe
+                  className="html-preview-frame"
+                  title={`Preview of ${doc.path}`}
+                  sandbox=""
+                  srcDoc={`${PREVIEW_CSP}\n${doc.content}`}
+                />
+                <div className="html-preview-note muted">
+                  Sandboxed preview — scripts and network access are blocked.
+                </div>
+              </div>
+            ) : previewKind === "json" && previewOn ? (
+              <div className="editor-body editor-json-preview" ref={bodyRef}>
+                {jsonValue !== undefined ? (
+                  <JsonTree value={jsonValue} defaultDepth={prefs.jsonTreeDepth} />
+                ) : (
+                  <div className="editor-banner">Not valid JSON — showing source instead.</div>
+                )}
+                {jsonValue === undefined && (
+                  <pre className="code-view editor-plain">{doc.content}</pre>
+                )}
               </div>
             ) : (
               <div className="editor-body" ref={bodyRef}>
                 {lines.length <= MAX_ROWED_LINES ? (
                   <div className={`code-lines${wrap ? " wrap" : ""}`}>
                     {lines.map((h, i) => (
-                      <div key={i} className="cl-row" data-ln={i + 1}>
+                      <div
+                        key={i}
+                        className={`cl-row${hlRange && i + 1 >= hlRange[0] && i + 1 <= hlRange[1] ? " hl" : ""}`}
+                        data-ln={i + 1}
+                      >
                         <span className="cl-ln">{i + 1}</span>
                         <span className="cl-code" dangerouslySetInnerHTML={{ __html: h || " " }} />
                       </div>
@@ -455,7 +861,7 @@ export default function EditorView() {
           <div className="editor-empty">
             <p className="muted">Select a file to view or edit.</p>
             <p className="muted editor-empty-hint">
-              Enter opens · @ adds to chat · {MOD}L sends a selection to the session
+              Enter opens · @ adds to chat · {MOD}L sends a selection to the session · right-click for file actions
             </p>
             {error && <div className="files-error">{error}</div>}
           </div>

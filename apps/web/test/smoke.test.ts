@@ -5,19 +5,40 @@ import type { JsonObject, SessionEvent } from "@polyth/contracts";
 import { buildModel, emptyModel, reduceEvent, type GoalState } from "../src/reduce.ts";
 import { createSeqDedupe } from "../src/sync.ts";
 import { registerSlot, listSlots, renderSlot } from "../src/slots.ts";
-import { applyTerminalChunk, filterCommands, filterSnippets, goalChecklist, parseDiffLines } from "../src/utils.ts";
-import { ago, displaySessionTitle, isPlaceholderTitle, modelBadge, providerColor, titleFromPrompt } from "../src/format.ts";
 import {
-  DEFAULT_SETTINGS,
-  formatModelRef,
-  friendlyError,
-  modKeyLabel,
-  normalizeSettings,
-  parseModelRef,
-  parseSettings,
-  serializeSettings,
-  shortcutLabel,
-} from "../src/settings.ts";
+  applyTerminalChunk,
+  copyText,
+  diffStat,
+  filterCommands,
+  filterSnippets,
+  firstUserText,
+  goalChecklist,
+  groupWork,
+  loadDraft,
+  parseDiffLines,
+  saveDraft,
+  toolSummary,
+} from "../src/utils.ts";
+import { drainInserts, queueInsert, requestComposerInsert } from "../src/composerInsert.ts";
+import { ago, deriveSessionTitle, fmtDuration, fmtMs, fullSessionTitle, modKey, modelBadge, providerColor } from "../src/format.ts";
+import { applyPersona, getPrefs, isCustomized, parsePrefs, pluginOn, togglePlugin } from "../src/prefs.ts";
+import { filterPalette, type PaletteCommand } from "../src/commands.ts";
+import { highlight, highlightLines, langOf } from "../src/highlight.ts";
+import { PATH_MIME, dragKind, getDragPath, setDragPath } from "../src/dnd.ts";
+import { formatFileChat, formatSelectionChat, lineRangeOf } from "../src/chatclip.ts";
+import { filterPickerItems, type PickerItem } from "../src/picker.ts";
+import { MODEL_PREFS_KEY, parseModelPrefs } from "@polyth/models";
+import { getModelPrefs, noteModelUsed, setModelSort, toggleModelFavorite } from "../src/modelPrefs.ts";
+import {
+  UI_DEFAULTS,
+  UI_SETTINGS_KEY,
+  applyUiSettings,
+  getUiSettings,
+  parseUiSettings,
+  setUiSettings,
+} from "../src/uiPrefs.ts";
+import { normalizeScheduleList } from "../src/scheduleData.ts";
+import { agentPickerDefaultLabel, modelPickerDefaultLabel } from "../src/composerDefaults.ts";
 
 let seqCounter = 0;
 function ev(type: string, data: JsonObject, sessionId = "s1"): SessionEvent {
@@ -151,6 +172,161 @@ test("slot registry orders by order and disposes cleanly", () => {
   assert.deepEqual(listSlots("contextRail.tabs").map((i) => i.id), ["b"]);
   b();
   assert.deepEqual(listSlots("contextRail.tabs"), []);
+});
+
+test("applyPersona enables the expected plugins for every persona", () => {
+  const expected = {
+    engineer: ["session", "files", "git", "preview", "terminal", "context", "usage", "events", "goals", "multirun", "fusion", "walkthrough", "schedule", "github", "dictation", "knowledge"],
+    manager: ["session", "files", "context", "usage", "goals", "multirun", "fusion", "walkthrough", "knowledge"],
+    creator: ["session", "preview", "files"],
+    blank: ["session", "files", "context", "usage"],
+  } as const;
+
+  for (const persona of ["engineer", "manager", "creator", "blank"] as const) {
+    applyPersona(persona);
+    assert.equal(getPrefs().persona, persona);
+    assert.deepEqual(getPrefs().plugins, expected[persona]);
+  }
+});
+
+test("togglePlugin keeps session enabled and adds or removes git", () => {
+  applyPersona("creator");
+  assert.equal(pluginOn("session"), true);
+  assert.equal(pluginOn("git"), false);
+
+  togglePlugin("session");
+  assert.equal(pluginOn("session"), true);
+
+  togglePlugin("git");
+  assert.equal(pluginOn("git"), true);
+  togglePlugin("git");
+  assert.equal(pluginOn("git"), false);
+});
+
+test("pluginOn reflects the currently enabled persona plugins", () => {
+  applyPersona("manager");
+  assert.equal(pluginOn("goals"), true);
+  assert.equal(pluginOn("git"), false);
+});
+
+test("parsePrefs restores persona, drops unknown plugins, and fills empty lists", () => {
+  const restored = parsePrefs(JSON.stringify({
+    persona: "engineer",
+    plugins: ["session", "git", "schedule", "github", "dictation", "nope"],
+  }));
+  assert.equal(restored.persona, "engineer");
+  assert.deepEqual(restored.plugins, ["session", "git", "schedule", "github", "dictation"]);
+  assert.deepEqual(parsePrefs("not-json"), { persona: null, plugins: [] });
+  const creator = parsePrefs(JSON.stringify({ persona: "creator", plugins: [] }));
+  assert.equal(creator.persona, "creator");
+  assert.deepEqual(creator.plugins, ["session", "preview", "files"]);
+});
+
+test("model preference wrapper updates and persists favorites, sort, and recents", () => {
+  const values = new Map<string, string>();
+  Object.defineProperty(globalThis, "localStorage", {
+    configurable: true,
+    value: {
+      getItem(key: string) { return values.get(key) ?? null; },
+      setItem(key: string, value: string) { values.set(key, value); },
+    },
+  });
+  const key = "test-provider/test-model";
+  if (getModelPrefs().favorites.includes(key)) toggleModelFavorite(key);
+
+  toggleModelFavorite(key);
+  noteModelUsed("other/model");
+  noteModelUsed(key);
+  setModelSort("recent");
+
+  assert.equal(getModelPrefs().favorites.includes(key), true);
+  assert.deepEqual(getModelPrefs().recents.slice(0, 2), [key, "other/model"]);
+  assert.equal(getModelPrefs().sort, "recent");
+  assert.deepEqual(parseModelPrefs(values.get(MODEL_PREFS_KEY) ?? null), getModelPrefs());
+});
+
+test("parseUiSettings defaults invalid values and sanitizes MCP servers", () => {
+  assert.deepEqual(parseUiSettings(null), UI_DEFAULTS);
+  assert.deepEqual(parseUiSettings("not-json"), UI_DEFAULTS);
+  const servers = Array.from({ length: 35 }, (_, i) => ({ name: `server-${i}`, url: `https://mcp/${i}` }));
+  const parsed = parseUiSettings(JSON.stringify({
+    density: "compact",
+    fontSize: "l",
+    chatWidth: "wide",
+    reducedMotion: true,
+    notifyOnComplete: true,
+    notifySound: "yes",
+    confirmSessionArchive: true,
+    autoScroll: false,
+    mcpServers: [null, { name: 1, url: "bad" }, ...servers],
+  }));
+
+  assert.deepEqual(
+    {
+      density: parsed.density,
+      fontSize: parsed.fontSize,
+      chatWidth: parsed.chatWidth,
+      reducedMotion: parsed.reducedMotion,
+      notifyOnComplete: parsed.notifyOnComplete,
+      notifySound: parsed.notifySound,
+      confirmSessionArchive: parsed.confirmSessionArchive,
+      autoScroll: parsed.autoScroll,
+    },
+    {
+      density: "compact",
+      fontSize: "l",
+      chatWidth: "wide",
+      reducedMotion: true,
+      notifyOnComplete: true,
+      notifySound: false,
+      confirmSessionArchive: true,
+      autoScroll: false,
+    },
+  );
+  assert.equal(parsed.mcpServers.length, 32);
+  assert.deepEqual(parsed.mcpServers[0], servers[0]);
+});
+
+test("setUiSettings persists and applies visual data attributes", () => {
+  const values = new Map<string, string>();
+  const dataset: Record<string, string> = {};
+  Object.defineProperty(globalThis, "localStorage", {
+    configurable: true,
+    value: {
+      getItem(key: string) { return values.get(key) ?? null; },
+      setItem(key: string, value: string) { values.set(key, value); },
+    },
+  });
+  Object.defineProperty(globalThis, "document", {
+    configurable: true,
+    value: { body: { dataset } },
+  });
+
+  setUiSettings({ density: "compact", fontSize: "s", chatWidth: "wide", reducedMotion: true });
+  assert.deepEqual(dataset, {
+    density: "compact",
+    fontsize: "s",
+    chatwidth: "wide",
+    motion: "reduced",
+  });
+  assert.deepEqual(parseUiSettings(values.get(UI_SETTINGS_KEY) ?? null), getUiSettings());
+
+  Object.defineProperty(globalThis, "document", { configurable: true, value: undefined });
+  assert.doesNotThrow(() => applyUiSettings());
+});
+
+test("filterPalette matches label, id, and group case-insensitively", () => {
+  const commands: PaletteCommand[] = [
+    { id: "session.new", label: "New Session", group: "Workspace", run() {} },
+    { id: "settings.open", label: "Preferences", group: "Account", run() {} },
+    { id: "git.commit", label: "Create commit", group: "Source Control", run() {} },
+  ];
+
+  assert.deepEqual(filterPalette(commands, " SESSION ").map((c) => c.id), ["session.new"]);
+  assert.deepEqual(filterPalette(commands, "settings").map((c) => c.id), ["settings.open"]);
+  assert.deepEqual(filterPalette(commands, "source control").map((c) => c.id), ["git.commit"]);
+  assert.equal(filterPalette(commands, ""), commands);
+  assert.deepEqual(filterPalette(commands, "missing"), []);
 });
 
 // ---- goal reducer paths -----------------------------------------------------
@@ -343,6 +519,67 @@ test("parseDiffLines returns empty array for empty string", () => {
   assert.deepEqual(parseDiffLines(""), []);
 });
 
+test("diffStat excludes diff headers from added and removed counts", () => {
+  const diff = "--- a/file.ts\n+++ b/file.ts\n-old\n+new\n context";
+  assert.deepEqual(diffStat(diff), { add: 1, del: 1 });
+});
+
+test("toolSummary selects a useful argument and truncates long values", () => {
+  assert.equal(toolSummary({ path: "src/App.tsx", query: "ignored" }), "src/App.tsx");
+  assert.equal(toolSummary({ count: 2 }), "");
+  const summary = toolSummary({ command: "x".repeat(200) });
+  assert.equal(summary, `${"x".repeat(157)}…`);
+});
+
+test("groupWork groups consecutive tools and computes elapsed time", () => {
+  const messages = [
+    { kind: "tool" as const, id: "a", callId: "a", tool: "read", input: {}, status: "done" as const, time: 100, finishTime: 250 },
+    { kind: "tool" as const, id: "b", callId: "b", tool: "write", input: {}, status: "done" as const, time: 260, finishTime: 375 },
+    { kind: "user" as const, id: "u", text: "next", time: 400 },
+  ];
+  const grouped = groupWork(messages);
+  const work = grouped[0];
+  assert.ok(work && work.kind === "work");
+  assert.equal(work.ms, 275);
+  assert.deepEqual(work.tools, messages.slice(0, 2));
+  assert.equal(grouped[1], messages[2]);
+
+  const loneTool = groupWork(messages.slice(0, 1));
+  assert.equal(loneTool[0], messages[0]);
+});
+
+test("draft helpers persist per session and remove empty drafts", () => {
+  const values = new Map<string, string>();
+  Object.defineProperty(globalThis, "localStorage", {
+    configurable: true,
+    value: {
+      getItem(key: string) { return values.get(key) ?? null; },
+      setItem(key: string, value: string) { values.set(key, value); },
+      removeItem(key: string) { values.delete(key); },
+    },
+  });
+
+  saveDraft("s1", "unfinished");
+  saveDraft("s2", "other");
+  assert.equal(loadDraft("s1"), "unfinished");
+  assert.equal(loadDraft("s2"), "other");
+  saveDraft("s1", "");
+  assert.equal(loadDraft("s1"), "");
+  assert.equal(values.has("polyth.draft.s1"), false);
+});
+
+test("fmtMs formats elapsed milliseconds and seconds", () => {
+  assert.equal(fmtMs(999), "999ms");
+  assert.equal(fmtMs(1_250), "1.3s");
+});
+
+test("fmtDuration formats elapsed wall-clock spans", () => {
+  assert.equal(fmtDuration(-1), "0s");
+  assert.equal(fmtDuration(45_600), "46s");
+  assert.equal(fmtDuration(181_000), "3m 1s");
+  assert.equal(fmtDuration(3_840_000), "1h 4m");
+});
+
 test("multirun events reconstruct runs, output, and pick from the log", () => {
   const m = buildModel([
     ev("multirun/started", {
@@ -404,137 +641,216 @@ test("providerColor maps known vendors; modelBadge splits provider/id", () => {
   assert.equal(modelBadge({ providerID: "xai", modelID: "grok" }).color, "#c4a7ee");
 });
 
-// ---- pure helper tests: session title display --------------------------------
+// ---- highlight tokenizer ------------------------------------------------------
 
-test("isPlaceholderTitle flags empty, generic, id-like titles", () => {
-  assert.equal(isPlaceholderTitle(""), true);
-  assert.equal(isPlaceholderTitle("   "), true);
-  assert.equal(isPlaceholderTitle("New session"), true);
-  assert.equal(isPlaceholderTitle("Untitled session"), true);
-  assert.equal(isPlaceholderTitle("untitled"), true);
-  assert.equal(isPlaceholderTitle("ses_01ABCDEF"), true);
-  assert.equal(isPlaceholderTitle("3f2a9c1e-77aa-4b1e-9c00-aa11bb22cc33"), true);
-  assert.equal(isPlaceholderTitle("deadbeef00"), true);
-  assert.equal(isPlaceholderTitle("abc123", "abc123"), true); // equals sessionId
-  assert.equal(isPlaceholderTitle("Fix the login bug"), false);
-  assert.equal(isPlaceholderTitle("Refactor auth"), false);
+test("highlight wraps kw/str/cmt/num in spans and escapes HTML", () => {
+  const html = highlight('const n = 42; // note\nconst s = "<b>";', "ts");
+  assert.ok(html.includes('<span class="tok-kw">const</span>'));
+  assert.ok(html.includes('<span class="tok-num">42</span>'));
+  assert.ok(html.includes('<span class="tok-cmt">// note</span>'));
+  assert.ok(html.includes('<span class="tok-str">"&lt;b&gt;"</span>'));
+  assert.ok(!html.includes("<b>"));
 });
 
-test("titleFromPrompt takes the first line, collapses whitespace, and caps length", () => {
-  assert.equal(titleFromPrompt("Fix the   login\tbug\nmore detail"), "Fix the login bug");
-  assert.equal(titleFromPrompt("\n\n  second line is first non-empty  \nrest"), "second line is first non-empty");
-  const long = titleFromPrompt("a".repeat(100));
-  assert.ok(long.length <= 48);
-  assert.ok(long.endsWith("…"));
-  assert.equal(titleFromPrompt(""), "");
+test("highlight uses hash comments for py/sh/yaml and html comments for md", () => {
+  assert.ok(highlight("# hi", "py").includes('<span class="tok-cmt"># hi</span>'));
+  assert.ok(highlight("# hi", "sh").includes("tok-cmt"));
+  assert.ok(highlight("<!-- x -->", "md").includes("tok-cmt"));
+  assert.ok(highlight('key: "v" # c', "yaml").includes("tok-str"));
 });
 
-test("displaySessionTitle prefers human title, then prompt, then fallback", () => {
-  assert.equal(displaySessionTitle("Refactor auth", "s1"), "Refactor auth");
-  assert.equal(displaySessionTitle("", "s1", "Explore the codebase\nplease"), "Explore the codebase");
-  assert.equal(displaySessionTitle("s1", "s1", "  "), "New session");
-  assert.equal(displaySessionTitle("ses_x", "s1"), "New session");
+test("langOf maps extensions and aliases", () => {
+  assert.equal(langOf("src/App.tsx"), "ts");
+  assert.equal(langOf("a/b.yml"), "yaml");
+  assert.equal(langOf("main.rs"), "rs");
 });
 
-test("ago formats relative times and falls back to a date", () => {
-  const now = 1_700_000_000_000;
-  assert.equal(ago(now - 10_000, now), "just now");
-  assert.equal(ago(now - 5 * 60_000, now), "5m ago");
-  assert.equal(ago(now - 3 * 3_600_000, now), "3h ago");
-  assert.equal(ago(now - 2 * 86_400_000, now), "2d ago");
-  const old = ago(now - 30 * 86_400_000, now);
-  assert.ok(!old.endsWith("ago"));
-  assert.ok(old.length > 0);
+test("highlightLines splits highlighted code into self-contained line HTML", () => {
+  const lines = highlightLines("const a = 1;\nconst b = 2;", "ts");
+  assert.equal(lines.length, 2);
+  assert.ok(lines[0]!.includes('<span class="tok-kw">const</span>'));
+  assert.ok(lines[1]!.includes('<span class="tok-num">2</span>'));
 });
 
-// ---- pure helper tests: settings (polyth.settings) ---------------------------
-
-test("parseSettings returns defaults for null, garbage, and non-object JSON", () => {
-  assert.deepEqual(parseSettings(null), DEFAULT_SETTINGS);
-  assert.deepEqual(parseSettings(""), DEFAULT_SETTINGS);
-  assert.deepEqual(parseSettings("not json"), DEFAULT_SETTINGS);
-  assert.deepEqual(parseSettings("42"), DEFAULT_SETTINGS);
-  assert.deepEqual(parseSettings("null"), DEFAULT_SETTINGS);
+test("highlightLines reopens tokens that span newlines", () => {
+  const lines = highlightLines("/* a\nb */ x", "ts");
+  assert.equal(lines.length, 2);
+  // The block comment closes at the break and reopens on the next line.
+  assert.ok(lines[0]!.endsWith("</span>"));
+  assert.ok(lines[1]!.startsWith('<span class="tok-cmt">'));
+  assert.equal(highlightLines("", "ts").length, 1);
 });
 
-test("parseSettings merges partial stored values over defaults", () => {
-  const s = parseSettings(JSON.stringify({ theme: "light", fontSize: 16 }));
-  assert.equal(s.theme, "light");
-  assert.equal(s.fontSize, 16);
-  assert.equal(s.density, DEFAULT_SETTINGS.density);
-  assert.equal(s.sendOnEnter, DEFAULT_SETTINGS.sendOnEnter);
-  assert.equal(s.productName, DEFAULT_SETTINGS.productName);
-});
+// ---- dnd helpers --------------------------------------------------------------
 
-test("normalizeSettings clamps and validates every field", () => {
-  const s = normalizeSettings({
-    theme: "hotdog",
-    density: "cozy",
-    fontSize: 99,
-    productName: "   ",
-    relativeTime: "yes",
-    defaultModel: 7,
-  });
-  assert.equal(s.theme, "dark");
-  assert.equal(s.density, "comfortable");
-  assert.equal(s.fontSize, 18); // clamped to max
-  assert.equal(s.productName, "Polyth"); // blank falls back
-  assert.equal(s.relativeTime, DEFAULT_SETTINGS.relativeTime); // non-boolean ignored
-  assert.equal(s.defaultModel, ""); // non-string ignored
-  assert.equal(normalizeSettings({ fontSize: 1 }).fontSize, 12); // clamped to min
-});
-
-test("settings round-trip: serialize then parse is identity", () => {
-  const custom = {
-    ...DEFAULT_SETTINGS,
-    theme: "light" as const,
-    density: "compact" as const,
-    fontSize: 15,
-    productName: "MyPolyth",
-    sendOnEnter: false,
-    defaultModel: "anthropic/claude-x",
-    showArchived: false,
+test("dnd path mime helpers set and read the polyth path", () => {
+  const data = new Map<string, string>();
+  const dt = {
+    setData: (t: string, v: string) => void data.set(t, v),
+    getData: (t: string) => data.get(t) ?? "",
   };
-  assert.deepEqual(parseSettings(serializeSettings(custom)), custom);
+  setDragPath(dt, "src/app.ts");
+  assert.equal(data.get(PATH_MIME), "src/app.ts");
+  assert.equal(data.get("text/plain"), "@src/app.ts");
+  assert.equal(getDragPath(dt), "src/app.ts");
+  assert.equal(getDragPath({ ...dt, getData: () => "" }), null);
 });
 
-test("parseModelRef splits provider/model at the first slash", () => {
-  assert.deepEqual(parseModelRef("anthropic/claude-x"), { providerID: "anthropic", modelID: "claude-x" });
-  assert.deepEqual(parseModelRef("openrouter/anthropic/claude"), { providerID: "openrouter", modelID: "anthropic/claude" });
-  assert.equal(parseModelRef(""), undefined);
-  assert.equal(parseModelRef("no-slash"), undefined);
-  assert.equal(parseModelRef("/leading"), undefined);
-  assert.equal(parseModelRef("trailing/"), undefined);
-  assert.equal(formatModelRef({ providerID: "a", modelID: "b" }), "a/b");
+test("dragKind detects polyth paths, desktop files, or nothing", () => {
+  assert.equal(dragKind({ types: [PATH_MIME, "text/plain"] }), "path");
+  assert.equal(dragKind({ types: ["Files"] }), "files");
+  assert.equal(dragKind({ types: ["text/html"] }), null);
 });
 
-// ---- pure helper tests: friendly error messages -------------------------------
-
-test("friendlyError collapses transport failures into the reconnect message", () => {
-  const expected = "OpenCode is reconnecting. Try again in a moment.";
-  assert.equal(friendlyError("Couldn’t create a session", new Error("HTTP 500 Internal Server Error — fetch failed")), expected);
-  assert.equal(friendlyError("x", new Error("HTTP 503 Service Unavailable — {}")), expected);
-  assert.equal(friendlyError("x", new Error("backend unavailable")), expected);
-  assert.equal(friendlyError("x", new Error("connect ECONNREFUSED 127.0.0.1:4096")), expected);
-});
-
-test("friendlyError extracts the server's JSON error body", () => {
-  const err = new Error('HTTP 500 Internal Server Error — {"error":"worktree is locked"}');
+test("formatSelectionChat includes the file, line range, and fenced selection", () => {
   assert.equal(
-    friendlyError("Couldn’t fork the session", err),
-    "Couldn’t fork the session: HTTP 500 Internal Server Error — worktree is locked",
+    formatSelectionChat("src/view.tsx", "<Button>\n  Save\n</Button>", 12, 14),
+    "@src/view.tsx (lines 12-14)\n```\n<Button>\n  Save\n</Button>\n```",
   );
 });
 
-test("modKeyLabel and shortcutLabel fall back to Ctrl without a DOM", () => {
-  assert.equal(modKeyLabel(), "Ctrl");
-  assert.equal(shortcutLabel("K"), "Ctrl+K");
+test("formatFileChat fences small files and omits oversized content", () => {
+  assert.equal(
+    formatFileChat("src/tiny.ts", "export {};\n", 11),
+    "@src/tiny.ts\n```\nexport {};\n```",
+  );
+  assert.equal(formatFileChat("src/large.ts", "12345", 4), "@src/large.ts");
 });
 
-test("friendlyError truncates long raw messages and keeps the action prefix", () => {
-  const long = new Error(`HTTP 500 Oops — ${"x".repeat(500)}`);
-  const msg = friendlyError("Couldn’t send the message", long);
-  assert.ok(msg.startsWith("Couldn’t send the message: "));
-  assert.ok(msg.length < 220);
-  assert.equal(friendlyError("Couldn’t archive the session", "plain string"), "Couldn’t archive the session: plain string");
+test("lineRangeOf maps character offsets to 1-based line ranges", () => {
+  const content = "one\ntwo\nthree";
+  assert.deepEqual(lineRangeOf(content, 0, 3), { startLine: 1, endLine: 1 });
+  assert.deepEqual(lineRangeOf(content, 4, 7), { startLine: 2, endLine: 2 });
+  assert.deepEqual(lineRangeOf(content, 0, content.length), { startLine: 1, endLine: 3 });
+  // A selection ending exactly on a newline does not reach the next line.
+  assert.deepEqual(lineRangeOf(content, 0, 4), { startLine: 1, endLine: 1 });
+  // Clamped: offsets beyond the content never produce out-of-range lines.
+  assert.deepEqual(lineRangeOf(content, 50, 99), { startLine: 3, endLine: 3 });
+  assert.deepEqual(lineRangeOf("", 0, 0), { startLine: 1, endLine: 1 });
+});
+
+// ---- UX fix-list helpers ------------------------------------------------------
+
+test("ago formats compact relative times", () => {
+  const now = 1_700_000_000_000;
+  assert.equal(ago(now - 5_000, now), "5s");
+  assert.equal(ago(now - 3 * 60_000, now), "3m");
+  assert.equal(ago(now - 6 * 3_600_000, now), "6h");
+  assert.equal(ago(now - 2 * 86_400_000, now), "2d");
+  assert.equal(ago(now + 10_000, now), "0s"); // clock skew never goes negative
+});
+
+test("modKey picks ⌘ on Apple platforms, Ctrl elsewhere", () => {
+  assert.equal(modKey("MacIntel"), "⌘");
+  assert.equal(modKey("iPhone"), "⌘");
+  assert.equal(modKey("Win32"), "Ctrl");
+  assert.equal(modKey(""), "Ctrl");
+});
+
+test("deriveSessionTitle replaces placeholders with the first user line", () => {
+  assert.equal(deriveSessionTitle("Real title", "hello"), "Real title");
+  assert.equal(deriveSessionTitle("New session", "Fix the login bug\nmore"), "Fix the login bug");
+  assert.equal(deriveSessionTitle("", "  \n  second line  "), "second line");
+  assert.equal(deriveSessionTitle("(untitled)", undefined), "(untitled)");
+  const long = "x".repeat(60);
+  const derived = deriveSessionTitle("new session", long);
+  assert.equal(derived.length, 48);
+  assert.ok(derived.endsWith("…"));
+});
+
+test("fullSessionTitle preserves the complete derived title for tooltips", () => {
+  const full = "Investigate the unusually long authentication regression before release";
+  assert.equal(fullSessionTitle("New session", full), full);
+  assert.notEqual(deriveSessionTitle("New session", full), full);
+});
+
+test("schedule list normalization accepts arrays and wrapped payloads", () => {
+  const task = {
+    id: "task-1",
+    projectId: "project-1",
+    prompt: "Check CI",
+    kind: "every" as const,
+    cadence: { kind: "every" as const, everyMinutes: 15 },
+    enabled: true,
+    createdAt: 1,
+    updatedAt: 1,
+    nextRunAt: 2,
+    runs: 0,
+  };
+  assert.deepEqual(normalizeScheduleList([task]), { tasks: [task], loopErrors: [] });
+  assert.deepEqual(
+    normalizeScheduleList({ tasks: [task], loopErrors: [{ path: ".agents/loops/ci.md", error: "bad cron" }] }),
+    { tasks: [task], loopErrors: [{ path: ".agents/loops/ci.md", error: "bad cron" }] },
+  );
+  assert.deepEqual(normalizeScheduleList({ tasks: null }), { tasks: [], loopErrors: [] });
+});
+
+test("composer defaults show resolved model and agent names", () => {
+  const models = [
+    { providerID: "google", modelID: "gemini-2", name: "Gemini Pro" },
+    { providerID: "openai", modelID: "gpt-5", name: "GPT 5" },
+  ];
+  const agents = [{ name: "build", mode: "primary" as const }];
+  assert.equal(modelPickerDefaultLabel(undefined, models), "Default: Gemini Pro");
+  assert.equal(modelPickerDefaultLabel({ providerID: "openai", modelID: "gpt-5" }, models), "GPT 5");
+  assert.equal(agentPickerDefaultLabel(undefined, agents), "Default: build");
+});
+
+test("firstUserText finds the first non-empty user message", () => {
+  const events = [
+    ev("turn/started", { turnId: "t1" }),
+    ev("user/message", { text: "   " }),
+    ev("user/message", { text: "actual question" }),
+  ];
+  // First user/message wins even when blank → undefined, so blank logs fall back.
+  assert.equal(firstUserText(events), undefined);
+  assert.equal(firstUserText([ev("user/message", { text: "hi" })]), "hi");
+  assert.equal(firstUserText(undefined), undefined);
+  assert.equal(firstUserText([]), undefined);
+});
+
+test("copyText reports success and failure via injected clipboard", async () => {
+  let copied = "";
+  assert.equal(await copyText("abc", { writeText: async (t) => void (copied = t) }), true);
+  assert.equal(copied, "abc");
+  assert.equal(await copyText("abc", { writeText: async () => { throw new Error("denied"); } }), false);
+});
+
+test("composer insert queue holds inserts until drained", () => {
+  drainInserts(); // isolate
+  queueInsert("@src/a.ts ");
+  queueInsert("@src/b.ts ");
+  assert.deepEqual(drainInserts(), ["@src/a.ts ", "@src/b.ts "]);
+  assert.deepEqual(drainInserts(), []);
+});
+
+test("requestComposerInsert queues when no composer consumes the event", () => {
+  drainInserts();
+  // Node has no window: the insert must land in the queue, not vanish.
+  assert.equal(requestComposerInsert("@x.ts "), false);
+  assert.deepEqual(drainInserts(), ["@x.ts "]);
+});
+
+test("isCustomized flags plugin sets that drift from persona defaults", () => {
+  applyPersona("creator");
+  assert.equal(isCustomized(), false);
+  togglePlugin("git");
+  assert.equal(isCustomized(), true);
+  togglePlugin("git");
+  assert.equal(isCustomized(), false);
+  assert.equal(isCustomized({ persona: null, plugins: [] }), false);
+});
+
+test("filterPickerItems handles empty and case-insensitive grouped searches", () => {
+  const items: PickerItem[] = [
+    { id: "file.app", label: "App.tsx", group: "Files", detail: "src/App.tsx" },
+    { id: "command.commit", label: "Create commit", group: "Source Control" },
+    { id: "session.new", label: "New session", group: "Workspace", keywords: ["Start"] },
+  ];
+
+  assert.deepEqual(filterPickerItems(items, "  "), items);
+  assert.deepEqual(filterPickerItems(items, "SOURCE"), [items[1]]);
+  assert.deepEqual(filterPickerItems(items, "app.TSX"), [items[0]]);
+  assert.deepEqual(filterPickerItems(items, "start"), [items[2]]);
+  assert.deepEqual(filterPickerItems(items, "missing"), []);
 });

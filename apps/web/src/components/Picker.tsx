@@ -17,6 +17,8 @@ export interface PickerProps {
   placeholder?: string;
   direction?: "up" | "down";
   disabled?: boolean;
+  /** Trailing per-row action (e.g. pin-to-profile). Never also picks the row. */
+  trailingAction?: { label: string; title?: string; onAction: (id: string) => void };
 }
 
 export default function Picker({
@@ -28,6 +30,7 @@ export default function Picker({
   placeholder = "Default",
   direction = "down",
   disabled,
+  trailingAction,
 }: PickerProps) {
   const multi = values !== undefined;
   const [open, setOpen] = useState(false);
@@ -117,19 +120,31 @@ export default function Picker({
                   {it.group !== "" && (n === 0 || shown[n - 1]!.group !== it.group) && (
                     <div className="picker-group">{it.group}</div>
                   )}
-                  <button
-                    type="button"
+                  <div
                     role="option"
+                    tabIndex={0}
                     aria-selected={isCurrent(it.id)}
                     data-active={n === active ? "true" : undefined}
                     className={`picker-item${n === active ? " active" : ""}${isCurrent(it.id) ? " current" : ""}`}
                     onClick={() => pick(it.id)}
+                    onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); pick(it.id); } }}
                     onMouseEnter={() => setActive(n)}
                   >
                     <span className="picker-check">{isCurrent(it.id) ? "✓" : ""}</span>
                     <span className="palette-label">{it.label}</span>
                     {it.detail && <span className="palette-meta">{it.detail}</span>}
-                  </button>
+                    {trailingAction && it.id && (
+                      <button
+                        type="button"
+                        className="picker-trail"
+                        title={trailingAction.title ?? trailingAction.label}
+                        onClick={(e) => { e.stopPropagation(); trailingAction.onAction(it.id); close(); }}
+                        onKeyDown={(e) => e.stopPropagation()}
+                      >
+                        {trailingAction.label}
+                      </button>
+                    )}
+                  </div>
                 </Fragment>
               ))}
               {shown.length === 0 && <div className="palette-empty">No matches</div>}

@@ -3,6 +3,7 @@
 import { useMemo, useSyncExternalStore } from "react";
 import type {
   AgentDescriptor,
+  EditorLocation,
   ModelDescriptor,
   Project,
   SessionEvent,
@@ -13,7 +14,9 @@ import { applySettingsToDom, loadSettings, saveSettings, type PolythSettings } f
 
 export type AppView = "session" | "files" | "goals" | "multirun" | "fusion" | "walkthrough" | "preview" | "git" | "terminal" | "schedule" | "github";
 export type Overlay = "onboarding" | "palette" | "search" | "settings" | null;
-export type RailPlugin = "files" | "changes" | "context" | "usage" | "events";
+export type RailPlugin = "files" | "changes" | "context" | "usage" | "events" | "knowledge";
+/** "all": commands+workspaces+files. "files": file-focused (Mod+P). */
+export type PaletteMode = "all" | "files";
 
 export interface AppState {
   projects: Project[];
@@ -28,11 +31,14 @@ export interface AppState {
   settings: PolythSettings;
   uiError: string | null;
   overlay: Overlay;
+  paletteMode: PaletteMode;
   railPlugin: RailPlugin | null;
   moreOpen: boolean;
   sidebarOpen: boolean;
   /** File open in the full-screen editor (files view); null = tree only. */
   editorFile: string | null;
+  /** Requested cursor placement for the open file (file refs; go-to-line). */
+  editorLocation: EditorLocation | null;
 }
 
 let state: AppState = {
@@ -48,10 +54,12 @@ let state: AppState = {
   settings: loadSettings(),
   uiError: null,
   overlay: null,
+  paletteMode: "all",
   railPlugin: null,
   moreOpen: false,
   sidebarOpen: false,
   editorFile: null,
+  editorLocation: null,
 };
 
 const listeners = new Set<() => void>();
@@ -101,7 +109,7 @@ export function activateProject(id: string | null): void {
   localStorage.setItem("polyth.activeProjectId", id ?? "");
   // Re-activating the current project must not drop the session or branch (UX-04).
   if (id === state.activeProjectId) return;
-  set({ activeProjectId: id, activeSessionId: null, gitBranch: "", editorFile: null });
+  set({ activeProjectId: id, activeSessionId: null, gitBranch: "", editorFile: null, editorLocation: null });
 }
 export function setActiveView(view: AppView): void {
   set({ activeView: view });
@@ -110,7 +118,25 @@ export function setGitBranch(branch: string): void {
   set({ gitBranch: branch });
 }
 export function setOverlay(overlay: Overlay): void {
-  set({ overlay, moreOpen: false });
+  // Plain opens reset to the general palette; openPalette() picks the mode.
+  set({ overlay, moreOpen: false, ...(overlay === "palette" ? { paletteMode: "all" as PaletteMode } : {}) });
+}
+/** Open the command palette in a specific mode (Mod+P = file-focused). */
+export function openPalette(mode: PaletteMode): void {
+  set({ overlay: "palette", paletteMode: mode, moreOpen: false });
+}
+
+// Settings deep-link: "Change shortcut…" and similar commands land on a page.
+let pendingSettingsPage: string | null = null;
+export function openSettingsPage(pageId: string): void {
+  pendingSettingsPage = pageId;
+  set({ overlay: "settings", moreOpen: false });
+}
+/** One-shot read by SettingsView on mount. */
+export function consumePendingSettingsPage(): string | null {
+  const v = pendingSettingsPage;
+  pendingSettingsPage = null;
+  return v;
 }
 export function setRailPlugin(railPlugin: RailPlugin | null): void {
   set({ railPlugin });
@@ -124,9 +150,14 @@ export function setMoreOpen(moreOpen: boolean): void {
 export function setSidebarOpen(sidebarOpen: boolean): void {
   set({ sidebarOpen });
 }
-/** Open a file in the full-screen editor; null keeps the view on the tree. */
-export function openEditorFile(path: string | null): void {
-  set({ editorFile: path, activeView: "files" });
+/** Open a file in the full-screen editor; null keeps the view on the tree.
+ *  A location asks the editor to select/center that range once loaded. */
+export function openEditorFile(path: string | null, location?: EditorLocation): void {
+  set({ editorFile: path, editorLocation: location ?? null, activeView: "files" });
+}
+/** The editor consumed the pending location (one-shot). */
+export function clearEditorLocation(): void {
+  if (state.editorLocation !== null) set({ editorLocation: null });
 }
 export function activateSession(id: string | null): void {
   localStorage.setItem("polyth.activeSessionId", id ?? "");

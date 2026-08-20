@@ -147,3 +147,143 @@ test("search matches filename substring, skips .git and node_modules, respects l
     assert.equal(limited.length, 1);
   });
 });
+
+test("searchScored ranks exact basename above prefix, substring, segment, fuzzy", async () => {
+  await withRoot(async (root) => {
+    await mkdir(path.join(root, "src", "app"), { recursive: true });
+    await mkdir(path.join(root, "docs"), { recursive: true });
+    await writeFile(path.join(root, "src", "app.ts"), "");              // exact basename (sans ext)
+    await writeFile(path.join(root, "src", "app-config.ts"), "");       // basename prefix
+    await writeFile(path.join(root, "src", "webapp.ts"), "");           // basename substring
+    await writeFile(path.join(root, "src", "app", "index.ts"), "");     // path segment
+    await writeFile(path.join(root, "docs", "a-p-p-guide.md"), "");     // fuzzy only
+    const hits = await files.searchScored(root, "app", { limit: 10 });
+    const paths = hits.map((h) => h.path);
+    assert.equal(paths[0], "src/app.ts");
+    assert.ok(paths.indexOf("src/app-config.ts") < paths.indexOf("src/webapp.ts"));
+    assert.ok(paths.indexOf("src/webapp.ts") < paths.indexOf("src/app/index.ts"));
+    assert.equal(paths[paths.length - 1], "docs/a-p-p-guide.md");
+    // scores descend and stay in [0,1]
+    for (let i = 1; i < hits.length; i++) assert.ok(hits[i]!.score <= hits[i - 1]!.score);
+    for (const h of hits) assert.ok(h.score >= 0 && h.score <= 1);
+    // exact hit highlights the basename range
+    assert.deepEqual(hits[0]!.matches, [[4, 7]]);
+  });
+});
+
+test("searchScored: includeDirs returns folders; spaces and diacritics fold", async () => {
+  await withRoot(async (root) => {
+    await mkdir(path.join(root, "my components"), { recursive: true });
+    await writeFile(path.join(root, "my components", "Café.md"), "");
+    const withDirs = await files.searchScored(root, "my comp", { includeDirs: true });
+    assert.ok(withDirs.some((h) => h.path === "my components" && h.kind === "dir"));
+    const withoutDirs = await files.searchScored(root, "my comp");
+    assert.ok(!withoutDirs.some((h) => h.kind === "dir"));
+    // diacritic-insensitive: "cafe" finds Café.md with the basename highlighted
+    const folded = await files.searchScored(root, "cafe");
+    assert.equal(folded.length, 1);
+    assert.equal(folded[0]!.path, "my components/Café.md");
+    assert.deepEqual(folded[0]!.matches, [[14, 18]]);
+  });
+});
+
+test("searchScored: empty query bounded by limit; symlinked dirs not followed", async () => {
+  await withRoot(async (root) => {
+    await mkdir(path.join(root, "a"));
+    await writeFile(path.join(root, "a", "one.txt"), "");
+    await writeFile(path.join(root, "a", "two.txt"), "");
+    // symlink loop: a/loop -> root
+    try {
+      await symlink(root, path.join(root, "a", "loop"), "dir");
+    } catch { /* symlinks unavailable — skip loop half */ }
+    const all = await files.searchScored(root, "", { limit: 1 });
+    assert.equal(all.length, 1);
+    const hits = await files.searchScored(root, "one", { limit: 50 });
+    assert.deepEqual(hits.map((h) => h.path), ["a/one.txt"]);
+  });
+});
+
+test("stat returns kind/size/mime/revision and rejects traversal", async () => {
+  await withRoot(async (root) => {
+    await mkdir(path.join(root, "img"));
+    await writeFile(path.join(root, "img", "a.png"), Buffer.from([0x89, 0x50, 0x4e, 0x47]));
+    const st = await files.stat(root, "img/a.png");
+    assert.equal(st.kind, "file");
+    assert.equal(st.size, 4);
+    assert.equal(st.mime, "image/png");
+    assert.ok(st.revision && st.revision.length > 0);
+
+    const dir = await files.stat(root, "img");
+    assert.equal(dir.kind, "dir");
+
+    await assert.rejects(() => files.stat(root, "../outside"), /escapes/);
+    await assert.rejects(() => files.stat(root, "/etc/passwd"), /escapes/);
+  });
+});
+
+test("readRaw serves bytes with a whitelisted mime; html maps to octet-stream", async () => {
+  await withRoot(async (root) => {
+    await writeFile(path.join(root, "pic.webp"), Buffer.from([1, 2, 3]));
+    await writeFile(path.join(root, "page.html"), "<script>alert(1)</script>");
+    await writeFile(path.join(root, "art.svg"), "<svg onload=alert(1)/>");
+
+    const img = await files.readRaw(root, "pic.webp");
+    assert.equal(img.mime, "image/webp");
+    assert.equal(img.size, 3);
+    assert.deepEqual([...img.data], [1, 2, 3]);
+
+    // Executable document types must never be served with their real mime.
+    assert.equal((await files.readRaw(root, "page.html")).mime, "application/octet-stream");
+    assert.equal((await files.readRaw(root, "art.svg")).mime, "application/octet-stream");
+
+    await assert.rejects(() => files.readRaw(root, "../pic.webp"), /escapes/);
+    await assert.rejects(() => files.readRaw(root, "."), /Not a file/);
+  });
+});
+
+test("write with matching baseRevision succeeds and returns new revision", async () => {
+  await withRoot(async (root) => {
+    await writeFile(path.join(root, "a.txt"), "v1");
+    const got = await files.read(root, "a.txt");
+    assert.ok(got.revision);
+    const res = await files.write(root, "a.txt", "v2", { baseRevision: got.revision! });
+    assert.ok(res.revision);
+    assert.equal(await readFile(path.join(root, "a.txt"), "utf8"), "v2");
+  });
+});
+
+test("write with stale baseRevision rejects with conflict and keeps disk content", async () => {
+  await withRoot(async (root) => {
+    await writeFile(path.join(root, "a.txt"), "v1");
+    const got = await files.read(root, "a.txt");
+    // External change moves the on-disk revision.
+    await new Promise((r) => setTimeout(r, 10));
+    await writeFile(path.join(root, "a.txt"), "external!");
+    await assert.rejects(
+      files.write(root, "a.txt", "mine", { baseRevision: got.revision! }),
+      (err: Error & { code?: string }) => err.code === "conflict",
+    );
+    assert.equal(await readFile(path.join(root, "a.txt"), "utf8"), "external!");
+  });
+});
+
+test("write without baseRevision still succeeds (explicit overwrite)", async () => {
+  await withRoot(async (root) => {
+    await writeFile(path.join(root, "a.txt"), "v1");
+    const res = await files.write(root, "a.txt", "v2");
+    assert.ok(res.revision);
+    assert.equal(await readFile(path.join(root, "a.txt"), "utf8"), "v2");
+  });
+});
+
+test("write refuses to overwrite a binary file with text", async () => {
+  await withRoot(async (root) => {
+    await writeFile(path.join(root, "img.bin"), Buffer.from([1, 0, 2, 3]));
+    await assert.rejects(
+      files.write(root, "img.bin", "text now"),
+      (err: Error & { code?: string }) => err.code === "invalid-input",
+    );
+    const still = await readFile(path.join(root, "img.bin"));
+    assert.deepEqual([...still], [1, 0, 2, 3]);
+  });
+});

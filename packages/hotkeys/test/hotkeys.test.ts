@@ -21,7 +21,8 @@ const ev = (key: string, mods: Partial<{ meta: boolean; ctrl: boolean; shift: bo
 
 test("defaults match the current shell bindings", () => {
   assert.equal(DEFAULT_KEYMAP.palette, "mod+k");
-  assert.equal(DEFAULT_KEYMAP.searchSessions, "mod+p");
+  assert.equal(DEFAULT_KEYMAP.searchFiles, "mod+p");
+  assert.equal(DEFAULT_KEYMAP.searchSessions, "mod+shift+f");
   assert.equal(DEFAULT_KEYMAP.settings, "mod+,");
   assert.equal(DEFAULT_KEYMAP.newSession, "mod+n");
 });
@@ -45,7 +46,7 @@ test("matchAction resolves events against custom maps", () => {
   assert.equal(map.palette, "mod+shift+p");
   assert.equal(map.viewGit, DEFAULT_KEYMAP.viewGit); // bad combo dropped
   assert.equal(matchAction(map, ev("p", { ctrl: true, shift: true })), "palette");
-  assert.equal(matchAction(map, ev("p", { ctrl: true })), "searchSessions");
+  assert.equal(matchAction(map, ev("p", { ctrl: true })), "searchFiles");
   assert.equal(matchAction(map, ev("x", { ctrl: true })), null);
 });
 

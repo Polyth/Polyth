@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react";
+import { useId, useState, type FormEvent } from "react";
 import { useEscape } from "../useEscape.ts";
 
 export default function ProjectForm({
@@ -13,6 +13,7 @@ export default function ProjectForm({
   const [create, setCreate] = useState(false);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+  const pathHelpId = useId();
   useEscape(!!onCancel, () => onCancel?.());
 
   const submit = async (event: FormEvent) => {
@@ -31,8 +32,17 @@ export default function ProjectForm({
 
   return (
     <form className="project-form" onSubmit={(event) => void submit(event)}>
-      <label>Project folder <span>absolute path on this machine</span>
-        <input autoFocus value={path} placeholder="/workspace/my-project" onChange={(e) => setPath(e.target.value)} />
+      <label>Project folder <span>absolute path on the Polyth server</span>
+        <input
+          autoFocus
+          value={path}
+          placeholder="/workspace/my-project"
+          aria-describedby={pathHelpId}
+          onChange={(e) => setPath(e.target.value)}
+        />
+        <span className="project-path-help" id={pathHelpId}>
+          In a terminal, open the folder and run <code>pwd</code>, then paste that path here.
+        </span>
       </label>
       <label className="project-name">Display name <span>optional — defaults to the folder name</span>
         <input value={name} placeholder="My project" onChange={(e) => setName(e.target.value)} />

@@ -4,8 +4,9 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createContext } from "@polyth/kernel";
 import { createStore } from "@polyth/session";
-import { CAP, type AgentRuntime, type RuntimeEvent, type SessionEvent, type SessionProjection } from "@polyth/contracts";
-import { createOpenCodeRuntime, type OpenCodeAdapterOptions } from "@polyth/backend-opencode";
+import { CAP, type AgentRuntime, type JsonObject, type RuntimeEvent, type SessionEvent, type SessionProjection, type WalkthroughSource } from "@polyth/contracts";
+import { createConfigApplier, createOpenCodeRuntime, type OpenCodeAdapterOptions } from "@polyth/backend-opencode";
+import { createPluginRegistry } from "@polyth/plugins";
 import { createPermissionService } from "@polyth/permissions";
 import { createGoalService, type GoalService } from "@polyth/goals";
 import { createFileService } from "@polyth/files";
@@ -15,12 +16,20 @@ import { createTerminalService } from "@polyth/terminal";
 import { createPreviewService } from "@polyth/preview";
 import { createMultirunService } from "@polyth/multirun";
 import { createFusionService, synthesisPrompt } from "@polyth/fusion";
-import { createScheduleService } from "@polyth/schedule";
+import { createScheduleService, scanLoopsDir } from "@polyth/schedule";
+import { createKnowledgeStore } from "@polyth/knowledge";
 import { createGithubService } from "@polyth/github";
+import { createFakeQuotaProvider, createUsageService } from "@polyth/usage";
+import {
+  createBrowserService, createChromiumDriver, createFakeDriver, demoWeb,
+  findChromiumExecutable, originOf,
+} from "@polyth/browser";
+import { createDictationService } from "@polyth/dictation";
 import { createProjectService } from "./projects.ts";
 import { createSessionService, type Broadcaster, type RuntimePool } from "./sessions.ts";
 import { createHttpServer, type RouteHandler } from "./http.ts";
 import { goalRoutes } from "./routes/goals.ts";
+import { orgRoutes } from "./routes/org.ts";
 import { workspaceRoutes } from "./routes/workspace.ts";
 import { gitRoutes } from "./routes/git.ts";
 import { terminalRoutes, attachTerminalWs } from "./routes/terminal.ts";
@@ -29,9 +38,19 @@ import { multirunRoutes } from "./routes/multirun.ts";
 import { fusionRoutes } from "./routes/fusion.ts";
 import { walkthroughRoutes } from "./routes/walkthrough.ts";
 import { scheduleRoutes } from "./routes/schedule.ts";
+import { usageRoutes } from "./routes/usage.ts";
+import { knowledgeRoutes } from "./routes/knowledge.ts";
 import { githubRoutes } from "./routes/github.ts";
 import { controlRoutes } from "./routes/control.ts";
 import { snippetRoutes } from "./routes/snippets.ts";
+import { profileRoutes } from "./routes/profiles.ts";
+import { settingsRoutes } from "./routes/settings.ts";
+import { browserRoutes } from "./routes/browser.ts";
+import { dictationRoutes } from "./routes/dictation.ts";
+import { createBehaviorService } from "./behavior.ts";
+import { createMcpConfigService } from "./mcp.ts";
+import { createWalkthroughJobService } from "./walkthroughs.ts";
+import { createReviewFlowService, createReviewService } from "./review.ts";
 import { createMultirunRunOne } from "./multirunRunner.ts";
 import { oneShot } from "./oneshot.ts";
 import { attachWs } from "./ws.ts";
@@ -173,14 +192,54 @@ export async function boot(opts: BootOptions = {}) {
   const commands = createCommandService();
   const terminals = createTerminalService();
   const preview = createPreviewService();
+
+  // --- controlled browser (WP14): Chromium if configured/found, fake driver
+  // behind POLYTH_FAKE_BROWSER=1, otherwise an honest "unavailable" state that
+  // keeps the iframe preview as the fallback surface.
+  const previewOrigins = new Set<string>();
+  preview.onStatusChange((_pid, st) => {
+    if (st.url) {
+      const o = originOf(st.url);
+      if (o) previewOrigins.add(o);
+    }
+  });
+  const chromiumPath = process.env.POLYTH_FAKE_BROWSER === "1" ? null : await findChromiumExecutable();
+  const browserDriver = process.env.POLYTH_FAKE_BROWSER === "1"
+    ? createFakeDriver(demoWeb())
+    : chromiumPath
+      ? createChromiumDriver(chromiumPath)
+      : null;
+  const browser = createBrowserService({
+    driver: browserDriver,
+    unavailableReason: "browser engine unavailable: no Chromium executable found (set POLYTH_CHROMIUM_PATH)",
+    allowedOrigins: () => [...previewOrigins],
+  });
+
+  // Streaming dictation (WP15): the protocol is live, but no STT engine ships
+  // by default — capability reports honestly and the web app keeps browser
+  // Web Speech as its zero-configuration path. A speech plugin can contribute
+  // an SttAdapter here later.
+  const dictation = createDictationService({
+    adapter: null,
+    unavailableReason: "no speech-to-text engine configured; browser Web Speech is used instead",
+  });
   const parseModel = (raw?: string) => {
     if (!raw || !raw.includes("/")) return undefined;
     const i = raw.indexOf("/");
     return { providerID: raw.slice(0, i), modelID: raw.slice(i + 1) };
   };
 
+  // --- WP9: behavior instructions, MCP config, managed plugins (adapter-applied)
+  const configApplier = createConfigApplier();
+  const behavior = createBehaviorService({ file: `${dataDir}/behavior.md`, applier: configApplier });
+  const mcp = createMcpConfigService({ file: `${dataDir}/mcp.json`, applier: configApplier });
+  const pluginRegistry = createPluginRegistry({
+    dir: `${dataDir}/plugins`,
+    trustedDir: process.env.POLYTH_TRUSTED_PLUGIN_DIR ?? `${dataDir}/trusted-plugins`,
+  });
+
   const sessions = createSessionService({
-    store, projects, permissions, runtimes, broadcast,
+    store, projects, permissions, runtimes, broadcast, queue: store, org: store, profiles: store, behavior,
     expand: async (projectId, text) => {
       const project = await projects.get(projectId);
       const r = await commands.expand(project?.path ?? process.cwd(), text);
@@ -258,13 +317,25 @@ export async function boot(opts: BootOptions = {}) {
     },
   });
 
-  // --- scheduled prompts: due tasks send into an existing session or spawn a
-  // fresh one in the target project (all model-visible flow stays in sessions)
+  // --- scheduled prompts: every run owns a VISIBLE session per its target
+  // mode; schedule/run-started is appended before the prompt so the durable
+  // log explains why the message arrived (all model flow stays in sessions).
   const schedule = createScheduleService({
     file: `${dataDir}/schedule.json`,
     runner: {
-      run: async (task) => {
-        let sessionId = task.sessionId;
+      run: async (task, runId) => {
+        const mode = task.target?.mode ?? (task.sessionId ? "existing-session" : "new-session-per-run");
+        let sessionId: string | undefined;
+        if (mode === "existing-session") {
+          sessionId = task.target?.sessionId ?? task.sessionId;
+          if (!sessionId || !(await store.projection(sessionId))) {
+            throw Object.assign(new Error("target session no longer exists"), { code: "not-found" });
+          }
+        } else if (mode === "dedicated-session") {
+          if (task.lastSessionId && (await store.projection(task.lastSessionId))) {
+            sessionId = task.lastSessionId;
+          }
+        }
         if (!sessionId) {
           const ref = await sessions.create({
             projectId: task.projectId,
@@ -272,13 +343,85 @@ export async function boot(opts: BootOptions = {}) {
           });
           sessionId = ref.id;
         }
+        const started = await store.append(sessionId, "schedule/run-started", {
+          taskId: task.id, runId,
+          ...(task.title ? { taskTitle: task.title } : {}),
+          ...(task.source === "loop-file" ? { source: "loop-file", ...(task.loopId ? { loopId: task.loopId } : {}) } : {}),
+        }, { ignorable: true, producerPlugin: "schedule" });
+        broadcast.event(started);
         await sessions.send(sessionId, { text: task.prompt });
+        return { sessionId };
       },
     },
   });
   schedule.start();
 
+  // Periodic .agents/loops reconciliation (rescan endpoint offers on-demand).
+  const loopSync = async () => {
+    for (const p of await projects.list()) {
+      try {
+        schedule.syncLoops(p.id, scanLoopsDir(p.path));
+      } catch { /* unreadable project dir */ }
+    }
+  };
+  void loopSync();
+  const loopTimer = setInterval(() => void loopSync(), 60_000);
+  loopTimer.unref?.();
+
+  const knowledge = createKnowledgeStore(`${dataDir}/knowledge.db`);
+
   const github = createGithubService();
+
+  // --- WP12: generic quota telemetry. Adapters are registered here on the
+  // server; the browser only ever sees sanitized snapshots. No adapters are
+  // configured by default — POLYTH_FAKE_QUOTAS=1 enables the demo provider.
+  const usage = createUsageService({ file: `${dataDir}/quotas.json` });
+  if (process.env.POLYTH_FAKE_QUOTAS === "1") usage.register(createFakeQuotaProvider());
+  usage.start();
+
+  // --- WP11: generated walkthroughs, structured reviews, bounded review flow.
+  // The source diff is captured through git/gh only; the model call is a
+  // one-shot on the project's runtime (never a user session).
+  const captureDiff = async (source: WalkthroughSource): Promise<string> => {
+    const project = await projects.get(source.projectId);
+    if (!project) throw Object.assign(new Error("unknown project"), { code: "not-found" });
+    if (source.kind === "working-tree") return git.diffHead(project.path);
+    if (source.kind === "range") return git.diffRange(project.path, source.base, source.head);
+    const r = await github.prDiff(project.path, source.number);
+    if (!r.ok) throw Object.assign(new Error(r.reason), { code: "invalid-input" });
+    return r.data;
+  };
+  const generateForSource = async (source: WalkthroughSource, prompt: string): Promise<string> => {
+    const project = await projects.get(source.projectId);
+    const rt = await runtimes.forProject(source.projectId);
+    return oneShot(rt, {
+      cwd: project?.path ?? process.cwd(), prompt,
+      ...(smallModel() ? { model: smallModel()! } : {}),
+      timeoutMs: 180_000,
+    });
+  };
+  const appendLogged = async (sessionId: string, type: string, data: JsonObject) => {
+    const ev = await store.append(sessionId, type, data, { ignorable: true, producerPlugin: "review" });
+    broadcast.event(ev);
+    return ev;
+  };
+  const walkthroughJobs = createWalkthroughJobService({
+    captureDiff,
+    generate: generateForSource,
+    append: appendLogged,
+    cacheFile: `${dataDir}/walkthroughs.json`,
+    ...(smallModel() ? { modelId: `${smallModel()!.providerID}/${smallModel()!.modelID}` } : {}),
+  });
+  const review = createReviewService({ captureDiff, generate: generateForSource, append: appendLogged });
+  const reviewFlow = createReviewFlowService({
+    sessionStatus: async (sessionId) => (await store.projection(sessionId))?.status ?? null,
+    sessionProject: async (sessionId) => (await store.projection(sessionId))?.projectId ?? null,
+    send: async (sessionId, text) => { await sessions.send(sessionId, { text }); },
+    review: (sessionId, source) => review.generate(sessionId, source),
+    append: appendLogged,
+  });
+  const flowTimer = setInterval(() => void reviewFlow.tick(), 4_000);
+  flowTimer.unref?.();
 
   const routes: RouteHandler[] = [
     async (rc) => {
@@ -290,6 +433,7 @@ export async function boot(opts: BootOptions = {}) {
       return false;
     },
     goalRoutes(goals),
+    orgRoutes({ projects, sessions, store }),
     workspaceRoutes({ projects, files, commands }),
     gitRoutes({
       projects, git,
@@ -325,31 +469,94 @@ export async function boot(opts: BootOptions = {}) {
       },
     }),
     previewRoutes({ projects, preview }),
+    browserRoutes({ browser, append: appendLogged, shotsDir: `${dataDir}/browser-shots` }),
+    dictationRoutes({ dictation }),
     multirunRoutes(multirun),
     fusionRoutes(fusion),
-    walkthroughRoutes({ store, broadcast }),
-    scheduleRoutes(schedule),
-    githubRoutes({ projects, github }),
+    walkthroughRoutes({ store, broadcast, jobs: walkthroughJobs, review, flow: reviewFlow }),
+    scheduleRoutes({ schedule, projects }),
+    usageRoutes(usage),
+    knowledgeRoutes({
+      knowledge,
+      events: {
+        append: async (sessionId, type, data) => {
+          const ev = await store.append(sessionId, type, data, { producerPlugin: "knowledge" });
+          broadcast.event(ev);
+          return ev;
+        },
+      },
+    }),
+    githubRoutes({ projects, github, append: appendLogged }),
     controlRoutes(sessions),
     snippetRoutes({ projects, commands }),
+    profileRoutes({
+      store,
+      // Aggregated across live runtimes, same as the /api/models endpoint.
+      listModels: async () => {
+        const out: Awaited<ReturnType<AgentRuntime["models"]>> = [];
+        const seen = new Set<string>();
+        for (const p of await projects.list()) {
+          try {
+            const rt = await runtimes.forProject(p.id);
+            for (const m of await rt.models()) {
+              const key = `${m.providerID}/${m.modelID}`;
+              if (!seen.has(key)) { seen.add(key); out.push(m); }
+            }
+          } catch { /* runtime unavailable */ }
+        }
+        return out;
+      },
+      listAgents: async () => {
+        const out: Awaited<ReturnType<AgentRuntime["agents"]>> = [];
+        const seen = new Set<string>();
+        for (const p of await projects.list()) {
+          try {
+            const rt = await runtimes.forProject(p.id);
+            for (const a of await rt.agents()) {
+              if (!seen.has(a.name)) { seen.add(a.name); out.push(a); }
+            }
+          } catch { /* runtime unavailable */ }
+        }
+        return out;
+      },
+    }),
+    settingsRoutes({
+      behavior, mcp, plugins: pluginRegistry,
+      systemInfo: (local) => ({
+        version: "0.1.0",
+        // Configured bind address only — never derived from the Host header.
+        applicationUrl: `http://127.0.0.1:${port}`,
+        tunnelUrl: process.env.POLYTH_TUNNEL_URL ?? null,
+        dataDirLabel: local ? dataDir : "Polyth data directory",
+        capabilities: allCapabilities(),
+      }),
+    }),
   ];
+
+  const allCapabilities = () => ["polyth.sessions", "polyth.sessionPersistence", "polyth.projects", "polyth.agentRuntime", "polyth.goals", "polyth.files", "polyth.commands", "polyth.git", "polyth.worktrees", "polyth.terminal", "polyth.preview", "polyth.multirun", "polyth.fusion", "polyth.walkthrough", "polyth.schedule", "polyth.github", "polyth.control", "polyth.agentProfiles", "polyth.settings", "polyth.mcp", "polyth.plugins", "polyth.knowledge", "polyth.review", "polyth.usage", "polyth.browser"];
 
   const server = createHttpServer({
     sessions, projects, runtimes, routes,
-    capabilities: () => ["polyth.sessions", "polyth.sessionPersistence", "polyth.projects", "polyth.agentRuntime", "polyth.goals", "polyth.files", "polyth.commands", "polyth.git", "polyth.worktrees", "polyth.terminal", "polyth.preview", "polyth.multirun", "polyth.fusion", "polyth.walkthrough", "polyth.schedule", "polyth.github", "polyth.control"],
+    capabilities: allCapabilities,
     webDist: resolve(__dirname, "../../../apps/web/dist"),
     version: "0.1.0",
   });
   // order matters: /ws (session gateway) aborts upgrades whose path it does
   // not match, so the terminal channel must claim /ws/terminal/:id first
   attachTerminalWs(server, { terminals });
-  live = attachWs(server, sessions);
+  live = attachWs(server, sessions, browser, dictation);
 
   await new Promise<void>((res) => server.listen(port, res));
   console.log(`[polyth] server on http://127.0.0.1:${port}  data=${dataDir}`);
 
   const shutdown = async () => {
     schedule.stop();
+    usage.stop();
+    clearInterval(loopTimer);
+    clearInterval(flowTimer);
+    knowledge.close();
+    await browser.closeAll().catch(() => {});
+    await pluginRegistry.dispose().catch(() => {});
     for (const t of terminals.list()) await terminals.close(t.id).catch(() => {});
     for (const p of await projects.list()) await preview.stop(p.id).catch(() => {});
     for (const p of runtimesByProject.values()) await (await p.catch(() => null))?.dispose().catch(() => {});

@@ -95,11 +95,29 @@ export function createHttpServer(deps: HttpDeps): Server {
       m = path.match(/^\/api\/sessions\/([^/]+)\/message$/);
       if (m && method === "POST") {
         const b = await readBody(req);
+        const delivery = b.delivery;
         return json(res, 200, await sessions.send(m[1]!, {
           text: String(b.text ?? ""),
           ...(b.model ? { model: b.model as { providerID: string; modelID: string } } : {}),
           ...(b.agent ? { agent: String(b.agent) } : {}),
+          ...(delivery === "steer" || delivery === "queue" || delivery === "interrupt" || delivery === "normal"
+            ? { delivery } : {}),
+          ...(b.dismissPending === true ? { dismissPending: true } : {}),
+          ...(b.agentProfileId ? { agentProfileId: String(b.agentProfileId) } : {}),
         }));
+      }
+      m = path.match(/^\/api\/sessions\/([^/]+)\/queue$/);
+      if (m && method === "GET") return json(res, 200, await sessions.queueList?.(m[1]!) ?? []);
+      m = path.match(/^\/api\/sessions\/([^/]+)\/queue\/order$/);
+      if (m && method === "PATCH") {
+        const b = await readBody(req);
+        const ids = Array.isArray(b.ids) ? b.ids.map(String) : [];
+        return json(res, 200, await sessions.queueReorder?.(m[1]!, ids) ?? []);
+      }
+      m = path.match(/^\/api\/sessions\/([^/]+)\/queue\/([^/]+)$/);
+      if (m && method === "DELETE") {
+        await sessions.queueRemove?.(m[1]!, m[2]!);
+        return json(res, 200, { ok: true });
       }
       m = path.match(/^\/api\/sessions\/([^/]+)\/(abort|archive|restore)$/);
       if (m && method === "POST") {
@@ -114,7 +132,8 @@ export function createHttpServer(deps: HttpDeps): Server {
       m = path.match(/^\/api\/sessions\/([^/]+)\/permission\/([^/]+)$/);
       if (m && method === "POST") {
         const b = await readBody(req);
-        await sessions.replyPermission(m[1]!, m[2]!, b.reply as "once" | "always" | "reject");
+        const scope = b.scope === "session" || b.scope === "project" ? b.scope : undefined;
+        await sessions.replyPermission(m[1]!, m[2]!, b.reply as "once" | "always" | "reject", scope);
         return json(res, 200, { ok: true });
       }
       m = path.match(/^\/api\/sessions\/([^/]+)\/question\/([^/]+)\/reject$/);
@@ -167,15 +186,19 @@ export function createHttpServer(deps: HttpDeps): Server {
       res.writeHead(200, { "content-type": MIME[extname(filePath)] ?? "application/octet-stream" });
       res.end(data);
     } catch (err) {
-      const e = err as Error & { code?: string };
-      // opencode transport hiccup: the runtime pool respawns on the next call,
-      // so tell the client to retry instead of surfacing a raw "fetch failed".
+      const e = err as Error & { code?: string; cause?: unknown };
+      // A dead OpenCode transport is transient: the runtime pool respawns on
+      // the next call, so give clients a retryable status and useful message.
       if (/fetch failed|terminated|ECONNREFUSED/i.test(`${e.message ?? ""} ${String(e.cause ?? "")}`)) {
         return json(res, 503, { error: "unavailable", message: "OpenCode is reconnecting. Try again in a moment." });
       }
-      json(res, e.code === "not-found" ? 404 : e.code === "invalid-path" ? 400 : 500, {
-        error: e.code ?? "internal", message: e.message,
-      });
+      const status =
+        e.code === "not-found" ? 404
+        : e.code === "invalid-path" || e.code === "invalid-input" ? 400
+        : e.code === "conflict" ? 409
+        : e.code === "unsupported" ? 501
+        : 500;
+      json(res, status, { error: e.code ?? "internal", message: e.message });
     }
   });
 }

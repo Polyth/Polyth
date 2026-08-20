@@ -6,7 +6,7 @@ export type PersonaId = "engineer" | "manager" | "creator" | "blank";
 export type PluginId =
   | "session" | "goals" | "files" | "git" | "preview" | "terminal"
   | "context" | "usage" | "events" | "multirun" | "fusion" | "walkthrough"
-  | "schedule" | "github" | "dictation";
+  | "schedule" | "github" | "dictation" | "knowledge";
 
 export interface Persona {
   id: PersonaId;
@@ -22,14 +22,14 @@ export const PERSONAS: Record<PersonaId, Persona> = {
     id: "engineer", label: "Engineer",
     blurb: "Full dev toolkit in the rail — git, terminal, live preview. Diffs and tool calls shown in full, nothing hidden.",
     tags: ["git", "terminal", "preview"],
-    plugins: ["session", "files", "git", "preview", "terminal", "context", "usage", "events", "goals", "multirun", "fusion", "walkthrough", "schedule", "github", "dictation"],
+    plugins: ["session", "files", "git", "preview", "terminal", "context", "usage", "events", "goals", "multirun", "fusion", "walkthrough", "schedule", "github", "dictation", "knowledge"],
     composer: "full",
   },
   manager: {
     id: "manager", label: "Manager",
     blurb: "Goal and cost stay in view. Plain-language risk checks instead of diffs — no git, no terminal.",
     tags: ["goals", "cost", "risk checks"],
-    plugins: ["session", "files", "context", "usage", "goals", "multirun", "fusion", "walkthrough"],
+    plugins: ["session", "files", "context", "usage", "goals", "multirun", "fusion", "walkthrough", "knowledge"],
     composer: "full",
   },
   creator: {
@@ -68,7 +68,7 @@ export const PLUGIN_LABELS: Record<PluginId, string> = {
   session: "Session", goals: "Goals", files: "Files", git: "Git", preview: "Preview",
   terminal: "Terminal", context: "Context", usage: "Usage", events: "Events",
   multirun: "Multi-Run", fusion: "Fusion", walkthrough: "Walkthrough",
-  schedule: "Schedule", github: "GitHub", dictation: "Dictation",
+  schedule: "Schedule", github: "GitHub", dictation: "Dictation", knowledge: "Knowledge",
 };
 
 function isPlugin(id: unknown): id is PluginId {

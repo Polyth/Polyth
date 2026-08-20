@@ -40,8 +40,25 @@ export interface AssistantMessageData { partId: string; text: string; reasoning?
 export interface ToolCallData { callId: string; tool: string; input: JsonObject; partId?: string }
 export interface ToolResultData { callId: string; tool: string; output: string; title?: string; metadata?: JsonObject; attachments?: AttachmentRef[]; input?: JsonObject }
 export interface ToolErrorData { callId: string; tool: string; error: string }
-export interface PermissionRequestData { requestId: string; permission: string; patterns: string[]; metadata?: JsonObject; tool?: string }
-export interface PermissionResolvedData { requestId: string; reply: "once" | "always" | "reject" }
+export interface PermissionPreview { title: string; lines: string[]; risk?: "low" | "medium" | "high" }
+export type PermissionScope = "once" | "session" | "project";
+export interface PermissionRequestData {
+  requestId: string; permission: string; patterns: string[]; metadata?: JsonObject; tool?: string;
+  /** Server-generated, secret-redacted preview (optional; old events lack it). */
+  preview?: PermissionPreview;
+  allowedScopes?: PermissionScope[];
+}
+export interface PermissionResolvedData { requestId: string; reply: "once" | "always" | "reject"; scope?: "session" | "project" }
+export interface QuestionOption { value: string; label: string; description?: string }
+export interface QuestionItem {
+  id: string;
+  title?: string;
+  prompt: string;
+  type: "single" | "multi" | "text";
+  options?: QuestionOption[];
+  required?: boolean;
+  allowOther?: boolean;
+}
 export interface QuestionRequestData { requestId: string; questions: JsonObject[] }
 export interface TurnStartedData { turnId: string; model?: ModelRef; agent?: string }
 export interface TurnStoppedData { turnId: string; reason: "completed" | "aborted" | "error"; error?: string }
@@ -117,9 +134,30 @@ export interface CreateSessionInput {
 }
 export interface SessionRef { id: string }
 export interface TurnRef { turnId: string }
-export interface UserTurnInput { text: string; attachments?: AttachmentRef[]; model?: ModelRef; agent?: string }
+export interface UserTurnInput {
+  text: string;
+  attachments?: AttachmentRef[];
+  model?: ModelRef;
+  agent?: string;
+  /** Active-turn delivery admission; defaults to "normal". */
+  delivery?: DeliveryMode;
+  /** Atomically reject open questions / deny open permissions of this session before admission. */
+  dismissPending?: boolean;
+  /** Resolve model/agent/options through a stored agent profile at send time. */
+  agentProfileId?: string;
+}
 
 export type SessionStatus = "idle" | "working" | "waiting" | "finished" | "failed" | "archived";
+
+/** Derived unresolved-request counters; always computed from durable events. */
+export interface SessionAttention {
+  questions: number;
+  permissions: number;
+  unread: number;
+  goalStatus?: string;
+}
+
+export type WorktreeState = "ready" | "bootstrapping" | "busy" | "missing";
 
 export interface SessionProjection {
   id: string; projectId: string; parentId?: string;
@@ -130,11 +168,20 @@ export interface SessionProjection {
   worktreePath?: string;
   backendSessionId?: string;
   goal?: { objective: string; status: string };
+  // -- optional parity metadata (backward compatible: absent on old records) --
+  attention?: SessionAttention;
+  labelIds?: string[];
+  folderId?: string;
+  branch?: string;
+  worktreeId?: string;
+  worktreeState?: WorktreeState;
+  agentProfileId?: string;
 }
 
 export interface SessionService {
   create(input: CreateSessionInput): Promise<SessionRef>;
-  send(sessionId: string, input: UserTurnInput): Promise<TurnRef>;
+  /** Result carries turnId for admitted turns or queueId+queued for deferred delivery. */
+  send(sessionId: string, input: UserTurnInput): Promise<SendResult>;
   abort(sessionId: string): Promise<void>;
   fork(sessionId: string, atSeq?: number): Promise<SessionRef>;
   archive(sessionId: string): Promise<void>;
@@ -143,8 +190,22 @@ export interface SessionService {
   sync(projectId: string): Promise<SessionProjection[]>;
   snapshot(sessionId: string): Promise<SessionProjection>;
   events(sessionId: string, afterSeq?: number): Promise<SessionEvent[]>;
-  replyPermission(sessionId: string, requestId: string, reply: "once" | "always" | "reject"): Promise<void>;
+  replyPermission(sessionId: string, requestId: string, reply: "once" | "always" | "reject", scope?: "session" | "project"): Promise<void>;
   replyQuestion(sessionId: string, requestId: string, answers: JsonObject): Promise<void>;
+  // -- parity additions (optional so existing fakes/tests remain valid) --
+  /** Append session/metadata-changed and update the projection title. */
+  rename?(sessionId: string, title: string): Promise<void>;
+  /** Folder/label assignment; folder must belong to the session's project. */
+  organize?(sessionId: string, patch: SessionOrganizePatch): Promise<void>;
+  queueList?(sessionId: string): Promise<QueueItemDto[]>;
+  queueReorder?(sessionId: string, ids: string[]): Promise<QueueItemDto[]>;
+  queueRemove?(sessionId: string, queueId: string): Promise<void>;
+}
+
+export interface SessionOrganizePatch {
+  /** null clears the folder assignment */
+  folderId?: string | null;
+  labelIds?: string[];
 }
 
 // ---------------------------------------------------------------- persistence
@@ -164,7 +225,7 @@ export interface SessionPersistence {
 
 export interface ModelDescriptor { providerID: string; modelID: string; name: string; context?: number; cost?: { input: number; output: number }; capabilities?: string[] }
 export interface AgentDescriptor { name: string; description?: string; mode: "primary" | "subagent" | "all" }
-export interface RuntimeCapabilities { streaming: boolean; permissions: boolean; questions: boolean; compaction: boolean; subagents: boolean }
+export interface RuntimeCapabilities { streaming: boolean; permissions: boolean; questions: boolean; compaction: boolean; subagents: boolean; steering?: boolean }
 export interface RuntimeSession { id: string; title: string; parentId?: string; createdAt: number; updatedAt: number }
 export interface RuntimeSessionMessage { role: "user" | "assistant"; text: string; reasoning?: string }
 
@@ -187,7 +248,10 @@ export type RuntimeEvent =
   | { type: "permission/requested"; requestId: string; permission: string; patterns: string[]; metadata?: JsonObject; tool?: string }
   | { type: "question/asked"; requestId: string; questions: JsonObject[] }
   | { type: "turn/stopped"; reason: "completed" | "aborted" | "error"; error?: string }
-  | { type: "usage/recorded"; model: ModelRef; tokens: TokenUsage; cost?: number };
+  | { type: "usage/recorded"; model: ModelRef; tokens: TokenUsage; cost?: number }
+  // Full revisioned snapshots (WP8): replay-deterministic task/subagent state.
+  | { type: "task/snapshot"; listId: string; revision: number; items: Array<{ id: string; text: string; status: TaskItemStatus }> }
+  | { type: "subagent/snapshot"; revision: number; agents: Array<{ sessionId: string; label: string; status: string; currentTask?: string }> };
 
 export interface AgentRuntime {
   capabilities(): Promise<RuntimeCapabilities>;
@@ -197,6 +261,9 @@ export interface AgentRuntime {
   sessions(): Promise<RuntimeSession[]>;
   history(sessionId: string): Promise<RuntimeSessionMessage[]>;
   startTurn(req: CanonicalTurnRequest): Promise<void>; // events flow via onEvent
+  /** Live steering of an active turn. Returns false when unsupported/rejected;
+   *  callers must fall back to queueing. Optional so old fakes remain valid. */
+  steer?(sessionId: string, text: string): Promise<boolean>;
   abort(sessionId: string): Promise<void>;
   replyPermission(sessionId: string, requestId: string, reply: "once" | "always" | "reject"): Promise<void>;
   replyQuestion(sessionId: string, requestId: string, answers: JsonObject): Promise<void>;
@@ -227,13 +294,36 @@ export interface PermissionGuard {
 
 // ---------------------------------------------------------------- projects
 
-export interface Project { id: string; path: string; name: string; color?: string; icon?: string; createdAt: number }
+export interface ProjectDefaults {
+  agentProfileId?: string;
+  agent?: string;
+  model?: ModelRef;
+  groupingMode?: string;
+  worktreeBehavior?: "project-root" | "fresh-worktree";
+}
+
+export interface Project {
+  id: string; path: string; name: string;
+  color?: string; icon?: string; createdAt: number;
+  defaults?: ProjectDefaults;
+  labelIds?: string[];
+}
+
+export interface ProjectPatch {
+  name?: string;
+  color?: string;
+  icon?: string;
+  defaults?: ProjectDefaults;
+}
+
 export interface ProjectService {
   list(): Promise<Project[]>;
   add(path: string, name?: string): Promise<Project>;
   create(path: string, name?: string): Promise<Project>;
   remove(id: string): Promise<void>;
   get(id: string): Promise<Project | undefined>;
+  /** PATCH metadata/defaults; optional so old fakes remain valid. */
+  update?(id: string, patch: ProjectPatch): Promise<Project>;
 }
 
 // ---------------------------------------------------------------- UI contributions (host + client shared shapes)
@@ -241,7 +331,13 @@ export interface ProjectService {
 export type UiSlot =
   | "app.nav" | "session.header.actions" | "session.list.badges"
   | "composer.leading" | "composer.trailing" | "contextRail.tabs"
-  | "settings.pages" | "commandPalette.commands";
+  | "settings.pages" | "commandPalette.commands"
+  // parity slots (WP1): focused seams instead of mega-component imports
+  | "workspace.main.tabs" | "workspace.right.tabs"
+  | "session.timeline.before" | "session.timeline.after"
+  | "session.message.actions"
+  | "sidebar.project.actions" | "sidebar.session.actions"
+  | "workStatus.sections";
 
 export interface UiSlotItem {
   id: string;
@@ -343,6 +439,428 @@ export interface PreviewStartInput {
   command?: string;
   /** explicit port; omitted = OS-assigned free port */
   port?: number;
+}
+
+// ================================================================ parity contracts (WP1)
+// All additions below are optional/additive: old event logs, JSON stores and
+// clients keep working; unknown events stay ignorable.
+
+// ---------------------------------------------------------------- delivery & queue (WP3)
+
+export type DeliveryMode = "normal" | "steer" | "queue" | "interrupt";
+
+export interface QueueItemDto {
+  id: string;
+  sessionId: string;
+  position: number;
+  text: string;
+  delivery: DeliveryMode;
+  createdAt: number;
+}
+
+export interface QueueEnqueuedData { queueId: string; text: string; delivery: string }
+export interface QueueDispatchedData { queueId: string }
+export interface QueueReorderedData { ids: string[] }
+export interface QueueRemovedData { queueId: string }
+export interface DeliverySteeredData { text: string }
+export interface DeliveryFallbackQueuedData { queueId: string; reason: string }
+
+export interface SendResult {
+  turnId?: string;
+  queueId?: string;
+  queued?: boolean;
+}
+
+// ---------------------------------------------------------------- editor & files (WP4/WP6)
+
+export interface EditorLocation { path: string; startLine?: number; endLine?: number; column?: number }
+
+export interface FileStatDto {
+  path: string;
+  kind: "file" | "dir";
+  size: number;
+  mime?: string;
+  revision?: string;
+}
+
+export type FileRenderKind = "text" | "markdown" | "html" | "json" | "binary";
+
+// ---------------------------------------------------------------- tasks & subagents (WP8)
+
+export type TaskItemStatus = "pending" | "active" | "done" | "failed";
+export interface TaskSnapshotData {
+  listId: string;
+  revision: number;
+  items: Array<{ id: string; text: string; status: TaskItemStatus }>;
+}
+export interface SubagentSnapshotData {
+  revision: number;
+  agents: Array<{ sessionId: string; label: string; status: string; currentTask?: string }>;
+}
+
+// ---------------------------------------------------------------- agent profiles (WP8)
+
+export interface AgentProfile {
+  id: string;
+  name: string;
+  providerID: string;
+  modelID: string;
+  agent?: string;
+  mode?: string;
+  thinking?: string;
+  features: Record<string, boolean>;
+  notes?: string;
+  icon?: string;
+  color?: string;
+  revision: number;
+  createdAt: number;
+  updatedAt: number;
+}
+export interface AgentProfileSeed { providerID: string; modelID: string; name?: string }
+export interface AgentProfileRepair { field: string; from: string; to: string; reason: string }
+
+// ---------------------------------------------------------------- system info (WP9)
+
+export interface SystemInfoDto {
+  version: string;
+  applicationUrl: string;
+  tunnelUrl: string | null;
+  dataDirLabel: string;
+  capabilities: string[];
+}
+
+// ---------------------------------------------------------------- folders & labels (WP5/WP18)
+
+export interface SessionFolderDto {
+  id: string;
+  projectId: string;
+  parentId?: string;
+  name: string;
+  position: number;
+  revision: number;
+}
+
+export interface WorkspaceLabel {
+  id: string;
+  name: string;
+  color: string;
+  position: number;
+  revision: number;
+}
+
+export interface BulkSessionResult {
+  succeeded: string[];
+  failed: Array<{ id: string; code: string }>;
+}
+
+// ---------------------------------------------------------------- pane surfaces (WP6)
+
+export interface WorkspaceSurface {
+  id: string;
+  title: string;
+  icon: string;
+  placement: "main" | "right" | "either";
+  singleton: boolean;
+  keepAlive?: boolean;
+  module: string;
+  requiresCapabilities?: string[];
+}
+
+export interface PaneTabState {
+  instanceId: string;
+  surfaceId: string;
+  resource?: string;
+  title?: string;
+  dirty?: boolean;
+}
+
+// ---------------------------------------------------------------- schedule cadence (WP10)
+
+export type ScheduleCadence =
+  | { kind: "at"; at: number }
+  | { kind: "every"; everyMinutes: number }
+  | { kind: "cron"; expression: string; timeZone: string };
+
+export interface ScheduleTarget {
+  mode: "existing-session" | "new-session-per-run" | "dedicated-session";
+  sessionId?: string;
+  worktreePolicy?: "project-root" | "fresh-worktree";
+}
+
+export type ScheduleOverlapPolicy = "skip" | "queue" | "parallel";
+
+export interface ScheduleRunDto {
+  runId: string;
+  taskId: string;
+  startedAt: number;
+  finishedAt?: number;
+  status: "running" | "completed" | "failed" | "skipped";
+  error?: string;
+  sessionId?: string;
+}
+
+// ---------------------------------------------------------------- knowledge (WP10)
+
+export type KnowledgeKind = "note" | "plan" | "memory";
+export interface KnowledgeItem {
+  id: string;
+  projectId: string;
+  kind: KnowledgeKind;
+  title: string;
+  body: string;
+  tags: string[];
+  source: "user" | "agent" | "import";
+  sourceSessionId?: string;
+  revision: number;
+  createdAt: number;
+  updatedAt: number;
+}
+export interface KnowledgeAttachedData {
+  knowledgeId: string;
+  revision: number;
+  title: string;
+  body: string;
+  digest: string;
+}
+
+// ---------------------------------------------------------------- quotas (WP12)
+
+export interface QuotaWindow {
+  id: string;
+  label: string;
+  used: number;
+  limit: number;
+  unit: "tokens" | "requests" | "currency" | "percent";
+  resetsAt?: number;
+  periodMs?: number;
+}
+
+export interface QuotaSnapshot {
+  providerId: string;
+  accountLabel?: string;
+  windows: QuotaWindow[];
+  fetchedAt: number;
+  stale: boolean;
+  error?: { code: string; message: string };
+}
+
+export interface QuotaPace {
+  usageFraction: number;
+  timeFraction: number;
+  pace: "under" | "on-track" | "over";
+  predictedAtReset?: number;
+  exhaustsAt?: number;
+}
+
+// ---------------------------------------------------------------- review & walkthrough (WP11)
+
+export interface ReviewFinding {
+  severity: "critical" | "high" | "medium" | "low";
+  path?: string;
+  line?: number;
+  body: string;
+  confidence: number;
+}
+export interface ReviewAssessment {
+  summary: string;
+  findings: ReviewFinding[];
+  riskScore: 1 | 2 | 3 | 4 | 5;
+  confidenceScore: 1 | 2 | 3 | 4 | 5;
+}
+
+export type WalkthroughSource =
+  | { kind: "working-tree"; projectId: string }
+  | { kind: "range"; projectId: string; base: string; head: string }
+  | { kind: "pull-request"; projectId: string; number: number };
+
+export interface GeneratedWalkthroughStop {
+  id: string;
+  path: string;
+  hunkDigest: string;
+  diff: string;
+  explanation: string;
+}
+export interface GeneratedWalkthroughStage {
+  id: string;
+  title: string;
+  explanation: string;
+  stops: GeneratedWalkthroughStop[];
+}
+export interface GeneratedWalkthroughDto {
+  id: string;
+  source: WalkthroughSource;
+  sourceDigest: string;
+  status: "queued" | "running" | "ready" | "failed";
+  stages: GeneratedWalkthroughStage[];
+  error?: string;
+  createdAt: number;
+}
+
+export type CheckStatus =
+  | "queued" | "in_progress" | "success" | "failure" | "cancelled"
+  | "skipped" | "neutral" | "timed_out" | "action_required";
+export interface PrCheck {
+  id: string;
+  name: string;
+  workflow?: string;
+  status: CheckStatus;
+  startedAt?: string;
+  completedAt?: string;
+  url?: string;
+  summary?: string;
+}
+
+export interface ReviewFlowState {
+  id: string;
+  sessionId: string;
+  status: "idle" | "implementing" | "awaiting-review" | "reviewing" | "passed" | "changes-requested" | "failed" | "paused" | "stopped";
+  iteration: number;
+  maxIterations: number;
+  baseDigest: string;
+  latestReviewId?: string;
+  stoppedReason?: string;
+}
+
+// ---------------------------------------------------------------- MCP & plugins (WP9)
+
+export type McpTransport =
+  | { kind: "stdio"; command: string; args: string[]; envKeys: string[] }
+  | { kind: "http"; url: string; headersSecretRefs: string[] };
+
+export type McpStatus = "disabled" | "starting" | "connected" | "error";
+
+export interface McpServerDto {
+  id: string;
+  name: string;
+  transport: McpTransport;
+  enabled: boolean;
+  status: McpStatus;
+  lastError?: string;
+  revision: number;
+}
+
+export interface InstalledPluginDto {
+  id: string;
+  name: string;
+  version: string;
+  source: string;
+  trust: TrustClass;
+  enabled: boolean;
+  status: "installed" | "loading" | "ready" | "error" | "disabled";
+  update?: { version: string };
+  capabilities: string[];
+  contributions: UiSlotItem[];
+  lastError?: string;
+}
+
+// ---------------------------------------------------------------- browser (WP14)
+
+export interface BrowserSessionDto {
+  id: string;
+  projectId: string;
+  sessionId?: string;
+  url: string;
+  title: string;
+  status: "starting" | "ready" | "closed" | "failed";
+  viewport: { width: number; height: number; deviceScaleFactor: number };
+  revision: number;
+  /** honest engine state: "chromium" when driven, "unavailable" for fallback */
+  engine: "chromium" | "fake" | "unavailable";
+}
+
+export type BrowserTarget =
+  | { selector: string }
+  | { role: string; name?: string; exact?: boolean }
+  | { point: { x: number; y: number }; frameRevision: number };
+
+export type BrowserAction =
+  | { kind: "click"; target: BrowserTarget }
+  | { kind: "type"; target: BrowserTarget; text: string; submit?: boolean }
+  | { kind: "press"; key: string }
+  | { kind: "scroll"; x: number; y: number }
+  | { kind: "select"; target: BrowserTarget; value: string }
+  | { kind: "wait"; condition: "network-idle" | "selector"; value?: string; timeoutMs?: number };
+
+export interface BrowserObservation {
+  url: string;
+  title: string;
+  text: string;
+  accessibilityDigest?: string;
+  screenshotRef?: string;
+}
+
+// ---------------------------------------------------------------- dictation (WP15)
+
+export interface DictationSessionDto {
+  id: string;
+  sessionId?: string;
+  status: "starting" | "recording" | "finalizing" | "done" | "failed";
+  format: { encoding: "pcm_s16le"; sampleRate: number; channels: number };
+  acknowledgedSeq: number;
+  transcript: string;
+}
+
+// ---------------------------------------------------------------- commands / settings / shortcuts (WP9/WP13)
+
+export interface CommandDescriptor {
+  id: string;
+  label: string;
+  group: string;
+  keywords?: string[];
+  defaultShortcut?: string[];
+  when?: string;
+  requiresCapabilities?: string[];
+}
+
+export interface SettingsSearchItem {
+  id: string;
+  pageId: string;
+  label: string;
+  description?: string;
+  keywords?: string[];
+  focusTarget: string;
+}
+
+export interface ShortcutBinding {
+  commandId: string;
+  sequence: string[];
+  when?: string;
+}
+
+// ---------------------------------------------------------------- workspace search (WP13)
+
+/** One row of `/api/search/workspaces`: a project or session matched on
+ *  metadata only (never transcript bodies). */
+export interface WorkspaceSearchItem {
+  kind: "project" | "session";
+  id: string;
+  projectId?: string;
+  title: string;
+  /** Project: path. Session: "project · branch · status" fragments. */
+  subtitle?: string;
+  keywords?: string[];
+  status?: string;
+  updatedAt: number;
+  archived?: boolean;
+}
+
+export interface FileSearchItem {
+  path: string;
+  kind: "file" | "dir";
+  score: number;
+  matches?: Array<[number, number]>;
+}
+
+// ---------------------------------------------------------------- notifications (WP15)
+
+export type NotificationKind = "completed" | "failed" | "question" | "permission" | "subagent";
+export interface NotificationPrefs {
+  enabled: boolean;
+  sound: boolean;
+  kinds: NotificationKind[];
+  onlyWhenHidden: boolean;
+  template: string;
+  summarize: boolean;
 }
 
 // Well-known capability keys

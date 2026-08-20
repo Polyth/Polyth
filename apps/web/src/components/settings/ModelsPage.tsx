@@ -3,12 +3,14 @@
 import { Fragment, useState } from "react";
 import { filterModels, isFavorite, modelKey, sortModels } from "@polyth/models";
 import { setModelSort, toggleModelFavorite, useModelPrefs } from "../../modelPrefs.ts";
-import { useStore } from "../../store.ts";
+import { updateSettings, useStore } from "../../store.ts";
 import { providerColor } from "../../format.ts";
+import { formatModelRef } from "../../settings.ts";
 import { EmptyState, PageHead, Row, Seg } from "./parts.tsx";
 
 export default function ModelsPage() {
   const models = useStore((s) => s.models);
+  const settings = useStore((s) => s.settings);
   const prefs = useModelPrefs();
   const [q, setQ] = useState("");
 
@@ -21,7 +23,17 @@ export default function ModelsPage() {
         <EmptyState title="No models available" body="Check that the backend is running and configured with providers." />
       ) : (
         <>
-          <Row label="Sort" hint="Favorites always float first.">
+          <Row label="Default model" hint="Used when a session has not selected a model." itemId="models.default">
+            <select value={settings.defaultModel} onChange={(e) => updateSettings({ defaultModel: e.target.value })}>
+              <option value="">Server default</option>
+              {models.map((model) => (
+                <option key={modelKey(model)} value={formatModelRef(model)}>
+                  {model.providerID} / {model.name || model.modelID}
+                </option>
+              ))}
+            </select>
+          </Row>
+          <Row label="Sort" hint="Favorites always float first." itemId="models.favorites">
             <Seg value={prefs.sort} options={[["provider", "Provider"], ["name", "Name"], ["recent", "Recent"]]} onChange={setModelSort} />
           </Row>
           <input

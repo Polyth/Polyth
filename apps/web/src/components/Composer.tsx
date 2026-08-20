@@ -1,10 +1,26 @@
-import { useState, useRef, useEffect, useCallback, type KeyboardEvent, type ReactNode } from "react";
-import { useActiveModel, useStore, setUiError } from "../store.ts";
+import { Fragment, useState, useRef, useEffect, useCallback, type KeyboardEvent } from "react";
+import { getState, useActiveModel, useStore, setActiveView } from "../store.ts";
 import { sendMessage, abortSession, createSession } from "../init.ts";
 import { api, type SlashCommand, type SnippetDef } from "../api.ts";
-import { filterCommands, filterSnippets, type AutocompleteItem } from "../utils.ts";
-import { friendlyError, modKeyLabel, parseModelRef } from "../settings.ts";
-import { providerColor } from "../format.ts";
+import { filterCommands, filterSnippets, loadDraft, saveDraft, type AutocompleteItem } from "../utils.ts";
+import { PERSONAS, usePrefs } from "../prefs.ts";
+import { renderSlot } from "../slots.ts";
+import { dragKind, dropIntoSession } from "../dnd.ts";
+import { COMPOSER_INSERT, drainInserts } from "../composerInsert.ts";
+import { activeToken, completeToken, type PromptToken } from "../composer/language.ts";
+import type { PickerItem } from "../picker.ts";
+import Picker from "./Picker.tsx";
+import AdaptiveTextInput, { type TextInputHandle } from "./input/AdaptiveTextInput.tsx";
+import ComposerFocusDialog from "./ComposerFocusDialog.tsx";
+import QueuedMessageList from "./QueuedMessageList.tsx";
+import { isFavorite, modelKey, sortModels } from "@polyth/models";
+import { noteModelUsed, useModelPrefs } from "../modelPrefs.ts";
+import { getUiSettings } from "../uiPrefs.ts";
+import { migrateFavoritesOnce, useProfiles } from "../profiles.ts";
+import AgentProfileForm from "./AgentProfileForm.tsx";
+import type { AgentProfile } from "@polyth/contracts";
+import { agentPickerDefaultLabel, modelPickerDefaultLabel } from "../composerDefaults.ts";
+import { modKeyLabel, parseModelRef } from "../settings.ts";
 
 function modelRefFromValue(value: string): { providerID: string; modelID: string } | undefined {
   if (!value) return undefined;
@@ -22,56 +38,88 @@ function modelRefFromValue(value: string): { providerID: string; modelID: string
 const EMPTY_AC: AutocompleteItem[] = [];
 const EMPTY_SLCMD: SlashCommand[] = [];
 const EMPTY_SNIP: SnippetDef[] = [];
-
-const CHIP_STROKE = { fill: "none", stroke: "currentColor", strokeWidth: 1.4, strokeLinecap: "round", strokeLinejoin: "round" } as const;
-
-const STARTERS: Array<{ label: string; icon: ReactNode }> = [
-  {
-    label: "Explore the codebase",
-    icon: <svg width="13" height="13" viewBox="0 0 16 16" {...CHIP_STROKE}><path d="M8 2.2 9.3 6l3.8 1.3-3.8 1.3L8 12.4 6.7 8.6 2.9 7.3 6.7 6z" /></svg>,
-  },
-  {
-    label: "Review my recent changes",
-    icon: <svg width="13" height="13" viewBox="0 0 16 16" {...CHIP_STROKE}><circle cx="4.6" cy="4" r="1.7" /><circle cx="4.6" cy="12" r="1.7" /><circle cx="11.4" cy="5.6" r="1.7" /><path d="M4.6 5.7v4.6M11.4 7.3c0 2.3-2.5 2.5-5 3" /></svg>,
-  },
-  {
-    label: "Add tests",
-    icon: <svg width="13" height="13" viewBox="0 0 16 16" {...CHIP_STROKE}><path d="M3.4 8.4 6.4 11.4l6.2-6.8" /></svg>,
-  },
-  {
-    label: "Debug an issue",
-    icon: <svg width="13" height="13" viewBox="0 0 16 16" {...CHIP_STROKE}><rect x="1.9" y="2.9" width="12.2" height="10.2" rx="2.2" /><path d="M4.7 6.3 6.9 8l-2.2 1.7M8.5 10.1h2.9" /></svg>,
-  },
-  {
-    label: "Explain this project",
-    icon: <svg width="13" height="13" viewBox="0 0 16 16" {...CHIP_STROKE}><path d="M2.4 3.2c1.9-.6 3.7-.5 5.6.5v9c-1.9-1-3.7-1.1-5.6-.5zM13.6 3.2c-1.9-.6-3.7-.5-5.6.5v9c1.9-1 3.7-1.1 5.6-.5z" /></svg>,
-  },
+const STARTERS = [
+  "Explore the codebase",
+  "Review my recent changes",
+  "Add tests",
+  "Debug an issue",
+  "Explain this project",
 ];
 
 export default function Composer({ variant = "docked" }: { variant?: "docked" | "hero" }) {
-  const [text, setText] = useState("");
   const [modelValue, setModelValue] = useState("");
   const [agentValue, setAgentValue] = useState("");
-  const [busy, setBusy] = useState(false);
+  const [profileValue, setProfileValue] = useState("");
+  const [pinSeed, setPinSeed] = useState<{ providerID: string; modelID: string; name?: string } | null>(null);
+  const [pinEdit, setPinEdit] = useState<AgentProfile | null>(null);
+  const profiles = useProfiles();
   const models = useStore((s) => s.models);
   const agents = useStore((s) => s.agents);
   const settings = useStore((s) => s.settings);
-  const sessionId = useStore((s) => s.activeSessionId);
-  const activeProjectId = useStore((s) => s.activeProjectId);
   const session = useStore((s) => s.sessions.find((x) => x.id === s.activeSessionId) ?? null);
   const model = useActiveModel();
   const working = model.turn?.status === "working";
+  const prefs = usePrefs();
+  // Creator persona: plain-language composer, no model/agent jargon.
+  const simple = (prefs.persona ? PERSONAS[prefs.persona].composer : "full") === "simple";
   const noModels = models.length === 0;
-  const mod = modKeyLabel();
 
-  // Autocomplete state
+  // IME-safe input: the DOM owns live text; `text` tracks committed edits only.
+  const inputRef = useRef<TextInputHandle>(null);
+  const sessionIdRef = useRef<string | null>(session?.id ?? null);
+  const [text, setText] = useState(() => (session?.id ? loadDraft(session.id) : ""));
+  const [focusMode, setFocusMode] = useState(false);
+
+  // Session switch: restore the draft through the command handle (never a
+  // controlled replay), and never while the user is mid-composition.
+  useEffect(() => {
+    sessionIdRef.current = session?.id ?? null;
+    const t = session?.id ? loadDraft(session.id) : "";
+    setText(t);
+    inputRef.current?.replaceText(t);
+  }, [session?.id]);
+
+  // Debounced draft persistence of committed text.
+  useEffect(() => {
+    const id = session?.id;
+    if (!id) return;
+    const t = setTimeout(() => saveDraft(id, text), 250);
+    return () => clearTimeout(t);
+  }, [session?.id, text]);
+
+  // Drag-and-drop: tree paths attach as @path, desktop files upload first.
+  const [dropHint, setDropHint] = useState<"path" | "files" | null>(null);
+
+  // Autocomplete state (token-based: works at any caret position)
   const [acItems, setAcItems] = useState<AutocompleteItem[]>(EMPTY_AC);
   const [acIndex, setAcIndex] = useState(0);
   const [acOpen, setAcOpen] = useState(false);
-  const [acType, setAcType] = useState<"cmd" | "snip">("cmd");
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const [acType, setAcType] = useState<"cmd" | "snip" | "file">("cmd");
+  const acTokenRef = useRef<PromptToken | null>(null);
+  const fileSearchSeq = useRef(0);
+
+  // Explicit selections reset when the session changes (UX-30).
+  useEffect(() => {
+    setModelValue("");
+    setAgentValue("");
+    setProfileValue("");
+  }, [session?.id]);
+
+  // One-time favorites → profiles migration once models are known.
+  useEffect(() => {
+    if (models.length > 0) void migrateFavoritesOnce(models);
+  }, [models]);
+
+  // Auto-grow up to 40vh based on committed text.
+  useEffect(() => {
+    const el = inputRef.current?.element();
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight + 2, window.innerHeight * 0.4)}px`;
+  }, [text]);
 
   // Load commands and snippets from API (once per project change)
+  const activeProjectId = useStore((s) => s.activeProjectId);
   const [commands, setCommands] = useState<SlashCommand[]>(EMPTY_SLCMD);
   const [snippets, setSnippets] = useState<SnippetDef[]>(EMPTY_SNIP);
 
@@ -86,280 +134,372 @@ export default function Composer({ variant = "docked" }: { variant?: "docked" | 
     });
   }, [activeProjectId]);
 
-  const autogrow = useCallback(() => {
-    const el = textareaRef.current;
-    if (!el) return;
-    el.style.height = "auto";
-    el.style.height = `${Math.min(el.scrollHeight, Math.round(window.innerHeight * 0.4))}px`;
+  // Composer inserts (Files @, drag-drop, starter chips). preventDefault marks
+  // the event consumed; anything queued while unmounted drains now. Inserts go
+  // through the command handle so an active composition is never interrupted.
+  useEffect(() => {
+    const insert = (detail: string) => {
+      const h = inputRef.current;
+      if (!h) return;
+      const cur = h.getText();
+      h.replaceText(cur ? `${cur} ${detail}` : detail);
+    };
+    for (const queued of drainInserts()) insert(queued);
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (typeof detail !== "string") return;
+      e.preventDefault();
+      insert(detail);
+      inputRef.current?.focus();
+    };
+    window.addEventListener(COMPOSER_INSERT, handler);
+    return () => window.removeEventListener(COMPOSER_INSERT, handler);
   }, []);
 
-  // polyth:composer-insert appends text (FilesPanel @-attach, starter chips);
-  // polyth:composer-focus focuses the textarea (command palette).
-  useEffect(() => {
-    const onInsert = (e: Event) => {
-      const detail = (e as CustomEvent).detail;
-      if (typeof detail === "string") {
-        setText((prev) => (prev ? prev + " " + detail : detail));
-        requestAnimationFrame(() => { autogrow(); textareaRef.current?.focus(); });
-      }
-    };
-    const onFocus = () => textareaRef.current?.focus();
-    window.addEventListener("polyth:composer-insert", onInsert);
-    window.addEventListener("polyth:composer-focus", onFocus);
-    return () => {
-      window.removeEventListener("polyth:composer-insert", onInsert);
-      window.removeEventListener("polyth:composer-focus", onFocus);
-    };
-  }, [autogrow]);
+  const send = useCallback((override?: string) => {
+    const t = (override ?? inputRef.current?.getText() ?? text).trim();
+    if (!t || noModels) return;
+    // Capture the target session at send time — project/session switches must
+    // never reroute a send (delivery admission handles active turns server-side).
+    const target = sessionIdRef.current;
+    const delivery = working ? getUiSettings().followUpBehavior : undefined;
+    const preferred = !session?.model ? parseModelRef(settings.defaultModel) : undefined;
+    const deliver = (targetSessionId: string) => sendMessage(
+      t,
+      modelRefFromValue(modelValue) ?? preferred,
+      agentValue || undefined,
+      {
+        targetSessionId,
+        ...(delivery ? { delivery } : {}),
+        dismissPending: true,
+        ...(profileValue ? { agentProfileId: profileValue } : {}),
+      },
+    );
+    if (target) {
+      void deliver(target);
+    } else if (activeProjectId) {
+      void createSession(activeProjectId).then(() => {
+        const created = getState().activeSessionId;
+        if (created) return deliver(created);
+      });
+    }
+    setText("");
+    inputRef.current?.replaceText("");
+    if (target) saveDraft(target, "");
+    setAcOpen(false);
+  }, [text, modelValue, agentValue, profileValue, noModels, working, activeProjectId, session?.model, settings.defaultModel]);
 
-  const groups = new Map<string, typeof models>();
-  for (const m of models) {
-    const g = groups.get(m.providerID) ?? [];
-    g.push(m);
-    groups.set(m.providerID, g);
-  }
-
-  // Default-model preference (Settings → Models) applies when the session has
-  // no model yet and the user hasn't picked one from the pill.
-  const prefRef = settings.defaultModel ? parseModelRef(settings.defaultModel) : undefined;
-  const prefDesc = prefRef
-    ? models.find((m) => m.providerID === prefRef.providerID && m.modelID === prefRef.modelID)
-    : undefined;
-
-  const send = useCallback(() => {
-    const t = text.trim();
-    if (!t || noModels || busy) return;
-    const explicit = modelRefFromValue(modelValue);
-    const fallback = !session?.model && prefDesc
-      ? { providerID: prefDesc.providerID, modelID: prefDesc.modelID }
-      : undefined;
-    setBusy(true);
-    void (async () => {
-      try {
-        if (!sessionId) {
-          if (!activeProjectId) return;
-          await createSession(activeProjectId);
-        }
-        await sendMessage(t, explicit ?? fallback, agentValue || undefined);
-        setText("");
-        setAcOpen(false);
-        requestAnimationFrame(autogrow);
-      } catch (err) {
-        setUiError(friendlyError("Couldn’t create a session", err));
-      } finally {
-        setBusy(false);
-      }
-    })();
-  }, [text, modelValue, agentValue, noModels, busy, sessionId, activeProjectId, session, prefDesc, autogrow]);
+  const applyCompletion = useCallback((item: AutocompleteItem) => {
+    const token = acTokenRef.current;
+    const h = inputRef.current;
+    if (!token || !h) return false;
+    const cur = h.getText();
+    const r = completeToken(cur, token, item.value);
+    h.replaceText(r.text, { anchor: r.caret });
+    setText(r.text);
+    setAcOpen(false);
+    h.focus();
+    return true;
+  }, []);
 
   const completeAutocomplete = useCallback(() => {
     if (!acOpen || acItems.length === 0) return false;
     const item = acItems[acIndex];
     if (!item) return false;
-    setText(item.value);
-    setAcOpen(false);
-    textareaRef.current?.focus();
-    return true;
-  }, [acOpen, acItems, acIndex]);
+    return applyCompletion(item);
+  }, [acOpen, acItems, acIndex, applyCompletion]);
 
-  const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
-    // Autocomplete navigation
+  const onKeyIntercept = (e: KeyboardEvent<HTMLTextAreaElement>, composing: boolean): boolean => {
+    // IME composition: never send, never navigate autocomplete, never hotkey.
+    if (composing) return false;
+    if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === "Enter") {
+      setFocusMode(true);
+      return true;
+    }
     if (acOpen) {
       if (e.key === "ArrowDown") {
-        e.preventDefault();
         setAcIndex((i) => (i + 1) % acItems.length);
-        return;
+        return true;
       }
       if (e.key === "ArrowUp") {
-        e.preventDefault();
         setAcIndex((i) => (i - 1 + acItems.length) % acItems.length);
-        return;
+        return true;
       }
       if (e.key === "Enter" || e.key === "Tab") {
-        if (completeAutocomplete()) {
-          e.preventDefault();
-          return;
-        }
+        if (completeAutocomplete()) return true;
       }
       if (e.key === "Escape") {
         setAcOpen(false);
-        return;
+        return true;
       }
     }
-
     if (e.key === "Enter") {
-      // Mod+Enter always sends; plain Enter sends only with "Send on Enter".
       if (e.metaKey || e.ctrlKey) {
-        e.preventDefault();
         send();
-        return;
+        return true;
       }
       if (settings.sendOnEnter && !e.shiftKey) {
-        e.preventDefault();
         send();
+        return true;
       }
     }
+    return false;
   };
 
-  // Update autocomplete when text changes
+  // Token-based autocomplete on committed text changes.
   const onTextChange = useCallback(
     (val: string) => {
       setText(val);
-      autogrow();
-      const firstToken = val.match(/^([\/#])(\S*)$/);
-      if (firstToken) {
-        const trigger = firstToken[1]!;
-        const prefix = firstToken[2]!;
-        if (trigger === "/") {
-          const items = filterCommands(commands, prefix);
-          setAcItems(items);
-          setAcType("cmd");
-          setAcIndex(0);
-          setAcOpen(items.length > 0);
-          return;
-        }
-        if (trigger === "#") {
-          const items = filterSnippets(snippets, prefix);
-          setAcItems(items);
-          setAcType("snip");
-          setAcIndex(0);
-          setAcOpen(items.length > 0);
-          return;
-        }
+      const caret = inputRef.current?.getSelection().end ?? val.length;
+      const token = activeToken(val, caret);
+      acTokenRef.current = token;
+      if (!token) { setAcOpen(false); return; }
+      if (token.kind === "command") {
+        const items = filterCommands(commands, token.value);
+        setAcItems(items);
+        setAcType("cmd");
+        setAcIndex(0);
+        setAcOpen(items.length > 0);
+        return;
       }
-      setAcOpen(false);
+      if (token.kind === "snippet") {
+        const items = filterSnippets(snippets, token.value);
+        setAcItems(items);
+        setAcType("snip");
+        setAcIndex(0);
+        setAcOpen(items.length > 0);
+        return;
+      }
+      // file mention: scored search shared with the palette; folders included
+      if (!activeProjectId || token.path.length < 1) { setAcOpen(false); return; }
+      const seq = ++fileSearchSeq.current;
+      void api.filesSearchScored(activeProjectId, token.path, 8, true).then((hits) => {
+        if (seq !== fileSearchSeq.current) return; // stale
+        const items = hits.map((h) => ({
+          label: `@${h.path}`,
+          detail: h.kind === "dir" ? "folder" : "file",
+          value: `@${h.path}${h.kind === "dir" ? "/" : " "}`,
+        }));
+        setAcItems(items);
+        setAcType("file");
+        setAcIndex(0);
+        setAcOpen(items.length > 0);
+      });
     },
-    [commands, snippets, autogrow],
+    [commands, snippets, activeProjectId],
   );
 
-  const sessionModelDesc = session?.model
-    ? models.find((m) => m.providerID === session.model!.providerID && m.modelID === session.model!.modelID)
-    : undefined;
-  const defaultModelLabel = session?.model
-    ? (sessionModelDesc?.name ?? session.model.modelID)
-    : prefDesc
-      ? (prefDesc.name || prefDesc.modelID)
-      : (models.length > 0 ? "Default model" : "No models");
-  const defaultAgentLabel = session?.agent ?? agents[0]?.name ?? "Agent";
+  const leading = renderSlot("composer.leading", { sessionId: session?.id });
+  const trailing = renderSlot("composer.trailing", { sessionId: session?.id });
 
-  const explicitRef = modelRefFromValue(modelValue);
-  const swatchProvider = explicitRef?.providerID
-    ?? session?.model?.providerID
-    ?? prefDesc?.providerID
-    ?? models[0]?.providerID
-    ?? "";
+  // Favorites float first (Settings > Providers & Models); picking records recency.
+  const modelPrefs = useModelPrefs();
+  const preferredModel = parseModelRef(settings.defaultModel);
+  const modelItems: PickerItem[] = [
+    { id: "", label: modelPickerDefaultLabel(session?.model, models, preferredModel), group: "" },
+    ...sortModels(models, modelPrefs).map((m) => {
+      const fav = isFavorite(modelPrefs, modelKey(m));
+      return {
+        id: JSON.stringify({ providerID: m.providerID, modelID: m.modelID }),
+        label: fav ? `★ ${m.name || m.modelID}` : m.name || m.modelID,
+        group: fav ? "Favorites" : m.providerID,
+        keywords: [m.providerID, m.modelID],
+      };
+    }),
+  ];
+  const pickModel = (value: string) => {
+    setModelValue(value);
+    const ref = modelRefFromValue(value);
+    if (ref) noteModelUsed(`${ref.providerID}/${ref.modelID}`);
+  };
+  const agentItems: PickerItem[] = [
+    { id: "", label: agentPickerDefaultLabel(session?.agent, agents), group: "" },
+    ...agents.map((a) => ({
+      id: a.name,
+      label: a.name,
+      group: "",
+      ...(a.description ? { detail: a.description } : {}),
+    })),
+  ];
 
-  const empty = model.messages.length === 0;
-  const sendLabel = working ? null : (
-    <button className="send" onClick={send} disabled={!text.trim() || noModels || busy}>
-      Send <span className="send-key">{settings.sendOnEnter ? "↵" : `${mod}↵`}</span>
-    </button>
-  );
+  // Pin/Edit from the model row: exactly one matching profile opens Edit,
+  // otherwise the form is seeded with the immutable provider/model pair.
+  const pinModel = (value: string) => {
+    const ref = modelRefFromValue(value);
+    if (!ref) return;
+    const matching = profiles.filter((p) => p.providerID === ref.providerID && p.modelID === ref.modelID);
+    if (matching.length === 1) setPinEdit(matching[0]!);
+    else {
+      const m = models.find((x) => x.providerID === ref.providerID && x.modelID === ref.modelID);
+      setPinSeed({ ...ref, name: m?.name || ref.modelID });
+    }
+  };
+  const profileItems: PickerItem[] = [
+    { id: "", label: "None", group: "" },
+    ...profiles.map((p) => ({
+      id: p.id,
+      label: p.name,
+      group: "",
+      detail: `${p.providerID}/${p.modelID}${p.agent ? ` · ${p.agent}` : ""}`,
+    })),
+  ];
 
-  const chips = (
+  const followUp = getUiSettings().followUpBehavior;
+  const starterChips = (
     <div className="starter-chips" aria-label="Suggestions">
-      {STARTERS.map(({ label, icon }) => (
+      {STARTERS.map((label) => (
         <button
           key={label}
           className="chip"
           onClick={() => {
             setText(label);
-            requestAnimationFrame(() => { autogrow(); textareaRef.current?.focus(); });
+            inputRef.current?.replaceText(label);
+            inputRef.current?.focus();
           }}
-        >{icon}{label}</button>
+        >
+          <span aria-hidden="true">✦</span>{label}
+        </button>
       ))}
     </div>
   );
 
-  const card = (
-    <div className="composer-card">
+  return (
+    <div className={variant === "hero" ? "composer-hero" : "composer"}>
+      <div
+        className="composer-card"
+        onDragOver={(e) => { const k = dragKind(e.dataTransfer); if (k) { e.preventDefault(); setDropHint(k); } }}
+        onDragLeave={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node)) setDropHint(null); }}
+        onDrop={(e) => {
+          const k = dragKind(e.dataTransfer);
+          setDropHint(null);
+          if (!k || !activeProjectId) return;
+          e.preventDefault();
+          void dropIntoSession(e.dataTransfer, activeProjectId);
+        }}
+      >
+      {dropHint && (
+        <div className="drop-hint">{dropHint === "path" ? "Attach to session" : "Drop to upload"}</div>
+      )}
+      {simple && (prefs.plugins.includes("multirun") || prefs.plugins.includes("fusion")) && (
+        <div className="chip-row">
+          {prefs.plugins.includes("multirun") && (
+            <button className="chip" onClick={() => setActiveView("multirun")}>Try 3 directions</button>
+          )}
+          {prefs.plugins.includes("fusion") && (
+            <button className="chip" onClick={() => setActiveView("fusion")}>Combine the best parts</button>
+          )}
+        </div>
+      )}
+      {noModels && (
+        <div className="composer-note" role="status">
+          No models available — check that the backend is running and configured.
+        </div>
+      )}
+      {session?.id && <QueuedMessageList sessionId={session.id} />}
       <div className="composer-input">
-        <textarea
-          ref={textareaRef}
+        <AdaptiveTextInput
+          ref={inputRef}
+          initialText={text}
           rows={3}
-          value={text}
-          placeholder="Ask Polyth to explore, build, or review…   @ files   / commands   # snippets"
-          onChange={(e) => onTextChange(e.target.value)}
-          onKeyDown={onKeyDown}
+          className="composer-editor"
+          ariaLabel="Message"
+          placeholder={simple
+            ? "Describe what you want — it gets built as you watch…"
+            : "Ask Polyth to explore, build, or review — / for commands, # for snippets, @ for files"}
+          onTextChange={onTextChange}
+          onKeyIntercept={onKeyIntercept}
         />
         {acOpen && acItems.length > 0 && (
           <div className="ac-popup">
-            {acType === "cmd" && <div className="ac-header">Commands</div>}
-            {acType === "snip" && <div className="ac-header">Snippets</div>}
-            {acItems.map((item, i) => (
-              <div
-                key={i}
-                className={`ac-item ${i === acIndex ? "ac-active" : ""}`}
-                onMouseDown={(e) => {
-                  e.preventDefault();
-                  setAcIndex(i);
-                  setText(item.value);
-                  setAcOpen(false);
-                  textareaRef.current?.focus();
-                }}
-                onMouseEnter={() => setAcIndex(i)}
-              >
-                <span className="ac-label">{item.label}</span>
-                <span className="ac-detail">{item.detail}</span>
-              </div>
-            ))}
+            <div className="ac-header">{acType === "cmd" ? "Commands" : acType === "snip" ? "Snippets" : "Files"}</div>
+            <div className="ac-list" role="listbox" aria-label={acType === "cmd" ? "Commands" : acType === "snip" ? "Snippets" : "Files"}>
+              {acItems.map((item, i) => (
+                <div
+                  key={i}
+                  role="option"
+                  aria-selected={i === acIndex}
+                  ref={i === acIndex ? (el) => el?.scrollIntoView({ block: "nearest" }) : null}
+                  className={`ac-item ${i === acIndex ? "ac-active" : ""}`}
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    setAcIndex(i);
+                    applyCompletion(item);
+                  }}
+                  onMouseEnter={() => setAcIndex(i)}
+                >
+                  <span className="ac-label">{item.label}</span>
+                  <span className="ac-detail">{item.detail}</span>
+                </div>
+              ))}
+            </div>
+            <div className="ac-footer">
+              <span><kbd>↑↓</kbd> navigate</span>
+              <span><kbd>↵</kbd> / <kbd>Tab</kbd> insert</span>
+              <span><kbd>Esc</kbd> dismiss</span>
+            </div>
           </div>
         )}
       </div>
-      <div className="composer-bar">
-        <span className="pill pill-select" title="Model">
-          <span className="swatch" style={{ background: providerColor(swatchProvider) }} />
-          <select value={modelValue} onChange={(e) => setModelValue(e.target.value)} aria-label="Model">
-            <option value="">{defaultModelLabel}</option>
-            {[...groups.entries()].map(([provider, ms]) => (
-              <optgroup key={provider} label={provider}>
-                {ms.map((m) => (
-                  <option key={m.modelID} value={JSON.stringify({ providerID: m.providerID, modelID: m.modelID })}>
-                    {m.name ?? m.modelID}
-                  </option>
-                ))}
-              </optgroup>
-            ))}
-          </select>
-          <svg className="pill-chev" width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M3.8 6.2 8 10.4l4.2-4.2" /></svg>
-        </span>
-        <span className="pill pill-select" title="Agent">
-          <span className="swatch agent" />
-          <select value={agentValue} onChange={(e) => setAgentValue(e.target.value)} aria-label="Agent">
-            <option value="">{defaultAgentLabel}</option>
-            {agents.map((a) => (
-              <option key={a.name} value={a.name}>
-                {a.name}
-                {a.description ? ` — ${a.description}` : ""}
-              </option>
-            ))}
-          </select>
-          <svg className="pill-chev" width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round"><path d="M3.8 6.2 8 10.4l4.2-4.2" /></svg>
-        </span>
-        {noModels && (
-          <span className="composer-notice">No models yet — OpenCode will fill this when a provider is configured.</span>
+      <div className="composer-bar composer-row">
+        {leading.map((n, i) => <Fragment key={i}>{n}</Fragment>)}
+        {!simple && !noModels && (
+          <Picker
+            label="Model" direction="up" items={modelItems} value={modelValue} onPick={pickModel}
+            trailingAction={{ label: "⚲", title: "Pin as profile (or edit the matching one)", onAction: pinModel }}
+          />
         )}
+        {!simple && agents.length > 0 && (
+          <Picker label="Agent" direction="up" items={agentItems} value={agentValue} onPick={setAgentValue} />
+        )}
+        {!simple && profiles.length > 0 && (
+          <Picker label="Profile" direction="up" items={profileItems} value={profileValue} onPick={setProfileValue} placeholder="None" />
+        )}
+        <button
+          className="icon-btn"
+          title="Focused editor (Mod+Shift+Enter)"
+          aria-label="Open focused editor"
+          onClick={() => setFocusMode(true)}
+        >⤢</button>
         <span className="header-spacer" />
+        {trailing.map((n, i) => <Fragment key={i}>{n}</Fragment>)}
         {working ? (
-          <button className="stop" onClick={() => void abortSession()}>Stop</button>
-        ) : sendLabel}
+          <>
+            <button className="send composer-delivery" onClick={() => send()} disabled={!text.trim() || noModels}
+              title={`Active turn — this message will ${followUp === "steer" ? "steer the current turn" : followUp === "interrupt" ? "interrupt, then send" : "queue until idle"}`}>
+              {followUp === "steer" ? "Steer" : followUp === "interrupt" ? "Interrupt" : "Queue"} <span className="send-key">{settings.sendOnEnter ? "↵" : `${modKeyLabel()}↵`}</span>
+            </button>
+            <button className="stop" onClick={() => void abortSession()}>
+              Stop
+            </button>
+          </>
+        ) : (
+          <button className="send" onClick={() => send()} disabled={!text.trim() || noModels}>
+            Send <span className="send-key">{settings.sendOnEnter ? "↵" : `${modKeyLabel()}↵`}</span>
+          </button>
+        )}
       </div>
-    </div>
-  );
-
-  if (variant === "hero") {
-    return (
-      <div className="composer-hero">
-        {card}
-        {chips}
+      {focusMode && (
+        <ComposerFocusDialog
+          initialText={inputRef.current?.getText() ?? text}
+          onCommit={(t) => {
+            setText(t);
+            inputRef.current?.replaceText(t);
+          }}
+          onClose={() => setFocusMode(false)}
+          onSend={(t) => send(t)}
+        />
+      )}
+      {(pinSeed || pinEdit) && (
+        <AgentProfileForm
+          {...(pinEdit ? { existing: pinEdit } : {})}
+          {...(pinSeed ? { seed: pinSeed } : {})}
+          lockModel
+          onClose={() => { setPinSeed(null); setPinEdit(null); }}
+          onSaved={(profile, use) => { if (use) setProfileValue(profile.id); }}
+        />
+      )}
       </div>
-    );
-  }
-
-  return (
-    <div className="composer">
-      {empty && !working && chips}
-      {card}
+      {(variant === "hero" || (model.messages.length === 0 && !working)) && starterChips}
     </div>
   );
 }

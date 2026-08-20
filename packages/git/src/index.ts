@@ -36,6 +36,12 @@ export interface GitCommit {
   date: string;
 }
 
+export interface GitGraphCommit extends GitCommit {
+  parents: string[];
+  /** Decorations: branch heads, remote heads, tags pointing at this commit. */
+  refs: string[];
+}
+
 export interface GitBranches {
   current: string | null;
   branches: Array<{ name: string; current: boolean; remote?: string }>;
@@ -58,6 +64,10 @@ export interface GitService {
   isRepo(root: string): Promise<boolean>;
   status(root: string): Promise<GitStatus>;
   diff(root: string, opts?: { path?: string; staged?: boolean }): Promise<{ path: string | null; diff: string }>;
+  /** All uncommitted changes (staged + unstaged) against HEAD; plain `git diff` on a fresh repo. */
+  diffHead(root: string): Promise<string>;
+  /** `git diff base...head` — the walkthrough snapshot for a commit range. */
+  diffRange(root: string, base: string, head: string): Promise<string>;
   stage(root: string, paths: string[]): Promise<void>;
   unstage(root: string, paths: string[]): Promise<void>;
   discard(root: string, paths: string[]): Promise<void>;
@@ -66,7 +76,26 @@ export interface GitService {
   createBranch(root: string, name: string, from?: string): Promise<void>;
   checkout(root: string, name: string): Promise<void>;
   log(root: string, limit?: number): Promise<GitCommit[]>;
+  /** History with parent SHAs and ref decorations, paginated for the graph view. */
+  graph(root: string, opts?: { limit?: number; skip?: number }): Promise<GitGraphCommit[]>;
   worktrees: WorktreeService;
+}
+
+/** Expand a folder into the concrete changed paths under it, per status view.
+ *  Pure — folder actions must act on what Git currently reports, never a glob. */
+export function pathsUnder(
+  status: Pick<GitStatus, "staged" | "unstaged" | "untracked" | "conflicted">,
+  folder: string,
+): { staged: string[]; unstaged: string[]; untracked: string[]; conflicted: string[] } {
+  const prefix = folder.endsWith("/") ? folder : folder ? `${folder}/` : "";
+  const under = (list: GitFileEntry[]) =>
+    list.filter((f) => prefix === "" || f.path.startsWith(prefix)).map((f) => f.path);
+  return {
+    staged: under(status.staged),
+    unstaged: under(status.unstaged),
+    untracked: under(status.untracked),
+    conflicted: under(status.conflicted),
+  };
 }
 
 export interface GitServiceOptions {
@@ -205,6 +234,22 @@ export function createGitService(opts: GitServiceOptions = {}): GitService {
       return { path, diff: untracked.stdout };
     },
 
+    async diffHead(root) {
+      const hasHead = (await run(root, ["rev-parse", "--verify", "HEAD"], true)).code === 0;
+      const r = await run(root, hasHead ? ["diff", "--no-color", "HEAD"] : ["diff", "--no-color"], true);
+      return r.stdout;
+    },
+
+    async diffRange(root, base, head) {
+      // refs are passed as separate argv entries — never interpolated into a shell
+      const safe = /^[\w./~^-]{1,128}$/;
+      if (!safe.test(base) || !safe.test(head)) {
+        throw Object.assign(new Error("invalid ref"), { code: "invalid-input" });
+      }
+      const r = await run(root, ["diff", "--no-color", `${base}...${head}`]);
+      return r.stdout;
+    },
+
     async stage(root, paths) {
       if (!paths.length) return;
       await run(root, ["add", "--", ...paths]);
@@ -263,6 +308,30 @@ export function createGitService(opts: GitServiceOptions = {}): GitService {
       return r.stdout.split("\n").filter(Boolean).map((line) => {
         const [sha, shortSha, subject, author, date] = line.split("\x1f");
         return { sha: sha ?? "", shortSha: shortSha ?? "", subject: subject ?? "", author: author ?? "", date: date ?? "" };
+      });
+    },
+
+    async graph(root, o = {}) {
+      const limit = Math.min(Math.max(1, o.limit ?? 40), 400);
+      const skip = Math.max(0, o.skip ?? 0);
+      const r = await run(root, [
+        "log", "--all", `-n${limit}`, `--skip=${skip}`, "--date-order",
+        "--format=%H%x1f%h%x1f%P%x1f%D%x1f%s%x1f%an%x1f%aI",
+      ], true);
+      if (r.code !== 0) return []; // e.g. repo without commits
+      return r.stdout.split("\n").filter(Boolean).map((line) => {
+        const [sha, shortSha, parents, decorations, subject, author, date] = line.split("\x1f");
+        const refs = (decorations ?? "")
+          .split(",").map((d) => d.trim().replace(/^HEAD -> /, "")).filter((d) => d && d !== "HEAD");
+        return {
+          sha: sha ?? "",
+          shortSha: shortSha ?? "",
+          parents: (parents ?? "").split(" ").filter(Boolean),
+          refs,
+          subject: subject ?? "",
+          author: author ?? "",
+          date: date ?? "",
+        };
       });
     },
 

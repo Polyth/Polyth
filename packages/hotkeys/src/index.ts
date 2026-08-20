@@ -5,6 +5,7 @@
 
 export type HotkeyAction =
   | "palette"
+  | "searchFiles"
   | "searchSessions"
   | "settings"
   | "newSession"
@@ -17,6 +18,7 @@ export const HOTKEYS_KEY = "polyth.hotkeys";
 
 export const HOTKEY_ACTIONS: ReadonlyArray<{ id: HotkeyAction; label: string }> = [
   { id: "palette", label: "Command palette" },
+  { id: "searchFiles", label: "Search files" },
   { id: "searchSessions", label: "Search sessions" },
   { id: "settings", label: "Settings" },
   { id: "newSession", label: "New session" },
@@ -28,7 +30,8 @@ export const HOTKEY_ACTIONS: ReadonlyArray<{ id: HotkeyAction; label: string }> 
 
 export const DEFAULT_KEYMAP: Record<HotkeyAction, string> = {
   palette: "mod+k",
-  searchSessions: "mod+p",
+  searchFiles: "mod+p",
+  searchSessions: "mod+shift+f",
   settings: "mod+,",
   newSession: "mod+n",
   focusComposer: "mod+i",

@@ -6,15 +6,56 @@ import { randomUUID } from "node:crypto";
 
 import { MODEL_VISIBLE_TYPES } from "@polyth/contracts";
 import type {
+  AgentProfile,
+  DeliveryMode,
   JsonObject,
   ModelMessage,
+  QueueItemDto,
   SessionEvent,
+  SessionFolderDto,
   SessionPersistence,
   SessionProjection,
+  WorkspaceLabel,
 } from "@polyth/contracts";
+
+/** Unresolved-request counters derived from durable events (never cached). */
+export interface AttentionCounts { questions: number; permissions: number }
+
+export interface SearchHit { sessionId: string; field: "message"; snippet: string }
 
 export interface Store extends SessionPersistence {
   exportJsonl(sessionId: string): Promise<string>;
+  // -- durable delivery queue (WP3) --
+  enqueue(sessionId: string, text: string, delivery: DeliveryMode): Promise<QueueItemDto>;
+  queueList(sessionId: string): Promise<QueueItemDto[]>;
+  /** Validates ids are an exact permutation for the session; positions update transactionally. */
+  queueReorder(sessionId: string, ids: string[]): Promise<QueueItemDto[]>;
+  queueRemove(sessionId: string, queueId: string): Promise<boolean>;
+  /** Pop the first item (FIFO); undefined when the queue is empty. */
+  queueShift(sessionId: string): Promise<QueueItemDto | undefined>;
+  deleteProjection(sessionId: string): Promise<void>;
+  // -- organization: folders + labels (WP5) --
+  folderList(projectId: string): Promise<SessionFolderDto[]>;
+  folderCreate(projectId: string, name: string, parentId?: string): Promise<SessionFolderDto>;
+  /** Stale expectedRevision → conflict; parent move validates same-project + acyclic. */
+  folderUpdate(id: string, patch: { name?: string; parentId?: string | null; position?: number }, expectedRevision: number): Promise<SessionFolderDto>;
+  /** Children reparent to the removed folder's parent. Returns false when absent. */
+  folderRemove(id: string): Promise<boolean>;
+  labelList(): Promise<WorkspaceLabel[]>;
+  labelCreate(name: string, color: string): Promise<WorkspaceLabel>;
+  labelUpdate(id: string, patch: { name?: string; color?: string; position?: number }, expectedRevision: number): Promise<WorkspaceLabel>;
+  labelRemove(id: string): Promise<boolean>;
+  // -- derived counters + search (WP5) --
+  attentionFor(sessionIds: string[]): Promise<Record<string, AttentionCounts>>;
+  /** Bounded LIKE search over message text; snippets are trimmed around the hit. */
+  searchEventText(q: string, limit?: number): Promise<SearchHit[]>;
+  // -- server-owned agent profiles (WP8) --
+  profileList(): Promise<AgentProfile[]>;
+  profileGet(id: string): Promise<AgentProfile | undefined>;
+  profileCreate(input: Omit<AgentProfile, "id" | "revision" | "createdAt" | "updatedAt">): Promise<AgentProfile>;
+  /** Stale expectedRevision → conflict. providerID/modelID stay immutable per profile. */
+  profileUpdate(id: string, patch: Partial<Omit<AgentProfile, "id" | "revision" | "createdAt" | "updatedAt">>, expectedRevision: number): Promise<AgentProfile>;
+  profileRemove(id: string): Promise<boolean>;
 }
 
 const EVENTS_COLS = [
@@ -57,6 +98,93 @@ export function createStore(dbPath: string): Store {
       data TEXT NOT NULL
     )
   `);
+
+  // Forward-only, transactional schema migrations. Reopening an old DB runs
+  // only the missing steps; reopening a new DB is a no-op.
+  db.exec(`CREATE TABLE IF NOT EXISTS schema_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL)`);
+  const getVersion = (): number => {
+    const row = db.prepare("SELECT value FROM schema_meta WHERE key = 'version'").get() as { value: string } | undefined;
+    return row ? Number(row.value) : 0;
+  };
+  const setVersion = (v: number): void => {
+    db.prepare(
+      "INSERT INTO schema_meta (key, value) VALUES ('version', ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+    ).run(String(v));
+  };
+  const MIGRATIONS: Array<() => void> = [
+    // v1: durable per-session delivery queue (WP3)
+    () => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS session_queue (
+          queue_id   TEXT PRIMARY KEY,
+          session_id TEXT NOT NULL,
+          position   INTEGER NOT NULL,
+          text       TEXT NOT NULL,
+          delivery   TEXT NOT NULL DEFAULT 'queue',
+          created_at INTEGER NOT NULL
+        )
+      `);
+      db.exec("CREATE INDEX IF NOT EXISTS idx_queue_session ON session_queue (session_id, position)");
+    },
+    // v2: session folders + workspace labels (WP5)
+    () => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS folders (
+          id         TEXT PRIMARY KEY,
+          project_id TEXT NOT NULL,
+          parent_id  TEXT,
+          name       TEXT NOT NULL,
+          position   INTEGER NOT NULL DEFAULT 0,
+          revision   INTEGER NOT NULL DEFAULT 1
+        )
+      `);
+      db.exec("CREATE INDEX IF NOT EXISTS idx_folders_project ON folders (project_id, position)");
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS labels (
+          id       TEXT PRIMARY KEY,
+          name     TEXT NOT NULL,
+          color    TEXT NOT NULL,
+          position INTEGER NOT NULL DEFAULT 0,
+          revision INTEGER NOT NULL DEFAULT 1
+        )
+      `);
+    },
+    // v3: server-owned agent profiles (WP8)
+    () => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS agent_profiles (
+          id          TEXT PRIMARY KEY,
+          name        TEXT NOT NULL,
+          provider_id TEXT NOT NULL,
+          model_id    TEXT NOT NULL,
+          agent       TEXT,
+          mode        TEXT,
+          thinking    TEXT,
+          features    TEXT NOT NULL DEFAULT '{}',
+          notes       TEXT,
+          icon        TEXT,
+          color       TEXT,
+          revision    INTEGER NOT NULL DEFAULT 1,
+          created_at  INTEGER NOT NULL,
+          updated_at  INTEGER NOT NULL
+        )
+      `);
+    },
+  ];
+  {
+    const current = getVersion();
+    for (let v = current; v < MIGRATIONS.length; v++) {
+      db.exec("BEGIN IMMEDIATE");
+      try {
+        MIGRATIONS[v]!();
+        setVersion(v + 1);
+        db.exec("COMMIT");
+      } catch (err) {
+        db.exec("ROLLBACK");
+        throw err;
+      }
+    }
+  }
 
   // ------------------------------------------------------------- append
 
@@ -211,6 +339,442 @@ export function createStore(dbPath: string): Store {
     return Promise.resolve(rows.map((r) => r.data).join("\n"));
   }
 
+  // ------------------------------------------------------------- delivery queue (WP3)
+
+  interface QueueRow {
+    queue_id: string;
+    session_id: string;
+    position: number;
+    text: string;
+    delivery: string;
+    created_at: number;
+  }
+
+  const rowToQueueItem = (r: QueueRow): QueueItemDto => ({
+    id: r.queue_id,
+    sessionId: r.session_id,
+    position: Number(r.position),
+    text: r.text,
+    delivery: (["normal", "steer", "queue", "interrupt"].includes(r.delivery) ? r.delivery : "queue") as DeliveryMode,
+    createdAt: Number(r.created_at),
+  });
+
+  async function enqueue(sessionId: string, text: string, delivery: DeliveryMode): Promise<QueueItemDto> {
+    const queueId = randomUUID();
+    const createdAt = Date.now();
+    let position = 0;
+    db.exec("BEGIN IMMEDIATE");
+    try {
+      const row = db
+        .prepare("SELECT COALESCE(MAX(position), -1) + 1 AS next FROM session_queue WHERE session_id = ?")
+        .get(sessionId) as { next: number };
+      position = Number(row.next);
+      db.prepare(
+        "INSERT INTO session_queue (queue_id, session_id, position, text, delivery, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+      ).run(queueId, sessionId, position, text, delivery, createdAt);
+      db.exec("COMMIT");
+    } catch (err) {
+      db.exec("ROLLBACK");
+      throw err;
+    }
+    return { id: queueId, sessionId, position, text, delivery, createdAt };
+  }
+
+  function queueList(sessionId: string): Promise<QueueItemDto[]> {
+    const rows = db
+      .prepare("SELECT * FROM session_queue WHERE session_id = ? ORDER BY position")
+      .all(sessionId) as unknown as QueueRow[];
+    return Promise.resolve(rows.map(rowToQueueItem));
+  }
+
+  async function queueReorder(sessionId: string, ids: string[]): Promise<QueueItemDto[]> {
+    db.exec("BEGIN IMMEDIATE");
+    try {
+      const rows = db
+        .prepare("SELECT queue_id FROM session_queue WHERE session_id = ?")
+        .all(sessionId) as { queue_id: string }[];
+      const existing = new Set(rows.map((r) => r.queue_id));
+      const submitted = new Set(ids);
+      if (existing.size !== submitted.size || ids.length !== submitted.size || [...existing].some((id) => !submitted.has(id))) {
+        throw Object.assign(new Error("ids must be an exact permutation of the session queue"), { code: "invalid-input" });
+      }
+      const upd = db.prepare("UPDATE session_queue SET position = ? WHERE queue_id = ? AND session_id = ?");
+      ids.forEach((id, i) => upd.run(i, id, sessionId));
+      db.exec("COMMIT");
+    } catch (err) {
+      db.exec("ROLLBACK");
+      throw err;
+    }
+    return queueList(sessionId);
+  }
+
+  function queueRemove(sessionId: string, queueId: string): Promise<boolean> {
+    const res = db
+      .prepare("DELETE FROM session_queue WHERE session_id = ? AND queue_id = ?")
+      .run(sessionId, queueId);
+    return Promise.resolve(Number(res.changes) > 0);
+  }
+
+  function queueShift(sessionId: string): Promise<QueueItemDto | undefined> {
+    let item: QueueItemDto | undefined;
+    db.exec("BEGIN IMMEDIATE");
+    try {
+      const row = db
+        .prepare("SELECT * FROM session_queue WHERE session_id = ? ORDER BY position LIMIT 1")
+        .get(sessionId) as QueueRow | undefined;
+      if (row) {
+        db.prepare("DELETE FROM session_queue WHERE queue_id = ?").run(row.queue_id);
+        item = rowToQueueItem(row);
+      }
+      db.exec("COMMIT");
+    } catch (err) {
+      db.exec("ROLLBACK");
+      throw err;
+    }
+    return Promise.resolve(item);
+  }
+
+  function deleteProjection(sessionId: string): Promise<void> {
+    db.prepare("DELETE FROM projections WHERE session_id = ?").run(sessionId);
+    return Promise.resolve();
+  }
+
+  // ------------------------------------------------------------- folders + labels (WP5)
+
+  interface FolderRow { id: string; project_id: string; parent_id: string | null; name: string; position: number; revision: number }
+  const rowToFolder = (r: FolderRow): SessionFolderDto => ({
+    id: r.id,
+    projectId: r.project_id,
+    ...(r.parent_id !== null ? { parentId: r.parent_id } : {}),
+    name: r.name,
+    position: Number(r.position),
+    revision: Number(r.revision),
+  });
+
+  const folderRow = (id: string): FolderRow | undefined =>
+    db.prepare("SELECT * FROM folders WHERE id = ?").get(id) as FolderRow | undefined;
+
+  /** True when `candidateAncestor` is `id` itself or any ancestor of `id`. */
+  const folderHasAncestor = (id: string, candidateAncestor: string): boolean => {
+    let cur: string | null = id;
+    for (let hops = 0; cur !== null && hops < 1000; hops++) {
+      if (cur === candidateAncestor) return true;
+      const row = folderRow(cur);
+      cur = row?.parent_id ?? null;
+    }
+    return false;
+  };
+
+  async function folderList(projectId: string): Promise<SessionFolderDto[]> {
+    const rows = db
+      .prepare("SELECT * FROM folders WHERE project_id = ? ORDER BY position, name")
+      .all(projectId) as unknown as FolderRow[];
+    return rows.map(rowToFolder);
+  }
+
+  async function folderCreate(projectId: string, name: string, parentId?: string): Promise<SessionFolderDto> {
+    const trimmed = name.trim();
+    if (!trimmed || trimmed.length > 120) throw Object.assign(new Error("folder name required (≤120 chars)"), { code: "invalid-input" });
+    if (parentId !== undefined) {
+      const parent = folderRow(parentId);
+      if (!parent) throw Object.assign(new Error("parent folder not found"), { code: "not-found" });
+      if (parent.project_id !== projectId) throw Object.assign(new Error("parent folder belongs to another project"), { code: "invalid-input" });
+    }
+    const id = randomUUID();
+    const pos = db.prepare("SELECT COALESCE(MAX(position), -1) + 1 AS next FROM folders WHERE project_id = ?").get(projectId) as { next: number };
+    db.prepare("INSERT INTO folders (id, project_id, parent_id, name, position, revision) VALUES (?, ?, ?, ?, ?, 1)")
+      .run(id, projectId, parentId ?? null, trimmed, Number(pos.next));
+    return rowToFolder(folderRow(id)!);
+  }
+
+  async function folderUpdate(
+    id: string,
+    patch: { name?: string; parentId?: string | null; position?: number },
+    expectedRevision: number,
+  ): Promise<SessionFolderDto> {
+    db.exec("BEGIN IMMEDIATE");
+    try {
+      const row = folderRow(id);
+      if (!row) throw Object.assign(new Error("folder not found"), { code: "not-found" });
+      if (Number(row.revision) !== expectedRevision) {
+        throw Object.assign(new Error("stale folder revision"), { code: "conflict" });
+      }
+      let name = row.name;
+      if (patch.name !== undefined) {
+        name = patch.name.trim();
+        if (!name || name.length > 120) throw Object.assign(new Error("folder name required (≤120 chars)"), { code: "invalid-input" });
+      }
+      let parentId = row.parent_id;
+      if (patch.parentId !== undefined) {
+        if (patch.parentId === null) {
+          parentId = null;
+        } else {
+          const parent = folderRow(patch.parentId);
+          if (!parent) throw Object.assign(new Error("parent folder not found"), { code: "not-found" });
+          if (parent.project_id !== row.project_id) {
+            throw Object.assign(new Error("cross-project folder moves are not allowed"), { code: "invalid-input" });
+          }
+          // Cycle guard: the new parent must not be the folder or its descendant.
+          if (folderHasAncestor(patch.parentId, id)) {
+            throw Object.assign(new Error("folder move would create a cycle"), { code: "invalid-input" });
+          }
+          parentId = patch.parentId;
+        }
+      }
+      const position = patch.position !== undefined ? patch.position : Number(row.position);
+      db.prepare("UPDATE folders SET name = ?, parent_id = ?, position = ?, revision = revision + 1 WHERE id = ?")
+        .run(name, parentId, position, id);
+      db.exec("COMMIT");
+    } catch (err) {
+      db.exec("ROLLBACK");
+      throw err;
+    }
+    return rowToFolder(folderRow(id)!);
+  }
+
+  async function folderRemove(id: string): Promise<boolean> {
+    let removed = false;
+    db.exec("BEGIN IMMEDIATE");
+    try {
+      const row = folderRow(id);
+      if (row) {
+        db.prepare("UPDATE folders SET parent_id = ?, revision = revision + 1 WHERE parent_id = ?").run(row.parent_id, id);
+        db.prepare("DELETE FROM folders WHERE id = ?").run(id);
+        removed = true;
+      }
+      db.exec("COMMIT");
+    } catch (err) {
+      db.exec("ROLLBACK");
+      throw err;
+    }
+    return removed;
+  }
+
+  interface LabelRow { id: string; name: string; color: string; position: number; revision: number }
+  const rowToLabel = (r: LabelRow): WorkspaceLabel => ({
+    id: r.id, name: r.name, color: r.color, position: Number(r.position), revision: Number(r.revision),
+  });
+
+  async function labelList(): Promise<WorkspaceLabel[]> {
+    const rows = db.prepare("SELECT * FROM labels ORDER BY position, name").all() as unknown as LabelRow[];
+    return rows.map(rowToLabel);
+  }
+
+  async function labelCreate(name: string, color: string): Promise<WorkspaceLabel> {
+    const trimmed = name.trim();
+    if (!trimmed || trimmed.length > 60) throw Object.assign(new Error("label name required (≤60 chars)"), { code: "invalid-input" });
+    if (!/^#[0-9a-fA-F]{3,8}$/.test(color)) throw Object.assign(new Error("label color must be a hex value"), { code: "invalid-input" });
+    const id = randomUUID();
+    const pos = db.prepare("SELECT COALESCE(MAX(position), -1) + 1 AS next FROM labels").get() as { next: number };
+    db.prepare("INSERT INTO labels (id, name, color, position, revision) VALUES (?, ?, ?, ?, 1)")
+      .run(id, trimmed, color, Number(pos.next));
+    const row = db.prepare("SELECT * FROM labels WHERE id = ?").get(id) as unknown as LabelRow;
+    return rowToLabel(row);
+  }
+
+  async function labelUpdate(
+    id: string,
+    patch: { name?: string; color?: string; position?: number },
+    expectedRevision: number,
+  ): Promise<WorkspaceLabel> {
+    db.exec("BEGIN IMMEDIATE");
+    try {
+      const row = db.prepare("SELECT * FROM labels WHERE id = ?").get(id) as LabelRow | undefined;
+      if (!row) throw Object.assign(new Error("label not found"), { code: "not-found" });
+      if (Number(row.revision) !== expectedRevision) throw Object.assign(new Error("stale label revision"), { code: "conflict" });
+      const name = patch.name !== undefined ? patch.name.trim() : row.name;
+      if (!name || name.length > 60) throw Object.assign(new Error("label name required (≤60 chars)"), { code: "invalid-input" });
+      const color = patch.color ?? row.color;
+      if (!/^#[0-9a-fA-F]{3,8}$/.test(color)) throw Object.assign(new Error("label color must be a hex value"), { code: "invalid-input" });
+      const position = patch.position ?? Number(row.position);
+      db.prepare("UPDATE labels SET name = ?, color = ?, position = ?, revision = revision + 1 WHERE id = ?")
+        .run(name, color, position, id);
+      db.exec("COMMIT");
+    } catch (err) {
+      db.exec("ROLLBACK");
+      throw err;
+    }
+    const row = db.prepare("SELECT * FROM labels WHERE id = ?").get(id) as unknown as LabelRow;
+    return rowToLabel(row);
+  }
+
+  async function labelRemove(id: string): Promise<boolean> {
+    const res = db.prepare("DELETE FROM labels WHERE id = ?").run(id);
+    return Number(res.changes) > 0;
+  }
+
+  // ------------------------------------------------------------- agent profiles (WP8)
+
+  interface ProfileRow {
+    id: string; name: string; provider_id: string; model_id: string;
+    agent: string | null; mode: string | null; thinking: string | null;
+    features: string; notes: string | null; icon: string | null; color: string | null;
+    revision: number; created_at: number; updated_at: number;
+  }
+  const rowToProfile = (r: ProfileRow): AgentProfile => ({
+    id: r.id,
+    name: r.name,
+    providerID: r.provider_id,
+    modelID: r.model_id,
+    ...(r.agent ? { agent: r.agent } : {}),
+    ...(r.mode ? { mode: r.mode } : {}),
+    ...(r.thinking ? { thinking: r.thinking } : {}),
+    features: safeFeatures(r.features),
+    ...(r.notes ? { notes: r.notes } : {}),
+    ...(r.icon ? { icon: r.icon } : {}),
+    ...(r.color ? { color: r.color } : {}),
+    revision: Number(r.revision),
+    createdAt: Number(r.created_at),
+    updatedAt: Number(r.updated_at),
+  });
+  const safeFeatures = (raw: string): Record<string, boolean> => {
+    try {
+      const v = JSON.parse(raw) as Record<string, unknown>;
+      const out: Record<string, boolean> = {};
+      for (const [k, val] of Object.entries(v)) if (typeof val === "boolean") out[k] = val;
+      return out;
+    } catch {
+      return {};
+    }
+  };
+  const profileRow = (id: string): ProfileRow | undefined =>
+    db.prepare("SELECT * FROM agent_profiles WHERE id = ?").get(id) as unknown as ProfileRow | undefined;
+
+  async function profileList(): Promise<AgentProfile[]> {
+    const rows = db.prepare("SELECT * FROM agent_profiles ORDER BY name").all() as unknown as ProfileRow[];
+    return rows.map(rowToProfile);
+  }
+
+  async function profileGet(id: string): Promise<AgentProfile | undefined> {
+    const row = profileRow(id);
+    return row ? rowToProfile(row) : undefined;
+  }
+
+  async function profileCreate(
+    input: Omit<AgentProfile, "id" | "revision" | "createdAt" | "updatedAt">,
+  ): Promise<AgentProfile> {
+    const name = input.name.trim();
+    if (!name || name.length > 80) throw Object.assign(new Error("profile name required (≤80 chars)"), { code: "invalid-input" });
+    if (!input.providerID || !input.modelID) throw Object.assign(new Error("providerID and modelID are required"), { code: "invalid-input" });
+    const id = randomUUID();
+    const now = Date.now();
+    db.prepare(
+      `INSERT INTO agent_profiles (id, name, provider_id, model_id, agent, mode, thinking, features, notes, icon, color, revision, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?)`,
+    ).run(
+      id, name, input.providerID, input.modelID,
+      input.agent ?? null, input.mode ?? null, input.thinking ?? null,
+      JSON.stringify(input.features ?? {}), input.notes ?? null, input.icon ?? null, input.color ?? null,
+      now, now,
+    );
+    return rowToProfile(profileRow(id)!);
+  }
+
+  async function profileUpdate(
+    id: string,
+    patch: Partial<Omit<AgentProfile, "id" | "revision" | "createdAt" | "updatedAt">>,
+    expectedRevision: number,
+  ): Promise<AgentProfile> {
+    db.exec("BEGIN IMMEDIATE");
+    try {
+      const row = profileRow(id);
+      if (!row) throw Object.assign(new Error("profile not found"), { code: "not-found" });
+      if (Number(row.revision) !== expectedRevision) throw Object.assign(new Error("stale profile revision"), { code: "conflict" });
+      const name = patch.name !== undefined ? patch.name.trim() : row.name;
+      if (!name || name.length > 80) throw Object.assign(new Error("profile name required (≤80 chars)"), { code: "invalid-input" });
+      db.prepare(
+        `UPDATE agent_profiles SET name = ?, provider_id = ?, model_id = ?, agent = ?, mode = ?, thinking = ?,
+         features = ?, notes = ?, icon = ?, color = ?, revision = revision + 1, updated_at = ? WHERE id = ?`,
+      ).run(
+        name,
+        patch.providerID ?? row.provider_id,
+        patch.modelID ?? row.model_id,
+        patch.agent !== undefined ? patch.agent || null : row.agent,
+        patch.mode !== undefined ? patch.mode || null : row.mode,
+        patch.thinking !== undefined ? patch.thinking || null : row.thinking,
+        patch.features !== undefined ? JSON.stringify(patch.features) : row.features,
+        patch.notes !== undefined ? patch.notes || null : row.notes,
+        patch.icon !== undefined ? patch.icon || null : row.icon,
+        patch.color !== undefined ? patch.color || null : row.color,
+        Date.now(), id,
+      );
+      db.exec("COMMIT");
+    } catch (err) {
+      db.exec("ROLLBACK");
+      throw err;
+    }
+    return rowToProfile(profileRow(id)!);
+  }
+
+  async function profileRemove(id: string): Promise<boolean> {
+    const res = db.prepare("DELETE FROM agent_profiles WHERE id = ?").run(id);
+    return Number(res.changes) > 0;
+  }
+
+  // ------------------------------------------------------------- attention + search (WP5)
+
+  async function attentionFor(sessionIds: string[]): Promise<Record<string, AttentionCounts>> {
+    const out: Record<string, AttentionCounts> = {};
+    if (sessionIds.length === 0) return out;
+    const placeholders = sessionIds.map(() => "?").join(",");
+    const rows = db
+      .prepare(
+        `SELECT session_id, type, json_extract(data, '$.requestId') AS rid FROM events
+         WHERE type IN ('permission/requested','permission/resolved','question/asked','question/answered')
+           AND session_id IN (${placeholders}) ORDER BY seq`,
+      )
+      .all(...sessionIds) as Array<{ session_id: string; type: string; rid: string | null }>;
+    const open = new Map<string, { q: Set<string>; p: Set<string> }>();
+    for (const r of rows) {
+      if (!r.rid) continue;
+      let s = open.get(r.session_id);
+      if (!s) open.set(r.session_id, (s = { q: new Set(), p: new Set() }));
+      if (r.type === "permission/requested") s.p.add(r.rid);
+      else if (r.type === "permission/resolved") s.p.delete(r.rid);
+      else if (r.type === "question/asked") s.q.add(r.rid);
+      else if (r.type === "question/answered") s.q.delete(r.rid);
+    }
+    for (const id of sessionIds) {
+      const s = open.get(id);
+      out[id] = { questions: s?.q.size ?? 0, permissions: s?.p.size ?? 0 };
+    }
+    return out;
+  }
+
+  const SNIPPET_RADIUS = 40;
+
+  async function searchEventText(q: string, limit = 50): Promise<SearchHit[]> {
+    const needle = q.trim();
+    if (!needle) return [];
+    const like = `%${needle.replace(/[%_]/g, (c) => `\\${c}`)}%`;
+    const rows = db
+      .prepare(
+        `SELECT session_id, data FROM events
+         WHERE type IN ('user/message','assistant/message') AND data LIKE ? ESCAPE '\\'
+         ORDER BY time DESC LIMIT ?`,
+      )
+      .all(like, limit * 4) as Array<{ session_id: string; data: string }>;
+    const out: SearchHit[] = [];
+    const perSession = new Map<string, number>();
+    for (const r of rows) {
+      if (out.length >= limit) break;
+      const count = perSession.get(r.session_id) ?? 0;
+      if (count >= 2) continue; // at most 2 snippets per session
+      let text = "";
+      try {
+        text = String((JSON.parse(r.data) as { text?: string }).text ?? "");
+      } catch { continue; }
+      const at = text.toLowerCase().indexOf(needle.toLowerCase());
+      if (at < 0) continue;
+      const start = Math.max(0, at - SNIPPET_RADIUS);
+      const end = Math.min(text.length, at + needle.length + SNIPPET_RADIUS);
+      const snippet = `${start > 0 ? "…" : ""}${text.slice(start, end).replace(/\s+/g, " ")}${end < text.length ? "…" : ""}`;
+      out.push({ sessionId: r.session_id, field: "message", snippet });
+      perSession.set(r.session_id, count + 1);
+    }
+    return out;
+  }
+
   function close(): Promise<void> {
     db.close();
     return Promise.resolve();
@@ -225,6 +789,27 @@ export function createStore(dbPath: string): Store {
     projection,
     projections,
     exportJsonl,
+    enqueue,
+    queueList,
+    queueReorder,
+    queueRemove,
+    queueShift,
+    deleteProjection,
+    folderList,
+    folderCreate,
+    folderUpdate,
+    folderRemove,
+    labelList,
+    labelCreate,
+    labelUpdate,
+    labelRemove,
+    attentionFor,
+    searchEventText,
+    profileList,
+    profileGet,
+    profileCreate,
+    profileUpdate,
+    profileRemove,
     close,
   };
 }

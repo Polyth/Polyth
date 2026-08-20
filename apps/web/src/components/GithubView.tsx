@@ -1,14 +1,17 @@
 // GitHub view: repo card + issues/PRs lists over the gh CLI. Fails soft with
-// the reason (gh missing, signed out, no GitHub remote).
+// the reason (gh missing, signed out, no GitHub remote). Selecting a PR opens
+// the detail surface (overview/files/checks/comments).
 import { useEffect, useState } from "react";
 import { api, type GithubIssueDto, type GithubPrDto, type GithubStatusDto } from "../api.ts";
 import { useStore } from "../store.ts";
 import { requestComposerInsert } from "../composerInsert.ts";
 import { setActiveView } from "../store.ts";
+import PullRequestView from "./PullRequestView.tsx";
+import EmptyState from "./EmptyState.tsx";
 
 type Tab = "issues" | "prs";
 
-function ItemRow({ item, kind }: { item: GithubIssueDto | GithubPrDto; kind: Tab }) {
+function ItemRow({ item, kind, onOpen }: { item: GithubIssueDto | GithubPrDto; kind: Tab; onOpen?: (n: number) => void }) {
   const pr = kind === "prs" ? (item as GithubPrDto) : null;
   const ref = `${kind === "prs" ? "PR" : "issue"} #${item.number}`;
   return (
@@ -21,6 +24,9 @@ function ItemRow({ item, kind }: { item: GithubIssueDto | GithubPrDto; kind: Tab
       </a>
       {pr && <span className="gh-branch mono">{pr.headRefName}</span>}
       <span className="gh-meta">{item.author}{item.updatedAt ? ` · ${new Date(item.updatedAt).toLocaleDateString()}` : ""}</span>
+      {pr && onOpen && (
+        <button className="small-btn" title="Open PR details, checks, and comments" onClick={() => onOpen(item.number)}>Details</button>
+      )}
       <button
         className="small-btn"
         title="Ask about this in the session composer"
@@ -41,6 +47,7 @@ export default function GithubView() {
   const [prs, setPrs] = useState<GithubPrDto[]>([]);
   const [reason, setReason] = useState("");
   const [loading, setLoading] = useState(false);
+  const [openPr, setOpenPr] = useState<number | null>(null);
 
   useEffect(() => {
     if (!projectId) return;
@@ -64,7 +71,15 @@ export default function GithubView() {
     return () => { stale = true; };
   }, [projectId]);
 
-  if (!projectId) return <div className="view-page"><div className="view-empty">Open a project to browse its GitHub repo.</div></div>;
+  if (!projectId) return <EmptyState title="No project selected" description="Open a project to browse its GitHub repository." />;
+
+  if (openPr !== null) {
+    return (
+      <div className="view-page">
+        <PullRequestView number={openPr} onClose={() => setOpenPr(null)} />
+      </div>
+    );
+  }
 
   const items = tab === "issues" ? issues : prs;
 
@@ -76,12 +91,10 @@ export default function GithubView() {
       </div>
 
       {status && !status.installed && (
-        <div className="view-empty">
-          GitHub CLI not found. Install <code>gh</code> from cli.github.com, then run <code>gh auth login</code>.
-        </div>
+        <EmptyState title="GitHub CLI not found" description="Install gh from cli.github.com, then authenticate with gh auth login." />
       )}
       {status && status.installed && !status.repo && (
-        <div className="view-empty">{reason || "No GitHub repository detected for this project."}</div>
+        <EmptyState title="No GitHub repository" description={reason || "No GitHub repository was detected for this project."} />
       )}
 
       {status?.repo && (
@@ -105,13 +118,15 @@ export default function GithubView() {
             <button className={tab === "prs" ? "on" : ""} onClick={() => setTab("prs")}>Pull requests ({prs.length})</button>
           </div>
 
-          {loading && <div className="view-empty">Loading…</div>}
-          {!loading && reason && items.length === 0 && <div className="view-empty">{reason}</div>}
+          {loading && <div className="set-muted">Loading repository activity…</div>}
+          {!loading && reason && items.length === 0 && <EmptyState title="Couldn’t load GitHub data" description={reason} />}
           {!loading && !reason && items.length === 0 && (
-            <div className="view-empty">No open {tab === "issues" ? "issues" : "pull requests"}.</div>
+            <EmptyState title={`No open ${tab === "issues" ? "issues" : "pull requests"}`} description="New repository activity will appear here." />
           )}
           <div className="gh-list">
-            {items.map((it) => <ItemRow key={`${tab}-${it.number}`} item={it} kind={tab} />)}
+            {items.map((it) => (
+              <ItemRow key={`${tab}-${it.number}`} item={it} kind={tab} {...(tab === "prs" ? { onOpen: setOpenPr } : {})} />
+            ))}
           </div>
         </>
       )}

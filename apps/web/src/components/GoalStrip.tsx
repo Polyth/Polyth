@@ -3,6 +3,7 @@ import { useState, useEffect, useCallback } from "react";
 import { api, type GoalState } from "../api.ts";
 import { useStore } from "../store.ts";
 import { goalChecklist } from "../utils.ts";
+import EmptyState from "./EmptyState.tsx";
 
 export function GoalStrip({ forceOpen = false }: { forceOpen?: boolean }) {
   const activeSessionId = useStore((s) => s.activeSessionId);
@@ -36,7 +37,11 @@ export function GoalStrip({ forceOpen = false }: { forceOpen?: boolean }) {
     if (model && model.type.startsWith("goal/")) void refresh();
   }, [model, refresh]);
 
-  if (!goal) return forceOpen ? <div className="view-empty">No goal attached to this session.</div> : null;
+  if (!goal) {
+    return forceOpen
+      ? <EmptyState title="No goal attached" description="Attach an objective from the session actions to track progress here." />
+      : null;
+  }
 
   const pause = async () => { setBusy(true); await api.goalPause(activeSessionId!); setBusy(false); void refresh(); };
   const resume = async () => { setBusy(true); await api.goalResume(activeSessionId!); setBusy(false); void refresh(); };

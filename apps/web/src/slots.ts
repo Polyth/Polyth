@@ -9,12 +9,16 @@ export interface SlotItem {
   id: string;
   order: number;
   render: SlotRender;
+  /** Optional descriptor payload (e.g. settingsItems for item-level search). */
+  meta?: Record<string, unknown>;
 }
 
 const registry = new Map<UiSlot, SlotItem[]>();
 
-export function registerSlot(slot: UiSlot, id: string, render: SlotRender, order = 0): () => void {
-  const item: SlotItem = { id, order, render };
+export function registerSlot(
+  slot: UiSlot, id: string, render: SlotRender, order = 0, meta?: Record<string, unknown>,
+): () => void {
+  const item: SlotItem = { id, order, render, ...(meta ? { meta } : {}) };
   const list = registry.get(slot) ?? [];
   registry.set(slot, [...list, item]);
   return () => {

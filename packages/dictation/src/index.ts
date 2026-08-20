@@ -1,6 +1,14 @@
 // Voice: dictation (speech→text) and read-aloud (text→speech) built on the
 // browser Web Speech API — no npm deps, no audio leaves the machine beyond
 // what the browser engine does. Pure helpers here; the web app owns DOM glue.
+// Server-authoritative streaming dictation (WP15) lives in ./streaming.ts.
+
+export {
+  createDictationService, createChunkBuffer, DICTATION_FORMAT,
+  type DictationFormat, type DictationSessionDto, type DictationChunkResult,
+  type DictationService, type DictationServiceOptions,
+  type SttAdapter, type SttStream, type ChunkBuffer, type BufferedChunk,
+} from "./streaming.ts";
 
 export interface VoicePrefs {
   /** Show the mic button and allow dictation. */

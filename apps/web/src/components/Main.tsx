@@ -4,6 +4,7 @@ import Composer from "./Composer.tsx";
 import PermissionBanner from "./PermissionBanner.tsx";
 import QuestionCards from "./QuestionCards.tsx";
 import { GoalStrip } from "./GoalStrip.tsx";
+import WorkStatus, { TrackerPills } from "./WorkStatus.tsx";
 import ProjectForm from "./ProjectForm.tsx";
 import MultiRunView from "./MultiRunView.tsx";
 import FusionView from "./FusionView.tsx";
@@ -12,6 +13,9 @@ import GitView from "./GitView.tsx";
 import GoalsView from "./GoalsView.tsx";
 import WalkthroughView from "./WalkthroughView.tsx";
 import TerminalView from "./TerminalView.tsx";
+import EditorView from "./EditorView.tsx";
+import ScheduleView from "./ScheduleView.tsx";
+import GithubView from "./GithubView.tsx";
 import { useActiveModel, useStore } from "../store.ts";
 import { addProject, createProject } from "../init.ts";
 import { shortcutLabel } from "../settings.ts";
@@ -52,13 +56,16 @@ export default function Main() {
   const model = useActiveModel();
 
   // Project-level views work without an open session.
-  if (!sessionId && (view === "preview" || view === "git" || view === "terminal")) {
+  if (!sessionId && (view === "files" || view === "preview" || view === "git" || view === "terminal" || view === "schedule" || view === "github")) {
     return (
       <main className="main">
         <Header />
+        {view === "files" && <EditorView />}
         {view === "preview" && <PreviewView />}
         {view === "git" && <GitView />}
         {view === "terminal" && <TerminalView />}
+        {view === "schedule" && <ScheduleView />}
+        {view === "github" && <GithubView />}
       </main>
     );
   }
@@ -87,9 +94,12 @@ export default function Main() {
   if (view === "multirun") return <main className="main"><Header /><MultiRunView /></main>;
   if (view === "fusion") return <main className="main"><Header /><FusionView /></main>;
   if (view === "walkthrough") return <main className="main"><Header /><WalkthroughView /></main>;
+  if (view === "files") return <main className="main"><Header /><EditorView /></main>;
   if (view === "preview") return <main className="main"><Header /><PreviewView /></main>;
   if (view === "git") return <main className="main"><Header /><GitView /></main>;
   if (view === "terminal") return <main className="main"><Header /><TerminalView /></main>;
+  if (view === "schedule") return <main className="main"><Header /><ScheduleView /></main>;
+  if (view === "github") return <main className="main"><Header /><GithubView /></main>;
 
   // Fresh state: no session yet, or an open session with nothing sent.
   if (!sessionId || model.messages.length === 0) {
@@ -109,10 +119,12 @@ export default function Main() {
       <Header />
       <div className="timeline-wrap">
         <GoalStrip />
+        <WorkStatus model={model} />
         <Timeline model={model} />
       </div>
       {pendingQuestions.length > 0 && <QuestionCards questions={pendingQuestions} />}
       {pendingPermissions.length > 0 && <PermissionBanner permissions={pendingPermissions} />}
+      <TrackerPills model={model} />
       <Composer />
     </main>
   );

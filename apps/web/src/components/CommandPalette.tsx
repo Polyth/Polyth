@@ -1,152 +1,194 @@
-// Cmd/Ctrl+K command palette: fuzzy filter, arrow keys + Enter, Escape closes.
-import { useEffect, useMemo, useRef, useState } from "react";
-import { getState, setActiveView, type AppView } from "../store.ts";
-import { createSession, exportSessionMarkdown, forkSession } from "../init.ts";
-import { shortcutLabel } from "../settings.ts";
+// Unified palette (WP13): commands, projects, sessions, and files in one box.
+// Mod+P opens file-focused mode; `is:archived` reveals archived sessions.
+import { Fragment, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import { commandHint, filterPalette, listCommands, type PaletteCommand } from "../commands.ts";
+import { api, type FileSearchHitDto, type WorkspaceSearchItemDto } from "../api.ts";
+import { activateProject, openEditorFile, setOverlay, setUiError, useStore } from "../store.ts";
+import { openSession } from "../init.ts";
+import { pluginOn } from "../prefs.ts";
+import { announce } from "./a11y/live.tsx";
 
-interface Command {
-  id: string;
-  label: string;
-  hint?: string;
-  run: () => void;
+type Entry =
+  | { kind: "cmd"; id: string; cmd: PaletteCommand }
+  | { kind: "workspace"; id: string; item: WorkspaceSearchItemDto }
+  | { kind: "file"; id: string; hit: FileSearchHitDto };
+
+/** Pull an `is:archived` token out of the raw query. */
+export function parseQuery(raw: string): { text: string; archived: boolean } {
+  const archived = /(^|\s)is:archived(\s|$)/i.test(raw);
+  return { text: raw.replace(/(^|\s)is:archived(?=\s|$)/gi, " ").trim(), archived };
 }
 
-// Loose subsequence match: every query char appears in order.
-function fuzzyMatch(query: string, target: string): boolean {
-  const q = query.toLowerCase();
-  const t = target.toLowerCase();
-  let i = 0;
-  for (const ch of t) {
-    if (ch === q[i]) i++;
-    if (i === q.length) return true;
-  }
-  return q.length === 0;
-}
+export default function CommandPalette() {
+  const [q, setQ] = useState("");
+  const [i, setI] = useState(0);
+  const [files, setFiles] = useState<FileSearchHitDto[]>([]);
+  const [workspaces, setWorkspaces] = useState<WorkspaceSearchItemDto[]>([]);
+  const input = useRef<HTMLInputElement>(null);
+  const seq = useRef(0);
+  const projectId = useStore((s) => s.activeProjectId);
+  const mode = useStore((s) => s.paletteMode);
+  const filesMode = mode === "files";
+  const { text, archived } = useMemo(() => parseQuery(q), [q]);
 
-const VIEWS: Array<[AppView, string]> = [
-  ["session", "Chat"],
-  ["git", "Git"],
-  ["terminal", "Terminal"],
-  ["preview", "Preview"],
-  ["goals", "Goals"],
-  ["multirun", "Multi-run"],
-  ["fusion", "Fusion"],
-  ["walkthrough", "Walkthrough"],
-];
+  const cmds = useMemo(
+    () => (filesMode ? [] : filterPalette(listCommands(), text)),
+    [filesMode, text],
+  );
+  useEffect(() => { input.current?.focus(); }, []);
+  useEffect(() => { setI(0); }, [q]);
 
-function buildCommands(onToggleRail: () => void, close: () => void): Command[] {
-  const wrap = (fn: () => void) => () => { close(); fn(); };
-  const cmds: Command[] = [
-    {
-      id: "new-session",
-      label: "New session",
-      run: wrap(() => {
-        const pid = getState().activeProjectId;
-        if (pid) void createSession(pid);
-      }),
-    },
-    {
-      id: "open-project",
-      label: "Open project",
-      run: wrap(() => window.dispatchEvent(new CustomEvent("polyth:open-project"))),
-    },
-    {
-      id: "open-settings",
-      label: "Open settings",
-      hint: shortcutLabel(","),
-      run: wrap(() => window.dispatchEvent(new CustomEvent("polyth:open-settings"))),
-    },
-    ...VIEWS.map(([view, label]): Command => ({
-      id: `view-${view}`,
-      label: `Go to ${label}`,
-      hint: "View",
-      run: wrap(() => setActiveView(view)),
-    })),
-    { id: "toggle-rail", label: "Toggle right rail", run: wrap(onToggleRail) },
-    {
-      id: "fork",
-      label: "Fork session",
-      run: wrap(() => {
-        const sid = getState().activeSessionId;
-        if (sid) void forkSession(sid).catch(() => {});
-      }),
-    },
-    { id: "export", label: "Export session as Markdown", run: wrap(exportSessionMarkdown) },
-    {
-      id: "focus-composer",
-      label: "Focus composer",
-      run: wrap(() => {
-        setActiveView("session");
-        window.dispatchEvent(new CustomEvent("polyth:composer-focus"));
-      }),
-    },
-  ];
-  return cmds;
-}
-
-export default function CommandPalette({ onToggleRail }: { onToggleRail: () => void }) {
-  const [open, setOpen] = useState(false);
-  const [query, setQuery] = useState("");
-  const [index, setIndex] = useState(0);
-  const inputRef = useRef<HTMLInputElement>(null);
-
+  // Debounced remote searches; stale responses are dropped by sequence.
   useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
-        e.preventDefault();
-        setOpen((v) => !v);
-        setQuery("");
-        setIndex(0);
+    const mySeq = ++seq.current;
+    const wantFiles = pluginOn("files") && !!projectId && text.length >= (filesMode ? 1 : 2);
+    // `is:archived` alone lists recent archived sessions (server-bounded).
+    const wantWorkspaces = !filesMode && (archived || text.length >= 2);
+    if (!wantFiles) setFiles([]);
+    if (!wantWorkspaces) setWorkspaces([]);
+    if (!wantFiles && !wantWorkspaces) return;
+    const h = setTimeout(() => {
+      if (wantFiles) {
+        void api.filesSearchScored(projectId!, text, filesMode ? 20 : 8).then((hits) => {
+          if (mySeq === seq.current) setFiles(hits);
+        });
       }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, []);
+      if (wantWorkspaces) {
+        void api.searchWorkspaces(text, 10, archived).then((items) => {
+          if (mySeq === seq.current) setWorkspaces(items);
+        });
+      }
+    }, 150);
+    return () => clearTimeout(h);
+  }, [text, archived, filesMode, projectId]);
 
-  useEffect(() => {
-    if (open) inputRef.current?.focus();
-  }, [open]);
-
-  const commands = useMemo(() => buildCommands(onToggleRail, () => setOpen(false)), [onToggleRail]);
-  const filtered = useMemo(
-    () => commands.filter((c) => fuzzyMatch(query.trim(), c.label)),
-    [commands, query],
+  const entries = useMemo<Entry[]>(
+    () => [
+      ...cmds.map((c): Entry => ({ kind: "cmd", id: c.id, cmd: c })),
+      ...workspaces.map((w): Entry => ({ kind: "workspace", id: `${w.kind}:${w.id}`, item: w })),
+      ...files.map((f): Entry => ({ kind: "file", id: `file:${f.path}`, hit: f })),
+    ],
+    [cmds, workspaces, files],
   );
 
-  if (!open) return null;
-
-  const onKeyDown = (e: React.KeyboardEvent) => {
-    if (e.key === "Escape") { setOpen(false); return; }
-    if (e.key === "ArrowDown") { e.preventDefault(); setIndex((i) => (i + 1) % Math.max(1, filtered.length)); return; }
-    if (e.key === "ArrowUp") { e.preventDefault(); setIndex((i) => (i - 1 + Math.max(1, filtered.length)) % Math.max(1, filtered.length)); return; }
-    if (e.key === "Enter") { e.preventDefault(); filtered[Math.min(index, filtered.length - 1)]?.run(); }
+  const run = (entry: Entry) => {
+    setOverlay(null);
+    if (entry.kind === "cmd") {
+      entry.cmd.run();
+    } else if (entry.kind === "workspace") {
+      // Capture ids now: activation must not race a store update mid-switch.
+      const { kind, id } = entry.item;
+      if (kind === "project") {
+        activateProject(id);
+      } else {
+        // openSession switches the owning project first, atomically.
+        void openSession(id).catch(() => {
+          announce("That session no longer exists");
+          setUiError("That session no longer exists.");
+        });
+      }
+    } else {
+      openEditorFile(entry.hit.path);
+    }
+  };
+  const onKey = (e: KeyboardEvent<HTMLInputElement>) => {
+    if (e.nativeEvent.isComposing || e.keyCode === 229) return; // IME safety
+    if (e.key === "ArrowDown") { e.preventDefault(); setI((n) => (n + 1) % Math.max(entries.length, 1)); }
+    else if (e.key === "ArrowUp") { e.preventDefault(); setI((n) => (n - 1 + entries.length) % Math.max(entries.length, 1)); }
+    else if (e.key === "Enter" && entries[i]) { e.preventDefault(); run(entries[i]!); }
+    else if (e.key === "Escape") setOverlay(null);
   };
 
+  const groupOf = (entry: Entry): string => {
+    if (entry.kind === "cmd") return entry.cmd.group ?? "";
+    if (entry.kind === "workspace") return entry.item.kind === "project" ? "Projects" : "Sessions";
+    return "Files";
+  };
+
+  const dirOf = (p: string): string => {
+    const idx = p.lastIndexOf("/");
+    return idx < 0 ? "" : p.slice(0, idx);
+  };
+  const baseOf = (p: string): string => p.slice(p.lastIndexOf("/") + 1);
+
   return (
-    <div className="palette-overlay" onMouseDown={(e) => { if (e.target === e.currentTarget) setOpen(false); }}>
-      <div className="palette" role="dialog" aria-label="Command palette">
+    <div className="scrim palette-overlay" onMouseDown={(e) => { if (e.target === e.currentTarget) setOverlay(null); }}>
+      <div
+        className="palette"
+        onMouseDown={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Command palette"
+        aria-describedby="palette-close-hint"
+      >
         <input
-          ref={inputRef}
+          ref={input}
           className="palette-input"
-          value={query}
-          placeholder="Type a command…"
-          onChange={(e) => { setQuery(e.target.value); setIndex(0); }}
-          onKeyDown={onKeyDown}
+          value={q}
+          role="combobox"
+          aria-expanded={entries.length > 0}
+          aria-controls="palette-listbox"
+          aria-activedescendant={entries[i] ? `palette-opt-${i}` : undefined}
+          aria-autocomplete="list"
+          placeholder={filesMode ? "Search files…" : "Search commands, projects, sessions, files… (is:archived)"}
+          onChange={(e) => setQ(e.target.value)}
+          onKeyDown={onKey}
         />
-        <div className="palette-list">
-          {filtered.length === 0 && <div className="palette-empty">No matching commands.</div>}
-          {filtered.map((c, i) => (
-            <button
-              key={c.id}
-              className={`palette-item ${i === Math.min(index, filtered.length - 1) ? "active" : ""}`}
-              onMouseEnter={() => setIndex(i)}
-              onClick={() => c.run()}
-            >
-              <span>{c.label}</span>
-              {c.hint && <span className="palette-hint">{c.hint}</span>}
-            </button>
+        <div className="palette-list" role="listbox" id="palette-listbox" aria-label="Palette results">
+          {entries.length === 0 && <div className="palette-empty">No matches</div>}
+          {entries.map((entry, n) => (
+            <Fragment key={entry.id}>
+              {groupOf(entry) && (n === 0 || groupOf(entries[n - 1]!) !== groupOf(entry)) && (
+                <div className="palette-group" role="presentation">{groupOf(entry)}</div>
+              )}
+              <button
+                className={`palette-item ${n === i ? "active" : ""} ${entry.kind === "workspace" ? `palette-${entry.item.kind}` : ""}`}
+                role="option"
+                id={`palette-opt-${n}`}
+                aria-selected={n === i}
+                ref={n === i ? (el) => el?.scrollIntoView({ block: "nearest" }) : null}
+                onClick={() => run(entry)}
+              >
+                {entry.kind === "cmd" && (
+                  <>
+                    {entry.cmd.checked && (
+                      <span className="palette-check" aria-hidden="true">{entry.cmd.checked() ? "✓" : "\u00a0"}</span>
+                    )}
+                    <span className="palette-label">
+                      {entry.cmd.label}
+                      {entry.cmd.checked?.() && <span className="sr-only"> (current)</span>}
+                    </span>
+                    {commandHint(entry.cmd) && <kbd>{commandHint(entry.cmd)}</kbd>}
+                  </>
+                )}
+                {entry.kind === "workspace" && (
+                  <>
+                    <span className="palette-col">
+                      <span className="palette-label">
+                        {entry.item.title}
+                        {entry.item.archived && <span className="palette-status archived"> archived</span>}
+                      </span>
+                      {entry.item.subtitle && <span className="palette-sub">{entry.item.subtitle}</span>}
+                    </span>
+                    <span className="palette-meta">
+                      {entry.item.kind === "project" ? "switch project" : "open session"}
+                    </span>
+                  </>
+                )}
+                {entry.kind === "file" && (
+                  <>
+                    <span className="palette-col">
+                      <span className="palette-label mono">{baseOf(entry.hit.path)}</span>
+                      {dirOf(entry.hit.path) && <span className="palette-sub mono">{dirOf(entry.hit.path)}</span>}
+                    </span>
+                    <span className="palette-meta">{entry.hit.kind === "dir" ? "folder" : "open in editor"}</span>
+                  </>
+                )}
+              </button>
+            </Fragment>
           ))}
         </div>
+        <div className="palette-footer" id="palette-close-hint"><kbd>Esc</kbd> close</div>
       </div>
     </div>
   );
