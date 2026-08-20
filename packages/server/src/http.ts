@@ -98,6 +98,8 @@ export function createHttpServer(deps: HttpDeps): Server {
         const delivery = b.delivery;
         return json(res, 200, await sessions.send(m[1]!, {
           text: String(b.text ?? ""),
+          // sanitized + existence-checked inside the session service (F2)
+          ...(Array.isArray(b.attachments) ? { attachments: b.attachments as never } : {}),
           ...(b.model ? { model: b.model as { providerID: string; modelID: string } } : {}),
           ...(b.agent ? { agent: String(b.agent) } : {}),
           ...(delivery === "steer" || delivery === "queue" || delivery === "interrupt" || delivery === "normal"

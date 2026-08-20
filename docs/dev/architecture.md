@@ -87,7 +87,10 @@ statically by the server with SPA fallback.
 ## REST surface
 
 Core: `/api/health`, `/api/projects` (+`/create`, DELETE), `/api/sessions`
-(list/create/snapshot/events/message/shell/fork/rewind/rewind-clear/abort/archive/restore/bulk),
+(list/create/snapshot/events/message/shell/fork/rewind/rewind-clear/abort/archive/restore/bulk;
+`message` accepts `attachments` — shape-checked, path-traversal-rejected and
+existence-verified against the session root before anything is logged or queued;
+URL attachments are link-only and never fetched server-side),
 `/api/sessions/:id/queue` (+`/order`, DELETE item),
 `/api/sessions/:id/permission/:reqId`, `/api/sessions/:id/question/:reqId` (+`/reject`),
 `/api/models`, `/api/agents`.
@@ -124,7 +127,9 @@ The client (`apps/web/src/sync.ts`) resends its subscription on reconnect and de
 
 ## Event vocabulary
 
-Turn flow: `user/message`, `turn/started`, `assistant/chunk`,
+Turn flow: `user/message` (optionally carrying sanitized `attachments:
+AttachmentRef[]` — file/image/range/url; persisted before the runtime sees
+them, so replay/fork keeps them), `turn/started`, `assistant/chunk`,
 `assistant/reasoning-chunk`, `assistant/message`, `tool/call`, `tool/result`,
 `tool/error`, `turn/stopped`, `turn/failed`, `usage/recorded`.
 
@@ -138,7 +143,9 @@ markers soft-splice model history in `deriveMessages`; replacement sends reset
 the backend session before appending a new tail.
 
 Delivery: `queue/enqueued`, `queue/dispatched`, `queue/reordered`, `queue/removed`,
-`delivery/steered`, `delivery/fallback-queued`.
+`delivery/steered`, `delivery/fallback-queued`. Queued items keep their
+attachments durably (queue table column); steering is text-only, so a steer
+with attachments falls back to queue (`steer-attachments`).
 
 Work state (revisioned snapshots): `task/snapshot`, `subagent/snapshot`. The web
 reducer turns task revision deltas into replay-stable created/started/completed

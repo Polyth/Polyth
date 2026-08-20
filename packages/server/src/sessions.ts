@@ -3,7 +3,7 @@
 import { randomUUID } from "node:crypto";
 import { resolve } from "node:path";
 import type {
-  AgentProfile, AgentRuntime, CreateSessionInput, DeliveryMode, JsonObject, QueueItemDto, RuntimeEvent,
+  AgentProfile, AgentRuntime, AttachmentRef, CreateSessionInput, DeliveryMode, JsonObject, QueueItemDto, RuntimeEvent,
   SendResult, SessionEvent, SessionFolderDto, SessionOrganizePatch, SessionProjection, SessionRef,
   SessionService, SessionPersistence, UserTurnInput,
 } from "@polyth/contracts";
@@ -11,6 +11,7 @@ import type { ProjectService } from "@polyth/contracts";
 import type { PermissionService } from "@polyth/permissions";
 import { activeRewind } from "@polyth/session";
 import { buildPermissionPreview, PERMISSION_ALLOWED_SCOPES } from "./permissionPreview.ts";
+import { sanitizeAttachments } from "./attachments.ts";
 
 export interface Broadcaster {
   event(ev: SessionEvent): void;
@@ -19,7 +20,7 @@ export interface Broadcaster {
 
 /** Durable FIFO delivery queue (implemented by @polyth/session's Store). */
 export interface QueueStore {
-  enqueue(sessionId: string, text: string, delivery: DeliveryMode): Promise<QueueItemDto>;
+  enqueue(sessionId: string, text: string, delivery: DeliveryMode, attachments?: AttachmentRef[]): Promise<QueueItemDto>;
   queueList(sessionId: string): Promise<QueueItemDto[]>;
   queueReorder(sessionId: string, ids: string[]): Promise<QueueItemDto[]>;
   queueRemove(sessionId: string, queueId: string): Promise<boolean>;
@@ -76,6 +77,12 @@ export function createSessionService(deps: {
       input: { projectId: string; cwd: string; cmd: string },
       opts?: { timeoutMs?: number; maxOutputBytes?: number },
     ): Promise<{ output: string; exitCode: number | null; timedOut: boolean; truncated: boolean }>;
+  };
+  /** Attachment existence/size verification against the session's file root (F2).
+   *  `stat` must reject paths escaping the root; `maxBytes` reuses the upload cap. */
+  attachments?: {
+    stat(root: string, rel: string): Promise<{ kind: "file" | "dir"; size: number }>;
+    maxBytes: number;
   };
 }): SessionService {
   const { store, projects, permissions, runtimes, broadcast } = deps;
@@ -311,15 +318,51 @@ export function createSessionService(deps: {
     }
   };
 
+  /** F2: shape-check + existence-check attachments before anything is logged
+   *  or queued. Deleted files refuse attachment with a typed error. */
+  const verifyAttachments = async (
+    proj: SessionProjection, raw: unknown,
+  ): Promise<AttachmentRef[] | undefined> => {
+    const maxBytes = deps.attachments?.maxBytes ?? 20 * 1024 * 1024;
+    const refs = sanitizeAttachments(raw, { maxBytes, projectId: proj.projectId });
+    if (refs.length === 0) return undefined;
+    if (deps.attachments) {
+      const project = await projects.get(proj.projectId);
+      const root = proj.worktreePath ?? project?.path;
+      if (!root) throw Object.assign(new Error("project not found"), { code: "not-found" });
+      for (const ref of refs) {
+        if (!ref.path) continue; // url attachments have nothing on disk
+        let stat: { kind: "file" | "dir"; size: number };
+        try {
+          stat = await deps.attachments.stat(root, ref.path);
+        } catch {
+          throw Object.assign(new Error(`attachment file not found: ${ref.path}`), { code: "invalid-input" });
+        }
+        if (stat.kind !== "file") {
+          throw Object.assign(new Error(`attachment must be a file: ${ref.path}`), { code: "invalid-input" });
+        }
+        if (stat.size > deps.attachments.maxBytes) {
+          throw Object.assign(new Error(`attachment too large (max ${deps.attachments.maxBytes} bytes): ${ref.path}`), { code: "invalid-input" });
+        }
+        ref.size = stat.size; // trust disk, not the client
+      }
+    }
+    return refs;
+  };
+
   const enqueueMessage = async (
     sessionId: string, text: string, delivery: DeliveryMode, fallbackReason?: string,
+    attachments?: AttachmentRef[],
   ): Promise<SendResult> => {
     if (!deps.queue) throw Object.assign(new Error("delivery queue unavailable"), { code: "unsupported" });
-    const item = await deps.queue.enqueue(sessionId, text, delivery);
+    const item = await deps.queue.enqueue(sessionId, text, delivery, attachments);
     if (fallbackReason) {
       await appendAndBroadcast(sessionId, "delivery/fallback-queued", { queueId: item.id, reason: fallbackReason }, { ignorable: true });
     }
-    await appendAndBroadcast(sessionId, "queue/enqueued", { queueId: item.id, text, delivery }, { ignorable: true });
+    await appendAndBroadcast(sessionId, "queue/enqueued", {
+      queueId: item.id, text, delivery,
+      ...(attachments?.length ? { attachments: attachments as unknown as JsonObject[] } : {}),
+    }, { ignorable: true });
     return { queueId: item.id, queued: true };
   };
 
@@ -335,7 +378,7 @@ export function createSessionService(deps: {
     if (!item) return;
     if (turnActive(sessionId)) {
       // a send raced us between shift and dispatch: put the item back at the front
-      const restored = await deps.queue.enqueue(sessionId, item.text, item.delivery);
+      const restored = await deps.queue.enqueue(sessionId, item.text, item.delivery, item.attachments);
       const rest = await deps.queue.queueList(sessionId);
       const ids = [restored.id, ...rest.filter((i) => i.id !== restored.id).map((i) => i.id)];
       if (ids.length > 1) await deps.queue.queueReorder(sessionId, ids);
@@ -348,7 +391,10 @@ export function createSessionService(deps: {
       const proj2 = await store.projection(sessionId);
       if (!proj2) return;
       const rt = await ensureWired(sessionId, proj2);
-      await admitTurn(sessionId, proj2, rt, { text: item.text });
+      await admitTurn(sessionId, proj2, rt, {
+        text: item.text,
+        ...(item.attachments?.length ? { attachments: item.attachments } : {}),
+      });
     } catch (err) {
       console.error(`[polyth] queued dispatch failed for ${sessionId}`, err);
     }
@@ -408,6 +454,7 @@ export function createSessionService(deps: {
       });
       await rt.startTurn({
         sessionId, text,
+        ...(input.attachments?.length ? { attachments: input.attachments } : {}),
         ...(model ? { model } : {}),
         ...(agent ? { agent } : {}),
       });
@@ -469,6 +516,14 @@ export function createSessionService(deps: {
     async send(sessionId, input: UserTurnInput): Promise<SendResult> {
       let proj = await store.projection(sessionId);
       if (!proj) throw Object.assign(new Error("session not found"), { code: "not-found" });
+      // Attachments are verified before any state changes (rewind reset,
+      // queueing, admission) so a bad ref can never dirty the durable log.
+      if (input.attachments !== undefined) {
+        const verified = await verifyAttachments(proj, input.attachments);
+        input = { ...input };
+        if (verified) input.attachments = verified;
+        else delete input.attachments;
+      }
       const rt = await ensureWired(sessionId, proj);
 
       // A replacement send after rewind must not continue in the backend's
@@ -516,15 +571,20 @@ export function createSessionService(deps: {
       const active = turnActive(sessionId);
 
       if (active && deps.queue) {
-        if (delivery === "queue") return enqueueMessage(sessionId, input.text, "queue");
+        if (delivery === "queue") return enqueueMessage(sessionId, input.text, "queue", undefined, input.attachments);
         if (delivery === "normal") {
           // idle race: the turn started between the client's check and admission
-          return enqueueMessage(sessionId, input.text, "queue", "turn-active");
+          return enqueueMessage(sessionId, input.text, "queue", "turn-active", input.attachments);
         }
         if (delivery === "steer") {
           const caps = await rt.capabilities().catch(() => null);
           if (!caps?.steering || !rt.steer) {
-            return enqueueMessage(sessionId, input.text, "steer", "steer-unsupported");
+            return enqueueMessage(sessionId, input.text, "steer", "steer-unsupported", input.attachments);
+          }
+          // Steering is text-only in the runtime seam; attachments would be
+          // silently dropped mid-turn, so they queue for the next turn instead.
+          if (input.attachments?.length) {
+            return enqueueMessage(sessionId, input.text, "steer", "steer-attachments", input.attachments);
           }
           // Deliver first, then log: a failed steer must fall back to queue
           // without leaving a dangling user/message the model never saw.
@@ -536,11 +596,14 @@ export function createSessionService(deps: {
         }
         if (delivery === "interrupt") {
           // enqueue at the head, then abort; turn/stopped(aborted) dispatches it
-          const item = await deps.queue.enqueue(sessionId, input.text, "interrupt");
+          const item = await deps.queue.enqueue(sessionId, input.text, "interrupt", input.attachments);
           const rest = await deps.queue.queueList(sessionId);
           const ids = [item.id, ...rest.filter((i) => i.id !== item.id).map((i) => i.id)];
           if (ids.length > 1) await deps.queue.queueReorder(sessionId, ids);
-          await appendAndBroadcast(sessionId, "queue/enqueued", { queueId: item.id, text: input.text, delivery }, { ignorable: true });
+          await appendAndBroadcast(sessionId, "queue/enqueued", {
+            queueId: item.id, text: input.text, delivery,
+            ...(input.attachments?.length ? { attachments: input.attachments as unknown as JsonObject[] } : {}),
+          }, { ignorable: true });
           await rt.abort(sessionId).catch(() => {});
           return { queueId: item.id, queued: true };
         }
@@ -551,7 +614,7 @@ export function createSessionService(deps: {
       if (!active && deps.queue && delivery !== "interrupt") {
         const pendingQueue = await deps.queue.queueList(sessionId);
         if (pendingQueue.length > 0) {
-          const res = await enqueueMessage(sessionId, input.text, delivery === "steer" ? "steer" : "queue");
+          const res = await enqueueMessage(sessionId, input.text, delivery === "steer" ? "steer" : "queue", undefined, input.attachments);
           void dispatchQueue(sessionId);
           return res;
         }

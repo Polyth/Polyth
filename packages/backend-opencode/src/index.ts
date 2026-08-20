@@ -44,10 +44,12 @@ import { spawn, type ChildProcess } from "node:child_process";
 import { createServer as createNetServer } from "node:net";
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { isAbsolute, join, relative, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import type {
   AgentDescriptor,
   AgentRuntime,
+  AttachmentRef,
   CanonicalTurnRequest,
   CreateSessionInput,
   Disposable,
@@ -300,6 +302,40 @@ export interface OpenCodeRuntimeExtras {
   cwd?: string;
 }
 
+/** F2: canonical AttachmentRefs → OpenCode message parts.
+ *  - file/image/range → `{type:"file", url:"file://…"}`; OpenCode reads the
+ *    bytes locally (ranges via verified `?start=&end=` query params).
+ *  - url → a plain text part carrying the link. Never a file part: the server
+ *    side must not fetch foreign URLs (browser-package origin policy).
+ *  Paths outside the session cwd are skipped — defense in depth on top of the
+ *  server-side validation. */
+export const attachmentParts = (
+  attachments: AttachmentRef[] | undefined,
+  cwd: string | undefined,
+  log?: (level: "debug" | "info" | "warn" | "error", msg: string, data?: JsonObject) => void,
+): JsonObject[] => {
+  const parts: JsonObject[] = [];
+  for (const a of attachments ?? []) {
+    if (a.kind === "url") {
+      if (!a.url || !/^https?:\/\//i.test(a.url)) continue;
+      parts.push({ type: "text", text: `[Attached link: ${a.name}] ${a.url}` });
+      continue;
+    }
+    if (!a.path || !cwd) continue;
+    const rootAbs = resolve(cwd);
+    const abs = resolve(rootAbs, a.path);
+    const rel = relative(rootAbs, abs);
+    if (rel.startsWith("..") || isAbsolute(rel)) {
+      log?.("warn", "attachment path escapes session cwd; skipped", { path: a.path });
+      continue;
+    }
+    let url = pathToFileURL(abs).href;
+    if (a.kind === "range" && a.range) url += `?start=${a.range[0]}&end=${a.range[1]}`;
+    parts.push({ type: "file", mime: a.mime, filename: a.name, url });
+  }
+  return parts;
+};
+
 export const createOpenCodeRuntimeWithClient = (
   client: OpenCodeClient,
   extras: OpenCodeRuntimeExtras = {},
@@ -473,7 +509,10 @@ export const createOpenCodeRuntimeWithClient = (
         emit(req.sessionId, { type: "turn/started", turnId });
       }
       const body: JsonObject = {
-        parts: [{ type: "text", text: req.text }],
+        parts: [
+          { type: "text", text: req.text },
+          ...attachmentParts(req.attachments, extras.cwd, log),
+        ],
       };
       if (req.model) {
         body.model = { providerID: req.model.providerID, modelID: req.model.modelID };

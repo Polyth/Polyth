@@ -105,7 +105,21 @@ export interface WalkthroughStepDto { file: string; explanation: string; diff: s
 export interface WalkthroughStepApprovedData { stepIndex: number; file: string }
 export interface WalkthroughStepRejectedData { stepIndex: number; file: string }
 
-export interface AttachmentRef { id: string; name: string; mime: string; size: number; url?: string }
+export interface AttachmentRef {
+  id: string;
+  name: string;
+  mime: string;
+  size: number;
+  /** Display/download URL. Required (http/https) for kind "url"; for project
+   *  files it is the sanitized raw endpoint and purely presentational. */
+  url?: string;
+  /** Attachment class; absent means "file" (backward compatible). */
+  kind?: "file" | "image" | "range" | "url";
+  /** Project-relative path for file/image/range attachments. */
+  path?: string;
+  /** 1-based inclusive line range (kind "range" only). */
+  range?: [number, number];
+}
 export interface ModelRef { providerID: string; modelID: string }
 
 // Model-visible derivation: these types feed deriveMessages()
@@ -124,6 +138,7 @@ export interface ModelMessage {
   parts: Array<
     | { type: "text"; text: string }
     | { type: "reasoning"; text: string }
+    | { type: "file"; name: string; mime: string; path?: string; url?: string; range?: [number, number] }
     | { type: "tool-call"; callId: string; tool: string; input: JsonObject }
     | { type: "tool-result"; callId: string; tool: string; output: string; isError?: boolean }
   >;
@@ -255,6 +270,8 @@ export interface RuntimeSessionMessage { role: "user" | "assistant"; text: strin
 export interface CanonicalTurnRequest {
   sessionId: string;       // canonical session id; adapter maps to backend id
   text: string;
+  /** Already persisted in the user/message event before startTurn is called. */
+  attachments?: AttachmentRef[];
   model?: ModelRef;
   agent?: string;
 }
@@ -481,6 +498,8 @@ export interface QueueItemDto {
   text: string;
   delivery: DeliveryMode;
   createdAt: number;
+  /** Preserved across queueing so deferred sends keep their attachments. */
+  attachments?: AttachmentRef[];
 }
 
 export interface QueueEnqueuedData { queueId: string; text: string; delivery: string }

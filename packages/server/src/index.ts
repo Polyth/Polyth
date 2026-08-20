@@ -9,7 +9,7 @@ import { createConfigApplier, createOpenCodeRuntime, type OpenCodeAdapterOptions
 import { createPluginRegistry } from "@polyth/plugins";
 import { createPermissionService } from "@polyth/permissions";
 import { createGoalService, type GoalService } from "@polyth/goals";
-import { createFileService } from "@polyth/files";
+import { createFileService, MAX_RAW_BYTES } from "@polyth/files";
 import { createCommandService } from "@polyth/commands";
 import { createGitService } from "@polyth/git";
 import { createTerminalService } from "@polyth/terminal";
@@ -254,6 +254,13 @@ export async function boot(opts: BootOptions = {}) {
     store, projects, permissions, runtimes, broadcast, queue: store, org: store, profiles: store, behavior,
     worktrees: git.worktrees,
     shell: terminals,
+    attachments: {
+      stat: async (root, rel) => {
+        const st = await files.stat(root, rel);
+        return { kind: st.kind, size: st.size };
+      },
+      maxBytes: MAX_RAW_BYTES,
+    },
     expand: async (projectId, text) => {
       const project = await projects.get(projectId);
       const r = await commands.expand(project?.path ?? process.cwd(), text);
