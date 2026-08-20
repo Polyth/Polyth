@@ -30,7 +30,7 @@ packages/session (node:sqlite WAL: events + projections + queue/org/profiles)
 | `files` | Path-jailed file service: tree/stat/read (revision = mtime+size), revision-guarded `write` (stale `baseRevision` → `conflict`), binary-overwrite refusal, mkdir/rename/delete/upload, scored file search (shared with palette + mentions). |
 | `git` | Porcelain wrapper: status/diff/show/stage/unstage/discard/commit/log/graph/branches/checkout/stash/fetch/pull/push/worktrees, diffHead/diffRange for review flows. Session-scoped Git routes resolve an owned worktree cwd server-side. |
 | `commands` | Slash commands + `#alias` snippets: project (`.agents/commands`) and user scopes, `$ARGUMENTS`/`@file`/`!cmd` template expansion, CRUD for the settings UI. |
-| `terminal` | PTY sessions (`node-pty` when present) with create/list/close; `/ws/terminal/:id` byte stream. |
+| `terminal` | PTY sessions (`node-pty` when present) with create/list/close/rename; bounded per-PTY replay ring (default 200 KB, UTF-8-tear-safe) replayed on every `/ws/terminal/:id` attach; PTYs survive socket drops — close only via REST or process exit. |
 | `preview` | Dev-server lifecycle per project: script detection, `PORT` injection, status events, URL for the iframe preview. |
 | `multirun` | N parallel one-shot runs (model/agent matrix) inside a session; per-run progress events; pick-a-winner. |
 | `fusion` | Multi-model answers + small-model synthesis with weights, attribution, disagreements. |
@@ -109,7 +109,8 @@ Feature routes: `/api/folders`, `/api/labels`, `/api/search/workspaces`,
 (tree/stat/read/raw/write/mkdir/rename/delete/upload/search), `/api/commands`,
 `/api/snippets`, `/api/git/*` (status/diff/show/stage/unstage/discard/commit/commit-message/
 log/graph/branch(es)/checkout/folder/stash/stashes/fetch/pull/push; optional owned
-`sessionId` selects its worktree), `/api/worktrees` (+`/remove`), `/api/terminals`,
+`sessionId` selects its worktree), `/api/worktrees` (+`/remove`), `/api/terminals`
+(POST input, PATCH rename, DELETE close; `/ws/terminal/:id` replays scrollback then streams live),
 `/api/preview` (+start/stop; optional owned `sessionId` selects its worktree), `/api/browser/*` (sessions/capability/approvals),
 `/api/dictation` (+capability), `/api/multiruns`, `/api/fusions`, `/api/walkthroughs`,
 `/api/schedule` (+preview/loops/loops/rescan), `/api/usage/quotas` (+refresh),
@@ -220,7 +221,10 @@ a generic collapsed row (never crash).
   suggestion chip that fills the composer and never sends),
   `ScheduleView`, `GoalsView`/`GoalStrip`, `MultiRunView`, `FusionView`,
   `WalkthroughView`/`GeneratedWalkthrough`, `PreviewView` (iframe + browser driving),
-  `TerminalView`, `SettingsModal`/`SettingsView` + `settings/registry.ts`
+  `TerminalView` (F12: tab strip with double-click rename and confirm-close
+  while running; reconnects with backoff reusing the same terminal id, replay
+  frames replace the local buffer so reattach never duplicates),
+  `SettingsModal`/`SettingsView` + `settings/registry.ts`
   (item-level search), `Onboarding` (personas), `SessionSearch`.
 - Preferences: `settings.ts` (`polyth.settings`), `uiPrefs.ts` (including
   `polyth.editorPrefs`), `sidebarPrefs.ts`,

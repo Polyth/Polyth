@@ -122,6 +122,24 @@ commits, and the L-queue packages started landing.
   panel's "From chat" button opens the draft in the note editor for review —
   saving goes through the normal `/api/knowledge` flow with `sourceSessionId`.
 
+### Added — L6: terminal scrollback replay, resumable bind, tabs (F12)
+
+- `packages/terminal`: bounded replay ring per PTY (default 200 KB,
+  `POLYTH_TERM_REPLAY_BYTES`) — byte-exact within the cap and UTF-8-tear-safe:
+  a `StringDecoder` on the live path reassembles multi-byte characters split
+  across chunks, and the snapshot skips continuation bytes orphaned by
+  eviction. New `replay(id)` and `rename(id, title)`; `TerminalInfo` carries
+  `exitCode` for exited-but-not-closed terminals.
+- Server: `/ws/terminal/:id` now replays the scrollback before live frames on
+  every attach, reports `exit` state for dead processes, and answers
+  `not-found` for unknown ids so client reconnect loops stop.
+  `PATCH /api/terminals/:id` renames a tab.
+- Web `TerminalView`: reloading the page reattaches to the same shells with
+  visible scrollback (replay frames REPLACE the buffer — no duplicates);
+  dropped sockets retry silently with 500ms→5s backoff reusing the same
+  terminal id; tabs rename on double-click; closing a running shell asks
+  first.
+
 ### Removed — stale planning artifacts (`3928fe9`)
 
 - `docs/features/*` — the 19-file upstream research dump (polyth/Paseo PR

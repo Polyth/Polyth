@@ -461,6 +461,8 @@ export interface TerminalInfo {
   projectId: string;
   createdAt: number;
   running: boolean;
+  /** Set once the process has exited (F12: exited-but-not-closed terminals stay listed). */
+  exitCode?: number | null;
 }
 
 export interface TerminalCreatedData {

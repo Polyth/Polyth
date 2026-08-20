@@ -115,22 +115,22 @@ test("assist service: hard switch — disabled generates NOTHING", async () => {
 });
 
 test("assist service: a new event between schedule and fire skips generation", async () => {
-  const h = serviceHarness({});
+  const h = serviceHarness({ idleSeconds: 0.25 });
   h.svc.onTurnCompleted("s1");
-  await sleep(2); // after latestSeq capture, before the timer fires
+  await sleep(20); // after latestSeq capture, well before the 250ms timer fires
   h.bumpSeq();
-  await sleep(60);
+  await sleep(400);
   assert.equal(h.completes.length, 0);
   assert.equal(h.saves.length, 0);
   h.svc.stop();
 });
 
 test("assist service: a new event DURING generation discards the result", async () => {
-  const h = serviceHarness({ completeDelayMs: 40 });
+  const h = serviceHarness({ idleSeconds: 0.02, completeDelayMs: 250 });
   h.svc.onTurnCompleted("s1");
-  await sleep(25); // model call in flight
+  await sleep(120); // model call in flight (starts ~20ms in, runs 250ms)
   h.bumpSeq();
-  await sleep(80);
+  await sleep(400);
   assert.equal(h.completes.length, 1); // the call happened…
   assert.equal(h.saves.length, 0);     // …but the stale result was dropped
   h.svc.stop();

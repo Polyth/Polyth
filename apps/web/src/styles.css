@@ -1323,6 +1323,12 @@ html.light .error-banner { color: #a1352b; }
 }
 .term-tab-x:hover { color: var(--red); background: var(--elevated); border-color: var(--border-soft); }
 .term-tab-group.active .term-tab-x { background: var(--accent-wash); }
+.term-tab-rename {
+  border: none; border-radius: 0; width: 120px;
+  padding: 5px 10px; font-size: 12px; font-family: var(--mono);
+  background: var(--elevated); color: var(--fg);
+}
+.term-tab-dead { color: var(--muted); font-size: 10.5px; }
 .term-new { padding: 4px 10px; color: var(--muted); font-size: 12px; }
 .term-body {
   flex: 1; margin: 0; border: 0; border-radius: 0; background: #0a0a09;

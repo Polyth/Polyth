@@ -684,6 +684,8 @@ export const api = {
     jfetch<{ ok: true }>(`/api/terminals/${terminalId}`, json("POST", { data })),
   closeTerminal: (terminalId: string) =>
     jfetch<{ ok: true }>(`/api/terminals/${terminalId}`, { method: "DELETE" }),
+  renameTerminal: (terminalId: string, title: string) =>
+    jfetch<TerminalInfo>(`/api/terminals/${terminalId}`, json("PATCH", { title })),
 
   // ---- schedule --------------------------------------------------------------
   scheduleList: (projectId?: string) =>

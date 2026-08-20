@@ -209,7 +209,12 @@ export async function boot(opts: BootOptions = {}) {
   const files = createFileService();
   const git = createGitService();
   const commands = createCommandService();
-  const terminals = createTerminalService();
+  // POLYTH_TERM_REPLAY_BYTES caps per-PTY scrollback replay (default 200 KB).
+  const terminals = createTerminalService({
+    ...(Number(process.env.POLYTH_TERM_REPLAY_BYTES) > 0
+      ? { replayBytes: Number(process.env.POLYTH_TERM_REPLAY_BYTES) }
+      : {}),
+  });
   const preview = createPreviewService();
 
   // --- controlled browser (WP14): Chromium if configured/found, fake driver

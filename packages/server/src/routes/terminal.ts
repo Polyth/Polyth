@@ -87,6 +87,15 @@ export function terminalRoutes(deps: {
       json(200, { ok: true });
       return true;
     }
+    if (m && method === "PATCH") { // rename (F12)
+      const b = await body();
+      const title = String(b.title ?? "").trim();
+      if (!title) throw Object.assign(new Error("title required"), { code: "invalid-input" });
+      const info = terminals.rename(m[1]!, title);
+      if (!info) throw Object.assign(new Error("unknown terminal"), { code: "not-found" });
+      json(200, info);
+      return true;
+    }
     if (m && method === "DELETE") {
       if (!terminals.get(m[1]!)) throw Object.assign(new Error("unknown terminal"), { code: "not-found" });
       await terminals.close(m[1]!);
@@ -113,8 +122,21 @@ export function attachTerminalWs(server: Server, deps: {
 
   wss.on("connection", (ws, req) => {
     const id = (req.url ?? "").split("/").pop() ?? "";
+    const info = deps.terminals.get(id);
+    if (!info) {
+      // the PTY is gone (closed via REST or server restart) — tell the client
+      // so its reconnect loop stops instead of retrying forever
+      send(ws, { type: "error", terminalId: id, code: "not-found" });
+      ws.close();
+      return;
+    }
     sockets.set(ws, id);
     send(ws, { type: "attached", terminalId: id });
+    // F12: replay the bounded scrollback before any live frame, so late
+    // subscribers (page reloads, second windows) see the startup output
+    const replay = deps.terminals.replay(id);
+    if (replay) send(ws, { type: "replay", terminalId: id, data: replay });
+    if (!info.running) send(ws, { type: "exit", terminalId: id, exitCode: info.exitCode ?? null });
     ws.on("message", (raw) => {
       let msg: { type?: string; data?: string; cols?: number; rows?: number };
       try { msg = JSON.parse(String(raw)); } catch { return; }

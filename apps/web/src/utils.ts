@@ -238,6 +238,12 @@ export function goalChecklist(objective: string, status: string): Array<{ text: 
   return rows.map((text) => ({ text, done }));
 }
 
+/** Terminal WS reconnect backoff (F12): 500 ms doubling to a 5 s ceiling. */
+export function nextTermBackoff(prev: number | undefined): number {
+  if (!prev || prev < 500) return 500;
+  return Math.min(prev * 2, 5000);
+}
+
 /** Apply a PTY chunk to a terminal buffer: strip CSI, honour CR/BS, cap size. */
 export function applyTerminalChunk(prev: string, chunk: string): string {
   const cleaned = chunk
