@@ -4,14 +4,12 @@
 import { useEffect, useState } from "react";
 import { api, type GithubStatusDto } from "../../api.ts";
 import { setActiveView, setOverlay, useStore } from "../../store.ts";
-import { pluginOn, togglePlugin } from "../../prefs.ts";
-import { EmptyState, PageHead, Row, Toggle } from "./parts.tsx";
+import { EmptyState, PageHead, Row } from "./parts.tsx";
 
 export default function IntegrationsPage() {
   const projectId = useStore((s) => s.activeProjectId);
   const [status, setStatus] = useState<GithubStatusDto | null>(null);
   const [counts, setCounts] = useState<{ issues: number; prs: number } | null>(null);
-  const githubOn = pluginOn("github");
 
   useEffect(() => {
     if (!projectId) { setStatus(null); setCounts(null); return; }
@@ -31,9 +29,6 @@ export default function IntegrationsPage() {
   return (
     <>
       <PageHead title="Integrations" blurb="External services wired through local CLIs — no tokens stored by Polyth." />
-      <Row label="GitHub plugin" hint="Adds the GitHub view (repo, issues, pull requests).">
-        <Toggle on={githubOn} onChange={() => togglePlugin("github")} label="GitHub plugin" />
-      </Row>
       {!projectId && <EmptyState title="No active project" />}
       {projectId && status && (
         <>

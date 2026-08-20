@@ -21,7 +21,7 @@ import {
 } from "../src/utils.ts";
 import { drainInserts, queueInsert, requestComposerInsert } from "../src/composerInsert.ts";
 import { ago, deriveSessionTitle, fmtDuration, fmtMs, fullSessionTitle, modKey, modelBadge, providerColor } from "../src/format.ts";
-import { applyPersona, getPrefs, isCustomized, parsePrefs, pluginOn, togglePlugin } from "../src/prefs.ts";
+import { parsePrefs } from "../src/prefs.ts";
 import { filterPalette, type PaletteCommand } from "../src/commands.ts";
 import { highlight, highlightLines, langOf } from "../src/highlight.ts";
 import { PATH_MIME, dragKind, getDragPath, setDragPath } from "../src/dnd.ts";
@@ -291,41 +291,6 @@ test("slot registry orders by order and disposes cleanly", () => {
   assert.deepEqual(listSlots("contextRail.tabs").map((i) => i.id), ["b"]);
   b();
   assert.deepEqual(listSlots("contextRail.tabs"), []);
-});
-
-test("applyPersona enables the expected plugins for every persona", () => {
-  const expected = {
-    engineer: ["session", "files", "git", "preview", "terminal", "context", "usage", "events", "goals", "multirun", "fusion", "walkthrough", "schedule", "github", "dictation", "knowledge"],
-    manager: ["session", "files", "context", "usage", "goals", "multirun", "fusion", "walkthrough", "knowledge"],
-    creator: ["session", "preview", "files"],
-    blank: ["session", "files", "context", "usage"],
-  } as const;
-
-  for (const persona of ["engineer", "manager", "creator", "blank"] as const) {
-    applyPersona(persona);
-    assert.equal(getPrefs().persona, persona);
-    assert.deepEqual(getPrefs().plugins, expected[persona]);
-  }
-});
-
-test("togglePlugin keeps session enabled and adds or removes git", () => {
-  applyPersona("creator");
-  assert.equal(pluginOn("session"), true);
-  assert.equal(pluginOn("git"), false);
-
-  togglePlugin("session");
-  assert.equal(pluginOn("session"), true);
-
-  togglePlugin("git");
-  assert.equal(pluginOn("git"), true);
-  togglePlugin("git");
-  assert.equal(pluginOn("git"), false);
-});
-
-test("pluginOn reflects the currently enabled persona plugins", () => {
-  applyPersona("manager");
-  assert.equal(pluginOn("goals"), true);
-  assert.equal(pluginOn("git"), false);
 });
 
 test("parsePrefs restores persona, drops unknown plugins, and fills empty lists", () => {
@@ -998,16 +963,6 @@ test("requestComposerInsert queues when no composer consumes the event", () => {
   // Node has no window: the insert must land in the queue, not vanish.
   assert.equal(requestComposerInsert("@x.ts "), false);
   assert.deepEqual(drainInserts(), ["@x.ts "]);
-});
-
-test("isCustomized flags plugin sets that drift from persona defaults", () => {
-  applyPersona("creator");
-  assert.equal(isCustomized(), false);
-  togglePlugin("git");
-  assert.equal(isCustomized(), true);
-  togglePlugin("git");
-  assert.equal(isCustomized(), false);
-  assert.equal(isCustomized({ persona: null, plugins: [] }), false);
 });
 
 test("filterPickerItems handles empty and case-insensitive grouped searches", () => {

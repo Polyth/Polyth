@@ -7,10 +7,12 @@
 // UX-A390: below 821px the inline rail/strip reserves zero workspace width.
 // The strip moves inside a modal panel sheet and the header hosts
 // NarrowPanelTrigger, which shares the exact same visibleSurfaces(...) model.
+//
+// UX-PERSONAS: presets order capabilities but never gate them. Every panel
+// remains reachable through the shared capability model and More tools.
 import { Fragment, useEffect, useRef, useState, type CSSProperties, type JSX, type PointerEvent as ReactPointerEvent } from "react";
 import { renderSlot } from "../slots.ts";
-import { getState, useActiveModel, useStore, setActiveView, setOverlay, setRailPlugin, setSidebarOpen, toggleRailPlugin, type AppView } from "../store.ts";
-import { PLUGIN_LABELS, togglePlugin, usePrefs, type PluginId } from "../prefs.ts";
+import { getState, useActiveModel, useStore, setActiveView, setRailPlugin, setSidebarOpen, toggleRailPlugin, type AppView } from "../store.ts";
 import { Icon } from "../icons.tsx";
 import { useEscape } from "../useEscape.ts";
 import { useGitStatus } from "../gitStatusStore.ts";
@@ -22,18 +24,24 @@ import {
 import { clampRailWidth, railWidthOf, setRailWidth } from "../railPrefs.ts";
 import { useShellMode } from "../responsiveShell.ts";
 import { useModalSurface } from "./a11y/Dialog.tsx";
+import {
+  GROUP_ORDER, TECHNICAL_GROUP_LABEL, capabilityGroup, useResolvedCapabilities,
+  type ResolvedCapability,
+} from "../capabilities.ts";
+import { VIEW_OF_CAPABILITY } from "../builtinCapabilities.ts";
 import "./railSurfaces.tsx";
 
-// Full-view jumps that live on the strip when their plugin is on.
-// Icons only (like polyth): title + aria-label carry the names.
-const JUMPS: Array<{ view: AppView; plugin: PluginId; label: string; icon: () => JSX.Element }> = [
-  { view: "preview", plugin: "preview", label: "Preview", icon: Icon.globe },
-  { view: "multirun", plugin: "multirun", label: "Compare models", icon: Icon.compare },
-  { view: "fusion", plugin: "fusion", label: "Fuse models", icon: Icon.fuse },
-  { view: "terminal", plugin: "terminal", label: "Terminal", icon: Icon.term },
-  { view: "schedule", plugin: "schedule", label: "Scheduled prompts", icon: Icon.clock },
-  { view: "github", plugin: "github", label: "GitHub", icon: Icon.github },
-];
+const JUMP_ICONS: Partial<Record<AppView, () => JSX.Element>> = {
+  preview: Icon.globe,
+  multirun: Icon.compare,
+  fusion: Icon.fuse,
+  terminal: Icon.term,
+  schedule: Icon.clock,
+  github: Icon.github,
+  git: Icon.tree,
+  goals: Icon.context,
+  walkthrough: Icon.events,
+};
 
 const NO_EVENTS: never[] = [];
 
@@ -56,13 +64,12 @@ interface RailSurfaceModel {
 export function useRailSurfaceModel(): RailSurfaceModel {
   const rail = useStore((s) => s.railPlugin);
   const projectId = useStore((s) => s.activeProjectId);
-  const prefs = usePrefs();
   const session = useStore((s) => s.sessions.find((x) => x.id === s.activeSessionId) ?? null);
   const model = useActiveModel();
   const events = useStore((s) => (s.activeSessionId ? s.events[s.activeSessionId] : undefined) ?? NO_EVENTS);
+  const resolved = useResolvedCapabilities();
 
-  const gitOn = prefs.plugins.includes("git");
-  const gitStatus = useGitStatus(gitOn ? projectId : null, model.turn?.status === "working", session?.id);
+  const gitStatus = useGitStatus(projectId, model.turn?.status === "working", session?.id);
   const ctx: RailSurfaceContext = {
     changeCount: gitStatus ? gitChangedFiles(gitStatus).length : 0,
     eventCount: events.length,
@@ -71,7 +78,14 @@ export function useRailSurfaceModel(): RailSurfaceModel {
   };
 
   useSurfaceVersion(); // re-render when surfaces register/unregister
-  const surfaces = visibleSurfaces([...listSurfaces(), ...slotSurfaces()], prefs.plugins, ctx);
+  // Preset-compatible ordering: panels whose capability resolves primary come
+  // first, then the resolved rank; nothing is removed.
+  const positionOf = new Map(resolved.map((c, i) => [c.descriptor.id, i]));
+  const surfaces = visibleSurfaces([...listSurfaces(), ...slotSurfaces()], ctx)
+    .slice()
+    .sort((a, b) =>
+      (positionOf.get(a.capabilityId ?? a.id) ?? 999) - (positionOf.get(b.capabilityId ?? b.id) ?? 999)
+      || a.order - b.order);
   const open = surfaces.find((s) => s.id === rail) ?? null;
   return { rail, surfaces, open, ctx };
 }
@@ -119,19 +133,20 @@ export default function ContextRail() {
   const compact = mode !== "wide";
   const { rail, surfaces, open, ctx } = useRailSurfaceModel();
   const view = useStore((s) => s.activeView);
-  const prefs = usePrefs();
-  const [picker, setPicker] = useState(false);
-  useEscape(picker, () => setPicker(false));
+  const resolved = useResolvedCapabilities();
+  const [moreOpen, setMoreOpen] = useState(false);
+  useEscape(moreOpen, () => setMoreOpen(false));
+  const moreTriggerRef = useRef<HTMLButtonElement>(null);
 
   // Keep-alive: panels stay mounted once visited so their state survives
-  // switching surfaces; unavailable surfaces (plugin off) unmount naturally.
+  // switching surfaces; surfaces that lose content-driven visibility unmount.
   const [visited, setVisited] = useState<string[]>([]);
   useEffect(() => {
     if (rail !== null && !visited.includes(rail)) setVisited((v) => [...v, rail]);
   }, [rail, visited]);
-  // A registered surface that became invisible (content gone / plugin off)
-  // closes the panel; an id that is merely not registered *yet* (a plugin
-  // still loading) is left alone so it opens once the surface arrives.
+  // A registered surface that became invisible (content gone) closes the
+  // panel; an id that is merely not registered *yet* (a plugin still loading)
+  // is left alone so it opens once the surface arrives.
   const known = rail !== null && [...listSurfaces(), ...slotSurfaces()].some((s) => s.id === rail);
   useEffect(() => {
     if (rail !== null && known && open === null) setRailPlugin(null);
@@ -172,38 +187,84 @@ export default function ContextRail() {
     containerRef: sheetRef,
   });
 
-  const jumps = JUMPS.filter((j) => prefs.plugins.includes(j.plugin));
-  const togglable = (Object.keys(PLUGIN_LABELS) as PluginId[]).filter((id) => id !== "session");
+  // Full-view jumps for primary capabilities that are views (not the chat
+  // itself and not a strip panel).
+  const panelCapabilities = new Set(surfaces.map((s) => s.capabilityId ?? s.id));
+  const jumps = resolved.filter((c) => {
+    if (c.tier !== "primary" || !c.descriptor.available()) return false;
+    const v = VIEW_OF_CAPABILITY[c.descriptor.id];
+    return !!v && v !== "session" && !panelCapabilities.has(c.descriptor.id);
+  });
+
   const slotTabs = renderSlot("contextRail.tabs", { tab: rail, onSelect: toggleRailPlugin });
   const badgeOf = (s: RailSurface): number => s.badge?.(ctx) ?? 0;
 
-  const pluginPicker = (
+  // Same resolved list as the header disclosure, grouped by user outcome.
+  const groups = GROUP_ORDER
+    .map((label) => ({
+      label,
+      items: resolved.filter((c) => capabilityGroup(c.descriptor.id) === label && c.descriptor.id !== "session"),
+    }))
+    .filter((g) => g.items.length > 0);
+
+  const capabilityItem = (c: ResolvedCapability) => {
+    const available = c.descriptor.available();
+    const reason = available ? null : c.descriptor.unavailableReason?.() ?? "Unavailable right now";
+    const alias = c.descriptor.technicalLabel && c.descriptor.technicalLabel !== c.descriptor.label
+      ? ` (${c.descriptor.technicalLabel})`
+      : "";
+    return (
+      <button
+        key={c.descriptor.id}
+        role="menuitem"
+        className="more-tools-item"
+        disabled={!available}
+        title={reason ?? c.descriptor.plainDescription}
+        onClick={() => {
+          setMoreOpen(false);
+          c.descriptor.open();
+        }}
+      >
+        <span>{c.descriptor.label}{alias}</span>
+        {!available && reason && <span className="more-tools-reason">{reason}</span>}
+      </button>
+    );
+  };
+
+  const moreToolsPicker = (
     <>
       <button
-        className="rail-icon strip-btn"
-        title="Add or remove plugins"
-        aria-label="Add or remove plugins"
-        aria-expanded={picker}
-        onClick={() => setPicker((v) => !v)}
+        ref={moreTriggerRef}
+        className="rail-icon strip-btn strip-more"
+        title="More tools"
+        aria-label="More tools"
+        aria-expanded={moreOpen}
+        aria-haspopup="menu"
+        onClick={() => setMoreOpen((v) => !v)}
       >
-        <Icon.plus />
+        <span className="strip-more-text" aria-hidden="true">More</span>
       </button>
-      {picker && (
+      {moreOpen && (
         <>
-          <div className="menu-backdrop" onClick={() => setPicker(false)} />
-          <div className="strip-picker" role="menu">
-            <div className="strip-picker-label">Plugins</div>
-            {togglable.map((id) => {
-              const on = prefs.plugins.includes(id);
-              return (
-                <button key={id} aria-pressed={on} onClick={() => togglePlugin(id)}>
-                  <span className="strip-picker-check">{on ? "✓" : ""}</span>
-                  {PLUGIN_LABELS[id]}
-                </button>
-              );
-            })}
-            <button className="strip-picker-manage" onClick={() => { setPicker(false); setOverlay("settings"); }}>
-              Manage in settings…
+          <div className="menu-backdrop" onClick={() => setMoreOpen(false)} />
+          <div className="strip-picker more-tools-popup" role="menu" aria-label="More tools">
+            {groups.map((g) => (
+              <div className="more-tools-group" key={g.label}>
+                <div className="more-tools-group-label">
+                  {g.label === TECHNICAL_GROUP_LABEL ? TECHNICAL_GROUP_LABEL : g.label}
+                </div>
+                {g.items.map(capabilityItem)}
+              </div>
+            ))}
+            <button
+              className="strip-picker-manage"
+              onClick={() => {
+                setMoreOpen(false);
+                setActiveView("session");
+                window.dispatchEvent(new CustomEvent("polyth:open-settings"));
+              }}
+            >
+              Manage in Settings…
             </button>
           </div>
         </>
@@ -250,20 +311,24 @@ export default function ContextRail() {
               </button>
             ))}
             {jumps.length > 0 && <span className="strip-sep" />}
-            {jumps.map((j) => (
-              <button
-                key={j.view}
-                className={`rail-icon strip-btn ${view === j.view ? "active" : ""}`}
-                title={j.label}
-                aria-label={j.label}
-                aria-pressed={view === j.view}
-                onClick={() => { setActiveView(j.view); setRailPlugin(null); }}
-              >
-                <j.icon />
-              </button>
-            ))}
+            {jumps.map((c) => {
+              const v = VIEW_OF_CAPABILITY[c.descriptor.id]!;
+              const JIcon = JUMP_ICONS[v] ?? Icon.context;
+              return (
+                <button
+                  key={c.descriptor.id}
+                  className={`rail-icon strip-btn ${view === v ? "active" : ""}`}
+                  title={c.descriptor.label}
+                  aria-label={c.descriptor.label}
+                  aria-pressed={view === v}
+                  onClick={() => { c.descriptor.open(); setRailPlugin(null); }}
+                >
+                  <JIcon />
+                </button>
+              );
+            })}
             <span className="strip-spacer" />
-            {pluginPicker}
+            {moreToolsPicker}
           </div>
           {kept.map((s) => (
             <div key={s.id} className="rail-body" style={s.id === rail ? undefined : { display: "none" }}>
@@ -311,20 +376,24 @@ export default function ContextRail() {
           </button>
         ))}
         {jumps.length > 0 && <span className="strip-sep" />}
-        {jumps.map((j) => (
-          <button
-            key={j.view}
-            className={`rail-icon strip-btn ${view === j.view ? "active" : ""}`}
-            title={j.label}
-            aria-label={j.label}
-            aria-pressed={view === j.view}
-            onClick={() => setActiveView(j.view)}
-          >
-            <j.icon />
-          </button>
-        ))}
+        {jumps.map((c) => {
+          const v = VIEW_OF_CAPABILITY[c.descriptor.id]!;
+          const JIcon = JUMP_ICONS[v] ?? Icon.context;
+          return (
+            <button
+              key={c.descriptor.id}
+              className={`rail-icon strip-btn ${view === v ? "active" : ""}`}
+              title={c.descriptor.label}
+              aria-label={c.descriptor.label}
+              aria-pressed={view === v}
+              onClick={() => c.descriptor.open()}
+            >
+              <JIcon />
+            </button>
+          );
+        })}
         <span className="strip-spacer" />
-        {pluginPicker}
+        {moreToolsPicker}
       </div>
     </aside>
   );

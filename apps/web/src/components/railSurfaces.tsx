@@ -123,20 +123,20 @@ function EventsView() {
   );
 }
 
-registerSurface({ id: "files", title: "Files", plugin: "files", order: 10, icon: Icon.files, component: FilesPanel });
+registerSurface({ id: "files", title: "Files", capabilityId: "files", order: 10, icon: Icon.files, component: FilesPanel });
 registerSurface({
-  id: "changes", title: "Changes", plugin: "git", order: 20, icon: Icon.tree,
+  id: "changes", title: "Changes", capabilityId: "git", order: 20, icon: Icon.tree,
   component: ChangesPanel, badge: (ctx) => ctx.changeCount,
 });
-registerSurface({ id: "context", title: "Context", plugin: "context", order: 30, icon: Icon.context, component: ContextView });
-registerSurface({ id: "knowledge", title: "Knowledge", plugin: "knowledge", order: 40, icon: Icon.book, component: KnowledgePanel });
+registerSurface({ id: "context", title: "Context", capabilityId: "context", order: 30, icon: Icon.context, component: ContextView });
+registerSurface({ id: "knowledge", title: "Knowledge", capabilityId: "knowledge", order: 40, icon: Icon.book, component: KnowledgePanel });
 registerSurface({
-  id: "usage", title: "Usage", plugin: "usage", order: 50, icon: Icon.usage,
+  id: "usage", title: "Usage", capabilityId: "usage", order: 50, icon: Icon.usage,
   component: UsagePanel,
   // content-driven (OC#2418): nothing to show until the session spends tokens
   visible: (ctx) => !ctx.hasSession || ctx.totalTokens > 0,
 });
 registerSurface({
-  id: "events", title: "Events", plugin: "events", order: 60, icon: Icon.events,
+  id: "events", title: "Events", capabilityId: "events", order: 60, icon: Icon.events,
   component: EventsView, badge: (ctx) => ctx.eventCount,
 });

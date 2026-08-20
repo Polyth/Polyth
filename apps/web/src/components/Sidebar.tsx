@@ -5,7 +5,6 @@ import {
 } from "../store.ts";
 import { createSession } from "../init.ts";
 import { api } from "../api.ts";
-import { usePrefs } from "../prefs.ts";
 import { MOD } from "../format.ts";
 import { friendlyError } from "../settings.ts";
 import { Icon } from "../icons.tsx";
@@ -32,7 +31,6 @@ export default function Sidebar() {
   const drawerOpen = useStore((s) => s.sidebarOpen);
   const branch = useStore((s) => s.gitBranch);
   const productName = useStore((s) => s.settings.productName);
-  const prefs = usePrefs();
   const project = projects.find((p) => p.id === activeProjectId) ?? null;
   const [renamingProject, setRenamingProject] = useState<string | null>(null);
   const [projectName, setProjectName] = useState("");
@@ -92,9 +90,7 @@ export default function Sidebar() {
           <span className="brand"><i>p</i> {productName.toLowerCase()}</span>
           <span className="side-icons">
             <button className="icon-btn" title={`Search sessions (${MOD}P)`} onClick={() => setOverlay("search")}><Icon.search /></button>
-            {prefs.plugins.includes("git") && (
-              <button className="icon-btn" title="Git & worktrees" onClick={() => setActiveView("git")}><Icon.tree /></button>
-            )}
+            <button className="icon-btn" title="Source control (Git & worktrees)" onClick={() => setActiveView("git")}><Icon.tree /></button>
             <button className="icon-btn" title="Open project" onClick={() => setOverlay("project-picker")}><Icon.plus /></button>
             {compact && (
               <button
@@ -175,13 +171,11 @@ export default function Sidebar() {
                     setRenamingProject(p.id);
                     setProjectName(p.name);
                   }}>Rename project</button>
-                  {prefs.plugins.includes("git") && (
-                    <button role="menuitem" onClick={() => {
-                      setProjectMenu(null);
-                      if (p.id !== activeProjectId) activateProject(p.id);
-                      setActiveView("git");
-                    }}>Git &amp; worktrees</button>
-                  )}
+                  <button role="menuitem" onClick={() => {
+                    setProjectMenu(null);
+                    if (p.id !== activeProjectId) activateProject(p.id);
+                    setActiveView("git");
+                  }}>Source control (Git &amp; worktrees)</button>
                 </div>
               )}
             </div>

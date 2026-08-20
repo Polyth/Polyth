@@ -15,7 +15,6 @@ import {
 } from "@polyth/dictation";
 import { registerSlot } from "./slots.ts";
 import { requestComposerInsert } from "./composerInsert.ts";
-import { pluginOn, subscribePrefs, usePrefs } from "./prefs.ts";
 import { getState, openSettingsPage, subscribeStore } from "./store.ts";
 import { api } from "./api.ts";
 import { startStreamingDictation, type StreamingDictation } from "./dictationClient.ts";
@@ -150,7 +149,6 @@ const boundedReason = (raw: unknown): string => {
 
 function MicButton() {
   const prefs = useVoicePrefs();
-  const workspace = usePrefs();
   const [phase, setPhase] = useState<MicPhase>("idle");
   const [error, setError] = useState<string | null>(null);
   const [capability, setCapability] = useState<{ available: boolean; engine?: string; reason?: string } | null>(null);
@@ -158,7 +156,6 @@ function MicButton() {
   const streamRef = useRef<StreamingDictation | null>(null);
   const support = speechSupport(typeof window !== "undefined" ? window : undefined);
   const serverStt = prefs.sttEngine === "server";
-  const pluginEnabled = workspace.plugins.includes("dictation");
 
   useEffect(() => () => {
     recRef.current?.abort();
@@ -166,20 +163,20 @@ function MicButton() {
   }, []);
 
   // Server capability is a live probe, not an assumption from preferences.
+  // Presets affect placement only; they never gate voice availability.
   useEffect(() => {
-    if (!pluginEnabled || !prefs.dictation || !serverStt) {
+    if (!prefs.dictation || !serverStt) {
       setCapability(null);
       return;
     }
     let cancelled = false;
     void api.dictationCapability().then((c) => { if (!cancelled) setCapability(c); });
     return () => { cancelled = true; };
-  }, [pluginEnabled, prefs.dictation, serverStt]);
+  }, [prefs.dictation, serverStt]);
 
   // The four truthful availability states (plus checking) for the idle control.
   const availability: { available: boolean; reason?: string; settings?: boolean } =
-    !pluginEnabled ? { available: false, reason: "Voice plugin is off", settings: true }
-    : !prefs.dictation ? { available: false, reason: "Dictation is off", settings: true }
+    !prefs.dictation ? { available: false, reason: "Dictation is off", settings: true }
     : serverStt && capability === null ? { available: false, reason: "Checking microphone…" }
     : serverStt && capability && !capability.available && !support.stt
       ? { available: false, reason: capability.reason ?? "Server transcription unavailable", settings: true }
@@ -338,7 +335,7 @@ export function installVoice(): void {
     const from = spoken.get(id)!;
     if (last <= from) return;
     spoken.set(id, last);
-    if (!voicePrefs.tts || !pluginOn("dictation")) return;
+    if (!voicePrefs.tts) return;
     for (let i = events.length - 1; i >= 0; i--) {
       const e = events[i]!;
       if (e.seq <= from) break;
@@ -349,5 +346,4 @@ export function installVoice(): void {
     }
   };
   subscribeStore(check);
-  subscribePrefs(check);
 }

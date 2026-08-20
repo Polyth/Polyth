@@ -40,17 +40,17 @@ test("registry orders by order then id, replaces by id, unregisters", () => {
   assert.deepEqual(listSurfaces(), []);
 });
 
-test("visibleSurfaces gates on plugin toggles then content-driven visibility", () => {
+test("visibleSurfaces gates on content-driven visibility only — no plugin allow-list (UX-PERSONAS)", () => {
   const list: RailSurface[] = [
     surface("always", 1),
-    surface("gated", 2, { plugin: "git" }),
+    surface("capability", 2, { capabilityId: "git" }),
     surface("content", 3, { visible: (c) => c.totalTokens > 0 }),
   ];
-  assert.deepEqual(visibleSurfaces(list, [], ctx()).map((s) => s.id), ["always"]);
-  assert.deepEqual(visibleSurfaces(list, ["git"], ctx()).map((s) => s.id), ["always", "gated"]);
+  // A capability id is placement metadata, never an availability gate.
+  assert.deepEqual(visibleSurfaces(list, ctx()).map((s) => s.id), ["always", "capability"]);
   assert.deepEqual(
-    visibleSurfaces(list, ["git"], ctx({ totalTokens: 5 })).map((s) => s.id),
-    ["always", "gated", "content"],
+    visibleSurfaces(list, ctx({ totalTokens: 5 })).map((s) => s.id),
+    ["always", "capability", "content"],
   );
 });
 

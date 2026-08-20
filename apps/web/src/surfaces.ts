@@ -7,7 +7,6 @@
 import { useSyncExternalStore } from "react";
 import type { JSX, ReactNode } from "react";
 import { listSlots } from "./slots.ts";
-import type { PluginId } from "./prefs.ts";
 
 /** Values the rail computes once per render for badge/visibility decisions —
  *  shared so surfaces never spin up their own pollers (e.g. git status). */
@@ -24,8 +23,10 @@ export interface RailSurface {
   /** Short strip label; falls back to title. */
   shortLabel?: string;
   icon?: () => JSX.Element;
-  /** Plugin toggle gating the surface; undefined = always available. */
-  plugin?: PluginId;
+  /** Capability the panel belongs to in the navigation metadata layer
+   *  (UX-PERSONAS); defaults to the surface id. Placement metadata only —
+   *  never an availability gate. */
+  capabilityId?: string;
   order: number;
   /** Panel body — a component, so it owns its hooks and state. */
   component: () => ReactNode;
@@ -82,15 +83,14 @@ export function slotSurfaces(): RailSurface[] {
   }));
 }
 
-/** Pure gate: plugin toggles first, then content-driven visibility. */
+/** Pure gate: content-driven visibility only. The old plugin allow-list is
+ *  gone (UX-PERSONAS) — presets and preferences place panels, they never
+ *  remove them. */
 export function visibleSurfaces(
   surfaces: RailSurface[],
-  enabledPlugins: readonly string[],
   ctx: RailSurfaceContext,
 ): RailSurface[] {
-  return surfaces
-    .filter((s) => s.plugin === undefined || enabledPlugins.includes(s.plugin))
-    .filter((s) => s.visible === undefined || s.visible(ctx));
+  return surfaces.filter((s) => s.visible === undefined || s.visible(ctx));
 }
 
 export interface PolythSurfacesApi {

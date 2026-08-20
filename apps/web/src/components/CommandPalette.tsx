@@ -5,7 +5,6 @@ import { commandHint, filterPalette, listCommands, type PaletteCommand } from ".
 import { api, type FileSearchHitDto, type WorkspaceSearchItemDto } from "../api.ts";
 import { activateProject, openEditorFile, setOverlay, setUiError, useStore } from "../store.ts";
 import { openSession } from "../init.ts";
-import { pluginOn } from "../prefs.ts";
 import { announce } from "./a11y/live.tsx";
 
 type Entry =
@@ -43,7 +42,7 @@ export default function CommandPalette() {
   // Debounced remote searches; stale responses are dropped by sequence.
   useEffect(() => {
     const mySeq = ++seq.current;
-    const wantFiles = pluginOn("files") && !!projectId && text.length >= (filesMode ? 1 : 2);
+    const wantFiles = !!projectId && text.length >= (filesMode ? 1 : 2);
     // `is:archived` alone lists recent archived sessions (server-bounded).
     const wantWorkspaces = !filesMode && (archived || text.length >= 2);
     if (!wantFiles) setFiles([]);

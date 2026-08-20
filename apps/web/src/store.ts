@@ -29,6 +29,8 @@ export interface WorktreeSessionRequest {
 
 export interface AppState {
   projects: Project[];
+  /** True once the initial project list fetch has resolved. */
+  projectsLoaded: boolean;
   sessions: SessionProjection[];
   events: Record<string, SessionEvent[]>;
   models: ModelDescriptor[];
@@ -55,6 +57,7 @@ export interface AppState {
 
 let state: AppState = {
   projects: [],
+  projectsLoaded: false,
   sessions: [],
   events: {},
   models: [],
@@ -108,7 +111,7 @@ export function useActiveModel(): RenderModel {
 // ---- actions -------------------------------------------------------------
 
 export function setProjects(projects: Project[]): void {
-  set({ projects });
+  set({ projects, projectsLoaded: true });
 }
 export function setSessions(sessions: SessionProjection[]): void {
   set({ sessions });

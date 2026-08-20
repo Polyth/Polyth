@@ -1,9 +1,12 @@
 import { Fragment, useState, useRef, useEffect, useCallback, type ClipboardEvent, type KeyboardEvent } from "react";
-import { getState, useActiveModel, useStore, setActiveView, setUiError, openSettingsPage } from "../store.ts";
+import { getState, useActiveModel, useStore, setUiError, openSettingsPage } from "../store.ts";
 import { sendMessage, abortSession, createSession } from "../init.ts";
 import { api, type ComposerCatalogResult, type SlashCommand, type SnippetDef } from "../api.ts";
 import { loadDraft, saveDraft, type AutocompleteItem } from "../utils.ts";
-import { PERSONAS, usePrefs } from "../prefs.ts";
+import {
+  setComposerDetail, starterLabelsFor, usePresentation, usePresetState,
+  effectiveComposerDetail,
+} from "../workspacePresets.ts";
 import { renderSlot } from "../slots.ts";
 import { dragKind, dropIntoSession } from "../dnd.ts";
 import {
@@ -70,14 +73,6 @@ function modelRefFromValue(value: string): { providerID: string; modelID: string
   return undefined;
 }
 
-const STARTERS = [
-  "Explore the codebase",
-  "Review my recent changes",
-  "Add tests",
-  "Debug an issue",
-  "Explain this project",
-];
-
 const PROFILE_MISSING_NOTE = "Profile unavailable — choose another";
 
 export default function Composer({ variant = "docked" }: { variant?: "docked" | "hero" }) {
@@ -92,10 +87,13 @@ export default function Composer({ variant = "docked" }: { variant?: "docked" | 
   const session = useStore((s) => s.sessions.find((x) => x.id === s.activeSessionId) ?? null);
   const model = useActiveModel();
   const working = model.turn?.status === "working";
-  const prefs = usePrefs();
-  // Creator persona: plain-language composer, no model/agent jargon.
-  const simple = (prefs.persona ? PERSONAS[prefs.persona].composer : "full") === "simple";
-  const goalsEnabled = prefs.plugins.includes("goals");
+  // UX-PERSONAS: one composer. The preset seeds only the initial disclosure
+  // state; the user's explicit Technical options choice is stored separately
+  // and wins over every later preset. No preset change unmounts the composer.
+  const presetState = usePresetState();
+  const presentation = usePresentation();
+  const starters = starterLabelsFor(presetState.presetId, presentation.starterOrder);
+  const techOpen = effectiveComposerDetail() === "technical";
   const noModels = models.length === 0;
 
   // IME-safe input: the DOM owns live text; `text` tracks committed edits only.
@@ -582,7 +580,7 @@ export default function Composer({ variant = "docked" }: { variant?: "docked" | 
     onAction: pinModel,
   };
 
-  const noneLabel = simple ? "Default" : "None";
+  const noneLabel = "None";
   const profileItems: PickerItem[] = [
     { id: "", label: noneLabel, group: "" },
     ...profiles.map((p) => ({
@@ -614,9 +612,11 @@ export default function Composer({ variant = "docked" }: { variant?: "docked" | 
   const currentAgentLabel = agentItems.find((i) => i.id === agentValue)?.label ?? agentItems[0]!.label;
 
   const followUp = getUiSettings().followUpBehavior;
+  // Starter actions are generated from the preset schema (stable ids →
+  // localized labels). Selecting one only fills the composer draft.
   const starterChips = (
     <div className="starter-chips" aria-label="Suggestions">
-      {STARTERS.map((label) => (
+      {starters.map((label) => (
         <button
           key={label}
           className="chip"
@@ -651,16 +651,6 @@ export default function Composer({ variant = "docked" }: { variant?: "docked" | 
       {dropHint && (
         <div className="drop-hint">{dropHint === "path" ? "Attach to chat" : "Drop to attach"}</div>
       )}
-      {simple && (prefs.plugins.includes("multirun") || prefs.plugins.includes("fusion")) && (
-        <div className="chip-row">
-          {prefs.plugins.includes("multirun") && (
-            <button className="chip" onClick={() => setActiveView("multirun")}>Try 3 directions</button>
-          )}
-          {prefs.plugins.includes("fusion") && (
-            <button className="chip" onClick={() => setActiveView("fusion")}>Combine the best parts</button>
-          )}
-        </div>
-      )}
       {noModels && (
         <div className="composer-note" role="status">
           No models available — check that the backend is running and configured.
@@ -678,7 +668,7 @@ export default function Composer({ variant = "docked" }: { variant?: "docked" | 
           onRemove={(id) => removeAttachment(session?.id ?? null, id)}
         />
       )}
-      {attachments.length > 0 && !simple && !noModels && (
+      {attachments.length > 0 && !noModels && (
         <div className="composer-attach-note">{ATTACHMENT_COMPAT_NOTE}</div>
       )}
       <div className="composer-input">
@@ -691,9 +681,9 @@ export default function Composer({ variant = "docked" }: { variant?: "docked" | 
           ariaLabel="Message"
           placeholder={shellMode
             ? "Enter a workspace shell command…"
-            : simple
-            ? "Describe what you want — it gets built as you watch…"
-            : "Ask Polyth to explore, build, or review — ! for shell, / for commands, # for snippets, @ for files"}
+            : techOpen
+            ? "Ask Polyth to explore, build, or review — ! for shell, / for commands, # for snippets, @ for files"
+            : "Ask Polyth to explore, build, or review…"}
           {...(acView ? {
             role: "combobox",
             ariaAutocomplete: "list" as const,
@@ -761,13 +751,27 @@ export default function Composer({ variant = "docked" }: { variant?: "docked" | 
           </div>
         )}
       </div>
-      {/* UX-A390 command surface: one composer, one send() path. The bar is
-          three semantic groups — selectors, extension slots, actions — which
-          stay on one row in wide mode and become the two-tier phone layout in
-          CSS. No controller logic forks. */}
+      {techOpen && (
+        <div className="composer-tech-help" role="note">
+          Type <kbd>!</kbd> for a shell command, <kbd>/</kbd> for commands, <kbd>#</kbd> for snippets, <kbd>@</kbd> to mention files.
+        </div>
+      )}
+      {/* UX-A390 and UX-PERSONAS share one composer and one send path. The
+          preset controls initial disclosure only; all execution controls stay
+          reachable from the persistent Technical options toggle. */}
       <div className="composer-bar composer-row">
         <div className="composer-selectors">
-          {!simple && !noModels && (
+          <button
+            className="composer-tech-toggle"
+            aria-expanded={techOpen}
+            title={techOpen
+              ? "Hide model, agent, and syntax options"
+              : "Show model, agent, and syntax options"}
+            onClick={() => setComposerDetail(techOpen ? "plain" : "technical")}
+          >
+            Technical options
+          </button>
+          {techOpen && !noModels && (
             <Picker
               className="picker-model"
               label="Model" direction="up" items={modelItems} value={modelValue} onPick={pickModel}
@@ -775,31 +779,20 @@ export default function Composer({ variant = "docked" }: { variant?: "docked" | 
               trailingAction={modelRowAction}
             />
           )}
-          {!simple && agents.length > 0 && (
+          {techOpen && agents.length > 0 && (
             <Picker
               className="picker-agent"
               label="Agent" direction="up" items={agentItems} value={agentValue} onPick={pickAgent}
               ariaLabel={`Select agent, current ${currentAgentLabel}`}
             />
           )}
-          {/* Profile stays present at zero profiles; Creator renders the same
-              store as `Setup` — one profile system, one send field. */}
-          {!simple && (
+          {techOpen && (
             <Picker
               className="picker-profile"
               label="Profile" direction="up" items={profileItems} value={selectedProfileId} onPick={pickProfile}
               placeholder={profileMissing ? "Profile unavailable" : "None"}
               ariaLabel={`Select profile, current ${currentProfileName}`}
               footerAction={profileFooter("Create profile…")}
-            />
-          )}
-          {simple && (
-            <Picker
-              className="picker-profile picker-setup"
-              label="Setup" direction="up" items={profileItems} value={selectedProfileId} onPick={pickProfile}
-              placeholder={profileMissing ? "Profile unavailable" : "Default"}
-              ariaLabel={`Working setup (profile), current ${currentProfileName}`}
-              footerAction={profileFooter("Create advanced setup…")}
             />
           )}
         </div>
@@ -822,7 +815,7 @@ export default function Composer({ variant = "docked" }: { variant?: "docked" | 
           <ComposerAddMenu
             hasProject={!!activeProjectId}
             hasSession={!!session?.id}
-            goalsEnabled={goalsEnabled}
+            goalsEnabled
             draftText={text}
             commands={commandCatalog}
             snippets={snippetCatalog}

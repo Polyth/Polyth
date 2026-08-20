@@ -10,6 +10,13 @@ import { useShellMode, type ShellMode } from "../responsiveShell.ts";
 import { NarrowPanelTrigger } from "./ContextRail.tsx";
 import Picker from "./Picker.tsx";
 import type { PickerItem } from "../picker.ts";
+import {
+  GROUP_ORDER, TECHNICAL_GROUP_LABEL, capabilityGroup, useResolvedCapabilities,
+  type ResolvedCapability,
+} from "../capabilities.ts";
+import { getPresetState, setMoreToolsOpen } from "../workspacePresets.ts";
+import { PANEL_OF_CAPABILITY, VIEW_OF_CAPABILITY } from "../builtinCapabilities.ts";
+import { Icon } from "../icons.tsx";
 
 const STROKE = { fill: "none", stroke: "currentColor", strokeWidth: 1.5, strokeLinecap: "round", strokeLinejoin: "round" } as const;
 
@@ -75,12 +82,178 @@ const ICONS: Record<AppView, React.ReactNode> = {
   ),
 };
 
-// Groups separated by a thin divider: chat · workspace · workflows.
-const VIEW_GROUPS: Array<Array<[AppView, string]>> = [
-  [["session", "Chat"]],
-  [["files", "Files"], ["git", "Git"], ["terminal", "Terminal"], ["preview", "Preview"]],
-  [["goals", "Goals"], ["multirun", "Multi-run"], ["fusion", "Fusion"], ["walkthrough", "Walkthrough"], ["schedule", "Schedule"], ["github", "GitHub"]],
-];
+// Icons for capabilities that are not full views (panels, settings pages).
+const EXTRA_ICONS: Record<string, React.ReactNode> = {
+  usage: <Icon.usage />,
+  events: <Icon.events />,
+  context: <Icon.context />,
+  knowledge: <Icon.book />,
+  voice: <Icon.mic />,
+  "models-agents": <Icon.gear />,
+  diagnostics: <Icon.shield />,
+};
+
+function capabilityIcon(id: string): React.ReactNode {
+  const view = VIEW_OF_CAPABILITY[id];
+  if (view && ICONS[view]) return ICONS[view];
+  return EXTRA_ICONS[id] ?? <Icon.context />;
+}
+
+/** Primary navigation + the named More tools disclosure. Every surface
+ *  resolves the same capability list — nothing is filtered out here; items
+ *  that don't fit overflow into More tools, and an active overflowed item
+ *  stays named in the header. */
+function CapabilityNav() {
+  const resolved = useResolvedCapabilities();
+  const view = useStore((s) => s.activeView);
+  const rail = useStore((s) => s.railPlugin);
+  const navRef = useRef<HTMLElement>(null);
+  const [fit, setFit] = useState(8);
+  const [moreOpen, setMoreOpen] = useState(() => getPresetState().moreToolsOpen);
+  const [techOpen, setTechOpen] = useState(false);
+  const moreRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+
+  // Overflow: primary items that don't fit move into More tools; they never
+  // disappear. ~36px per icon button + room for the named trigger.
+  useEffect(() => {
+    const el = navRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const compute = () => setFit(Math.max(1, Math.floor((el.clientWidth - 96) / 36)));
+    compute();
+    const ro = new ResizeObserver(compute);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
+  useEffect(() => {
+    if (!moreOpen) return;
+    const onDown = (e: MouseEvent) => {
+      if (moreRef.current && !moreRef.current.contains(e.target as Node)) toggleMore(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.stopPropagation();
+        toggleMore(false);
+        triggerRef.current?.focus();
+      }
+    };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey, true);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey, true);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [moreOpen]);
+
+  const toggleMore = (open: boolean) => {
+    setMoreOpen(open);
+    setMoreToolsOpen(open); // stored separately from the preset
+  };
+
+  const isActive = (c: ResolvedCapability): boolean => {
+    const v = VIEW_OF_CAPABILITY[c.descriptor.id];
+    if (v) return view === v;
+    const panel = PANEL_OF_CAPABILITY[c.descriptor.id];
+    return panel !== undefined && rail === panel;
+  };
+
+  const primaries = resolved.filter((c) => c.tier === "primary" && c.descriptor.available());
+  let visible = primaries.slice(0, fit);
+  const overflowedActive = primaries.slice(fit).find(isActive);
+  if (overflowedActive) visible = [...visible.slice(0, Math.max(0, fit - 1)), overflowedActive];
+  const visibleIds = new Set(visible.map((c) => c.descriptor.id));
+  // Everything else (overflowed primaries + more + technical) stays reachable
+  // through the named disclosure, grouped by user outcome.
+  const rest = resolved.filter((c) => !visibleIds.has(c.descriptor.id));
+
+  const groups = GROUP_ORDER
+    .map((label) => ({
+      label,
+      items: rest.filter((c) => capabilityGroup(c.descriptor.id) === label),
+    }))
+    .filter((g) => g.items.length > 0);
+
+  const itemButton = (c: ResolvedCapability) => {
+    const available = c.descriptor.available();
+    const reason = available ? null : c.descriptor.unavailableReason?.() ?? "Unavailable right now";
+    const alias = c.descriptor.technicalLabel && c.descriptor.technicalLabel !== c.descriptor.label
+      ? ` (${c.descriptor.technicalLabel})`
+      : "";
+    return (
+      <button
+        key={c.descriptor.id}
+        role="menuitem"
+        className="more-tools-item"
+        disabled={!available}
+        title={reason ?? c.descriptor.plainDescription}
+        onClick={() => {
+          toggleMore(false);
+          c.descriptor.open();
+        }}
+      >
+        <span>{c.descriptor.label}{alias}</span>
+        {!available && reason && <span className="more-tools-reason">{reason}</span>}
+      </button>
+    );
+  };
+
+  return (
+    <nav className="view-switcher" aria-label="Workspace tools" ref={navRef}>
+      {visible.map((c) => {
+        const overflowed = c === overflowedActive;
+        return (
+          <button
+            key={c.descriptor.id}
+            className={`view-icon ${isActive(c) ? "active" : ""} ${overflowed ? "view-icon-named" : ""}`}
+            title={c.descriptor.label}
+            aria-label={c.descriptor.label}
+            aria-pressed={isActive(c)}
+            onClick={() => c.descriptor.open()}
+          >
+            {capabilityIcon(c.descriptor.id)}
+            {overflowed && <span className="view-icon-label">{c.descriptor.label}</span>}
+          </button>
+        );
+      })}
+      <div className="more-tools" ref={moreRef}>
+        <button
+          ref={triggerRef}
+          className="more-tools-trigger"
+          aria-expanded={moreOpen}
+          aria-haspopup="menu"
+          onClick={() => toggleMore(!moreOpen)}
+        >
+          More tools
+        </button>
+        {moreOpen && (
+          <div className="more-tools-popup" role="menu" aria-label="More tools">
+            {groups.map((g) =>
+              g.label === TECHNICAL_GROUP_LABEL ? (
+                <div className="more-tools-group" key={g.label}>
+                  <button
+                    className="more-tools-group-head"
+                    aria-expanded={techOpen}
+                    onClick={() => setTechOpen((v) => !v)}
+                  >
+                    <span className="more-tools-group-arrow" aria-hidden="true">{techOpen ? "▾" : "▸"}</span>
+                    {TECHNICAL_GROUP_LABEL}
+                  </button>
+                  {techOpen && g.items.map(itemButton)}
+                </div>
+              ) : (
+                <div className="more-tools-group" key={g.label}>
+                  <div className="more-tools-group-label">{g.label}</div>
+                  {g.items.map(itemButton)}
+                </div>
+              ))}
+          </div>
+        )}
+      </div>
+    </nav>
+  );
+}
 
 function ContextRing({ gauge }: { gauge: ContextGauge }) {
   const r = 13;
@@ -149,14 +322,16 @@ function AutoAcceptChip({ sessionId, effective }: { sessionId: string; effective
 }
 
 /** UX-A390: one bounded current-view trigger replacing the desktop switcher
- *  in compact mode. Items derive from the same VIEW_GROUPS — no second view
- *  list, no second router. The accessible name always carries the current
- *  label even when the visible text condenses to the icon at phone width. */
+ *  in compact mode. Items derive from the same resolved capability list as
+ *  desktop navigation; presets reorder but never remove them. */
 function CompactViewPicker({ view }: { view: AppView }) {
-  const groupNames = ["", "Workspace", "Workflows"];
-  const items: PickerItem[] = VIEW_GROUPS.flatMap((group, gi) =>
-    group.map(([id, label]) => ({ id, label, group: groupNames[gi] ?? "" })),
-  );
+  const resolved = useResolvedCapabilities();
+  const views = resolved.filter((c) => VIEW_OF_CAPABILITY[c.descriptor.id] !== undefined);
+  const items: PickerItem[] = views.map((c) => ({
+    id: VIEW_OF_CAPABILITY[c.descriptor.id]!,
+    label: c.descriptor.label,
+    group: c.tier === "primary" ? "" : c.tier === "more" ? "More tools" : TECHNICAL_GROUP_LABEL,
+  }));
   const current = items.find((i) => i.id === view)?.label ?? view;
   return (
     <Picker
@@ -291,9 +466,9 @@ function OverflowMenu({ sessionId, onGoal }: { sessionId: string | null; onGoal:
 export default function Header() {
   const session = useStore((s) => s.sessions.find((x) => x.id === s.activeSessionId) ?? null);
   const project = useStore((s) => s.projects.find((p) => p.id === s.activeProjectId) ?? null);
+  const view = useStore((s) => s.activeView);
   const branch = useStore((s) => s.gitBranch);
   const models = useStore((s) => s.models);
-  const view = useStore((s) => s.activeView);
   const model = useActiveModel();
   const ctx = useMemo(() => {
     const ref = model.contextUsage?.model ?? model.turn?.model ?? session?.model;
@@ -332,24 +507,7 @@ export default function Header() {
         {compact ? (
           <CompactViewPicker view={view} />
         ) : (
-          <nav className="view-switcher" aria-label="Views">
-            {VIEW_GROUPS.map((group, gi) => (
-              <span className="view-group" key={gi}>
-                {group.map(([id, label]) => (
-                  <button
-                    key={id}
-                    className={`view-icon ${view === id ? "active" : ""}`}
-                    title={label}
-                    aria-label={label}
-                    aria-pressed={view === id}
-                    onClick={() => setActiveView(id)}
-                  >
-                    {ICONS[id]}
-                  </button>
-                ))}
-              </span>
-            ))}
-          </nav>
+          <CapabilityNav />
         )}
         <OverflowMenu sessionId={session?.id ?? null} onGoal={() => setGoalFormOpen((v) => !v)} />
         {compact && <NarrowPanelTrigger />}

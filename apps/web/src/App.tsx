@@ -1,18 +1,19 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import Sidebar from "./components/Sidebar.tsx";
 import Main from "./components/Main.tsx";
 import ContextRail from "./components/ContextRail.tsx";
 import StatusBar from "./components/StatusBar.tsx";
-import Onboarding from "./components/Onboarding.tsx";
+import PresetSetup from "./components/PresetSetup.tsx";
 import CommandPalette from "./components/CommandPalette.tsx";
 import SessionSearch from "./components/SessionSearch.tsx";
 import SettingsModal from "./components/SettingsModal.tsx";
 import ProjectFolderDialog from "./components/ProjectFolderDialog.tsx";
 import ViewErrorBoundary from "./components/ViewErrorBoundary.tsx";
 import { clearUiError, setOverlay, useStore } from "./store.ts";
-import { usePrefs } from "./prefs.ts";
+import { usePresetState } from "./workspacePresets.ts";
 import { LiveRegion } from "./components/a11y/live.tsx";
 import WorktreeSessionDialog from "./components/WorktreeSessionDialog.tsx";
+import "./builtinCapabilities.ts";
 
 function ErrorBanner() {
   const message = useStore((s) => s.uiError);
@@ -30,7 +31,11 @@ export default function App() {
   const viewResetKey = useStore(
     (s) => `${s.activeProjectId ?? ""}:${s.activeSessionId ?? ""}:${s.activeView}`,
   );
-  const prefs = usePrefs();
+  const preset = usePresetState();
+  const projectReady = useStore(
+    (s) => s.activeProjectId !== null && s.projects.some((p) => p.id === s.activeProjectId),
+  );
+  const noProjects = useStore((s) => s.projectsLoaded && s.projects.length === 0);
 
   useEffect(() => {
     const openSettings = () => setOverlay("settings");
@@ -38,7 +43,21 @@ export default function App() {
     return () => window.removeEventListener("polyth:open-settings", openSettings);
   }, []);
 
-  if (!prefs.persona || overlay === "onboarding") return <Onboarding />;
+  // First-run sequence: the shell, runtime state, and project picker never
+  // depend on a preset. With no project yet, offer the picker once — preset
+  // setup does not cover or replace connection, health, or project errors.
+  const autoPickerShown = useRef(false);
+  useEffect(() => {
+    if (preset.setup === "unseen" && noProjects && overlay === null && !autoPickerShown.current) {
+      autoPickerShown.current = true;
+      setOverlay("project-picker");
+    }
+  }, [preset.setup, noProjects, overlay]);
+
+  // Optional preset setup: only after a project is usable, only while unseen,
+  // and never over another dialog. Settings can reopen it (overlay).
+  const showPresetSetup =
+    overlay === "onboarding" || (preset.setup === "unseen" && projectReady && overlay === null);
 
   return (
     <div className="app">
@@ -56,6 +75,7 @@ export default function App() {
       {overlay === "project-picker" && <ProjectFolderDialog onClose={() => setOverlay(null)} />}
       {overlay === "worktree-session" && <WorktreeSessionDialog />}
       <SettingsModal open={overlay === "settings"} onClose={() => setOverlay(null)} />
+      {showPresetSetup && <PresetSetup />}
       <LiveRegion />
     </div>
   );
