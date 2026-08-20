@@ -1,15 +1,16 @@
-import { Fragment, useEffect, useState, type JSX } from "react";
+import { Fragment, useState, type JSX } from "react";
 import { renderSlot } from "../slots.ts";
 import { useActiveModel, useStore, setActiveView, setOverlay, setRailPlugin, toggleRailPlugin, type AppView, type RailPlugin } from "../store.ts";
 import { PLUGIN_LABELS, togglePlugin, usePrefs, type PluginId } from "../prefs.ts";
 import { fmtCost, fmtTokens } from "../format.ts";
-import { api } from "../api.ts";
 import { Icon } from "../icons.tsx";
 import { useEscape } from "../useEscape.ts";
 import type { SessionProjection } from "@polyth/contracts";
 import ChangesPanel from "./ChangesPanel.tsx";
 import FilesPanel from "./FilesPanel.tsx";
 import KnowledgePanel from "./KnowledgePanel.tsx";
+import { useGitStatus } from "../gitStatusStore.ts";
+import { gitChangedFiles } from "../pendingChanges.ts";
 
 // Rail panels toggled in place; each is backed by a plugin toggle.
 const PANELS: Array<{ rail: RailPlugin; plugin: PluginId; label: string; icon: () => JSX.Element }> = [
@@ -127,16 +128,11 @@ export default function ContextRail() {
   const model = useActiveModel();
   const events = useStore((s) => (s.activeSessionId ? s.events[s.activeSessionId] : undefined) ?? NO_EVENTS);
   const [picker, setPicker] = useState(false);
-  const [changeCount, setChangeCount] = useState(0);
   useEscape(picker, () => setPicker(false));
 
   const gitOn = prefs.plugins.includes("git");
-  useEffect(() => {
-    if (!projectId || !gitOn) { setChangeCount(0); return; }
-    void api.gitStatus(projectId).then((s) =>
-      setChangeCount(s.staged.length + s.unstaged.length + s.untracked.length + s.conflicted.length),
-    );
-  }, [projectId, gitOn]);
+  const gitStatus = useGitStatus(gitOn ? projectId : null, model.turn?.status === "working");
+  const changeCount = gitStatus ? gitChangedFiles(gitStatus).length : 0;
 
   const panels = PANELS.filter((p) => prefs.plugins.includes(p.plugin));
   const jumps = JUMPS.filter((j) => prefs.plugins.includes(j.plugin));

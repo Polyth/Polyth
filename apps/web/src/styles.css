@@ -549,6 +549,31 @@ html.light .composer-card { background: var(--elevated); box-shadow: 0 24px 60px
 .composer-mode-label {
   color: var(--accent); font-size: 11px; font-weight: 600; padding: 6px 10px 0;
 }
+.pending-changes-bar {
+  position: relative; display: flex; align-items: center; gap: 7px; margin: 0 0 8px;
+  min-height: 34px; padding: 4px 6px; border: 1px solid var(--accent-line);
+  border-radius: var(--radius-md); background: var(--accent-wash); color: var(--text-dim);
+  font-size: 12px;
+}
+.pending-changes-main, .pending-changes-dismiss, .pending-changes-files > summary {
+  border: 0; background: transparent; color: inherit; cursor: pointer; font: inherit;
+}
+.pending-changes-main { display: flex; align-items: center; gap: 7px; font-weight: 650; }
+.pending-changes-dot { width: 7px; height: 7px; border-radius: 50%; background: var(--accent); }
+.pending-changes-files { margin-left: auto; position: relative; }
+.pending-changes-files > summary { list-style: none; padding: 3px 6px; color: var(--muted); }
+.pending-changes-files > summary::-webkit-details-marker { display: none; }
+.pending-changes-menu {
+  position: absolute; right: 0; bottom: calc(100% + 8px); z-index: 40; width: min(420px, 70vw);
+  display: flex; flex-direction: column; padding: 5px; border: 1px solid var(--border);
+  border-radius: var(--radius-md); background: var(--elevated); box-shadow: var(--shadow-lg);
+}
+.pending-changes-menu button {
+  border: 0; border-radius: var(--radius-sm); background: transparent; color: var(--text-dim);
+  padding: 6px 8px; text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.pending-changes-menu button:hover { background: var(--accent-wash); color: var(--text); }
+.pending-changes-dismiss { padding: 3px 6px; color: var(--muted); font-size: 16px; line-height: 1; }
 .git-sync-steps { display: flex; flex-wrap: wrap; gap: 8px; padding: 4px 12px; font-size: 11px; }
 .git-sync-steps span { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .git-stash-row { display: flex; align-items: center; gap: 6px; padding: 4px 0; font-size: 11.5px; }
@@ -563,6 +588,13 @@ html.light .composer-card { background: var(--elevated); box-shadow: 0 24px 60px
 .split-diff-row code { min-height: 18px; padding: 1px 6px; white-space: pre; border-right: 1px solid var(--border); }
 .split-diff-row code:last-child { border-right: 0; }
 .split-diff-row.hunk code { color: var(--accent); background: color-mix(in srgb, var(--accent) 8%, transparent); }
+.task-activity {
+  display: flex; align-items: baseline; gap: 7px; margin: 4px 0; padding: 5px 9px;
+  border-left: 2px solid var(--hair-strong); color: var(--text-dim); font-size: 12px;
+}
+.task-activity-mark { width: 12px; flex: 0 0 12px; color: var(--accent); text-align: center; }
+.task-activity.completed .task-activity-mark { color: var(--green); }
+.task-activity.failed .task-activity-mark { color: var(--red); }
 .composer-card textarea {
   display: block; width: 100%; min-height: 86px; max-height: 40vh; resize: none;
   background: none; border: 0; outline: none; padding: 15px 17px 6px;

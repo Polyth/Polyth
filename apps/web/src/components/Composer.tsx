@@ -24,6 +24,7 @@ import { noteModelUsed, useModelPrefs } from "../modelPrefs.ts";
 import { getUiSettings } from "../uiPrefs.ts";
 import { migrateFavoritesOnce, useProfiles } from "../profiles.ts";
 import AgentProfileForm from "./AgentProfileForm.tsx";
+import PendingChangesBar from "./PendingChangesBar.tsx";
 import type { AgentProfile } from "@polyth/contracts";
 import { agentPickerDefaultLabel, modelPickerDefaultLabel } from "../composerDefaults.ts";
 import { modKeyLabel, parseModelRef } from "../settings.ts";
@@ -424,6 +425,7 @@ export default function Composer({ variant = "docked" }: { variant?: "docked" | 
 
   return (
     <div className={variant === "hero" ? "composer-hero" : "composer"}>
+      {variant === "docked" && <PendingChangesBar model={model} />}
       <div
         className="composer-card"
         onDragOver={(e) => { const k = dragKind(e.dataTransfer); if (k) { e.preventDefault(); setDropHint(k); } }}

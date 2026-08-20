@@ -3,7 +3,7 @@
 // The right pane shows hunk-by-hunk diffs where local review comments anchor
 // by content digest and turn Outdated when the source moves on.
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { api, type GitBranches, type GitFileEntry, type GitGraphEntry, type GitStash, type GitStatus, type Worktree } from "../api.ts";
+import { api, type GitBranches, type GitFileEntry, type GitGraphEntry, type GitStash, type Worktree } from "../api.ts";
 import { useStore, setGitBranch, setUiError } from "../store.ts";
 import { diffStat } from "../utils.ts";
 import { friendlyError } from "../settings.ts";
@@ -15,6 +15,7 @@ import {
 import CopyButton from "./CopyButton.tsx";
 import EmptyState from "./EmptyState.tsx";
 import { setGitPrefs, splitDiffRows, useGitPrefs } from "../gitPrefs.ts";
+import { refreshGitStatus, useGitStatus } from "../gitStatusStore.ts";
 
 const STATUS_LETTER: Record<string, { letter: string; cls: string; label: string }> = {
   added: { letter: "A", cls: "staged", label: "Added" },
@@ -63,7 +64,7 @@ function GraphSvg({ row }: { row: GraphRow }) {
 
 export default function GitView() {
   const projectId = useStore((s) => s.activeProjectId);
-  const [status, setStatus] = useState<GitStatus | null>(null);
+  const status = useGitStatus(projectId, false);
   const [branches, setBranches] = useState<GitBranches>({ current: "", branches: [] });
   const [trees, setTrees] = useState<Worktree[]>([]);
   const [graph, setGraph] = useState<GitGraphEntry[]>([]);
@@ -93,13 +94,13 @@ export default function GitView() {
     if (!projectId) return;
     try {
       const [s, b, w, g, stashRows] = await Promise.all([
-        api.gitStatus(projectId),
+        refreshGitStatus(projectId),
         api.gitBranches(projectId),
         api.listWorktrees(projectId),
         api.gitGraph(projectId, GRAPH_PAGE, 0),
         api.gitStashes(projectId),
       ]);
-      setStatus(s);
+      if (!s) throw new Error("git status unavailable");
       setBranches(b);
       setTrees(w);
       setGraph(g);
@@ -108,7 +109,6 @@ export default function GitView() {
       setLoadError(false);
       if (b.current) setGitBranch(b.current);
     } catch {
-      setStatus(null);
       setLoadError(true);
     }
   }, [projectId]);

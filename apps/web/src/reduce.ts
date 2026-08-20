@@ -11,6 +11,7 @@ import type {
   SessionEvent,
   TokenUsage,
 } from "@polyth/contracts";
+import { extractChangedFiles } from "./pendingChanges.ts";
 
 export interface UserMsg {
   kind: "user";
@@ -55,9 +56,22 @@ export interface ToolMsg {
   rewindMarkerSeq?: number;
   time: number;
   finishTime?: number;
+  changedFiles?: string[];
 }
 
-export type RenderMessage = UserMsg | AssistantMsg | ToolMsg;
+export interface TaskActivityMsg {
+  kind: "task";
+  id: string;
+  eventSeq: number;
+  taskId: string;
+  text: string;
+  action: "created" | "started" | "completed" | "failed";
+  undone?: boolean;
+  rewindMarkerSeq?: number;
+  time: number;
+}
+
+export type RenderMessage = UserMsg | AssistantMsg | ToolMsg | TaskActivityMsg;
 
 export interface PendingPermission {
   requestId: string;
@@ -137,6 +151,8 @@ export interface RenderModel {
   /** Latest revisioned task/subagent snapshots (WP8); replay-deterministic. */
   tasks: TaskListState | null;
   subagents: SubagentState | null;
+  /** Edit-tool paths from the current/last turn; cleared by the next prompt. */
+  changedFiles: string[];
   rewind: { markerSeq: number; atSeq: number; restoredText?: string } | null;
   version: number; // bumps on every applied event (cheap change signal)
 }
@@ -154,6 +170,7 @@ export function emptyModel(): RenderModel {
     fusionPrompt: "",
     tasks: null,
     subagents: null,
+    changedFiles: [],
     rewind: null,
     version: 0,
   };
@@ -192,6 +209,7 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
       const msg: UserMsg = { kind: "user", id: ev.id, eventSeq: ev.seq, text, time: ev.time };
       if (raw !== undefined && raw !== text) msg.raw = raw;
       model.messages.push(msg);
+      model.changedFiles = [];
       break;
     }
     case "assistant/chunk":
@@ -248,6 +266,11 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
         if (title !== undefined) t.title = title;
         const lateInput = obj(d, "input");
         if (lateInput && Object.keys(t.input).length === 0) t.input = lateInput; // opencode fills input late
+        const changedFiles = extractChangedFiles(t.tool, lateInput ?? t.input, obj(d, "metadata"));
+        if (changedFiles.length > 0) {
+          t.changedFiles = changedFiles;
+          model.changedFiles = [...new Set([...model.changedFiles, ...changedFiles])];
+        }
         t.finishTime = ev.time;
       }
       break;
@@ -312,7 +335,30 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
       // so out-of-order delivery can never regress the projection.
       if (model.tasks && revision <= model.tasks.revision) break;
       const items = Array.isArray(d.items) ? (d.items as TaskListState["items"]) : [];
-      model.tasks = { listId: str(d, "listId") ?? "todo", revision, items };
+      const listId = str(d, "listId") ?? "todo";
+      const previous = new Map(model.tasks?.items.map((item) => [item.id, item]));
+      for (const item of items) {
+        const old = previous.get(item.id);
+        let action: TaskActivityMsg["action"] | null = null;
+        if (!old || old.status !== item.status) {
+          if (item.status === "active") action = "started";
+          else if (item.status === "done") action = "completed";
+          else if (item.status === "failed") action = "failed";
+          else if (!old) action = "created";
+        }
+        if (action) {
+          model.messages.push({
+            kind: "task",
+            id: `task-${listId}-${revision}-${item.id}-${action}`,
+            eventSeq: ev.seq,
+            taskId: item.id,
+            text: item.text,
+            action,
+            time: ev.time,
+          });
+        }
+      }
+      model.tasks = { listId, revision, items };
       break;
     }
     case "subagent/snapshot": {

@@ -39,6 +39,8 @@ export interface AppState {
   editorFile: string | null;
   /** Requested cursor placement for the open file (file refs; go-to-line). */
   editorLocation: EditorLocation | null;
+  /** File requested by a changed-file jump into the Changes rail. */
+  gitDiffPath: string | null;
 }
 
 let state: AppState = {
@@ -60,6 +62,7 @@ let state: AppState = {
   sidebarOpen: false,
   editorFile: null,
   editorLocation: null,
+  gitDiffPath: null,
 };
 
 const listeners = new Set<() => void>();
@@ -109,7 +112,7 @@ export function activateProject(id: string | null): void {
   localStorage.setItem("polyth.activeProjectId", id ?? "");
   // Re-activating the current project must not drop the session or branch (UX-04).
   if (id === state.activeProjectId) return;
-  set({ activeProjectId: id, activeSessionId: null, gitBranch: "", editorFile: null, editorLocation: null });
+  set({ activeProjectId: id, activeSessionId: null, gitBranch: "", editorFile: null, editorLocation: null, gitDiffPath: null });
 }
 export function setActiveView(view: AppView): void {
   set({ activeView: view });
@@ -143,6 +146,12 @@ export function setRailPlugin(railPlugin: RailPlugin | null): void {
 }
 export function toggleRailPlugin(id: RailPlugin): void {
   set({ railPlugin: state.railPlugin === id ? null : id });
+}
+export function openChanges(path?: string): void {
+  set({ railPlugin: "changes", ...(path !== undefined ? { gitDiffPath: path } : {}) });
+}
+export function setGitDiffPath(gitDiffPath: string | null): void {
+  set({ gitDiffPath });
 }
 export function setMoreOpen(moreOpen: boolean): void {
   set({ moreOpen });

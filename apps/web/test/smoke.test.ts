@@ -39,6 +39,7 @@ import {
 } from "../src/uiPrefs.ts";
 import { normalizeScheduleList } from "../src/scheduleData.ts";
 import { agentPickerDefaultLabel, modelPickerDefaultLabel } from "../src/composerDefaults.ts";
+import { extractChangedFiles, selectPendingChanges } from "../src/pendingChanges.ts";
 
 let seqCounter = 0;
 function ev(type: string, data: JsonObject, sessionId = "s1"): SessionEvent {
@@ -106,6 +107,100 @@ test("tool call → result fills the card; call → error marks it failed", () =
   const t2 = withError.messages[0] as { status: string; error: string };
   assert.equal(t2.status, "error");
   assert.equal(t2.error, "permission denied");
+});
+
+test("edit tool results derive changed files and a new prompt clears the turn summary", () => {
+  const model = buildModel([
+    ev("tool/call", { callId: "read", tool: "read_file", input: { path: "src/read.ts" } }),
+    ev("tool/result", { callId: "read", tool: "read_file", output: "ok" }),
+    ev("tool/call", { callId: "write", tool: "apply_patch", input: {
+      patchText: "*** Update File: src/a.ts\n*** Add File: src/b.ts",
+    } }),
+    ev("tool/result", {
+      callId: "write",
+      tool: "apply_patch",
+      output: "done",
+      metadata: { files: ["src/b.ts", "src/c.ts"] },
+    }),
+  ]);
+  assert.deepEqual(model.changedFiles, ["src/a.ts", "src/b.ts", "src/c.ts"]);
+  const write = model.messages.find((message) => message.kind === "tool" && message.callId === "write");
+  assert.deepEqual(write?.kind === "tool" ? write.changedFiles : undefined, model.changedFiles);
+
+  reduceEvent(model, ev("user/message", { text: "next turn" }));
+  assert.deepEqual(model.changedFiles, []);
+});
+
+test("pending-change source prefers authoritative git status and dedupes file paths", () => {
+  assert.deepEqual(extractChangedFiles("read_file", { path: "src/a.ts" }), []);
+  assert.deepEqual(extractChangedFiles("write", { filePath: "./src/a.ts" }, { changedFiles: ["src/a.ts", "src/b.ts"] }), [
+    "src/a.ts",
+    "src/b.ts",
+  ]);
+  const status = {
+    branch: "main",
+    ahead: 0,
+    behind: 0,
+    staged: [{ path: "src/a.ts", status: "modified", staged: true }],
+    unstaged: [{ path: "src/a.ts", status: "modified", staged: false }],
+    untracked: [{ path: "src/new.ts", status: "untracked", staged: false }],
+    conflicted: [],
+  };
+  assert.deepEqual(selectPendingChanges(status, ["fallback.ts"]), {
+    source: "git",
+    paths: ["src/a.ts", "src/new.ts"],
+  });
+  assert.deepEqual(selectPendingChanges({ ...status, staged: [], unstaged: [], untracked: [] }, ["fallback.ts"]), {
+    source: "git",
+    paths: [],
+  });
+  assert.deepEqual(selectPendingChanges(null, ["fallback.ts", "./fallback.ts"]), {
+    source: "tools",
+    paths: ["fallback.ts"],
+  });
+});
+
+test("task snapshot revisions derive ordered semantic activity exactly once", () => {
+  const model = buildModel([
+    ev("task/snapshot", {
+      listId: "todo",
+      revision: 1,
+      items: [
+        { id: "a", text: "Inspect", status: "pending" },
+        { id: "b", text: "Build", status: "active" },
+      ],
+    }),
+    ev("task/snapshot", {
+      listId: "todo",
+      revision: 2,
+      items: [
+        { id: "a", text: "Inspect", status: "active" },
+        { id: "b", text: "Build", status: "done" },
+      ],
+    }),
+    ev("task/snapshot", {
+      listId: "todo",
+      revision: 2,
+      items: [{ id: "a", text: "duplicate", status: "done" }],
+    }),
+    ev("task/snapshot", {
+      listId: "todo",
+      revision: 3,
+      items: [
+        { id: "a", text: "Inspect", status: "active" },
+        { id: "b", text: "Build", status: "done" },
+      ],
+    }),
+  ]);
+  const activities = model.messages.filter((message) => message.kind === "task");
+  assert.deepEqual(activities.map((activity) => [activity.action, activity.text]), [
+    ["created", "Inspect"],
+    ["started", "Build"],
+    ["started", "Inspect"],
+    ["completed", "Build"],
+  ]);
+  assert.equal(new Set(activities.map((activity) => activity.id)).size, activities.length);
+  assert.equal(model.tasks?.revision, 3);
 });
 
 test("permission requested → resolved (and question asked → answered)", () => {
@@ -580,6 +675,15 @@ test("groupWork groups consecutive tools and computes elapsed time", () => {
 
   const loneTool = groupWork(messages.slice(0, 1));
   assert.equal(loneTool[0], messages[0]);
+
+  const withTask = groupWork([
+    messages[0]!,
+    { kind: "task", id: "task-1", taskId: "1", eventSeq: 2, text: "Build", action: "started", time: 200 },
+  ]);
+  const taskGroup = withTask[0];
+  assert.ok(taskGroup && taskGroup.kind === "work");
+  assert.equal(taskGroup.tools.length, 1);
+  assert.equal(taskGroup.tasks[0]?.action, "started");
 });
 
 test("draft helpers persist per session and remove empty drafts", () => {

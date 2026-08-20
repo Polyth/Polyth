@@ -9,7 +9,7 @@ import { openSettingsPage, setUiError, useStore } from "../store.ts";
 import { api } from "../api.ts";
 import CopyButton from "./CopyButton.tsx";
 import Dialog from "./a11y/Dialog.tsx";
-import type { RenderModel, RenderMessage, ToolMsg, AssistantMsg, UserMsg } from "../reduce.ts";
+import type { RenderModel, RenderMessage, ToolMsg, AssistantMsg, TaskActivityMsg, UserMsg } from "../reduce.ts";
 
 // Merged thinking block (WP4): collapsible with a first-line preview, or a
 // plain block when the collapsible pref is off.
@@ -135,19 +135,42 @@ function ToolCard({ m }: { m: ToolMsg }) {
   );
 }
 
+function TaskActivityRow({ activity }: { activity: TaskActivityMsg }) {
+  const label = activity.action === "created"
+    ? "Task created"
+    : activity.action === "started"
+      ? "Task started"
+      : activity.action === "completed"
+        ? "Task completed"
+        : "Task failed";
+  return (
+    <div className={`task-activity ${activity.action}`}>
+      <span className="task-activity-mark" aria-hidden="true">
+        {activity.action === "completed" ? "✓" : activity.action === "failed" ? "✕" : "•"}
+      </span>
+      <span>{label}: {activity.text}</span>
+    </div>
+  );
+}
+
 // Consecutive tool calls fold behind one "Worked for 3m 1s · 4 steps" row.
 function WorkedGroup({ g }: { g: WorkGroup }) {
-  const failed = g.tools.some((t) => t.status === "error");
-  const running = g.tools.some((t) => t.status === "pending");
+  const failed = g.tools.some((t) => t.status === "error") || g.tasks.some((task) => task.action === "failed");
+  const running = g.tools.some((t) => t.status === "pending") || g.tasks.some((task) => task.action === "started");
   const [open, setOpen] = useState(running || failed);
+  const updates = g.tasks.length > 0 ? ` · ${g.tasks.length} task ${g.tasks.length === 1 ? "update" : "updates"}` : "";
   return (
     <div className="msg assistant">
       <button className="goal-toggle muted" style={{ fontSize: 11.5, marginBottom: 6 }} onClick={() => setOpen((v) => !v)}>
         <span className="goal-chevron">{open ? "▾" : "▸"}</span>
-        {running ? "Working" : "Worked"} for {fmtDuration(g.ms)} · {g.tools.length} steps
+        {running ? "Working" : "Worked"} for {fmtDuration(g.ms)} · {g.tools.length} steps{updates}
         {failed && <span style={{ color: "var(--red)" }}>· {g.tools.filter((t) => t.status === "error").length} failed</span>}
       </button>
-      {open && g.tools.map((t) => <ToolCard key={t.id} m={t} />)}
+      {open && g.items.map((item) => (
+        item.kind === "tool"
+          ? <ToolCard key={item.id} m={item} />
+          : <TaskActivityRow key={item.id} activity={item} />
+      ))}
     </div>
   );
 }
@@ -173,6 +196,7 @@ function MessageView({ m, onRewind, onFork }: {
     );
   }
   if (m.kind === "assistant") return <AssistantView m={m} />;
+  if (m.kind === "task") return <TaskActivityRow activity={m} />;
   return <ToolCard m={m} />;
 }
 

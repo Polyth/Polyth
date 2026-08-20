@@ -1,7 +1,7 @@
 // DOM-free pure helpers extracted from components for testability.
 import type { SlashCommand, SnippetDef } from "./api.ts";
 import type { JsonObject, SessionEvent } from "@polyth/contracts";
-import type { RenderMessage, ToolMsg, UserMsg } from "./reduce.ts";
+import type { RenderMessage, TaskActivityMsg, ToolMsg, UserMsg } from "./reduce.ts";
 
 /** Text of the first user message in a session's event log, if any. */
 export function firstUserText(events: readonly SessionEvent[] | undefined): string | undefined {
@@ -74,7 +74,9 @@ export function toolSummary(input: JsonObject): string {
 export interface WorkGroup {
   kind: "work";
   id: string;
+  items: Array<ToolMsg | TaskActivityMsg>;
   tools: ToolMsg[];
+  tasks: TaskActivityMsg[];
   ms: number;
 }
 
@@ -124,6 +126,7 @@ export function mergeThinking(messages: RenderMessage[]): RenderMessage[] {
 
 /** Message as Markdown for the copy action. */
 export function messageMarkdown(m: RenderMessage): string {
+  if (m.kind === "task") return `Task ${m.action}: ${m.text}`;
   if (m.kind === "tool") {
     const parts = [`### ${m.title || m.tool}`, "```json", JSON.stringify(m.input, null, 2), "```"];
     if (m.output) parts.push("", m.output);
@@ -143,11 +146,14 @@ export function messageJson(m: RenderMessage): string {
       2,
     );
   }
-  return JSON.stringify(
-    { role: "tool", tool: m.tool, input: m.input, output: m.output, error: m.error, status: m.status, time: m.time },
-    null,
-    2,
-  );
+  if (m.kind === "tool") {
+    return JSON.stringify(
+      { role: "tool", tool: m.tool, input: m.input, output: m.output, error: m.error, status: m.status, time: m.time },
+      null,
+      2,
+    );
+  }
+  return JSON.stringify({ role: "task", taskId: m.taskId, action: m.action, text: m.text, time: m.time }, null, 2);
 }
 
 /** User prompts with previews for the prompt navigator (WP4). */
@@ -160,23 +166,25 @@ export function promptIndex(messages: RenderMessage[]): Array<{ id: string; prev
     });
 }
 
-/** Collapse runs of ≥2 consecutive tool calls into one "Worked for …" group. */
+/** Collapse tool calls and semantic task deltas into one "Worked for …" group. */
 export function groupWork(messages: RenderMessage[]): Array<RenderMessage | WorkGroup> {
   const out: Array<RenderMessage | WorkGroup> = [];
-  let run: ToolMsg[] = [];
+  let run: Array<ToolMsg | TaskActivityMsg> = [];
   const flush = () => {
-    if (run.length >= 2) {
+    const tools = run.filter((item): item is ToolMsg => item.kind === "tool");
+    const tasks = run.filter((item): item is TaskActivityMsg => item.kind === "task");
+    if (run.length >= 2 || tasks.length > 0) {
       const first = run[0]!;
       const last = run[run.length - 1]!;
-      const end = last.finishTime ?? last.time;
-      out.push({ kind: "work", id: `work-${first.id}`, tools: run, ms: Math.max(0, end - first.time) });
+      const end = last.kind === "tool" ? (last.finishTime ?? last.time) : last.time;
+      out.push({ kind: "work", id: `work-${first.id}`, items: run, tools, tasks, ms: Math.max(0, end - first.time) });
     } else {
       out.push(...run);
     }
     run = [];
   };
   for (const m of messages) {
-    if (m.kind === "tool") run.push(m);
+    if (m.kind === "tool" || m.kind === "task") run.push(m);
     else {
       flush();
       out.push(m);

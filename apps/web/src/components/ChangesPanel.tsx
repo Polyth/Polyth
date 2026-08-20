@@ -1,11 +1,12 @@
 // Git Changes panel for the Context Rail: branch info, staged/unstaged lists,
 // per-file stage/unstage/discard, diff viewer, commit with generate.
 import { useState, useEffect, useCallback } from "react";
-import { api, type GitStatus, type GitFileEntry } from "../api.ts";
-import { useStore } from "../store.ts";
+import { api, type GitFileEntry } from "../api.ts";
+import { setGitDiffPath, useStore } from "../store.ts";
 import { diffStat } from "../utils.ts";
 import CopyButton from "./CopyButton.tsx";
 import { setGitPrefs, splitDiffRows, useGitPrefs } from "../gitPrefs.ts";
+import { refreshGitStatus, useGitStatus } from "../gitStatusStore.ts";
 
 const EMPTY_STAGED: never[] = [];
 const EMPTY_UNSTAGED: never[] = [];
@@ -79,9 +80,9 @@ function DiffViewer({ diff }: { diff: string }) {
 
 export default function ChangesPanel() {
   const activeProjectId = useStore((s) => s.activeProjectId);
-  const [status, setStatus] = useState<GitStatus | null>(null);
+  const diffPath = useStore((s) => s.gitDiffPath);
+  const status = useGitStatus(activeProjectId, false);
   const [worktrees, setWorktrees] = useState(0);
-  const [diffPath, setDiffPath] = useState<string | null>(null);
   const [diffText, setDiffText] = useState("");
   const [commitMsg, setCommitMsg] = useState("");
   const [generating, setGenerating] = useState(false);
@@ -91,7 +92,7 @@ export default function ChangesPanel() {
   const projectId = activeProjectId;
   const refresh = useCallback(() => {
     if (!projectId) return;
-    void api.gitStatus(projectId).then(setStatus);
+    void refreshGitStatus(projectId);
     void api.listWorktrees(projectId).then((w) => setWorktrees(w.length));
   }, [projectId]);
 
@@ -109,7 +110,7 @@ export default function ChangesPanel() {
   }
 
   const loadDiff = async (fp: string) => {
-    setDiffPath(fp);
+    setGitDiffPath(fp);
     if (!projectId) return;
     const staged = status.staged.some((f) => f.path === fp);
     const got = await api.gitDiff(projectId, fp, staged, prefs.ignoreWhitespace);
@@ -151,6 +152,7 @@ export default function ChangesPanel() {
     setBusy(true);
     await api.gitCommit(projectId, commitMsg.trim());
     setCommitMsg("");
+    setGitDiffPath(null);
     setBusy(false);
     refresh();
   };

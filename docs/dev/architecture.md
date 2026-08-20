@@ -137,7 +137,9 @@ the backend session before appending a new tail.
 Delivery: `queue/enqueued`, `queue/dispatched`, `queue/reordered`, `queue/removed`,
 `delivery/steered`, `delivery/fallback-queued`.
 
-Work state (revisioned snapshots): `task/snapshot`, `subagent/snapshot`.
+Work state (revisioned snapshots): `task/snapshot`, `subagent/snapshot`. The web
+reducer turns task revision deltas into replay-stable created/started/completed
+timeline rows; it never appends a second event for this UI derivation.
 
 Workflows: `goal/attached|audit|completed|paused|resumed|stopped|stuck`,
 `multirun/started|run-progress|completed|picked`, `fusion/started|completed`,
@@ -158,7 +160,7 @@ a generic collapsed row (never crash).
   preview/git/terminal/schedule/github), overlays (onboarding/palette/search/settings),
   rail plugin, editor file + location.
 - `reduce.ts` — event log → `RenderModel` (messages, pending permissions/questions,
-  tasks, subagents, usage) — pure and testable.
+  task deltas, edit-tool changed paths, subagents, usage) — pure and testable.
 - `sync.ts` — reconnect-safe WS client (see above).
 - `api.ts` — typed fetch wrappers over the REST surface.
 - `slots.ts` — client slot registry mirroring the `UiSlot` union; exposed as
@@ -166,7 +168,8 @@ a generic collapsed row (never crash).
 - `components/` — views + panels. Notables: `Composer` (drafts, delivery modes, prompt
   token grammar from `composer/language.ts`, mic button via slot), `Timeline` +
   markdown pipeline (`markdown/` — fenced code, Mermaid, KaTeX, JSON tree, galleries,
-  file references with go-to-line), `QuestionCards` (multi-question stepper),
+  file references with go-to-line), `PendingChangesBar` (shared git-status source
+  with edit-tool fallback), `QuestionCards` (multi-question stepper),
   `PermissionBanner` (preview + scoped Always), `WorkStatus` (usage/tasks/agents
   sections + tracker pills), `ContextRail` (files/changes/context/usage/events/knowledge
   rail with `contextRail.tabs` slot), `CommandPalette` (commands/workspaces/files,
