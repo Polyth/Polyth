@@ -12,6 +12,7 @@ import { Icon } from "../icons.tsx";
 import SessionList from "./sidebar/SessionList.tsx";
 import ImportSessionsDialog from "./ImportSessionsDialog.tsx";
 import SlotHost from "./slots/SlotHost.ts";
+import { useSidebarExpanded } from "../sidebarPresentation.ts";
 
 function projectGlyph(name: string): string {
   const words = name.trim().split(/[\s\-_/]+/).filter(Boolean);
@@ -24,6 +25,9 @@ export default function Sidebar() {
   const activeProjectId = useStore((s) => s.activeProjectId);
   const activeSessionId = useStore((s) => s.activeSessionId);
   const drawerOpen = useStore((s) => s.sidebarOpen);
+  // Honest presentation state for app.nav contributions: on desktop the
+  // sidebar is always expanded regardless of the mobile drawer flag.
+  const expanded = useSidebarExpanded(drawerOpen);
   const branch = useStore((s) => s.gitBranch);
   const productName = useStore((s) => s.settings.productName);
   const prefs = usePrefs();
@@ -159,7 +163,7 @@ export default function Sidebar() {
           )}
           <SlotHost
             slot="app.nav"
-            context={{ projectId: activeProjectId, sessionId: activeSessionId, expanded: drawerOpen }}
+            context={{ projectId: activeProjectId, sessionId: activeSessionId, expanded }}
           />
         </div>
         <div className="side-foot">
