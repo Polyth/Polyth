@@ -15,8 +15,8 @@ test("ContextRail renders no visible strip labels", async () => {
 
 test("ContextRail strip buttons keep title + aria-label for hover/accessibility", async () => {
   const src = await railSource();
-  assert.ok(src.includes("title={p.label}"), "panel buttons need title");
-  assert.ok(src.includes("aria-label={p.label}"), "panel buttons need aria-label");
+  assert.ok(src.includes("title={s.title}"), "surface buttons need title");
+  assert.ok(src.includes("aria-label={s.title}"), "surface buttons need aria-label");
   assert.ok(src.includes("title={j.label}"), "jump buttons need title");
   assert.ok(src.includes("aria-label={j.label}"), "jump buttons need aria-label");
 });
