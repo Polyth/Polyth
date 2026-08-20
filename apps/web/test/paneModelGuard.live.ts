@@ -147,7 +147,7 @@ before(async () => {
   const events = await fetch(`${BASE}/api/sessions/${messageSessionId}/events`)
     .then((r) => r.json()) as Array<{ type: string }>;
   assert.ok(
-    events.some((e) => e.type === "message/user"),
+    events.some((e) => e.type === "user/message"),
     `no user message event landed; got: ${events.map((e) => e.type).join(", ")}`,
   );
 
@@ -326,10 +326,12 @@ test("live: the PANE-VERIFY-02 crash shape — fresh session, typed draft, Files
   });
   try {
     await h.page.waitForSelector(".app", { timeout: 15_000 });
-    // Fresh session → the hero stage with the hero composer variant. Before
-    // the repair this exact shape entered the guard's promote/clear loop and
-    // blanked the app with React #185.
-    await h.page.waitForSelector(".stage", { timeout: 15_000 });
+    // Fresh session → the hero stage with the hero composer variant (waiting
+    // on `.composer-hero`, not `.stage`, which the project empty state also
+    // renders during boot). Before the repair this exact shape entered the
+    // guard's promote/clear loop and blanked the app with React #185.
+    await h.page.waitForSelector(".composer-hero", { timeout: 15_000 });
+    await h.page.waitForSelector(".rail-workspace", { timeout: 15_000 });
     await settle(h.page);
 
     assert.deepEqual(reactLoopErrors(h.errors), [], `React render-loop errors: ${h.errors.join(" | ")}`);
