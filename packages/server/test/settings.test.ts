@@ -138,6 +138,28 @@ test("mcp: failed backend apply rolls the stored list back", async () => {
   assert.deepEqual(applied.at(-1), ["alpha", "gamma"]);
 });
 
+test("mcp: disabled servers are removed from the applied config entirely (F10)", async () => {
+  const applied: string[][] = [];
+  const svc = createMcpConfigService({
+    file: join(tmp(), "mcp.json"),
+    applier: { applyMcp: async (entries) => { applied.push(entries.map((e) => e.name)); } },
+  });
+
+  const a = await svc.create({ name: "alpha", transport: { kind: "http", url: "https://a.example", headersSecretRefs: [] } });
+  await svc.create({ name: "beta", transport: { kind: "http", url: "https://b.example", headersSecretRefs: [] } });
+  assert.deepEqual(applied.at(-1), ["alpha", "beta"]);
+
+  // disabling drops the entry from what the backend sees — not enabled:false
+  await svc.update(a.id, { enabled: false }, a.revision);
+  assert.deepEqual(applied.at(-1), ["beta"]);
+  // …but it stays in the stored list for the UI
+  assert.deepEqual(svc.list().map((s) => `${s.name}:${s.enabled}`), ["alpha:false", "beta:true"]);
+
+  const off = svc.list().find((s) => s.name === "alpha")!;
+  await svc.update(off.id, { enabled: true }, off.revision);
+  assert.deepEqual(applied.at(-1), ["alpha", "beta"]);
+});
+
 test("mcp: stdio test reports command reachability honestly", async () => {
   const svc = createMcpConfigService({ file: join(tmp(), "mcp.json") });
   const there = await svc.create({ name: "node-echo", transport: { kind: "stdio", command: "node", args: [], envKeys: [] } });

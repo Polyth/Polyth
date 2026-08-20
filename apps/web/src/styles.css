@@ -2298,6 +2298,11 @@ body[data-motion="reduced"] .settings-row.flash { animation: none; outline: 1px 
   border-radius: 7px; padding: 6px 8px; font-size: 12.5px; flex: 1;
 }
 .mcp-secrets { display: flex; flex-direction: column; gap: 4px; }
+.mcp-form textarea {
+  background: var(--elevated); color: var(--text); border: 1px solid var(--border);
+  border-radius: 7px; padding: 7px 9px; font-size: 12.5px; resize: vertical;
+}
+.mcp-import-preview { display: flex; flex-direction: column; gap: 3px; padding: 4px 2px; }
 .secret-redacted { color: var(--muted); }
 
 .plugin-trust { margin-left: 6px; font-size: 10px; }

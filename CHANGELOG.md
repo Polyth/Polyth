@@ -63,6 +63,21 @@ commits, and the L-queue packages started landing.
   title/body on the overview, and "+ session" on issue/PR rows that creates a
   session with the issue/PR context saved as the composer draft (never sent).
 
+### Added — L3: MCP management UI and health probe (F10)
+
+- Settings → MCP is now full CRUD: edit prefills the structure (name,
+  command/args or URL, secret key names) but never echoes stored secret
+  values — leaving a value blank keeps the stored one.
+- JSON import: paste an `mcpServers` block (Claude shape `{command, args,
+  env}` / `{url, headers}` or OpenCode shape `{type:"local", command:[...],
+  environment}`), preview the mapped entries (duplicates flagged), then save;
+  env/header values become write-only secrets (`apps/web/src/mcpImport.ts`).
+- `POST /api/mcp/servers/:id/probe` (spec name; `/test` kept) stores
+  status/lastError from the reachability check; the UI button is "Probe".
+- Disabled servers are now removed from the applied backend config entirely
+  instead of being written with `enabled:false`. OAuth stays a follow-up
+  (`:id/authorize` remains an honest 501).
+
 ### Removed — stale planning artifacts (`3928fe9`)
 
 - `docs/features/*` — the 19-file upstream research dump (polyth/Paseo PR

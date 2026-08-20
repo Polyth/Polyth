@@ -11,6 +11,7 @@ import { fmtCost, fmtTokens } from "../../format.ts";
 import { EmptyState, PageHead, Row, Seg, Toggle } from "./parts.tsx";
 import { refreshProfiles, useProfiles } from "../../profiles.ts";
 import AgentProfileForm from "../AgentProfileForm.tsx";
+import { parseMcpServersJson, type McpImportResult } from "../../mcpImport.ts";
 import type { AgentProfile, InstalledPluginDto, McpServerDto, McpTransport, SystemInfoDto } from "@polyth/contracts";
 
 function ThemeCard({
@@ -596,14 +597,20 @@ export function AgentsPage() {
   );
 }
 
-function McpServerForm({ onDone }: { onDone: () => void }) {
-  const [name, setName] = useState("");
-  const [kind, setKind] = useState<"stdio" | "http">("stdio");
-  const [command, setCommand] = useState("");
-  const [args, setArgs] = useState("");
-  const [url, setUrl] = useState("");
+function McpServerForm({ existing, onDone }: { existing?: McpServerDto; onDone: () => void }) {
+  const [name, setName] = useState(existing?.name ?? "");
+  const [kind, setKind] = useState<"stdio" | "http">(existing?.transport.kind ?? "stdio");
+  const [command, setCommand] = useState(existing?.transport.kind === "stdio" ? existing.transport.command : "");
+  const [args, setArgs] = useState(existing?.transport.kind === "stdio" ? existing.transport.args.join(" ") : "");
+  const [url, setUrl] = useState(existing?.transport.kind === "http" ? existing.transport.url : "");
   // Env keys / header names with values entered once; values are write-only.
-  const [secretRows, setSecretRows] = useState<Array<{ key: string; value: string }>>([]);
+  // Editing prefills the key names with EMPTY values — stored values are never
+  // echoed back; leaving a value blank keeps the stored one.
+  const [secretRows, setSecretRows] = useState<Array<{ key: string; value: string }>>(() => {
+    if (!existing) return [];
+    const keys = existing.transport.kind === "stdio" ? existing.transport.envKeys : existing.transport.headersSecretRefs;
+    return keys.map((key) => ({ key, value: "" }));
+  });
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -617,7 +624,14 @@ function McpServerForm({ onDone }: { onDone: () => void }) {
       const transport: McpTransport = kind === "stdio"
         ? { kind: "stdio", command: command.trim(), args: args.trim() ? args.trim().split(/\s+/) : [], envKeys: keys }
         : { kind: "http", url: url.trim(), headersSecretRefs: keys };
-      await api.mcpCreate({ name: name.trim(), transport, ...(Object.keys(secrets).length ? { secrets } : {}) });
+      if (existing) {
+        await api.mcpUpdate(existing.id, {
+          name: name.trim(), transport,
+          ...(Object.keys(secrets).length ? { secrets } : {}),
+        }, existing.revision);
+      } else {
+        await api.mcpCreate({ name: name.trim(), transport, ...(Object.keys(secrets).length ? { secrets } : {}) });
+      }
       onDone();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -658,8 +672,81 @@ function McpServerForm({ onDone }: { onDone: () => void }) {
       {error && <div className="form-error">{error}</div>}
       <div className="mcp-form-row">
         <button className="small-btn" disabled={busy || !name.trim() || (kind === "stdio" ? !command.trim() : !url.trim())} onClick={() => void submit()}>
-          Add server
+          {existing ? "Save changes" : "Add server"}
         </button>
+        {existing && <button className="small-btn" disabled={busy} onClick={onDone}>Cancel</button>}
+      </div>
+    </div>
+  );
+}
+
+/** F10: paste an mcpServers JSON block, preview the mapped entries, then save. */
+function McpImportForm({ existingNames, onDone }: { existingNames: string[]; onDone: () => void }) {
+  const [text, setText] = useState("");
+  const [preview, setPreview] = useState<McpImportResult | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [results, setResults] = useState<string[]>([]);
+
+  const doImport = async () => {
+    if (!preview) return;
+    setBusy(true);
+    const out: string[] = [];
+    for (const entry of preview.entries) {
+      try {
+        await api.mcpCreate({
+          name: entry.name, transport: entry.transport,
+          ...(entry.secrets ? { secrets: entry.secrets } : {}),
+          ...(entry.enabled === false ? { enabled: false } : {}),
+        });
+        out.push(`✓ ${entry.name}`);
+      } catch (e) {
+        out.push(`✗ ${entry.name}: ${e instanceof Error ? e.message : String(e)}`);
+      }
+      setResults([...out]);
+    }
+    setBusy(false);
+    if (out.every((line) => line.startsWith("✓"))) onDone();
+  };
+
+  return (
+    <div className="mcp-form" data-settings-item="mcp.import">
+      <div className="stat-label">Import JSON <span className="muted">(mcpServers block — Claude or OpenCode shape; env/header values become write-only secrets)</span></div>
+      <textarea
+        rows={6}
+        className="mono"
+        placeholder={'{\n  "mcpServers": {\n    "my-server": { "command": "npx", "args": ["-y", "some-mcp"], "env": { "API_KEY": "…" } }\n  }\n}'}
+        value={text}
+        onChange={(e) => { setText(e.target.value); setPreview(null); setResults([]); }}
+      />
+      {preview && (
+        <div className="mcp-import-preview">
+          {preview.entries.map((entry) => {
+            const dup = existingNames.includes(entry.name);
+            const secretKeys = entry.transport.kind === "stdio" ? entry.transport.envKeys : entry.transport.headersSecretRefs;
+            return (
+              <div key={entry.name} className="set-row-hint mono">
+                {dup ? "⚠" : "+"} {entry.name} · {entry.transport.kind === "stdio"
+                  ? `${entry.transport.command} ${entry.transport.args.join(" ")}`.trim()
+                  : entry.transport.url}
+                {secretKeys.length > 0 && <span className="secret-redacted"> · secrets: {secretKeys.join(", ")}</span>}
+                {dup && <span> — name already exists, will fail</span>}
+              </div>
+            );
+          })}
+          {preview.errors.map((e, i) => <div key={i} className="form-error">{e}</div>)}
+        </div>
+      )}
+      {results.map((line, i) => (
+        <div key={i} className={line.startsWith("✗") ? "form-error" : "set-row-hint"}>{line}</div>
+      ))}
+      <div className="mcp-form-row">
+        <button className="small-btn" disabled={busy || !text.trim()} onClick={() => setPreview(parseMcpServersJson(text))}>
+          Preview
+        </button>
+        <button className="small-btn" disabled={busy || !preview || preview.entries.length === 0} onClick={() => void doImport()}>
+          {busy ? "Importing…" : `Import ${preview?.entries.length ?? 0} server${(preview?.entries.length ?? 0) === 1 ? "" : "s"}`}
+        </button>
+        <button className="small-btn" disabled={busy} onClick={onDone}>Cancel</button>
       </div>
     </div>
   );
@@ -668,12 +755,14 @@ function McpServerForm({ onDone }: { onDone: () => void }) {
 export function McpPage() {
   const [servers, setServers] = useState<McpServerDto[]>([]);
   const [adding, setAdding] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [testMsg, setTestMsg] = useState<Record<string, string>>({});
   const refresh = () => void api.mcpList().then(setServers);
   useEffect(() => { refresh(); }, []);
 
-  const test = async (s: McpServerDto) => {
-    const r = await api.mcpTest(s.id).catch((e) => ({ ok: false, message: e instanceof Error ? e.message : String(e) }));
+  const probe = async (s: McpServerDto) => {
+    const r = await api.mcpProbe(s.id).catch((e) => ({ ok: false, message: e instanceof Error ? e.message : String(e) }));
     setTestMsg((m) => ({ ...m, [s.id]: `${r.ok ? "✓" : "✗"} ${r.message}` }));
     refresh();
   };
@@ -685,7 +774,9 @@ export function McpPage() {
         {servers.length === 0 && !adding && (
           <EmptyState title="No MCP servers configured" body="Add a stdio or HTTP server; the backend adapter applies the configuration." />
         )}
-        {servers.map((s) => (
+        {servers.map((s) => editingId === s.id ? (
+          <McpServerForm key={s.id} existing={s} onDone={() => { setEditingId(null); refresh(); }} />
+        ) : (
           <div key={s.id} className="set-row">
             <div className="set-row-text">
               <div className="set-row-label">{s.name}</div>
@@ -704,7 +795,8 @@ export function McpPage() {
             </div>
             <div className="set-row-control">
               <span className={`tag mcp-status ${s.status}`}>{s.status}</span>
-              <button className="small-btn" onClick={() => void test(s)}>Test</button>
+              <button className="small-btn" title="Check reachability and store the result" onClick={() => void probe(s)}>Probe</button>
+              <button className="small-btn" onClick={() => setEditingId(s.id)}>Edit</button>
               <button className="small-btn" onClick={() => void api.mcpUpdate(s.id, { enabled: !s.enabled }, s.revision).then(refresh)}>
                 {s.enabled ? "Disable" : "Enable"}
               </button>
@@ -715,9 +807,14 @@ export function McpPage() {
           </div>
         ))}
       </div>
-      {adding
-        ? <McpServerForm onDone={() => { setAdding(false); refresh(); }} />
-        : <button className="small-btn" onClick={() => setAdding(true)}>+ MCP server</button>}
+      {adding && <McpServerForm onDone={() => { setAdding(false); refresh(); }} />}
+      {importing && <McpImportForm existingNames={servers.map((s) => s.name)} onDone={() => { setImporting(false); refresh(); }} />}
+      {!adding && !importing && (
+        <div className="mcp-form-row">
+          <button className="small-btn" onClick={() => setAdding(true)}>+ MCP server</button>
+          <button className="small-btn" onClick={() => setImporting(true)}>Import JSON…</button>
+        </div>
+      )}
     </>
   );
 }

@@ -466,6 +466,8 @@ export const api = {
     jfetch<McpServerDto>(`/api/mcp/servers/${encodeURIComponent(id)}`, json("PATCH", { ...patch, expectedRevision })),
   mcpRemove: (id: string) => jfetch<{ ok: boolean }>(`/api/mcp/servers/${encodeURIComponent(id)}`, { method: "DELETE" }),
   mcpTest: (id: string) => jfetch<{ ok: boolean; message: string }>(`/api/mcp/servers/${encodeURIComponent(id)}/test`, json("POST", {})),
+  /** F10: spec-named probe — same reachability check, stores status/lastError. */
+  mcpProbe: (id: string) => jfetch<{ ok: boolean; message: string }>(`/api/mcp/servers/${encodeURIComponent(id)}/probe`, json("POST", {})),
   pluginsList: () => jfetch<InstalledPluginDto[]>("/api/plugins").catch((): InstalledPluginDto[] => []),
   pluginsInstall: (source: string) => jfetch<InstalledPluginDto>("/api/plugins/install", json("POST", { source })),
   pluginsOp: (id: string, op: "enable" | "disable" | "reload") =>

@@ -76,6 +76,8 @@ statically by the server with SPA fallback.
   goals.
 - `behavior.ts` / `mcp.ts` — server-owned behavior instructions (`behavior.md`) and MCP
   server config (`mcp.json`), applied to OpenCode through the adapter's config applier.
+  Disabled MCP servers are removed from the applied config entirely (F10); secret
+  values live in `mcp-secrets.json` and are never returned by any API.
 - `search.ts` — pure workspace matcher (projects/sessions metadata, `is:archived`).
 - `permissionPreview.ts` — redacted, risk-scored previews built server-side before
   `permission/requested` is appended.
@@ -109,7 +111,9 @@ F7 writes: `pr/create`, `pr/update`, `pr/merge` — merge requires `confirm:true
 squash/merge/rebase strategy, never deletes the branch; `pr/describe` returns a
 small-model title+body draft from `git diff base...HEAD` and never submits),
 `/api/control/sessions`, `/api/agent-profiles`, `/api/settings/behavior`,
-`/api/mcp/servers`, `/api/plugins` (+install), `/api/system/info`,
+`/api/mcp/servers` (CRUD + POST `:id/test`|`:id/probe` reachability check that
+stores status/lastError; `:id/authorize` is an honest 501 until the backend
+bridge exists), `/api/plugins` (+install), `/api/system/info`,
 `/api/sessions/:id/goal*`.
 
 Errors are `{ error: code, message }` with mapped status; a dead OpenCode transport
