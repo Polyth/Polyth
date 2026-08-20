@@ -7,6 +7,7 @@ import Onboarding from "./components/Onboarding.tsx";
 import CommandPalette from "./components/CommandPalette.tsx";
 import SessionSearch from "./components/SessionSearch.tsx";
 import SettingsModal from "./components/SettingsModal.tsx";
+import ProjectFolderDialog from "./components/ProjectFolderDialog.tsx";
 import ViewErrorBoundary from "./components/ViewErrorBoundary.tsx";
 import { clearUiError, setOverlay, useStore } from "./store.ts";
 import { usePrefs } from "./prefs.ts";
@@ -51,6 +52,7 @@ export default function App() {
       <ContextRail />
       {overlay === "palette" && <CommandPalette />}
       {overlay === "search" && <SessionSearch />}
+      {overlay === "project-picker" && <ProjectFolderDialog onClose={() => setOverlay(null)} />}
       <SettingsModal open={overlay === "settings"} onClose={() => setOverlay(null)} />
       <LiveRegion />
     </div>

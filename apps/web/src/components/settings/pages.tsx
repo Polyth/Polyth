@@ -6,11 +6,11 @@ import { setOverlay, setActiveView, updateSettings, useStore } from "../../store
 import { setUiSettings, useUiSettings } from "../../uiPrefs.ts";
 import { requestNotifyPermission } from "../../notify.ts";
 import { api, type GitStatus, type QuotaSnapshotDto, type QuotaWindowDto, type QuotaPaceDto } from "../../api.ts";
-import { addProject, createProject } from "../../init.ts";
 import { fmtCost, fmtTokens } from "../../format.ts";
 import { EmptyState, PageHead, Row, Seg, Toggle } from "./parts.tsx";
 import { refreshProfiles, useProfiles } from "../../profiles.ts";
 import AgentProfileForm from "../AgentProfileForm.tsx";
+import ProjectFolderDialog from "../ProjectFolderDialog.tsx";
 import type { AgentProfile, InstalledPluginDto, McpServerDto, McpTransport, SystemInfoDto } from "@polyth/contracts";
 
 function ThemeCard({
@@ -451,19 +451,7 @@ export function UsagePage() {
 
 export function ProjectsPage() {
   const projects = useStore((s) => s.projects);
-  const [path, setPath] = useState("");
-  const [create, setCreate] = useState(false);
-  const [error, setError] = useState("");
-  const add = async () => {
-    if (!path.trim()) return;
-    try {
-      setError("");
-      await (create ? createProject(path.trim()) : addProject(path.trim()));
-      setPath("");
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    }
-  };
+  const [picking, setPicking] = useState(false);
   return (
     <>
       <PageHead title="Projects" blurb="Folders Polyth can work in. Removing a project keeps the folder on disk." />
@@ -482,11 +470,9 @@ export function ProjectsPage() {
         </div>
       ))}
       <div className="set-add-form">
-        <input value={path} placeholder="/absolute/path/to/project" onChange={(e) => setPath(e.target.value)} onKeyDown={(e) => e.key === "Enter" && void add()} />
-        <label className="plugin-toggle"><input type="checkbox" checked={create} onChange={(e) => setCreate(e.target.checked)} />Create folder</label>
-        <button className="small-btn" onClick={() => void add()}>Add</button>
+        <button className="small-btn" onClick={() => setPicking(true)}>+ Open project folder…</button>
       </div>
-      {error && <div className="form-error">{error}</div>}
+      {picking && <ProjectFolderDialog onClose={() => setPicking(false)} />}
     </>
   );
 }
@@ -805,6 +791,27 @@ function ManagedPluginsSection() {
   );
 }
 
+/** Plugins declared in the OpenCode config (read-only; managed via opencode.json). */
+function OpenCodePluginsSection() {
+  const [plugins, setPlugins] = useState<string[]>([]);
+  useEffect(() => { void api.opencodePlugins().then((r) => setPlugins(r.plugins)); }, []);
+  if (plugins.length === 0) return null;
+  return (
+    <div data-settings-item="plugins.opencode">
+      <div className="stat-label">OpenCode plugins ({plugins.length})</div>
+      {plugins.map((spec) => (
+        <div key={spec} className="set-row">
+          <div className="set-row-text">
+            <div className="set-row-label mono">{spec}</div>
+            <div className="set-row-hint">Loaded by the OpenCode backend; edit opencode.json to change.</div>
+          </div>
+          <div className="set-row-control"><span className="tag">opencode.json</span></div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export function PluginsPage() {
   const prefs = usePrefs();
   const custom = isCustomized(prefs);
@@ -824,6 +831,7 @@ export function PluginsPage() {
           Reset to {PERSONAS[prefs.persona].label} defaults →
         </button>
       )}
+      <OpenCodePluginsSection />
       <ManagedPluginsSection />
     </>
   );

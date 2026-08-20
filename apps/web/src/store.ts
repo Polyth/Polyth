@@ -13,7 +13,7 @@ import { buildModel, type RenderModel } from "./reduce.ts";
 import { applySettingsToDom, loadSettings, saveSettings, type PolythSettings } from "./settings.ts";
 
 export type AppView = "session" | "files" | "goals" | "multirun" | "fusion" | "walkthrough" | "preview" | "git" | "terminal" | "schedule" | "github";
-export type Overlay = "onboarding" | "palette" | "search" | "settings" | null;
+export type Overlay = "onboarding" | "project-picker" | "palette" | "search" | "settings" | null;
 export type RailPlugin = "files" | "changes" | "context" | "usage" | "events" | "knowledge";
 /** "all": commands+workspaces+files. "files": file-focused (Mod+P). */
 export type PaletteMode = "all" | "files";

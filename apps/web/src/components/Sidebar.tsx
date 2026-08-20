@@ -1,12 +1,11 @@
 import { useState } from "react";
 import { useStore, activateProject, setActiveView, setOverlay, setProjects, setSidebarOpen, setUiError } from "../store.ts";
-import { addProject, createProject, createSession } from "../init.ts";
+import { createSession } from "../init.ts";
 import { api } from "../api.ts";
 import { usePrefs } from "../prefs.ts";
 import { MOD } from "../format.ts";
 import { friendlyError } from "../settings.ts";
 import { Icon } from "../icons.tsx";
-import ProjectForm from "./ProjectForm.tsx";
 import SessionList from "./sidebar/SessionList.tsx";
 
 function projectGlyph(name: string): string {
@@ -23,15 +22,9 @@ export default function Sidebar() {
   const productName = useStore((s) => s.settings.productName);
   const prefs = usePrefs();
   const project = projects.find((p) => p.id === activeProjectId) ?? null;
-  const [addingProject, setAddingProject] = useState(false);
   const [renamingProject, setRenamingProject] = useState<string | null>(null);
   const [projectName, setProjectName] = useState("");
 
-  const onAddProject = async (path: string, name: string, create: boolean) => {
-    if (create) await createProject(path, name || undefined);
-    else await addProject(path, name || undefined);
-    setAddingProject(false);
-  };
   const onNewSession = () => {
     if (!activeProjectId) return;
     setSidebarOpen(false);
@@ -61,12 +54,15 @@ export default function Sidebar() {
             {prefs.plugins.includes("git") && (
               <button className="icon-btn" title="Git & worktrees" onClick={() => setActiveView("git")}><Icon.tree /></button>
             )}
-            <button className="icon-btn" title="Open project" onClick={() => setAddingProject(true)}><Icon.plus /></button>
+            <button className="icon-btn" title="Open project" onClick={() => setOverlay("project-picker")}><Icon.plus /></button>
           </span>
         </div>
-        {addingProject && <ProjectForm onSubmit={onAddProject} onCancel={() => setAddingProject(false)} />}
         <div className="side-scroll">
-          {projects.length === 0 && <div className="empty">No projects yet.<br />Add one with +</div>}
+          {projects.length === 0 && (
+            <button className="empty side-open-project" onClick={() => setOverlay("project-picker")}>
+              No projects yet.<br />Choose a folder to start →
+            </button>
+          )}
           {projects.map((p) => (
           renamingProject === p.id ? (
             <div key={p.id} className="project-card project-rename">

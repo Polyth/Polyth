@@ -5,7 +5,6 @@ import PermissionBanner from "./PermissionBanner.tsx";
 import QuestionCards from "./QuestionCards.tsx";
 import { GoalStrip } from "./GoalStrip.tsx";
 import WorkStatus, { TrackerPills } from "./WorkStatus.tsx";
-import ProjectForm from "./ProjectForm.tsx";
 import MultiRunView from "./MultiRunView.tsx";
 import FusionView from "./FusionView.tsx";
 import PreviewView from "./PreviewView.tsx";
@@ -16,8 +15,7 @@ import TerminalView from "./TerminalView.tsx";
 import EditorView from "./EditorView.tsx";
 import ScheduleView from "./ScheduleView.tsx";
 import GithubView from "./GithubView.tsx";
-import { useActiveModel, useStore } from "../store.ts";
-import { addProject, createProject } from "../init.ts";
+import { setOverlay, useActiveModel, useStore } from "../store.ts";
 import { shortcutLabel } from "../settings.ts";
 
 // Large polyth-style hero for a fresh session (or no session yet):
@@ -76,14 +74,11 @@ export default function Main() {
         <div className="stage">
           <div className="hero">
             <div className="hero-mark">p</div>
-            <h2>Open a project</h2>
-            <p className="hero-sub">Point Polyth at a folder, or create a new one.</p>
-            <div className="hero-project-form">
-              <ProjectForm onSubmit={async (path, name, create) => {
-                if (create) await createProject(path, name || undefined);
-                else await addProject(path, name || undefined);
-              }} />
-            </div>
+            <h2>Bring your work into focus.</h2>
+            <p className="hero-sub">Open a local project to start a session with its files, history, and tools.</p>
+            <button className="primary-btn hero-open-project" onClick={() => setOverlay("project-picker")}>
+              Choose a folder…
+            </button>
           </div>
         </div>
       </main>

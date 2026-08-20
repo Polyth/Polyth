@@ -79,6 +79,44 @@ export interface SessionSearchResult {
   matches: Array<{ field: string; snippet: string }>;
 }
 
+// ---- host directory browsing (project folder picker; localhost-only) --------
+export interface BrowseEntryDto {
+  name: string;
+  path: string;
+  modifiedAt?: number;
+  hidden: boolean;
+}
+export interface BrowseResultDto {
+  path: string;
+  parent: string | null;
+  home: string;
+  entries: BrowseEntryDto[];
+}
+
+// ---- provider/model visibility (Providers & Models settings) ----------------
+export interface ProviderCatalogModelDto {
+  providerID: string;
+  modelID: string;
+  key: string;
+  name: string;
+  context?: number;
+  cost?: { input: number; output: number };
+  connected: boolean;
+  enabled: boolean;
+}
+export interface ProviderCatalogDto {
+  id: string;
+  name: string;
+  connected: boolean;
+  enabled: boolean;
+  models: ProviderCatalogModelDto[];
+}
+export interface VisibilityStateDto {
+  ok: boolean;
+  disabledProviders: string[];
+  disabledModels: string[];
+}
+
 async function jfetch<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, init);
   if (!res.ok) {
@@ -469,6 +507,24 @@ export const api = {
 
   listModels: () => jfetch<ModelDescriptor[]>("/api/models"),
   listAgents: () => jfetch<AgentDescriptor[]>("/api/agents"),
+
+  // ---- provider/model visibility (Providers & Models settings) --------------
+  listProviders: () => jfetch<ProviderCatalogDto[]>("/api/providers"),
+  setProviderEnabled: (id: string, enabled: boolean) =>
+    jfetch<VisibilityStateDto>(`/api/providers/${encodeURIComponent(id)}/enabled`, json("POST", { enabled })),
+  setModelEnabled: (key: string, enabled: boolean) =>
+    jfetch<VisibilityStateDto>(`/api/models/enabled`, json("POST", { key, enabled })),
+  opencodePlugins: () =>
+    jfetch<{ plugins: string[] }>("/api/plugins/opencode").catch((): { plugins: string[] } => ({ plugins: [] })),
+
+  // ---- host directory browsing (folder picker; localhost-only route) --------
+  browseHost: (path?: string, hidden?: boolean) =>
+    jfetch<BrowseResultDto>(`/api/browse?${new URLSearchParams({
+      ...(path ? { path } : {}),
+      ...(hidden ? { hidden: "true" } : {}),
+    })}`),
+  browseMkdir: (path: string) =>
+    jfetch<{ path: string }>(`/api/browse/mkdir`, json("POST", { path })),
 
   // ---- git (§12) -----------------------------------------------------------
   gitStatus: (projectId: string) =>

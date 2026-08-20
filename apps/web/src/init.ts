@@ -4,6 +4,7 @@ import { SyncClient } from "./sync.ts";
 import { buildModel } from "./reduce.ts";
 import { displaySessionTitle, isPlaceholderTitle, modelToMarkdown, titleFromPrompt } from "./format.ts";
 import { friendlyError } from "./settings.ts";
+import { formatAppUrl, parseAppUrl } from "./router.ts";
 import * as store from "./store.ts";
 import type { JsonObject } from "@polyth/contracts";
 
@@ -15,6 +16,47 @@ let branchFetchedFor: string | null = null;
 function fetchBranch(projectId: string): void {
   branchFetchedFor = projectId;
   void api.gitStatus(projectId).then((st) => store.setGitBranch(st.branch)).catch(() => store.setGitBranch(""));
+}
+
+// ---- session URLs -----------------------------------------------------------
+// The address bar always reflects the active project/session so links can be
+// shared and agents can deep-link (/p/:projectId/s/:sessionId or ?session=).
+let urlSyncStarted = false;
+
+/** Align the address bar with the store. Boot uses replaceState (no junk
+ *  history entry); user-driven switches push so Back works. Skips when the
+ *  URL already matches — popstate navigation never double-pushes. */
+function syncUrl(replace: boolean): void {
+  const s = store.getState();
+  const target = formatAppUrl(s.activeProjectId, s.activeSessionId);
+  if (location.pathname === target && !location.search.includes("session=")) return;
+  if (replace) history.replaceState(null, "", target);
+  else history.pushState(null, "", target);
+}
+
+function startUrlSync(): void {
+  if (urlSyncStarted) return;
+  urlSyncStarted = true;
+  syncUrl(true); // canonicalize whatever the boot URL was
+  let lastUrlProject = store.getState().activeProjectId;
+  let lastUrlSession = store.getState().activeSessionId;
+  store.subscribeStore(() => {
+    const s = store.getState();
+    if (s.activeProjectId === lastUrlProject && s.activeSessionId === lastUrlSession) return;
+    lastUrlProject = s.activeProjectId;
+    lastUrlSession = s.activeSessionId;
+    syncUrl(false);
+  });
+  window.addEventListener("popstate", () => {
+    const loc = parseAppUrl(location.pathname, location.search);
+    const s = store.getState();
+    if (loc.sessionId && loc.sessionId !== s.activeSessionId) {
+      void openSession(loc.sessionId).catch(() => {});
+    } else if (!loc.sessionId) {
+      if (loc.projectId && loc.projectId !== s.activeProjectId) store.activateProject(loc.projectId);
+      else if (!loc.projectId && s.activeSessionId) store.activateSession(null);
+    }
+  });
 }
 
 export function init(): void {
@@ -52,8 +94,25 @@ async function boot(): Promise<void> {
     store.setProjects(projects);
     store.setModels(models);
     store.setAgents(agents);
+
+    // URL wins over localStorage: opening a shared /p/…/s/… link (or an
+    // agent's ?session=) restores exactly that session.
+    const fromUrl = parseAppUrl(location.pathname, location.search);
+    if (fromUrl.sessionId) {
+      try {
+        await openSession(fromUrl.sessionId);
+        startUrlSync();
+        return;
+      } catch (err) {
+        console.warn("session from URL not found, falling back", err);
+      }
+    }
+
     const savedProject = localStorage.getItem("polyth.activeProjectId");
-    const activeProject = projects.find((p) => p.id === savedProject) ?? projects[0];
+    const activeProject =
+      projects.find((p) => p.id === fromUrl.projectId)
+      ?? projects.find((p) => p.id === savedProject)
+      ?? projects[0];
     if (activeProject) {
       store.activateProject(activeProject.id);
       await refreshSessions(activeProject.id);
@@ -62,6 +121,7 @@ async function boot(): Promise<void> {
         await openSession(savedSession);
       }
     }
+    startUrlSync();
   } catch (err) {
     console.error("initial load failed", err);
     store.setUiError(friendlyError("Couldn’t reach the Polyth server", err));

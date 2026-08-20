@@ -22,13 +22,14 @@ const PANELS: Array<{ rail: RailPlugin; plugin: PluginId; label: string; icon: (
 ];
 
 // Full-view jumps that live on the strip when their plugin is on.
-const JUMPS: Array<{ view: AppView; plugin: PluginId; label: string; shortLabel: string; icon: () => JSX.Element }> = [
-  { view: "preview", plugin: "preview", label: "Preview", shortLabel: "Preview", icon: Icon.globe },
-  { view: "multirun", plugin: "multirun", label: "Compare models", shortLabel: "Compare", icon: Icon.compare },
-  { view: "fusion", plugin: "fusion", label: "Fuse models", shortLabel: "Fusion", icon: Icon.fuse },
-  { view: "terminal", plugin: "terminal", label: "Terminal", shortLabel: "Terminal", icon: Icon.term },
-  { view: "schedule", plugin: "schedule", label: "Scheduled prompts", shortLabel: "Schedule", icon: Icon.clock },
-  { view: "github", plugin: "github", label: "GitHub", shortLabel: "GitHub", icon: Icon.github },
+// Icons only (like polyth): title + aria-label carry the names.
+const JUMPS: Array<{ view: AppView; plugin: PluginId; label: string; icon: () => JSX.Element }> = [
+  { view: "preview", plugin: "preview", label: "Preview", icon: Icon.globe },
+  { view: "multirun", plugin: "multirun", label: "Compare models", icon: Icon.compare },
+  { view: "fusion", plugin: "fusion", label: "Fuse models", icon: Icon.fuse },
+  { view: "terminal", plugin: "terminal", label: "Terminal", icon: Icon.term },
+  { view: "schedule", plugin: "schedule", label: "Scheduled prompts", icon: Icon.clock },
+  { view: "github", plugin: "github", label: "GitHub", icon: Icon.github },
 ];
 
 function ContextView({ session, model }: { session: SessionProjection | null; model: ReturnType<typeof useActiveModel> }) {
@@ -177,7 +178,6 @@ export default function ContextRail() {
             onClick={() => toggleRailPlugin(p.rail)}
           >
             <p.icon />
-            <span className="strip-label">{p.label}</span>
             <Badge n={badgeOf(p.rail)} />
           </button>
         ))}
@@ -192,7 +192,6 @@ export default function ContextRail() {
             onClick={() => setActiveView(j.view)}
           >
             <j.icon />
-            <span className="strip-label">{j.shortLabel}</span>
           </button>
         ))}
         <span className="strip-spacer" />
@@ -204,7 +203,6 @@ export default function ContextRail() {
           onClick={() => setPicker((v) => !v)}
         >
           <Icon.plus />
-          <span className="strip-label">Plugins</span>
         </button>
         {picker && (
           <>
