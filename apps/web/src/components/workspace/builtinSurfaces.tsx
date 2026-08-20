@@ -13,12 +13,8 @@ import { GoalStrip } from "../GoalStrip.tsx";
 import WorkStatus, { TrackerPills } from "../WorkStatus.tsx";
 import MultiRunView from "../MultiRunView.tsx";
 import FusionView from "../FusionView.tsx";
-import PreviewView from "../PreviewView.tsx";
-import GitView from "../GitView.tsx";
 import GoalsView from "../GoalsView.tsx";
 import WalkthroughView from "../WalkthroughView.tsx";
-import TerminalView from "../TerminalView.tsx";
-import EditorView from "../EditorView.tsx";
 import ScheduleView from "../ScheduleView.tsx";
 import GithubView from "../GithubView.tsx";
 import { useActiveModel, useStore } from "../../store.ts";
@@ -81,13 +77,11 @@ function SessionSurface() {
 }
 
 // Ids stay the built-in AppView names this slice; store.ts keeps persisting
-// the union. Orders mirror the header's view groups: chat, workspace,
-// workflows.
+// the union. Orders mirror the header's view groups: chat, then workflows.
+// UX-PANE-MODEL: Files, Git, Terminal, and Preview are NOT primary surfaces —
+// they are canonical workspace panes registered in railSurfaces.tsx and
+// opened through openWorkspacePane() beside a still-mounted Chat.
 registerWorkspaceSurface({ id: "session", title: "Session", order: 0, plugin: "session", requires: "project", component: SessionSurface });
-registerWorkspaceSurface({ id: "files", title: "Files", order: 10, plugin: "files", requires: "project", component: EditorView });
-registerWorkspaceSurface({ id: "git", title: "Git", order: 11, plugin: "git", requires: "project", component: GitView });
-registerWorkspaceSurface({ id: "terminal", title: "Terminal", order: 12, plugin: "terminal", requires: "project", component: TerminalView });
-registerWorkspaceSurface({ id: "preview", title: "Preview", order: 13, plugin: "preview", requires: "project", component: PreviewView });
 registerWorkspaceSurface({ id: "goals", title: "Goals", order: 20, plugin: "goals", requires: "project", component: GoalsView });
 registerWorkspaceSurface({ id: "multirun", title: "Multi-Run", order: 21, plugin: "multirun", requires: "project", component: MultiRunView });
 registerWorkspaceSurface({ id: "fusion", title: "Fusion", order: 22, plugin: "fusion", requires: "project", component: FusionView });

@@ -1,16 +1,15 @@
 import { Fragment } from "react";
 import { useStore, type AppView } from "../store.ts";
+import { isWorkspaceSurface, listSurfaces } from "../surfaces.ts";
 
+// UX-PANE-MODEL: Files/Git/Terminal/Preview are workspace panes beside Chat,
+// not primary views — the open pane is appended to the label instead.
 const VIEW_LABEL: Record<AppView, string> = {
   session: "Chat",
   goals: "Goals",
   multirun: "Multi-run",
   fusion: "Fusion",
   walkthrough: "Walkthrough",
-  preview: "Preview",
-  git: "Git",
-  terminal: "Terminal",
-  files: "Files",
   schedule: "Schedule",
   github: "GitHub",
 };
@@ -20,6 +19,10 @@ export default function StatusBar() {
   const project = useStore((s) => s.projects.find((p) => p.id === s.activeProjectId) ?? null);
   const session = useStore((s) => s.sessions.find((x) => x.id === s.activeSessionId) ?? null);
   const view = useStore((s) => s.activeView);
+  const rail = useStore((s) => s.railPlugin);
+  const paneTitle = rail !== null
+    ? listSurfaces().find((s) => s.id === rail && isWorkspaceSurface(s))?.title ?? null
+    : null;
 
   const segments: Array<{ key: string; node: React.ReactNode }> = [];
   segments.push({
@@ -53,7 +56,7 @@ export default function StatusBar() {
         </Fragment>
       ))}
       <span className="header-spacer" />
-      <span className="sb">{VIEW_LABEL[view]}</span>
+      <span className="sb">{VIEW_LABEL[view]}{paneTitle !== null ? ` · ${paneTitle}` : ""}</span>
     </div>
   );
 }

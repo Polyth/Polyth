@@ -6,7 +6,8 @@ import { PERSONAS, applyPersona, pluginOn, type PersonaId, type PluginId } from 
 import { getKeymap } from "./hotkeys.ts";
 import { readLastReply, stopSpeaking } from "./voice.tsx";
 import {
-  getState, openPalette, openSettingsPage, openWorktreeSessionDialog, setActiveView, setOverlay, toggleRailPlugin,
+  getState, openPalette, openSettingsPage, openWorktreeSessionDialog, setActiveView, setOverlay,
+  toggleRailPlugin, toggleWorkspacePane,
   type AppView, type RailPlugin,
 } from "./store.ts";
 import {
@@ -16,12 +17,18 @@ import {
 import { announce } from "./components/a11y/live.tsx";
 
 const VIEW: Array<[AppView, string]> = [
-  ["session", "Open session"], ["files", "Files & editor"], ["goals", "Open goals"], ["multirun", "Compare models"],
-  ["fusion", "Fuse models"], ["walkthrough", "Guided walkthrough"], ["preview", "Live preview"],
-  ["git", "Git & worktrees"], ["terminal", "Terminal"], ["schedule", "Scheduled prompts"], ["github", "GitHub issues & PRs"],
+  ["session", "Open session"], ["goals", "Open goals"], ["multirun", "Compare models"],
+  ["fusion", "Fuse models"], ["walkthrough", "Guided walkthrough"],
+  ["schedule", "Scheduled prompts"], ["github", "GitHub issues & PRs"],
+];
+// UX-PANE-MODEL: the four canonical workspace panes go through the shared
+// command path — never setActiveView().
+const PANES: Array<[string, string, PluginId]> = [
+  ["files", "Files & editor", "files"], ["git", "Git & worktrees", "git"],
+  ["terminal", "Terminal", "terminal"], ["preview", "Live preview", "preview"],
 ];
 const RAIL: Array<[RailPlugin, string, PluginId]> = [
-  ["files", "Files panel", "files"], ["changes", "Changes panel", "git"], ["context", "Context panel", "context"],
+  ["context", "Context panel", "context"],
   ["usage", "Usage panel", "usage"], ["events", "Event log", "events"],
 ];
 
@@ -120,6 +127,13 @@ export function installShell(): void {
       run: () => setActiveView(view),
     });
   }
+  for (const [id, label, plugin] of PANES) {
+    registerCommand({
+      id: `view.${id}`, label, group: "Workspace",
+      when: () => pluginOn(plugin),
+      run: () => toggleWorkspacePane(id),
+    });
+  }
   for (const [id, label, plugin] of RAIL) {
     registerCommand({
       id: `rail.${id}`, label, group: "Panels",
@@ -158,9 +172,11 @@ const ACTIONS: Record<HotkeyAction, () => void> = {
     if (id) void createSession(id);
   },
   focusComposer,
-  viewFiles: () => { if (pluginOn("files")) setActiveView("files"); },
-  viewGit: () => { if (pluginOn("git")) setActiveView("git"); },
-  viewTerminal: () => { if (pluginOn("terminal")) setActiveView("terminal"); },
+  // Workspace-pane shortcuts toggle so the same keys also close (and remain
+  // reachable from inside a focused terminal without sending it Escape).
+  viewFiles: () => { if (pluginOn("files")) toggleWorkspacePane("files"); },
+  viewGit: () => { if (pluginOn("git")) toggleWorkspacePane("git"); },
+  viewTerminal: () => { if (pluginOn("terminal")) toggleWorkspacePane("terminal"); },
 };
 
 function onKey(e: KeyboardEvent): void {

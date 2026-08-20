@@ -1,6 +1,6 @@
 import { useState } from "react";
 import {
-  useStore, activateProject, openWorktreeSessionDialog, setActiveView, setOverlay,
+  useStore, activateProject, openWorkspacePane, openWorktreeSessionDialog, setOverlay,
   setProjects, setSidebarOpen, setUiError,
 } from "../store.ts";
 import { createSession } from "../init.ts";
@@ -64,7 +64,7 @@ export default function Sidebar() {
           <span className="side-icons">
             <button className="icon-btn" title={`Search sessions (${MOD}P)`} onClick={() => setOverlay("search")}><Icon.search /></button>
             {prefs.plugins.includes("git") && (
-              <button className="icon-btn" title="Git & worktrees" onClick={() => setActiveView("git")}><Icon.tree /></button>
+              <button className="icon-btn" title="Git & worktrees" onClick={() => openWorkspacePane("git")}><Icon.tree /></button>
             )}
             <button className="icon-btn" title="Open project" onClick={() => setOverlay("project-picker")}><Icon.plus /></button>
           </span>
@@ -139,7 +139,7 @@ export default function Sidebar() {
                     <button role="menuitem" onClick={() => {
                       setProjectMenu(null);
                       if (p.id !== activeProjectId) activateProject(p.id);
-                      setActiveView("git");
+                      openWorkspacePane("git");
                     }}>Git &amp; worktrees</button>
                   )}
                   <SlotHost slot="sidebar.project.actions" context={{ projectId: p.id }} />

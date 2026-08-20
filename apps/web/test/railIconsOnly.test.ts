@@ -17,6 +17,13 @@ test("ContextRail strip buttons keep title + aria-label for hover/accessibility"
   const src = await railSource();
   assert.ok(src.includes("title={s.title}"), "surface buttons need title");
   assert.ok(src.includes("aria-label={s.title}"), "surface buttons need aria-label");
-  assert.ok(src.includes("title={j.label}"), "jump buttons need title");
-  assert.ok(src.includes("aria-label={j.label}"), "jump buttons need aria-label");
+});
+
+// UX-PANE-MODEL: the old JUMPS rows (Terminal/Preview shortcuts that flipped
+// the primary view) are gone — Terminal and Preview are registered workspace
+// surfaces launched through the same strip buttons as everything else.
+test("ContextRail has no JUMPS rows — panes open through registered launchers", async () => {
+  const src = await railSource();
+  assert.ok(!src.includes("JUMPS"), "jump rows were replaced by workspace pane launchers");
+  assert.ok(src.includes("toggleRailPlugin(s.id)"), "strip buttons route through the shared toggle");
 });

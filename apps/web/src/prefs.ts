@@ -1,6 +1,5 @@
 // Workspace persona + enabled plugins. Survives reload; drives nav, rail, composer.
 import { useSyncExternalStore } from "react";
-import type { AppView } from "./store.ts";
 
 export type PersonaId = "engineer" | "manager" | "creator" | "blank";
 export type PluginId =
@@ -89,20 +88,6 @@ export function parsePrefs(raw: string | null): Prefs {
 
 const listeners = new Set<() => void>();
 let prefs: Prefs = parsePrefs(store.get(KEY));
-
-export const NAV: Array<[AppView, PluginId, string]> = [
-  ["session", "session", "Session"],
-  ["files", "files", "Files"],
-  ["goals", "goals", "Goals"],
-  ["multirun", "multirun", "Multi-Run"],
-  ["fusion", "fusion", "Fusion"],
-  ["walkthrough", "walkthrough", "Walkthrough"],
-  ["preview", "preview", "Preview"],
-  ["git", "git", "Git"],
-  ["terminal", "terminal", "Terminal"],
-  ["schedule", "schedule", "Schedule"],
-  ["github", "github", "GitHub"],
-];
 
 function emit(): void {
   store.set(KEY, JSON.stringify(prefs));

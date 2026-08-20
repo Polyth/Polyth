@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useActiveModel, useStore, setActiveView, setUiError, type AppView } from "../store.ts";
+import { closeWorkspacePane, useActiveModel, useStore, setActiveView, setUiError, toggleWorkspacePane, type AppView } from "../store.ts";
 import { forkSession, exportSessionMarkdown } from "../init.ts";
 import { displaySessionTitle } from "../format.ts";
 import { friendlyError, shortcutLabel } from "../settings.ts";
@@ -7,6 +7,9 @@ import { GoalAttachForm } from "./GoalStrip.tsx";
 import { contextGauge, type ContextGauge } from "../reduce.ts";
 import { api } from "../api.ts";
 import SlotHost from "./slots/SlotHost.ts";
+import { listSurfaces, useSurfaceVersion, workspaceSurfacesOf } from "../surfaces.ts";
+import { usePrefs } from "../prefs.ts";
+import { Icon } from "../icons.tsx";
 
 const STROKE = { fill: "none", stroke: "currentColor", strokeWidth: 1.5, strokeLinecap: "round", strokeLinejoin: "round" } as const;
 
@@ -14,24 +17,6 @@ const ICONS: Record<AppView, React.ReactNode> = {
   session: (
     <svg width="16" height="16" viewBox="0 0 16 16" {...STROKE}>
       <path d="M2.5 3.5h11v7h-6l-2.8 2.6v-2.6h-2.2z" />
-    </svg>
-  ),
-  git: (
-    <svg width="16" height="16" viewBox="0 0 16 16" {...STROKE}>
-      <circle cx="4.5" cy="4" r="1.7" /><circle cx="4.5" cy="12" r="1.7" /><circle cx="11.5" cy="5.5" r="1.7" />
-      <path d="M4.5 5.7v4.6M11.5 7.2c0 2.3-2.5 2.6-5 3" />
-    </svg>
-  ),
-  terminal: (
-    <svg width="16" height="16" viewBox="0 0 16 16" {...STROKE}>
-      <rect x="1.8" y="2.8" width="12.4" height="10.4" rx="2" />
-      <path d="M4.5 6.2 6.8 8l-2.3 1.8M8.4 10.2h3" />
-    </svg>
-  ),
-  preview: (
-    <svg width="16" height="16" viewBox="0 0 16 16" {...STROKE}>
-      <rect x="1.8" y="2.8" width="12.4" height="10.4" rx="2" />
-      <path d="M1.8 5.6h12.4" /><circle cx="4" cy="4.2" r="0.3" />
     </svg>
   ),
   goals: (
@@ -54,11 +39,6 @@ const ICONS: Record<AppView, React.ReactNode> = {
       <path d="M3 4h2M3 8h2M3 12h2M8 4h5M8 8h5M8 12h5" />
     </svg>
   ),
-  files: (
-    <svg width="16" height="16" viewBox="0 0 16 16" {...STROKE}>
-      <path d="M4 2.5h5l3 3v8h-8z" /><path d="M9 2.5v3h3" />
-    </svg>
-  ),
   schedule: (
     <svg width="16" height="16" viewBox="0 0 16 16" {...STROKE}>
       <circle cx="8" cy="8" r="5.5" /><path d="M8 5v3.2l2.2 1.3" />
@@ -72,10 +52,11 @@ const ICONS: Record<AppView, React.ReactNode> = {
   ),
 };
 
-// Groups separated by a thin divider: chat · workspace · workflows.
+// Primary-view groups separated by a thin divider: chat · workflows. The
+// workspace group (Files/Git/Terminal/Preview) is registry-backed and opens
+// panes through the shared command path — it is not primary navigation.
 const VIEW_GROUPS: Array<Array<[AppView, string]>> = [
   [["session", "Chat"]],
-  [["files", "Files"], ["git", "Git"], ["terminal", "Terminal"], ["preview", "Preview"]],
   [["goals", "Goals"], ["multirun", "Multi-run"], ["fusion", "Fusion"], ["walkthrough", "Walkthrough"], ["schedule", "Schedule"], ["github", "GitHub"]],
 ];
 
@@ -203,6 +184,12 @@ export default function Header() {
   const branch = useStore((s) => s.gitBranch);
   const models = useStore((s) => s.models);
   const view = useStore((s) => s.activeView);
+  const rail = useStore((s) => s.railPlugin);
+  const paneFullscreen = useStore((s) => s.paneFullscreen);
+  const prefs = usePrefs();
+  useSurfaceVersion(); // registry-backed workspace launchers stay current
+  const paneSurfaces = workspaceSurfacesOf(listSurfaces())
+    .filter((s) => s.plugin === undefined || prefs.plugins.includes(s.plugin));
   const model = useActiveModel();
   const ctx = useMemo(() => {
     const ref = model.contextUsage?.model ?? model.turn?.model ?? session?.model;
@@ -245,17 +232,43 @@ export default function Header() {
               {group.map(([id, label]) => (
                 <button
                   key={id}
-                  className={`view-icon ${view === id ? "active" : ""}`}
+                  // Never mark a hidden full view active: under a full-screen
+                  // workspace layer, Chat is mounted but not the visible page.
+                  className={`view-icon ${view === id && !(id === "session" && paneFullscreen) ? "active" : ""}`}
                   title={label}
                   aria-label={label}
-                  aria-pressed={view === id}
-                  onClick={() => setActiveView(id)}
+                  aria-pressed={view === id && !(id === "session" && paneFullscreen)}
+                  onClick={() => {
+                    // Selecting Chat under the workspace layer hides the layer
+                    // (kept-alive) instead of stacking a second destination.
+                    if (id === "session" && paneFullscreen) closeWorkspacePane();
+                    else setActiveView(id);
+                  }}
                 >
                   {ICONS[id]}
                 </button>
               ))}
             </span>
-          ))}
+          )).flatMap((groupNode, gi) =>
+            gi === 0 && paneSurfaces.length > 0
+              ? [groupNode, (
+                <span className="view-group workspace-launchers" aria-label="Workspace panes" key="workspace-panes">
+                  {paneSurfaces.map((s) => (
+                    <button
+                      key={s.id}
+                      className={`view-icon ${rail === s.id ? "active" : ""}`}
+                      title={s.title}
+                      aria-label={s.title}
+                      aria-pressed={rail === s.id}
+                      data-pane-launcher={s.id}
+                      onClick={() => toggleWorkspacePane(s.id)}
+                    >
+                      {s.icon ? <s.icon /> : <Icon.context />}
+                    </button>
+                  ))}
+                </span>
+              )]
+              : [groupNode])}
         </nav>
         <OverflowMenu sessionId={session?.id ?? null} onGoal={() => setGoalFormOpen((v) => !v)} />
       </header>

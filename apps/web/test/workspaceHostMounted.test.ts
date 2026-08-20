@@ -53,8 +53,10 @@ function probe(id: string, text: string, over: Record<string, unknown> = {}) {
   });
 }
 
+// UX-PANE-MODEL: "files" is a workspace PANE surface now, not a primary view,
+// so this test drives the host with a workflow view ("goals") instead.
 test("mounted host: late registration renders, disposal falls back deterministically", async () => {
-  setActiveView("files");
+  setActiveView("goals");
   activateProject(null);
   const { container, unmount } = await mountHost();
   const offs: Cleanup[] = [];
@@ -68,20 +70,20 @@ test("mounted host: late registration renders, disposal falls back deterministic
     assert.match(container.textContent ?? "", /session surface/);
 
     // The active view's surface arrives late and takes over.
-    let offFiles = probe("files", "files surface", { order: 10 });
+    let offGoals = probe("goals", "goals surface", { order: 10 });
     await act(async () => {});
-    assert.match(container.textContent ?? "", /files surface/);
+    assert.match(container.textContent ?? "", /goals surface/);
 
     // Disposal selects the deterministic fallback (session) without touching
     // the store's active view.
-    await act(async () => { offFiles(); });
+    await act(async () => { offGoals(); });
     assert.match(container.textContent ?? "", /session surface/);
 
     // Re-registration restores the still-active view — nothing was deleted.
-    offFiles = probe("files", "files surface", { order: 10 });
-    offs.push(offFiles);
+    offGoals = probe("goals", "goals surface", { order: 10 });
+    offs.push(offGoals);
     await act(async () => {});
-    assert.match(container.textContent ?? "", /files surface/);
+    assert.match(container.textContent ?? "", /goals surface/);
   } finally {
     for (const off of offs) off();
     await unmount();
@@ -137,14 +139,14 @@ test("mounted host: a disabled plugin gates its surface to the fallback", async 
 });
 
 test("mounted host: surfaces receive canonical projectId/sessionId props (EXT-SEAMS-S2-V1)", async () => {
-  setActiveView("files");
+  setActiveView("goals");
   activateProject(null);
   // Captures the exact props object each render, like the verification probe
   // that observed `{}` before the repair.
   const received: Array<Record<string, unknown>> = [];
   const recorder = (label: string) =>
     registerWorkspaceSurface({
-      id: "files",
+      id: "goals",
       title: label,
       order: 10,
       component: (ctx) => {

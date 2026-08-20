@@ -13,6 +13,7 @@ import { clearUiError, setOverlay, useStore } from "./store.ts";
 import { usePrefs } from "./prefs.ts";
 import { LiveRegion } from "./components/a11y/live.tsx";
 import WorktreeSessionDialog from "./components/WorktreeSessionDialog.tsx";
+import WorkspaceBottomNav from "./components/workspace/WorkspaceBottomNav.tsx";
 
 function ErrorBanner() {
   const message = useStore((s) => s.uiError);
@@ -30,6 +31,7 @@ export default function App() {
   const viewResetKey = useStore(
     (s) => `${s.activeProjectId ?? ""}:${s.activeSessionId ?? ""}:${s.activeView}`,
   );
+  const paneFullscreen = useStore((s) => s.paneFullscreen);
   const prefs = usePrefs();
 
   useEffect(() => {
@@ -43,7 +45,10 @@ export default function App() {
   return (
     <div className="app">
       <Sidebar />
-      <div className="workspace">
+      {/* UX-PANE-MODEL: while a workspace surface covers the workspace, Chat
+          stays mounted underneath but is inert and out of the a11y tree — it
+          consumes no hit area and cannot retain sequential focus. */}
+      <div className="workspace" inert={paneFullscreen} aria-hidden={paneFullscreen || undefined}>
         <ErrorBanner />
         <ViewErrorBoundary resetKey={viewResetKey}>
           <Main />
@@ -51,6 +56,7 @@ export default function App() {
         <StatusBar />
       </div>
       <ContextRail />
+      <WorkspaceBottomNav />
       {overlay === "palette" && <CommandPalette />}
       {overlay === "search" && <SessionSearch />}
       {overlay === "project-picker" && <ProjectFolderDialog onClose={() => setOverlay(null)} />}

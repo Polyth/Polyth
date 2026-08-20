@@ -1,4 +1,4 @@
-// Composer insert bus: FilesPanel @ buttons, drag-drop, and starter chips all
+// Composer insert bus: file-tree @ buttons, drag-drop, and starter chips all
 // go through here. If no Composer is mounted (no open session), inserts queue
 // and drain when one mounts — the @ click never gets lost.
 export const COMPOSER_INSERT = "polyth:composer-insert";
