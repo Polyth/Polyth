@@ -113,9 +113,12 @@ export default function WorkspaceHost(): ReactNode {
   if (gate === "needs-project") return createElement(ProjectEmptyState);
   if (gate === "needs-session") return createElement(SessionEmptyState, { title: surface.title });
 
+  // EXT-SEAMS-S2-V1: every surface receives the canonical ids as props — the
+  // specified identity contract, so contributions never reach into internal
+  // stores or invent their own workspace authority just to learn "where am I".
   return createElement(
     ViewErrorBoundary,
     { inline: true, resetKey: surfaceResetKey(surface, projectId, sessionId) },
-    createElement(surface.component),
+    createElement(surface.component, { projectId, sessionId }),
   );
 }

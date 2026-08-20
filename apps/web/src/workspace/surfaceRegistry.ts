@@ -15,9 +15,10 @@ import type { PluginId } from "../prefs.ts";
  *  absent — surfaces never invent their own "open a project first" screens. */
 export type WorkspaceSurfaceRequirement = "none" | "project" | "session";
 
-/** Canonical ids the host derives from shared stores. Surfaces read these and
- *  the stores; they never receive an arbitrary cwd — worktree resolution stays
- *  server-owned. */
+/** Canonical ids the host derives from shared stores and passes to every
+ *  surface component as props (EXT-SEAMS-S2-V1). Surfaces receive these and
+ *  read shared stores; they never receive an arbitrary cwd — worktree
+ *  resolution stays server-owned. */
 export interface WorkspaceSurfaceContext {
   projectId: string | null;
   sessionId: string | null;
@@ -32,8 +33,10 @@ export interface WorkspaceSurface {
   plugin?: PluginId;
   /** Requirement gate applied by the host (default "none"). */
   requires?: WorkspaceSurfaceRequirement;
-  /** Surface body — a component, so it owns its hooks and state. */
-  component: () => ReactNode;
+  /** Surface body — a component, so it owns its hooks and state. The host
+   *  renders it with the canonical `WorkspaceSurfaceContext` as props;
+   *  components that don't need the ids may simply take no parameters. */
+  component: (context: WorkspaceSurfaceContext) => ReactNode;
 }
 
 const registry = new Map<string, WorkspaceSurface>();

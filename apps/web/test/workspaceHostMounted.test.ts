@@ -2,8 +2,9 @@
 // surface host must react to late registration/disposal without editing the
 // host, fall back deterministically when the active surface disappears or its
 // plugin is disabled, render the standard project/session empty states when a
-// requirement is absent, and isolate a throwing surface behind its boundary —
-// recovering on same-id replacement.
+// requirement is absent, isolate a throwing surface behind its boundary —
+// recovering on same-id replacement — and deliver the canonical
+// projectId/sessionId context to every surface component (EXT-SEAMS-S2-V1).
 import test from "node:test";
 import assert from "node:assert/strict";
 import { Window } from "happy-dom";
@@ -131,6 +132,59 @@ test("mounted host: a disabled plugin gates its surface to the fallback", async 
   } finally {
     for (const off of offs) off();
     await act(async () => { setPlugins([]); activateProject(null); });
+    await unmount();
+  }
+});
+
+test("mounted host: surfaces receive canonical projectId/sessionId props (EXT-SEAMS-S2-V1)", async () => {
+  setActiveView("files");
+  activateProject(null);
+  // Captures the exact props object each render, like the verification probe
+  // that observed `{}` before the repair.
+  const received: Array<Record<string, unknown>> = [];
+  const recorder = (label: string) =>
+    registerWorkspaceSurface({
+      id: "files",
+      title: label,
+      order: 10,
+      component: (ctx) => {
+        received.push({ ...ctx });
+        return createElement("div", null, `${label}:${String(ctx.projectId)}:${String(ctx.sessionId)}`);
+      },
+    });
+  const offs: Cleanup[] = [];
+  const { container, unmount } = await mountHost();
+  try {
+    // Late registration with nothing active: explicit nulls, not an empty
+    // props object and not undefined.
+    offs.push(recorder("first"));
+    await act(async () => {});
+    assert.match(container.textContent ?? "", /first:null:null/);
+    assert.deepEqual(received.at(-1), { projectId: null, sessionId: null });
+
+    // Activating a project and session flows the non-null canonical ids into
+    // the same surface reactively.
+    await act(async () => { activateProject("p1"); });
+    await act(async () => { activateSession("s1"); });
+    assert.match(container.textContent ?? "", /first:p1:s1/);
+    assert.deepEqual(received.at(-1), { projectId: "p1", sessionId: "s1" });
+
+    // A late same-id replacement (the verification probe's shape) receives
+    // the identical canonical context on its first render.
+    received.length = 0;
+    offs.push(recorder("replacement"));
+    await act(async () => {});
+    assert.match(container.textContent ?? "", /replacement:p1:s1/);
+    assert.deepEqual(received[0], { projectId: "p1", sessionId: "s1" });
+
+    // Clearing the session hands null back — surfaces always see the current
+    // canonical identity, never a stale snapshot.
+    await act(async () => { activateSession(null); });
+    assert.match(container.textContent ?? "", /replacement:p1:null/);
+    assert.deepEqual(received.at(-1), { projectId: "p1", sessionId: null });
+  } finally {
+    for (const off of offs) off();
+    await act(async () => { activateSession(null); activateProject(null); });
     await unmount();
   }
 });
