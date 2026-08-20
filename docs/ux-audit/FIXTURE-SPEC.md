@@ -234,7 +234,7 @@ if git merge --no-ff fixture/conflict-side -m "merge: retain fixture conflict"; 
   exit 1
 fi
 test -f .git/MERGE_HEAD
-git ls-files -u -- conflict.txt | test "$(wc -l)" -eq 3
+test "$(git ls-files -u -- conflict.txt | wc -l)" -eq 3
 
 printf '\nexport const stagedChange = "staged synthetic change";\n' >> src/staged.ts
 git add src/staged.ts
