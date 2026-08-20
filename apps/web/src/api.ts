@@ -7,6 +7,7 @@ import type {
   AutoAcceptSetting,
   BulkSessionResult,
   DictationSessionDto,
+  ForkResult,
   FusionDto,
   InstalledPluginDto,
   JsonObject,
@@ -131,7 +132,21 @@ async function jfetch<T>(path: string, init?: RequestInit): Promise<T> {
       window.dispatchEvent(new Event("polyth:auth-required"));
     }
     const body = await res.text().catch(() => "");
-    throw Object.assign(new Error(`HTTP ${res.status} ${res.statusText} — ${body}`), { status: res.status });
+    // Typed server errors ({error, message}) keep their code and message so
+    // callers can explain conflicts/history mismatches without regexing HTML.
+    let code: string | undefined;
+    let message: string | undefined;
+    try {
+      const parsed = JSON.parse(body) as { error?: unknown; message?: unknown };
+      if (typeof parsed.error === "string") code = parsed.error;
+      if (typeof parsed.message === "string") message = parsed.message;
+    } catch {
+      // non-JSON error body
+    }
+    throw Object.assign(
+      new Error(message ?? `HTTP ${res.status} ${res.statusText} — ${body}`),
+      { status: res.status, ...(code !== undefined ? { code } : {}) },
+    );
   }
   if (res.status === 204) return undefined as T;
   return (await res.json()) as T;
@@ -139,6 +154,10 @@ async function jfetch<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const httpStatusOf = (err: unknown): number =>
   typeof (err as { status?: unknown })?.status === "number" ? (err as { status: number }).status : 0;
+
+/** Typed error code from a server error body (e.g. "conflict", "history-mismatch"). */
+export const errorCodeOf = (err: unknown): string =>
+  typeof (err as { code?: unknown })?.code === "string" ? (err as { code: string }).code : "";
 
 function json(method: string, body?: unknown): RequestInit {
   return {
@@ -461,7 +480,7 @@ export const api = {
   queueRemove: (id: string, queueId: string) =>
     jfetch<{ ok: true }>(`/api/sessions/${id}/queue/${encodeURIComponent(queueId)}`, { method: "DELETE" }),
   fork: (id: string, atSeq?: number) =>
-    jfetch<SessionRef>(`/api/sessions/${id}/fork`, json("POST", atSeq === undefined ? {} : { atSeq })),
+    jfetch<ForkResult>(`/api/sessions/${id}/fork`, json("POST", atSeq === undefined ? {} : { atSeq })),
   rewind: (id: string, atSeq: number) =>
     jfetch<SessionEvent>(`/api/sessions/${id}/rewind`, json("POST", { atSeq })),
   clearRewind: (id: string) =>

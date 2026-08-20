@@ -79,6 +79,12 @@ export function clearAttachments(sessionId: string | null | undefined): void {
   set(keyOf(sessionId), []);
 }
 
+/** Replace a session's pending pills wholesale (marker-owned composer seeds:
+ *  rewind/fork drafts restore the excluded prompt's exact attachments). */
+export function seedAttachments(sessionId: string | null | undefined, refs: AttachmentRef[]): void {
+  set(keyOf(sessionId), refs);
+}
+
 /** Read-and-clear for send: the returned refs go on the wire, the pills go away. */
 export function takeAttachments(sessionId: string | null | undefined): AttachmentRef[] {
   const key = keyOf(sessionId);

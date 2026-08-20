@@ -2216,11 +2216,59 @@ body[data-motion="reduced"] *, body[data-motion="reduced"] *::before, body[data-
 .gallery-nav.prev { left: 10px; }
 .gallery-nav.next { right: 10px; }
 
-/* message actions + prompt navigator */
+/* message actions + prompt navigator (UX-MSG-ACTIONS) */
 .msg { position: relative; }
-.msg-actions { display: flex; gap: 4px; align-items: center; justify-content: flex-end; opacity: 0; transition: opacity 120ms; margin-top: 2px; }
-.msg:hover .msg-actions, .msg-actions:focus-within { opacity: 1; }
-.msg-actions-flash { font-size: 11px; color: var(--green, #8bcf6b); }
+/* Time stays visible; actions reveal on message hover or action focus-within.
+   Hidden controls keep keyboard focusability but no pointer hit area. */
+.msg-meta { display: flex; gap: 8px; align-items: center; justify-content: flex-end; margin-top: 2px; min-height: 24px; }
+.msg-time { font-size: 11px; color: var(--muted); white-space: nowrap; }
+.msg-actions { display: flex; gap: 4px; align-items: center; opacity: 0; pointer-events: none; transition: opacity 120ms; }
+.msg:hover .msg-actions,
+.msg-meta:focus-within .msg-actions,
+.msg-actions:focus-within { opacity: 1; pointer-events: auto; }
+.msg-actions button[disabled] { opacity: 0.55; cursor: not-allowed; }
+/* Persistent named touch entry (≥44px) + its ≥44px menu rows. Hidden at
+   hover-capable desktop widths; the inline row hides at touch/narrow. */
+.msg-actions-menu-wrap { position: relative; display: none; }
+.msg-actions-entry {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 44px; min-height: 44px; font-size: 18px; line-height: 1;
+  border: 1px solid var(--border-soft); border-radius: var(--radius);
+  background: var(--panel); color: var(--fg); cursor: pointer;
+}
+.msg-actions-entry[aria-expanded="true"] { border-color: var(--accent); }
+.msg-actions-popup {
+  position: absolute; right: 0; bottom: calc(100% + 4px); z-index: 30;
+  display: flex; flex-direction: column; min-width: 250px; max-width: calc(100vw - 24px);
+  background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35); padding: 4px;
+}
+.msg-actions-item {
+  min-height: 44px; text-align: left; padding: 10px 12px; font-size: 13px;
+  background: transparent; border: 0; border-radius: calc(var(--radius) - 2px);
+  color: var(--fg); cursor: pointer;
+}
+.msg-actions-item:hover, .msg-actions-item:focus-visible { background: var(--surface); }
+.msg-actions-item[disabled] { opacity: 0.55; cursor: not-allowed; }
+@media (hover: none), (max-width: 480px) {
+  .msg-actions { display: none; }
+  .msg-actions-menu-wrap { display: inline-flex; }
+}
+/* One timeline live region: visible chip + polite announcement. */
+.msg-live {
+  position: sticky; bottom: 4px; align-self: flex-end; z-index: 5;
+  font-size: 12px; color: var(--fg); min-height: 0; max-width: 90%;
+}
+.msg-live:not(:empty) {
+  background: var(--panel); border: 1px solid var(--border-soft);
+  border-radius: var(--radius); padding: 4px 10px;
+}
+.reasoning-actions { margin-top: 8px; }
+.rewound-confirm {
+  display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+  padding: 8px 10px; font-size: 12px;
+  border-top: 1px dashed var(--border);
+}
 .timeline { position: relative; }
 .timeline-open { align-self: flex-start; position: sticky; top: 8px; z-index: 4; }
 .rewound-tail {

@@ -9,6 +9,8 @@ import * as store from "./store.ts";
 import type { AttachmentRef, JsonObject } from "@polyth/contracts";
 import { suggestWorktreeBranch } from "./worktreeSessions.ts";
 import { installPushDeepLinks } from "./push.ts";
+import { applyComposerSeed } from "./drafts.ts";
+import { forkSeedKey, rewindSeedKey } from "./messageActions.ts";
 
 let sync: SyncClient | null = null;
 let lastSubSession: string | undefined;
@@ -161,7 +163,23 @@ export async function openSession(sessionId: string): Promise<void> {
   if (session.projectId !== store.getState().activeProjectId) store.activateProject(session.projectId);
   const events = await api.getEvents(sessionId, 0);
   for (const ev of events) store.applyEvent(ev);
+  maybeSeedFromReplay(sessionId);
   store.activateSession(sessionId);
+}
+
+/** Replay-derived composer seeding (UX-MSG-ACTIONS): an active rewind marker
+ *  or an unconsumed fork lineage marker seeds the draft at most once. Direct
+ *  URL reload therefore restores the same editable draft; edited or cleared
+ *  drafts are never overwritten (provenance in drafts.ts). */
+function maybeSeedFromReplay(sessionId: string): void {
+  const events = store.getState().events[sessionId] ?? [];
+  if (events.length === 0) return;
+  const model = buildModel(events);
+  if (model.rewind?.draft) {
+    applyComposerSeed(sessionId, rewindSeedKey(model.rewind.markerSeq), model.rewind.draft);
+  } else if (model.fork?.draft && !model.fork.seedConsumed) {
+    applyComposerSeed(sessionId, forkSeedKey(model.fork.fromSessionId, model.fork.sourceAtSeq), model.fork.draft);
+  }
 }
 
 export async function refreshSessions(projectId: string): Promise<void> {
@@ -226,9 +244,19 @@ export async function createSession(projectId: string, opts: CreateSessionOption
 }
 
 export async function forkSession(sessionId: string, atSeq?: number): Promise<void> {
-  const { id: newId } = await api.fork(sessionId, atSeq);
+  const result = await api.fork(sessionId, atSeq);
+  // Per-message fork: persist the excluded prompt as the child's editable
+  // draft BEFORE navigation, so the child composer mounts already seeded and
+  // a reload replays the same state (marker-owned, applied at most once).
+  if (result.draft) {
+    applyComposerSeed(
+      result.id,
+      forkSeedKey(result.fromSessionId ?? sessionId, result.sourceAtSeq),
+      result.draft,
+    );
+  }
   const proj = store.getState().sessions.find((s) => s.id === sessionId)?.projectId;
-  await openSession(newId);
+  await openSession(result.id);
   if (proj) void refreshSessions(proj);
 }
 
