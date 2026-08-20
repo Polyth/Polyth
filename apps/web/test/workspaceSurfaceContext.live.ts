@@ -152,7 +152,10 @@ type CapturedCtx = Record<string, unknown>;
 /** The verification probe: register an active replacement for the `session`
  *  surface (the default view) through the public plugin seam and capture the
  *  exact props object the host hands the component on every render. */
-async function registerProbe(page: Page, key: string, marker: string): Promise<void> {
+/** Registers the probe, then waits until it has rendered `waitFor` — the
+ *  marker alone for the null case, marker:projectId:sessionId once real ids
+ *  must have flowed (boot's URL-driven session activation is async). */
+async function registerProbe(page: Page, key: string, marker: string, waitFor?: string): Promise<void> {
   await page.evaluate(([k, m]) => {
     const captured: CapturedCtx[] = [];
     (window as unknown as Record<string, CapturedCtx[]>)[k] = captured;
@@ -166,7 +169,7 @@ async function registerProbe(page: Page, key: string, marker: string): Promise<v
       },
     });
   }, [key, marker] as const);
-  await page.waitForSelector(`text=${marker}:`, { timeout: 10_000 });
+  await page.waitForSelector(`text=${waitFor ?? `${marker}:`}`, { timeout: 15_000 });
 }
 
 const capturedCtx = (page: Page, key: string): Promise<CapturedCtx[]> =>
@@ -210,14 +213,16 @@ test("live: a surface receives real canonical ids, and a late replacement inheri
   // Deep link restores exactly that session; the zero-message hero renders.
   const page = await openApp(`/p/${project.id}/s/${session.id}`, ".hero");
   try {
-    await registerProbe(page, "__ctxProbeIds", "ids-ctx-probe");
+    const ids = `${project.id}:${session.id}`;
+    await registerProbe(page, "__ctxProbeIds", "ids-ctx-probe", `ids-ctx-probe:${ids}`);
     const captured = await capturedCtx(page, "__ctxProbeIds");
     assert.ok(captured.length > 0, "probe component never rendered");
     assert.deepEqual(captured.at(-1), { projectId: project.id, sessionId: session.id });
 
     // Late same-id replacement: the second registration must receive the same
-    // canonical context on its very first render.
-    await registerProbe(page, "__ctxProbeLate", "late-ctx-probe");
+    // canonical context on its very first render (ids are active by now, so
+    // there is no earlier null render to hide behind).
+    await registerProbe(page, "__ctxProbeLate", "late-ctx-probe", `late-ctx-probe:${ids}`);
     const late = await capturedCtx(page, "__ctxProbeLate");
     assert.ok(late.length > 0, "replacement probe never rendered");
     assert.deepEqual(late[0], { projectId: project.id, sessionId: session.id });
