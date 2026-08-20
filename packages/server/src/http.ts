@@ -45,7 +45,14 @@ export interface HttpDeps {
   webDist: string;
   version: string;
   routes?: RouteHandler[];
+  /** F16 gate: null = proceed, otherwise the denial to answer with. Applied
+   *  to every /api path except the two the lock screen itself needs. */
+  auth?: { gate(req: IncomingMessage): { status: number; body: unknown } | null };
 }
+
+// Public even when a password is set: the SPA lock screen must be able to
+// learn that auth is required and then mint a session.
+const AUTH_PUBLIC = new Set(["/api/auth/status", "/api/auth/login"]);
 
 export function createHttpServer(deps: HttpDeps): Server {
   const { sessions, projects } = deps;
@@ -54,6 +61,12 @@ export function createHttpServer(deps: HttpDeps): Server {
     const path = url.pathname;
     const method = req.method ?? "GET";
     try {
+      // F16: one gate before all routing. Static assets stay public (the SPA
+      // shell renders the lock screen); every /api answer needs a session.
+      if (deps.auth && path.startsWith("/api/") && !AUTH_PUBLIC.has(path)) {
+        const denial = deps.auth.gate(req);
+        if (denial) return json(res, denial.status, denial.body);
+      }
       if (path === "/api/health" && method === "GET") {
         return json(res, 200, { ok: true, version: deps.version, capabilities: deps.capabilities() });
       }

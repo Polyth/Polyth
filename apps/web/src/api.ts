@@ -85,6 +85,11 @@ export interface SessionSearchResult {
 async function jfetch<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, init);
   if (!res.ok) {
+    // F16: a 401 outside the auth endpoints means the device session is gone
+    // (revoked, expired, or a password was just set) — surface the lock screen.
+    if (res.status === 401 && !path.startsWith("/api/auth/")) {
+      window.dispatchEvent(new Event("polyth:auth-required"));
+    }
     const body = await res.text().catch(() => "");
     throw Object.assign(new Error(`HTTP ${res.status} ${res.statusText} — ${body}`), { status: res.status });
   }
@@ -928,4 +933,42 @@ export const api = {
     ),
   importBackendSessions: (projectId: string, ids: string[]) =>
     jfetch<SessionProjection[]>(`/api/control/backend-sessions/import`, json("POST", { projectId, ids })),
+
+  // ---- access control (F16) --------------------------------------------------------
+  authStatus: () => jfetch<AuthStatusDto>(`/api/auth/status`),
+  /** Never throws on auth failures: the lock screen needs the structured body
+   *  (retryAfterSec) and must not trigger the global 401 handler. */
+  authLogin: async (password: string): Promise<AuthLoginResult> => {
+    const res = await fetch(`/api/auth/login`, json("POST", { password }));
+    if (res.ok) return { ok: true };
+    const body = await res.json().catch(() => ({})) as { error?: string; message?: string; retryAfterSec?: number };
+    return {
+      ok: false,
+      error: body.error ?? `http-${res.status}`,
+      message: body.message ?? `HTTP ${res.status}`,
+      ...(typeof body.retryAfterSec === "number" ? { retryAfterSec: body.retryAfterSec } : {}),
+    };
+  },
+  authLogout: () => jfetch<{ ok: boolean }>(`/api/auth/logout`, json("POST", {})),
+  authLogoutAll: () => jfetch<{ ok: boolean }>(`/api/auth/logout-all`, json("POST", {})),
+  authSessions: () => jfetch<AuthDeviceDto[]>(`/api/auth/sessions`),
+  authRevoke: (id: string) => jfetch<{ ok: boolean }>(`/api/auth/sessions/${encodeURIComponent(id)}`, { method: "DELETE" }),
 };
+
+// ---- access control DTOs (F16) ------------------------------------------------------
+export interface AuthStatusDto {
+  required: boolean;
+  authorized: boolean;
+}
+
+export interface AuthDeviceDto {
+  id: string;
+  createdAt: number;
+  lastSeenAt: number;
+  label: string;
+  current: boolean;
+}
+
+export type AuthLoginResult =
+  | { ok: true }
+  | { ok: false; error: string; message: string; retryAfterSec?: number };

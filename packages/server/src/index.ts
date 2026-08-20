@@ -47,6 +47,8 @@ import { profileRoutes } from "./routes/profiles.ts";
 import { settingsRoutes } from "./routes/settings.ts";
 import { browserRoutes } from "./routes/browser.ts";
 import { dictationRoutes } from "./routes/dictation.ts";
+import { createAuthService } from "./auth.ts";
+import { authRoutes } from "./routes/auth.ts";
 import { createBehaviorService } from "./behavior.ts";
 import { createMcpConfigService } from "./mcp.ts";
 import { createVoiceSettings } from "./voice.ts";
@@ -520,7 +522,18 @@ export async function boot(opts: BootOptions = {}) {
   const flowTimer = setInterval(() => void reviewFlow.tick(), 4_000);
   flowTimer.unref?.();
 
+  // --- F16 access control: OFF unless a password is configured. When on,
+  // every /api + /ws answer requires the polyth_auth session cookie; login is
+  // rate-limited per client IP; sessions persist in data/auth.json so devices
+  // stay remembered across restarts.
+  const auth = createAuthService({
+    file: `${dataDir}/auth.json`,
+    envPassword: process.env.POLYTH_UI_PASSWORD,
+    localhostOptional: process.env.POLYTH_UI_PASSWORD_LOCALHOST === "optional",
+  });
+
   const routes: RouteHandler[] = [
+    authRoutes(auth),
     async (rc) => {
       // lazily rehydrate goal state from the log before the goals routes answer
       if (/^\/api\/sessions\/[^/]+\/goal/.test(rc.path)) {
@@ -696,15 +709,16 @@ export async function boot(opts: BootOptions = {}) {
   const allCapabilities = () => ["polyth.sessions", "polyth.sessionPersistence", "polyth.projects", "polyth.agentRuntime", "polyth.goals", "polyth.files", "polyth.commands", "polyth.git", "polyth.worktrees", "polyth.terminal", "polyth.preview", "polyth.multirun", "polyth.fusion", "polyth.walkthrough", "polyth.schedule", "polyth.github", "polyth.control", "polyth.agentProfiles", "polyth.settings", "polyth.mcp", "polyth.plugins", "polyth.knowledge", "polyth.review", "polyth.usage", "polyth.browser", "polyth.voice", "polyth.assist"];
 
   const server = createHttpServer({
-    sessions, projects, runtimes, routes,
+    sessions, projects, runtimes, routes, auth,
     capabilities: allCapabilities,
     webDist: resolve(__dirname, "../../../apps/web/dist"),
     version: "0.1.0",
   });
   // order matters: /ws (session gateway) aborts upgrades whose path it does
   // not match, so the terminal channel must claim /ws/terminal/:id first
-  attachTerminalWs(server, { terminals });
-  live = attachWs(server, sessions, browser, dictation);
+  const wsAuthorize = (req: import("node:http").IncomingMessage) => auth.authorized(req);
+  attachTerminalWs(server, { terminals, authorize: wsAuthorize });
+  live = attachWs(server, sessions, browser, dictation, wsAuthorize);
 
   await new Promise<void>((res) => server.listen(port, res));
   console.log(`[polyth] server on http://127.0.0.1:${port}  data=${dataDir}`);

@@ -110,6 +110,8 @@ export function terminalRoutes(deps: {
  *  only claims its own path; unmatched upgrades fall through to us). */
 export function attachTerminalWs(server: Server, deps: {
   terminals: TerminalService;
+  /** F16: when provided, upgrades without a valid auth cookie are rejected. */
+  authorize?: (req: IncomingMessage) => boolean;
 }): void {
   const wss = new WebSocketServer({ noServer: true });
   // socket -> terminalId it was opened for (each /ws/terminal/:id socket
@@ -158,6 +160,11 @@ export function attachTerminalWs(server: Server, deps: {
     const url = new URL(req.url ?? "/", "http://x");
     const m = url.pathname.match(/^\/ws\/terminal\/([^/]+)$/);
     if (!m) return;
+    if (deps.authorize && !deps.authorize(req)) {
+      socket.write("HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n");
+      socket.destroy();
+      return;
+    }
     wss.handleUpgrade(req, socket, head, (ws) => wss.emit("connection", ws, req));
   };
   server.on("upgrade", upgrade);

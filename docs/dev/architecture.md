@@ -64,7 +64,19 @@ statically by the server with SPA fallback.
   runtime event → durable log translation, permission preview enrichment, question/permission
   replies with `dismissPending`, turn hooks (goals), usage/projection updates.
 - `http.ts` — core REST (health, projects, sessions, models/agents) + `RouteHandler`
-  chain + static bundle. Feature packages never edit this file.
+  chain + static bundle. Feature packages never edit this file. F16: one auth gate
+  runs before all routing — every `/api` path 401s without a session cookie except
+  `/api/auth/status` and `/api/auth/login`; static assets stay public so the SPA
+  shell can render the lock screen.
+- `auth.ts` (F16) — optional UI password: `crypto.scrypt` hashing
+  (`scrypt$salt$hash`), random 32-byte cookie tokens stored as SHA-256 hashes in
+  `data/auth.json` (remembered devices survive restarts; 30-day idle expiry;
+  lastSeen writes throttled), clock-injected login rate limiter (10 failures /
+  10 min window → 15 min lockout with `Retry-After`; clients without a socket
+  address share one "anon" budget). Password comes from `POLYTH_UI_PASSWORD`
+  (hashed at boot, never persisted) or a `passwordHash` in `auth.json`;
+  `POLYTH_UI_PASSWORD_LOCALHOST=optional` lets loopback connections skip auth.
+  Off entirely when no password is configured.
 - `ws.ts` — `/ws` gateway: `subscribe` (gap-fill from the durable log, then live, seq-deduped),
   projections fan-out, per-socket rate limits, browser frame stream with newest-frame
   backpressure + `afterRevision` resume, dictation audio path with its own rate budget.
@@ -75,7 +87,7 @@ statically by the server with SPA fallback.
   browse+import of unadopted OpenCode sessions), snippets, profiles
   (agent profiles + model/agent aggregation), settings (behavior/MCP/plugins/system info),
   voice (engine settings + TTS proxy + summarize), assist (F9 settings + recap
-  read + chat→note), goals.
+  read + chat→note), auth (F16 status/login/logout/logout-all/device sessions), goals.
 - `behavior.ts` / `mcp.ts` — server-owned behavior instructions (`behavior.md`) and MCP
   server config (`mcp.json`), applied to OpenCode through the adapter's config applier.
   Disabled MCP servers are removed from the applied config entirely (F10); secret
@@ -134,10 +146,18 @@ standard fields forwarded, honest 503 when unconfigured), `/api/tts/summarize`
 `/api/sessions/:id/assist` (freshness-checked recap+suggestion — 404 `stale` the
 moment the log outgrows it), `/api/sessions/:id/assist/note` (small-model chat→note
 DRAFT; saving goes through the normal `/api/knowledge` flow),
+`/api/auth/*` (F16: GET `status {required, authorized}` and POST `login {password}`
+are the only public `/api` paths — login mints an httpOnly SameSite=Strict
+`polyth_auth` cookie, 401 `invalid-password` on a miss, 429 `rate-limited` +
+`Retry-After` when the IP window locks; POST `logout` / `logout-all`, GET
+`sessions` device list, DELETE `sessions/:id` per-device revoke),
 `/api/sessions/:id/goal*`.
 
 Errors are `{ error: code, message }` with mapped status; a dead OpenCode transport
-returns 503 `unavailable` (the pool respawns on the next call).
+returns 503 `unavailable` (the pool respawns on the next call). When a UI password
+is set (F16), every `/api` path except `/api/auth/status` + `/api/auth/login`
+answers 401 `unauthorized` without a valid session cookie, and `/ws` +
+`/ws/terminal/:id` upgrades are rejected at the socket with HTTP 401.
 
 ## WS protocol (`/ws`)
 
@@ -259,6 +279,13 @@ a generic collapsed row (never crash).
   (browser Web Speech by default; server engines via `/api/tts/speak` and the
   `/ws` streaming dictation client in `dictationClient.ts`, with optional
   summarize-before-speak through `/api/tts/summarize`).
+- Access control (F16): `main.tsx` checks `/api/auth/status` before `init()`
+  runs — when a password is required and the device has no session,
+  `LockScreen` renders instead of the app (login → cookie → normal boot). A
+  401 on any non-auth endpoint dispatches `polyth:auth-required`, which
+  re-locks the UI (reload-on-unlock keeps store/WS state clean). Settings →
+  Access lists remembered devices with per-device revoke and "Sign out
+  everywhere".
 
 ## UI slot model
 
@@ -280,7 +307,8 @@ extending a slot must never require editing `App.tsx`.
 `knowledge.db`, `projects.json`, `schedule.json`, `quotas.json`,
 `quota-providers.json` (optional, hand-written: HTTP quota adapter specs),
 `walkthroughs.json`, `behavior.md`, `mcp.json`, `plugins/` + `trusted-plugins/`,
-`browser-shots/`.
+`browser-shots/`, `auth.json` (F16: password hash + remembered device sessions —
+token SHA-256 hashes only, never tokens or passwords).
 
 ## Security posture
 

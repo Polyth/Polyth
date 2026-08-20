@@ -21,6 +21,7 @@ import VoicePage from "./settings/VoicePage.tsx";
 import IntegrationsPage from "./settings/IntegrationsPage.tsx";
 import SessionsPage from "./settings/SessionsPage.tsx";
 import CommandsPage from "./settings/CommandsPage.tsx";
+import AccessPage from "./settings/AccessPage.tsx";
 
 interface PageDef {
   id: string;
@@ -46,6 +47,7 @@ const BUILTIN: PageDef[] = [
   { id: "commands", label: "Commands", render: () => <CommandsPage /> },
   { id: "mcp", label: "MCP", render: () => <McpPage /> },
   { id: "plugins", label: "Plugins", render: () => <PluginsPage /> },
+  { id: "access", label: "Access", render: () => <AccessPage /> },
   { id: "about", label: "About", render: () => <AboutPage /> },
 ];
 

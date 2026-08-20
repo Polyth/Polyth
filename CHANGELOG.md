@@ -202,6 +202,24 @@ commits, and the L-queue packages started landing.
   for a session until it has spent tokens; badges (changes count, event count)
   come from the same shared context — no second git-status poller.
 
+### Added — L11: access control with UI password and remembered devices (F16)
+
+- Optional UI password (off by default): set `POLYTH_UI_PASSWORD` in the
+  server environment (or a `passwordHash` in `data/auth.json`) and every
+  `/api` and `/ws` answer requires a device session; static assets stay
+  public so the SPA can render a lock screen. `crypto.scrypt` hashing,
+  random 32-byte cookie tokens, httpOnly `SameSite=Strict` `polyth_auth`
+  cookie — the server stores only token SHA-256 hashes.
+- Login rate limiting per OC#269: 10 wrong passwords inside 10 minutes lock
+  the client IP for 15 minutes with `429` + `Retry-After` (clients without a
+  socket address share one budget); the lock screen counts the retry down.
+- Remembered devices survive restarts (`data/auth.json`), expire after 30
+  idle days, and are managed in Settings → Access: per-device revoke and
+  "Sign out everywhere" (`POST /api/auth/logout-all`). WS upgrades without a
+  valid cookie are rejected at the socket; a mid-session 401 re-locks the UI.
+- `POLYTH_UI_PASSWORD_LOCALHOST=optional` is the only bypass: loopback
+  connections skip auth, everything else still needs the cookie.
+
 ### Removed — stale planning artifacts (`3928fe9`)
 
 - `docs/features/*` — the 19-file upstream research dump (polyth/Paseo PR
