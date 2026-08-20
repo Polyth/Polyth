@@ -8,7 +8,7 @@ import CommandPalette from "./components/CommandPalette.tsx";
 import SessionSearch from "./components/SessionSearch.tsx";
 import SettingsModal from "./components/SettingsModal.tsx";
 import ProjectFolderDialog from "./components/ProjectFolderDialog.tsx";
-import ViewErrorBoundary from "./components/ViewErrorBoundary.tsx";
+import ViewErrorBoundary from "./components/ViewErrorBoundary.ts";
 import { clearUiError, setOverlay, useStore } from "./store.ts";
 import { usePrefs } from "./prefs.ts";
 import { LiveRegion } from "./components/a11y/live.tsx";

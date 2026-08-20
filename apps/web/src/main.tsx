@@ -4,6 +4,7 @@ import { api } from "./api.ts";
 import { init } from "./init.ts";
 import { exposeSlots } from "./slots.ts";
 import { exposeSurfaces } from "./surfaces.ts";
+import { exposeWorkspaceSurfaces } from "./workspace/surfaceRegistry.ts";
 import { applySettingsToDom } from "./settings.ts";
 import { getState } from "./store.ts";
 import App from "./App.tsx";
@@ -13,6 +14,7 @@ import "./styles.css";
 applySettingsToDom(getState().settings);
 exposeSlots();
 exposeSurfaces();
+exposeWorkspaceSurfaces();
 
 // F16: init() loads REST data and opens /ws — it must not run until the
 // server says this device is authorized (or that no password is set).
