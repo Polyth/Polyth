@@ -6,6 +6,7 @@ import { exposeSlots } from "./slots.ts";
 import { exposeSurfaces } from "./surfaces.ts";
 import { applySettingsToDom } from "./settings.ts";
 import { getState } from "./store.ts";
+import { installVoice } from "./voice.tsx";
 import App from "./App.tsx";
 import LockScreen from "./components/LockScreen.tsx";
 import "./styles.css";
@@ -13,6 +14,9 @@ import "./styles.css";
 applySettingsToDom(getState().settings);
 exposeSlots();
 exposeSurfaces();
+// Voice registers its composer.leading slot before the first ready App
+// render; installVoice is idempotent so repeated boots stay single-slot.
+installVoice();
 
 // F16: init() loads REST data and opens /ws — it must not run until the
 // server says this device is authorized (or that no password is set).

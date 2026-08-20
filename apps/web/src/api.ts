@@ -254,6 +254,17 @@ export interface CommandListResult {
   snippets: SnippetDef[];
 }
 
+/** Strict list outcome (UX-COMPOSER-DISC): a request failure is never
+ *  presented as a successful empty list. */
+export type StrictListResult<T> =
+  | { ok: true; items: T[] }
+  | { ok: false; reason: string };
+
+export interface ComposerCatalogResult {
+  commands: StrictListResult<SlashCommand>;
+  snippets: StrictListResult<SnippetDef>;
+}
+
 // ---- schedule types --------------------------------------------------------
 export type ScheduleCadenceDto =
   | { kind: "at"; at: number }
@@ -466,7 +477,9 @@ export const api = {
   getEvents: (id: string, afterSeq = 0) =>
     jfetch<SessionEvent[]>(`/api/sessions/${id}/events?afterSeq=${afterSeq}`),
 
-  sendMessage: (id: string, body: { text: string; attachments?: AttachmentRef[]; model?: JsonObject; agent?: string; delivery?: string; dismissPending?: boolean; agentProfileId?: string }) =>
+  // agentProfileId: string selects a profile, null explicitly clears the
+  // session's stored profile, omitted inherits it (UX-COMPOSER-DISC).
+  sendMessage: (id: string, body: { text: string; attachments?: AttachmentRef[]; model?: JsonObject; agent?: string; delivery?: string; dismissPending?: boolean; agentProfileId?: string | null }) =>
     jfetch<SendResult>(`/api/sessions/${id}/message`, json("POST", body)),
   abort: (id: string) => jfetch<void>(`/api/sessions/${id}/abort`, { method: "POST" }),
   renameSession: (id: string, title: string) =>
@@ -705,7 +718,27 @@ export const api = {
       .catch((): WorkspaceSearchItemDto[] => []),
 
   // ---- commands + snippets (§12) --------------------------------------------
+  // UX-COMPOSER-DISC: strict catalog read for the composer. Command and
+  // snippet outcomes stay independent and an HTTP/transport failure is an
+  // explicit `ok: false` — never coerced into an empty array.
+  composerCatalog: async (projectId: string): Promise<ComposerCatalogResult> => {
+    const strict = async <T>(path: string): Promise<StrictListResult<T>> => {
+      try {
+        const items = await jfetch<T[]>(path);
+        return { ok: true, items: Array.isArray(items) ? items : [] };
+      } catch (err) {
+        return { ok: false, reason: err instanceof Error ? err.message : String(err) };
+      }
+    };
+    const [commands, snippets] = await Promise.all([
+      strict<SlashCommand>(`/api/commands?projectId=${encodeURIComponent(projectId)}`),
+      strict<SnippetDef>(`/api/snippets?projectId=${encodeURIComponent(projectId)}`),
+    ]);
+    return { commands, snippets };
+  },
   // PLAN §12: /api/commands and /api/snippets each return a flat array.
+  // Convenience callers keep the fail-soft empty-array fallback; Composer
+  // must use composerCatalog above instead.
   listCommands: async (projectId: string): Promise<CommandListResult> => {
     const [commands, snippets] = await Promise.all([
       jfetch<SlashCommand[]>(`/api/commands?projectId=${encodeURIComponent(projectId)}`).catch(

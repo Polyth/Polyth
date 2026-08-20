@@ -141,7 +141,11 @@ export function createHttpServer(deps: HttpDeps): Server {
           ...(delivery === "steer" || delivery === "queue" || delivery === "interrupt" || delivery === "normal"
             ? { delivery } : {}),
           ...(b.dismissPending === true ? { dismissPending: true } : {}),
-          ...(b.agentProfileId ? { agentProfileId: String(b.agentProfileId) } : {}),
+          // string selects a profile, explicit null clears the stored one,
+          // absent field inherits it — never conflated (UX-COMPOSER-DISC)
+          ...(b.agentProfileId !== undefined
+            ? { agentProfileId: b.agentProfileId === null ? null : String(b.agentProfileId) }
+            : {}),
         }));
       }
       m = path.match(/^\/api\/sessions\/([^/]+)\/queue$/);

@@ -1,18 +1,38 @@
 import { Fragment, useState, useRef, useEffect, useCallback, type ClipboardEvent, type KeyboardEvent } from "react";
-import { getState, useActiveModel, useStore, setActiveView, setUiError } from "../store.ts";
+import { getState, useActiveModel, useStore, setActiveView, setUiError, openSettingsPage } from "../store.ts";
 import { sendMessage, abortSession, createSession } from "../init.ts";
-import { api, type SlashCommand, type SnippetDef } from "../api.ts";
-import { filterCommands, filterSnippets, loadDraft, saveDraft, type AutocompleteItem } from "../utils.ts";
+import { api, type ComposerCatalogResult, type SlashCommand, type SnippetDef } from "../api.ts";
+import { loadDraft, saveDraft, type AutocompleteItem } from "../utils.ts";
 import { PERSONAS, usePrefs } from "../prefs.ts";
 import { renderSlot } from "../slots.ts";
 import { dragKind, dropIntoSession } from "../dnd.ts";
 import {
-  attachUpload, parseGithubUrl, removeAttachment, takeAttachments,
-  tryAttachGithubUrl, usePendingAttachments,
+  attachGithubLink, attachUpload, parseGithubUrl, removeAttachment, takeAttachments,
+  tryAttachGithubUrl, usePendingAttachments, type GithubAttachResult,
 } from "../attachments.ts";
 import AttachmentPills from "./AttachmentPills.tsx";
 import { COMPOSER_INSERT, COMPOSER_REPLACE, drainInserts } from "../composerInsert.ts";
 import { activeToken, completeToken, shellCommand, type PromptToken } from "../composer/language.ts";
+import {
+  ATTACHMENT_COMPAT_NOTE,
+  catalogFromResult,
+  commandAutocomplete,
+  fileAutocomplete,
+  modelDetail,
+  OPEN_PROJECT_FIRST,
+  planCommandInsert,
+  planShellEntry,
+  planSigilInsert,
+  snippetAutocomplete,
+  type AutocompleteViewState,
+  type CatalogState,
+  type InsertPlan,
+} from "../composer/discovery.ts";
+import {
+  loadComposerConfig, saveComposerConfig, consumeComposerConfig, wireProfileId,
+  withExplicitAgent, withExplicitModel, withProfile, withProfileNone,
+  type ComposerConfig,
+} from "../composerConfig.ts";
 import {
   emptyPromptHistoryCursor,
   promptHistory,
@@ -22,12 +42,15 @@ import {
 import type { PickerItem } from "../picker.ts";
 import Picker from "./Picker.tsx";
 import AdaptiveTextInput, { type TextInputHandle } from "./input/AdaptiveTextInput.tsx";
+import ComposerAddMenu from "./ComposerAddMenu.tsx";
 import ComposerFocusDialog from "./ComposerFocusDialog.tsx";
 import QueuedMessageList from "./QueuedMessageList.tsx";
+import { GoalAttachForm } from "./GoalStrip.tsx";
+import { announce } from "./a11y/live.tsx";
 import { isFavorite, modelKey, sortModels } from "@polyth/models";
 import { noteModelUsed, useModelPrefs } from "../modelPrefs.ts";
 import { getUiSettings } from "../uiPrefs.ts";
-import { migrateFavoritesOnce, useProfiles } from "../profiles.ts";
+import { migrateFavoritesOnce, profilesLoaded, useProfiles } from "../profiles.ts";
 import AgentProfileForm from "./AgentProfileForm.tsx";
 import PendingChangesBar from "./PendingChangesBar.tsx";
 import type { AgentProfile } from "@polyth/contracts";
@@ -47,9 +70,6 @@ function modelRefFromValue(value: string): { providerID: string; modelID: string
   return undefined;
 }
 
-const EMPTY_AC: AutocompleteItem[] = [];
-const EMPTY_SLCMD: SlashCommand[] = [];
-const EMPTY_SNIP: SnippetDef[] = [];
 const STARTERS = [
   "Explore the codebase",
   "Review my recent changes",
@@ -58,12 +78,13 @@ const STARTERS = [
   "Explain this project",
 ];
 
+const PROFILE_MISSING_NOTE = "Profile unavailable — choose another";
+
 export default function Composer({ variant = "docked" }: { variant?: "docked" | "hero" }) {
-  const [modelValue, setModelValue] = useState("");
-  const [agentValue, setAgentValue] = useState("");
-  const [profileValue, setProfileValue] = useState("");
   const [pinSeed, setPinSeed] = useState<{ providerID: string; modelID: string; name?: string } | null>(null);
   const [pinEdit, setPinEdit] = useState<AgentProfile | null>(null);
+  const [createProfileOpen, setCreateProfileOpen] = useState(false);
+  const [goalFormOpen, setGoalFormOpen] = useState(false);
   const profiles = useProfiles();
   const models = useStore((s) => s.models);
   const agents = useStore((s) => s.agents);
@@ -74,6 +95,7 @@ export default function Composer({ variant = "docked" }: { variant?: "docked" | 
   const prefs = usePrefs();
   // Creator persona: plain-language composer, no model/agent jargon.
   const simple = (prefs.persona ? PERSONAS[prefs.persona].composer : "full") === "simple";
+  const goalsEnabled = prefs.plugins.includes("goals");
   const noModels = models.length === 0;
 
   // IME-safe input: the DOM owns live text; `text` tracks committed edits only.
@@ -87,14 +109,29 @@ export default function Composer({ variant = "docked" }: { variant?: "docked" | 
   const shell = shellCommand(text);
   const shellMode = shell !== null;
 
+  // UX-COMPOSER-DISC: one pending execution configuration (profile / model /
+  // agent) per canonical session, persisted with the draft. Selections flow
+  // through composerConfig transitions so profile and explicit overrides
+  // clear each other.
+  const [cfg, setCfg] = useState<ComposerConfig>(() => loadComposerConfig(session?.id ?? null));
+  const updateCfg = useCallback((next: ComposerConfig) => {
+    setCfg(next);
+    saveComposerConfig(sessionIdRef.current, next);
+  }, []);
+
   // Session switch: restore the draft through the command handle (never a
-  // controlled replay), and never while the user is mid-composition.
+  // controlled replay), and never while the user is mid-composition. The
+  // pending execution configuration is per-session and reloads with it.
   useEffect(() => {
     sessionIdRef.current = session?.id ?? null;
     const t = session?.id ? loadDraft(session.id) : "";
     setText(t);
     inputRef.current?.replaceText(t);
     historyCursor.current = emptyPromptHistoryCursor();
+    setCfg(loadComposerConfig(session?.id ?? null));
+    setAcToken(null);
+    acTokenRef.current = null;
+    fileSearchSeq.current++;
   }, [session?.id]);
 
   // Debounced draft persistence of committed text.
@@ -142,20 +179,39 @@ export default function Composer({ variant = "docked" }: { variant?: "docked" | 
     });
   }, [attachFiles]);
 
-  // Autocomplete state (token-based: works at any caret position)
-  const [acItems, setAcItems] = useState<AutocompleteItem[]>(EMPTY_AC);
+  // ---- capability catalogs (UX-COMPOSER-DISC) --------------------------------
+  // Strict independent command/snippet outcomes; an HTTP failure is
+  // `unavailable`, never a successful empty list.
+  const activeProjectId = useStore((s) => s.activeProjectId);
+  const [catalog, setCatalog] = useState<ComposerCatalogResult | null>(null);
+  const catalogSeq = useRef(0);
+
+  useEffect(() => {
+    const seq = ++catalogSeq.current;
+    setCatalog(null);
+    if (!activeProjectId) return;
+    void api.composerCatalog(activeProjectId).then((r) => {
+      if (seq === catalogSeq.current) setCatalog(r);
+    });
+  }, [activeProjectId]);
+
+  const commandCatalog: CatalogState<SlashCommand> = !activeProjectId
+    ? { state: "unavailable", reason: OPEN_PROJECT_FIRST }
+    : catalogFromResult(catalog?.commands ?? null);
+  const snippetCatalog: CatalogState<SnippetDef> = !activeProjectId
+    ? { state: "unavailable", reason: OPEN_PROJECT_FIRST }
+    : catalogFromResult(catalog?.snippets ?? null);
+
+  // ---- token autocomplete -----------------------------------------------------
+  // The active token is state so catalog transitions (loading → available)
+  // re-derive the popup; Escape closes the popup but keeps the token text.
+  const [acToken, setAcToken] = useState<PromptToken | null>(null);
   const [acIndex, setAcIndex] = useState(0);
-  const [acOpen, setAcOpen] = useState(false);
-  const [acType, setAcType] = useState<"cmd" | "snip" | "file">("cmd");
   const acTokenRef = useRef<PromptToken | null>(null);
   const fileSearchSeq = useRef(0);
-
-  // Explicit selections reset when the session changes (UX-30).
-  useEffect(() => {
-    setModelValue("");
-    setAgentValue("");
-    setProfileValue("");
-  }, [session?.id]);
+  const [fileSearch, setFileSearch] = useState<{ query: string; phase: "pending" | "done"; hits: Array<{ path: string; kind: "file" | "dir" }> }>(
+    { query: "", phase: "done", hits: [] },
+  );
 
   // One-time favorites → profiles migration once models are known.
   useEffect(() => {
@@ -169,22 +225,6 @@ export default function Composer({ variant = "docked" }: { variant?: "docked" | 
     el.style.height = "auto";
     el.style.height = `${Math.min(el.scrollHeight + 2, window.innerHeight * 0.4)}px`;
   }, [text]);
-
-  // Load commands and snippets from API (once per project change)
-  const activeProjectId = useStore((s) => s.activeProjectId);
-  const [commands, setCommands] = useState<SlashCommand[]>(EMPTY_SLCMD);
-  const [snippets, setSnippets] = useState<SnippetDef[]>(EMPTY_SNIP);
-
-  useEffect(() => {
-    if (!activeProjectId) { setCommands(EMPTY_SLCMD); setSnippets(EMPTY_SNIP); return; }
-    void api.listCommands(activeProjectId).then((r) => {
-      setCommands(r.commands);
-      setSnippets(r.snippets);
-    }).catch(() => {
-      setCommands(EMPTY_SLCMD);
-      setSnippets(EMPTY_SNIP);
-    });
-  }, [activeProjectId]);
 
   // Composer inserts (Files @, drag-drop, starter chips). preventDefault marks
   // the event consumed; anything queued while unmounted drains now. Inserts go
@@ -220,11 +260,18 @@ export default function Composer({ variant = "docked" }: { variant?: "docked" | 
     };
   }, []);
 
+  // A selected profile that was deleted after selection blocks Send with a
+  // visible state; it is never silently substituted.
+  const profileMissing = profilesLoaded()
+    && cfg.profile.kind === "id"
+    && !profiles.some((p) => cfg.profile.kind === "id" && p.id === cfg.profile.id);
+
   const send = useCallback((override?: string) => {
     const t = (override ?? inputRef.current?.getText() ?? text).trim();
     const command = shellCommand(t);
     const hasPills = command === null && attachments.length > 0;
     if ((!t && !hasPills) || (command === null && noModels) || command === "") return;
+    if (command === null && profileMissing) return;
     // Capture the target session at send time — project/session switches must
     // never reroute a send (delivery admission handles active turns server-side).
     const target = sessionIdRef.current;
@@ -232,22 +279,34 @@ export default function Composer({ variant = "docked" }: { variant?: "docked" | 
     const atts = command === null ? takeAttachments(target) : [];
     const delivery = working ? getUiSettings().followUpBehavior : undefined;
     const preferred = !session?.model ? parseModelRef(settings.defaultModel) : undefined;
+    const cfgSent = cfg;
+    const wire = wireProfileId(cfgSent);
+    const sentModel = cfgSent.model
+      ? { providerID: cfgSent.model.providerID, modelID: cfgSent.model.modelID }
+      : preferred;
     const deliver = (targetSessionId: string) => command !== null
       ? api.runShell(targetSessionId, command).catch(
           (err) => setUiError(`Couldn’t run shell command: ${err instanceof Error ? err.message : String(err)}`),
         )
       : sendMessage(
           t,
-          modelRefFromValue(modelValue) ?? preferred,
-          agentValue || undefined,
+          sentModel,
+          cfgSent.agent,
           {
             targetSessionId,
             ...(atts.length > 0 ? { attachments: atts } : {}),
             ...(delivery ? { delivery } : {}),
             dismissPending: true,
-            ...(profileValue ? { agentProfileId: profileValue } : {}),
+            ...(wire !== undefined ? { agentProfileId: wire } : {}),
           },
-        );
+        ).then((ok) => {
+          if (!ok) return;
+          // The server recorded the sent configuration in the projection and
+          // durable log; drop the local pending record only when it still
+          // equals what was sent, then reflect the authoritative state.
+          consumeComposerConfig(target, cfgSent);
+          if (sessionIdRef.current === target) setCfg(loadComposerConfig(target));
+        });
     if (target) {
       void deliver(target);
     } else if (activeProjectId) {
@@ -260,8 +319,9 @@ export default function Composer({ variant = "docked" }: { variant?: "docked" | 
     inputRef.current?.replaceText("");
     historyCursor.current = emptyPromptHistoryCursor();
     if (target) saveDraft(target, "");
-    setAcOpen(false);
-  }, [text, attachments, modelValue, agentValue, profileValue, noModels, working, activeProjectId, session?.model, settings.defaultModel]);
+    setAcToken(null);
+    acTokenRef.current = null;
+  }, [text, attachments, cfg, profileMissing, noModels, working, activeProjectId, session?.model, settings.defaultModel]);
 
   const applyCompletion = useCallback((item: AutocompleteItem) => {
     const token = acTokenRef.current;
@@ -269,19 +329,43 @@ export default function Composer({ variant = "docked" }: { variant?: "docked" | 
     if (!token || !h) return false;
     const cur = h.getText();
     const r = completeToken(cur, token, item.value);
+    // replaceText fires onTextChange, which re-derives the token/popup state.
     h.replaceText(r.text, { anchor: r.caret });
-    setText(r.text);
-    setAcOpen(false);
     h.focus();
     return true;
   }, []);
 
-  const completeAutocomplete = useCallback(() => {
-    if (!acOpen || acItems.length === 0) return false;
-    const item = acItems[acIndex];
+  // ---- derived popup view (honest four-state projection) ----------------------
+  const acView: AutocompleteViewState | null = (() => {
+    if (!acToken) return null;
+    if (acToken.kind === "command") return commandAutocomplete(commandCatalog, acToken.value);
+    if (acToken.kind === "snippet") return snippetAutocomplete(snippetCatalog, acToken.value);
+    if (!activeProjectId) return null;
+    const fresh = fileSearch.query === acToken.path;
+    return fileAutocomplete(
+      acToken.path,
+      fresh ? fileSearch.phase : "pending",
+      fresh && fileSearch.phase === "done" ? fileSearch.hits : [],
+    );
+  })();
+  const acOptions = acView?.options ?? [];
+  const acSel = acOptions.length > 0 ? Math.min(acIndex, acOptions.length - 1) : -1;
+
+  // One polite announcement per status transition — never per render and never
+  // duplicating the active option name (aria-activedescendant covers that).
+  const lastAnnounced = useRef<string | null>(null);
+  const statusText = acView?.status?.text ?? null;
+  useEffect(() => {
+    if (statusText && statusText !== lastAnnounced.current) announce(statusText);
+    lastAnnounced.current = statusText;
+  }, [statusText]);
+
+  const completeAutocomplete = (): boolean => {
+    if (!acView || acOptions.length === 0) return false;
+    const item = acOptions[acSel];
     if (!item) return false;
     return applyCompletion(item);
-  }, [acOpen, acItems, acIndex, applyCompletion]);
+  };
 
   const onKeyIntercept = (e: KeyboardEvent<HTMLTextAreaElement>, composing: boolean): boolean => {
     // IME composition: never send, never navigate autocomplete, never hotkey.
@@ -290,20 +374,23 @@ export default function Composer({ variant = "docked" }: { variant?: "docked" | 
       setFocusMode(true);
       return true;
     }
-    if (acOpen) {
-      if (e.key === "ArrowDown") {
-        setAcIndex((i) => (i + 1) % acItems.length);
+    if (acView) {
+      // Arrows move the active descendant; Enter/Tab insert only when a
+      // selectable option exists (Tab otherwise follows normal focus order).
+      if (e.key === "ArrowDown" && acOptions.length > 0) {
+        setAcIndex((i) => (i + 1) % acOptions.length);
         return true;
       }
-      if (e.key === "ArrowUp") {
-        setAcIndex((i) => (i - 1 + acItems.length) % acItems.length);
+      if (e.key === "ArrowUp" && acOptions.length > 0) {
+        setAcIndex((i) => (i - 1 + acOptions.length) % acOptions.length);
         return true;
       }
-      if (e.key === "Enter" || e.key === "Tab") {
+      if ((e.key === "Enter" || e.key === "Tab") && acOptions.length > 0) {
         if (completeAutocomplete()) return true;
       }
       if (e.key === "Escape") {
-        setAcOpen(false);
+        // Close the popup only; the token text and editor focus stay put.
+        setAcToken(null);
         return true;
       }
     }
@@ -347,7 +434,9 @@ export default function Composer({ variant = "docked" }: { variant?: "docked" | 
     return false;
   };
 
-  // Token-based autocomplete on committed text changes.
+  // Token-based autocomplete on committed text changes. File searches keep the
+  // sequence guard: a project, session, token, or query change invalidates the
+  // in-flight request, so a stale response never reopens or replaces results.
   const onTextChange = useCallback(
     (val: string) => {
       setText(val);
@@ -356,44 +445,78 @@ export default function Composer({ variant = "docked" }: { variant?: "docked" | 
       const caret = inputRef.current?.getSelection().end ?? val.length;
       const token = activeToken(val, caret);
       acTokenRef.current = token;
-      if (!token) { setAcOpen(false); return; }
-      if (token.kind === "command") {
-        const items = filterCommands(commands, token.value);
-        setAcItems(items);
-        setAcType("cmd");
-        setAcIndex(0);
-        setAcOpen(items.length > 0);
+      setAcToken(token);
+      setAcIndex(0);
+      if (!token || token.kind !== "file") {
+        fileSearchSeq.current++;
         return;
       }
-      if (token.kind === "snippet") {
-        const items = filterSnippets(snippets, token.value);
-        setAcItems(items);
-        setAcType("snip");
-        setAcIndex(0);
-        setAcOpen(items.length > 0);
-        return;
-      }
-      // file mention: scored search shared with the palette; folders included
-      if (!activeProjectId || token.path.length < 1) { setAcOpen(false); return; }
+      const q = token.path;
       const seq = ++fileSearchSeq.current;
-      void api.filesSearchScored(activeProjectId, token.path, 8, true, getState().activeSessionId ?? undefined).then((hits) => {
+      if (!activeProjectId || q.length === 0) {
+        setFileSearch({ query: q, phase: "done", hits: [] });
+        return;
+      }
+      setFileSearch({ query: q, phase: "pending", hits: [] });
+      void api.filesSearchScored(activeProjectId, q, 8, true, getState().activeSessionId ?? undefined).then((hits) => {
         if (seq !== fileSearchSeq.current) return; // stale
-        const items = hits.map((h) => ({
-          label: `@${h.path}`,
-          detail: h.kind === "dir" ? "folder" : "file",
-          value: `@${h.path}${h.kind === "dir" ? "/" : " "}`,
-        }));
-        setAcItems(items);
-        setAcType("file");
-        setAcIndex(0);
-        setAcOpen(items.length > 0);
+        setFileSearch({ query: q, phase: "done", hits: hits.map((h) => ({ path: h.path, kind: h.kind })) });
       });
     },
-    [commands, snippets, activeProjectId],
+    [activeProjectId],
   );
+
+  // ---- Add menu insertions (through the IME-safe handle only) ----------------
+  const applyPlan = useCallback((plan: InsertPlan) => {
+    const h = inputRef.current;
+    if (!h) return;
+    h.replaceText(plan.text, { anchor: plan.caret });
+    h.focus();
+  }, []);
+  const currentDraft = () => {
+    const h = inputRef.current;
+    const cur = h?.getText() ?? text;
+    return { cur, caret: h?.getSelection().end ?? cur.length };
+  };
+  const menuMention = () => {
+    const { cur, caret } = currentDraft();
+    applyPlan(planSigilInsert(cur, caret, "@"));
+  };
+  const menuSnippet = () => {
+    const { cur, caret } = currentDraft();
+    applyPlan(planSigilInsert(cur, caret, "#"));
+  };
+  const menuCommand = () => {
+    const { cur, caret } = currentDraft();
+    applyPlan(planCommandInsert(cur, caret));
+  };
+  const menuShell = () => {
+    // The menu row is disabled with a visible reason for nonempty drafts;
+    // this guard keeps the rule even if activated programmatically.
+    const plan = planShellEntry(inputRef.current?.getText() ?? text);
+    if (plan.ok) applyPlan({ text: plan.text, caret: plan.caret });
+  };
+  const attachGithub = (url: string): Promise<GithubAttachResult> => {
+    const projectId = getState().activeProjectId;
+    if (!projectId) {
+      return Promise.resolve({ ok: false, code: "no-repo", reason: OPEN_PROJECT_FIRST });
+    }
+    return attachGithubLink(projectId, sessionIdRef.current, url);
+  };
 
   const leading = renderSlot("composer.leading", { sessionId: session?.id });
   const trailing = renderSlot("composer.trailing", { sessionId: session?.id });
+
+  // ---- execution configuration projections ------------------------------------
+  const modelValue = cfg.model
+    ? JSON.stringify({ providerID: cfg.model.providerID, modelID: cfg.model.modelID })
+    : "";
+  const agentValue = cfg.agent ?? "";
+  const selectedProfileId = cfg.profile.kind === "id"
+    ? cfg.profile.id
+    : cfg.profile.kind === "none"
+    ? ""
+    : (session?.agentProfileId ?? "");
 
   // Favorites float first (Settings > Providers & Models); picking records recency.
   const modelPrefs = useModelPrefs();
@@ -406,13 +529,16 @@ export default function Composer({ variant = "docked" }: { variant?: "docked" | 
         id: JSON.stringify({ providerID: m.providerID, modelID: m.modelID }),
         label: fav ? `★ ${m.name || m.modelID}` : m.name || m.modelID,
         group: fav ? "Favorites" : m.providerID,
+        // Honest model detail: provider + numeric context + reported
+        // connection only. No cost/modality/variant/attachment guesses.
+        detail: modelDetail(m),
         keywords: [m.providerID, m.modelID],
       };
     }),
   ];
   const pickModel = (value: string) => {
-    setModelValue(value);
     const ref = modelRefFromValue(value);
+    updateCfg(withExplicitModel(cfg, ref));
     if (ref) noteModelUsed(`${ref.providerID}/${ref.modelID}`);
   };
   const agentItems: PickerItem[] = [
@@ -424,21 +550,41 @@ export default function Composer({ variant = "docked" }: { variant?: "docked" | 
       ...(a.description ? { detail: a.description } : {}),
     })),
   ];
+  const pickAgent = (id: string) => updateCfg(withExplicitAgent(cfg, id || undefined));
 
-  // Pin/Edit from the model row: exactly one matching profile opens Edit,
-  // otherwise the form is seeded with the immutable provider/model pair.
+  // Create/Edit profile from the model row: exactly one matching profile opens
+  // Edit, otherwise the form is seeded with the immutable provider/model pair.
+  const matchingProfiles = (ref: { providerID: string; modelID: string }) =>
+    profiles.filter((p) => p.providerID === ref.providerID && p.modelID === ref.modelID);
   const pinModel = (value: string) => {
     const ref = modelRefFromValue(value);
     if (!ref) return;
-    const matching = profiles.filter((p) => p.providerID === ref.providerID && p.modelID === ref.modelID);
+    const matching = matchingProfiles(ref);
     if (matching.length === 1) setPinEdit(matching[0]!);
     else {
       const m = models.find((x) => x.providerID === ref.providerID && x.modelID === ref.modelID);
       setPinSeed({ ...ref, name: m?.name || ref.modelID });
     }
   };
+  const modelRowAction = {
+    labelFor: (id: string) => {
+      const ref = modelRefFromValue(id);
+      return ref && matchingProfiles(ref).length === 1 ? "Edit profile" : "Create profile";
+    },
+    nameFor: (id: string) => {
+      const ref = modelRefFromValue(id);
+      if (!ref) return "Create profile";
+      const matching = matchingProfiles(ref);
+      if (matching.length === 1) return `Edit profile ${matching[0]!.name}`;
+      const m = models.find((x) => x.providerID === ref.providerID && x.modelID === ref.modelID);
+      return `Create profile from ${m?.name || ref.modelID}`;
+    },
+    onAction: pinModel,
+  };
+
+  const noneLabel = simple ? "Default" : "None";
   const profileItems: PickerItem[] = [
-    { id: "", label: "None", group: "" },
+    { id: "", label: noneLabel, group: "" },
     ...profiles.map((p) => ({
       id: p.id,
       label: p.name,
@@ -446,6 +592,26 @@ export default function Composer({ variant = "docked" }: { variant?: "docked" | 
       detail: `${p.providerID}/${p.modelID}${p.agent ? ` · ${p.agent}` : ""}`,
     })),
   ];
+  const pickProfile = (id: string) => {
+    updateCfg(id ? withProfile(cfg, id) : withProfileNone(cfg));
+  };
+  const currentProfileName = profileMissing
+    ? "Profile unavailable"
+    : profiles.find((p) => p.id === selectedProfileId)?.name ?? noneLabel;
+  // Creation needs a connectable model; the reason is visible text with an
+  // operable settings route, never a silent hidden action.
+  const profileFooter = (label: string) => ({
+    label,
+    run: () => setCreateProfileOpen(true),
+    ...(noModels ? {
+      disabledReason: "Connect a model before creating a profile",
+      secondaryLabel: "Open model settings",
+      secondaryRun: () => openSettingsPage("models"),
+    } : {}),
+  });
+
+  const currentModelLabel = modelItems.find((i) => i.id === modelValue)?.label ?? modelItems[0]!.label;
+  const currentAgentLabel = agentItems.find((i) => i.id === agentValue)?.label ?? agentItems[0]!.label;
 
   const followUp = getUiSettings().followUpBehavior;
   const starterChips = (
@@ -500,12 +666,20 @@ export default function Composer({ variant = "docked" }: { variant?: "docked" | 
           No models available — check that the backend is running and configured.
         </div>
       )}
+      {profileMissing && (
+        <div className="composer-note composer-profile-missing" role="alert">
+          {PROFILE_MISSING_NOTE}
+        </div>
+      )}
       {session?.id && <QueuedMessageList sessionId={session.id} />}
       {attachments.length > 0 && (
         <AttachmentPills
           attachments={attachments}
           onRemove={(id) => removeAttachment(session?.id ?? null, id)}
         />
+      )}
+      {attachments.length > 0 && !simple && !noModels && (
+        <div className="composer-attach-note">{ATTACHMENT_COMPAT_NOTE}</div>
       )}
       <div className="composer-input">
         {shellMode && <div className="composer-mode-label">Shell command · permission checked · output added to context</div>}
@@ -520,38 +694,70 @@ export default function Composer({ variant = "docked" }: { variant?: "docked" | 
             : simple
             ? "Describe what you want — it gets built as you watch…"
             : "Ask Polyth to explore, build, or review — ! for shell, / for commands, # for snippets, @ for files"}
+          {...(acView ? {
+            role: "combobox",
+            ariaAutocomplete: "list" as const,
+            ariaExpanded: true,
+            ariaControls: "composer-autocomplete-list",
+            ...(acSel >= 0 && acOptions[acSel] ? { ariaActiveDescendant: acOptions[acSel].id } : {}),
+          } : {})}
           onTextChange={onTextChange}
           onKeyIntercept={onKeyIntercept}
           onPaste={onPaste}
         />
-        {acOpen && acItems.length > 0 && (
+        {acView && (
           <div className="ac-popup">
-            <div className="ac-header">{acType === "cmd" ? "Commands" : acType === "snip" ? "Snippets" : "Files"}</div>
-            <div className="ac-list" role="listbox" aria-label={acType === "cmd" ? "Commands" : acType === "snip" ? "Snippets" : "Files"}>
-              {acItems.map((item, i) => (
-                <div
-                  key={i}
-                  role="option"
-                  aria-selected={i === acIndex}
-                  ref={i === acIndex ? (el) => el?.scrollIntoView({ block: "nearest" }) : null}
-                  className={`ac-item ${i === acIndex ? "ac-active" : ""}`}
-                  onMouseDown={(e) => {
-                    e.preventDefault();
-                    setAcIndex(i);
-                    applyCompletion(item);
-                  }}
-                  onMouseEnter={() => setAcIndex(i)}
-                >
-                  <span className="ac-label">{item.label}</span>
-                  <span className="ac-detail">{item.detail}</span>
-                </div>
-              ))}
-            </div>
-            <div className="ac-footer">
-              <span><kbd>↑↓</kbd> navigate</span>
-              <span><kbd>↵</kbd> / <kbd>Tab</kbd> insert</span>
-              <span><kbd>Esc</kbd> dismiss</span>
-            </div>
+            <div className="ac-header">{acView.kind === "cmd" ? "Commands" : acView.kind === "snip" ? "Snippets" : "Files"}</div>
+            {acOptions.length > 0 ? (
+              <div
+                className="ac-list"
+                id="composer-autocomplete-list"
+                role="listbox"
+                aria-label={acView.kind === "cmd" ? "Commands" : acView.kind === "snip" ? "Snippets" : "Files"}
+              >
+                {acOptions.map((item, i) => (
+                  <div
+                    key={item.id}
+                    id={item.id}
+                    role="option"
+                    aria-selected={i === acSel}
+                    ref={i === acSel ? (el) => el?.scrollIntoView({ block: "nearest" }) : null}
+                    className={`ac-item ${i === acSel ? "ac-active" : ""}`}
+                    onMouseDown={(e) => {
+                      e.preventDefault();
+                      setAcIndex(i);
+                      applyCompletion(item);
+                    }}
+                    onMouseEnter={() => setAcIndex(i)}
+                  >
+                    <span className="ac-label">{item.label}</span>
+                    <span className="ac-detail">{item.detail}</span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              // Instructional / loading / empty / error body: the popup stays
+              // open so the state is visible; Tab passes through normally.
+              <div className="ac-status" id="composer-autocomplete-list">
+                <span>{acView.status?.text}</span>
+                {acView.status?.createSnippet && (
+                  <button
+                    type="button"
+                    className="small-btn ac-create-snippet"
+                    onClick={() => { setAcToken(null); openSettingsPage("commands"); }}
+                  >
+                    Create a snippet…
+                  </button>
+                )}
+              </div>
+            )}
+            {acOptions.length > 0 && (
+              <div className="ac-footer">
+                <span><kbd>↑↓</kbd> navigate</span>
+                <span><kbd>↵</kbd> / <kbd>Tab</kbd> insert</span>
+                <span><kbd>Esc</kbd> dismiss</span>
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -565,14 +771,36 @@ export default function Composer({ variant = "docked" }: { variant?: "docked" | 
             <Picker
               className="picker-model"
               label="Model" direction="up" items={modelItems} value={modelValue} onPick={pickModel}
-              trailingAction={{ label: "⚲", title: "Pin as profile (or edit the matching one)", onAction: pinModel }}
+              ariaLabel={`Select model, current ${currentModelLabel}`}
+              trailingAction={modelRowAction}
             />
           )}
           {!simple && agents.length > 0 && (
-            <Picker className="picker-agent" label="Agent" direction="up" items={agentItems} value={agentValue} onPick={setAgentValue} />
+            <Picker
+              className="picker-agent"
+              label="Agent" direction="up" items={agentItems} value={agentValue} onPick={pickAgent}
+              ariaLabel={`Select agent, current ${currentAgentLabel}`}
+            />
           )}
-          {!simple && profiles.length > 0 && (
-            <Picker className="picker-profile" label="Profile" direction="up" items={profileItems} value={profileValue} onPick={setProfileValue} placeholder="None" />
+          {/* Profile stays present at zero profiles; Creator renders the same
+              store as `Setup` — one profile system, one send field. */}
+          {!simple && (
+            <Picker
+              className="picker-profile"
+              label="Profile" direction="up" items={profileItems} value={selectedProfileId} onPick={pickProfile}
+              placeholder={profileMissing ? "Profile unavailable" : "None"}
+              ariaLabel={`Select profile, current ${currentProfileName}`}
+              footerAction={profileFooter("Create profile…")}
+            />
+          )}
+          {simple && (
+            <Picker
+              className="picker-profile picker-setup"
+              label="Setup" direction="up" items={profileItems} value={selectedProfileId} onPick={pickProfile}
+              placeholder={profileMissing ? "Profile unavailable" : "Default"}
+              ariaLabel={`Working setup (profile), current ${currentProfileName}`}
+              footerAction={profileFooter("Create advanced setup…")}
+            />
           )}
         </div>
         <div className="composer-extensions">
@@ -591,13 +819,22 @@ export default function Composer({ variant = "docked" }: { variant?: "docked" | 
               attachFiles(files);
             }}
           />
-          <button
-            className="icon-btn composer-attach"
-            title="Attach files"
-            aria-label="Attach files"
-            disabled={!activeProjectId}
-            onClick={() => fileInputRef.current?.click()}
-          >⊕</button>
+          <ComposerAddMenu
+            hasProject={!!activeProjectId}
+            hasSession={!!session?.id}
+            goalsEnabled={goalsEnabled}
+            draftText={text}
+            commands={commandCatalog}
+            snippets={snippetCatalog}
+            direction={variant === "hero" ? "down" : "up"}
+            onUpload={() => fileInputRef.current?.click()}
+            onInsertMention={menuMention}
+            onInsertCommand={menuCommand}
+            onInsertSnippet={menuSnippet}
+            onEnterShell={menuShell}
+            onAttachGoal={() => setGoalFormOpen(true)}
+            attachGithub={attachGithub}
+          />
           <button
             className="icon-btn composer-expand"
             title="Focused editor (Mod+Shift+Enter)"
@@ -607,7 +844,9 @@ export default function Composer({ variant = "docked" }: { variant?: "docked" | 
           <span className="composer-primary">
             {working ? (
               <>
-                <button className="send composer-delivery" onClick={() => send()} disabled={(!text.trim() && attachments.length === 0) || (!shellMode && noModels)}
+                <button className="send composer-delivery" onClick={() => send()}
+                  disabled={(!text.trim() && attachments.length === 0) || (!shellMode && (noModels || profileMissing))}
+                  aria-label={shellMode ? "Run shell command" : `${followUp === "steer" ? "Steer the current turn" : followUp === "interrupt" ? "Interrupt, then send" : "Queue until idle"}`}
                   title={`Active turn — this message will ${followUp === "steer" ? "steer the current turn" : followUp === "interrupt" ? "interrupt, then send" : "queue until idle"}`}>
                   {shellMode ? "Run" : followUp === "steer" ? "Steer" : followUp === "interrupt" ? "Interrupt" : "Queue"} <span className="send-key">{settings.sendOnEnter ? "↵" : `${modKeyLabel()}↵`}</span>
                 </button>
@@ -616,7 +855,8 @@ export default function Composer({ variant = "docked" }: { variant?: "docked" | 
                 </button>
               </>
             ) : (
-              <button className="send" onClick={() => send()} disabled={(!text.trim() && attachments.length === 0) || (!shellMode && noModels)}>
+              <button className="send" onClick={() => send()}
+                disabled={(!text.trim() && attachments.length === 0) || (!shellMode && (noModels || profileMissing))}>
                 {shellMode ? "Run" : "Send"} <span className="send-key">{settings.sendOnEnter ? "↵" : `${modKeyLabel()}↵`}</span>
               </button>
             )}
@@ -640,9 +880,16 @@ export default function Composer({ variant = "docked" }: { variant?: "docked" | 
           {...(pinSeed ? { seed: pinSeed } : {})}
           lockModel
           onClose={() => { setPinSeed(null); setPinEdit(null); }}
-          onSaved={(profile, use) => { if (use) setProfileValue(profile.id); }}
+          onSaved={(profile, use) => { if (use) updateCfg(withProfile(cfg, profile.id)); }}
         />
       )}
+      {createProfileOpen && (
+        <AgentProfileForm
+          onClose={() => setCreateProfileOpen(false)}
+          onSaved={(profile, use) => { if (use) updateCfg(withProfile(cfg, profile.id)); }}
+        />
+      )}
+      {goalFormOpen && <GoalAttachForm onDone={() => setGoalFormOpen(false)} />}
       </div>
       {(variant === "hero" || (model.messages.length === 0 && !working)) && starterChips}
     </div>

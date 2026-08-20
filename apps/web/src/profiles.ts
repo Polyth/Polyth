@@ -16,6 +16,12 @@ export function getProfiles(): AgentProfile[] {
   return profiles;
 }
 
+/** True once the authoritative profile list has loaded at least once —
+ *  "profile deleted" states must never fire on the initial empty mirror. */
+export function profilesLoaded(): boolean {
+  return loaded;
+}
+
 export async function refreshProfiles(): Promise<AgentProfile[]> {
   profiles = await api.listProfiles();
   loaded = true;

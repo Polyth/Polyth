@@ -17,8 +17,22 @@ export interface PickerProps {
   placeholder?: string;
   direction?: "up" | "down";
   disabled?: boolean;
-  /** Trailing per-row action (e.g. pin-to-profile). Never also picks the row. */
-  trailingAction?: { label: string; title?: string; onAction: (id: string) => void };
+  /** Trailing per-row action (e.g. create/edit profile). Never also picks the
+   *  row. Label and accessible name are item-specific (UX-COMPOSER-DISC). */
+  trailingAction?: {
+    labelFor: (id: string) => string;
+    nameFor: (id: string) => string;
+    onAction: (id: string) => void;
+  };
+  /** Named list-footer action (e.g. `Create profile…`). A disabledReason is
+   *  visible text, with an optional operable secondary route. */
+  footerAction?: {
+    label: string;
+    run: () => void;
+    disabledReason?: string;
+    secondaryLabel?: string;
+    secondaryRun?: () => void;
+  };
   /** Extra class on the root (responsive layout hooks, e.g. picker-profile). */
   className?: string;
   /** Accessible trigger name; keeps the full label when text is condensed. */
@@ -37,6 +51,7 @@ export default function Picker({
   direction = "down",
   disabled,
   trailingAction,
+  footerAction,
   className,
   ariaLabel,
   triggerIcon,
@@ -149,11 +164,12 @@ export default function Picker({
                       <button
                         type="button"
                         className="picker-trail"
-                        title={trailingAction.title ?? trailingAction.label}
+                        aria-label={trailingAction.nameFor(it.id)}
+                        title={trailingAction.nameFor(it.id)}
                         onClick={(e) => { e.stopPropagation(); trailingAction.onAction(it.id); close(); }}
                         onKeyDown={(e) => e.stopPropagation()}
                       >
-                        {trailingAction.label}
+                        {trailingAction.labelFor(it.id)}
                       </button>
                     )}
                   </div>
@@ -164,6 +180,36 @@ export default function Picker({
                 <div className="picker-more">{hits.length - MAX_SHOWN} more — refine the filter</div>
               )}
             </div>
+            {footerAction && (
+              <div className="picker-footer">
+                <button
+                  type="button"
+                  className="picker-footer-action"
+                  aria-disabled={footerAction.disabledReason ? true : undefined}
+                  onClick={() => {
+                    if (footerAction.disabledReason) return;
+                    close();
+                    footerAction.run();
+                  }}
+                >
+                  {footerAction.label}
+                </button>
+                {footerAction.disabledReason && (
+                  <div className="picker-footer-reason">
+                    <span>{footerAction.disabledReason}</span>
+                    {footerAction.secondaryLabel && footerAction.secondaryRun && (
+                      <button
+                        type="button"
+                        className="small-btn"
+                        onClick={() => { close(); footerAction.secondaryRun!(); }}
+                      >
+                        {footerAction.secondaryLabel}
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </>
       )}

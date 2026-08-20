@@ -278,15 +278,19 @@ export interface SendOptions {
   delivery?: "normal" | "steer" | "queue" | "interrupt";
   /** Atomically reject open questions / deny open permissions before admission. */
   dismissPending?: boolean;
-  /** Reusable execution configuration resolved server-side (WP8). */
-  agentProfileId?: string;
+  /** Reusable execution configuration resolved server-side (WP8). A string
+   *  selects a profile, `null` explicitly clears the session's stored one,
+   *  omitted inherits it (UX-COMPOSER-DISC). */
+  agentProfileId?: string | null;
   /** Composer pills (F2); validated + persisted server-side before the model sees them. */
   attachments?: AttachmentRef[];
 }
 
-export async function sendMessage(text: string, model?: JsonObject, agent?: string, opts?: SendOptions): Promise<void> {
+/** Returns true when the server accepted the message (callers that persist
+ *  pending composer configuration consume it only on success). */
+export async function sendMessage(text: string, model?: JsonObject, agent?: string, opts?: SendOptions): Promise<boolean> {
   const id = opts?.targetSessionId ?? store.getState().activeSessionId;
-  if (!id) return;
+  if (!id) return false;
   // If the stored title is still a placeholder, derive one from the first
   // prompt so the sidebar/header update immediately (display-only upsert).
   const session = store.getState().sessions.find((s) => s.id === id);
@@ -300,11 +304,15 @@ export async function sendMessage(text: string, model?: JsonObject, agent?: stri
       ...(opts?.attachments?.length ? { attachments: opts.attachments } : {}),
       ...(opts?.delivery ? { delivery: opts.delivery } : {}),
       ...(opts?.dismissPending ? { dismissPending: true } : {}),
-      ...(opts?.agentProfileId ? { agentProfileId: opts.agentProfileId } : {}),
+      // Explicit null must reach the wire (it clears the stored profile);
+      // only an omitted field means "inherit".
+      ...(opts?.agentProfileId !== undefined ? { agentProfileId: opts.agentProfileId } : {}),
     });
+    return true;
   } catch (err) {
     console.error("send message failed", err);
     store.setUiError(friendlyError("Couldn’t send the message", err));
+    return false;
   }
 }
 

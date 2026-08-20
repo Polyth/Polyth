@@ -201,8 +201,11 @@ export interface UserTurnInput {
   delivery?: DeliveryMode;
   /** Atomically reject open questions / deny open permissions of this session before admission. */
   dismissPending?: boolean;
-  /** Resolve model/agent/options through a stored agent profile at send time. */
-  agentProfileId?: string;
+  /** Resolve model/agent/options through a stored agent profile at send time.
+   *  A string selects a profile, `null` explicitly clears the session's
+   *  stored profile, and an omitted field inherits it. The three are never
+   *  conflated (UX-COMPOSER-DISC). */
+  agentProfileId?: string | null;
 }
 
 export type SessionStatus = "idle" | "working" | "waiting" | "finished" | "failed" | "archived";

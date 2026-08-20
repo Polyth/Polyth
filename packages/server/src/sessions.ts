@@ -159,6 +159,17 @@ export function createSessionService(deps: {
     await applyProjection(sessionId, (current) => ({ ...current, ...patch, updatedAt: Date.now() }));
   };
 
+  // UX-COMPOSER-DISC: the projection records the selected profile id or its
+  // explicit clear; spread-merge cannot delete a key, so this owns removal.
+  const setProjectionProfile = async (sessionId: string, id: string | undefined) => {
+    await applyProjection(sessionId, (current) => {
+      const next = { ...current, updatedAt: Date.now() };
+      if (id) next.agentProfileId = id;
+      else delete next.agentProfileId;
+      return next;
+    });
+  };
+
   // F18: effective auto-accept — own explicit setting, else the nearest
   // ancestor's (subagents/forks carry parentId). The chain is prefetched from
   // projections; resolveAutoAccept is the pure, cycle-guarded core.
@@ -555,12 +566,13 @@ export function createSessionService(deps: {
         }
       }
       // Resolved turn configuration lands in the durable log (not just the
-      // mutable profile id), so replay is stable across profile edits.
+      // mutable profile id), so replay is stable across profile edits. An
+      // explicit clear (null) is recorded too — omitted means inherited.
       await appendAndBroadcast(sessionId, "user/message", {
         text, ...(raw !== text ? { raw } : {}),
         ...(input.attachments ? { attachments: input.attachments as unknown as JsonObject[] } : {}),
+        ...(input.agentProfileId !== undefined ? { agentProfileId: input.agentProfileId } : {}),
         ...(input.agentProfileId ? {
-          agentProfileId: input.agentProfileId,
           ...(model ? { resolvedModel: model as unknown as JsonObject } : {}),
           ...(agent ? { resolvedAgent: agent } : {}),
         } : {}),
@@ -716,14 +728,34 @@ export function createSessionService(deps: {
       // Atomic profile application: resolve to explicit model/agent up front so
       // no intermediate invalid combination can reach the runtime. Explicit
       // per-send model/agent still win over the profile's bundle.
-      if (input.agentProfileId && deps.profiles) {
-        const profile = await deps.profiles.profileGet(input.agentProfileId);
-        if (!profile) throw Object.assign(new Error("agent profile not found"), { code: "not-found" });
-        input = {
-          ...input,
-          model: input.model ?? { providerID: profile.providerID, modelID: profile.modelID },
-          ...(input.agent ?? profile.agent ? { agent: input.agent ?? profile.agent } : {}),
-        };
+      // UX-COMPOSER-DISC: a string selects a profile, explicit null clears the
+      // session's stored profile, and an omitted field inherits it.
+      const requestedProfile = input.agentProfileId; // string | null | undefined
+      const effectiveProfileId = requestedProfile === undefined
+        ? proj.agentProfileId
+        : requestedProfile ?? undefined;
+      if (effectiveProfileId && deps.profiles) {
+        const profile = await deps.profiles.profileGet(effectiveProfileId);
+        // An explicitly requested profile must exist; a stored (inherited)
+        // profile that was deleted degrades to the projection's persisted
+        // resolved model/agent rather than failing every later send.
+        if (!profile && requestedProfile !== undefined) {
+          throw Object.assign(new Error("agent profile not found"), { code: "not-found" });
+        }
+        if (profile) {
+          input = {
+            ...input,
+            // the durable user/message records the actually applied profile id
+            agentProfileId: effectiveProfileId,
+            model: input.model ?? { providerID: profile.providerID, modelID: profile.modelID },
+            ...(input.agent ?? profile.agent ? { agent: input.agent ?? profile.agent } : {}),
+          };
+        }
+      }
+      // Persist the explicit selection or clear after resolution succeeded, so
+      // an unknown profile id can never be recorded.
+      if (requestedProfile !== undefined && (proj.agentProfileId ?? undefined) !== (requestedProfile ?? undefined)) {
+        await setProjectionProfile(sessionId, requestedProfile ?? undefined);
       }
       // Send-time arbitration first: resolution events precede queue/user events.
       if (input.dismissPending) await dismissPendingRequests(sessionId, rt);
