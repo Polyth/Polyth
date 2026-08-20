@@ -4,7 +4,7 @@
 - Model / role: `SOL` / UX and architecture specification
 - Status: `specified`
 - Specified: `2026-08-20`
-- Product source baseline: `7466c50c3e94a65de31877cd254d8242e1b22734`
+- Product source baseline: `7466c5053d4867f2118e61c0df84cf7dbcfdcd74`
 - Inputs: polyth audit at `0038e37`, Polyth audit at `ea25b84`,
   and the coordinated `UX-PERSONAS` specification at `0b570e7`
 - Scope: project hydration, first-run arbitration, project activation,
