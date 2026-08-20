@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Polyth — Command palette</title>
+  <link rel="stylesheet" href="./tokens.css">
+  <style>
+    .palette-scrim { align-items: start; padding-top: 112px; background: rgba(7,6,5,.57); backdrop-filter: blur(4px); }
+    .palette { width: min(700px,calc(100vw - 48px)); overflow: hidden; border: 1px solid #514a42; border-radius: 16px; background: #1e1c19; box-shadow: 0 38px 110px rgba(0,0,0,.7),0 10px 35px rgba(0,0,0,.4); }
+    .palette-search { display: flex; height: 62px; align-items: center; gap: 12px; padding: 0 15px; border-bottom: 1px solid var(--line); }
+    .palette-search .icon { color: var(--accent); }
+    .palette-search input { min-width: 0; flex: 1; border: 0; outline: 0; color: var(--text-strong); background: transparent; font-size: 15px; letter-spacing: -.02em; }
+    .palette-search input::placeholder { color: #77716b; }
+    .palette-results { max-height: 580px; overflow: auto; padding: 8px; }
+    .result-group { padding: 3px 0 6px; }
+    .result-group + .result-group { border-top: 1px solid var(--line); }
+    .result-group-title { display: flex; height: 28px; align-items: center; padding: 0 10px; color: #716c65; font-size: 9.5px; font-weight: 780; letter-spacing: .1em; text-transform: uppercase; }
+    .result-row { display: grid; min-height: 47px; align-items: center; grid-template-columns: 30px minmax(0,1fr) auto; gap: 8px; padding: 5px 9px; border: 1px solid transparent; border-radius: 9px; color: var(--muted); cursor: pointer; }
+    .result-row:hover { color: var(--text); background: var(--elevated); }
+    .result-row.selected { color: var(--text); border-color: rgba(244,155,91,.28); background: var(--accent-soft); }
+    .result-icon { display: grid; width: 28px; height: 28px; place-items: center; border: 1px solid var(--line); border-radius: 8px; color: var(--muted); background: var(--sunken); }
+    .result-row.selected .result-icon { color: var(--accent); border-color: rgba(244,155,91,.26); background: #30231b; }
+    .result-copy { min-width: 0; }
+    .result-title { overflow: hidden; color: inherit; font-size: 12px; font-weight: 590; text-overflow: ellipsis; white-space: nowrap; }
+    .result-desc { overflow: hidden; margin-top: 2px; color: var(--muted-2); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+    .result-meta { display: flex; align-items: center; gap: 7px; color: var(--muted-2); font-size: 10px; }
+    .palette-foot { display: flex; height: 38px; align-items: center; gap: 12px; padding: 0 13px; border-top: 1px solid var(--line); color: var(--muted-2); background: var(--sunken); font-size: 10px; }
+    .palette-foot span { display: inline-flex; align-items: center; gap: 5px; }
+    .palette-foot .scope { margin-left: auto; }
+    .under-stage { display: flex; flex: 1; align-items: center; justify-content: center; }
+    .under-compose { width: min(620px,calc(100% - 60px)); }
+    .under-compose h1 { margin: 0 0 25px; color: var(--text-strong); font-size: 39px; letter-spacing: -.055em; text-align: center; }
+    [hidden] { display: none !important; }
+  </style>
+</head>
+<body>
+  <div class="workspace-blur" aria-hidden="true">
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div class="sidebar-top"><a class="brand" href="./index.html"><span class="brand-mark">p</span><span>Polyth</span></a></div>
+        <section class="project-card"><div class="project-row"><span class="project-avatar">d</span><div class="project-meta"><div class="project-name">demo-app</div><div class="project-path">/tmp/demo-app</div></div></div><div class="branch-row">⌘ master</div></section>
+        <div class="sidebar-section-head">Sessions</div>
+        <div class="new-session">+&nbsp; New session</div>
+        <div class="session-list">
+          <div class="session-item active"><span class="dot live"></span><span class="session-copy"><span class="session-title">Plan the dashboard redesign</span><span class="session-time">Working now</span></span></div>
+          <div class="session-item"><span class="dot green"></span><span class="session-copy"><span class="session-title">Add CTA to landing page</span><span class="session-time">18 min ago</span></span></div>
+          <div class="session-item"><span class="dot"></span><span class="session-copy"><span class="session-title">Fix mobile navigation</span><span class="session-time">Yesterday</span></span></div>
+        </div>
+      </aside>
+      <main class="main-stage">
+        <div class="stage-head"><span class="stage-title">New session</span><span class="stage-subtitle">demo-app</span></div>
+        <div class="under-stage">
+          <div class="under-compose">
+            <h1>What should we build?</h1>
+            <div class="composer"><div class="composer-quickbar"><span class="quick-action">+ Attach</span><span class="quick-action">@ Files</span><span class="quick-action">/ Commands</span></div><textarea placeholder="Ask Polyth to build, explain, or investigate…"></textarea><div class="composer-bottom"><span class="select-chip">DeepSeek V4 Flash</span><span class="composer-spacer"></span><span class="send-btn">Send</span></div></div>
+          </div>
+        </div>
+      </main>
+      <aside class="inspector"><div class="inspector-head"><span class="inspector-title">Context</span></div><div class="inspector-body"><div class="panel-card"><div class="panel-card-head">Session context</div><div class="panel-card-body"><div class="metric-row">Context window<strong>11.8k / 96k</strong></div><div class="meter"><span></span></div></div></div></div></aside>
+      <nav class="tool-rail">
+        <span class="rail-item active"><svg class="icon" viewBox="0 0 24 24"><path d="M4 6h16v12H4z"/></svg>Context</span>
+        <span class="rail-item"><svg class="icon" viewBox="0 0 24 24"><path d="M4 5h6l2 2h8v12H4z"/></svg>Files</span>
+        <span class="rail-item"><svg class="icon" viewBox="0 0 24 24"><path d="M5 7h14v12H5z"/></svg>Git</span>
+      </nav>
+    </div>
+    <footer class="status-bar"><span class="status-brand">Local</span><span class="status-item">demo-app</span><span class="status-item">master</span><span class="status-right"><span class="status-item">DeepSeek V4 Flash</span><span class="status-item">Chat</span></span></footer>
+  </div>
+
+  <div class="scrim palette-scrim" role="dialog" aria-modal="true" aria-label="Command palette">
+    <section class="palette">
+      <label class="palette-search">
+        <svg class="icon icon-lg" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4 4"/></svg>
+        <input id="command-search" autocomplete="off" autofocus placeholder="Search sessions, commands, and files…" aria-label="Search commands">
+        <span class="kbd">Esc</span>
+      </label>
+
+      <div class="palette-results">
+        <section class="result-group">
+          <div class="result-group-title">Sessions</div>
+          <a class="result-row selected" href="./04-composer-session.html" data-search="add cta landing page session">
+            <span class="result-icon"><svg class="icon icon-sm" viewBox="0 0 24 24"><path d="M4 5h16v12H8l-4 4z"/></svg></span>
+            <span class="result-copy"><span class="result-title">Add CTA to landing page</span><span class="result-desc">demo-app · 2 messages · 18 min ago</span></span>
+            <span class="result-meta"><span class="dot green"></span><span class="kbd">↵</span></span>
+          </a>
+          <a class="result-row" href="./03-chat-hero.html" data-search="plan dashboard redesign working session">
+            <span class="result-icon"><svg class="icon icon-sm" viewBox="0 0 24 24"><path d="M4 5h16v12H8l-4 4z"/></svg></span>
+            <span class="result-copy"><span class="result-title">Plan the dashboard redesign</span><span class="result-desc">demo-app · working now · build</span></span>
+            <span class="result-meta"><span class="dot live"></span></span>
+          </a>
+        </section>
+
+        <section class="result-group">
+          <div class="result-group-title">Commands</div>
+          <div class="result-row" data-search="new session command">
+            <span class="result-icon"><svg class="icon icon-sm" viewBox="0 0 24 24"><path d="M4 12h16M12 4v16"/></svg></span>
+            <span class="result-copy"><span class="result-title">New session</span><span class="result-desc">Start a clean conversation in demo-app</span></span>
+            <span class="result-meta"><span class="kbd">⌘ N</span></span>
+          </div>
+          <a class="result-row" href="./02-open-project.html" data-search="open project folder command">
+            <span class="result-icon"><svg class="icon icon-sm" viewBox="0 0 24 24"><path d="M4 5h6l2 2h8v12H4z"/></svg></span>
+            <span class="result-copy"><span class="result-title">Open project…</span><span class="result-desc">Browse a local folder or clone a repository</span></span>
+            <span class="result-meta"><span class="kbd">⌘ O</span></span>
+          </a>
+          <a class="result-row" href="./05-settings.html" data-search="settings preferences command">
+            <span class="result-icon"><svg class="icon icon-sm" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3"/></svg></span>
+            <span class="result-copy"><span class="result-title">Open settings</span><span class="result-desc">Models, agents, workspace, and interface</span></span>
+            <span class="result-meta"><span class="kbd">⌘ ,</span></span>
+          </a>
+        </section>
+
+        <section class="result-group">
+          <div class="result-group-title">Files</div>
+          <div class="result-row" data-search="index html file">
+            <span class="result-icon"><svg class="icon icon-sm" viewBox="0 0 24 24"><path d="M6 3h8l4 4v14H6zM14 3v5h4"/></svg></span>
+            <span class="result-copy"><span class="result-title">index.html</span><span class="result-desc mono">/tmp/demo-app/index.html</span></span>
+            <span class="result-meta">HTML</span>
+          </div>
+          <div class="result-row" data-search="app css file">
+            <span class="result-icon"><svg class="icon icon-sm" viewBox="0 0 24 24"><path d="M6 3h8l4 4v14H6zM14 3v5h4"/></svg></span>
+            <span class="result-copy"><span class="result-title">app.css</span><span class="result-desc mono">/tmp/demo-app/src/app.css</span></span>
+            <span class="result-meta">CSS</span>
+          </div>
+        </section>
+      </div>
+      <footer class="palette-foot">
+        <span><span class="kbd">↑</span><span class="kbd">↓</span> move</span>
+        <span><span class="kbd">↵</span> open</span>
+        <span><span class="kbd">⌘ K</span> actions</span>
+        <span class="scope">Scope: demo-app</span>
+      </footer>
+    </section>
+  </div>
+  <script>
+    const search = document.querySelector('#command-search');
+    search.addEventListener('input', () => {
+      const query = search.value.trim().toLowerCase();
+      document.querySelectorAll('[data-search]').forEach((row) => {
+        row.hidden = query && !row.dataset.search.includes(query);
+      });
+    });
+  </script>
+</body>
+</html>

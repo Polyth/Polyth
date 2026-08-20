@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Polyth — Choose your working style</title>
+  <link rel="stylesheet" href="./tokens.css">
+  <style>
+    .onboarding {
+      position: relative;
+      display: flex;
+      height: 100%;
+      flex-direction: column;
+      overflow: auto;
+      background:
+        radial-gradient(circle at 51% 7%, rgba(244,155,91,.14), transparent 31%),
+        radial-gradient(circle at 9% 90%, rgba(130,191,244,.035), transparent 27%),
+        var(--bg);
+    }
+    .onboarding::before {
+      position: absolute; inset: 0; content: ""; pointer-events: none; opacity: .35;
+      background-image: linear-gradient(rgba(255,255,255,.016) 1px,transparent 1px),linear-gradient(90deg,rgba(255,255,255,.016) 1px,transparent 1px);
+      background-size: 54px 54px;
+      mask-image: linear-gradient(to bottom,black,transparent 75%);
+    }
+    .onboard-nav {
+      position: relative; z-index: 2; display: flex; height: 68px; flex: 0 0 auto;
+      align-items: center; padding: 0 28px; border-bottom: 1px solid rgba(48,45,41,.72);
+    }
+    .step-indicator { display: flex; margin-left: auto; align-items: center; gap: 9px; color: var(--muted); font-size: 11px; }
+    .step-line { width: 38px; height: 3px; overflow: hidden; border-radius: 99px; background: var(--line); }
+    .step-line::after { display: block; width: 50%; height: 100%; border-radius: inherit; content: ""; background: var(--accent); }
+    .onboard-main {
+      position: relative; z-index: 1; display: flex; width: min(1160px,calc(100vw - 72px)); flex: 1;
+      margin: 0 auto; flex-direction: column; justify-content: center; padding: 38px 0 58px;
+    }
+    .onboard-kicker { display: flex; margin-bottom: 18px; justify-content: center; }
+    .onboard-main h1 { margin: 0; color: var(--text-strong); font-size: clamp(38px,4.1vw,58px); font-weight: 650; letter-spacing: -.06em; line-height: 1.02; text-align: center; }
+    .onboard-lede { max-width: 570px; margin: 15px auto 34px; color: var(--muted); font-size: 14px; line-height: 1.65; text-align: center; }
+    .persona-grid { display: grid; grid-template-columns: repeat(4,1fr); gap: 12px; }
+    .persona {
+      position: relative; min-height: 316px; overflow: hidden; padding: 20px; border: 1px solid var(--line);
+      border-radius: 18px; color: var(--muted); background: rgba(29,27,25,.82); cursor: pointer;
+      text-align: left; box-shadow: 0 18px 44px rgba(0,0,0,.12); transition: 180ms ease;
+    }
+    .persona:hover { border-color: #514942; background: var(--elevated); transform: translateY(-3px); }
+    .persona.active { border-color: rgba(244,155,91,.72); color: var(--text); background: linear-gradient(145deg,rgba(244,155,91,.13),rgba(34,31,28,.98) 55%); box-shadow: 0 24px 55px rgba(0,0,0,.28),0 0 0 3px rgba(244,155,91,.055); }
+    .persona-check { position: absolute; top: 16px; right: 16px; display: grid; width: 24px; height: 24px; place-items: center; border: 1px solid var(--line-strong); border-radius: 50%; color: transparent; background: var(--sunken); }
+    .persona.active .persona-check { color: var(--accent-ink); border-color: var(--accent); background: var(--accent); }
+    .persona-symbol { display: grid; width: 48px; height: 48px; margin-bottom: 45px; place-items: center; border: 1px solid var(--line); border-radius: 14px; color: #bbb4ac; background: var(--raised); }
+    .persona.active .persona-symbol { color: #ffc69d; border-color: rgba(244,155,91,.3); background: var(--accent-soft); }
+    .persona h2 { margin: 0 0 8px; color: var(--text); font-size: 19px; font-weight: 660; letter-spacing: -.035em; }
+    .persona p { min-height: 54px; margin: 0 0 18px; color: var(--muted); font-size: 12px; line-height: 1.55; }
+    .persona ul { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; color: #a8a39b; font-size: 11px; }
+    .persona li { display: flex; align-items: center; gap: 7px; }
+    .persona li::before { width: 4px; height: 4px; border-radius: 50%; content: ""; background: #716b64; }
+    .persona.active li::before { background: var(--accent); }
+    .onboard-actions { display: flex; margin-top: 28px; align-items: center; justify-content: center; gap: 12px; }
+    .onboard-note { position: absolute; right: 28px; bottom: 22px; color: var(--muted-2); font-size: 10.5px; }
+    @media(max-width:900px){.persona-grid{grid-template-columns:repeat(2,1fr)}.onboard-main{justify-content:flex-start}.onboarding{overflow:auto}.persona{min-height:280px}}
+  </style>
+</head>
+<body>
+  <div class="onboarding">
+    <nav class="onboard-nav">
+      <a class="brand" href="./index.html">
+        <span class="brand-mark" aria-hidden="true">p</span>
+        <span>Polyth</span>
+      </a>
+      <div class="step-indicator">
+        <span>Setup</span>
+        <span class="step-line" aria-hidden="true"></span>
+        <strong>2 of 4</strong>
+      </div>
+    </nav>
+
+    <main class="onboard-main">
+      <div class="onboard-kicker"><span class="eyebrow">Make Polyth yours</span></div>
+      <h1>How do you like to work?</h1>
+      <p class="onboard-lede">
+        We’ll tune the first actions, context panels, and agent defaults around you.
+        Nothing is locked—you can change this anytime.
+      </p>
+
+      <section class="persona-grid" aria-label="Working styles">
+        <button class="persona active" type="button" aria-pressed="true">
+          <span class="persona-check" aria-hidden="true">
+            <svg class="icon icon-sm" viewBox="0 0 24 24"><path d="m6 12 4 4 8-9"/></svg>
+          </span>
+          <span class="persona-symbol">
+            <svg class="icon icon-lg" viewBox="0 0 24 24" aria-hidden="true"><path d="m8 9-4 3 4 3M16 9l4 3-4 3M14 5l-4 14"/></svg>
+          </span>
+          <h2>Engineer</h2>
+          <p>Build, debug, and ship with code-aware actions always close at hand.</p>
+          <ul>
+            <li>Files and Git up front</li>
+            <li>Build agent by default</li>
+            <li>Technical suggestion set</li>
+          </ul>
+        </button>
+
+        <button class="persona" type="button" aria-pressed="false">
+          <span class="persona-check" aria-hidden="true">
+            <svg class="icon icon-sm" viewBox="0 0 24 24"><path d="m6 12 4 4 8-9"/></svg>
+          </span>
+          <span class="persona-symbol">
+            <svg class="icon icon-lg" viewBox="0 0 24 24" aria-hidden="true"><path d="M4 19V9M10 19V5M16 19v-7M22 19H2"/></svg>
+          </span>
+          <h2>Manager</h2>
+          <p>Turn project signals into goals, status updates, and clear next moves.</p>
+          <ul>
+            <li>Goals and plans up front</li>
+            <li>Concise progress summaries</li>
+            <li>Task scheduling actions</li>
+          </ul>
+        </button>
+
+        <button class="persona" type="button" aria-pressed="false">
+          <span class="persona-check" aria-hidden="true">
+            <svg class="icon icon-sm" viewBox="0 0 24 24"><path d="m6 12 4 4 8-9"/></svg>
+          </span>
+          <span class="persona-symbol">
+            <svg class="icon icon-lg" viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 9.5 9.5 3 12l6.5 2.5L12 21l2.5-6.5L21 12l-6.5-2.5L12 3Z"/></svg>
+          </span>
+          <h2>Creator</h2>
+          <p>Explore ideas, shape interfaces, and move from a rough brief to a real artifact.</p>
+          <ul>
+            <li>Preview and voice up front</li>
+            <li>Visual suggestion set</li>
+            <li>Draft-friendly responses</li>
+          </ul>
+        </button>
+
+        <button class="persona" type="button" aria-pressed="false">
+          <span class="persona-check" aria-hidden="true">
+            <svg class="icon icon-sm" viewBox="0 0 24 24"><path d="m6 12 4 4 8-9"/></svg>
+          </span>
+          <span class="persona-symbol">
+            <svg class="icon icon-lg" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"/><path d="M12 8v8M8 12h8"/></svg>
+          </span>
+          <h2>Blank</h2>
+          <p>Start neutral and let Polyth adapt as your workspace takes shape.</p>
+          <ul>
+            <li>Balanced workspace</li>
+            <li>No assumed agent</li>
+            <li>Learn from your choices</li>
+          </ul>
+        </button>
+      </section>
+
+      <div class="onboard-actions">
+        <a class="btn btn-ghost" href="./index.html">Back</a>
+        <a class="btn btn-primary" href="./02-open-project.html">
+          Continue as Engineer
+          <svg class="icon icon-sm" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+        </a>
+      </div>
+    </main>
+    <span class="onboard-note">Your preference stays on this device.</span>
+  </div>
+  <script>
+    const cards = [...document.querySelectorAll('.persona')];
+    const continueLink = document.querySelector('.btn-primary');
+    cards.forEach((card) => card.addEventListener('click', () => {
+      cards.forEach((item) => { item.classList.remove('active'); item.setAttribute('aria-pressed', 'false'); });
+      card.classList.add('active');
+      card.setAttribute('aria-pressed', 'true');
+      continueLink.childNodes[0].textContent = `Continue as ${card.querySelector('h2').textContent} `;
+    }));
+  </script>
+</body>
+</html>

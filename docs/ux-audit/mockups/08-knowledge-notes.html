@@ -1,0 +1,195 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Polyth — Knowledge</title>
+  <link rel="stylesheet" href="./tokens.css">
+  <style>
+    :root { --sidebar-w: 232px; --inspector-w: 455px; --rail-w: 96px; }
+    .session-canvas { min-height: 0; flex: 1; overflow: auto; }
+    .session-thread { width: min(650px,calc(100% - 44px)); margin: 0 auto; padding: 37px 0 24px; }
+    .thread-label { display: flex; margin-bottom: 20px; align-items: center; gap: 8px; color: var(--muted-2); font-size: 10px; }
+    .thread-label::before,.thread-label::after { height: 1px; flex: 1; content: ""; background: var(--line); }
+    .thread-user { margin-left: 42px; padding: 13px 15px; border: 1px solid var(--line); border-radius: 13px 5px 13px 13px; color: #d4cfc7; background: var(--elevated); font-size: 13px; }
+    .thread-assistant { display: grid; margin-top: 22px; grid-template-columns: 29px 1fr; gap: 10px; }
+    .thread-assistant .brand-mark { width: 28px; height: 28px; border-radius: 9px; font-size: 17px; }
+    .thread-response { color: #c6c1ba; font-size: 12.5px; line-height: 1.65; }
+    .thread-response strong { color: var(--text); }
+    .note-ref { display: inline-flex; height: 22px; align-items: center; gap: 5px; padding: 0 7px; border: 1px solid rgba(244,155,91,.25); border-radius: 6px; color: #ffc094; background: var(--accent-soft); font-size: 10px; font-weight: 620; }
+    .compact-dock { flex: 0 0 auto; padding: 0 18px 15px; }
+    .compact-dock .composer { width: min(650px,100%); margin: 0 auto; }
+    .compact-dock textarea { min-height: 58px; }
+    .knowledge-inspector .inspector-body { padding: 12px; }
+    .knowledge-tabs { margin-bottom: 11px; }
+    .knowledge-view { display: none; }
+    .knowledge-view.active { display: block; }
+    .knowledge-banner { display: flex; margin-bottom: 10px; align-items: center; gap: 9px; padding: 10px; border: 1px solid rgba(244,155,91,.2); border-radius: 10px; color: #c5b8ad; background: var(--accent-soft); font-size: 10.5px; line-height: 1.4; }
+    .knowledge-banner .icon { color: var(--accent); }
+    .knowledge-banner code { color: #ffc194; font: 650 10px/1 var(--mono); }
+    .note-card { position: relative; padding: 13px; border: 1px solid var(--line); border-radius: 11px; background: var(--elevated); cursor: pointer; transition: 150ms ease; }
+    .note-card + .note-card { margin-top: 8px; }
+    .note-card:hover { border-color: #4d4740; background: var(--raised); transform: translateY(-1px); }
+    .note-card.pinned::before { position: absolute; top: 12px; right: 12px; width: 5px; height: 5px; border-radius: 50%; content: ""; background: var(--accent); box-shadow: 0 0 0 4px rgba(244,155,91,.08); }
+    .note-meta { display: flex; align-items: center; gap: 7px; color: var(--muted-2); font-size: 9.5px; }
+    .note-card h3 { margin: 8px 0 5px; padding-right: 14px; color: #ded9d1; font-size: 12px; font-weight: 650; letter-spacing: -.02em; }
+    .note-card p { margin: 0; color: var(--muted); font-size: 10.5px; line-height: 1.5; }
+    .note-tags { display: flex; margin-top: 10px; gap: 5px; }
+    .note-tag { display: inline-flex; height: 20px; align-items: center; padding: 0 6px; border-radius: 5px; color: #9fbfda; background: var(--blue-soft); font: 550 9px/1 var(--mono); }
+    .knowledge-footer { display: flex; margin-top: 10px; align-items: center; color: var(--muted-2); font-size: 9.5px; }
+    .knowledge-footer a { margin-left: auto; }
+    .todo-card { overflow: hidden; border: 1px solid var(--line); border-radius: 11px; background: var(--elevated); }
+    .todo-row { display: flex; min-height: 45px; align-items: center; gap: 9px; padding: 8px 11px; color: #c9c4bd; font-size: 11px; }
+    .todo-row + .todo-row { border-top: 1px solid var(--line); }
+    .todo-check { display: grid; width: 17px; height: 17px; flex: 0 0 auto; place-items: center; border: 1px solid var(--line-strong); border-radius: 5px; color: transparent; background: var(--sunken); }
+    .todo-row.done { color: var(--muted-2); text-decoration: line-through; }
+    .todo-row.done .todo-check { color: var(--accent-ink); border-color: var(--green); background: var(--green); }
+    .todo-row .badge { margin-left: auto; }
+    .plan-card { padding: 13px; border: 1px solid var(--line); border-radius: 11px; background: var(--elevated); }
+    .plan-card h3 { margin: 0 0 9px; color: #dad5cd; font-size: 12px; }
+    .plan-step { display: flex; min-height: 30px; align-items: center; gap: 9px; color: var(--muted); font-size: 10.5px; }
+    .step-number { display: grid; width: 19px; height: 19px; place-items: center; border: 1px solid var(--line); border-radius: 50%; color: var(--muted-2); background: var(--sunken); font: 600 9px/1 var(--mono); }
+  </style>
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="sidebar-top"><a class="brand" href="./index.html"><span class="brand-mark">p</span><span>Polyth</span></a></div>
+      <section class="project-card">
+        <div class="project-row"><span class="project-avatar">d</span><div class="project-meta"><div class="project-name">demo-app</div><div class="project-path">/tmp/demo-app</div></div><svg class="icon icon-sm muted" viewBox="0 0 24 24"><path d="m8 10 4 4 4-4"/></svg></div>
+        <div class="branch-row"><svg class="icon icon-sm" viewBox="0 0 24 24"><circle cx="6" cy="5" r="2"/><circle cx="18" cy="6" r="2"/><circle cx="6" cy="19" r="2"/><path d="M6 7v10M8 9c5 0 8-1 8-3"/></svg>master<svg class="icon icon-sm" viewBox="0 0 24 24"><path d="m8 10 4 4 4-4"/></svg></div>
+      </section>
+      <div class="sidebar-section-head">Sessions</div>
+      <a class="new-session" href="./03-chat-hero.html"><svg class="icon icon-sm" viewBox="0 0 24 24"><path d="M4 12h16M12 4v16"/></svg>New session</a>
+      <div class="session-list">
+        <a class="session-item active" href="./08-knowledge-notes.html"><span class="dot live"></span><span class="session-copy"><span class="session-title">Fix mobile navigation</span><span class="session-time">Working now · plan</span></span></a>
+        <a class="session-item" href="./04-composer-session.html"><span class="dot green"></span><span class="session-copy"><span class="session-title">Add CTA to landing page</span><span class="session-time">18 min ago</span></span></a>
+        <a class="session-item" href="./03-chat-hero.html"><span class="dot"></span><span class="session-copy"><span class="session-title">Plan the dashboard redesign</span><span class="session-time">Yesterday</span></span></a>
+      </div>
+      <div class="sidebar-bottom">
+        <a class="sidebar-link" href="./index.html"><svg class="icon icon-sm" viewBox="0 0 24 24"><path d="M4 5h6v6H4zM14 5h6v6h-6zM4 15h6v4H4zM14 15h6v4h-6z"/></svg>Gallery</a>
+        <a class="sidebar-link" href="./05-settings.html"><svg class="icon icon-sm" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.1-1l2-1.5-2-3.4-2.4 1a8 8 0 0 0-1.7-1L14.5 3h-4l-.4 3.1a8 8 0 0 0-1.7 1L6 6.1 4 9.5 6.1 11a7 7 0 0 0 0 2L4 14.5 6 18l2.4-1a8 8 0 0 0 1.7 1l.4 3h4l.4-3a8 8 0 0 0 1.7-1l2.4 1 2-3.5-2.1-1.5a7 7 0 0 0 .1-1Z"/></svg>Settings</a>
+      </div>
+    </aside>
+
+    <main class="main-stage">
+      <header class="stage-head">
+        <span class="stage-title">Fix mobile navigation</span><span class="stage-subtitle">4 messages</span>
+        <div class="stage-head-actions"><span class="badge p1">Planning</span><button class="icon-btn"><svg class="icon" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg></button></div>
+      </header>
+      <div class="session-canvas">
+        <div class="session-thread">
+          <div class="thread-label">Today · 11:08</div>
+          <div class="thread-user">Use our established responsive breakpoint and keep the navigation animation consistent with the dashboard.</div>
+          <div class="thread-assistant">
+            <span class="brand-mark">p</span>
+            <div class="thread-response">
+              I found the breakpoint and motion guidance in
+              <span class="note-ref">@note responsive conventions</span>.
+              I’ll use <strong>768px</strong>, preserve the 180ms easing curve, and update the navigation without introducing a second mobile pattern.
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="compact-dock">
+        <form class="composer">
+          <div class="composer-quickbar">
+            <button class="quick-action" type="button"><span class="quick-glyph">+</span>Attach</button>
+            <button class="quick-action" type="button"><span class="quick-glyph">@</span>Files &amp; notes</button>
+            <button class="quick-action" type="button"><span class="quick-glyph">/</span>Commands</button>
+            <button class="quick-action" type="button"><span class="quick-glyph">#</span>Snippets</button>
+            <button class="quick-action" type="button"><span class="quick-glyph">!</span>Shell</button>
+          </div>
+          <textarea placeholder="Continue the plan or type @note to reuse knowledge…"></textarea>
+          <div class="composer-bottom">
+            <button class="select-chip" type="button"><span class="model-gem"></span>DeepSeek V4 Flash</button>
+            <button class="select-chip" type="button"><span class="agent-gem"></span>plan</button>
+            <span class="composer-spacer"></span>
+            <button class="icon-btn" type="button"><svg class="icon" viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="12" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg></button>
+            <button class="send-btn" type="button">Send<svg class="icon icon-sm" viewBox="0 0 24 24"><path d="m5 12 14-8-4 16-3-6-7-2Z"/></svg></button>
+          </div>
+        </form>
+      </div>
+    </main>
+
+    <aside class="inspector knowledge-inspector">
+      <header class="inspector-head">
+        <span class="inspector-title">Knowledge</span><span class="inspector-kicker">local to demo-app</span>
+        <div class="inspector-actions"><button class="btn" style="min-height:30px;padding:0 9px;font-size:10.5px"><svg class="icon icon-sm" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>New note</button></div>
+      </header>
+      <div class="inspector-body">
+        <div class="tabs knowledge-tabs" role="tablist">
+          <button class="tab active" type="button" data-view="notes">Notes <span class="badge">3</span></button>
+          <button class="tab" type="button" data-view="todo">Todo <span class="badge">2</span></button>
+          <button class="tab" type="button" data-view="plans">Plans <span class="badge">1</span></button>
+        </div>
+
+        <section class="knowledge-view active" id="knowledge-notes">
+          <div class="knowledge-banner">
+            <svg class="icon" viewBox="0 0 24 24"><path d="M5 4h11l3 3v13H5zM9 9h6M9 13h6"/></svg>
+            <span>Reference durable context in chat with <code>@note</code>. Notes stay on this device.</span>
+          </div>
+          <article class="note-card pinned">
+            <div class="note-meta"><svg class="icon icon-sm" viewBox="0 0 24 24"><path d="m14 4 6 6-4 2-4 7-2-2 3-8zM7 17l-3 3"/></svg>Pinned · updated yesterday</div>
+            <h3>Responsive conventions</h3>
+            <p>Use 768px for compact navigation. Motion stays at 180ms with ease-out; respect reduced motion.</p>
+            <div class="note-tags"><span class="note-tag">#frontend</span><span class="note-tag">#mobile</span><span class="note-tag">#a11y</span></div>
+          </article>
+          <article class="note-card">
+            <div class="note-meta"><svg class="icon icon-sm" viewBox="0 0 24 24"><path d="M5 4h11l3 3v13H5z"/></svg>Learned from session · 3 days ago</div>
+            <h3>Local preview ports</h3>
+            <p>Vite runs on 4400. The API uses 8787 and expects requests under <span class="mono">/api</span>.</p>
+            <div class="note-tags"><span class="note-tag">#dev</span><span class="note-tag">#preview</span></div>
+          </article>
+          <article class="note-card">
+            <div class="note-meta"><svg class="icon icon-sm" viewBox="0 0 24 24"><path d="M5 4h11l3 3v13H5z"/></svg>Added manually · 6 days ago</div>
+            <h3>Product voice</h3>
+            <p>Confident, warm, direct. Prefer useful next actions over passive empty-state descriptions.</p>
+            <div class="note-tags"><span class="note-tag">#content</span><span class="note-tag">#design</span></div>
+          </article>
+          <div class="knowledge-footer"><span>3 notes · indexed locally</span><a class="text-link" href="#">Manage library</a></div>
+        </section>
+
+        <section class="knowledge-view" id="knowledge-todo">
+          <div class="knowledge-banner"><svg class="icon" viewBox="0 0 24 24"><path d="M5 12l4 4L19 6"/></svg><span>Session tasks stay visible until you complete or archive them.</span></div>
+          <div class="todo-card">
+            <div class="todo-row done"><span class="todo-check"><svg class="icon icon-sm" viewBox="0 0 24 24"><path d="m6 12 4 4 8-9"/></svg></span>Confirm the compact breakpoint<span class="badge">Done</span></div>
+            <div class="todo-row"><span class="todo-check"></span>Update mobile nav markup<span class="badge p0">Now</span></div>
+            <div class="todo-row"><span class="todo-check"></span>Verify keyboard and reduced motion<span class="badge">Next</span></div>
+          </div>
+        </section>
+
+        <section class="knowledge-view" id="knowledge-plans">
+          <div class="knowledge-banner"><svg class="icon" viewBox="0 0 24 24"><path d="M5 4h14v16H5zM8 9h8M8 13h8M8 17h5"/></svg><span>Plans connect session intent to an explicit finish line.</span></div>
+          <article class="plan-card">
+            <h3>Mobile navigation refresh</h3>
+            <div class="plan-step"><span class="step-number">1</span>Map existing breakpoint and focus behavior</div>
+            <div class="plan-step"><span class="step-number">2</span>Refactor compact navigation structure</div>
+            <div class="plan-step"><span class="step-number">3</span>Run accessibility and viewport checks</div>
+          </article>
+        </section>
+      </div>
+    </aside>
+
+    <nav class="tool-rail" aria-label="Workspace tools">
+      <a class="rail-item" data-tip="Session context" href="./03-chat-hero.html"><svg class="icon" viewBox="0 0 24 24"><path d="M4 6h16v12H4zM8 10h8M8 14h4"/></svg><span>Context</span></a>
+      <a class="rail-item" data-tip="Browse project files" href="./04-composer-session.html"><svg class="icon" viewBox="0 0 24 24"><path d="M4 5h6l2 2h8v12H4z"/></svg><span>Files</span></a>
+      <a class="rail-item" data-tip="Git changes and branches" href="./06-files-git.html"><svg class="icon" viewBox="0 0 24 24"><circle cx="6" cy="5" r="2"/><circle cx="18" cy="6" r="2"/><circle cx="6" cy="19" r="2"/><path d="M6 7v10M8 9c5 0 8-1 8-3"/></svg><span>Git</span></a>
+      <a class="rail-item" data-tip="Project terminal" href="#"><svg class="icon" viewBox="0 0 24 24"><path d="m5 7 5 5-5 5M12 17h7"/></svg><span>Terminal</span></a>
+      <a class="rail-item" data-tip="Preview running servers" href="./06-files-git.html"><svg class="icon" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 9h18M7 7h.01"/></svg><span>Preview</span></a>
+      <a class="rail-item active" data-tip="Notes, todos, and plans" href="./08-knowledge-notes.html"><svg class="icon" viewBox="0 0 24 24"><path d="M5 4h11l3 3v13H5zM9 9h6M9 13h6M9 17h4"/></svg><span>Knowledge</span></a>
+      <span class="rail-spacer"></span>
+      <a class="rail-item" data-tip="Polyth settings" href="./05-settings.html"><svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.1-1l2-1.5-2-3.4-2.4 1a8 8 0 0 0-1.7-1L14.5 3h-4l-.4 3.1a8 8 0 0 0-1.7 1L6 6.1 4 9.5 6.1 11a7 7 0 0 0 0 2L4 14.5 6 18l2.4-1a8 8 0 0 0 1.7 1l.4 3h4l.4-3a8 8 0 0 0 1.7-1l2.4 1 2-3.5-2.1-1.5a7 7 0 0 0 .1-1Z"/></svg><span>Settings</span></a>
+    </nav>
+  </div>
+  <footer class="status-bar"><span class="status-brand"><span class="dot green"></span>Local</span><span class="status-item">demo-app</span><span class="status-item">master</span><span class="status-right"><span class="status-item">DeepSeek V4 Flash</span><span class="status-item"><span class="dot live"></span>Planning</span></span></footer>
+  <script>
+    document.querySelectorAll('[data-view]').forEach((tab) => tab.addEventListener('click', () => {
+      document.querySelectorAll('[data-view]').forEach((peer) => peer.classList.remove('active'));
+      document.querySelectorAll('.knowledge-view').forEach((view) => view.classList.remove('active'));
+      tab.classList.add('active');
+      document.querySelector(`#knowledge-${tab.dataset.view}`).classList.add('active');
+    }));
+  </script>
+</body>
+</html>

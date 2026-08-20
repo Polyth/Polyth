@@ -1,0 +1,178 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Polyth — Settings</title>
+  <link rel="stylesheet" href="./tokens.css">
+  <style>
+    .settings-dialog { width: min(1080px,calc(100vw - 56px)); height: min(790px,calc(100vh - 56px)); max-height: none; display: flex; flex-direction: column; }
+    .settings-head { min-height: 72px; padding: 0 18px 0 22px; }
+    .settings-search { position: relative; width: 320px; margin-left: auto; }
+    .settings-search .field { height: 38px; padding-left: 36px; }
+    .settings-search .icon { position: absolute; z-index: 1; top: 11px; left: 12px; color: var(--muted-2); }
+    .settings-body { display: grid; min-height: 0; flex: 1; grid-template-columns: 252px minmax(0,1fr); }
+    .settings-nav { min-height: 0; overflow: auto; padding: 15px 11px; border-right: 1px solid var(--line); background: rgba(14,13,12,.24); }
+    .settings-group + .settings-group { margin-top: 12px; }
+    .settings-group-title { display: flex; height: 27px; align-items: center; padding: 0 9px; color: #706b64; font-size: 9.5px; font-weight: 780; letter-spacing: .11em; text-transform: uppercase; }
+    .settings-link { display: flex; width: 100%; height: 30px; align-items: center; gap: 9px; padding: 0 9px; border: 1px solid transparent; border-radius: 8px; color: var(--muted); background: transparent; cursor: pointer; font-size: 11.5px; text-align: left; }
+    .settings-link:hover { color: var(--text); background: var(--elevated); }
+    .settings-link.active { color: #ffd2b1; border-color: rgba(244,155,91,.2); background: var(--accent-soft); }
+    .settings-link .icon { width: 14px; height: 14px; }
+    .settings-content { min-width: 0; min-height: 0; overflow: auto; padding: 30px 40px 45px; }
+    .pane-intro { margin-bottom: 25px; }
+    .pane-intro h1 { margin: 0 0 6px; color: var(--text-strong); font-size: 25px; font-weight: 650; letter-spacing: -.045em; }
+    .pane-intro p { margin: 0; color: var(--muted); font-size: 12px; }
+    .settings-section { overflow: hidden; border: 1px solid var(--line); border-radius: 13px; background: rgba(34,31,28,.64); }
+    .settings-section + .settings-section { margin-top: 14px; }
+    .settings-section-title { display: flex; height: 38px; align-items: center; padding: 0 14px; border-bottom: 1px solid var(--line); color: #a9a49c; font-size: 10px; font-weight: 730; letter-spacing: .08em; text-transform: uppercase; }
+    .setting-row { display: flex; min-height: 64px; align-items: center; gap: 18px; padding: 11px 14px; }
+    .setting-row + .setting-row { border-top: 1px solid var(--line); }
+    .setting-copy { min-width: 0; flex: 1; }
+    .setting-copy strong { display: block; color: #dcd7cf; font-size: 12px; font-weight: 630; }
+    .setting-copy span { display: block; margin-top: 3px; color: var(--muted-2); font-size: 10.5px; line-height: 1.4; }
+    .setting-control { flex: 0 0 auto; }
+    .compact-input { width: 245px; height: 34px; padding: 0 10px; border: 1px solid var(--line); outline: none; border-radius: 8px; color: var(--text); background: var(--sunken); font-size: 11.5px; }
+    .switch { position: relative; width: 34px; height: 20px; border-radius: 99px; background: #46413b; cursor: pointer; transition: 150ms ease; }
+    .switch::after { position: absolute; top: 3px; left: 3px; width: 14px; height: 14px; border-radius: 50%; content: ""; background: #aaa59e; transition: 150ms ease; }
+    .switch.on { background: rgba(244,155,91,.58); }
+    .switch.on::after { left: 17px; background: #ffb27b; }
+    .settings-content .segmented { max-width: 420px; }
+    .settings-content .segment { min-width: 86px; }
+    .onboarding-summary { display: flex; align-items: center; gap: 12px; }
+    .persona-mini { display: grid; width: 34px; height: 34px; place-items: center; border: 1px solid rgba(244,155,91,.24); border-radius: 10px; color: var(--accent); background: var(--accent-soft); }
+    .settings-foot { padding: 0 18px; }
+    .settings-foot-note { color: var(--muted-2); font-size: 10.5px; }
+    .underlay-copy { display: flex; flex: 1; align-items: center; justify-content: center; color: var(--muted-2); }
+  </style>
+</head>
+<body>
+  <div class="workspace-blur" aria-hidden="true">
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div class="sidebar-top"><span class="brand"><span class="brand-mark">p</span><span>Polyth</span></span></div>
+        <div class="project-card"><div class="project-row"><span class="project-avatar">d</span><div class="project-meta"><div class="project-name">demo-app</div><div class="project-path">/tmp/demo-app</div></div></div></div>
+        <div class="sidebar-section-head">Sessions</div>
+        <div class="new-session">+&nbsp; New session</div>
+        <div class="session-list"><div class="session-item active"><span class="dot live"></span><span class="session-copy"><span class="session-title">Plan the dashboard redesign</span><span class="session-time">Working now</span></span></div></div>
+      </aside>
+      <main class="main-stage"><div class="stage-head"><span class="stage-title">New session</span></div><div class="underlay-copy">What should we build in demo-app?</div></main>
+      <aside class="inspector"><div class="inspector-head"><span class="inspector-title">Context</span></div></aside>
+      <nav class="tool-rail"></nav>
+    </div>
+    <footer class="status-bar"><span class="status-brand">Local</span><span class="status-item">demo-app</span><span class="status-item">master</span></footer>
+  </div>
+
+  <div class="scrim" role="dialog" aria-modal="true" aria-labelledby="settings-title">
+    <section class="dialog settings-dialog">
+      <header class="dialog-head settings-head">
+        <div>
+          <div class="dialog-title" id="settings-title">Settings</div>
+          <div class="dialog-subtitle">Shape Polyth around the way you work.</div>
+        </div>
+        <label class="settings-search">
+          <span class="sr-only">Search settings</span>
+          <svg class="icon icon-sm" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4 4"/></svg>
+          <input class="field" type="search" placeholder="Search settings">
+        </label>
+        <a class="icon-btn" href="./03-chat-hero.html" aria-label="Close settings" style="margin-left:10px">
+          <svg class="icon" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg>
+        </a>
+      </header>
+
+      <div class="settings-body">
+        <nav class="settings-nav" aria-label="Settings sections">
+          <section class="settings-group">
+            <div class="settings-group-title">Interface</div>
+            <button class="settings-link active"><svg class="icon" viewBox="0 0 24 24"><path d="M4 5h16v14H4zM4 9h16"/></svg>General</button>
+            <button class="settings-link"><svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M19 5l-2 2M7 17l-2 2"/></svg>Appearance</button>
+            <button class="settings-link"><svg class="icon" viewBox="0 0 24 24"><path d="M4 5h16v12H8l-4 4z"/></svg>Chat</button>
+            <button class="settings-link"><svg class="icon" viewBox="0 0 24 24"><path d="M6 9a6 6 0 0 1 12 0c0 7 3 7 3 7H3s3 0 3-7M10 20h4"/></svg>Notifications</button>
+            <button class="settings-link"><svg class="icon" viewBox="0 0 24 24"><rect x="3" y="6" width="18" height="12" rx="2"/><path d="M7 10h.01M11 10h.01M15 10h2M7 14h6M15 14h2"/></svg>Shortcuts</button>
+          </section>
+          <section class="settings-group">
+            <div class="settings-group-title">Workspace</div>
+            <button class="settings-link"><svg class="icon" viewBox="0 0 24 24"><path d="M4 6h16v12H4zM8 10h8M8 14h5"/></svg>Sessions</button>
+            <button class="settings-link"><svg class="icon" viewBox="0 0 24 24"><path d="M4 5h6l2 2h8v12H4z"/></svg>Projects</button>
+            <button class="settings-link"><svg class="icon" viewBox="0 0 24 24"><circle cx="6" cy="5" r="2"/><circle cx="18" cy="6" r="2"/><circle cx="6" cy="19" r="2"/><path d="M6 7v10M8 9c5 0 8-1 8-3"/></svg>Git</button>
+            <button class="settings-link"><svg class="icon" viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="12" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>Voice</button>
+          </section>
+          <section class="settings-group">
+            <div class="settings-group-title">Tools</div>
+            <button class="settings-link"><svg class="icon" viewBox="0 0 24 24"><path d="m12 3 2.5 6.5L21 12l-6.5 2.5L12 21l-2.5-6.5L3 12l6.5-2.5z"/></svg>Providers &amp; Models</button>
+            <button class="settings-link"><svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M5 21a7 7 0 0 1 14 0"/></svg>Agents</button>
+            <button class="settings-link"><svg class="icon" viewBox="0 0 24 24"><path d="M4 7h10M18 7h2M4 17h2M10 17h10M14 4v6M8 14v6"/></svg>Behavior</button>
+            <button class="settings-link"><svg class="icon" viewBox="0 0 24 24"><path d="m5 7 5 5-5 5M12 17h7"/></svg>Commands</button>
+            <button class="settings-link"><svg class="icon" viewBox="0 0 24 24"><circle cx="6" cy="12" r="3"/><circle cx="18" cy="6" r="3"/><circle cx="18" cy="18" r="3"/><path d="m9 11 6-4M9 13l6 4"/></svg>MCP</button>
+            <button class="settings-link"><svg class="icon" viewBox="0 0 24 24"><path d="M8 3v5H3v8h5v5h8v-5h5V8h-5V3z"/></svg>Plugins</button>
+          </section>
+          <section class="settings-group">
+            <div class="settings-group-title">Account</div>
+            <button class="settings-link"><svg class="icon" viewBox="0 0 24 24"><path d="M4 19V9M10 19V5M16 19v-7M22 19H2"/></svg>Usage</button>
+            <button class="settings-link"><svg class="icon" viewBox="0 0 24 24"><path d="M9 12a4 4 0 0 0 4 4h3a4 4 0 0 0 0-8h-3M15 12a4 4 0 0 0-4-4H8a4 4 0 0 0 0 8h3"/></svg>Integrations</button>
+          </section>
+        </nav>
+
+        <main class="settings-content">
+          <header class="pane-intro">
+            <h1>General</h1>
+            <p>Core interface behavior and the defaults Polyth uses across projects.</p>
+          </header>
+
+          <section class="settings-section">
+            <div class="settings-section-title">Product</div>
+            <div class="setting-row">
+              <div class="setting-copy"><strong>Product name</strong><span>Shown in the window title and welcome surfaces.</span></div>
+              <input class="compact-input setting-control" value="Polyth" aria-label="Product name">
+            </div>
+            <div class="setting-row">
+              <div class="setting-copy"><strong>Relative timestamps</strong><span>Show “18 min ago” instead of an absolute date in session lists.</span></div>
+              <button class="switch on setting-control" type="button" aria-label="Relative timestamps on" aria-pressed="true"></button>
+            </div>
+          </section>
+
+          <section class="settings-section">
+            <div class="settings-section-title">Working style</div>
+            <div class="setting-row" style="align-items:flex-start">
+              <div class="setting-copy"><strong>Persona</strong><span>Tunes suggestions and initial panels without limiting any feature.</span></div>
+              <div class="segmented setting-control" role="group" aria-label="Persona">
+                <button class="segment active" type="button">Engineer</button>
+                <button class="segment" type="button">Manager</button>
+                <button class="segment" type="button">Creator</button>
+                <button class="segment" type="button">Blank</button>
+              </div>
+            </div>
+          </section>
+
+          <section class="settings-section">
+            <div class="settings-section-title">Onboarding</div>
+            <div class="setting-row">
+              <div class="onboarding-summary">
+                <span class="persona-mini"><svg class="icon" viewBox="0 0 24 24"><path d="m8 9-4 3 4 3M16 9l4 3-4 3M14 5l-4 14"/></svg></span>
+                <div class="setting-copy"><strong>Setup complete</strong><span>Engineer · local workspace · voice skipped</span></div>
+              </div>
+              <a class="btn setting-control" href="./01-onboarding-persona.html">Run onboarding again</a>
+            </div>
+          </section>
+        </main>
+      </div>
+
+      <footer class="dialog-foot settings-foot">
+        <span class="settings-foot-note">Settings save automatically on this device.</span>
+        <span class="foot-spacer"></span>
+        <a class="btn btn-primary" href="./03-chat-hero.html">Done</a>
+      </footer>
+    </section>
+  </div>
+  <script>
+    document.querySelectorAll('.switch').forEach((item) => item.addEventListener('click', () => {
+      item.classList.toggle('on');
+      item.setAttribute('aria-pressed', String(item.classList.contains('on')));
+    }));
+    document.querySelectorAll('.segment').forEach((item) => item.addEventListener('click', () => {
+      item.parentElement.querySelectorAll('.segment').forEach((peer) => peer.classList.remove('active'));
+      item.classList.add('active');
+    }));
+  </script>
+</body>
+</html>

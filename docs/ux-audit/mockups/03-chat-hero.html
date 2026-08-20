@@ -1,0 +1,265 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Polyth — What should we build?</title>
+  <link rel="stylesheet" href="./tokens.css">
+  <style>
+    .context-summary { padding: 13px; }
+    .context-progress { padding: 12px; border: 1px solid var(--line); border-radius: 11px; background: var(--sunken); }
+    .context-progress-top { display: flex; align-items: center; }
+    .context-progress-top strong { color: #ddd8d0; font-size: 11.5px; }
+    .context-progress-top span { margin-left: auto; color: var(--muted); font: 600 10px/1 var(--mono); }
+    .context-progress .meter { margin-top: 9px; }
+    .context-grid { display: grid; margin-top: 9px; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .context-stat { padding: 10px; border: 1px solid var(--line); border-radius: 10px; background: rgba(14,13,12,.45); }
+    .context-stat span { display: block; color: var(--muted-2); font-size: 9.5px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; }
+    .context-stat strong { display: block; margin-top: 5px; color: #d6d1ca; font: 600 11px/1 var(--mono); }
+    .file-pills { display: flex; flex-wrap: wrap; gap: 6px; }
+    .file-pill { display: inline-flex; height: 26px; align-items: center; gap: 6px; padding: 0 8px; border: 1px solid var(--line); border-radius: 7px; color: var(--muted); background: var(--sunken); font: 500 10px/1 var(--mono); }
+    .file-pill .icon { color: var(--blue); }
+    .suggestion-break { width: 100%; height: 0; }
+    .working-label { display: inline-flex; margin-left: auto; align-items: center; gap: 6px; color: #f1b489; font-size: 10px; font-weight: 620; }
+    .working-label .dot { width: 6px; height: 6px; }
+  </style>
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="sidebar-top">
+        <a class="brand" href="./index.html">
+          <span class="brand-mark" aria-hidden="true">p</span>
+          <span>Polyth</span>
+        </a>
+        <div class="top-actions">
+          <a class="icon-btn" href="./07-command-palette.html" aria-label="Search">
+            <svg class="icon" viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m16 16 4 4"/></svg>
+          </a>
+        </div>
+      </div>
+
+      <section class="project-card" aria-label="Current project">
+        <div class="project-row">
+          <span class="project-avatar">d</span>
+          <div class="project-meta">
+            <div class="project-name">demo-app</div>
+            <div class="project-path">/tmp/demo-app</div>
+          </div>
+          <a class="icon-btn" href="./02-open-project.html" aria-label="Change project">
+            <svg class="icon icon-sm" viewBox="0 0 24 24"><path d="m8 10 4 4 4-4"/></svg>
+          </a>
+        </div>
+        <div class="branch-row">
+          <svg class="icon icon-sm" viewBox="0 0 24 24"><circle cx="6" cy="5" r="2"/><circle cx="18" cy="6" r="2"/><circle cx="6" cy="19" r="2"/><path d="M6 7v10M8 9c5 0 8-1 8-3"/></svg>
+          <span>master</span>
+          <svg class="icon icon-sm" viewBox="0 0 24 24"><path d="m8 10 4 4 4-4"/></svg>
+          <span class="working-label"><span class="dot live"></span>working</span>
+        </div>
+      </section>
+
+      <div class="sidebar-section-head">
+        Sessions
+        <button class="icon-btn" aria-label="Session options">
+          <svg class="icon icon-sm" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg>
+        </button>
+      </div>
+      <button class="new-session" type="button">
+        <svg class="icon icon-sm" viewBox="0 0 24 24"><path d="M4 12h16M12 4v16"/></svg>
+        New session
+        <span class="kbd" style="margin-left:auto">⌘ N</span>
+      </button>
+      <div class="session-list">
+        <a class="session-item active" href="./03-chat-hero.html">
+          <span class="dot live"></span>
+          <span class="session-copy">
+            <span class="session-title">Plan the dashboard redesign</span>
+            <span class="session-time">Working now · build</span>
+          </span>
+        </a>
+        <a class="session-item" href="./04-composer-session.html">
+          <span class="dot green"></span>
+          <span class="session-copy">
+            <span class="session-title">Add CTA to landing page</span>
+            <span class="session-time">18 min ago · 6 messages</span>
+          </span>
+        </a>
+        <a class="session-item" href="./08-knowledge-notes.html">
+          <span class="dot"></span>
+          <span class="session-copy">
+            <span class="session-title">Fix mobile navigation</span>
+            <span class="session-time">Yesterday · 14 messages</span>
+          </span>
+        </a>
+      </div>
+
+      <div class="sidebar-bottom">
+        <a class="sidebar-link" href="./index.html">
+          <svg class="icon icon-sm" viewBox="0 0 24 24"><path d="M4 5h6v6H4zM14 5h6v6h-6zM4 15h6v4H4zM14 15h6v4h-6z"/></svg>
+          Mockup gallery
+        </a>
+        <a class="sidebar-link" href="./05-settings.html">
+          <svg class="icon icon-sm" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.1-1l2-1.5-2-3.4-2.4 1a8 8 0 0 0-1.7-1L14.5 3h-4l-.4 3.1a8 8 0 0 0-1.7 1L6 6.1 4 9.5 6.1 11a7 7 0 0 0 0 2L4 14.5 6 18l2.4-1a8 8 0 0 0 1.7 1l.4 3h4l.4-3a8 8 0 0 0 1.7-1l2.4 1 2-3.5-2.1-1.5a7 7 0 0 0 .1-1Z"/></svg>
+          Settings
+        </a>
+      </div>
+    </aside>
+
+    <main class="main-stage">
+      <header class="stage-head">
+        <span class="stage-title">New session</span>
+        <span class="stage-subtitle">demo-app</span>
+        <div class="stage-head-actions">
+          <button class="icon-btn" aria-label="Session details"><svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></svg></button>
+          <button class="icon-btn" aria-label="More options"><svg class="icon" viewBox="0 0 24 24"><circle cx="5" cy="12" r="1"/><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/></svg></button>
+        </div>
+      </header>
+
+      <section class="hero">
+        <div class="hero-inner">
+          <div class="hero-brand"><span class="brand-mark" aria-hidden="true">p</span></div>
+          <h1>What should we build<br>in demo-app?</h1>
+          <p class="hero-subcopy">
+            Describe the outcome. Polyth can inspect the project, make a plan,
+            edit files, and run the checks—with every step visible.
+          </p>
+
+          <form class="composer">
+            <div class="composer-quickbar" aria-label="Prompt tools">
+              <button class="quick-action" type="button"><span class="quick-glyph">+</span>Attach</button>
+              <button class="quick-action" type="button"><span class="quick-glyph">@</span>Files</button>
+              <button class="quick-action" type="button"><span class="quick-glyph">/</span>Commands</button>
+              <button class="quick-action" type="button"><span class="quick-glyph">#</span>Snippets</button>
+              <button class="quick-action" type="button"><span class="quick-glyph">!</span>Shell</button>
+            </div>
+            <textarea aria-label="Message" placeholder="Ask Polyth to build, explain, or investigate…"></textarea>
+            <div class="composer-bottom">
+              <button class="select-chip" type="button">
+                <span class="model-gem"></span>
+                DeepSeek V4 Flash
+                <svg class="icon icon-sm" viewBox="0 0 24 24"><path d="m8 10 4 4 4-4"/></svg>
+              </button>
+              <button class="select-chip" type="button">
+                <span class="agent-gem"></span>
+                build
+                <svg class="icon icon-sm" viewBox="0 0 24 24"><path d="m8 10 4 4 4-4"/></svg>
+              </button>
+              <span class="composer-spacer"></span>
+              <button class="icon-btn" type="button" aria-label="Dictate">
+                <svg class="icon" viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="12" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3M9 21h6"/></svg>
+              </button>
+              <button class="send-btn" type="button">
+                Send
+                <svg class="icon icon-sm" viewBox="0 0 24 24"><path d="m5 12 14-8-4 16-3-6-7-2Z"/></svg>
+              </button>
+            </div>
+          </form>
+
+          <div class="suggestions" aria-label="Suggested prompts">
+            <button class="chip" type="button">◌ Catch me up</button>
+            <button class="chip" type="button">◇ Craft a Goal</button>
+            <button class="chip" type="button">◷ Schedule a Task</button>
+            <span class="suggestion-break"></span>
+            <button class="chip" type="button">⌁ Review recent changes</button>
+            <button class="chip" type="button">✦ Build a polished settings page</button>
+            <button class="chip" type="button">↗ Run the app locally</button>
+          </div>
+        </div>
+      </section>
+      <button class="help-corner" type="button" aria-label="Help">?</button>
+    </main>
+
+    <aside class="inspector">
+      <header class="inspector-head">
+        <span class="inspector-title">Context</span>
+        <span class="inspector-kicker">work status</span>
+        <div class="inspector-actions">
+          <button class="icon-btn" aria-label="Refresh context"><svg class="icon icon-sm" viewBox="0 0 24 24"><path d="M20 7v5h-5M4 17v-5h5"/><path d="M6.1 8A7 7 0 0 1 18 6l2 6M18 16a7 7 0 0 1-12 2l-2-6"/></svg></button>
+        </div>
+      </header>
+      <div class="inspector-body">
+        <section class="panel-card">
+          <div class="panel-card-head">
+            <svg class="icon icon-sm" viewBox="0 0 24 24"><path d="M4 6h16v12H4zM8 10h8M8 14h4"/></svg>
+            Session context
+            <span class="badge" style="margin-left:auto">Ready</span>
+          </div>
+          <div class="context-summary">
+            <div class="context-progress">
+              <div class="context-progress-top"><strong>Context window</strong><span>11.8k / 96k</span></div>
+              <div class="meter"><span></span></div>
+            </div>
+            <div class="context-grid">
+              <div class="context-stat"><span>Est. cost</span><strong>$0.08</strong></div>
+              <div class="context-stat"><span>Mode</span><strong>Build</strong></div>
+            </div>
+          </div>
+        </section>
+
+        <section class="panel-card">
+          <div class="panel-card-head">
+            <svg class="icon icon-sm" viewBox="0 0 24 24"><path d="M4 5h6l2 2h8v12H4z"/></svg>
+            Files in focus
+            <span style="margin-left:auto;color:var(--muted-2)">3</span>
+          </div>
+          <div class="panel-card-body">
+            <div class="file-pills">
+              <span class="file-pill"><svg class="icon icon-sm" viewBox="0 0 24 24"><path d="M6 3h8l4 4v14H6zM14 3v5h4"/></svg>index.html</span>
+              <span class="file-pill"><svg class="icon icon-sm" viewBox="0 0 24 24"><path d="M6 3h8l4 4v14H6zM14 3v5h4"/></svg>app.css</span>
+              <span class="file-pill"><svg class="icon icon-sm" viewBox="0 0 24 24"><path d="M6 3h8l4 4v14H6zM14 3v5h4"/></svg>README.md</span>
+            </div>
+          </div>
+        </section>
+
+        <section class="panel-card">
+          <div class="panel-card-head">
+            <svg class="icon icon-sm" viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="3"/></svg>
+            Goal
+          </div>
+          <div class="action-empty">
+            <svg class="icon icon-lg" viewBox="0 0 24 24"><path d="M12 21a9 9 0 1 0-9-9M12 16a4 4 0 1 0-4-4M12 12l7-7M16 5h3v3"/></svg>
+            <strong>No goal yet</strong>
+            <p>Give this session a finish line so Polyth can keep decisions and progress aligned.</p>
+            <button class="btn" type="button">Craft a goal</button>
+          </div>
+        </section>
+      </div>
+    </aside>
+
+    <nav class="tool-rail" aria-label="Workspace tools">
+      <a class="rail-item active" data-tip="Session context" href="./03-chat-hero.html">
+        <svg class="icon" viewBox="0 0 24 24"><path d="M4 6h16v12H4zM8 10h8M8 14h4"/></svg><span>Context</span>
+      </a>
+      <a class="rail-item" data-tip="Browse project files" href="./04-composer-session.html">
+        <svg class="icon" viewBox="0 0 24 24"><path d="M4 5h6l2 2h8v12H4z"/></svg><span>Files</span>
+      </a>
+      <a class="rail-item" data-tip="Git changes and branches" href="./06-files-git.html">
+        <svg class="icon" viewBox="0 0 24 24"><circle cx="6" cy="5" r="2"/><circle cx="18" cy="6" r="2"/><circle cx="6" cy="19" r="2"/><path d="M6 7v10M8 9c5 0 8-1 8-3"/></svg><span>Git</span>
+      </a>
+      <a class="rail-item" data-tip="Project terminal" href="#">
+        <svg class="icon" viewBox="0 0 24 24"><path d="m5 7 5 5-5 5M12 17h7"/></svg><span>Terminal</span>
+      </a>
+      <a class="rail-item" data-tip="Preview running servers" href="./06-files-git.html">
+        <svg class="icon" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 9h18M7 7h.01"/></svg><span>Preview</span>
+      </a>
+      <a class="rail-item" data-tip="Notes, todos, and plans" href="./08-knowledge-notes.html">
+        <svg class="icon" viewBox="0 0 24 24"><path d="M5 4h11l3 3v13H5zM9 9h6M9 13h6M9 17h4"/></svg><span>Knowledge</span>
+      </a>
+      <span class="rail-spacer"></span>
+      <a class="rail-item" data-tip="Polyth settings" href="./05-settings.html">
+        <svg class="icon" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.1-1l2-1.5-2-3.4-2.4 1a8 8 0 0 0-1.7-1L14.5 3h-4l-.4 3.1a8 8 0 0 0-1.7 1L6 6.1 4 9.5 6.1 11a7 7 0 0 0 0 2L4 14.5 6 18l2.4-1a8 8 0 0 0 1.7 1l.4 3h4l.4-3a8 8 0 0 0 1.7-1l2.4 1 2-3.5-2.1-1.5a7 7 0 0 0 .1-1Z"/></svg><span>Settings</span>
+      </a>
+    </nav>
+  </div>
+
+  <footer class="status-bar">
+    <span class="status-brand"><span class="dot green"></span>Local</span>
+    <span class="status-item"><svg class="icon icon-sm" viewBox="0 0 24 24"><path d="M4 5h6l2 2h8v12H4z"/></svg>demo-app</span>
+    <span class="status-item"><svg class="icon icon-sm" viewBox="0 0 24 24"><circle cx="6" cy="5" r="2"/><circle cx="18" cy="6" r="2"/><circle cx="6" cy="19" r="2"/><path d="M6 7v10M8 9c5 0 8-1 8-3"/></svg>master</span>
+    <span class="status-right">
+      <span class="status-item">DeepSeek V4 Flash</span>
+      <span class="status-item"><span class="dot live"></span>Chat</span>
+    </span>
+  </footer>
+</body>
+</html>
