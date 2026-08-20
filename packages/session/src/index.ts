@@ -849,8 +849,64 @@ function rowToEvent(r: Row): SessionEvent {
 
 // ------------------------------------------------------------- deriveMessages
 
+export interface ActiveRewind {
+  markerSeq: number;
+  atSeq: number;
+  restoredText?: string;
+}
+
+/** Latest unresolved rewind marker. Replaced clears and redo clears both resolve it. */
+export function activeRewind(events: readonly SessionEvent[]): ActiveRewind | null {
+  let active: ActiveRewind | null = null;
+  for (const ev of events) {
+    if (ev.type === "session/rewound") {
+      const atSeq = Number((ev.data as { atSeq?: unknown }).atSeq);
+      if (Number.isSafeInteger(atSeq) && atSeq > 0) {
+        const restored = (ev.data as { restoredText?: unknown }).restoredText;
+        active = {
+          markerSeq: ev.seq,
+          atSeq,
+          ...(typeof restored === "string" ? { restoredText: restored } : {}),
+        };
+      }
+      continue;
+    }
+    if (ev.type === "session/rewind-cleared" && active) {
+      const rewindSeq = Number((ev.data as { rewindSeq?: unknown }).rewindSeq);
+      if (!Number.isSafeInteger(rewindSeq) || rewindSeq === active.markerSeq) active = null;
+    }
+  }
+  return active;
+}
+
 export function deriveMessages(events: SessionEvent[]): ModelMessage[] {
   const out: ModelMessage[] = [];
+  let visibleEvents: SessionEvent[] = [];
+  let hidden: { markerSeq: number; events: SessionEvent[] } | null = null;
+
+  // Rewinds splice model-visible history without mutating old rows. Redo
+  // restores the captured tail; a replacement clear permanently drops it and
+  // lets subsequent events form a new tail.
+  for (const ev of events) {
+    if (ev.type === "session/rewound") {
+      const atSeq = Number((ev.data as { atSeq?: unknown }).atSeq);
+      if (Number.isSafeInteger(atSeq) && atSeq > 0) {
+        hidden = { markerSeq: ev.seq, events: visibleEvents.filter((item) => item.seq >= atSeq) };
+        visibleEvents = visibleEvents.filter((item) => item.seq < atSeq);
+      }
+      continue;
+    }
+    if (ev.type === "session/rewind-cleared" && hidden) {
+      const d = ev.data as { rewindSeq?: unknown; replaced?: unknown };
+      const markerMatches = d.rewindSeq === undefined || Number(d.rewindSeq) === hidden.markerSeq;
+      if (markerMatches) {
+        if (d.replaced !== true) visibleEvents.push(...hidden.events);
+        hidden = null;
+      }
+      continue;
+    }
+    visibleEvents.push(ev);
+  }
 
   const pushText = (role: "user" | "assistant" | "tool", text: string) => {
     const last = out[out.length - 1];
@@ -897,7 +953,7 @@ export function deriveMessages(events: SessionEvent[]): ModelMessage[] {
     }
   };
 
-  for (const ev of events) {
+  for (const ev of visibleEvents) {
     if (!MODEL_VISIBLE_TYPES.includes(ev.type as (typeof MODEL_VISIBLE_TYPES)[number])) {
       continue;
     }

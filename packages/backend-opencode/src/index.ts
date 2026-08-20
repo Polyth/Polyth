@@ -452,6 +452,19 @@ export const createOpenCodeRuntimeWithClient = (
       maps.reverse.set(created.id, canonical.sessionId);
       return created.id;
     },
+    async resetSession(canonical: CreateSessionInput & { sessionId: string; cwd: string }) {
+      const previous = maps.forward.get(canonical.sessionId);
+      if (previous) maps.reverse.delete(previous);
+      maps.forward.delete(canonical.sessionId);
+      translate.delete(canonical.sessionId);
+      activeTurn.delete(canonical.sessionId);
+      const created = await client.post<CreatedSession>("/session", {
+        title: canonical.title ?? canonical.sessionId,
+      });
+      maps.forward.set(canonical.sessionId, created.id);
+      maps.reverse.set(created.id, canonical.sessionId);
+      return created.id;
+    },
     async startTurn(req: CanonicalTurnRequest) {
       const backendId = backendOf(req.sessionId);
       if (!activeTurn.has(req.sessionId)) {

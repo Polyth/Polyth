@@ -83,13 +83,14 @@ export interface WorkGroup {
  *  off by a tool call (or end of log) keeps its own block. */
 export function mergeThinking(messages: RenderMessage[]): RenderMessage[] {
   const out: RenderMessage[] = [];
-  let pending: { texts: string[]; time: number; id: string; finalized: boolean } | null = null;
+  let pending: { texts: string[]; time: number; id: string; eventSeq: number; finalized: boolean } | null = null;
   const flush = (midLog: boolean) => {
     if (!pending) return;
     out.push({
       kind: "assistant",
       id: pending.id,
       partId: pending.id,
+      eventSeq: pending.eventSeq,
       text: "",
       reasoning: pending.texts.join("\n\n"),
       // A later message proves this thinking finished even without a part-final.
@@ -104,7 +105,7 @@ export function mergeThinking(messages: RenderMessage[]): RenderMessage[] {
         pending.texts.push(m.reasoning);
         pending.finalized = m.finalized;
       } else {
-        pending = { texts: [m.reasoning], time: m.time, id: m.id, finalized: m.finalized };
+        pending = { texts: [m.reasoning], time: m.time, id: m.id, eventSeq: m.eventSeq, finalized: m.finalized };
       }
       continue;
     }

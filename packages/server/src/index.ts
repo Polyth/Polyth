@@ -138,6 +138,18 @@ export async function boot(opts: BootOptions = {}) {
           return inner.ensureSession(canonical);
         }
       },
+      async resetSession(canonical) {
+        if (!inner.resetSession) throw Object.assign(new Error("runtime cannot reset session history"), { code: "unsupported" });
+        try {
+          return await inner.resetSession(canonical);
+        } catch (err) {
+          if (!isTransportError(err)) throw err;
+          console.warn(`[polyth] opencode transport error while resetting ${key}; respawning`, err);
+          await respawn();
+          if (!inner.resetSession) throw Object.assign(new Error("runtime cannot reset session history"), { code: "unsupported" });
+          return inner.resetSession(canonical);
+        }
+      },
       startTurn: (req) => inner.startTurn(req),
       abort: (sessionId) => inner.abort(sessionId),
       replyPermission: (sessionId, requestId, reply) => inner.replyPermission(sessionId, requestId, reply),

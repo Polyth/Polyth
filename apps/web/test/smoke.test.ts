@@ -432,6 +432,40 @@ test("user/message with raw === text does not set raw", () => {
   }
 });
 
+test("rewind collapses its target tail, redo restores it, replacement keeps it hidden", () => {
+  const events = [
+    ev("user/message", { text: "first" }),
+    ev("assistant/message", { partId: "a1", text: "one" }),
+    ev("user/message", { text: "second" }),
+    ev("assistant/message", { partId: "a2", text: "two" }),
+  ];
+  const targetSeq = events[2]!.seq;
+  const marker = ev("session/rewound", { atSeq: targetSeq, restoredText: "second" });
+  const rewound = buildModel([...events, marker]);
+  assert.deepEqual(rewound.messages.filter((message) => !message.undone).map((message) => message.id), [
+    events[0]!.id,
+    "a1",
+  ]);
+  assert.deepEqual(rewound.messages.filter((message) => message.undone).map((message) => message.id), [
+    events[2]!.id,
+    "a2",
+  ]);
+  assert.deepEqual(rewound.rewind, { markerSeq: marker.seq, atSeq: targetSeq, restoredText: "second" });
+
+  const redone = reduceEvent(rewound, ev("session/rewind-cleared", { rewindSeq: marker.seq }));
+  assert.equal(redone.rewind, null);
+  assert.equal(redone.messages.some((message) => message.undone), false);
+
+  const replacedBase = buildModel([...events, marker]);
+  const replaced = reduceEvent(
+    replacedBase,
+    ev("session/rewind-cleared", { rewindSeq: marker.seq, replaced: true }),
+  );
+  reduceEvent(replaced, ev("user/message", { text: "replacement" }));
+  assert.equal(replaced.messages.filter((message) => message.undone).length, 2);
+  assert.equal(replaced.messages.at(-1)?.undone, undefined);
+});
+
 // ---- replay idempotency including goal --------------------------------------
 
 test("replaying with goal events reconstructs identical model", () => {
@@ -533,9 +567,9 @@ test("toolSummary selects a useful argument and truncates long values", () => {
 
 test("groupWork groups consecutive tools and computes elapsed time", () => {
   const messages = [
-    { kind: "tool" as const, id: "a", callId: "a", tool: "read", input: {}, status: "done" as const, time: 100, finishTime: 250 },
-    { kind: "tool" as const, id: "b", callId: "b", tool: "write", input: {}, status: "done" as const, time: 260, finishTime: 375 },
-    { kind: "user" as const, id: "u", text: "next", time: 400 },
+    { kind: "tool" as const, id: "a", callId: "a", eventSeq: 1, tool: "read", input: {}, status: "done" as const, time: 100, finishTime: 250 },
+    { kind: "tool" as const, id: "b", callId: "b", eventSeq: 2, tool: "write", input: {}, status: "done" as const, time: 260, finishTime: 375 },
+    { kind: "user" as const, id: "u", eventSeq: 3, text: "next", time: 400 },
   ];
   const grouped = groupWork(messages);
   const work = grouped[0];

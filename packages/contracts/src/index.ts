@@ -66,6 +66,17 @@ export interface TokenUsage { input: number; output: number; reasoning?: number;
 export interface UsageRecordedData { model: ModelRef; tokens: TokenUsage; cost?: number }
 export interface GoalAttachedData { objective: string; budgetTokens?: number; maxContinuations?: number }
 export interface GoalAuditData { verdict: "keep" | "done" | "stuck"; consecutiveStuck: number; note?: string }
+export interface SessionRewoundData {
+  /** The reverted user/message seq. That message and its following tail are hidden. */
+  atSeq: number;
+  restoredText?: string;
+}
+export interface SessionRewindClearedData {
+  /** Seq of the session/rewound marker being resolved. */
+  rewindSeq: number;
+  /** True when a new send replaces the hidden tail; false/absent means redo. */
+  replaced?: boolean;
+}
 
 // ---------------------------------------------------------------- M3 workflows: multirun / fusion / walkthrough
 
@@ -184,6 +195,10 @@ export interface SessionService {
   send(sessionId: string, input: UserTurnInput): Promise<SendResult>;
   abort(sessionId: string): Promise<void>;
   fork(sessionId: string, atSeq?: number): Promise<SessionRef>;
+  /** Soft-rewind to a user message without mutating prior events. */
+  rewind?(sessionId: string, atSeq: number): Promise<SessionEvent>;
+  /** Restore the tail hidden by the active rewind marker. */
+  clearRewind?(sessionId: string): Promise<SessionEvent>;
   archive(sessionId: string): Promise<void>;
   restore(sessionId: string): Promise<void>;
   list(projectId?: string): Promise<SessionProjection[]>;
@@ -258,6 +273,8 @@ export interface AgentRuntime {
   models(): Promise<ModelDescriptor[]>;
   agents(): Promise<AgentDescriptor[]>;
   ensureSession(canonical: CreateSessionInput & { sessionId: string; cwd: string }): Promise<string>;
+  /** Replace one canonical session's backend history with a fresh backend session. */
+  resetSession?(canonical: CreateSessionInput & { sessionId: string; cwd: string }): Promise<string>;
   sessions(): Promise<RuntimeSession[]>;
   history(sessionId: string): Promise<RuntimeSessionMessage[]>;
   startTurn(req: CanonicalTurnRequest): Promise<void>; // events flow via onEvent

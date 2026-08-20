@@ -127,7 +127,19 @@ export function createHttpServer(deps: HttpDeps): Server {
       m = path.match(/^\/api\/sessions\/([^/]+)\/fork$/);
       if (m && method === "POST") {
         const b = await readBody(req);
-        return json(res, 200, await sessions.fork(m[1]!, b.atSeq ? Number(b.atSeq) : undefined));
+        return json(res, 200, await sessions.fork(m[1]!, b.atSeq === undefined ? undefined : Number(b.atSeq)));
+      }
+      m = path.match(/^\/api\/sessions\/([^/]+)\/rewind$/);
+      if (m && method === "POST") {
+        if (!sessions.rewind) throw Object.assign(new Error("session rewind unavailable"), { code: "unsupported" });
+        const b = await readBody(req);
+        if (b.atSeq === undefined) throw Object.assign(new Error("atSeq required"), { code: "invalid-input" });
+        return json(res, 200, await sessions.rewind(m[1]!, Number(b.atSeq)));
+      }
+      m = path.match(/^\/api\/sessions\/([^/]+)\/rewind\/clear$/);
+      if (m && method === "POST") {
+        if (!sessions.clearRewind) throw Object.assign(new Error("session rewind unavailable"), { code: "unsupported" });
+        return json(res, 200, await sessions.clearRewind(m[1]!));
       }
       m = path.match(/^\/api\/sessions\/([^/]+)\/permission\/([^/]+)$/);
       if (m && method === "POST") {

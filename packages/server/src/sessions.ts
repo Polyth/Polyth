@@ -8,6 +8,7 @@ import type {
 } from "@polyth/contracts";
 import type { ProjectService } from "@polyth/contracts";
 import type { PermissionService } from "@polyth/permissions";
+import { activeRewind } from "@polyth/session";
 import { buildPermissionPreview, PERMISSION_ALLOWED_SCOPES } from "./permissionPreview.ts";
 
 export interface Broadcaster {
@@ -376,9 +377,35 @@ export function createSessionService(deps: {
     },
 
     async send(sessionId, input: UserTurnInput): Promise<SendResult> {
-      const proj = await store.projection(sessionId);
+      let proj = await store.projection(sessionId);
       if (!proj) throw Object.assign(new Error("session not found"), { code: "not-found" });
       const rt = await ensureWired(sessionId, proj);
+
+      // A replacement send after rewind must not continue in the backend's
+      // stale conversation. Reset first, then resolve the marker and admit the
+      // new tail. If reset fails the rewind remains active and replay-safe.
+      const rewind = activeRewind(await store.events(sessionId));
+      if (rewind) {
+        if (!rt.resetSession) {
+          throw Object.assign(new Error("runtime cannot reset rewound history"), { code: "unsupported" });
+        }
+        const project = await projects.get(proj.projectId);
+        const cwd = proj.worktreePath ?? project?.path ?? process.cwd();
+        const backendSessionId = await rt.resetSession({
+          projectId: proj.projectId,
+          title: proj.title,
+          sessionId,
+          cwd,
+          ...(proj.model ? { model: proj.model } : {}),
+          ...(proj.agent ? { agent: proj.agent } : {}),
+        });
+        await updateProjection(sessionId, { backendSessionId, status: "idle" });
+        proj = { ...proj, backendSessionId, status: "idle" };
+        await appendAndBroadcast(sessionId, "session/rewind-cleared", {
+          rewindSeq: rewind.markerSeq,
+          replaced: true,
+        });
+      }
 
       // Atomic profile application: resolve to explicit model/agent up front so
       // no intermediate invalid combination can reach the runtime. Explicit
@@ -471,6 +498,13 @@ export function createSessionService(deps: {
     async fork(sessionId, atSeq): Promise<SessionRef> {
       const proj = await store.projection(sessionId);
       if (!proj) throw Object.assign(new Error("session not found"), { code: "not-found" });
+      if (atSeq !== undefined) {
+        if (!Number.isSafeInteger(atSeq) || atSeq <= 0) {
+          throw Object.assign(new Error("atSeq must be a positive event sequence"), { code: "invalid-input" });
+        }
+        const target = (await store.events(sessionId)).find((ev) => ev.seq === atSeq);
+        if (!target) throw Object.assign(new Error("fork event not found"), { code: "not-found" });
+      }
       const forkId = randomUUID();
       const project = await projects.get(proj.projectId);
       const forkCwd = proj.worktreePath ?? project?.path ?? process.cwd();
@@ -488,6 +522,46 @@ export function createSessionService(deps: {
       await appendAndBroadcast(forkId, "session/forked", { fromSessionId: sessionId, ...(atSeq ? { atSeq } : {}) }, { ignorable: true });
       broadcast.projection(projection);
       return { id: forkId };
+    },
+
+    async rewind(sessionId, atSeq): Promise<SessionEvent> {
+      const proj = await store.projection(sessionId);
+      if (!proj) throw Object.assign(new Error("session not found"), { code: "not-found" });
+      if (turnActive(sessionId) || proj.status === "working" || proj.status === "waiting") {
+        throw Object.assign(new Error("cannot rewind while a turn is running"), { code: "conflict" });
+      }
+      if (!Number.isSafeInteger(atSeq) || atSeq <= 0) {
+        throw Object.assign(new Error("atSeq must be a positive event sequence"), { code: "invalid-input" });
+      }
+      if (deps.queue && (await deps.queue.queueList(sessionId)).length > 0) {
+        throw Object.assign(new Error("cannot rewind while messages are queued"), { code: "conflict" });
+      }
+      const events = await store.events(sessionId);
+      if (activeRewind(events)) {
+        throw Object.assign(new Error("restore or replace the current rewind first"), { code: "conflict" });
+      }
+      const target = events.find((ev) => ev.seq === atSeq);
+      if (!target) throw Object.assign(new Error("rewind event not found"), { code: "not-found" });
+      if (target.type !== "user/message") {
+        throw Object.assign(new Error("rewind target must be a user message"), { code: "invalid-input" });
+      }
+      const text = (target.data as { raw?: unknown; text?: unknown }).raw
+        ?? (target.data as { text?: unknown }).text;
+      return appendAndBroadcast(sessionId, "session/rewound", {
+        atSeq,
+        ...(typeof text === "string" ? { restoredText: text } : {}),
+      });
+    },
+
+    async clearRewind(sessionId): Promise<SessionEvent> {
+      const proj = await store.projection(sessionId);
+      if (!proj) throw Object.assign(new Error("session not found"), { code: "not-found" });
+      if (turnActive(sessionId) || proj.status === "working" || proj.status === "waiting") {
+        throw Object.assign(new Error("cannot restore while a turn is running"), { code: "conflict" });
+      }
+      const rewind = activeRewind(await store.events(sessionId));
+      if (!rewind) throw Object.assign(new Error("session has no active rewind"), { code: "conflict" });
+      return appendAndBroadcast(sessionId, "session/rewind-cleared", { rewindSeq: rewind.markerSeq });
     },
 
     async archive(sessionId) {

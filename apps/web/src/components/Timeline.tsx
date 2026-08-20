@@ -3,11 +3,13 @@ import { renderMarkdown } from "../markdown.tsx";
 import { fmtCost, fmtDuration, fmtMs, fmtTokens } from "../format.ts";
 import { groupWork, mergeThinking, messageJson, promptIndex, toolSummary, copyText, type WorkGroup } from "../utils.ts";
 import { useUiSettings } from "../uiPrefs.ts";
-import { sendMessage } from "../init.ts";
-import { requestComposerInsert } from "../composerInsert.ts";
-import { openSettingsPage } from "../store.ts";
+import { forkSession, sendMessage } from "../init.ts";
+import { requestComposerInsert, requestComposerReplace } from "../composerInsert.ts";
+import { openSettingsPage, setUiError, useStore } from "../store.ts";
+import { api } from "../api.ts";
 import CopyButton from "./CopyButton.tsx";
-import type { RenderModel, RenderMessage, ToolMsg, AssistantMsg } from "../reduce.ts";
+import Dialog from "./a11y/Dialog.tsx";
+import type { RenderModel, RenderMessage, ToolMsg, AssistantMsg, UserMsg } from "../reduce.ts";
 
 // Merged thinking block (WP4): collapsible with a first-line preview, or a
 // plain block when the collapsible pref is off.
@@ -33,7 +35,11 @@ function Thinking({ m }: { m: AssistantMsg }) {
 }
 
 // Copy as Markdown / copy as JSON, shown on hover (WP4 message actions).
-function MessageActions({ m }: { m: RenderMessage }) {
+function MessageActions({ m, onRewind, onFork }: {
+  m: RenderMessage;
+  onRewind?: (message: UserMsg) => void;
+  onFork?: (message: UserMsg) => void;
+}) {
   const [flash, setFlash] = useState("");
   const doCopy = async (label: string, text: string) => {
     const ok = await copyText(text);
@@ -48,6 +54,12 @@ function MessageActions({ m }: { m: RenderMessage }) {
         <button className="small-btn" title="Copy message as Markdown" onClick={() => void doCopy("Markdown", md)}>MD</button>
       )}
       <button className="small-btn" title="Copy message as JSON" onClick={() => void doCopy("JSON", messageJson(m))}>JSON</button>
+      {m.kind === "user" && onRewind && (
+        <button className="small-btn" title="Rewind to before this prompt" onClick={() => onRewind(m)}>Rewind</button>
+      )}
+      {m.kind === "user" && onFork && (
+        <button className="small-btn" title="Fork a new session from this prompt" onClick={() => onFork(m)}>Fork</button>
+      )}
     </div>
   );
 }
@@ -140,7 +152,11 @@ function WorkedGroup({ g }: { g: WorkGroup }) {
   );
 }
 
-function MessageView({ m }: { m: RenderMessage }) {
+function MessageView({ m, onRewind, onFork }: {
+  m: RenderMessage;
+  onRewind?: (message: UserMsg) => void;
+  onFork?: (message: UserMsg) => void;
+}) {
   if (m.kind === "user") {
     return (
       <div className="msg user" data-msg-id={m.id}>
@@ -152,12 +168,44 @@ function MessageView({ m }: { m: RenderMessage }) {
             </div>
           )}
         </div>
-        <MessageActions m={m} />
+        <MessageActions m={m} onRewind={onRewind} onFork={onFork} />
       </div>
     );
   }
   if (m.kind === "assistant") return <AssistantView m={m} />;
   return <ToolCard m={m} />;
+}
+
+function TimelineDialog({ prompts, onClose, onJump, onRewind, onFork }: {
+  prompts: UserMsg[];
+  onClose: () => void;
+  onJump: (id: string) => void;
+  onRewind: (message: UserMsg) => void;
+  onFork: (message: UserMsg) => void;
+}) {
+  return (
+    <Dialog title="Session timeline" onClose={onClose}>
+      <div className="dialog-head">
+        <div>
+          <h2>Session timeline</h2>
+          <p className="muted">Jump, rewind, or branch from any prompt.</p>
+        </div>
+        <button className="icon-btn" aria-label="Close timeline" onClick={onClose}>×</button>
+      </div>
+      <div className="timeline-dialog-list">
+        {prompts.map((message, index) => (
+          <div className="timeline-dialog-row" key={message.id}>
+            <button className="timeline-dialog-prompt" onClick={() => { onJump(message.id); onClose(); }}>
+              <span className="muted">{index + 1}</span>
+              <span>{message.text.split("\n").find((line) => line.trim()) || "(empty prompt)"}</span>
+            </button>
+            <button className="small-btn" onClick={() => { onRewind(message); onClose(); }}>Rewind</button>
+            <button className="small-btn" onClick={() => { onFork(message); onClose(); }}>Fork</button>
+          </div>
+        ))}
+      </div>
+    </Dialog>
+  );
 }
 
 // Floating rail of user prompts; click jumps the timeline to that prompt (WP4).
@@ -205,6 +253,8 @@ export default function Timeline({ model }: { model: RenderModel }) {
   const ref = useRef<HTMLDivElement>(null);
   const atBottom = useRef(true);
   const prefs = useUiSettings();
+  const sessionId = useStore((s) => s.activeSessionId);
+  const [timelineOpen, setTimelineOpen] = useState(false);
 
   useEffect(() => {
     const el = ref.current;
@@ -218,16 +268,47 @@ export default function Timeline({ model }: { model: RenderModel }) {
   };
 
   const footer = turnFooter(model);
-  const rows = useMemo(() => groupWork(mergeThinking(model.messages)), [model.version]);
-  const prompts = useMemo(() => promptIndex(model.messages), [model.version]);
+  const visibleMessages = useMemo(() => model.messages.filter((message) => !message.undone), [model.version]);
+  const undoneMessages = useMemo(() => model.messages.filter((message) => message.undone), [model.version]);
+  const rows = useMemo(() => groupWork(mergeThinking(visibleMessages)), [visibleMessages]);
+  const undoneRows = useMemo(() => groupWork(mergeThinking(undoneMessages)), [undoneMessages]);
+  const prompts = useMemo(() => promptIndex(visibleMessages), [visibleMessages]);
+  const promptMessages = useMemo(
+    () => visibleMessages.filter((message): message is UserMsg => message.kind === "user"),
+    [visibleMessages],
+  );
   const showNav = prefs.promptNavigator === "on" || (prefs.promptNavigator === "auto" && prompts.length >= 3);
   const turn = model.turn;
   const turnBroken = turn && (turn.status === "failed" || turn.status === "aborted");
   const lastUser = [...model.messages].reverse().find((m) => m.kind === "user");
+  const jump = (id: string) => {
+    ref.current?.querySelector(`[data-msg-id="${id}"]`)?.scrollIntoView({ block: "center" });
+  };
+  const rewind = (message: UserMsg) => {
+    if (!sessionId) return;
+    void api.rewind(sessionId, message.eventSeq).then(() => {
+      requestComposerReplace(message.raw ?? message.text);
+    }).catch((err) => setUiError(`Couldn’t rewind: ${err instanceof Error ? err.message : String(err)}`));
+  };
+  const fork = (message: UserMsg) => {
+    if (!sessionId) return;
+    void forkSession(sessionId, message.eventSeq).catch(
+      (err) => setUiError(`Couldn’t fork: ${err instanceof Error ? err.message : String(err)}`),
+    );
+  };
+  const restore = () => {
+    if (!sessionId) return;
+    void api.clearRewind(sessionId).catch(
+      (err) => setUiError(`Couldn’t restore: ${err instanceof Error ? err.message : String(err)}`),
+    );
+  };
 
   return (
     <div className="timeline" ref={ref} onScroll={onScroll}>
       {showNav && <PromptNavigator prompts={prompts} container={ref} />}
+      {promptMessages.length > 0 && (
+        <button className="timeline-open small-btn" onClick={() => setTimelineOpen(true)}>Timeline</button>
+      )}
       {model.messages.length === 0 && (
         <div className="empty">
           <div>No messages yet — say hi below.</div>
@@ -239,8 +320,25 @@ export default function Timeline({ model }: { model: RenderModel }) {
         </div>
       )}
       {rows.map((r) => (
-        r.kind === "work" ? <WorkedGroup key={r.id} g={r} /> : <MessageView key={r.id} m={r} />
+        r.kind === "work"
+          ? <WorkedGroup key={r.id} g={r} />
+          : <MessageView key={r.id} m={r} onRewind={rewind} onFork={fork} />
       ))}
+      {undoneRows.length > 0 && (
+        <details className="rewound-tail">
+          <summary>
+            <span>{undoneMessages.length} hidden timeline {undoneMessages.length === 1 ? "item" : "items"}</span>
+            {model.rewind && <button className="small-btn" onClick={(event) => { event.preventDefault(); restore(); }}>Restore</button>}
+          </summary>
+          <div className="rewound-tail-body">
+            {undoneRows.map((row) => (
+              row.kind === "work"
+                ? <WorkedGroup key={row.id} g={row} />
+                : <MessageView key={row.id} m={row} />
+            ))}
+          </div>
+        </details>
+      )}
       {turnBroken && (
         <div className="turn-error" role="alert">
           <span className="turn-error-text">
@@ -257,6 +355,15 @@ export default function Timeline({ model }: { model: RenderModel }) {
         </div>
       )}
       {footer && <div className="turn-footer">{footer}</div>}
+      {timelineOpen && (
+        <TimelineDialog
+          prompts={promptMessages}
+          onClose={() => setTimelineOpen(false)}
+          onJump={jump}
+          onRewind={rewind}
+          onFork={fork}
+        />
+      )}
     </div>
   );
 }

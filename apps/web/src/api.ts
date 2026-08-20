@@ -396,6 +396,10 @@ export const api = {
     jfetch<{ ok: true }>(`/api/sessions/${id}/queue/${encodeURIComponent(queueId)}`, { method: "DELETE" }),
   fork: (id: string, atSeq?: number) =>
     jfetch<SessionRef>(`/api/sessions/${id}/fork`, json("POST", atSeq === undefined ? {} : { atSeq })),
+  rewind: (id: string, atSeq: number) =>
+    jfetch<SessionEvent>(`/api/sessions/${id}/rewind`, json("POST", { atSeq })),
+  clearRewind: (id: string) =>
+    jfetch<SessionEvent>(`/api/sessions/${id}/rewind/clear`, { method: "POST" }),
   archive: (id: string) => jfetch<void>(`/api/sessions/${id}/archive`, { method: "POST" }),
   restore: (id: string) => jfetch<void>(`/api/sessions/${id}/restore`, { method: "POST" }),
 

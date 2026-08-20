@@ -21,6 +21,7 @@ function fakeRuntime(opts: { steering?: boolean; steerResult?: boolean } = {}) {
   const steeredTexts: string[] = [];
   const permissionReplies: Array<{ requestId: string; reply: string }> = [];
   const questionReplies: Array<{ requestId: string; answers: JsonObject }> = [];
+  const resetSessions: string[] = [];
   let aborted = 0;
   const emit = (sessionId: string, ev: RuntimeEvent) => {
     for (const l of listeners) l(sessionId, ev);
@@ -33,6 +34,10 @@ function fakeRuntime(opts: { steering?: boolean; steerResult?: boolean } = {}) {
     models: async () => [],
     agents: async () => [],
     ensureSession: async (c) => `be_${c.sessionId}`,
+    resetSession: async (c) => {
+      resetSessions.push(c.sessionId);
+      return `fresh_${resetSessions.length}`;
+    },
     sessions: async () => [],
     history: async () => [],
     startTurn: async (req) => {
@@ -61,7 +66,7 @@ function fakeRuntime(opts: { steering?: boolean; steerResult?: boolean } = {}) {
     dispose: async () => {},
   };
   return {
-    rt, emit, startedTexts, steeredTexts, permissionReplies, questionReplies,
+    rt, emit, startedTexts, steeredTexts, permissionReplies, questionReplies, resetSessions,
     get aborted() { return aborted; },
   };
 }
@@ -293,4 +298,45 @@ test("queue reorder validates permutations and remove is session-scoped", async 
   await sessions.queueRemove!(id, b.queueId!);
   assert.deepEqual((await sessions.queueList!(id)).map((i) => i.text), ["a"]);
   await assert.rejects(() => sessions.queueRemove!(id, "nope"), /not found/);
+});
+
+test("rewind rejects running turns, supports redo, and resets backend before replacement", async () => {
+  const fake = fakeRuntime();
+  const { sessions, store } = makeService(fake);
+  const { id } = await sessions.create({ projectId: "p1", title: "T" });
+  await sessions.send(id, { text: "first" });
+  await flush();
+  await assert.rejects(() => sessions.rewind!(id, 2), /while a turn is running/);
+  fake.emit(id, { type: "assistant/message", partId: "a1", text: "one" });
+  fake.emit(id, { type: "turn/stopped", reason: "completed" });
+  await flush();
+
+  await sessions.send(id, { text: "second" });
+  await flush();
+  fake.emit(id, { type: "assistant/message", partId: "a2", text: "two" });
+  fake.emit(id, { type: "turn/stopped", reason: "completed" });
+  await flush();
+  const before = await store.events(id);
+  const second = before.filter((event) => event.type === "user/message")[1]!;
+
+  const marker = await sessions.rewind!(id, second.seq);
+  assert.equal(marker.type, "session/rewound");
+  assert.equal((marker.data as { restoredText?: string }).restoredText, "second");
+  const restored = await sessions.clearRewind!(id);
+  assert.equal(restored.type, "session/rewind-cleared");
+
+  await sessions.rewind!(id, second.seq);
+  await sessions.send(id, { text: "replacement" });
+  await flush();
+  assert.deepEqual(fake.resetSessions, [id]);
+  assert.equal((await store.projection(id))?.backendSessionId, "fresh_1");
+  const after = await store.events(id);
+  const replacement = after.findLast(
+    (event) => event.type === "user/message" && (event.data as { text?: string }).text === "replacement",
+  )!;
+  const clear = after.findLast(
+    (event) => event.type === "session/rewind-cleared" && (event.data as { replaced?: boolean }).replaced === true,
+  )!;
+  assert.ok(clear.seq < replacement.seq);
+  await store.close();
 });

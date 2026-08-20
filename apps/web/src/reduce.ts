@@ -15,8 +15,11 @@ import type {
 export interface UserMsg {
   kind: "user";
   id: string;
+  eventSeq: number;
   text: string;
   raw?: string;
+  undone?: boolean;
+  rewindMarkerSeq?: number;
   time: number;
 }
 
@@ -24,6 +27,7 @@ export interface AssistantMsg {
   kind: "assistant";
   id: string; // partId
   partId: string;
+  eventSeq: number;
   text: string;
   reasoning: string;
   finalized: boolean; // assistant/message seen
@@ -31,6 +35,8 @@ export interface AssistantMsg {
   agent?: string;
   tokens?: TokenUsage;
   cost?: number;
+  undone?: boolean;
+  rewindMarkerSeq?: number;
   time: number;
 }
 
@@ -38,12 +44,15 @@ export interface ToolMsg {
   kind: "tool";
   id: string; // callId
   callId: string;
+  eventSeq: number;
   tool: string;
   input: JsonObject;
   output?: string;
   error?: string;
   title?: string;
   status: "pending" | "done" | "error";
+  undone?: boolean;
+  rewindMarkerSeq?: number;
   time: number;
   finishTime?: number;
 }
@@ -128,6 +137,7 @@ export interface RenderModel {
   /** Latest revisioned task/subagent snapshots (WP8); replay-deterministic. */
   tasks: TaskListState | null;
   subagents: SubagentState | null;
+  rewind: { markerSeq: number; atSeq: number; restoredText?: string } | null;
   version: number; // bumps on every applied event (cheap change signal)
 }
 
@@ -144,6 +154,7 @@ export function emptyModel(): RenderModel {
     fusionPrompt: "",
     tasks: null,
     subagents: null,
+    rewind: null,
     version: 0,
   };
 }
@@ -178,7 +189,7 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
     case "user/message": {
       const text = str(d, "text") ?? "";
       const raw = str(d, "raw");
-      const msg: UserMsg = { kind: "user", id: ev.id, text, time: ev.time };
+      const msg: UserMsg = { kind: "user", id: ev.id, eventSeq: ev.seq, text, time: ev.time };
       if (raw !== undefined && raw !== text) msg.raw = raw;
       model.messages.push(msg);
       break;
@@ -188,7 +199,7 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
       const partId = str(d, "partId") ?? "";
       let m = findAssistant(model, partId);
       if (!m) {
-        m = { kind: "assistant", id: partId, partId, text: "", reasoning: "", finalized: false, time: ev.time };
+        m = { kind: "assistant", id: partId, partId, eventSeq: ev.seq, text: "", reasoning: "", finalized: false, time: ev.time };
         model.messages.push(m);
       }
       const text = str(d, "text") ?? "";
@@ -200,7 +211,7 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
       const partId = str(d, "partId") ?? "";
       let m = findAssistant(model, partId);
       if (!m) {
-        m = { kind: "assistant", id: partId, partId, text: "", reasoning: "", finalized: false, time: ev.time };
+        m = { kind: "assistant", id: partId, partId, eventSeq: ev.seq, text: "", reasoning: "", finalized: false, time: ev.time };
         model.messages.push(m);
       }
       m.finalized = true;
@@ -220,6 +231,7 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
         kind: "tool",
         id: callId,
         callId,
+        eventSeq: ev.seq,
         tool: str(d, "tool") ?? "",
         input: obj(d, "input") ?? {},
         status: "pending",
@@ -252,6 +264,7 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
           kind: "tool",
           id: callId,
           callId,
+          eventSeq: ev.seq,
           tool: str(d, "tool") ?? "",
           input: {},
           status: "error",
@@ -260,6 +273,37 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
           finishTime: ev.time,
         });
       }
+      break;
+    }
+    case "session/rewound": {
+      const atSeq = num(d, "atSeq");
+      if (atSeq === undefined || !Number.isSafeInteger(atSeq) || atSeq <= 0) break;
+      for (const message of model.messages) {
+        if (!message.undone && message.eventSeq >= atSeq) {
+          message.undone = true;
+          message.rewindMarkerSeq = ev.seq;
+        }
+      }
+      const restoredText = str(d, "restoredText");
+      model.rewind = {
+        markerSeq: ev.seq,
+        atSeq,
+        ...(restoredText !== undefined ? { restoredText } : {}),
+      };
+      break;
+    }
+    case "session/rewind-cleared": {
+      const rewindSeq = num(d, "rewindSeq");
+      if (!model.rewind || (rewindSeq !== undefined && rewindSeq !== model.rewind.markerSeq)) break;
+      if (d.replaced !== true) {
+        for (const message of model.messages) {
+          if (message.rewindMarkerSeq === model.rewind.markerSeq) {
+            delete message.undone;
+            delete message.rewindMarkerSeq;
+          }
+        }
+      }
+      model.rewind = null;
       break;
     }
     case "task/snapshot": {

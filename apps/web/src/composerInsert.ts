@@ -2,6 +2,7 @@
 // go through here. If no Composer is mounted (no open session), inserts queue
 // and drain when one mounts — the @ click never gets lost.
 export const COMPOSER_INSERT = "polyth:composer-insert";
+export const COMPOSER_REPLACE = "polyth:composer-replace";
 
 const queue: string[] = [];
 
@@ -29,4 +30,12 @@ export function requestComposerInsert(text: string): boolean {
   }
   queueInsert(text);
   return false;
+}
+
+/** Replace the mounted composer's draft, used by session rewind. */
+export function requestComposerReplace(text: string): boolean {
+  if (typeof window === "undefined") return false;
+  return !window.dispatchEvent(
+    new CustomEvent(COMPOSER_REPLACE, { detail: text, cancelable: true }),
+  );
 }

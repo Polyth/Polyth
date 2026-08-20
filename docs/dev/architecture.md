@@ -85,7 +85,7 @@ statically by the server with SPA fallback.
 ## REST surface
 
 Core: `/api/health`, `/api/projects` (+`/create`, DELETE), `/api/sessions`
-(list/create/snapshot/events/message/fork/abort/archive/restore/bulk),
+(list/create/snapshot/events/message/fork/rewind/rewind-clear/abort/archive/restore/bulk),
 `/api/sessions/:id/queue` (+`/order`, DELETE item),
 `/api/sessions/:id/permission/:reqId`, `/api/sessions/:id/question/:reqId` (+`/reject`),
 `/api/models`, `/api/agents`.
@@ -130,7 +130,9 @@ Requests: `permission/requested` (with server-built preview + allowed scopes),
 
 Session lifecycle: `session/created`, `session/forked`, `session/archived`,
 `session/restored`, `session/metadata-changed`, `session/imported`,
-`session/history-imported`.
+`session/history-imported`, `session/rewound`, `session/rewind-cleared`. Rewind
+markers soft-splice model history in `deriveMessages`; replacement sends reset
+the backend session before appending a new tail.
 
 Delivery: `queue/enqueued`, `queue/dispatched`, `queue/reordered`, `queue/removed`,
 `delivery/steered`, `delivery/fallback-queued`.

@@ -6,7 +6,7 @@ import { filterCommands, filterSnippets, loadDraft, saveDraft, type Autocomplete
 import { PERSONAS, usePrefs } from "../prefs.ts";
 import { renderSlot } from "../slots.ts";
 import { dragKind, dropIntoSession } from "../dnd.ts";
-import { COMPOSER_INSERT, drainInserts } from "../composerInsert.ts";
+import { COMPOSER_INSERT, COMPOSER_REPLACE, drainInserts } from "../composerInsert.ts";
 import { activeToken, completeToken, type PromptToken } from "../composer/language.ts";
 import type { PickerItem } from "../picker.ts";
 import Picker from "./Picker.tsx";
@@ -152,8 +152,20 @@ export default function Composer({ variant = "docked" }: { variant?: "docked" | 
       insert(detail);
       inputRef.current?.focus();
     };
+    const replace = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (typeof detail !== "string") return;
+      e.preventDefault();
+      setText(detail);
+      inputRef.current?.replaceText(detail);
+      inputRef.current?.focus();
+    };
     window.addEventListener(COMPOSER_INSERT, handler);
-    return () => window.removeEventListener(COMPOSER_INSERT, handler);
+    window.addEventListener(COMPOSER_REPLACE, replace);
+    return () => {
+      window.removeEventListener(COMPOSER_INSERT, handler);
+      window.removeEventListener(COMPOSER_REPLACE, replace);
+    };
   }, []);
 
   const send = useCallback((override?: string) => {
