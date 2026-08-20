@@ -4,6 +4,7 @@ polyth feature parity on a DeepSeek-Harness/Cordis-style "everything is a plugin
 
 ## Docs
 
+- `CHANGELOG.md` — full project history from the initial commit, grouped by milestone, plus what is still open.
 - `docs/dev/README.md` — how to build a new feature from zero (kernel, contracts, events, tests).
 - `docs/dev/architecture.md` — current packages, protocol, event vocabulary, UI slot model.
 - `docs/dev/parity.md` — feature-parity map vs polyth + Paseo, by product domain.
