@@ -4,6 +4,7 @@ import { useEffect, useState, type CSSProperties } from "react";
 import { PERSONAS, PLUGIN_LABELS, applyPersona, isCustomized, pluginOn, togglePlugin, usePrefs, type PersonaId, type PluginId } from "../../prefs.ts";
 import { setOverlay, setActiveView, updateSettings, useStore } from "../../store.ts";
 import { setUiSettings, useUiSettings } from "../../uiPrefs.ts";
+import { groupQuotaWindows, setGroupCollapsed, setProviderHidden, useUsagePrefs } from "../../usagePrefs.ts";
 import { requestNotifyPermission } from "../../notify.ts";
 import { api, type GitStatus, type QuotaSnapshotDto, type QuotaWindowDto, type QuotaPaceDto } from "../../api.ts";
 import { addProject, createProject } from "../../init.ts";
@@ -387,7 +388,28 @@ function paceText(pace: QuotaPaceDto | null, win: QuotaWindowDto): string {
   return bits.join(" · ");
 }
 
+function QuotaWindowRow({ w, pace }: { w: QuotaWindowDto; pace: QuotaPaceDto | null }) {
+  const frac = w.limit > 0 ? Math.min(1, w.used / w.limit) : 0;
+  return (
+    <div className="quota-window">
+      <div className="quota-window-head">
+        <span>{w.label}</span>
+        <span className="mono">{fmtQuota(w.used, w.unit)} / {fmtQuota(w.limit, w.unit)}</span>
+      </div>
+      <div className="quota-progress" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(frac * 100)} aria-label={w.label}>
+        <div className={`quota-progress-fill ${pace?.pace ?? ""}`} style={{ width: `${frac * 100}%` }} />
+      </div>
+      {pace && <div className="quota-pace">{paceText(pace, w)}</div>}
+      {w.resetsAt !== undefined && <div className="muted" style={{ fontSize: 11 }}>resets {new Date(w.resetsAt).toLocaleString()}</div>}
+    </div>
+  );
+}
+
 function QuotaCard({ snap, onRefresh }: { snap: QuotaSnapshotDto; onRefresh: (id: string) => void }) {
+  const prefs = useUsagePrefs();
+  // F13: windows grouped by model family; groups collapse and remember it.
+  const groups = groupQuotaWindows(snap.windows);
+  const grouped = groups.some((g) => g.family !== null);
   return (
     <div className={`quota-card ${snap.stale ? "quota-stale" : ""}`}>
       <div className="quota-card-head">
@@ -399,20 +421,23 @@ function QuotaCard({ snap, onRefresh }: { snap: QuotaSnapshotDto; onRefresh: (id
         <button className="small-btn" onClick={() => onRefresh(snap.providerId)}>Refresh</button>
       </div>
       {snap.stale && snap.error && <div className="quota-error">{snap.error.message}</div>}
-      {snap.windows.map((w) => {
-        const frac = w.limit > 0 ? Math.min(1, w.used / w.limit) : 0;
-        const pace = snap.pace[w.id] ?? null;
+      {groups.map((g) => {
+        const key = `${snap.providerId}/${g.family ?? "general"}`;
+        const collapsed = grouped && prefs.collapsedGroups.includes(key);
         return (
-          <div key={w.id} className="quota-window">
-            <div className="quota-window-head">
-              <span>{w.label}</span>
-              <span className="mono">{fmtQuota(w.used, w.unit)} / {fmtQuota(w.limit, w.unit)}</span>
-            </div>
-            <div className="quota-progress" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(frac * 100)} aria-label={w.label}>
-              <div className={`quota-progress-fill ${pace?.pace ?? ""}`} style={{ width: `${frac * 100}%` }} />
-            </div>
-            {pace && <div className="quota-pace">{paceText(pace, w)}</div>}
-            {w.resetsAt !== undefined && <div className="muted" style={{ fontSize: 11 }}>resets {new Date(w.resetsAt).toLocaleString()}</div>}
+          <div key={key} className="quota-group">
+            {grouped && (
+              <button
+                className="quota-group-head"
+                aria-expanded={!collapsed}
+                onClick={() => setGroupCollapsed(key, !collapsed)}
+              >
+                <span className="quota-group-arrow">{collapsed ? "▸" : "▾"}</span>
+                <span>{g.label}</span>
+                <span className="muted">{g.windows.length}</span>
+              </button>
+            )}
+            {!collapsed && g.windows.map((w) => <QuotaWindowRow key={w.id} w={w} pace={snap.pace[w.id] ?? null} />)}
           </div>
         );
       })}
@@ -423,6 +448,7 @@ function QuotaCard({ snap, onRefresh }: { snap: QuotaSnapshotDto; onRefresh: (id
 
 function QuotaSection() {
   const [snaps, setSnaps] = useState<QuotaSnapshotDto[]>([]);
+  const prefs = useUsagePrefs();
   const reload = () => void api.usageQuotas().then(setSnaps);
   useEffect(() => {
     reload();
@@ -430,6 +456,7 @@ function QuotaSection() {
     return () => clearInterval(t);
   }, []);
   const refresh = (id: string) => void api.usageQuotasRefresh(id).then(reload).catch(reload);
+  const visible = snaps.filter((s) => !prefs.hiddenProviders.includes(s.providerId));
   return (
     <>
       <div className="stat-label">Provider quotas</div>
@@ -437,8 +464,25 @@ function QuotaSection() {
         <EmptyState title="No quota providers configured" body="Provider quota adapters are registered on the server; credentials never reach the browser." />
       )}
       {snaps.length > 0 && (
+        <div className="quota-visibility">
+          {snaps.map((s) => (
+            <label key={s.providerId} className="plugin-toggle">
+              <input
+                type="checkbox"
+                checked={!prefs.hiddenProviders.includes(s.providerId)}
+                onChange={(e) => setProviderHidden(s.providerId, !e.target.checked)}
+              />
+              {s.providerId}
+            </label>
+          ))}
+        </div>
+      )}
+      {snaps.length > 0 && visible.length === 0 && (
+        <div className="muted" style={{ fontSize: 12 }}>All providers hidden — tick one to show its card.</div>
+      )}
+      {visible.length > 0 && (
         <div className="quota-grid">
-          {snaps.map((s) => <QuotaCard key={s.providerId} snap={s} onRefresh={refresh} />)}
+          {visible.map((s) => <QuotaCard key={s.providerId} snap={s} onRefresh={refresh} />)}
         </div>
       )}
     </>

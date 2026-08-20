@@ -154,6 +154,19 @@ commits, and the L-queue packages started landing.
   checkboxes, select-all, and distinct empty states ("no OpenCode sessions
   found" vs "all N already imported", PS#766).
 
+### Added — L8: usage breakdown and real quota adapters (F13 quota half)
+
+- Quota cards in Settings → Usage group windows by model family (pure
+  `modelFamily`/`groupQuotaWindows` helpers, OC#355): family groups collapse
+  and remember it, non-model windows stay in an honest General bucket.
+- Per-provider visibility checkboxes; hidden providers and collapsed groups
+  persist in browser-local `polyth.usagePrefs` and survive reload.
+- Real quota providers plug in server-side via `data/quota-providers.json`
+  (`createHttpQuotaProvider` in `@polyth/usage`): HTTP endpoint + optional
+  `windowsPath` dot path, with the bearer credential referenced by env-var
+  *name* so tokens never sit in config or reach the browser; endpoint failures
+  degrade to the existing stale-with-reason snapshot path.
+
 ### Removed — stale planning artifacts (`3928fe9`)
 
 - `docs/features/*` — the 19-file upstream research dump (polyth/Paseo PR

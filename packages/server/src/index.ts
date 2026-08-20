@@ -1,5 +1,5 @@
 // Polyth server boot. Composition root: kernel context + plugins + gateway.
-import { mkdirSync } from "node:fs";
+import { mkdirSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createContext } from "@polyth/kernel";
@@ -19,7 +19,7 @@ import { createFusionService, synthesisPrompt } from "@polyth/fusion";
 import { createScheduleService, scanLoopsDir } from "@polyth/schedule";
 import { createKnowledgeStore } from "@polyth/knowledge";
 import { createGithubService } from "@polyth/github";
-import { createFakeQuotaProvider, createUsageService } from "@polyth/usage";
+import { createFakeQuotaProvider, createHttpQuotaProvider, createUsageService, parseQuotaProviderSpecs } from "@polyth/usage";
 import {
   createBrowserService, createChromiumDriver, createFakeDriver, demoWeb,
   findChromiumExecutable, originOf,
@@ -458,9 +458,22 @@ export async function boot(opts: BootOptions = {}) {
 
   // --- WP12: generic quota telemetry. Adapters are registered here on the
   // server; the browser only ever sees sanitized snapshots. No adapters are
-  // configured by default — POLYTH_FAKE_QUOTAS=1 enables the demo provider.
+  // configured by default — POLYTH_FAKE_QUOTAS=1 enables the demo provider,
+  // and real providers plug in via data/quota-providers.json (F13): each entry
+  // names an HTTP endpoint plus an env var holding the bearer credential, so
+  // tokens stay in the server environment and never in config or the browser.
   const usage = createUsageService({ file: `${dataDir}/quotas.json` });
   if (process.env.POLYTH_FAKE_QUOTAS === "1") usage.register(createFakeQuotaProvider());
+  try {
+    const specsRaw = readFileSync(`${dataDir}/quota-providers.json`, "utf8");
+    for (const spec of parseQuotaProviderSpecs(JSON.parse(specsRaw))) {
+      usage.register(createHttpQuotaProvider(spec));
+    }
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code !== "ENOENT") {
+      console.error("[usage] quota-providers.json ignored:", e instanceof Error ? e.message : e);
+    }
+  }
   usage.start();
 
   // --- WP11: generated walkthroughs, structured reviews, bounded review flow.
