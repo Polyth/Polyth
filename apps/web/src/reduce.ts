@@ -2,6 +2,7 @@
 // the store, the views and tests. Replaying the same event list in order
 // reconstructs an identical model (session log invariant).
 import type {
+  AttachmentRef,
   FusionDto,
   FusionWeightDto,
   JsonObject,
@@ -19,6 +20,7 @@ export interface UserMsg {
   eventSeq: number;
   text: string;
   raw?: string;
+  attachments?: AttachmentRef[];
   undone?: boolean;
   rewindMarkerSeq?: number;
   time: number;
@@ -247,6 +249,15 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
       const raw = str(d, "raw");
       const msg: UserMsg = { kind: "user", id: ev.id, eventSeq: ev.seq, text, time: ev.time };
       if (raw !== undefined && raw !== text) msg.raw = raw;
+      // Attachment pills on the message (F2): keep only well-formed refs.
+      const atts = (d as { attachments?: unknown }).attachments;
+      if (Array.isArray(atts)) {
+        const refs = atts.filter((a): a is AttachmentRef =>
+          typeof a === "object" && a !== null
+          && typeof (a as { name?: unknown }).name === "string"
+          && typeof (a as { mime?: unknown }).mime === "string");
+        if (refs.length > 0) msg.attachments = refs;
+      }
       model.messages.push(msg);
       model.changedFiles = [];
       break;

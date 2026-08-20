@@ -2,6 +2,7 @@
 import type {
   AgentDescriptor,
   AgentProfile,
+  AttachmentRef,
   BulkSessionResult,
   DictationSessionDto,
   FusionDto,
@@ -388,7 +389,7 @@ export const api = {
   getEvents: (id: string, afterSeq = 0) =>
     jfetch<SessionEvent[]>(`/api/sessions/${id}/events?afterSeq=${afterSeq}`),
 
-  sendMessage: (id: string, body: { text: string; model?: JsonObject; agent?: string; delivery?: string; dismissPending?: boolean; agentProfileId?: string }) =>
+  sendMessage: (id: string, body: { text: string; attachments?: AttachmentRef[]; model?: JsonObject; agent?: string; delivery?: string; dismissPending?: boolean; agentProfileId?: string }) =>
     jfetch<SendResult>(`/api/sessions/${id}/message`, json("POST", body)),
   abort: (id: string) => jfetch<void>(`/api/sessions/${id}/abort`, { method: "POST" }),
   renameSession: (id: string, title: string) =>
@@ -719,6 +720,10 @@ export const api = {
   githubStatus: (projectId: string) =>
     jfetch<GithubStatusDto>(`/api/github/status?projectId=${encodeURIComponent(projectId)}`).catch(
       (): GithubStatusDto => ({ installed: false, authenticated: false, repo: null, reason: "server unreachable" }),
+    ),
+  githubRepo: (projectId: string) =>
+    jfetch<GhListResult<GithubRepoDto>>(`/api/github/repo?projectId=${encodeURIComponent(projectId)}`).catch(
+      (): GhListResult<GithubRepoDto> => ({ ok: false, reason: "server unreachable" }),
     ),
   githubIssues: (projectId: string, limit = 30) =>
     jfetch<GhListResult<GithubIssueDto[]>>(`/api/github/issues?projectId=${encodeURIComponent(projectId)}&limit=${limit}`).catch(

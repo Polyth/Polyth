@@ -198,6 +198,12 @@ a generic collapsed row (never crash).
   `modelPrefs.ts`, `prefs.ts` (personas/enabled plugins), `drafts.ts`
   (`polyth.draft.<sessionId>`) — all browser-local. Server-owned settings go through
   `/api/settings/*` routes.
+- `attachments.ts` (F2) — pending composer pills per session
+  (`polyth.draft.att.<sessionId>`; the draft store owns text + pills): stat-verified
+  project-file/range refs, `_inbox/` uploads for drops/pastes, GitHub PR/issue URL
+  pills gated on the project's remote (`/api/github/repo`). Rendered by
+  `AttachmentPills` (composer: removable; timeline: read-only) and the shared
+  `FileRowActions` menu (Open / Copy path / Add to chat) on Files/Changes rows.
 - `notifications.ts` — kind-filtered, allowlisted-template, replay-deduped web
   notifications; `voice.tsx` — browser TTS/STT with the composer mic slot.
 

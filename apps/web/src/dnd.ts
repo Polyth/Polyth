@@ -1,7 +1,7 @@
 // Drag-and-drop helpers: the polyth path mime carries tree→composer drags;
-// desktop-file drops upload through the binary API and resolve to @paths.
+// desktop-file drops upload through the binary API and become attachment pills.
 import { api } from "./api.ts";
-import { requestComposerInsert } from "./composerInsert.ts";
+import { attachProjectFile, attachUpload } from "./attachments.ts";
 
 export const PATH_MIME = "application/x-polyth-path";
 
@@ -41,9 +41,22 @@ export async function uploadFiles(
   return paths;
 }
 
-/** Drop onto the session: tree drags insert directly; desktop files land in _inbox/ first. */
-export async function dropIntoSession(dt: DataTransfer, projectId: string): Promise<void> {
+/** Drop onto the session: tree drags become pills directly; desktop files
+ *  upload into _inbox/ first, then attach. Failures are reported per-file. */
+export async function dropIntoSession(
+  dt: DataTransfer,
+  projectId: string,
+  sessionId: string | null,
+  onError?: (reason: string) => void,
+): Promise<void> {
   const p = getDragPath(dt);
-  const paths = p ? [p] : await uploadFiles(projectId, "_inbox", Array.from(dt.files));
-  for (const rel of paths) requestComposerInsert(`@${rel}`);
+  if (p) {
+    const r = await attachProjectFile(projectId, sessionId, p);
+    if (!r.ok) onError?.(r.reason);
+    return;
+  }
+  for (const f of Array.from(dt.files)) {
+    const r = await attachUpload(projectId, sessionId, f);
+    if (!r.ok) onError?.(r.reason);
+  }
 }

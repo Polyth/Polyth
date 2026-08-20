@@ -19,10 +19,32 @@ Companion docs: `docs/dev/architecture.md` (the system as built),
 
 ## Unreleased — branch `feat/feature-parity-docs-impl-6b1a` (2026-08-20)
 
-Commits `3928fe9`…`3ec11f2`. Two things happened on this branch: the docs were
-reset into a maintained developer handbook, and the "this-pass" web-parity
-slice (P1–P8 from `docs/dev/implementation-order.md`) was implemented as eight
-contract-first commits.
+Commits `3928fe9`…`3ec11f2`, then the later-package (L) queue. Three things
+happened on this branch: the docs were reset into a maintained developer
+handbook, the "this-pass" web-parity slice (P1–P8 from
+`docs/dev/implementation-order.md`) was implemented as eight contract-first
+commits, and the L-queue packages started landing.
+
+### Added — L1: message attachments on the wire (F2)
+
+- Contracts: `AttachmentRef` gained `kind` ("file" | "image" | "range" |
+  "url"), `path`, and `range`; `ModelMessage` gained a `file` part;
+  `CanonicalTurnRequest` and `QueueItemDto` carry attachments.
+- Server: `/api/sessions/:id/message` accepts `attachments`, sanitizes them
+  (shape, mime, size vs the shared upload cap, path traversal, http(s)-only
+  URLs) and existence-checks paths against the session root — deleted files
+  refuse attachment — before persisting them in `user/message` data. Queued
+  messages keep attachments durably (queue table column); steer with
+  attachments falls back to queue (`steer-attachments`).
+- Adapter (`backend-opencode`, the only L-queue adapter change): attachments
+  map to OpenCode `file://` parts on `startTurn` (line ranges via
+  `?start=&end=`); URL attachments ride as link-only text parts and are never
+  fetched server-side.
+- Web: removable composer pills fed by drag-drop, the file picker, pasted
+  images, and pasted GitHub PR/issue URLs (pill only when `/api/github/repo`
+  matches); pills persist in the per-session draft store; Files/Changes rows
+  share an Open / Copy path / Add to chat menu; timeline user messages render
+  their attachments (image thumbnails from the sanitized raw endpoint).
 
 ### Removed — stale planning artifacts (`3928fe9`)
 

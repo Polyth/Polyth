@@ -9,6 +9,7 @@ import { openSettingsPage, setUiError, useStore } from "../store.ts";
 import { api } from "../api.ts";
 import CopyButton from "./CopyButton.tsx";
 import Dialog from "./a11y/Dialog.tsx";
+import AttachmentPills from "./AttachmentPills.tsx";
 import type { RenderModel, RenderMessage, ToolMsg, AssistantMsg, TaskActivityMsg, UserMsg } from "../reduce.ts";
 
 // Merged thinking block (WP4): collapsible with a first-line preview, or a
@@ -185,6 +186,9 @@ function MessageView({ m, onRewind, onFork }: {
       <div className="msg user" data-msg-id={m.id}>
         <div className="bubble">
           {renderMarkdown(m.text, m.id)}
+          {m.attachments && m.attachments.length > 0 && (
+            <AttachmentPills attachments={m.attachments} />
+          )}
           {m.raw && m.raw !== m.text && (
             <div className="user-expanded-hint">
               expanded from <code>{m.raw.split("\n")[0] ?? m.raw}</code>

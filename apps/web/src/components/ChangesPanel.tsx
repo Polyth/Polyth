@@ -5,6 +5,7 @@ import { api, type GitFileEntry } from "../api.ts";
 import { setGitDiffPath, useStore } from "../store.ts";
 import { diffStat } from "../utils.ts";
 import CopyButton from "./CopyButton.tsx";
+import FileRowActions from "./FileRowActions.tsx";
 import { setGitPrefs, splitDiffRows, useGitPrefs } from "../gitPrefs.ts";
 import { refreshGitStatus, useGitStatus } from "../gitStatusStore.ts";
 
@@ -14,6 +15,7 @@ const EMPTY_UNTRACKED: never[] = [];
 const EMPTY_CONFLICTED: never[] = [];
 
 function fileRow(
+  projectId: string,
   f: GitFileEntry,
   onStage?: (p: string) => void,
   onUnstage?: (p: string) => void,
@@ -21,6 +23,8 @@ function fileRow(
   onClick?: (p: string) => void,
   selected?: boolean,
 ) {
+  // Deleted files have nothing on disk to attach; the menu still offers
+  // Open (diff) and Copy path, and Add to chat fails with a clear error.
   const letter = f.staged ? "+" : f.status === "conflict" ? "!" : f.status === "untracked" ? "?" : "-";
   return (
     <div className={`git-file-row ${selected ? "selected" : ""}`} key={f.path} onClick={() => onClick?.(f.path)}>
@@ -33,6 +37,7 @@ function fileRow(
           ? onUnstage && <button className="small-btn" title="Unstage" onClick={() => onUnstage(f.path)}>U</button>
           : onStage && <button className="small-btn" title="Stage" onClick={() => onStage(f.path)}>S</button>}
         {onDiscard && <button className="small-btn danger-btn" title="Discard" onClick={() => onDiscard(f.path)}>✕</button>}
+        <FileRowActions projectId={projectId} path={f.path} {...(onClick ? { onOpen: () => onClick(f.path) } : {})} />
       </span>
     </div>
   );
@@ -185,13 +190,13 @@ export default function ChangesPanel() {
       {status.conflicted.length > 0 && (
         <>
           <div className="stat-label" style={{ color: "var(--red)" }}>Conflicts ({status.conflicted.length})</div>
-          {status.conflicted.map((f) => fileRow(f, undefined, undefined, undefined, loadDiff, f.path === diffPath))}
+          {status.conflicted.map((f) => fileRow(projectId, f, undefined, undefined, undefined, loadDiff, f.path === diffPath))}
         </>
       )}
 
       <div className="stat-label">Staged ({status.staged.length})</div>
       {status.staged.length === 0 && <div className="empty" style={{ padding: "4px 0" }}>No staged files.</div>}
-      {status.staged.map((f) => fileRow(f, undefined, unstage, undefined, loadDiff, f.path === diffPath))}
+      {status.staged.map((f) => fileRow(projectId, f, undefined, unstage, undefined, loadDiff, f.path === diffPath))}
 
       <div className="stat-label" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <span>Unstaged ({status.unstaged.length + status.untracked.length})</span>
@@ -199,8 +204,8 @@ export default function ChangesPanel() {
           <button className="small-btn" onClick={() => void stageAll()} disabled={busy}>Stage all</button>
         )}
       </div>
-      {status.unstaged.map((f) => fileRow(f, stage, undefined, discard, loadDiff, f.path === diffPath))}
-      {status.untracked.map((f) => fileRow(f, stage, undefined, undefined, loadDiff, f.path === diffPath))}
+      {status.unstaged.map((f) => fileRow(projectId, f, stage, undefined, discard, loadDiff, f.path === diffPath))}
+      {status.untracked.map((f) => fileRow(projectId, f, stage, undefined, undefined, loadDiff, f.path === diffPath))}
       {status.unstaged.length === 0 && status.untracked.length === 0 && (
         <div className="empty" style={{ padding: "4px 0" }}>Working tree clean.</div>
       )}

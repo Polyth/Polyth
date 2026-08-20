@@ -5,7 +5,7 @@ import { buildModel } from "./reduce.ts";
 import { displaySessionTitle, isPlaceholderTitle, modelToMarkdown, titleFromPrompt } from "./format.ts";
 import { friendlyError } from "./settings.ts";
 import * as store from "./store.ts";
-import type { JsonObject } from "@polyth/contracts";
+import type { AttachmentRef, JsonObject } from "@polyth/contracts";
 import { suggestWorktreeBranch } from "./worktreeSessions.ts";
 
 let sync: SyncClient | null = null;
@@ -177,6 +177,8 @@ export interface SendOptions {
   dismissPending?: boolean;
   /** Reusable execution configuration resolved server-side (WP8). */
   agentProfileId?: string;
+  /** Composer pills (F2); validated + persisted server-side before the model sees them. */
+  attachments?: AttachmentRef[];
 }
 
 export async function sendMessage(text: string, model?: JsonObject, agent?: string, opts?: SendOptions): Promise<void> {
@@ -192,6 +194,7 @@ export async function sendMessage(text: string, model?: JsonObject, agent?: stri
   try {
     await api.sendMessage(id, {
       text, model, agent,
+      ...(opts?.attachments?.length ? { attachments: opts.attachments } : {}),
       ...(opts?.delivery ? { delivery: opts.delivery } : {}),
       ...(opts?.dismissPending ? { dismissPending: true } : {}),
       ...(opts?.agentProfileId ? { agentProfileId: opts.agentProfileId } : {}),
