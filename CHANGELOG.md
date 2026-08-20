@@ -167,6 +167,24 @@ commits, and the L-queue packages started landing.
   *name* so tokens never sit in config or reach the browser; endpoint failures
   degrade to the existing stale-with-reason snapshot path.
 
+### Added — L9: themes with presets, custom JSON, and system-follow (F15)
+
+- A theme is now a JSON token schema (surface, line, ink, brand, signal, and
+  syntax color roles) resolved to CSS custom properties at one apply point;
+  six presets ship (Ember Dark, Midnight, Forest, Parchment, Mist, Solar) and
+  the pre-F15 "dark"/"light" settings values keep resolving to the originals.
+- `theme: "system"` follows `prefers-color-scheme` and flips live; hovering a
+  theme card previews it and leaving restores the saved pick.
+- Custom themes: paste JSON in Settings → Appearance ("Copy current as JSON"
+  gives a starting point); invalid input is rejected with the exact reason;
+  themes persist in browser-local `polyth.customThemes`.
+- Hardcoded-color audit: diff washes, status dots, permission-risk chips,
+  glows, the user bubble, switches, and terminal/preview surfaces now derive
+  from tokens via `var()`/`color-mix`; the tiny syntax highlighter's `tok-*`
+  classes gained theme-driven colors; Mermaid re-renders from live token
+  values on theme change. Light mode's previously dark user bubble now derives
+  from the accent over the panel surface and is readable.
+
 ### Removed — stale planning artifacts (`3928fe9`)
 
 - `docs/features/*` — the 19-file upstream research dump (polyth/Paseo PR

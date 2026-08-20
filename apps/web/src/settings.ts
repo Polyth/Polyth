@@ -1,8 +1,12 @@
 // Local UI preferences persisted under localStorage["polyth.settings"],
 // plus DOM-free error-message helpers. Pure parts are covered by smoke tests.
+import { applyThemeSetting } from "./theme.ts";
 
 export interface PolythSettings {
-  theme: "dark" | "light";
+  /** Theme setting (F15): a preset id ("dark", "light", "midnight", …),
+   *  a custom theme id from polyth.customThemes, or "system" to follow the
+   *  OS scheme. Unknown ids resolve to the default dark preset. */
+  theme: string;
   density: "comfortable" | "compact";
   fontSize: number; // px, 12–18; scales the UI, not code blocks
   productName: string; // brand label in the sidebar + document title
@@ -45,7 +49,7 @@ export function normalizeSettings(raw: unknown): PolythSettings {
   const r = (raw !== null && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
   const d = DEFAULT_SETTINGS;
   return {
-    theme: r.theme === "light" ? "light" : "dark",
+    theme: pickString(r.theme, d.theme).trim() || d.theme,
     density: r.density === "compact" ? "compact" : "comfortable",
     fontSize: pickNumber(r.fontSize, d.fontSize, 12, 18),
     productName: pickString(r.productName, d.productName).trim() || d.productName,
@@ -88,11 +92,11 @@ export function saveSettings(s: PolythSettings): void {
   }
 }
 
-// Theme class, density attribute, UI font size, and title on <html>/<title>.
+// Theme tokens, density attribute, UI font size, and title on <html>/<title>.
 export function applySettingsToDom(s: PolythSettings): void {
   if (typeof document === "undefined") return;
   const html = document.documentElement;
-  html.classList.toggle("light", s.theme === "light");
+  applyThemeSetting(s.theme);
   html.dataset.density = s.density;
   html.style.setProperty("--ui-font-size", `${s.fontSize}px`);
   document.title = s.productName;

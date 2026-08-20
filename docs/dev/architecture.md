@@ -229,6 +229,14 @@ a generic collapsed row (never crash).
   frames replace the local buffer so reattach never duplicates),
   `SettingsModal`/`SettingsView` + `settings/registry.ts`
   (item-level search), `Onboarding` (personas), `SessionSearch`.
+- Theming (F15): `theme.ts` — JSON token schema (surface/line/ink/brand/signal/
+  syntax roles) resolved to CSS custom properties at one apply point
+  (`applyTheme`); 6 bundled presets, `theme: "system"` follows
+  `prefers-color-scheme` live, custom themes are pasted JSON validated with the
+  rejection reason and stored in `polyth.customThemes`. `styles.css` derives
+  every surface (diff washes, syntax roles, user bubble, glows) from tokens via
+  `var()`/`color-mix`; Mermaid re-renders from live token values on the
+  `polyth:theme` event.
 - Preferences: `settings.ts` (`polyth.settings`), `uiPrefs.ts` (including
   `polyth.editorPrefs`), `sidebarPrefs.ts`,
   `modelPrefs.ts`, `prefs.ts` (personas/enabled plugins), `usagePrefs.ts`

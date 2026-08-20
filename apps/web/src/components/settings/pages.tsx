@@ -13,6 +13,10 @@ import { EmptyState, PageHead, Row, Seg, Toggle } from "./parts.tsx";
 import { refreshProfiles, useProfiles } from "../../profiles.ts";
 import AgentProfileForm from "../AgentProfileForm.tsx";
 import { parseMcpServersJson, type McpImportResult } from "../../mcpImport.ts";
+import {
+  PRESET_THEMES, addCustomTheme, applyTheme, loadCustomThemes, parseThemeJson,
+  reapplyTheme, removeCustomTheme, resolveTheme, type ThemeSpec,
+} from "../../theme.ts";
 import type { AssistSettingsDto } from "../../api.ts";
 import type { AgentProfile, InstalledPluginDto, McpServerDto, McpTransport, SystemInfoDto } from "@polyth/contracts";
 
@@ -21,14 +25,25 @@ function ThemeCard({
   name,
   colors,
   onPick,
+  onPreview,
+  onPreviewEnd,
 }: {
   active: boolean;
   name: string;
   colors: { bg: string; side: string; line: string; accent: string; soft: string };
   onPick: () => void;
+  onPreview?: () => void;
+  onPreviewEnd?: () => void;
 }) {
   return (
-    <button className={`theme-card ${active ? "active" : ""}`} onClick={onPick}>
+    <button
+      className={`theme-card ${active ? "active" : ""}`}
+      onClick={onPick}
+      onMouseEnter={onPreview}
+      onMouseLeave={onPreviewEnd}
+      onFocus={onPreview}
+      onBlur={onPreviewEnd}
+    >
       <div className="theme-prev" style={{ background: colors.bg }}>
         <div className="theme-prev-side" style={{ background: colors.side, borderRight: `1px solid ${colors.line}` }} />
         <div className="theme-prev-main">
@@ -89,6 +104,107 @@ export function GeneralPage() {
   );
 }
 
+const themeCardColors = (t: ThemeSpec) => ({
+  bg: t.tokens.bg, side: t.tokens.panel, line: t.tokens.borderSoft, accent: t.tokens.accent, soft: t.tokens.raised,
+});
+
+const EXAMPLE_THEME_HINT = 'Paste theme JSON: { "id": "my-theme", "name": "My theme", "appearance": "dark", "tokens": { "bg": "#101010", … } }';
+
+// F15: preset grid + system-follow + custom JSON themes with hover preview.
+// Hover applies the candidate tokens live; leaving re-applies the saved pick.
+function ThemeSection() {
+  const settings = useStore((s) => s.settings);
+  const [customs, setCustoms] = useState<ThemeSpec[]>(() => loadCustomThemes());
+  const [json, setJson] = useState("");
+  const [jsonError, setJsonError] = useState("");
+  const preview = (t: ThemeSpec) => applyTheme(t);
+  const endPreview = () => reapplyTheme();
+  const importJson = () => {
+    const res = parseThemeJson(json);
+    if (!res.ok) { setJsonError(res.error); return; }
+    setCustoms(addCustomTheme(res.theme));
+    setJson("");
+    setJsonError("");
+    updateSettings({ theme: res.theme.id });
+  };
+  const copyCurrent = () => {
+    const current = resolveTheme(settings.theme, { custom: customs, systemDark: !document.documentElement.classList.contains("light") });
+    const draft = { ...current, id: "my-theme", name: "My theme" };
+    void navigator.clipboard?.writeText(JSON.stringify(draft, null, 2));
+  };
+  const removeCustom = (id: string) => {
+    setCustoms(removeCustomTheme(id));
+    if (settings.theme === id) updateSettings({ theme: "dark" });
+  };
+  const systemPreview = resolveTheme("system", {
+    systemDark: typeof matchMedia === "function" ? matchMedia("(prefers-color-scheme: dark)").matches : true,
+  });
+  return (
+    <div className="set-sec" data-settings-item="appearance.theme">
+      <div className="set-sec-title">Theme</div>
+      <div className="theme-grid">
+        {PRESET_THEMES.map((t) => (
+          <ThemeCard
+            key={t.id}
+            active={settings.theme === t.id}
+            name={t.name}
+            colors={themeCardColors(t)}
+            onPick={() => updateSettings({ theme: t.id })}
+            onPreview={() => preview(t)}
+            onPreviewEnd={endPreview}
+          />
+        ))}
+        <ThemeCard
+          active={settings.theme === "system"}
+          name="System"
+          colors={themeCardColors(systemPreview)}
+          onPick={() => updateSettings({ theme: "system" })}
+          onPreview={() => preview(systemPreview)}
+          onPreviewEnd={endPreview}
+        />
+        {customs.map((t) => (
+          <ThemeCard
+            key={t.id}
+            active={settings.theme === t.id}
+            name={t.name}
+            colors={themeCardColors(t)}
+            onPick={() => updateSettings({ theme: t.id })}
+            onPreview={() => preview(t)}
+            onPreviewEnd={endPreview}
+          />
+        ))}
+      </div>
+      {customs.length > 0 && (
+        <div className="theme-custom-list">
+          {customs.map((t) => (
+            <div key={t.id} className="theme-custom-row">
+              <span className="mono">{t.id}</span>
+              <span className="muted">{t.name} · {t.appearance}</span>
+              <span className="header-spacer" />
+              <button className="small-btn danger-btn" onClick={() => removeCustom(t.id)}>Delete</button>
+            </div>
+          ))}
+        </div>
+      )}
+      <div className="theme-import">
+        <textarea
+          className="theme-import-input"
+          rows={3}
+          placeholder={EXAMPLE_THEME_HINT}
+          value={json}
+          onChange={(e) => { setJson(e.target.value); setJsonError(""); }}
+          aria-label="Custom theme JSON"
+        />
+        <div className="theme-import-actions">
+          <button className="small-btn" disabled={!json.trim()} onClick={importJson}>Import theme</button>
+          <button className="small-btn" onClick={copyCurrent} title="Copy the active theme as JSON to edit">Copy current as JSON</button>
+        </div>
+        {jsonError && <div className="form-error">{jsonError}</div>}
+      </div>
+    </div>
+  );
+}
+
 export function AppearancePage() {
   const ui = useUiSettings();
   const settings = useStore((s) => s.settings);
@@ -100,23 +216,7 @@ export function AppearancePage() {
   return (
     <>
       <PageHead title="Appearance" blurb="Visual preferences, saved in this browser and applied immediately." />
-      <div className="set-sec" data-settings-item="appearance.theme">
-        <div className="set-sec-title">Theme</div>
-        <div className="theme-grid">
-          <ThemeCard
-            active={settings.theme === "dark"}
-            name="Ember Dark"
-            colors={{ bg: "#121110", side: "#191816", line: "#2a2723", accent: "#f49b5b", soft: "#3a352f" }}
-            onPick={() => updateSettings({ theme: "dark" })}
-          />
-          <ThemeCard
-            active={settings.theme === "light"}
-            name="Parchment"
-            colors={{ bg: "#faf8f4", side: "#f1ede6", line: "#e2dcd2", accent: "#d9822b", soft: "#ddd7cc" }}
-            onPick={() => updateSettings({ theme: "light" })}
-          />
-        </div>
-      </div>
+      <ThemeSection />
       <Row label="Density" hint="Compact tightens paddings and font sizes across panels." itemId="appearance.density">
         <Seg value={ui.density} options={[["comfortable", "Comfortable"], ["compact", "Compact"]]} onChange={(density) => { setUiSettings({ density }); updateSettings({ density }); }} />
       </Row>
