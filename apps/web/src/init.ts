@@ -6,7 +6,9 @@ import { displaySessionTitle, isPlaceholderTitle, modelToMarkdown, titleFromProm
 import { friendlyError } from "./settings.ts";
 import { formatAppUrl, parseAppUrl } from "./router.ts";
 import * as store from "./store.ts";
-import type { JsonObject } from "@polyth/contracts";
+import type { AttachmentRef, JsonObject } from "@polyth/contracts";
+import { suggestWorktreeBranch } from "./worktreeSessions.ts";
+import { installPushDeepLinks } from "./push.ts";
 
 let sync: SyncClient | null = null;
 let lastSubSession: string | undefined;
@@ -62,6 +64,9 @@ function startUrlSync(): void {
 export function init(): void {
   void boot();
   startSync();
+  // F18: notification clicks from the service worker land here when a tab
+  // already exists (postMessage instead of a second window).
+  installPushDeepLinks(openSession);
   store.subscribeStore(() => {
     const s = store.getState();
     if (s.activeSessionId !== lastSubSession) {
@@ -96,11 +101,13 @@ async function boot(): Promise<void> {
     store.setAgents(agents);
 
     // URL wins over localStorage: opening a shared /p/…/s/… link (or an
-    // agent's ?session=) restores exactly that session.
+    // agent's/push notification's ?session=) restores exactly that session.
     const fromUrl = parseAppUrl(location.pathname, location.search);
     if (fromUrl.sessionId) {
       try {
         await openSession(fromUrl.sessionId);
+        const projectId = store.getState().activeProjectId;
+        if (projectId) await refreshSessions(projectId);
         startUrlSync();
         return;
       } catch (err) {
@@ -170,8 +177,41 @@ export async function createProject(path: string, name?: string): Promise<void> 
   store.activateProject(p.id);
 }
 
-export async function createSession(projectId: string, opts?: { model?: JsonObject; agent?: string }): Promise<void> {
-  const { id: sessionId } = await api.createSession({ projectId, ...opts });
+export interface CreateSessionOptions {
+  title?: string;
+  model?: JsonObject;
+  agent?: string;
+  worktreePath?: string;
+}
+
+async function createDefaultWorktree(projectId: string, title?: string): Promise<string> {
+  const [worktrees, branches] = await Promise.all([
+    api.listWorktrees(projectId),
+    api.gitBranches(projectId),
+  ]);
+  const taken = [
+    ...worktrees.map((worktree) => worktree.branch).filter((branch): branch is string => !!branch),
+    ...branches.branches.map((branch) => branch.name),
+  ];
+  const branch = suggestWorktreeBranch(
+    store.getState().settings.branchTemplate,
+    title || "session",
+    taken,
+  );
+  return (await api.createWorktree(projectId, branch)).path;
+}
+
+export async function createSession(projectId: string, opts: CreateSessionOptions = {}): Promise<void> {
+  const project = store.getState().projects.find((candidate) => candidate.id === projectId);
+  const worktreePath = opts.worktreePath
+    ?? (project?.defaults?.worktreeBehavior === "fresh-worktree"
+      ? await createDefaultWorktree(projectId, opts.title)
+      : undefined);
+  const { id: sessionId } = await api.createSession({
+    projectId,
+    ...opts,
+    ...(worktreePath ? { worktreePath } : {}),
+  });
   await openSession(sessionId);
   void refreshSessions(projectId);
 }
@@ -203,6 +243,8 @@ export interface SendOptions {
   dismissPending?: boolean;
   /** Reusable execution configuration resolved server-side (WP8). */
   agentProfileId?: string;
+  /** Composer pills (F2); validated + persisted server-side before the model sees them. */
+  attachments?: AttachmentRef[];
 }
 
 export async function sendMessage(text: string, model?: JsonObject, agent?: string, opts?: SendOptions): Promise<void> {
@@ -218,6 +260,7 @@ export async function sendMessage(text: string, model?: JsonObject, agent?: stri
   try {
     await api.sendMessage(id, {
       text, model, agent,
+      ...(opts?.attachments?.length ? { attachments: opts.attachments } : {}),
       ...(opts?.delivery ? { delivery: opts.delivery } : {}),
       ...(opts?.dismissPending ? { dismissPending: true } : {}),
       ...(opts?.agentProfileId ? { agentProfileId: opts.agentProfileId } : {}),

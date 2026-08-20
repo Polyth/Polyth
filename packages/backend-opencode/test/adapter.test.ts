@@ -162,6 +162,7 @@ const startFake = async () => {
   let sessionSeq = 0;
   const sseClients: http.ServerResponse[] = [];
   let posted = false;
+  const postedBodies: Array<Record<string, unknown>> = [];
   const permissionReplies: unknown[] = [];
   const questionReplies: unknown[] = [];
   let aborts = 0;
@@ -185,14 +186,19 @@ const startFake = async () => {
     const msg = path.match(/^\/session\/([^/]+)\/(message|prompt_async)$/);
     if (req.method === "POST" && msg) {
       const sessionID = msg[1]!;
-      posted = true;
-      json(200, { ok: true });
-      setTimeout(() => {
-        for (const ev of scriptedSequence(sessionID)) {
-          const frame = sseFrame(ev);
-          for (const c of sseClients) c.write(frame);
-        }
-      }, 40);
+      let raw = "";
+      req.on("data", (c) => (raw += c));
+      req.on("end", () => {
+        postedBodies.push(JSON.parse(raw || "{}") as Record<string, unknown>);
+        posted = true;
+        json(200, { ok: true });
+        setTimeout(() => {
+          for (const ev of scriptedSequence(sessionID)) {
+            const frame = sseFrame(ev);
+            for (const c of sseClients) c.write(frame);
+          }
+        }, 40);
+      });
       return;
     }
     const perm = path.match(/^\/session\/([^/]+)\/permissions\/([^/]+)$/);
@@ -251,6 +257,7 @@ const startFake = async () => {
     get posted() {
       return posted;
     },
+    postedBodies,
     permissionReplies,
     questionReplies,
     get aborts() {
@@ -394,6 +401,40 @@ test("flattenModels marks connected providers; empty connected[] means all conne
   for (const connected of [[], undefined]) {
     const all = flattenModels({ ...twoProviders, connected });
     assert.ok(all.every((m) => m.connected === true), "all connected when signal is absent");
+  }
+});
+
+test("startTurn maps attachments to file parts; url attachments stay text (F2)", async () => {
+  const fake = await startFake();
+  const client = createOpenCodeClient(fake.baseUrl);
+  const runtime = createOpenCodeRuntimeWithClient(client, { cwd: "/workspace/demo" });
+  try {
+    await runtime.ensureSession({ sessionId: "canon-att", projectId: "p", cwd: "/workspace/demo", title: "t" });
+    await runtime.startTurn({
+      sessionId: "canon-att",
+      text: "review these",
+      attachments: [
+        { id: "a1", name: "notes.md", mime: "text/plain", size: 10, kind: "file", path: "docs/notes.md" },
+        { id: "a2", name: "pic.png", mime: "image/png", size: 99, kind: "image", path: "img/pic.png" },
+        { id: "a3", name: "i.ts (3-9)", mime: "text/plain", size: 5, kind: "range", path: "src/i.ts", range: [3, 9] },
+        { id: "a4", name: "PR #4", mime: "text/uri-list", size: 0, kind: "url", url: "https://github.com/o/r/pull/4" },
+        { id: "a5", name: "escape", mime: "text/plain", size: 1, kind: "file", path: "../../etc/passwd" },
+      ],
+    });
+    await waitUntil(() => fake.postedBodies.length >= 1);
+    const body = fake.postedBodies[0]!;
+    const parts = body.parts as Array<Record<string, unknown>>;
+    assert.deepEqual(parts[0], { type: "text", text: "review these" });
+    assert.deepEqual(parts[1], { type: "file", mime: "text/plain", filename: "notes.md", url: "file:///workspace/demo/docs/notes.md" });
+    assert.deepEqual(parts[2], { type: "file", mime: "image/png", filename: "pic.png", url: "file:///workspace/demo/img/pic.png" });
+    assert.deepEqual(parts[3], { type: "file", mime: "text/plain", filename: "i.ts (3-9)", url: "file:///workspace/demo/src/i.ts?start=3&end=9" });
+    // URL attachment: a text part carrying the link — never a fetchable file part
+    assert.deepEqual(parts[4], { type: "text", text: "[Attached link: PR #4] https://github.com/o/r/pull/4" });
+    // path escaping the session cwd is dropped entirely
+    assert.equal(parts.length, 5);
+  } finally {
+    await runtime.dispose();
+    fake.server.close();
   }
 });
 

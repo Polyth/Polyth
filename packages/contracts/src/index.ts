@@ -66,6 +66,17 @@ export interface TokenUsage { input: number; output: number; reasoning?: number;
 export interface UsageRecordedData { model: ModelRef; tokens: TokenUsage; cost?: number }
 export interface GoalAttachedData { objective: string; budgetTokens?: number; maxContinuations?: number }
 export interface GoalAuditData { verdict: "keep" | "done" | "stuck"; consecutiveStuck: number; note?: string }
+export interface SessionRewoundData {
+  /** The reverted user/message seq. That message and its following tail are hidden. */
+  atSeq: number;
+  restoredText?: string;
+}
+export interface SessionRewindClearedData {
+  /** Seq of the session/rewound marker being resolved. */
+  rewindSeq: number;
+  /** True when a new send replaces the hidden tail; false/absent means redo. */
+  replaced?: boolean;
+}
 
 // ---------------------------------------------------------------- M3 workflows: multirun / fusion / walkthrough
 
@@ -94,7 +105,21 @@ export interface WalkthroughStepDto { file: string; explanation: string; diff: s
 export interface WalkthroughStepApprovedData { stepIndex: number; file: string }
 export interface WalkthroughStepRejectedData { stepIndex: number; file: string }
 
-export interface AttachmentRef { id: string; name: string; mime: string; size: number; url?: string }
+export interface AttachmentRef {
+  id: string;
+  name: string;
+  mime: string;
+  size: number;
+  /** Display/download URL. Required (http/https) for kind "url"; for project
+   *  files it is the sanitized raw endpoint and purely presentational. */
+  url?: string;
+  /** Attachment class; absent means "file" (backward compatible). */
+  kind?: "file" | "image" | "range" | "url";
+  /** Project-relative path for file/image/range attachments. */
+  path?: string;
+  /** 1-based inclusive line range (kind "range" only). */
+  range?: [number, number];
+}
 export interface ModelRef { providerID: string; modelID: string }
 
 // Model-visible derivation: these types feed deriveMessages()
@@ -113,6 +138,7 @@ export interface ModelMessage {
   parts: Array<
     | { type: "text"; text: string }
     | { type: "reasoning"; text: string }
+    | { type: "file"; name: string; mime: string; path?: string; url?: string; range?: [number, number] }
     | { type: "tool-call"; callId: string; tool: string; input: JsonObject }
     | { type: "tool-result"; callId: string; tool: string; output: string; isError?: boolean }
   >;
@@ -159,6 +185,16 @@ export interface SessionAttention {
 
 export type WorktreeState = "ready" | "bootstrapping" | "busy" | "missing";
 
+/** F9 idle assist: recap + one suggested follow-up, keyed to the log tail.
+ *  Projection-only — it is never model-visible unless the user sends it. */
+export interface SessionAssist {
+  recap: string;
+  suggestion: string;
+  /** Log seq the assist was generated against; any newer event makes it stale. */
+  atSeq: number;
+  generatedAt: number;
+}
+
 export interface SessionProjection {
   id: string; projectId: string; parentId?: string;
   title: string; status: SessionStatus;
@@ -176,6 +212,23 @@ export interface SessionProjection {
   worktreeId?: string;
   worktreeState?: WorktreeState;
   agentProfileId?: string;
+  /** Organization metadata, never written to the session event log. */
+  pinned?: { position: number };
+  /** Small-model idle assist (F9); stale once the log grows past atSeq. */
+  assist?: SessionAssist;
+  /** F18: effective auto-accept policy (own setting or nearest parent's) —
+   *  drives the loud header indicator. Never a global default. */
+  autoAccept?: boolean;
+}
+
+/** F18: per-session auto-accept policy. "inherit" (the default) walks to the
+ *  nearest ancestor with an explicit setting; the root default is off.
+ *  "off" on a child is the explicit opt-out from an inherited "on". */
+export type AutoAcceptSetting = "on" | "off" | "inherit";
+
+export interface AutoAcceptDto {
+  setting: AutoAcceptSetting;
+  effective: boolean;
 }
 
 export interface SessionService {
@@ -184,6 +237,12 @@ export interface SessionService {
   send(sessionId: string, input: UserTurnInput): Promise<SendResult>;
   abort(sessionId: string): Promise<void>;
   fork(sessionId: string, atSeq?: number): Promise<SessionRef>;
+  /** Soft-rewind to a user message without mutating prior events. */
+  rewind?(sessionId: string, atSeq: number): Promise<SessionEvent>;
+  /** Restore the tail hidden by the active rewind marker. */
+  clearRewind?(sessionId: string): Promise<SessionEvent>;
+  /** Execute a composer `!` command through the shell permission family. */
+  runShell?(sessionId: string, command: string): Promise<ShellTurnResult>;
   archive(sessionId: string): Promise<void>;
   restore(sessionId: string): Promise<void>;
   list(projectId?: string): Promise<SessionProjection[]>;
@@ -197,15 +256,28 @@ export interface SessionService {
   rename?(sessionId: string, title: string): Promise<void>;
   /** Folder/label assignment; folder must belong to the session's project. */
   organize?(sessionId: string, patch: SessionOrganizePatch): Promise<void>;
+  /** Projection-only reconciliation after a linked worktree is removed. */
+  markWorktreeMissing?(projectId: string, worktreePath: string): Promise<void>;
   queueList?(sessionId: string): Promise<QueueItemDto[]>;
   queueReorder?(sessionId: string, ids: string[]): Promise<QueueItemDto[]>;
   queueRemove?(sessionId: string, queueId: string): Promise<void>;
+  /** F14 import half: backend sessions not yet adopted (items) + how many the
+   *  backend has in total, so the UI can tell "none exist" from "all imported". */
+  backendSessions?(projectId: string): Promise<{ items: RuntimeSession[]; total: number }>;
+  /** Adopt the selected backend sessions; returns the new projections. */
+  importBackendSessions?(projectId: string, backendIds: string[]): Promise<SessionProjection[]>;
+  /** F18: read the session's auto-accept policy (own setting + effective). */
+  autoAcceptGet?(sessionId: string): Promise<AutoAcceptDto>;
+  /** F18: set the policy; enabling reconciles already-pending requests. */
+  autoAcceptSet?(sessionId: string, setting: AutoAcceptSetting): Promise<AutoAcceptDto>;
 }
 
 export interface SessionOrganizePatch {
   /** null clears the folder assignment */
   folderId?: string | null;
   labelIds?: string[];
+  /** null unpins; position controls ordering in the pinned sidebar section. */
+  pinned?: { position: number } | null;
 }
 
 // ---------------------------------------------------------------- persistence
@@ -232,6 +304,8 @@ export interface RuntimeSessionMessage { role: "user" | "assistant"; text: strin
 export interface CanonicalTurnRequest {
   sessionId: string;       // canonical session id; adapter maps to backend id
   text: string;
+  /** Already persisted in the user/message event before startTurn is called. */
+  attachments?: AttachmentRef[];
   model?: ModelRef;
   agent?: string;
 }
@@ -258,6 +332,8 @@ export interface AgentRuntime {
   models(): Promise<ModelDescriptor[]>;
   agents(): Promise<AgentDescriptor[]>;
   ensureSession(canonical: CreateSessionInput & { sessionId: string; cwd: string }): Promise<string>;
+  /** Replace one canonical session's backend history with a fresh backend session. */
+  resetSession?(canonical: CreateSessionInput & { sessionId: string; cwd: string }): Promise<string>;
   sessions(): Promise<RuntimeSession[]>;
   history(sessionId: string): Promise<RuntimeSessionMessage[]>;
   startTurn(req: CanonicalTurnRequest): Promise<void>; // events flow via onEvent
@@ -407,6 +483,8 @@ export interface TerminalInfo {
   projectId: string;
   createdAt: number;
   running: boolean;
+  /** Set once the process has exited (F12: exited-but-not-closed terminals stay listed). */
+  exitCode?: number | null;
 }
 
 export interface TerminalCreatedData {
@@ -456,6 +534,8 @@ export interface QueueItemDto {
   text: string;
   delivery: DeliveryMode;
   createdAt: number;
+  /** Preserved across queueing so deferred sends keep their attachments. */
+  attachments?: AttachmentRef[];
 }
 
 export interface QueueEnqueuedData { queueId: string; text: string; delivery: string }
@@ -469,6 +549,12 @@ export interface SendResult {
   turnId?: string;
   queueId?: string;
   queued?: boolean;
+}
+
+export interface ShellTurnResult {
+  callId: string;
+  status: "pending" | "completed" | "rejected";
+  requestId?: string;
 }
 
 // ---------------------------------------------------------------- editor & files (WP4/WP6)

@@ -33,7 +33,14 @@ const MAX_AUDIO_PER_SECOND = 100;
 // Above this many buffered bytes, hold frames (newest only) until drained.
 const FRAME_HIGH_WATER = 1_000_000;
 
-export function attachWs(server: Server, sessions: SessionService, browser?: BrowserService, dictation?: DictationService): Broadcaster {
+export function attachWs(
+  server: Server,
+  sessions: SessionService,
+  browser?: BrowserService,
+  dictation?: DictationService,
+  /** F16: when provided, upgrades without a valid auth cookie are rejected. */
+  authorize?: (req: IncomingMessage) => boolean,
+): Broadcaster {
   // noServer + manual upgrade matcher: a WSS bound with {server, path} aborts
   // *every* unmatched upgrade with 400, which would kill the terminal channel's
   // /ws/terminal/:id handshakes. Pass-through matching keeps both channels live.
@@ -42,6 +49,11 @@ export function attachWs(server: Server, sessions: SessionService, browser?: Bro
 
   const upgrade = (req: IncomingMessage, socket: Socket, head: Buffer) => {
     if (new URL(req.url ?? "/", "http://x").pathname !== "/ws") return;
+    if (authorize && !authorize(req)) {
+      socket.write("HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n");
+      socket.destroy();
+      return;
+    }
     wss.handleUpgrade(req, socket, head, (ws) => wss.emit("connection", ws, req));
   };
   server.on("upgrade", upgrade);

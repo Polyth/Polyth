@@ -7,6 +7,7 @@ import { randomUUID } from "node:crypto";
 import { MODEL_VISIBLE_TYPES } from "@polyth/contracts";
 import type {
   AgentProfile,
+  AttachmentRef,
   DeliveryMode,
   JsonObject,
   ModelMessage,
@@ -26,7 +27,7 @@ export interface SearchHit { sessionId: string; field: "message"; snippet: strin
 export interface Store extends SessionPersistence {
   exportJsonl(sessionId: string): Promise<string>;
   // -- durable delivery queue (WP3) --
-  enqueue(sessionId: string, text: string, delivery: DeliveryMode): Promise<QueueItemDto>;
+  enqueue(sessionId: string, text: string, delivery: DeliveryMode, attachments?: AttachmentRef[]): Promise<QueueItemDto>;
   queueList(sessionId: string): Promise<QueueItemDto[]>;
   /** Validates ids are an exact permutation for the session; positions update transactionally. */
   queueReorder(sessionId: string, ids: string[]): Promise<QueueItemDto[]>;
@@ -169,6 +170,10 @@ export function createStore(dbPath: string): Store {
           updated_at  INTEGER NOT NULL
         )
       `);
+    },
+    // v4: queued messages keep their attachments (F2)
+    () => {
+      db.exec("ALTER TABLE session_queue ADD COLUMN attachments TEXT");
     },
   ];
   {
@@ -348,18 +353,33 @@ export function createStore(dbPath: string): Store {
     text: string;
     delivery: string;
     created_at: number;
+    attachments: string | null;
   }
 
-  const rowToQueueItem = (r: QueueRow): QueueItemDto => ({
-    id: r.queue_id,
-    sessionId: r.session_id,
-    position: Number(r.position),
-    text: r.text,
-    delivery: (["normal", "steer", "queue", "interrupt"].includes(r.delivery) ? r.delivery : "queue") as DeliveryMode,
-    createdAt: Number(r.created_at),
-  });
+  const parseAttachments = (raw: string | null): AttachmentRef[] | undefined => {
+    if (!raw) return undefined;
+    try {
+      const v = JSON.parse(raw) as unknown;
+      return Array.isArray(v) && v.length > 0 ? (v as AttachmentRef[]) : undefined;
+    } catch {
+      return undefined;
+    }
+  };
 
-  async function enqueue(sessionId: string, text: string, delivery: DeliveryMode): Promise<QueueItemDto> {
+  const rowToQueueItem = (r: QueueRow): QueueItemDto => {
+    const attachments = parseAttachments(r.attachments);
+    return {
+      id: r.queue_id,
+      sessionId: r.session_id,
+      position: Number(r.position),
+      text: r.text,
+      delivery: (["normal", "steer", "queue", "interrupt"].includes(r.delivery) ? r.delivery : "queue") as DeliveryMode,
+      createdAt: Number(r.created_at),
+      ...(attachments ? { attachments } : {}),
+    };
+  };
+
+  async function enqueue(sessionId: string, text: string, delivery: DeliveryMode, attachments?: AttachmentRef[]): Promise<QueueItemDto> {
     const queueId = randomUUID();
     const createdAt = Date.now();
     let position = 0;
@@ -370,14 +390,17 @@ export function createStore(dbPath: string): Store {
         .get(sessionId) as { next: number };
       position = Number(row.next);
       db.prepare(
-        "INSERT INTO session_queue (queue_id, session_id, position, text, delivery, created_at) VALUES (?, ?, ?, ?, ?, ?)",
-      ).run(queueId, sessionId, position, text, delivery, createdAt);
+        "INSERT INTO session_queue (queue_id, session_id, position, text, delivery, created_at, attachments) VALUES (?, ?, ?, ?, ?, ?, ?)",
+      ).run(queueId, sessionId, position, text, delivery, createdAt, attachments?.length ? JSON.stringify(attachments) : null);
       db.exec("COMMIT");
     } catch (err) {
       db.exec("ROLLBACK");
       throw err;
     }
-    return { id: queueId, sessionId, position, text, delivery, createdAt };
+    return {
+      id: queueId, sessionId, position, text, delivery, createdAt,
+      ...(attachments?.length ? { attachments } : {}),
+    };
   }
 
   function queueList(sessionId: string): Promise<QueueItemDto[]> {
@@ -849,8 +872,64 @@ function rowToEvent(r: Row): SessionEvent {
 
 // ------------------------------------------------------------- deriveMessages
 
+export interface ActiveRewind {
+  markerSeq: number;
+  atSeq: number;
+  restoredText?: string;
+}
+
+/** Latest unresolved rewind marker. Replaced clears and redo clears both resolve it. */
+export function activeRewind(events: readonly SessionEvent[]): ActiveRewind | null {
+  let active: ActiveRewind | null = null;
+  for (const ev of events) {
+    if (ev.type === "session/rewound") {
+      const atSeq = Number((ev.data as { atSeq?: unknown }).atSeq);
+      if (Number.isSafeInteger(atSeq) && atSeq > 0) {
+        const restored = (ev.data as { restoredText?: unknown }).restoredText;
+        active = {
+          markerSeq: ev.seq,
+          atSeq,
+          ...(typeof restored === "string" ? { restoredText: restored } : {}),
+        };
+      }
+      continue;
+    }
+    if (ev.type === "session/rewind-cleared" && active) {
+      const rewindSeq = Number((ev.data as { rewindSeq?: unknown }).rewindSeq);
+      if (!Number.isSafeInteger(rewindSeq) || rewindSeq === active.markerSeq) active = null;
+    }
+  }
+  return active;
+}
+
 export function deriveMessages(events: SessionEvent[]): ModelMessage[] {
   const out: ModelMessage[] = [];
+  let visibleEvents: SessionEvent[] = [];
+  let hidden: { markerSeq: number; events: SessionEvent[] } | null = null;
+
+  // Rewinds splice model-visible history without mutating old rows. Redo
+  // restores the captured tail; a replacement clear permanently drops it and
+  // lets subsequent events form a new tail.
+  for (const ev of events) {
+    if (ev.type === "session/rewound") {
+      const atSeq = Number((ev.data as { atSeq?: unknown }).atSeq);
+      if (Number.isSafeInteger(atSeq) && atSeq > 0) {
+        hidden = { markerSeq: ev.seq, events: visibleEvents.filter((item) => item.seq >= atSeq) };
+        visibleEvents = visibleEvents.filter((item) => item.seq < atSeq);
+      }
+      continue;
+    }
+    if (ev.type === "session/rewind-cleared" && hidden) {
+      const d = ev.data as { rewindSeq?: unknown; replaced?: unknown };
+      const markerMatches = d.rewindSeq === undefined || Number(d.rewindSeq) === hidden.markerSeq;
+      if (markerMatches) {
+        if (d.replaced !== true) visibleEvents.push(...hidden.events);
+        hidden = null;
+      }
+      continue;
+    }
+    visibleEvents.push(ev);
+  }
 
   const pushText = (role: "user" | "assistant" | "tool", text: string) => {
     const last = out[out.length - 1];
@@ -858,6 +937,30 @@ export function deriveMessages(events: SessionEvent[]): ModelMessage[] {
       last.parts.push({ type: "text", text });
     } else {
       out.push({ role, parts: [{ type: "text", text }] });
+    }
+  };
+
+  // Attachments ride the same user message so replay/fork keeps them adjacent
+  // to the text the model saw. Malformed rows are skipped, never thrown.
+  const pushUserFiles = (attachments: unknown) => {
+    if (!Array.isArray(attachments)) return;
+    const last = out[out.length - 1];
+    if (!last || last.role !== "user") return;
+    for (const raw of attachments) {
+      const a = raw as { name?: unknown; mime?: unknown; path?: unknown; url?: unknown; range?: unknown };
+      if (typeof a?.name !== "string" || typeof a?.mime !== "string") continue;
+      const range = Array.isArray(a.range) && a.range.length === 2
+        && Number.isSafeInteger(a.range[0]) && Number.isSafeInteger(a.range[1])
+        ? [Number(a.range[0]), Number(a.range[1])] as [number, number]
+        : undefined;
+      last.parts.push({
+        type: "file",
+        name: a.name,
+        mime: a.mime,
+        ...(typeof a.path === "string" ? { path: a.path } : {}),
+        ...(typeof a.url === "string" ? { url: a.url } : {}),
+        ...(range ? { range } : {}),
+      });
     }
   };
 
@@ -897,7 +1000,7 @@ export function deriveMessages(events: SessionEvent[]): ModelMessage[] {
     }
   };
 
-  for (const ev of events) {
+  for (const ev of visibleEvents) {
     if (!MODEL_VISIBLE_TYPES.includes(ev.type as (typeof MODEL_VISIBLE_TYPES)[number])) {
       continue;
     }
@@ -907,6 +1010,7 @@ export function deriveMessages(events: SessionEvent[]): ModelMessage[] {
     switch (ev.type) {
       case "user/message":
         pushText("user", String(d.text ?? ""));
+        pushUserFiles(d.attachments);
         break;
       case "assistant/message": {
         const text = String(d.text ?? "");

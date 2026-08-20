@@ -4,13 +4,21 @@ import { useEffect, useState, type CSSProperties } from "react";
 import { PERSONAS, PLUGIN_LABELS, applyPersona, isCustomized, pluginOn, togglePlugin, usePrefs, type PersonaId, type PluginId } from "../../prefs.ts";
 import { setOverlay, setActiveView, updateSettings, useStore } from "../../store.ts";
 import { setUiSettings, useUiSettings } from "../../uiPrefs.ts";
+import { groupQuotaWindows, setGroupCollapsed, setProviderHidden, useUsagePrefs } from "../../usagePrefs.ts";
 import { requestNotifyPermission } from "../../notify.ts";
+import { disablePush, enablePush, pushSubscription, pushUnsupportedReason } from "../../push.ts";
 import { api, type GitStatus, type QuotaSnapshotDto, type QuotaWindowDto, type QuotaPaceDto } from "../../api.ts";
 import { fmtCost, fmtTokens } from "../../format.ts";
 import { EmptyState, PageHead, Row, Seg, Toggle } from "./parts.tsx";
 import { refreshProfiles, useProfiles } from "../../profiles.ts";
 import AgentProfileForm from "../AgentProfileForm.tsx";
 import ProjectFolderDialog from "../ProjectFolderDialog.tsx";
+import { parseMcpServersJson, type McpImportResult } from "../../mcpImport.ts";
+import {
+  PRESET_THEMES, addCustomTheme, applyTheme, loadCustomThemes, parseThemeJson,
+  reapplyTheme, removeCustomTheme, resolveTheme, type ThemeSpec,
+} from "../../theme.ts";
+import type { AssistSettingsDto } from "../../api.ts";
 import type { AgentProfile, InstalledPluginDto, McpServerDto, McpTransport, SystemInfoDto } from "@polyth/contracts";
 
 function ThemeCard({
@@ -18,14 +26,25 @@ function ThemeCard({
   name,
   colors,
   onPick,
+  onPreview,
+  onPreviewEnd,
 }: {
   active: boolean;
   name: string;
   colors: { bg: string; side: string; line: string; accent: string; soft: string };
   onPick: () => void;
+  onPreview?: () => void;
+  onPreviewEnd?: () => void;
 }) {
   return (
-    <button className={`theme-card ${active ? "active" : ""}`} onClick={onPick}>
+    <button
+      className={`theme-card ${active ? "active" : ""}`}
+      onClick={onPick}
+      onMouseEnter={onPreview}
+      onMouseLeave={onPreviewEnd}
+      onFocus={onPreview}
+      onBlur={onPreviewEnd}
+    >
       <div className="theme-prev" style={{ background: colors.bg }}>
         <div className="theme-prev-side" style={{ background: colors.side, borderRight: `1px solid ${colors.line}` }} />
         <div className="theme-prev-main">
@@ -86,6 +105,107 @@ export function GeneralPage() {
   );
 }
 
+const themeCardColors = (t: ThemeSpec) => ({
+  bg: t.tokens.bg, side: t.tokens.panel, line: t.tokens.borderSoft, accent: t.tokens.accent, soft: t.tokens.raised,
+});
+
+const EXAMPLE_THEME_HINT = 'Paste theme JSON: { "id": "my-theme", "name": "My theme", "appearance": "dark", "tokens": { "bg": "#101010", … } }';
+
+// F15: preset grid + system-follow + custom JSON themes with hover preview.
+// Hover applies the candidate tokens live; leaving re-applies the saved pick.
+function ThemeSection() {
+  const settings = useStore((s) => s.settings);
+  const [customs, setCustoms] = useState<ThemeSpec[]>(() => loadCustomThemes());
+  const [json, setJson] = useState("");
+  const [jsonError, setJsonError] = useState("");
+  const preview = (t: ThemeSpec) => applyTheme(t);
+  const endPreview = () => reapplyTheme();
+  const importJson = () => {
+    const res = parseThemeJson(json);
+    if (!res.ok) { setJsonError(res.error); return; }
+    setCustoms(addCustomTheme(res.theme));
+    setJson("");
+    setJsonError("");
+    updateSettings({ theme: res.theme.id });
+  };
+  const copyCurrent = () => {
+    const current = resolveTheme(settings.theme, { custom: customs, systemDark: !document.documentElement.classList.contains("light") });
+    const draft = { ...current, id: "my-theme", name: "My theme" };
+    void navigator.clipboard?.writeText(JSON.stringify(draft, null, 2));
+  };
+  const removeCustom = (id: string) => {
+    setCustoms(removeCustomTheme(id));
+    if (settings.theme === id) updateSettings({ theme: "dark" });
+  };
+  const systemPreview = resolveTheme("system", {
+    systemDark: typeof matchMedia === "function" ? matchMedia("(prefers-color-scheme: dark)").matches : true,
+  });
+  return (
+    <div className="set-sec" data-settings-item="appearance.theme">
+      <div className="set-sec-title">Theme</div>
+      <div className="theme-grid">
+        {PRESET_THEMES.map((t) => (
+          <ThemeCard
+            key={t.id}
+            active={settings.theme === t.id}
+            name={t.name}
+            colors={themeCardColors(t)}
+            onPick={() => updateSettings({ theme: t.id })}
+            onPreview={() => preview(t)}
+            onPreviewEnd={endPreview}
+          />
+        ))}
+        <ThemeCard
+          active={settings.theme === "system"}
+          name="System"
+          colors={themeCardColors(systemPreview)}
+          onPick={() => updateSettings({ theme: "system" })}
+          onPreview={() => preview(systemPreview)}
+          onPreviewEnd={endPreview}
+        />
+        {customs.map((t) => (
+          <ThemeCard
+            key={t.id}
+            active={settings.theme === t.id}
+            name={t.name}
+            colors={themeCardColors(t)}
+            onPick={() => updateSettings({ theme: t.id })}
+            onPreview={() => preview(t)}
+            onPreviewEnd={endPreview}
+          />
+        ))}
+      </div>
+      {customs.length > 0 && (
+        <div className="theme-custom-list">
+          {customs.map((t) => (
+            <div key={t.id} className="theme-custom-row">
+              <span className="mono">{t.id}</span>
+              <span className="muted">{t.name} · {t.appearance}</span>
+              <span className="header-spacer" />
+              <button className="small-btn danger-btn" onClick={() => removeCustom(t.id)}>Delete</button>
+            </div>
+          ))}
+        </div>
+      )}
+      <div className="theme-import">
+        <textarea
+          className="theme-import-input"
+          rows={3}
+          placeholder={EXAMPLE_THEME_HINT}
+          value={json}
+          onChange={(e) => { setJson(e.target.value); setJsonError(""); }}
+          aria-label="Custom theme JSON"
+        />
+        <div className="theme-import-actions">
+          <button className="small-btn" disabled={!json.trim()} onClick={importJson}>Import theme</button>
+          <button className="small-btn" onClick={copyCurrent} title="Copy the active theme as JSON to edit">Copy current as JSON</button>
+        </div>
+        {jsonError && <div className="form-error">{jsonError}</div>}
+      </div>
+    </div>
+  );
+}
+
 export function AppearancePage() {
   const ui = useUiSettings();
   const settings = useStore((s) => s.settings);
@@ -97,23 +217,7 @@ export function AppearancePage() {
   return (
     <>
       <PageHead title="Appearance" blurb="Visual preferences, saved in this browser and applied immediately." />
-      <div className="set-sec" data-settings-item="appearance.theme">
-        <div className="set-sec-title">Theme</div>
-        <div className="theme-grid">
-          <ThemeCard
-            active={settings.theme === "dark"}
-            name="Ember Dark"
-            colors={{ bg: "#121110", side: "#191816", line: "#2a2723", accent: "#f49b5b", soft: "#3a352f" }}
-            onPick={() => updateSettings({ theme: "dark" })}
-          />
-          <ThemeCard
-            active={settings.theme === "light"}
-            name="Parchment"
-            colors={{ bg: "#faf8f4", side: "#f1ede6", line: "#e2dcd2", accent: "#d9822b", soft: "#ddd7cc" }}
-            onPick={() => updateSettings({ theme: "light" })}
-          />
-        </div>
-      </div>
+      <ThemeSection />
       <Row label="Density" hint="Compact tightens paddings and font sizes across panels." itemId="appearance.density">
         <Seg value={ui.density} options={[["comfortable", "Comfortable"], ["compact", "Compact"]]} onChange={(density) => { setUiSettings({ density }); updateSettings({ density }); }} />
       </Row>
@@ -154,6 +258,12 @@ export function AppearancePage() {
 export function ChatPage() {
   const ui = useUiSettings();
   const settings = useStore((s) => s.settings);
+  // F9 hard switch lives server-side: disabled means nothing is generated at all
+  const [assist, setAssist] = useState<AssistSettingsDto | null>(null);
+  useEffect(() => { void api.assistSettings().then(setAssist).catch(() => setAssist(null)); }, []);
+  const saveAssist = (patch: Partial<AssistSettingsDto>) => {
+    void api.assistSettingsSave(patch).then(setAssist).catch(() => {});
+  };
   return (
     <>
       <PageHead title="Chat" blurb="Conversation layout and delivery preferences." />
@@ -169,6 +279,28 @@ export function ChatPage() {
       <Row label="Send on Enter" hint="When off, Enter inserts a newline and Mod+Enter sends. / for commands, # for snippets, @ to attach files." itemId="chat.sendOnEnter">
         <Toggle on={settings.sendOnEnter} onChange={(sendOnEnter) => updateSettings({ sendOnEnter })} label="Send on Enter" />
       </Row>
+      {assist && (
+        <Row
+          label="Idle recap & suggestion"
+          hint="After a session goes quiet, the small model writes a ≤20-word recap and one suggested next prompt. Spends tokens only while enabled; off by default."
+          itemId="chat.assist"
+        >
+          <Toggle on={assist.enabled} onChange={(enabled) => saveAssist({ enabled })} label="Idle recap" />
+        </Row>
+      )}
+      {assist?.enabled && (
+        <Row label="Quiet time" hint="Seconds of inactivity after a reply before the recap is generated (10–3600).">
+          <div className="editor-font-control">
+            <input
+              type="number" min={10} max={3600} value={assist.idleSeconds}
+              aria-label="Assist quiet time in seconds"
+              onChange={(e) => setAssist({ ...assist, idleSeconds: Number(e.target.value) })}
+              onBlur={(e) => saveAssist({ idleSeconds: Number(e.target.value) })}
+            />
+            <span className="muted">s</span>
+          </div>
+        </Row>
+      )}
     </>
   );
 }
@@ -245,6 +377,59 @@ export function NotificationsPage() {
           <button className="small-btn" onClick={requestNotifyPermission}>Grant permission</button>
         </Row>
       )}
+      <PushRow />
+    </>
+  );
+}
+
+/** F18: web push toggle — notifications keep arriving after the tab closes.
+ *  Subscription state lives in the browser's push manager, not localStorage. */
+function PushRow() {
+  const unsupported = pushUnsupportedReason();
+  const [on, setOn] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const [tested, setTested] = useState("");
+  useEffect(() => {
+    void pushSubscription().then((s) => setOn(!!s)).catch(() => {});
+  }, []);
+
+  const toggle = (v: boolean) => {
+    if (busy) return;
+    setBusy(true);
+    setErr("");
+    void (v ? enablePush() : disablePush())
+      .then(() => setOn(v))
+      .catch((e) => setErr(e instanceof Error ? e.message : String(e)))
+      .finally(() => setBusy(false));
+  };
+
+  return (
+    <>
+      <Row
+        label="Push notifications"
+        hint={unsupported ?? "Delivered by the browser's push service even when this tab is closed. Clicking opens the session."}
+        itemId="notifications.push"
+      >
+        {unsupported
+          ? <span className="tag">unavailable</span>
+          : <Toggle on={on} onChange={toggle} label="Push notifications" />}
+      </Row>
+      {on && !unsupported && (
+        <Row label="Test push" hint="Sends a test notification through the push service (hide the tab to see it).">
+          <button
+            className="small-btn"
+            disabled={busy}
+            onClick={() => {
+              setTested("");
+              void api.pushTest().then((r) => setTested(`sent to ${r.sent} device${r.sent === 1 ? "" : "s"}`))
+                .catch((e) => setErr(e instanceof Error ? e.message : String(e)));
+            }}
+          >Send test</button>
+          {tested && <span className="muted">{tested}</span>}
+        </Row>
+      )}
+      {err && <div className="muted" role="alert">{err}</div>}
     </>
   );
 }
@@ -357,7 +542,28 @@ function paceText(pace: QuotaPaceDto | null, win: QuotaWindowDto): string {
   return bits.join(" · ");
 }
 
+function QuotaWindowRow({ w, pace }: { w: QuotaWindowDto; pace: QuotaPaceDto | null }) {
+  const frac = w.limit > 0 ? Math.min(1, w.used / w.limit) : 0;
+  return (
+    <div className="quota-window">
+      <div className="quota-window-head">
+        <span>{w.label}</span>
+        <span className="mono">{fmtQuota(w.used, w.unit)} / {fmtQuota(w.limit, w.unit)}</span>
+      </div>
+      <div className="quota-progress" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(frac * 100)} aria-label={w.label}>
+        <div className={`quota-progress-fill ${pace?.pace ?? ""}`} style={{ width: `${frac * 100}%` }} />
+      </div>
+      {pace && <div className="quota-pace">{paceText(pace, w)}</div>}
+      {w.resetsAt !== undefined && <div className="muted" style={{ fontSize: 11 }}>resets {new Date(w.resetsAt).toLocaleString()}</div>}
+    </div>
+  );
+}
+
 function QuotaCard({ snap, onRefresh }: { snap: QuotaSnapshotDto; onRefresh: (id: string) => void }) {
+  const prefs = useUsagePrefs();
+  // F13: windows grouped by model family; groups collapse and remember it.
+  const groups = groupQuotaWindows(snap.windows);
+  const grouped = groups.some((g) => g.family !== null);
   return (
     <div className={`quota-card ${snap.stale ? "quota-stale" : ""}`}>
       <div className="quota-card-head">
@@ -369,20 +575,23 @@ function QuotaCard({ snap, onRefresh }: { snap: QuotaSnapshotDto; onRefresh: (id
         <button className="small-btn" onClick={() => onRefresh(snap.providerId)}>Refresh</button>
       </div>
       {snap.stale && snap.error && <div className="quota-error">{snap.error.message}</div>}
-      {snap.windows.map((w) => {
-        const frac = w.limit > 0 ? Math.min(1, w.used / w.limit) : 0;
-        const pace = snap.pace[w.id] ?? null;
+      {groups.map((g) => {
+        const key = `${snap.providerId}/${g.family ?? "general"}`;
+        const collapsed = grouped && prefs.collapsedGroups.includes(key);
         return (
-          <div key={w.id} className="quota-window">
-            <div className="quota-window-head">
-              <span>{w.label}</span>
-              <span className="mono">{fmtQuota(w.used, w.unit)} / {fmtQuota(w.limit, w.unit)}</span>
-            </div>
-            <div className="quota-progress" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(frac * 100)} aria-label={w.label}>
-              <div className={`quota-progress-fill ${pace?.pace ?? ""}`} style={{ width: `${frac * 100}%` }} />
-            </div>
-            {pace && <div className="quota-pace">{paceText(pace, w)}</div>}
-            {w.resetsAt !== undefined && <div className="muted" style={{ fontSize: 11 }}>resets {new Date(w.resetsAt).toLocaleString()}</div>}
+          <div key={key} className="quota-group">
+            {grouped && (
+              <button
+                className="quota-group-head"
+                aria-expanded={!collapsed}
+                onClick={() => setGroupCollapsed(key, !collapsed)}
+              >
+                <span className="quota-group-arrow">{collapsed ? "▸" : "▾"}</span>
+                <span>{g.label}</span>
+                <span className="muted">{g.windows.length}</span>
+              </button>
+            )}
+            {!collapsed && g.windows.map((w) => <QuotaWindowRow key={w.id} w={w} pace={snap.pace[w.id] ?? null} />)}
           </div>
         );
       })}
@@ -393,6 +602,7 @@ function QuotaCard({ snap, onRefresh }: { snap: QuotaSnapshotDto; onRefresh: (id
 
 function QuotaSection() {
   const [snaps, setSnaps] = useState<QuotaSnapshotDto[]>([]);
+  const prefs = useUsagePrefs();
   const reload = () => void api.usageQuotas().then(setSnaps);
   useEffect(() => {
     reload();
@@ -400,6 +610,7 @@ function QuotaSection() {
     return () => clearInterval(t);
   }, []);
   const refresh = (id: string) => void api.usageQuotasRefresh(id).then(reload).catch(reload);
+  const visible = snaps.filter((s) => !prefs.hiddenProviders.includes(s.providerId));
   return (
     <>
       <div className="stat-label">Provider quotas</div>
@@ -407,8 +618,25 @@ function QuotaSection() {
         <EmptyState title="No quota providers configured" body="Provider quota adapters are registered on the server; credentials never reach the browser." />
       )}
       {snaps.length > 0 && (
+        <div className="quota-visibility">
+          {snaps.map((s) => (
+            <label key={s.providerId} className="plugin-toggle">
+              <input
+                type="checkbox"
+                checked={!prefs.hiddenProviders.includes(s.providerId)}
+                onChange={(e) => setProviderHidden(s.providerId, !e.target.checked)}
+              />
+              {s.providerId}
+            </label>
+          ))}
+        </div>
+      )}
+      {snaps.length > 0 && visible.length === 0 && (
+        <div className="muted" style={{ fontSize: 12 }}>All providers hidden — tick one to show its card.</div>
+      )}
+      {visible.length > 0 && (
         <div className="quota-grid">
-          {snaps.map((s) => <QuotaCard key={s.providerId} snap={s} onRefresh={refresh} />)}
+          {visible.map((s) => <QuotaCard key={s.providerId} snap={s} onRefresh={refresh} />)}
         </div>
       )}
     </>
@@ -582,14 +810,20 @@ export function AgentsPage() {
   );
 }
 
-function McpServerForm({ onDone }: { onDone: () => void }) {
-  const [name, setName] = useState("");
-  const [kind, setKind] = useState<"stdio" | "http">("stdio");
-  const [command, setCommand] = useState("");
-  const [args, setArgs] = useState("");
-  const [url, setUrl] = useState("");
+function McpServerForm({ existing, onDone }: { existing?: McpServerDto; onDone: () => void }) {
+  const [name, setName] = useState(existing?.name ?? "");
+  const [kind, setKind] = useState<"stdio" | "http">(existing?.transport.kind ?? "stdio");
+  const [command, setCommand] = useState(existing?.transport.kind === "stdio" ? existing.transport.command : "");
+  const [args, setArgs] = useState(existing?.transport.kind === "stdio" ? existing.transport.args.join(" ") : "");
+  const [url, setUrl] = useState(existing?.transport.kind === "http" ? existing.transport.url : "");
   // Env keys / header names with values entered once; values are write-only.
-  const [secretRows, setSecretRows] = useState<Array<{ key: string; value: string }>>([]);
+  // Editing prefills the key names with EMPTY values — stored values are never
+  // echoed back; leaving a value blank keeps the stored one.
+  const [secretRows, setSecretRows] = useState<Array<{ key: string; value: string }>>(() => {
+    if (!existing) return [];
+    const keys = existing.transport.kind === "stdio" ? existing.transport.envKeys : existing.transport.headersSecretRefs;
+    return keys.map((key) => ({ key, value: "" }));
+  });
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -603,7 +837,14 @@ function McpServerForm({ onDone }: { onDone: () => void }) {
       const transport: McpTransport = kind === "stdio"
         ? { kind: "stdio", command: command.trim(), args: args.trim() ? args.trim().split(/\s+/) : [], envKeys: keys }
         : { kind: "http", url: url.trim(), headersSecretRefs: keys };
-      await api.mcpCreate({ name: name.trim(), transport, ...(Object.keys(secrets).length ? { secrets } : {}) });
+      if (existing) {
+        await api.mcpUpdate(existing.id, {
+          name: name.trim(), transport,
+          ...(Object.keys(secrets).length ? { secrets } : {}),
+        }, existing.revision);
+      } else {
+        await api.mcpCreate({ name: name.trim(), transport, ...(Object.keys(secrets).length ? { secrets } : {}) });
+      }
       onDone();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -644,8 +885,81 @@ function McpServerForm({ onDone }: { onDone: () => void }) {
       {error && <div className="form-error">{error}</div>}
       <div className="mcp-form-row">
         <button className="small-btn" disabled={busy || !name.trim() || (kind === "stdio" ? !command.trim() : !url.trim())} onClick={() => void submit()}>
-          Add server
+          {existing ? "Save changes" : "Add server"}
         </button>
+        {existing && <button className="small-btn" disabled={busy} onClick={onDone}>Cancel</button>}
+      </div>
+    </div>
+  );
+}
+
+/** F10: paste an mcpServers JSON block, preview the mapped entries, then save. */
+function McpImportForm({ existingNames, onDone }: { existingNames: string[]; onDone: () => void }) {
+  const [text, setText] = useState("");
+  const [preview, setPreview] = useState<McpImportResult | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [results, setResults] = useState<string[]>([]);
+
+  const doImport = async () => {
+    if (!preview) return;
+    setBusy(true);
+    const out: string[] = [];
+    for (const entry of preview.entries) {
+      try {
+        await api.mcpCreate({
+          name: entry.name, transport: entry.transport,
+          ...(entry.secrets ? { secrets: entry.secrets } : {}),
+          ...(entry.enabled === false ? { enabled: false } : {}),
+        });
+        out.push(`✓ ${entry.name}`);
+      } catch (e) {
+        out.push(`✗ ${entry.name}: ${e instanceof Error ? e.message : String(e)}`);
+      }
+      setResults([...out]);
+    }
+    setBusy(false);
+    if (out.every((line) => line.startsWith("✓"))) onDone();
+  };
+
+  return (
+    <div className="mcp-form" data-settings-item="mcp.import">
+      <div className="stat-label">Import JSON <span className="muted">(mcpServers block — Claude or OpenCode shape; env/header values become write-only secrets)</span></div>
+      <textarea
+        rows={6}
+        className="mono"
+        placeholder={'{\n  "mcpServers": {\n    "my-server": { "command": "npx", "args": ["-y", "some-mcp"], "env": { "API_KEY": "…" } }\n  }\n}'}
+        value={text}
+        onChange={(e) => { setText(e.target.value); setPreview(null); setResults([]); }}
+      />
+      {preview && (
+        <div className="mcp-import-preview">
+          {preview.entries.map((entry) => {
+            const dup = existingNames.includes(entry.name);
+            const secretKeys = entry.transport.kind === "stdio" ? entry.transport.envKeys : entry.transport.headersSecretRefs;
+            return (
+              <div key={entry.name} className="set-row-hint mono">
+                {dup ? "⚠" : "+"} {entry.name} · {entry.transport.kind === "stdio"
+                  ? `${entry.transport.command} ${entry.transport.args.join(" ")}`.trim()
+                  : entry.transport.url}
+                {secretKeys.length > 0 && <span className="secret-redacted"> · secrets: {secretKeys.join(", ")}</span>}
+                {dup && <span> — name already exists, will fail</span>}
+              </div>
+            );
+          })}
+          {preview.errors.map((e, i) => <div key={i} className="form-error">{e}</div>)}
+        </div>
+      )}
+      {results.map((line, i) => (
+        <div key={i} className={line.startsWith("✗") ? "form-error" : "set-row-hint"}>{line}</div>
+      ))}
+      <div className="mcp-form-row">
+        <button className="small-btn" disabled={busy || !text.trim()} onClick={() => setPreview(parseMcpServersJson(text))}>
+          Preview
+        </button>
+        <button className="small-btn" disabled={busy || !preview || preview.entries.length === 0} onClick={() => void doImport()}>
+          {busy ? "Importing…" : `Import ${preview?.entries.length ?? 0} server${(preview?.entries.length ?? 0) === 1 ? "" : "s"}`}
+        </button>
+        <button className="small-btn" disabled={busy} onClick={onDone}>Cancel</button>
       </div>
     </div>
   );
@@ -654,12 +968,14 @@ function McpServerForm({ onDone }: { onDone: () => void }) {
 export function McpPage() {
   const [servers, setServers] = useState<McpServerDto[]>([]);
   const [adding, setAdding] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [testMsg, setTestMsg] = useState<Record<string, string>>({});
   const refresh = () => void api.mcpList().then(setServers);
   useEffect(() => { refresh(); }, []);
 
-  const test = async (s: McpServerDto) => {
-    const r = await api.mcpTest(s.id).catch((e) => ({ ok: false, message: e instanceof Error ? e.message : String(e) }));
+  const probe = async (s: McpServerDto) => {
+    const r = await api.mcpProbe(s.id).catch((e) => ({ ok: false, message: e instanceof Error ? e.message : String(e) }));
     setTestMsg((m) => ({ ...m, [s.id]: `${r.ok ? "✓" : "✗"} ${r.message}` }));
     refresh();
   };
@@ -671,7 +987,9 @@ export function McpPage() {
         {servers.length === 0 && !adding && (
           <EmptyState title="No MCP servers configured" body="Add a stdio or HTTP server; the backend adapter applies the configuration." />
         )}
-        {servers.map((s) => (
+        {servers.map((s) => editingId === s.id ? (
+          <McpServerForm key={s.id} existing={s} onDone={() => { setEditingId(null); refresh(); }} />
+        ) : (
           <div key={s.id} className="set-row">
             <div className="set-row-text">
               <div className="set-row-label">{s.name}</div>
@@ -690,7 +1008,8 @@ export function McpPage() {
             </div>
             <div className="set-row-control">
               <span className={`tag mcp-status ${s.status}`}>{s.status}</span>
-              <button className="small-btn" onClick={() => void test(s)}>Test</button>
+              <button className="small-btn" title="Check reachability and store the result" onClick={() => void probe(s)}>Probe</button>
+              <button className="small-btn" onClick={() => setEditingId(s.id)}>Edit</button>
               <button className="small-btn" onClick={() => void api.mcpUpdate(s.id, { enabled: !s.enabled }, s.revision).then(refresh)}>
                 {s.enabled ? "Disable" : "Enable"}
               </button>
@@ -701,9 +1020,14 @@ export function McpPage() {
           </div>
         ))}
       </div>
-      {adding
-        ? <McpServerForm onDone={() => { setAdding(false); refresh(); }} />
-        : <button className="small-btn" onClick={() => setAdding(true)}>+ MCP server</button>}
+      {adding && <McpServerForm onDone={() => { setAdding(false); refresh(); }} />}
+      {importing && <McpImportForm existingNames={servers.map((s) => s.name)} onDone={() => { setImporting(false); refresh(); }} />}
+      {!adding && !importing && (
+        <div className="mcp-form-row">
+          <button className="small-btn" onClick={() => setAdding(true)}>+ MCP server</button>
+          <button className="small-btn" onClick={() => setImporting(true)}>Import JSON…</button>
+        </div>
+      )}
     </>
   );
 }

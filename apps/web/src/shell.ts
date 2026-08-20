@@ -2,11 +2,11 @@ import { HOTKEY_ACTIONS, matchAction, formatCombo, type HotkeyAction } from "@po
 import { registerCommand } from "./commands.ts";
 import { createSession, exportSessionMarkdown, forkSession, abortSession } from "./init.ts";
 import { MOD } from "./format.ts";
-import { PERSONAS, applyPersona, pluginOn, type PersonaId } from "./prefs.ts";
+import { PERSONAS, applyPersona, pluginOn, type PersonaId, type PluginId } from "./prefs.ts";
 import { getKeymap } from "./hotkeys.ts";
 import { readLastReply, stopSpeaking } from "./voice.tsx";
 import {
-  getState, openPalette, openSettingsPage, setActiveView, setOverlay, toggleRailPlugin,
+  getState, openPalette, openSettingsPage, openWorktreeSessionDialog, setActiveView, setOverlay, toggleRailPlugin,
   type AppView, type RailPlugin,
 } from "./store.ts";
 import {
@@ -20,9 +20,9 @@ const VIEW: Array<[AppView, string]> = [
   ["fusion", "Fuse models"], ["walkthrough", "Guided walkthrough"], ["preview", "Live preview"],
   ["git", "Git & worktrees"], ["terminal", "Terminal"], ["schedule", "Scheduled prompts"], ["github", "GitHub issues & PRs"],
 ];
-const RAIL: Array<[RailPlugin, string]> = [
-  ["files", "Files panel"], ["changes", "Changes panel"], ["context", "Context panel"],
-  ["usage", "Usage panel"], ["events", "Event log"],
+const RAIL: Array<[RailPlugin, string, PluginId]> = [
+  ["files", "Files panel", "files"], ["changes", "Changes panel", "git"], ["context", "Context panel", "context"],
+  ["usage", "Usage panel", "usage"], ["events", "Event log", "events"],
 ];
 
 const IS_MAC = MOD === "⌘";
@@ -81,6 +81,15 @@ export function installShell(): void {
     run: () => { const id = getState().activeProjectId; if (id) void createSession(id); },
   });
   registerCommand({
+    id: "cmd.newWorktree", label: "New session in worktree", group: "Session",
+    keywords: ["branch", "isolated", "checkout"],
+    when: () => !!getState().activeProjectId && pluginOn("git"),
+    run: () => {
+      const id = getState().activeProjectId;
+      if (id) openWorktreeSessionDialog(id);
+    },
+  });
+  registerCommand({
     id: "cmd.fork", label: "Fork session", group: "Session",
     when: () => !!getState().activeSessionId,
     run: () => { const id = getState().activeSessionId; if (id) void forkSession(id); },
@@ -111,10 +120,10 @@ export function installShell(): void {
       run: () => setActiveView(view),
     });
   }
-  for (const [id, label] of RAIL) {
+  for (const [id, label, plugin] of RAIL) {
     registerCommand({
       id: `rail.${id}`, label, group: "Panels",
-      when: () => pluginOn(id === "changes" ? "git" : id),
+      when: () => pluginOn(plugin),
       run: () => toggleRailPlugin(id),
     });
   }

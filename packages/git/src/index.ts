@@ -42,6 +42,13 @@ export interface GitGraphCommit extends GitCommit {
   refs: string[];
 }
 
+export interface GitStash {
+  ref: string;
+  sha: string;
+  message: string;
+  date: string;
+}
+
 export interface GitBranches {
   current: string | null;
   branches: Array<{ name: string; current: boolean; remote?: string }>;
@@ -63,7 +70,8 @@ export interface WorktreeService {
 export interface GitService {
   isRepo(root: string): Promise<boolean>;
   status(root: string): Promise<GitStatus>;
-  diff(root: string, opts?: { path?: string; staged?: boolean }): Promise<{ path: string | null; diff: string }>;
+  diff(root: string, opts?: { path?: string; staged?: boolean; ignoreWhitespace?: boolean }): Promise<{ path: string | null; diff: string }>;
+  show(root: string, sha: string, opts?: { ignoreWhitespace?: boolean }): Promise<{ sha: string; diff: string }>;
   /** All uncommitted changes (staged + unstaged) against HEAD; plain `git diff` on a fresh repo. */
   diffHead(root: string): Promise<string>;
   /** `git diff base...head` — the walkthrough snapshot for a commit range. */
@@ -78,6 +86,13 @@ export interface GitService {
   log(root: string, limit?: number): Promise<GitCommit[]>;
   /** History with parent SHAs and ref decorations, paginated for the graph view. */
   graph(root: string, opts?: { limit?: number; skip?: number }): Promise<GitGraphCommit[]>;
+  stashList(root: string): Promise<GitStash[]>;
+  stashPush(root: string, message?: string): Promise<{ created: boolean }>;
+  stashApply(root: string, ref?: string): Promise<void>;
+  stashDrop(root: string, ref?: string): Promise<void>;
+  fetch(root: string, remote?: string): Promise<void>;
+  pull(root: string, remote?: string): Promise<void>;
+  push(root: string, remote?: string): Promise<void>;
   worktrees: WorktreeService;
 }
 
@@ -126,7 +141,12 @@ export function createGitService(opts: GitServiceOptions = {}): GitService {
 
   const run = (root: string, args: string[], allowFail = false): Promise<RunResult> =>
     new Promise((res, rej) => {
-      execFile(bin, args, { cwd: root, timeout, maxBuffer: 32 * 1024 * 1024 }, (err, stdout, stderr) => {
+      execFile(bin, args, {
+        cwd: root,
+        timeout,
+        maxBuffer: 32 * 1024 * 1024,
+        env: { ...process.env, GIT_TERMINAL_PROMPT: "0" },
+      }, (err, stdout, stderr) => {
         const code = (err as (Error & { code?: number }) | null)?.code ?? 0;
         if (err && !allowFail) {
           rej(Object.assign(new Error(shortErr(String(stderr || err.message))), { cause: stderr, code: "git-failed" }));
@@ -222,6 +242,7 @@ export function createGitService(opts: GitServiceOptions = {}): GitService {
     async diff(root, o = {}) {
       const path = o.path ?? null;
       const args = ["diff", "--no-color"];
+      if (o.ignoreWhitespace) args.push("--ignore-all-space");
       if (o.staged) args.push("--cached");
       if (path) args.push("--", path);
       const r = await run(root, args, true);
@@ -232,6 +253,17 @@ export function createGitService(opts: GitServiceOptions = {}): GitService {
       if (tracked) return { path, diff: "" };
       const untracked = await run(root, ["diff", "--no-color", "--no-index", "--", "/dev/null", path], true);
       return { path, diff: untracked.stdout };
+    },
+
+    async show(root, sha, o = {}) {
+      if (!/^[\w./~^{}@+-]{1,160}$/.test(sha) || sha.startsWith("-")) {
+        throw Object.assign(new Error("invalid commit ref"), { code: "invalid-input" });
+      }
+      const args = ["show", "--format=fuller", "--no-ext-diff", "--no-color"];
+      if (o.ignoreWhitespace) args.push("--ignore-all-space");
+      args.push(sha);
+      const r = await run(root, args);
+      return { sha, diff: r.stdout };
     },
 
     async diffHead(root) {
@@ -333,6 +365,48 @@ export function createGitService(opts: GitServiceOptions = {}): GitService {
           date: date ?? "",
         };
       });
+    },
+
+    async stashList(root) {
+      const r = await run(root, ["stash", "list", "--format=%gd%x1f%H%x1f%gs%x1f%aI"], true);
+      if (r.code !== 0) return [];
+      return r.stdout.split("\n").filter(Boolean).map((line) => {
+        const [ref, sha, message, date] = line.split("\x1f");
+        return { ref: ref ?? "", sha: sha ?? "", message: message ?? "", date: date ?? "" };
+      });
+    },
+
+    async stashPush(root, message) {
+      const args = ["stash", "push", "--include-untracked"];
+      const cleanMessage = message?.trim();
+      if (cleanMessage) args.push("-m", cleanMessage);
+      const r = await run(root, args);
+      return { created: !/No local changes to save/i.test(r.stdout) };
+    },
+
+    async stashApply(root, ref = "stash@{0}") {
+      if (!/^stash@\{\d+\}$/.test(ref)) throw Object.assign(new Error("invalid stash ref"), { code: "invalid-input" });
+      await run(root, ["stash", "apply", ref]);
+    },
+
+    async stashDrop(root, ref = "stash@{0}") {
+      if (!/^stash@\{\d+\}$/.test(ref)) throw Object.assign(new Error("invalid stash ref"), { code: "invalid-input" });
+      await run(root, ["stash", "drop", ref]);
+    },
+
+    async fetch(root, remote = "origin") {
+      if (!/^[\w.-]{1,120}$/.test(remote)) throw Object.assign(new Error("invalid remote"), { code: "invalid-input" });
+      await run(root, ["fetch", remote]);
+    },
+
+    async pull(root, remote = "origin") {
+      if (!/^[\w.-]{1,120}$/.test(remote)) throw Object.assign(new Error("invalid remote"), { code: "invalid-input" });
+      await run(root, ["pull", "--ff-only", remote]);
+    },
+
+    async push(root, remote = "origin") {
+      if (!/^[\w.-]{1,120}$/.test(remote)) throw Object.assign(new Error("invalid remote"), { code: "invalid-input" });
+      await run(root, ["push", remote]);
     },
 
     worktrees: {

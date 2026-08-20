@@ -11,12 +11,20 @@ import type {
 } from "@polyth/contracts";
 import { buildModel, type RenderModel } from "./reduce.ts";
 import { applySettingsToDom, loadSettings, saveSettings, type PolythSettings } from "./settings.ts";
+import { getRailPrefs, setRailLastOpen } from "./railPrefs.ts";
 
 export type AppView = "session" | "files" | "goals" | "multirun" | "fusion" | "walkthrough" | "preview" | "git" | "terminal" | "schedule" | "github";
-export type Overlay = "onboarding" | "project-picker" | "palette" | "search" | "settings" | null;
-export type RailPlugin = "files" | "changes" | "context" | "usage" | "events" | "knowledge";
+export type Overlay = "onboarding" | "project-picker" | "palette" | "search" | "settings" | "worktree-session" | null;
+/** Right-rail surface id (F17): a registry id such as "files" or a
+ *  plugin-contributed "slot:…" id — no longer a closed union. */
+export type RailPlugin = string;
 /** "all": commands+workspaces+files. "files": file-focused (Mod+P). */
 export type PaletteMode = "all" | "files";
+export interface WorktreeSessionRequest {
+  projectId: string;
+  /** Preselect an existing worktree when launched from its Git row. */
+  worktreePath?: string;
+}
 
 export interface AppState {
   projects: Project[];
@@ -31,6 +39,7 @@ export interface AppState {
   settings: PolythSettings;
   uiError: string | null;
   overlay: Overlay;
+  worktreeSessionRequest: WorktreeSessionRequest | null;
   paletteMode: PaletteMode;
   railPlugin: RailPlugin | null;
   moreOpen: boolean;
@@ -39,6 +48,8 @@ export interface AppState {
   editorFile: string | null;
   /** Requested cursor placement for the open file (file refs; go-to-line). */
   editorLocation: EditorLocation | null;
+  /** File requested by a changed-file jump into the Changes rail. */
+  gitDiffPath: string | null;
 }
 
 let state: AppState = {
@@ -54,12 +65,14 @@ let state: AppState = {
   settings: loadSettings(),
   uiError: null,
   overlay: null,
+  worktreeSessionRequest: null,
   paletteMode: "all",
-  railPlugin: null,
+  railPlugin: getRailPrefs().lastOpen, // F17: last-open surface survives reload
   moreOpen: false,
   sidebarOpen: false,
   editorFile: null,
   editorLocation: null,
+  gitDiffPath: null,
 };
 
 const listeners = new Set<() => void>();
@@ -109,7 +122,7 @@ export function activateProject(id: string | null): void {
   localStorage.setItem("polyth.activeProjectId", id ?? "");
   // Re-activating the current project must not drop the session or branch (UX-04).
   if (id === state.activeProjectId) return;
-  set({ activeProjectId: id, activeSessionId: null, gitBranch: "", editorFile: null, editorLocation: null });
+  set({ activeProjectId: id, activeSessionId: null, gitBranch: "", editorFile: null, editorLocation: null, gitDiffPath: null });
 }
 export function setActiveView(view: AppView): void {
   set({ activeView: view });
@@ -119,7 +132,19 @@ export function setGitBranch(branch: string): void {
 }
 export function setOverlay(overlay: Overlay): void {
   // Plain opens reset to the general palette; openPalette() picks the mode.
-  set({ overlay, moreOpen: false, ...(overlay === "palette" ? { paletteMode: "all" as PaletteMode } : {}) });
+  set({
+    overlay,
+    moreOpen: false,
+    ...(overlay === "palette" ? { paletteMode: "all" as PaletteMode } : {}),
+    ...(overlay !== "worktree-session" ? { worktreeSessionRequest: null } : {}),
+  });
+}
+export function openWorktreeSessionDialog(projectId: string, worktreePath?: string): void {
+  set({
+    overlay: "worktree-session",
+    worktreeSessionRequest: { projectId, ...(worktreePath ? { worktreePath } : {}) },
+    moreOpen: false,
+  });
 }
 /** Open the command palette in a specific mode (Mod+P = file-focused). */
 export function openPalette(mode: PaletteMode): void {
@@ -139,10 +164,20 @@ export function consumePendingSettingsPage(): string | null {
   return v;
 }
 export function setRailPlugin(railPlugin: RailPlugin | null): void {
+  setRailLastOpen(railPlugin);
   set({ railPlugin });
 }
 export function toggleRailPlugin(id: RailPlugin): void {
-  set({ railPlugin: state.railPlugin === id ? null : id });
+  const railPlugin = state.railPlugin === id ? null : id;
+  setRailLastOpen(railPlugin);
+  set({ railPlugin });
+}
+export function openChanges(path?: string): void {
+  setRailLastOpen("changes");
+  set({ railPlugin: "changes", ...(path !== undefined ? { gitDiffPath: path } : {}) });
+}
+export function setGitDiffPath(gitDiffPath: string | null): void {
+  set({ gitDiffPath });
 }
 export function setMoreOpen(moreOpen: boolean): void {
   set({ moreOpen });

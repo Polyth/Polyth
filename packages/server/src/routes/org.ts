@@ -38,9 +38,18 @@ export function orgRoutes(deps: {
     m = path.match(/^\/api\/sessions\/([^/]+)\/organize$/);
     if (m && method === "PATCH") {
       const b = await body();
+      let pinned: { position: number } | null | undefined;
+      if (b.pinned === null) pinned = null;
+      else if (b.pinned !== undefined) {
+        if (!b.pinned || typeof b.pinned !== "object" || typeof (b.pinned as { position?: unknown }).position !== "number") {
+          throw Object.assign(new Error("pinned must be null or { position }"), { code: "invalid-input" });
+        }
+        pinned = { position: (b.pinned as { position: number }).position };
+      }
       await sessions.organize?.(m[1]!, {
         ...(b.folderId !== undefined ? { folderId: b.folderId === null ? null : String(b.folderId) } : {}),
         ...(Array.isArray(b.labelIds) ? { labelIds: b.labelIds.map(String) } : {}),
+        ...(pinned !== undefined ? { pinned } : {}),
       });
       json(200, { ok: true });
       return true;

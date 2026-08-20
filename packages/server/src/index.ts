@@ -1,15 +1,15 @@
 // Polyth server boot. Composition root: kernel context + plugins + gateway.
-import { mkdirSync } from "node:fs";
+import { mkdirSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createContext } from "@polyth/kernel";
-import { createStore } from "@polyth/session";
+import { createStore, deriveMessages } from "@polyth/session";
 import { CAP, type AgentRuntime, type JsonObject, type RuntimeEvent, type SessionEvent, type SessionProjection, type WalkthroughSource } from "@polyth/contracts";
 import { createConfigApplier, createOpenCodeRuntime, type OpenCodeAdapterOptions } from "@polyth/backend-opencode";
 import { createPluginRegistry } from "@polyth/plugins";
-import { createPermissionService } from "@polyth/permissions";
+import { createAutoAcceptStore, createPermissionService } from "@polyth/permissions";
 import { createGoalService, type GoalService } from "@polyth/goals";
-import { createFileService } from "@polyth/files";
+import { createFileService, MAX_RAW_BYTES } from "@polyth/files";
 import { createCommandService } from "@polyth/commands";
 import { createGitService } from "@polyth/git";
 import { createTerminalService } from "@polyth/terminal";
@@ -19,12 +19,12 @@ import { createFusionService, synthesisPrompt } from "@polyth/fusion";
 import { createScheduleService, scanLoopsDir } from "@polyth/schedule";
 import { createKnowledgeStore } from "@polyth/knowledge";
 import { createGithubService } from "@polyth/github";
-import { createFakeQuotaProvider, createUsageService } from "@polyth/usage";
+import { createFakeQuotaProvider, createHttpQuotaProvider, createUsageService, parseQuotaProviderSpecs } from "@polyth/usage";
 import {
   createBrowserService, createChromiumDriver, createFakeDriver, demoWeb,
   findChromiumExecutable, originOf,
 } from "@polyth/browser";
-import { createDictationService } from "@polyth/dictation";
+import { createDictationService, createWhisperSttAdapter } from "@polyth/dictation";
 import { createProjectService } from "./projects.ts";
 import { createSessionService, type Broadcaster, type RuntimePool } from "./sessions.ts";
 import { createHttpServer, type RouteHandler } from "./http.ts";
@@ -48,9 +48,18 @@ import { settingsRoutes } from "./routes/settings.ts";
 import { browserRoutes } from "./routes/browser.ts";
 import { browseRoutes } from "./routes/browse.ts";
 import { dictationRoutes } from "./routes/dictation.ts";
+import { createAuthService } from "./auth.ts";
+import { authRoutes } from "./routes/auth.ts";
+import { createPushNotifier, createPushService } from "./push.ts";
+import { pushRoutes } from "./routes/push.ts";
+import { autoAcceptRoutes } from "./routes/autoAccept.ts";
 import { createBehaviorService } from "./behavior.ts";
 import { createMcpConfigService, mcpEntriesFromBackendConfig } from "./mcp.ts";
 import { createModelVisibilityService } from "./modelVisibility.ts";
+import { createVoiceSettings } from "./voice.ts";
+import { voiceRoutes } from "./routes/voice.ts";
+import { buildNotePrompt, createAssistService, createAssistSettings, parseNoteReply, type AssistService } from "./assist.ts";
+import { assistRoutes } from "./routes/assist.ts";
 import { createWalkthroughJobService } from "./walkthroughs.ts";
 import { createReviewFlowService, createReviewService } from "./review.ts";
 import { createMultirunRunOne } from "./multirunRunner.ts";
@@ -152,6 +161,13 @@ export async function boot(opts: BootOptions = {}) {
       sessions: () => reviving("sessions", () => inner.sessions()),
       history: (sessionId) => reviving("history", () => inner.history(sessionId)),
       ensureSession: (canonical) => reviving("ensureSession", () => inner.ensureSession(canonical)),
+      async resetSession(canonical) {
+        if (!inner.resetSession) throw Object.assign(new Error("runtime cannot reset session history"), { code: "unsupported" });
+        return reviving("resetSession", () => {
+          if (!inner.resetSession) throw Object.assign(new Error("runtime cannot reset session history"), { code: "unsupported" });
+          return inner.resetSession(canonical);
+        });
+      },
       startTurn: (req) => inner.startTurn(req),
       abort: (sessionId) => inner.abort(sessionId),
       replyPermission: (sessionId, requestId, reply) => inner.replyPermission(sessionId, requestId, reply),
@@ -195,6 +211,9 @@ export async function boot(opts: BootOptions = {}) {
 
   // --- goals workflow plugin (listens on the turn seam, never touches the loop)
   let goals: GoalService | null = null;
+  // F9 idle assist: created after `sessions` (it needs the runtime resolver);
+  // the turn hook below only pings it, so a late assignment is safe.
+  let assist: AssistService | null = null;
   const ensureGoalState = async (sessionId: string) => {
     if (!goals) return null;
     const known = goals.get(sessionId);
@@ -205,7 +224,12 @@ export async function boot(opts: BootOptions = {}) {
   const files = createFileService();
   const git = createGitService();
   const commands = createCommandService();
-  const terminals = createTerminalService();
+  // POLYTH_TERM_REPLAY_BYTES caps per-PTY scrollback replay (default 200 KB).
+  const terminals = createTerminalService({
+    ...(Number(process.env.POLYTH_TERM_REPLAY_BYTES) > 0
+      ? { replayBytes: Number(process.env.POLYTH_TERM_REPLAY_BYTES) }
+      : {}),
+  });
   const preview = createPreviewService();
 
   // --- controlled browser (WP14): Chromium if configured/found, fake driver
@@ -230,12 +254,22 @@ export async function boot(opts: BootOptions = {}) {
     allowedOrigins: () => [...previewOrigins],
   });
 
-  // Streaming dictation (WP15): the protocol is live, but no STT engine ships
-  // by default — capability reports honestly and the web app keeps browser
-  // Web Speech as its zero-configuration path. A speech plugin can contribute
-  // an SttAdapter here later.
+  // Streaming dictation (WP15/F8): the adapter provider re-reads voice.json on
+  // every call, so saving an STT server URL in Settings → Voice flips the
+  // capability honestly without a restart; no URL = browser Web Speech.
+  const voiceSettings = createVoiceSettings({ file: `${dataDir}/voice.json` });
   const dictation = createDictationService({
-    adapter: null,
+    adapter: () => {
+      const stt = voiceSettings.get().stt;
+      if (!stt.baseUrl) return null;
+      const apiKey = voiceSettings.resolveKey("stt");
+      return createWhisperSttAdapter({
+        baseUrl: stt.baseUrl,
+        ...(stt.model ? { model: stt.model } : {}),
+        ...(stt.language ? { language: stt.language } : {}),
+        ...(apiKey ? { apiKey } : {}),
+      });
+    },
     unavailableReason: "no speech-to-text engine configured; browser Web Speech is used instead",
   });
   const parseModel = (raw?: string) => {
@@ -271,8 +305,30 @@ export async function boot(opts: BootOptions = {}) {
     }
   }
 
+  // --- F18: web push (VAPID keys minted once into the data dir) + the
+  // notifier bridging the session service's attention/turn-stopped seam.
+  // Auto-accepted permissions never reach this seam, so they never push.
+  const push = createPushService({ file: `${dataDir}/push.json` });
+  const pushNotifier = createPushNotifier({
+    send: (payload) => push.send(payload),
+    projection: (sessionId) => store.projection(sessionId),
+  });
+
   const sessions = createSessionService({
     store, projects, permissions, runtimes, broadcast, queue: store, org: store, profiles: store, behavior,
+    worktrees: git.worktrees,
+    shell: terminals,
+    // F18: server-owned per-session auto-accept policy (nearest-parent
+    // resolution for subagents; session-scoped only, never a global default).
+    autoAccept: createAutoAcceptStore(`${dataDir}/auto-accept.json`),
+    notify: pushNotifier,
+    attachments: {
+      stat: async (root, rel) => {
+        const st = await files.stat(root, rel);
+        return { kind: st.kind, size: st.size };
+      },
+      maxBytes: MAX_RAW_BYTES,
+    },
     expand: async (projectId, text) => {
       const project = await projects.get(projectId);
       const r = await commands.expand(project?.path ?? process.cwd(), text);
@@ -288,6 +344,7 @@ export async function boot(opts: BootOptions = {}) {
           const state = await ensureGoalState(sessionId);
           if (state?.status === "active") await goals?.onTurnCompleted(sessionId, text);
         })().catch((err: unknown) => console.error("[polyth] goal audit failed", err));
+        assist?.onTurnCompleted(sessionId);
       },
       onUsage: (sessionId, tokens) => goals?.recordUsage(sessionId, { ...tokens, cacheRead: 0, cacheWrite: 0 }),
     },
@@ -311,6 +368,46 @@ export async function boot(opts: BootOptions = {}) {
         ...(smallModel() ? { model: smallModel()! } : proj?.model ? { model: proj.model } : {}),
       });
     },
+  });
+
+  // --- F9 idle assist: after N quiet seconds past turn/stopped, a small-model
+  // recap + ONE suggestion lands on the projection (never the event log) keyed
+  // to the log tail seq — any newer event makes it stale. Hard off by default.
+  const assistSettings = createAssistSettings({ file: `${dataDir}/assist.json` });
+  const assistTranscript = async (sessionId: string): Promise<string> => {
+    const msgs = deriveMessages(await store.events(sessionId));
+    const lines: string[] = [];
+    for (const m of msgs.slice(-40)) {
+      if (m.role === "tool") continue;
+      const text = m.parts
+        .filter((p): p is { type: "text"; text: string } => p.type === "text")
+        .map((p) => p.text).join("\n").trim();
+      if (text) lines.push(`${m.role === "user" ? "User" : "Assistant"}: ${text}`);
+    }
+    return lines.join("\n\n").slice(-16_000);
+  };
+  const assistComplete = async (sessionId: string, prompt: string): Promise<string> => {
+    const proj = await store.projection(sessionId);
+    const project = proj ? await projects.get(proj.projectId) : null;
+    const rt = await runtimes.forProject(proj?.projectId ?? "__default__");
+    return oneShot(rt, {
+      cwd: project?.path ?? process.cwd(), prompt,
+      ...(smallModel() ? { model: smallModel()! } : proj?.model ? { model: proj.model } : {}),
+    });
+  };
+  assist = createAssistService({
+    settings: () => assistSettings.get(),
+    latestSeq: (sessionId) => store.latestSeq(sessionId),
+    transcript: assistTranscript,
+    complete: assistComplete,
+    save: async (sessionId, a) => {
+      const current = await store.projection(sessionId);
+      if (!current) return;
+      const next = { ...current, assist: a, updatedAt: Date.now() };
+      await store.upsertProjection(next);
+      broadcast.projection(next);
+    },
+    onError: (sessionId, err) => console.error(`[polyth] assist generation failed for ${sessionId}`, err),
   });
 
   // --- multirun/fusion (M3): both resolve the parent session's project/runtime
@@ -407,9 +504,22 @@ export async function boot(opts: BootOptions = {}) {
 
   // --- WP12: generic quota telemetry. Adapters are registered here on the
   // server; the browser only ever sees sanitized snapshots. No adapters are
-  // configured by default — POLYTH_FAKE_QUOTAS=1 enables the demo provider.
+  // configured by default — POLYTH_FAKE_QUOTAS=1 enables the demo provider,
+  // and real providers plug in via data/quota-providers.json (F13): each entry
+  // names an HTTP endpoint plus an env var holding the bearer credential, so
+  // tokens stay in the server environment and never in config or the browser.
   const usage = createUsageService({ file: `${dataDir}/quotas.json` });
   if (process.env.POLYTH_FAKE_QUOTAS === "1") usage.register(createFakeQuotaProvider());
+  try {
+    const specsRaw = readFileSync(`${dataDir}/quota-providers.json`, "utf8");
+    for (const spec of parseQuotaProviderSpecs(JSON.parse(specsRaw))) {
+      usage.register(createHttpQuotaProvider(spec));
+    }
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code !== "ENOENT") {
+      console.error("[usage] quota-providers.json ignored:", e instanceof Error ? e.message : e);
+    }
+  }
   usage.start();
 
   // --- WP11: generated walkthroughs, structured reviews, bounded review flow.
@@ -456,7 +566,18 @@ export async function boot(opts: BootOptions = {}) {
   const flowTimer = setInterval(() => void reviewFlow.tick(), 4_000);
   flowTimer.unref?.();
 
+  // --- F16 access control: OFF unless a password is configured. When on,
+  // every /api + /ws answer requires the polyth_auth session cookie; login is
+  // rate-limited per client IP; sessions persist in data/auth.json so devices
+  // stay remembered across restarts.
+  const auth = createAuthService({
+    file: `${dataDir}/auth.json`,
+    envPassword: process.env.POLYTH_UI_PASSWORD,
+    localhostOptional: process.env.POLYTH_UI_PASSWORD_LOCALHOST === "optional",
+  });
+
   const routes: RouteHandler[] = [
+    authRoutes(auth),
     async (rc) => {
       // lazily rehydrate goal state from the log before the goals routes answer
       if (/^\/api\/sessions\/[^/]+\/goal/.test(rc.path)) {
@@ -469,7 +590,7 @@ export async function boot(opts: BootOptions = {}) {
     orgRoutes({ projects, sessions, store }),
     workspaceRoutes({ projects, files, commands }),
     gitRoutes({
-      projects, git,
+      projects, sessions, git,
       // OC-13-002: AI commit message, generated by the Small Model from the diff
       commitMessage: async (root) => {
         const staged = await git.diff(root, { staged: true });
@@ -491,7 +612,7 @@ export async function boot(opts: BootOptions = {}) {
       },
     }),
     terminalRoutes({
-      projects, terminals,
+      projects, sessions, terminals,
       // invariant #4: terminals spawned from a session context are logged
       events: {
         append: async (sessionId, type, data) => {
@@ -501,9 +622,39 @@ export async function boot(opts: BootOptions = {}) {
         },
       },
     }),
-    previewRoutes({ projects, preview }),
+    previewRoutes({ projects, sessions, preview }),
     browserRoutes({ browser, append: appendLogged, shotsDir: `${dataDir}/browser-shots` }),
     dictationRoutes({ dictation }),
+    voiceRoutes({
+      voice: voiceSettings,
+      // OC-2049 seam: summarize long replies before speaking, small model only
+      summarize: async (text) => {
+        const rt = await runtimes.forProject("__default__");
+        return oneShot(rt, {
+          cwd: process.cwd(),
+          ...(smallModel() ? { model: smallModel()! } : {}),
+          prompt: [
+            "Summarize the following assistant reply for text-to-speech playback.",
+            "Keep it under 3 sentences, plain prose, no markdown, no preamble.",
+            "", "<reply>", text.slice(0, 24_000), "</reply>",
+          ].join("\n"),
+        });
+      },
+    }),
+    assistRoutes({
+      settings: assistSettings,
+      projection: (sessionId) => store.projection(sessionId),
+      latestSeq: (sessionId) => store.latestSeq(sessionId),
+      // chat→note: distill with the same small-model seam; the route returns a
+      // DRAFT — saving goes through the normal /api/knowledge flow.
+      distill: async (sessionId) => {
+        const transcript = await assistTranscript(sessionId);
+        if (!transcript.trim()) {
+          throw Object.assign(new Error("nothing to distill — the session has no messages"), { code: "invalid-input" });
+        }
+        return parseNoteReply(await assistComplete(sessionId, buildNotePrompt(transcript)));
+      },
+    }),
     multirunRoutes(multirun),
     fusionRoutes(fusion),
     walkthroughRoutes({ store, broadcast, jobs: walkthroughJobs, review, flow: reviewFlow }),
@@ -519,8 +670,43 @@ export async function boot(opts: BootOptions = {}) {
         },
       },
     }),
-    githubRoutes({ projects, github, append: appendLogged }),
+    githubRoutes({
+      projects, github, append: appendLogged,
+      // OC-15-005: AI PR title/body — same Small Model seam as commit messages.
+      // Reads the diff via git only; never creates or edits the PR itself.
+      describe: async (root, base) => {
+        let baseRef = base;
+        if (!baseRef) {
+          const r = await github.repo(root);
+          baseRef = (r.ok && r.data.defaultBranch) || "main";
+        }
+        const diff = await git.diffRange(root, baseRef, "HEAD");
+        if (!diff.trim()) {
+          throw Object.assign(new Error(`no commits to describe against ${baseRef}`), { code: "invalid-input" });
+        }
+        const project = (await projects.list()).find((p) => p.path === root);
+        const rt = await runtimes.forProject(project?.id ?? "__default__");
+        const text = await oneShot(rt, {
+          cwd: root,
+          ...(smallModel() ? { model: smallModel()! } : {}),
+          prompt: [
+            "Write a pull request title and description for the diff below.",
+            "Line 1: a <=72 character imperative title. Then a blank line, then a concise",
+            "markdown description (what changed and why; a short bullet list is fine).",
+            "Do not use tools. Do not wrap the answer in code fences. Output nothing else.",
+            "", "<diff>", diff.slice(0, 24_000), "</diff>",
+          ].join("\n"),
+        });
+        const clean = text.replace(/^```[a-z]*\n?|```$/g, "").trim();
+        const nl = clean.indexOf("\n");
+        return nl === -1
+          ? { title: clean.slice(0, 72), body: "" }
+          : { title: clean.slice(0, nl).trim().slice(0, 200), body: clean.slice(nl + 1).trim() };
+      },
+    }),
     controlRoutes(sessions),
+    autoAcceptRoutes(sessions),
+    pushRoutes(push),
     snippetRoutes({ projects, commands }),
     profileRoutes({
       store,
@@ -568,18 +754,19 @@ export async function boot(opts: BootOptions = {}) {
     }),
   ];
 
-  const allCapabilities = () => ["polyth.sessions", "polyth.sessionPersistence", "polyth.projects", "polyth.agentRuntime", "polyth.goals", "polyth.files", "polyth.commands", "polyth.git", "polyth.worktrees", "polyth.terminal", "polyth.preview", "polyth.multirun", "polyth.fusion", "polyth.walkthrough", "polyth.schedule", "polyth.github", "polyth.control", "polyth.agentProfiles", "polyth.settings", "polyth.mcp", "polyth.plugins", "polyth.knowledge", "polyth.review", "polyth.usage", "polyth.browser"];
+  const allCapabilities = () => ["polyth.sessions", "polyth.sessionPersistence", "polyth.projects", "polyth.agentRuntime", "polyth.goals", "polyth.files", "polyth.commands", "polyth.git", "polyth.worktrees", "polyth.terminal", "polyth.preview", "polyth.multirun", "polyth.fusion", "polyth.walkthrough", "polyth.schedule", "polyth.github", "polyth.control", "polyth.agentProfiles", "polyth.settings", "polyth.mcp", "polyth.plugins", "polyth.knowledge", "polyth.review", "polyth.usage", "polyth.browser", "polyth.voice", "polyth.assist"];
 
   const server = createHttpServer({
-    sessions, projects, runtimes, routes, visibility,
+    sessions, projects, runtimes, routes, visibility, auth,
     capabilities: allCapabilities,
     webDist: resolve(__dirname, "../../../apps/web/dist"),
     version: "0.1.0",
   });
   // order matters: /ws (session gateway) aborts upgrades whose path it does
   // not match, so the terminal channel must claim /ws/terminal/:id first
-  attachTerminalWs(server, { terminals });
-  live = attachWs(server, sessions, browser, dictation);
+  const wsAuthorize = (req: import("node:http").IncomingMessage) => auth.authorized(req);
+  attachTerminalWs(server, { terminals, authorize: wsAuthorize });
+  live = attachWs(server, sessions, browser, dictation, wsAuthorize);
 
   await new Promise<void>((res) => server.listen(port, res));
   console.log(`[polyth] server on http://127.0.0.1:${port}  data=${dataDir}`);
@@ -587,6 +774,7 @@ export async function boot(opts: BootOptions = {}) {
   const shutdown = async () => {
     schedule.stop();
     usage.stop();
+    assist?.stop();
     clearInterval(loopTimer);
     clearInterval(flowTimer);
     knowledge.close();

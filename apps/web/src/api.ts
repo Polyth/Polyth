@@ -2,6 +2,9 @@
 import type {
   AgentDescriptor,
   AgentProfile,
+  AttachmentRef,
+  AutoAcceptDto,
+  AutoAcceptSetting,
   BulkSessionResult,
   DictationSessionDto,
   FusionDto,
@@ -17,11 +20,13 @@ import type {
   Project,
   ProjectPatch,
   QueueItemDto,
+  RuntimeSession,
   SendResult,
   SessionEvent,
   SessionFolderDto,
   SessionProjection,
   SessionRef,
+  ShellTurnResult,
   TerminalInfo,
   WalkthroughStepDto,
   WorkspaceLabel,
@@ -120,6 +125,11 @@ export interface VisibilityStateDto {
 async function jfetch<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(path, init);
   if (!res.ok) {
+    // F16: a 401 outside the auth endpoints means the device session is gone
+    // (revoked, expired, or a password was just set) — surface the lock screen.
+    if (res.status === 401 && !path.startsWith("/api/auth/")) {
+      window.dispatchEvent(new Event("polyth:auth-required"));
+    }
     const body = await res.text().catch(() => "");
     throw Object.assign(new Error(`HTTP ${res.status} ${res.statusText} — ${body}`), { status: res.status });
   }
@@ -175,6 +185,12 @@ export interface GitLogEntry {
 export interface GitGraphEntry extends GitLogEntry {
   parents: string[];
   refs: string[];
+}
+export interface GitStash {
+  ref: string;
+  sha: string;
+  message: string;
+  date: string;
 }
 
 // ---- worktree types --------------------------------------------------------
@@ -316,6 +332,18 @@ export interface GithubStatusDto {
 }
 export type GhListResult<T> = { ok: true; data: T } | { ok: false; reason: string };
 
+// ---- voice engines (F8) -------------------------------------------------------
+export interface VoiceSettingsDto {
+  stt: { baseUrl: string; model: string; language: string; apiKeyEnv: string };
+  tts: { baseUrl: string; model: string; voice: string; apiKeyEnv: string };
+  sttConfigured: boolean;
+  ttsConfigured: boolean;
+}
+
+// ---- idle assist (F9) ----------------------------------------------------------
+export interface AssistSettingsDto { enabled: boolean; idleSeconds: number }
+export interface AssistDto { recap: string; suggestion: string; atSeq: number; generatedAt: number }
+
 // ---- PR detail + checks (WP11) ----------------------------------------------
 export interface PrDetailDto {
   number: number; title: string; state: string; isDraft: boolean; author: string;
@@ -413,13 +441,13 @@ export const api = {
     jfetch<Project>(`/api/projects/${id}`, json("PATCH", patch)),
 
   listSessions: (projectId: string) => jfetch<SessionProjection[]>(`/api/sessions?projectId=${encodeURIComponent(projectId)}`),
-  createSession: (input: { projectId: string; title?: string; model?: JsonObject; agent?: string }) =>
+  createSession: (input: { projectId: string; title?: string; model?: JsonObject; agent?: string; worktreePath?: string }) =>
     jfetch<SessionRef>("/api/sessions", json("POST", input)),
   getSession: (id: string) => jfetch<SessionProjection>(`/api/sessions/${id}`),
   getEvents: (id: string, afterSeq = 0) =>
     jfetch<SessionEvent[]>(`/api/sessions/${id}/events?afterSeq=${afterSeq}`),
 
-  sendMessage: (id: string, body: { text: string; model?: JsonObject; agent?: string; delivery?: string; dismissPending?: boolean; agentProfileId?: string }) =>
+  sendMessage: (id: string, body: { text: string; attachments?: AttachmentRef[]; model?: JsonObject; agent?: string; delivery?: string; dismissPending?: boolean; agentProfileId?: string }) =>
     jfetch<SendResult>(`/api/sessions/${id}/message`, json("POST", body)),
   abort: (id: string) => jfetch<void>(`/api/sessions/${id}/abort`, { method: "POST" }),
   renameSession: (id: string, title: string) =>
@@ -434,11 +462,17 @@ export const api = {
     jfetch<{ ok: true }>(`/api/sessions/${id}/queue/${encodeURIComponent(queueId)}`, { method: "DELETE" }),
   fork: (id: string, atSeq?: number) =>
     jfetch<SessionRef>(`/api/sessions/${id}/fork`, json("POST", atSeq === undefined ? {} : { atSeq })),
+  rewind: (id: string, atSeq: number) =>
+    jfetch<SessionEvent>(`/api/sessions/${id}/rewind`, json("POST", { atSeq })),
+  clearRewind: (id: string) =>
+    jfetch<SessionEvent>(`/api/sessions/${id}/rewind/clear`, { method: "POST" }),
+  runShell: (id: string, command: string) =>
+    jfetch<ShellTurnResult>(`/api/sessions/${id}/shell`, json("POST", { command })),
   archive: (id: string) => jfetch<void>(`/api/sessions/${id}/archive`, { method: "POST" }),
   restore: (id: string) => jfetch<void>(`/api/sessions/${id}/restore`, { method: "POST" }),
 
   // ---- organization (WP5) ----------------------------------------------------
-  organizeSession: (id: string, patch: { folderId?: string | null; labelIds?: string[] }) =>
+  organizeSession: (id: string, patch: { folderId?: string | null; labelIds?: string[]; pinned?: { position: number } | null }) =>
     jfetch<{ ok: true }>(`/api/sessions/${id}/organize`, json("PATCH", patch)),
   bulkSessions: (op: "archive" | "restore", ids: string[]) =>
     jfetch<BulkSessionResult>(`/api/sessions/bulk`, json("POST", { op, ids })),
@@ -490,6 +524,8 @@ export const api = {
     jfetch<McpServerDto>(`/api/mcp/servers/${encodeURIComponent(id)}`, json("PATCH", { ...patch, expectedRevision })),
   mcpRemove: (id: string) => jfetch<{ ok: boolean }>(`/api/mcp/servers/${encodeURIComponent(id)}`, { method: "DELETE" }),
   mcpTest: (id: string) => jfetch<{ ok: boolean; message: string }>(`/api/mcp/servers/${encodeURIComponent(id)}/test`, json("POST", {})),
+  /** F10: spec-named probe — same reachability check, stores status/lastError. */
+  mcpProbe: (id: string) => jfetch<{ ok: boolean; message: string }>(`/api/mcp/servers/${encodeURIComponent(id)}/probe`, json("POST", {})),
   pluginsList: () => jfetch<InstalledPluginDto[]>("/api/plugins").catch((): InstalledPluginDto[] => []),
   pluginsInstall: (source: string) => jfetch<InstalledPluginDto>("/api/plugins/install", json("POST", { source })),
   pluginsOp: (id: string, op: "enable" | "disable" | "reload") =>
@@ -527,44 +563,62 @@ export const api = {
     jfetch<{ path: string }>(`/api/browse/mkdir`, json("POST", { path })),
 
   // ---- git (§12) -----------------------------------------------------------
-  gitStatus: (projectId: string) =>
-    jfetch<GitStatus>(`/api/git/status?projectId=${encodeURIComponent(projectId)}`).catch((): GitStatus => ({
+  gitStatus: (projectId: string, sessionId?: string) =>
+    jfetch<GitStatus>(`/api/git/status?projectId=${encodeURIComponent(projectId)}${sessionId ? `&sessionId=${encodeURIComponent(sessionId)}` : ""}`).catch((): GitStatus => ({
       branch: "", ahead: 0, behind: 0, staged: [], unstaged: [], untracked: [], conflicted: [],
     })),
-  gitDiff: (projectId: string, filePath: string, staged?: boolean) =>
+  gitDiff: (projectId: string, filePath: string, staged?: boolean, ignoreWhitespace?: boolean, sessionId?: string) =>
     jfetch<GitDiffResult>(
-      `/api/git/diff?projectId=${encodeURIComponent(projectId)}&path=${encodeURIComponent(filePath)}${staged ? "&staged=true" : ""}`,
+      `/api/git/diff?projectId=${encodeURIComponent(projectId)}&path=${encodeURIComponent(filePath)}${staged ? "&staged=true" : ""}${ignoreWhitespace ? "&ignoreWhitespace=true" : ""}${sessionId ? `&sessionId=${encodeURIComponent(sessionId)}` : ""}`,
     ).catch((): GitDiffResult => ({ path: filePath, diff: "" })),
-  gitStage: (projectId: string, paths: string[]) =>
-    jfetch<{ ok: true }>(`/api/git/stage`, json("POST", { projectId, paths })),
-  gitUnstage: (projectId: string, paths: string[]) =>
-    jfetch<{ ok: true }>(`/api/git/unstage`, json("POST", { projectId, paths })),
-  gitDiscard: (projectId: string, paths: string[]) =>
-    jfetch<{ ok: true }>(`/api/git/discard`, json("POST", { projectId, paths })),
-  gitCommit: (projectId: string, message: string) =>
-    jfetch<{ sha: string }>(`/api/git/commit`, json("POST", { projectId, message })),
-  gitCommitMessage: (projectId: string) =>
-    jfetch<{ message: string }>(`/api/git/commit-message`, json("POST", { projectId })).catch(
+  gitShow: (projectId: string, sha: string, ignoreWhitespace?: boolean, sessionId?: string) =>
+    jfetch<{ sha: string; diff: string }>(
+      `/api/git/show?projectId=${encodeURIComponent(projectId)}&sha=${encodeURIComponent(sha)}${ignoreWhitespace ? "&ignoreWhitespace=true" : ""}${sessionId ? `&sessionId=${encodeURIComponent(sessionId)}` : ""}`,
+    ),
+  gitStage: (projectId: string, paths: string[], sessionId?: string) =>
+    jfetch<{ ok: true }>(`/api/git/stage`, json("POST", { projectId, paths, ...(sessionId ? { sessionId } : {}) })),
+  gitUnstage: (projectId: string, paths: string[], sessionId?: string) =>
+    jfetch<{ ok: true }>(`/api/git/unstage`, json("POST", { projectId, paths, ...(sessionId ? { sessionId } : {}) })),
+  gitDiscard: (projectId: string, paths: string[], sessionId?: string) =>
+    jfetch<{ ok: true }>(`/api/git/discard`, json("POST", { projectId, paths, ...(sessionId ? { sessionId } : {}) })),
+  gitCommit: (projectId: string, message: string, sessionId?: string) =>
+    jfetch<{ sha: string }>(`/api/git/commit`, json("POST", { projectId, message, ...(sessionId ? { sessionId } : {}) })),
+  gitCommitMessage: (projectId: string, sessionId?: string) =>
+    jfetch<{ message: string }>(`/api/git/commit-message`, json("POST", { projectId, ...(sessionId ? { sessionId } : {}) })).catch(
       (): { message: "" } => ({ message: "" }),
     ),
-  gitBranches: (projectId: string) =>
-    jfetch<GitBranches>(`/api/git/branches?projectId=${encodeURIComponent(projectId)}`).catch(
+  gitBranches: (projectId: string, sessionId?: string) =>
+    jfetch<GitBranches>(`/api/git/branches?projectId=${encodeURIComponent(projectId)}${sessionId ? `&sessionId=${encodeURIComponent(sessionId)}` : ""}`).catch(
       (): GitBranches => ({ current: "", branches: [] }),
     ),
-  gitBranch: (projectId: string, name: string, from?: string) =>
-    jfetch<{ ok: true }>(`/api/git/branch`, json("POST", { projectId, name, from })),
-  gitCheckout: (projectId: string, name: string) =>
-    jfetch<{ ok: true }>(`/api/git/checkout`, json("POST", { projectId, name })),
-  gitLog: (projectId: string, limit = 20) =>
-    jfetch<GitLogEntry[]>(`/api/git/log?projectId=${encodeURIComponent(projectId)}&limit=${limit}`).catch(
+  gitBranch: (projectId: string, name: string, from?: string, sessionId?: string) =>
+    jfetch<{ ok: true }>(`/api/git/branch`, json("POST", { projectId, name, from, ...(sessionId ? { sessionId } : {}) })),
+  gitCheckout: (projectId: string, name: string, sessionId?: string) =>
+    jfetch<{ ok: true }>(`/api/git/checkout`, json("POST", { projectId, name, ...(sessionId ? { sessionId } : {}) })),
+  gitLog: (projectId: string, limit = 20, sessionId?: string) =>
+    jfetch<GitLogEntry[]>(`/api/git/log?projectId=${encodeURIComponent(projectId)}&limit=${limit}${sessionId ? `&sessionId=${encodeURIComponent(sessionId)}` : ""}`).catch(
       (): GitLogEntry[] => [],
     ),
-  gitGraph: (projectId: string, limit = 40, skip = 0) =>
-    jfetch<GitGraphEntry[]>(`/api/git/graph?projectId=${encodeURIComponent(projectId)}&limit=${limit}&skip=${skip}`).catch(
+  gitGraph: (projectId: string, limit = 40, skip = 0, sessionId?: string) =>
+    jfetch<GitGraphEntry[]>(`/api/git/graph?projectId=${encodeURIComponent(projectId)}&limit=${limit}&skip=${skip}${sessionId ? `&sessionId=${encodeURIComponent(sessionId)}` : ""}`).catch(
       (): GitGraphEntry[] => [],
     ),
-  gitFolder: (projectId: string, folder: string, op: "stage" | "unstage" | "discard") =>
-    jfetch<{ ok: true }>(`/api/git/folder`, json("POST", { projectId, folder, op })),
+  gitFolder: (projectId: string, folder: string, op: "stage" | "unstage" | "discard", sessionId?: string) =>
+    jfetch<{ ok: true }>(`/api/git/folder`, json("POST", { projectId, folder, op, ...(sessionId ? { sessionId } : {}) })),
+  gitStashes: (projectId: string, sessionId?: string) =>
+    jfetch<GitStash[]>(`/api/git/stashes?projectId=${encodeURIComponent(projectId)}${sessionId ? `&sessionId=${encodeURIComponent(sessionId)}` : ""}`).catch((): GitStash[] => []),
+  gitStashPush: (projectId: string, message?: string, sessionId?: string) =>
+    jfetch<{ created: boolean }>(`/api/git/stash`, json("POST", { projectId, message, ...(sessionId ? { sessionId } : {}) })),
+  gitStashApply: (projectId: string, ref: string, sessionId?: string) =>
+    jfetch<{ ok: true }>(`/api/git/stash/apply`, json("POST", { projectId, ref, ...(sessionId ? { sessionId } : {}) })),
+  gitStashDrop: (projectId: string, ref: string, sessionId?: string) =>
+    jfetch<{ ok: true }>(`/api/git/stash/drop`, json("POST", { projectId, ref, ...(sessionId ? { sessionId } : {}) })),
+  gitFetch: (projectId: string, remote = "origin", sessionId?: string) =>
+    jfetch<{ ok: true }>(`/api/git/fetch`, json("POST", { projectId, remote, ...(sessionId ? { sessionId } : {}) })),
+  gitPull: (projectId: string, remote = "origin", sessionId?: string) =>
+    jfetch<{ ok: true }>(`/api/git/pull`, json("POST", { projectId, remote, ...(sessionId ? { sessionId } : {}) })),
+  gitPush: (projectId: string, remote = "origin", sessionId?: string) =>
+    jfetch<{ ok: true }>(`/api/git/push`, json("POST", { projectId, remote, ...(sessionId ? { sessionId } : {}) })),
 
   // ---- worktrees (§12) -----------------------------------------------------
   listWorktrees: (projectId: string) =>
@@ -694,6 +748,8 @@ export const api = {
     jfetch<{ ok: true }>(`/api/terminals/${terminalId}`, json("POST", { data })),
   closeTerminal: (terminalId: string) =>
     jfetch<{ ok: true }>(`/api/terminals/${terminalId}`, { method: "DELETE" }),
+  renameTerminal: (terminalId: string, title: string) =>
+    jfetch<TerminalInfo>(`/api/terminals/${terminalId}`, json("PATCH", { title })),
 
   // ---- schedule --------------------------------------------------------------
   scheduleList: (projectId?: string) =>
@@ -745,6 +801,10 @@ export const api = {
     jfetch<GithubStatusDto>(`/api/github/status?projectId=${encodeURIComponent(projectId)}`).catch(
       (): GithubStatusDto => ({ installed: false, authenticated: false, repo: null, reason: "server unreachable" }),
     ),
+  githubRepo: (projectId: string) =>
+    jfetch<GhListResult<GithubRepoDto>>(`/api/github/repo?projectId=${encodeURIComponent(projectId)}`).catch(
+      (): GhListResult<GithubRepoDto> => ({ ok: false, reason: "server unreachable" }),
+    ),
   githubIssues: (projectId: string, limit = 30) =>
     jfetch<GhListResult<GithubIssueDto[]>>(`/api/github/issues?projectId=${encodeURIComponent(projectId)}&limit=${limit}`).catch(
       (): GhListResult<GithubIssueDto[]> => ({ ok: false, reason: "server unreachable" }),
@@ -779,6 +839,18 @@ export const api = {
     jfetch<GhListResult<{ id: string; url?: string }>>(`/api/github/pr/${number}/reviews`, json("POST", input)),
   githubAddLabels: (number: number, projectId: string, labels: string[]) =>
     jfetch<GhListResult<{ labels: string[] }>>(`/api/github/pr/${number}/labels`, json("POST", { projectId, labels })),
+
+  // ---- PR lifecycle (F7): explicit external writes + AI describe ---------------
+  githubPrCreate: (input: { projectId: string; title: string; body: string; base?: string; draft?: boolean; sessionId?: string }) =>
+    jfetch<GhListResult<{ number: number; url: string }>>(`/api/github/pr/create`, json("POST", input)),
+  githubPrUpdate: (input: { projectId: string; number: number; title?: string; body?: string; base?: string; sessionId?: string }) =>
+    jfetch<GhListResult<{ number: number }>>(`/api/github/pr/update`, json("POST", input)),
+  githubPrMerge: (input: { projectId: string; number: number; strategy: "squash" | "merge" | "rebase"; sessionId?: string }) =>
+    jfetch<GhListResult<{ number: number; strategy: string }>>(`/api/github/pr/merge`, json("POST", { ...input, confirm: true })),
+  githubPrDescribe: (projectId: string, base?: string) =>
+    jfetch<GhListResult<{ title: string; body: string }>>(`/api/github/pr/describe`, json("POST", { projectId, ...(base ? { base } : {}) })).catch(
+      (e: unknown): GhListResult<{ title: string; body: string }> => ({ ok: false, reason: e instanceof Error ? e.message : String(e) }),
+    ),
 
   // ---- generated walkthroughs + reviews (WP11) ----------------------------------
   walkthroughGenerate: (source: WalkthroughSourceDto, sessionId?: string) =>
@@ -827,14 +899,14 @@ export const api = {
     jfetch<{ ok: boolean }>(`/api/snippets`, json("DELETE", { projectId, scope, alias })),
 
   // ---- M3: preview ---------------------------------------------------------
-  previewStart: (projectId: string, command?: string) =>
-    jfetch<{ url: string; port: number }>(`/api/preview/start`, json("POST", { projectId, command })),
-  previewGet: (projectId: string) =>
-    jfetch<PreviewState>(`/api/preview?projectId=${encodeURIComponent(projectId)}`).catch(
+  previewStart: (projectId: string, command?: string, sessionId?: string) =>
+    jfetch<{ url: string; port: number }>(`/api/preview/start`, json("POST", { projectId, command, ...(sessionId ? { sessionId } : {}) })),
+  previewGet: (projectId: string, sessionId?: string) =>
+    jfetch<PreviewState>(`/api/preview?projectId=${encodeURIComponent(projectId)}${sessionId ? `&sessionId=${encodeURIComponent(sessionId)}` : ""}`).catch(
       (): PreviewState => ({ url: null, status: "off" }),
     ),
-  previewStop: (projectId: string) =>
-    jfetch<{ ok: true }>(`/api/preview/stop`, json("POST", { projectId })),
+  previewStop: (projectId: string, sessionId?: string) =>
+    jfetch<{ ok: true }>(`/api/preview/stop`, json("POST", { projectId, ...(sessionId ? { sessionId } : {}) })),
 
   // ---- controlled browser (WP14) ---------------------------------------------
   browserCapability: () =>
@@ -883,4 +955,90 @@ export const api = {
     jfetch<DictationSessionDto>(`/api/dictation/${encodeURIComponent(id)}/finalize`, { method: "POST" }),
   dictationCancel: (id: string) =>
     jfetch<{ ok: true }>(`/api/dictation/${encodeURIComponent(id)}`, { method: "DELETE" }),
+
+  // ---- voice engines (F8): server settings + TTS proxy --------------------------
+  voiceSettings: () => jfetch<VoiceSettingsDto>(`/api/settings/voice`),
+  voiceSettingsSave: (next: {
+    stt: { baseUrl: string; model: string; language: string; apiKeyEnv: string };
+    tts: { baseUrl: string; model: string; voice: string; apiKeyEnv: string };
+  }) => jfetch<VoiceSettingsDto>(`/api/settings/voice`, json("PUT", next)),
+  /** Buffered clip from the configured OpenAI-compatible TTS server. */
+  ttsSpeak: async (text: string, opts: { model?: string; voice?: string } = {}): Promise<ArrayBuffer> => {
+    const res = await fetch(`/api/tts/speak`, json("POST", { text, ...opts }));
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({})) as { message?: string };
+      throw new Error(body.message ?? `TTS failed: HTTP ${res.status}`);
+    }
+    return res.arrayBuffer();
+  },
+  ttsSummarize: (text: string) => jfetch<{ text: string }>(`/api/tts/summarize`, json("POST", { text })),
+
+  // ---- idle assist (F9): recap + suggestion, chat→note --------------------------
+  assistSettings: () => jfetch<AssistSettingsDto>(`/api/settings/assist`),
+  assistSettingsSave: (patch: Partial<AssistSettingsDto>) =>
+    jfetch<AssistSettingsDto>(`/api/settings/assist`, json("PUT", patch)),
+  /** 404s when nothing fresh exists — callers rely on the projection instead. */
+  assistGet: (sessionId: string) =>
+    jfetch<AssistDto>(`/api/sessions/${encodeURIComponent(sessionId)}/assist`),
+  /** Small-model chat→note DRAFT; saving still goes through knowledgeCreate. */
+  assistNote: (sessionId: string) =>
+    jfetch<{ title: string; body: string }>(`/api/sessions/${encodeURIComponent(sessionId)}/assist/note`, json("POST", {})),
+
+  // ---- backend session import (F14 import half) ----------------------------------
+  backendSessions: (projectId: string) =>
+    jfetch<{ items: RuntimeSession[]; total: number }>(
+      `/api/control/backend-sessions?projectId=${encodeURIComponent(projectId)}`,
+    ),
+  importBackendSessions: (projectId: string, ids: string[]) =>
+    jfetch<SessionProjection[]>(`/api/control/backend-sessions/import`, json("POST", { projectId, ids })),
+
+  // ---- auto-accept policy (F18) ------------------------------------------------------
+  autoAcceptGet: (sessionId: string) =>
+    jfetch<AutoAcceptDto>(`/api/sessions/${encodeURIComponent(sessionId)}/permissions/auto-accept`),
+  autoAcceptSet: (sessionId: string, setting: AutoAcceptSetting) =>
+    jfetch<AutoAcceptDto>(`/api/sessions/${encodeURIComponent(sessionId)}/permissions/auto-accept`, json("PATCH", { setting })),
+
+  // ---- web push (F18) -----------------------------------------------------------------
+  pushKey: () => jfetch<{ publicKey: string; subscriptions: number }>(`/api/push/key`),
+  pushSubscribe: (sub: unknown) => jfetch<{ ok: boolean }>(`/api/push/subscribe`, json("POST", sub)),
+  pushUnsubscribe: (endpoint: string) => jfetch<{ ok: boolean }>(`/api/push/subscribe`, json("DELETE", { endpoint })),
+  pushTest: () => jfetch<{ sent: number; dropped: number }>(`/api/push/test`, json("POST", {})),
+
+  // ---- access control (F16) --------------------------------------------------------
+  authStatus: () => jfetch<AuthStatusDto>(`/api/auth/status`),
+  /** Never throws on auth failures: the lock screen needs the structured body
+   *  (retryAfterSec) and must not trigger the global 401 handler. */
+  authLogin: async (password: string): Promise<AuthLoginResult> => {
+    const res = await fetch(`/api/auth/login`, json("POST", { password }));
+    if (res.ok) return { ok: true };
+    const body = await res.json().catch(() => ({})) as { error?: string; message?: string; retryAfterSec?: number };
+    return {
+      ok: false,
+      error: body.error ?? `http-${res.status}`,
+      message: body.message ?? `HTTP ${res.status}`,
+      ...(typeof body.retryAfterSec === "number" ? { retryAfterSec: body.retryAfterSec } : {}),
+    };
+  },
+  authLogout: () => jfetch<{ ok: boolean }>(`/api/auth/logout`, json("POST", {})),
+  authLogoutAll: () => jfetch<{ ok: boolean }>(`/api/auth/logout-all`, json("POST", {})),
+  authSessions: () => jfetch<AuthDeviceDto[]>(`/api/auth/sessions`),
+  authRevoke: (id: string) => jfetch<{ ok: boolean }>(`/api/auth/sessions/${encodeURIComponent(id)}`, { method: "DELETE" }),
 };
+
+// ---- access control DTOs (F16) ------------------------------------------------------
+export interface AuthStatusDto {
+  required: boolean;
+  authorized: boolean;
+}
+
+export interface AuthDeviceDto {
+  id: string;
+  createdAt: number;
+  lastSeenAt: number;
+  label: string;
+  current: boolean;
+}
+
+export type AuthLoginResult =
+  | { ok: true }
+  | { ok: false; error: string; message: string; retryAfterSec?: number };

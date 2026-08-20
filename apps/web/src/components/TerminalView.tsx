@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import type { TerminalInfo } from "@polyth/contracts";
 import { api } from "../api.ts";
 import { useStore } from "../store.ts";
-import { applyTerminalChunk } from "../utils.ts";
+import { applyTerminalChunk, nextTermBackoff } from "../utils.ts";
 import EmptyState from "./EmptyState.tsx";
 
 interface Tab {
@@ -20,55 +20,112 @@ function wsUrl(id: string): string {
 export default function TerminalView() {
   const projectId = useStore((s) => s.activeProjectId);
   const sessionId = useStore((s) => s.activeSessionId);
+  const session = useStore((s) => s.sessions.find((candidate) => candidate.id === s.activeSessionId) ?? null);
   const [tabs, setTabs] = useState<Tab[]>([]);
   const [active, setActive] = useState<string | null>(null);
   const [line, setLine] = useState("");
+  const [renaming, setRenaming] = useState<string | null>(null);
+  const [renameVal, setRenameVal] = useState("");
   const sockets = useRef(new Map<string, WebSocket>());
+  // F12 reconnect state: per-terminal backoff + pending timers; `gone` marks
+  // terminals we closed deliberately (or the server reported missing) so the
+  // reconnect loop stops instead of resurrecting them.
+  const backoffs = useRef(new Map<string, number>());
+  const timers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
+  const gone = useRef(new Set<string>());
+  const mounted = useRef(true);
   const preRef = useRef<HTMLPreElement>(null);
 
+  const dropTab = (id: string) => {
+    setTabs((prev) => {
+      const next = prev.filter((t) => t.id !== id);
+      setActive((a) => (a === id ? next[0]?.id ?? null : a));
+      return next;
+    });
+  };
+
   const attach = (id: string) => {
-    if (sockets.current.has(id)) return;
+    if (!mounted.current || sockets.current.has(id) || gone.current.has(id)) return;
     const ws = new WebSocket(wsUrl(id));
     sockets.current.set(id, ws);
+    ws.onopen = () => backoffs.current.delete(id); // healthy again: reset backoff
     ws.onmessage = (ev) => {
-      let msg: { type?: string; data?: string; exitCode?: number };
+      let msg: { type?: string; data?: string; exitCode?: number | null; code?: string };
       try { msg = JSON.parse(String(ev.data)); } catch { return; }
+      if (msg.type === "replay" && typeof msg.data === "string") {
+        // server replays the bounded scrollback on every attach — REPLACE the
+        // local buffer so reconnects never duplicate output
+        setTabs((prev) => prev.map((t) => t.id === id ? { ...t, buf: applyTerminalChunk("", msg.data!) } : t));
+      }
       if (msg.type === "data" && typeof msg.data === "string") {
         setTabs((prev) => prev.map((t) => t.id === id ? { ...t, buf: applyTerminalChunk(t.buf, msg.data!) } : t));
       }
       if (msg.type === "exit") {
-        setTabs((prev) => prev.map((t) => t.id === id ? { ...t, running: false, buf: applyTerminalChunk(t.buf, `\n[exit ${msg.exitCode ?? 0}]\n`) } : t));
+        gone.current.add(id); // process ended — no point reconnecting
+        setTabs((prev) => prev.map((t) => t.id === id && t.running
+          ? { ...t, running: false, buf: applyTerminalChunk(t.buf, `\n[exit ${msg.exitCode ?? 0}]\n`) }
+          : t));
+      }
+      if (msg.type === "error" && msg.code === "not-found") {
+        gone.current.add(id); // PTY no longer exists (closed elsewhere / restart)
+        dropTab(id);
       }
     };
-    ws.onclose = () => { sockets.current.delete(id); };
+    ws.onclose = () => {
+      if (sockets.current.get(id) === ws) sockets.current.delete(id);
+      if (!mounted.current || gone.current.has(id)) return;
+      // silent retry with backoff, reusing the SAME terminal id — the PTY
+      // stays alive server-side and replays its scrollback on reattach
+      const delay = backoffs.current.get(id) ?? nextTermBackoff(undefined);
+      backoffs.current.set(id, nextTermBackoff(delay));
+      const timer = setTimeout(() => { timers.current.delete(id); attach(id); }, delay);
+      timers.current.set(id, timer);
+    };
   };
 
   const spawn = async (cmd?: string) => {
     if (!projectId) return;
     const { terminalId } = await api.createTerminal(projectId, {
       ...(sessionId ? { sessionId } : {}),
+      ...(session?.worktreePath ? { cwd: session.worktreePath } : {}),
       ...(cmd ? { cmd } : {}),
       cols: 120,
       rows: 32,
     });
-    const tab: Tab = { id: terminalId, title: cmd ?? `zsh · ${tabs.length + 1}`, buf: "", running: true };
+    const tab: Tab = { id: terminalId, title: cmd ?? `shell · ${tabs.length + 1}`, buf: "", running: true };
     setTabs((prev) => [...prev, tab]);
     setActive(terminalId);
     attach(terminalId);
   };
 
   const closeTab = async (id: string) => {
+    const t = tabs.find((x) => x.id === id);
+    // PS#52: closing a live shell asks first — the process dies with the tab
+    if (t?.running && !window.confirm(`Close ${t.title}? The shell is still running.`)) return;
+    gone.current.add(id);
+    const timer = timers.current.get(id);
+    if (timer) { clearTimeout(timer); timers.current.delete(id); }
     sockets.current.get(id)?.close();
     sockets.current.delete(id);
     await api.closeTerminal(id).catch(() => {});
-    setTabs((prev) => {
-      const next = prev.filter((t) => t.id !== id);
-      if (active === id) setActive(next[0]?.id ?? null);
-      return next;
-    });
+    dropTab(id);
   };
 
-  // Adopt terminals that already exist for this project (e.g. after reload).
+  const startRename = (t: Tab) => {
+    setRenaming(t.id);
+    setRenameVal(t.title);
+  };
+
+  const commitRename = (id: string) => {
+    const title = renameVal.trim();
+    setRenaming(null);
+    if (!title) return;
+    setTabs((prev) => prev.map((t) => t.id === id ? { ...t, title } : t));
+    void api.renameTerminal(id, title).catch(() => {});
+  };
+
+  // Adopt terminals that already exist for this project (e.g. after reload) —
+  // the replay frame restores their visible scrollback on attach.
   useEffect(() => {
     if (!projectId) { setTabs([]); setActive(null); return; }
     void api.listTerminals(projectId).then((list: TerminalInfo[]) => {
@@ -87,6 +144,9 @@ export default function TerminalView() {
   }, [projectId]);
 
   useEffect(() => () => {
+    mounted.current = false;
+    for (const timer of timers.current.values()) clearTimeout(timer);
+    timers.current.clear();
     for (const ws of sockets.current.values()) ws.close();
     sockets.current.clear();
   }, []);
@@ -137,12 +197,30 @@ export default function TerminalView() {
       <div className="term-tabs">
         {tabs.map((t) => (
           <span key={t.id} className={`term-tab-group ${t.id === tab?.id ? "active" : ""}`}>
-            <button
-              className={`term-tab ${t.id === tab?.id ? "active" : ""}`}
-              onClick={() => setActive(t.id)}
-            >
-              {t.title}
-            </button>
+            {renaming === t.id ? (
+              <input
+                className="term-tab-rename"
+                value={renameVal}
+                autoFocus
+                aria-label="Terminal tab name"
+                onChange={(e) => setRenameVal(e.target.value)}
+                onBlur={() => commitRename(t.id)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") { e.preventDefault(); commitRename(t.id); }
+                  if (e.key === "Escape") setRenaming(null);
+                }}
+              />
+            ) : (
+              <button
+                className={`term-tab ${t.id === tab?.id ? "active" : ""}`}
+                title="Double-click to rename"
+                onClick={() => setActive(t.id)}
+                onDoubleClick={() => startRename(t)}
+              >
+                {t.title}
+                {!t.running && <span className="term-tab-dead"> ·exited</span>}
+              </button>
+            )}
             <button
               className="term-tab-x"
               title={`Close ${t.title}`}

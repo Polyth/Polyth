@@ -123,6 +123,20 @@ export interface SubmitReviewInput {
   commitSha?: string;
 }
 
+// ---- PR lifecycle (F7) -------------------------------------------------------
+
+export interface PrCreateInput {
+  title: string;
+  body: string;
+  /** target branch; defaults to the repo's default branch when omitted */
+  base?: string;
+  draft?: boolean;
+  /** fork-aware head ref (owner:branch); omitted = current branch */
+  head?: string;
+}
+
+export type MergeStrategy = "squash" | "merge" | "rebase";
+
 export interface GithubService {
   status(cwd: string): Promise<GithubStatus>;
   repo(cwd: string): Promise<GhResult<GithubRepo>>;
@@ -138,9 +152,27 @@ export interface GithubService {
   submitReview(cwd: string, input: SubmitReviewInput): Promise<GhResult<{ id: string; url?: string }>>;
   /** External write. Labels are policy-checked (risk:N / confidence:N only). */
   addLabels(cwd: string, number: number, labels: string[]): Promise<GhResult<{ labels: string[] }>>;
+  /** External write (F7). Opens a PR from the current branch (or `head`). */
+  prCreate(cwd: string, input: PrCreateInput): Promise<GhResult<{ number: number; url: string }>>;
+  /** External write (F7). Edits the title/body/base of an open PR. */
+  prUpdate(cwd: string, number: number, patch: { title?: string; body?: string; base?: string }): Promise<GhResult<{ number: number }>>;
+  /** External write (F7). Merges via GitHub with an explicit strategy.
+   *  Never deletes the branch — that stays a separate, deliberate action. */
+  prMerge(cwd: string, number: number, strategy: MergeStrategy): Promise<GhResult<{ number: number; strategy: MergeStrategy }>>;
 }
 
 const LABEL_POLICY = /^(risk|confidence):[1-5]$/;
+
+// Refs go straight into argv (never a shell), but must not start with "-" so
+// a crafted branch name can never be parsed by gh as a flag.
+const SAFE_REF = /^[\w][\w./~^-]{0,255}$/;
+// fork-aware head may carry an owner prefix: owner:branch
+const SAFE_HEAD = /^[\w][\w./~^:-]{0,255}$/;
+const MERGE_FLAG: Record<MergeStrategy, string> = {
+  squash: "--squash",
+  merge: "--merge",
+  rebase: "--rebase",
+};
 
 const NOT_INSTALLED = "GitHub CLI (gh) is not installed — install it from cli.github.com";
 
@@ -375,6 +407,71 @@ export function createGithubService(deps: { exec?: ExecFn } = {}): GithubService
       try {
         await exec("gh", ["pr", "edit", String(number), "--add-label", labels.join(",")], { cwd });
         return { ok: true, data: { labels } };
+      } catch (e) {
+        return { ok: false, reason: reasonOf(e) };
+      }
+    },
+
+    // ---- PR lifecycle (F7) ---------------------------------------------------
+
+    async prCreate(cwd, input) {
+      const title = input.title.trim();
+      if (!title) return { ok: false, reason: "a pull request title is required" };
+      if (input.base !== undefined && !SAFE_REF.test(input.base)) {
+        return { ok: false, reason: `invalid base ref: ${input.base}` };
+      }
+      if (input.head !== undefined && !SAFE_HEAD.test(input.head)) {
+        return { ok: false, reason: `invalid head ref: ${input.head}` };
+      }
+      // body arrives via stdin (--body-file -) so its content can never be
+      // read as arguments, whatever it contains
+      const args = [
+        "pr", "create", "--title", title, "--body-file", "-",
+        ...(input.base ? ["--base", input.base] : []),
+        ...(input.head ? ["--head", input.head] : []),
+        ...(input.draft ? ["--draft"] : []),
+      ];
+      try {
+        const { stdout } = await exec("gh", args, { cwd, input: input.body });
+        const url = stdout.trim().split("\n").find((l) => /\/pull\/\d+/.test(l)) ?? "";
+        const number = Number(url.match(/\/pull\/(\d+)/)?.[1] ?? 0);
+        if (!number) return { ok: false, reason: `gh did not return a pull request URL: ${stdout.trim().slice(0, 200)}` };
+        return { ok: true, data: { number, url } };
+      } catch (e) {
+        return { ok: false, reason: reasonOf(e) };
+      }
+    },
+
+    async prUpdate(cwd, number, patch) {
+      const title = patch.title?.trim();
+      const hasBody = typeof patch.body === "string";
+      if (!title && !hasBody && patch.base === undefined) {
+        return { ok: false, reason: "nothing to update — pass title, body, or base" };
+      }
+      if (patch.base !== undefined && !SAFE_REF.test(patch.base)) {
+        return { ok: false, reason: `invalid base ref: ${patch.base}` };
+      }
+      const args = [
+        "pr", "edit", String(number),
+        ...(title ? ["--title", title] : []),
+        ...(hasBody ? ["--body-file", "-"] : []),
+        ...(patch.base ? ["--base", patch.base] : []),
+      ];
+      try {
+        await exec("gh", args, { cwd, ...(hasBody ? { input: patch.body } : {}) });
+        return { ok: true, data: { number } };
+      } catch (e) {
+        return { ok: false, reason: reasonOf(e) };
+      }
+    },
+
+    async prMerge(cwd, number, strategy) {
+      const flag = MERGE_FLAG[strategy];
+      if (!flag) return { ok: false, reason: `merge strategy must be squash, merge, or rebase — got ${String(strategy)}` };
+      try {
+        // deliberately no --delete-branch: destructive follow-ups stay separate
+        await exec("gh", ["pr", "merge", String(number), flag], { cwd });
+        return { ok: true, data: { number, strategy } };
       } catch (e) {
         return { ok: false, reason: reasonOf(e) };
       }

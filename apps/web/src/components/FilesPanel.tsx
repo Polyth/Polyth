@@ -1,7 +1,9 @@
 // Files panel for Context Rail: one-level lazy tree, search, read-only viewer.
 import { useState, useEffect, useCallback, useRef } from "react";
 import { api, type FileEntry, type FileReadResult } from "../api.ts";
-import { useStore } from "../store.ts";
+import { getState, setUiError, useStore } from "../store.ts";
+import { attachProjectFile } from "../attachments.ts";
+import FileRowActions from "./FileRowActions.tsx";
 
 const EMPTY_FILES: FileEntry[] = [];
 
@@ -41,6 +43,22 @@ export default function FilesPanel() {
   );
 
   useEffect(() => { loadTree(""); }, [loadTree]);
+  useEffect(() => {
+    if (!projectId) return;
+    const refreshCurrent = () => {
+      if (document.visibilityState === "hidden") return;
+      void api.filesTree(projectId, currentPath || undefined).then(setTree).catch(() => {});
+    };
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") refreshCurrent();
+    };
+    document.addEventListener("visibilitychange", onVisibility);
+    const timer = setInterval(refreshCurrent, 8_000);
+    return () => {
+      document.removeEventListener("visibilitychange", onVisibility);
+      clearInterval(timer);
+    };
+  }, [projectId, currentPath]);
 
   const onDirClick = (p: string) => {
     setSearchResults(null);
@@ -70,9 +88,12 @@ export default function FilesPanel() {
     if (e.key === "Enter") void search();
   };
 
+  // Add to chat = attachment pill on the active composer (F2).
   const attachToChat = (fp: string) => {
-    const event = new CustomEvent("polyth:composer-insert", { detail: `@${fp}` });
-    window.dispatchEvent(event);
+    if (!projectId) return;
+    void attachProjectFile(projectId, getState().activeSessionId, fp).then((r) => {
+      if (!r.ok) setUiError(`Couldn’t attach: ${r.reason}`);
+    });
   };
 
   const createEntry = async () => {
@@ -96,8 +117,8 @@ export default function FilesPanel() {
     if (!projectId || !viewFile) return;
     setSaving(true);
     try {
-      await api.filesWrite(projectId, viewFile.path, content);
-      setViewFile({ ...viewFile, content });
+      const result = await api.filesWrite(projectId, viewFile.path, content, viewFile.revision);
+      setViewFile({ ...viewFile, content, revision: result.revision });
       setError("");
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -226,7 +247,7 @@ export default function FilesPanel() {
             >
               <span className="files-file-icon file-glyph" aria-hidden>▤</span>
               <span className="files-file-name">{fp}</span>
-              <span className="files-attach-btn" title="Attach to chat" onClick={(e) => { e.stopPropagation(); attachToChat(fp); }}>@</span>
+              <FileRowActions projectId={projectId} path={fp} onOpen={() => void onFileClick(fp)} />
             </div>
           ))}
         </div>
@@ -254,7 +275,7 @@ export default function FilesPanel() {
                 <span className="files-file-icon file-glyph" aria-hidden>▤</span>
                 <span className="files-file-name">{e.name}</span>
                 {e.size !== undefined && <span className="files-size">{fmtSize(e.size)}</span>}
-                <span className="files-attach-btn" title="Attach to chat" onClick={(e2) => { e2.stopPropagation(); attachToChat(e.path); }}>@</span>
+                <FileRowActions projectId={projectId} path={e.path} onOpen={() => void onFileClick(e.path)} />
               </div>
             ),
           )}

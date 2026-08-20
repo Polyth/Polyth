@@ -8,6 +8,18 @@ export type PromptToken =
 
 interface Span { from: number; to: number }
 
+export type ComposerMode = "prompt" | "shell";
+
+/** A bang is shell mode only when it is the first non-whitespace character. */
+export function composerMode(text: string): ComposerMode {
+  return text.trimStart().startsWith("!") ? "shell" : "prompt";
+}
+
+export function shellCommand(text: string): string | null {
+  if (composerMode(text) !== "shell") return null;
+  return text.trimStart().slice(1).trim();
+}
+
 /** Ranges covered by ``` fences (including unterminated trailing fences). */
 export function fencedSpans(text: string): Span[] {
   const spans: Span[] = [];

@@ -6,7 +6,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { createStore } from "@polyth/session";
+import { createStore, deriveMessages } from "@polyth/session";
 import type {
   AgentRuntime, JsonObject, Project, ProjectService, RuntimeEvent,
 } from "@polyth/contracts";
@@ -21,6 +21,7 @@ function fakeRuntime(opts: { steering?: boolean; steerResult?: boolean } = {}) {
   const steeredTexts: string[] = [];
   const permissionReplies: Array<{ requestId: string; reply: string }> = [];
   const questionReplies: Array<{ requestId: string; answers: JsonObject }> = [];
+  const resetSessions: string[] = [];
   let aborted = 0;
   const emit = (sessionId: string, ev: RuntimeEvent) => {
     for (const l of listeners) l(sessionId, ev);
@@ -33,6 +34,10 @@ function fakeRuntime(opts: { steering?: boolean; steerResult?: boolean } = {}) {
     models: async () => [],
     agents: async () => [],
     ensureSession: async (c) => `be_${c.sessionId}`,
+    resetSession: async (c) => {
+      resetSessions.push(c.sessionId);
+      return `fresh_${resetSessions.length}`;
+    },
     sessions: async () => [],
     history: async () => [],
     startTurn: async (req) => {
@@ -61,14 +66,21 @@ function fakeRuntime(opts: { steering?: boolean; steerResult?: boolean } = {}) {
     dispose: async () => {},
   };
   return {
-    rt, emit, startedTexts, steeredTexts, permissionReplies, questionReplies,
+    rt, emit, startedTexts, steeredTexts, permissionReplies, questionReplies, resetSessions,
     get aborted() { return aborted; },
   };
 }
 
 const flush = () => new Promise((r) => setTimeout(r, 20));
 
-function makeService(fake: ReturnType<typeof fakeRuntime>) {
+function makeService(fake: ReturnType<typeof fakeRuntime>, opts: {
+  permission?: "allow" | "deny" | "ask";
+  shell?: {
+    run(input: { projectId: string; cwd: string; cmd: string }): Promise<{
+      output: string; exitCode: number | null; timedOut: boolean; truncated: boolean;
+    }>;
+  };
+} = {}) {
   const dir = mkdtempSync(join(tmpdir(), "polyth-delivery-"));
   const store = createStore(join(dir, "s.db"));
   const project: Project = { id: "p1", path: dir, name: "p", createdAt: 1 };
@@ -80,7 +92,7 @@ function makeService(fake: ReturnType<typeof fakeRuntime>) {
     remove: async () => {},
   };
   const permissions = {
-    evaluate: () => "ask",
+    evaluate: () => opts.permission ?? "ask",
     addRule: () => {},
     rules: () => [],
   } as unknown as PermissionService;
@@ -88,6 +100,7 @@ function makeService(fake: ReturnType<typeof fakeRuntime>) {
   const sessions = createSessionService({
     store, projects, permissions, broadcast, queue: store,
     runtimes: { forProject: async () => fake.rt },
+    ...(opts.shell ? { shell: opts.shell } : {}),
   });
   return { sessions, store };
 }
@@ -293,4 +306,109 @@ test("queue reorder validates permutations and remove is session-scoped", async 
   await sessions.queueRemove!(id, b.queueId!);
   assert.deepEqual((await sessions.queueList!(id)).map((i) => i.text), ["a"]);
   await assert.rejects(() => sessions.queueRemove!(id, "nope"), /not found/);
+});
+
+test("rewind rejects running turns, supports redo, and resets backend before replacement", async () => {
+  const fake = fakeRuntime();
+  const { sessions, store } = makeService(fake);
+  const { id } = await sessions.create({ projectId: "p1", title: "T" });
+  await sessions.send(id, { text: "first" });
+  await flush();
+  await assert.rejects(() => sessions.rewind!(id, 2), /while a turn is running/);
+  fake.emit(id, { type: "assistant/message", partId: "a1", text: "one" });
+  fake.emit(id, { type: "turn/stopped", reason: "completed" });
+  await flush();
+
+  await sessions.send(id, { text: "second" });
+  await flush();
+  fake.emit(id, { type: "assistant/message", partId: "a2", text: "two" });
+  fake.emit(id, { type: "turn/stopped", reason: "completed" });
+  await flush();
+  const before = await store.events(id);
+  const second = before.filter((event) => event.type === "user/message")[1]!;
+
+  const marker = await sessions.rewind!(id, second.seq);
+  assert.equal(marker.type, "session/rewound");
+  assert.equal((marker.data as { restoredText?: string }).restoredText, "second");
+  const restored = await sessions.clearRewind!(id);
+  assert.equal(restored.type, "session/rewind-cleared");
+
+  await sessions.rewind!(id, second.seq);
+  await sessions.send(id, { text: "replacement" });
+  await flush();
+  assert.deepEqual(fake.resetSessions, [id]);
+  assert.equal((await store.projection(id))?.backendSessionId, "fresh_1");
+  const after = await store.events(id);
+  const replacement = after.findLast(
+    (event) => event.type === "user/message" && (event.data as { text?: string }).text === "replacement",
+  )!;
+  const clear = after.findLast(
+    (event) => event.type === "session/rewind-cleared" && (event.data as { replaced?: boolean }).replaced === true,
+  )!;
+  assert.ok(clear.seq < replacement.seq);
+  await store.close();
+});
+
+test("composer shell waits for shell-family permission then appends call before result", async () => {
+  const fake = fakeRuntime();
+  const commands: string[] = [];
+  const { sessions, store } = makeService(fake, {
+    permission: "ask",
+    shell: {
+      run: async (input) => {
+        commands.push(input.cmd);
+        return { output: "clean\n", exitCode: 0, timedOut: false, truncated: false };
+      },
+    },
+  });
+  const { id } = await sessions.create({ projectId: "p1", title: "T" });
+  const pending = await sessions.runShell!(id, "git status --short");
+  assert.equal(pending.status, "pending");
+  assert.ok(pending.requestId);
+  assert.deepEqual(commands, []);
+  let events = await store.events(id);
+  const request = events.find((event) => event.type === "permission/requested")!;
+  assert.equal((request.data as { permission?: string }).permission, "shell");
+  assert.equal(request.producerPlugin, "composer-shell");
+  assert.equal(events.some((event) => event.type === "tool/call"), false);
+
+  await sessions.replyPermission(id, pending.requestId!, "once");
+  assert.deepEqual(commands, ["git status --short"]);
+  events = await store.events(id);
+  const types = events.map((event) => event.type);
+  const resolvedIndex = types.indexOf("permission/resolved");
+  const callIndex = types.indexOf("tool/call");
+  const resultIndex = types.indexOf("tool/result");
+  assert.ok(resolvedIndex >= 0 && callIndex > resolvedIndex && resultIndex > callIndex);
+  assert.equal(events[callIndex]!.producerPlugin, "composer-shell");
+  assert.equal(events[resultIndex]!.producerPlugin, "composer-shell");
+  const modelMessages = deriveMessages(events);
+  assert.equal(
+    modelMessages.some((message) => message.parts.some((part) => part.type === "tool-result" && part.output === "clean\n")),
+    true,
+  );
+  assert.equal((await sessions.snapshot(id)).status, "idle");
+  await store.close();
+});
+
+test("composer shell honors deny rules without executing", async () => {
+  const fake = fakeRuntime();
+  let runs = 0;
+  const { sessions, store } = makeService(fake, {
+    permission: "deny",
+    shell: {
+      run: async () => {
+        runs += 1;
+        return { output: "", exitCode: 0, timedOut: false, truncated: false };
+      },
+    },
+  });
+  const { id } = await sessions.create({ projectId: "p1", title: "T" });
+  const result = await sessions.runShell!(id, "rm -rf build");
+  assert.equal(result.status, "rejected");
+  assert.equal(runs, 0);
+  const events = await store.events(id);
+  assert.deepEqual(events.slice(-2).map((event) => event.type), ["tool/call", "tool/result"]);
+  assert.match(String((events.at(-1)!.data as { output?: string }).output), /rejected/);
+  await store.close();
 });

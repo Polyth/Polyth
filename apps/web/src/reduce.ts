@@ -2,6 +2,7 @@
 // the store, the views and tests. Replaying the same event list in order
 // reconstructs an identical model (session log invariant).
 import type {
+  AttachmentRef,
   FusionDto,
   FusionWeightDto,
   JsonObject,
@@ -11,12 +12,17 @@ import type {
   SessionEvent,
   TokenUsage,
 } from "@polyth/contracts";
+import { extractChangedFiles } from "./pendingChanges.ts";
 
 export interface UserMsg {
   kind: "user";
   id: string;
+  eventSeq: number;
   text: string;
   raw?: string;
+  attachments?: AttachmentRef[];
+  undone?: boolean;
+  rewindMarkerSeq?: number;
   time: number;
 }
 
@@ -24,6 +30,7 @@ export interface AssistantMsg {
   kind: "assistant";
   id: string; // partId
   partId: string;
+  eventSeq: number;
   text: string;
   reasoning: string;
   finalized: boolean; // assistant/message seen
@@ -31,6 +38,8 @@ export interface AssistantMsg {
   agent?: string;
   tokens?: TokenUsage;
   cost?: number;
+  undone?: boolean;
+  rewindMarkerSeq?: number;
   time: number;
 }
 
@@ -38,17 +47,33 @@ export interface ToolMsg {
   kind: "tool";
   id: string; // callId
   callId: string;
+  eventSeq: number;
   tool: string;
   input: JsonObject;
   output?: string;
   error?: string;
   title?: string;
   status: "pending" | "done" | "error";
+  undone?: boolean;
+  rewindMarkerSeq?: number;
   time: number;
   finishTime?: number;
+  changedFiles?: string[];
 }
 
-export type RenderMessage = UserMsg | AssistantMsg | ToolMsg;
+export interface TaskActivityMsg {
+  kind: "task";
+  id: string;
+  eventSeq: number;
+  taskId: string;
+  text: string;
+  action: "created" | "started" | "completed" | "failed";
+  undone?: boolean;
+  rewindMarkerSeq?: number;
+  time: number;
+}
+
+export type RenderMessage = UserMsg | AssistantMsg | ToolMsg | TaskActivityMsg;
 
 export interface PendingPermission {
   requestId: string;
@@ -57,6 +82,8 @@ export interface PendingPermission {
   tool?: string;
   status: "pending" | "resolved";
   reply?: "once" | "always" | "reject";
+  /** F18: resolved by the session's auto-accept policy, not a human click. */
+  auto?: boolean;
   time: number;
   /** Server-generated, secret-redacted preview (WP15; old events lack it). */
   preview?: { title: string; lines: string[]; risk?: "low" | "medium" | "high" };
@@ -95,6 +122,27 @@ export interface Totals {
   cost: number;
 }
 
+export interface ContextUsageState {
+  inputTokens: number;
+  model?: ModelRef;
+}
+
+export type ContextGauge =
+  | {
+      known: true;
+      inputTokens: number;
+      contextTokens: number;
+      percent: number;
+      level: "green" | "yellow" | "red";
+    }
+  | {
+      known: false;
+      inputTokens: number;
+      contextTokens: null;
+      percent: null;
+      level: "unknown";
+    };
+
 export interface TurnState {
   turnId: string;
   status: "working" | "stopped" | "aborted" | "failed";
@@ -120,6 +168,8 @@ export interface RenderModel {
   permissions: PendingPermission[];
   questions: PendingQuestion[];
   totals: Totals;
+  /** Latest usage sample for the active/last turn (not lifetime totals). */
+  contextUsage: ContextUsageState | null;
   turn: TurnState | null;
   goal: GoalState | null;
   multirun: MultirunDto | null;
@@ -128,6 +178,9 @@ export interface RenderModel {
   /** Latest revisioned task/subagent snapshots (WP8); replay-deterministic. */
   tasks: TaskListState | null;
   subagents: SubagentState | null;
+  /** Edit-tool paths from the current/last turn; cleared by the next prompt. */
+  changedFiles: string[];
+  rewind: { markerSeq: number; atSeq: number; restoredText?: string } | null;
   version: number; // bumps on every applied event (cheap change signal)
 }
 
@@ -137,6 +190,7 @@ export function emptyModel(): RenderModel {
     permissions: [],
     questions: [],
     totals: { input: 0, output: 0, reasoning: 0, cacheRead: 0, cacheWrite: 0, cost: 0 },
+    contextUsage: null,
     turn: null,
     goal: null,
     multirun: null,
@@ -144,7 +198,24 @@ export function emptyModel(): RenderModel {
     fusionPrompt: "",
     tasks: null,
     subagents: null,
+    changedFiles: [],
+    rewind: null,
     version: 0,
+  };
+}
+
+export function contextGauge(model: Pick<RenderModel, "contextUsage">, contextTokens?: number): ContextGauge {
+  const inputTokens = Math.max(0, model.contextUsage?.inputTokens ?? 0);
+  if (!Number.isFinite(contextTokens) || !contextTokens || contextTokens <= 0) {
+    return { known: false, inputTokens, contextTokens: null, percent: null, level: "unknown" };
+  }
+  const percent = Math.min(100, Math.max(0, Math.round((inputTokens / contextTokens) * 100)));
+  return {
+    known: true,
+    inputTokens,
+    contextTokens,
+    percent,
+    level: percent < 60 ? "green" : percent < 85 ? "yellow" : "red",
   };
 }
 
@@ -178,9 +249,19 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
     case "user/message": {
       const text = str(d, "text") ?? "";
       const raw = str(d, "raw");
-      const msg: UserMsg = { kind: "user", id: ev.id, text, time: ev.time };
+      const msg: UserMsg = { kind: "user", id: ev.id, eventSeq: ev.seq, text, time: ev.time };
       if (raw !== undefined && raw !== text) msg.raw = raw;
+      // Attachment pills on the message (F2): keep only well-formed refs.
+      const atts = (d as { attachments?: unknown }).attachments;
+      if (Array.isArray(atts)) {
+        const refs = atts.filter((a): a is AttachmentRef =>
+          typeof a === "object" && a !== null
+          && typeof (a as { name?: unknown }).name === "string"
+          && typeof (a as { mime?: unknown }).mime === "string");
+        if (refs.length > 0) msg.attachments = refs;
+      }
       model.messages.push(msg);
+      model.changedFiles = [];
       break;
     }
     case "assistant/chunk":
@@ -188,7 +269,7 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
       const partId = str(d, "partId") ?? "";
       let m = findAssistant(model, partId);
       if (!m) {
-        m = { kind: "assistant", id: partId, partId, text: "", reasoning: "", finalized: false, time: ev.time };
+        m = { kind: "assistant", id: partId, partId, eventSeq: ev.seq, text: "", reasoning: "", finalized: false, time: ev.time };
         model.messages.push(m);
       }
       const text = str(d, "text") ?? "";
@@ -200,7 +281,7 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
       const partId = str(d, "partId") ?? "";
       let m = findAssistant(model, partId);
       if (!m) {
-        m = { kind: "assistant", id: partId, partId, text: "", reasoning: "", finalized: false, time: ev.time };
+        m = { kind: "assistant", id: partId, partId, eventSeq: ev.seq, text: "", reasoning: "", finalized: false, time: ev.time };
         model.messages.push(m);
       }
       m.finalized = true;
@@ -220,6 +301,7 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
         kind: "tool",
         id: callId,
         callId,
+        eventSeq: ev.seq,
         tool: str(d, "tool") ?? "",
         input: obj(d, "input") ?? {},
         status: "pending",
@@ -236,6 +318,11 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
         if (title !== undefined) t.title = title;
         const lateInput = obj(d, "input");
         if (lateInput && Object.keys(t.input).length === 0) t.input = lateInput; // opencode fills input late
+        const changedFiles = extractChangedFiles(t.tool, lateInput ?? t.input, obj(d, "metadata"));
+        if (changedFiles.length > 0) {
+          t.changedFiles = changedFiles;
+          model.changedFiles = [...new Set([...model.changedFiles, ...changedFiles])];
+        }
         t.finishTime = ev.time;
       }
       break;
@@ -252,6 +339,7 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
           kind: "tool",
           id: callId,
           callId,
+          eventSeq: ev.seq,
           tool: str(d, "tool") ?? "",
           input: {},
           status: "error",
@@ -262,13 +350,67 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
       }
       break;
     }
+    case "session/rewound": {
+      const atSeq = num(d, "atSeq");
+      if (atSeq === undefined || !Number.isSafeInteger(atSeq) || atSeq <= 0) break;
+      for (const message of model.messages) {
+        if (!message.undone && message.eventSeq >= atSeq) {
+          message.undone = true;
+          message.rewindMarkerSeq = ev.seq;
+        }
+      }
+      const restoredText = str(d, "restoredText");
+      model.rewind = {
+        markerSeq: ev.seq,
+        atSeq,
+        ...(restoredText !== undefined ? { restoredText } : {}),
+      };
+      break;
+    }
+    case "session/rewind-cleared": {
+      const rewindSeq = num(d, "rewindSeq");
+      if (!model.rewind || (rewindSeq !== undefined && rewindSeq !== model.rewind.markerSeq)) break;
+      if (d.replaced !== true) {
+        for (const message of model.messages) {
+          if (message.rewindMarkerSeq === model.rewind.markerSeq) {
+            delete message.undone;
+            delete message.rewindMarkerSeq;
+          }
+        }
+      }
+      model.rewind = null;
+      break;
+    }
     case "task/snapshot": {
       const revision = num(d, "revision") ?? 0;
       // Snapshots are full state: apply only monotonically increasing revisions
       // so out-of-order delivery can never regress the projection.
       if (model.tasks && revision <= model.tasks.revision) break;
       const items = Array.isArray(d.items) ? (d.items as TaskListState["items"]) : [];
-      model.tasks = { listId: str(d, "listId") ?? "todo", revision, items };
+      const listId = str(d, "listId") ?? "todo";
+      const previous = new Map(model.tasks?.items.map((item) => [item.id, item]));
+      for (const item of items) {
+        const old = previous.get(item.id);
+        let action: TaskActivityMsg["action"] | null = null;
+        if (!old || old.status !== item.status) {
+          if (item.status === "active") action = "started";
+          else if (item.status === "done") action = "completed";
+          else if (item.status === "failed") action = "failed";
+          else if (!old) action = "created";
+        }
+        if (action) {
+          model.messages.push({
+            kind: "task",
+            id: `task-${listId}-${revision}-${item.id}-${action}`,
+            eventSeq: ev.seq,
+            taskId: item.id,
+            text: item.text,
+            action,
+            time: ev.time,
+          });
+        }
+      }
+      model.tasks = { listId, revision, items };
       break;
     }
     case "subagent/snapshot": {
@@ -315,6 +457,7 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
         p.status = "resolved";
         const reply = str(d, "reply");
         if (reply === "once" || reply === "always" || reply === "reject") p.reply = reply;
+        if (d.auto === true) p.auto = true; // F18: policy-approved, no human click
       }
       break;
     }
@@ -341,12 +484,14 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
       break;
     }
     case "turn/started": {
+      const turnModel = obj(d, "model") as ModelRef | undefined;
       model.turn = {
         turnId: str(d, "turnId") ?? "",
         status: "working",
-        model: obj(d, "model") as ModelRef | undefined,
+        model: turnModel,
         agent: str(d, "agent"),
       };
+      model.contextUsage = { inputTokens: 0, ...(turnModel ? { model: turnModel } : {}) };
       break;
     }
     case "turn/stopped": {
@@ -372,6 +517,11 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
         model.totals.reasoning += t.reasoning ?? 0;
         model.totals.cacheRead += t.cacheRead ?? 0;
         model.totals.cacheWrite += t.cacheWrite ?? 0;
+        const usageModel = obj(d, "model") as ModelRef | undefined;
+        model.contextUsage = {
+          inputTokens: Math.max(0, t.input ?? 0),
+          ...(usageModel ? { model: usageModel } : model.contextUsage?.model ? { model: model.contextUsage.model } : {}),
+        };
       }
       const cost = num(d, "cost");
       if (cost !== undefined) model.totals.cost += cost;

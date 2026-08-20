@@ -20,6 +20,8 @@ interface EditorState {
   body: string;
   tags: string;
   revision: number;
+  /** Set when the draft came from chat→note distillation (F9). */
+  sourceSessionId?: string;
 }
 
 const EMPTY_EDITOR: EditorState = { id: null, kind: "note", title: "", body: "", tags: "", revision: 0 };
@@ -34,6 +36,7 @@ export default function KnowledgePanel() {
   const [editor, setEditor] = useState<EditorState | null>(null);
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  const [distilling, setDistilling] = useState(false);
 
   const reload = useCallback(() => {
     if (!projectId) { setItems([]); setTotal(0); return; }
@@ -65,7 +68,10 @@ export default function KnowledgePanel() {
     const tags = editor.tags.split(",").map((t) => t.trim()).filter(Boolean);
     void run(async () => {
       if (editor.id === null) {
-        await api.knowledgeCreate({ projectId, kind: editor.kind, title: editor.title, body: editor.body, tags });
+        await api.knowledgeCreate({
+          projectId, kind: editor.kind, title: editor.title, body: editor.body, tags,
+          ...(editor.sourceSessionId ? { sourceSessionId: editor.sourceSessionId } : {}),
+        });
       } else {
         await api.knowledgeUpdate(editor.id, { title: editor.title, body: editor.body, tags, kind: editor.kind }, editor.revision);
       }
@@ -99,6 +105,20 @@ export default function KnowledgePanel() {
     <div className="knowledge-panel">
       <div className="view-toolbar-row">
         <input className="knowledge-search" placeholder="Search knowledge…" value={q} onChange={(e) => setQ(e.target.value)} />
+        {sessionId && (
+          <button
+            className="small-btn"
+            disabled={distilling}
+            title="Distill the current session into a note draft (small model) — you review before saving"
+            onClick={() => {
+              setDistilling(true);
+              void run(async () => {
+                const draft = await api.assistNote(sessionId);
+                setEditor({ ...EMPTY_EDITOR, title: draft.title, body: draft.body, sourceSessionId: sessionId });
+              }).finally(() => setDistilling(false));
+            }}
+          >{distilling ? "Distilling…" : "From chat"}</button>
+        )}
         <button className="small-btn" title="New knowledge item" onClick={() => setEditor({ ...EMPTY_EDITOR })}>New</button>
       </div>
       <div className="seg knowledge-kinds">

@@ -1,13 +1,24 @@
-import { Fragment, useState, useRef, useEffect, useCallback, type KeyboardEvent } from "react";
-import { getState, useActiveModel, useStore, setActiveView } from "../store.ts";
+import { Fragment, useState, useRef, useEffect, useCallback, type ClipboardEvent, type KeyboardEvent } from "react";
+import { getState, useActiveModel, useStore, setActiveView, setUiError } from "../store.ts";
 import { sendMessage, abortSession, createSession } from "../init.ts";
 import { api, type SlashCommand, type SnippetDef } from "../api.ts";
 import { filterCommands, filterSnippets, loadDraft, saveDraft, type AutocompleteItem } from "../utils.ts";
 import { PERSONAS, usePrefs } from "../prefs.ts";
 import { renderSlot } from "../slots.ts";
 import { dragKind, dropIntoSession } from "../dnd.ts";
-import { COMPOSER_INSERT, drainInserts } from "../composerInsert.ts";
-import { activeToken, completeToken, type PromptToken } from "../composer/language.ts";
+import {
+  attachUpload, parseGithubUrl, removeAttachment, takeAttachments,
+  tryAttachGithubUrl, usePendingAttachments,
+} from "../attachments.ts";
+import AttachmentPills from "./AttachmentPills.tsx";
+import { COMPOSER_INSERT, COMPOSER_REPLACE, drainInserts } from "../composerInsert.ts";
+import { activeToken, completeToken, shellCommand, type PromptToken } from "../composer/language.ts";
+import {
+  emptyPromptHistoryCursor,
+  promptHistory,
+  restorePromptHistoryDraft,
+  stepPromptHistory,
+} from "../composer/history.ts";
 import type { PickerItem } from "../picker.ts";
 import Picker from "./Picker.tsx";
 import AdaptiveTextInput, { type TextInputHandle } from "./input/AdaptiveTextInput.tsx";
@@ -18,6 +29,7 @@ import { noteModelUsed, useModelPrefs } from "../modelPrefs.ts";
 import { getUiSettings } from "../uiPrefs.ts";
 import { migrateFavoritesOnce, useProfiles } from "../profiles.ts";
 import AgentProfileForm from "./AgentProfileForm.tsx";
+import PendingChangesBar from "./PendingChangesBar.tsx";
 import type { AgentProfile } from "@polyth/contracts";
 import { agentPickerDefaultLabel, modelPickerDefaultLabel } from "../composerDefaults.ts";
 import { modKeyLabel, parseModelRef } from "../settings.ts";
@@ -69,6 +81,11 @@ export default function Composer({ variant = "docked" }: { variant?: "docked" | 
   const sessionIdRef = useRef<string | null>(session?.id ?? null);
   const [text, setText] = useState(() => (session?.id ? loadDraft(session.id) : ""));
   const [focusMode, setFocusMode] = useState(false);
+  const historyCursor = useRef(emptyPromptHistoryCursor());
+  const applyingHistory = useRef(false);
+  const historyItems = promptHistory(model.messages);
+  const shell = shellCommand(text);
+  const shellMode = shell !== null;
 
   // Session switch: restore the draft through the command handle (never a
   // controlled replay), and never while the user is mid-composition.
@@ -77,6 +94,7 @@ export default function Composer({ variant = "docked" }: { variant?: "docked" | 
     const t = session?.id ? loadDraft(session.id) : "";
     setText(t);
     inputRef.current?.replaceText(t);
+    historyCursor.current = emptyPromptHistoryCursor();
   }, [session?.id]);
 
   // Debounced draft persistence of committed text.
@@ -87,8 +105,42 @@ export default function Composer({ variant = "docked" }: { variant?: "docked" | 
     return () => clearTimeout(t);
   }, [session?.id, text]);
 
-  // Drag-and-drop: tree paths attach as @path, desktop files upload first.
+  // Drag-and-drop: tree paths and desktop files become attachment pills.
   const [dropHint, setDropHint] = useState<"path" | "files" | null>(null);
+
+  // Pending attachment pills live in the per-session draft store (F2).
+  const attachments = usePendingAttachments(session?.id ?? null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const attachFiles = useCallback((files: File[]) => {
+    const projectId = getState().activeProjectId;
+    if (!projectId || files.length === 0) return;
+    const target = sessionIdRef.current;
+    for (const f of files) {
+      void attachUpload(projectId, target, f).then((r) => {
+        if (!r.ok) setUiError(`Couldn’t attach ${f.name || "file"}: ${r.reason}`);
+      });
+    }
+  }, []);
+
+  // Paste: image/file clipboards become pills; a lone GitHub PR/issue URL
+  // becomes a pill when the project's remote matches, else stays plain text.
+  const onPaste = useCallback((e: ClipboardEvent<HTMLTextAreaElement>) => {
+    const projectId = getState().activeProjectId;
+    if (!projectId) return;
+    const files = Array.from(e.clipboardData?.files ?? []);
+    if (files.length > 0) {
+      e.preventDefault();
+      attachFiles(files);
+      return;
+    }
+    const pasted = e.clipboardData?.getData("text/plain") ?? "";
+    if (!parseGithubUrl(pasted)) return;
+    e.preventDefault();
+    const target = sessionIdRef.current;
+    void tryAttachGithubUrl(projectId, target, pasted).then((consumed) => {
+      if (!consumed) inputRef.current?.insertText(pasted);
+    });
+  }, [attachFiles]);
 
   // Autocomplete state (token-based: works at any caret position)
   const [acItems, setAcItems] = useState<AutocompleteItem[]>(EMPTY_AC);
@@ -152,29 +204,50 @@ export default function Composer({ variant = "docked" }: { variant?: "docked" | 
       insert(detail);
       inputRef.current?.focus();
     };
+    const replace = (e: Event) => {
+      const detail = (e as CustomEvent).detail;
+      if (typeof detail !== "string") return;
+      e.preventDefault();
+      setText(detail);
+      inputRef.current?.replaceText(detail);
+      inputRef.current?.focus();
+    };
     window.addEventListener(COMPOSER_INSERT, handler);
-    return () => window.removeEventListener(COMPOSER_INSERT, handler);
+    window.addEventListener(COMPOSER_REPLACE, replace);
+    return () => {
+      window.removeEventListener(COMPOSER_INSERT, handler);
+      window.removeEventListener(COMPOSER_REPLACE, replace);
+    };
   }, []);
 
   const send = useCallback((override?: string) => {
     const t = (override ?? inputRef.current?.getText() ?? text).trim();
-    if (!t || noModels) return;
+    const command = shellCommand(t);
+    const hasPills = command === null && attachments.length > 0;
+    if ((!t && !hasPills) || (command === null && noModels) || command === "") return;
     // Capture the target session at send time — project/session switches must
     // never reroute a send (delivery admission handles active turns server-side).
     const target = sessionIdRef.current;
+    // Pills leave the draft the moment the message leaves the composer.
+    const atts = command === null ? takeAttachments(target) : [];
     const delivery = working ? getUiSettings().followUpBehavior : undefined;
     const preferred = !session?.model ? parseModelRef(settings.defaultModel) : undefined;
-    const deliver = (targetSessionId: string) => sendMessage(
-      t,
-      modelRefFromValue(modelValue) ?? preferred,
-      agentValue || undefined,
-      {
-        targetSessionId,
-        ...(delivery ? { delivery } : {}),
-        dismissPending: true,
-        ...(profileValue ? { agentProfileId: profileValue } : {}),
-      },
-    );
+    const deliver = (targetSessionId: string) => command !== null
+      ? api.runShell(targetSessionId, command).catch(
+          (err) => setUiError(`Couldn’t run shell command: ${err instanceof Error ? err.message : String(err)}`),
+        )
+      : sendMessage(
+          t,
+          modelRefFromValue(modelValue) ?? preferred,
+          agentValue || undefined,
+          {
+            targetSessionId,
+            ...(atts.length > 0 ? { attachments: atts } : {}),
+            ...(delivery ? { delivery } : {}),
+            dismissPending: true,
+            ...(profileValue ? { agentProfileId: profileValue } : {}),
+          },
+        );
     if (target) {
       void deliver(target);
     } else if (activeProjectId) {
@@ -185,9 +258,10 @@ export default function Composer({ variant = "docked" }: { variant?: "docked" | 
     }
     setText("");
     inputRef.current?.replaceText("");
+    historyCursor.current = emptyPromptHistoryCursor();
     if (target) saveDraft(target, "");
     setAcOpen(false);
-  }, [text, modelValue, agentValue, profileValue, noModels, working, activeProjectId, session?.model, settings.defaultModel]);
+  }, [text, attachments, modelValue, agentValue, profileValue, noModels, working, activeProjectId, session?.model, settings.defaultModel]);
 
   const applyCompletion = useCallback((item: AutocompleteItem) => {
     const token = acTokenRef.current;
@@ -233,6 +307,33 @@ export default function Composer({ variant = "docked" }: { variant?: "docked" | 
         return true;
       }
     }
+    const h = inputRef.current;
+    const current = h?.getText() ?? text;
+    const selection = h?.getSelection() ?? { start: 0, end: 0 };
+    if (e.key === "ArrowUp" && (historyCursor.current.index !== null || (selection.start === 0 && selection.end === 0))) {
+      const next = stepPromptHistory(historyItems, current, historyCursor.current, "up");
+      historyCursor.current = next.cursor;
+      applyingHistory.current = true;
+      setText(next.text);
+      h?.replaceText(next.text);
+      return historyItems.length > 0;
+    }
+    if (e.key === "ArrowDown" && (historyCursor.current.index !== null || (selection.start === current.length && selection.end === current.length))) {
+      const next = stepPromptHistory(historyItems, current, historyCursor.current, "down");
+      historyCursor.current = next.cursor;
+      applyingHistory.current = true;
+      setText(next.text);
+      h?.replaceText(next.text);
+      return historyCursor.current.index !== null || next.text !== current;
+    }
+    if (e.key === "Escape" && historyCursor.current.index !== null) {
+      const next = restorePromptHistoryDraft(current, historyCursor.current);
+      historyCursor.current = next.cursor;
+      applyingHistory.current = true;
+      setText(next.text);
+      h?.replaceText(next.text);
+      return true;
+    }
     if (e.key === "Enter") {
       if (e.metaKey || e.ctrlKey) {
         send();
@@ -250,6 +351,8 @@ export default function Composer({ variant = "docked" }: { variant?: "docked" | 
   const onTextChange = useCallback(
     (val: string) => {
       setText(val);
+      if (!applyingHistory.current) historyCursor.current = emptyPromptHistoryCursor();
+      applyingHistory.current = false;
       const caret = inputRef.current?.getSelection().end ?? val.length;
       const token = activeToken(val, caret);
       acTokenRef.current = token;
@@ -365,6 +468,7 @@ export default function Composer({ variant = "docked" }: { variant?: "docked" | 
 
   return (
     <div className={variant === "hero" ? "composer-hero" : "composer"}>
+      {variant === "docked" && <PendingChangesBar model={model} />}
       <div
         className="composer-card"
         onDragOver={(e) => { const k = dragKind(e.dataTransfer); if (k) { e.preventDefault(); setDropHint(k); } }}
@@ -374,11 +478,12 @@ export default function Composer({ variant = "docked" }: { variant?: "docked" | 
           setDropHint(null);
           if (!k || !activeProjectId) return;
           e.preventDefault();
-          void dropIntoSession(e.dataTransfer, activeProjectId);
+          void dropIntoSession(e.dataTransfer, activeProjectId, sessionIdRef.current,
+            (reason) => setUiError(`Couldn’t attach: ${reason}`));
         }}
       >
       {dropHint && (
-        <div className="drop-hint">{dropHint === "path" ? "Attach to session" : "Drop to upload"}</div>
+        <div className="drop-hint">{dropHint === "path" ? "Attach to chat" : "Drop to attach"}</div>
       )}
       {simple && (prefs.plugins.includes("multirun") || prefs.plugins.includes("fusion")) && (
         <div className="chip-row">
@@ -396,18 +501,28 @@ export default function Composer({ variant = "docked" }: { variant?: "docked" | 
         </div>
       )}
       {session?.id && <QueuedMessageList sessionId={session.id} />}
+      {attachments.length > 0 && (
+        <AttachmentPills
+          attachments={attachments}
+          onRemove={(id) => removeAttachment(session?.id ?? null, id)}
+        />
+      )}
       <div className="composer-input">
+        {shellMode && <div className="composer-mode-label">Shell command · permission checked · output added to context</div>}
         <AdaptiveTextInput
           ref={inputRef}
           initialText={text}
           rows={3}
           className="composer-editor"
           ariaLabel="Message"
-          placeholder={simple
+          placeholder={shellMode
+            ? "Enter a workspace shell command…"
+            : simple
             ? "Describe what you want — it gets built as you watch…"
-            : "Ask Polyth to explore, build, or review — / for commands, # for snippets, @ for files"}
+            : "Ask Polyth to explore, build, or review — ! for shell, / for commands, # for snippets, @ for files"}
           onTextChange={onTextChange}
           onKeyIntercept={onKeyIntercept}
+          onPaste={onPaste}
         />
         {acOpen && acItems.length > 0 && (
           <div className="ac-popup">
@@ -454,6 +569,24 @@ export default function Composer({ variant = "docked" }: { variant?: "docked" | 
         {!simple && profiles.length > 0 && (
           <Picker label="Profile" direction="up" items={profileItems} value={profileValue} onPick={setProfileValue} placeholder="None" />
         )}
+        <input
+          ref={fileInputRef}
+          type="file"
+          multiple
+          hidden
+          onChange={(e) => {
+            const files = Array.from(e.currentTarget.files ?? []);
+            e.currentTarget.value = "";
+            attachFiles(files);
+          }}
+        />
+        <button
+          className="icon-btn"
+          title="Attach files"
+          aria-label="Attach files"
+          disabled={!activeProjectId}
+          onClick={() => fileInputRef.current?.click()}
+        >⊕</button>
         <button
           className="icon-btn"
           title="Focused editor (Mod+Shift+Enter)"
@@ -464,17 +597,17 @@ export default function Composer({ variant = "docked" }: { variant?: "docked" | 
         {trailing.map((n, i) => <Fragment key={i}>{n}</Fragment>)}
         {working ? (
           <>
-            <button className="send composer-delivery" onClick={() => send()} disabled={!text.trim() || noModels}
+            <button className="send composer-delivery" onClick={() => send()} disabled={(!text.trim() && attachments.length === 0) || (!shellMode && noModels)}
               title={`Active turn — this message will ${followUp === "steer" ? "steer the current turn" : followUp === "interrupt" ? "interrupt, then send" : "queue until idle"}`}>
-              {followUp === "steer" ? "Steer" : followUp === "interrupt" ? "Interrupt" : "Queue"} <span className="send-key">{settings.sendOnEnter ? "↵" : `${modKeyLabel()}↵`}</span>
+              {shellMode ? "Run" : followUp === "steer" ? "Steer" : followUp === "interrupt" ? "Interrupt" : "Queue"} <span className="send-key">{settings.sendOnEnter ? "↵" : `${modKeyLabel()}↵`}</span>
             </button>
             <button className="stop" onClick={() => void abortSession()}>
               Stop
             </button>
           </>
         ) : (
-          <button className="send" onClick={() => send()} disabled={!text.trim() || noModels}>
-            Send <span className="send-key">{settings.sendOnEnter ? "↵" : `${modKeyLabel()}↵`}</span>
+          <button className="send" onClick={() => send()} disabled={(!text.trim() && attachments.length === 0) || (!shellMode && noModels)}>
+            {shellMode ? "Run" : "Send"} <span className="send-key">{settings.sendOnEnter ? "↵" : `${modKeyLabel()}↵`}</span>
           </button>
         )}
       </div>

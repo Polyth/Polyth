@@ -96,7 +96,9 @@ export function settingsRoutes(deps: SettingsRouteDeps): RouteHandler {
       rc.json(200, { ok: await deps.mcp.remove(m[1]!) });
       return true;
     }
-    m = path.match(/^\/api\/mcp\/servers\/([^/]+)\/test$/);
+    // F10 names this "probe"; "test" remains as the original spelling. Both hit
+    // the same reachability check, which stores status/lastError on the entry.
+    m = path.match(/^\/api\/mcp\/servers\/([^/]+)\/(?:test|probe)$/);
     if (m && method === "POST") {
       rc.json(200, await deps.mcp.test(m[1]!));
       return true;

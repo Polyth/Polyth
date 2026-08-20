@@ -5,13 +5,16 @@
 import { WebSocketServer, WebSocket } from "ws";
 import type { Server } from "node:http";
 import type { IncomingMessage } from "node:http";
+import { resolve } from "node:path";
 import type { ProjectService, SessionEvent, SessionPersistence, JsonObject } from "@polyth/contracts";
+import type { SessionService } from "@polyth/contracts";
 import type { TerminalService } from "@polyth/terminal";
 import type { RouteHandler } from "../http.ts";
 import type { Broadcaster } from "../sessions.ts";
 
 export function terminalRoutes(deps: {
   projects: ProjectService;
+  sessions: SessionService;
   terminals: TerminalService;
   /** append + broadcast; only used when a terminal is spawned from a session context */
   events?: { append(sessionId: string, type: string, data: JsonObject): Promise<SessionEvent> };
@@ -46,7 +49,22 @@ export function terminalRoutes(deps: {
       if (!projectId) throw Object.assign(new Error("projectId required"), { code: "invalid-path" });
       const project = await deps.projects.get(projectId);
       if (!project) throw Object.assign(new Error("unknown project"), { code: "not-found" });
-      const cwd = b.cwd ? String(b.cwd) : project.path; // UI passes a session's worktreePath here
+      let cwd = project.path;
+      if (b.sessionId) {
+        const session = await deps.sessions.snapshot(String(b.sessionId));
+        if (session.projectId !== projectId) {
+          throw Object.assign(new Error("session does not belong to this project"), { code: "invalid-input" });
+        }
+        if (session.worktreeState === "missing") {
+          throw Object.assign(new Error("session worktree is missing"), { code: "not-found" });
+        }
+        cwd = session.worktreePath ?? project.path;
+        if (b.cwd && resolve(String(b.cwd)) !== resolve(cwd)) {
+          throw Object.assign(new Error("terminal cwd does not match the session workspace"), { code: "invalid-path" });
+        }
+      } else if (b.cwd && resolve(String(b.cwd)) !== resolve(project.path)) {
+        throw Object.assign(new Error("terminal cwd requires a matching session"), { code: "invalid-path" });
+      }
       const { id } = await terminals.create({
         projectId,
         cwd,
@@ -69,6 +87,15 @@ export function terminalRoutes(deps: {
       json(200, { ok: true });
       return true;
     }
+    if (m && method === "PATCH") { // rename (F12)
+      const b = await body();
+      const title = String(b.title ?? "").trim();
+      if (!title) throw Object.assign(new Error("title required"), { code: "invalid-input" });
+      const info = terminals.rename(m[1]!, title);
+      if (!info) throw Object.assign(new Error("unknown terminal"), { code: "not-found" });
+      json(200, info);
+      return true;
+    }
     if (m && method === "DELETE") {
       if (!terminals.get(m[1]!)) throw Object.assign(new Error("unknown terminal"), { code: "not-found" });
       await terminals.close(m[1]!);
@@ -83,6 +110,8 @@ export function terminalRoutes(deps: {
  *  only claims its own path; unmatched upgrades fall through to us). */
 export function attachTerminalWs(server: Server, deps: {
   terminals: TerminalService;
+  /** F16: when provided, upgrades without a valid auth cookie are rejected. */
+  authorize?: (req: IncomingMessage) => boolean;
 }): void {
   const wss = new WebSocketServer({ noServer: true });
   // socket -> terminalId it was opened for (each /ws/terminal/:id socket
@@ -95,8 +124,21 @@ export function attachTerminalWs(server: Server, deps: {
 
   wss.on("connection", (ws, req) => {
     const id = (req.url ?? "").split("/").pop() ?? "";
+    const info = deps.terminals.get(id);
+    if (!info) {
+      // the PTY is gone (closed via REST or server restart) — tell the client
+      // so its reconnect loop stops instead of retrying forever
+      send(ws, { type: "error", terminalId: id, code: "not-found" });
+      ws.close();
+      return;
+    }
     sockets.set(ws, id);
     send(ws, { type: "attached", terminalId: id });
+    // F12: replay the bounded scrollback before any live frame, so late
+    // subscribers (page reloads, second windows) see the startup output
+    const replay = deps.terminals.replay(id);
+    if (replay) send(ws, { type: "replay", terminalId: id, data: replay });
+    if (!info.running) send(ws, { type: "exit", terminalId: id, exitCode: info.exitCode ?? null });
     ws.on("message", (raw) => {
       let msg: { type?: string; data?: string; cols?: number; rows?: number };
       try { msg = JSON.parse(String(raw)); } catch { return; }
@@ -118,6 +160,11 @@ export function attachTerminalWs(server: Server, deps: {
     const url = new URL(req.url ?? "/", "http://x");
     const m = url.pathname.match(/^\/ws\/terminal\/([^/]+)$/);
     if (!m) return;
+    if (deps.authorize && !deps.authorize(req)) {
+      socket.write("HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n");
+      socket.destroy();
+      return;
+    }
     wss.handleUpgrade(req, socket, head, (ws) => wss.emit("connection", ws, req));
   };
   server.on("upgrade", upgrade);

@@ -3,14 +3,19 @@
 // operations (submit review, publish labels) are explicit, confirmed actions —
 // nothing else on the server may write to GitHub.
 import type { JsonObject, ProjectService, SessionEvent } from "@polyth/contracts";
-import { summarizeChecks, type GithubService, type ReviewCommentInput } from "@polyth/github";
+import { summarizeChecks, type GithubService, type MergeStrategy, type ReviewCommentInput } from "@polyth/github";
 import type { RouteHandler } from "../http.ts";
+
+const MERGE_STRATEGIES = ["squash", "merge", "rebase"] as const;
 
 export function githubRoutes(deps: {
   projects: ProjectService;
   github: GithubService;
-  /** logs review/submitted to the originating session before responding */
+  /** logs review/submitted and pr/* lifecycle events to the originating session before responding */
   append?: (sessionId: string, type: string, data: JsonObject) => Promise<SessionEvent>;
+  /** F7: small-model PR title+body from `git diff base...HEAD` — wired in boot,
+   *  absent in minimal deployments. Never submits anything itself. */
+  describe?: (root: string, base?: string) => Promise<{ title: string; body: string }>;
 }): RouteHandler {
   const rootOf = async (projectId: string | null): Promise<string> => {
     if (!projectId) throw Object.assign(new Error("projectId required"), { code: "invalid-path" });
@@ -62,6 +67,96 @@ export function githubRoutes(deps: {
       const root = await rootOf(b.projectId ? String(b.projectId) : null);
       const labels = Array.isArray(b.labels) ? (b.labels as string[]).map(String) : [];
       json(200, await deps.github.addLabels(root, Number(w[1]), labels));
+      return true;
+    }
+
+    // ---- PR lifecycle (F7): create / update / merge / describe ---------------
+    if (path === "/api/github/pr/create" && method === "POST") {
+      const b = await body();
+      const root = await rootOf(b.projectId ? String(b.projectId) : null);
+      const title = String(b.title ?? "").trim();
+      if (!title) { json(400, { ok: false, reason: "title is required" }); return true; }
+      const result = await deps.github.prCreate(root, {
+        title,
+        body: String(b.body ?? ""),
+        ...(b.base ? { base: String(b.base) } : {}),
+        ...(b.head ? { head: String(b.head) } : {}),
+        ...(b.draft === true ? { draft: true } : {}),
+      });
+      // durable log first: the originating session records the external write
+      if (result.ok && b.sessionId && deps.append) {
+        await deps.append(String(b.sessionId), "pr/created", {
+          prNumber: result.data.number, url: result.data.url, title,
+          ...(b.base ? { base: String(b.base) } : {}),
+          ...(b.draft === true ? { draft: true } : {}),
+        });
+      }
+      json(200, result);
+      return true;
+    }
+
+    if (path === "/api/github/pr/update" && method === "POST") {
+      const b = await body();
+      const root = await rootOf(b.projectId ? String(b.projectId) : null);
+      const number = Number(b.number ?? 0);
+      if (!Number.isSafeInteger(number) || number <= 0) {
+        json(400, { ok: false, reason: "a positive PR number is required" });
+        return true;
+      }
+      const result = await deps.github.prUpdate(root, number, {
+        ...(b.title !== undefined ? { title: String(b.title) } : {}),
+        ...(b.body !== undefined ? { body: String(b.body) } : {}),
+        ...(b.base !== undefined ? { base: String(b.base) } : {}),
+      });
+      if (result.ok && b.sessionId && deps.append) {
+        await deps.append(String(b.sessionId), "pr/updated", {
+          prNumber: number,
+          fields: ["title", "body", "base"].filter((f) => (b as Record<string, unknown>)[f] !== undefined),
+        });
+      }
+      json(200, result);
+      return true;
+    }
+
+    if (path === "/api/github/pr/merge" && method === "POST") {
+      const b = await body();
+      const root = await rootOf(b.projectId ? String(b.projectId) : null);
+      const number = Number(b.number ?? 0);
+      if (!Number.isSafeInteger(number) || number <= 0) {
+        json(400, { ok: false, reason: "a positive PR number is required" });
+        return true;
+      }
+      const strategy = String(b.strategy ?? "") as MergeStrategy;
+      if (!MERGE_STRATEGIES.includes(strategy)) {
+        json(400, { ok: false, reason: "strategy must be squash, merge, or rebase" });
+        return true;
+      }
+      // destructive remote action — the UI must send an explicit confirmation
+      if (b.confirm !== true) {
+        json(400, { ok: false, reason: "merge requires confirm:true" });
+        return true;
+      }
+      const result = await deps.github.prMerge(root, number, strategy);
+      if (result.ok && b.sessionId && deps.append) {
+        await deps.append(String(b.sessionId), "pr/merged", { prNumber: number, strategy });
+      }
+      json(200, result);
+      return true;
+    }
+
+    if (path === "/api/github/pr/describe" && method === "POST") {
+      const b = await body();
+      const root = await rootOf(b.projectId ? String(b.projectId) : null);
+      if (!deps.describe) {
+        json(200, { ok: false, reason: "AI describe is not available on this server" });
+        return true;
+      }
+      try {
+        const draft = await deps.describe(root, b.base ? String(b.base) : undefined);
+        json(200, { ok: true, data: draft });
+      } catch (e) {
+        json(200, { ok: false, reason: e instanceof Error ? e.message : String(e) });
+      }
       return true;
     }
 

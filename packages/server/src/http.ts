@@ -48,7 +48,14 @@ export interface HttpDeps {
   routes?: RouteHandler[];
   /** Provider/model visibility toggles (Providers & Models settings). */
   visibility?: ModelVisibilityService;
+  /** F16 gate: null = proceed, otherwise the denial to answer with. Applied
+   *  to every /api path except the two the lock screen itself needs. */
+  auth?: { gate(req: IncomingMessage): { status: number; body: unknown } | null };
 }
+
+// Public even when a password is set: the SPA lock screen must be able to
+// learn that auth is required and then mint a session.
+const AUTH_PUBLIC = new Set(["/api/auth/status", "/api/auth/login"]);
 
 export function createHttpServer(deps: HttpDeps): Server {
   const { sessions, projects } = deps;
@@ -75,6 +82,12 @@ export function createHttpServer(deps: HttpDeps): Server {
     const path = url.pathname;
     const method = req.method ?? "GET";
     try {
+      // F16: one gate before all routing. Static assets stay public (the SPA
+      // shell renders the lock screen); every /api answer needs a session.
+      if (deps.auth && path.startsWith("/api/") && !AUTH_PUBLIC.has(path)) {
+        const denial = deps.auth.gate(req);
+        if (denial) return json(res, denial.status, denial.body);
+      }
       if (path === "/api/health" && method === "GET") {
         return json(res, 200, { ok: true, version: deps.version, capabilities: deps.capabilities() });
       }
@@ -92,7 +105,9 @@ export function createHttpServer(deps: HttpDeps): Server {
 
       if (path === "/api/sessions" && method === "GET") {
         const projectId = url.searchParams.get("projectId") ?? undefined;
-        if (projectId) await sessions.sync(projectId).catch((err) => console.warn("[polyth] OpenCode session sync failed", err));
+        // F14: listing no longer silently adopts every backend session — the
+        // sidebar's "Import sessions…" sheet browses and adopts selectively
+        // via /api/control/backend-sessions.
         return json(res, 200, await sessions.list(projectId));
       }
       if (path === "/api/sessions" && method === "POST") {
@@ -119,6 +134,8 @@ export function createHttpServer(deps: HttpDeps): Server {
         const delivery = b.delivery;
         return json(res, 200, await sessions.send(m[1]!, {
           text: String(b.text ?? ""),
+          // sanitized + existence-checked inside the session service (F2)
+          ...(Array.isArray(b.attachments) ? { attachments: b.attachments as never } : {}),
           ...(b.model ? { model: b.model as { providerID: string; modelID: string } } : {}),
           ...(b.agent ? { agent: String(b.agent) } : {}),
           ...(delivery === "steer" || delivery === "queue" || delivery === "interrupt" || delivery === "normal"
@@ -148,7 +165,26 @@ export function createHttpServer(deps: HttpDeps): Server {
       m = path.match(/^\/api\/sessions\/([^/]+)\/fork$/);
       if (m && method === "POST") {
         const b = await readBody(req);
-        return json(res, 200, await sessions.fork(m[1]!, b.atSeq ? Number(b.atSeq) : undefined));
+        return json(res, 200, await sessions.fork(m[1]!, b.atSeq === undefined ? undefined : Number(b.atSeq)));
+      }
+      m = path.match(/^\/api\/sessions\/([^/]+)\/rewind$/);
+      if (m && method === "POST") {
+        if (!sessions.rewind) throw Object.assign(new Error("session rewind unavailable"), { code: "unsupported" });
+        const b = await readBody(req);
+        if (b.atSeq === undefined) throw Object.assign(new Error("atSeq required"), { code: "invalid-input" });
+        return json(res, 200, await sessions.rewind(m[1]!, Number(b.atSeq)));
+      }
+      m = path.match(/^\/api\/sessions\/([^/]+)\/rewind\/clear$/);
+      if (m && method === "POST") {
+        if (!sessions.clearRewind) throw Object.assign(new Error("session rewind unavailable"), { code: "unsupported" });
+        return json(res, 200, await sessions.clearRewind(m[1]!));
+      }
+      m = path.match(/^\/api\/sessions\/([^/]+)\/shell$/);
+      if (m && method === "POST") {
+        if (!sessions.runShell) throw Object.assign(new Error("composer shell unavailable"), { code: "unsupported" });
+        const b = await readBody(req);
+        if (typeof b.command !== "string") throw Object.assign(new Error("command required"), { code: "invalid-input" });
+        return json(res, 200, await sessions.runShell(m[1]!, b.command));
       }
       m = path.match(/^\/api\/sessions\/([^/]+)\/permission\/([^/]+)$/);
       if (m && method === "POST") {

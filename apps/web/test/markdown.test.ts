@@ -138,10 +138,10 @@ test("findFileRefs splits prose into text and ref segments", () => {
 
 // ---------------------------------------------------------------- thinking
 
-const user = (id: string, text: string): UserMsg => ({ kind: "user", id, text, time: 0 });
+const user = (id: string, text: string): UserMsg => ({ kind: "user", id, eventSeq: 1, text, time: 0 });
 const asst = (id: string, text: string, reasoning: string, finalized = true): AssistantMsg =>
-  ({ kind: "assistant", id, partId: id, text, reasoning, finalized, time: 0 });
-const tool = (id: string): ToolMsg => ({ kind: "tool", id, callId: id, tool: "bash", input: {}, status: "done", time: 0 });
+  ({ kind: "assistant", id, partId: id, eventSeq: 1, text, reasoning, finalized, time: 0 });
+const tool = (id: string): ToolMsg => ({ kind: "tool", id, callId: id, eventSeq: 1, tool: "bash", input: {}, status: "done", time: 0 });
 
 test("mergeThinking folds reasoning-only parts into the next answer", () => {
   const msgs: RenderMessage[] = [user("u1", "hi"), asst("a1", "", "step one"), asst("a2", "", "step two"), asst("a3", "answer", "final")];

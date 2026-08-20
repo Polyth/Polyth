@@ -45,8 +45,10 @@ export interface DictationChunkResult {
 }
 
 export interface DictationServiceOptions {
-  /** No adapter = capability {available:false}; the web app keeps Web Speech. */
-  adapter?: SttAdapter | null;
+  /** No adapter = capability {available:false}; the web app keeps Web Speech.
+   *  A function is re-evaluated per call so settings changes flip the
+   *  capability honestly without recreating the service (F8). */
+  adapter?: SttAdapter | null | (() => SttAdapter | null);
   unavailableReason?: string;
   maxSessions?: number;
   /** Total audio cap per dictation (default 10 MB). */
@@ -78,7 +80,7 @@ interface SessionState {
 const err = (code: string, message: string): Error => Object.assign(new Error(message), { code });
 
 export function createDictationService(opts: DictationServiceOptions = {}): DictationService {
-  const adapter = opts.adapter ?? null;
+  const adapterOf = typeof opts.adapter === "function" ? opts.adapter : () => (opts.adapter as SttAdapter | null | undefined) ?? null;
   const maxSessions = opts.maxSessions ?? 8;
   const maxBytes = opts.maxBytes ?? 10 * 1024 * 1024;
   const maxDurationMs = opts.maxDurationMs ?? 120_000;
@@ -96,11 +98,13 @@ export function createDictationService(opts: DictationServiceOptions = {}): Dict
 
   return {
     capability() {
+      const adapter = adapterOf();
       if (!adapter) return { available: false, reason: opts.unavailableReason ?? "no speech-to-text engine configured" };
       return { available: true, engine: adapter.engine };
     },
 
     create(input) {
+      const adapter = adapterOf();
       if (!adapter) throw err("unavailable", opts.unavailableReason ?? "no speech-to-text engine configured");
       if (sessions.size >= maxSessions) throw err("limit", `too many dictation sessions (max ${maxSessions})`);
       const id = randomUUID();

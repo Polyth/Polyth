@@ -11,7 +11,14 @@ import { friendlyError } from "../../settings.ts";
 import { getUiSettings } from "../../uiPrefs.ts";
 import { firstUserText } from "../../utils.ts";
 import { announce } from "../a11y/live.tsx";
-import { groupSessions, listGroupings, useGroupingMode } from "../../sidebarPrefs.ts";
+import { worktreeLabel } from "../../worktreeSessions.ts";
+import {
+  groupSessions,
+  listGroupings,
+  reorderPinnedSessions,
+  sortPinnedSessions,
+  useGroupingMode,
+} from "../../sidebarPrefs.ts";
 
 const STATUS_DOT: Record<string, string> = {
   working: "working", waiting: "waiting", idle: "idle",
@@ -58,9 +65,16 @@ interface RowProps {
   onToggleSelect: (id: string) => void;
   onChanged: () => void;
   onOpen: (id: string) => void;
+  onTogglePin: (session: SessionProjection) => void;
+  pinnedSection: boolean;
+  onPinDragStart: (id: string) => void;
+  onPinDrop: (targetId: string) => void;
 }
 
-function SessionRow({ s, activeSessionId, labels, folders, eventsTitle, relativeTime, selectMode, selected, onToggleSelect, onChanged, onOpen }: RowProps) {
+function SessionRow({
+  s, activeSessionId, labels, folders, eventsTitle, relativeTime, selectMode, selected,
+  onToggleSelect, onChanged, onOpen, onTogglePin, pinnedSection, onPinDragStart, onPinDrop,
+}: RowProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [title, setTitle] = useState(s.title);
@@ -112,7 +126,13 @@ function SessionRow({ s, activeSessionId, labels, folders, eventsTitle, relative
   const hoverTitle = fullSessionTitle(s.title, eventsTitle);
 
   return (
-    <div className={`session-row ${s.id === activeSessionId ? "active" : ""} ${s.status === "archived" ? "archived" : ""}`}>
+    <div
+      className={`session-row ${s.id === activeSessionId ? "active" : ""} ${s.status === "archived" ? "archived" : ""}`}
+      draggable={pinnedSection}
+      onDragStart={() => { if (pinnedSection) onPinDragStart(s.id); }}
+      onDragOver={(event) => { if (pinnedSection) event.preventDefault(); }}
+      onDrop={(event) => { if (pinnedSection) { event.preventDefault(); onPinDrop(s.id); } }}
+    >
       {selectMode && (
         <input
           type="checkbox"
@@ -146,10 +166,21 @@ function SessionRow({ s, activeSessionId, labels, folders, eventsTitle, relative
           <span className="session-body">
             <span className="session-title-line">
               <span className="session-title">{displayTitle}</span>
+              {s.worktreePath && (
+                <span
+                  className={`session-worktree-badge${s.worktreeState === "missing" ? " missing" : ""}`}
+                  title={`${s.worktreeState === "missing" ? "Missing worktree" : "Worktree"}: ${s.worktreePath}`}
+                >
+                  {worktreeLabel(s.branch, s.worktreePath)}
+                </span>
+              )}
+              {s.pinned && <span className="session-pin" title="Pinned" aria-label="Pinned">◆</span>}
               <LabelDots ids={s.labelIds} labels={labels} />
               <AttentionBadges s={s} />
             </span>
-            <span className="session-sub">{s.status === "working" ? "Agent working" : s.status}</span>
+            <span className="session-sub">
+              {s.worktreeState === "missing" ? "worktree missing" : s.status === "working" ? "Agent working" : s.status}
+            </span>
           </span>
           <span className="session-time">{activityTime(s.updatedAt, relativeTime)}</span>
         </button>
@@ -164,6 +195,9 @@ function SessionRow({ s, activeSessionId, labels, folders, eventsTitle, relative
             setMenuOpen(false);
             void forkSession(s.id).catch((e) => setUiError(friendlyError("Couldn’t fork the session", e)));
           }}>Fork</button>
+          <button role="menuitem" onClick={() => { setMenuOpen(false); onTogglePin(s); }}>
+            {s.pinned ? "Unpin" : "Pin to top"}
+          </button>
           {s.status === "archived" ? (
             <button role="menuitem" onClick={() => {
               setMenuOpen(false);
@@ -210,6 +244,7 @@ export default function SessionList({ projectId }: { projectId: string }) {
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
   const [creatingFolder, setCreatingFolder] = useState(false);
   const [folderName, setFolderName] = useState("");
+  const [draggedPin, setDraggedPin] = useState<string | null>(null);
   const groupingMode = useGroupingMode(); // flat | folder | status | worktree | plugin
 
   useEffect(() => {
@@ -234,10 +269,12 @@ export default function SessionList({ projectId }: { projectId: string }) {
   );
   const active = projectSessions.filter((s) => s.status !== "archived");
   const archived = projectSessions.filter((s) => s.status === "archived");
+  const pinned = sortPinnedSessions(active);
+  const unpinned = active.filter((session) => session.pinned === undefined);
 
   const byFolder = new Map<string, SessionProjection[]>();
   const rootSessions: SessionProjection[] = [];
-  for (const s of active) {
+  for (const s of unpinned) {
     if (s.folderId && folders.some((f) => f.id === s.folderId)) {
       const list = byFolder.get(s.folderId) ?? [];
       list.push(s);
@@ -297,7 +334,36 @@ export default function SessionList({ projectId }: { projectId: string }) {
     }
   };
 
-  const row = (s: SessionProjection) => (
+  const togglePin = async (session: SessionProjection) => {
+    try {
+      const position = pinned.reduce((max, item) => Math.max(max, item.pinned?.position ?? -1), -1) + 1;
+      await api.organizeSession(session.id, { pinned: session.pinned ? null : { position } });
+      onChanged();
+    } catch (error) {
+      setUiError(friendlyError(`Couldn’t ${session.pinned ? "unpin" : "pin"} the session`, error));
+    }
+  };
+
+  const dropPin = async (targetId: string) => {
+    const draggedId = draggedPin;
+    setDraggedPin(null);
+    if (!draggedId || draggedId === targetId) return;
+    const next = reorderPinnedSessions(pinned, draggedId, targetId);
+    try {
+      await Promise.all(next.map((session, position) =>
+        session.pinned?.position === pinned.find((item) => item.id === session.id)?.pinned?.position
+          ? Promise.resolve()
+          : api.organizeSession(session.id, { pinned: { position } }),
+      ));
+      onChanged();
+      announce("Pinned sessions reordered");
+    } catch (error) {
+      setUiError(friendlyError("Couldn’t reorder pinned sessions", error));
+      onChanged();
+    }
+  };
+
+  const row = (s: SessionProjection, pinnedSection = false) => (
     <SessionRow
       key={s.id}
       s={s}
@@ -311,6 +377,10 @@ export default function SessionList({ projectId }: { projectId: string }) {
       onToggleSelect={toggleSelect}
       onChanged={onChanged}
       onOpen={(id) => void openSession(id)}
+      onTogglePin={(session) => void togglePin(session)}
+      pinnedSection={pinnedSection}
+      onPinDragStart={setDraggedPin}
+      onPinDrop={(targetId) => void dropPin(targetId)}
     />
   );
 
@@ -344,6 +414,13 @@ export default function SessionList({ projectId }: { projectId: string }) {
         </div>
       )}
 
+      {pinned.length > 0 && (
+        <div className="session-pinned">
+          <div className="session-group-head">Pinned <span className="muted">{pinned.length}</span></div>
+          {pinned.map((session) => row(session, true))}
+        </div>
+      )}
+
       {groupingMode === "folder" && folders.map((f) => {
         const inFolder = byFolder.get(f.id) ?? [];
         const isCollapsed = collapsed.has(f.id);
@@ -365,22 +442,22 @@ export default function SessionList({ projectId }: { projectId: string }) {
               </button>
               <button className="session-folder-del" title={`Delete folder ${f.name}`} onClick={() => void removeFolder(f)}>✕</button>
             </div>
-            {!isCollapsed && inFolder.map(row)}
+            {!isCollapsed && inFolder.map((session) => row(session))}
             {!isCollapsed && inFolder.length === 0 && <div className="empty session-folder-empty">Empty</div>}
           </div>
         );
       })}
-      {groupingMode === "folder" && rootSessions.map(row)}
+      {groupingMode === "folder" && rootSessions.map((session) => row(session))}
 
-      {groupingMode === "flat" && active.map(row)}
+      {groupingMode === "flat" && unpinned.map((session) => row(session))}
 
       {groupingMode !== "folder" && groupingMode !== "flat" &&
-        groupSessions(active, groupingMode, listGroupings()).map((g) => (
+        groupSessions(unpinned, groupingMode, listGroupings()).map((g) => (
           <div key={g.key} className="session-group">
             <div className="session-group-head">
               {g.label} <span className="muted">{g.sessions.length}</span>
             </div>
-            {g.sessions.map(row)}
+            {g.sessions.map((session) => row(session))}
           </div>
         ))}
 
@@ -391,7 +468,7 @@ export default function SessionList({ projectId }: { projectId: string }) {
           <button className="session-folder-toggle" aria-expanded={showArchived} onClick={() => setShowArchived((v) => !v)}>
             <span>{showArchived ? "▾" : "▸"}</span> Archived <span className="muted">{archived.length}</span>
           </button>
-          {showArchived && archived.map(row)}
+          {showArchived && archived.map((session) => row(session))}
         </div>
       )}
     </div>

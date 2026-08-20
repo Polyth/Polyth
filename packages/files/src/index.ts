@@ -10,6 +10,9 @@ const MAX_READ = 512 * 1024;
 const BINARY_SCAN = 8 * 1024;
 const MAX_RAW = 20 * 1024 * 1024;
 
+/** Shared binary cap: raw serving, uploads, and message attachments (F2). */
+export const MAX_RAW_BYTES = MAX_RAW;
+
 export interface FileEntry {
   name: string;
   path: string;

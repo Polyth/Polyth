@@ -93,6 +93,32 @@ export interface SessionGroup {
   sessions: SessionProjection[];
 }
 
+export function sortPinnedSessions(sessions: readonly SessionProjection[]): SessionProjection[] {
+  return sessions
+    .filter((session) => session.pinned !== undefined)
+    .sort((a, b) =>
+      (a.pinned!.position - b.pinned!.position)
+      || (b.updatedAt - a.updatedAt)
+      || a.id.localeCompare(b.id),
+    );
+}
+
+export function reorderPinnedSessions(
+  sessions: readonly SessionProjection[],
+  draggedId: string,
+  targetId: string,
+): SessionProjection[] {
+  const ordered = sortPinnedSessions(sessions);
+  const from = ordered.findIndex((session) => session.id === draggedId);
+  const to = ordered.findIndex((session) => session.id === targetId);
+  if (from < 0 || to < 0 || from === to) return ordered;
+  const next = [...ordered];
+  const [dragged] = next.splice(from, 1);
+  if (!dragged) return ordered;
+  next.splice(to, 0, dragged);
+  return next.map((session, position) => ({ ...session, pinned: { position } }));
+}
+
 /** Pure: bucket sessions for keyed modes. flat/folder return one bucket
  *  (the sidebar renders folders itself). Group order follows first
  *  appearance in the (recency-sorted) input, so busiest groups lead. */

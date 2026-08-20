@@ -117,11 +117,13 @@ export function modelToMarkdown(model: RenderModel): string {
       lines.push("## Assistant");
       if (m.reasoning) lines.push(`\n<details>\n<summary>Reasoning</summary>\n\n${m.reasoning}\n</details>`);
       lines.push(`\n${m.text}`);
-    } else {
+    } else if (m.kind === "tool") {
       lines.push(`### Tool: ${m.tool} — ${m.status}`);
       lines.push(`\nInput:\n\`\`\`json\n${JSON.stringify(m.input, null, 2)}\n\`\`\``);
       if (m.output !== undefined) lines.push(`\nOutput:\n\n${m.output}`);
       if (m.error !== undefined) lines.push(`\nError:\n\n${m.error}`);
+    } else {
+      lines.push(`### Task ${m.action}: ${m.text}`);
     }
     lines.push("");
   }

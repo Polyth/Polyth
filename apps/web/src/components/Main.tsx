@@ -1,6 +1,7 @@
 import Header from "./Header.tsx";
 import Timeline from "./Timeline.tsx";
 import Composer from "./Composer.tsx";
+import AssistStrip from "./AssistStrip.tsx";
 import PermissionBanner from "./PermissionBanner.tsx";
 import QuestionCards from "./QuestionCards.tsx";
 import { GoalStrip } from "./GoalStrip.tsx";
@@ -116,6 +117,7 @@ export default function Main() {
         <GoalStrip />
         <WorkStatus model={model} />
         <Timeline model={model} />
+        <AssistStrip />
       </div>
       {pendingQuestions.length > 0 && <QuestionCards questions={pendingQuestions} />}
       {pendingPermissions.length > 0 && <PermissionBanner permissions={pendingPermissions} />}

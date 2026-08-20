@@ -1,6 +1,17 @@
 # Polyth
 
-polyth feature parity on a DeepSeek-Harness/Cordis-style "everything is a plugin" microkernel. See `docs/PLAN.md` (merged build contract) and `docs/parity/polyth-parity.yaml` (209-row parity matrix).
+polyth feature parity on a DeepSeek-Harness/Cordis-style "everything is a plugin" microkernel.
+
+## Docs
+
+- `CHANGELOG.md` — full project history from the initial commit, grouped by milestone, plus what is still open.
+- `docs/dev/README.md` — how to build a new feature from zero (kernel, contracts, events, tests).
+- `docs/dev/architecture.md` — current packages, protocol, event vocabulary, UI slot model.
+- `docs/dev/parity.md` — feature-parity map vs polyth + Paseo, by product domain.
+- `docs/dev/new-features.md` — implement-now catalog for the remaining web parity gaps.
+- `docs/dev/implementation-order.md` + `docs/dev/HANDOFF.md` — sequenced work packages and the current handoff.
+- `docs/dev/pr-index.json` — machine-readable disposition of every scanned upstream PR.
+- `docs/parity/polyth-parity.yaml` — 209-row parity matrix (status per feature).
 
 ## Run
 

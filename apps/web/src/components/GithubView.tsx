@@ -3,15 +3,23 @@
 // the detail surface (overview/files/checks/comments).
 import { useEffect, useState } from "react";
 import { api, type GithubIssueDto, type GithubPrDto, type GithubStatusDto } from "../api.ts";
-import { useStore } from "../store.ts";
+import { useStore, setUiError } from "../store.ts";
 import { requestComposerInsert } from "../composerInsert.ts";
 import { setActiveView } from "../store.ts";
+import { openSession, refreshSessions } from "../init.ts";
+import { saveDraft } from "../utils.ts";
+import { friendlyError } from "../settings.ts";
 import PullRequestView from "./PullRequestView.tsx";
 import EmptyState from "./EmptyState.tsx";
 
 type Tab = "issues" | "prs";
 
-function ItemRow({ item, kind, onOpen }: { item: GithubIssueDto | GithubPrDto; kind: Tab; onOpen?: (n: number) => void }) {
+function ItemRow({ item, kind, onOpen, onStartSession }: {
+  item: GithubIssueDto | GithubPrDto;
+  kind: Tab;
+  onOpen?: (n: number) => void;
+  onStartSession: (item: GithubIssueDto | GithubPrDto, kind: Tab) => void;
+}) {
   const pr = kind === "prs" ? (item as GithubPrDto) : null;
   const ref = `${kind === "prs" ? "PR" : "issue"} #${item.number}`;
   return (
@@ -27,6 +35,11 @@ function ItemRow({ item, kind, onOpen }: { item: GithubIssueDto | GithubPrDto; k
       {pr && onOpen && (
         <button className="small-btn" title="Open PR details, checks, and comments" onClick={() => onOpen(item.number)}>Details</button>
       )}
+      <button
+        className="small-btn"
+        title={`Start a new session with this ${kind === "prs" ? "PR" : "issue"} as the first draft`}
+        onClick={() => onStartSession(item, kind)}
+      >+ session</button>
       <button
         className="small-btn"
         title="Ask about this in the session composer"
@@ -72,6 +85,26 @@ export default function GithubView() {
   }, [projectId]);
 
   if (!projectId) return <EmptyState title="No project selected" description="Open a project to browse its GitHub repository." />;
+
+  // F7 / OC-15-002/003: bootstrap a session from an issue or PR. The context
+  // lands as the composer draft (saved before the session opens so the
+  // composer restores it) — nothing is sent until the user does.
+  const startSession = async (item: GithubIssueDto | GithubPrDto, kind: Tab) => {
+    const label = kind === "prs" ? "PR" : "issue";
+    try {
+      const { id } = await api.createSession({ projectId, title: `${label} #${item.number}: ${item.title}`.slice(0, 80) });
+      saveDraft(id, [
+        `Work on GitHub ${label} #${item.number}: "${item.title}" (${item.url}).`,
+        ...(kind === "prs" ? [`Head branch: ${(item as GithubPrDto).headRefName}.`] : []),
+        `Start by reading the ${label} and summarizing what needs to happen.`,
+      ].join("\n"));
+      await openSession(id);
+      void refreshSessions(projectId);
+      setActiveView("session");
+    } catch (e) {
+      setUiError(friendlyError("Couldn’t start a session from GitHub", e));
+    }
+  };
 
   if (openPr !== null) {
     return (
@@ -125,7 +158,9 @@ export default function GithubView() {
           )}
           <div className="gh-list">
             {items.map((it) => (
-              <ItemRow key={`${tab}-${it.number}`} item={it} kind={tab} {...(tab === "prs" ? { onOpen: setOpenPr } : {})} />
+              <ItemRow key={`${tab}-${it.number}`} item={it} kind={tab}
+                onStartSession={(item, kind) => void startSession(item, kind)}
+                {...(tab === "prs" ? { onOpen: setOpenPr } : {})} />
             ))}
           </div>
         </>

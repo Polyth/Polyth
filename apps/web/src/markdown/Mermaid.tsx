@@ -10,11 +10,40 @@ type MermaidApi = {
 
 let mermaidPromise: Promise<MermaidApi | null> | null = null;
 
+// F15: diagram colors derive from the live theme tokens (base theme +
+// themeVariables read from the CSS custom properties at render time).
+function themeConfig(): Record<string, unknown> {
+  const base: Record<string, unknown> = { startOnLoad: false, securityLevel: "strict", fontFamily: "inherit" };
+  if (typeof document === "undefined") return { ...base, theme: "dark" };
+  const css = getComputedStyle(document.documentElement);
+  const v = (name: string, fallback: string) => css.getPropertyValue(name).trim() || fallback;
+  const dark = !document.documentElement.classList.contains("light");
+  return {
+    ...base,
+    theme: "base",
+    themeVariables: {
+      darkMode: dark,
+      background: v("--panel", dark ? "#191816" : "#f1ede6"),
+      primaryColor: v("--elevated", dark ? "#221f1c" : "#ffffff"),
+      primaryTextColor: v("--text", dark ? "#f0eee8" : "#2a2620"),
+      primaryBorderColor: v("--border", dark ? "#35322c" : "#d5cec1"),
+      secondaryColor: v("--raised", dark ? "#2a2724" : "#f3efe8"),
+      tertiaryColor: v("--sunken", dark ? "#0e0d0c" : "#e9e4da"),
+      lineColor: v("--muted", "#9c9890"),
+      textColor: v("--text", dark ? "#f0eee8" : "#2a2620"),
+      mainBkg: v("--elevated", dark ? "#221f1c" : "#ffffff"),
+      nodeBorder: v("--border", dark ? "#35322c" : "#d5cec1"),
+      clusterBkg: v("--panel", dark ? "#191816" : "#f1ede6"),
+      edgeLabelBackground: v("--panel", dark ? "#191816" : "#f1ede6"),
+    },
+  };
+}
+
 function loadMermaid(): Promise<MermaidApi | null> {
   mermaidPromise ??= import("mermaid")
     .then((m) => {
       const api = (m.default ?? m) as unknown as MermaidApi;
-      api.initialize({ startOnLoad: false, securityLevel: "strict", theme: "dark", fontFamily: "inherit" });
+      api.initialize(themeConfig());
       return api;
     })
     .catch(() => null);
@@ -38,6 +67,14 @@ export default function Mermaid({ code }: { code: string }) {
   const [error, setError] = useState<string | null>(null);
   const [zoomIdx, setZoomIdx] = useState(2);
   const [full, setFull] = useState(false);
+  const [themeTick, setThemeTick] = useState(0);
+
+  // Re-render diagrams when the theme tokens change (F15).
+  useEffect(() => {
+    const bump = () => setThemeTick((t) => t + 1);
+    window.addEventListener("polyth:theme", bump);
+    return () => window.removeEventListener("polyth:theme", bump);
+  }, []);
 
   useEffect(() => {
     let stale = false;
@@ -47,6 +84,7 @@ export default function Mermaid({ code }: { code: string }) {
       if (stale) return;
       if (!api) { setError("diagram renderer unavailable"); return; }
       try {
+        api.initialize(themeConfig());
         const out = await api.render(`mmd-${id}-${Date.now().toString(36)}`, code);
         if (!stale) setSvg(out.svg);
       } catch (err) {
@@ -54,7 +92,7 @@ export default function Mermaid({ code }: { code: string }) {
       }
     });
     return () => { stale = true; };
-  }, [code, id]);
+  }, [code, id, themeTick]);
 
   if (error !== null) {
     return (

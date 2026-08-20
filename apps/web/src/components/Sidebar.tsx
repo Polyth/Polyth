@@ -1,5 +1,8 @@
 import { useState } from "react";
-import { useStore, activateProject, setActiveView, setOverlay, setProjects, setSidebarOpen, setUiError } from "../store.ts";
+import {
+  useStore, activateProject, openWorktreeSessionDialog, setActiveView, setOverlay,
+  setProjects, setSidebarOpen, setUiError,
+} from "../store.ts";
 import { createSession } from "../init.ts";
 import { api } from "../api.ts";
 import { usePrefs } from "../prefs.ts";
@@ -7,6 +10,7 @@ import { MOD } from "../format.ts";
 import { friendlyError } from "../settings.ts";
 import { Icon } from "../icons.tsx";
 import SessionList from "./sidebar/SessionList.tsx";
+import ImportSessionsDialog from "./ImportSessionsDialog.tsx";
 
 function projectGlyph(name: string): string {
   const words = name.trim().split(/[\s\-_/]+/).filter(Boolean);
@@ -24,6 +28,8 @@ export default function Sidebar() {
   const project = projects.find((p) => p.id === activeProjectId) ?? null;
   const [renamingProject, setRenamingProject] = useState<string | null>(null);
   const [projectName, setProjectName] = useState("");
+  const [projectMenu, setProjectMenu] = useState<string | null>(null);
+  const [importingProject, setImportingProject] = useState<string | null>(null);
 
   const onNewSession = () => {
     if (!activeProjectId) return;
@@ -78,24 +84,61 @@ export default function Sidebar() {
               />
             </div>
           ) : (
-            <button
-              key={p.id}
-              className={`project-card ${p.id === activeProjectId ? "active" : ""}`}
-              aria-current={p.id === activeProjectId ? "true" : undefined}
-              onClick={() => {
-                // Clicking the already-active project must not drop the session (UX-04).
-                if (p.id !== activeProjectId) activateProject(p.id);
-              }}
-              onDoubleClick={() => { setRenamingProject(p.id); setProjectName(p.name); }}
-            >
-              <span className="project-glyph" style={p.color ? { background: p.color } : undefined}>
-                {p.icon || projectGlyph(p.name || p.path)}
-              </span>
-              <span className="project-meta">
-                <span className="project-name" title={p.path}>{p.icon ? `${p.icon} ` : ""}{p.name || p.path}</span>
-                <span className="project-path">{p.path}</span>
-              </span>
-            </button>
+            <div className="project-card-shell" key={p.id}>
+              <button
+                className={`project-card ${p.id === activeProjectId ? "active" : ""}`}
+                aria-current={p.id === activeProjectId ? "true" : undefined}
+                onClick={() => {
+                  // Clicking the already-active project must not drop the session (UX-04).
+                  if (p.id !== activeProjectId) activateProject(p.id);
+                }}
+                onDoubleClick={() => { setRenamingProject(p.id); setProjectName(p.name); }}
+              >
+                <span className="project-glyph" style={p.color ? { background: p.color } : undefined}>
+                  {p.icon || projectGlyph(p.name || p.path)}
+                </span>
+                <span className="project-meta">
+                  <span className="project-name" title={p.path}>{p.icon ? `${p.icon} ` : ""}{p.name || p.path}</span>
+                  <span className="project-path">{p.path}</span>
+                </span>
+              </button>
+              <button
+                className="project-menu-btn"
+                aria-label={`Actions for ${p.name || p.path}`}
+                aria-haspopup="menu"
+                aria-expanded={projectMenu === p.id}
+                onClick={() => setProjectMenu((current) => current === p.id ? null : p.id)}
+              >⋯</button>
+              {projectMenu === p.id && (
+                <div className="project-actions-menu" role="menu">
+                  <button role="menuitem" onClick={() => {
+                    setProjectMenu(null);
+                    if (p.id !== activeProjectId) activateProject(p.id);
+                    void createSession(p.id).catch((error) => setUiError(friendlyError("Couldn’t create a session", error)));
+                  }}>New session</button>
+                  <button role="menuitem" onClick={() => {
+                    setProjectMenu(null);
+                    openWorktreeSessionDialog(p.id);
+                  }}>New session in worktree…</button>
+                  <button role="menuitem" onClick={() => {
+                    setProjectMenu(null);
+                    setImportingProject(p.id);
+                  }}>Import sessions…</button>
+                  <button role="menuitem" onClick={() => {
+                    setProjectMenu(null);
+                    setRenamingProject(p.id);
+                    setProjectName(p.name);
+                  }}>Rename project</button>
+                  {prefs.plugins.includes("git") && (
+                    <button role="menuitem" onClick={() => {
+                      setProjectMenu(null);
+                      if (p.id !== activeProjectId) activateProject(p.id);
+                      setActiveView("git");
+                    }}>Git &amp; worktrees</button>
+                  )}
+                </div>
+              )}
+            </div>
           )
           ))}
           {project && branch && (
@@ -121,6 +164,9 @@ export default function Sidebar() {
           </button>
         </div>
       </nav>
+      {importingProject && (
+        <ImportSessionsDialog projectId={importingProject} onClose={() => setImportingProject(null)} />
+      )}
     </>
   );
 }

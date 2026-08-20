@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { createStore, deriveMessages } from "@polyth/session";
+import { activeRewind, createStore, deriveMessages } from "@polyth/session";
 import type { SessionEvent, SessionProjection } from "@polyth/contracts";
 
 function freshDir(): string {
@@ -154,6 +154,58 @@ test("deriveMessages: ignorable flag filters, consecutive same-role merges, ques
     { role: "assistant", parts: [{ type: "text", text: "Continue?" }] },
     { role: "user", parts: [{ type: "text", text: '{"go":"yes"}' }] },
   ]);
+});
+
+test("deriveMessages soft-rewind, redo, and replacement are replay-deterministic", () => {
+  const base: SessionEvent[] = [
+    ev(1, "user/message", { text: "first" }),
+    ev(2, "assistant/message", { partId: "a1", text: "one" }),
+    ev(3, "user/message", { text: "second" }),
+    ev(4, "assistant/message", { partId: "a2", text: "two" }),
+    ev(5, "session/rewound", { atSeq: 3, restoredText: "second" }),
+  ];
+  assert.deepEqual(deriveMessages(base), [
+    { role: "user", parts: [{ type: "text", text: "first" }] },
+    { role: "assistant", parts: [{ type: "text", text: "one" }] },
+  ]);
+  assert.deepEqual(activeRewind(base), { markerSeq: 5, atSeq: 3, restoredText: "second" });
+
+  const redone = [...base, ev(6, "session/rewind-cleared", { rewindSeq: 5 })];
+  assert.deepEqual(deriveMessages(redone).map((message) => message.parts), [
+    [{ type: "text", text: "first" }],
+    [{ type: "text", text: "one" }],
+    [{ type: "text", text: "second" }],
+    [{ type: "text", text: "two" }],
+  ]);
+  assert.equal(activeRewind(redone), null);
+
+  const replaced = [
+    ...base,
+    ev(6, "session/rewind-cleared", { rewindSeq: 5, replaced: true }),
+    ev(7, "user/message", { text: "replacement" }),
+  ];
+  assert.deepEqual(deriveMessages(replaced).map((message) => message.parts), [
+    [{ type: "text", text: "first" }],
+    [{ type: "text", text: "one" }],
+    [{ type: "text", text: "replacement" }],
+  ]);
+});
+
+test("fork copied after an active rewind derives the same truncated history", async () => {
+  const dir = freshDir();
+  const store = createStore(join(dir, "t.db"));
+  try {
+    await store.append("src", "user/message", { text: "keep" });
+    await store.append("src", "assistant/message", { partId: "a", text: "kept" });
+    await store.append("src", "user/message", { text: "hide" });
+    await store.append("src", "assistant/message", { partId: "b", text: "hidden" });
+    const marker = await store.append("src", "session/rewound", { atSeq: 3, restoredText: "hide" });
+    await store.copyTo("src", "fork", marker.seq);
+    assert.deepEqual(deriveMessages(await store.events("fork")), deriveMessages(await store.events("src")));
+  } finally {
+    await store.close();
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("projection roundtrip and projections(projectId) filter", async () => {

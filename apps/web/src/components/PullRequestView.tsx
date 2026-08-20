@@ -57,6 +57,16 @@ export default function PullRequestView({ number, onClose }: { number: number; o
   const [confirmWrite, setConfirmWrite] = useState(false);
   const [writeMsg, setWriteMsg] = useState("");
 
+  // F7: merge (destructive remote write) + title/body edit
+  const [mergeStrategy, setMergeStrategy] = useState<"squash" | "merge" | "rebase">("squash");
+  const [mergeConfirm, setMergeConfirm] = useState(false);
+  const [mergeBusy, setMergeBusy] = useState(false);
+  const [mergeMsg, setMergeMsg] = useState("");
+  const [editing, setEditing] = useState(false);
+  const [editTitle, setEditTitle] = useState("");
+  const [editBody, setEditBody] = useState("");
+  const [editBusy, setEditBusy] = useState(false);
+
   const loadChecks = useCallback(() => {
     if (!projectId) return;
     void api.githubPrChecks(projectId, number).then((r) => {
@@ -85,6 +95,56 @@ export default function PullRequestView({ number, onClose }: { number: number; o
   }, [checks, loadChecks]);
 
   if (!projectId) return null;
+
+  const reloadDetail = () => {
+    void api.githubPrDetail(projectId, number).then((r) => { if (r.ok) setDetail(r.data); });
+  };
+
+  // Merge stays disabled with the reason until GitHub reports MERGEABLE.
+  const mergeBlock = !detail ? "loading"
+    : detail.state !== "OPEN" ? `pull request is ${detail.state.toLowerCase()}`
+    : detail.isDraft ? "draft pull requests cannot be merged"
+    : detail.mergeable === "CONFLICTING" ? "has conflicts with the base branch"
+    : detail.mergeable !== "MERGEABLE" ? "GitHub has not confirmed mergeability yet — refresh"
+    : null;
+
+  const doMerge = async () => {
+    if (mergeBlock || !mergeConfirm) return;
+    setMergeBusy(true);
+    setMergeMsg("");
+    const r = await api.githubPrMerge({
+      projectId, number, strategy: mergeStrategy,
+      ...(sessionId ? { sessionId } : {}),
+    }).catch((e: unknown) => ({ ok: false as const, reason: e instanceof Error ? e.message : String(e) }));
+    setMergeBusy(false);
+    setMergeConfirm(false);
+    if (r.ok) {
+      // remote merge via GitHub — distinct from a local `git merge`
+      setMergeMsg(`Merged via GitHub (${mergeStrategy}).`);
+      reloadDetail();
+    } else {
+      setMergeMsg(`Merge failed: ${r.reason}`);
+    }
+  };
+
+  const saveEdit = async () => {
+    if (!detail) return;
+    if (editTitle.trim() === detail.title && editBody === detail.body) { setEditing(false); return; }
+    setEditBusy(true);
+    const r = await api.githubPrUpdate({
+      projectId, number,
+      ...(editTitle.trim() !== detail.title ? { title: editTitle.trim() } : {}),
+      ...(editBody !== detail.body ? { body: editBody } : {}),
+      ...(sessionId ? { sessionId } : {}),
+    }).catch((e: unknown) => ({ ok: false as const, reason: e instanceof Error ? e.message : String(e) }));
+    setEditBusy(false);
+    if (r.ok) {
+      setEditing(false);
+      reloadDetail();
+    } else {
+      setMergeMsg(`Update failed: ${r.reason}`);
+    }
+  };
 
   const submitReview = async () => {
     setWriteMsg("");
@@ -147,8 +207,61 @@ export default function PullRequestView({ number, onClose }: { number: number; o
                 <span><span className="diff-add">+{detail.additions}</span> <span className="diff-del">−{detail.deletions}</span></span>
                 <span>·</span>
                 <span>{detail.mergeable.toLowerCase()}</span>
+                <span className="header-spacer" />
+                {detail.state === "OPEN" && !editing && (
+                  <button className="small-btn" onClick={() => { setEditTitle(detail.title); setEditBody(detail.body); setEditing(true); }}>
+                    Edit
+                  </button>
+                )}
               </div>
-              <pre className="pr-body">{detail.body || "No description."}</pre>
+
+              {editing ? (
+                <div className="pr-edit-form">
+                  <input value={editTitle} placeholder="Title…" onChange={(e) => setEditTitle(e.target.value)} />
+                  <textarea rows={6} placeholder="Description…" value={editBody} onChange={(e) => setEditBody(e.target.value)} />
+                  <div className="view-toolbar-row">
+                    <span className="header-spacer" />
+                    <button className="small-btn" disabled={editBusy} onClick={() => setEditing(false)}>Cancel</button>
+                    <button className="primary-btn" disabled={editBusy || !editTitle.trim()} onClick={() => void saveEdit()}>
+                      {editBusy ? "Saving…" : "Save"}
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <pre className="pr-body">{detail.body || "No description."}</pre>
+              )}
+
+              {/* F7: merge — a destructive remote write, gated on mergeability and
+                  an explicit confirmation. Branch deletion is deliberately not here. */}
+              {detail.state === "OPEN" && (
+                <div className="pr-merge-area">
+                  <div className="stat-label">Merge (external write)</div>
+                  <div className="view-toolbar-row">
+                    <select value={mergeStrategy} disabled={!!mergeBlock || mergeBusy}
+                      onChange={(e) => setMergeStrategy(e.target.value as typeof mergeStrategy)}>
+                      <option value="squash">Squash and merge</option>
+                      <option value="merge">Merge commit</option>
+                      <option value="rebase">Rebase and merge</option>
+                    </select>
+                    {!mergeBlock && (
+                      <label className="sched-every">
+                        <input type="checkbox" checked={mergeConfirm} onChange={(e) => setMergeConfirm(e.target.checked)} />
+                        I confirm this merge
+                      </label>
+                    )}
+                    <span className="header-spacer" />
+                    <button className="primary-btn" disabled={!!mergeBlock || !mergeConfirm || mergeBusy}
+                      title={mergeBlock ?? `Merge #${number} via GitHub (${mergeStrategy})`}
+                      onClick={() => void doMerge()}>
+                      {mergeBusy ? "Merging…" : "Merge pull request"}
+                    </button>
+                  </div>
+                  {mergeBlock && <div className="set-muted">Merge unavailable: {mergeBlock}.</div>}
+                </div>
+              )}
+              {mergeMsg && (
+                <div className={/failed/.test(mergeMsg) ? "form-error" : "knowledge-notice"} role="status">{mergeMsg}</div>
+              )}
             </div>
           )}
 

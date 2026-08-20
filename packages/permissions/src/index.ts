@@ -70,3 +70,64 @@ export function createPermissionService(dataDir: string): PermissionService {
     rules: () => [...ruleList],
   };
 }
+
+// ---- F18: per-session auto-accept policy -------------------------------------
+
+/** "inherit" (default) defers to the nearest ancestor with an explicit
+ *  setting; "off" is a child's explicit opt-out from an inherited "on". */
+export type AutoAcceptSetting = "on" | "off" | "inherit";
+
+/** Pure nearest-parent policy resolution (F18). Walks the parent chain until
+ *  an explicit "on"/"off" appears; the root default is OFF — auto-accept is
+ *  never a global default. Cycle- and depth-guarded. */
+export function resolveAutoAccept(
+  sessionId: string,
+  settingOf: (id: string) => AutoAcceptSetting,
+  parentOf: (id: string) => string | undefined,
+): boolean {
+  const seen = new Set<string>();
+  let id: string | undefined = sessionId;
+  while (id && !seen.has(id) && seen.size < 64) {
+    seen.add(id);
+    const setting = settingOf(id);
+    if (setting === "on") return true;
+    if (setting === "off") return false;
+    id = parentOf(id);
+  }
+  return false;
+}
+
+export interface AutoAcceptStore {
+  get(sessionId: string): AutoAcceptSetting;
+  /** "inherit" removes the record — only explicit choices persist. */
+  set(sessionId: string, setting: AutoAcceptSetting): void;
+}
+
+/** Persistent explicit-settings map (<file> holds only "on"/"off" entries). */
+export function createAutoAcceptStore(file: string): AutoAcceptStore {
+  const settings = new Map<string, "on" | "off">();
+  try {
+    const raw = JSON.parse(readFileSync(file, "utf8")) as Record<string, unknown>;
+    for (const [k, v] of Object.entries(raw)) {
+      if (v === "on" || v === "off") settings.set(k, v);
+    }
+  } catch { /* first run */ }
+
+  const persist = () => {
+    mkdirSync(dirname(file), { recursive: true });
+    writeFileSync(file, JSON.stringify(Object.fromEntries(settings), null, 2));
+  };
+
+  return {
+    get: (sessionId) => settings.get(sessionId) ?? "inherit",
+    set(sessionId, setting) {
+      if (setting === "inherit") {
+        if (!settings.delete(sessionId)) return;
+      } else {
+        if (settings.get(sessionId) === setting) return;
+        settings.set(sessionId, setting);
+      }
+      persist();
+    },
+  };
+}

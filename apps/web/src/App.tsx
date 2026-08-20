@@ -12,6 +12,7 @@ import ViewErrorBoundary from "./components/ViewErrorBoundary.tsx";
 import { clearUiError, setOverlay, useStore } from "./store.ts";
 import { usePrefs } from "./prefs.ts";
 import { LiveRegion } from "./components/a11y/live.tsx";
+import WorktreeSessionDialog from "./components/WorktreeSessionDialog.tsx";
 
 function ErrorBanner() {
   const message = useStore((s) => s.uiError);
@@ -53,6 +54,7 @@ export default function App() {
       {overlay === "palette" && <CommandPalette />}
       {overlay === "search" && <SessionSearch />}
       {overlay === "project-picker" && <ProjectFolderDialog onClose={() => setOverlay(null)} />}
+      {overlay === "worktree-session" && <WorktreeSessionDialog />}
       <SettingsModal open={overlay === "settings"} onClose={() => setOverlay(null)} />
       <LiveRegion />
     </div>

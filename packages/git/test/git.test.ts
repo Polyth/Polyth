@@ -215,3 +215,72 @@ test("pathsUnder expands folders from status without touching siblings", async (
   const srcx = pathsUnder(status, "sr");
   assert.deepEqual([...srcx.staged, ...srcx.untracked, ...srcx.unstaged], []);
 });
+
+test("show returns a per-commit patch and diff can ignore whitespace", async () => {
+  const dir = repo();
+  writeFileSync(join(dir, "README.md"), "hello world\n");
+  await git.stage(dir, ["README.md"]);
+  const { sha } = await git.commit(dir, "change greeting");
+  const shown = await git.show(dir, sha);
+  assert.equal(shown.sha, sha);
+  assert.match(shown.diff, /change greeting/);
+  assert.match(shown.diff, /\+hello world/);
+
+  writeFileSync(join(dir, "README.md"), "hello    world\n");
+  assert.match((await git.diff(dir)).diff, /hello/);
+  assert.equal((await git.diff(dir, { ignoreWhitespace: true })).diff.trim(), "");
+});
+
+test("stash push, apply, and drop round-trip tracked and untracked files", async () => {
+  const dir = repo();
+  writeFileSync(join(dir, "README.md"), "stashed edit\n");
+  writeFileSync(join(dir, "new.txt"), "untracked\n");
+  assert.equal((await git.stashPush(dir, "work in progress")).created, true);
+  assert.equal((await git.status(dir)).clean, true);
+  const stashes = await git.stashList(dir);
+  assert.equal(stashes.length, 1);
+  assert.match(stashes[0]!.message, /work in progress/);
+
+  await git.stashApply(dir, stashes[0]!.ref);
+  const restored = await git.status(dir);
+  assert.equal(restored.unstaged.some((file) => file.path === "README.md"), true);
+  assert.equal(restored.untracked.some((file) => file.path === "new.txt"), true);
+  await git.stashDrop(dir, stashes[0]!.ref);
+  assert.deepEqual(await git.stashList(dir), []);
+  await assert.rejects(() => git.stashApply(dir, "--bad"), /invalid stash ref/);
+});
+
+test("fetch, pull, and push synchronize an explicit remote", async () => {
+  const dir = repo();
+  const bare = mkdtempSync(join(tmpdir(), "polyth-remote-"));
+  dirs.push(bare);
+  execFileSync("git", ["init", "--bare", "-q"], { cwd: bare });
+  const g = (...args: string[]) => execFileSync("git", args, { cwd: dir, stdio: "pipe" });
+  g("remote", "add", "origin", bare);
+  g("push", "-qu", "origin", "main");
+  execFileSync("git", ["symbolic-ref", "HEAD", "refs/heads/main"], { cwd: bare });
+
+  const peerParent = mkdtempSync(join(tmpdir(), "polyth-peer-"));
+  dirs.push(peerParent);
+  const peer = join(peerParent, "repo");
+  execFileSync("git", ["clone", "-q", bare, peer]);
+  const pg = (...args: string[]) => execFileSync("git", args, { cwd: peer, stdio: "pipe" });
+  pg("config", "user.email", "t@example.com");
+  pg("config", "user.name", "Peer");
+  pg("config", "commit.gpgsign", "false");
+  writeFileSync(join(peer, "peer.txt"), "from peer\n");
+  pg("add", ".");
+  pg("commit", "-qm", "peer change");
+  pg("push", "-q");
+
+  await git.fetch(dir, "origin");
+  assert.equal((await git.status(dir)).behind, 1);
+  await git.pull(dir, "origin");
+  assert.equal((await git.status(dir)).behind, 0);
+  writeFileSync(join(dir, "local.txt"), "from local\n");
+  await git.stage(dir, ["local.txt"]);
+  await git.commit(dir, "local change");
+  await git.push(dir, "origin");
+  assert.equal((await git.status(dir)).ahead, 0);
+  await assert.rejects(() => git.fetch(dir, "--upload-pack=evil"), /invalid remote/);
+});

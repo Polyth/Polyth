@@ -3,8 +3,8 @@
 // The right pane shows hunk-by-hunk diffs where local review comments anchor
 // by content digest and turn Outdated when the source moves on.
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { api, type GitBranches, type GitFileEntry, type GitGraphEntry, type GitStatus, type Worktree } from "../api.ts";
-import { useStore, setGitBranch, setUiError } from "../store.ts";
+import { api, type GitBranches, type GitFileEntry, type GitGraphEntry, type GitStash, type Worktree } from "../api.ts";
+import { openWorktreeSessionDialog, useStore, setGitBranch, setUiError } from "../store.ts";
 import { diffStat } from "../utils.ts";
 import { friendlyError } from "../settings.ts";
 import { layoutGraph, type GraphRow } from "../git/graph.ts";
@@ -14,6 +14,9 @@ import {
 } from "../review/anchors.ts";
 import CopyButton from "./CopyButton.tsx";
 import EmptyState from "./EmptyState.tsx";
+import PrCreatePanel from "./PrCreatePanel.tsx";
+import { setGitPrefs, splitDiffRows, useGitPrefs } from "../gitPrefs.ts";
+import { refreshGitStatus, useGitStatus } from "../gitStatusStore.ts";
 
 const STATUS_LETTER: Record<string, { letter: string; cls: string; label: string }> = {
   added: { letter: "A", cls: "staged", label: "Added" },
@@ -62,47 +65,56 @@ function GraphSvg({ row }: { row: GraphRow }) {
 
 export default function GitView() {
   const projectId = useStore((s) => s.activeProjectId);
-  const [status, setStatus] = useState<GitStatus | null>(null);
+  const sessionId = useStore((s) => s.activeSessionId);
+  const status = useGitStatus(projectId, false, sessionId);
   const [branches, setBranches] = useState<GitBranches>({ current: "", branches: [] });
   const [trees, setTrees] = useState<Worktree[]>([]);
   const [graph, setGraph] = useState<GitGraphEntry[]>([]);
+  const [stashes, setStashes] = useState<GitStash[]>([]);
   const [graphDone, setGraphDone] = useState(false);
   const [loadError, setLoadError] = useState(false);
   const [sel, setSel] = useState<string | null>(null);
   const [diff, setDiff] = useState("");
+  const [commitSel, setCommitSel] = useState<string | null>(null);
+  const [commitDiff, setCommitDiff] = useState("");
   const [commitMsg, setCommitMsg] = useState("");
   const [newBranch, setNewBranch] = useState("");
   const [newTree, setNewTree] = useState("");
+  const [stashMessage, setStashMessage] = useState("");
   const [showBranchForm, setShowBranchForm] = useState(false);
   const [showTreeForm, setShowTreeForm] = useState(false);
+  const [showPrForm, setShowPrForm] = useState(false);
   const [busy, setBusy] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
   const [comments, setComments] = useState<ReviewComment[]>([]);
   const [draft, setDraft] = useState<{ digest: string; line: number } | null>(null);
   const [draftText, setDraftText] = useState("");
+  const [syncSteps, setSyncSteps] = useState<Array<{ step: "fetch" | "pull" | "push"; error?: string }>>([]);
+  const prefs = useGitPrefs();
 
   const refresh = useCallback(async () => {
     if (!projectId) return;
     try {
-      const [s, b, w, g] = await Promise.all([
-        api.gitStatus(projectId),
-        api.gitBranches(projectId),
+      const [s, b, w, g, stashRows] = await Promise.all([
+        refreshGitStatus(projectId, sessionId),
+        api.gitBranches(projectId, sessionId ?? undefined),
         api.listWorktrees(projectId),
-        api.gitGraph(projectId, GRAPH_PAGE, 0),
+        api.gitGraph(projectId, GRAPH_PAGE, 0, sessionId ?? undefined),
+        api.gitStashes(projectId, sessionId ?? undefined),
       ]);
-      setStatus(s);
+      if (!s) throw new Error("git status unavailable");
       setBranches(b);
       setTrees(w);
       setGraph(g);
+      setStashes(stashRows);
       setGraphDone(g.length < GRAPH_PAGE);
       setLoadError(false);
       if (b.current) setGitBranch(b.current);
     } catch {
-      setStatus(null);
       setLoadError(true);
     }
-  }, [projectId]);
+  }, [projectId, sessionId]);
 
   useEffect(() => { void refresh(); }, [refresh]);
 
@@ -113,9 +125,16 @@ export default function GitView() {
   useEffect(() => {
     if (!projectId || !sel || !status) return;
     const staged = status.staged.some((f) => f.path === sel);
-    void api.gitDiff(projectId, sel, staged).then((d) => setDiff(d.diff));
+    void api.gitDiff(projectId, sel, staged, prefs.ignoreWhitespace, sessionId ?? undefined).then((d) => setDiff(d.diff));
     setDraft(null);
-  }, [projectId, sel, status]);
+  }, [projectId, sessionId, sel, status, prefs.ignoreWhitespace]);
+
+  useEffect(() => {
+    if (!projectId || !commitSel) return;
+    void api.gitShow(projectId, commitSel, prefs.ignoreWhitespace, sessionId ?? undefined)
+      .then((result) => setCommitDiff(result.diff))
+      .catch((err) => setUiError(friendlyError("Couldn’t load the commit diff", err)));
+  }, [projectId, sessionId, commitSel, prefs.ignoreWhitespace]);
 
   const hunks = useMemo(() => splitHunks(diff), [diff]);
   const graphRows = useMemo(() => layoutGraph(graph), [graph]);
@@ -156,9 +175,29 @@ export default function GitView() {
   const fileComments = comments.filter((c) => c.path === sel);
 
   const loadMoreGraph = async () => {
-    const more = await api.gitGraph(projectId, GRAPH_PAGE, graph.length);
+    const more = await api.gitGraph(projectId, GRAPH_PAGE, graph.length, sessionId ?? undefined);
     setGraph((g) => [...g, ...more]);
     if (more.length < GRAPH_PAGE) setGraphDone(true);
+  };
+
+  const syncRepository = async () => {
+    setBusy(true);
+    const results: Array<{ step: "fetch" | "pull" | "push"; error?: string }> = [];
+    for (const [step, action] of [
+      ["fetch", api.gitFetch],
+      ["pull", api.gitPull],
+      ["push", api.gitPush],
+    ] as const) {
+      try {
+        await action(projectId, "origin", sessionId ?? undefined);
+        results.push({ step });
+      } catch (err) {
+        results.push({ step, error: err instanceof Error ? err.message : String(err) });
+      }
+      setSyncSteps([...results]);
+    }
+    await refresh();
+    setBusy(false);
   };
 
   return (
@@ -166,15 +205,27 @@ export default function GitView() {
       <div className="goals-head">
         <h1 className="view-title">Git &amp; Worktrees</h1>
         <span className="header-spacer" />
-        <button className="small-btn" onClick={() => { setShowBranchForm((v) => !v); setShowTreeForm(false); }}>+ Branch</button>
-        <button className="small-btn" onClick={() => { setShowTreeForm((v) => !v); setShowBranchForm(false); }}>+ Worktree</button>
+        <button className="small-btn" disabled={busy} onClick={() => void syncRepository()}>Sync</button>
+        <button className="small-btn" onClick={() => openWorktreeSessionDialog(projectId)}>+ Worktree session</button>
+        <button className="small-btn" onClick={() => { setShowBranchForm((v) => !v); setShowTreeForm(false); setShowPrForm(false); }}>+ Branch</button>
+        <button className="small-btn" onClick={() => { setShowTreeForm((v) => !v); setShowBranchForm(false); setShowPrForm(false); }}>+ Worktree</button>
+        <button className="small-btn" onClick={() => { setShowPrForm((v) => !v); setShowBranchForm(false); setShowTreeForm(false); }}>Create PR</button>
       </div>
+      {syncSteps.length > 0 && (
+        <div className="git-sync-steps" role="status">
+          {syncSteps.map((result) => (
+            <span key={result.step} className={result.error ? "err" : "ok"} title={result.error}>
+              {result.error ? "✕" : "✓"} {result.step}{result.error ? `: ${result.error}` : ""}
+            </span>
+          ))}
+        </div>
+      )}
 
       {showBranchForm && (
         <div className="view-toolbar-row">
           <input value={newBranch} placeholder="new-branch-name" onChange={(e) => setNewBranch(e.target.value)} />
           <button className="small-btn" disabled={busy || !newBranch.trim()}
-            onClick={() => void run(async () => { await api.gitBranch(projectId, newBranch.trim()); setNewBranch(""); setShowBranchForm(false); })}>
+            onClick={() => void run(async () => { await api.gitBranch(projectId, newBranch.trim(), undefined, sessionId ?? undefined); setNewBranch(""); setShowBranchForm(false); })}>
             Create
           </button>
         </div>
@@ -187,6 +238,13 @@ export default function GitView() {
             Create
           </button>
         </div>
+      )}
+      {showPrForm && (
+        <PrCreatePanel
+          projectId={projectId}
+          sessionId={sessionId}
+          onClose={() => setShowPrForm(false)}
+        />
       )}
 
       <div className="git-grid">
@@ -202,22 +260,39 @@ export default function GitView() {
               </span>
             )}
             <span className="header-spacer" />
+            <button className={`small-btn ${prefs.changesView === "flat" ? "active" : ""}`} onClick={() => setGitPrefs({ changesView: "flat" })}>Flat</button>
+            <button className={`small-btn ${prefs.changesView === "tree" ? "active" : ""}`} onClick={() => setGitPrefs({ changesView: "tree" })}>Tree</button>
             {status && (status.unstaged.length + status.untracked.length) > 0 && (
               <button className="small-btn" disabled={busy}
-                onClick={() => void run(() => api.gitFolder(projectId, "", "stage"))}>
+                onClick={() => void run(() => api.gitFolder(projectId, "", "stage", sessionId ?? undefined))}>
                 Stage all
               </button>
             )}
             {status && status.staged.length > 0 && (
               <button className="small-btn" disabled={busy}
-                onClick={() => void run(() => api.gitFolder(projectId, "", "unstage"))}>
+                onClick={() => void run(() => api.gitFolder(projectId, "", "unstage", sessionId ?? undefined))}>
                 Unstage all
               </button>
             )}
           </div>
           <div className="git-changes">
             {all.length === 0 && <div className="muted" style={{ fontSize: 12.5, padding: "4px 0" }}>Working tree clean.</div>}
-            {groupKeys.map((dir) => {
+            {prefs.changesView === "flat" && all.map((f) => {
+              const { letter, cls, label } = fileLetter(f);
+              return (
+                <div key={`${f.path}:${f.staged}`} className={`git-file-row ${sel === f.path ? "selected" : ""}`}
+                  onClick={() => { setCommitSel(null); setSel(f.path); }}>
+                  <span className={`git-file-letter ${cls}`} title={label} aria-label={label}>{letter}</span>
+                  <span className="git-file-path" title={f.origPath ? `${f.origPath} → ${f.path}` : f.path}>{f.path}</span>
+                  <span className="git-file-actions" onClick={(event) => event.stopPropagation()}>
+                    {f.staged
+                      ? <button className="small-btn" title="Unstage" disabled={busy} onClick={() => void run(() => api.gitUnstage(projectId, [f.path], sessionId ?? undefined))}>U</button>
+                      : <button className="small-btn" title="Stage" disabled={busy} onClick={() => void run(() => api.gitStage(projectId, [f.path], sessionId ?? undefined))}>S</button>}
+                  </span>
+                </div>
+              );
+            })}
+            {prefs.changesView === "tree" && groupKeys.map((dir) => {
               const files = groups.get(dir)!;
               const open = !collapsed.has(dir);
               return (
@@ -237,15 +312,15 @@ export default function GitView() {
                     <span className="git-file-actions">
                       {files.some((f) => !f.staged && f.status !== "conflicted") && (
                         <button className="small-btn" title="Stage folder" disabled={busy}
-                          onClick={() => void run(() => api.gitFolder(projectId, dir, "stage"))}>S</button>
+                          onClick={() => void run(() => api.gitFolder(projectId, dir, "stage", sessionId ?? undefined))}>S</button>
                       )}
                       {files.some((f) => f.staged) && (
                         <button className="small-btn" title="Unstage folder" disabled={busy}
-                          onClick={() => void run(() => api.gitFolder(projectId, dir, "unstage"))}>U</button>
+                          onClick={() => void run(() => api.gitFolder(projectId, dir, "unstage", sessionId ?? undefined))}>U</button>
                       )}
                       {files.some((f) => !f.staged) && (
                         <button className="small-btn danger-btn" title="Discard folder changes" disabled={busy}
-                          onClick={() => { if (confirmTyped(`discard all changes under ${dir || "the repository root"}`)) void run(() => api.gitFolder(projectId, dir, "discard")); }}>✕</button>
+                          onClick={() => { if (confirmTyped(`discard all changes under ${dir || "the repository root"}`)) void run(() => api.gitFolder(projectId, dir, "discard", sessionId ?? undefined)); }}>✕</button>
                       )}
                     </span>
                   </div>
@@ -253,18 +328,18 @@ export default function GitView() {
                     const { letter, cls, label } = fileLetter(f);
                     return (
                       <div key={`${f.path}:${f.staged}`} className={`git-file-row ${sel === f.path ? "selected" : ""}`}
-                        onClick={() => setSel(f.path)}>
+                        onClick={() => { setCommitSel(null); setSel(f.path); }}>
                         <span className={`git-file-letter ${cls}`} title={label} aria-label={label}>{letter}</span>
                         <span className="git-file-path" title={f.origPath ? `${f.origPath} → ${f.path}` : f.path}>
                           {f.origPath ? <><span className="muted">{f.origPath} → </span>{f.path}</> : f.path}
                         </span>
                         <span className="git-file-actions" onClick={(e) => e.stopPropagation()}>
                           {f.staged
-                            ? <button className="small-btn" title="Unstage" disabled={busy} onClick={() => void run(() => api.gitUnstage(projectId, [f.path]))}>U</button>
-                            : <button className="small-btn" title="Stage" disabled={busy} onClick={() => void run(() => api.gitStage(projectId, [f.path]))}>S</button>}
+                            ? <button className="small-btn" title="Unstage" disabled={busy} onClick={() => void run(() => api.gitUnstage(projectId, [f.path], sessionId ?? undefined))}>U</button>
+                            : <button className="small-btn" title="Stage" disabled={busy} onClick={() => void run(() => api.gitStage(projectId, [f.path], sessionId ?? undefined))}>S</button>}
                           {!f.staged && f.status !== "untracked" && (
                             <button className="small-btn danger-btn" title="Discard" disabled={busy}
-                              onClick={() => { if (window.confirm(`Discard ${f.path}?`)) void run(() => api.gitDiscard(projectId, [f.path])); }}>✕</button>
+                              onClick={() => { if (window.confirm(`Discard ${f.path}?`)) void run(() => api.gitDiscard(projectId, [f.path], sessionId ?? undefined)); }}>✕</button>
                           )}
                         </span>
                       </div>
@@ -295,7 +370,7 @@ export default function GitView() {
                 <div className="stat-label">{label}</div>
                 {list.map((b) => (
                   <button key={b.name} className="git-branch-row" disabled={busy} title={b.name}
-                    onClick={() => void run(() => api.gitCheckout(projectId, b.name))}>
+                    onClick={() => void run(() => api.gitCheckout(projectId, b.name, sessionId ?? undefined))}>
                     <span className="mono">{b.name}</span>
                   </button>
                 ))}
@@ -314,6 +389,11 @@ export default function GitView() {
               </div>
               <div className="muted" style={{ fontSize: 11 }}>{t.path} · {t.head.slice(0, 7)}</div>
               {!t.isMain && (
+                <button className="small-btn git-wt-session" disabled={busy} onClick={() => openWorktreeSessionDialog(projectId, t.path)}>
+                  New session
+                </button>
+              )}
+              {!t.isMain && (
                 <button className="small-btn danger-btn git-wt-remove" disabled={busy}
                   onClick={() => { if (window.confirm(`Remove worktree ${t.path}?`)) void run(() => api.removeWorktree(projectId, t.path, true)); }}>
                   Remove
@@ -322,19 +402,41 @@ export default function GitView() {
             </div>
           ))}
 
+          <div className="stat-label">Stashes ({stashes.length})</div>
+          <div className="view-toolbar-row">
+            <input value={stashMessage} placeholder="stash message (optional)" onChange={(event) => setStashMessage(event.target.value)} />
+            <button className="small-btn" disabled={busy || all.length === 0}
+              onClick={() => void run(async () => { await api.gitStashPush(projectId, stashMessage.trim() || undefined, sessionId ?? undefined); setStashMessage(""); setSel(null); })}>
+              Stash
+            </button>
+          </div>
+          {stashes.map((stash) => (
+            <div className="git-stash-row" key={stash.ref}>
+              <span className="mono">{stash.ref}</span>
+              <span className="git-subj" title={stash.message}>{stash.message.replace(/^On [^:]+:\s*/, "")}</span>
+              <button className="small-btn" disabled={busy} onClick={() => void run(() => api.gitStashApply(projectId, stash.ref, sessionId ?? undefined))}>Apply</button>
+              <button className="small-btn danger-btn" disabled={busy}
+                onClick={() => { if (window.confirm(`Drop ${stash.ref}?`)) void run(() => api.gitStashDrop(projectId, stash.ref, sessionId ?? undefined)); }}>
+                Drop
+              </button>
+            </div>
+          ))}
+
           {/* ---- commit graph -------------------------------------------------- */}
           <div className="stat-label">Graph</div>
           {graph.length === 0 && <div className="muted" style={{ fontSize: 12.5 }}>No commits yet.</div>}
           <div className="git-graph">
             {graph.map((c, i) => (
-              <div key={c.sha} className="git-graph-row" title={`${c.author} · ${new Date(c.date).toLocaleString()}${c.parents.length > 1 ? " · merge" : ""}`}>
+              <button key={c.sha} className={`git-graph-row ${commitSel === c.sha ? "selected" : ""}`}
+                title={`${c.author} · ${new Date(c.date).toLocaleString()}${c.parents.length > 1 ? " · merge" : ""}`}
+                onClick={() => { setSel(null); setCommitSel(c.sha); }}>
                 {graphRows[i] && <GraphSvg row={graphRows[i]!} />}
                 <span className="git-sha">{c.shortSha}</span>
                 {c.refs.map((r) => (
                   <span key={r} className={`graph-ref${r.startsWith("tag: ") ? " tag" : ""}`}>{r.replace(/^tag: /, "⌂ ")}</span>
                 ))}
                 <span className="git-subj">{c.subject}</span>
-              </div>
+              </button>
             ))}
           </div>
           {!graphDone && graph.length > 0 && (
@@ -343,15 +445,27 @@ export default function GitView() {
         </div>
 
         <div className="git-col git-col-right">
-          {all.length === 0 ? (
+          {commitSel ? (
+            <>
+              <div className="wt-file" title={commitSel}>
+                Commit {graph.find((commit) => commit.sha === commitSel)?.shortSha ?? commitSel.slice(0, 7)}
+                {" · "}{graph.find((commit) => commit.sha === commitSel)?.subject ?? ""}
+              </div>
+              <DiffPrefsToolbar />
+              <DiffContent diff={commitDiff} split={prefs.layout === "split"} wrap={prefs.wrap} />
+            </>
+          ) : all.length === 0 ? (
             <EmptyState title="No changes" description="The working tree is clean. Edits in this project will show up here." />
           ) : sel === null ? (
             <EmptyState title="Pick a file" description="Select a changed file to view its diff." />
           ) : (
             <>
               <div className="wt-file" title={sel}>{sel}</div>
-              <div className="copy-wrap">
-                <pre className="git-diff git-diff-page">
+              <DiffPrefsToolbar />
+              {prefs.layout === "split" ? (
+                <DiffContent diff={diff} split wrap={prefs.wrap} />
+              ) : <div className="copy-wrap">
+                <pre className={`git-diff git-diff-page${prefs.wrap ? " wrap" : ""}`}>
                   {hunks.length === 0 && diff.split("\n").map((line, i) => (
                     <div key={i} className="git-diff-line">
                       <span className="git-diff-ln">{i + 1}</span>
@@ -367,7 +481,7 @@ export default function GitView() {
                   ))}
                 </pre>
                 <CopyButton text={diff} />
-              </div>
+              </div>}
 
               {draft && (
                 <div className="review-draft">
@@ -427,12 +541,12 @@ export default function GitView() {
               />
               <div className="commit-row">
                 <button className="small-btn" disabled={generating || busy}
-                  onClick={() => { setGenerating(true); void api.gitCommitMessage(projectId).then((r) => { if (r.message) setCommitMsg(r.message); }).finally(() => setGenerating(false)); }}>
+                  onClick={() => { setGenerating(true); void api.gitCommitMessage(projectId, sessionId ?? undefined).then((r) => { if (r.message) setCommitMsg(r.message); }).finally(() => setGenerating(false)); }}>
                   {generating ? "…" : "✦ Generate with AI"}
                 </button>
                 <button className="primary-btn" style={{ padding: "5px 14px", fontSize: 12 }}
                   disabled={!commitMsg.trim() || busy}
-                  onClick={() => void run(async () => { await api.gitCommit(projectId, commitMsg.trim()); setCommitMsg(""); setSel(null); })}>
+                  onClick={() => void run(async () => { await api.gitCommit(projectId, commitMsg.trim(), sessionId ?? undefined); setCommitMsg(""); setSel(null); })}>
                   Commit
                 </button>
               </div>
@@ -473,5 +587,42 @@ function HunkBlock({ hunk, onComment }: { hunk: DiffHunk; onComment: () => void 
         );
       })}
     </>
+  );
+}
+
+function DiffPrefsToolbar() {
+  const prefs = useGitPrefs();
+  return (
+    <div className="diff-prefs">
+      <button className={`small-btn ${prefs.layout === "unified" ? "active" : ""}`} onClick={() => setGitPrefs({ layout: "unified" })}>Unified</button>
+      <button className={`small-btn ${prefs.layout === "split" ? "active" : ""}`} onClick={() => setGitPrefs({ layout: "split" })}>Split</button>
+      <label><input type="checkbox" checked={prefs.ignoreWhitespace} onChange={(event) => setGitPrefs({ ignoreWhitespace: event.target.checked })} /> Ignore whitespace</label>
+      <label><input type="checkbox" checked={prefs.wrap} onChange={(event) => setGitPrefs({ wrap: event.target.checked })} /> Wrap</label>
+    </div>
+  );
+}
+
+function DiffContent({ diff, split, wrap }: { diff: string; split: boolean; wrap: boolean }) {
+  if (!diff) return <div className="empty" style={{ padding: 12 }}>No diff.</div>;
+  if (!split) {
+    return (
+      <div className="copy-wrap">
+        <pre className={`git-diff git-diff-page${wrap ? " wrap" : ""}`}>{diff}</pre>
+        <CopyButton text={diff} />
+      </div>
+    );
+  }
+  return (
+    <div className="copy-wrap">
+      <div className={`split-diff${wrap ? " wrap" : ""}`}>
+        {splitDiffRows(diff).map((row, index) => (
+          <div className={`split-diff-row ${row.kind}`} key={index}>
+            <code className={row.left.startsWith("-") ? "diff-del" : ""}>{row.left}</code>
+            <code className={row.right.startsWith("+") ? "diff-add" : ""}>{row.right}</code>
+          </div>
+        ))}
+      </div>
+      <CopyButton text={diff} />
+    </div>
   );
 }

@@ -174,7 +174,9 @@ export function createMcpConfigService(opts: { file: string; applier?: McpApplie
 
   const applyAll = async (): Promise<void> => {
     if (!opts.applier) return;
-    await opts.applier.applyMcp(servers.map((s) => ({
+    // F10: disabled servers are REMOVED from the applied config (not written
+    // with enabled:false) so the backend cannot start or list them at all.
+    await opts.applier.applyMcp(servers.filter((s) => s.enabled).map((s) => ({
       name: s.name,
       enabled: s.enabled,
       transport: s.transport.kind === "stdio"

@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
-import { createTerminalService } from "../src/index.ts";
+import { createReplayBuffer, createTerminalService } from "../src/index.ts";
 
 let cwd: string;
 const services: ReturnType<typeof createTerminalService>[] = [];
@@ -71,4 +71,98 @@ test("resize + write to a closed terminal are no-ops", async () => {
   const { id } = await t.create({ projectId: "p", cwd, cmd: "cat" });
   await t.close(id);
   assert.doesNotThrow(() => { t.resize(id, 120, 40); t.write(id, "x"); });
+});
+
+test("run captures bounded command output and removes the short-lived terminal", async () => {
+  const t = newService();
+  const result = await t.run(
+    { projectId: "p", cwd, cmd: "printf 'prefix-'; printf '1234567890'" },
+    { timeoutMs: 5_000, maxOutputBytes: 1_024 },
+  );
+  assert.equal(result.exitCode, 0);
+  assert.equal(result.timedOut, false);
+  assert.equal(result.truncated, false);
+  assert.equal(result.output, "prefix-1234567890");
+  assert.equal(t.list("p").length, 0);
+});
+
+test("run times out a long command", async () => {
+  const t = newService();
+  const result = await t.run(
+    { projectId: "p", cwd, cmd: "sleep 5" },
+    { timeoutMs: 100, maxOutputBytes: 1_024 },
+  );
+  assert.equal(result.timedOut, true);
+  assert.equal(t.list("p").length, 0);
+});
+
+// ------------------------------------------------------------- F12 replay ring
+
+test("replay buffer is byte-exact under the cap and evicts from the front", () => {
+  const rb = createReplayBuffer(10);
+  rb.push(Buffer.from("hello"));
+  assert.equal(rb.snapshot(), "hello");
+  assert.equal(rb.byteLength(), 5);
+
+  rb.push(Buffer.from(" world")); // 11 bytes total -> "h" evicted
+  assert.equal(rb.snapshot(), "ello world");
+  assert.equal(rb.byteLength(), 10);
+
+  // one chunk bigger than the whole ring keeps only its tail
+  rb.push(Buffer.from("0123456789ABCDEF"));
+  assert.equal(rb.snapshot(), "6789ABCDEF");
+
+  rb.clear();
+  assert.equal(rb.snapshot(), "");
+  assert.equal(rb.byteLength(), 0);
+});
+
+test("replay buffer never tears UTF-8: split chunks and mid-character eviction", () => {
+  // a multi-byte char split ACROSS two pushes reassembles byte-exactly
+  const euro = Buffer.from("€"); // e2 82 ac
+  const rb = createReplayBuffer(100);
+  rb.push(Buffer.from("price: "));
+  rb.push(euro.subarray(0, 1));
+  rb.push(euro.subarray(1));
+  rb.push(Buffer.from("42"));
+  assert.equal(rb.snapshot(), "price: €42");
+
+  // eviction that lands INSIDE a multi-byte char skips the torn tail bytes
+  const tight = createReplayBuffer(4);
+  tight.push(Buffer.from("a€b")); // 61 e2 82 ac 62 -> cap 4 drops 0x61, leaving e2 82 ac 62
+  assert.equal(tight.snapshot(), "€b");
+  tight.push(Buffer.from("c")); // drops e2, leaving torn 82 ac + "bc"
+  assert.equal(tight.snapshot(), "bc"); // orphaned continuation bytes skipped, no garbage
+});
+
+test("live onData decodes UTF-8 split across chunk boundaries via the replay path", async () => {
+  const t = newService();
+  // printf writes the euro sign bytes in one go; the service must both stream
+  // it intact and replay it intact afterwards
+  // octal escapes (POSIX printf): é = \303\251, € = \342\202\254
+  const { id } = await t.create({ projectId: "p", cwd, cmd: "printf 'caf\\303\\251 \\342\\202\\254'" });
+  await new Promise<void>((res) => {
+    const sub = t.onExit((eid) => { if (eid === id) { sub.dispose(); res(); } });
+  });
+  assert.equal(t.replay(id), "café €");
+  const info = t.get(id);
+  assert.equal(info?.running, false);
+  assert.equal(info?.exitCode, 0);
+});
+
+test("rename mutates the title; replay survives socket-free reads; unknown ids are undefined", async () => {
+  const t = newService();
+  const { id } = await t.create({ projectId: "p", cwd, cmd: "cat" });
+
+  const renamed = t.rename(id, "  build watcher  ");
+  assert.equal(renamed?.title, "build watcher");
+  assert.equal(t.get(id)?.title, "build watcher");
+  // a blank title is ignored, not applied
+  assert.equal(t.rename(id, "   ")?.title, "build watcher");
+
+  assert.equal(t.rename("nope", "x"), undefined);
+  assert.equal(t.replay("nope"), undefined);
+
+  await t.close(id);
+  assert.equal(t.replay(id), undefined, "closed terminals free their ring");
 });
