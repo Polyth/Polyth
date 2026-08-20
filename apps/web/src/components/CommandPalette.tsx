@@ -27,6 +27,8 @@ export default function CommandPalette() {
   const input = useRef<HTMLInputElement>(null);
   const seq = useRef(0);
   const projectId = useStore((s) => s.activeProjectId);
+  // File search resolves against the active session's worktree (P0).
+  const sessionId = useStore((s) => s.activeSessionId);
   const mode = useStore((s) => s.paletteMode);
   const filesMode = mode === "files";
   const { text, archived } = useMemo(() => parseQuery(q), [q]);
@@ -49,7 +51,7 @@ export default function CommandPalette() {
     if (!wantFiles && !wantWorkspaces) return;
     const h = setTimeout(() => {
       if (wantFiles) {
-        void api.filesSearchScored(projectId!, text, filesMode ? 20 : 8).then((hits) => {
+        void api.filesSearchScored(projectId!, text, filesMode ? 20 : 8, false, sessionId ?? undefined).then((hits) => {
           if (mySeq === seq.current) setFiles(hits);
         });
       }
@@ -60,7 +62,7 @@ export default function CommandPalette() {
       }
     }, 150);
     return () => clearTimeout(h);
-  }, [text, archived, filesMode, projectId]);
+  }, [text, archived, filesMode, projectId, sessionId]);
 
   const entries = useMemo<Entry[]>(
     () => [

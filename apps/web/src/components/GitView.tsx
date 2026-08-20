@@ -250,7 +250,7 @@ export default function GitView() {
       <div className="git-grid">
         <div className="git-col">
           {/* ---- changes first ------------------------------------------------ */}
-          <div className="stat-label" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 6 }}>
+          <div className="stat-label git-changes-head">
             <span>Changes ({all.length})</span>
             {status && all.length > 0 && (
               <span className="git-ahead-behind">

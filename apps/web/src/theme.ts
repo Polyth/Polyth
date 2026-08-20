@@ -42,12 +42,16 @@ const SYNTAX_KEYS: ReadonlyArray<keyof ThemeSyntax> = ["kw", "str", "cmt", "num"
 
 /** ids "dark" and "light" are the pre-F15 settings values and must stay stable. */
 export const PRESET_THEMES: ThemeSpec[] = [
+  // UX-FIXTURE-VISUAL P1: `faint` (and in light themes `muted`) labels
+  // meaningful status metadata (sidebar status/time, header subtitle), so
+  // every bundled value holds ≥4.5:1 against its worst-case surface — the
+  // accent-wash selected row over the panel.
   {
     id: "dark", name: "Ember Dark", appearance: "dark",
     tokens: {
       bg: "#121110", panel: "#191816", elevated: "#221f1c", raised: "#2a2724", sunken: "#0e0d0c", inputBg: "#161513",
       border: "#35322c", borderSoft: "#2a2723",
-      text: "#f0eee8", textDim: "#cbc6bc", muted: "#9c9890", faint: "#6f6b64",
+      text: "#f0eee8", textDim: "#cbc6bc", muted: "#9c9890", faint: "#96928a",
       accent: "#f49b5b", accentInk: "#1c1109", accentHi: "#f8a869",
       green: "#8bcf6b", amber: "#e4bb62", red: "#f07c71", blue: "#82bff4", purple: "#c4a7ee",
     },
@@ -57,7 +61,7 @@ export const PRESET_THEMES: ThemeSpec[] = [
     tokens: {
       bg: "#0f1115", panel: "#14171d", elevated: "#1a1e26", raised: "#222732", sunken: "#0a0c10", inputBg: "#12151b",
       border: "#2c3240", borderSoft: "#232837",
-      text: "#e8eaf0", textDim: "#c2c7d4", muted: "#8f96a8", faint: "#636a7c",
+      text: "#e8eaf0", textDim: "#c2c7d4", muted: "#8f96a8", faint: "#8990a1",
       accent: "#7aa2f7", accentInk: "#0a0f1a", accentHi: "#8fb3ff",
       green: "#9ece6a", amber: "#e0af68", red: "#f7768e", blue: "#7dcfff", purple: "#bb9af7",
     },
@@ -67,7 +71,7 @@ export const PRESET_THEMES: ThemeSpec[] = [
     tokens: {
       bg: "#0e1310", panel: "#131a15", elevated: "#19241c", raised: "#223027", sunken: "#0a0e0b", inputBg: "#111812",
       border: "#2b3a30", borderSoft: "#223028",
-      text: "#e6efe7", textDim: "#c3d2c6", muted: "#8fa396", faint: "#64756a",
+      text: "#e6efe7", textDim: "#c3d2c6", muted: "#8fa396", faint: "#889a8e",
       accent: "#7fd08a", accentInk: "#0b130d", accentHi: "#93e09e",
       green: "#8bcf6b", amber: "#dcbb6a", red: "#ec8074", blue: "#7fb8e6", purple: "#b8a3e6",
     },
@@ -79,7 +83,7 @@ export const PRESET_THEMES: ThemeSpec[] = [
     tokens: {
       bg: "#faf8f4", panel: "#f1ede6", elevated: "#ffffff", raised: "#f3efe8", sunken: "#e9e4da", inputBg: "#ffffff",
       border: "#d5cec1", borderSoft: "#e2dcd2",
-      text: "#2a2620", textDim: "#4d473e", muted: "#7a7469", faint: "#a39c8f",
+      text: "#2a2620", textDim: "#4d473e", muted: "#5b564e", faint: "#6a6357",
       accent: "#d9822b", accentInk: "#241404", accentHi: "#e2954a",
       green: "#4d9432", amber: "#a97d14", red: "#c4453a", blue: "#2f6fae", purple: "#7a53b8",
     },
@@ -92,7 +96,7 @@ export const PRESET_THEMES: ThemeSpec[] = [
     tokens: {
       bg: "#f4f6f8", panel: "#e9edf1", elevated: "#ffffff", raised: "#eef1f5", sunken: "#dde3e9", inputBg: "#ffffff",
       border: "#c6cfd8", borderSoft: "#d8dfe6",
-      text: "#24292f", textDim: "#454c54", muted: "#6e7781", faint: "#9aa4ae",
+      text: "#24292f", textDim: "#454c54", muted: "#4d535a", faint: "#57616c",
       accent: "#2d64ae", accentInk: "#f7fafc", accentHi: "#3870bb",
       green: "#3e8636", amber: "#9a6d00", red: "#c03d33", blue: "#2f6fae", purple: "#7a53b8",
     },
@@ -104,7 +108,7 @@ export const PRESET_THEMES: ThemeSpec[] = [
     tokens: {
       bg: "#fdf6e3", panel: "#f3ecd9", elevated: "#fffdf5", raised: "#f5eeda", sunken: "#e9e2cd", inputBg: "#fffdf5",
       border: "#d5cdb4", borderSoft: "#e2dbc4",
-      text: "#3b4a51", textDim: "#586e75", muted: "#7d8f96", faint: "#a3b0b5",
+      text: "#3b4a51", textDim: "#586e75", muted: "#4b575c", faint: "#56656b",
       accent: "#2aa198", accentInk: "#002b36", accentHi: "#35b3aa",
       green: "#859900", amber: "#b58900", red: "#dc322f", blue: "#268bd2", purple: "#6c71c4",
     },

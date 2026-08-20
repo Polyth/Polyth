@@ -631,44 +631,47 @@ export const api = {
     jfetch<{ ok: true }>(`/api/worktrees/remove`, json("POST", { projectId, path: wtPath, deleteBranch })),
 
   // ---- files (§12) ---------------------------------------------------------
-  filesTree: (projectId: string, relPath?: string, hidden?: boolean) =>
-    jfetch<FileEntry[]>(`/api/files/tree?projectId=${encodeURIComponent(projectId)}${relPath ? `&path=${encodeURIComponent(relPath)}` : ""}${hidden ? "&hidden=true" : ""}`),
-  filesRead: (projectId: string, relPath: string) =>
-    jfetch<FileReadResult>(`/api/files/read?projectId=${encodeURIComponent(projectId)}&path=${encodeURIComponent(relPath)}`),
-  filesWrite: (projectId: string, relPath: string, content: string, baseRevision?: string) =>
+  // Every files call carries an optional sessionId so the server resolves the
+  // active session's worktree, not the project root (UX-FIXTURE-VISUAL P0).
+  filesTree: (projectId: string, relPath?: string, hidden?: boolean, sessionId?: string) =>
+    jfetch<FileEntry[]>(`/api/files/tree?projectId=${encodeURIComponent(projectId)}${relPath ? `&path=${encodeURIComponent(relPath)}` : ""}${hidden ? "&hidden=true" : ""}${sessionId ? `&sessionId=${encodeURIComponent(sessionId)}` : ""}`),
+  filesRead: (projectId: string, relPath: string, sessionId?: string) =>
+    jfetch<FileReadResult>(`/api/files/read?projectId=${encodeURIComponent(projectId)}&path=${encodeURIComponent(relPath)}${sessionId ? `&sessionId=${encodeURIComponent(sessionId)}` : ""}`),
+  filesWrite: (projectId: string, relPath: string, content: string, baseRevision?: string, sessionId?: string) =>
     jfetch<{ ok: true; revision: string }>(`/api/files/write`, json("POST", {
       projectId, path: relPath, content,
       ...(baseRevision !== undefined ? { baseRevision } : {}),
+      ...(sessionId ? { sessionId } : {}),
     })),
-  filesMkdir: (projectId: string, relPath: string) =>
-    jfetch<{ ok: true }>(`/api/files/mkdir`, json("POST", { projectId, path: relPath })),
-  filesDelete: (projectId: string, relPath: string) =>
-    jfetch<{ ok: true }>(`/api/files/delete`, json("POST", { projectId, path: relPath })),
-  filesRename: (projectId: string, from: string, to: string) =>
-    jfetch<{ ok: true }>(`/api/files/rename`, json("POST", { projectId, from, to })),
-  filesUpload: (projectId: string, relPath: string, bytes: Uint8Array) => {
+  filesMkdir: (projectId: string, relPath: string, sessionId?: string) =>
+    jfetch<{ ok: true }>(`/api/files/mkdir`, json("POST", { projectId, path: relPath, ...(sessionId ? { sessionId } : {}) })),
+  filesDelete: (projectId: string, relPath: string, sessionId?: string) =>
+    jfetch<{ ok: true }>(`/api/files/delete`, json("POST", { projectId, path: relPath, ...(sessionId ? { sessionId } : {}) })),
+  filesRename: (projectId: string, from: string, to: string, sessionId?: string) =>
+    jfetch<{ ok: true }>(`/api/files/rename`, json("POST", { projectId, from, to, ...(sessionId ? { sessionId } : {}) })),
+  filesUpload: (projectId: string, relPath: string, bytes: Uint8Array, sessionId?: string) => {
     let bin = "";
     for (let i = 0; i < bytes.length; i += 0x8000) {
       bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
     }
-    return jfetch<{ ok: true }>(`/api/files/upload`, json("POST", { projectId, path: relPath, base64: btoa(bin) }));
+    return jfetch<{ ok: true }>(`/api/files/upload`, json("POST", { projectId, path: relPath, base64: btoa(bin), ...(sessionId ? { sessionId } : {}) }));
   },
-  filesStat: (projectId: string, relPath: string) =>
+  filesStat: (projectId: string, relPath: string, sessionId?: string) =>
     jfetch<{ path: string; kind: "file" | "dir"; size: number; mime?: string; revision?: string }>(
-      `/api/files/stat?projectId=${encodeURIComponent(projectId)}&path=${encodeURIComponent(relPath)}`,
+      `/api/files/stat?projectId=${encodeURIComponent(projectId)}&path=${encodeURIComponent(relPath)}${sessionId ? `&sessionId=${encodeURIComponent(sessionId)}` : ""}`,
     ),
   /** URL of the sanitized raw-bytes endpoint (images in Markdown, previews). */
-  filesRawUrl: (projectId: string, relPath: string) =>
-    `/api/files/raw?projectId=${encodeURIComponent(projectId)}&path=${encodeURIComponent(relPath)}`,
+  filesRawUrl: (projectId: string, relPath: string, sessionId?: string) =>
+    `/api/files/raw?projectId=${encodeURIComponent(projectId)}&path=${encodeURIComponent(relPath)}${sessionId ? `&sessionId=${encodeURIComponent(sessionId)}` : ""}`,
   /** Legacy string results; accepts old (string[]) and new (scored) payloads. */
-  filesSearch: async (projectId: string, q: string, limit = 50): Promise<string[]> => {
-    const hits = await api.filesSearchScored(projectId, q, limit);
+  filesSearch: async (projectId: string, q: string, limit = 50, sessionId?: string): Promise<string[]> => {
+    const hits = await api.filesSearchScored(projectId, q, limit, false, sessionId);
     return hits.map((h) => h.path);
   },
   /** Scored file search (WP13). Migration-safe: plain strings are upgraded. */
-  filesSearchScored: (projectId: string, q: string, limit = 50, includeDirs = false) =>
+  filesSearchScored: (projectId: string, q: string, limit = 50, includeDirs = false, sessionId?: string) =>
     jfetch<Array<string | FileSearchHitDto>>(
-      `/api/files/search?projectId=${encodeURIComponent(projectId)}&q=${encodeURIComponent(q)}&limit=${limit}${includeDirs ? "&includeDirs=true" : ""}`,
+      `/api/files/search?projectId=${encodeURIComponent(projectId)}&q=${encodeURIComponent(q)}&limit=${limit}${includeDirs ? "&includeDirs=true" : ""}${sessionId ? `&sessionId=${encodeURIComponent(sessionId)}` : ""}`,
     )
       .then((rows): FileSearchHitDto[] =>
         rows.map((r) => (typeof r === "string" ? { path: r, kind: "file", score: 0, matches: [] } : r)),
@@ -772,6 +775,8 @@ export const api = {
     jfetch<{ tasks: ScheduleTaskDto[]; errors: ScheduleLoopErrorDto[] }>(
       `/api/schedule/loops/rescan`, json("POST", { projectId }),
     ),
+  scheduleLoopErrorDismiss: (projectId: string, path: string) =>
+    jfetch<{ ok: boolean }>(`/api/schedule/loops/errors/dismiss`, json("POST", { projectId, path })),
 
   // ---- knowledge (WP10) --------------------------------------------------------
   knowledgeList: (projectId: string, opts: { kind?: KnowledgeKindDto; q?: string; limit?: number; offset?: number } = {}) => {

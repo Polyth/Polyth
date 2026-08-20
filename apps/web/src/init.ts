@@ -15,9 +15,17 @@ let lastSubSession: string | undefined;
 let lastProject: string | null | undefined;
 let branchFetchedFor: string | null = null;
 
-function fetchBranch(projectId: string): void {
-  branchFetchedFor = projectId;
-  void api.gitStatus(projectId).then((st) => store.setGitBranch(st.branch)).catch(() => store.setGitBranch(""));
+// Branch is resolved per (project, session): a session attached to a git
+// worktree reports that worktree's branch, never the primary checkout's
+// (UX-FIXTURE-VISUAL P0 — header/status must derive from the resolved root).
+const branchKey = (projectId: string, sessionId: string | null): string =>
+  `${projectId}\0${sessionId ?? ""}`;
+
+function fetchBranch(projectId: string, sessionId: string | null): void {
+  branchFetchedFor = branchKey(projectId, sessionId);
+  void api.gitStatus(projectId, sessionId ?? undefined)
+    .then((st) => store.setGitBranch(st.branch))
+    .catch(() => store.setGitBranch(""));
 }
 
 // ---- session URLs -----------------------------------------------------------
@@ -77,14 +85,15 @@ export function init(): void {
       lastProject = s.activeProjectId;
       if (s.activeProjectId) {
         void refreshSessions(s.activeProjectId);
-        fetchBranch(s.activeProjectId);
+        fetchBranch(s.activeProjectId, s.activeSessionId);
       } else {
         branchFetchedFor = null;
         store.setGitBranch("");
       }
-    } else if (s.activeProjectId && !s.gitBranch && branchFetchedFor !== s.activeProjectId) {
-      // Project unchanged but branch missing (e.g. earlier fetch failed) — refetch once (UX-04).
-      fetchBranch(s.activeProjectId);
+    } else if (s.activeProjectId && branchFetchedFor !== branchKey(s.activeProjectId, s.activeSessionId)) {
+      // Session switch (worktree may differ) or an earlier fetch failed —
+      // refetch once per (project, session) pair (UX-04, UX-FIXTURE-VISUAL).
+      fetchBranch(s.activeProjectId, s.activeSessionId);
     }
   });
 }

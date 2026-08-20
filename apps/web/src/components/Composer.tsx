@@ -376,7 +376,7 @@ export default function Composer({ variant = "docked" }: { variant?: "docked" | 
       // file mention: scored search shared with the palette; folders included
       if (!activeProjectId || token.path.length < 1) { setAcOpen(false); return; }
       const seq = ++fileSearchSeq.current;
-      void api.filesSearchScored(activeProjectId, token.path, 8, true).then((hits) => {
+      void api.filesSearchScored(activeProjectId, token.path, 8, true, getState().activeSessionId ?? undefined).then((hits) => {
         if (seq !== fileSearchSeq.current) return; // stale
         const items = hits.map((h) => ({
           label: `@${h.path}`,

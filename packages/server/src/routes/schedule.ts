@@ -52,7 +52,11 @@ export function scheduleRoutes(deps: ScheduleRouteDeps): RouteHandler {
     if (!path.startsWith("/api/schedule")) return false;
 
     if (path === "/api/schedule" && method === "GET") {
-      json(200, schedule.list(url.searchParams.get("projectId") ?? undefined));
+      // Wrapped shape: persisted loop diagnostics ride along so a list refresh
+      // can never erase rescan errors (UX-FIXTURE-VISUAL P1). The web client
+      // normalizes both this and the legacy bare-array payload.
+      const projectId = url.searchParams.get("projectId") ?? undefined;
+      json(200, { tasks: schedule.list(projectId), loopErrors: schedule.loopErrors(projectId) });
       return true;
     }
     if (path === "/api/schedule" && method === "POST") {
@@ -82,7 +86,13 @@ export function scheduleRoutes(deps: ScheduleRouteDeps): RouteHandler {
         json(404, { error: "not-found", message: "project not found" });
         return true;
       }
-      json(200, schedule.syncLoops(projectId, scanLoopsDir(project.path)));
+      // explicit: a user-requested rescan surfaces even dismissed diagnostics
+      json(200, schedule.syncLoops(projectId, scanLoopsDir(project.path), { explicit: true }));
+      return true;
+    }
+    if (path === "/api/schedule/loops/errors/dismiss" && method === "POST") {
+      const b = await body();
+      json(200, { ok: schedule.dismissLoopError(String(b.projectId ?? ""), String(b.path ?? "")) });
       return true;
     }
 

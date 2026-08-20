@@ -73,6 +73,10 @@ interface CtxMenu {
 
 export default function EditorView() {
   const projectId = useStore((s) => s.activeProjectId);
+  // Files must follow the ACTIVE SESSION's worktree, not the project root
+  // (UX-FIXTURE-VISUAL P0): every files call carries the session id.
+  const sessionId = useStore((s) => s.activeSessionId);
+  const sid = sessionId ?? undefined;
   const filePath = useStore((s) => s.editorFile);
   const location = useStore((s) => s.editorLocation);
   const prefs = useUiSettings();
@@ -153,13 +157,23 @@ export default function EditorView() {
   const loadDir = async (p: string) => {
     if (!projectId) return;
     try {
-      const entries = await api.filesTree(projectId, p || undefined);
+      const entries = await api.filesTree(projectId, p || undefined, undefined, sid);
       setKids((k) => ({ ...k, [p]: entries }));
       setTreeErr("");
     } catch (err) {
       setTreeErr(msg(err));
     }
   };
+
+  // A session switch can move the filesystem root to that session's worktree,
+  // so cached listings and documents are stale (UX-FIXTURE-VISUAL P0).
+  useEffect(() => {
+    cacheRef.current.clear();
+    setKids({});
+    if (projectId) void loadDir("");
+    bump();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionId]);
 
   // Store-driven opens (file refs in chat, palette, files panel) become tabs.
   useEffect(() => {
@@ -184,7 +198,7 @@ export default function EditorView() {
     };
     cacheRef.current.set(activePath, entry);
     bump();
-    api.filesRead(projectId, activePath)
+    api.filesRead(projectId, activePath, sid)
       .then((got) => {
         entry.doc = got;
         entry.buf = got.content;
@@ -197,7 +211,8 @@ export default function EditorView() {
         entry.loading = false;
         bump();
       });
-  }, [projectId, activePath]);
+    // tick re-checks after the session-switch effect clears the cache
+  }, [projectId, activePath, sessionId, tick]);
 
   // Reset one-shot chrome when the active tab changes.
   useEffect(() => {
@@ -350,7 +365,7 @@ export default function EditorView() {
       // This revision came from filesRead; only an explicit conflict overwrite
       // omits it. Autosave can therefore never silently clobber an external edit.
       const base = opts.force ? undefined : e.doc.revision;
-      const res = await api.filesWrite(projectId, path, content, base);
+      const res = await api.filesWrite(projectId, path, content, base, getState().activeSessionId ?? undefined);
       const stillDirty = e.buf !== content;
       e.doc = { ...e.doc, content, revision: res.revision };
       e.live = completeLiveFileSave(e.live, res.revision, stillDirty);
@@ -378,7 +393,7 @@ export default function EditorView() {
     const e = path ? cacheRef.current.get(path) : undefined;
     if (!projectId || !path || !e) return;
     try {
-      const got = await api.filesRead(projectId, path);
+      const got = await api.filesRead(projectId, path, sid);
       e.doc = got;
       e.buf = got.content;
       e.live = loadedLiveFile(got.revision);
@@ -395,7 +410,7 @@ export default function EditorView() {
     const e = path ? cacheRef.current.get(path) : undefined;
     if (!projectId || !path || !e?.doc || !e.live) return;
     try {
-      const stat = await api.filesStat(projectId, path);
+      const stat = await api.filesStat(projectId, path, sid);
       e.live = checkLiveFile(e.live, { kind: "present", revision: stat.revision });
     } catch (err) {
       e.live = httpStatusOf(err) === 404
@@ -457,7 +472,7 @@ export default function EditorView() {
     }
     setBusy(true);
     try {
-      await api.filesRename(projectId, doc.path, to);
+      await api.filesRename(projectId, doc.path, to, sid);
       await Promise.all([loadDir(parentOf(doc.path)), loadDir(parentOf(to))]);
       const old = doc.path;
       const entry = cacheRef.current.get(old);
@@ -480,7 +495,7 @@ export default function EditorView() {
     if (!projectId || !doc) return;
     setBusy(true);
     try {
-      await api.filesDelete(projectId, doc.path);
+      await api.filesDelete(projectId, doc.path, sid);
       setConfirmDel(false);
       await loadDir(parentOf(doc.path));
       const id = tabId("file", doc.path);
@@ -501,7 +516,7 @@ export default function EditorView() {
     const to = window.prompt("Rename / move to:", entry.path)?.trim();
     if (!to || to === entry.path) return;
     try {
-      await api.filesRename(projectId, entry.path, to);
+      await api.filesRename(projectId, entry.path, to, sid);
       await Promise.all([loadDir(parentOf(entry.path)), loadDir(parentOf(to))]);
       if (!entry.dir && pane.tabs.some((t) => t.id === tabId("file", entry.path))) {
         const entryDoc = cacheRef.current.get(entry.path);
@@ -522,7 +537,7 @@ export default function EditorView() {
     if (!projectId) return;
     if (!window.confirm(`Delete ${entry.path}${entry.dir ? " and its contents" : ""}?`)) return;
     try {
-      await api.filesDelete(projectId, entry.path);
+      await api.filesDelete(projectId, entry.path, sid);
       await loadDir(parentOf(entry.path));
       if (!entry.dir) {
         const id = tabId("file", entry.path);
@@ -542,8 +557,8 @@ export default function EditorView() {
     if (!name) return;
     const rel = dirPath ? `${dirPath}/${name}` : name;
     try {
-      if (kind === "folder") await api.filesMkdir(projectId, rel);
-      else await api.filesWrite(projectId, rel, "");
+      if (kind === "folder") await api.filesMkdir(projectId, rel, sid);
+      else await api.filesWrite(projectId, rel, "", undefined, sid);
       await loadDir(dirPath);
       setOpen((o) => new Set(o).add(dirPath));
       if (kind === "file") openFile(rel);

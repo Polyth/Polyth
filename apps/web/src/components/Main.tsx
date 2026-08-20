@@ -16,8 +16,11 @@ import TerminalView from "./TerminalView.tsx";
 import EditorView from "./EditorView.tsx";
 import ScheduleView from "./ScheduleView.tsx";
 import GithubView from "./GithubView.tsx";
-import { setOverlay, useActiveModel, useStore } from "../store.ts";
-import { shortcutLabel } from "../settings.ts";
+import { setOverlay, setUiError, useActiveModel, useStore } from "../store.ts";
+import { restoreSession } from "../init.ts";
+import { friendlyError, shortcutLabel } from "../settings.ts";
+import { composerBlockedByArchive, showSessionHero } from "../sessionSurface.ts";
+import { useState } from "react";
 
 // Large polyth-style hero for a fresh session (or no session yet):
 // centered headline, the composer as an elevated card, and suggestion chips.
@@ -48,10 +51,36 @@ function SessionHero() {
   );
 }
 
+/** Archived sessions are read-only: one explicit, atomic restore-and-continue
+ *  action replaces the composer (UX-FIXTURE-VISUAL P1). */
+function ArchivedComposerGuard({ sessionId }: { sessionId: string }) {
+  const [busy, setBusy] = useState(false);
+  return (
+    <div className="archived-guard" role="status">
+      <span className="archived-guard-text">
+        This session is archived and read-only. Restore it to continue the conversation.
+      </span>
+      <button
+        className="primary-btn archived-restore-btn"
+        disabled={busy}
+        onClick={() => {
+          setBusy(true);
+          void restoreSession(sessionId)
+            .catch((e) => setUiError(friendlyError("Couldn’t restore the session", e)))
+            .finally(() => setBusy(false));
+        }}
+      >
+        Restore and continue
+      </button>
+    </div>
+  );
+}
+
 export default function Main() {
   const sessionId = useStore((s) => s.activeSessionId);
   const projectId = useStore((s) => s.activeProjectId);
   const view = useStore((s) => s.activeView);
+  const session = useStore((s) => s.sessions.find((x) => x.id === s.activeSessionId) ?? null);
   const model = useActiveModel();
 
   // Project-level views work without an open session.
@@ -97,8 +126,10 @@ export default function Main() {
   if (view === "schedule") return <main className="main"><Header /><ScheduleView /></main>;
   if (view === "github") return <main className="main"><Header /><GithubView /></main>;
 
-  // Fresh state: no session yet, or an open session with nothing sent.
-  if (!sessionId || model.messages.length === 0) {
+  // Fresh state: no session yet, or an open session with nothing to act on.
+  // Pending question/permission surfaces take precedence over the hero, and
+  // archived sessions render the read-only guard instead (UX-FIXTURE-VISUAL).
+  if (showSessionHero(sessionId, model, session)) {
     return (
       <main className="main">
         <Header />
@@ -109,6 +140,7 @@ export default function Main() {
 
   const pendingPermissions = model.permissions.filter((p) => p.status === "pending");
   const pendingQuestions = model.questions.filter((q) => q.status === "pending");
+  const archived = composerBlockedByArchive(session);
 
   return (
     <main className="main">
@@ -122,7 +154,7 @@ export default function Main() {
       {pendingQuestions.length > 0 && <QuestionCards questions={pendingQuestions} />}
       {pendingPermissions.length > 0 && <PermissionBanner permissions={pendingPermissions} />}
       <TrackerPills model={model} />
-      <Composer />
+      {archived && sessionId ? <ArchivedComposerGuard sessionId={sessionId} /> : <Composer />}
     </main>
   );
 }

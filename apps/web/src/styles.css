@@ -14,11 +14,12 @@
   --hair: rgba(255, 255, 255, 0.055);
   --hair-strong: rgba(255, 255, 255, 0.09);
 
-  /* ink */
+  /* ink — faint labels meaningful status metadata, so it holds ≥4.5:1 against
+     the accent-wash selected row, the worst-case surface (UX-FIXTURE-VISUAL) */
   --text: #f0eee8;
   --text-dim: #cbc6bc;
   --muted: #9c9890;
-  --faint: #6f6b64;
+  --faint: #96928a;
 
   /* accent + signals */
   --accent: #f49b5b;
@@ -82,8 +83,8 @@ html.light {
   --hair-strong: rgba(40, 30, 15, 0.12);
   --text: #2a2620;
   --text-dim: #4d473e;
-  --muted: #7a7469;
-  --faint: #a39c8f;
+  --muted: #5b564e;
+  --faint: #6a6357;
   --accent: #d9822b;
   /* UX-A390: dark ink keeps Send/primary text ≥4.5:1 over both accent stops */
   --accent-ink: #241404;
@@ -289,7 +290,10 @@ html.light .project-glyph { background: linear-gradient(155deg, #ece5d8, #ddd3c2
 .session-row.active .session-btn::before {
   content: ""; position: absolute; left: 0; top: 9px; bottom: 9px; width: 2px; border-radius: 2px; background: var(--accent);
 }
-.session-row.archived { opacity: 0.45; }
+/* Archived rows stay subdued via ink roles, never whole-row opacity — the
+   status/time labels must keep normal-text contrast (UX-FIXTURE-VISUAL P1). */
+.session-row.archived .session-title { color: var(--muted); }
+.session-row.archived .dot { opacity: 0.5; }
 .session-body { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 2px; }
 .session-title-line { min-width: 0; display: flex; align-items: center; gap: 4px; }
 .session-title { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-dim); letter-spacing: -0.01em; }
@@ -361,6 +365,7 @@ html.light .project-glyph { background: linear-gradient(155deg, #ece5d8, #ddd3c2
 }
 html.light .kbd { background: rgba(0, 0, 0, 0.04); }
 .form-error { color: var(--red); font-size: 12px; overflow-wrap: anywhere; }
+.loop-error-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 2px 0; }
 .form-actions { display: flex; justify-content: flex-end; gap: 6px; }
 .primary-btn { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); font-weight: 700; }
 .primary-btn:hover { background: var(--accent-hi); border-color: var(--accent-hi); }
@@ -575,6 +580,16 @@ html.light .hero h2 { background: none; -webkit-background-clip: initial; backgr
   padding: 12px max(var(--gutter), calc((100% - 920px) / 2)) 14px;
   background: var(--panel);
 }
+/* Archived-session read-only guard replaces the composer entirely: no draft,
+   no Send — one explicit restore action (UX-FIXTURE-VISUAL P1). */
+.archived-guard {
+  display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 10px 14px;
+  border-top: 1px solid var(--border-soft);
+  padding: 16px max(var(--gutter), calc((100% - 920px) / 2)) 18px;
+  background: var(--panel);
+}
+.archived-guard-text { font-size: 13px; color: var(--text-dim); }
+.archived-restore-btn { height: 32px; padding: 0 14px; border-radius: 9px; font-size: 12.5px; }
 .composer-hero { width: 100%; }
 .composer-card {
   background: linear-gradient(180deg, #211e1b, #1c1a18);
@@ -1386,6 +1401,14 @@ html.light .error-banner { color: #a1352b; }
 }
 .git-wt-remove { position: absolute; top: 6px; right: 6px; }
 .git-wt-session { position: absolute; top: 6px; right: 70px; }
+/* Changes header: counts + Flat/Tree + Stage/Unstage all must stay inside the
+   300px left column — wrap onto new rows instead of overpainting the diff
+   heading in the right pane (UX-FIXTURE-VISUAL P1). */
+.git-changes-head {
+  display: flex; flex-wrap: wrap; align-items: center;
+  gap: 4px 6px; min-width: 0;
+}
+.git-changes-head .git-ahead-behind { flex-wrap: wrap; margin-left: 0; }
 .git-changes { display: flex; flex-direction: column; gap: 1px; }
 .git-file-row.selected { background: var(--elevated); }
 .git-diff-page { max-height: 480px; flex: 1; }

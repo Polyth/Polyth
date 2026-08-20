@@ -9,6 +9,10 @@ const EMPTY_FILES: FileEntry[] = [];
 
 export default function FilesPanel() {
   const activeProjectId = useStore((s) => s.activeProjectId);
+  // Follow the ACTIVE SESSION's worktree, never just the project root
+  // (UX-FIXTURE-VISUAL P0): each files call carries the session id.
+  const activeSessionId = useStore((s) => s.activeSessionId);
+  const sid = activeSessionId ?? undefined;
   const [tree, setTree] = useState<FileEntry[]>(EMPTY_FILES);
   const [currentPath, setCurrentPath] = useState("");
   const [breadcrumbs, setBreadcrumbs] = useState<string[]>([]);
@@ -29,7 +33,7 @@ export default function FilesPanel() {
     async (p: string) => {
       if (!projectId) return;
       try {
-        const entries = await api.filesTree(projectId, p || undefined);
+        const entries = await api.filesTree(projectId, p || undefined, undefined, sid);
         setTree(entries);
         setCurrentPath(p);
         setBreadcrumbs(p ? p.split("/") : []);
@@ -39,15 +43,16 @@ export default function FilesPanel() {
         setError(err instanceof Error ? err.message : String(err));
       }
     },
-    [projectId],
+    [projectId, sid],
   );
 
+  // Session switches restart at the tree root: the worktree root may differ.
   useEffect(() => { loadTree(""); }, [loadTree]);
   useEffect(() => {
     if (!projectId) return;
     const refreshCurrent = () => {
       if (document.visibilityState === "hidden") return;
-      void api.filesTree(projectId, currentPath || undefined).then(setTree).catch(() => {});
+      void api.filesTree(projectId, currentPath || undefined, undefined, sid).then(setTree).catch(() => {});
     };
     const onVisibility = () => {
       if (document.visibilityState === "visible") refreshCurrent();
@@ -58,7 +63,7 @@ export default function FilesPanel() {
       document.removeEventListener("visibilitychange", onVisibility);
       clearInterval(timer);
     };
-  }, [projectId, currentPath]);
+  }, [projectId, currentPath, sid]);
 
   const onDirClick = (p: string) => {
     setSearchResults(null);
@@ -69,7 +74,7 @@ export default function FilesPanel() {
   const onFileClick = async (fp: string) => {
     if (!projectId) return;
     try {
-      const got = await api.filesRead(projectId, fp);
+      const got = await api.filesRead(projectId, fp, sid);
       setViewFile(got);
       setContent(got.content);
       setError("");
@@ -80,7 +85,7 @@ export default function FilesPanel() {
 
   const search = async () => {
     if (!projectId || !query.trim()) { setSearchResults(null); return; }
-    const got = await api.filesSearch(projectId, query.trim());
+    const got = await api.filesSearch(projectId, query.trim(), 50, sid);
     setSearchResults(got);
   };
 
@@ -101,8 +106,8 @@ export default function FilesPanel() {
     const path = currentPath ? `${currentPath}/${newName.trim()}` : newName.trim();
     setSaving(true);
     try {
-      if (newKind === "folder") await api.filesMkdir(projectId, path);
-      else await api.filesWrite(projectId, path, "");
+      if (newKind === "folder") await api.filesMkdir(projectId, path, sid);
+      else await api.filesWrite(projectId, path, "", undefined, sid);
       setNewKind(null);
       setNewName("");
       await loadTree(currentPath);
@@ -117,7 +122,7 @@ export default function FilesPanel() {
     if (!projectId || !viewFile) return;
     setSaving(true);
     try {
-      const result = await api.filesWrite(projectId, viewFile.path, content, viewFile.revision);
+      const result = await api.filesWrite(projectId, viewFile.path, content, viewFile.revision, sid);
       setViewFile({ ...viewFile, content, revision: result.revision });
       setError("");
     } catch (err) {
@@ -131,7 +136,7 @@ export default function FilesPanel() {
     if (!projectId || !viewFile || !renamePath.trim()) return;
     setSaving(true);
     try {
-      await api.filesRename(projectId, viewFile.path, renamePath.trim());
+      await api.filesRename(projectId, viewFile.path, renamePath.trim(), sid);
       await loadTree(currentPath);
       await onFileClick(renamePath.trim());
       setRenaming(false);
@@ -146,7 +151,7 @@ export default function FilesPanel() {
     if (!projectId || !viewFile) return;
     setSaving(true);
     try {
-      await api.filesDelete(projectId, viewFile.path);
+      await api.filesDelete(projectId, viewFile.path, sid);
       setViewFile(null);
       setConfirmDelete(false);
       await loadTree(currentPath);

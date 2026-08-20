@@ -242,8 +242,20 @@ export default function ScheduleView() {
         <button className="small-btn" title="Rescan .agents/loops for Markdown-managed tasks" onClick={rescan}>Rescan loops</button>
       </div>
       {loopErrors.length > 0 && (
-        <div className="form-error">
-          {loopErrors.map((e) => <div key={e.path}><span className="mono">{e.path}</span>: {e.error}</div>)}
+        <div className="form-error" role="alert">
+          {loopErrors.map((e) => (
+            <div key={e.path} className="loop-error-row">
+              <span><span className="mono">{e.path}</span>: {e.error}</span>
+              <button
+                className="small-btn"
+                title="Dismiss until this file's error changes"
+                aria-label={`Dismiss loop error for ${e.path}`}
+                onClick={() => void run(() => api.scheduleLoopErrorDismiss(projectId, e.path))}
+              >
+                ✕
+              </button>
+            </div>
+          ))}
         </div>
       )}
 

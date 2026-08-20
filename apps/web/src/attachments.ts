@@ -112,9 +112,12 @@ export async function attachProjectFile(
   path: string,
   range?: [number, number],
 ): Promise<AttachResult> {
+  // Resolve against the session's worktree so the pill points at the same
+  // bytes the agent sees (UX-FIXTURE-VISUAL P0).
+  const sid = sessionId ?? undefined;
   let st: { kind: "file" | "dir"; size: number; mime?: string };
   try {
-    st = await api.filesStat(projectId, path);
+    st = await api.filesStat(projectId, path, sid);
   } catch {
     return { ok: false, reason: `File not found: ${path}` };
   }
@@ -127,7 +130,7 @@ export async function attachProjectFile(
     size: st.size,
     kind: range ? "range" : mime.startsWith("image/") ? "image" : "file",
     path,
-    url: api.filesRawUrl(projectId, path),
+    url: api.filesRawUrl(projectId, path, sid),
     ...(range ? { range } : {}),
   };
   if (!addAttachment(sessionId, ref)) {
@@ -145,7 +148,7 @@ export async function attachUpload(
   const safeName = (file.name || "pasted").replace(/[^\w.-]+/g, "_").slice(0, 80) || "pasted";
   const rel = `_inbox/${Date.now().toString(36)}-${safeName}`;
   try {
-    await api.filesUpload(projectId, rel, new Uint8Array(await file.arrayBuffer()));
+    await api.filesUpload(projectId, rel, new Uint8Array(await file.arrayBuffer()), sessionId ?? undefined);
   } catch (err) {
     return { ok: false, reason: err instanceof Error ? err.message : String(err) };
   }

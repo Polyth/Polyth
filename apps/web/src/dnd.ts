@@ -26,16 +26,18 @@ export function dragKind(dt: { types: readonly string[] }): "path" | "files" | n
   return null;
 }
 
-/** Upload dropped desktop files into `dir` ("" = project root); returns their rel paths. */
+/** Upload dropped desktop files into `dir` ("" = project/worktree root);
+ *  returns their rel paths. */
 export async function uploadFiles(
   projectId: string,
   dir: string,
   files: Iterable<File>,
+  sessionId?: string,
 ): Promise<string[]> {
   const paths: string[] = [];
   for (const f of files) {
     const rel = dir ? `${dir}/${f.name}` : f.name;
-    await api.filesUpload(projectId, rel, new Uint8Array(await f.arrayBuffer()));
+    await api.filesUpload(projectId, rel, new Uint8Array(await f.arrayBuffer()), sessionId);
     paths.push(rel);
   }
   return paths;
