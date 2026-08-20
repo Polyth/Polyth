@@ -5,7 +5,8 @@ import assert from "node:assert/strict";
 import type { SessionProjection } from "@polyth/contracts";
 import {
   BUILTIN_GROUPINGS, getGroupingMode, groupSessions, listGroupings,
-  parseGroupingMode, registerGrouping, setGroupingMode,
+  parseGroupingMode, registerGrouping, reorderPinnedSessions, setGroupingMode,
+  sortPinnedSessions,
 } from "../src/sidebarPrefs.ts";
 
 const session = (over: Partial<SessionProjection> & { id: string }): SessionProjection => ({
@@ -56,6 +57,21 @@ test("flat and folder modes return one structural bucket", () => {
     assert.equal(groups.length, 1);
     assert.equal(groups[0]!.sessions.length, 2);
   }
+});
+
+test("pinned sessions sort by position and reorder to normalized persisted positions", () => {
+  const sessions = [
+    session({ id: "plain", updatedAt: 50 }),
+    session({ id: "second", updatedAt: 20, pinned: { position: 8 } }),
+    session({ id: "first", updatedAt: 10, pinned: { position: 2 } }),
+    session({ id: "tie-newer", updatedAt: 30, pinned: { position: 8 } }),
+  ];
+  assert.deepEqual(sortPinnedSessions(sessions).map((item) => item.id), ["first", "tie-newer", "second"]);
+
+  const reordered = reorderPinnedSessions(sessions, "second", "first");
+  assert.deepEqual(reordered.map((item) => item.id), ["second", "first", "tie-newer"]);
+  assert.deepEqual(reordered.map((item) => item.pinned?.position), [0, 1, 2]);
+  assert.equal(reorderPinnedSessions(sessions, "missing", "first")[0]?.id, "first");
 });
 
 test("plugin groupings need a pure keyOf, no duplicates; dispose falls back", () => {

@@ -86,6 +86,24 @@ test("organize assigns folders/labels; unknown or cross-project folder rejected"
   assert.deepEqual(snap.labelIds, ["l1", "l2"]); // untouched by folder-only patch
 });
 
+test("pin organization persists on projections without adding model history", async () => {
+  const { sessions, store } = makeService();
+  const { id } = await sessions.create({ projectId: "p1", title: "Pinned" });
+  const before = await store.events(id);
+
+  await sessions.organize!(id, { pinned: { position: 3 } });
+  assert.deepEqual((await sessions.snapshot(id)).pinned, { position: 3 });
+  assert.equal((await store.events(id)).length, before.length, "pin state must stay out of the event log");
+
+  await assert.rejects(
+    () => sessions.organize!(id, { pinned: { position: -1 } }),
+    (error: Error & { code?: string }) => error.code === "invalid-input",
+  );
+  await sessions.organize!(id, { pinned: null });
+  assert.equal((await sessions.snapshot(id)).pinned, undefined);
+  assert.equal((await store.events(id)).length, before.length);
+});
+
 test("archive/restore are idempotent: repeats do not append duplicate events", async () => {
   const { sessions, store } = makeService();
   const { id } = await sessions.create({ projectId: "p1", title: "S" });

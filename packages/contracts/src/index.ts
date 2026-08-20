@@ -187,6 +187,8 @@ export interface SessionProjection {
   worktreeId?: string;
   worktreeState?: WorktreeState;
   agentProfileId?: string;
+  /** Organization metadata, never written to the session event log. */
+  pinned?: { position: number };
 }
 
 export interface SessionService {
@@ -223,6 +225,8 @@ export interface SessionOrganizePatch {
   /** null clears the folder assignment */
   folderId?: string | null;
   labelIds?: string[];
+  /** null unpins; position controls ordering in the pinned sidebar section. */
+  pinned?: { position: number } | null;
 }
 
 // ---------------------------------------------------------------- persistence

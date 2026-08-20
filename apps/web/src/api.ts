@@ -413,7 +413,7 @@ export const api = {
   restore: (id: string) => jfetch<void>(`/api/sessions/${id}/restore`, { method: "POST" }),
 
   // ---- organization (WP5) ----------------------------------------------------
-  organizeSession: (id: string, patch: { folderId?: string | null; labelIds?: string[] }) =>
+  organizeSession: (id: string, patch: { folderId?: string | null; labelIds?: string[]; pinned?: { position: number } | null }) =>
     jfetch<{ ok: true }>(`/api/sessions/${id}/organize`, json("PATCH", patch)),
   bulkSessions: (op: "archive" | "restore", ids: string[]) =>
     jfetch<BulkSessionResult>(`/api/sessions/bulk`, json("POST", { op, ids })),

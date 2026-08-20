@@ -23,7 +23,7 @@ packages/session (node:sqlite WAL: events + projections + queue/org/profiles)
 |---|---|
 | `contracts` | Type-only DTOs, `SessionEvent`, service interfaces, `UiSlot` union, capability keys (`CAP`). The normative surface. |
 | `kernel` | Scoped plugin contexts: `provide`/`inject`/`optional` capabilities (priority + registration order), `on`/`emit`/`waterfall` events, LIFO effect disposal, `contribute()` for UI slot items, `loadPlugin` with manifest requirement checks, profile resolver (bundles → ordered plugin list). |
-| `session` | Append-only event store. `append` allocates monotonic per-session `seq` transactionally; projections (`SessionProjection`) are updated alongside; also owns queue items, folders, labels, agent profiles, and transcript text search (`searchEventText`). `deriveMessages` turns the log into model history (skips `ignorable`). |
+| `session` | Append-only event store. `append` allocates monotonic per-session `seq` transactionally; projections (`SessionProjection`) are updated alongside; also owns queue items, folders, labels, projection-only session pins, agent profiles, and transcript text search (`searchEventText`). `deriveMessages` turns the log into model history (skips `ignorable`). |
 | `backend-opencode` | The only OpenCode integration point. Spawns/attaches `opencode serve`, translates its SSE into `RuntimeEvent`s, maps canonical session ids ↔ backend ids, applies behavior/MCP config (`createConfigApplier`), imports pre-existing OpenCode sessions, snapshots task/subagent state as revisioned events. |
 | `permissions` | Monotonic fail-closed rule engine; scopes user/project/session; deny beats allow; "always" persists a rule at the chosen scope. |
 | `goals` | Objective attach/audit loop: small-model auditor verdicts (`keep`/`done`/`stuck`), budgets, auto-continuation, pause/resume; rehydrates from the event log after restart. |
@@ -56,7 +56,8 @@ statically by the server with SPA fallback.
   stable facade), broadcast box, goal service wiring, multirun/fusion runners, schedule
   runner (visible sessions per target mode), walkthrough/review/review-flow jobs,
   usage service, browser/dictation services, the `routes` array, HTTP+WS attach, shutdown.
-- `sessions.ts` — canonical session service: create/fork/archive/restore/rename/organize,
+- `sessions.ts` — canonical session service: create/fork/archive/restore/rename/organize
+  (folder/labels plus projection-only pin positions),
   send with **delivery admission** (`normal` | `steer` | `queue` | `interrupt`,
   steer falls back to queue with `delivery/fallback-queued`), queue CRUD + dispatch,
   runtime event → durable log translation, permission preview enrichment, question/permission

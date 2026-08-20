@@ -710,15 +710,30 @@ export function createSessionService(deps: {
         }
       }
       if (patch.labelIds !== undefined) next.labelIds = patch.labelIds;
-      await appendAndBroadcast(sessionId, "session/metadata-changed", {
-        ...(patch.folderId !== undefined ? { folderId: patch.folderId } : {}),
-        ...(patch.labelIds !== undefined ? { labelIds: patch.labelIds } : {}),
-      }, { ignorable: true });
+      if (patch.pinned !== undefined) {
+        if (patch.pinned === null) {
+          next.pinned = undefined;
+        } else {
+          const position = patch.pinned.position;
+          if (!Number.isSafeInteger(position) || position < 0 || position > 100_000) {
+            throw Object.assign(new Error("pin position must be an integer from 0 to 100000"), { code: "invalid-input" });
+          }
+          next.pinned = { position };
+        }
+      }
+      // Pin state is organization metadata, not model-visible session history.
+      if (patch.folderId !== undefined || patch.labelIds !== undefined) {
+        await appendAndBroadcast(sessionId, "session/metadata-changed", {
+          ...(patch.folderId !== undefined ? { folderId: patch.folderId } : {}),
+          ...(patch.labelIds !== undefined ? { labelIds: patch.labelIds } : {}),
+        }, { ignorable: true });
+      }
       // folderId: undefined must actually clear the stored key
       const current = await store.projection(sessionId);
       if (!current) return;
       const merged = { ...current, ...next, updatedAt: Date.now() };
       if (patch.folderId === null) delete merged.folderId;
+      if (patch.pinned === null) delete merged.pinned;
       await store.upsertProjection(merged);
       broadcast.projection(merged);
     },
