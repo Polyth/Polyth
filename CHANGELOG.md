@@ -46,6 +46,23 @@ commits, and the L-queue packages started landing.
   share an Open / Copy path / Add to chat menu; timeline user messages render
   their attachments (image thumbnails from the sanitized raw endpoint).
 
+### Added — L2: PR lifecycle (F7)
+
+- `packages/github`: `prCreate` (body via stdin, refuses flag-like refs, parses
+  the PR number from the returned URL), `prUpdate` (title/body/base, at least
+  one field), `prMerge` (squash/merge/rebase flags only — never
+  `--delete-branch`). All gh-CLI, fail-soft, no stored tokens.
+- Server: `POST /api/github/pr/create|update|merge` (merge requires
+  `confirm:true` + a known strategy) and `POST /api/github/pr/describe` —
+  small-model title+body from `git diff base...HEAD`, never auto-submits.
+  Successful writes append `pr/created`, `pr/updated`, `pr/merged` to the
+  originating session before the response.
+- Web: `PrCreatePanel` in GitView ("Create PR" — AI prefill, editable, explicit
+  submit), merge controls on `PullRequestView` gated on `mergeable` with the
+  disable reason shown ("Merged via GitHub" labels the remote merge), Edit
+  title/body on the overview, and "+ session" on issue/PR rows that creates a
+  session with the issue/PR context saved as the composer draft (never sent).
+
 ### Removed — stale planning artifacts (`3928fe9`)
 
 - `docs/features/*` — the 19-file upstream research dump (polyth/Paseo PR

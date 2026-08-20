@@ -760,6 +760,18 @@ export const api = {
   githubAddLabels: (number: number, projectId: string, labels: string[]) =>
     jfetch<GhListResult<{ labels: string[] }>>(`/api/github/pr/${number}/labels`, json("POST", { projectId, labels })),
 
+  // ---- PR lifecycle (F7): explicit external writes + AI describe ---------------
+  githubPrCreate: (input: { projectId: string; title: string; body: string; base?: string; draft?: boolean; sessionId?: string }) =>
+    jfetch<GhListResult<{ number: number; url: string }>>(`/api/github/pr/create`, json("POST", input)),
+  githubPrUpdate: (input: { projectId: string; number: number; title?: string; body?: string; base?: string; sessionId?: string }) =>
+    jfetch<GhListResult<{ number: number }>>(`/api/github/pr/update`, json("POST", input)),
+  githubPrMerge: (input: { projectId: string; number: number; strategy: "squash" | "merge" | "rebase"; sessionId?: string }) =>
+    jfetch<GhListResult<{ number: number; strategy: string }>>(`/api/github/pr/merge`, json("POST", { ...input, confirm: true })),
+  githubPrDescribe: (projectId: string, base?: string) =>
+    jfetch<GhListResult<{ title: string; body: string }>>(`/api/github/pr/describe`, json("POST", { projectId, ...(base ? { base } : {}) })).catch(
+      (e: unknown): GhListResult<{ title: string; body: string }> => ({ ok: false, reason: e instanceof Error ? e.message : String(e) }),
+    ),
+
   // ---- generated walkthroughs + reviews (WP11) ----------------------------------
   walkthroughGenerate: (source: WalkthroughSourceDto, sessionId?: string) =>
     jfetch<GeneratedWalkthroughDto>(`/api/walkthroughs`, json("POST", { source, ...(sessionId ? { sessionId } : {}) })),

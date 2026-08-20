@@ -14,6 +14,7 @@ import {
 } from "../review/anchors.ts";
 import CopyButton from "./CopyButton.tsx";
 import EmptyState from "./EmptyState.tsx";
+import PrCreatePanel from "./PrCreatePanel.tsx";
 import { setGitPrefs, splitDiffRows, useGitPrefs } from "../gitPrefs.ts";
 import { refreshGitStatus, useGitStatus } from "../gitStatusStore.ts";
 
@@ -82,6 +83,7 @@ export default function GitView() {
   const [stashMessage, setStashMessage] = useState("");
   const [showBranchForm, setShowBranchForm] = useState(false);
   const [showTreeForm, setShowTreeForm] = useState(false);
+  const [showPrForm, setShowPrForm] = useState(false);
   const [busy, setBusy] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
@@ -205,8 +207,9 @@ export default function GitView() {
         <span className="header-spacer" />
         <button className="small-btn" disabled={busy} onClick={() => void syncRepository()}>Sync</button>
         <button className="small-btn" onClick={() => openWorktreeSessionDialog(projectId)}>+ Worktree session</button>
-        <button className="small-btn" onClick={() => { setShowBranchForm((v) => !v); setShowTreeForm(false); }}>+ Branch</button>
-        <button className="small-btn" onClick={() => { setShowTreeForm((v) => !v); setShowBranchForm(false); }}>+ Worktree</button>
+        <button className="small-btn" onClick={() => { setShowBranchForm((v) => !v); setShowTreeForm(false); setShowPrForm(false); }}>+ Branch</button>
+        <button className="small-btn" onClick={() => { setShowTreeForm((v) => !v); setShowBranchForm(false); setShowPrForm(false); }}>+ Worktree</button>
+        <button className="small-btn" onClick={() => { setShowPrForm((v) => !v); setShowBranchForm(false); setShowTreeForm(false); }}>Create PR</button>
       </div>
       {syncSteps.length > 0 && (
         <div className="git-sync-steps" role="status">
@@ -235,6 +238,13 @@ export default function GitView() {
             Create
           </button>
         </div>
+      )}
+      {showPrForm && (
+        <PrCreatePanel
+          projectId={projectId}
+          sessionId={sessionId}
+          onClose={() => setShowPrForm(false)}
+        />
       )}
 
       <div className="git-grid">

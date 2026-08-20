@@ -2402,6 +2402,28 @@ body[data-motion="reduced"] .settings-row.flash { animation: none; outline: 1px 
   border-radius: 7px; padding: 7px 9px; font-size: 13px; resize: vertical;
 }
 
+/* ---- PR lifecycle (F7): create panel, merge area, edit form ---------------- */
+.pr-create-panel,
+.pr-merge-area,
+.pr-edit-form {
+  border: 1px dashed var(--border); border-radius: var(--radius-lg); background: var(--sunken);
+  padding: 12px; display: flex; flex-direction: column; gap: 7px;
+}
+.pr-create-panel input,
+.pr-edit-form input {
+  background: var(--elevated); color: var(--text); border: 1px solid var(--border);
+  border-radius: 7px; padding: 6px 9px; font-size: 13px;
+}
+.pr-create-panel textarea,
+.pr-edit-form textarea {
+  width: 100%; background: var(--elevated); color: var(--text); border: 1px solid var(--border);
+  border-radius: 7px; padding: 7px 9px; font-size: 13px; resize: vertical;
+}
+.pr-merge-area select {
+  background: var(--elevated); color: var(--text); border: 1px solid var(--border);
+  border-radius: 7px; padding: 5px 8px; font-size: 12.5px;
+}
+
 .walkthrough-generated { display: flex; flex-direction: column; gap: 10px; }
 .walkthrough-source { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .walkthrough-source input {

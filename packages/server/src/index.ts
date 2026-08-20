@@ -507,7 +507,40 @@ export async function boot(opts: BootOptions = {}) {
         },
       },
     }),
-    githubRoutes({ projects, github, append: appendLogged }),
+    githubRoutes({
+      projects, github, append: appendLogged,
+      // OC-15-005: AI PR title/body — same Small Model seam as commit messages.
+      // Reads the diff via git only; never creates or edits the PR itself.
+      describe: async (root, base) => {
+        let baseRef = base;
+        if (!baseRef) {
+          const r = await github.repo(root);
+          baseRef = (r.ok && r.data.defaultBranch) || "main";
+        }
+        const diff = await git.diffRange(root, baseRef, "HEAD");
+        if (!diff.trim()) {
+          throw Object.assign(new Error(`no commits to describe against ${baseRef}`), { code: "invalid-input" });
+        }
+        const project = (await projects.list()).find((p) => p.path === root);
+        const rt = await runtimes.forProject(project?.id ?? "__default__");
+        const text = await oneShot(rt, {
+          cwd: root,
+          ...(smallModel() ? { model: smallModel()! } : {}),
+          prompt: [
+            "Write a pull request title and description for the diff below.",
+            "Line 1: a <=72 character imperative title. Then a blank line, then a concise",
+            "markdown description (what changed and why; a short bullet list is fine).",
+            "Do not use tools. Do not wrap the answer in code fences. Output nothing else.",
+            "", "<diff>", diff.slice(0, 24_000), "</diff>",
+          ].join("\n"),
+        });
+        const clean = text.replace(/^```[a-z]*\n?|```$/g, "").trim();
+        const nl = clean.indexOf("\n");
+        return nl === -1
+          ? { title: clean.slice(0, 72), body: "" }
+          : { title: clean.slice(0, nl).trim().slice(0, 200), body: clean.slice(nl + 1).trim() };
+      },
+    }),
     controlRoutes(sessions),
     snippetRoutes({ projects, commands }),
     profileRoutes({

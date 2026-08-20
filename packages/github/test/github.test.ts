@@ -275,6 +275,89 @@ test("submitReview posts JSON via stdin and is idempotent per content digest", a
   assert.equal(posts, 2);
 });
 
+// ---- F7: PR lifecycle (create / update / merge) ------------------------------
+
+test("prCreate passes the body via stdin and parses the PR number from the URL", async () => {
+  const calls: Array<{ args: string[]; input?: string }> = [];
+  const exec: ExecFn = async (_bin, args, opts) => {
+    calls.push({ args, ...(opts.input !== undefined ? { input: opts.input } : {}) });
+    return { stdout: "https://github.com/acme/polyth/pull/42\n", stderr: "" };
+  };
+  const svc = createGithubService({ exec });
+  const r = await svc.prCreate("/repo", { title: "Add thing", body: "does **stuff**", base: "main", draft: true });
+  assert.ok(r.ok);
+  if (r.ok) assert.deepEqual(r.data, { number: 42, url: "https://github.com/acme/polyth/pull/42" });
+  assert.deepEqual(calls[0]?.args, [
+    "pr", "create", "--title", "Add thing", "--body-file", "-",
+    "--base", "main", "--draft",
+  ]);
+  assert.equal(calls[0]?.input, "does **stuff**");
+});
+
+test("prCreate rejects empty titles and flag-like refs before any gh call", async () => {
+  let calls = 0;
+  const svc = createGithubService({ exec: async () => { calls += 1; return { stdout: "", stderr: "" }; } });
+  const noTitle = await svc.prCreate("/repo", { title: "  ", body: "" });
+  assert.equal(noTitle.ok, false);
+  const badBase = await svc.prCreate("/repo", { title: "T", body: "", base: "--delete-branch" });
+  assert.equal(badBase.ok, false);
+  const badHead = await svc.prCreate("/repo", { title: "T", body: "", head: "-evil" });
+  assert.equal(badHead.ok, false);
+  assert.equal(calls, 0);
+
+  const noUrl = createGithubService({ exec: async () => ({ stdout: "something went sideways", stderr: "" }) });
+  const r = await noUrl.prCreate("/repo", { title: "T", body: "" });
+  assert.equal(r.ok, false);
+  if (!r.ok) assert.match(r.reason, /did not return a pull request URL/);
+});
+
+test("prUpdate requires at least one field and sends the body via stdin", async () => {
+  const calls: Array<{ args: string[]; input?: string }> = [];
+  const exec: ExecFn = async (_bin, args, opts) => {
+    calls.push({ args, ...(opts.input !== undefined ? { input: opts.input } : {}) });
+    return { stdout: "", stderr: "" };
+  };
+  const svc = createGithubService({ exec });
+
+  const nothing = await svc.prUpdate("/repo", 5, {});
+  assert.equal(nothing.ok, false);
+  if (!nothing.ok) assert.match(nothing.reason, /nothing to update/);
+  assert.equal(calls.length, 0);
+
+  const r = await svc.prUpdate("/repo", 5, { title: "New title", body: "new body" });
+  assert.ok(r.ok);
+  assert.deepEqual(calls[0]?.args, ["pr", "edit", "5", "--title", "New title", "--body-file", "-"]);
+  assert.equal(calls[0]?.input, "new body");
+
+  const badBase = await svc.prUpdate("/repo", 5, { base: "-x" });
+  assert.equal(badBase.ok, false);
+});
+
+test("prMerge maps strategies to gh flags and never deletes the branch", async () => {
+  const calls: string[][] = [];
+  const exec: ExecFn = async (_bin, args) => { calls.push(args); return { stdout: "", stderr: "" }; };
+  const svc = createGithubService({ exec });
+
+  for (const [strategy, flag] of [["squash", "--squash"], ["merge", "--merge"], ["rebase", "--rebase"]] as const) {
+    const r = await svc.prMerge("/repo", 7, strategy);
+    assert.ok(r.ok);
+    if (r.ok) assert.equal(r.data.strategy, strategy);
+    assert.deepEqual(calls.at(-1), ["pr", "merge", "7", flag]);
+  }
+  assert.ok(calls.every((args) => !args.includes("--delete-branch")));
+
+  const bad = await svc.prMerge("/repo", 7, "fast-forward" as never);
+  assert.equal(bad.ok, false);
+  assert.equal(calls.length, 3);
+
+  const failing = createGithubService({
+    exec: async () => { throw Object.assign(new Error("exit 1"), { stderr: "Pull request is not mergeable" }); },
+  });
+  const soft = await failing.prMerge("/repo", 7, "squash");
+  assert.equal(soft.ok, false);
+  if (!soft.ok) assert.match(soft.reason, /not mergeable/);
+});
+
 test("addLabels enforces the risk/confidence policy before any gh call", async () => {
   let calls = 0;
   const svc = createGithubService({ exec: async () => { calls += 1; return { stdout: "", stderr: "" }; } });

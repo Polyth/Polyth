@@ -104,7 +104,10 @@ log/graph/branch(es)/checkout/folder/stash/stashes/fetch/pull/push; optional own
 `/api/preview` (+start/stop; optional owned `sessionId` selects its worktree), `/api/browser/*` (sessions/capability/approvals),
 `/api/dictation` (+capability), `/api/multiruns`, `/api/fusions`, `/api/walkthroughs`,
 `/api/schedule` (+preview/loops/loops/rescan), `/api/usage/quotas` (+refresh),
-`/api/knowledge`, `/api/github/*` (status/repo/issues/prs/pr/checks/comments/diff/files),
+`/api/knowledge`, `/api/github/*` (status/repo/issues/prs/pr/checks/comments/diff/files;
+F7 writes: `pr/create`, `pr/update`, `pr/merge` — merge requires `confirm:true` and a
+squash/merge/rebase strategy, never deletes the branch; `pr/describe` returns a
+small-model title+body draft from `git diff base...HEAD` and never submits),
 `/api/control/sessions`, `/api/agent-profiles`, `/api/settings/behavior`,
 `/api/mcp/servers`, `/api/plugins` (+install), `/api/system/info`,
 `/api/sessions/:id/goal*`.
@@ -154,9 +157,10 @@ timeline rows; it never appends a second event for this UI derivation.
 Workflows: `goal/attached|audit|completed|paused|resumed|stopped|stuck`,
 `multirun/started|run-progress|completed|picked`, `fusion/started|completed`,
 `walkthrough/generated`, `review/generated|risk-scored|submitted`,
-`knowledge/attached`, `schedule/run-started`, `browser/action-requested|
-action-completed|action-failed|observation`, `terminal/created|closed`,
-`behavior/instructions-applied`.
+`pr/created|updated|merged` (F7 external writes, logged to the originating
+session before the response), `knowledge/attached`, `schedule/run-started`,
+`browser/action-requested|action-completed|action-failed|observation`,
+`terminal/created|closed`, `behavior/instructions-applied`.
 
 Rules: types are `domain/past-tense`; payloads JSON-only; `ignorable: true` keeps an
 event out of model-history derivation; `surfaceOp: "replace"` lets snapshots supersede
@@ -188,7 +192,10 @@ a generic collapsed row (never crash).
   IME-safe autosave, `editor/liveFile.ts` revision/conflict checks, sandboxed
   Markdown/HTML previews), `GitView` + `WorktreeSessionDialog` (sidebar/Git/palette
   entry points, existing-or-new worktree selection, branch-template suggestions),
-  `GithubView`/`PullRequestView`,
+  `GithubView`/`PullRequestView` (F7: `+ session` bootstraps a session with the
+  issue/PR as the composer draft; merge is gated on `mergeable` + explicit
+  confirm; `PrCreatePanel` in GitView prefills via describe but never
+  auto-submits),
   `ScheduleView`, `GoalsView`/`GoalStrip`, `MultiRunView`, `FusionView`,
   `WalkthroughView`/`GeneratedWalkthrough`, `PreviewView` (iframe + browser driving),
   `TerminalView`, `SettingsModal`/`SettingsView` + `settings/registry.ts`
