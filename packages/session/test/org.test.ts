@@ -96,17 +96,19 @@ test("attentionFor counts only unresolved questions/permissions per session", as
 test("searchEventText returns bounded snippets, at most two per session", async () => {
   const store = freshStore();
   const long = `${"x".repeat(200)} the needle sits here ${"y".repeat(200)}`;
-  await store.append("s1", "user/message", { text: long });
+  await store.append("s1", "user/message", { text: "needle first" });
   await store.append("s1", "assistant/message", { text: "needle again" });
   await store.append("s1", "user/message", { text: "third needle mention" });
-  await store.append("s2", "user/message", { text: "no match here" });
+  await store.append("s2", "user/message", { text: long });
+  await store.append("s3", "user/message", { text: "no match here" });
 
   const hits = await store.searchEventText("needle");
   assert.equal(hits.filter((h) => h.sessionId === "s1").length, 2); // capped per session
-  const snip = hits.find((h) => h.snippet.includes("needle sits here"))!;
+  const snip = hits.find((h) => h.sessionId === "s2");
+  assert.ok(snip);
   assert.ok(snip.snippet.length < 140, `snippet too long: ${snip.snippet.length}`);
   assert.ok(snip.snippet.startsWith("…") && snip.snippet.endsWith("…"));
-  assert.equal(hits.some((h) => h.sessionId === "s2"), false);
+  assert.equal(hits.some((h) => h.sessionId === "s3"), false);
   await store.close();
 });
 
