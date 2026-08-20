@@ -1,6 +1,6 @@
 # Polyth Ember UX direction — approval brief
 
-> **Status / Статус:** Awaiting approval before implementing in `apps/web`.  
+> **Status / Статус:** Awaiting approval before implementing in `apps/web`.
 > **Очікуємо на погодження перед будь-якою реалізацією в `apps/web`.**
 
 ## Вердикт
