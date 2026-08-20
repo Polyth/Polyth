@@ -6,9 +6,9 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { createStore, deriveMessages } from "@polyth/session";
+import { createStore, deriveMessages, rewindDraft } from "@polyth/session";
 import type {
-  AgentRuntime, JsonObject, Project, ProjectService, RuntimeEvent,
+  AgentRuntime, JsonObject, ModelMessage, Project, ProjectService, RuntimeBranchRequest, RuntimeEvent,
 } from "@polyth/contracts";
 import { createSessionService, type Broadcaster } from "../src/sessions.ts";
 import type { PermissionService } from "@polyth/permissions";
@@ -22,6 +22,8 @@ function fakeRuntime(opts: { steering?: boolean; steerResult?: boolean } = {}) {
   const permissionReplies: Array<{ requestId: string; reply: string }> = [];
   const questionReplies: Array<{ requestId: string; answers: JsonObject }> = [];
   const resetSessions: string[] = [];
+  const branchRequests: Array<{ sourceSessionId: string; targetSessionId: string; history: ModelMessage[] }> = [];
+  const discarded: string[] = [];
   let aborted = 0;
   const emit = (sessionId: string, ev: RuntimeEvent) => {
     for (const l of listeners) l(sessionId, ev);
@@ -38,6 +40,15 @@ function fakeRuntime(opts: { steering?: boolean; steerResult?: boolean } = {}) {
       resetSessions.push(c.sessionId);
       return `fresh_${resetSessions.length}`;
     },
+    branchSession: async (request: RuntimeBranchRequest) => {
+      branchRequests.push({
+        sourceSessionId: request.sourceSessionId,
+        targetSessionId: request.target.sessionId,
+        history: request.history,
+      });
+      return `branch_${branchRequests.length}`;
+    },
+    discardSession: async (sessionId: string) => { discarded.push(sessionId); },
     sessions: async () => [],
     history: async () => [],
     startTurn: async (req) => {
@@ -67,6 +78,7 @@ function fakeRuntime(opts: { steering?: boolean; steerResult?: boolean } = {}) {
   };
   return {
     rt, emit, startedTexts, steeredTexts, permissionReplies, questionReplies, resetSessions,
+    branchRequests, discarded,
     get aborted() { return aborted; },
   };
 }
@@ -308,7 +320,7 @@ test("queue reorder validates permutations and remove is session-scoped", async 
   await assert.rejects(() => sessions.queueRemove!(id, "nope"), /not found/);
 });
 
-test("rewind rejects running turns, supports redo, and resets backend before replacement", async () => {
+test("rewind rejects running turns, supports redo, and branches backend before replacement", async () => {
   const fake = fakeRuntime();
   const { sessions, store } = makeService(fake);
   const { id } = await sessions.create({ projectId: "p1", title: "T" });
@@ -329,15 +341,25 @@ test("rewind rejects running turns, supports redo, and resets backend before rep
 
   const marker = await sessions.rewind!(id, second.seq);
   assert.equal(marker.type, "session/rewound");
-  assert.equal((marker.data as { restoredText?: string }).restoredText, "second");
+  // new markers never duplicate prompt text; the draft derives from replay
+  assert.equal("restoredText" in (marker.data as Record<string, unknown>), false);
+  assert.deepEqual(rewindDraft(await store.events(id)), { text: "second", attachments: [] });
   const restored = await sessions.clearRewind!(id);
   assert.equal(restored.type, "session/rewind-cleared");
 
   await sessions.rewind!(id, second.seq);
   await sessions.send(id, { text: "replacement" });
   await flush();
-  assert.deepEqual(fake.resetSessions, [id]);
-  assert.equal((await store.projection(id))?.backendSessionId, "fresh_1");
+  // the replacement backend is an exact-history BRANCH (never an empty reset)
+  assert.deepEqual(fake.resetSessions, []);
+  assert.equal(fake.branchRequests.length, 1);
+  assert.equal(fake.branchRequests[0]!.sourceSessionId, id);
+  assert.equal(fake.branchRequests[0]!.targetSessionId, id);
+  assert.deepEqual(fake.branchRequests[0]!.history, [
+    { role: "user", parts: [{ type: "text", text: "first" }] },
+    { role: "assistant", parts: [{ type: "text", text: "one" }] },
+  ]);
+  assert.equal((await store.projection(id))?.backendSessionId, "branch_1");
   const after = await store.events(id);
   const replacement = after.findLast(
     (event) => event.type === "user/message" && (event.data as { text?: string }).text === "replacement",
@@ -346,6 +368,11 @@ test("rewind rejects running turns, supports redo, and resets backend before rep
     (event) => event.type === "session/rewind-cleared" && (event.data as { replaced?: boolean }).replaced === true,
   )!;
   assert.ok(clear.seq < replacement.seq);
+  assert.deepEqual(deriveMessages(after).map((m) => m.parts[0]), [
+    { type: "text", text: "first" },
+    { type: "text", text: "one" },
+    { type: "text", text: "replacement" },
+  ]);
   await store.close();
 });
 

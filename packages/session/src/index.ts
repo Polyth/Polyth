@@ -8,6 +8,8 @@ import { MODEL_VISIBLE_TYPES } from "@polyth/contracts";
 import type {
   AgentProfile,
   AttachmentRef,
+  ChildSnapshotInput,
+  ChildSnapshotResult,
   DeliveryMode,
   JsonObject,
   ModelMessage,
@@ -309,6 +311,73 @@ export function createStore(dbPath: string): Store {
     return Promise.resolve();
   }
 
+  // ------------------------------------------------------------- atomic child snapshot (UX-MSG-ACTIONS)
+
+  // Per-message fork publication: prefix events + projection + one lineage
+  // marker commit together or not at all. Copied events keep their exact
+  // source times/payloads, get fresh child ids, and record source-sequence
+  // provenance in source_seqs.
+  function publishChildSession(input: ChildSnapshotInput): Promise<ChildSnapshotResult> {
+    const childId = input.childSessionId;
+    const out: SessionEvent[] = [];
+    let marker: SessionEvent;
+    db.exec("BEGIN IMMEDIATE");
+    try {
+      const existing = db
+        .prepare("SELECT COALESCE(MAX(seq), 0) AS m FROM events WHERE session_id = ?")
+        .get(childId) as { m: number };
+      if (Number(existing.m) > 0) {
+        throw Object.assign(new Error("child session already has events"), { code: "conflict" });
+      }
+      const ins = db.prepare(
+        `INSERT INTO events (session_id, seq, id, time, type, data, ignorable, surface_op, source_seqs, producer, v)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`,
+      );
+      let seq = 0;
+      for (const e of input.events) {
+        seq += 1;
+        const id = randomUUID();
+        ins.run(
+          childId, seq, id, e.time, e.type, JSON.stringify(e.data),
+          e.ignorable ? 1 : 0,
+          e.surfaceOp ?? null,
+          e.sourceSeq !== undefined ? JSON.stringify([e.sourceSeq]) : null,
+          e.producerPlugin ?? null,
+        );
+        out.push({
+          id, sessionId: childId, seq, time: e.time, type: e.type, data: e.data,
+          ...(e.ignorable ? { ignorable: true } : {}),
+          ...(e.surfaceOp ? { surfaceOp: e.surfaceOp } : {}),
+          ...(e.sourceSeq !== undefined ? { sourceEventSeqs: [e.sourceSeq] } : {}),
+          ...(e.producerPlugin ? { producerPlugin: e.producerPlugin } : {}),
+          v: 1,
+        });
+      }
+      seq += 1;
+      const markerId = randomUUID();
+      const markerTime = Date.now();
+      ins.run(
+        childId, seq, markerId, markerTime, input.marker.type, JSON.stringify(input.marker.data),
+        input.marker.ignorable ? 1 : 0, null, null, null,
+      );
+      marker = {
+        id: markerId, sessionId: childId, seq, time: markerTime,
+        type: input.marker.type, data: input.marker.data,
+        ...(input.marker.ignorable ? { ignorable: true } : {}),
+        v: 1,
+      };
+      db.prepare(
+        `INSERT INTO projections (session_id, data) VALUES (?, ?)
+         ON CONFLICT(session_id) DO UPDATE SET data = excluded.data`,
+      ).run(input.projection.id, JSON.stringify(input.projection));
+      db.exec("COMMIT");
+    } catch (err) {
+      db.exec("ROLLBACK");
+      throw err;
+    }
+    return Promise.resolve({ events: out, marker });
+  }
+
   // ------------------------------------------------------------- projections
 
   function upsertProjection(p: SessionProjection): Promise<void> {
@@ -317,6 +386,32 @@ export function createStore(dbPath: string): Store {
        ON CONFLICT(session_id) DO UPDATE SET data = excluded.data`,
     ).run(p.id, JSON.stringify(p));
     return Promise.resolve();
+  }
+
+  // Atomic read-modify-write: increments (token totals) and status patches
+  // always apply to the latest committed row, so an awaited callback can never
+  // overwrite fields a later callback already changed.
+  function patchProjection(
+    sessionId: string,
+    patch: (current: SessionProjection) => SessionProjection,
+  ): Promise<SessionProjection | undefined> {
+    let next: SessionProjection | undefined;
+    db.exec("BEGIN IMMEDIATE");
+    try {
+      const row = db
+        .prepare("SELECT data FROM projections WHERE session_id = ?")
+        .get(sessionId) as { data: string } | undefined;
+      if (row) {
+        next = patch(JSON.parse(row.data) as SessionProjection);
+        db.prepare("UPDATE projections SET data = ? WHERE session_id = ?")
+          .run(JSON.stringify(next), sessionId);
+      }
+      db.exec("COMMIT");
+    } catch (err) {
+      db.exec("ROLLBACK");
+      throw err;
+    }
+    return Promise.resolve(next);
   }
 
   function projection(sessionId: string): Promise<SessionProjection | undefined> {
@@ -808,7 +903,9 @@ export function createStore(dbPath: string): Store {
     events,
     latestSeq,
     copyTo,
+    publishChildSession,
     upsertProjection,
+    patchProjection,
     projection,
     projections,
     exportJsonl,
@@ -902,19 +999,30 @@ export function activeRewind(events: readonly SessionEvent[]): ActiveRewind | nu
   return active;
 }
 
-export function deriveMessages(events: SessionEvent[]): ModelMessage[] {
-  const out: ModelMessage[] = [];
-  let visibleEvents: SessionEvent[] = [];
-  let hidden: { markerSeq: number; events: SessionEvent[] } | null = null;
+/** The one pure effective-history selector (UX-MSG-ACTIONS): timeline replay,
+ *  model derivation, export, mutation eligibility, and backend branch
+ *  preparation all consume this so they can never disagree about the visible
+ *  prefix. Rewinds splice history without mutating old rows: redo restores the
+ *  captured tail; a replacement clear permanently drops it and lets subsequent
+ *  events form a new tail. */
+export interface EffectiveHistory {
+  /** Visible events in order; rewind markers themselves are excluded. */
+  events: SessionEvent[];
+  /** Tail hidden by the currently active rewind marker (empty when none). */
+  hidden: SessionEvent[];
+  /** The active (unresolved) rewind marker, if any. */
+  rewind: { markerSeq: number; atSeq: number } | null;
+}
 
-  // Rewinds splice model-visible history without mutating old rows. Redo
-  // restores the captured tail; a replacement clear permanently drops it and
-  // lets subsequent events form a new tail.
+export function effectiveHistory(events: readonly SessionEvent[]): EffectiveHistory {
+  let visibleEvents: SessionEvent[] = [];
+  let hidden: { markerSeq: number; atSeq: number; events: SessionEvent[] } | null = null;
+
   for (const ev of events) {
     if (ev.type === "session/rewound") {
       const atSeq = Number((ev.data as { atSeq?: unknown }).atSeq);
       if (Number.isSafeInteger(atSeq) && atSeq > 0) {
-        hidden = { markerSeq: ev.seq, events: visibleEvents.filter((item) => item.seq >= atSeq) };
+        hidden = { markerSeq: ev.seq, atSeq, events: visibleEvents.filter((item) => item.seq >= atSeq) };
         visibleEvents = visibleEvents.filter((item) => item.seq < atSeq);
       }
       continue;
@@ -930,6 +1038,30 @@ export function deriveMessages(events: SessionEvent[]): ModelMessage[] {
     }
     visibleEvents.push(ev);
   }
+
+  return {
+    events: visibleEvents,
+    hidden: hidden?.events ?? [],
+    rewind: hidden ? { markerSeq: hidden.markerSeq, atSeq: hidden.atSeq } : null,
+  };
+}
+
+/** Composer seed for the active rewind marker: the hidden target's exact
+ *  `raw ?? text` plus attachments. Null when no rewind is active. */
+export function rewindDraft(events: readonly SessionEvent[]): { text: string; attachments: AttachmentRef[] } | null {
+  const eff = effectiveHistory(events);
+  if (!eff.rewind) return null;
+  const target = eff.hidden.find((ev) => ev.seq === eff.rewind!.atSeq && ev.type === "user/message");
+  if (!target) return null;
+  const d = target.data as { raw?: unknown; text?: unknown; attachments?: unknown };
+  const text = typeof d.raw === "string" ? d.raw : typeof d.text === "string" ? d.text : "";
+  const attachments = Array.isArray(d.attachments) ? (d.attachments as AttachmentRef[]) : [];
+  return { text, attachments };
+}
+
+export function deriveMessages(events: SessionEvent[]): ModelMessage[] {
+  const out: ModelMessage[] = [];
+  const visibleEvents = effectiveHistory(events).events;
 
   const pushText = (role: "user" | "assistant" | "tool", text: string) => {
     const last = out[out.length - 1];
@@ -1016,7 +1148,9 @@ export function deriveMessages(events: SessionEvent[]): ModelMessage[] {
         const text = String(d.text ?? "");
         const reasoning = d.reasoning === undefined ? undefined : String(d.reasoning);
         if (reasoning) pushReasoning(reasoning);
-        pushText("assistant", text);
+        // Reasoning-only final records carry text:"" — an empty text part must
+        // not become an ordinary answer bubble in model history.
+        if (text !== "") pushText("assistant", text);
         break;
       }
       case "tool/call":

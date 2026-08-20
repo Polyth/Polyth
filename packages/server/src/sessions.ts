@@ -3,15 +3,16 @@
 import { randomUUID } from "node:crypto";
 import { resolve } from "node:path";
 import type {
-  AgentProfile, AgentRuntime, AttachmentRef, AutoAcceptSetting, CreateSessionInput, DeliveryMode, JsonObject,
+  AgentProfile, AgentRuntime, AttachmentRef, AutoAcceptSetting, ChildSnapshotResult, CreateSessionInput, DeliveryMode,
+  ForkDraft, ForkResult, JsonObject,
   QueueItemDto, RuntimeEvent,
-  RuntimeSession, SendResult, SessionEvent, SessionFolderDto, SessionOrganizePatch, SessionProjection, SessionRef,
+  RuntimeSession, SendResult, SessionEvent, SessionFolderDto, SessionForkedData, SessionOrganizePatch, SessionProjection, SessionRef,
   SessionService, SessionPersistence, UserTurnInput,
 } from "@polyth/contracts";
 import type { ProjectService } from "@polyth/contracts";
 import type { AutoAcceptStore, PermissionService } from "@polyth/permissions";
 import { resolveAutoAccept } from "@polyth/permissions";
-import { activeRewind } from "@polyth/session";
+import { activeRewind, deriveMessages, effectiveHistory } from "@polyth/session";
 import { buildPermissionPreview, PERMISSION_ALLOWED_SCOPES } from "./permissionPreview.ts";
 import { sanitizeAttachments } from "./attachments.ts";
 
@@ -112,6 +113,19 @@ export function createSessionService(deps: {
   const replyText = (sessionId: string): string =>
     [...(turnReply.get(sessionId)?.values() ?? [])].filter((t) => t.trim()).join("\n\n");
 
+  // UX-MSG-ACTIONS: one per-canonical-session promise chain. Runtime callbacks
+  // are applied in arrival order (never as unobserved parallel calls) and
+  // Revert/Fork validation + publication run under the same serialization, so
+  // an apparently idle message row can never race a newly admitted turn.
+  // A failed link is logged and contained without breaking the chain.
+  const chains = new Map<string, Promise<unknown>>();
+  const withSessionLock = <T>(sessionId: string, fn: () => Promise<T>): Promise<T> => {
+    const prev = chains.get(sessionId) ?? Promise.resolve();
+    const run = prev.then(fn, fn);
+    chains.set(sessionId, run.then(() => undefined, () => undefined));
+    return run;
+  };
+
   const appendAndBroadcast = async (
     sessionId: string, type: string, data: JsonObject,
     opts?: Parameters<SessionPersistence["append"]>[3],
@@ -121,12 +135,28 @@ export function createSessionService(deps: {
     return ev;
   };
 
+  // Projection patches operate on the latest committed row (one store
+  // transaction when the store supports it) and broadcast the exact committed
+  // projection — a callback can no longer read, await, and then overwrite
+  // fields a later callback already changed.
+  const applyProjection = async (
+    sessionId: string, patch: (current: SessionProjection) => SessionProjection,
+  ): Promise<SessionProjection | undefined> => {
+    let next: SessionProjection | undefined;
+    if (store.patchProjection) {
+      next = await store.patchProjection(sessionId, patch);
+    } else {
+      const current = await store.projection(sessionId);
+      if (!current) return undefined;
+      next = patch(current);
+      await store.upsertProjection(next);
+    }
+    if (next) broadcast.projection(next);
+    return next;
+  };
+
   const updateProjection = async (sessionId: string, patch: Partial<SessionProjection>) => {
-    const current = await store.projection(sessionId);
-    if (!current) return;
-    const next = { ...current, ...patch, updatedAt: Date.now() };
-    await store.upsertProjection(next);
-    broadcast.projection(next);
+    await applyProjection(sessionId, (current) => ({ ...current, ...patch, updatedAt: Date.now() }));
   };
 
   // F18: effective auto-accept — own explicit setting, else the nearest
@@ -208,16 +238,18 @@ export function createSessionService(deps: {
       case "usage/recorded": {
         const { type: _t, ...uData } = ev;
         await appendAndBroadcast(sessionId, "usage/recorded", uData as unknown as JsonObject, { ignorable: true });
-        const proj = await store.projection(sessionId);
-        const t = proj?.tokenTotals;
-        await updateProjection(sessionId, {
+        // Token/cost increments are read-modify-written inside one projection
+        // patch so back-to-back callbacks apply exactly once each.
+        await applyProjection(sessionId, (proj) => ({
+          ...proj,
           tokenTotals: {
-            input: (t?.input ?? 0) + ev.tokens.input,
-            output: (t?.output ?? 0) + ev.tokens.output,
-            ...(ev.tokens.reasoning ? { reasoning: (t?.reasoning ?? 0) + ev.tokens.reasoning } : {}),
+            input: (proj.tokenTotals?.input ?? 0) + ev.tokens.input,
+            output: (proj.tokenTotals?.output ?? 0) + ev.tokens.output,
+            ...(ev.tokens.reasoning ? { reasoning: (proj.tokenTotals?.reasoning ?? 0) + ev.tokens.reasoning } : {}),
           },
-          costTotal: (proj?.costTotal ?? 0) + (ev.cost ?? 0),
-        });
+          costTotal: (proj.costTotal ?? 0) + (ev.cost ?? 0),
+          updatedAt: Date.now(),
+        }));
         hooks.onUsage?.(sessionId, ev.tokens);
         break;
       }
@@ -237,7 +269,14 @@ export function createSessionService(deps: {
   const wire = (sessionId: string, rt: AgentRuntime) => {
     if (sessionRuntime.has(sessionId)) return;
     sessionRuntime.set(sessionId, rt);
-    rt.onEvent((sid, ev) => { if (sid === sessionId) void onRuntimeEvent(sid, ev); });
+    rt.onEvent((sid, ev) => {
+      if (sid !== sessionId) return;
+      // Serialized per canonical session: a terminal turn/stopped can never be
+      // overwritten by an older usage or chunk projection update.
+      void withSessionLock(sid, () => onRuntimeEvent(sid, ev)).catch((err) => {
+        console.error(`[polyth] runtime event handling failed for ${sid}`, err);
+      });
+    });
   };
 
   const ensureWired = async (sessionId: string, proj: SessionProjection): Promise<AgentRuntime> => {
@@ -260,6 +299,46 @@ export function createSessionService(deps: {
 
   const turnActive = (sessionId: string): boolean =>
     lastTurnId.has(sessionId) || admitting.has(sessionId);
+
+  /** Unresolved question/permission requests derived from durable events. */
+  const openRequestCount = (events: SessionEvent[]): number => {
+    const questions = new Set<string>();
+    const perms = new Set<string>();
+    for (const e of events) {
+      const rid = (e.data as { requestId?: string }).requestId;
+      if (!rid) continue;
+      if (e.type === "question/asked") questions.add(rid);
+      else if (e.type === "question/answered") questions.delete(rid);
+      else if (e.type === "permission/requested") perms.add(rid);
+      else if (e.type === "permission/resolved") perms.delete(rid);
+    }
+    return questions.size + perms.size;
+  };
+
+  /** Truthful Revert/Fork eligibility, evaluated fresh under the session lock.
+   *  Live runtime admission + durable unresolved requests are authoritative; a
+   *  stale `working` projection from an interrupted process must not turn the
+   *  offered action into a deterministic 409. */
+  const assertMutable = async (
+    sessionId: string,
+  ): Promise<{ proj: SessionProjection; events: SessionEvent[] }> => {
+    const proj = await store.projection(sessionId);
+    if (!proj) throw Object.assign(new Error("session not found"), { code: "not-found" });
+    if (proj.status === "archived") {
+      throw Object.assign(new Error("unavailable while the session is archived"), { code: "conflict" });
+    }
+    if (turnActive(sessionId)) {
+      throw Object.assign(new Error("unavailable while a turn is running"), { code: "conflict" });
+    }
+    const events = await store.events(sessionId);
+    if (openRequestCount(events) > 0) {
+      throw Object.assign(new Error("unavailable while a request is waiting"), { code: "conflict" });
+    }
+    if (deps.queue && (await deps.queue.queueList(sessionId)).length > 0) {
+      throw Object.assign(new Error("unavailable while messages are queued"), { code: "conflict" });
+    }
+    return { proj, events };
+  };
 
   const finishShell = async (
     sessionId: string,
@@ -436,7 +515,7 @@ export function createSessionService(deps: {
 
   /** Expansion + user/message append + startTurn. Callers already decided
    *  admission; this is the single place a text enters the model stream. */
-  const admitTurn = async (
+  const admitTurnCore = async (
     sessionId: string, proj: SessionProjection, rt: AgentRuntime, input: UserTurnInput,
   ): Promise<SendResult> => {
     // /command and #snippet expansion happens before anything is logged, so the
@@ -500,6 +579,13 @@ export function createSessionService(deps: {
     }
     return { turnId: randomUUID() };
   };
+
+  /** Admission joins the same per-session serialization as runtime callbacks
+   *  and Revert/Fork, closing the idle-row-vs-new-turn activation race. */
+  const admitTurn = (
+    sessionId: string, proj: SessionProjection, rt: AgentRuntime, input: UserTurnInput,
+  ): Promise<SendResult> =>
+    withSessionLock(sessionId, () => admitTurnCore(sessionId, proj, rt, input));
 
   // F14 import half: one scan shared by browse/import/sync — backend sessions
   // deduped by id, already-adopted ones filtered out, most recent first.
@@ -587,28 +673,43 @@ export function createSessionService(deps: {
       const rt = await ensureWired(sessionId, proj);
 
       // A replacement send after rewind must not continue in the backend's
-      // stale conversation. Reset first, then resolve the marker and admit the
-      // new tail. If reset fails the rewind remains active and replay-safe.
-      const rewind = activeRewind(await store.events(sessionId));
-      if (rewind) {
-        if (!rt.resetSession) {
-          throw Object.assign(new Error("runtime cannot reset rewound history"), { code: "unsupported" });
-        }
-        const project = await projects.get(proj.projectId);
-        const cwd = proj.worktreePath ?? project?.path ?? process.cwd();
-        const backendSessionId = await rt.resetSession({
-          projectId: proj.projectId,
-          title: proj.title,
-          sessionId,
-          cwd,
-          ...(proj.model ? { model: proj.model } : {}),
-          ...(proj.agent ? { agent: proj.agent } : {}),
-        });
-        await updateProjection(sessionId, { backendSessionId, status: "idle" });
-        proj = { ...proj, backendSessionId, status: "idle" };
-        await appendAndBroadcast(sessionId, "session/rewind-cleared", {
-          rewindSeq: rewind.markerSeq,
-          replaced: true,
+      // stale conversation — and it must not reset into an EMPTY backend
+      // either. Prepare a backend branch that holds the exact canonical
+      // effective history before the target, then resolve the marker and admit
+      // the new tail. If branch preparation fails the rewind and draft remain
+      // active and no event is appended.
+      if (activeRewind(await store.events(sessionId))) {
+        proj = await withSessionLock(sessionId, async () => {
+          const events = await store.events(sessionId);
+          const rewind = activeRewind(events);
+          let current = (await store.projection(sessionId)) ?? proj!;
+          if (!rewind) return current; // resolved concurrently — plain send
+          if (!rt.branchSession) {
+            throw Object.assign(new Error("runtime cannot branch rewound history"), { code: "unsupported" });
+          }
+          const project = await projects.get(current.projectId);
+          const cwd = current.worktreePath ?? project?.path ?? process.cwd();
+          // deriveMessages already applies the active marker, so this is the
+          // exact effective model history before the reverted prompt.
+          const backendSessionId = await rt.branchSession({
+            sourceSessionId: sessionId,
+            target: {
+              projectId: current.projectId,
+              title: current.title,
+              sessionId,
+              cwd,
+              ...(current.model ? { model: current.model } : {}),
+              ...(current.agent ? { agent: current.agent } : {}),
+            },
+            history: deriveMessages(events),
+          });
+          await updateProjection(sessionId, { backendSessionId, status: "idle" });
+          current = { ...current, backendSessionId, status: "idle" };
+          await appendAndBroadcast(sessionId, "session/rewind-cleared", {
+            rewindSeq: rewind.markerSeq,
+            replaced: true,
+          });
+          return current;
         });
       }
 
@@ -708,73 +809,164 @@ export function createSessionService(deps: {
 
     async abort(sessionId) { await sessionRuntime.get(sessionId)?.abort(sessionId); },
 
-    async fork(sessionId, atSeq): Promise<SessionRef> {
-      const proj = await store.projection(sessionId);
-      if (!proj) throw Object.assign(new Error("session not found"), { code: "not-found" });
-      if (atSeq !== undefined) {
-        if (!Number.isSafeInteger(atSeq) || atSeq <= 0) {
-          throw Object.assign(new Error("atSeq must be a positive event sequence"), { code: "invalid-input" });
+    // UX-MSG-ACTIONS Fork: backend branch is prepared FIRST; the canonical
+    // child (prefix + projection + one lineage marker) publishes in a single
+    // store transaction only after the backend id is verified. Failure at any
+    // stage leaves the source selected and creates no optimistic child.
+    async fork(sessionId, atSeq): Promise<ForkResult> {
+      return withSessionLock(sessionId, async () => {
+        const { proj, events } = await assertMutable(sessionId);
+        const eff = effectiveHistory(events);
+        let draft: ForkDraft | undefined;
+        let prefix: SessionEvent[];
+        if (atSeq !== undefined) {
+          // Per-message fork: the child prefix ends strictly BEFORE the target
+          // user message; the excluded prompt returns only as an editable draft.
+          if (!Number.isSafeInteger(atSeq) || atSeq <= 0) {
+            throw Object.assign(new Error("atSeq must be a positive event sequence"), { code: "invalid-input" });
+          }
+          if (eff.rewind) {
+            throw Object.assign(new Error("restore or replace the current rewind first"), { code: "conflict" });
+          }
+          const target = eff.events.find((ev) => ev.seq === atSeq);
+          if (!target) throw Object.assign(new Error("fork event not found"), { code: "not-found" });
+          if (target.type !== "user/message") {
+            throw Object.assign(new Error("fork target must be a user message"), { code: "invalid-input" });
+          }
+          const d = target.data as { raw?: unknown; text?: unknown; attachments?: unknown };
+          draft = {
+            text: typeof d.raw === "string" ? d.raw : typeof d.text === "string" ? d.text : "",
+            ...(Array.isArray(d.attachments) && d.attachments.length
+              ? { attachments: d.attachments as AttachmentRef[] }
+              : {}),
+          };
+          prefix = eff.events.filter((ev) => ev.seq < atSeq);
+        } else {
+          // Whole-session fork: the complete effective history at the locked
+          // source tail; no draft.
+          prefix = eff.events;
         }
-        const target = (await store.events(sessionId)).find((ev) => ev.seq === atSeq);
-        if (!target) throw Object.assign(new Error("fork event not found"), { code: "not-found" });
-      }
-      const forkId = randomUUID();
-      const project = await projects.get(proj.projectId);
-      const forkCwd = proj.worktreePath ?? project?.path ?? process.cwd();
-      const rt = await runtimes.forProject(proj.projectId, forkCwd);
-      const backendSessionId = await rt.ensureSession({ projectId: proj.projectId, title: `${proj.title} (fork)`, sessionId: forkId, cwd: forkCwd });
-      wire(forkId, rt);
-      await store.copyTo(sessionId, forkId, atSeq);
-      const now = Date.now();
-      const projection: SessionProjection = {
-        ...proj, id: forkId, parentId: sessionId,
-        title: `${proj.title} (fork)`, status: "idle", createdAt: now, updatedAt: now,
-        backendSessionId,
-      };
-      await store.upsertProjection(projection);
-      await appendAndBroadcast(forkId, "session/forked", { fromSessionId: sessionId, ...(atSeq ? { atSeq } : {}) }, { ignorable: true });
-      broadcast.projection(projection);
-      return { id: forkId };
+        const copiedThroughSeq = prefix.length > 0 ? prefix[prefix.length - 1]!.seq : 0;
+        const history = deriveMessages(prefix);
+
+        const forkId = randomUUID();
+        const project = await projects.get(proj.projectId);
+        const forkCwd = proj.worktreePath ?? project?.path ?? process.cwd();
+        const rt = await runtimes.forProject(proj.projectId, forkCwd);
+        const title = `${proj.title} (fork)`;
+        const target: CreateSessionInput & { sessionId: string; cwd: string } = {
+          projectId: proj.projectId, title, sessionId: forkId, cwd: forkCwd,
+          ...(proj.model ? { model: proj.model } : {}),
+          ...(proj.agent ? { agent: proj.agent } : {}),
+        };
+        // An empty prefix needs no branch — a fresh backend session already
+        // represents the same (empty) history. Anything else requires exact
+        // branching; approximating with a hidden prompt is forbidden.
+        let backendSessionId: string;
+        if (history.length === 0) {
+          backendSessionId = await rt.ensureSession(target);
+        } else if (rt.branchSession) {
+          backendSessionId = await rt.branchSession({ sourceSessionId: sessionId, target, history });
+        } else {
+          throw Object.assign(new Error("runtime cannot branch exact history"), { code: "unsupported" });
+        }
+
+        const now = Date.now();
+        const projection: SessionProjection = {
+          ...proj, id: forkId, parentId: sessionId, title,
+          status: "idle", createdAt: now, updatedAt: now, backendSessionId,
+        };
+        const markerData: SessionForkedData = {
+          fromSessionId: sessionId,
+          ...(atSeq !== undefined ? { sourceAtSeq: atSeq } : {}),
+          copiedThroughSeq,
+          ...(draft ? { draft } : {}),
+        };
+        let published: ChildSnapshotResult;
+        try {
+          if (store.publishChildSession) {
+            published = await store.publishChildSession({
+              childSessionId: forkId,
+              events: prefix.map((ev) => ({
+                time: ev.time, type: ev.type, data: ev.data,
+                ...(ev.ignorable ? { ignorable: true as const } : {}),
+                ...(ev.surfaceOp ? { surfaceOp: ev.surfaceOp } : {}),
+                ...(ev.producerPlugin ? { producerPlugin: ev.producerPlugin } : {}),
+                sourceSeq: ev.seq,
+              })),
+              projection,
+              marker: { type: "session/forked", data: markerData as unknown as JsonObject, ignorable: true },
+            });
+          } else {
+            // Fallback for stores without the atomic child-snapshot seam:
+            // same content, same provenance, without single-transaction wrap.
+            const copied: SessionEvent[] = [];
+            for (const ev of prefix) {
+              copied.push(await store.append(forkId, ev.type, ev.data, {
+                ...(ev.ignorable ? { ignorable: true } : {}),
+                ...(ev.surfaceOp ? { surfaceOp: ev.surfaceOp } : {}),
+                sourceEventSeqs: [ev.seq],
+              }));
+            }
+            await store.upsertProjection(projection);
+            const marker = await store.append(
+              forkId, "session/forked", markerData as unknown as JsonObject, { ignorable: true },
+            );
+            published = { events: copied, marker };
+          }
+        } catch (err) {
+          // Canonical publication failed: best-effort discard of the now
+          // unreferenced backend branch; the source stays untouched.
+          if (rt.discardSession && backendSessionId !== proj.backendSessionId) {
+            await rt.discardSession(backendSessionId).catch(() => {});
+          }
+          throw err;
+        }
+        wire(forkId, rt);
+        // append-before-broadcast: nothing above was visible; everything below
+        // reflects only the committed transaction.
+        for (const ev of published.events) broadcast.event(ev);
+        broadcast.event(published.marker);
+        broadcast.projection(projection);
+        return {
+          id: forkId,
+          fromSessionId: sessionId,
+          ...(atSeq !== undefined ? { sourceAtSeq: atSeq } : {}),
+          ...(draft ? { draft } : {}),
+        };
+      });
     },
 
     async rewind(sessionId, atSeq): Promise<SessionEvent> {
-      const proj = await store.projection(sessionId);
-      if (!proj) throw Object.assign(new Error("session not found"), { code: "not-found" });
-      if (turnActive(sessionId) || proj.status === "working" || proj.status === "waiting") {
-        throw Object.assign(new Error("cannot rewind while a turn is running"), { code: "conflict" });
-      }
-      if (!Number.isSafeInteger(atSeq) || atSeq <= 0) {
-        throw Object.assign(new Error("atSeq must be a positive event sequence"), { code: "invalid-input" });
-      }
-      if (deps.queue && (await deps.queue.queueList(sessionId)).length > 0) {
-        throw Object.assign(new Error("cannot rewind while messages are queued"), { code: "conflict" });
-      }
-      const events = await store.events(sessionId);
-      if (activeRewind(events)) {
-        throw Object.assign(new Error("restore or replace the current rewind first"), { code: "conflict" });
-      }
-      const target = events.find((ev) => ev.seq === atSeq);
-      if (!target) throw Object.assign(new Error("rewind event not found"), { code: "not-found" });
-      if (target.type !== "user/message") {
-        throw Object.assign(new Error("rewind target must be a user message"), { code: "invalid-input" });
-      }
-      const text = (target.data as { raw?: unknown; text?: unknown }).raw
-        ?? (target.data as { text?: unknown }).text;
-      return appendAndBroadcast(sessionId, "session/rewound", {
-        atSeq,
-        ...(typeof text === "string" ? { restoredText: text } : {}),
+      return withSessionLock(sessionId, async () => {
+        const { events } = await assertMutable(sessionId);
+        if (!Number.isSafeInteger(atSeq) || atSeq <= 0) {
+          throw Object.assign(new Error("atSeq must be a positive event sequence"), { code: "invalid-input" });
+        }
+        const eff = effectiveHistory(events);
+        if (eff.rewind) {
+          throw Object.assign(new Error("restore or replace the current rewind first"), { code: "conflict" });
+        }
+        // Only a VISIBLE user message is a valid target — a prompt inside a
+        // previously replaced tail no longer exists in effective history.
+        const target = eff.events.find((ev) => ev.seq === atSeq);
+        if (!target) throw Object.assign(new Error("rewind event not found"), { code: "not-found" });
+        if (target.type !== "user/message") {
+          throw Object.assign(new Error("rewind target must be a user message"), { code: "invalid-input" });
+        }
+        // The marker carries no prompt copy: the target user/message already
+        // owns raw text and attachments, and the draft derives from replay.
+        return appendAndBroadcast(sessionId, "session/rewound", { atSeq });
       });
     },
 
     async clearRewind(sessionId): Promise<SessionEvent> {
-      const proj = await store.projection(sessionId);
-      if (!proj) throw Object.assign(new Error("session not found"), { code: "not-found" });
-      if (turnActive(sessionId) || proj.status === "working" || proj.status === "waiting") {
-        throw Object.assign(new Error("cannot restore while a turn is running"), { code: "conflict" });
-      }
-      const rewind = activeRewind(await store.events(sessionId));
-      if (!rewind) throw Object.assign(new Error("session has no active rewind"), { code: "conflict" });
-      return appendAndBroadcast(sessionId, "session/rewind-cleared", { rewindSeq: rewind.markerSeq });
+      return withSessionLock(sessionId, async () => {
+        const { events } = await assertMutable(sessionId);
+        const rewind = activeRewind(events);
+        if (!rewind) throw Object.assign(new Error("session has no active rewind"), { code: "conflict" });
+        return appendAndBroadcast(sessionId, "session/rewind-cleared", { rewindSeq: rewind.markerSeq });
+      });
     },
 
     async runShell(sessionId, command) {

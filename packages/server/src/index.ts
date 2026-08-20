@@ -168,6 +168,20 @@ export async function boot(opts: BootOptions = {}) {
           return inner.resetSession(canonical);
         });
       },
+      // UX-MSG-ACTIONS: exact-history branching passes through the facade so
+      // the session service never learns backend/OpenCode details.
+      async branchSession(request) {
+        if (!inner.branchSession) throw Object.assign(new Error("runtime cannot branch exact history"), { code: "unsupported" });
+        return reviving("branchSession", () => {
+          if (!inner.branchSession) throw Object.assign(new Error("runtime cannot branch exact history"), { code: "unsupported" });
+          return inner.branchSession(request);
+        });
+      },
+      async discardSession(sessionId) {
+        // best-effort by contract: an unreachable backend must not turn a
+        // clean fork failure into a second error.
+        await inner.discardSession?.(sessionId).catch(() => {});
+      },
       startTurn: (req) => inner.startTurn(req),
       abort: (sessionId) => inner.abort(sessionId),
       replyPermission: (sessionId, requestId, reply) => inner.replyPermission(sessionId, requestId, reply),

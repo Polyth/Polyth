@@ -78,6 +78,38 @@ export interface SessionRewindClearedData {
   replaced?: boolean;
 }
 
+// ---------------------------------------------------------------- fork lineage (UX-MSG-ACTIONS)
+
+/** Editable composer seed carried by a per-message fork marker. Never
+ *  model-visible: the target prompt is excluded from the child history and
+ *  exists only as this draft until the user sends it. */
+export interface ForkDraft {
+  text: string;
+  attachments?: AttachmentRef[];
+}
+
+/** `session/forked` marker payload (ignorable). Legacy whole-session markers
+ *  carry only `fromSessionId` (+ optional `atSeq`); per-message forks add the
+ *  excluded prompt seq, the copied-through seq, and the draft seed. */
+export interface SessionForkedData {
+  fromSessionId: string;
+  /** Legacy whole-session fork bound: events copied up to and including atSeq. */
+  atSeq?: number;
+  /** Per-message fork: the excluded source `user/message` seq. */
+  sourceAtSeq?: number;
+  /** Highest source seq copied into the child prefix (0 = empty prefix). */
+  copiedThroughSeq?: number;
+  draft?: ForkDraft;
+}
+
+/** Typed fork response: the child ref plus the lineage/draft the client
+ *  persists before navigating to the child. */
+export interface ForkResult extends SessionRef {
+  fromSessionId?: string;
+  sourceAtSeq?: number;
+  draft?: ForkDraft;
+}
+
 // ---------------------------------------------------------------- M3 workflows: multirun / fusion / walkthrough
 
 export type MultirunRunStatus = "pending" | "running" | "completed" | "failed";
@@ -236,7 +268,10 @@ export interface SessionService {
   /** Result carries turnId for admitted turns or queueId+queued for deferred delivery. */
   send(sessionId: string, input: UserTurnInput): Promise<SendResult>;
   abort(sessionId: string): Promise<void>;
-  fork(sessionId: string, atSeq?: number): Promise<SessionRef>;
+  /** No atSeq: copy the complete effective history. With atSeq: per-message
+   *  fork — the child prefix ends strictly BEFORE the target user message and
+   *  the excluded prompt returns as an editable draft. */
+  fork(sessionId: string, atSeq?: number): Promise<ForkResult>;
   /** Soft-rewind to a user message without mutating prior events. */
   rewind?(sessionId: string, atSeq: number): Promise<SessionEvent>;
   /** Restore the tail hidden by the active rewind marker. */
@@ -282,6 +317,34 @@ export interface SessionOrganizePatch {
 
 // ---------------------------------------------------------------- persistence
 
+/** One copied event of an atomic child snapshot. Copied events keep their
+ *  exact source times and payloads but receive fresh child ids; `sourceSeq`
+ *  records lineage provenance instead of reusing one event id across sessions. */
+export interface ChildSnapshotEvent {
+  time: number;
+  type: string;
+  data: JsonObject;
+  ignorable?: boolean;
+  surfaceOp?: "append" | "replace";
+  producerPlugin?: string;
+  /** Source-session seq this copied event was derived from. */
+  sourceSeq?: number;
+}
+
+/** Atomic child publication: prefix events + projection + one lineage marker
+ *  commit in a single store transaction or not at all. */
+export interface ChildSnapshotInput {
+  childSessionId: string;
+  events: ChildSnapshotEvent[];
+  projection: SessionProjection;
+  marker: { type: string; data: JsonObject; ignorable?: boolean };
+}
+
+export interface ChildSnapshotResult {
+  events: SessionEvent[];
+  marker: SessionEvent;
+}
+
 export interface SessionPersistence {
   append(sessionId: string, type: string, data: JsonObject, opts?: Partial<Pick<SessionEvent, "ignorable" | "surfaceOp" | "sourceEventSeqs" | "producerPlugin">>): Promise<SessionEvent>;
   events(sessionId: string, afterSeq?: number): Promise<SessionEvent[]>;
@@ -290,6 +353,12 @@ export interface SessionPersistence {
   upsertProjection(p: SessionProjection): Promise<void>;
   projection(sessionId: string): Promise<SessionProjection | undefined>;
   projections(projectId?: string): Promise<SessionProjection[]>;
+  /** All-or-nothing child snapshot (per-message fork publication). Optional so
+   *  existing fakes remain valid; callers must treat absence as unsupported. */
+  publishChildSession?(input: ChildSnapshotInput): Promise<ChildSnapshotResult>;
+  /** Atomic read-modify-write on the latest projection row. Returns the exact
+   *  committed projection (broadcast that, never a stale in-memory copy). */
+  patchProjection?(sessionId: string, patch: (current: SessionProjection) => SessionProjection): Promise<SessionProjection | undefined>;
   close(): Promise<void>;
 }
 
@@ -310,12 +379,24 @@ export interface CanonicalTurnRequest {
   agent?: string;
 }
 
+/** Provider-neutral exact-history branch request (UX-MSG-ACTIONS).
+ *  `sourceSessionId` and `target.sessionId` are canonical ids; the server
+ *  passes only the canonical effective model history and never knows a
+ *  backend message id. When `target.sessionId === sourceSessionId` the
+ *  adapter prepares a replacement backend for the same canonical session and
+ *  swaps its mapping only after the exact prefix is verified. */
+export interface RuntimeBranchRequest {
+  sourceSessionId: string;
+  target: CreateSessionInput & { sessionId: string; cwd: string };
+  history: ModelMessage[];
+}
+
 // Runtime events the adapter yields; session service translates + persists them.
 export type RuntimeEvent =
   | { type: "turn/started"; turnId: string }
   | { type: "assistant/chunk"; partId: string; text: string }
   | { type: "assistant/reasoning-chunk"; partId: string; text: string }
-  | { type: "assistant/message"; partId: string; text: string; tokens?: TokenUsage; cost?: number }
+  | { type: "assistant/message"; partId: string; text: string; reasoning?: string; tokens?: TokenUsage; cost?: number }
   | { type: "tool/call"; callId: string; tool: string; input: JsonObject }
   | { type: "tool/result"; callId: string; tool: string; output: string; title?: string; metadata?: JsonObject; input?: JsonObject }
   | { type: "tool/error"; callId: string; tool: string; error: string; input?: JsonObject }
@@ -334,6 +415,15 @@ export interface AgentRuntime {
   ensureSession(canonical: CreateSessionInput & { sessionId: string; cwd: string }): Promise<string>;
   /** Replace one canonical session's backend history with a fresh backend session. */
   resetSession?(canonical: CreateSessionInput & { sessionId: string; cwd: string }): Promise<string>;
+  /** Create a backend session holding EXACTLY the requested canonical history
+   *  (native fork at the exact predecessor). Returns the backend child id.
+   *  Rejects `history-mismatch` when the read-back child history differs and
+   *  `unsupported` when the runtime cannot branch or hydrate exact history —
+   *  never approximates with a hidden prompt, summary, or optimistic copy. */
+  branchSession?(request: RuntimeBranchRequest): Promise<string>;
+  /** Best-effort discard of an unreferenced backend branch after a failed
+   *  canonical publication. Never throws for an unknown session. */
+  discardSession?(sessionId: string): Promise<void>;
   sessions(): Promise<RuntimeSession[]>;
   history(sessionId: string): Promise<RuntimeSessionMessage[]>;
   startTurn(req: CanonicalTurnRequest): Promise<void>; // events flow via onEvent

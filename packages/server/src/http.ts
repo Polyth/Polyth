@@ -265,7 +265,9 @@ export function createHttpServer(deps: HttpDeps): Server {
       const status =
         e.code === "not-found" ? 404
         : e.code === "invalid-path" || e.code === "invalid-input" ? 400
-        : e.code === "conflict" ? 409
+        // history-mismatch keeps its own code in the body so the client can
+        // explain a failed exact-history branch, but shares 409 semantics.
+        : e.code === "conflict" || e.code === "history-mismatch" ? 409
         : e.code === "unsupported" ? 501
         : 500;
       json(res, status, { error: e.code ?? "internal", message: e.message });
