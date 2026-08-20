@@ -11,6 +11,7 @@ import { friendlyError } from "../../settings.ts";
 import { getUiSettings } from "../../uiPrefs.ts";
 import { firstUserText } from "../../utils.ts";
 import { announce } from "../a11y/live.tsx";
+import { worktreeLabel } from "../../worktreeSessions.ts";
 import {
   groupSessions,
   listGroupings,
@@ -165,11 +166,21 @@ function SessionRow({
           <span className="session-body">
             <span className="session-title-line">
               <span className="session-title">{displayTitle}</span>
+              {s.worktreePath && (
+                <span
+                  className={`session-worktree-badge${s.worktreeState === "missing" ? " missing" : ""}`}
+                  title={`${s.worktreeState === "missing" ? "Missing worktree" : "Worktree"}: ${s.worktreePath}`}
+                >
+                  {worktreeLabel(s.branch, s.worktreePath)}
+                </span>
+              )}
               {s.pinned && <span className="session-pin" title="Pinned" aria-label="Pinned">◆</span>}
               <LabelDots ids={s.labelIds} labels={labels} />
               <AttentionBadges s={s} />
             </span>
-            <span className="session-sub">{s.status === "working" ? "Agent working" : s.status}</span>
+            <span className="session-sub">
+              {s.worktreeState === "missing" ? "worktree missing" : s.status === "working" ? "Agent working" : s.status}
+            </span>
           </span>
           <span className="session-time">{activityTime(s.updatedAt, relativeTime)}</span>
         </button>

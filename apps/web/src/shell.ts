@@ -6,7 +6,7 @@ import { PERSONAS, applyPersona, pluginOn, type PersonaId } from "./prefs.ts";
 import { getKeymap } from "./hotkeys.ts";
 import { readLastReply, stopSpeaking } from "./voice.tsx";
 import {
-  getState, openPalette, openSettingsPage, setActiveView, setOverlay, toggleRailPlugin,
+  getState, openPalette, openSettingsPage, openWorktreeSessionDialog, setActiveView, setOverlay, toggleRailPlugin,
   type AppView, type RailPlugin,
 } from "./store.ts";
 import {
@@ -79,6 +79,15 @@ export function installShell(): void {
     id: "cmd.new", label: "New session", hint: hintOf("newSession"), group: "Session",
     when: () => !!getState().activeProjectId,
     run: () => { const id = getState().activeProjectId; if (id) void createSession(id); },
+  });
+  registerCommand({
+    id: "cmd.newWorktree", label: "New session in worktree", group: "Session",
+    keywords: ["branch", "isolated", "checkout"],
+    when: () => !!getState().activeProjectId && pluginOn("git"),
+    run: () => {
+      const id = getState().activeProjectId;
+      if (id) openWorktreeSessionDialog(id);
+    },
   });
   registerCommand({
     id: "cmd.fork", label: "Fork session", group: "Session",

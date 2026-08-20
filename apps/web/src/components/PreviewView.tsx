@@ -38,12 +38,12 @@ export default function PreviewView() {
 
   const refresh = async () => {
     if (!projectId) return;
-    const got = await api.previewGet(projectId);
+    const got = await api.previewGet(projectId, activeSessionId ?? undefined);
     setState(got);
     if (got.url && !urlInput) setUrlInput(got.url);
   };
 
-  useEffect(() => { void refresh(); }, [projectId]);
+  useEffect(() => { void refresh(); }, [projectId, activeSessionId]);
   useEffect(() => { void api.browserCapability().then(setCap); }, []);
   useEffect(() => {
     if (!projectId || state.status !== "starting") return;
@@ -106,7 +106,7 @@ export default function PreviewView() {
     setBusy(true);
     setError("");
     try {
-      const got = await api.previewStart(projectId);
+      const got = await api.previewStart(projectId, undefined, activeSessionId ?? undefined);
       setUrlInput(got.url);
       setState({ url: got.url, status: "starting", port: got.port });
       if (browser) await navigate(got.url);
@@ -119,7 +119,7 @@ export default function PreviewView() {
   const stop = async () => {
     if (!projectId) return;
     setBusy(true);
-    await api.previewStop(projectId).catch(() => {});
+    await api.previewStop(projectId, activeSessionId ?? undefined).catch(() => {});
     await refresh();
     setBusy(false);
   };

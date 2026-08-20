@@ -382,7 +382,7 @@ export const api = {
     jfetch<Project>(`/api/projects/${id}`, json("PATCH", patch)),
 
   listSessions: (projectId: string) => jfetch<SessionProjection[]>(`/api/sessions?projectId=${encodeURIComponent(projectId)}`),
-  createSession: (input: { projectId: string; title?: string; model?: JsonObject; agent?: string }) =>
+  createSession: (input: { projectId: string; title?: string; model?: JsonObject; agent?: string; worktreePath?: string }) =>
     jfetch<SessionRef>("/api/sessions", json("POST", input)),
   getSession: (id: string) => jfetch<SessionProjection>(`/api/sessions/${id}`),
   getEvents: (id: string, afterSeq = 0) =>
@@ -484,62 +484,62 @@ export const api = {
   listAgents: () => jfetch<AgentDescriptor[]>("/api/agents"),
 
   // ---- git (§12) -----------------------------------------------------------
-  gitStatus: (projectId: string) =>
-    jfetch<GitStatus>(`/api/git/status?projectId=${encodeURIComponent(projectId)}`).catch((): GitStatus => ({
+  gitStatus: (projectId: string, sessionId?: string) =>
+    jfetch<GitStatus>(`/api/git/status?projectId=${encodeURIComponent(projectId)}${sessionId ? `&sessionId=${encodeURIComponent(sessionId)}` : ""}`).catch((): GitStatus => ({
       branch: "", ahead: 0, behind: 0, staged: [], unstaged: [], untracked: [], conflicted: [],
     })),
-  gitDiff: (projectId: string, filePath: string, staged?: boolean, ignoreWhitespace?: boolean) =>
+  gitDiff: (projectId: string, filePath: string, staged?: boolean, ignoreWhitespace?: boolean, sessionId?: string) =>
     jfetch<GitDiffResult>(
-      `/api/git/diff?projectId=${encodeURIComponent(projectId)}&path=${encodeURIComponent(filePath)}${staged ? "&staged=true" : ""}${ignoreWhitespace ? "&ignoreWhitespace=true" : ""}`,
+      `/api/git/diff?projectId=${encodeURIComponent(projectId)}&path=${encodeURIComponent(filePath)}${staged ? "&staged=true" : ""}${ignoreWhitespace ? "&ignoreWhitespace=true" : ""}${sessionId ? `&sessionId=${encodeURIComponent(sessionId)}` : ""}`,
     ).catch((): GitDiffResult => ({ path: filePath, diff: "" })),
-  gitShow: (projectId: string, sha: string, ignoreWhitespace?: boolean) =>
+  gitShow: (projectId: string, sha: string, ignoreWhitespace?: boolean, sessionId?: string) =>
     jfetch<{ sha: string; diff: string }>(
-      `/api/git/show?projectId=${encodeURIComponent(projectId)}&sha=${encodeURIComponent(sha)}${ignoreWhitespace ? "&ignoreWhitespace=true" : ""}`,
+      `/api/git/show?projectId=${encodeURIComponent(projectId)}&sha=${encodeURIComponent(sha)}${ignoreWhitespace ? "&ignoreWhitespace=true" : ""}${sessionId ? `&sessionId=${encodeURIComponent(sessionId)}` : ""}`,
     ),
-  gitStage: (projectId: string, paths: string[]) =>
-    jfetch<{ ok: true }>(`/api/git/stage`, json("POST", { projectId, paths })),
-  gitUnstage: (projectId: string, paths: string[]) =>
-    jfetch<{ ok: true }>(`/api/git/unstage`, json("POST", { projectId, paths })),
-  gitDiscard: (projectId: string, paths: string[]) =>
-    jfetch<{ ok: true }>(`/api/git/discard`, json("POST", { projectId, paths })),
-  gitCommit: (projectId: string, message: string) =>
-    jfetch<{ sha: string }>(`/api/git/commit`, json("POST", { projectId, message })),
-  gitCommitMessage: (projectId: string) =>
-    jfetch<{ message: string }>(`/api/git/commit-message`, json("POST", { projectId })).catch(
+  gitStage: (projectId: string, paths: string[], sessionId?: string) =>
+    jfetch<{ ok: true }>(`/api/git/stage`, json("POST", { projectId, paths, ...(sessionId ? { sessionId } : {}) })),
+  gitUnstage: (projectId: string, paths: string[], sessionId?: string) =>
+    jfetch<{ ok: true }>(`/api/git/unstage`, json("POST", { projectId, paths, ...(sessionId ? { sessionId } : {}) })),
+  gitDiscard: (projectId: string, paths: string[], sessionId?: string) =>
+    jfetch<{ ok: true }>(`/api/git/discard`, json("POST", { projectId, paths, ...(sessionId ? { sessionId } : {}) })),
+  gitCommit: (projectId: string, message: string, sessionId?: string) =>
+    jfetch<{ sha: string }>(`/api/git/commit`, json("POST", { projectId, message, ...(sessionId ? { sessionId } : {}) })),
+  gitCommitMessage: (projectId: string, sessionId?: string) =>
+    jfetch<{ message: string }>(`/api/git/commit-message`, json("POST", { projectId, ...(sessionId ? { sessionId } : {}) })).catch(
       (): { message: "" } => ({ message: "" }),
     ),
-  gitBranches: (projectId: string) =>
-    jfetch<GitBranches>(`/api/git/branches?projectId=${encodeURIComponent(projectId)}`).catch(
+  gitBranches: (projectId: string, sessionId?: string) =>
+    jfetch<GitBranches>(`/api/git/branches?projectId=${encodeURIComponent(projectId)}${sessionId ? `&sessionId=${encodeURIComponent(sessionId)}` : ""}`).catch(
       (): GitBranches => ({ current: "", branches: [] }),
     ),
-  gitBranch: (projectId: string, name: string, from?: string) =>
-    jfetch<{ ok: true }>(`/api/git/branch`, json("POST", { projectId, name, from })),
-  gitCheckout: (projectId: string, name: string) =>
-    jfetch<{ ok: true }>(`/api/git/checkout`, json("POST", { projectId, name })),
-  gitLog: (projectId: string, limit = 20) =>
-    jfetch<GitLogEntry[]>(`/api/git/log?projectId=${encodeURIComponent(projectId)}&limit=${limit}`).catch(
+  gitBranch: (projectId: string, name: string, from?: string, sessionId?: string) =>
+    jfetch<{ ok: true }>(`/api/git/branch`, json("POST", { projectId, name, from, ...(sessionId ? { sessionId } : {}) })),
+  gitCheckout: (projectId: string, name: string, sessionId?: string) =>
+    jfetch<{ ok: true }>(`/api/git/checkout`, json("POST", { projectId, name, ...(sessionId ? { sessionId } : {}) })),
+  gitLog: (projectId: string, limit = 20, sessionId?: string) =>
+    jfetch<GitLogEntry[]>(`/api/git/log?projectId=${encodeURIComponent(projectId)}&limit=${limit}${sessionId ? `&sessionId=${encodeURIComponent(sessionId)}` : ""}`).catch(
       (): GitLogEntry[] => [],
     ),
-  gitGraph: (projectId: string, limit = 40, skip = 0) =>
-    jfetch<GitGraphEntry[]>(`/api/git/graph?projectId=${encodeURIComponent(projectId)}&limit=${limit}&skip=${skip}`).catch(
+  gitGraph: (projectId: string, limit = 40, skip = 0, sessionId?: string) =>
+    jfetch<GitGraphEntry[]>(`/api/git/graph?projectId=${encodeURIComponent(projectId)}&limit=${limit}&skip=${skip}${sessionId ? `&sessionId=${encodeURIComponent(sessionId)}` : ""}`).catch(
       (): GitGraphEntry[] => [],
     ),
-  gitFolder: (projectId: string, folder: string, op: "stage" | "unstage" | "discard") =>
-    jfetch<{ ok: true }>(`/api/git/folder`, json("POST", { projectId, folder, op })),
-  gitStashes: (projectId: string) =>
-    jfetch<GitStash[]>(`/api/git/stashes?projectId=${encodeURIComponent(projectId)}`).catch((): GitStash[] => []),
-  gitStashPush: (projectId: string, message?: string) =>
-    jfetch<{ created: boolean }>(`/api/git/stash`, json("POST", { projectId, message })),
-  gitStashApply: (projectId: string, ref: string) =>
-    jfetch<{ ok: true }>(`/api/git/stash/apply`, json("POST", { projectId, ref })),
-  gitStashDrop: (projectId: string, ref: string) =>
-    jfetch<{ ok: true }>(`/api/git/stash/drop`, json("POST", { projectId, ref })),
-  gitFetch: (projectId: string, remote = "origin") =>
-    jfetch<{ ok: true }>(`/api/git/fetch`, json("POST", { projectId, remote })),
-  gitPull: (projectId: string, remote = "origin") =>
-    jfetch<{ ok: true }>(`/api/git/pull`, json("POST", { projectId, remote })),
-  gitPush: (projectId: string, remote = "origin") =>
-    jfetch<{ ok: true }>(`/api/git/push`, json("POST", { projectId, remote })),
+  gitFolder: (projectId: string, folder: string, op: "stage" | "unstage" | "discard", sessionId?: string) =>
+    jfetch<{ ok: true }>(`/api/git/folder`, json("POST", { projectId, folder, op, ...(sessionId ? { sessionId } : {}) })),
+  gitStashes: (projectId: string, sessionId?: string) =>
+    jfetch<GitStash[]>(`/api/git/stashes?projectId=${encodeURIComponent(projectId)}${sessionId ? `&sessionId=${encodeURIComponent(sessionId)}` : ""}`).catch((): GitStash[] => []),
+  gitStashPush: (projectId: string, message?: string, sessionId?: string) =>
+    jfetch<{ created: boolean }>(`/api/git/stash`, json("POST", { projectId, message, ...(sessionId ? { sessionId } : {}) })),
+  gitStashApply: (projectId: string, ref: string, sessionId?: string) =>
+    jfetch<{ ok: true }>(`/api/git/stash/apply`, json("POST", { projectId, ref, ...(sessionId ? { sessionId } : {}) })),
+  gitStashDrop: (projectId: string, ref: string, sessionId?: string) =>
+    jfetch<{ ok: true }>(`/api/git/stash/drop`, json("POST", { projectId, ref, ...(sessionId ? { sessionId } : {}) })),
+  gitFetch: (projectId: string, remote = "origin", sessionId?: string) =>
+    jfetch<{ ok: true }>(`/api/git/fetch`, json("POST", { projectId, remote, ...(sessionId ? { sessionId } : {}) })),
+  gitPull: (projectId: string, remote = "origin", sessionId?: string) =>
+    jfetch<{ ok: true }>(`/api/git/pull`, json("POST", { projectId, remote, ...(sessionId ? { sessionId } : {}) })),
+  gitPush: (projectId: string, remote = "origin", sessionId?: string) =>
+    jfetch<{ ok: true }>(`/api/git/push`, json("POST", { projectId, remote, ...(sessionId ? { sessionId } : {}) })),
 
   // ---- worktrees (§12) -----------------------------------------------------
   listWorktrees: (projectId: string) =>
@@ -802,14 +802,14 @@ export const api = {
     jfetch<{ ok: boolean }>(`/api/snippets`, json("DELETE", { projectId, scope, alias })),
 
   // ---- M3: preview ---------------------------------------------------------
-  previewStart: (projectId: string, command?: string) =>
-    jfetch<{ url: string; port: number }>(`/api/preview/start`, json("POST", { projectId, command })),
-  previewGet: (projectId: string) =>
-    jfetch<PreviewState>(`/api/preview?projectId=${encodeURIComponent(projectId)}`).catch(
+  previewStart: (projectId: string, command?: string, sessionId?: string) =>
+    jfetch<{ url: string; port: number }>(`/api/preview/start`, json("POST", { projectId, command, ...(sessionId ? { sessionId } : {}) })),
+  previewGet: (projectId: string, sessionId?: string) =>
+    jfetch<PreviewState>(`/api/preview?projectId=${encodeURIComponent(projectId)}${sessionId ? `&sessionId=${encodeURIComponent(sessionId)}` : ""}`).catch(
       (): PreviewState => ({ url: null, status: "off" }),
     ),
-  previewStop: (projectId: string) =>
-    jfetch<{ ok: true }>(`/api/preview/stop`, json("POST", { projectId })),
+  previewStop: (projectId: string, sessionId?: string) =>
+    jfetch<{ ok: true }>(`/api/preview/stop`, json("POST", { projectId, ...(sessionId ? { sessionId } : {}) })),
 
   // ---- controlled browser (WP14) ---------------------------------------------
   browserCapability: () =>

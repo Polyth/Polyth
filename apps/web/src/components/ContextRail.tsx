@@ -166,7 +166,7 @@ export default function ContextRail() {
   useEscape(picker, () => setPicker(false));
 
   const gitOn = prefs.plugins.includes("git");
-  const gitStatus = useGitStatus(gitOn ? projectId : null, model.turn?.status === "working");
+  const gitStatus = useGitStatus(gitOn ? projectId : null, model.turn?.status === "working", session?.id);
   const changeCount = gitStatus ? gitChangedFiles(gitStatus).length : 0;
 
   const panels = PANELS.filter((p) => prefs.plugins.includes(p.plugin));

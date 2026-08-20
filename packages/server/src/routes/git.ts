@@ -1,20 +1,36 @@
 // HTTP face of the git + worktrees plugin (PLAN §12).
-import type { ProjectService } from "@polyth/contracts";
+import type { ProjectService, SessionService } from "@polyth/contracts";
 import { pathsUnder, type GitService } from "@polyth/git";
 import type { RouteHandler } from "../http.ts";
 
 export function gitRoutes(deps: {
   projects: ProjectService;
+  sessions: SessionService;
   git: GitService;
   /** small-model commit message (server owns the LLM seam, the git plugin does not) */
   commitMessage(root: string): Promise<string>;
 }): RouteHandler {
   const { git } = deps;
-  const rootOf = async (projectId: string | null | undefined): Promise<string> => {
+  const projectRootOf = async (projectId: string | null | undefined): Promise<string> => {
     if (!projectId) throw Object.assign(new Error("projectId required"), { code: "invalid-path" });
     const project = await deps.projects.get(String(projectId));
     if (!project) throw Object.assign(new Error("unknown project"), { code: "not-found" });
     return project.path;
+  };
+  const rootOf = async (
+    projectId: string | null | undefined,
+    sessionId?: string | null,
+  ): Promise<string> => {
+    const projectRoot = await projectRootOf(projectId);
+    if (!sessionId) return projectRoot;
+    const session = await deps.sessions.snapshot(sessionId);
+    if (session.projectId !== projectId) {
+      throw Object.assign(new Error("session does not belong to this project"), { code: "invalid-input" });
+    }
+    if (session.worktreeState === "missing") {
+      throw Object.assign(new Error("session worktree is missing"), { code: "not-found" });
+    }
+    return session.worktreePath ?? projectRoot;
   };
   const paths = (b: Record<string, unknown>): string[] =>
     Array.isArray(b.paths) ? b.paths.map((p) => String(p)) : [];
@@ -24,7 +40,7 @@ export function gitRoutes(deps: {
     const q = (k: string) => url.searchParams.get(k);
 
     if (path === "/api/git/status" && method === "GET") {
-      const root = await rootOf(q("projectId"));
+      const root = await rootOf(q("projectId"), q("sessionId"));
       if (!(await git.isRepo(root))) {
         json(200, { branch: null, ahead: 0, behind: 0, staged: [], unstaged: [], untracked: [], conflicted: [], clean: true, isRepo: false });
         return true;
@@ -33,7 +49,7 @@ export function gitRoutes(deps: {
       return true;
     }
     if (path === "/api/git/diff" && method === "GET") {
-      const root = await rootOf(q("projectId"));
+      const root = await rootOf(q("projectId"), q("sessionId"));
       json(200, await git.diff(root, {
         ...(q("path") ? { path: q("path")! } : {}),
         staged: q("staged") === "true",
@@ -42,19 +58,19 @@ export function gitRoutes(deps: {
       return true;
     }
     if (path === "/api/git/show" && method === "GET") {
-      const root = await rootOf(q("projectId"));
+      const root = await rootOf(q("projectId"), q("sessionId"));
       const sha = q("sha");
       if (!sha) throw Object.assign(new Error("sha required"), { code: "invalid-input" });
       json(200, await git.show(root, sha, { ignoreWhitespace: q("ignoreWhitespace") === "true" }));
       return true;
     }
     if (path === "/api/git/log" && method === "GET") {
-      const root = await rootOf(q("projectId"));
+      const root = await rootOf(q("projectId"), q("sessionId"));
       json(200, await git.log(root, Number(q("limit") ?? 20)));
       return true;
     }
     if (path === "/api/git/graph" && method === "GET") {
-      const root = await rootOf(q("projectId"));
+      const root = await rootOf(q("projectId"), q("sessionId"));
       json(200, await git.graph(root, {
         limit: Number(q("limit") ?? 40),
         skip: Number(q("skip") ?? 0),
@@ -62,24 +78,27 @@ export function gitRoutes(deps: {
       return true;
     }
     if (path === "/api/git/branches" && method === "GET") {
-      const root = await rootOf(q("projectId"));
+      const root = await rootOf(q("projectId"), q("sessionId"));
       json(200, await git.branches(root));
       return true;
     }
     if (path === "/api/git/stashes" && method === "GET") {
-      const root = await rootOf(q("projectId"));
+      const root = await rootOf(q("projectId"), q("sessionId"));
       json(200, await git.stashList(root));
       return true;
     }
     if (path === "/api/worktrees" && method === "GET") {
-      const root = await rootOf(q("projectId"));
+      const root = await projectRootOf(q("projectId"));
       json(200, (await git.isRepo(root)) ? await git.worktrees.list(root) : []);
       return true;
     }
 
     if (method !== "POST") return false;
     const b = await body();
-    const root = await rootOf(b.projectId as string | undefined);
+    const projectId = String(b.projectId ?? "");
+    const root = path.startsWith("/api/worktrees")
+      ? await projectRootOf(projectId)
+      : await rootOf(projectId, b.sessionId ? String(b.sessionId) : undefined);
 
     switch (path) {
       case "/api/git/stage": await git.stage(root, paths(b)); break;
@@ -127,6 +146,7 @@ export function gitRoutes(deps: {
       }
       case "/api/worktrees/remove":
         await git.worktrees.remove(root, { path: String(b.path ?? ""), deleteBranch: b.deleteBranch === true });
+        await deps.sessions.markWorktreeMissing?.(projectId, String(b.path ?? ""));
         break;
       default:
         return false;

@@ -30,7 +30,10 @@ function fakeRuntime(): AgentRuntime {
   };
 }
 
-function makeService() {
+function makeService(opts: {
+  worktrees?: { list(root: string): Promise<Array<{ path: string; branch: string | null }>> };
+  onRuntimeCwd?: (cwd: string | undefined) => void;
+} = {}) {
   const dir = mkdtempSync(join(tmpdir(), "polyth-orgsvc-"));
   const store = createStore(join(dir, "s.db"));
   const project: Project = { id: "p1", path: dir, name: "p", createdAt: 1 };
@@ -45,7 +48,13 @@ function makeService() {
   const broadcast: Broadcaster = { event: () => {}, projection: () => {} };
   const sessions = createSessionService({
     store, projects, permissions, broadcast, queue: store, org: store,
-    runtimes: { forProject: async () => fakeRuntime() },
+    ...(opts.worktrees ? { worktrees: opts.worktrees } : {}),
+    runtimes: {
+      forProject: async (_projectId, cwd) => {
+        opts.onRuntimeCwd?.(cwd);
+        return fakeRuntime();
+      },
+    },
   });
   return { sessions, store, dir };
 }
@@ -102,6 +111,36 @@ test("pin organization persists on projections without adding model history", as
   await sessions.organize!(id, { pinned: null });
   assert.equal((await sessions.snapshot(id)).pinned, undefined);
   assert.equal((await store.events(id)).length, before.length);
+});
+
+test("worktree session validates project ownership, persists branch metadata, and uses the worktree cwd", async () => {
+  let runtimeCwd: string | undefined;
+  let linkedPath = "";
+  const { sessions, store, dir } = makeService({
+    onRuntimeCwd: (cwd) => { runtimeCwd = cwd; },
+    worktrees: {
+      list: async () => [{ path: linkedPath, branch: "feat/isolated" }],
+    },
+  });
+  linkedPath = join(dir, "linked");
+
+  const { id } = await sessions.create({ projectId: "p1", title: "Isolated", worktreePath: linkedPath });
+  const projection = await sessions.snapshot(id);
+  assert.equal(runtimeCwd, linkedPath);
+  assert.equal(projection.worktreePath, linkedPath);
+  assert.equal(projection.worktreeId, linkedPath);
+  assert.equal(projection.branch, "feat/isolated");
+  assert.equal(projection.worktreeState, "ready");
+
+  const eventCount = (await store.events(id)).length;
+  await sessions.markWorktreeMissing!("p1", linkedPath);
+  assert.equal((await sessions.snapshot(id)).worktreeState, "missing");
+  assert.equal((await store.events(id)).length, eventCount, "worktree state is projection metadata");
+
+  await assert.rejects(
+    () => sessions.create({ projectId: "p1", worktreePath: join(dir, "..", "foreign") }),
+    (error: Error & { code?: string }) => error.code === "invalid-input",
+  );
 });
 
 test("archive/restore are idempotent: repeats do not append duplicate events", async () => {

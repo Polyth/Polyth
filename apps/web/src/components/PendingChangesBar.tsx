@@ -6,8 +6,9 @@ import { openChanges, useStore } from "../store.ts";
 
 export default function PendingChangesBar({ model }: { model: RenderModel }) {
   const projectId = useStore((state) => state.activeProjectId);
+  const sessionId = useStore((state) => state.activeSessionId);
   const working = model.turn?.status === "working";
-  const status = useGitStatus(projectId, working);
+  const status = useGitStatus(projectId, working, sessionId);
   const selected = useMemo(
     () => selectPendingChanges(status, model.changedFiles),
     [status, model.changedFiles],

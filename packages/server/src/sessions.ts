@@ -1,6 +1,7 @@
 // SessionService: canonical session orchestration.
 // Runtime events -> appended to durable session log FIRST -> then broadcast/projections.
 import { randomUUID } from "node:crypto";
+import { resolve } from "node:path";
 import type {
   AgentProfile, AgentRuntime, CreateSessionInput, DeliveryMode, JsonObject, QueueItemDto, RuntimeEvent,
   SendResult, SessionEvent, SessionFolderDto, SessionOrganizePatch, SessionProjection, SessionRef,
@@ -60,6 +61,10 @@ export function createSessionService(deps: {
   expand?: ExpandInput;
   queue?: QueueStore;
   org?: OrgStore;
+  /** Authoritative git worktree inventory used to validate session cwd overrides. */
+  worktrees?: {
+    list(root: string): Promise<Array<{ path: string; branch: string | null }>>;
+  };
   /** Agent-profile lookup (WP8) — profiles resolve to explicit model/agent at send time. */
   profiles?: { profileGet(id: string): Promise<AgentProfile | undefined> };
   /** Global behavior instructions (WP9): revision+digest logged before a turn
@@ -419,6 +424,16 @@ export function createSessionService(deps: {
     async create(input: CreateSessionInput): Promise<SessionRef> {
       const project = await projects.get(input.projectId);
       if (!project) throw Object.assign(new Error("project not found"), { code: "not-found" });
+      let worktree: { path: string; branch: string | null } | undefined;
+      if (input.worktreePath && deps.worktrees) {
+        const requested = resolve(input.worktreePath);
+        worktree = (await deps.worktrees.list(project.path))
+          .find((candidate) => resolve(candidate.path) === requested);
+        if (!worktree) {
+          throw Object.assign(new Error("worktree does not belong to this project"), { code: "invalid-input" });
+        }
+        input = { ...input, worktreePath: worktree.path };
+      }
       const sessionId = randomUUID();
       const cwd = input.worktreePath ?? project.path;
       const rt = await runtimes.forProject(project.id, cwd);
@@ -429,7 +444,12 @@ export function createSessionService(deps: {
         id: sessionId, projectId: project.id,
         ...(input.parentId ? { parentId: input.parentId } : {}),
         title: input.title || "New session", status: "idle",
-        ...(input.worktreePath ? { worktreePath: input.worktreePath } : {}),
+        ...(input.worktreePath ? {
+          worktreePath: input.worktreePath,
+          worktreeId: input.worktreePath,
+          worktreeState: "ready" as const,
+          ...(worktree?.branch ? { branch: worktree.branch } : {}),
+        } : {}),
         ...(input.model ? { model: input.model } : {}),
         ...(input.agent ? { agent: input.agent } : {}),
         backendSessionId,
@@ -438,6 +458,7 @@ export function createSessionService(deps: {
       await store.upsertProjection(projection);
       await appendAndBroadcast(sessionId, "session/created", {
         title: projection.title, projectId: project.id,
+        ...(input.worktreePath ? { worktreePath: input.worktreePath } : {}),
         ...(input.model ? { model: input.model as unknown as JsonObject } : {}),
         ...(input.agent ? { agent: input.agent } : {}),
       }, { ignorable: true });
@@ -736,6 +757,20 @@ export function createSessionService(deps: {
       if (patch.pinned === null) delete merged.pinned;
       await store.upsertProjection(merged);
       broadcast.projection(merged);
+    },
+
+    async markWorktreeMissing(projectId, worktreePath) {
+      const missingPath = resolve(worktreePath);
+      for (const projection of await store.projections(projectId)) {
+        if (!projection.worktreePath || resolve(projection.worktreePath) !== missingPath) continue;
+        const next: SessionProjection = {
+          ...projection,
+          worktreeState: "missing",
+          updatedAt: Date.now(),
+        };
+        await store.upsertProjection(next);
+        broadcast.projection(next);
+      }
     },
 
     async list(projectId) {

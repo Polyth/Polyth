@@ -6,6 +6,7 @@ import { displaySessionTitle, isPlaceholderTitle, modelToMarkdown, titleFromProm
 import { friendlyError } from "./settings.ts";
 import * as store from "./store.ts";
 import type { JsonObject } from "@polyth/contracts";
+import { suggestWorktreeBranch } from "./worktreeSessions.ts";
 
 let sync: SyncClient | null = null;
 let lastSubSession: string | undefined;
@@ -110,8 +111,41 @@ export async function createProject(path: string, name?: string): Promise<void> 
   store.activateProject(p.id);
 }
 
-export async function createSession(projectId: string, opts?: { model?: JsonObject; agent?: string }): Promise<void> {
-  const { id: sessionId } = await api.createSession({ projectId, ...opts });
+export interface CreateSessionOptions {
+  title?: string;
+  model?: JsonObject;
+  agent?: string;
+  worktreePath?: string;
+}
+
+async function createDefaultWorktree(projectId: string, title?: string): Promise<string> {
+  const [worktrees, branches] = await Promise.all([
+    api.listWorktrees(projectId),
+    api.gitBranches(projectId),
+  ]);
+  const taken = [
+    ...worktrees.map((worktree) => worktree.branch).filter((branch): branch is string => !!branch),
+    ...branches.branches.map((branch) => branch.name),
+  ];
+  const branch = suggestWorktreeBranch(
+    store.getState().settings.branchTemplate,
+    title || "session",
+    taken,
+  );
+  return (await api.createWorktree(projectId, branch)).path;
+}
+
+export async function createSession(projectId: string, opts: CreateSessionOptions = {}): Promise<void> {
+  const project = store.getState().projects.find((candidate) => candidate.id === projectId);
+  const worktreePath = opts.worktreePath
+    ?? (project?.defaults?.worktreeBehavior === "fresh-worktree"
+      ? await createDefaultWorktree(projectId, opts.title)
+      : undefined);
+  const { id: sessionId } = await api.createSession({
+    projectId,
+    ...opts,
+    ...(worktreePath ? { worktreePath } : {}),
+  });
   await openSession(sessionId);
   void refreshSessions(projectId);
 }

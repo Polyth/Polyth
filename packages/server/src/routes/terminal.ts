@@ -5,13 +5,16 @@
 import { WebSocketServer, WebSocket } from "ws";
 import type { Server } from "node:http";
 import type { IncomingMessage } from "node:http";
+import { resolve } from "node:path";
 import type { ProjectService, SessionEvent, SessionPersistence, JsonObject } from "@polyth/contracts";
+import type { SessionService } from "@polyth/contracts";
 import type { TerminalService } from "@polyth/terminal";
 import type { RouteHandler } from "../http.ts";
 import type { Broadcaster } from "../sessions.ts";
 
 export function terminalRoutes(deps: {
   projects: ProjectService;
+  sessions: SessionService;
   terminals: TerminalService;
   /** append + broadcast; only used when a terminal is spawned from a session context */
   events?: { append(sessionId: string, type: string, data: JsonObject): Promise<SessionEvent> };
@@ -46,7 +49,22 @@ export function terminalRoutes(deps: {
       if (!projectId) throw Object.assign(new Error("projectId required"), { code: "invalid-path" });
       const project = await deps.projects.get(projectId);
       if (!project) throw Object.assign(new Error("unknown project"), { code: "not-found" });
-      const cwd = b.cwd ? String(b.cwd) : project.path; // UI passes a session's worktreePath here
+      let cwd = project.path;
+      if (b.sessionId) {
+        const session = await deps.sessions.snapshot(String(b.sessionId));
+        if (session.projectId !== projectId) {
+          throw Object.assign(new Error("session does not belong to this project"), { code: "invalid-input" });
+        }
+        if (session.worktreeState === "missing") {
+          throw Object.assign(new Error("session worktree is missing"), { code: "not-found" });
+        }
+        cwd = session.worktreePath ?? project.path;
+        if (b.cwd && resolve(String(b.cwd)) !== resolve(cwd)) {
+          throw Object.assign(new Error("terminal cwd does not match the session workspace"), { code: "invalid-path" });
+        }
+      } else if (b.cwd && resolve(String(b.cwd)) !== resolve(project.path)) {
+        throw Object.assign(new Error("terminal cwd requires a matching session"), { code: "invalid-path" });
+      }
       const { id } = await terminals.create({
         projectId,
         cwd,

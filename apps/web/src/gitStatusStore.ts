@@ -11,11 +11,15 @@ interface StatusEntry {
 
 const entries = new Map<string, StatusEntry>();
 
-function entry(projectId: string): StatusEntry {
-  let value = entries.get(projectId);
+const contextKey = (projectId: string, sessionId?: string | null): string =>
+  `${projectId}\0${sessionId ?? ""}`;
+
+function entry(projectId: string, sessionId?: string | null): StatusEntry {
+  const key = contextKey(projectId, sessionId);
+  let value = entries.get(key);
   if (!value) {
     value = { status: null, listeners: new Set(), inFlight: null, polling: 0, timer: null };
-    entries.set(projectId, value);
+    entries.set(key, value);
   }
   return value;
 }
@@ -25,10 +29,10 @@ function notify(value: StatusEntry): void {
 }
 
 /** Shared, deduplicated status fetch used by GitView, the rail, and the composer bar. */
-export function refreshGitStatus(projectId: string): Promise<GitStatus | null> {
-  const value = entry(projectId);
+export function refreshGitStatus(projectId: string, sessionId?: string | null): Promise<GitStatus | null> {
+  const value = entry(projectId, sessionId);
   if (value.inFlight) return value.inFlight;
-  value.inFlight = api.gitStatus(projectId)
+  value.inFlight = api.gitStatus(projectId, sessionId ?? undefined)
     .then((status) => {
       value.status = status;
       notify(value);
@@ -45,11 +49,11 @@ export function refreshGitStatus(projectId: string): Promise<GitStatus | null> {
   return value.inFlight;
 }
 
-function beginPolling(projectId: string): () => void {
-  const value = entry(projectId);
+function beginPolling(projectId: string, sessionId?: string | null): () => void {
+  const value = entry(projectId, sessionId);
   value.polling += 1;
   if (!value.timer) {
-    value.timer = setInterval(() => void refreshGitStatus(projectId), 2_500);
+    value.timer = setInterval(() => void refreshGitStatus(projectId, sessionId), 2_500);
   }
   return () => {
     value.polling = Math.max(0, value.polling - 1);
@@ -60,25 +64,25 @@ function beginPolling(projectId: string): () => void {
   };
 }
 
-export function useGitStatus(projectId: string | null, poll: boolean): GitStatus | null {
+export function useGitStatus(projectId: string | null, poll: boolean, sessionId?: string | null): GitStatus | null {
   const subscribe = useCallback((listener: () => void) => {
     if (!projectId) return () => {};
-    const value = entry(projectId);
+    const value = entry(projectId, sessionId);
     value.listeners.add(listener);
     return () => value.listeners.delete(listener);
-  }, [projectId]);
-  const snapshot = useCallback(() => projectId ? entry(projectId).status : null, [projectId]);
+  }, [projectId, sessionId]);
+  const snapshot = useCallback(() => projectId ? entry(projectId, sessionId).status : null, [projectId, sessionId]);
   const status = useSyncExternalStore(subscribe, snapshot, snapshot);
 
   useEffect(() => {
     if (!projectId) return;
-    void refreshGitStatus(projectId);
-  }, [projectId]);
+    void refreshGitStatus(projectId, sessionId);
+  }, [projectId, sessionId]);
 
   useEffect(() => {
     if (!projectId || !poll) return;
-    return beginPolling(projectId);
-  }, [projectId, poll]);
+    return beginPolling(projectId, sessionId);
+  }, [projectId, sessionId, poll]);
 
   return status;
 }

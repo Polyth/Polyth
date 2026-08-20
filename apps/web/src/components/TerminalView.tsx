@@ -20,6 +20,7 @@ function wsUrl(id: string): string {
 export default function TerminalView() {
   const projectId = useStore((s) => s.activeProjectId);
   const sessionId = useStore((s) => s.activeSessionId);
+  const session = useStore((s) => s.sessions.find((candidate) => candidate.id === s.activeSessionId) ?? null);
   const [tabs, setTabs] = useState<Tab[]>([]);
   const [active, setActive] = useState<string | null>(null);
   const [line, setLine] = useState("");
@@ -47,6 +48,7 @@ export default function TerminalView() {
     if (!projectId) return;
     const { terminalId } = await api.createTerminal(projectId, {
       ...(sessionId ? { sessionId } : {}),
+      ...(session?.worktreePath ? { cwd: session.worktreePath } : {}),
       ...(cmd ? { cmd } : {}),
       cols: 120,
       rows: 32,

@@ -28,7 +28,7 @@ packages/session (node:sqlite WAL: events + projections + queue/org/profiles)
 | `permissions` | Monotonic fail-closed rule engine; scopes user/project/session; deny beats allow; "always" persists a rule at the chosen scope. |
 | `goals` | Objective attach/audit loop: small-model auditor verdicts (`keep`/`done`/`stuck`), budgets, auto-continuation, pause/resume; rehydrates from the event log after restart. |
 | `files` | Path-jailed file service: tree/stat/read (revision = mtime+size), revision-guarded `write` (stale `baseRevision` → `conflict`), binary-overwrite refusal, mkdir/rename/delete/upload, scored file search (shared with palette + mentions). |
-| `git` | Porcelain wrapper: status/diff/show/stage/unstage/discard/commit/log/graph/branches/checkout/stash/fetch/pull/push/worktrees, diffHead/diffRange for review flows. |
+| `git` | Porcelain wrapper: status/diff/show/stage/unstage/discard/commit/log/graph/branches/checkout/stash/fetch/pull/push/worktrees, diffHead/diffRange for review flows. Session-scoped Git routes resolve an owned worktree cwd server-side. |
 | `commands` | Slash commands + `#alias` snippets: project (`.agents/commands`) and user scopes, `$ARGUMENTS`/`@file`/`!cmd` template expansion, CRUD for the settings UI. |
 | `terminal` | PTY sessions (`node-pty` when present) with create/list/close; `/ws/terminal/:id` byte stream. |
 | `preview` | Dev-server lifecycle per project: script detection, `PORT` injection, status events, URL for the iframe preview. |
@@ -58,6 +58,7 @@ statically by the server with SPA fallback.
   usage service, browser/dictation services, the `routes` array, HTTP+WS attach, shutdown.
 - `sessions.ts` — canonical session service: create/fork/archive/restore/rename/organize
   (folder/labels plus projection-only pin positions),
+  authoritative worktree-path validation + branch/state projection metadata,
   send with **delivery admission** (`normal` | `steer` | `queue` | `interrupt`,
   steer falls back to queue with `delivery/fallback-queued`), queue CRUD + dispatch,
   runtime event → durable log translation, permission preview enrichment, question/permission
@@ -95,8 +96,9 @@ Feature routes: `/api/folders`, `/api/labels`, `/api/search/workspaces`,
 `/api/search/sessions` (metadata + transcript snippets), `/api/files/*`
 (tree/stat/read/raw/write/mkdir/rename/delete/upload/search), `/api/commands`,
 `/api/snippets`, `/api/git/*` (status/diff/show/stage/unstage/discard/commit/commit-message/
-log/graph/branch(es)/checkout/folder/stash/stashes/fetch/pull/push), `/api/worktrees` (+`/remove`), `/api/terminals`,
-`/api/preview` (+start/stop), `/api/browser/*` (sessions/capability/approvals),
+log/graph/branch(es)/checkout/folder/stash/stashes/fetch/pull/push; optional owned
+`sessionId` selects its worktree), `/api/worktrees` (+`/remove`), `/api/terminals`,
+`/api/preview` (+start/stop; optional owned `sessionId` selects its worktree), `/api/browser/*` (sessions/capability/approvals),
 `/api/dictation` (+capability), `/api/multiruns`, `/api/fusions`, `/api/walkthroughs`,
 `/api/schedule` (+preview/loops/loops/rescan), `/api/usage/quotas` (+refresh),
 `/api/knowledge`, `/api/github/*` (status/repo/issues/prs/pr/checks/comments/diff/files),
@@ -177,7 +179,9 @@ a generic collapsed row (never crash).
   rail with context-window estimate and `contextRail.tabs` slot), `CommandPalette` (commands/workspaces/files,
   `Mod+P` file mode), `EditorView` (pane tabs via `workspace/paneStore.ts`, per-tab
   IME-safe autosave, `editor/liveFile.ts` revision/conflict checks, sandboxed
-  Markdown/HTML previews), `GitView`, `GithubView`/`PullRequestView`,
+  Markdown/HTML previews), `GitView` + `WorktreeSessionDialog` (sidebar/Git/palette
+  entry points, existing-or-new worktree selection, branch-template suggestions),
+  `GithubView`/`PullRequestView`,
   `ScheduleView`, `GoalsView`/`GoalStrip`, `MultiRunView`, `FusionView`,
   `WalkthroughView`/`GeneratedWalkthrough`, `PreviewView` (iframe + browser driving),
   `TerminalView`, `SettingsModal`/`SettingsView` + `settings/registry.ts`

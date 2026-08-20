@@ -216,6 +216,8 @@ export interface SessionService {
   rename?(sessionId: string, title: string): Promise<void>;
   /** Folder/label assignment; folder must belong to the session's project. */
   organize?(sessionId: string, patch: SessionOrganizePatch): Promise<void>;
+  /** Projection-only reconciliation after a linked worktree is removed. */
+  markWorktreeMissing?(projectId: string, worktreePath: string): Promise<void>;
   queueList?(sessionId: string): Promise<QueueItemDto[]>;
   queueReorder?(sessionId: string, ids: string[]): Promise<QueueItemDto[]>;
   queueRemove?(sessionId: string, queueId: string): Promise<void>;

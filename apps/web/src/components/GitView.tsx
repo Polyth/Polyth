@@ -4,7 +4,7 @@
 // by content digest and turn Outdated when the source moves on.
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api, type GitBranches, type GitFileEntry, type GitGraphEntry, type GitStash, type Worktree } from "../api.ts";
-import { useStore, setGitBranch, setUiError } from "../store.ts";
+import { openWorktreeSessionDialog, useStore, setGitBranch, setUiError } from "../store.ts";
 import { diffStat } from "../utils.ts";
 import { friendlyError } from "../settings.ts";
 import { layoutGraph, type GraphRow } from "../git/graph.ts";
@@ -64,7 +64,8 @@ function GraphSvg({ row }: { row: GraphRow }) {
 
 export default function GitView() {
   const projectId = useStore((s) => s.activeProjectId);
-  const status = useGitStatus(projectId, false);
+  const sessionId = useStore((s) => s.activeSessionId);
+  const status = useGitStatus(projectId, false, sessionId);
   const [branches, setBranches] = useState<GitBranches>({ current: "", branches: [] });
   const [trees, setTrees] = useState<Worktree[]>([]);
   const [graph, setGraph] = useState<GitGraphEntry[]>([]);
@@ -94,11 +95,11 @@ export default function GitView() {
     if (!projectId) return;
     try {
       const [s, b, w, g, stashRows] = await Promise.all([
-        refreshGitStatus(projectId),
-        api.gitBranches(projectId),
+        refreshGitStatus(projectId, sessionId),
+        api.gitBranches(projectId, sessionId ?? undefined),
         api.listWorktrees(projectId),
-        api.gitGraph(projectId, GRAPH_PAGE, 0),
-        api.gitStashes(projectId),
+        api.gitGraph(projectId, GRAPH_PAGE, 0, sessionId ?? undefined),
+        api.gitStashes(projectId, sessionId ?? undefined),
       ]);
       if (!s) throw new Error("git status unavailable");
       setBranches(b);
@@ -111,7 +112,7 @@ export default function GitView() {
     } catch {
       setLoadError(true);
     }
-  }, [projectId]);
+  }, [projectId, sessionId]);
 
   useEffect(() => { void refresh(); }, [refresh]);
 
@@ -122,16 +123,16 @@ export default function GitView() {
   useEffect(() => {
     if (!projectId || !sel || !status) return;
     const staged = status.staged.some((f) => f.path === sel);
-    void api.gitDiff(projectId, sel, staged, prefs.ignoreWhitespace).then((d) => setDiff(d.diff));
+    void api.gitDiff(projectId, sel, staged, prefs.ignoreWhitespace, sessionId ?? undefined).then((d) => setDiff(d.diff));
     setDraft(null);
-  }, [projectId, sel, status, prefs.ignoreWhitespace]);
+  }, [projectId, sessionId, sel, status, prefs.ignoreWhitespace]);
 
   useEffect(() => {
     if (!projectId || !commitSel) return;
-    void api.gitShow(projectId, commitSel, prefs.ignoreWhitespace)
+    void api.gitShow(projectId, commitSel, prefs.ignoreWhitespace, sessionId ?? undefined)
       .then((result) => setCommitDiff(result.diff))
       .catch((err) => setUiError(friendlyError("Couldn’t load the commit diff", err)));
-  }, [projectId, commitSel, prefs.ignoreWhitespace]);
+  }, [projectId, sessionId, commitSel, prefs.ignoreWhitespace]);
 
   const hunks = useMemo(() => splitHunks(diff), [diff]);
   const graphRows = useMemo(() => layoutGraph(graph), [graph]);
@@ -172,7 +173,7 @@ export default function GitView() {
   const fileComments = comments.filter((c) => c.path === sel);
 
   const loadMoreGraph = async () => {
-    const more = await api.gitGraph(projectId, GRAPH_PAGE, graph.length);
+    const more = await api.gitGraph(projectId, GRAPH_PAGE, graph.length, sessionId ?? undefined);
     setGraph((g) => [...g, ...more]);
     if (more.length < GRAPH_PAGE) setGraphDone(true);
   };
@@ -186,7 +187,7 @@ export default function GitView() {
       ["push", api.gitPush],
     ] as const) {
       try {
-        await action(projectId, "origin");
+        await action(projectId, "origin", sessionId ?? undefined);
         results.push({ step });
       } catch (err) {
         results.push({ step, error: err instanceof Error ? err.message : String(err) });
@@ -203,6 +204,7 @@ export default function GitView() {
         <h1 className="view-title">Git &amp; Worktrees</h1>
         <span className="header-spacer" />
         <button className="small-btn" disabled={busy} onClick={() => void syncRepository()}>Sync</button>
+        <button className="small-btn" onClick={() => openWorktreeSessionDialog(projectId)}>+ Worktree session</button>
         <button className="small-btn" onClick={() => { setShowBranchForm((v) => !v); setShowTreeForm(false); }}>+ Branch</button>
         <button className="small-btn" onClick={() => { setShowTreeForm((v) => !v); setShowBranchForm(false); }}>+ Worktree</button>
       </div>
@@ -220,7 +222,7 @@ export default function GitView() {
         <div className="view-toolbar-row">
           <input value={newBranch} placeholder="new-branch-name" onChange={(e) => setNewBranch(e.target.value)} />
           <button className="small-btn" disabled={busy || !newBranch.trim()}
-            onClick={() => void run(async () => { await api.gitBranch(projectId, newBranch.trim()); setNewBranch(""); setShowBranchForm(false); })}>
+            onClick={() => void run(async () => { await api.gitBranch(projectId, newBranch.trim(), undefined, sessionId ?? undefined); setNewBranch(""); setShowBranchForm(false); })}>
             Create
           </button>
         </div>
@@ -252,13 +254,13 @@ export default function GitView() {
             <button className={`small-btn ${prefs.changesView === "tree" ? "active" : ""}`} onClick={() => setGitPrefs({ changesView: "tree" })}>Tree</button>
             {status && (status.unstaged.length + status.untracked.length) > 0 && (
               <button className="small-btn" disabled={busy}
-                onClick={() => void run(() => api.gitFolder(projectId, "", "stage"))}>
+                onClick={() => void run(() => api.gitFolder(projectId, "", "stage", sessionId ?? undefined))}>
                 Stage all
               </button>
             )}
             {status && status.staged.length > 0 && (
               <button className="small-btn" disabled={busy}
-                onClick={() => void run(() => api.gitFolder(projectId, "", "unstage"))}>
+                onClick={() => void run(() => api.gitFolder(projectId, "", "unstage", sessionId ?? undefined))}>
                 Unstage all
               </button>
             )}
@@ -274,8 +276,8 @@ export default function GitView() {
                   <span className="git-file-path" title={f.origPath ? `${f.origPath} → ${f.path}` : f.path}>{f.path}</span>
                   <span className="git-file-actions" onClick={(event) => event.stopPropagation()}>
                     {f.staged
-                      ? <button className="small-btn" title="Unstage" disabled={busy} onClick={() => void run(() => api.gitUnstage(projectId, [f.path]))}>U</button>
-                      : <button className="small-btn" title="Stage" disabled={busy} onClick={() => void run(() => api.gitStage(projectId, [f.path]))}>S</button>}
+                      ? <button className="small-btn" title="Unstage" disabled={busy} onClick={() => void run(() => api.gitUnstage(projectId, [f.path], sessionId ?? undefined))}>U</button>
+                      : <button className="small-btn" title="Stage" disabled={busy} onClick={() => void run(() => api.gitStage(projectId, [f.path], sessionId ?? undefined))}>S</button>}
                   </span>
                 </div>
               );
@@ -300,15 +302,15 @@ export default function GitView() {
                     <span className="git-file-actions">
                       {files.some((f) => !f.staged && f.status !== "conflicted") && (
                         <button className="small-btn" title="Stage folder" disabled={busy}
-                          onClick={() => void run(() => api.gitFolder(projectId, dir, "stage"))}>S</button>
+                          onClick={() => void run(() => api.gitFolder(projectId, dir, "stage", sessionId ?? undefined))}>S</button>
                       )}
                       {files.some((f) => f.staged) && (
                         <button className="small-btn" title="Unstage folder" disabled={busy}
-                          onClick={() => void run(() => api.gitFolder(projectId, dir, "unstage"))}>U</button>
+                          onClick={() => void run(() => api.gitFolder(projectId, dir, "unstage", sessionId ?? undefined))}>U</button>
                       )}
                       {files.some((f) => !f.staged) && (
                         <button className="small-btn danger-btn" title="Discard folder changes" disabled={busy}
-                          onClick={() => { if (confirmTyped(`discard all changes under ${dir || "the repository root"}`)) void run(() => api.gitFolder(projectId, dir, "discard")); }}>✕</button>
+                          onClick={() => { if (confirmTyped(`discard all changes under ${dir || "the repository root"}`)) void run(() => api.gitFolder(projectId, dir, "discard", sessionId ?? undefined)); }}>✕</button>
                       )}
                     </span>
                   </div>
@@ -323,11 +325,11 @@ export default function GitView() {
                         </span>
                         <span className="git-file-actions" onClick={(e) => e.stopPropagation()}>
                           {f.staged
-                            ? <button className="small-btn" title="Unstage" disabled={busy} onClick={() => void run(() => api.gitUnstage(projectId, [f.path]))}>U</button>
-                            : <button className="small-btn" title="Stage" disabled={busy} onClick={() => void run(() => api.gitStage(projectId, [f.path]))}>S</button>}
+                            ? <button className="small-btn" title="Unstage" disabled={busy} onClick={() => void run(() => api.gitUnstage(projectId, [f.path], sessionId ?? undefined))}>U</button>
+                            : <button className="small-btn" title="Stage" disabled={busy} onClick={() => void run(() => api.gitStage(projectId, [f.path], sessionId ?? undefined))}>S</button>}
                           {!f.staged && f.status !== "untracked" && (
                             <button className="small-btn danger-btn" title="Discard" disabled={busy}
-                              onClick={() => { if (window.confirm(`Discard ${f.path}?`)) void run(() => api.gitDiscard(projectId, [f.path])); }}>✕</button>
+                              onClick={() => { if (window.confirm(`Discard ${f.path}?`)) void run(() => api.gitDiscard(projectId, [f.path], sessionId ?? undefined)); }}>✕</button>
                           )}
                         </span>
                       </div>
@@ -358,7 +360,7 @@ export default function GitView() {
                 <div className="stat-label">{label}</div>
                 {list.map((b) => (
                   <button key={b.name} className="git-branch-row" disabled={busy} title={b.name}
-                    onClick={() => void run(() => api.gitCheckout(projectId, b.name))}>
+                    onClick={() => void run(() => api.gitCheckout(projectId, b.name, sessionId ?? undefined))}>
                     <span className="mono">{b.name}</span>
                   </button>
                 ))}
@@ -377,6 +379,11 @@ export default function GitView() {
               </div>
               <div className="muted" style={{ fontSize: 11 }}>{t.path} · {t.head.slice(0, 7)}</div>
               {!t.isMain && (
+                <button className="small-btn git-wt-session" disabled={busy} onClick={() => openWorktreeSessionDialog(projectId, t.path)}>
+                  New session
+                </button>
+              )}
+              {!t.isMain && (
                 <button className="small-btn danger-btn git-wt-remove" disabled={busy}
                   onClick={() => { if (window.confirm(`Remove worktree ${t.path}?`)) void run(() => api.removeWorktree(projectId, t.path, true)); }}>
                   Remove
@@ -389,7 +396,7 @@ export default function GitView() {
           <div className="view-toolbar-row">
             <input value={stashMessage} placeholder="stash message (optional)" onChange={(event) => setStashMessage(event.target.value)} />
             <button className="small-btn" disabled={busy || all.length === 0}
-              onClick={() => void run(async () => { await api.gitStashPush(projectId, stashMessage.trim() || undefined); setStashMessage(""); setSel(null); })}>
+              onClick={() => void run(async () => { await api.gitStashPush(projectId, stashMessage.trim() || undefined, sessionId ?? undefined); setStashMessage(""); setSel(null); })}>
               Stash
             </button>
           </div>
@@ -397,9 +404,9 @@ export default function GitView() {
             <div className="git-stash-row" key={stash.ref}>
               <span className="mono">{stash.ref}</span>
               <span className="git-subj" title={stash.message}>{stash.message.replace(/^On [^:]+:\s*/, "")}</span>
-              <button className="small-btn" disabled={busy} onClick={() => void run(() => api.gitStashApply(projectId, stash.ref))}>Apply</button>
+              <button className="small-btn" disabled={busy} onClick={() => void run(() => api.gitStashApply(projectId, stash.ref, sessionId ?? undefined))}>Apply</button>
               <button className="small-btn danger-btn" disabled={busy}
-                onClick={() => { if (window.confirm(`Drop ${stash.ref}?`)) void run(() => api.gitStashDrop(projectId, stash.ref)); }}>
+                onClick={() => { if (window.confirm(`Drop ${stash.ref}?`)) void run(() => api.gitStashDrop(projectId, stash.ref, sessionId ?? undefined)); }}>
                 Drop
               </button>
             </div>
@@ -524,12 +531,12 @@ export default function GitView() {
               />
               <div className="commit-row">
                 <button className="small-btn" disabled={generating || busy}
-                  onClick={() => { setGenerating(true); void api.gitCommitMessage(projectId).then((r) => { if (r.message) setCommitMsg(r.message); }).finally(() => setGenerating(false)); }}>
+                  onClick={() => { setGenerating(true); void api.gitCommitMessage(projectId, sessionId ?? undefined).then((r) => { if (r.message) setCommitMsg(r.message); }).finally(() => setGenerating(false)); }}>
                   {generating ? "…" : "✦ Generate with AI"}
                 </button>
                 <button className="primary-btn" style={{ padding: "5px 14px", fontSize: 12 }}
                   disabled={!commitMsg.trim() || busy}
-                  onClick={() => void run(async () => { await api.gitCommit(projectId, commitMsg.trim()); setCommitMsg(""); setSel(null); })}>
+                  onClick={() => void run(async () => { await api.gitCommit(projectId, commitMsg.trim(), sessionId ?? undefined); setCommitMsg(""); setSel(null); })}>
                   Commit
                 </button>
               </div>

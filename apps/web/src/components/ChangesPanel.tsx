@@ -80,8 +80,9 @@ function DiffViewer({ diff }: { diff: string }) {
 
 export default function ChangesPanel() {
   const activeProjectId = useStore((s) => s.activeProjectId);
+  const activeSessionId = useStore((s) => s.activeSessionId);
   const diffPath = useStore((s) => s.gitDiffPath);
-  const status = useGitStatus(activeProjectId, false);
+  const status = useGitStatus(activeProjectId, false, activeSessionId);
   const [worktrees, setWorktrees] = useState(0);
   const [diffText, setDiffText] = useState("");
   const [commitMsg, setCommitMsg] = useState("");
@@ -92,16 +93,16 @@ export default function ChangesPanel() {
   const projectId = activeProjectId;
   const refresh = useCallback(() => {
     if (!projectId) return;
-    void refreshGitStatus(projectId);
+    void refreshGitStatus(projectId, activeSessionId);
     void api.listWorktrees(projectId).then((w) => setWorktrees(w.length));
-  }, [projectId]);
+  }, [projectId, activeSessionId]);
 
   useEffect(() => { refresh(); }, [refresh]);
   useEffect(() => {
     if (!projectId || !diffPath || !status) return;
     const staged = status.staged.some((file) => file.path === diffPath);
-    void api.gitDiff(projectId, diffPath, staged, prefs.ignoreWhitespace).then((result) => setDiffText(result.diff));
-  }, [projectId, diffPath, status, prefs.ignoreWhitespace]);
+    void api.gitDiff(projectId, diffPath, staged, prefs.ignoreWhitespace, activeSessionId ?? undefined).then((result) => setDiffText(result.diff));
+  }, [projectId, activeSessionId, diffPath, status, prefs.ignoreWhitespace]);
 
   if (!projectId) return <div className="empty">Select a project first.</div>;
   if (!status) return <div className="empty">Loading git status…</div>;
@@ -113,21 +114,21 @@ export default function ChangesPanel() {
     setGitDiffPath(fp);
     if (!projectId) return;
     const staged = status.staged.some((f) => f.path === fp);
-    const got = await api.gitDiff(projectId, fp, staged, prefs.ignoreWhitespace);
+    const got = await api.gitDiff(projectId, fp, staged, prefs.ignoreWhitespace, activeSessionId ?? undefined);
     setDiffText(got.diff);
   };
 
   const stage = async (fp: string) => {
     if (!projectId) return;
     setBusy(true);
-    await api.gitStage(projectId, [fp]);
+    await api.gitStage(projectId, [fp], activeSessionId ?? undefined);
     setBusy(false);
     refresh();
   };
   const unstage = async (fp: string) => {
     if (!projectId) return;
     setBusy(true);
-    await api.gitUnstage(projectId, [fp]);
+    await api.gitUnstage(projectId, [fp], activeSessionId ?? undefined);
     setBusy(false);
     refresh();
   };
@@ -135,7 +136,7 @@ export default function ChangesPanel() {
     if (!projectId) return;
     if (!window.confirm(`Discard changes to ${fp}?`)) return;
     setBusy(true);
-    await api.gitDiscard(projectId, [fp]);
+    await api.gitDiscard(projectId, [fp], activeSessionId ?? undefined);
     setBusy(false);
     refresh();
   };
@@ -143,14 +144,14 @@ export default function ChangesPanel() {
     if (!projectId) return;
     setBusy(true);
     const paths = [...status.unstaged, ...status.untracked].map((f) => f.path);
-    if (paths.length > 0) await api.gitStage(projectId, paths);
+    if (paths.length > 0) await api.gitStage(projectId, paths, activeSessionId ?? undefined);
     setBusy(false);
     refresh();
   };
   const commit = async () => {
     if (!projectId || !commitMsg.trim()) return;
     setBusy(true);
-    await api.gitCommit(projectId, commitMsg.trim());
+    await api.gitCommit(projectId, commitMsg.trim(), activeSessionId ?? undefined);
     setCommitMsg("");
     setGitDiffPath(null);
     setBusy(false);
@@ -159,7 +160,7 @@ export default function ChangesPanel() {
   const generate = async () => {
     if (!projectId) return;
     setGenerating(true);
-    const got = await api.gitCommitMessage(projectId);
+    const got = await api.gitCommitMessage(projectId, activeSessionId ?? undefined);
     if (got.message) setCommitMsg(got.message);
     setGenerating(false);
   };
