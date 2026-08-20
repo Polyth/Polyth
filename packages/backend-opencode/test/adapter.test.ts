@@ -5,6 +5,7 @@ import type { RuntimeEvent } from "@polyth/contracts";
 import {
   createOpenCodeClient,
   createOpenCodeRuntimeWithClient,
+  flattenModels,
 } from "../src/index.ts";
 
 interface ScriptedEvent {
@@ -280,6 +281,8 @@ test("models/agents flatten from verified /provider and /agent shapes", async ()
     assert.equal(models[0]?.modelID, "big-pickle");
     assert.equal(models[0]?.context, 128000);
     assert.deepEqual(models[0]?.cost, { input: 0, output: 0 });
+    assert.equal(models[0]?.connected, true, "provider in connected[] is marked connected");
+    assert.equal(models[0]?.providerName, "OpenCode");
     const agents = await runtime.agents();
     assert.equal(agents[1]?.mode, "subagent");
     const caps = await runtime.capabilities();
@@ -372,6 +375,25 @@ test("SSE reconnect dedups by event id", async () => {
   } finally {
     await runtime.dispose();
     fake.server.close();
+  }
+});
+
+test("flattenModels marks connected providers; empty connected[] means all connected", () => {
+  const twoProviders = {
+    all: [
+      { id: "openai", models: { "gpt-x": { id: "gpt-x", name: "GPT X" } } },
+      { id: "ollama", models: { llama: { id: "llama", name: "Llama" } } },
+    ],
+    connected: ["openai"],
+  };
+  const marked = flattenModels(twoProviders);
+  assert.equal(marked.find((m) => m.providerID === "openai")?.connected, true);
+  assert.equal(marked.find((m) => m.providerID === "ollama")?.connected, false);
+
+  // No signal (empty or missing connected[]) → nothing gets hidden.
+  for (const connected of [[], undefined]) {
+    const all = flattenModels({ ...twoProviders, connected });
+    assert.ok(all.every((m) => m.connected === true), "all connected when signal is absent");
   }
 });
 

@@ -40,3 +40,64 @@ test("applyMcp refuses to overwrite a corrupt backend config", async () => {
   await assert.rejects(() => applier.applyMcp([]));
   assert.equal(readFileSync(join(dir, "opencode.json"), "utf8"), "{corrupt", "corrupt file untouched");
 });
+
+test("readConfig returns {} for a missing file and parses an existing one", async () => {
+  const dir = tmp();
+  const applier = createConfigApplier({ configDir: dir });
+  assert.deepEqual(await applier.readConfig(), {});
+  writeFileSync(join(dir, "opencode.json"), JSON.stringify({ theme: "dark", mcp: { ctx: { type: "local" } } }));
+  const cfg = await applier.readConfig();
+  assert.equal(cfg.theme, "dark");
+  assert.deepEqual(cfg.mcp, { ctx: { type: "local" } });
+  assert.equal(applier.configPath(), join(dir, "opencode.json"));
+});
+
+test("readConfig throws on corrupt JSON instead of returning garbage", async () => {
+  const dir = tmp();
+  writeFileSync(join(dir, "opencode.json"), "{corrupt");
+  const applier = createConfigApplier({ configDir: dir });
+  await assert.rejects(() => applier.readConfig());
+});
+
+test("applyProviderVisibility merges disabled_providers and blacklists, preserving other keys", async () => {
+  const dir = tmp();
+  writeFileSync(join(dir, "opencode.json"), JSON.stringify({
+    theme: "dark",
+    mcp: { ctx: { type: "local", command: ["ctx"] } },
+    provider: { openai: { apiKey: "sk-test", baseURL: "https://x" } },
+  }));
+  const applier = createConfigApplier({ configDir: dir });
+  await applier.applyProviderVisibility({
+    disabledProviders: ["ollama", "azure"],
+    blacklists: { openai: ["gpt-3.5-turbo"], anthropic: ["claude-2"] },
+  });
+  const cfg = JSON.parse(readFileSync(join(dir, "opencode.json"), "utf8"));
+  assert.equal(cfg.theme, "dark", "unrelated top-level keys preserved");
+  assert.deepEqual(cfg.mcp, { ctx: { type: "local", command: ["ctx"] } }, "mcp block untouched");
+  assert.deepEqual(cfg.disabled_providers, ["azure", "ollama"]);
+  assert.equal(cfg.provider.openai.apiKey, "sk-test", "unrelated provider keys preserved");
+  assert.equal(cfg.provider.openai.baseURL, "https://x");
+  assert.deepEqual(cfg.provider.openai.blacklist, ["gpt-3.5-turbo"]);
+  assert.deepEqual(cfg.provider.anthropic, { blacklist: ["claude-2"] });
+});
+
+test("applyProviderVisibility clears stale entries when everything is re-enabled", async () => {
+  const dir = tmp();
+  const applier = createConfigApplier({ configDir: dir });
+  await applier.applyProviderVisibility({
+    disabledProviders: ["ollama"],
+    blacklists: { openai: ["gpt-4o-mini"] },
+  });
+  await applier.applyProviderVisibility({ disabledProviders: [], blacklists: {} });
+  const cfg = JSON.parse(readFileSync(join(dir, "opencode.json"), "utf8"));
+  assert.equal("disabled_providers" in cfg, false);
+  assert.equal("provider" in cfg, false, "empty provider entries removed");
+});
+
+test("applyProviderVisibility refuses to overwrite a corrupt backend config", async () => {
+  const dir = tmp();
+  writeFileSync(join(dir, "opencode.json"), "{corrupt");
+  const applier = createConfigApplier({ configDir: dir });
+  await assert.rejects(() => applier.applyProviderVisibility({ disabledProviders: [], blacklists: {} }));
+  assert.equal(readFileSync(join(dir, "opencode.json"), "utf8"), "{corrupt", "corrupt file untouched");
+});

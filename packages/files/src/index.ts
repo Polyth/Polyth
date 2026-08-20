@@ -3,6 +3,9 @@
 import { mkdir, open, readFile, readdir, lstat, realpath, rename as move, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 
+export { browseHost, mkdirHost, resolveHostPath, isBlockedHostPath } from "./browse.ts";
+export type { BrowseEntry, BrowseOptions, BrowseResult } from "./browse.ts";
+
 const MAX_READ = 512 * 1024;
 const BINARY_SCAN = 8 * 1024;
 const MAX_RAW = 20 * 1024 * 1024;

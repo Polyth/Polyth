@@ -124,6 +124,8 @@ interface ProviderList {
       }
     >;
   }>;
+  /** Provider ids with live credentials. Empty/missing = unknown. */
+  connected?: string[];
 }
 
 interface AgentRow {
@@ -148,8 +150,12 @@ interface OpenCodeMessage {
   parts?: Array<{ type?: string; text?: string }>;
 }
 
-const flattenModels = (body: ProviderList): ModelDescriptor[] => {
+export const flattenModels = (body: ProviderList): ModelDescriptor[] => {
   const out: ModelDescriptor[] = [];
+  // When `connected` is empty or missing the backend gave us no signal —
+  // treat every provider as connected rather than hiding everything.
+  const connectedIds = new Set(body.connected ?? []);
+  const hasSignal = connectedIds.size > 0;
   for (const provider of body.all ?? []) {
     const models = provider.models ?? {};
     for (const [key, model] of Object.entries(models)) {
@@ -161,8 +167,10 @@ const flattenModels = (body: ProviderList): ModelDescriptor[] => {
         providerID: provider.id,
         modelID: model.id ?? key,
         name: model.name ?? key,
+        ...(provider.name ? { providerName: provider.name } : {}),
         context: model.limit?.context,
         cost,
+        connected: hasSignal ? connectedIds.has(provider.id) : true,
       });
     }
   }

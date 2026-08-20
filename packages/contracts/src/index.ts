@@ -223,7 +223,7 @@ export interface SessionPersistence {
 
 // ---------------------------------------------------------------- agent runtime (backend seam)
 
-export interface ModelDescriptor { providerID: string; modelID: string; name: string; context?: number; cost?: { input: number; output: number }; capabilities?: string[] }
+export interface ModelDescriptor { providerID: string; modelID: string; name: string; providerName?: string; context?: number; cost?: { input: number; output: number }; capabilities?: string[]; /** Provider has live credentials (backend `connected[]`); undefined = unknown/assume connected. */ connected?: boolean }
 export interface AgentDescriptor { name: string; description?: string; mode: "primary" | "subagent" | "all" }
 export interface RuntimeCapabilities { streaming: boolean; permissions: boolean; questions: boolean; compaction: boolean; subagents: boolean; steering?: boolean }
 export interface RuntimeSession { id: string; title: string; parentId?: string; createdAt: number; updatedAt: number }
