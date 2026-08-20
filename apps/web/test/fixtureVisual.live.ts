@@ -201,7 +201,7 @@ test("P0: Files view of the worktree session shows the attached checkout, not th
     width: 1280, height: 900,
     path: `/p/${PROJECT}/s/${S_WORKTREE}`,
     ready: ".ft-row",
-    storage: { "polyth.activeView": JSON.stringify("files") },
+    storage: { "polyth.activeView": "files" },
   });
 
   // Header subtitle and status bar must carry the worktree branch.
@@ -309,7 +309,7 @@ test("P1: Git changes toolbar and the selected diff heading do not overlap at 14
     width: 1440, height: 900,
     path: `/p/${PROJECT}/s/${S_IDLE}`,
     ready: ".git-changes-head",
-    storage: { "polyth.activeView": JSON.stringify("git") },
+    storage: { "polyth.activeView": "git" },
   });
 
   // Force the flat list, then select the conflicted file (the audit case).
@@ -370,7 +370,7 @@ test("P1: loop rescan diagnostics persist across refresh and dismiss explicitly"
     width: 1280, height: 900,
     path: `/p/${PROJECT}/s/${S_IDLE}`,
     ready: RESCAN,
-    storage: { "polyth.activeView": JSON.stringify("schedule") },
+    storage: { "polyth.activeView": "schedule" },
   });
 
   const errorTexts = () =>
