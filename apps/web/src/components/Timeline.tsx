@@ -8,6 +8,7 @@ import { requestComposerInsert, requestComposerReplace } from "../composerInsert
 import { openSettingsPage, setUiError, useStore } from "../store.ts";
 import { api } from "../api.ts";
 import { TIMELINE_CHUNK, TIMELINE_WINDOW, grownLimit, limitToInclude, windowStart } from "../timelineWindow.ts";
+import { loadTimelineAnchor, saveTimelineAnchor } from "../timelineAnchor.ts";
 import CopyButton from "./CopyButton.tsx";
 import Dialog from "./a11y/Dialog.tsx";
 import AttachmentPills from "./AttachmentPills.tsx";
@@ -303,18 +304,52 @@ export default function Timeline({ model }: { model: RenderModel }) {
   const [limit, setLimit] = useState(TIMELINE_WINDOW);
   const anchor = useRef<{ scrollTop: number; scrollHeight: number } | null>(null);
   const pendingJump = useRef<string | null>(null);
+  // UX-A390: the saved per-session scroll anchor (timelineAnchor.ts). A
+  // non-bottom anchor is re-applied until the replayed content is tall enough
+  // to hold it; a bottom anchor keeps the existing follow behavior.
+  const pendingRestore = useRef<number | null>(null);
+  const saveTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const pendingSave = useRef<{ sessionId: string; atBottom: boolean; scrollTop: number } | null>(null);
+  const anchorSession = useRef<string | null | undefined>(undefined);
+  const flushAnchor = () => {
+    clearTimeout(saveTimer.current);
+    const p = pendingSave.current;
+    pendingSave.current = null;
+    if (p) saveTimelineAnchor(p.sessionId, { atBottom: p.atBottom, scrollTop: p.scrollTop });
+  };
+  if (anchorSession.current !== sessionId) {
+    // Render-time, idempotent reset so the refs are correct before effects run.
+    anchorSession.current = sessionId;
+    flushAnchor(); // a debounced write for the previous session must not vanish
+    const saved = sessionId !== null ? loadTimelineAnchor(sessionId) : null;
+    atBottom.current = saved === null || saved.atBottom;
+    pendingRestore.current = saved !== null && !saved.atBottom ? saved.scrollTop : null;
+  }
 
   useEffect(() => { setLimit(TIMELINE_WINDOW); }, [sessionId]);
+  useEffect(() => flushAnchor, []);
 
   useEffect(() => {
     const el = ref.current;
-    if (el && atBottom.current) el.scrollTop = el.scrollHeight;
-  }, [model.version]);
+    if (!el) return;
+    const target = pendingRestore.current;
+    if (target !== null) {
+      el.scrollTop = target;
+      // Keep pinning until the saved offset is actually reachable.
+      if (el.scrollHeight - el.clientHeight >= target) pendingRestore.current = null;
+      return;
+    }
+    if (atBottom.current) el.scrollTop = el.scrollHeight;
+  }, [model.version, sessionId]);
 
   const onScroll = () => {
     const el = ref.current;
     if (!el) return;
     atBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+    if (sessionId === null || pendingRestore.current !== null) return;
+    pendingSave.current = { sessionId, atBottom: atBottom.current, scrollTop: el.scrollTop };
+    clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(flushAnchor, 150);
   };
 
   const footer = turnFooter(model);

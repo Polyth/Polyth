@@ -28,6 +28,30 @@ test("preset set: six themes, unique stable ids, both appearances, valid tokens"
   }
 });
 
+// UX-A390: WCAG relative luminance / contrast ratio for token pinning.
+const relLum = (hex: string): number => {
+  const c = [1, 3, 5]
+    .map((i) => parseInt(hex.slice(i, i + 2), 16) / 255)
+    .map((v) => (v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4));
+  return 0.2126 * c[0]! + 0.7152 * c[1]! + 0.0722 * c[2]!;
+};
+const contrast = (a: string, b: string): number => {
+  const l1 = Math.max(relLum(a), relLum(b));
+  const l2 = Math.min(relLum(a), relLum(b));
+  return (l1 + 0.05) / (l2 + 0.05);
+};
+
+test("every bundled theme's primary-action pair meets 4.5:1 at both gradient endpoints", () => {
+  // Send (and every accent-ink-on-accent control) paints text over the
+  // accent-hi → accent gradient, so both endpoints must clear 4.5:1.
+  for (const t of PRESET_THEMES) {
+    const overAccent = contrast(t.tokens.accentInk, t.tokens.accent);
+    const overHi = contrast(t.tokens.accentInk, t.tokens.accentHi);
+    assert.ok(overAccent >= 4.5, `${t.id}: accent-ink over accent is ${overAccent.toFixed(2)} < 4.5`);
+    assert.ok(overHi >= 4.5, `${t.id}: accent-ink over accent-hi is ${overHi.toFixed(2)} < 4.5`);
+  }
+});
+
 test("validateTheme accepts a complete theme and reports precise reasons", () => {
   const ok = validateTheme(validTheme());
   assert.ok(ok.ok);

@@ -85,7 +85,8 @@ html.light {
   --muted: #7a7469;
   --faint: #a39c8f;
   --accent: #d9822b;
-  --accent-ink: #fffaf2;
+  /* UX-A390: dark ink keeps Send/primary text ≥4.5:1 over both accent stops */
+  --accent-ink: #241404;
   --accent-hi: #e2954a;
   --accent-wash: rgba(217, 130, 43, 0.12);
   --accent-line: rgba(217, 130, 43, 0.4);

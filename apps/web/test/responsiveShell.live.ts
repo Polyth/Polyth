@@ -845,18 +845,48 @@ test("normal motion settles drawer geometry by 160ms", async () => {
 });
 
 // =============================================================================
-// 9. Reload at 390 preserves session, draft, attachments, panel; drawer closed
+// 9. Reload at 390 preserves session, draft, attachments, panel, timeline
+//    anchor; drawer closed; the session event log stays byte-for-byte intact
 // =============================================================================
+
+/** The raw event-log body — persistence must never append or mutate events. */
+const fetchEvents = (page: Page, sessionId: string): Promise<string> =>
+  page.evaluate(async (id: string) => {
+    const res = await fetch(`/api/sessions/${id}/events?afterSeq=0`);
+    return await res.text();
+  }, sessionId);
 
 test("reload at 390 restores working state and starts with the drawer closed", async () => {
   const attachmentPath = join(ARTIFACTS, "a390-attachment.txt");
   await writeFile(attachmentPath, "synthetic attachment payload\n");
 
   const page = await openApp({ width: 390, height: 900, path: `/p/${PROJECT}/s/${S_LOADED}`, ready: ".timeline .msg" });
+  const eventsBefore = await fetchEvents(page, S_LOADED);
 
   await page.fill(".composer-input textarea", "draft line one\ndraft line two");
   await page.setInputFiles('.composer input[type="file"]', attachmentPath);
   await page.waitForSelector('[aria-label="Attachments"]', { state: "visible" });
+
+  // Place the timeline at a mid-scroll reading position: a non-bottom anchor
+  // must survive reload exactly (spec acceptance item 11).
+  const anchorSet = await page.evaluate(() => {
+    const el = document.querySelector<HTMLElement>(".timeline")!;
+    const max = el.scrollHeight - el.clientHeight;
+    const target = Math.round(max * 0.25);
+    el.scrollTop = target;
+    return { target, max };
+  });
+  assert.ok(anchorSet.max >= 400, `loaded timeline scrolls only ${anchorSet.max}px; fixture too short for the anchor gate`);
+  // The anchor store debounces writes; require the flush before reloading.
+  await page.waitForFunction(({ id, target }: { id: string; target: number }) => {
+    try {
+      const map = JSON.parse(localStorage.getItem("polyth.timelineAnchors") ?? "{}") as Record<string, { atBottom: boolean; scrollTop: number }>;
+      const a = map[id];
+      return !!a && a.atBottom === false && Math.abs(a.scrollTop - target) <= 1;
+    } catch {
+      return false;
+    }
+  }, { id: S_LOADED, target: anchorSet.target });
 
   // Open a panel so its last-open state persists, then reload with it open.
   await page.click(".narrow-panel-trigger");
@@ -884,6 +914,20 @@ test("reload at 390 restores working state and starts with the drawer closed", a
   assert.equal(restored.panelPressed, "Files", "reload lost the last-open panel");
   assert.equal(restored.drawerOpen, false, "drawer must start closed after reload");
 
+  // The timeline restored the saved mid-scroll anchor, not the bottom.
+  await page.waitForFunction((target: number) => {
+    const el = document.querySelector<HTMLElement>(".timeline");
+    return el !== null && Math.abs(el.scrollTop - target) <= 2;
+  }, anchorSet.target, { timeout: 5_000 });
+  const anchorBack = await page.evaluate(() => {
+    const el = document.querySelector<HTMLElement>(".timeline")!;
+    return { scrollTop: el.scrollTop, max: el.scrollHeight - el.clientHeight };
+  });
+  assert.ok(Math.abs(anchorBack.scrollTop - anchorSet.target) <= 2,
+    `reload lost the timeline anchor: restored ${anchorBack.scrollTop}, saved ${anchorSet.target}`);
+  assert.ok(anchorBack.max - anchorBack.scrollTop > 80,
+    `restored anchor sits at the bottom (${anchorBack.scrollTop}/${anchorBack.max}), not the saved reading position`);
+
   // Close the sheet to reach the composer; the draft and attachment survived.
   await page.keyboard.press("Escape");
   await page.waitForFunction(() => {
@@ -894,6 +938,75 @@ test("reload at 390 restores working state and starts with the drawer closed", a
   assert.equal(draft, "draft line one\ndraft line two", "reload lost the draft");
   const attachmentBack = await page.locator('[aria-label="Attachments"]').count();
   assert.ok(attachmentBack > 0, "reload lost the pending attachment");
+
+  // Event safety: none of the persistence above touched the session log.
+  const eventsAfter = await fetchEvents(page, S_LOADED);
+  assert.equal(eventsAfter, eventsBefore, "UI persistence mutated the session event log");
+
+  await page.context().close();
+  contexts.pop();
+});
+
+// =============================================================================
+// 9b. Reload at 390 restores a non-default view; returning to Chat restores
+//     the saved top-of-timeline anchor (the verifier's exact failing case)
+// =============================================================================
+
+test("reload at 390 restores the Terminal view and the top timeline anchor", async () => {
+  const page = await openApp({ width: 390, height: 900, path: `/p/${PROJECT}/s/${S_LOADED}`, ready: ".timeline .msg" });
+  const eventsBefore = await fetchEvents(page, S_LOADED);
+
+  // Scroll the timeline to its very top and require the persisted anchor.
+  await page.evaluate(() => {
+    document.querySelector<HTMLElement>(".timeline")!.scrollTop = 0;
+  });
+  await page.waitForFunction((id: string) => {
+    try {
+      const map = JSON.parse(localStorage.getItem("polyth.timelineAnchors") ?? "{}") as Record<string, { atBottom: boolean; scrollTop: number }>;
+      const a = map[id];
+      return !!a && a.atBottom === false && a.scrollTop === 0;
+    } catch {
+      return false;
+    }
+  }, S_LOADED);
+
+  // Select the non-default Terminal view through the compact picker.
+  await page.click(".header-view-picker .picker-chip");
+  await page.waitForSelector(".picker-pop input", { state: "visible" });
+  await page.fill(".picker-pop input", "terminal");
+  await page.keyboard.press("Enter");
+  await page.waitForFunction(() => document.querySelector(".sb-view")?.textContent === "Terminal");
+  await page.waitForFunction(() => localStorage.getItem("polyth.activeView") === "terminal");
+
+  await page.reload({ waitUntil: "load" });
+  await page.waitForSelector(".app");
+  await page.waitForFunction((id: string) => location.pathname.includes(`/s/${id}`), S_LOADED);
+  // The restored view must be the selected Terminal, not the Chat default.
+  await page.waitForFunction(
+    () => document.querySelector(".sb-view")?.textContent === "Terminal",
+    undefined,
+    { timeout: 15_000 },
+  );
+  const chip = await page.getAttribute(".header-view-picker .picker-chip", "aria-label");
+  assert.match(chip ?? "", /current: Terminal$/, "reload lost the selected view");
+  const drawerOpen = await page.evaluate(() => document.querySelector(".sidebar")?.classList.contains("open") === true);
+  assert.equal(drawerOpen, false, "drawer must start closed after reload");
+
+  // Returning to Chat restores the saved top anchor, not the bottom.
+  await page.click(".header-view-picker .picker-chip");
+  await page.waitForSelector(".picker-pop input", { state: "visible" });
+  await page.fill(".picker-pop input", "chat");
+  await page.keyboard.press("Enter");
+  await page.waitForSelector(".timeline .msg", { state: "visible", timeout: 15_000 });
+  await page.waitForFunction(() => {
+    const el = document.querySelector<HTMLElement>(".timeline");
+    return el !== null && el.scrollHeight - el.clientHeight > 400 && el.scrollTop <= 2;
+  });
+  await page.waitForFunction(() => localStorage.getItem("polyth.activeView") === "session");
+
+  // Event safety: view and anchor persistence never touch the session log.
+  const eventsAfter = await fetchEvents(page, S_LOADED);
+  assert.equal(eventsAfter, eventsBefore, "view/anchor persistence mutated the session event log");
 
   await page.context().close();
   contexts.pop();
@@ -1059,14 +1172,16 @@ test("bundled theme contrast for actionable text, icons, and focus", async () =>
       };
       const drawerBtn = document.querySelector(".header-drawer-btn")!;
       const outline = parse(getComputedStyle(drawerBtn).outlineColor);
-      // The theme's own capability for the primary-action pair: what the
-      // bundled accent-ink over accent tokens can deliver at best.
+      // The bundled primary-action token pair at both gradient endpoints:
+      // accent-ink must clear 4.5:1 over --accent and over --accent-hi.
       const rootStyle = getComputedStyle(document.documentElement);
       const ink = parse(rootStyle.getPropertyValue("--accent-ink").trim()) ?? parse("rgb(0,0,0)")!;
-      const accent = parse(rootStyle.getPropertyValue("--accent-hi").trim() || rootStyle.getPropertyValue("--accent").trim()) ?? parse("rgb(255,255,255)")!;
+      const accent = parse(rootStyle.getPropertyValue("--accent").trim()) ?? parse("rgb(255,255,255)")!;
+      const accentHi = parse(rootStyle.getPropertyValue("--accent-hi").trim()) ?? accent;
       return {
         send: textRatio(".send"),
-        sendTokenCapability: ratio({ r: ink.r, g: ink.g, b: ink.b }, { r: accent.r, g: accent.g, b: accent.b }),
+        sendTokenAccent: ratio({ r: ink.r, g: ink.g, b: ink.b }, { r: accent.r, g: accent.g, b: accent.b }),
+        sendTokenHi: ratio({ r: ink.r, g: ink.g, b: ink.b }, { r: accentHi.r, g: accentHi.g, b: accentHi.b }),
         headerTitle: textRatio(".header-title"),
         viewChipText: textRatio(".header-view-picker .picker-chip-text"),
         drawerIcon: textRatio(".header-drawer-btn"),
@@ -1074,14 +1189,12 @@ test("bundled theme contrast for actionable text, icons, and focus", async () =>
       };
     });
 
-    // Primary action: full 4.5:1 wherever the bundled token pair can deliver
-    // it; never below what the theme's own accent-ink/accent pair provides.
-    // Raising the sub-4.5 bundled light-theme accent-ink pairs is a theme.ts
-    // token change, which the UX-A390 spec assigns to a separate reviewed
-    // scope — this gate pins the shell to the tokens' full capability so any
-    // token fix is enforced here automatically.
-    const sendFloor = Math.min(4.5, ratios.sendTokenCapability - 0.05);
-    assert.ok((ratios.send ?? 0) >= sendFloor, `${theme}: Send text contrast ${ratios.send?.toFixed(2)} < ${sendFloor.toFixed(2)}`);
+    // Primary action: the specification's explicit 4.5:1, enforced directly
+    // for every bundled theme — as rendered on .send and at both accent
+    // gradient endpoints. No capability floor, no Math.min escape hatch.
+    assert.ok((ratios.send ?? 0) >= 4.5, `${theme}: Send text contrast ${ratios.send?.toFixed(2)} < 4.5`);
+    assert.ok(ratios.sendTokenAccent >= 4.5, `${theme}: accent-ink over accent is ${ratios.sendTokenAccent.toFixed(2)} < 4.5`);
+    assert.ok(ratios.sendTokenHi >= 4.5, `${theme}: accent-ink over accent-hi is ${ratios.sendTokenHi.toFixed(2)} < 4.5`);
     assert.ok((ratios.headerTitle ?? 0) >= 4.5, `${theme}: header title contrast ${ratios.headerTitle?.toFixed(2)} < 4.5`);
     assert.ok((ratios.viewChipText ?? 0) >= 4.5, `${theme}: view chip text contrast ${ratios.viewChipText?.toFixed(2)} < 4.5`);
     assert.ok((ratios.drawerIcon ?? 0) >= 3, `${theme}: drawer icon contrast ${ratios.drawerIcon?.toFixed(2)} < 3`);

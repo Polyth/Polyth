@@ -12,6 +12,7 @@ import type {
 import { buildModel, type RenderModel } from "./reduce.ts";
 import { applySettingsToDom, loadSettings, saveSettings, type PolythSettings } from "./settings.ts";
 import { getRailPrefs, setRailLastOpen } from "./railPrefs.ts";
+import { loadActiveView, saveActiveView } from "./viewPrefs.ts";
 
 export type AppView = "session" | "files" | "goals" | "multirun" | "fusion" | "walkthrough" | "preview" | "git" | "terminal" | "schedule" | "github";
 export type Overlay = "onboarding" | "project-picker" | "palette" | "search" | "settings" | "worktree-session" | null;
@@ -60,7 +61,7 @@ let state: AppState = {
   agents: [],
   activeProjectId: null,
   activeSessionId: null,
-  activeView: "session",
+  activeView: loadActiveView(), // UX-A390: the selected view survives reload
   gitBranch: "",
   settings: loadSettings(),
   uiError: null,
@@ -125,6 +126,7 @@ export function activateProject(id: string | null): void {
   set({ activeProjectId: id, activeSessionId: null, gitBranch: "", editorFile: null, editorLocation: null, gitDiffPath: null });
 }
 export function setActiveView(view: AppView): void {
+  saveActiveView(view);
   set({ activeView: view });
 }
 export function setGitBranch(branch: string): void {
@@ -188,6 +190,7 @@ export function setSidebarOpen(sidebarOpen: boolean): void {
 /** Open a file in the full-screen editor; null keeps the view on the tree.
  *  A location asks the editor to select/center that range once loaded. */
 export function openEditorFile(path: string | null, location?: EditorLocation): void {
+  saveActiveView("files");
   set({ editorFile: path, editorLocation: location ?? null, activeView: "files" });
 }
 /** The editor consumed the pending location (one-shot). */

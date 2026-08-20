@@ -73,32 +73,39 @@ export const PRESET_THEMES: ThemeSpec[] = [
     },
   },
   {
+    // UX-A390: accentInk is dark so Send/primary-action text reaches ≥4.5:1
+    // over both accent gradient endpoints (6.10 vs accent, 7.34 vs accentHi).
     id: "light", name: "Parchment", appearance: "light",
     tokens: {
       bg: "#faf8f4", panel: "#f1ede6", elevated: "#ffffff", raised: "#f3efe8", sunken: "#e9e4da", inputBg: "#ffffff",
       border: "#d5cec1", borderSoft: "#e2dcd2",
       text: "#2a2620", textDim: "#4d473e", muted: "#7a7469", faint: "#a39c8f",
-      accent: "#d9822b", accentInk: "#fffaf2", accentHi: "#e2954a",
+      accent: "#d9822b", accentInk: "#241404", accentHi: "#e2954a",
       green: "#4d9432", amber: "#a97d14", red: "#c4453a", blue: "#2f6fae", purple: "#7a53b8",
     },
   },
   {
+    // UX-A390: mid-tone blues fail 4.5:1 against both black and white, so the
+    // accents darken until the near-white ink passes both gradient endpoints
+    // (5.65 vs accent, 4.77 vs accentHi).
     id: "mist", name: "Mist", appearance: "light",
     tokens: {
       bg: "#f4f6f8", panel: "#e9edf1", elevated: "#ffffff", raised: "#eef1f5", sunken: "#dde3e9", inputBg: "#ffffff",
       border: "#c6cfd8", borderSoft: "#d8dfe6",
       text: "#24292f", textDim: "#454c54", muted: "#6e7781", faint: "#9aa4ae",
-      accent: "#3d76c2", accentInk: "#f7fafc", accentHi: "#4f86d0",
+      accent: "#2d64ae", accentInk: "#f7fafc", accentHi: "#3870bb",
       green: "#3e8636", amber: "#9a6d00", red: "#c03d33", blue: "#2f6fae", purple: "#7a53b8",
     },
   },
   {
+    // UX-A390: accentInk is Solarized base03 so Send/primary-action text
+    // reaches ≥4.5:1 over both endpoints (4.75 vs accent, 5.85 vs accentHi).
     id: "solar", name: "Solar", appearance: "light",
     tokens: {
       bg: "#fdf6e3", panel: "#f3ecd9", elevated: "#fffdf5", raised: "#f5eeda", sunken: "#e9e2cd", inputBg: "#fffdf5",
       border: "#d5cdb4", borderSoft: "#e2dbc4",
       text: "#3b4a51", textDim: "#586e75", muted: "#7d8f96", faint: "#a3b0b5",
-      accent: "#2aa198", accentInk: "#fdf6e3", accentHi: "#35b3aa",
+      accent: "#2aa198", accentInk: "#002b36", accentHi: "#35b3aa",
       green: "#859900", amber: "#b58900", red: "#dc322f", blue: "#268bd2", purple: "#6c71c4",
     },
   },
