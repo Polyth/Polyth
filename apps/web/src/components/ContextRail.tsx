@@ -32,6 +32,7 @@ import {
 } from "../surfaces.ts";
 import { clampRailWidth, railWidthOf, setRailWidth } from "../railPrefs.ts";
 import { getWorkspacePanePrefs, setPanePreferredWidth } from "../workspace/panePrefs.ts";
+import { chatDockViability, dockGuardTargets } from "../workspace/dockGuard.ts";
 import { PaneVisibilityContext } from "../workspace/paneVisibility.ts";
 import "./railSurfaces.tsx";
 
@@ -63,36 +64,20 @@ function useCompact(): boolean {
   return compact;
 }
 
-/** Layout-phase dock guard: Chat's content box holds the floor, timeline and
- *  composer have visible boxes, and every visible composer action is inside
- *  Chat's clip rectangle and wins its own center hit-test. Failure promotes
- *  to full-screen before pointer input is accepted — overflow clipping is
- *  never treated as success. */
-function chatDockViable(chatEl: Element | null): boolean {
-  if (!chatEl) return true; // nothing to protect (no chat rendered)
-  const chat = chatEl.getBoundingClientRect();
-  if (chat.width < CHAT_FLOOR) return false;
-  const timeline = chatEl.querySelector(".timeline-wrap, .stage");
-  const composer = chatEl.querySelector(".composer");
-  if (!timeline && !composer) return true; // non-chat primary view
-  for (const el of [timeline, composer]) {
-    if (!el) return false;
-    const r = el.getBoundingClientRect();
-    if (r.width <= 0 || r.height <= 0) return false;
-  }
-  if (composer) {
-    const actions = composer.querySelectorAll<HTMLElement>("button, textarea, [role=button]");
-    for (const action of actions) {
-      const r = action.getBoundingClientRect();
-      if (r.width <= 0 || r.height <= 0) continue; // hidden action: fine
-      if (r.left < chat.left - 0.5 || r.right > chat.right + 0.5) return false;
-      if (typeof document.elementFromPoint === "function") {
-        const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
-        if (hit && hit !== action && !action.contains(hit) && !hit.contains(action)) return false;
-      }
-    }
-  }
-  return true;
+/** Measured workspace widths within this distance are the SAME geometry: the
+ *  full-screen layer takes the pane out of flow and Chat absorbs its width, so
+ *  the Chat+pane sum re-measures within a border/rounding pixel or two of the
+ *  docked sum. A promotion must not release on its own mode flip
+ *  (PANE-VERIFY-02); a real window/sidebar resize moves well past this. */
+const GUARD_WIDTH_TOLERANCE = 4;
+
+/** A guard promotion and the geometry it was judged against. `widths` keeps
+ *  every workspace width this latch failed at, so re-measurement on either
+ *  side of the dock/layer flip cannot release-and-refail in a loop. */
+interface GuardLatch {
+  inputs: string;
+  widths: number[];
+  promoted: boolean;
 }
 
 export default function ContextRail() {
@@ -187,7 +172,12 @@ export default function ContextRail() {
   }, [open?.id]);
 
   // Layout guard result: docked geometry that clips or covers Chat promotes.
+  // The promotion LATCHES (PANE-VERIFY-02): it releases only when a real
+  // geometry input changes — surface, project, preferred width, or the
+  // measured workspace width — never because the promotion itself flipped
+  // the mode to the full-screen layer.
   const [guardPromoted, setGuardPromoted] = useState(false);
+  const guardLatchRef = useRef<GuardLatch | null>(null);
 
   const isWorkspacePane = open !== null && presentation !== undefined;
   const measured = workspaceWidth > 0;
@@ -203,19 +193,103 @@ export default function ContextRail() {
     ? clampDockWidth(liveWidth ?? decision.width, presentation, geo)
     : railWidthOf(rail);
 
-  // Reset the guard whenever the inputs it judged actually change.
-  const guardKey = `${open?.id ?? ""}:${workspaceWidth}:${dockWidth}:${mode}`;
-  const lastGuardKey = useRef("");
+  // ---- layout guard engine (PANE-VERIFY-01/02) -----------------------------------
+  // Judges the ACTUAL post-dock Chat layout after the pane width is committed
+  // (layout effect: before paint, so before pointer input), and keeps judging
+  // it from the composer's OWN geometry: every visible action is observed and
+  // subtree changes (a Model picker mounting once models arrive) re-run the
+  // check — the Chat+pane sum alone stays constant while a dock consumes
+  // Chat's width and must never be the only trigger.
+  const guardInputs = `${open?.id ?? ""}:${projectId ?? ""}:${remembered ?? "auto"}`;
   useLayoutEffect(() => {
-    if (lastGuardKey.current === guardKey) return;
-    lastGuardKey.current = guardKey;
-    if (!isWorkspacePane || mode !== "docked" || !measured) {
-      setGuardPromoted(false);
-      return;
+    const latch = guardLatchRef.current;
+    if (latch !== null && latch.promoted) {
+      if (latch.inputs !== guardInputs) {
+        // Different surface/project/preferred width: judge it fresh.
+        guardLatchRef.current = null;
+        setGuardPromoted(false);
+        return;
+      }
+      if (
+        !isWorkspacePane || !measured
+        || !latch.widths.some((w) => Math.abs(w - workspaceWidth) <= GUARD_WIDTH_TOLERANCE)
+      ) {
+        // A real geometry change: release, and retry the dock next commit.
+        latch.promoted = false;
+        setGuardPromoted(false);
+        return;
+      }
+      return; // hold the latch — the layer mode it selected is not a release
     }
-    setGuardPromoted(!chatDockViable(chatElOf()));
+    if (!isWorkspacePane || !measured || mode !== "docked") return;
+
+    const promote = () => {
+      const cur = guardLatchRef.current;
+      if (cur !== null && cur.promoted) return;
+      if (cur !== null && cur.inputs === guardInputs) {
+        // Re-failing after a release: remember this width too, so measuring
+        // either side of the dock/layer flip can never oscillate.
+        if (!cur.widths.some((w) => Math.abs(w - workspaceWidth) <= GUARD_WIDTH_TOLERANCE)) {
+          cur.widths = [...cur.widths.slice(-7), workspaceWidth];
+        }
+        cur.promoted = true;
+      } else {
+        guardLatchRef.current = { inputs: guardInputs, widths: [workspaceWidth], promoted: true };
+      }
+      setGuardPromoted(true);
+    };
+    const check = () => {
+      const cur = guardLatchRef.current;
+      if (cur !== null && cur.promoted) return;
+      // "pending" (Chat mid-render) is NOT a failure: promoting on a
+      // transient state would latch the user into full-screen. The observers
+      // below re-check once the boxes settle.
+      if (chatDockViability(chatElOf(), CHAT_FLOOR) === "blocked") promote();
+    };
+    check();
+
+    const chat = chatElOf();
+    if (!chat) return;
+    let ro: ResizeObserver | null = null;
+    const observeAll = () => {
+      if (ro === null) return;
+      ro.disconnect();
+      for (const el of dockGuardTargets(chat)) ro.observe(el);
+    };
+    if (typeof ResizeObserver === "function") {
+      ro = new ResizeObserver(check);
+      observeAll();
+    }
+    // Coalesce mutation bursts (timeline streaming) into one check per frame.
+    let scheduled = 0;
+    const scheduleCheck = () => {
+      if (typeof requestAnimationFrame !== "function") {
+        observeAll();
+        check();
+        return;
+      }
+      if (scheduled !== 0) return;
+      scheduled = requestAnimationFrame(() => {
+        scheduled = 0;
+        observeAll();
+        check();
+      });
+    };
+    let mo: MutationObserver | null = null;
+    if (typeof MutationObserver === "function") {
+      mo = new MutationObserver(scheduleCheck);
+      mo.observe(chat, { childList: true, subtree: true });
+    }
+    // One post-paint settle pass (fonts, late async content) regardless.
+    const raf = typeof requestAnimationFrame === "function" ? requestAnimationFrame(check) : 0;
+    return () => {
+      ro?.disconnect();
+      mo?.disconnect();
+      if (scheduled !== 0) cancelAnimationFrame(scheduled);
+      if (raf !== 0) cancelAnimationFrame(raf);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [guardKey]);
+  }, [guardInputs, workspaceWidth, dockWidth, mode, isWorkspacePane, measured]);
 
   // Publish presentation truth so App can make hidden Chat inert.
   useEffect(() => {
@@ -321,6 +395,10 @@ export default function ContextRail() {
   const dockNow = () => {
     setStickyFullscreen(false);
     interactedRef.current = false;
+    // Explicit user retry: drop the guard latch so the dock is judged fresh;
+    // a still-invalid dock re-promotes once (no loop — the latch re-arms).
+    guardLatchRef.current = null;
+    setGuardPromoted(false);
     collapseWorkspacePane();
   };
 
