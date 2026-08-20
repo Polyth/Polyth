@@ -286,6 +286,14 @@ export interface GithubStatusDto {
 }
 export type GhListResult<T> = { ok: true; data: T } | { ok: false; reason: string };
 
+// ---- voice engines (F8) -------------------------------------------------------
+export interface VoiceSettingsDto {
+  stt: { baseUrl: string; model: string; language: string; apiKeyEnv: string };
+  tts: { baseUrl: string; model: string; voice: string; apiKeyEnv: string };
+  sttConfigured: boolean;
+  ttsConfigured: boolean;
+}
+
 // ---- PR detail + checks (WP11) ----------------------------------------------
 export interface PrDetailDto {
   number: number; title: string; state: string; isDraft: boolean; author: string;
@@ -877,4 +885,21 @@ export const api = {
     jfetch<DictationSessionDto>(`/api/dictation/${encodeURIComponent(id)}/finalize`, { method: "POST" }),
   dictationCancel: (id: string) =>
     jfetch<{ ok: true }>(`/api/dictation/${encodeURIComponent(id)}`, { method: "DELETE" }),
+
+  // ---- voice engines (F8): server settings + TTS proxy --------------------------
+  voiceSettings: () => jfetch<VoiceSettingsDto>(`/api/settings/voice`),
+  voiceSettingsSave: (next: {
+    stt: { baseUrl: string; model: string; language: string; apiKeyEnv: string };
+    tts: { baseUrl: string; model: string; voice: string; apiKeyEnv: string };
+  }) => jfetch<VoiceSettingsDto>(`/api/settings/voice`, json("PUT", next)),
+  /** Buffered clip from the configured OpenAI-compatible TTS server. */
+  ttsSpeak: async (text: string, opts: { model?: string; voice?: string } = {}): Promise<ArrayBuffer> => {
+    const res = await fetch(`/api/tts/speak`, json("POST", { text, ...opts }));
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({})) as { message?: string };
+      throw new Error(body.message ?? `TTS failed: HTTP ${res.status}`);
+    }
+    return res.arrayBuffer();
+  },
+  ttsSummarize: (text: string) => jfetch<{ text: string }>(`/api/tts/summarize`, json("POST", { text })),
 };

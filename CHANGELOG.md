@@ -78,6 +78,30 @@ commits, and the L-queue packages started landing.
   instead of being written with `enabled:false`. OAuth stays a follow-up
   (`:id/authorize` remains an honest 501).
 
+### Added — L4: voice engines (F8)
+
+- `packages/dictation`: `createWhisperSttAdapter({baseUrl, model, language,
+  apiKey})` posts finalize-once WAV uploads (`pcmToWav`) to any
+  OpenAI-compatible `/audio/transcriptions` endpoint; `downsampleToPcm16`
+  converts browser Float32 capture to the protocol's 16 kHz mono s16le. The
+  dictation service now takes an adapter *provider*, so `/api/dictation/capability`
+  follows live settings without a restart. `VoicePrefs` grew
+  `sttEngine`/`ttsEngine`/`pitch`/`volume`/`summarize`.
+- Server: `data/voice.json` stores STT/TTS endpoints where API keys are env-var
+  *names* — values are read from the server environment at call time and never
+  echoed (`GET /api/settings/voice` returns `configured` flags only).
+  `POST /api/tts/speak` proxies the configured `/audio/speech` and returns
+  buffered audio, forwarding only standard OpenAI fields; `POST /api/tts/summarize`
+  shortens long replies with the small model. Both are honest 503s when
+  unconfigured/unwired.
+- Web: engine pickers (Browser | Server) for dictation and read-aloud in
+  Settings → Voice with endpoint forms and a TTS test button; pitch/volume
+  sliders (server playback via WebAudio); summarize-before-speak toggle with
+  raw-text fallback; the mic button streams PCM over `/ws`
+  (`dictationClient.ts`: seq/ack flow control, reconnect replay, live partial
+  transcripts) when a server engine is configured, else browser Web Speech.
+- Raw audio and interim transcripts still never enter the session event log.
+
 ### Removed — stale planning artifacts (`3928fe9`)
 
 - `docs/features/*` — the 19-file upstream research dump (polyth/Paseo PR

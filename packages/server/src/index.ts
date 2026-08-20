@@ -24,7 +24,7 @@ import {
   createBrowserService, createChromiumDriver, createFakeDriver, demoWeb,
   findChromiumExecutable, originOf,
 } from "@polyth/browser";
-import { createDictationService } from "@polyth/dictation";
+import { createDictationService, createWhisperSttAdapter } from "@polyth/dictation";
 import { createProjectService } from "./projects.ts";
 import { createSessionService, type Broadcaster, type RuntimePool } from "./sessions.ts";
 import { createHttpServer, type RouteHandler } from "./http.ts";
@@ -49,6 +49,8 @@ import { browserRoutes } from "./routes/browser.ts";
 import { dictationRoutes } from "./routes/dictation.ts";
 import { createBehaviorService } from "./behavior.ts";
 import { createMcpConfigService } from "./mcp.ts";
+import { createVoiceSettings } from "./voice.ts";
+import { voiceRoutes } from "./routes/voice.ts";
 import { createWalkthroughJobService } from "./walkthroughs.ts";
 import { createReviewFlowService, createReviewService } from "./review.ts";
 import { createMultirunRunOne } from "./multirunRunner.ts";
@@ -227,12 +229,22 @@ export async function boot(opts: BootOptions = {}) {
     allowedOrigins: () => [...previewOrigins],
   });
 
-  // Streaming dictation (WP15): the protocol is live, but no STT engine ships
-  // by default — capability reports honestly and the web app keeps browser
-  // Web Speech as its zero-configuration path. A speech plugin can contribute
-  // an SttAdapter here later.
+  // Streaming dictation (WP15/F8): the adapter provider re-reads voice.json on
+  // every call, so saving an STT server URL in Settings → Voice flips the
+  // capability honestly without a restart; no URL = browser Web Speech.
+  const voiceSettings = createVoiceSettings({ file: `${dataDir}/voice.json` });
   const dictation = createDictationService({
-    adapter: null,
+    adapter: () => {
+      const stt = voiceSettings.get().stt;
+      if (!stt.baseUrl) return null;
+      const apiKey = voiceSettings.resolveKey("stt");
+      return createWhisperSttAdapter({
+        baseUrl: stt.baseUrl,
+        ...(stt.model ? { model: stt.model } : {}),
+        ...(stt.language ? { language: stt.language } : {}),
+        ...(apiKey ? { apiKey } : {}),
+      });
+    },
     unavailableReason: "no speech-to-text engine configured; browser Web Speech is used instead",
   });
   const parseModel = (raw?: string) => {
@@ -492,6 +504,22 @@ export async function boot(opts: BootOptions = {}) {
     previewRoutes({ projects, sessions, preview }),
     browserRoutes({ browser, append: appendLogged, shotsDir: `${dataDir}/browser-shots` }),
     dictationRoutes({ dictation }),
+    voiceRoutes({
+      voice: voiceSettings,
+      // OC-2049 seam: summarize long replies before speaking, small model only
+      summarize: async (text) => {
+        const rt = await runtimes.forProject("__default__");
+        return oneShot(rt, {
+          cwd: process.cwd(),
+          ...(smallModel() ? { model: smallModel()! } : {}),
+          prompt: [
+            "Summarize the following assistant reply for text-to-speech playback.",
+            "Keep it under 3 sentences, plain prose, no markdown, no preamble.",
+            "", "<reply>", text.slice(0, 24_000), "</reply>",
+          ].join("\n"),
+        });
+      },
+    }),
     multirunRoutes(multirun),
     fusionRoutes(fusion),
     walkthroughRoutes({ store, broadcast, jobs: walkthroughJobs, review, flow: reviewFlow }),
@@ -587,7 +615,7 @@ export async function boot(opts: BootOptions = {}) {
     }),
   ];
 
-  const allCapabilities = () => ["polyth.sessions", "polyth.sessionPersistence", "polyth.projects", "polyth.agentRuntime", "polyth.goals", "polyth.files", "polyth.commands", "polyth.git", "polyth.worktrees", "polyth.terminal", "polyth.preview", "polyth.multirun", "polyth.fusion", "polyth.walkthrough", "polyth.schedule", "polyth.github", "polyth.control", "polyth.agentProfiles", "polyth.settings", "polyth.mcp", "polyth.plugins", "polyth.knowledge", "polyth.review", "polyth.usage", "polyth.browser"];
+  const allCapabilities = () => ["polyth.sessions", "polyth.sessionPersistence", "polyth.projects", "polyth.agentRuntime", "polyth.goals", "polyth.files", "polyth.commands", "polyth.git", "polyth.worktrees", "polyth.terminal", "polyth.preview", "polyth.multirun", "polyth.fusion", "polyth.walkthrough", "polyth.schedule", "polyth.github", "polyth.control", "polyth.agentProfiles", "polyth.settings", "polyth.mcp", "polyth.plugins", "polyth.knowledge", "polyth.review", "polyth.usage", "polyth.browser", "polyth.voice"];
 
   const server = createHttpServer({
     sessions, projects, runtimes, routes,

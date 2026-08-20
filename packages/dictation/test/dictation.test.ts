@@ -15,7 +15,14 @@ test("voice prefs parse defaults, clamp rate, round-trip", () => {
   assert.deepEqual(parseVoicePrefs("{oops"), defaultVoicePrefs());
   assert.equal(parseVoicePrefs('{"rate": 99}').rate, 1);
   assert.equal(parseVoicePrefs('{"rate": 1.5}').rate, 1.5);
-  const p = { dictation: false, tts: true, lang: "de-DE", rate: 0.8, voice: "Anna" };
+  const p = {
+    ...defaultVoicePrefs(),
+    dictation: false,
+    tts: true,
+    lang: "de-DE",
+    rate: 0.8,
+    voice: "Anna",
+  };
   assert.deepEqual(parseVoicePrefs(serializeVoicePrefs(p)), p);
 });
 

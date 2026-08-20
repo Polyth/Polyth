@@ -40,7 +40,7 @@ packages/session (node:sqlite WAL: events + projections + queue/org/profiles)
 | `github` | `gh`-CLI-backed repo/issues/PR list, PR detail/files/diff/comments, failure-first checks aggregation, guarded review submit + risk/confidence labels. No tokens stored. |
 | `usage` | Provider-neutral quota adapter contract: jittered polling, in-flight dedup, backoff, bounded last-good persistence, secret redaction, pace/prediction from multi-sample history. |
 | `browser` | Agent-drivable Chromium (playwright-core) or fake driver: URL/origin policy (blocks unsafe schemes, private IPs, DNS rebinding, downloads), stale-frame rejection, redacted observations, JPEG frame stream, honest `unavailable` engine state. |
-| `dictation` | Server streaming dictation protocol: lifecycle via REST, PCM chunks via `/ws` with acks + `(id,seq)` dedupe + replay-from-last-ack, `SttAdapter` seam (no engine ships by default). |
+| `dictation` | Server streaming dictation protocol: lifecycle via REST, PCM chunks via `/ws` with acks + `(id,seq)` dedupe + replay-from-last-ack, `SttAdapter` seam plus `createWhisperSttAdapter` (finalize-once WAV upload to any OpenAI-compatible `/audio/transcriptions` endpoint); the service takes an adapter *provider* so capability follows live settings. |
 | `models` | Model preference logic: favorites, provider/name/recent sort, search (shared by picker + settings). |
 | `hotkeys` | Keymap model: default bindings, user overrides, conflict detection, sequence matching. |
 | `plugins` | Installed-plugin registry (install/enable/disable from dir sources, trust classes, contribution manifests). |
@@ -73,7 +73,7 @@ statically by the server with SPA fallback.
   multirun, fusion, walkthrough (+review flow), schedule, usage, knowledge, github,
   control (`/api/control/sessions` list/new/fork/abort), snippets, profiles
   (agent profiles + model/agent aggregation), settings (behavior/MCP/plugins/system info),
-  goals.
+  voice (engine settings + TTS proxy + summarize), goals.
 - `behavior.ts` / `mcp.ts` — server-owned behavior instructions (`behavior.md`) and MCP
   server config (`mcp.json`), applied to OpenCode through the adapter's config applier.
   Disabled MCP servers are removed from the applied config entirely (F10); secret
@@ -114,6 +114,11 @@ small-model title+body draft from `git diff base...HEAD` and never submits),
 `/api/mcp/servers` (CRUD + POST `:id/test`|`:id/probe` reachability check that
 stores status/lastError; `:id/authorize` is an honest 501 until the backend
 bridge exists), `/api/plugins` (+install), `/api/system/info`,
+`/api/settings/voice` (GET/PUT engine endpoints in `data/voice.json`; API keys are env-var
+*names*, never values — GET returns only `configured` flags), `/api/tts/speak`
+(proxy to the configured OpenAI-compatible `/audio/speech`, buffered audio back, only
+standard fields forwarded, honest 503 when unconfigured), `/api/tts/summarize`
+(small-model shortening for read-aloud; 503 when no small model is wired),
 `/api/sessions/:id/goal*`.
 
 Errors are `{ error: code, message }` with mapped status; a dead OpenCode transport
@@ -216,7 +221,10 @@ a generic collapsed row (never crash).
   `AttachmentPills` (composer: removable; timeline: read-only) and the shared
   `FileRowActions` menu (Open / Copy path / Add to chat) on Files/Changes rows.
 - `notifications.ts` — kind-filtered, allowlisted-template, replay-deduped web
-  notifications; `voice.tsx` — browser TTS/STT with the composer mic slot.
+  notifications; `voice.tsx` — engine-aware TTS/STT with the composer mic slot
+  (browser Web Speech by default; server engines via `/api/tts/speak` and the
+  `/ws` streaming dictation client in `dictationClient.ts`, with optional
+  summarize-before-speak through `/api/tts/summarize`).
 
 ## UI slot model
 

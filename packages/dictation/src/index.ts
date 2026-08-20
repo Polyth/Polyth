@@ -9,6 +9,12 @@ export {
   type DictationService, type DictationServiceOptions,
   type SttAdapter, type SttStream, type ChunkBuffer, type BufferedChunk,
 } from "./streaming.ts";
+export {
+  createWhisperSttAdapter, downsampleToPcm16, pcmToWav,
+  type WhisperSttOptions,
+} from "./whisper.ts";
+
+export type VoiceEngine = "browser" | "server";
 
 export interface VoicePrefs {
   /** Show the mic button and allow dictation. */
@@ -21,13 +27,29 @@ export interface VoicePrefs {
   rate: number;
   /** Preferred speechSynthesis voice name. */
   voice?: string;
+  /** F8: dictation engine — server needs a configured STT endpoint. */
+  sttEngine: VoiceEngine;
+  /** F8: read-aloud engine — server needs a configured TTS endpoint. */
+  ttsEngine: VoiceEngine;
+  /** Playback pitch 0.5–2 (browser: utterance pitch; server: playbackRate). */
+  pitch: number;
+  /** Playback volume 0–1. */
+  volume: number;
+  /** F8: summarize long replies with the Small Model before speaking. */
+  summarize: boolean;
 }
 
 export const VOICE_PREFS_KEY = "polyth.voice";
 
 export function defaultVoicePrefs(): VoicePrefs {
-  return { dictation: true, tts: false, lang: "en-US", rate: 1 };
+  return {
+    dictation: true, tts: false, lang: "en-US", rate: 1,
+    sttEngine: "browser", ttsEngine: "browser", pitch: 1, volume: 1, summarize: false,
+  };
 }
+
+const engineOf = (v: unknown, fallback: VoiceEngine): VoiceEngine =>
+  v === "browser" || v === "server" ? v : fallback;
 
 export function parseVoicePrefs(raw: string | null): VoicePrefs {
   const d = defaultVoicePrefs();
@@ -39,6 +61,11 @@ export function parseVoicePrefs(raw: string | null): VoicePrefs {
       lang: typeof data.lang === "string" && data.lang ? data.lang : d.lang,
       rate: typeof data.rate === "number" && data.rate >= 0.5 && data.rate <= 2 ? data.rate : d.rate,
       ...(typeof data.voice === "string" && data.voice ? { voice: data.voice } : {}),
+      sttEngine: engineOf(data.sttEngine, d.sttEngine),
+      ttsEngine: engineOf(data.ttsEngine, d.ttsEngine),
+      pitch: typeof data.pitch === "number" && data.pitch >= 0.5 && data.pitch <= 2 ? data.pitch : d.pitch,
+      volume: typeof data.volume === "number" && data.volume >= 0 && data.volume <= 1 ? data.volume : d.volume,
+      summarize: typeof data.summarize === "boolean" ? data.summarize : d.summarize,
     };
   } catch {
     return d;
