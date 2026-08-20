@@ -2126,6 +2126,37 @@ body[data-motion="reduced"] *, body[data-motion="reduced"] *::before, body[data-
 .prompt-nav-label { display: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .prompt-nav:hover .prompt-nav-label, .prompt-nav:focus-within .prompt-nav-label { display: inline; }
 
+/* L13: hover-preview card beside the rail (sticky nav is the positioned box). */
+.prompt-nav-preview {
+  position: absolute; right: calc(100% + 10px); top: 0;
+  width: min(420px, 44vw); max-height: 300px; overflow: hidden;
+  background: var(--elevated); border: 1px solid var(--border);
+  border-radius: var(--radius); box-shadow: var(--shadow-lg);
+  padding: 10px 12px; z-index: 6; text-align: left; cursor: default;
+}
+.prompt-nav-preview-head {
+  font-size: 11px; font-weight: 650; color: var(--muted);
+  text-transform: uppercase; letter-spacing: 0.04em; margin-bottom: 6px;
+}
+.prompt-nav-preview-body {
+  font-size: 12.5px; line-height: 1.5; white-space: pre-wrap; word-break: break-word;
+  max-height: 252px; overflow: hidden;
+  -webkit-mask-image: linear-gradient(to bottom, #000 82%, transparent);
+  mask-image: linear-gradient(to bottom, #000 82%, transparent);
+}
+
+/* L13: selection quick actions + windowed-timeline reveal bar */
+.selection-menu {
+  position: fixed; z-index: 70; display: flex; align-items: center; gap: 3px;
+  padding: 4px; background: var(--elevated); border: 1px solid var(--border);
+  border-radius: var(--radius-sm); box-shadow: var(--shadow-lg);
+}
+.selection-menu-flash { font-size: 12px; color: var(--muted); padding: 2px 8px; white-space: nowrap; }
+.timeline-earlier {
+  display: flex; gap: 8px; justify-content: center; align-items: center;
+  padding: 4px 0 8px; border-bottom: 1px dashed var(--border-soft); margin-bottom: 4px;
+}
+
 /* editor go-to-line + range highlight */
 .editor-goto input {
   background: var(--sunken); color: inherit; border: 1px solid var(--border);

@@ -247,6 +247,24 @@ commits, and the L-queue packages started landing.
   completions attribute to the parent session; aborted turns stay silent;
   auto-accepted permissions never push.
 
+### Added — L13: selection quick actions, prompt hover previews, timeline windowing (F3 remainder)
+
+- Selection quick actions (OC#283/OC#1501): selecting transcript text floats a
+  mini-menu — Quote in reply (markdown-quotes the selection into the composer,
+  bounded so a select-all cannot flood the draft), New session from selection
+  (the quote becomes a fresh session's draft, nothing is sent — same bootstrap
+  pattern as the GitHub "+ session" flow), and Copy. Buttons act on mousedown
+  so the selection survives the click.
+- Prompt-navigator hover previews (OC#2054/OC#2211): hovering or focusing a
+  rail item shows a preview card with the bounded full prompt text beside the
+  rail, so "which prompt was that?" never needs a scroll away.
+- Timeline windowed rendering: long sessions render only the last 150 rows —
+  the window is a suffix, so appends and follow-scroll are unchanged. "Show
+  earlier / Show all" reveals with the viewport anchored (no jump), and
+  navigator/timeline-dialog jumps to a hidden prompt grow the window exactly
+  far enough first. Pure helpers in `timelineWindow.ts`; presentation-only —
+  the event log and render model never change.
+
 ### Removed — stale planning artifacts (`3928fe9`)
 
 - `docs/features/*` — the 19-file upstream research dump (polyth/Paseo PR

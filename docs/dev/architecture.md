@@ -251,7 +251,12 @@ a generic collapsed row (never crash).
 - `components/` — views + panels. Notables: `Composer` (drafts, delivery modes, prompt
   token grammar from `composer/language.ts`, mic button via slot), `Timeline` +
   markdown pipeline (`markdown/` — fenced code, Mermaid, KaTeX, JSON tree, galleries,
-  file references with go-to-line), `PendingChangesBar` (shared git-status source
+  file references with go-to-line; L13: windowed rendering via `timelineWindow.ts` —
+  long sessions render only the last 150 rows as a suffix window, "Show earlier"
+  reveals anchored, prompt jumps grow the window; the prompt-navigator rail gains a
+  hover-preview card with the bounded full prompt; `SelectionMenu` floats over
+  transcript selections with Quote in reply / New session from selection / Copy,
+  pure helpers in `selectionActions.ts`), `PendingChangesBar` (shared git-status source
   with edit-tool fallback), `QuestionCards` (multi-question stepper),
   `PermissionBanner` (preview + scoped Always), `WorkStatus` (usage/tasks/agents
   sections + tracker pills), `ContextRail` (F17 surface host: renders the

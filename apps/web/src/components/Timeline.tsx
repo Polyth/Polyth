@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { renderMarkdown } from "../markdown.tsx";
 import { fmtCost, fmtDuration, fmtMs, fmtTokens } from "../format.ts";
 import { groupWork, mergeThinking, messageJson, promptIndex, toolSummary, copyText, type WorkGroup } from "../utils.ts";
@@ -7,9 +7,11 @@ import { forkSession, sendMessage } from "../init.ts";
 import { requestComposerInsert, requestComposerReplace } from "../composerInsert.ts";
 import { openSettingsPage, setUiError, useStore } from "../store.ts";
 import { api } from "../api.ts";
+import { TIMELINE_CHUNK, TIMELINE_WINDOW, grownLimit, limitToInclude, windowStart } from "../timelineWindow.ts";
 import CopyButton from "./CopyButton.tsx";
 import Dialog from "./a11y/Dialog.tsx";
 import AttachmentPills from "./AttachmentPills.tsx";
+import SelectionMenu from "./SelectionMenu.tsx";
 import type { RenderModel, RenderMessage, ToolMsg, AssistantMsg, TaskActivityMsg, UserMsg } from "../reduce.ts";
 
 // Merged thinking block (WP4): collapsible with a first-line preview, or a
@@ -237,21 +239,35 @@ function TimelineDialog({ prompts, onClose, onJump, onRewind, onFork }: {
 }
 
 // Floating rail of user prompts; click jumps the timeline to that prompt (WP4).
-function PromptNavigator({ prompts, container }: {
-  prompts: Array<{ id: string; preview: string }>;
-  container: React.RefObject<HTMLDivElement | null>;
+// L13 (OC#2054/#2211): hovering or focusing an item shows a preview card with
+// the bounded full prompt, so the rail answers "which prompt was that?"
+// without scrolling away.
+function PromptNavigator({ prompts, onJump }: {
+  prompts: Array<{ id: string; preview: string; text: string }>;
+  onJump: (id: string) => void;
 }) {
-  const jump = (id: string) => {
-    container.current?.querySelector(`[data-msg-id="${id}"]`)?.scrollIntoView({ block: "center" });
-  };
+  const [hover, setHover] = useState(-1);
+  const shown = hover >= 0 ? prompts[hover] : undefined;
   return (
-    <nav className="prompt-nav" aria-label="Prompts in this session">
+    <nav className="prompt-nav" aria-label="Prompts in this session" onMouseLeave={() => setHover(-1)}>
       {prompts.map((p, i) => (
-        <button key={p.id} className="prompt-nav-item" title={p.preview || `Prompt ${i + 1}`} onClick={() => jump(p.id)}>
+        <button
+          key={p.id}
+          className="prompt-nav-item"
+          onClick={() => onJump(p.id)}
+          onMouseEnter={() => setHover(i)}
+          onFocus={() => setHover(i)}
+        >
           <span className="prompt-nav-dot" aria-hidden="true" />
           <span className="prompt-nav-label">{p.preview || `Prompt ${i + 1}`}</span>
         </button>
       ))}
+      {shown && (
+        <div className="prompt-nav-preview" role="tooltip">
+          <div className="prompt-nav-preview-head">Prompt {hover + 1} of {prompts.length}</div>
+          <div className="prompt-nav-preview-body">{shown.text || "(empty prompt)"}</div>
+        </div>
+      )}
     </nav>
   );
 }
@@ -283,6 +299,12 @@ export default function Timeline({ model }: { model: RenderModel }) {
   const prefs = useUiSettings();
   const sessionId = useStore((s) => s.activeSessionId);
   const [timelineOpen, setTimelineOpen] = useState(false);
+  // L13 windowing: only the last `limit` rows render (see timelineWindow.ts).
+  const [limit, setLimit] = useState(TIMELINE_WINDOW);
+  const anchor = useRef<{ scrollTop: number; scrollHeight: number } | null>(null);
+  const pendingJump = useRef<string | null>(null);
+
+  useEffect(() => { setLimit(TIMELINE_WINDOW); }, [sessionId]);
 
   useEffect(() => {
     const el = ref.current;
@@ -309,7 +331,34 @@ export default function Timeline({ model }: { model: RenderModel }) {
   const turn = model.turn;
   const turnBroken = turn && (turn.status === "failed" || turn.status === "aborted");
   const lastUser = [...model.messages].reverse().find((m) => m.kind === "user");
+
+  // L13 windowing: rows render as a suffix; revealing earlier rows keeps the
+  // viewport anchored (scrollTop compensates for the height that appeared
+  // above), and a jump to a hidden prompt grows the window first.
+  const start = windowStart(rows.length, limit);
+  const shownRows = start > 0 ? rows.slice(start) : rows;
+  const reveal = (next: number) => {
+    const el = ref.current;
+    if (el) anchor.current = { scrollTop: el.scrollTop, scrollHeight: el.scrollHeight };
+    setLimit(next);
+  };
+  useLayoutEffect(() => {
+    const el = ref.current;
+    const a = anchor.current;
+    anchor.current = null;
+    if (el && a) el.scrollTop = a.scrollTop + (el.scrollHeight - a.scrollHeight);
+    const target = pendingJump.current;
+    pendingJump.current = null;
+    if (target) el?.querySelector(`[data-msg-id="${target}"]`)?.scrollIntoView({ block: "center" });
+  }, [limit]);
   const jump = (id: string) => {
+    const index = rows.findIndex((r) => r.kind !== "work" && r.id === id);
+    const next = limitToInclude(rows.length, limit, index);
+    if (next !== limit) {
+      pendingJump.current = id;
+      setLimit(next);
+      return;
+    }
     ref.current?.querySelector(`[data-msg-id="${id}"]`)?.scrollIntoView({ block: "center" });
   };
   const rewind = (message: UserMsg) => {
@@ -333,7 +382,7 @@ export default function Timeline({ model }: { model: RenderModel }) {
 
   return (
     <div className="timeline" ref={ref} onScroll={onScroll}>
-      {showNav && <PromptNavigator prompts={prompts} container={ref} />}
+      {showNav && <PromptNavigator prompts={prompts} onJump={jump} />}
       {promptMessages.length > 0 && (
         <button className="timeline-open small-btn" onClick={() => setTimelineOpen(true)}>Timeline</button>
       )}
@@ -347,7 +396,17 @@ export default function Timeline({ model }: { model: RenderModel }) {
           </div>
         </div>
       )}
-      {rows.map((r) => (
+      {start > 0 && (
+        <div className="timeline-earlier">
+          <button className="small-btn" onClick={() => reveal(grownLimit(rows.length, limit))}>
+            Show {Math.min(TIMELINE_CHUNK, start)} earlier
+          </button>
+          <button className="small-btn" onClick={() => reveal(rows.length)}>
+            Show all ({start} hidden)
+          </button>
+        </div>
+      )}
+      {shownRows.map((r) => (
         r.kind === "work"
           ? <WorkedGroup key={r.id} g={r} />
           : <MessageView key={r.id} m={r} onRewind={rewind} onFork={fork} />
@@ -383,6 +442,7 @@ export default function Timeline({ model }: { model: RenderModel }) {
         </div>
       )}
       {footer && <div className="turn-footer">{footer}</div>}
+      <SelectionMenu container={ref} />
       {timelineOpen && (
         <TimelineDialog
           prompts={promptMessages}

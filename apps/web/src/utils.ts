@@ -156,13 +156,18 @@ export function messageJson(m: RenderMessage): string {
   return JSON.stringify({ role: "task", taskId: m.taskId, action: m.action, text: m.text, time: m.time }, null, 2);
 }
 
-/** User prompts with previews for the prompt navigator (WP4). */
-export function promptIndex(messages: RenderMessage[]): Array<{ id: string; preview: string }> {
+/** User prompts with previews for the prompt navigator (WP4). `text` is the
+ *  bounded full prompt for the L13 hover-preview card. */
+export function promptIndex(messages: RenderMessage[]): Array<{ id: string; preview: string; text: string }> {
   return messages
     .filter((m): m is UserMsg => m.kind === "user")
     .map((m) => {
       const first = m.text.split("\n").find((l) => l.trim()) ?? "";
-      return { id: m.id, preview: first.length > 64 ? `${first.slice(0, 61)}…` : first };
+      return {
+        id: m.id,
+        preview: first.length > 64 ? `${first.slice(0, 61)}…` : first,
+        text: m.text.length > 1200 ? `${m.text.slice(0, 1200)}…` : m.text,
+      };
     });
 }
 
