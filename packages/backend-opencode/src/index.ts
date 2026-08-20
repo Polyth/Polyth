@@ -212,7 +212,9 @@ const freePort = (hostname: string): Promise<number> =>
 // One `opencode serve` per project cwd. A hard kill of the polyth process
 // (crash, SIGKILL) leaves the child reparented to init — it never dies on
 // its own. Track it in a pidfile keyed by cwd so the next spawn for that
-// cwd reaps its orphaned predecessor instead of leaking forever.
+// cwd reaps its orphaned predecessor instead of leaking forever. The file
+// records `<owner pid> <child pid>`: only a *foreign* owner marks an orphan,
+// so a second spawn can never shoot down a live sibling of this process.
 const pidFileFor = (cwd: string): string => {
   let h = 0;
   for (let i = 0; i < cwd.length; i++) h = (h * 31 + cwd.charCodeAt(i)) | 0;
@@ -221,20 +223,42 @@ const pidFileFor = (cwd: string): string => {
   return join(dir, `${(h >>> 0).toString(36)}.pid`);
 };
 
-const reapOrphan = (pidFile: string): void => {
+const readPidFile = (pidFile: string): { owner: number; child: number } | undefined => {
   let raw: string;
   try {
     raw = readFileSync(pidFile, "utf8");
   } catch {
+    return undefined;
+  }
+  const parts = raw.trim().split(/\s+/).map(Number);
+  // Legacy single-pid files predate the owner column; treat them as foreign.
+  const [owner, child] = parts.length >= 2 ? parts : [0, parts[0]];
+  if (!Number.isFinite(child) || !child || child <= 0) return undefined;
+  return { owner: Number.isFinite(owner) ? owner! : 0, child: child! };
+};
+
+const alive = (pid: number): boolean => {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+const reapOrphan = (pidFile: string): void => {
+  const rec = readPidFile(pidFile);
+  if (!rec) {
+    rmSync(pidFile, { force: true });
     return;
   }
-  const pid = Number(raw.trim());
-  if (Number.isFinite(pid) && pid > 0) {
-    try {
-      process.kill(pid, "SIGKILL");
-    } catch {
-      /* already dead */
-    }
+  // Our own live child is in use by another runtime for this cwd, not an
+  // orphan — leave it running and let the caller overwrite the file.
+  if (rec.owner === process.pid && alive(rec.child)) return;
+  try {
+    process.kill(rec.child, "SIGKILL");
+  } catch {
+    /* already dead */
   }
   rmSync(pidFile, { force: true });
 };
@@ -269,7 +293,7 @@ const spawnServe = async (
       if (m && !settled) {
         settled = true;
         clearTimeout(timeout);
-        if (child.pid) writeFileSync(pidFile, String(child.pid));
+        if (child.pid) writeFileSync(pidFile, `${process.pid} ${child.pid}`);
         resolve({ child, port: Number(m[1]), hostname });
       }
     };
@@ -291,7 +315,12 @@ const spawnServe = async (
 };
 
 const killChild = async (child: ChildProcess | undefined, cwd?: string): Promise<void> => {
-  if (cwd) rmSync(pidFileFor(cwd), { force: true });
+  // Only drop the pidfile if it still tracks *this* child: a later runtime for
+  // the same cwd may already own it, and that one still needs reaping later.
+  if (cwd) {
+    const pidFile = pidFileFor(cwd);
+    if (!child?.pid || readPidFile(pidFile)?.child === child.pid) rmSync(pidFile, { force: true });
+  }
   if (!child || child.killed) return;
   child.kill("SIGTERM");
   const exited = await Promise.race([
