@@ -715,7 +715,24 @@ export default function Timeline({ model }: { model: RenderModel }) {
             />
           )
       ))}
-      {undoneRows.length > 0 && (
+      {/* The dock confirmation sits OUTSIDE the collapsible tail: it must be
+          visible even while the reverted items stay folded away. */}
+      {confirmRestore && model.rewind && undoneRows.length > 0 && (
+        <div className="rewound-confirm" role="group" aria-label="Confirm restore">
+          <span>You edited the draft. Restoring the original timeline discards it.</span>
+          <button
+            className="small-btn"
+            onClick={(event) => restore({ confirmed: true, invoker: event.currentTarget })}
+          >Restore and discard the edited draft</button>
+          <button className="small-btn" onClick={() => setConfirmRestore(false)}>
+            Keep editing the draft
+          </button>
+        </div>
+      )}
+      {/* The collapsed tail exists only while the revert is ACTIVE. After a
+          replacement the originals stay on disk (and out of model history)
+          but no longer occupy the visible timeline. */}
+      {model.rewind && undoneRows.length > 0 && (
         <details className="rewound-tail">
           <summary>
             <span>{undoneMessages.length} reverted timeline {undoneMessages.length === 1 ? "item" : "items"}</span>
@@ -729,18 +746,6 @@ export default function Timeline({ model }: { model: RenderModel }) {
               >Restore original timeline</button>
             )}
           </summary>
-          {confirmRestore && model.rewind && (
-            <div className="rewound-confirm" role="group" aria-label="Confirm restore">
-              <span>You edited the draft. Restoring the original timeline discards it.</span>
-              <button
-                className="small-btn"
-                onClick={(event) => restore({ confirmed: true, invoker: event.currentTarget })}
-              >Restore and discard the edited draft</button>
-              <button className="small-btn" onClick={() => setConfirmRestore(false)}>
-                Keep editing the draft
-              </button>
-            </div>
-          )}
           <div className="rewound-tail-body">
             {undoneRows.map((row) => (
               row.kind === "work"

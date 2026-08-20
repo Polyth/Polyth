@@ -164,8 +164,10 @@ export type ActionAvailability = { enabled: true } | { enabled: false; reason: s
 
 function mutationAvailability(action: "Revert" | "Fork", g: MutationGuards): ActionAvailability {
   if (g.archived) return { enabled: false, reason: `${action} unavailable in an archived session` };
-  if (g.turnWorking) return { enabled: false, reason: `${action} unavailable while a turn is running` };
+  // A pending request outranks the open turn it is blocking: "answer the
+  // request" is the actionable reason, "a turn is running" is its symptom.
   if (g.pendingRequest) return { enabled: false, reason: `${action} unavailable while a request is waiting` };
+  if (g.turnWorking) return { enabled: false, reason: `${action} unavailable while a turn is running` };
   if (g.queuedCount > 0) return { enabled: false, reason: `${action} unavailable while messages are queued` };
   if (g.rewindActive) return { enabled: false, reason: "Restore or replace the current revert first" };
   return { enabled: true };

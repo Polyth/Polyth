@@ -852,7 +852,10 @@ export function createSessionService(deps: {
         const forkId = randomUUID();
         const project = await projects.get(proj.projectId);
         const forkCwd = proj.worktreePath ?? project?.path ?? process.cwd();
-        const rt = await runtimes.forProject(proj.projectId, forkCwd);
+        // ensureWired (not a bare runtime lookup): after a server restart the
+        // adapter has no canonical→backend mapping yet, and branchSession must
+        // resolve the SOURCE session's backend id to fork from it.
+        const rt = await ensureWired(sessionId, proj);
         const title = `${proj.title} (fork)`;
         const target: CreateSessionInput & { sessionId: string; cwd: string } = {
           projectId: proj.projectId, title, sessionId: forkId, cwd: forkCwd,

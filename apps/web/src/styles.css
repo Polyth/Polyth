@@ -2267,7 +2267,8 @@ body[data-motion="reduced"] *, body[data-motion="reduced"] *::before, body[data-
 .rewound-confirm {
   display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
   padding: 8px 10px; font-size: 12px;
-  border-top: 1px dashed var(--border);
+  background: var(--panel); border: 1px dashed var(--border);
+  border-radius: var(--radius);
 }
 .timeline { position: relative; }
 .timeline-open { align-self: flex-start; position: sticky; top: 8px; z-index: 4; }
