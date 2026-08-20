@@ -5,8 +5,30 @@
 import type { SessionService } from "@polyth/contracts";
 import type { RouteHandler } from "../http.ts";
 
+const MAX_IMPORT_BATCH = 200;
+
 export function controlRoutes(sessions: SessionService): RouteHandler {
   return async ({ path, method, url, body, json }) => {
+    // F14 import half: browse unadopted backend sessions, then adopt selected.
+    if (path === "/api/control/backend-sessions" && method === "GET") {
+      const projectId = url.searchParams.get("projectId") ?? "";
+      if (!projectId) throw Object.assign(new Error("projectId required"), { code: "invalid-path" });
+      json(200, await sessions.backendSessions!(projectId));
+      return true;
+    }
+    if (path === "/api/control/backend-sessions/import" && method === "POST") {
+      const b = await body();
+      const projectId = String(b.projectId ?? "");
+      if (!projectId) throw Object.assign(new Error("projectId required"), { code: "invalid-path" });
+      const ids = Array.isArray(b.ids) ? b.ids.map(String).filter(Boolean) : [];
+      if (ids.length === 0) throw Object.assign(new Error("ids required"), { code: "invalid-input" });
+      if (ids.length > MAX_IMPORT_BATCH) {
+        throw Object.assign(new Error(`at most ${MAX_IMPORT_BATCH} sessions per import`), { code: "invalid-input" });
+      }
+      json(200, await sessions.importBackendSessions!(projectId, ids));
+      return true;
+    }
+
     if (!path.startsWith("/api/control/sessions")) return false;
 
     if (path === "/api/control/sessions" && method === "GET") {

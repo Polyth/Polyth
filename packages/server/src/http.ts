@@ -71,7 +71,9 @@ export function createHttpServer(deps: HttpDeps): Server {
 
       if (path === "/api/sessions" && method === "GET") {
         const projectId = url.searchParams.get("projectId") ?? undefined;
-        if (projectId) await sessions.sync(projectId).catch((err) => console.warn("[polyth] OpenCode session sync failed", err));
+        // F14: listing no longer silently adopts every backend session — the
+        // sidebar's "Import sessions…" sheet browses and adopts selectively
+        // via /api/control/backend-sessions.
         return json(res, 200, await sessions.list(projectId));
       }
       if (path === "/api/sessions" && method === "POST") {

@@ -18,6 +18,7 @@ import type {
   Project,
   ProjectPatch,
   QueueItemDto,
+  RuntimeSession,
   SendResult,
   SessionEvent,
   SessionFolderDto,
@@ -919,4 +920,12 @@ export const api = {
   /** Small-model chat→note DRAFT; saving still goes through knowledgeCreate. */
   assistNote: (sessionId: string) =>
     jfetch<{ title: string; body: string }>(`/api/sessions/${encodeURIComponent(sessionId)}/assist/note`, json("POST", {})),
+
+  // ---- backend session import (F14 import half) ----------------------------------
+  backendSessions: (projectId: string) =>
+    jfetch<{ items: RuntimeSession[]; total: number }>(
+      `/api/control/backend-sessions?projectId=${encodeURIComponent(projectId)}`,
+    ),
+  importBackendSessions: (projectId: string, ids: string[]) =>
+    jfetch<SessionProjection[]>(`/api/control/backend-sessions/import`, json("POST", { projectId, ids })),
 };

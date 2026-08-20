@@ -140,6 +140,20 @@ commits, and the L-queue packages started landing.
   terminal id; tabs rename on double-click; closing a running shell asks
   first.
 
+### Added — L7: sidebar import-browse for backend sessions (F14 import half)
+
+- `GET /api/sessions` no longer silently adopts every OpenCode session. New
+  `GET /api/control/backend-sessions?projectId=` lists unadopted backend
+  sessions (deduped, most recent first) plus an honest `total`, and
+  `POST /api/control/backend-sessions/import {projectId, ids}` adopts only the
+  selected ones through the existing `backendSessionId` seam —
+  `session/imported` is logged before the projection broadcasts, and history
+  still hydrates lazily on first open. `sessions.sync` remains the
+  programmatic bulk-adopt path.
+- Sidebar project menu gained "Import sessions…": a sheet with per-session
+  checkboxes, select-all, and distinct empty states ("no OpenCode sessions
+  found" vs "all N already imported", PS#766).
+
 ### Removed — stale planning artifacts (`3928fe9`)
 
 - `docs/features/*` — the 19-file upstream research dump (polyth/Paseo PR

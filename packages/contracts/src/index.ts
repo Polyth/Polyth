@@ -248,6 +248,11 @@ export interface SessionService {
   queueList?(sessionId: string): Promise<QueueItemDto[]>;
   queueReorder?(sessionId: string, ids: string[]): Promise<QueueItemDto[]>;
   queueRemove?(sessionId: string, queueId: string): Promise<void>;
+  /** F14 import half: backend sessions not yet adopted (items) + how many the
+   *  backend has in total, so the UI can tell "none exist" from "all imported". */
+  backendSessions?(projectId: string): Promise<{ items: RuntimeSession[]; total: number }>;
+  /** Adopt the selected backend sessions; returns the new projections. */
+  importBackendSessions?(projectId: string, backendIds: string[]): Promise<SessionProjection[]>;
 }
 
 export interface SessionOrganizePatch {

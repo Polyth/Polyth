@@ -11,6 +11,7 @@ import { friendlyError } from "../settings.ts";
 import { Icon } from "../icons.tsx";
 import ProjectForm from "./ProjectForm.tsx";
 import SessionList from "./sidebar/SessionList.tsx";
+import ImportSessionsDialog from "./ImportSessionsDialog.tsx";
 
 function projectGlyph(name: string): string {
   const words = name.trim().split(/[\s\-_/]+/).filter(Boolean);
@@ -30,6 +31,7 @@ export default function Sidebar() {
   const [renamingProject, setRenamingProject] = useState<string | null>(null);
   const [projectName, setProjectName] = useState("");
   const [projectMenu, setProjectMenu] = useState<string | null>(null);
+  const [importingProject, setImportingProject] = useState<string | null>(null);
 
   const onAddProject = async (path: string, name: string, create: boolean) => {
     if (create) await createProject(path, name || undefined);
@@ -124,6 +126,10 @@ export default function Sidebar() {
                   }}>New session in worktree…</button>
                   <button role="menuitem" onClick={() => {
                     setProjectMenu(null);
+                    setImportingProject(p.id);
+                  }}>Import sessions…</button>
+                  <button role="menuitem" onClick={() => {
+                    setProjectMenu(null);
                     setRenamingProject(p.id);
                     setProjectName(p.name);
                   }}>Rename project</button>
@@ -162,6 +168,9 @@ export default function Sidebar() {
           </button>
         </div>
       </nav>
+      {importingProject && (
+        <ImportSessionsDialog projectId={importingProject} onClose={() => setImportingProject(null)} />
+      )}
     </>
   );
 }

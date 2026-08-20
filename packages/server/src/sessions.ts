@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import { resolve } from "node:path";
 import type {
   AgentProfile, AgentRuntime, AttachmentRef, CreateSessionInput, DeliveryMode, JsonObject, QueueItemDto, RuntimeEvent,
-  SendResult, SessionEvent, SessionFolderDto, SessionOrganizePatch, SessionProjection, SessionRef,
+  RuntimeSession, SendResult, SessionEvent, SessionFolderDto, SessionOrganizePatch, SessionProjection, SessionRef,
   SessionService, SessionPersistence, UserTurnInput,
 } from "@polyth/contracts";
 import type { ProjectService } from "@polyth/contracts";
@@ -467,6 +467,28 @@ export function createSessionService(deps: {
     return { turnId: randomUUID() };
   };
 
+  // F14 import half: one scan shared by browse/import/sync — backend sessions
+  // deduped by id, already-adopted ones filtered out, most recent first.
+  const backendSessionScan = async (projectId: string) => {
+    const project = await projects.get(projectId);
+    if (!project) throw Object.assign(new Error("project not found"), { code: "not-found" });
+    const runtime = await runtimes.forProject(projectId, project.path);
+    const known = await store.projections(projectId);
+    const adopted = new Set(known.map((s) => s.backendSessionId).filter(Boolean));
+    const seen = new Set<string>();
+    const items: RuntimeSession[] = [];
+    let total = 0;
+    for (const remote of await runtime.sessions()) {
+      if (seen.has(remote.id)) continue;
+      seen.add(remote.id);
+      total += 1;
+      if (adopted.has(remote.id)) continue;
+      items.push(remote);
+    }
+    items.sort((a, b) => b.updatedAt - a.updatedAt);
+    return { project, runtime, items, total };
+  };
+
   const service: SessionService = {
     async create(input: CreateSessionInput): Promise<SessionRef> {
       const project = await projects.get(input.projectId);
@@ -847,13 +869,24 @@ export function createSessionService(deps: {
       });
     },
     async sync(projectId) {
-      const project = await projects.get(projectId);
-      if (!project) throw Object.assign(new Error("project not found"), { code: "not-found" });
-      const runtime = await runtimes.forProject(projectId, project.path);
-      const known = await store.projections(projectId);
-      const byBackend = new Map(known.filter((session) => session.backendSessionId).map((session) => [session.backendSessionId!, session]));
-      for (const remote of await runtime.sessions()) {
-        if (byBackend.has(remote.id)) continue;
+      // F14: bulk adopt-everything, kept for programmatic use. The web now
+      // browses /api/control/backend-sessions and imports selectively.
+      const { items } = await backendSessionScan(projectId);
+      if (items.length > 0) {
+        await this.importBackendSessions!(projectId, items.map((r) => r.id));
+      }
+      return store.projections(projectId);
+    },
+    async backendSessions(projectId) {
+      const { items, total } = await backendSessionScan(projectId);
+      return { items, total };
+    },
+    async importBackendSessions(projectId, backendIds) {
+      const { project, runtime, items } = await backendSessionScan(projectId);
+      const wanted = new Set(backendIds);
+      const out: SessionProjection[] = [];
+      for (const remote of items) {
+        if (!wanted.has(remote.id)) continue;
         const id = randomUUID();
         const projection: SessionProjection = {
           id, projectId, title: remote.title, status: "idle", backendSessionId: remote.id,
@@ -867,8 +900,9 @@ export function createSessionService(deps: {
         await store.upsertProjection(projection);
         await appendAndBroadcast(id, "session/imported", { backendSessionId: remote.id }, { ignorable: true });
         broadcast.projection(projection);
+        out.push(projection);
       }
-      return store.projections(projectId);
+      return out;
     },
     async snapshot(sessionId) {
       const p = await store.projection(sessionId);
