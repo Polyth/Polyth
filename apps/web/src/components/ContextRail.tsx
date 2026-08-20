@@ -5,7 +5,8 @@ import { PLUGIN_LABELS, togglePlugin, usePrefs, type PluginId } from "../prefs.t
 import { fmtCost, fmtTokens } from "../format.ts";
 import { Icon } from "../icons.tsx";
 import { useEscape } from "../useEscape.ts";
-import type { SessionProjection } from "@polyth/contracts";
+import type { ModelDescriptor, SessionProjection } from "@polyth/contracts";
+import { contextGauge } from "../reduce.ts";
 import ChangesPanel from "./ChangesPanel.tsx";
 import FilesPanel from "./FilesPanel.tsx";
 import KnowledgePanel from "./KnowledgePanel.tsx";
@@ -32,7 +33,15 @@ const JUMPS: Array<{ view: AppView; plugin: PluginId; label: string; shortLabel:
   { view: "github", plugin: "github", label: "GitHub", shortLabel: "GitHub", icon: Icon.github },
 ];
 
-function ContextView({ session, model }: { session: SessionProjection | null; model: ReturnType<typeof useActiveModel> }) {
+function ContextView({
+  session,
+  model,
+  models,
+}: {
+  session: SessionProjection | null;
+  model: ReturnType<typeof useActiveModel>;
+  models: ModelDescriptor[];
+}) {
   const events = useStore((s) => (s.activeSessionId ? s.events[s.activeSessionId] : undefined) ?? NO_EVENTS);
   if (!session) return <div className="rail-empty">Session status, usage, and pinned context will appear here.</div>;
 
@@ -43,6 +52,12 @@ function ContextView({ session, model }: { session: SessionProjection | null; mo
     if (e.type === "context/unpinned") pinned.set(String((e.data as Record<string, unknown>).path ?? ""), false);
   }
   const pinnedPaths = [...pinned.entries()].filter(([, v]) => v).map(([k]) => k);
+  const activeModel = model.contextUsage?.model ?? model.turn?.model ?? session.model;
+  const descriptor = activeModel
+    ? models.find((candidate) =>
+        candidate.providerID === activeModel.providerID && candidate.modelID === activeModel.modelID)
+    : undefined;
+  const gauge = contextGauge(model, descriptor?.context);
 
   return (
     <div>
@@ -65,6 +80,25 @@ function ContextView({ session, model }: { session: SessionProjection | null; mo
         <span className="k">Tokens</span>
         <span className="mono">{fmtTokens(model.totals.input + model.totals.output)}</span>
       </div>
+      <div className="stat-row context-estimate-row">
+        <span className="k">Context estimate</span>
+        <span className="mono">
+          {gauge.known
+            ? `${fmtTokens(gauge.inputTokens)} / ${fmtTokens(gauge.contextTokens)} (${gauge.percent}%)`
+            : "Unknown"}
+        </span>
+      </div>
+      <div
+        className={`context-meter ${gauge.level}`}
+        role="meter"
+        aria-label={gauge.known ? `${gauge.percent}% context estimate` : "Context estimate unknown"}
+        aria-valuemin={0}
+        aria-valuemax={100}
+        {...(gauge.known ? { "aria-valuenow": gauge.percent } : {})}
+      >
+        <span style={{ width: `${gauge.known ? gauge.percent : 0}%` }} />
+      </div>
+      {!gauge.known && <div className="muted context-estimate-note">Model context metadata is unavailable.</div>}
       <div className="stat-row">
         <span className="k">Cost</span>
         <span className="mono">{model.totals.cost > 0 ? fmtCost(model.totals.cost) : "—"}</span>
@@ -123,6 +157,7 @@ export default function ContextRail() {
   const rail = useStore((s) => s.railPlugin);
   const view = useStore((s) => s.activeView);
   const projectId = useStore((s) => s.activeProjectId);
+  const models = useStore((s) => s.models);
   const prefs = usePrefs();
   const session = useStore((s) => s.sessions.find((x) => x.id === s.activeSessionId) ?? null);
   const model = useActiveModel();
@@ -153,7 +188,7 @@ export default function ContextRail() {
             <button className="rail-toggle" onClick={() => setRailPlugin(null)} title="Close panel" aria-label="Close panel">»</button>
           </div>
           <div className="rail-body">
-            {open.rail === "context" && <ContextView session={session} model={model} />}
+            {open.rail === "context" && <ContextView session={session} model={model} models={models} />}
             {open.rail === "usage" && <UsagePanel model={model} />}
             {open.rail === "events" && <EventsView events={events} />}
             {open.rail === "changes" && <ChangesPanel />}

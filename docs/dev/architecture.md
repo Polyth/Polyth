@@ -161,7 +161,8 @@ a generic collapsed row (never crash).
   preview/git/terminal/schedule/github), overlays (onboarding/palette/search/settings),
   rail plugin, editor file + location.
 - `reduce.ts` — event log → `RenderModel` (messages, pending permissions/questions,
-  task deltas, edit-tool changed paths, subagents, usage) — pure and testable.
+  task deltas, edit-tool changed paths, subagents, lifetime usage plus the latest
+  turn input sample for the context estimate) — pure and testable.
 - `sync.ts` — reconnect-safe WS client (see above).
 - `api.ts` — typed fetch wrappers over the REST surface.
 - `slots.ts` — client slot registry mirroring the `UiSlot` union; exposed as
@@ -173,7 +174,7 @@ a generic collapsed row (never crash).
   with edit-tool fallback), `QuestionCards` (multi-question stepper),
   `PermissionBanner` (preview + scoped Always), `WorkStatus` (usage/tasks/agents
   sections + tracker pills), `ContextRail` (files/changes/context/usage/events/knowledge
-  rail with `contextRail.tabs` slot), `CommandPalette` (commands/workspaces/files,
+  rail with context-window estimate and `contextRail.tabs` slot), `CommandPalette` (commands/workspaces/files,
   `Mod+P` file mode), `EditorView` (pane tabs via `workspace/paneStore.ts`, per-tab
   IME-safe autosave, `editor/liveFile.ts` revision/conflict checks, sandboxed
   Markdown/HTML previews), `GitView`, `GithubView`/`PullRequestView`,

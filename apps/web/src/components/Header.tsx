@@ -4,8 +4,7 @@ import { forkSession, exportSessionMarkdown } from "../init.ts";
 import { displaySessionTitle } from "../format.ts";
 import { friendlyError, shortcutLabel } from "../settings.ts";
 import { GoalAttachForm } from "./GoalStrip.tsx";
-import type { RenderModel } from "../reduce.ts";
-import type { SessionProjection, ModelDescriptor } from "@polyth/contracts";
+import { contextGauge, type ContextGauge } from "../reduce.ts";
 
 const STROKE = { fill: "none", stroke: "currentColor", strokeWidth: 1.5, strokeLinecap: "round", strokeLinejoin: "round" } as const;
 
@@ -78,27 +77,17 @@ const VIEW_GROUPS: Array<Array<[AppView, string]>> = [
   [["goals", "Goals"], ["multirun", "Multi-run"], ["fusion", "Fusion"], ["walkthrough", "Walkthrough"], ["schedule", "Schedule"], ["github", "GitHub"]],
 ];
 
-function contextUsage(
-  model: RenderModel,
-  session: SessionProjection | null,
-  models: ModelDescriptor[],
-): { pct: number; level: "green" | "yellow" | "red" } | null {
-  const total = model.totals.input + model.totals.output;
-  if (total <= 0 || !session?.model) return null;
-  const desc = models.find(
-    (m) => m.providerID === session.model!.providerID && m.modelID === session.model!.modelID,
-  );
-  if (!desc?.context) return null;
-  const pct = Math.min(100, Math.round((total / desc.context) * 100));
-  return { pct, level: pct < 60 ? "green" : pct < 85 ? "yellow" : "red" };
-}
-
-function ContextRing({ pct, level }: { pct: number; level: "green" | "yellow" | "red" }) {
+function ContextRing({ gauge }: { gauge: ContextGauge }) {
   const r = 13;
   const c = 2 * Math.PI * r;
+  const pct = gauge.known ? gauge.percent : 0;
   const dash = (pct / 100) * c;
+  const label = gauge.known
+    ? `${pct}% context estimate (${gauge.inputTokens} of ${gauge.contextTokens} tokens)`
+    : "Context estimate unknown — model metadata unavailable";
   return (
-    <svg className={`ctx-ring ${level}`} width="30" height="30" viewBox="0 0 36 36" aria-label={`${pct}% context`}>
+    <svg className={`ctx-ring ${gauge.level}`} width="30" height="30" viewBox="0 0 36 36" aria-label={label}>
+      <title>{label}</title>
       <circle cx="18" cy="18" r={r} fill="none" stroke="#343330" strokeWidth="2.6" />
       <circle
         cx="18"
@@ -111,7 +100,9 @@ function ContextRing({ pct, level }: { pct: number; level: "green" | "yellow" | 
         strokeDasharray={`${dash} ${c}`}
         transform="rotate(-90 18 18)"
       />
-      <text x="18" y="19.5" textAnchor="middle" fontSize="8.5" fontWeight="700" fill="currentColor">{pct}</text>
+      <text x="18" y="19.5" textAnchor="middle" fontSize="8.5" fontWeight="700" fill="currentColor">
+        {gauge.known ? pct : "?"}
+      </text>
     </svg>
   );
 }
@@ -178,7 +169,14 @@ export default function Header() {
   const models = useStore((s) => s.models);
   const view = useStore((s) => s.activeView);
   const model = useActiveModel();
-  const ctx = useMemo(() => contextUsage(model, session, models), [model, session, models]);
+  const ctx = useMemo(() => {
+    const ref = model.contextUsage?.model ?? model.turn?.model ?? session?.model;
+    if (!ref) return null;
+    const descriptor = models.find(
+      (candidate) => candidate.providerID === ref.providerID && candidate.modelID === ref.modelID,
+    );
+    return contextGauge(model, descriptor?.context);
+  }, [model, session?.model, models]);
   const [goalFormOpen, setGoalFormOpen] = useState(false);
 
   const firstUserText = useMemo(() => {
@@ -194,7 +192,7 @@ export default function Header() {
   return (
     <>
       <header className="header">
-        {ctx && <ContextRing pct={ctx.pct} level={ctx.level} />}
+        {ctx && <ContextRing gauge={ctx} />}
         <div className="header-session">
           <div className="header-title" title={title}>{title}</div>
           {subtitle && <div className="header-sub">{subtitle}</div>}

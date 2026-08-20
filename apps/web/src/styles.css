@@ -347,6 +347,7 @@ html.light .kbd { background: rgba(0, 0, 0, 0.04); }
 .ctx-ring.green { color: var(--green); }
 .ctx-ring.yellow { color: var(--amber); }
 .ctx-ring.red { color: var(--red); }
+.ctx-ring.unknown { color: var(--muted); }
 .ctx-badge { font-size: 11px; padding: 3px 8px; border-radius: 10px; border: 1px solid var(--border); }
 .ctx-badge.green { color: var(--green); border-color: var(--green); }
 .ctx-badge.yellow { color: var(--amber); border-color: var(--amber); }
@@ -760,6 +761,18 @@ input.notification-preview { font-family: var(--mono); font-size: 12.5px; min-wi
 
 .stat-row { display: flex; justify-content: space-between; padding: 4px 0; border-bottom: 1px solid var(--border-soft); font-size: 12.5px; }
 .stat-row .k { color: var(--muted); }
+.context-estimate-row { align-items: baseline; gap: 8px; }
+.context-estimate-row > :last-child { text-align: right; }
+.context-meter {
+  height: 5px; margin: 7px 0 3px; overflow: hidden; border-radius: 999px;
+  background: var(--hair-strong);
+}
+.context-meter > span { display: block; height: 100%; border-radius: inherit; background: var(--muted); }
+.context-meter.green > span { background: var(--green); }
+.context-meter.yellow > span { background: var(--amber); }
+.context-meter.red > span { background: var(--red); }
+.context-meter.unknown { background: repeating-linear-gradient(90deg, var(--hair-strong) 0 5px, transparent 5px 8px); }
+.context-estimate-note { font-size: 11px; line-height: 1.4; }
 .stat-label { font-size: 12px; color: var(--muted); font-weight: 600; letter-spacing: 0.02em; margin: 12px 0 6px; }
 .status-line { display: flex; align-items: center; gap: 8px; padding: 4px 0; }
 

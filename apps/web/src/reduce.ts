@@ -118,6 +118,27 @@ export interface Totals {
   cost: number;
 }
 
+export interface ContextUsageState {
+  inputTokens: number;
+  model?: ModelRef;
+}
+
+export type ContextGauge =
+  | {
+      known: true;
+      inputTokens: number;
+      contextTokens: number;
+      percent: number;
+      level: "green" | "yellow" | "red";
+    }
+  | {
+      known: false;
+      inputTokens: number;
+      contextTokens: null;
+      percent: null;
+      level: "unknown";
+    };
+
 export interface TurnState {
   turnId: string;
   status: "working" | "stopped" | "aborted" | "failed";
@@ -143,6 +164,8 @@ export interface RenderModel {
   permissions: PendingPermission[];
   questions: PendingQuestion[];
   totals: Totals;
+  /** Latest usage sample for the active/last turn (not lifetime totals). */
+  contextUsage: ContextUsageState | null;
   turn: TurnState | null;
   goal: GoalState | null;
   multirun: MultirunDto | null;
@@ -163,6 +186,7 @@ export function emptyModel(): RenderModel {
     permissions: [],
     questions: [],
     totals: { input: 0, output: 0, reasoning: 0, cacheRead: 0, cacheWrite: 0, cost: 0 },
+    contextUsage: null,
     turn: null,
     goal: null,
     multirun: null,
@@ -173,6 +197,21 @@ export function emptyModel(): RenderModel {
     changedFiles: [],
     rewind: null,
     version: 0,
+  };
+}
+
+export function contextGauge(model: Pick<RenderModel, "contextUsage">, contextTokens?: number): ContextGauge {
+  const inputTokens = Math.max(0, model.contextUsage?.inputTokens ?? 0);
+  if (!Number.isFinite(contextTokens) || !contextTokens || contextTokens <= 0) {
+    return { known: false, inputTokens, contextTokens: null, percent: null, level: "unknown" };
+  }
+  const percent = Math.min(100, Math.max(0, Math.round((inputTokens / contextTokens) * 100)));
+  return {
+    known: true,
+    inputTokens,
+    contextTokens,
+    percent,
+    level: percent < 60 ? "green" : percent < 85 ? "yellow" : "red",
   };
 }
 
@@ -431,12 +470,14 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
       break;
     }
     case "turn/started": {
+      const turnModel = obj(d, "model") as ModelRef | undefined;
       model.turn = {
         turnId: str(d, "turnId") ?? "",
         status: "working",
-        model: obj(d, "model") as ModelRef | undefined,
+        model: turnModel,
         agent: str(d, "agent"),
       };
+      model.contextUsage = { inputTokens: 0, ...(turnModel ? { model: turnModel } : {}) };
       break;
     }
     case "turn/stopped": {
@@ -462,6 +503,11 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
         model.totals.reasoning += t.reasoning ?? 0;
         model.totals.cacheRead += t.cacheRead ?? 0;
         model.totals.cacheWrite += t.cacheWrite ?? 0;
+        const usageModel = obj(d, "model") as ModelRef | undefined;
+        model.contextUsage = {
+          inputTokens: Math.max(0, t.input ?? 0),
+          ...(usageModel ? { model: usageModel } : model.contextUsage?.model ? { model: model.contextUsage.model } : {}),
+        };
       }
       const cost = num(d, "cost");
       if (cost !== undefined) model.totals.cost += cost;
