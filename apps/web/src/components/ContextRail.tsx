@@ -60,7 +60,7 @@ export default function ContextRail() {
 
   useSurfaceVersion(); // re-render when surfaces register/unregister
   useSlotVersion(); // …and when workspace.right.tabs slot items arrive/leave
-  const surfaces = visibleSurfaces([...listSurfaces(), ...slotSurfaces()], prefs.plugins, ctx);
+  const surfaces = visibleSurfaces([...listSurfaces(), ...slotSurfaces(ctx)], prefs.plugins, ctx);
   const open = surfaces.find((s) => s.id === rail) ?? null;
 
   // Keep-alive: panels stay mounted once visited so their state survives
@@ -72,7 +72,7 @@ export default function ContextRail() {
   // A registered surface that became invisible (content gone / plugin off)
   // closes the panel; an id that is merely not registered *yet* (a plugin
   // still loading) is left alone so it opens once the surface arrives.
-  const known = rail !== null && [...listSurfaces(), ...slotSurfaces()].some((s) => s.id === rail);
+  const known = rail !== null && [...listSurfaces(), ...slotSurfaces(ctx)].some((s) => s.id === rail);
   useEffect(() => {
     if (rail !== null && known && open === null) setRailPlugin(null);
   }, [rail, known, open]);
