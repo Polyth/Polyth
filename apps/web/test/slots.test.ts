@@ -123,6 +123,29 @@ test("one failing contribution is isolated by its own boundary", () => {
   assert.equal((el.props as { item: { id: string } }).item.id, "fine");
 });
 
+// EXT-SEAMS-V1 (pure half; the mounted proof lives in slotHostMounted.test.ts):
+// the boundary keys by contribution id, so a same-id registration replacement
+// must reset a failed boundary while an unchanged registration stays closed.
+test("SlotBoundary resets on item replacement but stays failed for the same item", () => {
+  const broken = { id: "flaky", order: 0, render: () => { throw new Error("broken"); } };
+  const fixed = { id: "flaky", order: 0, render: () => "recovered" };
+  const props = { slot: "composer.leading" as const, item: broken, context: {} };
+
+  // Mount: derived state adopts the registration, boundary is open.
+  let state = { failed: false, item: null as unknown };
+  Object.assign(state, SlotBoundary.getDerivedStateFromProps(props, state as never));
+  assert.deepEqual(state, { failed: false, item: broken });
+
+  // Throw: fails closed; a re-render with the *same* registration keeps it closed.
+  Object.assign(state, SlotBoundary.getDerivedStateFromError());
+  assert.equal(state.failed, true);
+  assert.equal(SlotBoundary.getDerivedStateFromProps(props, state as never), null);
+
+  // Same-id replacement (new SlotItem): the boundary reopens for the fix.
+  const replaced = SlotBoundary.getDerivedStateFromProps({ ...props, item: fixed }, state as never);
+  assert.deepEqual(replaced, { failed: false, item: fixed });
+});
+
 test("contracts expose the runtime slot vocabulary used for validation", () => {
   assert.ok(UI_SLOTS.length >= 16);
   assert.ok(isUiSlot("composer.leading"));

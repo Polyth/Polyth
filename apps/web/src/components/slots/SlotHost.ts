@@ -35,13 +35,27 @@ interface SlotBoundaryProps extends SlotItemViewProps {
 
 interface SlotBoundaryState {
   failed: boolean;
+  /** The registration the failure belongs to. The host keys boundaries by the
+   *  stable contribution id, so a same-id replacement reuses this instance;
+   *  tracking the SlotItem lets a fixed/hot-reloaded contribution recover
+   *  (EXT-SEAMS-V1) instead of inheriting the old registration's failure. */
+  item: SlotItem | null;
 }
 
 export class SlotBoundary extends Component<SlotBoundaryProps, SlotBoundaryState> {
-  state: SlotBoundaryState = { failed: false };
+  state: SlotBoundaryState = { failed: false, item: null };
 
-  static getDerivedStateFromError(): SlotBoundaryState {
+  static getDerivedStateFromError(): Partial<SlotBoundaryState> {
     return { failed: true };
+  }
+
+  /** A replaced registration (new SlotItem under the same id) resets the
+   *  boundary; re-renders of the unchanged registration keep it failed closed. */
+  static getDerivedStateFromProps(
+    props: SlotBoundaryProps, state: SlotBoundaryState,
+  ): Partial<SlotBoundaryState> | null {
+    if (state.item !== props.item) return { failed: false, item: props.item };
+    return null;
   }
 
   componentDidCatch(error: Error): void {
