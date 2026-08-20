@@ -4,6 +4,8 @@ import { api } from "./api.ts";
 import { init } from "./init.ts";
 import { exposeSlots } from "./slots.ts";
 import { exposeSurfaces } from "./surfaces.ts";
+import { exposeCapabilities } from "./capabilities.ts";
+import { installShell } from "./shell.ts";
 import { applySettingsToDom } from "./settings.ts";
 import { getState } from "./store.ts";
 import { installVoice } from "./voice.tsx";
@@ -14,6 +16,10 @@ import "./styles.css";
 applySettingsToDom(getState().settings);
 exposeSlots();
 exposeSurfaces();
+exposeCapabilities();
+// Palette commands + keyboard shortcuts: one install, synced with the
+// capability registry from then on (UX-PERSONAS: search sees every tool).
+installShell();
 // Voice registers its composer.leading slot before the first ready App
 // render; installVoice is idempotent so repeated boots stay single-slot.
 installVoice();

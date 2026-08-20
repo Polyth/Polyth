@@ -377,10 +377,9 @@ html.light .kbd { background: rgba(0, 0, 0, 0.04); }
   height: 52px; min-height: 52px; padding: 0 14px 0 18px; border-bottom: 1px solid var(--border-soft);
   background: linear-gradient(180deg, var(--panel), var(--bg));
 }
-/* The title column is the flexible one: it ellipsizes instead of forcing the
-   fixed controls around it to overlap or overflow when a rail squeezes the
-   chat column (UX-A390 geometry gate, persisted-panel state). */
-.header-session { flex: 1; min-width: 0; }
+/* The title shrinks (truncating) before the tool nav does; free space goes to
+   the nav so overflow into More tools tracks the real available width. */
+.header-session { flex: 0 1 auto; min-width: 96px; overflow: hidden; }
 .header-title { font-size: 13.5px; font-weight: 600; letter-spacing: -.014em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .header-sub { color: var(--faint); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .header-spacer { flex: 1; }
@@ -395,13 +394,15 @@ html.light .kbd { background: rgba(0, 0, 0, 0.04); }
 .ctx-badge.yellow { color: var(--amber); border-color: var(--amber); }
 .ctx-badge.red { color: var(--red); border-color: var(--red); }
 
-/* icon view switcher */
+/* icon view switcher: the nav grows into the free header space (its width is
+   the measuring basis for overflow into More tools — it must never depend on
+   its own contents); the inner pill hugs the icons. */
 .view-switcher {
-  display: flex; align-items: center; gap: 2px;
-  /* Cramped wide columns (open rail on a ~850px viewport): the switcher
-     shrinks and scrolls within its own box rather than bleeding over the
-     rail; at normal widths every icon fits and nothing scrolls. */
-  flex-shrink: 1; min-width: 44px; overflow-x: auto; scrollbar-width: none;
+  display: flex; align-items: center; justify-content: flex-end;
+  flex: 1 1 0; min-width: 140px;
+}
+.view-switcher-pill {
+  display: flex; align-items: center; gap: 2px; max-width: 100%;
   padding: 3px; background: var(--panel); border: 1px solid var(--hair); border-radius: 11px;
   box-shadow: var(--inset-hi);
 }
@@ -1169,7 +1170,9 @@ html.light .error-banner { color: #a1352b; }
   display: flex; align-items: flex-start; gap: 10px; padding: 18px 18px 10px;
   border-bottom: 1px solid var(--border-soft);
 }
-.preset-setup-head { flex: 1; min-width: 0; }
+/* The heading never squeezes beside the actions: below ~380px of row space
+   the actions wrap onto their own row instead. */
+.preset-setup-head { flex: 1 1 220px; min-width: 0; }
 .preset-kicker {
   display: inline-block; margin-bottom: 6px; font: 650 10.5px/1.3 var(--mono);
   letter-spacing: 0.09em; text-transform: uppercase; color: var(--accent);

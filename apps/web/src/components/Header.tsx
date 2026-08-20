@@ -115,11 +115,13 @@ function CapabilityNav() {
   const triggerRef = useRef<HTMLButtonElement>(null);
 
   // Overflow: primary items that don't fit move into More tools; they never
-  // disappear. ~36px per icon button + room for the named trigger.
+  // disappear. The nav is a flex-grow container whose width tracks the free
+  // header space (never its own contents — measuring content width would
+  // oscillate). ~36px per icon button + room for the named trigger.
   useEffect(() => {
     const el = navRef.current;
     if (!el || typeof ResizeObserver === "undefined") return;
-    const compute = () => setFit(Math.max(1, Math.floor((el.clientWidth - 96) / 36)));
+    const compute = () => setFit(Math.max(1, Math.floor((el.clientWidth - 110) / 36)));
     compute();
     const ro = new ResizeObserver(compute);
     ro.observe(el);
@@ -201,55 +203,57 @@ function CapabilityNav() {
 
   return (
     <nav className="view-switcher" aria-label="Workspace tools" ref={navRef}>
-      {visible.map((c) => {
-        const overflowed = c === overflowedActive;
-        return (
+      <div className="view-switcher-pill">
+        {visible.map((c) => {
+          const overflowed = c === overflowedActive;
+          return (
+            <button
+              key={c.descriptor.id}
+              className={`view-icon ${isActive(c) ? "active" : ""} ${overflowed ? "view-icon-named" : ""}`}
+              title={c.descriptor.label}
+              aria-label={c.descriptor.label}
+              aria-pressed={isActive(c)}
+              onClick={() => c.descriptor.open()}
+            >
+              {capabilityIcon(c.descriptor.id)}
+              {overflowed && <span className="view-icon-label">{c.descriptor.label}</span>}
+            </button>
+          );
+        })}
+        <div className="more-tools" ref={moreRef}>
           <button
-            key={c.descriptor.id}
-            className={`view-icon ${isActive(c) ? "active" : ""} ${overflowed ? "view-icon-named" : ""}`}
-            title={c.descriptor.label}
-            aria-label={c.descriptor.label}
-            aria-pressed={isActive(c)}
-            onClick={() => c.descriptor.open()}
+            ref={triggerRef}
+            className="more-tools-trigger"
+            aria-expanded={moreOpen}
+            aria-haspopup="menu"
+            onClick={() => toggleMore(!moreOpen)}
           >
-            {capabilityIcon(c.descriptor.id)}
-            {overflowed && <span className="view-icon-label">{c.descriptor.label}</span>}
+            More tools
           </button>
-        );
-      })}
-      <div className="more-tools" ref={moreRef}>
-        <button
-          ref={triggerRef}
-          className="more-tools-trigger"
-          aria-expanded={moreOpen}
-          aria-haspopup="menu"
-          onClick={() => toggleMore(!moreOpen)}
-        >
-          More tools
-        </button>
-        {moreOpen && (
-          <div className="more-tools-popup" role="menu" aria-label="More tools">
-            {groups.map((g) =>
-              g.label === TECHNICAL_GROUP_LABEL ? (
-                <div className="more-tools-group" key={g.label}>
-                  <button
-                    className="more-tools-group-head"
-                    aria-expanded={techOpen}
-                    onClick={() => setTechOpen((v) => !v)}
-                  >
-                    <span className="more-tools-group-arrow" aria-hidden="true">{techOpen ? "▾" : "▸"}</span>
-                    {TECHNICAL_GROUP_LABEL}
-                  </button>
-                  {techOpen && g.items.map(itemButton)}
-                </div>
-              ) : (
-                <div className="more-tools-group" key={g.label}>
-                  <div className="more-tools-group-label">{g.label}</div>
-                  {g.items.map(itemButton)}
-                </div>
-              ))}
-          </div>
-        )}
+          {moreOpen && (
+            <div className="more-tools-popup" role="menu" aria-label="More tools">
+              {groups.map((g) =>
+                g.label === TECHNICAL_GROUP_LABEL ? (
+                  <div className="more-tools-group" key={g.label}>
+                    <button
+                      className="more-tools-group-head"
+                      aria-expanded={techOpen}
+                      onClick={() => setTechOpen((v) => !v)}
+                    >
+                      <span className="more-tools-group-arrow" aria-hidden="true">{techOpen ? "▾" : "▸"}</span>
+                      {TECHNICAL_GROUP_LABEL}
+                    </button>
+                    {techOpen && g.items.map(itemButton)}
+                  </div>
+                ) : (
+                  <div className="more-tools-group" key={g.label}>
+                    <div className="more-tools-group-label">{g.label}</div>
+                    {g.items.map(itemButton)}
+                  </div>
+                ))}
+            </div>
+          )}
+        </div>
       </div>
     </nav>
   );

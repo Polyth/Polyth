@@ -180,3 +180,26 @@ export function useResolvedCapabilities(): ResolvedCapability[] {
   useSyncExternalStore(subscribePresetState, getPresentation);
   return currentResolvedCapabilities();
 }
+
+// ---- extension seam -----------------------------------------------------------
+
+export interface PolythCapabilitiesApi {
+  registerCapability: typeof registerCapability;
+  listCapabilities: typeof listCapabilities;
+}
+
+declare global {
+  interface Window {
+    __polythCapabilities?: PolythCapabilitiesApi;
+  }
+}
+
+/** Managed extensions register navigation capabilities dynamically (like
+ *  window.__polythSurfaces for panels). A registered capability appears in
+ *  More tools and command search immediately, defaulting to the `more` tier —
+ *  registration never touches preset state. */
+export function exposeCapabilities(): void {
+  if (typeof window !== "undefined") {
+    window.__polythCapabilities = { registerCapability, listCapabilities };
+  }
+}
