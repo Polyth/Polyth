@@ -3,12 +3,14 @@
 import { randomUUID } from "node:crypto";
 import { resolve } from "node:path";
 import type {
-  AgentProfile, AgentRuntime, AttachmentRef, CreateSessionInput, DeliveryMode, JsonObject, QueueItemDto, RuntimeEvent,
+  AgentProfile, AgentRuntime, AttachmentRef, AutoAcceptSetting, CreateSessionInput, DeliveryMode, JsonObject,
+  QueueItemDto, RuntimeEvent,
   RuntimeSession, SendResult, SessionEvent, SessionFolderDto, SessionOrganizePatch, SessionProjection, SessionRef,
   SessionService, SessionPersistence, UserTurnInput,
 } from "@polyth/contracts";
 import type { ProjectService } from "@polyth/contracts";
-import type { PermissionService } from "@polyth/permissions";
+import type { AutoAcceptStore, PermissionService } from "@polyth/permissions";
+import { resolveAutoAccept } from "@polyth/permissions";
 import { activeRewind } from "@polyth/session";
 import { buildPermissionPreview, PERMISSION_ALLOWED_SCOPES } from "./permissionPreview.ts";
 import { sanitizeAttachments } from "./attachments.ts";
@@ -84,6 +86,15 @@ export function createSessionService(deps: {
     stat(root: string, rel: string): Promise<{ kind: "file" | "dir"; size: number }>;
     maxBytes: number;
   };
+  /** F18: per-session auto-accept policy store (nearest-parent resolution). */
+  autoAccept?: AutoAcceptStore;
+  /** F18: human-needed / turn-ended signals for out-of-page delivery (web
+   *  push). Fired only when a card actually reaches the UI — auto-accepted
+   *  permissions never notify. */
+  notify?: {
+    attention(sessionId: string, kind: "permission" | "question"): void;
+    turnStopped(sessionId: string, reason: "completed" | "aborted" | "error"): void;
+  };
 }): SessionService {
   const { store, projects, permissions, runtimes, broadcast } = deps;
   const hooks = deps.hooks ?? {};
@@ -118,6 +129,21 @@ export function createSessionService(deps: {
     broadcast.projection(next);
   };
 
+  // F18: effective auto-accept — own explicit setting, else the nearest
+  // ancestor's (subagents/forks carry parentId). The chain is prefetched from
+  // projections; resolveAutoAccept is the pure, cycle-guarded core.
+  const effectiveAutoAccept = async (sessionId: string): Promise<boolean> => {
+    if (!deps.autoAccept) return false;
+    const parents = new Map<string, string | undefined>();
+    let id: string | undefined = sessionId;
+    while (id && !parents.has(id) && parents.size < 64) {
+      const proj = await store.projection(id);
+      parents.set(id, proj?.parentId);
+      id = proj?.parentId;
+    }
+    return resolveAutoAccept(sessionId, (x) => deps.autoAccept!.get(x), (x) => parents.get(x));
+  };
+
   const onRuntimeEvent = async (sessionId: string, ev: RuntimeEvent) => {
     // invariant: model-visible content hits the log before any UI sees it
     switch (ev.type) {
@@ -135,6 +161,7 @@ export function createSessionService(deps: {
         lastTurnId.delete(sessionId);
         admitting.delete(sessionId);
         await updateProjection(sessionId, { status: ev.reason === "error" ? "failed" : "idle" });
+        deps.notify?.turnStopped(sessionId, ev.reason);
         if (ev.reason === "completed") hooks.onTurnCompleted?.(sessionId, replyText(sessionId));
         // FIFO dispatch of queued follow-ups; never into an error state (a
         // failing session would silently burn the whole queue otherwise).
@@ -160,8 +187,14 @@ export function createSessionService(deps: {
           const reply = verdict === "allow" ? "once" : "reject";
           await appendAndBroadcast(sessionId, "permission/resolved", { requestId: ev.requestId, reply }, { ignorable: true });
           await sessionRuntime.get(sessionId)?.replyPermission(sessionId, ev.requestId, reply);
+        } else if (await effectiveAutoAccept(sessionId)) {
+          // F18: policy-approved. Both events land at once so the log stays
+          // truthful while the UI never shows a banner; deny rules above win.
+          await appendAndBroadcast(sessionId, "permission/resolved", { requestId: ev.requestId, reply: "once", auto: true }, { ignorable: true });
+          await sessionRuntime.get(sessionId)?.replyPermission(sessionId, ev.requestId, "once");
         } else {
           await updateProjection(sessionId, { status: "waiting" });
+          deps.notify?.attention(sessionId, "permission");
         }
         break;
       }
@@ -169,6 +202,7 @@ export function createSessionService(deps: {
         const { type: _t, ...qData } = ev;
         await appendAndBroadcast(sessionId, "question/asked", qData as unknown as JsonObject, { ignorable: true });
         await updateProjection(sessionId, { status: "waiting" });
+        deps.notify?.attention(sessionId, "question");
         break;
       }
       case "usage/recorded": {
@@ -509,9 +543,13 @@ export function createSessionService(deps: {
       const backendSessionId = await rt.ensureSession({ ...input, sessionId, cwd });
       wire(sessionId, rt);
       const now = Date.now();
+      // F18: a subagent/fork child starts under the nearest parent's policy —
+      // the indicator must be honest from the first projection broadcast.
+      const inheritedAutoAccept = input.parentId ? await effectiveAutoAccept(input.parentId) : false;
       const projection: SessionProjection = {
         id: sessionId, projectId: project.id,
         ...(input.parentId ? { parentId: input.parentId } : {}),
+        ...(inheritedAutoAccept ? { autoAccept: true } : {}),
         title: input.title || "New session", status: "idle",
         ...(input.worktreePath ? {
           worktreePath: input.worktreePath,
@@ -1004,6 +1042,66 @@ export function createSessionService(deps: {
       const proj = await store.projection(sessionId);
       if (proj?.status === "waiting") await updateProjection(sessionId, { status: "working" });
     },
+
+    async autoAcceptGet(sessionId) {
+      if (!deps.autoAccept) throw Object.assign(new Error("auto-accept unavailable"), { code: "unsupported" });
+      const proj = await store.projection(sessionId);
+      if (!proj) throw Object.assign(new Error("session not found"), { code: "not-found" });
+      return { setting: deps.autoAccept.get(sessionId), effective: await effectiveAutoAccept(sessionId) };
+    },
+
+    async autoAcceptSet(sessionId, setting: AutoAcceptSetting) {
+      if (!deps.autoAccept) throw Object.assign(new Error("auto-accept unavailable"), { code: "unsupported" });
+      const proj = await store.projection(sessionId);
+      if (!proj) throw Object.assign(new Error("session not found"), { code: "not-found" });
+      if (setting !== "on" && setting !== "off" && setting !== "inherit") {
+        throw Object.assign(new Error("setting must be on, off, or inherit"), { code: "invalid-input" });
+      }
+      deps.autoAccept.set(sessionId, setting);
+      // Refresh the effective flag everywhere the change can be seen through a
+      // parent chain, and reconcile pending requests where the policy now
+      // approves them (OC#2158: enabling resolves requests already waiting).
+      for (const p of await store.projections()) {
+        const effective = await effectiveAutoAccept(p.id);
+        if ((p.autoAccept ?? false) !== effective) await updateProjection(p.id, { autoAccept: effective });
+        if (effective && p.status === "waiting") await reconcilePendingPermissions(p.id);
+      }
+      return { setting, effective: await effectiveAutoAccept(sessionId) };
+    },
   };
+
+  /** F18 reconcile-on-enable: resolve every pending runtime permission request
+   *  of the session with an auto "once". Composer-shell confirmations are
+   *  skipped — those confirm a command the USER typed and must stay manual. */
+  const reconcilePendingPermissions = async (sessionId: string): Promise<void> => {
+    const evs = await store.events(sessionId);
+    const resolved = new Set<string>();
+    const answeredQs = new Set<string>();
+    for (const e of evs) {
+      const rid = (e.data as { requestId?: string }).requestId;
+      if (!rid) continue;
+      if (e.type === "permission/resolved") resolved.add(rid);
+      if (e.type === "question/answered") answeredQs.add(rid);
+    }
+    let openQuestions = 0;
+    let resolvedAny = false;
+    for (const e of evs) {
+      const rid = (e.data as { requestId?: string }).requestId;
+      if (!rid) continue;
+      if (e.type === "question/asked" && !answeredQs.has(rid)) openQuestions++;
+      if (e.type !== "permission/requested" || resolved.has(rid)) continue;
+      if (e.producerPlugin === "composer-shell") continue;
+      resolved.add(rid);
+      resolvedAny = true;
+      await appendAndBroadcast(sessionId, "permission/resolved", { requestId: rid, reply: "once", auto: true }, { ignorable: true });
+      await sessionRuntime.get(sessionId)?.replyPermission(sessionId, rid, "once").catch(() => {});
+    }
+    // The turn resumes once its blocker is answered; questions keep it waiting.
+    if (resolvedAny && openQuestions === 0) {
+      const proj = await store.projection(sessionId);
+      if (proj?.status === "waiting") await updateProjection(sessionId, { status: "working" });
+    }
+  };
+
   return service;
 }

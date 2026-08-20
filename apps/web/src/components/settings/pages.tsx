@@ -6,6 +6,7 @@ import { setOverlay, setActiveView, updateSettings, useStore } from "../../store
 import { setUiSettings, useUiSettings } from "../../uiPrefs.ts";
 import { groupQuotaWindows, setGroupCollapsed, setProviderHidden, useUsagePrefs } from "../../usagePrefs.ts";
 import { requestNotifyPermission } from "../../notify.ts";
+import { disablePush, enablePush, pushSubscription, pushUnsupportedReason } from "../../push.ts";
 import { api, type GitStatus, type QuotaSnapshotDto, type QuotaWindowDto, type QuotaPaceDto } from "../../api.ts";
 import { addProject, createProject } from "../../init.ts";
 import { fmtCost, fmtTokens } from "../../format.ts";
@@ -376,6 +377,59 @@ export function NotificationsPage() {
           <button className="small-btn" onClick={requestNotifyPermission}>Grant permission</button>
         </Row>
       )}
+      <PushRow />
+    </>
+  );
+}
+
+/** F18: web push toggle — notifications keep arriving after the tab closes.
+ *  Subscription state lives in the browser's push manager, not localStorage. */
+function PushRow() {
+  const unsupported = pushUnsupportedReason();
+  const [on, setOn] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState("");
+  const [tested, setTested] = useState("");
+  useEffect(() => {
+    void pushSubscription().then((s) => setOn(!!s)).catch(() => {});
+  }, []);
+
+  const toggle = (v: boolean) => {
+    if (busy) return;
+    setBusy(true);
+    setErr("");
+    void (v ? enablePush() : disablePush())
+      .then(() => setOn(v))
+      .catch((e) => setErr(e instanceof Error ? e.message : String(e)))
+      .finally(() => setBusy(false));
+  };
+
+  return (
+    <>
+      <Row
+        label="Push notifications"
+        hint={unsupported ?? "Delivered by the browser's push service even when this tab is closed. Clicking opens the session."}
+        itemId="notifications.push"
+      >
+        {unsupported
+          ? <span className="tag">unavailable</span>
+          : <Toggle on={on} onChange={toggle} label="Push notifications" />}
+      </Row>
+      {on && !unsupported && (
+        <Row label="Test push" hint="Sends a test notification through the push service (hide the tab to see it).">
+          <button
+            className="small-btn"
+            disabled={busy}
+            onClick={() => {
+              setTested("");
+              void api.pushTest().then((r) => setTested(`sent to ${r.sent} device${r.sent === 1 ? "" : "s"}`))
+                .catch((e) => setErr(e instanceof Error ? e.message : String(e)));
+            }}
+          >Send test</button>
+          {tested && <span className="muted">{tested}</span>}
+        </Row>
+      )}
+      {err && <div className="muted" role="alert">{err}</div>}
     </>
   );
 }

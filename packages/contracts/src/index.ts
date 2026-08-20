@@ -216,6 +216,19 @@ export interface SessionProjection {
   pinned?: { position: number };
   /** Small-model idle assist (F9); stale once the log grows past atSeq. */
   assist?: SessionAssist;
+  /** F18: effective auto-accept policy (own setting or nearest parent's) —
+   *  drives the loud header indicator. Never a global default. */
+  autoAccept?: boolean;
+}
+
+/** F18: per-session auto-accept policy. "inherit" (the default) walks to the
+ *  nearest ancestor with an explicit setting; the root default is off.
+ *  "off" on a child is the explicit opt-out from an inherited "on". */
+export type AutoAcceptSetting = "on" | "off" | "inherit";
+
+export interface AutoAcceptDto {
+  setting: AutoAcceptSetting;
+  effective: boolean;
 }
 
 export interface SessionService {
@@ -253,6 +266,10 @@ export interface SessionService {
   backendSessions?(projectId: string): Promise<{ items: RuntimeSession[]; total: number }>;
   /** Adopt the selected backend sessions; returns the new projections. */
   importBackendSessions?(projectId: string, backendIds: string[]): Promise<SessionProjection[]>;
+  /** F18: read the session's auto-accept policy (own setting + effective). */
+  autoAcceptGet?(sessionId: string): Promise<AutoAcceptDto>;
+  /** F18: set the policy; enabling reconciles already-pending requests. */
+  autoAcceptSet?(sessionId: string, setting: AutoAcceptSetting): Promise<AutoAcceptDto>;
 }
 
 export interface SessionOrganizePatch {

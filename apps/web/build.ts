@@ -19,3 +19,6 @@ await build({
   logLevel: "info",
 });
 await copyFile(join(here, "src/index.html"), join(here, "dist/index.html"));
+// F18: the service worker must live at the origin root (its own scope), so it
+// is copied verbatim instead of being bundled.
+await copyFile(join(here, "sw.js"), join(here, "dist/sw.js"));

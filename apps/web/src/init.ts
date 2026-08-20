@@ -7,6 +7,7 @@ import { friendlyError } from "./settings.ts";
 import * as store from "./store.ts";
 import type { AttachmentRef, JsonObject } from "@polyth/contracts";
 import { suggestWorktreeBranch } from "./worktreeSessions.ts";
+import { installPushDeepLinks } from "./push.ts";
 
 let sync: SyncClient | null = null;
 let lastSubSession: string | undefined;
@@ -21,6 +22,9 @@ function fetchBranch(projectId: string): void {
 export function init(): void {
   void boot();
   startSync();
+  // F18: notification clicks from the service worker land here when a tab
+  // already exists (postMessage instead of a second window).
+  installPushDeepLinks(openSession);
   store.subscribeStore(() => {
     const s = store.getState();
     if (s.activeSessionId !== lastSubSession) {
@@ -53,14 +57,30 @@ async function boot(): Promise<void> {
     store.setProjects(projects);
     store.setModels(models);
     store.setAgents(agents);
-    const savedProject = localStorage.getItem("polyth.activeProjectId");
-    const activeProject = projects.find((p) => p.id === savedProject) ?? projects[0];
-    if (activeProject) {
-      store.activateProject(activeProject.id);
-      await refreshSessions(activeProject.id);
-      const savedSession = localStorage.getItem("polyth.activeSessionId");
-      if (savedSession && store.getState().sessions.some((session) => session.id === savedSession)) {
-        await openSession(savedSession);
+    // F18: push deep link — the service worker opens "/?session=<id>" when no
+    // tab exists; a stale id falls through to the normal boot path.
+    const urlSession = new URLSearchParams(location.search).get("session");
+    if (urlSession) history.replaceState(null, "", location.pathname);
+    let openedFromUrl = false;
+    if (urlSession) {
+      try {
+        await openSession(urlSession);
+        openedFromUrl = true;
+      } catch { /* stale or foreign session id */ }
+    }
+    if (openedFromUrl) {
+      const pid = store.getState().activeProjectId;
+      if (pid) await refreshSessions(pid);
+    } else {
+      const savedProject = localStorage.getItem("polyth.activeProjectId");
+      const activeProject = projects.find((p) => p.id === savedProject) ?? projects[0];
+      if (activeProject) {
+        store.activateProject(activeProject.id);
+        await refreshSessions(activeProject.id);
+        const savedSession = localStorage.getItem("polyth.activeSessionId");
+        if (savedSession && store.getState().sessions.some((session) => session.id === savedSession)) {
+          await openSession(savedSession);
+        }
       }
     }
   } catch (err) {

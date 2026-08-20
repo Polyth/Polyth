@@ -5,6 +5,7 @@ import { displaySessionTitle } from "../format.ts";
 import { friendlyError, shortcutLabel } from "../settings.ts";
 import { GoalAttachForm } from "./GoalStrip.tsx";
 import { contextGauge, type ContextGauge } from "../reduce.ts";
+import { api } from "../api.ts";
 
 const STROKE = { fill: "none", stroke: "currentColor", strokeWidth: 1.5, strokeLinecap: "round", strokeLinejoin: "round" } as const;
 
@@ -107,6 +108,39 @@ function ContextRing({ gauge }: { gauge: ContextGauge }) {
   );
 }
 
+/** F18: loud auto-accept indicator + toggle. The server owns the policy; the
+ *  effective value rides the projection so an inherited "on" (subagent under
+ *  an enabled parent) lights up too. Session-scoped only — never global. */
+function AutoAcceptChip({ sessionId, effective }: { sessionId: string; effective: boolean }) {
+  const [busy, setBusy] = useState(false);
+  const toggle = () => {
+    if (busy) return;
+    setBusy(true);
+    // The response also reconciles pending requests server-side; the updated
+    // projection broadcast flips `effective` here without local state.
+    void api.autoAcceptSet(sessionId, effective ? "off" : "on")
+      .catch((e) => setUiError(friendlyError("Couldn’t change auto-accept", e)))
+      .finally(() => setBusy(false));
+  };
+  return (
+    <button
+      className={`auto-accept-chip ${effective ? "on" : ""}`}
+      title={effective
+        ? "Auto-accept is ON: permission requests in this session are approved automatically. Click to turn off."
+        : "Auto-accept permission requests in this session"}
+      aria-pressed={effective}
+      disabled={busy}
+      onClick={toggle}
+    >
+      <svg width="12" height="12" viewBox="0 0 16 16" {...STROKE}>
+        <path d="M8 1.8 13.5 4v4.2c0 3.2-2.3 5.3-5.5 6-3.2-.7-5.5-2.8-5.5-6V4z" />
+        {effective && <path d="M5.4 8.2 7.2 10l3.4-3.6" />}
+      </svg>
+      {effective ? "Auto-accept on" : "Auto-accept"}
+    </button>
+  );
+}
+
 function OverflowMenu({ sessionId, onGoal }: { sessionId: string | null; onGoal: () => void }) {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
@@ -197,6 +231,7 @@ export default function Header() {
           <div className="header-title" title={title}>{title}</div>
           {subtitle && <div className="header-sub">{subtitle}</div>}
         </div>
+        {session && <AutoAcceptChip sessionId={session.id} effective={!!session.autoAccept} />}
         <nav className="view-switcher" aria-label="Views">
           {VIEW_GROUPS.map((group, gi) => (
             <span className="view-group" key={gi}>

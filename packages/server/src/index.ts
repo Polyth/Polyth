@@ -7,7 +7,7 @@ import { createStore, deriveMessages } from "@polyth/session";
 import { CAP, type AgentRuntime, type JsonObject, type RuntimeEvent, type SessionEvent, type SessionProjection, type WalkthroughSource } from "@polyth/contracts";
 import { createConfigApplier, createOpenCodeRuntime, type OpenCodeAdapterOptions } from "@polyth/backend-opencode";
 import { createPluginRegistry } from "@polyth/plugins";
-import { createPermissionService } from "@polyth/permissions";
+import { createAutoAcceptStore, createPermissionService } from "@polyth/permissions";
 import { createGoalService, type GoalService } from "@polyth/goals";
 import { createFileService, MAX_RAW_BYTES } from "@polyth/files";
 import { createCommandService } from "@polyth/commands";
@@ -49,6 +49,9 @@ import { browserRoutes } from "./routes/browser.ts";
 import { dictationRoutes } from "./routes/dictation.ts";
 import { createAuthService } from "./auth.ts";
 import { authRoutes } from "./routes/auth.ts";
+import { createPushNotifier, createPushService } from "./push.ts";
+import { pushRoutes } from "./routes/push.ts";
+import { autoAcceptRoutes } from "./routes/autoAccept.ts";
 import { createBehaviorService } from "./behavior.ts";
 import { createMcpConfigService } from "./mcp.ts";
 import { createVoiceSettings } from "./voice.ts";
@@ -274,10 +277,23 @@ export async function boot(opts: BootOptions = {}) {
     trustedDir: process.env.POLYTH_TRUSTED_PLUGIN_DIR ?? `${dataDir}/trusted-plugins`,
   });
 
+  // --- F18: web push (VAPID keys minted once into the data dir) + the
+  // notifier bridging the session service's attention/turn-stopped seam.
+  // Auto-accepted permissions never reach this seam, so they never push.
+  const push = createPushService({ file: `${dataDir}/push.json` });
+  const pushNotifier = createPushNotifier({
+    send: (payload) => push.send(payload),
+    projection: (sessionId) => store.projection(sessionId),
+  });
+
   const sessions = createSessionService({
     store, projects, permissions, runtimes, broadcast, queue: store, org: store, profiles: store, behavior,
     worktrees: git.worktrees,
     shell: terminals,
+    // F18: server-owned per-session auto-accept policy (nearest-parent
+    // resolution for subagents; session-scoped only, never a global default).
+    autoAccept: createAutoAcceptStore(`${dataDir}/auto-accept.json`),
+    notify: pushNotifier,
     attachments: {
       stat: async (root, rel) => {
         const st = await files.stat(root, rel);
@@ -661,6 +677,8 @@ export async function boot(opts: BootOptions = {}) {
       },
     }),
     controlRoutes(sessions),
+    autoAcceptRoutes(sessions),
+    pushRoutes(push),
     snippetRoutes({ projects, commands }),
     profileRoutes({
       store,

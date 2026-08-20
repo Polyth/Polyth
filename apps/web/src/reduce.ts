@@ -82,6 +82,8 @@ export interface PendingPermission {
   tool?: string;
   status: "pending" | "resolved";
   reply?: "once" | "always" | "reject";
+  /** F18: resolved by the session's auto-accept policy, not a human click. */
+  auto?: boolean;
   time: number;
   /** Server-generated, secret-redacted preview (WP15; old events lack it). */
   preview?: { title: string; lines: string[]; risk?: "low" | "medium" | "high" };
@@ -455,6 +457,7 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
         p.status = "resolved";
         const reply = str(d, "reply");
         if (reply === "once" || reply === "always" || reply === "reject") p.reply = reply;
+        if (d.auto === true) p.auto = true; // F18: policy-approved, no human click
       }
       break;
     }

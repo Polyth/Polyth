@@ -3,6 +3,8 @@ import type {
   AgentDescriptor,
   AgentProfile,
   AttachmentRef,
+  AutoAcceptDto,
+  AutoAcceptSetting,
   BulkSessionResult,
   DictationSessionDto,
   FusionDto,
@@ -933,6 +935,18 @@ export const api = {
     ),
   importBackendSessions: (projectId: string, ids: string[]) =>
     jfetch<SessionProjection[]>(`/api/control/backend-sessions/import`, json("POST", { projectId, ids })),
+
+  // ---- auto-accept policy (F18) ------------------------------------------------------
+  autoAcceptGet: (sessionId: string) =>
+    jfetch<AutoAcceptDto>(`/api/sessions/${encodeURIComponent(sessionId)}/permissions/auto-accept`),
+  autoAcceptSet: (sessionId: string, setting: AutoAcceptSetting) =>
+    jfetch<AutoAcceptDto>(`/api/sessions/${encodeURIComponent(sessionId)}/permissions/auto-accept`, json("PATCH", { setting })),
+
+  // ---- web push (F18) -----------------------------------------------------------------
+  pushKey: () => jfetch<{ publicKey: string; subscriptions: number }>(`/api/push/key`),
+  pushSubscribe: (sub: unknown) => jfetch<{ ok: boolean }>(`/api/push/subscribe`, json("POST", sub)),
+  pushUnsubscribe: (endpoint: string) => jfetch<{ ok: boolean }>(`/api/push/subscribe`, json("DELETE", { endpoint })),
+  pushTest: () => jfetch<{ sent: number; dropped: number }>(`/api/push/test`, json("POST", {})),
 
   // ---- access control (F16) --------------------------------------------------------
   authStatus: () => jfetch<AuthStatusDto>(`/api/auth/status`),

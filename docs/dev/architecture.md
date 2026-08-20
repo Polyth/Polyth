@@ -63,6 +63,14 @@ statically by the server with SPA fallback.
   steer falls back to queue with `delivery/fallback-queued`), queue CRUD + dispatch,
   runtime event → durable log translation, permission preview enrichment, question/permission
   replies with `dismissPending`, turn hooks (goals), usage/projection updates.
+  F18: per-session auto-accept policy (`on`/`off`/`inherit`, nearest-parent
+  resolution from `@polyth/permissions`, store in `data/auto-accept.json`) —
+  policy-approved requests append `permission/requested` +
+  `permission/resolved{auto:true}` back-to-back and reply to the runtime without
+  ever setting `waiting`; enabling reconciles already-pending requests
+  (composer-shell confirmations stay manual); the effective flag rides the
+  projection. A `notify` seam fires `attention` (permission/question that
+  actually reached the UI) and `turnStopped` for out-of-page delivery.
 - `http.ts` — core REST (health, projects, sessions, models/agents) + `RouteHandler`
   chain + static bundle. Feature packages never edit this file. F16: one auth gate
   runs before all routing — every `/api` path 401s without a session cookie except
@@ -77,6 +85,14 @@ statically by the server with SPA fallback.
   (hashed at boot, never persisted) or a `passwordHash` in `auth.json`;
   `POLYTH_UI_PASSWORD_LOCALHOST=optional` lets loopback connections skip auth.
   Off entirely when no password is configured.
+- `push.ts` (F18) — web push in `node:crypto` only: aes128gcm payload encryption
+  (RFC 8291) + VAPID ES256 authorization (RFC 8292). Keys are minted once into
+  `data/push.json` (rotation would orphan every browser subscription) and
+  subscriptions persist beside them; `send` encrypts per subscription and drops
+  dead endpoints (404/410). `createPushNotifier` bridges the session service's
+  notify seam to templated payloads (same allowlisted bounded semantics as the
+  in-page notifier): subagent completions attribute to the parent session,
+  aborted turns stay silent, and auto-accepted permissions never reach the seam.
 - `ws.ts` — `/ws` gateway: `subscribe` (gap-fill from the durable log, then live, seq-deduped),
   projections fan-out, per-socket rate limits, browser frame stream with newest-frame
   backpressure + `afterRevision` resume, dictation audio path with its own rate budget.
@@ -87,7 +103,8 @@ statically by the server with SPA fallback.
   browse+import of unadopted OpenCode sessions), snippets, profiles
   (agent profiles + model/agent aggregation), settings (behavior/MCP/plugins/system info),
   voice (engine settings + TTS proxy + summarize), assist (F9 settings + recap
-  read + chat→note), auth (F16 status/login/logout/logout-all/device sessions), goals.
+  read + chat→note), auth (F16 status/login/logout/logout-all/device sessions),
+  autoAccept (F18 per-session policy GET/PATCH), push (F18 key/subscribe/test), goals.
 - `behavior.ts` / `mcp.ts` — server-owned behavior instructions (`behavior.md`) and MCP
   server config (`mcp.json`), applied to OpenCode through the adapter's config applier.
   Disabled MCP servers are removed from the applied config entirely (F10); secret
@@ -151,6 +168,11 @@ are the only public `/api` paths — login mints an httpOnly SameSite=Strict
 `polyth_auth` cookie, 401 `invalid-password` on a miss, 429 `rate-limited` +
 `Retry-After` when the IP window locks; POST `logout` / `logout-all`, GET
 `sessions` device list, DELETE `sessions/:id` per-device revoke),
+`/api/sessions/:id/permissions/auto-accept` (F18: GET `{setting, effective}`,
+PATCH `{setting: on|off|inherit}` — enabling reconciles pending requests),
+`/api/push/key` (VAPID public key + subscription count), `/api/push/subscribe`
+(POST registers the browser's PushSubscription, DELETE removes by endpoint),
+`/api/push/test` (POST sends a test notification to every subscription),
 `/api/sessions/:id/goal*`.
 
 Errors are `{ error: code, message }` with mapped status; a dead OpenCode transport
@@ -181,7 +203,9 @@ them, so replay/fork keeps them), `turn/started`, `assistant/chunk`,
 `tool/error`, `turn/stopped`, `turn/failed`, `usage/recorded`.
 
 Requests: `permission/requested` (with server-built preview + allowed scopes),
-`permission/resolved`, `question/asked`, `question/answered`.
+`permission/resolved` (carries `auto: true` when the session's F18 auto-accept
+policy resolved it — appended immediately after the request so the log stays
+truthful while no banner shows), `question/asked`, `question/answered`.
 
 Session lifecycle: `session/created`, `session/forked`, `session/archived`,
 `session/restored`, `session/metadata-changed`, `session/imported`,
@@ -286,6 +310,17 @@ a generic collapsed row (never crash).
   re-locks the UI (reload-on-unlock keeps store/WS state clean). Settings →
   Access lists remembered devices with per-device revoke and "Sign out
   everywhere".
+- Auto-accept + push (F18): the `Header` shows a loud pulsing chip while the
+  session's effective auto-accept is on (click toggles; server owns the
+  policy); `reduce.ts` marks policy-resolved permissions `auto` so the
+  timeline can label them. `push.ts` registers the root-scope service worker
+  (`sw.js`, plain JS copied verbatim to `dist/`), mints a `PushSubscription`
+  against the server's VAPID key, and keeps the server list in sync;
+  Settings → Notifications has the toggle + test button (needs a secure
+  context — https or loopback). The worker shows notifications only when no
+  visible window exists and deep-links clicks: `postMessage` to an existing
+  tab (handled in `init.ts` via `installPushDeepLinks`) or a new window at
+  `/?session=<id>`, which `boot()` resolves and strips.
 
 ## UI slot model
 
@@ -308,7 +343,9 @@ extending a slot must never require editing `App.tsx`.
 `quota-providers.json` (optional, hand-written: HTTP quota adapter specs),
 `walkthroughs.json`, `behavior.md`, `mcp.json`, `plugins/` + `trusted-plugins/`,
 `browser-shots/`, `auth.json` (F16: password hash + remembered device sessions —
-token SHA-256 hashes only, never tokens or passwords).
+token SHA-256 hashes only, never tokens or passwords), `auto-accept.json` (F18:
+explicit per-session on/off records — "inherit" is the absence of a record),
+`push.json` (F18: VAPID keypair + push subscriptions).
 
 ## Security posture
 
