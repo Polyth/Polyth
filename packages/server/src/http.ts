@@ -141,6 +141,13 @@ export function createHttpServer(deps: HttpDeps): Server {
         if (!sessions.clearRewind) throw Object.assign(new Error("session rewind unavailable"), { code: "unsupported" });
         return json(res, 200, await sessions.clearRewind(m[1]!));
       }
+      m = path.match(/^\/api\/sessions\/([^/]+)\/shell$/);
+      if (m && method === "POST") {
+        if (!sessions.runShell) throw Object.assign(new Error("composer shell unavailable"), { code: "unsupported" });
+        const b = await readBody(req);
+        if (typeof b.command !== "string") throw Object.assign(new Error("command required"), { code: "invalid-input" });
+        return json(res, 200, await sessions.runShell(m[1]!, b.command));
+      }
       m = path.match(/^\/api\/sessions\/([^/]+)\/permission\/([^/]+)$/);
       if (m && method === "POST") {
         const b = await readBody(req);

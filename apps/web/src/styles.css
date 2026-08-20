@@ -546,6 +546,9 @@ html.light .composer-card { background: var(--elevated); box-shadow: 0 24px 60px
   box-shadow: 0 24px 60px -26px rgba(0, 0, 0, 0.9), 0 0 0 3px rgba(244, 155, 91, 0.09), var(--inset-hi);
 }
 .composer-input { position: relative; }
+.composer-mode-label {
+  color: var(--accent); font-size: 11px; font-weight: 600; padding: 6px 10px 0;
+}
 .composer-card textarea {
   display: block; width: 100%; min-height: 86px; max-height: 40vh; resize: none;
   background: none; border: 0; outline: none; padding: 15px 17px 6px;

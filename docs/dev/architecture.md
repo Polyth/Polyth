@@ -85,7 +85,7 @@ statically by the server with SPA fallback.
 ## REST surface
 
 Core: `/api/health`, `/api/projects` (+`/create`, DELETE), `/api/sessions`
-(list/create/snapshot/events/message/fork/rewind/rewind-clear/abort/archive/restore/bulk),
+(list/create/snapshot/events/message/shell/fork/rewind/rewind-clear/abort/archive/restore/bulk),
 `/api/sessions/:id/queue` (+`/order`, DELETE item),
 `/api/sessions/:id/permission/:reqId`, `/api/sessions/:id/question/:reqId` (+`/reject`),
 `/api/models`, `/api/agents`.

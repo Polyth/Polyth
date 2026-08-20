@@ -199,6 +199,8 @@ export interface SessionService {
   rewind?(sessionId: string, atSeq: number): Promise<SessionEvent>;
   /** Restore the tail hidden by the active rewind marker. */
   clearRewind?(sessionId: string): Promise<SessionEvent>;
+  /** Execute a composer `!` command through the shell permission family. */
+  runShell?(sessionId: string, command: string): Promise<ShellTurnResult>;
   archive(sessionId: string): Promise<void>;
   restore(sessionId: string): Promise<void>;
   list(projectId?: string): Promise<SessionProjection[]>;
@@ -486,6 +488,12 @@ export interface SendResult {
   turnId?: string;
   queueId?: string;
   queued?: boolean;
+}
+
+export interface ShellTurnResult {
+  callId: string;
+  status: "pending" | "completed" | "rejected";
+  requestId?: string;
 }
 
 // ---------------------------------------------------------------- editor & files (WP4/WP6)

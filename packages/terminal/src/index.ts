@@ -25,6 +25,8 @@ interface TermSession {
 
 export interface TerminalService {
   create(input: TerminalCreateInput): Promise<{ id: string }>;
+  /** Run a bounded, non-interactive command and capture merged output. */
+  run(input: TerminalCreateInput & { cmd: string }, opts?: { timeoutMs?: number; maxOutputBytes?: number }): Promise<TerminalRunResult>;
   write(id: string, data: string): void;
   resize(id: string, cols: number, rows: number): void;
   close(id: string): Promise<void>;
@@ -34,6 +36,13 @@ export interface TerminalService {
   onData(cb: (id: string, data: string) => void): Disposable;
   /** fired on process exit (also after close()); last callback wins for an id */
   onExit(cb: (id: string, exitCode: number | null) => void): Disposable;
+}
+
+export interface TerminalRunResult {
+  output: string;
+  exitCode: number | null;
+  timedOut: boolean;
+  truncated: boolean;
 }
 
 const defaultShell = (): string => process.env.SHELL || "/bin/sh";
@@ -80,6 +89,54 @@ export function createTerminalService(): TerminalService {
       };
       sessions.set(id, s);
       return { id };
+    },
+
+    async run(input, opts = {}) {
+      const timeoutMs = Math.max(100, Math.min(opts.timeoutMs ?? 30_000, 120_000));
+      const maxOutputBytes = Math.max(1_024, Math.min(opts.maxOutputBytes ?? 64 * 1_024, 1024 * 1024));
+      let terminalId = "";
+      let output = "";
+      let truncated = false;
+      let timedOut = false;
+      let settled = false;
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      let resolveResult: (result: TerminalRunResult) => void = () => {};
+      const result = new Promise<TerminalRunResult>((resolve) => { resolveResult = resolve; });
+      const dataSub = service.onData((id, data) => {
+        if (id !== terminalId || settled) return;
+        output += data;
+        if (Buffer.byteLength(output, "utf8") > maxOutputBytes) {
+          truncated = true;
+          // Retain a little extra by character first, then tighten by bytes.
+          output = output.slice(-maxOutputBytes);
+          while (Buffer.byteLength(output, "utf8") > maxOutputBytes) output = output.slice(1);
+        }
+      });
+      const finish = (exitCode: number | null) => {
+        if (settled) return;
+        settled = true;
+        if (timer) clearTimeout(timer);
+        dataSub.dispose();
+        exitSub.dispose();
+        resolveResult({ output, exitCode, timedOut, truncated });
+        if (terminalId) void service.close(terminalId).catch(() => {});
+      };
+      const exitSub = service.onExit((id, exitCode) => {
+        if (id === terminalId) finish(exitCode);
+      });
+      try {
+        terminalId = (await service.create(input)).id;
+        timer = setTimeout(() => {
+          timedOut = true;
+          void service.close(terminalId).then(() => finish(null)).catch(() => finish(null));
+        }, timeoutMs);
+        timer.unref?.();
+      } catch (err) {
+        dataSub.dispose();
+        exitSub.dispose();
+        throw err;
+      }
+      return result;
     },
 
     write(id, data) {

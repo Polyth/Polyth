@@ -72,3 +72,26 @@ test("resize + write to a closed terminal are no-ops", async () => {
   await t.close(id);
   assert.doesNotThrow(() => { t.resize(id, 120, 40); t.write(id, "x"); });
 });
+
+test("run captures bounded command output and removes the short-lived terminal", async () => {
+  const t = newService();
+  const result = await t.run(
+    { projectId: "p", cwd, cmd: "printf 'prefix-'; printf '1234567890'" },
+    { timeoutMs: 5_000, maxOutputBytes: 1_024 },
+  );
+  assert.equal(result.exitCode, 0);
+  assert.equal(result.timedOut, false);
+  assert.equal(result.truncated, false);
+  assert.equal(result.output, "prefix-1234567890");
+  assert.equal(t.list("p").length, 0);
+});
+
+test("run times out a long command", async () => {
+  const t = newService();
+  const result = await t.run(
+    { projectId: "p", cwd, cmd: "sleep 5" },
+    { timeoutMs: 100, maxOutputBytes: 1_024 },
+  );
+  assert.equal(result.timedOut, true);
+  assert.equal(t.list("p").length, 0);
+});

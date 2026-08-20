@@ -252,6 +252,7 @@ export async function boot(opts: BootOptions = {}) {
 
   const sessions = createSessionService({
     store, projects, permissions, runtimes, broadcast, queue: store, org: store, profiles: store, behavior,
+    shell: terminals,
     expand: async (projectId, text) => {
       const project = await projects.get(projectId);
       const r = await commands.expand(project?.path ?? process.cwd(), text);

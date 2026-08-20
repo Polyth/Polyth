@@ -65,6 +65,13 @@ export function createSessionService(deps: {
   /** Global behavior instructions (WP9): revision+digest logged before a turn
    *  starts under a newly applied revision, keeping replay reproducible. */
   behavior?: { current(): Promise<{ revision: string; digest: string } | null> };
+  /** Bounded composer-shell executor backed by @polyth/terminal. */
+  shell?: {
+    run(
+      input: { projectId: string; cwd: string; cmd: string },
+      opts?: { timeoutMs?: number; maxOutputBytes?: number },
+    ): Promise<{ output: string; exitCode: number | null; timedOut: boolean; truncated: boolean }>;
+  };
 }): SessionService {
   const { store, projects, permissions, runtimes, broadcast } = deps;
   const hooks = deps.hooks ?? {};
@@ -207,6 +214,68 @@ export function createSessionService(deps: {
 
   const turnActive = (sessionId: string): boolean =>
     lastTurnId.has(sessionId) || admitting.has(sessionId);
+
+  const finishShell = async (
+    sessionId: string,
+    proj: SessionProjection,
+    command: string,
+    callId: string,
+    rejected = false,
+  ): Promise<void> => {
+    await appendAndBroadcast(sessionId, "tool/call", {
+      callId,
+      tool: "shell",
+      input: { command },
+    }, { producerPlugin: "composer-shell" });
+    if (rejected) {
+      await appendAndBroadcast(sessionId, "tool/result", {
+        callId,
+        tool: "shell",
+        output: "Command rejected by the shell permission policy.",
+        title: `!${command}`,
+        input: { command },
+        metadata: { rejected: true },
+      }, { producerPlugin: "composer-shell" });
+      return;
+    }
+    if (!deps.shell) throw Object.assign(new Error("composer shell unavailable"), { code: "unsupported" });
+    const project = await projects.get(proj.projectId);
+    if (!project) throw Object.assign(new Error("project not found"), { code: "not-found" });
+    try {
+      const result = await deps.shell.run({
+        projectId: proj.projectId,
+        cwd: proj.worktreePath ?? project.path,
+        cmd: command,
+      }, { timeoutMs: 30_000, maxOutputBytes: 64 * 1_024 });
+      const suffix = result.timedOut
+        ? "\n[command timed out]"
+        : result.truncated
+          ? "\n[earlier output truncated]"
+          : "";
+      await appendAndBroadcast(sessionId, "tool/result", {
+        callId,
+        tool: "shell",
+        output: `${result.output}${suffix}`,
+        title: `!${command}`,
+        input: { command },
+        metadata: {
+          exitCode: result.exitCode,
+          timedOut: result.timedOut,
+          truncated: result.truncated,
+        },
+      }, { producerPlugin: "composer-shell" });
+    } catch (err) {
+      await appendAndBroadcast(sessionId, "tool/result", {
+        callId,
+        tool: "shell",
+        output: err instanceof Error ? err.message : String(err),
+        title: `!${command}`,
+        input: { command },
+        metadata: { failed: true },
+      }, { producerPlugin: "composer-shell" });
+      throw err;
+    }
+  };
 
   /** Atomic send-time arbitration: reject open questions and deny open
    *  permissions of this exact session before the new message is admitted.
@@ -564,6 +633,41 @@ export function createSessionService(deps: {
       return appendAndBroadcast(sessionId, "session/rewind-cleared", { rewindSeq: rewind.markerSeq });
     },
 
+    async runShell(sessionId, command) {
+      const proj = await store.projection(sessionId);
+      if (!proj) throw Object.assign(new Error("session not found"), { code: "not-found" });
+      if (!deps.shell) throw Object.assign(new Error("composer shell unavailable"), { code: "unsupported" });
+      if (turnActive(sessionId) || proj.status === "working" || proj.status === "waiting") {
+        throw Object.assign(new Error("cannot run a composer shell command during an active turn"), { code: "conflict" });
+      }
+      const cmd = command.trim();
+      if (!cmd || cmd.length > 8_000 || cmd.includes("\0")) {
+        throw Object.assign(new Error("shell command required (≤8000 chars)"), { code: "invalid-input" });
+      }
+      const callId = `shell_${randomUUID()}`;
+      const verdict = permissions.evaluate("shell", [cmd], proj.projectId, sessionId);
+      if (verdict === "deny") {
+        await finishShell(sessionId, proj, cmd, callId, true);
+        return { callId, status: "rejected" };
+      }
+      if (verdict === "ask") {
+        const requestId = `per_${randomUUID()}`;
+        await appendAndBroadcast(sessionId, "permission/requested", {
+          requestId,
+          permission: "shell",
+          patterns: [cmd],
+          tool: "shell",
+          callId,
+          preview: buildPermissionPreview({ permission: "shell", patterns: [cmd], tool: "shell" }) as unknown as JsonObject,
+          allowedScopes: [...PERMISSION_ALLOWED_SCOPES],
+        }, { ignorable: true, producerPlugin: "composer-shell" });
+        await updateProjection(sessionId, { status: "waiting" });
+        return { callId, requestId, status: "pending" };
+      }
+      await finishShell(sessionId, proj, cmd, callId);
+      return { callId, status: "completed" };
+    },
+
     async archive(sessionId) {
       const proj = await store.projection(sessionId);
       if (!proj) throw Object.assign(new Error("session not found"), { code: "not-found" });
@@ -698,14 +802,25 @@ export function createSessionService(deps: {
     },
 
     async replyPermission(sessionId, requestId, reply, scope) {
+      const priorEvents = await store.events(sessionId);
+      const original = priorEvents.find(
+        (e) => e.type === "permission/requested" && (e.data as { requestId?: string }).requestId === requestId,
+      );
+      const shellRequest = original && (original.data as { permission?: string }).permission === "shell"
+        ? original
+        : undefined;
+      if (shellRequest && priorEvents.some(
+        (e) => e.type === "permission/resolved" && (e.data as { requestId?: string }).requestId === requestId,
+      )) {
+        throw Object.assign(new Error("shell permission request already resolved"), { code: "conflict" });
+      }
       await appendAndBroadcast(sessionId, "permission/resolved", { requestId, reply, ...(scope ? { scope } : {}) }, { ignorable: true });
       const proj = await store.projection(sessionId);
       if (reply === "always") {
         // Persist an allow rule derived from the original request. Scope is
         // explicit (WP15): session/project confine the rule; old clients that
         // send no scope keep the pre-existing user-wide behavior.
-        const evs = await store.events(sessionId);
-        const req = evs.find((e) => e.type === "permission/requested" && (e.data as { requestId?: string }).requestId === requestId);
+        const req = original;
         if (req) {
           const d = req.data as { permission?: string; patterns?: string[] };
           for (const pattern of d.patterns?.length ? d.patterns : ["*"]) {
@@ -719,8 +834,16 @@ export function createSessionService(deps: {
           }
         }
       }
-      await sessionRuntime.get(sessionId)?.replyPermission(sessionId, requestId, reply);
-      if (proj?.status === "waiting") await updateProjection(sessionId, { status: "working" });
+      if (shellRequest && proj) {
+        const d = shellRequest.data as { patterns?: string[]; callId?: string };
+        const command = d.patterns?.[0] ?? "";
+        const callId = d.callId ?? `shell_${randomUUID()}`;
+        await finishShell(sessionId, proj, command, callId, reply === "reject");
+        if (proj.status === "waiting") await updateProjection(sessionId, { status: "idle" });
+      } else {
+        await sessionRuntime.get(sessionId)?.replyPermission(sessionId, requestId, reply);
+        if (proj?.status === "waiting") await updateProjection(sessionId, { status: "working" });
+      }
     },
 
     async replyQuestion(sessionId, requestId, answers) {
