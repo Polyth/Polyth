@@ -73,7 +73,8 @@ statically by the server with SPA fallback.
   multirun, fusion, walkthrough (+review flow), schedule, usage, knowledge, github,
   control (`/api/control/sessions` list/new/fork/abort), snippets, profiles
   (agent profiles + model/agent aggregation), settings (behavior/MCP/plugins/system info),
-  voice (engine settings + TTS proxy + summarize), goals.
+  voice (engine settings + TTS proxy + summarize), assist (F9 settings + recap
+  read + chat→note), goals.
 - `behavior.ts` / `mcp.ts` — server-owned behavior instructions (`behavior.md`) and MCP
   server config (`mcp.json`), applied to OpenCode through the adapter's config applier.
   Disabled MCP servers are removed from the applied config entirely (F10); secret
@@ -85,6 +86,12 @@ statically by the server with SPA fallback.
   (pauses on permission waits, hard iteration limit, structurally cannot merge/push).
 - `oneshot.ts` — single-turn utility completion on a runtime (used by goals auditor,
   commit messages, fusion synthesis, walkthrough generation).
+- `assist.ts` (F9) — idle assist watcher: N quiet seconds after `turn/stopped` the
+  small model writes a ≤20-word recap + ONE suggested follow-up, stored on the
+  projection keyed to the log tail seq (never the event log — not model-visible
+  until the user sends it); any newer event makes it stale. Hard off-by-default
+  switch in `data/assist.json`; one flight per session. The same seam distills
+  chat→note drafts.
 
 ## REST surface
 
@@ -119,6 +126,10 @@ bridge exists), `/api/plugins` (+install), `/api/system/info`,
 (proxy to the configured OpenAI-compatible `/audio/speech`, buffered audio back, only
 standard fields forwarded, honest 503 when unconfigured), `/api/tts/summarize`
 (small-model shortening for read-aloud; 503 when no small model is wired),
+`/api/settings/assist` (GET/PUT the F9 hard switch + quiet time),
+`/api/sessions/:id/assist` (freshness-checked recap+suggestion — 404 `stale` the
+moment the log outgrows it), `/api/sessions/:id/assist/note` (small-model chat→note
+DRAFT; saving goes through the normal `/api/knowledge` flow),
 `/api/sessions/:id/goal*`.
 
 Errors are `{ error: code, message }` with mapped status; a dead OpenCode transport
@@ -205,6 +216,8 @@ a generic collapsed row (never crash).
   issue/PR as the composer draft; merge is gated on `mergeable` + explicit
   confirm; `PrCreatePanel` in GitView prefills via describe but never
   auto-submits),
+  `AssistStrip` (F9: fresh recap under the last message + a dismissible
+  suggestion chip that fills the composer and never sends),
   `ScheduleView`, `GoalsView`/`GoalStrip`, `MultiRunView`, `FusionView`,
   `WalkthroughView`/`GeneratedWalkthrough`, `PreviewView` (iframe + browser driving),
   `TerminalView`, `SettingsModal`/`SettingsView` + `settings/registry.ts`

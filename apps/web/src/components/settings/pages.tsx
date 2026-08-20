@@ -12,6 +12,7 @@ import { EmptyState, PageHead, Row, Seg, Toggle } from "./parts.tsx";
 import { refreshProfiles, useProfiles } from "../../profiles.ts";
 import AgentProfileForm from "../AgentProfileForm.tsx";
 import { parseMcpServersJson, type McpImportResult } from "../../mcpImport.ts";
+import type { AssistSettingsDto } from "../../api.ts";
 import type { AgentProfile, InstalledPluginDto, McpServerDto, McpTransport, SystemInfoDto } from "@polyth/contracts";
 
 function ThemeCard({
@@ -155,6 +156,12 @@ export function AppearancePage() {
 export function ChatPage() {
   const ui = useUiSettings();
   const settings = useStore((s) => s.settings);
+  // F9 hard switch lives server-side: disabled means nothing is generated at all
+  const [assist, setAssist] = useState<AssistSettingsDto | null>(null);
+  useEffect(() => { void api.assistSettings().then(setAssist).catch(() => setAssist(null)); }, []);
+  const saveAssist = (patch: Partial<AssistSettingsDto>) => {
+    void api.assistSettingsSave(patch).then(setAssist).catch(() => {});
+  };
   return (
     <>
       <PageHead title="Chat" blurb="Conversation layout and delivery preferences." />
@@ -170,6 +177,28 @@ export function ChatPage() {
       <Row label="Send on Enter" hint="When off, Enter inserts a newline and Mod+Enter sends. / for commands, # for snippets, @ to attach files." itemId="chat.sendOnEnter">
         <Toggle on={settings.sendOnEnter} onChange={(sendOnEnter) => updateSettings({ sendOnEnter })} label="Send on Enter" />
       </Row>
+      {assist && (
+        <Row
+          label="Idle recap & suggestion"
+          hint="After a session goes quiet, the small model writes a ≤20-word recap and one suggested next prompt. Spends tokens only while enabled; off by default."
+          itemId="chat.assist"
+        >
+          <Toggle on={assist.enabled} onChange={(enabled) => saveAssist({ enabled })} label="Idle recap" />
+        </Row>
+      )}
+      {assist?.enabled && (
+        <Row label="Quiet time" hint="Seconds of inactivity after a reply before the recap is generated (10–3600).">
+          <div className="editor-font-control">
+            <input
+              type="number" min={10} max={3600} value={assist.idleSeconds}
+              aria-label="Assist quiet time in seconds"
+              onChange={(e) => setAssist({ ...assist, idleSeconds: Number(e.target.value) })}
+              onBlur={(e) => saveAssist({ idleSeconds: Number(e.target.value) })}
+            />
+            <span className="muted">s</span>
+          </div>
+        </Row>
+      )}
     </>
   );
 }

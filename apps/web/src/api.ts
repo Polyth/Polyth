@@ -294,6 +294,10 @@ export interface VoiceSettingsDto {
   ttsConfigured: boolean;
 }
 
+// ---- idle assist (F9) ----------------------------------------------------------
+export interface AssistSettingsDto { enabled: boolean; idleSeconds: number }
+export interface AssistDto { recap: string; suggestion: string; atSeq: number; generatedAt: number }
+
 // ---- PR detail + checks (WP11) ----------------------------------------------
 export interface PrDetailDto {
   number: number; title: string; state: string; isDraft: boolean; author: string;
@@ -902,4 +906,15 @@ export const api = {
     return res.arrayBuffer();
   },
   ttsSummarize: (text: string) => jfetch<{ text: string }>(`/api/tts/summarize`, json("POST", { text })),
+
+  // ---- idle assist (F9): recap + suggestion, chat→note --------------------------
+  assistSettings: () => jfetch<AssistSettingsDto>(`/api/settings/assist`),
+  assistSettingsSave: (patch: Partial<AssistSettingsDto>) =>
+    jfetch<AssistSettingsDto>(`/api/settings/assist`, json("PUT", patch)),
+  /** 404s when nothing fresh exists — callers rely on the projection instead. */
+  assistGet: (sessionId: string) =>
+    jfetch<AssistDto>(`/api/sessions/${encodeURIComponent(sessionId)}/assist`),
+  /** Small-model chat→note DRAFT; saving still goes through knowledgeCreate. */
+  assistNote: (sessionId: string) =>
+    jfetch<{ title: string; body: string }>(`/api/sessions/${encodeURIComponent(sessionId)}/assist/note`, json("POST", {})),
 };

@@ -185,6 +185,16 @@ export interface SessionAttention {
 
 export type WorktreeState = "ready" | "bootstrapping" | "busy" | "missing";
 
+/** F9 idle assist: recap + one suggested follow-up, keyed to the log tail.
+ *  Projection-only — it is never model-visible unless the user sends it. */
+export interface SessionAssist {
+  recap: string;
+  suggestion: string;
+  /** Log seq the assist was generated against; any newer event makes it stale. */
+  atSeq: number;
+  generatedAt: number;
+}
+
 export interface SessionProjection {
   id: string; projectId: string; parentId?: string;
   title: string; status: SessionStatus;
@@ -204,6 +214,8 @@ export interface SessionProjection {
   agentProfileId?: string;
   /** Organization metadata, never written to the session event log. */
   pinned?: { position: number };
+  /** Small-model idle assist (F9); stale once the log grows past atSeq. */
+  assist?: SessionAssist;
 }
 
 export interface SessionService {

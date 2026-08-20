@@ -3,7 +3,7 @@ import { mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createContext } from "@polyth/kernel";
-import { createStore } from "@polyth/session";
+import { createStore, deriveMessages } from "@polyth/session";
 import { CAP, type AgentRuntime, type JsonObject, type RuntimeEvent, type SessionEvent, type SessionProjection, type WalkthroughSource } from "@polyth/contracts";
 import { createConfigApplier, createOpenCodeRuntime, type OpenCodeAdapterOptions } from "@polyth/backend-opencode";
 import { createPluginRegistry } from "@polyth/plugins";
@@ -51,6 +51,8 @@ import { createBehaviorService } from "./behavior.ts";
 import { createMcpConfigService } from "./mcp.ts";
 import { createVoiceSettings } from "./voice.ts";
 import { voiceRoutes } from "./routes/voice.ts";
+import { buildNotePrompt, createAssistService, createAssistSettings, parseNoteReply, type AssistService } from "./assist.ts";
+import { assistRoutes } from "./routes/assist.ts";
 import { createWalkthroughJobService } from "./walkthroughs.ts";
 import { createReviewFlowService, createReviewService } from "./review.ts";
 import { createMultirunRunOne } from "./multirunRunner.ts";
@@ -194,6 +196,9 @@ export async function boot(opts: BootOptions = {}) {
 
   // --- goals workflow plugin (listens on the turn seam, never touches the loop)
   let goals: GoalService | null = null;
+  // F9 idle assist: created after `sessions` (it needs the runtime resolver);
+  // the turn hook below only pings it, so a late assignment is safe.
+  let assist: AssistService | null = null;
   const ensureGoalState = async (sessionId: string) => {
     if (!goals) return null;
     const known = goals.get(sessionId);
@@ -288,6 +293,7 @@ export async function boot(opts: BootOptions = {}) {
           const state = await ensureGoalState(sessionId);
           if (state?.status === "active") await goals?.onTurnCompleted(sessionId, text);
         })().catch((err: unknown) => console.error("[polyth] goal audit failed", err));
+        assist?.onTurnCompleted(sessionId);
       },
       onUsage: (sessionId, tokens) => goals?.recordUsage(sessionId, { ...tokens, cacheRead: 0, cacheWrite: 0 }),
     },
@@ -311,6 +317,46 @@ export async function boot(opts: BootOptions = {}) {
         ...(smallModel() ? { model: smallModel()! } : proj?.model ? { model: proj.model } : {}),
       });
     },
+  });
+
+  // --- F9 idle assist: after N quiet seconds past turn/stopped, a small-model
+  // recap + ONE suggestion lands on the projection (never the event log) keyed
+  // to the log tail seq — any newer event makes it stale. Hard off by default.
+  const assistSettings = createAssistSettings({ file: `${dataDir}/assist.json` });
+  const assistTranscript = async (sessionId: string): Promise<string> => {
+    const msgs = deriveMessages(await store.events(sessionId));
+    const lines: string[] = [];
+    for (const m of msgs.slice(-40)) {
+      if (m.role === "tool") continue;
+      const text = m.parts
+        .filter((p): p is { type: "text"; text: string } => p.type === "text")
+        .map((p) => p.text).join("\n").trim();
+      if (text) lines.push(`${m.role === "user" ? "User" : "Assistant"}: ${text}`);
+    }
+    return lines.join("\n\n").slice(-16_000);
+  };
+  const assistComplete = async (sessionId: string, prompt: string): Promise<string> => {
+    const proj = await store.projection(sessionId);
+    const project = proj ? await projects.get(proj.projectId) : null;
+    const rt = await runtimes.forProject(proj?.projectId ?? "__default__");
+    return oneShot(rt, {
+      cwd: project?.path ?? process.cwd(), prompt,
+      ...(smallModel() ? { model: smallModel()! } : proj?.model ? { model: proj.model } : {}),
+    });
+  };
+  assist = createAssistService({
+    settings: () => assistSettings.get(),
+    latestSeq: (sessionId) => store.latestSeq(sessionId),
+    transcript: assistTranscript,
+    complete: assistComplete,
+    save: async (sessionId, a) => {
+      const current = await store.projection(sessionId);
+      if (!current) return;
+      const next = { ...current, assist: a, updatedAt: Date.now() };
+      await store.upsertProjection(next);
+      broadcast.projection(next);
+    },
+    onError: (sessionId, err) => console.error(`[polyth] assist generation failed for ${sessionId}`, err),
   });
 
   // --- multirun/fusion (M3): both resolve the parent session's project/runtime
@@ -520,6 +566,20 @@ export async function boot(opts: BootOptions = {}) {
         });
       },
     }),
+    assistRoutes({
+      settings: assistSettings,
+      projection: (sessionId) => store.projection(sessionId),
+      latestSeq: (sessionId) => store.latestSeq(sessionId),
+      // chat→note: distill with the same small-model seam; the route returns a
+      // DRAFT — saving goes through the normal /api/knowledge flow.
+      distill: async (sessionId) => {
+        const transcript = await assistTranscript(sessionId);
+        if (!transcript.trim()) {
+          throw Object.assign(new Error("nothing to distill — the session has no messages"), { code: "invalid-input" });
+        }
+        return parseNoteReply(await assistComplete(sessionId, buildNotePrompt(transcript)));
+      },
+    }),
     multirunRoutes(multirun),
     fusionRoutes(fusion),
     walkthroughRoutes({ store, broadcast, jobs: walkthroughJobs, review, flow: reviewFlow }),
@@ -615,7 +675,7 @@ export async function boot(opts: BootOptions = {}) {
     }),
   ];
 
-  const allCapabilities = () => ["polyth.sessions", "polyth.sessionPersistence", "polyth.projects", "polyth.agentRuntime", "polyth.goals", "polyth.files", "polyth.commands", "polyth.git", "polyth.worktrees", "polyth.terminal", "polyth.preview", "polyth.multirun", "polyth.fusion", "polyth.walkthrough", "polyth.schedule", "polyth.github", "polyth.control", "polyth.agentProfiles", "polyth.settings", "polyth.mcp", "polyth.plugins", "polyth.knowledge", "polyth.review", "polyth.usage", "polyth.browser", "polyth.voice"];
+  const allCapabilities = () => ["polyth.sessions", "polyth.sessionPersistence", "polyth.projects", "polyth.agentRuntime", "polyth.goals", "polyth.files", "polyth.commands", "polyth.git", "polyth.worktrees", "polyth.terminal", "polyth.preview", "polyth.multirun", "polyth.fusion", "polyth.walkthrough", "polyth.schedule", "polyth.github", "polyth.control", "polyth.agentProfiles", "polyth.settings", "polyth.mcp", "polyth.plugins", "polyth.knowledge", "polyth.review", "polyth.usage", "polyth.browser", "polyth.voice", "polyth.assist"];
 
   const server = createHttpServer({
     sessions, projects, runtimes, routes,
@@ -634,6 +694,7 @@ export async function boot(opts: BootOptions = {}) {
   const shutdown = async () => {
     schedule.stop();
     usage.stop();
+    assist?.stop();
     clearInterval(loopTimer);
     clearInterval(flowTimer);
     knowledge.close();
