@@ -45,5 +45,6 @@ test("close, Escape, and Skip all record completion without writing a preset", a
   assert.ok(!src.includes("applyPreset(null);\n    setOverlay(null);\n    restoreFocus"),
     "dismiss must not write a disguised default preset");
   assert.ok(src.includes("useModalSurface"), "the shared modal contract owns Escape dismissal");
-  assert.ok(src.includes("restoreFocus"), "focus returns to the invoker or composer");
+  assert.ok(src.includes("resolveRestoreFocus"), "the shared modal contract restores the invoker");
+  assert.ok(src.includes("focusComposer()"), "the composer remains the fallback focus target");
 });
