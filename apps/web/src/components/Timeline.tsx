@@ -451,11 +451,14 @@ function TimelineDialog({ prompts, onClose, onJump, onRevert, onFork, revert, fo
 }
 
 // Right-edge prompt rail (WP4, restyled after polyth PromptNavigatorRail):
-// a thin vertical tape of ticks anchored right-center of the chat. Each tick is
-// one real user prompt from this session; the active turn is tracked against
-// the timeline scroll position, ticks swell in a proximity wave under the
-// cursor, and hover/focus reveals a recent-turns panel. Click jumps via the
-// existing jump()/scrollIntoView path. Presentation-only — no SessionEvent.
+// a thin vertical tape of ticks in a 28px gutter hugging the right edge of the
+// chat viewport, vertically centered. It is a SIBLING of the .timeline scroller
+// (absolute within .timeline-viewport), so it never scrolls away and never
+// competes with right-aligned user bubbles. Each tick is one real user prompt
+// from this session; the active turn is tracked against the timeline scroll
+// position, ticks swell in a proximity wave under the cursor, and hover/focus
+// reveals a recent-turns panel. Click jumps via the existing
+// jump()/scrollIntoView path. Presentation-only — no SessionEvent.
 function PromptNavigator({ prompts, onJump, containerRef }: {
   prompts: Array<{ id: string; preview: string; text: string }>;
   onJump: (id: string) => void;
@@ -826,113 +829,118 @@ export default function Timeline({ model }: { model: RenderModel }) {
     turnStatus: turn?.status ?? null,
   };
 
+  // .timeline-viewport is the non-scrolling positioning context for the prompt
+  // rail: the rail is a sibling of the .timeline scroller, so it stays pinned
+  // right-center of the visible chat instead of scrolling with the messages.
   return (
-    <div className="timeline" ref={ref} onScroll={onScroll}>
-      {showNav && <PromptNavigator prompts={prompts} onJump={jump} containerRef={ref} />}
-      {promptMessages.length > 0 && (
-        <button className="timeline-open small-btn" onClick={() => setTimelineOpen(true)}>Timeline</button>
-      )}
-      <SlotHost slot="session.timeline.before" context={slotSummary} />
-      {model.messages.length === 0 && (
-        <div className="empty">
-          <div>{emptyCopy}</div>
-        </div>
-      )}
-      {start > 0 && (
-        <div className="timeline-earlier">
-          <button className="small-btn" onClick={() => reveal(grownLimit(rows.length, limit))}>
-            Show {Math.min(TIMELINE_CHUNK, start)} earlier
-          </button>
-          <button className="small-btn" onClick={() => reveal(rows.length)}>
-            Show all ({start} hidden)
-          </button>
-        </div>
-      )}
-      {shownRows.map((r) => (
-        r.kind === "work"
-          ? <WorkedGroup key={r.id} g={r} />
-          : (
-            <MessageView
-              key={r.id}
-              m={r}
-              announce={announce}
-              onRevert={revert}
-              onFork={fork}
-              revert={revertOk}
-              fork={forkOk}
-            />
-          )
-      ))}
-      {/* The dock confirmation sits OUTSIDE the collapsible tail: it must be
-          visible even while the reverted items stay folded away. */}
-      {confirmRestore && model.rewind && undoneRows.length > 0 && (
-        <div className="rewound-confirm" role="group" aria-label="Confirm restore">
-          <span>You edited the draft. Restoring the original timeline discards it.</span>
-          <button
-            className="small-btn"
-            onClick={(event) => restore({ confirmed: true, invoker: event.currentTarget })}
-          >Restore and discard the edited draft</button>
-          <button className="small-btn" onClick={() => setConfirmRestore(false)}>
-            Keep editing the draft
-          </button>
-        </div>
-      )}
-      {/* The collapsed tail exists only while the revert is ACTIVE. After a
-          replacement the originals stay on disk (and out of model history)
-          but no longer occupy the visible timeline. */}
-      {model.rewind && undoneRows.length > 0 && (
-        <details className="rewound-tail">
-          <summary>
-            <span>{undoneMessages.length} reverted timeline {undoneMessages.length === 1 ? "item" : "items"}</span>
-            {model.rewind && !confirmRestore && (
-              <button
-                className="small-btn"
-                onClick={(event) => {
-                  event.preventDefault();
-                  restore({ invoker: event.currentTarget });
-                }}
-              >Restore original timeline</button>
-            )}
-          </summary>
-          <div className="rewound-tail-body">
-            {undoneRows.map((row) => (
-              row.kind === "work"
-                ? <WorkedGroup key={row.id} g={row} />
-                : <MessageView key={row.id} m={row} announce={announce} />
-            ))}
+    <div className="timeline-viewport">
+      <div className="timeline" ref={ref} onScroll={onScroll}>
+        {promptMessages.length > 0 && (
+          <button className="timeline-open small-btn" onClick={() => setTimelineOpen(true)}>Timeline</button>
+        )}
+        <SlotHost slot="session.timeline.before" context={slotSummary} />
+        {model.messages.length === 0 && (
+          <div className="empty">
+            <div>{emptyCopy}</div>
           </div>
-        </details>
-      )}
-      {turnBroken && (
-        <div className="turn-error" role="alert">
-          <span className="turn-error-text">
-            {turn.status === "aborted" ? "Turn aborted" : "Turn failed"}
-            {turn.error ? ` — ${turn.error}` : ""}
-          </span>
-          {turn.error && <CopyButton text={turn.error} />}
-          {lastUser && (
-            <button className="small-btn" onClick={() => void sendMessage(lastUser.text)}>Retry</button>
-          )}
-          {turn.status === "failed" && (
-            <button className="small-btn" onClick={() => openSettingsPage("models")}>Open settings</button>
-          )}
-        </div>
-      )}
-      {footer && <div className="turn-footer">{footer}</div>}
-      <div className="msg-live" role="status" aria-live="polite">{liveText}</div>
-      <SlotHost slot="session.timeline.after" context={slotSummary} />
-      <SelectionMenu container={ref} />
-      {timelineOpen && (
-        <TimelineDialog
-          prompts={promptMessages}
-          onClose={() => setTimelineOpen(false)}
-          onJump={jump}
-          onRevert={revert}
-          onFork={fork}
-          revert={revertOk}
-          fork={forkOk}
-        />
-      )}
+        )}
+        {start > 0 && (
+          <div className="timeline-earlier">
+            <button className="small-btn" onClick={() => reveal(grownLimit(rows.length, limit))}>
+              Show {Math.min(TIMELINE_CHUNK, start)} earlier
+            </button>
+            <button className="small-btn" onClick={() => reveal(rows.length)}>
+              Show all ({start} hidden)
+            </button>
+          </div>
+        )}
+        {shownRows.map((r) => (
+          r.kind === "work"
+            ? <WorkedGroup key={r.id} g={r} />
+            : (
+              <MessageView
+                key={r.id}
+                m={r}
+                announce={announce}
+                onRevert={revert}
+                onFork={fork}
+                revert={revertOk}
+                fork={forkOk}
+              />
+            )
+        ))}
+        {/* The dock confirmation sits OUTSIDE the collapsible tail: it must be
+            visible even while the reverted items stay folded away. */}
+        {confirmRestore && model.rewind && undoneRows.length > 0 && (
+          <div className="rewound-confirm" role="group" aria-label="Confirm restore">
+            <span>You edited the draft. Restoring the original timeline discards it.</span>
+            <button
+              className="small-btn"
+              onClick={(event) => restore({ confirmed: true, invoker: event.currentTarget })}
+            >Restore and discard the edited draft</button>
+            <button className="small-btn" onClick={() => setConfirmRestore(false)}>
+              Keep editing the draft
+            </button>
+          </div>
+        )}
+        {/* The collapsed tail exists only while the revert is ACTIVE. After a
+            replacement the originals stay on disk (and out of model history)
+            but no longer occupy the visible timeline. */}
+        {model.rewind && undoneRows.length > 0 && (
+          <details className="rewound-tail">
+            <summary>
+              <span>{undoneMessages.length} reverted timeline {undoneMessages.length === 1 ? "item" : "items"}</span>
+              {model.rewind && !confirmRestore && (
+                <button
+                  className="small-btn"
+                  onClick={(event) => {
+                    event.preventDefault();
+                    restore({ invoker: event.currentTarget });
+                  }}
+                >Restore original timeline</button>
+              )}
+            </summary>
+            <div className="rewound-tail-body">
+              {undoneRows.map((row) => (
+                row.kind === "work"
+                  ? <WorkedGroup key={row.id} g={row} />
+                  : <MessageView key={row.id} m={row} announce={announce} />
+              ))}
+            </div>
+          </details>
+        )}
+        {turnBroken && (
+          <div className="turn-error" role="alert">
+            <span className="turn-error-text">
+              {turn.status === "aborted" ? "Turn aborted" : "Turn failed"}
+              {turn.error ? ` — ${turn.error}` : ""}
+            </span>
+            {turn.error && <CopyButton text={turn.error} />}
+            {lastUser && (
+              <button className="small-btn" onClick={() => void sendMessage(lastUser.text)}>Retry</button>
+            )}
+            {turn.status === "failed" && (
+              <button className="small-btn" onClick={() => openSettingsPage("models")}>Open settings</button>
+            )}
+          </div>
+        )}
+        {footer && <div className="turn-footer">{footer}</div>}
+        <div className="msg-live" role="status" aria-live="polite">{liveText}</div>
+        <SlotHost slot="session.timeline.after" context={slotSummary} />
+        <SelectionMenu container={ref} />
+        {timelineOpen && (
+          <TimelineDialog
+            prompts={promptMessages}
+            onClose={() => setTimelineOpen(false)}
+            onJump={jump}
+            onRevert={revert}
+            onFork={fork}
+            revert={revertOk}
+            fork={forkOk}
+          />
+        )}
+      </div>
+      {showNav && <PromptNavigator prompts={prompts} onJump={jump} containerRef={ref} />}
     </div>
   );
 }
