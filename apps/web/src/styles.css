@@ -4131,7 +4131,7 @@ body[data-quick-actions="false"] [data-widget-id="core.quick-actions"] { display
 @media (max-width: 820px) {
   .app > .header { padding: 0 8px; }
   .sidebar { transform: translateX(-102%); visibility: hidden; }
-  .sidebar.open { transform: translateX(0); visibility: visible; }
+  .sidebar.open { transform: none; visibility: visible; }
   .header-brand strong, .header-breadcrumb-sep, .header-crumb:nth-of-type(2), .header-new-session span { display: none; }
   .header-crumb { max-width: 130px; }
   .workspace-mode-switch button { min-width: auto; height: 28px; padding: 0 7px; }
