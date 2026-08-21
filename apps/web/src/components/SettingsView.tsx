@@ -192,7 +192,7 @@ export default function SettingsView({ onClose = () => setOverlay(null) }: { onC
   };
 
   return (
-    <div className="scrim" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+    <div className="scrim settings-scrim" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <div
         className={`modal settings-shell settings-page-${current.id}`}
         ref={modalRef}

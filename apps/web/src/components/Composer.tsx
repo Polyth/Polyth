@@ -98,6 +98,7 @@ export default function Composer({ variant = "docked" }: { variant?: "docked" | 
   const techOpen = effectiveComposerDetail() === "technical";
   const noModels = models.length === 0;
   const simpleMode = useWorkspaceMode() === "chat";
+  const lightFocusComposer = simpleMode && variant === "docked";
   const ui = useUiSettings();
 
   // IME-safe input: the DOM owns live text; `text` tracks committed edits only.
@@ -657,7 +658,7 @@ export default function Composer({ variant = "docked" }: { variant?: "docked" | 
   );
 
   return (
-    <div className={`${variant === "hero" ? "composer-hero" : "composer"}${simpleMode ? " composer-simple" : " composer-power"}`}>
+    <div className={`${variant === "hero" ? "composer-hero" : "composer"}${simpleMode ? " composer-simple" : " composer-power"}${lightFocusComposer ? " composer-focus-light" : ""}`}>
       {variant === "docked" && <PendingChangesBar model={model} />}
       <div
         className="composer-card"
@@ -821,10 +822,12 @@ export default function Composer({ variant = "docked" }: { variant?: "docked" | 
             />
           )}
         </div>
-        <div className="composer-extensions">
-          <SlotHost slot="composer.leading" context={slotContext} />
-          <SlotHost slot="composer.trailing" context={slotContext} />
-        </div>
+        {!lightFocusComposer && (
+          <div className="composer-extensions">
+            <SlotHost slot="composer.leading" context={slotContext} />
+            <SlotHost slot="composer.trailing" context={slotContext} />
+          </div>
+        )}
         <div className="composer-actions">
           <input
             ref={fileInputRef}
@@ -859,14 +862,14 @@ export default function Composer({ variant = "docked" }: { variant?: "docked" | 
               title="Attach files"
               aria-label="Attach files"
               onClick={() => fileInputRef.current?.click()}
-            >⌕</button>
+            ><Icon.paperclip /></button>
           )}
           <button
             className="icon-btn composer-expand"
             title="Focused editor (Mod+Shift+Enter)"
             aria-label="Open focused editor"
             onClick={() => setFocusMode(true)}
-          >▢</button>
+          ><Icon.focus /></button>
           {simpleMode && (
             <button
               className="icon-btn composer-privacy"
@@ -883,7 +886,7 @@ export default function Composer({ variant = "docked" }: { variant?: "docked" | 
                   aria-label={shellMode ? "Run shell command" : `${followUp === "steer" ? "Steer the current turn" : followUp === "interrupt" ? "Interrupt, then send" : "Queue until idle"}`}
                   title={`Active turn — this message will ${followUp === "steer" ? "steer the current turn" : followUp === "interrupt" ? "interrupt, then send" : "queue until idle"}`}>
                   {simpleMode
-                    ? <span className="send-plane" aria-hidden="true">➤</span>
+                    ? <span className="send-plane" aria-hidden="true"><Icon.send /></span>
                     : <>{shellMode ? "Run" : followUp === "steer" ? "Steer" : followUp === "interrupt" ? "Interrupt" : "Queue"} <span className="send-key">{settings.sendOnEnter ? "↵" : `${modKeyLabel()}↵`}</span></>}
                 </button>
                 <button className="stop" onClick={() => void abortSession()}>
@@ -894,7 +897,7 @@ export default function Composer({ variant = "docked" }: { variant?: "docked" | 
               <button className="send" onClick={() => send()}
                 disabled={(!text.trim() && attachments.length === 0) || (!shellMode && (noModels || profileMissing))}>
                 {simpleMode
-                  ? <span className="send-plane" aria-hidden="true">➤</span>
+                  ? <span className="send-plane" aria-hidden="true"><Icon.send /></span>
                   : <>{shellMode ? "Run" : "Send"} <span className="send-key">{settings.sendOnEnter ? "↵" : `${modKeyLabel()}↵`}</span></>}
               </button>
             )}

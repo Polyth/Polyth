@@ -145,6 +145,38 @@ test("composer bar exposes the two-tier semantic groups without forking send", a
   assert.ok(css.includes("repeat(2, minmax(0, 1fr))"), "phone selector grid contract");
 });
 
+test("Focus uses the light composer controls without technical chrome", async () => {
+  const composer = await read("../src/components/Composer.tsx");
+  assert.ok(composer.includes('simpleMode && variant === "docked"'), "light controls are scoped to docked Focus");
+  assert.ok(composer.includes("!lightFocusComposer && ("), "Focus suppresses extension toolbar controls");
+  assert.ok(composer.includes("<Icon.paperclip />"), "Focus exposes a paperclip attachment action");
+  assert.ok(composer.includes("<Icon.focus />"), "Focus exposes the focused editor action");
+  assert.ok(composer.includes("<Icon.send />"), "Focus uses a paper-plane send icon");
+  const css = await read("../src/styles.css");
+  assert.ok(css.includes(".composer-focus-light .chip-k { display: none; }"), "technical picker keys are hidden");
+});
+
+test("desktop header keeps branded breadcrumbs and a named utility cluster", async () => {
+  const header = await read("../src/components/Header.tsx");
+  assert.ok(header.includes('<span className="polyth-mark">p</span>'), "stylized Polyth mark is visible");
+  assert.ok(header.includes("<strong>polyth</strong>"), "wordmark text is visible");
+  assert.ok(header.includes('<div className="header-breadcrumbs"'), "project and branch breadcrumbs share one group");
+  assert.ok(header.includes('<div className="header-actions"'), "utilities share one right-side cluster");
+  for (const label of ["Search", "History", "Settings"]) {
+    assert.ok(header.includes(`<span>${label}</span>`), `${label} utility remains named`);
+  }
+  assert.ok(!header.includes('className="header-global-search"'), "Search is not duplicated in the header");
+});
+
+test("Settings occupies the viewport and preserves a usable widget inspector column", async () => {
+  const settings = await read("../src/components/SettingsView.tsx");
+  const css = await read("../src/styles.css");
+  assert.ok(settings.includes('className="scrim settings-scrim"'), "Settings owns viewport-specific scrim geometry");
+  assert.ok(css.includes("width: 96vw; max-width: none; height: 92vh"), "Settings is a near-full viewport workspace");
+  assert.ok(css.includes(".settings-shell { min-width: 1100px; }"), "wide Settings keeps the three-column floor");
+  assert.ok(css.includes("clamp(286px, 21vw, 320px)"), "widget inspector retains a dedicated right column");
+});
+
 test("hero and docked composers expose the shared stable focus target", async () => {
   const composer = await read("../src/components/Composer.tsx");
   const input = await read("../src/components/input/AdaptiveTextInput.tsx");

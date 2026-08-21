@@ -455,9 +455,6 @@ export default function Header() {
             <b aria-hidden="true">⌄</b>
           </button>
         </div>
-        <button className="header-global-search" onClick={() => setOverlay("search")}>
-          <Icon.search /><span>Search</span><kbd>⌘K</kbd>
-        </button>
         <div className="workspace-mode-switch" role="group" aria-label="Workspace view">
           <button
             className={workspaceMode === "chat" ? "active" : ""}
@@ -476,19 +473,25 @@ export default function Header() {
           >Edit layout</button>
         </div>
         <span className="header-spacer" />
-        {session && (
+        {workspaceMode !== "chat" && session && (
           <SlotHost
             slot="session.header.actions"
             context={{ sessionId: session.id, status: session.status, working: model.turn?.status === "working" }}
           />
         )}
-        <button className="header-action header-new-session" disabled={!project} onClick={newSession}>
-          <Icon.plus /><span>New session</span>
-        </button>
-        <button className="header-action" title="Search" aria-label="Search" onClick={() => setOverlay("search")}><Icon.search /></button>
-        <button className="header-action" title="History" aria-label="History" onClick={() => setOverlay("search")}><Icon.clock /></button>
-        <button className="header-action" title="Settings" aria-label="Settings" onClick={() => setOverlay("settings")}><Icon.gear /></button>
-        <OverflowMenu sessionId={session?.id ?? null} onGoal={() => setGoalFormOpen((value) => !value)} />
+        {workspaceMode !== "chat" && (
+          <button className="header-action header-new-session" disabled={!project} onClick={newSession}>
+            <Icon.plus /><span>New session</span>
+          </button>
+        )}
+        <div className="header-actions" aria-label="Application">
+          <button className="header-action" onClick={() => setOverlay("search")}><Icon.search /><span>Search</span></button>
+          <button className="header-action" onClick={() => setOverlay("search")}><Icon.clock /><span>History</span></button>
+          <button className="header-action" onClick={() => setOverlay("settings")}><Icon.gear /><span>Settings</span></button>
+        </div>
+        {workspaceMode !== "chat" && (
+          <OverflowMenu sessionId={session?.id ?? null} onGoal={() => setGoalFormOpen((value) => !value)} />
+        )}
         <button className="header-profile" aria-label="User menu">
           <span>PO</span><b aria-hidden="true">⌄</b>
         </button>
