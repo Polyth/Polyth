@@ -7,11 +7,12 @@ import { friendlyError } from "./settings.ts";
 import { formatAppUrl, parseAppUrl } from "./router.ts";
 import * as store from "./store.ts";
 import { resolveActiveProjectId } from "./projectRegistry.ts";
-import type { AttachmentRef, JsonObject, Project, SessionEvent } from "@polyth/contracts";
+import type { AttachmentRef, JsonObject, ModelRef, Project, SessionEvent } from "@polyth/contracts";
 import { suggestWorktreeBranch } from "./worktreeSessions.ts";
 import { installPushDeepLinks } from "./push.ts";
 import { applyComposerSeed } from "./drafts.ts";
 import { forkSeedKey, rewindSeedKey } from "./messageActions.ts";
+import { getSessionDefaults, resolveSessionDefaultModel } from "./sessionDefaults.ts";
 
 let sync: SyncClient | null = null;
 let lastSubSession: string | undefined;
@@ -335,7 +336,7 @@ export async function removeProject(id: string): Promise<void> {
 
 export interface CreateSessionOptions {
   title?: string;
-  model?: JsonObject;
+  model?: ModelRef;
   agent?: string;
   worktreePath?: string;
 }
@@ -359,6 +360,11 @@ async function createDefaultWorktree(projectId: string, title?: string): Promise
 
 export async function createSession(projectId: string, opts: CreateSessionOptions = {}): Promise<void> {
   const project = store.getState().projectRegistry.projects.find((candidate) => candidate.id === projectId);
+  const model = opts.model ?? resolveSessionDefaultModel(
+    project?.defaults?.model,
+    getSessionDefaults().defaultModel,
+  );
+  const agent = opts.agent ?? project?.defaults?.agent;
   const worktreePath = opts.worktreePath
     ?? (project?.defaults?.worktreeBehavior === "fresh-worktree"
       ? await createDefaultWorktree(projectId, opts.title)
@@ -366,6 +372,8 @@ export async function createSession(projectId: string, opts: CreateSessionOption
   const { id: sessionId } = await api.createSession({
     projectId,
     ...opts,
+    ...(model ? { model } : {}),
+    ...(agent ? { agent } : {}),
     ...(worktreePath ? { worktreePath } : {}),
   });
   await openSession(sessionId);

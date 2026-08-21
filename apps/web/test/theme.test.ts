@@ -27,13 +27,14 @@ const validTheme = (): Record<string, unknown> => ({
   tokens: { ...PRESET_THEMES[0]!.tokens },
 });
 
-test("preset set: six themes, unique stable ids, both appearances, valid tokens", () => {
-  assert.equal(PRESET_THEMES.length, 6);
-  assert.equal(new Set(PRESET_THEMES.map((t) => t.id)).size, 6);
+test("preset set: twenty themes, unique stable ids, both appearances, valid tokens", () => {
+  assert.equal(PRESET_THEMES.length, 20);
+  assert.equal(new Set(PRESET_THEMES.map((t) => t.id)).size, PRESET_THEMES.length);
   // pre-F15 settings values keep resolving
   assert.ok(PRESET_THEMES.some((t) => t.id === "dark" && t.appearance === "dark"));
   assert.ok(PRESET_THEMES.some((t) => t.id === "light" && t.appearance === "light"));
-  assert.equal(PRESET_THEMES.filter((t) => t.appearance === "dark").length, 3);
+  assert.equal(PRESET_THEMES.filter((t) => t.appearance === "dark").length, 10);
+  assert.equal(PRESET_THEMES.filter((t) => t.appearance === "light").length, 10);
   for (const preset of PRESET_THEMES) {
     for (const key of TOKEN_KEYS) assert.match(preset.tokens[key], HEX, `${preset.id}.${key}`);
   }

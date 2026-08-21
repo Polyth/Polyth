@@ -63,7 +63,8 @@ export function searchSettingsItems(
 const BUILTIN_ITEMS: SettingsSearchItem[] = [
   // "persona" and "role" remain only as migration search keywords.
   { id: "general.workspacePreset", pageId: "general", label: "Workspace preset", description: "Starting arrangement for starter actions, workspace order, and initial detail", keywords: ["preset", "starting setup", "workspace", "persona", "role"], focusTarget: "general.workspacePreset" },
-  { id: "appearance.density", pageId: "appearance", label: "Density", keywords: ["compact", "comfortable", "spacing"], focusTarget: "appearance.density" },
+  { id: "appearance.theme", pageId: "appearance", label: "Theme", description: "Search bundled, system, and custom color themes", keywords: ["appearance", "dark", "light", "palette", "colors"], focusTarget: "appearance.theme" },
+  { id: "appearance.density", pageId: "appearance", label: "Density", keywords: ["compact", "balanced", "comfortable", "spacing"], focusTarget: "appearance.density" },
   { id: "appearance.fontSize", pageId: "appearance", label: "Font size", keywords: ["text", "scale"], focusTarget: "appearance.fontSize" },
   { id: "appearance.editorFontSize", pageId: "appearance", label: "Editor font size", description: "Composer, file editor, diffs, terminal, and code blocks", keywords: ["monospace", "code", "px"], focusTarget: "appearance.editorFontSize" },
   { id: "appearance.reducedMotion", pageId: "appearance", label: "Reduced motion", keywords: ["animation", "accessibility", "a11y"], focusTarget: "appearance.reducedMotion" },
@@ -82,6 +83,11 @@ const BUILTIN_ITEMS: SettingsSearchItem[] = [
   { id: "voice.dictation", pageId: "voice", label: "Dictation", keywords: ["microphone", "speech"], focusTarget: "voice.dictation" },
   { id: "models.favorites", pageId: "models", label: "Model favorites", keywords: ["pin", "provider"], focusTarget: "models.favorites" },
   { id: "agents.profiles", pageId: "agents", label: "Agent profiles", keywords: ["preset", "pin", "model"], focusTarget: "agents.profiles" },
+  { id: "sessions.defaultModel", pageId: "sessions", label: "Global default model", description: "Default model for new sessions and projects", keywords: ["session", "provider", "model"], focusTarget: "sessions.defaultModel" },
+  { id: "sessions.projectModel", pageId: "sessions", label: "Project default model", description: "Per-project model override", keywords: ["session", "project", "inherit", "global"], focusTarget: "sessions.projectModel" },
+  { id: "sessions.worktree", pageId: "sessions", label: "Worktree behavior", keywords: ["session", "fresh worktree", "project root"], focusTarget: "sessions.worktree" },
+  { id: "widgets.presets", pageId: "widgets", label: "Widget layout presets", description: "Focused, balanced, manager, and build layouts", keywords: ["workspace", "canvas", "customize"], focusTarget: "widgets.presets" },
+  { id: "widgets.layout", pageId: "widgets", label: "Widget placement", description: "Drag widgets between workspace zones", keywords: ["canvas", "zone", "layout", "resize"], focusTarget: "widgets.layout" },
 ];
 
 registerSettingsItems(BUILTIN_ITEMS);

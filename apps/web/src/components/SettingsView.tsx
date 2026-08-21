@@ -3,7 +3,7 @@
 // (WP9) matches individual settings rows through the item registry and jumps
 // to the exact row; page-title filtering remains the fallback for plugin
 // pages without item metadata.
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { consumePendingSettingsPage, setOverlay } from "../store.ts";
 import { listSlots } from "../slots.ts";
 import { useSlotVersion } from "./slots/SlotHost.ts";
@@ -24,33 +24,36 @@ import IntegrationsPage from "./settings/IntegrationsPage.tsx";
 import SessionsPage from "./settings/SessionsPage.tsx";
 import CommandsPage from "./settings/CommandsPage.tsx";
 import AccessPage from "./settings/AccessPage.tsx";
+import WidgetsPage from "./settings/WidgetsPage.tsx";
 
 interface PageDef {
   id: string;
   label: string;
+  group: "Workspace" | "Engineering" | "Customize" | "System";
   render: () => ReactNode;
 }
 
 const BUILTIN: PageDef[] = [
-  { id: "general", label: "General", render: () => <GeneralPage /> },
-  { id: "appearance", label: "Appearance", render: () => <AppearancePage /> },
-  { id: "chat", label: "Chat", render: () => <ChatPage /> },
-  { id: "notifications", label: "Notifications", render: () => <NotificationsPage /> },
-  { id: "sessions", label: "Sessions", render: () => <SessionsPage /> },
-  { id: "shortcuts", label: "Shortcuts", render: () => <ShortcutsPage /> },
-  { id: "voice", label: "Voice", render: () => <VoicePage /> },
-  { id: "integrations", label: "Integrations", render: () => <IntegrationsPage /> },
-  { id: "usage", label: "Usage", render: () => <UsagePage /> },
-  { id: "projects", label: "Projects", render: () => <ProjectsPage /> },
-  { id: "git", label: "Git", render: () => <GitPage /> },
-  { id: "models", label: "Providers & Models", render: () => <ModelsPage /> },
-  { id: "agents", label: "Agents", render: () => <AgentsPage /> },
-  { id: "behavior", label: "Behavior", render: () => <BehaviorPage /> },
-  { id: "commands", label: "Commands", render: () => <CommandsPage /> },
-  { id: "mcp", label: "MCP", render: () => <McpPage /> },
-  { id: "plugins", label: "Plugins", render: () => <PluginsPage /> },
-  { id: "access", label: "Access", render: () => <AccessPage /> },
-  { id: "about", label: "About", render: () => <AboutPage /> },
+  { id: "general", label: "General", group: "Workspace", render: () => <GeneralPage /> },
+  { id: "appearance", label: "Appearance", group: "Workspace", render: () => <AppearancePage /> },
+  { id: "chat", label: "Chat", group: "Workspace", render: () => <ChatPage /> },
+  { id: "notifications", label: "Notifications", group: "Workspace", render: () => <NotificationsPage /> },
+  { id: "sessions", label: "Sessions", group: "Workspace", render: () => <SessionsPage /> },
+  { id: "shortcuts", label: "Shortcuts", group: "Workspace", render: () => <ShortcutsPage /> },
+  { id: "voice", label: "Voice", group: "Workspace", render: () => <VoicePage /> },
+  { id: "integrations", label: "Integrations", group: "Workspace", render: () => <IntegrationsPage /> },
+  { id: "usage", label: "Usage", group: "Workspace", render: () => <UsagePage /> },
+  { id: "projects", label: "Projects", group: "Engineering", render: () => <ProjectsPage /> },
+  { id: "git", label: "Git", group: "Engineering", render: () => <GitPage /> },
+  { id: "models", label: "Providers & Models", group: "Engineering", render: () => <ModelsPage /> },
+  { id: "agents", label: "Agents", group: "Engineering", render: () => <AgentsPage /> },
+  { id: "behavior", label: "Behavior", group: "Engineering", render: () => <BehaviorPage /> },
+  { id: "commands", label: "Commands", group: "Engineering", render: () => <CommandsPage /> },
+  { id: "mcp", label: "MCP", group: "Engineering", render: () => <McpPage /> },
+  { id: "widgets", label: "Widgets & Layout", group: "Customize", render: () => <WidgetsPage /> },
+  { id: "plugins", label: "Plugins", group: "Customize", render: () => <PluginsPage /> },
+  { id: "access", label: "Access", group: "System", render: () => <AccessPage /> },
+  { id: "about", label: "About", group: "System", render: () => <AboutPage /> },
 ];
 
 export default function SettingsView({ onClose = () => setOverlay(null) }: { onClose?: () => void }) {
@@ -100,6 +103,7 @@ export default function SettingsView({ onClose = () => setOverlay(null) }: { onC
     const extra = slotItems.map((item): PageDef => ({
       id: `slot:${item.id}`,
       label: item.id.replace(/^[^.]*\./, "").replace(/[-_]/g, " ").replace(/^\w/, (c) => c.toUpperCase()),
+      group: "Customize",
       render: () => <>{item.render({ prefs })}</>,
     }));
     return [...BUILTIN, ...extra];
@@ -242,15 +246,19 @@ export default function SettingsView({ onClose = () => setOverlay(null) }: { onC
             </div>
           ) : (
             <nav className="settings-nav-list" aria-label="Settings pages">
-              {pages.map((p) => (
-                <button
-                  key={p.id}
-                  className={`settings-nav-item ${current.id === p.id ? "active" : ""}`}
-                  aria-current={current.id === p.id ? "page" : undefined}
-                  onClick={() => { setActive(p.id); }}
-                >
-                  {p.label}
-                </button>
+              {pages.map((p, index) => (
+                <Fragment key={p.id}>
+                  {(index === 0 || pages[index - 1]!.group !== p.group) && (
+                    <div className="settings-nav-group">{p.group}</div>
+                  )}
+                  <button
+                    className={`settings-nav-item ${current.id === p.id ? "active" : ""}`}
+                    aria-current={current.id === p.id ? "page" : undefined}
+                    onClick={() => { setActive(p.id); }}
+                  >
+                    {p.label}
+                  </button>
+                </Fragment>
               ))}
             </nav>
           )}

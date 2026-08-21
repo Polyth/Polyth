@@ -1,5 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { getState, useActiveModel, useStore, setRailPlugin, setSidebarOpen, setUiError, type AppView } from "../store.ts";
+import {
+  closeWorkspacePane, getState, setActiveView, useActiveModel, useStore,
+  setRailPlugin, setSidebarOpen, setUiError, type AppView,
+} from "../store.ts";
 import { forkSession, exportSessionMarkdown } from "../init.ts";
 import { displaySessionTitle } from "../format.ts";
 import { friendlyError, shortcutLabel } from "../settings.ts";
@@ -19,6 +22,8 @@ import { PANEL_OF_CAPABILITY, PANE_OF_CAPABILITY, VIEW_OF_CAPABILITY } from "../
 import SlotHost from "./slots/SlotHost.ts";
 import { Icon } from "../icons.tsx";
 import CapabilityMenu from "./CapabilityMenu.tsx";
+import { setWorkspaceMode, useWorkspaceMode } from "../widgets/workspaceMode.ts";
+import { useWidgetLayout } from "../widgets/widgetLayout.ts";
 
 const STROKE = { fill: "none", stroke: "currentColor", strokeWidth: 1.5, strokeLinecap: "round", strokeLinejoin: "round" } as const;
 
@@ -423,6 +428,8 @@ export default function Header() {
     return contextGauge(model, descriptor?.context);
   }, [model, session?.model, models]);
   const [goalFormOpen, setGoalFormOpen] = useState(false);
+  const workspaceMode = useWorkspaceMode();
+  const widgetLayout = useWidgetLayout();
 
   const firstUserText = useMemo(() => {
     const first = model.messages.find((m) => m.kind === "user");
@@ -437,6 +444,11 @@ export default function Header() {
   const mode = useShellMode();
   const compact = mode !== "wide";
   useResizeFocusHandoff(mode);
+  const switchWorkspaceMode = (next: "chat" | "widgets") => {
+    closeWorkspacePane();
+    setActiveView("session");
+    setWorkspaceMode(next);
+  };
 
   return (
     <>
@@ -454,11 +466,26 @@ export default function Header() {
             context={{ sessionId: session.id, status: session.status, working: model.turn?.status === "working" }}
           />
         )}
-        {compact ? (
+        <div className="workspace-mode-switch" role="group" aria-label="Workspace mode">
+          <button
+            className={workspaceMode === "chat" ? "active" : ""}
+            aria-pressed={workspaceMode === "chat"}
+            onClick={() => switchWorkspaceMode("chat")}
+          >Chat</button>
+          <button
+            className={workspaceMode === "widgets" ? "active" : ""}
+            aria-pressed={workspaceMode === "widgets"}
+            onClick={() => switchWorkspaceMode("widgets")}
+          >Widgets</button>
+        </div>
+        {workspaceMode === "chat" && (
+          <button className="workspace-customize" onClick={() => switchWorkspaceMode("widgets")}>Customize</button>
+        )}
+        {widgetLayout.audience === "power" && (compact ? (
           <CompactViewPicker view={view} />
         ) : (
           <CapabilityNav />
-        )}
+        ))}
         <OverflowMenu sessionId={session?.id ?? null} onGoal={() => setGoalFormOpen((v) => !v)} />
         {compact && <NarrowPanelTrigger />}
       </header>

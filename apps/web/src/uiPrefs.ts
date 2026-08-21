@@ -7,7 +7,7 @@ export type FollowUpBehavior = "steer" | "queue" | "interrupt";
 export type NotificationKindPref = "completed" | "failed" | "question" | "permission" | "subagent";
 
 export interface UiSettings {
-  density: "comfortable" | "compact";
+  density: "comfortable" | "balanced" | "compact";
   fontSize: "s" | "m" | "l";
   /** Editor/composer font size in px (WP2/WP9 font tokens). */
   editorFontSize: number;
@@ -78,7 +78,7 @@ export function parseUiSettings(raw: string | null): UiSettings {
     const data = JSON.parse(raw ?? "") as Partial<UiSettings>;
     const fontPx = Number(data.editorFontSize);
     return {
-      density: data.density === "compact" ? "compact" : "comfortable",
+      density: data.density === "compact" || data.density === "balanced" ? data.density : "comfortable",
       fontSize: data.fontSize === "s" || data.fontSize === "l" ? data.fontSize : "m",
       editorFontSize: Number.isFinite(fontPx) && fontPx >= 11 && fontPx <= 24 ? Math.round(fontPx) : 14,
       chatWidth: data.chatWidth === "wide" ? "wide" : "normal",

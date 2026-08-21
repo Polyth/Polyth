@@ -43,6 +43,10 @@ test("manifest parsing rejects malformed input, keeps valid descriptors", () => 
   const m = parseManifest(manifest());
   assert.equal(m.id, "sample.widget");
   assert.equal(m.contributions!.length, 1);
+  const widget = parseManifest(manifest({
+    contributions: [{ slot: "widget.catalog", id: "sample.widget", module: "sample-widget" }],
+  }));
+  assert.equal(widget.contributions?.[0]?.slot, "widget.catalog");
   // every trust class has visible grant text
   assert.ok(TRUST_GRANTS[m.trust].length > 0);
 });

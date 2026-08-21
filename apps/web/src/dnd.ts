@@ -4,6 +4,7 @@ import { api } from "./api.ts";
 import { attachProjectFile, attachUpload } from "./attachments.ts";
 
 export const PATH_MIME = "application/x-polyth-path";
+export const WIDGET_MIME = "application/x-polyth-widget";
 
 interface DataLike {
   setData(type: string, value: string): void;
@@ -17,6 +18,15 @@ export function setDragPath(dt: DataLike, path: string): void {
 
 export function getDragPath(dt: DataLike): string | null {
   return dt.getData(PATH_MIME) || null;
+}
+
+export function setDragWidget(dt: DataLike, widgetId: string): void {
+  dt.setData(WIDGET_MIME, widgetId);
+  dt.setData("text/plain", widgetId);
+}
+
+export function getDragWidget(dt: Pick<DataLike, "getData">): string | null {
+  return dt.getData(WIDGET_MIME) || null;
 }
 
 /** What a dragover carries: a tree path, desktop files, or nothing we accept. */

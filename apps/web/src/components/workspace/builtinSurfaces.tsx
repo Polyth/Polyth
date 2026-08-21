@@ -7,11 +7,8 @@
 import { useState } from "react";
 import Timeline from "../Timeline.tsx";
 import Composer from "../Composer.tsx";
-import AssistStrip from "../AssistStrip.tsx";
 import PermissionBanner from "../PermissionBanner.tsx";
 import QuestionCards from "../QuestionCards.tsx";
-import { GoalStrip } from "../GoalStrip.tsx";
-import WorkStatus, { TrackerPills } from "../WorkStatus.tsx";
 import MultiRunView from "../MultiRunView.tsx";
 import FusionView from "../FusionView.tsx";
 import GoalsView from "../GoalsView.tsx";
@@ -23,6 +20,8 @@ import { restoreSession } from "../../init.ts";
 import { friendlyError, shortcutLabel } from "../../settings.ts";
 import { composerBlockedByArchive, sessionSurfaceKind } from "../../sessionSurface.ts";
 import { registerWorkspaceSurface } from "../../workspace/surfaceRegistry.ts";
+import WidgetCanvas from "../../widgets/WidgetCanvas.tsx";
+import { useWorkspaceMode } from "../../widgets/workspaceMode.ts";
 
 // Large polyth-style hero for a fresh session (or no session yet):
 // centered headline, the composer as an elevated card, and suggestion chips.
@@ -93,10 +92,13 @@ function ArchivedComposerGuard({ sessionId }: { sessionId: string }) {
 }
 
 function SessionSurface() {
+  const workspaceMode = useWorkspaceMode();
   const sessionId = useStore((s) => s.activeSessionId);
   const openingSessionId = useStore((s) => s.openingSessionId);
   const session = useStore((s) => s.sessions.find((x) => x.id === s.activeSessionId) ?? null);
   const model = useActiveModel();
+
+  if (workspaceMode === "widgets") return <WidgetCanvas />;
 
   // Fresh state yields to pending prompts and permissions; an in-flight
   // canonical replay yields to the loading row (never a false fresh hero).
@@ -113,14 +115,10 @@ function SessionSurface() {
   return (
     <>
       <div className="timeline-wrap">
-        <GoalStrip />
-        <WorkStatus model={model} />
         <Timeline model={model} />
-        <AssistStrip />
       </div>
       {pendingQuestions.length > 0 && <QuestionCards questions={pendingQuestions} />}
       {pendingPermissions.length > 0 && <PermissionBanner permissions={pendingPermissions} />}
-      <TrackerPills model={model} />
       {archived && sessionId ? <ArchivedComposerGuard sessionId={sessionId} /> : <Composer />}
     </>
   );

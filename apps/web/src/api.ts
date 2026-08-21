@@ -471,7 +471,7 @@ export const api = {
     jfetch<Project>(`/api/projects/${id}`, json("PATCH", patch)),
 
   listSessions: (projectId: string) => jfetch<SessionProjection[]>(`/api/sessions?projectId=${encodeURIComponent(projectId)}`),
-  createSession: (input: { projectId: string; title?: string; model?: JsonObject; agent?: string; worktreePath?: string }) =>
+  createSession: (input: { projectId: string; title?: string; model?: ModelRef; agent?: string; worktreePath?: string }) =>
     jfetch<SessionRef>("/api/sessions", json("POST", input)),
   getSession: (id: string) => jfetch<SessionProjection>(`/api/sessions/${id}`),
   getEvents: (id: string, afterSeq = 0) =>
