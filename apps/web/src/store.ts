@@ -262,8 +262,12 @@ export function applyProjectRemoved(id: string): void {
 
 // ---- other actions ---------------------------------------------------------
 
-export function setSessions(sessions: SessionProjection[]): void {
-  set({ sessions });
+/** Replace ONE project's session projections, keeping every other project's
+ *  entries (UX-FILES-TIMELINE-03 finding 9: the sidebar folder mode shows
+ *  several projects' sessions at once, so a refresh must not evict them). */
+export function setSessions(projectId: string, sessions: SessionProjection[]): void {
+  const others = state.sessions.filter((s) => s.projectId !== projectId);
+  set({ sessions: others.length === 0 ? sessions : [...others, ...sessions] });
 }
 export function setModels(models: ModelDescriptor[]): void {
   set({ models });
@@ -506,6 +510,15 @@ export function clearEditorLocation(): void {
 export function activateSession(id: string | null): void {
   localStorage.setItem("polyth.activeSessionId", id ?? "");
   set({ activeSessionId: id });
+}
+
+/** UX-FILES-TIMELINE-03 finding 8: a session switch always lands in that
+ *  session's chat. The visible workspace pane closes through the command
+ *  path (metadata-only — keep-alive scope caches survive per UX-PANE-MODEL)
+ *  and the primary view returns to "session". */
+export function showSessionChat(): void {
+  closeWorkspacePane();
+  setActiveView("session");
 }
 
 /** Claim/clear the in-flight session open (see AppState.openingSessionId). */

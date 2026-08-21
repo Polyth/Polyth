@@ -59,9 +59,11 @@ test("settings Sessions page renders defaults and never lists sessions", async (
     providerName: "OpenAI",
     name: "GPT Test",
   }]);
-  setSessions([
+  setSessions("p-settings", [
     session({ id: "s1", projectId: "p-settings", title: "Fix the flaky test" }),
     session({ id: "s2", projectId: "p-settings", title: "Ship the release", status: "working", updatedAt: Date.now() - 5_000 }),
+  ]);
+  setSessions("p-other", [
     session({ id: "s3", projectId: "p-other", title: "Other project session" }),
   ]);
 
@@ -81,7 +83,7 @@ test("settings Sessions page renders defaults and never lists sessions", async (
     assert.doesNotMatch(text, /Fix the flaky test|Ship the release|Other project session/);
 
     await act(async () => {
-      setSessions([
+      setSessions("p-settings", [
         session({ id: "s4", projectId: "p-settings", title: "Still not settings content" }),
       ]);
     });
@@ -102,7 +104,8 @@ test("settings Sessions page renders defaults and never lists sessions", async (
 test("global defaults remain available when no project is active", async () => {
   publishProjects([]);
   activateProject(null);
-  setSessions([]);
+  setSessions("p-settings", []);
+  setSessions("p-other", []);
   const container = document.createElement("div");
   document.body.appendChild(container);
   const root = createRoot(container);

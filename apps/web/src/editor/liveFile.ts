@@ -122,8 +122,14 @@ export function previewKindForPath(path: string): EditorPreviewKind {
   return null;
 }
 
-export function initialPreviewVisible(path: string, openInPreview: boolean): boolean {
-  return openInPreview && previewKindForPath(path) !== null;
+export function initialPreviewVisible(
+  path: string,
+  openInPreview: boolean,
+  byKind?: Partial<Record<"markdown" | "html" | "json", boolean>>,
+): boolean {
+  const kind = previewKindForPath(path);
+  if (kind === null) return false;
+  return byKind?.[kind] ?? openInPreview;
 }
 
 function escapeAttribute(value: string): string {

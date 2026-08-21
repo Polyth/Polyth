@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { renderMarkdown } from "../markdown.tsx";
 import { fmtDuration, fmtMs } from "../format.ts";
 import { groupWork, mergeThinking, promptIndex, toolSummary, copyText, loadDraft, type WorkGroup } from "../utils.ts";
@@ -40,6 +40,13 @@ import {
 } from "../messageActions.ts";
 import { applyComposerSeed, discardComposerSeed, loadSeedRecord } from "../drafts.ts";
 import { TIMELINE_CHUNK, TIMELINE_WINDOW, grownLimit, limitToInclude, windowStart } from "../timelineWindow.ts";
+import {
+  RAIL_PANEL_ROWS,
+  activePromptIndex,
+  cursorTickIndex,
+  railWindow,
+  tickWidth,
+} from "../promptRail.ts";
 import { captureTimelineAnchor, loadTimelineAnchor, restoreScrollDelta, saveTimelineAnchor, type TimelineAnchor } from "../timelineAnchor.ts";
 import CopyButton from "./CopyButton.tsx";
 import Dialog from "./a11y/Dialog.tsx";
@@ -521,47 +528,132 @@ function TimelineDialog({ prompts, onClose, onJump, onRevert, onFork, revert, fo
   );
 }
 
-// Reserved prompt navigation (UX-TIMELINE-LAYOUT-01 §2.3): ordered,
-// window-aware jump chips in the utility region OUTSIDE the scroll root.
-// Hover/focus reveals a bounded IN-FLOW preview that grows this region and
-// shrinks the scrollport — it never overlays a message or opens off-screen.
-function PromptNavigator({ prompts, onJump }: {
+// Right-edge prompt rail (WP4, restyled after polyth PromptNavigatorRail):
+// a thin vertical tape of ticks in a 28px gutter hugging the right edge of the
+// chat viewport, vertically centered. It is a SIBLING of the .timeline scroller
+// (absolute within .timeline-viewport), so it never scrolls away and never
+// competes with right-aligned user bubbles. Each tick is one real user prompt
+// from this session; the active turn is tracked against the timeline scroll
+// position, ticks swell in a proximity wave under the cursor, and hover/focus
+// reveals a recent-turns panel. Click jumps via the existing
+// jump()/scrollIntoView path. Presentation-only — no SessionEvent.
+function PromptNavigator({ prompts, onJump, containerRef }: {
   prompts: Array<{ id: string; preview: string; text: string }>;
   onJump: (id: string) => void;
+  containerRef: RefObject<HTMLDivElement | null>;
 }) {
   const [active, setActive] = useState(-1);
-  const shown = active >= 0 ? prompts[active] : undefined;
+  const [cursor, setCursor] = useState(-1);
+  const [open, setOpen] = useState(false);
+  const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Scroll-spy: the active turn is the last prompt at/above the viewport
+  // midline; at the very bottom the newest rendered prompt always wins (its
+  // top may never cross the midline). rAF-throttled; rows hidden by L13
+  // windowing count as "above" (see activePromptIndex).
+  useEffect(() => {
+    const el = containerRef.current;
+    if (el === null) return;
+    let raf = 0;
+    const measure = () => {
+      raf = 0;
+      const box = el.getBoundingClientRect();
+      const line = box.top + el.clientHeight * 0.5;
+      const tops = prompts.map((p) => {
+        const node = el.querySelector(`[data-msg-id="${p.id}"]`);
+        return node === null ? null : node.getBoundingClientRect().top;
+      });
+      let index = activePromptIndex(tops, line);
+      if (el.scrollTop + el.clientHeight >= el.scrollHeight - 8) {
+        for (let i = tops.length - 1; i >= 0; i--) {
+          if (tops[i] !== null) { index = i; break; }
+        }
+      }
+      setActive(index);
+    };
+    const onScroll = () => { if (raf === 0) raf = requestAnimationFrame(measure); };
+    el.addEventListener("scroll", onScroll, { passive: true });
+    measure();
+    return () => {
+      el.removeEventListener("scroll", onScroll);
+      if (raf !== 0) cancelAnimationFrame(raf);
+    };
+  }, [prompts, containerRef]);
+  useEffect(() => () => { if (closeTimer.current !== null) clearTimeout(closeTimer.current); }, []);
+
+  const reveal = () => {
+    if (closeTimer.current !== null) { clearTimeout(closeTimer.current); closeTimer.current = null; }
+    setOpen(true);
+  };
+  // 160ms leave grace so the pointer can cross the gap into the panel.
+  const scheduleClose = () => {
+    if (closeTimer.current !== null) clearTimeout(closeTimer.current);
+    closeTimer.current = setTimeout(() => { closeTimer.current = null; setOpen(false); setCursor(-1); }, 160);
+  };
+
+  const { start, end } = railWindow(prompts.length, active);
+  const visible = prompts.slice(start, end);
+  const recentStart = Math.max(0, prompts.length - RAIL_PANEL_ROWS);
+  const recent = prompts.slice(recentStart);
+  const jumpTo = (id: string) => { onJump(id); setOpen(false); setCursor(-1); };
+
   return (
     <nav
       className="prompt-nav"
       aria-label={PROMPT_NAV_NAME}
-      onMouseLeave={() => setActive(-1)}
-      onBlur={(e) => {
-        if (!e.currentTarget.contains(e.relatedTarget as Node | null)) setActive(-1);
-      }}
+      onMouseEnter={reveal}
+      onMouseLeave={scheduleClose}
+      onFocus={reveal}
+      onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) scheduleClose(); }}
     >
-      <div className="prompt-nav-items">
-        {prompts.map((p, i) => (
-          <button
-            key={p.id}
-            className="prompt-nav-item"
-            aria-label={promptJumpName(i, prompts.length, p.text)}
-            aria-describedby={active === i && shown ? "prompt-nav-preview" : undefined}
-            onClick={() => onJump(p.id)}
-            onMouseEnter={() => setActive(i)}
-            onFocus={() => setActive(i)}
-          >
-            <span className="prompt-nav-dot" aria-hidden="true" />
-            <span className="prompt-nav-index">{i + 1}</span>
-          </button>
-        ))}
+      <div
+        className="prompt-nav-tape"
+        onMouseMove={(e) => {
+          const box = e.currentTarget.getBoundingClientRect();
+          setCursor(cursorTickIndex(e.clientY - box.top, visible.length));
+        }}
+        onMouseLeave={() => setCursor(-1)}
+        data-clip-above={start > 0 || undefined}
+        data-clip-below={end < prompts.length || undefined}
+      >
+        {visible.map((p, i) => {
+          const index = start + i;
+          return (
+            <button
+              key={p.id}
+              className="prompt-nav-tick"
+              aria-label={promptJumpName(index, prompts.length, p.text)}
+              aria-current={index === active ? "true" : undefined}
+              onClick={() => jumpTo(p.id)}
+            >
+              <span
+                className="prompt-nav-tick-bar"
+                aria-hidden="true"
+                style={{ width: `${tickWidth(index, active, cursor >= 0 ? start + cursor : -1)}px` }}
+              />
+            </button>
+          );
+        })}
       </div>
-      {shown && (
-        <div className="prompt-nav-preview" id="prompt-nav-preview" role="note">
-          <span className="prompt-nav-preview-head">Prompt {active + 1} of {prompts.length}</span>
-          <span className="prompt-nav-preview-body" dir="auto">
-            {shown.text.trim() === "" ? "(empty prompt)" : shown.text}
-          </span>
+      {open && recent.length > 0 && (
+        <div className="prompt-nav-panel">
+          <div className="prompt-nav-panel-head">
+            Recent turns{prompts.length > recent.length ? ` (${recentStart + 1}–${prompts.length} of ${prompts.length})` : ""}
+          </div>
+          {recent.map((p, i) => {
+            const index = recentStart + i;
+            return (
+              <button
+                key={p.id}
+                className={index === active ? "prompt-nav-row current" : "prompt-nav-row"}
+                aria-current={index === active ? "true" : undefined}
+                onClick={() => jumpTo(p.id)}
+              >
+                <span className="prompt-nav-row-index">{index + 1}</span>
+                <span className="prompt-nav-row-text">{p.preview || "(empty prompt)"}</span>
+              </button>
+            );
+          })}
         </div>
       )}
     </nav>
@@ -879,23 +971,23 @@ export default function Timeline({ model }: { model: RenderModel }) {
 
   // One timeline, one scroll root (§2.1): the shell stacks the reserved
   // utility region, the single `.timeline` scrollport, and the reserved
-  // latest-reveal region as normal-flow siblings. Reserved chrome consumes
-  // layout space — nothing is absolutely positioned over the transcript.
+  // latest-reveal region as normal-flow siblings. The only exception is the
+  // prompt rail: `.timeline-viewport` is a non-scrolling positioning context
+  // wrapping the scrollport, and the rail is an absolute SIBLING of the
+  // scroller pinned to the right gutter (never over the reading column).
   return (
     <div className="timeline-shell">
-      {(showNav || promptMessages.length > 0) && (
+      {promptMessages.length > 0 && (
         <div className="timeline-utility">
-          {showNav && <PromptNavigator prompts={prompts} onJump={jump} />}
-          {promptMessages.length > 0 && (
-            <button
-              className="timeline-open small-btn"
-              aria-label={OPEN_TIMELINE_NAME}
-              aria-haspopup="dialog"
-              onClick={() => { dialogFocusHandoff.current = false; setTimelineOpen(true); }}
-            >Timeline</button>
-          )}
+          <button
+            className="timeline-open small-btn"
+            aria-label={OPEN_TIMELINE_NAME}
+            aria-haspopup="dialog"
+            onClick={() => { dialogFocusHandoff.current = false; setTimelineOpen(true); }}
+          >Timeline</button>
         </div>
       )}
+      <div className="timeline-viewport">
       <div
         className="timeline"
         role="region"
@@ -994,6 +1086,8 @@ export default function Timeline({ model }: { model: RenderModel }) {
         {footer && <div className="turn-footer">{footer}</div>}
         <div className="msg-live" role="status" aria-live="polite">{liveText}</div>
         <SlotHost slot="session.timeline.after" context={slotSummary} />
+      </div>
+      {showNav && <PromptNavigator prompts={prompts} onJump={jump} containerRef={ref} />}
       </div>
       {showJump && (
         <div className="timeline-reveal">

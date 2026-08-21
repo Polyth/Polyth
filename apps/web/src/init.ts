@@ -187,8 +187,9 @@ async function restoreSelectionAfterReady(): Promise<void> {
     if (initial) store.activateProject(initial);
     if (fromUrl.sessionId) {
       // A valid session deep link resolves its owning project and wins.
+      // Boot restoration must not close the restored workspace pane.
       try {
-        await openSession(fromUrl.sessionId);
+        await openSession(fromUrl.sessionId, { showChat: false });
       } catch (err) {
         console.warn("session from URL not found, falling back", err);
         store.setUiError("That session link couldn’t be opened — showing the project instead.");
@@ -198,7 +199,7 @@ async function restoreSelectionAfterReady(): Promise<void> {
       if (savedSession) {
         await refreshSessions(initial);
         if (store.getState().sessions.some((session) => session.id === savedSession)) {
-          await openSession(savedSession).catch(() => {});
+          await openSession(savedSession, { showChat: false }).catch(() => {});
         }
       }
     }
@@ -262,7 +263,16 @@ function startSync(): void {
 
 // ---- session / project actions --------------------------------------------
 
-export async function openSession(sessionId: string): Promise<void> {
+export async function openSession(
+  sessionId: string,
+  opts: {
+    /** UX-FILES-TIMELINE-03 finding 8: user-driven switches (default) always
+     *  land in the session's chat view — the open workspace pane closes and
+     *  the primary view returns to "session". Boot restoration passes false
+     *  so a reload keeps the restored pane. */
+    showChat?: boolean;
+  } = {},
+): Promise<void> {
   // Claim the in-flight open BEFORE the first await: the session surface must
   // represent an unresolved canonical replay as loading, never flash the
   // fresh-session hero over a populated session (UX-TIMELINE-LAYOUT-01 §8).
@@ -274,6 +284,7 @@ export async function openSession(sessionId: string): Promise<void> {
     store.applyEvents(events); // one store update for the whole history
     maybeSeedFromReplay(sessionId);
     store.activateSession(sessionId);
+    if (opts.showChat !== false) store.showSessionChat();
   } finally {
     // A newer concurrent open owns the claim; only this open's claim clears.
     if (store.getState().openingSessionId === sessionId) store.setOpeningSession(null);
@@ -297,7 +308,7 @@ function maybeSeedFromReplay(sessionId: string): void {
 
 export async function refreshSessions(projectId: string): Promise<void> {
   try {
-    store.setSessions(await api.listSessions(projectId));
+    store.setSessions(projectId, await api.listSessions(projectId));
   } catch (err) {
     console.error("list sessions failed", err);
   }
