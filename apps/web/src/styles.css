@@ -2132,20 +2132,44 @@ html[data-density="compact"] .set-row { padding: 9px 0; }
 .editor-ta[wrap="soft"] { white-space: pre-wrap; padding-left: 14px; }
 .editor-ta:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
 
-/* file tree (finding 7): namespaced ft-* rows — `.sel` is the select widget */
-.ft-tree { display: flex; flex-direction: column; gap: 1px; outline: none; }
+/* file tree (finding 7 + UX-FILES-TIMELINE-03 finding 1): namespaced ft-*
+   rows — `.sel` is the select widget. Rows carry a disclosure chevron, a
+   file-type tinted glyph (data-ft from editor/fileTreeIcons.tsx), and clean
+   hover/selected/focus states. */
+.ft-tree { display: flex; flex-direction: column; gap: 1px; outline: none; padding: 2px 4px; }
 .ft-tree:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; border-radius: 4px; }
 .ft-row {
-  display: flex; align-items: center; gap: 4px;
-  width: 100%; padding: 3px 6px; border-radius: 4px;
-  font-size: 12.5px; line-height: 1.5; cursor: pointer; user-select: none;
+  display: flex; align-items: center; gap: 5px;
+  width: 100%; padding: 3px 8px 3px 6px; border-radius: 5px;
+  font-size: 12.5px; line-height: 1.6; cursor: pointer; user-select: none;
   color: var(--text-dim); transition: background 120ms ease;
 }
-.ft-row:hover { background: var(--elevated); }
-.ft-row.ft-selected { background: var(--raised); color: var(--text); }
+.ft-row:hover { background: var(--elevated); color: var(--text); }
+.ft-row.ft-selected { background: var(--accent-wash); color: var(--text); }
 .ft-tree:focus-visible .ft-row.ft-selected { outline: 1px solid var(--accent-line); outline-offset: -1px; }
-.ft-chevron { flex: none; width: 13px; text-align: center; color: var(--faint); font-size: 10px; }
+.ft-chevron {
+  flex: none; width: 12px; height: 12px;
+  display: inline-flex; align-items: center; justify-content: center;
+  color: var(--faint);
+}
+.ft-chevron svg { transition: transform 120ms ease; }
+.ft-chevron.open svg { transform: rotate(90deg); }
+body[data-motion="reduced"] .ft-chevron svg { transition: none; }
 .ft-dir > .ft-chevron { color: var(--muted); }
+.ft-icon {
+  flex: none; width: 15px; height: 15px;
+  display: inline-flex; align-items: center; justify-content: center;
+  color: var(--muted);
+}
+.ft-icon[data-ft="folder"] { color: var(--accent); }
+.ft-icon[data-ft="folder"].open svg { fill: currentColor; fill-opacity: 0.16; }
+.ft-icon[data-ft="code"] { color: var(--blue); }
+.ft-icon[data-ft="markup"] { color: var(--red); }
+.ft-icon[data-ft="doc"] { color: var(--text-dim); }
+.ft-icon[data-ft="data"] { color: var(--amber); }
+.ft-icon[data-ft="style"] { color: var(--purple); }
+.ft-icon[data-ft="image"] { color: var(--green); }
+.ft-icon[data-ft="shell"] { color: var(--green); }
 .ft-name {
   flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   font-family: var(--mono);
