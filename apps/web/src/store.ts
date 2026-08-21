@@ -502,6 +502,15 @@ export function activateSession(id: string | null): void {
   set({ activeSessionId: id });
 }
 
+/** UX-FILES-TIMELINE-03 finding 8: a session switch always lands in that
+ *  session's chat. The visible workspace pane closes through the command
+ *  path (metadata-only — keep-alive scope caches survive per UX-PANE-MODEL)
+ *  and the primary view returns to "session". */
+export function showSessionChat(): void {
+  closeWorkspacePane();
+  setActiveView("session");
+}
+
 // Merge + persist local UI preferences and apply the visual ones to <html>.
 export function updateSettings(patch: Partial<PolythSettings>): void {
   const settings = { ...state.settings, ...patch };

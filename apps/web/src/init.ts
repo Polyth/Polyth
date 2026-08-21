@@ -186,8 +186,9 @@ async function restoreSelectionAfterReady(): Promise<void> {
     if (initial) store.activateProject(initial);
     if (fromUrl.sessionId) {
       // A valid session deep link resolves its owning project and wins.
+      // Boot restoration must not close the restored workspace pane.
       try {
-        await openSession(fromUrl.sessionId);
+        await openSession(fromUrl.sessionId, { showChat: false });
       } catch (err) {
         console.warn("session from URL not found, falling back", err);
         store.setUiError("That session link couldn’t be opened — showing the project instead.");
@@ -197,7 +198,7 @@ async function restoreSelectionAfterReady(): Promise<void> {
       if (savedSession) {
         await refreshSessions(initial);
         if (store.getState().sessions.some((session) => session.id === savedSession)) {
-          await openSession(savedSession).catch(() => {});
+          await openSession(savedSession, { showChat: false }).catch(() => {});
         }
       }
     }
@@ -261,13 +262,23 @@ function startSync(): void {
 
 // ---- session / project actions --------------------------------------------
 
-export async function openSession(sessionId: string): Promise<void> {
+export async function openSession(
+  sessionId: string,
+  opts: {
+    /** UX-FILES-TIMELINE-03 finding 8: user-driven switches (default) always
+     *  land in the session's chat view — the open workspace pane closes and
+     *  the primary view returns to "session". Boot restoration passes false
+     *  so a reload keeps the restored pane. */
+    showChat?: boolean;
+  } = {},
+): Promise<void> {
   const session = await api.getSession(sessionId);
   if (session.projectId !== store.getState().activeProjectId) store.activateProject(session.projectId);
   const events = await api.getEvents(sessionId, 0);
   store.applyEvents(events); // one store update for the whole history
   maybeSeedFromReplay(sessionId);
   store.activateSession(sessionId);
+  if (opts.showChat !== false) store.showSessionChat();
 }
 
 /** Replay-derived composer seeding (UX-MSG-ACTIONS): an active rewind marker
