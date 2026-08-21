@@ -3,6 +3,7 @@
 // the limit exactly far enough. Pure math — the render model never changes.
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import { grownLimit, hiddenCount, limitToInclude, windowStart, TIMELINE_CHUNK, TIMELINE_WINDOW } from "../src/timelineWindow.ts";
 
 // The integration assertion below exercises timelineAnchor.ts against window
@@ -10,6 +11,14 @@ import { grownLimit, hiddenCount, limitToInclude, windowStart, TIMELINE_CHUNK, T
 (globalThis as { getComputedStyle?: unknown }).getComputedStyle =
   (el: { __position?: string }) => ({ position: el.__position ?? "static" });
 const { captureTimelineAnchor, restoreScrollDelta } = await import("../src/timelineAnchor.ts");
+
+test("timeline dialog uses labelled icon actions for revert and fork", async () => {
+  const source = await readFile(new URL("../src/components/Timeline.tsx", import.meta.url), "utf8");
+  const dialog = source.slice(source.indexOf("function TimelineDialog"), source.indexOf("// Right-edge prompt rail"));
+  assert.match(dialog, /aria-label=\{revertActionName\(message\.time\)\}[\s\S]*?<Icon\.rewind \/><\/button>/);
+  assert.match(dialog, /aria-label=\{forkActionName\(message\.time\)\}[\s\S]*?<Icon\.fork \/><\/button>/);
+  assert.doesNotMatch(dialog, />Revert and edit<\/button>/);
+});
 
 test("windowStart/hiddenCount: suffix window, nothing hidden for short sessions", () => {
   assert.equal(windowStart(10, TIMELINE_WINDOW), 0);

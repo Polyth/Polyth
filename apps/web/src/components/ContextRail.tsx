@@ -38,6 +38,7 @@ import { chatDockViability, dockGuardTargets } from "../workspace/dockGuard.ts";
 import { PaneVisibilityContext } from "../workspace/paneVisibility.ts";
 import CapabilityMenu from "./CapabilityMenu.tsx";
 import "./railSurfaces.tsx";
+import { setPlacementOverride } from "../workspacePresets.ts";
 
 const NO_EVENTS: never[] = [];
 /** Fallback separator chrome before the real element is measured. */
@@ -153,12 +154,24 @@ export default function ContextRail() {
   const paneExpanded = useStore((s) => s.paneExpanded);
   const resolved = useResolvedCapabilities();
   const [moreOpen, setMoreOpen] = useState(false);
+  const [railEditOpen, setRailEditOpen] = useState(false);
   const moreTriggerRef = useRef<HTMLButtonElement>(null);
   useEscape(moreOpen, () => {
     setMoreOpen(false);
     moreTriggerRef.current?.focus();
   });
   const presentation = open?.presentation;
+  const capabilityById = new Map(resolved.map((capability) => [capability.descriptor.id, capability]));
+  const tierOf = (surface: RailSurface) => capabilityById.get(surface.capabilityId ?? surface.id)?.tier ?? "more";
+  const configuredRailSurfaces = surfaces.filter((surface) => tierOf(surface) === "more");
+  const railButtons = open && !configuredRailSurfaces.some((surface) => surface.id === open.id)
+    ? [open, ...configuredRailSurfaces]
+    : configuredRailSurfaces;
+  const nextRank = (tier: "primary" | "more" | "technical") =>
+    Math.max(-1, ...resolved.filter((capability) => capability.tier === tier).map((capability) => capability.rank)) + 1;
+  const placeSurface = (surface: RailSurface, tier: "primary" | "more" | "technical") => {
+    setPlacementOverride(surface.capabilityId ?? surface.id, { tier, rank: nextRank(tier) });
+  };
 
   // Keep-alive: panels stay mounted once visited so their state survives
   // switching surfaces; surfaces that lose content-driven visibility unmount.
@@ -502,6 +515,48 @@ export default function ContextRail() {
     </>
   );
 
+  const railEditor = (
+    <div className="rail-edit-shell">
+      <button
+        className="rail-icon strip-btn rail-add-button"
+        title="Add or move workspace buttons"
+        aria-label="Add or move workspace buttons"
+        aria-expanded={railEditOpen}
+        onClick={() => setRailEditOpen((value) => !value)}
+      ><Icon.plus /></button>
+      {railEditOpen && (
+        <div className="rail-edit-menu" role="group" aria-label="Configure workspace buttons">
+          <div className="rail-edit-title">Workspace buttons</div>
+          {surfaces.map((surface) => {
+            const tier = tierOf(surface);
+            return (
+              <div key={surface.id} className="rail-edit-row">
+                <span>{surface.title}</span>
+                <button
+                  className={tier === "more" ? "active" : ""}
+                  aria-label={`Show ${surface.title} in right rail`}
+                  title="Right rail"
+                  onClick={() => placeSurface(surface, "more")}
+                >→</button>
+                <button
+                  className={tier === "primary" ? "active" : ""}
+                  aria-label={`Show ${surface.title} in top strip`}
+                  title="Top strip"
+                  onClick={() => placeSurface(surface, "primary")}
+                >↑</button>
+                <button
+                  aria-label={`Remove ${surface.title} button`}
+                  title="Remove button"
+                  onClick={() => placeSurface(surface, "technical")}
+                >×</button>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+
   return (
     <>
       {compactContext && <div className="menu-backdrop sheet-backdrop" onClick={() => setRailPlugin(null)} />}
@@ -568,7 +623,7 @@ export default function ContextRail() {
           </div>
           {compactContext && (
             <div className="plugin-strip sheet-strip" aria-label="Workspace panels">
-              {surfaces.map((s) => (
+              {railButtons.map((s) => (
                 <button
                   key={s.id}
                   className={`rail-icon strip-btn ${rail === s.id ? "active" : ""}`}
@@ -583,6 +638,7 @@ export default function ContextRail() {
                 </button>
               ))}
               <span className="strip-spacer" />
+              {railEditor}
               {moreToolsPicker}
             </div>
           )}
@@ -607,7 +663,7 @@ export default function ContextRail() {
         )}
         {!compact && (
           <div className="rail-icon-col plugin-strip" aria-label="Workspace panels">
-            {surfaces.map((s) => (
+            {railButtons.map((s) => (
             <button
               key={s.id}
               className={`rail-icon strip-btn ${rail === s.id ? "active" : ""}`}
@@ -622,6 +678,7 @@ export default function ContextRail() {
             </button>
             ))}
             <span className="strip-spacer" />
+            {railEditor}
             {moreToolsPicker}
           </div>
         )}

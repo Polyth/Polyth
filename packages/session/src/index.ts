@@ -21,6 +21,9 @@ import type {
   WorkspaceLabel,
 } from "@polyth/contracts";
 
+export { sessionRetentionSummary } from "./retention.ts";
+export type { SessionRetentionSummary } from "./retention.ts";
+
 /** Unresolved-request counters derived from durable events (never cached). */
 export interface AttentionCounts { questions: number; permissions: number }
 

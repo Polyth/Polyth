@@ -44,6 +44,7 @@ const store = await import("../src/store.ts");
 const { openSession } = await import("../src/init.ts");
 const { registerSurface } = await import("../src/surfaces.ts");
 const { getWorkspacePanePrefs } = await import("../src/workspace/panePrefs.ts");
+const { getWorkspaceMode, setWorkspaceMode } = await import("../src/widgets/workspaceMode.ts");
 
 // A minimal canonical workspace surface so openWorkspacePane admits "files"
 // without mounting the real component tree.
@@ -62,8 +63,11 @@ test("user session switch closes the open pane and returns to chat, keeping pane
   store.activateProject("p1");
   assert.equal(store.openWorkspacePane("files", "file:src/app.ts"), true);
   store.setActiveView("goals"); // pane stays open while a workflow page shows
+  store.setOverlay("settings");
+  setWorkspaceMode("widgets");
   assert.equal(store.getState().railPlugin, "files");
   assert.equal(store.getState().activeView, "goals");
+  assert.equal(getWorkspaceMode(), "widgets");
 
   await openSession("s1");
 
@@ -71,6 +75,8 @@ test("user session switch closes the open pane and returns to chat, keeping pane
   assert.equal(s.activeSessionId, "s1", "session activated");
   assert.equal(s.railPlugin, null, "visible workspace pane closed");
   assert.equal(s.activeView, "session", "primary view returned to chat");
+  assert.equal(s.overlay, null, "session activation closes overlays above chat");
+  assert.equal(getWorkspaceMode(), "chat", "Canvas no longer covers the selected session");
   // Scope caches survive: only openSurface flips to null — the surface's
   // last resource (and any widths) remain for the next open.
   const prefs = getWorkspacePanePrefs("p1");
@@ -81,6 +87,7 @@ test("user session switch closes the open pane and returns to chat, keeping pane
 test("boot restoration keeps the restored workspace pane open", async () => {
   store.activateProject("p1");
   assert.equal(store.openWorkspacePane("files"), true);
+  setWorkspaceMode("widgets");
 
   await openSession("s2", { showChat: false });
 
@@ -88,4 +95,5 @@ test("boot restoration keeps the restored workspace pane open", async () => {
   assert.equal(s.activeSessionId, "s2");
   assert.equal(s.railPlugin, "files", "boot path must not close the restored pane");
   assert.equal(s.activeView, "session");
+  assert.equal(getWorkspaceMode(), "widgets", "boot restoration preserves the saved workspace mode");
 });

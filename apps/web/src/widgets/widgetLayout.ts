@@ -11,6 +11,12 @@ export interface WidgetSize {
   h: number;
 }
 
+/** Zero-based coordinates on the single 12-column canvas. */
+export interface WidgetPosition {
+  x: number;
+  y: number;
+}
+
 export interface WidgetLayoutDefinition {
   id: string;
   pluginId?: string;
@@ -32,6 +38,7 @@ export interface WidgetLayoutDefinition {
 export interface WidgetPlacement {
   visible: boolean;
   size: WidgetSize;
+  position: WidgetPosition;
   definitionId?: string;
   pluginId?: string;
   title?: string;
@@ -132,6 +139,17 @@ const clampSize = (value: unknown): WidgetSize => {
   return { w, h };
 };
 
+const clampPosition = (value: unknown): WidgetPosition => {
+  const position = value as Partial<WidgetPosition> | undefined;
+  const x = typeof position?.x === "number" && Number.isFinite(position.x)
+    ? Math.min(11, Math.max(0, Math.round(position.x)))
+    : 0;
+  const y = typeof position?.y === "number" && Number.isFinite(position.y)
+    ? Math.min(999, Math.max(0, Math.round(position.y)))
+    : 0;
+  return { x, y };
+};
+
 function constrainedSize(value: unknown, definition?: WidgetLayoutDefinition): WidgetSize {
   const size = clampSize(value);
   const min = definition?.minSize ? clampSize(definition.minSize) : { w: 1, h: 1 };
@@ -151,13 +169,18 @@ function showInFor(definition: WidgetLayoutDefinition): WidgetAudience[] | undef
   );
 }
 
-function placementFor(definition: WidgetLayoutDefinition, visible: boolean): WidgetPlacement {
+function placementFor(
+  definition: WidgetLayoutDefinition,
+  visible: boolean,
+  position: WidgetPosition = { x: 0, y: 0 },
+): WidgetPlacement {
   return {
     visible,
     size: constrainedSize(
       definition.defaultSize ?? DEFAULT_SIZE_BY_ID[definition.id] ?? DEFAULT_SIZE,
       definition,
     ),
+    position: clampPosition(position),
     definitionId: definition.id,
     ...(definition.pluginId ? { pluginId: definition.pluginId } : {}),
     ...(definition.title ? { title: definition.title } : {}),
@@ -172,12 +195,29 @@ export function createDefaultWidgetLayout(
 ): WidgetLayout {
   const zones = emptyZones();
   const widgets: Record<string, WidgetPlacement> = {};
+  let x = 0;
+  let y = 0;
+  let rowHeight = 0;
   for (const item of known) {
     const definition = typeof item === "string" ? { id: item } : item;
     const id = definition.id;
     const zone = definition.zone ?? DEFAULT_ZONE[id] ?? "main";
+    const visible = DEFAULT_VISIBLE.has(id);
+    const size = constrainedSize(
+      definition.defaultSize ?? DEFAULT_SIZE_BY_ID[id] ?? DEFAULT_SIZE,
+      definition,
+    );
+    if (visible && x > 0 && x + size.w > 12) {
+      x = 0;
+      y += rowHeight;
+      rowHeight = 0;
+    }
     zones[zone].push(id);
-    widgets[id] = placementFor(definition, DEFAULT_VISIBLE.has(id));
+    widgets[id] = placementFor(definition, visible, visible ? { x, y } : { x: 0, y: 0 });
+    if (visible) {
+      x += size.w;
+      rowHeight = Math.max(rowHeight, size.h);
+    }
   }
   return { version: 1, audience: "standard", zones, widgets };
 }
@@ -251,6 +291,7 @@ export function parseWidgetLayout(
       widgets[id] = {
         visible: typeof value?.visible === "boolean" ? value.visible : base?.visible ?? false,
         size: constrainedSize(value?.size ?? base?.size ?? DEFAULT_SIZE, definition),
+        position: clampPosition(value?.position ?? base?.position),
         definitionId,
         ...(definition?.pluginId || value?.pluginId
           ? { pluginId: definition?.pluginId ?? value!.pluginId! }
@@ -352,7 +393,26 @@ export function moveWidget(
 export function setWidgetVisible(layout: WidgetLayout, id: string, visible: boolean): WidgetLayout {
   const current = layout.widgets[id];
   if (!current || current.visible === visible) return layout;
-  return { ...layout, widgets: { ...layout.widgets, [id]: { ...current, visible } } };
+  if (!visible) {
+    return { ...layout, widgets: { ...layout.widgets, [id]: { ...current, visible: false } } };
+  }
+  const others = Object.entries(layout.widgets)
+    .filter(([otherId, placement]) => otherId !== id && placement.visible);
+  const collides = others.some(([, placement]) =>
+    overlaps(current.position, current.size, placement.position, placement.size));
+  const position = collides
+    ? {
+        x: 0,
+        y: others.reduce(
+          (bottom, [, placement]) => Math.max(bottom, placement.position.y + placement.size.h),
+          0,
+        ),
+      }
+    : current.position;
+  return {
+    ...layout,
+    widgets: { ...layout.widgets, [id]: { ...current, visible: true, position } },
+  };
 }
 
 export function setWidgetSize(
@@ -365,7 +425,48 @@ export function setWidgetSize(
   if (!current || definition?.resizable === false) return layout;
   const next = constrainedSize(size, definition);
   if (next.w === current.size.w && next.h === current.size.h) return layout;
-  return { ...layout, widgets: { ...layout.widgets, [id]: { ...current, size: next } } };
+  const resized = {
+    ...layout,
+    widgets: { ...layout.widgets, [id]: { ...current, size: next } },
+  };
+  return setWidgetPosition(resized, id, current.position);
+}
+
+function overlaps(
+  a: WidgetPosition,
+  aSize: WidgetSize,
+  b: WidgetPosition,
+  bSize: WidgetSize,
+): boolean {
+  return a.x < b.x + bSize.w
+    && a.x + aSize.w > b.x
+    && a.y < b.y + bSize.h
+    && a.y + aSize.h > b.y;
+}
+
+/** Move on the free-form canvas. Collisions are resolved downward so widgets
+ * remain separated by the CSS grid gap instead of stacking over each other. */
+export function setWidgetPosition(
+  layout: WidgetLayout,
+  id: string,
+  position: WidgetPosition,
+): WidgetLayout {
+  const current = layout.widgets[id];
+  if (!current) return layout;
+  let next = clampPosition({ ...position, x: Math.min(position.x, 12 - current.size.w) });
+  const others = Object.entries(layout.widgets)
+    .filter(([otherId, placement]) => otherId !== id && placement.visible);
+  for (let pass = 0; pass < others.length + 1; pass++) {
+    const collision = others.find(([, placement]) =>
+      overlaps(next, current.size, placement.position, placement.size));
+    if (!collision) break;
+    next = clampPosition({ x: next.x, y: collision[1].position.y + collision[1].size.h });
+  }
+  if (next.x === current.position.x && next.y === current.position.y) return layout;
+  return {
+    ...layout,
+    widgets: { ...layout.widgets, [id]: { ...current, position: next } },
+  };
 }
 
 export function setWidgetAudience(layout: WidgetLayout, audience: WidgetAudience): WidgetLayout {
@@ -439,17 +540,20 @@ export function duplicateWidget(
     [instanceId]: {
       ...current,
       definitionId: definition.id,
+      position: { x: current.position.x, y: current.position.y + current.size.h },
       title: current.title ? `${current.title} copy` : definition.title ? `${definition.title} copy` : undefined,
     },
   };
   const zones = { ...layout.zones, [zone]: [...layout.zones[zone], instanceId] };
-  return { ...layout, widgets, zones };
+  const duplicated = { ...layout, widgets, zones };
+  return setWidgetPosition(duplicated, instanceId, widgets[instanceId]!.position);
 }
 
 export type WidgetLayoutMutation =
   | { type: "move"; id: string; zone: WidgetZone; index?: number }
   | { type: "visibility"; id: string; visible: boolean }
   | { type: "resize"; id: string; size: WidgetSize }
+  | { type: "position"; id: string; position: WidgetPosition }
   | { type: "audience"; audience: WidgetAudience }
   | { type: "show-in"; id: string; showIn: WidgetAudience[] }
   | { type: "scope"; id: string; scope: WidgetScope }
@@ -492,6 +596,8 @@ export function applyWidgetLayoutMutations(
         return setWidgetVisible(current, mutation.id, mutation.visible);
       case "resize":
         return setWidgetSize(current, mutation.id, mutation.size, definition);
+      case "position":
+        return setWidgetPosition(current, mutation.id, mutation.position);
       case "audience":
         return setWidgetAudience(current, mutation.audience);
       case "show-in":

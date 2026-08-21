@@ -4,8 +4,13 @@
 // still feed the composer picker ordering. Every toggle refreshes the model
 // list in the store so the composer picker updates immediately.
 import { useEffect, useMemo, useState } from "react";
-import { isFavorite, modelKey } from "@polyth/models";
-import { toggleModelFavorite, useModelPrefs } from "../../modelPrefs.ts";
+import { isFavorite, modelKey, orderProviders } from "@polyth/models";
+import {
+  reorderModelProviders,
+  setModelProviderExpanded,
+  toggleModelFavorite,
+  useModelPrefs,
+} from "../../modelPrefs.ts";
 import { setModels, updateSettings, useStore } from "../../store.ts";
 import { providerColor } from "../../format.ts";
 import { formatModelRef } from "../../settings.ts";
@@ -31,7 +36,7 @@ export default function ModelsPage() {
   const [q, setQ] = useState("");
   const [scope, setScope] = useState<Scope>("connected");
   const [providerFilter, setProviderFilter] = useState<string | null>(null);
-  const [open, setOpen] = useState<Record<string, boolean>>({});
+  const [draggedProvider, setDraggedProvider] = useState<string | null>(null);
   const [busyKey, setBusyKey] = useState("");
   const catalogModels = useMemo(
     () => providers?.flatMap((provider) => provider.models) ?? [],
@@ -61,7 +66,7 @@ export default function ModelsPage() {
   const query = q.trim().toLowerCase();
   const shown = useMemo(() => {
     if (!providers) return [];
-    return providers
+    return orderProviders(providers
       .filter((p) => (scope === "connected" ? p.connected : true))
       .filter((p) => (providerFilter ? p.id === providerFilter : true))
       .map((p) => ({
@@ -73,11 +78,11 @@ export default function ModelsPage() {
               || p.name.toLowerCase().includes(query))
           : p.models,
       }))
-      .filter((p) => p.models.length > 0 || !query);
-  }, [providers, scope, providerFilter, query]);
+      .filter((p) => p.models.length > 0 || !query), prefs);
+  }, [providers, scope, providerFilter, query, prefs]);
 
   // Search auto-expands so hits are visible without clicking each provider.
-  const isOpen = (id: string) => (query ? true : open[id] ?? false);
+  const isOpen = (id: string) => query.length > 0 || prefs.expandedProviders.includes(id);
 
   if (providers === null && !error) {
     return <><PageHead title="Providers & Models" /><EmptyState title="Loading catalog…" /></>;
@@ -158,14 +163,28 @@ export default function ModelsPage() {
           const enabledCount = p.models.filter((m) => m.enabled).length;
           const expanded = isOpen(p.id);
           return (
-            <div key={p.id} className={`provider-card ${p.enabled ? "" : "provider-disabled"}`}>
+            <div
+              key={p.id}
+              className={`provider-card ${p.enabled ? "" : "provider-disabled"}`}
+              draggable={!query}
+              onDragStart={() => setDraggedProvider(p.id)}
+              onDragOver={(event) => event.preventDefault()}
+              onDrop={(event) => {
+                event.preventDefault();
+                if (draggedProvider) {
+                  reorderModelProviders(shown.map((provider) => provider.id), draggedProvider, p.id);
+                }
+                setDraggedProvider(null);
+              }}
+            >
               <div className="provider-head">
                 <button
                   className="provider-expand"
                   aria-expanded={expanded}
                   aria-label={`${expanded ? "Collapse" : "Expand"} ${p.name}`}
-                  onClick={() => setOpen((o) => ({ ...o, [p.id]: !expanded }))}
+                  onClick={() => setModelProviderExpanded(p.id, !expanded)}
                 >
+                  <span className="provider-drag" aria-hidden="true">⠿</span>
                   <span className={`provider-chevron ${expanded ? "open" : ""}`} aria-hidden="true">›</span>
                   <span className="set-model-dot" style={{ background: providerColor(p.id) }} />
                   <span className="provider-name">{p.name}</span>

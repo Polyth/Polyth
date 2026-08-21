@@ -441,6 +441,19 @@ export interface QuotaSnapshotDto {
   providerId: string; accountLabel?: string; windows: QuotaWindowDto[];
   fetchedAt: number; stale: boolean; error?: { code: string; message: string };
   pace: Record<string, QuotaPaceDto | null>;
+  overview?: {
+    providerId: string;
+    accountLabel?: string;
+    stale: boolean;
+    windows: Array<QuotaWindowDto & { usedFraction: number; remainingFraction: number }>;
+    highestUsedFraction: number;
+  };
+}
+
+export interface SessionRetentionDto {
+  days: number;
+  cutoff: number;
+  eligibleCount: number;
 }
 
 // ---- goal types (§12) ------------------------------------------------------
@@ -937,6 +950,14 @@ export const api = {
     jfetch<QuotaSnapshotDto[]>(`/api/usage/quotas`).catch((): QuotaSnapshotDto[] => []),
   usageQuotasRefresh: (providerId: string) =>
     jfetch<QuotaSnapshotDto>(`/api/usage/quotas/refresh`, json("POST", { providerId })),
+
+  sessionRetention: (days: number) =>
+    jfetch<SessionRetentionDto>(`/api/session-retention?days=${encodeURIComponent(days)}`),
+  runSessionRetention: (days: number) =>
+    jfetch<{ eligibleCount: number; succeeded: string[]; failed: Array<{ id: string; code: string }> }>(
+      "/api/session-retention",
+      json("POST", { days }),
+    ),
 
   // ---- session control ---------------------------------------------------------
   controlSessions: (projectId?: string) =>

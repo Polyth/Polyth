@@ -131,6 +131,7 @@ interface ProviderList {
           input?: Record<string, boolean>;
           output?: Record<string, boolean>;
         };
+        variants?: Record<string, unknown>;
       }
     >;
   }>;
@@ -251,6 +252,9 @@ export const flattenModels = (body: ProviderList): ModelDescriptor[] => {
         context: model.limit?.context,
         cost,
         ...(model.capabilities ? { capabilities } : {}),
+        ...(model.variants && Object.keys(model.variants).length > 0
+          ? { variants: Object.keys(model.variants) }
+          : {}),
         connected: hasSignal ? connectedIds.has(provider.id) : true,
       });
     }
@@ -710,6 +714,7 @@ export const createOpenCodeRuntimeWithClient = (
       };
       if (req.model) {
         body.model = { providerID: req.model.providerID, modelID: req.model.modelID };
+        if (req.model.variant) body.variant = req.model.variant;
       }
       if (req.agent) body.agent = req.agent;
       try {

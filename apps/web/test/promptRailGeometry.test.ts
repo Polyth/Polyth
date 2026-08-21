@@ -51,7 +51,7 @@ test("rail mounts as a sibling of the .timeline scroller, outside its overflow",
   // inside the scroller it would scroll away and be overpainted by bubbles.
   assert.match(
     src,
-    /<\/div>\s*\{showNav && <PromptNavigator/,
+    /<\/div>\s*\{showNav && \(\s*<PromptNavigator/,
     "PromptNavigator must be a sibling of the closed .timeline scroller",
   );
 });

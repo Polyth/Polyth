@@ -24,7 +24,6 @@ import IntegrationsPage from "./settings/IntegrationsPage.tsx";
 import SessionsPage from "./settings/SessionsPage.tsx";
 import CommandsPage from "./settings/CommandsPage.tsx";
 import AccessPage from "./settings/AccessPage.tsx";
-import WidgetsPage from "./settings/WidgetsPage.tsx";
 
 interface PageDef {
   id: string;
@@ -47,11 +46,10 @@ const BUILTIN: PageDef[] = [
   { id: "projects", label: "Projects", group: "Engineering", render: () => <ProjectsPage /> },
   { id: "git", label: "Git", group: "Engineering", render: () => <GitPage /> },
   { id: "models", label: "Providers & Models", group: "Engineering", render: () => <ModelsPage /> },
-  { id: "agents", label: "Agents", group: "Engineering", render: () => <AgentsPage /> },
+  { id: "agents", label: "Roles", group: "Engineering", render: () => <AgentsPage /> },
   { id: "behavior", label: "Behavior", group: "Engineering", render: () => <BehaviorPage /> },
   { id: "commands", label: "Commands", group: "Engineering", render: () => <CommandsPage /> },
   { id: "mcp", label: "MCP", group: "Engineering", render: () => <McpPage /> },
-  { id: "widgets", label: "Widgets & Layout", group: "Customize", render: () => <WidgetsPage /> },
   { id: "plugins", label: "Plugins", group: "Customize", render: () => <PluginsPage /> },
   { id: "access", label: "Access", group: "System", nav: false, render: () => <AccessPage /> },
   { id: "about", label: "About", group: "System", nav: false, render: () => <AboutPage /> },
@@ -277,7 +275,6 @@ export default function SettingsView({ onClose = () => setOverlay(null) }: { onC
           )}
           <div className="nav-foot">
             <span>Changes save automatically</span>
-            <button onClick={() => setOverlay("onboarding")}>Choose a setup</button>
           </div>
         </nav>
         <div className="modal-main settings-pane">

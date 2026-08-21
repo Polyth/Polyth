@@ -1,9 +1,9 @@
-// Organized session list (WP5): folder grouping, labels, attention badges,
+// Organized session list: worktree grouping, labels, attention badges,
 // inline rename, archived section, bulk archive/restore with partial-failure
 // reporting. All mutations go through the REST org endpoints.
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
-import type { SessionFolderDto, SessionProjection, WorkspaceLabel } from "@polyth/contracts";
-import { api } from "../../api.ts";
+import type { SessionProjection, WorkspaceLabel } from "@polyth/contracts";
+import { api, type Worktree } from "../../api.ts";
 import { getState, setSidebarOpen, setUiError, useStore } from "../../store.ts";
 import { openSession, archiveSession, deleteSession, restoreSession, forkSession, refreshSessions } from "../../init.ts";
 import { sessionStatusBadge } from "../../sessionBadges.ts";
@@ -15,11 +15,8 @@ import { announce } from "../a11y/live.tsx";
 import { worktreeLabel } from "../../worktreeSessions.ts";
 import SlotHost from "../slots/SlotHost.ts";
 import {
-  groupSessions,
-  listGroupings,
   reorderPinnedSessions,
   sortPinnedSessions,
-  useGroupingMode,
 } from "../../sidebarPrefs.ts";
 
 const STATUS_DOT: Record<string, string> = {
@@ -93,7 +90,6 @@ interface RowProps {
   s: SessionProjection;
   activeSessionId: string | null;
   labels: WorkspaceLabel[];
-  folders: SessionFolderDto[];
   eventsTitle: string | undefined;
   relativeTime: boolean;
   selectMode: boolean;
@@ -164,7 +160,7 @@ function useShiftArmed(): boolean {
 }
 
 function SessionRow({
-  s, activeSessionId, labels, folders, eventsTitle, relativeTime, selectMode, selected,
+  s, activeSessionId, labels, eventsTitle, relativeTime, selectMode, selected,
   onToggleSelect, onChanged, onOpen, onTogglePin, pinnedSection, onPinDragStart, onPinDrop,
 }: RowProps) {
   const [menuOpen, setMenuOpen] = useState(false);
@@ -253,16 +249,6 @@ function SessionRow({
       onChanged();
     } catch (e) {
       setUiError(friendlyError("Couldn’t rename the session", e));
-    }
-  };
-
-  const moveToFolder = async (folderId: string | null) => {
-    setMenuOpen(false);
-    try {
-      await api.organizeSession(s.id, { folderId });
-      onChanged();
-    } catch (e) {
-      setUiError(friendlyError("Couldn’t move the session", e));
     }
   };
 
@@ -417,11 +403,6 @@ function SessionRow({
               quickDelete();
             }}
           >Delete</button>
-          {folders.length > 0 && <div className="session-menu-head">Move to folder</div>}
-          {s.folderId && <button role="menuitem" onClick={() => void moveToFolder(null)}>⌂ No folder</button>}
-          {folders.filter((f) => f.id !== s.folderId).map((f) => (
-            <button key={f.id} role="menuitem" onClick={() => void moveToFolder(f.id)}>▸ {f.name}</button>
-          ))}
           {labels.length > 0 && <div className="session-menu-head">Labels</div>}
           {labels.map((l) => (
             <button key={l.id} role="menuitemcheckbox" aria-checked={(s.labelIds ?? []).includes(l.id)} onClick={() => void toggleLabel(l.id)}>
@@ -435,30 +416,37 @@ function SessionRow({
   );
 }
 
-export default function SessionList({ projectId }: { projectId: string }) {
+export default function SessionList({
+  projectId,
+  selectMode = false,
+  onSelectModeChange = () => {},
+}: {
+  projectId: string;
+  selectMode?: boolean;
+  onSelectModeChange?: (selecting: boolean) => void;
+}) {
   const sessions = useStore((st) => st.sessions);
   const activeSessionId = useStore((st) => st.activeSessionId);
   const eventsMap = useStore((st) => st.events);
   const expandArchived = useStore((st) => st.settings.showArchived);
   const relativeTime = useStore((st) => st.settings.relativeTime);
-  const [folders, setFolders] = useState<SessionFolderDto[]>([]);
   const [labels, setLabels] = useState<WorkspaceLabel[]>([]);
+  const [worktrees, setWorktrees] = useState<Worktree[]>([]);
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
   const [showArchived, setShowArchived] = useState(expandArchived);
-  const [selectMode, setSelectMode] = useState(false);
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
-  const [creatingFolder, setCreatingFolder] = useState(false);
-  const [folderName, setFolderName] = useState("");
   const [draggedPin, setDraggedPin] = useState<string | null>(null);
-  const groupingMode = useGroupingMode(); // flat | folder | status | worktree | plugin
 
   useEffect(() => {
     setShowArchived(expandArchived);
   }, [expandArchived]);
+  useEffect(() => {
+    if (!selectMode) setSelected(new Set());
+  }, [selectMode]);
 
   const reloadOrg = () => {
-    void api.listFolders(projectId).then(setFolders);
     void api.listLabels().then(setLabels);
+    void api.listWorktrees(projectId).then(setWorktrees);
   };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(reloadOrg, [projectId]);
@@ -475,19 +463,46 @@ export default function SessionList({ projectId }: { projectId: string }) {
   const active = projectSessions.filter((s) => s.status !== "archived");
   const archived = projectSessions.filter((s) => s.status === "archived");
   const pinned = sortPinnedSessions(active);
-  const unpinned = active.filter((session) => session.pinned === undefined);
+  const pinRank = new Map(pinned.map((session, index) => [session.id, index]));
+  const mainWorktree = worktrees.find((worktree) => worktree.isMain);
 
-  const byFolder = new Map<string, SessionProjection[]>();
-  const rootSessions: SessionProjection[] = [];
-  for (const s of unpinned) {
-    if (s.folderId && folders.some((f) => f.id === s.folderId)) {
-      const list = byFolder.get(s.folderId) ?? [];
-      list.push(s);
-      byFolder.set(s.folderId, list);
-    } else {
-      rootSessions.push(s);
-    }
+  const byWorktree = new Map<string, SessionProjection[]>();
+  for (const s of active) {
+    const key = !s.worktreePath || s.worktreePath === mainWorktree?.path ? "__main__" : s.worktreePath;
+    byWorktree.set(key, [...(byWorktree.get(key) ?? []), s]);
   }
+  for (const grouped of byWorktree.values()) {
+    grouped.sort((a, b) => {
+      const aRank = pinRank.get(a.id);
+      const bRank = pinRank.get(b.id);
+      if (aRank !== undefined || bRank !== undefined) {
+        if (aRank === undefined) return 1;
+        if (bRank === undefined) return -1;
+        return aRank - bRank;
+      }
+      return b.updatedAt - a.updatedAt;
+    });
+  }
+  const knownWorktreePaths = new Set(worktrees.filter((worktree) => !worktree.isMain).map((worktree) => worktree.path));
+  const worktreeGroups = [
+    {
+      key: "__main__",
+      label: mainWorktree?.branch || "Main worktree",
+      sessions: byWorktree.get("__main__") ?? [],
+    },
+    ...worktrees.filter((worktree) => !worktree.isMain).map((worktree) => ({
+      key: worktree.path,
+      label: worktree.branch || worktreeLabel(null, worktree.path),
+      sessions: byWorktree.get(worktree.path) ?? [],
+    })),
+    ...[...byWorktree.entries()]
+      .filter(([path]) => path !== "__main__" && !knownWorktreePaths.has(path))
+      .map(([path, grouped]) => ({
+        key: path,
+        label: worktreeLabel(grouped[0]?.branch ?? null, path),
+        sessions: grouped,
+      })),
+  ];
 
   const toggleSelect = (id: string) => {
     setSelected((prev) => {
@@ -512,31 +527,8 @@ export default function SessionList({ projectId }: { projectId: string }) {
       setUiError(friendlyError(`Couldn’t ${op} the selected sessions`, e));
     }
     setSelected(new Set());
-    setSelectMode(false);
+    onSelectModeChange(false);
     onChanged();
-  };
-
-  const createFolder = async () => {
-    const name = folderName.trim();
-    setCreatingFolder(false);
-    setFolderName("");
-    if (!name) return;
-    try {
-      await api.createFolder(projectId, name);
-      reloadOrg();
-    } catch (e) {
-      setUiError(friendlyError("Couldn’t create the folder", e));
-    }
-  };
-
-  const removeFolder = async (f: SessionFolderDto) => {
-    if (!window.confirm(`Delete folder "${f.name}"? Sessions stay; children hoist up.`)) return;
-    try {
-      await api.deleteFolder(f.id);
-      onChanged();
-    } catch (e) {
-      setUiError(friendlyError("Couldn’t delete the folder", e));
-    }
   };
 
   const togglePin = async (session: SessionProjection) => {
@@ -574,7 +566,6 @@ export default function SessionList({ projectId }: { projectId: string }) {
       s={s}
       activeSessionId={activeSessionId}
       labels={labels}
-      folders={folders}
       eventsTitle={firstUserText(eventsMap[s.id])}
       relativeTime={relativeTime}
       selectMode={selectMode}
@@ -595,80 +586,42 @@ export default function SessionList({ projectId }: { projectId: string }) {
 
   return (
     <div className="session-org">
-      <div className="session-org-bar">
-        {groupingMode === "folder" && <button className="small-btn" onClick={() => setCreatingFolder(true)}>＋ Folder</button>}
-        <button className="small-btn" aria-pressed={selectMode} onClick={() => { setSelectMode((v) => !v); setSelected(new Set()); }}>
-          {selectMode ? "Cancel" : "Select"}
-        </button>
-        {selectMode && selected.size > 0 && (
-          <>
-            <button className="small-btn" onClick={() => void runBulk("archive")}>Archive {selected.size}</button>
-            <button className="small-btn" onClick={() => void runBulk("restore")}>Restore {selected.size}</button>
-          </>
-        )}
-      </div>
-      {creatingFolder && (
-        <div className="folder-create">
-          <input
-            autoFocus
-            placeholder="Folder name"
-            value={folderName}
-            onChange={(e) => setFolderName(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter") void createFolder();
-              else if (e.key === "Escape") { setCreatingFolder(false); setFolderName(""); }
-            }}
-          />
-          <button className="small-btn" onClick={() => void createFolder()}>Add</button>
+      {selectMode && selected.size > 0 && (
+        <div className="session-bulk-actions" aria-label="Selected session actions">
+          <span>{selected.size} selected</span>
+          <button className="small-btn" onClick={() => void runBulk("archive")}>Archive</button>
+          <button className="small-btn" onClick={() => void runBulk("restore")}>Restore</button>
         </div>
       )}
 
-      {pinned.length > 0 && (
-        <div className="session-pinned">
-          <div className="session-group-head">Pinned <span className="muted">{pinned.length}</span></div>
-          {pinned.map((session) => row(session, true))}
-        </div>
-      )}
-
-      {groupingMode === "folder" && folders.map((f) => {
-        const inFolder = byFolder.get(f.id) ?? [];
-        const isCollapsed = collapsed.has(f.id);
+      {worktreeGroups.map((group) => {
+        const isCollapsed = collapsed.has(group.key);
         return (
-          <div key={f.id} className="session-folder">
-            <div className="session-folder-head">
-              <button
-                className="session-folder-toggle"
-                aria-expanded={!isCollapsed}
-                onClick={() => setCollapsed((prev) => {
-                  const n = new Set(prev);
-                  if (n.has(f.id)) n.delete(f.id);
-                  else n.add(f.id);
-                  return n;
-                })}
-              >
-                <span>{isCollapsed ? "▸" : "▾"}</span> {f.name}
-                <span className="muted"> {inFolder.length}</span>
-              </button>
-              <button className="session-folder-del" title={`Delete folder ${f.name}`} onClick={() => void removeFolder(f)}>✕</button>
-            </div>
-            {!isCollapsed && inFolder.map((session) => row(session))}
-            {!isCollapsed && inFolder.length === 0 && <div className="empty session-folder-empty">Empty</div>}
+          <div key={group.key} className="session-worktree-group" data-worktree={group.key}>
+            <button
+              className="session-worktree-toggle"
+              aria-expanded={!isCollapsed}
+              aria-label={`${isCollapsed ? "Expand" : "Collapse"} ${group.label} worktree`}
+              onClick={() => setCollapsed((prev) => {
+                const next = new Set(prev);
+                if (next.has(group.key)) next.delete(group.key);
+                else next.add(group.key);
+                return next;
+              })}
+            >
+              <span aria-hidden="true">{isCollapsed ? "▸" : "▾"}</span>
+              <span className="session-worktree-name">{group.label}</span>
+              <span className="muted">{group.sessions.length}</span>
+            </button>
+            {!isCollapsed && (
+              <div className="session-worktree-sessions">
+                {group.sessions.map((session) => row(session, session.pinned !== undefined))}
+                {group.sessions.length === 0 && <div className="empty session-worktree-empty">No sessions</div>}
+              </div>
+            )}
           </div>
         );
       })}
-      {groupingMode === "folder" && rootSessions.map((session) => row(session))}
-
-      {groupingMode === "flat" && unpinned.map((session) => row(session))}
-
-      {groupingMode !== "folder" && groupingMode !== "flat" &&
-        groupSessions(unpinned, groupingMode, listGroupings()).map((g) => (
-          <div key={g.key} className="session-group">
-            <div className="session-group-head">
-              {g.label} <span className="muted">{g.sessions.length}</span>
-            </div>
-            {g.sessions.map((session) => row(session))}
-          </div>
-        ))}
 
       {active.length === 0 && <div className="empty" style={{ padding: "12px" }}>No sessions.</div>}
 

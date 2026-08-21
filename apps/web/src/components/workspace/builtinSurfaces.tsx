@@ -21,7 +21,7 @@ import { friendlyError, shortcutLabel } from "../../settings.ts";
 import { composerBlockedByArchive, sessionSurfaceKind } from "../../sessionSurface.ts";
 import { registerWorkspaceSurface } from "../../workspace/surfaceRegistry.ts";
 import WidgetCanvas from "../../widgets/WidgetCanvas.tsx";
-import { setWorkspaceMode, useWorkspaceMode } from "../../widgets/workspaceMode.ts";
+import { useWorkspaceMode } from "../../widgets/workspaceMode.ts";
 
 // Large polyth-style hero for a fresh session (or no session yet):
 // centered headline, the composer as an elevated card, and suggestion chips.
@@ -114,9 +114,6 @@ function SessionSurface() {
 
   return (
     <div className="focus-conversation">
-      <button className="focus-customize" onClick={() => setWorkspaceMode("edit")}>
-        <span aria-hidden="true">☷</span> Customize
-      </button>
       <div className="timeline-wrap">
         <Timeline model={model} />
       </div>

@@ -49,21 +49,21 @@ export default function Sidebar() {
   const [projectName, setProjectName] = useState("");
   const [projectMenu, setProjectMenu] = useState<string | null>(null);
   const [importingProject, setImportingProject] = useState<string | null>(null);
+  const [selectingProjectId, setSelectingProjectId] = useState<string | null>(null);
 
-  // UX-FILES-TIMELINE-03 finding 9: persisted view mode — "list" is the
-  // current presentation, "folders" nests each project's sessions under a
-  // collapsible project folder. Expansion is per-project UI state.
+  // Persisted view mode: list shows the active project; tree expands projects
+  // into worktrees and sessions. Expansion is per-project UI state.
   const viewMode = useSidebarViewMode();
-  const [expandedFolders, setExpandedFolders] = useState<ReadonlySet<string>>(
+  const [expandedTrees, setExpandedTrees] = useState<ReadonlySet<string>>(
     () => new Set(activeProjectId ? [activeProjectId] : []),
   );
   useEffect(() => {
-    // The active project's folder always reveals its sessions.
-    if (!activeProjectId || viewMode !== "folders") return;
-    setExpandedFolders((prev) => (prev.has(activeProjectId) ? prev : new Set(prev).add(activeProjectId)));
+    // The active project always reveals its worktree/session branch.
+    if (!activeProjectId || viewMode !== "tree") return;
+    setExpandedTrees((prev) => (prev.has(activeProjectId) ? prev : new Set(prev).add(activeProjectId)));
   }, [activeProjectId, viewMode]);
-  const toggleFolder = (id: string) => {
-    setExpandedFolders((prev) => {
+  const toggleTree = (id: string) => {
+    setExpandedTrees((prev) => {
       const next = new Set(prev);
       if (next.has(id)) next.delete(id);
       else {
@@ -73,12 +73,6 @@ export default function Sidebar() {
       return next;
     });
   };
-  const expandAllFolders = () => {
-    setExpandedFolders(new Set(projects.map((p) => p.id)));
-    for (const p of projects) void refreshSessions(p.id);
-  };
-  const collapseAllFolders = () => setExpandedFolders(new Set());
-
   // UX-A390: below 821px the sidebar is a modal drawer. It never opens by
   // itself when the viewport shrinks — wide visibility is not a persisted
   // drawer-open preference.
@@ -190,18 +184,19 @@ export default function Sidebar() {
         )}
         {!collapsed && (<>
         <div className="sidebar-head">
-          <span className="side-section-title">Workspaces</span>
+          <span className="side-section-title">Projects</span>
           <span className="side-icons">
             <button
               className="icon-btn"
-              title={viewMode === "folders" ? "Switch to single-project session list" : "Group sessions under project folders"}
-              aria-label="Toggle project folder view"
-              aria-pressed={viewMode === "folders"}
-              onClick={() => setSidebarViewMode(viewMode === "folders" ? "list" : "folders")}
-            ><Icon.files /></button>
+              title={viewMode === "tree" ? "Switch to project list" : "Show project, worktree, and session tree"}
+              aria-label="Toggle project tree view"
+              aria-pressed={viewMode === "tree"}
+              onClick={() => setSidebarViewMode(viewMode === "tree" ? "list" : "tree")}
+            >{viewMode === "tree" ? <Icon.list /> : <Icon.hierarchy />}</button>
             <button
-              className="icon-btn"
+              className="icon-btn sidebar-project-plus"
               title="Open project"
+              aria-label="Open project"
               disabled={registry.status === "loading"}
               onClick={() => setOverlay("project-picker")}
             ><Icon.plus /></button>
@@ -233,14 +228,8 @@ export default function Sidebar() {
           )}
           {registry.status === "ready" && projects.length === 0 && (
             <button className="empty side-open-project" onClick={() => setOverlay("project-picker")}>
-              No projects yet.<br />Choose a folder to start →
+              No projects yet.<br />Choose a project path to start →
             </button>
-          )}
-          {viewMode === "folders" && projects.length > 1 && (
-            <div className="side-folder-bar">
-              <button className="small-btn" onClick={expandAllFolders}>Expand all</button>
-              <button className="small-btn" onClick={collapseAllFolders}>Collapse all</button>
-            </div>
           )}
           {projects.map((p) => {
             const card = renamingProject === p.id ? (
@@ -258,21 +247,20 @@ export default function Sidebar() {
               </div>
             ) : (
               <div className="project-card-shell">
-                {viewMode === "folders" && (
+                {viewMode === "tree" && (
                   <button
-                    className={`project-folder-chevron${expandedFolders.has(p.id) ? " open" : ""}`}
-                    aria-expanded={expandedFolders.has(p.id)}
-                    aria-label={`${expandedFolders.has(p.id) ? "Collapse" : "Expand"} sessions for ${p.name || p.path}`}
-                    onClick={() => toggleFolder(p.id)}
-                  >{expandedFolders.has(p.id) ? "▾" : "▸"}</button>
+                    className={`project-tree-chevron${expandedTrees.has(p.id) ? " open" : ""}`}
+                    aria-expanded={expandedTrees.has(p.id)}
+                    aria-label={`${expandedTrees.has(p.id) ? "Collapse" : "Expand"} sessions for ${p.name || p.path}`}
+                    onClick={() => toggleTree(p.id)}
+                  >{expandedTrees.has(p.id) ? "▾" : "▸"}</button>
                 )}
                 <button
                   className={`project-card ${p.id === activeProjectId ? "active" : ""}`}
                   aria-current={p.id === activeProjectId ? "true" : undefined}
                   onClick={() => {
-                    // Clicking the already-active project must not drop the session (UX-04).
                     if (p.id !== activeProjectId) activateProject(p.id);
-                    if (viewMode === "folders") toggleFolder(p.id);
+                    if (viewMode === "tree") toggleTree(p.id);
                     else closeDrawer();
                   }}
                   onDoubleClick={() => { setRenamingProject(p.id); setProjectName(p.name); }}
@@ -284,6 +272,18 @@ export default function Sidebar() {
                     <span className="project-name" title={p.path}>{p.icon ? `${p.icon} ` : ""}{p.name || p.path}</span>
                     <span className="project-path">{p.path}</span>
                   </span>
+                </button>
+                <button
+                  className={`project-select-btn${selectingProjectId === p.id ? " selected" : ""}`}
+                  aria-label={`${selectingProjectId === p.id ? "Cancel selecting" : "Select"} sessions in ${p.name || p.path}`}
+                  aria-pressed={selectingProjectId === p.id}
+                  onClick={() => {
+                    if (p.id !== activeProjectId) activateProject(p.id);
+                    if (viewMode === "tree" && !expandedTrees.has(p.id)) toggleTree(p.id);
+                    setSelectingProjectId((current) => current === p.id ? null : p.id);
+                  }}
+                >
+                  {selectingProjectId === p.id ? "Cancel" : "Select"}
                 </button>
                 <button
                   className="project-menu-btn"
@@ -333,15 +333,17 @@ export default function Sidebar() {
                 )}
               </div>
             );
-            if (viewMode !== "folders") return <div key={p.id} className="project-entry">{card}</div>;
-            // Finding 9: each project is a folder with its sessions nested —
-            // the SAME SessionList the list mode renders for the active project.
+            if (viewMode !== "tree") return <div key={p.id} className="project-entry">{card}</div>;
             return (
-              <div key={p.id} className="project-folder">
+              <div key={p.id} className="project-tree-node">
                 {card}
-                {expandedFolders.has(p.id) && (
-                  <div className="project-folder-sessions">
-                    <SessionList projectId={p.id} />
+                {expandedTrees.has(p.id) && (
+                  <div className="project-tree-sessions">
+                    <SessionList
+                      projectId={p.id}
+                      selectMode={selectingProjectId === p.id}
+                      onSelectModeChange={(selecting) => setSelectingProjectId(selecting ? p.id : null)}
+                    />
                   </div>
                 )}
               </div>
@@ -353,11 +355,11 @@ export default function Sidebar() {
 
           {viewMode === "list" && project && (
             <div className="session-list">
-              <div className="side-label session-heading">
-                <span>Sessions</span>
-                <span className="count" title={project.path}>Workspace</span>
-              </div>
-              <SessionList projectId={project.id} />
+              <SessionList
+                projectId={project.id}
+                selectMode={selectingProjectId === project.id}
+                onSelectModeChange={(selecting) => setSelectingProjectId(selecting ? project.id : null)}
+              />
             </div>
           )}
           <SlotHost

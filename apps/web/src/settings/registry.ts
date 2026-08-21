@@ -86,8 +86,6 @@ const BUILTIN_ITEMS: SettingsSearchItem[] = [
   { id: "sessions.defaultModel", pageId: "sessions", label: "Global default model", description: "Default model for new sessions and projects", keywords: ["session", "provider", "model"], focusTarget: "sessions.defaultModel" },
   { id: "sessions.projectModel", pageId: "sessions", label: "Project default model", description: "Per-project model override", keywords: ["session", "project", "inherit", "global"], focusTarget: "sessions.projectModel" },
   { id: "sessions.worktree", pageId: "sessions", label: "Worktree behavior", keywords: ["session", "fresh worktree", "project root"], focusTarget: "sessions.worktree" },
-  { id: "widgets.presets", pageId: "widgets", label: "Widget layout presets", description: "Focused, balanced, manager, and build layouts", keywords: ["workspace", "canvas", "customize"], focusTarget: "widgets.presets" },
-  { id: "widgets.layout", pageId: "widgets", label: "Widget placement", description: "Drag widgets between workspace zones", keywords: ["canvas", "zone", "layout", "resize"], focusTarget: "widgets.layout" },
 ];
 
 registerSettingsItems(BUILTIN_ITEMS);

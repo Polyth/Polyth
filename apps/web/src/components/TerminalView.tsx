@@ -25,7 +25,6 @@ export default function TerminalView() {
   const visible = usePaneVisible();
   const [tabs, setTabs] = useState<Tab[]>([]);
   const [active, setActive] = useState<string | null>(null);
-  const [line, setLine] = useState("");
   const [renaming, setRenaming] = useState<string | null>(null);
   const [renameVal, setRenameVal] = useState("");
   // One-click terminal (finding 6): listLoaded flips true once the adopt fetch
@@ -108,9 +107,6 @@ export default function TerminalView() {
   };
 
   const closeTab = async (id: string) => {
-    const t = tabs.find((x) => x.id === id);
-    // PS#52: closing a live shell asks first — the process dies with the tab
-    if (t?.running && !window.confirm(`Close ${t.title}? The shell is still running.`)) return;
     gone.current.add(id);
     const timer = timers.current.get(id);
     if (timer) { clearTimeout(timer); timers.current.delete(id); }
@@ -207,12 +203,6 @@ export default function TerminalView() {
     if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) send(active, e.key);
   };
 
-  const submitLine = () => {
-    if (!active || !line) return;
-    send(active, line + "\r");
-    setLine("");
-  };
-
   const tab = tabs.find((t) => t.id === active) ?? tabs[0];
 
   return (
@@ -266,26 +256,14 @@ export default function TerminalView() {
         />
       )}
       {tab && (
-        <>
-          <pre
-            ref={preRef}
-            className="term-body"
-            tabIndex={0}
-            onKeyDown={onKey}
-            onClick={() => preRef.current?.focus()}
-          >{tab.buf || " "}<span className="term-caret" /></pre>
-          <div className="term-input-row">
-            <span className="term-prompt">❯</span>
-            <input
-              className="term-input"
-              value={line}
-              placeholder="Type a command…"
-              onChange={(e) => setLine(e.target.value)}
-              onKeyDown={(e) => { if (e.key === "Enter") { e.preventDefault(); submitLine(); } }}
-            />
-            <span className="term-caret" />
-          </div>
-        </>
+        <pre
+          ref={preRef}
+          className="term-body"
+          tabIndex={0}
+          aria-label={`Terminal ${tab.title}`}
+          onKeyDown={onKey}
+          onClick={() => preRef.current?.focus()}
+        >{tab.buf || " "}<span className="term-caret" /></pre>
       )}
     </div>
   );

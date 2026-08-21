@@ -35,7 +35,7 @@ import {
 } from "../composer/discovery.ts";
 import {
   loadComposerConfig, saveComposerConfig, consumeComposerConfig, wireProfileId,
-  withExplicitAgent, withExplicitModel, withProfile, withProfileNone,
+  withExplicitAgent, withExplicitModel, withExplicitThinking, withProfile, withProfileNone,
   type ComposerConfig,
 } from "../composerConfig.ts";
 import {
@@ -63,6 +63,9 @@ import { agentPickerDefaultLabel, modelPickerDefaultLabel } from "../composerDef
 import { modKeyLabel, parseModelRef } from "../settings.ts";
 import { Icon } from "../icons.tsx";
 import { useWorkspaceMode } from "../widgets/workspaceMode.ts";
+import ModelPicker, { modelSupportsThinking } from "./ModelPicker.tsx";
+import { useSessionDefaults } from "../sessionDefaults.ts";
+import { roleKind, useRolePrefs } from "../rolePrefs.ts";
 
 function modelRefFromValue(value: string): { providerID: string; modelID: string } | undefined {
   if (!value) return undefined;
@@ -79,7 +82,7 @@ function modelRefFromValue(value: string): { providerID: string; modelID: string
 
 const PROFILE_MISSING_NOTE = "Profile unavailable — choose another";
 
-export default function Composer({ variant = "docked" }: { variant?: "docked" | "hero" }) {
+export default function Composer({ variant = "docked" }: { variant?: "docked" | "hero" | "widget" }) {
   const [pinSeed, setPinSeed] = useState<{ providerID: string; modelID: string; name?: string } | null>(null);
   const [pinEdit, setPinEdit] = useState<AgentProfile | null>(null);
   const [createProfileOpen, setCreateProfileOpen] = useState(false);
@@ -88,7 +91,9 @@ export default function Composer({ variant = "docked" }: { variant?: "docked" | 
   const models = useStore((s) => s.models);
   const chatModels = models.filter(modelSupportsTextWorkflow);
   const agents = useStore((s) => s.agents);
+  const rolePrefs = useRolePrefs();
   const settings = useStore((s) => s.settings);
+  const sessionDefaults = useSessionDefaults();
   const session = useStore((s) => s.sessions.find((x) => x.id === s.activeSessionId) ?? null);
   const model = useActiveModel();
   const working = model.turn?.status === "working";
@@ -100,7 +105,8 @@ export default function Composer({ variant = "docked" }: { variant?: "docked" | 
   const starters = starterLabelsFor(presetState.presetId, presentation.starterOrder);
   const techOpen = effectiveComposerDetail() === "technical";
   const noModels = chatModels.length === 0;
-  const simpleMode = useWorkspaceMode() === "chat";
+  const widgetMode = variant === "widget";
+  const simpleMode = useWorkspaceMode() === "chat" || widgetMode;
   const lightFocusComposer = simpleMode && variant === "docked";
   const ui = useUiSettings();
 
@@ -304,12 +310,27 @@ export default function Composer({ variant = "docked" }: { variant?: "docked" | 
     // Pills leave the draft the moment the message leaves the composer.
     const atts = command === null ? takeAttachments(target) : [];
     const delivery = working ? getUiSettings().followUpBehavior : undefined;
-    const preferred = !session?.model ? parseModelRef(settings.defaultModel) : undefined;
+    const preferred = !session?.model
+      ? sessionDefaults.defaultModel ?? parseModelRef(settings.defaultModel)
+      : undefined;
     const cfgSent = cfg;
     const wire = wireProfileId(cfgSent);
-    const sentModel = cfgSent.model
-      ? { providerID: cfgSent.model.providerID, modelID: cfgSent.model.modelID }
-      : preferred;
+    const selected = cfgSent.model ?? session?.model ?? preferred;
+    const selectedDescriptor = selected
+      ? chatModels.find((candidate) =>
+          candidate.providerID === selected.providerID && candidate.modelID === selected.modelID)
+      : undefined;
+    const requestedThinking = cfgSent.thinking ?? sessionDefaults.defaultThinking;
+    const sentThinking = requestedThinking && selectedDescriptor?.variants?.includes(requestedThinking)
+      ? requestedThinking
+      : undefined;
+    const sentModel = selected
+      ? {
+          providerID: selected.providerID,
+          modelID: selected.modelID,
+          ...(sentThinking ? { variant: sentThinking } : {}),
+        }
+      : undefined;
     const deliver = (targetSessionId: string) => command !== null
       ? api.runShell(targetSessionId, command).catch(
           (err) => setUiError(`Couldn’t run shell command: ${err instanceof Error ? err.message : String(err)}`),
@@ -347,7 +368,11 @@ export default function Composer({ variant = "docked" }: { variant?: "docked" | 
     if (target) saveDraft(target, "");
     setAcToken(null);
     acTokenRef.current = null;
-  }, [text, attachments, cfg, profileMissing, noModels, working, activeProjectId, session?.model, settings.defaultModel]);
+  }, [
+    text, attachments, cfg, profileMissing, noModels, working, activeProjectId,
+    session?.model, settings.defaultModel, sessionDefaults.defaultModel,
+    sessionDefaults.defaultThinking, chatModels,
+  ]);
 
   const applyCompletion = useCallback((item: AutocompleteItem) => {
     const token = acTokenRef.current;
@@ -546,7 +571,7 @@ export default function Composer({ variant = "docked" }: { variant?: "docked" | 
 
   // Favorites float first (Settings > Providers & Models); picking records recency.
   const modelPrefs = useModelPrefs();
-  const preferredModel = parseModelRef(settings.defaultModel);
+  const preferredModel = sessionDefaults.defaultModel ?? parseModelRef(settings.defaultModel);
   const recommendedModel = session?.model && chatModels.some((candidate) =>
     candidate.providerID === session.model?.providerID && candidate.modelID === session.model?.modelID)
     ? session.model
@@ -584,15 +609,14 @@ export default function Composer({ variant = "docked" }: { variant?: "docked" | 
     updateCfg(withExplicitModel(cfg, ref));
     if (ref) noteModelUsed(`${ref.providerID}/${ref.modelID}`);
   };
+  const chatAgents = agents.filter((agent) =>
+    roleKind(agent, rolePrefs) === "main" && agent.name.toLowerCase() !== "compaction");
   const agentItems: PickerItem[] = [
-    { id: "", label: agentPickerDefaultLabel(session?.agent, agents).replace(/^Default:\s*/, "Ask · "), group: "Recommended" },
-    ...agents.map((a) => ({
+    { id: "", label: agentPickerDefaultLabel(session?.agent, chatAgents).replace(/^Default:\s*/, ""), group: "" },
+    ...chatAgents.map((a) => ({
       id: a.name,
-      label: ["ask", "plan", "build", "review", "research"].includes(a.name.toLowerCase())
-        ? a.name[0]!.toUpperCase() + a.name.slice(1)
-        : a.name,
-      group: "Work modes",
-      ...(a.description ? { detail: a.description } : {}),
+      label: a.name,
+      group: "",
     })),
   ];
   const pickAgent = (id: string) => updateCfg(withExplicitAgent(cfg, id || undefined));
@@ -657,6 +681,20 @@ export default function Composer({ variant = "docked" }: { variant?: "docked" | 
 
   const currentModelLabel = modelItems.find((i) => i.id === modelValue)?.label ?? modelItems[0]!.label;
   const currentAgentLabel = agentItems.find((i) => i.id === agentValue)?.label ?? agentItems[0]!.label;
+  const selectedModel = cfg.model
+    ? chatModels.find((candidate) =>
+        candidate.providerID === cfg.model?.providerID && candidate.modelID === cfg.model?.modelID)
+    : recommendedModel
+      ? chatModels.find((candidate) =>
+          candidate.providerID === recommendedModel.providerID && candidate.modelID === recommendedModel.modelID)
+      : undefined;
+  const thinkingItems: PickerItem[] = [
+    { id: "", label: "Default", group: "" },
+    ...(selectedModel?.variants ?? []).map((variant) => ({ id: variant, label: variant, group: "" })),
+  ];
+  const defaultThinking = selectedModel?.variants?.includes(sessionDefaults.defaultThinking ?? "")
+    ? sessionDefaults.defaultThinking
+    : undefined;
 
   const followUp = getUiSettings().followUpBehavior;
   // Starter actions are generated from the preset schema (stable ids →
@@ -741,7 +779,7 @@ export default function Composer({ variant = "docked" }: { variant?: "docked" | 
           onKeyIntercept={onKeyIntercept}
           onPaste={onPaste}
         />
-        {!shellMode && !text && !acView && (
+        {!widgetMode && !shellMode && !text && !acView && (
           <div className="composer-sigil-hint" aria-hidden="true">
             <span>@ files</span><span>/ commands</span><span>! shell</span><span># snippets</span>
           </div>
@@ -823,18 +861,34 @@ export default function Composer({ variant = "docked" }: { variant?: "docked" | 
             Technical options
           </button>}
           {!noModels && (
-            <Picker
-              className="picker-model"
-              label="Model" direction="up" items={modelItems} value={modelValue} onPick={pickModel}
-              ariaLabel={`Select model, current ${currentModelLabel}`}
-              trailingAction={modelRowAction}
+            <ModelPicker
+              models={chatModels}
+              value={cfg.model}
+              recommended={recommendedModel}
+              onPick={(ref) => {
+                updateCfg(withExplicitModel(cfg, ref));
+                if (ref) noteModelUsed(`${ref.providerID}/${ref.modelID}`);
+              }}
             />
           )}
-          {agents.length > 0 && (
+          {chatAgents.length > 0 && (
             <Picker
               className="picker-agent"
-              label="Work mode" direction="up" items={agentItems} value={agentValue} onPick={pickAgent}
+              label="Agent" direction="up" items={agentItems} value={agentValue} onPick={pickAgent}
               ariaLabel={`Select work mode, current ${currentAgentLabel}`}
+              triggerIcon={<span className="agent-status-dot" />}
+            />
+          )}
+          {modelSupportsThinking(selectedModel) && (
+            <Picker
+              className="picker-thinking"
+              label="Thinking"
+              direction="up"
+              items={thinkingItems}
+              value={cfg.thinking ?? defaultThinking ?? ""}
+              onPick={(thinking) => updateCfg(withExplicitThinking(cfg, thinking || undefined))}
+              ariaLabel={`Select thinking effort, current ${cfg.thinking ?? defaultThinking ?? "Default"}`}
+              triggerIcon={<span className="thinking-glyph">◌</span>}
             />
           )}
           {!simpleMode && ui.showTechnicalButtons && techOpen && (
@@ -888,20 +942,6 @@ export default function Composer({ variant = "docked" }: { variant?: "docked" | 
               aria-label="Attach files"
               onClick={() => fileInputRef.current?.click()}
             ><Icon.paperclip /></button>
-          )}
-          <button
-            className="icon-btn composer-expand"
-            title="Focused editor (Mod+Shift+Enter)"
-            aria-label="Open focused editor"
-            onClick={() => setFocusMode(true)}
-          ><Icon.focus /></button>
-          {simpleMode && (
-            <button
-              className="icon-btn composer-privacy"
-              title="Permissions and privacy"
-              aria-label="Permissions and privacy"
-              onClick={() => openSettingsPage("access")}
-            ><Icon.shield /></button>
           )}
           <span className="composer-primary">
             {working ? (
@@ -959,7 +999,7 @@ export default function Composer({ variant = "docked" }: { variant?: "docked" | 
       )}
       {goalFormOpen && <GoalAttachForm onDone={() => setGoalFormOpen(false)} />}
       </div>
-      {(variant === "hero" || (model.messages.length === 0 && !working)) && starterChips}
+      {!widgetMode && (variant === "hero" || (model.messages.length === 0 && !working)) && starterChips}
     </div>
   );
 }

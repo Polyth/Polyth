@@ -8,12 +8,26 @@ import {
   parseModelPrefs,
   planFavoriteMigration,
   recordRecent,
+  reorderProvider,
   serializeModelPrefs,
+  setProviderExpanded,
   sortModels,
   toggleFavorite,
   validateProfile,
   type ModelPrefs,
 } from "@polyth/models";
+
+test("model providers are collapsed by default and expansion/order persist", () => {
+  const initial = defaultModelPrefs();
+  assert.deepEqual(initial.expandedProviders, []);
+  assert.deepEqual(initial.providerOrder, []);
+
+  const expanded = setProviderExpanded(initial, "anthropic", true);
+  const reordered = reorderProvider(expanded, ["openai", "anthropic", "google"], "google", "openai");
+  const parsed = parseModelPrefs(serializeModelPrefs(reordered));
+  assert.deepEqual(parsed.expandedProviders, ["anthropic"]);
+  assert.deepEqual(parsed.providerOrder, ["google", "openai", "anthropic"]);
+});
 
 const MODELS = [
   { providerID: "openai", modelID: "gpt-5", name: "GPT-5" },
@@ -88,6 +102,7 @@ test("parseModelPrefs sanitizes, deduplicates, and caps persisted keys", () => {
 
 test("favorite and recent updates are immutable and preserve ordering", () => {
   const original = {
+    ...defaultModelPrefs(),
     favorites: ["p/a"],
     sort: "provider" as const,
     recents: ["p/b", "p/a"],
@@ -99,6 +114,8 @@ test("favorite and recent updates are immutable and preserve ordering", () => {
     favorites: ["p/a"],
     sort: "provider",
     recents: ["p/b", "p/a"],
+    providerOrder: [],
+    expandedProviders: [],
   });
   assert.deepEqual(favorited.favorites, ["p/a", "p/c"]);
   assert.deepEqual(recent.recents, ["p/a", "p/b"]);

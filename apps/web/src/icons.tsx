@@ -23,4 +23,13 @@ export const Icon = {
   book: () => <svg {...s}><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2Z"/></svg>,
   pencil: () => <svg {...s}><path d="M17 3a2.8 2.8 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/></svg>,
   shield: () => <svg {...s}><path d="M12 22s8-3.6 8-10V5l-8-3-8 3v7c0 6.4 8 10 8 10Z"/></svg>,
+  copy: () => <svg {...s}><rect x="8" y="8" width="11" height="11" rx="2"/><path d="M16 8V5a2 2 0 0 0-2-2H5a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h3"/></svg>,
+  markdown: () => <svg {...s}><rect x="2.5" y="5" width="19" height="14" rx="2"/><path d="M6 15V9l3 3 3-3v6M15 12h3M16.5 10.5V15"/></svg>,
+  json: () => <svg {...s}><path d="M9 4H7a2 2 0 0 0-2 2v3a2 2 0 0 1-2 2 2 2 0 0 1 2 2v3a2 2 0 0 0 2 2h2M15 4h2a2 2 0 0 1 2 2v3a2 2 0 0 0 2 2 2 2 0 0 0-2 2v3a2 2 0 0 1-2 2h-2"/></svg>,
+  fork: () => <svg {...s}><circle cx="6" cy="4" r="2"/><circle cx="18" cy="6" r="2"/><circle cx="6" cy="20" r="2"/><path d="M6 6v12M8 12h4a6 6 0 0 0 6-4"/></svg>,
+  rewind: () => <svg {...s}><path d="M3 7v5h5"/><path d="M5.1 17a8 8 0 1 0 .5-10.5L3 9"/></svg>,
+  check: () => <svg {...s}><path d="m5 12 4 4L19 6"/></svg>,
+  list: () => <svg {...s}><path d="M8 6h13M8 12h13M8 18h13"/><path d="M3 6h.01M3 12h.01M3 18h.01"/></svg>,
+  hierarchy: () => <svg {...s}><path d="M6 3v12M6 7h8M6 15h8"/><rect x="14" y="4.5" width="7" height="5" rx="1"/><rect x="14" y="12.5" width="7" height="5" rx="1"/></svg>,
+  target: () => <svg {...s}><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4"/><path d="M12 3v3M21 12h-3M12 21v-3M3 12h3"/></svg>,
 };

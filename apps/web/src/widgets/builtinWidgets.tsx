@@ -14,11 +14,17 @@ import Timeline from "../components/Timeline.tsx";
 import WalkthroughView from "../components/WalkthroughView.tsx";
 import { fmtCost, fmtTokens } from "../format.ts";
 import { openWorkspacePane, useActiveModel, useStore } from "../store.ts";
-import { registerWidget, type WidgetDef } from "./catalog.ts";
+import {
+  registerWidget,
+  type WidgetDef,
+  type WidgetRenderContext,
+  type WidgetSettingsContext,
+} from "./catalog.ts";
 import { api, type FileEntry, type GitFileEntry } from "../api.ts";
 import { useGitStatus } from "../gitStatusStore.ts";
 import { requestComposerReplace } from "../composerInsert.ts";
 import { Icon } from "../icons.tsx";
+import { registerSlot } from "../slots.ts";
 
 const NO_EVENTS: never[] = [];
 
@@ -29,7 +35,7 @@ function ChatWidget() {
     return (
       <div className="widget-chat-empty">
         <p>Start a session in this project.</p>
-        <Composer variant="hero" />
+        <Composer variant="widget" />
       </div>
     );
   }
@@ -42,7 +48,7 @@ function ChatWidget() {
       {permissions.length > 0 && <PermissionBanner permissions={permissions} />}
       {session.status === "archived"
         ? <div className="archived-guard">This session is archived and read-only.</div>
-        : <Composer />}
+        : <Composer variant="widget" />}
     </div>
   );
 }
@@ -215,9 +221,9 @@ function UsageWidget() {
 const BUILTINS: WidgetDef[] = [
   {
     id: "core.composer", pluginId: "session", title: "Composer",
-    description: "Prompt, model, agent, voice, and technical controls.",
+    description: "A compact conversation timeline and full composer.",
     zone: "main", defaultSize: { w: 12, h: 6 }, audience: "simple",
-    render: () => <Composer variant="hero" />,
+    render: () => <ChatWidget />,
   },
   {
     id: "core.chat", pluginId: "session", title: "Conversation",
@@ -306,6 +312,11 @@ const BUILTINS: WidgetDef[] = [
     defaultSize: { w: 4, h: 3 }, audience: "standard", render: () => <UsageWidget />,
   },
 ];
+
+// Feature-owned widget pluginIds match their packages/<pluginId> boundary.
+// These web adapters keep React in apps/web while contributing package-owned
+// Git, Terminal, and Usage widgets through the same slot third parties use.
+const SLOT_BACKED_BUILTINS = new Set(["git.recent", "terminal.shell", "usage.session"]);
 
 const BUILTIN_WIDGET_META: Record<string, Partial<WidgetDef>> = {
   "core.composer": {
@@ -403,8 +414,32 @@ const BUILTIN_WIDGET_META: Record<string, Partial<WidgetDef>> = {
   },
 };
 
+function widgetSlotMeta(widget: WidgetDef): Record<string, unknown> {
+  return {
+    pluginId: widget.pluginId,
+    pluginName: widget.pluginName,
+    title: widget.title,
+    description: widget.description,
+    zone: widget.zone,
+    supportedZones: widget.supportedZones,
+    defaultSize: widget.defaultSize,
+    minSize: widget.minSize,
+    maxSize: widget.maxSize,
+    audience: widget.audience,
+    showIn: widget.showIn,
+    scope: widget.scope,
+    resizable: widget.resizable,
+    duplicatable: widget.duplicatable,
+    floating: widget.floating,
+    recommended: widget.recommended,
+    category: widget.category,
+    capabilities: widget.capabilities,
+    settingsSchema: widget.settingsSchema,
+  };
+}
+
 for (const widget of BUILTINS) {
-  registerWidget({
+  const definition: WidgetDef = {
     ...widget,
     ...BUILTIN_WIDGET_META[widget.id],
     settingsRender: widget.settingsRender ?? (() => (
@@ -413,5 +448,23 @@ for (const widget of BUILTINS) {
         <small>Visibility, size, audience, and placement are configured above.</small>
       </div>
     )),
-  });
+  };
+  if (SLOT_BACKED_BUILTINS.has(widget.id)) {
+    registerSlot(
+      "widget.catalog",
+      definition.id,
+      (context) => definition.render(context as WidgetRenderContext),
+      0,
+      widgetSlotMeta(definition),
+    );
+    registerSlot(
+      "widget.settings",
+      definition.id,
+      (context) => definition.settingsRender?.(context as WidgetSettingsContext) ?? null,
+      0,
+      { widgetId: definition.id },
+    );
+  } else {
+    registerWidget(definition);
+  }
 }

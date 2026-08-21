@@ -8,6 +8,8 @@ export interface ModelPrefs {
   favorites: string[];      // "providerID/modelID" keys, insertion order
   sort: ModelSort;
   recents: string[];        // most-recent-first "providerID/modelID" keys
+  providerOrder: string[];
+  expandedProviders: string[];
 }
 
 export interface ModelLike {
@@ -21,7 +23,7 @@ export const MODEL_PREFS_KEY = "polyth.modelPrefs";
 export const modelKey = (m: ModelLike): string => `${m.providerID}/${m.modelID}`;
 
 export function defaultModelPrefs(): ModelPrefs {
-  return { favorites: [], sort: "provider", recents: [] };
+  return { favorites: [], sort: "provider", recents: [], providerOrder: [], expandedProviders: [] };
 }
 
 export function parseModelPrefs(raw: string | null): ModelPrefs {
@@ -33,6 +35,8 @@ export function parseModelPrefs(raw: string | null): ModelPrefs {
       favorites: [...new Set(strs(data.favorites))],
       sort,
       recents: [...new Set(strs(data.recents))].slice(0, 20),
+      providerOrder: [...new Set(strs(data.providerOrder))].slice(0, 100),
+      expandedProviders: [...new Set(strs(data.expandedProviders))].slice(0, 100),
     };
   } catch {
     return defaultModelPrefs();
@@ -56,6 +60,52 @@ export function toggleFavorite(p: ModelPrefs, key: string): ModelPrefs {
 
 export function recordRecent(p: ModelPrefs, key: string): ModelPrefs {
   return { ...p, recents: [key, ...p.recents.filter((k) => k !== key)].slice(0, 20) };
+}
+
+export function setProviderExpanded(p: ModelPrefs, providerId: string, expanded: boolean): ModelPrefs {
+  return {
+    ...p,
+    expandedProviders: expanded
+      ? [...p.expandedProviders.filter((id) => id !== providerId), providerId]
+      : p.expandedProviders.filter((id) => id !== providerId),
+  };
+}
+
+export function reorderProvider(
+  p: ModelPrefs,
+  providerIds: readonly string[],
+  draggedId: string,
+  targetId: string,
+): ModelPrefs {
+  const ordered = [
+    ...p.providerOrder.filter((id) => providerIds.includes(id)),
+    ...providerIds.filter((id) => !p.providerOrder.includes(id)),
+  ];
+  const from = ordered.indexOf(draggedId);
+  const to = ordered.indexOf(targetId);
+  if (from < 0 || to < 0 || from === to) return p;
+  const next = [...ordered];
+  const [dragged] = next.splice(from, 1);
+  if (!dragged) return p;
+  next.splice(to, 0, dragged);
+  const reordered = [...next];
+  const visible = new Set(providerIds);
+  let cursor = 0;
+  const providerOrder = p.providerOrder.map((id) =>
+    visible.has(id) ? reordered[cursor++]! : id);
+  providerOrder.push(...reordered.slice(cursor));
+  return { ...p, providerOrder };
+}
+
+export function orderProviders<T extends { id: string }>(providers: readonly T[], p: ModelPrefs): T[] {
+  const rank = new Map(p.providerOrder.map((id, index) => [id, index]));
+  return providers
+    .map((provider, index) => ({ provider, index }))
+    .sort((a, b) =>
+      (rank.get(a.provider.id) ?? Number.MAX_SAFE_INTEGER)
+      - (rank.get(b.provider.id) ?? Number.MAX_SAFE_INTEGER)
+      || a.index - b.index)
+    .map(({ provider }) => provider);
 }
 
 /** Favorites always float first (their own saved order), then the chosen sort. */

@@ -371,11 +371,12 @@ async function createDefaultWorktree(projectId: string, title?: string): Promise
 
 export async function createSession(projectId: string, opts: CreateSessionOptions = {}): Promise<void> {
   const project = store.getState().projectRegistry.projects.find((candidate) => candidate.id === projectId);
+  const defaults = getSessionDefaults();
   const model = opts.model ?? resolveSessionDefaultModel(
     project?.defaults?.model,
-    getSessionDefaults().defaultModel,
+    defaults.defaultModel,
   );
-  const agent = opts.agent ?? project?.defaults?.agent;
+  const agent = opts.agent ?? project?.defaults?.agent ?? defaults.defaultAgent;
   const worktreePath = opts.worktreePath
     ?? (project?.defaults?.worktreeBehavior === "fresh-worktree"
       ? await createDefaultWorktree(projectId, opts.title)

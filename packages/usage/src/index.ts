@@ -12,6 +12,8 @@ import { computePace, type QuotaSample } from "./pace.ts";
 
 export { computePace, usableSamples } from "./pace.ts";
 export type { QuotaSample, PaceOptions } from "./pace.ts";
+export { buildProviderUsageOverview } from "./overview.ts";
+export type { ProviderUsageOverview } from "./overview.ts";
 export { createHttpQuotaProvider, parseQuotaProviderSpecs } from "./http.ts";
 export type { HttpQuotaProviderSpec, HttpQuotaProviderOptions } from "./http.ts";
 

@@ -32,6 +32,7 @@ import {
   type ListPublishOutcome,
   type ProjectRegistryState,
 } from "./projectRegistry.ts";
+import { setWorkspaceMode } from "./widgets/workspaceMode.ts";
 
 // UX-PANE-MODEL: Files, Git, Terminal, and Preview are workspace PANE
 // surfaces, not primary views — they open beside (or over) a still-mounted
@@ -518,7 +519,9 @@ export function activateSession(id: string | null): void {
  *  and the primary view returns to "session". */
 export function showSessionChat(): void {
   closeWorkspacePane();
+  set({ overlay: null });
   setActiveView("session");
+  setWorkspaceMode("chat");
 }
 
 /** Claim/clear the in-flight session open (see AppState.openingSessionId). */

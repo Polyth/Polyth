@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { register } from "node:module";
-import { registerSlot } from "../src/slots.ts";
+import { listSlots, registerSlot } from "../src/slots.ts";
 
 register("./tsxHooks.mjs", import.meta.url);
 
@@ -24,6 +24,18 @@ test("built-in catalog covers the complete default canvas", () => {
     assert.equal(byId.get(id)?.title, title);
     assert.equal(typeof byId.get(id)?.render, "function");
     assert.equal(typeof byId.get(id)?.settingsRender, "function");
+  }
+});
+
+test("feature-owned Git, Terminal, and Usage widgets contribute through the catalog slot", () => {
+  const contributions = new Map(listSlots("widget.catalog").map((item) => [item.id, item]));
+  for (const [id, pluginId] of [
+    ["git.recent", "git"],
+    ["terminal.shell", "terminal"],
+    ["usage.session", "usage"],
+  ] as const) {
+    assert.equal(contributions.get(id)?.meta?.pluginId, pluginId);
+    assert.equal(listWidgets().find((widget) => widget.id === id)?.pluginId, pluginId);
   }
 });
 

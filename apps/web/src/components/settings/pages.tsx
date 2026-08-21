@@ -26,9 +26,11 @@ import {
   reapplyTheme, removeCustomTheme, resolveTheme, type ThemeSpec,
 } from "../../theme.ts";
 import type { AssistSettingsDto } from "../../api.ts";
-import type { AgentProfile, InstalledPluginDto, McpServerDto, McpTransport, SystemInfoDto } from "@polyth/contracts";
+import type { AgentProfile, InstalledPluginDto, McpServerDto, McpTransport, SessionProjection, SystemInfoDto } from "@polyth/contracts";
 import { useWidgetCatalog } from "../../widgets/catalog.ts";
 import { useWidgetLayout } from "../../widgets/widgetLayout.ts";
+import { roleKind, setRoleKind, useRolePrefs } from "../../rolePrefs.ts";
+import { providerUsageDistribution } from "../../usageShare.ts";
 
 function ThemeSwatches({ theme }: { theme: ThemeSpec }) {
   return (
@@ -731,6 +733,44 @@ function QuotaWindowRow({ w, pace }: { w: QuotaWindowDto; pace: QuotaPaceDto | n
   );
 }
 
+function ProviderQuotaChart({ snap }: { snap: QuotaSnapshotDto }) {
+  const windows = snap.overview?.windows ?? snap.windows.map((window) => ({
+    ...window,
+    usedFraction: window.limit > 0 ? Math.min(1, Math.max(0, window.used / window.limit)) : 0,
+    remainingFraction: window.limit > 0 ? Math.max(0, 1 - window.used / window.limit) : 1,
+  }));
+  const width = 240;
+  const height = 72;
+  const gap = 8;
+  const barWidth = windows.length > 0 ? Math.max(8, (width - gap * (windows.length - 1)) / windows.length) : width;
+  return (
+    <div className="provider-quota-chart" role="img" aria-label={`${snap.providerId} quota utilization chart`}>
+      <svg viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" aria-hidden="true">
+        <line x1="0" x2={width} y1={height * .2} y2={height * .2} />
+        <line x1="0" x2={width} y1={height * .5} y2={height * .5} />
+        <line x1="0" x2={width} y1={height * .8} y2={height * .8} />
+        {windows.map((window, index) => {
+          const usedHeight = window.usedFraction * height;
+          return (
+            <rect
+              key={window.id}
+              x={index * (barWidth + gap)}
+              y={height - usedHeight}
+              width={barWidth}
+              height={usedHeight}
+              rx="3"
+              className={window.usedFraction >= .8 ? "warn" : ""}
+            />
+          );
+        })}
+      </svg>
+      <div className="provider-quota-chart-labels">
+        {windows.map((window) => <span key={window.id} title={window.label}>{Math.round(window.usedFraction * 100)}%</span>)}
+      </div>
+    </div>
+  );
+}
+
 function QuotaCard({ snap, onRefresh }: { snap: QuotaSnapshotDto; onRefresh: (id: string) => void }) {
   const prefs = useUsagePrefs();
   // F13: windows grouped by model family; groups collapse and remember it.
@@ -747,6 +787,7 @@ function QuotaCard({ snap, onRefresh }: { snap: QuotaSnapshotDto; onRefresh: (id
         <button className="small-btn" onClick={() => onRefresh(snap.providerId)}>Refresh</button>
       </div>
       {snap.stale && snap.error && <div className="quota-error">{snap.error.message}</div>}
+      {snap.windows.length > 0 && <ProviderQuotaChart snap={snap} />}
       {groups.map((g) => {
         const key = `${snap.providerId}/${g.family ?? "general"}`;
         const collapsed = grouped && prefs.collapsedGroups.includes(key);
@@ -783,11 +824,23 @@ function QuotaSection() {
   }, []);
   const refresh = (id: string) => void api.usageQuotasRefresh(id).then(reload).catch(reload);
   const visible = snaps.filter((s) => !prefs.hiddenProviders.includes(s.providerId));
+  const windowCount = visible.reduce((count, snapshot) => count + snapshot.windows.length, 0);
+  const attentionCount = visible.reduce((count, snapshot) =>
+    count + snapshot.windows.filter((window) => window.limit > 0 && window.used / window.limit >= .8).length, 0);
+  const staleCount = visible.filter((snapshot) => snapshot.stale).length;
   return (
     <>
-      <div className="stat-label">Provider quotas</div>
+      <div className="stat-label">Provider usage overview</div>
       {snaps.length === 0 && (
         <EmptyState title="No quota providers configured" body="Provider quota adapters are registered on the server; credentials never reach the browser." />
+      )}
+      {visible.length > 0 && (
+        <div className="usage-overview-grid">
+          <div><span>Providers</span><strong>{visible.length}</strong></div>
+          <div><span>Quota windows</span><strong>{windowCount}</strong></div>
+          <div><span>At 80%+</span><strong className={attentionCount > 0 ? "warn" : ""}>{attentionCount}</strong></div>
+          <div><span>Stale feeds</span><strong>{staleCount}</strong></div>
+        </div>
       )}
       {snaps.length > 0 && (
         <div className="quota-visibility">
@@ -807,11 +860,81 @@ function QuotaSection() {
         <div className="muted" style={{ fontSize: 12 }}>All providers hidden — tick one to show its card.</div>
       )}
       {visible.length > 0 && (
+        <>
+        <div className="stat-label">Provider details</div>
         <div className="quota-grid">
           {visible.map((s) => <QuotaCard key={s.providerId} snap={s} onRefresh={refresh} />)}
         </div>
+        </>
       )}
     </>
+  );
+}
+
+const PROVIDER_SHARE_COLORS = [
+  "var(--accent)",
+  "var(--green)",
+  "var(--amber)",
+  "#c4a7ee",
+  "#64b5f6",
+  "#f49b5b",
+] as const;
+
+function ProviderUsageDonut({ sessions }: { sessions: readonly SessionProjection[] }) {
+  const distribution = providerUsageDistribution(sessions);
+  let offset = 0;
+  const arcs = distribution.providers.map((provider, index) => {
+    const start = offset;
+    offset += provider.share * 100;
+    return {
+      ...provider,
+      color: PROVIDER_SHARE_COLORS[index % PROVIDER_SHARE_COLORS.length]!,
+      offset: start,
+    };
+  });
+  const totalLabel = distribution.metric === "tokens"
+    ? fmtTokens(distribution.total)
+    : `${distribution.total} session${distribution.total === 1 ? "" : "s"}`;
+
+  return (
+    <section className="provider-share-card" aria-labelledby="provider-share-title">
+      <div>
+        <div className="stat-label" id="provider-share-title">Usage by provider</div>
+        <p>Share of project {distribution.metric === "tokens" ? "tokens" : "sessions"}.</p>
+      </div>
+      <div
+        className="provider-share-donut"
+        role="img"
+        aria-label={`Provider usage share by ${distribution.metric}`}
+      >
+        <svg viewBox="0 0 120 120" aria-hidden="true">
+          <circle className="provider-share-track" cx="60" cy="60" r="44" pathLength="100" />
+          {arcs.map((provider) => (
+            <circle
+              key={provider.providerId}
+              className="provider-share-arc"
+              cx="60"
+              cy="60"
+              r="44"
+              pathLength="100"
+              stroke={provider.color}
+              strokeDasharray={`${provider.share * 100} ${100 - provider.share * 100}`}
+              strokeDashoffset={-provider.offset}
+            />
+          ))}
+        </svg>
+        <div><strong>{totalLabel}</strong><span>total</span></div>
+      </div>
+      <div className="provider-share-legend">
+        {arcs.map((provider) => (
+          <div key={provider.providerId}>
+            <i style={{ background: provider.color }} />
+            <span>{provider.providerId}</span>
+            <strong>{Math.round(provider.share * 100)}%</strong>
+          </div>
+        ))}
+      </div>
+    </section>
   );
 }
 
@@ -835,6 +958,7 @@ export function UsagePage() {
             <div className="goal-stat-cell"><div className="goal-stat-k">Tokens</div><div className="goal-stat-v mono">{fmtTokens(totalTokens)}</div></div>
             <div className="goal-stat-cell"><div className="goal-stat-k">Cost</div><div className="goal-stat-v mono">{totalCost > 0 ? fmtCost(totalCost) : "—"}</div></div>
           </div>
+          <ProviderUsageDonut sessions={mine} />
           <div className="stat-label">Top sessions</div>
           {top.map((s) => (
             <div key={s.id} className="stat-row">
@@ -919,6 +1043,10 @@ export function AgentsPage() {
   const [editing, setEditing] = useState<AgentProfile | null>(null);
   const [creating, setCreating] = useState(false);
   const [repairsFor, setRepairsFor] = useState<Record<string, string>>({});
+  const rolePrefs = useRolePrefs();
+  const configurableAgents = agents.filter((agent) => agent.name.toLowerCase() !== "compaction");
+  const mainAgents = configurableAgents.filter((agent) => roleKind(agent, rolePrefs) === "main");
+  const subagents = configurableAgents.filter((agent) => roleKind(agent, rolePrefs) === "subagent");
   const checkProfile = async (p: AgentProfile) => {
     const r = await api.validateProfile(p.id).catch(() => null);
     setRepairsFor((m) => ({
@@ -928,19 +1056,36 @@ export function AgentsPage() {
   };
   return (
     <>
-      <PageHead title="Agents" blurb="Agent presets reported by the backend runtime, plus reusable agent profiles." />
+      <PageHead title="Roles" blurb="Choose which OpenCode roles appear as main agents and which run as subagents." />
       {agents.length === 0 ? (
         <EmptyState title="No agents reported" body="The backend did not report agent presets. Sessions run with the default agent." />
       ) : (
-        agents.map((a) => (
-          <div key={a.name} className="set-row">
-            <div className="set-row-text">
-              <div className="set-row-label">{a.name}</div>
-              {a.description && <div className="set-row-hint">{a.description}</div>}
+        <>
+          <div className="stat-label">Main agents</div>
+          {mainAgents.map((agent) => (
+            <div key={agent.name} className="set-row role-row">
+              <div className="set-row-label">{agent.name}</div>
+              <div className="set-row-control">
+                <select aria-label={`Role for ${agent.name}`} value="main" onChange={(event) => setRoleKind(agent.name, event.target.value as "main" | "subagent")}>
+                  <option value="main">Main agent</option>
+                  <option value="subagent">Subagent</option>
+                </select>
+              </div>
             </div>
-            <div className="set-row-control"><span className="tag">{a.mode}</span></div>
-          </div>
-        ))
+          ))}
+          <div className="stat-label">Subagents</div>
+          {subagents.map((agent) => (
+            <div key={agent.name} className="set-row role-row">
+              <div className="set-row-label">{agent.name}</div>
+              <div className="set-row-control">
+                <select aria-label={`Role for ${agent.name}`} value="subagent" onChange={(event) => setRoleKind(agent.name, event.target.value as "main" | "subagent")}>
+                  <option value="main">Main agent</option>
+                  <option value="subagent">Subagent</option>
+                </select>
+              </div>
+            </div>
+          ))}
+        </>
       )}
       <div className="stat-label" style={{ display: "flex", alignItems: "center", gap: 8 }} data-settings-item="agents.profiles">
         <span>Agent profiles ({profiles.length})</span>

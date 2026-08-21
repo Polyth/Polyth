@@ -88,15 +88,15 @@ export function useGroupingMode(): string {
 }
 
 // ---- sidebar view mode (UX-FILES-TIMELINE-03 finding 9) -----------------------
-// "list": the current presentation — project cards plus the ACTIVE project's
-// sessions. "folders": every project is a collapsible folder with its
-// sessions nested. Persisted separately from the session grouping mode.
+// "list": projects plus the active project's worktree-grouped sessions.
+// "tree": project → worktrees → sessions for every expanded project.
 
 export const VIEW_MODE_KEY = "polyth.sidebar.viewMode";
-export type SidebarViewMode = "list" | "folders";
+export type SidebarViewMode = "list" | "tree";
 
 export function parseSidebarViewMode(raw: string | null): SidebarViewMode {
-  return raw === "folders" ? "folders" : "list";
+  // One-way migration from the removed project-folder presentation.
+  return raw === "tree" || raw === "folders" ? "tree" : "list";
 }
 
 const readViewMode = (): string | null => {

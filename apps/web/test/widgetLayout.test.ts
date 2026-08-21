@@ -13,10 +13,27 @@ import {
   parseWidgetLayout,
   serializeWidgetLayout,
   setWidgetSize,
+  setWidgetPosition,
   setWidgetVisible,
   updateWidgetLayout,
   widgetZoneOf,
 } from "../src/widgets/widgetLayout.ts";
+
+test("free-form positions persist and collisions resolve with a grid gap", () => {
+  const definitions = [
+    { id: "a", defaultSize: { w: 6, h: 3 } },
+    { id: "b", defaultSize: { w: 6, h: 3 } },
+  ];
+  let layout = createDefaultWidgetLayout(definitions);
+  layout = setWidgetVisible(layout, "a", true);
+  layout = setWidgetVisible(layout, "b", true);
+  const moved = setWidgetPosition(layout, "b", { x: 0, y: 0 });
+  assert.deepEqual(moved.widgets.a?.position, { x: 0, y: 0 });
+  assert.deepEqual(moved.widgets.b?.position, { x: 0, y: 3 });
+
+  const parsed = parseWidgetLayout(serializeWidgetLayout(moved), definitions);
+  assert.deepEqual(parsed.widgets.b?.position, { x: 0, y: 3 });
+});
 
 test("default widget layout contains every built-in exactly once", () => {
   const layout = createDefaultWidgetLayout();

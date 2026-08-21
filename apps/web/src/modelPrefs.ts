@@ -4,7 +4,9 @@ import {
   MODEL_PREFS_KEY,
   parseModelPrefs,
   recordRecent,
+  reorderProvider,
   serializeModelPrefs,
+  setProviderExpanded,
   toggleFavorite,
   type ModelPrefs,
   type ModelSort,
@@ -40,6 +42,18 @@ export function setModelSort(sort: ModelSort): void {
 
 export function noteModelUsed(key: string): void {
   commit(recordRecent(prefs, key));
+}
+
+export function setModelProviderExpanded(providerId: string, expanded: boolean): void {
+  commit(setProviderExpanded(prefs, providerId, expanded));
+}
+
+export function reorderModelProviders(
+  providerIds: readonly string[],
+  draggedId: string,
+  targetId: string,
+): void {
+  commit(reorderProvider(prefs, providerIds, draggedId, targetId));
 }
 
 export function useModelPrefs(): ModelPrefs {

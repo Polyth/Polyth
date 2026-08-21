@@ -1,8 +1,5 @@
-// UX-FILES-TIMELINE-03 finding 9: sidebar folder view mode. Projects render
-// as collapsible folders with their sessions nested (the SAME SessionList the
-// list mode uses), expand/collapse works per project and for all projects at
-// once, the toggle persists, and setSessions merges per project so several
-// projects' sessions can coexist in the store.
+// Sidebar tree mode: projects contain worktrees, and worktrees contain
+// sessions. The same SessionList is reused by the flat project list.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { register } from "node:module";
@@ -26,7 +23,7 @@ Object.defineProperty(globalThis, "HTMLElement", {
 const sessionsByProject: Record<string, SessionProjection[]> = {
   alpha: [
     { id: "a1", projectId: "alpha", title: "Alpha session one", status: "idle", createdAt: 1, updatedAt: 2 },
-    { id: "a2", projectId: "alpha", title: "Alpha session two", status: "idle", createdAt: 1, updatedAt: 1 },
+    { id: "a2", projectId: "alpha", title: "Alpha session two", status: "idle", createdAt: 1, updatedAt: 1, worktreePath: "/work/alpha-feature", branch: "feature/ui" },
   ],
   beta: [
     { id: "b1", projectId: "beta", title: "Beta session", status: "idle", createdAt: 1, updatedAt: 1 },
@@ -37,7 +34,14 @@ const sessionsByProject: Record<string, SessionProjection[]> = {
   const u = new URL(String(url), "http://localhost:3000");
   const body: unknown = u.pathname === "/api/sessions"
     ? sessionsByProject[u.searchParams.get("projectId") ?? ""] ?? []
-    : []; // /api/folders, /api/labels
+    : u.pathname === "/api/worktrees"
+      ? [
+          { path: `/work/${u.searchParams.get("projectId")}`, branch: "master", head: "a", isMain: true },
+          ...(u.searchParams.get("projectId") === "alpha"
+            ? [{ path: "/work/alpha-feature", branch: "feature/ui", head: "b", isMain: false }]
+            : []),
+        ]
+      : [];
   return {
     ok: true,
     status: 200,
@@ -63,10 +67,10 @@ const project = (id: string): Project => ({ id, path: `/work/${id}`, name: id, c
 test("parseSidebarViewMode falls back to list; setter persists and round-trips", () => {
   assert.equal(parseSidebarViewMode(null), "list");
   assert.equal(parseSidebarViewMode("bogus"), "list");
-  assert.equal(parseSidebarViewMode("folders"), "folders");
-  setSidebarViewMode("folders");
-  assert.equal(getSidebarViewMode(), "folders");
-  assert.equal(localStorage.getItem(VIEW_MODE_KEY), "folders");
+  assert.equal(parseSidebarViewMode("folders"), "tree", "legacy folder mode migrates");
+  setSidebarViewMode("tree");
+  assert.equal(getSidebarViewMode(), "tree");
+  assert.equal(localStorage.getItem(VIEW_MODE_KEY), "tree");
   setSidebarViewMode("list");
   assert.equal(getSidebarViewMode(), "list");
 });
@@ -81,7 +85,7 @@ test("setSessions merges per project — one project's refresh keeps the others"
   assert.deepEqual(ids, ["a1", "b1"]);
 });
 
-test("folder mode nests each project's sessions with per-project and expand/collapse-all", async () => {
+test("tree mode nests sessions under project worktrees", async () => {
   // Two ready projects; alpha is active.
   const ticket = store.beginProjectListRequest();
   store.publishProjectList(ticket, [project("alpha"), project("beta")]);
@@ -96,55 +100,45 @@ test("folder mode nests each project's sessions with per-project and expand/coll
   try {
     await act(async () => { root.render(createElement(Sidebar)); });
 
-    // List mode: classic layout — one Sessions section, no folder chevrons.
-    assert.ok(container.querySelector(".session-heading"), "list mode keeps the Sessions heading");
-    assert.equal(container.querySelector(".project-folder"), null);
-    const toggle = container.querySelector<HTMLElement>('[aria-label="Toggle project folder view"]');
+    assert.ok(container.querySelector(".session-list .session-org"), "list mode renders the active project sessions");
+    assert.equal(container.querySelector(".project-tree-node"), null);
+    const toggle = container.querySelector<HTMLElement>('[aria-label="Toggle project tree view"]');
     assert.ok(toggle, "view-mode toggle rendered");
     assert.equal(toggle!.getAttribute("aria-pressed"), "false");
 
-    // Flip to folder mode: persisted, projects become folders, the active
-    // project's sessions are already nested.
+    // Tree mode: projects become expandable roots and the active project's
+    // worktrees are already visible.
     await act(async () => { click(toggle!); });
     await act(async () => { await Promise.resolve(); });
     assert.equal(toggle!.getAttribute("aria-pressed"), "true");
-    assert.equal(localStorage.getItem(VIEW_MODE_KEY), "folders");
-    const folders = [...container.querySelectorAll(".project-folder")];
-    assert.equal(folders.length, 2, "each project renders as a folder");
-    assert.equal(container.querySelector(".session-heading"), null, "no separate Sessions section in folder mode");
-    const alphaFolder = folders.find((f) => (f.textContent ?? "").includes("alpha"))!;
+    assert.equal(localStorage.getItem(VIEW_MODE_KEY), "tree");
+    const trees = [...container.querySelectorAll(".project-tree-node")];
+    assert.equal(trees.length, 2, "each project renders as a tree root");
+    const alphaTree = trees.find((tree) => (tree.textContent ?? "").includes("alpha"))!;
     assert.ok(
-      alphaFolder.querySelector(".project-folder-sessions .session-org"),
-      "active project folder nests the real SessionList",
+      alphaTree.querySelector(".project-tree-sessions .session-org"),
+      "active project tree nests the real SessionList",
     );
-    assert.match(alphaFolder.textContent ?? "", /Alpha session one/);
-    const betaFolder = folders.find((f) => (f.textContent ?? "").includes("beta"))!;
-    assert.equal(betaFolder.querySelector(".project-folder-sessions"), null, "other projects start collapsed");
-    const betaChevron = betaFolder.querySelector<HTMLElement>(".project-folder-chevron")!;
+    assert.match(alphaTree.textContent ?? "", /Alpha session one/);
+    assert.match(alphaTree.textContent ?? "", /master/);
+    assert.match(alphaTree.textContent ?? "", /feature\/ui/);
+    const betaTree = trees.find((tree) => (tree.textContent ?? "").includes("beta"))!;
+    assert.equal(betaTree.querySelector(".project-tree-sessions"), null, "other projects start collapsed");
+    const betaChevron = betaTree.querySelector<HTMLElement>(".project-tree-chevron")!;
     assert.equal(betaChevron.getAttribute("aria-expanded"), "false");
 
     // Per-project expand reveals that project's sessions.
     await act(async () => { click(betaChevron); });
     await act(async () => { await Promise.resolve(); });
     assert.equal(betaChevron.getAttribute("aria-expanded"), "true");
-    assert.match(betaFolder.textContent ?? "", /Beta session/);
-
-    // Collapse all, then expand all.
-    const bar = container.querySelector<HTMLElement>(".side-folder-bar")!;
-    const buttons = [...bar.querySelectorAll("button")];
-    const collapseAll = buttons.find((b) => (b.textContent ?? "").includes("Collapse all"))!;
-    const expandAll = buttons.find((b) => (b.textContent ?? "").includes("Expand all"))!;
-    await act(async () => { click(collapseAll); });
-    assert.equal(container.querySelectorAll(".project-folder-sessions").length, 0, "collapse all hides every nested list");
-    await act(async () => { click(expandAll); });
-    await act(async () => { await Promise.resolve(); });
-    assert.equal(container.querySelectorAll(".project-folder-sessions").length, 2, "expand all reveals every project");
+    assert.match(betaTree.textContent ?? "", /Beta session/);
+    assert.equal(container.querySelector(".side-folder-bar"), null, "folder toolbar is removed");
 
     // Back to list mode restores the classic layout.
     await act(async () => { click(toggle!); });
     assert.equal(toggle!.getAttribute("aria-pressed"), "false");
-    assert.ok(container.querySelector(".session-heading"), "list layout restored");
-    assert.equal(container.querySelector(".project-folder"), null);
+    assert.ok(container.querySelector(".session-list .session-org"), "list layout restored");
+    assert.equal(container.querySelector(".project-tree-node"), null);
   } finally {
     await act(async () => { root.unmount(); });
     container.remove();

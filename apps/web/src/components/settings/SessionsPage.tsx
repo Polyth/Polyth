@@ -1,52 +1,60 @@
-// Session defaults and technical behavior. Session browsing and lifecycle
-// actions belong to the sidebar, never to Settings.
-import { useEffect, useState } from "react";
-import type { ModelRef, ProjectDefaults } from "@polyth/contracts";
+import { useEffect, useMemo, useState } from "react";
+import type { ModelRef } from "@polyth/contracts";
 import { api } from "../../api.ts";
-import {
-  applyProjectUpsert, setOverlay, setActiveView, setUiError, updateSettings, useStore,
-} from "../../store.ts";
+import { setUiError, updateSettings, useStore } from "../../store.ts";
 import { friendlyError } from "../../settings.ts";
-import { setGlobalDefaultModel, useSessionDefaults } from "../../sessionDefaults.ts";
-import { EmptyState, PageHead, Row, Toggle } from "./parts.tsx";
+import { setGlobalDefaultModel, setSessionDefaults, useSessionDefaults } from "../../sessionDefaults.ts";
+import { PageHead, Row } from "./parts.tsx";
 import { modelDisplayName, modelSupportsTextWorkflow } from "../../composer/discovery.ts";
+import { roleKind, useRolePrefs } from "../../rolePrefs.ts";
 
 const modelKey = (model: ModelRef): string => `${model.providerID}/${model.modelID}`;
 
 export default function SessionsPage() {
-  const activeProjectId = useStore((s) => s.activeProjectId);
-  const projects = useStore((s) => s.projectRegistry.projects);
   const models = useStore((s) => s.models);
-  const textModels = models.filter(modelSupportsTextWorkflow);
+  const textModels = useMemo(() => models.filter(modelSupportsTextWorkflow), [models]);
   const agents = useStore((s) => s.agents);
-  const settings = useStore((s) => s.settings);
-  const globalDefaults = useSessionDefaults();
-  const [selectedProjectId, setSelectedProjectId] = useState(activeProjectId ?? "");
+  const rolePrefs = useRolePrefs();
+  const mainAgents = agents.filter((agent) =>
+    roleKind(agent, rolePrefs) === "main" && agent.name.toLowerCase() !== "compaction");
+  const defaults = useSessionDefaults();
+  const retentionDays = defaults.retentionDays ?? 30;
+  const defaultAgent = defaults.defaultAgent
+    && mainAgents.some((agent) => agent.name === defaults.defaultAgent)
+    ? defaults.defaultAgent
+    : mainAgents.find((agent) => agent.name.toLowerCase() === "build")?.name
+      ?? mainAgents[0]?.name
+    ?? "";
+  const thinkingOptions = [...new Set(models.flatMap((model) => model.variants ?? []))];
+  const [eligible, setEligible] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
-    if (activeProjectId && !selectedProjectId) setSelectedProjectId(activeProjectId);
-  }, [activeProjectId, selectedProjectId]);
-
-  const project = projects.find((candidate) => candidate.id === selectedProjectId) ?? null;
-  const globalValue = globalDefaults.defaultModel ? modelKey(globalDefaults.defaultModel) : "";
-  const projectValue = project?.defaults?.model ? modelKey(project.defaults.model) : "";
+    let live = true;
+    setEligible(null);
+    void api.sessionRetention(retentionDays)
+      .then((summary) => {
+        if (live) setEligible(typeof summary.eligibleCount === "number" ? summary.eligibleCount : 0);
+      })
+      .catch(() => { if (live) setEligible(0); });
+    return () => { live = false; };
+  }, [retentionDays]);
 
   const modelFrom = (value: string): ModelRef | undefined => {
     const model = textModels.find((candidate) => modelKey(candidate) === value);
     return model ? { providerID: model.providerID, modelID: model.modelID } : undefined;
   };
 
-  const saveProjectDefaults = async (patch: Partial<ProjectDefaults>) => {
-    if (!project) return;
+  const cleanup = async () => {
     setBusy(true);
     try {
-      const updated = await api.patchProject(project.id, {
-        defaults: { ...project.defaults, ...patch },
-      });
-      applyProjectUpsert(updated);
+      const result = await api.runSessionRetention(retentionDays);
+      setEligible(Math.max(0, result.eligibleCount - result.succeeded.length));
+      if (result.failed.length > 0) {
+        setUiError(`${result.failed.length} eligible session(s) could not be archived.`);
+      }
     } catch (e) {
-      setUiError(friendlyError("Couldn’t update project defaults", e));
+      setUiError(friendlyError("Couldn’t clean up expired sessions", e));
     } finally {
       setBusy(false);
     }
@@ -54,24 +62,23 @@ export default function SessionsPage() {
 
   return (
     <>
-      <PageHead title="Sessions" blurb="Technical behavior and defaults for new sessions. Existing sessions stay in the sidebar." />
-      <div className="stat-label">Global defaults</div>
-      <Row
-        label="Global default model"
-        hint="Used for new projects and sessions when the project does not choose its own model."
-        itemId="sessions.defaultModel"
-      >
+      <PageHead title="Sessions" blurb="Set defaults and retention for sessions." />
+      <div className="stat-label session-settings-heading">Session Defaults</div>
+      <p className="session-default-summary">
+        New sessions will start with: <strong>OpenCode agent default</strong>
+        {defaultAgent && <> / <strong>{defaultAgent}</strong></>}
+      </p>
+      <Row label="Default Model" hint="The model selected when a project does not provide an override." itemId="sessions.defaultModel">
         <select
-          aria-label="Global default model"
-          value={globalValue}
+          aria-label="Default Model"
+          value={defaults.defaultModel ? modelKey(defaults.defaultModel) : ""}
           onChange={(event) => {
-            const value = event.target.value;
-            const model = modelFrom(value);
+            const model = modelFrom(event.target.value);
             setGlobalDefaultModel(model);
-            updateSettings({ defaultModel: value });
+            updateSettings({ defaultModel: event.target.value });
           }}
         >
-          <option value="">Server default</option>
+          <option value="">Not selected</option>
           {textModels.map((model) => (
             <option key={modelKey(model)} value={modelKey(model)}>
               {modelDisplayName(model, textModels)}
@@ -79,92 +86,72 @@ export default function SessionsPage() {
           ))}
         </select>
       </Row>
-      <Row label="Auto-title new sessions" hint="Derive a title from the first prompt." itemId="sessions.autoTitle">
-        <Toggle on={settings.autoTitleSessions} onChange={(autoTitleSessions) => updateSettings({ autoTitleSessions })} label="Auto-title sessions" />
+      <Row label="Default Thinking" hint="Applied to models that offer thinking variants.">
+        <select
+          aria-label="Default Thinking"
+          value={defaults.defaultThinking ?? ""}
+          onChange={(event) => setSessionDefaults({ defaultThinking: event.target.value || undefined })}
+        >
+          <option value="">Default</option>
+          {thinkingOptions.map((thinking) => <option key={thinking} value={thinking}>{thinking}</option>)}
+        </select>
       </Row>
-      <Row label="Expand archived sessions" hint="Show archived sessions immediately in the sidebar." itemId="sessions.showArchived">
-        <Toggle on={settings.showArchived} onChange={(showArchived) => updateSettings({ showArchived })} label="Expand archived sessions" />
+      <Row label="Default Agent" hint="OpenCode role used when no project or session override is selected.">
+        <select
+          aria-label="Default Agent"
+          value={defaultAgent}
+          onChange={(event) => setSessionDefaults({ defaultAgent: event.target.value || undefined })}
+        >
+          <option value="">OpenCode agent default</option>
+          {mainAgents.map((agent) => <option key={agent.name} value={agent.name}>{agent.name}</option>)}
+        </select>
+      </Row>
+      <Row label="Small Model" hint="Override model for lightweight summaries and generated metadata.">
+        <select
+          aria-label="Small Model"
+          value={defaults.smallModel ? modelKey(defaults.smallModel) : ""}
+          onChange={(event) => setSessionDefaults({ smallModel: modelFrom(event.target.value) })}
+        >
+          <option value="">Not selected</option>
+          {textModels.map((model) => <option key={modelKey(model)} value={modelKey(model)}>{modelDisplayName(model, textModels)}</option>)}
+        </select>
+      </Row>
+      <Row label="Changes Walkthrough Model" hint="Model used when generating a changes walkthrough.">
+        <select
+          aria-label="Changes Walkthrough Model"
+          value={defaults.walkthroughModel ? modelKey(defaults.walkthroughModel) : ""}
+          onChange={(event) => setSessionDefaults({ walkthroughModel: modelFrom(event.target.value) })}
+        >
+          <option value="">Not selected</option>
+          {textModels.map((model) => <option key={modelKey(model)} value={modelKey(model)}>{modelDisplayName(model, textModels)}</option>)}
+        </select>
       </Row>
 
-      <div className="stat-label">Per-project defaults</div>
-      {projects.length > 0 && (
-        <Row label="Project" hint="Choose which project defaults to edit." itemId="sessions.project">
-          <select value={selectedProjectId} onChange={(event) => setSelectedProjectId(event.target.value)}>
-            {projects.map((item) => <option key={item.id} value={item.id}>{item.name || item.path}</option>)}
-          </select>
-        </Row>
-      )}
-      {!project && (
-        <EmptyState
-          title="No project selected"
-          body="Global defaults still apply. Open a project to override its model and worktree behavior."
-        />
-      )}
-      {project && (
-        <>
-          <Row
-            label="Project default model"
-            hint="Use global follows the global choice above; a project override wins for every new session."
-            itemId="sessions.projectModel"
-          >
-            <select
-              disabled={busy}
-              aria-label="Project default model"
-              value={projectValue}
-              onChange={(event) => void saveProjectDefaults({
-                model: event.target.value ? modelFrom(event.target.value) : null,
-              })}
-            >
-              <option value="">Use global default</option>
-              {textModels.map((model) => (
-                <option key={modelKey(model)} value={modelKey(model)}>
-                  {modelDisplayName(model, textModels)}
-                </option>
-              ))}
-            </select>
-          </Row>
-          <Row
-            label="Worktree behavior"
-            hint="Start sessions in the project root or create a fresh worktree automatically."
-            itemId="sessions.worktree"
-          >
-            <select
-              disabled={busy}
-              value={project.defaults?.worktreeBehavior ?? "project-root"}
-              onChange={(event) => void saveProjectDefaults({
-                worktreeBehavior: event.target.value as "project-root" | "fresh-worktree",
-              })}
-            >
-              <option value="project-root">Project root</option>
-              <option value="fresh-worktree">Fresh worktree</option>
-            </select>
-          </Row>
-          <Row label="Default agent" hint="Use the backend default or choose an agent preset for new sessions.">
-            <select
-              disabled={busy}
-              value={project.defaults?.agent ?? ""}
-              onChange={(event) => void saveProjectDefaults({ agent: event.target.value || null })}
-            >
-              <option value="">Backend default</option>
-              {agents.map((agent) => <option key={agent.name} value={agent.name}>{agent.name}</option>)}
-            </select>
-          </Row>
-          <Row label="Sidebar grouping" hint="Technical grouping preference for sessions in this project.">
-            <select
-              disabled={busy}
-              value={project.defaults?.groupingMode ?? "status"}
-              onChange={(event) => void saveProjectDefaults({ groupingMode: event.target.value })}
-            >
-              <option value="status">By status</option>
-              <option value="worktree">By worktree</option>
-              <option value="none">No grouping</option>
-            </select>
-          </Row>
-        </>
-      )}
-      <Row label="Scheduled prompts" hint="Automation belongs in Schedule, not in the session defaults list.">
-        <button className="small-btn" onClick={() => { setOverlay(null); setActiveView("schedule"); }}>Open Schedule →</button>
+      <div className="stat-label session-settings-heading">Session Retention</div>
+      <Row label="Retention Period" hint="Idle completed sessions older than this become eligible for cleanup.">
+        <label className="retention-days">
+          <input
+            type="number"
+            min={1}
+            max={3650}
+            value={retentionDays}
+            aria-label="Retention Period"
+            onChange={(event) => setSessionDefaults({ retentionDays: Number(event.target.value) || 1 })}
+          />
+          <span>days</span>
+        </label>
       </Row>
+      <p className="session-retention-note">
+        Expired sessions are archived only when you run manual cleanup. Running, waiting, and already archived sessions are skipped.
+      </p>
+      <Row label="Manual Cleanup" hint="Archive every session that currently meets the retention rule.">
+        <button className="small-btn" disabled={busy || !eligible} onClick={() => void cleanup()}>
+          {busy ? "Archiving…" : "Archive eligible sessions"}
+        </button>
+      </Row>
+      <div className="retention-eligible" role="status">
+        Eligible for archiving right now: <strong>{eligible ?? "…"}</strong>
+      </div>
     </>
   );
 }

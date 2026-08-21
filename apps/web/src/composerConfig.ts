@@ -19,6 +19,7 @@ export interface ComposerConfig {
   profile: ProfileChoice;
   model?: ModelRef;
   agent?: string;
+  thinking?: string;
 }
 
 const KEY_PREFIX = "polyth.composer.config.v1.";
@@ -29,14 +30,17 @@ export function emptyComposerConfig(): ComposerConfig {
 }
 
 export function isDefaultComposerConfig(cfg: ComposerConfig): boolean {
-  return cfg.profile.kind === "inherit" && cfg.model === undefined && cfg.agent === undefined;
+  return cfg.profile.kind === "inherit"
+    && cfg.model === undefined
+    && cfg.agent === undefined
+    && cfg.thinking === undefined;
 }
 
 export function parseComposerConfig(raw: string | null): ComposerConfig {
   if (!raw) return emptyComposerConfig();
   try {
     const v = JSON.parse(raw) as {
-      v?: unknown; profile?: unknown; model?: unknown; agent?: unknown;
+      v?: unknown; profile?: unknown; model?: unknown; agent?: unknown; thinking?: unknown;
     };
     if (v.v !== 1) return emptyComposerConfig();
     const cfg = emptyComposerConfig();
@@ -47,6 +51,7 @@ export function parseComposerConfig(raw: string | null): ComposerConfig {
       cfg.model = { providerID: m.providerID, modelID: m.modelID };
     }
     if (typeof v.agent === "string" && v.agent) cfg.agent = v.agent;
+    if (typeof v.thinking === "string" && v.thinking) cfg.thinking = v.thinking;
     return cfg;
   } catch {
     return emptyComposerConfig();
@@ -59,6 +64,7 @@ export function serializeComposerConfig(cfg: ComposerConfig): string {
     profile: cfg.profile.kind === "id" ? cfg.profile.id : cfg.profile.kind === "none" ? "none" : null,
     ...(cfg.model ? { model: { providerID: cfg.model.providerID, modelID: cfg.model.modelID } } : {}),
     ...(cfg.agent ? { agent: cfg.agent } : {}),
+    ...(cfg.thinking ? { thinking: cfg.thinking } : {}),
   });
 }
 
@@ -98,10 +104,12 @@ export function withExplicitModel(cfg: ComposerConfig, model: ModelRef | undefin
   if (!model) {
     const next: ComposerConfig = { profile: cfg.profile };
     if (cfg.agent !== undefined) next.agent = cfg.agent;
+    if (cfg.thinking !== undefined) next.thinking = cfg.thinking;
     return next;
   }
   const next: ComposerConfig = { profile: cfg.profile.kind === "id" ? { kind: "none" } : cfg.profile, model };
   if (cfg.agent !== undefined) next.agent = cfg.agent;
+  if (cfg.thinking !== undefined) next.thinking = cfg.thinking;
   return next;
 }
 
@@ -112,6 +120,19 @@ export function withExplicitAgent(cfg: ComposerConfig, agent: string | undefined
   };
   if (cfg.model !== undefined) next.model = cfg.model;
   if (agent) next.agent = agent;
+  if (cfg.thinking !== undefined) next.thinking = cfg.thinking;
+  return next;
+}
+
+/** Thinking is an explicit per-turn override. Selecting it clears a profile
+ * bundle because the bundle no longer applies unmodified. */
+export function withExplicitThinking(cfg: ComposerConfig, thinking: string | undefined): ComposerConfig {
+  const next: ComposerConfig = {
+    profile: thinking && cfg.profile.kind === "id" ? { kind: "none" } : cfg.profile,
+  };
+  if (cfg.model !== undefined) next.model = cfg.model;
+  if (cfg.agent !== undefined) next.agent = cfg.agent;
+  if (thinking) next.thinking = thinking;
   return next;
 }
 

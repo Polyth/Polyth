@@ -152,7 +152,7 @@ export interface AttachmentRef {
   /** 1-based inclusive line range (kind "range" only). */
   range?: [number, number];
 }
-export interface ModelRef { providerID: string; modelID: string }
+export interface ModelRef { providerID: string; modelID: string; variant?: string }
 
 // Model-visible derivation: these types feed deriveMessages()
 export const MODEL_VISIBLE_TYPES = [
@@ -374,7 +374,7 @@ export interface SessionPersistence {
 
 // ---------------------------------------------------------------- agent runtime (backend seam)
 
-export interface ModelDescriptor { providerID: string; modelID: string; name: string; providerName?: string; context?: number; cost?: { input: number; output: number }; /** Normalized values include `input:text`, `output:image`, `input:none`, `toolcall`, and `attachment`. */ capabilities?: string[]; /** Provider has live credentials (backend `connected[]`); undefined = unknown/assume connected. */ connected?: boolean }
+export interface ModelDescriptor { providerID: string; modelID: string; name: string; providerName?: string; context?: number; cost?: { input: number; output: number }; /** Normalized values include `input:text`, `output:image`, `input:none`, `toolcall`, and `attachment`. */ capabilities?: string[]; /** Named reasoning variants reported by OpenCode (for example low/medium/high). */ variants?: string[]; /** Provider has live credentials (backend `connected[]`); undefined = unknown/assume connected. */ connected?: boolean }
 export interface AgentDescriptor { name: string; description?: string; mode: "primary" | "subagent" | "all" }
 export interface RuntimeCapabilities { streaming: boolean; permissions: boolean; questions: boolean; compaction: boolean; subagents: boolean; steering?: boolean }
 export interface RuntimeSession { id: string; title: string; parentId?: string; createdAt: number; updatedAt: number }

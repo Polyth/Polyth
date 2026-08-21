@@ -122,11 +122,6 @@ export function installShell(): void {
   });
   registerCommand({ id: "cmd.search", label: "Search sessions", hint: hintOf("searchSessions"), group: "Shell", run: () => setOverlay("search") });
   registerCommand({ id: "cmd.settings", label: "Settings", hint: hintOf("settings"), group: "Shell", run: () => setOverlay("settings") });
-  registerCommand({
-    id: "cmd.customize", label: "Change workspace preset", group: "Shell",
-    keywords: ["preset", "starting setup", "workspace", "persona", "role", "customize"],
-    run: () => setOverlay("onboarding"),
-  });
   registerCommand({ id: "cmd.focusComposer", label: "Focus composer", hint: hintOf("focusComposer"), group: "Shell", run: focusComposer });
   registerCommand({
     id: "cmd.new", label: "New session", hint: hintOf("newSession"), group: "Session",

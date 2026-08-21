@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import type { WidgetDef } from "../src/widgets/catalog.ts";
 import {
   filterWidgetLibrary,
@@ -61,6 +62,17 @@ const WIDGETS: WidgetDef[] = [
   },
 ];
 
+test("canvas exposes one simple add-widget menu and no placement-zone controls", async () => {
+  const source = await readFile(new URL("../src/widgets/WidgetCanvas.tsx", import.meta.url), "utf8");
+  assert.equal((source.match(/<WidgetMenu /g) ?? []).length, 1);
+  assert.ok(!source.includes("WIDGET_ZONES"));
+  assert.ok(!source.includes("layout preset"));
+  assert.ok(!source.includes("Recommended"));
+  assert.ok(!source.includes("Recent"));
+  assert.ok(!source.includes("Project canvas"));
+  assert.ok(!source.includes("Drag widgets to rearrange"));
+});
+
 test("widget library searches capabilities and combines plugin, size, zone, and tab filters", () => {
   const hits = filterWidgetLibrary(WIDGETS, {
     query: "diff",
@@ -110,19 +122,22 @@ test("plugin filters disambiguate colliding display names", () => {
   assert.equal(grouped.get("Tools — alpha-tools")?.length, 2);
 });
 
-test("guided setup applies workflow, audience, and selected widgets via shared mutations", () => {
-  const layout = createDefaultWidgetLayout(WIDGETS);
+test("guided setup applies audience and exact widget visibility without a layout preset", async () => {
+  const layout = setWidgetVisible(createDefaultWidgetLayout(WIDGETS), "terminal.shell", true);
   const draft = {
     ...createSetupDraft("build-debug"),
     audience: "power" as const,
-    widgetIds: ["core.composer", "git.recent", "terminal.shell"],
+    widgetIds: ["git.recent"],
   };
   const next = applyWorkspaceSetup(layout, draft, WIDGETS);
   assert.equal(next.audience, "power");
-  assert.equal(next.widgets["core.composer"]?.visible, true);
+  assert.equal(next.widgets["core.composer"]?.visible, false);
   assert.equal(next.widgets["git.recent"]?.visible, true);
-  assert.equal(next.widgets["terminal.shell"]?.visible, true);
+  assert.equal(next.widgets["terminal.shell"]?.visible, false);
   assert.equal(workflowOption("build-debug").suggestedWidgetIds.length, 7);
+
+  const source = await readFile(new URL("../src/widgets/workspaceSetup.ts", import.meta.url), "utf8");
+  assert.doesNotMatch(source, /type:\s*"preset"|applyWidgetLayoutPreset/);
 });
 
 test("guided setup enforces its advertised five-to-eight unique widget range", () => {

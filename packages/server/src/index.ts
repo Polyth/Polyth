@@ -40,6 +40,7 @@ import { fusionRoutes } from "./routes/fusion.ts";
 import { walkthroughRoutes } from "./routes/walkthrough.ts";
 import { scheduleRoutes } from "./routes/schedule.ts";
 import { usageRoutes } from "./routes/usage.ts";
+import { sessionRetentionRoutes } from "./routes/sessionRetention.ts";
 import { knowledgeRoutes } from "./routes/knowledge.ts";
 import { githubRoutes } from "./routes/github.ts";
 import { controlRoutes } from "./routes/control.ts";
@@ -675,6 +676,7 @@ export async function boot(opts: BootOptions = {}) {
     walkthroughRoutes({ store, broadcast, jobs: walkthroughJobs, review, flow: reviewFlow }),
     scheduleRoutes({ schedule, projects }),
     usageRoutes(usage),
+    sessionRetentionRoutes(sessions),
     knowledgeRoutes({
       knowledge,
       events: {

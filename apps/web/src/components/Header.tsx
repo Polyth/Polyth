@@ -500,24 +500,33 @@ export default function Header() {
             onClick={() => switchWorkspaceMode("chat")}
           >Focus</button>
           <button
-            className={workspaceMode === "widgets" ? "active" : ""}
-            aria-pressed={workspaceMode === "widgets"}
+            className={workspaceMode !== "chat" ? "active" : ""}
+            aria-pressed={workspaceMode !== "chat"}
             onClick={() => switchWorkspaceMode("widgets")}
           >Canvas</button>
-          <button
-            className={workspaceMode === "edit" ? "active" : ""}
-            aria-pressed={workspaceMode === "edit"}
-            onClick={() => switchWorkspaceMode("edit")}
-          >Edit layout</button>
         </div>
+        {workspaceMode === "chat" && <CapabilityNav />}
         <span className="header-spacer" />
-        {workspaceMode !== "chat" && session && (
+        {workspaceMode === "chat" && session && (
           <SlotHost
             slot="session.header.actions"
             context={{ sessionId: session.id, status: session.status, working: model.turn?.status === "working" }}
           />
         )}
-        {workspaceMode !== "chat" && (
+        {workspaceMode === "chat" && session && (
+          <>
+            <button
+              className="header-action header-goal"
+              title="Attach or update goal"
+              aria-label="Attach or update goal"
+              onClick={() => setGoalFormOpen((value) => !value)}
+            >
+              <Icon.target />
+            </button>
+            <AutoAcceptChip sessionId={session.id} effective={session.autoAccept === true} />
+          </>
+        )}
+        {workspaceMode === "chat" && (
           <button className="header-action header-new-session" disabled={!project} onClick={newSession}>
             <Icon.plus /><span>New session</span>
           </button>
@@ -527,7 +536,7 @@ export default function Header() {
           <button className="header-action" onClick={() => setOverlay("search")} aria-label="Search session history"><Icon.clock /><span>History</span></button>
           <button className="header-action" onClick={() => setOverlay("settings")}><Icon.gear /><span>Settings</span></button>
         </div>
-        {workspaceMode !== "chat" && (
+        {workspaceMode === "chat" && (
           <OverflowMenu sessionId={session?.id ?? null} onGoal={() => setGoalFormOpen((value) => !value)} />
         )}
         <UserMenu />

@@ -1,0 +1,21 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+
+test("copy and message actions are icon-only with hover and accessible names", async () => {
+  const [copy, timeline] = await Promise.all([
+    readFile(new URL("../src/components/CopyButton.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../src/components/Timeline.tsx", import.meta.url), "utf8"),
+  ]);
+
+  assert.match(copy, /aria-label="Copy to clipboard"/);
+  assert.match(copy, /title="Copy to clipboard"/);
+  assert.match(copy, /<Icon\.(?:check|copy)/);
+
+  for (const icon of ["markdown", "json", "fork"]) {
+    assert.match(timeline, new RegExp(`<Icon\\.${icon}`));
+  }
+  assert.match(timeline, /aria-label=\{entry\.name\}/);
+  assert.match(timeline, /title=\{entry\.disabledReason \?\? entry\.name\}/);
+  assert.doesNotMatch(timeline, />Copy MD<\/button>|>Copy JSON<\/button>|>Fork and edit<\/button>/);
+});

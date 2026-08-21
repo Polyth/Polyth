@@ -6,11 +6,33 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { QuotaSnapshot } from "@polyth/contracts";
-import { createUsageService, createFakeQuotaProvider, redactSecrets, type QuotaProvider } from "@polyth/usage";
+import {
+  buildProviderUsageOverview,
+  createUsageService,
+  createFakeQuotaProvider,
+  redactSecrets,
+  type QuotaProvider,
+} from "@polyth/usage";
 
 const snapshot = (used: number): QuotaSnapshot => ({
   providerId: "p", windows: [{ id: "w", label: "W", used, limit: 100, unit: "requests" }],
   fetchedAt: Date.now(), stale: false,
+});
+
+test("provider overview derives bounded utilization for dashboard charts", () => {
+  const [overview] = buildProviderUsageOverview([
+    {
+      ...snapshot(80),
+      accountLabel: "team",
+      windows: [
+        { id: "requests", label: "Requests", used: 80, limit: 100, unit: "requests" },
+        { id: "tokens", label: "Tokens", used: 150, limit: 100, unit: "tokens" },
+      ],
+    },
+  ]);
+  assert.equal(overview?.accountLabel, "team");
+  assert.equal(overview?.highestUsedFraction, 1);
+  assert.deepEqual(overview?.windows.map((window) => window.usedFraction), [.8, 1]);
 });
 
 test("no adapters → empty snapshot list; unknown refresh rejects", async () => {

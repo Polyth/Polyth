@@ -54,6 +54,7 @@ import AttachmentPills from "./AttachmentPills.tsx";
 import SelectionMenu from "./SelectionMenu.tsx";
 import SlotHost from "./slots/SlotHost.ts";
 import type { RenderModel, RenderMessage, ToolMsg, AssistantMsg, TaskActivityMsg, UserMsg } from "../reduce.ts";
+import { Icon } from "../icons.tsx";
 
 /** One announcement per copy/mutation outcome; text is the accessible record,
  *  checkmarks only supplement it. Screen readers ignore repeats, so identical
@@ -90,8 +91,8 @@ function Thinking({ m, announce }: { m: AssistantMsg; announce?: Announce }) {
         <div className="reasoning-body" dir="auto">
           {m.reasoning}
           <div className="reasoning-actions">
-            <button className="small-btn" aria-label={COPY_REASONING_NAME} onClick={() => void copyReasoning()}>
-              Copy reasoning
+            <button className="small-btn" aria-label={COPY_REASONING_NAME} title={COPY_REASONING_NAME} onClick={() => void copyReasoning()}>
+              <Icon.copy />
             </button>
           </div>
         </div>
@@ -155,6 +156,13 @@ function messageActionEntries(
 }
 
 function ActionButton({ entry, className }: { entry: MessageActionEntry; className: string }) {
+  const glyph = entry.key === "md"
+    ? <Icon.markdown />
+    : entry.key === "json"
+      ? <Icon.json />
+      : entry.key === "fork"
+        ? <Icon.fork />
+        : <Icon.rewind />;
   return (
     <button
       className={className}
@@ -164,7 +172,7 @@ function ActionButton({ entry, className }: { entry: MessageActionEntry; classNa
       onClick={entry.run}
       {...(entry.dataAttr ?? {})}
     >
-      {entry.label}
+      <span aria-hidden="true">{glyph}</span>
     </button>
   );
 }
@@ -285,7 +293,15 @@ function MessageMeta({ m, announce, onRevert, onFork, revert, fork }: {
               disabled={entry.disabledReason !== undefined}
               onClick={() => { entry.run(); closeMenu(true); }}
             >
-              {entry.name}
+              <span aria-hidden="true">
+                {entry.key === "md"
+                  ? <Icon.markdown />
+                  : entry.key === "json"
+                    ? <Icon.json />
+                    : entry.key === "fork"
+                      ? <Icon.fork />
+                      : <Icon.rewind />}
+              </span>
             </button>
           ))}
         </div>
@@ -513,14 +529,14 @@ function TimelineDialog({ prompts, onClose, onJump, onRevert, onFork, revert, fo
               title={revert.enabled ? revertActionName(message.time) : revert.reason}
               disabled={!revert.enabled}
               onClick={() => { onRevert(message); onClose(); }}
-            >Revert and edit</button>
+            ><Icon.rewind /></button>
             <button
               className="small-btn"
               aria-label={forkActionName(message.time)}
               title={fork.enabled ? forkActionName(message.time) : fork.reason}
               disabled={!fork.enabled}
               onClick={() => { onFork(message); onClose(); }}
-            >Fork and edit</button>
+            ><Icon.fork /></button>
           </div>
         ))}
       </div>
@@ -537,9 +553,10 @@ function TimelineDialog({ prompts, onClose, onJump, onRevert, onFork, revert, fo
 // position, ticks swell in a proximity wave under the cursor, and hover/focus
 // reveals a recent-turns panel. Click jumps via the existing
 // jump()/scrollIntoView path. Presentation-only — no SessionEvent.
-function PromptNavigator({ prompts, onJump, containerRef }: {
+function PromptNavigator({ prompts, onJump, onManage, containerRef }: {
   prompts: Array<{ id: string; preview: string; text: string }>;
   onJump: (id: string) => void;
+  onManage: () => void;
   containerRef: RefObject<HTMLDivElement | null>;
 }) {
   const [active, setActive] = useState(-1);
@@ -638,7 +655,15 @@ function PromptNavigator({ prompts, onJump, containerRef }: {
       {open && recent.length > 0 && (
         <div className="prompt-nav-panel">
           <div className="prompt-nav-panel-head">
-            Recent turns{prompts.length > recent.length ? ` (${recentStart + 1}–${prompts.length} of ${prompts.length})` : ""}
+            <span>MANAGE TURNS{prompts.length > recent.length ? ` (${recentStart + 1}–${prompts.length} of ${prompts.length})` : ""}</span>
+            <button
+              className="prompt-nav-manage"
+              aria-label={OPEN_TIMELINE_NAME}
+              aria-haspopup="dialog"
+              onClick={() => { setOpen(false); onManage(); }}
+            >
+              <Icon.list />
+            </button>
           </div>
           {recent.map((p, i) => {
             const index = recentStart + i;
@@ -977,16 +1002,6 @@ export default function Timeline({ model }: { model: RenderModel }) {
   // scroller pinned to the right gutter (never over the reading column).
   return (
     <div className="timeline-shell">
-      {promptMessages.length > 0 && (
-        <div className="timeline-utility">
-          <button
-            className="timeline-open small-btn"
-            aria-label={OPEN_TIMELINE_NAME}
-            aria-haspopup="dialog"
-            onClick={() => { dialogFocusHandoff.current = false; setTimelineOpen(true); }}
-          >Timeline</button>
-        </div>
-      )}
       <div className="timeline-viewport">
       <div
         className="timeline"
@@ -1087,7 +1102,14 @@ export default function Timeline({ model }: { model: RenderModel }) {
         <div className="msg-live" role="status" aria-live="polite">{liveText}</div>
         <SlotHost slot="session.timeline.after" context={slotSummary} />
       </div>
-      {showNav && <PromptNavigator prompts={prompts} onJump={jump} containerRef={ref} />}
+      {showNav && (
+        <PromptNavigator
+          prompts={prompts}
+          onJump={jump}
+          onManage={() => { dialogFocusHandoff.current = false; setTimelineOpen(true); }}
+          containerRef={ref}
+        />
+      )}
       </div>
       {showJump && (
         <div className="timeline-reveal">

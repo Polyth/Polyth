@@ -474,6 +474,25 @@ test("startTurn maps attachments to file parts; url attachments stay text (F2)",
   }
 });
 
+test("startTurn forwards a selected thinking variant", async () => {
+  const fake = await startFake();
+  const client = createOpenCodeClient(fake.baseUrl);
+  const runtime = createOpenCodeRuntimeWithClient(client, { cwd: "/workspace/demo" });
+  try {
+    await runtime.ensureSession({ sessionId: "canon-think", projectId: "p", cwd: "/workspace/demo", title: "t" });
+    await runtime.startTurn({
+      sessionId: "canon-think",
+      text: "think",
+      model: { providerID: "openai", modelID: "gpt-test", variant: "high" },
+    });
+    await waitUntil(() => fake.postedBodies.length >= 1);
+    assert.equal(fake.postedBodies[0]?.variant, "high");
+  } finally {
+    await runtime.dispose();
+    fake.server.close();
+  }
+});
+
 // ---------------------------------------------------------------- UX-MSG-ACTIONS: native branch
 
 interface FakeMessage {

@@ -2,6 +2,7 @@
 // plugin items, hidden pages, no matches.
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import {
   fold, listSettingsItems, registerSettingsItems, searchSettingsItems,
 } from "../src/settings/registry.ts";
@@ -37,6 +38,18 @@ test("diacritic query matches plain text", () => {
 test("no matches yields an empty list, blank query too", () => {
   assert.deepEqual(searchSettingsItems("zzzz-nothing", PAGES), []);
   assert.deepEqual(searchSettingsItems("   ", PAGES), []);
+});
+
+test("deleted widget-layout settings and setup launchers are not advertised", async () => {
+  assert.equal(listSettingsItems().some((item) => item.pageId === "widgets"), false);
+  assert.deepEqual(searchSettingsItems("widget layout presets", { ...PAGES, widgets: "Widgets" }), []);
+
+  const [shell, settings] = await Promise.all([
+    readFile(new URL("../src/shell.ts", import.meta.url), "utf8"),
+    readFile(new URL("../src/components/SettingsView.tsx", import.meta.url), "utf8"),
+  ]);
+  assert.doesNotMatch(shell, /Change workspace preset|cmd\.customize/);
+  assert.doesNotMatch(settings, /Choose a setup/);
 });
 
 test("items on hidden/unknown pages are skipped", () => {

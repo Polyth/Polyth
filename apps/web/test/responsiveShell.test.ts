@@ -145,12 +145,13 @@ test("composer bar exposes the two-tier semantic groups without forking send", a
   assert.ok(css.includes("repeat(2, minmax(0, 1fr))"), "phone selector grid contract");
 });
 
-test("Focus uses the light composer controls without technical chrome", async () => {
+test("Focus uses light composer controls without editor or privacy chrome", async () => {
   const composer = await read("../src/components/Composer.tsx");
   assert.ok(composer.includes('simpleMode && variant === "docked"'), "light controls are scoped to docked Focus");
   assert.ok(composer.includes("!lightFocusComposer && ("), "Focus suppresses extension toolbar controls");
   assert.ok(composer.includes("<Icon.paperclip />"), "Focus exposes a paperclip attachment action");
-  assert.ok(composer.includes("<Icon.focus />"), "Focus exposes the focused editor action");
+  assert.ok(!composer.includes("<Icon.focus />"), "Focus removes the focused-editor header action");
+  assert.ok(!composer.includes("<Icon.shield />"), "Focus removes the permissions/privacy header action");
   assert.ok(composer.includes("<Icon.send />"), "Focus uses a paper-plane send icon");
   const css = await read("../src/styles.css");
   assert.ok(css.includes(".composer-focus-light .chip-k { display: none; }"), "technical picker keys are hidden");
