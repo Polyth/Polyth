@@ -20,7 +20,7 @@ test("built-in catalog covers the complete default canvas", () => {
     ["knowledge.notes", "Notes / Memory"],
     ["session.activity", "Activity Timeline"],
     ["core.quick-actions", "Quick actions"],
-  ]) {
+  ] as const) {
     assert.equal(byId.get(id)?.title, title);
     assert.equal(typeof byId.get(id)?.render, "function");
     assert.equal(typeof byId.get(id)?.settingsRender, "function");
