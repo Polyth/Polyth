@@ -255,7 +255,14 @@ export function createHttpServer(deps: HttpDeps): Server {
       // static web bundle
       let filePath = normalize(join(deps.webDist, path === "/" ? "index.html" : path));
       if (!filePath.startsWith(normalize(deps.webDist))) { res.writeHead(403); return res.end(); }
-      if (!existsSync(filePath)) filePath = join(deps.webDist, "index.html"); // SPA fallback
+      if (!existsSync(filePath)) {
+        // SPA fallback is for navigations only. A missing asset-like path
+        // (anything with a file extension) must fail honestly: serving
+        // index.html as e.g. a JS module response breaks refresh replay on
+        // nested routes with an unhelpful MIME error (EXT-SEAMS-V3).
+        if (extname(path) !== "") { res.writeHead(404, { "content-type": "text/plain" }); return res.end("not found"); }
+        filePath = join(deps.webDist, "index.html");
+      }
       const data = await readFile(filePath);
       res.writeHead(200, { "content-type": MIME[extname(filePath)] ?? "application/octet-stream" });
       res.end(data);

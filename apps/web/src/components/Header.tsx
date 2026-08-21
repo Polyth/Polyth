@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { getState, useActiveModel, useStore, setActiveView, setRailPlugin, setSidebarOpen, setUiError, type AppView } from "../store.ts";
+import { getState, useActiveModel, useStore, setRailPlugin, setSidebarOpen, setUiError, type AppView } from "../store.ts";
 import { forkSession, exportSessionMarkdown } from "../init.ts";
 import { displaySessionTitle } from "../format.ts";
 import { friendlyError, shortcutLabel } from "../settings.ts";
@@ -15,7 +15,8 @@ import {
   type ResolvedCapability,
 } from "../capabilities.ts";
 import { getPresetState, setMoreToolsOpen } from "../workspacePresets.ts";
-import { PANEL_OF_CAPABILITY, VIEW_OF_CAPABILITY } from "../builtinCapabilities.ts";
+import { PANEL_OF_CAPABILITY, PANE_OF_CAPABILITY, VIEW_OF_CAPABILITY } from "../builtinCapabilities.ts";
+import SlotHost from "./slots/SlotHost.ts";
 import { Icon } from "../icons.tsx";
 
 const STROKE = { fill: "none", stroke: "currentColor", strokeWidth: 1.5, strokeLinecap: "round", strokeLinejoin: "round" } as const;
@@ -24,24 +25,6 @@ const ICONS: Record<AppView, React.ReactNode> = {
   session: (
     <svg width="16" height="16" viewBox="0 0 16 16" {...STROKE}>
       <path d="M2.5 3.5h11v7h-6l-2.8 2.6v-2.6h-2.2z" />
-    </svg>
-  ),
-  git: (
-    <svg width="16" height="16" viewBox="0 0 16 16" {...STROKE}>
-      <circle cx="4.5" cy="4" r="1.7" /><circle cx="4.5" cy="12" r="1.7" /><circle cx="11.5" cy="5.5" r="1.7" />
-      <path d="M4.5 5.7v4.6M11.5 7.2c0 2.3-2.5 2.6-5 3" />
-    </svg>
-  ),
-  terminal: (
-    <svg width="16" height="16" viewBox="0 0 16 16" {...STROKE}>
-      <rect x="1.8" y="2.8" width="12.4" height="10.4" rx="2" />
-      <path d="M4.5 6.2 6.8 8l-2.3 1.8M8.4 10.2h3" />
-    </svg>
-  ),
-  preview: (
-    <svg width="16" height="16" viewBox="0 0 16 16" {...STROKE}>
-      <rect x="1.8" y="2.8" width="12.4" height="10.4" rx="2" />
-      <path d="M1.8 5.6h12.4" /><circle cx="4" cy="4.2" r="0.3" />
     </svg>
   ),
   goals: (
@@ -64,11 +47,6 @@ const ICONS: Record<AppView, React.ReactNode> = {
       <path d="M3 4h2M3 8h2M3 12h2M8 4h5M8 8h5M8 12h5" />
     </svg>
   ),
-  files: (
-    <svg width="16" height="16" viewBox="0 0 16 16" {...STROKE}>
-      <path d="M4 2.5h5l3 3v8h-8z" /><path d="M9 2.5v3h3" />
-    </svg>
-  ),
   schedule: (
     <svg width="16" height="16" viewBox="0 0 16 16" {...STROKE}>
       <circle cx="8" cy="8" r="5.5" /><path d="M8 5v3.2l2.2 1.3" />
@@ -84,6 +62,10 @@ const ICONS: Record<AppView, React.ReactNode> = {
 
 // Icons for capabilities that are not full views (panels, settings pages).
 const EXTRA_ICONS: Record<string, React.ReactNode> = {
+  files: <Icon.files />,
+  preview: <Icon.globe />,
+  git: <Icon.tree />,
+  terminal: <Icon.term />,
   usage: <Icon.usage />,
   events: <Icon.events />,
   context: <Icon.context />,
@@ -107,6 +89,7 @@ function CapabilityNav() {
   const resolved = useResolvedCapabilities();
   const view = useStore((s) => s.activeView);
   const rail = useStore((s) => s.railPlugin);
+  const paneFullscreen = useStore((s) => s.paneFullscreen);
   const navRef = useRef<HTMLElement>(null);
   const [fit, setFit] = useState(8);
   const [moreOpen, setMoreOpen] = useState(() => getPresetState().moreToolsOpen);
@@ -156,7 +139,9 @@ function CapabilityNav() {
 
   const isActive = (c: ResolvedCapability): boolean => {
     const v = VIEW_OF_CAPABILITY[c.descriptor.id];
-    if (v) return view === v;
+    if (v) return view === v && !(v === "session" && paneFullscreen);
+    const pane = PANE_OF_CAPABILITY[c.descriptor.id];
+    if (pane) return rail === pane;
     const panel = PANEL_OF_CAPABILITY[c.descriptor.id];
     return panel !== undefined && rail === panel;
   };
@@ -345,7 +330,7 @@ function CompactViewPicker({ view }: { view: AppView }) {
       triggerIcon={ICONS[view]}
       items={items}
       value={view}
-      onPick={(id) => setActiveView(id as AppView)}
+      onPick={(id) => views.find((c) => VIEW_OF_CAPABILITY[c.descriptor.id] === id)?.descriptor.open()}
     />
   );
 }
@@ -508,6 +493,12 @@ export default function Header() {
           {subtitle && <div className="header-sub">{subtitle}</div>}
         </div>
         {session && <AutoAcceptChip sessionId={session.id} effective={!!session.autoAccept} />}
+        {session && (
+          <SlotHost
+            slot="session.header.actions"
+            context={{ sessionId: session.id, status: session.status, working: model.turn?.status === "working" }}
+          />
+        )}
         {compact ? (
           <CompactViewPicker view={view} />
         ) : (

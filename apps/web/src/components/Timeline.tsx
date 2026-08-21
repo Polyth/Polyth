@@ -34,11 +34,12 @@ import {
 } from "../messageActions.ts";
 import { applyComposerSeed, discardComposerSeed, loadSeedRecord } from "../drafts.ts";
 import { TIMELINE_CHUNK, TIMELINE_WINDOW, grownLimit, limitToInclude, windowStart } from "../timelineWindow.ts";
-import { loadTimelineAnchor, saveTimelineAnchor } from "../timelineAnchor.ts";
+import { captureTimelineAnchor, loadTimelineAnchor, saveTimelineAnchor, type TimelineAnchor } from "../timelineAnchor.ts";
 import CopyButton from "./CopyButton.tsx";
 import Dialog from "./a11y/Dialog.tsx";
 import AttachmentPills from "./AttachmentPills.tsx";
 import SelectionMenu from "./SelectionMenu.tsx";
+import SlotHost from "./slots/SlotHost.ts";
 import type { RenderModel, RenderMessage, ToolMsg, AssistantMsg, TaskActivityMsg, UserMsg } from "../reduce.ts";
 
 /** One announcement per copy/mutation outcome; text is the accessible record,
@@ -233,6 +234,7 @@ function MessageMeta({ m, announce, onRevert, onFork, revert, fork }: {
   revert?: ActionAvailability;
   fork?: ActionAvailability;
 }) {
+  const sessionId = useStore((s) => s.activeSessionId);
   const t = m.kind === "user" ? m.time : assistantTime(m);
   const name = m.kind === "user" ? sentName(t) : completedName(t);
   const entries = messageActionEntries(m, { announce, onRevert, onFork, revert, fork });
@@ -243,6 +245,10 @@ function MessageMeta({ m, announce, onRevert, onFork, revert, fork }: {
         {entries.map((entry) => <ActionButton key={entry.key} entry={entry} className="small-btn" />)}
       </div>
       <ActionsMenu m={m} entries={entries} />
+      <SlotHost
+        slot="session.message.actions"
+        context={{ sessionId, kind: m.kind, messageId: m.id, eventSeq: m.eventSeq }}
+      />
     </div>
   );
 }
@@ -486,53 +492,59 @@ export default function Timeline({ model }: { model: RenderModel }) {
   const [limit, setLimit] = useState(TIMELINE_WINDOW);
   const anchor = useRef<{ scrollTop: number; scrollHeight: number } | null>(null);
   const pendingJump = useRef<string | null>(null);
-  // UX-A390: the saved per-session scroll anchor (timelineAnchor.ts). A
-  // non-bottom anchor is re-applied until the replayed content is tall enough
-  // to hold it; a bottom anchor keeps the existing follow behavior.
-  const pendingRestore = useRef<number | null>(null);
-  const saveTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  const pendingSave = useRef<{ sessionId: string; atBottom: boolean; scrollTop: number } | null>(null);
-  const anchorSession = useRef<string | null | undefined>(undefined);
-  const flushAnchor = () => {
-    clearTimeout(saveTimer.current);
-    const p = pendingSave.current;
-    pendingSave.current = null;
-    if (p) saveTimelineAnchor(p.sessionId, { atBottom: p.atBottom, scrollTop: p.scrollTop });
-  };
-  if (anchorSession.current !== sessionId) {
-    // Render-time, idempotent reset so the refs are correct before effects run.
-    anchorSession.current = sessionId;
-    flushAnchor(); // a debounced write for the previous session must not vanish
-    const saved = sessionId !== null ? loadTimelineAnchor(sessionId) : null;
-    atBottom.current = saved === null || saved.atBottom;
-    pendingRestore.current = saved !== null && !saved.atBottom ? saved.scrollTop : null;
+  // UX-PANE-MODEL stable anchor: session switches adjust during render so the
+  // outgoing anchor is captured from the STILL-CURRENT DOM (before commit) and
+  // the incoming one is ready before the first paint of the new session.
+  // Pane dock/expand/full-screen transitions never remount this tree, so the
+  // live scroll position carries itself; this record covers reload + switch.
+  const restoreRef = useRef<TimelineAnchor | null>(null);
+  const [anchorSession, setAnchorSession] = useState<string | null | undefined>(undefined);
+  if (anchorSession !== sessionId) {
+    const el = ref.current;
+    if (anchorSession !== undefined && anchorSession !== null && el !== null) {
+      saveTimelineAnchor(anchorSession, captureTimelineAnchor(el, atBottom.current));
+    }
+    setAnchorSession(sessionId);
+    setLimit(TIMELINE_WINDOW);
+    const stored = sessionId !== null ? loadTimelineAnchor(sessionId) : null;
+    restoreRef.current = stored !== null && !stored.atBottom ? stored : null;
+    atBottom.current = stored?.atBottom ?? true;
   }
-
-  useEffect(() => { setLimit(TIMELINE_WINDOW); }, [sessionId]);
-  useEffect(() => flushAnchor, []);
 
   useEffect(() => {
     const el = ref.current;
-    if (!el) return;
-    const target = pendingRestore.current;
-    if (target !== null) {
-      el.scrollTop = target;
-      // Keep pinning until the saved offset is actually reachable.
-      if (el.scrollHeight - el.clientHeight >= target) pendingRestore.current = null;
-      return;
-    }
-    if (atBottom.current) el.scrollTop = el.scrollHeight;
-  }, [model.version, sessionId]);
+    if (el && atBottom.current) el.scrollTop = el.scrollHeight;
+  }, [model.version]);
 
+  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const onScroll = () => {
     const el = ref.current;
     if (!el) return;
     atBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
-    if (sessionId === null || pendingRestore.current !== null) return;
-    pendingSave.current = { sessionId, atBottom: atBottom.current, scrollTop: el.scrollTop };
-    clearTimeout(saveTimer.current);
-    saveTimer.current = setTimeout(flushAnchor, 150);
+    if (sessionId === null) return;
+    if (saveTimer.current !== null) clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(() => {
+      saveTimer.current = null;
+      const now = ref.current;
+      if (now) saveTimelineAnchor(sessionId, captureTimelineAnchor(now, atBottom.current));
+    }, 200);
   };
+
+  // Debounce safety: reload and unmount flush the stable anchor immediately.
+  useEffect(() => {
+    if (sessionId === null) return;
+    const flush = () => {
+      if (saveTimer.current !== null) clearTimeout(saveTimer.current);
+      saveTimer.current = null;
+      const el = ref.current;
+      if (el) saveTimelineAnchor(sessionId, captureTimelineAnchor(el, atBottom.current));
+    };
+    window.addEventListener("pagehide", flush);
+    return () => {
+      window.removeEventListener("pagehide", flush);
+      flush();
+    };
+  }, [sessionId]);
 
   // One timeline live region: copy results and mutation outcomes are announced
   // as text (visual checkmarks only supplement). Identical repeats get an
@@ -599,6 +611,31 @@ export default function Timeline({ model }: { model: RenderModel }) {
     pendingJump.current = null;
     if (target) el?.querySelector(`[data-msg-id="${target}"]`)?.scrollIntoView({ block: "center" });
   }, [limit]);
+
+  // Reapply the stored stable anchor once its row exists: grow the window to
+  // include it if needed, then align the row to the remembered offset. Runs
+  // every commit but is a no-op unless a restore is pending.
+  useLayoutEffect(() => {
+    const a = restoreRef.current;
+    const el = ref.current;
+    if (a === null || a.id === null || el === null) return;
+    const node = el.querySelector(`[data-msg-id="${a.id}"]`);
+    if (node === null) {
+      const index = rows.findIndex((r) => r.kind !== "work" && r.id === a.id);
+      if (index >= 0) {
+        const next = limitToInclude(rows.length, limit, index);
+        if (next !== limit) {
+          setLimit(next);
+          return; // retry after the window grows
+        }
+      }
+      if (rows.length > 0) restoreRef.current = null; // anchor row is gone
+      return;
+    }
+    restoreRef.current = null;
+    const rowTop = node.getBoundingClientRect().top - el.getBoundingClientRect().top;
+    el.scrollTop += rowTop - a.offset;
+  });
   const jump = (id: string) => {
     const index = rows.findIndex((r) => r.kind !== "work" && r.id === id);
     const next = limitToInclude(rows.length, limit, index);
@@ -674,12 +711,22 @@ export default function Timeline({ model }: { model: RenderModel }) {
     });
   };
 
+  // Bounded, already-reduced summary for the timeline before/after hosts —
+  // contributions never receive live events or a mutable model reference.
+  const slotSummary = {
+    sessionId,
+    messageCount: model.messages.length,
+    promptCount: prompts.length,
+    turnStatus: turn?.status ?? null,
+  };
+
   return (
     <div className="timeline" ref={ref} onScroll={onScroll}>
       {showNav && <PromptNavigator prompts={prompts} onJump={jump} />}
       {promptMessages.length > 0 && (
         <button className="timeline-open small-btn" onClick={() => setTimelineOpen(true)}>Timeline</button>
       )}
+      <SlotHost slot="session.timeline.before" context={slotSummary} />
       {model.messages.length === 0 && (
         <div className="empty">
           <div>No messages yet — say hi below.</div>
@@ -772,6 +819,7 @@ export default function Timeline({ model }: { model: RenderModel }) {
       )}
       {footer && <div className="turn-footer">{footer}</div>}
       <div className="msg-live" role="status" aria-live="polite">{liveText}</div>
+      <SlotHost slot="session.timeline.after" context={slotSummary} />
       <SelectionMenu container={ref} />
       {timelineOpen && (
         <TimelineDialog

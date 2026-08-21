@@ -4,9 +4,9 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <title>Polyth</title>
-    <!-- Root-relative assets: the SPA fallback serves this page for deep links
-         like /p/{project}/s/{session}, where relative URLs would resolve into
-         the session path and break the bundle load on reload. -->
+    <!-- Root-absolute asset URLs (EXT-SEAMS-V3): this shell is also served as
+         the SPA fallback for nested routes like /p/:projectId/s/:sessionId, so
+         relative ./bundle.* would resolve under the route and break refresh. -->
     <link rel="stylesheet" href="/bundle.css" />
   </head>
   <body>

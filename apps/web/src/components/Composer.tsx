@@ -1,4 +1,4 @@
-import { Fragment, useState, useRef, useEffect, useCallback, type ClipboardEvent, type KeyboardEvent } from "react";
+import { useState, useRef, useEffect, useCallback, type ClipboardEvent, type KeyboardEvent } from "react";
 import { getState, useActiveModel, useStore, setUiError, openSettingsPage } from "../store.ts";
 import { sendMessage, abortSession, createSession } from "../init.ts";
 import { api, type ComposerCatalogResult, type SlashCommand, type SnippetDef } from "../api.ts";
@@ -7,7 +7,7 @@ import {
   setComposerDetail, starterLabelsFor, usePresentation, usePresetState,
   effectiveComposerDetail,
 } from "../workspacePresets.ts";
-import { renderSlot } from "../slots.ts";
+import SlotHost from "./slots/SlotHost.ts";
 import { dragKind, dropIntoSession } from "../dnd.ts";
 import {
   attachGithubLink, attachUpload, parseGithubUrl, removeAttachment, takeAttachments,
@@ -100,6 +100,8 @@ export default function Composer({ variant = "docked" }: { variant?: "docked" | 
   const inputRef = useRef<TextInputHandle>(null);
   const sessionIdRef = useRef<string | null>(session?.id ?? null);
   const [text, setText] = useState(() => (session?.id ? loadDraft(session.id) : ""));
+  const committedTextRef = useRef(text);
+  committedTextRef.current = text;
   const [focusMode, setFocusMode] = useState(false);
   const historyCursor = useRef(emptyPromptHistoryCursor());
   const applyingHistory = useRef(false);
@@ -121,6 +123,10 @@ export default function Composer({ variant = "docked" }: { variant?: "docked" | 
   // controlled replay), and never while the user is mid-composition. The
   // pending execution configuration is per-session and reloads with it.
   useEffect(() => {
+    const outgoing = sessionIdRef.current;
+    if (outgoing !== null && outgoing !== (session?.id ?? null)) {
+      saveDraft(outgoing, inputRef.current?.getText() ?? committedTextRef.current);
+    }
     sessionIdRef.current = session?.id ?? null;
     const t = session?.id ? loadDraft(session.id) : "";
     setText(t);
@@ -131,6 +137,20 @@ export default function Composer({ variant = "docked" }: { variant?: "docked" | 
     acTokenRef.current = null;
     fileSearchSeq.current++;
   }, [session?.id]);
+
+  // Pane and session transitions must not depend on the debounce. Flush the
+  // canonical draft synchronously on pagehide and unmount.
+  useEffect(() => {
+    const flush = () => {
+      const id = sessionIdRef.current;
+      if (id !== null) saveDraft(id, inputRef.current?.getText() ?? committedTextRef.current);
+    };
+    window.addEventListener("pagehide", flush);
+    return () => {
+      window.removeEventListener("pagehide", flush);
+      flush();
+    };
+  }, []);
 
   // Debounced draft persistence of committed text.
   useEffect(() => {
@@ -502,8 +522,8 @@ export default function Composer({ variant = "docked" }: { variant?: "docked" | 
     return attachGithubLink(projectId, sessionIdRef.current, url);
   };
 
-  const leading = renderSlot("composer.leading", { sessionId: session?.id });
-  const trailing = renderSlot("composer.trailing", { sessionId: session?.id });
+  // Bounded context for the composer.leading/trailing hosts (EXTENSION-SEAMS).
+  const slotContext = { sessionId: session?.id, projectId: activeProjectId ?? undefined, variant, working };
 
   // ---- execution configuration projections ------------------------------------
   const modelValue = cfg.model
@@ -797,8 +817,8 @@ export default function Composer({ variant = "docked" }: { variant?: "docked" | 
           )}
         </div>
         <div className="composer-extensions">
-          {leading.map((n, i) => <Fragment key={i}>{n}</Fragment>)}
-          {trailing.map((n, i) => <Fragment key={i}>{n}</Fragment>)}
+          <SlotHost slot="composer.leading" context={slotContext} />
+          <SlotHost slot="composer.trailing" context={slotContext} />
         </div>
         <div className="composer-actions">
           <input

@@ -6,6 +6,7 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { consumePendingSettingsPage, setOverlay } from "../store.ts";
 import { listSlots } from "../slots.ts";
+import { useSlotVersion } from "./slots/SlotHost.ts";
 import { usePrefs } from "../prefs.ts";
 import {
   registerSettingsItems, searchSettingsItems,
@@ -90,7 +91,10 @@ export default function SettingsView({ onClose = () => setOverlay(null) }: { onC
 
   // Plugin-contributed pages (settings.pages slot): one nav entry per item.
   // Slot props may carry `settingsItems` descriptors for item-level search.
-  const slotItems = listSlots("settings.pages");
+  // Version-keyed so late registration/disposal re-renders and the list keeps
+  // a stable identity between slot changes.
+  const slotsAt = useSlotVersion();
+  const slotItems = useMemo(() => listSlots("settings.pages"), [slotsAt]);
   const pages = useMemo<PageDef[]>(() => {
     const extra = slotItems.map((item): PageDef => ({
       id: `slot:${item.id}`,

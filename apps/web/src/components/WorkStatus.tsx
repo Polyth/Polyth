@@ -7,6 +7,7 @@ import { useMemo } from "react";
 import type { RenderModel } from "../reduce.ts";
 import { setUiSettings, useUiSettings } from "../uiPrefs.ts";
 import { fmtCost, fmtTokens } from "../format.ts";
+import SlotHost from "./slots/SlotHost.ts";
 
 const SECTIONS = ["usage", "tasks", "agents"] as const;
 type SectionId = typeof SECTIONS[number];
@@ -127,6 +128,15 @@ export default function WorkStatus({ model }: { model: RenderModel }) {
           </div>
         </section>
       )}
+      <SlotHost
+        slot="workStatus.sections"
+        context={{
+          turnStatus: model.turn?.status ?? null,
+          totals: model.totals,
+          tasks: model.tasks,
+          subagents: model.subagents,
+        }}
+      />
       {hidden.length > 0 && (
         <button className="ghost-link ws-restore" onClick={restoreAll}>Restore hidden sections →</button>
       )}

@@ -12,7 +12,7 @@ import { createHash } from "node:crypto";
 import { isAbsolute, join, normalize, resolve, sep } from "node:path";
 import { promisify } from "node:util";
 import { createContext, type KernelContext } from "@polyth/kernel";
-import type { InstalledPluginDto, TrustClass, UiSlotItem } from "@polyth/contracts";
+import { isUiSlot, type InstalledPluginDto, type TrustClass, type UiSlot, type UiSlotItem } from "@polyth/contracts";
 
 const execFileAsync = promisify(execFile);
 
@@ -36,7 +36,7 @@ export interface ManagedPluginManifest {
   trust: TrustClass;
   capabilities?: string[];
   /** Slot descriptors; `module` names an entry in the UI's allowlisted registry. */
-  contributions?: Array<{ slot: string; id: string; module: string }>;
+  contributions?: Array<{ slot: UiSlot; id: string; module: string }>;
 }
 
 const err = (code: string, message: string) => Object.assign(new Error(message), { code });
@@ -68,6 +68,10 @@ export function parseManifest(raw: string): ManagedPluginManifest {
     const item = c as { slot?: unknown; id?: unknown; module?: unknown };
     if (typeof item.slot !== "string" || typeof item.id !== "string" || typeof item.module !== "string") {
       throw err("invalid-input", "each contribution needs slot, id, and module strings");
+    }
+    // Manifest text is untrusted: reject unknown slot names instead of casting.
+    if (!isUiSlot(item.slot)) {
+      throw err("invalid-input", `unknown ui slot "${item.slot}"`);
     }
     contributions.push({ slot: item.slot, id: item.id, module: item.module });
   }
@@ -174,7 +178,7 @@ export function createPluginRegistry(opts: PluginRegistryOptions): PluginRegistr
     status: p.status,
     capabilities: p.manifest.capabilities ?? [],
     contributions: (p.manifest.contributions ?? []).map((c) => ({
-      slot: c.slot as UiSlotItem["slot"], id: c.id, module: c.module,
+      slot: c.slot, id: c.id, module: c.module,
     })),
     ...(p.lastError ? { lastError: p.lastError } : {}),
   });
@@ -193,7 +197,7 @@ export function createPluginRegistry(opts: PluginRegistryOptions): PluginRegistr
       for (const c of p.manifest.contributions ?? []) {
         // `module` is a registry KEY the web shell resolves through its
         // allowlist — never executable content from the manifest.
-        const item: UiSlotItem = { slot: c.slot as UiSlotItem["slot"], id: c.id, module: c.module };
+        const item: UiSlotItem = { slot: c.slot, id: c.id, module: c.module };
         const d = opts.slots ? opts.slots.add(item) : scope.contribute(item);
         scope.effect(() => d.dispose());
       }

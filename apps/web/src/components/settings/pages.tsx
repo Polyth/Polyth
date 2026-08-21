@@ -8,7 +8,7 @@ import {
   type CapabilityTier, type PresetSummary, type WorkspacePresetId,
 } from "../../workspacePresets.ts";
 import { listCapabilities, useResolvedCapabilities } from "../../capabilities.ts";
-import { setOverlay, setActiveView, updateSettings, useStore } from "../../store.ts";
+import { openWorkspacePane, setOverlay, updateSettings, useStore } from "../../store.ts";
 import { setUiSettings, useUiSettings } from "../../uiPrefs.ts";
 import { groupQuotaWindows, setGroupCollapsed, setProviderHidden, useUsagePrefs } from "../../usagePrefs.ts";
 import { requestNotifyPermission } from "../../notify.ts";
@@ -812,7 +812,7 @@ export function GitPage() {
             />
           </Row>
           <Row label="Full view" hint="Stage, commit, branch, and manage worktrees.">
-            <button className="small-btn" onClick={() => { setOverlay(null); setActiveView("git"); }}>Open Git view →</button>
+            <button className="small-btn" onClick={() => { setOverlay(null); openWorkspacePane("git"); }}>Open Git view →</button>
           </Row>
         </>
       )}

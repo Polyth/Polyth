@@ -6,7 +6,9 @@
 export interface PaneTab {
   /** Stable resource key, e.g. "file:src/app.ts" or "plugin:git-graph". */
   id: string;
-  kind: "file" | "plugin";
+  /** Open provider namespace (UX-PANE-MODEL/EXTENSION-SEAMS slice 3): any
+   *  registered pane-provider kind, not a closed union. */
+  kind: string;
   /** Resource locator inside the kind (relative path, plugin tab id). */
   resource: string;
   title: string;
@@ -81,6 +83,24 @@ export function moveTab(state: PaneState, id: string, to: number): PaneState {
   return { ...state, tabs };
 }
 
+/** Recompute availability after provider registration/replacement/disposal:
+ *  a restored-unavailable tab whose provider arrived late becomes usable, and
+ *  a tab whose provider unloaded turns honestly unavailable — never dropped. */
+export function reconcileAvailability(
+  state: PaneState,
+  available: (kind: string, resource: string) => boolean,
+): PaneState {
+  let changed = false;
+  const tabs = state.tabs.map((t) => {
+    const ok = available(t.kind, t.resource);
+    if (ok === !t.unavailable) return t;
+    changed = true;
+    const next: PaneTab = { id: t.id, kind: t.kind, resource: t.resource, title: t.title, dirty: t.dirty };
+    return ok ? next : { ...next, unavailable: true };
+  });
+  return changed ? { ...state, tabs } : state;
+}
+
 /** Cycle activation with keyboard (Ctrl+PageDown / PageUp semantics). */
 export function cycleTab(state: PaneState, dir: 1 | -1): PaneState {
   if (state.tabs.length < 2) return state;
@@ -118,8 +138,8 @@ export function deserializePane(
     for (const t of data.tabs.slice(0, 64)) {
       if (typeof t.id !== "string" || typeof t.resource !== "string" || seen.has(t.id)) continue;
       seen.add(t.id);
-      const kind = t.kind === "file" || t.kind === "plugin" ? t.kind : "plugin";
-      const ok = (t.kind === "file" || t.kind === "plugin") && available(t.kind, t.resource);
+      const kind = typeof t.kind === "string" && t.kind !== "" ? t.kind : "plugin";
+      const ok = available(kind, t.resource);
       tabs.push({
         id: t.id,
         kind,

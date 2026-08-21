@@ -6,8 +6,7 @@ import type { AppView } from "./store.ts";
 export const ACTIVE_VIEW_KEY = "polyth.activeView";
 
 const APP_VIEWS = [
-  "session", "files", "goals", "multirun", "fusion", "walkthrough",
-  "preview", "git", "terminal", "schedule", "github",
+  "session", "goals", "multirun", "fusion", "walkthrough", "schedule", "github",
 ] as const satisfies readonly AppView[];
 const KNOWN = new Set<string>(APP_VIEWS);
 

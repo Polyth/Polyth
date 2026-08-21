@@ -35,6 +35,11 @@ test("manifest parsing rejects malformed input, keeps valid descriptors", () => 
   assert.throws(() => parseManifest(manifest({ trust: "root-of-all" })), /trust must be one of/);
   assert.throws(() => parseManifest(manifest({ version: "latest" })), /semver/);
   assert.throws(() => parseManifest(manifest({ contributions: [{ slot: "x" }] })), /slot, id, and module/);
+  // Unknown slot names are rejected at the manifest boundary, never cast through.
+  assert.throws(
+    () => parseManifest(manifest({ contributions: [{ slot: "not.a.slot", id: "a", module: "m" }] })),
+    /unknown ui slot "not\.a\.slot"/,
+  );
   const m = parseManifest(manifest());
   assert.equal(m.id, "sample.widget");
   assert.equal(m.contributions!.length, 1);

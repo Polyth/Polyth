@@ -13,8 +13,23 @@ import { buildModel, type RenderModel } from "./reduce.ts";
 import { applySettingsToDom, loadSettings, saveSettings, type PolythSettings } from "./settings.ts";
 import { getRailPrefs, setRailLastOpen } from "./railPrefs.ts";
 import { loadActiveView, saveActiveView } from "./viewPrefs.ts";
+import { isWorkspaceSurface, listSurfaces } from "./surfaces.ts";
+import {
+  getWorkspacePanePrefs,
+  setPaneExpanded as persistPaneExpanded,
+  setPaneLastResource,
+  setPaneOpenSurface,
+} from "./workspace/panePrefs.ts";
 
-export type AppView = "session" | "files" | "goals" | "multirun" | "fusion" | "walkthrough" | "preview" | "git" | "terminal" | "schedule" | "github";
+// UX-PANE-MODEL: Files, Git, Terminal, and Preview are workspace PANE
+// surfaces, not primary views — they open beside (or over) a still-mounted
+// Chat through openWorkspacePane(). Only Chat and the workflow pages remain
+// primary destinations.
+export type AppView = "session" | "goals" | "multirun" | "fusion" | "walkthrough" | "schedule" | "github";
+/** Legacy ids that older persisted state / call sites may still send. */
+export type LegacyPaneViewId = "files" | "git" | "terminal" | "preview";
+const LEGACY_PANE_VIEWS: readonly string[] = ["files", "git", "terminal", "preview"];
+const PRIMARY_VIEWS: readonly string[] = ["session", "goals", "multirun", "fusion", "walkthrough", "schedule", "github"];
 export type Overlay = "onboarding" | "project-picker" | "palette" | "search" | "settings" | "worktree-session" | null;
 /** Right-rail surface id (F17): a registry id such as "files" or a
  *  plugin-contributed "slot:…" id — no longer a closed union. */
@@ -45,6 +60,13 @@ export interface AppState {
   worktreeSessionRequest: WorktreeSessionRequest | null;
   paletteMode: PaletteMode;
   railPlugin: RailPlugin | null;
+  /** Explicit user expansion of the open workspace pane (persisted per
+   *  project). Never set by the automatic full-screen fallback. */
+  paneExpanded: boolean;
+  /** Live presentation truth from the pane host: the open workspace surface
+   *  currently covers the workspace (explicit expand, geometry fallback, or
+   *  compact). App uses it to make hidden Chat inert. */
+  paneFullscreen: boolean;
   moreOpen: boolean;
   sidebarOpen: boolean;
   /** File open in the full-screen editor (files view); null = tree only. */
@@ -72,6 +94,8 @@ let state: AppState = {
   worktreeSessionRequest: null,
   paletteMode: "all",
   railPlugin: getRailPrefs().lastOpen, // F17: last-open surface survives reload
+  paneExpanded: false,
+  paneFullscreen: false,
   moreOpen: false,
   sidebarOpen: false,
   editorFile: null,
@@ -122,15 +146,48 @@ export function setModels(models: ModelDescriptor[]): void {
 export function setAgents(agents: AgentDescriptor[]): void {
   set({ agents });
 }
+/** Is this id an enabled, registered workspace pane surface right now? */
+function paneSurfaceOf(id: string | null) {
+  if (id === null) return null;
+  const surface = listSurfaces().find((s) => s.id === id);
+  if (!surface || !isWorkspaceSurface(surface)) return null;
+  return surface;
+}
+
 export function activateProject(id: string | null): void {
   localStorage.setItem("polyth.activeProjectId", id ?? "");
   // Re-activating the current project must not drop the session or branch (UX-04).
   if (id === state.activeProjectId) return;
-  set({ activeProjectId: id, activeSessionId: null, gitBranch: "", editorFile: null, editorLocation: null, gitDiffPath: null });
+  // Workspace-pane state is project-scoped: restore this project's open
+  // surface/expansion, and never carry another project's pane across. An
+  // unavailable persisted surface must not restore as visibly open.
+  const pane = id !== null ? getWorkspacePanePrefs(id) : null;
+  const restored = pane !== null ? paneSurfaceOf(pane.openSurface)?.id ?? null : null;
+  const railPlugin = restored
+    ?? (state.railPlugin !== null && paneSurfaceOf(state.railPlugin) !== null ? null : state.railPlugin);
+  set({
+    activeProjectId: id, activeSessionId: null, gitBranch: "",
+    editorFile: null, editorLocation: null, gitDiffPath: null,
+    railPlugin, paneExpanded: restored !== null ? pane!.expanded : false, paneFullscreen: false,
+  });
 }
-export function setActiveView(view: AppView): void {
-  saveActiveView(view);
-  set({ activeView: view });
+export function setActiveView(view: AppView | LegacyPaneViewId): void {
+  // One-time legacy adapter: a stored/contributed "files"/"git"/"terminal"/
+  // "preview" view id becomes Chat plus the corresponding workspace pane.
+  if (LEGACY_PANE_VIEWS.includes(view)) {
+    if (!openWorkspacePane(view)) {
+      saveActiveView("session");
+      set({ activeView: "session" });
+    }
+    return;
+  }
+  if (!PRIMARY_VIEWS.includes(view)) {
+    saveActiveView("session");
+    set({ activeView: "session" });
+    return;
+  }
+  saveActiveView(view as AppView);
+  set({ activeView: view as AppView });
 }
 export function setGitBranch(branch: string): void {
   set({ gitBranch: branch });
@@ -169,17 +226,142 @@ export function consumePendingSettingsPage(): string | null {
   return v;
 }
 export function setRailPlugin(railPlugin: RailPlugin | null): void {
+  // Contextual surfaces persist globally (F17). Workspace panes go through
+  // the command path below so their persistence stays project-scoped.
+  if (paneSurfaceOf(railPlugin) !== null) {
+    openWorkspacePane(railPlugin!);
+    return;
+  }
+  if (railPlugin === null && paneSurfaceOf(state.railPlugin) !== null) {
+    closeWorkspacePane();
+    return;
+  }
   setRailLastOpen(railPlugin);
   set({ railPlugin });
 }
 export function toggleRailPlugin(id: RailPlugin): void {
+  if (paneSurfaceOf(id) !== null) {
+    toggleWorkspacePane(id);
+    return;
+  }
   const railPlugin = state.railPlugin === id ? null : id;
   setRailLastOpen(railPlugin);
   set({ railPlugin });
 }
+
+// ---- workspace pane command path (UX-PANE-MODEL) ------------------------------
+// The ONE way Files/Git/Terminal/Preview open. Header controls, the rail,
+// bottom navigation, Sidebar actions, palette/file references, Settings
+// links, and hotkeys all land here; none of them set a primary view for
+// these four surfaces.
+
+/** Invoking element captured for deterministic focus return on close. */
+let paneInvoker: HTMLElement | null = null;
+
+function recordPaneInvoker(): void {
+  if (typeof document === "undefined") return;
+  paneInvoker = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+}
+
+/** Focus the exact invoker when still connected, else the surface's launcher,
+ *  else Chat's composer. */
+function restorePaneFocus(surfaceId: string | null): void {
+  if (typeof document === "undefined") return;
+  const invoker = paneInvoker;
+  paneInvoker = null;
+  // Defer one tick so the pane is hidden and launchers reflect the new state.
+  setTimeout(() => {
+    if (invoker && invoker.isConnected) {
+      invoker.focus();
+      return;
+    }
+    const launcher = surfaceId !== null
+      ? document.querySelector<HTMLElement>(`[data-pane-launcher="${surfaceId}"]`)
+      : null;
+    if (launcher) {
+      launcher.focus();
+      return;
+    }
+    document.querySelector<HTMLTextAreaElement>(".composer textarea")?.focus();
+  }, 0);
+}
+
+/** Apply a provider resource to the matching surface's channel. Stable
+ *  schemes: "file:<path>" (Files) and "changes:<path>" (Git diff). */
+function applyPaneResource(surfaceId: string, resource: string): Partial<AppState> {
+  if (surfaceId === "files" && resource.startsWith("file:")) {
+    return { editorFile: resource.slice("file:".length) };
+  }
+  if (surfaceId === "git" && resource.startsWith("changes:")) {
+    return { gitDiffPath: resource.slice("changes:".length) };
+  }
+  return {};
+}
+
+/** Open (or keep open) a workspace pane beside Chat. Returns false when the
+ *  surface is not a registered, enabled workspace surface. Docked versus
+ *  full-screen is decided by the pane host from measured geometry. */
+export function openWorkspacePane(surfaceId: string, resource?: string): boolean {
+  const surface = paneSurfaceOf(surfaceId);
+  if (surface === null) return false;
+  if (state.railPlugin !== surfaceId) recordPaneInvoker();
+  const projectId = state.activeProjectId;
+  if (projectId !== null) {
+    setPaneOpenSurface(projectId, surfaceId);
+    if (resource !== undefined) setPaneLastResource(projectId, surfaceId, resource);
+  }
+  set({
+    railPlugin: surfaceId,
+    // Chat is always the companion: the primary surface stays (or becomes)
+    // the session view. Reopening the active surface reuses the instance.
+    activeView: "session",
+    ...(resource !== undefined ? applyPaneResource(surfaceId, resource) : {}),
+  });
+  saveActiveView("session");
+  return true;
+}
+
+export function closeWorkspacePane(): void {
+  const open = paneSurfaceOf(state.railPlugin);
+  if (open === null) return;
+  const projectId = state.activeProjectId;
+  if (projectId !== null) setPaneOpenSurface(projectId, null);
+  set({ railPlugin: null, paneExpanded: false, paneFullscreen: false });
+  restorePaneFocus(open.id);
+}
+
+/** Rail-launcher semantic: activating the already-open surface closes it. */
+export function toggleWorkspacePane(surfaceId: string): void {
+  if (state.railPlugin === surfaceId) closeWorkspacePane();
+  else openWorkspacePane(surfaceId);
+}
+
+/** Explicit expansion: the pane occupies the workspace, Chat stays mounted. */
+export function expandWorkspacePane(): void {
+  if (paneSurfaceOf(state.railPlugin) === null || state.paneExpanded) return;
+  const projectId = state.activeProjectId;
+  if (projectId !== null) persistPaneExpanded(projectId, true);
+  set({ paneExpanded: true });
+}
+
+/** Collapse back to the exact preferred dock width (host re-caps it). */
+export function collapseWorkspacePane(): void {
+  if (!state.paneExpanded) return;
+  const projectId = state.activeProjectId;
+  if (projectId !== null) persistPaneExpanded(projectId, false);
+  set({ paneExpanded: false });
+}
+
+/** Pane-host presentation truth (never persisted as user intent). */
+export function setPaneFullscreen(paneFullscreen: boolean): void {
+  if (state.paneFullscreen !== paneFullscreen) set({ paneFullscreen });
+}
+
+/** Compatibility adapter: open the canonical Git surface and select that
+ *  exact diff in it. Never sets the primary view. */
 export function openChanges(path?: string): void {
-  setRailLastOpen("changes");
-  set({ railPlugin: "changes", ...(path !== undefined ? { gitDiffPath: path } : {}) });
+  if (path !== undefined) set({ gitDiffPath: path });
+  openWorkspacePane("git", path !== undefined ? `changes:${path}` : undefined);
 }
 export function setGitDiffPath(gitDiffPath: string | null): void {
   set({ gitDiffPath });
@@ -190,11 +372,12 @@ export function setMoreOpen(moreOpen: boolean): void {
 export function setSidebarOpen(sidebarOpen: boolean): void {
   set({ sidebarOpen });
 }
-/** Open a file in the full-screen editor; null keeps the view on the tree.
- *  A location asks the editor to select/center that range once loaded. */
+/** Compatibility adapter: open the Files surface and the stable
+ *  "file:<path>" provider resource. Never sets the primary view. A location
+ *  asks the editor to select/center that range once loaded. */
 export function openEditorFile(path: string | null, location?: EditorLocation): void {
-  saveActiveView("files");
-  set({ editorFile: path, editorLocation: location ?? null, activeView: "files" });
+  set({ editorFile: path, editorLocation: location ?? null });
+  if (path !== null) openWorkspacePane("files", `file:${path}`);
 }
 /** The editor consumed the pending location (one-shot). */
 export function clearEditorLocation(): void {

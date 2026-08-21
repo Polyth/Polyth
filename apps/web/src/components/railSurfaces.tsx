@@ -1,15 +1,23 @@
-// F17: built-in right-rail surfaces. Each panel is a self-contained component
-// (own hooks/state) registered into the surface registry — ContextRail renders
-// whatever is registered and never enumerates panels itself. Importing this
-// module registers the built-ins once.
+// F17 + UX-PANE-MODEL: built-in right-rail surfaces. Each panel is a
+// self-contained component (own hooks/state) registered into the surface
+// registry — ContextRail renders whatever is registered and never enumerates
+// panels itself. Importing this module registers the built-ins once.
+//
+// The four CANONICAL workspace surfaces (Files/Git/Terminal/Preview) register
+// here with presentation metadata: the same full implementations that used to
+// be primary views, now docked/expanded/full-screen beside a still-mounted
+// Chat. The reduced FilesPanel/ChangesPanel duplicates are gone — surface
+// switching changes presentation, never implementation identity.
 import { useActiveModel, useStore } from "../store.ts";
 import { fmtCost, fmtTokens } from "../format.ts";
 import { Icon } from "../icons.tsx";
 import type { SessionEvent } from "@polyth/contracts";
 import { contextGauge } from "../reduce.ts";
-import { registerSurface } from "../surfaces.ts";
-import ChangesPanel from "./ChangesPanel.tsx";
-import FilesPanel from "./FilesPanel.tsx";
+import { registerSurface, type WorkspacePanePresentation } from "../surfaces.ts";
+import EditorView from "./EditorView.tsx";
+import GitView from "./GitView.tsx";
+import TerminalView from "./TerminalView.tsx";
+import PreviewView from "./PreviewView.tsx";
 import KnowledgePanel from "./KnowledgePanel.tsx";
 
 const NO_EVENTS: SessionEvent[] = [];
@@ -123,11 +131,32 @@ function EventsView() {
   );
 }
 
-registerSurface({ id: "files", title: "Files", capabilityId: "files", order: 10, icon: Icon.files, component: FilesPanel });
-registerSurface({
-  id: "changes", title: "Changes", capabilityId: "git", order: 20, icon: Icon.tree,
-  component: ChangesPanel, badge: (ctx) => ctx.changeCount,
+// Canonical workspace surfaces (spec starting values). Layout policy lives in
+// the host; these components never decide dock versus full-screen geometry.
+const pane = (over: Partial<WorkspacePanePresentation>): WorkspacePanePresentation => ({
+  kind: "workspace", defaultRatio: 0.6, minWidth: 380, preferredMaxWidth: 760,
+  keepAlive: true, escape: "close", ...over,
 });
+
+registerSurface({
+  id: "files", title: "Project files", capabilityId: "files", order: 1, icon: Icon.files,
+  component: EditorView, presentation: pane({ defaultRatio: 0.6, minWidth: 380, preferredMaxWidth: 760 }),
+});
+registerSurface({
+  id: "git", title: "Source control", capabilityId: "git", order: 2, icon: Icon.tree,
+  component: GitView, badge: (ctx) => ctx.changeCount,
+  presentation: pane({ defaultRatio: 0.4, minWidth: 340, preferredMaxWidth: 640 }),
+});
+registerSurface({
+  id: "terminal", title: "Terminal", capabilityId: "terminal", order: 3, icon: Icon.term,
+  component: TerminalView,
+  presentation: pane({ defaultRatio: 0.6, minWidth: 380, preferredMaxWidth: 760, escape: "content" }),
+});
+registerSurface({
+  id: "preview", title: "Preview", capabilityId: "preview", order: 4, icon: Icon.globe,
+  component: PreviewView, presentation: pane({ defaultRatio: 0.45, minWidth: 380, preferredMaxWidth: 760 }),
+});
+
 registerSurface({ id: "context", title: "Context", capabilityId: "context", order: 30, icon: Icon.context, component: ContextView });
 registerSurface({ id: "knowledge", title: "Knowledge", capabilityId: "knowledge", order: 40, icon: Icon.book, component: KnowledgePanel });
 registerSurface({

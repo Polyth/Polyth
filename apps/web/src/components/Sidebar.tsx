@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import {
-  getState, useStore, activateProject, openWorktreeSessionDialog, setActiveView, setOverlay,
+  getState, useStore, activateProject, openWorkspacePane, openWorktreeSessionDialog, setOverlay,
   setProjects, setSidebarOpen, setUiError,
 } from "../store.ts";
 import { createSession } from "../init.ts";
@@ -12,6 +12,8 @@ import SessionList from "./sidebar/SessionList.tsx";
 import ImportSessionsDialog from "./ImportSessionsDialog.tsx";
 import { useShellMode } from "../responsiveShell.ts";
 import { useModalSurface } from "./a11y/Dialog.tsx";
+import SlotHost from "./slots/SlotHost.ts";
+import { useSidebarExpanded } from "../sidebarPresentation.ts";
 
 function projectGlyph(name: string): string {
   const words = name.trim().split(/[\s\-_/]+/).filter(Boolean);
@@ -28,7 +30,11 @@ function closeDrawer(): void {
 export default function Sidebar() {
   const projects = useStore((s) => s.projects);
   const activeProjectId = useStore((s) => s.activeProjectId);
+  const activeSessionId = useStore((s) => s.activeSessionId);
   const drawerOpen = useStore((s) => s.sidebarOpen);
+  // Honest presentation state for app.nav contributions: on desktop the
+  // sidebar is always expanded regardless of the mobile drawer flag.
+  const expanded = useSidebarExpanded(drawerOpen);
   const branch = useStore((s) => s.gitBranch);
   const productName = useStore((s) => s.settings.productName);
   const project = projects.find((p) => p.id === activeProjectId) ?? null;
@@ -90,7 +96,7 @@ export default function Sidebar() {
           <span className="brand"><i>p</i> {productName.toLowerCase()}</span>
           <span className="side-icons">
             <button className="icon-btn" title={`Search sessions (${MOD}P)`} onClick={() => setOverlay("search")}><Icon.search /></button>
-            <button className="icon-btn" title="Source control (Git & worktrees)" onClick={() => setActiveView("git")}><Icon.tree /></button>
+            <button className="icon-btn" title="Source control (Git & worktrees)" onClick={() => openWorkspacePane("git")}><Icon.tree /></button>
             <button className="icon-btn" title="Open project" onClick={() => setOverlay("project-picker")}><Icon.plus /></button>
             {compact && (
               <button
@@ -174,8 +180,9 @@ export default function Sidebar() {
                   <button role="menuitem" onClick={() => {
                     setProjectMenu(null);
                     if (p.id !== activeProjectId) activateProject(p.id);
-                    setActiveView("git");
+                    openWorkspacePane("git");
                   }}>Source control (Git &amp; worktrees)</button>
+                  <SlotHost slot="sidebar.project.actions" context={{ projectId: p.id }} />
                 </div>
               )}
             </div>
@@ -194,6 +201,10 @@ export default function Sidebar() {
               <SessionList projectId={project.id} />
             </div>
           )}
+          <SlotHost
+            slot="app.nav"
+            context={{ projectId: activeProjectId, sessionId: activeSessionId, expanded }}
+          />
         </div>
         <div className="side-foot">
           <button className="new-session" onClick={onNewSession} disabled={!activeProjectId}>

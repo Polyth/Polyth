@@ -5,7 +5,8 @@ import { MOD } from "./format.ts";
 import { getKeymap } from "./hotkeys.ts";
 import { readLastReply, stopSpeaking } from "./voice.tsx";
 import {
-  getState, openPalette, openSettingsPage, openWorktreeSessionDialog, setActiveView, setOverlay, toggleRailPlugin,
+  getState, openPalette, openSettingsPage, openWorktreeSessionDialog, setActiveView, setOverlay,
+  toggleRailPlugin, toggleWorkspacePane,
   type RailPlugin,
 } from "./store.ts";
 import {
@@ -32,7 +33,7 @@ const LEGACY_SEARCH_TERMS: Record<string, string[]> = {
 };
 
 const RAIL: Array<[RailPlugin, string]> = [
-  ["files", "Files panel"], ["changes", "Changes panel"], ["context", "Context panel"],
+  ["context", "Context panel"], ["knowledge", "Knowledge panel"],
   ["usage", "Usage panel"], ["events", "Event log"],
 ];
 
@@ -210,9 +211,11 @@ const ACTIONS: Record<HotkeyAction, () => void> = {
     if (id) void createSession(id);
   },
   focusComposer,
-  viewFiles: () => setActiveView("files"),
-  viewGit: () => setActiveView("git"),
-  viewTerminal: () => setActiveView("terminal"),
+  // Workspace-pane shortcuts toggle so the same keys also close (and remain
+  // reachable from inside a focused terminal without sending it Escape).
+  viewFiles: () => toggleWorkspacePane("files"),
+  viewGit: () => toggleWorkspacePane("git"),
+  viewTerminal: () => toggleWorkspacePane("terminal"),
 };
 
 function onKey(e: KeyboardEvent): void {

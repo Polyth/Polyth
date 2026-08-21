@@ -7,6 +7,7 @@ import type { PreviewState } from "@polyth/contracts";
 import { api, type BrowserSessionDto } from "../api.ts";
 import { useStore } from "../store.ts";
 import EmptyState from "./EmptyState.tsx";
+import { usePaneVisible } from "../workspace/paneVisibility.ts";
 
 type InspectorTab = "console" | "activity" | "network";
 
@@ -19,6 +20,9 @@ interface Capability {
 export default function PreviewView() {
   const projectId = useStore((s) => s.activeProjectId);
   const activeSessionId = useStore((s) => s.activeSessionId);
+  // Kept alive while hidden: UI-only polling pauses; the canonical browser
+  // frame subscription (WebSocket) below stays attached.
+  const visible = usePaneVisible();
   const [state, setState] = useState<PreviewState>({ url: null, status: "off" });
   const [urlInput, setUrlInput] = useState("");
   const [tab, setTab] = useState<InspectorTab>("console");
@@ -46,10 +50,10 @@ export default function PreviewView() {
   useEffect(() => { void refresh(); }, [projectId, activeSessionId]);
   useEffect(() => { void api.browserCapability().then(setCap); }, []);
   useEffect(() => {
-    if (!projectId || state.status !== "starting") return;
+    if (!projectId || state.status !== "starting" || !visible) return;
     const t = setInterval(() => void refresh(), 1000);
     return () => clearInterval(t);
-  }, [projectId, state.status]);
+  }, [projectId, state.status, visible]);
 
   // Frame stream: subscribe over /ws; reconnect resumes at the last revision.
   useEffect(() => {
@@ -92,14 +96,14 @@ export default function PreviewView() {
     };
   }, [browser?.id]);
 
-  // Console poll while the inspector shows it.
+  // Console poll only while the inspector shows it AND the pane is visible.
   useEffect(() => {
-    if (!browser || !inspectorOpen || tab !== "console") return;
+    if (!browser || !inspectorOpen || tab !== "console" || !visible) return;
     const load = () => void api.browserConsole(browser.id).then(setConsoleLines);
     load();
     const t = setInterval(load, 2000);
     return () => clearInterval(t);
-  }, [browser?.id, inspectorOpen, tab]);
+  }, [browser?.id, inspectorOpen, tab, visible]);
 
   const start = async () => {
     if (!projectId) return;

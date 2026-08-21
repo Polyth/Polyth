@@ -1,58 +1,62 @@
-// UX-A390 repair: per-session timeline scroll anchor. Browser-local
-// presentation state (localStorage polyth.timelineAnchors) — never session
-// data, never appended to the event log. A session that was following the
-// bottom keeps following after reload; a session scrolled back restores its
-// exact reading position. Entries are LRU-capped so storage stays bounded.
+// UX-PANE-MODEL: per-session timeline position as a STABLE anchor — the id of
+// the topmost visible prompt plus its pixel offset and an at-bottom flag —
+// never a raw global scrollTop. Full-screen/expanded pane transitions keep the
+// live DOM (Chat stays mounted under the layer), so this record only matters
+// for direct reload and session switches, where it is reapplied after event
+// replay and window growth. Presentation state: appends no SessionEvent.
+// sessionStorage scopes it to the tab so parallel tabs don't fight.
 
 export interface TimelineAnchor {
-  /** Within the follow threshold of the bottom — keep following new rows. */
+  /** data-msg-id of the topmost visible prompt; null when none applies. */
+  id: string | null;
+  /** Anchor row top relative to the scroller top, in px. */
+  offset: number;
   atBottom: boolean;
-  /** Exact scroll offset, meaningful when not at the bottom. */
-  scrollTop: number;
 }
 
-export const TIMELINE_ANCHORS_KEY = "polyth.timelineAnchors";
-export const MAX_TIMELINE_ANCHORS = 50;
+const KEY = "polyth.timelineAnchor.";
 
-/** Parse the stored anchor map; malformed input or entries are dropped and
- *  the map is capped to the most recently saved sessions. */
-export function parseTimelineAnchors(raw: string | null): Record<string, TimelineAnchor> {
+export function parseTimelineAnchor(raw: string | null): TimelineAnchor | null {
+  if (raw === null) return null;
   try {
-    const data = JSON.parse(raw ?? "") as unknown;
-    if (typeof data !== "object" || data === null || Array.isArray(data)) return {};
-    const out: Record<string, TimelineAnchor> = {};
-    for (const [id, entry] of Object.entries(data).slice(-MAX_TIMELINE_ANCHORS)) {
-      if (!id || typeof entry !== "object" || entry === null) continue;
-      const a = entry as Partial<TimelineAnchor>;
-      if (typeof a.atBottom !== "boolean") continue;
-      if (typeof a.scrollTop !== "number" || !Number.isFinite(a.scrollTop) || a.scrollTop < 0) continue;
-      out[id] = { atBottom: a.atBottom, scrollTop: Math.round(a.scrollTop) };
-    }
-    return out;
+    const v = JSON.parse(raw) as Partial<TimelineAnchor>;
+    if (typeof v !== "object" || v === null) return null;
+    const id = typeof v.id === "string" ? v.id : null;
+    const offset = typeof v.offset === "number" && Number.isFinite(v.offset) ? v.offset : 0;
+    const atBottom = v.atBottom === true;
+    if (id === null && !atBottom) return null; // nothing restorable
+    return { id, offset, atBottom };
   } catch {
-    return {};
+    return null;
   }
 }
 
-function readAll(): Record<string, TimelineAnchor> {
-  let raw: string | null = null;
-  try { raw = localStorage.getItem(TIMELINE_ANCHORS_KEY); } catch { /* private mode / no DOM */ }
-  return parseTimelineAnchors(raw);
-}
-
 export function loadTimelineAnchor(sessionId: string): TimelineAnchor | null {
-  return readAll()[sessionId] ?? null;
+  try {
+    return parseTimelineAnchor(sessionStorage.getItem(KEY + sessionId));
+  } catch {
+    return null;
+  }
 }
 
-/** Insert-last keeps key order as recency, so the cap drops the oldest. */
 export function saveTimelineAnchor(sessionId: string, anchor: TimelineAnchor): void {
-  const all = readAll();
-  delete all[sessionId];
-  const entries = [...Object.entries(all), [sessionId, {
-    atBottom: anchor.atBottom,
-    scrollTop: Math.max(0, Math.round(anchor.scrollTop)),
-  }] as const].slice(-MAX_TIMELINE_ANCHORS);
   try {
-    localStorage.setItem(TIMELINE_ANCHORS_KEY, JSON.stringify(Object.fromEntries(entries)));
-  } catch { /* private mode / no DOM */ }
+    sessionStorage.setItem(KEY + sessionId, JSON.stringify(anchor));
+  } catch {
+    // storage unavailable (private mode/quota): position simply isn't restored
+  }
+}
+
+/** Topmost visible anchored row: first [data-msg-id] whose bottom edge is at
+ *  or below the scroller's top edge (document order = timeline order). */
+export function captureTimelineAnchor(el: HTMLElement, atBottom: boolean): TimelineAnchor {
+  if (atBottom) return { id: null, offset: 0, atBottom: true };
+  const top = el.getBoundingClientRect().top;
+  for (const node of el.querySelectorAll<HTMLElement>("[data-msg-id]")) {
+    const r = node.getBoundingClientRect();
+    if (r.bottom >= top) {
+      return { id: node.dataset.msgId ?? null, offset: r.top - top, atBottom: false };
+    }
+  }
+  return { id: null, offset: 0, atBottom: false };
 }

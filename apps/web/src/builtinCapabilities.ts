@@ -6,23 +6,29 @@
 import {
   BUILTIN_CAPABILITY_META, registerCapability, type CapabilityMeta,
 } from "./capabilities.ts";
-import { openSettingsPage, setActiveView, setRailPlugin, type AppView } from "./store.ts";
+import {
+  closeWorkspacePane, openSettingsPage, openWorkspacePane, setActiveView, setRailPlugin, type AppView,
+} from "./store.ts";
 import { speechSupport } from "@polyth/dictation";
 
 /** Capability id → full workspace view, used for active-state highlighting.
  *  Panel/settings capabilities have no view and never show as "active". */
 export const VIEW_OF_CAPABILITY: Partial<Record<string, AppView>> = {
   session: "session",
-  files: "files",
-  preview: "preview",
   goals: "goals",
   multirun: "multirun",
   fusion: "fusion",
   walkthrough: "walkthrough",
   schedule: "schedule",
   github: "github",
+};
+
+/** Canonical workspace pane opened by a capability. */
+export const PANE_OF_CAPABILITY: Partial<Record<string, string>> = {
+  files: "files",
   git: "git",
   terminal: "terminal",
+  preview: "preview",
 };
 
 /** Rail surface opened by a capability (panels rather than full views). */
@@ -44,7 +50,14 @@ const voiceAvailable = (): boolean => {
 
 function openOf(meta: CapabilityMeta): () => void {
   const view = VIEW_OF_CAPABILITY[meta.id];
-  if (view) return () => setActiveView(view);
+  if (view) {
+    return () => {
+      if (view === "session") closeWorkspacePane();
+      setActiveView(view);
+    };
+  }
+  const pane = PANE_OF_CAPABILITY[meta.id];
+  if (pane) return () => openWorkspacePane(pane);
   const panel = PANEL_OF_CAPABILITY[meta.id];
   if (panel) return () => setRailPlugin(panel);
   if (meta.id === "models-agents") return () => openSettingsPage("models");

@@ -8,12 +8,13 @@ import CommandPalette from "./components/CommandPalette.tsx";
 import SessionSearch from "./components/SessionSearch.tsx";
 import SettingsModal from "./components/SettingsModal.tsx";
 import ProjectFolderDialog from "./components/ProjectFolderDialog.tsx";
-import ViewErrorBoundary from "./components/ViewErrorBoundary.tsx";
+import ViewErrorBoundary from "./components/ViewErrorBoundary.ts";
 import { clearUiError, setOverlay, useStore } from "./store.ts";
 import { usePresetState } from "./workspacePresets.ts";
 import { LiveRegion } from "./components/a11y/live.tsx";
 import WorktreeSessionDialog from "./components/WorktreeSessionDialog.tsx";
 import "./builtinCapabilities.ts";
+import WorkspaceBottomNav from "./components/workspace/WorkspaceBottomNav.tsx";
 
 function ErrorBanner() {
   const message = useStore((s) => s.uiError);
@@ -36,6 +37,7 @@ export default function App() {
     (s) => s.activeProjectId !== null && s.projects.some((p) => p.id === s.activeProjectId),
   );
   const noProjects = useStore((s) => s.projectsLoaded && s.projects.length === 0);
+  const paneFullscreen = useStore((s) => s.paneFullscreen);
 
   useEffect(() => {
     const openSettings = () => setOverlay("settings");
@@ -62,7 +64,10 @@ export default function App() {
   return (
     <div className="app">
       <Sidebar />
-      <div className="workspace">
+      {/* UX-PANE-MODEL: while a workspace surface covers the workspace, Chat
+          stays mounted underneath but is inert and out of the a11y tree — it
+          consumes no hit area and cannot retain sequential focus. */}
+      <div className="workspace" inert={paneFullscreen} aria-hidden={paneFullscreen || undefined}>
         <ErrorBanner />
         <ViewErrorBoundary resetKey={viewResetKey}>
           <Main />
@@ -70,6 +75,7 @@ export default function App() {
         <StatusBar />
       </div>
       <ContextRail />
+      <WorkspaceBottomNav />
       {overlay === "palette" && <CommandPalette />}
       {overlay === "search" && <SessionSearch />}
       {overlay === "project-picker" && <ProjectFolderDialog onClose={() => setOverlay(null)} />}
