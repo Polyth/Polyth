@@ -3,7 +3,7 @@ import {
   getState, useStore, activateProject, openWorkspacePane, openWorktreeSessionDialog, setOverlay,
   setSidebarOpen, setUiError,
 } from "../store.ts";
-import { createSession, renameProject } from "../init.ts";
+import { createSession, refreshSessions, renameProject } from "../init.ts";
 import { MOD } from "../format.ts";
 import { friendlyError } from "../settings.ts";
 import { Icon } from "../icons.tsx";
@@ -13,6 +13,7 @@ import { useShellMode } from "../responsiveShell.ts";
 import { useModalSurface } from "./a11y/Dialog.tsx";
 import SlotHost from "./slots/SlotHost.ts";
 import { useSidebarExpanded } from "../sidebarPresentation.ts";
+import { setSidebarViewMode, useSidebarViewMode } from "../sidebarPrefs.ts";
 import {
   SIDEBAR_COLLAPSED_WIDTH, SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH,
   clampSidebarWidth, setSidebarLayout, useSidebarLayout,
@@ -48,6 +49,35 @@ export default function Sidebar() {
   const [projectName, setProjectName] = useState("");
   const [projectMenu, setProjectMenu] = useState<string | null>(null);
   const [importingProject, setImportingProject] = useState<string | null>(null);
+
+  // UX-FILES-TIMELINE-03 finding 9: persisted view mode — "list" is the
+  // current presentation, "folders" nests each project's sessions under a
+  // collapsible project folder. Expansion is per-project UI state.
+  const viewMode = useSidebarViewMode();
+  const [expandedFolders, setExpandedFolders] = useState<ReadonlySet<string>>(
+    () => new Set(activeProjectId ? [activeProjectId] : []),
+  );
+  useEffect(() => {
+    // The active project's folder always reveals its sessions.
+    if (!activeProjectId || viewMode !== "folders") return;
+    setExpandedFolders((prev) => (prev.has(activeProjectId) ? prev : new Set(prev).add(activeProjectId)));
+  }, [activeProjectId, viewMode]);
+  const toggleFolder = (id: string) => {
+    setExpandedFolders((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else {
+        next.add(id);
+        void refreshSessions(id); // nested lists need this project's sessions
+      }
+      return next;
+    });
+  };
+  const expandAllFolders = () => {
+    setExpandedFolders(new Set(projects.map((p) => p.id)));
+    for (const p of projects) void refreshSessions(p.id);
+  };
+  const collapseAllFolders = () => setExpandedFolders(new Set());
 
   // UX-A390: below 821px the sidebar is a modal drawer. It never opens by
   // itself when the viewport shrinks — wide visibility is not a persisted
@@ -155,6 +185,13 @@ export default function Sidebar() {
           <span className="brand"><i>p</i> {productName.toLowerCase()}</span>
           <span className="side-icons">
             <button className="icon-btn" title={`Search sessions (${MOD}P)`} onClick={() => setOverlay("search")}><Icon.search /></button>
+            <button
+              className="icon-btn"
+              title={viewMode === "folders" ? "Switch to single-project session list" : "Group sessions under project folders"}
+              aria-label="Toggle project folder view"
+              aria-pressed={viewMode === "folders"}
+              onClick={() => setSidebarViewMode(viewMode === "folders" ? "list" : "folders")}
+            ><Icon.files /></button>
             <button className="icon-btn" title="Source control (Git & worktrees)" onClick={() => openWorkspacePane("git")}><Icon.tree /></button>
             <button
               className="icon-btn"
@@ -193,85 +230,113 @@ export default function Sidebar() {
               No projects yet.<br />Choose a folder to start →
             </button>
           )}
-          {projects.map((p) => (
-          renamingProject === p.id ? (
-            <div key={p.id} className="project-card project-rename">
-              <input
-                autoFocus
-                value={projectName}
-                onChange={(e) => setProjectName(e.target.value)}
-                onBlur={() => void saveProjectName(p.id)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") void saveProjectName(p.id);
-                  else if (e.key === "Escape") setRenamingProject(null);
-                }}
-              />
+          {viewMode === "folders" && projects.length > 1 && (
+            <div className="side-folder-bar">
+              <button className="small-btn" onClick={expandAllFolders}>Expand all</button>
+              <button className="small-btn" onClick={collapseAllFolders}>Collapse all</button>
             </div>
-          ) : (
-            <div className="project-card-shell" key={p.id}>
-              <button
-                className={`project-card ${p.id === activeProjectId ? "active" : ""}`}
-                aria-current={p.id === activeProjectId ? "true" : undefined}
-                onClick={() => {
-                  // Clicking the already-active project must not drop the session (UX-04).
-                  if (p.id !== activeProjectId) activateProject(p.id);
-                  closeDrawer();
-                }}
-                onDoubleClick={() => { setRenamingProject(p.id); setProjectName(p.name); }}
-              >
-                <span className="project-glyph" style={p.color ? { background: p.color } : undefined}>
-                  {p.icon || projectGlyph(p.name || p.path)}
-                </span>
-                <span className="project-meta">
-                  <span className="project-name" title={p.path}>{p.icon ? `${p.icon} ` : ""}{p.name || p.path}</span>
-                  <span className="project-path">{p.path}</span>
-                </span>
-              </button>
-              <button
-                className="project-menu-btn"
-                aria-label={`Actions for ${p.name || p.path}`}
-                aria-haspopup="menu"
-                aria-expanded={projectMenu === p.id}
-                onClick={() => setProjectMenu((current) => current === p.id ? null : p.id)}
-              >⋯</button>
-              {projectMenu === p.id && (
-                <div className="project-actions-menu" role="menu">
-                  <button role="menuitem" onClick={() => {
-                    setProjectMenu(null);
+          )}
+          {projects.map((p) => {
+            const card = renamingProject === p.id ? (
+              <div className="project-card project-rename">
+                <input
+                  autoFocus
+                  value={projectName}
+                  onChange={(e) => setProjectName(e.target.value)}
+                  onBlur={() => void saveProjectName(p.id)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") void saveProjectName(p.id);
+                    else if (e.key === "Escape") setRenamingProject(null);
+                  }}
+                />
+              </div>
+            ) : (
+              <div className="project-card-shell">
+                {viewMode === "folders" && (
+                  <button
+                    className={`project-folder-chevron${expandedFolders.has(p.id) ? " open" : ""}`}
+                    aria-expanded={expandedFolders.has(p.id)}
+                    aria-label={`${expandedFolders.has(p.id) ? "Collapse" : "Expand"} sessions for ${p.name || p.path}`}
+                    onClick={() => toggleFolder(p.id)}
+                  >{expandedFolders.has(p.id) ? "▾" : "▸"}</button>
+                )}
+                <button
+                  className={`project-card ${p.id === activeProjectId ? "active" : ""}`}
+                  aria-current={p.id === activeProjectId ? "true" : undefined}
+                  onClick={() => {
+                    // Clicking the already-active project must not drop the session (UX-04).
                     if (p.id !== activeProjectId) activateProject(p.id);
-                    void createSession(p.id)
-                      .then(closeDrawer)
-                      .catch((error) => setUiError(friendlyError("Couldn’t create a session", error)));
-                  }}>New session</button>
-                  <button role="menuitem" onClick={() => {
-                    setProjectMenu(null);
-                    openWorktreeSessionDialog(p.id);
-                  }}>New session in worktree…</button>
-                  <button role="menuitem" onClick={() => {
-                    setProjectMenu(null);
-                    setImportingProject(p.id);
-                  }}>Import sessions…</button>
-                  <button role="menuitem" onClick={() => {
-                    setProjectMenu(null);
-                    setRenamingProject(p.id);
-                    setProjectName(p.name);
-                  }}>Rename project</button>
-                  <button role="menuitem" onClick={() => {
-                    setProjectMenu(null);
-                    if (p.id !== activeProjectId) activateProject(p.id);
-                    openWorkspacePane("git");
-                  }}>Source control (Git &amp; worktrees)</button>
-                  <SlotHost slot="sidebar.project.actions" context={{ projectId: p.id }} />
-                </div>
-              )}
-            </div>
-          )
-          ))}
-          {project && branch && (
+                    if (viewMode === "folders") toggleFolder(p.id);
+                    else closeDrawer();
+                  }}
+                  onDoubleClick={() => { setRenamingProject(p.id); setProjectName(p.name); }}
+                >
+                  <span className="project-glyph" style={p.color ? { background: p.color } : undefined}>
+                    {p.icon || projectGlyph(p.name || p.path)}
+                  </span>
+                  <span className="project-meta">
+                    <span className="project-name" title={p.path}>{p.icon ? `${p.icon} ` : ""}{p.name || p.path}</span>
+                    <span className="project-path">{p.path}</span>
+                  </span>
+                </button>
+                <button
+                  className="project-menu-btn"
+                  aria-label={`Actions for ${p.name || p.path}`}
+                  aria-haspopup="menu"
+                  aria-expanded={projectMenu === p.id}
+                  onClick={() => setProjectMenu((current) => current === p.id ? null : p.id)}
+                >⋯</button>
+                {projectMenu === p.id && (
+                  <div className="project-actions-menu" role="menu">
+                    <button role="menuitem" onClick={() => {
+                      setProjectMenu(null);
+                      if (p.id !== activeProjectId) activateProject(p.id);
+                      void createSession(p.id)
+                        .then(closeDrawer)
+                        .catch((error) => setUiError(friendlyError("Couldn’t create a session", error)));
+                    }}>New session</button>
+                    <button role="menuitem" onClick={() => {
+                      setProjectMenu(null);
+                      openWorktreeSessionDialog(p.id);
+                    }}>New session in worktree…</button>
+                    <button role="menuitem" onClick={() => {
+                      setProjectMenu(null);
+                      setImportingProject(p.id);
+                    }}>Import sessions…</button>
+                    <button role="menuitem" onClick={() => {
+                      setProjectMenu(null);
+                      setRenamingProject(p.id);
+                      setProjectName(p.name);
+                    }}>Rename project</button>
+                    <button role="menuitem" onClick={() => {
+                      setProjectMenu(null);
+                      if (p.id !== activeProjectId) activateProject(p.id);
+                      openWorkspacePane("git");
+                    }}>Source control (Git &amp; worktrees)</button>
+                    <SlotHost slot="sidebar.project.actions" context={{ projectId: p.id }} />
+                  </div>
+                )}
+              </div>
+            );
+            if (viewMode !== "folders") return <div key={p.id} className="project-entry">{card}</div>;
+            // Finding 9: each project is a folder with its sessions nested —
+            // the SAME SessionList the list mode renders for the active project.
+            return (
+              <div key={p.id} className="project-folder">
+                {card}
+                {expandedFolders.has(p.id) && (
+                  <div className="project-folder-sessions">
+                    <SessionList projectId={p.id} />
+                  </div>
+                )}
+              </div>
+            );
+          })}
+          {viewMode === "list" && project && branch && (
             <div className="branch-row"><Icon.tree /><span className="mono">{branch}</span></div>
           )}
 
-          {project && (
+          {viewMode === "list" && project && (
             <div className="session-list">
               <div className="side-label session-heading">
                 <span>Sessions</span>

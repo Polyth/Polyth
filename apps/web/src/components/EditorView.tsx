@@ -17,6 +17,7 @@ import { setPaneLastResource } from "../workspace/panePrefs.ts";
 import type { PaneTab } from "../workspace/paneStore.ts";
 import PaneHost, { type PaneHostHandle } from "./workspace/PaneHost.tsx";
 import FileRowActions from "./FileRowActions.tsx";
+import { ChevronGlyph, FileTypeGlyph, FolderGlyph, fileTypeKeyOf } from "../editor/fileTreeIcons.tsx";
 import "./editor/FilePane.tsx"; // registers the "file" pane provider
 import "../workspace/mainSlotPanes.ts"; // registers the "plugin" slot bridge
 
@@ -297,7 +298,9 @@ export default function EditorView() {
             {searchResults.length === 0 && <div className="empty">No matches.</div>}
             {searchResults.map((fp) => (
               <div key={fp} className="files-row" onClick={() => openFile(fp)}>
-                <span className="files-file-icon file-glyph" aria-hidden>▤</span>
+                <span className="files-file-icon ft-icon" data-ft={fileTypeKeyOf(baseOf(fp))} aria-hidden>
+                  <FileTypeGlyph type={fileTypeKeyOf(baseOf(fp))} />
+                </span>
                 <span className="files-file-name">{fp}</span>
                 <FileRowActions projectId={projectId} path={fp} onOpen={() => openFile(fp)} />
               </div>
@@ -316,6 +319,7 @@ export default function EditorView() {
             >
               {rows.map(({ e, depth }) => {
                 const selected = sel === e.path || activePath === e.path;
+                const expanded = e.dir && open.has(e.path);
                 return (
                   <div
                     key={e.path}
@@ -335,7 +339,16 @@ export default function EditorView() {
                       else openFile(e.path);
                     }}
                   >
-                    <span className="ft-chevron" aria-hidden>{e.dir ? (open.has(e.path) ? "▾" : "▸") : ""}</span>
+                    <span className={`ft-chevron${expanded ? " open" : ""}`} aria-hidden>
+                      {e.dir && <ChevronGlyph />}
+                    </span>
+                    <span
+                      className={`ft-icon${expanded ? " open" : ""}`}
+                      data-ft={e.dir ? "folder" : fileTypeKeyOf(e.name)}
+                      aria-hidden
+                    >
+                      {e.dir ? <FolderGlyph /> : <FileTypeGlyph type={fileTypeKeyOf(e.name)} />}
+                    </span>
                     <span className="ft-name">{e.name}</span>
                     {!e.dir && (
                       <button

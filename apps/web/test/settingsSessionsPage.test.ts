@@ -43,9 +43,11 @@ test("settings Sessions page mounts and renders the project's sessions without t
   console.error = (...args: unknown[]) => { errors.push(args.map(String).join(" ")); };
 
   activateProject("p-settings");
-  setSessions([
+  setSessions("p-settings", [
     session({ id: "s1", projectId: "p-settings", title: "Fix the flaky test" }),
     session({ id: "s2", projectId: "p-settings", title: "Ship the release", status: "working", updatedAt: Date.now() - 5_000 }),
+  ]);
+  setSessions("p-other", [
     session({ id: "s3", projectId: "p-other", title: "Other project session" }),
   ]);
 
@@ -63,7 +65,7 @@ test("settings Sessions page mounts and renders the project's sessions without t
 
     // A later store update (e.g. a WS projection) re-renders once — no loop.
     await act(async () => {
-      setSessions([
+      setSessions("p-settings", [
         session({ id: "s1", projectId: "p-settings", title: "Fix the flaky test", status: "finished" }),
       ]);
     });
@@ -84,7 +86,8 @@ test("settings Sessions page mounts and renders the project's sessions without t
 
 test("settings Sessions page renders the empty state when no project is active", async () => {
   activateProject(null);
-  setSessions([]);
+  setSessions("p-settings", []);
+  setSessions("p-other", []);
   const container = document.createElement("div");
   document.body.appendChild(container);
   const root = createRoot(container);

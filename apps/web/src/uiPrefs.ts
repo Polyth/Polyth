@@ -158,19 +158,34 @@ export function useUiSettings(): UiSettings {
   );
 }
 
+/** Preview-capable editor families (mirrors liveFile.previewKindForPath). */
+export type PreviewableKind = "markdown" | "html" | "json";
+const PREVIEWABLE_KINDS: PreviewableKind[] = ["markdown", "html", "json"];
+
 export interface EditorPrefs {
   openInPreview: boolean;
+  /** UX-FILES-TIMELINE-03 finding 3: the last preview/edit choice per
+   *  previewable kind. A kind's entry wins over openInPreview; a missing
+   *  entry falls back to it. */
+  previewByKind: Partial<Record<PreviewableKind, boolean>>;
 }
 
 export const EDITOR_PREFS_KEY = "polyth.editorPrefs";
-export const EDITOR_PREFS_DEFAULTS: EditorPrefs = { openInPreview: true };
+export const EDITOR_PREFS_DEFAULTS: EditorPrefs = { openInPreview: true, previewByKind: {} };
 
 export function parseEditorPrefs(raw: string | null): EditorPrefs {
   try {
     const value = JSON.parse(raw ?? "") as Partial<EditorPrefs>;
-    return { openInPreview: value.openInPreview !== false };
+    const previewByKind: Partial<Record<PreviewableKind, boolean>> = {};
+    if (typeof value.previewByKind === "object" && value.previewByKind !== null) {
+      for (const kind of PREVIEWABLE_KINDS) {
+        const v = (value.previewByKind as Record<string, unknown>)[kind];
+        if (typeof v === "boolean") previewByKind[kind] = v;
+      }
+    }
+    return { openInPreview: value.openInPreview !== false, previewByKind };
   } catch {
-    return { ...EDITOR_PREFS_DEFAULTS };
+    return { openInPreview: true, previewByKind: {} };
   }
 }
 
@@ -189,6 +204,12 @@ export function setEditorPrefs(patch: Partial<EditorPrefs>): void {
   editorPrefs = { ...editorPrefs, ...patch };
   try { localStorage.setItem(EDITOR_PREFS_KEY, JSON.stringify(editorPrefs)); } catch { /* best-effort */ }
   for (const listener of [...editorPrefListeners]) listener();
+}
+
+/** Persist the user's preview/edit choice for one previewable kind (the
+ *  toolbar switch calls this — programmatic mode flips must not). */
+export function setEditorPreviewDefault(kind: PreviewableKind, on: boolean): void {
+  setEditorPrefs({ previewByKind: { ...editorPrefs.previewByKind, [kind]: on } });
 }
 
 export function useEditorPrefs(): EditorPrefs {

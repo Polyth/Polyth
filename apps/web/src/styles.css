@@ -233,6 +233,22 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
 /* project card */
 .project-card-shell { position: relative; margin-bottom: 4px; }
 .project-card-shell .project-card { margin-bottom: 0; padding-right: 38px; }
+
+/* UX-FILES-TIMELINE-03 finding 9: sidebar folder view — projects as
+   collapsible folders with their sessions nested underneath. */
+.side-folder-bar { display: flex; gap: 4px; padding: 0 0 6px; }
+.project-folder { margin-bottom: 4px; }
+.project-folder .project-card-shell { display: flex; align-items: center; gap: 2px; margin-bottom: 0; }
+.project-folder .project-card { flex: 1; min-width: 0; }
+.project-folder-chevron {
+  flex: none; width: 20px; height: 27px; padding: 0; border: none; background: none;
+  color: var(--muted); font-size: 11px; cursor: pointer; border-radius: 6px;
+}
+.project-folder-chevron:hover { color: var(--text); background: var(--panel); }
+.project-folder-chevron:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -1px; }
+.project-folder-sessions {
+  margin: 2px 0 6px 9px; padding-left: 8px; border-left: 1px solid var(--hair);
+}
 .project-card {
   display: flex; align-items: center; gap: 11px; width: 100%; text-align: left;
   padding: 10px; border: 1px solid var(--hair); border-radius: var(--radius-lg);
@@ -483,8 +499,12 @@ html.light .kbd { background: rgba(0, 0, 0, 0.04); }
 /* UX-TIMELINE-LAYOUT-01 §2.1: one flex shell stacks the reserved utility
    region, the single .timeline scroll root, and the reserved latest-reveal
    region as normal-flow siblings. Reserved chrome consumes layout space; it
-   is never absolutely positioned over the transcript. */
+   is never absolutely positioned over the transcript (sole exception: the
+   right-gutter prompt rail below, which sits outside the reading column). */
 .timeline-shell { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+/* Non-scrolling positioning context for the prompt rail: the rail is a sibling
+   of the .timeline scroller, so the scroller's overflow can never clip it. */
+.timeline-viewport { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; }
 /* Centered reading measure: fluid up to 768px, minimum 16px logical gutters
    at narrow widths (§2.2). Bottom padding is the ≥32px (target 40px) tail
    clearance between the last surface and the composer boundary. */
@@ -2101,6 +2121,15 @@ html[data-density="compact"] .set-row { padding: 9px 0; }
 }
 .editor-tree:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
 .editor-pane { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+/* UX-FILES-TIMELINE-03 finding 7: PaneHost wraps every kept-alive resource in
+   .pane-body — it must complete the fill chain so .editor-body/.editor-edit
+   flex sizing works and the pane fills its container. [hidden] keeps its
+   no-geometry keep-alive semantics (display:flex would otherwise defeat it). */
+.pane-body {
+  flex: 1; min-width: 0; min-height: 0;
+  display: flex; flex-direction: column; overflow: hidden;
+}
+.pane-body[hidden] { display: none; }
 .editor-head {
   display: flex; align-items: center; gap: 8px; min-height: 38px;
   padding: 4px var(--gutter) 4px 14px; border-bottom: 1px solid var(--border-soft); background: var(--panel);
@@ -2113,8 +2142,10 @@ html[data-density="compact"] .set-row { padding: 9px 0; }
   display: flex; align-items: center; gap: 4px; flex-wrap: wrap;
   padding: 5px 14px; border-bottom: 1px solid var(--border-soft); background: var(--sunken);
 }
-.editor-preview-default { display: inline-flex; align-items: center; gap: 4px; color: var(--muted); font-size: 11px; }
-.editor-preview-default input { margin: 0; }
+/* UX-FILES-TIMELINE-03 finding 3: a real preview↔edit switch with labeled
+   states (persisted per previewable kind). */
+.editor-mode-switch { display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--muted); }
+.editor-mode-label.on { color: var(--ink); font-weight: 600; }
 .editor-rename { padding: 6px 14px; border-bottom: 1px solid var(--border-soft); }
 .editor-banner {
   padding: 5px 14px; font-size: 11.5px; color: var(--amber);
@@ -2151,20 +2182,72 @@ html[data-density="compact"] .set-row { padding: 9px 0; }
 .editor-ta[wrap="soft"] { white-space: pre-wrap; padding-left: 14px; }
 .editor-ta:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
 
-/* file tree (finding 7): namespaced ft-* rows — `.sel` is the select widget */
-.ft-tree { display: flex; flex-direction: column; gap: 1px; outline: none; }
+/* UX-FILES-TIMELINE-03 finding 4: highlight WHILE editing. A backdrop <pre>
+   mirrors the buffer (same font, padding, wrapping) beneath a transparent-text
+   textarea; scroll is synced from the textarea. The textarea keeps the caret,
+   selection, IME, and dirty/autosave semantics. */
+.editor-edit-surface { position: relative; flex: 1; min-width: 0; display: flex; }
+.editor-edit-surface .editor-ta { position: relative; z-index: 1; }
+.editor-hl-backdrop {
+  position: absolute; inset: 0; margin: 0; overflow: hidden; pointer-events: none;
+  border: none; border-radius: 0; background: transparent;
+  padding: 8px 14px 8px 0; font: 12px/1.55 var(--mono); tab-size: 2;
+  white-space: pre; color: var(--ink);
+}
+.editor-hl-backdrop.wrap { white-space: pre-wrap; overflow-wrap: break-word; padding-left: 14px; }
+.editor-ta-hl { color: transparent; caret-color: var(--ink); }
+.editor-ta-hl::selection { color: transparent; background: var(--accent-wash); }
+
+/* UX-FILES-TIMELINE-03 finding 5: contextual "add selection to chat" hint —
+   appears only while a selection is active, floats near it. */
+.editor-sel-hint {
+  position: fixed; z-index: 70; width: 26px; height: 24px; padding: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: var(--elevated); border: 1px solid var(--border); border-radius: var(--radius-sm);
+  color: var(--accent); font: 600 13px/1 var(--mono); cursor: pointer;
+  box-shadow: var(--shadow-lg);
+}
+.editor-sel-hint:hover { background: var(--raised); }
+.editor-sel-hint:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
+
+/* file tree (finding 7 + UX-FILES-TIMELINE-03 finding 1): namespaced ft-*
+   rows — `.sel` is the select widget. Rows carry a disclosure chevron, a
+   file-type tinted glyph (data-ft from editor/fileTreeIcons.tsx), and clean
+   hover/selected/focus states. */
+.ft-tree { display: flex; flex-direction: column; gap: 1px; outline: none; padding: 2px 4px; }
 .ft-tree:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; border-radius: 4px; }
 .ft-row {
-  display: flex; align-items: center; gap: 4px;
-  width: 100%; padding: 3px 6px; border-radius: 4px;
-  font-size: 12.5px; line-height: 1.5; cursor: pointer; user-select: none;
+  display: flex; align-items: center; gap: 5px;
+  width: 100%; padding: 3px 8px 3px 6px; border-radius: 5px;
+  font-size: 12.5px; line-height: 1.6; cursor: pointer; user-select: none;
   color: var(--text-dim); transition: background 120ms ease;
 }
-.ft-row:hover { background: var(--elevated); }
-.ft-row.ft-selected { background: var(--raised); color: var(--text); }
+.ft-row:hover { background: var(--elevated); color: var(--text); }
+.ft-row.ft-selected { background: var(--accent-wash); color: var(--text); }
 .ft-tree:focus-visible .ft-row.ft-selected { outline: 1px solid var(--accent-line); outline-offset: -1px; }
-.ft-chevron { flex: none; width: 13px; text-align: center; color: var(--faint); font-size: 10px; }
+.ft-chevron {
+  flex: none; width: 12px; height: 12px;
+  display: inline-flex; align-items: center; justify-content: center;
+  color: var(--faint);
+}
+.ft-chevron svg { transition: transform 120ms ease; }
+.ft-chevron.open svg { transform: rotate(90deg); }
+body[data-motion="reduced"] .ft-chevron svg { transition: none; }
 .ft-dir > .ft-chevron { color: var(--muted); }
+.ft-icon {
+  flex: none; width: 15px; height: 15px;
+  display: inline-flex; align-items: center; justify-content: center;
+  color: var(--muted);
+}
+.ft-icon[data-ft="folder"] { color: var(--accent); }
+.ft-icon[data-ft="folder"].open svg { fill: currentColor; fill-opacity: 0.16; }
+.ft-icon[data-ft="code"] { color: var(--blue); }
+.ft-icon[data-ft="markup"] { color: var(--red); }
+.ft-icon[data-ft="doc"] { color: var(--text-dim); }
+.ft-icon[data-ft="data"] { color: var(--amber); }
+.ft-icon[data-ft="style"] { color: var(--purple); }
+.ft-icon[data-ft="image"] { color: var(--green); }
+.ft-icon[data-ft="shell"] { color: var(--green); }
 .ft-name {
   flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   font-family: var(--mono);
@@ -2665,44 +2748,81 @@ body[data-motion="reduced"] *, body[data-motion="reduced"] *::before, body[data-
   border: 0; background: transparent; color: inherit; cursor: pointer;
 }
 .timeline-dialog-prompt span:last-child { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-/* Prompt navigation (§2.3): compact ordered chips in the reserved utility
-   region. The strip scrolls horizontally when crowded; nothing overlays the
-   transcript and no essential operation requires hover. */
-.prompt-nav { flex: 1 1 auto; min-width: 0; display: flex; flex-direction: column; gap: 4px; }
-.prompt-nav-items {
-  display: flex; align-items: center; gap: 4px;
-  overflow-x: auto; overflow-y: hidden; padding-block: 2px;
+/* Prompt navigator (L13, polyth PromptNavigatorRail mechanics): a 28px
+   gutter pinned to the right edge of the chat viewport, vertically centered.
+   The rail lives OUTSIDE the .timeline scroller (absolute sibling inside
+   .timeline-viewport), so it stays put while messages scroll, never competes
+   with right-aligned user bubbles, and cannot be clipped by the scroller's
+   overflow. right: 10px keeps the tick bars clear of the 10px scrollbar. */
+.prompt-nav {
+  position: absolute; top: 50%; right: 10px; transform: translateY(-50%);
+  width: 28px; z-index: 5;
+  display: flex; flex-direction: column; align-items: flex-end;
 }
-.prompt-nav-item {
-  flex: none; display: inline-flex; align-items: center; justify-content: center; gap: 5px;
-  min-width: 26px; min-height: 24px; padding: 2px 8px;
-  border: 1px solid var(--hair); border-radius: 999px; background: none;
-  cursor: pointer; color: var(--muted); font-size: 11px;
+.prompt-nav-tape {
+  display: flex; flex-direction: column; align-items: flex-end;
+  width: 100%; padding: 4px 0;
 }
-.prompt-nav-item:hover, .prompt-nav-item:focus-visible {
-  color: var(--text); border-color: var(--accent-line); background: var(--accent-wash);
+/* Gradient masks hint that the 30-tick window clipped earlier/later prompts. */
+.prompt-nav-tape[data-clip-above] {
+  -webkit-mask-image: linear-gradient(to bottom, transparent, #000 28px);
+  mask-image: linear-gradient(to bottom, transparent, #000 28px);
 }
-.prompt-nav-dot { width: 6px; height: 6px; border-radius: 50%; background: var(--border); flex-shrink: 0; }
-.prompt-nav-item:hover .prompt-nav-dot, .prompt-nav-item:focus-visible .prompt-nav-dot { background: var(--accent); }
-.prompt-nav-index { font-variant-numeric: tabular-nums; }
+.prompt-nav-tape[data-clip-below] {
+  -webkit-mask-image: linear-gradient(to top, transparent, #000 28px);
+  mask-image: linear-gradient(to top, transparent, #000 28px);
+}
+.prompt-nav-tape[data-clip-above][data-clip-below] {
+  -webkit-mask-image: linear-gradient(to bottom, transparent, #000 28px, #000 calc(100% - 28px), transparent);
+  mask-image: linear-gradient(to bottom, transparent, #000 28px, #000 calc(100% - 28px), transparent);
+}
+/* Each tick is a real button: a 28px-wide hit zone at the 12px pitch; the
+   visual bar is a 2px line whose width the component drives (active tick and
+   cursor proximity wave). */
+.prompt-nav-tick {
+  display: flex; align-items: center; justify-content: flex-end;
+  width: 28px; height: 12px; padding: 0 6px 0 0; border: 0; background: none;
+  cursor: pointer; border-radius: 4px;
+}
+.prompt-nav-tick-bar {
+  height: 2px; border-radius: 1px; background: var(--border);
+  transition: width 120ms ease, background 120ms ease;
+}
+.prompt-nav-tick:hover .prompt-nav-tick-bar { background: var(--muted); }
+.prompt-nav-tick[aria-current="true"] .prompt-nav-tick-bar { background: var(--accent); }
+.prompt-nav-tick:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 
-/* Hover/focus preview: bounded IN-FLOW content inside the utility region. It
-   grows this region (shrinking the scrollport) instead of overlaying a
-   message, and it can never open off-screen (§2.3, root-cause row 3). */
-.prompt-nav-preview {
-  display: flex; flex-direction: column; gap: 2px; min-width: 0;
-  border: 1px solid var(--border-soft); border-radius: var(--radius);
-  background: var(--elevated); padding: 6px 10px; cursor: default;
-  text-align: start;
+/* Recent-turns panel revealed on hover/focus, left of the tape and centered
+   against it. */
+.prompt-nav-panel {
+  position: absolute; top: 50%; right: calc(100% + 8px); transform: translateY(-50%);
+  width: min(340px, 42vw); max-height: min(440px, 70vh); overflow-y: auto;
+  display: flex; flex-direction: column; gap: 2px;
+  background: var(--elevated); border: 1px solid var(--border);
+  border-radius: var(--radius); box-shadow: var(--shadow-lg);
+  padding: 6px; z-index: 6; text-align: left;
 }
-.prompt-nav-preview-head {
-  font-size: 10.5px; font-weight: 650; color: var(--muted);
-  text-transform: uppercase; letter-spacing: 0.04em;
+.prompt-nav-panel-head {
+  font-size: 11px; font-weight: 650; color: var(--muted);
+  text-transform: uppercase; letter-spacing: 0.04em; padding: 4px 6px 2px;
 }
-.prompt-nav-preview-body {
-  font-size: 12.5px; line-height: 1.5; color: var(--text-dim);
-  white-space: pre-wrap; overflow-wrap: anywhere;
-  overflow: hidden; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical;
+.prompt-nav-row {
+  display: flex; align-items: baseline; gap: 8px; width: 100%;
+  border: 0; background: none; cursor: pointer; color: inherit;
+  font-size: 12.5px; line-height: 1.4; padding: 5px 6px; border-radius: 6px;
+  text-align: left;
+}
+.prompt-nav-row:hover, .prompt-nav-row:focus-visible { background: var(--surface); }
+.prompt-nav-row.current { background: var(--accent-wash); }
+.prompt-nav-row-index { color: var(--muted); font-size: 11px; flex-shrink: 0; min-width: 16px; }
+.prompt-nav-row-text {
+  overflow: hidden; display: -webkit-box;
+  -webkit-line-clamp: 2; -webkit-box-orient: vertical; word-break: break-word;
+}
+/* Tablet/phone layouts drop the chat's wide side padding, so the gutter would
+   sit on top of message bubbles; like polyth, the rail is desktop-only. */
+@media (max-width: 1100px) {
+  .prompt-nav { display: none; }
 }
 
 /* L13: selection quick actions + windowed-timeline reveal bar */
@@ -2724,7 +2844,10 @@ body[data-motion="reduced"] *, body[data-motion="reduced"] *::before, body[data-
 }
 .cl-row.hl { background: var(--accent-wash); }
 .cl-row.hl .cl-ln { color: var(--accent); }
-.editor-md-preview { padding: 16px 22px; max-width: 860px; overflow-y: auto; }
+/* Finding 7: the scrollport fills the pane; the readable-line-width cap lives
+   on the INNER content so wide panes keep a full-width background/scrollbar. */
+.editor-md-preview { padding: 16px 22px; overflow-y: auto; }
+.editor-md-content { max-width: 860px; }
 .editor-md-preview h1, .editor-md-preview h2 { border-bottom: 1px solid var(--border-soft); padding-bottom: 4px; }
 
 /* ---------- WP5: session organization ---------- */
