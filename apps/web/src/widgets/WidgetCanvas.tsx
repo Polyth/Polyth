@@ -1,9 +1,9 @@
-import { useEffect, useState, type CSSProperties, type KeyboardEvent, type PointerEvent } from "react";
+import { useEffect, useMemo, useState, type CSSProperties, type KeyboardEvent, type PointerEvent } from "react";
 import { getDragWidget, setDragWidget, WIDGET_MIME } from "../dnd.ts";
 import { openSettingsPage, useStore } from "../store.ts";
 import SlotHost from "../components/slots/SlotHost.ts";
 import ViewErrorBoundary from "../components/ViewErrorBoundary.ts";
-import { useWidgetCatalog, type WidgetDef } from "./catalog.ts";
+import { getWidget, useWidgetCatalog, type WidgetDef } from "./catalog.ts";
 import {
   WIDGET_ZONES,
   applyWidgetLayoutPreset,
@@ -16,6 +16,7 @@ import {
   useWidgetLayout,
   widgetZoneOf,
   type WidgetAudience,
+  type WidgetPlacement,
   type WidgetZone,
 } from "./widgetLayout.ts";
 import "./builtinWidgets.tsx";
@@ -34,21 +35,23 @@ function allowed(widget: WidgetDef, audience: WidgetAudience): boolean {
 
 function WidgetCard({
   widget,
+  placement,
   zone,
   index,
   orderedIds,
   editing,
+  projectId,
+  sessionId,
 }: {
   widget: WidgetDef;
+  placement: WidgetPlacement;
   zone: WidgetZone;
   index: number;
   orderedIds: string[];
   editing: boolean;
+  projectId: string | null;
+  sessionId: string | null;
 }) {
-  const layout = useWidgetLayout();
-  const projectId = useStore((state) => state.activeProjectId);
-  const sessionId = useStore((state) => state.activeSessionId);
-  const placement = layout.widgets[widget.id]!;
   const [menuOpen, setMenuOpen] = useState(false);
 
   const moveBy = (delta: number) => {
@@ -63,9 +66,16 @@ function WidgetCard({
   const startResize = (event: PointerEvent<HTMLButtonElement>) => {
     event.preventDefault();
     const start = { x: event.clientX, y: event.clientY, ...placement.size };
+    // Commit only when the pointer crosses a grid cell — not on every
+    // pointermove — so drags don't storm the layout store.
+    let lastW = start.w;
+    let lastH = start.h;
     const onMove = (next: globalThis.PointerEvent) => {
-      const w = start.w + Math.round((next.clientX - start.x) / 70);
-      const h = start.h + Math.round((next.clientY - start.y) / 48);
+      const w = Math.min(12, Math.max(1, start.w + Math.round((next.clientX - start.x) / 70)));
+      const h = Math.min(12, Math.max(1, start.h + Math.round((next.clientY - start.y) / 48)));
+      if (w === lastW && h === lastH) return;
+      lastW = w;
+      lastH = h;
       updateWidgetLayout((current) => setWidgetSize(current, widget.id, { w, h }));
     };
     const onUp = () => {
@@ -332,21 +342,27 @@ export default function WidgetCanvas() {
   const widgets = useWidgetCatalog();
   const layout = useWidgetLayout();
   const workspaceMode = useWorkspaceMode();
+  const projectId = useStore((state) => state.activeProjectId);
+  const sessionId = useStore((state) => state.activeSessionId);
   const editing = workspaceMode === "edit";
   const [libraryOpen, setLibraryOpen] = useState(false);
   const [customizeOpen, setCustomizeOpen] = useState(editing);
   const [customizeTab, setCustomizeTab] = useState<"customize" | "widgets">("customize");
-  const idKey = widgets.map((widget) => widget.id).sort().join("\0");
 
+  // `widgets` is referentially stable per catalog version, so this runs only
+  // when a widget actually registers/unregisters (and ensureWidgets itself
+  // early-returns when nothing is missing) — never a render loop.
   useEffect(() => {
     ensureWidgets(widgets);
-  }, [idKey]);
+  }, [widgets]);
   useEffect(() => {
     if (editing) setCustomizeOpen(true);
   }, [editing]);
 
-  const byId = new Map(widgets.map((widget) => [widget.id, widget]));
-  const shown = widgets.filter((widget) => allowed(widget, layout.audience));
+  const shown = useMemo(
+    () => widgets.filter((widget) => allowed(widget, layout.audience)),
+    [widgets, layout.audience],
+  );
 
   return (
     <div className={`widget-workspace audience-${layout.audience}${editing ? " editing" : ""}`}>
@@ -362,7 +378,7 @@ export default function WidgetCanvas() {
       <div className="widget-canvas">
         {WIDGET_ZONES.map((zone) => {
           const zoneWidgets = layout.zones[zone]
-            .map((id) => byId.get(id))
+            .map((id) => getWidget(id))
             .filter((widget): widget is WidgetDef =>
               widget !== undefined && layout.widgets[widget.id]?.visible === true && allowed(widget, layout.audience));
           return (
@@ -385,10 +401,13 @@ export default function WidgetCanvas() {
                 <WidgetCard
                   key={widget.id}
                   widget={widget}
+                  placement={layout.widgets[widget.id]!}
                   zone={zone}
                   index={index}
                   orderedIds={zoneWidgets.map((item) => item.id)}
                   editing={editing}
+                  projectId={projectId}
+                  sessionId={sessionId}
                 />
               ))}
               {zoneWidgets.length === 0 && (

@@ -72,10 +72,29 @@ function slotWidgets(): WidgetDef[] {
   });
 }
 
+// The merged catalog is cached per (registry, slot) version so render-time
+// consumers get a stable array reference and stable WidgetDef identities —
+// no rebuild, re-sort, or new render closures on unrelated re-renders.
+let cachedVersion = "";
+let cachedList: WidgetDef[] | null = null;
+let cachedById = new Map<string, WidgetDef>();
+
 export function listWidgets(): WidgetDef[] {
-  const all = new Map<string, WidgetDef>(registry);
-  for (const widget of slotWidgets()) all.set(widget.id, widget);
-  return [...all.values()].sort((a, b) => a.title.localeCompare(b.title) || a.id.localeCompare(b.id));
+  const key = catalogVersion();
+  if (cachedList === null || cachedVersion !== key) {
+    const all = new Map<string, WidgetDef>(registry);
+    for (const widget of slotWidgets()) all.set(widget.id, widget);
+    cachedList = [...all.values()].sort((a, b) => a.title.localeCompare(b.title) || a.id.localeCompare(b.id));
+    cachedById = all;
+    cachedVersion = key;
+  }
+  return cachedList;
+}
+
+/** O(1) lookup against the same cache as listWidgets(). */
+export function getWidget(id: string): WidgetDef | undefined {
+  listWidgets();
+  return cachedById.get(id);
 }
 
 function catalogVersion(): string {

@@ -23,7 +23,6 @@ import SlotHost from "./slots/SlotHost.ts";
 import { Icon } from "../icons.tsx";
 import CapabilityMenu from "./CapabilityMenu.tsx";
 import { setWorkspaceMode, useWorkspaceMode } from "../widgets/workspaceMode.ts";
-import { useWidgetLayout } from "../widgets/widgetLayout.ts";
 
 const STROKE = { fill: "none", stroke: "currentColor", strokeWidth: 1.5, strokeLinecap: "round", strokeLinejoin: "round" } as const;
 

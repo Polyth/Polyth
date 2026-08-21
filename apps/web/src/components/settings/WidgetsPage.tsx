@@ -3,7 +3,7 @@ import { getDragWidget, setDragWidget, WIDGET_MIME } from "../../dnd.ts";
 import { setOverlay, updateSettings, useStore } from "../../store.ts";
 import { setUiSettings, useUiSettings } from "../../uiPrefs.ts";
 import { applyPreset } from "../../workspacePresets.ts";
-import { useWidgetCatalog, type WidgetDef } from "../../widgets/catalog.ts";
+import { getWidget, useWidgetCatalog, type WidgetDef } from "../../widgets/catalog.ts";
 import {
   WIDGET_ZONES,
   applyWidgetLayoutPreset,
@@ -61,23 +61,26 @@ export default function WidgetsPage() {
   const [preset, setPreset] = useState<WidgetLayoutPresetId>("balanced");
   const [command, setCommand] = useState("");
   const [commandResult, setCommandResult] = useState("");
-  const idKey = widgets.map((widget) => widget.id).sort().join("\0");
 
+  // `widgets` is referentially stable per catalog version; ensureWidgets
+  // early-returns when nothing is missing, so this can never loop.
   useEffect(() => {
     ensureWidgets(widgets);
-  }, [idKey]);
+  }, [widgets]);
 
-  const byId = useMemo(() => new Map(widgets.map((widget) => [widget.id, widget])), [idKey]);
-  const selectedWidget = selected ? byId.get(selected) ?? null : null;
+  const selectedWidget = selected ? getWidget(selected) ?? null : null;
   const selectedPlacement = selected ? layout.widgets[selected] : undefined;
   const groups = useMemo(() => {
     const result = new Map<string, WidgetDef[]>();
-    for (const widget of widgets.filter((item) => isAllowed(item, layout.audience))) {
+    for (const widget of widgets) {
+      if (!isAllowed(widget, layout.audience)) continue;
       const name = groupOf(widget);
-      result.set(name, [...(result.get(name) ?? []), widget]);
+      const list = result.get(name);
+      if (list) list.push(widget);
+      else result.set(name, [widget]);
     }
     return result;
-  }, [idKey, layout.audience]);
+  }, [widgets, layout.audience]);
 
   const applyLayoutPreset = (id: WidgetLayoutPresetId) => {
     setPreset(id);
@@ -194,7 +197,7 @@ export default function WidgetsPage() {
           <div className="widget-layout-editor" data-settings-item="widgets.layout">
             {WIDGET_ZONES.map((zone) => {
               const items = layout.zones[zone]
-                .map((id) => byId.get(id))
+                .map((id) => getWidget(id))
                 .filter((widget): widget is WidgetDef =>
                   widget !== undefined && layout.widgets[widget.id]?.visible === true
                   && isAllowed(widget, layout.audience));
@@ -246,7 +249,7 @@ export default function WidgetsPage() {
           <div className="widget-recommended">
             <h3>Recommended to start</h3>
             <div>
-              {["core.composer", "goals.current", "git.recent", "core.quick-actions"].map((id) => byId.get(id)).filter((widget): widget is WidgetDef => !!widget).map((widget) => (
+              {["core.composer", "goals.current", "git.recent", "core.quick-actions"].map((id) => getWidget(id)).filter((widget): widget is WidgetDef => !!widget).map((widget) => (
                 <button key={widget.id} onClick={() => {
                   updateWidgetLayout((current) => moveWidget(setWidgetVisible(current, widget.id, true), widget.id, widget.zone ?? "main"));
                   setSelected(widget.id);
