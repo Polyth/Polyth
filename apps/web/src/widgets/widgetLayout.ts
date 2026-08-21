@@ -197,16 +197,27 @@ export function moveWidget(
   zone: WidgetZone,
   index = layout.zones[zone].length,
 ): WidgetLayout {
-  if (!(id in layout.widgets)) return layout;
+  const current = layout.widgets[id];
+  if (!current) return layout;
   const zones = Object.fromEntries(
     WIDGET_ZONES.map((name) => [name, layout.zones[name].filter((widgetId) => widgetId !== id)]),
   ) as Record<WidgetZone, string[]>;
   const target = zones[zone];
   target.splice(Math.max(0, Math.min(index, target.length)), 0, id);
+  // No-op moves (already visible at that exact position) return the same
+  // layout so commit() can skip the persist + listener fanout.
+  if (current.visible) {
+    const unchanged = WIDGET_ZONES.every((name) => {
+      const before = layout.zones[name];
+      const after = zones[name];
+      return before.length === after.length && before.every((widgetId, i) => widgetId === after[i]);
+    });
+    if (unchanged) return layout;
+  }
   return {
     ...layout,
     zones,
-    widgets: { ...layout.widgets, [id]: { ...layout.widgets[id]!, visible: true } },
+    widgets: { ...layout.widgets, [id]: { ...current, visible: true } },
   };
 }
 
@@ -219,7 +230,9 @@ export function setWidgetVisible(layout: WidgetLayout, id: string, visible: bool
 export function setWidgetSize(layout: WidgetLayout, id: string, size: WidgetSize): WidgetLayout {
   const current = layout.widgets[id];
   if (!current) return layout;
-  return { ...layout, widgets: { ...layout.widgets, [id]: { ...current, size: clampSize(size) } } };
+  const next = clampSize(size);
+  if (next.w === current.size.w && next.h === current.size.h) return layout;
+  return { ...layout, widgets: { ...layout.widgets, [id]: { ...current, size: next } } };
 }
 
 export function setWidgetAudience(layout: WidgetLayout, audience: WidgetAudience): WidgetLayout {
@@ -260,9 +273,34 @@ const write = (layout: WidgetLayout): void => {
 let state = parseWidgetLayout(read());
 const listeners = new Set<() => void>();
 
-function commit(next: WidgetLayout): void {
-  state = next;
+// Drag-resize commits many layouts per second; a trailing timer batches them
+// into one localStorage serialization per pause while listeners still see
+// every state synchronously. pagehide flushes so nothing is lost on exit.
+let writeTimer: ReturnType<typeof setTimeout> | null = null;
+
+function flushWrite(): void {
+  if (writeTimer === null) return;
+  clearTimeout(writeTimer);
+  writeTimer = null;
   write(state);
+}
+
+function scheduleWrite(): void {
+  if (writeTimer !== null) return;
+  writeTimer = setTimeout(() => {
+    writeTimer = null;
+    write(state);
+  }, 150);
+  // Node timers would keep the test process alive; browsers return a number.
+  (writeTimer as unknown as { unref?: () => void }).unref?.();
+}
+
+if (typeof window !== "undefined") window.addEventListener("pagehide", flushWrite);
+
+function commit(next: WidgetLayout): void {
+  if (next === state) return;
+  state = next;
+  scheduleWrite();
   for (const listener of [...listeners]) listener();
 }
 
