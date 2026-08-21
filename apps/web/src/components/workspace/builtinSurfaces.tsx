@@ -27,7 +27,7 @@ import { registerWorkspaceSurface } from "../../workspace/surfaceRegistry.ts";
 // Large polyth-style hero for a fresh session (or no session yet):
 // centered headline, the composer as an elevated card, and suggestion chips.
 function SessionHero() {
-  const project = useStore((s) => s.projects.find((p) => p.id === s.activeProjectId) ?? null);
+  const project = useStore((s) => s.projectRegistry.projects.find((p) => p.id === s.activeProjectId) ?? null);
   const branch = useStore((s) => s.gitBranch);
   const name = project?.name || project?.path || "this project";
   return (

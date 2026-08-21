@@ -68,7 +68,7 @@ export function installNotify(): void {
     const specs = diffNotifications(prev, snapshots, {
       kinds: new Set<NotifyKind>(ui.notifyKinds),
       template: ui.notifyTemplate,
-      projectNames: new Map(s.projects.map((p) => [p.id, p.name])),
+      projectNames: new Map(s.projectRegistry.projects.map((p) => [p.id, p.name])),
     });
     prev.clear();
     for (const snap of snapshots) prev.set(snap.id, snap);

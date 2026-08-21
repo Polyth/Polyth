@@ -21,6 +21,9 @@ export interface ModalSurfaceOptions {
   containerRef: RefObject<HTMLElement | null>;
   /** CSS selector inside the container to receive initial focus. */
   initialFocus?: string;
+  /** Resolve the unmount focus target from the recorded opener. Returning
+   *  null delegates focus to a caller-owned handoff. */
+  resolveRestoreFocus?: (opener: HTMLElement | null) => HTMLElement | null;
 }
 
 const visible = (el: HTMLElement): boolean => el.getClientRects().length > 0;
@@ -34,9 +37,18 @@ const visible = (el: HTMLElement): boolean => el.getClientRects().length > 0;
  * - restores a still-connected opener on close;
  * - keeps hidden mounted content inert and aria-hidden while closed.
  */
-export function useModalSurface({ open, enabled = true, onClose, containerRef, initialFocus }: ModalSurfaceOptions): void {
+export function useModalSurface({
+  open,
+  enabled = true,
+  onClose,
+  containerRef,
+  initialFocus,
+  resolveRestoreFocus,
+}: ModalSurfaceOptions): void {
   const closeRef = useRef(onClose);
   closeRef.current = onClose;
+  const resolverRef = useRef(resolveRestoreFocus);
+  resolverRef.current = resolveRestoreFocus;
 
   // Hidden-but-mounted surfaces (keep-alive drawer/sheet) must not be
   // reachable by focus, pointer, or assistive technology.
@@ -93,7 +105,11 @@ export function useModalSurface({ open, enabled = true, onClose, containerRef, i
     el.addEventListener("keydown", onKeyDown);
     return () => {
       el.removeEventListener("keydown", onKeyDown);
-      if (opener && opener.isConnected && visible(opener)) opener.focus();
+      const connectedOpener = opener && opener !== document.body && opener.isConnected && visible(opener)
+        ? opener
+        : null;
+      const target = resolverRef.current ? resolverRef.current(connectedOpener) : connectedOpener;
+      target?.focus();
     };
   }, [enabled, open, initialFocus, containerRef]);
 }
@@ -106,11 +122,23 @@ export interface DialogProps {
   /** wide dialogs (focus editor, fullscreen diagram) */
   size?: "md" | "lg" | "full";
   initialFocus?: string; // CSS selector inside the dialog
+  /** Explicit exit-focus intent (UX-ONBOARDING): given the recorded opener,
+   *  return the element to focus on unmount — a fallback when the opener has
+   *  unmounted, or null when the caller owns a queued focus handoff instead.
+   *  Default behavior (no prop) restores the opener. `BODY` is never a valid
+   *  destination. */
+  resolveRestoreFocus?: (opener: HTMLElement | null) => HTMLElement | null;
 }
 
-export default function Dialog({ title, onClose, children, className, size = "md", initialFocus }: DialogProps) {
+export default function Dialog({ title, onClose, children, className, size = "md", initialFocus, resolveRestoreFocus }: DialogProps) {
   const panelRef = useRef<HTMLDivElement>(null);
-  useModalSurface({ open: true, onClose, containerRef: panelRef, initialFocus });
+  useModalSurface({
+    open: true,
+    onClose,
+    containerRef: panelRef,
+    initialFocus,
+    resolveRestoreFocus,
+  });
 
   return (
     <div className="dialog-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>

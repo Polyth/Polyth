@@ -17,6 +17,7 @@ import { api, type GitStatus, type QuotaSnapshotDto, type QuotaWindowDto, type Q
 import { fmtCost, fmtTokens } from "../../format.ts";
 import { EmptyState, PageHead, Row, Seg, Toggle } from "./parts.tsx";
 import { refreshProfiles, useProfiles } from "../../profiles.ts";
+import { removeProject } from "../../init.ts";
 import AgentProfileForm from "../AgentProfileForm.tsx";
 import ProjectFolderDialog from "../ProjectFolderDialog.tsx";
 import { parseMcpServersJson, type McpImportResult } from "../../mcpImport.ts";
@@ -757,7 +758,7 @@ export function UsagePage() {
 }
 
 export function ProjectsPage() {
-  const projects = useStore((s) => s.projects);
+  const projects = useStore((s) => s.projectRegistry.projects);
   const [picking, setPicking] = useState(false);
   return (
     <>
@@ -771,7 +772,7 @@ export function ProjectsPage() {
           <div className="set-row-control">
             <button
               className="small-btn danger-btn"
-              onClick={() => { if (window.confirm(`Remove project "${p.name || p.path}" from Polyth?`)) void api.deleteProject(p.id).then(() => location.reload()); }}
+              onClick={() => { if (window.confirm(`Remove project "${p.name || p.path}" from Polyth?`)) void removeProject(p.id); }}
             >Remove</button>
           </div>
         </div>

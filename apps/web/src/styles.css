@@ -541,6 +541,16 @@ html.light .hero h2 { background: none; -webkit-background-clip: initial; backgr
 .hero-open-project { margin-top: 18px; padding: 9px 18px; border-radius: var(--radius); font-size: 13px; cursor: pointer; }
 .side-open-project { display: block; width: 100%; background: none; border: 0; cursor: pointer; line-height: 1.5; }
 .side-open-project:hover { color: var(--text); }
+/* UX-ONBOARDING: registry loading/failure never claim "no projects". */
+.side-projects-status { padding: 24px 12px; font-size: 12px; }
+.hero-open-project:disabled { opacity: 0.55; cursor: default; }
+.hero-retry-projects { margin-top: 18px; padding: 9px 22px; border-radius: var(--radius); font-size: 13px; cursor: pointer; }
+.hero-status { margin-top: 14px; max-width: 470px; font-size: 11.5px; color: var(--faint); overflow-wrap: anywhere; }
+.hero-project-loading h2 { animation: hero-loading-pulse 1.6s ease-in-out infinite; }
+@keyframes hero-loading-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.55; } }
+@media (prefers-reduced-motion: reduce) {
+  .hero-project-loading h2 { animation: none; }
+}
 
 .empty { color: var(--muted); text-align: center; padding: 40px 20px; }
 .surface-error { min-height: 100%; }
@@ -2272,6 +2282,15 @@ body[data-motion="reduced"] *, body[data-motion="reduced"] *::before, body[data-
 
 /* ---------- open-project folder picker (file manager dialog) ---------- */
 .folder-dialog { width: min(720px, calc(100vw - 48px)); gap: 0; }
+/* UX-ONBOARDING: one keyboard-owning wrapper (Mod+Enter direct confirm)
+   preserving the panel's column layout. */
+.folder-dialog-body { display: flex; flex-direction: column; gap: 10px; min-height: 0; flex: 1; }
+.folder-up-action {
+  background: none; border: 0; font: inherit; color: inherit; text-align: left;
+  width: auto; margin: 0 18px;
+}
+.folder-up-action:disabled { opacity: 0.5; cursor: default; }
+.folder-list[aria-busy="true"] { opacity: 0.6; pointer-events: none; }
 .folder-dialog-head {
   display: flex; align-items: flex-start; justify-content: space-between; gap: 12px;
   padding: 16px 18px 10px;

@@ -454,7 +454,7 @@ function OverflowMenu({ sessionId, onGoal }: { sessionId: string | null; onGoal:
 
 export default function Header() {
   const session = useStore((s) => s.sessions.find((x) => x.id === s.activeSessionId) ?? null);
-  const project = useStore((s) => s.projects.find((p) => p.id === s.activeProjectId) ?? null);
+  const project = useStore((s) => s.projectRegistry.projects.find((p) => p.id === s.activeProjectId) ?? null);
   const view = useStore((s) => s.activeView);
   const branch = useStore((s) => s.gitBranch);
   const models = useStore((s) => s.models);

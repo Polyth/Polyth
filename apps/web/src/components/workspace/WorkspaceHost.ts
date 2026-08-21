@@ -12,6 +12,8 @@
 // isolation through a real React root.
 import { createElement, useSyncExternalStore, type ReactNode } from "react";
 import { setOverlay, useStore } from "../../store.ts";
+import { refreshProjects } from "../../init.ts";
+import type { ProjectRegistryState } from "../../projectRegistry.ts";
 import ViewErrorBoundary from "../ViewErrorBoundary.ts";
 import {
   listWorkspaceSurfaces,
@@ -52,8 +54,49 @@ export function surfaceResetKey(
   return `${surface.id}#${instanceIdOf(surface)}:${projectId ?? ""}:${sessionId ?? ""}`;
 }
 
-/** Standard project empty state — the same hero the session view always used. */
-function ProjectEmptyState(): ReactNode {
+/** Project-registry-aware empty state. Loading and failure never masquerade as
+ *  a successful empty project list. */
+function ProjectEmptyState({ registry }: { registry: ProjectRegistryState }): ReactNode {
+  if (registry.status === "loading") {
+    return createElement(
+      "div",
+      { className: "stage" },
+      createElement(
+        "div",
+        { className: "hero hero-project-loading" },
+        createElement("div", { className: "hero-mark" }, "p"),
+        createElement("h2", null, "Loading your projects…"),
+        createElement("p", { className: "hero-sub" }, "Polyth is checking this server for saved projects."),
+        createElement(
+          "button",
+          { className: "primary-btn hero-open-project", disabled: true },
+          "Choose a folder…",
+        ),
+      ),
+    );
+  }
+  if (registry.status === "failed") {
+    return createElement(
+      "div",
+      { className: "stage" },
+      createElement(
+        "div",
+        { className: "hero hero-project-failed" },
+        createElement("div", { className: "hero-mark" }, "p"),
+        createElement("h2", null, "Couldn’t load projects"),
+        createElement("p", { className: "hero-sub" }, "Polyth couldn’t read the project list from this server."),
+        createElement(
+          "button",
+          {
+            className: "primary-btn hero-retry-projects",
+            onClick: () => { void refreshProjects("manual"); },
+          },
+          "Retry",
+        ),
+        createElement("p", { className: "hero-status mono", role: "status" }, registry.error),
+      ),
+    );
+  }
   return createElement(
     "div",
     { className: "stage" },
@@ -103,12 +146,13 @@ export default function WorkspaceHost(): ReactNode {
   const projectId = useStore((s) => s.activeProjectId);
   const sessionId = useStore((s) => s.activeSessionId);
   const view = useStore((s) => s.activeView);
+  const registry = useStore((s) => s.projectRegistry);
 
   const surface = resolveWorkspaceSurface(view, listWorkspaceSurfaces(), []);
   if (!surface) return createElement(NoSurfaceEmptyState);
 
   const gate = workspaceSurfaceGate(surface, { projectId, sessionId });
-  if (gate === "needs-project") return createElement(ProjectEmptyState);
+  if (gate === "needs-project") return createElement(ProjectEmptyState, { registry });
   if (gate === "needs-session") return createElement(SessionEmptyState, { title: surface.title });
 
   // EXT-SEAMS-S2-V1: every surface receives the canonical ids as props — the

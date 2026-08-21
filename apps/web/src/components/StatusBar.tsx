@@ -21,7 +21,7 @@ const VIEW_LABEL: Record<AppView, string> = {
 // of being clipped half-visible. The bar itself never scrolls horizontally.
 export default function StatusBar() {
   const branch = useStore((s) => s.gitBranch);
-  const project = useStore((s) => s.projects.find((p) => p.id === s.activeProjectId) ?? null);
+  const project = useStore((s) => s.projectRegistry.projects.find((p) => p.id === s.activeProjectId) ?? null);
   const session = useStore((s) => s.sessions.find((x) => x.id === s.activeSessionId) ?? null);
   const view = useStore((s) => s.activeView);
   const rail = useStore((s) => s.railPlugin);

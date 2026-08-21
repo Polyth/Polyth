@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect } from "react";
 import Sidebar from "./components/Sidebar.tsx";
 import Main from "./components/Main.tsx";
 import ContextRail from "./components/ContextRail.tsx";
@@ -10,6 +10,7 @@ import SettingsModal from "./components/SettingsModal.tsx";
 import ProjectFolderDialog from "./components/ProjectFolderDialog.tsx";
 import ViewErrorBoundary from "./components/ViewErrorBoundary.ts";
 import { clearUiError, setOverlay, useStore } from "./store.ts";
+import { decideFirstRunSurface, markAutoPickerOffered, wasAutoPickerOffered } from "./projectOnboarding.ts";
 import { usePresetState } from "./workspacePresets.ts";
 import { LiveRegion } from "./components/a11y/live.tsx";
 import WorktreeSessionDialog from "./components/WorktreeSessionDialog.tsx";
@@ -33,10 +34,11 @@ export default function App() {
     (s) => `${s.activeProjectId ?? ""}:${s.activeSessionId ?? ""}:${s.activeView}`,
   );
   const preset = usePresetState();
-  const projectReady = useStore(
-    (s) => s.activeProjectId !== null && s.projects.some((p) => p.id === s.activeProjectId),
+  const registryStatus = useStore((s) => s.projectRegistry.status);
+  const projectCount = useStore((s) => s.projectRegistry.projects.length);
+  const hasActiveProject = useStore(
+    (s) => s.activeProjectId !== null && s.projectRegistry.projects.some((p) => p.id === s.activeProjectId),
   );
-  const noProjects = useStore((s) => s.projectsLoaded && s.projects.length === 0);
   const paneFullscreen = useStore((s) => s.paneFullscreen);
 
   useEffect(() => {
@@ -45,21 +47,31 @@ export default function App() {
     return () => window.removeEventListener("polyth:open-settings", openSettings);
   }, []);
 
-  // First-run sequence: the shell, runtime state, and project picker never
-  // depend on a preset. With no project yet, offer the picker once — preset
-  // setup does not cover or replace connection, health, or project errors.
-  const autoPickerShown = useRef(false);
+  // UX-ONBOARDING coordinator: one pure decision over project-registry truth.
+  // `preset.setup` is not an input to picker admission — the picker opens only
+  // from a ready-empty registry, once per document, and never over another
+  // overlay. The episode flag is read in render; it only changes together with
+  // the overlay transition below, so the value is always current.
+  const surface = decideFirstRunSurface({
+    registryStatus,
+    projectCount,
+    hasValidActiveProject: hasActiveProject,
+    pickerOfferedThisDocument: wasAutoPickerOffered(),
+    presetSetup: preset.setup,
+  });
+
   useEffect(() => {
-    if (preset.setup === "unseen" && noProjects && overlay === null && !autoPickerShown.current) {
-      autoPickerShown.current = true;
+    if (surface === "project-picker" && overlay === null) {
+      markAutoPickerOffered();
       setOverlay("project-picker");
     }
-  }, [preset.setup, noProjects, overlay]);
+  }, [surface, overlay]);
 
-  // Optional preset setup: only after a project is usable, only while unseen,
-  // and never over another dialog. Settings can reopen it (overlay).
+  // Optional preset setup renders only after activeProjectId identifies a
+  // project in a ready registry, never over the picker or another dialog.
+  // Settings can reopen it explicitly (overlay === "onboarding").
   const showPresetSetup =
-    overlay === "onboarding" || (preset.setup === "unseen" && projectReady && overlay === null);
+    overlay === "onboarding" || (surface === "preset-setup" && overlay === null);
 
   return (
     <div className="app">

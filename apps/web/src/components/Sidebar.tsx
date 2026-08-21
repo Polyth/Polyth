@@ -1,10 +1,9 @@
 import { useEffect, useRef, useState } from "react";
 import {
   getState, useStore, activateProject, openWorkspacePane, openWorktreeSessionDialog, setOverlay,
-  setProjects, setSidebarOpen, setUiError,
+  setSidebarOpen, setUiError,
 } from "../store.ts";
-import { createSession } from "../init.ts";
-import { api } from "../api.ts";
+import { createSession, renameProject } from "../init.ts";
 import { MOD } from "../format.ts";
 import { friendlyError } from "../settings.ts";
 import { Icon } from "../icons.tsx";
@@ -28,7 +27,10 @@ function closeDrawer(): void {
 }
 
 export default function Sidebar() {
-  const projects = useStore((s) => s.projects);
+  // Canonical registry truth: `projects` has one owner; loading and failure
+  // never claim there are no projects (UX-ONBOARDING).
+  const registry = useStore((s) => s.projectRegistry);
+  const projects = registry.projects;
   const activeProjectId = useStore((s) => s.activeProjectId);
   const activeSessionId = useStore((s) => s.activeSessionId);
   const drawerOpen = useStore((s) => s.sidebarOpen);
@@ -75,8 +77,9 @@ export default function Sidebar() {
     const current = projects.find((p) => p.id === id);
     if (!name || !current || name === current.name) return;
     try {
-      await api.patchProject(id, { name });
-      setProjects(await api.listProjects());
+      // Registry action: the server-returned project is upserted in place —
+      // no component-owned `setProjects(await listProjects())` write.
+      await renameProject(id, name);
     } catch (e) {
       setUiError(friendlyError("Couldn’t rename the project", e));
     }
@@ -97,7 +100,12 @@ export default function Sidebar() {
           <span className="side-icons">
             <button className="icon-btn" title={`Search sessions (${MOD}P)`} onClick={() => setOverlay("search")}><Icon.search /></button>
             <button className="icon-btn" title="Source control (Git & worktrees)" onClick={() => openWorkspacePane("git")}><Icon.tree /></button>
-            <button className="icon-btn" title="Open project" onClick={() => setOverlay("project-picker")}><Icon.plus /></button>
+            <button
+              className="icon-btn"
+              title="Open project"
+              disabled={registry.status === "loading"}
+              onClick={() => setOverlay("project-picker")}
+            ><Icon.plus /></button>
             {compact && (
               <button
                 className="icon-btn drawer-close"
@@ -109,7 +117,13 @@ export default function Sidebar() {
           </span>
         </div>
         <div className="side-scroll">
-          {projects.length === 0 && (
+          {registry.status === "loading" && (
+            <div className="empty side-projects-status" role="status">Loading projects…</div>
+          )}
+          {registry.status === "failed" && (
+            <div className="empty side-projects-status" role="status">Couldn’t load projects.</div>
+          )}
+          {registry.status === "ready" && projects.length === 0 && (
             <button className="empty side-open-project" onClick={() => setOverlay("project-picker")}>
               No projects yet.<br />Choose a folder to start →
             </button>

@@ -20,6 +20,18 @@ import {
   setPaneLastResource,
   setPaneOpenSurface,
 } from "./workspace/panePrefs.ts";
+import {
+  beginListRequest,
+  initialProjectRegistry,
+  mutationVersionOf,
+  publishListFailure,
+  publishListSuccess,
+  removeProject,
+  replacementActiveId,
+  upsertProject,
+  type ListPublishOutcome,
+  type ProjectRegistryState,
+} from "./projectRegistry.ts";
 
 // UX-PANE-MODEL: Files, Git, Terminal, and Preview are workspace PANE
 // surfaces, not primary views — they open beside (or over) a still-mounted
@@ -43,9 +55,9 @@ export interface WorktreeSessionRequest {
 }
 
 export interface AppState {
-  projects: Project[];
-  /** True once the initial project list fetch has resolved. */
-  projectsLoaded: boolean;
+  /** Canonical project-registry truth (UX-ONBOARDING): loading, failed, and
+   *  ready are distinct; `projects` has this one owner. */
+  projectRegistry: ProjectRegistryState;
   sessions: SessionProjection[];
   events: Record<string, SessionEvent[]>;
   models: ModelDescriptor[];
@@ -78,8 +90,7 @@ export interface AppState {
 }
 
 let state: AppState = {
-  projects: [],
-  projectsLoaded: false,
+  projectRegistry: initialProjectRegistry(),
   sessions: [],
   events: {},
   models: [],
@@ -132,11 +143,86 @@ export function useActiveModel(): RenderModel {
   return useMemo(() => buildModel(events), [events]);
 }
 
-// ---- actions -------------------------------------------------------------
+// ---- project registry actions (UX-ONBOARDING) -----------------------------
+// All project mutations go through these; direct component writes equivalent
+// to `setProjects(await listProjects())` no longer exist.
 
-export function setProjects(projects: Project[]): void {
-  set({ projects, projectsLoaded: true });
+/** Monotonic list-request generation — one per document, never reused. */
+let nextProjectRequestId = 0;
+
+export interface ProjectListTicket {
+  requestId: number;
+  /** mutationVersion captured when the request began; a mutation completing
+   *  after that makes the response stale even when the requestId is current. */
+  mutationVersion: number;
 }
+
+export function beginProjectListRequest(): ProjectListTicket {
+  const requestId = ++nextProjectRequestId;
+  const mutationVersion = mutationVersionOf(state.projectRegistry);
+  set({ projectRegistry: beginListRequest(state.projectRegistry, requestId) });
+  return { requestId, mutationVersion };
+}
+
+export function publishProjectList(ticket: ProjectListTicket, projects: Project[]): ListPublishOutcome {
+  const result = publishListSuccess(state.projectRegistry, ticket.requestId, ticket.mutationVersion, projects);
+  if (result.outcome === "published") set({ projectRegistry: result.state });
+  return result.outcome;
+}
+
+export function failProjectList(ticket: ProjectListTicket, error: string): void {
+  set({ projectRegistry: publishListFailure(state.projectRegistry, ticket.requestId, error) });
+}
+
+/** Rename (and other in-place mutations): upsert the server-returned project. */
+export function applyProjectUpsert(project: Project): void {
+  set({ projectRegistry: upsertProject(state.projectRegistry, project) });
+}
+
+/** Add/Create success — one atomic client transaction: the server-returned
+ *  project is in the registry AND active in the same store transition, so the
+ *  picker can observe the commit before it closes. Stale session/branch/editor
+ *  state from another project is cleared here; no session is created. */
+export function applyProjectAdded(project: Project): void {
+  localStorage.setItem("polyth.activeProjectId", project.id);
+  const projectRegistry = upsertProject(state.projectRegistry, project);
+  if (state.activeProjectId === project.id) {
+    set({ projectRegistry });
+    return;
+  }
+  set({
+    projectRegistry,
+    activeProjectId: project.id,
+    activeSessionId: null,
+    gitBranch: "",
+    editorFile: null,
+    editorLocation: null,
+    gitDiffPath: null,
+  });
+}
+
+/** Delete success: remove the confirmed id and resolve a replacement active. */
+export function applyProjectRemoved(id: string): void {
+  const projectRegistry = removeProject(state.projectRegistry, id);
+  const activeProjectId = replacementActiveId(projectRegistry.projects, state.activeProjectId);
+  localStorage.setItem("polyth.activeProjectId", activeProjectId ?? "");
+  if (activeProjectId === state.activeProjectId) {
+    set({ projectRegistry });
+    return;
+  }
+  set({
+    projectRegistry,
+    activeProjectId,
+    activeSessionId: null,
+    gitBranch: "",
+    editorFile: null,
+    editorLocation: null,
+    gitDiffPath: null,
+  });
+}
+
+// ---- other actions ---------------------------------------------------------
+
 export function setSessions(sessions: SessionProjection[]): void {
   set({ sessions });
 }

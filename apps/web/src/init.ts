@@ -6,7 +6,8 @@ import { displaySessionTitle, isPlaceholderTitle, modelToMarkdown, titleFromProm
 import { friendlyError } from "./settings.ts";
 import { formatAppUrl, parseAppUrl } from "./router.ts";
 import * as store from "./store.ts";
-import type { AttachmentRef, JsonObject } from "@polyth/contracts";
+import { resolveActiveProjectId } from "./projectRegistry.ts";
+import type { AttachmentRef, JsonObject, Project } from "@polyth/contracts";
 import { suggestWorktreeBranch } from "./worktreeSessions.ts";
 import { installPushDeepLinks } from "./push.ts";
 import { applyComposerSeed } from "./drafts.ts";
@@ -24,10 +25,29 @@ const branchKey = (projectId: string, sessionId: string | null): string =>
   `${projectId}\0${sessionId ?? ""}`;
 
 function fetchBranch(projectId: string, sessionId: string | null): void {
-  branchFetchedFor = branchKey(projectId, sessionId);
+  const key = branchKey(projectId, sessionId);
+  branchFetchedFor = key;
   void api.gitStatus(projectId, sessionId ?? undefined)
-    .then((st) => store.setGitBranch(st.branch))
-    .catch(() => store.setGitBranch(""));
+    .then((st) => {
+      const current = store.getState();
+      if (
+        branchFetchedFor === key
+        && current.activeProjectId === projectId
+        && current.activeSessionId === sessionId
+      ) {
+        store.setGitBranch(st.branch);
+      }
+    })
+    .catch(() => {
+      const current = store.getState();
+      if (
+        branchFetchedFor === key
+        && current.activeProjectId === projectId
+        && current.activeSessionId === sessionId
+      ) {
+        store.setGitBranch("");
+      }
+    });
 }
 
 // ---- session URLs -----------------------------------------------------------
@@ -72,7 +92,13 @@ function startUrlSync(): void {
 }
 
 export function init(): void {
-  void boot();
+  // UX-ONBOARDING boot: project, model, and agent hydration launch
+  // independently and publish as soon as each settles. Awaiting a combined
+  // Promise.all/allSettled before publishing any result is forbidden — a slow
+  // or failed catalog request can never delay, erase, or roll back projects.
+  void refreshProjects("initial");
+  void refreshModels();
+  void refreshAgents();
   startSync();
   // F18: notification clicks from the service worker land here when a tab
   // already exists (postMessage instead of a second window).
@@ -100,49 +126,109 @@ export function init(): void {
   });
 }
 
-async function boot(): Promise<void> {
-  try {
-    const [projects, models, agents] = await Promise.all([
-      api.listProjects(),
-      api.listModels(),
-      api.listAgents(),
-    ]);
-    store.setProjects(projects);
-    store.setModels(models);
-    store.setAgents(agents);
+// ---- project registry hydration (UX-ONBOARDING) ------------------------------
 
-    // URL wins over localStorage: opening a shared /p/…/s/… link (or an
-    // agent's/push notification's ?session=) restores exactly that session.
-    const fromUrl = parseAppUrl(location.pathname, location.search);
-    if (fromUrl.sessionId) {
-      try {
-        await openSession(fromUrl.sessionId);
-        const projectId = store.getState().activeProjectId;
-        if (projectId) await refreshSessions(projectId);
-        startUrlSync();
-        return;
-      } catch (err) {
-        console.warn("session from URL not found, falling back", err);
+export type ProjectRefreshReason = "initial" | "manual" | "reconcile";
+
+let bootRestored = false;
+let reconcileRetryTimer: ReturnType<typeof setTimeout> | undefined;
+
+/** Generation-safe project refresh: increment the request id and capture the
+ *  mutationVersion (store ticket), publish only when the response is still
+ *  current, and reconcile once when a mutation superseded the captured data.
+ *  Initial failure publishes `failed`; a refresh failure keeps the ready
+ *  snapshot and exposes a retryable, non-blocking refresh error. */
+export async function refreshProjects(reason: ProjectRefreshReason = "manual"): Promise<void> {
+  const ticket = store.beginProjectListRequest();
+  try {
+    const projects = await api.listProjects();
+    const outcome = store.publishProjectList(ticket, projects);
+    if (outcome === "superseded-by-mutation") {
+      void refreshProjects("reconcile");
+      return;
+    }
+    if (outcome !== "published") return;
+    await restoreSelectionAfterReady();
+  } catch (err) {
+    console.error("project list failed", err);
+    const hadSnapshot = store.getState().projectRegistry.status === "ready";
+    store.failProjectList(ticket, friendlyError("Couldn’t load projects", err));
+    if (hadSnapshot) {
+      // Non-blocking refresh warning; known data stays usable.
+      store.setUiError(friendlyError("Couldn’t refresh the project list", err));
+      if (reason === "reconcile" && reconcileRetryTimer === undefined) {
+        reconcileRetryTimer = setTimeout(() => {
+          reconcileRetryTimer = undefined;
+          void refreshProjects("reconcile");
+        }, 4_000);
       }
     }
+  }
+}
 
-    const savedProject = localStorage.getItem("polyth.activeProjectId");
-    const activeProject =
-      projects.find((p) => p.id === fromUrl.projectId)
-      ?? projects.find((p) => p.id === savedProject)
-      ?? projects[0];
-    if (activeProject) {
-      store.activateProject(activeProject.id);
-      await refreshSessions(activeProject.id);
+/** URL/session restoration begins once projects are ready — never delayed by
+ *  model/agent catalogs. Selection order: valid session deep link, valid
+ *  project deep link, valid saved id, then the first server project. An
+ *  invalid link reports a recoverable error and falls through; it never
+ *  manufactures an empty first run. */
+async function restoreSelectionAfterReady(): Promise<void> {
+  const registry = store.getState().projectRegistry;
+  if (registry.status !== "ready") return;
+  const projects = registry.projects;
+
+  if (!bootRestored) {
+    bootRestored = true;
+    const fromUrl = parseAppUrl(location.pathname, location.search);
+    const initial = resolveActiveProjectId(projects, {
+      urlProjectId: fromUrl.projectId ?? null,
+      savedProjectId: localStorage.getItem("polyth.activeProjectId"),
+    });
+    if (initial) store.activateProject(initial);
+    if (fromUrl.sessionId) {
+      // A valid session deep link resolves its owning project and wins.
+      try {
+        await openSession(fromUrl.sessionId);
+      } catch (err) {
+        console.warn("session from URL not found, falling back", err);
+        store.setUiError("That session link couldn’t be opened — showing the project instead.");
+      }
+    } else if (initial) {
       const savedSession = localStorage.getItem("polyth.activeSessionId");
-      if (savedSession && store.getState().sessions.some((session) => session.id === savedSession)) {
-        await openSession(savedSession);
+      if (savedSession) {
+        await refreshSessions(initial);
+        if (store.getState().sessions.some((session) => session.id === savedSession)) {
+          await openSession(savedSession).catch(() => {});
+        }
       }
     }
     startUrlSync();
+    return;
+  }
+
+  // Later refresh: keep the current active project when it still exists,
+  // otherwise resolve a replacement (or none when the registry emptied).
+  const active = store.getState().activeProjectId;
+  if (active && !projects.some((p) => p.id === active)) {
+    store.activateProject(projects[0]?.id ?? null);
+  } else if (!active && projects.length > 0) {
+    store.activateProject(projects[0]!.id);
+  }
+}
+
+async function refreshModels(): Promise<void> {
+  try {
+    store.setModels(await api.listModels());
   } catch (err) {
-    console.error("initial load failed", err);
-    store.setUiError(friendlyError("Couldn’t reach the Polyth server", err));
+    // Project onboarding continues; the composer catalog owns its own state.
+    console.error("list models failed", err);
+  }
+}
+
+async function refreshAgents(): Promise<void> {
+  try {
+    store.setAgents(await api.listAgents());
+  } catch (err) {
+    console.error("list agents failed", err);
   }
 }
 
@@ -190,18 +276,35 @@ export async function refreshSessions(projectId: string): Promise<void> {
   }
 }
 
-export async function addProject(path: string, name?: string): Promise<void> {
+// Add/Create ordering (UX-ONBOARDING): the POST response is authoritative for
+// id, name, and canonical path. On success the store applies one atomic
+// upsert-and-activate transition (mutationVersion increments, so any list
+// captured before the mutation is discarded), then a non-blocking
+// reconciliation list request starts. No session is created and no remote Git
+// endpoint is contacted here; local branch enrichment follows activation.
+export async function addProject(path: string, name?: string): Promise<Project> {
   const p = await api.addProject(path, name);
-  const projects = store.getState().projects;
-  store.setProjects(projects.some((project) => project.id === p.id) ? projects : [...projects, p]);
-  store.activateProject(p.id);
+  store.applyProjectAdded(p);
+  void refreshProjects("reconcile");
+  return p;
 }
 
-export async function createProject(path: string, name?: string): Promise<void> {
+export async function createProject(path: string, name?: string): Promise<Project> {
   const p = await api.createProject(path, name);
-  const projects = store.getState().projects;
-  store.setProjects(projects.some((project) => project.id === p.id) ? projects : [...projects, p]);
-  store.activateProject(p.id);
+  store.applyProjectAdded(p);
+  void refreshProjects("reconcile");
+  return p;
+}
+
+export async function renameProject(id: string, name: string): Promise<void> {
+  const updated = await api.patchProject(id, { name });
+  store.applyProjectUpsert(updated);
+}
+
+export async function removeProject(id: string): Promise<void> {
+  await api.deleteProject(id);
+  store.applyProjectRemoved(id);
+  void refreshProjects("reconcile");
 }
 
 export interface CreateSessionOptions {
@@ -229,7 +332,7 @@ async function createDefaultWorktree(projectId: string, title?: string): Promise
 }
 
 export async function createSession(projectId: string, opts: CreateSessionOptions = {}): Promise<void> {
-  const project = store.getState().projects.find((candidate) => candidate.id === projectId);
+  const project = store.getState().projectRegistry.projects.find((candidate) => candidate.id === projectId);
   const worktreePath = opts.worktreePath
     ?? (project?.defaults?.worktreeBehavior === "fresh-worktree"
       ? await createDefaultWorktree(projectId, opts.title)
