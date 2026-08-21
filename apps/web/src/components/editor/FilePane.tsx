@@ -546,7 +546,9 @@ export default function FilePane({ projectId, sessionId, resource: path, visible
         </div>
       ) : previewKind === "markdown" && previewOn ? (
         <div className="editor-body editor-md-preview" ref={bodyRef}>
-          <MarkdownDoc text={doc.content} keyBase={`md-${doc.path}`} />
+          <div className="editor-md-content">
+            <MarkdownDoc text={doc.content} keyBase={`md-${doc.path}`} />
+          </div>
         </div>
       ) : previewKind === "html" && previewOn ? (
         <div className="editor-body editor-html-preview" ref={bodyRef}>

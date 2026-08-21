@@ -2073,6 +2073,15 @@ html[data-density="compact"] .set-row { padding: 9px 0; }
 }
 .editor-tree:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
 .editor-pane { flex: 1; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
+/* UX-FILES-TIMELINE-03 finding 7: PaneHost wraps every kept-alive resource in
+   .pane-body — it must complete the fill chain so .editor-body/.editor-edit
+   flex sizing works and the pane fills its container. [hidden] keeps its
+   no-geometry keep-alive semantics (display:flex would otherwise defeat it). */
+.pane-body {
+  flex: 1; min-width: 0; min-height: 0;
+  display: flex; flex-direction: column; overflow: hidden;
+}
+.pane-body[hidden] { display: none; }
 .editor-head {
   display: flex; align-items: center; gap: 8px; min-height: 38px;
   padding: 4px var(--gutter) 4px 14px; border-bottom: 1px solid var(--border-soft); background: var(--panel);
@@ -2649,7 +2658,10 @@ body[data-motion="reduced"] *, body[data-motion="reduced"] *::before, body[data-
 }
 .cl-row.hl { background: var(--accent-wash); }
 .cl-row.hl .cl-ln { color: var(--accent); }
-.editor-md-preview { padding: 16px 22px; max-width: 860px; overflow-y: auto; }
+/* Finding 7: the scrollport fills the pane; the readable-line-width cap lives
+   on the INNER content so wide panes keep a full-width background/scrollbar. */
+.editor-md-preview { padding: 16px 22px; overflow-y: auto; }
+.editor-md-content { max-width: 860px; }
 .editor-md-preview h1, .editor-md-preview h2 { border-bottom: 1px solid var(--border-soft); padding-bottom: 4px; }
 
 /* ---------- WP5: session organization ---------- */
