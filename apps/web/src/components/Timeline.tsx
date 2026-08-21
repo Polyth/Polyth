@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { renderMarkdown } from "../markdown.tsx";
 import { fmtDuration, fmtMs } from "../format.ts";
 import { groupWork, mergeThinking, promptIndex, toolSummary, copyText, loadDraft, type WorkGroup } from "../utils.ts";
@@ -34,6 +34,13 @@ import {
 } from "../messageActions.ts";
 import { applyComposerSeed, discardComposerSeed, loadSeedRecord } from "../drafts.ts";
 import { TIMELINE_CHUNK, TIMELINE_WINDOW, grownLimit, limitToInclude, windowStart } from "../timelineWindow.ts";
+import {
+  RAIL_PANEL_ROWS,
+  activePromptIndex,
+  cursorTickIndex,
+  railWindow,
+  tickWidth,
+} from "../promptRail.ts";
 import { captureTimelineAnchor, loadTimelineAnchor, saveTimelineAnchor, type TimelineAnchor } from "../timelineAnchor.ts";
 import CopyButton from "./CopyButton.tsx";
 import Dialog from "./a11y/Dialog.tsx";
@@ -443,34 +450,129 @@ function TimelineDialog({ prompts, onClose, onJump, onRevert, onFork, revert, fo
   );
 }
 
-// Floating rail of user prompts; click jumps the timeline to that prompt (WP4).
-// L13 (OC#2054/#2211): hovering or focusing an item shows a preview card with
-// the bounded full prompt, so the rail answers "which prompt was that?"
-// without scrolling away.
-function PromptNavigator({ prompts, onJump }: {
+// Right-edge prompt rail (WP4, restyled after polyth PromptNavigatorRail):
+// a thin vertical tape of ticks anchored right-center of the chat. Each tick is
+// one real user prompt from this session; the active turn is tracked against
+// the timeline scroll position, ticks swell in a proximity wave under the
+// cursor, and hover/focus reveals a recent-turns panel. Click jumps via the
+// existing jump()/scrollIntoView path. Presentation-only — no SessionEvent.
+function PromptNavigator({ prompts, onJump, containerRef }: {
   prompts: Array<{ id: string; preview: string; text: string }>;
   onJump: (id: string) => void;
+  containerRef: RefObject<HTMLDivElement | null>;
 }) {
-  const [hover, setHover] = useState(-1);
-  const shown = hover >= 0 ? prompts[hover] : undefined;
+  const [active, setActive] = useState(-1);
+  const [cursor, setCursor] = useState(-1);
+  const [open, setOpen] = useState(false);
+  const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  // Scroll-spy: the active turn is the last prompt at/above the viewport
+  // midline; at the very bottom the newest rendered prompt always wins (its
+  // top may never cross the midline). rAF-throttled; rows hidden by L13
+  // windowing count as "above" (see activePromptIndex).
+  useEffect(() => {
+    const el = containerRef.current;
+    if (el === null) return;
+    let raf = 0;
+    const measure = () => {
+      raf = 0;
+      const box = el.getBoundingClientRect();
+      const line = box.top + el.clientHeight * 0.5;
+      const tops = prompts.map((p) => {
+        const node = el.querySelector(`[data-msg-id="${p.id}"]`);
+        return node === null ? null : node.getBoundingClientRect().top;
+      });
+      let index = activePromptIndex(tops, line);
+      if (el.scrollTop + el.clientHeight >= el.scrollHeight - 8) {
+        for (let i = tops.length - 1; i >= 0; i--) {
+          if (tops[i] !== null) { index = i; break; }
+        }
+      }
+      setActive(index);
+    };
+    const onScroll = () => { if (raf === 0) raf = requestAnimationFrame(measure); };
+    el.addEventListener("scroll", onScroll, { passive: true });
+    measure();
+    return () => {
+      el.removeEventListener("scroll", onScroll);
+      if (raf !== 0) cancelAnimationFrame(raf);
+    };
+  }, [prompts, containerRef]);
+  useEffect(() => () => { if (closeTimer.current !== null) clearTimeout(closeTimer.current); }, []);
+
+  const reveal = () => {
+    if (closeTimer.current !== null) { clearTimeout(closeTimer.current); closeTimer.current = null; }
+    setOpen(true);
+  };
+  // 160ms leave grace so the pointer can cross the gap into the panel.
+  const scheduleClose = () => {
+    if (closeTimer.current !== null) clearTimeout(closeTimer.current);
+    closeTimer.current = setTimeout(() => { closeTimer.current = null; setOpen(false); setCursor(-1); }, 160);
+  };
+
+  const { start, end } = railWindow(prompts.length, active);
+  const visible = prompts.slice(start, end);
+  const recentStart = Math.max(0, prompts.length - RAIL_PANEL_ROWS);
+  const recent = prompts.slice(recentStart);
+  const jumpTo = (id: string) => { onJump(id); setOpen(false); setCursor(-1); };
+
   return (
-    <nav className="prompt-nav" aria-label="Prompts in this session" onMouseLeave={() => setHover(-1)}>
-      {prompts.map((p, i) => (
-        <button
-          key={p.id}
-          className="prompt-nav-item"
-          onClick={() => onJump(p.id)}
-          onMouseEnter={() => setHover(i)}
-          onFocus={() => setHover(i)}
-        >
-          <span className="prompt-nav-dot" aria-hidden="true" />
-          <span className="prompt-nav-label">{p.preview || `Prompt ${i + 1}`}</span>
-        </button>
-      ))}
-      {shown && (
-        <div className="prompt-nav-preview" role="tooltip">
-          <div className="prompt-nav-preview-head">Prompt {hover + 1} of {prompts.length}</div>
-          <div className="prompt-nav-preview-body">{shown.text || "(empty prompt)"}</div>
+    <nav
+      className="prompt-nav"
+      aria-label="Prompts in this session"
+      onMouseEnter={reveal}
+      onMouseLeave={scheduleClose}
+      onFocus={reveal}
+      onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) scheduleClose(); }}
+    >
+      <div
+        className="prompt-nav-tape"
+        onMouseMove={(e) => {
+          const box = e.currentTarget.getBoundingClientRect();
+          setCursor(cursorTickIndex(e.clientY - box.top, visible.length));
+        }}
+        onMouseLeave={() => setCursor(-1)}
+        data-clip-above={start > 0 || undefined}
+        data-clip-below={end < prompts.length || undefined}
+      >
+        {visible.map((p, i) => {
+          const index = start + i;
+          return (
+            <button
+              key={p.id}
+              className="prompt-nav-tick"
+              aria-label={`Prompt ${index + 1} of ${prompts.length}: ${p.preview || "(empty prompt)"}`}
+              aria-current={index === active ? "true" : undefined}
+              onClick={() => jumpTo(p.id)}
+            >
+              <span
+                className="prompt-nav-tick-bar"
+                aria-hidden="true"
+                style={{ width: `${tickWidth(index, active, cursor >= 0 ? start + cursor : -1)}px` }}
+              />
+            </button>
+          );
+        })}
+      </div>
+      {open && recent.length > 0 && (
+        <div className="prompt-nav-panel">
+          <div className="prompt-nav-panel-head">
+            Recent turns{prompts.length > recent.length ? ` (${recentStart + 1}–${prompts.length} of ${prompts.length})` : ""}
+          </div>
+          {recent.map((p, i) => {
+            const index = recentStart + i;
+            return (
+              <button
+                key={p.id}
+                className={index === active ? "prompt-nav-row current" : "prompt-nav-row"}
+                aria-current={index === active ? "true" : undefined}
+                onClick={() => jumpTo(p.id)}
+              >
+                <span className="prompt-nav-row-index">{index + 1}</span>
+                <span className="prompt-nav-row-text">{p.preview || "(empty prompt)"}</span>
+              </button>
+            );
+          })}
         </div>
       )}
     </nav>
@@ -726,7 +828,7 @@ export default function Timeline({ model }: { model: RenderModel }) {
 
   return (
     <div className="timeline" ref={ref} onScroll={onScroll}>
-      {showNav && <PromptNavigator prompts={prompts} onJump={jump} />}
+      {showNav && <PromptNavigator prompts={prompts} onJump={jump} containerRef={ref} />}
       {promptMessages.length > 0 && (
         <button className="timeline-open small-btn" onClick={() => setTimelineOpen(true)}>Timeline</button>
       )}
