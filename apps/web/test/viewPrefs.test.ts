@@ -12,9 +12,12 @@ const mem = new Map<string, string>();
 
 const { ACTIVE_VIEW_KEY, loadActiveView, parseActiveView, saveActiveView } = await import("../src/viewPrefs.ts");
 
-test("parseActiveView keeps known view ids and falls back to session", () => {
-  for (const view of ["session", "files", "goals", "multirun", "fusion", "walkthrough", "preview", "git", "terminal", "schedule", "github"]) {
+test("parseActiveView keeps primary view ids and migrates legacy panes to Chat", () => {
+  for (const view of ["session", "goals", "multirun", "fusion", "walkthrough", "schedule", "github"]) {
     assert.equal(parseActiveView(view), view);
+  }
+  for (const pane of ["files", "preview", "git", "terminal"]) {
+    assert.equal(parseActiveView(pane), "session");
   }
   assert.equal(parseActiveView(null), "session");
   assert.equal(parseActiveView(""), "session");
@@ -23,11 +26,11 @@ test("parseActiveView keeps known view ids and falls back to session", () => {
 });
 
 test("saveActiveView round-trips through storage", () => {
-  saveActiveView("terminal");
-  assert.equal(mem.get(ACTIVE_VIEW_KEY), "terminal");
-  assert.equal(loadActiveView(), "terminal");
-  saveActiveView("files");
-  assert.equal(loadActiveView(), "files");
+  saveActiveView("goals");
+  assert.equal(mem.get(ACTIVE_VIEW_KEY), "goals");
+  assert.equal(loadActiveView(), "goals");
+  saveActiveView("schedule");
+  assert.equal(loadActiveView(), "schedule");
 });
 
 test("a stored garbage value restores the session view", () => {
@@ -36,7 +39,7 @@ test("a stored garbage value restores the session view", () => {
 });
 
 test("preset placement cannot make a valid stored view unreachable", () => {
-  for (const view of ["terminal", "git", "schedule", "github"] as const) {
+  for (const view of ["goals", "multirun", "schedule", "github"] as const) {
     saveActiveView(view);
     assert.equal(loadActiveView(), view);
   }

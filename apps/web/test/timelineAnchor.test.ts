@@ -1,61 +1,47 @@
-// UX-A390 repair: per-session timeline scroll anchor store — parse rules,
-// round-trip, and the LRU cap. DOM-free (localStorage shimmed).
+// UX-A390 + UX-PANE-MODEL: stable per-session timeline anchors survive reload
+// without coupling position to a global raw scrollTop.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
 const mem = new Map<string, string>();
-(globalThis as { localStorage?: unknown }).localStorage = {
+(globalThis as { sessionStorage?: unknown }).sessionStorage = {
   getItem: (k: string) => mem.get(k) ?? null,
   setItem: (k: string, v: string) => void mem.set(k, v),
   removeItem: (k: string) => void mem.delete(k),
 };
 
 const {
-  MAX_TIMELINE_ANCHORS, TIMELINE_ANCHORS_KEY,
-  loadTimelineAnchor, parseTimelineAnchors, saveTimelineAnchor,
+  loadTimelineAnchor, parseTimelineAnchor, saveTimelineAnchor,
 } = await import("../src/timelineAnchor.ts");
 
-test("parseTimelineAnchors survives garbage and drops malformed entries", () => {
-  assert.deepEqual(parseTimelineAnchors(null), {});
-  assert.deepEqual(parseTimelineAnchors("not json"), {});
-  assert.deepEqual(parseTimelineAnchors("[1,2]"), {});
-  const parsed = parseTimelineAnchors(JSON.stringify({
-    good: { atBottom: false, scrollTop: 120.6 },
-    following: { atBottom: true, scrollTop: 0 },
-    negative: { atBottom: false, scrollTop: -4 },
-    wrongTypes: { atBottom: "no", scrollTop: "120" },
-    infinite: { atBottom: false, scrollTop: Number.POSITIVE_INFINITY },
-    empty: null,
-  }));
-  assert.deepEqual(parsed, {
-    good: { atBottom: false, scrollTop: 121 }, // offsets round to whole pixels
-    following: { atBottom: true, scrollTop: 0 },
-  });
+test("parseTimelineAnchor survives garbage and rejects unrestorable records", () => {
+  assert.equal(parseTimelineAnchor(null), null);
+  assert.equal(parseTimelineAnchor("not json"), null);
+  assert.equal(parseTimelineAnchor("[]"), null);
+  assert.equal(parseTimelineAnchor(JSON.stringify({ id: null, offset: 0, atBottom: false })), null);
+  assert.deepEqual(
+    parseTimelineAnchor(JSON.stringify({ id: "message-7", offset: -12.5, atBottom: false })),
+    { id: "message-7", offset: -12.5, atBottom: false },
+  );
+  assert.deepEqual(
+    parseTimelineAnchor(JSON.stringify({ id: null, offset: 0, atBottom: true })),
+    { id: null, offset: 0, atBottom: true },
+  );
 });
 
-test("save/load round-trips, including the exact scrollTop=0 top anchor", () => {
+test("save/load round-trips a stable row anchor and at-bottom state", () => {
   mem.clear();
-  saveTimelineAnchor("s1", { atBottom: false, scrollTop: 0 });
-  assert.deepEqual(loadTimelineAnchor("s1"), { atBottom: false, scrollTop: 0 });
-  saveTimelineAnchor("s1", { atBottom: false, scrollTop: 987.4 });
-  assert.deepEqual(loadTimelineAnchor("s1"), { atBottom: false, scrollTop: 987 });
-  saveTimelineAnchor("s1", { atBottom: true, scrollTop: 2414 });
-  assert.deepEqual(loadTimelineAnchor("s1"), { atBottom: true, scrollTop: 2414 });
+  saveTimelineAnchor("s1", { id: "message-3", offset: 17.25, atBottom: false });
+  assert.deepEqual(loadTimelineAnchor("s1"), { id: "message-3", offset: 17.25, atBottom: false });
+  saveTimelineAnchor("s1", { id: null, offset: 0, atBottom: true });
+  assert.deepEqual(loadTimelineAnchor("s1"), { id: null, offset: 0, atBottom: true });
   assert.equal(loadTimelineAnchor("unknown"), null);
 });
 
-test("the anchor map is LRU-capped and re-saving refreshes recency", () => {
+test("anchors remain scoped to their canonical session", () => {
   mem.clear();
-  for (let i = 0; i < MAX_TIMELINE_ANCHORS; i++) {
-    saveTimelineAnchor(`s${i}`, { atBottom: false, scrollTop: i });
-  }
-  // Refresh the oldest, then push one past the cap: the refreshed entry
-  // survives and the now-oldest (s1) is evicted.
-  saveTimelineAnchor("s0", { atBottom: false, scrollTop: 999 });
-  saveTimelineAnchor("overflow", { atBottom: true, scrollTop: 0 });
-  const all = parseTimelineAnchors(mem.get(TIMELINE_ANCHORS_KEY) ?? null);
-  assert.equal(Object.keys(all).length, MAX_TIMELINE_ANCHORS);
-  assert.deepEqual(all.s0, { atBottom: false, scrollTop: 999 });
-  assert.deepEqual(all.overflow, { atBottom: true, scrollTop: 0 });
-  assert.equal(all.s1, undefined);
+  saveTimelineAnchor("s1", { id: "one", offset: 1, atBottom: false });
+  saveTimelineAnchor("s2", { id: "two", offset: 2, atBottom: false });
+  assert.deepEqual(loadTimelineAnchor("s1"), { id: "one", offset: 1, atBottom: false });
+  assert.deepEqual(loadTimelineAnchor("s2"), { id: "two", offset: 2, atBottom: false });
 });

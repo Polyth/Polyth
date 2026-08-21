@@ -25,7 +25,6 @@ const { createRoot } = await import("react-dom/client");
 const { registerWorkspaceSurface } = await import("../src/workspace/surfaceRegistry.ts");
 const { default: WorkspaceHost } = await import("../src/components/workspace/WorkspaceHost.ts");
 const { activateProject, activateSession, setActiveView } = await import("../src/store.ts");
-const { setPlugins } = await import("../src/prefs.ts");
 
 type Cleanup = () => void;
 
@@ -117,7 +116,7 @@ test("mounted host: project and session requirements render standard empty state
   }
 });
 
-test("mounted host: a disabled plugin gates its surface to the fallback", async () => {
+test("mounted host: legacy plugin metadata does not gate a surface", async () => {
   setActiveView("github");
   activateProject("p1");
   const offs: Cleanup[] = [];
@@ -125,15 +124,11 @@ test("mounted host: a disabled plugin gates its surface to the fallback", async 
   try {
     offs.push(probe("session", "session surface"));
     offs.push(probe("github", "github surface", { order: 25, plugin: "github" }));
-    await act(async () => { setPlugins([]); });
-    assert.match(container.textContent ?? "", /session surface/);
-
-    // Enabling the plugin makes the requested surface available reactively.
-    await act(async () => { setPlugins(["github"]); });
+    await act(async () => {});
     assert.match(container.textContent ?? "", /github surface/);
   } finally {
     for (const off of offs) off();
-    await act(async () => { setPlugins([]); activateProject(null); });
+    await act(async () => { activateProject(null); });
     await unmount();
   }
 });

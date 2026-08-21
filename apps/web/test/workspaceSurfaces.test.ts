@@ -84,12 +84,12 @@ test("late registration and disposal notify subscribers and bump the version", (
   assert.equal(notified, 2);
 });
 
-test("plugin gate: a surface tied to a disabled plugin is unavailable", () => {
+test("legacy plugin metadata never gates workspace surface availability", () => {
   const all = [
     surface({ id: "always" }),
     surface({ id: "gated", plugin: "github" }),
   ];
-  assert.deepEqual(availableWorkspaceSurfaces(all, []).map((s) => s.id), ["always"]);
+  assert.deepEqual(availableWorkspaceSurfaces(all, []).map((s) => s.id), ["always", "gated"]);
   assert.deepEqual(
     availableWorkspaceSurfaces(all, ["github"]).map((s) => s.id),
     ["always", "gated"],
@@ -105,13 +105,13 @@ test("resolution: requested surface wins; fallback is session, then first availa
   assert.equal(resolveWorkspaceSurface("files", [session, files, gated], []), files);
   // Unknown id (e.g. the active surface was disposed) → session.
   assert.equal(resolveWorkspaceSurface("gone", [session, files], []), session);
-  // Requested but plugin-gated off → deterministic fallback, not a blank page.
-  assert.equal(resolveWorkspaceSurface("github", [session, files, gated], []), session);
+  // Presets/plugins cannot hide a registered requested surface.
+  assert.equal(resolveWorkspaceSurface("github", [session, files, gated], []), gated);
   assert.equal(resolveWorkspaceSurface("github", [session, files, gated], ["github"]), gated);
   // No session surface → first available in (order, id) order.
   assert.equal(resolveWorkspaceSurface("gone", [files, gated], []), files);
-  // Nothing available at all → null.
-  assert.equal(resolveWorkspaceSurface("gone", [gated], []), null);
+  assert.equal(resolveWorkspaceSurface("gone", [gated], []), gated);
+  // Nothing registered at all → null.
   assert.equal(resolveWorkspaceSurface("gone", [], []), null);
 });
 

@@ -148,8 +148,8 @@ export function NarrowPanelTrigger() {
 }
 
 export default function ContextRail() {
-  const mode = useShellMode();
-  const compact = mode !== "wide";
+  const shellMode = useShellMode();
+  const compact = shellMode !== "wide";
   const { rail, surfaces, open, ctx } = useRailSurfaceModel();
   const projectId = useStore((s) => s.activeProjectId);
   const paneExpanded = useStore((s) => s.paneExpanded);
