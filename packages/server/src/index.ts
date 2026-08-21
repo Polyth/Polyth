@@ -2,7 +2,7 @@
 import { mkdirSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { createContext } from "@polyth/kernel";
+import { createContext, loadPlugin } from "@polyth/kernel";
 import { createStore, deriveMessages } from "@polyth/session";
 import { CAP, type AgentRuntime, type JsonObject, type RuntimeEvent, type SessionEvent, type SessionProjection, type WalkthroughSource } from "@polyth/contracts";
 import { createConfigApplier, createOpenCodeRuntime, type OpenCodeAdapterOptions } from "@polyth/backend-opencode";
@@ -25,6 +25,7 @@ import {
   findChromiumExecutable, originOf,
 } from "@polyth/browser";
 import { createDictationService, createWhisperSttAdapter } from "@polyth/dictation";
+import { createHomeAssistantPlugin, createHomeAssistantService } from "@polyth/home-assistant";
 import { createProjectService } from "./projects.ts";
 import { createSessionService, type Broadcaster, type RuntimePool } from "./sessions.ts";
 import { aggregateRuntimes } from "./runtimeAggregate.ts";
@@ -49,6 +50,7 @@ import { settingsRoutes } from "./routes/settings.ts";
 import { browserRoutes } from "./routes/browser.ts";
 import { browseRoutes } from "./routes/browse.ts";
 import { dictationRoutes } from "./routes/dictation.ts";
+import { homeAssistantRoutes } from "./routes/homeAssistant.ts";
 import { createAuthService } from "./auth.ts";
 import { authRoutes } from "./routes/auth.ts";
 import { createPushNotifier, createPushService } from "./push.ts";
@@ -301,6 +303,10 @@ export async function boot(opts: BootOptions = {}) {
     dir: `${dataDir}/plugins`,
     trustedDir: process.env.POLYTH_TRUSTED_PLUGIN_DIR ?? `${dataDir}/trusted-plugins`,
   });
+  const homeAssistant = createHomeAssistantService({
+    file: `${dataDir}/home-assistant.json`,
+  });
+  await loadPlugin(root, createHomeAssistantPlugin(homeAssistant));
 
   // Provider/model visibility: seeds from opencode.json (disabled_providers +
   // provider blacklists), then mirrors every toggle back to it.
@@ -675,6 +681,7 @@ export async function boot(opts: BootOptions = {}) {
     walkthroughRoutes({ store, broadcast, jobs: walkthroughJobs, review, flow: reviewFlow }),
     scheduleRoutes({ schedule, projects }),
     usageRoutes(usage),
+    homeAssistantRoutes(homeAssistant),
     knowledgeRoutes({
       knowledge,
       events: {
@@ -744,7 +751,7 @@ export async function boot(opts: BootOptions = {}) {
     }),
   ];
 
-  const allCapabilities = () => ["polyth.sessions", "polyth.sessionPersistence", "polyth.projects", "polyth.agentRuntime", "polyth.goals", "polyth.files", "polyth.commands", "polyth.git", "polyth.worktrees", "polyth.terminal", "polyth.preview", "polyth.multirun", "polyth.fusion", "polyth.walkthrough", "polyth.schedule", "polyth.github", "polyth.control", "polyth.agentProfiles", "polyth.settings", "polyth.mcp", "polyth.plugins", "polyth.knowledge", "polyth.review", "polyth.usage", "polyth.browser", "polyth.voice", "polyth.assist"];
+  const allCapabilities = () => ["polyth.sessions", "polyth.sessionPersistence", "polyth.projects", "polyth.agentRuntime", "polyth.goals", "polyth.files", "polyth.commands", "polyth.git", "polyth.worktrees", "polyth.terminal", "polyth.preview", "polyth.multirun", "polyth.fusion", "polyth.walkthrough", "polyth.schedule", "polyth.github", "polyth.control", "polyth.agentProfiles", "polyth.settings", "polyth.mcp", "polyth.plugins", "polyth.knowledge", "polyth.review", "polyth.usage", "polyth.browser", "polyth.voice", "polyth.assist", "polyth.homeAssistant"];
 
   const server = createHttpServer({
     sessions, projects, runtimes, routes, visibility, auth,

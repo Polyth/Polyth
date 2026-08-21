@@ -503,6 +503,48 @@ export interface ProjectService {
   update?(id: string, patch: ProjectPatch): Promise<Project>;
 }
 
+// ---------------------------------------------------------------- Home Assistant
+
+export interface HomeAssistantEntitySelection {
+  stateEntityId: string;
+  lightEntityId: string;
+  climateEntityId: string;
+  sensorEntityIds: string[];
+}
+
+/** Safe, browser-visible settings. `tokenEnv` is a reference; token values are
+ * write-only and never appear in this shape. */
+export interface HomeAssistantConfigDto {
+  baseUrl: string;
+  tokenEnv: string;
+  tokenConfigured: boolean;
+  entities: HomeAssistantEntitySelection;
+}
+
+export interface HomeAssistantConfigInput {
+  baseUrl?: string;
+  tokenEnv?: string;
+  /** Write-only long-lived access token. */
+  token?: string;
+  entities?: Partial<HomeAssistantEntitySelection>;
+}
+
+export interface HomeAssistantConnectionDto {
+  status: "connected" | "unconfigured" | "unavailable";
+  baseUrl: string;
+  checkedAt: number;
+  version?: string;
+  message?: string;
+}
+
+export interface HomeAssistantEntityDto {
+  entityId: string;
+  state: string;
+  attributes: Record<string, JsonValue>;
+  lastChanged: string;
+  lastUpdated: string;
+}
+
 // ---------------------------------------------------------------- UI contributions (host + client shared shapes)
 
 /** Canonical slot vocabulary — the runtime list backs `UiSlot` so the
