@@ -11,6 +11,7 @@ import { applySettingsToDom } from "./settings.ts";
 import { getState } from "./store.ts";
 import { installVoice } from "./voice.tsx";
 import { installBuiltinMiniWidgets } from "./widgets/builtinMiniWidgets.tsx";
+import { installHomeAssistantPlugin } from "./widgets/homeAssistantPlugin.tsx";
 import { exposeWidgets } from "./widgets/catalog.ts";
 import App from "./App.tsx";
 import LockScreen from "./components/LockScreen.tsx";
@@ -23,6 +24,7 @@ exposeCapabilities();
 exposeWorkspaceSurfaces();
 exposeWidgets();
 installBuiltinMiniWidgets();
+installHomeAssistantPlugin();
 // Palette commands + keyboard shortcuts: one install, synced with the
 // capability registry from then on (UX-PERSONAS: search sees every tool).
 installShell();
