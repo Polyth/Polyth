@@ -508,12 +508,15 @@ export interface ProjectService {
 /** Canonical slot vocabulary — the runtime list backs `UiSlot` so the
  *  server-managed manifest boundary can reject unknown slot names. */
 export const UI_SLOTS = [
-  "app.nav", "session.header.actions", "session.list.badges",
+  "app.nav", "app.header.actions", "session.header.actions", "session.list.badges",
   "composer.leading", "composer.trailing", "contextRail.tabs",
   "settings.pages", "commandPalette.commands",
-  // widget-first workspace contributions. Catalog items render on the
-  // customizable canvas; settings items augment a selected widget's inspector.
+  // Widget definitions enter through the catalog/settings seams. The six
+  // workspace slots are first-class placement targets alongside panel and
+  // toolbar slots, rather than a canvas-only parallel vocabulary.
   "widget.catalog", "widget.settings", "workspace.canvas",
+  "workspace.header", "workspace.left", "workspace.main",
+  "workspace.right", "workspace.bottom", "workspace.floating",
   // parity slots (WP1): focused seams instead of mega-component imports
   "workspace.main.tabs", "workspace.right.tabs",
   "session.timeline.before", "session.timeline.after",
@@ -526,6 +529,42 @@ export type UiSlot = (typeof UI_SLOTS)[number];
 
 export function isUiSlot(value: string): value is UiSlot {
   return (UI_SLOTS as readonly string[]).includes(value);
+}
+
+export type WidgetKind = "widget" | "mini-widget";
+export type WidgetAudience = "simple" | "standard" | "power";
+export type WidgetScope = "global" | "workspace" | "plugin";
+
+export interface WidgetSize {
+  w: number;
+  h: number;
+}
+
+/** Serializable half of a plugin-owned widget. The client pairs `module` with
+ * an allowlisted renderer. A plugin may declare zero, one, or many of these.
+ * Full widgets and toolbar/panel actions share this contribution shape; `kind`
+ * only controls host sizing/chrome. */
+export interface WidgetContributionDescriptor {
+  id: string;
+  module: string;
+  title: string;
+  description: string;
+  kind: WidgetKind;
+  defaultSlot: UiSlot;
+  supportedSlots: UiSlot[];
+  order?: number;
+  category?: string;
+  capabilities?: string[];
+  defaultSize?: WidgetSize;
+  minSize?: WidgetSize;
+  maxSize?: WidgetSize;
+  audience?: WidgetAudience;
+  showIn?: WidgetAudience[];
+  scope?: WidgetScope;
+  resizable?: boolean;
+  duplicatable?: boolean;
+  recommended?: boolean;
+  defaultVisible?: boolean;
 }
 
 export interface UiSlotItem {
@@ -554,6 +593,8 @@ export interface PluginManifest {
   provides?: string[];        // capability ids
   requires?: string[];
   optionalRequires?: string[];
+  /** Optional UI surface. Omitted/empty means this plugin has no widgets. */
+  widgets?: WidgetContributionDescriptor[];
 }
 
 export interface PluginContext {
@@ -949,6 +990,8 @@ export interface InstalledPluginDto {
   update?: { version: string };
   capabilities: string[];
   contributions: UiSlotItem[];
+  /** Widget declarations owned by this plugin; absent on older registries. */
+  widgets?: WidgetContributionDescriptor[];
   lastError?: string;
 }
 

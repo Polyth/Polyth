@@ -12,7 +12,18 @@ import { createHash } from "node:crypto";
 import { isAbsolute, join, normalize, resolve, sep } from "node:path";
 import { promisify } from "node:util";
 import { createContext, type KernelContext } from "@polyth/kernel";
-import { isUiSlot, type InstalledPluginDto, type TrustClass, type UiSlot, type UiSlotItem } from "@polyth/contracts";
+import {
+  isUiSlot,
+  type InstalledPluginDto,
+  type JsonObject,
+  type TrustClass,
+  type UiSlot,
+  type UiSlotItem,
+  type WidgetAudience,
+  type WidgetContributionDescriptor,
+  type WidgetScope,
+  type WidgetSize,
+} from "@polyth/contracts";
 
 const execFileAsync = promisify(execFile);
 
@@ -37,9 +48,100 @@ export interface ManagedPluginManifest {
   capabilities?: string[];
   /** Slot descriptors; `module` names an entry in the UI's allowlisted registry. */
   contributions?: Array<{ slot: UiSlot; id: string; module: string }>;
+  /** A plugin owns zero or more full/mini widgets. */
+  widgets?: WidgetContributionDescriptor[];
 }
 
 const err = (code: string, message: string) => Object.assign(new Error(message), { code });
+
+const optionalSize = (value: unknown, field: string): WidgetSize | undefined => {
+  if (value === undefined) return undefined;
+  const size = value as Partial<WidgetSize> | null;
+  if (
+    !size || typeof size !== "object"
+    || typeof size.w !== "number" || !Number.isFinite(size.w) || size.w <= 0
+    || typeof size.h !== "number" || !Number.isFinite(size.h) || size.h <= 0
+  ) {
+    throw err("invalid-input", `${field} must contain positive numeric w and h`);
+  }
+  return { w: size.w, h: size.h };
+};
+
+const optionalStrings = (value: unknown, field: string): string[] | undefined => {
+  if (value === undefined) return undefined;
+  if (!Array.isArray(value) || value.some((item) => typeof item !== "string")) {
+    throw err("invalid-input", `${field} must be an array of strings`);
+  }
+  return [...new Set(value)];
+};
+
+function parseWidget(value: unknown): WidgetContributionDescriptor {
+  const widget = value as Partial<WidgetContributionDescriptor> | null;
+  if (!widget || typeof widget !== "object") throw err("invalid-input", "each widget must be an object");
+  for (const field of ["id", "module", "title", "description"] as const) {
+    if (typeof widget[field] !== "string" || !widget[field].trim()) {
+      throw err("invalid-input", `each widget needs a non-empty ${field}`);
+    }
+  }
+  if (widget.kind !== "widget" && widget.kind !== "mini-widget") {
+    throw err("invalid-input", 'widget kind must be "widget" or "mini-widget"');
+  }
+  if (typeof widget.defaultSlot !== "string" || !isUiSlot(widget.defaultSlot)) {
+    throw err("invalid-input", `unknown widget default slot "${String(widget.defaultSlot)}"`);
+  }
+  if (
+    !Array.isArray(widget.supportedSlots) || widget.supportedSlots.length === 0
+    || widget.supportedSlots.some((slot) => typeof slot !== "string" || !isUiSlot(slot))
+  ) {
+    throw err("invalid-input", "widget supportedSlots must contain known UI slots");
+  }
+  const supportedSlots = [...new Set(widget.supportedSlots)] as UiSlot[];
+  if (!supportedSlots.includes(widget.defaultSlot)) {
+    throw err("invalid-input", "widget supportedSlots must include defaultSlot");
+  }
+  const audience = widget.audience as WidgetAudience | undefined;
+  if (audience !== undefined && audience !== "simple" && audience !== "standard" && audience !== "power") {
+    throw err("invalid-input", "widget audience is invalid");
+  }
+  const scope = widget.scope as WidgetScope | undefined;
+  if (scope !== undefined && scope !== "global" && scope !== "workspace" && scope !== "plugin") {
+    throw err("invalid-input", "widget scope is invalid");
+  }
+  const showIn = optionalStrings(widget.showIn, "widget showIn") as WidgetAudience[] | undefined;
+  if (showIn?.some((item) => item !== "simple" && item !== "standard" && item !== "power")) {
+    throw err("invalid-input", "widget showIn contains an invalid audience");
+  }
+  return {
+    id: widget.id!,
+    module: widget.module!,
+    title: widget.title!,
+    description: widget.description!,
+    kind: widget.kind,
+    defaultSlot: widget.defaultSlot,
+    supportedSlots,
+    ...(typeof widget.order === "number" && Number.isFinite(widget.order) ? { order: widget.order } : {}),
+    ...(typeof widget.category === "string" ? { category: widget.category } : {}),
+    ...(optionalStrings(widget.capabilities, "widget capabilities")
+      ? { capabilities: optionalStrings(widget.capabilities, "widget capabilities")! }
+      : {}),
+    ...(optionalSize(widget.defaultSize, "widget defaultSize")
+      ? { defaultSize: optionalSize(widget.defaultSize, "widget defaultSize")! }
+      : {}),
+    ...(optionalSize(widget.minSize, "widget minSize")
+      ? { minSize: optionalSize(widget.minSize, "widget minSize")! }
+      : {}),
+    ...(optionalSize(widget.maxSize, "widget maxSize")
+      ? { maxSize: optionalSize(widget.maxSize, "widget maxSize")! }
+      : {}),
+    ...(audience ? { audience } : {}),
+    ...(showIn ? { showIn } : {}),
+    ...(scope ? { scope } : {}),
+    ...(typeof widget.resizable === "boolean" ? { resizable: widget.resizable } : {}),
+    ...(typeof widget.duplicatable === "boolean" ? { duplicatable: widget.duplicatable } : {}),
+    ...(typeof widget.recommended === "boolean" ? { recommended: widget.recommended } : {}),
+    ...(typeof widget.defaultVisible === "boolean" ? { defaultVisible: widget.defaultVisible } : {}),
+  };
+}
 
 export function parseManifest(raw: string): ManagedPluginManifest {
   let data: unknown;
@@ -75,7 +177,21 @@ export function parseManifest(raw: string): ManagedPluginManifest {
     }
     contributions.push({ slot: item.slot, id: item.id, module: item.module });
   }
-  return { id: m.id, name: m.name.trim(), version: m.version, trust: m.trust as TrustClass, capabilities, contributions };
+  const widgets = (Array.isArray(m.widgets) ? m.widgets : []).map(parseWidget);
+  const widgetIds = new Set<string>();
+  for (const widget of widgets) {
+    if (widgetIds.has(widget.id)) throw err("invalid-input", `duplicate widget id "${widget.id}"`);
+    widgetIds.add(widget.id);
+  }
+  return {
+    id: m.id,
+    name: m.name.trim(),
+    version: m.version,
+    trust: m.trust as TrustClass,
+    capabilities,
+    contributions,
+    widgets,
+  };
 }
 
 // ---- secret redaction -----------------------------------------------------------
@@ -168,6 +284,22 @@ export function createPluginRegistry(opts: PluginRegistryOptions): PluginRegistr
     renameSync(tmp, stateFile);
   };
 
+  const widgetSlotItem = (pluginId: string, widget: WidgetContributionDescriptor): UiSlotItem => {
+    const { module, defaultSlot: _defaultSlot, supportedSlots: _supportedSlots, ...metadata } = widget;
+    return {
+      slot: "widget.catalog",
+      id: widget.id,
+      module,
+      order: widget.order,
+      props: {
+        ...metadata,
+        pluginId,
+        defaultSlot: widget.defaultSlot,
+        supportedSlots: [...widget.supportedSlots],
+      } as JsonObject,
+    };
+  };
+
   const toDto = (p: StoredPlugin): InstalledPluginDto => ({
     id: p.manifest.id,
     name: p.manifest.name,
@@ -177,9 +309,13 @@ export function createPluginRegistry(opts: PluginRegistryOptions): PluginRegistr
     enabled: p.enabled,
     status: p.status,
     capabilities: p.manifest.capabilities ?? [],
-    contributions: (p.manifest.contributions ?? []).map((c) => ({
-      slot: c.slot, id: c.id, module: c.module,
-    })),
+    contributions: [
+      ...(p.manifest.contributions ?? []).map((c) => ({
+        slot: c.slot, id: c.id, module: c.module,
+      })),
+      ...(p.manifest.widgets ?? []).map((widget) => widgetSlotItem(p.manifest.id, widget)),
+    ],
+    widgets: p.manifest.widgets ?? [],
     ...(p.lastError ? { lastError: p.lastError } : {}),
   });
 
@@ -198,6 +334,11 @@ export function createPluginRegistry(opts: PluginRegistryOptions): PluginRegistr
         // `module` is a registry KEY the web shell resolves through its
         // allowlist — never executable content from the manifest.
         const item: UiSlotItem = { slot: c.slot, id: c.id, module: c.module };
+        const d = opts.slots ? opts.slots.add(item) : scope.contribute(item);
+        scope.effect(() => d.dispose());
+      }
+      for (const widget of p.manifest.widgets ?? []) {
+        const item = widgetSlotItem(p.manifest.id, widget);
         const d = opts.slots ? opts.slots.add(item) : scope.contribute(item);
         scope.effect(() => d.dispose());
       }

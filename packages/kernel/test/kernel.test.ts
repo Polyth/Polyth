@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { cap } from "@polyth/contracts";
+import { CAP, cap, type UiSlot, type UiSlotItem } from "@polyth/contracts";
 import {
   assertDisposedClean,
   createContext,
@@ -138,6 +138,54 @@ test("loadPlugin: setup runs in child scope; dispose cleans child only", async (
   assert.equal(disposed, true);
   // parent still alive
   assert.equal(parent.inject(cap<string>("shared")), "shared-value");
+});
+
+test("loadPlugin registers every manifest widget through the scoped UI registry", async () => {
+  const parent = createContext("widget-plugin");
+  const items = new Map<string, UiSlotItem>();
+  parent.provide(CAP.ui, {
+    addSlot(item: UiSlotItem) {
+      items.set(item.id, item);
+      return { dispose: () => { items.delete(item.id); } };
+    },
+    list(slot: UiSlot) {
+      return [...items.values()].filter((item) => item.slot === slot);
+    },
+  });
+  const disposable = await loadPlugin(parent, {
+    manifest: {
+      id: "sample",
+      version: "1.0.0",
+      trust: "ui-only",
+      widgets: [
+        {
+          id: "sample.canvas",
+          module: "sample-canvas",
+          title: "Canvas",
+          description: "Canvas widget",
+          kind: "widget",
+          defaultSlot: "workspace.main",
+          supportedSlots: ["workspace.main"],
+        },
+        {
+          id: "sample.action",
+          module: "sample-action",
+          title: "Action",
+          description: "Toolbar action",
+          kind: "mini-widget",
+          defaultSlot: "session.header.actions",
+          supportedSlots: ["session.header.actions", "app.header.actions"],
+        },
+      ],
+    },
+    setup() {},
+  });
+
+  assert.deepEqual([...items.keys()], ["sample.canvas", "sample.action"]);
+  assert.equal(items.get("sample.action")?.slot, "widget.catalog");
+  assert.equal(items.get("sample.action")?.props?.pluginId, "sample");
+  await disposable.dispose();
+  assert.deepEqual([...items.keys()], []);
 });
 
 test("dispose-then-use throws", async () => {

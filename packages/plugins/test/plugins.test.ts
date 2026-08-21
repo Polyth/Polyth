@@ -51,6 +51,82 @@ test("manifest parsing rejects malformed input, keeps valid descriptors", () => 
   assert.ok(TRUST_GRANTS[m.trust].length > 0);
 });
 
+test("plugins may own zero or many full and mini widgets", () => {
+  const withoutWidgets = parseManifest(manifest({ widgets: undefined }));
+  assert.deepEqual(withoutWidgets.widgets, []);
+
+  const widgets = [
+    {
+      id: "sample.overview",
+      module: "sample-overview",
+      title: "Overview",
+      description: "Project overview",
+      kind: "widget",
+      defaultSlot: "workspace.main",
+      supportedSlots: ["workspace.main", "workspace.right"],
+    },
+    {
+      id: "sample.refresh",
+      module: "sample-refresh",
+      title: "Refresh",
+      description: "Refresh sample data",
+      kind: "mini-widget",
+      defaultSlot: "session.header.actions",
+      supportedSlots: ["session.header.actions", "app.header.actions"],
+      defaultVisible: true,
+    },
+  ];
+  const parsed = parseManifest(manifest({ widgets }));
+  assert.deepEqual(parsed.widgets?.map((widget) => widget.id), ["sample.overview", "sample.refresh"]);
+  assert.equal(parsed.widgets?.[1]?.kind, "mini-widget");
+  assert.throws(
+    () => parseManifest(manifest({ widgets: [{ ...widgets[0], supportedSlots: ["workspace.right"] }] })),
+    /must include defaultSlot/,
+  );
+  assert.throws(
+    () => parseManifest(manifest({ widgets: [widgets[0], widgets[0]] })),
+    /duplicate widget id/,
+  );
+});
+
+test("managed activation contributes every plugin-owned widget and disposes them together", async () => {
+  const { dir, trusted } = scaffold();
+  const source = join(trusted, "sample", "polyth-plugin.json");
+  writeFileSync(source, manifest({
+    contributions: [],
+    widgets: [
+      {
+        id: "sample.one",
+        module: "sample-one",
+        title: "One",
+        description: "First",
+        kind: "widget",
+        defaultSlot: "workspace.main",
+        supportedSlots: ["workspace.main"],
+      },
+      {
+        id: "sample.two",
+        module: "sample-two",
+        title: "Two",
+        description: "Second",
+        kind: "mini-widget",
+        defaultSlot: "composer.trailing",
+        supportedSlots: ["composer.trailing", "session.header.actions"],
+      },
+    ],
+  }));
+  const reg = createPluginRegistry({ dir, trustedDir: trusted });
+  const installed = await reg.install("file:sample");
+  assert.deepEqual(installed.widgets?.map((widget) => widget.id), ["sample.one", "sample.two"]);
+  assert.deepEqual(installed.contributions.map((item) => item.slot), ["widget.catalog", "widget.catalog"]);
+
+  await reg.enable("sample.widget");
+  assert.equal(reg.scopeState("sample.widget")?.contributions, 2);
+  await reg.disable("sample.widget");
+  assert.equal(reg.scopeState("sample.widget"), null);
+  await reg.dispose();
+});
+
 test("file install stages atomically; traversal and duplicates rejected", async () => {
   const { dir, trusted } = scaffold();
   const reg = createPluginRegistry({ dir, trustedDir: trusted });

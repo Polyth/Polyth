@@ -285,7 +285,37 @@ export async function loadPlugin(
   }
 
   const child = ctx.scope(`plugin:${manifest.id}`);
-  await plugin.setup(child, config);
+  try {
+    const widgetIds = new Set<string>();
+    for (const widget of manifest.widgets ?? []) {
+      if (widgetIds.has(widget.id)) {
+        throw new Error(`plugin ${manifest.id} declares duplicate widget: ${widget.id}`);
+      }
+      widgetIds.add(widget.id);
+      if (!widget.supportedSlots.includes(widget.defaultSlot)) {
+        throw new Error(
+          `plugin ${manifest.id} widget ${widget.id} does not support its default slot ${widget.defaultSlot}`,
+        );
+      }
+      const { module, defaultSlot: _defaultSlot, supportedSlots: _supportedSlots, ...metadata } = widget;
+      child.contribute({
+        slot: "widget.catalog",
+        id: widget.id,
+        module,
+        order: widget.order,
+        props: {
+          ...metadata,
+          pluginId: manifest.id,
+          defaultSlot: widget.defaultSlot,
+          supportedSlots: [...widget.supportedSlots],
+        } as JsonObject,
+      });
+    }
+    await plugin.setup(child, config);
+  } catch (error) {
+    await (child as ScopeContext).dispose();
+    throw error;
+  }
   return {
     dispose: async () => {
       await (child as ScopeContext).dispose();
