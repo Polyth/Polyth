@@ -44,6 +44,6 @@ test("close, Escape, and Skip all record completion without writing a preset", a
   assert.ok(src.includes("completePresetSetup()"), "dismiss marks setup completed");
   assert.ok(!src.includes("applyPreset(null);\n    setOverlay(null);\n    restoreFocus"),
     "dismiss must not write a disguised default preset");
-  assert.ok(src.includes('e.key === "Escape"'), "Escape dismisses the panel");
+  assert.ok(src.includes("useModalSurface"), "the shared modal contract owns Escape dismissal");
   assert.ok(src.includes("restoreFocus"), "focus returns to the invoker or composer");
 });

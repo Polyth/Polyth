@@ -15,7 +15,7 @@ import Dialog from "./a11y/Dialog.tsx";
 import { announce } from "./a11y/live.tsx";
 import { api, type BrowseEntryDto } from "../api.ts";
 import { addProject } from "../init.ts";
-import { getState } from "../store.ts";
+import { COMPOSER_INPUT_SELECTOR, focusComposer, getState } from "../store.ts";
 import { getPresetState } from "../workspacePresets.ts";
 import { ago, MOD } from "../format.ts";
 import { Icon } from "../icons.tsx";
@@ -46,7 +46,7 @@ function focusAfterActivation(): void {
   if (getPresetState().setup === "unseen") {
     queueFocusHandoff(() => document.querySelector<HTMLElement>(".preset-setup"));
   } else {
-    queueFocusHandoff(() => document.querySelector<HTMLElement>(".composer textarea"));
+    focusComposer();
   }
 }
 
@@ -134,7 +134,7 @@ export default function ProjectFolderDialog({
     return (
       document.querySelector<HTMLElement>(".hero-open-project")
       ?? document.querySelector<HTMLElement>(".side-open-project")
-      ?? document.querySelector<HTMLElement>(".composer textarea")
+      ?? document.querySelector<HTMLElement>(COMPOSER_INPUT_SELECTOR)
     );
   };
 

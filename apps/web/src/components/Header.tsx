@@ -11,13 +11,14 @@ import { NarrowPanelTrigger } from "./ContextRail.tsx";
 import Picker from "./Picker.tsx";
 import type { PickerItem } from "../picker.ts";
 import {
-  GROUP_ORDER, TECHNICAL_GROUP_LABEL, capabilityGroup, useResolvedCapabilities,
+  TECHNICAL_GROUP_LABEL, useResolvedCapabilities,
   type ResolvedCapability,
 } from "../capabilities.ts";
 import { getPresetState, setMoreToolsOpen } from "../workspacePresets.ts";
 import { PANEL_OF_CAPABILITY, PANE_OF_CAPABILITY, VIEW_OF_CAPABILITY } from "../builtinCapabilities.ts";
 import SlotHost from "./slots/SlotHost.ts";
 import { Icon } from "../icons.tsx";
+import CapabilityMenu from "./CapabilityMenu.tsx";
 
 const STROKE = { fill: "none", stroke: "currentColor", strokeWidth: 1.5, strokeLinecap: "round", strokeLinejoin: "round" } as const;
 
@@ -93,7 +94,6 @@ function CapabilityNav() {
   const navRef = useRef<HTMLElement>(null);
   const [fit, setFit] = useState(8);
   const [moreOpen, setMoreOpen] = useState(() => getPresetState().moreToolsOpen);
-  const [techOpen, setTechOpen] = useState(false);
   const moreRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
 
@@ -155,37 +155,6 @@ function CapabilityNav() {
   // through the named disclosure, grouped by user outcome.
   const rest = resolved.filter((c) => !visibleIds.has(c.descriptor.id));
 
-  const groups = GROUP_ORDER
-    .map((label) => ({
-      label,
-      items: rest.filter((c) => capabilityGroup(c.descriptor.id) === label),
-    }))
-    .filter((g) => g.items.length > 0);
-
-  const itemButton = (c: ResolvedCapability) => {
-    const available = c.descriptor.available();
-    const reason = available ? null : c.descriptor.unavailableReason?.() ?? "Unavailable right now";
-    const alias = c.descriptor.technicalLabel && c.descriptor.technicalLabel !== c.descriptor.label
-      ? ` (${c.descriptor.technicalLabel})`
-      : "";
-    return (
-      <button
-        key={c.descriptor.id}
-        role="menuitem"
-        className="more-tools-item"
-        disabled={!available}
-        title={reason ?? c.descriptor.plainDescription}
-        onClick={() => {
-          toggleMore(false);
-          c.descriptor.open();
-        }}
-      >
-        <span>{c.descriptor.label}{alias}</span>
-        {!available && reason && <span className="more-tools-reason">{reason}</span>}
-      </button>
-    );
-  };
-
   return (
     <nav className="view-switcher" aria-label="Workspace tools" ref={navRef}>
       <div className="view-switcher-pill">
@@ -210,33 +179,19 @@ function CapabilityNav() {
             ref={triggerRef}
             className="more-tools-trigger"
             aria-expanded={moreOpen}
-            aria-haspopup="menu"
+            aria-controls="header-capability-menu"
             onClick={() => toggleMore(!moreOpen)}
           >
             More tools
           </button>
           {moreOpen && (
-            <div className="more-tools-popup" role="menu" aria-label="More tools">
-              {groups.map((g) =>
-                g.label === TECHNICAL_GROUP_LABEL ? (
-                  <div className="more-tools-group" key={g.label}>
-                    <button
-                      className="more-tools-group-head"
-                      aria-expanded={techOpen}
-                      onClick={() => setTechOpen((v) => !v)}
-                    >
-                      <span className="more-tools-group-arrow" aria-hidden="true">{techOpen ? "▾" : "▸"}</span>
-                      {TECHNICAL_GROUP_LABEL}
-                    </button>
-                    {techOpen && g.items.map(itemButton)}
-                  </div>
-                ) : (
-                  <div className="more-tools-group" key={g.label}>
-                    <div className="more-tools-group-label">{g.label}</div>
-                    {g.items.map(itemButton)}
-                  </div>
-                ))}
-            </div>
+            <CapabilityMenu
+              id="header-capability-menu"
+              className="more-tools-popup"
+              capabilities={rest}
+              collapseTechnical
+              onClose={() => toggleMore(false)}
+            />
           )}
         </div>
       </div>

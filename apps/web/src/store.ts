@@ -1,6 +1,6 @@
 // Minimal useSyncExternalStore-backed store. Events are kept per session;
 // render models (incl. pendingPermissions/pendingQuestions) derive from them.
-import { useMemo, useSyncExternalStore } from "react";
+import { useSyncExternalStore } from "react";
 import type {
   AgentDescriptor,
   EditorLocation,
@@ -79,7 +79,6 @@ export interface AppState {
    *  currently covers the workspace (explicit expand, geometry fallback, or
    *  compact). App uses it to make hidden Chat inert. */
   paneFullscreen: boolean;
-  moreOpen: boolean;
   sidebarOpen: boolean;
   /** File open in the full-screen editor (files view); null = tree only. */
   editorFile: string | null;
@@ -107,7 +106,6 @@ let state: AppState = {
   railPlugin: getRailPrefs().lastOpen, // F17: last-open surface survives reload
   paneExpanded: false,
   paneFullscreen: false,
-  moreOpen: false,
   sidebarOpen: false,
   editorFile: null,
   editorLocation: null,
@@ -136,11 +134,62 @@ export function useStore<T>(selector: (s: AppState) => T): T {
   return useSyncExternalStore(subscribeStore, () => selector(getState()));
 }
 
+export const COMPOSER_INPUT_SELECTOR = "[data-composer-input]";
+
+/** The one focus path for either the hero or docked composer. */
+export function focusComposer(): void {
+  setActiveView("session");
+  // Retry briefly so view/dialog transitions can commit and release inert
+  // before focusing either the hero or docked variant.
+  const focusWhenReady = (attempts: number) => {
+    if (typeof document === "undefined") return;
+    const input = document.querySelector<HTMLTextAreaElement>(COMPOSER_INPUT_SELECTOR);
+    input?.focus();
+    if (document.activeElement === input || attempts <= 0) return;
+    if (typeof requestAnimationFrame === "function") {
+      requestAnimationFrame(() => focusWhenReady(attempts - 1));
+    } else {
+      setTimeout(() => focusWhenReady(attempts - 1), 0);
+    }
+  };
+  setTimeout(() => focusWhenReady(24), 0);
+}
+
 const EMPTY_EVENTS: SessionEvent[] = [];
 
+interface ReducedModelCache {
+  sessionId: string | null;
+  eventVersion: number;
+  events: readonly SessionEvent[];
+  model: RenderModel;
+}
+
+let reducedModelCache: ReducedModelCache | null = null;
+
+/** Reduce one immutable event batch once, even when many active-model
+ * subscribers render it. Event arrays are append-only, so length is their
+ * version; identity is retained as a safety check for replacement batches. */
+export function reduceSessionModel(
+  sessionId: string | null,
+  events: readonly SessionEvent[],
+): RenderModel {
+  const eventVersion = events.length;
+  if (
+    reducedModelCache?.sessionId === sessionId
+    && reducedModelCache.eventVersion === eventVersion
+    && reducedModelCache.events === events
+  ) {
+    return reducedModelCache.model;
+  }
+  const model = buildModel(events);
+  reducedModelCache = { sessionId, eventVersion, events, model };
+  return model;
+}
+
 export function useActiveModel(): RenderModel {
+  const sessionId = useStore((s) => s.activeSessionId);
   const events = useStore((s) => (s.activeSessionId ? s.events[s.activeSessionId] : undefined) ?? EMPTY_EVENTS);
-  return useMemo(() => buildModel(events), [events]);
+  return reduceSessionModel(sessionId, events);
 }
 
 // ---- project registry actions (UX-ONBOARDING) -----------------------------
@@ -282,7 +331,6 @@ export function setOverlay(overlay: Overlay): void {
   // Plain opens reset to the general palette; openPalette() picks the mode.
   set({
     overlay,
-    moreOpen: false,
     ...(overlay === "palette" ? { paletteMode: "all" as PaletteMode } : {}),
     ...(overlay !== "worktree-session" ? { worktreeSessionRequest: null } : {}),
   });
@@ -291,19 +339,18 @@ export function openWorktreeSessionDialog(projectId: string, worktreePath?: stri
   set({
     overlay: "worktree-session",
     worktreeSessionRequest: { projectId, ...(worktreePath ? { worktreePath } : {}) },
-    moreOpen: false,
   });
 }
 /** Open the command palette in a specific mode (Mod+P = file-focused). */
 export function openPalette(mode: PaletteMode): void {
-  set({ overlay: "palette", paletteMode: mode, moreOpen: false });
+  set({ overlay: "palette", paletteMode: mode });
 }
 
 // Settings deep-link: "Change shortcut…" and similar commands land on a page.
 let pendingSettingsPage: string | null = null;
 export function openSettingsPage(pageId: string): void {
   pendingSettingsPage = pageId;
-  set({ overlay: "settings", moreOpen: false });
+  set({ overlay: "settings" });
 }
 /** One-shot read by SettingsView on mount. */
 export function consumePendingSettingsPage(): string | null {
@@ -368,7 +415,7 @@ function restorePaneFocus(surfaceId: string | null): void {
       launcher.focus();
       return;
     }
-    document.querySelector<HTMLTextAreaElement>(".composer textarea")?.focus();
+    focusComposer();
   }, 0);
 }
 
@@ -451,9 +498,6 @@ export function openChanges(path?: string): void {
 }
 export function setGitDiffPath(gitDiffPath: string | null): void {
   set({ gitDiffPath });
-}
-export function setMoreOpen(moreOpen: boolean): void {
-  set({ moreOpen });
 }
 export function setSidebarOpen(sidebarOpen: boolean): void {
   set({ sidebarOpen });

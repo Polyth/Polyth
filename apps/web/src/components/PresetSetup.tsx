@@ -3,14 +3,15 @@
 // workspace and record setup as completed with no disguised default. A card
 // click is a draft selection only; nothing persists or rearranges until the
 // confirmation action is activated.
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import {
   NO_PRESET_CARD, OPTIONAL_SETUP_COPY, WORKSPACE_PRESETS,
   applyPreset, completePresetSetup, formatPresetSummary, getPresentation,
   getPresetState, presetSummary, type WorkspacePresetId,
 } from "../workspacePresets.ts";
 import { listCapabilities } from "../capabilities.ts";
-import { setOverlay } from "../store.ts";
+import { focusComposer, setOverlay } from "../store.ts";
+import { useModalSurface } from "./a11y/Dialog.tsx";
 import { announce } from "./a11y/live.tsx";
 
 type DraftChoice = WorkspacePresetId | "no-preset" | null;
@@ -22,46 +23,31 @@ interface CardDef {
   confirmationLabel: string;
 }
 
-function focusComposerFallback(): void {
-  document.querySelector<HTMLTextAreaElement>(".composer textarea")?.focus();
-}
-
 export default function PresetSetup() {
   const [draft, setDraft] = useState<DraftChoice>(null);
-  const invokerRef = useRef<HTMLElement | null>(null);
   const panelRef = useRef<HTMLDivElement>(null);
-
-  // Focus return: to the element that opened the panel, or to the composer.
-  useEffect(() => {
-    invokerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    panelRef.current?.focus();
-  }, []);
-
-  const restoreFocus = () => {
-    const invoker = invokerRef.current;
-    if (invoker && invoker.isConnected) invoker.focus();
-    else focusComposerFallback();
-  };
+  const exitFocus = useRef<"restore" | "composer">("restore");
 
   // Close, Escape, and Skip: setup completed, no preset written, workspace
   // unchanged. On a reopen the existing preset is left exactly as it is.
   const dismiss = () => {
     completePresetSetup();
     setOverlay(null);
-    restoreFocus();
   };
 
-  useEffect(() => {
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.stopPropagation();
-        dismiss();
+  useModalSurface({
+    open: true,
+    onClose: dismiss,
+    containerRef: panelRef,
+    initialFocus: ".preset-card",
+    resolveRestoreFocus: (opener) => {
+      if (exitFocus.current === "composer" || opener === null) {
+        focusComposer();
+        return null;
       }
-    };
-    document.addEventListener("keydown", onKey, true);
-    return () => document.removeEventListener("keydown", onKey, true);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+      return opener;
+    },
+  });
 
   // Cards are generated from the schema; `No preset` from the standard
   // arrangement. Order: Build & debug, Plan & coordinate, Design & explore,
@@ -100,8 +86,8 @@ export default function PresetSetup() {
     announce(
       `${summary.label} applied. ${summary.bullets.length} visible arrangement ${summary.bullets.length === 1 ? "change" : "changes"}.`,
     );
+    exitFocus.current = "composer";
     setOverlay(null);
-    focusComposerFallback();
   };
 
   return (

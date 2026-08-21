@@ -43,6 +43,8 @@ export interface AdaptiveTextInputProps {
   className?: string;
   disabled?: boolean;
   ariaLabel?: string;
+  /** Stable DOM hook for the shared composer focus command. */
+  "data-composer-input"?: "";
   /** Optional combobox relationship (UX-COMPOSER-DISC): the host sets these
    *  only while a discovery token drives an autocomplete popup. The textarea
    *  stays uncontrolled and IME admission is untouched. */
@@ -62,6 +64,7 @@ export interface AdaptiveTextInputProps {
 const AdaptiveTextInput = forwardRef<TextInputHandle, AdaptiveTextInputProps>(function AdaptiveTextInput(
   {
     initialText = "", placeholder, rows = 3, className, disabled, ariaLabel,
+    "data-composer-input": dataComposerInput,
     role, ariaAutocomplete, ariaExpanded, ariaControls, ariaActiveDescendant,
     onTextChange, onKeyIntercept, onPaste, onFocusChange,
   },
@@ -167,6 +170,7 @@ const AdaptiveTextInput = forwardRef<TextInputHandle, AdaptiveTextInputProps>(fu
       placeholder={placeholder}
       disabled={disabled}
       aria-label={ariaLabel}
+      data-composer-input={dataComposerInput}
       {...(role ? { role } : {})}
       {...(ariaAutocomplete ? { "aria-autocomplete": ariaAutocomplete } : {})}
       {...(ariaExpanded !== undefined ? { "aria-expanded": ariaExpanded } : {})}

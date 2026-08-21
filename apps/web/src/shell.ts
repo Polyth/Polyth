@@ -5,7 +5,7 @@ import { MOD } from "./format.ts";
 import { getKeymap } from "./hotkeys.ts";
 import { readLastReply, stopSpeaking } from "./voice.tsx";
 import {
-  getState, openPalette, openSettingsPage, openWorktreeSessionDialog, setActiveView, setOverlay,
+  focusComposer, getState, openPalette, openSettingsPage, openWorktreeSessionDialog, setOverlay,
   toggleRailPlugin, toggleWorkspacePane,
   type RailPlugin,
 } from "./store.ts";
@@ -40,14 +40,6 @@ const RAIL: Array<[RailPlugin, string]> = [
 const IS_MAC = MOD === "⌘";
 // Live resolver: command hints must always reflect the current custom binding.
 const hintOf = (action: HotkeyAction) => (): string => formatCombo(getKeymap()[action], IS_MAC);
-
-export function focusComposer(): void {
-  setActiveView("session");
-  // Defer so the composer exists after a view switch.
-  setTimeout(() => {
-    document.querySelector<HTMLTextAreaElement>(".composer textarea")?.focus();
-  }, 0);
-}
 
 /** Register one Group-by palette command for a grouping descriptor. */
 function registerGroupingCommand(g: GroupingDescriptor): () => void {

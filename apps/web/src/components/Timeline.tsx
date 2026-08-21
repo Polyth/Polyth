@@ -4,7 +4,7 @@ import { fmtDuration, fmtMs } from "../format.ts";
 import { groupWork, mergeThinking, promptIndex, toolSummary, copyText, loadDraft, type WorkGroup } from "../utils.ts";
 import { useUiSettings } from "../uiPrefs.ts";
 import { forkSession, sendMessage } from "../init.ts";
-import { requestComposerInsert, requestComposerReplace } from "../composerInsert.ts";
+import { requestComposerReplace } from "../composerInsert.ts";
 import { applyEvent, openSettingsPage, setUiError, useStore } from "../store.ts";
 import { api } from "../api.ts";
 import {
@@ -480,8 +480,6 @@ function PromptNavigator({ prompts, onJump }: {
 // Footer under the last message once the turn ended: exactly one terminal
 // turn's own start/stop and usage (UX-MSG-ACTIONS) — see turnFooterLine().
 
-const STARTERS = ["Explain this codebase", "Fix a failing test", "Review my latest changes"];
-
 export default function Timeline({ model }: { model: RenderModel }) {
   const ref = useRef<HTMLDivElement>(null);
   const atBottom = useRef(true);
@@ -566,6 +564,12 @@ export default function Timeline({ model }: { model: RenderModel }) {
   // model plus the authoritative queue; the server re-validates inside the
   // per-session lock, so a raced action returns a typed conflict, not a lie.
   const archived = useStore((s) => s.sessions.find((x) => x.id === s.activeSessionId)?.status === "archived");
+  const pendingQuestion = model.questions.some((question) => question.status === "pending");
+  const emptyCopy = archived
+    ? "This archived session has no messages. Restore it below to continue."
+    : pendingQuestion
+      ? "Answer the pending question below to continue."
+      : "No messages yet.";
   const [queuedCount, setQueuedCount] = useState(0);
   useEffect(() => {
     if (!sessionId) { setQueuedCount(0); return; }
@@ -729,12 +733,7 @@ export default function Timeline({ model }: { model: RenderModel }) {
       <SlotHost slot="session.timeline.before" context={slotSummary} />
       {model.messages.length === 0 && (
         <div className="empty">
-          <div>No messages yet — say hi below.</div>
-          <div className="chip-row" style={{ justifyContent: "center", marginTop: 12 }}>
-            {STARTERS.map((s) => (
-              <button key={s} className="chip" onClick={() => requestComposerInsert(s)}>{s}</button>
-            ))}
-          </div>
+          <div>{emptyCopy}</div>
         </div>
       )}
       {start > 0 && (

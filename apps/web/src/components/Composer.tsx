@@ -695,6 +695,7 @@ export default function Composer({ variant = "docked" }: { variant?: "docked" | 
         {shellMode && <div className="composer-mode-label">Shell command · permission checked · output added to context</div>}
         <AdaptiveTextInput
           ref={inputRef}
+          data-composer-input=""
           initialText={text}
           rows={3}
           className="composer-editor"

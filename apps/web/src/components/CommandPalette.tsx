@@ -6,6 +6,7 @@ import { api, type FileSearchHitDto, type WorkspaceSearchItemDto } from "../api.
 import { activateProject, openEditorFile, setOverlay, setUiError, useStore } from "../store.ts";
 import { openSession } from "../init.ts";
 import { announce } from "./a11y/live.tsx";
+import { useModalSurface } from "./a11y/Dialog.tsx";
 
 type Entry =
   | { kind: "cmd"; id: string; cmd: PaletteCommand }
@@ -23,7 +24,7 @@ export default function CommandPalette() {
   const [i, setI] = useState(0);
   const [files, setFiles] = useState<FileSearchHitDto[]>([]);
   const [workspaces, setWorkspaces] = useState<WorkspaceSearchItemDto[]>([]);
-  const input = useRef<HTMLInputElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
   const seq = useRef(0);
   const projectId = useStore((s) => s.activeProjectId);
   // File search resolves against the active session's worktree (P0).
@@ -36,7 +37,12 @@ export default function CommandPalette() {
     () => (filesMode ? [] : filterPalette(listCommands(), text)),
     [filesMode, text],
   );
-  useEffect(() => { input.current?.focus(); }, []);
+  useModalSurface({
+    open: true,
+    onClose: () => setOverlay(null),
+    containerRef: panelRef,
+    initialFocus: ".palette-input",
+  });
   useEffect(() => { setI(0); }, [q]);
 
   // Debounced remote searches; stale responses are dropped by sequence.
@@ -97,7 +103,6 @@ export default function CommandPalette() {
     if (e.key === "ArrowDown") { e.preventDefault(); setI((n) => (n + 1) % Math.max(entries.length, 1)); }
     else if (e.key === "ArrowUp") { e.preventDefault(); setI((n) => (n - 1 + entries.length) % Math.max(entries.length, 1)); }
     else if (e.key === "Enter" && entries[i]) { e.preventDefault(); run(entries[i]!); }
-    else if (e.key === "Escape") setOverlay(null);
   };
 
   const groupOf = (entry: Entry): string => {
@@ -115,6 +120,7 @@ export default function CommandPalette() {
   return (
     <div className="scrim palette-overlay" onMouseDown={(e) => { if (e.target === e.currentTarget) setOverlay(null); }}>
       <div
+        ref={panelRef}
         className="palette"
         onMouseDown={(e) => e.stopPropagation()}
         role="dialog"
@@ -123,7 +129,6 @@ export default function CommandPalette() {
         aria-describedby="palette-close-hint"
       >
         <input
-          ref={input}
           className="palette-input"
           value={q}
           role="combobox"

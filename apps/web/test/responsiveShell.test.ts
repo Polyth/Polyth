@@ -100,12 +100,19 @@ test("header owns the drawer trigger, compact view picker, and panel trigger", a
   assert.ok(header.includes('"Auto-accept on" : "Auto-accept off"'), "auto-accept state exposed as text, not color alone");
 });
 
-test("drawer and sheet share the Dialog focus contract (no copied traps)", async () => {
+test("modal surfaces share the Dialog focus contract (no copied traps)", async () => {
   const dialog = await read("../src/components/a11y/Dialog.tsx");
   assert.ok(dialog.includes("export function useModalSurface"), "Dialog.tsx exports the reusable hook");
   const sidebar = await read("../src/components/Sidebar.tsx");
   const rail = await read("../src/components/ContextRail.tsx");
-  for (const [name, src] of [["Sidebar", sidebar], ["ContextRail", rail]] as const) {
+  const preset = await read("../src/components/PresetSetup.tsx");
+  const palette = await read("../src/components/CommandPalette.tsx");
+  for (const [name, src] of [
+    ["Sidebar", sidebar],
+    ["ContextRail", rail],
+    ["PresetSetup", preset],
+    ["CommandPalette", palette],
+  ] as const) {
     assert.ok(src.includes("useModalSurface"), `${name} consumes useModalSurface`);
     assert.ok(!src.includes("FOCUSABLE"), `${name} must not copy a focus-trap implementation`);
   }
@@ -133,6 +140,37 @@ test("composer bar exposes the two-tier semantic groups without forking send", a
   assert.equal(composer.match(/const send = useCallback/g)?.length, 1, "exactly one send() path");
   const css = await read("../src/styles.css");
   assert.ok(css.includes("repeat(2, minmax(0, 1fr))"), "phone selector grid contract");
+});
+
+test("hero and docked composers expose the shared stable focus target", async () => {
+  const composer = await read("../src/components/Composer.tsx");
+  const input = await read("../src/components/input/AdaptiveTextInput.tsx");
+  const store = await read("../src/store.ts");
+  assert.ok(composer.includes('variant === "hero" ? "composer-hero" : "composer"'), "one component owns both variants");
+  assert.ok(composer.includes('data-composer-input=""'), "both variants mark the shared input");
+  assert.ok(input.includes("data-composer-input={dataComposerInput}"), "the marker reaches the textarea");
+  assert.ok(store.includes('COMPOSER_INPUT_SELECTOR = "[data-composer-input]"'), "focus uses the stable marker");
+  assert.ok(store.includes("export function focusComposer()"), "one focus command is exported");
+});
+
+test("timeline empty states defer starters to the hero", async () => {
+  const timeline = await read("../src/components/Timeline.tsx");
+  assert.ok(!timeline.includes("const STARTERS"), "the timeline no longer duplicates hero starters");
+  assert.ok(timeline.includes("Answer the pending question below to continue."), "pending questions get actionable copy");
+  assert.ok(timeline.includes("This archived session has no messages."), "archived sessions get read-only copy");
+});
+
+test("header and rail share one capability disclosure", async () => {
+  const header = await read("../src/components/Header.tsx");
+  const rail = await read("../src/components/ContextRail.tsx");
+  const menu = await read("../src/components/CapabilityMenu.tsx");
+  const store = await read("../src/store.ts");
+  assert.ok(header.includes("<CapabilityMenu"), "header consumes the shared disclosure");
+  assert.ok(rail.includes("<CapabilityMenu"), "rail consumes the shared disclosure");
+  assert.ok(menu.includes('role="group"'), "disclosure uses grouped native buttons");
+  assert.ok(!menu.includes('role="menuitem"'), "disclosure does not claim unsupported menu arrow behavior");
+  assert.ok(!store.includes("moreOpen:"), "dead global More-tools state stays removed");
+  assert.ok(!store.includes("setMoreOpen"), "dead global More-tools action stays removed");
 });
 
 test("status bar segments carry stable keys and phone priority", async () => {

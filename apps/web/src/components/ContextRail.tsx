@@ -32,13 +32,11 @@ import {
 import { clampRailWidth, railWidthOf, setRailWidth } from "../railPrefs.ts";
 import { useShellMode } from "../responsiveShell.ts";
 import { useModalSurface } from "./a11y/Dialog.tsx";
-import {
-  GROUP_ORDER, TECHNICAL_GROUP_LABEL, capabilityGroup, useResolvedCapabilities,
-  type ResolvedCapability,
-} from "../capabilities.ts";
+import { useResolvedCapabilities } from "../capabilities.ts";
 import { getWorkspacePanePrefs, setPanePreferredWidth } from "../workspace/panePrefs.ts";
 import { chatDockViability, dockGuardTargets } from "../workspace/dockGuard.ts";
 import { PaneVisibilityContext } from "../workspace/paneVisibility.ts";
+import CapabilityMenu from "./CapabilityMenu.tsx";
 import "./railSurfaces.tsx";
 
 const NO_EVENTS: never[] = [];
@@ -155,8 +153,11 @@ export default function ContextRail() {
   const paneExpanded = useStore((s) => s.paneExpanded);
   const resolved = useResolvedCapabilities();
   const [moreOpen, setMoreOpen] = useState(false);
-  useEscape(moreOpen, () => setMoreOpen(false));
   const moreTriggerRef = useRef<HTMLButtonElement>(null);
+  useEscape(moreOpen, () => {
+    setMoreOpen(false);
+    moreTriggerRef.current?.focus();
+  });
   const presentation = open?.presentation;
 
   // Keep-alive: panels stay mounted once visited so their state survives
@@ -470,39 +471,6 @@ export default function ContextRail() {
     containerRef: paneRef,
   });
 
-  // Same resolved capability list as the header and Settings. Presets only
-  // order the disclosure; they never remove a tool.
-  const groups = GROUP_ORDER
-    .map((label) => ({
-      label,
-      items: resolved.filter((c) => capabilityGroup(c.descriptor.id) === label && c.descriptor.id !== "session"),
-    }))
-    .filter((g) => g.items.length > 0);
-
-  const capabilityItem = (c: ResolvedCapability) => {
-    const available = c.descriptor.available();
-    const reason = available ? null : c.descriptor.unavailableReason?.() ?? "Unavailable right now";
-    const alias = c.descriptor.technicalLabel && c.descriptor.technicalLabel !== c.descriptor.label
-      ? ` (${c.descriptor.technicalLabel})`
-      : "";
-    return (
-      <button
-        key={c.descriptor.id}
-        role="menuitem"
-        className="more-tools-item"
-        disabled={!available}
-        title={reason ?? c.descriptor.plainDescription}
-        onClick={() => {
-          setMoreOpen(false);
-          c.descriptor.open();
-        }}
-      >
-        <span>{c.descriptor.label}{alias}</span>
-        {!available && reason && <span className="more-tools-reason">{reason}</span>}
-      </button>
-    );
-  };
-
   const moreToolsPicker = (
     <>
       <button
@@ -511,7 +479,7 @@ export default function ContextRail() {
         title="More tools"
         aria-label="More tools"
         aria-expanded={moreOpen}
-        aria-haspopup="menu"
+        aria-controls="rail-capability-menu"
         onClick={() => setMoreOpen((v) => !v)}
       >
         <span className="strip-more-text" aria-hidden="true">More</span>
@@ -519,24 +487,16 @@ export default function ContextRail() {
       {moreOpen && (
         <>
           <div className="menu-backdrop" onClick={() => setMoreOpen(false)} />
-          <div className="strip-picker more-tools-popup" role="menu" aria-label="More tools">
-            {groups.map((g) => (
-              <div className="more-tools-group" key={g.label}>
-                <div className="more-tools-group-label">{g.label}</div>
-                {g.items.map(capabilityItem)}
-              </div>
-            ))}
-            <button
-              className="strip-picker-manage"
-              onClick={() => {
-                setMoreOpen(false);
-                setActiveView("session");
-                window.dispatchEvent(new CustomEvent("polyth:open-settings"));
-              }}
-            >
-              Manage in Settings…
-            </button>
-          </div>
+          <CapabilityMenu
+            id="rail-capability-menu"
+            className="strip-picker more-tools-popup"
+            capabilities={resolved.filter((capability) => capability.descriptor.id !== "session")}
+            onClose={() => setMoreOpen(false)}
+            manageAction={() => {
+              setActiveView("session");
+              window.dispatchEvent(new CustomEvent("polyth:open-settings"));
+            }}
+          />
         </>
       )}
     </>
