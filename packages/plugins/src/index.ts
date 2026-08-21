@@ -296,7 +296,7 @@ export function createPluginRegistry(opts: PluginRegistryOptions): PluginRegistr
         pluginId,
         defaultSlot: widget.defaultSlot,
         supportedSlots: [...widget.supportedSlots],
-      } as JsonObject,
+      } as unknown as JsonObject,
     };
   };
 
