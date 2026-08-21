@@ -101,12 +101,20 @@ export default function SettingsView({ onClose = () => setOverlay(null) }: { onC
   const slotsAt = useSlotVersion();
   const slotItems = useMemo(() => listSlots("settings.pages"), [slotsAt]);
   const pages = useMemo<PageDef[]>(() => {
-    const extra = slotItems.map((item): PageDef => ({
-      id: `slot:${item.id}`,
-      label: item.id.replace(/^[^.]*\./, "").replace(/[-_]/g, " ").replace(/^\w/, (c) => c.toUpperCase()),
-      group: "Customize",
-      render: () => <>{item.render({ prefs })}</>,
-    }));
+    const extra = slotItems.map((item): PageDef => {
+      const meta = item.meta as { label?: unknown; group?: unknown } | undefined;
+      const group = meta?.group;
+      return {
+        id: `slot:${item.id}`,
+        label: typeof meta?.label === "string"
+          ? meta.label
+          : item.id.replace(/^[^.]*\./, "").replace(/[-_]/g, " ").replace(/^\w/, (c) => c.toUpperCase()),
+        group: group === "Workspace" || group === "Engineering" || group === "Customize" || group === "System"
+          ? group
+          : "Customize",
+        render: () => <>{item.render({ prefs })}</>,
+      };
+    });
     return [...BUILTIN, ...extra];
   }, [prefs, slotItems]);
 

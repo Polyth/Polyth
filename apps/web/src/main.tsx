@@ -11,6 +11,7 @@ import { applySettingsToDom } from "./settings.ts";
 import { getState } from "./store.ts";
 import { installVoice } from "./voice.tsx";
 import { exposeWidgets } from "./widgets/catalog.ts";
+import "./secureSafe.tsx";
 import App from "./App.tsx";
 import LockScreen from "./components/LockScreen.tsx";
 import "./styles.css";

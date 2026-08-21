@@ -255,6 +255,38 @@ test("permission requested → resolved (and question asked → answered)", () =
   assert.deepEqual(m3.questions[0]?.answers, { "0": "yes" });
 });
 
+test("secret/requested adds a pending credential handle and secret/resolved clears it", () => {
+  const requested = ev("secret/requested", {
+    requestId: "secret-1",
+    handle: "deploy-token",
+    label: "Deployment token",
+    purpose: "Publish releases",
+    kind: "token",
+    existing: true,
+  });
+  const model = buildModel([requested]);
+
+  assert.deepEqual(model.secrets, [{
+    requestId: "secret-1",
+    handle: "deploy-token",
+    label: "Deployment token",
+    purpose: "Publish releases",
+    kind: "token",
+    existing: true,
+    status: "pending",
+    time: requested.time,
+  }]);
+
+  reduceEvent(model, ev("secret/resolved", {
+    requestId: "secret-1",
+    action: "saved",
+    handle: "deploy-token",
+  }));
+  assert.equal(model.secrets[0]?.status, "resolved");
+  assert.equal(model.secrets[0]?.action, "saved");
+  assert.equal(model.secrets.filter((secret) => secret.status === "pending").length, 0);
+});
+
 test("replayed seq is deduped per (sessionId, seq)", () => {
   const d = createSeqDedupe();
   assert.equal(d.has("s1", 3), false);
@@ -277,6 +309,8 @@ test("replaying the event log reconstructs an identical model (fold === buildMod
     ev("assistant/message", { partId: "p1", text: "Part 1 Part 2" }),
     ev("permission/requested", { requestId: "r1", permission: "write", patterns: [] }),
     ev("permission/resolved", { requestId: "r1", reply: "reject" }),
+    ev("secret/requested", { requestId: "secret-1", handle: "token", label: "Token" }),
+    ev("secret/resolved", { requestId: "secret-1", action: "dismissed" }),
     ev("usage/recorded", { model: { providerID: "anthropic", modelID: "claude-x" }, tokens: { input: 3, output: 7 }, cost: 0.01 }),
     ev("turn/stopped", { turnId: "t1", reason: "completed" }),
   ];
@@ -284,6 +318,7 @@ test("replaying the event log reconstructs an identical model (fold === buildMod
   const b = events.reduce(reduceEvent, emptyModel());
   assert.deepEqual(a.messages, b.messages);
   assert.deepEqual(a.permissions, b.permissions);
+  assert.deepEqual(a.secrets, b.secrets);
   assert.deepEqual(a.totals, b.totals);
   assert.deepEqual(a.turn, b.turn);
   assert.equal(a.version, events.length);
@@ -1216,11 +1251,12 @@ test("session surface: unresolved replay is loading, never the fresh-session her
   // UX-TIMELINE-LAYOUT-01 §8 initial replay (verifier finding 3): while a
   // canonical event load is in flight, an otherwise-fresh surface presents
   // as loading; a populated surface stays visible during a session switch.
-  const fresh: SurfaceModel = { messages: [], permissions: [], questions: [] };
+  const fresh: SurfaceModel = { messages: [], permissions: [], questions: [], secrets: [] };
   const populated = {
     messages: [{ kind: "user" }],
     permissions: [],
     questions: [],
+    secrets: [],
   } as unknown as SurfaceModel;
   const idle = { status: "idle" } as const;
 
@@ -1244,8 +1280,16 @@ test("session surface: unresolved replay is loading, never the fresh-session her
     messages: [],
     permissions: [],
     questions: [{ status: "pending" }],
+    secrets: [],
   } as unknown as SurfaceModel;
   assert.equal(sessionSurfaceKind("s1", "s1", pendingQuestion, idle), "session");
+  const pendingSecret = {
+    messages: [],
+    permissions: [],
+    questions: [],
+    secrets: [{ status: "pending" }],
+  } as unknown as SurfaceModel;
+  assert.equal(sessionSurfaceKind("s1", "s1", pendingSecret, idle), "session");
 });
 
 test("truthful guards explain exactly why revert/fork are unavailable", () => {
@@ -1280,6 +1324,8 @@ test("truthful guards explain exactly why revert/fork are unavailable", () => {
   assert.equal(guardsFromModel(working).turnWorking, true);
   const waiting = buildModel([ev("question/asked", { requestId: "q1", questions: [] })]);
   assert.equal(guardsFromModel(waiting).pendingRequest, true);
+  const waitingForSecret = buildModel([ev("secret/requested", { requestId: "s1", handle: "token", label: "Token" })]);
+  assert.equal(guardsFromModel(waitingForSecret).pendingRequest, true);
 });
 
 test("marker-owned seeds apply at most once and never overwrite edits or deliberate clears", () => {

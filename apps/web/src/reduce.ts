@@ -101,6 +101,18 @@ export interface PendingQuestion {
   time: number;
 }
 
+export interface PendingSecret {
+  requestId: string;
+  handle: string;
+  label: string;
+  purpose?: string;
+  kind?: string;
+  existing?: boolean;
+  status: "pending" | "resolved";
+  action?: "saved" | "dismissed";
+  time: number;
+}
+
 export type GoalVerdict = "keep" | "done" | "stuck";
 
 export interface GoalState {
@@ -195,6 +207,7 @@ export interface RenderModel {
   messages: RenderMessage[];
   permissions: PendingPermission[];
   questions: PendingQuestion[];
+  secrets: PendingSecret[];
   totals: Totals;
   /** Latest usage sample for the active/last turn (not lifetime totals). */
   contextUsage: ContextUsageState | null;
@@ -222,6 +235,7 @@ export function emptyModel(): RenderModel {
     messages: [],
     permissions: [],
     questions: [],
+    secrets: [],
     totals: { input: 0, output: 0, reasoning: 0, cacheRead: 0, cacheWrite: 0, cost: 0 },
     contextUsage: null,
     turn: null,
@@ -601,6 +615,32 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
       }
       break;
     }
+    case "secret/requested": {
+      const requestId = str(d, "requestId") ?? "";
+      if (!model.secrets.some((secret) => secret.requestId === requestId)) {
+        model.secrets.push({
+          requestId,
+          handle: str(d, "handle") ?? "",
+          label: str(d, "label") ?? "",
+          purpose: str(d, "purpose"),
+          kind: str(d, "kind"),
+          ...(d.existing === true ? { existing: true } : {}),
+          status: "pending",
+          time: ev.time,
+        });
+      }
+      break;
+    }
+    case "secret/resolved": {
+      const requestId = str(d, "requestId") ?? "";
+      const secret = model.secrets.find((item) => item.requestId === requestId);
+      if (secret) {
+        secret.status = "resolved";
+        const action = str(d, "action");
+        if (action === "saved" || action === "dismissed") secret.action = action;
+      }
+      break;
+    }
     case "turn/started": {
       const turnModel = obj(d, "model") as ModelRef | undefined;
       model.turn = {
@@ -822,6 +862,7 @@ export function cloneModel(src: RenderModel): RenderModel {
     messages: src.messages.slice(),
     permissions: src.permissions.slice(),
     questions: src.questions.slice(),
+    secrets: src.secrets.slice(),
     totals: { ...src.totals },
     changedFiles: src.changedFiles.slice(),
   };
