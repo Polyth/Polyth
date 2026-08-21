@@ -45,6 +45,38 @@ export const COPY_REASONING_NAME = "Copy reasoning for assistant answer";
 export const reasoningToggleName = (open: boolean): string =>
   `${open ? "Hide" : "Show"} reasoning for assistant answer`;
 
+// ---- timeline layout names (UX-TIMELINE-LAYOUT-01) ---------------------------
+
+/** Visible and accessible name of the reserved latest-reveal control. */
+export const JUMP_TO_LATEST_NAME = "Jump to latest";
+
+/** Accessible name of the timeline-dialog entry (visible text stays compact). */
+export const OPEN_TIMELINE_NAME = "Open session timeline";
+
+/** Accessible name of the prompt navigation region. */
+export const PROMPT_NAV_NAME = "Prompts in this session";
+
+/** Bounded single-line prompt preview for accessible names and the in-flow
+ *  preview head. An empty prompt is named as empty, never a blank control. */
+export function boundedPromptPreview(text: string, max = 80): string {
+  const first = text.split("\n").find((line) => line.trim())?.trim() ?? "";
+  if (first === "") return "(empty prompt)";
+  return first.length > max ? `${first.slice(0, Math.max(1, max - 1))}…` : first;
+}
+
+/** Ordered, window-aware prompt jump control name. */
+export function promptJumpName(index: number, total: number, text: string): string {
+  return `Jump to prompt ${index + 1} of ${total}: ${boundedPromptPreview(text)}`;
+}
+
+/** Semantic turn-container names: role is conveyed by the group/article name,
+ *  never by a persistent visible role label or avatar. */
+export const userArticleName = (ms: number, locale?: string): string =>
+  `User message sent ${timeFull(ms, locale)}`;
+export function assistantArticleName(finalized: boolean, ms: number, locale?: string): string {
+  return finalized ? `Assistant answer completed ${timeFull(ms, locale)}` : "Assistant answer streaming";
+}
+
 /** Persistent touch entry: one named button per actionable message. */
 export function actionsMenuName(m: UserMsg | AssistantMsg, locale?: string): string {
   return m.kind === "user"

@@ -272,13 +272,22 @@ export async function openSession(
     showChat?: boolean;
   } = {},
 ): Promise<void> {
-  const session = await api.getSession(sessionId);
-  if (session.projectId !== store.getState().activeProjectId) store.activateProject(session.projectId);
-  const events = await api.getEvents(sessionId, 0);
-  store.applyEvents(events); // one store update for the whole history
-  maybeSeedFromReplay(sessionId);
-  store.activateSession(sessionId);
-  if (opts.showChat !== false) store.showSessionChat();
+  // Claim the in-flight open BEFORE the first await: the session surface must
+  // represent an unresolved canonical replay as loading, never flash the
+  // fresh-session hero over a populated session (UX-TIMELINE-LAYOUT-01 §8).
+  store.setOpeningSession(sessionId);
+  try {
+    const session = await api.getSession(sessionId);
+    if (session.projectId !== store.getState().activeProjectId) store.activateProject(session.projectId);
+    const events = await api.getEvents(sessionId, 0);
+    store.applyEvents(events); // one store update for the whole history
+    maybeSeedFromReplay(sessionId);
+    store.activateSession(sessionId);
+    if (opts.showChat !== false) store.showSessionChat();
+  } finally {
+    // A newer concurrent open owns the claim; only this open's claim clears.
+    if (store.getState().openingSessionId === sessionId) store.setOpeningSession(null);
+  }
 }
 
 /** Replay-derived composer seeding (UX-MSG-ACTIONS): an active rewind marker

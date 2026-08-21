@@ -496,22 +496,45 @@ html.light .kbd { background: rgba(0, 0, 0, 0.04); }
 }
 
 .timeline-wrap { flex: 1; min-height: 0; display: flex; flex-direction: column; }
+/* UX-TIMELINE-LAYOUT-01 §2.1: one flex shell stacks the reserved utility
+   region, the single .timeline scroll root, and the reserved latest-reveal
+   region as normal-flow siblings. Reserved chrome consumes layout space; it
+   is never absolutely positioned over the transcript (sole exception: the
+   right-gutter prompt rail below, which sits outside the reading column). */
+.timeline-shell { flex: 1; min-height: 0; display: flex; flex-direction: column; }
 /* Non-scrolling positioning context for the prompt rail: the rail is a sibling
    of the .timeline scroller, so the scroller's overflow can never clip it. */
 .timeline-viewport { position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; }
+/* Centered reading measure: fluid up to 768px, minimum 16px logical gutters
+   at narrow widths (§2.2). Bottom padding is the ≥32px (target 40px) tail
+   clearance between the last surface and the composer boundary. */
 .timeline {
-  flex: 1; overflow-y: auto; padding: var(--gutter) max(var(--gutter), calc((100% - 920px) / 2)) 16px;
-  display: flex; flex-direction: column; gap: 12px;
+  flex: 1; min-height: 0; overflow-y: auto;
+  padding-block: var(--gutter) 40px;
+  padding-inline: max(var(--gutter), calc((100% - 768px) / 2));
+  display: flex; flex-direction: column; gap: 16px;
 }
 
 .msg { display: flex; flex-direction: column; max-width: 100%; }
+/* flex alignment is writing-mode aware: user turns sit at the logical end. */
 .msg.user { align-items: flex-end; }
 .bubble {
-  max-width: 860px; padding: 12px 14px; border-radius: var(--radius-lg);
+  max-width: 100%; padding: 12px 14px; border-radius: var(--radius-lg);
   border: 1px solid var(--border-soft); background: var(--panel);
   overflow-wrap: anywhere;
 }
-.msg.user .bubble { background: var(--bubble-user-bg); border-color: var(--bubble-user-line); }
+/* User turns: Ember-tinted bubble, content-sensitive width capped so the
+   assistant prose keeps an obviously independent reading edge (§2.2). */
+.msg.user .bubble {
+  max-inline-size: 85%;
+  background: var(--bubble-user-bg); border-color: var(--bubble-user-line);
+}
+/* Assistant answers: unboxed prose on the reading column. Reasoning, tool,
+   code, JSON, and image surfaces keep their own boundaries. */
+.msg.assistant > .bubble {
+  background: none; border: none; border-radius: 0; padding: 0;
+  align-self: stretch;
+}
 .bubble h1, .bubble h2, .bubble h3, .bubble h4, .bubble h5, .bubble h6 { margin: 12px 0 4px; }
 .bubble h1 { font-size: 18px; }
 .bubble h2 { font-size: 16px; }
@@ -524,12 +547,12 @@ html.light .kbd { background: rgba(0, 0, 0, 0.04); }
 .caret { display: inline-block; width: 8px; height: 14px; margin-left: 2px; background: var(--accent); vertical-align: -2px; animation: blink 1s steps(1) infinite; }
 @keyframes blink { 50% { opacity: 0; } }
 
-.reasoning { border: 1px solid var(--border-soft); border-radius: var(--radius); background: var(--panel); margin-bottom: 8px; max-width: 860px; }
+.reasoning { border: 1px solid var(--border-soft); border-radius: var(--radius); background: var(--panel); margin-bottom: 8px; max-width: 100%; }
 .reasoning summary { cursor: pointer; padding: 6px 10px; color: var(--purple); font-size: 12px; }
 .reasoning-body { padding: 0 10px 8px; color: var(--muted); white-space: pre-wrap; max-height: 300px; overflow-y: auto; }
 
 /* tool cards */
-.tool-card { border: 1px solid var(--border-soft); border-radius: var(--radius); background: var(--panel); max-width: 860px; }
+.tool-card { border: 1px solid var(--border-soft); border-radius: var(--radius); background: var(--panel); max-width: 100%; }
 .tool-card.error { border-color: color-mix(in srgb, var(--red) 50%, transparent); }
 .tool-head { display: flex; align-items: center; gap: 8px; padding: 6px 10px; cursor: pointer; user-select: none; }
 .tool-name { font-family: var(--mono); font-size: 12px; }
@@ -565,6 +588,12 @@ html.light .kbd { background: rgba(0, 0, 0, 0.04); }
     radial-gradient(520px 300px at 82% 108%, color-mix(in srgb, var(--blue) 5%, transparent), transparent 70%);
 }
 .hero { position: relative; width: 100%; max-width: 720px; display: flex; flex-direction: column; align-items: center; }
+/* UX-TIMELINE-LAYOUT-01 §8: honest initial-replay row — shown while a
+   session's canonical event load is in flight, instead of the fresh hero. */
+.session-loading {
+  position: relative; display: flex; align-items: center; gap: 9px;
+  color: var(--muted); font-size: 13px;
+}
 .hero-mark {
   width: 46px; height: 46px; border-radius: 14px; display: grid; place-items: center;
   background: linear-gradient(160deg, color-mix(in srgb, var(--accent) 68%, white), var(--accent) 52%, color-mix(in srgb, var(--accent) 82%, black));
@@ -2399,6 +2428,8 @@ body[data-density="compact"] .bubble { padding: 8px 11px; }
 body[data-density="compact"] .composer { padding-block: 8px; }
 body[data-density="compact"] .composer textarea { min-height: 48px; }
 body[data-chatwidth="wide"] .timeline { padding-inline: max(24px, calc((100% - 1240px) / 2)); }
+body[data-chatwidth="wide"] .timeline-utility,
+body[data-chatwidth="wide"] .timeline-reveal { padding-inline: max(24px, calc((100% - 1240px) / 2)); }
 body[data-chatwidth="wide"] .composer { padding-inline: max(20px, calc((100% - 1240px) / 2)); }
 body[data-chatwidth="wide"] .bubble, body[data-chatwidth="wide"] .reasoning, body[data-chatwidth="wide"] .tool-card { max-width: 1180px; }
 body[data-motion="reduced"] *, body[data-motion="reduced"] *::before, body[data-motion="reduced"] *::after {
@@ -2598,11 +2629,14 @@ body[data-motion="reduced"] *, body[data-motion="reduced"] *::before, body[data-
 .gallery-nav.prev { left: 10px; }
 .gallery-nav.next { right: 10px; }
 
-/* message actions + prompt navigator (UX-MSG-ACTIONS) */
+/* message actions + prompt navigator (UX-MSG-ACTIONS / UX-TIMELINE-LAYOUT-01) */
 .msg { position: relative; }
 /* Time stays visible; actions reveal on message hover or action focus-within.
-   Hidden controls keep keyboard focusability but no pointer hit area. */
+   Hidden controls keep keyboard focusability but no pointer hit area. The
+   footer is a separate normal-flow row beneath its body; assistant footers
+   align to the prose reading edge, user footers to the bubble edge. */
 .msg-meta { display: flex; gap: 8px; align-items: center; justify-content: flex-end; margin-top: 2px; min-height: 24px; }
+.msg.assistant .msg-meta { justify-content: flex-start; align-self: stretch; }
 .msg-time { font-size: 11px; color: var(--muted); white-space: nowrap; }
 .msg-actions { display: flex; gap: 4px; align-items: center; opacity: 0; pointer-events: none; transition: opacity 120ms; }
 .msg:hover .msg-actions,
@@ -2611,22 +2645,27 @@ body[data-motion="reduced"] *, body[data-motion="reduced"] *::before, body[data-
 .msg-actions button[disabled] { opacity: 0.55; cursor: not-allowed; }
 /* Persistent named touch entry (≥44px) + its ≥44px menu rows. Hidden at
    hover-capable desktop widths; the inline row hides at touch/narrow. */
-.msg-actions-menu-wrap { position: relative; display: none; }
 .msg-actions-entry {
-  display: inline-flex; align-items: center; justify-content: center;
+  display: none; align-items: center; justify-content: center;
   min-width: 44px; min-height: 44px; font-size: 18px; line-height: 1;
   border: 1px solid var(--border-soft); border-radius: var(--radius);
   background: var(--panel); color: var(--fg); cursor: pointer;
 }
 .msg-actions-entry[aria-expanded="true"] { border-color: var(--accent); }
+/* §2.5: the open menu is bounded NORMAL-FLOW content immediately after the
+   footer. It pushes later content (never covers its body), its inline size is
+   bounded by the reading column, and its block size is capped to the visible
+   scrollport (Timeline.tsx measures the live cap) with internal scrolling. */
 .msg-actions-popup {
-  position: absolute; right: 0; bottom: calc(100% + 4px); z-index: 30;
-  display: flex; flex-direction: column; min-width: 250px; max-width: calc(100vw - 24px);
+  display: none; flex-direction: column;
+  inline-size: min(100%, 320px); margin-block-start: 4px;
+  max-block-size: min(60vh, 480px); overflow-y: auto; overscroll-behavior: contain;
   background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius);
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35); padding: 4px;
 }
+.msg.assistant .msg-actions-popup { align-self: flex-start; }
 .msg-actions-item {
-  min-height: 44px; text-align: left; padding: 10px 12px; font-size: 13px;
+  flex: none; min-height: 44px; text-align: start; padding: 10px 12px; font-size: 13px;
   background: transparent; border: 0; border-radius: calc(var(--radius) - 2px);
   color: var(--fg); cursor: pointer;
 }
@@ -2634,7 +2673,8 @@ body[data-motion="reduced"] *, body[data-motion="reduced"] *::before, body[data-
 .msg-actions-item[disabled] { opacity: 0.55; cursor: not-allowed; }
 @media (hover: none), (max-width: 480px) {
   .msg-actions { display: none; }
-  .msg-actions-menu-wrap { display: inline-flex; }
+  .msg-actions-entry { display: inline-flex; }
+  .msg-actions-popup { display: flex; }
 }
 /* One timeline live region: visible chip + polite announcement. */
 .msg-live {
@@ -2653,7 +2693,39 @@ body[data-motion="reduced"] *, body[data-motion="reduced"] *::before, body[data-
   border-radius: var(--radius);
 }
 .timeline { position: relative; }
-.timeline-open { align-self: flex-start; position: sticky; top: 8px; z-index: 4; }
+/* Reserved utility region (§2.3): prompt navigation + the timeline-dialog
+   entry live OUTSIDE the scroll root in normal flow. No float, no sticky
+   overlay, no transparent paint area above transcript text. */
+.timeline-utility {
+  flex: none;
+  display: flex; align-items: center; gap: 8px;
+  padding-block: 5px;
+  padding-inline: max(var(--gutter), calc((100% - 768px) / 2));
+  border-bottom: 1px solid var(--hair);
+}
+.timeline-open { flex: none; margin-inline-start: auto; align-self: flex-start; }
+/* Reserved latest-reveal region (§2.4): mounted between the scrollport and
+   the composer while the reader holds a position away from the tail. It
+   consumes layout space; it never paints over the tail clearance. */
+.timeline-reveal {
+  flex: none; display: flex; justify-content: center;
+  padding-block: 6px 8px;
+  padding-inline: max(var(--gutter), calc((100% - 768px) / 2));
+  border-top: 1px solid var(--hair);
+}
+.jump-latest {
+  display: inline-flex; align-items: center; gap: 7px;
+  min-height: 30px; padding: 3px 14px; border-radius: 999px;
+  border: 1px solid var(--accent-line); background: var(--accent-wash);
+  color: var(--text); font-size: 12.5px; font-weight: 550;
+}
+.jump-latest:hover { background: var(--elevated); border-color: var(--accent); }
+/* Nonessential Ember progress affordance while streaming; the reduced-motion
+   block kills the pulse globally and the name/operation never change. */
+.jump-latest-dot {
+  width: 7px; height: 7px; border-radius: 50%; background: var(--accent); flex: none;
+  animation: pulse 2s ease-in-out infinite;
+}
 .rewound-tail {
   border: 1px dashed var(--border); border-radius: var(--radius); color: var(--muted);
   background: color-mix(in srgb, var(--surface) 75%, transparent);
@@ -3334,6 +3406,7 @@ body[data-motion="reduced"] .settings-row.flash { animation: none; outline: 1px 
   .panel-sheet .rail-body { flex: 1; min-height: 0; overflow-y: auto; }
 
   .timeline { padding-inline: 16px; }
+  .timeline-utility, .timeline-reveal { padding-inline: 16px; }
   .composer { padding-inline: 12px; }
 }
 
@@ -3393,6 +3466,16 @@ body[data-motion="reduced"] .settings-row.flash { animation: none; outline: 1px 
   .stage { align-items: flex-start; justify-content: flex-start; padding: 16px 16px 24px; }
   .hero { margin-inline: auto; }
 }
+
+/* UX-TIMELINE-LAYOUT-01: reserved-utility pointer targets. Coarse pointers
+   and phone widths get ≥44px prompt chips, timeline entry, and latest
+   reveal; the strip scrolls horizontally instead of overlaying content. */
+@media (pointer: coarse), (max-width: 480px) {
+  .prompt-nav-item { min-width: 44px; min-height: 44px; }
+  .timeline-open { min-width: 44px; min-height: 44px; }
+  .jump-latest { min-height: 44px; }
+}
+
 /* ================== end UX-A390 Ember command shelf ==================== */
 
 /* ================== UX-COMPOSER-DISC: honest discovery ==================== */
@@ -3502,3 +3585,78 @@ body[data-motion="reduced"] .settings-row.flash { animation: none; outline: 1px 
   }
 }
 /* ================== end UX-COMPOSER-DISC ================================== */
+
+/* ========= UX-TIMELINE-LAYOUT-01 §2.6: short-viewport height allocation =====
+   Kept last on purpose: these rules intentionally override the A390 shelf and
+   COMPOSER-DISC narrow/coarse sizing when the viewport is SHORT (high zoom).
+   The composer compacts — every control stays mounted and reachable, the
+   textarea, panels, and menus scroll internally — so the timeline keeps
+   ≥120px of usable height at a 384×450 CSS viewport (768×900 at 200% zoom)
+   with EVERY reserved region mounted: the latest-reveal region is compact,
+   and the prompt preview adapts to the strip/dialog presentation (§2.3 —
+   space is insufficient) so keyboard focus can never starve the scrollport. */
+@media (max-height: 560px) {
+  .composer { padding-block: 3px 4px; }
+  .composer-card textarea { min-height: 28px; max-height: 64px; padding: 5px 14px 2px; }
+  .composer-bar { padding: 3px 6px 4px; gap: 4px; }
+  .timeline { padding-block: 12px 32px; }
+  .timeline-utility { padding-block: 2px; }
+  .timeline-reveal { padding-block: 2px 3px; }
+  /* §2.3 zoomed/short presentation: the chips strip plus the Session timeline
+     dialog carry the prompt targets (each chip's accessible name keeps its
+     index, total, and bounded preview). The in-flow visual preview would
+     consume the 120px floor, so it does not mount into layout here. */
+  .prompt-nav-preview { display: none; }
+  /* Classic (non-overlay) scrollbars must not tax the height budget of the
+     horizontal strips; wheel/drag/keyboard scrolling is unaffected. */
+  .prompt-nav-items, .composer-bar { scrollbar-width: none; }
+}
+/* Fine pointers (browser zoom on desktop) can compact utility chips too;
+   coarse pointers keep their 44px targets even when the viewport is short. */
+@media (max-height: 560px) and (pointer: fine) {
+  .prompt-nav-item { min-width: 26px; min-height: 22px; }
+  .timeline-open { min-width: 0; min-height: 0; }
+  .jump-latest { min-height: 22px; padding-block: 1px; }
+}
+/* Short + phone-width (the 200% zoom case): the stacked two-tier command
+   surface would starve the timeline, so the whole bar becomes ONE
+   horizontally scrollable row and the work-status panel is bounded with
+   internal scrolling. Every control stays mounted and reachable; only the
+   redundant syntax hint (plain text duplicated by control tooltips, not a
+   control) is dropped. */
+@media (max-height: 560px) and (max-width: 480px) {
+  .composer-tech-help { display: none; }
+  .composer-card textarea { max-height: 40px; }
+  .composer-bar {
+    flex-direction: row; align-items: center; flex-wrap: nowrap;
+    overflow-x: auto; overflow-y: hidden; overscroll-behavior-inline: contain;
+    gap: 4px; padding: 3px 6px 4px;
+  }
+  /* Disjoint geometry for the selector/extension/action groups: NONE of the
+     groups may shrink below its content (a shrunken group lets its flex:none
+     children paint over the next group — the audited 200% overlap). The bar
+     itself scrolls horizontally instead; every control stays reachable. */
+  .composer-selectors { display: flex; flex-wrap: nowrap; gap: 4px; flex: none; }
+  .composer-selectors .picker { width: auto; flex: none; }
+  .composer-selectors .picker-chip { width: auto; max-width: 130px; min-width: 0; }
+  .composer-extensions { flex-wrap: nowrap; flex: none; row-gap: 0; }
+  .composer-actions { flex-wrap: nowrap; flex: none; margin-inline-start: auto; }
+  /* Work-status stays mounted (all sections + hide/restore controls remain
+     reachable by scrolling the panel) but no longer starves the transcript. */
+  .timeline-wrap .work-status {
+    max-block-size: 36px; overflow-y: auto; overscroll-behavior: contain;
+    padding-block: 3px; margin-block: 2px;
+  }
+}
+/* The control-height shrink is zoom-scoped: a fine pointer at 200% still gets
+   ≥64 physical px targets. Coarse pointers keep 44px CSS targets and simply
+   scroll the strip. */
+@media (max-height: 560px) and (max-width: 480px) and (pointer: fine) {
+  .composer-selectors .picker-chip { height: 32px; }
+  .composer-tech-toggle { min-height: 32px; padding-block: 2px; }
+  .composer-actions .icon-btn { width: 32px; height: 32px; font-size: 15px; }
+  .composer-actions .send, .composer-actions .stop { min-height: 32px; }
+  .composer-add-trigger { min-height: 32px; min-width: 32px; }
+  .mic-btn { min-height: 32px; min-width: 0; }
+}
+/* ============== end UX-TIMELINE-LAYOUT-01 short-height allocation ========= */

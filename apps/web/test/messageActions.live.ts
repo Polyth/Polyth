@@ -550,34 +550,63 @@ test("touch: 44px entries and menu rows, center taps hit the intended control, m
     const box = (await opener.boundingBox())!;
     await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2);
     await page.waitForSelector(".msg-actions-popup", { state: "visible", timeout: 5000 });
+    // The reveal region can mount right after the open scroll and shrink the
+    // scrollport; the menu re-caps itself to the live port, so let it settle.
+    await page.waitForTimeout(150);
 
-    const menu = await page.evaluate(() => {
-      const popup = document.querySelector(".msg-actions-popup")!;
+    // UX-TIMELINE-LAYOUT-01 §2.5: the menu is bounded NORMAL-FLOW content —
+    // the whole popup stays inside the visible scrollport and never covers
+    // the message body it belongs to. When every ≥44px row cannot fit at
+    // once, the menu scrolls internally and every row stays fully reachable.
+    const menu = await page.evaluate((text: string) => {
+      const popup = document.querySelector<HTMLElement>(".msg-actions-popup")!;
       const pr = popup.getBoundingClientRect();
       const port = document.querySelector(".timeline")!.getBoundingClientRect();
       const top = Math.max(port.top, 0);
       const bottom = Math.min(port.bottom, innerHeight);
+      const msg = Array.from(document.querySelectorAll(".timeline > .msg.user"))
+        .find((el) => el.querySelector(".bubble")?.textContent?.includes(text))!;
+      const body = msg.querySelector(".bubble")!.getBoundingClientRect();
       const rows = Array.from(popup.querySelectorAll<HTMLElement>(".msg-actions-item")).map((el) => {
         const r = el.getBoundingClientRect();
-        const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
-        return { w: r.width, h: r.height, name: el.getAttribute("aria-label") ?? "", selfHit: el === hit || el.contains(hit) };
+        return { w: r.width, h: r.height, name: el.getAttribute("aria-label") ?? "" };
       });
       return {
         rows,
+        normalFlow: getComputedStyle(popup).position === "static",
+        coversOwnBody: pr.top < body.bottom && pr.bottom > body.top
+          && pr.left < body.right && pr.right > body.left,
         // 1px tolerance: scrollIntoView(nearest) can settle on a half pixel.
         inScrollport: pr.top >= top - 1 && pr.bottom <= bottom + 1 && pr.left >= -1 && pr.right <= innerWidth + 1,
       };
-    });
+    }, TEXTS.u2);
     assert.ok(menu.inScrollport, `${ctx}: menu escapes the visible scrollport`);
+    assert.ok(menu.normalFlow, `${ctx}: menu is not normal-flow content`);
+    assert.ok(!menu.coversOwnBody, `${ctx}: menu covers the message body it belongs to`);
     assert.ok(menu.rows.length >= 4, `${ctx}: menu rows missing`);
     for (const row of menu.rows) {
       assert.ok(row.w >= 44 && row.h >= 44, `${ctx}: menu row "${row.name}" is ${row.w}x${row.h}`);
-      assert.ok(row.selfHit, `${ctx}: center of "${row.name}" hits a different element`);
       assert.ok(row.name.length > 0, `${ctx}: menu row without an accessible name`);
+    }
+    // Every row is fully reachable: after revealing it inside the bounded
+    // menu (internal scroll when needed), its unforced center hits itself.
+    for (let i = 0; i < menu.rows.length; i++) {
+      const reach = await page.evaluate((idx: number) => {
+        const el = document.querySelectorAll<HTMLElement>(".msg-actions-popup .msg-actions-item")[idx]!;
+        el.scrollIntoView({ block: "nearest" });
+        const r = el.getBoundingClientRect();
+        const hit = document.elementFromPoint(r.left + r.width / 2, r.top + r.height / 2);
+        return {
+          selfHit: el === hit || el.contains(hit),
+          hitDesc: hit ? `${hit.tagName}.${(hit as HTMLElement).className}` : "none",
+        };
+      }, i);
+      assert.ok(reach.selfHit, `${ctx}: center of "${menu.rows[i]!.name}" is covered by ${reach.hitDesc}`);
     }
 
     // An unforced center tap on the Markdown row announces exactly one result.
     const mdRow = page.locator('.msg-actions-popup button[aria-label^="Copy user message as Markdown"]');
+    await mdRow.scrollIntoViewIfNeeded();
     const mdBox = (await mdRow.boundingBox())!;
     await page.mouse.click(mdBox.x + mdBox.width / 2, mdBox.y + mdBox.height / 2);
     await page.waitForFunction(() => (document.querySelector(".msg-live")?.textContent ?? "") !== "", undefined, { timeout: 5000 });

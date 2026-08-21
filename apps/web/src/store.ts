@@ -64,6 +64,11 @@ export interface AppState {
   agents: AgentDescriptor[];
   activeProjectId: string | null;
   activeSessionId: string | null;
+  /** Session whose canonical event load (openSession) is in flight. While
+   *  set, the session surface shows a loading row instead of the fresh-
+   *  session hero (UX-TIMELINE-LAYOUT-01 §8: unresolved replay is loading,
+   *  never a false empty state). */
+  openingSessionId: string | null;
   activeView: AppView;
   gitBranch: string;
   settings: PolythSettings;
@@ -96,6 +101,7 @@ let state: AppState = {
   agents: [],
   activeProjectId: null,
   activeSessionId: null,
+  openingSessionId: null,
   activeView: loadActiveView(), // UX-A390: the selected view survives reload
   gitBranch: "",
   settings: loadSettings(),
@@ -513,6 +519,11 @@ export function activateSession(id: string | null): void {
 export function showSessionChat(): void {
   closeWorkspacePane();
   setActiveView("session");
+}
+
+/** Claim/clear the in-flight session open (see AppState.openingSessionId). */
+export function setOpeningSession(id: string | null): void {
+  if (state.openingSessionId !== id) set({ openingSessionId: id });
 }
 
 // Merge + persist local UI preferences and apply the visual ones to <html>.

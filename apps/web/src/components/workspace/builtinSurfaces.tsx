@@ -21,7 +21,7 @@ import GithubView from "../GithubView.tsx";
 import { setUiError, useActiveModel, useStore } from "../../store.ts";
 import { restoreSession } from "../../init.ts";
 import { friendlyError, shortcutLabel } from "../../settings.ts";
-import { composerBlockedByArchive, showSessionHero } from "../../sessionSurface.ts";
+import { composerBlockedByArchive, sessionSurfaceKind } from "../../sessionSurface.ts";
 import { registerWorkspaceSurface } from "../../workspace/surfaceRegistry.ts";
 
 // Large polyth-style hero for a fresh session (or no session yet):
@@ -48,6 +48,20 @@ function SessionHero() {
           <span className="hero-sep">·</span>
           <span className="kbd">{shortcutLabel(",")}</span> settings
         </div>
+      </div>
+    </div>
+  );
+}
+
+// UX-TIMELINE-LAYOUT-01 §8 initial replay: an unresolved canonical event load
+// is represented as loading — never as the fresh-session hero and never as a
+// phantom empty timeline. The row is honest, bounded, and appends no event.
+function SessionLoading() {
+  return (
+    <div className="stage">
+      <div className="session-loading" role="status">
+        <span className="spinner" aria-hidden="true" />
+        <span>Loading session…</span>
       </div>
     </div>
   );
@@ -80,12 +94,17 @@ function ArchivedComposerGuard({ sessionId }: { sessionId: string }) {
 
 function SessionSurface() {
   const sessionId = useStore((s) => s.activeSessionId);
+  const openingSessionId = useStore((s) => s.openingSessionId);
   const session = useStore((s) => s.sessions.find((x) => x.id === s.activeSessionId) ?? null);
   const model = useActiveModel();
 
-  // Fresh state yields to pending prompts and permissions. Archived sessions
-  // remain visible but replace the composer with the atomic restore action.
-  if (showSessionHero(sessionId, model, session)) return <SessionHero />;
+  // Fresh state yields to pending prompts and permissions; an in-flight
+  // canonical replay yields to the loading row (never a false fresh hero).
+  // Archived sessions remain visible but replace the composer with the
+  // atomic restore action.
+  const kind = sessionSurfaceKind(sessionId, openingSessionId, model, session);
+  if (kind === "loading") return <SessionLoading />;
+  if (kind === "hero") return <SessionHero />;
 
   const pendingPermissions = model.permissions.filter((p) => p.status === "pending");
   const pendingQuestions = model.questions.filter((q) => q.status === "pending");

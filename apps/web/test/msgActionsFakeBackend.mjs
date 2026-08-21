@@ -85,6 +85,55 @@ const runTurn = (sess, promptText) => {
   // "hang": the turn never completes — the live gate uses this to hold a
   // session in a truthful active-turn + queued-delivery state.
   if (sess.turnBehavior === "hang") return;
+  // "stream": several growing full-text snapshots before finalization, so the
+  // timeline layout gate can observe tail-follow and reader-held positions
+  // while scrollHeight actually grows (UX-TIMELINE-LAYOUT-01).
+  if (sess.turnBehavior === "stream") {
+    const n = ++counter;
+    const asId = `as_${n}`;
+    const partId = `prt_as_${n}`;
+    const started = Date.now();
+    const para = (i) =>
+      `Streamed paragraph ${i} for "${promptText.slice(0, 40)}": the synthetic ` +
+      "stream appends several rendered lines so follow, hold, and the latest " +
+      "reveal are observable while the transcript grows.\n\n";
+    const total = 8;
+    let text = "";
+    for (let i = 1; i <= total; i++) {
+      setTimeout(() => {
+        text += para(i);
+        const done = i === total;
+        emit("message.part.updated", {
+          part: {
+            id: partId,
+            messageID: asId,
+            sessionID: sess.id,
+            type: "text",
+            text,
+            time: done ? { start: started, end: Date.now() } : { start: started },
+          },
+        });
+        if (done) {
+          emit("message.updated", {
+            info: {
+              id: asId,
+              sessionID: sess.id,
+              role: "assistant",
+              time: { completed: Date.now() },
+              tokens: { input: 64, output: 128 },
+              cost: 0.005,
+              providerID: "synthetic",
+              modelID: "fable-mini",
+            },
+          });
+          sess.messages.push(wireMessage(sess.id, "assistant", text, asId));
+          persistState();
+          emit("session.idle", { sessionID: sess.id });
+        }
+      }, 150 * i);
+    }
+    return;
+  }
   const n = ++counter;
   const asId = `as_${n}`;
   const partId = `prt_as_${n}`;

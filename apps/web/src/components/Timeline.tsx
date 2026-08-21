@@ -9,7 +9,11 @@ import { applyEvent, openSettingsPage, setUiError, useStore } from "../store.ts"
 import { api } from "../api.ts";
 import {
   COPY_REASONING_NAME,
+  JUMP_TO_LATEST_NAME,
+  OPEN_TIMELINE_NAME,
+  PROMPT_NAV_NAME,
   actionsMenuName,
+  assistantArticleName,
   assistantTime,
   completedName,
   copyActionName,
@@ -21,6 +25,7 @@ import {
   forkAvailability,
   guardsFromModel,
   mutationErrorMessage,
+  promptJumpName,
   reasoningToggleName,
   revertActionName,
   revertAvailability,
@@ -29,6 +34,7 @@ import {
   timeIso,
   timeShort,
   turnFooterLine,
+  userArticleName,
   type ActionAvailability,
   type MutationGuards,
 } from "../messageActions.ts";
@@ -41,7 +47,7 @@ import {
   railWindow,
   tickWidth,
 } from "../promptRail.ts";
-import { captureTimelineAnchor, loadTimelineAnchor, saveTimelineAnchor, type TimelineAnchor } from "../timelineAnchor.ts";
+import { captureTimelineAnchor, loadTimelineAnchor, restoreScrollDelta, saveTimelineAnchor, type TimelineAnchor } from "../timelineAnchor.ts";
 import CopyButton from "./CopyButton.tsx";
 import Dialog from "./a11y/Dialog.tsx";
 import AttachmentPills from "./AttachmentPills.tsx";
@@ -67,7 +73,7 @@ function Thinking({ m, announce }: { m: AssistantMsg; announce?: Announce }) {
     announce?.(copyAnnouncement(ok ? "reasoning" : "failed"));
   };
   if (!prefs.collapsibleThinkingBlocks) {
-    return <div className="reasoning reasoning-flat"><div className="reasoning-body">{m.reasoning}</div></div>;
+    return <div className="reasoning reasoning-flat"><div className="reasoning-body" dir="auto">{m.reasoning}</div></div>;
   }
   return (
     <details className="reasoning" open={open}>
@@ -81,7 +87,7 @@ function Thinking({ m, announce }: { m: AssistantMsg; announce?: Announce }) {
         {!open && <span className="muted" style={{ fontStyle: "italic", flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{preview}</span>}
       </summary>
       {open && (
-        <div className="reasoning-body">
+        <div className="reasoning-body" dir="auto">
           {m.reasoning}
           <div className="reasoning-actions">
             <button className="small-btn" aria-label={COPY_REASONING_NAME} onClick={() => void copyReasoning()}>
@@ -163,76 +169,17 @@ function ActionButton({ entry, className }: { entry: MessageActionEntry; classNa
   );
 }
 
-/** Persistent named entry for non-hover/narrow widths: one ≥44px button whose
- *  menu holds the copy + eligible mutation actions as ≥44px rows. Escape and
- *  outside press close it; focus returns to the opener. */
-function ActionsMenu({ m, entries }: { m: UserMsg | AssistantMsg; entries: MessageActionEntry[] }) {
-  const [open, setOpen] = useState(false);
-  const openerRef = useRef<HTMLButtonElement>(null);
-  const menuRef = useRef<HTMLDivElement>(null);
-  const close = useCallback((refocus: boolean) => {
-    setOpen(false);
-    if (refocus) openerRef.current?.focus();
-  }, []);
-  useEffect(() => {
-    if (!open) return;
-    const onKey = (e: globalThis.KeyboardEvent) => {
-      if (e.key === "Escape") { e.stopPropagation(); close(true); }
-    };
-    const onPress = (e: PointerEvent) => {
-      const t = e.target as Node;
-      if (!menuRef.current?.contains(t) && !openerRef.current?.contains(t)) close(false);
-    };
-    document.addEventListener("keydown", onKey, true);
-    document.addEventListener("pointerdown", onPress, true);
-    return () => {
-      document.removeEventListener("keydown", onKey, true);
-      document.removeEventListener("pointerdown", onPress, true);
-    };
-  }, [open, close]);
-  useEffect(() => {
-    if (!open) return;
-    // The whole menu must sit inside the visible scrollport (320/390 gate).
-    menuRef.current?.scrollIntoView({ block: "nearest" });
-    menuRef.current?.querySelector<HTMLElement>("button:not([disabled])")?.focus();
-  }, [open]);
-  return (
-    <span className="msg-actions-menu-wrap">
-      <button
-        ref={openerRef}
-        className="msg-actions-entry"
-        aria-label={actionsMenuName(m)}
-        aria-haspopup="menu"
-        aria-expanded={open}
-        data-actions-seq={m.eventSeq}
-        onClick={() => setOpen((v) => !v)}
-      >
-        ⋯
-      </button>
-      {open && (
-        <div ref={menuRef} className="msg-actions-popup" role="menu" aria-label={actionsMenuName(m)}>
-          {entries.map((entry) => (
-            <button
-              key={entry.key}
-              role="menuitem"
-              className="msg-actions-item"
-              aria-label={entry.name}
-              title={entry.disabledReason ?? entry.name}
-              disabled={entry.disabledReason !== undefined}
-              onClick={() => { entry.run(); close(true); }}
-            >
-              {entry.name}
-            </button>
-          ))}
-        </div>
-      )}
-    </span>
-  );
-}
-
 // Semantic time + actions row under a user message or finalized answer. The
 // time stays visible; the desktop action buttons reveal on hover/focus-within
 // (hidden ones have no pointer hit area); the touch entry is persistent.
+//
+// UX-TIMELINE-LAYOUT-01 §2.5: the narrow action menu is bounded NORMAL-FLOW
+// content immediately after this footer — it pushes later content instead of
+// covering its message body, its block size is capped to the visible
+// scrollport (internally scrollable beyond that), and opening it reveals it
+// through the existing timeline scroll root. Escape/outside press close it,
+// action activation closes it, and focus returns to the opener (predecessor
+// UX-MSG-ACTIONS contract, placement only).
 function MessageMeta({ m, announce, onRevert, onFork, revert, fork }: {
   m: UserMsg | AssistantMsg;
   announce: Announce;
@@ -245,27 +192,120 @@ function MessageMeta({ m, announce, onRevert, onFork, revert, fork }: {
   const t = m.kind === "user" ? m.time : assistantTime(m);
   const name = m.kind === "user" ? sentName(t) : completedName(t);
   const entries = messageActionEntries(m, { announce, onRevert, onFork, revert, fork });
+  const [menuOpen, setMenuOpen] = useState(false);
+  const openerRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const closeMenu = useCallback((refocus: boolean) => {
+    setMenuOpen(false);
+    if (refocus) openerRef.current?.focus();
+  }, []);
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onKey = (e: globalThis.KeyboardEvent) => {
+      if (e.key === "Escape") { e.stopPropagation(); closeMenu(true); }
+    };
+    const onPress = (e: PointerEvent) => {
+      const target = e.target as Node;
+      if (menuRef.current?.contains(target) || openerRef.current?.contains(target)) return;
+      // Outside press closes AND restores the opener, matching Escape and
+      // action activation (UX-MSG-ACTIONS focus contract). One exception: a
+      // press on another interactive control must keep that control's own
+      // focus — restoring here would steal a deliberate target (and trap the
+      // composer). The restore runs after the press's default focus handling,
+      // which would otherwise land on the focusable timeline region.
+      const interactive = target instanceof Element
+        && target.closest("button, a[href], input, textarea, select, summary, [contenteditable]") !== null;
+      closeMenu(false);
+      if (!interactive) {
+        const opener = openerRef.current;
+        requestAnimationFrame(() => opener?.focus());
+      }
+    };
+    document.addEventListener("keydown", onKey, true);
+    document.addEventListener("pointerdown", onPress, true);
+    return () => {
+      document.removeEventListener("keydown", onKey, true);
+      document.removeEventListener("pointerdown", onPress, true);
+    };
+  }, [menuOpen, closeMenu]);
+  useEffect(() => {
+    if (!menuOpen) return;
+    const menu = menuRef.current;
+    if (!menu) return;
+    // Cap to the LIVE scrollport so the whole menu always sits inside it
+    // (rows beyond the cap scroll internally per §2.5), then reveal it
+    // through the existing timeline scroll root. The menu sits BELOW its
+    // footer in normal flow, so it can never extend behind the fixed header —
+    // even at scrollTop=0 — and never covers the body it belongs to. The
+    // reveal region can mount mid-open and shrink the port, so the cap tracks
+    // port resizes for as long as the menu stays open.
+    const port = menu.closest<HTMLElement>(".timeline");
+    const fit = () => {
+      if (port) menu.style.maxBlockSize = `${Math.max(44, port.clientHeight - 12)}px`;
+      menu.scrollIntoView({ block: "nearest" });
+    };
+    fit();
+    const ro = port && typeof ResizeObserver !== "undefined" ? new ResizeObserver(fit) : undefined;
+    if (ro && port) ro.observe(port);
+    menu.querySelector<HTMLElement>("button:not([disabled])")?.focus();
+    return () => ro?.disconnect();
+  }, [menuOpen]);
   return (
-    <div className="msg-meta">
-      <time className="msg-time" dateTime={timeIso(t)} aria-label={name}>{timeShort(t)}</time>
-      <div className="msg-actions">
-        {entries.map((entry) => <ActionButton key={entry.key} entry={entry} className="small-btn" />)}
+    <>
+      <div className="msg-meta">
+        <time className="msg-time" dateTime={timeIso(t)} aria-label={name}>{timeShort(t)}</time>
+        <div className="msg-actions">
+          {entries.map((entry) => <ActionButton key={entry.key} entry={entry} className="small-btn" />)}
+        </div>
+        <button
+          ref={openerRef}
+          className="msg-actions-entry"
+          aria-label={actionsMenuName(m)}
+          aria-haspopup="menu"
+          aria-expanded={menuOpen}
+          data-actions-seq={m.eventSeq}
+          onClick={() => setMenuOpen((v) => !v)}
+        >
+          ⋯
+        </button>
+        <SlotHost
+          slot="session.message.actions"
+          context={{ sessionId, kind: m.kind, messageId: m.id, eventSeq: m.eventSeq }}
+        />
       </div>
-      <ActionsMenu m={m} entries={entries} />
-      <SlotHost
-        slot="session.message.actions"
-        context={{ sessionId, kind: m.kind, messageId: m.id, eventSeq: m.eventSeq }}
-      />
-    </div>
+      {menuOpen && (
+        <div ref={menuRef} className="msg-actions-popup" role="menu" aria-label={actionsMenuName(m)}>
+          {entries.map((entry) => (
+            <button
+              key={entry.key}
+              role="menuitem"
+              className="msg-actions-item"
+              aria-label={entry.name}
+              title={entry.disabledReason ?? entry.name}
+              disabled={entry.disabledReason !== undefined}
+              onClick={() => { entry.run(); closeMenu(true); }}
+            >
+              {entry.name}
+            </button>
+          ))}
+        </div>
+      )}
+    </>
   );
 }
 
 function AssistantView({ m, announce }: { m: AssistantMsg; announce?: Announce }) {
+  // Role and progress live in the semantic container name — never a visible
+  // role label or avatar row (UX-TIMELINE-LAYOUT-01 a11y §2).
+  const hasAnswer = m.text !== "" || !m.finalized;
+  const articleProps = hasAnswer
+    ? ({ role: "article", "aria-label": assistantArticleName(m.finalized, assistantTime(m)) } as const)
+    : undefined;
   return (
-    <div className="msg assistant">
+    <div className="msg assistant" {...(articleProps ?? {})}>
       {m.reasoning !== "" && <Thinking m={m} announce={announce} />}
-      {(m.text !== "" || !m.finalized) && (
-        <div className="bubble">{renderMarkdown(m.text || "", m.id)}{!m.finalized && <span className="caret" />}</div>
+      {hasAnswer && (
+        <div className="bubble" dir="auto">{renderMarkdown(m.text || "", m.id)}{!m.finalized && <span className="caret" />}</div>
       )}
       {m.finalized && m.text !== "" && announce && <MessageMeta m={m} announce={announce} />}
     </div>
@@ -381,8 +421,8 @@ function MessageView({ m, announce, onRevert, onFork, revert, fork }: {
 }) {
   if (m.kind === "user") {
     return (
-      <div className="msg user" data-msg-id={m.id}>
-        <div className="bubble">
+      <div className="msg user" data-msg-id={m.id} role="article" aria-label={userArticleName(m.time)}>
+        <div className="bubble" dir="auto">
           {renderMarkdown(m.text, m.id)}
           {m.attachments && m.attachments.length > 0 && (
             <AttachmentPills attachments={m.attachments} />
@@ -404,7 +444,7 @@ function MessageView({ m, announce, onRevert, onFork, revert, fork }: {
   return <ToolCard m={m} />;
 }
 
-function TimelineDialog({ prompts, onClose, onJump, onRevert, onFork, revert, fork }: {
+function TimelineDialog({ prompts, onClose, onJump, onRevert, onFork, revert, fork, resolveRestoreFocus }: {
   prompts: UserMsg[];
   onClose: () => void;
   onJump: (id: string) => void;
@@ -412,9 +452,10 @@ function TimelineDialog({ prompts, onClose, onJump, onRevert, onFork, revert, fo
   onFork: (message: UserMsg) => void;
   revert: ActionAvailability;
   fork: ActionAvailability;
+  resolveRestoreFocus?: (opener: HTMLElement | null) => HTMLElement | null;
 }) {
   return (
-    <Dialog title="Session timeline" onClose={onClose}>
+    <Dialog title="Session timeline" onClose={onClose} resolveRestoreFocus={resolveRestoreFocus}>
       <div className="dialog-head">
         <div>
           <h2>Session timeline</h2>
@@ -427,7 +468,7 @@ function TimelineDialog({ prompts, onClose, onJump, onRevert, onFork, revert, fo
           <div className="timeline-dialog-row" key={message.id}>
             <button className="timeline-dialog-prompt" onClick={() => { onJump(message.id); onClose(); }}>
               <span className="muted">{index + 1}</span>
-              <span>{message.text.split("\n").find((line) => line.trim()) || "(empty prompt)"}</span>
+              <span dir="auto">{message.text.split("\n").find((line) => line.trim()) || "(empty prompt)"}</span>
             </button>
             <button
               className="small-btn"
@@ -522,7 +563,7 @@ function PromptNavigator({ prompts, onJump, containerRef }: {
   return (
     <nav
       className="prompt-nav"
-      aria-label="Prompts in this session"
+      aria-label={PROMPT_NAV_NAME}
       onMouseEnter={reveal}
       onMouseLeave={scheduleClose}
       onFocus={reveal}
@@ -544,7 +585,7 @@ function PromptNavigator({ prompts, onJump, containerRef }: {
             <button
               key={p.id}
               className="prompt-nav-tick"
-              aria-label={`Prompt ${index + 1} of ${prompts.length}: ${p.preview || "(empty prompt)"}`}
+              aria-label={promptJumpName(index, prompts.length, p.text)}
               aria-current={index === active ? "true" : undefined}
               onClick={() => jumpTo(p.id)}
             >
@@ -591,10 +632,17 @@ export default function Timeline({ model }: { model: RenderModel }) {
   const prefs = useUiSettings();
   const sessionId = useStore((s) => s.activeSessionId);
   const [timelineOpen, setTimelineOpen] = useState(false);
+  // A prompt chosen from the CLOSING dialog hands focus to the jump target
+  // (never back to the dialog opener, never BODY) — §2.3.
+  const dialogFocusHandoff = useRef(false);
   // L13 windowing: only the last `limit` rows render (see timelineWindow.ts).
   const [limit, setLimit] = useState(TIMELINE_WINDOW);
   const anchor = useRef<{ scrollTop: number; scrollHeight: number } | null>(null);
   const pendingJump = useRef<string | null>(null);
+  const pendingJumpFocus = useRef(false);
+  // Latest-reveal state (§2.4): true while the reader holds a position away
+  // from the tail, mounting the reserved Jump to latest region.
+  const [showJump, setShowJump] = useState(false);
   // UX-PANE-MODEL stable anchor: session switches adjust during render so the
   // outgoing anchor is captured from the STILL-CURRENT DOM (before commit) and
   // the incoming one is ready before the first paint of the new session.
@@ -612,18 +660,29 @@ export default function Timeline({ model }: { model: RenderModel }) {
     const stored = sessionId !== null ? loadTimelineAnchor(sessionId) : null;
     restoreRef.current = stored !== null && !stored.atBottom ? stored : null;
     atBottom.current = stored?.atBottom ?? true;
+    setShowJump(stored !== null && !stored.atBottom);
   }
 
+  // Tail follow (§2.4): at/near the tail the timeline follows growth; a reader
+  // who scrolled up keeps the chosen position and sees the reveal control.
   useEffect(() => {
     const el = ref.current;
-    if (el && atBottom.current) el.scrollTop = el.scrollHeight;
+    if (!el) return;
+    if (atBottom.current) {
+      el.scrollTop = el.scrollHeight;
+      setShowJump(false);
+    } else {
+      setShowJump(el.scrollHeight - el.scrollTop - el.clientHeight >= 80);
+    }
   }, [model.version]);
 
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const onScroll = () => {
     const el = ref.current;
     if (!el) return;
-    atBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+    const near = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+    atBottom.current = near;
+    setShowJump(!near);
     if (sessionId === null) return;
     if (saveTimer.current !== null) clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(() => {
@@ -706,9 +765,15 @@ export default function Timeline({ model }: { model: RenderModel }) {
   // above), and a jump to a hidden prompt grows the window first.
   const start = windowStart(rows.length, limit);
   const shownRows = start > 0 ? rows.slice(start) : rows;
+  // A reveal activated from the keyboard can unmount its own control (the
+  // final Show earlier chunk, or Show all): focus must then hand off to the
+  // named timeline region — never fall to BODY (a11y criteria 6–7).
+  const revealHadFocus = useRef(false);
   const reveal = (next: number) => {
     const el = ref.current;
     if (el) anchor.current = { scrollTop: el.scrollTop, scrollHeight: el.scrollHeight };
+    const active = document.activeElement;
+    revealHadFocus.current = active instanceof Element && active.closest(".timeline-earlier") !== null;
     setLimit(next);
   };
   useLayoutEffect(() => {
@@ -718,12 +783,29 @@ export default function Timeline({ model }: { model: RenderModel }) {
     if (el && a) el.scrollTop = a.scrollTop + (el.scrollHeight - a.scrollHeight);
     const target = pendingJump.current;
     pendingJump.current = null;
-    if (target) el?.querySelector(`[data-msg-id="${target}"]`)?.scrollIntoView({ block: "center" });
+    if (target) {
+      const node = el?.querySelector<HTMLElement>(`[data-msg-id="${target}"]`);
+      node?.scrollIntoView({ block: "center" });
+      if (pendingJumpFocus.current && node) {
+        node.tabIndex = -1;
+        node.focus({ preventScroll: true });
+      }
+    }
+    pendingJumpFocus.current = false;
+    if (revealHadFocus.current) {
+      revealHadFocus.current = false;
+      // The bar survives a partial reveal and keeps focus itself; only its
+      // unmount hands focus to the region (preserving the anchored position).
+      if (el && el.querySelector(".timeline-earlier") === null) {
+        el.focus({ preventScroll: true });
+      }
+    }
   }, [limit]);
 
   // Reapply the stored stable anchor once its row exists: grow the window to
-  // include it if needed, then align the row to the remembered offset. Runs
-  // every commit but is a no-op unless a restore is pending.
+  // include it if needed, then align the row to the remembered usable-edge
+  // offset (timelineAnchor.ts owns the inset invariant). Runs every commit
+  // but is a no-op unless a restore is pending.
   useLayoutEffect(() => {
     const a = restoreRef.current;
     const el = ref.current;
@@ -742,18 +824,38 @@ export default function Timeline({ model }: { model: RenderModel }) {
       return;
     }
     restoreRef.current = null;
-    const rowTop = node.getBoundingClientRect().top - el.getBoundingClientRect().top;
-    el.scrollTop += rowTop - a.offset;
+    el.scrollTop += restoreScrollDelta(el, node, a);
   });
-  const jump = (id: string) => {
+  const jump = (id: string, opts?: { focus?: boolean }) => {
     const index = rows.findIndex((r) => r.kind !== "work" && r.id === id);
     const next = limitToInclude(rows.length, limit, index);
     if (next !== limit) {
       pendingJump.current = id;
+      pendingJumpFocus.current = opts?.focus === true;
       setLimit(next);
       return;
     }
-    ref.current?.querySelector(`[data-msg-id="${id}"]`)?.scrollIntoView({ block: "center" });
+    const node = ref.current?.querySelector<HTMLElement>(`[data-msg-id="${id}"]`);
+    node?.scrollIntoView({ block: "center" });
+    if (opts?.focus && node) {
+      node.tabIndex = -1;
+      node.focus({ preventScroll: true });
+    }
+  };
+  // Jump to latest (§2.4): scroll to the true final surface (error/retry and
+  // turn footer included — they precede the tail clearance), mark follow mode
+  // active, and hand focus to the latest message container since this control
+  // unmounts. Appends no event.
+  const jumpToLatest = () => {
+    const el = ref.current;
+    if (!el) return;
+    atBottom.current = true;
+    el.scrollTop = el.scrollHeight;
+    setShowJump(false);
+    const msgs = el.querySelectorAll<HTMLElement>(":scope > .msg");
+    const target = msgs[msgs.length - 1] ?? el;
+    target.tabIndex = -1;
+    target.focus({ preventScroll: true });
   };
   // Revert and edit: append the marker, then seed the composer with the exact
   // raw prompt + attachments (marker-owned; replay derives the same draft).
@@ -811,7 +913,7 @@ export default function Timeline({ model }: { model: RenderModel }) {
         const target = el?.querySelector<HTMLElement>(`[data-revert-seq="${atSeq}"]`)
           ?? el?.querySelector<HTMLElement>(`[data-actions-seq="${atSeq}"]`);
         if (target) { target.focus(); return; }
-        if (el) { el.tabIndex = -1; el.focus(); }
+        if (el) { el.focus(); }
       });
     }).catch((err) => {
       const text = mutationErrorMessage("restore", err);
@@ -829,15 +931,33 @@ export default function Timeline({ model }: { model: RenderModel }) {
     turnStatus: turn?.status ?? null,
   };
 
-  // .timeline-viewport is the non-scrolling positioning context for the prompt
-  // rail: the rail is a sibling of the .timeline scroller, so it stays pinned
-  // right-center of the visible chat instead of scrolling with the messages.
+  // One timeline, one scroll root (§2.1): the shell stacks the reserved
+  // utility region, the single `.timeline` scrollport, and the reserved
+  // latest-reveal region as normal-flow siblings. The only exception is the
+  // prompt rail: `.timeline-viewport` is a non-scrolling positioning context
+  // wrapping the scrollport, and the rail is an absolute SIBLING of the
+  // scroller pinned to the right gutter (never over the reading column).
   return (
-    <div className="timeline-viewport">
-      <div className="timeline" ref={ref} onScroll={onScroll}>
-        {promptMessages.length > 0 && (
-          <button className="timeline-open small-btn" onClick={() => setTimelineOpen(true)}>Timeline</button>
-        )}
+    <div className="timeline-shell">
+      {promptMessages.length > 0 && (
+        <div className="timeline-utility">
+          <button
+            className="timeline-open small-btn"
+            aria-label={OPEN_TIMELINE_NAME}
+            aria-haspopup="dialog"
+            onClick={() => { dialogFocusHandoff.current = false; setTimelineOpen(true); }}
+          >Timeline</button>
+        </div>
+      )}
+      <div className="timeline-viewport">
+      <div
+        className="timeline"
+        role="region"
+        aria-label="Conversation timeline"
+        tabIndex={-1}
+        ref={ref}
+        onScroll={onScroll}
+      >
         <SlotHost slot="session.timeline.before" context={slotSummary} />
         {model.messages.length === 0 && (
           <div className="empty">
@@ -927,20 +1047,30 @@ export default function Timeline({ model }: { model: RenderModel }) {
         {footer && <div className="turn-footer">{footer}</div>}
         <div className="msg-live" role="status" aria-live="polite">{liveText}</div>
         <SlotHost slot="session.timeline.after" context={slotSummary} />
-        <SelectionMenu container={ref} />
-        {timelineOpen && (
-          <TimelineDialog
-            prompts={promptMessages}
-            onClose={() => setTimelineOpen(false)}
-            onJump={jump}
-            onRevert={revert}
-            onFork={fork}
-            revert={revertOk}
-            fork={forkOk}
-          />
-        )}
       </div>
       {showNav && <PromptNavigator prompts={prompts} onJump={jump} containerRef={ref} />}
+      </div>
+      {showJump && (
+        <div className="timeline-reveal">
+          <button className="jump-latest" onClick={jumpToLatest}>
+            {turn?.status === "working" && <span className="jump-latest-dot" aria-hidden="true" />}
+            {JUMP_TO_LATEST_NAME}
+          </button>
+        </div>
+      )}
+      <SelectionMenu container={ref} />
+      {timelineOpen && (
+        <TimelineDialog
+          prompts={promptMessages}
+          onClose={() => setTimelineOpen(false)}
+          onJump={(id) => { dialogFocusHandoff.current = true; jump(id, { focus: true }); }}
+          onRevert={revert}
+          onFork={fork}
+          revert={revertOk}
+          fork={forkOk}
+          resolveRestoreFocus={(opener) => (dialogFocusHandoff.current ? null : opener)}
+        />
+      )}
     </div>
   );
 }
