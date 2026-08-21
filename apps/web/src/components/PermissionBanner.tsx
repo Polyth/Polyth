@@ -60,7 +60,7 @@ function PermissionRow({ p }: { p: PendingPermission }) {
             </select>
           </span>
         )}
-        <button className="danger" onClick={() => replyPermission(p.requestId, "reject")}>Reject</button>
+        <button className="danger" onClick={() => replyPermission(p.requestId, "reject")}>Deny</button>
       </div>
     </div>
   );

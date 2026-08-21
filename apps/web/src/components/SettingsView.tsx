@@ -30,6 +30,7 @@ interface PageDef {
   id: string;
   label: string;
   group: "Workspace" | "Engineering" | "Customize" | "System";
+  nav?: boolean;
   render: () => ReactNode;
 }
 
@@ -52,8 +53,8 @@ const BUILTIN: PageDef[] = [
   { id: "mcp", label: "MCP", group: "Engineering", render: () => <McpPage /> },
   { id: "widgets", label: "Widgets & Layout", group: "Customize", render: () => <WidgetsPage /> },
   { id: "plugins", label: "Plugins", group: "Customize", render: () => <PluginsPage /> },
-  { id: "access", label: "Access", group: "System", render: () => <AccessPage /> },
-  { id: "about", label: "About", group: "System", render: () => <AboutPage /> },
+  { id: "access", label: "Access", group: "System", nav: false, render: () => <AccessPage /> },
+  { id: "about", label: "About", group: "System", nav: false, render: () => <AboutPage /> },
 ];
 
 export default function SettingsView({ onClose = () => setOverlay(null) }: { onClose?: () => void }) {
@@ -108,6 +109,18 @@ export default function SettingsView({ onClose = () => setOverlay(null) }: { onC
     }));
     return [...BUILTIN, ...extra];
   }, [prefs, slotItems]);
+
+  useEffect(() => {
+    const navigate = (event: Event) => {
+      const pageId = (event as CustomEvent<unknown>).detail;
+      if (typeof pageId !== "string" || !pages.some((page) => page.id === pageId)) return;
+      setActive(pageId);
+      setFilter("");
+      setCursor(0);
+    };
+    window.addEventListener("polyth:settings-page", navigate);
+    return () => window.removeEventListener("polyth:settings-page", navigate);
+  }, [pages]);
 
   useEffect(() => {
     const contributed: SettingsSearchItem[] = [];
@@ -205,7 +218,7 @@ export default function SettingsView({ onClose = () => setOverlay(null) }: { onC
       >
         <nav className="modal-nav settings-nav">
           <div className="settings-nav-head">
-            <h2>Settings</h2>
+            <h2><span className="polyth-mark">p</span> polyth</h2>
           </div>
           <input
             className="settings-nav-search"
@@ -246,9 +259,9 @@ export default function SettingsView({ onClose = () => setOverlay(null) }: { onC
             </div>
           ) : (
             <nav className="settings-nav-list" aria-label="Settings pages">
-              {pages.map((p, index) => (
+              {pages.filter((page) => page.nav !== false).map((p, index, navPages) => (
                 <Fragment key={p.id}>
-                  {(index === 0 || pages[index - 1]!.group !== p.group) && (
+                  {(index === 0 || navPages[index - 1]!.group !== p.group) && (
                     <div className="settings-nav-group">{p.group}</div>
                   )}
                   <button
@@ -264,7 +277,7 @@ export default function SettingsView({ onClose = () => setOverlay(null) }: { onC
           )}
           <div className="nav-foot">
             <span>Changes save automatically</span>
-            <button onClick={() => setOverlay("onboarding")}>Open preset setup</button>
+            <button onClick={() => setOverlay("onboarding")}>Choose a setup</button>
           </div>
         </nav>
         <div className="modal-main settings-pane">

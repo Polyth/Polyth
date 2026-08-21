@@ -1,6 +1,6 @@
 // UX-PERSONAS first-run contract: the shell never gates on a preset, the
-// setup panel is optional (Skip/Escape/close all lead to the full workspace),
-// no card is selected initially, and the exact plain-language copy ships.
+// setup panel is optional (Skip/Escape/close all lead to the full workspace)
+// and the four progressive setup choices do not persist before Apply.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
@@ -19,24 +19,23 @@ test("App always renders the operational shell — no persona early return", asy
   assert.ok(app.includes("<Sidebar />"), "the shell mounts unconditionally");
 });
 
-test("preset setup ships the exact optional-setup copy", async () => {
+test("guided setup ships friendly optional copy and four named steps", async () => {
   const src = await setupSrc();
-  const presets = await readFile(new URL("../src/workspacePresets.ts", import.meta.url), "utf8");
-  assert.ok(presets.includes("What should Polyth put within easy reach?"), "exact heading");
-  assert.ok(presets.includes("Skip for now"), "exact skip label");
-  assert.ok(presets.includes("Saved on this device. Change it in Settings → Workspace preset."), "persistence note");
-  assert.ok(src.includes("OPTIONAL_SETUP_COPY.skip"), "skip renders from the schema copy");
+  assert.ok(src.includes("Choose a setup"), "friendly setup heading");
+  assert.ok(src.includes("You can change everything later."), "setup explains that choices are reversible");
+  assert.ok(src.includes("Skip for now"), "skip remains explicit");
+  assert.ok(src.includes('["Workflow", "Control", "Widgets", "Review"]'), "all four steps are named");
   for (const banned of ["Continue as", "persona", "Persona"]) {
     assert.ok(!src.includes(banned), `setup panel must not contain "${banned}"`);
   }
 });
 
-test("no card is selected initially and a click is only a draft choice", async () => {
+test("guided choices stay in one draft and persist only from Apply setup", async () => {
   const src = await setupSrc();
-  assert.ok(src.includes("useState<DraftChoice>(null)"), "initial draft selection is null");
-  assert.ok(src.includes("applyPreset"), "persistence happens only via the confirmation action");
-  assert.ok(src.includes("aria-pressed={selected}"), "cards expose programmatic selected state");
-  assert.ok(src.includes("aria-describedby"), "cards reference their supporting copy");
+  assert.ok(src.includes("useState<WorkspaceSetupDraft>"), "one draft owns the four setup steps");
+  assert.ok(src.includes("applyWorkspaceSetup(current, draft, widgets)"), "Apply uses the shared layout engine");
+  assert.ok(src.includes("aria-pressed="), "choices expose programmatic selected state");
+  assert.ok(src.includes(">Apply setup</button>"), "one named confirmation action persists the draft");
 });
 
 test("close, Escape, and Skip all record completion without writing a preset", async () => {

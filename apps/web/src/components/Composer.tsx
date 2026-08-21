@@ -544,14 +544,25 @@ export default function Composer({ variant = "docked" }: { variant?: "docked" | 
   // Favorites float first (Settings > Providers & Models); picking records recency.
   const modelPrefs = useModelPrefs();
   const preferredModel = parseModelRef(settings.defaultModel);
+  const recommendedModel = session?.model ?? preferredModel ?? models[0];
   const modelItems: PickerItem[] = [
-    { id: "", label: modelPickerDefaultLabel(session?.model, models, preferredModel), group: "" },
-    ...sortModels(models, modelPrefs).map((m) => {
+    {
+      id: "",
+      label: `Auto · ${modelPickerDefaultLabel(session?.model, models, preferredModel).replace(/^Default:\s*/, "")}`,
+      group: "Recommended",
+      detail: "Let Polyth use your current workspace default",
+    },
+    ...sortModels(models, modelPrefs).filter((model) => !(
+      recommendedModel
+      && model.providerID === recommendedModel.providerID
+      && model.modelID === recommendedModel.modelID
+    )).map((m) => {
       const fav = isFavorite(modelPrefs, modelKey(m));
+      const recent = modelPrefs.recents.includes(modelKey(m));
       return {
         id: JSON.stringify({ providerID: m.providerID, modelID: m.modelID }),
         label: fav ? `★ ${m.name || m.modelID}` : m.name || m.modelID,
-        group: fav ? "Favorites" : m.providerID,
+        group: fav ? "Favorites" : recent ? "Recent" : "All models",
         // Honest model detail: provider + numeric context + reported
         // connection only. No cost/modality/variant/attachment guesses.
         detail: modelDetail(m),
@@ -565,11 +576,13 @@ export default function Composer({ variant = "docked" }: { variant?: "docked" | 
     if (ref) noteModelUsed(`${ref.providerID}/${ref.modelID}`);
   };
   const agentItems: PickerItem[] = [
-    { id: "", label: agentPickerDefaultLabel(session?.agent, agents), group: "" },
+    { id: "", label: agentPickerDefaultLabel(session?.agent, agents).replace(/^Default:\s*/, "Ask · "), group: "Recommended" },
     ...agents.map((a) => ({
       id: a.name,
-      label: a.name,
-      group: "",
+      label: ["ask", "plan", "build", "review", "research"].includes(a.name.toLowerCase())
+        ? a.name[0]!.toUpperCase() + a.name.slice(1)
+        : a.name,
+      group: "Work modes",
       ...(a.description ? { detail: a.description } : {}),
     })),
   ];
@@ -707,9 +720,7 @@ export default function Composer({ variant = "docked" }: { variant?: "docked" | 
           ariaLabel="Message"
           placeholder={shellMode
             ? "Enter a workspace shell command…"
-            : simpleMode
-              ? "@ for files/agents; / for commands and skills; ! for shell; # for snippets"
-              : "Ask Polyth to explore, build, or review — ! for shell, / for commands, # for snippets, @ for files"}
+            : "Ask Polyth anything…"}
           {...(acView ? {
             role: "combobox",
             ariaAutocomplete: "list" as const,
@@ -721,6 +732,11 @@ export default function Composer({ variant = "docked" }: { variant?: "docked" | 
           onKeyIntercept={onKeyIntercept}
           onPaste={onPaste}
         />
+        {!shellMode && !text && !acView && (
+          <div className="composer-sigil-hint" aria-hidden="true">
+            <span>@ files</span><span>/ commands</span><span>! shell</span><span># snippets</span>
+          </div>
+        )}
         {acView && (
           <div className="ac-popup">
             <div className="ac-header">{acView.kind === "cmd" ? "Commands" : acView.kind === "snip" ? "Snippets" : "Files"}</div>
@@ -797,7 +813,7 @@ export default function Composer({ variant = "docked" }: { variant?: "docked" | 
           >
             Technical options
           </button>}
-          {(simpleMode || (ui.showTechnicalButtons && techOpen)) && !noModels && (
+          {!noModels && (
             <Picker
               className="picker-model"
               label="Model" direction="up" items={modelItems} value={modelValue} onPick={pickModel}
@@ -805,11 +821,11 @@ export default function Composer({ variant = "docked" }: { variant?: "docked" | 
               trailingAction={modelRowAction}
             />
           )}
-          {(simpleMode || (ui.showTechnicalButtons && techOpen)) && agents.length > 0 && (
+          {agents.length > 0 && (
             <Picker
               className="picker-agent"
-              label="Agent" direction="up" items={agentItems} value={agentValue} onPick={pickAgent}
-              ariaLabel={`Select agent, current ${currentAgentLabel}`}
+              label="Work mode" direction="up" items={agentItems} value={agentValue} onPick={pickAgent}
+              ariaLabel={`Select work mode, current ${currentAgentLabel}`}
             />
           )}
           {!simpleMode && ui.showTechnicalButtons && techOpen && (
@@ -889,12 +905,14 @@ export default function Composer({ variant = "docked" }: { variant?: "docked" | 
                     ? <span className="send-plane" aria-hidden="true"><Icon.send /></span>
                     : <>{shellMode ? "Run" : followUp === "steer" ? "Steer" : followUp === "interrupt" ? "Interrupt" : "Queue"} <span className="send-key">{settings.sendOnEnter ? "↵" : `${modKeyLabel()}↵`}</span></>}
                 </button>
-                <button className="stop" onClick={() => void abortSession()}>
+                <button className="stop" title="Stop the current response" aria-label="Stop the current response" onClick={() => void abortSession()}>
                   Stop
                 </button>
               </>
             ) : (
               <button className="send" onClick={() => send()}
+                title={shellMode ? "Run shell command" : "Send message"}
+                aria-label={shellMode ? "Run shell command" : "Send message"}
                 disabled={(!text.trim() && attachments.length === 0) || (!shellMode && (noModels || profileMissing))}>
                 {simpleMode
                   ? <span className="send-plane" aria-hidden="true"><Icon.send /></span>

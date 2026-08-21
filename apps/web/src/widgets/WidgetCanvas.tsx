@@ -6,34 +6,38 @@ import ViewErrorBoundary from "../components/ViewErrorBoundary.ts";
 import { getWidget, useWidgetCatalog, type WidgetDef } from "./catalog.ts";
 import {
   WIDGET_ZONES,
-  applyWidgetLayoutPreset,
+  applyWidgetLayoutMutations,
+  canPlaceWidget,
   ensureWidgets,
-  moveWidget,
-  setWidgetSize,
-  setWidgetAudience,
-  setWidgetVisible,
   updateWidgetLayout,
   useWidgetLayout,
+  widgetDefinitionId,
   widgetZoneOf,
   type WidgetAudience,
   type WidgetPlacement,
   type WidgetZone,
 } from "./widgetLayout.ts";
+import { planWorkspaceCustomization } from "./workspaceCustomize.ts";
 import "./builtinWidgets.tsx";
 import { setWorkspaceMode, useWorkspaceMode } from "./workspaceMode.ts";
 import { setUiSettings, useUiSettings } from "../uiPrefs.ts";
 import { Icon } from "../icons.tsx";
+import { useEscape } from "../useEscape.ts";
 
 const AUDIENCE_RANK: Record<WidgetAudience, number> = { simple: 0, standard: 1, power: 2 };
 const ZONE_LABEL: Record<WidgetZone, string> = {
-  top: "Top", left: "Left", main: "Main workspace", right: "Right", bottom: "Bottom strip",
+  header: "Header", left: "Left side", main: "Main workspace", right: "Right side",
+  bottom: "Bottom strip", floating: "Floating",
 };
 
-function allowed(widget: WidgetDef, audience: WidgetAudience): boolean {
-  return AUDIENCE_RANK[widget.audience ?? "standard"] <= AUDIENCE_RANK[audience];
+function allowed(widget: WidgetDef, audience: WidgetAudience, placement?: WidgetPlacement): boolean {
+  return placement?.showIn
+    ? placement.showIn.includes(audience)
+    : AUDIENCE_RANK[widget.audience ?? "standard"] <= AUDIENCE_RANK[audience];
 }
 
 function WidgetCard({
+  instanceId,
   widget,
   placement,
   zone,
@@ -42,7 +46,9 @@ function WidgetCard({
   editing,
   projectId,
   sessionId,
+  onDrag,
 }: {
+  instanceId: string;
   widget: WidgetDef;
   placement: WidgetPlacement;
   zone: WidgetZone;
@@ -51,14 +57,21 @@ function WidgetCard({
   editing: boolean;
   projectId: string | null;
   sessionId: string | null;
+  onDrag: (id: string | null) => void;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
+  useEscape(menuOpen, () => setMenuOpen(false));
 
   const moveBy = (delta: number) => {
     updateWidgetLayout((current) => {
       const sibling = orderedIds[index + delta];
       return sibling
-        ? moveWidget(current, widget.id, zone, current.zones[zone].indexOf(sibling))
+        ? applyWidgetLayoutMutations(current, [{
+            type: "move",
+            id: instanceId,
+            zone,
+            index: current.zones[zone].indexOf(sibling),
+          }], [widget])
         : current;
     });
   };
@@ -76,7 +89,11 @@ function WidgetCard({
       if (w === lastW && h === lastH) return;
       lastW = w;
       lastH = h;
-      updateWidgetLayout((current) => setWidgetSize(current, widget.id, { w, h }));
+      updateWidgetLayout((current) => applyWidgetLayoutMutations(
+        current,
+        [{ type: "resize", id: instanceId, size: { w, h } }],
+        [widget],
+      ));
     };
     const onUp = () => {
       window.removeEventListener("pointermove", onMove);
@@ -95,7 +112,11 @@ function WidgetCard({
     else if (event.key === "ArrowUp") size = { ...size, h: size.h - step };
     else return;
     event.preventDefault();
-    updateWidgetLayout((current) => setWidgetSize(current, widget.id, size));
+    updateWidgetLayout((current) => applyWidgetLayoutMutations(
+      current,
+      [{ type: "resize", id: instanceId, size }],
+      [widget],
+    ));
   };
 
   return (
@@ -104,19 +125,21 @@ function WidgetCard({
       style={{ "--widget-w": placement.size.w, "--widget-h": placement.size.h } as CSSProperties}
       draggable={editing}
       onDragStart={(event) => {
-        setDragWidget(event.dataTransfer, widget.id);
+        setDragWidget(event.dataTransfer, instanceId);
         event.dataTransfer.effectAllowed = "move";
+        onDrag(instanceId);
       }}
+      onDragEnd={() => onDrag(null)}
       onContextMenu={(event) => {
         event.preventDefault();
         setMenuOpen(true);
       }}
-      data-widget-id={widget.id}
+      data-widget-id={instanceId}
     >
       <header className="widget-card-head">
         <span className="widget-drag" aria-hidden="true">⠿</span>
         <div>
-          <strong>{widget.title}</strong>
+          <strong>{placement.title ?? widget.title}</strong>
           {editing && <span>{widget.pluginId}</span>}
         </div>
         <div className="widget-card-menu-shell">
@@ -132,13 +155,29 @@ function WidgetCard({
               {editing && <button role="menuitem" disabled={index === orderedIds.length - 1} onClick={() => { moveBy(1); setMenuOpen(false); }}>Move later</button>}
               {editing && WIDGET_ZONES.map((target) => (
                 target !== zone && <button key={target} role="menuitem" onClick={() => {
-                  updateWidgetLayout((current) => moveWidget(current, widget.id, target));
+                  updateWidgetLayout((current) => applyWidgetLayoutMutations(
+                    current,
+                    [{ type: "move", id: instanceId, zone: target }],
+                    [widget],
+                  ));
                   setMenuOpen(false);
-                }}>Move to {ZONE_LABEL[target]}</button>
+                }} disabled={!canPlaceWidget(widget, target).ok}>Move to {ZONE_LABEL[target]}</button>
               ))}
               <button role="menuitem" onClick={() => { setMenuOpen(false); openSettingsPage("widgets"); }}>Widget settings</button>
+              {widget.duplicatable && <button role="menuitem" onClick={() => {
+                updateWidgetLayout((current) => applyWidgetLayoutMutations(
+                  current,
+                  [{ type: "duplicate", id: instanceId }],
+                  [widget],
+                ));
+                setMenuOpen(false);
+              }}>Duplicate</button>}
               <button role="menuitem" onClick={() => {
-                updateWidgetLayout((current) => setWidgetVisible(current, widget.id, false));
+                updateWidgetLayout((current) => applyWidgetLayoutMutations(
+                  current,
+                  [{ type: "visibility", id: instanceId, visible: false }],
+                  [widget],
+                ));
                 setMenuOpen(false);
               }}>Hide widget</button>
             </div>
@@ -146,7 +185,7 @@ function WidgetCard({
         </div>
       </header>
       <div className="widget-card-body">
-        <ViewErrorBoundary resetKey={`${widget.id}:${projectId ?? ""}:${sessionId ?? ""}`} inline>
+        <ViewErrorBoundary resetKey={`${instanceId}:${projectId ?? ""}:${sessionId ?? ""}`} inline>
           {widget.render({ projectId, sessionId, editing })}
         </ViewErrorBoundary>
       </div>
@@ -179,40 +218,13 @@ function CustomizeWorkspace({
   const [result, setResult] = useState("");
   const visibleCount = widgets.filter((widget) => layout.widgets[widget.id]?.visible).length;
   const runCommand = () => {
-    const text = command.trim().toLowerCase();
-    if (!text) return;
-    let changed = false;
-    const preset = text.includes("focused")
-      ? "focused"
-      : text.includes("manager")
-        ? "manager"
-        : text.includes("build") || text.includes("debug")
-          ? "build-debug"
-          : text.includes("balanced")
-            ? "balanced"
-            : null;
-    if (preset) {
-      updateWidgetLayout((current) => applyWidgetLayoutPreset(current, preset));
-      changed = true;
+    const plan = planWorkspaceCustomization(command, widgets);
+    if (plan.density) setUiSettings({ density: plan.density });
+    if (plan.mutations.length > 0) {
+      updateWidgetLayout((current) => applyWidgetLayoutMutations(current, plan.mutations, widgets));
     }
-    if (text.includes("compact")) {
-      setUiSettings({ density: "compact" });
-      changed = true;
-    } else if (text.includes("comfortable")) {
-      setUiSettings({ density: "comfortable" });
-      changed = true;
-    }
-    const request = text.match(/\b(hide|show)\s+([\w -]+)/);
-    if (request) {
-      const target = widgets.find((widget) =>
-        `${widget.id} ${widget.title}`.toLowerCase().includes(request[2]!.trim()));
-      if (target) {
-        updateWidgetLayout((current) => setWidgetVisible(current, target.id, request[1] === "show"));
-        changed = true;
-      }
-    }
-    setResult(changed ? "Workspace updated locally." : "Try “balanced”, “compact”, “hide terminal”, or “show notes”.");
-    if (changed) setCommand("");
+    setResult(plan.message);
+    if (plan.mutations.length > 0 || plan.density) setCommand("");
   };
   return (
     <aside className="workspace-customize-panel" aria-label="Customize Workspace">
@@ -240,7 +252,10 @@ function CustomizeWorkspace({
                 ["build-debug", "▥"], ["balanced", "▧"], ["focused", "□"],
               ].map(([preset, icon], index) => (
                 <button key={`${preset}:${index}`} title={`${preset} layout`} onClick={() =>
-                  updateWidgetLayout((current) => applyWidgetLayoutPreset(current, preset as "focused" | "balanced" | "manager" | "build-debug"))}>
+                  updateWidgetLayout((current) => applyWidgetLayoutMutations(current, [{
+                    type: "preset",
+                    preset: preset as "focused" | "balanced" | "manager" | "build-debug",
+                  }], widgets))}>
                   {icon}
                 </button>
               ))}
@@ -261,7 +276,11 @@ function CustomizeWorkspace({
             <div className="customize-segmented">
               {(["simple", "standard", "power"] as const).map((audience) => (
                 <button className={layout.audience === audience ? "active" : ""} key={audience} onClick={() =>
-                  updateWidgetLayout((current) => setWidgetAudience(current, audience))}>
+                  updateWidgetLayout((current) => applyWidgetLayoutMutations(
+                    current,
+                    [{ type: "audience", audience }],
+                    widgets,
+                  ))}>
                   {audience[0]!.toUpperCase() + audience.slice(1)}
                 </button>
               ))}
@@ -282,7 +301,11 @@ function CustomizeWorkspace({
                   <input type="checkbox" checked={on} onChange={(event) => {
                     setUiSettings({ [setting]: event.target.checked });
                     if (setting === "showQuickActions") {
-                      updateWidgetLayout((current) => setWidgetVisible(current, "core.quick-actions", event.target.checked));
+                      updateWidgetLayout((current) => applyWidgetLayoutMutations(current, [{
+                        type: "visibility",
+                        id: "core.quick-actions",
+                        visible: event.target.checked,
+                      }], widgets));
                     }
                   }} />
                 </label>
@@ -324,7 +347,10 @@ function WidgetLibrary({ widgets, onDone }: { widgets: WidgetDef[]; onDone: () =
                 onDragStart={(event) => setDragWidget(event.dataTransfer, widget.id)}
                 onClick={() => updateWidgetLayout((current) => {
                   const zone = widgetZoneOf(current, widget.id) ?? widget.zone ?? "main";
-                  return moveWidget(setWidgetVisible(current, widget.id, true), widget.id, zone);
+                  return applyWidgetLayoutMutations(current, [
+                    { type: "visibility", id: widget.id, visible: true },
+                    { type: "move", id: widget.id, zone },
+                  ], widgets);
                 })}
               >
                 <span>{widget.title}</span>
@@ -348,6 +374,8 @@ export default function WidgetCanvas() {
   const [libraryOpen, setLibraryOpen] = useState(false);
   const [customizeOpen, setCustomizeOpen] = useState(editing);
   const [customizeTab, setCustomizeTab] = useState<"customize" | "widgets">("customize");
+  const [draggedId, setDraggedId] = useState<string | null>(null);
+  const [overZone, setOverZone] = useState<WidgetZone | null>(null);
 
   // `widgets` is referentially stable per catalog version, so this runs only
   // when a widget actually registers/unregisters (and ensureWidgets itself
@@ -360,8 +388,8 @@ export default function WidgetCanvas() {
   }, [editing]);
 
   const shown = useMemo(
-    () => widgets.filter((widget) => allowed(widget, layout.audience)),
-    [widgets, layout.audience],
+    () => widgets.filter((widget) => allowed(widget, layout.audience, layout.widgets[widget.id])),
+    [widgets, layout.audience, layout.widgets],
   );
 
   return (
@@ -378,36 +406,66 @@ export default function WidgetCanvas() {
       <div className="widget-canvas">
         {WIDGET_ZONES.map((zone) => {
           const zoneWidgets = layout.zones[zone]
-            .map((id) => getWidget(id))
-            .filter((widget): widget is WidgetDef =>
-              widget !== undefined && layout.widgets[widget.id]?.visible === true && allowed(widget, layout.audience));
+            .map((instanceId) => ({
+              instanceId,
+              widget: getWidget(widgetDefinitionId(layout, instanceId)),
+              placement: layout.widgets[instanceId],
+            }))
+            .filter((item): item is { instanceId: string; widget: WidgetDef; placement: WidgetPlacement } =>
+              item.widget !== undefined
+              && item.placement?.visible === true
+              && allowed(item.widget, layout.audience, item.placement));
+          const draggedWidget = draggedId
+            ? getWidget(widgetDefinitionId(layout, draggedId))
+            : undefined;
+          const check = draggedWidget ? canPlaceWidget(draggedWidget, zone) : { ok: true };
           return (
             <div
               key={zone}
-              className={`widget-zone zone-${zone}`}
+              className={[
+                "widget-zone",
+                `zone-${zone}`,
+                draggedWidget ? (check.ok ? "compatible" : "incompatible") : "",
+                overZone === zone ? "over" : "",
+              ].filter(Boolean).join(" ")}
               data-zone={zone}
+              onDragEnter={() => setOverZone(zone)}
+              onDragLeave={(event) => {
+                if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setOverZone(null);
+              }}
               onDragOver={(event) => {
-                if (event.dataTransfer.types.includes(WIDGET_MIME)) event.preventDefault();
+                if (!event.dataTransfer.types.includes(WIDGET_MIME)) return;
+                if (check.ok) event.preventDefault();
+                event.dataTransfer.dropEffect = check.ok ? "move" : "none";
               }}
               onDrop={(event) => {
                 const id = getDragWidget(event.dataTransfer);
-                if (!id) return;
+                const widget = id ? getWidget(widgetDefinitionId(layout, id)) : undefined;
+                if (!id || !widget || !canPlaceWidget(widget, zone).ok) return;
                 event.preventDefault();
-                updateWidgetLayout((current) => moveWidget(current, id, zone));
+                updateWidgetLayout((current) => applyWidgetLayoutMutations(
+                  current,
+                  [{ type: "move", id, zone }],
+                  widgets,
+                ));
+                setDraggedId(null);
+                setOverZone(null);
               }}
             >
               <div className="widget-zone-label">{ZONE_LABEL[zone]}</div>
-              {zoneWidgets.map((widget, index) => (
+              {zoneWidgets.map(({ instanceId, widget, placement }, index) => (
                 <WidgetCard
-                  key={widget.id}
+                  key={instanceId}
+                  instanceId={instanceId}
                   widget={widget}
-                  placement={layout.widgets[widget.id]!}
+                  placement={placement}
                   zone={zone}
                   index={index}
-                  orderedIds={zoneWidgets.map((item) => item.id)}
+                  orderedIds={zoneWidgets.map((item) => item.instanceId)}
                   editing={editing}
                   projectId={projectId}
                   sessionId={sessionId}
+                  onDrag={setDraggedId}
                 />
               ))}
               {zoneWidgets.length === 0 && (

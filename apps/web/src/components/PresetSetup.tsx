@@ -1,35 +1,46 @@
-// UX-PERSONAS: optional workspace preset setup. Shown over the mounted, ready
-// workspace — never a gate. Close, Escape, and Skip all lead to the complete
-// workspace and record setup as completed with no disguised default. A card
-// click is a draft selection only; nothing persists or rearranges until the
-// confirmation action is activated.
-import { useMemo, useRef, useState } from "react";
-import {
-  NO_PRESET_CARD, OPTIONAL_SETUP_COPY, WORKSPACE_PRESETS,
-  applyPreset, completePresetSetup, formatPresetSummary, getPresentation,
-  getPresetState, presetSummary, type WorkspacePresetId,
-} from "../workspacePresets.ts";
-import { listCapabilities } from "../capabilities.ts";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { applyPreset, completePresetSetup } from "../workspacePresets.ts";
 import { focusComposer, setOverlay } from "../store.ts";
-import { useModalSurface } from "./a11y/Dialog.tsx";
+import { useWidgetCatalog } from "../widgets/catalog.ts";
+import { ensureWidgets, updateWidgetLayout, type WidgetAudience } from "../widgets/widgetLayout.ts";
+import {
+  WORKFLOW_OPTIONS,
+  applyWorkspaceSetup,
+  createSetupDraft,
+  workflowOption,
+  type SetupWorkflow,
+  type WorkspaceSetupDraft,
+} from "../widgets/workspaceSetup.ts";
+import "../widgets/builtinWidgets.tsx";
 import { announce } from "./a11y/live.tsx";
+import { useModalSurface } from "./a11y/Dialog.tsx";
 
-type DraftChoice = WorkspacePresetId | "no-preset" | null;
+const MODE_COPY: Array<[WidgetAudience, string, string]> = [
+  ["simple", "Simple", "A calm workspace with essential controls and friendly names."],
+  ["standard", "Standard", "Everyday project tools with detail when you need it."],
+  ["power", "Power", "All technical controls, advanced widgets, and status detail."],
+];
 
-interface CardDef {
-  choice: Exclude<DraftChoice, null>;
-  label: string;
-  description: string;
-  confirmationLabel: string;
+const STEP_LABELS = ["Workflow", "Control", "Widgets", "Review"] as const;
+
+function workflowPreset(workflow: SetupWorkflow): "build-debug" | "plan-coordinate" | "design-explore" | null {
+  if (workflow === "build-debug") return "build-debug";
+  if (workflow === "plan-coordinate") return "plan-coordinate";
+  if (workflow === "design-explore") return "design-explore";
+  return null;
 }
 
 export default function PresetSetup() {
-  const [draft, setDraft] = useState<DraftChoice>(null);
+  const widgets = useWidgetCatalog();
+  const [step, setStep] = useState(0);
+  const [draft, setDraft] = useState<WorkspaceSetupDraft>(() => createSetupDraft());
   const panelRef = useRef<HTMLDivElement>(null);
   const exitFocus = useRef<"restore" | "composer">("restore");
 
-  // Close, Escape, and Skip: setup completed, no preset written, workspace
-  // unchanged. On a reopen the existing preset is left exactly as it is.
+  useEffect(() => {
+    ensureWidgets(widgets);
+  }, [widgets]);
+
   const dismiss = () => {
     completePresetSetup();
     setOverlay(null);
@@ -39,7 +50,7 @@ export default function PresetSetup() {
     open: true,
     onClose: dismiss,
     containerRef: panelRef,
-    initialFocus: ".preset-card",
+    initialFocus: ".setup-choice",
     resolveRestoreFocus: (opener) => {
       if (exitFocus.current === "composer" || opener === null) {
         focusComposer();
@@ -49,51 +60,45 @@ export default function PresetSetup() {
     },
   });
 
-  // Cards are generated from the schema; `No preset` from the standard
-  // arrangement. Order: Build & debug, Plan & coordinate, Design & explore,
-  // No preset, then the persistent Skip action.
-  const cards: CardDef[] = [
-    ...WORKSPACE_PRESETS.map((p): CardDef => ({
-      choice: p.id, label: p.label, description: p.description, confirmationLabel: p.confirmationLabel,
-    })),
-    { choice: "no-preset", ...NO_PRESET_CARD },
-  ];
+  const availableSuggestions = useMemo(() => {
+    const preferred = workflowOption(draft.workflow).suggestedWidgetIds;
+    const rank: Record<WidgetAudience, number> = { simple: 0, standard: 1, power: 2 };
+    return widgets
+      .filter((widget) => preferred.includes(widget.id) || widget.recommended)
+      .filter((widget) => rank[widget.audience ?? "standard"] <= rank[draft.audience])
+      .slice(0, 8);
+  }, [draft.workflow, draft.audience, widgets]);
 
-  // Confirmation preview: the exact effective changes, generated from the
-  // schema against the current state. Unavailable capabilities are omitted.
-  const summary = useMemo(() => {
-    if (draft === null) return null;
-    const state = getPresetState();
-    return presetSummary({
-      presetId: draft === "no-preset" ? null : draft,
-      currentPresetId: state.presetId,
-      caps: listCapabilities().map((d) => ({
-        id: d.id,
-        standardTier: d.standardTier,
-        standardRank: d.standardRank,
-        label: d.label,
-        available: d.available(),
-      })),
-      overrides: getPresentation().placements,
-      starterOverride: getPresentation().starterOrder,
-      explicitComposerDetail: state.composerDetail,
-    });
-  }, [draft]);
+  const chooseWorkflow = (workflow: SetupWorkflow) => {
+    const option = workflowOption(workflow);
+    setDraft((current) => ({
+      ...current,
+      workflow,
+      widgetIds: option.suggestedWidgetIds.filter((id) => widgets.some((widget) => widget.id === id)).slice(0, 8),
+    }));
+  };
 
-  const confirm = () => {
-    if (draft === null || !summary) return;
-    applyPreset(draft === "no-preset" ? null : draft);
-    announce(
-      `${summary.label} applied. ${summary.bullets.length} visible arrangement ${summary.bullets.length === 1 ? "change" : "changes"}.`,
-    );
+  const apply = () => {
+    updateWidgetLayout((current) => applyWorkspaceSetup(current, draft, widgets));
+    applyPreset(workflowPreset(draft.workflow));
+    announce(`${workflowOption(draft.workflow).label} setup applied with ${draft.widgetIds.length} widgets in ${draft.audience} mode.`);
     exitFocus.current = "composer";
     setOverlay(null);
   };
 
+  const toggleWidget = (id: string) => {
+    setDraft((current) => {
+      const selected = current.widgetIds.includes(id);
+      if (selected) return { ...current, widgetIds: current.widgetIds.filter((item) => item !== id) };
+      if (current.widgetIds.length >= 8) return current;
+      return { ...current, widgetIds: [...current.widgetIds, id] };
+    });
+  };
+
   return (
-    <div className="preset-scrim" onMouseDown={(e) => { if (e.target === e.currentTarget) dismiss(); }}>
+    <div className="preset-scrim" onMouseDown={(event) => { if (event.target === event.currentTarget) dismiss(); }}>
       <div
-        className="preset-setup"
+        className="preset-setup guided-setup"
         ref={panelRef}
         role="dialog"
         aria-modal="true"
@@ -101,55 +106,119 @@ export default function PresetSetup() {
         aria-describedby="preset-setup-desc"
         tabIndex={-1}
       >
-        <div className="preset-setup-top">
-          <div className="preset-setup-head">
-            <span className="preset-kicker">{OPTIONAL_SETUP_COPY.kicker}</span>
-            <h1 id="preset-setup-heading">{OPTIONAL_SETUP_COPY.heading}</h1>
-            <p id="preset-setup-desc">{OPTIONAL_SETUP_COPY.description}</p>
+        <header className="guided-setup-head">
+          <div>
+            <span className="preset-kicker">Optional setup</span>
+            <h1 id="preset-setup-heading">Choose a setup</h1>
+            <p id="preset-setup-desc">Start close to what you need. You can change everything later.</p>
           </div>
-          <div className="preset-setup-actions">
-            <button className="preset-skip" onClick={dismiss}>{OPTIONAL_SETUP_COPY.skip}</button>
-            <button className="preset-close" onClick={dismiss} aria-label="Close preset setup">×</button>
-          </div>
-        </div>
-        <div className="preset-setup-scroll">
-          <div className="preset-cards" role="group" aria-label="Workspace preset choices">
-            {cards.map((card) => {
-              const selected = draft === card.choice;
-              return (
-                <button
-                  key={card.choice}
-                  className={`preset-card ${selected ? "selected" : ""}`}
-                  aria-pressed={selected}
-                  aria-describedby={`preset-card-desc-${card.choice}`}
-                  onClick={() => setDraft(selected ? null : card.choice)}
-                >
-                  <span className="preset-card-title">
-                    {card.label}
-                    <span className="preset-card-state" aria-hidden="true">{selected ? "✓ Selected" : ""}</span>
-                  </span>
-                  <span className="preset-card-desc" id={`preset-card-desc-${card.choice}`}>
-                    {card.description}
-                  </span>
-                </button>
-              );
-            })}
-          </div>
-          {draft !== null && summary && (
-            <div className="preset-preview" role="region" aria-label="What this preset changes">
-              <pre className="preset-preview-text">{formatPresetSummary(summary)}</pre>
-              {summary.maskedByOverrides.length > 0 && (
-                <p className="preset-preview-note">
-                  Your explicit layout choices are kept — they win over preset suggestions.
-                </p>
-              )}
-              <button className="preset-confirm" onClick={confirm}>
-                {summary.confirmationLabel}
-              </button>
-            </div>
+          <button className="preset-close" onClick={dismiss} aria-label="Close workspace setup">×</button>
+        </header>
+
+        <ol className="guided-setup-steps" aria-label="Setup progress">
+          {STEP_LABELS.map((label, index) => (
+            <li key={label} className={index === step ? "active" : index < step ? "done" : ""}>
+              <span>{index < step ? "✓" : index + 1}</span><b>{label}</b>
+            </li>
+          ))}
+        </ol>
+
+        <div className="guided-setup-body">
+          {step === 0 && (
+            <section>
+              <div className="guided-step-title"><span>Step 1 of 4</span><h2>What kind of work should stay nearby?</h2><p>This only chooses a starting arrangement.</p></div>
+              <div className="guided-workflow-grid">
+                {WORKFLOW_OPTIONS.map((option) => (
+                  <button
+                    type="button"
+                    key={option.id}
+                    className={`setup-choice${draft.workflow === option.id ? " selected" : ""}`}
+                    aria-pressed={draft.workflow === option.id}
+                    onClick={() => chooseWorkflow(option.id)}
+                  >
+                    <i aria-hidden="true">{option.id === "build-debug" ? "⌘" : option.id === "plan-coordinate" ? "✓" : option.id === "research" ? "⌕" : option.id === "design-explore" ? "◇" : option.id === "write" ? "✎" : "✦"}</i>
+                    <span><strong>{option.label}</strong><small>{option.description}</small></span>
+                    <b aria-hidden="true">{draft.workflow === option.id ? "✓" : ""}</b>
+                  </button>
+                ))}
+              </div>
+            </section>
           )}
-          <p className="preset-persistence-note">{OPTIONAL_SETUP_COPY.persistenceNote}</p>
+
+          {step === 1 && (
+            <section>
+              <div className="guided-step-title"><span>Step 2 of 4</span><h2>How much control do you want up front?</h2><p>This changes presentation, not what Polyth can do.</p></div>
+              <div className="guided-mode-grid">
+                {MODE_COPY.map(([id, label, description]) => (
+                  <button
+                    type="button"
+                    key={id}
+                    className={`setup-choice${draft.audience === id ? " selected" : ""}`}
+                    aria-pressed={draft.audience === id}
+                    onClick={() => setDraft((current) => ({ ...current, audience: id }))}
+                  >
+                    <span className={`guided-mode-preview mode-${id}`} aria-hidden="true"><i /><i /><i /><i /></span>
+                    <strong>{label}</strong>
+                    <small>{description}</small>
+                    {id === "standard" && <em>Recommended</em>}
+                  </button>
+                ))}
+              </div>
+            </section>
+          )}
+
+          {step === 2 && (
+            <section>
+              <div className="guided-step-title"><span>Step 3 of 4</span><h2>Pick the widgets you want nearby</h2><p>Choose 5–8 now, or keep the suggested set.</p></div>
+              <div className="guided-widget-grid">
+                {availableSuggestions.map((widget) => {
+                  const selected = draft.widgetIds.includes(widget.id);
+                  return (
+                    <button
+                      type="button"
+                      key={widget.id}
+                      className={`setup-choice${selected ? " selected" : ""}`}
+                      aria-pressed={selected}
+                      onClick={() => toggleWidget(widget.id)}
+                    >
+                      <i aria-hidden="true">{widget.title.slice(0, 1)}</i>
+                      <span><strong>{widget.title}</strong><small>{widget.description}</small></span>
+                      <b aria-hidden="true">{selected ? "✓" : "+"}</b>
+                    </button>
+                  );
+                })}
+              </div>
+              <p className="guided-selection-count">{draft.widgetIds.length} selected · You can add any plugin widget later.</p>
+            </section>
+          )}
+
+          {step === 3 && (
+            <section>
+              <div className="guided-step-title"><span>Step 4 of 4</span><h2>Your starting workspace</h2><p>Review the choices below. Nothing is locked.</p></div>
+              <div className="guided-review">
+                <article><span>Workflow</span><strong>{workflowOption(draft.workflow).label}</strong><button type="button" onClick={() => setStep(0)}>Edit</button></article>
+                <article><span>Control</span><strong>{MODE_COPY.find(([id]) => id === draft.audience)?.[1]}</strong><button type="button" onClick={() => setStep(1)}>Edit</button></article>
+                <article><span>Widgets</span><strong>{draft.widgetIds.length} selected</strong><button type="button" onClick={() => setStep(2)}>Edit</button></article>
+                <div className="guided-review-widgets">
+                  {draft.widgetIds.map((id) => {
+                    const widget = widgets.find((item) => item.id === id);
+                    return widget ? <span key={id}>{widget.title}</span> : null;
+                  })}
+                </div>
+              </div>
+              <div className="guided-review-note"><span aria-hidden="true">✦</span><p><strong>You can change everything later.</strong><small>Move, resize, hide, or add widgets from Settings → Widgets & Layout.</small></p></div>
+            </section>
+          )}
         </div>
+
+        <footer className="guided-setup-foot">
+          <button type="button" className="preset-skip" onClick={dismiss}>Skip for now</button>
+          <span />
+          {step > 0 && <button type="button" onClick={() => setStep((current) => current - 1)}>Back</button>}
+          {step < 3
+            ? <button type="button" className="btn-accent" onClick={() => setStep((current) => current + 1)}>Continue</button>
+            : <button type="button" className="btn-accent" disabled={draft.widgetIds.length === 0} onClick={apply}>Apply setup</button>}
+        </footer>
       </div>
     </div>
   );

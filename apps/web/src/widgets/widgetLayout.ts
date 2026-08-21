@@ -1,8 +1,10 @@
 import { useSyncExternalStore } from "react";
 
-export type WidgetZone = "main" | "left" | "right" | "top" | "bottom";
+export type WidgetZone = "header" | "left" | "main" | "right" | "bottom" | "floating";
 export type WidgetAudience = "simple" | "standard" | "power";
+export type WidgetScope = "global" | "workspace" | "plugin";
 export type WidgetLayoutPresetId = "focused" | "balanced" | "manager" | "build-debug" | "custom";
+export type WidgetSaveStatus = "saved" | "saving" | "error";
 
 export interface WidgetSize {
   w: number;
@@ -11,13 +13,31 @@ export interface WidgetSize {
 
 export interface WidgetLayoutDefinition {
   id: string;
+  pluginId?: string;
+  title?: string;
+  description?: string;
   zone?: WidgetZone;
+  supportedZones?: readonly WidgetZone[];
   defaultSize?: WidgetSize;
+  minSize?: WidgetSize;
+  maxSize?: WidgetSize;
+  audience?: WidgetAudience;
+  showIn?: readonly WidgetAudience[];
+  scope?: WidgetScope;
+  resizable?: boolean;
+  duplicatable?: boolean;
+  floating?: boolean;
 }
 
 export interface WidgetPlacement {
   visible: boolean;
   size: WidgetSize;
+  definitionId?: string;
+  pluginId?: string;
+  title?: string;
+  description?: string;
+  showIn?: WidgetAudience[];
+  scope?: WidgetScope;
 }
 
 export interface WidgetLayout {
@@ -28,7 +48,7 @@ export interface WidgetLayout {
 }
 
 export const WIDGET_LAYOUT_KEY = "polyth.widgetLayout";
-export const WIDGET_ZONES: readonly WidgetZone[] = ["top", "left", "main", "right", "bottom"];
+export const WIDGET_ZONES: readonly WidgetZone[] = ["header", "left", "main", "right", "bottom", "floating"];
 export const BUILTIN_WIDGET_IDS = [
   "core.composer",
   "core.chat",
@@ -51,8 +71,8 @@ export const BUILTIN_WIDGET_IDS = [
 ] as const;
 
 const DEFAULT_ZONE: Record<string, WidgetZone> = {
-  "core.quick-actions": "top",
-  "goals.current": "top",
+  "core.quick-actions": "header",
+  "goals.current": "header",
   "files.explorer": "left",
   "files.project-map": "left",
   "knowledge.notes": "left",
@@ -98,7 +118,7 @@ const DEFAULT_VISIBLE = new Set<string>([
 ]);
 
 const emptyZones = (): Record<WidgetZone, string[]> => ({
-  top: [], left: [], main: [], right: [], bottom: [],
+  header: [], left: [], main: [], right: [], bottom: [], floating: [],
 });
 
 const clampSize = (value: unknown): WidgetSize => {
@@ -112,22 +132,52 @@ const clampSize = (value: unknown): WidgetSize => {
   return { w, h };
 };
 
+function constrainedSize(value: unknown, definition?: WidgetLayoutDefinition): WidgetSize {
+  const size = clampSize(value);
+  const min = definition?.minSize ? clampSize(definition.minSize) : { w: 1, h: 1 };
+  const max = definition?.maxSize ? clampSize(definition.maxSize) : { w: 12, h: 12 };
+  return {
+    w: Math.max(min.w, Math.min(max.w, size.w)),
+    h: Math.max(min.h, Math.min(max.h, size.h)),
+  };
+}
+
+function showInFor(definition: WidgetLayoutDefinition): WidgetAudience[] | undefined {
+  if (definition.showIn && definition.showIn.length > 0) return [...definition.showIn];
+  if (!definition.audience) return undefined;
+  const rank: Record<WidgetAudience, number> = { simple: 0, standard: 1, power: 2 };
+  return (["simple", "standard", "power"] as const).filter(
+    (audience) => rank[audience] >= rank[definition.audience!],
+  );
+}
+
+function placementFor(definition: WidgetLayoutDefinition, visible: boolean): WidgetPlacement {
+  return {
+    visible,
+    size: constrainedSize(
+      definition.defaultSize ?? DEFAULT_SIZE_BY_ID[definition.id] ?? DEFAULT_SIZE,
+      definition,
+    ),
+    definitionId: definition.id,
+    ...(definition.pluginId ? { pluginId: definition.pluginId } : {}),
+    ...(definition.title ? { title: definition.title } : {}),
+    ...(definition.description ? { description: definition.description } : {}),
+    ...(showInFor(definition) ? { showIn: showInFor(definition)! } : {}),
+    ...(definition.scope ? { scope: definition.scope } : {}),
+  };
+}
+
 export function createDefaultWidgetLayout(
   known: readonly (string | WidgetLayoutDefinition)[] = BUILTIN_WIDGET_IDS,
 ): WidgetLayout {
   const zones = emptyZones();
   const widgets: Record<string, WidgetPlacement> = {};
   for (const item of known) {
-    const id = typeof item === "string" ? item : item.id;
-    const zone = typeof item === "string" ? DEFAULT_ZONE[id] ?? "main" : item.zone ?? DEFAULT_ZONE[id] ?? "main";
-    const size = typeof item === "string"
-      ? DEFAULT_SIZE_BY_ID[id] ?? DEFAULT_SIZE
-      : clampSize(item.defaultSize ?? DEFAULT_SIZE_BY_ID[id] ?? DEFAULT_SIZE);
+    const definition = typeof item === "string" ? { id: item } : item;
+    const id = definition.id;
+    const zone = definition.zone ?? DEFAULT_ZONE[id] ?? "main";
     zones[zone].push(id);
-    widgets[id] = {
-      visible: DEFAULT_VISIBLE.has(id),
-      size: { ...size },
-    };
+    widgets[id] = placementFor(definition, DEFAULT_VISIBLE.has(id));
   }
   return { version: 1, audience: "standard", zones, widgets };
 }
@@ -140,19 +190,45 @@ const isAudience = (value: unknown): value is WidgetAudience =>
  * the library and receive their default placement. */
 export function parseWidgetLayout(
   raw: string | null,
-  knownIds: readonly string[] = BUILTIN_WIDGET_IDS,
+  knownItems: readonly (string | WidgetLayoutDefinition)[] = BUILTIN_WIDGET_IDS,
 ): WidgetLayout {
-  const fallback = createDefaultWidgetLayout(knownIds);
+  const definitions = knownItems.map((item) => typeof item === "string" ? { id: item } : item);
+  const knownIds = definitions.map((item) => item.id);
+  const definitionById = new Map(definitions.map((item) => [item.id, item]));
+  const fallback = createDefaultWidgetLayout(definitions);
   try {
-    const data = JSON.parse(raw ?? "") as Partial<WidgetLayout>;
+    const data = JSON.parse(raw ?? "") as Partial<WidgetLayout> & {
+      zones?: Partial<Record<WidgetZone | "top", unknown>>;
+    };
     if (!data || data.version !== 1 || typeof data.zones !== "object" || typeof data.widgets !== "object") {
       return fallback;
     }
-    const known = new Set(knownIds);
+    // A catalog contribution can disappear when its plugin is disabled or
+    // uninstalled. Preserve only self-describing orphan placements so the UI
+    // can offer Enable/Remove without ever attempting to render unknown code.
+    const persistedInstanceIds = Object.entries(data.widgets).flatMap(([instanceId, rawPlacement]) => {
+      const value = rawPlacement as Partial<WidgetPlacement> | undefined;
+      return !knownIds.includes(instanceId) && definitionById.has(value?.definitionId ?? instanceId)
+        ? [instanceId]
+        : [];
+    }).slice(0, 128);
+    const orphanIds = Object.entries(data.widgets).flatMap(([instanceId, rawPlacement]) => {
+      const value = rawPlacement as Partial<WidgetPlacement> | undefined;
+      return !knownIds.includes(instanceId)
+        && !persistedInstanceIds.includes(instanceId)
+        && !definitionById.has(value?.definitionId ?? instanceId)
+        && typeof value?.pluginId === "string"
+        && typeof value?.title === "string"
+        ? [instanceId]
+        : [];
+    }).slice(0, 128);
+    const known = new Set([...knownIds, ...persistedInstanceIds, ...orphanIds]);
     const seen = new Set<string>();
     const zones = emptyZones();
     for (const zone of WIDGET_ZONES) {
-      const values = data.zones?.[zone];
+      const values = zone === "header"
+        ? data.zones?.header ?? data.zones?.top
+        : data.zones?.[zone];
       if (!Array.isArray(values)) continue;
       for (const id of values) {
         if (typeof id !== "string" || !known.has(id) || seen.has(id)) continue;
@@ -163,12 +239,32 @@ export function parseWidgetLayout(
     for (const id of knownIds) {
       if (!seen.has(id)) zones[DEFAULT_ZONE[id] ?? "main"].push(id);
     }
+    for (const id of [...persistedInstanceIds, ...orphanIds]) {
+      if (!seen.has(id)) zones.main.push(id);
+    }
     const widgets: Record<string, WidgetPlacement> = {};
-    for (const id of knownIds) {
+    for (const id of [...knownIds, ...persistedInstanceIds, ...orphanIds]) {
       const value = data.widgets?.[id] as Partial<WidgetPlacement> | undefined;
+      const definition = definitionById.get(value?.definitionId ?? id);
+      const base = definition ? fallback.widgets[definition.id] : undefined;
+      const definitionId = definition?.id ?? value?.definitionId ?? id;
       widgets[id] = {
-        visible: typeof value?.visible === "boolean" ? value.visible : fallback.widgets[id]!.visible,
-        size: clampSize(value?.size ?? fallback.widgets[id]!.size),
+        visible: typeof value?.visible === "boolean" ? value.visible : base?.visible ?? false,
+        size: constrainedSize(value?.size ?? base?.size ?? DEFAULT_SIZE, definition),
+        definitionId,
+        ...(definition?.pluginId || value?.pluginId
+          ? { pluginId: definition?.pluginId ?? value!.pluginId! }
+          : {}),
+        ...(definition?.title || value?.title ? { title: definition?.title ?? value!.title! } : {}),
+        ...(definition?.description || value?.description
+          ? { description: definition?.description ?? value!.description! }
+          : {}),
+        ...(Array.isArray(value?.showIn)
+          ? { showIn: value.showIn.filter(isAudience) }
+          : base?.showIn ? { showIn: [...base.showIn] } : {}),
+        ...(value?.scope === "global" || value?.scope === "workspace" || value?.scope === "plugin"
+          ? { scope: value.scope }
+          : base?.scope ? { scope: base.scope } : {}),
       };
     }
     return {
@@ -191,14 +287,46 @@ export function widgetZoneOf(layout: WidgetLayout, id: string): WidgetZone | nul
   return null;
 }
 
+export function widgetDefinitionId(layout: WidgetLayout, instanceId: string): string {
+  return layout.widgets[instanceId]?.definitionId ?? instanceId;
+}
+
+export interface WidgetPlacementCheck {
+  ok: boolean;
+  reason?: string;
+}
+
+export function canPlaceWidget(
+  definition: WidgetLayoutDefinition | undefined,
+  zone: WidgetZone,
+): WidgetPlacementCheck {
+  if (!definition) return { ok: false, reason: "This widget’s plugin is unavailable." };
+  const supported = definition.supportedZones
+    ?? (definition.floating
+      ? [definition.zone ?? "main", "floating"]
+      : [definition.zone ?? "main"]);
+  if (!supported.includes(zone)) {
+    return {
+      ok: false,
+      reason: `${definition.title ?? "This widget"} doesn’t fit in ${zone === "header" ? "the header" : `the ${zone} zone`}.`,
+    };
+  }
+  if (zone === "header" && (definition.minSize?.h ?? definition.defaultSize?.h ?? 1) > 3) {
+    return { ok: false, reason: `${definition.title ?? "This widget"} needs more height than the header provides.` };
+  }
+  return { ok: true };
+}
+
 export function moveWidget(
   layout: WidgetLayout,
   id: string,
   zone: WidgetZone,
   index = layout.zones[zone].length,
+  definition?: WidgetLayoutDefinition,
 ): WidgetLayout {
   const current = layout.widgets[id];
   if (!current) return layout;
+  if (definition && !canPlaceWidget(definition, zone).ok) return layout;
   const zones = Object.fromEntries(
     WIDGET_ZONES.map((name) => [name, layout.zones[name].filter((widgetId) => widgetId !== id)]),
   ) as Record<WidgetZone, string[]>;
@@ -227,16 +355,159 @@ export function setWidgetVisible(layout: WidgetLayout, id: string, visible: bool
   return { ...layout, widgets: { ...layout.widgets, [id]: { ...current, visible } } };
 }
 
-export function setWidgetSize(layout: WidgetLayout, id: string, size: WidgetSize): WidgetLayout {
+export function setWidgetSize(
+  layout: WidgetLayout,
+  id: string,
+  size: WidgetSize,
+  definition?: WidgetLayoutDefinition,
+): WidgetLayout {
   const current = layout.widgets[id];
-  if (!current) return layout;
-  const next = clampSize(size);
+  if (!current || definition?.resizable === false) return layout;
+  const next = constrainedSize(size, definition);
   if (next.w === current.size.w && next.h === current.size.h) return layout;
   return { ...layout, widgets: { ...layout.widgets, [id]: { ...current, size: next } } };
 }
 
 export function setWidgetAudience(layout: WidgetLayout, audience: WidgetAudience): WidgetLayout {
   return layout.audience === audience ? layout : { ...layout, audience };
+}
+
+export function setWidgetShowIn(
+  layout: WidgetLayout,
+  id: string,
+  showIn: readonly WidgetAudience[],
+): WidgetLayout {
+  const current = layout.widgets[id];
+  if (!current) return layout;
+  const next = [...new Set(showIn.filter(isAudience))];
+  if (
+    current.showIn?.length === next.length
+    && current.showIn.every((audience, index) => audience === next[index])
+  ) return layout;
+  return { ...layout, widgets: { ...layout.widgets, [id]: { ...current, showIn: next } } };
+}
+
+export function setWidgetScope(layout: WidgetLayout, id: string, scope: WidgetScope): WidgetLayout {
+  const current = layout.widgets[id];
+  if (!current || current.scope === scope) return layout;
+  return { ...layout, widgets: { ...layout.widgets, [id]: { ...current, scope } } };
+}
+
+export function setWidgetIdentity(
+  layout: WidgetLayout,
+  id: string,
+  identity: { title?: string; description?: string },
+): WidgetLayout {
+  const current = layout.widgets[id];
+  if (!current) return layout;
+  const title = identity.title?.trim() || undefined;
+  const description = identity.description?.trim() || undefined;
+  if (current.title === title && current.description === description) return layout;
+  return {
+    ...layout,
+    widgets: { ...layout.widgets, [id]: { ...current, title, description } },
+  };
+}
+
+export function forgetWidget(layout: WidgetLayout, id: string): WidgetLayout {
+  if (!layout.widgets[id]) return layout;
+  const widgets = { ...layout.widgets };
+  delete widgets[id];
+  const zones = Object.fromEntries(
+    WIDGET_ZONES.map((zone) => [zone, layout.zones[zone].filter((item) => item !== id)]),
+  ) as Record<WidgetZone, string[]>;
+  return { ...layout, widgets, zones };
+}
+
+function nextInstanceId(layout: WidgetLayout, definitionId: string): string {
+  let number = 2;
+  while (`${definitionId}#${number}` in layout.widgets) number++;
+  return `${definitionId}#${number}`;
+}
+
+export function duplicateWidget(
+  layout: WidgetLayout,
+  id: string,
+  definition: WidgetLayoutDefinition | undefined,
+): WidgetLayout {
+  const current = layout.widgets[id];
+  if (!current || !definition?.duplicatable) return layout;
+  const instanceId = nextInstanceId(layout, definition.id);
+  const zone = widgetZoneOf(layout, id) ?? definition.zone ?? "main";
+  const widgets = {
+    ...layout.widgets,
+    [instanceId]: {
+      ...current,
+      definitionId: definition.id,
+      title: current.title ? `${current.title} copy` : definition.title ? `${definition.title} copy` : undefined,
+    },
+  };
+  const zones = { ...layout.zones, [zone]: [...layout.zones[zone], instanceId] };
+  return { ...layout, widgets, zones };
+}
+
+export type WidgetLayoutMutation =
+  | { type: "move"; id: string; zone: WidgetZone; index?: number }
+  | { type: "visibility"; id: string; visible: boolean }
+  | { type: "resize"; id: string; size: WidgetSize }
+  | { type: "audience"; audience: WidgetAudience }
+  | { type: "show-in"; id: string; showIn: WidgetAudience[] }
+  | { type: "scope"; id: string; scope: WidgetScope }
+  | { type: "identity"; id: string; title?: string; description?: string }
+  | { type: "duplicate"; id: string }
+  | { type: "forget"; id: string }
+  | { type: "preset"; preset: WidgetLayoutPresetId };
+
+function definitionsById(
+  definitions: readonly WidgetLayoutDefinition[],
+): Map<string, WidgetLayoutDefinition> {
+  return new Map(definitions.map((definition) => [definition.id, definition]));
+}
+
+/** One mutation engine for pointer/keyboard editing, quick add, guided setup,
+ * and text customization. Unsupported placement/size requests are no-ops. */
+export function applyWidgetLayoutMutations(
+  layout: WidgetLayout,
+  mutations: readonly WidgetLayoutMutation[],
+  definitions: readonly WidgetLayoutDefinition[] = [],
+): WidgetLayout {
+  const byId = definitionsById(definitions);
+  return mutations.reduce((current, mutation) => {
+    const definition = "id" in mutation
+      ? byId.get(widgetDefinitionId(current, mutation.id))
+      : undefined;
+    if ("id" in mutation && definitions.length > 0 && !definition && mutation.type !== "forget") {
+      return current;
+    }
+    switch (mutation.type) {
+      case "move":
+        return moveWidget(
+          current,
+          mutation.id,
+          mutation.zone,
+          mutation.index ?? current.zones[mutation.zone].length,
+          definition,
+        );
+      case "visibility":
+        return setWidgetVisible(current, mutation.id, mutation.visible);
+      case "resize":
+        return setWidgetSize(current, mutation.id, mutation.size, definition);
+      case "audience":
+        return setWidgetAudience(current, mutation.audience);
+      case "show-in":
+        return setWidgetShowIn(current, mutation.id, mutation.showIn);
+      case "scope":
+        return setWidgetScope(current, mutation.id, mutation.scope);
+      case "identity":
+        return setWidgetIdentity(current, mutation.id, mutation);
+      case "duplicate":
+        return duplicateWidget(current, mutation.id, definition);
+      case "forget":
+        return forgetWidget(current, mutation.id);
+      case "preset":
+        return applyWidgetLayoutPreset(current, mutation.preset);
+    }
+  }, layout);
 }
 
 const PRESET_VISIBLE: Record<Exclude<WidgetLayoutPresetId, "custom">, readonly string[]> = {
@@ -252,7 +523,15 @@ export function applyWidgetLayoutPreset(
 ): WidgetLayout {
   if (preset === "custom") return layout;
   const visible = new Set(PRESET_VISIBLE[preset]);
-  const base = createDefaultWidgetLayout(Object.keys(layout.widgets));
+  const base = createDefaultWidgetLayout(Object.entries(layout.widgets).map(([id, placement]) => ({
+    id,
+    pluginId: placement.pluginId,
+    title: placement.title,
+    description: placement.description,
+    defaultSize: placement.size,
+    showIn: placement.showIn,
+    scope: placement.scope,
+  })));
   return {
     ...base,
     audience: preset === "focused" ? "simple" : preset === "manager" ? "standard" : layout.audience,
@@ -266,12 +545,20 @@ export function applyWidgetLayoutPreset(
 const read = (): string | null => {
   try { return localStorage.getItem(WIDGET_LAYOUT_KEY); } catch { return null; }
 };
-const write = (layout: WidgetLayout): void => {
-  try { localStorage.setItem(WIDGET_LAYOUT_KEY, serializeWidgetLayout(layout)); } catch { /* private mode */ }
+const write = (layout: WidgetLayout): boolean => {
+  try {
+    localStorage.setItem(WIDGET_LAYOUT_KEY, serializeWidgetLayout(layout));
+    return true;
+  } catch {
+    return false;
+  }
 };
 
 let state = parseWidgetLayout(read());
 const listeners = new Set<() => void>();
+const statusListeners = new Set<() => void>();
+let history: WidgetLayout[] = [];
+let saveStatus: WidgetSaveStatus = "saved";
 
 // Drag-resize commits many layouts per second; a trailing timer batches them
 // into one localStorage serialization per pause while listeners still see
@@ -282,14 +569,18 @@ function flushWrite(): void {
   if (writeTimer === null) return;
   clearTimeout(writeTimer);
   writeTimer = null;
-  write(state);
+  saveStatus = write(state) ? "saved" : "error";
+  for (const listener of [...statusListeners]) listener();
 }
 
 function scheduleWrite(): void {
   if (writeTimer !== null) return;
+  saveStatus = "saving";
+  for (const listener of [...statusListeners]) listener();
   writeTimer = setTimeout(() => {
     writeTimer = null;
-    write(state);
+    saveStatus = write(state) ? "saved" : "error";
+    for (const listener of [...statusListeners]) listener();
   }, 150);
   // Node timers would keep the test process alive; browsers return a number.
   (writeTimer as unknown as { unref?: () => void }).unref?.();
@@ -297,11 +588,13 @@ function scheduleWrite(): void {
 
 if (typeof window !== "undefined") window.addEventListener("pagehide", flushWrite);
 
-function commit(next: WidgetLayout): void {
+function commit(next: WidgetLayout, recordHistory = true): void {
   if (next === state) return;
+  if (recordHistory) history = [...history.slice(-39), state];
   state = next;
   scheduleWrite();
   for (const listener of [...listeners]) listener();
+  for (const listener of [...statusListeners]) listener();
 }
 
 export function getWidgetLayout(): WidgetLayout {
@@ -312,19 +605,67 @@ export function updateWidgetLayout(update: WidgetLayout | ((current: WidgetLayou
   commit(typeof update === "function" ? update(state) : update);
 }
 
+export function undoWidgetLayout(): void {
+  const previous = history.at(-1);
+  if (!previous) return;
+  history = history.slice(0, -1);
+  commit(previous, false);
+}
+
+export function canUndoWidgetLayout(): boolean {
+  return history.length > 0;
+}
+
+export function getWidgetSaveStatus(): WidgetSaveStatus {
+  return saveStatus;
+}
+
+export function retryWidgetSave(): void {
+  if (writeTimer !== null) flushWrite();
+  else {
+    saveStatus = "saving";
+    for (const listener of [...statusListeners]) listener();
+    saveStatus = write(state) ? "saved" : "error";
+    for (const listener of [...statusListeners]) listener();
+  }
+}
+
 export function ensureWidgetIds(ids: readonly string[]): void {
   ensureWidgets(ids.map((id) => ({ id })));
 }
 
 export function ensureWidgets(definitions: readonly WidgetLayoutDefinition[]): void {
   const missing = definitions.filter((definition) => !(definition.id in state.widgets));
-  if (missing.length === 0) return;
-  const defaults = createDefaultWidgetLayout(missing);
+  const defaults = createDefaultWidgetLayout(definitions);
   const zones = Object.fromEntries(WIDGET_ZONES.map((zone) => [
     zone,
-    [...state.zones[zone], ...defaults.zones[zone]],
+    [...state.zones[zone], ...missing.flatMap((definition) =>
+      defaults.zones[zone].includes(definition.id) ? [definition.id] : [])],
   ])) as Record<WidgetZone, string[]>;
-  commit({ ...state, zones, widgets: { ...state.widgets, ...defaults.widgets } });
+  let changed = missing.length > 0;
+  const widgets = { ...state.widgets };
+  for (const definition of definitions) {
+    const current = widgets[definition.id];
+    if (!current) {
+      widgets[definition.id] = defaults.widgets[definition.id]!;
+      continue;
+    }
+    const metadata = placementFor(definition, current.visible);
+    const next = {
+      ...current,
+      definitionId: definition.id,
+      pluginId: metadata.pluginId,
+      title: current.title ?? metadata.title,
+      description: current.description ?? metadata.description,
+      showIn: current.showIn ?? metadata.showIn,
+      scope: current.scope ?? metadata.scope,
+    };
+    if (JSON.stringify(next) !== JSON.stringify(current)) {
+      widgets[definition.id] = next;
+      changed = true;
+    }
+  }
+  if (changed) commit({ ...state, zones, widgets }, false);
 }
 
 export function resetWidgetLayout(
@@ -341,4 +682,19 @@ export function useWidgetLayout(): WidgetLayout {
     },
     getWidgetLayout,
   );
+}
+
+export function useWidgetStoreStatus(): { saveStatus: WidgetSaveStatus; canUndo: boolean } {
+  const snapshot = useSyncExternalStore(
+    (listener) => {
+      statusListeners.add(listener);
+      return () => { statusListeners.delete(listener); };
+    },
+    () => `${saveStatus}:${history.length}`,
+  );
+  const [status, count] = snapshot.split(":");
+  return {
+    saveStatus: status as WidgetSaveStatus,
+    canUndo: Number(count) > 0,
+  };
 }

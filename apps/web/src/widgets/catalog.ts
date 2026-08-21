@@ -1,6 +1,6 @@
 import { useSyncExternalStore, type ReactNode } from "react";
 import { listSlots, slotVersion, subscribeSlots } from "../slots.ts";
-import type { WidgetAudience, WidgetZone } from "./widgetLayout.ts";
+import type { WidgetAudience, WidgetScope, WidgetSize, WidgetZone } from "./widgetLayout.ts";
 
 export interface WidgetRenderContext extends Record<string, unknown> {
   projectId: string | null;
@@ -15,11 +15,24 @@ export interface WidgetSettingsContext extends WidgetRenderContext {
 export interface WidgetDef {
   id: string;
   pluginId: string;
+  pluginName?: string;
   title: string;
   description: string;
+  category?: string;
+  capabilities?: readonly string[];
   zone?: WidgetZone;
-  defaultSize?: { w: number; h: number };
+  supportedZones?: readonly WidgetZone[];
+  defaultSize?: WidgetSize;
+  minSize?: WidgetSize;
+  maxSize?: WidgetSize;
   audience?: WidgetAudience;
+  showIn?: readonly WidgetAudience[];
+  scope?: WidgetScope;
+  resizable?: boolean;
+  duplicatable?: boolean;
+  floating?: boolean;
+  recommended?: boolean;
+  settingsSchema?: Readonly<Record<string, unknown>>;
   render: (context: WidgetRenderContext) => ReactNode;
   settingsRender?: (context: WidgetSettingsContext) => ReactNode;
 }
@@ -54,22 +67,55 @@ function slotWidgets(): WidgetDef[] {
     const zone = meta.zone;
     const audience = meta.audience;
     const setting = settings.get(item.id);
+    const zones = Array.isArray(meta.supportedZones)
+      ? meta.supportedZones.filter(isWidgetZone)
+      : undefined;
+    const size = (value: unknown): WidgetSize | undefined => {
+      if (!value || typeof value !== "object") return undefined;
+      const candidate = value as { w?: unknown; h?: unknown };
+      return typeof candidate.w === "number" && typeof candidate.h === "number"
+        ? { w: candidate.w, h: candidate.h }
+        : undefined;
+    };
     return {
       id: item.id,
       pluginId: typeof meta.pluginId === "string" ? meta.pluginId : item.id.split(".")[0] ?? "plugin",
+      ...(typeof meta.pluginName === "string" ? { pluginName: meta.pluginName } : {}),
       title: typeof meta.title === "string" ? meta.title : item.id.replace(/[._-]+/g, " "),
       description: typeof meta.description === "string" ? meta.description : "Plugin-provided workspace widget.",
-      ...(zone === "main" || zone === "left" || zone === "right" || zone === "top" || zone === "bottom"
-        ? { zone }
+      ...(typeof meta.category === "string" ? { category: meta.category } : {}),
+      ...(Array.isArray(meta.capabilities)
+        ? { capabilities: meta.capabilities.filter((value): value is string => typeof value === "string") }
         : {}),
+      ...(isWidgetZone(zone) ? { zone } : {}),
+      ...(zones && zones.length > 0 ? { supportedZones: zones } : {}),
       ...(audience === "simple" || audience === "standard" || audience === "power" ? { audience } : {}),
-      ...(meta.defaultSize && typeof meta.defaultSize === "object"
-        ? { defaultSize: meta.defaultSize as { w: number; h: number } }
+      ...(size(meta.defaultSize) ? { defaultSize: size(meta.defaultSize)! } : {}),
+      ...(size(meta.minSize) ? { minSize: size(meta.minSize)! } : {}),
+      ...(size(meta.maxSize) ? { maxSize: size(meta.maxSize)! } : {}),
+      ...(Array.isArray(meta.showIn)
+        ? { showIn: meta.showIn.filter((value): value is WidgetAudience =>
+            value === "simple" || value === "standard" || value === "power") }
+        : {}),
+      ...(meta.scope === "global" || meta.scope === "workspace" || meta.scope === "plugin"
+        ? { scope: meta.scope }
+        : {}),
+      ...(typeof meta.resizable === "boolean" ? { resizable: meta.resizable } : {}),
+      ...(typeof meta.duplicatable === "boolean" ? { duplicatable: meta.duplicatable } : {}),
+      ...(typeof meta.floating === "boolean" ? { floating: meta.floating } : {}),
+      ...(typeof meta.recommended === "boolean" ? { recommended: meta.recommended } : {}),
+      ...(meta.settingsSchema && typeof meta.settingsSchema === "object"
+        ? { settingsSchema: meta.settingsSchema as Readonly<Record<string, unknown>> }
         : {}),
       render: (context) => item.render(context),
       ...(setting ? { settingsRender: (context: WidgetSettingsContext) => setting.render(context) } : {}),
     };
   });
+}
+
+function isWidgetZone(value: unknown): value is WidgetZone {
+  return value === "header" || value === "left" || value === "main"
+    || value === "right" || value === "bottom" || value === "floating";
 }
 
 // The merged catalog is cached per (registry, slot) version so render-time

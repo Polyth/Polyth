@@ -27,6 +27,8 @@ import {
 } from "../../theme.ts";
 import type { AssistSettingsDto } from "../../api.ts";
 import type { AgentProfile, InstalledPluginDto, McpServerDto, McpTransport, SystemInfoDto } from "@polyth/contracts";
+import { useWidgetCatalog } from "../../widgets/catalog.ts";
+import { useWidgetLayout } from "../../widgets/widgetLayout.ts";
 
 function ThemeSwatches({ theme }: { theme: ThemeSpec }) {
   return (
@@ -118,8 +120,8 @@ function WorkspacePresetSection() {
           )}
         </div>
       )}
-      <Row label="Setup panel" hint="Reopen the optional workspace preset setup.">
-        <button className="small-btn" onClick={() => setOverlay("onboarding")}>Open preset setup…</button>
+      <Row label="Workspace setup" hint="Choose another starting point. You can change everything afterward.">
+        <button className="small-btn" onClick={() => setOverlay("onboarding")}>Choose a setup…</button>
       </Row>
       <Row label="Reset workspace order" hint="Clears your explicit capability placement and starter overrides only.">
         <button
@@ -1199,6 +1201,11 @@ function ManagedPluginsSection() {
   const [source, setSource] = useState("");
   const [error, setError] = useState("");
   const [logsFor, setLogsFor] = useState<string | null>(null);
+  const [selected, setSelected] = useState<string | null>(null);
+  const [detailTab, setDetailTab] = useState<"overview" | "widgets" | "commands" | "tools" | "settings" | "permissions" | "contributions">("overview");
+  const [toast, setToast] = useState("");
+  const widgets = useWidgetCatalog();
+  const layout = useWidgetLayout();
   const refresh = () => void api.pluginsList().then(setPlugins);
   useEffect(() => { refresh(); }, []);
 
@@ -1206,8 +1213,9 @@ function ManagedPluginsSection() {
     if (!source.trim()) return;
     setError("");
     try {
-      await api.pluginsInstall(source.trim());
+      const installed = await api.pluginsInstall(source.trim());
       setSource("");
+      setToast(`${installed.name} installed. Its contributions are available when you choose them.`);
       refresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -1217,46 +1225,109 @@ function ManagedPluginsSection() {
   const op = async (id: string, what: "enable" | "disable" | "reload") => {
     setError("");
     try {
-      await api.pluginsOp(id, what);
+      const plugin = await api.pluginsOp(id, what);
+      setToast(what === "disable"
+        ? `${plugin.name} disabled. Its widget placements are kept.`
+        : what === "enable"
+          ? `${plugin.name} enabled. See what’s new in its contributions.`
+          : `${plugin.name} reloaded.`);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
     refresh();
   };
 
+  const remove = async (plugin: InstalledPluginDto) => {
+    const active = Object.values(layout.widgets).filter((placement) =>
+      placement.visible
+      && (placement.pluginId === plugin.id
+        || widgets.some((widget) => widget.id === placement.definitionId && widget.pluginId === plugin.id)));
+    const warning = active.length > 0
+      ? `${active.length} widget${active.length === 1 ? "" : "s"} from "${plugin.name}" ${active.length === 1 ? "is" : "are"} in your layout. Uninstalling keeps a placeholder so you can remove or restore each one. Continue?`
+      : `Remove plugin "${plugin.name}"?`;
+    if (!window.confirm(warning)) return;
+    await api.pluginsRemove(plugin.id);
+    setToast(`${plugin.name} removed.`);
+    if (selected === plugin.id) setSelected(null);
+    refresh();
+  };
+
+  const selectedPlugin = plugins.find((plugin) => plugin.id === selected);
+  const contributionCount = (plugin: InstalledPluginDto, prefix: string) =>
+    plugin.contributions.filter((item) => item.slot.startsWith(prefix)).length;
+
   return (
-    <div data-settings-item="plugins.managed">
-      <div className="stat-label">Managed plugins ({plugins.length})</div>
+    <div className="plugin-library" data-settings-item="plugins.managed">
+      <div className="plugin-library-head">
+        <div><strong>Plugin library</strong><span>Extensions contribute widgets, commands, tools, settings, and workspace surfaces.</span></div>
+        <span>{plugins.length} installed</span>
+      </div>
       {plugins.length === 0 && (
         <EmptyState title="No managed plugins installed" body='Install with "npm:@scope/name@version" or "file:folder" (relative to the trusted plugin directory).' />
       )}
-      {plugins.map((p) => (
-        <div key={p.id} className="set-row">
-          <div className="set-row-text">
-            <div className="set-row-label">
-              {p.name} <span className="muted mono">v{p.version}</span>
-              <span className={`tag plugin-trust trust-${p.trust}`} title={p.trust}>{p.trust}</span>
-            </div>
-            <div className="set-row-hint mono">{p.source}{p.contributions.length ? ` · ${p.contributions.length} contribution${p.contributions.length === 1 ? "" : "s"}` : ""}</div>
-            {p.lastError && <div className="set-row-hint form-error">{p.lastError}</div>}
+      <div className="plugin-card-grid">
+        {plugins.map((p) => {
+          const widgetCount = contributionCount(p, "widget.");
+          const commandCount = contributionCount(p, "command");
+          const toolCount = p.capabilities.length;
+          return (
+            <article key={p.id} className={`plugin-card ${p.enabled ? "" : "disabled"}`}>
+              <button type="button" className="plugin-card-main" onClick={() => setSelected(p.id)}>
+                <span className="plugin-card-icon">{p.name.slice(0, 1).toUpperCase()}</span>
+                <span className="plugin-card-copy">
+                  <strong>{p.name}</strong>
+                  <small>{p.source}</small>
+                </span>
+                <span className={`tag mcp-status ${p.status === "ready" ? "connected" : p.status === "error" ? "error" : "disabled"}`}>{p.status}</span>
+                <p>{p.lastError || `${p.name} adds ${p.contributions.length || "workspace"} contributions to Polyth.`}</p>
+                <span className="plugin-card-counts">
+                  <b>{widgetCount} widgets</b><b>{commandCount} commands</b><b>{toolCount} tools</b>
+                </span>
+              </button>
+              <div className="plugin-card-actions">
+                {p.update && <button type="button" onClick={() => void op(p.id, "reload")}>Update to {p.update.version}</button>}
+                <button type="button" onClick={() => void op(p.id, p.enabled ? "disable" : "enable")}>{p.enabled ? "Disable" : "Enable"}</button>
+                <button type="button" onClick={() => setLogsFor(logsFor === p.id ? null : p.id)}>Logs</button>
+                <button type="button" className="danger-btn" onClick={() => void remove(p)}>Uninstall</button>
+              </div>
+            </article>
+          );
+        })}
+      </div>
+      {selectedPlugin && (
+        <section className="plugin-detail">
+          <header>
+            <span className="plugin-card-icon">{selectedPlugin.name.slice(0, 1).toUpperCase()}</span>
+            <div><strong>{selectedPlugin.name}</strong><small>v{selectedPlugin.version} · {selectedPlugin.source}</small></div>
+            <button type="button" onClick={() => setSelected(null)} aria-label="Close plugin details">×</button>
+          </header>
+          <div className="plugin-detail-tabs" role="tablist">
+            {(["overview", "widgets", "commands", "tools", "settings", "permissions", "contributions"] as const).map((tab) => (
+              <button type="button" role="tab" aria-selected={detailTab === tab} className={detailTab === tab ? "active" : ""} key={tab} onClick={() => setDetailTab(tab)}>
+                {tab[0]!.toUpperCase() + tab.slice(1)}
+              </button>
+            ))}
           </div>
-          <div className="set-row-control">
-            <span className={`tag mcp-status ${p.status === "ready" ? "connected" : p.status === "error" ? "error" : "disabled"}`}>{p.status}</span>
-            <button className="small-btn" onClick={() => void op(p.id, p.enabled ? "disable" : "enable")}>{p.enabled ? "Disable" : "Enable"}</button>
-            <button className="small-btn" onClick={() => void op(p.id, "reload")}>Reload</button>
-            <button className="small-btn" onClick={() => setLogsFor(logsFor === p.id ? null : p.id)}>Logs</button>
-            <button className="small-btn danger-btn" onClick={() => { if (window.confirm(`Remove plugin "${p.name}"?`)) void api.pluginsRemove(p.id).then(refresh); }}>
-              Remove
-            </button>
+          <div className="plugin-detail-body">
+            {detailTab === "overview" && <p>{selectedPlugin.enabled ? "Enabled and ready to contribute to your workspace." : "Disabled. Existing layout placements are kept until you enable or remove them."}</p>}
+            {detailTab === "widgets" && <p>{contributionCount(selectedPlugin, "widget.")} widget contributions. Installing a plugin never inserts them automatically.</p>}
+            {detailTab === "commands" && <p>{contributionCount(selectedPlugin, "command")} command contributions.</p>}
+            {detailTab === "tools" && <p>{selectedPlugin.capabilities.length ? selectedPlugin.capabilities.join(", ") : "No declared tools."}</p>}
+            {detailTab === "settings" && <p>{contributionCount(selectedPlugin, "settings.")} settings pages or controls.</p>}
+            {detailTab === "permissions" && <p><span className={`tag plugin-trust trust-${selectedPlugin.trust}`}>{selectedPlugin.trust}</span> Permissions are requested when the plugin needs them.</p>}
+            {detailTab === "contributions" && (
+              <ul>{selectedPlugin.contributions.map((item) => <li key={`${item.slot}:${item.id}`}><code>{item.slot}</code> {item.id}</li>)}</ul>
+            )}
           </div>
-        </div>
-      ))}
+        </section>
+      )}
       {logsFor && <PluginLogViewer id={logsFor} />}
       <div className="set-add-form">
         <input value={source} placeholder="npm:@scope/name@1.0.0 or file:my-plugin" onChange={(e) => setSource(e.target.value)} onKeyDown={(e) => e.key === "Enter" && void install()} />
         <button className="small-btn" onClick={() => void install()}>Install</button>
       </div>
       {error && <div className="form-error">{error}</div>}
+      {toast && <div className="plugin-toast" role="status"><span>{toast}</span><button type="button" onClick={() => setToast("")}>Dismiss</button></div>}
     </div>
   );
 }
@@ -1347,10 +1418,10 @@ function CapabilityPlacementSection() {
 export function PluginsPage() {
   return (
     <>
-      <PageHead title="Plugins" blurb="Place built-in capabilities and manage installed extensions. Placement never removes a capability." />
-      <CapabilityPlacementSection />
-      <OpenCodePluginsSection />
+      <PageHead title="Plugins" blurb="Add workspace capabilities without changing your layout until you choose a widget." />
       <ManagedPluginsSection />
+      <OpenCodePluginsSection />
+      <CapabilityPlacementSection />
     </>
   );
 }

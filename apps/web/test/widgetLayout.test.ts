@@ -3,7 +3,10 @@ import assert from "node:assert/strict";
 import {
   BUILTIN_WIDGET_IDS,
   WIDGET_ZONES,
+  applyWidgetLayoutMutations,
+  canPlaceWidget,
   createDefaultWidgetLayout,
+  duplicateWidget,
   moveWidget,
   parseWidgetLayout,
   serializeWidgetLayout,
@@ -62,8 +65,8 @@ test("moves reorder between zones, reveal widgets, and ignore unknown ids", () =
     "terminal.shell",
     false,
   );
-  const moved = moveWidget(initial, "terminal.shell", "top", 0);
-  assert.deepEqual(moved.zones.top, ["terminal.shell"]);
+  const moved = moveWidget(initial, "terminal.shell", "header", 0);
+  assert.deepEqual(moved.zones.header, ["terminal.shell"]);
   assert.equal(moved.zones.bottom.includes("terminal.shell"), false);
   assert.equal(moved.widgets["terminal.shell"]?.visible, true);
   assert.equal(moveWidget(moved, "unknown.widget", "left"), moved);
@@ -86,7 +89,7 @@ test("parser drops unknown and duplicate widget ids and restores missing known i
     },
   }), ["core.chat", "terminal.shell"]);
 
-  assert.deepEqual(parsed.zones.top, ["core.chat"]);
+  assert.deepEqual(parsed.zones.header, ["core.chat"]);
   assert.deepEqual(parsed.zones.bottom, ["terminal.shell"]);
   assert.equal("ghost.widget" in parsed.widgets, false);
   assert.deepEqual(parsed.widgets["core.chat"]?.size, { w: 12, h: 1 });
@@ -103,4 +106,65 @@ test("invalid persisted layouts fall back to defaults", () => {
     parseWidgetLayout('{"version":2}', ["core.chat"]),
     createDefaultWidgetLayout(["core.chat"]),
   );
+});
+
+test("shared mutation engine enforces zones and min/max widget sizes", () => {
+  const definitions = [{
+    id: "sample.widget",
+    title: "Sample",
+    zone: "main" as const,
+    supportedZones: ["main", "right"] as const,
+    defaultSize: { w: 6, h: 4 },
+    minSize: { w: 4, h: 3 },
+    maxSize: { w: 8, h: 6 },
+  }];
+  const initial = createDefaultWidgetLayout(definitions);
+  const rejected = applyWidgetLayoutMutations(initial, [
+    { type: "move", id: "sample.widget", zone: "header" },
+  ], definitions);
+  assert.equal(rejected, initial);
+  assert.match(canPlaceWidget(definitions[0], "header").reason ?? "", /doesn’t fit/);
+
+  const changed = applyWidgetLayoutMutations(initial, [
+    { type: "move", id: "sample.widget", zone: "right" },
+    { type: "resize", id: "sample.widget", size: { w: 12, h: 1 } },
+  ], definitions);
+  assert.equal(widgetZoneOf(changed, "sample.widget"), "right");
+  assert.deepEqual(changed.widgets["sample.widget"]?.size, { w: 8, h: 3 });
+});
+
+test("duplicatable widgets create independent instances through the same layout model", () => {
+  const definition = {
+    id: "knowledge.note",
+    pluginId: "knowledge",
+    title: "Note",
+    zone: "left" as const,
+    defaultSize: { w: 5, h: 4 },
+    duplicatable: true,
+  };
+  const initial = createDefaultWidgetLayout([definition]);
+  const duplicated = duplicateWidget(initial, definition.id, definition);
+  assert.ok(duplicated.widgets["knowledge.note#2"]);
+  assert.equal(duplicated.widgets["knowledge.note#2"]?.definitionId, "knowledge.note");
+  assert.deepEqual(duplicated.zones.left, ["knowledge.note", "knowledge.note#2"]);
+});
+
+test("self-describing plugin placements survive parsing as missing-plugin placeholders", () => {
+  const parsed = parseWidgetLayout(JSON.stringify({
+    version: 1,
+    audience: "standard",
+    zones: { header: [], left: [], main: [], right: ["sample.status"], bottom: [], floating: [] },
+    widgets: {
+      "sample.status": {
+        visible: true,
+        size: { w: 4, h: 3 },
+        definitionId: "sample.status",
+        pluginId: "sample",
+        title: "Sample status",
+        description: "Plugin status",
+      },
+    },
+  }), ["core.composer"]);
+  assert.equal(parsed.widgets["sample.status"]?.pluginId, "sample");
+  assert.equal(widgetZoneOf(parsed, "sample.status"), "right");
 });
