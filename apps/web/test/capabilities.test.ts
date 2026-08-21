@@ -12,7 +12,7 @@ import {
 } from "../src/capabilities.ts";
 import { WORKSPACE_PRESETS, type WorkspacePresetId } from "../src/workspacePresets.ts";
 import {
-  PANEL_OF_CAPABILITY, VIEW_OF_CAPABILITY,
+  PANEL_OF_CAPABILITY, PANE_OF_CAPABILITY, VIEW_OF_CAPABILITY,
 } from "../src/builtinCapabilities.ts";
 
 function fakeDescriptor(id: string, over: Partial<CapabilityDescriptor> = {}): CapabilityDescriptor {
@@ -174,12 +174,14 @@ test("all built-in metadata is registered with open + available attached", async
   }
 });
 
-test("every built-in capability opens something concrete: a view, a panel, or a settings page", () => {
+test("every built-in capability opens one concrete destination", () => {
   for (const m of BUILTIN_CAPABILITY_META) {
     const hasView = m.id in VIEW_OF_CAPABILITY;
     const hasPanel = m.id in PANEL_OF_CAPABILITY;
+    const hasPane = m.id in PANE_OF_CAPABILITY;
     const isSettings = ["models-agents", "diagnostics", "voice"].includes(m.id);
-    assert.ok(hasView || hasPanel || isSettings, `${m.id} has a concrete destination`);
-    assert.ok(!(hasView && hasPanel), `${m.id} has exactly one destination kind`);
+    const destinationKinds = [hasView, hasPanel, hasPane, isSettings].filter(Boolean);
+    assert.ok(destinationKinds.length > 0, `${m.id} has a concrete destination`);
+    assert.equal(destinationKinds.length, 1, `${m.id} has exactly one destination kind`);
   }
 });

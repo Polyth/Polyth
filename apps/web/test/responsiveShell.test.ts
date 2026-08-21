@@ -110,7 +110,10 @@ test("drawer and sheet share the Dialog focus contract (no copied traps)", async
     assert.ok(!src.includes("FOCUSABLE"), `${name} must not copy a focus-trap implementation`);
   }
   assert.ok(sidebar.includes('id="polyth-session-drawer"'), "drawer id matches the trigger");
-  assert.ok(rail.includes('id="polyth-panel-sheet"'), "sheet id matches the trigger");
+  assert.ok(
+    rail.includes('id={compact ? "polyth-panel-sheet" : undefined}'),
+    "compact sheet id matches the trigger without duplicating it on the desktop rail",
+  );
   assert.ok(rail.includes("export function NarrowPanelTrigger"), "panel trigger exported for the header");
   assert.ok(rail.includes("useRailSurfaceModel"), "trigger and host share one visibleSurfaces model");
 });
