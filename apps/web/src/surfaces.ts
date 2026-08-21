@@ -35,6 +35,12 @@ export interface WorkspacePanePresentation {
   escape: "close" | "content";
 }
 
+/** Keep-alive surface components can pause background work while hidden. */
+export interface RailSurfaceComponentProps {
+  /** Omitted by legacy/plugin callers; the host always supplies it. */
+  active?: boolean;
+}
+
 export interface RailSurface {
   id: string;
   title: string;
@@ -47,7 +53,7 @@ export interface RailSurface {
   capabilityId?: string;
   order: number;
   /** Panel body — a component, so it owns its hooks and state. */
-  component: () => ReactNode;
+  component: (props?: RailSurfaceComponentProps) => ReactNode;
   /** Count badge on the strip button. */
   badge?: (ctx: RailSurfaceContext) => number;
   /** Content-driven visibility: false hides the strip button (OC#2418). */

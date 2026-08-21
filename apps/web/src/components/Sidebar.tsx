@@ -87,7 +87,13 @@ export default function Sidebar() {
 
   return (
     <>
-      {compact && drawerOpen && <div className="menu-backdrop sidebar-backdrop" onClick={() => setSidebarOpen(false)} />}
+      {compact && drawerOpen && (
+        <div
+          className="menu-backdrop sidebar-backdrop"
+          aria-hidden="true"
+          onClick={() => setSidebarOpen(false)}
+        />
+      )}
       <nav
         ref={navRef}
         id="polyth-session-drawer"

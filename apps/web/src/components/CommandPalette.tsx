@@ -127,34 +127,35 @@ export default function CommandPalette() {
         aria-modal="true"
         aria-label="Command palette"
         aria-describedby="palette-close-hint"
+        tabIndex={-1}
       >
-        <input
-          className="palette-input"
-          value={q}
-          role="combobox"
-          aria-expanded={entries.length > 0}
-          aria-controls="palette-listbox"
-          aria-activedescendant={entries[i] ? `palette-opt-${i}` : undefined}
-          aria-autocomplete="list"
-          placeholder={filesMode ? "Search files…" : "Search commands, projects, sessions, files… (is:archived)"}
-          onChange={(e) => setQ(e.target.value)}
-          onKeyDown={onKey}
-        />
-        <div className="palette-list" role="listbox" id="palette-listbox" aria-label="Palette results">
-          {entries.length === 0 && <div className="palette-empty">No matches</div>}
-          {entries.map((entry, n) => (
-            <Fragment key={entry.id}>
-              {groupOf(entry) && (n === 0 || groupOf(entries[n - 1]!) !== groupOf(entry)) && (
-                <div className="palette-group" role="presentation">{groupOf(entry)}</div>
-              )}
-              <button
-                className={`palette-item ${n === i ? "active" : ""} ${entry.kind === "workspace" ? `palette-${entry.item.kind}` : ""}`}
-                role="option"
-                id={`palette-opt-${n}`}
-                aria-selected={n === i}
-                ref={n === i ? (el) => el?.scrollIntoView({ block: "nearest" }) : null}
-                onClick={() => run(entry)}
-              >
+      <input
+        className="palette-input"
+        value={q}
+        role="combobox"
+        aria-expanded={entries.length > 0}
+        aria-controls="palette-listbox"
+        aria-activedescendant={entries[i] ? `palette-opt-${i}` : undefined}
+        aria-autocomplete="list"
+        placeholder={filesMode ? "Search files…" : "Search commands, projects, sessions, files… (is:archived)"}
+        onChange={(e) => setQ(e.target.value)}
+        onKeyDown={onKey}
+      />
+      <div className="palette-list" role="listbox" id="palette-listbox" aria-label="Palette results">
+        {entries.length === 0 && <div className="palette-empty">No matches</div>}
+        {entries.map((entry, n) => (
+          <Fragment key={entry.id}>
+            {groupOf(entry) && (n === 0 || groupOf(entries[n - 1]!) !== groupOf(entry)) && (
+              <div className="palette-group" role="presentation">{groupOf(entry)}</div>
+            )}
+            <button
+              className={`palette-item ${n === i ? "active" : ""} ${entry.kind === "workspace" ? `palette-${entry.item.kind}` : ""}`}
+              role="option"
+              id={`palette-opt-${n}`}
+              aria-selected={n === i}
+              ref={n === i ? (el) => el?.scrollIntoView({ block: "nearest" }) : null}
+              onClick={() => run(entry)}
+            >
                 {entry.kind === "cmd" && (
                   <>
                     {entry.cmd.checked && (
@@ -190,11 +191,11 @@ export default function CommandPalette() {
                     <span className="palette-meta">{entry.hit.kind === "dir" ? "folder" : "open in editor"}</span>
                   </>
                 )}
-              </button>
-            </Fragment>
-          ))}
-        </div>
-        <div className="palette-footer" id="palette-close-hint"><kbd>Esc</kbd> close</div>
+            </button>
+          </Fragment>
+        ))}
+      </div>
+      <div className="palette-footer" id="palette-close-hint"><kbd>Esc</kbd> close</div>
       </div>
     </div>
   );

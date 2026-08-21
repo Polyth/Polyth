@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import { resolve } from "node:path";
 import type {
   AgentProfile, AgentRuntime, AttachmentRef, AutoAcceptSetting, ChildSnapshotResult, CreateSessionInput, DeliveryMode,
-  ForkDraft, ForkResult, JsonObject,
+  Disposable, ForkDraft, ForkResult, JsonObject,
   QueueItemDto, RuntimeEvent,
   RuntimeSession, SendResult, SessionEvent, SessionFolderDto, SessionForkedData, SessionOrganizePatch, SessionProjection, SessionRef,
   SessionService, SessionPersistence, UserTurnInput,
@@ -100,6 +100,10 @@ export function createSessionService(deps: {
   const { store, projects, permissions, runtimes, broadcast } = deps;
   const hooks = deps.hooks ?? {};
   const sessionRuntime = new Map<string, AgentRuntime>(); // sessionId -> runtime
+  // One onEvent subscription per runtime (not per session): events dispatch
+  // through sessionRuntime, so wiring N sessions to a runtime costs a single
+  // listener that unwire() disposes once the last session leaves it.
+  const runtimeSubs = new Map<AgentRuntime, Disposable>();
   const lastTurnId = new Map<string, string>();           // sessionId -> active turnId
   // sessions whose turn admission is in flight (startTurn sent, turn/started
   // not yet observed) — a concurrent send must treat these as active
@@ -280,14 +284,28 @@ export function createSessionService(deps: {
   const wire = (sessionId: string, rt: AgentRuntime) => {
     if (sessionRuntime.has(sessionId)) return;
     sessionRuntime.set(sessionId, rt);
-    rt.onEvent((sid, ev) => {
-      if (sid !== sessionId) return;
-      // Serialized per canonical session: a terminal turn/stopped can never be
+    if (runtimeSubs.has(rt)) return;
+    runtimeSubs.set(rt, rt.onEvent((sid, ev) => {
+      // deliver only to sessions currently wired to this runtime — the same
+      // filter the old per-session closures applied, minus the listener pile-up.
+      if (sessionRuntime.get(sid) !== rt) return;
+      // Serialize each canonical session: a terminal turn/stopped can never be
       // overwritten by an older usage or chunk projection update.
       void withSessionLock(sid, () => onRuntimeEvent(sid, ev)).catch((err) => {
         console.error(`[polyth] runtime event handling failed for ${sid}`, err);
       });
-    });
+    }));
+  };
+
+  const unwire = (sessionId: string) => {
+    const rt = sessionRuntime.get(sessionId);
+    if (!rt) return;
+    sessionRuntime.delete(sessionId);
+    turnReply.delete(sessionId);
+    behaviorLogged.delete(sessionId);
+    for (const wired of sessionRuntime.values()) if (wired === rt) return;
+    runtimeSubs.get(rt)?.dispose();
+    runtimeSubs.delete(rt);
   };
 
   const ensureWired = async (sessionId: string, proj: SessionProjection): Promise<AgentRuntime> => {
@@ -1045,6 +1063,10 @@ export function createSessionService(deps: {
       if (proj.status === "archived") return; // idempotent: no duplicate events
       await appendAndBroadcast(sessionId, "session/archived", {}, { ignorable: true });
       await updateProjection(sessionId, { status: "archived" });
+      // Release the dispatch slot when idle. A mid-turn archive stays wired:
+      // model-visible content must keep landing in the log until the turn
+      // stops; ensureWired re-wires lazily after a restore.
+      if (!turnActive(sessionId)) unwire(sessionId);
     },
     async restore(sessionId) {
       const proj = await store.projection(sessionId);

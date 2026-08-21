@@ -20,8 +20,8 @@ async function startStaticServer(): Promise<{ server: Server; base: string }> {
   mkdirSync(webDist, { recursive: true });
   // The real shell, exactly as build.ts copies it into dist/.
   copyFileSync(SHIPPED_INDEX, join(webDist, "index.html"));
-  writeFileSync(join(webDist, "bundle.js"), "export const boot = true;\n");
-  writeFileSync(join(webDist, "bundle.css"), ":root { --ok: 1; }\n");
+  writeFileSync(join(webDist, "main.js"), "export const boot = true;\n");
+  writeFileSync(join(webDist, "main.css"), ":root { --ok: 1; }\n");
   writeFileSync(join(webDist, "sw.js"), "// service worker\n");
 
   const server = createHttpServer({
@@ -91,9 +91,9 @@ test("refresh at /p/:projectId/s/:sessionId replays: shell + every asset boots",
 test("a missing asset-like path 404s instead of masquerading as the HTML shell", async () => {
   const { server, base } = await startStaticServer();
   try {
-    // The pre-fix failure: ./bundle.js under a nested route hit the SPA
+    // The pre-fix failure: a relative asset under a nested route hit the SPA
     // fallback and returned index.html, which Chrome rejects as a module.
-    const nestedMiss = await fetch(`${base}/p/some-project/s/bundle.js`);
+    const nestedMiss = await fetch(`${base}/p/some-project/s/main.js`);
     assert.equal(nestedMiss.status, 404);
     assert.doesNotMatch(nestedMiss.headers.get("content-type") ?? "", /text\/html/);
 
@@ -106,7 +106,7 @@ test("a missing asset-like path 404s instead of masquerading as the HTML shell",
     assert.match(nav.headers.get("content-type") ?? "", /text\/html/);
 
     // …and real assets keep their MIME types.
-    const js = await fetch(`${base}/bundle.js`);
+    const js = await fetch(`${base}/main.js`);
     assert.equal(js.status, 200);
     assert.match(js.headers.get("content-type") ?? "", /javascript/);
   } finally {

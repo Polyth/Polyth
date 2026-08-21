@@ -7,7 +7,7 @@ import { friendlyError } from "./settings.ts";
 import { formatAppUrl, parseAppUrl } from "./router.ts";
 import * as store from "./store.ts";
 import { resolveActiveProjectId } from "./projectRegistry.ts";
-import type { AttachmentRef, JsonObject, Project } from "@polyth/contracts";
+import type { AttachmentRef, JsonObject, Project, SessionEvent } from "@polyth/contracts";
 import { suggestWorktreeBranch } from "./worktreeSessions.ts";
 import { installPushDeepLinks } from "./push.ts";
 import { applyComposerSeed } from "./drafts.ts";
@@ -235,9 +235,26 @@ async function refreshAgents(): Promise<void> {
 function startSync(): void {
   const proto = location.protocol === "https:" ? "wss" : "ws";
   sync = new SyncClient();
+  // Micro-batched ingestion: a WS burst (reconnect gap-fill, fast streaming)
+  // queues one browser task per message. A 0ms timer runs after every task
+  // already in the queue, so the whole burst folds into a single applyEvents
+  // (one store update + one render) instead of one render per event. Dropped
+  // or reordered flushes are harmless — applyEvents sorts and dedupes by seq.
+  let pending: SessionEvent[] = [];
+  let flushTimer: ReturnType<typeof setTimeout> | null = null;
+  const flush = (): void => {
+    flushTimer = null;
+    const batch = pending;
+    pending = [];
+    if (batch.length > 0) store.applyEvents(batch);
+  };
   sync.onEvent((msg) => {
-    if (msg.type === "event") store.applyEvent(msg.event);
-    else if (msg.type === "projection") store.upsertSession(msg.session);
+    if (msg.type === "event") {
+      pending.push(msg.event);
+      flushTimer ??= setTimeout(flush, 0);
+    } else if (msg.type === "projection") {
+      store.upsertSession(msg.session);
+    }
   });
   sync.connect(`${proto}://${location.host}/ws`);
 }
@@ -248,7 +265,7 @@ export async function openSession(sessionId: string): Promise<void> {
   const session = await api.getSession(sessionId);
   if (session.projectId !== store.getState().activeProjectId) store.activateProject(session.projectId);
   const events = await api.getEvents(sessionId, 0);
-  for (const ev of events) store.applyEvent(ev);
+  store.applyEvents(events); // one store update for the whole history
   maybeSeedFromReplay(sessionId);
   store.activateSession(sessionId);
 }

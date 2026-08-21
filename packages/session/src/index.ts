@@ -1,7 +1,7 @@
 // Polyth session log: append-only event store on node:sqlite (WAL).
 // Erasable TS only. Local imports use explicit .ts.
 
-import { DatabaseSync } from "node:sqlite";
+import { DatabaseSync, type StatementSync } from "node:sqlite";
 import { randomUUID } from "node:crypto";
 
 import { MODEL_VISIBLE_TYPES } from "@polyth/contracts";
@@ -177,6 +177,11 @@ export function createStore(dbPath: string): Store {
     () => {
       db.exec("ALTER TABLE session_queue ADD COLUMN attachments TEXT");
     },
+    // v5: index for the message-search read path (searchEventText filters on
+    // type and orders by time; the primary key only covers session_id+seq)
+    () => {
+      db.exec("CREATE INDEX IF NOT EXISTS idx_events_type_time ON events (type, time)");
+    },
   ];
   {
     const current = getVersion();
@@ -193,6 +198,16 @@ export function createStore(dbPath: string): Store {
     }
   }
 
+  // Prepared-statement cache for the fixed queries below (compiled once, then
+  // reused). Created only after migrations so no statement predates an ALTER.
+  // Queries with a variable placeholder count (attentionFor) stay uncached.
+  const stmts = new Map<string, StatementSync>();
+  const prep = (sql: string): StatementSync => {
+    let s = stmts.get(sql);
+    if (!s) { s = db.prepare(sql); stmts.set(sql, s); }
+    return s;
+  };
+
   // ------------------------------------------------------------- append
 
   function append(
@@ -208,11 +223,10 @@ export function createStore(dbPath: string): Store {
     let seq = 0;
     db.exec("BEGIN IMMEDIATE");
     try {
-      const row = db
-        .prepare("SELECT COALESCE(MAX(seq), 0) + 1 AS next FROM events WHERE session_id = ?")
+      const row = prep("SELECT COALESCE(MAX(seq), 0) + 1 AS next FROM events WHERE session_id = ?")
         .get(sessionId) as { next: number };
       seq = Number(row.next);
-      db.prepare(
+      prep(
         `INSERT INTO events (session_id, seq, id, time, type, data, ignorable, surface_op, source_seqs, producer, v)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`,
       ).run(
@@ -251,17 +265,13 @@ export function createStore(dbPath: string): Store {
   // ------------------------------------------------------------- reads
 
   function events(sessionId: string, afterSeq = 0): Promise<SessionEvent[]> {
-    const rows = db
-      .prepare(
-        "SELECT * FROM events WHERE session_id = ? AND seq > ? ORDER BY seq",
-      )
+    const rows = prep("SELECT * FROM events WHERE session_id = ? AND seq > ? ORDER BY seq")
       .all(sessionId, afterSeq) as unknown as Row[];
     return Promise.resolve(rows.map(rowToEvent));
   }
 
   function latestSeq(sessionId: string): Promise<number> {
-    const row = db
-      .prepare("SELECT COALESCE(MAX(seq), 0) AS s FROM events WHERE session_id = ?")
+    const row = prep("SELECT COALESCE(MAX(seq), 0) AS s FROM events WHERE session_id = ?")
       .get(sessionId) as { s: number };
     return Promise.resolve(Number(row.s));
   }
@@ -272,18 +282,14 @@ export function createStore(dbPath: string): Store {
     db.exec("BEGIN IMMEDIATE");
     try {
       const limit = upToSeq === undefined ? Number.MAX_SAFE_INTEGER : upToSeq;
-      const src = db
-        .prepare(
-          "SELECT * FROM events WHERE session_id = ? AND seq <= ? ORDER BY seq",
-        )
+      const src = prep("SELECT * FROM events WHERE session_id = ? AND seq <= ? ORDER BY seq")
         .all(srcSessionId, limit) as unknown as Row[];
 
-      const next = db
-        .prepare("SELECT COALESCE(MAX(seq), 0) AS m FROM events WHERE session_id = ?")
+      const next = prep("SELECT COALESCE(MAX(seq), 0) AS m FROM events WHERE session_id = ?")
         .get(dstSessionId) as { m: number };
       let seq = Number(next.m);
 
-      const ins = db.prepare(
+      const ins = prep(
         `INSERT INTO events (session_id, seq, id, time, type, data, ignorable, surface_op, source_seqs, producer, v)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       );
@@ -381,7 +387,7 @@ export function createStore(dbPath: string): Store {
   // ------------------------------------------------------------- projections
 
   function upsertProjection(p: SessionProjection): Promise<void> {
-    db.prepare(
+    prep(
       `INSERT INTO projections (session_id, data) VALUES (?, ?)
        ON CONFLICT(session_id) DO UPDATE SET data = excluded.data`,
     ).run(p.id, JSON.stringify(p));
@@ -415,17 +421,15 @@ export function createStore(dbPath: string): Store {
   }
 
   function projection(sessionId: string): Promise<SessionProjection | undefined> {
-    const row = db
-      .prepare("SELECT data FROM projections WHERE session_id = ?")
+    const row = prep("SELECT data FROM projections WHERE session_id = ?")
       .get(sessionId) as { data: string } | undefined;
     return Promise.resolve(row ? (JSON.parse(row.data) as SessionProjection) : undefined);
   }
 
   function projections(projectId?: string): Promise<SessionProjection[]> {
     const rows = projectId === undefined
-      ? (db.prepare("SELECT data FROM projections").all() as { data: string }[])
-      : (db
-          .prepare("SELECT data FROM projections WHERE json_extract(data, '$.projectId') = ?")
+      ? (prep("SELECT data FROM projections").all() as { data: string }[])
+      : (prep("SELECT data FROM projections WHERE json_extract(data, '$.projectId') = ?")
           .all(projectId) as { data: string }[]);
     return Promise.resolve(rows.map((r) => JSON.parse(r.data) as SessionProjection));
   }
@@ -480,11 +484,10 @@ export function createStore(dbPath: string): Store {
     let position = 0;
     db.exec("BEGIN IMMEDIATE");
     try {
-      const row = db
-        .prepare("SELECT COALESCE(MAX(position), -1) + 1 AS next FROM session_queue WHERE session_id = ?")
+      const row = prep("SELECT COALESCE(MAX(position), -1) + 1 AS next FROM session_queue WHERE session_id = ?")
         .get(sessionId) as { next: number };
       position = Number(row.next);
-      db.prepare(
+      prep(
         "INSERT INTO session_queue (queue_id, session_id, position, text, delivery, created_at, attachments) VALUES (?, ?, ?, ?, ?, ?, ?)",
       ).run(queueId, sessionId, position, text, delivery, createdAt, attachments?.length ? JSON.stringify(attachments) : null);
       db.exec("COMMIT");
@@ -499,8 +502,7 @@ export function createStore(dbPath: string): Store {
   }
 
   function queueList(sessionId: string): Promise<QueueItemDto[]> {
-    const rows = db
-      .prepare("SELECT * FROM session_queue WHERE session_id = ? ORDER BY position")
+    const rows = prep("SELECT * FROM session_queue WHERE session_id = ? ORDER BY position")
       .all(sessionId) as unknown as QueueRow[];
     return Promise.resolve(rows.map(rowToQueueItem));
   }
@@ -508,15 +510,14 @@ export function createStore(dbPath: string): Store {
   async function queueReorder(sessionId: string, ids: string[]): Promise<QueueItemDto[]> {
     db.exec("BEGIN IMMEDIATE");
     try {
-      const rows = db
-        .prepare("SELECT queue_id FROM session_queue WHERE session_id = ?")
+      const rows = prep("SELECT queue_id FROM session_queue WHERE session_id = ?")
         .all(sessionId) as { queue_id: string }[];
       const existing = new Set(rows.map((r) => r.queue_id));
       const submitted = new Set(ids);
       if (existing.size !== submitted.size || ids.length !== submitted.size || [...existing].some((id) => !submitted.has(id))) {
         throw Object.assign(new Error("ids must be an exact permutation of the session queue"), { code: "invalid-input" });
       }
-      const upd = db.prepare("UPDATE session_queue SET position = ? WHERE queue_id = ? AND session_id = ?");
+      const upd = prep("UPDATE session_queue SET position = ? WHERE queue_id = ? AND session_id = ?");
       ids.forEach((id, i) => upd.run(i, id, sessionId));
       db.exec("COMMIT");
     } catch (err) {
@@ -527,8 +528,7 @@ export function createStore(dbPath: string): Store {
   }
 
   function queueRemove(sessionId: string, queueId: string): Promise<boolean> {
-    const res = db
-      .prepare("DELETE FROM session_queue WHERE session_id = ? AND queue_id = ?")
+    const res = prep("DELETE FROM session_queue WHERE session_id = ? AND queue_id = ?")
       .run(sessionId, queueId);
     return Promise.resolve(Number(res.changes) > 0);
   }
@@ -537,11 +537,10 @@ export function createStore(dbPath: string): Store {
     let item: QueueItemDto | undefined;
     db.exec("BEGIN IMMEDIATE");
     try {
-      const row = db
-        .prepare("SELECT * FROM session_queue WHERE session_id = ? ORDER BY position LIMIT 1")
+      const row = prep("SELECT * FROM session_queue WHERE session_id = ? ORDER BY position LIMIT 1")
         .get(sessionId) as QueueRow | undefined;
       if (row) {
-        db.prepare("DELETE FROM session_queue WHERE queue_id = ?").run(row.queue_id);
+        prep("DELETE FROM session_queue WHERE queue_id = ?").run(row.queue_id);
         item = rowToQueueItem(row);
       }
       db.exec("COMMIT");
@@ -553,7 +552,7 @@ export function createStore(dbPath: string): Store {
   }
 
   function deleteProjection(sessionId: string): Promise<void> {
-    db.prepare("DELETE FROM projections WHERE session_id = ?").run(sessionId);
+    prep("DELETE FROM projections WHERE session_id = ?").run(sessionId);
     return Promise.resolve();
   }
 
@@ -570,7 +569,7 @@ export function createStore(dbPath: string): Store {
   });
 
   const folderRow = (id: string): FolderRow | undefined =>
-    db.prepare("SELECT * FROM folders WHERE id = ?").get(id) as FolderRow | undefined;
+    prep("SELECT * FROM folders WHERE id = ?").get(id) as FolderRow | undefined;
 
   /** True when `candidateAncestor` is `id` itself or any ancestor of `id`. */
   const folderHasAncestor = (id: string, candidateAncestor: string): boolean => {
@@ -865,13 +864,11 @@ export function createStore(dbPath: string): Store {
     const needle = q.trim();
     if (!needle) return [];
     const like = `%${needle.replace(/[%_]/g, (c) => `\\${c}`)}%`;
-    const rows = db
-      .prepare(
-        `SELECT session_id, data FROM events
-         WHERE type IN ('user/message','assistant/message') AND data LIKE ? ESCAPE '\\'
-         ORDER BY time DESC LIMIT ?`,
-      )
-      .all(like, limit * 4) as Array<{ session_id: string; data: string }>;
+    const rows = prep(
+      `SELECT session_id, data FROM events
+       WHERE type IN ('user/message','assistant/message') AND data LIKE ? ESCAPE '\\'
+       ORDER BY time DESC LIMIT ?`,
+    ).all(like, limit * 4) as Array<{ session_id: string; data: string }>;
     const out: SearchHit[] = [];
     const perSession = new Map<string, number>();
     for (const r of rows) {

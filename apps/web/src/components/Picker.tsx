@@ -1,7 +1,10 @@
 // Reusable searchable listbox replacing native <select>s: compact chip
 // trigger, type-to-filter popover, ↑↓ Enter Esc keyboard nav, grouped options
 // with a checkmark on the current one. Pass `values` for multi-select.
-import { Fragment, useEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
+import {
+  Fragment, useEffect, useId, useMemo, useRef, useState,
+  type KeyboardEvent, type ReactNode,
+} from "react";
 import { filterPickerItems, type PickerItem } from "../picker.ts";
 import { useEscape } from "../useEscape.ts";
 
@@ -62,6 +65,8 @@ export default function Picker({
   const [active, setActive] = useState(0);
   const listRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
+  const pickerId = useId();
+  const listId = `${pickerId}-listbox`;
 
   const close = () => {
     setOpen(false);
@@ -94,6 +99,12 @@ export default function Picker({
     } else if (e.key === "ArrowUp") {
       e.preventDefault();
       setActive((n) => Math.max(n - 1, 0));
+    } else if (e.key === "Home") {
+      e.preventDefault();
+      setActive(0);
+    } else if (e.key === "End") {
+      e.preventDefault();
+      setActive(Math.max(shown.length - 1, 0));
     } else if (e.key === "Enter") {
       e.preventDefault();
       const it = shown[active];
@@ -118,6 +129,7 @@ export default function Picker({
         aria-label={ariaLabel}
         aria-haspopup="listbox"
         aria-expanded={open}
+        aria-controls={open ? listId : undefined}
         disabled={disabled}
         onClick={() => {
           setOpen((v) => !v);
@@ -140,21 +152,34 @@ export default function Picker({
               placeholder={`Filter ${label.toLowerCase()}…`}
               onChange={(e) => setQ(e.target.value)}
               onKeyDown={onKey}
+              role="combobox"
+              aria-label={`Filter ${label}`}
+              aria-autocomplete="list"
+              aria-expanded="true"
+              aria-controls={listId}
+              aria-activedescendant={shown[active] ? `${pickerId}-option-${active}` : undefined}
             />
-            <div className="picker-list" role="listbox" aria-label={label} ref={listRef}>
+            <div
+              id={listId}
+              className="picker-list"
+              role="listbox"
+              aria-label={label}
+              aria-multiselectable={multi || undefined}
+              ref={listRef}
+            >
               {shown.map((it, n) => (
                 <Fragment key={it.id || "(default)"}>
                   {it.group !== "" && (n === 0 || shown[n - 1]!.group !== it.group) && (
-                    <div className="picker-group">{it.group}</div>
+                    <div className="picker-group" role="presentation">{it.group}</div>
                   )}
                   <div
+                    id={`${pickerId}-option-${n}`}
                     role="option"
-                    tabIndex={0}
+                    tabIndex={-1}
                     aria-selected={isCurrent(it.id)}
                     data-active={n === active ? "true" : undefined}
                     className={`picker-item${n === active ? " active" : ""}${isCurrent(it.id) ? " current" : ""}`}
                     onClick={() => pick(it.id)}
-                    onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); pick(it.id); } }}
                     onMouseEnter={() => setActive(n)}
                   >
                     <span className="picker-check">{isCurrent(it.id) ? "✓" : ""}</span>

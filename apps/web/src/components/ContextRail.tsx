@@ -465,7 +465,7 @@ export default function ContextRail() {
   // surfaces retain the pane model's full-screen layer and bottom navigation.
   const compactContext = compact && open !== null && !isWorkspacePane;
   useModalSurface({
-    enabled: compact,
+    enabled: compact && !isWorkspacePane,
     open: compactContext,
     onClose: () => setRailPlugin(null),
     containerRef: paneRef,
@@ -598,7 +598,7 @@ export default function ContextRail() {
                 aria-hidden={!active || undefined}
               >
                 <PaneVisibilityContext.Provider value={active}>
-                  <s.component />
+                  <s.component active={active} />
                 </PaneVisibilityContext.Provider>
               </div>
             );

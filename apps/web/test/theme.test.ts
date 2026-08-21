@@ -9,6 +9,17 @@ import {
 
 const HEX = /^#[0-9a-fA-F]{6}$/;
 
+function luminance(hex: string): number {
+  const channels = hex.slice(1).match(/../g)!.map((value) => Number.parseInt(value, 16) / 255);
+  const [r, g, b] = channels.map((value) => value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4);
+  return 0.2126 * r! + 0.7152 * g! + 0.0722 * b!;
+}
+
+function contrast(a: string, b: string): number {
+  const [lighter, darker] = [luminance(a), luminance(b)].sort((x, y) => y - x);
+  return (lighter! + 0.05) / (darker! + 0.05);
+}
+
 const validTheme = (): Record<string, unknown> => ({
   id: "my-theme",
   name: "My theme",
@@ -28,19 +39,6 @@ test("preset set: six themes, unique stable ids, both appearances, valid tokens"
   }
 });
 
-// UX-A390: WCAG relative luminance / contrast ratio for token pinning.
-const relLum = (hex: string): number => {
-  const c = [1, 3, 5]
-    .map((i) => parseInt(hex.slice(i, i + 2), 16) / 255)
-    .map((v) => (v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4));
-  return 0.2126 * c[0]! + 0.7152 * c[1]! + 0.0722 * c[2]!;
-};
-const contrast = (a: string, b: string): number => {
-  const l1 = Math.max(relLum(a), relLum(b));
-  const l2 = Math.min(relLum(a), relLum(b));
-  return (l1 + 0.05) / (l2 + 0.05);
-};
-
 test("every bundled theme's primary-action pair meets 4.5:1 at both gradient endpoints", () => {
   // Send (and every accent-ink-on-accent control) paints text over the
   // accent-hi → accent gradient, so both endpoints must clear 4.5:1.
@@ -49,6 +47,27 @@ test("every bundled theme's primary-action pair meets 4.5:1 at both gradient end
     const overHi = contrast(t.tokens.accentInk, t.tokens.accentHi);
     assert.ok(overAccent >= 4.5, `${t.id}: accent-ink over accent is ${overAccent.toFixed(2)} < 4.5`);
     assert.ok(overHi >= 4.5, `${t.id}: accent-ink over accent-hi is ${overHi.toFixed(2)} < 4.5`);
+  }
+});
+
+test("preset secondary text tokens meet readable contrast on app surfaces", () => {
+  for (const theme of PRESET_THEMES) {
+    const surfaces = [
+      theme.tokens.bg,
+      theme.tokens.panel,
+      theme.tokens.elevated,
+      theme.tokens.raised,
+      theme.tokens.sunken,
+      theme.tokens.inputBg,
+    ];
+    for (const token of ["muted", "faint"] as const) {
+      for (const surface of surfaces) {
+        assert.ok(
+          contrast(theme.tokens[token], surface) >= 4.5,
+          `${theme.id}.${token} must meet 4.5:1 on ${surface}`,
+        );
+      }
+    }
   }
 });
 

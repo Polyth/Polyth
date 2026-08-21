@@ -69,7 +69,12 @@ function PermissionRow({ p }: { p: PendingPermission }) {
 export default function PermissionBanner({ permissions }: { permissions: PendingPermission[] }) {
   if (permissions.length === 0) return null;
   return (
-    <div className="perm-banner permission-toast">
+    <div
+      className="perm-banner permission-toast"
+      role="alert"
+      aria-live="assertive"
+      aria-relevant="additions text"
+    >
       <div className="perm-title">Permission requested</div>
       {permissions.map((p) => (
         <PermissionRow key={p.requestId} p={p} />

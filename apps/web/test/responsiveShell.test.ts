@@ -97,7 +97,10 @@ test("header owns the drawer trigger, compact view picker, and panel trigger", a
   assert.ok(header.includes("const resolved = useResolvedCapabilities()"), "compact picker consumes the shared capability model");
   assert.ok(header.includes("VIEW_OF_CAPABILITY[c.descriptor.id]"), "compact picker maps capability descriptors to views");
   assert.ok(!header.includes("const VIEW_GROUPS"), "no duplicate hard-coded view list");
-  assert.ok(header.includes('"Auto-accept on" : "Auto-accept off"'), "auto-accept state exposed as text, not color alone");
+  assert.ok(
+    header.includes('"Turn off auto-accept" : "Turn on auto-accept"'),
+    "auto-accept control exposes the resulting action in its accessible name",
+  );
 });
 
 test("modal surfaces share the Dialog focus contract (no copied traps)", async () => {

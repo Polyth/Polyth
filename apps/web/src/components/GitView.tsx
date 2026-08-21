@@ -36,6 +36,18 @@ function fileLetter(f: GitFileEntry): { letter: string; cls: string; label: stri
   return { letter: "M", cls: f.staged ? "staged" : "unstaged", label: "Modified" };
 }
 
+function GitFileMain({ file, onOpen }: { file: GitFileEntry; onOpen: () => void }) {
+  const { letter, cls, label } = fileLetter(file);
+  return (
+    <button type="button" className="git-file-main" onClick={onOpen}>
+      <span className={`git-file-letter ${cls}`} title={label} aria-label={label}>{letter}</span>
+      <span className="git-file-path" title={file.origPath ? `${file.origPath} → ${file.path}` : file.path}>
+        {file.origPath ? <><span className="muted">{file.origPath} → </span>{file.path}</> : file.path}
+      </span>
+    </button>
+  );
+}
+
 const dirOf = (p: string) => p.split("/").slice(0, -1).join("/");
 
 /** Typed confirmation for destructive bulk actions. */
@@ -295,13 +307,10 @@ export default function GitView() {
           <div className="git-changes">
             {all.length === 0 && <div className="muted" style={{ fontSize: 12.5, padding: "4px 0" }}>Working tree clean.</div>}
             {prefs.changesView === "flat" && all.map((f) => {
-              const { letter, cls, label } = fileLetter(f);
               return (
-                <div key={`${f.path}:${f.staged}`} className={`git-file-row ${sel === f.path ? "selected" : ""}`}
-                  onClick={() => { setCommitSel(null); setSel(f.path); }}>
-                  <span className={`git-file-letter ${cls}`} title={label} aria-label={label}>{letter}</span>
-                  <span className="git-file-path" title={f.origPath ? `${f.origPath} → ${f.path}` : f.path}>{f.path}</span>
-                  <span className="git-file-actions" onClick={(event) => event.stopPropagation()}>
+                <div key={`${f.path}:${f.staged}`} className={`git-file-row ${sel === f.path ? "selected" : ""}`}>
+                  <GitFileMain file={f} onOpen={() => { setCommitSel(null); setSel(f.path); }} />
+                  <span className="git-file-actions">
                     {f.staged
                       ? <button className="small-btn" title="Unstage" disabled={busy} onClick={() => void run(() => api.gitUnstage(projectId, [f.path], sessionId ?? undefined))}>U</button>
                       : <button className="small-btn" title="Stage" disabled={busy} onClick={() => void run(() => api.gitStage(projectId, [f.path], sessionId ?? undefined))}>S</button>}
@@ -342,15 +351,10 @@ export default function GitView() {
                     </span>
                   </div>
                   {open && files.map((f) => {
-                    const { letter, cls, label } = fileLetter(f);
                     return (
-                      <div key={`${f.path}:${f.staged}`} className={`git-file-row ${sel === f.path ? "selected" : ""}`}
-                        onClick={() => { setCommitSel(null); setSel(f.path); }}>
-                        <span className={`git-file-letter ${cls}`} title={label} aria-label={label}>{letter}</span>
-                        <span className="git-file-path" title={f.origPath ? `${f.origPath} → ${f.path}` : f.path}>
-                          {f.origPath ? <><span className="muted">{f.origPath} → </span>{f.path}</> : f.path}
-                        </span>
-                        <span className="git-file-actions" onClick={(e) => e.stopPropagation()}>
+                      <div key={`${f.path}:${f.staged}`} className={`git-file-row ${sel === f.path ? "selected" : ""}`}>
+                        <GitFileMain file={f} onOpen={() => { setCommitSel(null); setSel(f.path); }} />
+                        <span className="git-file-actions">
                           {f.staged
                             ? <button className="small-btn" title="Unstage" disabled={busy} onClick={() => void run(() => api.gitUnstage(projectId, [f.path], sessionId ?? undefined))}>U</button>
                             : <button className="small-btn" title="Stage" disabled={busy} onClick={() => void run(() => api.gitStage(projectId, [f.path], sessionId ?? undefined))}>S</button>}

@@ -50,9 +50,37 @@ function targetLabel(t: ScheduleTaskDto): string {
 }
 
 function RunHistory({ taskId }: { taskId: string }) {
-  const [runs, setRuns] = useState<ScheduleRunDto[] | null>(null);
-  useEffect(() => { void api.scheduleRuns(taskId).then(setRuns); }, [taskId]);
-  if (runs === null) return <div className="muted" style={{ fontSize: 12 }}>Loading runs…</div>;
+  const [runs, setRuns] = useState<ScheduleRunDto[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
+  const [reloadKey, setReloadKey] = useState(0);
+  useEffect(() => {
+    let active = true;
+    setLoading(true);
+    setLoadError("");
+    void api.scheduleRuns(taskId)
+      .then((next) => {
+        if (active) setRuns(next);
+      })
+      .catch((cause) => {
+        if (active) {
+          setRuns([]);
+          setLoadError(cause instanceof Error ? cause.message : String(cause));
+        }
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+    return () => { active = false; };
+  }, [taskId, reloadKey]);
+  if (loading) return <div className="muted" style={{ fontSize: 12 }} role="status">Loading runs…</div>;
+  if (loadError) {
+    return (
+      <div className="muted" style={{ fontSize: 12 }} role="status">
+        Couldn’t load runs. <button className="small-btn" onClick={() => setReloadKey((key) => key + 1)}>Retry</button>
+      </div>
+    );
+  }
   if (runs.length === 0) return <div className="muted" style={{ fontSize: 12 }}>No runs recorded yet.</div>;
   return (
     <div className="sched-runs">

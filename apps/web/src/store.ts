@@ -1,6 +1,6 @@
 // Minimal useSyncExternalStore-backed store. Events are kept per session;
 // render models (incl. pendingPermissions/pendingQuestions) derive from them.
-import { useSyncExternalStore } from "react";
+import { useMemo, useSyncExternalStore } from "react";
 import type {
   AgentDescriptor,
   EditorLocation,
@@ -9,7 +9,7 @@ import type {
   SessionEvent,
   SessionProjection,
 } from "@polyth/contracts";
-import { buildModel, type RenderModel } from "./reduce.ts";
+import { createModelCache, emptyModel, type RenderModel } from "./reduce.ts";
 import { applySettingsToDom, loadSettings, saveSettings, type PolythSettings } from "./settings.ts";
 import { getRailPrefs, setRailLastOpen } from "./railPrefs.ts";
 import { loadActiveView, saveActiveView } from "./viewPrefs.ts";
@@ -156,40 +156,24 @@ export function focusComposer(): void {
 }
 
 const EMPTY_EVENTS: SessionEvent[] = [];
+const EMPTY_MODEL: RenderModel = emptyModel();
+// Shared per-session incremental cache: new events fold into the previous
+// model instead of replaying the whole log on every render (P1 perf fix).
+const activeModelCache = createModelCache();
 
-interface ReducedModelCache {
-  sessionId: string | null;
-  eventVersion: number;
-  events: readonly SessionEvent[];
-  model: RenderModel;
-}
-
-let reducedModelCache: ReducedModelCache | null = null;
-
-/** Reduce one immutable event batch once, even when many active-model
- * subscribers render it. Event arrays are append-only, so length is their
- * version; identity is retained as a safety check for replacement batches. */
+/** Reduce an immutable event batch once per session. The shared incremental
+ * cache folds append-only suffixes while safely rebuilding replacements. */
 export function reduceSessionModel(
   sessionId: string | null,
   events: readonly SessionEvent[],
 ): RenderModel {
-  const eventVersion = events.length;
-  if (
-    reducedModelCache?.sessionId === sessionId
-    && reducedModelCache.eventVersion === eventVersion
-    && reducedModelCache.events === events
-  ) {
-    return reducedModelCache.model;
-  }
-  const model = buildModel(events);
-  reducedModelCache = { sessionId, eventVersion, events, model };
-  return model;
+  return sessionId ? activeModelCache.get(sessionId, events) : EMPTY_MODEL;
 }
 
 export function useActiveModel(): RenderModel {
   const sessionId = useStore((s) => s.activeSessionId);
   const events = useStore((s) => (s.activeSessionId ? s.events[s.activeSessionId] : undefined) ?? EMPTY_EVENTS);
-  return reduceSessionModel(sessionId, events);
+  return useMemo(() => reduceSessionModel(sessionId, events), [sessionId, events]);
 }
 
 // ---- project registry actions (UX-ONBOARDING) -----------------------------
@@ -546,12 +530,63 @@ export function upsertSession(p: SessionProjection): void {
   set({ sessions });
 }
 
+/** First index whose seq >= target (list sorted by seq ascending). */
+function seqLowerBound(list: readonly SessionEvent[], seq: number): number {
+  let lo = 0;
+  let hi = list.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >>> 1;
+    if (list[mid]!.seq < seq) lo = mid + 1;
+    else hi = mid;
+  }
+  return lo;
+}
+
+/** Merge incoming events into a seq-sorted list, copy-on-write. Live events
+ *  arrive in order → O(1) append; out-of-order gap-fill binary-inserts; events
+ *  whose seq is already present are dropped (WS replay can re-deliver the
+ *  boundary event). Returns the original array when nothing new arrived. */
+function mergeEvents(list: SessionEvent[], incoming: readonly SessionEvent[]): SessionEvent[] {
+  let out: SessionEvent[] | null = null;
+  for (const ev of incoming) {
+    const cur = out ?? list;
+    if (cur.length === 0 || ev.seq > cur[cur.length - 1]!.seq) {
+      out ??= list.slice();
+      out.push(ev);
+      continue;
+    }
+    const i = seqLowerBound(cur, ev.seq);
+    if (i < cur.length && cur[i]!.seq === ev.seq) continue; // duplicate
+    out ??= list.slice();
+    out.splice(i, 0, ev);
+  }
+  return out ?? list;
+}
+
 // Dedupes by (sessionId, seq): WS gap-fill can re-deliver the boundary event.
 export function applyEvent(ev: SessionEvent): void {
-  const list = state.events[ev.sessionId];
-  if (list && list.some((e) => e.seq === ev.seq)) return;
-  const next = [...(list ?? []), ev].sort((a, b) => a.seq - b.seq);
-  set({ events: { ...state.events, [ev.sessionId]: next } });
+  applyEvents([ev]);
+}
+
+/** Batch ingestion: one store update — and one listener/render pass — per
+ *  call regardless of batch size. Session open and WS bursts land here. */
+export function applyEvents(evs: readonly SessionEvent[]): void {
+  if (evs.length === 0) return;
+  const bySession = new Map<string, SessionEvent[]>();
+  for (const ev of evs) {
+    const group = bySession.get(ev.sessionId);
+    if (group) group.push(ev);
+    else bySession.set(ev.sessionId, [ev]);
+  }
+  let next: Record<string, SessionEvent[]> | null = null;
+  for (const [sessionId, incoming] of bySession) {
+    const list = state.events[sessionId] ?? EMPTY_EVENTS;
+    const merged = mergeEvents(list, incoming);
+    if (merged === list) continue;
+    next ??= { ...state.events };
+    next[sessionId] = merged;
+  }
+  if (next) set({ events: next });
 }
 
 export function lastSeq(sessionId: string): number {

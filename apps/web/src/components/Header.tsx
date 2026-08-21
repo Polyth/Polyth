@@ -251,12 +251,12 @@ function AutoAcceptChip({ sessionId, effective }: { sessionId: string; effective
       title={effective
         ? "Auto-accept is ON: permission requests in this session are approved automatically. Click to turn off."
         : "Auto-accept permission requests in this session"}
-      aria-label={effective ? "Auto-accept on" : "Auto-accept off"}
+      aria-label={effective ? "Turn off auto-accept" : "Turn on auto-accept"}
       aria-pressed={effective}
       disabled={busy}
       onClick={toggle}
     >
-      <svg width="12" height="12" viewBox="0 0 16 16" {...STROKE}>
+      <svg width="12" height="12" viewBox="0 0 16 16" aria-hidden="true" {...STROKE}>
         <path d="M8 1.8 13.5 4v4.2c0 3.2-2.3 5.3-5.5 6-3.2-.7-5.5-2.8-5.5-6V4z" />
         {effective && <path d="M5.4 8.2 7.2 10l3.4-3.6" />}
       </svg>

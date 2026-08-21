@@ -13,7 +13,11 @@ import { fmtCost, fmtTokens } from "../format.ts";
 import { Icon } from "../icons.tsx";
 import type { SessionEvent } from "@polyth/contracts";
 import { contextGauge } from "../reduce.ts";
-import { registerSurface, type WorkspacePanePresentation } from "../surfaces.ts";
+import {
+  registerSurface,
+  type RailSurfaceComponentProps,
+  type WorkspacePanePresentation,
+} from "../surfaces.ts";
 import EditorView from "./EditorView.tsx";
 import GitView from "./GitView.tsx";
 import TerminalView from "./TerminalView.tsx";
@@ -110,7 +114,7 @@ function UsagePanel() {
   );
 }
 
-function EventsView() {
+function ActiveEventsView() {
   const events = useStore((s) => (s.activeSessionId ? s.events[s.activeSessionId] : undefined) ?? NO_EVENTS);
   if (events.length === 0) return <div className="empty">No events yet.</div>;
   return (
@@ -137,6 +141,10 @@ const pane = (over: Partial<WorkspacePanePresentation>): WorkspacePanePresentati
   kind: "workspace", defaultRatio: 0.6, minWidth: 380, preferredMaxWidth: 760,
   keepAlive: true, escape: "close", ...over,
 });
+
+function EventsView(props?: RailSurfaceComponentProps) {
+  return props?.active !== false ? <ActiveEventsView /> : null;
+}
 
 registerSurface({
   id: "files", title: "Project files", capabilityId: "files", order: 1, icon: Icon.files,

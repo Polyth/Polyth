@@ -27,6 +27,7 @@ import {
 import { createDictationService, createWhisperSttAdapter } from "@polyth/dictation";
 import { createProjectService } from "./projects.ts";
 import { createSessionService, type Broadcaster, type RuntimePool } from "./sessions.ts";
+import { aggregateRuntimes } from "./runtimeAggregate.ts";
 import { createHttpServer, type RouteHandler } from "./http.ts";
 import { goalRoutes } from "./routes/goals.ts";
 import { orgRoutes } from "./routes/org.ts";
@@ -725,33 +726,8 @@ export async function boot(opts: BootOptions = {}) {
     profileRoutes({
       store,
       // Aggregated across live runtimes, same as the /api/models endpoint.
-      listModels: async () => {
-        const out: Awaited<ReturnType<AgentRuntime["models"]>> = [];
-        const seen = new Set<string>();
-        for (const p of await projects.list()) {
-          try {
-            const rt = await runtimes.forProject(p.id);
-            for (const m of await rt.models()) {
-              const key = `${m.providerID}/${m.modelID}`;
-              if (!seen.has(key)) { seen.add(key); out.push(m); }
-            }
-          } catch { /* runtime unavailable */ }
-        }
-        return out;
-      },
-      listAgents: async () => {
-        const out: Awaited<ReturnType<AgentRuntime["agents"]>> = [];
-        const seen = new Set<string>();
-        for (const p of await projects.list()) {
-          try {
-            const rt = await runtimes.forProject(p.id);
-            for (const a of await rt.agents()) {
-              if (!seen.has(a.name)) { seen.add(a.name); out.push(a); }
-            }
-          } catch { /* runtime unavailable */ }
-        }
-        return out;
-      },
+      listModels: () => aggregateRuntimes({ projects, runtimes }, (rt) => rt.models(), (m) => `${m.providerID}/${m.modelID}`),
+      listAgents: () => aggregateRuntimes({ projects, runtimes }, (rt) => rt.agents(), (a) => a.name),
     }),
     browseRoutes(),
     settingsRoutes({
