@@ -4,7 +4,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { SessionFolderDto, SessionProjection, WorkspaceLabel } from "@polyth/contracts";
 import { api } from "../../api.ts";
-import { setUiError, useStore } from "../../store.ts";
+import { getState, setSidebarOpen, setUiError, useStore } from "../../store.ts";
 import { openSession, archiveSession, restoreSession, forkSession, refreshSessions } from "../../init.ts";
 import { ago, deriveSessionTitle, fullSessionTitle } from "../../format.ts";
 import { friendlyError } from "../../settings.ts";
@@ -12,6 +12,7 @@ import { getUiSettings } from "../../uiPrefs.ts";
 import { firstUserText } from "../../utils.ts";
 import { announce } from "../a11y/live.tsx";
 import { worktreeLabel } from "../../worktreeSessions.ts";
+import SlotHost from "../slots/SlotHost.ts";
 import {
   groupSessions,
   listGroupings,
@@ -177,6 +178,10 @@ function SessionRow({
               {s.pinned && <span className="session-pin" title="Pinned" aria-label="Pinned">◆</span>}
               <LabelDots ids={s.labelIds} labels={labels} />
               <AttentionBadges s={s} />
+              <SlotHost
+                slot="session.list.badges"
+                context={{ sessionId: s.id, questions: s.attention?.questions ?? 0, permissions: s.attention?.permissions ?? 0 }}
+              />
             </span>
             <span className="session-sub">
               {s.worktreeState === "missing" ? "worktree missing" : s.status === "working" ? "Agent working" : s.status}
@@ -224,6 +229,7 @@ function SessionRow({
               <span className="label-dot" style={{ background: l.color }} /> {l.name} {(s.labelIds ?? []).includes(l.id) ? "✓" : ""}
             </button>
           ))}
+          <SlotHost slot="sidebar.session.actions" context={{ sessionId: s.id, status: s.status }} />
         </div>
       )}
     </div>
@@ -376,7 +382,11 @@ export default function SessionList({ projectId }: { projectId: string }) {
       selected={selected.has(s.id)}
       onToggleSelect={toggleSelect}
       onChanged={onChanged}
-      onOpen={(id) => void openSession(id)}
+      // UX-A390: the compact drawer closes only after activation resolves;
+      // a failure leaves it open with the existing error path.
+      onOpen={(id) => void openSession(id).then(() => {
+        if (getState().sidebarOpen) setSidebarOpen(false);
+      })}
       onTogglePin={(session) => void togglePin(session)}
       pinnedSection={pinnedSection}
       onPinDragStart={setDraggedPin}

@@ -6,7 +6,6 @@ import { useEffect, useState } from "react";
 import { speechSupport } from "@polyth/dictation";
 import { api, type VoiceSettingsDto } from "../../api.ts";
 import { setVoicePrefs, speak, stopSpeaking, useVoicePrefs } from "../../voice.tsx";
-import { pluginOn, togglePlugin } from "../../prefs.ts";
 import { EmptyState, PageHead, Row, Seg, Toggle } from "./parts.tsx";
 
 const LANGS = ["en-US", "en-GB", "de-DE", "fr-FR", "es-ES", "it-IT", "pt-BR", "ja-JP", "ko-KR", "zh-CN"];
@@ -78,7 +77,6 @@ function ServerEndpointForm({ server, onSaved }: { server: VoiceSettingsDto; onS
 export default function VoicePage() {
   const prefs = useVoicePrefs();
   const support = speechSupport(typeof window !== "undefined" ? window : undefined);
-  const pluginEnabled = pluginOn("dictation");
   const [voices, setVoices] = useState<SpeechSynthesisVoice[]>([]);
   const [streaming, setStreaming] = useState<{ available: boolean; engine?: string; reason?: string } | null>(null);
   const [server, setServer] = useState<VoiceSettingsDto | null>(null);
@@ -114,10 +112,7 @@ export default function VoicePage() {
       {!support.stt && !support.tts && (
         <EmptyState title="Speech is not supported in this browser" body="Dictation needs the Web Speech API (Chrome, Edge, Safari) or a configured server engine." />
       )}
-      <Row label="Voice plugin" hint="Shows the mic button in the composer and voice commands in the palette.">
-        <Toggle on={pluginEnabled} onChange={() => togglePlugin("dictation")} label="Voice plugin" />
-      </Row>
-      <Row label="Dictation" hint={support.stt || streaming?.available ? "Mic button inserts your speech into the composer." : "Not supported in this browser."} itemId="voice.dictation">
+      <Row label="Dictation" hint={support.stt || streaming?.available ? "Shows the mic button in the composer; your speech is inserted as text." : "Not supported in this browser."} itemId="voice.dictation">
         <Toggle on={prefs.dictation} onChange={(v) => setVoicePrefs({ dictation: v })} label="Dictation" />
       </Row>
       <Row

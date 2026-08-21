@@ -41,6 +41,9 @@ export interface AssistantMsg {
   undone?: boolean;
   rewindMarkerSeq?: number;
   time: number;
+  /** Final `assistant/message.time` — the semantic completion time, distinct
+   *  from `time` (the first streamed chunk) per UX-MSG-ACTIONS. */
+  completedAt?: number;
 }
 
 export interface ToolMsg {
@@ -150,6 +153,31 @@ export interface TurnState {
   agent?: string;
   reason?: string;
   error?: string;
+  /** Event-derived wall-clock bounds of THIS turn (UX-MSG-ACTIONS): the footer
+   *  duration is `stoppedAt - startedAt`, absent while working or when a
+   *  copied/unmatched stop carries no start. */
+  startedAt?: number;
+  stoppedAt?: number;
+  /** This turn's own usage, separate from lifetime totals — a branch child
+   *  must not combine inherited totals with a zero-duration pseudo-turn. */
+  usage?: { tokens: TokenUsage; cost: number };
+}
+
+/** Editable seed carried by an active rewind or a per-message fork marker. */
+export interface SeedDraft {
+  text: string;
+  attachments?: AttachmentRef[];
+}
+
+/** Lineage/draft state owned by a `session/forked` marker (per-message fork).
+ *  `seedConsumed` flips when a child-origin user/message lands after the
+ *  marker, so reload seeds the composer at most once. */
+export interface ForkState {
+  fromSessionId: string;
+  markerSeq: number;
+  sourceAtSeq?: number;
+  draft?: SeedDraft;
+  seedConsumed: boolean;
 }
 
 export interface TaskListState {
@@ -180,7 +208,12 @@ export interface RenderModel {
   subagents: SubagentState | null;
   /** Edit-tool paths from the current/last turn; cleared by the next prompt. */
   changedFiles: string[];
-  rewind: { markerSeq: number; atSeq: number; restoredText?: string } | null;
+  /** Active rewind marker. `draft` is replay-derived from the target
+   *  `user/message` (raw ?? text + attachments); `restoredText` only appears
+   *  when an old marker carried it (compat). */
+  rewind: { markerSeq: number; atSeq: number; restoredText?: string; draft?: SeedDraft } | null;
+  /** Lineage of a `session/forked` child (per-message forks carry a draft). */
+  fork: ForkState | null;
   version: number; // bumps on every applied event (cheap change signal)
 }
 
@@ -200,6 +233,7 @@ export function emptyModel(): RenderModel {
     subagents: null,
     changedFiles: [],
     rewind: null,
+    fork: null,
     version: 0,
   };
 }
@@ -300,6 +334,11 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
       }
       model.messages.push(msg);
       model.changedFiles = [];
+      // A child-origin prompt after the fork marker proves the seed was sent
+      // (or replaced) — reload must not re-seed the composer.
+      if (model.fork && !model.fork.seedConsumed && ev.seq > model.fork.markerSeq) {
+        model.fork.seedConsumed = true;
+      }
       break;
     }
     case "assistant/chunk":
@@ -323,6 +362,7 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
         pushAssistant(model, m);
       }
       m.finalized = true;
+      m.completedAt = ev.time; // semantic completion time, not first chunk
       const text = str(d, "text");
       if (text !== undefined) m.text = text;
       const reasoning = str(d, "reasoning");
@@ -391,17 +431,33 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
     case "session/rewound": {
       const atSeq = num(d, "atSeq");
       if (atSeq === undefined || !Number.isSafeInteger(atSeq) || atSeq <= 0) break;
+      // Replay-derived composer seed: the target user/message already owns the
+      // raw text and attachments — new markers never duplicate them (spec).
+      const target = model.messages.find(
+        (message): message is UserMsg => message.kind === "user" && message.eventSeq === atSeq,
+      );
       for (const message of model.messages) {
         if (!message.undone && message.eventSeq >= atSeq) {
           message.undone = true;
           message.rewindMarkerSeq = ev.seq;
         }
       }
-      const restoredText = str(d, "restoredText");
+      const restoredText = str(d, "restoredText"); // legacy markers only
+      const draft: SeedDraft | undefined = target
+        ? {
+            text: target.raw ?? target.text,
+            ...(target.attachments && target.attachments.length > 0
+              ? { attachments: target.attachments }
+              : {}),
+          }
+        : restoredText !== undefined
+          ? { text: restoredText }
+          : undefined;
       model.rewind = {
         markerSeq: ev.seq,
         atSeq,
         ...(restoredText !== undefined ? { restoredText } : {}),
+        ...(draft ? { draft } : {}),
       };
       break;
     }
@@ -417,6 +473,30 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
         }
       }
       model.rewind = null;
+      break;
+    }
+    case "session/forked": {
+      // Ignorable lineage marker on the CHILD log (per-message forks carry the
+      // excluded prompt as an editable, never model-visible, draft).
+      const fromSessionId = str(d, "fromSessionId");
+      if (fromSessionId === undefined) break;
+      const rawDraft = obj(d, "draft");
+      let draft: SeedDraft | undefined;
+      if (rawDraft && typeof rawDraft.text === "string") {
+        const atts = (rawDraft as { attachments?: unknown }).attachments;
+        draft = {
+          text: rawDraft.text,
+          ...(Array.isArray(atts) && atts.length > 0 ? { attachments: atts as AttachmentRef[] } : {}),
+        };
+      }
+      const sourceAtSeq = num(d, "sourceAtSeq");
+      model.fork = {
+        fromSessionId,
+        markerSeq: ev.seq,
+        ...(sourceAtSeq !== undefined ? { sourceAtSeq } : {}),
+        ...(draft ? { draft } : {}),
+        seedConsumed: false,
+      };
       break;
     }
     case "task/snapshot": {
@@ -528,6 +608,7 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
         status: "working",
         model: turnModel,
         agent: str(d, "agent"),
+        startedAt: ev.time,
       };
       model.contextUsage = { inputTokens: 0, ...(turnModel ? { model: turnModel } : {}) };
       break;
@@ -540,15 +621,18 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
       if (t) {
         t.status = status;
         t.reason = reason;
+        t.stoppedAt = ev.time;
         const error = str(d, "error");
         if (error !== undefined) t.error = error;
       } else {
-        model.turn = { turnId: str(d, "turnId") ?? "", status, reason, error: str(d, "error") };
+        // Unmatched stop (copied/partial log): no startedAt, so no duration.
+        model.turn = { turnId: str(d, "turnId") ?? "", status, reason, error: str(d, "error"), stoppedAt: ev.time };
       }
       break;
     }
     case "usage/recorded": {
       const t = obj(d, "tokens") as TokenUsage | undefined;
+      const cost = num(d, "cost");
       if (t) {
         model.totals.input += t.input ?? 0;
         model.totals.output += t.output ?? 0;
@@ -561,8 +645,23 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
           ...(usageModel ? { model: usageModel } : model.contextUsage?.model ? { model: model.contextUsage.model } : {}),
         };
       }
-      const cost = num(d, "cost");
       if (cost !== undefined) model.totals.cost += cost;
+      // Per-turn usage, kept apart from lifetime totals: a forked child's
+      // footer must reflect its own terminal turn, never inherited sums.
+      if (model.turn && (t || cost !== undefined)) {
+        const u = model.turn.usage ?? { tokens: { input: 0, output: 0 }, cost: 0 };
+        if (t) {
+          u.tokens = {
+            input: (u.tokens.input ?? 0) + (t.input ?? 0),
+            output: (u.tokens.output ?? 0) + (t.output ?? 0),
+            reasoning: (u.tokens.reasoning ?? 0) + (t.reasoning ?? 0),
+            cacheRead: (u.tokens.cacheRead ?? 0) + (t.cacheRead ?? 0),
+            cacheWrite: (u.tokens.cacheWrite ?? 0) + (t.cacheWrite ?? 0),
+          };
+        }
+        if (cost !== undefined) u.cost += cost;
+        model.turn.usage = u;
+      }
       break;
     }
     case "goal/attached": {

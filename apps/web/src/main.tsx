@@ -4,8 +4,12 @@ import { api } from "./api.ts";
 import { init } from "./init.ts";
 import { exposeSlots } from "./slots.ts";
 import { exposeSurfaces } from "./surfaces.ts";
+import { exposeCapabilities } from "./capabilities.ts";
+import { installShell } from "./shell.ts";
+import { exposeWorkspaceSurfaces } from "./workspace/surfaceRegistry.ts";
 import { applySettingsToDom } from "./settings.ts";
 import { getState } from "./store.ts";
+import { installVoice } from "./voice.tsx";
 import App from "./App.tsx";
 import LockScreen from "./components/LockScreen.tsx";
 import "./styles.css";
@@ -13,6 +17,14 @@ import "./styles.css";
 applySettingsToDom(getState().settings);
 exposeSlots();
 exposeSurfaces();
+exposeCapabilities();
+exposeWorkspaceSurfaces();
+// Palette commands + keyboard shortcuts: one install, synced with the
+// capability registry from then on (UX-PERSONAS: search sees every tool).
+installShell();
+// Voice registers its composer.leading slot before the first ready App
+// render; installVoice is idempotent so repeated boots stay single-slot.
+installVoice();
 
 // F16: init() loads REST data and opens /ws — it must not run until the
 // server says this device is authorized (or that no password is set).

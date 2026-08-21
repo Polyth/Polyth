@@ -5,9 +5,8 @@ import { commandHint, filterPalette, listCommands, type PaletteCommand } from ".
 import { api, type FileSearchHitDto, type WorkspaceSearchItemDto } from "../api.ts";
 import { activateProject, openEditorFile, setOverlay, setUiError, useStore } from "../store.ts";
 import { openSession } from "../init.ts";
-import { pluginOn } from "../prefs.ts";
 import { announce } from "./a11y/live.tsx";
-import Dialog from "./a11y/Dialog.tsx";
+import { useModalSurface } from "./a11y/Dialog.tsx";
 
 type Entry =
   | { kind: "cmd"; id: string; cmd: PaletteCommand }
@@ -25,8 +24,11 @@ export default function CommandPalette() {
   const [i, setI] = useState(0);
   const [files, setFiles] = useState<FileSearchHitDto[]>([]);
   const [workspaces, setWorkspaces] = useState<WorkspaceSearchItemDto[]>([]);
+  const panelRef = useRef<HTMLDivElement>(null);
   const seq = useRef(0);
   const projectId = useStore((s) => s.activeProjectId);
+  // File search resolves against the active session's worktree (P0).
+  const sessionId = useStore((s) => s.activeSessionId);
   const mode = useStore((s) => s.paletteMode);
   const filesMode = mode === "files";
   const { text, archived } = useMemo(() => parseQuery(q), [q]);
@@ -35,12 +37,18 @@ export default function CommandPalette() {
     () => (filesMode ? [] : filterPalette(listCommands(), text)),
     [filesMode, text],
   );
+  useModalSurface({
+    open: true,
+    onClose: () => setOverlay(null),
+    containerRef: panelRef,
+    initialFocus: ".palette-input",
+  });
   useEffect(() => { setI(0); }, [q]);
 
   // Debounced remote searches; stale responses are dropped by sequence.
   useEffect(() => {
     const mySeq = ++seq.current;
-    const wantFiles = pluginOn("files") && !!projectId && text.length >= (filesMode ? 1 : 2);
+    const wantFiles = !!projectId && text.length >= (filesMode ? 1 : 2);
     // `is:archived` alone lists recent archived sessions (server-bounded).
     const wantWorkspaces = !filesMode && (archived || text.length >= 2);
     if (!wantFiles) setFiles([]);
@@ -48,7 +56,7 @@ export default function CommandPalette() {
     if (!wantFiles && !wantWorkspaces) return;
     const h = setTimeout(() => {
       if (wantFiles) {
-        void api.filesSearchScored(projectId!, text, filesMode ? 20 : 8).then((hits) => {
+        void api.filesSearchScored(projectId!, text, filesMode ? 20 : 8, false, sessionId ?? undefined).then((hits) => {
           if (mySeq === seq.current) setFiles(hits);
         });
       }
@@ -59,7 +67,7 @@ export default function CommandPalette() {
       }
     }, 150);
     return () => clearTimeout(h);
-  }, [text, archived, filesMode, projectId]);
+  }, [text, archived, filesMode, projectId, sessionId]);
 
   const entries = useMemo<Entry[]>(
     () => [
@@ -110,14 +118,17 @@ export default function CommandPalette() {
   const baseOf = (p: string): string => p.slice(p.lastIndexOf("/") + 1);
 
   return (
-    <Dialog
-      title="Command palette"
-      onClose={() => setOverlay(null)}
-      className="palette"
-      backdropClassName="palette-overlay"
-      initialFocus=".palette-input"
-      ariaDescribedBy="palette-close-hint"
-    >
+    <div className="scrim palette-overlay" onMouseDown={(e) => { if (e.target === e.currentTarget) setOverlay(null); }}>
+      <div
+        ref={panelRef}
+        className="palette"
+        onMouseDown={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+        aria-label="Command palette"
+        aria-describedby="palette-close-hint"
+        tabIndex={-1}
+      >
       <input
         className="palette-input"
         value={q}
@@ -185,6 +196,7 @@ export default function CommandPalette() {
         ))}
       </div>
       <div className="palette-footer" id="palette-close-hint"><kbd>Esc</kbd> close</div>
-    </Dialog>
+      </div>
+    </div>
   );
 }

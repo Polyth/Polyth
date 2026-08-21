@@ -40,17 +40,17 @@ test("registry orders by order then id, replaces by id, unregisters", () => {
   assert.deepEqual(listSurfaces(), []);
 });
 
-test("visibleSurfaces gates on plugin toggles then content-driven visibility", () => {
+test("visibleSurfaces gates on content-driven visibility only — no plugin allow-list (UX-PERSONAS)", () => {
   const list: RailSurface[] = [
     surface("always", 1),
-    surface("gated", 2, { plugin: "git" }),
+    surface("capability", 2, { capabilityId: "git" }),
     surface("content", 3, { visible: (c) => c.totalTokens > 0 }),
   ];
-  assert.deepEqual(visibleSurfaces(list, [], ctx()).map((s) => s.id), ["always"]);
-  assert.deepEqual(visibleSurfaces(list, ["git"], ctx()).map((s) => s.id), ["always", "gated"]);
+  // A capability id is placement metadata, never an availability gate.
+  assert.deepEqual(visibleSurfaces(list, ctx()).map((s) => s.id), ["always", "capability"]);
   assert.deepEqual(
-    visibleSurfaces(list, ["git"], ctx({ totalTokens: 5 })).map((s) => s.id),
-    ["always", "gated", "content"],
+    visibleSurfaces(list, ctx({ totalTokens: 5 })).map((s) => s.id),
+    ["always", "capability", "content"],
   );
 });
 
@@ -58,7 +58,7 @@ test("workspace.right.tabs slot items become surfaces without registry edits", (
   const off = registerSlot("workspace.right.tabs", "my-plugin", () => null, 2, { title: "My plugin" });
   const off2 = registerSlot("workspace.right.tabs", "bare", () => null, 1);
   try {
-    const bridged = slotSurfaces();
+    const bridged = slotSurfaces(ctx());
     assert.deepEqual(bridged.map((s) => s.id), ["slot:bare", "slot:my-plugin"]);
     assert.equal(bridged[1]!.title, "My plugin");
     assert.equal(bridged[0]!.title, "bare"); // falls back to the slot id
@@ -67,7 +67,27 @@ test("workspace.right.tabs slot items become surfaces without registry edits", (
     off();
     off2();
   }
-  assert.equal(slotSurfaces().length, 0);
+  assert.equal(slotSurfaces(ctx()).length, 0);
+});
+
+// EXT-SEAMS-V2 regression: the bridge must hand every bridged renderer the
+// host's already-derived RailSurfaceContext — not {} — so contributed panels
+// consume shared counts instead of creating independent fetchers.
+test("slotSurfaces threads the shared RailSurfaceContext to bridged renderers", () => {
+  let seen: Record<string, unknown> | null = null;
+  const off = registerSlot("workspace.right.tabs", "ctx-probe", (props) => { seen = props; return null; });
+  try {
+    const shared = ctx({ changeCount: 3, eventCount: 41, totalTokens: 1234, hasSession: true });
+    slotSurfaces(shared)[0]!.component();
+    assert.deepEqual(seen, { changeCount: 3, eventCount: 41, totalTokens: 1234, hasSession: true });
+
+    // The context is re-derived per render: a later invocation with fresh
+    // counts must reach the renderer, not a stale captured snapshot.
+    slotSurfaces(ctx({ changeCount: 0, eventCount: 42, totalTokens: 1300, hasSession: true }))[0]!.component();
+    assert.deepEqual(seen, { changeCount: 0, eventCount: 42, totalTokens: 1300, hasSession: true });
+  } finally {
+    off();
+  }
 });
 
 test("parseRailPrefs round-trips, clamps widths, survives garbage", () => {

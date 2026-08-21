@@ -79,6 +79,12 @@ export function clearAttachments(sessionId: string | null | undefined): void {
   set(keyOf(sessionId), []);
 }
 
+/** Replace a session's pending pills wholesale (marker-owned composer seeds:
+ *  rewind/fork drafts restore the excluded prompt's exact attachments). */
+export function seedAttachments(sessionId: string | null | undefined, refs: AttachmentRef[]): void {
+  set(keyOf(sessionId), refs);
+}
+
 /** Read-and-clear for send: the returned refs go on the wire, the pills go away. */
 export function takeAttachments(sessionId: string | null | undefined): AttachmentRef[] {
   const key = keyOf(sessionId);
@@ -112,9 +118,12 @@ export async function attachProjectFile(
   path: string,
   range?: [number, number],
 ): Promise<AttachResult> {
+  // Resolve against the session's worktree so the pill points at the same
+  // bytes the agent sees (UX-FIXTURE-VISUAL P0).
+  const sid = sessionId ?? undefined;
   let st: { kind: "file" | "dir"; size: number; mime?: string };
   try {
-    st = await api.filesStat(projectId, path);
+    st = await api.filesStat(projectId, path, sid);
   } catch {
     return { ok: false, reason: `File not found: ${path}` };
   }
@@ -127,7 +136,7 @@ export async function attachProjectFile(
     size: st.size,
     kind: range ? "range" : mime.startsWith("image/") ? "image" : "file",
     path,
-    url: api.filesRawUrl(projectId, path),
+    url: api.filesRawUrl(projectId, path, sid),
     ...(range ? { range } : {}),
   };
   if (!addAttachment(sessionId, ref)) {
@@ -145,7 +154,7 @@ export async function attachUpload(
   const safeName = (file.name || "pasted").replace(/[^\w.-]+/g, "_").slice(0, 80) || "pasted";
   const rel = `_inbox/${Date.now().toString(36)}-${safeName}`;
   try {
-    await api.filesUpload(projectId, rel, new Uint8Array(await file.arrayBuffer()));
+    await api.filesUpload(projectId, rel, new Uint8Array(await file.arrayBuffer()), sessionId ?? undefined);
   } catch (err) {
     return { ok: false, reason: err instanceof Error ? err.message : String(err) };
   }
@@ -194,16 +203,74 @@ export function githubUrlRef(parts: GithubUrlParts): AttachmentRef {
   };
 }
 
+/** UX-COMPOSER-DISC: result-bearing link attach shared by the Add-menu dialog
+ *  and the paste path. Distinguishes every failure — invalid URL, no detected
+ *  repository, repository mismatch, attachment limit, request failure. Only a
+ *  matching URL creates the link-only pill; nothing is ever fetched from the
+ *  linked issue or pull request. */
+export type GithubAttachResult =
+  | { ok: true; ref: AttachmentRef }
+  | {
+      ok: false;
+      code: "invalid-url" | "no-repo" | "repo-mismatch" | "limit" | "request-failed";
+      reason: string;
+    };
+
+/** Pure classification of a link attempt; exported for tests. `repo` is the
+ *  probe outcome and `repoKnown` distinguishes "probe failed" from "probe
+ *  succeeded but found no GitHub repository". */
+export function classifyGithubAttach(
+  parts: GithubUrlParts | null,
+  probe: { ok: true; repo: { owner: string; name: string } | null } | { ok: false; reason: string },
+): { code: "ok" } | { code: "invalid-url" | "no-repo" | "repo-mismatch" | "request-failed"; reason: string } {
+  if (!parts) {
+    return { code: "invalid-url", reason: "Enter a GitHub issue or pull request URL." };
+  }
+  if (!probe.ok) {
+    return { code: "request-failed", reason: `Couldn’t check the project repository: ${probe.reason}` };
+  }
+  if (!probe.repo) {
+    return { code: "no-repo", reason: "The active project has no detected GitHub repository." };
+  }
+  if (!githubUrlMatchesRepo(parts, probe.repo)) {
+    return {
+      code: "repo-mismatch",
+      reason: `That link points at ${parts.owner}/${parts.repo}, not this project’s repository (${probe.repo.owner}/${probe.repo.name}).`,
+    };
+  }
+  return { code: "ok" };
+}
+
+export async function attachGithubLink(
+  projectId: string,
+  sessionId: string | null | undefined,
+  text: string,
+): Promise<GithubAttachResult> {
+  const parts = parseGithubUrl(text);
+  let probe: { ok: true; repo: { owner: string; name: string } | null } | { ok: false; reason: string };
+  if (!parts) {
+    probe = { ok: true, repo: null }; // unused: invalid URL classifies first
+  } else {
+    const res = await api.githubRepo(projectId);
+    probe = res.ok ? { ok: true, repo: res.data } : { ok: false, reason: res.reason };
+  }
+  const verdict = classifyGithubAttach(parts, probe);
+  if (verdict.code !== "ok") return { ok: false, code: verdict.code, reason: verdict.reason };
+  const ref = githubUrlRef(parts!);
+  if (!addAttachment(sessionId, ref)) {
+    return { ok: false, code: "limit", reason: `At most ${MAX_PENDING_ATTACHMENTS} attachments per message` };
+  }
+  return { ok: true, ref };
+}
+
 /** Paste handler: a lone GitHub PR/issue URL becomes a pill when the repo
- *  matches `/api/github/repo`. Returns true when consumed as a pill. */
+ *  matches `/api/github/repo`. Returns true when consumed as a pill; any
+ *  non-match falls back to plain text at the caller. */
 export async function tryAttachGithubUrl(
   projectId: string,
   sessionId: string | null | undefined,
   text: string,
 ): Promise<boolean> {
-  const parts = parseGithubUrl(text);
-  if (!parts) return false;
-  const repo = await api.githubRepo(projectId);
-  if (!repo.ok || !githubUrlMatchesRepo(parts, repo.data)) return false;
-  return addAttachment(sessionId, githubUrlRef(parts));
+  const r = await attachGithubLink(projectId, sessionId, text);
+  return r.ok;
 }

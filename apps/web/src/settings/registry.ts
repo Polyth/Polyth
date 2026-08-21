@@ -61,7 +61,8 @@ export function searchSettingsItems(
 // ---- built-in item descriptors ---------------------------------------------------
 
 const BUILTIN_ITEMS: SettingsSearchItem[] = [
-  { id: "general.persona", pageId: "general", label: "Workspace persona", keywords: ["preset", "role"], focusTarget: "general.persona" },
+  // "persona" and "role" remain only as migration search keywords.
+  { id: "general.workspacePreset", pageId: "general", label: "Workspace preset", description: "Starting arrangement for starter actions, workspace order, and initial detail", keywords: ["preset", "starting setup", "workspace", "persona", "role"], focusTarget: "general.workspacePreset" },
   { id: "appearance.density", pageId: "appearance", label: "Density", keywords: ["compact", "comfortable", "spacing"], focusTarget: "appearance.density" },
   { id: "appearance.fontSize", pageId: "appearance", label: "Font size", keywords: ["text", "scale"], focusTarget: "appearance.fontSize" },
   { id: "appearance.editorFontSize", pageId: "appearance", label: "Editor font size", description: "Composer, file editor, diffs, terminal, and code blocks", keywords: ["monospace", "code", "px"], focusTarget: "appearance.editorFontSize" },
@@ -76,7 +77,7 @@ const BUILTIN_ITEMS: SettingsSearchItem[] = [
   { id: "behavior.instructions", pageId: "behavior", label: "Global instructions", description: "Behavior text applied to every agent (global AGENTS.md)", keywords: ["agents.md", "system prompt", "rules"], focusTarget: "behavior.instructions" },
   { id: "mcp.servers", pageId: "mcp", label: "MCP servers", description: "Model Context Protocol server configuration", keywords: ["mcp", "tools", "transport", "stdio"], focusTarget: "mcp.servers" },
   { id: "plugins.managed", pageId: "plugins", label: "Managed plugins", description: "Install, enable, and inspect third-party plugins", keywords: ["install", "extension", "trust"], focusTarget: "plugins.managed" },
-  { id: "plugins.builtin", pageId: "plugins", label: "Built-in panels", keywords: ["widgets", "toggle"], focusTarget: "plugins.builtin" },
+  { id: "plugins.builtin", pageId: "plugins", label: "Capability placement", description: "Where each built-in capability appears — primary, More tools, or Technical options", keywords: ["widgets", "toggle", "plugins", "built-in panels", "placement"], focusTarget: "plugins.builtin" },
   { id: "about.info", pageId: "about", label: "Application URL", description: "Server address, data directory, and capabilities", keywords: ["about", "version", "health", "url"], focusTarget: "about.info" },
   { id: "voice.dictation", pageId: "voice", label: "Dictation", keywords: ["microphone", "speech"], focusTarget: "voice.dictation" },
   { id: "models.favorites", pageId: "models", label: "Model favorites", keywords: ["pin", "provider"], focusTarget: "models.favorites" },

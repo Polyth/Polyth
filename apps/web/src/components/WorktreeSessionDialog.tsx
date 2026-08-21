@@ -12,7 +12,9 @@ export default function WorktreeSessionDialog() {
   const request = useStore((state) => state.worktreeSessionRequest);
   const template = useStore((state) => state.settings.branchTemplate);
   const project = useStore((state) =>
-    state.projects.find((candidate) => candidate.id === state.worktreeSessionRequest?.projectId) ?? null
+    state.projectRegistry.projects.find(
+      (candidate) => candidate.id === state.worktreeSessionRequest?.projectId,
+    ) ?? null
   );
   const [worktrees, setWorktrees] = useState<Worktree[]>([]);
   const [branches, setBranches] = useState<GitBranches>({ current: "", branches: [] });

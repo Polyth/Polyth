@@ -15,10 +15,10 @@ import {
 } from "@polyth/dictation";
 import { registerSlot } from "./slots.ts";
 import { requestComposerInsert } from "./composerInsert.ts";
-import { pluginOn, subscribePrefs } from "./prefs.ts";
-import { getState, subscribeStore } from "./store.ts";
+import { getState, openSettingsPage, subscribeStore } from "./store.ts";
 import { api } from "./api.ts";
 import { startStreamingDictation, type StreamingDictation } from "./dictationClient.ts";
+import { announce } from "./components/a11y/live.tsx";
 import { Icon } from "./icons.tsx";
 
 // ---- voice prefs store ------------------------------------------------------
@@ -135,10 +135,23 @@ export function readLastReply(): void {
 }
 
 // ---- mic button (composer.leading) -------------------------------------------
+// UX-COMPOSER-DISC: the slot never disappears while the control can explain
+// itself. Availability, lifecycle, and failure are visible named states —
+// never a claim inferred from a settings toggle alone. Transcripts stay
+// drafts (composer insert); nothing here sends or appends a session event.
+
+type MicPhase = "idle" | "starting" | "listening" | "transcribing";
+
+const boundedReason = (raw: unknown): string => {
+  const s = raw instanceof Error ? raw.message : String(raw ?? "microphone error");
+  return s.length > 120 ? `${s.slice(0, 117)}…` : s;
+};
 
 function MicButton() {
   const prefs = useVoicePrefs();
-  const [listening, setListening] = useState(false);
+  const [phase, setPhase] = useState<MicPhase>("idle");
+  const [error, setError] = useState<string | null>(null);
+  const [capability, setCapability] = useState<{ available: boolean; engine?: string; reason?: string } | null>(null);
   const recRef = useRef<SpeechRecognitionLike | null>(null);
   const streamRef = useRef<StreamingDictation | null>(null);
   const support = speechSupport(typeof window !== "undefined" ? window : undefined);
@@ -149,40 +162,74 @@ function MicButton() {
     streamRef.current?.cancel();
   }, []);
 
-  if (!pluginOn("dictation") || !prefs.dictation) return null;
+  // Server capability is a live probe, not an assumption from preferences.
+  // Presets affect placement only; they never gate voice availability.
+  useEffect(() => {
+    if (!prefs.dictation || !serverStt) {
+      setCapability(null);
+      return;
+    }
+    let cancelled = false;
+    void api.dictationCapability().then((c) => { if (!cancelled) setCapability(c); });
+    return () => { cancelled = true; };
+  }, [prefs.dictation, serverStt]);
+
+  // The four truthful availability states (plus checking) for the idle control.
+  const availability: { available: boolean; reason?: string; settings?: boolean } =
+    !prefs.dictation ? { available: false, reason: "Dictation is off", settings: true }
+    : serverStt && capability === null ? { available: false, reason: "Checking microphone…" }
+    : serverStt && capability && !capability.available && !support.stt
+      ? { available: false, reason: capability.reason ?? "Server transcription unavailable", settings: true }
+    : !serverStt && !support.stt
+      ? { available: false, reason: "Dictation is not supported in this browser", settings: true }
+    : { available: true };
+
+  const status = error !== null ? `Dictation failed: ${error}`
+    : phase === "starting" ? "Starting microphone…"
+    : phase === "listening" ? "Listening…"
+    : phase === "transcribing" ? "Transcribing…"
+    : availability.available ? null
+    : availability.reason ?? null;
+
+  // Announce each state transition exactly once (never per render).
+  const lastAnnounced = useRef<string | null>(null);
+  useEffect(() => {
+    if (status && status !== lastAnnounced.current) announce(status);
+    lastAnnounced.current = status;
+  }, [status]);
+
+  const fail = (raw: unknown) => {
+    setPhase("idle");
+    setError(boundedReason(raw));
+  };
 
   const stop = () => {
     recRef.current?.stop();
     recRef.current = null;
-    // server engine: finalize and insert the final transcript
+    // server engine: finalize, show Transcribing…, insert the final transcript
     const stream = streamRef.current;
     streamRef.current = null;
     if (stream) {
+      setPhase("transcribing");
       void stream.stop()
-        .then((text) => { if (text.trim()) requestComposerInsert(text.trim()); })
-        .catch(() => { /* onError already surfaced it */ });
+        .then((text) => {
+          setPhase("idle");
+          // draft insert only — the IME-safe composer command returns focus
+          // to the editor; nothing auto-sends
+          if (text.trim()) requestComposerInsert(text.trim());
+        })
+        .catch(fail);
+      return;
     }
-    setListening(false);
-  };
-
-  const startServer = async () => {
-    try {
-      streamRef.current = await startStreamingDictation({
-        ...(getState().activeSessionId ? { sessionId: getState().activeSessionId! } : {}),
-        language: prefs.lang.split("-")[0] ?? prefs.lang,
-        onError: () => setListening(false),
-      });
-      setListening(true);
-    } catch {
-      // mic denied or server capability lost — fall back to the browser engine
-      streamRef.current = null;
-      startBrowser();
-    }
+    setPhase("idle");
   };
 
   const startBrowser = () => {
     const Ctor = recognitionCtor(window);
-    if (!Ctor) return;
+    if (!Ctor) {
+      fail("Dictation is not supported in this browser");
+      return;
+    }
     const rec = new Ctor();
     rec.lang = prefs.lang;
     rec.continuous = true;
@@ -199,33 +246,77 @@ function MicButton() {
         }
       }
     };
-    rec.onerror = () => stop();
-    rec.onend = () => setListening(false);
+    rec.onerror = (e) => fail(e.error ?? "microphone error");
+    rec.onend = () => setPhase((p) => (p === "listening" ? "idle" : p));
     recRef.current = rec;
     rec.start();
-    setListening(true);
+    setPhase("listening");
   };
 
-  const canDictate = serverStt || support.stt;
+  const startServer = async () => {
+    setPhase("starting");
+    try {
+      streamRef.current = await startStreamingDictation({
+        ...(getState().activeSessionId ? { sessionId: getState().activeSessionId! } : {}),
+        language: prefs.lang.split("-")[0] ?? prefs.lang,
+        onError: fail,
+      });
+      setPhase("listening");
+    } catch (err) {
+      // mic denied or server capability lost — fall back to the browser engine
+      streamRef.current = null;
+      if (support.stt) startBrowser();
+      else fail(err);
+    }
+  };
+
+  const start = () => {
+    setError(null);
+    if (serverStt && capability?.available) void startServer();
+    else startBrowser();
+  };
+
+  const busy = phase === "starting" || phase === "transcribing";
+  const showSettings = error !== null || (!availability.available && availability.settings === true);
+
   return (
-    <button
-      className={`icon-btn mic-btn ${listening ? "listening" : ""}`}
-      title={canDictate
-        ? (listening ? "Stop dictation" : `Dictate (${serverStt ? "server transcription" : "speech to text"})`)
-        : "Dictation is not supported in this browser"}
-      aria-pressed={listening}
-      disabled={!canDictate}
-      onClick={() => (listening ? stop() : serverStt ? void startServer() : startBrowser())}
-    >
-      <Icon.mic />
-    </button>
+    <span className={`mic-control mic-${error ? "failed" : phase}`}>
+      <button
+        type="button"
+        className={`chip mic-btn${phase === "listening" ? " listening" : ""}`}
+        aria-label={phase === "listening" ? "Stop dictation" : "Dictate"}
+        {...(phase === "listening" ? { "aria-pressed": true } : {})}
+        disabled={!availability.available || busy}
+        onClick={() => (phase === "listening" ? stop() : start())}
+      >
+        <span aria-hidden="true" className="mic-icon"><Icon.mic /></span>
+        <span className="mic-label">{phase === "listening" ? "Stop dictation" : "Dictate"}</span>
+      </button>
+      {status && <span className="mic-status">{status}</span>}
+      {error !== null && (
+        <button type="button" className="small-btn mic-retry" onClick={start}>
+          Try again
+        </button>
+      )}
+      {showSettings && (
+        <button type="button" className="small-btn mic-settings" onClick={() => openSettingsPage("voice")}>
+          Voice settings
+        </button>
+      )}
+    </span>
   );
 }
 
 // ---- install -----------------------------------------------------------------
 
-/** Register the mic slot + auto read-aloud of newly completed replies. */
+let voiceInstalled = false;
+
+/** Register the mic slot + auto read-aloud of newly completed replies.
+ *  Idempotent: repeated boot (dev HMR, double module eval) can never add a
+ *  second slot entry or store subscription (UX-COMPOSER-DISC). */
 export function installVoice(): void {
+  if (voiceInstalled) return;
+  voiceInstalled = true;
   registerSlot("composer.leading", "voice.mic", () => <MicButton key="voice.mic" />, 5);
 
   // Auto-TTS: speak assistant/message events as they land in the active
@@ -244,7 +335,7 @@ export function installVoice(): void {
     const from = spoken.get(id)!;
     if (last <= from) return;
     spoken.set(id, last);
-    if (!voicePrefs.tts || !pluginOn("dictation")) return;
+    if (!voicePrefs.tts) return;
     for (let i = events.length - 1; i >= 0; i--) {
       const e = events[i]!;
       if (e.seq <= from) break;
@@ -255,5 +346,4 @@ export function installVoice(): void {
     }
   };
   subscribeStore(check);
-  subscribePrefs(check);
 }

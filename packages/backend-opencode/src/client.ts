@@ -7,6 +7,8 @@ export interface OpenCodeClient {
   readonly baseUrl: string;
   get<T = unknown>(path: string): Promise<T>;
   post<T = unknown>(path: string, body?: unknown): Promise<T>;
+  /** DELETE (no body) — used for best-effort orphan branch cleanup. */
+  del<T = unknown>(path: string): Promise<T>;
   streamEvents(
     signal: AbortSignal,
     onEvent: (evt: { id?: string; data: unknown }) => void,
@@ -126,6 +128,7 @@ export const createOpenCodeClient = (
     baseUrl: root,
     get: (path) => request("GET", path),
     post: (path, body) => request("POST", path, body ?? {}),
+    del: (path) => request("DELETE", path),
     // node:http, NOT fetch: undici aborts long-idle /event bodies
     // ("TypeError: terminated") and poisons the pooled connection, which then
     // fails later POSTs with "fetch failed".

@@ -21,7 +21,7 @@ import {
 } from "../src/utils.ts";
 import { drainInserts, queueInsert, requestComposerInsert } from "../src/composerInsert.ts";
 import { ago, deriveSessionTitle, fmtDuration, fmtMs, fullSessionTitle, modKey, modelBadge, providerColor } from "../src/format.ts";
-import { applyPersona, getPrefs, isCustomized, parsePrefs, pluginOn, togglePlugin } from "../src/prefs.ts";
+import { parsePrefs } from "../src/prefs.ts";
 import { filterPalette, type PaletteCommand } from "../src/commands.ts";
 import { highlight, highlightLines, langOf } from "../src/highlight.ts";
 import { PATH_MIME, dragKind, getDragPath, setDragPath } from "../src/dnd.ts";
@@ -40,6 +40,30 @@ import {
 import { normalizeScheduleList } from "../src/scheduleData.ts";
 import { agentPickerDefaultLabel, modelPickerDefaultLabel } from "../src/composerDefaults.ts";
 import { extractChangedFiles, selectPendingChanges } from "../src/pendingChanges.ts";
+import { mergeThinking } from "../src/utils.ts";
+import {
+  assistantTime,
+  copyActionName,
+  copyAnnouncement,
+  copyJson,
+  copyMarkdown,
+  draftStateOf,
+  forkActionName,
+  forkAvailability,
+  forkSeedKey,
+  guardsFromModel,
+  mutationErrorMessage,
+  normalizedDuration,
+  reasoningToggleName,
+  revertActionName,
+  revertAvailability,
+  rewindSeedKey,
+  shouldApplySeed,
+  timeIso,
+  timeShort,
+  turnDurationMs,
+  turnFooterLine,
+} from "../src/messageActions.ts";
 
 let seqCounter = 0;
 function ev(type: string, data: JsonObject, sessionId = "s1"): SessionEvent {
@@ -267,41 +291,6 @@ test("slot registry orders by order and disposes cleanly", () => {
   assert.deepEqual(listSlots("contextRail.tabs").map((i) => i.id), ["b"]);
   b();
   assert.deepEqual(listSlots("contextRail.tabs"), []);
-});
-
-test("applyPersona enables the expected plugins for every persona", () => {
-  const expected = {
-    engineer: ["session", "files", "git", "preview", "terminal", "context", "usage", "events", "goals", "multirun", "fusion", "walkthrough", "schedule", "github", "dictation", "knowledge"],
-    manager: ["session", "files", "context", "usage", "goals", "multirun", "fusion", "walkthrough", "knowledge"],
-    creator: ["session", "preview", "files"],
-    blank: ["session", "files", "context", "usage"],
-  } as const;
-
-  for (const persona of ["engineer", "manager", "creator", "blank"] as const) {
-    applyPersona(persona);
-    assert.equal(getPrefs().persona, persona);
-    assert.deepEqual(getPrefs().plugins, expected[persona]);
-  }
-});
-
-test("togglePlugin keeps session enabled and adds or removes git", () => {
-  applyPersona("creator");
-  assert.equal(pluginOn("session"), true);
-  assert.equal(pluginOn("git"), false);
-
-  togglePlugin("session");
-  assert.equal(pluginOn("session"), true);
-
-  togglePlugin("git");
-  assert.equal(pluginOn("git"), true);
-  togglePlugin("git");
-  assert.equal(pluginOn("git"), false);
-});
-
-test("pluginOn reflects the currently enabled persona plugins", () => {
-  applyPersona("manager");
-  assert.equal(pluginOn("goals"), true);
-  assert.equal(pluginOn("git"), false);
 });
 
 test("parsePrefs restores persona, drops unknown plugins, and fills empty lists", () => {
@@ -545,7 +534,14 @@ test("rewind collapses its target tail, redo restores it, replacement keeps it h
     events[2]!.id,
     "a2",
   ]);
-  assert.deepEqual(rewound.rewind, { markerSeq: marker.seq, atSeq: targetSeq, restoredText: "second" });
+  // UX-MSG-ACTIONS: the composer seed is replay-derived from the target
+  // user/message (raw ?? text); legacy restoredText stays readable.
+  assert.deepEqual(rewound.rewind, {
+    markerSeq: marker.seq,
+    atSeq: targetSeq,
+    restoredText: "second",
+    draft: { text: "second" },
+  });
 
   const redone = reduceEvent(rewound, ev("session/rewind-cleared", { rewindSeq: marker.seq }));
   assert.equal(redone.rewind, null);
@@ -969,16 +965,6 @@ test("requestComposerInsert queues when no composer consumes the event", () => {
   assert.deepEqual(drainInserts(), ["@x.ts "]);
 });
 
-test("isCustomized flags plugin sets that drift from persona defaults", () => {
-  applyPersona("creator");
-  assert.equal(isCustomized(), false);
-  togglePlugin("git");
-  assert.equal(isCustomized(), true);
-  togglePlugin("git");
-  assert.equal(isCustomized(), false);
-  assert.equal(isCustomized({ persona: null, plugins: [] }), false);
-});
-
 test("filterPickerItems handles empty and case-insensitive grouped searches", () => {
   const items: PickerItem[] = [
     { id: "file.app", label: "App.tsx", group: "Files", detail: "src/App.tsx" },
@@ -991,4 +977,254 @@ test("filterPickerItems handles empty and case-insensitive grouped searches", ()
   assert.deepEqual(filterPickerItems(items, "app.TSX"), [items[0]]);
   assert.deepEqual(filterPickerItems(items, "start"), [items[2]]);
   assert.deepEqual(filterPickerItems(items, "missing"), []);
+});
+
+// ---- UX-MSG-ACTIONS: timing, seeds, fork lineage, reasoning, copy ------------
+
+test("turn footer uses one terminal turn's own start/stop and usage with normalized carry", () => {
+  const events = [
+    ev("user/message", { text: "go" }),
+    ev("turn/started", { turnId: "t1", model: { providerID: "p", modelID: "m" } }),
+    ev("assistant/message", { partId: "p1", text: "done" }),
+    ev("usage/recorded", { tokens: { input: 1200, output: 300 }, cost: 0.01 }),
+    ev("turn/stopped", { turnId: "t1", reason: "completed" }),
+  ];
+  // Force a 299.6s wall clock between start and stop (the "4m 60s" trap).
+  events[1]!.time = 1_000_000;
+  events[4]!.time = 1_000_000 + 299_600;
+  const m = buildModel(events);
+  assert.equal(m.turn?.startedAt, 1_000_000);
+  assert.equal(m.turn?.stoppedAt, 1_000_000 + 299_600);
+  assert.equal(normalizedDuration(299_600), "5m 0s"); // never "4m 60s"
+  assert.deepEqual(m.turn?.usage, { tokens: { input: 1200, output: 300, reasoning: 0, cacheRead: 0, cacheWrite: 0 }, cost: 0.01 });
+  const line = turnFooterLine(m);
+  assert.ok(line);
+  assert.match(line!, /worked 5m 0s/);
+  assert.match(line!, /1\.2k in · 300 out/);
+});
+
+test("an unmatched copied stop yields no duration and inherited totals never leak into the footer turn", () => {
+  // A branch child log that (hypothetically) carried a stop without a start:
+  const m = buildModel([
+    ev("user/message", { text: "seed" }),
+    ev("turn/stopped", { turnId: "ghost", reason: "completed" }),
+  ]);
+  assert.equal(turnDurationMs(m.turn), null);
+  const line = turnFooterLine(m);
+  assert.equal(line === null || !/worked/.test(line), true); // no "worked 0s"
+  // Working turns render no footer at all.
+  const working = buildModel([ev("turn/started", { turnId: "t" })]);
+  assert.equal(turnFooterLine(working), null);
+});
+
+test("assistant completion time is the final assistant/message time, not the first chunk", () => {
+  const chunk = ev("assistant/chunk", { partId: "pt", text: "he" });
+  const fin = ev("assistant/message", { partId: "pt", text: "hello" });
+  chunk.time = 5_000;
+  fin.time = 9_000;
+  const m = buildModel([chunk, fin]);
+  const a = m.messages[0];
+  assert.ok(a && a.kind === "assistant");
+  if (a.kind === "assistant") {
+    assert.equal(a.time, 5_000); // stream anchor unchanged
+    assert.equal(a.completedAt, 9_000);
+    assert.equal(assistantTime(a), 9_000);
+  }
+});
+
+test("session/forked marker owns the child draft and a child prompt consumes the seed exactly once", () => {
+  const prefix = [
+    ev("user/message", { text: "turn one" }),
+    ev("assistant/message", { partId: "f1", text: "answer one" }),
+  ];
+  const marker = ev("session/forked", {
+    fromSessionId: "source-1",
+    sourceAtSeq: 42,
+    copiedThroughSeq: 41,
+    draft: { text: "excluded prompt", attachments: [] },
+  });
+  const m = buildModel([...prefix, marker]);
+  assert.deepEqual(m.fork, {
+    fromSessionId: "source-1",
+    markerSeq: marker.seq,
+    sourceAtSeq: 42,
+    draft: { text: "excluded prompt" },
+    seedConsumed: false,
+  });
+  // The excluded prompt is NOT in the child timeline (draft only).
+  assert.equal(m.messages.filter((x) => x.kind === "user").length, 1);
+  // A child-origin prompt after the marker flips seedConsumed; replay agrees.
+  const sent = reduceEvent(m, ev("user/message", { text: "excluded prompt" }));
+  assert.equal(sent.fork?.seedConsumed, true);
+  const replayed = buildModel([...prefix, marker, ev("user/message", { text: "again" })]);
+  assert.equal(replayed.fork?.seedConsumed, true);
+});
+
+test("copied fork events keep their source times through the reducer", () => {
+  const u = ev("user/message", { text: "original" });
+  u.time = 123_456_789;
+  const m = buildModel([u]);
+  assert.equal(m.messages[0]?.time, 123_456_789);
+});
+
+test("full replay and incremental reduction are deeply equal for messages, reasoning, tail, turn, and usage", () => {
+  const events = [
+    ev("user/message", { text: "one" }),
+    ev("turn/started", { turnId: "t1" }),
+    ev("assistant/reasoning-chunk", { partId: "r1", text: "hmm " }),
+    ev("assistant/message", { partId: "r1", text: "", reasoning: "hmm done" }),
+    ev("assistant/chunk", { partId: "a1", text: "ans" }),
+    ev("assistant/message", { partId: "a1", text: "answer" }),
+    ev("usage/recorded", { tokens: { input: 10, output: 4 }, cost: 0.002 }),
+    ev("turn/stopped", { turnId: "t1", reason: "completed" }),
+    ev("user/message", { text: "two" }),
+  ];
+  const rewound = ev("session/rewound", { atSeq: events[8]!.seq });
+  const all = [...events, rewound];
+  const replay = buildModel(all);
+  const incremental = all.reduce(reduceEvent, emptyModel());
+  assert.deepEqual(replay.messages, incremental.messages);
+  assert.deepEqual(replay.turn, incremental.turn);
+  assert.deepEqual(replay.totals, incremental.totals);
+  assert.deepEqual(replay.rewind, incremental.rewind);
+  assert.deepEqual(replay.fork, incremental.fork);
+  // The rewind derives the exact prompt as the draft; the tail is hidden.
+  assert.equal(replay.rewind?.draft?.text, "two");
+  assert.equal(replay.messages.filter((x) => x.undone).length, 1);
+});
+
+test("a reasoning-only final record stays one disclosure and never an answer bubble", () => {
+  const m = buildModel([
+    ev("assistant/reasoning-chunk", { partId: "rz", text: "step " }),
+    ev("assistant/message", { partId: "rz", text: "", reasoning: "step by step" }),
+    ev("assistant/message", { partId: "az", text: "final answer" }),
+  ]);
+  const merged = mergeThinking(m.messages);
+  // One merged assistant row: reasoning attached to the answer, no bare bubble.
+  assert.equal(merged.length, 1);
+  const only = merged[0]!;
+  assert.equal(only.kind, "assistant");
+  if (only.kind === "assistant") {
+    assert.equal(only.text, "final answer");
+    assert.equal(only.reasoning, "step by step");
+  }
+});
+
+test("copy payloads: exact markdown, stable JSON with ISO+epoch time and sanitized attachments", () => {
+  const events = [
+    ev("user/message", {
+      text: "expanded body",
+      raw: "/cmd body",
+      attachments: [{
+        id: "att-1", name: "notes.md", mime: "text/markdown", size: 42,
+        kind: "file", path: "notes.md", url: "/api/files/raw?projectId=p&path=notes.md",
+      }],
+    }),
+    ev("assistant/chunk", { partId: "cp", text: "he" }),
+    ev("assistant/message", { partId: "cp", text: "hello **world**", reasoning: "quietly" }),
+  ];
+  const m = buildModel(events);
+  const user = m.messages[0]!;
+  const asst = m.messages[1]!;
+  assert.ok(user.kind === "user" && asst.kind === "assistant");
+  if (user.kind !== "user" || asst.kind !== "assistant") return;
+
+  assert.equal(copyMarkdown(user), "expanded body"); // exact projected text
+  assert.equal(copyMarkdown(asst), "hello **world**");
+
+  const uj = JSON.parse(copyJson(user)) as Record<string, unknown>;
+  assert.equal(uj.role, "user");
+  assert.equal(uj.text, "expanded body");
+  assert.equal(uj.time, new Date(user.time).toISOString());
+  assert.equal(uj.timeMs, user.time);
+  assert.deepEqual(uj.attachments, [{ name: "notes.md", mime: "text/markdown", size: 42, kind: "file" }]);
+  // No backend ids, urls, paths, or local provenance leave the app.
+  const raw = copyJson(user);
+  for (const secret of ["att-1", "url", "\"path\"", "backend", "eventSeq", "raw"]) {
+    assert.equal(raw.includes(secret), false, `copy JSON must not include ${secret}`);
+  }
+
+  const aj = JSON.parse(copyJson(asst)) as Record<string, unknown>;
+  assert.equal(aj.role, "assistant");
+  assert.equal(aj.text, "hello **world**");
+  assert.equal(aj.reasoning, "quietly");
+  assert.equal(aj.time, new Date(assistantTime(asst)).toISOString());
+  assert.equal(aj.timeMs, assistantTime(asst));
+});
+
+test("purpose-and-target names and one announcement per copy outcome", () => {
+  assert.equal(copyActionName("user", "markdown"), "Copy user message as Markdown");
+  assert.equal(copyActionName("assistant", "json"), "Copy assistant answer as JSON");
+  assert.equal(copyAnnouncement("markdown"), "Message copied as Markdown");
+  assert.equal(copyAnnouncement("json"), "Message copied as JSON");
+  assert.equal(copyAnnouncement("reasoning"), "Reasoning copied");
+  assert.equal(copyAnnouncement("failed"), "Couldn’t copy message");
+  assert.equal(reasoningToggleName(false), "Show reasoning for assistant answer");
+  assert.equal(reasoningToggleName(true), "Hide reasoning for assistant answer");
+  assert.match(revertActionName(1_700_000_000_000), /^Revert and edit user message sent /);
+  assert.match(forkActionName(1_700_000_000_000), /^Fork and edit from user message sent /);
+  // Semantic time attributes: valid ISO dateTime, locale-formatted visuals.
+  assert.equal(timeIso(0), "1970-01-01T00:00:00.000Z");
+  assert.equal(typeof timeShort(1_700_000_000_000), "string");
+});
+
+test("truthful guards explain exactly why revert/fork are unavailable", () => {
+  const idle = { turnWorking: false, pendingRequest: false, queuedCount: 0, rewindActive: false, archived: false };
+  assert.deepEqual(revertAvailability(idle), { enabled: true });
+  assert.deepEqual(forkAvailability(idle), { enabled: true });
+  assert.deepEqual(
+    revertAvailability({ ...idle, turnWorking: true }),
+    { enabled: false, reason: "Revert unavailable while a turn is running" },
+  );
+  assert.deepEqual(
+    revertAvailability({ ...idle, pendingRequest: true }),
+    { enabled: false, reason: "Revert unavailable while a request is waiting" },
+  );
+  assert.deepEqual(
+    revertAvailability({ ...idle, queuedCount: 2 }),
+    { enabled: false, reason: "Revert unavailable while messages are queued" },
+  );
+  assert.deepEqual(
+    revertAvailability({ ...idle, rewindActive: true }),
+    { enabled: false, reason: "Restore or replace the current revert first" },
+  );
+  // Priority: the pending request outranks the open turn it is blocking —
+  // "answer the request" is the actionable reason, not the symptom.
+  assert.deepEqual(
+    revertAvailability({ ...idle, turnWorking: true, pendingRequest: true }),
+    { enabled: false, reason: "Revert unavailable while a request is waiting" },
+  );
+  assert.equal(forkAvailability({ ...idle, turnWorking: true }).enabled, false);
+  // guardsFromModel derives from the live render model.
+  const working = buildModel([ev("turn/started", { turnId: "g1" })]);
+  assert.equal(guardsFromModel(working).turnWorking, true);
+  const waiting = buildModel([ev("question/asked", { requestId: "q1", questions: [] })]);
+  assert.equal(guardsFromModel(waiting).pendingRequest, true);
+});
+
+test("marker-owned seeds apply at most once and never overwrite edits or deliberate clears", () => {
+  const key = rewindSeedKey(57);
+  assert.equal(shouldApplySeed(null, key), true);
+  assert.equal(shouldApplySeed({ key, seedText: "orig" }, key), false);
+  assert.equal(shouldApplySeed({ key: rewindSeedKey(3), seedText: "old" }, key), true);
+  assert.equal(shouldApplySeed({ key: forkSeedKey("src", 42), seedText: "x" }, forkSeedKey("src", 42)), false);
+  assert.notEqual(forkSeedKey("src", 42), forkSeedKey("src", 43));
+  assert.equal(forkSeedKey("src"), "fork:src:all");
+  // Draft states derive from the record + current text: seed → edited → cleared.
+  const record = { key, seedText: "orig" };
+  assert.equal(draftStateOf(null, "whatever"), "none");
+  assert.equal(draftStateOf(record, "orig"), "seed");
+  assert.equal(draftStateOf(record, "orig + more"), "edited");
+  assert.equal(draftStateOf(record, ""), "cleared");
+});
+
+test("typed mutation errors become bounded actionable messages", () => {
+  const mismatch = Object.assign(new Error("child history diverged"), { code: "history-mismatch" });
+  assert.match(mutationErrorMessage("fork", mismatch), /Fork failed: the backend history/);
+  assert.match(mutationErrorMessage("fork", mismatch), /Nothing was changed/);
+  const conflict = Object.assign(new Error("busy"), { code: "conflict" });
+  assert.match(mutationErrorMessage("revert", conflict), /isn’t available right now/);
+  const unsupported = Object.assign(new Error("nope"), { code: "unsupported" });
+  assert.match(mutationErrorMessage("fork", unsupported), /isn’t supported/);
+  assert.match(mutationErrorMessage("restore", new Error("boom")), /Couldn’t restore: boom/);
 });

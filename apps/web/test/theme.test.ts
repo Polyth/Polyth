@@ -39,6 +39,17 @@ test("preset set: six themes, unique stable ids, both appearances, valid tokens"
   }
 });
 
+test("every bundled theme's primary-action pair meets 4.5:1 at both gradient endpoints", () => {
+  // Send (and every accent-ink-on-accent control) paints text over the
+  // accent-hi → accent gradient, so both endpoints must clear 4.5:1.
+  for (const t of PRESET_THEMES) {
+    const overAccent = contrast(t.tokens.accentInk, t.tokens.accent);
+    const overHi = contrast(t.tokens.accentInk, t.tokens.accentHi);
+    assert.ok(overAccent >= 4.5, `${t.id}: accent-ink over accent is ${overAccent.toFixed(2)} < 4.5`);
+    assert.ok(overHi >= 4.5, `${t.id}: accent-ink over accent-hi is ${overHi.toFixed(2)} < 4.5`);
+  }
+});
+
 test("preset secondary text tokens meet readable contrast on app surfaces", () => {
   for (const theme of PRESET_THEMES) {
     const surfaces = [

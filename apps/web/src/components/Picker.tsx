@@ -1,7 +1,10 @@
 // Reusable searchable listbox replacing native <select>s: compact chip
 // trigger, type-to-filter popover, ↑↓ Enter Esc keyboard nav, grouped options
 // with a checkmark on the current one. Pass `values` for multi-select.
-import { Fragment, useEffect, useId, useMemo, useRef, useState, type KeyboardEvent } from "react";
+import {
+  Fragment, useEffect, useId, useMemo, useRef, useState,
+  type KeyboardEvent, type ReactNode,
+} from "react";
 import { filterPickerItems, type PickerItem } from "../picker.ts";
 import { useEscape } from "../useEscape.ts";
 
@@ -17,8 +20,28 @@ export interface PickerProps {
   placeholder?: string;
   direction?: "up" | "down";
   disabled?: boolean;
-  /** Trailing per-row action (e.g. pin-to-profile). Never also picks the row. */
-  trailingAction?: { label: string; title?: string; onAction: (id: string) => void };
+  /** Trailing per-row action (e.g. create/edit profile). Never also picks the
+   *  row. Label and accessible name are item-specific (UX-COMPOSER-DISC). */
+  trailingAction?: {
+    labelFor: (id: string) => string;
+    nameFor: (id: string) => string;
+    onAction: (id: string) => void;
+  };
+  /** Named list-footer action (e.g. `Create profile…`). A disabledReason is
+   *  visible text, with an optional operable secondary route. */
+  footerAction?: {
+    label: string;
+    run: () => void;
+    disabledReason?: string;
+    secondaryLabel?: string;
+    secondaryRun?: () => void;
+  };
+  /** Extra class on the root (responsive layout hooks, e.g. picker-profile). */
+  className?: string;
+  /** Accessible trigger name; keeps the full label when text is condensed. */
+  ariaLabel?: string;
+  /** Icon rendered in place of the uppercase label key (compact triggers). */
+  triggerIcon?: ReactNode;
 }
 
 export default function Picker({
@@ -31,6 +54,10 @@ export default function Picker({
   direction = "down",
   disabled,
   trailingAction,
+  footerAction,
+  className,
+  ariaLabel,
+  triggerIcon,
 }: PickerProps) {
   const multi = values !== undefined;
   const [open, setOpen] = useState(false);
@@ -93,12 +120,13 @@ export default function Picker({
     : current?.label ?? placeholder;
 
   return (
-    <span className="picker">
+    <span className={`picker${className ? ` ${className}` : ""}`}>
       <button
         ref={triggerRef}
         type="button"
         className="chip picker-chip"
-        title={label}
+        title={ariaLabel ?? label}
+        aria-label={ariaLabel}
         aria-haspopup="listbox"
         aria-expanded={open}
         aria-controls={open ? listId : undefined}
@@ -108,7 +136,9 @@ export default function Picker({
           setQ("");
         }}
       >
-        <span className="chip-k">{label}</span>
+        {triggerIcon
+          ? <span className="picker-trigger-icon" aria-hidden="true">{triggerIcon}</span>
+          : <span className="chip-k">{label}</span>}
         <span className="picker-chip-text">{chipText}</span>
         <span className="picker-caret">▾</span>
       </button>
@@ -159,11 +189,12 @@ export default function Picker({
                       <button
                         type="button"
                         className="picker-trail"
-                        title={trailingAction.title ?? trailingAction.label}
+                        aria-label={trailingAction.nameFor(it.id)}
+                        title={trailingAction.nameFor(it.id)}
                         onClick={(e) => { e.stopPropagation(); trailingAction.onAction(it.id); close(); }}
                         onKeyDown={(e) => e.stopPropagation()}
                       >
-                        {trailingAction.label}
+                        {trailingAction.labelFor(it.id)}
                       </button>
                     )}
                   </div>
@@ -174,6 +205,36 @@ export default function Picker({
                 <div className="picker-more">{hits.length - MAX_SHOWN} more — refine the filter</div>
               )}
             </div>
+            {footerAction && (
+              <div className="picker-footer">
+                <button
+                  type="button"
+                  className="picker-footer-action"
+                  aria-disabled={footerAction.disabledReason ? true : undefined}
+                  onClick={() => {
+                    if (footerAction.disabledReason) return;
+                    close();
+                    footerAction.run();
+                  }}
+                >
+                  {footerAction.label}
+                </button>
+                {footerAction.disabledReason && (
+                  <div className="picker-footer-reason">
+                    <span>{footerAction.disabledReason}</span>
+                    {footerAction.secondaryLabel && footerAction.secondaryRun && (
+                      <button
+                        type="button"
+                        className="small-btn"
+                        onClick={() => { close(); footerAction.secondaryRun!(); }}
+                      >
+                        {footerAction.secondaryLabel}
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </>
       )}

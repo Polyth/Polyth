@@ -5,6 +5,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api, type GitBranches, type GitFileEntry, type GitGraphEntry, type GitStash, type Worktree } from "../api.ts";
 import { openWorktreeSessionDialog, useStore, setGitBranch, setUiError } from "../store.ts";
+import { setPaneLastResource } from "../workspace/panePrefs.ts";
 import { diffStat } from "../utils.ts";
 import { friendlyError } from "../settings.ts";
 import { layoutGraph, type GraphRow } from "../git/graph.ts";
@@ -78,6 +79,7 @@ function GraphSvg({ row }: { row: GraphRow }) {
 export default function GitView() {
   const projectId = useStore((s) => s.activeProjectId);
   const sessionId = useStore((s) => s.activeSessionId);
+  const diffPath = useStore((s) => s.gitDiffPath);
   const status = useGitStatus(projectId, false, sessionId);
   const [branches, setBranches] = useState<GitBranches>({ current: "", branches: [] });
   const [trees, setTrees] = useState<Worktree[]>([]);
@@ -129,6 +131,21 @@ export default function GitView() {
   }, [projectId, sessionId]);
 
   useEffect(() => { void refresh(); }, [refresh]);
+
+  // openChanges(path) channel: selecting a changed file elsewhere (sidebar,
+  // chat file pills, adapters) selects that exact diff in THIS canonical
+  // instance — there is no separate reduced changes implementation.
+  useEffect(() => {
+    if (diffPath) {
+      setCommitSel(null);
+      setSel(diffPath);
+    }
+  }, [diffPath]);
+
+  // The selected diff is the surface's provider resource (project-scoped).
+  useEffect(() => {
+    if (projectId && sel) setPaneLastResource(projectId, "git", `changes:${sel}`);
+  }, [projectId, sel]);
 
   useEffect(() => {
     setComments(projectId ? loadComments(projectId) : []);
@@ -262,7 +279,7 @@ export default function GitView() {
       <div className="git-grid">
         <div className="git-col">
           {/* ---- changes first ------------------------------------------------ */}
-          <div className="stat-label" style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 6 }}>
+          <div className="stat-label git-changes-head">
             <span>Changes ({all.length})</span>
             {status && all.length > 0 && (
               <span className="git-ahead-behind">

@@ -43,6 +43,16 @@ export interface AdaptiveTextInputProps {
   className?: string;
   disabled?: boolean;
   ariaLabel?: string;
+  /** Stable DOM hook for the shared composer focus command. */
+  "data-composer-input"?: "";
+  /** Optional combobox relationship (UX-COMPOSER-DISC): the host sets these
+   *  only while a discovery token drives an autocomplete popup. The textarea
+   *  stays uncontrolled and IME admission is untouched. */
+  role?: string;
+  ariaAutocomplete?: "list" | "none" | "inline" | "both";
+  ariaExpanded?: boolean;
+  ariaControls?: string;
+  ariaActiveDescendant?: string;
   /** Fires on committed edits only — never mid-composition. */
   onTextChange?: (text: string) => void;
   /** Raw keydown with a composition flag; return true to consume the event. */
@@ -52,7 +62,12 @@ export interface AdaptiveTextInputProps {
 }
 
 const AdaptiveTextInput = forwardRef<TextInputHandle, AdaptiveTextInputProps>(function AdaptiveTextInput(
-  { initialText = "", placeholder, rows = 3, className, disabled, ariaLabel, onTextChange, onKeyIntercept, onPaste, onFocusChange },
+  {
+    initialText = "", placeholder, rows = 3, className, disabled, ariaLabel,
+    "data-composer-input": dataComposerInput,
+    role, ariaAutocomplete, ariaExpanded, ariaControls, ariaActiveDescendant,
+    onTextChange, onKeyIntercept, onPaste, onFocusChange,
+  },
   ref,
 ) {
   const taRef = useRef<HTMLTextAreaElement>(null);
@@ -155,6 +170,12 @@ const AdaptiveTextInput = forwardRef<TextInputHandle, AdaptiveTextInputProps>(fu
       placeholder={placeholder}
       disabled={disabled}
       aria-label={ariaLabel}
+      data-composer-input={dataComposerInput}
+      {...(role ? { role } : {})}
+      {...(ariaAutocomplete ? { "aria-autocomplete": ariaAutocomplete } : {})}
+      {...(ariaExpanded !== undefined ? { "aria-expanded": ariaExpanded } : {})}
+      {...(ariaControls ? { "aria-controls": ariaControls } : {})}
+      {...(ariaActiveDescendant ? { "aria-activedescendant": ariaActiveDescendant } : {})}
       defaultValue={initialText}
       onInput={onInput}
       onCompositionStart={onCompositionStart}

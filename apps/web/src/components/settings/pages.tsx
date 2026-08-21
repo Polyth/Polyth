@@ -1,8 +1,14 @@
 // The simpler settings pages: General, Appearance, Chat, Notifications,
 // Behavior, Usage, Projects, Git, Agents, MCP, Plugins.
 import { useEffect, useState, type CSSProperties } from "react";
-import { PERSONAS, PLUGIN_LABELS, applyPersona, isCustomized, pluginOn, togglePlugin, usePrefs, type PersonaId, type PluginId } from "../../prefs.ts";
-import { setOverlay, setActiveView, updateSettings, useStore } from "../../store.ts";
+import {
+  NO_PRESET_CARD, WORKSPACE_PRESETS, applyPreset, clearPreset, formatPresetSummary,
+  getPresentation, getPresetState, presetSummary, resetDisclosureChoices,
+  resetWorkspaceOrder, setPlacementOverride, usePresentation, usePresetState,
+  type CapabilityTier, type PresetSummary, type WorkspacePresetId,
+} from "../../workspacePresets.ts";
+import { listCapabilities, useResolvedCapabilities } from "../../capabilities.ts";
+import { openWorkspacePane, setOverlay, updateSettings, useStore } from "../../store.ts";
 import { setUiSettings, useUiSettings } from "../../uiPrefs.ts";
 import { groupQuotaWindows, setGroupCollapsed, setProviderHidden, useUsagePrefs } from "../../usagePrefs.ts";
 import { requestNotifyPermission } from "../../notify.ts";
@@ -11,6 +17,7 @@ import { api, type GitStatus, type QuotaSnapshotDto, type QuotaWindowDto, type Q
 import { fmtCost, fmtTokens } from "../../format.ts";
 import { EmptyState, PageHead, Row, Seg, Toggle } from "./parts.tsx";
 import { refreshProfiles, useProfiles } from "../../profiles.ts";
+import { removeProject } from "../../init.ts";
 import AgentProfileForm from "../AgentProfileForm.tsx";
 import ProjectFolderDialog from "../ProjectFolderDialog.tsx";
 import { parseMcpServersJson, type McpImportResult } from "../../mcpImport.ts";
@@ -62,17 +69,106 @@ function ThemeCard({
   );
 }
 
-export function GeneralPage() {
-  const prefs = usePrefs();
-  const settings = useStore((s) => s.settings);
-  const custom = isCustomized(prefs);
-  const pick = (id: PersonaId) => {
-    if (prefs.persona && custom && !window.confirm("Switching resets plugin customizations to the persona defaults. Continue?")) return;
-    applyPersona(id);
+/** UX-PERSONAS: `Workspace preset` (never "persona"). Offers the four
+ *  choices, Preview changes, Apply, Clear preset, and the separate reset
+ *  controls. Switching preserves explicit placement, starter, and disclosure
+ *  overrides; when an override masks a proposed change, the preview says so
+ *  and `Keep my layout` is the default. */
+function WorkspacePresetSection() {
+  const state = usePresetState();
+  usePresentation();
+  const [draft, setDraft] = useState<WorkspacePresetId | "none">(state.presetId ?? "none");
+  const [preview, setPreview] = useState<PresetSummary | null>(null);
+  useEffect(() => {
+    setDraft(state.presetId ?? "none");
+    setPreview(null);
+  }, [state.presetId]);
+
+  const summarize = (choice: WorkspacePresetId | "none"): PresetSummary =>
+    presetSummary({
+      presetId: choice === "none" ? null : choice,
+      currentPresetId: getPresetState().presetId,
+      caps: listCapabilities().map((d) => ({
+        id: d.id,
+        standardTier: d.standardTier,
+        standardRank: d.standardRank,
+        label: d.label,
+        available: d.available(),
+      })),
+      overrides: getPresentation().placements,
+      starterOverride: getPresentation().starterOrder,
+      explicitComposerDetail: getPresetState().composerDetail,
+    });
+
+  const apply = () => applyPreset(draft === "none" ? null : draft);
+  const usePresetOrder = () => {
+    if (!window.confirm("Use the preset order? This clears only your explicit placement and starter overrides.")) return;
+    resetWorkspaceOrder();
+    apply();
   };
+
+  const current = state.presetId
+    ? WORKSPACE_PRESETS.find((p) => p.id === state.presetId)?.label ?? state.presetId
+    : NO_PRESET_CARD.label;
+
   return (
     <>
-      <PageHead title="General" blurb="Personas set the rail, shortcuts and how much detail you see. Switch anytime." />
+      <Row
+        label="Workspace preset"
+        hint={`Current: ${current}. A preset changes starter actions, workspace order, and initial detail — it never hides tools or changes what you can do.`}
+        itemId="general.workspacePreset"
+      >
+        <Seg
+          value={draft}
+          options={[
+            ...WORKSPACE_PRESETS.map((p): [WorkspacePresetId | "none", string] => [p.id, p.label]),
+            ["none", NO_PRESET_CARD.label],
+          ]}
+          onChange={(v) => { setDraft(v); setPreview(null); }}
+        />
+      </Row>
+      <Row label="Preview and apply" hint="Preview shows the exact effective changes before anything is saved.">
+        <div className="preset-settings-actions">
+          <button className="small-btn" onClick={() => setPreview(summarize(draft))}>Preview changes</button>
+          <button className="small-btn" onClick={apply}>Apply</button>
+          <button className="small-btn" onClick={clearPreset}>Clear preset</button>
+        </div>
+      </Row>
+      {preview && (
+        <div className="preset-preview preset-preview-settings" role="region" aria-label="Preset preview">
+          <pre className="preset-preview-text">{formatPresetSummary(preview)}</pre>
+          {preview.maskedByOverrides.length > 0 && (
+            <div className="preset-preview-note">
+              <p>Some of your explicit layout choices mask this preset’s suggested order. Keeping your layout is the default.</p>
+              <div className="preset-settings-actions">
+                <button className="small-btn btn-accent" onClick={apply}>Keep my layout</button>
+                <button className="small-btn" onClick={usePresetOrder}>Use preset order</button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+      <Row label="Setup panel" hint="Reopen the optional workspace preset setup.">
+        <button className="small-btn" onClick={() => setOverlay("onboarding")}>Open preset setup…</button>
+      </Row>
+      <Row label="Reset workspace order" hint="Clears your explicit capability placement and starter overrides only.">
+        <button
+          className="small-btn"
+          onClick={() => { if (window.confirm("Reset workspace order to the preset (or standard) arrangement?")) resetWorkspaceOrder(); }}
+        >Reset workspace order</button>
+      </Row>
+      <Row label="Reset disclosure choices" hint="Technical options and More tools return to their preset-seeded state.">
+        <button className="small-btn" onClick={resetDisclosureChoices}>Reset disclosure choices</button>
+      </Row>
+    </>
+  );
+}
+
+export function GeneralPage() {
+  const settings = useStore((s) => s.settings);
+  return (
+    <>
+      <PageHead title="General" blurb="Workspace basics. A preset is a starting arrangement — change or clear it anytime." />
       <Row label="Product name" hint="Shown in the sidebar and window chrome." itemId="general.productName">
         <input
           className="inp"
@@ -84,23 +180,7 @@ export function GeneralPage() {
       <Row label="Relative timestamps" hint="Show session activity as “2m ago” instead of a clock time." itemId="general.relativeTime">
         <Toggle on={settings.relativeTime} onChange={(relativeTime) => updateSettings({ relativeTime })} label="Relative timestamps" />
       </Row>
-      <Row label="Workspace persona" hint={prefs.persona ? PERSONAS[prefs.persona].blurb : "Pick a starting point."} itemId="general.persona">
-        <Seg
-          value={prefs.persona ?? "engineer"}
-          options={(["engineer", "manager", "creator", "blank"] as const).map((id) => [id, PERSONAS[id].label])}
-          onChange={pick}
-        />
-      </Row>
-      <Row label="Onboarding" hint="Re-run the guided workspace setup.">
-        <button className="small-btn" onClick={() => setOverlay("onboarding")}>Customize workspace…</button>
-      </Row>
-      {custom && prefs.persona && (
-        <Row label="Plugin customizations" hint="Your plugin set differs from the persona defaults.">
-          <button className="small-btn" onClick={() => { if (prefs.persona) applyPersona(prefs.persona); }}>
-            Reset to {PERSONAS[prefs.persona].label} defaults
-          </button>
-        </Row>
-      )}
+      <WorkspacePresetSection />
     </>
   );
 }
@@ -678,7 +758,7 @@ export function UsagePage() {
 }
 
 export function ProjectsPage() {
-  const projects = useStore((s) => s.projects);
+  const projects = useStore((s) => s.projectRegistry.projects);
   const [picking, setPicking] = useState(false);
   return (
     <>
@@ -692,7 +772,7 @@ export function ProjectsPage() {
           <div className="set-row-control">
             <button
               className="small-btn danger-btn"
-              onClick={() => { if (window.confirm(`Remove project "${p.name || p.path}" from Polyth?`)) void api.deleteProject(p.id).then(() => location.reload()); }}
+              onClick={() => { if (window.confirm(`Remove project "${p.name || p.path}" from Polyth?`)) void removeProject(p.id); }}
             >Remove</button>
           </div>
         </div>
@@ -733,7 +813,7 @@ export function GitPage() {
             />
           </Row>
           <Row label="Full view" hint="Stage, commit, branch, and manage worktrees.">
-            <button className="small-btn" onClick={() => { setOverlay(null); setActiveView("git"); }}>Open Git view →</button>
+            <button className="small-btn" onClick={() => { setOverlay(null); openWorkspacePane("git"); }}>Open Git view →</button>
           </Row>
         </>
       )}
@@ -1032,11 +1112,6 @@ export function McpPage() {
   );
 }
 
-const TOGGLE: PluginId[] = [
-  "files", "git", "github", "preview", "terminal", "context", "usage", "events",
-  "goals", "multirun", "fusion", "walkthrough", "schedule", "dictation",
-];
-
 function PluginLogViewer({ id }: { id: string }) {
   const [lines, setLines] = useState<Array<{ at: number; line: string }>>([]);
   useEffect(() => { void api.pluginsLogs(id).then(setLines).catch(() => setLines([])); }, [id]);
@@ -1136,25 +1211,73 @@ function OpenCodePluginsSection() {
   );
 }
 
+const TIER_LABELS: Array<[CapabilityTier, string]> = [
+  ["primary", "Primary"],
+  ["more", "More tools"],
+  ["technical", "Technical options"],
+];
+
+/** UX-PERSONAS: capability placement replaces the built-in enable
+ *  checkboxes. Every capability is listed with its current placement; a
+ *  change is an explicit override that survives preset switches. Nothing here
+ *  can hide or disable a built-in capability. */
+function CapabilityPlacementSection() {
+  const resolved = useResolvedCapabilities();
+  const presentation = usePresentation();
+  return (
+    <div data-settings-item="plugins.builtin">
+      <div className="stat-label">Capability placement</div>
+      {resolved.map((c) => {
+        const overridden = c.descriptor.id in presentation.placements;
+        const alias = c.descriptor.technicalLabel && c.descriptor.technicalLabel !== c.descriptor.label
+          ? ` (${c.descriptor.technicalLabel})`
+          : "";
+        return (
+          <div key={c.descriptor.id} className="set-row">
+            <div className="set-row-text">
+              <div className="set-row-label">
+                {c.descriptor.label}{alias}
+                {overridden && <span className="tag" title="Your explicit placement wins over preset suggestions">custom</span>}
+                {!c.descriptor.available() && (
+                  <span className="tag" title={c.descriptor.unavailableReason?.() ?? undefined}>unavailable</span>
+                )}
+              </div>
+              <div className="set-row-hint">{c.descriptor.plainDescription}</div>
+            </div>
+            <div className="set-row-control">
+              {c.descriptor.id === "session" ? (
+                <span className="tag">Primary</span>
+              ) : (
+                <select
+                  aria-label={`Placement for ${c.descriptor.label}`}
+                  value={c.tier}
+                  onChange={(e) => setPlacementOverride(c.descriptor.id, { tier: e.target.value as CapabilityTier, rank: c.rank })}
+                >
+                  {TIER_LABELS.map(([tier, label]) => <option key={tier} value={tier}>{label}</option>)}
+                </select>
+              )}
+              {overridden && (
+                <button className="small-btn" onClick={() => setPlacementOverride(c.descriptor.id, null)}>Reset</button>
+              )}
+            </div>
+          </div>
+        );
+      })}
+      <button
+        className="ghost-link"
+        onClick={() => { if (window.confirm("Reset workspace order to the preset (or standard) arrangement?")) resetWorkspaceOrder(); }}
+      >
+        Reset workspace order →
+      </button>
+    </div>
+  );
+}
+
 export function PluginsPage() {
-  const prefs = usePrefs();
-  const custom = isCustomized(prefs);
   return (
     <>
-      <PageHead title="Plugins" blurb="Everything is a widget. Toggle panels and workflows without leaving the session." />
-      <div className="plugin-toggles" data-settings-item="plugins.builtin">
-        {TOGGLE.map((id) => (
-          <label key={id} className="plugin-toggle">
-            <input type="checkbox" checked={pluginOn(id)} onChange={() => togglePlugin(id)} />
-            {PLUGIN_LABELS[id]}
-          </label>
-        ))}
-      </div>
-      {custom && prefs.persona && (
-        <button className="ghost-link" onClick={() => { if (prefs.persona) applyPersona(prefs.persona); }}>
-          Reset to {PERSONAS[prefs.persona].label} defaults →
-        </button>
-      )}
+      <PageHead title="Plugins" blurb="Place built-in capabilities and manage installed extensions. Placement never removes a capability." />
+      <CapabilityPlacementSection />
       <OpenCodePluginsSection />
       <ManagedPluginsSection />
     </>

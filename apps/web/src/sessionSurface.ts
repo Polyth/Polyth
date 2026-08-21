@@ -1,0 +1,41 @@
+// Pure surface-selection rules for the session main pane (UX-FIXTURE-VISUAL).
+// Pending question/permission surfaces must take precedence over the
+// empty-session hero, and archived sessions must never present a live
+// composer. Derived only from replayed events + the session projection, so
+// reload/replay can never resolve or duplicate a request.
+import type { SessionProjection } from "@polyth/contracts";
+import type { RenderModel } from "./reduce.ts";
+
+export type SurfaceModel = Pick<RenderModel, "messages" | "permissions" | "questions">;
+
+export interface PendingCounts {
+  questions: number;
+  permissions: number;
+}
+
+export function pendingCounts(model: SurfaceModel): PendingCounts {
+  return {
+    questions: model.questions.filter((q) => q.status === "pending").length,
+    permissions: model.permissions.filter((p) => p.status === "pending").length,
+  };
+}
+
+/** True only when there is genuinely nothing to act on: no messages, no
+ *  unresolved question/permission, and the session is not archived. */
+export function showSessionHero(
+  sessionId: string | null,
+  model: SurfaceModel,
+  session: Pick<SessionProjection, "status"> | null,
+): boolean {
+  if (!sessionId) return true;
+  if (session?.status === "archived") return false;
+  const pending = pendingCounts(model);
+  return model.messages.length === 0 && pending.questions === 0 && pending.permissions === 0;
+}
+
+/** Archived sessions block composition behind an explicit restore action. */
+export function composerBlockedByArchive(
+  session: Pick<SessionProjection, "status"> | null,
+): boolean {
+  return session?.status === "archived";
+}

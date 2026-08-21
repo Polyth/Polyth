@@ -6,7 +6,6 @@ import { setOverlay, setActiveView, setUiError, updateSettings, useStore } from 
 import { openSession, refreshSessions } from "../../init.ts";
 import { ago } from "../../format.ts";
 import { friendlyError } from "../../settings.ts";
-import { pluginOn } from "../../prefs.ts";
 import { EmptyState, PageHead, Row, Toggle } from "./parts.tsx";
 
 export default function SessionsPage() {
@@ -50,11 +49,9 @@ export default function SessionsPage() {
               })}
             >Create</button>
           </Row>
-          {pluginOn("schedule") && (
-            <Row label="Scheduled prompts" hint="Send a prompt at a time or on an interval.">
-              <button className="small-btn" onClick={() => { setOverlay(null); setActiveView("schedule"); }}>Open Schedule →</button>
-            </Row>
-          )}
+          <Row label="Scheduled prompts" hint="Send a prompt at a time or on an interval.">
+            <button className="small-btn" onClick={() => { setOverlay(null); setActiveView("schedule"); }}>Open Schedule →</button>
+          </Row>
           <div className="stat-label">Sessions in project</div>
           {sessions.length === 0 && <EmptyState title="No sessions yet" />}
           {[...sessions].sort((a, b) => b.updatedAt - a.updatedAt).map((s) => (

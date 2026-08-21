@@ -2,40 +2,44 @@ import { HOTKEY_ACTIONS, matchAction, formatCombo, type HotkeyAction } from "@po
 import { registerCommand } from "./commands.ts";
 import { createSession, exportSessionMarkdown, forkSession, abortSession } from "./init.ts";
 import { MOD } from "./format.ts";
-import { PERSONAS, applyPersona, pluginOn, type PersonaId, type PluginId } from "./prefs.ts";
 import { getKeymap } from "./hotkeys.ts";
 import { readLastReply, stopSpeaking } from "./voice.tsx";
 import {
-  getState, openPalette, openSettingsPage, openWorktreeSessionDialog, setActiveView, setOverlay, toggleRailPlugin,
-  type AppView, type RailPlugin,
+  focusComposer, getState, openPalette, openSettingsPage, openWorktreeSessionDialog, setOverlay,
+  toggleRailPlugin, toggleWorkspacePane,
+  type RailPlugin,
 } from "./store.ts";
 import {
   getGroupingMode, listGroupings, registerGrouping, setGroupingMode,
   type GroupingDescriptor,
 } from "./sidebarPrefs.ts";
 import { announce } from "./components/a11y/live.tsx";
+import { listCapabilities, subscribeCapabilities, type CapabilityDescriptor } from "./capabilities.ts";
+import "./builtinCapabilities.ts";
 
-const VIEW: Array<[AppView, string]> = [
-  ["session", "Open session"], ["files", "Files & editor"], ["goals", "Open goals"], ["multirun", "Compare models"],
-  ["fusion", "Fuse models"], ["walkthrough", "Guided walkthrough"], ["preview", "Live preview"],
-  ["git", "Git & worktrees"], ["terminal", "Terminal"], ["schedule", "Scheduled prompts"], ["github", "GitHub issues & PRs"],
-];
-const RAIL: Array<[RailPlugin, string, PluginId]> = [
-  ["files", "Files panel", "files"], ["changes", "Changes panel", "git"], ["context", "Context panel", "context"],
-  ["usage", "Usage panel", "usage"], ["events", "Event log", "events"],
+/** Old palette labels preserved as extra search terms per capability so
+ *  existing users' muscle memory ("Git & worktrees", "Fuse models") keeps
+ *  finding the same commands. */
+const LEGACY_SEARCH_TERMS: Record<string, string[]> = {
+  session: ["Open session"],
+  files: ["Files & editor"],
+  goals: ["Open goals"],
+  multirun: ["Compare models"],
+  fusion: ["Fuse models"],
+  preview: ["Live preview"],
+  git: ["Git & worktrees"],
+  schedule: ["Scheduled prompts"],
+  github: ["GitHub issues & PRs"],
+};
+
+const RAIL: Array<[RailPlugin, string]> = [
+  ["context", "Context panel"], ["knowledge", "Knowledge panel"],
+  ["usage", "Usage panel"], ["events", "Event log"],
 ];
 
 const IS_MAC = MOD === "⌘";
 // Live resolver: command hints must always reflect the current custom binding.
 const hintOf = (action: HotkeyAction) => (): string => formatCombo(getKeymap()[action], IS_MAC);
-
-export function focusComposer(): void {
-  setActiveView("session");
-  // Defer so the composer exists after a view switch.
-  setTimeout(() => {
-    document.querySelector<HTMLTextAreaElement>(".composer textarea")?.focus();
-  }, 0);
-}
 
 /** Register one Group-by palette command for a grouping descriptor. */
 function registerGroupingCommand(g: GroupingDescriptor): () => void {
@@ -63,17 +67,66 @@ export function registerSidebarGrouping(desc: GroupingDescriptor): () => void {
   };
 }
 
+/** One palette command per capability descriptor: same id, same open()
+ *  command as the header, rail, compact Tools, Settings, and shortcuts.
+ *  Search matches plain and technical terms; shortcuts never check a preset. */
+function capabilityCommand(d: CapabilityDescriptor): () => void {
+  return registerCommand({
+    id: `capability.${d.id}`,
+    label: d.label,
+    group: "Workspace",
+    keywords: [
+      ...(d.technicalLabel ? [d.technicalLabel] : []),
+      ...d.keywords,
+      ...(LEGACY_SEARCH_TERMS[d.id] ?? []),
+      d.plainDescription,
+    ],
+    when: d.available,
+    run: d.open,
+  });
+}
+
+/** Keep palette commands in lockstep with the capability registry: a
+ *  dynamically registered extension is searchable immediately; a disposed one
+ *  vanishes with its descriptor. */
+function syncCapabilityCommands(): () => void {
+  const disposers = new Map<string, () => void>();
+  const sync = () => {
+    const current = new Map(listCapabilities().map((d) => [d.id, d]));
+    for (const [id, dispose] of disposers) {
+      if (!current.has(id)) {
+        dispose();
+        disposers.delete(id);
+      }
+    }
+    for (const [id, d] of current) {
+      disposers.get(id)?.();
+      disposers.set(id, capabilityCommand(d));
+    }
+  };
+  sync();
+  const unsubscribe = subscribeCapabilities(sync);
+  return () => {
+    unsubscribe();
+    for (const dispose of disposers.values()) dispose();
+    disposers.clear();
+  };
+}
+
 export function installShell(): void {
   registerCommand({ id: "cmd.palette", label: "Command palette", hint: hintOf("palette"), group: "Shell", run: () => openPalette("all") });
   registerCommand({
     id: "cmd.searchFiles", label: "Search files", hint: hintOf("searchFiles"), group: "Shell",
     keywords: ["quick open", "go to file"],
-    when: () => pluginOn("files"),
     run: () => openPalette("files"),
   });
   registerCommand({ id: "cmd.search", label: "Search sessions", hint: hintOf("searchSessions"), group: "Shell", run: () => setOverlay("search") });
   registerCommand({ id: "cmd.settings", label: "Settings", hint: hintOf("settings"), group: "Shell", run: () => setOverlay("settings") });
-  registerCommand({ id: "cmd.customize", label: "Customize workspace", group: "Shell", run: () => setOverlay("onboarding") });
+  registerCommand({
+    id: "cmd.customize", label: "Change workspace preset", group: "Shell",
+    keywords: ["preset", "starting setup", "workspace", "persona", "role", "customize"],
+    run: () => setOverlay("onboarding"),
+  });
   registerCommand({ id: "cmd.focusComposer", label: "Focus composer", hint: hintOf("focusComposer"), group: "Shell", run: focusComposer });
   registerCommand({
     id: "cmd.new", label: "New session", hint: hintOf("newSession"), group: "Session",
@@ -83,7 +136,7 @@ export function installShell(): void {
   registerCommand({
     id: "cmd.newWorktree", label: "New session in worktree", group: "Session",
     keywords: ["branch", "isolated", "checkout"],
-    when: () => !!getState().activeProjectId && pluginOn("git"),
+    when: () => !!getState().activeProjectId,
     run: () => {
       const id = getState().activeProjectId;
       if (id) openWorktreeSessionDialog(id);
@@ -105,30 +158,20 @@ export function installShell(): void {
   });
   registerCommand({
     id: "voice.read", label: "Read last reply aloud", group: "Voice",
-    when: () => pluginOn("dictation") && !!getState().activeSessionId,
+    when: () => !!getState().activeSessionId,
     run: readLastReply,
   });
   registerCommand({
     id: "voice.stop", label: "Stop reading aloud", group: "Voice",
-    when: () => pluginOn("dictation"),
     run: stopSpeaking,
   });
-  for (const [view, label] of VIEW) {
-    registerCommand({
-      id: `view.${view}`, label, group: "Views",
-      when: () => pluginOn(view),
-      run: () => setActiveView(view),
-    });
-  }
-  for (const [id, label, plugin] of RAIL) {
+  // Every registered, available capability is searchable regardless of tier.
+  syncCapabilityCommands();
+  for (const [id, label] of RAIL) {
     registerCommand({
       id: `rail.${id}`, label, group: "Panels",
-      when: () => pluginOn(plugin),
       run: () => toggleRailPlugin(id),
     });
-  }
-  for (const id of Object.keys(PERSONAS) as PersonaId[]) {
-    registerCommand({ id: `persona.${id}`, label: `Persona: ${PERSONAS[id].label}`, group: "Workspace", run: () => applyPersona(id) });
   }
   // Sidebar Group by (WP13): built-ins; plugins add via registerSidebarGrouping.
   for (const g of listGroupings()) registerGroupingCommand(g);
@@ -148,9 +191,11 @@ export function installShell(): void {
   window.addEventListener("keydown", onKey);
 }
 
+// Shortcuts call the capability's open() command directly and never check a
+// preset — presets change emphasis, not availability.
 const ACTIONS: Record<HotkeyAction, () => void> = {
   palette: () => openPalette("all"),
-  searchFiles: () => { if (pluginOn("files")) openPalette("files"); },
+  searchFiles: () => openPalette("files"),
   searchSessions: () => setOverlay("search"),
   settings: () => setOverlay("settings"),
   newSession: () => {
@@ -158,9 +203,11 @@ const ACTIONS: Record<HotkeyAction, () => void> = {
     if (id) void createSession(id);
   },
   focusComposer,
-  viewFiles: () => { if (pluginOn("files")) setActiveView("files"); },
-  viewGit: () => { if (pluginOn("git")) setActiveView("git"); },
-  viewTerminal: () => { if (pluginOn("terminal")) setActiveView("terminal"); },
+  // Workspace-pane shortcuts toggle so the same keys also close (and remain
+  // reachable from inside a focused terminal without sending it Escape).
+  viewFiles: () => toggleWorkspacePane("files"),
+  viewGit: () => toggleWorkspacePane("git"),
+  viewTerminal: () => toggleWorkspacePane("terminal"),
 };
 
 function onKey(e: KeyboardEvent): void {

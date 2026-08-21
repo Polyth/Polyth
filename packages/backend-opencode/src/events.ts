@@ -72,6 +72,12 @@ export interface TranslateState {
   toolCalls: Set<string>;
   partText: Map<string, string>;
   partReasoning: Map<string, string>;
+  // UX-MSG-ACTIONS: one-time part classification. A part is text OR reasoning
+  // for its whole life; bytes that arrive before classification buffer in
+  // pendingDelta and emit NOTHING until part.type/field resolves them, so an
+  // unclassified reasoning stream can never be displayed as answer text.
+  partKind: Map<string, "text" | "reasoning">;
+  pendingDelta: Map<string, string>;
   emittedAssistant: Set<string>;
   emittedUsage: Set<string>;
   lastTokens?: TokenUsage;
@@ -89,6 +95,8 @@ export const createTranslateState = (): TranslateState => ({
   toolCalls: new Set(),
   partText: new Map(),
   partReasoning: new Map(),
+  partKind: new Map(),
+  pendingDelta: new Map(),
   emittedAssistant: new Set(),
   emittedUsage: new Set(),
   taskRevision: 0,
@@ -96,6 +104,37 @@ export const createTranslateState = (): TranslateState => ({
   subagentRevision: 0,
   subagents: new Map(),
 });
+
+/** First classification wins: later updates can never migrate already
+ *  displayed reasoning into answer text (or vice versa). */
+const classify = (
+  state: TranslateState, partId: string, hint: "text" | "reasoning" | undefined,
+): "text" | "reasoning" | undefined => {
+  const existing = state.partKind.get(partId);
+  if (existing) return existing;
+  if (hint) state.partKind.set(partId, hint);
+  return hint;
+};
+
+/** Append `delta` to the part's one canonical channel and emit its chunk.
+ *  Any bytes buffered before classification drain first, in arrival order. */
+const appendChunk = (
+  state: TranslateState, out: RuntimeEvent[], partId: string, kind: "text" | "reasoning", delta: string,
+): void => {
+  const pending = state.pendingDelta.get(partId);
+  if (pending) {
+    state.pendingDelta.delete(partId);
+    delta = pending + delta;
+  }
+  if (!delta) return;
+  const store = kind === "reasoning" ? state.partReasoning : state.partText;
+  store.set(partId, (store.get(partId) ?? "") + delta);
+  out.push(
+    kind === "reasoning"
+      ? { type: "assistant/reasoning-chunk", partId, text: delta }
+      : { type: "assistant/chunk", partId, text: delta },
+  );
+};
 
 type TaskStatus = "pending" | "active" | "done" | "failed";
 const TASK_STATUS: Record<string, TaskStatus> = {
@@ -160,17 +199,19 @@ export const translateOcEvent = (ev: OcEvent, state: TranslateState): RuntimeEve
   if (type === "message.part.delta") {
     const partId = typeof p.partID === "string" ? p.partID : "part";
     const delta = typeof p.delta === "string" ? p.delta : "";
-    const field = typeof p.field === "string" ? p.field : "text";
+    const field = typeof p.field === "string" ? p.field : undefined;
     const messageID = typeof p.messageID === "string" ? p.messageID : "";
     if (messageID && state.userMessageIds.has(messageID)) return out;
     if (!delta) return out;
-    if (field === "reasoning") {
-      state.partReasoning.set(partId, (state.partReasoning.get(partId) ?? "") + delta);
-      out.push({ type: "assistant/reasoning-chunk", partId, text: delta });
-    } else {
-      state.partText.set(partId, (state.partText.get(partId) ?? "") + delta);
-      out.push({ type: "assistant/chunk", partId, text: delta });
+    const hint = field === "reasoning" ? "reasoning" as const : field === "text" ? "text" as const : undefined;
+    const kind = classify(state, partId, hint);
+    if (!kind) {
+      // untyped delta before classification: buffer, display nothing —
+      // part.updated's part.type resolves it to exactly one channel later
+      state.pendingDelta.set(partId, (state.pendingDelta.get(partId) ?? "") + delta);
+      return out;
     }
+    appendChunk(state, out, partId, kind, delta);
     return out;
   }
 
@@ -183,46 +224,49 @@ export const translateOcEvent = (ev: OcEvent, state: TranslateState): RuntimeEve
     const partType = part.type;
     const delta = typeof p.delta === "string" ? p.delta : undefined;
 
-    if (partType === "text") {
+    if (partType === "text" || partType === "reasoning") {
+      // classification is one-time: an already displayed reasoning part stays
+      // reasoning even if a later update claims to be text (and vice versa)
+      const kind = classify(state, partId, partType)!;
+      const store = kind === "reasoning" ? state.partReasoning : state.partText;
       const text = typeof part.text === "string" ? part.text : "";
       if (delta) {
-        state.partText.set(partId, (state.partText.get(partId) ?? "") + delta);
-        out.push({ type: "assistant/chunk", partId, text: delta });
+        appendChunk(state, out, partId, kind, delta);
       } else if (text) {
-        const prev = state.partText.get(partId) ?? "";
+        // A full snapshot supersedes buffered pre-classification bytes (they
+        // are contained in it) — emit only what is not yet displayed.
+        state.pendingDelta.delete(partId);
+        const prev = store.get(partId) ?? "";
         if (text.startsWith(prev) && text.length > prev.length) {
-          const chunk = text.slice(prev.length);
-          state.partText.set(partId, text);
-          out.push({ type: "assistant/chunk", partId, text: chunk });
-        } else {
-          state.partText.set(partId, text);
+          out.push(
+            kind === "reasoning"
+              ? { type: "assistant/reasoning-chunk", partId, text: text.slice(prev.length) }
+              : { type: "assistant/chunk", partId, text: text.slice(prev.length) },
+          );
         }
+        store.set(partId, text);
+      } else {
+        // classification-only update: resolve buffered bytes into the channel
+        appendChunk(state, out, partId, kind, "");
       }
+      // Independent finalization per channel. A finalized reasoning part is
+      // the model-visible reasoning-only record; deriveMessages() skips its
+      // empty text so it can never become an ordinary answer bubble.
       const time = asRecord(part.time);
       if (time && typeof time.end === "number" && !state.emittedAssistant.has(partId)) {
         state.emittedAssistant.add(partId);
-        out.push({
-          type: "assistant/message",
-          partId,
-          text: state.partText.get(partId) ?? text,
-          tokens: state.lastTokens,
-          cost: state.lastCost,
-        });
-      }
-      return out;
-    }
-
-    if (partType === "reasoning") {
-      const text = typeof part.text === "string" ? part.text : "";
-      if (delta) {
-        state.partReasoning.set(partId, (state.partReasoning.get(partId) ?? "") + delta);
-        out.push({ type: "assistant/reasoning-chunk", partId, text: delta });
-      } else if (text) {
-        const prev = state.partReasoning.get(partId) ?? "";
-        if (text.startsWith(prev) && text.length > prev.length) {
-          out.push({ type: "assistant/reasoning-chunk", partId, text: text.slice(prev.length) });
+        if (kind === "reasoning") {
+          const reasoning = store.get(partId) ?? text;
+          if (reasoning) out.push({ type: "assistant/message", partId, text: "", reasoning });
+        } else {
+          out.push({
+            type: "assistant/message",
+            partId,
+            text: store.get(partId) ?? text,
+            tokens: state.lastTokens,
+            cost: state.lastCost,
+          });
         }
-        state.partReasoning.set(partId, text);
       }
       return out;
     }
@@ -350,8 +394,17 @@ export const translateOcEvent = (ev: OcEvent, state: TranslateState): RuntimeEve
   return out;
 };
 
+/** Finalize the text and reasoning maps independently on idle. Parts still
+ *  waiting for classification (pendingDelta) are never flushed as text —
+ *  unclassified bytes stay invisible rather than becoming a wrong answer. */
 export const flushAssistantOnIdle = (state: TranslateState): RuntimeEvent[] => {
   const out: RuntimeEvent[] = [];
+  for (const [partId, reasoning] of state.partReasoning) {
+    if (state.emittedAssistant.has(partId)) continue;
+    if (!reasoning) continue;
+    state.emittedAssistant.add(partId);
+    out.push({ type: "assistant/message", partId, text: "", reasoning });
+  }
   for (const [partId, text] of state.partText) {
     if (state.emittedAssistant.has(partId)) continue;
     if (!text) continue;

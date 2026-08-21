@@ -114,6 +114,17 @@ export interface SchedulePreview {
   description: string;
 }
 
+/** Persisted .agents/loops scan diagnostic (UX-FIXTURE-VISUAL P1): survives
+ *  list refreshes and restarts until a later scan proves the file valid or
+ *  the user explicitly dismisses it. */
+export interface ScheduleLoopError {
+  path: string;
+  error: string;
+  firstSeenAt: number;
+  lastSeenAt: number;
+  dismissed?: boolean;
+}
+
 export interface ScheduleService {
   list(projectId?: string): ScheduleTask[];
   get(id: string): ScheduleTask | undefined;
@@ -129,8 +140,13 @@ export interface ScheduleService {
   preview(cadence: ScheduleCadence, count?: number): SchedulePreview;
   /** Bounded run history, newest first. */
   runsOf(id: string, limit?: number): ScheduleRunRecord[];
-  /** Reconcile .agents/loops scan results with managed tasks. */
-  syncLoops(projectId: string, scan: LoopFileResult[]): { tasks: ScheduleTask[]; errors: Array<{ path: string; error: string }> };
+  /** Reconcile .agents/loops scan results with managed tasks. An explicit
+   *  (user-requested) rescan clears dismissals so fresh diagnostics show. */
+  syncLoops(projectId: string, scan: LoopFileResult[], opts?: { explicit?: boolean }): { tasks: ScheduleTask[]; errors: Array<{ path: string; error: string }> };
+  /** Visible (non-dismissed) persisted scan diagnostics. */
+  loopErrors(projectId?: string): Array<{ path: string; error: string }>;
+  /** Hide one diagnostic until its error text changes on a later scan. */
+  dismissLoopError(projectId: string, path: string): boolean;
   start(): void;
   stop(): void;
 }
@@ -204,7 +220,10 @@ export function createScheduleService(opts: ScheduleServiceOptions): ScheduleSer
   const tickMs = opts.tickMs ?? 15_000;
   const minCronMinutes = opts.minCronIntervalMinutes ?? 1;
   let timer: ReturnType<typeof setInterval> | null = null;
-  let tasks: ScheduleTask[] = load(opts.file);
+  const persisted = load(opts.file);
+  let tasks: ScheduleTask[] = persisted.tasks;
+  // projectId -> persisted scan diagnostics (survive refresh + restart)
+  const loopErrorsByProject: Record<string, ScheduleLoopError[]> = persisted.loopErrors;
   // task id -> in-flight run promise (overlap policy consults this)
   const running = new Map<string, Promise<void>>();
 
@@ -221,7 +240,7 @@ export function createScheduleService(opts: ScheduleServiceOptions): ScheduleSer
 
   const save = (): void => {
     mkdirSync(dirname(opts.file), { recursive: true });
-    writeFileSync(opts.file, JSON.stringify({ v: 2, tasks }, null, 2));
+    writeFileSync(opts.file, JSON.stringify({ v: 2, tasks, loopErrors: loopErrorsByProject }, null, 2));
   };
   if (migrated) save();
 
@@ -410,7 +429,7 @@ export function createScheduleService(opts: ScheduleServiceOptions): ScheduleSer
     runsOf(id, limit = 50) {
       return (mustGet(id).history ?? []).slice(0, Math.max(1, Math.min(limit, HISTORY_LIMIT)));
     },
-    syncLoops(projectId, scan) {
+    syncLoops(projectId, scan, syncOpts) {
       const errors: Array<{ path: string; error: string }> = [];
       const seenIds = new Set<string>();
       for (const file of scan) {
@@ -465,11 +484,37 @@ export function createScheduleService(opts: ScheduleServiceOptions): ScheduleSer
       // Managed tasks whose file/id vanished: explicit remove policy.
       tasks = tasks.filter((t) =>
         !(t.projectId === projectId && t.source === "loop-file" && t.loopId && !seenIds.has(t.loopId)));
+      // Persist diagnostics: a clean scan clears them, an identical error
+      // keeps its firstSeenAt (and dismissal, unless the rescan was explicit).
+      const prevErrors = loopErrorsByProject[projectId] ?? [];
+      loopErrorsByProject[projectId] = errors.map((e) => {
+        const old = prevErrors.find((p) => p.path === e.path && p.error === e.error);
+        return {
+          path: e.path,
+          error: e.error,
+          firstSeenAt: old?.firstSeenAt ?? now(),
+          lastSeenAt: now(),
+          ...(old?.dismissed && !syncOpts?.explicit ? { dismissed: true } : {}),
+        };
+      });
       save();
       return {
         tasks: tasks.filter((t) => t.projectId === projectId && t.source === "loop-file"),
         errors,
       };
+    },
+    loopErrors(projectId) {
+      const all = projectId
+        ? loopErrorsByProject[projectId] ?? []
+        : Object.values(loopErrorsByProject).flat();
+      return all.filter((e) => !e.dismissed).map((e) => ({ path: e.path, error: e.error }));
+    },
+    dismissLoopError(projectId, path) {
+      const e = (loopErrorsByProject[projectId] ?? []).find((x) => x.path === path && !x.dismissed);
+      if (!e) return false;
+      e.dismissed = true;
+      save();
+      return true;
     },
     start() {
       if (timer) return;
@@ -485,11 +530,17 @@ export function createScheduleService(opts: ScheduleServiceOptions): ScheduleSer
   };
 }
 
-function load(file: string): ScheduleTask[] {
+function load(file: string): { tasks: ScheduleTask[]; loopErrors: Record<string, ScheduleLoopError[]> } {
   try {
-    const parsed = JSON.parse(readFileSync(file, "utf8")) as { tasks?: ScheduleTask[] };
-    return Array.isArray(parsed.tasks) ? parsed.tasks : [];
+    const parsed = JSON.parse(readFileSync(file, "utf8")) as {
+      tasks?: ScheduleTask[];
+      loopErrors?: Record<string, ScheduleLoopError[]>;
+    };
+    return {
+      tasks: Array.isArray(parsed.tasks) ? parsed.tasks : [],
+      loopErrors: parsed.loopErrors && typeof parsed.loopErrors === "object" ? parsed.loopErrors : {},
+    };
   } catch {
-    return [];
+    return { tasks: [], loopErrors: {} };
   }
 }

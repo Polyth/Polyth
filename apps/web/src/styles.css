@@ -14,11 +14,12 @@
   --hair: rgba(255, 255, 255, 0.055);
   --hair-strong: rgba(255, 255, 255, 0.09);
 
-  /* ink */
+  /* ink — faint labels meaningful status metadata, so it holds ≥4.5:1 against
+     the accent-wash selected row, the worst-case surface (UX-FIXTURE-VISUAL) */
   --text: #f0eee8;
   --text-dim: #cbc6bc;
   --muted: #9c9890;
-  --faint: #928d84;
+  --faint: #96928a;
 
   /* accent + signals */
   --accent: #f49b5b;
@@ -85,10 +86,11 @@ html.light {
   --hair-strong: rgba(40, 30, 15, 0.12);
   --text: #2a2620;
   --text-dim: #4d473e;
-  --muted: #655f56;
-  --faint: #69635a;
+  --muted: #5b564e;
+  --faint: #6a6357;
   --accent: #d9822b;
-  --accent-ink: #fffaf2;
+  /* UX-A390: dark ink keeps Send/primary text ≥4.5:1 over both accent stops */
+  --accent-ink: #241404;
   --accent-hi: #e2954a;
   --accent-wash: rgba(217, 130, 43, 0.12);
   --accent-line: rgba(217, 130, 43, 0.4);
@@ -154,7 +156,12 @@ input, select, textarea {
   transition: border-color 120ms ease;
 }
 select { background-color: var(--elevated); }
-:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 2px; }
+/* UX-A390 a11y contract: focus is visible with at least a 2px outline and
+   2px offset on every surface. */
+/* Focus ring in the text token: --text is contrast-validated against every
+   bundled surface (accent falls under 3:1 on the light themes) and it stays
+   identifiable in monochrome capture. */
+:focus-visible { outline: 2px solid var(--text); outline-offset: 2px; }
 
 code {
   font-family: var(--mono);
@@ -289,7 +296,10 @@ html.light .project-glyph { background: linear-gradient(155deg, #ece5d8, #ddd3c2
 .session-row.active .session-btn::before {
   content: ""; position: absolute; left: 0; top: 9px; bottom: 9px; width: 2px; border-radius: 2px; background: var(--accent);
 }
-.session-row.archived { opacity: 0.45; }
+/* Archived rows stay subdued via ink roles, never whole-row opacity — the
+   status/time labels must keep normal-text contrast (UX-FIXTURE-VISUAL P1). */
+.session-row.archived .session-title { color: var(--muted); }
+.session-row.archived .dot { opacity: 0.5; }
 .session-body { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 2px; }
 .session-title-line { min-width: 0; display: flex; align-items: center; gap: 4px; }
 .session-title { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text-dim); letter-spacing: -0.01em; }
@@ -361,6 +371,7 @@ html.light .project-glyph { background: linear-gradient(155deg, #ece5d8, #ddd3c2
 }
 html.light .kbd { background: rgba(0, 0, 0, 0.04); }
 .form-error { color: var(--red); font-size: 12px; overflow-wrap: anywhere; }
+.loop-error-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 2px 0; }
 .form-actions { display: flex; justify-content: flex-end; gap: 6px; }
 .primary-btn { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); font-weight: 700; }
 .primary-btn:hover { background: var(--accent-hi); border-color: var(--accent-hi); }
@@ -372,8 +383,9 @@ html.light .kbd { background: rgba(0, 0, 0, 0.04); }
   height: 52px; min-height: 52px; padding: 0 14px 0 18px; border-bottom: 1px solid var(--border-soft);
   background: linear-gradient(180deg, var(--panel), var(--bg));
 }
-.mobile-menu-btn { display: none; }
-.header-session { flex: 1; min-width: 120px; }
+/* The title shrinks (truncating) before the tool nav does; free space goes to
+   the nav so overflow into More tools tracks the real available width. */
+.header-session { flex: 0 1 auto; min-width: 96px; overflow: hidden; }
 .header-title { font-size: 13.5px; font-weight: 600; letter-spacing: -.014em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .header-sub { color: var(--faint); font-size: 11px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .header-spacer { flex: 1; }
@@ -388,12 +400,20 @@ html.light .kbd { background: rgba(0, 0, 0, 0.04); }
 .ctx-badge.yellow { color: var(--amber); border-color: var(--amber); }
 .ctx-badge.red { color: var(--red); border-color: var(--red); }
 
-/* icon view switcher */
+/* icon view switcher: the nav grows into the free header space (its width is
+   the measuring basis for overflow into More tools — it must never depend on
+   its own contents); the inner pill hugs the icons. */
 .view-switcher {
-  display: flex; align-items: center; gap: 2px; flex-shrink: 0;
+  display: flex; align-items: center; justify-content: flex-end;
+  flex: 1 1 0; min-width: 140px;
+}
+.view-switcher-pill {
+  display: flex; align-items: center; gap: 2px; max-width: 100%;
   padding: 3px; background: var(--panel); border: 1px solid var(--hair); border-radius: 11px;
   box-shadow: var(--inset-hi);
 }
+.view-switcher::-webkit-scrollbar { display: none; }
+.view-switcher .view-group { flex: none; }
 .view-group { display: flex; align-items: center; gap: 2px; }
 .view-group + .view-group { margin-left: 4px; padding-left: 5px; border-left: 1px solid var(--hair-strong); }
 .view-icon {
@@ -527,6 +547,16 @@ html.light .hero h2 { background: none; -webkit-background-clip: initial; backgr
 .hero-open-project { margin-top: 18px; padding: 9px 18px; border-radius: var(--radius); font-size: 13px; cursor: pointer; }
 .side-open-project { display: block; width: 100%; background: none; border: 0; cursor: pointer; line-height: 1.5; }
 .side-open-project:hover { color: var(--text); }
+/* UX-ONBOARDING: registry loading/failure never claim "no projects". */
+.side-projects-status { padding: 24px 12px; font-size: 12px; }
+.hero-open-project:disabled { opacity: 0.55; cursor: default; }
+.hero-retry-projects { margin-top: 18px; padding: 9px 22px; border-radius: var(--radius); font-size: 13px; cursor: pointer; }
+.hero-status { margin-top: 14px; max-width: 470px; font-size: 11.5px; color: var(--faint); overflow-wrap: anywhere; }
+.hero-project-loading h2 { animation: hero-loading-pulse 1.6s ease-in-out infinite; }
+@keyframes hero-loading-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.55; } }
+@media (prefers-reduced-motion: reduce) {
+  .hero-project-loading h2 { animation: none; }
+}
 
 .empty { color: var(--muted); text-align: center; padding: 40px 20px; }
 .surface-error { min-height: 100%; }
@@ -567,6 +597,16 @@ html.light .hero h2 { background: none; -webkit-background-clip: initial; backgr
   padding: 12px max(var(--gutter), calc((100% - 920px) / 2)) 14px;
   background: var(--panel);
 }
+/* Archived-session read-only guard replaces the composer entirely: no draft,
+   no Send — one explicit restore action (UX-FIXTURE-VISUAL P1). */
+.archived-guard {
+  display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 10px 14px;
+  border-top: 1px solid var(--border-soft);
+  padding: 16px max(var(--gutter), calc((100% - 920px) / 2)) 18px;
+  background: var(--panel);
+}
+.archived-guard-text { font-size: 13px; color: var(--text-dim); }
+.archived-restore-btn { height: 32px; padding: 0 14px; border-radius: 9px; font-size: 12.5px; }
 .composer-hero { width: 100%; }
 .composer-card {
   background: linear-gradient(180deg, #211e1b, #1c1a18);
@@ -681,7 +721,20 @@ html.light .composer-card { background: var(--elevated); box-shadow: 0 24px 60px
 .composer-bar {
   display: flex; align-items: center; gap: 7px; padding: 9px 10px 10px 12px;
   border-top: 1px solid var(--hair);
+  /* Groups stay on one row at normal wide widths; when an open rail squeezes
+     the chat column they tier instead of overflowing the workspace. */
+  flex-wrap: wrap;
 }
+/* UX-A390 semantic groups: selectors · extension slots · actions. One row in
+   wide mode; the phone media block below turns them into the two-tier
+   command surface. */
+.composer-selectors { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; min-width: 0; }
+.composer-extensions { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; min-width: 0; max-width: 100%; }
+.composer-selectors:empty, .composer-extensions:empty { display: none; }
+/* flex-shrink 0: the action group never collapses below its buttons — in a
+   squeezed column it wraps onto its own bar row instead of bleeding out. */
+.composer-actions { display: flex; align-items: center; gap: 7px; flex: 1 0 auto; min-width: 0; }
+.composer-primary { margin-left: auto; display: flex; align-items: center; gap: 7px; flex: none; }
 
 /* model / agent pills (native selects dressed as pills) */
 .pill {
@@ -810,7 +863,11 @@ input.notification-preview { font-family: var(--mono); font-size: 12.5px; min-wi
 
 /* ---------- context rail ---------- */
 .rail {
-  width: var(--rail-w, 344px); min-width: var(--rail-w, 344px);
+  /* The preferred width yields when the chat column hits its minimum
+     (cramped wide viewports with an open rail), instead of pushing header
+     controls over the rail. 200px keeps panel content usable. */
+  width: var(--rail-w, 344px); min-width: min(var(--rail-w, 344px), 200px);
+  flex: 0 1 var(--rail-w, 344px);
   background: var(--panel); border-left: 1px solid var(--border-soft);
   display: flex; flex-direction: column;
   position: relative;
@@ -839,6 +896,33 @@ input.notification-preview { font-family: var(--mono); font-size: 12.5px; min-wi
 .rail-toggle { background: transparent; border: none; padding: 8px; color: var(--muted); }
 .rail-body { flex: 1; overflow-y: auto; padding: 10px; }
 .rail-empty { max-width: 210px; margin: 24px auto; color: var(--muted); text-align: center; line-height: 1.6; }
+
+/* ---- UX-PANE-MODEL: adaptive workspace pane shell ------------------------- */
+/* Docked workspace pane: JS measures geometry and decides admission; CSS only
+   realizes the chosen width (--rail-w). Kept-alive bodies fill the pane
+   edge-to-edge and own a single scroll axis inside the surface itself. */
+.rail-workspace .rail-body {
+  display: flex; flex-direction: column; padding: 0; overflow: hidden;
+  container-type: inline-size;
+}
+.rail-workspace .rail-body[hidden] { display: none; }
+/* Full-screen workspace layer: covers Chat (still mounted, inert underneath).
+   The 44px launcher strip stays beside it so surfaces remain one click away. */
+.rail-fullscreen {
+  position: fixed; top: 0; left: 0; bottom: 0; right: 44px; z-index: 40;
+  width: auto; min-width: 0;
+  border-left: none;
+}
+.pane-back { white-space: nowrap; color: var(--text); font-size: 12.5px; }
+/* Inner surfaces adapt to pane width (these were full main views before). */
+.rail-workspace .git-page { max-width: none; margin: 0; padding: 12px 14px; }
+@container (max-width: 700px) {
+  .git-grid { grid-template-columns: 1fr; }
+  .editor-tree { width: 180px; min-width: 180px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .rail, .rail-fullscreen, .workspace-bottom-nav { transition: none; animation: none; }
+}
 
 .stat-row { display: flex; justify-content: space-between; padding: 4px 0; border-bottom: 1px solid var(--border-soft); font-size: 12.5px; }
 .stat-row .k { color: var(--muted); }
@@ -1122,35 +1206,152 @@ html.light .error-banner { color: #a1352b; }
 .view-toolbar textarea { width: 100%; resize: none; }
 .view-toolbar-row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
 
-/* ---------- onboarding ---------- */
-.onboard {
-  min-height: 100vh; overflow: auto; display: grid; place-items: center; padding: 48px 24px;
-  background:
-    radial-gradient(720px 380px at 50% 4%, var(--accent-wash), transparent 70%),
-    var(--bg);
+/* ---------- optional workspace preset setup (UX-PERSONAS) ---------- */
+/* An overlay over the mounted workspace — never a gate. Skip stays visible
+   without scrolling; every interactive target is at least 44×44px; long
+   localized labels wrap; no horizontal page scroll at 320px. */
+.preset-scrim {
+  position: fixed; inset: 0; z-index: 60; display: grid; place-items: center;
+  padding: 12px; background: color-mix(in srgb, var(--bg) 62%, transparent);
+  backdrop-filter: blur(2px); overflow: hidden;
 }
-.onboard-inner { width: min(900px, 100%); text-align: center; }
-.onboard-inner > .welcome-mark {
-  display: inline-grid; place-items: center; width: 46px; height: 46px; margin-bottom: 16px;
-  border-radius: 14px; background: linear-gradient(160deg, var(--accent-hi), var(--accent));
-  color: var(--accent-ink); font: 700 24px/1 Inter, sans-serif; box-shadow: var(--shadow-lg);
+.preset-setup {
+  display: flex; flex-direction: column; width: min(880px, 100%);
+  max-height: min(92dvh, 860px); overflow: hidden;
+  background: var(--panel); border: 1px solid var(--hair-strong);
+  border-radius: var(--radius-xl); box-shadow: var(--shadow-lg);
 }
-.onboard-inner h1 { margin: 0; font-size: 32px; letter-spacing: -0.035em; }
-.onboard-inner > p { max-width: 600px; margin: 10px auto 28px; color: var(--muted); line-height: 1.6; }
-.onboard-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; margin-bottom: 18px; text-align: left; }
-.onboard-card {
-  min-height: 220px; display: flex; flex-direction: column; align-items: stretch; gap: 12px; padding: 18px;
+.preset-setup:focus { outline: none; }
+.preset-setup-top {
+  display: flex; align-items: flex-start; gap: 10px; padding: 18px 18px 10px;
+  border-bottom: 1px solid var(--border-soft);
+}
+/* The heading never squeezes beside the actions: below ~380px of row space
+   the actions wrap onto their own row instead. */
+.preset-setup-head { flex: 1 1 220px; min-width: 0; }
+.preset-kicker {
+  display: inline-block; margin-bottom: 6px; font: 650 10.5px/1.3 var(--mono);
+  letter-spacing: 0.09em; text-transform: uppercase; color: var(--accent);
+}
+.preset-setup-head h1 { margin: 0; font-size: clamp(19px, 4.5vw, 26px); letter-spacing: -0.03em; overflow-wrap: anywhere; }
+.preset-setup-head p { margin: 8px 0 0; max-width: 560px; color: var(--muted); font-size: 13px; line-height: 1.6; }
+.preset-setup-actions { display: flex; align-items: center; gap: 6px; flex: none; }
+.preset-skip {
+  min-width: 44px; min-height: 44px; padding: 10px 16px; font-size: 13px; font-weight: 650;
+  color: var(--text); background: var(--elevated);
+  border: 1px solid var(--border); border-radius: 10px; cursor: pointer;
+}
+.preset-skip:hover { background: var(--raised); border-color: var(--accent-line); }
+.preset-close {
+  min-width: 44px; min-height: 44px; border: none; border-radius: 10px;
+  background: transparent; color: var(--muted); font-size: 20px; cursor: pointer;
+}
+.preset-close:hover { color: var(--text); background: var(--elevated); }
+.preset-setup-scroll { overflow-y: auto; overflow-x: hidden; padding: 16px 18px 18px; }
+.preset-cards {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 10px; text-align: left;
+}
+.preset-card {
+  display: flex; flex-direction: column; gap: 8px; min-height: 44px; padding: 14px;
   background: var(--elevated); border: 1px solid var(--hair-strong); border-radius: var(--radius-xl);
-  box-shadow: var(--inset-hi); text-align: left;
+  box-shadow: var(--inset-hi); text-align: left; cursor: pointer;
 }
-.onboard-card:hover { background: var(--raised); border-color: var(--border); transform: translateY(-1px); }
-.onboard-card.featured { border-color: var(--accent-line); box-shadow: 0 18px 40px -32px var(--accent), var(--inset-hi); }
-.onboard-card-title { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
-.onboard-card-name { display: inline-flex; align-items: center; gap: 8px; color: var(--text); font-size: 15px; font-weight: 650; }
-.onboard-card p { flex: 1; margin: 0; color: var(--muted); font-size: 13px; line-height: 1.55; }
-.onboard-tags { display: flex; flex-wrap: wrap; gap: 5px; }
-.onboard-cta { align-self: flex-start; }
-.onboard-inner > .ghost-link { margin: 4px 8px; }
+.preset-card:hover { background: var(--raised); border-color: var(--border); }
+/* Selection is shown by text (✓ Selected) as well as color. */
+.preset-card.selected { border-color: var(--accent); background: var(--accent-wash); }
+.preset-card-title {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 8px;
+  color: var(--text); font-size: 14.5px; font-weight: 650; overflow-wrap: anywhere;
+}
+.preset-card-state { flex: none; color: var(--accent); font-size: 11.5px; font-weight: 650; }
+.preset-card-desc { color: var(--muted); font-size: 12.5px; line-height: 1.5; overflow-wrap: anywhere; }
+.preset-preview {
+  margin-top: 14px; padding: 12px 14px; text-align: left;
+  background: var(--elevated); border: 1px solid var(--border-soft); border-radius: var(--radius-xl);
+}
+.preset-preview-text {
+  margin: 0; white-space: pre-wrap; overflow-wrap: anywhere;
+  font: 400 12.5px/1.6 inherit; font-family: inherit; color: var(--text);
+}
+.preset-preview-note { margin: 10px 0 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
+.preset-confirm {
+  margin-top: 12px; min-height: 44px; padding: 10px 18px; font-size: 13.5px; font-weight: 700;
+  color: var(--accent-ink); background: linear-gradient(160deg, var(--accent-hi), var(--accent));
+  border: none; border-radius: 10px; cursor: pointer;
+}
+.preset-confirm:hover { filter: brightness(1.05); }
+.preset-persistence-note { margin: 14px 0 0; color: var(--muted); font-size: 11.5px; }
+.preset-preview-settings { margin: 8px 0 14px; }
+.preset-settings-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+@media (max-width: 480px) {
+  .preset-setup-top { flex-wrap: wrap; }
+  .preset-cards { grid-template-columns: 1fr; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .preset-scrim { backdrop-filter: none; }
+  .preset-card, .preset-card:hover { transform: none; transition: none; }
+}
+
+/* ---------- More tools disclosure (header + rail) ---------- */
+.more-tools { position: relative; display: inline-flex; }
+.more-tools-trigger {
+  min-width: 44px; min-height: 34px; padding: 6px 12px; font-size: 12px; font-weight: 650;
+  color: var(--muted); background: transparent; border: 1px solid var(--border-soft);
+  border-radius: 8px; cursor: pointer; white-space: nowrap;
+}
+.more-tools-trigger:hover, .more-tools-trigger[aria-expanded="true"] {
+  color: var(--text); background: var(--elevated); border-color: var(--border);
+}
+.more-tools-popup {
+  position: absolute; top: calc(100% + 6px); right: 0; z-index: 55;
+  min-width: 250px; max-width: min(320px, 90vw); max-height: min(65dvh, 480px);
+  overflow-y: auto; padding: 6px;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 12px;
+  box-shadow: var(--shadow-lg); text-align: left;
+}
+.more-tools-group { display: flex; flex-direction: column; }
+.more-tools-group-label {
+  padding: 7px 10px 3px; font-size: 10px; font-weight: 650; letter-spacing: 0.07em;
+  text-transform: uppercase; color: var(--muted);
+}
+.more-tools-group-head {
+  display: flex; align-items: center; gap: 6px; min-height: 44px; padding: 6px 10px;
+  border: none; border-radius: 8px; background: transparent; text-align: left;
+  font-size: 12.5px; font-weight: 650; color: var(--text); cursor: pointer;
+}
+.more-tools-group-head:hover { background: var(--elevated); }
+.more-tools-group-arrow { color: var(--muted); font-size: 10px; }
+.more-tools-item {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 2px;
+  min-height: 44px; justify-content: center; width: 100%; padding: 6px 10px;
+  border: none; border-radius: 8px; background: transparent; text-align: left;
+  font-size: 12.5px; color: var(--text); cursor: pointer; overflow-wrap: anywhere;
+}
+.more-tools-item:hover:not(:disabled) { background: var(--elevated); }
+.more-tools-item:disabled { color: var(--muted); cursor: not-allowed; opacity: 0.75; }
+.more-tools-reason { font-size: 11px; color: var(--muted); }
+.view-icon-named { width: auto; gap: 5px; padding: 0 8px; }
+.view-icon-label { font-size: 11.5px; font-weight: 650; white-space: nowrap; }
+.strip-more { min-height: 44px; }
+.strip-more-text { font-size: 10.5px; font-weight: 650; }
+
+/* ---------- composer technical options (UX-PERSONAS) ---------- */
+.composer-tech-toggle {
+  min-height: 30px; padding: 4px 10px; font-size: 11.5px; font-weight: 650;
+  color: var(--muted); background: transparent; border: 1px solid var(--border-soft);
+  border-radius: 8px; cursor: pointer; white-space: nowrap;
+}
+.composer-tech-toggle:hover, .composer-tech-toggle[aria-expanded="true"] {
+  color: var(--text); background: var(--elevated); border-color: var(--border);
+}
+.composer-tech-help {
+  padding: 5px 12px 0; color: var(--muted); font-size: 11.5px; line-height: 1.5;
+}
+.composer-tech-help kbd {
+  padding: 0 4px; border: 1px solid var(--border-soft); border-radius: 4px;
+  font: 500 10.5px/1.6 var(--mono); color: var(--text);
+}
 
 /* ---------- auto-accept chip (F18) ---------- */
 .auto-accept-chip {
@@ -1374,6 +1575,14 @@ html.light .error-banner { color: #a1352b; }
 }
 .git-wt-remove { position: absolute; top: 6px; right: 6px; }
 .git-wt-session { position: absolute; top: 6px; right: 70px; }
+/* Changes header: counts + Flat/Tree + Stage/Unstage all must stay inside the
+   300px left column — wrap onto new rows instead of overpainting the diff
+   heading in the right pane (UX-FIXTURE-VISUAL P1). */
+.git-changes-head {
+  display: flex; flex-wrap: wrap; align-items: center;
+  gap: 4px 6px; min-width: 0;
+}
+.git-changes-head .git-ahead-behind { flex-wrap: wrap; margin-left: 0; }
 .git-changes { display: flex; flex-direction: column; gap: 1px; }
 .git-file-row.selected { background: var(--elevated); }
 .git-diff-page { max-height: 480px; flex: 1; }
@@ -1578,6 +1787,8 @@ html.light .switch:hover { background: var(--border); }
 .plugin-strip {
   position: relative; width: 44px; min-width: 44px; min-height: 0;
   display: flex; flex-direction: column; align-items: center; gap: 3px; padding: 10px 0;
+  /* Short viewports: surface icons scroll instead of clipping past the fold. */
+  overflow-y: auto;
   background: var(--panel); border-left: 1px solid var(--border-soft);
 }
 .strip-btn {
@@ -1718,7 +1929,8 @@ html[data-density="compact"] .stat-row { padding: 2px 0; }
 html[data-density="compact"] .set-row { padding: 9px 0; }
 
 @media (max-width: 1100px) {
-  .rail { width: 300px; min-width: 300px; }
+  /* workspace panes keep their measured JS-decided width (--rail-w) */
+  .rail:not(.rail-workspace) { width: 300px; min-width: 300px; }
   .sidebar { width: 224px; min-width: 224px; }
   .header-nav {
     padding-bottom: 3px; scrollbar-width: thin; scrollbar-color: var(--border) transparent;
@@ -1732,8 +1944,10 @@ html[data-density="compact"] .set-row { padding: 9px 0; }
   .goal-stat-grid { grid-template-columns: repeat(2, 1fr); }
 }
 @media (max-width: 1000px) {
-  /* docked rail overlays the conversation instead of squeezing it (UX-07) */
-  .rail {
+  /* contextual rail overlays the conversation instead of squeezing it (UX-07);
+     workspace panes instead dock or promote to full-screen via measured
+     admission, so they are excluded here. */
+  .rail:not(.rail-workspace) {
     position: fixed; top: 0; bottom: 28px; right: 44px; z-index: 30;
     width: 320px; min-width: 320px;
     border-left: 1px solid var(--border);
@@ -1744,22 +1958,11 @@ html[data-density="compact"] .set-row { padding: 9px 0; }
   .onboard-grid { grid-template-columns: 1fr; }
 }
 @media (max-width: 820px) {
-  .sidebar { display: none; }
-  .sidebar.open {
-    display: flex; position: fixed; inset: 0 auto 0 0; z-index: 210;
-    width: min(320px, 88vw); min-width: 0; height: 100dvh;
-    box-shadow: 18px 0 48px rgba(0, 0, 0, 0.5);
-  }
-  .sidebar-backdrop {
-    display: block; position: fixed; inset: 0; z-index: 200;
-    background: var(--scrim); backdrop-filter: blur(4px);
-  }
-  .mobile-sidebar-close, .mobile-menu-btn { display: grid; place-items: center; }
-  .rail { display: none; }
-  .header { gap: 8px; padding-inline: 10px; }
-  .header-session { flex: 0 1 160px; min-width: 0; }
-  .auto-accept-chip { width: 30px; height: 30px; justify-content: center; padding: 0; }
-  .auto-accept-label { display: none; }
+  /* Compact: workspace surfaces are always the full-screen layer; the desktop
+     dock and separator reserve no width. Contextual surfaces use A390's
+     modal sheet, while workspace panes retain the pane-model layer. */
+  .rail:not(.rail-fullscreen) { display: none; }
+  .rail-fullscreen { right: 0; bottom: calc(52px + env(safe-area-inset-bottom, 0px)); }
   .timeline { padding-inline: 16px; }
   .composer { padding-inline: 12px; }
   .composer-bar { flex-wrap: wrap; }
@@ -1774,6 +1977,31 @@ html[data-density="compact"] .set-row { padding: 9px 0; }
   .view-switcher::-webkit-scrollbar { display: none; }
 }
 
+/* ---- UX-PANE-MODEL: compact bottom navigation ------------------------------ */
+/* One bounded row (Chat, Files, Git, Terminal, Preview) above the safe area at
+   max-width:820px. Navigation, not a modal: it stays visible under the
+   full-screen workspace layer and is never clipped by it. Five >=44px targets
+   fit a 320px viewport without horizontal scroll (5 x 44 = 220). */
+.workspace-bottom-nav { display: none; }
+@media (max-width: 820px) {
+  .workspace-bottom-nav {
+    position: fixed; left: 0; right: 0; bottom: 0; z-index: 41;
+    display: flex; align-items: stretch;
+    height: calc(52px + env(safe-area-inset-bottom, 0px));
+    padding: 0 2px env(safe-area-inset-bottom, 0px);
+    background: var(--panel); border-top: 1px solid var(--border);
+  }
+  .wbn-item {
+    flex: 1 1 0; min-width: 44px; min-height: 44px;
+    display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 3px;
+    background: none; border: 0; border-radius: 0; color: var(--muted); padding: 4px 2px;
+  }
+  .wbn-item.current { color: var(--accent); }
+  .wbn-label { font-size: 10px; line-height: 1; }
+  /* Chat content (composer + statusbar) scrolls/lands above the fixed row. */
+  .workspace { padding-bottom: calc(52px + env(safe-area-inset-bottom, 0px)); }
+}
+
 /* ---------- searchable picker (replaces native selects) ---------- */
 .picker { position: relative; display: inline-flex; min-width: 0; }
 .picker-chip {
@@ -1781,6 +2009,7 @@ html[data-density="compact"] .set-row { padding: 9px 0; }
   padding: 3px 10px; font-size: 12px;
 }
 .chip-k { color: var(--muted); font-size: 10.5px; font-weight: 650; letter-spacing: .04em; text-transform: uppercase; }
+.picker-trigger-icon { display: inline-grid; place-items: center; flex: none; color: var(--muted); }
 .picker-chip-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .picker-caret { color: var(--muted); font-size: 9px; }
 .picker-pop {
@@ -1969,9 +2198,22 @@ html[data-density="compact"] .set-row { padding: 9px 0; }
 .switch:disabled { opacity: 0.45; cursor: not-allowed; }
 
 /* mic button (composer.leading) */
-.mic-btn { display: grid; place-items: center; color: var(--muted); }
+/* UX-COMPOSER-DISC: visible dictation lifecycle — the control is a labeled
+   chip (`Dictate` / `Stop dictation`), never icon-only, and its state is
+   carried by visible text, not color alone. */
+.mic-control { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
+.mic-btn { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); height: 30px; padding: 0 10px; }
 .mic-btn:hover { color: var(--text); }
+.mic-btn:disabled { opacity: 0.55; cursor: default; transform: none; }
 .mic-btn.listening { color: var(--red); border-color: var(--red); animation: pulse 1.2s ease-in-out infinite; }
+.mic-icon { display: grid; place-items: center; }
+.mic-label { font-size: 12px; font-weight: 550; white-space: nowrap; }
+.mic-status {
+  font-size: 11.5px; color: var(--muted); min-width: 0;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 220px;
+}
+.mic-failed .mic-status { color: var(--red); }
+.mic-listening .mic-status, .mic-transcribing .mic-status, .mic-starting .mic-status { color: var(--text-dim); }
 
 /* schedule view */
 .sched-form { display: flex; flex-direction: column; gap: 8px; border: 1px solid var(--hair-strong); border-radius: var(--radius-lg); background: var(--elevated); padding: 14px 16px; box-shadow: var(--inset-hi); }
@@ -2071,6 +2313,15 @@ body[data-motion="reduced"] *, body[data-motion="reduced"] *::before, body[data-
 
 /* ---------- open-project folder picker (file manager dialog) ---------- */
 .folder-dialog { width: min(720px, calc(100vw - 48px)); gap: 0; }
+/* UX-ONBOARDING: one keyboard-owning wrapper (Mod+Enter direct confirm)
+   preserving the panel's column layout. */
+.folder-dialog-body { display: flex; flex-direction: column; gap: 10px; min-height: 0; flex: 1; }
+.folder-up-action {
+  background: none; border: 0; font: inherit; color: inherit; text-align: left;
+  width: auto; margin: 0 18px;
+}
+.folder-up-action:disabled { opacity: 0.5; cursor: default; }
+.folder-list[aria-busy="true"] { opacity: 0.6; pointer-events: none; }
 .folder-dialog-head {
   display: flex; align-items: flex-start; justify-content: space-between; gap: 12px;
   padding: 16px 18px 10px;
@@ -2212,11 +2463,60 @@ body[data-motion="reduced"] *, body[data-motion="reduced"] *::before, body[data-
 .gallery-nav.prev { left: 10px; }
 .gallery-nav.next { right: 10px; }
 
-/* message actions + prompt navigator */
+/* message actions + prompt navigator (UX-MSG-ACTIONS) */
 .msg { position: relative; }
-.msg-actions { display: flex; gap: 4px; align-items: center; justify-content: flex-end; opacity: 0; transition: opacity 120ms; margin-top: 2px; }
-.msg:hover .msg-actions, .msg-actions:focus-within { opacity: 1; }
-.msg-actions-flash { font-size: 11px; color: var(--green, #8bcf6b); }
+/* Time stays visible; actions reveal on message hover or action focus-within.
+   Hidden controls keep keyboard focusability but no pointer hit area. */
+.msg-meta { display: flex; gap: 8px; align-items: center; justify-content: flex-end; margin-top: 2px; min-height: 24px; }
+.msg-time { font-size: 11px; color: var(--muted); white-space: nowrap; }
+.msg-actions { display: flex; gap: 4px; align-items: center; opacity: 0; pointer-events: none; transition: opacity 120ms; }
+.msg:hover .msg-actions,
+.msg-meta:focus-within .msg-actions,
+.msg-actions:focus-within { opacity: 1; pointer-events: auto; }
+.msg-actions button[disabled] { opacity: 0.55; cursor: not-allowed; }
+/* Persistent named touch entry (≥44px) + its ≥44px menu rows. Hidden at
+   hover-capable desktop widths; the inline row hides at touch/narrow. */
+.msg-actions-menu-wrap { position: relative; display: none; }
+.msg-actions-entry {
+  display: inline-flex; align-items: center; justify-content: center;
+  min-width: 44px; min-height: 44px; font-size: 18px; line-height: 1;
+  border: 1px solid var(--border-soft); border-radius: var(--radius);
+  background: var(--panel); color: var(--fg); cursor: pointer;
+}
+.msg-actions-entry[aria-expanded="true"] { border-color: var(--accent); }
+.msg-actions-popup {
+  position: absolute; right: 0; bottom: calc(100% + 4px); z-index: 30;
+  display: flex; flex-direction: column; min-width: 250px; max-width: calc(100vw - 24px);
+  background: var(--panel); border: 1px solid var(--border); border-radius: var(--radius);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35); padding: 4px;
+}
+.msg-actions-item {
+  min-height: 44px; text-align: left; padding: 10px 12px; font-size: 13px;
+  background: transparent; border: 0; border-radius: calc(var(--radius) - 2px);
+  color: var(--fg); cursor: pointer;
+}
+.msg-actions-item:hover, .msg-actions-item:focus-visible { background: var(--surface); }
+.msg-actions-item[disabled] { opacity: 0.55; cursor: not-allowed; }
+@media (hover: none), (max-width: 480px) {
+  .msg-actions { display: none; }
+  .msg-actions-menu-wrap { display: inline-flex; }
+}
+/* One timeline live region: visible chip + polite announcement. */
+.msg-live {
+  position: sticky; bottom: 4px; align-self: flex-end; z-index: 5;
+  font-size: 12px; color: var(--fg); min-height: 0; max-width: 90%;
+}
+.msg-live:not(:empty) {
+  background: var(--panel); border: 1px solid var(--border-soft);
+  border-radius: var(--radius); padding: 4px 10px;
+}
+.reasoning-actions { margin-top: 8px; }
+.rewound-confirm {
+  display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+  padding: 8px 10px; font-size: 12px;
+  background: var(--panel); border: 1px dashed var(--border);
+  border-radius: var(--radius);
+}
 .timeline { position: relative; }
 .timeline-open { align-self: flex-start; position: sticky; top: 8px; z-index: 4; }
 .rewound-tail {
@@ -2772,3 +3072,240 @@ body[data-motion="reduced"] .settings-row.flash { animation: none; outline: 1px 
   border: 1px dashed var(--hair-strong); background: var(--elevated); color: var(--fg);
 }
 .assist-chip:hover { border-color: var(--accent); color: var(--accent); }
+
+/* ===================== UX-A390 Ember command shelf ======================
+   Width alone selects the shell mode (see responsiveShell.ts — the same
+   literal boundaries: compact ≤ 820px, phone ≤ 480px, short ≤ 600px height).
+   compact: the sidebar is a modal drawer, the view picker is compact, right
+   panels are modal sheets, and no rail width is reserved. */
+@media (max-width: 820px) {
+  /* Project/session drawer: fixed, above the workspace, never consumes
+     layout width. Closed = fully translated out, hidden, inert (JS). */
+  .sidebar {
+    position: fixed; top: 0; bottom: 0; left: 0; z-index: 120;
+    width: min(320px, calc(100vw - 24px)); min-width: 0; height: 100%;
+    border-right: 1px solid var(--border);
+    box-shadow: var(--shadow-lg);
+    transform: translateX(-102%); visibility: hidden;
+    /* ≤160ms budget (spec): 120ms leaves frame-alignment headroom so geometry
+       is provably settled at the 160ms sample point. */
+    transition: transform 120ms ease, visibility 120ms;
+  }
+  .sidebar.open { transform: none; visibility: visible; }
+  .sidebar-backdrop {
+    display: block; position: fixed; inset: 0; z-index: 119;
+    background: var(--scrim); backdrop-filter: blur(4px);
+  }
+  .sidebar .side-icons .icon-btn, .sidebar .drawer-close { width: 44px; height: 44px; }
+  .sidebar .session-btn { min-height: 44px; }
+  .sidebar .project-card { min-height: 44px; }
+  .sidebar .side-foot .new-session, .sidebar .side-foot .settings-btn { height: 44px; }
+  .sidebar .side-open-project { min-height: 44px; }
+
+  /* Header shelf: bounded fixed controls around one flexible title column. */
+  .header { gap: 8px; padding: 0 10px; }
+  .header-session { flex: 1 1 0; min-width: 0; }
+  .header-drawer-btn, .narrow-panel-trigger { width: 44px; height: 44px; flex: none; }
+  /* Icon boundaries at 3:1 in every bundled theme (muted misses in solar). */
+  .header-drawer-btn, .narrow-panel-trigger, .header .overflow-trigger { color: var(--text-dim); }
+  .header .overflow-trigger { width: 44px; height: 44px; }
+  .header-view-picker { flex: none; }
+  .header-view-picker .picker-chip { height: 44px; max-width: 190px; }
+  /* Actionable text: the current-view label reads at 4.5:1 in every bundled
+     theme (muted/dim tokens fall short in the light themes). */
+  .header-view-picker .picker-chip-text { color: var(--text); }
+  .header-view-picker .picker-pop { left: auto; right: 0; }
+  .auto-accept-chip { min-height: 44px; }
+
+  /* Registered panel sheet: overlays the workspace above the status bar;
+     the strip lives inside it and reserves zero inline width. */
+  .panel-sheet {
+    position: fixed; top: 0; right: 0; bottom: 28px; z-index: 120;
+    width: min(380px, 100vw);
+    display: flex; flex-direction: column; min-height: 0;
+    background: var(--panel); border-left: 1px solid var(--border);
+    box-shadow: var(--shadow-lg);
+  }
+  .sheet-backdrop { position: fixed; inset: 0; z-index: 119; background: var(--scrim); }
+  .sheet-head { flex: none; }
+  .sheet-close { width: 44px; height: 44px; font-size: 17px; }
+  .plugin-strip.sheet-strip {
+    position: relative; width: auto; min-width: 0; flex: none;
+    display: flex; flex-direction: row; flex-wrap: wrap; align-items: center; gap: 4px;
+    padding: 6px 8px; border-left: none; border-bottom: 1px solid var(--border-soft);
+  }
+  .sheet-strip .rail-icon, .sheet-strip .strip-btn { width: 44px; height: 44px; }
+  .sheet-strip .strip-sep { width: 1px; height: 24px; margin: 0 4px; border-top: none; border-left: 1px solid var(--border-soft); }
+  .sheet-strip .strip-spacer { flex: 1; min-height: 0; }
+  .sheet-strip .strip-picker { right: 8px; top: calc(100% + 4px); bottom: auto; }
+  .panel-sheet .rail-body { flex: 1; min-height: 0; overflow-y: auto; }
+
+  .timeline { padding-inline: 16px; }
+  .composer { padding-inline: 12px; }
+}
+
+/* phone: compact rules plus the exact phone header, two-tier composer,
+   prioritized status bar, and wrapped hero. */
+@media (max-width: 480px) {
+  .header { height: 56px; min-height: 56px; padding: 0 8px; gap: 4px; }
+  .header-sub { display: none; }
+  .header .ctx-ring { display: none; }
+  .auto-accept-chip { width: 44px; height: 44px; min-width: 44px; padding: 0; justify-content: center; }
+  .auto-accept-chip svg { width: 16px; height: 16px; }
+  .auto-accept-chip .auto-accept-text { display: none; }
+  .header-view-picker .picker-chip {
+    width: 44px; height: 44px; min-width: 44px; max-width: none;
+    padding: 0; justify-content: center;
+  }
+  .header-view-picker .picker-chip-text, .header-view-picker .picker-caret { display: none; }
+  .header-view-picker .picker-pop { position: fixed; left: 8px; right: 8px; top: 60px; width: auto; }
+
+  .panel-sheet { width: 100vw; border-left: none; }
+
+  /* Two-tier composer: selector grid, wrapped extensions, one action row. */
+  .composer { padding-inline: 8px; }
+  .composer-bar { flex-direction: column; align-items: stretch; gap: 8px; padding: 8px 8px 10px; }
+  .composer-selectors { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; }
+  .composer-selectors .picker { min-width: 0; width: 100%; display: flex; }
+  .composer-selectors .picker-profile { grid-column: 1 / -1; }
+  .composer-selectors .picker-chip {
+    width: 100%; max-width: none; min-width: 0; height: 44px; justify-content: flex-start;
+  }
+  .composer-selectors .picker-pop {
+    position: fixed; left: 8px; right: 8px; bottom: 12px; top: auto; width: auto; z-index: 121;
+  }
+  .composer-actions { flex-wrap: wrap; }
+  .composer-actions .icon-btn { width: 44px; height: 44px; font-size: 20px; }
+  .composer-actions .send, .composer-actions .stop { min-height: 44px; }
+  .composer-actions .send-key { display: none; }
+
+  /* Hero and stage: wrapped, reachable, no clipped primary action. */
+  .hero h2 { font-size: clamp(22px, 8vw, 30px); }
+  .hero-sub { margin: 10px 0 22px; }
+  .hero-foot { flex-wrap: wrap; justify-content: center; row-gap: 6px; }
+  .starter-chips .chip { max-width: 100%; height: auto; min-height: 36px; white-space: normal; text-align: left; }
+
+  /* Status bar priority: project identity/status at the start, current view
+     at the end; branch/model/agent stay in drawer/header/panels. */
+  .statusbar { overflow: hidden; padding: 0 8px; }
+  .sb-branch, .sb-model, .sb-agent, .statusbar .sb-sep { display: none; }
+  .sb-project { flex: 0 1 auto; min-width: 0; }
+  .sb-project .sb-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .sb-view { flex: none; }
+}
+
+/* short: oversized content aligns to scroll start; every action stays
+   reachable through positive scrolling. Combines with any width mode. */
+@media (max-width: 480px), (max-height: 600px) {
+  .stage { align-items: flex-start; justify-content: flex-start; padding: 16px 16px 24px; }
+  .hero { margin-inline: auto; }
+}
+/* ================== end UX-A390 Ember command shelf ==================== */
+
+/* ================== UX-COMPOSER-DISC: honest discovery ==================== */
+
+/* Shared invisible click-catcher for transient menus/popovers (Picker, Add
+   menu). Sits under the popover layer; a press on it closes the surface. */
+.menu-backdrop { position: fixed; inset: 0; z-index: 40; background: transparent; }
+
+/* --- Add trigger + menu ---------------------------------------------------- */
+.composer-add { position: relative; display: inline-flex; }
+.composer-add-trigger { height: 32px; padding: 0 11px; gap: 6px; color: var(--text-dim); }
+.composer-add-icon { display: grid; place-items: center; }
+.composer-add-label { font-weight: 560; }
+.add-menu {
+  position: absolute; left: 0; z-index: 41;
+  width: 300px; max-width: min(340px, calc(100vw - 16px));
+  max-height: min(60vh, 420px); overflow-y: auto;
+  display: flex; flex-direction: column; padding: 5px;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.55);
+  animation: pop .12s ease;
+}
+.add-menu.up { bottom: calc(100% + 6px); }
+.add-menu.down { top: calc(100% + 6px); }
+.add-menu-group {
+  padding: 7px 10px 3px; font-size: 10px; font-weight: 650;
+  letter-spacing: 0.07em; text-transform: uppercase; color: var(--muted);
+}
+.add-menu-item {
+  display: flex; align-items: flex-start; gap: 10px; width: 100%;
+  border: none; background: none; border-radius: 7px;
+  padding: 7px 10px; text-align: left; font: inherit; font-size: 12.5px;
+  color: var(--text); cursor: pointer;
+}
+.add-menu-item:hover, .add-menu-item:focus-visible { background: var(--accent-wash); }
+.add-menu-item[aria-disabled="true"] { cursor: default; }
+.add-menu-item[aria-disabled="true"] .add-menu-label { color: var(--muted); }
+.add-menu-main { display: flex; flex-direction: column; gap: 1px; min-width: 0; flex: 1; }
+.add-menu-label { font-weight: 550; }
+.add-menu-desc { font-size: 11px; color: var(--muted); }
+/* The disabled reason is visible text, never tooltip-only, and not
+   color-coded alone. */
+.add-menu-reason { font-size: 11px; color: var(--text-dim); font-style: italic; }
+.add-menu-hint {
+  flex: none; font-family: var(--mono); font-size: 11.5px; color: var(--faint);
+  border: 1px solid var(--hair); border-radius: 5px; padding: 1px 6px; margin-top: 1px;
+}
+
+/* --- GitHub link dialog ---------------------------------------------------- */
+.github-link-dialog { display: flex; flex-direction: column; gap: 10px; padding: 14px 16px; width: min(440px, calc(100vw - 32px)); }
+.github-link-title { margin: 0; font-size: 14px; }
+.github-link-copy { margin: 0; font-size: 12px; color: var(--muted); }
+.github-link-dialog input {
+  width: 100%; padding: 8px 10px; font-size: 12.5px;
+  background: var(--sunken); color: var(--text);
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+}
+.github-link-error { font-size: 12px; color: var(--red); }
+.github-link-actions { display: flex; justify-content: flex-end; gap: 8px; }
+
+/* --- autocomplete status states -------------------------------------------- */
+/* Instructional / loading / empty / error body keeps the popup visible; the
+   copy itself names the state (no color-only signal). */
+.ac-status {
+  display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+  padding: 9px 10px; font-size: 12px; color: var(--muted);
+}
+.ac-create-snippet { flex: none; }
+.ac-footer {
+  display: flex; gap: 12px; padding: 4px 10px; font-size: 10.5px; color: var(--faint);
+  border-top: 1px solid var(--border-soft);
+}
+
+/* --- picker footer action (Create profile… / Create advanced setup…) ------- */
+.picker-footer { border-top: 1px solid var(--border-soft); padding: 5px; display: flex; flex-direction: column; gap: 4px; }
+.picker-footer-action {
+  width: 100%; border: none; background: none; border-radius: 6px;
+  padding: 6px 8px; text-align: left; font: inherit; font-size: 12.5px;
+  color: var(--accent); cursor: pointer;
+}
+.picker-footer-action:hover, .picker-footer-action:focus-visible { background: var(--accent-wash); }
+.picker-footer-action[aria-disabled="true"] { color: var(--muted); cursor: default; }
+.picker-footer-reason {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  padding: 0 8px 4px; font-size: 11px; color: var(--muted);
+}
+
+/* --- composer notes --------------------------------------------------------- */
+.composer-attach-note { padding: 2px 14px 0; font-size: 11px; color: var(--muted); }
+.composer-profile-missing { color: var(--amber); }
+
+/* --- coarse pointer / phone targets ----------------------------------------- */
+@media (pointer: coarse) {
+  .composer-add-trigger { min-height: 44px; min-width: 44px; }
+  .mic-btn { min-height: 44px; min-width: 44px; }
+  .add-menu-item { min-height: 44px; align-items: center; }
+  .picker-footer-action { min-height: 44px; }
+}
+@media (max-width: 640px) {
+  .composer-add-trigger { min-height: 44px; min-width: 44px; }
+  .mic-btn { min-height: 44px; }
+  .composer-extensions { flex-wrap: wrap; row-gap: 4px; }
+  .mic-status { max-width: 160px; }
+  /* Bounded popups: viewport width minus 16px, opening over the composer. */
+  .composer-actions .add-menu {
+    position: fixed; left: 8px; right: 8px; bottom: 12px; top: auto; width: auto; z-index: 121;
+  }
+}
+/* ================== end UX-COMPOSER-DISC ================================== */

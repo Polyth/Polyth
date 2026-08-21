@@ -1,12 +1,17 @@
 import assert from "node:assert/strict";
 import http from "node:http";
 import { test } from "node:test";
-import type { RuntimeEvent } from "@polyth/contracts";
+import type { ModelMessage, RuntimeEvent } from "@polyth/contracts";
 import {
   createOpenCodeClient,
   createOpenCodeRuntimeWithClient,
   flattenModels,
 } from "../src/index.ts";
+import {
+  createTranslateState,
+  flushAssistantOnIdle,
+  translateOcEvent,
+} from "../src/events.ts";
 
 interface ScriptedEvent {
   id: string;
@@ -436,6 +441,271 @@ test("startTurn maps attachments to file parts; url attachments stay text (F2)",
     await runtime.dispose();
     fake.server.close();
   }
+});
+
+// ---------------------------------------------------------------- UX-MSG-ACTIONS: native branch
+
+interface FakeMessage {
+  info: { id: string; role: string };
+  parts: Array<{ type: string; text?: string }>;
+}
+
+const fakeMsg = (id: string, role: string, text: string): FakeMessage => ({
+  info: { id, role },
+  parts: [{ type: "text", text }],
+});
+
+/** Minimal fork-capable OpenCode fake: message lists per session, native
+ *  /fork copying strictly BEFORE messageID, DELETE, and prompt capture. */
+const startForkFake = async () => {
+  const sessions = new Map<string, FakeMessage[]>();
+  let forkSeq = 0;
+  const forkBodies: Array<Record<string, unknown>> = [];
+  const deleted: string[] = [];
+  const promptPaths: string[] = [];
+  let createdSeq = 0;
+  const state = { breakFork: false };
+
+  const server = http.createServer((req, res) => {
+    const url = new URL(req.url ?? "/", "http://127.0.0.1");
+    const path = url.pathname;
+    const json = (code: number, body: unknown) => {
+      res.writeHead(code, { "content-type": "application/json" });
+      res.end(JSON.stringify(body));
+    };
+    const readBody = (cb: (body: Record<string, unknown>) => void) => {
+      let raw = "";
+      req.on("data", (c) => (raw += c));
+      req.on("end", () => cb(JSON.parse(raw || "{}") as Record<string, unknown>));
+    };
+    if (req.method === "GET" && path === "/event") {
+      res.writeHead(200, { "content-type": "text/event-stream" });
+      res.write("data: {\"type\":\"server.connected\",\"properties\":{}}\n\n");
+      return;
+    }
+    const messages = path.match(/^\/session\/([^/]+)\/message$/);
+    if (req.method === "GET" && messages) return json(200, sessions.get(messages[1]!) ?? []);
+    if (req.method === "POST" && messages) {
+      promptPaths.push(path);
+      return json(200, { ok: true });
+    }
+    const prompt = path.match(/^\/session\/([^/]+)\/prompt_async$/);
+    if (req.method === "POST" && prompt) {
+      promptPaths.push(path);
+      return json(200, { ok: true });
+    }
+    const fork = path.match(/^\/session\/([^/]+)\/fork$/);
+    if (req.method === "POST" && fork) {
+      const src = sessions.get(fork[1]!) ?? [];
+      return readBody((body) => {
+        forkBodies.push(body);
+        const boundary = typeof body.messageID === "string" ? body.messageID : undefined;
+        // OpenCode semantics: copy messages strictly BEFORE messageID
+        let copied = boundary ? src.filter((m) => m.info.id < boundary) : [...src];
+        if (state.breakFork) copied = copied.slice(0, -1);
+        forkSeq += 1;
+        const id = `ses_fork_${forkSeq}`;
+        sessions.set(id, copied);
+        json(200, { id, title: "fork" });
+      });
+    }
+    if (req.method === "POST" && path === "/session") {
+      createdSeq += 1;
+      const id = `ses_new_${createdSeq}`;
+      sessions.set(id, []);
+      return json(200, { id, title: "t" });
+    }
+    const del = path.match(/^\/session\/([^/]+)$/);
+    if (req.method === "DELETE" && del) {
+      deleted.push(del[1]!);
+      sessions.delete(del[1]!);
+      return json(200, true);
+    }
+    json(404, { error: path });
+  });
+
+  await new Promise<void>((r) => server.listen(0, "127.0.0.1", r));
+  const addr = server.address();
+  if (!addr || typeof addr === "string") throw new Error("no addr");
+  return {
+    baseUrl: `http://127.0.0.1:${addr.port}`,
+    server, sessions, forkBodies, deleted, promptPaths, state,
+  };
+};
+
+const userMsg = (text: string): ModelMessage => ({ role: "user", parts: [{ type: "text", text }] });
+const asstMsg = (text: string): ModelMessage => ({ role: "assistant", parts: [{ type: "text", text }] });
+
+test("branchSession forks strictly before the first excluded message and verifies the child", async () => {
+  const fake = await startForkFake();
+  const client = createOpenCodeClient(fake.baseUrl);
+  const runtime = createOpenCodeRuntimeWithClient(client, {});
+  try {
+    fake.sessions.set("ses_src", [
+      fakeMsg("msg_1", "user", "same"),
+      fakeMsg("msg_2", "assistant", "one"),
+      fakeMsg("msg_3", "user", "same"),
+      fakeMsg("msg_4", "assistant", "two"),
+    ]);
+    await runtime.ensureSession({ sessionId: "canon-src", projectId: "p", cwd: "/tmp", backendSessionId: "ses_src" });
+
+    const childId = await runtime.branchSession!({
+      sourceSessionId: "canon-src",
+      target: { projectId: "p", sessionId: "canon-child", cwd: "/tmp", title: "T (fork)" },
+      history: [userMsg("same"), asstMsg("one")],
+    });
+    // boundary is the first EXCLUDED backend message, not the predecessor
+    assert.deepEqual(fake.forkBodies[0], { messageID: "msg_3" });
+    assert.equal(childId, "ses_fork_1");
+    // the child mapping is live: a turn for the fork canonical posts to it
+    await runtime.startTurn({ sessionId: "canon-child", text: "next" });
+    assert.ok(fake.promptPaths.some((p) => p.includes("ses_fork_1")));
+
+    // duplicate prompt text selects the LATER requested predecessor
+    await runtime.branchSession!({
+      sourceSessionId: "canon-src",
+      target: { projectId: "p", sessionId: "canon-child-2", cwd: "/tmp", title: "T (fork)" },
+      history: [userMsg("same"), asstMsg("one"), userMsg("same")],
+    });
+    assert.deepEqual(fake.forkBodies[1], { messageID: "msg_4" });
+
+    // full effective history: no messageID at all
+    await runtime.branchSession!({
+      sourceSessionId: "canon-src",
+      target: { projectId: "p", sessionId: "canon-child-3", cwd: "/tmp", title: "T (fork)" },
+      history: [userMsg("same"), asstMsg("one"), userMsg("same"), asstMsg("two")],
+    });
+    assert.deepEqual(fake.forkBodies[2], {});
+
+    // empty prefix: a fresh session, no fork call
+    const freshId = await runtime.branchSession!({
+      sourceSessionId: "canon-src",
+      target: { projectId: "p", sessionId: "canon-child-4", cwd: "/tmp", title: "T (fork)" },
+      history: [],
+    });
+    assert.equal(freshId, "ses_new_1");
+    assert.equal(fake.forkBodies.length, 3);
+  } finally {
+    await runtime.dispose();
+    fake.server.close();
+  }
+});
+
+test("branchSession mismatch deletes the orphan child and keeps mappings untouched", async () => {
+  const fake = await startForkFake();
+  const client = createOpenCodeClient(fake.baseUrl);
+  const runtime = createOpenCodeRuntimeWithClient(client, {});
+  try {
+    fake.sessions.set("ses_src", [
+      fakeMsg("msg_1", "user", "hello"),
+      fakeMsg("msg_2", "assistant", "world"),
+    ]);
+    await runtime.ensureSession({ sessionId: "canon-src", projectId: "p", cwd: "/tmp", backendSessionId: "ses_src" });
+
+    // prefix that is not present in the backend at all
+    await assert.rejects(
+      () => runtime.branchSession!({
+        sourceSessionId: "canon-src",
+        target: { projectId: "p", sessionId: "canon-x", cwd: "/tmp" },
+        history: [userMsg("different")],
+      }),
+      (err: Error & { code?: string }) => err.code === "history-mismatch",
+    );
+    assert.equal(fake.forkBodies.length, 0, "no fork attempted for an absent prefix");
+
+    // fork succeeds but the read-back child differs → delete + typed error
+    fake.state.breakFork = true;
+    await assert.rejects(
+      () => runtime.branchSession!({
+        sourceSessionId: "canon-src",
+        target: { projectId: "p", sessionId: "canon-src", cwd: "/tmp" }, // revert-style: same canonical id
+        history: [userMsg("hello")],
+      }),
+      (err: Error & { code?: string }) => err.code === "history-mismatch",
+    );
+    assert.deepEqual(fake.deleted, ["ses_fork_1"]);
+    // mapping was NOT swapped: the canonical session still posts to ses_src
+    await runtime.startTurn({ sessionId: "canon-src", text: "still original" });
+    assert.ok(fake.promptPaths.some((p) => p.includes("ses_src")));
+    assert.ok(!fake.promptPaths.some((p) => p.includes("ses_fork_1")));
+
+    // discardSession is best-effort and clears mappings by backend id
+    await runtime.discardSession!("ses_missing");
+    assert.ok(fake.deleted.includes("ses_missing"));
+  } finally {
+    await runtime.dispose();
+    fake.server.close();
+  }
+});
+
+// ---------------------------------------------------------------- UX-MSG-ACTIONS: part classification
+
+test("untyped deltas buffer invisibly until part.type resolves them to reasoning", () => {
+  const st = createTranslateState();
+  // missing-field delta: nothing may be displayed yet
+  const out1 = translateOcEvent({
+    type: "message.part.delta",
+    properties: { sessionID: "s", messageID: "m_a", partID: "prt_r", delta: "thinking…" },
+  }, st);
+  assert.deepEqual(out1, []);
+  // classification arrives: buffered bytes resolve to exactly one channel
+  const out2 = translateOcEvent({
+    type: "message.part.updated",
+    properties: { sessionID: "s", part: { id: "prt_r", type: "reasoning", messageID: "m_a", sessionID: "s" } },
+  }, st);
+  assert.deepEqual(out2, [{ type: "assistant/reasoning-chunk", partId: "prt_r", text: "thinking…" }]);
+  // later typed reasoning delta appends normally
+  const out3 = translateOcEvent({
+    type: "message.part.delta",
+    properties: { sessionID: "s", messageID: "m_a", partID: "prt_r", field: "reasoning", delta: " more" },
+  }, st);
+  assert.deepEqual(out3, [{ type: "assistant/reasoning-chunk", partId: "prt_r", text: " more" }]);
+  // a later update claiming to be text cannot migrate displayed reasoning
+  const out4 = translateOcEvent({
+    type: "message.part.delta",
+    properties: { sessionID: "s", messageID: "m_a", partID: "prt_r", field: "text", delta: "!" },
+  }, st);
+  assert.deepEqual(out4, [{ type: "assistant/reasoning-chunk", partId: "prt_r", text: "!" }]);
+  assert.equal(st.partText.size, 0, "reasoning never enters the text-finalization map");
+  // finalization emits ONE reasoning-only record with empty text
+  const out5 = translateOcEvent({
+    type: "message.part.updated",
+    properties: {
+      sessionID: "s",
+      part: { id: "prt_r", type: "reasoning", text: "thinking… more!", messageID: "m_a", sessionID: "s", time: { start: 1, end: 2 } },
+    },
+  }, st);
+  assert.deepEqual(out5, [{ type: "assistant/message", partId: "prt_r", text: "", reasoning: "thinking… more!" }]);
+  // idle flush adds no duplicate answer bubble
+  assert.deepEqual(flushAssistantOnIdle(st), []);
+});
+
+test("a text part followed by stop yields exactly one finalized answer", () => {
+  const st = createTranslateState();
+  translateOcEvent({
+    type: "message.part.delta",
+    properties: { sessionID: "s", messageID: "m_a", partID: "prt_t", field: "text", delta: "Hel" },
+  }, st);
+  translateOcEvent({
+    type: "message.part.delta",
+    properties: { sessionID: "s", messageID: "m_a", partID: "prt_t", field: "text", delta: "lo" },
+  }, st);
+  const final = translateOcEvent({
+    type: "message.part.updated",
+    properties: {
+      sessionID: "s",
+      part: { id: "prt_t", type: "text", text: "Hello", messageID: "m_a", sessionID: "s", time: { start: 1, end: 2 } },
+    },
+  }, st);
+  assert.deepEqual(final.map((e) => e.type), ["assistant/message"]);
+  assert.equal((final[0] as { text: string }).text, "Hello");
+  assert.deepEqual(flushAssistantOnIdle(st), [], "no duplicate on idle");
+  // an unclassified part with buffered bytes is never flushed as text
+  translateOcEvent({
+    type: "message.part.delta",
+    properties: { sessionID: "s", messageID: "m_a", partID: "prt_unknown", delta: "???" },
+  }, st);
+  assert.deepEqual(flushAssistantOnIdle(st), []);
 });
 
 test("real opencode provider list", { skip: process.env.POLYTH_REAL_OPENCODE !== "1" }, async () => {

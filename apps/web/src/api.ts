@@ -7,6 +7,7 @@ import type {
   AutoAcceptSetting,
   BulkSessionResult,
   DictationSessionDto,
+  ForkResult,
   FusionDto,
   InstalledPluginDto,
   JsonObject,
@@ -131,7 +132,21 @@ async function jfetch<T>(path: string, init?: RequestInit): Promise<T> {
       window.dispatchEvent(new Event("polyth:auth-required"));
     }
     const body = await res.text().catch(() => "");
-    throw Object.assign(new Error(`HTTP ${res.status} ${res.statusText} — ${body}`), { status: res.status });
+    // Typed server errors ({error, message}) keep their code and message so
+    // callers can explain conflicts/history mismatches without regexing HTML.
+    let code: string | undefined;
+    let message: string | undefined;
+    try {
+      const parsed = JSON.parse(body) as { error?: unknown; message?: unknown };
+      if (typeof parsed.error === "string") code = parsed.error;
+      if (typeof parsed.message === "string") message = parsed.message;
+    } catch {
+      // non-JSON error body
+    }
+    throw Object.assign(
+      new Error(message ?? `HTTP ${res.status} ${res.statusText} — ${body}`),
+      { status: res.status, ...(code !== undefined ? { code } : {}) },
+    );
   }
   if (res.status === 204) return undefined as T;
   return (await res.json()) as T;
@@ -139,6 +154,10 @@ async function jfetch<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const httpStatusOf = (err: unknown): number =>
   typeof (err as { status?: unknown })?.status === "number" ? (err as { status: number }).status : 0;
+
+/** Typed error code from a server error body (e.g. "conflict", "history-mismatch"). */
+export const errorCodeOf = (err: unknown): string =>
+  typeof (err as { code?: unknown })?.code === "string" ? (err as { code: string }).code : "";
 
 function json(method: string, body?: unknown): RequestInit {
   return {
@@ -233,6 +252,17 @@ export interface SnippetDef {
 export interface CommandListResult {
   commands: SlashCommand[];
   snippets: SnippetDef[];
+}
+
+/** Strict list outcome (UX-COMPOSER-DISC): a request failure is never
+ *  presented as a successful empty list. */
+export type StrictListResult<T> =
+  | { ok: true; items: T[] }
+  | { ok: false; reason: string };
+
+export interface ComposerCatalogResult {
+  commands: StrictListResult<SlashCommand>;
+  snippets: StrictListResult<SnippetDef>;
 }
 
 // ---- schedule types --------------------------------------------------------
@@ -447,7 +477,9 @@ export const api = {
   getEvents: (id: string, afterSeq = 0) =>
     jfetch<SessionEvent[]>(`/api/sessions/${id}/events?afterSeq=${afterSeq}`),
 
-  sendMessage: (id: string, body: { text: string; attachments?: AttachmentRef[]; model?: JsonObject; agent?: string; delivery?: string; dismissPending?: boolean; agentProfileId?: string }) =>
+  // agentProfileId: string selects a profile, null explicitly clears the
+  // session's stored profile, omitted inherits it (UX-COMPOSER-DISC).
+  sendMessage: (id: string, body: { text: string; attachments?: AttachmentRef[]; model?: JsonObject; agent?: string; delivery?: string; dismissPending?: boolean; agentProfileId?: string | null }) =>
     jfetch<SendResult>(`/api/sessions/${id}/message`, json("POST", body)),
   abort: (id: string) => jfetch<void>(`/api/sessions/${id}/abort`, { method: "POST" }),
   renameSession: (id: string, title: string) =>
@@ -461,7 +493,7 @@ export const api = {
   queueRemove: (id: string, queueId: string) =>
     jfetch<{ ok: true }>(`/api/sessions/${id}/queue/${encodeURIComponent(queueId)}`, { method: "DELETE" }),
   fork: (id: string, atSeq?: number) =>
-    jfetch<SessionRef>(`/api/sessions/${id}/fork`, json("POST", atSeq === undefined ? {} : { atSeq })),
+    jfetch<ForkResult>(`/api/sessions/${id}/fork`, json("POST", atSeq === undefined ? {} : { atSeq })),
   rewind: (id: string, atSeq: number) =>
     jfetch<SessionEvent>(`/api/sessions/${id}/rewind`, json("POST", { atSeq })),
   clearRewind: (id: string) =>
@@ -632,44 +664,47 @@ export const api = {
     jfetch<{ ok: true }>(`/api/worktrees/remove`, json("POST", { projectId, path: wtPath, deleteBranch })),
 
   // ---- files (§12) ---------------------------------------------------------
-  filesTree: (projectId: string, relPath?: string, hidden?: boolean) =>
-    jfetch<FileEntry[]>(`/api/files/tree?projectId=${encodeURIComponent(projectId)}${relPath ? `&path=${encodeURIComponent(relPath)}` : ""}${hidden ? "&hidden=true" : ""}`),
-  filesRead: (projectId: string, relPath: string) =>
-    jfetch<FileReadResult>(`/api/files/read?projectId=${encodeURIComponent(projectId)}&path=${encodeURIComponent(relPath)}`),
-  filesWrite: (projectId: string, relPath: string, content: string, baseRevision?: string) =>
+  // Every files call carries an optional sessionId so the server resolves the
+  // active session's worktree, not the project root (UX-FIXTURE-VISUAL P0).
+  filesTree: (projectId: string, relPath?: string, hidden?: boolean, sessionId?: string) =>
+    jfetch<FileEntry[]>(`/api/files/tree?projectId=${encodeURIComponent(projectId)}${relPath ? `&path=${encodeURIComponent(relPath)}` : ""}${hidden ? "&hidden=true" : ""}${sessionId ? `&sessionId=${encodeURIComponent(sessionId)}` : ""}`),
+  filesRead: (projectId: string, relPath: string, sessionId?: string) =>
+    jfetch<FileReadResult>(`/api/files/read?projectId=${encodeURIComponent(projectId)}&path=${encodeURIComponent(relPath)}${sessionId ? `&sessionId=${encodeURIComponent(sessionId)}` : ""}`),
+  filesWrite: (projectId: string, relPath: string, content: string, baseRevision?: string, sessionId?: string) =>
     jfetch<{ ok: true; revision: string }>(`/api/files/write`, json("POST", {
       projectId, path: relPath, content,
       ...(baseRevision !== undefined ? { baseRevision } : {}),
+      ...(sessionId ? { sessionId } : {}),
     })),
-  filesMkdir: (projectId: string, relPath: string) =>
-    jfetch<{ ok: true }>(`/api/files/mkdir`, json("POST", { projectId, path: relPath })),
-  filesDelete: (projectId: string, relPath: string) =>
-    jfetch<{ ok: true }>(`/api/files/delete`, json("POST", { projectId, path: relPath })),
-  filesRename: (projectId: string, from: string, to: string) =>
-    jfetch<{ ok: true }>(`/api/files/rename`, json("POST", { projectId, from, to })),
-  filesUpload: (projectId: string, relPath: string, bytes: Uint8Array) => {
+  filesMkdir: (projectId: string, relPath: string, sessionId?: string) =>
+    jfetch<{ ok: true }>(`/api/files/mkdir`, json("POST", { projectId, path: relPath, ...(sessionId ? { sessionId } : {}) })),
+  filesDelete: (projectId: string, relPath: string, sessionId?: string) =>
+    jfetch<{ ok: true }>(`/api/files/delete`, json("POST", { projectId, path: relPath, ...(sessionId ? { sessionId } : {}) })),
+  filesRename: (projectId: string, from: string, to: string, sessionId?: string) =>
+    jfetch<{ ok: true }>(`/api/files/rename`, json("POST", { projectId, from, to, ...(sessionId ? { sessionId } : {}) })),
+  filesUpload: (projectId: string, relPath: string, bytes: Uint8Array, sessionId?: string) => {
     let bin = "";
     for (let i = 0; i < bytes.length; i += 0x8000) {
       bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
     }
-    return jfetch<{ ok: true }>(`/api/files/upload`, json("POST", { projectId, path: relPath, base64: btoa(bin) }));
+    return jfetch<{ ok: true }>(`/api/files/upload`, json("POST", { projectId, path: relPath, base64: btoa(bin), ...(sessionId ? { sessionId } : {}) }));
   },
-  filesStat: (projectId: string, relPath: string) =>
+  filesStat: (projectId: string, relPath: string, sessionId?: string) =>
     jfetch<{ path: string; kind: "file" | "dir"; size: number; mime?: string; revision?: string }>(
-      `/api/files/stat?projectId=${encodeURIComponent(projectId)}&path=${encodeURIComponent(relPath)}`,
+      `/api/files/stat?projectId=${encodeURIComponent(projectId)}&path=${encodeURIComponent(relPath)}${sessionId ? `&sessionId=${encodeURIComponent(sessionId)}` : ""}`,
     ),
   /** URL of the sanitized raw-bytes endpoint (images in Markdown, previews). */
-  filesRawUrl: (projectId: string, relPath: string) =>
-    `/api/files/raw?projectId=${encodeURIComponent(projectId)}&path=${encodeURIComponent(relPath)}`,
+  filesRawUrl: (projectId: string, relPath: string, sessionId?: string) =>
+    `/api/files/raw?projectId=${encodeURIComponent(projectId)}&path=${encodeURIComponent(relPath)}${sessionId ? `&sessionId=${encodeURIComponent(sessionId)}` : ""}`,
   /** Legacy string results; accepts old (string[]) and new (scored) payloads. */
-  filesSearch: async (projectId: string, q: string, limit = 50): Promise<string[]> => {
-    const hits = await api.filesSearchScored(projectId, q, limit);
+  filesSearch: async (projectId: string, q: string, limit = 50, sessionId?: string): Promise<string[]> => {
+    const hits = await api.filesSearchScored(projectId, q, limit, false, sessionId);
     return hits.map((h) => h.path);
   },
   /** Scored file search (WP13). Migration-safe: plain strings are upgraded. */
-  filesSearchScored: (projectId: string, q: string, limit = 50, includeDirs = false) =>
+  filesSearchScored: (projectId: string, q: string, limit = 50, includeDirs = false, sessionId?: string) =>
     jfetch<Array<string | FileSearchHitDto>>(
-      `/api/files/search?projectId=${encodeURIComponent(projectId)}&q=${encodeURIComponent(q)}&limit=${limit}${includeDirs ? "&includeDirs=true" : ""}`,
+      `/api/files/search?projectId=${encodeURIComponent(projectId)}&q=${encodeURIComponent(q)}&limit=${limit}${includeDirs ? "&includeDirs=true" : ""}${sessionId ? `&sessionId=${encodeURIComponent(sessionId)}` : ""}`,
     )
       .then((rows): FileSearchHitDto[] =>
         rows.map((r) => (typeof r === "string" ? { path: r, kind: "file", score: 0, matches: [] } : r)),
@@ -684,7 +719,27 @@ export const api = {
       .catch((): WorkspaceSearchItemDto[] => []),
 
   // ---- commands + snippets (§12) --------------------------------------------
+  // UX-COMPOSER-DISC: strict catalog read for the composer. Command and
+  // snippet outcomes stay independent and an HTTP/transport failure is an
+  // explicit `ok: false` — never coerced into an empty array.
+  composerCatalog: async (projectId: string): Promise<ComposerCatalogResult> => {
+    const strict = async <T>(path: string): Promise<StrictListResult<T>> => {
+      try {
+        const items = await jfetch<T[]>(path);
+        return { ok: true, items: Array.isArray(items) ? items : [] };
+      } catch (err) {
+        return { ok: false, reason: err instanceof Error ? err.message : String(err) };
+      }
+    };
+    const [commands, snippets] = await Promise.all([
+      strict<SlashCommand>(`/api/commands?projectId=${encodeURIComponent(projectId)}`),
+      strict<SnippetDef>(`/api/snippets?projectId=${encodeURIComponent(projectId)}`),
+    ]);
+    return { commands, snippets };
+  },
   // PLAN §12: /api/commands and /api/snippets each return a flat array.
+  // Convenience callers keep the fail-soft empty-array fallback; Composer
+  // must use composerCatalog above instead.
   listCommands: async (projectId: string): Promise<CommandListResult> => {
     const [commands, snippets] = await Promise.all([
       jfetch<SlashCommand[]>(`/api/commands?projectId=${encodeURIComponent(projectId)}`).catch(
@@ -773,6 +828,8 @@ export const api = {
     jfetch<{ tasks: ScheduleTaskDto[]; errors: ScheduleLoopErrorDto[] }>(
       `/api/schedule/loops/rescan`, json("POST", { projectId }),
     ),
+  scheduleLoopErrorDismiss: (projectId: string, path: string) =>
+    jfetch<{ ok: boolean }>(`/api/schedule/loops/errors/dismiss`, json("POST", { projectId, path })),
 
   // ---- knowledge (WP10) --------------------------------------------------------
   knowledgeList: (projectId: string, opts: { kind?: KnowledgeKindDto; q?: string; limit?: number; offset?: number } = {}) => {
