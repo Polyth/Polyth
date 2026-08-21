@@ -16,6 +16,8 @@ import { LiveRegion } from "./components/a11y/live.tsx";
 import WorktreeSessionDialog from "./components/WorktreeSessionDialog.tsx";
 import "./builtinCapabilities.ts";
 import WorkspaceBottomNav from "./components/workspace/WorkspaceBottomNav.tsx";
+import Header from "./components/Header.tsx";
+import { useWorkspaceMode } from "./widgets/workspaceMode.ts";
 
 function ErrorBanner() {
   const message = useStore((s) => s.uiError);
@@ -40,6 +42,8 @@ export default function App() {
     (s) => s.activeProjectId !== null && s.projectRegistry.projects.some((p) => p.id === s.activeProjectId),
   );
   const paneFullscreen = useStore((s) => s.paneFullscreen);
+  const activeView = useStore((s) => s.activeView);
+  const workspaceMode = useWorkspaceMode();
 
   useEffect(() => {
     const openSettings = () => setOverlay("settings");
@@ -74,19 +78,22 @@ export default function App() {
     overlay === "onboarding" || (surface === "preset-setup" && overlay === null);
 
   return (
-    <div className="app">
-      <Sidebar />
-      {/* UX-PANE-MODEL: while a workspace surface covers the workspace, Chat
-          stays mounted underneath but is inert and out of the a11y tree — it
-          consumes no hit area and cannot retain sequential focus. */}
-      <div className="workspace" inert={paneFullscreen} aria-hidden={paneFullscreen || undefined}>
-        <ErrorBanner />
-        <ViewErrorBoundary resetKey={viewResetKey}>
-          <Main />
-        </ViewErrorBoundary>
-        <StatusBar />
+    <div className={`app mode-${workspaceMode} view-${activeView}`}>
+      <Header />
+      <div className="app-shell">
+        <Sidebar />
+        {/* UX-PANE-MODEL: while a workspace surface covers the workspace, Chat
+            stays mounted underneath but is inert and out of the a11y tree — it
+            consumes no hit area and cannot retain sequential focus. */}
+        <div className="workspace" inert={paneFullscreen} aria-hidden={paneFullscreen || undefined}>
+          <ErrorBanner />
+          <ViewErrorBoundary resetKey={viewResetKey}>
+            <Main />
+          </ViewErrorBoundary>
+          <StatusBar />
+        </div>
+        <ContextRail />
       </div>
-      <ContextRail />
       <WorkspaceBottomNav />
       {overlay === "palette" && <CommandPalette />}
       {overlay === "search" && <SessionSearch />}

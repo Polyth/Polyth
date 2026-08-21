@@ -7,7 +7,7 @@ export interface PolythSettings {
    *  a custom theme id from polyth.customThemes, or "system" to follow the
    *  OS scheme. Unknown ids resolve to the default dark preset. */
   theme: string;
-  density: "comfortable" | "compact";
+  density: "comfortable" | "balanced" | "compact";
   fontSize: number; // px, 12–18; scales the UI, not code blocks
   productName: string; // brand label in the sidebar + document title
   relativeTime: boolean; // "2m ago" vs absolute times in the session list
@@ -21,7 +21,7 @@ export interface PolythSettings {
 export const SETTINGS_KEY = "polyth.settings";
 
 export const DEFAULT_SETTINGS: PolythSettings = {
-  theme: "dark",
+  theme: "light",
   density: "comfortable",
   fontSize: 14,
   productName: "Polyth",
@@ -50,7 +50,7 @@ export function normalizeSettings(raw: unknown): PolythSettings {
   const d = DEFAULT_SETTINGS;
   return {
     theme: pickString(r.theme, d.theme).trim() || d.theme,
-    density: r.density === "compact" ? "compact" : "comfortable",
+    density: r.density === "compact" || r.density === "balanced" ? r.density : "comfortable",
     fontSize: pickNumber(r.fontSize, d.fontSize, 12, 18),
     productName: pickString(r.productName, d.productName).trim() || d.productName,
     relativeTime: pickBool(r.relativeTime, d.relativeTime),

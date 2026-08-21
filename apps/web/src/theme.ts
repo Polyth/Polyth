@@ -40,6 +40,57 @@ const SYNTAX_KEYS: ReadonlyArray<keyof ThemeSyntax> = ["kw", "str", "cmt", "num"
 
 // ---- presets -----------------------------------------------------------------
 
+interface PresetPalette {
+  bg: string;
+  panel: string;
+  elevated: string;
+  raised: string;
+  sunken: string;
+  inputBg: string;
+  border: string;
+  borderSoft: string;
+  accent: string;
+  accentHi: string;
+}
+
+const darkPreset = (id: string, name: string, palette: PresetPalette): ThemeSpec => ({
+  id,
+  name,
+  appearance: "dark",
+  tokens: {
+    ...palette,
+    text: "#f2f4f7",
+    textDim: "#d0d5dc",
+    muted: "#aab2bd",
+    faint: "#a0a9b5",
+    accentInk: "#101216",
+    green: "#8ecf78",
+    amber: "#e5bd68",
+    red: "#f1847b",
+    blue: "#82bdf2",
+    purple: "#c2a7eb",
+  },
+});
+
+const lightPreset = (id: string, name: string, palette: PresetPalette): ThemeSpec => ({
+  id,
+  name,
+  appearance: "light",
+  tokens: {
+    ...palette,
+    text: "#202832",
+    textDim: "#39434f",
+    muted: "#46505c",
+    faint: "#525c68",
+    accentInk: "#ffffff",
+    green: "#337c3e",
+    amber: "#946800",
+    red: "#b83d37",
+    blue: "#28679f",
+    purple: "#704aa2",
+  },
+});
+
 /** ids "dark" and "light" are the pre-F15 settings values and must stay stable. */
 export const PRESET_THEMES: ThemeSpec[] = [
   // UX-FIXTURE-VISUAL P1: `faint` (and in light themes `muted`) labels
@@ -77,14 +128,14 @@ export const PRESET_THEMES: ThemeSpec[] = [
     },
   },
   {
-    // UX-A390: accentInk is dark so Send/primary-action text reaches ≥4.5:1
-    // over both accent gradient endpoints (6.10 vs accent, 7.34 vs accentHi).
+    // White action ink matches the light shell and reaches ≥4.5:1 over both
+    // accessible orange gradient endpoints.
     id: "light", name: "Parchment", appearance: "light",
     tokens: {
       bg: "#faf8f4", panel: "#f1ede6", elevated: "#ffffff", raised: "#f3efe8", sunken: "#e9e4da", inputBg: "#ffffff",
       border: "#d5cec1", borderSoft: "#e2dcd2",
       text: "#2a2620", textDim: "#4d473e", muted: "#5b564e", faint: "#6a6357",
-      accent: "#d9822b", accentInk: "#241404", accentHi: "#e2954a",
+      accent: "#b54d00", accentInk: "#ffffff", accentHi: "#bd5700",
       green: "#4d9432", amber: "#a97d14", red: "#c4453a", blue: "#2f6fae", purple: "#7a53b8",
     },
   },
@@ -113,9 +164,65 @@ export const PRESET_THEMES: ThemeSpec[] = [
       green: "#859900", amber: "#b58900", red: "#dc322f", blue: "#268bd2", purple: "#6c71c4",
     },
   },
+  darkPreset("ocean", "Deep Ocean", {
+    bg: "#091419", panel: "#0e1c22", elevated: "#14262e", raised: "#1b3039", sunken: "#061014", inputBg: "#0b181e",
+    border: "#29414a", borderSoft: "#20343d", accent: "#69c8d4", accentHi: "#80d7e1",
+  }),
+  darkPreset("violet", "Velvet Violet", {
+    bg: "#15111c", panel: "#1c1725", elevated: "#261f31", raised: "#30273d", sunken: "#100c16", inputBg: "#191320",
+    border: "#443653", borderSoft: "#372c45", accent: "#c3a6ff", accentHi: "#d0b8ff",
+  }),
+  darkPreset("graphite", "Graphite", {
+    bg: "#111315", panel: "#181a1d", elevated: "#202328", raised: "#292d32", sunken: "#0c0e10", inputBg: "#15171a",
+    border: "#393e45", borderSoft: "#2e3339", accent: "#d0d4dc", accentHi: "#e1e4ea",
+  }),
+  darkPreset("nord", "Nord Night", {
+    bg: "#171c24", panel: "#1d2430", elevated: "#252e3b", raised: "#2c3745", sunken: "#11161d", inputBg: "#1a202a",
+    border: "#3c495a", borderSoft: "#303b49", accent: "#88c0d0", accentHi: "#9acbd8",
+  }),
+  darkPreset("contrast-dark", "High Contrast Dark", {
+    bg: "#050505", panel: "#0c0c0c", elevated: "#151515", raised: "#202020", sunken: "#000000", inputBg: "#090909",
+    border: "#4b4b4b", borderSoft: "#323232", accent: "#ffd447", accentHi: "#ffe074",
+  }),
+  darkPreset("rose-night", "Rose Night", {
+    bg: "#180f14", panel: "#21151c", elevated: "#2b1d25", raised: "#36252e", sunken: "#10090d", inputBg: "#1d1118",
+    border: "#49333d", borderSoft: "#3a2932", accent: "#f19ab2", accentHi: "#f6aec2",
+  }),
+  darkPreset("copper", "Copper Forge", {
+    bg: "#17110d", panel: "#201813", elevated: "#2a211a", raised: "#352a21", sunken: "#100b08", inputBg: "#1b140f",
+    border: "#493a2e", borderSoft: "#3a2e25", accent: "#e9a66f", accentHi: "#f1b884",
+  }),
+  lightPreset("cloud", "Cloud", {
+    bg: "#f9fbfd", panel: "#f1f4f7", elevated: "#ffffff", raised: "#eef1f4", sunken: "#e2e7ec", inputBg: "#ffffff",
+    border: "#c9d1d9", borderSoft: "#dbe1e7", accent: "#285b91", accentHi: "#326ba6",
+  }),
+  lightPreset("sage", "Soft Sage", {
+    bg: "#f5f8f4", panel: "#ebf1e9", elevated: "#ffffff", raised: "#edf3eb", sunken: "#dfe8dc", inputBg: "#ffffff",
+    border: "#c4d0c0", borderSoft: "#d7e0d4", accent: "#2f6f52", accentHi: "#3b7b5f",
+  }),
+  lightPreset("lavender", "Lavender", {
+    bg: "#f8f7fb", panel: "#efedf5", elevated: "#ffffff", raised: "#eceaf2", sunken: "#dfdce8", inputBg: "#ffffff",
+    border: "#ccc7d8", borderSoft: "#dedbe6", accent: "#68449a", accentHi: "#7654a7",
+  }),
+  lightPreset("sand", "Warm Sand", {
+    bg: "#fbf8f1", panel: "#f2ece0", elevated: "#fffefa", raised: "#f4eee3", sunken: "#e8dfcf", inputBg: "#fffefa",
+    border: "#d2c6b2", borderSoft: "#e1d8c8", accent: "#81551d", accentHi: "#936528",
+  }),
+  lightPreset("contrast-light", "High Contrast Light", {
+    bg: "#ffffff", panel: "#f4f4f4", elevated: "#ffffff", raised: "#ececec", sunken: "#dedede", inputBg: "#ffffff",
+    border: "#9c9c9c", borderSoft: "#c8c8c8", accent: "#111111", accentHi: "#282828",
+  }),
+  lightPreset("rosewater", "Rosewater", {
+    bg: "#fff8fa", panel: "#f7ecef", elevated: "#ffffff", raised: "#f8eef1", sunken: "#eadde1", inputBg: "#ffffff",
+    border: "#d8c3ca", borderSoft: "#e7d8dd", accent: "#8c3d5b", accentHi: "#9a4967",
+  }),
+  lightPreset("glacier", "Glacier", {
+    bg: "#f4fafb", panel: "#e8f2f4", elevated: "#ffffff", raised: "#eaf4f5", sunken: "#d9e8eb", inputBg: "#ffffff",
+    border: "#bdd0d5", borderSoft: "#d3e0e3", accent: "#176675", accentHi: "#257382",
+  }),
 ];
 
-export const DEFAULT_THEME: ThemeSpec = PRESET_THEMES[0]!;
+export const DEFAULT_THEME: ThemeSpec = PRESET_THEMES.find((theme) => theme.id === "light")!;
 
 // ---- validation ---------------------------------------------------------------
 

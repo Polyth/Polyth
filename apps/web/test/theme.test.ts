@@ -27,13 +27,14 @@ const validTheme = (): Record<string, unknown> => ({
   tokens: { ...PRESET_THEMES[0]!.tokens },
 });
 
-test("preset set: six themes, unique stable ids, both appearances, valid tokens", () => {
-  assert.equal(PRESET_THEMES.length, 6);
-  assert.equal(new Set(PRESET_THEMES.map((t) => t.id)).size, 6);
+test("preset set: twenty themes, unique stable ids, both appearances, valid tokens", () => {
+  assert.equal(PRESET_THEMES.length, 20);
+  assert.equal(new Set(PRESET_THEMES.map((t) => t.id)).size, PRESET_THEMES.length);
   // pre-F15 settings values keep resolving
   assert.ok(PRESET_THEMES.some((t) => t.id === "dark" && t.appearance === "dark"));
   assert.ok(PRESET_THEMES.some((t) => t.id === "light" && t.appearance === "light"));
-  assert.equal(PRESET_THEMES.filter((t) => t.appearance === "dark").length, 3);
+  assert.equal(PRESET_THEMES.filter((t) => t.appearance === "dark").length, 10);
+  assert.equal(PRESET_THEMES.filter((t) => t.appearance === "light").length, 10);
   for (const preset of PRESET_THEMES) {
     for (const key of TOKEN_KEYS) assert.match(preset.tokens[key], HEX, `${preset.id}.${key}`);
   }
@@ -115,7 +116,7 @@ test("resolveTheme: system follows the OS, ids resolve, unknown falls back", () 
   assert.equal(resolveTheme("light").id, "light");
   const custom: ThemeSpec = { ...(PRESET_THEMES[1]!), id: "my-theme", name: "Mine" };
   assert.equal(resolveTheme("my-theme", { custom: [custom] }).name, "Mine");
-  assert.equal(resolveTheme("deleted-theme").id, "dark"); // default fallback
+  assert.equal(resolveTheme("deleted-theme").id, "light"); // default fallback
 });
 
 test("themeCssVars maps roles, derives washes/rgb, and honors syntax overrides", () => {
@@ -132,7 +133,7 @@ test("themeCssVars maps roles, derives washes/rgb, and honors syntax overrides",
   assert.notEqual(dark["--bubble-user-bg"], PRESET_THEMES[0]!.tokens.accent);
 
   const light = themeCssVars(PRESET_THEMES.find((t) => t.id === "light")!);
-  assert.equal(light["--accent-wash"], "rgba(217, 130, 43, 0.12)"); // light alpha differs
+  assert.equal(light["--accent-wash"], "rgba(181, 77, 0, 0.12)"); // light alpha differs
 
   const withSyntax: ThemeSpec = { ...PRESET_THEMES[0]!, id: "s", syntax: { kw: "#ff0000" } };
   const vars = themeCssVars(withSyntax);

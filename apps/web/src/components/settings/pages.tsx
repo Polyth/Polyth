@@ -1,6 +1,6 @@
 // The simpler settings pages: General, Appearance, Chat, Notifications,
 // Behavior, Usage, Projects, Git, Agents, MCP, Plugins.
-import { useEffect, useState, type CSSProperties } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
 import {
   NO_PRESET_CARD, WORKSPACE_PRESETS, applyPreset, clearPreset, formatPresetSummary,
   getPresentation, getPresetState, presetSummary, resetDisclosureChoices,
@@ -28,44 +28,14 @@ import {
 import type { AssistSettingsDto } from "../../api.ts";
 import type { AgentProfile, InstalledPluginDto, McpServerDto, McpTransport, SystemInfoDto } from "@polyth/contracts";
 
-function ThemeCard({
-  active,
-  name,
-  colors,
-  onPick,
-  onPreview,
-  onPreviewEnd,
-}: {
-  active: boolean;
-  name: string;
-  colors: { bg: string; side: string; line: string; accent: string; soft: string };
-  onPick: () => void;
-  onPreview?: () => void;
-  onPreviewEnd?: () => void;
-}) {
+function ThemeSwatches({ theme }: { theme: ThemeSpec }) {
   return (
-    <button
-      className={`theme-card ${active ? "active" : ""}`}
-      onClick={onPick}
-      onMouseEnter={onPreview}
-      onMouseLeave={onPreviewEnd}
-      onFocus={onPreview}
-      onBlur={onPreviewEnd}
-    >
-      <div className="theme-prev" style={{ background: colors.bg }}>
-        <div className="theme-prev-side" style={{ background: colors.side, borderRight: `1px solid ${colors.line}` }} />
-        <div className="theme-prev-main">
-          <div className="theme-prev-line" style={{ background: colors.accent, width: "42%" }} />
-          <div className="theme-prev-line" style={{ background: colors.soft, width: "78%" }} />
-          <div className="theme-prev-line" style={{ background: colors.soft, width: "60%" }} />
-          <div className="theme-prev-line" style={{ background: colors.line, width: "70%" }} />
-        </div>
-      </div>
-      <div className="theme-name">
-        {name}
-        <span className="theme-check" aria-hidden>✓</span>
-      </div>
-    </button>
+    <span className="theme-swatches" aria-hidden="true">
+      <i style={{ background: theme.tokens.bg }} />
+      <i style={{ background: theme.tokens.panel }} />
+      <i style={{ background: theme.tokens.accent }} />
+      <i style={{ background: theme.tokens.text }} />
+    </span>
   );
 }
 
@@ -185,21 +155,51 @@ export function GeneralPage() {
   );
 }
 
-const themeCardColors = (t: ThemeSpec) => ({
-  bg: t.tokens.bg, side: t.tokens.panel, line: t.tokens.borderSoft, accent: t.tokens.accent, soft: t.tokens.raised,
-});
-
 const EXAMPLE_THEME_HINT = 'Paste theme JSON: { "id": "my-theme", "name": "My theme", "appearance": "dark", "tokens": { "bg": "#101010", … } }';
 
-// F15: preset grid + system-follow + custom JSON themes with hover preview.
+// F15: searchable grouped picker + system-follow + custom JSON themes.
 // Hover applies the candidate tokens live; leaving re-applies the saved pick.
 function ThemeSection() {
   const settings = useStore((s) => s.settings);
   const [customs, setCustoms] = useState<ThemeSpec[]>(() => loadCustomThemes());
   const [json, setJson] = useState("");
   const [jsonError, setJsonError] = useState("");
-  const preview = (t: ThemeSpec) => applyTheme(t);
-  const endPreview = () => reapplyTheme();
+  const [query, setQuery] = useState("");
+  const [pickerOpen, setPickerOpen] = useState(false);
+  // Each apply repaints ~35 CSS variables and notifies canvas consumers, so
+  // hover preview is debounced on one shared timer: sweeping across the list
+  // coalesces to a single apply per pause and a single restore on exit,
+  // instead of an apply + restore per crossed row.
+  const previewTimer = useRef<number | null>(null);
+  const previewApplied = useRef(false);
+  const schedulePreview = (action: () => void) => {
+    if (previewTimer.current !== null) window.clearTimeout(previewTimer.current);
+    previewTimer.current = window.setTimeout(() => {
+      previewTimer.current = null;
+      action();
+    }, 90);
+  };
+  const preview = (t: ThemeSpec) => schedulePreview(() => {
+    previewApplied.current = true;
+    applyTheme(t);
+  });
+  const endPreview = () => {
+    if (!previewApplied.current) {
+      if (previewTimer.current !== null) {
+        window.clearTimeout(previewTimer.current);
+        previewTimer.current = null;
+      }
+      return;
+    }
+    schedulePreview(() => {
+      previewApplied.current = false;
+      reapplyTheme();
+    });
+  };
+  useEffect(() => () => {
+    if (previewTimer.current !== null) window.clearTimeout(previewTimer.current);
+    if (previewApplied.current) reapplyTheme();
+  }, []);
   const importJson = () => {
     const res = parseThemeJson(json);
     if (!res.ok) { setJsonError(res.error); return; }
@@ -220,38 +220,109 @@ function ThemeSection() {
   const systemPreview = resolveTheme("system", {
     systemDark: typeof matchMedia === "function" ? matchMedia("(prefers-color-scheme: dark)").matches : true,
   });
+  const choices = [
+    ...PRESET_THEMES.filter((theme) => theme.appearance === "dark").map((theme) => ({ group: "Dark", theme })),
+    ...PRESET_THEMES.filter((theme) => theme.appearance === "light").map((theme) => ({ group: "Light", theme })),
+    ...customs.map((theme) => ({ group: "Custom", theme })),
+    { group: "System", theme: { ...systemPreview, id: "system", name: "System" } },
+  ];
+  const normalizedQuery = query.trim().toLowerCase();
+  const filtered = normalizedQuery
+    ? choices.filter(({ group, theme }) =>
+        `${theme.name} ${theme.id} ${theme.appearance} ${group}`.toLowerCase().includes(normalizedQuery))
+    : choices;
+  const current = choices.find(({ theme }) => theme.id === settings.theme) ?? choices[0]!;
+  const pick = (id: string) => {
+    updateSettings({ theme: id });
+    setQuery("");
+    setPickerOpen(false);
+  };
   return (
     <div className="set-sec" data-settings-item="appearance.theme">
       <div className="set-sec-title">Theme</div>
-      <div className="theme-grid">
-        {PRESET_THEMES.map((t) => (
-          <ThemeCard
-            key={t.id}
-            active={settings.theme === t.id}
-            name={t.name}
-            colors={themeCardColors(t)}
-            onPick={() => updateSettings({ theme: t.id })}
-            onPreview={() => preview(t)}
-            onPreviewEnd={endPreview}
-          />
-        ))}
-        <ThemeCard
-          active={settings.theme === "system"}
-          name="System"
-          colors={themeCardColors(systemPreview)}
-          onPick={() => updateSettings({ theme: "system" })}
-          onPreview={() => preview(systemPreview)}
-          onPreviewEnd={endPreview}
-        />
-        {customs.map((t) => (
-          <ThemeCard
-            key={t.id}
-            active={settings.theme === t.id}
-            name={t.name}
-            colors={themeCardColors(t)}
-            onPick={() => updateSettings({ theme: t.id })}
-            onPreview={() => preview(t)}
-            onPreviewEnd={endPreview}
+      <div
+        className="theme-picker"
+        onBlur={(event) => {
+          if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+            setPickerOpen(false);
+            endPreview();
+          }
+        }}
+      >
+        <button
+          className="theme-picker-current"
+          aria-expanded={pickerOpen}
+          aria-controls="theme-picker-options"
+          onClick={() => setPickerOpen((open) => !open)}
+        >
+          <ThemeSwatches theme={current.theme} />
+          <span><strong>{current.theme.name}</strong><small>{current.group} · {current.theme.appearance}</small></span>
+          <b aria-hidden="true">⌄</b>
+        </button>
+        {pickerOpen && (
+          <div className="theme-picker-pop" id="theme-picker-options">
+            <input
+              autoFocus
+              role="combobox"
+              aria-expanded="true"
+              aria-controls="theme-picker-list"
+              aria-label="Search themes"
+              value={query}
+              placeholder={`Search ${choices.length} themes…`}
+              onChange={(event) => setQuery(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === "Escape") {
+                  event.preventDefault();
+                  setPickerOpen(false);
+                  endPreview();
+                }
+              }}
+            />
+            <div className="theme-picker-list" id="theme-picker-list" role="listbox">
+              {(["Dark", "Light", "Custom", "System"] as const).map((group) => {
+                const groupChoices = filtered.filter((choice) => choice.group === group);
+                if (groupChoices.length === 0) return null;
+                return (
+                  <section key={group}>
+                    <div className="theme-picker-group">{group}</div>
+                    {groupChoices.map(({ theme }) => (
+                      <button
+                        key={`${group}:${theme.id}`}
+                        role="option"
+                        aria-selected={settings.theme === theme.id}
+                        className={settings.theme === theme.id ? "active" : ""}
+                        onClick={() => pick(theme.id)}
+                        onMouseEnter={() => preview(theme.id === "system" ? systemPreview : theme)}
+                        onMouseLeave={endPreview}
+                        onFocus={() => preview(theme.id === "system" ? systemPreview : theme)}
+                        onBlur={endPreview}
+                      >
+                        <ThemeSwatches theme={theme} />
+                        <span><strong>{theme.name}</strong><small>{theme.appearance}</small></span>
+                        <b aria-hidden="true">{settings.theme === theme.id ? "✓" : ""}</b>
+                      </button>
+                    ))}
+                  </section>
+                );
+              })}
+              {filtered.length === 0 && <div className="theme-picker-empty">No matching themes</div>}
+            </div>
+          </div>
+        )}
+      </div>
+      <div className="theme-swatch-strip" aria-label="Quick theme preview">
+        {PRESET_THEMES.map((theme) => (
+          <button
+            key={theme.id}
+            className={settings.theme === theme.id ? "active" : ""}
+            title={theme.name}
+            aria-label={`Use ${theme.name} theme`}
+            onClick={() => pick(theme.id)}
+            onMouseEnter={() => preview(theme)}
+            onMouseLeave={endPreview}
+            onFocus={() => preview(theme)}
+            onBlur={endPreview}
+            style={{ "--theme-swatch": theme.tokens.accent } as CSSProperties}
           />
         ))}
       </div>
@@ -298,8 +369,8 @@ export function AppearancePage() {
     <>
       <PageHead title="Appearance" blurb="Visual preferences, saved in this browser and applied immediately." />
       <ThemeSection />
-      <Row label="Density" hint="Compact tightens paddings and font sizes across panels." itemId="appearance.density">
-        <Seg value={ui.density} options={[["comfortable", "Comfortable"], ["compact", "Compact"]]} onChange={(density) => { setUiSettings({ density }); updateSettings({ density }); }} />
+      <Row label="Density" hint="Choose airy, balanced, or compact spacing across panels." itemId="appearance.density">
+        <Seg value={ui.density} options={[["comfortable", "Comfortable"], ["balanced", "Balanced"], ["compact", "Compact"]]} onChange={(density) => { setUiSettings({ density }); updateSettings({ density }); }} />
       </Row>
       <Row label="Interface font size" hint="Scales interface text except code blocks and the terminal." itemId="appearance.fontSize">
         <div className="rng">

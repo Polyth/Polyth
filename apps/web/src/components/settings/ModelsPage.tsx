@@ -11,6 +11,7 @@ import { providerColor } from "../../format.ts";
 import { formatModelRef } from "../../settings.ts";
 import { api, type ProviderCatalogDto } from "../../api.ts";
 import { EmptyState, PageHead, Row, Seg, Toggle } from "./parts.tsx";
+import { setGlobalDefaultModel, useSessionDefaults } from "../../sessionDefaults.ts";
 
 type Scope = "connected" | "all";
 
@@ -21,7 +22,7 @@ function fmtContext(context?: number): string {
 
 export default function ModelsPage() {
   const models = useStore((s) => s.models);
-  const settings = useStore((s) => s.settings);
+  const sessionDefaults = useSessionDefaults();
   const prefs = useModelPrefs();
   const [providers, setProviders] = useState<ProviderCatalogDto[] | null>(null);
   const [error, setError] = useState("");
@@ -93,7 +94,16 @@ export default function ModelsPage() {
         blurb="What the model picker offers. Toggles are written to the OpenCode config (disabled providers and per-provider blacklists), so every client sees the same catalog."
       />
       <Row label="Default model" hint="Used when a session has not selected a model." itemId="models.default">
-        <select value={settings.defaultModel} onChange={(e) => updateSettings({ defaultModel: e.target.value })}>
+        <select
+          value={sessionDefaults.defaultModel ? modelKey(sessionDefaults.defaultModel) : ""}
+          onChange={(e) => {
+            const selected = models.find((model) => modelKey(model) === e.target.value);
+            setGlobalDefaultModel(selected
+              ? { providerID: selected.providerID, modelID: selected.modelID }
+              : undefined);
+            updateSettings({ defaultModel: e.target.value });
+          }}
+        >
           <option value="">Server default</option>
           {models.map((model) => (
             <option key={modelKey(model)} value={formatModelRef(model)}>

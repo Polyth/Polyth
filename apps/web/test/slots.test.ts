@@ -147,8 +147,11 @@ test("SlotBoundary resets on item replacement but stays failed for the same item
 });
 
 test("contracts expose the runtime slot vocabulary used for validation", () => {
-  assert.ok(UI_SLOTS.length >= 16);
+  assert.ok(UI_SLOTS.length >= 19);
   assert.ok(isUiSlot("composer.leading"));
   assert.ok(isUiSlot("session.timeline.after"));
+  assert.ok(isUiSlot("widget.catalog"));
+  assert.ok(isUiSlot("widget.settings"));
+  assert.ok(isUiSlot("workspace.canvas"));
   assert.ok(!isUiSlot("not.a.slot"));
 });

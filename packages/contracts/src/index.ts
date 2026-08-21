@@ -472,8 +472,9 @@ export interface PermissionGuard {
 
 export interface ProjectDefaults {
   agentProfileId?: string;
-  agent?: string;
-  model?: ModelRef;
+  agent?: string | null;
+  /** null explicitly inherits the browser's global session default. */
+  model?: ModelRef | null;
   groupingMode?: string;
   worktreeBehavior?: "project-root" | "fresh-worktree";
 }
@@ -510,6 +511,9 @@ export const UI_SLOTS = [
   "app.nav", "session.header.actions", "session.list.badges",
   "composer.leading", "composer.trailing", "contextRail.tabs",
   "settings.pages", "commandPalette.commands",
+  // widget-first workspace contributions. Catalog items render on the
+  // customizable canvas; settings items augment a selected widget's inspector.
+  "widget.catalog", "widget.settings", "workspace.canvas",
   // parity slots (WP1): focused seams instead of mega-component imports
   "workspace.main.tabs", "workspace.right.tabs",
   "session.timeline.before", "session.timeline.after",

@@ -294,18 +294,49 @@ function MessageMeta({ m, announce, onRevert, onFork, revert, fork }: {
   );
 }
 
-function AssistantView({ m, announce }: { m: AssistantMsg; announce?: Announce }) {
-  // Role and progress live in the semantic container name — never a visible
-  // role label or avatar row (UX-TIMELINE-LAYOUT-01 a11y §2).
+function AssistantView({
+  m,
+  announce,
+  plan,
+}: {
+  m: AssistantMsg;
+  announce?: Announce;
+  plan?: NonNullable<RenderModel["tasks"]>;
+}) {
   const hasAnswer = m.text !== "" || !m.finalized;
   const articleProps = hasAnswer
     ? ({ role: "article", "aria-label": assistantArticleName(m.finalized, assistantTime(m)) } as const)
     : undefined;
   return (
     <div className="msg assistant" {...(articleProps ?? {})}>
+      <div className="msg-author">
+        <span className="msg-avatar agent" aria-hidden="true">p</span>
+        <strong>Polyth</strong>
+        <time dateTime={timeIso(assistantTime(m))}>{timeShort(assistantTime(m))}</time>
+      </div>
       {m.reasoning !== "" && <Thinking m={m} announce={announce} />}
       {hasAnswer && (
         <div className="bubble" dir="auto">{renderMarkdown(m.text || "", m.id)}{!m.finalized && <span className="caret" />}</div>
+      )}
+      {plan && plan.items.length > 0 && (
+        <section className="message-plan-card" aria-label="Current task plan">
+          <div className="message-plan-head">
+            <span className="message-plan-icon">✓</span>
+            <strong>Plan</strong>
+            <span>{plan.items.filter((item) => item.status === "done").length} of {plan.items.length}</span>
+          </div>
+          <div className="message-plan-progress">
+            <i style={{ width: `${Math.round((plan.items.filter((item) => item.status === "done").length / plan.items.length) * 100)}%` }} />
+          </div>
+          <ul>
+            {plan.items.slice(0, 5).map((item) => (
+              <li key={item.id} className={item.status}>
+                <span>{item.status === "done" ? "✓" : item.status === "active" ? "●" : "○"}</span>
+                {item.text}
+              </li>
+            ))}
+          </ul>
+        </section>
       )}
       {m.finalized && m.text !== "" && announce && <MessageMeta m={m} announce={announce} />}
     </div>
@@ -411,9 +442,10 @@ function WorkedGroup({ g }: { g: WorkGroup }) {
   );
 }
 
-function MessageView({ m, announce, onRevert, onFork, revert, fork }: {
+function MessageView({ m, announce, plan, onRevert, onFork, revert, fork }: {
   m: RenderMessage;
   announce?: Announce;
+  plan?: NonNullable<RenderModel["tasks"]>;
   onRevert?: (message: UserMsg) => void;
   onFork?: (message: UserMsg) => void;
   revert?: ActionAvailability;
@@ -422,6 +454,11 @@ function MessageView({ m, announce, onRevert, onFork, revert, fork }: {
   if (m.kind === "user") {
     return (
       <div className="msg user" data-msg-id={m.id} role="article" aria-label={userArticleName(m.time)}>
+        <div className="msg-author">
+          <span className="msg-avatar" aria-hidden="true">Y</span>
+          <strong>You</strong>
+          <time dateTime={timeIso(m.time)}>{timeShort(m.time)}</time>
+        </div>
         <div className="bubble" dir="auto">
           {renderMarkdown(m.text, m.id)}
           {m.attachments && m.attachments.length > 0 && (
@@ -439,7 +476,7 @@ function MessageView({ m, announce, onRevert, onFork, revert, fork }: {
       </div>
     );
   }
-  if (m.kind === "assistant") return <AssistantView m={m} announce={announce} />;
+  if (m.kind === "assistant") return <AssistantView m={m} announce={announce} plan={plan} />;
   if (m.kind === "task") return <TaskActivityRow activity={m} />;
   return <ToolCard m={m} />;
 }
@@ -765,6 +802,7 @@ export default function Timeline({ model }: { model: RenderModel }) {
   // above), and a jump to a hidden prompt grows the window first.
   const start = windowStart(rows.length, limit);
   const shownRows = start > 0 ? rows.slice(start) : rows;
+  const latestAssistantId = [...shownRows].reverse().find((row) => row.kind === "assistant")?.id;
   // A reveal activated from the keyboard can unmount its own control (the
   // final Show earlier chunk, or Show all): focus must then hand off to the
   // named timeline region — never fall to BODY (a11y criteria 6–7).
@@ -981,6 +1019,7 @@ export default function Timeline({ model }: { model: RenderModel }) {
               <MessageView
                 key={r.id}
                 m={r}
+                plan={r.kind === "assistant" && r.id === latestAssistantId && model.tasks ? model.tasks : undefined}
                 announce={announce}
                 onRevert={revert}
                 onFork={fork}

@@ -1,14 +1,10 @@
-// Finding 1 (UX-SHELL-CONSOLIDATION-02): Settings → Sessions white screen.
-// SessionsPage returned a FRESH filtered array from its useStore selector, so
-// every useSyncExternalStore getSnapshot differed and React looped until it
-// threw (#185 "Maximum update depth exceeded"), white-screening the overlay.
-// This mounts the REAL page through a React root and asserts it renders and
-// keeps rendering across store updates without throwing or loop warnings.
+// Settings → Sessions owns defaults and technical behavior, not session
+// browsing. Mount the real page and keep the getSnapshot-loop regression guard.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { register } from "node:module";
 import { Window } from "happy-dom";
-import type { SessionProjection } from "@polyth/contracts";
+import type { Project, SessionProjection } from "@polyth/contracts";
 
 // happy-dom globals must exist before react-dom/client (and the store's
 // localStorage-backed actions) initialize.
@@ -26,7 +22,9 @@ register("./tsxHooks.mjs", import.meta.url);
 
 const { act, createElement } = await import("react");
 const { createRoot } = await import("react-dom/client");
-const { activateProject, setSessions } = await import("../src/store.ts");
+const {
+  activateProject, beginProjectListRequest, publishProjectList, setModels, setSessions,
+} = await import("../src/store.ts");
 const { default: SessionsPage } = await import("../src/components/settings/SessionsPage.tsx");
 
 const session = (over: Partial<SessionProjection>): SessionProjection => ({
@@ -35,14 +33,32 @@ const session = (over: Partial<SessionProjection>): SessionProjection => ({
   ...over,
 });
 
-test("settings Sessions page mounts and renders the project's sessions without throwing", async () => {
-  // React reports an uncached getSnapshot loop through console.error before
-  // throwing — capture it so the regression is provable, not just crash-free.
+const project = (over: Partial<Project> = {}): Project => ({
+  id: "p-settings",
+  path: "/repo/settings",
+  name: "Settings project",
+  createdAt: Date.now(),
+  ...over,
+});
+
+function publishProjects(projects: Project[]): void {
+  const ticket = beginProjectListRequest();
+  assert.equal(publishProjectList(ticket, projects), "published");
+}
+
+test("settings Sessions page renders defaults and never lists sessions", async () => {
   const errors: string[] = [];
   const originalError = console.error;
   console.error = (...args: unknown[]) => { errors.push(args.map(String).join(" ")); };
 
+  publishProjects([project()]);
   activateProject("p-settings");
+  setModels([{
+    providerID: "openai",
+    modelID: "gpt-test",
+    providerName: "OpenAI",
+    name: "GPT Test",
+  }]);
   setSessions("p-settings", [
     session({ id: "s1", projectId: "p-settings", title: "Fix the flaky test" }),
     session({ id: "s2", projectId: "p-settings", title: "Ship the release", status: "working", updatedAt: Date.now() - 5_000 }),
@@ -57,20 +73,21 @@ test("settings Sessions page mounts and renders the project's sessions without t
   try {
     await act(async () => { root.render(createElement(SessionsPage)); });
     const text = container.textContent ?? "";
-    assert.match(text, /Sessions in project/);
-    assert.match(text, /Fix the flaky test/);
-    assert.match(text, /Ship the release/);
-    // Only the active project's sessions belong on the page.
-    assert.doesNotMatch(text, /Other project session/);
+    assert.match(text, /Technical behavior and defaults for new sessions/);
+    assert.match(text, /Global default model/);
+    assert.match(text, /Project default model/);
+    assert.match(text, /Worktree behavior/);
+    assert.match(text, /Default agent/);
+    assert.match(text, /Sidebar grouping/);
+    assert.match(text, /Open Schedule/);
+    assert.doesNotMatch(text, /Fix the flaky test|Ship the release|Other project session/);
 
-    // A later store update (e.g. a WS projection) re-renders once — no loop.
     await act(async () => {
       setSessions("p-settings", [
-        session({ id: "s1", projectId: "p-settings", title: "Fix the flaky test", status: "finished" }),
+        session({ id: "s4", projectId: "p-settings", title: "Still not settings content" }),
       ]);
     });
-    assert.match(container.textContent ?? "", /Fix the flaky test/);
-    assert.doesNotMatch(container.textContent ?? "", /Ship the release/);
+    assert.doesNotMatch(container.textContent ?? "", /Still not settings content/);
 
     assert.equal(
       errors.filter((e) => /getSnapshot|Maximum update depth/i.test(e)).length,
@@ -84,7 +101,8 @@ test("settings Sessions page mounts and renders the project's sessions without t
   }
 });
 
-test("settings Sessions page renders the empty state when no project is active", async () => {
+test("global defaults remain available when no project is active", async () => {
+  publishProjects([]);
   activateProject(null);
   setSessions("p-settings", []);
   setSessions("p-other", []);
@@ -93,7 +111,9 @@ test("settings Sessions page renders the empty state when no project is active",
   const root = createRoot(container);
   try {
     await act(async () => { root.render(createElement(SessionsPage)); });
-    assert.match(container.textContent ?? "", /No active project/);
+    assert.match(container.textContent ?? "", /Global default model/);
+    assert.match(container.textContent ?? "", /No project selected/);
+    assert.match(container.textContent ?? "", /Global defaults still apply/);
   } finally {
     await act(async () => { root.unmount(); });
     container.remove();

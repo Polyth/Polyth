@@ -400,6 +400,9 @@ test("setUiSettings persists and applies visual data attributes", () => {
     fontsize: "s",
     chatwidth: "wide",
     motion: "reduced",
+    technical: "true",
+    dictate: "true",
+    quickActions: "true",
   });
   assert.deepEqual(parseUiSettings(values.get(UI_SETTINGS_KEY) ?? null), getUiSettings());
 

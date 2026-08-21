@@ -7,7 +7,7 @@ export type FollowUpBehavior = "steer" | "queue" | "interrupt";
 export type NotificationKindPref = "completed" | "failed" | "question" | "permission" | "subagent";
 
 export interface UiSettings {
-  density: "comfortable" | "compact";
+  density: "comfortable" | "balanced" | "compact";
   fontSize: "s" | "m" | "l";
   /** Editor/composer font size in px (WP2/WP9 font tokens). */
   editorFontSize: number;
@@ -39,6 +39,9 @@ export interface UiSettings {
   /** Work-status panel (WP8). */
   workStatusPanelEnabled: boolean;
   workStatusHiddenSections: string[];
+  showTechnicalButtons: boolean;
+  showDictate: boolean;
+  showQuickActions: boolean;
   /** MCP server entries (stored locally; runtime integration pending). */
   mcpServers: Array<{ name: string; url: string }>;
 }
@@ -67,6 +70,9 @@ export const UI_DEFAULTS: UiSettings = {
   editorAutosave: true,
   workStatusPanelEnabled: true,
   workStatusHiddenSections: [],
+  showTechnicalButtons: true,
+  showDictate: true,
+  showQuickActions: true,
   mcpServers: [],
 };
 
@@ -78,7 +84,7 @@ export function parseUiSettings(raw: string | null): UiSettings {
     const data = JSON.parse(raw ?? "") as Partial<UiSettings>;
     const fontPx = Number(data.editorFontSize);
     return {
-      density: data.density === "compact" ? "compact" : "comfortable",
+      density: data.density === "compact" || data.density === "balanced" ? data.density : "comfortable",
       fontSize: data.fontSize === "s" || data.fontSize === "l" ? data.fontSize : "m",
       editorFontSize: Number.isFinite(fontPx) && fontPx >= 11 && fontPx <= 24 ? Math.round(fontPx) : 14,
       chatWidth: data.chatWidth === "wide" ? "wide" : "normal",
@@ -105,6 +111,9 @@ export function parseUiSettings(raw: string | null): UiSettings {
       workStatusHiddenSections: Array.isArray(data.workStatusHiddenSections)
         ? data.workStatusHiddenSections.filter((s): s is string => typeof s === "string").slice(0, 32)
         : [],
+      showTechnicalButtons: data.showTechnicalButtons !== false,
+      showDictate: data.showDictate !== false,
+      showQuickActions: data.showQuickActions !== false,
       mcpServers: Array.isArray(data.mcpServers)
         ? data.mcpServers
             .filter((s): s is { name: string; url: string } => !!s && typeof s.name === "string" && typeof s.url === "string")
@@ -134,6 +143,9 @@ export function applyUiSettings(s: UiSettings = settings): void {
   b.dataset.fontsize = s.fontSize;
   b.dataset.chatwidth = s.chatWidth;
   b.dataset.motion = s.reducedMotion ? "reduced" : "full";
+  b.dataset.technical = String(s.showTechnicalButtons);
+  b.dataset.dictate = String(s.showDictate);
+  b.dataset.quickActions = String(s.showQuickActions);
   b.style?.setProperty("--editor-font-size", `${s.editorFontSize}px`);
 }
 
