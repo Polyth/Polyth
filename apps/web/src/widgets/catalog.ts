@@ -2,7 +2,7 @@ import { useSyncExternalStore, type ReactNode } from "react";
 import { listSlots, slotVersion, subscribeSlots } from "../slots.ts";
 import type { WidgetAudience, WidgetZone } from "./widgetLayout.ts";
 
-export interface WidgetRenderContext {
+export interface WidgetRenderContext extends Record<string, unknown> {
   projectId: string | null;
   sessionId: string | null;
   editing: boolean;
