@@ -42,7 +42,6 @@ export default function Sidebar() {
   // sidebar is always expanded regardless of the mobile drawer flag.
   const expanded = useSidebarExpanded(drawerOpen);
   const branch = useStore((s) => s.gitBranch);
-  const productName = useStore((s) => s.settings.productName);
   const project = projects.find((p) => p.id === activeProjectId) ?? null;
   const [renamingProject, setRenamingProject] = useState<string | null>(null);
   const [projectName, setProjectName] = useState("");
@@ -152,10 +151,8 @@ export default function Sidebar() {
         )}
         {!collapsed && (<>
         <div className="sidebar-head">
-          <span className="brand"><i>p</i> {productName.toLowerCase()}</span>
+          <span className="side-section-title">Workspaces</span>
           <span className="side-icons">
-            <button className="icon-btn" title={`Search sessions (${MOD}P)`} onClick={() => setOverlay("search")}><Icon.search /></button>
-            <button className="icon-btn" title="Source control (Git & worktrees)" onClick={() => openWorkspacePane("git")}><Icon.tree /></button>
             <button
               className="icon-btn"
               title="Open project"

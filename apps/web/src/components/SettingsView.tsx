@@ -194,7 +194,7 @@ export default function SettingsView({ onClose = () => setOverlay(null) }: { onC
   return (
     <div className="scrim" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <div
-        className="modal settings-shell"
+        className={`modal settings-shell settings-page-${current.id}`}
         ref={modalRef}
         tabIndex={-1}
         onMouseDown={(e) => e.stopPropagation()}
@@ -210,7 +210,7 @@ export default function SettingsView({ onClose = () => setOverlay(null) }: { onC
           <input
             className="settings-nav-search"
             value={filter}
-            placeholder="Search settings…"
+            placeholder="Search settings... ⌘K"
             onChange={(e) => { setFilter(e.target.value); setCursor(0); }}
             onKeyDown={onSearchKey}
             aria-label="Search settings"
@@ -262,7 +262,10 @@ export default function SettingsView({ onClose = () => setOverlay(null) }: { onC
               ))}
             </nav>
           )}
-          <div className="nav-foot">Polyth settings<br />Changes save automatically</div>
+          <div className="nav-foot">
+            <span>Changes save automatically</span>
+            <button onClick={() => setOverlay("onboarding")}>Open preset setup</button>
+          </div>
         </nav>
         <div className="modal-main settings-pane">
           <div className="modal-head settings-pane-head">

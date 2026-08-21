@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  closeWorkspacePane, getState, setActiveView, useActiveModel, useStore,
-  setRailPlugin, setSidebarOpen, setUiError, type AppView,
+  closeWorkspacePane, getState, openWorkspacePane, setActiveView, useActiveModel, useStore,
+  setOverlay, setRailPlugin, setSidebarOpen, setUiError, type AppView,
 } from "../store.ts";
-import { forkSession, exportSessionMarkdown } from "../init.ts";
+import { createSession, forkSession, exportSessionMarkdown } from "../init.ts";
 import { displaySessionTitle } from "../format.ts";
 import { friendlyError, shortcutLabel } from "../settings.ts";
 import { GoalAttachForm } from "./GoalStrip.tsx";
@@ -415,79 +415,83 @@ function OverflowMenu({ sessionId, onGoal }: { sessionId: string | null; onGoal:
 export default function Header() {
   const session = useStore((s) => s.sessions.find((x) => x.id === s.activeSessionId) ?? null);
   const project = useStore((s) => s.projectRegistry.projects.find((p) => p.id === s.activeProjectId) ?? null);
-  const view = useStore((s) => s.activeView);
   const branch = useStore((s) => s.gitBranch);
-  const models = useStore((s) => s.models);
   const model = useActiveModel();
-  const ctx = useMemo(() => {
-    const ref = model.contextUsage?.model ?? model.turn?.model ?? session?.model;
-    if (!ref) return null;
-    const descriptor = models.find(
-      (candidate) => candidate.providerID === ref.providerID && candidate.modelID === ref.modelID,
-    );
-    return contextGauge(model, descriptor?.context);
-  }, [model, session?.model, models]);
   const [goalFormOpen, setGoalFormOpen] = useState(false);
   const workspaceMode = useWorkspaceMode();
-  const widgetLayout = useWidgetLayout();
-
-  const firstUserText = useMemo(() => {
-    const first = model.messages.find((m) => m.kind === "user");
-    return first && first.kind === "user" ? (first.text || first.raw) : undefined;
-  }, [model.messages]);
-
-  const title = session
-    ? displaySessionTitle(session.title, session.id, firstUserText)
-    : project?.name || project?.path || "Polyth";
-  const subtitle = [project?.name || project?.path, branch].filter(Boolean).join(" · ");
 
   const mode = useShellMode();
   const compact = mode !== "wide";
   useResizeFocusHandoff(mode);
-  const switchWorkspaceMode = (next: "chat" | "widgets") => {
+  const switchWorkspaceMode = (next: "chat" | "widgets" | "edit") => {
     closeWorkspacePane();
     setActiveView("session");
     setWorkspaceMode(next);
+  };
+  const newSession = () => {
+    if (!project) return;
+    void createSession(project.id).catch((error) =>
+      setUiError(friendlyError("Couldn’t create a session", error)));
   };
 
   return (
     <>
       <header className={`header${compact ? " header-compact" : ""}`}>
         {compact && <DrawerTrigger />}
-        {ctx && <ContextRing gauge={ctx} />}
-        <div className="header-session">
-          <div className="header-title" title={title}>{title}</div>
-          {subtitle && <div className="header-sub">{subtitle}</div>}
+        <button className="header-brand" aria-label="Polyth home" onClick={() => switchWorkspaceMode("chat")}>
+          <span className="polyth-mark">p</span>
+          <strong>polyth</strong>
+        </button>
+        <div className="header-breadcrumbs" aria-label="Current workspace">
+          <button className="header-crumb" title={project?.path ?? "Choose a project"} onClick={() => setOverlay("project-picker")}>
+            <Icon.files />
+            <span>{project?.name || project?.path || "Choose project"}</span>
+            <b aria-hidden="true">⌄</b>
+          </button>
+          <span className="header-breadcrumb-sep">/</span>
+          <button className="header-crumb" title={branch || "Current branch"} onClick={() => openWorkspacePane("git")}>
+            <Icon.tree />
+            <span>{branch || "no branch"}</span>
+            <b aria-hidden="true">⌄</b>
+          </button>
         </div>
-        {session && <AutoAcceptChip sessionId={session.id} effective={!!session.autoAccept} />}
+        <button className="header-global-search" onClick={() => setOverlay("search")}>
+          <Icon.search /><span>Search</span><kbd>⌘K</kbd>
+        </button>
+        <div className="workspace-mode-switch" role="group" aria-label="Workspace view">
+          <button
+            className={workspaceMode === "chat" ? "active" : ""}
+            aria-pressed={workspaceMode === "chat"}
+            onClick={() => switchWorkspaceMode("chat")}
+          >Focus</button>
+          <button
+            className={workspaceMode === "widgets" ? "active" : ""}
+            aria-pressed={workspaceMode === "widgets"}
+            onClick={() => switchWorkspaceMode("widgets")}
+          >Canvas</button>
+          <button
+            className={workspaceMode === "edit" ? "active" : ""}
+            aria-pressed={workspaceMode === "edit"}
+            onClick={() => switchWorkspaceMode("edit")}
+          >Edit layout</button>
+        </div>
+        <span className="header-spacer" />
         {session && (
           <SlotHost
             slot="session.header.actions"
             context={{ sessionId: session.id, status: session.status, working: model.turn?.status === "working" }}
           />
         )}
-        <div className="workspace-mode-switch" role="group" aria-label="Workspace mode">
-          <button
-            className={workspaceMode === "chat" ? "active" : ""}
-            aria-pressed={workspaceMode === "chat"}
-            onClick={() => switchWorkspaceMode("chat")}
-          >Chat</button>
-          <button
-            className={workspaceMode === "widgets" ? "active" : ""}
-            aria-pressed={workspaceMode === "widgets"}
-            onClick={() => switchWorkspaceMode("widgets")}
-          >Widgets</button>
-        </div>
-        {workspaceMode === "chat" && (
-          <button className="workspace-customize" onClick={() => switchWorkspaceMode("widgets")}>Customize</button>
-        )}
-        {widgetLayout.audience === "power" && (compact ? (
-          <CompactViewPicker view={view} />
-        ) : (
-          <CapabilityNav />
-        ))}
-        <OverflowMenu sessionId={session?.id ?? null} onGoal={() => setGoalFormOpen((v) => !v)} />
-        {compact && <NarrowPanelTrigger />}
+        <button className="header-action header-new-session" disabled={!project} onClick={newSession}>
+          <Icon.plus /><span>New session</span>
+        </button>
+        <button className="header-action" title="Search" aria-label="Search" onClick={() => setOverlay("search")}><Icon.search /></button>
+        <button className="header-action" title="History" aria-label="History" onClick={() => setOverlay("search")}><Icon.clock /></button>
+        <button className="header-action" title="Settings" aria-label="Settings" onClick={() => setOverlay("settings")}><Icon.gear /></button>
+        <OverflowMenu sessionId={session?.id ?? null} onGoal={() => setGoalFormOpen((value) => !value)} />
+        <button className="header-profile" aria-label="User menu">
+          <span>PO</span><b aria-hidden="true">⌄</b>
+        </button>
       </header>
       {goalFormOpen && <GoalAttachForm onDone={() => setGoalFormOpen(false)} />}
     </>

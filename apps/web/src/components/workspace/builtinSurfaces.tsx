@@ -21,7 +21,7 @@ import { friendlyError, shortcutLabel } from "../../settings.ts";
 import { composerBlockedByArchive, sessionSurfaceKind } from "../../sessionSurface.ts";
 import { registerWorkspaceSurface } from "../../workspace/surfaceRegistry.ts";
 import WidgetCanvas from "../../widgets/WidgetCanvas.tsx";
-import { useWorkspaceMode } from "../../widgets/workspaceMode.ts";
+import { setWorkspaceMode, useWorkspaceMode } from "../../widgets/workspaceMode.ts";
 
 // Large polyth-style hero for a fresh session (or no session yet):
 // centered headline, the composer as an elevated card, and suggestion chips.
@@ -98,7 +98,7 @@ function SessionSurface() {
   const session = useStore((s) => s.sessions.find((x) => x.id === s.activeSessionId) ?? null);
   const model = useActiveModel();
 
-  if (workspaceMode === "widgets") return <WidgetCanvas />;
+  if (workspaceMode !== "chat") return <WidgetCanvas />;
 
   // Fresh state yields to pending prompts and permissions; an in-flight
   // canonical replay yields to the loading row (never a false fresh hero).
@@ -113,14 +113,26 @@ function SessionSurface() {
   const archived = composerBlockedByArchive(session);
 
   return (
-    <>
+    <div className="focus-conversation">
+      <button className="focus-customize" onClick={() => setWorkspaceMode("edit")}>
+        <span aria-hidden="true">☷</span> Customize
+      </button>
       <div className="timeline-wrap">
         <Timeline model={model} />
       </div>
+      {model.turn?.status === "working" && (
+        <div className="focus-working" role="status">
+          <span className="focus-working-spinner" aria-hidden="true" />
+          <span>
+            <strong>Scanning repositories and indexing…</strong>
+            <small>This usually takes a few seconds.</small>
+          </span>
+        </div>
+      )}
       {pendingQuestions.length > 0 && <QuestionCards questions={pendingQuestions} />}
       {pendingPermissions.length > 0 && <PermissionBanner permissions={pendingPermissions} />}
       {archived && sessionId ? <ArchivedComposerGuard sessionId={sessionId} /> : <Composer />}
-    </>
+    </div>
   );
 }
 

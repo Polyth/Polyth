@@ -3,14 +3,12 @@
 // surface registry; built-ins register themselves in
 // workspace/builtinSurfaces.tsx (imported for its registrations), so adding a
 // surface never edits this file.
-import Header from "./Header.tsx";
 import WorkspaceHost from "./workspace/WorkspaceHost.ts";
 import "./workspace/builtinSurfaces.tsx";
 
 export default function Main() {
   return (
     <main className="main">
-      <Header />
       <WorkspaceHost />
     </main>
   );

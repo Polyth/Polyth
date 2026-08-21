@@ -128,14 +128,14 @@ export const PRESET_THEMES: ThemeSpec[] = [
     },
   },
   {
-    // UX-A390: accentInk is dark so Send/primary-action text reaches ≥4.5:1
-    // over both accent gradient endpoints (6.10 vs accent, 7.34 vs accentHi).
+    // White action ink matches the light shell and reaches ≥4.5:1 over both
+    // accessible orange gradient endpoints.
     id: "light", name: "Parchment", appearance: "light",
     tokens: {
       bg: "#faf8f4", panel: "#f1ede6", elevated: "#ffffff", raised: "#f3efe8", sunken: "#e9e4da", inputBg: "#ffffff",
       border: "#d5cec1", borderSoft: "#e2dcd2",
       text: "#2a2620", textDim: "#4d473e", muted: "#5b564e", faint: "#6a6357",
-      accent: "#d9822b", accentInk: "#241404", accentHi: "#e2954a",
+      accent: "#b54d00", accentInk: "#ffffff", accentHi: "#bd5700",
       green: "#4d9432", amber: "#a97d14", red: "#c4453a", blue: "#2f6fae", purple: "#7a53b8",
     },
   },
@@ -222,7 +222,7 @@ export const PRESET_THEMES: ThemeSpec[] = [
   }),
 ];
 
-export const DEFAULT_THEME: ThemeSpec = PRESET_THEMES[0]!;
+export const DEFAULT_THEME: ThemeSpec = PRESET_THEMES.find((theme) => theme.id === "light")!;
 
 // ---- validation ---------------------------------------------------------------
 

@@ -17,10 +17,17 @@ test("default widget layout contains every built-in exactly once", () => {
   const placed = WIDGET_ZONES.flatMap((zone) => layout.zones[zone]);
   assert.deepEqual(new Set(placed), new Set(BUILTIN_WIDGET_IDS));
   assert.equal(placed.length, BUILTIN_WIDGET_IDS.length);
-  assert.equal(widgetZoneOf(layout, "core.chat"), "main");
+  assert.equal(widgetZoneOf(layout, "core.composer"), "main");
   assert.equal(widgetZoneOf(layout, "terminal.shell"), "bottom");
-  assert.equal(layout.widgets["core.chat"]?.visible, true);
+  assert.equal(layout.widgets["core.composer"]?.visible, true);
+  assert.equal(layout.widgets["core.chat"]?.visible, false);
   assert.equal(layout.widgets["preview.app"]?.visible, false);
+  for (const id of [
+    "core.composer", "goals.current", "files.project-map", "git.recent",
+    "session.work-status", "knowledge.notes", "session.activity", "core.quick-actions",
+  ]) {
+    assert.equal(layout.widgets[id]?.visible, true, `${id} should be visible in the default canvas`);
+  }
 });
 
 test("catalog definitions provide plugin default zones and sizes", () => {

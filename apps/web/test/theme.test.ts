@@ -116,7 +116,7 @@ test("resolveTheme: system follows the OS, ids resolve, unknown falls back", () 
   assert.equal(resolveTheme("light").id, "light");
   const custom: ThemeSpec = { ...(PRESET_THEMES[1]!), id: "my-theme", name: "Mine" };
   assert.equal(resolveTheme("my-theme", { custom: [custom] }).name, "Mine");
-  assert.equal(resolveTheme("deleted-theme").id, "dark"); // default fallback
+  assert.equal(resolveTheme("deleted-theme").id, "light"); // default fallback
 });
 
 test("themeCssVars maps roles, derives washes/rgb, and honors syntax overrides", () => {
@@ -133,7 +133,7 @@ test("themeCssVars maps roles, derives washes/rgb, and honors syntax overrides",
   assert.notEqual(dark["--bubble-user-bg"], PRESET_THEMES[0]!.tokens.accent);
 
   const light = themeCssVars(PRESET_THEMES.find((t) => t.id === "light")!);
-  assert.equal(light["--accent-wash"], "rgba(217, 130, 43, 0.12)"); // light alpha differs
+  assert.equal(light["--accent-wash"], "rgba(181, 77, 0, 0.12)"); // light alpha differs
 
   const withSyntax: ThemeSpec = { ...PRESET_THEMES[0]!, id: "s", syntax: { kw: "#ff0000" } };
   const vars = themeCssVars(withSyntax);

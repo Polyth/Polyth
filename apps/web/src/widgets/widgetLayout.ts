@@ -30,6 +30,7 @@ export interface WidgetLayout {
 export const WIDGET_LAYOUT_KEY = "polyth.widgetLayout";
 export const WIDGET_ZONES: readonly WidgetZone[] = ["top", "left", "main", "right", "bottom"];
 export const BUILTIN_WIDGET_IDS = [
+  "core.composer",
   "core.chat",
   "terminal.shell",
   "goals.current",
@@ -40,6 +41,7 @@ export const BUILTIN_WIDGET_IDS = [
   "session.activity",
   "preview.app",
   "files.explorer",
+  "files.project-map",
   "github.overview",
   "schedule.tasks",
   "multirun.runs",
@@ -52,7 +54,9 @@ const DEFAULT_ZONE: Record<string, WidgetZone> = {
   "core.quick-actions": "top",
   "goals.current": "top",
   "files.explorer": "left",
+  "files.project-map": "left",
   "knowledge.notes": "left",
+  "core.composer": "main",
   "core.chat": "main",
   "multirun.runs": "main",
   "fusion.answers": "main",
@@ -69,10 +73,12 @@ const DEFAULT_ZONE: Record<string, WidgetZone> = {
 
 const DEFAULT_SIZE: WidgetSize = { w: 6, h: 4 };
 const DEFAULT_SIZE_BY_ID: Record<string, WidgetSize> = {
+  "core.composer": { w: 12, h: 6 },
   "core.chat": { w: 12, h: 8 },
   "core.quick-actions": { w: 6, h: 2 },
   "goals.current": { w: 6, h: 4 },
   "files.explorer": { w: 6, h: 7 },
+  "files.project-map": { w: 5, h: 4 },
   "git.recent": { w: 6, h: 6 },
   "terminal.shell": { w: 12, h: 5 },
   "knowledge.notes": { w: 6, h: 5 },
@@ -87,7 +93,8 @@ const DEFAULT_SIZE_BY_ID: Record<string, WidgetSize> = {
   "usage.session": { w: 4, h: 3 },
 };
 const DEFAULT_VISIBLE = new Set<string>([
-  "core.chat", "core.quick-actions", "goals.current", "git.recent", "terminal.shell",
+  "core.composer", "core.quick-actions", "goals.current", "files.project-map",
+  "git.recent", "knowledge.notes", "session.work-status", "session.activity",
 ]);
 
 const emptyZones = (): Record<WidgetZone, string[]> => ({
@@ -220,10 +227,10 @@ export function setWidgetAudience(layout: WidgetLayout, audience: WidgetAudience
 }
 
 const PRESET_VISIBLE: Record<Exclude<WidgetLayoutPresetId, "custom">, readonly string[]> = {
-  focused: ["core.chat", "core.quick-actions", "goals.current"],
-  balanced: ["core.chat", "core.quick-actions", "goals.current", "git.recent", "terminal.shell"],
-  manager: ["core.chat", "goals.current", "knowledge.notes", "schedule.tasks", "usage.session", "walkthrough.review"],
-  "build-debug": ["core.chat", "files.explorer", "git.recent", "terminal.shell", "preview.app", "session.activity"],
+  focused: ["core.composer", "core.quick-actions", "goals.current"],
+  balanced: ["core.composer", "core.quick-actions", "goals.current", "files.project-map", "git.recent", "knowledge.notes", "session.work-status", "session.activity"],
+  manager: ["core.composer", "goals.current", "knowledge.notes", "schedule.tasks", "usage.session", "walkthrough.review"],
+  "build-debug": ["core.composer", "files.explorer", "files.project-map", "git.recent", "terminal.shell", "preview.app", "session.activity", "session.work-status"],
 };
 
 export function applyWidgetLayoutPreset(

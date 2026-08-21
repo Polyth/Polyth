@@ -21,7 +21,7 @@ export interface PolythSettings {
 export const SETTINGS_KEY = "polyth.settings";
 
 export const DEFAULT_SETTINGS: PolythSettings = {
-  theme: "dark",
+  theme: "light",
   density: "comfortable",
   fontSize: 14,
   productName: "Polyth",

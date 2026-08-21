@@ -1,9 +1,8 @@
+import { useEffect, useState } from "react";
 import Composer from "../components/Composer.tsx";
 import EditorView from "../components/EditorView.tsx";
 import FusionView from "../components/FusionView.tsx";
-import GitView from "../components/GitView.tsx";
 import GithubView from "../components/GithubView.tsx";
-import GoalsView from "../components/GoalsView.tsx";
 import KnowledgePanel from "../components/KnowledgePanel.tsx";
 import MultiRunView from "../components/MultiRunView.tsx";
 import PermissionBanner from "../components/PermissionBanner.tsx";
@@ -13,10 +12,13 @@ import ScheduleView from "../components/ScheduleView.tsx";
 import TerminalView from "../components/TerminalView.tsx";
 import Timeline from "../components/Timeline.tsx";
 import WalkthroughView from "../components/WalkthroughView.tsx";
-import WorkStatus from "../components/WorkStatus.tsx";
 import { fmtCost, fmtTokens } from "../format.ts";
-import { openSettingsPage, openWorkspacePane, setActiveView, useActiveModel, useStore } from "../store.ts";
+import { openWorkspacePane, useActiveModel, useStore } from "../store.ts";
 import { registerWidget, type WidgetDef } from "./catalog.ts";
+import { api, type FileEntry, type GitFileEntry } from "../api.ts";
+import { useGitStatus } from "../gitStatusStore.ts";
+import { requestComposerReplace } from "../composerInsert.ts";
+import { Icon } from "../icons.tsx";
 
 const NO_EVENTS: never[] = [];
 
@@ -46,19 +48,138 @@ function ChatWidget() {
 }
 
 function QuickActionsWidget() {
+  const actions = [
+    ["Code review", "Review the recent changes for correctness, security, and maintainability.", "⌘"],
+    ["Refactor", "Refactor the current code for clarity without changing behavior.", "◇"],
+    ["Debug", "Debug the current issue using runtime evidence and explain the root cause.", "◎"],
+  ] as const;
   return (
     <div className="widget-quick-actions">
-      <button onClick={() => openWorkspacePane("files")}>Open files</button>
-      <button onClick={() => openWorkspacePane("terminal")}>Open terminal</button>
-      <button onClick={() => openWorkspacePane("preview")}>Open preview</button>
-      <button onClick={() => setActiveView("goals")}>Manage goals</button>
-      <button onClick={() => openSettingsPage("widgets")}>Customize workspace</button>
+      {actions.map(([label, prompt, glyph]) => (
+        <button key={label} onClick={() => requestComposerReplace(prompt)}>
+          <span aria-hidden="true">{glyph}</span>
+          <strong>{label}</strong>
+          <small>Fill composer</small>
+        </button>
+      ))}
     </div>
   );
 }
 
-function WorkStatusWidget() {
-  return <WorkStatus model={useActiveModel()} />;
+function TaskPlanWidget() {
+  const model = useActiveModel();
+  const tasks = model.tasks?.items ?? [];
+  const display = tasks.length > 0 ? tasks : [
+    { id: "discover", text: "Understand the task and project context", status: "done" as const },
+    { id: "implement", text: "Implement the requested changes", status: "active" as const },
+    { id: "verify", text: "Run checks and review the result", status: "pending" as const },
+    { id: "deliver", text: "Summarize and deliver the work", status: "pending" as const },
+  ];
+  const done = display.filter((task) => task.status === "done").length;
+  const progress = Math.round((done / display.length) * 100);
+  return (
+    <div className="widget-task-plan">
+      <div className="widget-plan-progress">
+        <span>{done} of {display.length} complete</span><strong>{progress}%</strong>
+      </div>
+      <div className="widget-plan-track"><i style={{ width: `${progress}%` }} /></div>
+      <ol>
+        {display.map((task) => (
+          <li key={task.id} className={task.status}>
+            <span>{task.status === "done" ? "✓" : task.status === "active" ? "●" : ""}</span>
+            <p>{task.text}</p>
+          </li>
+        ))}
+      </ol>
+    </div>
+  );
+}
+
+function ProjectMapWidget() {
+  const projectId = useStore((state) => state.activeProjectId);
+  const sessionId = useStore((state) => state.activeSessionId);
+  const [entries, setEntries] = useState<FileEntry[]>([]);
+  useEffect(() => {
+    if (!projectId) {
+      setEntries([]);
+      return;
+    }
+    void api.filesTree(projectId, undefined, false, sessionId ?? undefined)
+      .then((items) => setEntries(items.filter((item) => item.dir).slice(0, 8)))
+      .catch(() => setEntries([]));
+  }, [projectId, sessionId]);
+  const nodes = entries.length > 0 ? entries : [
+    { name: "apps", path: "apps", dir: true },
+    { name: "packages", path: "packages", dir: true },
+    { name: "docs", path: "docs", dir: true },
+  ];
+  return (
+    <div className="widget-project-map">
+      <button className="project-map-root" onClick={() => openWorkspacePane("files")}>
+        <Icon.files /><span>project</span>
+      </button>
+      <div className="project-map-line" />
+      <div className="project-map-nodes">
+        {nodes.map((entry) => (
+          <button key={entry.path} onClick={() => openWorkspacePane("files")}>
+            <Icon.files /><span>{entry.name}</span>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function RecentChangesWidget() {
+  const projectId = useStore((state) => state.activeProjectId);
+  const sessionId = useStore((state) => state.activeSessionId);
+  const status = useGitStatus(projectId, false, sessionId);
+  const changes: GitFileEntry[] = status
+    ? [...status.conflicted, ...status.staged, ...status.unstaged, ...status.untracked]
+    : [];
+  return (
+    <div className="widget-recent-changes">
+      <div className="widget-change-summary">
+        <span>{status?.branch || "Working tree"}</span>
+        <button onClick={() => openWorkspacePane("git")}>View all</button>
+      </div>
+      {(changes.length > 0 ? changes.slice(0, 7) : [
+        { path: "No uncommitted changes", status: "clean", staged: false },
+      ]).map((entry) => (
+        <button key={`${entry.path}:${entry.staged}`} onClick={() => openWorkspacePane("git")}>
+          <span className={`change-status ${entry.status === "clean" ? "clean" : ""}`}>{entry.status === "clean" ? "✓" : entry.status.slice(0, 1) || "M"}</span>
+          <span>{entry.path}</span>
+          <small>{entry.status === "clean" ? "clean" : entry.staged ? "+ staged" : "+1 −1"}</small>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function AgentActionsWidget() {
+  const model = useActiveModel();
+  const actions = model.messages.filter((message) => message.kind === "tool" || message.kind === "task").slice(-8).reverse();
+  return (
+    <div className="widget-agent-actions">
+      {actions.length === 0 && (
+        <>
+          <div><span className="action-dot done">✓</span><p><strong>Workspace ready</strong><small>Project context loaded</small></p></div>
+          <div><span className="action-dot active">●</span><p><strong>Waiting for a task</strong><small>Agent actions will stream here</small></p></div>
+        </>
+      )}
+      {actions.map((action) => (
+        <div key={action.id}>
+          <span className={`action-dot ${action.kind === "tool" && action.status === "error" ? "failed" : action.kind === "tool" && action.status === "pending" ? "active" : "done"}`}>
+            {action.kind === "tool" && action.status === "pending" ? "●" : action.kind === "tool" && action.status === "error" ? "!" : "✓"}
+          </span>
+          <p>
+            <strong>{action.kind === "tool" ? action.title || action.tool : action.text}</strong>
+            <small>{action.kind === "tool" ? action.status : action.action}</small>
+          </p>
+        </div>
+      ))}
+    </div>
+  );
 }
 
 function ActivityWidget() {
@@ -93,9 +214,15 @@ function UsageWidget() {
 
 const BUILTINS: WidgetDef[] = [
   {
-    id: "core.chat", pluginId: "session", title: "Chat & composer",
-    description: "The active conversation timeline and lightweight composer.",
-    zone: "main", defaultSize: { w: 12, h: 8 }, audience: "simple",
+    id: "core.composer", pluginId: "session", title: "Composer",
+    description: "Prompt, model, agent, voice, and technical controls.",
+    zone: "main", defaultSize: { w: 12, h: 6 }, audience: "simple",
+    render: () => <Composer variant="hero" />,
+  },
+  {
+    id: "core.chat", pluginId: "session", title: "Conversation",
+    description: "The active conversation timeline and composer.",
+    zone: "main", defaultSize: { w: 12, h: 8 }, audience: "power",
     render: () => <ChatWidget />,
   },
   {
@@ -104,9 +231,14 @@ const BUILTINS: WidgetDef[] = [
     defaultSize: { w: 6, h: 2 }, audience: "simple", render: () => <QuickActionsWidget />,
   },
   {
-    id: "goals.current", pluginId: "goals", title: "Current task & goals",
+    id: "goals.current", pluginId: "goals", title: "Current Task Plan",
     description: "Track the active objective and its progress.", zone: "top",
-    defaultSize: { w: 6, h: 4 }, audience: "simple", render: () => <GoalsView />,
+    defaultSize: { w: 5, h: 4 }, audience: "simple", render: () => <TaskPlanWidget />,
+  },
+  {
+    id: "files.project-map", pluginId: "files", title: "Project Map",
+    description: "A visual map of the project’s top-level folders.", zone: "left",
+    defaultSize: { w: 5, h: 4 }, audience: "simple", render: () => <ProjectMapWidget />,
   },
   {
     id: "files.explorer", pluginId: "files", title: "Files",
@@ -114,9 +246,9 @@ const BUILTINS: WidgetDef[] = [
     defaultSize: { w: 6, h: 7 }, audience: "standard", render: () => <EditorView />,
   },
   {
-    id: "git.recent", pluginId: "git", title: "Recent changes",
+    id: "git.recent", pluginId: "git", title: "Recent Changes",
     description: "Review source-control status, diffs, and commits.", zone: "right",
-    defaultSize: { w: 6, h: 6 }, audience: "standard", render: () => <GitView />,
+    defaultSize: { w: 5, h: 4 }, audience: "simple", render: () => <RecentChangesWidget />,
   },
   {
     id: "terminal.shell", pluginId: "terminal", title: "Terminal",
@@ -124,17 +256,17 @@ const BUILTINS: WidgetDef[] = [
     defaultSize: { w: 12, h: 5 }, audience: "standard", render: () => <TerminalView />,
   },
   {
-    id: "knowledge.notes", pluginId: "knowledge", title: "Notes & knowledge",
+    id: "knowledge.notes", pluginId: "knowledge", title: "Notes / Memory",
     description: "Keep project notes, plans, and durable knowledge.", zone: "left",
     defaultSize: { w: 6, h: 5 }, audience: "standard", render: () => <KnowledgePanel />,
   },
   {
-    id: "session.work-status", pluginId: "session", title: "Agent actions & work status",
+    id: "session.work-status", pluginId: "session", title: "Agent Actions",
     description: "Live task, delegated-agent, and usage status.", zone: "right",
-    defaultSize: { w: 6, h: 4 }, audience: "standard", render: () => <WorkStatusWidget />,
+    defaultSize: { w: 5, h: 4 }, audience: "simple", render: () => <AgentActionsWidget />,
   },
   {
-    id: "session.activity", pluginId: "session", title: "Activity",
+    id: "session.activity", pluginId: "session", title: "Activity Timeline",
     description: "Recent durable events from the active session.", zone: "right",
     defaultSize: { w: 6, h: 4 }, audience: "power", render: () => <ActivityWidget />,
   },
@@ -175,4 +307,14 @@ const BUILTINS: WidgetDef[] = [
   },
 ];
 
-for (const widget of BUILTINS) registerWidget(widget);
+for (const widget of BUILTINS) {
+  registerWidget({
+    ...widget,
+    settingsRender: widget.settingsRender ?? (() => (
+      <div className="builtin-widget-settings">
+        <span>Uses the active workspace context</span>
+        <small>Visibility, size, audience, and placement are configured above.</small>
+      </div>
+    )),
+  });
+}

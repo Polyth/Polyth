@@ -39,7 +39,8 @@ const PRESETS: Array<[WidgetLayoutPresetId, string, string]> = [
 function groupOf(widget: WidgetDef): string {
   if (widget.pluginId === "git" || widget.pluginId === "walkthrough") return "Git tools";
   if (widget.pluginId === "github") return "GitHub";
-  if (["multirun", "fusion", "schedule", "commands"].includes(widget.pluginId)) return "MCP / Tools";
+  if (widget.pluginId === "mcp") return "MCP";
+  if (["multirun", "fusion", "schedule", "commands"].includes(widget.pluginId)) return "Tools";
   if (["session", "goals", "files", "terminal", "preview", "knowledge", "usage"].includes(widget.pluginId)) {
     return "Core workspace";
   }
@@ -56,7 +57,7 @@ export default function WidgetsPage() {
   const ui = useUiSettings();
   const projectId = useStore((state) => state.activeProjectId);
   const sessionId = useStore((state) => state.activeSessionId);
-  const [selected, setSelected] = useState<string | null>("core.chat");
+  const [selected, setSelected] = useState<string | null>("terminal.shell");
   const [preset, setPreset] = useState<WidgetLayoutPresetId>("balanced");
   const [command, setCommand] = useState("");
   const [commandResult, setCommandResult] = useState("");
@@ -242,13 +243,26 @@ export default function WidgetsPage() {
             })}
           </div>
 
+          <div className="widget-recommended">
+            <h3>Recommended to start</h3>
+            <div>
+              {["core.composer", "goals.current", "git.recent", "core.quick-actions"].map((id) => byId.get(id)).filter((widget): widget is WidgetDef => !!widget).map((widget) => (
+                <button key={widget.id} onClick={() => {
+                  updateWidgetLayout((current) => moveWidget(setWidgetVisible(current, widget.id, true), widget.id, widget.zone ?? "main"));
+                  setSelected(widget.id);
+                }}>
+                  <strong>{widget.title}</strong><span>{widget.description}</span>
+                </button>
+              ))}
+            </div>
+          </div>
           <div className="widget-library-settings">
-            <h3>Widget library</h3>
-            {[...groups.entries()].map(([group, items]) => (
+            <h3>Plugin widget library</h3>
+            {["Core workspace", "Git tools", "GitHub", "MCP", "Tools", "Plugins"].map((group) => (
               <section key={group}>
-                <h4>{group} <span>{items.length}</span></h4>
+                <h4>{group} <span>{groups.get(group)?.length ?? 0}</span></h4>
                 <div>
-                  {items.map((widget) => {
+                  {(groups.get(group) ?? []).map((widget) => {
                     const visible = layout.widgets[widget.id]?.visible === true;
                     return (
                       <button
@@ -280,13 +294,29 @@ export default function WidgetsPage() {
           {selectedWidget && selectedPlacement ? (
             <>
               <div className="widget-inspector-head">
-                <span>{selectedWidget.pluginId}</span>
-                <h3>{selectedWidget.title}</h3>
+                <div className="widget-inspector-identity">
+                  <span className="widget-inspector-icon">{selectedWidget.title.slice(0, 1)}</span>
+                  <span><small>{selectedWidget.pluginId}</small><h3>{selectedWidget.title}</h3></span>
+                  <i aria-hidden="true"><b /><b /><b /></i>
+                </div>
                 <p>{selectedWidget.description}</p>
+              </div>
+              <div className="widget-inspector-tabs">
+                <button className="active">Settings</button><button>Preview</button>
+              </div>
+              <div className="widget-inspector-section">
+                <strong>Identity</strong>
+                <label>Title<input defaultValue={selectedWidget.title} aria-label="Widget title" /></label>
+                <label>Description<textarea defaultValue={selectedWidget.description} aria-label="Widget description" rows={2} /></label>
               </div>
               <label>
                 Size
                 <span>
+                  <select defaultValue={selectedPlacement.size.w >= 9 ? "large" : selectedPlacement.size.w >= 5 ? "medium" : "small"}>
+                    <option value="small">Small</option>
+                    <option value="medium">Medium</option>
+                    <option value="large">Large</option>
+                  </select>
                   <input
                     type="number" min={1} max={12} value={selectedPlacement.size.w}
                     aria-label="Widget width"
@@ -319,21 +349,20 @@ export default function WidgetsPage() {
                 Audience
                 <span className="tag">{selectedWidget.audience ?? "standard"}</span>
               </label>
-              <label>
-                Context
-                <select defaultValue={selectedWidget.pluginId === "session" ? "workspace" : "plugin"}>
-                  <option value="global">Global</option>
-                  <option value="workspace">Workspace</option>
-                  <option value="plugin">Plugin</option>
-                </select>
-              </label>
+              <fieldset className="widget-context-options">
+                <legend>Context <small>Where it appears</small></legend>
+                <label><input type="checkbox" defaultChecked={selectedWidget.pluginId === "session"} />Global</label>
+                <label><input type="checkbox" defaultChecked />Workspace</label>
+                <label><input type="checkbox" defaultChecked={selectedWidget.pluginId !== "session"} />Plugin</label>
+              </fieldset>
               {selectedWidget.settingsRender?.({ projectId, sessionId, widgetId: selectedWidget.id, editing: true })}
               <div className="widget-inspector-actions">
                 <button
                   className="danger-btn"
                   onClick={() => updateWidgetLayout((current) =>
                     setWidgetVisible(current, selectedWidget.id, false))}
-                >Remove</button>
+                >Remove this widget</button>
+                <button onClick={() => setSelected(null)}>Cancel</button>
                 <button className="btn-accent" onClick={() => setSelected(null)}>Done</button>
               </div>
             </>

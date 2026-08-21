@@ -1,11 +1,14 @@
 import { useSyncExternalStore } from "react";
 
-export type WorkspaceMode = "chat" | "widgets";
+export type WorkspaceMode = "chat" | "widgets" | "edit";
 
 export const WORKSPACE_MODE_KEY = "polyth.workspaceMode";
 
 function load(): WorkspaceMode {
-  try { return localStorage.getItem(WORKSPACE_MODE_KEY) === "widgets" ? "widgets" : "chat"; }
+  try {
+    const stored = localStorage.getItem(WORKSPACE_MODE_KEY);
+    return stored === "widgets" || stored === "edit" ? stored : "chat";
+  }
   catch { return "chat"; }
 }
 
