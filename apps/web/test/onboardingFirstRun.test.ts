@@ -14,7 +14,8 @@ test("App always renders the operational shell — no persona early return", asy
   const app = await appSrc();
   assert.ok(!app.includes("prefs.persona"), "the shell must not gate on a persona");
   assert.ok(!app.includes("return <Onboarding"), "the old onboarding gate is gone");
-  assert.ok(app.includes('preset.setup === "unseen" && projectReady'), "setup shows only after a project is usable");
+  assert.ok(app.includes("decideFirstRunSurface"), "first run is derived from the deterministic coordinator");
+  assert.ok(app.includes('surface === "preset-setup"'), "setup shows only after the coordinator admits it");
   assert.ok(app.includes("<Sidebar />"), "the shell mounts unconditionally");
 });
 
