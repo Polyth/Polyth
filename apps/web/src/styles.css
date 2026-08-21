@@ -4001,6 +4001,14 @@ body[data-density="balanced"] .composer { padding-block: 10px; }
   border: 0; border-radius: 10px; color: var(--muted); font-size: 11.5px;
 }
 .header-actions { display: flex; align-items: center; gap: 2px; }
+.placed-mini-widget { display: contents; }
+.placed-slot-widget { min-width: 0; }
+.mini-widget-placement { margin-bottom: 16px; padding: 16px; border: 1px solid var(--border); border-radius: 12px; }
+.mini-widget-placement-list { display: grid; gap: 8px; }
+.mini-widget-placement-list article { display: grid; grid-template-columns: minmax(150px, 1fr) minmax(190px, 1fr) auto; gap: 10px; align-items: center; padding: 9px; border: 1px solid var(--border); border-radius: 9px; }
+.mini-widget-placement-list article.selected { border-color: var(--accent); }
+.mini-widget-placement-list article > button { display: grid; text-align: left; background: none; border: 0; }
+.mini-widget-placement-list article small { color: var(--muted); }
 .header-action:hover { color: var(--text); background: var(--bg); }
 .header-new-session { width: auto; display: flex; gap: 6px; padding: 0 10px; border: 1px solid var(--border-soft); }
 .header-user-menu { position: relative; flex: none; }

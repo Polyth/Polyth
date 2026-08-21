@@ -18,6 +18,7 @@ import {
   type WidgetZone,
 } from "./widgetLayout.ts";
 import { planWorkspaceCustomization } from "./workspaceCustomize.ts";
+import { supportedWidgetZones } from "./widgetLibrary.ts";
 import "./builtinWidgets.tsx";
 import { setWorkspaceMode, useWorkspaceMode } from "./workspaceMode.ts";
 import { setUiSettings, useUiSettings } from "../uiPrefs.ts";
@@ -366,6 +367,10 @@ function WidgetLibrary({ widgets, onDone }: { widgets: WidgetDef[]; onDone: () =
 
 export default function WidgetCanvas() {
   const widgets = useWidgetCatalog();
+  const canvasWidgets = useMemo(
+    () => widgets.filter((widget) => supportedWidgetZones(widget).length > 0),
+    [widgets],
+  );
   const layout = useWidgetLayout();
   const workspaceMode = useWorkspaceMode();
   const projectId = useStore((state) => state.activeProjectId);
@@ -381,15 +386,15 @@ export default function WidgetCanvas() {
   // when a widget actually registers/unregisters (and ensureWidgets itself
   // early-returns when nothing is missing) — never a render loop.
   useEffect(() => {
-    ensureWidgets(widgets);
-  }, [widgets]);
+    ensureWidgets(canvasWidgets);
+  }, [canvasWidgets]);
   useEffect(() => {
     if (editing) setCustomizeOpen(true);
   }, [editing]);
 
   const shown = useMemo(
-    () => widgets.filter((widget) => allowed(widget, layout.audience, layout.widgets[widget.id])),
-    [widgets, layout.audience, layout.widgets],
+    () => canvasWidgets.filter((widget) => allowed(widget, layout.audience, layout.widgets[widget.id])),
+    [canvasWidgets, layout.audience, layout.widgets],
   );
 
   return (

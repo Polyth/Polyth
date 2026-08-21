@@ -5,6 +5,7 @@ import {
   type DragEvent,
   type KeyboardEvent,
 } from "react";
+import type { UiSlot } from "@polyth/contracts";
 import { api } from "../../api.ts";
 import { getDragWidget, setDragWidget, WIDGET_MIME } from "../../dnd.ts";
 import { setOverlay, updateSettings, useStore } from "../../store.ts";
@@ -25,6 +26,8 @@ import {
   useWidgetLayout,
   useWidgetStoreStatus,
   widgetDefinitionId,
+  widgetSlotFromZone,
+  widgetSlotOf,
   widgetZoneOf,
   type WidgetAudience,
   type WidgetLayout,
@@ -38,6 +41,7 @@ import {
   missingWidgetPlaceholders,
   pluginDisplayName,
   supportedWidgetZones,
+  supportedWidgetSlots,
   widgetPluginOptions,
 } from "../../widgets/widgetLibrary.ts";
 import { planWorkspaceCustomization } from "../../widgets/workspaceCustomize.ts";
@@ -53,6 +57,14 @@ const ZONE_LABEL: Record<WidgetZone, string> = {
   right: "Right side",
   bottom: "Bottom strip",
   floating: "Floating",
+};
+
+const slotLabel = (slot: UiSlot): string => {
+  if (slot.startsWith("workspace.")) {
+    const zone = slot.slice("workspace.".length) as WidgetZone;
+    if (zone in ZONE_LABEL) return ZONE_LABEL[zone];
+  }
+  return slot.split(".").map((part) => part[0]!.toUpperCase() + part.slice(1)).join(" · ");
 };
 
 const AUDIENCE_COPY: Record<WidgetAudience, { label: string; description: string }> = {
@@ -100,7 +112,7 @@ function changeSummary(before: WidgetLayout, after: WidgetLayout): string[] {
       if (!previous.visible && next.visible) shown++;
       if (previous.visible && !next.visible) hidden++;
       if (previous.size.w !== next.size.w || previous.size.h !== next.size.h) resized++;
-      if (widgetZoneOf(before, id) !== widgetZoneOf(after, id)) moved++;
+      if (widgetSlotOf(before, id) !== widgetSlotOf(after, id)) moved++;
     }
   }
   if (moved) result.push(`${moved} moved`);
@@ -209,6 +221,7 @@ export default function WidgetsPage() {
 
   const selectedPlacement = selected ? layout.widgets[selected] : undefined;
   const selectedWidget = selected ? widgetFor(layout, selected) : undefined;
+  const miniWidgets = widgets.filter((widget) => widget.kind === "mini-widget");
   const missing = useMemo(() => missingWidgetPlaceholders(layout, widgets), [layout, widgets]);
   const baselineLayout = useMemo(() => parseWidgetLayout(baseline, widgets), [baseline, widgets]);
   const summary = changeSummary(baselineLayout, layout);
@@ -247,9 +260,9 @@ export default function WidgetsPage() {
         size: selectedWidget.defaultSize ?? { w: 6, h: 4 },
       },
       {
-        type: "move",
+        type: "place",
         id: selected,
-        zone: selectedWidget.zone ?? "main",
+        slot: selectedWidget.defaultSlot ?? widgetSlotFromZone(selectedWidget.zone ?? "main"),
       },
       {
         type: "show-in",
@@ -342,6 +355,49 @@ export default function WidgetsPage() {
 
       <div className="widget-settings-workbench">
         <main className="widget-settings-center">
+          {miniWidgets.length > 0 && (
+            <section className="mini-widget-placement" data-settings-item="widgets.actions">
+              <div className="widget-section-title">
+                <div>
+                  <h3>Panel & toolbar mini-widgets</h3>
+                  <p>Plugin actions share widget placement and can move between compatible UI slots.</p>
+                </div>
+              </div>
+              <div className="mini-widget-placement-list">
+                {miniWidgets.map((widget) => {
+                  const placement = layout.widgets[widget.id];
+                  const slot = widgetSlotOf(layout, widget.id)
+                    ?? widget.defaultSlot
+                    ?? widgetSlotFromZone(widget.zone ?? "main");
+                  return (
+                    <article key={widget.id} className={selected === widget.id ? "selected" : ""}>
+                      <button type="button" onClick={() => setSelected(widget.id)}>
+                        <strong>{widget.title}</strong>
+                        <small>{pluginDisplayName(widget)}</small>
+                      </button>
+                      <select
+                        aria-label={`Placement for ${widget.title}`}
+                        value={slot}
+                        onChange={(event) => mutate(
+                          { type: "visibility", id: widget.id, visible: true },
+                          { type: "place", id: widget.id, slot: event.target.value as UiSlot },
+                        )}
+                      >
+                        {supportedWidgetSlots(widget).map((target) => (
+                          <option key={target} value={target}>{slotLabel(target)}</option>
+                        ))}
+                      </select>
+                      <Toggle
+                        on={placement?.visible === true}
+                        label={`Visibility for ${widget.title}`}
+                        onChange={(visible) => mutate({ type: "visibility", id: widget.id, visible })}
+                      />
+                    </article>
+                  );
+                })}
+              </div>
+            </section>
+          )}
           <div className="widget-layout-editor" data-settings-item="widgets.layout">
             <div className="widget-layout-editor-head">
               <div><strong>Workspace preview</strong><span>Drag widgets between compatible zones.</span></div>
@@ -492,36 +548,52 @@ export default function WidgetsPage() {
                 <label>Description<textarea value={selectedPlacement.description ?? selectedWidget.description} rows={2} onChange={(event) => mutate({ type: "identity", id: selected, title: selectedPlacement.title ?? selectedWidget.title, description: event.target.value })} /></label>
               </div>
               <div className="widget-inspector-section">
-                <strong>Size and position</strong>
-                <label>
-                  Size
-                  <span className="widget-size-fields">
+                <strong>{selectedWidget.kind === "mini-widget" ? "Placement" : "Size and position"}</strong>
+                {selectedWidget.kind !== "mini-widget" && (
+                  <label>
+                    Size
+                    <span className="widget-size-fields">
+                      <select
+                        value={selectedPlacement.size.w >= 9 ? "large" : selectedPlacement.size.w >= 5 ? "medium" : "small"}
+                        onChange={(event) => {
+                          const size = event.target.value === "large"
+                            ? { w: 12, h: 8 }
+                            : event.target.value === "medium"
+                              ? { w: 6, h: 5 }
+                              : { w: 4, h: 3 };
+                          mutate({ type: "resize", id: selected, size });
+                        }}
+                      >
+                        <option value="small">Small</option>
+                        <option value="medium">Medium</option>
+                        <option value="large">Large</option>
+                      </select>
+                      <input type="number" min={1} max={12} value={selectedPlacement.size.w} aria-label="Widget width" onChange={(event) => mutate({ type: "resize", id: selected, size: { ...selectedPlacement.size, w: Number(event.target.value) } })} />
+                      <span>×</span>
+                      <input type="number" min={1} max={12} value={selectedPlacement.size.h} aria-label="Widget height" onChange={(event) => mutate({ type: "resize", id: selected, size: { ...selectedPlacement.size, h: Number(event.target.value) } })} />
+                    </span>
+                  </label>
+                )}
+                {selectedWidget.kind === "mini-widget" ? (
+                  <label>
+                    UI slot
                     <select
-                      value={selectedPlacement.size.w >= 9 ? "large" : selectedPlacement.size.w >= 5 ? "medium" : "small"}
-                      onChange={(event) => {
-                        const size = event.target.value === "large"
-                          ? { w: 12, h: 8 }
-                          : event.target.value === "medium"
-                            ? { w: 6, h: 5 }
-                            : { w: 4, h: 3 };
-                        mutate({ type: "resize", id: selected, size });
-                      }}
+                      value={widgetSlotOf(layout, selected) ?? selectedWidget.defaultSlot ?? "app.header.actions"}
+                      onChange={(event) => mutate({ type: "place", id: selected, slot: event.target.value as UiSlot })}
                     >
-                      <option value="small">Small</option>
-                      <option value="medium">Medium</option>
-                      <option value="large">Large</option>
+                      {supportedWidgetSlots(selectedWidget).map((slot) => (
+                        <option key={slot} value={slot}>{slotLabel(slot)}</option>
+                      ))}
                     </select>
-                    <input type="number" min={1} max={12} value={selectedPlacement.size.w} aria-label="Widget width" onChange={(event) => mutate({ type: "resize", id: selected, size: { ...selectedPlacement.size, w: Number(event.target.value) } })} />
-                    <span>×</span>
-                    <input type="number" min={1} max={12} value={selectedPlacement.size.h} aria-label="Widget height" onChange={(event) => mutate({ type: "resize", id: selected, size: { ...selectedPlacement.size, h: Number(event.target.value) } })} />
-                  </span>
-                </label>
-                <label>
-                  Zone
-                  <select value={widgetZoneOf(layout, selected) ?? selectedWidget.zone ?? "main"} onChange={(event) => mutate({ type: "move", id: selected, zone: event.target.value as WidgetZone })}>
-                    {WIDGET_ZONES.map((zone) => <option key={zone} value={zone} disabled={!supportedWidgetZones(selectedWidget).includes(zone)}>{ZONE_LABEL[zone]}</option>)}
-                  </select>
-                </label>
+                  </label>
+                ) : (
+                  <label>
+                    Zone
+                    <select value={widgetZoneOf(layout, selected) ?? selectedWidget.zone ?? "main"} onChange={(event) => mutate({ type: "move", id: selected, zone: event.target.value as WidgetZone })}>
+                      {WIDGET_ZONES.map((zone) => <option key={zone} value={zone} disabled={!supportedWidgetZones(selectedWidget).includes(zone)}>{ZONE_LABEL[zone]}</option>)}
+                    </select>
+                  </label>
+                )}
               </div>
               <label>
                 Visible

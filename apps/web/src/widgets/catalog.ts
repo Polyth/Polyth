@@ -1,6 +1,14 @@
 import { useSyncExternalStore, type ReactNode } from "react";
 import { listSlots, slotVersion, subscribeSlots } from "../slots.ts";
-import type { WidgetAudience, WidgetScope, WidgetSize, WidgetZone } from "./widgetLayout.ts";
+import { isUiSlot, type UiSlot, type WidgetKind } from "@polyth/contracts";
+import {
+  ensureWidgets,
+  widgetSlotFromZone,
+  type WidgetAudience,
+  type WidgetScope,
+  type WidgetSize,
+  type WidgetZone,
+} from "./widgetLayout.ts";
 
 export interface WidgetRenderContext extends Record<string, unknown> {
   projectId: string | null;
@@ -18,6 +26,11 @@ export interface WidgetDef {
   pluginName?: string;
   title: string;
   description: string;
+  kind?: WidgetKind;
+  defaultSlot?: UiSlot;
+  supportedSlots?: readonly UiSlot[];
+  defaultVisible?: boolean;
+  order?: number;
   category?: string;
   capabilities?: readonly string[];
   zone?: WidgetZone;
@@ -57,6 +70,52 @@ export function registerWidget(def: WidgetDef): () => void {
   };
 }
 
+export type PluginWidgetDef = Omit<WidgetDef, "pluginId" | "pluginName">;
+
+/** Client-side plugin declaration. `widgets` is optional by design: most
+ * plugins can stay capability-only, while one plugin may own many widgets. */
+export interface WidgetPlugin {
+  id: string;
+  name: string;
+  widgets?: readonly PluginWidgetDef[];
+}
+
+export function defineWidgetPlugin<T extends WidgetPlugin>(plugin: T): T {
+  return plugin;
+}
+
+export function registerWidgetPlugin(plugin: WidgetPlugin): () => void {
+  const ids = new Set<string>();
+  const definitions = (plugin.widgets ?? []).map((widget): WidgetDef => {
+    if (ids.has(widget.id)) throw new Error(`plugin ${plugin.id} declares duplicate widget: ${widget.id}`);
+    ids.add(widget.id);
+    const existing = registry.get(widget.id);
+    if (existing && existing.pluginId !== plugin.id) {
+      throw new Error(`widget ${widget.id} is already owned by plugin ${existing.pluginId}`);
+    }
+    const defaultSlot = widget.defaultSlot ?? widgetSlotFromZone(widget.zone ?? "main");
+    const supportedSlots = widget.supportedSlots
+      ?? widget.supportedZones?.map(widgetSlotFromZone)
+      ?? [defaultSlot];
+    if (!supportedSlots.includes(defaultSlot)) {
+      throw new Error(`plugin ${plugin.id} widget ${widget.id} does not support its default slot ${defaultSlot}`);
+    }
+    return {
+      ...widget,
+      pluginId: plugin.id,
+      pluginName: plugin.name,
+      kind: widget.kind ?? "widget",
+      defaultSlot,
+      supportedSlots,
+    };
+  });
+  const unregister = definitions.map(registerWidget);
+  ensureWidgets(definitions);
+  return () => {
+    for (let index = unregister.length - 1; index >= 0; index--) unregister[index]!();
+  };
+}
+
 function slotWidgets(): WidgetDef[] {
   const settings = new Map(listSlots("widget.settings").map((item) => [
     typeof item.meta?.widgetId === "string" ? item.meta.widgetId : item.id,
@@ -66,6 +125,10 @@ function slotWidgets(): WidgetDef[] {
     const meta = item.meta ?? {};
     const zone = meta.zone;
     const audience = meta.audience;
+    const defaultSlot = meta.defaultSlot;
+    const supportedSlots = Array.isArray(meta.supportedSlots)
+      ? meta.supportedSlots.filter((value): value is UiSlot => typeof value === "string" && isUiSlot(value))
+      : undefined;
     const setting = settings.get(item.id);
     const zones = Array.isArray(meta.supportedZones)
       ? meta.supportedZones.filter(isWidgetZone)
@@ -83,6 +146,11 @@ function slotWidgets(): WidgetDef[] {
       ...(typeof meta.pluginName === "string" ? { pluginName: meta.pluginName } : {}),
       title: typeof meta.title === "string" ? meta.title : item.id.replace(/[._-]+/g, " "),
       description: typeof meta.description === "string" ? meta.description : "Plugin-provided workspace widget.",
+      ...(meta.kind === "widget" || meta.kind === "mini-widget" ? { kind: meta.kind } : {}),
+      ...(typeof defaultSlot === "string" && isUiSlot(defaultSlot) ? { defaultSlot } : {}),
+      ...(supportedSlots && supportedSlots.length > 0 ? { supportedSlots } : {}),
+      ...(typeof meta.defaultVisible === "boolean" ? { defaultVisible: meta.defaultVisible } : {}),
+      ...(typeof meta.order === "number" ? { order: meta.order } : {}),
       ...(typeof meta.category === "string" ? { category: meta.category } : {}),
       ...(Array.isArray(meta.capabilities)
         ? { capabilities: meta.capabilities.filter((value): value is string => typeof value === "string") }
@@ -164,6 +232,7 @@ export function useWidgetCatalog(): WidgetDef[] {
 
 export interface PolythWidgetsApi {
   registerWidget: typeof registerWidget;
+  registerPlugin: typeof registerWidgetPlugin;
   listWidgets: typeof listWidgets;
 }
 
@@ -174,5 +243,7 @@ declare global {
 }
 
 export function exposeWidgets(): void {
-  if (typeof window !== "undefined") window.__polythWidgets = { registerWidget, listWidgets };
+  if (typeof window !== "undefined") {
+    window.__polythWidgets = { registerWidget, registerPlugin: registerWidgetPlugin, listWidgets };
+  }
 }

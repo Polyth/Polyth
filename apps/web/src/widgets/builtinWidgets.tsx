@@ -14,7 +14,14 @@ import Timeline from "../components/Timeline.tsx";
 import WalkthroughView from "../components/WalkthroughView.tsx";
 import { fmtCost, fmtTokens } from "../format.ts";
 import { openWorkspacePane, useActiveModel, useStore } from "../store.ts";
-import { registerWidget, type WidgetDef } from "./catalog.ts";
+import {
+  defineWidgetPlugin,
+  registerWidgetPlugin,
+  type PluginWidgetDef,
+  type WidgetDef,
+  type WidgetPlugin,
+} from "./catalog.ts";
+import { widgetSlotFromZone } from "./widgetLayout.ts";
 import { api, type FileEntry, type GitFileEntry } from "../api.ts";
 import { useGitStatus } from "../gitStatusStore.ts";
 import { requestComposerReplace } from "../composerInsert.ts";
@@ -403,15 +410,47 @@ const BUILTIN_WIDGET_META: Record<string, Partial<WidgetDef>> = {
   },
 };
 
-for (const widget of BUILTINS) {
-  registerWidget({
-    ...widget,
-    ...BUILTIN_WIDGET_META[widget.id],
-    settingsRender: widget.settingsRender ?? (() => (
+const pluginDefinitions = new Map<string, { name: string; widgets: PluginWidgetDef[] }>();
+for (const base of BUILTINS) {
+  const widget: WidgetDef = {
+    ...base,
+    ...BUILTIN_WIDGET_META[base.id],
+    settingsRender: base.settingsRender ?? (() => (
       <div className="builtin-widget-settings">
         <span>Uses the active workspace context</span>
         <small>Visibility, size, audience, and placement are configured above.</small>
       </div>
     )),
+  };
+  const { pluginId, pluginName, ...definition } = widget;
+  const owner = pluginDefinitions.get(pluginId) ?? {
+    name: pluginName ?? pluginId,
+    widgets: [],
+  };
+  const defaultSlot = definition.defaultSlot ?? widgetSlotFromZone(definition.zone ?? "main");
+  owner.widgets.push({
+    ...definition,
+    kind: definition.kind ?? "widget",
+    defaultSlot,
+    supportedSlots: definition.supportedSlots
+      ?? definition.supportedZones?.map(widgetSlotFromZone)
+      ?? [defaultSlot],
   });
+  pluginDefinitions.set(pluginId, owner);
 }
+
+/** Built-ins use the exact same 0..N declaration API as third-party plugins.
+ * Notably `session` and `files` each own multiple independent widgets. */
+export const BUILTIN_WIDGET_PLUGINS: readonly WidgetPlugin[] = [...pluginDefinitions].map(
+  ([id, owner]) => defineWidgetPlugin({ id, name: owner.name, widgets: owner.widgets }),
+);
+
+let installed = false;
+
+export function installBuiltinWidgetPlugins(): void {
+  if (installed) return;
+  installed = true;
+  for (const plugin of BUILTIN_WIDGET_PLUGINS) registerWidgetPlugin(plugin);
+}
+
+installBuiltinWidgetPlugins();

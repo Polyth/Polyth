@@ -1,22 +1,25 @@
 import { useSyncExternalStore } from "react";
+import { UI_SLOTS, type UiSlot, type WidgetAudience, type WidgetKind, type WidgetScope, type WidgetSize } from "@polyth/contracts";
 
 export type WidgetZone = "header" | "left" | "main" | "right" | "bottom" | "floating";
-export type WidgetAudience = "simple" | "standard" | "power";
-export type WidgetScope = "global" | "workspace" | "plugin";
+export type { WidgetAudience, WidgetScope, WidgetSize } from "@polyth/contracts";
+export type WidgetPlacementTarget = WidgetZone | UiSlot;
 export type WidgetLayoutPresetId = "focused" | "balanced" | "manager" | "build-debug" | "custom";
 export type WidgetSaveStatus = "saved" | "saving" | "error";
-
-export interface WidgetSize {
-  w: number;
-  h: number;
-}
 
 export interface WidgetLayoutDefinition {
   id: string;
   pluginId?: string;
   title?: string;
   description?: string;
+  kind?: WidgetKind;
+  defaultSlot?: UiSlot;
+  supportedSlots?: readonly UiSlot[];
+  defaultVisible?: boolean;
+  order?: number;
+  /** @deprecated Use defaultSlot. Kept for persisted v1/client compatibility. */
   zone?: WidgetZone;
+  /** @deprecated Use supportedSlots. */
   supportedZones?: readonly WidgetZone[];
   defaultSize?: WidgetSize;
   minSize?: WidgetSize;
@@ -34,6 +37,7 @@ export interface WidgetPlacement {
   size: WidgetSize;
   definitionId?: string;
   pluginId?: string;
+  kind?: WidgetKind;
   title?: string;
   description?: string;
   showIn?: WidgetAudience[];
@@ -44,11 +48,34 @@ export interface WidgetLayout {
   version: 1;
   audience: WidgetAudience;
   zones: Record<WidgetZone, string[]>;
+  /** Non-canvas placement uses the same durable layout. Canvas slots continue
+   * to serialize through `zones` so existing layouts migrate without loss. */
+  slotPlacements: Partial<Record<UiSlot, string[]>>;
   widgets: Record<string, WidgetPlacement>;
 }
 
 export const WIDGET_LAYOUT_KEY = "polyth.widgetLayout";
 export const WIDGET_ZONES: readonly WidgetZone[] = ["header", "left", "main", "right", "bottom", "floating"];
+export const WIDGET_ZONE_SLOTS: Record<WidgetZone, UiSlot> = {
+  header: "workspace.header",
+  left: "workspace.left",
+  main: "workspace.main",
+  right: "workspace.right",
+  bottom: "workspace.bottom",
+  floating: "workspace.floating",
+};
+
+const SLOT_WIDGET_ZONES = new Map<UiSlot, WidgetZone>(
+  Object.entries(WIDGET_ZONE_SLOTS).map(([zone, slot]) => [slot, zone as WidgetZone]),
+);
+
+export function widgetSlotFromZone(zone: WidgetZone): UiSlot {
+  return WIDGET_ZONE_SLOTS[zone];
+}
+
+export function widgetZoneFromSlot(slot: UiSlot): WidgetZone | null {
+  return SLOT_WIDGET_ZONES.get(slot) ?? null;
+}
 export const BUILTIN_WIDGET_IDS = [
   "core.composer",
   "core.chat",
@@ -121,6 +148,26 @@ const emptyZones = (): Record<WidgetZone, string[]> => ({
   header: [], left: [], main: [], right: [], bottom: [], floating: [],
 });
 
+const emptySlotPlacements = (): Partial<Record<UiSlot, string[]>> => ({});
+
+function defaultSlotFor(definition: WidgetLayoutDefinition): UiSlot {
+  if (definition.defaultSlot) return definition.defaultSlot;
+  return widgetSlotFromZone(definition.zone ?? DEFAULT_ZONE[definition.id] ?? "main");
+}
+
+function supportedSlotsFor(definition: WidgetLayoutDefinition): readonly UiSlot[] {
+  if (definition.supportedSlots && definition.supportedSlots.length > 0) return definition.supportedSlots;
+  if (definition.supportedZones && definition.supportedZones.length > 0) {
+    return definition.supportedZones.map(widgetSlotFromZone);
+  }
+  const slot = defaultSlotFor(definition);
+  return definition.floating && !widgetZoneFromSlot(slot)
+    ? [slot, "workspace.floating"]
+    : definition.floating
+      ? [slot, "workspace.floating"]
+      : [slot];
+}
+
 const clampSize = (value: unknown): WidgetSize => {
   const size = value as Partial<WidgetSize> | undefined;
   const w = typeof size?.w === "number" && Number.isFinite(size.w)
@@ -160,6 +207,7 @@ function placementFor(definition: WidgetLayoutDefinition, visible: boolean): Wid
     ),
     definitionId: definition.id,
     ...(definition.pluginId ? { pluginId: definition.pluginId } : {}),
+    ...(definition.kind ? { kind: definition.kind } : {}),
     ...(definition.title ? { title: definition.title } : {}),
     ...(definition.description ? { description: definition.description } : {}),
     ...(showInFor(definition) ? { showIn: showInFor(definition)! } : {}),
@@ -171,15 +219,18 @@ export function createDefaultWidgetLayout(
   known: readonly (string | WidgetLayoutDefinition)[] = BUILTIN_WIDGET_IDS,
 ): WidgetLayout {
   const zones = emptyZones();
+  const slotPlacements = emptySlotPlacements();
   const widgets: Record<string, WidgetPlacement> = {};
   for (const item of known) {
     const definition = typeof item === "string" ? { id: item } : item;
     const id = definition.id;
-    const zone = definition.zone ?? DEFAULT_ZONE[id] ?? "main";
-    zones[zone].push(id);
-    widgets[id] = placementFor(definition, DEFAULT_VISIBLE.has(id));
+    const slot = defaultSlotFor(definition);
+    const zone = widgetZoneFromSlot(slot);
+    if (zone) zones[zone].push(id);
+    else slotPlacements[slot] = [...(slotPlacements[slot] ?? []), id];
+    widgets[id] = placementFor(definition, definition.defaultVisible ?? DEFAULT_VISIBLE.has(id));
   }
-  return { version: 1, audience: "standard", zones, widgets };
+  return { version: 1, audience: "standard", zones, slotPlacements, widgets };
 }
 
 const isAudience = (value: unknown): value is WidgetAudience =>
@@ -199,6 +250,7 @@ export function parseWidgetLayout(
   try {
     const data = JSON.parse(raw ?? "") as Partial<WidgetLayout> & {
       zones?: Partial<Record<WidgetZone | "top", unknown>>;
+      slotPlacements?: Partial<Record<UiSlot, unknown>>;
     };
     if (!data || data.version !== 1 || typeof data.zones !== "object" || typeof data.widgets !== "object") {
       return fallback;
@@ -225,6 +277,7 @@ export function parseWidgetLayout(
     const known = new Set([...knownIds, ...persistedInstanceIds, ...orphanIds]);
     const seen = new Set<string>();
     const zones = emptyZones();
+    const slotPlacements = emptySlotPlacements();
     for (const zone of WIDGET_ZONES) {
       const values = zone === "header"
         ? data.zones?.header ?? data.zones?.top
@@ -236,8 +289,24 @@ export function parseWidgetLayout(
         zones[zone].push(id);
       }
     }
+    for (const slot of UI_SLOTS) {
+      const values = data.slotPlacements?.[slot];
+      if (!Array.isArray(values)) continue;
+      for (const id of values) {
+        if (typeof id !== "string" || !known.has(id) || seen.has(id)) continue;
+        seen.add(id);
+        const zone = widgetZoneFromSlot(slot);
+        if (zone) zones[zone].push(id);
+        else slotPlacements[slot] = [...(slotPlacements[slot] ?? []), id];
+      }
+    }
     for (const id of knownIds) {
-      if (!seen.has(id)) zones[DEFAULT_ZONE[id] ?? "main"].push(id);
+      if (seen.has(id)) continue;
+      const definition = definitionById.get(id)!;
+      const slot = defaultSlotFor(definition);
+      const zone = widgetZoneFromSlot(slot);
+      if (zone) zones[zone].push(id);
+      else slotPlacements[slot] = [...(slotPlacements[slot] ?? []), id];
     }
     for (const id of [...persistedInstanceIds, ...orphanIds]) {
       if (!seen.has(id)) zones.main.push(id);
@@ -255,6 +324,7 @@ export function parseWidgetLayout(
         ...(definition?.pluginId || value?.pluginId
           ? { pluginId: definition?.pluginId ?? value!.pluginId! }
           : {}),
+        ...(definition?.kind || value?.kind ? { kind: definition?.kind ?? value!.kind! } : {}),
         ...(definition?.title || value?.title ? { title: definition?.title ?? value!.title! } : {}),
         ...(definition?.description || value?.description
           ? { description: definition?.description ?? value!.description! }
@@ -271,6 +341,7 @@ export function parseWidgetLayout(
       version: 1,
       audience: isAudience(data.audience) ? data.audience : "standard",
       zones,
+      slotPlacements,
       widgets,
     };
   } catch {
@@ -287,6 +358,15 @@ export function widgetZoneOf(layout: WidgetLayout, id: string): WidgetZone | nul
   return null;
 }
 
+export function widgetSlotOf(layout: WidgetLayout, id: string): UiSlot | null {
+  const zone = widgetZoneOf(layout, id);
+  if (zone) return widgetSlotFromZone(zone);
+  for (const slot of UI_SLOTS) {
+    if (layout.slotPlacements[slot]?.includes(id)) return slot;
+  }
+  return null;
+}
+
 export function widgetDefinitionId(layout: WidgetLayout, instanceId: string): string {
   return layout.widgets[instanceId]?.definitionId ?? instanceId;
 }
@@ -298,23 +378,74 @@ export interface WidgetPlacementCheck {
 
 export function canPlaceWidget(
   definition: WidgetLayoutDefinition | undefined,
-  zone: WidgetZone,
+  target: WidgetPlacementTarget,
 ): WidgetPlacementCheck {
   if (!definition) return { ok: false, reason: "This widget’s plugin is unavailable." };
-  const supported = definition.supportedZones
-    ?? (definition.floating
-      ? [definition.zone ?? "main", "floating"]
-      : [definition.zone ?? "main"]);
-  if (!supported.includes(zone)) {
+  const slot = isWidgetZone(target) ? widgetSlotFromZone(target) : target;
+  const supported = supportedSlotsFor(definition);
+  if (!supported.includes(slot)) {
+    const zone = widgetZoneFromSlot(slot);
     return {
       ok: false,
-      reason: `${definition.title ?? "This widget"} doesn’t fit in ${zone === "header" ? "the header" : `the ${zone} zone`}.`,
+      reason: zone
+        ? `${definition.title ?? "This widget"} doesn’t fit in ${zone === "header" ? "the header" : `the ${zone} zone`}.`
+        : `${definition.title ?? "This widget"} can’t be placed in ${slot}.`,
     };
   }
-  if (zone === "header" && (definition.minSize?.h ?? definition.defaultSize?.h ?? 1) > 3) {
+  if (slot === "workspace.header" && (definition.minSize?.h ?? definition.defaultSize?.h ?? 1) > 3) {
     return { ok: false, reason: `${definition.title ?? "This widget"} needs more height than the header provides.` };
   }
   return { ok: true };
+}
+
+const isWidgetZone = (value: WidgetPlacementTarget): value is WidgetZone =>
+  WIDGET_ZONES.includes(value as WidgetZone);
+
+export function moveWidgetToSlot(
+  layout: WidgetLayout,
+  id: string,
+  slot: UiSlot,
+  index = (widgetZoneFromSlot(slot)
+    ? layout.zones[widgetZoneFromSlot(slot)!]
+    : layout.slotPlacements[slot] ?? []).length,
+  definition?: WidgetLayoutDefinition,
+): WidgetLayout {
+  const current = layout.widgets[id];
+  if (!current) return layout;
+  if (definition && !canPlaceWidget(definition, slot).ok) return layout;
+  const zones = Object.fromEntries(
+    WIDGET_ZONES.map((name) => [name, layout.zones[name].filter((widgetId) => widgetId !== id)]),
+  ) as Record<WidgetZone, string[]>;
+  const slotPlacements = Object.fromEntries(
+    Object.entries(layout.slotPlacements).map(([name, ids]) => [
+      name,
+      (ids ?? []).filter((widgetId) => widgetId !== id),
+    ]),
+  ) as Partial<Record<UiSlot, string[]>>;
+  const zone = widgetZoneFromSlot(slot);
+  const target = zone
+    ? zones[zone]
+    : (slotPlacements[slot] ??= []);
+  target.splice(Math.max(0, Math.min(index, target.length)), 0, id);
+  if (current.visible) {
+    const zonesUnchanged = WIDGET_ZONES.every((name) => {
+      const before = layout.zones[name];
+      const after = zones[name];
+      return before.length === after.length && before.every((widgetId, i) => widgetId === after[i]);
+    });
+    const slotsUnchanged = UI_SLOTS.every((name) => {
+      const before = layout.slotPlacements[name] ?? [];
+      const after = slotPlacements[name] ?? [];
+      return before.length === after.length && before.every((widgetId, i) => widgetId === after[i]);
+    });
+    if (zonesUnchanged && slotsUnchanged) return layout;
+  }
+  return {
+    ...layout,
+    zones,
+    slotPlacements,
+    widgets: { ...layout.widgets, [id]: { ...current, visible: true } },
+  };
 }
 
 export function moveWidget(
@@ -324,29 +455,7 @@ export function moveWidget(
   index = layout.zones[zone].length,
   definition?: WidgetLayoutDefinition,
 ): WidgetLayout {
-  const current = layout.widgets[id];
-  if (!current) return layout;
-  if (definition && !canPlaceWidget(definition, zone).ok) return layout;
-  const zones = Object.fromEntries(
-    WIDGET_ZONES.map((name) => [name, layout.zones[name].filter((widgetId) => widgetId !== id)]),
-  ) as Record<WidgetZone, string[]>;
-  const target = zones[zone];
-  target.splice(Math.max(0, Math.min(index, target.length)), 0, id);
-  // No-op moves (already visible at that exact position) return the same
-  // layout so commit() can skip the persist + listener fanout.
-  if (current.visible) {
-    const unchanged = WIDGET_ZONES.every((name) => {
-      const before = layout.zones[name];
-      const after = zones[name];
-      return before.length === after.length && before.every((widgetId, i) => widgetId === after[i]);
-    });
-    if (unchanged) return layout;
-  }
-  return {
-    ...layout,
-    zones,
-    widgets: { ...layout.widgets, [id]: { ...current, visible: true } },
-  };
+  return moveWidgetToSlot(layout, id, widgetSlotFromZone(zone), index, definition);
 }
 
 export function setWidgetVisible(layout: WidgetLayout, id: string, visible: boolean): WidgetLayout {
@@ -416,7 +525,13 @@ export function forgetWidget(layout: WidgetLayout, id: string): WidgetLayout {
   const zones = Object.fromEntries(
     WIDGET_ZONES.map((zone) => [zone, layout.zones[zone].filter((item) => item !== id)]),
   ) as Record<WidgetZone, string[]>;
-  return { ...layout, widgets, zones };
+  const slotPlacements = Object.fromEntries(
+    Object.entries(layout.slotPlacements).map(([slot, ids]) => [
+      slot,
+      (ids ?? []).filter((item) => item !== id),
+    ]),
+  ) as Partial<Record<UiSlot, string[]>>;
+  return { ...layout, widgets, zones, slotPlacements };
 }
 
 function nextInstanceId(layout: WidgetLayout, definitionId: string): string {
@@ -433,7 +548,7 @@ export function duplicateWidget(
   const current = layout.widgets[id];
   if (!current || !definition?.duplicatable) return layout;
   const instanceId = nextInstanceId(layout, definition.id);
-  const zone = widgetZoneOf(layout, id) ?? definition.zone ?? "main";
+  const slot = widgetSlotOf(layout, id) ?? defaultSlotFor(definition);
   const widgets = {
     ...layout.widgets,
     [instanceId]: {
@@ -442,12 +557,21 @@ export function duplicateWidget(
       title: current.title ? `${current.title} copy` : definition.title ? `${definition.title} copy` : undefined,
     },
   };
-  const zones = { ...layout.zones, [zone]: [...layout.zones[zone], instanceId] };
-  return { ...layout, widgets, zones };
+  const zone = widgetZoneFromSlot(slot);
+  if (zone) {
+    const zones = { ...layout.zones, [zone]: [...layout.zones[zone], instanceId] };
+    return { ...layout, widgets, zones };
+  }
+  const slotPlacements = {
+    ...layout.slotPlacements,
+    [slot]: [...(layout.slotPlacements[slot] ?? []), instanceId],
+  };
+  return { ...layout, widgets, slotPlacements };
 }
 
 export type WidgetLayoutMutation =
   | { type: "move"; id: string; zone: WidgetZone; index?: number }
+  | { type: "place"; id: string; slot: UiSlot; index?: number }
   | { type: "visibility"; id: string; visible: boolean }
   | { type: "resize"; id: string; size: WidgetSize }
   | { type: "audience"; audience: WidgetAudience }
@@ -486,6 +610,18 @@ export function applyWidgetLayoutMutations(
           mutation.id,
           mutation.zone,
           mutation.index ?? current.zones[mutation.zone].length,
+          definition,
+        );
+      case "place":
+        return moveWidgetToSlot(
+          current,
+          mutation.id,
+          mutation.slot,
+          mutation.index ?? (
+            widgetZoneFromSlot(mutation.slot)
+              ? current.zones[widgetZoneFromSlot(mutation.slot)!].length
+              : current.slotPlacements[mutation.slot]?.length ?? 0
+          ),
           definition,
         );
       case "visibility":
@@ -528,6 +664,8 @@ export function applyWidgetLayoutPreset(
     pluginId: placement.pluginId,
     title: placement.title,
     description: placement.description,
+    kind: placement.kind,
+    defaultSlot: widgetSlotOf(layout, id) ?? "workspace.main",
     defaultSize: placement.size,
     showIn: placement.showIn,
     scope: placement.scope,
@@ -651,6 +789,12 @@ export function ensureWidgets(definitions: readonly WidgetLayoutDefinition[]): v
     [...state.zones[zone], ...missing.flatMap((definition) =>
       defaults.zones[zone].includes(definition.id) ? [definition.id] : [])],
   ])) as Record<WidgetZone, string[]>;
+  const slotPlacements = { ...state.slotPlacements };
+  for (const slot of UI_SLOTS) {
+    const added = missing.flatMap((definition) =>
+      defaults.slotPlacements[slot]?.includes(definition.id) ? [definition.id] : []);
+    if (added.length > 0) slotPlacements[slot] = [...(slotPlacements[slot] ?? []), ...added];
+  }
   let changed = missing.length > 0;
   const widgets = { ...state.widgets };
   for (const definition of definitions) {
@@ -664,6 +808,7 @@ export function ensureWidgets(definitions: readonly WidgetLayoutDefinition[]): v
       ...current,
       definitionId: definition.id,
       pluginId: metadata.pluginId,
+      kind: metadata.kind,
       title: current.title ?? metadata.title,
       description: current.description ?? metadata.description,
       showIn: current.showIn ?? metadata.showIn,
@@ -674,7 +819,7 @@ export function ensureWidgets(definitions: readonly WidgetLayoutDefinition[]): v
       changed = true;
     }
   }
-  if (changed) commit({ ...state, zones, widgets }, false);
+  if (changed) commit({ ...state, zones, slotPlacements, widgets }, false);
 }
 
 export function resetWidgetLayout(

@@ -10,12 +10,14 @@ import {
   duplicateWidget,
   getWidgetSaveStatus,
   moveWidget,
+  moveWidgetToSlot,
   parseWidgetLayout,
   serializeWidgetLayout,
   setWidgetSize,
   setWidgetVisible,
   updateWidgetLayout,
   widgetZoneOf,
+  widgetSlotOf,
 } from "../src/widgets/widgetLayout.ts";
 
 test("default widget layout contains every built-in exactly once", () => {
@@ -150,6 +152,38 @@ test("duplicatable widgets create independent instances through the same layout 
   assert.ok(duplicated.widgets["knowledge.note#2"]);
   assert.equal(duplicated.widgets["knowledge.note#2"]?.definitionId, "knowledge.note");
   assert.deepEqual(duplicated.zones.left, ["knowledge.note", "knowledge.note#2"]);
+});
+
+test("mini-widgets persist and move across first-class panel and toolbar slots", () => {
+  const definition = {
+    id: "sample.refresh",
+    pluginId: "sample",
+    title: "Refresh",
+    description: "Refresh data",
+    kind: "mini-widget" as const,
+    defaultSlot: "session.header.actions" as const,
+    supportedSlots: ["session.header.actions", "app.header.actions", "composer.trailing"] as const,
+    defaultVisible: true,
+    defaultSize: { w: 1, h: 1 },
+    resizable: false,
+  };
+  const initial = createDefaultWidgetLayout([definition]);
+  assert.equal(widgetSlotOf(initial, definition.id), "session.header.actions");
+  assert.equal(initial.widgets[definition.id]?.visible, true);
+
+  const moved = moveWidgetToSlot(initial, definition.id, "composer.trailing", 0, definition);
+  assert.equal(widgetSlotOf(moved, definition.id), "composer.trailing");
+  assert.deepEqual(moved.slotPlacements["session.header.actions"], []);
+  assert.deepEqual(moved.slotPlacements["composer.trailing"], [definition.id]);
+
+  const parsed = parseWidgetLayout(serializeWidgetLayout(moved), [definition]);
+  assert.equal(widgetSlotOf(parsed, definition.id), "composer.trailing");
+  assert.equal(parsed.widgets[definition.id]?.kind, "mini-widget");
+  assert.equal(
+    moveWidgetToSlot(parsed, definition.id, "workspace.main", 0, definition),
+    parsed,
+    "unsupported canvas placement is rejected",
+  );
 });
 
 test("self-describing plugin placements survive parsing as missing-plugin placeholders", () => {

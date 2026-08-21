@@ -1,5 +1,5 @@
-// Voice glue: mic button in the composer.leading slot (Web Speech dictation)
-// and optional read-aloud of assistant replies. Logic lives in
+// Voice glue: a placeable mic mini-widget (Web Speech dictation) and optional
+// read-aloud of assistant replies. Logic lives in
 // @polyth/dictation; this file owns DOM/store wiring only.
 import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import {
@@ -13,7 +13,7 @@ import {
   type SpeechRecognitionLike,
   type VoicePrefs,
 } from "@polyth/dictation";
-import { registerSlot } from "./slots.ts";
+import { defineWidgetPlugin, registerWidgetPlugin } from "./widgets/catalog.ts";
 import { requestComposerInsert } from "./composerInsert.ts";
 import { getState, openSettingsPage, subscribeStore } from "./store.ts";
 import { api } from "./api.ts";
@@ -311,13 +311,38 @@ function MicButton() {
 
 let voiceInstalled = false;
 
-/** Register the mic slot + auto read-aloud of newly completed replies.
+const VOICE_WIDGET_PLUGIN = defineWidgetPlugin({
+  id: "voice",
+  name: "Voice",
+  widgets: [{
+    id: "voice.mic",
+    title: "Dictate",
+    description: "Start or stop voice dictation.",
+    kind: "mini-widget",
+    defaultSlot: "composer.leading",
+    supportedSlots: [
+      "composer.leading",
+      "composer.trailing",
+      "app.header.actions",
+      "session.header.actions",
+      "app.nav",
+    ],
+    defaultVisible: true,
+    defaultSize: { w: 1, h: 1 },
+    resizable: false,
+    audience: "simple",
+    order: 5,
+    render: () => <MicButton />,
+  }],
+});
+
+/** Register the mic widget + auto read-aloud of newly completed replies.
  *  Idempotent: repeated boot (dev HMR, double module eval) can never add a
- *  second slot entry or store subscription (UX-COMPOSER-DISC). */
+ *  second widget entry or store subscription (UX-COMPOSER-DISC). */
 export function installVoice(): void {
   if (voiceInstalled) return;
   voiceInstalled = true;
-  registerSlot("composer.leading", "voice.mic", () => <MicButton key="voice.mic" />, 5);
+  registerWidgetPlugin(VOICE_WIDGET_PLUGIN);
 
   // Auto-TTS: speak assistant/message events as they land in the active
   // session. Sessions are primed on first sight so history is never read.

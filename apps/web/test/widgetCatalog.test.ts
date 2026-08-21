@@ -5,8 +5,8 @@ import { registerSlot } from "../src/slots.ts";
 
 register("./tsxHooks.mjs", import.meta.url);
 
-const { listWidgets } = await import("../src/widgets/catalog.ts");
-await import("../src/widgets/builtinWidgets.tsx");
+const { defineWidgetPlugin, listWidgets, registerWidgetPlugin } = await import("../src/widgets/catalog.ts");
+const { BUILTIN_WIDGET_PLUGINS } = await import("../src/widgets/builtinWidgets.tsx");
 
 test("built-in catalog covers the complete default canvas", () => {
   const widgets = listWidgets();
@@ -25,6 +25,8 @@ test("built-in catalog covers the complete default canvas", () => {
     assert.equal(typeof byId.get(id)?.render, "function");
     assert.equal(typeof byId.get(id)?.settingsRender, "function");
   }
+  assert.ok((BUILTIN_WIDGET_PLUGINS.find((plugin) => plugin.id === "session")?.widgets?.length ?? 0) > 1);
+  assert.ok((BUILTIN_WIDGET_PLUGINS.find((plugin) => plugin.id === "files")?.widgets?.length ?? 0) > 1);
 });
 
 test("plugin catalog and settings slots merge into one widget definition", () => {
@@ -56,4 +58,52 @@ test("plugin catalog and settings slots merge into one widget definition", () =>
     offSettings();
     offCatalog();
   }
+});
+
+test("client plugins declare zero or many widgets through one ownership API", () => {
+  const before = listWidgets().length;
+  const offEmpty = registerWidgetPlugin(defineWidgetPlugin({
+    id: "capability-only",
+    name: "Capability only",
+  }));
+  assert.equal(listWidgets().length, before);
+  offEmpty();
+
+  const off = registerWidgetPlugin(defineWidgetPlugin({
+    id: "sample-tools",
+    name: "Sample tools",
+    widgets: [
+      {
+        id: "sample-tools.overview",
+        title: "Sample overview",
+        description: "A full widget",
+        kind: "widget",
+        defaultSlot: "workspace.main",
+        supportedSlots: ["workspace.main", "workspace.right"],
+        render: () => "overview",
+      },
+      {
+        id: "sample-tools.refresh",
+        title: "Refresh sample",
+        description: "A mini-widget action",
+        kind: "mini-widget",
+        defaultSlot: "session.header.actions",
+        supportedSlots: ["session.header.actions", "app.header.actions"],
+        defaultVisible: true,
+        render: () => "refresh",
+      },
+    ],
+  }));
+  try {
+    const owned = listWidgets().filter((widget) => widget.pluginId === "sample-tools");
+    assert.deepEqual(owned.map((widget) => widget.id), [
+      "sample-tools.refresh",
+      "sample-tools.overview",
+    ]);
+    assert.ok(owned.every((widget) => widget.pluginName === "Sample tools"));
+    assert.equal(owned.find((widget) => widget.kind === "mini-widget")?.defaultSlot, "session.header.actions");
+  } finally {
+    off();
+  }
+  assert.equal(listWidgets().some((widget) => widget.pluginId === "sample-tools"), false);
 });

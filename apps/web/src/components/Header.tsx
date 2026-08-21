@@ -3,7 +3,7 @@ import {
   closeWorkspacePane, getState, openWorkspacePane, setActiveView, useActiveModel, useStore,
   openSettingsPage, setOverlay, setRailPlugin, setSidebarOpen, setUiError, type AppView,
 } from "../store.ts";
-import { createSession, forkSession, exportSessionMarkdown } from "../init.ts";
+import { forkSession, exportSessionMarkdown } from "../init.ts";
 import { displaySessionTitle } from "../format.ts";
 import { friendlyError, shortcutLabel } from "../settings.ts";
 import { GoalAttachForm } from "./GoalStrip.tsx";
@@ -466,12 +466,6 @@ export default function Header() {
     setActiveView("session");
     setWorkspaceMode(next);
   };
-  const newSession = () => {
-    if (!project) return;
-    void createSession(project.id).catch((error) =>
-      setUiError(friendlyError("Couldn’t create a session", error)));
-  };
-
   return (
     <>
       <header className={`header${compact ? " header-compact" : ""}`}>
@@ -517,15 +511,11 @@ export default function Header() {
             context={{ sessionId: session.id, status: session.status, working: model.turn?.status === "working" }}
           />
         )}
-        {workspaceMode !== "chat" && (
-          <button className="header-action header-new-session" disabled={!project} onClick={newSession}>
-            <Icon.plus /><span>New session</span>
-          </button>
-        )}
         <div className="header-actions" aria-label="Application">
-          <button className="header-action" onClick={() => setOverlay("palette")} aria-label="Search commands and actions"><Icon.search /><span>Search</span></button>
-          <button className="header-action" onClick={() => setOverlay("search")} aria-label="Search session history"><Icon.clock /><span>History</span></button>
-          <button className="header-action" onClick={() => setOverlay("settings")}><Icon.gear /><span>Settings</span></button>
+          <SlotHost
+            slot="app.header.actions"
+            context={{ projectId: project?.id ?? null, sessionId: session?.id ?? null, workspaceMode }}
+          />
         </div>
         {workspaceMode !== "chat" && (
           <OverflowMenu sessionId={session?.id ?? null} onGoal={() => setGoalFormOpen((value) => !value)} />
