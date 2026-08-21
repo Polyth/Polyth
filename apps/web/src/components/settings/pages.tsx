@@ -1,6 +1,6 @@
 // The simpler settings pages: General, Appearance, Chat, Notifications,
 // Behavior, Usage, Projects, Git, Agents, MCP, Plugins.
-import { useEffect, useState, type CSSProperties } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
 import {
   NO_PRESET_CARD, WORKSPACE_PRESETS, applyPreset, clearPreset, formatPresetSummary,
   getPresentation, getPresetState, presetSummary, resetDisclosureChoices,
@@ -166,8 +166,40 @@ function ThemeSection() {
   const [jsonError, setJsonError] = useState("");
   const [query, setQuery] = useState("");
   const [pickerOpen, setPickerOpen] = useState(false);
-  const preview = (t: ThemeSpec) => applyTheme(t);
-  const endPreview = () => reapplyTheme();
+  // Each apply repaints ~35 CSS variables and notifies canvas consumers, so
+  // hover preview is debounced on one shared timer: sweeping across the list
+  // coalesces to a single apply per pause and a single restore on exit,
+  // instead of an apply + restore per crossed row.
+  const previewTimer = useRef<number | null>(null);
+  const previewApplied = useRef(false);
+  const schedulePreview = (action: () => void) => {
+    if (previewTimer.current !== null) window.clearTimeout(previewTimer.current);
+    previewTimer.current = window.setTimeout(() => {
+      previewTimer.current = null;
+      action();
+    }, 90);
+  };
+  const preview = (t: ThemeSpec) => schedulePreview(() => {
+    previewApplied.current = true;
+    applyTheme(t);
+  });
+  const endPreview = () => {
+    if (!previewApplied.current) {
+      if (previewTimer.current !== null) {
+        window.clearTimeout(previewTimer.current);
+        previewTimer.current = null;
+      }
+      return;
+    }
+    schedulePreview(() => {
+      previewApplied.current = false;
+      reapplyTheme();
+    });
+  };
+  useEffect(() => () => {
+    if (previewTimer.current !== null) window.clearTimeout(previewTimer.current);
+    if (previewApplied.current) reapplyTheme();
+  }, []);
   const importJson = () => {
     const res = parseThemeJson(json);
     if (!res.ok) { setJsonError(res.error); return; }
