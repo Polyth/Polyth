@@ -158,12 +158,13 @@ test("Focus uses the light composer controls without technical chrome", async ()
 
 test("desktop header keeps branded breadcrumbs and a named utility cluster", async () => {
   const header = await read("../src/components/Header.tsx");
+  const actions = await read("../src/widgets/builtinMiniWidgets.tsx");
   assert.ok(header.includes('<span className="polyth-mark">p</span>'), "stylized Polyth mark is visible");
   assert.ok(header.includes("<strong>polyth</strong>"), "wordmark text is visible");
   assert.ok(header.includes('<div className="header-breadcrumbs"'), "project and branch breadcrumbs share one group");
   assert.ok(header.includes('<div className="header-actions"'), "utilities share one right-side cluster");
   for (const label of ["Search", "History", "Settings"]) {
-    assert.ok(header.includes(`<span>${label}</span>`), `${label} utility remains named`);
+    assert.ok(actions.includes(`<span>${label}</span>`), `${label} utility remains named`);
   }
   assert.ok(!header.includes('className="header-global-search"'), "Search is not duplicated in the header");
 });
@@ -207,13 +208,14 @@ test("mobile Settings uses a horizontal page navigator with independent content 
 test("shared menu, destructive, failed-turn, and header-action contracts stay wired", async () => {
   const sidebar = await read("../src/components/Sidebar.tsx");
   const header = await read("../src/components/Header.tsx");
+  const actions = await read("../src/widgets/builtinMiniWidgets.tsx");
   const sessions = await read("../src/components/sidebar/SessionList.tsx");
   const plugins = await read("../src/components/settings/pages.tsx");
   const css = await read("../src/styles.css");
   assert.ok(sidebar.includes("useDismissibleMenu"), "project actions consume the shared menu contract");
   assert.ok(header.includes("useDismissibleMenu"), "the user menu consumes the shared menu contract");
-  assert.ok(header.includes('setOverlay("palette")'), "Search opens the command/action palette");
-  assert.ok(header.includes('setOverlay("search")'), "History opens session history search");
+  assert.ok(actions.includes('setOverlay("palette")'), "Search opens the command/action palette");
+  assert.ok(actions.includes('setOverlay("search")'), "History opens session history search");
   assert.ok(sessions.includes("window.confirm"), "every permanent session deletion is guarded");
   assert.ok(plugins.includes('disabled={!sourceValid}'), "plugin install stays disabled until minimally valid");
   assert.match(css, /\.turn-error\s*\{[^}]*display:\s*flex[^}]*flex-wrap:\s*wrap[^}]*gap:\s*8px/);
