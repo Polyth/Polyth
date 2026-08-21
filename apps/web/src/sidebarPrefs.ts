@@ -87,6 +87,48 @@ export function useGroupingMode(): string {
   );
 }
 
+// ---- sidebar view mode (UX-FILES-TIMELINE-03 finding 9) -----------------------
+// "list": the current presentation — project cards plus the ACTIVE project's
+// sessions. "folders": every project is a collapsible folder with its
+// sessions nested. Persisted separately from the session grouping mode.
+
+export const VIEW_MODE_KEY = "polyth.sidebar.viewMode";
+export type SidebarViewMode = "list" | "folders";
+
+export function parseSidebarViewMode(raw: string | null): SidebarViewMode {
+  return raw === "folders" ? "folders" : "list";
+}
+
+const readViewMode = (): string | null => {
+  try { return localStorage.getItem(VIEW_MODE_KEY); } catch { return null; }
+};
+const writeViewMode = (v: string): void => {
+  try { localStorage.setItem(VIEW_MODE_KEY, v); } catch { /* private mode */ }
+};
+
+let storedViewMode: SidebarViewMode = parseSidebarViewMode(readViewMode());
+const viewModeListeners = new Set<() => void>();
+
+export function getSidebarViewMode(): SidebarViewMode {
+  return storedViewMode;
+}
+
+export function setSidebarViewMode(mode: SidebarViewMode): void {
+  storedViewMode = parseSidebarViewMode(mode);
+  writeViewMode(storedViewMode);
+  for (const l of [...viewModeListeners]) l();
+}
+
+export function useSidebarViewMode(): SidebarViewMode {
+  return useSyncExternalStore(
+    (cb) => {
+      viewModeListeners.add(cb);
+      return () => { viewModeListeners.delete(cb); };
+    },
+    getSidebarViewMode,
+  );
+}
+
 export interface SessionGroup {
   key: string;
   label: string;

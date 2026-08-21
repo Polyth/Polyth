@@ -298,7 +298,7 @@ function maybeSeedFromReplay(sessionId: string): void {
 
 export async function refreshSessions(projectId: string): Promise<void> {
   try {
-    store.setSessions(await api.listSessions(projectId));
+    store.setSessions(projectId, await api.listSessions(projectId));
   } catch (err) {
     console.error("list sessions failed", err);
   }

@@ -52,7 +52,7 @@ const windowTarget = dom as unknown as EventTarget;
 
 async function mountList() {
   activateProject("p1");
-  setSessions([
+  setSessions("p1", [
     session({ id: "s-idle", title: "Idle session" }),
     session({ id: "s-run", title: "Running session", status: "working", lastTurnAt: Date.now() - 10_000 }),
   ]);
@@ -135,7 +135,7 @@ test("delete acts immediately on an idle session, confirms first on a running on
     // The post-delete refresh answered [] through the fetch stub — re-seed the
     // store so the running row is still on screen for the second half.
     await act(async () => {
-      setSessions([
+      setSessions("p1", [
         session({ id: "s-run", title: "Running session", status: "working", lastTurnAt: Date.now() - 10_000 }),
       ]);
     });

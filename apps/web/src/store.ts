@@ -256,8 +256,12 @@ export function applyProjectRemoved(id: string): void {
 
 // ---- other actions ---------------------------------------------------------
 
-export function setSessions(sessions: SessionProjection[]): void {
-  set({ sessions });
+/** Replace ONE project's session projections, keeping every other project's
+ *  entries (UX-FILES-TIMELINE-03 finding 9: the sidebar folder mode shows
+ *  several projects' sessions at once, so a refresh must not evict them). */
+export function setSessions(projectId: string, sessions: SessionProjection[]): void {
+  const others = state.sessions.filter((s) => s.projectId !== projectId);
+  set({ sessions: others.length === 0 ? sessions : [...others, ...sessions] });
 }
 export function setModels(models: ModelDescriptor[]): void {
   set({ models });

@@ -233,6 +233,22 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
 /* project card */
 .project-card-shell { position: relative; margin-bottom: 4px; }
 .project-card-shell .project-card { margin-bottom: 0; padding-right: 38px; }
+
+/* UX-FILES-TIMELINE-03 finding 9: sidebar folder view — projects as
+   collapsible folders with their sessions nested underneath. */
+.side-folder-bar { display: flex; gap: 4px; padding: 0 0 6px; }
+.project-folder { margin-bottom: 4px; }
+.project-folder .project-card-shell { display: flex; align-items: center; gap: 2px; margin-bottom: 0; }
+.project-folder .project-card { flex: 1; min-width: 0; }
+.project-folder-chevron {
+  flex: none; width: 20px; height: 27px; padding: 0; border: none; background: none;
+  color: var(--muted); font-size: 11px; cursor: pointer; border-radius: 6px;
+}
+.project-folder-chevron:hover { color: var(--text); background: var(--panel); }
+.project-folder-chevron:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -1px; }
+.project-folder-sessions {
+  margin: 2px 0 6px 9px; padding-left: 8px; border-left: 1px solid var(--hair);
+}
 .project-card {
   display: flex; align-items: center; gap: 11px; width: 100%; text-align: left;
   padding: 10px; border: 1px solid var(--hair); border-radius: var(--radius-lg);
