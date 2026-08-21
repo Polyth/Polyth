@@ -66,11 +66,13 @@ register("./tsxHooks.mjs", import.meta.url);
 const { act, createElement } = await import("react");
 const { createRoot } = await import("react-dom/client");
 const { getState, setModels, setOverlay } = await import("../src/store.ts");
+const { installBuiltinMiniWidgets } = await import("../src/widgets/builtinMiniWidgets.tsx");
 const { default: Header } = await import("../src/components/Header.tsx");
 const { default: CommandPalette } = await import("../src/components/CommandPalette.tsx");
 const { default: SessionSearch } = await import("../src/components/SessionSearch.tsx");
 const { default: ModelsPage } = await import("../src/components/settings/ModelsPage.tsx");
 const { GeneralPage } = await import("../src/components/settings/pages.tsx");
+installBuiltinMiniWidgets();
 
 async function mounted(component: ReactNode) {
   const container = document.createElement("div");
