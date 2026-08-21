@@ -24,7 +24,14 @@ const { act, createElement } = await import("react");
 const { createRoot } = await import("react-dom/client");
 const { registerWorkspaceSurface } = await import("../src/workspace/surfaceRegistry.ts");
 const { default: WorkspaceHost } = await import("../src/components/workspace/WorkspaceHost.ts");
-const { activateProject, activateSession, setActiveView } = await import("../src/store.ts");
+const {
+  activateProject,
+  activateSession,
+  beginProjectListRequest,
+  failProjectList,
+  publishProjectList,
+  setActiveView,
+} = await import("../src/store.ts");
 
 type Cleanup = () => void;
 
@@ -97,7 +104,21 @@ test("mounted host: project and session requirements render standard empty state
   try {
     offs.push(probe("goals", "goals surface", { requires: "session" }));
     await act(async () => {});
-    // No project → the standard project empty state (not the surface).
+    // Unknown project truth never masquerades as a successful empty list.
+    assert.match(container.textContent ?? "", /Loading your projects/);
+
+    await act(async () => {
+      const ticket = beginProjectListRequest();
+      failProjectList(ticket, "offline");
+    });
+    assert.match(container.textContent ?? "", /Couldn’t load projects/);
+    assert.match(container.textContent ?? "", /offline/);
+
+    await act(async () => {
+      const ticket = beginProjectListRequest();
+      assert.equal(publishProjectList(ticket, []), "published");
+    });
+    // Ready-empty → the standard project empty state (not the surface).
     assert.match(container.textContent ?? "", /Bring your work into focus/);
     assert.ok(container.querySelector(".hero-open-project"));
 
