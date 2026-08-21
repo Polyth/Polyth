@@ -3,12 +3,24 @@
 Snapshot of the system as it exists on this branch. This replaces the old milestone
 plan; nothing here is aspirational — every item is in the tree today.
 
+## Orientation (read this first)
+
+One-minute map for a new agent; everything after this section is the deep reference.
+
+- **One app, one server.** `apps/web` (React 19 SPA, esbuild) talks REST `/api/*` + WS `/ws` to `packages/server` (node:http composition root). The server wires every feature service and lazily spawns `opencode serve` per project through `packages/backend-opencode` — the only package allowed to touch the OpenCode process/API.
+- **Truth lives in the event log.** `packages/session` stores append-only events in SQLite (WAL). Anything model-visible is appended before the UI sees it; `deriveMessages` rebuilds model history from the log (skipping `ignorable` events).
+- **Contracts first.** `packages/contracts` is the normative surface — mostly types (DTOs, `SessionEvent`, `UiSlot`) plus a few runtime exports (`cap`, `CAP`, `UI_SLOTS`, `isUiSlot`, `MODEL_VISIBLE_TYPES`). `packages/kernel` provides plugin scopes, capabilities, and slot contributions. Built-in feature services are wired directly at the composition root (`packages/server/src/index.ts`), not dynamically loaded; the kernel and the installed-plugin registry are the plugin seams.
+- **Extending the server:** add a feature package exposing a `RouteHandler` and register it at the composition root — never edit `packages/server/src/http.ts`.
+- **Extending the UI:** register into the typed slot registry (`apps/web/src/slots.ts`; slot names are the `UiSlot` union) — never edit `App.tsx` for a slot item.
+- **Feature packages** (one directory each under `packages/`): permissions, goals, files, git, commands, terminal, preview, multirun, fusion, walkthrough, schedule, knowledge, github, usage, browser, dictation, models, hotkeys, plugins.
+- **Conventions:** erasable TS on Node >= 22.18 (type stripping; earlier 22.x fails; no enums/namespaces/parameter properties), explicit `.ts` on local imports, `@polyth/*` workspace imports, `node --test` + `node:assert`. Full rules: `/AGENTS.md`. Feature workflow: `docs/dev/README.md`. Feature status: `docs/parity/polyth-parity.yaml`.
+
 ## Topology
 
 ```
 apps/web (React 19, esbuild bundle, no framework server)
    │  REST /api/*        WS /ws (sessions, browser frames, dictation audio)
-   │                     WS /ws/terminal/:id (PTY byte stream)
+   │                     WS /ws/terminal/:id (JSON terminal frames)
 packages/server (node:http composition root)
    ├─ kernel context (capability providers)
    ├─ session service (delivery, queue, steering, permission preview)
@@ -21,7 +33,7 @@ packages/session (node:sqlite WAL: events + projections + queue/org/profiles)
 
 | Package | Role |
 |---|---|
-| `contracts` | Type-only DTOs, `SessionEvent`, service interfaces, `UiSlot` union, capability keys (`CAP`). The normative surface. |
+| `contracts` | DTOs, `SessionEvent`, service interfaces, `UiSlot` union (types) plus runtime values: `cap()`, `CAP` capability keys, `UI_SLOTS`/`isUiSlot`, `MODEL_VISIBLE_TYPES`. The normative surface. |
 | `kernel` | Scoped plugin contexts: `provide`/`inject`/`optional` capabilities (priority + registration order), `on`/`emit`/`waterfall` events, LIFO effect disposal, `contribute()` for UI slot items, `loadPlugin` with manifest requirement checks, profile resolver (bundles → ordered plugin list). |
 | `session` | Append-only event store. `append` allocates monotonic per-session `seq` transactionally; projections (`SessionProjection`) are updated alongside; also owns queue items, folders, labels, projection-only session pins, agent profiles, and transcript text search (`searchEventText`). `deriveMessages` turns the log into model history (skips `ignorable`). |
 | `backend-opencode` | The only OpenCode integration point. Spawns/attaches `opencode serve`, translates its SSE into `RuntimeEvent`s, maps canonical session ids ↔ backend ids, applies behavior/MCP config (`createConfigApplier`), imports pre-existing OpenCode sessions, snapshots task/subagent state as revisioned events. |
@@ -29,8 +41,8 @@ packages/session (node:sqlite WAL: events + projections + queue/org/profiles)
 | `goals` | Objective attach/audit loop: small-model auditor verdicts (`keep`/`done`/`stuck`), budgets, auto-continuation, pause/resume; rehydrates from the event log after restart. |
 | `files` | Path-jailed file service: tree/stat/read (revision = mtime+size), revision-guarded `write` (stale `baseRevision` → `conflict`), binary-overwrite refusal, mkdir/rename/delete/upload, scored file search (shared with palette + mentions). |
 | `git` | Porcelain wrapper: status/diff/show/stage/unstage/discard/commit/log/graph/branches/checkout/stash/fetch/pull/push/worktrees, diffHead/diffRange for review flows. Session-scoped Git routes resolve an owned worktree cwd server-side. |
-| `commands` | Slash commands + `#alias` snippets: project (`.agents/commands`) and user scopes, `$ARGUMENTS`/`@file`/`!cmd` template expansion, CRUD for the settings UI. |
-| `terminal` | PTY sessions (`node-pty` when present) with create/list/close/rename; bounded per-PTY replay ring (default 200 KB, UTF-8-tear-safe) replayed on every `/ws/terminal/:id` attach; PTYs survive socket drops — close only via REST or process exit. |
+| `commands` | Slash commands + `#alias` snippets: project (`.polyth/commands`, snippets in `.polyth/snippets`) and user scopes, `$ARGUMENTS`/`@file`/`!cmd` template expansion, CRUD for the settings UI. |
+| `terminal` | Terminal sessions as piped `node:child_process` shells — no PTY (`node-pty` is not integrated), so full-screen TUIs (vim, htop) won't render — with create/list/close/rename; bounded per-terminal replay ring (default 200 KB, UTF-8-tear-safe) replayed on every `/ws/terminal/:id` attach; terminals survive socket drops — close only via REST or process exit. |
 | `preview` | Dev-server lifecycle per project: script detection, `PORT` injection, status events, URL for the iframe preview. |
 | `multirun` | N parallel one-shot runs (model/agent matrix) inside a session; per-run progress events; pick-a-winner. |
 | `fusion` | Multi-model answers + small-model synthesis with weights, attribution, disagreements. |
@@ -113,7 +125,9 @@ statically by the server with SPA fallback.
 - `permissionPreview.ts` — redacted, risk-scored previews built server-side before
   `permission/requested` is appended.
 - `review.ts` — structured review generation + the bounded implementer/reviewer flow
-  (pauses on permission waits, hard iteration limit, structurally cannot merge/push).
+  (pauses on permission waits, hard iteration limit). The implementer is a normal
+  tool-capable session: the handoff prompt instructs it not to merge/push/publish,
+  but nothing structurally prevents it.
 - `oneshot.ts` — single-turn utility completion on a runtime (used by goals auditor,
   commit messages, fusion synthesis, walkthrough generation).
 - `assist.ts` (F9) — idle assist watcher: N quiet seconds after `turn/stopped` the
@@ -232,14 +246,16 @@ session before the response), `knowledge/attached`, `schedule/run-started`,
 
 Rules: types are `domain/past-tense`; payloads JSON-only; `ignorable: true` keeps an
 event out of model-history derivation; `surfaceOp: "replace"` lets snapshots supersede
-earlier ones in the UI while staying append-only on disk; unknown types must render as
-a generic collapsed row (never crash).
+earlier ones in the UI while staying append-only on disk; unknown types are safely
+ignored by the web reducer (never crash).
 
 ## Web app structure (`apps/web/src`)
 
 - `store.ts` — `useSyncExternalStore` app state: projects, sessions, per-session events,
-  models/agents, active ids, `AppView` (session/files/goals/multirun/fusion/walkthrough/
-  preview/git/terminal/schedule/github), overlays (onboarding/palette/search/settings),
+  models/agents, active ids, `AppView` (session/goals/multirun/fusion/walkthrough/
+  schedule/github — files, Git, terminal, and preview are workspace panes opened
+  beside a still-mounted Chat via `openWorkspacePane()`, not `AppView` values;
+  legacy persisted ids map onto panes), overlays (onboarding/palette/search/settings),
   rail plugin, editor file + location.
 - `reduce.ts` — event log → `RenderModel` (messages, pending permissions/questions,
   task deltas, edit-tool changed paths, subagents, lifetime usage plus the latest
@@ -336,10 +352,13 @@ a generic collapsed row (never crash).
 `session.timeline.before/after`, `session.message.actions`,
 `sidebar.project.actions`, `sidebar.session.actions`, `workStatus.sections`.
 
-Server-side plugins contribute `UiSlotItem` descriptors (module keys, capability
-requirements) through `PluginContext.contribute`; the client registry
-(`slots.ts`) renders them. Built-in features register through the same registry —
-extending a slot must never require editing `App.tsx`.
+Installed server-side plugins declare `UiSlotItem` descriptors (slot + module key)
+in their manifests, and `PluginContext.contribute` is the kernel seam — but the
+production registry is wired with no slot sink and no client module bridge, so
+those descriptors are validated and stored, not rendered. Rendering happens only
+through the client registry (`apps/web/src/slots.ts`, exposed as
+`window.__polythSlots`), where built-in features register — extending a slot must
+never require editing `App.tsx`.
 
 ## Persistence layout (`POLYTH_DATA_DIR`, default `./data`)
 
@@ -354,9 +373,15 @@ explicit per-session on/off records — "inherit" is the absence of a record),
 
 ## Security posture
 
-Localhost-first (bind address is configuration, never the Host header). Permission
+The server binds all interfaces: `boot()` calls `server.listen(port)` with no host
+argument, so it is reachable on `*:4400` by default and no localhost-only bind
+option exists — set `POLYTH_UI_PASSWORD` whenever anything beyond your own machine
+can reach the port (with no password configured there is no auth at all). Addresses
+shown in system info come from configuration, never from the Host header. Permission
 engine fails closed. Browser sessions run in isolated contexts with an origin policy
 (no cam/mic, no private IPs, no downloads); observations are redacted. Quota adapters
 redact secrets before snapshots reach the client. GitHub auth is delegated to the `gh`
-CLI — no tokens stored. Uploaded files land in a project `_inbox`. There is no UI
-auth layer yet (see parity: security domain).
+CLI — no tokens stored. Uploaded files land in a project `_inbox`. UI auth is the
+optional F16 password gate described above (`auth.ts`): when a password is
+configured it covers every `/api` path and WS upgrade; when none is configured
+it is off entirely.
