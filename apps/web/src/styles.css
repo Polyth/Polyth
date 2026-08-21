@@ -2094,8 +2094,10 @@ html[data-density="compact"] .set-row { padding: 9px 0; }
   display: flex; align-items: center; gap: 4px; flex-wrap: wrap;
   padding: 5px 14px; border-bottom: 1px solid var(--border-soft); background: var(--sunken);
 }
-.editor-preview-default { display: inline-flex; align-items: center; gap: 4px; color: var(--muted); font-size: 11px; }
-.editor-preview-default input { margin: 0; }
+/* UX-FILES-TIMELINE-03 finding 3: a real preview↔edit switch with labeled
+   states (persisted per previewable kind). */
+.editor-mode-switch { display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--muted); }
+.editor-mode-label.on { color: var(--ink); font-weight: 600; }
 .editor-rename { padding: 6px 14px; border-bottom: 1px solid var(--border-soft); }
 .editor-banner {
   padding: 5px 14px; font-size: 11.5px; color: var(--amber);
@@ -2131,6 +2133,34 @@ html[data-density="compact"] .set-row { padding: 9px 0; }
 }
 .editor-ta[wrap="soft"] { white-space: pre-wrap; padding-left: 14px; }
 .editor-ta:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: -2px; }
+
+/* UX-FILES-TIMELINE-03 finding 4: highlight WHILE editing. A backdrop <pre>
+   mirrors the buffer (same font, padding, wrapping) beneath a transparent-text
+   textarea; scroll is synced from the textarea. The textarea keeps the caret,
+   selection, IME, and dirty/autosave semantics. */
+.editor-edit-surface { position: relative; flex: 1; min-width: 0; display: flex; }
+.editor-edit-surface .editor-ta { position: relative; z-index: 1; }
+.editor-hl-backdrop {
+  position: absolute; inset: 0; margin: 0; overflow: hidden; pointer-events: none;
+  border: none; border-radius: 0; background: transparent;
+  padding: 8px 14px 8px 0; font: 12px/1.55 var(--mono); tab-size: 2;
+  white-space: pre; color: var(--ink);
+}
+.editor-hl-backdrop.wrap { white-space: pre-wrap; overflow-wrap: break-word; padding-left: 14px; }
+.editor-ta-hl { color: transparent; caret-color: var(--ink); }
+.editor-ta-hl::selection { color: transparent; background: var(--accent-wash); }
+
+/* UX-FILES-TIMELINE-03 finding 5: contextual "add selection to chat" hint —
+   appears only while a selection is active, floats near it. */
+.editor-sel-hint {
+  position: fixed; z-index: 70; width: 26px; height: 24px; padding: 0;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: var(--elevated); border: 1px solid var(--border); border-radius: var(--radius-sm);
+  color: var(--accent); font: 600 13px/1 var(--mono); cursor: pointer;
+  box-shadow: var(--shadow-lg);
+}
+.editor-sel-hint:hover { background: var(--raised); }
+.editor-sel-hint:focus-visible { outline: 2px solid var(--focus-ring); outline-offset: 1px; }
 
 /* file tree (finding 7 + UX-FILES-TIMELINE-03 finding 1): namespaced ft-*
    rows — `.sel` is the select widget. Rows carry a disclosure chevron, a

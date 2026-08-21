@@ -74,8 +74,18 @@ test("editor preview selection and HTML sandbox document are deterministic", () 
   assert.equal(initialPreviewVisible("README.md", true), true);
   assert.equal(initialPreviewVisible("README.md", false), false);
   assert.equal(initialPreviewVisible("src/app.ts", true), false);
-  assert.deepEqual(parseEditorPrefs(null), { openInPreview: true });
-  assert.deepEqual(parseEditorPrefs('{"openInPreview":false}'), { openInPreview: false });
+  // Finding 3: a per-kind choice wins over the global default; other kinds
+  // and non-previewable paths are unaffected.
+  assert.equal(initialPreviewVisible("README.md", true, { markdown: false }), false);
+  assert.equal(initialPreviewVisible("README.md", false, { markdown: true }), true);
+  assert.equal(initialPreviewVisible("data.json", true, { markdown: false }), true);
+  assert.equal(initialPreviewVisible("src/app.ts", true, { markdown: true }), false);
+  assert.deepEqual(parseEditorPrefs(null), { openInPreview: true, previewByKind: {} });
+  assert.deepEqual(parseEditorPrefs('{"openInPreview":false}'), { openInPreview: false, previewByKind: {} });
+  assert.deepEqual(
+    parseEditorPrefs('{"previewByKind":{"markdown":false,"html":true,"bogus":true,"json":"nope"}}'),
+    { openInPreview: true, previewByKind: { markdown: false, html: true } },
+  );
 
   const html = htmlPreviewDocument("<script>globalThis.previewRan = true</script>", 'https://example.test/a"b/');
   assert.match(html, /<base href="https:\/\/example\.test\/a&quot;b\/">/);

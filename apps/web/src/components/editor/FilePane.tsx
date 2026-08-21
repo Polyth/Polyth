@@ -11,12 +11,15 @@ import { api, httpStatusOf } from "../../api.ts";
 import { clearEditorLocation, getState, useStore } from "../../store.ts";
 import { MarkdownDoc } from "../../markdown.tsx";
 import JsonTree, { tryParseJson } from "../../markdown/JsonTree.tsx";
-import { highlightLines, langOf } from "../../highlight.ts";
+import { highlight, highlightLines, langOf } from "../../highlight.ts";
 import { formatFileChat, formatSelectionChat, lineRangeOf } from "../../chatclip.ts";
 import { requestComposerInsert } from "../../composerInsert.ts";
 import { createSession } from "../../init.ts";
 import { MOD } from "../../format.ts";
-import { setEditorPrefs, useEditorPrefs, useUiSettings } from "../../uiPrefs.ts";
+import { useEscape } from "../../useEscape.ts";
+import { clampMenuPosition } from "../../selectionActions.ts";
+import { copyText } from "../../utils.ts";
+import { getEditorPrefs, setEditorPreviewDefault, useUiSettings } from "../../uiPrefs.ts";
 import {
   autosaveDelay,
   beginLiveFileSave,
@@ -56,7 +59,6 @@ export default function FilePane({ projectId, sessionId, resource: path, visible
   const scope = docScopeKey(projectId, sessionId);
   const sid = sessionId ?? undefined;
   const prefs = useUiSettings();
-  const editorPrefs = useEditorPrefs();
   const location = useStore((s) => s.editorLocation);
   const actions = usePaneActions();
   useSyncExternalStore(subscribeDocs, docsVersion);
@@ -79,15 +81,21 @@ export default function FilePane({ projectId, sessionId, resource: path, visible
   const [hlRange, setHlRange] = useState<[number, number] | null>(null);
   const [gotoOpen, setGotoOpen] = useState(false);
   const [gotoVal, setGotoVal] = useState("");
-  const [previewOn, setPreviewOn] = useState(() => initialPreviewVisible(path, editorPrefs.openInPreview));
+  // UX-FILES-TIMELINE-03 findings 3–5: actions menu + contextual selection hint.
+  const [menu, setMenu] = useState<{ x: number; y: number } | null>(null);
+  const [selHint, setSelHint] = useState<{ x: number; y: number } | null>(null);
 
   const bodyRef = useRef<HTMLDivElement>(null);
   const taRef = useRef<HTMLTextAreaElement>(null);
   const gutterRef = useRef<HTMLPreElement>(null);
+  const hlRef = useRef<HTMLPreElement>(null);
 
   useEffect(() => { installDocUnloadGuard(); }, []);
 
   // Load once; keep-alive afterwards (scope switch back reuses the buffer).
+  // Finding 3/4: the landing mode is decided here — previewable kinds honor
+  // the per-kind preference (preview by default), everything else editable
+  // opens straight into edit mode.
   useEffect(() => {
     const entry = ensureDoc(scope, path);
     if (entry.doc || entry.loading) return;
@@ -98,6 +106,9 @@ export default function FilePane({ projectId, sessionId, resource: path, visible
         entry.doc = got;
         entry.buf = got.content;
         entry.live = loadedLiveFile(got.revision);
+        const canEdit = !got.truncated && got.tooLarge !== true;
+        const prefsNow = getEditorPrefs();
+        entry.editing = canEdit && !initialPreviewVisible(path, prefsNow.openInPreview, prefsNow.previewByKind);
         entry.loading = false;
         bumpDocs();
       })
@@ -112,7 +123,6 @@ export default function FilePane({ projectId, sessionId, resource: path, visible
   useEffect(() => {
     if (!visible || !doc || !location || location.path !== doc.path) return;
     if (location.startLine !== undefined) {
-      setPreviewOn(false); // ranges need the line-numbered source view
       gotoLine(location.startLine, location.endLine);
     }
     clearEditorLocation();
@@ -125,13 +135,62 @@ export default function FilePane({ projectId, sessionId, resource: path, visible
     return () => clearTimeout(t);
   }, [flash]);
 
+  /** Flip preview↔edit (finding 3). User-driven flips persist per kind. */
+  const setPreviewMode = (on: boolean, opts: { persist?: boolean } = {}) => {
+    if (!doc || readOnly) return;
+    td.editing = !on;
+    bumpDocs();
+    setSelHint(null);
+    const kind = previewKindForPath(doc.path);
+    if (opts.persist !== false && kind) setEditorPreviewDefault(kind, on);
+  };
+
+  const MENU_W = 210;
+  const MENU_H = 300;
+  const openMenu = (x: number, y: number) => {
+    setMenu(clampMenuPosition(x, y, MENU_W, MENU_H, window.innerWidth, window.innerHeight));
+  };
+  useEscape(menu !== null, () => setMenu(null));
+
   const gotoLine = (start: number, end?: number) => {
     const last = end !== undefined && end >= start ? end : start;
+    if (doc && !readOnly) {
+      // Editable files select the range in the textarea (finding 4: editing
+      // IS the source view now).
+      if (!td.editing) setPreviewMode(false, { persist: false });
+      requestAnimationFrame(() => {
+        const ta = taRef.current;
+        if (!ta) return;
+        const rows = ta.value.split("\n");
+        const from = Math.min(Math.max(1, start), rows.length);
+        const to = Math.min(Math.max(from, last), rows.length);
+        const offsetOf = (line: number) => rows.slice(0, line - 1).reduce((n, l) => n + l.length + 1, 0);
+        const startOff = offsetOf(from);
+        const endOff = Math.min(ta.value.length, offsetOf(to) + (rows[to - 1]?.length ?? 0));
+        ta.focus();
+        ta.setSelectionRange(startOff, endOff);
+        const lineHeight = parseFloat(window.getComputedStyle(ta).lineHeight) || 19;
+        ta.scrollTop = Math.max(0, (from - 3) * lineHeight);
+        syncEditScroll();
+      });
+      return;
+    }
     setHlRange([start, last]);
     requestAnimationFrame(() => {
       const row = bodyRef.current?.querySelector(`[data-ln="${start}"]`);
       row?.scrollIntoView({ block: "center" });
     });
+  };
+
+  /** Keep the highlight backdrop and gutter glued to the textarea scroll. */
+  const syncEditScroll = () => {
+    const ta = taRef.current;
+    if (!ta) return;
+    if (gutterRef.current) gutterRef.current.scrollTop = ta.scrollTop;
+    if (hlRef.current) {
+      hlRef.current.scrollTop = ta.scrollTop;
+      hlRef.current.scrollLeft = ta.scrollLeft;
+    }
   };
 
   const setBuf = (text: string) => {
@@ -193,6 +252,55 @@ export default function FilePane({ projectId, sessionId, resource: path, visible
     if (!doc) return;
     insertToChat(readOnly ? `@${doc.path}` : formatFileChat(doc.path, doc.content, INLINE_FILE_CHARS));
   };
+
+  // ---- contextual selection hint (finding 5) -----------------------------------
+  // A small floating "add to chat" affordance that exists ONLY while a text
+  // selection is active in this file — never a permanent toolbar button.
+  const placeHint = (x: number, y: number) =>
+    setSelHint(clampMenuPosition(x, y, 34, 30, window.innerWidth, window.innerHeight));
+
+  /** Edit mode: pointer selections anchor at the pointer; keyboard selections
+   *  fall back to a caret-line approximation. Collapsed selections clear it. */
+  const updateEditHint = (at?: { x: number; y: number }) => {
+    const ta = taRef.current;
+    if (!ta || ta.selectionStart === ta.selectionEnd) {
+      setSelHint(null);
+      return;
+    }
+    if (at) {
+      placeHint(at.x, at.y);
+      return;
+    }
+    const rect = ta.getBoundingClientRect();
+    const lineHeight = parseFloat(window.getComputedStyle(ta).lineHeight) || 19;
+    const line = ta.value.slice(0, ta.selectionEnd).split("\n").length;
+    const y = rect.top + 8 + line * lineHeight - ta.scrollTop;
+    placeHint(rect.left + 24, Math.min(Math.max(y, rect.top + 4), rect.bottom - 34));
+  };
+
+  // Read/preview modes: follow the DOM selection inside this pane's body.
+  useEffect(() => {
+    if (!visible || editing) return;
+    const onSelectionChange = () => {
+      const s = window.getSelection();
+      const container = bodyRef.current;
+      if (!s || s.isCollapsed || s.rangeCount === 0 || !container
+        || !container.contains(s.getRangeAt(0).commonAncestorContainer)) {
+        setSelHint(null);
+        return;
+      }
+      const range = s.getRangeAt(0);
+      const rects = range.getClientRects();
+      const r = rects.length > 0 ? rects[rects.length - 1]! : range.getBoundingClientRect();
+      placeHint(r.right + 6, r.bottom + 8);
+    };
+    document.addEventListener("selectionchange", onSelectionChange);
+    return () => document.removeEventListener("selectionchange", onSelectionChange);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visible, editing]);
+
+  // Mode, file, or visibility changes invalidate the hint position.
+  useEffect(() => { setSelHint(null); }, [visible, editing, path]);
 
   // ---- revision-guarded save / reload / check ----------------------------------
   const save = async (opts: { force?: boolean } = {}) => {
@@ -338,7 +446,7 @@ export default function FilePane({ projectId, sessionId, resource: path, visible
       const mod = e.metaKey || e.ctrlKey;
       if (mod && e.key.toLowerCase() === "s") {
         e.preventDefault();
-        if (editing && dirty && !readOnly) void save();
+        if (dirty && !readOnly) void save();
       } else if (mod && e.key.toLowerCase() === "l") {
         e.preventDefault();
         addSelection();
@@ -346,8 +454,11 @@ export default function FilePane({ projectId, sessionId, resource: path, visible
         e.preventDefault();
         setGotoOpen(true);
       } else if (e.key === "Escape") {
+        if (menu) return; // the menu's own capture-phase Escape closes it
         if (gotoOpen) { setGotoOpen(false); return; }
-        if (renameTo !== null || confirmDel) return; // inner dialogs own Esc
+        if (selHint) { setSelHint(null); return; }
+        if (confirmDel) { setConfirmDel(false); return; }
+        if (renameTo !== null) return; // the rename input owns Esc
         actions?.closeSelf("file", path); // dirty guard applies in the host
       }
     };
@@ -356,18 +467,33 @@ export default function FilePane({ projectId, sessionId, resource: path, visible
   });
 
   // ---- render -----------------------------------------------------------------
+  const lang = doc ? langOf(doc.path) : "";
   const lines = useMemo(
-    () => (doc && !editing ? highlightLines(doc.content, langOf(doc.path)) : []),
-    [doc, editing],
+    () => (doc && !editing ? highlightLines(doc.content, lang) : []),
+    [doc, editing, lang],
   );
+  const bufLineCount = useMemo(() => (editing ? buf.split("\n").length : 0), [editing, buf]);
   const gutterText = useMemo(
-    () => (editing ? Array.from({ length: buf.split("\n").length }, (_, i) => i + 1).join("\n") : ""),
-    [editing, buf],
+    () => Array.from({ length: bufLineCount }, (_, i) => i + 1).join("\n"),
+    [bufLineCount],
   );
-  const previewKind = doc && !editing && !readOnly ? previewKindForPath(doc.path) : null;
+  // Finding 4: highlight WHILE editing — a backdrop <pre> mirrors the buffer
+  // under a transparent-text textarea. Very large buffers fall back to the
+  // plain textarea (same cap as the read view's per-line rows).
+  const editHl = useMemo(
+    () => (editing && !readOnly && doc && bufLineCount <= MAX_ROWED_LINES ? highlight(buf, lang) : null),
+    [editing, readOnly, doc, buf, bufLineCount, lang],
+  );
+  useEffect(() => { syncEditScroll(); }, [editHl, wrap]); // eslint-disable-line react-hooks/exhaustive-deps
+  /** Previewable kinds keep their switch visible in BOTH modes (finding 3). */
+  const previewKind = doc && !readOnly ? previewKindForPath(doc.path) : null;
+  const previewName = previewKind === "json" ? "Tree" : "Preview";
+  // Previews render the LIVE buffer, not the saved snapshot — flipping the
+  // switch while dirty must show the pending edits (they equal doc.content
+  // when clean).
   const jsonValue = useMemo(
-    () => (previewKind === "json" && doc ? tryParseJson(doc.content) : undefined),
-    [previewKind, doc],
+    () => (previewKind === "json" && doc && !editing ? tryParseJson(buf) : undefined),
+    [previewKind, doc, editing, buf],
   );
 
   if (td.loading || (!doc && !error)) {
@@ -400,31 +526,29 @@ export default function FilePane({ projectId, sessionId, resource: path, visible
         <button className="small-btn" title="Close file (Esc)" onClick={() => actions?.closeSelf("file", path)}>✕</button>
       </div>
       <div className="editor-toolbar">
-        <button className="small-btn" title={`Add selection to chat (${MOD}L)`} onClick={addSelection}>
-          Add selection to chat
-        </button>
-        <button className="small-btn" onClick={addFile}>Add file to chat</button>
-        <span className="header-spacer" />
-        {previewKind && (
-          <>
-            <button className="small-btn" aria-pressed={previewOn} onClick={() => setPreviewOn((v) => !v)}>
-              {previewOn ? "Source" : previewKind === "json" ? "Tree" : "Preview"}
+        {previewKind !== null && (
+          <span className="editor-mode-switch">
+            <span className={`editor-mode-label${editing ? " on" : ""}`}>Edit</span>
+            <button
+              className="switch switch-sm"
+              role="switch"
+              aria-checked={!editing}
+              aria-label={`${previewName} mode`}
+              title={editing ? `Show ${previewName.toLowerCase()}` : "Edit source"}
+              onClick={() => setPreviewMode(editing)}
+            >
+              <i />
             </button>
-            <label className="editor-preview-default" title="Open Markdown, HTML, and JSON files in preview mode">
-              <input
-                type="checkbox"
-                checked={editorPrefs.openInPreview}
-                onChange={(event) => setEditorPrefs({ openInPreview: event.target.checked })}
-              />
-              Preview by default
-            </label>
-          </>
+            <span className={`editor-mode-label${!editing ? " on" : ""}`}>{previewName}</span>
+          </span>
         )}
-        {gotoOpen ? (
+        <span className="header-spacer" />
+        {gotoOpen && (
           <span className="editor-goto">
             <input
               autoFocus
               placeholder="line[:end]"
+              aria-label="Go to line"
               value={gotoVal}
               size={8}
               onChange={(e) => setGotoVal(e.target.value)}
@@ -433,7 +557,6 @@ export default function FilePane({ projectId, sessionId, resource: path, visible
                 if (e.key !== "Enter") return;
                 const m2 = /^(\d+)(?:[:-](\d+))?$/.exec(gotoVal.trim());
                 if (m2) {
-                  setPreviewOn(false);
                   gotoLine(Number(m2[1]), m2[2] ? Number(m2[2]) : undefined);
                   setGotoOpen(false);
                   setGotoVal("");
@@ -441,45 +564,70 @@ export default function FilePane({ projectId, sessionId, resource: path, visible
               }}
             />
           </span>
-        ) : (
-          <button className="small-btn" title={`Go to line (${MOD}G)`} onClick={() => setGotoOpen(true)}>Go to line</button>
         )}
-        <button className="small-btn" aria-pressed={wrap} onClick={() => setWrap((v) => !v)}>
-          {wrap ? "Wrap ✓" : "Wrap"}
+        {!readOnly && (editing || dirty) && (
+          <button className="small-btn" disabled={live?.kind === "saving" || !dirty} title={`Save (${MOD}S)`} onClick={() => void save()}>
+            Save
+          </button>
+        )}
+        <button
+          className="small-btn editor-more-btn"
+          aria-haspopup="menu"
+          aria-expanded={menu !== null}
+          aria-label={`Actions for ${doc.path}`}
+          title="File actions"
+          onClick={(e) => {
+            const r = e.currentTarget.getBoundingClientRect();
+            openMenu(r.right - MENU_W, r.bottom + 4);
+          }}
+        >
+          ⋯
         </button>
-        {!readOnly &&
-          (editing ? (
-            <>
-              <button className="small-btn" disabled={live?.kind === "saving" || !dirty} title={`${MOD}S`} onClick={() => void save()}>
-                Save
-              </button>
+      </div>
+      {menu && (
+        <div className="ctx-backdrop" onClick={() => setMenu(null)} onContextMenu={(e) => { e.preventDefault(); setMenu(null); }}>
+          <div
+            className="ctx-menu"
+            role="menu"
+            aria-label={`Actions for ${doc.path}`}
+            style={{ left: menu.x, top: menu.y }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <button role="menuitem" onClick={() => { setMenu(null); addFile(); }}>Add file to chat</button>
+            <button role="menuitem" onClick={() => { setMenu(null); addSelection(); }}>{`Add selection to chat (${MOD}L)`}</button>
+            <button role="menuitem" onClick={() => { setMenu(null); void copyText(doc.path); }}>Copy path</button>
+            <button role="menuitem" onClick={() => { setMenu(null); setGotoOpen(true); }}>{`Go to line… (${MOD}G)`}</button>
+            <button role="menuitemcheckbox" aria-checked={wrap} onClick={() => setWrap((v) => !v)}>
+              {wrap ? "Wrap lines ✓" : "Wrap lines"}
+            </button>
+            {!readOnly && dirty && (
               <button
-                className="small-btn"
+                role="menuitem"
                 onClick={() => {
-                  if (dirty && !window.confirm("Discard unsaved changes?")) return;
-                  setBuf(doc.content);
-                  td.editing = false;
-                  bumpDocs();
+                  setMenu(null);
+                  if (window.confirm("Discard unsaved changes?")) setBuf(doc.content);
                 }}
               >
-                Cancel
+                Discard changes…
               </button>
-            </>
-          ) : (
-            <button className="small-btn" onClick={() => { td.editing = true; bumpDocs(); }}>Edit</button>
-          ))}
-        <button className="small-btn" onClick={() => setRenameTo(doc.path)}>Rename</button>
-        {confirmDel ? (
-          <>
-            <button className="small-btn danger-btn" disabled={busy} onClick={() => void remove()}>
-              Delete permanently
-            </button>
-            <button className="small-btn" onClick={() => setConfirmDel(false)}>Cancel</button>
-          </>
-        ) : (
-          <button className="small-btn danger-btn" onClick={() => setConfirmDel(true)}>Delete</button>
-        )}
-      </div>
+            )}
+            <button role="menuitem" onClick={() => { setMenu(null); setRenameTo(doc.path); }}>Rename / move…</button>
+            <button role="menuitem" className="danger" onClick={() => { setMenu(null); setConfirmDel(true); }}>Delete…</button>
+          </div>
+        </div>
+      )}
+      {selHint && (
+        <button
+          className="editor-sel-hint"
+          style={{ left: selHint.x, top: selHint.y }}
+          aria-label={`Add selection to chat (${MOD}L)`}
+          title={`Add selection to chat (${MOD}L)`}
+          onPointerDown={(e) => e.preventDefault() /* keep the selection + focus */}
+          onClick={() => { addSelection(); setSelHint(null); }}
+        >
+          @
+        </button>
+      )}
       {renameTo !== null && (
         <div className="files-create editor-rename">
           <input
@@ -493,6 +641,15 @@ export default function FilePane({ projectId, sessionId, resource: path, visible
           />
           <button className="small-btn" disabled={busy} onClick={() => void rename()}>Rename</button>
           <button className="small-btn" onClick={() => setRenameTo(null)}>Cancel</button>
+        </div>
+      )}
+      {confirmDel && (
+        <div className="editor-banner editor-conflict" role="alert">
+          <span>Delete {doc.path}?</span>
+          <button className="small-btn danger-btn" disabled={busy} onClick={() => void remove()}>
+            Delete permanently
+          </button>
+          <button className="small-btn" onClick={() => setConfirmDel(false)}>Cancel</button>
         </div>
       )}
       {live && !live.noticeDismissed && (live.kind === "external-change" || live.kind === "conflict") && (
@@ -524,45 +681,64 @@ export default function FilePane({ projectId, sessionId, resource: path, visible
       {doc.tooLarge && <div className="editor-banner">Binary file detected. Read-only.</div>}
       {error && <div className="files-error editor-error">{error}</div>}
       {editing && !readOnly ? (
-        <div className="editor-edit">
+        <div
+          className="editor-edit"
+          onContextMenu={(e) => {
+            // The textarea keeps its native menu (paste, spell-check, …).
+            if (e.target === taRef.current) return;
+            e.preventDefault();
+            openMenu(e.clientX, e.clientY);
+          }}
+        >
           {!wrap && (
             <pre className="editor-gutter" ref={gutterRef} aria-hidden="true">
               {gutterText}
             </pre>
           )}
-          <textarea
-            ref={taRef}
-            className="editor-ta"
-            value={buf}
-            wrap={wrap ? "soft" : "off"}
-            spellCheck={false}
-            onChange={(e) => setBuf(e.target.value)}
-            onCompositionStart={() => { td.composing = true; bumpDocs(); }}
-            onCompositionEnd={() => { td.composing = false; bumpDocs(); }}
-            onScroll={() => {
-              if (gutterRef.current && taRef.current) gutterRef.current.scrollTop = taRef.current.scrollTop;
-            }}
-          />
-        </div>
-      ) : previewKind === "markdown" && previewOn ? (
-        <div className="editor-body editor-md-preview" ref={bodyRef}>
-          <div className="editor-md-content">
-            <MarkdownDoc text={doc.content} keyBase={`md-${doc.path}`} />
+          <div className="editor-edit-surface">
+            {editHl !== null && (
+              <pre
+                className={`editor-hl-backdrop${wrap ? " wrap" : ""}`}
+                ref={hlRef}
+                aria-hidden="true"
+                dangerouslySetInnerHTML={{ __html: `${editHl}\n ` }}
+              />
+            )}
+            <textarea
+              ref={taRef}
+              className={`editor-ta${editHl !== null ? " editor-ta-hl" : ""}`}
+              value={buf}
+              wrap={wrap ? "soft" : "off"}
+              spellCheck={false}
+              aria-label={`Edit ${doc.path}`}
+              onChange={(e) => setBuf(e.target.value)}
+              onCompositionStart={() => { td.composing = true; bumpDocs(); }}
+              onCompositionEnd={() => { td.composing = false; bumpDocs(); }}
+              onPointerUp={(e) => updateEditHint({ x: e.clientX + 10, y: e.clientY + 14 })}
+              onKeyUp={(e) => { if (e.shiftKey || selHint) updateEditHint(); }}
+              onScroll={syncEditScroll}
+            />
           </div>
         </div>
-      ) : previewKind === "html" && previewOn ? (
+      ) : previewKind === "markdown" && !editing ? (
+        <div className="editor-body editor-md-preview" ref={bodyRef}>
+          <div className="editor-md-content">
+            <MarkdownDoc text={buf} keyBase={`md-${doc.path}`} />
+          </div>
+        </div>
+      ) : previewKind === "html" && !editing ? (
         <div className="editor-body editor-html-preview" ref={bodyRef}>
           <iframe
             className="html-preview-frame"
             title={`Preview of ${doc.path}`}
             sandbox="allow-scripts"
-            srcDoc={htmlPreviewDocument(doc.content, `${window.location.origin}/`)}
+            srcDoc={htmlPreviewDocument(buf, `${window.location.origin}/`)}
           />
           <div className="html-preview-note muted">
             Sandboxed preview — scripts are isolated and network access is blocked.
           </div>
         </div>
-      ) : previewKind === "json" && previewOn ? (
+      ) : previewKind === "json" && !editing ? (
         <div className="editor-body editor-json-preview" ref={bodyRef}>
           {jsonValue !== undefined ? (
             <JsonTree value={jsonValue} defaultDepth={prefs.jsonTreeDepth} />
@@ -570,11 +746,15 @@ export default function FilePane({ projectId, sessionId, resource: path, visible
             <div className="editor-banner">Not valid JSON — showing source instead.</div>
           )}
           {jsonValue === undefined && (
-            <pre className="code-view editor-plain">{doc.content}</pre>
+            <pre className="code-view editor-plain">{buf}</pre>
           )}
         </div>
       ) : (
-        <div className="editor-body" ref={bodyRef}>
+        <div
+          className="editor-body"
+          ref={bodyRef}
+          onContextMenu={(e) => { e.preventDefault(); openMenu(e.clientX, e.clientY); }}
+        >
           {lines.length <= MAX_ROWED_LINES ? (
             <div className={`code-lines${wrap ? " wrap" : ""}`}>
               {lines.map((h, i) => (
