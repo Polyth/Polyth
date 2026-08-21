@@ -6,6 +6,7 @@ import type {
   AgentProfile, AgentRuntime, AttachmentRef, AutoAcceptSetting, ChildSnapshotResult, CreateSessionInput, DeliveryMode,
   Disposable, ForkDraft, ForkResult, JsonObject,
   QueueItemDto, RuntimeEvent,
+  SecretRequestData, SecretResolvedData, SecureSafeKind, SecureSafeService,
   RuntimeSession, SendResult, SessionEvent, SessionFolderDto, SessionForkedData, SessionOrganizePatch, SessionProjection, SessionRef,
   SessionService, SessionPersistence, UserTurnInput,
 } from "@polyth/contracts";
@@ -74,6 +75,9 @@ export function createSessionService(deps: {
   /** Global behavior instructions (WP9): revision+digest logged before a turn
    *  starts under a newly applied revision, keeping replay reproducible. */
   behavior?: { current(): Promise<{ revision: string; digest: string } | null> };
+  /** Server-only credential vault. Values enter through replySecret and never
+   *  enter session events, runtime question metadata, or public DTOs. */
+  secureSafe?: SecureSafeService;
   /** Bounded composer-shell executor backed by @polyth/terminal. */
   shell?: {
     run(
@@ -116,6 +120,36 @@ export function createSessionService(deps: {
   const turnReply = new Map<string, Map<string, string>>();
   const replyText = (sessionId: string): string =>
     [...(turnReply.get(sessionId)?.values() ?? [])].filter((t) => t.trim()).join("\n\n");
+
+  const secureSafeKind = (value: unknown): SecureSafeKind | undefined =>
+    value === "env" || value === "token" || value === "password" ? value : undefined;
+
+  const secureRequest = (requestId: string, question: JsonObject): SecretRequestData | null => {
+    const raw = question as Record<string, unknown>;
+    const metadata = raw.metadata && typeof raw.metadata === "object" && !Array.isArray(raw.metadata)
+      ? raw.metadata as Record<string, unknown>
+      : {};
+    const marked = metadata.secureSafe === true || raw.type === "secure_safe";
+    const handle = typeof raw.handle === "string"
+      ? raw.handle.trim()
+      : typeof metadata.handle === "string" ? metadata.handle.trim() : "";
+    const label = typeof raw.label === "string"
+      ? raw.label.trim()
+      : typeof metadata.label === "string" ? metadata.label.trim() : "";
+    if (!marked || !handle || !label) return null;
+    const purpose = typeof raw.purpose === "string"
+      ? raw.purpose.trim()
+      : typeof metadata.purpose === "string" ? metadata.purpose.trim() : "";
+    const requestedKind = secureSafeKind(raw.kind) ?? secureSafeKind(metadata.kind);
+    return {
+      requestId,
+      handle,
+      label,
+      ...(purpose ? { purpose } : {}),
+      ...(requestedKind ? { kind: requestedKind } : {}),
+      existing: deps.secureSafe?.hasHandle(handle) ?? false,
+    };
+  };
 
   // UX-MSG-ACTIONS: one per-canonical-session promise chain. Runtime callbacks
   // are applied in arrival order (never as unobserved parallel calls) and
@@ -244,8 +278,41 @@ export function createSessionService(deps: {
         break;
       }
       case "question/asked": {
+        const request = ev.questions
+          .map((question) => secureRequest(ev.requestId, question))
+          .find((candidate): candidate is SecretRequestData => candidate !== null);
+        if (request) {
+          await appendAndBroadcast(
+            sessionId,
+            "secret/requested",
+            request as unknown as JsonObject,
+            { ignorable: true },
+          );
+          await updateProjection(sessionId, { status: "waiting" });
+          deps.notify?.attention(sessionId, "question");
+          break;
+        }
         const { type: _t, ...qData } = ev;
         await appendAndBroadcast(sessionId, "question/asked", qData as unknown as JsonObject, { ignorable: true });
+        await updateProjection(sessionId, { status: "waiting" });
+        deps.notify?.attention(sessionId, "question");
+        break;
+      }
+      case "secret/requested": {
+        const request: SecretRequestData = {
+          requestId: ev.requestId,
+          handle: ev.handle,
+          label: ev.label,
+          ...(ev.purpose ? { purpose: ev.purpose } : {}),
+          ...(ev.kind ? { kind: ev.kind } : {}),
+          existing: deps.secureSafe?.hasHandle(ev.handle) ?? ev.existing ?? false,
+        };
+        await appendAndBroadcast(
+          sessionId,
+          "secret/requested",
+          request as unknown as JsonObject,
+          { ignorable: true },
+        );
         await updateProjection(sessionId, { status: "waiting" });
         deps.notify?.attention(sessionId, "question");
         break;
@@ -329,10 +396,11 @@ export function createSessionService(deps: {
   const turnActive = (sessionId: string): boolean =>
     lastTurnId.has(sessionId) || admitting.has(sessionId);
 
-  /** Unresolved question/permission requests derived from durable events. */
+  /** Unresolved question/permission/secret requests derived from durable events. */
   const openRequestCount = (events: SessionEvent[]): number => {
     const questions = new Set<string>();
     const perms = new Set<string>();
+    const secrets = new Set<string>();
     for (const e of events) {
       const rid = (e.data as { requestId?: string }).requestId;
       if (!rid) continue;
@@ -340,8 +408,10 @@ export function createSessionService(deps: {
       else if (e.type === "question/answered") questions.delete(rid);
       else if (e.type === "permission/requested") perms.add(rid);
       else if (e.type === "permission/resolved") perms.delete(rid);
+      else if (e.type === "secret/requested") secrets.add(rid);
+      else if (e.type === "secret/resolved") secrets.delete(rid);
     }
-    return questions.size + perms.size;
+    return questions.size + perms.size + secrets.size;
   };
 
   /** Truthful Revert/Fork eligibility, evaluated fresh under the session lock.
@@ -438,11 +508,13 @@ export function createSessionService(deps: {
     const evs = await store.events(sessionId);
     const resolvedPerms = new Set<string>();
     const answeredQs = new Set<string>();
+    const resolvedSecrets = new Set<string>();
     for (const e of evs) {
       const rid = (e.data as { requestId?: string }).requestId;
       if (!rid) continue;
       if (e.type === "permission/resolved") resolvedPerms.add(rid);
       if (e.type === "question/answered") answeredQs.add(rid);
+      if (e.type === "secret/resolved") resolvedSecrets.add(rid);
     }
     for (const e of evs) {
       const rid = (e.data as { requestId?: string }).requestId;
@@ -456,6 +528,18 @@ export function createSessionService(deps: {
         answeredQs.add(rid);
         await appendAndBroadcast(sessionId, "question/answered", { requestId: rid, rejected: true }, { ignorable: true });
         await rt.replyQuestion(sessionId, rid, { action: "reject" }).catch(() => {});
+      }
+      if (e.type === "secret/requested" && !resolvedSecrets.has(rid)) {
+        resolvedSecrets.add(rid);
+        const handle = (e.data as { handle?: string }).handle;
+        const result: SecretResolvedData = {
+          requestId: rid,
+          action: "dismissed",
+          ...(handle ? { handle } : {}),
+        };
+        await appendAndBroadcast(sessionId, "secret/resolved", result as unknown as JsonObject, { ignorable: true });
+        if (rt.replySecret) await rt.replySecret(sessionId, rid, result).catch(() => {});
+        else await rt.replyQuestion(sessionId, rid, { action: "reject" }).catch(() => {});
       }
     }
   };
@@ -1315,6 +1399,54 @@ export function createSessionService(deps: {
       if (proj?.status === "waiting") await updateProjection(sessionId, { status: "working" });
     },
 
+    async replySecret(sessionId, requestId, reply) {
+      await withSessionLock(sessionId, async () => {
+        const priorEvents = await store.events(sessionId);
+        const requested = priorEvents.find(
+          (event) => event.type === "secret/requested"
+            && (event.data as { requestId?: string }).requestId === requestId,
+        );
+        if (!requested) throw Object.assign(new Error("secret request not found"), { code: "not-found" });
+        if (priorEvents.some(
+          (event) => event.type === "secret/resolved"
+            && (event.data as { requestId?: string }).requestId === requestId,
+        )) {
+          throw Object.assign(new Error("secret request already resolved"), { code: "conflict" });
+        }
+
+        const data = requested.data as unknown as SecretRequestData;
+        let result: SecretResolvedData;
+        if (reply.action === "save") {
+          if (!deps.secureSafe) throw Object.assign(new Error("Secure Safe unavailable"), { code: "unsupported" });
+          if (typeof reply.value !== "string" || !reply.value.trim()) {
+            throw Object.assign(new Error("value is required"), { code: "invalid-input" });
+          }
+          const saved = await deps.secureSafe.upsertByHandle({
+            handle: data.handle,
+            label: data.label,
+            ...(data.purpose ? { purpose: data.purpose } : {}),
+            ...(data.kind ? { kind: data.kind } : {}),
+            value: reply.value,
+          });
+          result = { requestId, action: "saved", handle: saved.handle };
+        } else {
+          result = { requestId, action: "dismissed", handle: data.handle };
+        }
+
+        await appendAndBroadcast(
+          sessionId,
+          "secret/resolved",
+          result as unknown as JsonObject,
+          { ignorable: true },
+        );
+        const rt = sessionRuntime.get(sessionId);
+        if (rt?.replySecret) await rt.replySecret(sessionId, requestId, result);
+        else await rt?.replyQuestion(sessionId, requestId, { action: "reject" });
+        const proj = await store.projection(sessionId);
+        if (proj?.status === "waiting") await updateProjection(sessionId, { status: "working" });
+      });
+    },
+
     async autoAcceptGet(sessionId) {
       if (!deps.autoAccept) throw Object.assign(new Error("auto-accept unavailable"), { code: "unsupported" });
       const proj = await store.projection(sessionId);
@@ -1349,18 +1481,22 @@ export function createSessionService(deps: {
     const evs = await store.events(sessionId);
     const resolved = new Set<string>();
     const answeredQs = new Set<string>();
+    const resolvedSecrets = new Set<string>();
     for (const e of evs) {
       const rid = (e.data as { requestId?: string }).requestId;
       if (!rid) continue;
       if (e.type === "permission/resolved") resolved.add(rid);
       if (e.type === "question/answered") answeredQs.add(rid);
+      if (e.type === "secret/resolved") resolvedSecrets.add(rid);
     }
     let openQuestions = 0;
+    let openSecrets = 0;
     let resolvedAny = false;
     for (const e of evs) {
       const rid = (e.data as { requestId?: string }).requestId;
       if (!rid) continue;
       if (e.type === "question/asked" && !answeredQs.has(rid)) openQuestions++;
+      if (e.type === "secret/requested" && !resolvedSecrets.has(rid)) openSecrets++;
       if (e.type !== "permission/requested" || resolved.has(rid)) continue;
       if (e.producerPlugin === "composer-shell") continue;
       resolved.add(rid);
@@ -1369,7 +1505,7 @@ export function createSessionService(deps: {
       await sessionRuntime.get(sessionId)?.replyPermission(sessionId, rid, "once").catch(() => {});
     }
     // The turn resumes once its blocker is answered; questions keep it waiting.
-    if (resolvedAny && openQuestions === 0) {
+    if (resolvedAny && openQuestions === 0 && openSecrets === 0) {
       const proj = await store.projection(sessionId);
       if (proj?.status === "waiting") await updateProjection(sessionId, { status: "working" });
     }

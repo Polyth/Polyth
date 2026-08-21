@@ -56,11 +56,13 @@ import { pushRoutes } from "./routes/push.ts";
 import { autoAcceptRoutes } from "./routes/autoAccept.ts";
 import { createBehaviorService } from "./behavior.ts";
 import { createMcpConfigService, mcpEntriesFromBackendConfig } from "./mcp.ts";
+import { createSecureSafeService, secureSafeBehaviorSection } from "./secureSafe.ts";
 import { createModelVisibilityService } from "./modelVisibility.ts";
 import { createVoiceSettings } from "./voice.ts";
 import { voiceRoutes } from "./routes/voice.ts";
 import { buildNotePrompt, createAssistService, createAssistSettings, parseNoteReply, type AssistService } from "./assist.ts";
 import { assistRoutes } from "./routes/assist.ts";
+import { secureSafeRoutes } from "./routes/secureSafe.ts";
 import { createWalkthroughJobService } from "./walkthroughs.ts";
 import { createReviewFlowService, createReviewService } from "./review.ts";
 import { createMultirunRunOne } from "./multirunRunner.ts";
@@ -187,6 +189,10 @@ export async function boot(opts: BootOptions = {}) {
       abort: (sessionId) => inner.abort(sessionId),
       replyPermission: (sessionId, requestId, reply) => inner.replyPermission(sessionId, requestId, reply),
       replyQuestion: (sessionId, requestId, answers) => inner.replyQuestion(sessionId, requestId, answers),
+      ...(inner.replySecret
+        ? { replySecret: (sessionId: string, requestId: string, result: Parameters<NonNullable<AgentRuntime["replySecret"]>>[2]) =>
+            inner.replySecret!(sessionId, requestId, result) }
+        : {}),
       onEvent(cb) {
         listeners.add(cb);
         return { dispose: () => { listeners.delete(cb); } };
@@ -295,7 +301,30 @@ export async function boot(opts: BootOptions = {}) {
 
   // --- WP9: behavior instructions, MCP config, managed plugins (adapter-applied)
   const configApplier = createConfigApplier();
-  const behavior = createBehaviorService({ file: `${dataDir}/behavior.md`, applier: configApplier });
+  let refreshSafeBehavior: () => Promise<void> = async () => {};
+  const secureSafe = createSecureSafeService({
+    dataDir,
+    onChanged: () => refreshSafeBehavior(),
+  });
+  const decorateBehavior = (text: string): string => {
+    const base = text.trimEnd();
+    const section = secureSafeBehaviorSection(`${dataDir}/forbidden-config.json`, secureSafe.manifest());
+    return `${base}${base ? "\n\n" : ""}${section}\n`;
+  };
+  const behavior = createBehaviorService({
+    file: `${dataDir}/behavior.md`,
+    applier: configApplier,
+    decorate: decorateBehavior,
+  });
+  refreshSafeBehavior = async () => {
+    try {
+      await configApplier.applyBehavior(decorateBehavior((await behavior.get()).text));
+    } catch (err) {
+      console.warn("[polyth] Secure Safe behavior refresh skipped", err);
+    }
+  };
+  await secureSafe.syncForbiddenConfig();
+  await refreshSafeBehavior();
   const mcp = createMcpConfigService({ file: `${dataDir}/mcp.json`, applier: configApplier });
   const pluginRegistry = createPluginRegistry({
     dir: `${dataDir}/plugins`,
@@ -330,7 +359,7 @@ export async function boot(opts: BootOptions = {}) {
   });
 
   const sessions = createSessionService({
-    store, projects, permissions, runtimes, broadcast, queue: store, org: store, profiles: store, behavior,
+    store, projects, permissions, runtimes, broadcast, queue: store, org: store, profiles: store, behavior, secureSafe,
     worktrees: git.worktrees,
     shell: terminals,
     // F18: server-owned per-session auto-accept policy (nearest-parent
@@ -730,6 +759,7 @@ export async function boot(opts: BootOptions = {}) {
       listAgents: () => aggregateRuntimes({ projects, runtimes }, (rt) => rt.agents(), (a) => a.name),
     }),
     browseRoutes(),
+    secureSafeRoutes(secureSafe),
     settingsRoutes({
       behavior, mcp, plugins: pluginRegistry,
       backendConfig: () => configApplier.readConfig(),
@@ -744,7 +774,7 @@ export async function boot(opts: BootOptions = {}) {
     }),
   ];
 
-  const allCapabilities = () => ["polyth.sessions", "polyth.sessionPersistence", "polyth.projects", "polyth.agentRuntime", "polyth.goals", "polyth.files", "polyth.commands", "polyth.git", "polyth.worktrees", "polyth.terminal", "polyth.preview", "polyth.multirun", "polyth.fusion", "polyth.walkthrough", "polyth.schedule", "polyth.github", "polyth.control", "polyth.agentProfiles", "polyth.settings", "polyth.mcp", "polyth.plugins", "polyth.knowledge", "polyth.review", "polyth.usage", "polyth.browser", "polyth.voice", "polyth.assist"];
+  const allCapabilities = () => ["polyth.sessions", "polyth.sessionPersistence", "polyth.projects", "polyth.agentRuntime", "polyth.goals", "polyth.files", "polyth.commands", "polyth.git", "polyth.worktrees", "polyth.terminal", "polyth.preview", "polyth.multirun", "polyth.fusion", "polyth.walkthrough", "polyth.schedule", "polyth.github", "polyth.control", "polyth.agentProfiles", "polyth.settings", "polyth.mcp", "polyth.plugins", "polyth.knowledge", "polyth.review", "polyth.usage", "polyth.browser", "polyth.voice", "polyth.assist", "polyth.secureSafe"];
 
   const server = createHttpServer({
     sessions, projects, runtimes, routes, visibility, auth,
