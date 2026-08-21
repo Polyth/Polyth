@@ -40,9 +40,15 @@ import {
 import { normalizeScheduleList } from "../src/scheduleData.ts";
 import { agentPickerDefaultLabel, modelPickerDefaultLabel } from "../src/composerDefaults.ts";
 import { extractChangedFiles, selectPendingChanges } from "../src/pendingChanges.ts";
+import { sessionSurfaceKind, type SurfaceModel } from "../src/sessionSurface.ts";
 import { mergeThinking } from "../src/utils.ts";
 import {
+  JUMP_TO_LATEST_NAME,
+  OPEN_TIMELINE_NAME,
+  PROMPT_NAV_NAME,
+  assistantArticleName,
   assistantTime,
+  boundedPromptPreview,
   copyActionName,
   copyAnnouncement,
   copyJson,
@@ -54,6 +60,7 @@ import {
   guardsFromModel,
   mutationErrorMessage,
   normalizedDuration,
+  promptJumpName,
   reasoningToggleName,
   revertActionName,
   revertAvailability,
@@ -63,6 +70,7 @@ import {
   timeShort,
   turnDurationMs,
   turnFooterLine,
+  userArticleName,
 } from "../src/messageActions.ts";
 
 let seqCounter = 0;
@@ -1166,6 +1174,72 @@ test("purpose-and-target names and one announcement per copy outcome", () => {
   // Semantic time attributes: valid ISO dateTime, locale-formatted visuals.
   assert.equal(timeIso(0), "1970-01-01T00:00:00.000Z");
   assert.equal(typeof timeShort(1_700_000_000_000), "string");
+});
+
+test("timeline layout names: purpose-and-target labels for nav, jump, and turn containers", () => {
+  // Fixed control names (UX-TIMELINE-LAYOUT-01 §2.3/§2.4).
+  assert.equal(JUMP_TO_LATEST_NAME, "Jump to latest");
+  assert.equal(OPEN_TIMELINE_NAME, "Open session timeline");
+  assert.equal(PROMPT_NAV_NAME, "Prompts in this session");
+
+  // Bounded previews: first non-empty line, truncated, honest about emptiness.
+  assert.equal(boundedPromptPreview("Fix the flaky test\nplease"), "Fix the flaky test");
+  assert.equal(boundedPromptPreview("\n\n  second line only  \n"), "second line only");
+  assert.equal(boundedPromptPreview(""), "(empty prompt)");
+  assert.equal(boundedPromptPreview("   \n \t "), "(empty prompt)");
+  const long = "x".repeat(200);
+  const bounded = boundedPromptPreview(long);
+  assert.equal(bounded.length, 80);
+  assert.ok(bounded.endsWith("…"));
+  assert.equal(boundedPromptPreview(long, 10), `${"x".repeat(9)}…`);
+
+  // Ordered, window-aware prompt jump names carry position AND target.
+  assert.equal(
+    promptJumpName(0, 3, "Refactor the parser"),
+    "Jump to prompt 1 of 3: Refactor the parser",
+  );
+  assert.equal(promptJumpName(2, 3, ""), "Jump to prompt 3 of 3: (empty prompt)");
+
+  // Turn container names: role via the accessible name, streaming is honest.
+  assert.match(userArticleName(1_700_000_000_000), /^User message sent .+\d/);
+  assert.match(assistantArticleName(true, 1_700_000_000_000), /^Assistant answer completed .+\d/);
+  assert.equal(assistantArticleName(false, 1_700_000_000_000), "Assistant answer streaming");
+});
+
+test("session surface: unresolved replay is loading, never the fresh-session hero", () => {
+  // UX-TIMELINE-LAYOUT-01 §8 initial replay (verifier finding 3): while a
+  // canonical event load is in flight, an otherwise-fresh surface presents
+  // as loading; a populated surface stays visible during a session switch.
+  const fresh: SurfaceModel = { messages: [], permissions: [], questions: [] };
+  const populated = {
+    messages: [{ kind: "user" }],
+    permissions: [],
+    questions: [],
+  } as unknown as SurfaceModel;
+  const idle = { status: "idle" } as const;
+
+  // Genuinely fresh states keep the hero.
+  assert.equal(sessionSurfaceKind(null, null, fresh, null), "hero");
+  assert.equal(sessionSurfaceKind("s1", null, fresh, idle), "hero");
+
+  // Any in-flight open turns a would-be hero into the loading row — the boot
+  // deep-link case has no active session yet, the reload case reopens its own.
+  assert.equal(sessionSurfaceKind(null, "s1", fresh, null), "loading");
+  assert.equal(sessionSurfaceKind("s1", "s1", fresh, idle), "loading");
+
+  // Real content always wins: a visible session stays visible while another
+  // one loads, and once messages exist the loading claim is irrelevant.
+  assert.equal(sessionSurfaceKind("s1", "s2", populated, idle), "session");
+  assert.equal(sessionSurfaceKind("s1", null, populated, idle), "session");
+
+  // Archived and pending-request sessions never regress to hero or loading.
+  assert.equal(sessionSurfaceKind("s1", null, fresh, { status: "archived" }), "session");
+  const pendingQuestion = {
+    messages: [],
+    permissions: [],
+    questions: [{ status: "pending" }],
+  } as unknown as SurfaceModel;
+  assert.equal(sessionSurfaceKind("s1", "s1", pendingQuestion, idle), "session");
 });
 
 test("truthful guards explain exactly why revert/fork are unavailable", () => {

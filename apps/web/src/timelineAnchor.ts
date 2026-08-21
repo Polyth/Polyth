@@ -5,11 +5,18 @@
 // for direct reload and session switches, where it is reapplied after event
 // replay and window growth. Presentation state: appends no SessionEvent.
 // sessionStorage scopes it to the tab so parallel tabs don't fight.
+//
+// UX-TIMELINE-LAYOUT-01: capture and restore are relative to the USABLE
+// content edge, not the raw scrollport top. Reserved utility chrome lives
+// outside the scroll root, so the inset is normally zero — but the helper
+// owns that invariant: if future in-scrollport sticky/overlay chrome appears,
+// the anchor row is the first row visible BELOW it, and restoration realigns
+// to the same usable edge instead of silently parking a row behind chrome.
 
 export interface TimelineAnchor {
   /** data-msg-id of the topmost visible prompt; null when none applies. */
   id: string | null;
-  /** Anchor row top relative to the scroller top, in px. */
+  /** Anchor row top relative to the scroller's usable content edge, in px. */
   offset: number;
   atBottom: boolean;
 }
@@ -47,16 +54,54 @@ export function saveTimelineAnchor(sessionId: string, anchor: TimelineAnchor): v
   }
 }
 
-/** Topmost visible anchored row: first [data-msg-id] whose bottom edge is at
- *  or below the scroller's top edge (document order = timeline order). */
-export function captureTimelineAnchor(el: HTMLElement, atBottom: boolean): TimelineAnchor {
-  if (atBottom) return { id: null, offset: 0, atBottom: true };
+/** Height of any sticky/fixed/absolute chrome painting over the scroller's
+ *  top band. The reserved utility layout keeps chrome out of the scrollport,
+ *  so this is normally 0 — measuring it anyway means a future in-scrollport
+ *  bar cannot silently occlude the captured or restored anchor row. */
+export function usableTopInset(el: HTMLElement): number {
   const top = el.getBoundingClientRect().top;
+  let inset = 0;
+  for (const child of el.children) {
+    const pos = getComputedStyle(child).position;
+    if (pos !== "sticky" && pos !== "fixed" && pos !== "absolute") continue;
+    const r = child.getBoundingClientRect();
+    if (r.width <= 0 || r.height <= 0) continue;
+    if (r.top <= top + 1 && r.bottom > top) inset = Math.max(inset, r.bottom - top);
+  }
+  return inset;
+}
+
+/** The usable content edge: scroller top plus any top-chrome inset. */
+export function usableTopEdge(el: HTMLElement, inset: number = usableTopInset(el)): number {
+  return el.getBoundingClientRect().top + inset;
+}
+
+/** Topmost USABLE-visible anchored row: first [data-msg-id] whose bottom edge
+ *  is at or below the usable content edge (document order = timeline order).
+ *  A row entirely behind top chrome is occluded, so it is never the anchor. */
+export function captureTimelineAnchor(
+  el: HTMLElement,
+  atBottom: boolean,
+  inset: number = usableTopInset(el),
+): TimelineAnchor {
+  if (atBottom) return { id: null, offset: 0, atBottom: true };
+  const edge = usableTopEdge(el, inset);
   for (const node of el.querySelectorAll<HTMLElement>("[data-msg-id]")) {
     const r = node.getBoundingClientRect();
-    if (r.bottom >= top) {
-      return { id: node.dataset.msgId ?? null, offset: r.top - top, atBottom: false };
+    if (r.bottom >= edge) {
+      return { id: node.dataset.msgId ?? null, offset: r.top - edge, atBottom: false };
     }
   }
   return { id: null, offset: 0, atBottom: false };
+}
+
+/** scrollTop delta that realigns `row` to the anchor's remembered offset from
+ *  the usable content edge. */
+export function restoreScrollDelta(
+  el: HTMLElement,
+  row: Element,
+  anchor: TimelineAnchor,
+  inset: number = usableTopInset(el),
+): number {
+  return row.getBoundingClientRect().top - usableTopEdge(el, inset) - anchor.offset;
 }

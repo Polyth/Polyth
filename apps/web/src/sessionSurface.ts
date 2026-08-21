@@ -33,6 +33,24 @@ export function showSessionHero(
   return model.messages.length === 0 && pending.questions === 0 && pending.permissions === 0;
 }
 
+export type SessionSurfaceKind = "loading" | "hero" | "session";
+
+/** Chooses among the loading row, the fresh-session hero, and the session
+ *  timeline. While a canonical event load is in flight (openingSessionId is
+ *  claimed), an otherwise-fresh surface presents as loading — never as the
+ *  fresh-session hero — so a delayed replay cannot flash a false empty state
+ *  over a populated session (UX-TIMELINE-LAYOUT-01 §8, initial replay). A
+ *  visible session with content stays visible during a switch, as before. */
+export function sessionSurfaceKind(
+  sessionId: string | null,
+  openingSessionId: string | null,
+  model: SurfaceModel,
+  session: Pick<SessionProjection, "status"> | null,
+): SessionSurfaceKind {
+  if (!showSessionHero(sessionId, model, session)) return "session";
+  return openingSessionId !== null ? "loading" : "hero";
+}
+
 /** Archived sessions block composition behind an explicit restore action. */
 export function composerBlockedByArchive(
   session: Pick<SessionProjection, "status"> | null,
