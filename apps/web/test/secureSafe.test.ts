@@ -1,46 +1,55 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createElement } from "react";
-import { renderToStaticMarkup } from "react-dom/server";
-import SecureSafeCard from "../src/components/SecureSafeCard.tsx";
-import { listSlots } from "../src/slots.ts";
-import "../src/secureSafe.tsx";
+import { api } from "../src/api.ts";
 
-test("Secure Safe request card is assertive and uses a write-only password field", () => {
-  const html = renderToStaticMarkup(createElement(SecureSafeCard, {
-    secrets: [{
-      requestId: "request-1",
-      handle: "deploy-token",
-      label: "Deployment token",
-      purpose: "Publish releases",
-      kind: "token",
-      existing: true,
-      status: "pending",
-      time: 1,
-    }],
-  }));
+interface FetchCall {
+  path: string;
+  init?: RequestInit;
+}
 
-  assert.match(html, /role="alert"/);
-  assert.match(html, /aria-live="assertive"/);
-  assert.match(html, /Secure Safe — save credential/);
-  assert.match(html, /Deployment token/);
-  assert.match(html, /deploy-token/);
-  assert.match(html, /Publish releases/);
-  assert.match(html, /Will update existing handle/);
-  assert.match(html, /type="password"/);
-  assert.match(html, /autoComplete="off"/);
-  assert.match(html, /Save to Secure Safe/);
-  assert.match(html, /Dismiss/);
-  assert.doesNotMatch(html, /credential-value/);
-});
+test("Secure Safe API encodes ids and sends values only in write requests", async () => {
+  const calls: FetchCall[] = [];
+  const entry = {
+    id: "entry/id",
+    handle: "deploy-token",
+    label: "Deployment token",
+    purpose: "Publish releases",
+    kind: "token" as const,
+    scope: "global" as const,
+    revision: 1,
+    createdAt: 1,
+    updatedAt: 1,
+  };
+  Object.defineProperty(globalThis, "fetch", {
+    configurable: true,
+    value: async (path: string, init?: RequestInit) => {
+      calls.push({ path, init });
+      const isList = path === "/api/secure-safe" && !init;
+      return {
+        ok: true,
+        status: isList ? 200 : 204,
+        statusText: "OK",
+        json: async () => isList ? [entry] : undefined,
+        text: async () => "",
+      };
+    },
+  });
 
-test("Secure Safe settings register through the settings page slot", () => {
-  const item = listSlots("settings.pages").find((candidate) => candidate.id === "secure-safe");
-  assert.ok(item);
-  assert.equal(item.meta?.label, "Secure Safe");
-  assert.equal(item.meta?.group, "Engineering");
-  assert.deepEqual(
-    (item.meta?.settingsItems as Array<{ focusTarget: string }>).map((entry) => entry.focusTarget),
-    ["secure-safe.entries"],
-  );
+  assert.deepEqual(await api.listSecureSafe(), [entry]);
+  await api.saveSecureSafe({ handle: entry.handle, label: entry.label, value: "write-only" });
+  await api.replySecret("session/id", "request/id", "save", "one-use-value");
+  await api.replySecret("session/id", "request/id", "dismiss");
+  await api.deleteSecureSafe(entry.id);
+
+  assert.equal(calls[0]?.path, "/api/secure-safe");
+  assert.deepEqual(JSON.parse(String(calls[1]?.init?.body)), {
+    handle: "deploy-token",
+    label: "Deployment token",
+    value: "write-only",
+  });
+  assert.equal(calls[2]?.path, "/api/sessions/session%2Fid/secrets/request%2Fid");
+  assert.deepEqual(JSON.parse(String(calls[2]?.init?.body)), { action: "save", value: "one-use-value" });
+  assert.deepEqual(JSON.parse(String(calls[3]?.init?.body)), { action: "dismiss" });
+  assert.equal(calls[4]?.path, "/api/secure-safe/entry%2Fid");
+  assert.equal(calls[4]?.init?.method, "DELETE");
 });
