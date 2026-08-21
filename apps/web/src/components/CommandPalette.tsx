@@ -7,6 +7,7 @@ import { activateProject, openEditorFile, setOverlay, setUiError, useStore } fro
 import { openSession } from "../init.ts";
 import { pluginOn } from "../prefs.ts";
 import { announce } from "./a11y/live.tsx";
+import Dialog from "./a11y/Dialog.tsx";
 
 type Entry =
   | { kind: "cmd"; id: string; cmd: PaletteCommand }
@@ -24,7 +25,6 @@ export default function CommandPalette() {
   const [i, setI] = useState(0);
   const [files, setFiles] = useState<FileSearchHitDto[]>([]);
   const [workspaces, setWorkspaces] = useState<WorkspaceSearchItemDto[]>([]);
-  const input = useRef<HTMLInputElement>(null);
   const seq = useRef(0);
   const projectId = useStore((s) => s.activeProjectId);
   const mode = useStore((s) => s.paletteMode);
@@ -35,7 +35,6 @@ export default function CommandPalette() {
     () => (filesMode ? [] : filterPalette(listCommands(), text)),
     [filesMode, text],
   );
-  useEffect(() => { input.current?.focus(); }, []);
   useEffect(() => { setI(0); }, [q]);
 
   // Debounced remote searches; stale responses are dropped by sequence.
@@ -96,7 +95,6 @@ export default function CommandPalette() {
     if (e.key === "ArrowDown") { e.preventDefault(); setI((n) => (n + 1) % Math.max(entries.length, 1)); }
     else if (e.key === "ArrowUp") { e.preventDefault(); setI((n) => (n - 1 + entries.length) % Math.max(entries.length, 1)); }
     else if (e.key === "Enter" && entries[i]) { e.preventDefault(); run(entries[i]!); }
-    else if (e.key === "Escape") setOverlay(null);
   };
 
   const groupOf = (entry: Entry): string => {
@@ -112,43 +110,41 @@ export default function CommandPalette() {
   const baseOf = (p: string): string => p.slice(p.lastIndexOf("/") + 1);
 
   return (
-    <div className="scrim palette-overlay" onMouseDown={(e) => { if (e.target === e.currentTarget) setOverlay(null); }}>
-      <div
-        className="palette"
-        onMouseDown={(e) => e.stopPropagation()}
-        role="dialog"
-        aria-modal="true"
-        aria-label="Command palette"
-        aria-describedby="palette-close-hint"
-      >
-        <input
-          ref={input}
-          className="palette-input"
-          value={q}
-          role="combobox"
-          aria-expanded={entries.length > 0}
-          aria-controls="palette-listbox"
-          aria-activedescendant={entries[i] ? `palette-opt-${i}` : undefined}
-          aria-autocomplete="list"
-          placeholder={filesMode ? "Search files…" : "Search commands, projects, sessions, files… (is:archived)"}
-          onChange={(e) => setQ(e.target.value)}
-          onKeyDown={onKey}
-        />
-        <div className="palette-list" role="listbox" id="palette-listbox" aria-label="Palette results">
-          {entries.length === 0 && <div className="palette-empty">No matches</div>}
-          {entries.map((entry, n) => (
-            <Fragment key={entry.id}>
-              {groupOf(entry) && (n === 0 || groupOf(entries[n - 1]!) !== groupOf(entry)) && (
-                <div className="palette-group" role="presentation">{groupOf(entry)}</div>
-              )}
-              <button
-                className={`palette-item ${n === i ? "active" : ""} ${entry.kind === "workspace" ? `palette-${entry.item.kind}` : ""}`}
-                role="option"
-                id={`palette-opt-${n}`}
-                aria-selected={n === i}
-                ref={n === i ? (el) => el?.scrollIntoView({ block: "nearest" }) : null}
-                onClick={() => run(entry)}
-              >
+    <Dialog
+      title="Command palette"
+      onClose={() => setOverlay(null)}
+      className="palette"
+      backdropClassName="palette-overlay"
+      initialFocus=".palette-input"
+      ariaDescribedBy="palette-close-hint"
+    >
+      <input
+        className="palette-input"
+        value={q}
+        role="combobox"
+        aria-expanded={entries.length > 0}
+        aria-controls="palette-listbox"
+        aria-activedescendant={entries[i] ? `palette-opt-${i}` : undefined}
+        aria-autocomplete="list"
+        placeholder={filesMode ? "Search files…" : "Search commands, projects, sessions, files… (is:archived)"}
+        onChange={(e) => setQ(e.target.value)}
+        onKeyDown={onKey}
+      />
+      <div className="palette-list" role="listbox" id="palette-listbox" aria-label="Palette results">
+        {entries.length === 0 && <div className="palette-empty">No matches</div>}
+        {entries.map((entry, n) => (
+          <Fragment key={entry.id}>
+            {groupOf(entry) && (n === 0 || groupOf(entries[n - 1]!) !== groupOf(entry)) && (
+              <div className="palette-group" role="presentation">{groupOf(entry)}</div>
+            )}
+            <button
+              className={`palette-item ${n === i ? "active" : ""} ${entry.kind === "workspace" ? `palette-${entry.item.kind}` : ""}`}
+              role="option"
+              id={`palette-opt-${n}`}
+              aria-selected={n === i}
+              ref={n === i ? (el) => el?.scrollIntoView({ block: "nearest" }) : null}
+              onClick={() => run(entry)}
+            >
                 {entry.kind === "cmd" && (
                   <>
                     {entry.cmd.checked && (
@@ -184,12 +180,11 @@ export default function CommandPalette() {
                     <span className="palette-meta">{entry.hit.kind === "dir" ? "folder" : "open in editor"}</span>
                   </>
                 )}
-              </button>
-            </Fragment>
-          ))}
-        </div>
-        <div className="palette-footer" id="palette-close-hint"><kbd>Esc</kbd> close</div>
+            </button>
+          </Fragment>
+        ))}
       </div>
-    </div>
+      <div className="palette-footer" id="palette-close-hint"><kbd>Esc</kbd> close</div>
+    </Dialog>
   );
 }

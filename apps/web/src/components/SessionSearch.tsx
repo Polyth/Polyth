@@ -6,6 +6,7 @@ import { api, type SessionSearchResult } from "../api.ts";
 import { openSession } from "../init.ts";
 import { ago, deriveSessionTitle } from "../format.ts";
 import { firstUserText } from "../utils.ts";
+import Dialog from "./a11y/Dialog.tsx";
 
 export default function SessionSearch() {
   const sessions = useStore((s) => s.sessions);
@@ -14,17 +15,45 @@ export default function SessionSearch() {
   const [q, setQ] = useState("");
   const [i, setI] = useState(0);
   const [remote, setRemote] = useState<SessionSearchResult[]>([]);
-  const input = useRef<HTMLInputElement>(null);
+  const [loading, setLoading] = useState(false);
+  const [searchFailed, setSearchFailed] = useState(false);
+  const [retry, setRetry] = useState(0);
+  const searchSequence = useRef(0);
 
   // Debounced server search: metadata/branch/labels/message text with snippets.
   useEffect(() => {
+    const sequence = ++searchSequence.current;
     const n = q.trim();
-    if (!n) { setRemote([]); return; }
+    setRemote([]);
+    setSearchFailed(false);
+    if (!n) {
+      setLoading(false);
+      return;
+    }
+
+    let active = true;
+    const controller = new AbortController();
+    setLoading(true);
     const t = setTimeout(() => {
-      void api.searchSessions(n, activeProjectId ?? undefined).then(setRemote);
+      void api.searchSessions(n, activeProjectId ?? undefined, 30, controller.signal)
+        .then((results) => {
+          if (active && searchSequence.current === sequence) setRemote(results);
+        })
+        .catch(() => {
+          if (active && !controller.signal.aborted && searchSequence.current === sequence) {
+            setSearchFailed(true);
+          }
+        })
+        .finally(() => {
+          if (active && searchSequence.current === sequence) setLoading(false);
+        });
     }, 160);
-    return () => clearTimeout(t);
-  }, [q, activeProjectId]);
+    return () => {
+      active = false;
+      clearTimeout(t);
+      controller.abort();
+    };
+  }, [q, activeProjectId, retry]);
 
   const items = useMemo(() => {
     const n = q.trim().toLowerCase();
@@ -38,7 +67,6 @@ export default function SessionSearch() {
     return [...local, ...extra].map((s) => ({ s, matches: snippets.get(s.id) ?? [] }));
   }, [sessions, q, remote]);
 
-  useEffect(() => { input.current?.focus(); }, []);
   useEffect(() => { setI(0); }, [q]);
 
   const pick = (id: string) => { setOverlay(null); void openSession(id); };
@@ -46,35 +74,45 @@ export default function SessionSearch() {
     if (e.key === "ArrowDown") { e.preventDefault(); setI((n) => (n + 1) % Math.max(items.length, 1)); }
     else if (e.key === "ArrowUp") { e.preventDefault(); setI((n) => (n - 1 + items.length) % Math.max(items.length, 1)); }
     else if (e.key === "Enter" && items[i]) { e.preventDefault(); pick(items[i]!.s.id); }
-    else if (e.key === "Escape") setOverlay(null);
   };
 
   return (
-    <div className="scrim palette-overlay" onMouseDown={(e) => { if (e.target === e.currentTarget) setOverlay(null); }}>
-      <div className="palette" onMouseDown={(e) => e.stopPropagation()} role="dialog" aria-label="Search sessions">
-        <input className="palette-input" ref={input} value={q} placeholder="Search title, branch, labels, messages" onChange={(e) => setQ(e.target.value)} onKeyDown={onKey} />
-        <div className="palette-list">
-          {items.length === 0 && <div className="palette-empty">No sessions</div>}
-          {items.map(({ s, matches }, n) => (
-            <button
-              key={s.id}
-              className={`palette-item ${n === i ? "active" : ""}`}
-              ref={n === i ? (el) => el?.scrollIntoView({ block: "nearest" }) : null}
-              onClick={() => pick(s.id)}
-            >
-              <span className={`dot ${s.status}`} />
-              <span className="palette-col">
-                <span className="palette-label">{deriveSessionTitle(s.title, firstUserText(events[s.id]))}</span>
-                {matches.filter((m) => m.field !== "title").slice(0, 2).map((m, k) => (
-                  <span key={k} className="palette-snippet"><em>{m.field}</em> {m.snippet}</span>
-                ))}
-              </span>
-              <span className="palette-meta">{ago(s.updatedAt)} · {s.status}</span>
-            </button>
-          ))}
-        </div>
-        <div className="palette-footer"><kbd>↑↓</kbd> navigate · <kbd>↵</kbd> open · <kbd>Esc</kbd> close</div>
+    <Dialog
+      title="Search sessions"
+      onClose={() => setOverlay(null)}
+      className="palette"
+      backdropClassName="palette-overlay"
+      initialFocus=".palette-input"
+    >
+      <input className="palette-input" value={q} placeholder="Search title, branch, labels, messages" onChange={(e) => setQ(e.target.value)} onKeyDown={onKey} />
+      <div className="palette-list">
+        {loading && <div className="palette-empty" role="status">Searching sessions…</div>}
+        {!loading && searchFailed && (
+          <div className="palette-empty" role="status">
+            Couldn’t search session contents.
+            <button className="small-btn palette-retry" onClick={() => setRetry((n) => n + 1)}>Retry</button>
+          </div>
+        )}
+        {!loading && !searchFailed && items.length === 0 && <div className="palette-empty">No sessions</div>}
+        {items.map(({ s, matches }, n) => (
+          <button
+            key={s.id}
+            className={`palette-item ${n === i ? "active" : ""}`}
+            ref={n === i ? (el) => el?.scrollIntoView({ block: "nearest" }) : null}
+            onClick={() => pick(s.id)}
+          >
+            <span className={`dot ${s.status}`} />
+            <span className="palette-col">
+              <span className="palette-label">{deriveSessionTitle(s.title, firstUserText(events[s.id]))}</span>
+              {matches.filter((m) => m.field !== "title").slice(0, 2).map((m, k) => (
+                <span key={k} className="palette-snippet"><em>{m.field}</em> {m.snippet}</span>
+              ))}
+            </span>
+            <span className="palette-meta">{ago(s.updatedAt)} · {s.status}</span>
+          </button>
+        ))}
       </div>
-    </div>
+      <div className="palette-footer"><kbd>↑↓</kbd> navigate · <kbd>↵</kbd> open · <kbd>Esc</kbd> close</div>
+    </Dialog>
   );
 }

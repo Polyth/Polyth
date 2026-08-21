@@ -1,5 +1,5 @@
 // Files panel for Context Rail: one-level lazy tree, search, read-only viewer.
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, type ReactNode } from "react";
 import { api, type FileEntry, type FileReadResult } from "../api.ts";
 import { getState, setUiError, useStore } from "../store.ts";
 import { attachProjectFile } from "../attachments.ts";
@@ -7,7 +7,21 @@ import FileRowActions from "./FileRowActions.tsx";
 
 const EMPTY_FILES: FileEntry[] = [];
 
-export default function FilesPanel() {
+function FilesRow({ children, onOpen, className = "", actions }: {
+  children: ReactNode;
+  onOpen: () => void;
+  className?: string;
+  actions?: ReactNode;
+}) {
+  return (
+    <div className={`files-row ${className}`}>
+      <button type="button" className="files-row-main" onClick={onOpen}>{children}</button>
+      {actions}
+    </div>
+  );
+}
+
+export default function FilesPanel({ active = true }: { active?: boolean }) {
   const activeProjectId = useStore((s) => s.activeProjectId);
   const [tree, setTree] = useState<FileEntry[]>(EMPTY_FILES);
   const [currentPath, setCurrentPath] = useState("");
@@ -44,7 +58,7 @@ export default function FilesPanel() {
 
   useEffect(() => { loadTree(""); }, [loadTree]);
   useEffect(() => {
-    if (!projectId) return;
+    if (!projectId || !active) return;
     const refreshCurrent = () => {
       if (document.visibilityState === "hidden") return;
       void api.filesTree(projectId, currentPath || undefined).then(setTree).catch(() => {});
@@ -58,7 +72,7 @@ export default function FilesPanel() {
       document.removeEventListener("visibilitychange", onVisibility);
       clearInterval(timer);
     };
-  }, [projectId, currentPath]);
+  }, [active, projectId, currentPath]);
 
   const onDirClick = (p: string) => {
     setSearchResults(null);
@@ -192,13 +206,13 @@ export default function FilesPanel() {
 
       {breadcrumbs.length > 0 && (
         <div className="files-breadcrumbs">
-          <span className="files-crumb" onClick={() => void loadTree("")}>/</span>
+          <button type="button" className="files-crumb" onClick={() => void loadTree("")}>/</button>
           {breadcrumbs.map((seg, i) => {
             const p = breadcrumbs.slice(0, i + 1).join("/");
             return (
               <span key={i}>
                 <span className="files-sep">/</span>
-                <span className="files-crumb" onClick={() => void loadTree(p)}>{seg}</span>
+                <button type="button" className="files-crumb" onClick={() => void loadTree(p)}>{seg}</button>
               </span>
             );
           })}
@@ -240,43 +254,45 @@ export default function FilesPanel() {
         <div className="files-list">
           {searchResults.length === 0 && <div className="empty">No matches.</div>}
           {searchResults.map((fp) => (
-            <div
+            <FilesRow
               key={fp}
-              className="files-row"
-              onClick={() => void onFileClick(fp)}
+              onOpen={() => void onFileClick(fp)}
+              actions={<FileRowActions projectId={projectId} path={fp} onOpen={() => void onFileClick(fp)} />}
             >
               <span className="files-file-icon file-glyph" aria-hidden>▤</span>
               <span className="files-file-name">{fp}</span>
-              <FileRowActions projectId={projectId} path={fp} onOpen={() => void onFileClick(fp)} />
-            </div>
+            </FilesRow>
           ))}
         </div>
       ) : (
         <div className="files-list">
           {currentPath && (
-            <div className="files-row files-up" onClick={() => {
+            <FilesRow className="files-up" onOpen={() => {
               const parts = currentPath.split("/");
               parts.pop();
               void loadTree(parts.join("/"));
             }}>
               <span className="files-file-icon">↩</span>
               <span className="files-file-name">..</span>
-            </div>
+            </FilesRow>
           )}
           {tree.length === 0 && <div className="empty">Empty directory.</div>}
           {tree.map((e) =>
             e.dir ? (
-              <div key={e.path} className="files-row files-dir" onClick={() => onDirClick(e.path)}>
+              <FilesRow key={e.path} className="files-dir" onOpen={() => onDirClick(e.path)}>
                 <span className="files-file-icon dir-glyph" aria-hidden>▸</span>
                 <span className="files-file-name">{e.name}</span>
-              </div>
+              </FilesRow>
             ) : (
-              <div key={e.path} className="files-row" onClick={() => void onFileClick(e.path)}>
+              <FilesRow
+                key={e.path}
+                onOpen={() => void onFileClick(e.path)}
+                actions={<FileRowActions projectId={projectId} path={e.path} onOpen={() => void onFileClick(e.path)} />}
+              >
                 <span className="files-file-icon file-glyph" aria-hidden>▤</span>
                 <span className="files-file-name">{e.name}</span>
                 {e.size !== undefined && <span className="files-size">{fmtSize(e.size)}</span>}
-                <FileRowActions projectId={projectId} path={e.path} onOpen={() => void onFileClick(e.path)} />
-              </div>
+              </FilesRow>
             ),
           )}
         </div>

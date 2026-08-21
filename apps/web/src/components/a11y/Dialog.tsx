@@ -10,12 +10,23 @@ export interface DialogProps {
   onClose: () => void;
   children: ReactNode;
   className?: string;
+  backdropClassName?: string;
   /** wide dialogs (focus editor, fullscreen diagram) */
   size?: "md" | "lg" | "full";
   initialFocus?: string; // CSS selector inside the dialog
+  ariaDescribedBy?: string;
 }
 
-export default function Dialog({ title, onClose, children, className, size = "md", initialFocus }: DialogProps) {
+export default function Dialog({
+  title,
+  onClose,
+  children,
+  className,
+  backdropClassName,
+  size = "md",
+  initialFocus,
+  ariaDescribedBy,
+}: DialogProps) {
   const panelRef = useRef<HTMLDivElement>(null);
   const restoreRef = useRef<HTMLElement | null>(null);
 
@@ -56,12 +67,16 @@ export default function Dialog({ title, onClose, children, className, size = "md
   };
 
   return (
-    <div className="dialog-backdrop" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+    <div
+      className={`dialog-backdrop${backdropClassName ? ` ${backdropClassName}` : ""}`}
+      onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}
+    >
       <div
         ref={panelRef}
         role="dialog"
         aria-modal="true"
         aria-label={title}
+        aria-describedby={ariaDescribedBy}
         tabIndex={-1}
         className={`dialog-panel dialog-${size}${className ? ` ${className}` : ""}`}
         onKeyDown={onKeyDown}

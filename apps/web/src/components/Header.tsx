@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useActiveModel, useStore, setActiveView, setUiError, type AppView } from "../store.ts";
+import { useActiveModel, useStore, setActiveView, setSidebarOpen, setUiError, type AppView } from "../store.ts";
 import { forkSession, exportSessionMarkdown } from "../init.ts";
 import { displaySessionTitle } from "../format.ts";
 import { friendlyError, shortcutLabel } from "../settings.ts";
@@ -128,15 +128,16 @@ function AutoAcceptChip({ sessionId, effective }: { sessionId: string; effective
       title={effective
         ? "Auto-accept is ON: permission requests in this session are approved automatically. Click to turn off."
         : "Auto-accept permission requests in this session"}
+      aria-label={effective ? "Turn off auto-accept" : "Turn on auto-accept"}
       aria-pressed={effective}
       disabled={busy}
       onClick={toggle}
     >
-      <svg width="12" height="12" viewBox="0 0 16 16" {...STROKE}>
+      <svg width="12" height="12" viewBox="0 0 16 16" aria-hidden="true" {...STROKE}>
         <path d="M8 1.8 13.5 4v4.2c0 3.2-2.3 5.3-5.5 6-3.2-.7-5.5-2.8-5.5-6V4z" />
         {effective && <path d="M5.4 8.2 7.2 10l3.4-3.6" />}
       </svg>
-      {effective ? "Auto-accept on" : "Auto-accept"}
+      <span className="auto-accept-label">{effective ? "Auto-accept on" : "Auto-accept"}</span>
     </button>
   );
 }
@@ -202,6 +203,7 @@ export default function Header() {
   const branch = useStore((s) => s.gitBranch);
   const models = useStore((s) => s.models);
   const view = useStore((s) => s.activeView);
+  const sidebarOpen = useStore((s) => s.sidebarOpen);
   const model = useActiveModel();
   const ctx = useMemo(() => {
     const ref = model.contextUsage?.model ?? model.turn?.model ?? session?.model;
@@ -226,6 +228,18 @@ export default function Header() {
   return (
     <>
       <header className="header">
+        <button
+          className="icon-btn mobile-menu-btn"
+          title="Open navigation"
+          aria-label="Open navigation"
+          aria-controls="polyth-sidebar"
+          aria-expanded={sidebarOpen}
+          onClick={() => setSidebarOpen(true)}
+        >
+          <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true" {...STROKE}>
+            <path d="M3 5h12M3 9h12M3 13h12" />
+          </svg>
+        </button>
         {ctx && <ContextRing gauge={ctx} />}
         <div className="header-session">
           <div className="header-title" title={title}>{title}</div>

@@ -7,7 +7,7 @@ import { fmtCost, fmtTokens } from "../format.ts";
 import { Icon } from "../icons.tsx";
 import type { SessionEvent } from "@polyth/contracts";
 import { contextGauge } from "../reduce.ts";
-import { registerSurface } from "../surfaces.ts";
+import { registerSurface, type RailSurfaceComponentProps } from "../surfaces.ts";
 import ChangesPanel from "./ChangesPanel.tsx";
 import FilesPanel from "./FilesPanel.tsx";
 import KnowledgePanel from "./KnowledgePanel.tsx";
@@ -102,7 +102,7 @@ function UsagePanel() {
   );
 }
 
-function EventsView() {
+function ActiveEventsView() {
   const events = useStore((s) => (s.activeSessionId ? s.events[s.activeSessionId] : undefined) ?? NO_EVENTS);
   if (events.length === 0) return <div className="empty">No events yet.</div>;
   return (
@@ -121,6 +121,10 @@ function EventsView() {
       ))}
     </div>
   );
+}
+
+function EventsView({ active }: RailSurfaceComponentProps) {
+  return active ? <ActiveEventsView /> : null;
 }
 
 registerSurface({ id: "files", title: "Files", plugin: "files", order: 10, icon: Icon.files, component: FilesPanel });

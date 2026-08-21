@@ -236,11 +236,49 @@ function strArr(d: JsonObject, k: string): string[] {
   return Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
 }
 
+// Lookup indexes (partId → assistant, callId → tool) so streaming reduction is
+// O(1) per event instead of a linear scan over all messages. Kept in a WeakMap
+// keyed by model so reduceEvent's signature and buildModel's replay purity are
+// unchanged: the index is built lazily from messages and maintained on push.
+interface MessageIndex {
+  assistants: Map<string, AssistantMsg>;
+  tools: Map<string, ToolMsg>;
+}
+
+const messageIndexes = new WeakMap<RenderModel, MessageIndex>();
+
+function messageIndex(m: RenderModel): MessageIndex {
+  let idx = messageIndexes.get(m);
+  if (!idx) {
+    idx = { assistants: new Map(), tools: new Map() };
+    // First occurrence wins, matching the previous `messages.find(...)` scans.
+    for (const msg of m.messages) {
+      if (msg.kind === "assistant") {
+        if (!idx.assistants.has(msg.partId)) idx.assistants.set(msg.partId, msg);
+      } else if (msg.kind === "tool") {
+        if (!idx.tools.has(msg.callId)) idx.tools.set(msg.callId, msg);
+      }
+    }
+    messageIndexes.set(m, idx);
+  }
+  return idx;
+}
+
 function findAssistant(m: RenderModel, partId: string): AssistantMsg | undefined {
-  return m.messages.find((x): x is AssistantMsg => x.kind === "assistant" && x.partId === partId);
+  return messageIndex(m).assistants.get(partId);
 }
 function findTool(m: RenderModel, callId: string): ToolMsg | undefined {
-  return m.messages.find((x): x is ToolMsg => x.kind === "tool" && x.callId === callId);
+  return messageIndex(m).tools.get(callId);
+}
+function pushAssistant(m: RenderModel, msg: AssistantMsg): void {
+  m.messages.push(msg);
+  const idx = messageIndex(m);
+  if (!idx.assistants.has(msg.partId)) idx.assistants.set(msg.partId, msg);
+}
+function pushTool(m: RenderModel, msg: ToolMsg): void {
+  m.messages.push(msg);
+  const idx = messageIndex(m);
+  if (!idx.tools.has(msg.callId)) idx.tools.set(msg.callId, msg);
 }
 
 export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
@@ -270,7 +308,7 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
       let m = findAssistant(model, partId);
       if (!m) {
         m = { kind: "assistant", id: partId, partId, eventSeq: ev.seq, text: "", reasoning: "", finalized: false, time: ev.time };
-        model.messages.push(m);
+        pushAssistant(model, m);
       }
       const text = str(d, "text") ?? "";
       if (ev.type === "assistant/chunk") m.text += text;
@@ -282,7 +320,7 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
       let m = findAssistant(model, partId);
       if (!m) {
         m = { kind: "assistant", id: partId, partId, eventSeq: ev.seq, text: "", reasoning: "", finalized: false, time: ev.time };
-        model.messages.push(m);
+        pushAssistant(model, m);
       }
       m.finalized = true;
       const text = str(d, "text");
@@ -297,7 +335,7 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
     }
     case "tool/call": {
       const callId = str(d, "callId") ?? "";
-      model.messages.push({
+      pushTool(model, {
         kind: "tool",
         id: callId,
         callId,
@@ -335,7 +373,7 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
         t.error = str(d, "error") ?? "";
         t.finishTime = ev.time;
       } else {
-        model.messages.push({
+        pushTool(model, {
           kind: "tool",
           id: callId,
           callId,
@@ -666,4 +704,70 @@ export function buildModel(events: readonly SessionEvent[]): RenderModel {
   const model = emptyModel();
   for (const ev of events) reduceEvent(model, ev);
   return model;
+}
+
+/** Copy a model so React reference checks observe the update: fresh top-level
+ *  object and fresh top-level arrays. Individual message/turn/goal objects are
+ *  shared — reduceEvent mutates those in place and nothing in the app keys
+ *  memoization off their identity (Timeline keys off `version`, Header off
+ *  `model`/`model.messages`). The lookup index carries over so the delta fold
+ *  doesn't rescan messages. */
+export function cloneModel(src: RenderModel): RenderModel {
+  const model: RenderModel = {
+    ...src,
+    messages: src.messages.slice(),
+    permissions: src.permissions.slice(),
+    questions: src.questions.slice(),
+    totals: { ...src.totals },
+    changedFiles: src.changedFiles.slice(),
+  };
+  const idx = messageIndexes.get(src);
+  if (idx) messageIndexes.set(model, { assistants: new Map(idx.assistants), tools: new Map(idx.tools) });
+  return model;
+}
+
+export interface ModelCache {
+  /** Render model for exactly this events array. When `events` extends the
+   *  last array seen for the session (the common live-append case), only the
+   *  new tail is folded via reduceEvent; otherwise a full buildModel replay
+   *  runs. The same array in → the same model out (stable references). */
+  get(sessionId: string, events: readonly SessionEvent[]): RenderModel;
+}
+
+interface ModelCacheEntry {
+  events: readonly SessionEvent[];
+  lastSeq: number;
+  model: RenderModel;
+}
+
+/** The store copies-on-append, so an unchanged prefix keeps the same event
+ *  objects; any insert at or before the boundary shifts it to a different
+ *  object and fails this identity check (→ full rebuild, which is rare:
+ *  only out-of-order gap-fill takes that path). */
+function extendsPrefix(prev: readonly SessionEvent[], next: readonly SessionEvent[]): boolean {
+  if (next.length < prev.length) return false;
+  if (prev.length === 0) return true;
+  return next[prev.length - 1] === prev[prev.length - 1];
+}
+
+/** Incremental render-model cache (one entry per session). buildModel stays
+ *  the pure reference implementation; equivalence is covered by tests. */
+export function createModelCache(): ModelCache {
+  const bySession = new Map<string, ModelCacheEntry>();
+  return {
+    get(sessionId, events) {
+      const entry = bySession.get(sessionId);
+      if (entry && entry.events === events) return entry.model;
+      let model: RenderModel;
+      if (entry && extendsPrefix(entry.events, events)) {
+        model = cloneModel(entry.model);
+        for (let i = entry.events.length; i < events.length; i += 1) reduceEvent(model, events[i]!);
+      } else {
+        model = buildModel(events);
+      }
+      const lastSeq = events.length > 0 ? events[events.length - 1]!.seq : 0;
+      bySession.set(sessionId, { events, lastSeq, model });
+      return model;
+    },
+  };
 }

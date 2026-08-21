@@ -9,6 +9,17 @@ import {
 
 const HEX = /^#[0-9a-fA-F]{6}$/;
 
+function luminance(hex: string): number {
+  const channels = hex.slice(1).match(/../g)!.map((value) => Number.parseInt(value, 16) / 255);
+  const [r, g, b] = channels.map((value) => value <= 0.04045 ? value / 12.92 : ((value + 0.055) / 1.055) ** 2.4);
+  return 0.2126 * r! + 0.7152 * g! + 0.0722 * b!;
+}
+
+function contrast(a: string, b: string): number {
+  const [lighter, darker] = [luminance(a), luminance(b)].sort((x, y) => y - x);
+  return (lighter! + 0.05) / (darker! + 0.05);
+}
+
 const validTheme = (): Record<string, unknown> => ({
   id: "my-theme",
   name: "My theme",
@@ -25,6 +36,27 @@ test("preset set: six themes, unique stable ids, both appearances, valid tokens"
   assert.equal(PRESET_THEMES.filter((t) => t.appearance === "dark").length, 3);
   for (const preset of PRESET_THEMES) {
     for (const key of TOKEN_KEYS) assert.match(preset.tokens[key], HEX, `${preset.id}.${key}`);
+  }
+});
+
+test("preset secondary text tokens meet readable contrast on app surfaces", () => {
+  for (const theme of PRESET_THEMES) {
+    const surfaces = [
+      theme.tokens.bg,
+      theme.tokens.panel,
+      theme.tokens.elevated,
+      theme.tokens.raised,
+      theme.tokens.sunken,
+      theme.tokens.inputBg,
+    ];
+    for (const token of ["muted", "faint"] as const) {
+      for (const surface of surfaces) {
+        assert.ok(
+          contrast(theme.tokens[token], surface) >= 4.5,
+          `${theme.id}.${token} must meet 4.5:1 on ${surface}`,
+        );
+      }
+    }
   }
 });
 

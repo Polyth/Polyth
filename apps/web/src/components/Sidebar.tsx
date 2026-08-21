@@ -51,8 +51,14 @@ export default function Sidebar() {
 
   return (
     <>
-      {drawerOpen && <div className="menu-backdrop sidebar-backdrop" onClick={() => setSidebarOpen(false)} />}
-      <nav className={`sidebar ${drawerOpen ? "open" : ""}`}>
+      {drawerOpen && (
+        <div
+          className="menu-backdrop sidebar-backdrop"
+          aria-hidden="true"
+          onClick={() => setSidebarOpen(false)}
+        />
+      )}
+      <nav id="polyth-sidebar" className={`sidebar ${drawerOpen ? "open" : ""}`} aria-label="Workspace navigation">
         <div className="sidebar-head">
           <span className="brand"><i>p</i> {productName.toLowerCase()}</span>
           <span className="side-icons">
@@ -61,6 +67,12 @@ export default function Sidebar() {
               <button className="icon-btn" title="Git & worktrees" onClick={() => setActiveView("git")}><Icon.tree /></button>
             )}
             <button className="icon-btn" title="Open project" onClick={() => setOverlay("project-picker")}><Icon.plus /></button>
+            <button
+              className="icon-btn mobile-sidebar-close"
+              title="Close navigation"
+              aria-label="Close navigation"
+              onClick={() => setSidebarOpen(false)}
+            >×</button>
           </span>
         </div>
         <div className="side-scroll">

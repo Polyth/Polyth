@@ -13,6 +13,13 @@ interface Sub {
   afterSeq: number;
   caughtUp: boolean;
   busy: boolean; // a subscribe is already being processed for this socket
+  // Latest subscribe that arrived while busy; processed after the in-flight
+  // gap-fill finishes so rapid session switches never lose their gap-fill.
+  pendingSubscribe: { sessionId: string | null; afterSeq: number } | null;
+  // Live events broadcast while gap-fill is awaiting the DB; their seqs sit
+  // above the gap-fill boundary, so they are flushed (seq-deduped) afterwards
+  // instead of being dropped.
+  liveBuffer: SessionEvent[];
   windowStart: number;
   windowCount: number;
   // WP14: browser frame stream. Backpressure keeps only the newest
@@ -110,7 +117,8 @@ export function attachWs(
   wss.on("connection", (ws) => {
     const sub: Sub = {
       sessionId: null, afterSeq: 0, caughtUp: true,
-      busy: false, windowStart: Date.now(), windowCount: 0,
+      busy: false, pendingSubscribe: null, liveBuffer: [],
+      windowStart: Date.now(), windowCount: 0,
       browserSessionId: null, browserAfterRevision: 0, pendingFrame: null,
       audioCount: 0,
     };
@@ -181,29 +189,49 @@ export function attachWs(
         return;
       }
       if (msg.type !== "subscribe") return;
-      sub.sessionId = msg.sessionId ?? null;
-      sub.afterSeq = Number(msg.afterSeq ?? 0);
       // One gap-fill + fan-out at a time per socket: a burst of subscribes
       // (buggy client, rapid session switches) must not spawn overlapping
-      // DB reads that pile up faster than they can complete.
+      // DB reads that pile up faster than they can complete. Requests that
+      // land while busy are not dropped — the latest one is kept and processed
+      // after the in-flight gap-fill finishes.
+      sub.pendingSubscribe = { sessionId: msg.sessionId ?? null, afterSeq: Number(msg.afterSeq ?? 0) };
       if (sub.busy) return;
       sub.busy = true;
       try {
-        if (sub.sessionId) {
-          sub.caughtUp = false;
-          try {
-            const gap = await sessions.events(sub.sessionId, sub.afterSeq);
-            for (const ev of gap) send(ws, { type: "event", event: ev });
-            sub.afterSeq = gap.length ? gap[gap.length - 1]!.seq : sub.afterSeq;
-          } catch (err) {
-            send(ws, { type: "error", code: "gap-fill", message: String(err) });
+        while (sub.pendingSubscribe) {
+          const cur = sub.pendingSubscribe;
+          sub.pendingSubscribe = null;
+          sub.sessionId = cur.sessionId;
+          sub.afterSeq = cur.afterSeq;
+          sub.liveBuffer = [];
+          if (sub.sessionId) {
+            sub.caughtUp = false;
+            try {
+              const gap = await sessions.events(sub.sessionId, sub.afterSeq);
+              for (const ev of gap) send(ws, { type: "event", event: ev });
+              sub.afterSeq = gap.length ? gap[gap.length - 1]!.seq : sub.afterSeq;
+            } catch (err) {
+              send(ws, { type: "error", code: "gap-fill", message: String(err) });
+            }
+            // Flip caughtUp and drain the buffer in one synchronous block:
+            // nothing can interleave, so every live event lands exactly once —
+            // either via the flush here or via the live path afterwards.
+            sub.caughtUp = true;
+            const buffered = sub.liveBuffer;
+            sub.liveBuffer = [];
+            for (const ev of buffered) {
+              if (ev.seq <= sub.afterSeq) continue; // already sent by gap-fill
+              sub.afterSeq = ev.seq;
+              send(ws, { type: "event", event: ev });
+            }
+          } else {
+            sub.caughtUp = true;
           }
-          sub.caughtUp = true;
+          // projections snapshot so UI can paint sidebar immediately
+          try {
+            for (const p of await sessions.list()) send(ws, { type: "projection", session: p });
+          } catch { /* non-fatal */ }
         }
-        // projections snapshot so UI can paint sidebar immediately
-        try {
-          for (const p of await sessions.list()) send(ws, { type: "projection", session: p });
-        } catch { /* non-fatal */ }
       } finally {
         sub.busy = false;
       }
@@ -214,8 +242,14 @@ export function attachWs(
   return {
     event(ev: SessionEvent) {
       for (const [ws, sub] of clients) {
-        if (!sub.caughtUp) continue;
         if (sub.sessionId && ev.sessionId !== sub.sessionId) continue;
+        if (!sub.caughtUp) {
+          // Gap-fill in flight: buffer instead of dropping. These seqs are
+          // above the gap-fill boundary, so skipping them would lose them
+          // for good; the flush after gap-fill dedupes and delivers.
+          sub.liveBuffer.push(ev);
+          continue;
+        }
         if (sub.sessionId && ev.seq <= sub.afterSeq) continue; // dedupe vs gap-fill
         send(ws, { type: "event", event: ev });
       }

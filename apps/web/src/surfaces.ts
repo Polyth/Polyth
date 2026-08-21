@@ -18,6 +18,10 @@ export interface RailSurfaceContext {
   hasSession: boolean;
 }
 
+export interface RailSurfaceComponentProps {
+  active: boolean;
+}
+
 export interface RailSurface {
   id: string;
   title: string;
@@ -28,7 +32,7 @@ export interface RailSurface {
   plugin?: PluginId;
   order: number;
   /** Panel body — a component, so it owns its hooks and state. */
-  component: () => ReactNode;
+  component: (props: RailSurfaceComponentProps) => ReactNode;
   /** Count badge on the strip button. */
   badge?: (ctx: RailSurfaceContext) => number;
   /** Content-driven visibility: false hides the strip button (OC#2418). */

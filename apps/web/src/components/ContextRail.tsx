@@ -122,7 +122,7 @@ export default function ContextRail() {
           </div>
           {kept.map((s) => (
             <div key={s.id} className="rail-body" style={s.id === rail ? undefined : { display: "none" }}>
-              <s.component />
+              <s.component active={s.id === rail} />
             </div>
           ))}
         </div>

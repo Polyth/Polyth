@@ -2,12 +2,13 @@
 // per-file stage/unstage/discard, diff viewer, commit with generate.
 import { useState, useEffect, useCallback } from "react";
 import { api, type GitFileEntry } from "../api.ts";
-import { setGitDiffPath, useStore } from "../store.ts";
+import { setGitDiffPath, setUiError, useStore } from "../store.ts";
 import { diffStat } from "../utils.ts";
 import CopyButton from "./CopyButton.tsx";
 import FileRowActions from "./FileRowActions.tsx";
 import { setGitPrefs, splitDiffRows, useGitPrefs } from "../gitPrefs.ts";
 import { refreshGitStatus, useGitStatus } from "../gitStatusStore.ts";
+import { friendlyError } from "../settings.ts";
 
 const EMPTY_STAGED: never[] = [];
 const EMPTY_UNSTAGED: never[] = [];
@@ -22,21 +23,24 @@ function fileRow(
   onDiscard?: (p: string) => void,
   onClick?: (p: string) => void,
   selected?: boolean,
+  disabled = false,
 ) {
   // Deleted files have nothing on disk to attach; the menu still offers
   // Open (diff) and Copy path, and Add to chat fails with a clear error.
   const letter = f.staged ? "+" : f.status === "conflict" ? "!" : f.status === "untracked" ? "?" : "-";
   return (
-    <div className={`git-file-row ${selected ? "selected" : ""}`} key={f.path} onClick={() => onClick?.(f.path)}>
-      <span className={`git-file-letter ${f.staged ? "staged" : f.status === "conflict" ? "conflict" : "unstaged"}`}>
-        {letter}
-      </span>
-      <span className="git-file-path">{f.path}</span>
-      <span className="git-file-actions" onClick={(e) => e.stopPropagation()}>
+    <div className={`git-file-row ${selected ? "selected" : ""}`} key={f.path}>
+      <button type="button" className="git-file-main" onClick={() => onClick?.(f.path)}>
+        <span className={`git-file-letter ${f.staged ? "staged" : f.status === "conflict" ? "conflict" : "unstaged"}`}>
+          {letter}
+        </span>
+        <span className="git-file-path">{f.path}</span>
+      </button>
+      <span className="git-file-actions">
         {f.staged
-          ? onUnstage && <button className="small-btn" title="Unstage" onClick={() => onUnstage(f.path)}>U</button>
-          : onStage && <button className="small-btn" title="Stage" onClick={() => onStage(f.path)}>S</button>}
-        {onDiscard && <button className="small-btn danger-btn" title="Discard" onClick={() => onDiscard(f.path)}>✕</button>}
+          ? onUnstage && <button className="small-btn" title="Unstage" disabled={disabled} onClick={() => onUnstage(f.path)}>U</button>
+          : onStage && <button className="small-btn" title="Stage" disabled={disabled} onClick={() => onStage(f.path)}>S</button>}
+        {onDiscard && <button className="small-btn danger-btn" title="Discard" disabled={disabled} onClick={() => onDiscard(f.path)}>✕</button>}
         <FileRowActions projectId={projectId} path={f.path} {...(onClick ? { onOpen: () => onClick(f.path) } : {})} />
       </span>
     </div>
@@ -119,55 +123,68 @@ export default function ChangesPanel() {
     setGitDiffPath(fp);
     if (!projectId) return;
     const staged = status.staged.some((f) => f.path === fp);
-    const got = await api.gitDiff(projectId, fp, staged, prefs.ignoreWhitespace, activeSessionId ?? undefined);
-    setDiffText(got.diff);
+    try {
+      const got = await api.gitDiff(projectId, fp, staged, prefs.ignoreWhitespace, activeSessionId ?? undefined);
+      setDiffText(got.diff);
+    } catch (cause) {
+      setUiError(friendlyError("Couldn’t load the diff", cause));
+    }
   };
 
-  const stage = async (fp: string) => {
-    if (!projectId) return;
+  const runGitAction = async (action: () => Promise<unknown>, onSuccess?: () => void) => {
     setBusy(true);
-    await api.gitStage(projectId, [fp], activeSessionId ?? undefined);
-    setBusy(false);
-    refresh();
+    try {
+      await action();
+      onSuccess?.();
+      refresh();
+    } catch (cause) {
+      setUiError(friendlyError("Couldn’t update the repository", cause));
+    } finally {
+      setBusy(false);
+    }
   };
-  const unstage = async (fp: string) => {
+
+  const stage = (fp: string) => {
     if (!projectId) return;
-    setBusy(true);
-    await api.gitUnstage(projectId, [fp], activeSessionId ?? undefined);
-    setBusy(false);
-    refresh();
+    void runGitAction(() => api.gitStage(projectId, [fp], activeSessionId ?? undefined));
   };
-  const discard = async (fp: string) => {
+  const unstage = (fp: string) => {
+    if (!projectId) return;
+    void runGitAction(() => api.gitUnstage(projectId, [fp], activeSessionId ?? undefined));
+  };
+  const discard = (fp: string) => {
     if (!projectId) return;
     if (!window.confirm(`Discard changes to ${fp}?`)) return;
-    setBusy(true);
-    await api.gitDiscard(projectId, [fp], activeSessionId ?? undefined);
-    setBusy(false);
-    refresh();
+    void runGitAction(() => api.gitDiscard(projectId, [fp], activeSessionId ?? undefined));
   };
-  const stageAll = async () => {
+  const stageAll = () => {
     if (!projectId) return;
-    setBusy(true);
     const paths = [...status.unstaged, ...status.untracked].map((f) => f.path);
-    if (paths.length > 0) await api.gitStage(projectId, paths, activeSessionId ?? undefined);
-    setBusy(false);
-    refresh();
+    if (paths.length > 0) {
+      void runGitAction(() => api.gitStage(projectId, paths, activeSessionId ?? undefined));
+    }
   };
-  const commit = async () => {
+  const commit = () => {
     if (!projectId || !commitMsg.trim()) return;
-    setBusy(true);
-    await api.gitCommit(projectId, commitMsg.trim(), activeSessionId ?? undefined);
-    setCommitMsg("");
-    setGitDiffPath(null);
-    setBusy(false);
-    refresh();
+    void runGitAction(
+      () => api.gitCommit(projectId, commitMsg.trim(), activeSessionId ?? undefined),
+      () => {
+        setCommitMsg("");
+        setGitDiffPath(null);
+      },
+    );
   };
   const generate = async () => {
     if (!projectId) return;
     setGenerating(true);
-    const got = await api.gitCommitMessage(projectId, activeSessionId ?? undefined);
-    if (got.message) setCommitMsg(got.message);
-    setGenerating(false);
+    try {
+      const got = await api.gitCommitMessage(projectId, activeSessionId ?? undefined);
+      if (got.message) setCommitMsg(got.message);
+    } catch (cause) {
+      setUiError(friendlyError("Couldn’t generate a commit message", cause));
+    } finally {
+      setGenerating(false);
+    }
   };
 
   const aheadBehind = status.ahead > 0 || status.behind > 0;
@@ -190,22 +207,22 @@ export default function ChangesPanel() {
       {status.conflicted.length > 0 && (
         <>
           <div className="stat-label" style={{ color: "var(--red)" }}>Conflicts ({status.conflicted.length})</div>
-          {status.conflicted.map((f) => fileRow(projectId, f, undefined, undefined, undefined, loadDiff, f.path === diffPath))}
+          {status.conflicted.map((f) => fileRow(projectId, f, undefined, undefined, undefined, loadDiff, f.path === diffPath, busy))}
         </>
       )}
 
       <div className="stat-label">Staged ({status.staged.length})</div>
       {status.staged.length === 0 && <div className="empty" style={{ padding: "4px 0" }}>No staged files.</div>}
-      {status.staged.map((f) => fileRow(projectId, f, undefined, unstage, undefined, loadDiff, f.path === diffPath))}
+      {status.staged.map((f) => fileRow(projectId, f, undefined, unstage, undefined, loadDiff, f.path === diffPath, busy))}
 
       <div className="stat-label" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
         <span>Unstaged ({status.unstaged.length + status.untracked.length})</span>
         {(status.unstaged.length + status.untracked.length) > 0 && (
-          <button className="small-btn" onClick={() => void stageAll()} disabled={busy}>Stage all</button>
+          <button className="small-btn" onClick={stageAll} disabled={busy}>Stage all</button>
         )}
       </div>
-      {status.unstaged.map((f) => fileRow(projectId, f, stage, undefined, discard, loadDiff, f.path === diffPath))}
-      {status.untracked.map((f) => fileRow(projectId, f, stage, undefined, undefined, loadDiff, f.path === diffPath))}
+      {status.unstaged.map((f) => fileRow(projectId, f, stage, undefined, discard, loadDiff, f.path === diffPath, busy))}
+      {status.untracked.map((f) => fileRow(projectId, f, stage, undefined, undefined, loadDiff, f.path === diffPath, busy))}
       {status.unstaged.length === 0 && status.untracked.length === 0 && (
         <div className="empty" style={{ padding: "4px 0" }}>Working tree clean.</div>
       )}
@@ -237,7 +254,7 @@ export default function ChangesPanel() {
             </button>
             <button
               className="send"
-              onClick={() => void commit()}
+              onClick={commit}
               disabled={!commitMsg.trim() || busy}
               style={{ padding: "4px 14px", fontSize: 12 }}
             >

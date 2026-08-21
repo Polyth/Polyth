@@ -494,10 +494,11 @@ export const api = {
     jfetch<WorkspaceLabel>(`/api/labels/${encodeURIComponent(id)}`, json("PATCH", { ...patch, revision })),
   deleteLabel: (id: string) =>
     jfetch<{ ok: true }>(`/api/labels/${encodeURIComponent(id)}`, { method: "DELETE" }),
-  searchSessions: (q: string, projectId?: string, limit = 30) =>
+  searchSessions: (q: string, projectId?: string, limit = 30, signal?: AbortSignal) =>
     jfetch<SessionSearchResult[]>(
       `/api/search/sessions?q=${encodeURIComponent(q)}${projectId ? `&projectId=${encodeURIComponent(projectId)}` : ""}&limit=${limit}`,
-    ).catch((): SessionSearchResult[] => []),
+      { signal },
+    ),
 
   // ---- agent profiles (WP8) --------------------------------------------------
   listProfiles: () => jfetch<AgentProfile[]>(`/api/agent-profiles`).catch((): AgentProfile[] => []),

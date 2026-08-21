@@ -61,28 +61,40 @@ export default function GithubView() {
   const [reason, setReason] = useState("");
   const [loading, setLoading] = useState(false);
   const [openPr, setOpenPr] = useState<number | null>(null);
+  const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
-    if (!projectId) return;
-    let stale = false;
+    if (!projectId) {
+      setLoading(false);
+      return;
+    }
+    let active = true;
     setLoading(true);
     setReason("");
-    void api.githubStatus(projectId).then(async (st) => {
-      if (stale) return;
-      setStatus(st);
-      if (!st.repo) {
-        setReason(st.reason ?? "No GitHub repository detected.");
-        setLoading(false);
-        return;
+    setStatus(null);
+    setIssues([]);
+    setPrs([]);
+    void (async () => {
+      try {
+        const st = await api.githubStatus(projectId);
+        if (!active) return;
+        setStatus(st);
+        if (!st.repo) {
+          setReason(st.reason ?? "No GitHub repository detected.");
+          return;
+        }
+        const [i, p] = await Promise.all([api.githubIssues(projectId), api.githubPrs(projectId)]);
+        if (!active) return;
+        if (i.ok) setIssues(i.data); else setReason(i.reason);
+        if (p.ok) setPrs(p.data); else setReason(p.reason);
+      } catch (cause) {
+        if (active) setReason(friendlyError("Couldn’t load GitHub data", cause));
+      } finally {
+        if (active) setLoading(false);
       }
-      const [i, p] = await Promise.all([api.githubIssues(projectId), api.githubPrs(projectId)]);
-      if (stale) return;
-      if (i.ok) setIssues(i.data); else setReason(i.reason);
-      if (p.ok) setPrs(p.data); else setReason(p.reason);
-      setLoading(false);
-    });
-    return () => { stale = true; };
-  }, [projectId]);
+    })();
+    return () => { active = false; };
+  }, [projectId, reloadKey]);
 
   if (!projectId) return <EmptyState title="No project selected" description="Open a project to browse its GitHub repository." />;
 
@@ -123,6 +135,15 @@ export default function GithubView() {
         <p className="view-sub">Repo, issues and pull requests via the local gh CLI — Polyth stores no tokens.</p>
       </div>
 
+      {loading && !status && <div className="set-muted" role="status">Loading repository activity…</div>}
+      {!loading && !status && reason && (
+        <EmptyState
+          title="Couldn’t load GitHub data"
+          description={reason}
+          actionLabel="Retry"
+          onAction={() => setReloadKey((key) => key + 1)}
+        />
+      )}
       {status && !status.installed && (
         <EmptyState title="GitHub CLI not found" description="Install gh from cli.github.com, then authenticate with gh auth login." />
       )}
@@ -152,7 +173,14 @@ export default function GithubView() {
           </div>
 
           {loading && <div className="set-muted">Loading repository activity…</div>}
-          {!loading && reason && items.length === 0 && <EmptyState title="Couldn’t load GitHub data" description={reason} />}
+          {!loading && reason && items.length === 0 && (
+            <EmptyState
+              title="Couldn’t load GitHub data"
+              description={reason}
+              actionLabel="Retry"
+              onAction={() => setReloadKey((key) => key + 1)}
+            />
+          )}
           {!loading && !reason && items.length === 0 && (
             <EmptyState title={`No open ${tab === "issues" ? "issues" : "pull requests"}`} description="New repository activity will appear here." />
           )}

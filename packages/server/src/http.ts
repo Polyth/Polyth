@@ -3,24 +3,48 @@ import { createServer, type IncomingMessage, type ServerResponse, type Server } 
 import { readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { extname, join, normalize } from "node:path";
-import type { JsonObject, ModelDescriptor, SessionService } from "@polyth/contracts";
+import type { AgentRuntime, JsonObject, ModelDescriptor, SessionService } from "@polyth/contracts";
 import type { ProjectService } from "@polyth/contracts";
 import type { RuntimePool } from "./sessions.ts";
+import { aggregateRuntimes } from "./runtimeAggregate.ts";
 import type { ModelVisibilityService } from "./modelVisibility.ts";
 
 const MIME: Record<string, string> = {
   ".html": "text/html", ".js": "text/javascript", ".css": "text/css",
   ".json": "application/json", ".png": "image/png", ".svg": "image/svg+xml",
+  ".map": "application/json", ".woff2": "font/woff2",
 };
+
+const HASHED_ASSET = /-[A-Z0-9]{8,}(?:\.[^./]+){1,2}$/;
 
 const json = (res: ServerResponse, code: number, body: unknown) => {
   res.writeHead(code, { "content-type": "application/json" });
   res.end(JSON.stringify(body));
 };
 
+// Buffered-body ceiling: headroom over the 20MB MAX_RAW_BYTES attachment cap
+// (@polyth/files) so a maximal upload survives its JSON envelope while a
+// runaway client can no longer grow the heap without bound.
+export const MAX_BODY_BYTES = 25 * 1024 * 1024;
+
 const readBody = async (req: IncomingMessage): Promise<Record<string, unknown>> => {
-  let raw = "";
-  for await (const chunk of req) raw += chunk;
+  const chunks: Buffer[] = [];
+  let size = 0;
+  let overflow = false;
+  for await (const chunk of req) {
+    size += (chunk as Buffer).length;
+    // On overflow keep draining without buffering: memory stays bounded and
+    // the connection ends cleanly so the 413 reliably reaches the client.
+    if (size > MAX_BODY_BYTES) { overflow = true; chunks.length = 0; }
+    if (!overflow) chunks.push(chunk as Buffer);
+  }
+  if (overflow) {
+    throw Object.assign(
+      new Error(`request body too large (max ${MAX_BODY_BYTES} bytes)`),
+      { code: "payload-too-large" },
+    );
+  }
+  const raw = Buffer.concat(chunks).toString("utf8");
   return raw ? JSON.parse(raw) : {};
 };
 
@@ -61,21 +85,8 @@ export function createHttpServer(deps: HttpDeps): Server {
   const { sessions, projects } = deps;
 
   // Aggregate across live runtimes (per-project pools may differ).
-  const aggregate = async <T>(fetch: (rt: Awaited<ReturnType<RuntimePool["forProject"]>>) => Promise<T[]>): Promise<T[]> => {
-    const projectList = await projects.list();
-    const out: T[] = [];
-    const seen = new Set<string>();
-    for (const p of projectList.length ? projectList : [{ id: "__default__" }]) {
-      try {
-        const rt = await deps.runtimes.forProject(p.id);
-        for (const it of await fetch(rt)) {
-          const key = JSON.stringify(it);
-          if (!seen.has(key)) { seen.add(key); out.push(it); }
-        }
-      } catch { /* runtime for that project unavailable */ }
-    }
-    return out;
-  };
+  const aggregate = <T>(fetch: (rt: AgentRuntime) => Promise<T[]>): Promise<T[]> =>
+    aggregateRuntimes({ projects, runtimes: deps.runtimes }, fetch);
 
   return createServer(async (req, res) => {
     const url = new URL(req.url ?? "/", "http://x");
@@ -253,7 +264,12 @@ export function createHttpServer(deps: HttpDeps): Server {
       if (!filePath.startsWith(normalize(deps.webDist))) { res.writeHead(403); return res.end(); }
       if (!existsSync(filePath)) filePath = join(deps.webDist, "index.html"); // SPA fallback
       const data = await readFile(filePath);
-      res.writeHead(200, { "content-type": MIME[extname(filePath)] ?? "application/octet-stream" });
+      res.writeHead(200, {
+        "content-type": MIME[extname(filePath)] ?? "application/octet-stream",
+        "cache-control": HASHED_ASSET.test(filePath)
+          ? "public, max-age=31536000, immutable"
+          : "no-cache",
+      });
       res.end(data);
     } catch (err) {
       const e = err as Error & { code?: string; cause?: unknown };
@@ -266,6 +282,7 @@ export function createHttpServer(deps: HttpDeps): Server {
         e.code === "not-found" ? 404
         : e.code === "invalid-path" || e.code === "invalid-input" ? 400
         : e.code === "conflict" ? 409
+        : e.code === "payload-too-large" ? 413
         : e.code === "unsupported" ? 501
         : 500;
       json(res, status, { error: e.code ?? "internal", message: e.message });
