@@ -8,6 +8,7 @@ import {
   matchAction,
   normalizeCombo,
   parseKeymap,
+  rebindKeymap,
   serializeKeymap,
 } from "@polyth/hotkeys";
 
@@ -63,6 +64,19 @@ test("findConflicts flags duplicate combos", () => {
   assert.ok(conflicts.includes("palette"));
   assert.ok(conflicts.includes("newSession"));
   assert.deepEqual(findConflicts(DEFAULT_KEYMAP), []);
+});
+
+test("legacy conflicts are repaired and new collisions swap owners", () => {
+  const repaired = parseKeymap(JSON.stringify({ palette: DEFAULT_KEYMAP.searchFiles }));
+  assert.deepEqual(findConflicts(repaired), []);
+  assert.equal(repaired.palette, DEFAULT_KEYMAP.searchFiles);
+  assert.equal(repaired.searchFiles, DEFAULT_KEYMAP.palette);
+
+  const rebound = rebindKeymap(DEFAULT_KEYMAP, "newSession", DEFAULT_KEYMAP.palette);
+  assert.deepEqual(findConflicts(rebound), []);
+  assert.equal(rebound.newSession, DEFAULT_KEYMAP.palette);
+  assert.equal(rebound.palette, DEFAULT_KEYMAP.newSession);
+  assert.deepEqual(parseKeymap(serializeKeymap(rebound)), rebound);
 });
 
 test("formatCombo renders mac glyphs and win/linux text", () => {

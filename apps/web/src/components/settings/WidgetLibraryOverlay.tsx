@@ -17,6 +17,7 @@ import {
   pluginDisplayName,
   readRecentWidgets,
   supportedWidgetZones,
+  widgetPluginOptions,
   widgetSizeLabel,
   type WidgetLibraryTab,
   type WidgetSizeFilter,
@@ -108,8 +109,7 @@ export default function WidgetLibraryOverlay({
   useEscape(true, onClose);
 
   const plugins = useMemo(
-    () => [...new Map(widgets.map((widget) => [widget.pluginId, pluginDisplayName(widget)])).entries()]
-      .sort((a, b) => a[1].localeCompare(b[1])),
+    () => widgetPluginOptions(widgets),
     [widgets],
   );
   const filtered = useMemo(() => filterWidgetLibrary(widgets, {
@@ -181,7 +181,7 @@ export default function WidgetLibraryOverlay({
           </label>
           <select aria-label="Filter by plugin" value={pluginId} onChange={(event) => setPluginId(event.target.value)}>
             <option value="all">All plugins</option>
-            {plugins.map(([id, name]) => <option key={id} value={id}>{name}</option>)}
+            {plugins.map(({ id, label }) => <option key={id} value={id}>{label}</option>)}
           </select>
           <select aria-label="Filter by size" value={size} onChange={(event) => setSize(event.target.value as WidgetSizeFilter)}>
             <option value="all">All sizes</option>

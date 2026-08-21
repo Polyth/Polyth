@@ -64,7 +64,9 @@ export default function SessionSearch() {
       .filter((r) => !localIds.has(r.sessionId))
       .map((r) => sessions.find((s) => s.id === r.sessionId))
       .filter((s): s is NonNullable<typeof s> => s !== undefined);
-    return [...local, ...extra].map((s) => ({ s, matches: snippets.get(s.id) ?? [] }));
+    return [...local, ...extra]
+      .sort((a, b) => b.updatedAt - a.updatedAt || a.id.localeCompare(b.id))
+      .map((s) => ({ s, matches: snippets.get(s.id) ?? [] }));
   }, [sessions, q, remote]);
 
   useEffect(() => { setI(0); }, [q]);
@@ -84,6 +86,12 @@ export default function SessionSearch() {
       backdropClassName="palette-overlay"
       initialFocus=".palette-input"
     >
+      <div className="palette-heading">
+        <span className="palette-heading-title">Session history</span>
+        <span className="palette-heading-description">
+          Recent sessions and conversation content
+        </span>
+      </div>
       <input className="palette-input" value={q} placeholder="Search title, branch, labels, messages" onChange={(e) => setQ(e.target.value)} onKeyDown={onKey} />
       <div className="palette-list">
         {loading && <div className="palette-empty" role="status">Searching sessions…</div>}

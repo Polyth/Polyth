@@ -12,6 +12,7 @@ import { formatModelRef } from "../../settings.ts";
 import { api, type ProviderCatalogDto } from "../../api.ts";
 import { EmptyState, PageHead, Row, Seg, Toggle } from "./parts.tsx";
 import { setGlobalDefaultModel, useSessionDefaults } from "../../sessionDefaults.ts";
+import { modelDisplayName, modelSupportsTextWorkflow } from "../../composer/discovery.ts";
 
 type Scope = "connected" | "all";
 
@@ -22,6 +23,7 @@ function fmtContext(context?: number): string {
 
 export default function ModelsPage() {
   const models = useStore((s) => s.models);
+  const textModels = models.filter(modelSupportsTextWorkflow);
   const sessionDefaults = useSessionDefaults();
   const prefs = useModelPrefs();
   const [providers, setProviders] = useState<ProviderCatalogDto[] | null>(null);
@@ -31,6 +33,10 @@ export default function ModelsPage() {
   const [providerFilter, setProviderFilter] = useState<string | null>(null);
   const [open, setOpen] = useState<Record<string, boolean>>({});
   const [busyKey, setBusyKey] = useState("");
+  const catalogModels = useMemo(
+    () => providers?.flatMap((provider) => provider.models) ?? [],
+    [providers],
+  );
 
   const refreshCatalog = () =>
     api.listProviders().then(setProviders).catch((e) => setError(e instanceof Error ? e.message : String(e)));
@@ -97,7 +103,7 @@ export default function ModelsPage() {
         <select
           value={sessionDefaults.defaultModel ? modelKey(sessionDefaults.defaultModel) : ""}
           onChange={(e) => {
-            const selected = models.find((model) => modelKey(model) === e.target.value);
+            const selected = textModels.find((model) => modelKey(model) === e.target.value);
             setGlobalDefaultModel(selected
               ? { providerID: selected.providerID, modelID: selected.modelID }
               : undefined);
@@ -105,9 +111,9 @@ export default function ModelsPage() {
           }}
         >
           <option value="">Server default</option>
-          {models.map((model) => (
+          {textModels.map((model) => (
             <option key={modelKey(model)} value={formatModelRef(model)}>
-              {model.providerID} / {model.name || model.modelID}
+              {modelDisplayName(model, textModels)}
             </option>
           ))}
         </select>
@@ -176,6 +182,7 @@ export default function ModelsPage() {
                 <div className="provider-models">
                   {p.models.map((m) => {
                     const fav = isFavorite(prefs, m.key);
+                    const displayName = modelDisplayName(m, catalogModels);
                     return (
                       <div key={m.key} className={`set-model-row ${m.enabled ? "" : "model-disabled"}`}>
                         <button
@@ -184,14 +191,14 @@ export default function ModelsPage() {
                           aria-pressed={fav}
                           onClick={() => toggleModelFavorite(m.key)}
                         >{fav ? "★" : "☆"}</button>
-                        <span className="set-model-name">{m.name}</span>
+                        <span className="set-model-name" title={displayName}>{displayName}</span>
                         {m.context !== undefined && <span className="set-model-ctx mono">{fmtContext(m.context)}</span>}
                         <span className="set-model-meta mono">{m.key}</span>
                         <button
                           className="switch switch-sm"
                           role="switch"
                           aria-checked={m.enabled}
-                          aria-label={`${m.enabled ? "Disable" : "Enable"} ${m.name}`}
+                          aria-label={`${m.enabled ? "Disable" : "Enable"} ${displayName}`}
                           disabled={busyKey === m.key || !p.enabled}
                           title={!p.enabled ? "Enable the provider first" : m.enabled ? "Disable model" : "Enable model"}
                           onClick={() => void mutate(m.key, () => api.setModelEnabled(m.key, !m.enabled))}

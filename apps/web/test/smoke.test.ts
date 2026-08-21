@@ -459,14 +459,17 @@ test("goal lifecycle: paused → resumed → completed", () => {
   assert.equal(m.goal!.status, "completed");
 });
 
-test("goal stuck and stopped", () => {
+test("goal stop clears the active projection so a replacement can be attached", () => {
   let m = buildModel([
     ev("goal/attached", { objective: "Deploy" }),
     ev("goal/stuck", {}),
   ]);
   assert.equal(m.goal!.status, "stuck");
   m = reduceEvent(m, ev("goal/stopped", {}));
-  assert.equal(m.goal!.status, "stopped");
+  assert.equal(m.goal, null);
+  m = reduceEvent(m, ev("goal/attached", { objective: "Deploy replacement" }));
+  assert.equal(m.goal?.objective, "Deploy replacement");
+  assert.equal(m.goal?.status, "active");
 });
 
 test("goal/attached with defaults when fields missing", () => {

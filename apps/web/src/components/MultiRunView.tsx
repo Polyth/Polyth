@@ -5,6 +5,7 @@ import { useActiveModel, useStore } from "../store.ts";
 import { fmtCost, fmtTokens, modelBadge } from "../format.ts";
 import { renderMarkdown } from "../markdown.tsx";
 import EmptyState from "./EmptyState.tsx";
+import { modelDisplayName, modelSupportsTextWorkflow } from "../composer/discovery.ts";
 
 function modelRefFromValue(value: string): ModelRef | undefined {
   if (!value) return undefined;
@@ -21,10 +22,12 @@ function modelRefFromValue(value: string): ModelRef | undefined {
 
 function RunCard({
   run,
+  modelLabel,
   picked,
   onPick,
 }: {
   run: MultirunRunDto;
+  modelLabel: string;
   picked: boolean;
   onPick: () => void;
 }) {
@@ -35,7 +38,7 @@ function RunCard({
       <div className="run-card-head">
         <div className="run-card-title">
           <span className={`dot ${run.status === "running" || run.status === "pending" ? "working" : run.status === "completed" ? "idle" : "failed"}`} />
-          <span className="run-model-name" style={{ color: badge.color }}>{run.model ? run.model.modelID : "default"}</span>
+          <span className="run-model-name" style={{ color: badge.color }}>{modelLabel}</span>
         </div>
         <span className="run-card-agent">{run.agent ?? "build"} agent</span>
       </div>
@@ -60,6 +63,7 @@ function RunCard({
 export default function MultiRunView() {
   const sessionId = useStore((s) => s.activeSessionId);
   const models = useStore((s) => s.models);
+  const textModels = models.filter(modelSupportsTextWorkflow);
   const agents = useStore((s) => s.agents);
   const fromLog = useActiveModel().multirun;
   const [live, setLive] = useState<MultirunDto | null>(null);
@@ -98,9 +102,9 @@ export default function MultiRunView() {
 
   const q = modelFilter.toLowerCase();
   const MAX_OPTIONS = 80;
-  const groups = new Map<string, typeof models>();
+  const groups = new Map<string, typeof textModels>();
   let shownCount = 0;
-  for (const m of models) {
+  for (const m of textModels) {
     const key = JSON.stringify({ providerID: m.providerID, modelID: m.modelID });
     const selected = slots.includes(key);
     const hit = !q || `${m.modelID} ${m.name ?? ""} ${m.providerID}`.toLowerCase().includes(q) || selected;
@@ -145,6 +149,14 @@ export default function MultiRunView() {
       setError(String(e));
     }
   };
+  const modelLabelFor = (model?: ModelRef): string => {
+    if (!model) return "default";
+    const descriptor = textModels.find((candidate) =>
+      candidate.providerID === model.providerID && candidate.modelID === model.modelID);
+    return descriptor
+      ? modelDisplayName(descriptor, textModels)
+      : `${model.providerID}/${model.modelID}`;
+  };
 
   if (!sessionId) {
     return <EmptyState title="No session open" description="Open a session to run the same prompt across models." />;
@@ -178,7 +190,7 @@ export default function MultiRunView() {
                 <optgroup key={provider} label={provider}>
                   {ms.map((m) => (
                     <option key={`${m.providerID}/${m.modelID}`} value={JSON.stringify({ providerID: m.providerID, modelID: m.modelID })}>
-                      {m.name ?? m.modelID}
+                      {modelDisplayName(m, textModels)}
                     </option>
                   ))}
                 </optgroup>
@@ -206,6 +218,7 @@ export default function MultiRunView() {
               <RunCard
                 key={run.id}
                 run={run}
+                modelLabel={modelLabelFor(run.model)}
                 picked={shown.pickedRunId === run.id}
                 onPick={() => void pick(run.id)}
               />

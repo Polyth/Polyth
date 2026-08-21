@@ -2,8 +2,8 @@
 // root: right-clicking a session row opens that row's action menu (the same
 // menu the ellipsis anchors) with delete/archive/pin items, correct ARIA
 // menu roles, and the keyboard contract (focus lands in the menu, arrows
-// cycle, Escape closes back to the button). Destructive clicks act
-// immediately on an idle session and confirm first on a running one.
+// cycle, Escape closes back to the button). Every permanent deletion confirms,
+// with additional activity context for a running session.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { register } from "node:module";
@@ -108,7 +108,7 @@ test("right-click opens the row-scoped menu with delete/archive/pin and menu ARI
   }
 });
 
-test("delete acts immediately on an idle session, confirms first on a running one", async () => {
+test("every permanent delete confirms; running sessions include activity context", async () => {
   const { container, unmount } = await mountList();
   const confirms: string[] = [];
   let confirmAnswer = false;
@@ -117,7 +117,7 @@ test("delete acts immediately on an idle session, confirms first on a running on
     return confirmAnswer;
   };
   try {
-    // Idle: no confirm, DELETE goes straight out (spec: shift-hover IS the guard).
+    // Idle: a declined confirmation sends nothing.
     const idleRow = rowOf(container, "Idle session");
     await act(async () => {
       idleRow.dispatchEvent(new MouseEventCtor("contextmenu", { bubbles: true, cancelable: true }));
@@ -126,10 +126,21 @@ test("delete acts immediately on an idle session, confirms first on a running on
     const idleDelete = [...container.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')]
       .find((b) => b.textContent?.trim() === "Delete");
     await act(async () => { idleDelete!.click(); });
-    assert.equal(confirms.length, 0, "idle delete never confirms");
+    assert.equal(confirms.length, 1, "idle delete confirms first");
+    assert.match(confirms[0]!, /permanently removes the session and its history/i);
+    assert.equal(fetchCalls.filter((c) => c.method === "DELETE").length, 0, "declined idle delete changes nothing");
+
+    // Accepting the same idle confirmation issues the delete.
+    confirmAnswer = true;
+    await act(async () => {
+      idleRow.dispatchEvent(new MouseEventCtor("contextmenu", { bubbles: true, cancelable: true }));
+    });
+    const idleDelete2 = [...container.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')]
+      .find((b) => b.textContent?.trim() === "Delete");
+    await act(async () => { idleDelete2!.click(); });
     assert.ok(
       fetchCalls.some((c) => c.method === "DELETE" && c.url === "/api/sessions/s-idle"),
-      `guarded DELETE issued (got: ${JSON.stringify(fetchCalls)})`,
+      `confirmed DELETE issued (got: ${JSON.stringify(fetchCalls)})`,
     );
 
     // The post-delete refresh answered [] through the fetch stub — re-seed the
@@ -140,7 +151,8 @@ test("delete acts immediately on an idle session, confirms first on a running on
       ]);
     });
 
-    // Running: confirm first; a declined confirm sends nothing.
+    // Running: confirmation additionally warns about active work.
+    confirmAnswer = false;
     const runRow = rowOf(container, "Running session");
     await act(async () => {
       runRow.dispatchEvent(new MouseEventCtor("contextmenu", { bubbles: true, cancelable: true }));
@@ -149,8 +161,8 @@ test("delete acts immediately on an idle session, confirms first on a running on
     const runDelete = [...container.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')]
       .find((b) => b.textContent?.trim() === "Delete");
     await act(async () => { runDelete!.click(); });
-    assert.equal(confirms.length, 1, "running delete confirms first");
-    assert.match(confirms[0]!, /still running|permanently/i);
+    assert.equal(confirms.length, 3, "running delete confirms first");
+    assert.match(confirms[2]!, /still running|permanently/i);
     assert.equal(fetchCalls.filter((c) => c.method === "DELETE").length, 0, "declined confirm deletes nothing");
 
     // Accepted confirm goes through.

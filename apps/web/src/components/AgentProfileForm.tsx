@@ -8,6 +8,7 @@ import { api } from "../api.ts";
 import { useStore } from "../store.ts";
 import { refreshProfiles } from "../profiles.ts";
 import Dialog from "./a11y/Dialog.tsx";
+import { modelDisplayName, modelSupportsTextWorkflow } from "../composer/discovery.ts";
 
 export interface ProfileFormProps {
   /** Existing profile to edit, or a seed for a new one. */
@@ -25,6 +26,7 @@ interface Repair { field: string; from: string; to: string; reason: string }
 export default function AgentProfileForm({ existing, seed, lockModel, onClose, onSaved }: ProfileFormProps) {
   const agents = useStore((s) => s.agents);
   const models = useStore((s) => s.models);
+  const textModels = models.filter(modelSupportsTextWorkflow);
   const [name, setName] = useState(existing?.name ?? seed?.name ?? "");
   const [providerID, setProviderID] = useState(existing?.providerID ?? seed?.providerID ?? "");
   const [modelID, setModelID] = useState(existing?.modelID ?? seed?.modelID ?? "");
@@ -111,9 +113,9 @@ export default function AgentProfileForm({ existing, seed, lockModel, onClose, o
               }}
             >
               <option value="/">Pick a model…</option>
-              {models.map((m) => (
+              {textModels.map((m) => (
                 <option key={`${m.providerID}/${m.modelID}`} value={`${m.providerID}/${m.modelID}`}>
-                  {m.providerID} / {m.name || m.modelID}
+                  {modelDisplayName(m, textModels)}
                 </option>
               ))}
             </select>

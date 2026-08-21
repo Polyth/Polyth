@@ -5,6 +5,7 @@ import {
   DEFAULT_KEYMAP,
   HOTKEYS_KEY,
   parseKeymap,
+  rebindKeymap,
   serializeKeymap,
   type HotkeyAction,
 } from "@polyth/hotkeys";
@@ -26,7 +27,7 @@ export function getKeymap(): Keymap {
 }
 
 export function setBinding(action: HotkeyAction, combo: string): void {
-  keymap = { ...keymap, [action]: combo };
+  keymap = rebindKeymap(keymap, action, combo);
   write(serializeKeymap(keymap));
   for (const l of [...listeners]) l();
 }

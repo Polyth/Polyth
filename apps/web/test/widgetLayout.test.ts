@@ -2,16 +2,19 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   BUILTIN_WIDGET_IDS,
+  WIDGET_LAYOUT_KEY,
   WIDGET_ZONES,
   applyWidgetLayoutMutations,
   canPlaceWidget,
   createDefaultWidgetLayout,
   duplicateWidget,
+  getWidgetSaveStatus,
   moveWidget,
   parseWidgetLayout,
   serializeWidgetLayout,
   setWidgetSize,
   setWidgetVisible,
+  updateWidgetLayout,
   widgetZoneOf,
 } from "../src/widgets/widgetLayout.ts";
 
@@ -167,4 +170,24 @@ test("self-describing plugin placements survive parsing as missing-plugin placeh
   }), ["core.composer"]);
   assert.equal(parsed.widgets["sample.status"]?.pluginId, "sample");
   assert.equal(widgetZoneOf(parsed, "sample.status"), "right");
+});
+
+test("setup-style immediate commits synchronously persist the complete layout", () => {
+  const stored = new Map<string, string>();
+  Object.defineProperty(globalThis, "localStorage", {
+    configurable: true,
+    value: {
+      getItem: (key: string) => stored.get(key) ?? null,
+      setItem: (key: string, value: string) => { stored.set(key, value); },
+    },
+  });
+
+  updateWidgetLayout((current) => ({
+    ...current,
+    audience: "power",
+  }), { immediate: true });
+  const persisted = stored.get(WIDGET_LAYOUT_KEY);
+  assert.ok(persisted, "immediate commit writes before returning");
+  assert.equal(parseWidgetLayout(persisted).audience, "power");
+  assert.equal(getWidgetSaveStatus(), "saved");
 });

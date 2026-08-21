@@ -99,7 +99,45 @@ export function parseKeymap(raw: string | null): Record<HotkeyAction, string> {
   } catch {
     // defaults
   }
-  return map;
+  return resolveKeymapConflicts(map);
+}
+
+/** Repair legacy or hand-edited maps so each combo has one owner. When a
+ * duplicate appears, the later action receives the first unused default. */
+export function resolveKeymapConflicts(
+  map: Record<HotkeyAction, string>,
+): Record<HotkeyAction, string> {
+  const next = { ...map };
+  const used = new Set<string>();
+  const defaults = HOTKEY_ACTIONS.map(({ id }) => DEFAULT_KEYMAP[id]);
+  for (const { id } of HOTKEY_ACTIONS) {
+    const wanted = next[id];
+    if (!used.has(wanted)) {
+      used.add(wanted);
+      continue;
+    }
+    const replacement = [DEFAULT_KEYMAP[id], ...defaults].find((combo) => !used.has(combo));
+    if (replacement) next[id] = replacement;
+    used.add(next[id]);
+  }
+  return next;
+}
+
+/** Assign one binding without creating a collision. The previous owner gets
+ * the edited action's old combo, which makes rebinding predictable and fully
+ * reversible instead of silently disabling a command. */
+export function rebindKeymap(
+  map: Record<HotkeyAction, string>,
+  action: HotkeyAction,
+  rawCombo: string,
+): Record<HotkeyAction, string> {
+  const combo = normalizeCombo(rawCombo);
+  if (!combo) return map;
+  const previous = map[action];
+  const owner = HOTKEY_ACTIONS.find(({ id }) => id !== action && map[id] === combo)?.id;
+  const next = { ...map, [action]: combo };
+  if (owner) next[owner] = previous;
+  return resolveKeymapConflicts(next);
 }
 
 export function serializeKeymap(map: Record<HotkeyAction, string>): string {

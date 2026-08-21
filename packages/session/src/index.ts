@@ -588,6 +588,23 @@ export function createStore(dbPath: string): Store {
   const folderRow = (id: string): FolderRow | undefined =>
     prep("SELECT * FROM folders WHERE id = ?").get(id) as FolderRow | undefined;
 
+  const folderNameKey = (name: string): string => name.normalize("NFKC").trim().toLowerCase();
+  const assertUniqueFolderName = (
+    projectId: string,
+    parentId: string | null,
+    name: string,
+    exceptIds: readonly string[] = [],
+  ): void => {
+    const siblings = db.prepare("SELECT * FROM folders WHERE project_id = ?").all(projectId) as unknown as FolderRow[];
+    const duplicate = siblings.some((row) =>
+      !exceptIds.includes(row.id)
+      && row.parent_id === parentId
+      && folderNameKey(row.name) === folderNameKey(name));
+    if (duplicate) {
+      throw Object.assign(new Error(`A folder named "${name}" already exists here.`), { code: "conflict" });
+    }
+  };
+
   /** True when `candidateAncestor` is `id` itself or any ancestor of `id`. */
   const folderHasAncestor = (id: string, candidateAncestor: string): boolean => {
     let cur: string | null = id;
@@ -614,6 +631,7 @@ export function createStore(dbPath: string): Store {
       if (!parent) throw Object.assign(new Error("parent folder not found"), { code: "not-found" });
       if (parent.project_id !== projectId) throw Object.assign(new Error("parent folder belongs to another project"), { code: "invalid-input" });
     }
+    assertUniqueFolderName(projectId, parentId ?? null, trimmed);
     const id = randomUUID();
     const pos = db.prepare("SELECT COALESCE(MAX(position), -1) + 1 AS next FROM folders WHERE project_id = ?").get(projectId) as { next: number };
     db.prepare("INSERT INTO folders (id, project_id, parent_id, name, position, revision) VALUES (?, ?, ?, ?, ?, 1)")
@@ -655,6 +673,7 @@ export function createStore(dbPath: string): Store {
           parentId = patch.parentId;
         }
       }
+      assertUniqueFolderName(row.project_id, parentId, name, [id]);
       const position = patch.position !== undefined ? patch.position : Number(row.position);
       db.prepare("UPDATE folders SET name = ?, parent_id = ?, position = ?, revision = revision + 1 WHERE id = ?")
         .run(name, parentId, position, id);
@@ -672,6 +691,10 @@ export function createStore(dbPath: string): Store {
     try {
       const row = folderRow(id);
       if (row) {
+        const children = db.prepare("SELECT * FROM folders WHERE parent_id = ?").all(id) as unknown as FolderRow[];
+        for (const child of children) {
+          assertUniqueFolderName(row.project_id, row.parent_id, child.name, [id, child.id]);
+        }
         db.prepare("UPDATE folders SET parent_id = ?, revision = revision + 1 WHERE parent_id = ?").run(row.parent_id, id);
         db.prepare("DELETE FROM folders WHERE id = ?").run(id);
         removed = true;

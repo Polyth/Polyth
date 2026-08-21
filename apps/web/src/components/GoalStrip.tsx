@@ -103,10 +103,21 @@ export function GoalAttachForm({ onDone }: { onDone: () => void }) {
   const [budget, setBudget] = useState("");
   const [maxCont, setMaxCont] = useState("");
   const [busy, setBusy] = useState(false);
+  const [serverError, setServerError] = useState("");
+  const limitError = (value: string, label: string) => {
+    if (!value) return "";
+    const number = Number(value);
+    return Number.isFinite(number) && Number.isInteger(number) && number > 0
+      ? ""
+      : `${label} must be a positive whole number.`;
+  };
+  const budgetError = limitError(budget, "Token budget");
+  const continuationError = limitError(maxCont, "Max continuations");
 
   const submit = async () => {
-    if (!activeSessionId || !objective.trim()) return;
+    if (!activeSessionId || !objective.trim() || budgetError || continuationError) return;
     setBusy(true);
+    setServerError("");
     try {
       await api.goalAttach(
         activeSessionId,
@@ -115,8 +126,8 @@ export function GoalAttachForm({ onDone }: { onDone: () => void }) {
         maxCont ? Number(maxCont) : undefined,
       );
       onDone();
-    } catch {
-      // show nothing, goal endpoint may not be available
+    } catch (error) {
+      setServerError(error instanceof Error ? error.message : "Couldn’t attach the goal.");
     }
     setBusy(false);
   };
@@ -137,28 +148,39 @@ export function GoalAttachForm({ onDone }: { onDone: () => void }) {
           Token budget
           <input
             type="number"
+            min={1}
+            step={1}
             placeholder="e.g. 500000"
             value={budget}
             onChange={(e) => setBudget(e.target.value)}
+            aria-invalid={budgetError ? true : undefined}
+            aria-describedby={budgetError ? "goal-budget-error" : undefined}
             style={{ width: 130 }}
           />
+          {budgetError && <span id="goal-budget-error" className="form-error">{budgetError}</span>}
         </label>
         <label className="goal-attach-label">
           Max continuations
           <input
             type="number"
+            min={1}
+            step={1}
             placeholder="e.g. 12"
             value={maxCont}
             onChange={(e) => setMaxCont(e.target.value)}
+            aria-invalid={continuationError ? true : undefined}
+            aria-describedby={continuationError ? "goal-continuations-error" : undefined}
             style={{ width: 130 }}
           />
+          {continuationError && <span id="goal-continuations-error" className="form-error">{continuationError}</span>}
         </label>
         <span className="header-spacer" />
         <button className="small-btn" onClick={onDone}>Cancel</button>
-        <button className="primary-btn goal-attach-submit" onClick={() => void submit()} disabled={busy || !objective.trim()}>
+        <button className="primary-btn goal-attach-submit" onClick={() => void submit()} disabled={busy || !objective.trim() || !!budgetError || !!continuationError}>
           Attach
         </button>
       </div>
+      {serverError && <div className="form-error" role="alert">{serverError}</div>}
     </div>
   );
 }

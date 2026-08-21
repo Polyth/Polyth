@@ -44,6 +44,17 @@ export const DEFAULT_BUDGET_TOKENS = 2_000_000;
 export const DEFAULT_MAX_CONTINUATIONS = 12;
 export const STUCK_STREAK_LIMIT = 3;
 
+function positiveInteger(value: number | undefined, field: string, fallback: number): number {
+  if (value === undefined) return fallback;
+  if (!Number.isFinite(value) || !Number.isInteger(value) || value <= 0) {
+    throw Object.assign(new Error(`${field} must be a finite positive integer`), {
+      code: "invalid-input",
+      field,
+    });
+  }
+  return value;
+}
+
 const CONTINUE_PROMPT =
   "Continue working towards the objective. Do the next concrete step yourself; do not ask for confirmation.";
 
@@ -127,14 +138,20 @@ export function createGoalService(deps: GoalDeps): GoalService {
   return {
     async attach(sessionId, input) {
       const objective = input.objective.trim();
-      if (!objective) throw new Error("goal objective is empty");
+      if (!objective) {
+        throw Object.assign(new Error("objective is required"), { code: "invalid-input", field: "objective" });
+      }
       const state: GoalState = touch({
         objective,
         status: "active",
         continuations: 0,
-        maxContinuations: input.maxContinuations ?? DEFAULT_MAX_CONTINUATIONS,
+        maxContinuations: positiveInteger(
+          input.maxContinuations,
+          "maxContinuations",
+          DEFAULT_MAX_CONTINUATIONS,
+        ),
         tokensUsed: 0,
-        budgetTokens: input.budgetTokens ?? DEFAULT_BUDGET_TOKENS,
+        budgetTokens: positiveInteger(input.budgetTokens, "budgetTokens", DEFAULT_BUDGET_TOKENS),
         stuckStreak: 0,
         updatedAt: now(),
       });

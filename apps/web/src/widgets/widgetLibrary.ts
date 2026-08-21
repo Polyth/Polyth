@@ -63,6 +63,26 @@ export function pluginDisplayName(widget: Pick<WidgetDef, "pluginId" | "pluginNa
     ?? widget.pluginId.replace(/[-_]/g, " ").replace(/^\w/, (letter) => letter.toUpperCase());
 }
 
+export interface WidgetPluginOption {
+  id: string;
+  label: string;
+}
+
+/** Plugin ids remain the filter value; colliding friendly names gain the
+ * stable id so no two options are visually indistinguishable. */
+export function widgetPluginOptions(
+  widgets: readonly Pick<WidgetDef, "pluginId" | "pluginName">[],
+): WidgetPluginOption[] {
+  const names = new Map<string, string>();
+  for (const widget of widgets) names.set(widget.pluginId, pluginDisplayName(widget));
+  const counts = new Map<string, number>();
+  for (const name of names.values()) counts.set(name, (counts.get(name) ?? 0) + 1);
+  return [...names].map(([id, name]) => ({
+    id,
+    label: (counts.get(name) ?? 0) > 1 ? `${name} — ${id}` : name,
+  })).sort((a, b) => a.label.localeCompare(b.label) || a.id.localeCompare(b.id));
+}
+
 export function supportedWidgetZones(widget: Pick<WidgetDef, "supportedZones" | "zone" | "floating">): readonly WidgetZone[] {
   if (widget.supportedZones && widget.supportedZones.length > 0) return widget.supportedZones;
   return widget.floating ? [widget.zone ?? "main", "floating"] : [widget.zone ?? "main"];
@@ -104,9 +124,19 @@ export function filterWidgetLibrary(
 }
 
 export function groupWidgetsByPlugin(widgets: readonly WidgetDef[]): Map<string, WidgetDef[]> {
+  const explicitNames = new Map<string, Set<string>>();
+  for (const widget of widgets) {
+    if (!widget.pluginName) continue;
+    const ids = explicitNames.get(widget.pluginName) ?? new Set<string>();
+    ids.add(widget.pluginId);
+    explicitNames.set(widget.pluginName, ids);
+  }
   const groups = new Map<string, WidgetDef[]>();
   for (const widget of widgets) {
-    const name = pluginDisplayName(widget);
+    const displayName = pluginDisplayName(widget);
+    const name = widget.pluginName && (explicitNames.get(widget.pluginName)?.size ?? 0) > 1
+      ? `${displayName} — ${widget.pluginId}`
+      : displayName;
     groups.set(name, [...(groups.get(name) ?? []), widget]);
   }
   return groups;

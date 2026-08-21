@@ -5,6 +5,7 @@ import {
   filterWidgetLibrary,
   groupWidgetsByPlugin,
   missingWidgetPlaceholders,
+  widgetPluginOptions,
 } from "../src/widgets/widgetLibrary.ts";
 import {
   createDefaultWidgetLayout,
@@ -14,6 +15,9 @@ import {
 import {
   applyWorkspaceSetup,
   createSetupDraft,
+  MAX_SETUP_WIDGETS,
+  MIN_SETUP_WIDGETS,
+  validSetupWidgetCount,
   workflowOption,
 } from "../src/widgets/workspaceSetup.ts";
 import { planWorkspaceCustomization } from "../src/widgets/workspaceCustomize.ts";
@@ -80,6 +84,32 @@ test("widget library searches capabilities and combines plugin, size, zone, and 
   assert.deepEqual([...groupWidgetsByPlugin(WIDGETS).keys()], ["Core workspace", "Git tools"]);
 });
 
+test("plugin filters disambiguate colliding display names", () => {
+  const colliding = [
+    { pluginId: "alpha-tools", pluginName: "Tools" },
+    { pluginId: "alpha-tools", pluginName: "Tools" },
+    { pluginId: "beta-tools", pluginName: "Tools" },
+    { pluginId: "git", pluginName: "Git" },
+  ];
+  const options = widgetPluginOptions(colliding);
+  assert.deepEqual(options, [
+    { id: "git", label: "Git" },
+    { id: "alpha-tools", label: "Tools — alpha-tools" },
+    { id: "beta-tools", label: "Tools — beta-tools" },
+  ]);
+
+  const grouped = groupWidgetsByPlugin(colliding.map((plugin, index): WidgetDef => ({
+    ...plugin,
+    id: `widget-${index}`,
+    title: `Widget ${index}`,
+    description: "test",
+    zone: "main",
+    render,
+  })));
+  assert.deepEqual([...grouped.keys()], ["Tools — alpha-tools", "Tools — beta-tools", "Git"]);
+  assert.equal(grouped.get("Tools — alpha-tools")?.length, 2);
+});
+
 test("guided setup applies workflow, audience, and selected widgets via shared mutations", () => {
   const layout = createDefaultWidgetLayout(WIDGETS);
   const draft = {
@@ -93,6 +123,15 @@ test("guided setup applies workflow, audience, and selected widgets via shared m
   assert.equal(next.widgets["git.recent"]?.visible, true);
   assert.equal(next.widgets["terminal.shell"]?.visible, true);
   assert.equal(workflowOption("build-debug").suggestedWidgetIds.length, 7);
+});
+
+test("guided setup enforces its advertised five-to-eight unique widget range", () => {
+  assert.equal(MIN_SETUP_WIDGETS, 5);
+  assert.equal(MAX_SETUP_WIDGETS, 8);
+  assert.equal(validSetupWidgetCount(["1", "2", "3", "4"]), false);
+  assert.equal(validSetupWidgetCount(["1", "2", "3", "4", "5"]), true);
+  assert.equal(validSetupWidgetCount(["1", "2", "3", "4", "5", "5"]), false);
+  assert.equal(validSetupWidgetCount(["1", "2", "3", "4", "5", "6", "7", "8", "9"]), false);
 });
 
 test("missing plugin placeholders retain identity and placement without rendering plugin code", () => {

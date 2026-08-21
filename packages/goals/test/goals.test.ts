@@ -43,6 +43,25 @@ test("attach emits goal/attached and exposes state", async () => {
   assert.equal(h.service.get("s1")?.objective, "ship it");
 });
 
+test("attach rejects empty objectives and non-positive or fractional limits", async () => {
+  const h = harness([]);
+  for (const [input, field] of [
+    [{ objective: " " }, "objective"],
+    [{ objective: "ship", budgetTokens: 0 }, "budgetTokens"],
+    [{ objective: "ship", budgetTokens: -1 }, "budgetTokens"],
+    [{ objective: "ship", maxContinuations: 0 }, "maxContinuations"],
+    [{ objective: "ship", maxContinuations: 1.5 }, "maxContinuations"],
+  ] as const) {
+    await assert.rejects(
+      () => h.service.attach("s1", input),
+      (error: Error & { code?: string; field?: string }) =>
+        error.code === "invalid-input" && error.field === field,
+    );
+  }
+  assert.deepEqual(h.events, []);
+  assert.equal(h.service.get("s1"), null);
+});
+
 test("keep verdict continues the session and counts continuations", async () => {
   const h = harness(['{"verdict":"keep","reason":"more work"}']);
   await h.service.attach("s1", { objective: "ship it" });

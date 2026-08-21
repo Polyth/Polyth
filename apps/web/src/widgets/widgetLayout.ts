@@ -588,11 +588,17 @@ function scheduleWrite(): void {
 
 if (typeof window !== "undefined") window.addEventListener("pagehide", flushWrite);
 
-function commit(next: WidgetLayout, recordHistory = true): void {
+function commit(next: WidgetLayout, recordHistory = true, immediate = false): void {
   if (next === state) return;
   if (recordHistory) history = [...history.slice(-39), state];
   state = next;
-  scheduleWrite();
+  if (immediate) {
+    if (writeTimer !== null) clearTimeout(writeTimer);
+    writeTimer = null;
+    saveStatus = write(state) ? "saved" : "error";
+  } else {
+    scheduleWrite();
+  }
   for (const listener of [...listeners]) listener();
   for (const listener of [...statusListeners]) listener();
 }
@@ -601,8 +607,11 @@ export function getWidgetLayout(): WidgetLayout {
   return state;
 }
 
-export function updateWidgetLayout(update: WidgetLayout | ((current: WidgetLayout) => WidgetLayout)): void {
-  commit(typeof update === "function" ? update(state) : update);
+export function updateWidgetLayout(
+  update: WidgetLayout | ((current: WidgetLayout) => WidgetLayout),
+  options: { immediate?: boolean } = {},
+): void {
+  commit(typeof update === "function" ? update(state) : update, true, options.immediate === true);
 }
 
 export function undoWidgetLayout(): void {

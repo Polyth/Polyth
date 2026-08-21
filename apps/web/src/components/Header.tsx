@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   closeWorkspacePane, getState, openWorkspacePane, setActiveView, useActiveModel, useStore,
-  setOverlay, setRailPlugin, setSidebarOpen, setUiError, type AppView,
+  openSettingsPage, setOverlay, setRailPlugin, setSidebarOpen, setUiError, type AppView,
 } from "../store.ts";
 import { createSession, forkSession, exportSessionMarkdown } from "../init.ts";
 import { displaySessionTitle } from "../format.ts";
@@ -23,6 +23,7 @@ import SlotHost from "./slots/SlotHost.ts";
 import { Icon } from "../icons.tsx";
 import CapabilityMenu from "./CapabilityMenu.tsx";
 import { setWorkspaceMode, useWorkspaceMode } from "../widgets/workspaceMode.ts";
+import { useDismissibleMenu } from "./a11y/Menu.ts";
 
 const STROKE = { fill: "none", stroke: "currentColor", strokeWidth: 1.5, strokeLinecap: "round", strokeLinejoin: "round" } as const;
 
@@ -411,6 +412,44 @@ function OverflowMenu({ sessionId, onGoal }: { sessionId: string | null; onGoal:
   );
 }
 
+function UserMenu() {
+  const [open, setOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const onMenuKey = useDismissibleMenu({
+    open,
+    menuRef,
+    triggerRef,
+    onClose: () => setOpen(false),
+  });
+  const go = (page: "access" | "about") => {
+    setOpen(false);
+    openSettingsPage(page);
+  };
+  return (
+    <div className="header-user-menu">
+      <button
+        ref={triggerRef}
+        className="header-profile"
+        aria-label="User menu"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        onClick={() => setOpen((value) => !value)}
+      >
+        <span>PO</span><b aria-hidden="true">⌄</b>
+      </button>
+      {open && (
+        <div className="menu-popup user-menu-popup" role="menu" aria-label="User and system" ref={menuRef} onKeyDown={onMenuKey}>
+          <button role="menuitem" onClick={() => go("access")}>Access &amp; security</button>
+          <button role="menuitem" onClick={() => go("about")}>About Polyth</button>
+          <div className="menu-sep" />
+          <button role="menuitem" onClick={() => { setOpen(false); setOverlay("settings"); }}>All settings</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function Header() {
   const session = useStore((s) => s.sessions.find((x) => x.id === s.activeSessionId) ?? null);
   const project = useStore((s) => s.projectRegistry.projects.find((p) => p.id === s.activeProjectId) ?? null);
@@ -484,16 +523,14 @@ export default function Header() {
           </button>
         )}
         <div className="header-actions" aria-label="Application">
-          <button className="header-action" onClick={() => setOverlay("search")}><Icon.search /><span>Search</span></button>
-          <button className="header-action" onClick={() => setOverlay("search")}><Icon.clock /><span>History</span></button>
+          <button className="header-action" onClick={() => setOverlay("palette")} aria-label="Search commands and actions"><Icon.search /><span>Search</span></button>
+          <button className="header-action" onClick={() => setOverlay("search")} aria-label="Search session history"><Icon.clock /><span>History</span></button>
           <button className="header-action" onClick={() => setOverlay("settings")}><Icon.gear /><span>Settings</span></button>
         </div>
         {workspaceMode !== "chat" && (
           <OverflowMenu sessionId={session?.id ?? null} onGoal={() => setGoalFormOpen((value) => !value)} />
         )}
-        <button className="header-profile" aria-label="User menu">
-          <span>PO</span><b aria-hidden="true">⌄</b>
-        </button>
+        <UserMenu />
       </header>
       {goalFormOpen && <GoalAttachForm onDone={() => setGoalFormOpen(false)} />}
     </>

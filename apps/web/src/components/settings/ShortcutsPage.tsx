@@ -1,5 +1,5 @@
-// Editable keyboard shortcuts (Settings > Shortcuts). Click a binding, press
-// the new combo; conflicts are flagged inline. Persists polyth.hotkeys.
+// Editable keyboard shortcuts (Settings > Shortcuts). Assigning an occupied
+// combo swaps the two bindings, so saved maps always have one command per key.
 import { useState, type KeyboardEvent } from "react";
 import { HOTKEY_ACTIONS, comboFromEvent, findConflicts, formatCombo, type HotkeyAction } from "@polyth/hotkeys";
 import { resetKeymap, setBinding, useKeymap } from "../../hotkeys.ts";
@@ -25,7 +25,7 @@ export default function ShortcutsPage() {
 
   return (
     <>
-      <PageHead title="Shortcuts" blurb="Click a binding and press the new key combo. Esc cancels. Also available: Esc closes overlays." />
+      <PageHead title="Shortcuts" blurb="Click a binding and press the new key combo. If it is already used, the commands swap shortcuts. Esc cancels." />
       {HOTKEY_ACTIONS.map(({ id, label }) => (
         <div key={id} className="set-row">
           <div className="set-row-text">

@@ -687,16 +687,21 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
       }
       break;
     }
+    case "goal/stopped": {
+      // Stop is a removal operation in the goal service. Clearing the client
+      // projection keeps the durable event history while allowing a fresh
+      // goal to be attached immediately.
+      model.goal = null;
+      break;
+    }
     case "goal/completed":
     case "goal/stuck":
-    case "goal/stopped":
     case "goal/paused":
     case "goal/resumed": {
       if (model.goal) {
         const statusMap: Record<string, GoalState["status"]> = {
           "goal/completed": "completed",
           "goal/stuck": "stuck",
-          "goal/stopped": "stopped",
           "goal/paused": "paused",
           "goal/resumed": "active",
         };

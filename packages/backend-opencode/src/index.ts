@@ -125,6 +125,12 @@ interface ProviderList {
         name?: string;
         limit?: { context?: number };
         cost?: { input?: number; output?: number };
+        capabilities?: {
+          attachment?: boolean;
+          toolcall?: boolean;
+          input?: Record<string, boolean>;
+          output?: Record<string, boolean>;
+        };
       }
     >;
   }>;
@@ -224,6 +230,19 @@ export const flattenModels = (body: ProviderList): ModelDescriptor[] => {
         model.cost && typeof model.cost.input === "number" && typeof model.cost.output === "number"
           ? { input: model.cost.input, output: model.cost.output }
           : undefined;
+      const capabilities: string[] = [];
+      if (model.capabilities?.attachment) capabilities.push("attachment");
+      if (model.capabilities?.toolcall) capabilities.push("toolcall");
+      for (const direction of ["input", "output"] as const) {
+        const reported = model.capabilities?.[direction];
+        if (reported === undefined) continue;
+        const modalities = Object.entries(reported)
+          .filter(([, supported]) => supported)
+          .map(([modality]) => modality)
+          .sort();
+        if (modalities.length === 0) capabilities.push(`${direction}:none`);
+        else for (const modality of modalities) capabilities.push(`${direction}:${modality}`);
+      }
       out.push({
         providerID: provider.id,
         modelID: model.id ?? key,
@@ -231,6 +250,7 @@ export const flattenModels = (body: ProviderList): ModelDescriptor[] => {
         ...(provider.name ? { providerName: provider.name } : {}),
         context: model.limit?.context,
         cost,
+        ...(model.capabilities ? { capabilities } : {}),
         connected: hasSignal ? connectedIds.has(provider.id) : true,
       });
     }

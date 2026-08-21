@@ -1,7 +1,27 @@
 // HTTP face of the git + worktrees plugin (PLAN §12).
 import type { ProjectService, SessionService } from "@polyth/contracts";
 import { pathsUnder, type GitService } from "@polyth/git";
+import { posix } from "node:path";
 import type { RouteHandler } from "../http.ts";
+
+export function assertGitRelativePath(value: string, allowEmpty = false): string {
+  if (value.length === 0 && allowEmpty) return value;
+  const portable = value.replaceAll("\\", "/");
+  const normalized = posix.normalize(portable);
+  if (
+    value.length === 0
+    || value.includes("\0")
+    || posix.isAbsolute(portable)
+    || /^[a-z]:\//i.test(portable)
+    || normalized === ".."
+    || normalized.startsWith("../")
+  ) {
+    throw Object.assign(new Error("Git path must stay within the project workspace."), {
+      code: "invalid-path",
+    });
+  }
+  return value;
+}
 
 export function gitRoutes(deps: {
   projects: ProjectService;
@@ -33,7 +53,7 @@ export function gitRoutes(deps: {
     return session.worktreePath ?? projectRoot;
   };
   const paths = (b: Record<string, unknown>): string[] =>
-    Array.isArray(b.paths) ? b.paths.map((p) => String(p)) : [];
+    Array.isArray(b.paths) ? b.paths.map((p) => assertGitRelativePath(String(p))) : [];
 
   return async ({ path, method, url, body, json }) => {
     if (!path.startsWith("/api/git") && !path.startsWith("/api/worktrees")) return false;
@@ -51,7 +71,7 @@ export function gitRoutes(deps: {
     if (path === "/api/git/diff" && method === "GET") {
       const root = await rootOf(q("projectId"), q("sessionId"));
       json(200, await git.diff(root, {
-        ...(q("path") ? { path: q("path")! } : {}),
+        ...(q("path") ? { path: assertGitRelativePath(q("path")!) } : {}),
         staged: q("staged") === "true",
         ignoreWhitespace: q("ignoreWhitespace") === "true",
       }));
@@ -107,7 +127,7 @@ export function gitRoutes(deps: {
       case "/api/git/folder": {
         // Folder actions expand against the *fresh* status, never a glob.
         const op = String(b.op ?? "");
-        const folder = String(b.folder ?? "");
+        const folder = assertGitRelativePath(String(b.folder ?? ""), true);
         const expanded = pathsUnder(await git.status(root), folder);
         if (op === "stage") await git.stage(root, [...expanded.unstaged, ...expanded.untracked, ...expanded.conflicted]);
         else if (op === "unstage") await git.unstage(root, expanded.staged);

@@ -11,6 +11,7 @@ import SessionList from "./sidebar/SessionList.tsx";
 import ImportSessionsDialog from "./ImportSessionsDialog.tsx";
 import { useShellMode } from "../responsiveShell.ts";
 import { useModalSurface } from "./a11y/Dialog.tsx";
+import { useDismissibleMenu } from "./a11y/Menu.ts";
 import SlotHost from "./slots/SlotHost.ts";
 import { useSidebarExpanded } from "../sidebarPresentation.ts";
 import { setSidebarViewMode, useSidebarViewMode } from "../sidebarPrefs.ts";
@@ -90,6 +91,14 @@ export default function Sidebar() {
   const [dragWidth, setDragWidth] = useState<number | null>(null);
   const width = dragWidth ?? layout.width;
   const navRef = useRef<HTMLElement>(null);
+  const projectMenuRef = useRef<HTMLDivElement>(null);
+  const projectMenuTriggerRef = useRef<HTMLButtonElement>(null);
+  const onProjectMenuKey = useDismissibleMenu({
+    open: projectMenu !== null,
+    menuRef: projectMenuRef,
+    triggerRef: projectMenuTriggerRef,
+    onClose: () => setProjectMenu(null),
+  });
   const prevCompact = useRef(compact);
   useEffect(() => {
     if (!prevCompact.current && compact) closeDrawer();
@@ -281,10 +290,19 @@ export default function Sidebar() {
                   aria-label={`Actions for ${p.name || p.path}`}
                   aria-haspopup="menu"
                   aria-expanded={projectMenu === p.id}
-                  onClick={() => setProjectMenu((current) => current === p.id ? null : p.id)}
+                  onClick={(event) => {
+                    projectMenuTriggerRef.current = event.currentTarget;
+                    setProjectMenu((current) => current === p.id ? null : p.id);
+                  }}
                 >⋯</button>
                 {projectMenu === p.id && (
-                  <div className="project-actions-menu" role="menu">
+                  <div
+                    className="project-actions-menu"
+                    role="menu"
+                    aria-label={`Actions for ${p.name || p.path}`}
+                    ref={projectMenuRef}
+                    onKeyDown={onProjectMenuKey}
+                  >
                     <button role="menuitem" onClick={() => {
                       setProjectMenu(null);
                       if (p.id !== activeProjectId) activateProject(p.id);

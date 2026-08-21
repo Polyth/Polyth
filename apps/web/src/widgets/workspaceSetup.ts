@@ -21,6 +21,16 @@ export interface WorkspaceSetupDraft {
   widgetIds: string[];
 }
 
+export const MIN_SETUP_WIDGETS = 5;
+export const MAX_SETUP_WIDGETS = 8;
+
+export function validSetupWidgetCount(widgetIds: readonly string[]): boolean {
+  const unique = new Set(widgetIds);
+  return unique.size === widgetIds.length
+    && unique.size >= MIN_SETUP_WIDGETS
+    && unique.size <= MAX_SETUP_WIDGETS;
+}
+
 export interface WorkflowOption {
   id: SetupWorkflow;
   label: string;

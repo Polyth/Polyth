@@ -1,6 +1,6 @@
-// Local UI settings (Settings overlay pages). All persisted in localStorage
-// under polyth.settings; visual prefs apply as data attributes on <body> so
-// CSS picks them up without component churn.
+// Local UI settings (Settings overlay pages). UI preferences use a dedicated,
+// versioned record; `polyth.settings` is read only as a one-time migration
+// source because older builds shared it with product-level settings.
 import { useSyncExternalStore } from "react";
 
 export type FollowUpBehavior = "steer" | "queue" | "interrupt";
@@ -46,7 +46,8 @@ export interface UiSettings {
   mcpServers: Array<{ name: string; url: string }>;
 }
 
-export const UI_SETTINGS_KEY = "polyth.settings";
+export const UI_SETTINGS_KEY = "polyth.uiSettings.v1";
+export const LEGACY_UI_SETTINGS_KEY = "polyth.settings";
 
 export const UI_DEFAULTS: UiSettings = {
   density: "comfortable",
@@ -126,7 +127,17 @@ export function parseUiSettings(raw: string | null): UiSettings {
 }
 
 const read = (): string | null => {
-  try { return localStorage.getItem(UI_SETTINGS_KEY); } catch { return null; }
+  try {
+    const current = localStorage.getItem(UI_SETTINGS_KEY);
+    if (current !== null) return current;
+    const legacy = localStorage.getItem(LEGACY_UI_SETTINGS_KEY);
+    if (legacy === null) return null;
+    const migrated = JSON.stringify(parseUiSettings(legacy));
+    localStorage.setItem(UI_SETTINGS_KEY, migrated);
+    return migrated;
+  } catch {
+    return null;
+  }
 };
 const write = (v: string): void => {
   try { localStorage.setItem(UI_SETTINGS_KEY, v); } catch { /* private mode */ }

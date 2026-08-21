@@ -1224,6 +1224,13 @@ input.notification-preview { font-family: var(--mono); font-size: 12.5px; min-wi
   box-shadow: 0 16px 48px rgba(0, 0, 0, 0.55);
   overflow: hidden; display: flex; flex-direction: column; gap: 0; padding: 0;
 }
+.palette-heading {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 14px;
+  padding: 11px 16px 9px; border-bottom: 1px solid var(--border-soft);
+  background: color-mix(in srgb, var(--accent-wash) 45%, var(--panel));
+}
+.palette-heading-title { color: var(--text); font-size: 13px; font-weight: 700; }
+.palette-heading-description { color: var(--muted); font-size: 11px; text-align: right; }
 .palette-input {
   width: 100%; border: none; border-bottom: 1px solid var(--border-soft); border-radius: 0;
   background: transparent; padding: 13px 16px; font-size: 14px;
@@ -1914,6 +1921,22 @@ html.light .switch:hover { background: var(--border); }
   background: var(--raised); color: var(--text);
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.3), inset 0 1px 0 rgba(255, 255, 255, 0.05);
 }
+.workspace-preset-seg { flex-wrap: wrap; justify-content: flex-end; }
+.workspace-preset-seg button {
+  height: auto; min-height: 32px; display: flex; align-items: center; gap: 7px;
+  padding: 5px 9px; border: 1px solid transparent;
+}
+.workspace-preset-seg button.on {
+  border-color: var(--accent); background: var(--accent); color: var(--accent-ink);
+  box-shadow: 0 0 0 2px var(--panel), 0 0 0 4px var(--accent-line);
+  font-weight: 700;
+}
+.workspace-preset-choice { display: inline-flex; align-items: center; gap: 5px; }
+.workspace-preset-check { width: 12px; font-weight: 800; text-align: center; }
+.workspace-preset-current {
+  padding: 1px 5px; border: 1px solid currentColor; border-radius: 999px;
+  font-size: 9px; font-weight: 800; letter-spacing: .04em; text-transform: uppercase;
+}
 
 /* range */
 .rng { display: flex; align-items: center; gap: 11px; }
@@ -2288,8 +2311,22 @@ body[data-motion="reduced"] .ft-chevron svg { transition: none; }
 .set-page-head h3 { margin: 12px 0 2px; }
 .set-page-head p { margin: 2px 0 6px; font-size: 12.5px; }
 @media (max-width: 700px) {
-  .settings-shell { flex-direction: column; height: 84vh; }
-  .settings-nav { width: 100%; min-width: 0; max-height: 180px; border-right: none; border-bottom: 1px solid var(--border-soft); }
+  .settings-shell { flex-direction: column; height: 88vh; }
+  .settings-nav {
+    width: 100%; min-width: 0; max-height: none; flex: none;
+    border-right: none; border-bottom: 1px solid var(--border-soft);
+  }
+  .settings-nav-head, .settings-nav > .nav-foot { display: none; }
+  .settings-nav-search { flex: none; margin-top: 8px; }
+  .settings-nav-list {
+    flex: none; min-height: 44px; padding: 0 8px 8px;
+    flex-direction: row; align-items: center; gap: 4px;
+    overflow-x: auto; overflow-y: hidden; scrollbar-width: thin;
+  }
+  .settings-nav-group { display: none; }
+  .settings-nav-item { flex: none; white-space: nowrap; }
+  .settings-results { max-height: 180px; overflow-y: auto; }
+  .settings-pane { min-height: 0; }
 }
 
 /* settings rows + controls */
@@ -3966,7 +4003,9 @@ body[data-density="balanced"] .composer { padding-block: 10px; }
 .header-actions { display: flex; align-items: center; gap: 2px; }
 .header-action:hover { color: var(--text); background: var(--bg); }
 .header-new-session { width: auto; display: flex; gap: 6px; padding: 0 10px; border: 1px solid var(--border-soft); }
+.header-user-menu { position: relative; flex: none; }
 .header-profile { display: flex; align-items: center; gap: 6px; padding: 0 4px; border: 0; background: transparent; }
+.user-menu-popup { top: calc(100% + 7px); min-width: 180px; }
 .header-profile > span {
   display: grid; place-items: center; width: 31px; height: 31px; border-radius: 50%;
   background: #3d4756; color: white; font-size: 10px; font-weight: 700;
@@ -3980,9 +4019,16 @@ body[data-density="balanced"] .composer { padding-block: 10px; }
 .app .overflow-trigger { width: 34px; height: 34px; }
 .app .workspace { background: var(--elevated); }
 .app.view-session .statusbar { display: none; }
-.app.view-session.mode-chat .railbar,
-.app.view-session.mode-widgets .railbar,
-.app.view-session.mode-edit .railbar { display: none; }
+.app.view-session.mode-chat .railbar:not(.railbar-open),
+.app.view-session.mode-widgets .railbar:not(.railbar-open),
+.app.view-session.mode-edit .railbar:not(.railbar-open) { display: none; }
+
+.turn-error {
+  display: flex; align-items: center; flex-wrap: wrap; gap: 8px;
+  max-width: 100%; padding: 10px 12px; border: 1px solid color-mix(in srgb, var(--red) 35%, var(--border));
+  border-radius: var(--radius-md); background: color-mix(in srgb, var(--red) 7%, var(--elevated));
+}
+.turn-error-text { flex: 1 1 280px; min-width: 0; overflow-wrap: anywhere; }
 
 /* Quiet project/session rail. */
 .sidebar { width: 258px; min-width: 258px; background: color-mix(in srgb, var(--panel) 50%, var(--elevated)); }
@@ -4854,4 +4900,39 @@ body[data-quick-actions="false"] [data-widget-id="core.quick-actions"] { display
 
 @media (max-width: 760px) {
   .plugin-card-grid { grid-template-columns: 1fr; }
+}
+
+/* Keep the phone Settings navigator after all theme/workbench overrides in
+   the cascade. It is a horizontal page strip; page content scrolls below it. */
+@media (max-width: 700px) {
+  .settings-shell { flex-direction: column; height: 92dvh; }
+  .settings-nav {
+    width: 100%; min-width: 0; max-height: none; flex: none; padding-bottom: 0;
+    border-right: none; border-bottom: 1px solid var(--border-soft);
+  }
+  .settings-nav-head, .settings-nav > .nav-foot { display: none; }
+  .settings-nav-search { flex: none; margin: 8px 10px; }
+  .settings-nav-list {
+    flex: none; min-height: 44px; padding: 0 8px 8px;
+    flex-direction: row; align-items: center; gap: 4px;
+    overflow-x: auto; overflow-y: hidden; scrollbar-width: thin;
+  }
+  .settings-nav-group { display: none; }
+  .settings-nav-item { flex: none; white-space: nowrap; }
+  .settings-results { max-height: 180px; overflow-y: auto; }
+  .settings-pane { min-height: 0; }
+  .settings-pane-body { padding-inline: 20px; }
+  .settings-pane-body .set-row {
+    align-items: stretch; flex-direction: column; gap: 10px;
+  }
+  .settings-pane-body .set-row-control {
+    width: 100%; min-width: 0; flex-shrink: 1; justify-content: flex-start;
+  }
+  .settings-pane-body .set-row-control > input,
+  .settings-pane-body .set-row-control > select,
+  .settings-pane-body .set-row-control > textarea { width: 100%; max-width: 100%; }
+  .workspace-preset-seg { width: 100%; justify-content: flex-start; }
+  .workspace-preset-seg button {
+    flex: 1 1 calc(50% - 2px); justify-content: center;
+  }
 }

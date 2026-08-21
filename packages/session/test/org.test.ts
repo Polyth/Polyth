@@ -44,6 +44,29 @@ test("folders: create/list/update; cycles, cross-project moves and stale revisio
   await store.close();
 });
 
+test("folder names are normalized and unique within each parent", async () => {
+  const store = freshStore();
+  const roadmap = await store.folderCreate("p1", "Roadmap");
+  await assert.rejects(
+    () => store.folderCreate("p1", "  ＲＯＡＤＭＡＰ  "),
+    (error: Error & { code?: string }) => error.code === "conflict",
+  );
+
+  const parent = await store.folderCreate("p1", "Parent");
+  const nested = await store.folderCreate("p1", "Roadmap", parent.id);
+  assert.equal(nested.parentId, parent.id, "the same name remains valid in a different parent");
+  await assert.rejects(
+    () => store.folderUpdate(nested.id, { parentId: null }, nested.revision),
+    (error: Error & { code?: string }) => error.code === "conflict",
+  );
+  await assert.rejects(
+    () => store.folderUpdate(parent.id, { name: "roadmap" }, parent.revision),
+    (error: Error & { code?: string }) => error.code === "conflict",
+  );
+  assert.equal((await store.folderList("p1")).find((folder) => folder.id === roadmap.id)?.name, "Roadmap");
+  await store.close();
+});
+
 test("folder remove reparents children to the removed folder's parent", async () => {
   const store = freshStore();
   const a = await store.folderCreate("p1", "A");
@@ -56,6 +79,23 @@ test("folder remove reparents children to the removed folder's parent", async ()
   const listed = await store.folderList("p1");
   const cRow = listed.find((f) => f.name === "C")!;
   assert.equal(cRow.parentId, a.id); // hoisted to grandparent
+  await store.close();
+});
+
+test("folder remove refuses to hoist a child onto a duplicate destination", async () => {
+  const store = freshStore();
+  await store.folderCreate("p1", "Existing");
+  const container = await store.folderCreate("p1", "Container");
+  await store.folderCreate("p1", "existing", container.id);
+
+  await assert.rejects(
+    () => store.folderRemove(container.id),
+    (error: Error & { code?: string }) => error.code === "conflict",
+  );
+  assert.deepEqual(
+    (await store.folderList("p1")).map((folder) => folder.name),
+    ["Existing", "Container", "existing"],
+  );
   await store.close();
 });
 

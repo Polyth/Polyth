@@ -121,7 +121,7 @@ export default function CommandPalette() {
     <div className="scrim palette-overlay" onMouseDown={(e) => { if (e.target === e.currentTarget) setOverlay(null); }}>
       <div
         ref={panelRef}
-        className="palette"
+        className="dialog-panel palette"
         onMouseDown={(e) => e.stopPropagation()}
         role="dialog"
         aria-modal="true"
@@ -129,6 +129,12 @@ export default function CommandPalette() {
         aria-describedby="palette-close-hint"
         tabIndex={-1}
       >
+      <div className="palette-heading">
+        <span className="palette-heading-title">Search workspace</span>
+        <span className="palette-heading-description">
+          Commands, projects, sessions, and files
+        </span>
+      </div>
       <input
         className="palette-input"
         value={q}

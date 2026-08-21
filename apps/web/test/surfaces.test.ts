@@ -3,6 +3,7 @@
 // polyth.railPrefs parsing.
 import test from "node:test";
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 import {
   listSurfaces, registerSurface, slotSurfaces, visibleSurfaces,
   type RailSurface, type RailSurfaceContext,
@@ -102,4 +103,12 @@ test("parseRailPrefs round-trips, clamps widths, survives garbage", () => {
   assert.equal(clampRailWidth(10), 240);
   assert.equal(clampRailWidth(10_000), 640);
   assert.equal(RAIL_WIDTH_DEFAULT, 344);
+});
+
+test("the built-in Usage surface is always available and owns a zero-token empty state", async () => {
+  const source = await readFile(new URL("../src/components/railSurfaces.tsx", import.meta.url), "utf8");
+  const registration = source.slice(source.indexOf('id: "usage"'), source.indexOf('id: "events"'));
+  assert.ok(registration.includes("component: UsagePanel"));
+  assert.ok(!registration.includes("visible:"), "zero tokens never hide the Usage command");
+  assert.ok(source.includes("Token and cost totals appear once the session runs."));
 });

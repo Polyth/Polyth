@@ -17,7 +17,8 @@ const {
   ATTACHMENT_COMPAT_NOTE, CATALOG_LOADING, OPEN_PROJECT_FIRST, OPEN_SESSION_FIRST,
   SHELL_DRAFT_BLOCK, addMenuRows, autocompleteOptionId, catalogFromResult,
   commandAutocomplete, contextTokensLabel, fileAutocomplete, modelDetail,
-  planCommandInsert, planShellEntry, planSigilInsert, snippetAutocomplete,
+  modelDisplayName, modelSupportsTextWorkflow, planCommandInsert, planShellEntry,
+  planSigilInsert, snippetAutocomplete,
 } = await import("../src/composer/discovery.ts");
 const { activeToken, composerMode } = await import("../src/composer/language.ts");
 const { classifyGithubAttach, parseGithubUrl } = await import("../src/attachments.ts");
@@ -234,6 +235,23 @@ test("model detail renders only contract-supplied fields — no cost/modality/va
     }
   }
   assert.equal(ATTACHMENT_COMPAT_NOTE, "Attachment compatibility is not reported by this provider");
+});
+
+test("text workflows reject reported non-text modalities and distinguish duplicate names", () => {
+  assert.equal(modelSupportsTextWorkflow({}), true, "legacy catalogs without modality metadata remain usable");
+  assert.equal(modelSupportsTextWorkflow({ capabilities: ["input:text", "output:text", "toolcall"] }), true);
+  assert.equal(modelSupportsTextWorkflow({ capabilities: ["input:text", "output:image"] }), false);
+  assert.equal(modelSupportsTextWorkflow({ capabilities: ["input:audio", "output:text"] }), false);
+  assert.equal(modelSupportsTextWorkflow({ capabilities: ["input:text", "output:none"] }), false);
+
+  const catalog = [
+    { providerID: "google", modelID: "nano-v1", name: "Nano Banana" },
+    { providerID: "vertex", modelID: "nano-v2-preview", name: "  nano   banana  " },
+    { providerID: "openai", modelID: "gpt", name: "GPT" },
+  ];
+  assert.equal(modelDisplayName(catalog[0]!, catalog), "Nano Banana · google/nano-v1");
+  assert.equal(modelDisplayName(catalog[1]!, catalog), "nano   banana · vertex/nano-v2-preview");
+  assert.equal(modelDisplayName(catalog[2]!, catalog), "GPT");
 });
 
 // ---------------------------------------------------------------- GitHub links

@@ -66,6 +66,8 @@ test("refresh at /p/:projectId/s/:sessionId replays: shell + every asset boots",
     const assets = assetUrlsOf(html, route);
     assert.ok(assets.some((u) => u.pathname.endsWith(".js")), "shell references a JS module");
     assert.ok(assets.some((u) => u.pathname.endsWith(".css")), "shell references a stylesheet");
+    assert.ok(assets.some((u) => u.protocol === "data:"), "the favicon is embedded and cannot create a startup 404");
+    assert.equal(assets.some((u) => u.pathname === "/favicon.ico"), false);
     for (const asset of assets) {
       assert.ok(
         !asset.pathname.startsWith("/p/"),

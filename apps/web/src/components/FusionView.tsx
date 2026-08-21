@@ -5,10 +5,12 @@ import { useActiveModel, useStore } from "../store.ts";
 import { modelBadge } from "../format.ts";
 import { renderMarkdown } from "../markdown.tsx";
 import EmptyState from "./EmptyState.tsx";
+import { modelDisplayName, modelSupportsTextWorkflow } from "../composer/discovery.ts";
 
 export default function FusionView() {
   const sessionId = useStore((s) => s.activeSessionId);
   const models = useStore((s) => s.models);
+  const textModels = models.filter(modelSupportsTextWorkflow);
   const reduced = useActiveModel();
   const fromLog = reduced.fusion;
   const promptFromLog = reduced.fusionPrompt;
@@ -20,11 +22,11 @@ export default function FusionView() {
   const [error, setError] = useState("");
 
   const q = modelFilter.toLowerCase();
-  const filteredModels = q ? models.filter((m) => (m.modelID + m.name + m.providerID).toLowerCase().includes(q)) : models;
+  const filteredModels = q ? textModels.filter((m) => (m.modelID + m.name + m.providerID).toLowerCase().includes(q)) : textModels;
   const MAX_CHIPS = 36;
   const visibleModels = filteredModels.slice(0, MAX_CHIPS);
   const shownChips = [
-    ...models.filter((m) => picked.includes(`${m.providerID}/${m.modelID}`) && !visibleModels.includes(m)),
+    ...textModels.filter((m) => picked.includes(`${m.providerID}/${m.modelID}`) && !visibleModels.includes(m)),
     ...visibleModels,
   ];
 
@@ -112,7 +114,7 @@ export default function FusionView() {
                 onClick={() => toggle(key)}
               >
                 <i style={{ background: badge.color }} />
-                {m.name ?? m.modelID}
+                {modelDisplayName(m, textModels)}
               </button>
             );
           })}

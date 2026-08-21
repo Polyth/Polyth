@@ -269,5 +269,32 @@ export function modelDetail(m: {
   return parts.join(" · ");
 }
 
+/** Providers that report modality metadata must support text input and text
+ * output to appear in chat/coding workflows. Older providers without a
+ * normalized modality report remain available for backward compatibility. */
+export function modelSupportsTextWorkflow(m: { capabilities?: string[] }): boolean {
+  const capabilities = m.capabilities ?? [];
+  const reportsInput = capabilities.some((capability) => capability.startsWith("input:"));
+  const reportsOutput = capabilities.some((capability) => capability.startsWith("output:"));
+  return (!reportsInput || capabilities.includes("input:text"))
+    && (!reportsOutput || capabilities.includes("output:text"));
+}
+
+/** Human labels stay concise when unique and gain a stable provider/model
+ * suffix only when catalog names collide. */
+export function modelDisplayName(
+  model: { providerID: string; modelID: string; name: string },
+  catalog: readonly { providerID: string; modelID: string; name: string }[],
+): string {
+  const name = model.name.trim() || model.modelID;
+  const nameKey = name.normalize("NFKC").replace(/\s+/g, " ").toLocaleLowerCase();
+  const duplicates = catalog.filter((candidate) =>
+    (candidate.name.trim() || candidate.modelID)
+      .normalize("NFKC")
+      .replace(/\s+/g, " ")
+      .toLocaleLowerCase() === nameKey);
+  return duplicates.length > 1 ? `${name} · ${model.providerID}/${model.modelID}` : name;
+}
+
 export const ATTACHMENT_COMPAT_NOTE =
   "Attachment compatibility is not reported by this provider";

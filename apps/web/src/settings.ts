@@ -1,5 +1,6 @@
-// Local UI preferences persisted under localStorage["polyth.settings"],
-// plus DOM-free error-message helpers. Pure parts are covered by smoke tests.
+// Product-level preferences have their own versioned storage record. Older
+// builds shared `polyth.settings` with UI preferences, so load performs a
+// one-time copy without ever writing the legacy key again.
 import { applyThemeSetting } from "./theme.ts";
 
 export interface PolythSettings {
@@ -18,7 +19,8 @@ export interface PolythSettings {
   branchTemplate: string; // git preference, e.g. "feat/{slug}"
 }
 
-export const SETTINGS_KEY = "polyth.settings";
+export const SETTINGS_KEY = "polyth.productSettings.v1";
+export const LEGACY_SETTINGS_KEY = "polyth.settings";
 
 export const DEFAULT_SETTINGS: PolythSettings = {
   theme: "light",
@@ -77,7 +79,13 @@ export function serializeSettings(s: PolythSettings): string {
 
 export function loadSettings(): PolythSettings {
   try {
-    if (typeof localStorage !== "undefined") return parseSettings(localStorage.getItem(SETTINGS_KEY));
+    if (typeof localStorage !== "undefined") {
+      const current = localStorage.getItem(SETTINGS_KEY);
+      if (current !== null) return parseSettings(current);
+      const migrated = parseSettings(localStorage.getItem(LEGACY_SETTINGS_KEY));
+      localStorage.setItem(SETTINGS_KEY, serializeSettings(migrated));
+      return migrated;
+    }
   } catch {
     // storage unavailable (private mode, node)
   }

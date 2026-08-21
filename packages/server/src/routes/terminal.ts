@@ -82,6 +82,9 @@ export function terminalRoutes(deps: {
     }
     const m = path.match(/^\/api\/terminals\/([^/]+)$/);
     if (m && method === "POST") { // /input
+      if (!terminals.get(m[1]!)) {
+        throw Object.assign(new Error("unknown terminal"), { code: "not-found" });
+      }
       const b = await body();
       terminals.write(m[1]!, String(b.data ?? ""));
       json(200, { ok: true });

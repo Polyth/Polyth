@@ -21,7 +21,9 @@ import {
   catalogFromResult,
   commandAutocomplete,
   fileAutocomplete,
+  modelDisplayName,
   modelDetail,
+  modelSupportsTextWorkflow,
   OPEN_PROJECT_FIRST,
   planCommandInsert,
   planShellEntry,
@@ -84,6 +86,7 @@ export default function Composer({ variant = "docked" }: { variant?: "docked" | 
   const [goalFormOpen, setGoalFormOpen] = useState(false);
   const profiles = useProfiles();
   const models = useStore((s) => s.models);
+  const chatModels = models.filter(modelSupportsTextWorkflow);
   const agents = useStore((s) => s.agents);
   const settings = useStore((s) => s.settings);
   const session = useStore((s) => s.sessions.find((x) => x.id === s.activeSessionId) ?? null);
@@ -96,7 +99,7 @@ export default function Composer({ variant = "docked" }: { variant?: "docked" | 
   const presentation = usePresentation();
   const starters = starterLabelsFor(presetState.presetId, presentation.starterOrder);
   const techOpen = effectiveComposerDetail() === "technical";
-  const noModels = models.length === 0;
+  const noModels = chatModels.length === 0;
   const simpleMode = useWorkspaceMode() === "chat";
   const lightFocusComposer = simpleMode && variant === "docked";
   const ui = useUiSettings();
@@ -544,15 +547,21 @@ export default function Composer({ variant = "docked" }: { variant?: "docked" | 
   // Favorites float first (Settings > Providers & Models); picking records recency.
   const modelPrefs = useModelPrefs();
   const preferredModel = parseModelRef(settings.defaultModel);
-  const recommendedModel = session?.model ?? preferredModel ?? models[0];
+  const recommendedModel = session?.model && chatModels.some((candidate) =>
+    candidate.providerID === session.model?.providerID && candidate.modelID === session.model?.modelID)
+    ? session.model
+    : preferredModel && chatModels.some((candidate) =>
+        candidate.providerID === preferredModel.providerID && candidate.modelID === preferredModel.modelID)
+      ? preferredModel
+      : chatModels[0];
   const modelItems: PickerItem[] = [
     {
       id: "",
-      label: `Auto · ${modelPickerDefaultLabel(session?.model, models, preferredModel).replace(/^Default:\s*/, "")}`,
+      label: `Auto · ${modelPickerDefaultLabel(undefined, chatModels, recommendedModel).replace(/^Default:\s*/, "")}`,
       group: "Recommended",
       detail: "Let Polyth use your current workspace default",
     },
-    ...sortModels(models, modelPrefs).filter((model) => !(
+    ...sortModels(chatModels, modelPrefs).filter((model) => !(
       recommendedModel
       && model.providerID === recommendedModel.providerID
       && model.modelID === recommendedModel.modelID
@@ -561,7 +570,7 @@ export default function Composer({ variant = "docked" }: { variant?: "docked" | 
       const recent = modelPrefs.recents.includes(modelKey(m));
       return {
         id: JSON.stringify({ providerID: m.providerID, modelID: m.modelID }),
-        label: fav ? `★ ${m.name || m.modelID}` : m.name || m.modelID,
+        label: `${fav ? "★ " : ""}${modelDisplayName(m, chatModels)}`,
         group: fav ? "Favorites" : recent ? "Recent" : "All models",
         // Honest model detail: provider + numeric context + reported
         // connection only. No cost/modality/variant/attachment guesses.

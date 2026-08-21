@@ -38,6 +38,7 @@ import {
   missingWidgetPlaceholders,
   pluginDisplayName,
   supportedWidgetZones,
+  widgetPluginOptions,
 } from "../../widgets/widgetLibrary.ts";
 import { planWorkspaceCustomization } from "../../widgets/workspaceCustomize.ts";
 import { setWorkspaceMode } from "../../widgets/workspaceMode.ts";
@@ -427,9 +428,9 @@ export default function WidgetsPage() {
               <button type="button" onClick={() => setLibraryOpen(true)}>Browse all widgets →</button>
             </div>
             <div className="widget-plugin-chips">
-              {[...new Map(widgets.map((widget) => [widget.pluginId, pluginDisplayName(widget)])).entries()].map(([id, name]) => (
+              {widgetPluginOptions(widgets).map(({ id, label }) => (
                 <button type="button" key={id} onClick={() => setLibraryOpen(true)}>
-                  <span>{name.slice(0, 1)}</span><strong>{name}</strong>
+                  <span>{label.slice(0, 1)}</span><strong>{label}</strong>
                   <small>{widgets.filter((widget) => widget.pluginId === id).length}</small>
                 </button>
               ))}

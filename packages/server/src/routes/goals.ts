@@ -18,8 +18,8 @@ export function goalRoutes(goals: GoalService): RouteHandler {
       const b = await body();
       const state = await goals.attach(sessionId, {
         objective: String(b.objective ?? ""),
-        ...(b.budgetTokens ? { budgetTokens: Number(b.budgetTokens) } : {}),
-        ...(b.maxContinuations ? { maxContinuations: Number(b.maxContinuations) } : {}),
+        ...(b.budgetTokens !== undefined ? { budgetTokens: Number(b.budgetTokens) } : {}),
+        ...(b.maxContinuations !== undefined ? { maxContinuations: Number(b.maxContinuations) } : {}),
       });
       json(200, state);
       return true;

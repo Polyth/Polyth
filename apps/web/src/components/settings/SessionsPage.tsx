@@ -9,6 +9,7 @@ import {
 import { friendlyError } from "../../settings.ts";
 import { setGlobalDefaultModel, useSessionDefaults } from "../../sessionDefaults.ts";
 import { EmptyState, PageHead, Row, Toggle } from "./parts.tsx";
+import { modelDisplayName, modelSupportsTextWorkflow } from "../../composer/discovery.ts";
 
 const modelKey = (model: ModelRef): string => `${model.providerID}/${model.modelID}`;
 
@@ -16,6 +17,7 @@ export default function SessionsPage() {
   const activeProjectId = useStore((s) => s.activeProjectId);
   const projects = useStore((s) => s.projectRegistry.projects);
   const models = useStore((s) => s.models);
+  const textModels = models.filter(modelSupportsTextWorkflow);
   const agents = useStore((s) => s.agents);
   const settings = useStore((s) => s.settings);
   const globalDefaults = useSessionDefaults();
@@ -31,7 +33,7 @@ export default function SessionsPage() {
   const projectValue = project?.defaults?.model ? modelKey(project.defaults.model) : "";
 
   const modelFrom = (value: string): ModelRef | undefined => {
-    const model = models.find((candidate) => modelKey(candidate) === value);
+    const model = textModels.find((candidate) => modelKey(candidate) === value);
     return model ? { providerID: model.providerID, modelID: model.modelID } : undefined;
   };
 
@@ -70,9 +72,9 @@ export default function SessionsPage() {
           }}
         >
           <option value="">Server default</option>
-          {models.map((model) => (
+          {textModels.map((model) => (
             <option key={modelKey(model)} value={modelKey(model)}>
-              {model.providerName ?? model.providerID} / {model.name || model.modelID}
+              {modelDisplayName(model, textModels)}
             </option>
           ))}
         </select>
@@ -114,9 +116,9 @@ export default function SessionsPage() {
               })}
             >
               <option value="">Use global default</option>
-              {models.map((model) => (
+              {textModels.map((model) => (
                 <option key={modelKey(model)} value={modelKey(model)}>
-                  {model.providerName ?? model.providerID} / {model.name || model.modelID}
+                  {modelDisplayName(model, textModels)}
                 </option>
               ))}
             </select>

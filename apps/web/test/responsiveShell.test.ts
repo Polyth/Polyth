@@ -177,6 +177,48 @@ test("Settings occupies the viewport and preserves a usable widget inspector col
   assert.ok(css.includes("clamp(286px, 21vw, 320px)"), "widget inspector retains a dedicated right column");
 });
 
+test("open rails remain visible in every workspace mode", async () => {
+  const rail = await read("../src/components/ContextRail.tsx");
+  const css = await read("../src/styles.css");
+  assert.ok(rail.includes('`railbar${open ? " railbar-open" : ""}`'), "the host marks an active surface");
+  for (const mode of ["chat", "widgets", "edit"]) {
+    assert.ok(
+      css.includes(`.app.view-session.mode-${mode} .railbar:not(.railbar-open)`),
+      `${mode} hides only an inactive rail host`,
+    );
+  }
+  assert.ok(!/mode-chat \.railbar\s*[,{][^}]*display:\s*none/.test(css), "Chat never hides an active rail");
+});
+
+test("mobile Settings uses a horizontal page navigator with independent content scrolling", async () => {
+  const css = await read("../src/styles.css");
+  const finalBreakpoint = css.lastIndexOf("@media (max-width: 700px)");
+  assert.ok(finalBreakpoint > css.indexOf("Settings uses the viewport"), "mobile rules follow desktop workbench overrides");
+  const mobile = css.slice(finalBreakpoint);
+  assert.match(mobile, /\.settings-nav-list\s*\{[^}]*flex-direction:\s*row/);
+  assert.match(mobile, /\.settings-nav-list\s*\{[^}]*overflow-x:\s*auto/);
+  assert.match(mobile, /\.settings-pane\s*\{[^}]*min-height:\s*0/);
+  assert.match(mobile, /\.settings-pane-body \.set-row\s*\{[^}]*flex-direction:\s*column/);
+  assert.match(mobile, /\.settings-pane-body \.set-row-control\s*\{[^}]*width:\s*100%/);
+  assert.match(mobile, /\.workspace-preset-seg button\s*\{[^}]*flex:\s*1 1 calc\(50% - 2px\)/);
+  assert.doesNotMatch(mobile, /\.settings-nav\s*\{[^}]*max-height:\s*180px/);
+});
+
+test("shared menu, destructive, failed-turn, and header-action contracts stay wired", async () => {
+  const sidebar = await read("../src/components/Sidebar.tsx");
+  const header = await read("../src/components/Header.tsx");
+  const sessions = await read("../src/components/sidebar/SessionList.tsx");
+  const plugins = await read("../src/components/settings/pages.tsx");
+  const css = await read("../src/styles.css");
+  assert.ok(sidebar.includes("useDismissibleMenu"), "project actions consume the shared menu contract");
+  assert.ok(header.includes("useDismissibleMenu"), "the user menu consumes the shared menu contract");
+  assert.ok(header.includes('setOverlay("palette")'), "Search opens the command/action palette");
+  assert.ok(header.includes('setOverlay("search")'), "History opens session history search");
+  assert.ok(sessions.includes("window.confirm"), "every permanent session deletion is guarded");
+  assert.ok(plugins.includes('disabled={!sourceValid}'), "plugin install stays disabled until minimally valid");
+  assert.match(css, /\.turn-error\s*\{[^}]*display:\s*flex[^}]*flex-wrap:\s*wrap[^}]*gap:\s*8px/);
+});
+
 test("hero and docked composers expose the shared stable focus target", async () => {
   const composer = await read("../src/components/Composer.tsx");
   const input = await read("../src/components/input/AdaptiveTextInput.tsx");

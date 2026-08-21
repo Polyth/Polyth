@@ -3,15 +3,24 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "engines": {
+    "node": ">=22.18.0"
+  },
   "workspaces": [
     "packages/*",
     "apps/*"
   ],
   "scripts": {
+    "check:node": "node scripts/check-node.mjs",
+    "preinstall": "node scripts/check-node.mjs",
+    "prebuild": "node scripts/check-node.mjs",
     "build:web": "node apps/web/build.ts",
     "build": "npm run build:web",
+    "prestart": "node scripts/check-node.mjs",
     "start": "node packages/server/src/index.ts",
+    "predev": "node scripts/check-node.mjs",
     "dev": "npm run build:web && node packages/server/src/index.ts",
+    "pretest": "node scripts/check-node.mjs",
     "test": "node --test packages/*/test/*.test.ts apps/*/test/*.test.ts"
   },
   "devDependencies": {

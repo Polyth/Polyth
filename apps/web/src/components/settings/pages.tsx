@@ -82,6 +82,11 @@ function WorkspacePresetSection() {
   const current = state.presetId
     ? WORKSPACE_PRESETS.find((p) => p.id === state.presetId)?.label ?? state.presetId
     : NO_PRESET_CARD.label;
+  const presetOptions: Array<[WorkspacePresetId | "none", string]> = [
+    ...WORKSPACE_PRESETS.map((p): [WorkspacePresetId | "none", string] => [p.id, p.label]),
+    ["none", NO_PRESET_CARD.label],
+  ];
+  const currentId: WorkspacePresetId | "none" = state.presetId ?? "none";
 
   return (
     <>
@@ -90,14 +95,28 @@ function WorkspacePresetSection() {
         hint={`Current: ${current}. A preset changes starter actions, workspace order, and initial detail — it never hides tools or changes what you can do.`}
         itemId="general.workspacePreset"
       >
-        <Seg
-          value={draft}
-          options={[
-            ...WORKSPACE_PRESETS.map((p): [WorkspacePresetId | "none", string] => [p.id, p.label]),
-            ["none", NO_PRESET_CARD.label],
-          ]}
-          onChange={(v) => { setDraft(v); setPreview(null); }}
-        />
+        <div className="seg workspace-preset-seg" role="radiogroup" aria-label="Workspace preset">
+          {presetOptions.map(([id, label]) => {
+            const selected = draft === id;
+            const applied = currentId === id;
+            return (
+              <button
+                key={id}
+                type="button"
+                className={selected ? "on" : ""}
+                role="radio"
+                aria-checked={selected}
+                onClick={() => { setDraft(id); setPreview(null); }}
+              >
+                <span className="workspace-preset-choice">
+                  <span className="workspace-preset-check" aria-hidden="true">{selected ? "✓" : ""}</span>
+                  {label}
+                </span>
+                {applied && <span className="workspace-preset-current">Current</span>}
+              </button>
+            );
+          })}
+        </div>
       </Row>
       <Row label="Preview and apply" hint="Preview shows the exact effective changes before anything is saved.">
         <div className="preset-settings-actions">
@@ -1206,11 +1225,12 @@ function ManagedPluginsSection() {
   const [toast, setToast] = useState("");
   const widgets = useWidgetCatalog();
   const layout = useWidgetLayout();
+  const sourceValid = /^(?:npm|file):\S+$/.test(source.trim());
   const refresh = () => void api.pluginsList().then(setPlugins);
   useEffect(() => { refresh(); }, []);
 
   const install = async () => {
-    if (!source.trim()) return;
+    if (!sourceValid) return;
     setError("");
     try {
       const installed = await api.pluginsInstall(source.trim());
@@ -1323,8 +1343,14 @@ function ManagedPluginsSection() {
       )}
       {logsFor && <PluginLogViewer id={logsFor} />}
       <div className="set-add-form">
-        <input value={source} placeholder="npm:@scope/name@1.0.0 or file:my-plugin" onChange={(e) => setSource(e.target.value)} onKeyDown={(e) => e.key === "Enter" && void install()} />
-        <button className="small-btn" onClick={() => void install()}>Install</button>
+        <input
+          value={source}
+          placeholder="npm:@scope/name@1.0.0 or file:my-plugin"
+          aria-invalid={source.length > 0 && !sourceValid ? true : undefined}
+          onChange={(e) => setSource(e.target.value)}
+          onKeyDown={(e) => { if (e.key === "Enter" && sourceValid) void install(); }}
+        />
+        <button className="small-btn" disabled={!sourceValid} onClick={() => void install()}>Install</button>
       </div>
       {error && <div className="form-error">{error}</div>}
       {toast && <div className="plugin-toast" role="status"><span>{toast}</span><button type="button" onClick={() => setToast("")}>Dismiss</button></div>}

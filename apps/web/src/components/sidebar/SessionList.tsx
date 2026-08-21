@@ -236,8 +236,8 @@ function SessionRow({
 
   const quickDelete = () => {
     const label = s.title || "session";
-    if (needsDestructiveConfirm(s)
-      && !window.confirm(`Delete "${label}"? The agent is still running or waiting on you. This permanently removes the session and its history.`)) return;
+    const activity = needsDestructiveConfirm(s) ? " The agent is still running or waiting on you." : "";
+    if (!window.confirm(`Delete "${label}"?${activity} This permanently removes the session and its history.`)) return;
     void deleteSession(s.id)
       .then(() => { announce(`Deleted ${label}`); onChanged(); })
       .catch((e) => setUiError(friendlyError("Couldn’t delete the session", e)));

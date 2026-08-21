@@ -170,8 +170,6 @@ registerSurface({ id: "knowledge", title: "Knowledge", capabilityId: "knowledge"
 registerSurface({
   id: "usage", title: "Usage", capabilityId: "usage", order: 50, icon: Icon.usage,
   component: UsagePanel,
-  // content-driven (OC#2418): nothing to show until the session spends tokens
-  visible: (ctx) => !ctx.hasSession || ctx.totalTokens > 0,
 });
 registerSurface({
   id: "events", title: "Events", capabilityId: "events", order: 60, icon: Icon.events,

@@ -45,7 +45,17 @@ const readBody = async (req: IncomingMessage): Promise<Record<string, unknown>> 
     );
   }
   const raw = Buffer.concat(chunks).toString("utf8");
-  return raw ? JSON.parse(raw) : {};
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw) as unknown;
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      throw Object.assign(new Error("Request body must be a JSON object."), { code: "invalid-json" });
+    }
+    return parsed as Record<string, unknown>;
+  } catch (error) {
+    if ((error as { code?: string }).code === "invalid-json") throw error;
+    throw Object.assign(new Error("Request body must be valid JSON."), { code: "invalid-json" });
+  }
 };
 
 /** A plugin-contributed route group: returns true when it handled the request.
@@ -288,7 +298,7 @@ export function createHttpServer(deps: HttpDeps): Server {
       });
       res.end(data);
     } catch (err) {
-      const e = err as Error & { code?: string; cause?: unknown };
+      const e = err as Error & { code?: string; cause?: unknown; field?: unknown };
       // A dead OpenCode transport is transient: the runtime pool respawns on
       // the next call, so give clients a retryable status and useful message.
       if (/fetch failed|terminated|ECONNREFUSED/i.test(`${e.message ?? ""} ${String(e.cause ?? "")}`)) {
@@ -296,14 +306,23 @@ export function createHttpServer(deps: HttpDeps): Server {
       }
       const status =
         e.code === "not-found" ? 404
-        : e.code === "invalid-path" || e.code === "invalid-input" ? 400
+        : e.code === "invalid-json" || e.code === "invalid-path" || e.code === "invalid-input" ? 400
         // history-mismatch keeps its own code in the body so the client can
         // explain a failed exact-history branch, but shares 409 semantics.
         : e.code === "conflict" || e.code === "history-mismatch" ? 409
         : e.code === "payload-too-large" ? 413
         : e.code === "unsupported" ? 501
         : 500;
-      json(res, status, { error: e.code ?? "internal", message: e.message });
+      const message =
+        e.code === "invalid-path" ? "The requested path is invalid."
+        : e.code === "invalid-json" ? e.message
+        : status === 500 ? "An internal server error occurred."
+        : e.message;
+      json(res, status, {
+        error: e.code ?? "internal",
+        message,
+        ...(e.code === "invalid-input" && typeof e.field === "string" ? { field: e.field } : {}),
+      });
     }
   });
 }

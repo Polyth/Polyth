@@ -409,6 +409,37 @@ test("flattenModels marks connected providers; empty connected[] means all conne
   }
 });
 
+test("flattenModels preserves reported input/output modalities including empty reports", () => {
+  const models = flattenModels({
+    all: [{
+      id: "mixed",
+      models: {
+        chat: {
+          id: "chat",
+          name: "Chat",
+          capabilities: {
+            attachment: true,
+            toolcall: true,
+            input: { text: true, image: true, audio: false },
+            output: { text: true, image: false },
+          },
+        },
+        embed: {
+          id: "embed",
+          name: "Embed",
+          capabilities: { input: { text: true }, output: { text: false } },
+        },
+      },
+    }],
+  });
+  assert.deepEqual(models.find((model) => model.modelID === "chat")?.capabilities, [
+    "attachment", "toolcall", "input:image", "input:text", "output:text",
+  ]);
+  assert.deepEqual(models.find((model) => model.modelID === "embed")?.capabilities, [
+    "input:text", "output:none",
+  ]);
+});
+
 test("startTurn maps attachments to file parts; url attachments stay text (F2)", async () => {
   const fake = await startFake();
   const client = createOpenCodeClient(fake.baseUrl);

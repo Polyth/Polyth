@@ -4,9 +4,12 @@ import { focusComposer, setOverlay } from "../store.ts";
 import { useWidgetCatalog } from "../widgets/catalog.ts";
 import { ensureWidgets, updateWidgetLayout, type WidgetAudience } from "../widgets/widgetLayout.ts";
 import {
+  MAX_SETUP_WIDGETS,
+  MIN_SETUP_WIDGETS,
   WORKFLOW_OPTIONS,
   applyWorkspaceSetup,
   createSetupDraft,
+  validSetupWidgetCount,
   workflowOption,
   type SetupWorkflow,
   type WorkspaceSetupDraft,
@@ -79,7 +82,11 @@ export default function PresetSetup() {
   };
 
   const apply = () => {
-    updateWidgetLayout((current) => applyWorkspaceSetup(current, draft, widgets));
+    if (!validSetupWidgetCount(draft.widgetIds)) return;
+    // Setup is a commit boundary, not an interactive drag: persist the final
+    // layout synchronously before closing so an immediate reload sees exactly
+    // the reviewed audience, visibility, and placement.
+    updateWidgetLayout((current) => applyWorkspaceSetup(current, draft, widgets), { immediate: true });
     applyPreset(workflowPreset(draft.workflow));
     announce(`${workflowOption(draft.workflow).label} setup applied with ${draft.widgetIds.length} widgets in ${draft.audience} mode.`);
     exitFocus.current = "composer";
@@ -90,7 +97,7 @@ export default function PresetSetup() {
     setDraft((current) => {
       const selected = current.widgetIds.includes(id);
       if (selected) return { ...current, widgetIds: current.widgetIds.filter((item) => item !== id) };
-      if (current.widgetIds.length >= 8) return current;
+      if (current.widgetIds.length >= MAX_SETUP_WIDGETS) return current;
       return { ...current, widgetIds: [...current.widgetIds, id] };
     });
   };
@@ -188,7 +195,11 @@ export default function PresetSetup() {
                   );
                 })}
               </div>
-              <p className="guided-selection-count">{draft.widgetIds.length} selected · You can add any plugin widget later.</p>
+              <p className="guided-selection-count" role={!validSetupWidgetCount(draft.widgetIds) ? "alert" : undefined}>
+                {draft.widgetIds.length} selected · {draft.widgetIds.length < MIN_SETUP_WIDGETS
+                  ? `Choose at least ${MIN_SETUP_WIDGETS}.`
+                  : "You can add any plugin widget later."}
+              </p>
             </section>
           )}
 
@@ -217,7 +228,7 @@ export default function PresetSetup() {
           {step > 0 && <button type="button" onClick={() => setStep((current) => current - 1)}>Back</button>}
           {step < 3
             ? <button type="button" className="btn-accent" onClick={() => setStep((current) => current + 1)}>Continue</button>
-            : <button type="button" className="btn-accent" disabled={draft.widgetIds.length === 0} onClick={apply}>Apply setup</button>}
+            : <button type="button" className="btn-accent" disabled={!validSetupWidgetCount(draft.widgetIds)} onClick={apply}>Apply setup</button>}
         </footer>
       </div>
     </div>
