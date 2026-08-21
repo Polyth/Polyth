@@ -392,6 +392,15 @@ export async function restoreSession(sessionId: string): Promise<void> {
   if (proj) void refreshSessions(proj);
 }
 
+/** Hard delete through the guarded server path. Callers confirm destructive
+ *  intent for running/pending sessions BEFORE calling this. */
+export async function deleteSession(sessionId: string): Promise<void> {
+  const proj = store.getState().sessions.find((s) => s.id === sessionId)?.projectId;
+  await api.deleteSession(sessionId);
+  if (store.getState().activeSessionId === sessionId) store.activateSession(null);
+  if (proj) void refreshSessions(proj);
+}
+
 export interface SendOptions {
   /** Captured at click time — project/session switches must never reroute a send. */
   targetSessionId?: string | null;

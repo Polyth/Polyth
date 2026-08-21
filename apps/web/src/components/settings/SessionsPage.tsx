@@ -1,6 +1,6 @@
 // Sessions settings page: session control (list/new/fork/abort) over the
 // /api/control surface — the same API agents and external tools can use.
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { api } from "../../api.ts";
 import { setOverlay, setActiveView, setUiError, updateSettings, useStore } from "../../store.ts";
 import { openSession, refreshSessions } from "../../init.ts";
@@ -10,8 +10,14 @@ import { EmptyState, PageHead, Row, Toggle } from "./parts.tsx";
 
 export default function SessionsPage() {
   const projectId = useStore((s) => s.activeProjectId);
-  const sessions = useStore((s) => s.sessions.filter((x) => x.projectId === s.activeProjectId));
+  // useSyncExternalStore selectors must return STABLE snapshots — returning a
+  // fresh filtered array here looped React (#185) and white-screened the page.
+  const allSessions = useStore((s) => s.sessions);
   const settings = useStore((s) => s.settings);
+  const sessions = useMemo(
+    () => allSessions.filter((x) => x.projectId === projectId).sort((a, b) => b.updatedAt - a.updatedAt),
+    [allSessions, projectId],
+  );
   const [busy, setBusy] = useState<string | null>(null);
 
   const act = async (id: string, fn: () => Promise<unknown>) => {
@@ -54,7 +60,7 @@ export default function SessionsPage() {
           </Row>
           <div className="stat-label">Sessions in project</div>
           {sessions.length === 0 && <EmptyState title="No sessions yet" />}
-          {[...sessions].sort((a, b) => b.updatedAt - a.updatedAt).map((s) => (
+          {sessions.map((s) => (
             <div key={s.id} className="set-row">
               <div className="set-row-text">
                 <div className="set-row-label">

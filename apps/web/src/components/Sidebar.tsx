@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent } from "react";
 import {
   getState, useStore, activateProject, openWorkspacePane, openWorktreeSessionDialog, setOverlay,
   setSidebarOpen, setUiError,
@@ -13,6 +13,10 @@ import { useShellMode } from "../responsiveShell.ts";
 import { useModalSurface } from "./a11y/Dialog.tsx";
 import SlotHost from "./slots/SlotHost.ts";
 import { useSidebarExpanded } from "../sidebarPresentation.ts";
+import {
+  SIDEBAR_COLLAPSED_WIDTH, SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH,
+  clampSidebarWidth, setSidebarLayout, useSidebarLayout,
+} from "../sidebarLayout.ts";
 
 function projectGlyph(name: string): string {
   const words = name.trim().split(/[\s\-_/]+/).filter(Boolean);
@@ -50,6 +54,12 @@ export default function Sidebar() {
   // drawer-open preference.
   const mode = useShellMode();
   const compact = mode !== "wide";
+  // Finding 2: wide-mode width + collapse persist across reloads; the compact
+  // drawer keeps its own responsive geometry and ignores both.
+  const layout = useSidebarLayout();
+  const collapsed = !compact && layout.collapsed;
+  const [dragWidth, setDragWidth] = useState<number | null>(null);
+  const width = dragWidth ?? layout.width;
   const navRef = useRef<HTMLElement>(null);
   const prevCompact = useRef(compact);
   useEffect(() => {
@@ -85,6 +95,33 @@ export default function Sidebar() {
     }
   };
 
+  // Mouse-drag resize: transient width during the drag, one persisted write
+  // on release (drag state stays local; the pref module owns durability).
+  const startResize = (event: ReactMouseEvent) => {
+    event.preventDefault();
+    const startX = event.clientX;
+    const startWidth = width;
+    let next = startWidth;
+    const onMove = (ev: MouseEvent) => {
+      next = clampSidebarWidth(startWidth + (ev.clientX - startX));
+      setDragWidth(next);
+    };
+    const onUp = () => {
+      window.removeEventListener("mousemove", onMove);
+      window.removeEventListener("mouseup", onUp);
+      setSidebarLayout({ width: next });
+      setDragWidth(null);
+    };
+    window.addEventListener("mousemove", onMove);
+    window.addEventListener("mouseup", onUp);
+  };
+
+  const onResizeKey = (event: ReactKeyboardEvent) => {
+    if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+    event.preventDefault();
+    setSidebarLayout({ width: width + (event.key === "ArrowRight" ? 16 : -16) });
+  };
+
   return (
     <>
       {compact && drawerOpen && (
@@ -97,10 +134,23 @@ export default function Sidebar() {
       <nav
         ref={navRef}
         id="polyth-session-drawer"
-        className={`sidebar ${drawerOpen ? "open" : ""}`}
+        className={`sidebar ${drawerOpen ? "open" : ""}${collapsed ? " collapsed" : ""}`}
+        style={!compact ? { width: collapsed ? SIDEBAR_COLLAPSED_WIDTH : width, minWidth: collapsed ? SIDEBAR_COLLAPSED_WIDTH : width } : undefined}
         {...(compact ? { role: "dialog", "aria-modal": true, "aria-label": "Projects and sessions" } : {})}
       >
         <h2 className="sr-only">Projects and sessions</h2>
+        {collapsed && (
+          <div className="sidebar-collapsed-rail">
+            <button
+              className="icon-btn sidebar-expand"
+              title="Expand projects and sessions"
+              aria-label="Expand projects and sessions"
+              aria-expanded="false"
+              onClick={() => setSidebarLayout({ collapsed: false })}
+            >»</button>
+          </div>
+        )}
+        {!collapsed && (<>
         <div className="sidebar-head">
           <span className="brand"><i>p</i> {productName.toLowerCase()}</span>
           <span className="side-icons">
@@ -112,6 +162,15 @@ export default function Sidebar() {
               disabled={registry.status === "loading"}
               onClick={() => setOverlay("project-picker")}
             ><Icon.plus /></button>
+            {!compact && (
+              <button
+                className="icon-btn sidebar-collapse"
+                title="Collapse projects and sessions"
+                aria-label="Collapse projects and sessions"
+                aria-expanded="true"
+                onClick={() => setSidebarLayout({ collapsed: true })}
+              >«</button>
+            )}
             {compact && (
               <button
                 className="icon-btn drawer-close"
@@ -234,6 +293,21 @@ export default function Sidebar() {
             <Icon.gear /> Settings <span className="kbd">{MOD} ,</span>
           </button>
         </div>
+        </>)}
+        {!compact && !collapsed && (
+          <div
+            className="sidebar-resize"
+            role="separator"
+            aria-orientation="vertical"
+            aria-label="Resize sidebar"
+            aria-valuenow={width}
+            aria-valuemin={SIDEBAR_MIN_WIDTH}
+            aria-valuemax={SIDEBAR_MAX_WIDTH}
+            tabIndex={0}
+            onMouseDown={startResize}
+            onKeyDown={onResizeKey}
+          />
+        )}
       </nav>
       {importingProject && (
         <ImportSessionsDialog projectId={importingProject} onClose={() => setImportingProject(null)} />

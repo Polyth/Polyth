@@ -3,6 +3,7 @@ import type { TerminalInfo } from "@polyth/contracts";
 import { api } from "../api.ts";
 import { useStore } from "../store.ts";
 import { applyTerminalChunk, nextTermBackoff } from "../utils.ts";
+import { usePaneVisible } from "../workspace/paneVisibility.ts";
 import EmptyState from "./EmptyState.tsx";
 
 interface Tab {
@@ -21,11 +22,19 @@ export default function TerminalView() {
   const projectId = useStore((s) => s.activeProjectId);
   const sessionId = useStore((s) => s.activeSessionId);
   const session = useStore((s) => s.sessions.find((candidate) => candidate.id === s.activeSessionId) ?? null);
+  const visible = usePaneVisible();
   const [tabs, setTabs] = useState<Tab[]>([]);
   const [active, setActive] = useState<string | null>(null);
   const [line, setLine] = useState("");
   const [renaming, setRenaming] = useState<string | null>(null);
   const [renameVal, setRenameVal] = useState("");
+  // One-click terminal (finding 6): listLoaded flips true once the adopt fetch
+  // below answered for the CURRENT project, so auto-spawn never fires on the
+  // not-yet-known empty state. autoSpawnArmed re-arms on every hidden→visible
+  // transition (and project switch) and is spent on first sight of a loaded
+  // list — closing the last tab while the pane stays open must NOT respawn it.
+  const [listLoaded, setListLoaded] = useState(false);
+  const autoSpawnArmed = useRef(true);
   const sockets = useRef(new Map<string, WebSocket>());
   // F12 reconnect state: per-terminal backoff + pending timers; `gone` marks
   // terminals we closed deliberately (or the server reported missing) so the
@@ -127,6 +136,8 @@ export default function TerminalView() {
   // Adopt terminals that already exist for this project (e.g. after reload) —
   // the replay frame restores their visible scrollback on attach.
   useEffect(() => {
+    setListLoaded(false);
+    autoSpawnArmed.current = true; // fresh project: one auto-spawn allowed again
     if (!projectId) { setTabs([]); setActive(null); return; }
     void api.listTerminals(projectId).then((list: TerminalInfo[]) => {
       setTabs((prev) => {
@@ -139,9 +150,21 @@ export default function TerminalView() {
         if (!active && next.length > 0) setActive(next[0]!.id);
         return next;
       });
+      setListLoaded(true);
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
+
+  // One-click terminal: an ACTIVE terminal pane with a confirmed-empty terminal
+  // list spawns + attaches one real shell — the tab only appears after the
+  // server returned a terminalId, so there is no fake "connected" state.
+  useEffect(() => {
+    if (!visible) { autoSpawnArmed.current = true; return; }
+    if (!projectId || !listLoaded || !autoSpawnArmed.current) return;
+    autoSpawnArmed.current = false; // one shot per activation, even if tabs exist
+    if (tabs.length === 0) void spawn().catch(() => {});
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visible, projectId, listLoaded, tabs.length]);
 
   useEffect(() => () => {
     mounted.current = false;

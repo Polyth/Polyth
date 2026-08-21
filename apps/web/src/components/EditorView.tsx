@@ -29,6 +29,9 @@ const parentOf = (p: string) => p.split("/").slice(0, -1).join("/");
 const baseOf = (p: string) => p.split("/").pop() ?? p;
 const msg = (err: unknown) => (err instanceof Error ? err.message : String(err));
 const TREE_REFRESH_MS = 8_000;
+// Stable DOM id per tree row for aria-activedescendant (encode: ids may not
+// contain whitespace, and paths may).
+const treeItemId = (p: string) => `ft-item-${encodeURIComponent(p)}`;
 
 interface CtxMenu {
   x: number;
@@ -232,18 +235,25 @@ export default function EditorView() {
   };
   walk("", 0);
 
+  // Keyboard selection moves the active descendant, not DOM focus — keep the
+  // selected row visible in long trees.
+  const selectRow = (path: string) => {
+    setSel(path);
+    document.getElementById(treeItemId(path))?.scrollIntoView({ block: "nearest" });
+  };
+
   const onTreeKey = (e: KeyboardEvent) => {
     const i = rows.findIndex((r) => r.e.path === sel);
     const cur = rows[i]?.e;
     if (e.key === "ArrowDown" || e.key === "ArrowUp") {
       e.preventDefault();
       const next = rows[e.key === "ArrowDown" ? Math.min(i + 1, rows.length - 1) : Math.max(i - 1, 0)];
-      if (next) setSel(next.e.path);
+      if (next) selectRow(next.e.path);
     } else if (e.key === "ArrowRight" && cur?.dir && !open.has(cur.path)) {
       toggle(cur.path);
     } else if (e.key === "ArrowLeft" && cur) {
       if (cur.dir && open.has(cur.path)) toggle(cur.path);
-      else if (parentOf(cur.path)) setSel(parentOf(cur.path));
+      else if (parentOf(cur.path)) selectRow(parentOf(cur.path));
     } else if (e.key === "Enter" && cur) {
       if (cur.dir) toggle(cur.path);
       else openFile(cur.path);
@@ -260,7 +270,7 @@ export default function EditorView() {
 
   return (
     <div className="editor-view">
-      <aside className="editor-tree" tabIndex={0} onKeyDown={onTreeKey} aria-label="Project files">
+      <aside className="editor-tree" aria-label="Files">
         <div className="files-search">
           <input
             type="text"
@@ -296,36 +306,55 @@ export default function EditorView() {
         ) : (
           <>
             {rows.length === 0 && !treeErr && <div className="empty">Empty directory.</div>}
-            {rows.map(({ e, depth }) => (
-              <div
-                key={e.path}
-                className={`ft-row${sel === e.path || activePath === e.path ? " sel" : ""}`}
-                style={{ paddingLeft: 6 + depth * 14 }}
-                draggable
-                onDragStart={(ev) => setDragPath(ev.dataTransfer, e.path)}
-                onContextMenu={(ev) => onRowContext(ev, e)}
-                onClick={() => {
-                  setSel(e.path);
-                  if (e.dir) toggle(e.path);
-                  else openFile(e.path);
-                }}
-              >
-                <span className="ft-chevron">{e.dir ? (open.has(e.path) ? "▾" : "▸") : ""}</span>
-                <span className="ft-name">{e.name}</span>
-                {!e.dir && (
-                  <button
-                    className="ft-at"
-                    title="Add to chat"
-                    onClick={(ev) => {
-                      ev.stopPropagation();
-                      attachPath(e.path);
+            <div
+              className="ft-tree"
+              role="tree"
+              aria-label="Project files"
+              tabIndex={0}
+              onKeyDown={onTreeKey}
+              aria-activedescendant={sel ? treeItemId(sel) : undefined}
+            >
+              {rows.map(({ e, depth }) => {
+                const selected = sel === e.path || activePath === e.path;
+                return (
+                  <div
+                    key={e.path}
+                    id={treeItemId(e.path)}
+                    role="treeitem"
+                    aria-level={depth + 1}
+                    aria-selected={selected}
+                    {...(e.dir ? { "aria-expanded": open.has(e.path) } : {})}
+                    className={`ft-row${e.dir ? " ft-dir" : ""}${selected ? " ft-selected" : ""}`}
+                    style={{ paddingLeft: 6 + depth * 14 }}
+                    draggable
+                    onDragStart={(ev) => setDragPath(ev.dataTransfer, e.path)}
+                    onContextMenu={(ev) => onRowContext(ev, e)}
+                    onClick={() => {
+                      setSel(e.path);
+                      if (e.dir) toggle(e.path);
+                      else openFile(e.path);
                     }}
                   >
-                    @
-                  </button>
-                )}
-              </div>
-            ))}
+                    <span className="ft-chevron" aria-hidden>{e.dir ? (open.has(e.path) ? "▾" : "▸") : ""}</span>
+                    <span className="ft-name">{e.name}</span>
+                    {!e.dir && (
+                      <button
+                        className="ft-at"
+                        title={`Add ${e.path} to chat`}
+                        aria-label={`Add ${e.path} to chat`}
+                        tabIndex={-1}
+                        onClick={(ev) => {
+                          ev.stopPropagation();
+                          attachPath(e.path);
+                        }}
+                      >
+                        @
+                      </button>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
           </>
         )}
       </aside>

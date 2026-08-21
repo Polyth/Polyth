@@ -502,6 +502,8 @@ export const api = {
     jfetch<ShellTurnResult>(`/api/sessions/${id}/shell`, json("POST", { command })),
   archive: (id: string) => jfetch<void>(`/api/sessions/${id}/archive`, { method: "POST" }),
   restore: (id: string) => jfetch<void>(`/api/sessions/${id}/restore`, { method: "POST" }),
+  /** Hard delete — destructive; callers confirm running/pending sessions first. */
+  deleteSession: (id: string) => jfetch<{ ok: true }>(`/api/sessions/${id}`, { method: "DELETE" }),
 
   // ---- organization (WP5) ----------------------------------------------------
   organizeSession: (id: string, patch: { folderId?: string | null; labelIds?: string[]; pinned?: { position: number } | null }) =>

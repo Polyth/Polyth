@@ -283,6 +283,10 @@ export interface SessionService {
   runShell?(sessionId: string, command: string): Promise<ShellTurnResult>;
   archive(sessionId: string): Promise<void>;
   restore(sessionId: string): Promise<void>;
+  /** Hard-delete the session (durable log + projection + queue). Guarded:
+   *  callers confirm destructive intent upstream; a running turn is aborted
+   *  first. Optional so existing fakes/tests remain valid. */
+  delete?(sessionId: string): Promise<void>;
   list(projectId?: string): Promise<SessionProjection[]>;
   sync(projectId: string): Promise<SessionProjection[]>;
   snapshot(sessionId: string): Promise<SessionProjection>;
@@ -362,6 +366,9 @@ export interface SessionPersistence {
   /** Atomic read-modify-write on the latest projection row. Returns the exact
    *  committed projection (broadcast that, never a stale in-memory copy). */
   patchProjection?(sessionId: string, patch: (current: SessionProjection) => SessionProjection): Promise<SessionProjection | undefined>;
+  /** Hard-delete one session's events, projection, and queued messages in a
+   *  single transaction. Optional so existing fakes remain valid. */
+  deleteSession?(sessionId: string): Promise<void>;
   close(): Promise<void>;
 }
 

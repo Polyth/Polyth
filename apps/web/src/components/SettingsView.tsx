@@ -16,6 +16,7 @@ import {
   AboutPage, AgentsPage, AppearancePage, BehaviorPage, ChatPage, GeneralPage, GitPage,
   McpPage, NotificationsPage, PluginsPage, ProjectsPage, UsagePage,
 } from "./settings/pages.tsx";
+import ViewErrorBoundary from "./ViewErrorBoundary.ts";
 import ShortcutsPage from "./settings/ShortcutsPage.tsx";
 import ModelsPage from "./settings/ModelsPage.tsx";
 import VoicePage from "./settings/VoicePage.tsx";
@@ -264,7 +265,11 @@ export default function SettingsView({ onClose = () => setOverlay(null) }: { onC
             <span className="dialog-hint" id="settings-close-hint"><kbd>Esc</kbd> close</span>
             <button className="close-btn" onClick={onClose} aria-label="Close">×</button>
           </div>
-          <div className="modal-body settings-pane-body" ref={paneRef}>{current.render()}</div>
+          <div className="modal-body settings-pane-body" ref={paneRef}>
+            {/* A page that throws must not white-screen the whole app —
+                Settings renders outside App's main view boundary. */}
+            <ViewErrorBoundary resetKey={current.id} inline>{current.render()}</ViewErrorBoundary>
+          </div>
           <div className="modal-foot">
             <span className="modal-note">Changes are saved as you edit</span>
             <span className="header-spacer" />

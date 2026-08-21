@@ -37,6 +37,8 @@ export interface Store extends SessionPersistence {
   /** Pop the first item (FIFO); undefined when the queue is empty. */
   queueShift(sessionId: string): Promise<QueueItemDto | undefined>;
   deleteProjection(sessionId: string): Promise<void>;
+  /** Hard delete: events + projection + queued messages, one transaction. */
+  deleteSession(sessionId: string): Promise<void>;
   // -- organization: folders + labels (WP5) --
   folderList(projectId: string): Promise<SessionFolderDto[]>;
   folderCreate(projectId: string, name: string, parentId?: string): Promise<SessionFolderDto>;
@@ -556,6 +558,21 @@ export function createStore(dbPath: string): Store {
     return Promise.resolve();
   }
 
+  /** Hard delete: events + projection + queued messages, one transaction. */
+  function deleteSession(sessionId: string): Promise<void> {
+    db.exec("BEGIN IMMEDIATE");
+    try {
+      prep("DELETE FROM events WHERE session_id = ?").run(sessionId);
+      prep("DELETE FROM projections WHERE session_id = ?").run(sessionId);
+      prep("DELETE FROM session_queue WHERE session_id = ?").run(sessionId);
+      db.exec("COMMIT");
+    } catch (err) {
+      db.exec("ROLLBACK");
+      throw err;
+    }
+    return Promise.resolve();
+  }
+
   // ------------------------------------------------------------- folders + labels (WP5)
 
   interface FolderRow { id: string; project_id: string; parent_id: string | null; name: string; position: number; revision: number }
@@ -912,6 +929,7 @@ export function createStore(dbPath: string): Store {
     queueRemove,
     queueShift,
     deleteProjection,
+    deleteSession,
     folderList,
     folderCreate,
     folderUpdate,

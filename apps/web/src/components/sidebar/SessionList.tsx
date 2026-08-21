@@ -1,12 +1,13 @@
 // Organized session list (WP5): folder grouping, labels, attention badges,
 // inline rename, archived section, bulk archive/restore with partial-failure
 // reporting. All mutations go through the REST org endpoints.
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { SessionFolderDto, SessionProjection, WorkspaceLabel } from "@polyth/contracts";
 import { api } from "../../api.ts";
 import { getState, setSidebarOpen, setUiError, useStore } from "../../store.ts";
-import { openSession, archiveSession, restoreSession, forkSession, refreshSessions } from "../../init.ts";
-import { ago, deriveSessionTitle, fullSessionTitle } from "../../format.ts";
+import { openSession, archiveSession, deleteSession, restoreSession, forkSession, refreshSessions } from "../../init.ts";
+import { sessionStatusBadge } from "../../sessionBadges.ts";
+import { ago, deriveSessionTitle, fmtDuration, fullSessionTitle } from "../../format.ts";
 import { friendlyError } from "../../settings.ts";
 import { getUiSettings } from "../../uiPrefs.ts";
 import { firstUserText } from "../../utils.ts";
@@ -42,6 +43,40 @@ function AttentionBadges({ s }: { s: SessionProjection }) {
   );
 }
 
+/** Re-render clock for the running badge's elapsed label (paused when off). */
+function useNowTick(enabled: boolean, intervalMs = 30_000): number {
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    if (!enabled) return;
+    setNow(Date.now());
+    const timer = setInterval(() => setNow(Date.now()), intervalMs);
+    return () => clearInterval(timer);
+  }, [enabled, intervalMs]);
+  return now;
+}
+
+/** Finding 3: derived status badge — running (elapsed), waiting, completed,
+ *  merged (lite: worktree cleanup signal). Read + nothing pending → nothing. */
+function StatusBadge({ s }: { s: SessionProjection }) {
+  const now = useNowTick(s.status === "working");
+  const badge = sessionStatusBadge(s, now);
+  if (!badge) return null;
+  if (badge.kind === "running") {
+    return (
+      <span className="status-badge running" title={`Agent running for ${fmtDuration(badge.elapsedMs)}`}>
+        <span className="status-badge-spin" aria-hidden>●</span> {fmtDuration(badge.elapsedMs)}
+      </span>
+    );
+  }
+  if (badge.kind === "waiting") {
+    return <span className="status-badge waiting" title="Waiting on your answer" aria-label="Waiting on a question">?</span>;
+  }
+  if (badge.kind === "merged") {
+    return <span className="status-badge merged" title="Worktree removed — branch merged/cleaned up">merged</span>;
+  }
+  return <span className="status-badge completed" title="Turn completed">✓ done</span>;
+}
+
 function LabelDots({ ids, labels }: { ids: string[] | undefined; labels: WorkspaceLabel[] }) {
   if (!ids || ids.length === 0) return null;
   return (
@@ -72,6 +107,62 @@ interface RowProps {
   onPinDrop: (targetId: string) => void;
 }
 
+/** Finding 4 guard: destructive quick actions confirm first while the agent
+ *  is running or a question/permission is waiting; otherwise act immediately. */
+function needsDestructiveConfirm(s: SessionProjection): boolean {
+  return s.status === "working" || s.status === "waiting"
+    || (s.attention?.questions ?? 0) > 0 || (s.attention?.permissions ?? 0) > 0;
+}
+
+// Finding 4: Shift is tracked in a module-level store whose window listeners
+// attach on first row mount — not after a row is hovered — so pressing Shift
+// before pointing at a row still arms it. Pointer moves over rows also feed
+// the sampled `event.shiftKey` in, covering inputs whose key events never
+// reach the window (synthesized pointers). Either signal arms; releasing
+// Shift (keyup or window blur) disarms both.
+let shiftKeyDown = false;
+let shiftSampled = false;
+let shiftListening = false;
+const shiftSubscribers = new Set<() => void>();
+const isShiftArmed = () => shiftKeyDown || shiftSampled;
+
+function publishShift(prev: boolean) {
+  if (isShiftArmed() === prev) return;
+  for (const notify of shiftSubscribers) notify();
+}
+
+function sampleShiftModifier(shiftKey: boolean) {
+  const prev = isShiftArmed();
+  shiftSampled = shiftKey;
+  publishShift(prev);
+}
+
+function setShiftKeyDown(down: boolean) {
+  const prev = isShiftArmed();
+  shiftKeyDown = down;
+  if (!down) shiftSampled = false; // releasing Shift disarms immediately
+  publishShift(prev);
+}
+
+function ensureShiftListeners() {
+  if (shiftListening) return;
+  shiftListening = true;
+  window.addEventListener("keydown", (e) => { if (e.key === "Shift") setShiftKeyDown(true); });
+  window.addEventListener("keyup", (e) => { if (e.key === "Shift") setShiftKeyDown(false); });
+  window.addEventListener("blur", () => setShiftKeyDown(false));
+}
+
+function useShiftArmed(): boolean {
+  return useSyncExternalStore(
+    (onChange) => {
+      ensureShiftListeners();
+      shiftSubscribers.add(onChange);
+      return () => { shiftSubscribers.delete(onChange); };
+    },
+    isShiftArmed,
+  );
+}
+
 function SessionRow({
   s, activeSessionId, labels, folders, eventsTitle, relativeTime, selectMode, selected,
   onToggleSelect, onChanged, onOpen, onTogglePin, pinnedSection, onPinDragStart, onPinDrop,
@@ -79,7 +170,23 @@ function SessionRow({
   const [menuOpen, setMenuOpen] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [title, setTitle] = useState(s.title);
+  // Shift+hover arms the quick actions (they stay keyboard-reachable through
+  // :focus-within regardless of the modifier).
+  const [hovered, setHovered] = useState(false);
+  const shiftHeld = useShiftArmed();
+  const quickArmed = hovered && shiftHeld;
   const menuRef = useRef<HTMLDivElement>(null);
+  const menuBtnRef = useRef<HTMLButtonElement>(null);
+
+  // Both mouse and pointer flavors are wired (idempotent, so duplicates are
+  // harmless): pointer events cover inputs that never synthesize mouseenter,
+  // and every move re-samples the modifier so arming stays live even when the
+  // Shift keydown itself is missed.
+  const hoverUpdate = (event: { shiftKey: boolean }) => {
+    setHovered(true);
+    sampleShiftModifier(event.shiftKey);
+  };
+  const hoverEnd = () => setHovered(false);
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -89,6 +196,52 @@ function SessionRow({
     document.addEventListener("mousedown", h);
     return () => document.removeEventListener("mousedown", h);
   }, [menuOpen]);
+
+  // Menu keyboard contract: focus lands on the first item on open; arrows
+  // cycle; Escape closes and returns focus to the row's menu button.
+  useEffect(() => {
+    if (!menuOpen) return;
+    menuRef.current?.querySelector<HTMLButtonElement>('[role^="menuitem"]')?.focus();
+  }, [menuOpen]);
+
+  const onMenuKey = (e: React.KeyboardEvent<HTMLDivElement>) => {
+    if (e.key === "Escape") {
+      e.preventDefault();
+      e.stopPropagation();
+      setMenuOpen(false);
+      menuBtnRef.current?.focus();
+      return;
+    }
+    if (e.key !== "ArrowDown" && e.key !== "ArrowUp" && e.key !== "Home" && e.key !== "End") return;
+    const items = [...(menuRef.current?.querySelectorAll<HTMLButtonElement>('[role^="menuitem"]') ?? [])];
+    if (items.length === 0) return;
+    e.preventDefault();
+    const current = items.indexOf(document.activeElement as HTMLButtonElement);
+    const next =
+      e.key === "Home" ? 0
+      : e.key === "End" ? items.length - 1
+      : current < 0 ? (e.key === "ArrowDown" ? 0 : items.length - 1)
+      : (current + (e.key === "ArrowDown" ? 1 : -1) + items.length) % items.length;
+    items[next]?.focus();
+  };
+
+  const quickArchive = () => {
+    const label = s.title || "session";
+    if (needsDestructiveConfirm(s) && !window.confirm(`Archive "${label}"? The agent is still running or waiting on you.`)) return;
+    if (!needsDestructiveConfirm(s) && getUiSettings().confirmSessionArchive && !window.confirm(`Archive "${label}"?`)) return;
+    void archiveSession(s.id)
+      .then(() => { announce(`Archived ${label}`); onChanged(); })
+      .catch((e) => setUiError(friendlyError("Couldn’t archive the session", e)));
+  };
+
+  const quickDelete = () => {
+    const label = s.title || "session";
+    if (needsDestructiveConfirm(s)
+      && !window.confirm(`Delete "${label}"? The agent is still running or waiting on you. This permanently removes the session and its history.`)) return;
+    void deleteSession(s.id)
+      .then(() => { announce(`Deleted ${label}`); onChanged(); })
+      .catch((e) => setUiError(friendlyError("Couldn’t delete the session", e)));
+  };
 
   const doRename = async () => {
     const t = title.trim();
@@ -128,11 +281,20 @@ function SessionRow({
 
   return (
     <div
-      className={`session-row ${s.id === activeSessionId ? "active" : ""} ${s.status === "archived" ? "archived" : ""}`}
+      className={`session-row ${s.id === activeSessionId ? "active" : ""} ${s.status === "archived" ? "archived" : ""}${quickArmed ? " quick-armed" : ""}`}
       draggable={pinnedSection}
       onDragStart={() => { if (pinnedSection) onPinDragStart(s.id); }}
       onDragOver={(event) => { if (pinnedSection) event.preventDefault(); }}
       onDrop={(event) => { if (pinnedSection) { event.preventDefault(); onPinDrop(s.id); } }}
+      onMouseEnter={hoverUpdate}
+      onMouseMove={hoverUpdate}
+      onMouseLeave={hoverEnd}
+      onPointerEnter={hoverUpdate}
+      onPointerMove={hoverUpdate}
+      onPointerLeave={hoverEnd}
+      // Finding 5: right-click opens this row's action menu — the same menu
+      // (and handlers) the ellipsis button anchors, so one action model.
+      onContextMenu={(event) => { event.preventDefault(); setMenuOpen(true); }}
     >
       {selectMode && (
         <input
@@ -177,6 +339,7 @@ function SessionRow({
               )}
               {s.pinned && <span className="session-pin" title="Pinned" aria-label="Pinned">◆</span>}
               <LabelDots ids={s.labelIds} labels={labels} />
+              <StatusBadge s={s} />
               <AttentionBadges s={s} />
               <SlotHost
                 slot="session.list.badges"
@@ -190,11 +353,40 @@ function SessionRow({
           <span className="session-time">{activityTime(s.updatedAt, relativeTime)}</span>
         </button>
       )}
+      <span className="session-quick">
+        {s.status !== "archived" && (
+          <button
+            className="session-quick-btn"
+            title={`Archive ${s.title || "session"} (Shift+hover quick action)`}
+            aria-label={`Archive ${s.title || "session"}`}
+            onClick={quickArchive}
+          >⤓</button>
+        )}
+        <button
+          className="session-quick-btn danger"
+          title={`Delete ${s.title || "session"} (Shift+hover quick action)`}
+          aria-label={`Delete ${s.title || "session"}`}
+          onClick={quickDelete}
+        >✕</button>
+      </span>
       <span className="session-actions">
-        <button title="Session menu" aria-label={`Menu for ${s.title || "session"}`} aria-haspopup="menu" onClick={() => setMenuOpen((v) => !v)}>⋯</button>
+        <button
+          ref={menuBtnRef}
+          title="Session menu"
+          aria-label={`Menu for ${s.title || "session"}`}
+          aria-haspopup="menu"
+          aria-expanded={menuOpen}
+          onClick={() => setMenuOpen((v) => !v)}
+        >⋯</button>
       </span>
       {menuOpen && (
-        <div className="session-menu" role="menu" ref={menuRef}>
+        <div
+          className="session-menu"
+          role="menu"
+          aria-label={`Actions for ${s.title || "session"}`}
+          ref={menuRef}
+          onKeyDown={onMenuKey}
+        >
           <button role="menuitem" onClick={() => { setMenuOpen(false); setTitle(s.title); setRenaming(true); }}>Rename</button>
           <button role="menuitem" onClick={() => {
             setMenuOpen(false);
@@ -213,11 +405,18 @@ function SessionRow({
               role="menuitem"
               onClick={() => {
                 setMenuOpen(false);
-                if (getUiSettings().confirmSessionArchive && !window.confirm(`Archive "${s.title || "session"}"?`)) return;
-                void archiveSession(s.id).then(onChanged).catch((e) => setUiError(friendlyError("Couldn’t archive the session", e)));
+                quickArchive();
               }}
             >Archive</button>
           )}
+          <button
+            role="menuitem"
+            className="danger"
+            onClick={() => {
+              setMenuOpen(false);
+              quickDelete();
+            }}
+          >Delete</button>
           {folders.length > 0 && <div className="session-menu-head">Move to folder</div>}
           {s.folderId && <button role="menuitem" onClick={() => void moveToFolder(null)}>⌂ No folder</button>}
           {folders.filter((f) => f.id !== s.folderId).map((f) => (

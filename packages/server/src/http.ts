@@ -134,6 +134,11 @@ export function createHttpServer(deps: HttpDeps): Server {
       }
       m = path.match(/^\/api\/sessions\/([^/]+)$/);
       if (m && method === "GET") return json(res, 200, await sessions.snapshot(m[1]!));
+      if (m && method === "DELETE") {
+        if (!sessions.delete) throw Object.assign(new Error("session deletion unavailable"), { code: "unsupported" });
+        await sessions.delete(m[1]!);
+        return json(res, 200, { ok: true });
+      }
       m = path.match(/^\/api\/sessions\/([^/]+)\/events$/);
       if (m && method === "GET") {
         const afterSeq = Number(url.searchParams.get("afterSeq") ?? 0);

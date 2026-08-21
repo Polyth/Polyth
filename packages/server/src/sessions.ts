@@ -1076,6 +1076,29 @@ export function createSessionService(deps: {
       await updateProjection(sessionId, { status: "idle" });
     },
 
+    // Hard delete (UX-SHELL-CONSOLIDATION-02): destructive intent is confirmed
+    // upstream (the UI confirms running/pending sessions before calling this).
+    // Runs under the per-session lock so it can never interleave with a turn
+    // callback; a still-running turn is aborted before the log is removed.
+    async delete(sessionId) {
+      return withSessionLock(sessionId, async () => {
+        const proj = await store.projection(sessionId);
+        if (!proj) throw Object.assign(new Error("session not found"), { code: "not-found" });
+        if (!store.deleteSession) {
+          throw Object.assign(new Error("session deletion unavailable"), { code: "unsupported" });
+        }
+        const active = turnActive(sessionId);
+        const rt = sessionRuntime.get(sessionId);
+        // Unwire BEFORE aborting: the abort's own turn/stopped must be dropped
+        // by the dispatch filter, never re-appended to the just-deleted log.
+        unwire(sessionId);
+        lastTurnId.delete(sessionId);
+        admitting.delete(sessionId);
+        if (active && rt) await rt.abort(sessionId).catch(() => {});
+        await store.deleteSession(sessionId);
+      });
+    },
+
     async rename(sessionId, title) {
       const t = title.trim();
       if (!t || t.length > 200) throw Object.assign(new Error("title required (≤200 chars)"), { code: "invalid-input" });
