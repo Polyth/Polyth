@@ -519,6 +519,22 @@ export interface ProjectService {
   update?(id: string, patch: ProjectPatch): Promise<Project>;
 }
 
+// ---------------------------------------------------------------- packages
+
+export type PackageSettingsGroup = "Workspace" | "Engineering" | "Customize" | "System";
+
+export interface PackageDescriptorDto {
+  id: string;
+  name: string;
+  description: string;
+  core: boolean;
+  enabled: boolean;
+  settingsGroup?: PackageSettingsGroup;
+  /** Emoji or short icon label for the settings navigation. */
+  icon?: string;
+  hasSettings: boolean;
+}
+
 // ---------------------------------------------------------------- Home Assistant
 
 export interface HomeAssistantEntitySelection {
@@ -1181,6 +1197,15 @@ export interface SettingsSearchItem {
   description?: string;
   keywords?: string[];
   focusTarget: string;
+}
+
+export interface SettingsPageMeta {
+  label: string;
+  group: PackageSettingsGroup;
+  icon?: string;
+  settingsItems?: SettingsSearchItem[];
+  /** Links the settings page to its package enablement state. */
+  packageId?: string;
 }
 
 export interface ShortcutBinding {

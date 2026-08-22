@@ -1,14 +1,15 @@
-import SecureSafePage from "./components/settings/SecureSafePage.tsx";
-import { registerSlot } from "./slots.ts";
+import SecureSafePage from "../components/settings/SecureSafePage.tsx";
+import { installSettingsPage } from "./settingsPage.ts";
 
-registerSlot(
-  "settings.pages",
-  "secure-safe",
-  () => <SecureSafePage />,
-  20,
-  {
+export function installSecureSafePackage(): () => void {
+  return installSettingsPage({
+    id: "secure-safe",
+    packageId: "secure-safe",
     label: "Secure Safe",
     group: "Engineering",
+    icon: "🔐",
+    order: 50,
+    component: SecureSafePage,
     settingsItems: [
       {
         id: "secure-safe.entries",
@@ -19,5 +20,5 @@ registerSlot(
         focusTarget: "secure-safe.entries",
       },
     ],
-  },
-);
+  });
+}

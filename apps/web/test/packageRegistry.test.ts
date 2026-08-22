@@ -1,0 +1,75 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import { register } from "node:module";
+import type { PackageDescriptorDto } from "@polyth/contracts";
+
+register("./tsxHooks.mjs", import.meta.url);
+
+const descriptors = new Map<string, PackageDescriptorDto>([
+  ["models", {
+    id: "models",
+    name: "Providers & Models",
+    description: "Model configuration.",
+    core: true,
+    enabled: true,
+    hasSettings: true,
+  }],
+  ["dictation", {
+    id: "dictation",
+    name: "Voice & Dictation",
+    description: "Voice controls.",
+    core: false,
+    enabled: true,
+    hasSettings: true,
+  }],
+  ["usage", {
+    id: "usage",
+    name: "Usage",
+    description: "Usage reporting.",
+    core: false,
+    enabled: true,
+    hasSettings: true,
+  }],
+]);
+
+Object.defineProperty(globalThis, "fetch", {
+  configurable: true,
+  value: async () => ({
+    ok: true,
+    status: 200,
+    statusText: "OK",
+    json: async () => ({ packages: [...descriptors.values()] }),
+    text: async () => "",
+  }),
+});
+
+const { bootPackages, isPackageEnabled, subscribePackages } =
+  await import("../src/packages/registry.ts");
+const { listSlots } = await import("../src/slots.ts");
+const { listWidgets } = await import("../src/widgets/catalog.ts");
+
+test("package boot installs and removes package-owned settings and widgets", async () => {
+  let notifications = 0;
+  const unsubscribe = subscribePackages(() => { notifications++; });
+  await bootPackages();
+
+  assert.equal(isPackageEnabled("voice"), true, "dictation aliases to the voice UI package");
+  assert.ok(listSlots("settings.pages").some((item) => item.id === "voice"));
+  assert.ok(listSlots("settings.pages").some((item) => item.id === "usage"));
+  assert.ok(listSlots("settings.pages").some((item) => item.id === "models"));
+  assert.ok(listSlots("settings.pages").some((item) => item.id === "agents"));
+  assert.ok(listWidgets().some((item) => item.pluginId === "voice"));
+  assert.ok(listWidgets().some((item) => item.pluginId === "usage"));
+
+  descriptors.get("dictation")!.enabled = false;
+  descriptors.get("usage")!.enabled = false;
+  await bootPackages();
+
+  assert.equal(isPackageEnabled("voice"), false);
+  assert.equal(listSlots("settings.pages").some((item) => item.id === "voice"), false);
+  assert.equal(listSlots("settings.pages").some((item) => item.id === "usage"), false);
+  assert.equal(listWidgets().some((item) => item.pluginId === "voice"), false);
+  assert.equal(listWidgets().some((item) => item.pluginId === "usage"), false);
+  assert.equal(notifications, 2);
+  unsubscribe();
+});

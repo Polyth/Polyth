@@ -9,12 +9,9 @@ import { installShell } from "./shell.ts";
 import { exposeWorkspaceSurfaces } from "./workspace/surfaceRegistry.ts";
 import { applySettingsToDom } from "./settings.ts";
 import { getState } from "./store.ts";
-import { installVoice } from "./voice.tsx";
 import { installBuiltinMiniWidgets } from "./widgets/builtinMiniWidgets.tsx";
-import { installHomeAssistantPlugin } from "./widgets/homeAssistantPlugin.tsx";
-import { installUsagePlugin } from "./widgets/usagePlugin.tsx";
 import { exposeWidgets } from "./widgets/catalog.ts";
-import "./secureSafe.tsx";
+import { bootPackages } from "./packages/registry.ts";
 import App from "./App.tsx";
 import LockScreen from "./components/LockScreen.tsx";
 import "./styles.css";
@@ -26,14 +23,9 @@ exposeCapabilities();
 exposeWorkspaceSurfaces();
 exposeWidgets();
 installBuiltinMiniWidgets();
-installHomeAssistantPlugin();
-installUsagePlugin();
 // Palette commands + keyboard shortcuts: one install, synced with the
 // capability registry from then on (UX-PERSONAS: search sees every tool).
 installShell();
-// Voice registers its composer.leading slot before the first ready App
-// render; installVoice is idempotent so repeated boots stay single-slot.
-installVoice();
 
 // F16: init() loads REST data and opens /ws — it must not run until the
 // server says this device is authorized (or that no password is set).
@@ -41,6 +33,7 @@ let booted = false;
 const bootOnce = (): void => {
   if (booted) return;
   booted = true;
+  void bootPackages().catch(() => undefined);
   init();
 };
 

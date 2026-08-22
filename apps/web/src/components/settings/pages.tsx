@@ -4,10 +4,10 @@ import { useEffect, useRef, useState, type CSSProperties } from "react";
 import {
   NO_PRESET_CARD, WORKSPACE_PRESETS, applyPreset, clearPreset, formatPresetSummary,
   getPresentation, getPresetState, presetSummary, resetDisclosureChoices,
-  resetWorkspaceOrder, setPlacementOverride, usePresentation, usePresetState,
-  type CapabilityTier, type PresetSummary, type WorkspacePresetId,
+  resetWorkspaceOrder, usePresentation, usePresetState,
+  type PresetSummary, type WorkspacePresetId,
 } from "../../workspacePresets.ts";
-import { listCapabilities, useResolvedCapabilities } from "../../capabilities.ts";
+import { listCapabilities } from "../../capabilities.ts";
 import { openWorkspacePane, setOverlay, updateSettings, useStore } from "../../store.ts";
 import { setUiSettings, useUiSettings } from "../../uiPrefs.ts";
 import { setProviderHidden, useUsagePrefs } from "../../usagePrefs.ts";
@@ -1169,7 +1169,7 @@ function PluginLogViewer({ id }: { id: string }) {
   );
 }
 
-function ManagedPluginsSection() {
+export function ManagedPluginsSection() {
   const [plugins, setPlugins] = useState<InstalledPluginDto[]>([]);
   const [source, setSource] = useState("");
   const [error, setError] = useState("");
@@ -1309,100 +1309,6 @@ function ManagedPluginsSection() {
       {error && <div className="form-error">{error}</div>}
       {toast && <div className="plugin-toast" role="status"><span>{toast}</span><button type="button" onClick={() => setToast("")}>Dismiss</button></div>}
     </div>
-  );
-}
-
-/** Plugins declared in the OpenCode config (read-only; managed via opencode.json). */
-function OpenCodePluginsSection() {
-  const [plugins, setPlugins] = useState<string[]>([]);
-  useEffect(() => { void api.opencodePlugins().then((r) => setPlugins(r.plugins)); }, []);
-  if (plugins.length === 0) return null;
-  return (
-    <div data-settings-item="plugins.opencode">
-      <div className="stat-label">OpenCode plugins ({plugins.length})</div>
-      {plugins.map((spec) => (
-        <div key={spec} className="set-row">
-          <div className="set-row-text">
-            <div className="set-row-label mono">{spec}</div>
-            <div className="set-row-hint">Loaded by the OpenCode backend; edit opencode.json to change.</div>
-          </div>
-          <div className="set-row-control"><span className="tag">opencode.json</span></div>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-const TIER_LABELS: Array<[CapabilityTier, string]> = [
-  ["primary", "Primary"],
-  ["more", "More tools"],
-  ["technical", "Technical options"],
-];
-
-/** UX-PERSONAS: capability placement replaces the built-in enable
- *  checkboxes. Every capability is listed with its current placement; a
- *  change is an explicit override that survives preset switches. Nothing here
- *  can hide or disable a built-in capability. */
-function CapabilityPlacementSection() {
-  const resolved = useResolvedCapabilities();
-  const presentation = usePresentation();
-  return (
-    <div data-settings-item="plugins.builtin">
-      <div className="stat-label">Capability placement</div>
-      {resolved.map((c) => {
-        const overridden = c.descriptor.id in presentation.placements;
-        const alias = c.descriptor.technicalLabel && c.descriptor.technicalLabel !== c.descriptor.label
-          ? ` (${c.descriptor.technicalLabel})`
-          : "";
-        return (
-          <div key={c.descriptor.id} className="set-row">
-            <div className="set-row-text">
-              <div className="set-row-label">
-                {c.descriptor.label}{alias}
-                {overridden && <span className="tag" title="Your explicit placement wins over preset suggestions">custom</span>}
-                {!c.descriptor.available() && (
-                  <span className="tag" title={c.descriptor.unavailableReason?.() ?? undefined}>unavailable</span>
-                )}
-              </div>
-              <div className="set-row-hint">{c.descriptor.plainDescription}</div>
-            </div>
-            <div className="set-row-control">
-              {c.descriptor.id === "session" ? (
-                <span className="tag">Primary</span>
-              ) : (
-                <select
-                  aria-label={`Placement for ${c.descriptor.label}`}
-                  value={c.tier}
-                  onChange={(e) => setPlacementOverride(c.descriptor.id, { tier: e.target.value as CapabilityTier, rank: c.rank })}
-                >
-                  {TIER_LABELS.map(([tier, label]) => <option key={tier} value={tier}>{label}</option>)}
-                </select>
-              )}
-              {overridden && (
-                <button className="small-btn" onClick={() => setPlacementOverride(c.descriptor.id, null)}>Reset</button>
-              )}
-            </div>
-          </div>
-        );
-      })}
-      <button
-        className="ghost-link"
-        onClick={() => { if (window.confirm("Reset workspace order to the preset (or standard) arrangement?")) resetWorkspaceOrder(); }}
-      >
-        Reset workspace order →
-      </button>
-    </div>
-  );
-}
-
-export function PluginsPage() {
-  return (
-    <>
-      <PageHead title="Plugins" blurb="Add workspace capabilities without changing your layout until you choose a widget." />
-      <ManagedPluginsSection />
-      <OpenCodePluginsSection />
-      <CapabilityPlacementSection />
-    </>
   );
 }
 

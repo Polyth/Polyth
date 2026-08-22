@@ -27,9 +27,11 @@ import {
 import { createDictationService, createWhisperSttAdapter } from "@polyth/dictation";
 import { createHomeAssistantPlugin, createHomeAssistantService } from "@polyth/home-assistant";
 import { createProjectService } from "./projects.ts";
+import { createPackageRegistry } from "./packages.ts";
 import { createSessionService, type Broadcaster, type RuntimePool } from "./sessions.ts";
 import { aggregateRuntimes } from "./runtimeAggregate.ts";
 import { createHttpServer, type RouteHandler } from "./http.ts";
+import { packageRoutes } from "./routes/packages.ts";
 import { goalRoutes } from "./routes/goals.ts";
 import { orgRoutes } from "./routes/org.ts";
 import { workspaceRoutes } from "./routes/workspace.ts";
@@ -88,10 +90,13 @@ export interface BootOptions {
   opencode?: Partial<OpenCodeAdapterOptions>;
 }
 
+export { isPackageEnabled } from "./packages.ts";
+
 export async function boot(opts: BootOptions = {}) {
   const port = opts.port ?? Number(process.env.PORT ?? 4400);
   const dataDir = resolve(opts.dataDir ?? process.env.POLYTH_DATA_DIR ?? "./data");
   mkdirSync(dataDir, { recursive: true });
+  const packageRegistry = createPackageRegistry({ file: `${dataDir}/packages.json` });
 
   // --- kernel composition root
   const root = createContext("root");
@@ -629,6 +634,7 @@ export async function boot(opts: BootOptions = {}) {
 
   const routes: RouteHandler[] = [
     authRoutes(auth),
+    packageRoutes(packageRegistry),
     async (rc) => {
       // lazily rehydrate goal state from the log before the goals routes answer
       if (/^\/api\/sessions\/[^/]+\/goal/.test(rc.path)) {

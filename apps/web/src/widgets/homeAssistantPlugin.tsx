@@ -262,7 +262,7 @@ function ClimateSensorsWidget() {
   );
 }
 
-function HomeAssistantSettings() {
+export function HomeAssistantSettings() {
   const { config, error, reload } = useConfig();
   const [baseUrl, setBaseUrl] = useState("");
   const [tokenEnv, setTokenEnv] = useState("HOME_ASSISTANT_TOKEN");
@@ -479,10 +479,15 @@ export const HOME_ASSISTANT_WIDGET_PLUGIN = defineWidgetPlugin({
   ],
 });
 
-let installed = false;
+let uninstall: (() => void) | null = null;
 
-export function installHomeAssistantPlugin(): void {
-  if (installed) return;
-  installed = true;
-  registerWidgetPlugin(HOME_ASSISTANT_WIDGET_PLUGIN);
+export function installHomeAssistantPlugin(): () => void {
+  if (uninstall) return uninstall;
+  const unregister = registerWidgetPlugin(HOME_ASSISTANT_WIDGET_PLUGIN);
+  const current = () => {
+    unregister();
+    if (uninstall === current) uninstall = null;
+  };
+  uninstall = current;
+  return current;
 }

@@ -20,6 +20,7 @@ import type {
   ModelDescriptor,
   ModelRef,
   MultirunDto,
+  PackageDescriptorDto,
   PreviewState,
   SystemInfoDto,
   Project,
@@ -479,6 +480,10 @@ export interface GoalState {
 
 export const api = {
   health: () => jfetch<Health>("/api/health"),
+  packagesList: (): Promise<{ packages: PackageDescriptorDto[] }> =>
+    jfetch<{ packages: PackageDescriptorDto[] }>("/api/packages"),
+  packagesSetEnabled: (id: string, enabled: boolean): Promise<PackageDescriptorDto> =>
+    jfetch<PackageDescriptorDto>(`/api/packages/${encodeURIComponent(id)}`, json("PATCH", { enabled })),
 
   listProjects: () => jfetch<Project[]>("/api/projects"),
   addProject: (path: string, name?: string) =>

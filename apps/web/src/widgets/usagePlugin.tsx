@@ -267,10 +267,15 @@ export const USAGE_WIDGET_PLUGIN = defineWidgetPlugin({
   ] satisfies readonly PluginWidgetDef[],
 });
 
-let installed = false;
+let uninstall: (() => void) | null = null;
 
-export function installUsagePlugin(): void {
-  if (installed) return;
-  installed = true;
-  registerWidgetPlugin(USAGE_WIDGET_PLUGIN);
+export function installUsagePlugin(): () => void {
+  if (uninstall) return uninstall;
+  const unregister = registerWidgetPlugin(USAGE_WIDGET_PLUGIN);
+  const current = () => {
+    unregister();
+    if (uninstall === current) uninstall = null;
+  };
+  uninstall = current;
+  return current;
 }

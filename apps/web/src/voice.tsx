@@ -309,7 +309,7 @@ function MicButton() {
 
 // ---- install -----------------------------------------------------------------
 
-let voiceInstalled = false;
+let uninstallVoice: (() => void) | null = null;
 
 const VOICE_WIDGET_PLUGIN = defineWidgetPlugin({
   id: "voice",
@@ -337,12 +337,11 @@ const VOICE_WIDGET_PLUGIN = defineWidgetPlugin({
 });
 
 /** Register the mic widget + auto read-aloud of newly completed replies.
- *  Idempotent: repeated boot (dev HMR, double module eval) can never add a
- *  second widget entry or store subscription (UX-COMPOSER-DISC). */
-export function installVoice(): void {
-  if (voiceInstalled) return;
-  voiceInstalled = true;
-  registerWidgetPlugin(VOICE_WIDGET_PLUGIN);
+ *  Idempotent and reversible so disabling the package removes every runtime
+ *  contribution without losing the user's saved preferences. */
+export function installVoice(): () => void {
+  if (uninstallVoice) return uninstallVoice;
+  const unregisterWidget = registerWidgetPlugin(VOICE_WIDGET_PLUGIN);
 
   // Auto-TTS: speak assistant/message events as they land in the active
   // session. Sessions are primed on first sight so history is never read.
@@ -370,5 +369,12 @@ export function installVoice(): void {
       }
     }
   };
-  subscribeStore(check);
+  const unsubscribeStore = subscribeStore(check);
+  const current = () => {
+    unsubscribeStore();
+    unregisterWidget();
+    if (uninstallVoice === current) uninstallVoice = null;
+  };
+  uninstallVoice = current;
+  return current;
 }

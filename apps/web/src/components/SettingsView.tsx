@@ -6,6 +6,7 @@
 import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { consumePendingSettingsPage, setOverlay } from "../store.ts";
 import { listSlots } from "../slots.ts";
+import { isPackageEnabled, subscribePackages } from "../packages/registry.ts";
 import { useSlotVersion } from "./slots/SlotHost.ts";
 import { usePrefs } from "../prefs.ts";
 import {
@@ -13,22 +14,20 @@ import {
   type SettingsSearchHit, type SettingsSearchItem,
 } from "../settings/registry.ts";
 import {
-  AboutPage, AgentsPage, AppearancePage, BehaviorPage, ChatPage, GeneralPage, GitPage,
-  McpPage, NotificationsPage, PluginsPage, ProjectsPage, UsagePage,
+  AboutPage, AppearancePage, BehaviorPage, ChatPage, GeneralPage,
+  NotificationsPage, ProjectsPage,
 } from "./settings/pages.tsx";
 import ViewErrorBoundary from "./ViewErrorBoundary.ts";
 import ShortcutsPage from "./settings/ShortcutsPage.tsx";
-import ModelsPage from "./settings/ModelsPage.tsx";
-import VoicePage from "./settings/VoicePage.tsx";
-import IntegrationsPage from "./settings/IntegrationsPage.tsx";
 import SessionsPage from "./settings/SessionsPage.tsx";
-import CommandsPage from "./settings/CommandsPage.tsx";
 import AccessPage from "./settings/AccessPage.tsx";
+import PackagesPage from "./settings/PackagesPage.tsx";
 
 interface PageDef {
   id: string;
   label: string;
   group: "Workspace" | "Engineering" | "Customize" | "System";
+  icon?: string;
   nav?: boolean;
   render: () => ReactNode;
 }
@@ -40,17 +39,9 @@ const BUILTIN: PageDef[] = [
   { id: "notifications", label: "Notifications", group: "Workspace", render: () => <NotificationsPage /> },
   { id: "sessions", label: "Sessions", group: "Workspace", render: () => <SessionsPage /> },
   { id: "shortcuts", label: "Shortcuts", group: "Workspace", render: () => <ShortcutsPage /> },
-  { id: "voice", label: "Voice", group: "Workspace", render: () => <VoicePage /> },
-  { id: "integrations", label: "Integrations", group: "Workspace", render: () => <IntegrationsPage /> },
-  { id: "usage", label: "Usage", group: "Workspace", render: () => <UsagePage /> },
   { id: "projects", label: "Projects", group: "Engineering", render: () => <ProjectsPage /> },
-  { id: "git", label: "Git", group: "Engineering", render: () => <GitPage /> },
-  { id: "models", label: "Providers & Models", group: "Engineering", render: () => <ModelsPage /> },
-  { id: "agents", label: "Roles", group: "Engineering", render: () => <AgentsPage /> },
   { id: "behavior", label: "Behavior", group: "Engineering", render: () => <BehaviorPage /> },
-  { id: "commands", label: "Commands", group: "Engineering", render: () => <CommandsPage /> },
-  { id: "mcp", label: "MCP", group: "Engineering", render: () => <McpPage /> },
-  { id: "plugins", label: "Plugins", group: "Customize", render: () => <PluginsPage /> },
+  { id: "packages", label: "Packages", group: "Customize", icon: "📦", render: () => <PackagesPage /> },
   { id: "access", label: "Access", group: "System", nav: false, render: () => <AccessPage /> },
   { id: "about", label: "About", group: "System", nav: false, render: () => <AboutPage /> },
 ];
@@ -98,23 +89,41 @@ export default function SettingsView({ onClose = () => setOverlay(null) }: { onC
   // a stable identity between slot changes.
   const slotsAt = useSlotVersion();
   const slotItems = useMemo(() => listSlots("settings.pages"), [slotsAt]);
+  const [packagesAt, setPackagesAt] = useState(0);
+  useEffect(() => subscribePackages(() => setPackagesAt((value) => value + 1)), []);
+  const visibleSlotItems = useMemo(
+    () => slotItems.filter((item) => {
+      const packageId = (item.meta as { packageId?: unknown } | undefined)?.packageId;
+      return typeof packageId !== "string" || isPackageEnabled(packageId);
+    }),
+    [packagesAt, slotItems],
+  );
   const pages = useMemo<PageDef[]>(() => {
-    const extra = slotItems.map((item): PageDef => {
-      const meta = item.meta as { label?: unknown; group?: unknown } | undefined;
+    const extra = visibleSlotItems.map((item): PageDef => {
+      const meta = item.meta as {
+        label?: unknown;
+        group?: unknown;
+        icon?: unknown;
+        pageId?: unknown;
+      } | undefined;
       const group = meta?.group;
       return {
-        id: `slot:${item.id}`,
+        id: typeof meta?.pageId === "string" ? meta.pageId : `slot:${item.id}`,
         label: typeof meta?.label === "string"
           ? meta.label
           : item.id.replace(/^[^.]*\./, "").replace(/[-_]/g, " ").replace(/^\w/, (c) => c.toUpperCase()),
         group: group === "Workspace" || group === "Engineering" || group === "Customize" || group === "System"
           ? group
           : "Customize",
+        ...(typeof meta?.icon === "string" ? { icon: meta.icon } : {}),
         render: () => <>{item.render({ prefs })}</>,
       };
     });
-    return [...BUILTIN, ...extra];
-  }, [prefs, slotItems]);
+    const groupOrder = ["Workspace", "Engineering", "Customize", "System"];
+    return [...BUILTIN, ...extra].sort(
+      (a, b) => groupOrder.indexOf(a.group) - groupOrder.indexOf(b.group),
+    );
+  }, [prefs, visibleSlotItems]);
 
   useEffect(() => {
     const navigate = (event: Event) => {
@@ -130,18 +139,19 @@ export default function SettingsView({ onClose = () => setOverlay(null) }: { onC
 
   useEffect(() => {
     const contributed: SettingsSearchItem[] = [];
-    for (const item of slotItems) {
+    for (const item of visibleSlotItems) {
       const list = (item.meta as { settingsItems?: SettingsSearchItem[] } | undefined)?.settingsItems;
       if (!Array.isArray(list)) continue;
+      const pageId = typeof item.meta?.pageId === "string" ? item.meta.pageId : `slot:${item.id}`;
       for (const si of list) {
         if (si && typeof si.id === "string" && typeof si.label === "string") {
-          contributed.push({ ...si, pageId: `slot:${item.id}` });
+          contributed.push({ ...si, pageId });
         }
       }
     }
     if (contributed.length === 0) return;
     return registerSettingsItems(contributed); // disposed plugin items vanish with the slot
-  }, [slotItems]);
+  }, [visibleSlotItems]);
 
   const pageLabels = useMemo(
     () => Object.fromEntries(pages.map((p) => [p.id, p.label])),
@@ -275,6 +285,7 @@ export default function SettingsView({ onClose = () => setOverlay(null) }: { onC
                     aria-current={current.id === p.id ? "page" : undefined}
                     onClick={() => { setActive(p.id); }}
                   >
+                    {p.icon && <span className="settings-nav-icon" aria-hidden="true">{p.icon}</span>}
                     {p.label}
                   </button>
                 </Fragment>
