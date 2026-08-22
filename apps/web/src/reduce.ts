@@ -11,6 +11,8 @@ import type {
   MultirunRunDto,
   SessionEvent,
   TokenUsage,
+  WorkflowRunDto,
+  WorkflowRunNodeDto,
 } from "@polyth/contracts";
 import { extractChangedFiles } from "./pendingChanges.ts";
 
@@ -214,6 +216,7 @@ export interface RenderModel {
   turn: TurnState | null;
   goal: GoalState | null;
   multirun: MultirunDto | null;
+  workflowRun: WorkflowRunDto | null;
   fusion: FusionDto | null;
   fusionPrompt: string;
   /** Latest revisioned task/subagent snapshots (WP8); replay-deterministic. */
@@ -241,6 +244,7 @@ export function emptyModel(): RenderModel {
     turn: null,
     goal: null,
     multirun: null,
+    workflowRun: null,
     fusion: null,
     fusionPrompt: "",
     tasks: null,
@@ -806,6 +810,45 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
       }
       break;
     }
+    case "workflow/run-started": {
+      const nodes = Array.isArray(d.nodes)
+        ? (d.nodes as unknown as WorkflowRunNodeDto[]).map((node) => ({ ...node }))
+        : [];
+      const layers = Array.isArray(d.layers)
+        ? (d.layers as unknown[]).map((layer) =>
+            Array.isArray(layer) ? layer.filter((id): id is string => typeof id === "string") : [])
+        : [];
+      model.workflowRun = {
+        id: str(d, "runId") ?? "",
+        workflowId: str(d, "workflowId") ?? "",
+        name: str(d, "name") ?? "",
+        input: str(d, "input") ?? "",
+        status: "running",
+        startedAt: num(d, "startedAt") ?? ev.time,
+        layers,
+        nodes,
+      };
+      break;
+    }
+    case "workflow/node-progress": {
+      const run = model.workflowRun;
+      if (!run || run.id !== (str(d, "runId") ?? run.id)) break;
+      const raw = obj(d, "node") as unknown as WorkflowRunNodeDto | undefined;
+      const nodeId = str(d, "nodeId") ?? raw?.id;
+      if (!raw || !nodeId) break;
+      const index = run.nodes.findIndex((node) => node.id === nodeId);
+      if (index === -1) run.nodes.push({ ...raw });
+      else run.nodes[index] = { ...raw };
+      break;
+    }
+    case "workflow/run-completed": {
+      const run = model.workflowRun;
+      if (!run || run.id !== (str(d, "runId") ?? run.id)) break;
+      const status = str(d, "status");
+      if (status === "done" || status === "error" || status === "stopped") run.status = status;
+      run.finishedAt = num(d, "finishedAt") ?? ev.time;
+      break;
+    }
     case "fusion/started": {
       model.fusionPrompt = str(d, "prompt") ?? "";
       const models = strArr(d, "models");
@@ -864,6 +907,9 @@ export function cloneModel(src: RenderModel): RenderModel {
     questions: src.questions.slice(),
     secrets: src.secrets.slice(),
     totals: { ...src.totals },
+    workflowRun: src.workflowRun
+      ? { ...src.workflowRun, layers: src.workflowRun.layers.map((layer) => layer.slice()), nodes: src.workflowRun.nodes.map((node) => ({ ...node })) }
+      : null,
     changedFiles: src.changedFiles.slice(),
   };
   const idx = messageIndexes.get(src);

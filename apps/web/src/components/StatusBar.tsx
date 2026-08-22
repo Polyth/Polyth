@@ -8,6 +8,7 @@ const VIEW_LABEL: Record<AppView, string> = {
   session: "Chat",
   goals: "Goals",
   multirun: "Multi-run",
+  workflow: "Workflows",
   fusion: "Fusion",
   walkthrough: "Walkthrough",
   schedule: "Schedule",

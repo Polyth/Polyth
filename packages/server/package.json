@@ -1,1 +1,1 @@
-{"name":"@polyth/server","version":"0.1.0","type":"module","exports":{".":"./src/index.ts"},"dependencies":{"@polyth/secure-safe":"0.1.0"}}
+{"name":"@polyth/server","version":"0.1.0","type":"module","exports":{".":"./src/index.ts"},"dependencies":{"@polyth/secure-safe":"0.1.0","@polyth/workflow":"0.1.0"}}

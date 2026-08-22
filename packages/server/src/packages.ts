@@ -31,6 +31,7 @@ export const BUILTIN_PACKAGES = [
   { id: "browser", name: "Browser", description: "Controlled browser sessions and observations.", core: false, enabled: true, settingsGroup: "Engineering", icon: "🌐", hasSettings: false },
   { id: "goals", name: "Goals", description: "Goal tracking and completion audits.", core: false, enabled: true, settingsGroup: "Workspace", icon: "◎", hasSettings: false },
   { id: "multirun", name: "Multirun", description: "Run prompts across multiple models.", core: false, enabled: true, settingsGroup: "Engineering", icon: "⑂", hasSettings: false },
+  { id: "workflow", name: "Workflows", description: "Orchestrate multi-agent DAG pipelines.", core: false, enabled: true, settingsGroup: "Engineering", icon: "◇", hasSettings: false },
   { id: "fusion", name: "Fusion", description: "Synthesize multiple model responses.", core: false, enabled: true, settingsGroup: "Engineering", icon: "⧉", hasSettings: false },
   { id: "walkthrough", name: "Walkthrough", description: "Generate and review code walkthroughs.", core: false, enabled: true, settingsGroup: "Engineering", icon: "→", hasSettings: false },
   { id: "schedule", name: "Schedule", description: "Schedule recurring and one-time agent tasks.", core: false, enabled: true, settingsGroup: "Engineering", icon: "⏱", hasSettings: false },

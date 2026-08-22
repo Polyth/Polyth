@@ -17,6 +17,7 @@ export const VIEW_OF_CAPABILITY: Partial<Record<string, AppView>> = {
   session: "session",
   goals: "goals",
   multirun: "multirun",
+  workflow: "workflow",
   fusion: "fusion",
   walkthrough: "walkthrough",
   schedule: "schedule",

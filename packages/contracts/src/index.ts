@@ -137,6 +137,93 @@ export interface MultirunRunProgressData { multirunId: string; runId: string; st
 export interface MultirunCompletedData { multirunId: string }
 export interface MultirunPickedData { multirunId: string; runId: string }
 
+export type WorkflowPipeMode = "direct" | "ancestors";
+export type WorkflowPermissionPolicy = "auto" | "manual";
+export type WorkflowNodeStatus = "queued" | "running" | "done" | "error" | "skipped" | "stopped";
+export type WorkflowRunStatus = "running" | "done" | "error" | "stopped";
+
+export interface WorkflowNodeDto {
+  id: string;
+  role: string;
+  prompt: string;
+  model?: ModelRef;
+  agent?: string;
+  position?: { x: number; y: number };
+}
+
+export interface WorkflowEdgeDto {
+  id: string;
+  source: string;
+  target: string;
+}
+
+export interface WorkflowRunOptionsDto {
+  pipe?: WorkflowPipeMode;
+  permissions?: WorkflowPermissionPolicy;
+  maxParallel?: number;
+  nodeTimeoutMs?: number;
+}
+
+export interface WorkflowDto {
+  id: string;
+  projectId: string;
+  name: string;
+  nodes: WorkflowNodeDto[];
+  edges: WorkflowEdgeDto[];
+  defaults?: WorkflowRunOptionsDto;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface WorkflowRunNodeDto {
+  id: string;
+  role: string;
+  status: WorkflowNodeStatus;
+  sessionId?: string;
+  model?: ModelRef;
+  agent?: string;
+  activity?: string;
+  prompt?: string;
+  output?: string;
+  error?: string;
+  startedAt?: number;
+  finishedAt?: number;
+}
+
+export interface WorkflowRunDto {
+  id: string;
+  workflowId: string;
+  name: string;
+  input: string;
+  status: WorkflowRunStatus;
+  startedAt: number;
+  finishedAt?: number;
+  layers: string[][];
+  nodes: WorkflowRunNodeDto[];
+}
+
+export interface WorkflowRunStartedData {
+  runId: string;
+  workflowId: string;
+  name: string;
+  input: string;
+  startedAt: number;
+  layers: string[][];
+  nodes: WorkflowRunNodeDto[];
+}
+
+export interface WorkflowNodeProgressData {
+  runId: string;
+  nodeId: string;
+  node: WorkflowRunNodeDto;
+}
+
+export interface WorkflowRunCompletedData {
+  runId: string;
+  status: WorkflowRunStatus;
+  finishedAt: number;
+}
+
 export interface FusionWeightDto { model: string; weight: number }
 export type FusionStatus = "running" | "completed" | "failed";
 export interface FusionDto { id: string; answer: string; weights: FusionWeightDto[]; disagreements: string[]; status: FusionStatus; error?: string }

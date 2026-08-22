@@ -37,6 +37,9 @@ import type {
   ShellTurnResult,
   TerminalInfo,
   WalkthroughStepDto,
+  WorkflowDto,
+  WorkflowRunDto,
+  WorkflowRunOptionsDto,
   WorkspaceLabel,
 } from "@polyth/contracts";
 
@@ -822,6 +825,28 @@ export const api = {
     jfetch<MultirunDto>(`/api/multiruns/${multirunId}`),
   pickMultirun: (multirunId: string, runId: string) =>
     jfetch<{ ok: true }>(`/api/multiruns/${multirunId}/pick`, json("POST", { runId })),
+
+  // ---- workflow orchestration -----------------------------------------------
+  listWorkflows: (projectId: string) =>
+    jfetch<WorkflowDto[]>(`/api/workflows?projectId=${encodeURIComponent(projectId)}`),
+  createWorkflow: (input: Omit<WorkflowDto, "id" | "createdAt" | "updatedAt">) =>
+    jfetch<WorkflowDto>("/api/workflows", json("POST", input)),
+  getWorkflow: (id: string) =>
+    jfetch<WorkflowDto>(`/api/workflows/${encodeURIComponent(id)}`),
+  updateWorkflow: (id: string, patch: Partial<Pick<WorkflowDto, "name" | "nodes" | "edges" | "defaults">>) =>
+    jfetch<WorkflowDto>(`/api/workflows/${encodeURIComponent(id)}`, json("PATCH", patch)),
+  deleteWorkflow: (id: string) =>
+    jfetch<{ ok: true }>(`/api/workflows/${encodeURIComponent(id)}`, { method: "DELETE" }),
+  runWorkflow: (id: string, sessionId: string, input: string, options?: WorkflowRunOptionsDto) =>
+    jfetch<WorkflowRunDto>(`/api/workflows/${encodeURIComponent(id)}/run`, json("POST", {
+      sessionId,
+      input,
+      ...(options ? { options } : {}),
+    })),
+  getWorkflowRun: (runId: string) =>
+    jfetch<WorkflowRunDto>(`/api/workflow-runs/${encodeURIComponent(runId)}`),
+  stopWorkflowRun: (runId: string) =>
+    jfetch<WorkflowRunDto>(`/api/workflow-runs/${encodeURIComponent(runId)}/stop`, { method: "POST" }),
 
   // ---- M3: fusion ----------------------------------------------------------
   startFusion: (sessionId: string, text: string, models: string[]) =>

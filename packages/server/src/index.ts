@@ -20,6 +20,7 @@ import { createGitService } from "@polyth/git";
 import { createTerminalService } from "@polyth/terminal";
 import { createPreviewService } from "@polyth/preview";
 import { createMultirunService } from "@polyth/multirun";
+import { createWorkflowService } from "@polyth/workflow";
 import { createFusionService, synthesisPrompt } from "@polyth/fusion";
 import { createScheduleService, scanLoopsDir } from "@polyth/schedule";
 import { createKnowledgeStore } from "@polyth/knowledge";
@@ -50,6 +51,7 @@ import { gitRoutes } from "./routes/git.ts";
 import { terminalRoutes, attachTerminalWs } from "./routes/terminal.ts";
 import { previewRoutes } from "./routes/preview.ts";
 import { multirunRoutes } from "./routes/multirun.ts";
+import { workflowRoutes } from "./routes/workflow.ts";
 import { fusionRoutes } from "./routes/fusion.ts";
 import { walkthroughRoutes } from "./routes/walkthrough.ts";
 import { scheduleRoutes } from "./routes/schedule.ts";
@@ -82,6 +84,7 @@ import { secureSafeRoutes } from "./routes/secureSafe.ts";
 import { createWalkthroughJobService } from "./walkthroughs.ts";
 import { createReviewFlowService, createReviewService } from "./review.ts";
 import { createMultirunRunOne } from "./multirunRunner.ts";
+import { createWorkflowRunNode } from "./workflowRunner.ts";
 import { oneShot } from "./oneshot.ts";
 import { attachWs } from "./ws.ts";
 
@@ -522,6 +525,19 @@ export async function boot(opts: BootOptions = {}) {
     runOne: createMultirunRunOne(resolveSessionRuntime),
   });
 
+  const workflow = createWorkflowService({
+    file: `${dataDir}/workflows.json`,
+    append: async (sessionId, type, data) => {
+      const ev = await store.append(sessionId, type, data, {
+        ignorable: true,
+        producerPlugin: "workflow",
+      });
+      broadcast.event(ev);
+      return ev;
+    },
+    runNode: createWorkflowRunNode(sessions),
+  });
+
   const fusion = createFusionService({
     append: async (sessionId, type, data) => {
       const ev = await store.append(sessionId, type, data, { ignorable: true });
@@ -751,6 +767,7 @@ export async function boot(opts: BootOptions = {}) {
       },
     }),
     multirunRoutes(multirun),
+    workflowRoutes(workflow),
     fusionRoutes(fusion),
     walkthroughRoutes({ store, broadcast, jobs: walkthroughJobs, review, flow: reviewFlow }),
     scheduleRoutes({ schedule, projects }),
@@ -827,7 +844,7 @@ export async function boot(opts: BootOptions = {}) {
     }),
   ];
 
-  const allCapabilities = () => ["polyth.sessions", "polyth.sessionPersistence", "polyth.projects", "polyth.agentRuntime", "polyth.goals", "polyth.files", "polyth.commands", "polyth.git", "polyth.worktrees", "polyth.terminal", "polyth.preview", "polyth.multirun", "polyth.fusion", "polyth.walkthrough", "polyth.schedule", "polyth.github", "polyth.control", "polyth.agentProfiles", "polyth.settings", "polyth.mcp", "polyth.plugins", "polyth.knowledge", "polyth.review", "polyth.usage", "polyth.browser", "polyth.voice", "polyth.assist", "polyth.homeAssistant", "polyth.secureSafe"];
+  const allCapabilities = () => ["polyth.sessions", "polyth.sessionPersistence", "polyth.projects", "polyth.agentRuntime", "polyth.goals", "polyth.files", "polyth.commands", "polyth.git", "polyth.worktrees", "polyth.terminal", "polyth.preview", "polyth.multirun", "polyth.workflow", "polyth.fusion", "polyth.walkthrough", "polyth.schedule", "polyth.github", "polyth.control", "polyth.agentProfiles", "polyth.settings", "polyth.mcp", "polyth.plugins", "polyth.knowledge", "polyth.review", "polyth.usage", "polyth.browser", "polyth.voice", "polyth.assist", "polyth.homeAssistant", "polyth.secureSafe"];
 
   const server = createHttpServer({
     sessions, projects, runtimes, routes, visibility, auth,

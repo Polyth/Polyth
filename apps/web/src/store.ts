@@ -38,11 +38,11 @@ import { setWorkspaceMode } from "./widgets/workspaceMode.ts";
 // surfaces, not primary views — they open beside (or over) a still-mounted
 // Chat through openWorkspacePane(). Only Chat and the workflow pages remain
 // primary destinations.
-export type AppView = "session" | "goals" | "multirun" | "fusion" | "walkthrough" | "schedule" | "github";
+export type AppView = "session" | "goals" | "multirun" | "workflow" | "fusion" | "walkthrough" | "schedule" | "github";
 /** Legacy ids that older persisted state / call sites may still send. */
 export type LegacyPaneViewId = "files" | "git" | "terminal" | "preview";
 const LEGACY_PANE_VIEWS: readonly string[] = ["files", "git", "terminal", "preview"];
-const PRIMARY_VIEWS: readonly string[] = ["session", "goals", "multirun", "fusion", "walkthrough", "schedule", "github"];
+const PRIMARY_VIEWS: readonly string[] = ["session", "goals", "multirun", "workflow", "fusion", "walkthrough", "schedule", "github"];
 export type Overlay = "onboarding" | "project-picker" | "palette" | "search" | "settings" | "worktree-session" | null;
 /** Right-rail surface id (F17): a registry id such as "files" or a
  *  plugin-contributed "slot:…" id — no longer a closed union. */
