@@ -370,6 +370,10 @@ export interface GithubIssueDto {
   number: number; title: string; state: string; author: string; updatedAt: string; url: string;
 }
 export interface GithubPrDto extends GithubIssueDto { isDraft: boolean; headRefName: string }
+export interface CurrentPrSummaryDto {
+  number: number; title: string; url: string;
+  changedFiles: number; additions: number; deletions: number;
+}
 export interface GithubStatusDto {
   installed: boolean; authenticated: boolean; repo: GithubRepoDto | null; reason?: string;
 }
@@ -915,6 +919,10 @@ export const api = {
     jfetch<GhListResult<GithubPrDto[]>>(`/api/github/prs?projectId=${encodeURIComponent(projectId)}&limit=${limit}`).catch(
       (): GhListResult<GithubPrDto[]> => ({ ok: false, reason: "server unreachable" }),
     ),
+  githubCurrentPrSummary: (projectId: string) =>
+    jfetch<GhListResult<CurrentPrSummaryDto>>(
+      `/api/github/pr/current?projectId=${encodeURIComponent(projectId)}`,
+    ).catch((): GhListResult<CurrentPrSummaryDto> => ({ ok: false, reason: "server unreachable" })),
 
   // ---- PR detail surfaces (WP11; fail-soft) ------------------------------------
   githubPrDetail: (projectId: string, number: number) =>

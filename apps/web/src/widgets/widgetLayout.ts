@@ -1,5 +1,13 @@
 import { useSyncExternalStore } from "react";
-import { UI_SLOTS, type UiSlot, type WidgetAudience, type WidgetKind, type WidgetScope, type WidgetSize } from "@polyth/contracts";
+import {
+  UI_SLOTS,
+  type JsonObject,
+  type UiSlot,
+  type WidgetAudience,
+  type WidgetKind,
+  type WidgetScope,
+  type WidgetSize,
+} from "@polyth/contracts";
 import { getState, subscribeStore } from "../store.ts";
 
 export type WidgetZone = "header" | "left" | "main" | "right" | "bottom" | "floating";
@@ -50,6 +58,8 @@ export interface WidgetPlacement {
   description?: string;
   showIn?: WidgetAudience[];
   scope?: WidgetScope;
+  /** Pure UI state, persisted per project and per widget instance. */
+  config?: JsonObject;
 }
 
 export interface WidgetLayout {
@@ -103,6 +113,7 @@ export const BUILTIN_WIDGET_IDS = [
   "files.explorer",
   "files.project-map",
   "github.overview",
+  "github.pr-summary",
   "schedule.tasks",
   "multirun.runs",
   "fusion.answers",
@@ -137,6 +148,11 @@ const DEFAULT_ZONE: Record<string, WidgetZone> = {
   "schedule.tasks": "right",
   "terminal.shell": "bottom",
   "preview.app": "bottom",
+};
+
+const DEFAULT_SLOT_BY_ID: Record<string, UiSlot> = {
+  "github.pr-summary": "session.composer.before",
+  "usage.session": "session.composer.before",
 };
 
 const DEFAULT_SIZE: WidgetSize = { w: 6, h: 4 };
@@ -177,6 +193,7 @@ const emptySlotPlacements = (): Partial<Record<UiSlot, string[]>> => ({});
 
 function defaultSlotFor(definition: WidgetLayoutDefinition): UiSlot {
   if (definition.defaultSlot) return definition.defaultSlot;
+  if (DEFAULT_SLOT_BY_ID[definition.id]) return DEFAULT_SLOT_BY_ID[definition.id]!;
   return widgetSlotFromZone(definition.zone ?? DEFAULT_ZONE[definition.id] ?? "main");
 }
 
@@ -299,6 +316,11 @@ export function createDefaultWidgetLayout(
 const isAudience = (value: unknown): value is WidgetAudience =>
   value === "simple" || value === "standard" || value === "power";
 
+const widgetConfig = (value: unknown): JsonObject | undefined =>
+  value !== null && typeof value === "object" && !Array.isArray(value)
+    ? value as JsonObject
+    : undefined;
+
 /** Parse untrusted browser state against the live catalog. Unknown ids and
  * duplicate placements are ignored; missing catalog items remain available in
  * the library and receive their default placement. */
@@ -405,6 +427,7 @@ export function parseWidgetLayout(
         ...(value?.scope === "global" || value?.scope === "workspace" || value?.scope === "plugin"
           ? { scope: value.scope }
           : base?.scope ? { scope: base.scope } : {}),
+        ...(widgetConfig(value?.config) ? { config: widgetConfig(value?.config)! } : {}),
       };
     }
     return {
@@ -632,6 +655,16 @@ export function setWidgetScope(layout: WidgetLayout, id: string, scope: WidgetSc
   return { ...layout, widgets: { ...layout.widgets, [id]: { ...current, scope } } };
 }
 
+export function setWidgetConfig(layout: WidgetLayout, id: string, config: JsonObject): WidgetLayout {
+  const current = layout.widgets[id];
+  if (!current) return layout;
+  if (JSON.stringify(current.config ?? {}) === JSON.stringify(config)) return layout;
+  return {
+    ...layout,
+    widgets: { ...layout.widgets, [id]: { ...current, config } },
+  };
+}
+
 export function setWidgetIdentity(
   layout: WidgetLayout,
   id: string,
@@ -710,6 +743,7 @@ export type WidgetLayoutMutation =
   | { type: "audience"; audience: WidgetAudience }
   | { type: "show-in"; id: string; showIn: WidgetAudience[] }
   | { type: "scope"; id: string; scope: WidgetScope }
+  | { type: "config"; id: string; config: JsonObject }
   | { type: "identity"; id: string; title?: string; description?: string }
   | { type: "duplicate"; id: string }
   | { type: "forget"; id: string }
@@ -769,6 +803,8 @@ export function applyWidgetLayoutMutations(
         return setWidgetShowIn(current, mutation.id, mutation.showIn);
       case "scope":
         return setWidgetScope(current, mutation.id, mutation.scope);
+      case "config":
+        return setWidgetConfig(current, mutation.id, mutation.config);
       case "identity":
         return setWidgetIdentity(current, mutation.id, mutation);
       case "duplicate":
@@ -810,7 +846,11 @@ export function applyWidgetLayoutPreset(
     audience: preset === "focused" ? "simple" : preset === "manager" ? "standard" : layout.audience,
     widgets: Object.fromEntries(Object.entries(base.widgets).map(([id, placement]) => [
       id,
-      { ...placement, visible: visible.has(id) },
+      {
+        ...placement,
+        visible: visible.has(id),
+        ...(layout.widgets[id]?.config ? { config: layout.widgets[id]!.config } : {}),
+      },
     ])),
   };
 }

@@ -14,6 +14,7 @@ import {
   moveWidgetToSlot,
   parseWidgetLayout,
   serializeWidgetLayout,
+  setWidgetConfig,
   setWidgetSize,
   setWidgetPosition,
   setWidgetVisible,
@@ -42,11 +43,16 @@ test("free-form positions persist and collisions resolve with a grid gap", () =>
 
 test("default widget layout contains every built-in exactly once", () => {
   const layout = createDefaultWidgetLayout();
-  const placed = WIDGET_ZONES.flatMap((zone) => layout.zones[zone]);
+  const placed = [
+    ...WIDGET_ZONES.flatMap((zone) => layout.zones[zone]),
+    ...Object.values(layout.slotPlacements).flatMap((ids) => ids ?? []),
+  ];
   assert.deepEqual(new Set(placed), new Set(BUILTIN_WIDGET_IDS));
   assert.equal(placed.length, BUILTIN_WIDGET_IDS.length);
   assert.equal(widgetZoneOf(layout, "core.composer"), "main");
   assert.equal(widgetZoneOf(layout, "terminal.shell"), "bottom");
+  assert.equal(widgetSlotOf(layout, "usage.session"), "session.composer.before");
+  assert.equal(widgetSlotOf(layout, "github.pr-summary"), "session.composer.before");
   assert.equal(layout.widgets["core.composer"]?.visible, true);
   assert.equal(layout.widgets["core.chat"]?.visible, false);
   assert.equal(layout.widgets["preview.app"]?.visible, false);
@@ -82,6 +88,27 @@ test("layout serializes and parses visibility, size, audience, and zone order", 
   );
   assert.deepEqual(parsed, layout);
   assert.deepEqual(parsed.zones.main.slice(0, 2), ["terminal.shell", "core.chat"]);
+});
+
+test("per-instance widget config persists and updates independently", () => {
+  const definition = {
+    id: "sample.metrics",
+    pluginId: "sample",
+    title: "Metrics",
+    defaultSlot: "session.composer.before" as const,
+    supportedSlots: ["session.composer.before", "workspace.main"] as const,
+    duplicatable: true,
+  };
+  let layout = createDefaultWidgetLayout([definition]);
+  layout = setWidgetConfig(layout, definition.id, { showCost: false, label: "primary" });
+  layout = duplicateWidget(layout, definition.id, definition);
+  layout = setWidgetConfig(layout, "sample.metrics#2", { showCost: true, label: "copy" });
+
+  const parsed = parseWidgetLayout(serializeWidgetLayout(layout), [definition]);
+  assert.deepEqual(parsed.widgets[definition.id]?.config, { showCost: false, label: "primary" });
+  assert.deepEqual(parsed.widgets["sample.metrics#2"]?.config, { showCost: true, label: "copy" });
+  assert.equal(widgetSlotOf(parsed, definition.id), "session.composer.before");
+  assert.equal(widgetSlotOf(parsed, "sample.metrics#2"), "session.composer.before");
 });
 
 test("moves reorder between zones, reveal widgets, and ignore unknown ids", () => {

@@ -3880,6 +3880,17 @@ body[data-motion="reduced"] .settings-row.flash { animation: none; outline: 1px 
 .widget-stat-grid > div { display: flex; flex-direction: column; gap: 2px; padding: 9px; border: 1px solid var(--hair); border-radius: var(--radius-md); background: var(--sunken); }
 .widget-stat-grid span { color: var(--muted); font-size: 10px; }
 .widget-stat-grid strong { font: 650 13px var(--mono); }
+.usage-session-stats small { color: var(--faint); font: 9px var(--mono); }
+.github-pr-summary { display: flex; align-items: stretch; gap: 12px; padding: 10px 12px; }
+.github-pr-summary > a { min-width: 0; flex: 1; display: flex; flex-direction: column; justify-content: center; text-decoration: none; }
+.github-pr-summary > a span { color: var(--muted); font-size: 9.5px; }
+.github-pr-summary > a strong { overflow: hidden; color: var(--text); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.github-pr-summary-metrics { display: flex; align-items: stretch; gap: 6px; }
+.github-pr-summary-metrics > div { min-width: 58px; display: flex; flex-direction: column; justify-content: center; padding: 5px 8px; border-left: 1px solid var(--hair); }
+.github-pr-summary-metrics span { color: var(--muted); font-size: 9px; }
+.github-pr-summary-metrics strong { font: 650 13px var(--mono); }
+.github-pr-summary-metrics .positive { color: var(--green); }
+.github-pr-summary-metrics .negative { color: var(--red); }
 .widget-add-panel {
   position: absolute; top: 55px; right: 12px; bottom: 12px; z-index: 20; width: min(330px, calc(100% - 24px));
   overflow-y: auto; padding: 10px; border: 1px solid var(--border); border-radius: var(--radius-lg);
@@ -4082,6 +4093,10 @@ body[data-density="balanced"] .composer { padding-block: 10px; }
 .header-actions { display: flex; align-items: center; gap: 2px; }
 .placed-mini-widget { display: contents; }
 .placed-slot-widget { min-width: 0; }
+.focus-conversation > .placed-slot-widget {
+  flex: none; width: min(920px, calc(100% - 72px)); margin: 8px auto 0;
+  border: 1px solid var(--border-soft); border-radius: 12px; background: var(--sunken);
+}
 .widget-placement-toolbar {
   display: flex; align-items: center; justify-content: flex-end; gap: 8px;
   margin: 6px 0 16px; padding-bottom: 14px; border-bottom: 1px solid var(--border-soft);
@@ -4273,6 +4288,17 @@ body[data-quick-actions="false"] [data-widget-id="core.quick-actions"] { display
   border: 1px solid var(--border); border-radius: 10px; background: var(--elevated); box-shadow: var(--shadow-lg);
 }
 .widget-card-menu button { border: 0; padding: 6px 8px; text-align: left; font-size: 10.5px; }
+.widget-instance-settings { min-height: 100%; display: flex; flex-direction: column; gap: 12px; padding: 12px; }
+.widget-instance-settings > header { display: flex; align-items: center; gap: 8px; }
+.widget-instance-settings > header button { margin-left: auto; width: 26px; height: 26px; padding: 0; border: 0; }
+.widget-placement-setting { display: flex; align-items: center; gap: 12px; font-size: 11px; }
+.widget-placement-setting span { color: var(--muted); }
+.widget-placement-setting select { min-width: 180px; margin-left: auto; }
+.widget-schema-settings { display: flex; flex-direction: column; gap: 8px; }
+.widget-schema-settings label { display: flex; align-items: center; gap: 8px; font-size: 11px; }
+.widget-schema-settings label > span { display: flex; flex: 1; flex-direction: column; }
+.widget-schema-settings small { color: var(--muted); font-size: 9.5px; }
+.widget-schema-settings select, .widget-schema-settings input:not([type="checkbox"]) { max-width: 180px; }
 .widget-card-body .composer { padding: 12px; border: 0; background: transparent; }
 .widget-card-body .composer-card { box-shadow: none; }
 .widget-canvas-footer {

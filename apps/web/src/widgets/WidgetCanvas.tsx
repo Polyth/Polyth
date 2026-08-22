@@ -6,6 +6,7 @@ import {
   type KeyboardEvent,
   type PointerEvent,
 } from "react";
+import type { JsonObject, JsonValue, UiSlot } from "@polyth/contracts";
 import { useStore } from "../store.ts";
 import SlotHost from "../components/slots/SlotHost.ts";
 import ViewErrorBoundary from "../components/ViewErrorBoundary.ts";
@@ -18,14 +19,108 @@ import {
   updateWidgetLayout,
   useWidgetLayout,
   widgetDefinitionId,
+  widgetSlotOf,
+  setWidgetConfig,
   type WidgetPlacement,
   type WidgetPosition,
 } from "./widgetLayout.ts";
-import { pluginDisplayName, supportedWidgetZones } from "./widgetLibrary.ts";
+import {
+  pluginDisplayName,
+  supportedWidgetSlots,
+  supportedWidgetZones,
+} from "./widgetLibrary.ts";
 import "./builtinWidgets.tsx";
 
 const GRID_GAP = 10;
 const GRID_ROW = 36;
+
+const SLOT_LABELS: Partial<Record<UiSlot, string>> = {
+  "session.composer.before": "Below chat / Above composer",
+  "workspace.header": "Header",
+  "workspace.left": "Left side",
+  "workspace.main": "Main workspace",
+  "workspace.right": "Right side",
+  "workspace.bottom": "Bottom strip",
+  "workspace.floating": "Floating",
+};
+
+const slotLabel = (slot: UiSlot): string =>
+  SLOT_LABELS[slot]
+  ?? slot.split(".").map((part) => part[0]!.toUpperCase() + part.slice(1)).join(" · ");
+
+interface SchemaProperty {
+  type?: unknown;
+  title?: unknown;
+  description?: unknown;
+  default?: unknown;
+  enum?: unknown;
+}
+
+function SchemaWidgetSettings({
+  schema,
+  config,
+  updateConfig,
+}: {
+  schema: Readonly<Record<string, unknown>>;
+  config: Readonly<JsonObject>;
+  updateConfig: (config: JsonObject) => void;
+}) {
+  const properties = schema.properties && typeof schema.properties === "object"
+    ? schema.properties as Record<string, SchemaProperty>
+    : {};
+  return (
+    <div className="widget-schema-settings">
+      {Object.entries(properties).map(([key, property]) => {
+        const label = typeof property.title === "string" ? property.title : key;
+        const description = typeof property.description === "string" ? property.description : "";
+        const value = config[key] ?? property.default as JsonValue | undefined;
+        const choices = Array.isArray(property.enum)
+          ? property.enum.filter((item): item is string => typeof item === "string")
+          : [];
+        if (property.type === "boolean") {
+          return (
+            <label key={key}>
+              <input
+                type="checkbox"
+                checked={value === true}
+                onChange={(event) => updateConfig({ ...config, [key]: event.target.checked })}
+              />
+              <span><strong>{label}</strong>{description && <small>{description}</small>}</span>
+            </label>
+          );
+        }
+        if (choices.length > 0) {
+          return (
+            <label key={key}>
+              <span><strong>{label}</strong>{description && <small>{description}</small>}</span>
+              <select
+                value={typeof value === "string" ? value : choices[0]}
+                onChange={(event) => updateConfig({ ...config, [key]: event.target.value })}
+              >
+                {choices.map((choice) => <option key={choice} value={choice}>{choice}</option>)}
+              </select>
+            </label>
+          );
+        }
+        return (
+          <label key={key}>
+            <span><strong>{label}</strong>{description && <small>{description}</small>}</span>
+            <input
+              type={property.type === "number" || property.type === "integer" ? "number" : "text"}
+              value={typeof value === "string" || typeof value === "number" ? value : ""}
+              onChange={(event) => updateConfig({
+                ...config,
+                [key]: property.type === "number" || property.type === "integer"
+                  ? Number(event.target.value)
+                  : event.target.value,
+              })}
+            />
+          </label>
+        );
+      })}
+    </div>
+  );
+}
 
 function positionStyle(placement: WidgetPlacement): CSSProperties {
   const width = Math.min(placement.size.w, 12 - placement.position.x);
@@ -58,8 +153,15 @@ function WidgetCard({
   projectId: string | null;
   sessionId: string | null;
 }) {
+  const layout = useWidgetLayout();
   const [menuOpen, setMenuOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   useEscape(menuOpen, () => setMenuOpen(false));
+  useEscape(settingsOpen, () => setSettingsOpen(false));
+  const config = placement.config ?? {};
+  const updateConfig = (next: JsonObject) => {
+    updateWidgetLayout((current) => setWidgetConfig(current, instanceId, next));
+  };
 
   const startMove = (event: PointerEvent<HTMLButtonElement>) => {
     event.preventDefault();
@@ -154,6 +256,10 @@ function WidgetCard({
           >⋮</button>
           {menuOpen && (
             <div className="widget-card-menu" role="menu">
+              <button role="menuitem" onClick={() => {
+                setSettingsOpen(true);
+                setMenuOpen(false);
+              }}>Settings</button>
               {widget.duplicatable && (
                 <button role="menuitem" onClick={() => {
                   updateWidgetLayout((current) => applyWidgetLayoutMutations(
@@ -177,9 +283,53 @@ function WidgetCard({
         </div>
       </header>
       <div className="widget-card-body">
-        <ViewErrorBoundary resetKey={`${instanceId}:${projectId ?? ""}:${sessionId ?? ""}`} inline>
-          {widget.render({ projectId, sessionId, editing: true })}
-        </ViewErrorBoundary>
+        {settingsOpen ? (
+          <div className="widget-instance-settings">
+            <header>
+              <strong>Widget settings</strong>
+              <button type="button" aria-label="Close widget settings" onClick={() => setSettingsOpen(false)}>×</button>
+            </header>
+            <label className="widget-placement-setting">
+              <span>Placement</span>
+              <select
+                value={widgetSlotOf(layout, instanceId) ?? widget.defaultSlot}
+                onChange={(event) => updateWidgetLayout((current) => applyWidgetLayoutMutations(
+                  current,
+                  [{ type: "place", id: instanceId, slot: event.target.value as UiSlot }],
+                  [widget],
+                ))}
+              >
+                {supportedWidgetSlots(widget).map((slot) => (
+                  <option key={slot} value={slot}>{slotLabel(slot)}</option>
+                ))}
+              </select>
+            </label>
+            {widget.settingsRender
+              ? widget.settingsRender({
+                  projectId,
+                  sessionId,
+                  editing: true,
+                  widgetId: widget.id,
+                  instanceId,
+                  config,
+                  updateConfig,
+                })
+              : widget.settingsSchema
+                ? <SchemaWidgetSettings schema={widget.settingsSchema} config={config} updateConfig={updateConfig} />
+                : <div className="builtin-widget-settings"><small>No additional options.</small></div>}
+          </div>
+        ) : (
+          <ViewErrorBoundary resetKey={`${instanceId}:${projectId ?? ""}:${sessionId ?? ""}`} inline>
+            {widget.render({
+              projectId,
+              sessionId,
+              editing: true,
+              instanceId,
+              config,
+              updateConfig,
+            })}
+          </ViewErrorBoundary>
+        )}
       </div>
       {widget.resizable !== false && (
         <button

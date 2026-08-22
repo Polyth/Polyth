@@ -1,6 +1,6 @@
 import { useSyncExternalStore, type ReactNode } from "react";
 import { listSlots, slotVersion, subscribeSlots } from "../slots.ts";
-import { isUiSlot, type UiSlot, type WidgetKind } from "@polyth/contracts";
+import { isUiSlot, type JsonObject, type UiSlot, type WidgetKind } from "@polyth/contracts";
 import {
   ensureWidgets,
   widgetSlotFromZone,
@@ -14,9 +14,13 @@ export interface WidgetRenderContext extends Record<string, unknown> {
   projectId: string | null;
   sessionId: string | null;
   editing: boolean;
+  instanceId: string;
+  config: Readonly<JsonObject>;
+  updateConfig: (config: JsonObject) => void;
 }
 
 export interface WidgetSettingsContext extends WidgetRenderContext {
+  /** Catalog definition id; use instanceId for per-instance identity. */
   widgetId: string;
 }
 
