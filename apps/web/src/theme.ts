@@ -192,6 +192,14 @@ export const PRESET_THEMES: ThemeSpec[] = [
     bg: "#17110d", panel: "#201813", elevated: "#2a211a", raised: "#352a21", sunken: "#100b08", inputBg: "#1b140f",
     border: "#493a2e", borderSoft: "#3a2e25", accent: "#e9a66f", accentHi: "#f1b884",
   }),
+  darkPreset("tokyo", "Tokyo Night", {
+    bg: "#10131c", panel: "#171b28", elevated: "#1e2433", raised: "#283044", sunken: "#0a0d14", inputBg: "#131725",
+    border: "#39435b", borderSoft: "#2c3448", accent: "#8aadf4", accentHi: "#9bb8fa",
+  }),
+  darkPreset("plum", "Electric Plum", {
+    bg: "#160f1c", panel: "#201628", elevated: "#2a1e34", raised: "#352641", sunken: "#100a15", inputBg: "#1a121f",
+    border: "#4b3659", borderSoft: "#3a2a46", accent: "#d5a6ff", accentHi: "#e0b8ff",
+  }),
   lightPreset("cloud", "Cloud", {
     bg: "#f9fbfd", panel: "#f1f4f7", elevated: "#ffffff", raised: "#eef1f4", sunken: "#e2e7ec", inputBg: "#ffffff",
     border: "#c9d1d9", borderSoft: "#dbe1e7", accent: "#285b91", accentHi: "#326ba6",
@@ -219,6 +227,14 @@ export const PRESET_THEMES: ThemeSpec[] = [
   lightPreset("glacier", "Glacier", {
     bg: "#f4fafb", panel: "#e8f2f4", elevated: "#ffffff", raised: "#eaf4f5", sunken: "#d9e8eb", inputBg: "#ffffff",
     border: "#bdd0d5", borderSoft: "#d3e0e3", accent: "#176675", accentHi: "#257382",
+  }),
+  lightPreset("paper", "Clean Paper", {
+    bg: "#fbfbfa", panel: "#f0f0ed", elevated: "#ffffff", raised: "#f3f3f0", sunken: "#e5e5e0", inputBg: "#ffffff",
+    border: "#c9c9c2", borderSoft: "#ddddd7", accent: "#315b89", accentHi: "#3b6796",
+  }),
+  lightPreset("peach", "Soft Peach", {
+    bg: "#fff9f5", panel: "#f7ede6", elevated: "#ffffff", raised: "#f8eee8", sunken: "#ebddd3", inputBg: "#ffffff",
+    border: "#d7c3b6", borderSoft: "#e7d8ce", accent: "#7c4328", accentHi: "#8b5033",
   }),
 ];
 

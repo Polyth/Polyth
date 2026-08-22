@@ -2,7 +2,6 @@ import type { WidgetDef } from "./catalog.ts";
 import type {
   WidgetAudience,
   WidgetLayoutMutation,
-  WidgetLayoutPresetId,
   WidgetZone,
 } from "./widgetLayout.ts";
 
@@ -11,13 +10,6 @@ export interface WorkspaceCustomizePlan {
   density?: "comfortable" | "balanced" | "compact";
   message: string;
 }
-
-const PRESET_TERMS: Array<[WidgetLayoutPresetId, readonly string[]]> = [
-  ["focused", ["focused", "minimal", "distraction"]],
-  ["manager", ["manager", "coordinate", "planning"]],
-  ["build-debug", ["build", "debug", "terminal"]],
-  ["balanced", ["balanced", "general"]],
-];
 
 const ZONE_TERMS: Array<[WidgetZone, readonly string[]]> = [
   ["header", ["header", "top"]],
@@ -41,8 +33,6 @@ export function planWorkspaceCustomization(
   const text = request.trim().toLowerCase();
   if (!text) return { mutations: [], message: "Describe one or more workspace changes." };
   const mutations: WidgetLayoutMutation[] = [];
-  const preset = PRESET_TERMS.find(([, terms]) => terms.some((term) => text.includes(term)))?.[0];
-  if (preset) mutations.push({ type: "preset", preset });
 
   const audience = (["simple", "standard", "power"] as const).find((value) => text.includes(value));
   if (audience) mutations.push({ type: "audience", audience: audience as WidgetAudience });
@@ -78,6 +68,6 @@ export function planWorkspaceCustomization(
     ...(density ? { density } : {}),
     message: count > 0
       ? `${count} workspace ${count === 1 ? "change" : "changes"} ready.`
-      : "Try “focused”, “compact”, “hide terminal”, “show notes”, or “move preview to bottom”.",
+      : "Try “compact”, “hide terminal”, “show notes”, or “move preview to bottom”.",
   };
 }

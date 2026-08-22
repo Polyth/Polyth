@@ -37,6 +37,14 @@ test("isRepo distinguishes a repo from a plain directory", async () => {
   assert.equal(await git.isRepo(plain), false);
 });
 
+test("repository identity can be read and changed without touching global config", async () => {
+  const dir = repo();
+  assert.deepEqual(await git.identity(dir), { name: "Test", email: "t@example.com" });
+  await git.setIdentity(dir, { name: "Polyth Bot", email: "polyth@example.invalid" });
+  assert.deepEqual(await git.identity(dir), { name: "Polyth Bot", email: "polyth@example.invalid" });
+  await assert.rejects(() => git.setIdentity(dir, { name: "", email: "bad" }), /name required/);
+});
+
 test("status reports untracked, modified, staged and deleted files", async () => {
   const dir = repo();
   writeFileSync(join(dir, "new.txt"), "fresh\n");

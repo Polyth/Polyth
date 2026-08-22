@@ -3,7 +3,7 @@
 // and MCP server entries (opencode.json "mcp" block). The server owns the
 // canonical revisioned copies; this applier projects them into the backend's
 // config directory with atomic writes so a crash never leaves a torn file.
-import { mkdirSync } from "node:fs";
+import { existsSync, mkdirSync } from "node:fs";
 import { readFile, rename, writeFile, unlink } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -31,6 +31,12 @@ export interface BackendConfigApplier {
   /** Mirror provider/model visibility into the backend config, preserving all
    *  other keys (including unrelated per-provider options). */
   applyProviderVisibility(v: ProviderVisibilityApply): Promise<void>;
+  /** Merge one role override without disturbing plugins or unrelated options. */
+  applyAgent(name: string, role: {
+    prompt?: string;
+    model?: { providerID: string; modelID: string };
+    mode: "primary" | "subagent" | "all";
+  }): Promise<void>;
   /** Read the backend config ({} when the file is missing; throws on corrupt
    *  content so callers never trust a torn read). OpenCode treats the file as
    *  JSONC — it rewrites it with trailing commas — so parsing is lenient. */
@@ -111,7 +117,11 @@ export function createConfigApplier(opts: { configDir?: string } = {}): BackendC
   const dir = opts.configDir ?? defaultConfigDir();
   mkdirSync(dir, { recursive: true });
   const agentsPath = join(dir, "AGENTS.md");
-  const configPath = join(dir, "opencode.json");
+  const jsonPath = join(dir, "opencode.json");
+  const jsoncPath = join(dir, "opencode.jsonc");
+  // OpenCode supports both spellings. Update the file the user already owns so
+  // plugin entries (including commandcode) remain in the effective config.
+  const configPath = existsSync(jsoncPath) ? jsoncPath : jsonPath;
 
   // Missing file is fine (fresh install); a corrupt one must not be
   // silently clobbered — callers roll their stores back on throw.
@@ -171,6 +181,28 @@ export function createConfigApplier(opts: { configDir?: string } = {}): BackendC
       else delete next.provider;
 
       await atomicWrite(configPath, `${JSON.stringify(next, null, 2)}\n`);
+    },
+
+    async applyAgent(name, role): Promise<void> {
+      if (!name.trim()) throw new Error("agent name required");
+      const existing = await readExisting();
+      const agentsRaw = existing.agent;
+      const agents: Record<string, unknown> =
+        agentsRaw && typeof agentsRaw === "object" && !Array.isArray(agentsRaw)
+          ? { ...(agentsRaw as Record<string, unknown>) }
+          : {};
+      const currentRaw = agents[name];
+      const current: Record<string, unknown> =
+        currentRaw && typeof currentRaw === "object" && !Array.isArray(currentRaw)
+          ? { ...(currentRaw as Record<string, unknown>) }
+          : {};
+      current.mode = role.mode;
+      if (role.prompt?.trim()) current.prompt = role.prompt;
+      else delete current.prompt;
+      if (role.model) current.model = `${role.model.providerID}/${role.model.modelID}`;
+      else delete current.model;
+      agents[name] = current;
+      await atomicWrite(configPath, `${JSON.stringify({ ...existing, agent: agents }, null, 2)}\n`);
     },
 
     async applyMcp(entries: McpApplyEntry[]): Promise<void> {

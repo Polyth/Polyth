@@ -32,17 +32,17 @@ import {
   type ListPublishOutcome,
   type ProjectRegistryState,
 } from "./projectRegistry.ts";
-import { setWorkspaceMode } from "./widgets/workspaceMode.ts";
+import { setWorkspaceMode, setWorkspaceModeProject } from "./widgets/workspaceMode.ts";
 
 // UX-PANE-MODEL: Files, Git, Terminal, and Preview are workspace PANE
 // surfaces, not primary views — they open beside (or over) a still-mounted
 // Chat through openWorkspacePane(). Only Chat and the workflow pages remain
 // primary destinations.
-export type AppView = "session" | "goals" | "multirun" | "fusion" | "walkthrough" | "schedule" | "github";
+export type AppView = "session" | "goals" | "multirun" | "workflow" | "fusion" | "walkthrough" | "schedule" | "github";
 /** Legacy ids that older persisted state / call sites may still send. */
 export type LegacyPaneViewId = "files" | "git" | "terminal" | "preview";
 const LEGACY_PANE_VIEWS: readonly string[] = ["files", "git", "terminal", "preview"];
-const PRIMARY_VIEWS: readonly string[] = ["session", "goals", "multirun", "fusion", "walkthrough", "schedule", "github"];
+const PRIMARY_VIEWS: readonly string[] = ["session", "goals", "multirun", "workflow", "fusion", "walkthrough", "schedule", "github"];
 export type Overlay = "onboarding" | "project-picker" | "palette" | "search" | "settings" | "worktree-session" | null;
 /** Right-rail surface id (F17): a registry id such as "files" or a
  *  plugin-contributed "slot:…" id — no longer a closed union. */
@@ -239,6 +239,7 @@ export function applyProjectAdded(project: Project): void {
     editorLocation: null,
     gitDiffPath: null,
   });
+  setWorkspaceModeProject(project.id);
 }
 
 /** Delete success: remove the confirmed id and resolve a replacement active. */
@@ -259,6 +260,7 @@ export function applyProjectRemoved(id: string): void {
     editorLocation: null,
     gitDiffPath: null,
   });
+  setWorkspaceModeProject(activeProjectId);
 }
 
 // ---- other actions ---------------------------------------------------------
@@ -300,6 +302,7 @@ export function activateProject(id: string | null): void {
     editorFile: null, editorLocation: null, gitDiffPath: null,
     railPlugin, paneExpanded: restored !== null ? pane!.expanded : false, paneFullscreen: false,
   });
+  setWorkspaceModeProject(id);
 }
 export function setActiveView(view: AppView | LegacyPaneViewId): void {
   // One-time legacy adapter: a stored/contributed "files"/"git"/"terminal"/

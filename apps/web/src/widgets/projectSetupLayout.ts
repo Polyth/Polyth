@@ -14,7 +14,7 @@ export type SetupWorkflow =
   | "write"
   | "general";
 
-export interface WorkspaceSetupDraft {
+export interface ProjectSetupDraft {
   workflow: SetupWorkflow;
   audience: WidgetAudience;
   widgetIds: string[];
@@ -43,7 +43,7 @@ export const WORKFLOW_OPTIONS: readonly WorkflowOption[] = [
     label: "Build & debug",
     description: "Code, changes, terminal, preview, and live activity.",
     suggestedWidgetIds: [
-      "core.composer", "files.explorer", "git.recent", "terminal.shell",
+      "core.chat", "files.explorer", "git.recent", "terminal.shell",
       "preview.app", "session.work-status", "session.activity",
     ],
   },
@@ -52,7 +52,7 @@ export const WORKFLOW_OPTIONS: readonly WorkflowOption[] = [
     label: "Plan & coordinate",
     description: "Goals, notes, schedule, progress, and review.",
     suggestedWidgetIds: [
-      "core.composer", "goals.current", "knowledge.notes", "schedule.tasks",
+      "core.chat", "goals.current", "knowledge.notes", "schedule.tasks",
       "usage.session", "walkthrough.review",
     ],
   },
@@ -61,7 +61,7 @@ export const WORKFLOW_OPTIONS: readonly WorkflowOption[] = [
     label: "Research",
     description: "Conversation, notes, browser, GitHub, and sources.",
     suggestedWidgetIds: [
-      "core.composer", "core.chat", "knowledge.notes", "github.overview",
+      "core.chat", "knowledge.notes", "github.overview",
       "files.project-map", "core.quick-actions",
     ],
   },
@@ -70,7 +70,7 @@ export const WORKFLOW_OPTIONS: readonly WorkflowOption[] = [
     label: "Design & explore",
     description: "Ideas, previews, project context, and quick actions.",
     suggestedWidgetIds: [
-      "core.composer", "preview.app", "files.project-map", "knowledge.notes",
+      "core.chat", "preview.app", "files.project-map", "knowledge.notes",
       "core.quick-actions", "goals.current",
     ],
   },
@@ -79,7 +79,7 @@ export const WORKFLOW_OPTIONS: readonly WorkflowOption[] = [
     label: "Write",
     description: "A calm composer with notes, goals, and references nearby.",
     suggestedWidgetIds: [
-      "core.composer", "knowledge.notes", "goals.current", "files.project-map",
+      "core.chat", "knowledge.notes", "goals.current", "files.project-map",
       "core.quick-actions",
     ],
   },
@@ -88,7 +88,7 @@ export const WORKFLOW_OPTIONS: readonly WorkflowOption[] = [
     label: "General assistant",
     description: "A balanced place to ask, plan, build, and review.",
     suggestedWidgetIds: [
-      "core.composer", "core.quick-actions", "goals.current", "files.project-map",
+      "core.chat", "core.quick-actions", "goals.current", "files.project-map",
       "git.recent", "knowledge.notes", "session.work-status",
     ],
   },
@@ -98,13 +98,13 @@ export function workflowOption(id: SetupWorkflow): WorkflowOption {
   return WORKFLOW_OPTIONS.find((option) => option.id === id) ?? WORKFLOW_OPTIONS.at(-1)!;
 }
 
-export function createSetupDraft(workflow: SetupWorkflow = "general"): WorkspaceSetupDraft {
+export function createSetupDraft(workflow: SetupWorkflow = "general"): ProjectSetupDraft {
   const option = workflowOption(workflow);
   return { workflow, audience: "standard", widgetIds: [...option.suggestedWidgetIds] };
 }
 
 export function setupMutations(
-  draft: WorkspaceSetupDraft,
+  draft: ProjectSetupDraft,
   widgets: readonly Pick<WidgetDef, "id">[],
 ): WidgetLayoutMutation[] {
   const selected = new Set(draft.widgetIds);
@@ -118,9 +118,9 @@ export function setupMutations(
   ];
 }
 
-export function applyWorkspaceSetup(
+export function applyProjectSetup(
   layout: WidgetLayout,
-  draft: WorkspaceSetupDraft,
+  draft: ProjectSetupDraft,
   widgets: readonly WidgetDef[],
 ): WidgetLayout {
   return applyWidgetLayoutMutations(layout, setupMutations(draft, widgets), widgets);

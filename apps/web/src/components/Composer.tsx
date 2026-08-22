@@ -3,10 +3,6 @@ import { getState, useActiveModel, useStore, setUiError, openSettingsPage } from
 import { sendMessage, abortSession, createSession } from "../init.ts";
 import { api, type ComposerCatalogResult, type SlashCommand, type SnippetDef } from "../api.ts";
 import { loadDraft, saveDraft, type AutocompleteItem } from "../utils.ts";
-import {
-  setComposerDetail, starterLabelsFor, usePresentation, usePresetState,
-  effectiveComposerDetail,
-} from "../workspacePresets.ts";
 import SlotHost from "./slots/SlotHost.ts";
 import { dragKind, dropIntoSession } from "../dnd.ts";
 import {
@@ -81,6 +77,13 @@ function modelRefFromValue(value: string): { providerID: string; modelID: string
 }
 
 const PROFILE_MISSING_NOTE = "Profile unavailable — choose another";
+const STARTER_SUGGESTIONS = [
+  "Explore this project",
+  "Explain what’s here",
+  "Plan a next step",
+  "Review recent work",
+  "Help me get started",
+] as const;
 
 export default function Composer({ variant = "docked" }: { variant?: "docked" | "hero" | "widget" }) {
   const [pinSeed, setPinSeed] = useState<{ providerID: string; modelID: string; name?: string } | null>(null);
@@ -97,13 +100,7 @@ export default function Composer({ variant = "docked" }: { variant?: "docked" | 
   const session = useStore((s) => s.sessions.find((x) => x.id === s.activeSessionId) ?? null);
   const model = useActiveModel();
   const working = model.turn?.status === "working";
-  // UX-PERSONAS: one composer. The preset seeds only the initial disclosure
-  // state; the user's explicit Technical options choice is stored separately
-  // and wins over every later preset. No preset change unmounts the composer.
-  const presetState = usePresetState();
-  const presentation = usePresentation();
-  const starters = starterLabelsFor(presetState.presetId, presentation.starterOrder);
-  const techOpen = effectiveComposerDetail() === "technical";
+  const [techOpen, setTechOpen] = useState(false);
   const noModels = chatModels.length === 0;
   const widgetMode = variant === "widget";
   const simpleMode = useWorkspaceMode() === "chat" || widgetMode;
@@ -697,11 +694,9 @@ export default function Composer({ variant = "docked" }: { variant?: "docked" | 
     : undefined;
 
   const followUp = getUiSettings().followUpBehavior;
-  // Starter actions are generated from the preset schema (stable ids →
-  // localized labels). Selecting one only fills the composer draft.
   const starterChips = (
     <div className="starter-chips" aria-label="Suggestions">
-      {starters.map((label) => (
+      {STARTER_SUGGESTIONS.map((label) => (
         <button
           key={label}
           className="chip"
@@ -845,9 +840,6 @@ export default function Composer({ variant = "docked" }: { variant?: "docked" | 
           Type <kbd>!</kbd> for a shell command, <kbd>/</kbd> for commands, <kbd>#</kbd> for snippets, <kbd>@</kbd> to mention files.
         </div>
       )}
-      {/* UX-A390 and UX-PERSONAS share one composer and one send path. The
-          preset controls initial disclosure only; all execution controls stay
-          reachable from the persistent Technical options toggle. */}
       <div className="composer-bar composer-row">
         <div className="composer-selectors">
           {!simpleMode && ui.showTechnicalButtons && <button
@@ -856,7 +848,7 @@ export default function Composer({ variant = "docked" }: { variant?: "docked" | 
             title={techOpen
               ? "Hide model, agent, and syntax options"
               : "Show model, agent, and syntax options"}
-            onClick={() => setComposerDetail(techOpen ? "plain" : "technical")}
+            onClick={() => setTechOpen((open) => !open)}
           >
             Technical options
           </button>}

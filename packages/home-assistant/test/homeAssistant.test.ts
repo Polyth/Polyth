@@ -3,7 +3,12 @@ import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createHomeAssistantService } from "@polyth/home-assistant";
+import type { RouteHandler } from "@polyth/contracts";
+import { createContext, loadPlugin } from "@polyth/kernel";
+import {
+  createHomeAssistantServerPlugin,
+  createHomeAssistantService,
+} from "@polyth/home-assistant";
 
 const tempFile = (): string =>
   join(mkdtempSync(join(tmpdir(), "polyth-home-assistant-")), "home-assistant.json");
@@ -13,6 +18,29 @@ const response = (body: unknown, status = 200): Response =>
     status,
     headers: { "content-type": "application/json" },
   });
+
+test("server plugin owns its route for the enabled scope", async () => {
+  const storageDir = mkdtempSync(join(tmpdir(), "polyth-home-assistant-plugin-"));
+  const root = createContext("test-root");
+  const routes = new Set<RouteHandler>();
+  const plugin = createHomeAssistantServerPlugin({
+    pluginId: "home-assistant",
+    storageDir,
+    routes: {
+      add(handler) {
+        routes.add(handler);
+        return { dispose: () => { routes.delete(handler); } };
+      },
+    },
+    root,
+  });
+
+  const loaded = await loadPlugin(root, plugin, {});
+  assert.equal(routes.size, 1);
+  await loaded.dispose();
+  assert.equal(routes.size, 0);
+  await root.dispose();
+});
 
 test("configuration keeps token values write-only in a separate secrets file", async () => {
   const file = tempFile();

@@ -108,12 +108,12 @@ test("modal surfaces share the Dialog focus contract (no copied traps)", async (
   assert.ok(dialog.includes("export function useModalSurface"), "Dialog.tsx exports the reusable hook");
   const sidebar = await read("../src/components/Sidebar.tsx");
   const rail = await read("../src/components/ContextRail.tsx");
-  const preset = await read("../src/components/PresetSetup.tsx");
+  const projectSetup = await read("../src/components/ProjectSetup.tsx");
   const palette = await read("../src/components/CommandPalette.tsx");
   for (const [name, src] of [
     ["Sidebar", sidebar],
     ["ContextRail", rail],
-    ["PresetSetup", preset],
+    ["ProjectSetup", projectSetup],
     ["CommandPalette", palette],
   ] as const) {
     assert.ok(src.includes("useModalSurface"), `${name} consumes useModalSurface`);
@@ -173,13 +173,13 @@ test("desktop header keeps brand, workspace modes, and a named utility cluster",
   assert.ok(!header.includes('className="header-global-search"'), "Search is not duplicated in the header");
 });
 
-test("Settings occupies the viewport without a widget preview inspector", async () => {
+test("Settings uses a focused desktop dialog without a widget preview inspector", async () => {
   const settings = await read("../src/components/SettingsView.tsx");
   const css = await read("../src/styles.css");
   const widgets = await read("../src/components/settings/WidgetsPage.tsx");
   assert.ok(settings.includes('className="scrim settings-scrim"'), "Settings owns viewport-specific scrim geometry");
-  assert.ok(css.includes("width: 96vw; max-width: none; height: 92vh"), "Settings is a near-full viewport workspace");
-  assert.ok(css.includes(".settings-shell { min-width: 1100px; }"), "wide Settings keeps the three-column floor");
+  assert.ok(css.includes("width: min(92vw, 780px); max-width: 780px; height: 92vh"), "Settings has a 780px desktop width cap");
+  assert.doesNotMatch(css, /\.settings-shell\s*\{[^}]*min-width:\s*1100px/, "Settings no longer forces an 1100px minimum width");
   assert.ok(!widgets.includes("widget-inspector"), "widget settings no longer render a preview inspector");
 });
 
@@ -200,18 +200,52 @@ test("open rails remain visible in every workspace mode", async () => {
   assert.ok(!/mode-chat \.railbar\s*[,{][^}]*display:\s*none/.test(css), "Chat never hides an active rail");
 });
 
-test("mobile Settings uses a horizontal page navigator with independent content scrolling", async () => {
+test("mobile Settings swaps a vertical page list for content with a back action", async () => {
+  const settings = await read("../src/components/SettingsView.tsx");
   const css = await read("../src/styles.css");
-  const finalBreakpoint = css.lastIndexOf("@media (max-width: 700px)");
-  assert.ok(finalBreakpoint > css.indexOf("Settings uses the viewport"), "mobile rules follow desktop workbench overrides");
+  const mobileSettingsMarker = css.indexOf("/* Mobile Settings");
+  const finalBreakpoint = css.indexOf("@media (max-width: 700px)", mobileSettingsMarker);
+  assert.ok(finalBreakpoint > css.indexOf("focused, centered"), "mobile rules follow desktop workbench overrides");
   const mobile = css.slice(finalBreakpoint);
-  assert.match(mobile, /\.settings-nav-list\s*\{[^}]*flex-direction:\s*row/);
-  assert.match(mobile, /\.settings-nav-list\s*\{[^}]*overflow-x:\s*auto/);
-  assert.match(mobile, /\.settings-pane\s*\{[^}]*min-height:\s*0/);
+  const mobileHeaderStart = settings.indexOf("{mobile ? (");
+  const mobileHeader = settings.slice(mobileHeaderStart, settings.indexOf(") : (", mobileHeaderStart));
+  assert.ok(settings.includes('type MobileStage = "nav" | "page"'), "Settings models the two mobile stages");
+  assert.ok(settings.includes('window.matchMedia("(max-width: 700px)")'), "Settings tracks the mobile breakpoint");
+  assert.ok(settings.includes('className="settings-mobile-back"'), "the page header renders a mobile back button");
+  assert.ok(settings.includes('className="settings-pane-head-bar"'), "mobile back and close actions share a header bar");
+  assert.doesNotMatch(mobileHeader, /current\.label/, "the mobile shell header leaves the page title to PageHead");
+  assert.match(mobile, /\.settings-nav-list\s*\{[^}]*flex-direction:\s*column/);
+  assert.match(mobile, /\.settings-nav-list\s*\{[^}]*overflow-y:\s*auto/);
+  assert.match(mobile, /\.settings-mobile-nav \.settings-pane\s*\{[^}]*display:\s*none/);
+  assert.match(mobile, /\.settings-mobile-page \.settings-nav\s*\{[^}]*display:\s*none/);
+  assert.match(mobile, /\.settings-mobile-page \.settings-pane\s*\{[^}]*display:\s*flex/);
+  assert.match(mobile, /\.settings-mobile-page \.settings-pane-head\s*\{[^}]*display:\s*block[^}]*min-height:\s*0/);
+  assert.doesNotMatch(mobile, /\.settings-mobile-page \.set-page-head\s*>\s*h3\s*\{[^}]*display:\s*none/);
+  assert.match(
+    mobile,
+    /\.settings-mobile-page \.widget-settings-toolbar,\s*\.settings-mobile-page \.widget-placement-toolbar\s*\{[^}]*position:\s*static[^}]*margin-inline:\s*-20px/,
+  );
   assert.match(mobile, /\.settings-pane-body \.set-row\s*\{[^}]*flex-direction:\s*column/);
   assert.match(mobile, /\.settings-pane-body \.set-row-control\s*\{[^}]*width:\s*100%/);
-  assert.match(mobile, /\.workspace-preset-seg button\s*\{[^}]*flex:\s*1 1 calc\(50% - 2px\)/);
-  assert.doesNotMatch(mobile, /\.settings-nav\s*\{[^}]*max-height:\s*180px/);
+  assert.doesNotMatch(mobile, /\.settings-nav-list\s*\{[^}]*overflow-x:\s*auto/);
+});
+
+test("package and plugin marketplaces use responsive vertical tiles", async () => {
+  const css = await read("../src/styles.css");
+  assert.match(
+    css,
+    /\.settings-pane-body \.package-grid,\s*\.settings-pane-body \.plugin-card-grid\s*\{[^}]*grid-template-columns:\s*repeat\(2, minmax\(0, 1fr\)\)\s*!important[^}]*gap:\s*10px/,
+    "marketplace grids use two pane-relative columns by default",
+  );
+  assert.match(
+    css,
+    /@media \(max-width: 480px\)[\s\S]*?\.settings-pane-body \.package-grid,\s*\.settings-pane-body \.plugin-card-grid\s*\{[^}]*grid-template-columns:\s*1fr/,
+    "marketplace grids collapse to one column on phones",
+  );
+  assert.doesNotMatch(css, /\.plugin-card-grid, \.package-grid\s*\{[^}]*repeat\([34], minmax\(150px, 1fr\)\)/);
+  assert.match(css, /\.package-tile\s*\{[^}]*display:\s*flex[^}]*flex-direction:\s*column[^}]*align-items:\s*center/);
+  assert.match(css, /\.plugin-card-main\s*\{[^}]*display:\s*flex[^}]*flex-direction:\s*column[^}]*align-items:\s*center/);
+  assert.match(css, /\.package-icon\s*\{[^}]*width:\s*58px[^}]*height:\s*58px/);
 });
 
 test("shared menu, destructive, failed-turn, and header-action contracts stay wired", async () => {

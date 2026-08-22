@@ -6,7 +6,7 @@ import type { AppView } from "./store.ts";
 export const ACTIVE_VIEW_KEY = "polyth.activeView";
 
 const APP_VIEWS = [
-  "session", "goals", "multirun", "fusion", "walkthrough", "schedule", "github",
+  "session", "goals", "multirun", "workflow", "fusion", "walkthrough", "schedule", "github",
 ] as const satisfies readonly AppView[];
 const KNOWN = new Set<string>(APP_VIEWS);
 
@@ -15,8 +15,7 @@ export function parseActiveView(raw: string | null): AppView {
   return raw !== null && KNOWN.has(raw) ? (raw as AppView) : "session";
 }
 
-/** Restore the saved view. Workspace presets affect placement only, so a
- *  valid view remains restorable regardless of the current preset. */
+/** Restore the saved view. */
 export function loadActiveView(): AppView {
   let raw: string | null = null;
   try { raw = localStorage.getItem(ACTIVE_VIEW_KEY); } catch { /* private mode / no DOM */ }

@@ -1,13 +1,7 @@
-// Legacy persona/plugin preference shim. The mandatory persona gate and the
-// plugin allow-list were replaced by optional workspace presets
-// (workspacePresets.ts) and the capability registry (capabilities.ts).
-// `polyth.prefs` is read exactly once by the one-time migration in
-// workspacePresets.ts; after migration no header, rail, command, shortcut,
-// sidebar, composer, voice, or settings path reads persona/plugin membership
-// for availability. Only compatibility exports remain while external plugin
-// call sites move off them.
+// Legacy persona/plugin preference shim. No current navigation or settings path
+// reads persona/plugin membership for availability. Compatibility exports
+// remain while external plugin call sites move off them.
 import { useSyncExternalStore } from "react";
-import { LEGACY_PERSONA_PLUGINS } from "./workspacePresets.ts";
 
 export type PersonaId = "engineer" | "manager" | "creator" | "blank";
 export type PluginId =
@@ -19,6 +13,13 @@ export interface Prefs {
   persona: PersonaId | null;
   plugins: PluginId[];
 }
+
+const LEGACY_PERSONA_PLUGINS: Record<PersonaId, PluginId[]> = {
+  engineer: ["session", "files", "git", "preview", "terminal", "context", "usage", "events", "goals", "multirun", "fusion", "walkthrough", "schedule", "github", "dictation", "knowledge"],
+  manager: ["session", "files", "context", "usage", "goals", "multirun", "fusion", "walkthrough", "knowledge"],
+  creator: ["session", "preview", "files"],
+  blank: ["session", "files", "context", "usage"],
+};
 
 /** Kept as legacy search keywords and slot-prop compatibility labels. */
 export const PLUGIN_LABELS: Record<PluginId, string> = {

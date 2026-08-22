@@ -13,6 +13,17 @@
   <body>
     <div id="root"></div>
     <script>window.__errs=[];const ce=console.error.bind(console);console.error=(...a)=>{__errs.push(a.map(String).join(' '));ce(...a)};window.addEventListener('error',e=>__errs.push('win:'+e.message));window.addEventListener('unhandledrejection',e=>__errs.push('rej:'+(e.reason&&e.reason.message||e.reason)));</script>
+    <script type="importmap">
+      {
+        "imports": {
+          "react": "/shared/react.js",
+          "react-dom": "/shared/react-dom.js",
+          "react-dom/client": "/shared/react-dom-client.js",
+          "react/jsx-runtime": "/shared/react-jsx-runtime.js",
+          "react/jsx-dev-runtime": "/shared/react-jsx-dev-runtime.js"
+        }
+      }
+    </script>
     <script type="module" src="/main.js"></script>
   </body>
 </html>

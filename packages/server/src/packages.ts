@@ -5,7 +5,7 @@ import type { PackageDescriptorDto } from "@polyth/contracts";
 export interface PackageRegistry {
   list(): PackageDescriptorDto[];
   get(id: string): PackageDescriptorDto | null;
-  setEnabled(id: string, enabled: boolean): PackageDescriptorDto;
+  setEnabled(id: string, enabled: boolean): Promise<PackageDescriptorDto>;
   isEnabled(id: string): boolean;
 }
 
@@ -31,6 +31,7 @@ export const BUILTIN_PACKAGES = [
   { id: "browser", name: "Browser", description: "Controlled browser sessions and observations.", core: false, enabled: true, settingsGroup: "Engineering", icon: "🌐", hasSettings: false },
   { id: "goals", name: "Goals", description: "Goal tracking and completion audits.", core: false, enabled: true, settingsGroup: "Workspace", icon: "◎", hasSettings: false },
   { id: "multirun", name: "Multirun", description: "Run prompts across multiple models.", core: false, enabled: true, settingsGroup: "Engineering", icon: "⑂", hasSettings: false },
+  { id: "workflow", name: "Workflows", description: "Orchestrate multi-agent DAG pipelines.", core: false, enabled: true, settingsGroup: "Engineering", icon: "◇", hasSettings: false },
   { id: "fusion", name: "Fusion", description: "Synthesize multiple model responses.", core: false, enabled: true, settingsGroup: "Engineering", icon: "⧉", hasSettings: false },
   { id: "walkthrough", name: "Walkthrough", description: "Generate and review code walkthroughs.", core: false, enabled: true, settingsGroup: "Engineering", icon: "→", hasSettings: false },
   { id: "schedule", name: "Schedule", description: "Schedule recurring and one-time agent tasks.", core: false, enabled: true, settingsGroup: "Engineering", icon: "⏱", hasSettings: false },
@@ -59,7 +60,11 @@ function atomicWriteSync(file: string, data: string): void {
   }
 }
 
-export function createPackageRegistry(opts: { file: string }): PackageRegistry {
+export function createPackageRegistry(opts: {
+  file: string;
+  onSetEnabled?: (id: string, enabled: boolean) => void | Promise<void>;
+  onChanged?: (pkg: PackageDescriptorDto) => void;
+}): PackageRegistry {
   mkdirSync(dirname(opts.file), { recursive: true });
 
   const byId = new Map<string, PackageDescriptorDto>(
@@ -89,10 +94,14 @@ export function createPackageRegistry(opts: { file: string }): PackageRegistry {
   };
   persist(enabled);
 
-  const descriptorFor = (descriptor: PackageDescriptorDto): PackageDescriptorDto => ({
-    ...descriptor,
-    enabled: descriptor.core || enabled[descriptor.id] === true,
-  });
+  const descriptorFor = (descriptor: PackageDescriptorDto): PackageDescriptorDto => {
+    const isEnabled = descriptor.core || enabled[descriptor.id] === true;
+    return {
+      ...descriptor,
+      enabled: isEnabled,
+      status: isEnabled ? "ready" : "disabled",
+    };
+  };
 
   const get = (id: string): PackageDescriptorDto | null => {
     const descriptor = byId.get(id);
@@ -102,7 +111,7 @@ export function createPackageRegistry(opts: { file: string }): PackageRegistry {
   return {
     list: () => BUILTIN_PACKAGES.map((descriptor) => descriptorFor(descriptor)),
     get,
-    setEnabled(id, value) {
+    async setEnabled(id, value) {
       const descriptor = byId.get(id);
       if (!descriptor) {
         throw Object.assign(new Error(`unknown package "${id}"`), { code: "not-found" });
@@ -110,10 +119,13 @@ export function createPackageRegistry(opts: { file: string }): PackageRegistry {
       if (descriptor.core) {
         throw Object.assign(new Error(`core package "${id}" cannot be disabled or enabled`), { code: "invalid-input" });
       }
+      await opts.onSetEnabled?.(id, value);
       const next = { ...enabled, [id]: value };
       persist(next);
       enabled = next;
-      return descriptorFor(descriptor);
+      const updated = descriptorFor(descriptor);
+      opts.onChanged?.(updated);
+      return updated;
     },
     isEnabled: (id) => get(id)?.enabled ?? false,
   };

@@ -16,7 +16,7 @@ test("built-in catalog covers the complete default canvas", () => {
   const widgets = listWidgets();
   const byId = new Map(widgets.map((widget) => [widget.id, widget]));
   for (const [id, title] of [
-    ["core.composer", "Composer"],
+    ["core.chat", "Conversation"],
     ["goals.current", "Current Task Plan"],
     ["files.project-map", "Project Map"],
     ["git.recent", "Recent Changes"],
@@ -29,6 +29,7 @@ test("built-in catalog covers the complete default canvas", () => {
     assert.equal(typeof byId.get(id)?.render, "function");
     assert.equal(typeof byId.get(id)?.settingsRender, "function");
   }
+  assert.equal(byId.has("core.composer"), false);
   assert.ok((BUILTIN_WIDGET_PLUGINS.find((plugin) => plugin.id === "session")?.widgets?.length ?? 0) > 1);
   assert.ok((BUILTIN_WIDGET_PLUGINS.find((plugin) => plugin.id === "files")?.widgets?.length ?? 0) > 1);
 });

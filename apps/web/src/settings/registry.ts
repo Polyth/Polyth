@@ -61,13 +61,14 @@ export function searchSettingsItems(
 // ---- built-in item descriptors ---------------------------------------------------
 
 const BUILTIN_ITEMS: SettingsSearchItem[] = [
-  // "persona" and "role" remain only as migration search keywords.
-  { id: "general.workspacePreset", pageId: "general", label: "Workspace preset", description: "Starting arrangement for starter actions, workspace order, and initial detail", keywords: ["preset", "starting setup", "workspace", "persona", "role"], focusTarget: "general.workspacePreset" },
+  { id: "projects.canvas", pageId: "projects", label: "Project canvas setup", description: "Per-project starting arrangement and widgets", keywords: ["preset", "starting setup", "workspace", "canvas"], focusTarget: "projects.canvas" },
   { id: "appearance.theme", pageId: "appearance", label: "Theme", description: "Search bundled, system, and custom color themes", keywords: ["appearance", "dark", "light", "palette", "colors"], focusTarget: "appearance.theme" },
+  { id: "appearance.fontFamily", pageId: "appearance", label: "Interface font", keywords: ["typeface", "system", "serif", "sans", "mono"], focusTarget: "appearance.fontFamily" },
   { id: "appearance.density", pageId: "appearance", label: "Density", keywords: ["compact", "balanced", "comfortable", "spacing"], focusTarget: "appearance.density" },
   { id: "appearance.fontSize", pageId: "appearance", label: "Font size", keywords: ["text", "scale"], focusTarget: "appearance.fontSize" },
   { id: "appearance.editorFontSize", pageId: "appearance", label: "Editor font size", description: "Composer, file editor, diffs, terminal, and code blocks", keywords: ["monospace", "code", "px"], focusTarget: "appearance.editorFontSize" },
-  { id: "appearance.reducedMotion", pageId: "appearance", label: "Reduced motion", keywords: ["animation", "accessibility", "a11y"], focusTarget: "appearance.reducedMotion" },
+  { id: "appearance.rounding", pageId: "appearance", label: "Corner rounding", keywords: ["square", "rounded", "radius", "corners"], focusTarget: "appearance.rounding" },
+  { id: "appearance.menuItems", pageId: "appearance", label: "Menu items", description: "Optional composer and workspace actions", keywords: ["technical", "dictation", "quick actions", "toolbar"], focusTarget: "appearance.menuItems" },
   { id: "chat.width", pageId: "chat", label: "Conversation width", keywords: ["wide", "layout"], focusTarget: "chat.width" },
   { id: "chat.followUp", pageId: "chat", label: "While the agent is working", description: "Steer, queue, or interrupt", keywords: ["delivery", "steer", "queue", "interrupt"], focusTarget: "chat.followUp" },
   { id: "chat.thinking", pageId: "chat", label: "Thinking blocks", keywords: ["reasoning", "collapse"], focusTarget: "chat.thinking" },
@@ -81,6 +82,7 @@ const BUILTIN_ITEMS: SettingsSearchItem[] = [
   { id: "about.info", pageId: "about", label: "Application URL", description: "Server address, data directory, and capabilities", keywords: ["about", "version", "health", "url"], focusTarget: "about.info" },
   { id: "sessions.defaultModel", pageId: "sessions", label: "Global default model", description: "Default model for new sessions and projects", keywords: ["session", "provider", "model"], focusTarget: "sessions.defaultModel" },
   { id: "sessions.projectModel", pageId: "sessions", label: "Project default model", description: "Per-project model override", keywords: ["session", "project", "inherit", "global"], focusTarget: "sessions.projectModel" },
+  { id: "git.personas", pageId: "git", label: "Git personas", description: "Repository-local commit author identities", keywords: ["author", "email", "identity"], focusTarget: "git.personas" },
   { id: "sessions.worktree", pageId: "sessions", label: "Worktree behavior", keywords: ["session", "fresh worktree", "project root"], focusTarget: "sessions.worktree" },
 ];
 

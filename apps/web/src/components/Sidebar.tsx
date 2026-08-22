@@ -19,6 +19,8 @@ import {
   SIDEBAR_COLLAPSED_WIDTH, SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH,
   clampSidebarWidth, setSidebarLayout, useSidebarLayout,
 } from "../sidebarLayout.ts";
+import { api } from "../api.ts";
+import { announce } from "./a11y/live.tsx";
 
 function projectGlyph(name: string): string {
   const words = name.trim().split(/[\s\-_/]+/).filter(Boolean);
@@ -45,11 +47,13 @@ export default function Sidebar() {
   const expanded = useSidebarExpanded(drawerOpen);
   const branch = useStore((s) => s.gitBranch);
   const project = projects.find((p) => p.id === activeProjectId) ?? null;
+  const sessions = useStore((s) => s.sessions);
   const [renamingProject, setRenamingProject] = useState<string | null>(null);
   const [projectName, setProjectName] = useState("");
   const [projectMenu, setProjectMenu] = useState<string | null>(null);
   const [importingProject, setImportingProject] = useState<string | null>(null);
-  const [selectingProjectId, setSelectingProjectId] = useState<string | null>(null);
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectedSessionIds, setSelectedSessionIds] = useState<ReadonlySet<string>>(new Set());
 
   // Persisted view mode: list shows the active project; tree expands projects
   // into worktrees and sessions. Expansion is per-project UI state.
@@ -112,6 +116,42 @@ export default function Sidebar() {
     void createSession(activeProjectId)
       .then(closeDrawer)
       .catch((e) => setUiError(friendlyError("Couldn’t create a session", e)));
+  };
+  const toggleSelectMode = () => {
+    setSelectMode((current) => {
+      if (current) setSelectedSessionIds(new Set());
+      return !current;
+    });
+  };
+  const toggleSelectedSession = (id: string) => {
+    setSelectedSessionIds((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+  const runBulk = async (op: "archive" | "restore") => {
+    const ids = [...selectedSessionIds];
+    if (ids.length === 0) return;
+    const affectedProjects = new Set(
+      sessions.filter((session) => selectedSessionIds.has(session.id)).map((session) => session.projectId),
+    );
+    try {
+      const result = await api.bulkSessions(op, ids);
+      const failNote = result.failed.length
+        ? `; ${result.failed.length} failed (${result.failed.map((failure) => failure.code).join(", ")})`
+        : "";
+      announce(`${op === "archive" ? "Archived" : "Restored"} ${result.succeeded.length} session(s)${failNote}`);
+      if (result.failed.length > 0) {
+        setUiError(`Some sessions could not be ${op === "archive" ? "archived" : "restored"}: ${result.failed.map((failure) => `${failure.id.slice(0, 8)}:${failure.code}`).join(", ")}`);
+      }
+      setSelectedSessionIds(new Set());
+      setSelectMode(false);
+      await Promise.all([...affectedProjects].map((projectId) => refreshSessions(projectId)));
+    } catch (error) {
+      setUiError(friendlyError(`Couldn’t ${op} the selected sessions`, error));
+    }
   };
   const saveProjectName = async (id: string) => {
     const name = projectName.trim();
@@ -184,7 +224,13 @@ export default function Sidebar() {
         )}
         {!collapsed && (<>
         <div className="sidebar-head">
-          <span className="side-section-title">Projects</span>
+          <button
+            className={`icon-btn sidebar-select-toggle${selectMode ? " active" : ""}`}
+            title={selectMode ? "Cancel session selection" : "Select sessions"}
+            aria-label={selectMode ? "Cancel session selection" : "Select sessions"}
+            aria-pressed={selectMode}
+            onClick={toggleSelectMode}
+          ><Icon.select /></button>
           <span className="side-icons">
             <button
               className="icon-btn"
@@ -220,6 +266,13 @@ export default function Sidebar() {
           </span>
         </div>
         <div className="side-scroll">
+          {selectMode && (
+            <div className="session-bulk-actions" aria-label="Selected session actions">
+              <span>{selectedSessionIds.size === 0 ? "Select sessions" : `${selectedSessionIds.size} selected`}</span>
+              <button className="small-btn" disabled={selectedSessionIds.size === 0} onClick={() => void runBulk("archive")}>Archive</button>
+              <button className="small-btn" disabled={selectedSessionIds.size === 0} onClick={() => void runBulk("restore")}>Restore</button>
+            </div>
+          )}
           {registry.status === "loading" && (
             <div className="empty side-projects-status" role="status">Loading projects…</div>
           )}
@@ -272,18 +325,6 @@ export default function Sidebar() {
                     <span className="project-name" title={p.path}>{p.icon ? `${p.icon} ` : ""}{p.name || p.path}</span>
                     <span className="project-path">{p.path}</span>
                   </span>
-                </button>
-                <button
-                  className={`project-select-btn${selectingProjectId === p.id ? " selected" : ""}`}
-                  aria-label={`${selectingProjectId === p.id ? "Cancel selecting" : "Select"} sessions in ${p.name || p.path}`}
-                  aria-pressed={selectingProjectId === p.id}
-                  onClick={() => {
-                    if (p.id !== activeProjectId) activateProject(p.id);
-                    if (viewMode === "tree" && !expandedTrees.has(p.id)) toggleTree(p.id);
-                    setSelectingProjectId((current) => current === p.id ? null : p.id);
-                  }}
-                >
-                  {selectingProjectId === p.id ? "Cancel" : "Select"}
                 </button>
                 <button
                   className="project-menu-btn"
@@ -341,8 +382,9 @@ export default function Sidebar() {
                   <div className="project-tree-sessions">
                     <SessionList
                       projectId={p.id}
-                      selectMode={selectingProjectId === p.id}
-                      onSelectModeChange={(selecting) => setSelectingProjectId(selecting ? p.id : null)}
+                      selectMode={selectMode}
+                      selectedSessionIds={selectedSessionIds}
+                      onToggleSelected={toggleSelectedSession}
                     />
                   </div>
                 )}
@@ -357,8 +399,9 @@ export default function Sidebar() {
             <div className="session-list">
               <SessionList
                 projectId={project.id}
-                selectMode={selectingProjectId === project.id}
-                onSelectModeChange={(selecting) => setSelectingProjectId(selecting ? project.id : null)}
+                selectMode={selectMode}
+                selectedSessionIds={selectedSessionIds}
+                onToggleSelected={toggleSelectedSession}
               />
             </div>
           )}

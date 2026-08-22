@@ -87,6 +87,65 @@ test("effect disposal is LIFO (reverse order)", async () => {
   assert.deepEqual(log, ["b", "a"]); // reverse of registration
 });
 
+test("provide auto-disposes on scope dispose without manual effect", async () => {
+  const ctx = createContext("provide-auto-dispose");
+  const disposable = ctx.provide(K, "value");
+
+  await ctx.dispose();
+  assert.deepEqual(ctx.state().providers, []);
+
+  // Manual disposal remains safe after the scope-owned effect has run.
+  assert.doesNotThrow(() => disposable.dispose());
+});
+
+test("dispose continues after effect throws and still clears providers", async () => {
+  const ctx = createContext("dispose-continues");
+  ctx.provide(K, "value");
+  ctx.effect(() => {
+    throw new Error("effect cleanup failed");
+  });
+
+  await assert.rejects(ctx.dispose(), AggregateError);
+  assert.deepEqual(ctx.state().providers, []);
+});
+
+test("dispose throws AggregateError when cleanup fails", async () => {
+  const ctx = createContext("aggregate");
+  ctx.provide(CAP.ui, {
+    addSlot() {
+      return {
+        dispose() {
+          throw new Error("contribution cleanup failed");
+        },
+      };
+    },
+    list() {
+      return [];
+    },
+  });
+  const child = ctx.scope("child") as KernelContext;
+  child.contribute({
+    id: "failing-contribution",
+    slot: "workspace.main",
+    module: "failing-contribution",
+  });
+  ctx.effect(() => {
+    throw new Error("effect cleanup failed");
+  });
+
+  await assert.rejects(ctx.dispose(), (error: unknown) => {
+    assert.ok(error instanceof AggregateError);
+    assert.equal(error.message, "dispose: aggregate");
+    assert.equal(error.errors.length, 2);
+    assert.ok(error.errors[0] instanceof AggregateError);
+    assert.equal(error.errors[0].message, "dispose: aggregate/child");
+    assert.match((error.errors[1] as Error).message, /effect cleanup failed/);
+    return true;
+  });
+  assert.deepEqual(ctx.state(), { providers: [], listeners: [], contributions: 0 });
+  assert.deepEqual(child.state(), { providers: [], listeners: [], contributions: 0 });
+});
+
 test("loadPlugin: missing required capability throws listing missing ids", async () => {
   const ctx = createContext("lp");
   const err = await loadPlugin(
@@ -109,6 +168,26 @@ test("loadPlugin: missing required capability throws listing missing ids", async
   assert.match(err.message, /missing required capabilities/);
   assert.match(err.message, /polyth\.sessions/);
   assert.match(err.message, /polyth\.projects/);
+});
+
+test("loadPlugin: child scope config() returns setup config", async () => {
+  const ctx = createContext("plugin-config");
+  const config = { enabled: true, nested: { value: "configured" } };
+  let setupConfig: unknown;
+
+  const disposable = await loadPlugin(
+    ctx,
+    {
+      manifest: { id: "p.config", version: "1.0.0", trust: "pure" },
+      setup(child) {
+        setupConfig = child.config();
+      },
+    },
+    config,
+  );
+
+  assert.deepEqual(setupConfig, config);
+  await disposable.dispose();
 });
 
 test("loadPlugin: setup runs in child scope; dispose cleans child only", async () => {

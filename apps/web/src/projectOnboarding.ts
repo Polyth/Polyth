@@ -1,8 +1,7 @@
 // UX-ONBOARDING: the first-run coordinator. One pure decision function maps
 // project-registry truth to the surface the shell shows; App executes the
-// result. `preset.setup` is not an input to picker admission — it only picks
-// between the optional preset panel and the workspace once a valid project is
-// active in a ready registry.
+// result. Project setup is considered only after a valid project is active in
+// a ready registry.
 //
 // The automatic-picker episode is in-memory, per document: it becomes true when
 // the automatic picker opens and stays true after cancellation so an effect
@@ -13,7 +12,7 @@ export type FirstRunSurface =
   | "project-loading"
   | "project-failed"
   | "project-picker"
-  | "preset-setup"
+  | "project-setup"
   | "workspace";
 
 export interface FirstRunInput {
@@ -23,7 +22,7 @@ export interface FirstRunInput {
   hasValidActiveProject: boolean;
   /** The automatic picker already opened in this document. */
   pickerOfferedThisDocument: boolean;
-  presetSetup: "unseen" | "completed";
+  projectSetup: "unseen" | "completed";
 }
 
 /** The exact decision table from the specification. `workspace` covers both
@@ -37,7 +36,7 @@ export function decideFirstRunSurface(input: FirstRunInput): FirstRunSurface {
     return input.pickerOfferedThisDocument ? "workspace" : "project-picker";
   }
   if (!input.hasValidActiveProject) return "workspace";
-  return input.presetSetup === "unseen" ? "preset-setup" : "workspace";
+  return input.projectSetup === "unseen" ? "project-setup" : "workspace";
 }
 
 // ---- per-document automatic-picker episode -------------------------------------

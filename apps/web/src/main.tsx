@@ -8,6 +8,7 @@ import { exposeCapabilities } from "./capabilities.ts";
 import { installShell } from "./shell.ts";
 import { exposeWorkspaceSurfaces } from "./workspace/surfaceRegistry.ts";
 import { applySettingsToDom } from "./settings.ts";
+import { applyUiSettings } from "./uiPrefs.ts";
 import { getState } from "./store.ts";
 import { installBuiltinMiniWidgets } from "./widgets/builtinMiniWidgets.tsx";
 import { exposeWidgets } from "./widgets/catalog.ts";
@@ -17,6 +18,7 @@ import LockScreen from "./components/LockScreen.tsx";
 import "./styles.css";
 
 applySettingsToDom(getState().settings);
+applyUiSettings();
 exposeSlots();
 exposeSurfaces();
 exposeCapabilities();

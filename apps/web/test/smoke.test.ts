@@ -379,8 +379,8 @@ test("parseUiSettings defaults invalid values and sanitizes MCP servers", () => 
   const parsed = parseUiSettings(JSON.stringify({
     density: "compact",
     fontSize: "l",
+    rounding: "rounded",
     chatWidth: "wide",
-    reducedMotion: true,
     notifyOnComplete: true,
     notifySound: "yes",
     confirmSessionArchive: true,
@@ -392,8 +392,8 @@ test("parseUiSettings defaults invalid values and sanitizes MCP servers", () => 
     {
       density: parsed.density,
       fontSize: parsed.fontSize,
+      rounding: parsed.rounding,
       chatWidth: parsed.chatWidth,
-      reducedMotion: parsed.reducedMotion,
       notifyOnComplete: parsed.notifyOnComplete,
       notifySound: parsed.notifySound,
       confirmSessionArchive: parsed.confirmSessionArchive,
@@ -402,8 +402,8 @@ test("parseUiSettings defaults invalid values and sanitizes MCP servers", () => 
     {
       density: "compact",
       fontSize: "l",
+      rounding: "rounded",
       chatWidth: "wide",
-      reducedMotion: true,
       notifyOnComplete: true,
       notifySound: false,
       confirmSessionArchive: true,
@@ -429,12 +429,11 @@ test("setUiSettings persists and applies visual data attributes", () => {
     value: { body: { dataset } },
   });
 
-  setUiSettings({ density: "compact", fontSize: "s", chatWidth: "wide", reducedMotion: true });
+  setUiSettings({ density: "compact", fontSize: "s", rounding: "rounded", chatWidth: "wide" });
   assert.deepEqual(dataset, {
     density: "compact",
-    fontsize: "s",
+    rounding: "rounded",
     chatwidth: "wide",
-    motion: "reduced",
     technical: "true",
     dictate: "true",
     quickActions: "true",

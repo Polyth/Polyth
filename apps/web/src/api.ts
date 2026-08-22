@@ -37,6 +37,9 @@ import type {
   ShellTurnResult,
   TerminalInfo,
   WalkthroughStepDto,
+  WorkflowDto,
+  WorkflowRunDto,
+  WorkflowRunOptionsDto,
   WorkspaceLabel,
 } from "@polyth/contracts";
 
@@ -118,8 +121,11 @@ export interface ProviderCatalogModelDto {
   modelID: string;
   key: string;
   name: string;
+  providerName?: string;
   context?: number;
   cost?: { input: number; output: number };
+  capabilities?: string[];
+  variants?: string[];
   connected: boolean;
   enabled: boolean;
 }
@@ -631,6 +637,8 @@ export const api = {
     jfetch<VisibilityStateDto>(`/api/providers/${encodeURIComponent(id)}/enabled`, json("POST", { enabled })),
   setModelEnabled: (key: string, enabled: boolean) =>
     jfetch<VisibilityStateDto>(`/api/models/enabled`, json("POST", { key, enabled })),
+  saveRole: (name: string, input: { prompt?: string; model?: ModelRef; mode: AgentDescriptor["mode"] }) =>
+    jfetch<AgentDescriptor>(`/api/settings/roles/${encodeURIComponent(name)}`, json("PUT", input)),
   opencodePlugins: () =>
     jfetch<{ plugins: string[] }>("/api/plugins/opencode").catch((): { plugins: string[] } => ({ plugins: [] })),
 
@@ -648,6 +656,10 @@ export const api = {
     jfetch<GitStatus>(`/api/git/status?projectId=${encodeURIComponent(projectId)}${sessionId ? `&sessionId=${encodeURIComponent(sessionId)}` : ""}`).catch((): GitStatus => ({
       branch: "", ahead: 0, behind: 0, staged: [], unstaged: [], untracked: [], conflicted: [],
     })),
+  gitIdentity: (projectId: string) =>
+    jfetch<{ name: string; email: string }>(`/api/git/identity?projectId=${encodeURIComponent(projectId)}`),
+  gitIdentitySet: (projectId: string, identity: { name: string; email: string }) =>
+    jfetch<{ name: string; email: string }>(`/api/git/identity`, json("POST", { projectId, ...identity })),
   gitDiff: (projectId: string, filePath: string, staged?: boolean, ignoreWhitespace?: boolean, sessionId?: string) =>
     jfetch<GitDiffResult>(
       `/api/git/diff?projectId=${encodeURIComponent(projectId)}&path=${encodeURIComponent(filePath)}${staged ? "&staged=true" : ""}${ignoreWhitespace ? "&ignoreWhitespace=true" : ""}${sessionId ? `&sessionId=${encodeURIComponent(sessionId)}` : ""}`,
@@ -826,6 +838,28 @@ export const api = {
     jfetch<MultirunDto>(`/api/multiruns/${multirunId}`),
   pickMultirun: (multirunId: string, runId: string) =>
     jfetch<{ ok: true }>(`/api/multiruns/${multirunId}/pick`, json("POST", { runId })),
+
+  // ---- workflow orchestration -----------------------------------------------
+  listWorkflows: (projectId: string) =>
+    jfetch<WorkflowDto[]>(`/api/workflows?projectId=${encodeURIComponent(projectId)}`),
+  createWorkflow: (input: Omit<WorkflowDto, "id" | "createdAt" | "updatedAt">) =>
+    jfetch<WorkflowDto>("/api/workflows", json("POST", input)),
+  getWorkflow: (id: string) =>
+    jfetch<WorkflowDto>(`/api/workflows/${encodeURIComponent(id)}`),
+  updateWorkflow: (id: string, patch: Partial<Pick<WorkflowDto, "name" | "nodes" | "edges" | "defaults">>) =>
+    jfetch<WorkflowDto>(`/api/workflows/${encodeURIComponent(id)}`, json("PATCH", patch)),
+  deleteWorkflow: (id: string) =>
+    jfetch<{ ok: true }>(`/api/workflows/${encodeURIComponent(id)}`, { method: "DELETE" }),
+  runWorkflow: (id: string, sessionId: string, input: string, options?: WorkflowRunOptionsDto) =>
+    jfetch<WorkflowRunDto>(`/api/workflows/${encodeURIComponent(id)}/run`, json("POST", {
+      sessionId,
+      input,
+      ...(options ? { options } : {}),
+    })),
+  getWorkflowRun: (runId: string) =>
+    jfetch<WorkflowRunDto>(`/api/workflow-runs/${encodeURIComponent(runId)}`),
+  stopWorkflowRun: (runId: string) =>
+    jfetch<WorkflowRunDto>(`/api/workflow-runs/${encodeURIComponent(runId)}/stop`, { method: "POST" }),
 
   // ---- M3: fusion ----------------------------------------------------------
   startFusion: (sessionId: string, text: string, models: string[]) =>

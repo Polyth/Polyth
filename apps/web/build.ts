@@ -8,12 +8,45 @@ const dist = join(here, "dist");
 
 await rm(dist, { recursive: true, force: true });
 await mkdir(dist, { recursive: true });
+const shared = join(dist, "shared");
+const reactExternals = [
+  "react",
+  "react-dom",
+  "react-dom/client",
+  "react/jsx-runtime",
+  "react/jsx-dev-runtime",
+];
+
+// Plugin bundles leave React external. These entries are built together with
+// splitting so the shell and every hot-loaded plugin resolve one React graph.
+await build({
+  entryPoints: {
+    react: join(here, "src/shared/react.ts"),
+    "react-dom": join(here, "src/shared/react-dom.ts"),
+    "react-dom-client": join(here, "src/shared/react-dom-client.ts"),
+    "react-jsx-runtime": join(here, "src/shared/react-jsx-runtime.ts"),
+    "react-jsx-dev-runtime": join(here, "src/shared/react-jsx-dev-runtime.ts"),
+  },
+  bundle: true,
+  platform: "browser",
+  format: "esm",
+  splitting: true,
+  sourcemap: true,
+  minify: true,
+  outdir: shared,
+  entryNames: "[name]",
+  chunkNames: "chunks/[name]-[hash]",
+  define: { "process.env.NODE_ENV": '"production"' },
+  logLevel: "info",
+});
 await build({
   entryPoints: [join(here, "src/main.tsx")],
   bundle: true,
+  platform: "browser",
   format: "esm",
   splitting: true,
   jsx: "automatic",
+  external: reactExternals,
   sourcemap: true,
   minify: true,
   outdir: dist,

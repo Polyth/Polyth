@@ -35,14 +35,16 @@ export interface MissingWidgetPlaceholder {
 }
 
 export const RECOMMENDED_WIDGET_IDS = [
-  "core.composer",
+  "core.chat",
   "core.quick-actions",
   "knowledge.notes",
   "git.recent",
 ] as const;
 
-export function widgetSizeLabel(widget: Pick<WidgetDef, "defaultSize">): Exclude<WidgetSizeFilter, "all"> {
-  const width = widget.defaultSize?.w ?? 6;
+export function widgetSizeLabel(
+  widget: Pick<WidgetDef, "recommendedSize" | "defaultSize">,
+): Exclude<WidgetSizeFilter, "all"> {
+  const width = widget.recommendedSize?.w ?? widget.defaultSize?.w ?? 6;
   return width >= 9 ? "large" : width >= 5 ? "medium" : "small";
 }
 

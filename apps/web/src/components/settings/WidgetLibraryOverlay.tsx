@@ -45,7 +45,7 @@ const defaultSlot = (widget: WidgetDef): UiSlot =>
   widget.defaultSlot ?? widgetSlotFromZone(widget.zone ?? "main");
 
 function WidgetGlyph({ widget }: { widget: WidgetDef }) {
-  const glyph = widget.id === "core.composer"
+  const glyph = widget.id === "core.chat"
     ? "✦"
     : widget.id.includes("quick")
       ? "⌘"

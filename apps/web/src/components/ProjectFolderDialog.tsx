@@ -7,7 +7,7 @@
 // selected; Mod+Enter is an additive direct-confirmation shortcut; during Add
 // the target and controls cannot change and Escape does not abandon the
 // in-flight request; success closes only after the atomic store transition is
-// observable and hands focus to preset setup or the composer; cancellation
+// observable and hands focus to project setup or the composer; cancellation
 // restores the connected invoker or the named no-project recovery action —
 // never BODY.
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -16,7 +16,7 @@ import { announce } from "./a11y/live.tsx";
 import { api, type BrowseEntryDto } from "../api.ts";
 import { addProject } from "../init.ts";
 import { COMPOSER_INPUT_SELECTOR, focusComposer, getState } from "../store.ts";
-import { getPresetState } from "../workspacePresets.ts";
+import { getProjectSetupState } from "../projectSetup.ts";
 import { ago, MOD } from "../format.ts";
 import { Icon } from "../icons.tsx";
 
@@ -40,11 +40,11 @@ function queueFocusHandoff(select: () => HTMLElement | null, attempts = 24): voi
   requestAnimationFrame(() => tick(attempts));
 }
 
-/** After successful activation: unseen preset setup owns focus next (its own
+/** After successful activation: unseen project setup owns focus next (its own
  *  contract later hands the composer off); otherwise the composer directly. */
 function focusAfterActivation(): void {
-  if (getPresetState().setup === "unseen") {
-    queueFocusHandoff(() => document.querySelector<HTMLElement>(".preset-setup"));
+  if (getProjectSetupState() === "unseen") {
+    queueFocusHandoff(() => document.querySelector<HTMLElement>(".project-setup"));
   } else {
     focusComposer();
   }

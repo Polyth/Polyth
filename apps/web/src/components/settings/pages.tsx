@@ -1,14 +1,7 @@
 // The simpler settings pages: General, Appearance, Chat, Notifications,
 // Behavior, Usage, Projects, Git, Agents, MCP, Plugins.
 import { useEffect, useRef, useState, type CSSProperties } from "react";
-import {
-  NO_PRESET_CARD, WORKSPACE_PRESETS, applyPreset, clearPreset, formatPresetSummary,
-  getPresentation, getPresetState, presetSummary, resetDisclosureChoices,
-  resetWorkspaceOrder, usePresentation, usePresetState,
-  type PresetSummary, type WorkspacePresetId,
-} from "../../workspacePresets.ts";
-import { listCapabilities } from "../../capabilities.ts";
-import { openWorkspacePane, setOverlay, updateSettings, useStore } from "../../store.ts";
+import { activateProject, applyProjectUpsert, openWorkspacePane, setAgents, setOverlay, updateSettings, useStore } from "../../store.ts";
 import { setUiSettings, useUiSettings } from "../../uiPrefs.ts";
 import { setProviderHidden, useUsagePrefs } from "../../usagePrefs.ts";
 import { requestNotifyPermission } from "../../notify.ts";
@@ -26,10 +19,13 @@ import {
   reapplyTheme, removeCustomTheme, resolveTheme, type ThemeSpec,
 } from "../../theme.ts";
 import type { AssistSettingsDto } from "../../api.ts";
-import type { AgentProfile, InstalledPluginDto, McpServerDto, McpTransport, SystemInfoDto } from "@polyth/contracts";
+import type { AgentDescriptor, AgentProfile, InstalledPluginDto, McpServerDto, McpTransport, ModelRef, SystemInfoDto } from "@polyth/contracts";
 import { useWidgetCatalog } from "../../widgets/catalog.ts";
 import { useWidgetLayout } from "../../widgets/widgetLayout.ts";
-import { roleKind, setRoleKind, useRolePrefs } from "../../rolePrefs.ts";
+import ModelPicker from "../ModelPicker.tsx";
+import Dialog from "../a11y/Dialog.tsx";
+import { modelSupportsTextWorkflow } from "../../composer/discovery.ts";
+import { removeGitPersona, saveGitPersona, useGitPersonas, type GitPersona } from "../../gitPersonas.ts";
 import {
   ProviderUsageDonut,
   projectUsageStats,
@@ -53,125 +49,11 @@ function ThemeSwatches({ theme }: { theme: ThemeSpec }) {
   );
 }
 
-/** UX-PERSONAS: `Workspace preset` (never "persona"). Offers the four
- *  choices, Preview changes, Apply, Clear preset, and the separate reset
- *  controls. Switching preserves explicit placement, starter, and disclosure
- *  overrides; when an override masks a proposed change, the preview says so
- *  and `Keep my layout` is the default. */
-function WorkspacePresetSection() {
-  const state = usePresetState();
-  usePresentation();
-  const [draft, setDraft] = useState<WorkspacePresetId | "none">(state.presetId ?? "none");
-  const [preview, setPreview] = useState<PresetSummary | null>(null);
-  useEffect(() => {
-    setDraft(state.presetId ?? "none");
-    setPreview(null);
-  }, [state.presetId]);
-
-  const summarize = (choice: WorkspacePresetId | "none"): PresetSummary =>
-    presetSummary({
-      presetId: choice === "none" ? null : choice,
-      currentPresetId: getPresetState().presetId,
-      caps: listCapabilities().map((d) => ({
-        id: d.id,
-        standardTier: d.standardTier,
-        standardRank: d.standardRank,
-        label: d.label,
-        available: d.available(),
-      })),
-      overrides: getPresentation().placements,
-      starterOverride: getPresentation().starterOrder,
-      explicitComposerDetail: getPresetState().composerDetail,
-    });
-
-  const apply = () => applyPreset(draft === "none" ? null : draft);
-  const usePresetOrder = () => {
-    if (!window.confirm("Use the preset order? This clears only your explicit placement and starter overrides.")) return;
-    resetWorkspaceOrder();
-    apply();
-  };
-
-  const current = state.presetId
-    ? WORKSPACE_PRESETS.find((p) => p.id === state.presetId)?.label ?? state.presetId
-    : NO_PRESET_CARD.label;
-  const presetOptions: Array<[WorkspacePresetId | "none", string]> = [
-    ...WORKSPACE_PRESETS.map((p): [WorkspacePresetId | "none", string] => [p.id, p.label]),
-    ["none", NO_PRESET_CARD.label],
-  ];
-  const currentId: WorkspacePresetId | "none" = state.presetId ?? "none";
-
-  return (
-    <>
-      <Row
-        label="Workspace preset"
-        hint={`Current: ${current}. A preset changes starter actions, workspace order, and initial detail — it never hides tools or changes what you can do.`}
-        itemId="general.workspacePreset"
-      >
-        <div className="seg workspace-preset-seg" role="radiogroup" aria-label="Workspace preset">
-          {presetOptions.map(([id, label]) => {
-            const selected = draft === id;
-            const applied = currentId === id;
-            return (
-              <button
-                key={id}
-                type="button"
-                className={selected ? "on" : ""}
-                role="radio"
-                aria-checked={selected}
-                onClick={() => { setDraft(id); setPreview(null); }}
-              >
-                <span className="workspace-preset-choice">
-                  <span className="workspace-preset-check" aria-hidden="true">{selected ? "✓" : ""}</span>
-                  {label}
-                </span>
-                {applied && <span className="workspace-preset-current">Current</span>}
-              </button>
-            );
-          })}
-        </div>
-      </Row>
-      <Row label="Preview and apply" hint="Preview shows the exact effective changes before anything is saved.">
-        <div className="preset-settings-actions">
-          <button className="small-btn" onClick={() => setPreview(summarize(draft))}>Preview changes</button>
-          <button className="small-btn" onClick={apply}>Apply</button>
-          <button className="small-btn" onClick={clearPreset}>Clear preset</button>
-        </div>
-      </Row>
-      {preview && (
-        <div className="preset-preview preset-preview-settings" role="region" aria-label="Preset preview">
-          <pre className="preset-preview-text">{formatPresetSummary(preview)}</pre>
-          {preview.maskedByOverrides.length > 0 && (
-            <div className="preset-preview-note">
-              <p>Some of your explicit layout choices mask this preset’s suggested order. Keeping your layout is the default.</p>
-              <div className="preset-settings-actions">
-                <button className="small-btn btn-accent" onClick={apply}>Keep my layout</button>
-                <button className="small-btn" onClick={usePresetOrder}>Use preset order</button>
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-      <Row label="Workspace setup" hint="Choose another starting point. You can change everything afterward.">
-        <button className="small-btn" onClick={() => setOverlay("onboarding")}>Choose a setup…</button>
-      </Row>
-      <Row label="Reset workspace order" hint="Clears your explicit capability placement and starter overrides only.">
-        <button
-          className="small-btn"
-          onClick={() => { if (window.confirm("Reset workspace order to the preset (or standard) arrangement?")) resetWorkspaceOrder(); }}
-        >Reset workspace order</button>
-      </Row>
-      <Row label="Reset disclosure choices" hint="Technical options and More tools return to their preset-seeded state.">
-        <button className="small-btn" onClick={resetDisclosureChoices}>Reset disclosure choices</button>
-      </Row>
-    </>
-  );
-}
-
 export function GeneralPage() {
   const settings = useStore((s) => s.settings);
   return (
     <>
-      <PageHead title="General" blurb="Workspace basics. A preset is a starting arrangement — change or clear it anytime." />
+      <PageHead title="General" blurb="Application basics and browser-local behavior." />
       <Row label="Product name" hint="Shown in the sidebar and window chrome." itemId="general.productName">
         <input
           className="inp"
@@ -183,7 +65,6 @@ export function GeneralPage() {
       <Row label="Relative timestamps" hint="Show session activity as “2m ago” instead of a clock time." itemId="general.relativeTime">
         <Toggle on={settings.relativeTime} onChange={(relativeTime) => updateSettings({ relativeTime })} label="Relative timestamps" />
       </Row>
-      <WorkspacePresetSection />
     </>
   );
 }
@@ -394,14 +275,19 @@ export function AppearancePage() {
   const ui = useUiSettings();
   const settings = useStore((s) => s.settings);
   const fontPct = ((settings.fontSize - 12) / 6) * 100;
-  const setFontSize = (fontSize: number) => {
-    updateSettings({ fontSize });
-    setUiSettings({ fontSize: fontSize <= 13 ? "s" : fontSize >= 16 ? "l" : "m" });
-  };
+  const editorFontPct = ((ui.editorFontSize - 11) / 13) * 100;
+  const setFontSize = (fontSize: number) => updateSettings({ fontSize });
   return (
     <>
       <PageHead title="Appearance" blurb="Visual preferences, saved in this browser and applied immediately." />
       <ThemeSection />
+      <Row label="Interface font" hint="Choose the main typeface used throughout menus, settings, and conversations." itemId="appearance.fontFamily">
+        <Seg
+          value={settings.fontFamily}
+          options={[["sans", "Modern"], ["system", "System"], ["serif", "Serif"], ["mono", "Mono"]]}
+          onChange={(fontFamily) => updateSettings({ fontFamily })}
+        />
+      </Row>
       <Row label="Density" hint="Choose airy, balanced, or compact spacing across panels." itemId="appearance.density">
         <Seg value={ui.density} options={[["comfortable", "Comfortable"], ["balanced", "Balanced"], ["compact", "Compact"]]} onChange={(density) => { setUiSettings({ density }); updateSettings({ density }); }} />
       </Row>
@@ -420,20 +306,25 @@ export function AppearancePage() {
         </div>
       </Row>
       <Row label="Editor font size" hint="Composer, file editor, diffs, terminal input, and code blocks (11–24 px)." itemId="appearance.editorFontSize">
-        <div className="editor-font-control">
+        <div className="rng">
           <input
-            type="number" min={11} max={24} value={ui.editorFontSize}
+            type="range" min={11} max={24} value={ui.editorFontSize}
             aria-label="Editor font size in pixels"
-            onChange={(e) => {
-              const v = Math.round(Number(e.target.value));
-              if (Number.isFinite(v) && v >= 11 && v <= 24) setUiSettings({ editorFontSize: v });
-            }}
+            style={{ "--p": `${editorFontPct}%` } as CSSProperties}
+            onChange={(e) => setUiSettings({ editorFontSize: Number(e.target.value) })}
           />
-          <span className="muted">px</span>
+          <span className="rng-val">{ui.editorFontSize}px</span>
         </div>
       </Row>
-      <Row label="Reduced motion" hint="Disables pulse and spinner animations." itemId="appearance.reducedMotion">
-        <Toggle on={ui.reducedMotion} onChange={(v) => setUiSettings({ reducedMotion: v })} label="Reduced motion" />
+      <Row label="Corner rounding" hint="Apply square, compact, or generously rounded corners across the interface." itemId="appearance.rounding">
+        <Seg value={ui.rounding} options={[["square", "Square"], ["compact", "Compact"], ["rounded", "Rounded"]]} onChange={(rounding) => setUiSettings({ rounding })} />
+      </Row>
+      <Row label="Menu items" hint="Choose which optional actions appear in the composer and workspace menus." itemId="appearance.menuItems">
+        <div className="appearance-menu-items">
+          <label><Toggle on={ui.showTechnicalButtons} onChange={(showTechnicalButtons) => setUiSettings({ showTechnicalButtons })} label="Technical options" /><span>Technical</span></label>
+          <label><Toggle on={ui.showDictate} onChange={(showDictate) => setUiSettings({ showDictate })} label="Dictation action" /><span>Dictation</span></label>
+          <label><Toggle on={ui.showQuickActions} onChange={(showQuickActions) => setUiSettings({ showQuickActions })} label="Quick actions" /><span>Quick actions</span></label>
+        </div>
       </Row>
     </>
   );
@@ -721,21 +612,34 @@ function QuotaSection() {
         <QuotaOverviewGrid snapshots={visible} />
       )}
       {snaps.length > 0 && (
-        <div className="quota-visibility">
-          {snaps.map((s) => (
-            <label key={s.providerId} className="plugin-toggle">
-              <input
-                type="checkbox"
-                checked={!prefs.hiddenProviders.includes(s.providerId)}
-                onChange={(e) => setProviderHidden(s.providerId, !e.target.checked)}
-              />
-              {s.providerId}
-            </label>
-          ))}
+        <div className="provider-filter" aria-label="Filter quota providers">
+          <div className="provider-filter-head">
+            <span>Shown providers</span>
+            <button type="button" onClick={() => snaps.forEach((s) => setProviderHidden(s.providerId, false))}>Show all</button>
+            <button type="button" onClick={() => snaps.forEach((s) => setProviderHidden(s.providerId, true))}>Hide all</button>
+          </div>
+          <div className="provider-filter-pills">
+            {snaps.map((s) => {
+              const shown = !prefs.hiddenProviders.includes(s.providerId);
+              return (
+                <button
+                  key={s.providerId}
+                  type="button"
+                  className={shown ? "active" : ""}
+                  aria-pressed={shown}
+                  onClick={() => setProviderHidden(s.providerId, shown)}
+                >
+                  <i aria-hidden="true" />
+                  <span>{s.providerId}</span>
+                  <b aria-hidden="true">{shown ? "✓" : "+"}</b>
+                </button>
+              );
+            })}
+          </div>
         </div>
       )}
       {snaps.length > 0 && visible.length === 0 && (
-        <div className="muted" style={{ fontSize: 12 }}>All providers hidden — tick one to show its card.</div>
+        <div className="muted" style={{ fontSize: 12 }}>All providers hidden — select one to show its card.</div>
       )}
       {visible.length > 0 && (
         <>
@@ -784,29 +688,120 @@ export function UsagePage() {
 
 export function ProjectsPage() {
   const projects = useStore((s) => s.projectRegistry.projects);
+  const activeProjectId = useStore((s) => s.activeProjectId);
+  const models = useStore((s) => s.models).filter(modelSupportsTextWorkflow);
   const [picking, setPicking] = useState(false);
+  const saveModel = async (projectId: string, model?: ModelRef) => {
+    const updated = await api.patchProject(projectId, { defaults: { model: model ?? null } });
+    applyProjectUpsert(updated);
+  };
   return (
     <>
-      <PageHead title="Projects" blurb="Folders Polyth can work in. Removing a project keeps the folder on disk." />
+      <PageHead title="Projects" blurb="Project-specific model and canvas setup. Removing a project keeps its folder on disk." />
       {projects.map((p) => (
-        <div key={p.id} className="set-row">
-          <div className="set-row-text">
-            <div className="set-row-label">{p.name || p.path}</div>
-            <div className="set-row-hint mono">{p.path}</div>
-          </div>
-          <div className="set-row-control">
+        <section key={p.id} className={`project-settings-card${p.id === activeProjectId ? " active" : ""}`}>
+          <header>
+            <div className="set-row-text">
+              <div className="set-row-label">{p.name || p.path}{p.id === activeProjectId && <span className="tag">active</span>}</div>
+              <div className="set-row-hint mono">{p.path}</div>
+            </div>
             <button
               className="small-btn danger-btn"
               onClick={() => { if (window.confirm(`Remove project "${p.name || p.path}" from Polyth?`)) void removeProject(p.id); }}
             >Remove</button>
+          </header>
+          <div className="project-settings-options">
+            <div>
+              <strong>Default model</strong>
+              <span>Overrides the global default for new sessions.</span>
+            </div>
+            <ModelPicker
+              direction="down"
+              models={models}
+              value={p.defaults?.model ?? undefined}
+              onPick={(model) => void saveModel(p.id, model)}
+            />
           </div>
-        </div>
+          <div className="project-settings-options" data-settings-item="projects.canvas">
+            <div>
+              <strong>Canvas setup</strong>
+              <span>Choose a starting layout, widgets, and workspace style for this project.</span>
+            </div>
+            <button
+              className="small-btn"
+              onClick={() => {
+                activateProject(p.id);
+                setOverlay("onboarding");
+              }}
+            >Configure canvas…</button>
+          </div>
+        </section>
       ))}
       <div className="set-add-form">
         <button className="small-btn" onClick={() => setPicking(true)}>+ Open project folder…</button>
       </div>
       {picking && <ProjectFolderDialog onClose={() => setPicking(false)} />}
     </>
+  );
+}
+
+function GitPersonas({ projectId }: { projectId: string }) {
+  const personas = useGitPersonas();
+  const [identity, setIdentity] = useState({ name: "", email: "" });
+  const [draft, setDraft] = useState<GitPersona | null>(null);
+  const [error, setError] = useState("");
+  useEffect(() => {
+    void api.gitIdentity(projectId).then(setIdentity).catch(() => setIdentity({ name: "", email: "" }));
+  }, [projectId]);
+  const apply = async (persona: GitPersona) => {
+    try {
+      setError("");
+      setIdentity(await api.gitIdentitySet(projectId, persona));
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    }
+  };
+  return (
+    <section className="git-personas" data-settings-item="git.personas">
+      <div className="settings-section-head">
+        <div><strong>Git personas</strong><span>Saved identities you can apply to this repository.</span></div>
+        <button className="small-btn" onClick={() => setDraft({ id: crypto.randomUUID(), label: "", name: "", email: "" })}>+ Persona</button>
+      </div>
+      <div className="git-current-identity">
+        Current repository identity: <strong>{identity.name || "not set"}</strong>
+        <span className="mono">{identity.email || "—"}</span>
+      </div>
+      {personas.map((persona) => {
+        const active = persona.name === identity.name && persona.email === identity.email;
+        return (
+          <div key={persona.id} className={`git-persona-row${active ? " active" : ""}`}>
+            <span className="profile-avatar">{persona.label.slice(0, 1).toUpperCase()}</span>
+            <span><strong>{persona.label}</strong><small>{persona.name} · {persona.email}</small></span>
+            {active && <span className="tag">in use</span>}
+            <button className="small-btn" disabled={active} onClick={() => void apply(persona)}>Use</button>
+            <button className="small-btn" onClick={() => setDraft(persona)}>Edit</button>
+            <button className="small-btn danger-btn" onClick={() => removeGitPersona(persona.id)}>Delete</button>
+          </div>
+        );
+      })}
+      {personas.length === 0 && <p className="muted">Add a work, personal, or bot identity. Applying one writes repository-local Git config.</p>}
+      {error && <div className="form-error">{error}</div>}
+      {draft && (
+        <Dialog title={draft.label ? `Edit ${draft.label}` : "New Git persona"} onClose={() => setDraft(null)} className="profile-form" initialFocus="input">
+          <div className="dialog-head"><span>{draft.label ? `Edit ${draft.label}` : "New Git persona"}</span><span className="header-spacer" /><button className="small-btn" onClick={() => setDraft(null)}>✕</button></div>
+          <div className="profile-form-body">
+            <label>Label<input value={draft.label} placeholder="Work" onChange={(event) => setDraft({ ...draft, label: event.target.value })} /></label>
+            <label>Commit author name<input value={draft.name} placeholder="Ada Lovelace" onChange={(event) => setDraft({ ...draft, name: event.target.value })} /></label>
+            <label>Commit email<input type="email" value={draft.email} placeholder="ada@example.com" onChange={(event) => setDraft({ ...draft, email: event.target.value })} /></label>
+          </div>
+          <div className="dialog-foot">
+            <button className="small-btn" onClick={() => setDraft(null)}>Cancel</button>
+            <span className="header-spacer" />
+            <button className="primary-btn" disabled={!draft.label.trim() || !draft.name.trim() || !draft.email.trim()} onClick={() => { saveGitPersona({ ...draft, label: draft.label.trim(), name: draft.name.trim(), email: draft.email.trim() }); setDraft(null); }}>Save persona</button>
+          </div>
+        </Dialog>
+      )}
+    </section>
   );
 }
 
@@ -830,6 +825,7 @@ export function GitPage() {
           <Row label="Branch"><span className="mono">{status.branch}</span></Row>
           <Row label="Working tree"><span className="mono">{changes === 0 ? "clean" : `${changes} changed file${changes === 1 ? "" : "s"}`}</span></Row>
           <Row label="Ahead / behind"><span className="mono">↑{status.ahead} ↓{status.behind}</span></Row>
+          <GitPersonas projectId={projectId} />
           <Row label="Branch name template" hint="Tokens: {slug} and {date}. Stored locally." itemId="git.branchTemplate">
             <input
               className="inp inp-mono"
@@ -846,16 +842,60 @@ export function GitPage() {
   );
 }
 
+function RoleEditor({ role, onClose }: { role: AgentDescriptor; onClose: () => void }) {
+  const models = useStore((state) => state.models).filter(modelSupportsTextWorkflow);
+  const agents = useStore((state) => state.agents);
+  const [prompt, setPrompt] = useState(role.prompt ?? "");
+  const [model, setModel] = useState<ModelRef | undefined>(role.model);
+  const [mode, setMode] = useState<AgentDescriptor["mode"]>(role.mode === "all" ? "primary" : role.mode);
+  const [error, setError] = useState("");
+  const [busy, setBusy] = useState(false);
+  const save = async () => {
+    setBusy(true);
+    setError("");
+    try {
+      const saved = await api.saveRole(role.name, { prompt, model, mode });
+      setAgents(agents.map((candidate) => candidate.name === saved.name ? saved : candidate));
+      onClose();
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : String(cause));
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <Dialog title={`Edit ${role.name}`} onClose={onClose} className="role-editor" initialFocus="textarea">
+      <div className="dialog-head"><span>Edit role · {role.name}</span><span className="header-spacer" /><button className="small-btn" onClick={onClose}>✕</button></div>
+      <div className="role-editor-body">
+        <label>
+          <span>Usage</span>
+          <Seg value={mode} options={[["primary", "Main agent"], ["subagent", "Subagent"]]} onChange={setMode} />
+          <small>Main agents can lead sessions. Subagents are delegated focused work.</small>
+        </label>
+        <label>
+          <span>Provider & model</span>
+          <ModelPicker direction="down" models={models} value={model} onPick={setModel} />
+          <small>Uses the same searchable picker and favorites as the composer. Auto inherits OpenCode’s default.</small>
+        </label>
+        <label>
+          <span>System prompt</span>
+          <textarea rows={12} value={prompt} placeholder="Instructions that define this role’s behavior…" onChange={(event) => setPrompt(event.target.value)} />
+        </label>
+        {error && <div className="form-error">{error}</div>}
+      </div>
+      <div className="dialog-foot"><button className="small-btn" onClick={onClose}>Cancel</button><span className="header-spacer" /><button className="primary-btn" disabled={busy} onClick={() => void save()}>{busy ? "Saving…" : "Save role"}</button></div>
+    </Dialog>
+  );
+}
+
 export function AgentsPage() {
   const agents = useStore((s) => s.agents);
   const profiles = useProfiles();
+  const [editingRole, setEditingRole] = useState<AgentDescriptor | null>(null);
   const [editing, setEditing] = useState<AgentProfile | null>(null);
   const [creating, setCreating] = useState(false);
   const [repairsFor, setRepairsFor] = useState<Record<string, string>>({});
-  const rolePrefs = useRolePrefs();
   const configurableAgents = agents.filter((agent) => agent.name.toLowerCase() !== "compaction");
-  const mainAgents = configurableAgents.filter((agent) => roleKind(agent, rolePrefs) === "main");
-  const subagents = configurableAgents.filter((agent) => roleKind(agent, rolePrefs) === "subagent");
   const checkProfile = async (p: AgentProfile) => {
     const r = await api.validateProfile(p.id).catch(() => null);
     setRepairsFor((m) => ({
@@ -865,37 +905,25 @@ export function AgentsPage() {
   };
   return (
     <>
-      <PageHead title="Roles" blurb="Choose which OpenCode roles appear as main agents and which run as subagents." />
+      <PageHead title="Roles" blurb="Shape how each OpenCode role works: its instructions, model, and where it can be used." />
       {agents.length === 0 ? (
         <EmptyState title="No agents reported" body="The backend did not report agent presets. Sessions run with the default agent." />
       ) : (
-        <>
-          <div className="stat-label">Main agents</div>
-          {mainAgents.map((agent) => (
-            <div key={agent.name} className="set-row role-row">
-              <div className="set-row-label">{agent.name}</div>
-              <div className="set-row-control">
-                <select aria-label={`Role for ${agent.name}`} value="main" onChange={(event) => setRoleKind(agent.name, event.target.value as "main" | "subagent")}>
-                  <option value="main">Main agent</option>
-                  <option value="subagent">Subagent</option>
-                </select>
+        <div className="role-card-grid">
+          {configurableAgents.map((agent) => (
+            <article key={agent.name} className="role-card">
+              <header><span className="role-card-icon">{agent.name.slice(0, 1).toUpperCase()}</span><div><strong>{agent.name}</strong><span className={`tag role-kind ${agent.mode}`}>{agent.mode === "subagent" ? "Subagent" : "Main agent"}</span></div></header>
+              <p>{agent.description || "A configurable OpenCode role."}</p>
+              <div className="role-card-meta">
+                <span><b>Model</b>{agent.model ? `${agent.model.providerID}/${agent.model.modelID}` : "Auto"}</span>
+                <span><b>Prompt</b>{agent.prompt?.trim() ? `${agent.prompt.trim().slice(0, 72)}${agent.prompt.trim().length > 72 ? "…" : ""}` : "OpenCode default"}</span>
               </div>
-            </div>
+              <button className="small-btn" onClick={() => setEditingRole(agent)}>Edit role</button>
+            </article>
           ))}
-          <div className="stat-label">Subagents</div>
-          {subagents.map((agent) => (
-            <div key={agent.name} className="set-row role-row">
-              <div className="set-row-label">{agent.name}</div>
-              <div className="set-row-control">
-                <select aria-label={`Role for ${agent.name}`} value="subagent" onChange={(event) => setRoleKind(agent.name, event.target.value as "main" | "subagent")}>
-                  <option value="main">Main agent</option>
-                  <option value="subagent">Subagent</option>
-                </select>
-              </div>
-            </div>
-          ))}
-        </>
+        </div>
       )}
+      {editingRole && <RoleEditor role={editingRole} onClose={() => setEditingRole(null)} />}
       <div className="stat-label" style={{ display: "flex", alignItems: "center", gap: 8 }} data-settings-item="agents.profiles">
         <span>Agent profiles ({profiles.length})</span>
         <span className="header-spacer" />
@@ -1245,7 +1273,7 @@ export function ManagedPluginsSection() {
           const commandCount = contributionCount(p, "command");
           const toolCount = p.capabilities.length;
           return (
-            <article key={p.id} className={`plugin-card ${p.enabled ? "" : "disabled"}`}>
+            <article key={p.id} className={`plugin-card ${p.enabled ? "enabled" : "disabled"}`}>
               <button type="button" className="plugin-card-main" onClick={() => setSelected(p.id)}>
                 <span className="plugin-card-icon">{p.name.slice(0, 1).toUpperCase()}</span>
                 <span className="plugin-card-copy">

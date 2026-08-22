@@ -1,6 +1,6 @@
-// Write side of commands + snippets (Settings > Commands/Snippets CRUD).
-// GET listing lives in workspaceRoutes; this handles create/delete of the
-// underlying markdown files in project (.polyth/) or user (~/.config/polyth/).
+// HTTP face of commands + snippets (Settings > Commands/Snippets CRUD).
+// The underlying markdown files live in project (.polyth/) or user
+// (~/.config/polyth/).
 import type { ProjectService } from "@polyth/contracts";
 import type { CommandService, WriteScope } from "@polyth/commands";
 import type { RouteHandler } from "../http.ts";
@@ -14,8 +14,14 @@ export function snippetRoutes(deps: { projects: ProjectService; commands: Comman
   };
   const scopeOf = (v: unknown): WriteScope => (v === "user" ? "user" : "project");
 
-  return async ({ path, method, body, json }) => {
+  return async ({ path, method, url, body, json }) => {
     if (path !== "/api/commands" && path !== "/api/snippets") return false;
+    if (method === "GET") {
+      const root = await rootOf(url.searchParams.get("projectId"));
+      const list = await deps.commands.list(root);
+      json(200, path === "/api/commands" ? list.commands : list.snippets);
+      return true;
+    }
     if (method !== "POST" && method !== "DELETE") return false;
     const b = await body();
     const root = await rootOf(b.projectId);

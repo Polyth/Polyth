@@ -13,6 +13,8 @@ import { installPushDeepLinks } from "./push.ts";
 import { applyComposerSeed } from "./drafts.ts";
 import { forkSeedKey, rewindSeedKey } from "./messageActions.ts";
 import { getSessionDefaults, resolveSessionDefaultModel } from "./sessionDefaults.ts";
+import { initPluginBridge } from "./pluginBridge.ts";
+import { reconcilePackage } from "./packages/reconcile.ts";
 
 let sync: SyncClient | null = null;
 let lastSubSession: string | undefined;
@@ -256,7 +258,12 @@ function startSync(): void {
       flushTimer ??= setTimeout(flush, 0);
     } else if (msg.type === "projection") {
       store.upsertSession(msg.session);
+    } else if (msg.type === "package/changed") {
+      reconcilePackage(msg.package);
     }
+  });
+  void initPluginBridge(sync).catch((error) => {
+    console.error("plugin bridge initialization failed", error);
   });
   sync.connect(`${proto}://${location.host}/ws`);
 }

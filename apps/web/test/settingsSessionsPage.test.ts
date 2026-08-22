@@ -105,10 +105,8 @@ test("settings Sessions page renders defaults and never lists sessions", async (
     assert.match(text, /Eligible for archiving right now: 2/);
     assert.doesNotMatch(text, /__default__|When sessions expire/);
     assert.doesNotMatch(text, /Fix the flaky test|Ship the release|Other project session/);
-    assert.equal(
-      container.querySelector<HTMLSelectElement>('select[aria-label="Small Model"]')?.options[0]?.text,
-      "Not selected",
-    );
+    assert.equal(container.querySelectorAll(".model-picker").length, 3);
+    assert.equal(container.querySelectorAll(".model-picker-trigger").length, 3);
     const agentOptions = [...container.querySelectorAll<HTMLOptionElement>('select[aria-label="Default Agent"] option')]
       .map((option) => option.textContent);
     assert.deepEqual(agentOptions, ["OpenCode agent default", "review", "plan"]);

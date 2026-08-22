@@ -3,11 +3,19 @@ import { createServer, type IncomingMessage, type ServerResponse, type Server } 
 import { readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { extname, join, normalize } from "node:path";
-import type { AgentRuntime, JsonObject, ModelDescriptor, SessionService } from "@polyth/contracts";
+import type {
+  AgentRuntime,
+  JsonObject,
+  ModelDescriptor,
+  RouteHandler,
+  RouteRequest,
+  SessionService,
+} from "@polyth/contracts";
 import type { ProjectService } from "@polyth/contracts";
 import type { RuntimePool } from "./sessions.ts";
 import { aggregateRuntimes } from "./runtimeAggregate.ts";
 import type { ModelVisibilityService } from "./modelVisibility.ts";
+import type { RuntimeCatalog } from "./runtimeCatalog.ts";
 
 const MIME: Record<string, string> = {
   ".html": "text/html", ".js": "text/javascript", ".css": "text/css",
@@ -58,19 +66,8 @@ const readBody = async (req: IncomingMessage): Promise<Record<string, unknown>> 
   }
 };
 
-/** A plugin-contributed route group: returns true when it handled the request.
- *  This is the HTTP face of a capability contribution — feature packages never
- *  edit this file, they hand a RouteHandler to the boot profile. */
-export type RouteHandler = (rc: RouteRequest) => Promise<boolean>;
-export interface RouteRequest {
-  req: IncomingMessage;
-  res: ServerResponse;
-  url: URL;
-  path: string;
-  method: string;
-  body(): Promise<Record<string, unknown>>;
-  json(code: number, body: unknown): void;
-}
+/** The gateway's route contract is public so trusted plugins can contribute it. */
+export type { RouteHandler, RouteRequest } from "@polyth/contracts";
 
 export interface HttpDeps {
   sessions: SessionService;
@@ -82,6 +79,8 @@ export interface HttpDeps {
   routes?: RouteHandler[];
   /** Provider/model visibility toggles (Providers & Models settings). */
   visibility?: ModelVisibilityService;
+  /** Single-flight, server-lifetime OpenCode catalog cache. */
+  catalog?: RuntimeCatalog;
   /** F16 gate: null = proceed, otherwise the denial to answer with. Applied
    *  to every /api path except the two the lock screen itself needs. */
   auth?: { gate(req: IncomingMessage): { status: number; body: unknown } | null };
@@ -97,6 +96,7 @@ export function createHttpServer(deps: HttpDeps): Server {
   // Aggregate across live runtimes (per-project pools may differ).
   const aggregate = <T>(fetch: (rt: AgentRuntime) => Promise<T[]>): Promise<T[]> =>
     aggregateRuntimes({ projects, runtimes: deps.runtimes }, fetch);
+  const models = () => deps.catalog?.models() ?? aggregate<ModelDescriptor>((runtime) => runtime.models());
 
   return createServer(async (req, res) => {
     const url = new URL(req.url ?? "/", "http://x");
@@ -254,14 +254,13 @@ export function createHttpServer(deps: HttpDeps): Server {
       if (deps.visibility) {
         const vis = deps.visibility;
         if (path === "/api/models" && method === "GET") {
-          const models = await aggregate<ModelDescriptor>((rt) => rt.models());
+          const allModels = await models();
           // ?all=1 → unfiltered catalog (settings); default → enabled + connected.
-          if (url.searchParams.get("all") === "1") return json(res, 200, models);
-          return json(res, 200, vis.filter(models));
+          if (url.searchParams.get("all") === "1") return json(res, 200, allModels);
+          return json(res, 200, vis.filter(allModels));
         }
         if (path === "/api/providers" && method === "GET") {
-          const models = await aggregate<ModelDescriptor>((rt) => rt.models());
-          return json(res, 200, vis.catalog(models));
+          return json(res, 200, vis.catalog(await models()));
         }
         m = path.match(/^\/api\/providers\/([^/]+)\/enabled$/);
         if (m && method === "POST") {
@@ -278,7 +277,9 @@ export function createHttpServer(deps: HttpDeps): Server {
 
       m = path.match(/^\/api\/(models|agents)$/);
       if (m && method === "GET") {
-        const out = await aggregate<unknown>((rt) => (m![1] === "models" ? rt.models() : rt.agents()));
+        const out = m[1] === "models"
+          ? await models()
+          : deps.catalog ? await deps.catalog.agents() : await aggregate<unknown>((runtime) => runtime.agents());
         return json(res, 200, out);
       }
 

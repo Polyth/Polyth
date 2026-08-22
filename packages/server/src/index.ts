@@ -4,14 +4,18 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createContext, loadPlugin } from "@polyth/kernel";
 import { createStore, deriveMessages } from "@polyth/session";
-import { CAP, type AgentRuntime, type JsonObject, type RuntimeEvent, type SessionEvent, type SessionProjection, type WalkthroughSource } from "@polyth/contracts";
+import { CAP, type AgentRuntime, type Disposable, type JsonObject, type RuntimeEvent, type SessionEvent, type SessionProjection, type WalkthroughSource } from "@polyth/contracts";
 import {
   createBrowserToolBridge,
   createConfigApplier,
   createOpenCodeRuntime,
   type OpenCodeAdapterOptions,
 } from "@polyth/backend-opencode";
-import { createPluginRegistry } from "@polyth/plugins";
+import {
+  createPluginRegistry,
+  type ServerPluginFactory,
+  type TrustedServerPluginHost,
+} from "@polyth/plugins";
 import { createAutoAcceptStore, createPermissionService } from "@polyth/permissions";
 import { createGoalService, type GoalService } from "@polyth/goals";
 import { createFileService, MAX_RAW_BYTES } from "@polyth/files";
@@ -20,6 +24,7 @@ import { createGitService } from "@polyth/git";
 import { createTerminalService } from "@polyth/terminal";
 import { createPreviewService } from "@polyth/preview";
 import { createMultirunService } from "@polyth/multirun";
+import { createWorkflowService } from "@polyth/workflow";
 import { createFusionService, synthesisPrompt } from "@polyth/fusion";
 import { createScheduleService, scanLoopsDir } from "@polyth/schedule";
 import { createKnowledgeStore } from "@polyth/knowledge";
@@ -36,13 +41,14 @@ import {
   findChromiumExecutable, originOf,
 } from "@polyth/browser";
 import { createDictationService, createWhisperSttAdapter } from "@polyth/dictation";
-import { createHomeAssistantPlugin, createHomeAssistantService } from "@polyth/home-assistant";
+import { createHomeAssistantServerPlugin } from "@polyth/home-assistant";
 import { createProjectService } from "./projects.ts";
 import { createPackageRegistry } from "./packages.ts";
 import { createSessionService, type Broadcaster, type RuntimePool } from "./sessions.ts";
-import { aggregateRuntimes } from "./runtimeAggregate.ts";
+import { createRuntimeCatalog } from "./runtimeCatalog.ts";
 import { createHttpServer, type RouteHandler } from "./http.ts";
 import { packageRoutes } from "./routes/packages.ts";
+import { pluginAssetRoutes } from "./routes/pluginAssets.ts";
 import { goalRoutes } from "./routes/goals.ts";
 import { orgRoutes } from "./routes/org.ts";
 import { workspaceRoutes } from "./routes/workspace.ts";
@@ -50,6 +56,7 @@ import { gitRoutes } from "./routes/git.ts";
 import { terminalRoutes, attachTerminalWs } from "./routes/terminal.ts";
 import { previewRoutes } from "./routes/preview.ts";
 import { multirunRoutes } from "./routes/multirun.ts";
+import { workflowRoutes } from "./routes/workflow.ts";
 import { fusionRoutes } from "./routes/fusion.ts";
 import { walkthroughRoutes } from "./routes/walkthrough.ts";
 import { scheduleRoutes } from "./routes/schedule.ts";
@@ -64,7 +71,6 @@ import { settingsRoutes } from "./routes/settings.ts";
 import { browserRoutes } from "./routes/browser.ts";
 import { browseRoutes } from "./routes/browse.ts";
 import { dictationRoutes } from "./routes/dictation.ts";
-import { homeAssistantRoutes } from "./routes/homeAssistant.ts";
 import { createAuthService } from "./auth.ts";
 import { authRoutes } from "./routes/auth.ts";
 import { createPushNotifier, createPushService } from "./push.ts";
@@ -79,11 +85,15 @@ import { voiceRoutes } from "./routes/voice.ts";
 import { buildNotePrompt, createAssistService, createAssistSettings, parseNoteReply, type AssistService } from "./assist.ts";
 import { assistRoutes } from "./routes/assist.ts";
 import { secureSafeRoutes } from "./routes/secureSafe.ts";
+import { createPluginContributionHub } from "./pluginContributions.ts";
 import { createWalkthroughJobService } from "./walkthroughs.ts";
 import { createReviewFlowService, createReviewService } from "./review.ts";
 import { createMultirunRunOne } from "./multirunRunner.ts";
+import { createWorkflowRunNode } from "./workflowRunner.ts";
 import { oneShot } from "./oneshot.ts";
 import { attachWs } from "./ws.ts";
+import { createRouteRegistry } from "./routeRegistry.ts";
+import { createPackageLifecycle } from "./packageLifecycle.ts";
 
 /** POLYTH_SMALL_MODEL="provider/model-id" — cheap model for auditors/commit messages. */
 const smallModel = (): { providerID: string; modelID: string } | undefined => {
@@ -94,6 +104,10 @@ const smallModel = (): { providerID: string; modelID: string } | undefined => {
 };
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
+
+const BUILTIN_SERVER_PLUGINS: Record<string, ServerPluginFactory> = {
+  "home-assistant": createHomeAssistantServerPlugin,
+};
 
 export interface BootOptions {
   port?: number;
@@ -107,7 +121,25 @@ export async function boot(opts: BootOptions = {}) {
   const port = opts.port ?? Number(process.env.PORT ?? 4400);
   const dataDir = resolve(opts.dataDir ?? process.env.POLYTH_DATA_DIR ?? "./data");
   mkdirSync(dataDir, { recursive: true });
-  const packageRegistry = createPackageRegistry({ file: `${dataDir}/packages.json` });
+  const routeRegistry = createRouteRegistry();
+  const packageLifecycle = createPackageLifecycle(routeRegistry);
+
+  // Sessions and package transitions can emit before WS attaches. This box
+  // starts forwarding as soon as the live broadcaster is installed.
+  let live: Broadcaster | null = null;
+  const broadcast: Broadcaster = {
+    event: (e: SessionEvent) => live?.event(e),
+    projection: (p: SessionProjection) => live?.projection(p),
+    pluginChanged: (plugin) => live?.pluginChanged?.(plugin),
+    packageChanged: (pkg) => live?.packageChanged?.(pkg),
+  };
+  const packageRegistry = createPackageRegistry({
+    file: `${dataDir}/packages.json`,
+    onSetEnabled: (id, enabled) => enabled
+      ? packageLifecycle.enable(id)
+      : packageLifecycle.disable(id),
+    onChanged: (pkg) => broadcast.packageChanged?.(pkg),
+  });
 
   // --- kernel composition root
   const root = createContext("root");
@@ -259,13 +291,7 @@ export async function boot(opts: BootOptions = {}) {
       return p;
     },
   };
-
-  // --- broadcast box: sessions service emits before WS attaches; box defers delivery
-  let live: Broadcaster | null = null;
-  const broadcast: Broadcaster = {
-    event: (e: SessionEvent) => live?.event(e),
-    projection: (p: SessionProjection) => live?.projection(p),
-  };
+  const runtimeCatalog = createRuntimeCatalog({ projects, runtimes });
 
   // --- goals workflow plugin (listens on the turn seam, never touches the loop)
   let goals: GoalService | null = null;
@@ -372,14 +398,17 @@ export async function boot(opts: BootOptions = {}) {
   await secureSafe.syncForbiddenConfig();
   await refreshSafeBehavior();
   const mcp = createMcpConfigService({ file: `${dataDir}/mcp.json`, applier: configApplier });
+  const pluginHub = createPluginContributionHub();
+  const pluginsDir = `${dataDir}/plugins`;
   const pluginRegistry = createPluginRegistry({
-    dir: `${dataDir}/plugins`,
+    dir: pluginsDir,
     trustedDir: process.env.POLYTH_TRUSTED_PLUGIN_DIR ?? `${dataDir}/trusted-plugins`,
+    slots: pluginHub.slots,
+    routes: routeRegistry,
+    root,
+    onChange: (plugin) => broadcast.pluginChanged?.(plugin),
   });
-  const homeAssistant = createHomeAssistantService({
-    file: `${dataDir}/home-assistant.json`,
-  });
-  await loadPlugin(root, createHomeAssistantPlugin(homeAssistant));
+  let homeAssistantPlugin: Disposable | null = null;
 
   // Provider/model visibility: seeds from opencode.json (disabled_providers +
   // provider blacklists), then mirrors every toggle back to it.
@@ -522,6 +551,19 @@ export async function boot(opts: BootOptions = {}) {
     runOne: createMultirunRunOne(resolveSessionRuntime),
   });
 
+  const workflow = createWorkflowService({
+    file: `${dataDir}/workflows.json`,
+    append: async (sessionId, type, data) => {
+      const ev = await store.append(sessionId, type, data, {
+        ignorable: true,
+        producerPlugin: "workflow",
+      });
+      broadcast.event(ev);
+      return ev;
+    },
+    runNode: createWorkflowRunNode(sessions),
+  });
+
   const fusion = createFusionService({
     append: async (sessionId, type, data) => {
       const ev = await store.append(sessionId, type, data, { ignorable: true });
@@ -578,7 +620,6 @@ export async function boot(opts: BootOptions = {}) {
       },
     },
   });
-  schedule.start();
 
   // Periodic .agents/loops reconciliation (rescan endpoint offers on-demand).
   const loopSync = async () => {
@@ -588,9 +629,7 @@ export async function boot(opts: BootOptions = {}) {
       } catch { /* unreadable project dir */ }
     }
   };
-  void loopSync();
-  const loopTimer = setInterval(() => void loopSync(), 60_000);
-  loopTimer.unref?.();
+  let loopTimer: ReturnType<typeof setInterval> | null = null;
 
   const knowledge = createKnowledgeStore(`${dataDir}/knowledge.db`);
 
@@ -613,7 +652,6 @@ export async function boot(opts: BootOptions = {}) {
     }
   }
   for (const provider of discoverQuotaProviders()) usage.register(provider);
-  usage.start();
 
   // --- WP11: generated walkthroughs, structured reviews, bounded review flow.
   // The source diff is captured through git/gh only; the model call is a
@@ -656,8 +694,7 @@ export async function boot(opts: BootOptions = {}) {
     review: (sessionId, source) => review.generate(sessionId, source),
     append: appendLogged,
   });
-  const flowTimer = setInterval(() => void reviewFlow.tick(), 4_000);
-  flowTimer.unref?.();
+  let flowTimer: ReturnType<typeof setInterval> | null = null;
 
   // --- F16 access control: OFF unless a password is configured. When on,
   // every /api + /ws answer requires the polyth_auth session cookie; login is
@@ -669,60 +706,102 @@ export async function boot(opts: BootOptions = {}) {
     localhostOptional: process.env.POLYTH_UI_PASSWORD_LOCALHOST === "optional",
   });
 
-  const routes: RouteHandler[] = [
-    authRoutes(auth),
-    packageRoutes(packageRegistry),
-    async (rc) => {
-      // lazily rehydrate goal state from the log before the goals routes answer
-      if (/^\/api\/sessions\/[^/]+\/goal/.test(rc.path)) {
-        const id = rc.path.split("/")[3]!;
-        await ensureGoalState(id);
-      }
-      return false;
+  const chainRoutes = (...handlers: RouteHandler[]): RouteHandler => async (request) => {
+    for (const handler of handlers) {
+      if (await handler(request)) return true;
+    }
+    return false;
+  };
+  const registerPackageRoute = (
+    id: string,
+    handler: RouteHandler,
+    hooks: { onEnable?: () => void | Promise<void>; onDisable?: () => void | Promise<void> } = {},
+  ): void => {
+    let route: Disposable | null = null;
+    packageLifecycle.register(id, {
+      async onEnable() {
+        await hooks.onEnable?.();
+        route = routeRegistry.add(id, handler);
+      },
+      async onDisable() {
+        await route?.dispose();
+        route = null;
+        try {
+          await hooks.onDisable?.();
+        } catch (error) {
+          route = routeRegistry.add(id, handler);
+          throw error;
+        }
+      },
+    });
+  };
+  const settingsRoute = settingsRoutes({
+    behavior, mcp, plugins: pluginRegistry,
+    backendConfig: () => configApplier.readConfig(),
+    saveRole: async (name, role) => {
+      await configApplier.applyAgent(name, role);
+      const current = (await runtimeCatalog.agents()).find((agent) => agent.name === name);
+      const saved = {
+        name,
+        ...(current?.description ? { description: current.description } : {}),
+        mode: role.mode,
+        ...(role.prompt ? { prompt: role.prompt } : {}),
+        ...(role.model ? { model: role.model } : {}),
+      };
+      runtimeCatalog.patchAgent(saved);
+      return saved;
     },
-    goalRoutes(goals),
-    orgRoutes({ projects, sessions, store }),
-    workspaceRoutes({ projects, files, commands, sessions }),
-    gitRoutes({
-      projects, sessions, git,
-      // OC-13-002: AI commit message, generated by the Small Model from the diff
-      commitMessage: async (root) => {
-        const staged = await git.diff(root, { staged: true });
-        const diff = staged.diff.trim() || (await git.diff(root)).diff;
-        if (!diff.trim()) throw Object.assign(new Error("nothing to describe"), { code: "invalid-input" });
-        const project = (await projects.list()).find((p) => p.path === root);
-        const rt = await runtimes.forProject(project?.id ?? "__default__");
-        const text = await oneShot(rt, {
-          cwd: root,
-          ...(smallModel() ? { model: smallModel()! } : {}),
-          prompt: [
-            "Write a git commit message for the diff below. Output ONLY the message.",
-            "Format: a <=72 character imperative subject line; add a short body only if the change is non-obvious.",
-            "Do not use tools. Do not wrap the answer in code fences.",
-            "", "<diff>", diff.slice(0, 24_000), "</diff>",
-          ].join("\n"),
-        });
-        return text.replace(/^```[a-z]*\n?|```$/g, "").trim();
-      },
+    systemInfo: (local) => ({
+      version: "0.1.0",
+      applicationUrl: `http://127.0.0.1:${port}`,
+      tunnelUrl: process.env.POLYTH_TUNNEL_URL ?? null,
+      dataDirLabel: local ? dataDir : "Polyth data directory",
+      capabilities: allCapabilities(),
     }),
-    terminalRoutes({
-      projects, sessions, terminals,
-      // invariant #4: terminals spawned from a session context are logged
-      events: {
-        append: async (sessionId, type, data) => {
-          const ev = await store.append(sessionId, type, data, { ignorable: true, producerPlugin: "terminal" });
-          broadcast.event(ev);
-          return ev;
-        },
+  });
+
+  registerPackageRoute("git", gitRoutes({
+    projects, sessions, git,
+    commitMessage: async (root) => {
+      const staged = await git.diff(root, { staged: true });
+      const diff = staged.diff.trim() || (await git.diff(root)).diff;
+      if (!diff.trim()) throw Object.assign(new Error("nothing to describe"), { code: "invalid-input" });
+      const project = (await projects.list()).find((p) => p.path === root);
+      const rt = await runtimes.forProject(project?.id ?? "__default__");
+      const text = await oneShot(rt, {
+        cwd: root,
+        ...(smallModel() ? { model: smallModel()! } : {}),
+        prompt: [
+          "Write a git commit message for the diff below. Output ONLY the message.",
+          "Format: a <=72 character imperative subject line; add a short body only if the change is non-obvious.",
+          "Do not use tools. Do not wrap the answer in code fences.",
+          "", "<diff>", diff.slice(0, 24_000), "</diff>",
+        ].join("\n"),
+      });
+      return text.replace(/^```[a-z]*\n?|```$/g, "").trim();
+    },
+  }));
+  registerPackageRoute("terminal", terminalRoutes({
+    projects, sessions, terminals,
+    events: {
+      append: async (sessionId, type, data) => {
+        const ev = await store.append(sessionId, type, data, { ignorable: true, producerPlugin: "terminal" });
+        broadcast.event(ev);
+        return ev;
       },
-    }),
-    previewRoutes({ projects, sessions, preview }),
+    },
+  }), { onDisable: () => terminals.closeAll() });
+  registerPackageRoute("preview", previewRoutes({ projects, sessions, preview }), {
+    onDisable: () => preview.stopAll(),
+  });
+  registerPackageRoute("browser", chainRoutes(
     browserToolBridge.route,
     browserRoutes({ browser, append: appendLogged, shotsDir: `${dataDir}/browser-shots` }),
+  ), { onDisable: () => browser.closeAll() });
+  registerPackageRoute("dictation", chainRoutes(
     dictationRoutes({ dictation }),
     voiceRoutes({
       voice: voiceSettings,
-      // OC-2049 seam: summarize long replies before speaking, small model only
       summarize: async (text) => {
         const rt = await runtimes.forProject("__default__");
         return oneShot(rt, {
@@ -736,12 +815,127 @@ export async function boot(opts: BootOptions = {}) {
         });
       },
     }),
+  ));
+  registerPackageRoute("multirun", multirunRoutes(multirun));
+  registerPackageRoute("workflow", workflowRoutes(workflow));
+  registerPackageRoute("fusion", fusionRoutes(fusion));
+  registerPackageRoute(
+    "walkthrough",
+    walkthroughRoutes({ store, broadcast, jobs: walkthroughJobs, review, flow: reviewFlow }),
+    {
+      onEnable() {
+        flowTimer = setInterval(() => void reviewFlow.tick(), 4_000);
+        flowTimer.unref?.();
+      },
+      onDisable() {
+        if (flowTimer) clearInterval(flowTimer);
+        flowTimer = null;
+      },
+    },
+  );
+  registerPackageRoute("schedule", scheduleRoutes({ schedule, projects }), {
+    onEnable() {
+      schedule.start();
+      void loopSync();
+      loopTimer = setInterval(() => void loopSync(), 60_000);
+      loopTimer.unref?.();
+    },
+    onDisable() {
+      schedule.stop();
+      if (loopTimer) clearInterval(loopTimer);
+      loopTimer = null;
+    },
+  });
+  registerPackageRoute("usage", usageRoutes(usage), {
+    onEnable: () => usage.start(),
+    onDisable: () => usage.stop(),
+  });
+  packageLifecycle.register("home-assistant", {
+    async onEnable() {
+      const host: TrustedServerPluginHost = {
+        pluginId: "home-assistant",
+        storageDir: dataDir,
+        routes: routeRegistry,
+        root,
+      };
+      const plugin = await BUILTIN_SERVER_PLUGINS["home-assistant"]!(host);
+      if (plugin.manifest.id !== host.pluginId) {
+        throw new Error(`builtin server plugin id mismatch: ${plugin.manifest.id}`);
+      }
+      homeAssistantPlugin = await loadPlugin(root, plugin, {});
+    },
+    async onDisable() {
+      await homeAssistantPlugin?.dispose();
+      homeAssistantPlugin = null;
+    },
+  });
+  registerPackageRoute("knowledge", knowledgeRoutes({
+    knowledge,
+    events: {
+      append: async (sessionId, type, data) => {
+        const ev = await store.append(sessionId, type, data, { producerPlugin: "knowledge" });
+        broadcast.event(ev);
+        return ev;
+      },
+    },
+  }));
+  registerPackageRoute("github", githubRoutes({
+    projects, github, append: appendLogged,
+    describe: async (root, base) => {
+      let baseRef = base;
+      if (!baseRef) {
+        const result = await github.repo(root);
+        baseRef = (result.ok && result.data.defaultBranch) || "main";
+      }
+      const diff = await git.diffRange(root, baseRef, "HEAD");
+      if (!diff.trim()) {
+        throw Object.assign(new Error(`no commits to describe against ${baseRef}`), { code: "invalid-input" });
+      }
+      const project = (await projects.list()).find((candidate) => candidate.path === root);
+      const rt = await runtimes.forProject(project?.id ?? "__default__");
+      const text = await oneShot(rt, {
+        cwd: root,
+        ...(smallModel() ? { model: smallModel()! } : {}),
+        prompt: [
+          "Write a pull request title and description for the diff below.",
+          "Line 1: a <=72 character imperative title. Then a blank line, then a concise",
+          "markdown description (what changed and why; a short bullet list is fine).",
+          "Do not use tools. Do not wrap the answer in code fences. Output nothing else.",
+          "", "<diff>", diff.slice(0, 24_000), "</diff>",
+        ].join("\n"),
+      });
+      const clean = text.replace(/^```[a-z]*\n?|```$/g, "").trim();
+      const newline = clean.indexOf("\n");
+      return newline === -1
+        ? { title: clean.slice(0, 72), body: "" }
+        : { title: clean.slice(0, newline).trim().slice(0, 200), body: clean.slice(newline + 1).trim() };
+    },
+  }));
+  registerPackageRoute("commands", snippetRoutes({ projects, commands }));
+  registerPackageRoute("secure-safe", secureSafeRoutes(secureSafe));
+  registerPackageRoute("mcp", async (request) =>
+    request.path.startsWith("/api/mcp/") ? settingsRoute(request) : false);
+  registerPackageRoute("plugins", async (request) =>
+    request.path.startsWith("/api/plugins") ? settingsRoute(request) : false);
+
+  const staticCoreRoutes: RouteHandler[] = [
+    authRoutes(auth),
+    packageRoutes(packageRegistry),
+    pluginAssetRoutes({ plugins: pluginRegistry, pluginsDir }),
+    async (rc) => {
+      if (/^\/api\/sessions\/[^/]+\/goal/.test(rc.path)) {
+        const id = rc.path.split("/")[3]!;
+        await ensureGoalState(id);
+      }
+      return false;
+    },
+    goalRoutes(goals),
+    orgRoutes({ projects, sessions, store }),
+    workspaceRoutes({ projects, files, sessions }),
     assistRoutes({
       settings: assistSettings,
       projection: (sessionId) => store.projection(sessionId),
       latestSeq: (sessionId) => store.latestSeq(sessionId),
-      // chat→note: distill with the same small-model seam; the route returns a
-      // DRAFT — saving goes through the normal /api/knowledge flow.
       distill: async (sessionId) => {
         const transcript = await assistTranscript(sessionId);
         if (!transcript.trim()) {
@@ -750,87 +944,29 @@ export async function boot(opts: BootOptions = {}) {
         return parseNoteReply(await assistComplete(sessionId, buildNotePrompt(transcript)));
       },
     }),
-    multirunRoutes(multirun),
-    fusionRoutes(fusion),
-    walkthroughRoutes({ store, broadcast, jobs: walkthroughJobs, review, flow: reviewFlow }),
-    scheduleRoutes({ schedule, projects }),
-    usageRoutes(usage),
     sessionRetentionRoutes(sessions),
-    homeAssistantRoutes(homeAssistant),
-    knowledgeRoutes({
-      knowledge,
-      events: {
-        append: async (sessionId, type, data) => {
-          const ev = await store.append(sessionId, type, data, { producerPlugin: "knowledge" });
-          broadcast.event(ev);
-          return ev;
-        },
-      },
-    }),
-    githubRoutes({
-      projects, github, append: appendLogged,
-      // OC-15-005: AI PR title/body — same Small Model seam as commit messages.
-      // Reads the diff via git only; never creates or edits the PR itself.
-      describe: async (root, base) => {
-        let baseRef = base;
-        if (!baseRef) {
-          const r = await github.repo(root);
-          baseRef = (r.ok && r.data.defaultBranch) || "main";
-        }
-        const diff = await git.diffRange(root, baseRef, "HEAD");
-        if (!diff.trim()) {
-          throw Object.assign(new Error(`no commits to describe against ${baseRef}`), { code: "invalid-input" });
-        }
-        const project = (await projects.list()).find((p) => p.path === root);
-        const rt = await runtimes.forProject(project?.id ?? "__default__");
-        const text = await oneShot(rt, {
-          cwd: root,
-          ...(smallModel() ? { model: smallModel()! } : {}),
-          prompt: [
-            "Write a pull request title and description for the diff below.",
-            "Line 1: a <=72 character imperative title. Then a blank line, then a concise",
-            "markdown description (what changed and why; a short bullet list is fine).",
-            "Do not use tools. Do not wrap the answer in code fences. Output nothing else.",
-            "", "<diff>", diff.slice(0, 24_000), "</diff>",
-          ].join("\n"),
-        });
-        const clean = text.replace(/^```[a-z]*\n?|```$/g, "").trim();
-        const nl = clean.indexOf("\n");
-        return nl === -1
-          ? { title: clean.slice(0, 72), body: "" }
-          : { title: clean.slice(0, nl).trim().slice(0, 200), body: clean.slice(nl + 1).trim() };
-      },
-    }),
     controlRoutes(sessions),
     autoAcceptRoutes(sessions),
     pushRoutes(push),
-    snippetRoutes({ projects, commands }),
     profileRoutes({
       store,
-      // Aggregated across live runtimes, same as the /api/models endpoint.
-      listModels: () => aggregateRuntimes({ projects, runtimes }, (rt) => rt.models(), (m) => `${m.providerID}/${m.modelID}`),
-      listAgents: () => aggregateRuntimes({ projects, runtimes }, (rt) => rt.agents(), (a) => a.name),
+      listModels: () => runtimeCatalog.models(),
+      listAgents: () => runtimeCatalog.agents(),
     }),
     browseRoutes(),
-    secureSafeRoutes(secureSafe),
-    settingsRoutes({
-      behavior, mcp, plugins: pluginRegistry,
-      backendConfig: () => configApplier.readConfig(),
-      systemInfo: (local) => ({
-        version: "0.1.0",
-        // Configured bind address only — never derived from the Host header.
-        applicationUrl: `http://127.0.0.1:${port}`,
-        tunnelUrl: process.env.POLYTH_TUNNEL_URL ?? null,
-        dataDirLabel: local ? dataDir : "Polyth data directory",
-        capabilities: allCapabilities(),
-      }),
-    }),
+    async (request) => {
+      if (request.path.startsWith("/api/mcp/") || request.path.startsWith("/api/plugins")) return false;
+      return settingsRoute(request);
+    },
   ];
+  const routes: RouteHandler[] = [...staticCoreRoutes, routeRegistry.handler];
 
-  const allCapabilities = () => ["polyth.sessions", "polyth.sessionPersistence", "polyth.projects", "polyth.agentRuntime", "polyth.goals", "polyth.files", "polyth.commands", "polyth.git", "polyth.worktrees", "polyth.terminal", "polyth.preview", "polyth.multirun", "polyth.fusion", "polyth.walkthrough", "polyth.schedule", "polyth.github", "polyth.control", "polyth.agentProfiles", "polyth.settings", "polyth.mcp", "polyth.plugins", "polyth.knowledge", "polyth.review", "polyth.usage", "polyth.browser", "polyth.voice", "polyth.assist", "polyth.homeAssistant", "polyth.secureSafe"];
+  const allCapabilities = () => ["polyth.sessions", "polyth.sessionPersistence", "polyth.projects", "polyth.agentRuntime", "polyth.goals", "polyth.files", "polyth.commands", "polyth.git", "polyth.worktrees", "polyth.terminal", "polyth.preview", "polyth.multirun", "polyth.workflow", "polyth.fusion", "polyth.walkthrough", "polyth.schedule", "polyth.github", "polyth.control", "polyth.agentProfiles", "polyth.settings", "polyth.mcp", "polyth.plugins", "polyth.knowledge", "polyth.review", "polyth.usage", "polyth.browser", "polyth.voice", "polyth.assist", "polyth.homeAssistant", "polyth.secureSafe"];
+
+  await packageLifecycle.startEnabled(packageRegistry);
 
   const server = createHttpServer({
-    sessions, projects, runtimes, routes, visibility, auth,
+    sessions, projects, runtimes, routes, visibility, auth, catalog: runtimeCatalog,
     capabilities: allCapabilities,
     webDist: resolve(__dirname, "../../../apps/web/dist"),
     version: "0.1.0",
@@ -848,13 +984,13 @@ export async function boot(opts: BootOptions = {}) {
     schedule.stop();
     usage.stop();
     assist?.stop();
-    clearInterval(loopTimer);
-    clearInterval(flowTimer);
+    if (loopTimer) clearInterval(loopTimer);
+    if (flowTimer) clearInterval(flowTimer);
     knowledge.close();
     await browser.closeAll().catch(() => {});
     await pluginRegistry.dispose().catch(() => {});
-    for (const t of terminals.list()) await terminals.close(t.id).catch(() => {});
-    for (const p of await projects.list()) await preview.stop(p.id).catch(() => {});
+    await terminals.closeAll().catch(() => {});
+    await preview.stopAll().catch(() => {});
     for (const p of runtimesByProject.values()) await (await p.catch(() => null))?.dispose().catch(() => {});
     await root.dispose();
     await store.close();

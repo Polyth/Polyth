@@ -93,6 +93,8 @@ export interface GitService {
   fetch(root: string, remote?: string): Promise<void>;
   pull(root: string, remote?: string): Promise<void>;
   push(root: string, remote?: string): Promise<void>;
+  identity(root: string): Promise<{ name: string; email: string }>;
+  setIdentity(root: string, identity: { name: string; email: string }): Promise<void>;
   worktrees: WorktreeService;
 }
 
@@ -155,6 +157,8 @@ export function createGitService(opts: GitServiceOptions = {}): GitService {
         res({ stdout: String(stdout), stderr: String(stderr), code: typeof code === "number" ? code : 1 });
       });
     });
+  const configValue = async (root: string, key: string): Promise<string> =>
+    (await run(root, ["config", "--local", "--get", key], true)).stdout.trim();
 
   const parseStatus = (raw: string): Omit<GitStatus, "branch" | "ahead" | "behind" | "upstream" | "clean"> => {
     const staged: GitFileEntry[] = [];
@@ -407,6 +411,24 @@ export function createGitService(opts: GitServiceOptions = {}): GitService {
     async push(root, remote = "origin") {
       if (!/^[\w.-]{1,120}$/.test(remote)) throw Object.assign(new Error("invalid remote"), { code: "invalid-input" });
       await run(root, ["push", remote]);
+    },
+
+    async identity(root) {
+      return {
+        name: await configValue(root, "user.name"),
+        email: await configValue(root, "user.email"),
+      };
+    },
+
+    async setIdentity(root, identity) {
+      const name = identity.name.trim();
+      const email = identity.email.trim();
+      if (!name || name.length > 160) throw Object.assign(new Error("git name required (≤160 characters)"), { code: "invalid-input" });
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 254) {
+        throw Object.assign(new Error("valid git email required"), { code: "invalid-input" });
+      }
+      await run(root, ["config", "--local", "user.name", name]);
+      await run(root, ["config", "--local", "user.email", email]);
     },
 
     worktrees: {

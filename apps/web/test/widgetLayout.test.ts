@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   BUILTIN_WIDGET_IDS,
+  MAX_GRID_ROWS,
   WIDGET_LAYOUT_KEY,
   WIDGET_ZONES,
   applyWidgetLayoutMutations,
@@ -13,6 +14,7 @@ import {
   moveWidget,
   moveWidgetToSlot,
   parseWidgetLayout,
+  recommendedWidgetSize,
   serializeWidgetLayout,
   setWidgetConfig,
   setWidgetSize,
@@ -25,7 +27,7 @@ import {
 } from "../src/widgets/widgetLayout.ts";
 import { activateProject } from "../src/store.ts";
 
-test("free-form positions persist and collisions resolve with a grid gap", () => {
+test("dragged widgets displace collisions and resting widgets snap back", () => {
   const definitions = [
     { id: "a", defaultSize: { w: 6, h: 3 } },
     { id: "b", defaultSize: { w: 6, h: 3 } },
@@ -33,12 +35,21 @@ test("free-form positions persist and collisions resolve with a grid gap", () =>
   let layout = createDefaultWidgetLayout(definitions);
   layout = setWidgetVisible(layout, "a", true);
   layout = setWidgetVisible(layout, "b", true);
-  const moved = setWidgetPosition(layout, "b", { x: 0, y: 0 });
-  assert.deepEqual(moved.widgets.a?.position, { x: 0, y: 0 });
-  assert.deepEqual(moved.widgets.b?.position, { x: 0, y: 3 });
+  const moved = setWidgetPosition(layout, "b", { x: 0, y: 0 }, layout);
+  assert.deepEqual(moved.widgets.a?.position, { x: 0, y: 3 });
+  assert.deepEqual(moved.widgets.b?.position, { x: 0, y: 0 });
+
+  const snappedBack = setWidgetPosition(
+    moved,
+    "b",
+    layout.widgets.b!.position,
+    layout,
+  );
+  assert.deepEqual(snappedBack.widgets.a?.position, { x: 0, y: 0 });
+  assert.deepEqual(snappedBack.widgets.b?.position, { x: 0, y: 3 });
 
   const parsed = parseWidgetLayout(serializeWidgetLayout(moved), definitions);
-  assert.deepEqual(parsed.widgets.b?.position, { x: 0, y: 3 });
+  assert.deepEqual(parsed.widgets.a?.position, { x: 0, y: 3 });
 });
 
 test("default widget layout contains every built-in exactly once", () => {
@@ -49,15 +60,15 @@ test("default widget layout contains every built-in exactly once", () => {
   ];
   assert.deepEqual(new Set(placed), new Set(BUILTIN_WIDGET_IDS));
   assert.equal(placed.length, BUILTIN_WIDGET_IDS.length);
-  assert.equal(widgetZoneOf(layout, "core.composer"), "main");
+  assert.equal((BUILTIN_WIDGET_IDS as readonly string[]).includes("core.composer"), false);
+  assert.equal(widgetZoneOf(layout, "core.chat"), "main");
   assert.equal(widgetZoneOf(layout, "terminal.shell"), "bottom");
   assert.equal(widgetSlotOf(layout, "usage.session"), "session.composer.before");
   assert.equal(widgetSlotOf(layout, "github.pr-summary"), "session.composer.before");
-  assert.equal(layout.widgets["core.composer"]?.visible, true);
-  assert.equal(layout.widgets["core.chat"]?.visible, false);
+  assert.equal(layout.widgets["core.chat"]?.visible, true);
   assert.equal(layout.widgets["preview.app"]?.visible, false);
   for (const id of [
-    "core.composer", "goals.current", "files.project-map", "git.recent",
+    "core.chat", "goals.current", "files.project-map", "git.recent",
     "session.work-status", "knowledge.notes", "session.activity", "core.quick-actions",
   ]) {
     assert.equal(layout.widgets[id]?.visible, true, `${id} should be visible in the default canvas`);
@@ -73,6 +84,24 @@ test("catalog definitions provide plugin default zones and sizes", () => {
   assert.deepEqual(layout.zones.right, ["sample.widget"]);
   assert.deepEqual(layout.widgets["sample.widget"]?.size, { w: 5, h: 3 });
   assert.equal(layout.widgets["sample.widget"]?.visible, false);
+});
+
+test("recommended spawn size fits title chrome without becoming a hard minimum", () => {
+  const definition = {
+    id: "sample.verbose",
+    title: "A deliberately verbose widget heading",
+    defaultSize: { w: 2, h: 3 },
+    minSize: { w: 1, h: 1 },
+  };
+  const recommended = recommendedWidgetSize(definition);
+  assert.deepEqual(recommended, { w: 9, h: 3 });
+
+  const layout = createDefaultWidgetLayout([definition]);
+  assert.deepEqual(layout.widgets[definition.id]?.size, recommended);
+  assert.deepEqual(
+    setWidgetSize(layout, definition.id, { w: 1, h: 1 }, definition).widgets[definition.id]?.size,
+    { w: 1, h: 1 },
+  );
 });
 
 test("layout serializes and parses visibility, size, audience, and zone order", () => {
@@ -149,6 +178,15 @@ test("parser drops unknown and duplicate widget ids and restores missing known i
   assert.equal(parsed.audience, "simple");
 });
 
+test("widget heights support tall canvases up to the grid row limit", () => {
+  let layout = createDefaultWidgetLayout(["core.chat"]);
+  layout = setWidgetSize(layout, "core.chat", { w: 12, h: 40 });
+  assert.deepEqual(layout.widgets["core.chat"]?.size, { w: 12, h: 40 });
+
+  layout = setWidgetSize(layout, "core.chat", { w: 12, h: MAX_GRID_ROWS + 1 });
+  assert.deepEqual(layout.widgets["core.chat"]?.size, { w: 12, h: MAX_GRID_ROWS });
+});
+
 test("persisted retired New session widget is removed from header placements", () => {
   const parsed = parseWidgetLayout(JSON.stringify({
     version: 1,
@@ -181,6 +219,33 @@ test("persisted retired New session widget is removed from header placements", (
 
   assert.equal("shell.new-session" in parsed.widgets, false);
   assert.deepEqual(parsed.slotPlacements["app.header.actions"], ["sample.search"]);
+});
+
+test("persisted composer widget migrates to the conversation widget", () => {
+  const parsed = parseWidgetLayout(JSON.stringify({
+    version: 1,
+    audience: "standard",
+    zones: {
+      header: [],
+      left: [],
+      main: ["core.composer"],
+      right: [],
+      bottom: [],
+      floating: [],
+    },
+    widgets: {
+      "core.composer": {
+        visible: true,
+        size: { w: 10, h: 7 },
+        position: { x: 1, y: 0 },
+      },
+    },
+  }), ["core.chat"]);
+
+  assert.equal("core.composer" in parsed.widgets, false);
+  assert.deepEqual(parsed.zones.main, ["core.chat"]);
+  assert.equal(parsed.widgets["core.chat"]?.visible, true);
+  assert.deepEqual(parsed.widgets["core.chat"]?.position, { x: 1, y: 0 });
 });
 
 test("invalid persisted layouts fall back to defaults", () => {
@@ -229,9 +294,12 @@ test("duplicatable widgets create independent instances through the same layout 
     duplicatable: true,
   };
   const initial = createDefaultWidgetLayout([definition]);
-  const duplicated = duplicateWidget(initial, definition.id, definition);
+  const compact = setWidgetSize(initial, definition.id, { w: 1, h: 1 }, definition);
+  const duplicated = duplicateWidget(compact, definition.id, definition);
   assert.ok(duplicated.widgets["knowledge.note#2"]);
   assert.equal(duplicated.widgets["knowledge.note#2"]?.definitionId, "knowledge.note");
+  assert.deepEqual(duplicated.widgets[definition.id]?.size, { w: 1, h: 1 });
+  assert.deepEqual(duplicated.widgets["knowledge.note#2"]?.size, { w: 5, h: 4 });
   assert.deepEqual(duplicated.zones.left, ["knowledge.note", "knowledge.note#2"]);
 });
 
@@ -282,7 +350,7 @@ test("self-describing plugin placements survive parsing as missing-plugin placeh
         description: "Plugin status",
       },
     },
-  }), ["core.composer"]);
+  }), ["core.chat"]);
   assert.equal(parsed.widgets["sample.status"]?.pluginId, "sample");
   assert.equal(widgetZoneOf(parsed, "sample.status"), "right");
 });

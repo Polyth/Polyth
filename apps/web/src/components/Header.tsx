@@ -17,7 +17,6 @@ import {
   TECHNICAL_GROUP_LABEL, useResolvedCapabilities,
   type ResolvedCapability,
 } from "../capabilities.ts";
-import { getPresetState, setMoreToolsOpen } from "../workspacePresets.ts";
 import { PANEL_OF_CAPABILITY, PANE_OF_CAPABILITY, VIEW_OF_CAPABILITY } from "../builtinCapabilities.ts";
 import SlotHost from "./slots/SlotHost.ts";
 import { Icon } from "../icons.tsx";
@@ -41,6 +40,12 @@ const ICONS: Record<AppView, React.ReactNode> = {
   multirun: (
     <svg width="16" height="16" viewBox="0 0 16 16" {...STROKE}>
       <rect x="2" y="3" width="3.2" height="10" rx="1" /><rect x="6.4" y="3" width="3.2" height="10" rx="1" /><rect x="10.8" y="3" width="3.2" height="10" rx="1" />
+    </svg>
+  ),
+  workflow: (
+    <svg width="16" height="16" viewBox="0 0 16 16" {...STROKE}>
+      <circle cx="3.5" cy="4" r="1.5" /><circle cx="3.5" cy="12" r="1.5" /><circle cx="12.5" cy="8" r="1.5" />
+      <path d="M5 4h2a2 2 0 0 1 2 2v.5M5 12h2a2 2 0 0 0 2-2v-.5M9 8h2" />
     </svg>
   ),
   fusion: (
@@ -98,7 +103,7 @@ function CapabilityNav() {
   const paneFullscreen = useStore((s) => s.paneFullscreen);
   const navRef = useRef<HTMLElement>(null);
   const [fit, setFit] = useState(8);
-  const [moreOpen, setMoreOpen] = useState(() => getPresetState().moreToolsOpen);
+  const [moreOpen, setMoreOpen] = useState(false);
   const moreRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
 
@@ -139,7 +144,6 @@ function CapabilityNav() {
 
   const toggleMore = (open: boolean) => {
     setMoreOpen(open);
-    setMoreToolsOpen(open); // stored separately from the preset
   };
 
   const isActive = (c: ResolvedCapability): boolean => {
@@ -272,7 +276,7 @@ function AutoAcceptChip({ sessionId, effective }: { sessionId: string; effective
 
 /** UX-A390: one bounded current-view trigger replacing the desktop switcher
  *  in compact mode. Items derive from the same resolved capability list as
- *  desktop navigation; presets reorder but never remove them. */
+ *  desktop navigation. */
 function CompactViewPicker({ view }: { view: AppView }) {
   const resolved = useResolvedCapabilities();
   const views = resolved.filter((c) => VIEW_OF_CAPABILITY[c.descriptor.id] !== undefined);

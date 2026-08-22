@@ -15,7 +15,7 @@ const decide = (over: Partial<FirstRunInput>): FirstRunSurface =>
     projectCount: 1,
     hasValidActiveProject: true,
     pickerOfferedThisDocument: false,
-    presetSetup: "completed",
+    projectSetup: "completed",
     ...over,
   });
 
@@ -34,13 +34,13 @@ test("first-run decision table distinguishes loading, failure, and ready-empty",
   }), "workspace");
 });
 
-test("a usable project deterministically chooses optional setup or workspace", () => {
+test("a usable project deterministically chooses project setup or workspace", () => {
   assert.equal(decide({
     hasValidActiveProject: false,
-    presetSetup: "unseen",
+    projectSetup: "unseen",
   }), "workspace");
-  assert.equal(decide({ presetSetup: "unseen" }), "preset-setup");
-  assert.equal(decide({ presetSetup: "completed" }), "workspace");
+  assert.equal(decide({ projectSetup: "unseen" }), "project-setup");
+  assert.equal(decide({ projectSetup: "completed" }), "workspace");
 });
 
 test("the automatic picker episode is once per document and resettable only for tests", () => {

@@ -325,11 +325,6 @@ function AssistantView({
     : undefined;
   return (
     <div className="msg assistant" {...(articleProps ?? {})}>
-      <div className="msg-author">
-        <span className="msg-avatar agent" aria-hidden="true">p</span>
-        <strong>Polyth</strong>
-        <time dateTime={timeIso(assistantTime(m))}>{timeShort(assistantTime(m))}</time>
-      </div>
       {m.reasoning !== "" && <Thinking m={m} announce={announce} />}
       {hasAnswer && (
         <div className="bubble" dir="auto">{renderMarkdown(m.text || "", m.id)}{!m.finalized && <span className="caret" />}</div>
@@ -470,11 +465,6 @@ function MessageView({ m, announce, plan, onRevert, onFork, revert, fork }: {
   if (m.kind === "user") {
     return (
       <div className="msg user" data-msg-id={m.id} role="article" aria-label={userArticleName(m.time)}>
-        <div className="msg-author">
-          <span className="msg-avatar" aria-hidden="true">Y</span>
-          <strong>You</strong>
-          <time dateTime={timeIso(m.time)}>{timeShort(m.time)}</time>
-        </div>
         <div className="bubble" dir="auto">
           {renderMarkdown(m.text, m.id)}
           {m.attachments && m.attachments.length > 0 && (

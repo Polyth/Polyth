@@ -18,6 +18,7 @@ export interface PreviewStartOptions {
 export interface PreviewService {
   start(projectId: string, opts: PreviewStartOptions): Promise<{ url: string; port: number }>;
   stop(projectId: string): Promise<void>;
+  stopAll(): Promise<void>;
   get(projectId: string): PreviewState;
   onStatusChange(cb: (projectId: string, state: PreviewState) => void): Disposable;
 }
@@ -406,6 +407,10 @@ export function createPreviewService(): PreviewService {
       }
       setStatus(projectId, "off", { proc: undefined });
       states.delete(projectId);
+    },
+
+    async stopAll() {
+      await Promise.all([...states.keys()].map((projectId) => service.stop(projectId)));
     },
 
     get(projectId) {

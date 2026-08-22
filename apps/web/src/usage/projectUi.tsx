@@ -6,13 +6,15 @@ const PROVIDER_SHARE_COLORS = [
   "var(--accent)",
   "var(--green)",
   "var(--amber)",
-  "#c4a7ee",
-  "#64b5f6",
-  "#f49b5b",
+  "var(--purple)",
+  "var(--blue)",
+  "var(--accent-hi)",
 ] as const;
 
 export function sessionTokens(session: SessionProjection): number {
-  return (session.tokenTotals?.input ?? 0) + (session.tokenTotals?.output ?? 0);
+  const safe = (value: number | undefined) =>
+    typeof value === "number" && Number.isFinite(value) ? Math.max(0, value) : 0;
+  return safe(session.tokenTotals?.input) + safe(session.tokenTotals?.output);
 }
 
 export interface ProjectUsageStats {
@@ -25,7 +27,10 @@ export function projectUsageStats(sessions: readonly SessionProjection[]): Proje
   return {
     sessions: sessions.length,
     tokens: sessions.reduce((total, session) => total + sessionTokens(session), 0),
-    cost: sessions.reduce((total, session) => total + (session.costTotal ?? 0), 0),
+    cost: sessions.reduce((total, session) =>
+      total + (typeof session.costTotal === "number" && Number.isFinite(session.costTotal)
+        ? Math.max(0, session.costTotal)
+        : 0), 0),
   };
 }
 
@@ -46,12 +51,14 @@ export function topProjectSessions(
 export function ProviderUsageDonut({ sessions }: { sessions: readonly SessionProjection[] }) {
   const distribution = providerUsageDistribution(sessions);
   let offset = 0;
-  const arcs = distribution.providers.map((provider, index) => {
+  const arcs = distribution.providers.filter((provider) => provider.share > 0).map((provider, index) => {
     const start = offset;
-    offset += provider.share * 100;
+    const length = Math.min(100, Math.max(0, provider.share * 100));
+    offset = Math.min(100, offset + length);
     return {
       ...provider,
       color: PROVIDER_SHARE_COLORS[index % PROVIDER_SHARE_COLORS.length]!,
+      length,
       offset: start,
     };
   });
@@ -81,7 +88,7 @@ export function ProviderUsageDonut({ sessions }: { sessions: readonly SessionPro
               r="44"
               pathLength="100"
               stroke={provider.color}
-              strokeDasharray={`${provider.share * 100} ${100 - provider.share * 100}`}
+              strokeDasharray={`${provider.length} ${100 - provider.length}`}
               strokeDashoffset={-provider.offset}
             />
           ))}

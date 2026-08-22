@@ -71,7 +71,6 @@ const { default: Header } = await import("../src/components/Header.tsx");
 const { default: CommandPalette } = await import("../src/components/CommandPalette.tsx");
 const { default: SessionSearch } = await import("../src/components/SessionSearch.tsx");
 const { default: ModelsPage } = await import("../src/components/settings/ModelsPage.tsx");
-const { GeneralPage } = await import("../src/components/settings/pages.tsx");
 installBuiltinMiniWidgets();
 
 async function mounted(component: ReactNode) {
@@ -150,17 +149,3 @@ test("Providers & Models disambiguates colliding names in the expanded provider 
   }
 });
 
-test("workspace preset exposes a checkmark and explicit Current badge", async () => {
-  const page = await mounted(createElement(GeneralPage));
-  try {
-    const selected = page.container.querySelector<HTMLButtonElement>(
-      '.workspace-preset-seg [role="radio"][aria-checked="true"]',
-    );
-    assert.ok(selected);
-    assert.match(selected.textContent ?? "", /✓/);
-    assert.match(selected.textContent ?? "", /Current/);
-    assert.ok(selected.classList.contains("on"));
-  } finally {
-    await page.unmount();
-  }
-});

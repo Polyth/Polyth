@@ -9,13 +9,16 @@
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { execFile } from "node:child_process";
 import { createHash } from "node:crypto";
-import { isAbsolute, join, normalize, resolve, sep } from "node:path";
+import { isAbsolute, join, normalize, resolve, sep, win32 } from "node:path";
 import { promisify } from "node:util";
 import { createContext, type KernelContext } from "@polyth/kernel";
 import {
+  type Disposable,
   isUiSlot,
   type InstalledPluginDto,
   type JsonObject,
+  type PluginContext,
+  type RouteHandler,
   type TrustClass,
   type UiSlot,
   type UiSlotItem,
@@ -24,6 +27,15 @@ import {
   type WidgetScope,
   type WidgetSize,
 } from "@polyth/contracts";
+import { loadServerEntry } from "./serverEntry.ts";
+import { buildUiBundle } from "./uiBundle.ts";
+
+export {
+  loadServerEntry,
+  type ServerPluginFactory,
+  type TrustedServerPluginHost,
+} from "./serverEntry.ts";
+export { buildUiBundle };
 
 const execFileAsync = promisify(execFile);
 
@@ -50,6 +62,11 @@ export interface ManagedPluginManifest {
   contributions?: Array<{ slot: UiSlot; id: string; module: string }>;
   /** A plugin owns zero or more full/mini widgets. */
   widgets?: WidgetContributionDescriptor[];
+  entries?: {
+    server?: string;
+    /** Browser ESM entry bundled at install time; exports the documented modules map. */
+    ui?: string;
+  };
 }
 
 const err = (code: string, message: string) => Object.assign(new Error(message), { code });
@@ -73,6 +90,39 @@ const optionalStrings = (value: unknown, field: string): string[] | undefined =>
     throw err("invalid-input", `${field} must be an array of strings`);
   }
   return [...new Set(value)];
+};
+
+const parseEntries = (value: unknown): ManagedPluginManifest["entries"] => {
+  if (value === undefined) return undefined;
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw err("invalid-input", "manifest entries must be an object");
+  }
+  const raw = value as Record<string, unknown>;
+  for (const key of Object.keys(raw)) {
+    if (key !== "server" && key !== "ui") {
+      throw err("invalid-input", `unknown manifest entry key "${key}"`);
+    }
+  }
+  const entries: NonNullable<ManagedPluginManifest["entries"]> = {};
+  for (const key of ["server", "ui"] as const) {
+    if (!(key in raw)) continue;
+    const entry = raw[key];
+    if (
+      typeof entry !== "string"
+      || !entry
+      || entry.includes("\\")
+      || isAbsolute(entry)
+      || win32.isAbsolute(entry)
+      || entry.split("/").includes("..")
+    ) {
+      throw err(
+        "invalid-input",
+        `manifest entries.${key} must be a relative path without ".." or backslashes`,
+      );
+    }
+    entries[key] = entry;
+  }
+  return entries;
 };
 
 function parseWidget(value: unknown): WidgetContributionDescriptor {
@@ -123,6 +173,9 @@ function parseWidget(value: unknown): WidgetContributionDescriptor {
     ...(typeof widget.category === "string" ? { category: widget.category } : {}),
     ...(optionalStrings(widget.capabilities, "widget capabilities")
       ? { capabilities: optionalStrings(widget.capabilities, "widget capabilities")! }
+      : {}),
+    ...(optionalSize(widget.recommendedSize, "widget recommendedSize")
+      ? { recommendedSize: optionalSize(widget.recommendedSize, "widget recommendedSize")! }
       : {}),
     ...(optionalSize(widget.defaultSize, "widget defaultSize")
       ? { defaultSize: optionalSize(widget.defaultSize, "widget defaultSize")! }
@@ -183,6 +236,7 @@ export function parseManifest(raw: string): ManagedPluginManifest {
     if (widgetIds.has(widget.id)) throw err("invalid-input", `duplicate widget id "${widget.id}"`);
     widgetIds.add(widget.id);
   }
+  const entries = parseEntries(m.entries);
   return {
     id: m.id,
     name: m.name.trim(),
@@ -191,6 +245,7 @@ export function parseManifest(raw: string): ManagedPluginManifest {
     capabilities,
     contributions,
     widgets,
+    ...(entries ? { entries } : {}),
   };
 }
 
@@ -219,6 +274,7 @@ interface StoredPlugin {
   status: InstalledPluginDto["status"];
   lastError?: string;
   integrity: string;
+  ui?: { integrity: string };
 }
 
 export interface PluginLogEntry { at: number; line: string }
@@ -230,6 +286,12 @@ export interface PluginRegistryOptions {
   trustedDir?: string;
   /** UI slot sink; contributions land here while a plugin is enabled. */
   slots?: { add(item: UiSlotItem): { dispose(): void } };
+  /** Trusted server route sink used only by validated server entries. */
+  routes?: { add(handler: RouteHandler): Disposable };
+  /** Composition root used to load trusted server plugins. */
+  root?: PluginContext;
+  /** Lifecycle changes published after their state has been persisted. */
+  onChange?: (dto: InstalledPluginDto) => void;
   /** npm executable override (tests point this at a stub). */
   npmBin?: string;
 }
@@ -251,14 +313,42 @@ export interface PluginRegistry {
 const MAX_LOG_LINES = 500;
 
 const integrityOf = (dir: string): string => {
-  // Digest over the manifest and package.json: enough to detect tampering of
-  // the descriptor surface (the only thing the server ever interprets).
   const hash = createHash("sha256");
-  for (const f of ["polyth-plugin.json", "package.json"]) {
-    const p = join(dir, f);
-    if (existsSync(p)) hash.update(readFileSync(p));
-  }
+  const visit = (current: string, prefix = ""): void => {
+    const entries = readdirSync(current, { withFileTypes: true })
+      .sort((a, b) => a.name.localeCompare(b.name));
+    for (const entry of entries) {
+      if (entry.isDirectory() && (entry.name === "node_modules" || entry.name === ".polyth")) continue;
+      const relativePath = prefix ? `${prefix}/${entry.name}` : entry.name;
+      const path = join(current, entry.name);
+      if (entry.isDirectory()) {
+        visit(path, relativePath);
+      } else if (entry.isFile()) {
+        hash.update(relativePath);
+        hash.update("\0");
+        hash.update(readFileSync(path));
+        hash.update("\0");
+      }
+    }
+  };
+  visit(dir);
   return hash.digest("hex").slice(0, 16);
+};
+
+const assertServerEntryAllowed = (manifest: ManagedPluginManifest, source: string): void => {
+  if (!manifest.entries?.server) return;
+  if (manifest.trust === "ui-only" || manifest.trust === "pure") {
+    throw err(
+      "invalid-input",
+      `trust class "${manifest.trust}" cannot declare entries.server`,
+    );
+  }
+  if (!source.startsWith("file:")) {
+    throw err(
+      "invalid-input",
+      "entries.server is allowed only for trusted file: installs; npm plugins cannot execute server code",
+    );
+  }
 };
 
 export function createPluginRegistry(opts: PluginRegistryOptions): PluginRegistry {
@@ -277,6 +367,23 @@ export function createPluginRegistry(opts: PluginRegistryOptions): PluginRegistr
   const plugins = new Map<string, StoredPlugin>(loadState().map((p) => [p.manifest.id, p]));
   const scopes = new Map<string, KernelContext>();
   const logsBuf = new Map<string, PluginLogEntry[]>();
+  const locks = new Map<string, Promise<void>>();
+
+  const withLock = async <T>(id: string, fn: () => Promise<T>): Promise<T> => {
+    const previous = locks.get(id) ?? Promise.resolve();
+    let release!: () => void;
+    const gate = new Promise<void>((resolveGate) => { release = resolveGate; });
+    const current = previous.then(() => gate);
+    locks.set(id, current);
+    await previous;
+    try {
+      return await fn();
+    } finally {
+      release();
+      // A later caller may already have extended this plugin's chain.
+      if (locks.get(id) === current) locks.delete(id);
+    }
+  };
 
   const persist = () => {
     const tmp = `${stateFile}.tmp-${process.pid}`;
@@ -316,6 +423,12 @@ export function createPluginRegistry(opts: PluginRegistryOptions): PluginRegistr
       ...(p.manifest.widgets ?? []).map((widget) => widgetSlotItem(p.manifest.id, widget)),
     ],
     widgets: p.manifest.widgets ?? [],
+    ...(p.ui ? {
+      ui: {
+        url: `/api/plugins/${encodeURIComponent(p.manifest.id)}/ui/${p.ui.integrity}.mjs`,
+        integrity: p.ui.integrity,
+      },
+    } : {}),
     ...(p.lastError ? { lastError: p.lastError } : {}),
   });
 
@@ -333,7 +446,12 @@ export function createPluginRegistry(opts: PluginRegistryOptions): PluginRegistr
       for (const c of p.manifest.contributions ?? []) {
         // `module` is a registry KEY the web shell resolves through its
         // allowlist — never executable content from the manifest.
-        const item: UiSlotItem = { slot: c.slot, id: c.id, module: c.module };
+        const item: UiSlotItem = {
+          slot: c.slot,
+          id: c.id,
+          module: c.module,
+          props: { pluginId: p.manifest.id },
+        };
         const d = opts.slots ? opts.slots.add(item) : scope.contribute(item);
         scope.effect(() => d.dispose());
       }
@@ -341,6 +459,26 @@ export function createPluginRegistry(opts: PluginRegistryOptions): PluginRegistr
         const item = widgetSlotItem(p.manifest.id, widget);
         const d = opts.slots ? opts.slots.add(item) : scope.contribute(item);
         scope.effect(() => d.dispose());
+      }
+      if (p.manifest.entries?.server) {
+        assertServerEntryAllowed(p.manifest, p.source);
+        if (!opts.root || !opts.routes) {
+          throw new Error("server entry activation requires plugin root and route registry");
+        }
+        const storageDir = join(disk, ".polyth");
+        mkdirSync(storageDir, { recursive: true });
+        const serverPlugin = await loadServerEntry({
+          installDir: disk,
+          entryPath: p.manifest.entries.server,
+          integrity: p.integrity,
+          host: {
+            pluginId: p.manifest.id,
+            storageDir,
+            routes: opts.routes,
+            root: opts.root,
+          },
+        });
+        scope.effect(() => serverPlugin.dispose());
       }
       scopes.set(p.manifest.id, scope);
       p.status = "ready";
@@ -356,8 +494,11 @@ export function createPluginRegistry(opts: PluginRegistryOptions): PluginRegistr
   const deactivate = async (id: string): Promise<void> => {
     const scope = scopes.get(id);
     if (scope) {
-      await scope.dispose();
-      scopes.delete(id);
+      try {
+        await scope.dispose();
+      } finally {
+        scopes.delete(id);
+      }
     }
   };
 
@@ -423,7 +564,15 @@ export function createPluginRegistry(opts: PluginRegistryOptions): PluginRegistr
         const manifestPath = join(pkgDir, "polyth-plugin.json");
         if (!existsSync(manifestPath)) throw err("invalid-input", "plugin has no polyth-plugin.json manifest");
         const manifest = parseManifest(readFileSync(manifestPath, "utf8"));
+        assertServerEntryAllowed(manifest, source);
         if (plugins.has(manifest.id)) throw err("conflict", `plugin already installed: ${manifest.id}`);
+        const ui = manifest.entries?.ui
+          ? await buildUiBundle({
+              installDir: pkgDir,
+              entryPath: manifest.entries.ui,
+              outDir: join(pkgDir, ".polyth", "ui"),
+            })
+          : undefined;
 
         // Stage → atomic rename into place, then register.
         const dest = installDirOf(manifest.id);
@@ -441,76 +590,110 @@ export function createPluginRegistry(opts: PluginRegistryOptions): PluginRegistr
           enabled: false,
           status: "installed",
           integrity: integrityOf(dest),
+          ...(ui ? { ui: { integrity: ui.integrity } } : {}),
         };
         plugins.set(manifest.id, stored);
         persist();
-        return toDto(stored);
+        const dto = toDto(stored);
+        opts.onChange?.(dto);
+        return dto;
       } finally {
         rmSync(stagingRoot, { recursive: true, force: true });
       }
     },
 
-    async enable(id: string): Promise<InstalledPluginDto> {
-      const p = get(id);
-      if (p.enabled && p.status === "ready") return toDto(p);
-      try {
-        await activate(p);
-        p.enabled = true;
-      } finally {
-        persist();
-      }
-      return toDto(p);
-    },
-
-    async disable(id: string): Promise<InstalledPluginDto> {
-      const p = get(id);
-      await deactivate(id);
-      p.enabled = false;
-      p.status = "disabled";
-      delete p.lastError;
-      persist();
-      return toDto(p);
-    },
-
-    async reload(id: string): Promise<InstalledPluginDto> {
-      const p = get(id);
-      const wasEnabled = p.enabled;
-      await deactivate(id);
-      // Re-read the manifest so an on-disk fix is picked up; keep the previous
-      // manifest when the reread fails so a healthy install can't be bricked.
-      try {
-        const manifest = parseManifest(readFileSync(join(installDirOf(id), "polyth-plugin.json"), "utf8"));
-        if (manifest.id !== id) throw err("invalid-input", "manifest id changed on disk");
-        p.manifest = manifest;
-        p.integrity = integrityOf(installDirOf(id));
-      } catch (e) {
-        p.status = "error";
-        p.lastError = (e as Error).message;
-        persist();
-        throw e;
-      }
-      if (wasEnabled) {
+    enable(id: string): Promise<InstalledPluginDto> {
+      return withLock(id, async () => {
+        const p = get(id);
+        if (p.enabled && p.status === "ready") return toDto(p);
         try {
           await activate(p);
+          p.enabled = true;
         } finally {
           persist();
         }
-      } else {
-        p.status = "installed";
-        persist();
-      }
-      return toDto(p);
+        const dto = toDto(p);
+        opts.onChange?.(dto);
+        return dto;
+      });
     },
 
-    async remove(id: string): Promise<boolean> {
-      const p = plugins.get(id);
-      if (!p) return false;
-      await deactivate(id);
-      plugins.delete(id);
-      logsBuf.delete(id);
-      rmSync(installDirOf(id), { recursive: true, force: true });
-      persist();
-      return true;
+    disable(id: string): Promise<InstalledPluginDto> {
+      return withLock(id, async () => {
+        const p = get(id);
+        try {
+          await deactivate(id);
+        } finally {
+          p.enabled = false;
+          p.status = "disabled";
+          delete p.lastError;
+          persist();
+          opts.onChange?.(toDto(p));
+        }
+        return toDto(p);
+      });
+    },
+
+    reload(id: string): Promise<InstalledPluginDto> {
+      return withLock(id, async () => {
+        const p = get(id);
+        const wasEnabled = p.enabled;
+        await deactivate(id);
+        // Re-read the manifest so an on-disk fix is picked up; keep the previous
+        // manifest when the reread fails so a healthy install can't be bricked.
+        try {
+          const installDir = installDirOf(id);
+          const manifest = parseManifest(readFileSync(join(installDir, "polyth-plugin.json"), "utf8"));
+          if (manifest.id !== id) throw err("invalid-input", "manifest id changed on disk");
+          const ui = manifest.entries?.ui
+            ? await buildUiBundle({
+                installDir,
+                entryPath: manifest.entries.ui,
+                outDir: join(installDir, ".polyth", "ui"),
+              })
+            : undefined;
+          if (!ui) rmSync(join(installDir, ".polyth", "ui"), { recursive: true, force: true });
+          p.manifest = manifest;
+          p.integrity = integrityOf(installDir);
+          if (ui) p.ui = { integrity: ui.integrity };
+          else delete p.ui;
+        } catch (e) {
+          p.status = "error";
+          p.lastError = (e as Error).message;
+          persist();
+          throw e;
+        }
+        if (wasEnabled) {
+          try {
+            await activate(p);
+          } finally {
+            persist();
+          }
+        } else {
+          p.status = "installed";
+          persist();
+        }
+        const dto = toDto(p);
+        opts.onChange?.(dto);
+        return dto;
+      });
+    },
+
+    remove(id: string): Promise<boolean> {
+      return withLock(id, async () => {
+        const p = plugins.get(id);
+        if (!p) return false;
+        await deactivate(id);
+        p.enabled = false;
+        p.status = "disabled";
+        delete p.lastError;
+        plugins.delete(id);
+        logsBuf.delete(id);
+        rmSync(installDirOf(id), { recursive: true, force: true });
+        persist();
+        opts.onChange?.(toDto(p));
+        return true;
+      });
     },
 
     logs(id: string, o: { after?: number; limit?: number } = {}): PluginLogEntry[] {
@@ -542,7 +725,13 @@ export function createPluginRegistry(opts: PluginRegistryOptions): PluginRegistr
   // Boot: re-activate plugins that were enabled when the process stopped.
   for (const p of plugins.values()) {
     if (p.enabled) {
-      void activate(p).catch(() => persist());
+      void withLock(p.manifest.id, async () => {
+        try {
+          await activate(p);
+        } catch {
+          persist();
+        }
+      });
     } else if (p.status !== "installed") {
       p.status = p.enabled ? p.status : "disabled";
     }

@@ -419,11 +419,13 @@ function SessionRow({
 export default function SessionList({
   projectId,
   selectMode = false,
-  onSelectModeChange = () => {},
+  selectedSessionIds = new Set<string>(),
+  onToggleSelected = () => {},
 }: {
   projectId: string;
   selectMode?: boolean;
-  onSelectModeChange?: (selecting: boolean) => void;
+  selectedSessionIds?: ReadonlySet<string>;
+  onToggleSelected?: (id: string) => void;
 }) {
   const sessions = useStore((st) => st.sessions);
   const activeSessionId = useStore((st) => st.activeSessionId);
@@ -434,15 +436,11 @@ export default function SessionList({
   const [worktrees, setWorktrees] = useState<Worktree[]>([]);
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
   const [showArchived, setShowArchived] = useState(expandArchived);
-  const [selected, setSelected] = useState<ReadonlySet<string>>(new Set());
   const [draggedPin, setDraggedPin] = useState<string | null>(null);
 
   useEffect(() => {
     setShowArchived(expandArchived);
   }, [expandArchived]);
-  useEffect(() => {
-    if (!selectMode) setSelected(new Set());
-  }, [selectMode]);
 
   const reloadOrg = () => {
     void api.listLabels().then(setLabels);
@@ -504,33 +502,6 @@ export default function SessionList({
       })),
   ];
 
-  const toggleSelect = (id: string) => {
-    setSelected((prev) => {
-      const n = new Set(prev);
-      if (n.has(id)) n.delete(id);
-      else n.add(id);
-      return n;
-    });
-  };
-
-  const runBulk = async (op: "archive" | "restore") => {
-    const ids = [...selected];
-    if (ids.length === 0) return;
-    try {
-      const result = await api.bulkSessions(op, ids);
-      const failNote = result.failed.length ? `; ${result.failed.length} failed (${result.failed.map((f) => f.code).join(", ")})` : "";
-      announce(`${op === "archive" ? "Archived" : "Restored"} ${result.succeeded.length} session(s)${failNote}`);
-      if (result.failed.length) {
-        setUiError(`Some sessions could not be ${op === "archive" ? "archived" : "restored"}: ${result.failed.map((f) => `${f.id.slice(0, 8)}:${f.code}`).join(", ")}`);
-      }
-    } catch (e) {
-      setUiError(friendlyError(`Couldn’t ${op} the selected sessions`, e));
-    }
-    setSelected(new Set());
-    onSelectModeChange(false);
-    onChanged();
-  };
-
   const togglePin = async (session: SessionProjection) => {
     try {
       const position = pinned.reduce((max, item) => Math.max(max, item.pinned?.position ?? -1), -1) + 1;
@@ -569,8 +540,8 @@ export default function SessionList({
       eventsTitle={firstUserText(eventsMap[s.id])}
       relativeTime={relativeTime}
       selectMode={selectMode}
-      selected={selected.has(s.id)}
-      onToggleSelect={toggleSelect}
+      selected={selectedSessionIds.has(s.id)}
+      onToggleSelect={onToggleSelected}
       onChanged={onChanged}
       // UX-A390: the compact drawer closes only after activation resolves;
       // a failure leaves it open with the existing error path.
@@ -586,14 +557,6 @@ export default function SessionList({
 
   return (
     <div className="session-org">
-      {selectMode && selected.size > 0 && (
-        <div className="session-bulk-actions" aria-label="Selected session actions">
-          <span>{selected.size} selected</span>
-          <button className="small-btn" onClick={() => void runBulk("archive")}>Archive</button>
-          <button className="small-btn" onClick={() => void runBulk("restore")}>Restore</button>
-        </div>
-      )}
-
       {worktreeGroups.map((group) => {
         const isCollapsed = collapsed.has(group.key);
         return (

@@ -1,10 +1,23 @@
 // Polyth public contracts. Type-only. No implementation imports allowed here.
 // Erasable TS only (no enums/namespaces) — Node strips types at runtime.
+import type { IncomingMessage, ServerResponse } from "node:http";
 
 export type JsonValue = string | number | boolean | null | JsonValue[] | { [k: string]: JsonValue };
 export type JsonObject = { [k: string]: JsonValue };
 
 export interface Disposable { dispose(): void | Promise<void> }
+
+/** Server route contribution shared by trusted server plugins and the gateway. */
+export type RouteHandler = (request: RouteRequest) => Promise<boolean>;
+export interface RouteRequest {
+  req: IncomingMessage;
+  res: ServerResponse;
+  url: URL;
+  path: string;
+  method: string;
+  body(): Promise<Record<string, unknown>>;
+  json(code: number, body: unknown): void;
+}
 
 // ---------------------------------------------------------------- capabilities
 
@@ -136,6 +149,93 @@ export interface MultirunStartedData { multirunId: string; prompt: string; runs:
 export interface MultirunRunProgressData { multirunId: string; runId: string; status: MultirunRunStatus; output: string; tokens?: TokenUsage; cost?: number; error?: string }
 export interface MultirunCompletedData { multirunId: string }
 export interface MultirunPickedData { multirunId: string; runId: string }
+
+export type WorkflowPipeMode = "direct" | "ancestors";
+export type WorkflowPermissionPolicy = "auto" | "manual";
+export type WorkflowNodeStatus = "queued" | "running" | "done" | "error" | "skipped" | "stopped";
+export type WorkflowRunStatus = "running" | "done" | "error" | "stopped";
+
+export interface WorkflowNodeDto {
+  id: string;
+  role: string;
+  prompt: string;
+  model?: ModelRef;
+  agent?: string;
+  position?: { x: number; y: number };
+}
+
+export interface WorkflowEdgeDto {
+  id: string;
+  source: string;
+  target: string;
+}
+
+export interface WorkflowRunOptionsDto {
+  pipe?: WorkflowPipeMode;
+  permissions?: WorkflowPermissionPolicy;
+  maxParallel?: number;
+  nodeTimeoutMs?: number;
+}
+
+export interface WorkflowDto {
+  id: string;
+  projectId: string;
+  name: string;
+  nodes: WorkflowNodeDto[];
+  edges: WorkflowEdgeDto[];
+  defaults?: WorkflowRunOptionsDto;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface WorkflowRunNodeDto {
+  id: string;
+  role: string;
+  status: WorkflowNodeStatus;
+  sessionId?: string;
+  model?: ModelRef;
+  agent?: string;
+  activity?: string;
+  prompt?: string;
+  output?: string;
+  error?: string;
+  startedAt?: number;
+  finishedAt?: number;
+}
+
+export interface WorkflowRunDto {
+  id: string;
+  workflowId: string;
+  name: string;
+  input: string;
+  status: WorkflowRunStatus;
+  startedAt: number;
+  finishedAt?: number;
+  layers: string[][];
+  nodes: WorkflowRunNodeDto[];
+}
+
+export interface WorkflowRunStartedData {
+  runId: string;
+  workflowId: string;
+  name: string;
+  input: string;
+  startedAt: number;
+  layers: string[][];
+  nodes: WorkflowRunNodeDto[];
+}
+
+export interface WorkflowNodeProgressData {
+  runId: string;
+  nodeId: string;
+  node: WorkflowRunNodeDto;
+}
+
+export interface WorkflowRunCompletedData {
+  runId: string;
+  status: WorkflowRunStatus;
+  finishedAt: number;
+}
 
 export interface FusionWeightDto { model: string; weight: number }
 export type FusionStatus = "running" | "completed" | "failed";
@@ -389,7 +489,15 @@ export interface SessionPersistence {
 // ---------------------------------------------------------------- agent runtime (backend seam)
 
 export interface ModelDescriptor { providerID: string; modelID: string; name: string; providerName?: string; context?: number; cost?: { input: number; output: number }; /** Normalized values include `input:text`, `output:image`, `input:none`, `toolcall`, and `attachment`. */ capabilities?: string[]; /** Named reasoning variants reported by OpenCode (for example low/medium/high). */ variants?: string[]; /** Provider has live credentials (backend `connected[]`); undefined = unknown/assume connected. */ connected?: boolean }
-export interface AgentDescriptor { name: string; description?: string; mode: "primary" | "subagent" | "all" }
+export interface AgentDescriptor {
+  name: string;
+  description?: string;
+  mode: "primary" | "subagent" | "all";
+  /** OpenCode's role-level system prompt, when exposed by the backend. */
+  prompt?: string;
+  /** Role-specific model override. */
+  model?: ModelRef;
+}
 export interface RuntimeCapabilities { streaming: boolean; permissions: boolean; questions: boolean; compaction: boolean; subagents: boolean; steering?: boolean }
 export interface RuntimeSession { id: string; title: string; parentId?: string; createdAt: number; updatedAt: number }
 export interface RuntimeSessionMessage { role: "user" | "assistant"; text: string; reasoning?: string }
@@ -529,6 +637,7 @@ export interface PackageDescriptorDto {
   description: string;
   core: boolean;
   enabled: boolean;
+  status?: "ready" | "disabled";
   settingsGroup?: PackageSettingsGroup;
   /** Emoji or short icon label for the settings navigation. */
   icon?: string;
@@ -629,6 +738,9 @@ export interface WidgetContributionDescriptor {
   order?: number;
   category?: string;
   capabilities?: string[];
+  /** Preferred size for a newly added widget. It is guidance, not a resize
+   * constraint: users may shrink the widget below this size afterward. */
+  recommendedSize?: WidgetSize;
   defaultSize?: WidgetSize;
   minSize?: WidgetSize;
   maxSize?: WidgetSize;
@@ -683,7 +795,10 @@ export interface PluginContext {
   effect(disposer: () => void | Promise<void>): void;      // owned by plugin scope
   contribute(item: UiSlotItem): Disposable;
   config<T = JsonObject>(): T;
-  scope(id: string): PluginContext;                        // child scope
+  scope(
+    id: string,
+    opts?: { config?: JsonObject; capabilities?: Array<CapabilityKey<unknown>> },
+  ): PluginContext;                                        // child scope
   log(level: "debug" | "info" | "warn" | "error", msg: string, data?: JsonObject): void;
 }
 
@@ -1133,6 +1248,8 @@ export interface InstalledPluginDto {
   contributions: UiSlotItem[];
   /** Widget declarations owned by this plugin; absent on older registries. */
   widgets?: WidgetContributionDescriptor[];
+  /** Browser-safe URL and content hash for the install-time UI bundle. */
+  ui?: { url: string; integrity: string };
   lastError?: string;
 }
 

@@ -14,8 +14,11 @@ export interface ProviderUsageDistribution {
   providers: ProviderUsageShare[];
 }
 
+const finiteNonNegative = (value: number | undefined): number =>
+  typeof value === "number" && Number.isFinite(value) ? Math.max(0, value) : 0;
+
 const sessionTokens = (session: SessionProjection): number =>
-  (session.tokenTotals?.input ?? 0) + (session.tokenTotals?.output ?? 0);
+  finiteNonNegative(session.tokenTotals?.input) + finiteNonNegative(session.tokenTotals?.output);
 
 /** Project usage grouped by the provider recorded on each session. Sessions
  * without an explicit model stay visible as the human-facing Default group. */
@@ -33,7 +36,7 @@ export function providerUsageDistribution(
     };
     current.sessions += 1;
     current.tokens += sessionTokens(session);
-    current.cost += session.costTotal ?? 0;
+    current.cost += finiteNonNegative(session.costTotal);
     grouped.set(providerId, current);
   }
 

@@ -210,15 +210,9 @@ function ActivityWidget() {
 
 const BUILTINS: WidgetDef[] = [
   {
-    id: "core.composer", pluginId: "session", title: "Composer",
-    description: "A compact conversation timeline and full composer.",
-    zone: "main", defaultSize: { w: 12, h: 6 }, audience: "simple",
-    render: () => <ChatWidget />,
-  },
-  {
     id: "core.chat", pluginId: "session", title: "Conversation",
     description: "The active conversation timeline and composer.",
-    zone: "main", defaultSize: { w: 12, h: 8 }, audience: "power",
+    zone: "main", defaultSize: { w: 12, h: 8 }, audience: "simple",
     render: () => <ChatWidget />,
   },
   {
@@ -304,93 +298,88 @@ const BUILTINS: WidgetDef[] = [
 const SLOT_BACKED_BUILTINS = new Set(["git.recent", "terminal.shell"]);
 
 const BUILTIN_WIDGET_META: Record<string, Partial<WidgetDef>> = {
-  "core.composer": {
-    pluginName: "Core workspace", category: "conversation", recommended: true,
-    supportedZones: ["main", "bottom"], minSize: { w: 6, h: 4 }, maxSize: { w: 12, h: 8 },
-    resizable: true, scope: "workspace",
-  },
   "core.chat": {
-    pluginName: "Core workspace", category: "conversation",
-    supportedZones: ["main"], minSize: { w: 8, h: 6 }, maxSize: { w: 12, h: 12 },
+    pluginName: "Core workspace", category: "conversation", recommended: true,
+    supportedZones: ["main", "bottom"], minSize: { w: 4, h: 3 }, maxSize: { w: 12, h: 50 },
     resizable: true, scope: "workspace",
   },
   "core.quick-actions": {
     pluginName: "Core workspace", category: "actions", recommended: true,
     supportedZones: ["header", "left", "main", "right"], minSize: { w: 3, h: 2 },
-    maxSize: { w: 12, h: 5 }, resizable: true, scope: "workspace",
+    maxSize: { w: 12, h: 50 }, resizable: true, scope: "workspace",
   },
   "goals.current": {
     pluginName: "Core workspace", category: "planning",
     supportedZones: ["header", "left", "main", "right"], minSize: { w: 4, h: 3 },
-    maxSize: { w: 12, h: 8 }, resizable: true, scope: "workspace",
+    maxSize: { w: 12, h: 50 }, resizable: true, scope: "workspace",
   },
   "files.project-map": {
     pluginName: "Core workspace", category: "files",
     supportedZones: ["left", "main", "right"], minSize: { w: 4, h: 3 },
-    maxSize: { w: 12, h: 8 }, resizable: true, scope: "workspace",
+    maxSize: { w: 12, h: 50 }, resizable: true, scope: "workspace",
   },
   "files.explorer": {
     pluginName: "Core workspace", category: "files",
     supportedZones: ["left", "main", "right"], minSize: { w: 5, h: 6 },
-    maxSize: { w: 12, h: 12 }, resizable: true, scope: "workspace",
+    maxSize: { w: 12, h: 50 }, resizable: true, scope: "workspace",
   },
   "git.recent": {
     pluginName: "Git tools", category: "source control", recommended: true,
     supportedZones: ["left", "main", "right"], minSize: { w: 4, h: 3 },
-    maxSize: { w: 12, h: 8 }, resizable: true, scope: "workspace",
+    maxSize: { w: 12, h: 50 }, resizable: true, scope: "workspace",
     capabilities: ["diff", "status", "history"],
   },
   "terminal.shell": {
     pluginName: "Core workspace", category: "tools",
     supportedZones: ["main", "bottom", "floating"], minSize: { w: 8, h: 4 },
-    maxSize: { w: 12, h: 12 }, resizable: true, floating: true, scope: "workspace",
+    maxSize: { w: 12, h: 50 }, resizable: true, floating: true, scope: "workspace",
     capabilities: ["shell", "commands"],
   },
   "knowledge.notes": {
     pluginName: "Knowledge", category: "knowledge", recommended: true,
     supportedZones: ["left", "main", "right", "floating"], minSize: { w: 4, h: 3 },
-    maxSize: { w: 12, h: 10 }, resizable: true, duplicatable: true, floating: true,
+    maxSize: { w: 12, h: 50 }, resizable: true, duplicatable: true, floating: true,
     scope: "workspace", capabilities: ["notes", "memory"],
   },
   "session.work-status": {
     pluginName: "Core workspace", category: "status",
     supportedZones: ["header", "left", "main", "right"], minSize: { w: 4, h: 3 },
-    maxSize: { w: 12, h: 8 }, resizable: true, scope: "workspace",
+    maxSize: { w: 12, h: 50 }, resizable: true, scope: "workspace",
   },
   "session.activity": {
     pluginName: "Core workspace", category: "status",
     supportedZones: ["left", "main", "right", "bottom"], minSize: { w: 4, h: 3 },
-    maxSize: { w: 12, h: 8 }, resizable: true, scope: "workspace",
+    maxSize: { w: 12, h: 50 }, resizable: true, scope: "workspace",
   },
   "preview.app": {
     pluginName: "Core workspace", category: "preview",
     supportedZones: ["main", "bottom", "floating"], minSize: { w: 8, h: 5 },
-    maxSize: { w: 12, h: 12 }, resizable: true, floating: true, scope: "workspace",
+    maxSize: { w: 12, h: 50 }, resizable: true, floating: true, scope: "workspace",
   },
   "github.overview": {
     pluginName: "GitHub", category: "source control",
     supportedZones: ["left", "main", "right"], minSize: { w: 5, h: 4 },
-    maxSize: { w: 12, h: 10 }, resizable: true, scope: "plugin",
+    maxSize: { w: 12, h: 50 }, resizable: true, scope: "plugin",
   },
   "schedule.tasks": {
     pluginName: "Tools", category: "planning",
     supportedZones: ["left", "main", "right"], minSize: { w: 4, h: 3 },
-    maxSize: { w: 12, h: 8 }, resizable: true, scope: "plugin",
+    maxSize: { w: 12, h: 50 }, resizable: true, scope: "plugin",
   },
   "multirun.runs": {
     pluginName: "Tools", category: "agents",
     supportedZones: ["main", "bottom"], minSize: { w: 8, h: 5 },
-    maxSize: { w: 12, h: 12 }, resizable: true, scope: "plugin",
+    maxSize: { w: 12, h: 50 }, resizable: true, scope: "plugin",
   },
   "fusion.answers": {
     pluginName: "Tools", category: "agents",
     supportedZones: ["main", "bottom"], minSize: { w: 8, h: 5 },
-    maxSize: { w: 12, h: 12 }, resizable: true, scope: "plugin",
+    maxSize: { w: 12, h: 50 }, resizable: true, scope: "plugin",
   },
   "walkthrough.review": {
     pluginName: "Git tools", category: "source control",
     supportedZones: ["main", "bottom"], minSize: { w: 8, h: 5 },
-    maxSize: { w: 12, h: 12 }, resizable: true, scope: "plugin",
+    maxSize: { w: 12, h: 50 }, resizable: true, scope: "plugin",
   },
 };
 
@@ -407,6 +396,7 @@ function widgetSlotMeta(widget: WidgetDef): Record<string, unknown> {
     order: widget.order,
     zone: widget.zone,
     supportedZones: widget.supportedZones,
+    recommendedSize: widget.recommendedSize,
     defaultSize: widget.defaultSize,
     minSize: widget.minSize,
     maxSize: widget.maxSize,
@@ -428,6 +418,10 @@ for (const base of BUILTINS) {
   const widget: WidgetDef = {
     ...base,
     ...BUILTIN_WIDGET_META[base.id],
+    recommendedSize: BUILTIN_WIDGET_META[base.id]?.recommendedSize
+      ?? base.recommendedSize
+      ?? base.defaultSize
+      ?? BUILTIN_WIDGET_META[base.id]?.minSize,
     settingsRender: base.settingsRender ?? (() => (
       <div className="builtin-widget-settings">
         <span>Uses the active workspace context</span>

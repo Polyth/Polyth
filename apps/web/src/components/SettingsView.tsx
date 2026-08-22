@@ -23,6 +23,7 @@ import SessionsPage from "./settings/SessionsPage.tsx";
 import AccessPage from "./settings/AccessPage.tsx";
 import PackagesPage from "./settings/PackagesPage.tsx";
 import WidgetsPage from "./settings/WidgetsPage.tsx";
+import { Icon } from "../icons.tsx";
 
 interface PageDef {
   id: string;
@@ -31,6 +32,24 @@ interface PageDef {
   icon?: string;
   nav?: boolean;
   render: () => ReactNode;
+}
+
+type MobileStage = "nav" | "page";
+
+function useMobileSettings() {
+  const [mobile, setMobile] = useState(
+    () => typeof window !== "undefined" && window.matchMedia("(max-width: 700px)").matches,
+  );
+
+  useEffect(() => {
+    const query = window.matchMedia("(max-width: 700px)");
+    const update = () => setMobile(query.matches);
+    update();
+    query.addEventListener("change", update);
+    return () => query.removeEventListener("change", update);
+  }, []);
+
+  return mobile;
 }
 
 const BUILTIN: PageDef[] = [
@@ -48,14 +67,49 @@ const BUILTIN: PageDef[] = [
   { id: "about", label: "About", group: "System", nav: false, render: () => <AboutPage /> },
 ];
 
+const SETTINGS_ICON_BY_PAGE: Record<string, keyof typeof Icon> = {
+  general: "gear",
+  appearance: "palette",
+  chat: "chat",
+  notifications: "bell",
+  sessions: "session",
+  shortcuts: "keyboard",
+  projects: "files",
+  behavior: "pencil",
+  widgets: "widgets",
+  packages: "package",
+  voice: "mic",
+  usage: "usage",
+  git: "branch",
+  models: "context",
+  agents: "session",
+  mcp: "plug",
+  commands: "term",
+  integrations: "link",
+  plugins: "puzzle",
+  "secure-safe": "shield",
+  "home-assistant": "home",
+};
+
+function SettingsNavIcon({ pageId }: { pageId: string }) {
+  const Glyph = Icon[SETTINGS_ICON_BY_PAGE[pageId] ?? "puzzle"];
+  return <Glyph />;
+}
+
 export default function SettingsView({ onClose = () => setOverlay(null) }: { onClose?: () => void }) {
   const prefs = usePrefs();
+  const mobile = useMobileSettings();
   // Deep link (e.g. "Change shortcut…" palette rows land on the Shortcuts page).
   const [active, setActive] = useState(() => consumePendingSettingsPage() ?? "general");
+  const [mobileStage, setMobileStage] = useState<MobileStage>("nav");
   const [filter, setFilter] = useState("");
   const [cursor, setCursor] = useState(0);
   const paneRef = useRef<HTMLDivElement>(null);
   const modalRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (mobile) setMobileStage("nav");
+  }, [mobile]);
 
   useEffect(() => {
     modalRef.current?.focus();
@@ -63,7 +117,11 @@ export default function SettingsView({ onClose = () => setOverlay(null) }: { onC
       if (event.key === "Escape") {
         event.preventDefault();
         event.stopPropagation();
-        onClose();
+        if (mobile && mobileStage === "page") {
+          setMobileStage("nav");
+        } else {
+          onClose();
+        }
         return;
       }
       if (event.key !== "Tab" || !modalRef.current) return;
@@ -83,7 +141,7 @@ export default function SettingsView({ onClose = () => setOverlay(null) }: { onC
     };
     document.addEventListener("keydown", onKey, true);
     return () => document.removeEventListener("keydown", onKey, true);
-  }, [onClose]);
+  }, [mobile, mobileStage, onClose]);
 
   // Plugin-contributed pages (settings.pages slot): one nav entry per item.
   // Slot props may carry `settingsItems` descriptors for item-level search.
@@ -132,12 +190,13 @@ export default function SettingsView({ onClose = () => setOverlay(null) }: { onC
       const pageId = (event as CustomEvent<unknown>).detail;
       if (typeof pageId !== "string" || !pages.some((page) => page.id === pageId)) return;
       setActive(pageId);
+      if (mobile) setMobileStage("page");
       setFilter("");
       setCursor(0);
     };
     window.addEventListener("polyth:settings-page", navigate);
     return () => window.removeEventListener("polyth:settings-page", navigate);
-  }, [pages]);
+  }, [mobile, pages]);
 
   useEffect(() => {
     const contributed: SettingsSearchItem[] = [];
@@ -177,6 +236,7 @@ export default function SettingsView({ onClose = () => setOverlay(null) }: { onC
 
   const gotoItem = (hit: SettingsSearchHit) => {
     setActive(hit.item.pageId);
+    if (mobile) setMobileStage("page");
     setFilter("");
     setCursor(0);
     // Focus + flash after the page renders.
@@ -194,6 +254,7 @@ export default function SettingsView({ onClose = () => setOverlay(null) }: { onC
 
   const gotoPage = (id: string) => {
     setActive(id);
+    if (mobile) setMobileStage("page");
     setFilter("");
     setCursor(0);
   };
@@ -225,14 +286,14 @@ export default function SettingsView({ onClose = () => setOverlay(null) }: { onC
   return (
     <div className="scrim settings-scrim" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <div
-        className={`modal settings-shell settings-page-${current.id}`}
+        className={`modal settings-shell settings-page-${current.id}${mobile ? ` settings-mobile-${mobileStage}` : ""}`}
         ref={modalRef}
         tabIndex={-1}
         onMouseDown={(e) => e.stopPropagation()}
         role="dialog"
         aria-modal="true"
         aria-label="Settings"
-        aria-describedby="settings-close-hint"
+        aria-describedby={mobile ? undefined : "settings-close-hint"}
       >
         <nav className="modal-nav settings-nav">
           <div className="settings-nav-head">
@@ -285,9 +346,12 @@ export default function SettingsView({ onClose = () => setOverlay(null) }: { onC
                   <button
                     className={`settings-nav-item ${current.id === p.id ? "active" : ""}`}
                     aria-current={current.id === p.id ? "page" : undefined}
-                    onClick={() => { setActive(p.id); }}
+                    onClick={() => {
+                      setActive(p.id);
+                      if (mobile) setMobileStage("page");
+                    }}
                   >
-                    {p.icon && <span className="settings-nav-icon" aria-hidden="true">{p.icon}</span>}
+                    <span className="settings-nav-icon" aria-hidden="true"><SettingsNavIcon pageId={p.id} /></span>
                     {p.label}
                   </button>
                 </Fragment>
@@ -300,12 +364,28 @@ export default function SettingsView({ onClose = () => setOverlay(null) }: { onC
         </nav>
         <div className="modal-main settings-pane">
           <div className="modal-head settings-pane-head">
-            <div>
-              <div className="modal-title settings-pane-title">{current.label}</div>
-              <div className="modal-desc">Configure this part of your Polyth workspace.</div>
-            </div>
-            <span className="dialog-hint" id="settings-close-hint"><kbd>Esc</kbd> close</span>
-            <button className="close-btn" onClick={onClose} aria-label="Close">×</button>
+            {mobile ? (
+              <div className="settings-pane-head-bar">
+                <button
+                  type="button"
+                  className="settings-mobile-back"
+                  onClick={() => setMobileStage("nav")}
+                  aria-label="Back to Settings"
+                >
+                  <span aria-hidden="true">←</span> Back
+                </button>
+                <button className="close-btn" onClick={onClose} aria-label="Close">×</button>
+              </div>
+            ) : (
+              <>
+                <div className="settings-pane-head-copy">
+                  <div className="modal-title settings-pane-title">{current.label}</div>
+                  <div className="modal-desc">Configure this part of your Polyth workspace.</div>
+                </div>
+                <span className="dialog-hint" id="settings-close-hint"><kbd>Esc</kbd> close</span>
+                <button className="close-btn" onClick={onClose} aria-label="Close">×</button>
+              </>
+            )}
           </div>
           <div className="modal-body settings-pane-body" ref={paneRef}>
             {/* A page that throws must not white-screen the whole app —

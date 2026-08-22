@@ -1,4 +1,4 @@
-// UX-PERSONAS: one capability model. This is a navigation-metadata registry —
+// One capability model. This is a navigation-metadata registry —
 // it owns labels, keywords, tier/rank resolution, and open commands only. It
 // is NOT a component host: the workspace and right-surface registries keep
 // rendering and lifecycle ownership, and a descriptor confers no filesystem,
@@ -6,13 +6,13 @@
 //
 // Header, right rail, compact navigation, command search, shortcuts, and
 // Settings all consume the same resolved list, so they can never disagree
-// about whether a capability exists. Presets change only tier and rank;
-// `available()` is independent of preset selection.
+// about whether a capability exists. Per-project placement changes only tier
+// and rank; `available()` remains a runtime property.
 import { useSyncExternalStore } from "react";
 import {
-  getPresentation, getPresetState, resolvePlacements, subscribePresetState,
-  type CapabilityTier, type ResolvedPlacement, type WorkspacePresetId, type PlacementOverride,
-} from "./workspacePresets.ts";
+  getCapabilityPlacements, resolvePlacements, subscribeCapabilityLayout,
+  type CapabilityTier, type ResolvedPlacement, type PlacementOverride,
+} from "./capabilityLayout.ts";
 
 export interface CapabilityDescriptor {
   id: string;
@@ -50,14 +50,15 @@ export const BUILTIN_CAPABILITY_META: CapabilityMeta[] = [
   { id: "preview", label: "Preview", plainDescription: "See the running result while you work.", keywords: ["live preview", "browser", "app"], standardTier: "primary", standardRank: 2 },
   { id: "goals", label: "Goals & progress", plainDescription: "Track goals and how the work is going.", keywords: ["goals", "progress", "status"], standardTier: "primary", standardRank: 3 },
   { id: "multirun", label: "Compare responses", technicalLabel: "Multi-Run", plainDescription: "Ask several ways at once and compare the answers.", keywords: ["multi-run", "multirun", "compare models"], standardTier: "more", standardRank: 10 },
-  { id: "fusion", label: "Combine drafts", technicalLabel: "Fusion", plainDescription: "Merge the best parts of several drafts.", keywords: ["fusion", "fuse models", "merge"], standardTier: "more", standardRank: 11 },
-  { id: "walkthrough", label: "Guided walkthrough", plainDescription: "A step-by-step guided review of the work.", keywords: ["walkthrough", "guide", "tour"], standardTier: "more", standardRank: 12 },
-  { id: "schedule", label: "Schedule", technicalLabel: "Scheduled prompts", plainDescription: "Run prompts on a schedule.", keywords: ["schedule", "scheduled prompts", "cron"], standardTier: "more", standardRank: 13 },
-  { id: "usage", label: "Usage & cost", plainDescription: "See what the work is using and costing.", keywords: ["usage", "cost", "tokens", "quota"], standardTier: "more", standardRank: 14 },
-  { id: "github", label: "GitHub", plainDescription: "Browse issues and pull requests for this project.", keywords: ["github", "issues", "pull requests", "pr"], standardTier: "more", standardRank: 15 },
-  { id: "knowledge", label: "Knowledge", plainDescription: "Notes and references Polyth can use.", keywords: ["knowledge", "notes", "docs"], standardTier: "more", standardRank: 16 },
-  { id: "context", label: "Context", plainDescription: "What Polyth is currently looking at.", keywords: ["context", "pinned", "session status"], standardTier: "more", standardRank: 17 },
-  { id: "voice", label: "Voice input", technicalLabel: "Dictation", plainDescription: "Talk instead of typing.", keywords: ["voice", "dictation", "microphone", "speech"], standardTier: "more", standardRank: 18 },
+  { id: "workflow", label: "Workflows", technicalLabel: "DAG orchestration", plainDescription: "Coordinate agent roles in dependency-based pipelines.", keywords: ["workflow", "dag", "orchestration", "multi-agent"], standardTier: "more", standardRank: 11 },
+  { id: "fusion", label: "Combine drafts", technicalLabel: "Fusion", plainDescription: "Merge the best parts of several drafts.", keywords: ["fusion", "fuse models", "merge"], standardTier: "more", standardRank: 12 },
+  { id: "walkthrough", label: "Guided walkthrough", plainDescription: "A step-by-step guided review of the work.", keywords: ["walkthrough", "guide", "tour"], standardTier: "more", standardRank: 13 },
+  { id: "schedule", label: "Schedule", technicalLabel: "Scheduled prompts", plainDescription: "Run prompts on a schedule.", keywords: ["schedule", "scheduled prompts", "cron"], standardTier: "more", standardRank: 14 },
+  { id: "usage", label: "Usage & cost", plainDescription: "See what the work is using and costing.", keywords: ["usage", "cost", "tokens", "quota"], standardTier: "more", standardRank: 15 },
+  { id: "github", label: "GitHub", plainDescription: "Browse issues and pull requests for this project.", keywords: ["github", "issues", "pull requests", "pr"], standardTier: "more", standardRank: 16 },
+  { id: "knowledge", label: "Knowledge", plainDescription: "Notes and references Polyth can use.", keywords: ["knowledge", "notes", "docs"], standardTier: "more", standardRank: 17 },
+  { id: "context", label: "Context", plainDescription: "What Polyth is currently looking at.", keywords: ["context", "pinned", "session status"], standardTier: "more", standardRank: 18 },
+  { id: "voice", label: "Voice input", technicalLabel: "Dictation", plainDescription: "Talk instead of typing.", keywords: ["voice", "dictation", "microphone", "speech"], standardTier: "more", standardRank: 19 },
   { id: "git", label: "Source control", technicalLabel: "Git", plainDescription: "Review and manage changes to the code.", keywords: ["git", "worktrees", "branch", "diff", "changes"], standardTier: "technical", standardRank: 30 },
   { id: "terminal", label: "Terminal", plainDescription: "Run commands in the project workspace.", keywords: ["terminal", "shell", "console"], standardTier: "technical", standardRank: 31 },
   { id: "models-agents", label: "Models & agents", plainDescription: "Choose which model and agent Polyth uses.", keywords: ["model", "agent", "profile", "provider"], standardTier: "technical", standardRank: 32 },
@@ -81,6 +82,7 @@ const GROUP_OF: Record<string, string> = {
   walkthrough: "Plan and review",
   github: "Plan and review",
   multirun: "Compare and refine",
+  workflow: "Compare and refine",
   fusion: "Compare and refine",
   git: TECHNICAL_GROUP_LABEL,
   terminal: TECHNICAL_GROUP_LABEL,
@@ -152,32 +154,28 @@ export interface ResolvedCapability {
   rank: number;
 }
 
-/** Pure: resolve descriptors against a preset + explicit overrides. */
+/** Pure: resolve descriptors against explicit per-project overrides. */
 export function resolveCapabilities(
   descriptors: readonly CapabilityDescriptor[],
-  presetId: WorkspacePresetId | null,
   overrides: Record<string, PlacementOverride> = {},
 ): ResolvedCapability[] {
   const byId = new Map(descriptors.map((d) => [d.id, d]));
   const placements: ResolvedPlacement[] = resolvePlacements(
     descriptors.map((d) => ({ id: d.id, standardTier: d.standardTier, standardRank: d.standardRank })),
-    presetId,
     overrides,
   );
   return placements.map((p) => ({ descriptor: byId.get(p.id)!, tier: p.tier, rank: p.rank }));
 }
 
-/** The single resolved list every navigation surface consumes: current
- *  registry contents against the current preset and explicit overrides. */
+/** The single resolved list every navigation surface consumes. */
 export function currentResolvedCapabilities(): ResolvedCapability[] {
-  return resolveCapabilities(listCapabilities(), getPresetState().presetId, getPresentation().placements);
+  return resolveCapabilities(listCapabilities(), getCapabilityPlacements());
 }
 
-/** React hook: re-render on registry changes or preset/override changes. */
+/** React hook: re-render on registry or active-project placement changes. */
 export function useResolvedCapabilities(): ResolvedCapability[] {
   useCapabilityVersion();
-  useSyncExternalStore(subscribePresetState, getPresetState);
-  useSyncExternalStore(subscribePresetState, getPresentation);
+  useSyncExternalStore(subscribeCapabilityLayout, getCapabilityPlacements);
   return currentResolvedCapabilities();
 }
 
@@ -196,8 +194,7 @@ declare global {
 
 /** Managed extensions register navigation capabilities dynamically (like
  *  window.__polythSurfaces for panels). A registered capability appears in
- *  More tools and command search immediately, defaulting to the `more` tier —
- *  registration never touches preset state. */
+ *  More tools and command search immediately, defaulting to the `more` tier. */
 export function exposeCapabilities(): void {
   if (typeof window !== "undefined") {
     window.__polythCapabilities = { registerCapability, listCapabilities };

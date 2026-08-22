@@ -159,6 +159,8 @@ interface AgentRow {
   name: string;
   description?: string;
   mode?: string;
+  prompt?: string;
+  model?: { providerID?: string; modelID?: string };
 }
 
 interface CreatedSession {
@@ -584,6 +586,10 @@ export const createOpenCodeRuntimeWithClient = (
           name: a.name,
           description: a.description,
           mode: a.mode === "subagent" || a.mode === "all" || a.mode === "primary" ? a.mode : "primary",
+          ...(a.prompt ? { prompt: a.prompt } : {}),
+          ...(a.model?.providerID && a.model.modelID
+            ? { model: { providerID: a.model.providerID, modelID: a.model.modelID } }
+            : {}),
         }),
       );
     },

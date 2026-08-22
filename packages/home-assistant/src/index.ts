@@ -16,8 +16,12 @@ import {
   type HomeAssistantEntitySelection,
   type JsonValue,
   type Plugin,
+  type RouteHandler,
+  type RouteRequest,
   type WidgetContributionDescriptor,
 } from "@polyth/contracts";
+
+export { default as createHomeAssistantServerPlugin } from "./serverEntry.ts";
 
 interface StoredHomeAssistantConfig {
   baseUrl: string;
@@ -56,6 +60,75 @@ export interface HomeAssistantServiceOptions {
   timeoutMs?: number;
 }
 
+const routeFailure = (
+  request: RouteRequest,
+  error: unknown,
+  fallback = "Home Assistant request failed",
+): true => {
+  const code = (error as { code?: unknown }).code;
+  const invalidInput = code === "invalid-input";
+  request.json(invalidInput ? 400 : 502, {
+    error: invalidInput ? "invalid-input" : "upstream",
+    message: error instanceof Error ? error.message : fallback,
+  });
+  return true;
+};
+
+const entityPayload = (body: Record<string, unknown>): string =>
+  typeof body.entityId === "string" ? body.entityId : "";
+
+export function homeAssistantRoutes(homeAssistant: HomeAssistantService): RouteHandler {
+  return async (request) => {
+    const { path, method, json, url } = request;
+    if (path === "/api/home-assistant/config" && method === "GET") {
+      json(200, homeAssistant.config());
+      return true;
+    }
+    if (path === "/api/home-assistant/config" && method === "PUT") {
+      try {
+        json(200, homeAssistant.configure(await request.body() as HomeAssistantConfigInput));
+      } catch (error) {
+        return routeFailure(request, error, "Home Assistant settings could not be saved");
+      }
+      return true;
+    }
+    if (path === "/api/home-assistant/status" && method === "GET") {
+      json(200, await homeAssistant.status());
+      return true;
+    }
+    if (path === "/api/home-assistant/entities" && method === "GET") {
+      try {
+        const requested = url.searchParams.getAll("entityId");
+        json(200, await homeAssistant.states(requested.length > 0 ? requested : undefined));
+      } catch (error) {
+        return routeFailure(request, error);
+      }
+      return true;
+    }
+    if (path === "/api/home-assistant/toggle" && method === "POST") {
+      try {
+        json(200, await homeAssistant.toggle(entityPayload(await request.body())));
+      } catch (error) {
+        return routeFailure(request, error);
+      }
+      return true;
+    }
+    if (path === "/api/home-assistant/climate/temperature" && method === "POST") {
+      try {
+        const body = await request.body();
+        json(200, await homeAssistant.setTemperature(
+          entityPayload(body),
+          typeof body.temperature === "number" ? body.temperature : Number.NaN,
+        ));
+      } catch (error) {
+        return routeFailure(request, error);
+      }
+      return true;
+    }
+    return false;
+  };
+}
+
 export const HOME_ASSISTANT_CAP = cap<HomeAssistantService>("polyth.homeAssistant");
 
 export const HOME_ASSISTANT_WIDGETS: readonly WidgetContributionDescriptor[] = [
@@ -71,7 +144,7 @@ export const HOME_ASSISTANT_WIDGETS: readonly WidgetContributionDescriptor[] = [
     capabilities: ["polyth.homeAssistant"],
     defaultSize: { w: 4, h: 3 },
     minSize: { w: 3, h: 2 },
-    maxSize: { w: 8, h: 6 },
+    maxSize: { w: 12, h: 50 },
     audience: "simple",
     recommended: true,
     defaultVisible: false,
@@ -88,7 +161,7 @@ export const HOME_ASSISTANT_WIDGETS: readonly WidgetContributionDescriptor[] = [
     capabilities: ["polyth.homeAssistant"],
     defaultSize: { w: 4, h: 3 },
     minSize: { w: 3, h: 2 },
-    maxSize: { w: 8, h: 7 },
+    maxSize: { w: 12, h: 50 },
     audience: "standard",
     duplicatable: true,
     defaultVisible: false,
@@ -105,7 +178,7 @@ export const HOME_ASSISTANT_WIDGETS: readonly WidgetContributionDescriptor[] = [
     capabilities: ["polyth.homeAssistant"],
     defaultSize: { w: 3, h: 2 },
     minSize: { w: 2, h: 2 },
-    maxSize: { w: 6, h: 5 },
+    maxSize: { w: 12, h: 50 },
     audience: "simple",
     recommended: true,
     defaultVisible: false,
@@ -122,7 +195,7 @@ export const HOME_ASSISTANT_WIDGETS: readonly WidgetContributionDescriptor[] = [
     capabilities: ["polyth.homeAssistant"],
     defaultSize: { w: 5, h: 5 },
     minSize: { w: 4, h: 3 },
-    maxSize: { w: 10, h: 8 },
+    maxSize: { w: 12, h: 50 },
     audience: "standard",
     recommended: true,
     defaultVisible: false,
@@ -167,7 +240,7 @@ export function createHomeAssistantPlugin(service: HomeAssistantService): Plugin
   return {
     manifest: {
       id: "home-assistant",
-      version: "0.1.0",
+      version: "1.0.0",
       trust: "credentialed",
       provides: [HOME_ASSISTANT_CAP.id],
       widgets: [...HOME_ASSISTANT_WIDGETS],

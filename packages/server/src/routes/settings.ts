@@ -1,7 +1,7 @@
 // WP9 routes: global behavior instructions, system info, MCP configuration,
 // and the managed plugin registry. Secret values never leave this boundary —
 // requests may carry them in, responses only ever name their keys.
-import type { McpTransport, SystemInfoDto } from "@polyth/contracts";
+import type { AgentDescriptor, McpTransport, ModelRef, SystemInfoDto } from "@polyth/contracts";
 import type { RouteHandler } from "../http.ts";
 import type { BehaviorService } from "../behavior.ts";
 import type { McpConfigService } from "../mcp.ts";
@@ -14,6 +14,7 @@ export interface SettingsRouteDeps {
   systemInfo(local: boolean): SystemInfoDto;
   /** Parsed backend config (opencode.json) for read-only surfaces. */
   backendConfig?(): Promise<Record<string, unknown>>;
+  saveRole?(name: string, role: { prompt?: string; model?: ModelRef; mode: AgentDescriptor["mode"] }): Promise<AgentDescriptor>;
 }
 
 const parseTransport = (raw: unknown): McpTransport => {
@@ -63,6 +64,26 @@ export function settingsRoutes(deps: SettingsRouteDeps): RouteHandler {
     // ---- system info ------------------------------------------------------------
     if (path === "/api/system/info" && method === "GET") {
       rc.json(200, deps.systemInfo(isLocal(rc.req.socket.remoteAddress)));
+      return true;
+    }
+
+    const roleMatch = path.match(/^\/api\/settings\/roles\/([^/]+)$/);
+    if (roleMatch && method === "PUT" && deps.saveRole) {
+      const b = await rc.body();
+      const mode = b.mode === "subagent" || b.mode === "all" ? b.mode : "primary";
+      const rawModel = b.model as { providerID?: unknown; modelID?: unknown } | undefined;
+      const model = rawModel
+        && typeof rawModel.providerID === "string"
+        && typeof rawModel.modelID === "string"
+        && rawModel.providerID
+        && rawModel.modelID
+        ? { providerID: rawModel.providerID, modelID: rawModel.modelID }
+        : undefined;
+      rc.json(200, await deps.saveRole(decodeURIComponent(roleMatch[1]!), {
+        prompt: typeof b.prompt === "string" ? b.prompt.slice(0, 128 * 1024) : undefined,
+        ...(model ? { model } : {}),
+        mode,
+      }));
       return true;
     }
 

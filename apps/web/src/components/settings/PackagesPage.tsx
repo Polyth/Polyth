@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { PackageDescriptorDto } from "@polyth/contracts";
 import { api } from "../../api.ts";
 import { bootPackages, isPackageEnabled, subscribePackages } from "../../packages/registry.ts";
-import { EmptyState } from "./parts.tsx";
+import { EmptyState, PageHead } from "./parts.tsx";
 
 export default function PackagesPage() {
   const [packages, setPackages] = useState<PackageDescriptorDto[] | null>(null);
@@ -45,14 +45,17 @@ export default function PackagesPage() {
   };
 
   if (!packages && !error) {
-    return <div className="set-page-head"><p className="muted">Loading installed Polyth packages…</p></div>;
+    return (
+      <>
+        <PageHead title="Packages" blurb="Enable or disable optional workspace features." />
+        <p className="muted">Loading installed Polyth packages…</p>
+      </>
+    );
   }
 
   return (
     <>
-      <div className="set-page-head">
-        <p className="muted">Enable or disable optional workspace features.</p>
-      </div>
+      <PageHead title="Packages" blurb="Enable or disable optional workspace features." />
       {error && <div className="form-error" role="alert">{error}</div>}
       {!packages && <EmptyState title="Packages unavailable" body="The package registry could not be loaded." />}
       {packages && (
@@ -64,7 +67,7 @@ export default function PackagesPage() {
             </div>
             <div className="package-grid">
               {grouped.optional.map((descriptor) => (
-                <article className={`package-tile${descriptor.enabled ? " enabled" : ""}`} key={descriptor.id}>
+                <article className={`package-tile ${descriptor.enabled ? "enabled" : "disabled"}`} key={descriptor.id}>
                   <span className="package-icon" aria-hidden="true">{descriptor.icon ?? "◇"}</span>
                   <div className="package-copy">
                     <strong>{descriptor.name}</strong>
@@ -95,7 +98,7 @@ export default function PackagesPage() {
             </div>
             <div className="package-grid">
               {grouped.core.map((descriptor) => (
-                <article className="package-tile package-tile-core" key={descriptor.id}>
+                <article className="package-tile package-tile-core enabled" key={descriptor.id}>
                   <span className="package-icon" aria-hidden="true">{descriptor.icon ?? "◆"}</span>
                   <div className="package-copy">
                     <strong>{descriptor.name}</strong>
