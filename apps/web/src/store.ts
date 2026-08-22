@@ -433,6 +433,9 @@ export function openWorkspacePane(surfaceId: string, resource?: string): boolean
   const surface = paneSurfaceOf(surfaceId);
   if (surface === null) return false;
   if (state.railPlugin !== surfaceId) recordPaneInvoker();
+  // A workspace pane is always Chat's companion. Canvas CSS must never win a
+  // race and hide a pane that the command path has just opened.
+  setWorkspaceMode("chat");
   const projectId = state.activeProjectId;
   if (projectId !== null) {
     setPaneOpenSurface(projectId, surfaceId);

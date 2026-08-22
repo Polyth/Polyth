@@ -54,6 +54,7 @@ export interface BrowserSessionDto {
 
 export type BrowserTargetDto =
   | { selector: string }
+  | { text: string; exact?: boolean }
   | { role: string; name?: string; exact?: boolean }
   | { point: { x: number; y: number }; frameRevision: number };
 
@@ -61,9 +62,14 @@ export type BrowserActionDto =
   | { kind: "click"; target: BrowserTargetDto }
   | { kind: "type"; target: BrowserTargetDto; text: string; submit?: boolean }
   | { kind: "press"; key: string }
-  | { kind: "scroll"; x: number; y: number }
+  | { kind: "scroll"; x?: number; y?: number; target?: BrowserTargetDto }
   | { kind: "select"; target: BrowserTargetDto; value: string }
-  | { kind: "wait"; condition: "network-idle" | "selector"; value?: string; timeoutMs?: number };
+  | { kind: "wait"; condition: "network-idle" | "selector"; value?: string; timeoutMs?: number }
+  | { kind: "back" }
+  | { kind: "forward" }
+  | { kind: "reload" }
+  | { kind: "resize"; viewport: { width: number; height: number } }
+  | { kind: "inspect"; selector: string };
 
 export interface WorkspaceSearchItemDto {
   kind: "project" | "session";
@@ -1028,12 +1034,15 @@ export const api = {
   browserNavigate: (id: string, url: string, actor: "user" | "agent" = "user") =>
     jfetch<BrowserSessionDto>(`/api/browser/sessions/${encodeURIComponent(id)}/navigate`, json("POST", { url, actor })),
   browserAction: (id: string, action: BrowserActionDto, actor: "user" | "agent" = "user") =>
-    jfetch<{ actionId: string; session: BrowserSessionDto }>(
+    jfetch<{ actionId: string; session: BrowserSessionDto; result?: JsonObject }>(
       `/api/browser/sessions/${encodeURIComponent(id)}/actions`, json("POST", { action, actor }),
     ),
-  browserObserve: (id: string, includeScreenshot = false) =>
+  browserObserve: (id: string, includeScreenshot = false, selector?: string) =>
     jfetch<{ url: string; title: string; text: string; accessibilityDigest: string; screenshotRef?: string }>(
-      `/api/browser/sessions/${encodeURIComponent(id)}/observe`, json("POST", { includeScreenshot }),
+      `/api/browser/sessions/${encodeURIComponent(id)}/observe`, json("POST", {
+        includeScreenshot,
+        ...(selector ? { selector } : {}),
+      }),
     ),
   browserClose: (id: string) =>
     jfetch<{ ok: true }>(`/api/browser/sessions/${encodeURIComponent(id)}`, { method: "DELETE" }),

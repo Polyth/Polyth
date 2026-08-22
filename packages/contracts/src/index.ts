@@ -734,6 +734,9 @@ export type PreviewStatus = "off" | "starting" | "running";
 
 export interface PreviewState {
   url: string | null;
+  /** Local URLs announced by the process and/or discovered from listeners.
+   * `url` is the currently selected reachable candidate. */
+  urls?: string[];
   status: PreviewStatus;
   port?: number;
   command?: string;
@@ -1148,6 +1151,7 @@ export interface BrowserSessionDto {
 
 export type BrowserTarget =
   | { selector: string }
+  | { text: string; exact?: boolean }
   | { role: string; name?: string; exact?: boolean }
   | { point: { x: number; y: number }; frameRevision: number };
 
@@ -1155,9 +1159,14 @@ export type BrowserAction =
   | { kind: "click"; target: BrowserTarget }
   | { kind: "type"; target: BrowserTarget; text: string; submit?: boolean }
   | { kind: "press"; key: string }
-  | { kind: "scroll"; x: number; y: number }
+  | { kind: "scroll"; x?: number; y?: number; target?: BrowserTarget }
   | { kind: "select"; target: BrowserTarget; value: string }
-  | { kind: "wait"; condition: "network-idle" | "selector"; value?: string; timeoutMs?: number };
+  | { kind: "wait"; condition: "network-idle" | "selector"; value?: string; timeoutMs?: number }
+  | { kind: "back" }
+  | { kind: "forward" }
+  | { kind: "reload" }
+  | { kind: "resize"; viewport: { width: number; height: number } }
+  | { kind: "inspect"; selector: string };
 
 export interface BrowserObservation {
   url: string;

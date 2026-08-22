@@ -23,6 +23,7 @@ export interface FakeWeb {
 
 const targetKey = (t: BrowserTarget): string => {
   if ("selector" in t) return t.selector;
+  if ("text" in t) return `text:${t.text}`;
   if ("role" in t) return `${t.role}:${t.name ?? ""}`;
   return `point:${t.point.x},${t.point.y}`;
 };
@@ -35,6 +36,7 @@ export function createFakeDriver(web: FakeWeb): BrowserDriver {
       let index = -1;
       const typed = new Map<string, string>();
       const listeners = new Set<(ev: DriverPageEvent) => void>();
+      let viewport = { width: opts.width, height: opts.height };
       let closed = false;
       const emit = (ev: DriverPageEvent) => { for (const l of [...listeners]) l(ev); };
 
@@ -103,6 +105,18 @@ export function createFakeDriver(web: FakeWeb): BrowserDriver {
           typed.set(targetKey(target), value);
         },
         wait: async () => {},
+        async resize(next) {
+          viewport = { ...next };
+        },
+        async inspect(selector) {
+          return {
+            selector,
+            tag: selector.startsWith("input") ? "input" : "div",
+            text: pageOf(nav().url).text ?? "",
+            rect: { x: 0, y: 0, width: viewport.width, height: viewport.height },
+            styles: { display: "block", position: "static" },
+          };
+        },
         async screenshot() {
           // deterministic bytes derived from the current URL (no real pixels)
           const data = new TextEncoder().encode(`frame:${nav().url}:${index}`);

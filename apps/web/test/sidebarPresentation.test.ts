@@ -20,9 +20,14 @@ test("sidebarExpanded reports the presentation, not the drawer flag", () => {
 
 test("the narrow-breakpoint query matches the stylesheet rule hiding the sidebar", () => {
   const css = readFileSync(resolve(import.meta.dirname, "../src/styles.css"), "utf8");
-  const media = css.lastIndexOf(`@media ${SIDEBAR_NARROW_QUERY}`);
+  const hiddenRule = css.search(
+    /\.sidebar\s*\{[^}]*transform:\s*translateX\(-102%\);\s*visibility:\s*hidden/,
+  );
+  assert.ok(hiddenRule >= 0, "styles.css has no rule hiding .sidebar off-canvas");
+  const media = css.lastIndexOf(`@media ${SIDEBAR_NARROW_QUERY}`, hiddenRule);
   assert.ok(media >= 0, `styles.css has no @media ${SIDEBAR_NARROW_QUERY} block`);
-  const block = css.slice(media, css.indexOf("}\n}", media) + 3);
+  const nextMedia = css.indexOf("@media ", media + 1);
+  const block = css.slice(media, nextMedia < 0 ? undefined : nextMedia);
   assert.match(
     block,
     /\.sidebar\s*\{[^}]*transform:\s*translateX\(-102%\);\s*visibility:\s*hidden/,

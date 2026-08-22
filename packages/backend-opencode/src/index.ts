@@ -64,6 +64,10 @@ import type {
 } from "@polyth/contracts";
 import { createOpenCodeClient, type OpenCodeClient } from "./client.ts";
 import {
+  prepareBrowserToolEnvironment,
+  type OpenCodeBrowserToolConfig,
+} from "./browserTool.ts";
+import {
   asOcEvent,
   backendSessionId,
   createTranslateState,
@@ -80,12 +84,24 @@ export interface OpenCodeAdapterOptions {
   hostname?: string;
   bin?: string;
   dataDir?: string;
+  browserTool?: OpenCodeBrowserToolConfig;
 }
 
 export { createOpenCodeClient } from "./client.ts";
 export type { OpenCodeClient } from "./client.ts";
 export { createConfigApplier } from "./config.ts";
 export type { BackendConfigApplier, McpApplyEntry } from "./config.ts";
+export {
+  BROWSER_TOOL_PATH,
+  createBrowserToolBridge,
+  createBrowserToolPluginSource,
+  prepareBrowserToolEnvironment,
+} from "./browserTool.ts";
+export type {
+  BrowserToolBridge,
+  BrowserToolRegistration,
+  OpenCodeBrowserToolConfig,
+} from "./browserTool.ts";
 
 const CAPABILITIES: RuntimeCapabilities = {
   streaming: true,
@@ -355,10 +371,11 @@ const spawnServe = async (
   const port = opts.port ?? (await freePort(hostname));
   const pidFile = pidFileFor(opts.cwd);
   reapOrphan(pidFile);
+  let env = { ...process.env };
+  if (opts.dataDir) env.OPENCODE_CONFIG_DIR = opts.dataDir;
+  if (opts.browserTool) env = await prepareBrowserToolEnvironment(opts.browserTool, env);
   return new Promise((resolve, reject) => {
     const bin = opts.bin ?? "opencode";
-    const env = { ...process.env };
-    if (opts.dataDir) env.OPENCODE_CONFIG_DIR = opts.dataDir;
     const child = spawn(bin, ["serve", "--hostname", hostname, "--port", String(port)], {
       cwd: opts.cwd,
       env,

@@ -119,6 +119,40 @@ test("parser drops unknown and duplicate widget ids and restores missing known i
   assert.equal(parsed.audience, "simple");
 });
 
+test("persisted retired New session widget is removed from header placements", () => {
+  const parsed = parseWidgetLayout(JSON.stringify({
+    version: 1,
+    audience: "standard",
+    zones: { header: [], left: [], main: [], right: [], bottom: [], floating: [] },
+    slotPlacements: {
+      "app.header.actions": ["shell.new-session", "sample.search"],
+    },
+    widgets: {
+      "shell.new-session": {
+        visible: true,
+        size: { w: 1, h: 1 },
+        position: { x: 0, y: 0 },
+        definitionId: "shell.new-session",
+        pluginId: "shell-actions",
+        title: "New session",
+      },
+      "sample.search": {
+        visible: true,
+        size: { w: 1, h: 1 },
+        position: { x: 0, y: 0 },
+      },
+    },
+  }), [{
+    id: "sample.search",
+    kind: "mini-widget",
+    defaultSlot: "app.header.actions",
+    defaultVisible: true,
+  }]);
+
+  assert.equal("shell.new-session" in parsed.widgets, false);
+  assert.deepEqual(parsed.slotPlacements["app.header.actions"], ["sample.search"]);
+});
+
 test("invalid persisted layouts fall back to defaults", () => {
   assert.deepEqual(
     parseWidgetLayout("not json", ["core.chat"]),

@@ -105,6 +105,11 @@ export function createChromiumDriver(executablePath: string): BrowserDriver {
 
       const locate = (target: BrowserTarget) => {
         if ("selector" in target) return page.locator(target.selector).first();
+        if ("text" in target) {
+          return page.getByText(target.text, {
+            ...(target.exact !== undefined ? { exact: target.exact } : {}),
+          }).first();
+        }
         if ("role" in target) {
           return page.getByRole(target.role as Parameters<typeof page.getByRole>[0], {
             ...(target.name !== undefined ? { name: target.name } : {}),
@@ -160,8 +165,10 @@ export function createChromiumDriver(executablePath: string): BrowserDriver {
         async press(key) {
           await page.keyboard.press(key);
         },
-        async scroll(x, y) {
-          await page.mouse.wheel(x, y);
+        async scroll(x, y, target) {
+          const loc = target ? locate(target) : null;
+          if (loc) await loc.scrollIntoViewIfNeeded();
+          else await page.mouse.wheel(x, y);
         },
         async select(target, value) {
           const loc = locate(target);
@@ -171,17 +178,56 @@ export function createChromiumDriver(executablePath: string): BrowserDriver {
           if (condition === "network-idle") await page.waitForLoadState("networkidle", { timeout: timeoutMs ?? 10_000 });
           else if (condition === "selector" && value) await page.waitForSelector(value, { timeout: timeoutMs ?? 10_000 });
         },
+        async resize(viewport) {
+          await page.setViewportSize(viewport);
+        },
+        async inspect(selector) {
+          const loc = page.locator(selector).first();
+          await loc.waitFor({ state: "attached" });
+          return loc.evaluate((element, queriedSelector) => {
+            const style = getComputedStyle(element);
+            const rect = element.getBoundingClientRect();
+            return {
+              selector: queriedSelector,
+              tag: element.tagName.toLowerCase(),
+              text: (element.textContent ?? "").trim().slice(0, 500),
+              rect: {
+                x: Math.round(rect.x),
+                y: Math.round(rect.y),
+                width: Math.round(rect.width),
+                height: Math.round(rect.height),
+              },
+              styles: {
+                display: style.display,
+                position: style.position,
+                color: style.color,
+                backgroundColor: style.backgroundColor,
+                fontFamily: style.fontFamily,
+                fontSize: style.fontSize,
+                fontWeight: style.fontWeight,
+                lineHeight: style.lineHeight,
+                margin: style.margin,
+                padding: style.padding,
+                border: style.border,
+                borderRadius: style.borderRadius,
+                opacity: style.opacity,
+                overflow: style.overflow,
+              },
+            };
+          }, selector);
+        },
         async screenshot() {
           const data = await page.screenshot({ type: "jpeg", quality: 60 });
           return { data: new Uint8Array(data), mime: "image/jpeg" };
         },
-        async observe() {
+        async observe(selector) {
           await refreshTitle();
           // innerText excludes input values, so passwords cannot leak this way.
-          const text = await page.evaluate(() => document.body?.innerText ?? "").catch(() => "");
+          const root = selector ? page.locator(selector).first() : page.locator("body");
+          const text = await root.innerText().catch(() => "");
           let ax = "";
           try {
-            ax = await page.locator("body").ariaSnapshot();
+            ax = await root.ariaSnapshot();
           } catch { /* aria snapshot unsupported/failed */ }
           return { url: page.url(), title: lastTitle, text, accessibilityDigest: ax.slice(0, 4000) };
         },

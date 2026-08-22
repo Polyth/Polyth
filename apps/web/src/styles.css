@@ -1660,6 +1660,10 @@ html.light .error-banner { color: #a1352b; }
   border-bottom: 1px solid var(--border-soft);
 }
 .browser-history { display: inline-flex; gap: 4px; }
+.browser-toolbar { flex-wrap: wrap; }
+.browser-toolbar .browser-address { min-width: min(320px, 45%); }
+.browser-toolbar select { max-width: 190px; font-size: 11px; padding: 5px 7px; }
+.browser-device { width: 92px; }
 .browser-frame-wrap { display: flex; flex-direction: column; width: 100%; height: 100%; }
 .browser-frame-img { flex: 1; min-height: 0; object-fit: contain; background: #fff; cursor: crosshair; width: 100%; }
 .browser-frame-bar {
@@ -1672,6 +1676,14 @@ html.light .error-banner { color: #a1352b; }
 .browser-console-line { font-size: 11px; word-break: break-word; }
 .browser-console-line.error { color: var(--danger, #e5534b); }
 .browser-console-line.warning { color: var(--warn, #d4a72c); }
+.browser-inspect-controls { display: flex; gap: 6px; margin: 8px 0; }
+.browser-inspect-controls input { min-width: 0; flex: 1; }
+.browser-snapshot pre {
+  margin: 8px 0 0; padding: 8px; max-height: 55vh; overflow: auto;
+  border: 1px solid var(--border-soft); border-radius: var(--radius-sm);
+  background: var(--sunken); white-space: pre-wrap; word-break: break-word;
+  font: 11px/1.45 var(--mono);
+}
 
 /* ---------- git view (Prototype) ---------- */
 .git-page { max-width: 1200px; width: 100%; margin-inline: auto; padding: 24px max(24px, calc((100% - 1180px) / 2)); }
@@ -4085,7 +4097,6 @@ body[data-density="balanced"] .composer { padding-block: 10px; }
 .mini-widget-placement-list article > button { display: grid; text-align: left; background: none; border: 0; }
 .mini-widget-placement-list article small { color: var(--muted); }
 .header-action:hover { color: var(--text); background: var(--bg); }
-.header-new-session { width: auto; display: flex; gap: 6px; padding: 0 10px; border: 1px solid var(--border-soft); }
 .header-user-menu { position: relative; flex: none; }
 .header-profile { display: flex; align-items: center; gap: 6px; padding: 0 4px; border: 0; background: transparent; }
 .user-menu-popup { top: calc(100% + 7px); min-width: 180px; }
@@ -4102,7 +4113,6 @@ body[data-density="balanced"] .composer { padding-block: 10px; }
 .app .overflow-trigger { width: 34px; height: 34px; }
 .app .workspace { background: var(--elevated); }
 .app.view-session .statusbar { display: none; }
-.app.view-session.mode-chat .railbar:not(.railbar-open),
 .app.view-session.mode-widgets .railbar:not(.railbar-open),
 .app.view-session.mode-edit .railbar:not(.railbar-open) { display: none; }
 
@@ -4404,7 +4414,7 @@ body[data-quick-actions="false"] [data-widget-id="core.quick-actions"] { display
   .app > .header { padding: 0 8px; }
   .sidebar { transform: translateX(-102%); visibility: hidden; }
   .sidebar.open { transform: none; visibility: visible; }
-  .header-brand strong, .header-breadcrumb-sep, .header-crumb:nth-of-type(2), .header-new-session span { display: none; }
+  .header-brand strong, .header-breadcrumb-sep, .header-crumb:nth-of-type(2) { display: none; }
   .header-crumb { max-width: 130px; }
   .workspace-mode-switch button { min-width: auto; height: 28px; padding: 0 7px; }
   .workspace-customize-panel { position: absolute; inset: 0 0 0 auto; width: min(340px, 92vw); z-index: 30; box-shadow: var(--shadow-lg); }
@@ -5047,7 +5057,7 @@ body[data-quick-actions="false"] [data-widget-id="core.quick-actions"] { display
 }
 
 /* Focus/canvas workspace overhaul. */
-.app.mode-widgets .railbar { display: none; }
+.app.mode-widgets .railbar:not(.railbar-open) { display: none; }
 .settings-nav-group {
   padding: 13px 10px 5px;
   color: var(--text-dim);

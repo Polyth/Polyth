@@ -193,18 +193,22 @@ export default function ContextRail() {
   const paneRef = useRef<HTMLDivElement>(null);
   const separatorRef = useRef<HTMLDivElement>(null);
   const backRef = useRef<HTMLButtonElement>(null);
-  const [workspaceWidth, setWorkspaceWidth] = useState(0);
+  const geometryKey = `${projectId ?? ""}:${open?.id ?? ""}:${presentation ? "workspace" : "context"}:${compact ? "compact" : "wide"}:${paneExpanded ? "expanded" : "normal"}`;
+  const [geometry, setGeometry] = useState<{ key: string; width: number }>({ key: "", width: 0 });
+  const workspaceWidth = geometry.key === geometryKey ? geometry.width : 0;
   const chatElOf = () =>
-    railbarRef.current?.closest(".app")?.querySelector(":scope > .workspace") ?? null;
+    railbarRef.current?.closest(".app")?.querySelector(":scope > .app-shell > .workspace") ?? null;
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const measure = () => {
       const chat = chatElOf();
       const paneW = presentation && paneRef.current && !paneRef.current.classList.contains("rail-fullscreen")
         ? paneRef.current.getBoundingClientRect().width
         : 0;
       const chatW = chat ? chat.getBoundingClientRect().width : 0;
-      setWorkspaceWidth(Math.round(chatW + paneW));
+      const width = Math.round(chatW + paneW);
+      setGeometry((current) =>
+        current.key === geometryKey && current.width === width ? current : { key: geometryKey, width });
     };
     measure();
     if (typeof ResizeObserver !== "function") return;
@@ -214,7 +218,7 @@ export default function ContextRail() {
     if (paneRef.current) ro.observe(paneRef.current);
     return () => ro.disconnect();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [open?.id, paneExpanded, compact]);
+  }, [geometryKey, presentation]);
 
   const chrome = (separatorRef.current?.getBoundingClientRect().width ?? SEPARATOR_FALLBACK) || SEPARATOR_FALLBACK;
   const geo: DockGeometry = { workspaceWidth, chrome };
@@ -248,11 +252,27 @@ export default function ContextRail() {
   const isWorkspacePane = open !== null && presentation !== undefined;
   const measured = workspaceWidth > 0;
   const admits = decision !== null && decision.dock;
-  const mode: "docked" | "layer" = !isWorkspacePane
+  const rawMode: "docked" | "layer" = !isWorkspacePane
     ? "docked"
     : compact || paneExpanded || stickyFullscreen || guardPromoted || (measured && !admits)
       ? "layer"
       : "docked";
+  const guardInputs = `${open?.id ?? ""}:${projectId ?? ""}:${remembered ?? "auto"}`;
+  const settledModeRef = useRef<{ key: string; width: number; mode: "docked" | "layer" } | null>(null);
+  const settledKey = `${guardInputs}:${compact}:${paneExpanded}:${stickyFullscreen}:${guardPromoted}`;
+  let mode = rawMode;
+  if (isWorkspacePane && measured) {
+    const settled = settledModeRef.current;
+    if (
+      settled !== null
+      && settled.key === settledKey
+      && Math.abs(settled.width - workspaceWidth) <= GUARD_WIDTH_TOLERANCE
+    ) {
+      mode = settled.mode;
+    } else {
+      settledModeRef.current = { key: settledKey, width: workspaceWidth, mode: rawMode };
+    }
+  }
   const layered = isWorkspacePane && mode === "layer";
 
   const dockWidth = decision !== null && presentation
@@ -266,7 +286,6 @@ export default function ContextRail() {
   // subtree changes (a Model picker mounting once models arrive) re-run the
   // check — the Chat+pane sum alone stays constant while a dock consumes
   // Chat's width and must never be the only trigger.
-  const guardInputs = `${open?.id ?? ""}:${projectId ?? ""}:${remembered ?? "auto"}`;
   useLayoutEffect(() => {
     const latch = guardLatchRef.current;
     if (latch !== null && latch.promoted) {
@@ -470,8 +489,12 @@ export default function ContextRail() {
 
   const badgeOf = (s: RailSurface): number => s.badge?.(ctx) ?? 0;
 
+  const geometryPending = isWorkspacePane && !measured && !compact && !paneExpanded;
   const paneStyle: CSSProperties | undefined = open
-    ? ({ "--rail-w": `${dockWidth}px` } as CSSProperties)
+    ? ({
+        "--rail-w": `${dockWidth}px`,
+        ...(geometryPending ? { visibility: "hidden", pointerEvents: "none" } : {}),
+      } as CSSProperties)
     : { display: "none" };
 
   // Compact contextual surfaces use the A390 modal sheet. Canonical workspace
@@ -572,6 +595,7 @@ export default function ContextRail() {
           role={compactContext ? "dialog" : "region"}
           aria-modal={compactContext || undefined}
           aria-label={open?.title ?? "Panel"}
+          data-geometry-ready={!geometryPending}
           onKeyDown={onPaneKey}
           onPointerDownCapture={onLayerInteract}
         >

@@ -59,6 +59,31 @@ test("create + navigate share one context; frames carry increasing revisions", a
   await svc.close(s.id);
 });
 
+test("history, resize, text targets, scoped observations, and inspect map through the service", async () => {
+  const svc = createBrowserService({
+    driver: createFakeDriver({
+      pages: {
+        [HOME]: { title: "App", text: "welcome", links: { "text:Next": `${HOME}next` } },
+        [`${HOME}next`]: { title: "Next", text: "second page token=sk-verysecret123" },
+      },
+    }),
+    allowedOrigins: () => ["http://127.0.0.1:5173"],
+  });
+  const s = await svc.create({ projectId: "p1", url: HOME });
+  const clicked = await svc.action(s.id, { kind: "click", target: { text: "Next", exact: true } }, "agent");
+  assert.equal(clicked.session.url, `${HOME}next`);
+  assert.equal((await svc.action(s.id, { kind: "back" }, "agent")).session.url, HOME);
+  assert.equal((await svc.action(s.id, { kind: "forward" }, "agent")).session.url, `${HOME}next`);
+  const resized = await svc.action(s.id, { kind: "resize", viewport: { width: 390, height: 844 } }, "agent");
+  assert.deepEqual(resized.session.viewport, { width: 390, height: 844, deviceScaleFactor: 1 });
+  const inspected = await svc.action(s.id, { kind: "inspect", selector: "main" }, "agent");
+  assert.equal((inspected.result as { selector?: string })?.selector, "main");
+  assert.doesNotMatch(String((inspected.result as { text?: string })?.text), /sk-verysecret123/);
+  assert.match(String((inspected.result as { text?: string })?.text), /\[redacted\]/i);
+  assert.match((await svc.observe(s.id, { selector: "main" })).text, /second page/);
+  await svc.close(s.id);
+});
+
 test("user and agent actions serialize on one queue with unique action ids", async () => {
   const svc = service();
   const s = await svc.create({ projectId: "p1", url: HOME });
@@ -136,6 +161,10 @@ test("redirect hops re-run policy; blocked origins never land", async () => {
 
 test("observations and console lines are redacted; password values never appear", async () => {
   const svc = service();
+  const runtimeMessages: string[] = [];
+  svc.onEvent((event) => {
+    if (event.message) runtimeMessages.push(event.message);
+  });
   const s = await svc.create({ projectId: "p1", url: HOME });
   await svc.navigate(s.id, `${HOME}next`, "user");
   const obs = await svc.observe(s.id);
@@ -144,6 +173,8 @@ test("observations and console lines are redacted; password values never appear"
   const logs = svc.console(s.id);
   assert.ok(logs.length >= 1);
   assert.ok(logs.every((l) => !l.message.includes("sk-abcdef12345")));
+  assert.ok(runtimeMessages.every((message) => !message.includes("sk-abcdef12345")));
+  assert.ok(runtimeMessages.some((message) => /\[redacted\]/i.test(message)));
   // password form: typing into a password field never shows up in observe
   await svc.navigate(s.id, `${HOME}form`, "user");
   await svc.action(s.id, { kind: "type", target: { selector: "input#pw" }, text: "hunter2" }, "user");

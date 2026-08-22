@@ -183,7 +183,11 @@ test("open rails remain visible in every workspace mode", async () => {
   const rail = await read("../src/components/ContextRail.tsx");
   const css = await read("../src/styles.css");
   assert.ok(rail.includes('`railbar${open ? " railbar-open" : ""}`'), "the host marks an active surface");
-  for (const mode of ["chat", "widgets", "edit"]) {
+  assert.ok(
+    !css.includes(".app.view-session.mode-chat .railbar:not(.railbar-open)"),
+    "Chat keeps the inactive desktop rail available as a stable launcher",
+  );
+  for (const mode of ["widgets", "edit"]) {
     assert.ok(
       css.includes(`.app.view-session.mode-${mode} .railbar:not(.railbar-open)`),
       `${mode} hides only an inactive rail host`,

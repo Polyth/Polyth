@@ -10,7 +10,7 @@ import {
 const PAGES: Record<string, string> = {
   general: "General", appearance: "Appearance", chat: "Chat", notifications: "Notifications",
   behavior: "Behavior", mcp: "MCP", plugins: "Plugins", about: "About", voice: "Voice",
-  models: "Providers & Models", agents: "Agents",
+  models: "Providers & Models", agents: "Agents", widgets: "Widgets & Layout",
 };
 
 test("fold strips diacritics and case", () => {
@@ -40,16 +40,22 @@ test("no matches yields an empty list, blank query too", () => {
   assert.deepEqual(searchSettingsItems("   ", PAGES), []);
 });
 
-test("deleted widget-layout settings and setup launchers are not advertised", async () => {
-  assert.equal(listSettingsItems().some((item) => item.pageId === "widgets"), false);
-  assert.deepEqual(searchSettingsItems("widget layout presets", { ...PAGES, widgets: "Widgets" }), []);
+test("Widgets & Layout is wired and its toolbar, rail, and mini-widget controls are searchable", async () => {
+  const widgetItems = listSettingsItems().filter((item) => item.pageId === "widgets");
+  assert.ok(widgetItems.some((item) => item.id === "widgets.capabilities"));
+  assert.ok(widgetItems.some((item) => item.id === "widgets.actions"));
+  assert.ok(searchSettingsItems("toolbar", PAGES).some((hit) => hit.item.id === "widgets.capabilities"));
 
-  const [shell, settings] = await Promise.all([
+  const [shell, settings, widgets] = await Promise.all([
     readFile(new URL("../src/shell.ts", import.meta.url), "utf8"),
     readFile(new URL("../src/components/SettingsView.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../src/components/settings/WidgetsPage.tsx", import.meta.url), "utf8"),
   ]);
   assert.doesNotMatch(shell, /Change workspace preset|cmd\.customize/);
   assert.doesNotMatch(settings, /Choose a setup/);
+  assert.match(settings, /Widgets & Layout/);
+  assert.match(widgets, /data-settings-item="widgets\.capabilities"/);
+  assert.match(widgets, /data-settings-item="widgets\.actions"/);
 });
 
 test("items on hidden/unknown pages are skipped", () => {

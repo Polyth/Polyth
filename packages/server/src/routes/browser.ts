@@ -3,7 +3,7 @@
 // nothing becomes model-visible without a log record.
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import type { BrowserAction, JsonObject, SessionEvent } from "@polyth/contracts";
+import type { BrowserAction, BrowserTarget, JsonObject, SessionEvent } from "@polyth/contracts";
 import type { BrowserService } from "@polyth/browser";
 import { redactObservationText } from "@polyth/browser";
 import type { RouteHandler } from "../http.ts";
@@ -31,14 +31,23 @@ const summarize = (action: BrowserAction): string => {
     case "click": return `click ${targetText(action.target)}`;
     case "type": return `type into ${targetText(action.target)} (${action.text.length} chars${action.submit ? ", submit" : ""})`;
     case "press": return `press ${action.key}`;
-    case "scroll": return `scroll ${action.x},${action.y}`;
+    case "scroll": return action.target ? `scroll to ${targetText(action.target)}` : `scroll ${action.x ?? 0},${action.y ?? 0}`;
     case "select": return `select ${action.value} in ${targetText(action.target)}`;
     case "wait": return `wait ${action.condition}${action.value ? ` ${action.value}` : ""}`;
+    case "back": return "go back";
+    case "forward": return "go forward";
+    case "reload": return "reload";
+    case "resize": return `resize to ${action.viewport.width}×${action.viewport.height}`;
+    case "inspect": return `inspect ${action.selector}`;
   }
 };
 
-const targetText = (t: { selector?: string; role?: string; name?: string; point?: { x: number; y: number } }): string =>
-  t.selector ?? (t.role ? `${t.role}${t.name ? ` "${t.name}"` : ""}` : t.point ? `(${t.point.x},${t.point.y})` : "?");
+const targetText = (t: BrowserTarget): string => {
+  if ("selector" in t) return t.selector;
+  if ("text" in t) return `text "${t.text}"`;
+  if ("role" in t) return `${t.role}${t.name ? ` "${t.name}"` : ""}`;
+  return `(${t.point.x},${t.point.y})`;
+};
 
 export function browserRoutes(deps: {
   browser: BrowserService;
@@ -151,11 +160,11 @@ export function browserRoutes(deps: {
           });
         }
         try {
-          const { actionId, session } = await browser.action(id, action, actor);
+          const { actionId, session, result } = await browser.action(id, action, actor);
           if (linked) {
             await append(linked, "browser/action-completed", { browserSessionId: id, actionId, actor, url: session.url, title: session.title });
           }
-          json(200, { actionId, session });
+          json(200, { actionId, session, ...(result ? { result } : {}) });
         } catch (err) {
           const e = err as Error & { code?: string };
           if (linked) {
@@ -170,7 +179,10 @@ export function browserRoutes(deps: {
       if (m && method === "POST") {
         const id = m[1]!;
         const b = await body();
-        const obs = await browser.observe(id, { includeScreenshot: b.includeScreenshot === true });
+        const obs = await browser.observe(id, {
+          includeScreenshot: b.includeScreenshot === true,
+          ...(typeof b.selector === "string" && b.selector.trim() ? { selector: b.selector } : {}),
+        });
         let screenshotRef: string | undefined;
         if (obs.screenshot) {
           const dto = browser.get(id);

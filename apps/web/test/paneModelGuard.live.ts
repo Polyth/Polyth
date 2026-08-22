@@ -193,6 +193,34 @@ async function openApp(
   await context.addInitScript((entries: Record<string, string>) => {
     for (const [k, v] of Object.entries(entries)) localStorage.setItem(k, v);
   }, { "polyth.prefs": PERSONA_SEED, ...seeds });
+  await context.addInitScript(() => {
+    const paints: Array<{ ready: string | null; visibility: string; mode: string }> = [];
+    Object.assign(window, { __polythPaneFirstPaints: paints });
+    const record = (node: Node) => {
+      const roots = node instanceof Element
+        ? [node, ...node.querySelectorAll(".rail-workspace")]
+        : [];
+      for (const root of roots) {
+        if (!(root instanceof HTMLElement) || !root.classList.contains("rail-workspace")) continue;
+        paints.push({
+          ready: root.getAttribute("data-geometry-ready"),
+          visibility: getComputedStyle(root).visibility,
+          mode: root.classList.contains("rail-fullscreen") ? "layer" : "docked",
+        });
+      }
+    };
+    new MutationObserver((records) => {
+      for (const mutation of records) {
+        if (mutation.type === "attributes") record(mutation.target);
+        else for (const node of mutation.addedNodes) record(node);
+      }
+    }).observe(document, {
+      subtree: true,
+      childList: true,
+      attributes: true,
+      attributeFilter: ["class", "style", "data-geometry-ready"],
+    });
+  });
   const page = await context.newPage();
   const errors: string[] = [];
   page.on("pageerror", (e) => errors.push(`pageerror: ${e.message}`));
@@ -237,7 +265,7 @@ interface PaneModeSnapshot {
 const snapshotMode = (page: Page): Promise<PaneModeSnapshot> =>
   page.evaluate(() => {
     const pane = document.querySelector(".rail-workspace");
-    const chat = document.querySelector(".app > .workspace");
+    const chat = document.querySelector(".app > .app-shell > .workspace");
     return {
       apps: document.querySelectorAll(".app").length,
       paneOpen: pane !== null,
@@ -245,6 +273,14 @@ const snapshotMode = (page: Page): Promise<PaneModeSnapshot> =>
       chatWidth: chat ? Math.round(chat.getBoundingClientRect().width) : 0,
       bodyText: (document.body.innerText ?? "").trim().length,
     };
+  });
+
+const provisionalPaintFailures = (page: Page): Promise<Array<{ ready: string | null; visibility: string; mode: string }>> =>
+  page.evaluate(() => {
+    const paints = (window as unknown as {
+      __polythPaneFirstPaints?: Array<{ ready: string | null; visibility: string; mode: string }>;
+    }).__polythPaneFirstPaints ?? [];
+    return paints.filter((paint) => paint.ready !== "true" && paint.visibility !== "hidden");
   });
 
 interface HitFailure {
@@ -260,7 +296,7 @@ const centerHitFailures = (page: Page): Promise<HitFailure[]> =>
   page.evaluate(() => {
     const describe = (el: Element | null): string =>
       el === null ? "null" : `${el.tagName.toLowerCase()}.${[...el.classList].join(".")}`;
-    const chat = document.querySelector(".app > .workspace");
+    const chat = document.querySelector(".app > .app-shell > .workspace");
     const composer = chat?.querySelector(".composer, .composer-hero") ?? null;
     if (!chat || !composer) return [{ action: "-", hit: "-", reason: "no chat/composer found" }];
     const chatRect = chat.getBoundingClientRect();
@@ -291,6 +327,7 @@ test("live: reload of the canonical session URL with Files open renders one app,
   try {
     await h.page.waitForSelector(".app", { timeout: 15_000 });
     await h.page.waitForSelector(".timeline-wrap", { timeout: 15_000 });
+    await h.page.waitForSelector('.rail-workspace[data-geometry-ready="true"]', { timeout: 15_000 });
     await settle(h.page);
 
     assert.deepEqual(reactLoopErrors(h.errors), [], `React render-loop errors: ${h.errors.join(" | ")}`);
@@ -306,6 +343,11 @@ test("live: reload of the canonical session URL with Files open renders one app,
     assert.equal(counts.composers, 1, "exactly one Composer");
     assert.equal(counts.paneOpen, true, "Files pane restored open");
     assert.ok(counts.bodyText > 0, "application did not blank");
+    assert.deepEqual(
+      await provisionalPaintFailures(h.page),
+      [],
+      "a provisional dock became visible before its initial geometry was known",
+    );
 
     // The mode the guard chose must be stable — no promote/release loop.
     const first = await snapshotMode(h.page);
@@ -331,7 +373,7 @@ test("live: the PANE-VERIFY-02 crash shape — fresh session, typed draft, Files
     // renders during boot). Before the repair this exact shape entered the
     // guard's promote/clear loop and blanked the app with React #185.
     await h.page.waitForSelector(".composer-hero", { timeout: 15_000 });
-    await h.page.waitForSelector(".rail-workspace", { timeout: 15_000 });
+    await h.page.waitForSelector('.rail-workspace[data-geometry-ready="true"]', { timeout: 15_000 });
     await settle(h.page);
 
     assert.deepEqual(reactLoopErrors(h.errors), [], `React render-loop errors: ${h.errors.join(" | ")}`);
@@ -353,6 +395,38 @@ test("live: the PANE-VERIFY-02 crash shape — fresh session, typed draft, Files
     assert.ok(state.bodyText > 0, "application blanked (the PANE-VERIFY-02 failure)");
     assert.equal(state.storedDraft, draft, "draft must survive the reload byte-for-byte");
     assert.ok((state.editorText ?? "").includes(draft), "draft restored into the composer editor");
+    assert.deepEqual(
+      await provisionalPaintFailures(h.page),
+      [],
+      "restored Files painted a provisional dock before choosing its settled mode",
+    );
+  } finally {
+    await closeApp(h);
+  }
+});
+
+test("live: a workspace launcher leaves Canvas for Chat and restores the desktop rail", { timeout: 120_000 }, async () => {
+  const h = await openApp(`/p/${projectId}/s/${messageSessionId}`, { width: 1200, height: 900 });
+  try {
+    await h.page.waitForSelector(".timeline-wrap", { timeout: 15_000 });
+    await h.page.getByRole("button", { name: "Canvas" }).click();
+    await h.page.waitForSelector(".app.mode-widgets", { timeout: 15_000 });
+
+    await h.page.evaluate(() => {
+      const launcher = document.querySelector<HTMLButtonElement>('[data-pane-launcher="files"]');
+      if (!launcher) throw new Error("Files launcher is not mounted");
+      launcher.click();
+    });
+    await h.page.waitForSelector('.app.mode-chat.view-session .rail-workspace[data-geometry-ready="true"]', { timeout: 15_000 });
+    const state = await h.page.evaluate(() => ({
+      modeChat: document.querySelector(".app.mode-chat") !== null,
+      sessionView: document.querySelector(".app.view-session") !== null,
+      railVisible: document.querySelector(".rail-icon-col")?.checkVisibility() ?? false,
+    }));
+    assert.equal(state.modeChat, true, "opening Files forces the Chat workspace mode");
+    assert.equal(state.sessionView, true, "opening Files restores the session primary view");
+    assert.equal(state.railVisible, true, "the desktop icon rail remains visible beside the open pane");
+    assert.deepEqual(reactLoopErrors(h.errors), [], `React render-loop errors: ${h.errors.join(" | ")}`);
   } finally {
     await closeApp(h);
   }
@@ -367,9 +441,21 @@ for (const width of [1440, 1200, 1024, 1000, 900]) {
       // The FULL engineer composer: wait for the Model picker chip so the
       // late-mounting pickers are part of the judged layout.
       await h.page.waitForSelector(".composer .picker-chip", { timeout: 20_000 });
+      assert.equal(
+        await h.page.locator(".rail-icon-col").isVisible(),
+        true,
+        `closed desktop rail disappeared at ${width}px`,
+      );
 
-      await h.page.click(`[data-pane-launcher="files"]`);
-      await h.page.waitForSelector(".rail-workspace", { timeout: 15_000 });
+      // Exercise the real React launcher callback independent of capability
+      // placement: at intermediate widths Files can live inside More tools,
+      // while the compact bottom-nav launcher remains mounted but hidden.
+      await h.page.evaluate(() => {
+        const launcher = document.querySelector<HTMLButtonElement>('[data-pane-launcher="files"]');
+        if (!launcher) throw new Error("Files launcher is not mounted");
+        launcher.click();
+      });
+      await h.page.waitForSelector('.rail-workspace[data-geometry-ready="true"]', { timeout: 15_000 });
       await settle(h.page);
 
       assert.deepEqual(reactLoopErrors(h.errors), [], `React render-loop errors: ${h.errors.join(" | ")}`);
@@ -377,6 +463,11 @@ for (const width of [1440, 1200, 1024, 1000, 900]) {
       assert.equal(first.apps, 1, "exactly one app");
       assert.equal(first.paneOpen, true, "Files pane is open");
       assert.ok(first.bodyText > 0, "application did not blank");
+      assert.deepEqual(
+        await provisionalPaintFailures(h.page),
+        [],
+        `Files painted a provisional dock at ${width}px`,
+      );
 
       // The guard's decision must be stable — an invalid dock promotes ONCE
       // and latches; it never ping-pongs between docked and layered.
@@ -396,7 +487,7 @@ for (const width of [1440, 1200, 1024, 1000, 900]) {
         // and the app is intact — the safety path, not a crash.
         const layer = await h.page.evaluate(() => ({
           fullscreen: document.querySelector(".rail-workspace.rail-fullscreen") !== null,
-          chatInert: document.querySelector(".app > .workspace")?.hasAttribute("inert") ?? false,
+          chatInert: document.querySelector(".app > .app-shell > .workspace")?.hasAttribute("inert") ?? false,
         }));
         assert.equal(layer.fullscreen, true, "layer mode uses the full-screen pane");
         assert.equal(layer.chatInert, true, "Chat must be inert under the layer");

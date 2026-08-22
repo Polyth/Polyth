@@ -9,7 +9,14 @@ import { useStore } from "../store.ts";
 import EmptyState from "./EmptyState.tsx";
 import { usePaneVisible } from "../workspace/paneVisibility.ts";
 
-type InspectorTab = "console" | "activity" | "network";
+type InspectorTab = "snapshot" | "console" | "activity";
+type DeviceSize = "mobile" | "tablet" | "desktop";
+
+const DEVICE_VIEWPORTS: Record<DeviceSize, { width: number; height: number }> = {
+  mobile: { width: 390, height: 844 },
+  tablet: { width: 768, height: 1024 },
+  desktop: { width: 1440, height: 900 },
+};
 
 interface Capability {
   available: boolean;
@@ -36,6 +43,9 @@ export default function PreviewView() {
   const [activity, setActivity] = useState<string[]>([]);
   const [consoleLines, setConsoleLines] = useState<Array<{ at: number; level: string; message: string }>>([]);
   const [typeText, setTypeText] = useState("");
+  const [snapshotText, setSnapshotText] = useState("");
+  const [inspectSelector, setInspectSelector] = useState("");
+  const [deviceSize, setDeviceSize] = useState<DeviceSize>("desktop");
   const wsRef = useRef<WebSocket | null>(null);
   const revisionRef = useRef(0);
   const imgRef = useRef<HTMLImageElement>(null);
@@ -49,6 +59,33 @@ export default function PreviewView() {
 
   useEffect(() => { void refresh(); }, [projectId, activeSessionId]);
   useEffect(() => { void api.browserCapability().then(setCap); }, []);
+  useEffect(() => {
+    if (!projectId) {
+      setBrowser(null);
+      return;
+    }
+    let cancelled = false;
+    const adopt = async () => {
+      const sessions = await api.browserList(projectId);
+      if (cancelled) return;
+      const matching = activeSessionId
+        ? sessions.find((session) => session.sessionId === activeSessionId)
+        : undefined;
+      const next = matching ?? sessions.at(-1) ?? null;
+      setBrowser((current) => current?.id === next?.id ? current : next);
+      if (next) revisionRef.current = 0;
+    };
+    void adopt();
+    if (!visible || browser) return () => { cancelled = true; };
+    const timer = setInterval(() => void adopt(), 1500);
+    return () => {
+      cancelled = true;
+      clearInterval(timer);
+    };
+  }, [projectId, activeSessionId, visible, browser?.id]);
+  useEffect(() => {
+    if (browser?.url) setUrlInput(browser.url);
+  }, [browser?.url]);
   useEffect(() => {
     if (!projectId || state.status !== "starting" || !visible) return;
     const t = setInterval(() => void refresh(), 1000);
@@ -112,7 +149,7 @@ export default function PreviewView() {
     try {
       const got = await api.previewStart(projectId, undefined, activeSessionId ?? undefined);
       setUrlInput(got.url);
-      setState({ url: got.url, status: "starting", port: got.port });
+      setState({ url: got.url, urls: [got.url], status: "starting", port: got.port });
       if (browser) await navigate(got.url);
     } catch (e) {
       setError(String(e));
@@ -177,11 +214,55 @@ export default function PreviewView() {
   };
 
   const act = async (action: Parameters<typeof api.browserAction>[1]) => {
+    if (!browser) return null;
+    setError("");
+    try {
+      const { session, result } = await api.browserAction(browser.id, action, "user");
+      setBrowser(session);
+      return result ?? null;
+    } catch (e) {
+      setError(String(e));
+      return null;
+    }
+  };
+
+  const takeSnapshot = async (selector?: string) => {
     if (!browser) return;
     setError("");
     try {
-      const { session } = await api.browserAction(browser.id, action, "user");
-      setBrowser(session);
+      const observation = await api.browserObserve(browser.id, false, selector);
+      setSnapshotText([
+        `${observation.title || "Untitled"} — ${observation.url}`,
+        observation.text,
+        observation.accessibilityDigest,
+      ].filter(Boolean).join("\n\n"));
+      setTab("snapshot");
+      setInspectorOpen(true);
+    } catch (e) {
+      setError(String(e));
+    }
+  };
+
+  const inspect = async () => {
+    const selector = inspectSelector.trim();
+    if (!selector) return;
+    const result = await act({ kind: "inspect", selector });
+    if (result) {
+      setSnapshotText(JSON.stringify(result, null, 2));
+      setTab("snapshot");
+      setInspectorOpen(true);
+    }
+  };
+
+  const capture = async () => {
+    if (!browser) return;
+    try {
+      const observation = await api.browserObserve(browser.id, true);
+      setSnapshotText(observation.screenshotRef
+        ? `Captured the current browser frame as ${observation.screenshotRef}.`
+        : "The browser returned no capture.");
+      setTab("snapshot");
+      setInspectorOpen(true);
     } catch (e) {
       setError(String(e));
     }
@@ -221,9 +302,9 @@ export default function PreviewView() {
       <div className="browser-chrome browser-toolbar">
         {browserMode && (
           <span className="browser-history">
-            <button className="small-btn" title="Back" aria-label="Back" onClick={() => void act({ kind: "press", key: "Alt+ArrowLeft" })}>←</button>
-            <button className="small-btn" title="Forward" aria-label="Forward" onClick={() => void act({ kind: "press", key: "Alt+ArrowRight" })}>→</button>
-            <button className="small-btn" title="Reload" aria-label="Reload" onClick={() => browser && void navigate(browser.url)}>↻</button>
+            <button className="small-btn" title="Back" aria-label="Back" onClick={() => void act({ kind: "back" })}>←</button>
+            <button className="small-btn" title="Forward" aria-label="Forward" onClick={() => void act({ kind: "forward" })}>→</button>
+            <button className="small-btn" title="Reload" aria-label="Reload" onClick={() => void act({ kind: "reload" })}>↻</button>
           </span>
         )}
         <form
@@ -240,6 +321,20 @@ export default function PreviewView() {
             placeholder="localhost:5173"
             aria-label="Address"
           />
+          {state.urls && state.urls.length > 1 && (
+            <select
+              aria-label="Discovered preview address"
+              value={state.urls.includes(urlInput) ? urlInput : ""}
+              onChange={(event) => {
+                if (!event.target.value) return;
+                setUrlInput(event.target.value);
+                if (browserMode) void navigate(event.target.value);
+              }}
+            >
+              <option value="">Discovered…</option>
+              {state.urls.map((url) => <option key={url} value={url}>{url}</option>)}
+            </select>
+          )}
         </form>
         {!browserMode && <button className="small-btn" title="Refresh" onClick={() => void refresh()}>↻</button>}
         {frameSrc && (
@@ -258,6 +353,22 @@ export default function PreviewView() {
         )}
         {browserMode && (
           <>
+            <select
+              className="browser-device"
+              aria-label="Browser device size"
+              value={deviceSize}
+              onChange={(event) => {
+                const next = event.target.value as DeviceSize;
+                setDeviceSize(next);
+                void act({ kind: "resize", viewport: DEVICE_VIEWPORTS[next] });
+              }}
+            >
+              <option value="mobile">Mobile</option>
+              <option value="tablet">Tablet</option>
+              <option value="desktop">Desktop</option>
+            </select>
+            <button className="small-btn" onClick={() => void takeSnapshot()} title="Read visible text and accessibility details">Snapshot</button>
+            <button className="small-btn" onClick={() => void capture()} title="Capture the current browser frame">Capture</button>
             <button className="small-btn" aria-pressed={agentPaused} onClick={() => void togglePause()} title="Pause or resume agent control of this browser">
               {agentPaused ? "Resume agent" : "Pause agent"}
             </button>
@@ -328,7 +439,7 @@ export default function PreviewView() {
         {inspectorOpen && (
           <aside className="inspector browser-inspector">
             <div className="inspector-tabs">
-              {(["console", "activity", "network"] as const).map((t) => (
+              {(["snapshot", "console", "activity"] as const).map((t) => (
                 <button key={t} className={`tab ${tab === t ? "active" : ""}`} onClick={() => setTab(t)}>
                   {t[0]!.toUpperCase() + t.slice(1)}
                 </button>
@@ -339,6 +450,31 @@ export default function PreviewView() {
               <div className="stat-row"><span className="k">Port</span><span className="mono">{state.port ?? "—"}</span></div>
               <div className="stat-row"><span className="k">Status</span><span>{statusCopy}</span></div>
               {browserMode && <div className="stat-row"><span className="k">Engine</span><span>{browser?.engine}{agentPaused ? " · agent paused" : ""}</span></div>}
+              {tab === "snapshot" && (
+                browserMode ? (
+                  <div className="browser-snapshot">
+                    <div className="browser-inspect-controls">
+                      <input
+                        value={inspectSelector}
+                        onChange={(event) => setInspectSelector(event.target.value)}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter") {
+                            event.preventDefault();
+                            void inspect();
+                          }
+                        }}
+                        placeholder="CSS selector to snapshot or inspect"
+                        aria-label="CSS selector"
+                      />
+                      <button className="small-btn" onClick={() => void takeSnapshot(inspectSelector.trim() || undefined)}>Read</button>
+                      <button className="small-btn" disabled={!inspectSelector.trim()} onClick={() => void inspect()}>Inspect</button>
+                    </div>
+                    <pre>{snapshotText || "Choose Snapshot to read the page, or enter a selector to inspect one element."}</pre>
+                  </div>
+                ) : (
+                  <div className="muted">Snapshots need the controlled browser.</div>
+                )
+              )}
               {tab === "console" && (
                 browserMode ? (
                   <div className="browser-console" role="log">
@@ -363,7 +499,6 @@ export default function PreviewView() {
                   <div className="muted">Activity needs the controlled browser.</div>
                 )
               )}
-              {tab === "network" && <div className="muted">Network capture is not enabled for this session.</div>}
             </div>
           </aside>
         )}

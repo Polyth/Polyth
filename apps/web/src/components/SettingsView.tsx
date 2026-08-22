@@ -22,6 +22,7 @@ import ShortcutsPage from "./settings/ShortcutsPage.tsx";
 import SessionsPage from "./settings/SessionsPage.tsx";
 import AccessPage from "./settings/AccessPage.tsx";
 import PackagesPage from "./settings/PackagesPage.tsx";
+import WidgetsPage from "./settings/WidgetsPage.tsx";
 
 interface PageDef {
   id: string;
@@ -41,6 +42,7 @@ const BUILTIN: PageDef[] = [
   { id: "shortcuts", label: "Shortcuts", group: "Workspace", render: () => <ShortcutsPage /> },
   { id: "projects", label: "Projects", group: "Engineering", render: () => <ProjectsPage /> },
   { id: "behavior", label: "Behavior", group: "Engineering", render: () => <BehaviorPage /> },
+  { id: "widgets", label: "Widgets & Layout", group: "Customize", icon: "◇", render: () => <WidgetsPage /> },
   { id: "packages", label: "Packages", group: "Customize", icon: "📦", render: () => <PackagesPage /> },
   { id: "access", label: "Access", group: "System", nav: false, render: () => <AccessPage /> },
   { id: "about", label: "About", group: "System", nav: false, render: () => <AboutPage /> },

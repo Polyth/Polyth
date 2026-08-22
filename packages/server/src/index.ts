@@ -5,7 +5,12 @@ import { fileURLToPath } from "node:url";
 import { createContext, loadPlugin } from "@polyth/kernel";
 import { createStore, deriveMessages } from "@polyth/session";
 import { CAP, type AgentRuntime, type JsonObject, type RuntimeEvent, type SessionEvent, type SessionProjection, type WalkthroughSource } from "@polyth/contracts";
-import { createConfigApplier, createOpenCodeRuntime, type OpenCodeAdapterOptions } from "@polyth/backend-opencode";
+import {
+  createBrowserToolBridge,
+  createConfigApplier,
+  createOpenCodeRuntime,
+  type OpenCodeAdapterOptions,
+} from "@polyth/backend-opencode";
 import { createPluginRegistry } from "@polyth/plugins";
 import { createAutoAcceptStore, createPermissionService } from "@polyth/permissions";
 import { createGoalService, type GoalService } from "@polyth/goals";
@@ -130,13 +135,31 @@ export async function boot(opts: BootOptions = {}) {
   const cwdFor = async (projectId: string, cwd?: string): Promise<string> =>
     cwd ?? (await projects.get(projectId))?.path ?? process.cwd();
 
-  const spawnRuntime = async (projectId: string, cwd: string): Promise<AgentRuntime> =>
-    createOpenCodeRuntime({
-      cwd, sessionIdMap,
-      ...(opts.opencode?.port ? { port: opts.opencode.port } : {}),
-      ...(opts.opencode?.bin ? { bin: opts.opencode.bin } : {}),
-      ...(opts.opencode?.hostname ? { hostname: opts.opencode.hostname } : {}),
-    });
+  const spawnRuntime = async (projectId: string, cwd: string): Promise<AgentRuntime> => {
+    const browserTool = browserToolBridge.register({ projectId, cwd });
+    try {
+      const runtime = await createOpenCodeRuntime({
+        cwd, sessionIdMap,
+        ...(opts.opencode?.port ? { port: opts.opencode.port } : {}),
+        ...(opts.opencode?.bin ? { bin: opts.opencode.bin } : {}),
+        ...(opts.opencode?.hostname ? { hostname: opts.opencode.hostname } : {}),
+        browserTool: {
+          endpoint: `http://127.0.0.1:${port}/internal/opencode/browser-tool`,
+          token: browserTool.token,
+          pluginDirectory: `${dataDir}/opencode-tools`,
+        },
+      });
+      const dispose = runtime.dispose.bind(runtime);
+      runtime.dispose = async () => {
+        browserTool.dispose();
+        await dispose();
+      };
+      return runtime;
+    } catch (error) {
+      browserTool.dispose();
+      throw error;
+    }
+  };
 
   // Stable facade per pool key: when ensureSession dies with a transport error
   // (serve process gone / poisoned socket), drop the cached promise, respawn,
@@ -272,8 +295,8 @@ export async function boot(opts: BootOptions = {}) {
   // keeps the iframe preview as the fallback surface.
   const previewOrigins = new Set<string>();
   preview.onStatusChange((_pid, st) => {
-    if (st.url) {
-      const o = originOf(st.url);
+    for (const candidate of st.urls ?? (st.url ? [st.url] : [])) {
+      const o = originOf(candidate);
       if (o) previewOrigins.add(o);
     }
   });
@@ -287,6 +310,15 @@ export async function boot(opts: BootOptions = {}) {
     driver: browserDriver,
     unavailableReason: "browser engine unavailable: no Chromium executable found (set POLYTH_CHROMIUM_PATH)",
     allowedOrigins: () => [...previewOrigins],
+  });
+  const browserToolBridge = createBrowserToolBridge({
+    browser,
+    canonicalSessionId: (backendSessionId) => {
+      for (const [canonical, backend] of sessionIdMap) {
+        if (backend === backendSessionId) return canonical;
+      }
+      return undefined;
+    },
   });
 
   // Streaming dictation (WP15/F8): the adapter provider re-reads voice.json on
@@ -685,6 +717,7 @@ export async function boot(opts: BootOptions = {}) {
       },
     }),
     previewRoutes({ projects, sessions, preview }),
+    browserToolBridge.route,
     browserRoutes({ browser, append: appendLogged, shotsDir: `${dataDir}/browser-shots` }),
     dictationRoutes({ dictation }),
     voiceRoutes({

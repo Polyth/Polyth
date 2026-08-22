@@ -3,7 +3,7 @@ import {
   closeWorkspacePane, getState, openWorkspacePane, setActiveView, useActiveModel, useStore,
   openSettingsPage, setOverlay, setRailPlugin, setSidebarOpen, setUiError, type AppView,
 } from "../store.ts";
-import { createSession, forkSession, exportSessionMarkdown } from "../init.ts";
+import { forkSession, exportSessionMarkdown } from "../init.ts";
 import { displaySessionTitle } from "../format.ts";
 import { friendlyError, shortcutLabel } from "../settings.ts";
 import { GoalAttachForm } from "./GoalStrip.tsx";
@@ -466,11 +466,6 @@ export default function Header() {
     setActiveView("session");
     setWorkspaceMode(next);
   };
-  const newSession = () => {
-    if (!project) return;
-    void createSession(project.id).catch((error) =>
-      setUiError(friendlyError("Couldn’t create a session", error)));
-  };
 
   return (
     <>
@@ -525,11 +520,6 @@ export default function Header() {
             </button>
             <AutoAcceptChip sessionId={session.id} effective={session.autoAccept === true} />
           </>
-        )}
-        {workspaceMode === "chat" && (
-          <button className="header-action header-new-session" disabled={!project} onClick={newSession}>
-            <Icon.plus /><span>New session</span>
-          </button>
         )}
         <div className="header-actions" aria-label="Application">
           <SlotHost

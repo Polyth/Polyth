@@ -63,6 +63,10 @@ export interface WidgetLayout {
 
 export const WIDGET_LAYOUT_KEY = "polyth.widgetLayout";
 export const WIDGET_ZONES: readonly WidgetZone[] = ["header", "left", "main", "right", "bottom", "floating"];
+/** Removed shell actions stay retired even when an older persisted layout
+ * still describes them as visible. This is a migration deny-list, not a
+ * second placement system. */
+const RETIRED_WIDGET_IDS = new Set(["shell.new-session"]);
 export const WIDGET_ZONE_SLOTS: Record<WidgetZone, UiSlot> = {
   header: "workspace.header",
   left: "workspace.left",
@@ -262,6 +266,7 @@ export function createDefaultWidgetLayout(
   for (const item of known) {
     const definition = typeof item === "string" ? { id: item } : item;
     const id = definition.id;
+    if (RETIRED_WIDGET_IDS.has(id)) continue;
     const slot = defaultSlotFor(definition);
     const zone = widgetZoneFromSlot(slot);
     const visible = definition.defaultVisible ?? DEFAULT_VISIBLE.has(id);
@@ -299,7 +304,9 @@ export function parseWidgetLayout(
   raw: string | null,
   knownItems: readonly (string | WidgetLayoutDefinition)[] = BUILTIN_WIDGET_IDS,
 ): WidgetLayout {
-  const definitions = knownItems.map((item) => typeof item === "string" ? { id: item } : item);
+  const definitions = knownItems
+    .map((item) => typeof item === "string" ? { id: item } : item)
+    .filter((item) => !RETIRED_WIDGET_IDS.has(item.id));
   const knownIds = definitions.map((item) => item.id);
   const definitionById = new Map(definitions.map((item) => [item.id, item]));
   const fallback = createDefaultWidgetLayout(definitions);
@@ -316,13 +323,17 @@ export function parseWidgetLayout(
     // can offer Enable/Remove without ever attempting to render unknown code.
     const persistedInstanceIds = Object.entries(data.widgets).flatMap(([instanceId, rawPlacement]) => {
       const value = rawPlacement as Partial<WidgetPlacement> | undefined;
-      return !knownIds.includes(instanceId) && definitionById.has(value?.definitionId ?? instanceId)
+      return !RETIRED_WIDGET_IDS.has(instanceId)
+        && !RETIRED_WIDGET_IDS.has(value?.definitionId ?? instanceId)
+        && !knownIds.includes(instanceId) && definitionById.has(value?.definitionId ?? instanceId)
         ? [instanceId]
         : [];
     }).slice(0, 128);
     const orphanIds = Object.entries(data.widgets).flatMap(([instanceId, rawPlacement]) => {
       const value = rawPlacement as Partial<WidgetPlacement> | undefined;
-      return !knownIds.includes(instanceId)
+      return !RETIRED_WIDGET_IDS.has(instanceId)
+        && !RETIRED_WIDGET_IDS.has(value?.definitionId ?? instanceId)
+        && !knownIds.includes(instanceId)
         && !persistedInstanceIds.includes(instanceId)
         && !definitionById.has(value?.definitionId ?? instanceId)
         && typeof value?.pluginId === "string"

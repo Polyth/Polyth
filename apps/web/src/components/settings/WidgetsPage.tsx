@@ -7,10 +7,16 @@ import {
 } from "react";
 import type { UiSlot } from "@polyth/contracts";
 import { api } from "../../api.ts";
+import { useResolvedCapabilities } from "../../capabilities.ts";
 import { getDragWidget, setDragWidget, WIDGET_MIME } from "../../dnd.ts";
 import { setOverlay, updateSettings, useStore } from "../../store.ts";
 import { setUiSettings, useUiSettings } from "../../uiPrefs.ts";
-import { applyPreset } from "../../workspacePresets.ts";
+import {
+  applyPreset,
+  setPlacementOverride,
+  usePresentation,
+  type CapabilityTier,
+} from "../../workspacePresets.ts";
 import { getWidget, useWidgetCatalog, type WidgetDef } from "../../widgets/catalog.ts";
 import {
   WIDGET_ZONES,
@@ -199,6 +205,8 @@ export default function WidgetsPage() {
   const layout = useWidgetLayout();
   const ui = useUiSettings();
   const storeStatus = useWidgetStoreStatus();
+  const capabilities = useResolvedCapabilities();
+  const presentation = usePresentation();
   const projectId = useStore((state) => state.activeProjectId);
   const sessionId = useStore((state) => state.activeSessionId);
   const [selected, setSelected] = useState<string | null>("core.composer");
@@ -226,6 +234,13 @@ export default function WidgetsPage() {
   const baselineLayout = useMemo(() => parseWidgetLayout(baseline, widgets), [baseline, widgets]);
   const summary = changeSummary(baselineLayout, layout);
   const changed = baseline !== serializeWidgetLayout(layout);
+  const placeCapability = (id: string, tier: CapabilityTier) => {
+    const rank = Math.max(
+      -1,
+      ...capabilities.filter((capability) => capability.tier === tier).map((capability) => capability.rank),
+    ) + 1;
+    setPlacementOverride(id, { tier, rank });
+  };
 
   const applyLayoutPreset = (id: WidgetLayoutPresetId) => {
     setPreset(id);
@@ -355,6 +370,43 @@ export default function WidgetsPage() {
 
       <div className="widget-settings-workbench">
         <main className="widget-settings-center">
+          <section className="mini-widget-placement" data-settings-item="widgets.capabilities">
+            <div className="widget-section-title">
+              <div>
+                <h3>Top &amp; side workspace buttons</h3>
+                <p>Move workspace tools to the top strip, the right rail, or the Technical menu. Technical keeps a tool available without a dedicated button.</p>
+              </div>
+            </div>
+            <div className="mini-widget-placement-list">
+              {capabilities
+                .filter((capability) => capability.descriptor.id !== "session" && capability.descriptor.available())
+                .map((capability) => {
+                  const id = capability.descriptor.id;
+                  return (
+                    <article key={id}>
+                      <span className="widget-layout-tile-name">
+                        <strong>{capability.descriptor.label}</strong>
+                        <small>{capability.descriptor.plainDescription}</small>
+                      </span>
+                      <select
+                        aria-label={`Button placement for ${capability.descriptor.label}`}
+                        value={capability.tier}
+                        onChange={(event) => placeCapability(id, event.target.value as CapabilityTier)}
+                      >
+                        <option value="primary">Top strip</option>
+                        <option value="more">Right rail / More tools</option>
+                        <option value="technical">Technical menu only</option>
+                      </select>
+                      <button
+                        type="button"
+                        disabled={presentation.placements[id] === undefined}
+                        onClick={() => setPlacementOverride(id, null)}
+                      >Use default</button>
+                    </article>
+                  );
+                })}
+            </div>
+          </section>
           {miniWidgets.length > 0 && (
             <section className="mini-widget-placement" data-settings-item="widgets.actions">
               <div className="widget-section-title">

@@ -3,7 +3,15 @@
 // delivery, URL policy on every hop, redacted observations, honest
 // capability reporting when no engine is available.
 import { randomUUID } from "node:crypto";
-import type { BrowserAction, BrowserObservation, BrowserSessionDto, BrowserTarget, Disposable } from "@polyth/contracts";
+import type {
+  BrowserAction,
+  BrowserObservation,
+  BrowserSessionDto,
+  BrowserTarget,
+  Disposable,
+  JsonObject,
+  JsonValue,
+} from "@polyth/contracts";
 import type { BrowserDriver, DriverPage, DriverPageEvent } from "./driver.ts";
 import { checkUrl, originOf, type UrlPolicyOptions } from "./policy.ts";
 import { redactObservationText } from "./redact.ts";
@@ -46,6 +54,7 @@ export interface BrowserCreateInput {
 
 export interface BrowserObserveOptions {
   includeScreenshot?: boolean;
+  selector?: string;
 }
 
 export interface ObservationWithShot extends BrowserObservation {
@@ -73,7 +82,7 @@ export interface BrowserService {
   get(id: string): BrowserSessionDto | null;
   list(): BrowserSessionDto[];
   navigate(id: string, url: string, actor: "user" | "agent"): Promise<BrowserSessionDto>;
-  action(id: string, action: BrowserAction, actor: "user" | "agent"): Promise<{ actionId: string; session: BrowserSessionDto }>;
+  action(id: string, action: BrowserAction, actor: "user" | "agent"): Promise<{ actionId: string; session: BrowserSessionDto; result?: JsonObject }>;
   observe(id: string, opts?: BrowserObserveOptions): Promise<ObservationWithShot>;
   close(id: string): Promise<void>;
   closeAll(): Promise<void>;
@@ -99,6 +108,22 @@ interface SessionState {
 }
 
 const err = (code: string, message: string): Error => Object.assign(new Error(message), { code });
+
+const redactJsonValue = (value: JsonValue, secrets: ReadonlyArray<string>): JsonValue => {
+  if (typeof value === "string") {
+    return redactObservationText(value, { secrets, maxChars: 2_000 });
+  }
+  if (Array.isArray(value)) return value.map((item) => redactJsonValue(item, secrets));
+  if (value !== null && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value).map(([key, item]) => [key, redactJsonValue(item, secrets)]),
+    );
+  }
+  return value;
+};
+
+const redactJsonObject = (value: JsonObject, secrets: ReadonlyArray<string>): JsonObject =>
+  redactJsonValue(value, secrets) as JsonObject;
 
 export function createBrowserService(opts: BrowserServiceOptions): BrowserService {
   const driver = opts.driver;
@@ -232,7 +257,15 @@ export function createBrowserService(opts: BrowserServiceOptions): BrowserServic
           if (s.consoleBuf.length > maxConsole) s.consoleBuf.splice(0, s.consoleBuf.length - maxConsole);
         }
         // High-frequency noise stays UI-side; the gateway decides what to fan out.
-        emit({ browserSessionId: id, kind: ev.kind, ...(ev.message !== undefined ? { message: ev.message } : {}), ...(ev.url !== undefined ? { url: ev.url } : {}), ...(ev.level !== undefined ? { level: ev.level } : {}) });
+        emit({
+          browserSessionId: id,
+          kind: ev.kind,
+          ...(ev.message !== undefined
+            ? { message: redactObservationText(ev.message, { secrets: opts.secrets ?? [], maxChars: 2_000 }) }
+            : {}),
+          ...(ev.url !== undefined ? { url: ev.url } : {}),
+          ...(ev.level !== undefined ? { level: ev.level } : {}),
+        });
       });
       sessions.set(id, s);
       dto.status = "ready";
@@ -278,27 +311,44 @@ export function createBrowserService(opts: BrowserServiceOptions): BrowserServic
       validateTargets(action, s.dto.revision);
       return enqueue(s, async () => {
         emit({ browserSessionId: id, kind: "action", actor, actionId, message: action.kind });
+        let result: JsonObject | undefined;
         const work = async (): Promise<void> => {
           switch (action.kind) {
             case "click": return s.page.click(action.target);
             case "type": return s.page.type(action.target, action.text, action.submit);
             case "press": return s.page.press(action.key);
-            case "scroll": return s.page.scroll(action.x, action.y);
+            case "scroll": return s.page.scroll(action.x ?? 0, action.y ?? 0, action.target);
             case "select": return s.page.select(action.target, action.value);
             case "wait": return s.page.wait(action.condition, action.value, Math.min(action.timeoutMs ?? actionTimeoutMs, actionTimeoutMs));
+            case "back": { await s.page.back(); return; }
+            case "forward": { await s.page.forward(); return; }
+            case "reload": { await s.page.reload(); return; }
+            case "resize": {
+              const viewport = {
+                width: Math.max(320, Math.min(action.viewport.width, 3840)),
+                height: Math.max(240, Math.min(action.viewport.height, 2160)),
+              };
+              await s.page.resize(viewport);
+              s.dto.viewport = { ...s.dto.viewport, ...viewport };
+              return;
+            }
+            case "inspect": {
+              result = redactJsonObject(await s.page.inspect(action.selector), opts.secrets ?? []);
+              return;
+            }
           }
         };
         await withTimeout(work(), actionTimeoutMs, `action ${action.kind}`);
         syncNav(s);
         await captureFrame(s);
-        return { actionId, session: { ...s.dto } };
+        return { actionId, session: { ...s.dto }, ...(result ? { result } : {}) };
       });
     },
 
     async observe(id, o = {}) {
       const s = stateOf(id);
       return enqueue(s, async () => {
-        const raw = await withTimeout(s.page.observe(), actionTimeoutMs, "observe");
+        const raw = await withTimeout(s.page.observe(o.selector), actionTimeoutMs, "observe");
         const out: ObservationWithShot = {
           url: raw.url,
           title: raw.title,
@@ -368,6 +418,7 @@ export function createBrowserService(opts: BrowserServiceOptions): BrowserServic
 function validateTargets(action: BrowserAction, currentRevision: number): void {
   const targets: BrowserTarget[] = [];
   if (action.kind === "click" || action.kind === "type" || action.kind === "select") targets.push(action.target);
+  if (action.kind === "scroll" && action.target) targets.push(action.target);
   for (const t of targets) {
     if ("point" in t && t.frameRevision < currentRevision) {
       throw err("stale-frame", `target was located on frame ${t.frameRevision}, current is ${currentRevision}`);

@@ -1,7 +1,5 @@
-import { createSession } from "../init.ts";
 import { Icon } from "../icons.tsx";
-import { setOverlay, setUiError, useStore } from "../store.ts";
-import { friendlyError } from "../settings.ts";
+import { setOverlay } from "../store.ts";
 import { defineWidgetPlugin, registerWidgetPlugin } from "./catalog.ts";
 
 const ACTION_SLOTS = [
@@ -10,42 +8,10 @@ const ACTION_SLOTS = [
   "app.nav",
 ] as const;
 
-function NewSessionAction() {
-  const project = useStore((state) =>
-    state.projectRegistry.projects.find((item) => item.id === state.activeProjectId) ?? null);
-  return (
-    <button
-      className="header-action header-new-session"
-      disabled={!project}
-      onClick={() => {
-        if (!project) return;
-        void createSession(project.id).catch((error) =>
-          setUiError(friendlyError("Couldn’t create a session", error)));
-      }}
-    >
-      <Icon.plus /><span>New session</span>
-    </button>
-  );
-}
-
 const SHELL_ACTIONS_PLUGIN = defineWidgetPlugin({
   id: "shell-actions",
   name: "Application shell",
   widgets: [
-    {
-      id: "shell.new-session",
-      title: "New session",
-      description: "Create a session in the active project.",
-      kind: "mini-widget",
-      defaultSlot: "app.header.actions",
-      supportedSlots: ACTION_SLOTS,
-      defaultVisible: true,
-      defaultSize: { w: 1, h: 1 },
-      resizable: false,
-      audience: "simple",
-      order: 5,
-      render: () => <NewSessionAction />,
-    },
     {
       id: "shell.search",
       title: "Search commands",
