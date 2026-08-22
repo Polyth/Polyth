@@ -19,7 +19,13 @@ import { createFusionService, synthesisPrompt } from "@polyth/fusion";
 import { createScheduleService, scanLoopsDir } from "@polyth/schedule";
 import { createKnowledgeStore } from "@polyth/knowledge";
 import { createGithubService } from "@polyth/github";
-import { createFakeQuotaProvider, createHttpQuotaProvider, createUsageService, parseQuotaProviderSpecs } from "@polyth/usage";
+import {
+  createFakeQuotaProvider,
+  createHttpQuotaProvider,
+  createUsageService,
+  discoverQuotaProviders,
+  parseQuotaProviderSpecs,
+} from "@polyth/usage";
 import {
   createBrowserService, createChromiumDriver, createFakeDriver, demoWeb,
   findChromiumExecutable, originOf,
@@ -558,12 +564,10 @@ export async function boot(opts: BootOptions = {}) {
 
   const github = createGithubService();
 
-  // --- WP12: generic quota telemetry. Adapters are registered here on the
-  // server; the browser only ever sees sanitized snapshots. No adapters are
-  // configured by default — POLYTH_FAKE_QUOTAS=1 enables the demo provider,
-  // and real providers plug in via data/quota-providers.json (F13): each entry
-  // names an HTTP endpoint plus an env var holding the bearer credential, so
-  // tokens stay in the server environment and never in config or the browser.
+  // --- WP12: quota telemetry. Built-in adapters discover the same OpenCode,
+  // Claude Code, and polyth-managed credentials as polyth. The
+  // browser only receives sanitized snapshots. The fake and hand-written HTTP
+  // adapter paths remain available for development and private providers.
   const usage = createUsageService({ file: `${dataDir}/quotas.json` });
   if (process.env.POLYTH_FAKE_QUOTAS === "1") usage.register(createFakeQuotaProvider());
   try {
@@ -576,6 +580,7 @@ export async function boot(opts: BootOptions = {}) {
       console.error("[usage] quota-providers.json ignored:", e instanceof Error ? e.message : e);
     }
   }
+  for (const provider of discoverQuotaProviders()) usage.register(provider);
   usage.start();
 
   // --- WP11: generated walkthroughs, structured reviews, bounded review flow.

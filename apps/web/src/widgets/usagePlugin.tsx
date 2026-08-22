@@ -45,7 +45,7 @@ function ProviderQuotasWidget() {
   return (
     <div className="usage-widget-panel">
       {snapshots.length === 0 && (
-        <div className="widget-empty">No quota providers configured.</div>
+        <div className="widget-empty">No providers discovered. Sign in through OpenCode or Claude Code; credentials stay on the server.</div>
       )}
       {visible.length > 0 && <QuotaOverviewGrid snapshots={visible} />}
       {snapshots.length > 0 && (
@@ -138,7 +138,7 @@ function QuotaSummaryWidget() {
   const prefs = useUsagePrefs();
   const visible = snapshots.filter((snapshot) => !prefs.hiddenProviders.includes(snapshot.providerId));
   const stats = quotaSnapshotStats(visible);
-  if (snapshots.length === 0) return <div className="widget-empty">No quota providers configured.</div>;
+  if (snapshots.length === 0) return <div className="widget-empty">No providers discovered from OpenCode or Claude Code.</div>;
   return (
     <div className="usage-quota-summary">
       <div><strong>{stats.providerCount}</strong><span>providers</span></div>

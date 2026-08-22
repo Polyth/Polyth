@@ -16,6 +16,12 @@ export { buildProviderUsageOverview } from "./overview.ts";
 export type { ProviderUsageOverview } from "./overview.ts";
 export { createHttpQuotaProvider, parseQuotaProviderSpecs } from "./http.ts";
 export type { HttpQuotaProviderSpec, HttpQuotaProviderOptions } from "./http.ts";
+export {
+  discoverQuotaProviders,
+  listConfiguredQuotaProviders,
+  mappolythUsage,
+} from "./providers/index.ts";
+export type { QuotaDiscoveryOptions, QuotaDiscoveryPaths } from "./providers/index.ts";
 export { USAGE_WIDGETS } from "../widgets/index.ts";
 
 export interface QuotaProvider {

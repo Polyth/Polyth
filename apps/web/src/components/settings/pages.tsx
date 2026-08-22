@@ -715,7 +715,7 @@ function QuotaSection() {
     <>
       <div className="stat-label">Provider usage overview</div>
       {snaps.length === 0 && (
-        <EmptyState title="No quota providers configured" body="Provider quota adapters are registered on the server; credentials never reach the browser." />
+        <EmptyState title="No quota providers discovered" body="Providers appear automatically when OpenCode or Claude Code credentials exist. Credentials stay on the server and never reach the browser." />
       )}
       {visible.length > 0 && (
         <QuotaOverviewGrid snapshots={visible} />
