@@ -106,7 +106,12 @@ const clip = (raw: string, cap: number): string => {
   return clean.length > cap ? `${clean.slice(0, cap)}…` : clean;
 };
 
-export interface PushPayload extends JsonObject {
+export interface PushQuickAnswer extends JsonObject {
+  title: string;
+  answers: JsonObject;
+}
+
+export type PushPayload = JsonObject & {
   kind: PushKind;
   /** Session activated on notification click (the parent for subagent kinds). */
   sessionId: string;
@@ -114,6 +119,49 @@ export interface PushPayload extends JsonObject {
   body: string;
   /** Notification tag: repeats per (session, kind) replace instead of piling up. */
   tag: string;
+  /** Pending request identity. The service worker sends actions only when this
+   *  is present; the authenticated session API still validates it is open. */
+  requestId?: string;
+  /** Direct answers are deliberately limited to one single-choice question
+   *  with at most two closed options (the practical notification action cap). */
+  quickAnswers?: PushQuickAnswer[];
+};
+
+const stringValue = (value: unknown): string | undefined =>
+  typeof value === "string" && value !== "" ? value : undefined;
+
+function quickAnswersFor(questions: JsonObject[] | undefined): PushQuickAnswer[] {
+  if (!questions || questions.length !== 1) return [];
+  const question = questions[0]!;
+  if (
+    question.type === "multi"
+    || question.multiple === true
+    || question.multi === true
+    || question.allowOther === true
+    || question.other === true
+  ) return [];
+  const rawOptions = Array.isArray(question.options)
+    ? question.options
+    : Array.isArray(question.choices) ? question.choices : [];
+  if (rawOptions.length < 1 || rawOptions.length > 2) return [];
+  const questionId = stringValue(question.id) ?? "q1";
+  const answers: PushQuickAnswer[] = [];
+  for (const raw of rawOptions) {
+    if (typeof raw === "string") {
+      if (!raw) return [];
+      answers.push({ title: clip(raw, 36), answers: { [questionId]: raw } });
+      continue;
+    }
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return [];
+    const option = raw as JsonObject;
+    const value = stringValue(option.value) ?? stringValue(option.id) ?? stringValue(option.label);
+    if (!value) return [];
+    answers.push({
+      title: clip(stringValue(option.label) ?? value, 36),
+      answers: { [questionId]: value },
+    });
+  }
+  return answers;
 }
 
 export function buildPushPayload(kind: PushKind, opts: {
@@ -121,15 +169,20 @@ export function buildPushPayload(kind: PushKind, opts: {
   sessionTitle: string;
   projectName?: string;
   statusText?: string;
+  requestId?: string;
+  questions?: JsonObject[];
 }): PushPayload {
   const session = clip(opts.sessionTitle || "Session", MAX_VAR_CHARS);
   const status = clip(opts.statusText ?? STATUS_TEXT[kind], MAX_VAR_CHARS);
+  const quickAnswers = kind === "question" ? quickAnswersFor(opts.questions) : [];
   return {
     kind,
     sessionId: opts.sessionId,
     title: clip(`Polyth — ${session}`, MAX_VAR_CHARS + 10),
     body: clip(`${session} — ${status}`, MAX_BODY_CHARS),
     tag: `polyth-${opts.sessionId}-${kind}`,
+    ...(opts.requestId ? { requestId: opts.requestId } : {}),
+    ...(quickAnswers.length > 0 ? { quickAnswers } : {}),
   };
 }
 
@@ -276,7 +329,7 @@ export function createPushNotifier(deps: {
   projection(sessionId: string): Promise<SessionProjection | undefined>;
   projectName?(projectId: string): Promise<string | undefined>;
 }): {
-  attention(sessionId: string, kind: "permission" | "question"): void;
+  attention(sessionId: string, kind: "permission" | "question", requestId?: string, questions?: JsonObject[]): void;
   turnStopped(sessionId: string, reason: "completed" | "aborted" | "error"): void;
 } {
   const fire = (p: Promise<unknown>): void => {
@@ -284,11 +337,16 @@ export function createPushNotifier(deps: {
   };
 
   return {
-    attention(sessionId, kind) {
+    attention(sessionId, kind, requestId, questions) {
       fire((async () => {
         const proj = await deps.projection(sessionId);
         if (!proj) return;
-        await deps.send(buildPushPayload(kind, { sessionId, sessionTitle: proj.title }));
+        await deps.send(buildPushPayload(kind, {
+          sessionId,
+          sessionTitle: proj.title,
+          ...(requestId ? { requestId } : {}),
+          ...(questions ? { questions } : {}),
+        }));
       })());
     },
     turnStopped(sessionId, reason) {

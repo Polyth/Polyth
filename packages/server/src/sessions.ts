@@ -110,7 +110,7 @@ export function createSessionService(deps: {
    *  push). Fired only when a card actually reaches the UI — auto-accepted
    *  permissions never notify. */
   notify?: {
-    attention(sessionId: string, kind: "permission" | "question"): void;
+    attention(sessionId: string, kind: "permission" | "question", requestId?: string, questions?: JsonObject[]): void;
     turnStopped(sessionId: string, reason: "completed" | "aborted" | "error"): void;
   };
 }): SessionService {
@@ -286,7 +286,7 @@ export function createSessionService(deps: {
           await sessionRuntime.get(sessionId)?.replyPermission(sessionId, ev.requestId, "once");
         } else {
           await updateProjection(sessionId, { status: "waiting" });
-          deps.notify?.attention(sessionId, "permission");
+          deps.notify?.attention(sessionId, "permission", ev.requestId);
         }
         break;
       }
@@ -308,7 +308,7 @@ export function createSessionService(deps: {
         const { type: _t, ...qData } = ev;
         await appendAndBroadcast(sessionId, "question/asked", qData as unknown as JsonObject, { ignorable: true });
         await updateProjection(sessionId, { status: "waiting" });
-        deps.notify?.attention(sessionId, "question");
+        deps.notify?.attention(sessionId, "question", ev.requestId, ev.questions);
         break;
       }
       case "secret/requested": {
@@ -1445,60 +1445,96 @@ export function createSessionService(deps: {
     },
 
     async replyPermission(sessionId, requestId, reply, scope) {
-      const priorEvents = await store.events(sessionId);
-      const original = priorEvents.find(
-        (e) => e.type === "permission/requested" && (e.data as { requestId?: string }).requestId === requestId,
-      );
-      const shellRequest = original && (original.data as { permission?: string }).permission === "shell"
-        ? original
-        : undefined;
-      if (shellRequest && priorEvents.some(
-        (e) => e.type === "permission/resolved" && (e.data as { requestId?: string }).requestId === requestId,
-      )) {
-        throw Object.assign(new Error("shell permission request already resolved"), { code: "conflict" });
-      }
-      await appendAndBroadcast(sessionId, "permission/resolved", { requestId, reply, ...(scope ? { scope } : {}) }, { ignorable: true });
-      const proj = await store.projection(sessionId);
-      if (reply === "always") {
-        // Persist an allow rule derived from the original request. Scope is
-        // explicit (WP15): session/project confine the rule; old clients that
-        // send no scope keep the pre-existing user-wide behavior.
-        const req = original;
-        if (req) {
-          const d = req.data as { permission?: string; patterns?: string[] };
+      await withSessionLock(sessionId, async () => {
+        if (reply !== "once" && reply !== "always" && reply !== "reject") {
+          throw Object.assign(new Error("permission reply must be once, always, or reject"), { code: "invalid-input" });
+        }
+        const priorEvents = await store.events(sessionId);
+        const original = priorEvents.find(
+          (e) => e.type === "permission/requested" && (e.data as { requestId?: string }).requestId === requestId,
+        );
+        if (!original) throw Object.assign(new Error("permission request not found"), { code: "not-found" });
+        if (priorEvents.some(
+          (e) => e.type === "permission/resolved" && (e.data as { requestId?: string }).requestId === requestId,
+        )) {
+          throw Object.assign(new Error("permission request already resolved"), { code: "conflict" });
+        }
+        const proj = await store.projection(sessionId);
+        if (!proj) throw Object.assign(new Error("session not found"), { code: "not-found" });
+        const shellRequest = (original.data as { permission?: string }).permission === "shell"
+          ? original
+          : undefined;
+        // A background notification may be answered after a server restart.
+        // Reattach to the original backend before recording the response so a
+        // missing in-memory runtime can never turn a click into a log-only lie.
+        const rt = shellRequest ? undefined : await ensureWired(sessionId, proj);
+        const resolved = await appendAndBroadcast(
+          sessionId,
+          "permission/resolved",
+          { requestId, reply, ...(scope ? { scope } : {}) },
+          { ignorable: true },
+        );
+        if (reply === "always") {
+          // Persist an allow rule derived from the original request. Scope is
+          // explicit (WP15): session/project confine the rule; old clients that
+          // send no scope keep the pre-existing user-wide behavior.
+          const d = original.data as { permission?: string; patterns?: string[] };
           for (const pattern of d.patterns?.length ? d.patterns : ["*"]) {
             if (scope === "session") {
               permissions.addRule({ permission: d.permission ?? "*", pattern, action: "allow", scope: "session", sessionId });
-            } else if (scope === "project" && proj?.projectId) {
+            } else if (scope === "project") {
               permissions.addRule({ permission: d.permission ?? "*", pattern, action: "allow", scope: "project", projectId: proj.projectId });
             } else {
               permissions.addRule({ permission: d.permission ?? "*", pattern, action: "allow", scope: "user" });
             }
           }
         }
-      }
-      if (shellRequest && proj) {
-        const d = shellRequest.data as { patterns?: string[]; callId?: string };
-        const command = d.patterns?.[0] ?? "";
-        const callId = d.callId ?? `shell_${randomUUID()}`;
-        await finishShell(sessionId, proj, command, callId, reply === "reject");
-        if (proj.status === "waiting") await updateProjection(sessionId, { status: "idle" });
-      } else {
-        await sessionRuntime.get(sessionId)?.replyPermission(sessionId, requestId, reply);
-        if (proj?.status === "waiting") await updateProjection(sessionId, { status: "working" });
-      }
+        if (shellRequest) {
+          const d = shellRequest.data as { patterns?: string[]; callId?: string };
+          const command = d.patterns?.[0] ?? "";
+          const callId = d.callId ?? `shell_${randomUUID()}`;
+          await finishShell(sessionId, proj, command, callId, reply === "reject");
+        } else {
+          await rt!.replyPermission(sessionId, requestId, reply);
+        }
+        if (proj.status === "waiting" && openRequestCount([...priorEvents, resolved]) === 0) {
+          await updateProjection(sessionId, { status: shellRequest ? "idle" : "working" });
+        }
+      });
     },
 
     async replyQuestion(sessionId, requestId, answers) {
-      await appendAndBroadcast(sessionId, "question/answered", { requestId, answers }, { ignorable: true });
-      const rt = sessionRuntime.get(sessionId);
-      if (answers && (answers as { __reject?: boolean }).__reject) {
-        await rt?.replyQuestion(sessionId, requestId, { action: "reject" });
-      } else {
-        await rt?.replyQuestion(sessionId, requestId, answers);
-      }
-      const proj = await store.projection(sessionId);
-      if (proj?.status === "waiting") await updateProjection(sessionId, { status: "working" });
+      await withSessionLock(sessionId, async () => {
+        const priorEvents = await store.events(sessionId);
+        const original = priorEvents.find(
+          (event) => event.type === "question/asked"
+            && (event.data as { requestId?: string }).requestId === requestId,
+        );
+        if (!original) throw Object.assign(new Error("question request not found"), { code: "not-found" });
+        if (priorEvents.some(
+          (event) => event.type === "question/answered"
+            && (event.data as { requestId?: string }).requestId === requestId,
+        )) {
+          throw Object.assign(new Error("question request already answered"), { code: "conflict" });
+        }
+        const proj = await store.projection(sessionId);
+        if (!proj) throw Object.assign(new Error("session not found"), { code: "not-found" });
+        const rt = await ensureWired(sessionId, proj);
+        const answered = await appendAndBroadcast(
+          sessionId,
+          "question/answered",
+          { requestId, answers },
+          { ignorable: true },
+        );
+        if (answers && (answers as { __reject?: boolean }).__reject) {
+          await rt.replyQuestion(sessionId, requestId, { action: "reject" });
+        } else {
+          await rt.replyQuestion(sessionId, requestId, answers);
+        }
+        if (proj.status === "waiting" && openRequestCount([...priorEvents, answered]) === 0) {
+          await updateProjection(sessionId, { status: "working" });
+        }
+      });
     },
 
     async replySecret(sessionId, requestId, reply) {

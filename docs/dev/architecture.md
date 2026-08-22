@@ -105,6 +105,8 @@ statically by the server with SPA fallback.
   notify seam to templated payloads (same allowlisted bounded semantics as the
   in-page notifier): subagent completions attribute to the parent session,
   aborted turns stay silent, and auto-accepted permissions never reach the seam.
+  Human-needed payloads bind `sessionId` + `requestId`; simple closed
+  single-choice questions may include at most two bounded quick answers.
 - `ws.ts` — `/ws` gateway: `subscribe` (gap-fill from the durable log, then live, seq-deduped),
   projections fan-out, per-socket rate limits, browser frame stream with newest-frame
   backpressure + `afterRevision` resume, dictation audio path with its own rate budget.
@@ -333,17 +335,27 @@ ignored by the web reducer (never crash).
   re-locks the UI (reload-on-unlock keeps store/WS state clean). Settings →
   Access lists remembered devices with per-device revoke and "Sign out
   everywhere".
-- Auto-accept + push (F18): the `Header` shows a loud pulsing chip while the
+- Auto-accept + push/PWA (F18 + OC-24-003/004): the `Header` shows a loud pulsing chip while the
   session's effective auto-accept is on (click toggles; server owns the
   policy); `reduce.ts` marks policy-resolved permissions `auto` so the
   timeline can label them. `push.ts` registers the root-scope service worker
-  (`sw.js`, plain JS copied verbatim to `dist/`), mints a `PushSubscription`
+  at authenticated app boot (`sw.js`, plain JS copied verbatim to `dist/`),
+  while `manifest.json` + 192/512 any/maskable icons make the root-scoped app
+  installable in standalone mode. Enabling push mints a `PushSubscription`
   against the server's VAPID key, and keeps the server list in sync;
   Settings → Notifications has the toggle + test button (needs a secure
   context — https or loopback). The worker shows notifications only when no
-  visible window exists and deep-links clicks: `postMessage` to an existing
-  tab (handled in `init.ts` via `installPushDeepLinks`) or a new window at
-  `/?session=<id>`, which `boot()` resolves and strips.
+  visible window exists. Permission pushes offer Allow once/Deny; a single
+  closed single-choice question with at most two options exposes those choices;
+  complex questions expose Answer/Reject and otherwise open the normal
+  stepper. Actions call the existing authenticated session APIs with the
+  payload's exact session/request pair. The session service serializes and
+  validates the pending request, reattaches its runtime after restart, appends
+  the resolution before replying, and rejects stale/cross-session duplicates.
+  Failed or ordinary clicks deep-link via `postMessage` to an existing tab
+  (handled in `init.ts` via `installPushDeepLinks`) or open
+  `/?session=<id>`, which `boot()` resolves and strips. Nothing in this path
+  implements a remote relay or E2EE pairing.
 
 ## UI slot model
 

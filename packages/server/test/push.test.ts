@@ -118,6 +118,28 @@ test("buildPushPayload bounds output, strips control chars, tags per session+kin
 
   const custom = buildPushPayload("subagent", { sessionId: "s", sessionTitle: "Parent", statusText: "delegated agent failed" });
   assert.equal(custom.body, "Parent — delegated agent failed");
+
+  const question = buildPushPayload("question", {
+    sessionId: "s",
+    sessionTitle: "Choose",
+    requestId: "que_1",
+    questions: [{
+      id: "choice",
+      prompt: "Continue?",
+      options: [{ value: "yes", label: "Yes" }, { value: "no", label: "No" }],
+    }],
+  });
+  assert.equal(question.requestId, "que_1");
+  assert.deepEqual(question.quickAnswers, [
+    { title: "Yes", answers: { choice: "yes" } },
+    { title: "No", answers: { choice: "no" } },
+  ]);
+  assert.equal(buildPushPayload("question", {
+    sessionId: "s",
+    sessionTitle: "Explain",
+    requestId: "que_2",
+    questions: [{ id: "detail", prompt: "Why?" }],
+  }).quickAnswers, undefined);
 });
 
 test("subscriptions validate, persist across reload, and unsubscribe", () => {
@@ -213,4 +235,28 @@ test("notifier: attention pushes, aborts stay silent, subagents attribute to par
     ["subagent", "root"],
   ]);
   assert.equal(sent[2]!.body, "Root task — delegated agent failed");
+});
+
+test("notifier binds pending request identity and quick answers to attention pushes", async () => {
+  const sent: PushPayload[] = [];
+  const notifier = createPushNotifier({
+    send: async (payload) => { sent.push(payload); },
+    projection: async () => ({
+      id: "root", projectId: "p", title: "Root task", status: "waiting", createdAt: 1, updatedAt: 1,
+    }),
+  });
+  notifier.attention("root", "question", "que_1", [{
+    id: "choice",
+    prompt: "Continue?",
+    options: ["Yes", "No"],
+  }]);
+  await new Promise((resolve) => setTimeout(resolve, 10));
+
+  assert.equal(sent.length, 1);
+  assert.equal(sent[0]!.sessionId, "root");
+  assert.equal(sent[0]!.requestId, "que_1");
+  assert.deepEqual(sent[0]!.quickAnswers, [
+    { title: "Yes", answers: { choice: "Yes" } },
+    { title: "No", answers: { choice: "No" } },
+  ]);
 });
