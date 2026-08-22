@@ -65,6 +65,7 @@ export interface WidgetLayout {
 export const WIDGET_LAYOUT_KEY = "polyth.widgetLayout";
 export const widgetLayoutStorageKey = (projectId: string): string => `${WIDGET_LAYOUT_KEY}.${projectId}`;
 export const WIDGET_ZONES: readonly WidgetZone[] = ["header", "left", "main", "right", "bottom", "floating"];
+export const MAX_GRID_ROWS = 50;
 /** Removed shell actions stay retired even when an older persisted layout
  * still describes them as visible. This is a migration deny-list, not a
  * second placement system. */
@@ -199,7 +200,7 @@ const clampSize = (value: unknown): WidgetSize => {
     ? Math.min(12, Math.max(1, Math.round(size.w)))
     : DEFAULT_SIZE.w;
   const h = typeof size?.h === "number" && Number.isFinite(size.h)
-    ? Math.min(12, Math.max(1, Math.round(size.h)))
+    ? Math.min(MAX_GRID_ROWS, Math.max(1, Math.round(size.h)))
     : DEFAULT_SIZE.h;
   return { w, h };
 };
@@ -218,7 +219,7 @@ const clampPosition = (value: unknown): WidgetPosition => {
 function constrainedSize(value: unknown, definition?: WidgetLayoutDefinition): WidgetSize {
   const size = clampSize(value);
   const min = definition?.minSize ? clampSize(definition.minSize) : { w: 1, h: 1 };
-  const max = definition?.maxSize ? clampSize(definition.maxSize) : { w: 12, h: 12 };
+  const max = definition?.maxSize ? clampSize(definition.maxSize) : { w: 12, h: MAX_GRID_ROWS };
   return {
     w: Math.max(min.w, Math.min(max.w, size.w)),
     h: Math.max(min.h, Math.min(max.h, size.h)),

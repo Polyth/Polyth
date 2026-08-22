@@ -1,6 +1,7 @@
 import {
   useEffect,
   useMemo,
+  useRef,
   useState,
   type CSSProperties,
   type KeyboardEvent,
@@ -38,11 +39,22 @@ function positionStyle(placement: WidgetPlacement): CSSProperties {
 }
 
 function canvasMetrics(element: HTMLElement): { column: number; row: number } {
-  const width = element.getBoundingClientRect().width;
+  const style = getComputedStyle(element);
+  const paddingLeft = parseFloat(style.paddingLeft) || 0;
+  const paddingRight = parseFloat(style.paddingRight) || 0;
+  const width = element.clientWidth - paddingLeft - paddingRight;
   return {
     column: Math.max(24, (width - GRID_GAP * 11) / 12),
     row: GRID_ROW + GRID_GAP,
   };
+}
+
+function maxRowsForCanvas(canvas: HTMLElement): number {
+  const style = getComputedStyle(canvas);
+  const paddingTop = parseFloat(style.paddingTop) || 0;
+  const paddingBottom = parseFloat(style.paddingBottom) || 0;
+  const available = canvas.clientHeight - paddingTop - paddingBottom;
+  return Math.max(1, Math.floor((available + GRID_GAP) / (GRID_ROW + GRID_GAP)));
 }
 
 function WidgetCard({
@@ -59,12 +71,24 @@ function WidgetCard({
   sessionId: string | null;
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
+  const moveCleanupRef = useRef<(() => void) | null>(null);
   useEscape(menuOpen, () => setMenuOpen(false));
 
-  const startMove = (event: PointerEvent<HTMLButtonElement>) => {
+  useEffect(() => () => {
+    moveCleanupRef.current?.();
+    moveCleanupRef.current = null;
+  }, []);
+
+  const startMove = (event: PointerEvent<HTMLElement>) => {
+    if (event.button !== 0) return;
     event.preventDefault();
-    const canvas = event.currentTarget.closest<HTMLElement>(".widget-canvas-grid");
+    const dragTarget = event.currentTarget;
+    const canvas = dragTarget.closest<HTMLElement>(".widget-canvas-grid");
     if (!canvas) return;
+    moveCleanupRef.current?.();
+    const pointerId = event.pointerId;
+    dragTarget.setPointerCapture(pointerId);
+    dragTarget.classList.add("widget-card-head-dragging");
     const metrics = canvasMetrics(canvas);
     const start = { x: event.clientX, y: event.clientY, position: placement.position };
     let last = placement.position;
@@ -82,12 +106,20 @@ function WidgetCard({
         [widget],
       ));
     };
-    const onUp = () => {
+    const cleanup = () => {
       window.removeEventListener("pointermove", onMove);
       window.removeEventListener("pointerup", onUp);
+      window.removeEventListener("pointercancel", onCancel);
+      if (dragTarget.hasPointerCapture(pointerId)) dragTarget.releasePointerCapture(pointerId);
+      dragTarget.classList.remove("widget-card-head-dragging");
+      if (moveCleanupRef.current === cleanup) moveCleanupRef.current = null;
     };
+    const onUp = () => cleanup();
+    const onCancel = () => cleanup();
+    moveCleanupRef.current = cleanup;
     window.addEventListener("pointermove", onMove);
     window.addEventListener("pointerup", onUp);
+    window.addEventListener("pointercancel", onCancel);
   };
 
   const startResize = (event: PointerEvent<HTMLButtonElement>) => {
@@ -95,13 +127,14 @@ function WidgetCard({
     const canvas = event.currentTarget.closest<HTMLElement>(".widget-canvas-grid");
     if (!canvas) return;
     const metrics = canvasMetrics(canvas);
+    const maxRows = maxRowsForCanvas(canvas);
     const start = { x: event.clientX, y: event.clientY, ...placement.size };
     let last = placement.size;
     const onMove = (next: globalThis.PointerEvent) => {
       const size = {
         w: Math.max(1, Math.min(12 - placement.position.x,
           start.w + Math.round((next.clientX - start.x) / (metrics.column + GRID_GAP)))),
-        h: Math.max(1, Math.min(12, start.h + Math.round((next.clientY - start.y) / metrics.row))),
+        h: Math.max(1, Math.min(maxRows, start.h + Math.round((next.clientY - start.y) / metrics.row))),
       };
       if (size.w === last.w && size.h === last.h) return;
       last = size;
@@ -128,6 +161,12 @@ function WidgetCard({
     else if (event.key === "ArrowUp") size = { ...size, h: size.h - step };
     else return;
     event.preventDefault();
+    const canvas = event.currentTarget.closest<HTMLElement>(".widget-canvas-grid");
+    const maxRows = canvas ? maxRowsForCanvas(canvas) : 12;
+    size = {
+      w: Math.max(1, Math.min(12 - placement.position.x, size.w)),
+      h: Math.max(1, Math.min(maxRows, size.h)),
+    };
     updateWidgetLayout((current) => applyWidgetLayoutMutations(
       current,
       [{ type: "resize", id: instanceId, size }],
@@ -137,19 +176,19 @@ function WidgetCard({
 
   return (
     <section className="widget-card editing" style={positionStyle(placement)} data-widget-id={instanceId}>
-      <header className="widget-card-head">
+      <header className="widget-card-head widget-card-head-draggable" onPointerDown={startMove}>
         <button
           className="widget-drag"
           aria-label={`Move ${placement.title ?? widget.title}`}
           title="Drag to move"
-          onPointerDown={startMove}
         >⠿</button>
         <strong>{placement.title ?? widget.title}</strong>
-        <div className="widget-card-menu-shell">
+        <div className="widget-card-menu-shell" onPointerDown={(event) => event.stopPropagation()}>
           <button
             className="widget-card-more"
             aria-label={`More options for ${widget.title}`}
             aria-expanded={menuOpen}
+            onPointerDown={(event) => event.stopPropagation()}
             onClick={() => setMenuOpen((open) => !open)}
           >⋮</button>
           {menuOpen && (

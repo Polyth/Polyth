@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import {
   BUILTIN_WIDGET_IDS,
+  MAX_GRID_ROWS,
   WIDGET_LAYOUT_KEY,
   WIDGET_ZONES,
   applyWidgetLayoutMutations,
@@ -120,6 +121,15 @@ test("parser drops unknown and duplicate widget ids and restores missing known i
   assert.deepEqual(parsed.widgets["core.chat"]?.size, { w: 12, h: 1 });
   assert.equal(parsed.widgets["core.chat"]?.visible, false);
   assert.equal(parsed.audience, "simple");
+});
+
+test("widget heights support tall canvases up to the grid row limit", () => {
+  let layout = createDefaultWidgetLayout(["core.chat"]);
+  layout = setWidgetSize(layout, "core.chat", { w: 12, h: 40 });
+  assert.deepEqual(layout.widgets["core.chat"]?.size, { w: 12, h: 40 });
+
+  layout = setWidgetSize(layout, "core.chat", { w: 12, h: MAX_GRID_ROWS + 1 });
+  assert.deepEqual(layout.widgets["core.chat"]?.size, { w: 12, h: MAX_GRID_ROWS });
 });
 
 test("persisted retired New session widget is removed from header placements", () => {
