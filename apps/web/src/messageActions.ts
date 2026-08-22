@@ -210,14 +210,15 @@ export const revertAvailability = (g: MutationGuards): ActionAvailability => mut
 export const forkAvailability = (g: MutationGuards): ActionAvailability => mutationAvailability("Fork", g);
 
 export function guardsFromModel(
-  model: Pick<RenderModel, "turn" | "permissions" | "questions" | "rewind">,
+  model: Pick<RenderModel, "turn" | "permissions" | "questions" | "secrets" | "rewind">,
   opts: { queuedCount?: number; archived?: boolean } = {},
 ): MutationGuards {
   return {
     turnWorking: model.turn?.status === "working",
     pendingRequest:
       model.permissions.some((p) => p.status === "pending")
-      || model.questions.some((q) => q.status === "pending"),
+      || model.questions.some((q) => q.status === "pending")
+      || model.secrets.some((secret) => secret.status === "pending"),
     queuedCount: opts.queuedCount ?? 0,
     rewindActive: model.rewind !== null,
     archived: opts.archived ?? false,

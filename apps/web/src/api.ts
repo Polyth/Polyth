@@ -26,6 +26,8 @@ import type {
   ProjectPatch,
   QueueItemDto,
   RuntimeSession,
+  SecureSafeCreateInput,
+  SecureSafeEntryDto,
   SendResult,
   SessionEvent,
   SessionFolderDto,
@@ -592,6 +594,18 @@ export const api = {
     jfetch<void>(`/api/sessions/${id}/question/${encodeURIComponent(requestId)}`, json("POST", { answers })),
   rejectQuestion: (id: string, requestId: string) =>
     jfetch<void>(`/api/sessions/${id}/question/${encodeURIComponent(requestId)}/reject`, { method: "POST" }),
+  replySecret: (id: string, requestId: string, action: "save" | "dismiss", value?: string) =>
+    jfetch<void>(
+      `/api/sessions/${encodeURIComponent(id)}/secrets/${encodeURIComponent(requestId)}`,
+      json("POST", action === "save" ? { action, value: value ?? "" } : { action }),
+    ),
+
+  // ---- Secure Safe (metadata reads; values are write-only) ------------------
+  listSecureSafe: () => jfetch<SecureSafeEntryDto[]>("/api/secure-safe"),
+  saveSecureSafe: (input: SecureSafeCreateInput) =>
+    jfetch<SecureSafeEntryDto>("/api/secure-safe", json("POST", input)),
+  deleteSecureSafe: (id: string) =>
+    jfetch<{ ok: boolean }>(`/api/secure-safe/${encodeURIComponent(id)}`, { method: "DELETE" }),
 
   listModels: () => jfetch<ModelDescriptor[]>("/api/models"),
   listAgents: () => jfetch<AgentDescriptor[]>("/api/agents"),

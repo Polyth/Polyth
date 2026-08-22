@@ -9,6 +9,7 @@ import Timeline from "../Timeline.tsx";
 import Composer from "../Composer.tsx";
 import PermissionBanner from "../PermissionBanner.tsx";
 import QuestionCards from "../QuestionCards.tsx";
+import SecureSafeCard from "../SecureSafeCard.tsx";
 import MultiRunView from "../MultiRunView.tsx";
 import FusionView from "../FusionView.tsx";
 import GoalsView from "../GoalsView.tsx";
@@ -110,6 +111,7 @@ function SessionSurface() {
 
   const pendingPermissions = model.permissions.filter((p) => p.status === "pending");
   const pendingQuestions = model.questions.filter((q) => q.status === "pending");
+  const pendingSecrets = model.secrets.filter((secret) => secret.status === "pending");
   const archived = composerBlockedByArchive(session);
 
   return (
@@ -127,6 +129,7 @@ function SessionSurface() {
         </div>
       )}
       {pendingQuestions.length > 0 && <QuestionCards questions={pendingQuestions} />}
+      {pendingSecrets.length > 0 && <SecureSafeCard secrets={pendingSecrets} />}
       {pendingPermissions.length > 0 && <PermissionBanner permissions={pendingPermissions} />}
       {archived && sessionId ? <ArchivedComposerGuard sessionId={sessionId} /> : <Composer />}
     </div>

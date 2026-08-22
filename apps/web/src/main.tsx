@@ -13,6 +13,7 @@ import { installVoice } from "./voice.tsx";
 import { installBuiltinMiniWidgets } from "./widgets/builtinMiniWidgets.tsx";
 import { installHomeAssistantPlugin } from "./widgets/homeAssistantPlugin.tsx";
 import { exposeWidgets } from "./widgets/catalog.ts";
+import "./secureSafe.tsx";
 import App from "./App.tsx";
 import LockScreen from "./components/LockScreen.tsx";
 import "./styles.css";

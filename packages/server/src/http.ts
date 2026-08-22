@@ -223,6 +223,22 @@ export function createHttpServer(deps: HttpDeps): Server {
         await sessions.replyPermission(m[1]!, m[2]!, b.reply as "once" | "always" | "reject", scope);
         return json(res, 200, { ok: true });
       }
+      m = path.match(/^\/api\/sessions\/([^/]+)\/secrets\/([^/]+)$/);
+      if (m && method === "POST") {
+        if (!sessions.replySecret) throw Object.assign(new Error("Secure Safe unavailable"), { code: "unsupported" });
+        const b = await readBody(req);
+        if (b.action === "save") {
+          if (typeof b.value !== "string" || !b.value.trim()) {
+            throw Object.assign(new Error("value is required"), { code: "invalid-input" });
+          }
+          await sessions.replySecret(m[1]!, m[2]!, { action: "save", value: b.value });
+        } else if (b.action === "dismiss") {
+          await sessions.replySecret(m[1]!, m[2]!, { action: "dismiss" });
+        } else {
+          throw Object.assign(new Error("action must be save or dismiss"), { code: "invalid-input" });
+        }
+        return json(res, 200, { ok: true });
+      }
       m = path.match(/^\/api\/sessions\/([^/]+)\/question\/([^/]+)\/reject$/);
       if (m && method === "POST") {
         await sessions.replyQuestion(m[1]!, m[2]!, { __reject: true });

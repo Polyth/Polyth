@@ -502,6 +502,18 @@ export function rejectQuestion(requestId: string): void {
   void api.rejectQuestion(id, requestId).catch((err) => console.error("question reject failed", err));
 }
 
+export async function replySecret(requestId: string, action: "save" | "dismiss", value?: string): Promise<void> {
+  const id = store.getState().activeSessionId;
+  if (!id) return;
+  try {
+    await api.replySecret(id, requestId, action, value);
+  } catch (err) {
+    console.error("secret reply failed", err);
+    store.setUiError(friendlyError("Couldn’t update Secure Safe", err));
+    throw err;
+  }
+}
+
 export function exportSessionMarkdown(): void {
   const s = store.getState();
   if (!s.activeSessionId) return;

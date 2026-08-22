@@ -60,6 +60,19 @@ export interface QuestionItem {
   allowOther?: boolean;
 }
 export interface QuestionRequestData { requestId: string; questions: JsonObject[] }
+export interface SecretRequestData {
+  requestId: string;
+  handle: string;
+  label: string;
+  purpose?: string;
+  kind?: SecureSafeKind;
+  existing?: boolean;
+}
+export interface SecretResolvedData {
+  requestId: string;
+  action: "saved" | "dismissed";
+  handle?: string;
+}
 export interface TurnStartedData { turnId: string; model?: ModelRef; agent?: string }
 export interface TurnStoppedData { turnId: string; reason: "completed" | "aborted" | "error"; error?: string }
 export interface TokenUsage { input: number; output: number; reasoning?: number; cacheRead?: number; cacheWrite?: number }
@@ -293,6 +306,7 @@ export interface SessionService {
   events(sessionId: string, afterSeq?: number): Promise<SessionEvent[]>;
   replyPermission(sessionId: string, requestId: string, reply: "once" | "always" | "reject", scope?: "session" | "project"): Promise<void>;
   replyQuestion(sessionId: string, requestId: string, answers: JsonObject): Promise<void>;
+  replySecret?(sessionId: string, requestId: string, reply: { action: "save"; value: string } | { action: "dismiss" }): Promise<void>;
   // -- parity additions (optional so existing fakes/tests remain valid) --
   /** Append session/metadata-changed and update the projection title. */
   rename?(sessionId: string, title: string): Promise<void>;
@@ -412,6 +426,7 @@ export type RuntimeEvent =
   | { type: "tool/error"; callId: string; tool: string; error: string; input?: JsonObject }
   | { type: "permission/requested"; requestId: string; permission: string; patterns: string[]; metadata?: JsonObject; tool?: string }
   | { type: "question/asked"; requestId: string; questions: JsonObject[] }
+  | ({ type: "secret/requested" } & SecretRequestData)
   | { type: "turn/stopped"; reason: "completed" | "aborted" | "error"; error?: string }
   | { type: "usage/recorded"; model: ModelRef; tokens: TokenUsage; cost?: number }
   // Full revisioned snapshots (WP8): replay-deterministic task/subagent state.
@@ -443,6 +458,7 @@ export interface AgentRuntime {
   abort(sessionId: string): Promise<void>;
   replyPermission(sessionId: string, requestId: string, reply: "once" | "always" | "reject"): Promise<void>;
   replyQuestion(sessionId: string, requestId: string, answers: JsonObject): Promise<void>;
+  replySecret?(sessionId: string, requestId: string, result: SecretResolvedData): Promise<void>;
   onEvent(cb: (sessionId: string, ev: RuntimeEvent) => void): Disposable;
   dispose(): Promise<void>;
 }
@@ -1019,6 +1035,68 @@ export interface McpServerDto {
   status: McpStatus;
   lastError?: string;
   revision: number;
+}
+
+// ---------------------------------------------------------------- Secure Safe (OC-22-008)
+
+export type SecureSafeKind = "env" | "token" | "password";
+export type SecureSafeScope = "global" | "project";
+
+/** Public metadata only. Secret values never cross this contract boundary. */
+export interface SecureSafeEntryDto {
+  id: string;
+  handle: string;
+  label: string;
+  purpose: string;
+  kind: SecureSafeKind;
+  scope: SecureSafeScope;
+  projectId?: string;
+  revision: number;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface SecureSafeManifest {
+  version: number;
+  handles: Array<{
+    handle: string;
+    label: string;
+    purpose: string;
+    kind: SecureSafeKind;
+    envRef: string;
+  }>;
+}
+
+export interface SecureSafeCreateInput {
+  handle: string;
+  label: string;
+  purpose?: string;
+  kind?: SecureSafeKind;
+  scope?: SecureSafeScope;
+  projectId?: string;
+  value: string;
+}
+
+export interface SecureSafePatchInput {
+  handle?: string;
+  label?: string;
+  purpose?: string;
+  kind?: SecureSafeKind;
+  scope?: SecureSafeScope;
+  projectId?: string | null;
+  /** Missing or blank retains the current write-only value. */
+  value?: string;
+}
+
+export interface SecureSafeService {
+  list(): SecureSafeEntryDto[];
+  manifest(): SecureSafeManifest;
+  hasHandle(handle: string): boolean;
+  create(input: SecureSafeCreateInput): Promise<SecureSafeEntryDto>;
+  update(id: string, patch: SecureSafePatchInput): Promise<SecureSafeEntryDto>;
+  remove(id: string): Promise<boolean>;
+  upsertByHandle(input: SecureSafeCreateInput): Promise<SecureSafeEntryDto>;
+  syncForbiddenConfig(): Promise<SecureSafeManifest>;
 }
 
 export interface InstalledPluginDto {

@@ -41,7 +41,13 @@ async function atomicWrite(path: string, data: string): Promise<void> {
   }
 }
 
-export function createBehaviorService(opts: { file: string; applier?: BehaviorApplier }): BehaviorService {
+export function createBehaviorService(opts: {
+  file: string;
+  applier?: BehaviorApplier;
+  /** Server-owned instructions appended at apply/digest time but not exposed
+   *  as editable behavior text. */
+  decorate?(text: string): string;
+}): BehaviorService {
   mkdirSync(dirname(opts.file), { recursive: true });
 
   const readText = async (): Promise<string> => {
@@ -54,6 +60,7 @@ export function createBehaviorService(opts: { file: string; applier?: BehaviorAp
   };
 
   const pathLabel = opts.applier ? "global AGENTS.md" : "global AGENTS.md (backend not attached)";
+  const effective = (text: string): string => opts.decorate?.(text) ?? text;
 
   return {
     async get(): Promise<BehaviorState> {
@@ -76,7 +83,7 @@ export function createBehaviorService(opts: { file: string; applier?: BehaviorAp
       await atomicWrite(opts.file, text);
       if (opts.applier) {
         try {
-          await opts.applier.applyBehavior(text);
+          await opts.applier.applyBehavior(effective(text));
         } catch (err) {
           // Canonical copy must match what the backend actually runs with.
           await atomicWrite(opts.file, before);
@@ -90,7 +97,7 @@ export function createBehaviorService(opts: { file: string; applier?: BehaviorAp
     },
 
     async current(): Promise<{ revision: string; digest: string } | null> {
-      const text = await readText();
+      const text = effective(await readText());
       if (!text.trim()) return null;
       const digest = createHash("sha256").update(text, "utf8").digest("hex");
       return { revision: digest.slice(0, 12), digest };
