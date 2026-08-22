@@ -5,6 +5,7 @@ import { useStore } from "../store.ts";
 import { applyTerminalChunk, nextTermBackoff } from "../utils.ts";
 import { usePaneVisible } from "../workspace/paneVisibility.ts";
 import EmptyState from "./EmptyState.tsx";
+import { Icon } from "../icons.tsx";
 
 interface Tab {
   id: string;
@@ -239,11 +240,11 @@ export default function TerminalView() {
               title={`Close ${t.title}`}
               aria-label={`Close ${t.title}`}
               onClick={() => void closeTab(t.id)}
-            >×</button>
+            ><Icon.close /></button>
           </span>
         ))}
         <span className="header-spacer" />
-        <button className="term-new" onClick={() => void spawn()} disabled={!projectId}>+ New</button>
+        <button className="term-new" title="New terminal" aria-label="New terminal" onClick={() => void spawn()} disabled={!projectId}><Icon.plus /></button>
       </div>
 
       {!projectId && <EmptyState title="No project selected" description="Open a project to use the terminal." />}

@@ -18,6 +18,7 @@ import EmptyState from "./EmptyState.tsx";
 import PrCreatePanel from "./PrCreatePanel.tsx";
 import { setGitPrefs, splitDiffRows, useGitPrefs } from "../gitPrefs.ts";
 import { refreshGitStatus, useGitStatus } from "../gitStatusStore.ts";
+import { Icon } from "../icons.tsx";
 
 const STATUS_LETTER: Record<string, { letter: string; cls: string; label: string }> = {
   added: { letter: "A", cls: "staged", label: "Added" },
@@ -231,14 +232,14 @@ export default function GitView() {
 
   return (
     <div className="view-page git-page">
-      <div className="goals-head">
+      <div className="goals-head workspace-toolbar">
         <h1 className="view-title">Git &amp; Worktrees</h1>
         <span className="header-spacer" />
-        <button className="small-btn" disabled={busy} onClick={() => void syncRepository()}>Sync</button>
-        <button className="small-btn" onClick={() => openWorktreeSessionDialog(projectId)}>+ Worktree session</button>
-        <button className="small-btn" onClick={() => { setShowBranchForm((v) => !v); setShowTreeForm(false); setShowPrForm(false); }}>+ Branch</button>
-        <button className="small-btn" onClick={() => { setShowTreeForm((v) => !v); setShowBranchForm(false); setShowPrForm(false); }}>+ Worktree</button>
-        <button className="small-btn" onClick={() => { setShowPrForm((v) => !v); setShowBranchForm(false); setShowTreeForm(false); }}>Create PR</button>
+        <button className="small-btn icon-only" title="Sync repository" aria-label="Sync repository" disabled={busy} onClick={() => void syncRepository()}><Icon.sync /></button>
+        <button className="small-btn icon-only" title="New worktree session" aria-label="New worktree session" onClick={() => openWorktreeSessionDialog(projectId)}><Icon.session /></button>
+        <button className={`small-btn icon-only ${showBranchForm ? "active" : ""}`} title="New branch" aria-label="New branch" aria-pressed={showBranchForm} onClick={() => { setShowBranchForm((v) => !v); setShowTreeForm(false); setShowPrForm(false); }}><Icon.branch /></button>
+        <button className={`small-btn icon-only ${showTreeForm ? "active" : ""}`} title="New worktree" aria-label="New worktree" aria-pressed={showTreeForm} onClick={() => { setShowTreeForm((v) => !v); setShowBranchForm(false); setShowPrForm(false); }}><Icon.worktree /></button>
+        <button className={`small-btn icon-only ${showPrForm ? "active" : ""}`} title="Create pull request" aria-label="Create pull request" aria-pressed={showPrForm} onClick={() => { setShowPrForm((v) => !v); setShowBranchForm(false); setShowTreeForm(false); }}><Icon.pullRequest /></button>
       </div>
       {syncSteps.length > 0 && (
         <div className="git-sync-steps" role="status">
@@ -279,7 +280,7 @@ export default function GitView() {
       <div className="git-grid">
         <div className="git-col">
           {/* ---- changes first ------------------------------------------------ */}
-          <div className="stat-label git-changes-head">
+          <div className="stat-label git-changes-head workspace-toolbar">
             <span>Changes ({all.length})</span>
             {status && all.length > 0 && (
               <span className="git-ahead-behind">
@@ -289,18 +290,18 @@ export default function GitView() {
               </span>
             )}
             <span className="header-spacer" />
-            <button className={`small-btn ${prefs.changesView === "flat" ? "active" : ""}`} onClick={() => setGitPrefs({ changesView: "flat" })}>Flat</button>
-            <button className={`small-btn ${prefs.changesView === "tree" ? "active" : ""}`} onClick={() => setGitPrefs({ changesView: "tree" })}>Tree</button>
+            <button className={`small-btn icon-only ${prefs.changesView === "flat" ? "active" : ""}`} title="Flat view" aria-label="Flat view" aria-pressed={prefs.changesView === "flat"} onClick={() => setGitPrefs({ changesView: "flat" })}><Icon.list /></button>
+            <button className={`small-btn icon-only ${prefs.changesView === "tree" ? "active" : ""}`} title="Tree view" aria-label="Tree view" aria-pressed={prefs.changesView === "tree"} onClick={() => setGitPrefs({ changesView: "tree" })}><Icon.hierarchy /></button>
             {status && (status.unstaged.length + status.untracked.length) > 0 && (
-              <button className="small-btn" disabled={busy}
+              <button className="small-btn icon-only" title="Stage all" aria-label="Stage all" disabled={busy}
                 onClick={() => void run(() => api.gitFolder(projectId, "", "stage", sessionId ?? undefined))}>
-                Stage all
+                <Icon.stage />
               </button>
             )}
             {status && status.staged.length > 0 && (
-              <button className="small-btn" disabled={busy}
+              <button className="small-btn icon-only" title="Unstage all" aria-label="Unstage all" disabled={busy}
                 onClick={() => void run(() => api.gitFolder(projectId, "", "unstage", sessionId ?? undefined))}>
-                Unstage all
+                <Icon.unstage />
               </button>
             )}
           </div>
@@ -312,8 +313,12 @@ export default function GitView() {
                   <GitFileMain file={f} onOpen={() => { setCommitSel(null); setSel(f.path); }} />
                   <span className="git-file-actions">
                     {f.staged
-                      ? <button className="small-btn" title="Unstage" disabled={busy} onClick={() => void run(() => api.gitUnstage(projectId, [f.path], sessionId ?? undefined))}>U</button>
-                      : <button className="small-btn" title="Stage" disabled={busy} onClick={() => void run(() => api.gitStage(projectId, [f.path], sessionId ?? undefined))}>S</button>}
+                      ? <button className="small-btn icon-only" title="Unstage" aria-label={`Unstage ${f.path}`} disabled={busy} onClick={() => void run(() => api.gitUnstage(projectId, [f.path], sessionId ?? undefined))}><Icon.unstage /></button>
+                      : <button className="small-btn icon-only" title="Stage" aria-label={`Stage ${f.path}`} disabled={busy} onClick={() => void run(() => api.gitStage(projectId, [f.path], sessionId ?? undefined))}><Icon.stage /></button>}
+                    {!f.staged && f.status !== "untracked" && (
+                      <button className="small-btn icon-only danger-btn" title="Discard" aria-label={`Discard ${f.path}`} disabled={busy}
+                        onClick={() => { if (window.confirm(`Discard ${f.path}?`)) void run(() => api.gitDiscard(projectId, [f.path], sessionId ?? undefined)); }}><Icon.trash /></button>
+                    )}
                   </span>
                 </div>
               );
@@ -333,20 +338,21 @@ export default function GitView() {
                         return n;
                       })}
                     >
-                      {open ? "▾" : "▸"} <span className="mono">{dir || "(root)"}</span> <span className="muted">({files.length})</span>
+                      <span className="git-folder-chevron" aria-hidden="true">{open ? <Icon.chevronDown /> : <Icon.chevronRight />}</span>
+                      <span className="mono">{dir || "(root)"}</span> <span className="muted">({files.length})</span>
                     </button>
                     <span className="git-file-actions">
                       {files.some((f) => !f.staged && f.status !== "conflicted") && (
-                        <button className="small-btn" title="Stage folder" disabled={busy}
-                          onClick={() => void run(() => api.gitFolder(projectId, dir, "stage", sessionId ?? undefined))}>S</button>
+                        <button className="small-btn icon-only" title="Stage folder" aria-label={`Stage ${dir || "root"} folder`} disabled={busy}
+                          onClick={() => void run(() => api.gitFolder(projectId, dir, "stage", sessionId ?? undefined))}><Icon.stage /></button>
                       )}
                       {files.some((f) => f.staged) && (
-                        <button className="small-btn" title="Unstage folder" disabled={busy}
-                          onClick={() => void run(() => api.gitFolder(projectId, dir, "unstage", sessionId ?? undefined))}>U</button>
+                        <button className="small-btn icon-only" title="Unstage folder" aria-label={`Unstage ${dir || "root"} folder`} disabled={busy}
+                          onClick={() => void run(() => api.gitFolder(projectId, dir, "unstage", sessionId ?? undefined))}><Icon.unstage /></button>
                       )}
                       {files.some((f) => !f.staged) && (
-                        <button className="small-btn danger-btn" title="Discard folder changes" disabled={busy}
-                          onClick={() => { if (confirmTyped(`discard all changes under ${dir || "the repository root"}`)) void run(() => api.gitFolder(projectId, dir, "discard", sessionId ?? undefined)); }}>✕</button>
+                        <button className="small-btn icon-only danger-btn" title="Discard folder changes" aria-label={`Discard changes in ${dir || "root"} folder`} disabled={busy}
+                          onClick={() => { if (confirmTyped(`discard all changes under ${dir || "the repository root"}`)) void run(() => api.gitFolder(projectId, dir, "discard", sessionId ?? undefined)); }}><Icon.trash /></button>
                       )}
                     </span>
                   </div>
@@ -356,11 +362,11 @@ export default function GitView() {
                         <GitFileMain file={f} onOpen={() => { setCommitSel(null); setSel(f.path); }} />
                         <span className="git-file-actions">
                           {f.staged
-                            ? <button className="small-btn" title="Unstage" disabled={busy} onClick={() => void run(() => api.gitUnstage(projectId, [f.path], sessionId ?? undefined))}>U</button>
-                            : <button className="small-btn" title="Stage" disabled={busy} onClick={() => void run(() => api.gitStage(projectId, [f.path], sessionId ?? undefined))}>S</button>}
+                            ? <button className="small-btn icon-only" title="Unstage" aria-label={`Unstage ${f.path}`} disabled={busy} onClick={() => void run(() => api.gitUnstage(projectId, [f.path], sessionId ?? undefined))}><Icon.unstage /></button>
+                            : <button className="small-btn icon-only" title="Stage" aria-label={`Stage ${f.path}`} disabled={busy} onClick={() => void run(() => api.gitStage(projectId, [f.path], sessionId ?? undefined))}><Icon.stage /></button>}
                           {!f.staged && f.status !== "untracked" && (
-                            <button className="small-btn danger-btn" title="Discard" disabled={busy}
-                              onClick={() => { if (window.confirm(`Discard ${f.path}?`)) void run(() => api.gitDiscard(projectId, [f.path], sessionId ?? undefined)); }}>✕</button>
+                            <button className="small-btn icon-only danger-btn" title="Discard" aria-label={`Discard ${f.path}`} disabled={busy}
+                              onClick={() => { if (window.confirm(`Discard ${f.path}?`)) void run(() => api.gitDiscard(projectId, [f.path], sessionId ?? undefined)); }}><Icon.trash /></button>
                           )}
                         </span>
                       </div>
@@ -410,15 +416,15 @@ export default function GitView() {
               </div>
               <div className="muted" style={{ fontSize: 11 }}>{t.path} · {t.head.slice(0, 7)}</div>
               {!t.isMain && (
-                <button className="small-btn git-wt-session" disabled={busy} onClick={() => openWorktreeSessionDialog(projectId, t.path)}>
-                  New session
-                </button>
-              )}
-              {!t.isMain && (
-                <button className="small-btn danger-btn git-wt-remove" disabled={busy}
-                  onClick={() => { if (window.confirm(`Remove worktree ${t.path}?`)) void run(() => api.removeWorktree(projectId, t.path, true)); }}>
-                  Remove
-                </button>
+                <div className="git-wt-actions">
+                  <button className="small-btn icon-only git-wt-session" title="New session" aria-label={`New session in ${t.branch}`} disabled={busy} onClick={() => openWorktreeSessionDialog(projectId, t.path)}>
+                    <Icon.session />
+                  </button>
+                  <button className="small-btn icon-only danger-btn git-wt-remove" title="Remove worktree" aria-label={`Remove worktree ${t.branch}`} disabled={busy}
+                    onClick={() => { if (window.confirm(`Remove worktree ${t.path}?`)) void run(() => api.removeWorktree(projectId, t.path, true)); }}>
+                    <Icon.trash />
+                  </button>
+                </div>
               )}
             </div>
           ))}
@@ -540,7 +546,7 @@ export default function GitView() {
                           <span className="mono">L{c.line}</span>
                           {state === "outdated" && <span className="tag">Outdated</span>}
                           <span className="header-spacer" />
-                          <button className="small-btn" onClick={() => persistComments(comments.filter((x) => x.id !== c.id))}>✕</button>
+                          <button className="small-btn icon-only" title="Remove review note" aria-label="Remove review note" onClick={() => persistComments(comments.filter((x) => x.id !== c.id))}><Icon.close /></button>
                         </div>
                         <div className="review-note-text">{c.text}</div>
                       </div>

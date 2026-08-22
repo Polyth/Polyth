@@ -20,6 +20,7 @@ import { useEscape } from "../../useEscape.ts";
 import { clampMenuPosition } from "../../selectionActions.ts";
 import { copyText } from "../../utils.ts";
 import { getEditorPrefs, setEditorPreviewDefault, useUiSettings } from "../../uiPrefs.ts";
+import { Icon } from "../../icons.tsx";
 import {
   autosaveDelay,
   beginLiveFileSave,
@@ -523,7 +524,7 @@ export default function FilePane({ projectId, sessionId, resource: path, visible
         {live?.kind === "saving" && <span className="editor-save-state">Saving…</span>}
         {live?.kind === "saved" && <span className="editor-save-state">Saved</span>}
         {flash && <span className="editor-flash">{flash}</span>}
-        <button className="small-btn" title="Close file (Esc)" onClick={() => actions?.closeSelf("file", path)}>✕</button>
+        <button className="small-btn icon-only" title="Close file (Esc)" aria-label="Close file" onClick={() => actions?.closeSelf("file", path)}><Icon.close /></button>
       </div>
       <div className="editor-toolbar">
         {previewKind !== null && (
@@ -566,12 +567,12 @@ export default function FilePane({ projectId, sessionId, resource: path, visible
           </span>
         )}
         {!readOnly && (editing || dirty) && (
-          <button className="small-btn" disabled={live?.kind === "saving" || !dirty} title={`Save (${MOD}S)`} onClick={() => void save()}>
-            Save
+          <button className="small-btn icon-only" disabled={live?.kind === "saving" || !dirty} title={`Save (${MOD}S)`} aria-label="Save file" onClick={() => void save()}>
+            <Icon.check />
           </button>
         )}
         <button
-          className="small-btn editor-more-btn"
+          className="small-btn icon-only editor-more-btn"
           aria-haspopup="menu"
           aria-expanded={menu !== null}
           aria-label={`Actions for ${doc.path}`}
@@ -581,7 +582,7 @@ export default function FilePane({ projectId, sessionId, resource: path, visible
             openMenu(r.right - MENU_W, r.bottom + 4);
           }}
         >
-          ⋯
+          <Icon.more />
         </button>
       </div>
       {menu && (
@@ -660,21 +661,21 @@ export default function FilePane({ projectId, sessionId, resource: path, visible
           </span>
           <button className="small-btn" onClick={() => void reload()}>Reload from disk</button>
           {live.dirty && <button className="small-btn danger-btn" onClick={() => void save({ force: true })}>Overwrite</button>}
-          <button className="small-btn" aria-label="Dismiss file change notice" onClick={() => { if (td.live) td.live = dismissLiveFileNotice(td.live); bumpDocs(); }}>×</button>
+          <button className="small-btn icon-only" title="Dismiss file change notice" aria-label="Dismiss file change notice" onClick={() => { if (td.live) td.live = dismissLiveFileNotice(td.live); bumpDocs(); }}><Icon.close /></button>
         </div>
       )}
       {live && !live.noticeDismissed && live.kind === "deleted" && (
         <div className="editor-banner editor-conflict" role="alert">
           <span>File was deleted on disk.{live.dirty ? " Saving recreates it; your buffer is preserved." : ""}</span>
           {live.dirty && <button className="small-btn danger-btn" onClick={() => void save({ force: true })}>Recreate</button>}
-          <button className="small-btn" aria-label="Dismiss deleted file notice" onClick={() => { if (td.live) td.live = dismissLiveFileNotice(td.live); bumpDocs(); }}>×</button>
+          <button className="small-btn icon-only" title="Dismiss deleted file notice" aria-label="Dismiss deleted file notice" onClick={() => { if (td.live) td.live = dismissLiveFileNotice(td.live); bumpDocs(); }}><Icon.close /></button>
         </div>
       )}
       {live && !live.noticeDismissed && live.kind === "check-failed" && (
         <div className="editor-banner" role="alert">
           <span>Couldn’t check for external changes: {live.message}</span>
           <button className="small-btn" onClick={() => void checkFile()}>Retry</button>
-          <button className="small-btn" aria-label="Dismiss file check notice" onClick={() => { if (td.live) td.live = dismissLiveFileNotice(td.live); bumpDocs(); }}>×</button>
+          <button className="small-btn icon-only" title="Dismiss file check notice" aria-label="Dismiss file check notice" onClick={() => { if (td.live) td.live = dismissLiveFileNotice(td.live); bumpDocs(); }}><Icon.close /></button>
         </div>
       )}
       {doc.truncated && <div className="editor-banner">Truncated — file exceeds 512 KB. Read-only.</div>}

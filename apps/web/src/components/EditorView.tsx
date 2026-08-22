@@ -18,6 +18,7 @@ import type { PaneTab } from "../workspace/paneStore.ts";
 import PaneHost, { type PaneHostHandle } from "./workspace/PaneHost.tsx";
 import FileRowActions from "./FileRowActions.tsx";
 import { ChevronGlyph, FileTypeGlyph, FolderGlyph, fileTypeKeyOf } from "../editor/fileTreeIcons.tsx";
+import { Icon } from "../icons.tsx";
 import "./editor/FilePane.tsx"; // registers the "file" pane provider
 import "../workspace/mainSlotPanes.ts"; // registers the "plugin" slot bridge
 
@@ -287,13 +288,13 @@ export default function EditorView() {
               }
             }}
           />
-          <button className="small-btn" onClick={() => void search()}>Go</button>
+          <button className="small-btn icon-only" title="Search files" aria-label="Search files" onClick={() => void search()}><Icon.search /></button>
         </div>
         {treeErr && <div className="files-error">{treeErr}</div>}
         {searchResults !== null ? (
           <div className="files-list">
             <div className="files-actions">
-              <button className="small-btn" onClick={() => { setSearchResults(null); setQuery(""); }}>← Tree</button>
+              <button className="small-btn icon-only" title="Back to tree" aria-label="Back to tree" onClick={() => { setSearchResults(null); setQuery(""); }}><Icon.back /></button>
             </div>
             {searchResults.length === 0 && <div className="empty">No matches.</div>}
             {searchResults.map((fp) => (
