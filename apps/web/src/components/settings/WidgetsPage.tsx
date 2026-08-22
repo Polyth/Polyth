@@ -20,6 +20,7 @@ import {
 } from "../../widgets/widgetLayout.ts";
 import { supportedWidgetSlots } from "../../widgets/widgetLibrary.ts";
 import "../../widgets/builtinWidgets.tsx";
+import { PageHead } from "./parts.tsx";
 
 type MiniPlaceId = "composer" | "session-header" | "app-header";
 type PlaceId = CapabilityTier | MiniPlaceId;
@@ -161,9 +162,7 @@ export default function WidgetsPage() {
 
   return (
     <>
-      <div className="set-page-head">
-        <p className="muted">Choose where workspace and composer buttons appear.</p>
-      </div>
+      <PageHead title="Widgets & Layout" blurb="Choose where workspace and composer buttons appear." />
 
       <div className="widget-placement-toolbar">
         <span className={`widget-save-state ${storeStatus.saveStatus}`} role="status">

@@ -1245,7 +1245,7 @@ export function ManagedPluginsSection() {
           const commandCount = contributionCount(p, "command");
           const toolCount = p.capabilities.length;
           return (
-            <article key={p.id} className={`plugin-card ${p.enabled ? "" : "disabled"}`}>
+            <article key={p.id} className={`plugin-card ${p.enabled ? "enabled" : "disabled"}`}>
               <button type="button" className="plugin-card-main" onClick={() => setSelected(p.id)}>
                 <span className="plugin-card-icon">{p.name.slice(0, 1).toUpperCase()}</span>
                 <span className="plugin-card-copy">
