@@ -10,10 +10,10 @@ import {
 import { listCapabilities, useResolvedCapabilities } from "../../capabilities.ts";
 import { openWorkspacePane, setOverlay, updateSettings, useStore } from "../../store.ts";
 import { setUiSettings, useUiSettings } from "../../uiPrefs.ts";
-import { groupQuotaWindows, setGroupCollapsed, setProviderHidden, useUsagePrefs } from "../../usagePrefs.ts";
+import { setProviderHidden, useUsagePrefs } from "../../usagePrefs.ts";
 import { requestNotifyPermission } from "../../notify.ts";
 import { disablePush, enablePush, pushSubscription, pushUnsupportedReason } from "../../push.ts";
-import { api, type GitStatus, type QuotaSnapshotDto, type QuotaWindowDto, type QuotaPaceDto } from "../../api.ts";
+import { api, type GitStatus } from "../../api.ts";
 import { fmtCost, fmtTokens } from "../../format.ts";
 import { EmptyState, PageHead, Row, Seg, Toggle } from "./parts.tsx";
 import { refreshProfiles, useProfiles } from "../../profiles.ts";
@@ -26,11 +26,21 @@ import {
   reapplyTheme, removeCustomTheme, resolveTheme, type ThemeSpec,
 } from "../../theme.ts";
 import type { AssistSettingsDto } from "../../api.ts";
-import type { AgentProfile, InstalledPluginDto, McpServerDto, McpTransport, SessionProjection, SystemInfoDto } from "@polyth/contracts";
+import type { AgentProfile, InstalledPluginDto, McpServerDto, McpTransport, SystemInfoDto } from "@polyth/contracts";
 import { useWidgetCatalog } from "../../widgets/catalog.ts";
 import { useWidgetLayout } from "../../widgets/widgetLayout.ts";
 import { roleKind, setRoleKind, useRolePrefs } from "../../rolePrefs.ts";
-import { providerUsageDistribution } from "../../usageShare.ts";
+import {
+  ProviderUsageDonut,
+  projectUsageStats,
+  sessionTokens,
+  topProjectSessions,
+} from "../../usage/projectUi.tsx";
+import {
+  QuotaCard,
+  QuotaOverviewGrid,
+  useQuotaSnapshots,
+} from "../../usage/quotaUi.tsx";
 
 function ThemeSwatches({ theme }: { theme: ThemeSpec }) {
   return (
@@ -697,137 +707,10 @@ export function BehaviorPage() {
 
 // ---- WP12: provider quota cards -------------------------------------------
 
-function fmtQuota(n: number, unit: QuotaWindowDto["unit"]): string {
-  if (unit === "currency") return `$${n.toFixed(2)}`;
-  if (unit === "percent") return `${Math.round(n)}%`;
-  if (unit === "tokens") return fmtTokens(n);
-  return String(Math.round(n));
-}
-
-function paceText(pace: QuotaPaceDto | null, win: QuotaWindowDto): string {
-  if (!pace) return "";
-  const bits: string[] = [`${Math.round(pace.usageFraction * 100)}% used, ${Math.round(pace.timeFraction * 100)}% of window elapsed (${pace.pace})`];
-  if (pace.predictedAtReset !== undefined) {
-    bits.push(`At current pace: ~${fmtQuota(pace.predictedAtReset, win.unit)} of ${fmtQuota(win.limit, win.unit)} by reset`);
-  }
-  if (pace.exhaustsAt !== undefined) {
-    bits.push(`may run out around ${new Date(pace.exhaustsAt).toLocaleTimeString()}`);
-  }
-  return bits.join(" · ");
-}
-
-function QuotaWindowRow({ w, pace }: { w: QuotaWindowDto; pace: QuotaPaceDto | null }) {
-  const frac = w.limit > 0 ? Math.min(1, w.used / w.limit) : 0;
-  return (
-    <div className="quota-window">
-      <div className="quota-window-head">
-        <span>{w.label}</span>
-        <span className="mono">{fmtQuota(w.used, w.unit)} / {fmtQuota(w.limit, w.unit)}</span>
-      </div>
-      <div className="quota-progress" role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(frac * 100)} aria-label={w.label}>
-        <div className={`quota-progress-fill ${pace?.pace ?? ""}`} style={{ width: `${frac * 100}%` }} />
-      </div>
-      {pace && <div className="quota-pace">{paceText(pace, w)}</div>}
-      {w.resetsAt !== undefined && <div className="muted" style={{ fontSize: 11 }}>resets {new Date(w.resetsAt).toLocaleString()}</div>}
-    </div>
-  );
-}
-
-function ProviderQuotaChart({ snap }: { snap: QuotaSnapshotDto }) {
-  const windows = snap.overview?.windows ?? snap.windows.map((window) => ({
-    ...window,
-    usedFraction: window.limit > 0 ? Math.min(1, Math.max(0, window.used / window.limit)) : 0,
-    remainingFraction: window.limit > 0 ? Math.max(0, 1 - window.used / window.limit) : 1,
-  }));
-  const width = 240;
-  const height = 72;
-  const gap = 8;
-  const barWidth = windows.length > 0 ? Math.max(8, (width - gap * (windows.length - 1)) / windows.length) : width;
-  return (
-    <div className="provider-quota-chart" role="img" aria-label={`${snap.providerId} quota utilization chart`}>
-      <svg viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" aria-hidden="true">
-        <line x1="0" x2={width} y1={height * .2} y2={height * .2} />
-        <line x1="0" x2={width} y1={height * .5} y2={height * .5} />
-        <line x1="0" x2={width} y1={height * .8} y2={height * .8} />
-        {windows.map((window, index) => {
-          const usedHeight = window.usedFraction * height;
-          return (
-            <rect
-              key={window.id}
-              x={index * (barWidth + gap)}
-              y={height - usedHeight}
-              width={barWidth}
-              height={usedHeight}
-              rx="3"
-              className={window.usedFraction >= .8 ? "warn" : ""}
-            />
-          );
-        })}
-      </svg>
-      <div className="provider-quota-chart-labels">
-        {windows.map((window) => <span key={window.id} title={window.label}>{Math.round(window.usedFraction * 100)}%</span>)}
-      </div>
-    </div>
-  );
-}
-
-function QuotaCard({ snap, onRefresh }: { snap: QuotaSnapshotDto; onRefresh: (id: string) => void }) {
-  const prefs = useUsagePrefs();
-  // F13: windows grouped by model family; groups collapse and remember it.
-  const groups = groupQuotaWindows(snap.windows);
-  const grouped = groups.some((g) => g.family !== null);
-  return (
-    <div className={`quota-card ${snap.stale ? "quota-stale" : ""}`}>
-      <div className="quota-card-head">
-        <strong>{snap.providerId}</strong>
-        {snap.accountLabel && <span className="muted">{snap.accountLabel}</span>}
-        {snap.stale && <span className="tag" title={snap.error?.message}>stale</span>}
-        <span className="header-spacer" />
-        {snap.fetchedAt > 0 && <span className="muted" style={{ fontSize: 11 }}>{new Date(snap.fetchedAt).toLocaleTimeString()}</span>}
-        <button className="small-btn" onClick={() => onRefresh(snap.providerId)}>Refresh</button>
-      </div>
-      {snap.stale && snap.error && <div className="quota-error">{snap.error.message}</div>}
-      {snap.windows.length > 0 && <ProviderQuotaChart snap={snap} />}
-      {groups.map((g) => {
-        const key = `${snap.providerId}/${g.family ?? "general"}`;
-        const collapsed = grouped && prefs.collapsedGroups.includes(key);
-        return (
-          <div key={key} className="quota-group">
-            {grouped && (
-              <button
-                className="quota-group-head"
-                aria-expanded={!collapsed}
-                onClick={() => setGroupCollapsed(key, !collapsed)}
-              >
-                <span className="quota-group-arrow">{collapsed ? "▸" : "▾"}</span>
-                <span>{g.label}</span>
-                <span className="muted">{g.windows.length}</span>
-              </button>
-            )}
-            {!collapsed && g.windows.map((w) => <QuotaWindowRow key={w.id} w={w} pace={snap.pace[w.id] ?? null} />)}
-          </div>
-        );
-      })}
-      {snap.windows.length === 0 && <div className="muted" style={{ fontSize: 12 }}>No quota data yet.</div>}
-    </div>
-  );
-}
-
 function QuotaSection() {
-  const [snaps, setSnaps] = useState<QuotaSnapshotDto[]>([]);
+  const { snapshots: snaps, refresh } = useQuotaSnapshots();
   const prefs = useUsagePrefs();
-  const reload = () => void api.usageQuotas().then(setSnaps);
-  useEffect(() => {
-    reload();
-    const t = setInterval(reload, 60_000);
-    return () => clearInterval(t);
-  }, []);
-  const refresh = (id: string) => void api.usageQuotasRefresh(id).then(reload).catch(reload);
   const visible = snaps.filter((s) => !prefs.hiddenProviders.includes(s.providerId));
-  const windowCount = visible.reduce((count, snapshot) => count + snapshot.windows.length, 0);
-  const attentionCount = visible.reduce((count, snapshot) =>
-    count + snapshot.windows.filter((window) => window.limit > 0 && window.used / window.limit >= .8).length, 0);
-  const staleCount = visible.filter((snapshot) => snapshot.stale).length;
   return (
     <>
       <div className="stat-label">Provider usage overview</div>
@@ -835,12 +718,7 @@ function QuotaSection() {
         <EmptyState title="No quota providers configured" body="Provider quota adapters are registered on the server; credentials never reach the browser." />
       )}
       {visible.length > 0 && (
-        <div className="usage-overview-grid">
-          <div><span>Providers</span><strong>{visible.length}</strong></div>
-          <div><span>Quota windows</span><strong>{windowCount}</strong></div>
-          <div><span>At 80%+</span><strong className={attentionCount > 0 ? "warn" : ""}>{attentionCount}</strong></div>
-          <div><span>Stale feeds</span><strong>{staleCount}</strong></div>
-        </div>
+        <QuotaOverviewGrid snapshots={visible} />
       )}
       {snaps.length > 0 && (
         <div className="quota-visibility">
@@ -871,81 +749,12 @@ function QuotaSection() {
   );
 }
 
-const PROVIDER_SHARE_COLORS = [
-  "var(--accent)",
-  "var(--green)",
-  "var(--amber)",
-  "#c4a7ee",
-  "#64b5f6",
-  "#f49b5b",
-] as const;
-
-function ProviderUsageDonut({ sessions }: { sessions: readonly SessionProjection[] }) {
-  const distribution = providerUsageDistribution(sessions);
-  let offset = 0;
-  const arcs = distribution.providers.map((provider, index) => {
-    const start = offset;
-    offset += provider.share * 100;
-    return {
-      ...provider,
-      color: PROVIDER_SHARE_COLORS[index % PROVIDER_SHARE_COLORS.length]!,
-      offset: start,
-    };
-  });
-  const totalLabel = distribution.metric === "tokens"
-    ? fmtTokens(distribution.total)
-    : `${distribution.total} session${distribution.total === 1 ? "" : "s"}`;
-
-  return (
-    <section className="provider-share-card" aria-labelledby="provider-share-title">
-      <div>
-        <div className="stat-label" id="provider-share-title">Usage by provider</div>
-        <p>Share of project {distribution.metric === "tokens" ? "tokens" : "sessions"}.</p>
-      </div>
-      <div
-        className="provider-share-donut"
-        role="img"
-        aria-label={`Provider usage share by ${distribution.metric}`}
-      >
-        <svg viewBox="0 0 120 120" aria-hidden="true">
-          <circle className="provider-share-track" cx="60" cy="60" r="44" pathLength="100" />
-          {arcs.map((provider) => (
-            <circle
-              key={provider.providerId}
-              className="provider-share-arc"
-              cx="60"
-              cy="60"
-              r="44"
-              pathLength="100"
-              stroke={provider.color}
-              strokeDasharray={`${provider.share * 100} ${100 - provider.share * 100}`}
-              strokeDashoffset={-provider.offset}
-            />
-          ))}
-        </svg>
-        <div><strong>{totalLabel}</strong><span>total</span></div>
-      </div>
-      <div className="provider-share-legend">
-        {arcs.map((provider) => (
-          <div key={provider.providerId}>
-            <i style={{ background: provider.color }} />
-            <span>{provider.providerId}</span>
-            <strong>{Math.round(provider.share * 100)}%</strong>
-          </div>
-        ))}
-      </div>
-    </section>
-  );
-}
-
 export function UsagePage() {
   const sessions = useStore((s) => s.sessions);
   const projectId = useStore((s) => s.activeProjectId);
   const mine = sessions.filter((s) => s.projectId === projectId);
-  const tok = (n?: { input: number; output: number }) => (n ? n.input + n.output : 0);
-  const totalTokens = mine.reduce((a, s) => a + tok(s.tokenTotals), 0);
-  const totalCost = mine.reduce((a, s) => a + (s.costTotal ?? 0), 0);
-  const top = [...mine].sort((a, b) => (b.costTotal ?? 0) - (a.costTotal ?? 0) || tok(b.tokenTotals) - tok(a.tokenTotals)).slice(0, 8);
+  const totals = projectUsageStats(mine);
+  const top = topProjectSessions(mine);
   return (
     <>
       <PageHead title="Usage" blurb="Token and cost totals for the active project (from the session log)." />
@@ -955,15 +764,15 @@ export function UsagePage() {
         <>
           <div className="set-usage-grid">
             <div className="goal-stat-cell"><div className="goal-stat-k">Sessions</div><div className="goal-stat-v">{mine.length}</div></div>
-            <div className="goal-stat-cell"><div className="goal-stat-k">Tokens</div><div className="goal-stat-v mono">{fmtTokens(totalTokens)}</div></div>
-            <div className="goal-stat-cell"><div className="goal-stat-k">Cost</div><div className="goal-stat-v mono">{totalCost > 0 ? fmtCost(totalCost) : "—"}</div></div>
+            <div className="goal-stat-cell"><div className="goal-stat-k">Tokens</div><div className="goal-stat-v mono">{fmtTokens(totals.tokens)}</div></div>
+            <div className="goal-stat-cell"><div className="goal-stat-k">Cost</div><div className="goal-stat-v mono">{totals.cost > 0 ? fmtCost(totals.cost) : "—"}</div></div>
           </div>
           <ProviderUsageDonut sessions={mine} />
           <div className="stat-label">Top sessions</div>
           {top.map((s) => (
             <div key={s.id} className="stat-row">
               <span className="k" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "60%" }}>{s.title || s.id}</span>
-              <span className="mono">{fmtTokens(tok(s.tokenTotals))}{s.costTotal ? ` · ${fmtCost(s.costTotal)}` : ""}</span>
+              <span className="mono">{fmtTokens(sessionTokens(s))}{s.costTotal ? ` · ${fmtCost(s.costTotal)}` : ""}</span>
             </div>
           ))}
         </>

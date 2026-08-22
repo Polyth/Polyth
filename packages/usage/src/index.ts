@@ -16,6 +16,7 @@ export { buildProviderUsageOverview } from "./overview.ts";
 export type { ProviderUsageOverview } from "./overview.ts";
 export { createHttpQuotaProvider, parseQuotaProviderSpecs } from "./http.ts";
 export type { HttpQuotaProviderSpec, HttpQuotaProviderOptions } from "./http.ts";
+export { USAGE_WIDGETS } from "../widgets/index.ts";
 
 export interface QuotaProvider {
   id: string;

@@ -12,7 +12,6 @@ import ScheduleView from "../components/ScheduleView.tsx";
 import TerminalView from "../components/TerminalView.tsx";
 import Timeline from "../components/Timeline.tsx";
 import WalkthroughView from "../components/WalkthroughView.tsx";
-import { fmtCost, fmtTokens } from "../format.ts";
 import { openWorkspacePane, useActiveModel, useStore } from "../store.ts";
 import {
   defineWidgetPlugin,
@@ -209,19 +208,6 @@ function ActivityWidget() {
   );
 }
 
-function UsageWidget() {
-  const model = useActiveModel();
-  const total = model.totals.input + model.totals.output;
-  return (
-    <div className="widget-stat-grid">
-      <div><span>Input</span><strong>{fmtTokens(model.totals.input)}</strong></div>
-      <div><span>Output</span><strong>{fmtTokens(model.totals.output)}</strong></div>
-      <div><span>Total</span><strong>{fmtTokens(total)}</strong></div>
-      <div><span>Cost</span><strong>{model.totals.cost > 0 ? fmtCost(model.totals.cost) : "—"}</strong></div>
-    </div>
-  );
-}
-
 const BUILTINS: WidgetDef[] = [
   {
     id: "core.composer", pluginId: "session", title: "Composer",
@@ -310,17 +296,12 @@ const BUILTINS: WidgetDef[] = [
     description: "Review changed files in guided stages.", zone: "main",
     defaultSize: { w: 12, h: 6 }, audience: "standard", render: () => <WalkthroughView />,
   },
-  {
-    id: "usage.session", pluginId: "usage", title: "Usage",
-    description: "Token and cost totals for the active session.", zone: "right",
-    defaultSize: { w: 4, h: 3 }, audience: "standard", render: () => <UsageWidget />,
-  },
 ];
 
 // Feature-owned widget pluginIds match their packages/<pluginId> boundary.
 // These web adapters keep React in apps/web while contributing package-owned
-// Git, Terminal, and Usage widgets through the same slot third parties use.
-const SLOT_BACKED_BUILTINS = new Set(["git.recent", "terminal.shell", "usage.session"]);
+// Git and Terminal widgets through the same slot third parties use.
+const SLOT_BACKED_BUILTINS = new Set(["git.recent", "terminal.shell"]);
 
 const BUILTIN_WIDGET_META: Record<string, Partial<WidgetDef>> = {
   "core.composer": {
@@ -410,11 +391,6 @@ const BUILTIN_WIDGET_META: Record<string, Partial<WidgetDef>> = {
     pluginName: "Git tools", category: "source control",
     supportedZones: ["main", "bottom"], minSize: { w: 8, h: 5 },
     maxSize: { w: 12, h: 12 }, resizable: true, scope: "plugin",
-  },
-  "usage.session": {
-    pluginName: "Tools", category: "status",
-    supportedZones: ["header", "left", "main", "right"], minSize: { w: 3, h: 2 },
-    maxSize: { w: 8, h: 6 }, resizable: true, scope: "workspace",
   },
 };
 

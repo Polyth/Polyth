@@ -1,12 +1,14 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { register } from "node:module";
+import { USAGE_WIDGETS } from "@polyth/usage";
 import { listSlots, registerSlot } from "../src/slots.ts";
 
 register("./tsxHooks.mjs", import.meta.url);
 
 const { defineWidgetPlugin, listWidgets, registerWidgetPlugin } = await import("../src/widgets/catalog.ts");
 const { BUILTIN_WIDGET_PLUGINS } = await import("../src/widgets/builtinWidgets.tsx");
+const { installUsagePlugin, USAGE_WIDGET_PLUGIN } = await import("../src/widgets/usagePlugin.tsx");
 
 test("built-in catalog covers the complete default canvas", () => {
   const widgets = listWidgets();
@@ -29,16 +31,43 @@ test("built-in catalog covers the complete default canvas", () => {
   assert.ok((BUILTIN_WIDGET_PLUGINS.find((plugin) => plugin.id === "files")?.widgets?.length ?? 0) > 1);
 });
 
-test("feature-owned Git, Terminal, and Usage widgets contribute through the catalog slot", () => {
+test("feature-owned Git and Terminal widgets contribute through the catalog slot", () => {
   const contributions = new Map(listSlots("widget.catalog").map((item) => [item.id, item]));
   for (const [id, pluginId] of [
     ["git.recent", "git"],
     ["terminal.shell", "terminal"],
-    ["usage.session", "usage"],
   ] as const) {
     assert.equal(contributions.get(id)?.meta?.pluginId, pluginId);
     assert.equal(listWidgets().find((widget) => widget.id === id)?.pluginId, pluginId);
   }
+});
+
+test("Usage plugin owns all package-declared usage widgets", () => {
+  const client = USAGE_WIDGET_PLUGIN.widgets ?? [];
+  assert.deepEqual(
+    client.map((widget) => widget.id),
+    USAGE_WIDGETS.map((widget) => widget.id),
+  );
+  assert.deepEqual(
+    client.map(({ render: _render, settingsRender: _settingsRender, ...widget }) => widget),
+    USAGE_WIDGETS.map(({ module: _module, ...widget }) => widget),
+  );
+  installUsagePlugin();
+  const widgets = listWidgets().filter((widget) => widget.pluginId === "usage");
+  assert.deepEqual(
+    widgets.map((widget) => widget.id).sort(),
+    [
+      "usage.project",
+      "usage.quota-summary",
+      "usage.quotas",
+      "usage.session",
+      "usage.sessions-table",
+    ],
+  );
+  assert.ok(widgets.every((widget) => widget.category === "Usage"));
+  assert.ok(widgets.every((widget) => typeof widget.render === "function"));
+  assert.ok(widgets.every((widget) => typeof widget.settingsRender === "function"));
+  assert.equal(widgets.find((widget) => widget.id === "usage.quota-summary")?.defaultSlot, "workspace.header");
 });
 
 test("plugin catalog and settings slots merge into one widget definition", () => {

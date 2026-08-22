@@ -11,12 +11,25 @@ import {
   createUsageService,
   createFakeQuotaProvider,
   redactSecrets,
+  USAGE_WIDGETS,
   type QuotaProvider,
 } from "@polyth/usage";
 
 const snapshot = (used: number): QuotaSnapshot => ({
   providerId: "p", windows: [{ id: "w", label: "W", used, limit: 100, unit: "requests" }],
   fetchedAt: Date.now(), stale: false,
+});
+
+test("usage package declares the complete widget suite", () => {
+  assert.deepEqual(USAGE_WIDGETS.map((widget) => widget.id), [
+    "usage.session",
+    "usage.quotas",
+    "usage.project",
+    "usage.sessions-table",
+    "usage.quota-summary",
+  ]);
+  assert.ok(USAGE_WIDGETS.every((widget) => widget.category === "Usage"));
+  assert.ok(USAGE_WIDGETS.every((widget) => widget.supportedSlots.includes(widget.defaultSlot)));
 });
 
 test("provider overview derives bounded utilization for dashboard charts", () => {

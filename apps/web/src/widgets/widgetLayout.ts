@@ -102,11 +102,16 @@ export const BUILTIN_WIDGET_IDS = [
   "fusion.answers",
   "walkthrough.review",
   "usage.session",
+  "usage.quotas",
+  "usage.project",
+  "usage.sessions-table",
+  "usage.quota-summary",
 ] as const;
 
 const DEFAULT_ZONE: Record<string, WidgetZone> = {
   "core.quick-actions": "header",
   "goals.current": "header",
+  "usage.quota-summary": "header",
   "files.explorer": "left",
   "files.project-map": "left",
   "knowledge.notes": "left",
@@ -115,11 +120,14 @@ const DEFAULT_ZONE: Record<string, WidgetZone> = {
   "multirun.runs": "main",
   "fusion.answers": "main",
   "walkthrough.review": "main",
+  "usage.quotas": "main",
+  "usage.project": "main",
   "github.overview": "right",
   "git.recent": "right",
   "session.work-status": "right",
   "session.activity": "right",
   "usage.session": "right",
+  "usage.sessions-table": "right",
   "schedule.tasks": "right",
   "terminal.shell": "bottom",
   "preview.app": "bottom",
@@ -145,6 +153,10 @@ const DEFAULT_SIZE_BY_ID: Record<string, WidgetSize> = {
   "fusion.answers": { w: 12, h: 6 },
   "walkthrough.review": { w: 12, h: 6 },
   "usage.session": { w: 4, h: 3 },
+  "usage.quotas": { w: 12, h: 7 },
+  "usage.project": { w: 8, h: 6 },
+  "usage.sessions-table": { w: 6, h: 5 },
+  "usage.quota-summary": { w: 4, h: 2 },
 };
 const DEFAULT_VISIBLE = new Set<string>([
   "core.composer", "core.quick-actions", "goals.current", "files.project-map",
@@ -759,7 +771,7 @@ export function applyWidgetLayoutMutations(
 const PRESET_VISIBLE: Record<Exclude<WidgetLayoutPresetId, "custom">, readonly string[]> = {
   focused: ["core.composer", "core.quick-actions", "goals.current"],
   balanced: ["core.composer", "core.quick-actions", "goals.current", "files.project-map", "git.recent", "knowledge.notes", "session.work-status", "session.activity"],
-  manager: ["core.composer", "goals.current", "knowledge.notes", "schedule.tasks", "usage.session", "walkthrough.review"],
+  manager: ["core.composer", "goals.current", "knowledge.notes", "schedule.tasks", "usage.session", "usage.quotas", "walkthrough.review"],
   "build-debug": ["core.composer", "files.explorer", "files.project-map", "git.recent", "terminal.shell", "preview.app", "session.activity", "session.work-status"],
 };
 

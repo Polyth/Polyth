@@ -57,8 +57,9 @@ test("provider usage distribution uses a human default label and session fallbac
 });
 
 test("Usage settings renders the provider distribution as an SVG donut", async () => {
-  const source = await readFile(new URL("../src/components/settings/pages.tsx", import.meta.url), "utf8");
+  const source = await readFile(new URL("../src/usage/projectUi.tsx", import.meta.url), "utf8");
+  const settings = await readFile(new URL("../src/components/settings/pages.tsx", import.meta.url), "utf8");
   assert.match(source, /function ProviderUsageDonut/);
   assert.match(source, /className="provider-share-donut"[\s\S]*?<svg/);
-  assert.match(source, /<ProviderUsageDonut sessions=\{mine\} \/>/);
+  assert.match(settings, /<ProviderUsageDonut sessions=\{mine\} \/>/);
 });

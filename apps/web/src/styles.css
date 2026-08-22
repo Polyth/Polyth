@@ -5289,6 +5289,22 @@ body[data-quick-actions="false"] [data-widget-id="core.quick-actions"] { display
 .provider-quota-chart rect { fill: var(--accent); opacity: .72; }
 .provider-quota-chart rect.warn { fill: var(--amber); }
 .provider-quota-chart-labels { display: flex; justify-content: space-around; color: var(--muted); font-size: 9px; }
+.usage-widget-panel { min-height: 100%; padding: 10px; }
+.usage-widget-panel > .usage-overview-grid { margin-top: 0; }
+.usage-widget-panel > .quota-grid { grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); }
+.usage-widget-panel > .provider-share-card { margin: 2px 0 0; }
+.usage-sessions-table { min-height: 100%; overflow: auto; padding: 8px 10px; }
+.usage-sessions-table table { width: 100%; border-collapse: collapse; font-size: 11px; }
+.usage-sessions-table th, .usage-sessions-table td { padding: 7px 8px; border-bottom: 1px solid var(--hair); text-align: right; }
+.usage-sessions-table th:first-child, .usage-sessions-table td:first-child { width: 100%; max-width: 0; overflow: hidden; text-align: left; text-overflow: ellipsis; white-space: nowrap; }
+.usage-sessions-table th { position: sticky; top: 0; z-index: 1; background: var(--panel); color: var(--muted); font-size: 9px; text-transform: uppercase; }
+.usage-sessions-table th button { border: 0; padding: 2px 3px; background: transparent; color: inherit; font: inherit; text-transform: inherit; }
+.usage-sessions-table th button.active { color: var(--accent); }
+.usage-quota-summary { flex: 1; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); align-items: stretch; gap: 7px; padding: 9px; }
+.usage-quota-summary > div { min-width: 0; display: flex; flex-direction: column; justify-content: center; padding: 7px 9px; border: 1px solid var(--hair); border-radius: var(--radius-md); background: var(--sunken); }
+.usage-quota-summary strong { font: 650 16px var(--mono); }
+.usage-quota-summary span { overflow: hidden; color: var(--muted); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
+.usage-quota-summary .warn strong { color: var(--amber); }
 
 @media (max-width: 760px) {
   .widget-canvas-grid { display: flex; flex-direction: column; padding: 56px 12px 18px; }
