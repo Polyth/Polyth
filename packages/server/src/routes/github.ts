@@ -169,6 +169,10 @@ export function githubRoutes(deps: {
     if (path === "/api/github/repo") { json(200, await deps.github.repo(root)); return true; }
     if (path === "/api/github/issues") { json(200, await deps.github.issues(root, limit)); return true; }
     if (path === "/api/github/prs") { json(200, await deps.github.prs(root, limit)); return true; }
+    if (path === "/api/github/pr/current") {
+      json(200, await deps.github.currentPrSummary(root));
+      return true;
+    }
 
     // ---- PR detail surfaces (WP11) ------------------------------------------
     if (path === "/api/github/pr") { json(200, await deps.github.prDetail(root, number)); return true; }

@@ -128,3 +128,39 @@ test("pr/describe fails soft when unwired and returns the wired draft", async ()
   assert.equal(soft.status, 200);
   assert.deepEqual(soft.payload, { ok: false, reason: "no commits to describe against main" });
 });
+
+test("current PR summary route resolves the project and returns branch PR totals", async () => {
+  const { calls, call } = makeHarness({
+    exec: async (_bin, args) => {
+      assert.deepEqual(args, [
+        "pr", "view", "--json", "number,title,url,changedFiles,additions,deletions",
+      ]);
+      return {
+        stdout: JSON.stringify({
+          number: 9,
+          title: "Add widgets",
+          url: "https://github.com/a/r/pull/9",
+          changedFiles: 4,
+          additions: 70,
+          deletions: 11,
+        }),
+        stderr: "",
+      };
+    },
+  });
+  const response = await call("GET", "/api/github/pr/current", {}, "?projectId=p1");
+  assert.equal(response.handled, true);
+  assert.equal(response.status, 200);
+  assert.deepEqual(response.payload, {
+    ok: true,
+    data: {
+      number: 9,
+      title: "Add widgets",
+      url: "https://github.com/a/r/pull/9",
+      changedFiles: 4,
+      additions: 70,
+      deletions: 11,
+    },
+  });
+  assert.equal(calls.length, 1);
+});

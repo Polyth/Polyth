@@ -3,7 +3,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 
-import { cap, MODEL_VISIBLE_TYPES } from "@polyth/contracts";
+import { cap, isUiSlot, MODEL_VISIBLE_TYPES, UI_SLOTS } from "@polyth/contracts";
 import type {
   BrowserAction,
   DeliveryMode,
@@ -35,6 +35,12 @@ test("model-visible vocabulary is unchanged (replay compatibility)", () => {
     "question/asked",
     "question/answered",
   ]);
+});
+
+test("composer-before is a first-class validated widget slot", () => {
+  assert.ok(UI_SLOTS.includes("session.composer.before"));
+  assert.equal(isUiSlot("session.composer.before"), true);
+  assert.equal(isUiSlot("session.composer.after"), false);
 });
 
 test("new DTOs serialize/parse without loss", () => {

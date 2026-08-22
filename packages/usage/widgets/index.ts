@@ -7,15 +7,26 @@ const WORKSPACE_SLOTS = [
   "workspace.right",
 ] as const;
 
+const SESSION_USAGE_SETTINGS = {
+  type: "object",
+  properties: {
+    showContext: { type: "boolean", title: "Context window", default: true },
+    showCost: { type: "boolean", title: "Session cost", default: true },
+    showInput: { type: "boolean", title: "Input tokens", default: true },
+    showOutput: { type: "boolean", title: "Output tokens", default: true },
+    showTotal: { type: "boolean", title: "Total tokens", default: true },
+  },
+} as const;
+
 export const USAGE_WIDGETS: readonly WidgetContributionDescriptor[] = [
   {
     id: "usage.session",
     module: "usage.session",
     title: "Session usage",
-    description: "Token and cost totals for the active session.",
+    description: "Context-window, token, and cost totals for the active session.",
     kind: "widget",
-    defaultSlot: "workspace.right",
-    supportedSlots: [...WORKSPACE_SLOTS],
+    defaultSlot: "session.composer.before",
+    supportedSlots: ["session.composer.before", ...WORKSPACE_SLOTS],
     category: "Usage",
     defaultSize: { w: 4, h: 3 },
     minSize: { w: 3, h: 2 },
@@ -25,6 +36,7 @@ export const USAGE_WIDGETS: readonly WidgetContributionDescriptor[] = [
     resizable: true,
     recommended: true,
     defaultVisible: false,
+    settingsSchema: SESSION_USAGE_SETTINGS,
   },
   {
     id: "usage.quotas",

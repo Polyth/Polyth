@@ -12,6 +12,8 @@ import type { UiSlot } from "@polyth/contracts";
 import { listSlots, slotVersion, subscribeSlots, type SlotItem } from "../../slots.ts";
 import { useWidgetCatalog, type WidgetDef } from "../../widgets/catalog.ts";
 import {
+  setWidgetConfig,
+  updateWidgetLayout,
   useWidgetLayout,
   widgetDefinitionId,
   type WidgetLayout,
@@ -99,6 +101,9 @@ export function placedWidgetItems(
     const widget = byId.get(widgetDefinitionId(layout, instanceId));
     if (!placement?.visible || !widget) return [];
     if (placement.showIn && !placement.showIn.includes(layout.audience)) return [];
+    const updateConfig = (config: Parameters<typeof setWidgetConfig>[2]) => {
+      updateWidgetLayout((current) => setWidgetConfig(current, instanceId, config));
+    };
     return [{
       id: `widget:${instanceId}`,
       order: widget.order ?? index,
@@ -113,6 +118,9 @@ export function placedWidgetItems(
           projectId: typeof hostContext.projectId === "string" ? hostContext.projectId : null,
           sessionId: typeof hostContext.sessionId === "string" ? hostContext.sessionId : null,
           editing: hostContext.editing === true,
+          instanceId,
+          config: placement.config ?? {},
+          updateConfig,
         }),
       ),
     }];

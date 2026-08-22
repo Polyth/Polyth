@@ -13,7 +13,11 @@ import {
 } from "../src/components/slots/SlotHost.ts";
 import { UI_SLOTS, isUiSlot } from "@polyth/contracts";
 import type { WidgetDef } from "../src/widgets/catalog.ts";
-import { createDefaultWidgetLayout, moveWidgetToSlot } from "../src/widgets/widgetLayout.ts";
+import {
+  createDefaultWidgetLayout,
+  moveWidgetToSlot,
+  setWidgetConfig,
+} from "../src/widgets/widgetLayout.ts";
 
 test("listSlots orders by order then id, deterministically", () => {
   const offs = [
@@ -149,6 +153,38 @@ test("placed mini-widgets render through ordinary UI slot hosts", () => {
   assert.equal(items.length, 1);
 });
 
+test("full widgets render before the composer with per-instance context", () => {
+  let seen: unknown = null;
+  const widget: WidgetDef = {
+    id: "sample.summary",
+    pluginId: "sample",
+    title: "Sample summary",
+    description: "A full configurable widget",
+    kind: "widget",
+    defaultSlot: "session.composer.before",
+    supportedSlots: ["session.composer.before", "workspace.main"],
+    defaultVisible: true,
+    render: (context) => {
+      seen = context;
+      return "summary";
+    },
+  };
+  let layout = createDefaultWidgetLayout([widget]);
+  layout = setWidgetConfig(layout, widget.id, { showCost: false });
+  const items = placedWidgetItems(
+    "session.composer.before",
+    { projectId: "p1", sessionId: "s1" },
+    [widget],
+    layout,
+  );
+  assert.equal(items.length, 1);
+  const element = items[0]!.render({ projectId: "p1", sessionId: "s1" });
+  assert.ok(isValidElement(element));
+  assert.deepEqual((seen as { instanceId: string; config: unknown }).instanceId, widget.id);
+  assert.deepEqual((seen as { instanceId: string; config: unknown }).config, { showCost: false });
+  assert.equal(typeof (seen as { updateConfig: unknown }).updateConfig, "function");
+});
+
 // EXT-SEAMS-V1 (pure half; the mounted proof lives in slotHostMounted.test.ts):
 // the boundary keys by contribution id, so a same-id registration replacement
 // must reset a failed boundary while an unchanged registration stays closed.
@@ -176,6 +212,7 @@ test("contracts expose the runtime slot vocabulary used for validation", () => {
   assert.ok(UI_SLOTS.length >= 19);
   assert.ok(isUiSlot("composer.leading"));
   assert.ok(isUiSlot("session.timeline.after"));
+  assert.ok(isUiSlot("session.composer.before"));
   assert.ok(isUiSlot("widget.catalog"));
   assert.ok(isUiSlot("widget.settings"));
   assert.ok(isUiSlot("workspace.canvas"));

@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { register } from "node:module";
 import { USAGE_WIDGETS } from "@polyth/usage";
+import { GITHUB_WIDGETS } from "@polyth/github";
 import { listSlots, registerSlot } from "../src/slots.ts";
 
 register("./tsxHooks.mjs", import.meta.url);
@@ -9,6 +10,7 @@ register("./tsxHooks.mjs", import.meta.url);
 const { defineWidgetPlugin, listWidgets, registerWidgetPlugin } = await import("../src/widgets/catalog.ts");
 const { BUILTIN_WIDGET_PLUGINS } = await import("../src/widgets/builtinWidgets.tsx");
 const { installUsagePlugin, USAGE_WIDGET_PLUGIN } = await import("../src/widgets/usagePlugin.tsx");
+const { installGithubPlugin, GITHUB_WIDGET_PLUGIN } = await import("../src/widgets/githubPlugin.tsx");
 
 test("built-in catalog covers the complete default canvas", () => {
   const widgets = listWidgets();
@@ -68,7 +70,25 @@ test("Usage plugin owns all package-declared usage widgets", () => {
   assert.ok(widgets.every((widget) => widget.category === "Usage"));
   assert.ok(widgets.every((widget) => typeof widget.render === "function"));
   assert.ok(widgets.every((widget) => typeof widget.settingsRender === "function"));
+  assert.equal(widgets.find((widget) => widget.id === "usage.session")?.defaultSlot, "session.composer.before");
+  assert.ok(widgets.find((widget) => widget.id === "usage.session")?.supportedSlots?.includes("session.composer.before"));
   assert.equal(widgets.find((widget) => widget.id === "usage.quota-summary")?.defaultSlot, "workspace.header");
+});
+
+test("GitHub plugin owns its package-declared current PR widget", () => {
+  const client = GITHUB_WIDGET_PLUGIN.widgets ?? [];
+  assert.deepEqual(
+    client.map(({ render: _render, settingsRender: _settingsRender, ...widget }) => widget),
+    GITHUB_WIDGETS.map(({ module: _module, ...widget }) => widget),
+  );
+  installGithubPlugin();
+  const widget = listWidgets().find((item) => item.id === "github.pr-summary");
+  assert.equal(widget?.pluginId, "github");
+  assert.equal(widget?.defaultSlot, "session.composer.before");
+  assert.ok(widget?.supportedSlots?.includes("workspace.right"));
+  assert.equal(typeof widget?.render, "function");
+  assert.equal(typeof widget?.settingsRender, "function");
+  assert.ok(widget?.settingsSchema);
 });
 
 test("plugin catalog and settings slots merge into one widget definition", () => {
@@ -89,10 +109,17 @@ test("plugin catalog and settings slots merge into one widget definition", () =>
     assert.equal(widget?.zone, "right");
     assert.equal(widget?.audience, "power");
     assert.deepEqual(widget?.defaultSize, { w: 4, h: 3 });
-    assert.equal(widget?.render({ projectId: null, sessionId: null, editing: false }), "status");
-    assert.equal(widget?.settingsRender?.({
+    const context = {
       projectId: null,
       sessionId: null,
+      editing: false,
+      instanceId: "sample.status#2",
+      config: {},
+      updateConfig: () => {},
+    };
+    assert.equal(widget?.render(context), "status");
+    assert.equal(widget?.settingsRender?.({
+      ...context,
       widgetId: "sample.status",
       editing: true,
     }), "settings");

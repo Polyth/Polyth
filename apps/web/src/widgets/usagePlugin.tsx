@@ -1,6 +1,8 @@
 import { useState, type ReactNode } from "react";
+import type { JsonObject } from "@polyth/contracts";
 import { fmtCost, fmtTokens } from "../format.ts";
 import { useActiveModel, useStore } from "../store.ts";
+import { contextGauge, type RenderModel } from "../reduce.ts";
 import {
   ProviderUsageDonut,
   projectUsageStats,
@@ -23,19 +25,109 @@ import {
   registerWidgetPlugin,
   type PluginWidgetDef,
   type WidgetRenderContext,
+  type WidgetSettingsContext,
 } from "./catalog.ts";
 
-function SessionUsageWidget() {
-  const model = useActiveModel();
+export type SessionUsageMetric =
+  | "showContext"
+  | "showCost"
+  | "showInput"
+  | "showOutput"
+  | "showTotal";
+
+interface UsageMetricRow {
+  id: string;
+  label: string;
+  value: string;
+  detail?: string;
+}
+
+const SESSION_USAGE_METRICS: ReadonlyArray<{ id: SessionUsageMetric; label: string }> = [
+  { id: "showContext", label: "Context window" },
+  { id: "showCost", label: "Session cost" },
+  { id: "showInput", label: "Input tokens" },
+  { id: "showOutput", label: "Output tokens" },
+  { id: "showTotal", label: "Total tokens" },
+];
+
+const SESSION_USAGE_SETTINGS = {
+  type: "object",
+  properties: {
+    showContext: { type: "boolean", title: "Context window", default: true },
+    showCost: { type: "boolean", title: "Session cost", default: true },
+    showInput: { type: "boolean", title: "Input tokens", default: true },
+    showOutput: { type: "boolean", title: "Output tokens", default: true },
+    showTotal: { type: "boolean", title: "Total tokens", default: true },
+  },
+} as const;
+
+export function usageMetricVisible(config: Readonly<JsonObject>, metric: SessionUsageMetric): boolean {
+  return config[metric] !== false;
+}
+
+export function SessionUsageStats({
+  model,
+  contextTokens,
+  config,
+}: {
+  model: Pick<RenderModel, "contextUsage" | "totals">;
+  contextTokens?: number;
+  config: Readonly<JsonObject>;
+}) {
   const total = model.totals.input + model.totals.output;
+  const gauge = contextGauge(model, contextTokens);
+  const rows: UsageMetricRow[] = [];
+  if (usageMetricVisible(config, "showContext")) {
+    rows.push({
+      id: "context",
+      label: "Context",
+      value: gauge.known ? `${gauge.percent}%` : "Unknown",
+      ...(gauge.known
+        ? { detail: `${fmtTokens(gauge.inputTokens)} / ${fmtTokens(gauge.contextTokens)}` }
+        : {}),
+    });
+  }
+  if (usageMetricVisible(config, "showInput")) {
+    rows.push({ id: "input", label: "Input", value: fmtTokens(model.totals.input) });
+  }
+  if (usageMetricVisible(config, "showOutput")) {
+    rows.push({ id: "output", label: "Output", value: fmtTokens(model.totals.output) });
+  }
+  if (usageMetricVisible(config, "showTotal")) {
+    rows.push({ id: "total", label: "Total", value: fmtTokens(total) });
+  }
+  if (usageMetricVisible(config, "showCost")) {
+    rows.push({
+      id: "cost",
+      label: "Cost",
+      value: model.totals.cost > 0 ? fmtCost(model.totals.cost) : "—",
+    });
+  }
   return (
-    <div className="widget-stat-grid">
-      <div><span>Input</span><strong>{fmtTokens(model.totals.input)}</strong></div>
-      <div><span>Output</span><strong>{fmtTokens(model.totals.output)}</strong></div>
-      <div><span>Total</span><strong>{fmtTokens(total)}</strong></div>
-      <div><span>Cost</span><strong>{model.totals.cost > 0 ? fmtCost(model.totals.cost) : "—"}</strong></div>
+    <div className="widget-stat-grid usage-session-stats">
+      {rows.map((row) => (
+        <div key={row.id} data-usage-metric={row.id}>
+          <span>{row.label}</span>
+          <strong>{row.value}</strong>
+          {row.detail && <small>{row.detail}</small>}
+        </div>
+      ))}
+      {rows.length === 0 && <div className="widget-empty">Choose metrics in widget settings.</div>}
     </div>
   );
+}
+
+function SessionUsageWidget({ config }: WidgetRenderContext) {
+  const model = useActiveModel();
+  const models = useStore((state) => state.models);
+  const session = useStore((state) =>
+    state.sessions.find((item) => item.id === state.activeSessionId) ?? null);
+  const activeModel = model.contextUsage?.model ?? model.turn?.model ?? session?.model;
+  const descriptor = activeModel
+    ? models.find((candidate) =>
+        candidate.providerID === activeModel.providerID && candidate.modelID === activeModel.modelID)
+    : undefined;
+  return <SessionUsageStats model={model} contextTokens={descriptor?.context} config={config} />;
 }
 
 function ProviderQuotasWidget() {
@@ -157,8 +249,25 @@ function UsageWidgetSettings() {
   );
 }
 
+function SessionUsageWidgetSettings({ config, updateConfig }: WidgetSettingsContext) {
+  return (
+    <div className="widget-schema-settings" aria-label="Session usage metrics">
+      {SESSION_USAGE_METRICS.map((metric) => (
+        <label key={metric.id}>
+          <input
+            type="checkbox"
+            checked={usageMetricVisible(config, metric.id)}
+            onChange={(event) => updateConfig({ ...config, [metric.id]: event.target.checked })}
+          />
+          <span><strong>{metric.label}</strong></span>
+        </label>
+      ))}
+    </div>
+  );
+}
+
 const RENDERERS: Record<string, (context: WidgetRenderContext) => ReactNode> = {
-  "usage.session": () => <SessionUsageWidget />,
+  "usage.session": (context) => <SessionUsageWidget {...context} />,
   "usage.quotas": () => <ProviderQuotasWidget />,
   "usage.project": (context) => <ProjectUsageWidget projectId={context.projectId} />,
   "usage.sessions-table": (context) => <SessionsTableWidget projectId={context.projectId} />,
@@ -172,10 +281,16 @@ export const USAGE_WIDGET_PLUGIN = defineWidgetPlugin({
     {
       id: "usage.session",
       title: "Session usage",
-      description: "Token and cost totals for the active session.",
+      description: "Context-window, token, and cost totals for the active session.",
       kind: "widget",
-      defaultSlot: "workspace.right",
-      supportedSlots: ["workspace.header", "workspace.left", "workspace.main", "workspace.right"],
+      defaultSlot: "session.composer.before",
+      supportedSlots: [
+        "session.composer.before",
+        "workspace.header",
+        "workspace.left",
+        "workspace.main",
+        "workspace.right",
+      ],
       category: "Usage",
       defaultSize: { w: 4, h: 3 },
       minSize: { w: 3, h: 2 },
@@ -185,8 +300,9 @@ export const USAGE_WIDGET_PLUGIN = defineWidgetPlugin({
       resizable: true,
       recommended: true,
       defaultVisible: false,
+      settingsSchema: SESSION_USAGE_SETTINGS,
       render: RENDERERS["usage.session"]!,
-      settingsRender: () => <UsageWidgetSettings />,
+      settingsRender: (context) => <SessionUsageWidgetSettings {...context} />,
     },
     {
       id: "usage.quotas",

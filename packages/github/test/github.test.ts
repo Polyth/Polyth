@@ -107,6 +107,42 @@ test("limit is passed through to gh", async () => {
   ]);
 });
 
+test("currentPrSummary reads the current branch PR diff totals", async () => {
+  const calls: string[][] = [];
+  const svc = createGithubService({
+    exec: async (_bin, args) => {
+      calls.push(args);
+      return {
+        stdout: JSON.stringify({
+          number: 31,
+          title: "Widget summaries",
+          url: "https://github.com/acme/polyth/pull/31",
+          changedFiles: 8,
+          additions: 144,
+          deletions: 23,
+        }),
+        stderr: "",
+      };
+    },
+  });
+
+  const result = await svc.currentPrSummary("/repo");
+  assert.deepEqual(calls, [[
+    "pr", "view", "--json", "number,title,url,changedFiles,additions,deletions",
+  ]]);
+  assert.deepEqual(result, {
+    ok: true,
+    data: {
+      number: 31,
+      title: "Widget summaries",
+      url: "https://github.com/acme/polyth/pull/31",
+      changedFiles: 8,
+      additions: 144,
+      deletions: 23,
+    },
+  });
+});
+
 test("malformed gh JSON and generic command failures stay soft", async () => {
   const malformed = createGithubService({
     exec: async () => ({ stdout: "{not-json", stderr: "" }),

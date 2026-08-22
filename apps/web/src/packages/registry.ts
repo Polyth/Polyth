@@ -2,6 +2,7 @@ import { api } from "../api.ts";
 import { installAgentsPackage } from "./agents.ts";
 import { installCommandsPackage } from "./commands.ts";
 import { installGitPackage } from "./git.ts";
+import { installGithubPackage } from "./github.ts";
 import { installHomeAssistantPackage } from "./home-assistant.ts";
 import { installIntegrationsPackage } from "./integrations.ts";
 import { installMcpPackage } from "./mcp.ts";
@@ -18,6 +19,7 @@ type PackageInstaller = () => () => void;
 const installers = new Map<string, PackageInstaller>([
   ["voice", installVoicePackage],
   ["git", installGitPackage],
+  ["github", installGithubPackage],
   ["usage", installUsagePackage],
   ["models", () => combineUnregister(installModelsPackage(), installAgentsPackage())],
   ["mcp", installMcpPackage],
@@ -32,7 +34,6 @@ const installers = new Map<string, PackageInstaller>([
 // the user-facing feature. Keep settings metadata stable across either form.
 const aliases = new Map<string, string>([
   ["dictation", "voice"],
-  ["github", "integrations"],
 ]);
 
 const active = new Map<string, () => void>();

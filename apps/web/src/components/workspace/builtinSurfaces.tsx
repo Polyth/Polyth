@@ -24,6 +24,7 @@ import { composerBlockedByArchive, sessionSurfaceKind } from "../../sessionSurfa
 import { registerWorkspaceSurface } from "../../workspace/surfaceRegistry.ts";
 import WidgetCanvas from "../../widgets/WidgetCanvas.tsx";
 import { useWorkspaceMode } from "../../widgets/workspaceMode.ts";
+import SlotHost from "../slots/SlotHost.ts";
 
 // Large polyth-style hero for a fresh session (or no session yet):
 // centered headline, the composer as an elevated card, and suggestion chips.
@@ -95,6 +96,7 @@ function ArchivedComposerGuard({ sessionId }: { sessionId: string }) {
 
 function SessionSurface() {
   const workspaceMode = useWorkspaceMode();
+  const projectId = useStore((s) => s.activeProjectId);
   const sessionId = useStore((s) => s.activeSessionId);
   const openingSessionId = useStore((s) => s.openingSessionId);
   const session = useStore((s) => s.sessions.find((x) => x.id === s.activeSessionId) ?? null);
@@ -129,6 +131,10 @@ function SessionSurface() {
       {pendingQuestions.length > 0 && <QuestionCards questions={pendingQuestions} />}
       {pendingSecrets.length > 0 && <SecureSafeCard secrets={pendingSecrets} />}
       {pendingPermissions.length > 0 && <PermissionBanner permissions={pendingPermissions} />}
+      <SlotHost
+        slot="session.composer.before"
+        context={{ projectId, sessionId, editing: false }}
+      />
       {archived && sessionId ? <ArchivedComposerGuard sessionId={sessionId} /> : <Composer />}
     </div>
   );

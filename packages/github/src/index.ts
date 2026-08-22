@@ -9,6 +9,7 @@ import { normalizeCheck, type RollupEntry } from "./checks.ts";
 
 export { anyCheckPending, normalizeCheck, summarizeChecks } from "./checks.ts";
 export type { ChecksGroup, ChecksSummary, RollupEntry } from "./checks.ts";
+export { GITHUB_WIDGETS } from "../widgets/index.ts";
 
 export type ExecFn = (
   bin: string,
@@ -56,6 +57,15 @@ export interface GithubIssue {
 export interface GithubPr extends GithubIssue {
   isDraft: boolean;
   headRefName: string;
+}
+
+export interface CurrentPrSummary {
+  number: number;
+  title: string;
+  url: string;
+  changedFiles: number;
+  additions: number;
+  deletions: number;
 }
 
 export interface GithubStatus {
@@ -142,6 +152,7 @@ export interface GithubService {
   repo(cwd: string): Promise<GhResult<GithubRepo>>;
   issues(cwd: string, limit?: number): Promise<GhResult<GithubIssue[]>>;
   prs(cwd: string, limit?: number): Promise<GhResult<GithubPr[]>>;
+  currentPrSummary(cwd: string): Promise<GhResult<CurrentPrSummary>>;
   prDetail(cwd: string, number: number): Promise<GhResult<PrDetail>>;
   prFiles(cwd: string, number: number): Promise<GhResult<PrFile[]>>;
   prChecks(cwd: string, number: number): Promise<GhResult<PrCheck[]>>;
@@ -276,6 +287,25 @@ export function createGithubService(deps: { exec?: ExecFn } = {}): GithubService
           author: p.author?.login ?? "", updatedAt: p.updatedAt, url: p.url,
           isDraft: p.isDraft === true, headRefName: p.headRefName,
         })),
+      };
+    },
+
+    async currentPrSummary(cwd) {
+      const r = await ghJson<CurrentPrSummary>(
+        cwd,
+        ["pr", "view", "--json", "number,title,url,changedFiles,additions,deletions"],
+      );
+      if (!r.ok) return r;
+      return {
+        ok: true,
+        data: {
+          number: r.data.number,
+          title: r.data.title,
+          url: r.data.url,
+          changedFiles: r.data.changedFiles ?? 0,
+          additions: r.data.additions ?? 0,
+          deletions: r.data.deletions ?? 0,
+        },
       };
     },
 

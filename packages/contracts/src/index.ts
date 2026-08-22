@@ -702,7 +702,7 @@ export const UI_SLOTS = [
   "workspace.right", "workspace.bottom", "workspace.floating",
   // parity slots (WP1): focused seams instead of mega-component imports
   "workspace.main.tabs", "workspace.right.tabs",
-  "session.timeline.before", "session.timeline.after",
+  "session.timeline.before", "session.timeline.after", "session.composer.before",
   "session.message.actions",
   "sidebar.project.actions", "sidebar.session.actions",
   "workStatus.sections",
@@ -751,6 +751,8 @@ export interface WidgetContributionDescriptor {
   duplicatable?: boolean;
   recommended?: boolean;
   defaultVisible?: boolean;
+  /** JSON Schema-shaped, browser-visible per-instance settings metadata. */
+  settingsSchema?: JsonObject;
 }
 
 export interface UiSlotItem {
