@@ -20,6 +20,7 @@ import {
   useWidgetLayout,
   widgetDefinitionId,
   widgetSlotOf,
+  widgetZoneFromSlot,
   setWidgetConfig,
   type WidgetPlacement,
   type WidgetPosition,
@@ -375,19 +376,31 @@ function WidgetMenu({ widgets, onClose }: { widgets: WidgetDef[]; onClose: () =>
             <h4>{plugin}</h4>
             {items.map((widget) => {
               const visible = layout.widgets[widget.id]?.visible === true;
+              const currentSlot = widgetSlotOf(layout, widget.id) ?? widget.defaultSlot;
+              const onCanvas = visible && currentSlot !== undefined && widgetZoneFromSlot(currentSlot) !== null;
+              const canvasSlot = supportedWidgetSlots(widget).find(
+                (slot) => widgetZoneFromSlot(slot) !== null,
+              );
               return (
                 <button
                   key={widget.id}
-                  className={visible ? "active" : ""}
-                  aria-pressed={visible}
+                  className={onCanvas ? "active" : ""}
+                  aria-pressed={onCanvas}
                   onClick={() => updateWidgetLayout((current) => applyWidgetLayoutMutations(
                     current,
-                    [{ type: "visibility", id: widget.id, visible: !visible }],
+                    onCanvas
+                      ? [{ type: "visibility", id: widget.id, visible: false }]
+                      : [
+                          { type: "visibility", id: widget.id, visible: true },
+                          ...(canvasSlot
+                            ? [{ type: "place" as const, id: widget.id, slot: canvasSlot }]
+                            : []),
+                        ],
                     widgets,
                   ))}
                 >
                   <span><strong>{widget.title}</strong><small>{widget.description}</small></span>
-                  <span aria-hidden="true">{visible ? "−" : "+"}</span>
+                  <span aria-hidden="true">{onCanvas ? "−" : "+"}</span>
                 </button>
               );
             })}
