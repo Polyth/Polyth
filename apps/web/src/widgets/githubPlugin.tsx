@@ -1,10 +1,10 @@
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState } from "react";
 import type { JsonObject } from "@polyth/contracts";
-import { GITHUB_WIDGETS } from "@polyth/github";
 import { api, type CurrentPrSummaryDto, type GhListResult } from "../api.ts";
 import {
   defineWidgetPlugin,
   registerWidgetPlugin,
+  type PluginWidgetDef,
   type WidgetRenderContext,
   type WidgetSettingsContext,
 } from "./catalog.ts";
@@ -17,6 +17,15 @@ const SUMMARY_METRICS: ReadonlyArray<{ id: GithubSummaryMetric; label: string }>
   { id: "showDeletions", label: "Removed lines" },
 ];
 
+const PR_SUMMARY_SETTINGS = {
+  type: "object",
+  properties: {
+    showFiles: { type: "boolean", title: "Changed files", default: true },
+    showAdditions: { type: "boolean", title: "Added lines", default: true },
+    showDeletions: { type: "boolean", title: "Removed lines", default: true },
+  },
+} as const;
+
 const metricVisible = (config: Readonly<JsonObject>, metric: GithubSummaryMetric): boolean =>
   config[metric] !== false;
 
@@ -27,17 +36,16 @@ export function GithubPrSummary({
   summary: CurrentPrSummaryDto;
   config: Readonly<JsonObject>;
 }) {
-  const metrics = [
-    metricVisible(config, "showFiles")
-      ? { id: "files", label: "Files", value: summary.changedFiles, className: "" }
-      : null,
-    metricVisible(config, "showAdditions")
-      ? { id: "additions", label: "Added", value: `+${summary.additions}`, className: "positive" }
-      : null,
-    metricVisible(config, "showDeletions")
-      ? { id: "deletions", label: "Removed", value: `−${summary.deletions}`, className: "negative" }
-      : null,
-  ].filter((metric): metric is NonNullable<typeof metric> => metric !== null);
+  const metrics: Array<{ id: string; label: string; value: string | number; className: string }> = [];
+  if (metricVisible(config, "showFiles")) {
+    metrics.push({ id: "files", label: "Files", value: summary.changedFiles, className: "" });
+  }
+  if (metricVisible(config, "showAdditions")) {
+    metrics.push({ id: "additions", label: "Added", value: `+${summary.additions}`, className: "positive" });
+  }
+  if (metricVisible(config, "showDeletions")) {
+    metrics.push({ id: "deletions", label: "Removed", value: `−${summary.deletions}`, className: "negative" });
+  }
   return (
     <div className="github-pr-summary">
       <a href={summary.url} target="_blank" rel="noreferrer">
@@ -92,18 +100,38 @@ function GithubPrSummarySettings({ config, updateConfig }: WidgetSettingsContext
   );
 }
 
-const RENDERERS: Record<string, (context: WidgetRenderContext) => ReactNode> = {
-  "github.pr-summary": (context) => <GithubPrSummaryWidget {...context} />,
-};
-
 export const GITHUB_WIDGET_PLUGIN = defineWidgetPlugin({
   id: "github",
   name: "GitHub",
-  widgets: GITHUB_WIDGETS.map(({ module, ...widget }) => ({
-    ...widget,
-    render: RENDERERS[module]!,
-    settingsRender: (context: WidgetSettingsContext) => <GithubPrSummarySettings {...context} />,
-  })),
+  widgets: [
+    {
+      id: "github.pr-summary",
+      title: "Current pull request",
+      description: "Changed files and added/removed lines for the current branch pull request.",
+      kind: "widget",
+      defaultSlot: "session.composer.before",
+      supportedSlots: [
+        "session.composer.before",
+        "workspace.header",
+        "workspace.left",
+        "workspace.main",
+        "workspace.right",
+      ],
+      category: "GitHub",
+      capabilities: ["pull requests", "diff stats"],
+      defaultSize: { w: 5, h: 3 },
+      minSize: { w: 3, h: 2 },
+      maxSize: { w: 8, h: 6 },
+      audience: "standard",
+      scope: "plugin",
+      resizable: true,
+      recommended: true,
+      defaultVisible: false,
+      settingsSchema: PR_SUMMARY_SETTINGS,
+      render: (context) => <GithubPrSummaryWidget {...context} />,
+      settingsRender: (context) => <GithubPrSummarySettings {...context} />,
+    },
+  ] satisfies readonly PluginWidgetDef[],
 });
 
 let uninstall: (() => void) | null = null;

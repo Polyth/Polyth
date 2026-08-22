@@ -1,6 +1,5 @@
 import { useState, type ReactNode } from "react";
 import type { JsonObject } from "@polyth/contracts";
-import { USAGE_WIDGETS } from "@polyth/usage";
 import { fmtCost, fmtTokens } from "../format.ts";
 import { useActiveModel, useStore } from "../store.ts";
 import { contextGauge, type RenderModel } from "../reduce.ts";
@@ -24,6 +23,7 @@ import {
 import {
   defineWidgetPlugin,
   registerWidgetPlugin,
+  type PluginWidgetDef,
   type WidgetRenderContext,
   type WidgetSettingsContext,
 } from "./catalog.ts";
@@ -50,6 +50,17 @@ const SESSION_USAGE_METRICS: ReadonlyArray<{ id: SessionUsageMetric; label: stri
   { id: "showTotal", label: "Total tokens" },
 ];
 
+const SESSION_USAGE_SETTINGS = {
+  type: "object",
+  properties: {
+    showContext: { type: "boolean", title: "Context window", default: true },
+    showCost: { type: "boolean", title: "Session cost", default: true },
+    showInput: { type: "boolean", title: "Input tokens", default: true },
+    showOutput: { type: "boolean", title: "Output tokens", default: true },
+    showTotal: { type: "boolean", title: "Total tokens", default: true },
+  },
+} as const;
+
 export function usageMetricVisible(config: Readonly<JsonObject>, metric: SessionUsageMetric): boolean {
   return config[metric] !== false;
 }
@@ -65,32 +76,33 @@ export function SessionUsageStats({
 }) {
   const total = model.totals.input + model.totals.output;
   const gauge = contextGauge(model, contextTokens);
-  const rows: Array<UsageMetricRow | null> = [
-    usageMetricVisible(config, "showContext")
-      ? {
-          id: "context",
-          label: "Context",
-          value: gauge.known
-            ? `${gauge.percent}%`
-            : "Unknown",
-          detail: gauge.known
-            ? `${fmtTokens(gauge.inputTokens)} / ${fmtTokens(gauge.contextTokens)}`
-            : undefined,
-        }
-      : null,
-    usageMetricVisible(config, "showInput")
-      ? { id: "input", label: "Input", value: fmtTokens(model.totals.input) }
-      : null,
-    usageMetricVisible(config, "showOutput")
-      ? { id: "output", label: "Output", value: fmtTokens(model.totals.output) }
-      : null,
-    usageMetricVisible(config, "showTotal")
-      ? { id: "total", label: "Total", value: fmtTokens(total) }
-      : null,
-    usageMetricVisible(config, "showCost")
-      ? { id: "cost", label: "Cost", value: model.totals.cost > 0 ? fmtCost(model.totals.cost) : "—" }
-      : null,
-  ].filter((row): row is UsageMetricRow => row !== null);
+  const rows: UsageMetricRow[] = [];
+  if (usageMetricVisible(config, "showContext")) {
+    rows.push({
+      id: "context",
+      label: "Context",
+      value: gauge.known ? `${gauge.percent}%` : "Unknown",
+      ...(gauge.known
+        ? { detail: `${fmtTokens(gauge.inputTokens)} / ${fmtTokens(gauge.contextTokens)}` }
+        : {}),
+    });
+  }
+  if (usageMetricVisible(config, "showInput")) {
+    rows.push({ id: "input", label: "Input", value: fmtTokens(model.totals.input) });
+  }
+  if (usageMetricVisible(config, "showOutput")) {
+    rows.push({ id: "output", label: "Output", value: fmtTokens(model.totals.output) });
+  }
+  if (usageMetricVisible(config, "showTotal")) {
+    rows.push({ id: "total", label: "Total", value: fmtTokens(total) });
+  }
+  if (usageMetricVisible(config, "showCost")) {
+    rows.push({
+      id: "cost",
+      label: "Cost",
+      value: model.totals.cost > 0 ? fmtCost(model.totals.cost) : "—",
+    });
+  }
   return (
     <div className="widget-stat-grid usage-session-stats">
       {rows.map((row) => (
@@ -265,13 +277,110 @@ const RENDERERS: Record<string, (context: WidgetRenderContext) => ReactNode> = {
 export const USAGE_WIDGET_PLUGIN = defineWidgetPlugin({
   id: "usage",
   name: "Usage",
-  widgets: USAGE_WIDGETS.map(({ module, ...widget }) => ({
-    ...widget,
-    render: RENDERERS[module]!,
-    settingsRender: module === "usage.session"
-      ? (context: WidgetSettingsContext) => <SessionUsageWidgetSettings {...context} />
-      : () => <UsageWidgetSettings />,
-  })),
+  widgets: [
+    {
+      id: "usage.session",
+      title: "Session usage",
+      description: "Context-window, token, and cost totals for the active session.",
+      kind: "widget",
+      defaultSlot: "session.composer.before",
+      supportedSlots: [
+        "session.composer.before",
+        "workspace.header",
+        "workspace.left",
+        "workspace.main",
+        "workspace.right",
+      ],
+      category: "Usage",
+      defaultSize: { w: 4, h: 3 },
+      minSize: { w: 3, h: 2 },
+      maxSize: { w: 8, h: 6 },
+      audience: "standard",
+      scope: "workspace",
+      resizable: true,
+      recommended: true,
+      defaultVisible: false,
+      settingsSchema: SESSION_USAGE_SETTINGS,
+      render: RENDERERS["usage.session"]!,
+      settingsRender: (context) => <SessionUsageWidgetSettings {...context} />,
+    },
+    {
+      id: "usage.quotas",
+      title: "Provider quotas",
+      description: "Provider quota windows, utilization charts, pace, and refresh controls.",
+      kind: "widget",
+      defaultSlot: "workspace.main",
+      supportedSlots: ["workspace.main", "workspace.right", "workspace.bottom"],
+      category: "Usage",
+      defaultSize: { w: 12, h: 7 },
+      minSize: { w: 6, h: 5 },
+      maxSize: { w: 12, h: 12 },
+      audience: "standard",
+      scope: "workspace",
+      resizable: true,
+      recommended: true,
+      defaultVisible: false,
+      render: RENDERERS["usage.quotas"]!,
+      settingsRender: () => <UsageWidgetSettings />,
+    },
+    {
+      id: "usage.project",
+      title: "Project usage",
+      description: "Project session, token, and cost totals with provider distribution.",
+      kind: "widget",
+      defaultSlot: "workspace.main",
+      supportedSlots: ["workspace.left", "workspace.main", "workspace.right"],
+      category: "Usage",
+      defaultSize: { w: 8, h: 6 },
+      minSize: { w: 5, h: 4 },
+      maxSize: { w: 12, h: 10 },
+      audience: "standard",
+      scope: "workspace",
+      resizable: true,
+      recommended: true,
+      defaultVisible: false,
+      render: RENDERERS["usage.project"]!,
+      settingsRender: () => <UsageWidgetSettings />,
+    },
+    {
+      id: "usage.sessions-table",
+      title: "Top sessions",
+      description: "Rank active-project sessions by cost or token usage.",
+      kind: "widget",
+      defaultSlot: "workspace.right",
+      supportedSlots: ["workspace.main", "workspace.right", "workspace.bottom"],
+      category: "Usage",
+      defaultSize: { w: 6, h: 5 },
+      minSize: { w: 4, h: 3 },
+      maxSize: { w: 12, h: 10 },
+      audience: "standard",
+      scope: "workspace",
+      resizable: true,
+      defaultVisible: false,
+      render: RENDERERS["usage.sessions-table"]!,
+      settingsRender: () => <UsageWidgetSettings />,
+    },
+    {
+      id: "usage.quota-summary",
+      title: "Quota summary",
+      description: "Compact provider, high-utilization, and stale-feed quota counts.",
+      kind: "mini-widget",
+      defaultSlot: "workspace.header",
+      supportedSlots: ["workspace.header", "workspace.left", "workspace.right"],
+      category: "Usage",
+      defaultSize: { w: 4, h: 2 },
+      minSize: { w: 3, h: 2 },
+      maxSize: { w: 6, h: 3 },
+      audience: "simple",
+      scope: "workspace",
+      resizable: true,
+      recommended: true,
+      defaultVisible: false,
+      order: 40,
+      render: RENDERERS["usage.quota-summary"]!,
+      settingsRender: () => <UsageWidgetSettings />,
+    },
+  ] satisfies readonly PluginWidgetDef[],
 });
 
 let uninstall: (() => void) | null = null;
