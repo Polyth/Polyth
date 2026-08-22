@@ -184,9 +184,12 @@ class ScopeContext implements KernelContext {
     }
     this.effects.length = 0;
 
-    // Revoke contributions registered through this scope.
-    for (const c of this.contributionList) await c.disposable.dispose();
-    this.contributionList.length = 0;
+    // Revoke contributions registered through this scope. Each disposable
+    // removes itself from the list, so pop from the end to avoid skipping the
+    // item that shifts into a disposed entry's index.
+    while (this.contributionList.length > 0) {
+      await this.contributionList.at(-1)!.disposable.dispose();
+    }
 
     this.providers.clear();
     this.listeners.clear();
@@ -207,14 +210,15 @@ class ScopeContext implements KernelContext {
     const registry = this.optional<UiContributionRegistry>(
       (CAP.ui as CapabilityKey<UiContributionRegistry>),
     );
-    if (registry) {
-      return registry.addSlot(item);
-    }
-    // No UI capability → buffer locally so contributions() can surface them.
+    const downstream = registry?.addSlot(item);
+    // Track both forwarded and locally buffered contributions in this scope:
+    // plugin disposal must revoke external slot registrations as well.
     const disposable: Disposable = {
-      dispose: () => {
+      dispose: async () => {
         const i = this.contributionList.findIndex((c) => c.disposable === disposable);
-        if (i >= 0) this.contributionList.splice(i, 1);
+        if (i < 0) return;
+        this.contributionList.splice(i, 1);
+        await downstream?.dispose();
       },
     };
     this.contributionList.push({ item, disposable });
@@ -285,7 +289,37 @@ export async function loadPlugin(
   }
 
   const child = ctx.scope(`plugin:${manifest.id}`);
-  await plugin.setup(child, config);
+  try {
+    const widgetIds = new Set<string>();
+    for (const widget of manifest.widgets ?? []) {
+      if (widgetIds.has(widget.id)) {
+        throw new Error(`plugin ${manifest.id} declares duplicate widget: ${widget.id}`);
+      }
+      widgetIds.add(widget.id);
+      if (!widget.supportedSlots.includes(widget.defaultSlot)) {
+        throw new Error(
+          `plugin ${manifest.id} widget ${widget.id} does not support its default slot ${widget.defaultSlot}`,
+        );
+      }
+      const { module, defaultSlot: _defaultSlot, supportedSlots: _supportedSlots, ...metadata } = widget;
+      child.contribute({
+        slot: "widget.catalog",
+        id: widget.id,
+        module,
+        order: widget.order,
+        props: {
+          ...metadata,
+          pluginId: manifest.id,
+          defaultSlot: widget.defaultSlot,
+          supportedSlots: [...widget.supportedSlots],
+        } as unknown as JsonObject,
+      });
+    }
+    await plugin.setup(child, config);
+  } catch (error) {
+    await (child as ScopeContext).dispose();
+    throw error;
+  }
   return {
     dispose: async () => {
       await (child as ScopeContext).dispose();

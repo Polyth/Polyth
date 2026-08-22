@@ -15,11 +15,15 @@ import WalkthroughView from "../components/WalkthroughView.tsx";
 import { fmtCost, fmtTokens } from "../format.ts";
 import { openWorkspacePane, useActiveModel, useStore } from "../store.ts";
 import {
-  registerWidget,
+  defineWidgetPlugin,
+  registerWidgetPlugin,
+  type PluginWidgetDef,
   type WidgetDef,
+  type WidgetPlugin,
   type WidgetRenderContext,
   type WidgetSettingsContext,
 } from "./catalog.ts";
+import { widgetSlotFromZone } from "./widgetLayout.ts";
 import { api, type FileEntry, type GitFileEntry } from "../api.ts";
 import { useGitStatus } from "../gitStatusStore.ts";
 import { requestComposerReplace } from "../composerInsert.ts";
@@ -420,6 +424,11 @@ function widgetSlotMeta(widget: WidgetDef): Record<string, unknown> {
     pluginName: widget.pluginName,
     title: widget.title,
     description: widget.description,
+    kind: widget.kind,
+    defaultSlot: widget.defaultSlot,
+    supportedSlots: widget.supportedSlots,
+    defaultVisible: widget.defaultVisible,
+    order: widget.order,
     zone: widget.zone,
     supportedZones: widget.supportedZones,
     defaultSize: widget.defaultSize,
@@ -438,11 +447,12 @@ function widgetSlotMeta(widget: WidgetDef): Record<string, unknown> {
   };
 }
 
-for (const widget of BUILTINS) {
-  const definition: WidgetDef = {
-    ...widget,
-    ...BUILTIN_WIDGET_META[widget.id],
-    settingsRender: widget.settingsRender ?? (() => (
+const pluginDefinitions = new Map<string, { name: string; widgets: PluginWidgetDef[] }>();
+for (const base of BUILTINS) {
+  const widget: WidgetDef = {
+    ...base,
+    ...BUILTIN_WIDGET_META[base.id],
+    settingsRender: base.settingsRender ?? (() => (
       <div className="builtin-widget-settings">
         <span>Uses the active workspace context</span>
         <small>Visibility, size, audience, and placement are configured above.</small>
@@ -452,19 +462,49 @@ for (const widget of BUILTINS) {
   if (SLOT_BACKED_BUILTINS.has(widget.id)) {
     registerSlot(
       "widget.catalog",
-      definition.id,
-      (context) => definition.render(context as WidgetRenderContext),
+      widget.id,
+      (context) => widget.render(context as WidgetRenderContext),
       0,
-      widgetSlotMeta(definition),
+      widgetSlotMeta(widget),
     );
     registerSlot(
       "widget.settings",
-      definition.id,
-      (context) => definition.settingsRender?.(context as WidgetSettingsContext) ?? null,
+      widget.id,
+      (context) => widget.settingsRender?.(context as WidgetSettingsContext) ?? null,
       0,
-      { widgetId: definition.id },
+      { widgetId: widget.id },
     );
-  } else {
-    registerWidget(definition);
+    continue;
   }
+  const { pluginId, pluginName, ...definition } = widget;
+  const owner = pluginDefinitions.get(pluginId) ?? {
+    name: pluginName ?? pluginId,
+    widgets: [],
+  };
+  const defaultSlot = definition.defaultSlot ?? widgetSlotFromZone(definition.zone ?? "main");
+  owner.widgets.push({
+    ...definition,
+    kind: definition.kind ?? "widget",
+    defaultSlot,
+    supportedSlots: definition.supportedSlots
+      ?? definition.supportedZones?.map(widgetSlotFromZone)
+      ?? [defaultSlot],
+  });
+  pluginDefinitions.set(pluginId, owner);
 }
+
+/** Built-ins use the exact same 0..N declaration API as third-party plugins.
+ * Notably `session` and `files` each own multiple independent widgets. */
+export const BUILTIN_WIDGET_PLUGINS: readonly WidgetPlugin[] = [...pluginDefinitions].map(
+  ([id, owner]) => defineWidgetPlugin({ id, name: owner.name, widgets: owner.widgets }),
+);
+
+let installed = false;
+
+export function installBuiltinWidgetPlugins(): void {
+  if (installed) return;
+  installed = true;
+  for (const plugin of BUILTIN_WIDGET_PLUGINS) registerWidgetPlugin(plugin);
+}
+
+installBuiltinWidgetPlugins();

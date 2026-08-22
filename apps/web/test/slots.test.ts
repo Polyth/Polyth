@@ -9,9 +9,11 @@ import {
   listSlots, registerSlot, renderSlot, slotVersion, subscribeSlots,
 } from "../src/slots.ts";
 import {
-  SlotBoundary, SlotItemView, slotHostChildren,
+  SlotBoundary, SlotItemView, placedWidgetItems, slotHostChildren,
 } from "../src/components/slots/SlotHost.ts";
 import { UI_SLOTS, isUiSlot } from "@polyth/contracts";
+import type { WidgetDef } from "../src/widgets/catalog.ts";
+import { createDefaultWidgetLayout, moveWidgetToSlot } from "../src/widgets/widgetLayout.ts";
 
 test("listSlots orders by order then id, deterministically", () => {
   const offs = [
@@ -123,6 +125,30 @@ test("one failing contribution is isolated by its own boundary", () => {
   assert.equal((el.props as { item: { id: string } }).item.id, "fine");
 });
 
+test("placed mini-widgets render through ordinary UI slot hosts", () => {
+  const widget: WidgetDef = {
+    id: "sample.action",
+    pluginId: "sample",
+    title: "Sample action",
+    description: "A placeable action",
+    kind: "mini-widget",
+    defaultSlot: "app.header.actions",
+    supportedSlots: ["app.header.actions", "composer.trailing"],
+    defaultVisible: true,
+    render: ({ sessionId }) => `action:${sessionId ?? "none"}`,
+  };
+  let layout = createDefaultWidgetLayout([widget]);
+  let items = placedWidgetItems("app.header.actions", { sessionId: "s1" }, [widget], layout);
+  assert.equal(items.length, 1);
+  assert.equal(items[0]?.id, "widget:sample.action");
+  assert.ok(isValidElement(items[0]?.render({ sessionId: "s1" })));
+
+  layout = moveWidgetToSlot(layout, widget.id, "composer.trailing", 0, widget);
+  assert.equal(placedWidgetItems("app.header.actions", {}, [widget], layout).length, 0);
+  items = placedWidgetItems("composer.trailing", {}, [widget], layout);
+  assert.equal(items.length, 1);
+});
+
 // EXT-SEAMS-V1 (pure half; the mounted proof lives in slotHostMounted.test.ts):
 // the boundary keys by contribution id, so a same-id registration replacement
 // must reset a failed boundary while an unchanged registration stays closed.
@@ -153,5 +179,7 @@ test("contracts expose the runtime slot vocabulary used for validation", () => {
   assert.ok(isUiSlot("widget.catalog"));
   assert.ok(isUiSlot("widget.settings"));
   assert.ok(isUiSlot("workspace.canvas"));
+  assert.ok(isUiSlot("workspace.main"));
+  assert.ok(isUiSlot("app.header.actions"));
   assert.ok(!isUiSlot("not.a.slot"));
 });

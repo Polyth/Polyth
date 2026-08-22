@@ -1,4 +1,5 @@
 import type { WidgetDef } from "./catalog.ts";
+import type { UiSlot } from "@polyth/contracts";
 import {
   WIDGET_ZONES,
   widgetDefinitionId,
@@ -6,6 +7,7 @@ import {
   type WidgetLayout,
   type WidgetPlacement,
   type WidgetZone,
+  widgetZoneFromSlot,
 } from "./widgetLayout.ts";
 
 export type WidgetSizeFilter = "all" | "small" | "medium" | "large";
@@ -29,6 +31,7 @@ export interface MissingWidgetPlaceholder {
   description: string;
   placement: WidgetPlacement;
   zone: WidgetZone;
+  slot: UiSlot;
 }
 
 export const RECOMMENDED_WIDGET_IDS = [
@@ -83,9 +86,26 @@ export function widgetPluginOptions(
   })).sort((a, b) => a.label.localeCompare(b.label) || a.id.localeCompare(b.id));
 }
 
-export function supportedWidgetZones(widget: Pick<WidgetDef, "supportedZones" | "zone" | "floating">): readonly WidgetZone[] {
+export function supportedWidgetZones(
+  widget: Pick<WidgetDef, "supportedSlots" | "supportedZones" | "zone" | "floating">,
+): readonly WidgetZone[] {
+  const modern = widget.supportedSlots;
+  if (modern && modern.length > 0) {
+    return modern.flatMap((slot) => {
+      const zone = widgetZoneFromSlot(slot);
+      return zone ? [zone] : [];
+    });
+  }
   if (widget.supportedZones && widget.supportedZones.length > 0) return widget.supportedZones;
   return widget.floating ? [widget.zone ?? "main", "floating"] : [widget.zone ?? "main"];
+}
+
+export function supportedWidgetSlots(
+  widget: Pick<WidgetDef, "defaultSlot" | "supportedSlots" | "zone" | "supportedZones" | "floating">,
+): readonly UiSlot[] {
+  if (widget.supportedSlots && widget.supportedSlots.length > 0) return widget.supportedSlots;
+  return supportedWidgetZones(widget).map((zone) =>
+    `workspace.${zone}` as UiSlot);
 }
 
 function queryText(widget: WidgetDef): string {
@@ -148,8 +168,16 @@ export function missingWidgetPlaceholders(
 ): MissingWidgetPlaceholder[] {
   const available = new Set(widgets.map((widget) => widget.id));
   const missing: MissingWidgetPlaceholder[] = [];
-  for (const zone of WIDGET_ZONES) {
-    for (const instanceId of layout.zones[zone]) {
+  const locations: Array<[UiSlot, WidgetZone, string[]]> = WIDGET_ZONES.map((zone) => [
+    `workspace.${zone}` as UiSlot,
+    zone,
+    layout.zones[zone],
+  ]);
+  for (const [slot, ids] of Object.entries(layout.slotPlacements)) {
+    locations.push([slot as UiSlot, widgetZoneFromSlot(slot as UiSlot) ?? "main", ids ?? []]);
+  }
+  for (const [slot, zone, instanceIds] of locations) {
+    for (const instanceId of instanceIds) {
       const placement = layout.widgets[instanceId];
       if (!placement) continue;
       const definitionId = widgetDefinitionId(layout, instanceId);
@@ -162,6 +190,7 @@ export function missingWidgetPlaceholders(
         description: placement.description ?? "This widget’s plugin is disabled or missing.",
         placement,
         zone,
+        slot,
       });
     }
   }

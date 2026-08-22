@@ -10,6 +10,12 @@
 import { Component, createElement, Fragment, useSyncExternalStore, type ReactNode } from "react";
 import type { UiSlot } from "@polyth/contracts";
 import { listSlots, slotVersion, subscribeSlots, type SlotItem } from "../../slots.ts";
+import { useWidgetCatalog, type WidgetDef } from "../../widgets/catalog.ts";
+import {
+  useWidgetLayout,
+  widgetDefinitionId,
+  type WidgetLayout,
+} from "../../widgets/widgetLayout.ts";
 
 /** Re-render whenever any slot contribution registers, replaces, or disposes. */
 export function useSlotVersion(): number {
@@ -79,6 +85,53 @@ export function slotHostChildren(slot: UiSlot, context: SlotContext): ReactNode[
   );
 }
 
+/** Resolve widget instances placed in a non-canvas UI slot. Full widgets and
+ * mini-widgets use the same layout; kind only selects lightweight host chrome. */
+export function placedWidgetItems(
+  slot: UiSlot,
+  context: SlotContext,
+  widgets: readonly WidgetDef[],
+  layout: WidgetLayout,
+): SlotItem[] {
+  const byId = new Map(widgets.map((widget) => [widget.id, widget]));
+  return (layout.slotPlacements[slot] ?? []).flatMap((instanceId, index) => {
+    const placement = layout.widgets[instanceId];
+    const widget = byId.get(widgetDefinitionId(layout, instanceId));
+    if (!placement?.visible || !widget) return [];
+    if (placement.showIn && !placement.showIn.includes(layout.audience)) return [];
+    return [{
+      id: `widget:${instanceId}`,
+      order: widget.order ?? index,
+      render: (hostContext: SlotContext) => createElement(
+        widget.kind === "mini-widget" ? "span" : "div",
+        {
+          className: widget.kind === "mini-widget" ? "placed-mini-widget" : "placed-slot-widget",
+          "data-widget-id": instanceId,
+        },
+        widget.render({
+          ...hostContext,
+          projectId: typeof hostContext.projectId === "string" ? hostContext.projectId : null,
+          sessionId: typeof hostContext.sessionId === "string" ? hostContext.sessionId : null,
+          editing: hostContext.editing === true,
+        }),
+      ),
+    }];
+  });
+}
+
+export function placeableSlotHostChildren(
+  slot: UiSlot,
+  context: SlotContext,
+  widgets: readonly WidgetDef[],
+  layout: WidgetLayout,
+): ReactNode[] {
+  const items = [...listSlots(slot), ...placedWidgetItems(slot, context, widgets, layout)]
+    .sort((a, b) => a.order - b.order || a.id.localeCompare(b.id));
+  return items.map((item) =>
+    createElement(SlotBoundary, { key: item.id, slot, item, context }),
+  );
+}
+
 export interface SlotHostProps {
   slot: UiSlot;
   /** Host-owned bounded context passed to every contribution. */
@@ -87,7 +140,9 @@ export interface SlotHostProps {
 
 export default function SlotHost({ slot, context = {} }: SlotHostProps): ReactNode {
   useSlotVersion();
-  const children = slotHostChildren(slot, context);
+  const widgets = useWidgetCatalog();
+  const layout = useWidgetLayout();
+  const children = placeableSlotHostChildren(slot, context, widgets, layout);
   if (children.length === 0) return null;
   return createElement(Fragment, null, children);
 }

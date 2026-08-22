@@ -1,4 +1,5 @@
 import { useMemo, useState, type DragEvent } from "react";
+import type { UiSlot } from "@polyth/contracts";
 import { getDragWidget, setDragWidget, WIDGET_MIME } from "../../dnd.ts";
 import { useEscape } from "../../useEscape.ts";
 import type { WidgetDef } from "../../widgets/catalog.ts";
@@ -7,7 +8,8 @@ import {
   applyWidgetLayoutMutations,
   updateWidgetLayout,
   useWidgetLayout,
-  widgetZoneOf,
+  widgetSlotFromZone,
+  widgetSlotOf,
   type WidgetZone,
 } from "../../widgets/widgetLayout.ts";
 import {
@@ -16,7 +18,7 @@ import {
   noteWidgetUsed,
   pluginDisplayName,
   readRecentWidgets,
-  supportedWidgetZones,
+  supportedWidgetSlots,
   widgetPluginOptions,
   widgetSizeLabel,
   type WidgetLibraryTab,
@@ -31,6 +33,16 @@ const ZONE_LABEL: Record<WidgetZone, string> = {
   bottom: "Bottom strip",
   floating: "Floating",
 };
+
+const slotLabel = (slot: UiSlot): string => {
+  const zone = slot.startsWith("workspace.") ? slot.slice("workspace.".length) as WidgetZone : null;
+  return zone && zone in ZONE_LABEL
+    ? ZONE_LABEL[zone]
+    : slot.split(".").map((part) => part[0]!.toUpperCase() + part.slice(1)).join(" · ");
+};
+
+const defaultSlot = (widget: WidgetDef): UiSlot =>
+  widget.defaultSlot ?? widgetSlotFromZone(widget.zone ?? "main");
 
 function WidgetGlyph({ widget }: { widget: WidgetDef }) {
   const glyph = widget.id === "core.composer"
@@ -56,7 +68,7 @@ function WidgetLibraryCard({
   onDrag: (widget: WidgetDef, event: DragEvent<HTMLElement>) => void;
   onAdd: (widget: WidgetDef) => void;
 }) {
-  const zones = supportedWidgetZones(widget);
+  const slots = supportedWidgetSlots(widget);
   return (
     <article
       className={`widget-library-card${visible ? " on-canvas" : ""}`}
@@ -73,7 +85,7 @@ function WidgetLibraryCard({
         <p>{widget.description}</p>
         <div className="widget-library-meta">
           <span>Size <b>{widgetSizeLabel(widget)[0]!.toUpperCase()}</b></span>
-          <span>Zones <b>{zones.map((zone) => ZONE_LABEL[zone]).join(", ")}</b></span>
+          <span>Placements <b>{slots.map(slotLabel).join(", ")}</b></span>
         </div>
       </div>
       <button
@@ -118,7 +130,7 @@ export default function WidgetLibraryOverlay({
   const groups = useMemo(() => groupWidgetsByPlugin(filtered), [filtered]);
   const dragged = draggedId ? widgets.find((widget) => widget.id === draggedId) : undefined;
 
-  const add = (widget: WidgetDef, target = widget.zone ?? "main") => {
+  const add = (widget: WidgetDef, target: UiSlot = defaultSlot(widget)) => {
     const check = canPlaceWidget(widget, target);
     if (!check.ok) {
       setStatus(check.reason ?? "That zone is not compatible.");
@@ -126,10 +138,10 @@ export default function WidgetLibraryOverlay({
     }
     updateWidgetLayout((current) => applyWidgetLayoutMutations(current, [
       { type: "visibility", id: widget.id, visible: true },
-      { type: "move", id: widget.id, zone: target },
+      { type: "place", id: widget.id, slot: target },
     ], widgets));
     setRecent(noteWidgetUsed(widget.id));
-    setStatus(`${widget.title} added to ${ZONE_LABEL[target]}.`);
+    setStatus(`${widget.title} added to ${slotLabel(target)}.`);
   };
 
   const startDrag = (widget: WidgetDef, event: DragEvent<HTMLElement>) => {
@@ -149,7 +161,7 @@ export default function WidgetLibraryOverlay({
     const widget = widgets.find((item) => item.id === id);
     if (!widget) return;
     event.preventDefault();
-    add(widget, target);
+    add(widget, widgetSlotFromZone(target));
     setDraggedId(null);
     setOverZone(null);
   };
@@ -326,7 +338,7 @@ export default function WidgetLibraryOverlay({
             <li><b>✓</b><span><strong>Zone compatibility</strong><small>Only zones where a widget fits become active.</small></span></li>
           </ul>
         </div>
-        <footer><span>Changes save automatically</span><b>{layout.widgets[draggedId ?? ""] ? ZONE_LABEL[widgetZoneOf(layout, draggedId ?? "") ?? "main"] : ""}</b></footer>
+        <footer><span>Changes save automatically</span><b>{layout.widgets[draggedId ?? ""] ? slotLabel(widgetSlotOf(layout, draggedId ?? "") ?? "workspace.main") : ""}</b></footer>
       </aside>
     </div>
   );

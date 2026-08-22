@@ -21,7 +21,7 @@ import {
   type WidgetPlacement,
   type WidgetPosition,
 } from "./widgetLayout.ts";
-import { pluginDisplayName } from "./widgetLibrary.ts";
+import { pluginDisplayName, supportedWidgetZones } from "./widgetLibrary.ts";
 import "./builtinWidgets.tsx";
 
 const GRID_GAP = 10;
@@ -250,6 +250,10 @@ function WidgetMenu({ widgets, onClose }: { widgets: WidgetDef[]; onClose: () =>
 
 export default function WidgetCanvas() {
   const widgets = useWidgetCatalog();
+  const canvasWidgets = useMemo(
+    () => widgets.filter((widget) => supportedWidgetZones(widget).length > 0),
+    [widgets],
+  );
   const layout = useWidgetLayout();
   const projectId = useStore((state) => state.activeProjectId);
   const sessionId = useStore((state) => state.activeSessionId);
@@ -257,8 +261,8 @@ export default function WidgetCanvas() {
   useEscape(menuOpen, () => setMenuOpen(false));
 
   useEffect(() => {
-    ensureWidgets(widgets);
-  }, [widgets]);
+    ensureWidgets(canvasWidgets);
+  }, [canvasWidgets]);
 
   const cards = useMemo(() => {
     const placed = [...new Set(Object.values(layout.zones).flat())];
@@ -302,7 +306,7 @@ export default function WidgetCanvas() {
           context={{ editing: true, visibleWidgetIds: cards.map((card) => card.instanceId) }}
         />
       </div>
-      {menuOpen && <WidgetMenu widgets={widgets} onClose={() => setMenuOpen(false)} />}
+      {menuOpen && <WidgetMenu widgets={canvasWidgets} onClose={() => setMenuOpen(false)} />}
     </div>
   );
 }

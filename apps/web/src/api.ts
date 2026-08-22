@@ -9,6 +9,10 @@ import type {
   DictationSessionDto,
   ForkResult,
   FusionDto,
+  HomeAssistantConfigDto,
+  HomeAssistantConfigInput,
+  HomeAssistantConnectionDto,
+  HomeAssistantEntityDto,
   InstalledPluginDto,
   JsonObject,
   McpServerDto,
@@ -1053,6 +1057,27 @@ export const api = {
     return res.arrayBuffer();
   },
   ttsSummarize: (text: string) => jfetch<{ text: string }>(`/api/tts/summarize`, json("POST", { text })),
+
+  // ---- Home Assistant plugin ---------------------------------------------------
+  homeAssistantConfig: () =>
+    jfetch<HomeAssistantConfigDto>("/api/home-assistant/config"),
+  homeAssistantConfigure: (input: HomeAssistantConfigInput) =>
+    jfetch<HomeAssistantConfigDto>("/api/home-assistant/config", json("PUT", input)),
+  homeAssistantStatus: () =>
+    jfetch<HomeAssistantConnectionDto>("/api/home-assistant/status"),
+  homeAssistantEntities: (entityIds: readonly string[] = []) => {
+    const params = new URLSearchParams();
+    for (const entityId of entityIds) params.append("entityId", entityId);
+    const query = params.size > 0 ? `?${params.toString()}` : "";
+    return jfetch<HomeAssistantEntityDto[]>(`/api/home-assistant/entities${query}`);
+  },
+  homeAssistantToggle: (entityId: string) =>
+    jfetch<HomeAssistantEntityDto>("/api/home-assistant/toggle", json("POST", { entityId })),
+  homeAssistantSetTemperature: (entityId: string, temperature: number) =>
+    jfetch<HomeAssistantEntityDto>(
+      "/api/home-assistant/climate/temperature",
+      json("POST", { entityId, temperature }),
+    ),
 
   // ---- idle assist (F9): recap + suggestion, chat→note --------------------------
   assistSettings: () => jfetch<AssistSettingsDto>(`/api/settings/assist`),
