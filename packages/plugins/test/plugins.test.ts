@@ -5,6 +5,8 @@ import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { InstalledPluginDto, RouteHandler, UiSlotItem } from "@polyth/contracts";
+import { createContext } from "@polyth/kernel";
 import { createPluginRegistry, parseManifest, redactSecrets, TRUST_GRANTS } from "../src/index.ts";
 
 const manifest = (over: Record<string, unknown> = {}) => JSON.stringify({
@@ -34,6 +36,13 @@ test("manifest parsing rejects malformed input, keeps valid descriptors", () => 
   assert.throws(() => parseManifest(JSON.stringify({ id: "UPPER", name: "x", version: "1.0.0", trust: "pure" })), /identifier/);
   assert.throws(() => parseManifest(manifest({ trust: "root-of-all" })), /trust must be one of/);
   assert.throws(() => parseManifest(manifest({ version: "latest" })), /semver/);
+  assert.throws(() => parseManifest(manifest({ entries: { worker: "./worker.mjs" } })), /unknown manifest entry key/);
+  for (const entry of ["/tmp/server.mjs", "../server.mjs", "dist\\server.mjs", "C:/server.mjs"]) {
+    assert.throws(
+      () => parseManifest(manifest({ entries: { server: entry } })),
+      /must be a relative path/,
+    );
+  }
   assert.throws(() => parseManifest(manifest({ contributions: [{ slot: "x" }] })), /slot, id, and module/);
   // Unknown slot names are rejected at the manifest boundary, never cast through.
   assert.throws(
@@ -43,6 +52,10 @@ test("manifest parsing rejects malformed input, keeps valid descriptors", () => 
   const m = parseManifest(manifest());
   assert.equal(m.id, "sample.widget");
   assert.equal(m.contributions!.length, 1);
+  assert.deepEqual(
+    parseManifest(manifest({ entries: { ui: "./dist/ui.mjs" } })).entries,
+    { ui: "./dist/ui.mjs" },
+  );
   const widget = parseManifest(manifest({
     contributions: [{ slot: "widget.catalog", id: "sample.widget", module: "sample-widget" }],
   }));
@@ -159,6 +172,185 @@ test("enable is atomic; disable disposes the kernel scope completely", async () 
   const disabled = await reg.disable("sample.widget");
   assert.equal(disabled.status, "disabled");
   assert.equal(reg.scopeState("sample.widget"), null, "scope fully disposed");
+  await reg.dispose();
+});
+
+test("disable clears scope and persists disabled state when disposal fails", async () => {
+  const { dir, trusted } = scaffold();
+  const changes: InstalledPluginDto[] = [];
+  const reg = createPluginRegistry({
+    dir,
+    trustedDir: trusted,
+    slots: {
+      add() {
+        return {
+          dispose() {
+            throw new Error("dispose failed");
+          },
+        };
+      },
+    },
+    onChange: (plugin) => changes.push(plugin),
+  });
+  await reg.install("file:sample");
+  await reg.enable("sample.widget");
+
+  await assert.rejects(() => reg.disable("sample.widget"), /dispose: plugin:sample\.widget/);
+
+  const state = reg.list().find((plugin) => plugin.id === "sample.widget");
+  assert.equal(state?.enabled, false);
+  assert.equal(state?.status, "disabled");
+  assert.equal(reg.scopeState("sample.widget"), null);
+  assert.deepEqual(
+    changes.at(-1) && { enabled: changes.at(-1)!.enabled, status: changes.at(-1)!.status },
+    { enabled: false, status: "disabled" },
+  );
+  await reg.dispose();
+});
+
+test("entries.server on a trusted file install loads and disposes the server plugin", async () => {
+  const { dir, trusted } = scaffold();
+  const pluginDir = join(trusted, "sample");
+  writeFileSync(join(pluginDir, "polyth-plugin.json"), manifest({
+    trust: "workspace",
+    entries: { server: "./server.mjs" },
+  }));
+  writeFileSync(join(pluginDir, "server.mjs"), `
+    export default (host) => ({
+      manifest: { id: host.pluginId, version: "1.0.0", trust: "workspace" },
+      setup(context) {
+        const route = host.routes.add(async () => true);
+        context.effect(() => route.dispose());
+      },
+    });
+  `);
+  const root = createContext("test-root");
+  const activeRoutes = new Set<RouteHandler>();
+  const reg = createPluginRegistry({
+    dir,
+    trustedDir: trusted,
+    root,
+    routes: {
+      add(handler) {
+        activeRoutes.add(handler);
+        return { dispose: () => { activeRoutes.delete(handler); } };
+      },
+    },
+  });
+
+  await reg.install("file:sample");
+  await reg.enable("sample.widget");
+  assert.equal(activeRoutes.size, 1);
+  await reg.disable("sample.widget");
+  assert.equal(activeRoutes.size, 0);
+  await reg.dispose();
+  await root.dispose();
+});
+
+test("low-trust manifests cannot install executable server entries", async () => {
+  const { dir, trusted } = scaffold();
+  writeFileSync(
+    join(trusted, "sample", "polyth-plugin.json"),
+    manifest({ entries: { server: "./server.mjs" } }),
+  );
+  writeFileSync(join(trusted, "sample", "server.mjs"), "export default () => ({})");
+  const reg = createPluginRegistry({ dir, trustedDir: trusted });
+  await assert.rejects(() => reg.install("file:sample"), /ui-only.*cannot declare entries\.server/);
+  await reg.dispose();
+});
+
+test("concurrent disable then enable is serialized per plugin", async () => {
+  const { dir, trusted } = scaffold();
+  const active = new Set<UiSlotItem>();
+  let markDisposalStarted!: () => void;
+  const disposalStarted = new Promise<void>((resolve) => { markDisposalStarted = resolve; });
+  let releaseDisposal!: () => void;
+  const disposalGate = new Promise<void>((resolve) => { releaseDisposal = resolve; });
+  const reg = createPluginRegistry({
+    dir,
+    trustedDir: trusted,
+    slots: {
+      add(item) {
+        active.add(item);
+        return {
+          async dispose() {
+            markDisposalStarted();
+            await disposalGate;
+            active.delete(item);
+          },
+        };
+      },
+    },
+  });
+  await reg.install("file:sample");
+  await reg.enable("sample.widget");
+
+  const disabling = reg.disable("sample.widget");
+  await disposalStarted;
+  const enabling = reg.enable("sample.widget");
+  releaseDisposal();
+  await Promise.all([disabling, enabling]);
+
+  const state = reg.list().find((plugin) => plugin.id === "sample.widget");
+  assert.equal(state?.enabled, true);
+  assert.equal(state?.status, "ready");
+  assert.equal(active.size, 1, "the final enabled state retains one active contribution");
+  await reg.dispose();
+});
+
+test("remove serializes teardown against later lifecycle transitions", async () => {
+  const { dir, trusted } = scaffold();
+  let markDisposalStarted!: () => void;
+  const disposalStarted = new Promise<void>((resolve) => { markDisposalStarted = resolve; });
+  let releaseDisposal!: () => void;
+  const disposalGate = new Promise<void>((resolve) => { releaseDisposal = resolve; });
+  const reg = createPluginRegistry({
+    dir,
+    trustedDir: trusted,
+    slots: {
+      add() {
+        return {
+          async dispose() {
+            markDisposalStarted();
+            await disposalGate;
+          },
+        };
+      },
+    },
+  });
+  await reg.install("file:sample");
+  await reg.enable("sample.widget");
+
+  const removing = reg.remove("sample.widget");
+  await disposalStarted;
+  const enabling = reg.enable("sample.widget");
+  releaseDisposal();
+
+  assert.equal(await removing, true);
+  await assert.rejects(() => enabling, /not installed/);
+  assert.deepEqual(reg.list(), []);
+  await reg.dispose();
+});
+
+test("onChange publishes persisted enable and disable states", async () => {
+  const { dir, trusted } = scaffold();
+  const changes: InstalledPluginDto[] = [];
+  const reg = createPluginRegistry({
+    dir,
+    trustedDir: trusted,
+    onChange: (plugin) => changes.push(plugin),
+  });
+  await reg.install("file:sample");
+  await reg.enable("sample.widget");
+  await reg.disable("sample.widget");
+
+  assert.deepEqual(
+    changes.slice(-2).map((plugin) => ({ enabled: plugin.enabled, status: plugin.status })),
+    [
+      { enabled: true, status: "ready" },
+      { enabled: false, status: "disabled" },
+    ],
+  );
   await reg.dispose();
 });
 

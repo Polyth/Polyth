@@ -3,7 +3,14 @@ import { createServer, type IncomingMessage, type ServerResponse, type Server } 
 import { readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { extname, join, normalize } from "node:path";
-import type { AgentRuntime, JsonObject, ModelDescriptor, SessionService } from "@polyth/contracts";
+import type {
+  AgentRuntime,
+  JsonObject,
+  ModelDescriptor,
+  RouteHandler,
+  RouteRequest,
+  SessionService,
+} from "@polyth/contracts";
 import type { ProjectService } from "@polyth/contracts";
 import type { RuntimePool } from "./sessions.ts";
 import { aggregateRuntimes } from "./runtimeAggregate.ts";
@@ -58,19 +65,8 @@ const readBody = async (req: IncomingMessage): Promise<Record<string, unknown>> 
   }
 };
 
-/** A plugin-contributed route group: returns true when it handled the request.
- *  This is the HTTP face of a capability contribution — feature packages never
- *  edit this file, they hand a RouteHandler to the boot profile. */
-export type RouteHandler = (rc: RouteRequest) => Promise<boolean>;
-export interface RouteRequest {
-  req: IncomingMessage;
-  res: ServerResponse;
-  url: URL;
-  path: string;
-  method: string;
-  body(): Promise<Record<string, unknown>>;
-  json(code: number, body: unknown): void;
-}
+/** The gateway's route contract is public so trusted plugins can contribute it. */
+export type { RouteHandler, RouteRequest } from "@polyth/contracts";
 
 export interface HttpDeps {
   sessions: SessionService;

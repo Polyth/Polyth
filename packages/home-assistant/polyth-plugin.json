@@ -1,0 +1,9 @@
+{
+  "id": "home-assistant",
+  "name": "Home Assistant",
+  "version": "1.0.0",
+  "trust": "credentialed",
+  "entries": {
+    "server": "./dist/server.mjs"
+  }
+}

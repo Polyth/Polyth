@@ -3,7 +3,13 @@ import { WebSocketServer, WebSocket } from "ws";
 import type { Server } from "node:http";
 import type { IncomingMessage } from "node:http";
 import type { Socket } from "node:net";
-import type { SessionEvent, SessionProjection, SessionService } from "@polyth/contracts";
+import type {
+  InstalledPluginDto,
+  PackageDescriptorDto,
+  SessionEvent,
+  SessionProjection,
+  SessionService,
+} from "@polyth/contracts";
 import type { BrowserFrame, BrowserService } from "@polyth/browser";
 import type { DictationService } from "@polyth/dictation";
 import type { Broadcaster } from "./sessions.ts";
@@ -256,6 +262,12 @@ export function attachWs(
     },
     projection(p: SessionProjection) {
       for (const [ws] of clients) send(ws, { type: "projection", session: p });
+    },
+    pluginChanged(plugin: InstalledPluginDto) {
+      for (const [ws] of clients) send(ws, { type: "plugin/changed", plugin });
+    },
+    packageChanged(pkg: PackageDescriptorDto) {
+      for (const [ws] of clients) send(ws, { type: "package/changed", package: pkg });
     },
   };
 }

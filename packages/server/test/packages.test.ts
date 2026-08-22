@@ -31,35 +31,37 @@ test("list returns every built-in package with core packages always enabled", ()
   );
 });
 
-test("setEnabled toggles a non-core package", () => {
+test("setEnabled toggles a non-core package", async () => {
   const registry = createPackageRegistry({ file: temporaryFile() });
 
-  const disabled = registry.setEnabled("git", false);
+  const disabled = await registry.setEnabled("git", false);
   assert.equal(disabled.enabled, false);
+  assert.equal(disabled.status, "disabled");
   assert.equal(registry.get("git")?.enabled, false);
   assert.equal(registry.isEnabled("git"), false);
 
-  const enabled = registry.setEnabled("git", true);
+  const enabled = await registry.setEnabled("git", true);
   assert.equal(enabled.enabled, true);
+  assert.equal(enabled.status, "ready");
   assert.equal(registry.isEnabled("git"), true);
 });
 
-test("setEnabled rejects core packages", () => {
+test("setEnabled rejects core packages", async () => {
   const registry = createPackageRegistry({ file: temporaryFile() });
 
-  assert.throws(
-    () => registry.setEnabled("session", false),
+  await assert.rejects(
+    registry.setEnabled("session", false),
     (error: Error & { code?: string }) =>
       error.code === "invalid-input" && /core package/.test(error.message),
   );
   assert.equal(registry.isEnabled("session"), true);
 });
 
-test("non-core state persists across registry reopen", () => {
+test("non-core state persists across registry reopen", async () => {
   const file = temporaryFile();
   const first = createPackageRegistry({ file });
-  first.setEnabled("terminal", false);
-  first.setEnabled("home-assistant", true);
+  await first.setEnabled("terminal", false);
+  await first.setEnabled("home-assistant", true);
 
   const reopened = createPackageRegistry({ file });
   assert.equal(reopened.isEnabled("terminal"), false);

@@ -1,0 +1,73 @@
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { once } from "node:events";
+import type { Server } from "node:http";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import type { InstalledPluginDto } from "@polyth/contracts";
+import { createHttpServer } from "../src/http.ts";
+import { pluginAssetRoutes } from "../src/routes/pluginAssets.ts";
+
+test("plugin UI assets require enabled matching metadata and are immutable", async () => {
+  const root = mkdtempSync(join(tmpdir(), "polyth-plugin-assets-"));
+  const pluginsDir = join(root, "plugins");
+  const webDist = join(root, "web");
+  const contents = "export const modules = {};\n";
+  const integrity = createHash("sha256").update(contents).digest("hex");
+  const assetDir = join(pluginsDir, "test.ui", ".polyth", "ui");
+  mkdirSync(assetDir, { recursive: true });
+  mkdirSync(webDist);
+  writeFileSync(join(assetDir, `ui-${integrity}.mjs`), contents);
+
+  const plugin: InstalledPluginDto = {
+    id: "test.ui",
+    name: "Test UI",
+    version: "1.0.0",
+    source: "file:test",
+    trust: "ui-only",
+    enabled: true,
+    status: "ready",
+    capabilities: [],
+    contributions: [],
+    ui: {
+      url: `/api/plugins/test.ui/ui/${integrity}.mjs`,
+      integrity,
+    },
+  };
+  const server = createHttpServer({
+    sessions: {} as never,
+    projects: { list: async () => [] } as never,
+    runtimes: {} as never,
+    capabilities: () => [],
+    webDist,
+    version: "test",
+    routes: [pluginAssetRoutes({
+      plugins: { list: () => [plugin] },
+      pluginsDir,
+    })],
+  });
+  server.listen(0);
+  await once(server, "listening");
+  const base = `http://127.0.0.1:${(server.address() as { port: number }).port}`;
+
+  try {
+    const response = await fetch(`${base}${plugin.ui!.url}`);
+    assert.equal(response.status, 200);
+    assert.equal(response.headers.get("content-type"), "application/javascript");
+    assert.match(response.headers.get("cache-control") ?? "", /immutable/);
+    assert.match(await response.text(), /export const modules/);
+
+    const mismatch = await fetch(
+      `${base}/api/plugins/test.ui/ui/${"b".repeat(64)}.mjs`,
+    );
+    assert.equal(mismatch.status, 404);
+
+    plugin.enabled = false;
+    const disabled = await fetch(`${base}${plugin.ui!.url}`);
+    assert.equal(disabled.status, 404);
+  } finally {
+    await new Promise<void>((resolve) => (server as Server).close(() => resolve()));
+  }
+});

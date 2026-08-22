@@ -90,7 +90,7 @@ class ScopeContext implements KernelContext {
   provide<T>(key: CapabilityKey<T>, value: T, priority = 0): Disposable {
     this.assertAlive();
     const entry = this.addProvider(key.id, value, priority);
-    return {
+    const disposable: Disposable = {
       dispose: () => {
         // Only remove if this exact registration is still present.
         const list = this.providers.get(key.id);
@@ -100,6 +100,8 @@ class ScopeContext implements KernelContext {
         }
       },
     };
+    this.effect(() => disposable.dispose());
+    return disposable;
   }
 
   inject<T>(key: CapabilityKey<T>): T {
@@ -174,13 +176,24 @@ class ScopeContext implements KernelContext {
   async dispose(): Promise<void> {
     if (this.disposed) return;
     this.disposed = true;
+    const errors: unknown[] = [];
 
     // Children first (deepest cleanup before parents), then own disposers LIFO.
-    for (const child of [...this.children]) await child.dispose();
+    for (const child of [...this.children]) {
+      try {
+        await child.dispose();
+      } catch (error) {
+        errors.push(error);
+      }
+    }
     this.children.clear();
 
     for (let i = this.effects.length - 1; i >= 0; i--) {
-      await this.effects[i]!();
+      try {
+        await this.effects[i]!();
+      } catch (error) {
+        errors.push(error);
+      }
     }
     this.effects.length = 0;
 
@@ -188,13 +201,21 @@ class ScopeContext implements KernelContext {
     // removes itself from the list, so pop from the end to avoid skipping the
     // item that shifts into a disposed entry's index.
     while (this.contributionList.length > 0) {
-      await this.contributionList.at(-1)!.disposable.dispose();
+      try {
+        await this.contributionList.at(-1)!.disposable.dispose();
+      } catch (error) {
+        errors.push(error);
+      }
     }
 
     this.providers.clear();
     this.listeners.clear();
 
     this.parent?.children.delete(this);
+
+    if (errors.length > 0) {
+      throw new AggregateError(errors, `dispose: ${this.id}`);
+    }
   }
 
   private assertAlive(): void {
@@ -235,9 +256,9 @@ class ScopeContext implements KernelContext {
     return this.configValue as T;
   }
 
-  scope(id: string): PluginContext {
+  scope(id: string, opts: ScopeConfig = {}): PluginContext {
     this.assertAlive();
-    const child = new ScopeContext(`${this.id}/${id}`, this);
+    const child = new ScopeContext(`${this.id}/${id}`, this, opts);
     this.children.add(child);
     return child;
   }
@@ -288,7 +309,7 @@ export async function loadPlugin(
     );
   }
 
-  const child = ctx.scope(`plugin:${manifest.id}`);
+  const child = ctx.scope(`plugin:${manifest.id}`, { config });
   try {
     const widgetIds = new Set<string>();
     for (const widget of manifest.widgets ?? []) {

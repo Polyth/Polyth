@@ -91,6 +91,7 @@ export interface TerminalService {
   write(id: string, data: string): void;
   resize(id: string, cols: number, rows: number): void;
   close(id: string): Promise<void>;
+  closeAll(): Promise<void>;
   list(projectId?: string): TerminalInfo[];
   get(id: string): TerminalInfo | undefined;
   /** Bounded scrollback replay for late subscribers (F12); undefined = unknown id. */
@@ -253,6 +254,10 @@ export function createTerminalService(opts: { replayBytes?: number } = {}): Term
       await wait;
       if (!sessions.has(id)) return;
       onExit();
+    },
+
+    async closeAll() {
+      await Promise.all([...sessions.keys()].map((id) => service.close(id)));
     },
 
     list(projectId) {

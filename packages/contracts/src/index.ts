@@ -1,10 +1,23 @@
 // Polyth public contracts. Type-only. No implementation imports allowed here.
 // Erasable TS only (no enums/namespaces) — Node strips types at runtime.
+import type { IncomingMessage, ServerResponse } from "node:http";
 
 export type JsonValue = string | number | boolean | null | JsonValue[] | { [k: string]: JsonValue };
 export type JsonObject = { [k: string]: JsonValue };
 
 export interface Disposable { dispose(): void | Promise<void> }
+
+/** Server route contribution shared by trusted server plugins and the gateway. */
+export type RouteHandler = (request: RouteRequest) => Promise<boolean>;
+export interface RouteRequest {
+  req: IncomingMessage;
+  res: ServerResponse;
+  url: URL;
+  path: string;
+  method: string;
+  body(): Promise<Record<string, unknown>>;
+  json(code: number, body: unknown): void;
+}
 
 // ---------------------------------------------------------------- capabilities
 
@@ -616,6 +629,7 @@ export interface PackageDescriptorDto {
   description: string;
   core: boolean;
   enabled: boolean;
+  status?: "ready" | "disabled";
   settingsGroup?: PackageSettingsGroup;
   /** Emoji or short icon label for the settings navigation. */
   icon?: string;
@@ -768,7 +782,10 @@ export interface PluginContext {
   effect(disposer: () => void | Promise<void>): void;      // owned by plugin scope
   contribute(item: UiSlotItem): Disposable;
   config<T = JsonObject>(): T;
-  scope(id: string): PluginContext;                        // child scope
+  scope(
+    id: string,
+    opts?: { config?: JsonObject; capabilities?: Array<CapabilityKey<unknown>> },
+  ): PluginContext;                                        // child scope
   log(level: "debug" | "info" | "warn" | "error", msg: string, data?: JsonObject): void;
 }
 
@@ -1218,6 +1235,8 @@ export interface InstalledPluginDto {
   contributions: UiSlotItem[];
   /** Widget declarations owned by this plugin; absent on older registries. */
   widgets?: WidgetContributionDescriptor[];
+  /** Browser-safe URL and content hash for the install-time UI bundle. */
+  ui?: { url: string; integrity: string };
   lastError?: string;
 }
 

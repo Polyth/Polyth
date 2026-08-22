@@ -5,7 +5,7 @@ import { resolve } from "node:path";
 import type {
   AgentProfile, AgentRuntime, AttachmentRef, AutoAcceptSetting, ChildSnapshotResult, CreateSessionInput, DeliveryMode,
   Disposable, ForkDraft, ForkResult, JsonObject,
-  QueueItemDto, RuntimeEvent,
+  InstalledPluginDto, PackageDescriptorDto, QueueItemDto, RuntimeEvent,
   SecretRequestData, SecretResolvedData, SecureSafeKind, SecureSafeService,
   RuntimeSession, SendResult, SessionEvent, SessionFolderDto, SessionForkedData, SessionOrganizePatch, SessionProjection, SessionRef,
   SessionService, SessionPersistence, UserTurnInput,
@@ -20,6 +20,8 @@ import { sanitizeAttachments } from "./attachments.ts";
 export interface Broadcaster {
   event(ev: SessionEvent): void;
   projection(p: SessionProjection): void;
+  pluginChanged?(plugin: InstalledPluginDto): void;
+  packageChanged?(pkg: PackageDescriptorDto): void;
 }
 
 /** Durable FIFO delivery queue (implemented by @polyth/session's Store). */

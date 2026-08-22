@@ -1,0 +1,20 @@
+{
+  "id": "test.ui-plugin",
+  "name": "Test UI Plugin",
+  "version": "1.0.0",
+  "trust": "ui-only",
+  "entries": {
+    "ui": "./ui.tsx"
+  },
+  "widgets": [
+    {
+      "id": "test.ui-widget",
+      "module": "test-ui-widget",
+      "title": "Test UI widget",
+      "description": "Install-time bundled test widget",
+      "kind": "widget",
+      "defaultSlot": "workspace.main",
+      "supportedSlots": ["workspace.main"]
+    }
+  ]
+}

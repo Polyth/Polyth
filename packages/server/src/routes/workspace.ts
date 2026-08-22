@@ -1,18 +1,16 @@
-// HTTP face of the files + commands plugins (PLAN §12). Both services are
-// root oriented; this adapter resolves projectId (+ optional sessionId) to a
+// HTTP face of the files plugin (PLAN §12). The service is root oriented;
+// this adapter resolves projectId (+ optional sessionId) to a
 // root and nothing else. A sessionId resolves the session's worktreePath
 // before the project root so Files can never read or write the wrong
 // checkout (UX-FIXTURE-VISUAL P0 — same resolver contract as git/terminal/
 // preview routes).
 import type { ProjectService, SessionService } from "@polyth/contracts";
 import type { FileService } from "@polyth/files";
-import type { CommandService } from "@polyth/commands";
 import type { RouteHandler } from "../http.ts";
 
 export function workspaceRoutes(deps: {
   projects: ProjectService;
   files: FileService;
-  commands: CommandService;
   sessions: SessionService;
 }): RouteHandler {
   const rootOf = async (projectId: string | null, sessionId?: string | null): Promise<string> => {
@@ -31,9 +29,7 @@ export function workspaceRoutes(deps: {
   };
 
   return async ({ path, method, url, body, json, res }) => {
-    if (!path.startsWith("/api/files") && !path.startsWith("/api/commands") && !path.startsWith("/api/snippets")) {
-      return false;
-    }
+    if (!path.startsWith("/api/files")) return false;
     const q = (k: string) => url.searchParams.get(k);
     const rootOfQuery = () => rootOf(q("projectId"), q("sessionId"));
     const rootOfBody = (b: Record<string, unknown>) =>
@@ -118,12 +114,6 @@ export function workspaceRoutes(deps: {
         limit: Number(q("limit") ?? 50),
         includeDirs: q("includeDirs") === "true",
       }));
-      return true;
-    }
-    if ((path === "/api/commands" || path === "/api/snippets") && method === "GET") {
-      const root = await rootOf(q("projectId"));
-      const list = await deps.commands.list(root);
-      json(200, path === "/api/commands" ? list.commands : list.snippets);
       return true;
     }
     return false;

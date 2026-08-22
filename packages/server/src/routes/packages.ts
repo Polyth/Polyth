@@ -17,7 +17,7 @@ export function packageRoutes(registry: PackageRegistry): RouteHandler {
           field: "enabled",
         });
       }
-      rc.json(200, registry.setEnabled(match[1]!, body.enabled));
+      rc.json(200, await registry.setEnabled(match[1]!, body.enabled));
       return true;
     }
 
