@@ -1,5 +1,6 @@
 import { useSyncExternalStore } from "react";
 import { UI_SLOTS, type UiSlot, type WidgetAudience, type WidgetKind, type WidgetScope, type WidgetSize } from "@polyth/contracts";
+import { getState, subscribeStore } from "../store.ts";
 
 export type WidgetZone = "header" | "left" | "main" | "right" | "bottom" | "floating";
 export type { WidgetAudience, WidgetScope, WidgetSize } from "@polyth/contracts";
@@ -62,6 +63,7 @@ export interface WidgetLayout {
 }
 
 export const WIDGET_LAYOUT_KEY = "polyth.widgetLayout";
+export const widgetLayoutStorageKey = (projectId: string): string => `${WIDGET_LAYOUT_KEY}.${projectId}`;
 export const WIDGET_ZONES: readonly WidgetZone[] = ["header", "left", "main", "right", "bottom", "floating"];
 /** Removed shell actions stay retired even when an older persisted layout
  * still describes them as visible. This is a migration deny-list, not a
@@ -813,19 +815,34 @@ export function applyWidgetLayoutPreset(
   };
 }
 
-const read = (): string | null => {
-  try { return localStorage.getItem(WIDGET_LAYOUT_KEY); } catch { return null; }
-};
-const write = (layout: WidgetLayout): boolean => {
+const read = (projectId: string | null): string | null => {
+  if (projectId === null) return null;
   try {
-    localStorage.setItem(WIDGET_LAYOUT_KEY, serializeWidgetLayout(layout));
+    const key = widgetLayoutStorageKey(projectId);
+    const projectLayout = localStorage.getItem(key);
+    if (projectLayout !== null) return projectLayout;
+
+    const legacyLayout = localStorage.getItem(WIDGET_LAYOUT_KEY);
+    if (legacyLayout === null) return null;
+    localStorage.setItem(key, legacyLayout);
+    localStorage.removeItem(WIDGET_LAYOUT_KEY);
+    return legacyLayout;
+  } catch {
+    return null;
+  }
+};
+const write = (layout: WidgetLayout, projectId: string | null): boolean => {
+  if (projectId === null) return true;
+  try {
+    localStorage.setItem(widgetLayoutStorageKey(projectId), serializeWidgetLayout(layout));
     return true;
   } catch {
     return false;
   }
 };
 
-let state = parseWidgetLayout(read());
+let activeProjectId = getState().activeProjectId;
+let state = parseWidgetLayout(read(activeProjectId));
 const listeners = new Set<() => void>();
 const statusListeners = new Set<() => void>();
 let history: WidgetLayout[] = [];
@@ -840,7 +857,7 @@ function flushWrite(): void {
   if (writeTimer === null) return;
   clearTimeout(writeTimer);
   writeTimer = null;
-  saveStatus = write(state) ? "saved" : "error";
+  saveStatus = write(state, activeProjectId) ? "saved" : "error";
   for (const listener of [...statusListeners]) listener();
 }
 
@@ -850,7 +867,7 @@ function scheduleWrite(): void {
   for (const listener of [...statusListeners]) listener();
   writeTimer = setTimeout(() => {
     writeTimer = null;
-    saveStatus = write(state) ? "saved" : "error";
+    saveStatus = write(state, activeProjectId) ? "saved" : "error";
     for (const listener of [...statusListeners]) listener();
   }, 150);
   // Node timers would keep the test process alive; browsers return a number.
@@ -859,6 +876,18 @@ function scheduleWrite(): void {
 
 if (typeof window !== "undefined") window.addEventListener("pagehide", flushWrite);
 
+subscribeStore(() => {
+  const nextProjectId = getState().activeProjectId;
+  if (nextProjectId === activeProjectId) return;
+  flushWrite();
+  activeProjectId = nextProjectId;
+  state = parseWidgetLayout(read(activeProjectId));
+  history = [];
+  saveStatus = "saved";
+  for (const listener of [...listeners]) listener();
+  for (const listener of [...statusListeners]) listener();
+});
+
 function commit(next: WidgetLayout, recordHistory = true, immediate = false): void {
   if (next === state) return;
   if (recordHistory) history = [...history.slice(-39), state];
@@ -866,7 +895,7 @@ function commit(next: WidgetLayout, recordHistory = true, immediate = false): vo
   if (immediate) {
     if (writeTimer !== null) clearTimeout(writeTimer);
     writeTimer = null;
-    saveStatus = write(state) ? "saved" : "error";
+    saveStatus = write(state, activeProjectId) ? "saved" : "error";
   } else {
     scheduleWrite();
   }
@@ -905,7 +934,7 @@ export function retryWidgetSave(): void {
   else {
     saveStatus = "saving";
     for (const listener of [...statusListeners]) listener();
-    saveStatus = write(state) ? "saved" : "error";
+    saveStatus = write(state, activeProjectId) ? "saved" : "error";
     for (const listener of [...statusListeners]) listener();
   }
 }

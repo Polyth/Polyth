@@ -40,22 +40,28 @@ test("no matches yields an empty list, blank query too", () => {
   assert.deepEqual(searchSettingsItems("   ", PAGES), []);
 });
 
-test("Widgets & Layout is wired and its toolbar, rail, and mini-widget controls are searchable", async () => {
+test("Widgets & Layout exposes place-first workspace and composer controls", async () => {
   const widgetItems = listSettingsItems().filter((item) => item.pageId === "widgets");
-  assert.ok(widgetItems.some((item) => item.id === "widgets.capabilities"));
-  assert.ok(widgetItems.some((item) => item.id === "widgets.actions"));
-  assert.ok(searchSettingsItems("toolbar", PAGES).some((hit) => hit.item.id === "widgets.capabilities"));
+  assert.deepEqual(widgetItems.map((item) => item.id), ["widgets.capabilities", "widgets.actions"]);
+  assert.ok(searchSettingsItems("zones", PAGES).some((hit) => hit.item.id === "widgets.capabilities"));
+  assert.ok(searchSettingsItems("composer", PAGES).some((hit) => hit.item.id === "widgets.actions"));
 
-  const [shell, settings, widgets] = await Promise.all([
+  const [shell, settings, widgets, packages] = await Promise.all([
     readFile(new URL("../src/shell.ts", import.meta.url), "utf8"),
     readFile(new URL("../src/components/SettingsView.tsx", import.meta.url), "utf8"),
     readFile(new URL("../src/components/settings/WidgetsPage.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../src/components/settings/PackagesPage.tsx", import.meta.url), "utf8"),
   ]);
   assert.doesNotMatch(shell, /Change workspace preset|cmd\.customize/);
   assert.doesNotMatch(settings, /Choose a setup/);
   assert.match(settings, /Widgets & Layout/);
-  assert.match(widgets, /data-settings-item="widgets\.capabilities"/);
-  assert.match(widgets, /data-settings-item="widgets\.actions"/);
+  assert.doesNotMatch(widgets, /<PageHead|<h[23][^>]*>Widgets & Layout/);
+  assert.doesNotMatch(packages, /<PageHead|<h[23][^>]*>Packages/);
+  assert.match(widgets, /data-settings-item=\{index === 0 \? "widgets\.capabilities"/);
+  assert.match(widgets, /data-settings-item=\{index === 0 \? "widgets\.actions"/);
+  assert.match(widgets, /Focus header/);
+  assert.match(widgets, /Composer actions/);
+  assert.doesNotMatch(widgets, /Top &amp; side workspace buttons|Workspace preview|Choose a starting layout|Help me set up|WidgetLibraryOverlay/);
 });
 
 test("items on hidden/unknown pages are skipped", () => {

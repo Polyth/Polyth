@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { PackageDescriptorDto } from "@polyth/contracts";
 import { api } from "../../api.ts";
 import { bootPackages, isPackageEnabled, subscribePackages } from "../../packages/registry.ts";
-import { EmptyState, PageHead } from "./parts.tsx";
+import { EmptyState } from "./parts.tsx";
 
 export default function PackagesPage() {
   const [packages, setPackages] = useState<PackageDescriptorDto[] | null>(null);
@@ -45,15 +45,14 @@ export default function PackagesPage() {
   };
 
   if (!packages && !error) {
-    return <><PageHead title="Packages" blurb="Loading installed Polyth packages…" /></>;
+    return <div className="set-page-head"><p className="muted">Loading installed Polyth packages…</p></div>;
   }
 
   return (
     <>
-      <PageHead
-        title="Packages"
-        blurb="Enable the features this workspace needs. Disabled packages do not register settings, widgets, or capabilities."
-      />
+      <div className="set-page-head">
+        <p className="muted">Enable or disable optional workspace features.</p>
+      </div>
       {error && <div className="form-error" role="alert">{error}</div>}
       {!packages && <EmptyState title="Packages unavailable" body="The package registry could not be loaded." />}
       {packages && (
@@ -63,42 +62,51 @@ export default function PackagesPage() {
               <strong id="optional-packages-title">Optional packages</strong>
               <span>{grouped.optional.filter((item) => item.enabled).length} enabled</span>
             </div>
-            {grouped.optional.map((descriptor) => (
-              <div className="package-row" key={descriptor.id}>
-                <span className="package-icon" aria-hidden="true">{descriptor.icon ?? "◇"}</span>
-                <span className="package-copy">
-                  <strong>{descriptor.name}</strong>
-                  <small>{descriptor.description}</small>
-                </span>
-                <button
-                  type="button"
-                  className={`package-toggle ${descriptor.enabled ? "on" : ""}`}
-                  role="switch"
-                  aria-checked={descriptor.enabled}
-                  aria-label={`${descriptor.enabled ? "Disable" : "Enable"} ${descriptor.name}`}
-                  disabled={busy === descriptor.id}
-                  onClick={() => { void setEnabled(descriptor, !descriptor.enabled); }}
-                >
-                  <span />
-                </button>
-              </div>
-            ))}
+            <div className="package-grid">
+              {grouped.optional.map((descriptor) => (
+                <article className={`package-tile${descriptor.enabled ? " enabled" : ""}`} key={descriptor.id}>
+                  <span className="package-icon" aria-hidden="true">{descriptor.icon ?? "◇"}</span>
+                  <div className="package-copy">
+                    <strong>{descriptor.name}</strong>
+                    <p>{descriptor.description}</p>
+                  </div>
+                  <div className="package-tile-control">
+                    <span>{descriptor.enabled ? "Enabled" : "Disabled"}</span>
+                    <button
+                      type="button"
+                      className={`package-toggle ${descriptor.enabled ? "on" : ""}`}
+                      role="switch"
+                      aria-checked={descriptor.enabled}
+                      aria-label={`${descriptor.enabled ? "Disable" : "Enable"} ${descriptor.name}`}
+                      disabled={busy === descriptor.id}
+                      onClick={() => { void setEnabled(descriptor, !descriptor.enabled); }}
+                    >
+                      <span />
+                    </button>
+                  </div>
+                </article>
+              ))}
+            </div>
           </section>
           <section className="package-group" aria-labelledby="core-packages-title">
             <div className="package-group-head">
               <strong id="core-packages-title">Core packages</strong>
               <span>Always enabled</span>
             </div>
-            {grouped.core.map((descriptor) => (
-              <div className="package-row" key={descriptor.id}>
-                <span className="package-icon" aria-hidden="true">{descriptor.icon ?? "◆"}</span>
-                <span className="package-copy">
-                  <strong>{descriptor.name}</strong>
-                  <small>{descriptor.description}</small>
-                </span>
-                <span className="tag package-core-badge">Core</span>
-              </div>
-            ))}
+            <div className="package-grid">
+              {grouped.core.map((descriptor) => (
+                <article className="package-tile package-tile-core" key={descriptor.id}>
+                  <span className="package-icon" aria-hidden="true">{descriptor.icon ?? "◆"}</span>
+                  <div className="package-copy">
+                    <strong>{descriptor.name}</strong>
+                    <p>{descriptor.description}</p>
+                  </div>
+                  <div className="package-tile-control">
+                    <span className="tag package-core-badge">Core</span>
+                  </div>
+                </article>
+              ))}
+            </div>
           </section>
           {isPackageEnabled("plugins") && (
             <button

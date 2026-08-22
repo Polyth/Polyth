@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  closeWorkspacePane, getState, openWorkspacePane, setActiveView, useActiveModel, useStore,
+  closeWorkspacePane, getState, setActiveView, useActiveModel, useStore,
   openSettingsPage, setOverlay, setRailPlugin, setSidebarOpen, setUiError, type AppView,
 } from "../store.ts";
 import { forkSession, exportSessionMarkdown } from "../init.ts";
@@ -453,7 +453,6 @@ function UserMenu() {
 export default function Header() {
   const session = useStore((s) => s.sessions.find((x) => x.id === s.activeSessionId) ?? null);
   const project = useStore((s) => s.projectRegistry.projects.find((p) => p.id === s.activeProjectId) ?? null);
-  const branch = useStore((s) => s.gitBranch);
   const model = useActiveModel();
   const [goalFormOpen, setGoalFormOpen] = useState(false);
   const workspaceMode = useWorkspaceMode();
@@ -475,19 +474,6 @@ export default function Header() {
           <span className="polyth-mark">p</span>
           <strong>polyth</strong>
         </button>
-        <div className="header-breadcrumbs" aria-label="Current workspace">
-          <button className="header-crumb" title={project?.path ?? "Choose a project"} onClick={() => setOverlay("project-picker")}>
-            <Icon.files />
-            <span>{project?.name || project?.path || "Choose project"}</span>
-            <b aria-hidden="true">⌄</b>
-          </button>
-          <span className="header-breadcrumb-sep">/</span>
-          <button className="header-crumb" title={branch || "Current branch"} onClick={() => openWorkspacePane("git")}>
-            <Icon.tree />
-            <span>{branch || "no branch"}</span>
-            <b aria-hidden="true">⌄</b>
-          </button>
-        </div>
         <div className="workspace-mode-switch" role="group" aria-label="Workspace view">
           <button
             className={workspaceMode === "chat" ? "active" : ""}

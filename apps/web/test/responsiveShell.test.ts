@@ -157,12 +157,15 @@ test("Focus uses light composer controls without editor or privacy chrome", asyn
   assert.ok(css.includes(".composer-focus-light .chip-k { display: none; }"), "technical picker keys are hidden");
 });
 
-test("desktop header keeps branded breadcrumbs and a named utility cluster", async () => {
+test("desktop header keeps brand, workspace modes, and a named utility cluster", async () => {
   const header = await read("../src/components/Header.tsx");
   const actions = await read("../src/widgets/builtinMiniWidgets.tsx");
+  const sidebar = await read("../src/components/Sidebar.tsx");
   assert.ok(header.includes('<span className="polyth-mark">p</span>'), "stylized Polyth mark is visible");
   assert.ok(header.includes("<strong>polyth</strong>"), "wordmark text is visible");
-  assert.ok(header.includes('<div className="header-breadcrumbs"'), "project and branch breadcrumbs share one group");
+  assert.ok(header.includes('className="workspace-mode-switch"'), "Focus and Canvas remain next to the brand");
+  assert.ok(!header.includes("header-breadcrumbs"), "project and branch crumbs are removed");
+  assert.ok(sidebar.includes('setOverlay("project-picker")'), "project switching remains available in the project sidebar");
   assert.ok(header.includes('<div className="header-actions"'), "utilities share one right-side cluster");
   for (const label of ["Search", "History", "Settings"]) {
     assert.ok(actions.includes(`<span>${label}</span>`), `${label} utility remains named`);
@@ -170,13 +173,14 @@ test("desktop header keeps branded breadcrumbs and a named utility cluster", asy
   assert.ok(!header.includes('className="header-global-search"'), "Search is not duplicated in the header");
 });
 
-test("Settings occupies the viewport and preserves a usable widget inspector column", async () => {
+test("Settings occupies the viewport without a widget preview inspector", async () => {
   const settings = await read("../src/components/SettingsView.tsx");
   const css = await read("../src/styles.css");
+  const widgets = await read("../src/components/settings/WidgetsPage.tsx");
   assert.ok(settings.includes('className="scrim settings-scrim"'), "Settings owns viewport-specific scrim geometry");
   assert.ok(css.includes("width: 96vw; max-width: none; height: 92vh"), "Settings is a near-full viewport workspace");
   assert.ok(css.includes(".settings-shell { min-width: 1100px; }"), "wide Settings keeps the three-column floor");
-  assert.ok(css.includes("clamp(286px, 21vw, 320px)"), "widget inspector retains a dedicated right column");
+  assert.ok(!widgets.includes("widget-inspector"), "widget settings no longer render a preview inspector");
 });
 
 test("open rails remain visible in every workspace mode", async () => {

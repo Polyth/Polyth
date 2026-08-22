@@ -8,6 +8,7 @@ import {
   canPlaceWidget,
   createDefaultWidgetLayout,
   duplicateWidget,
+  getWidgetLayout,
   getWidgetSaveStatus,
   moveWidget,
   moveWidgetToSlot,
@@ -17,9 +18,11 @@ import {
   setWidgetPosition,
   setWidgetVisible,
   updateWidgetLayout,
+  widgetLayoutStorageKey,
   widgetZoneOf,
   widgetSlotOf,
 } from "../src/widgets/widgetLayout.ts";
+import { activateProject } from "../src/store.ts";
 
 test("free-form positions persist and collisions resolve with a grid gap", () => {
   const definitions = [
@@ -257,22 +260,60 @@ test("self-describing plugin placements survive parsing as missing-plugin placeh
   assert.equal(widgetZoneOf(parsed, "sample.status"), "right");
 });
 
-test("setup-style immediate commits synchronously persist the complete layout", () => {
+test("layouts persist independently under project-specific keys", () => {
   const stored = new Map<string, string>();
   Object.defineProperty(globalThis, "localStorage", {
     configurable: true,
     value: {
       getItem: (key: string) => stored.get(key) ?? null,
       setItem: (key: string, value: string) => { stored.set(key, value); },
+      removeItem: (key: string) => { stored.delete(key); },
     },
   });
 
+  activateProject("layout-project-alpha");
   updateWidgetLayout((current) => ({
     ...current,
     audience: "power",
   }), { immediate: true });
-  const persisted = stored.get(WIDGET_LAYOUT_KEY);
-  assert.ok(persisted, "immediate commit writes before returning");
-  assert.equal(parseWidgetLayout(persisted).audience, "power");
+  const alphaKey = widgetLayoutStorageKey("layout-project-alpha");
+  assert.equal(parseWidgetLayout(stored.get(alphaKey) ?? null).audience, "power");
+  assert.equal(stored.has(WIDGET_LAYOUT_KEY), false);
+
+  activateProject("layout-project-beta");
+  assert.equal(getWidgetLayout().audience, "standard", "a new project starts from defaults");
+  updateWidgetLayout((current) => ({ ...current, audience: "simple" }), { immediate: true });
+  const betaKey = widgetLayoutStorageKey("layout-project-beta");
+  assert.equal(parseWidgetLayout(stored.get(betaKey) ?? null).audience, "simple");
+
+  activateProject("layout-project-alpha");
+  assert.equal(getWidgetLayout().audience, "power", "switching back restores that project's canvas");
   assert.equal(getWidgetSaveStatus(), "saved");
+});
+
+test("the legacy global layout migrates to only the first project that loads it", () => {
+  const stored = new Map<string, string>();
+  const legacy = {
+    ...createDefaultWidgetLayout(),
+    audience: "power" as const,
+  };
+  stored.set(WIDGET_LAYOUT_KEY, serializeWidgetLayout(legacy));
+  Object.defineProperty(globalThis, "localStorage", {
+    configurable: true,
+    value: {
+      getItem: (key: string) => stored.get(key) ?? null,
+      setItem: (key: string, value: string) => { stored.set(key, value); },
+      removeItem: (key: string) => { stored.delete(key); },
+    },
+  });
+
+  activateProject("layout-legacy-project");
+  const migratedKey = widgetLayoutStorageKey("layout-legacy-project");
+  assert.equal(getWidgetLayout().audience, "power");
+  assert.equal(stored.get(migratedKey), serializeWidgetLayout(legacy));
+  assert.equal(stored.has(WIDGET_LAYOUT_KEY), false, "the global key is retired after migration");
+
+  activateProject("layout-fresh-project");
+  assert.equal(getWidgetLayout().audience, "standard", "later projects do not inherit the migrated canvas");
+  assert.equal(stored.has(widgetLayoutStorageKey("layout-fresh-project")), false);
 });

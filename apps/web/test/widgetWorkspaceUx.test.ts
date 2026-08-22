@@ -73,6 +73,30 @@ test("canvas exposes one simple add-widget menu and no placement-zone controls",
   assert.ok(!source.includes("Drag widgets to rearrange"));
 });
 
+test("settings uses named button places without canvas layout controls", async () => {
+  const source = await readFile(new URL("../src/components/settings/WidgetsPage.tsx", import.meta.url), "utf8");
+  for (const place of [
+    "Focus header",
+    "More tools / right rail",
+    "Technical menu",
+    "Composer actions",
+    "Session header actions",
+    "App header actions",
+  ]) {
+    assert.ok(source.includes(place), `${place} is a named settings place`);
+  }
+  for (const removed of [
+    "Choose a starting layout",
+    "Workspace preview",
+    "Help me set up my workspace",
+    "WidgetLibraryOverlay",
+    "Build & Debug",
+    "Who is this for",
+  ]) {
+    assert.ok(!source.includes(removed), `${removed} stays out of widget settings`);
+  }
+});
+
 test("widget library searches capabilities and combines plugin, size, zone, and tab filters", () => {
   const hits = filterWidgetLibrary(WIDGETS, {
     query: "diff",
