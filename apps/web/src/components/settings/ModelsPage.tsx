@@ -11,13 +11,11 @@ import {
   toggleModelFavorite,
   useModelPrefs,
 } from "../../modelPrefs.ts";
-import { setModels, updateSettings, useStore } from "../../store.ts";
+import { setModels, useStore } from "../../store.ts";
 import { providerColor } from "../../format.ts";
-import { formatModelRef } from "../../settings.ts";
-import { api, type ProviderCatalogDto } from "../../api.ts";
-import { EmptyState, PageHead, Row, Seg, Toggle } from "./parts.tsx";
-import { setGlobalDefaultModel, useSessionDefaults } from "../../sessionDefaults.ts";
-import { modelDisplayName, modelSupportsTextWorkflow } from "../../composer/discovery.ts";
+import { api, type ProviderCatalogDto, type VisibilityStateDto } from "../../api.ts";
+import { EmptyState, PageHead, Seg, Toggle } from "./parts.tsx";
+import { modelDisplayName } from "../../composer/discovery.ts";
 
 type Scope = "connected" | "all";
 
@@ -28,8 +26,6 @@ function fmtContext(context?: number): string {
 
 export default function ModelsPage() {
   const models = useStore((s) => s.models);
-  const textModels = models.filter(modelSupportsTextWorkflow);
-  const sessionDefaults = useSessionDefaults();
   const prefs = useModelPrefs();
   const [providers, setProviders] = useState<ProviderCatalogDto[] | null>(null);
   const [error, setError] = useState("");
@@ -48,15 +44,53 @@ export default function ModelsPage() {
 
   useEffect(() => { void refreshCatalog(); }, []);
 
-  /** Server toggle + immediate composer refresh (picker only lists enabled). */
-  const mutate = async (key: string, fn: () => Promise<unknown>) => {
+  const publish = (catalog: ProviderCatalogDto[]) => {
+    setProviders(catalog);
+    const enabled = catalog.flatMap((provider) => provider.enabled
+      ? provider.models.filter((model) => model.enabled && model.connected).map((model) => ({
+          providerID: model.providerID,
+          modelID: model.modelID,
+          name: model.name,
+          ...(model.providerName ? { providerName: model.providerName } : {}),
+          ...(model.context !== undefined ? { context: model.context } : {}),
+          ...(model.cost ? { cost: model.cost } : {}),
+          ...(model.capabilities ? { capabilities: model.capabilities } : {}),
+          ...(model.variants ? { variants: model.variants } : {}),
+          connected: model.connected,
+        }))
+      : []);
+    setModels(enabled);
+  };
+
+  const reconcile = (catalog: ProviderCatalogDto[], state: VisibilityStateDto) =>
+    catalog.map((provider) => {
+      const providerEnabled = !state.disabledProviders.includes(provider.id);
+      return {
+        ...provider,
+        enabled: providerEnabled,
+        models: provider.models.map((model) => ({
+          ...model,
+          enabled: providerEnabled && !state.disabledModels.includes(model.key),
+        })),
+      };
+    });
+
+  /** Optimistic UI; the response only reconciles visibility flags and never
+   * re-runs OpenCode's expensive provider discovery endpoint. */
+  const mutate = async (
+    key: string,
+    optimistic: (catalog: ProviderCatalogDto[]) => ProviderCatalogDto[],
+    fn: () => Promise<VisibilityStateDto>,
+  ) => {
+    if (!providers) return;
+    const before = providers;
+    publish(optimistic(before));
     setBusyKey(key);
     setError("");
     try {
-      await fn();
-      await refreshCatalog();
-      setModels(await api.listModels());
+      publish(reconcile(before, await fn()));
     } catch (e) {
+      publish(before);
       setError(e instanceof Error ? e.message : String(e));
     } finally {
       setBusyKey("");
@@ -104,26 +138,6 @@ export default function ModelsPage() {
         title="Providers & Models"
         blurb="What the model picker offers. Toggles are written to the OpenCode config (disabled providers and per-provider blacklists), so every client sees the same catalog."
       />
-      <Row label="Default model" hint="Used when a session has not selected a model." itemId="models.default">
-        <select
-          value={sessionDefaults.defaultModel ? modelKey(sessionDefaults.defaultModel) : ""}
-          onChange={(e) => {
-            const selected = textModels.find((model) => modelKey(model) === e.target.value);
-            setGlobalDefaultModel(selected
-              ? { providerID: selected.providerID, modelID: selected.modelID }
-              : undefined);
-            updateSettings({ defaultModel: e.target.value });
-          }}
-        >
-          <option value="">Server default</option>
-          {textModels.map((model) => (
-            <option key={modelKey(model)} value={formatModelRef(model)}>
-              {modelDisplayName(model, textModels)}
-            </option>
-          ))}
-        </select>
-      </Row>
-
       <div className="models-toolbar" data-settings-item="models.catalog">
         <input
           className="set-search models-search"
@@ -194,7 +208,13 @@ export default function ModelsPage() {
                 <Toggle
                   on={p.enabled}
                   label={`${p.enabled ? "Disable" : "Enable"} provider ${p.name}`}
-                  onChange={(on) => void mutate(p.id, () => api.setProviderEnabled(p.id, on))}
+                  onChange={(on) => void mutate(
+                    p.id,
+                    (catalog) => catalog.map((provider) => provider.id === p.id
+                      ? { ...provider, enabled: on, models: provider.models.map((model) => ({ ...model, enabled: on })) }
+                      : provider),
+                    () => api.setProviderEnabled(p.id, on),
+                  )}
                 />
               </div>
               {expanded && (
@@ -220,7 +240,13 @@ export default function ModelsPage() {
                           aria-label={`${m.enabled ? "Disable" : "Enable"} ${displayName}`}
                           disabled={busyKey === m.key || !p.enabled}
                           title={!p.enabled ? "Enable the provider first" : m.enabled ? "Disable model" : "Enable model"}
-                          onClick={() => void mutate(m.key, () => api.setModelEnabled(m.key, !m.enabled))}
+                          onClick={() => void mutate(
+                            m.key,
+                            (catalog) => catalog.map((provider) => provider.id === p.id
+                              ? { ...provider, models: provider.models.map((model) => model.key === m.key ? { ...model, enabled: !m.enabled } : model) }
+                              : provider),
+                            () => api.setModelEnabled(m.key, !m.enabled),
+                          )}
                         >
                           <i />
                         </button>

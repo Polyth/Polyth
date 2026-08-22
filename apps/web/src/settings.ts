@@ -10,6 +10,7 @@ export interface PolythSettings {
   theme: string;
   density: "comfortable" | "balanced" | "compact";
   fontSize: number; // px, 12–18; scales the UI, not code blocks
+  fontFamily: "sans" | "system" | "serif" | "mono";
   productName: string; // brand label in the sidebar + document title
   relativeTime: boolean; // "2m ago" vs absolute times in the session list
   sendOnEnter: boolean; // Enter sends; off → Enter is newline, Mod+Enter sends
@@ -26,6 +27,7 @@ export const DEFAULT_SETTINGS: PolythSettings = {
   theme: "light",
   density: "comfortable",
   fontSize: 14,
+  fontFamily: "sans",
   productName: "Polyth",
   relativeTime: true,
   sendOnEnter: true,
@@ -54,6 +56,9 @@ export function normalizeSettings(raw: unknown): PolythSettings {
     theme: pickString(r.theme, d.theme).trim() || d.theme,
     density: r.density === "compact" || r.density === "balanced" ? r.density : "comfortable",
     fontSize: pickNumber(r.fontSize, d.fontSize, 12, 18),
+    fontFamily: r.fontFamily === "system" || r.fontFamily === "serif" || r.fontFamily === "mono"
+      ? r.fontFamily
+      : "sans",
     productName: pickString(r.productName, d.productName).trim() || d.productName,
     relativeTime: pickBool(r.relativeTime, d.relativeTime),
     sendOnEnter: pickBool(r.sendOnEnter, d.sendOnEnter),
@@ -106,6 +111,7 @@ export function applySettingsToDom(s: PolythSettings): void {
   const html = document.documentElement;
   applyThemeSetting(s.theme);
   html.dataset.density = s.density;
+  html.dataset.font = s.fontFamily;
   html.style.setProperty("--ui-font-size", `${s.fontSize}px`);
   document.title = s.productName;
 }

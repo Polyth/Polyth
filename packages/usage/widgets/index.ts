@@ -90,7 +90,7 @@ export const USAGE_WIDGETS: readonly WidgetContributionDescriptor[] = [
     category: "Usage",
     defaultSize: { w: 4, h: 2 },
     minSize: { w: 3, h: 2 },
-    maxSize: { w: 12, h: 12 },
+    maxSize: { w: 6, h: 3 },
     audience: "simple",
     scope: "workspace",
     resizable: true,

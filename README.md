@@ -32,9 +32,9 @@ Env: `PORT` (default 4400), `POLYTH_DATA_DIR` (default `./data`). The server bin
 
 ## Make it yours
 
-![The settings modal: searchable settings with left navigation, product name, and workspace presets.](docs/assets/readme/settings.png)
+![The settings modal with searchable settings and left navigation.](docs/assets/readme/settings.png)
 
-*Every preference in one searchable place — including workspace presets (Build & debug, Plan & coordinate, Design & explore) that rearrange the workspace for how you work without hiding any tools.*
+*Every preference in one searchable place, with project-specific canvas and widget setup kept alongside each project.*
 
 ![The Providers & Models settings page with per-provider and per-model toggles.](docs/assets/readme/models.png)
 

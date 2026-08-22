@@ -35,6 +35,9 @@ export interface WidgetDef {
   capabilities?: readonly string[];
   zone?: WidgetZone;
   supportedZones?: readonly WidgetZone[];
+  /** Preferred size used when the widget is first added to a canvas. This is
+   * deliberately separate from minSize so users can shrink it afterward. */
+  recommendedSize?: WidgetSize;
   defaultSize?: WidgetSize;
   minSize?: WidgetSize;
   maxSize?: WidgetSize;
@@ -158,6 +161,7 @@ function slotWidgets(): WidgetDef[] {
       ...(isWidgetZone(zone) ? { zone } : {}),
       ...(zones && zones.length > 0 ? { supportedZones: zones } : {}),
       ...(audience === "simple" || audience === "standard" || audience === "power" ? { audience } : {}),
+      ...(size(meta.recommendedSize) ? { recommendedSize: size(meta.recommendedSize)! } : {}),
       ...(size(meta.defaultSize) ? { defaultSize: size(meta.defaultSize)! } : {}),
       ...(size(meta.minSize) ? { minSize: size(meta.minSize)! } : {}),
       ...(size(meta.maxSize) ? { maxSize: size(meta.maxSize)! } : {}),

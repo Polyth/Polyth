@@ -489,7 +489,15 @@ export interface SessionPersistence {
 // ---------------------------------------------------------------- agent runtime (backend seam)
 
 export interface ModelDescriptor { providerID: string; modelID: string; name: string; providerName?: string; context?: number; cost?: { input: number; output: number }; /** Normalized values include `input:text`, `output:image`, `input:none`, `toolcall`, and `attachment`. */ capabilities?: string[]; /** Named reasoning variants reported by OpenCode (for example low/medium/high). */ variants?: string[]; /** Provider has live credentials (backend `connected[]`); undefined = unknown/assume connected. */ connected?: boolean }
-export interface AgentDescriptor { name: string; description?: string; mode: "primary" | "subagent" | "all" }
+export interface AgentDescriptor {
+  name: string;
+  description?: string;
+  mode: "primary" | "subagent" | "all";
+  /** OpenCode's role-level system prompt, when exposed by the backend. */
+  prompt?: string;
+  /** Role-specific model override. */
+  model?: ModelRef;
+}
 export interface RuntimeCapabilities { streaming: boolean; permissions: boolean; questions: boolean; compaction: boolean; subagents: boolean; steering?: boolean }
 export interface RuntimeSession { id: string; title: string; parentId?: string; createdAt: number; updatedAt: number }
 export interface RuntimeSessionMessage { role: "user" | "assistant"; text: string; reasoning?: string }
@@ -730,6 +738,9 @@ export interface WidgetContributionDescriptor {
   order?: number;
   category?: string;
   capabilities?: string[];
+  /** Preferred size for a newly added widget. It is guidance, not a resize
+   * constraint: users may shrink the widget below this size afterward. */
+  recommendedSize?: WidgetSize;
   defaultSize?: WidgetSize;
   minSize?: WidgetSize;
   maxSize?: WidgetSize;

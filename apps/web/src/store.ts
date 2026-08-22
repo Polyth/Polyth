@@ -32,7 +32,7 @@ import {
   type ListPublishOutcome,
   type ProjectRegistryState,
 } from "./projectRegistry.ts";
-import { setWorkspaceMode } from "./widgets/workspaceMode.ts";
+import { setWorkspaceMode, setWorkspaceModeProject } from "./widgets/workspaceMode.ts";
 
 // UX-PANE-MODEL: Files, Git, Terminal, and Preview are workspace PANE
 // surfaces, not primary views — they open beside (or over) a still-mounted
@@ -239,6 +239,7 @@ export function applyProjectAdded(project: Project): void {
     editorLocation: null,
     gitDiffPath: null,
   });
+  setWorkspaceModeProject(project.id);
 }
 
 /** Delete success: remove the confirmed id and resolve a replacement active. */
@@ -259,6 +260,7 @@ export function applyProjectRemoved(id: string): void {
     editorLocation: null,
     gitDiffPath: null,
   });
+  setWorkspaceModeProject(activeProjectId);
 }
 
 // ---- other actions ---------------------------------------------------------
@@ -300,6 +302,7 @@ export function activateProject(id: string | null): void {
     editorFile: null, editorLocation: null, gitDiffPath: null,
     railPlugin, paneExpanded: restored !== null ? pane!.expanded : false, paneFullscreen: false,
   });
+  setWorkspaceModeProject(id);
 }
 export function setActiveView(view: AppView | LegacyPaneViewId): void {
   // One-time legacy adapter: a stored/contributed "files"/"git"/"terminal"/

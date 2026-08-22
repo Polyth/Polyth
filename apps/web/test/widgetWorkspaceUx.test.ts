@@ -14,22 +14,22 @@ import {
   widgetZoneOf,
 } from "../src/widgets/widgetLayout.ts";
 import {
-  applyWorkspaceSetup,
+  applyProjectSetup,
   createSetupDraft,
   MAX_SETUP_WIDGETS,
   MIN_SETUP_WIDGETS,
   validSetupWidgetCount,
   workflowOption,
-} from "../src/widgets/workspaceSetup.ts";
+} from "../src/widgets/projectSetupLayout.ts";
 import { planWorkspaceCustomization } from "../src/widgets/workspaceCustomize.ts";
 
 const render = () => null;
 const WIDGETS: WidgetDef[] = [
   {
-    id: "core.composer",
+    id: "core.chat",
     pluginId: "session",
-    title: "Composer",
-    description: "Ask Polyth anything",
+    title: "Conversation",
+    description: "The active conversation timeline and composer",
     zone: "main",
     supportedZones: ["main", "bottom"],
     defaultSize: { w: 12, h: 5 },
@@ -71,6 +71,14 @@ test("canvas exposes one simple add-widget menu and no placement-zone controls",
   assert.ok(!source.includes("Recent"));
   assert.ok(!source.includes("Project canvas"));
   assert.ok(!source.includes("Drag widgets to rearrange"));
+});
+
+test("canvas top row is placeable and editing borders use theme colors", async () => {
+  const styles = await readFile(new URL("../src/styles.css", import.meta.url), "utf8");
+  assert.match(styles, /\.widget-canvas-grid\s*\{[^}]*padding:\s*0 18px 24px;/s);
+  assert.match(styles, /\.widget-menu-trigger\s*\{[^}]*bottom:\s*18px;/s);
+  assert.match(styles, /\.widget-card\.editing\s*\{[^}]*border:\s*1px solid var\(--border\);/s);
+  assert.doesNotMatch(styles, /\.widget-card\.editing\s*\{[^}]*accent-line/s);
 });
 
 test("settings uses named button places without canvas layout controls", async () => {
@@ -116,7 +124,7 @@ test("widget library searches capabilities and combines plugin, size, zone, and 
     category: "all",
     tab: "recommended",
   }, "standard");
-  assert.deepEqual(recommended.map((widget) => widget.id), ["core.composer", "git.recent"]);
+  assert.deepEqual(recommended.map((widget) => widget.id), ["core.chat", "git.recent"]);
   assert.deepEqual([...groupWidgetsByPlugin(WIDGETS).keys()], ["Core workspace", "Git tools"]);
 });
 
@@ -146,21 +154,21 @@ test("plugin filters disambiguate colliding display names", () => {
   assert.equal(grouped.get("Tools — alpha-tools")?.length, 2);
 });
 
-test("guided setup applies audience and exact widget visibility without a layout preset", async () => {
+test("project setup applies audience and exact widget visibility", async () => {
   const layout = setWidgetVisible(createDefaultWidgetLayout(WIDGETS), "terminal.shell", true);
   const draft = {
     ...createSetupDraft("build-debug"),
     audience: "power" as const,
     widgetIds: ["git.recent"],
   };
-  const next = applyWorkspaceSetup(layout, draft, WIDGETS);
+  const next = applyProjectSetup(layout, draft, WIDGETS);
   assert.equal(next.audience, "power");
-  assert.equal(next.widgets["core.composer"]?.visible, false);
+  assert.equal(next.widgets["core.chat"]?.visible, false);
   assert.equal(next.widgets["git.recent"]?.visible, true);
   assert.equal(next.widgets["terminal.shell"]?.visible, false);
   assert.equal(workflowOption("build-debug").suggestedWidgetIds.length, 7);
 
-  const source = await readFile(new URL("../src/widgets/workspaceSetup.ts", import.meta.url), "utf8");
+  const source = await readFile(new URL("../src/widgets/projectSetupLayout.ts", import.meta.url), "utf8");
   assert.doesNotMatch(source, /type:\s*"preset"|applyWidgetLayoutPreset/);
 });
 

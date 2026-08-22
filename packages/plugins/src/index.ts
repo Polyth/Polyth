@@ -174,6 +174,9 @@ function parseWidget(value: unknown): WidgetContributionDescriptor {
     ...(optionalStrings(widget.capabilities, "widget capabilities")
       ? { capabilities: optionalStrings(widget.capabilities, "widget capabilities")! }
       : {}),
+    ...(optionalSize(widget.recommendedSize, "widget recommendedSize")
+      ? { recommendedSize: optionalSize(widget.recommendedSize, "widget recommendedSize")! }
+      : {}),
     ...(optionalSize(widget.defaultSize, "widget defaultSize")
       ? { defaultSize: optionalSize(widget.defaultSize, "widget defaultSize")! }
       : {}),

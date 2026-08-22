@@ -56,6 +56,18 @@ test("provider usage distribution uses a human default label and session fallbac
   assert.doesNotMatch(JSON.stringify(distribution), /__default__/);
 });
 
+test("provider usage distribution clamps invalid counters before drawing shares", () => {
+  const malformed = session("a", "openai", -100, Number.NaN);
+  malformed.tokenTotals = { input: Number.NaN, output: -20 };
+  const distribution = providerUsageDistribution([malformed, session("b", "anthropic", 25)]);
+  assert.equal(distribution.metric, "tokens");
+  assert.equal(distribution.total, 25);
+  assert.deepEqual(distribution.providers.map(({ providerId, share }) => ({ providerId, share })), [
+    { providerId: "anthropic", share: 1 },
+    { providerId: "openai", share: 0 },
+  ]);
+});
+
 test("Usage settings renders the provider distribution as an SVG donut", async () => {
   const source = await readFile(new URL("../src/usage/projectUi.tsx", import.meta.url), "utf8");
   const settings = await readFile(new URL("../src/components/settings/pages.tsx", import.meta.url), "utf8");

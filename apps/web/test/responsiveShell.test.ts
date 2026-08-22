@@ -108,12 +108,12 @@ test("modal surfaces share the Dialog focus contract (no copied traps)", async (
   assert.ok(dialog.includes("export function useModalSurface"), "Dialog.tsx exports the reusable hook");
   const sidebar = await read("../src/components/Sidebar.tsx");
   const rail = await read("../src/components/ContextRail.tsx");
-  const preset = await read("../src/components/PresetSetup.tsx");
+  const projectSetup = await read("../src/components/ProjectSetup.tsx");
   const palette = await read("../src/components/CommandPalette.tsx");
   for (const [name, src] of [
     ["Sidebar", sidebar],
     ["ContextRail", rail],
-    ["PresetSetup", preset],
+    ["ProjectSetup", projectSetup],
     ["CommandPalette", palette],
   ] as const) {
     assert.ok(src.includes("useModalSurface"), `${name} consumes useModalSurface`);
@@ -203,7 +203,8 @@ test("open rails remain visible in every workspace mode", async () => {
 test("mobile Settings swaps a vertical page list for content with a back action", async () => {
   const settings = await read("../src/components/SettingsView.tsx");
   const css = await read("../src/styles.css");
-  const finalBreakpoint = css.lastIndexOf("@media (max-width: 700px)");
+  const mobileSettingsMarker = css.indexOf("/* Mobile Settings");
+  const finalBreakpoint = css.indexOf("@media (max-width: 700px)", mobileSettingsMarker);
   assert.ok(finalBreakpoint > css.indexOf("focused, centered"), "mobile rules follow desktop workbench overrides");
   const mobile = css.slice(finalBreakpoint);
   const mobileHeaderStart = settings.indexOf("{mobile ? (");
@@ -226,7 +227,6 @@ test("mobile Settings swaps a vertical page list for content with a back action"
   );
   assert.match(mobile, /\.settings-pane-body \.set-row\s*\{[^}]*flex-direction:\s*column/);
   assert.match(mobile, /\.settings-pane-body \.set-row-control\s*\{[^}]*width:\s*100%/);
-  assert.match(mobile, /\.workspace-preset-seg button\s*\{[^}]*flex:\s*1 1 calc\(50% - 2px\)/);
   assert.doesNotMatch(mobile, /\.settings-nav-list\s*\{[^}]*overflow-x:\s*auto/);
 });
 

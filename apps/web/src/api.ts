@@ -121,8 +121,11 @@ export interface ProviderCatalogModelDto {
   modelID: string;
   key: string;
   name: string;
+  providerName?: string;
   context?: number;
   cost?: { input: number; output: number };
+  capabilities?: string[];
+  variants?: string[];
   connected: boolean;
   enabled: boolean;
 }
@@ -630,6 +633,8 @@ export const api = {
     jfetch<VisibilityStateDto>(`/api/providers/${encodeURIComponent(id)}/enabled`, json("POST", { enabled })),
   setModelEnabled: (key: string, enabled: boolean) =>
     jfetch<VisibilityStateDto>(`/api/models/enabled`, json("POST", { key, enabled })),
+  saveRole: (name: string, input: { prompt?: string; model?: ModelRef; mode: AgentDescriptor["mode"] }) =>
+    jfetch<AgentDescriptor>(`/api/settings/roles/${encodeURIComponent(name)}`, json("PUT", input)),
   opencodePlugins: () =>
     jfetch<{ plugins: string[] }>("/api/plugins/opencode").catch((): { plugins: string[] } => ({ plugins: [] })),
 
@@ -647,6 +652,10 @@ export const api = {
     jfetch<GitStatus>(`/api/git/status?projectId=${encodeURIComponent(projectId)}${sessionId ? `&sessionId=${encodeURIComponent(sessionId)}` : ""}`).catch((): GitStatus => ({
       branch: "", ahead: 0, behind: 0, staged: [], unstaged: [], untracked: [], conflicted: [],
     })),
+  gitIdentity: (projectId: string) =>
+    jfetch<{ name: string; email: string }>(`/api/git/identity?projectId=${encodeURIComponent(projectId)}`),
+  gitIdentitySet: (projectId: string, identity: { name: string; email: string }) =>
+    jfetch<{ name: string; email: string }>(`/api/git/identity`, json("POST", { projectId, ...identity })),
   gitDiff: (projectId: string, filePath: string, staged?: boolean, ignoreWhitespace?: boolean, sessionId?: string) =>
     jfetch<GitDiffResult>(
       `/api/git/diff?projectId=${encodeURIComponent(projectId)}&path=${encodeURIComponent(filePath)}${staged ? "&staged=true" : ""}${ignoreWhitespace ? "&ignoreWhitespace=true" : ""}${sessionId ? `&sessionId=${encodeURIComponent(sessionId)}` : ""}`,

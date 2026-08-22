@@ -1,4 +1,4 @@
-// UX-PERSONAS: one capability model. This is a navigation-metadata registry —
+// One capability model. This is a navigation-metadata registry —
 // it owns labels, keywords, tier/rank resolution, and open commands only. It
 // is NOT a component host: the workspace and right-surface registries keep
 // rendering and lifecycle ownership, and a descriptor confers no filesystem,
@@ -6,13 +6,13 @@
 //
 // Header, right rail, compact navigation, command search, shortcuts, and
 // Settings all consume the same resolved list, so they can never disagree
-// about whether a capability exists. Presets change only tier and rank;
-// `available()` is independent of preset selection.
+// about whether a capability exists. Per-project placement changes only tier
+// and rank; `available()` remains a runtime property.
 import { useSyncExternalStore } from "react";
 import {
-  getPresentation, getPresetState, resolvePlacements, subscribePresetState,
-  type CapabilityTier, type ResolvedPlacement, type WorkspacePresetId, type PlacementOverride,
-} from "./workspacePresets.ts";
+  getCapabilityPlacements, resolvePlacements, subscribeCapabilityLayout,
+  type CapabilityTier, type ResolvedPlacement, type PlacementOverride,
+} from "./capabilityLayout.ts";
 
 export interface CapabilityDescriptor {
   id: string;
@@ -154,32 +154,28 @@ export interface ResolvedCapability {
   rank: number;
 }
 
-/** Pure: resolve descriptors against a preset + explicit overrides. */
+/** Pure: resolve descriptors against explicit per-project overrides. */
 export function resolveCapabilities(
   descriptors: readonly CapabilityDescriptor[],
-  presetId: WorkspacePresetId | null,
   overrides: Record<string, PlacementOverride> = {},
 ): ResolvedCapability[] {
   const byId = new Map(descriptors.map((d) => [d.id, d]));
   const placements: ResolvedPlacement[] = resolvePlacements(
     descriptors.map((d) => ({ id: d.id, standardTier: d.standardTier, standardRank: d.standardRank })),
-    presetId,
     overrides,
   );
   return placements.map((p) => ({ descriptor: byId.get(p.id)!, tier: p.tier, rank: p.rank }));
 }
 
-/** The single resolved list every navigation surface consumes: current
- *  registry contents against the current preset and explicit overrides. */
+/** The single resolved list every navigation surface consumes. */
 export function currentResolvedCapabilities(): ResolvedCapability[] {
-  return resolveCapabilities(listCapabilities(), getPresetState().presetId, getPresentation().placements);
+  return resolveCapabilities(listCapabilities(), getCapabilityPlacements());
 }
 
-/** React hook: re-render on registry changes or preset/override changes. */
+/** React hook: re-render on registry or active-project placement changes. */
 export function useResolvedCapabilities(): ResolvedCapability[] {
   useCapabilityVersion();
-  useSyncExternalStore(subscribePresetState, getPresetState);
-  useSyncExternalStore(subscribePresetState, getPresentation);
+  useSyncExternalStore(subscribeCapabilityLayout, getCapabilityPlacements);
   return currentResolvedCapabilities();
 }
 
@@ -198,8 +194,7 @@ declare global {
 
 /** Managed extensions register navigation capabilities dynamically (like
  *  window.__polythSurfaces for panels). A registered capability appears in
- *  More tools and command search immediately, defaulting to the `more` tier —
- *  registration never touches preset state. */
+ *  More tools and command search immediately, defaulting to the `more` tier. */
 export function exposeCapabilities(): void {
   if (typeof window !== "undefined") {
     window.__polythCapabilities = { registerCapability, listCapabilities };

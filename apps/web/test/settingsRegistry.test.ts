@@ -23,8 +23,8 @@ test("search matches label, description, and keywords; groups carry page labels"
   assert.ok(byLabel.some((h) => h.item.id === "appearance.editorFontSize"));
   assert.equal(byLabel.find((h) => h.item.id === "appearance.editorFontSize")!.pageLabel, "Appearance");
 
-  const byKeyword = searchSettingsItems("a11y", PAGES);
-  assert.ok(byKeyword.some((h) => h.item.id === "appearance.reducedMotion"));
+  const byKeyword = searchSettingsItems("radius", PAGES);
+  assert.ok(byKeyword.some((h) => h.item.id === "appearance.rounding"));
 
   const byDescription = searchSettingsItems("agents.md", PAGES);
   assert.ok(byDescription.some((h) => h.item.id === "behavior.instructions"));

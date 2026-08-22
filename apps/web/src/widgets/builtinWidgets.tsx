@@ -210,15 +210,9 @@ function ActivityWidget() {
 
 const BUILTINS: WidgetDef[] = [
   {
-    id: "core.composer", pluginId: "session", title: "Composer",
-    description: "A compact conversation timeline and full composer.",
-    zone: "main", defaultSize: { w: 12, h: 6 }, audience: "simple",
-    render: () => <ChatWidget />,
-  },
-  {
     id: "core.chat", pluginId: "session", title: "Conversation",
     description: "The active conversation timeline and composer.",
-    zone: "main", defaultSize: { w: 12, h: 8 }, audience: "power",
+    zone: "main", defaultSize: { w: 12, h: 8 }, audience: "simple",
     render: () => <ChatWidget />,
   },
   {
@@ -304,14 +298,9 @@ const BUILTINS: WidgetDef[] = [
 const SLOT_BACKED_BUILTINS = new Set(["git.recent", "terminal.shell"]);
 
 const BUILTIN_WIDGET_META: Record<string, Partial<WidgetDef>> = {
-  "core.composer": {
-    pluginName: "Core workspace", category: "conversation", recommended: true,
-    supportedZones: ["main", "bottom"], minSize: { w: 6, h: 4 }, maxSize: { w: 12, h: 50 },
-    resizable: true, scope: "workspace",
-  },
   "core.chat": {
-    pluginName: "Core workspace", category: "conversation",
-    supportedZones: ["main"], minSize: { w: 8, h: 6 }, maxSize: { w: 12, h: 50 },
+    pluginName: "Core workspace", category: "conversation", recommended: true,
+    supportedZones: ["main", "bottom"], minSize: { w: 4, h: 3 }, maxSize: { w: 12, h: 50 },
     resizable: true, scope: "workspace",
   },
   "core.quick-actions": {
@@ -407,6 +396,7 @@ function widgetSlotMeta(widget: WidgetDef): Record<string, unknown> {
     order: widget.order,
     zone: widget.zone,
     supportedZones: widget.supportedZones,
+    recommendedSize: widget.recommendedSize,
     defaultSize: widget.defaultSize,
     minSize: widget.minSize,
     maxSize: widget.maxSize,
@@ -428,6 +418,10 @@ for (const base of BUILTINS) {
   const widget: WidgetDef = {
     ...base,
     ...BUILTIN_WIDGET_META[base.id],
+    recommendedSize: BUILTIN_WIDGET_META[base.id]?.recommendedSize
+      ?? base.recommendedSize
+      ?? base.defaultSize
+      ?? BUILTIN_WIDGET_META[base.id]?.minSize,
     settingsRender: base.settingsRender ?? (() => (
       <div className="builtin-widget-settings">
         <span>Uses the active workspace context</span>

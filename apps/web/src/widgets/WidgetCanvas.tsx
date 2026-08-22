@@ -16,6 +16,8 @@ import { getWidget, useWidgetCatalog, type WidgetDef } from "./catalog.ts";
 import {
   applyWidgetLayoutMutations,
   ensureWidgets,
+  getWidgetLayout,
+  setWidgetPosition,
   updateWidgetLayout,
   useWidgetLayout,
   widgetDefinitionId,
@@ -90,8 +92,10 @@ function WidgetCard({
     dragTarget.setPointerCapture(pointerId);
     dragTarget.classList.add("widget-card-head-dragging");
     const metrics = canvasMetrics(canvas);
-    const start = { x: event.clientX, y: event.clientY, position: placement.position };
-    let last = placement.position;
+    const dragStartLayout = getWidgetLayout();
+    const startPosition = dragStartLayout.widgets[instanceId]?.position ?? placement.position;
+    const start = { x: event.clientX, y: event.clientY, position: startPosition };
+    let last = startPosition;
     const onMove = (next: globalThis.PointerEvent) => {
       const position: WidgetPosition = {
         x: Math.max(0, Math.min(12 - placement.size.w,
@@ -100,11 +104,8 @@ function WidgetCard({
       };
       if (position.x === last.x && position.y === last.y) return;
       last = position;
-      updateWidgetLayout((current) => applyWidgetLayoutMutations(
-        current,
-        [{ type: "position", id: instanceId, position }],
-        [widget],
-      ));
+      updateWidgetLayout((current) =>
+        setWidgetPosition(current, instanceId, position, dragStartLayout));
     };
     const cleanup = () => {
       window.removeEventListener("pointermove", onMove);

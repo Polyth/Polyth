@@ -17,7 +17,6 @@ import {
   TECHNICAL_GROUP_LABEL, useResolvedCapabilities,
   type ResolvedCapability,
 } from "../capabilities.ts";
-import { getPresetState, setMoreToolsOpen } from "../workspacePresets.ts";
 import { PANEL_OF_CAPABILITY, PANE_OF_CAPABILITY, VIEW_OF_CAPABILITY } from "../builtinCapabilities.ts";
 import SlotHost from "./slots/SlotHost.ts";
 import { Icon } from "../icons.tsx";
@@ -104,7 +103,7 @@ function CapabilityNav() {
   const paneFullscreen = useStore((s) => s.paneFullscreen);
   const navRef = useRef<HTMLElement>(null);
   const [fit, setFit] = useState(8);
-  const [moreOpen, setMoreOpen] = useState(() => getPresetState().moreToolsOpen);
+  const [moreOpen, setMoreOpen] = useState(false);
   const moreRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
 
@@ -145,7 +144,6 @@ function CapabilityNav() {
 
   const toggleMore = (open: boolean) => {
     setMoreOpen(open);
-    setMoreToolsOpen(open); // stored separately from the preset
   };
 
   const isActive = (c: ResolvedCapability): boolean => {
@@ -278,7 +276,7 @@ function AutoAcceptChip({ sessionId, effective }: { sessionId: string; effective
 
 /** UX-A390: one bounded current-view trigger replacing the desktop switcher
  *  in compact mode. Items derive from the same resolved capability list as
- *  desktop navigation; presets reorder but never remove them. */
+ *  desktop navigation. */
 function CompactViewPicker({ view }: { view: AppView }) {
   const resolved = useResolvedCapabilities();
   const views = resolved.filter((c) => VIEW_OF_CAPABILITY[c.descriptor.id] !== undefined);

@@ -132,3 +132,26 @@ test("applyProviderVisibility refuses to overwrite a corrupt backend config", as
   await assert.rejects(() => applier.applyProviderVisibility({ disabledProviders: [], blacklists: {} }));
   assert.equal(readFileSync(join(dir, "opencode.json"), "utf8"), "{corrupt", "corrupt file untouched");
 });
+
+test("role and visibility edits preserve plugins in an existing opencode.jsonc", async () => {
+  const dir = tmp();
+  const file = join(dir, "opencode.jsonc");
+  writeFileSync(file, `{
+    "$schema": "https://opencode.ai/config.json",
+    "plugin": ["commandcode@latest", "other-plugin"],
+    "agent": { "review": { "tools": { "write": false } } },
+  }`);
+  const applier = createConfigApplier({ configDir: dir });
+  assert.equal(applier.configPath(), file);
+  await applier.applyAgent("review", {
+    mode: "subagent",
+    prompt: "Review carefully.",
+    model: { providerID: "anthropic", modelID: "claude-sonnet" },
+  });
+  await applier.applyProviderVisibility({ disabledProviders: ["ollama"], blacklists: {} });
+  const cfg = JSON.parse(readFileSync(file, "utf8"));
+  assert.deepEqual(cfg.plugin, ["commandcode@latest", "other-plugin"]);
+  assert.equal(cfg.agent.review.tools.write, false);
+  assert.equal(cfg.agent.review.mode, "subagent");
+  assert.equal(cfg.agent.review.model, "anthropic/claude-sonnet");
+});

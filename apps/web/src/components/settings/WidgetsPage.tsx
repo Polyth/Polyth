@@ -4,7 +4,7 @@ import { useResolvedCapabilities } from "../../capabilities.ts";
 import {
   setPlacementOverride,
   type CapabilityTier,
-} from "../../workspacePresets.ts";
+} from "../../capabilityLayout.ts";
 import { useWidgetCatalog, type WidgetDef } from "../../widgets/catalog.ts";
 import {
   applyWidgetLayoutMutations,

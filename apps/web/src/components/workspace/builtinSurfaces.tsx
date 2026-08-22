@@ -123,10 +123,7 @@ function SessionSurface() {
       {model.turn?.status === "working" && (
         <div className="focus-working" role="status">
           <span className="focus-working-spinner" aria-hidden="true" />
-          <span>
-            <strong>Scanning repositories and indexing…</strong>
-            <small>This usually takes a few seconds.</small>
-          </span>
+          <span>Working…</span>
         </div>
       )}
       {pendingQuestions.length > 0 && <QuestionCards questions={pendingQuestions} />}

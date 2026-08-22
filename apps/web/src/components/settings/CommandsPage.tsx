@@ -6,6 +6,8 @@ import { useStore } from "../../store.ts";
 import { EmptyState, PageHead } from "./parts.tsx";
 
 type Scope = "project" | "user";
+const snippetScopeLabel = (scope: Scope): string =>
+  scope === "user" ? "General snippet" : "Project snippet";
 
 export default function CommandsPage() {
   const projectId = useStore((s) => s.activeProjectId);
@@ -106,7 +108,7 @@ export default function CommandsPage() {
             <div className="set-row-hint">{s.text.slice(0, 80)}</div>
           </div>
           <div className="set-row-control">
-            <span className="tag">{s.scope}</span>
+            <span className="tag">{snippetScopeLabel(s.scope as Scope)}</span>
             <button className="small-btn" onClick={() => { setSAlias(s.alias); setSText(s.text); setSScope(s.scope as Scope); }}>Edit</button>
             <button className="small-btn danger-btn" onClick={() => void run(() => api.deleteSnippet(projectId, s.scope as Scope, s.alias))}>Delete</button>
           </div>
@@ -116,8 +118,8 @@ export default function CommandsPage() {
         <div className="set-add-form">
           <input value={sAlias} placeholder="alias" style={{ maxWidth: 140 }} onChange={(e) => setSAlias(e.target.value)} />
           <select value={sScope} onChange={(e) => setSScope(e.target.value as Scope)}>
-            <option value="project">project</option>
-            <option value="user">user</option>
+            <option value="project">Project snippet</option>
+            <option value="user">General snippet</option>
           </select>
         </div>
         <textarea value={sText} rows={2} placeholder="Snippet text" onChange={(e) => setSText(e.target.value)} />

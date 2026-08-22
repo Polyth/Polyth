@@ -2,17 +2,21 @@ import { useSyncExternalStore } from "react";
 
 export type WorkspaceMode = "chat" | "widgets" | "edit";
 
-export const WORKSPACE_MODE_KEY = "polyth.workspaceMode";
+export const WORKSPACE_MODE_KEY = "polyth.workspaceMode.v1";
+export const workspaceModeStorageKey = (projectId: string): string =>
+  `${WORKSPACE_MODE_KEY}.${projectId}`;
 
-function load(): WorkspaceMode {
+function load(projectId: string | null): WorkspaceMode {
+  if (projectId === null) return "chat";
   try {
-    const stored = localStorage.getItem(WORKSPACE_MODE_KEY);
+    const stored = localStorage.getItem(workspaceModeStorageKey(projectId));
     return stored === "widgets" || stored === "edit" ? stored : "chat";
   }
   catch { return "chat"; }
 }
 
-let mode = load();
+let projectId: string | null = null;
+let mode = load(projectId);
 const listeners = new Set<() => void>();
 
 export function getWorkspaceMode(): WorkspaceMode {
@@ -22,7 +26,16 @@ export function getWorkspaceMode(): WorkspaceMode {
 export function setWorkspaceMode(next: WorkspaceMode): void {
   if (next === mode) return;
   mode = next;
-  try { localStorage.setItem(WORKSPACE_MODE_KEY, mode); } catch { /* private mode */ }
+  if (projectId !== null) {
+    try { localStorage.setItem(workspaceModeStorageKey(projectId), mode); } catch { /* private mode */ }
+  }
+  for (const listener of [...listeners]) listener();
+}
+
+export function setWorkspaceModeProject(nextProjectId: string | null): void {
+  if (nextProjectId === projectId) return;
+  projectId = nextProjectId;
+  mode = load(projectId);
   for (const listener of [...listeners]) listener();
 }
 

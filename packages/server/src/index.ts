@@ -45,7 +45,7 @@ import { createHomeAssistantServerPlugin } from "@polyth/home-assistant";
 import { createProjectService } from "./projects.ts";
 import { createPackageRegistry } from "./packages.ts";
 import { createSessionService, type Broadcaster, type RuntimePool } from "./sessions.ts";
-import { aggregateRuntimes } from "./runtimeAggregate.ts";
+import { createRuntimeCatalog } from "./runtimeCatalog.ts";
 import { createHttpServer, type RouteHandler } from "./http.ts";
 import { packageRoutes } from "./routes/packages.ts";
 import { pluginAssetRoutes } from "./routes/pluginAssets.ts";
@@ -291,6 +291,7 @@ export async function boot(opts: BootOptions = {}) {
       return p;
     },
   };
+  const runtimeCatalog = createRuntimeCatalog({ projects, runtimes });
 
   // --- goals workflow plugin (listens on the turn seam, never touches the loop)
   let goals: GoalService | null = null;
@@ -737,6 +738,19 @@ export async function boot(opts: BootOptions = {}) {
   const settingsRoute = settingsRoutes({
     behavior, mcp, plugins: pluginRegistry,
     backendConfig: () => configApplier.readConfig(),
+    saveRole: async (name, role) => {
+      await configApplier.applyAgent(name, role);
+      const current = (await runtimeCatalog.agents()).find((agent) => agent.name === name);
+      const saved = {
+        name,
+        ...(current?.description ? { description: current.description } : {}),
+        mode: role.mode,
+        ...(role.prompt ? { prompt: role.prompt } : {}),
+        ...(role.model ? { model: role.model } : {}),
+      };
+      runtimeCatalog.patchAgent(saved);
+      return saved;
+    },
     systemInfo: (local) => ({
       version: "0.1.0",
       applicationUrl: `http://127.0.0.1:${port}`,
@@ -936,8 +950,8 @@ export async function boot(opts: BootOptions = {}) {
     pushRoutes(push),
     profileRoutes({
       store,
-      listModels: () => aggregateRuntimes({ projects, runtimes }, (rt) => rt.models(), (m) => `${m.providerID}/${m.modelID}`),
-      listAgents: () => aggregateRuntimes({ projects, runtimes }, (rt) => rt.agents(), (a) => a.name),
+      listModels: () => runtimeCatalog.models(),
+      listAgents: () => runtimeCatalog.agents(),
     }),
     browseRoutes(),
     async (request) => {
@@ -952,7 +966,7 @@ export async function boot(opts: BootOptions = {}) {
   await packageLifecycle.startEnabled(packageRegistry);
 
   const server = createHttpServer({
-    sessions, projects, runtimes, routes, visibility, auth,
+    sessions, projects, runtimes, routes, visibility, auth, catalog: runtimeCatalog,
     capabilities: allCapabilities,
     webDist: resolve(__dirname, "../../../apps/web/dist"),
     version: "0.1.0",

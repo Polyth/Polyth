@@ -38,7 +38,7 @@ import { chatDockViability, dockGuardTargets } from "../workspace/dockGuard.ts";
 import { PaneVisibilityContext } from "../workspace/paneVisibility.ts";
 import CapabilityMenu from "./CapabilityMenu.tsx";
 import "./railSurfaces.tsx";
-import { setPlacementOverride } from "../workspacePresets.ts";
+import { setPlacementOverride } from "../capabilityLayout.ts";
 
 const NO_EVENTS: never[] = [];
 /** Fallback separator chrome before the real element is measured. */
@@ -96,7 +96,7 @@ export function useRailSurfaceModel(): RailSurfaceModel {
 
   useSurfaceVersion(); // re-render when surfaces register/unregister
   useSlotVersion(); // …and when workspace.right.tabs slot items arrive/leave
-  // Preset-compatible ordering: panels whose capability resolves primary come
+  // Project placement ordering: panels whose capability resolves primary come
   // first, then the resolved rank; nothing is removed.
   const positionOf = new Map(resolved.map((c, i) => [c.descriptor.id, i]));
   const surfaces = visibleSurfaces([...listSurfaces(), ...slotSurfaces(ctx)], ctx)

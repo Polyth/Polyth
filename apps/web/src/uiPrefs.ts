@@ -11,8 +11,9 @@ export interface UiSettings {
   fontSize: "s" | "m" | "l";
   /** Editor/composer font size in px (WP2/WP9 font tokens). */
   editorFontSize: number;
+  /** Shared corner treatment for controls, panels, and overlays. */
+  rounding: "square" | "compact" | "rounded";
   chatWidth: "normal" | "wide";
-  reducedMotion: boolean;
   /** Browser notification when a turn finishes in a hidden tab. */
   notifyOnComplete: boolean;
   /** Short beep when a turn finishes. */
@@ -53,8 +54,8 @@ export const UI_DEFAULTS: UiSettings = {
   density: "comfortable",
   fontSize: "m",
   editorFontSize: 14,
+  rounding: "compact",
   chatWidth: "normal",
-  reducedMotion: false,
   notifyOnComplete: false,
   notifySound: false,
   notifyKinds: ["completed", "failed", "question", "permission"],
@@ -88,8 +89,8 @@ export function parseUiSettings(raw: string | null): UiSettings {
       density: data.density === "compact" || data.density === "balanced" ? data.density : "comfortable",
       fontSize: data.fontSize === "s" || data.fontSize === "l" ? data.fontSize : "m",
       editorFontSize: Number.isFinite(fontPx) && fontPx >= 11 && fontPx <= 24 ? Math.round(fontPx) : 14,
+      rounding: data.rounding === "square" || data.rounding === "rounded" ? data.rounding : "compact",
       chatWidth: data.chatWidth === "wide" ? "wide" : "normal",
-      reducedMotion: data.reducedMotion === true,
       notifyOnComplete: data.notifyOnComplete === true,
       notifySound: data.notifySound === true,
       notifyKinds: Array.isArray(data.notifyKinds)
@@ -151,13 +152,19 @@ export function applyUiSettings(s: UiSettings = settings): void {
   if (typeof document === "undefined") return;
   const b = document.body;
   b.dataset.density = s.density;
-  b.dataset.fontsize = s.fontSize;
+  b.dataset.rounding = s.rounding;
   b.dataset.chatwidth = s.chatWidth;
-  b.dataset.motion = s.reducedMotion ? "reduced" : "full";
   b.dataset.technical = String(s.showTechnicalButtons);
   b.dataset.dictate = String(s.showDictate);
   b.dataset.quickActions = String(s.showQuickActions);
   b.style?.setProperty("--editor-font-size", `${s.editorFontSize}px`);
+  const radii = s.rounding === "square"
+    ? ["2px", "3px", "4px", "6px", "8px"]
+    : s.rounding === "rounded"
+      ? ["12px", "14px", "16px", "20px", "24px"]
+      : ["8px", "10px", "10px", "12px", "16px"];
+  ["--radius-sm", "--radius", "--radius-md", "--radius-lg", "--radius-xl"]
+    .forEach((name, index) => b.style?.setProperty(name, radii[index]!));
 }
 
 export function getUiSettings(): UiSettings {

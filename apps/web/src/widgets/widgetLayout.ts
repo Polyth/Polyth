@@ -5,7 +5,6 @@ import { getState, subscribeStore } from "../store.ts";
 export type WidgetZone = "header" | "left" | "main" | "right" | "bottom" | "floating";
 export type { WidgetAudience, WidgetScope, WidgetSize } from "@polyth/contracts";
 export type WidgetPlacementTarget = WidgetZone | UiSlot;
-export type WidgetLayoutPresetId = "focused" | "balanced" | "manager" | "build-debug" | "custom";
 export type WidgetSaveStatus = "saved" | "saving" | "error";
 
 /** Zero-based coordinates on the single 12-column canvas. */
@@ -28,6 +27,9 @@ export interface WidgetLayoutDefinition {
   zone?: WidgetZone;
   /** @deprecated Use supportedSlots. */
   supportedZones?: readonly WidgetZone[];
+  /** Preferred size for a newly spawned widget. This does not prevent later
+   * resizing below the recommendation; minSize is the hard resize limit. */
+  recommendedSize?: WidgetSize;
   defaultSize?: WidgetSize;
   minSize?: WidgetSize;
   maxSize?: WidgetSize;
@@ -69,7 +71,7 @@ export const MAX_GRID_ROWS = 50;
 /** Removed shell actions stay retired even when an older persisted layout
  * still describes them as visible. This is a migration deny-list, not a
  * second placement system. */
-const RETIRED_WIDGET_IDS = new Set(["shell.new-session"]);
+const RETIRED_WIDGET_IDS = new Set(["shell.new-session", "core.composer"]);
 export const WIDGET_ZONE_SLOTS: Record<WidgetZone, UiSlot> = {
   header: "workspace.header",
   left: "workspace.left",
@@ -91,7 +93,6 @@ export function widgetZoneFromSlot(slot: UiSlot): WidgetZone | null {
   return SLOT_WIDGET_ZONES.get(slot) ?? null;
 }
 export const BUILTIN_WIDGET_IDS = [
-  "core.composer",
   "core.chat",
   "terminal.shell",
   "goals.current",
@@ -122,7 +123,6 @@ const DEFAULT_ZONE: Record<string, WidgetZone> = {
   "files.explorer": "left",
   "files.project-map": "left",
   "knowledge.notes": "left",
-  "core.composer": "main",
   "core.chat": "main",
   "multirun.runs": "main",
   "fusion.answers": "main",
@@ -142,7 +142,6 @@ const DEFAULT_ZONE: Record<string, WidgetZone> = {
 
 const DEFAULT_SIZE: WidgetSize = { w: 6, h: 4 };
 const DEFAULT_SIZE_BY_ID: Record<string, WidgetSize> = {
-  "core.composer": { w: 12, h: 6 },
   "core.chat": { w: 12, h: 8 },
   "core.quick-actions": { w: 6, h: 2 },
   "goals.current": { w: 6, h: 4 },
@@ -166,7 +165,7 @@ const DEFAULT_SIZE_BY_ID: Record<string, WidgetSize> = {
   "usage.quota-summary": { w: 4, h: 2 },
 };
 const DEFAULT_VISIBLE = new Set<string>([
-  "core.composer", "core.quick-actions", "goals.current", "files.project-map",
+  "core.chat", "core.quick-actions", "goals.current", "files.project-map",
   "git.recent", "knowledge.notes", "session.work-status", "session.activity",
 ]);
 
@@ -226,6 +225,25 @@ function constrainedSize(value: unknown, definition?: WidgetLayoutDefinition): W
   };
 }
 
+/** Calculate a comfortable first-spawn size without turning that guidance
+ * into a hard resize constraint. The title allowance covers card drag/menu
+ * chrome, while each widget's preferred content height remains authoritative. */
+export function recommendedWidgetSize(definition: WidgetLayoutDefinition): WidgetSize {
+  const preferred = clampSize(
+    definition.recommendedSize
+      ?? definition.defaultSize
+      ?? DEFAULT_SIZE_BY_ID[definition.id]
+      ?? DEFAULT_SIZE,
+  );
+  const titleColumns = definition.title
+    ? Math.min(12, Math.max(1, Math.ceil(definition.title.trim().length / 6) + 2))
+    : 1;
+  return constrainedSize({
+    w: Math.max(preferred.w, titleColumns),
+    h: preferred.h,
+  }, definition);
+}
+
 function showInFor(definition: WidgetLayoutDefinition): WidgetAudience[] | undefined {
   if (definition.showIn && definition.showIn.length > 0) return [...definition.showIn];
   if (!definition.audience) return undefined;
@@ -242,10 +260,7 @@ function placementFor(
 ): WidgetPlacement {
   return {
     visible,
-    size: constrainedSize(
-      definition.defaultSize ?? DEFAULT_SIZE_BY_ID[definition.id] ?? DEFAULT_SIZE,
-      definition,
-    ),
+    size: recommendedWidgetSize(definition),
     position: clampPosition(position),
     definitionId: definition.id,
     ...(definition.pluginId ? { pluginId: definition.pluginId } : {}),
@@ -273,10 +288,7 @@ export function createDefaultWidgetLayout(
     const slot = defaultSlotFor(definition);
     const zone = widgetZoneFromSlot(slot);
     const visible = definition.defaultVisible ?? DEFAULT_VISIBLE.has(id);
-    const size = constrainedSize(
-      definition.defaultSize ?? DEFAULT_SIZE_BY_ID[id] ?? DEFAULT_SIZE,
-      definition,
-    );
+    const size = recommendedWidgetSize(definition);
     if (zone && visible && x > 0 && x + size.w > 12) {
       x = 0;
       y += rowHeight;
@@ -320,6 +332,34 @@ export function parseWidgetLayout(
     };
     if (!data || data.version !== 1 || typeof data.zones !== "object" || typeof data.widgets !== "object") {
       return fallback;
+    }
+    // `core.composer` and `core.chat` used to render the same surface. Migrate
+    // the retired duplicate into the canonical conversation widget so an
+    // existing visible canvas never loses its chat during catalog cleanup.
+    const legacyComposer = data.widgets["core.composer"];
+    const persistedChat = data.widgets["core.chat"];
+    if (legacyComposer) {
+      data.widgets = {
+        ...data.widgets,
+        "core.chat": legacyComposer.visible && !persistedChat?.visible
+          ? { ...legacyComposer, definitionId: "core.chat" }
+          : persistedChat ?? { ...legacyComposer, definitionId: "core.chat" },
+      };
+      delete data.widgets["core.composer"];
+      for (const zone of [...WIDGET_ZONES, "top"] as const) {
+        const ids = data.zones[zone];
+        if (Array.isArray(ids) && ids.includes("core.composer")) {
+          data.zones[zone] = [...new Set(ids.map((value) =>
+            value === "core.composer" ? "core.chat" : value))];
+        }
+      }
+      for (const slot of UI_SLOTS) {
+        const ids = data.slotPlacements?.[slot];
+        if (Array.isArray(ids) && ids.includes("core.composer")) {
+          data.slotPlacements![slot] = [...new Set(ids.map((value) =>
+            value === "core.composer" ? "core.chat" : value))];
+        }
+      }
     }
     // A catalog contribution can disappear when its plugin is disabled or
     // uninstalled. Preserve only self-describing orphan placements so the UI
@@ -583,28 +623,96 @@ function overlaps(
     && a.y + aSize.h > b.y;
 }
 
-/** Move on the free-form canvas. Collisions are resolved downward so widgets
- * remain separated by the CSS grid gap instead of stacking over each other. */
+function nearestFreePosition(
+  requested: WidgetPosition,
+  size: WidgetSize,
+  occupied: readonly WidgetPlacement[],
+): WidgetPosition {
+  const maxX = 12 - size.w;
+  const collides = (position: WidgetPosition) => occupied.some((placement) =>
+    overlaps(position, size, placement.position, placement.size));
+  if (!collides(requested)) return requested;
+
+  // Search the whole 12-column canvas by increasing Manhattan distance. This
+  // keeps a displaced widget as close as possible to its resting position.
+  const maxY = Math.max(
+    requested.y + MAX_GRID_ROWS,
+    ...occupied.map((placement) => placement.position.y + placement.size.h + size.h),
+  );
+  const candidates: Array<WidgetPosition & { distance: number }> = [];
+  for (let y = 0; y <= maxY; y++) {
+    for (let x = 0; x <= maxX; x++) {
+      const position = { x, y };
+      if (collides(position)) continue;
+      candidates.push({
+        ...position,
+        distance: Math.abs(x - requested.x) + Math.abs(y - requested.y),
+      });
+    }
+  }
+  candidates.sort((a, b) =>
+    a.distance - b.distance
+    || Math.abs(a.y - requested.y) - Math.abs(b.y - requested.y)
+    || a.y - b.y
+    || a.x - b.x);
+  const nearest = candidates[0];
+  return nearest ? { x: nearest.x, y: nearest.y } : requested;
+}
+
+/** Move on the free-form canvas. The dragged widget owns its requested cells
+ * and overlapping widgets move to their nearest free cells. Supplying the
+ * drag-start layout resets displaced widgets before every pointer update, so
+ * they snap back to their resting positions as soon as those cells are free. */
 export function setWidgetPosition(
   layout: WidgetLayout,
   id: string,
   position: WidgetPosition,
+  dragStartLayout: WidgetLayout = layout,
 ): WidgetLayout {
   const current = layout.widgets[id];
   if (!current) return layout;
-  let next = clampPosition({ ...position, x: Math.min(position.x, 12 - current.size.w) });
-  const others = Object.entries(layout.widgets)
-    .filter(([otherId, placement]) => otherId !== id && placement.visible);
-  for (let pass = 0; pass < others.length + 1; pass++) {
-    const collision = others.find(([, placement]) =>
-      overlaps(next, current.size, placement.position, placement.size));
-    if (!collision) break;
-    next = clampPosition({ x: next.x, y: collision[1].position.y + collision[1].size.h });
+  const requested = clampPosition({ ...position, x: Math.min(position.x, 12 - current.size.w) });
+  const canvasIds = [...new Set(WIDGET_ZONES.flatMap((zone) => layout.zones[zone]))]
+    .filter((instanceId) => layout.widgets[instanceId]?.visible);
+  const widgets = { ...layout.widgets };
+
+  // Rebase only positions onto the drag-start snapshot. Widget metadata and
+  // any visibility/size updates made while dragging remain current.
+  for (const instanceId of canvasIds) {
+    const placement = widgets[instanceId];
+    const resting = dragStartLayout.widgets[instanceId];
+    if (placement && resting) {
+      widgets[instanceId] = { ...placement, position: resting.position };
+    }
   }
-  if (next.x === current.position.x && next.y === current.position.y) return layout;
+  widgets[id] = { ...current, position: requested };
+
+  const displaced = canvasIds.filter((instanceId) => {
+    if (instanceId === id) return false;
+    const placement = widgets[instanceId]!;
+    return overlaps(requested, current.size, placement.position, placement.size);
+  });
+  for (const instanceId of displaced) {
+    const placement = widgets[instanceId]!;
+    const occupied = canvasIds
+      .filter((otherId) => otherId !== instanceId)
+      .map((otherId) => widgets[otherId]!)
+      .filter((other) => other.visible);
+    widgets[instanceId] = {
+      ...placement,
+      position: nearestFreePosition(placement.position, placement.size, occupied),
+    };
+  }
+
+  const unchanged = canvasIds.every((instanceId) => {
+    const before = layout.widgets[instanceId]?.position;
+    const after = widgets[instanceId]?.position;
+    return before?.x === after?.x && before?.y === after?.y;
+  });
+  if (unchanged) return layout;
   return {
     ...layout,
-    widgets: { ...layout.widgets, [id]: { ...current, position: next } },
+    widgets,
   };
 }
 
@@ -680,11 +788,13 @@ export function duplicateWidget(
   if (!current || !definition?.duplicatable) return layout;
   const instanceId = nextInstanceId(layout, definition.id);
   const slot = widgetSlotOf(layout, id) ?? defaultSlotFor(definition);
+  const size = recommendedWidgetSize(definition);
   const widgets = {
     ...layout.widgets,
     [instanceId]: {
       ...current,
       definitionId: definition.id,
+      size,
       position: { x: current.position.x, y: current.position.y + current.size.h },
       title: current.title ? `${current.title} copy` : definition.title ? `${definition.title} copy` : undefined,
     },
@@ -713,8 +823,7 @@ export type WidgetLayoutMutation =
   | { type: "scope"; id: string; scope: WidgetScope }
   | { type: "identity"; id: string; title?: string; description?: string }
   | { type: "duplicate"; id: string }
-  | { type: "forget"; id: string }
-  | { type: "preset"; preset: WidgetLayoutPresetId };
+  | { type: "forget"; id: string };
 
 function definitionsById(
   definitions: readonly WidgetLayoutDefinition[],
@@ -776,44 +885,8 @@ export function applyWidgetLayoutMutations(
         return duplicateWidget(current, mutation.id, definition);
       case "forget":
         return forgetWidget(current, mutation.id);
-      case "preset":
-        return applyWidgetLayoutPreset(current, mutation.preset);
     }
   }, layout);
-}
-
-const PRESET_VISIBLE: Record<Exclude<WidgetLayoutPresetId, "custom">, readonly string[]> = {
-  focused: ["core.composer", "core.quick-actions", "goals.current"],
-  balanced: ["core.composer", "core.quick-actions", "goals.current", "files.project-map", "git.recent", "knowledge.notes", "session.work-status", "session.activity"],
-  manager: ["core.composer", "goals.current", "knowledge.notes", "schedule.tasks", "usage.session", "usage.quotas", "walkthrough.review"],
-  "build-debug": ["core.composer", "files.explorer", "files.project-map", "git.recent", "terminal.shell", "preview.app", "session.activity", "session.work-status"],
-};
-
-export function applyWidgetLayoutPreset(
-  layout: WidgetLayout,
-  preset: WidgetLayoutPresetId,
-): WidgetLayout {
-  if (preset === "custom") return layout;
-  const visible = new Set(PRESET_VISIBLE[preset]);
-  const base = createDefaultWidgetLayout(Object.entries(layout.widgets).map(([id, placement]) => ({
-    id,
-    pluginId: placement.pluginId,
-    title: placement.title,
-    description: placement.description,
-    kind: placement.kind,
-    defaultSlot: widgetSlotOf(layout, id) ?? "workspace.main",
-    defaultSize: placement.size,
-    showIn: placement.showIn,
-    scope: placement.scope,
-  })));
-  return {
-    ...base,
-    audience: preset === "focused" ? "simple" : preset === "manager" ? "standard" : layout.audience,
-    widgets: Object.fromEntries(Object.entries(base.widgets).map(([id, placement]) => [
-      id,
-      { ...placement, visible: visible.has(id) },
-    ])),
-  };
 }
 
 const read = (projectId: string | null): string | null => {

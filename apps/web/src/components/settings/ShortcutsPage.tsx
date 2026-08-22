@@ -1,5 +1,4 @@
-// Editable keyboard shortcuts (Settings > Shortcuts). Assigning an occupied
-// combo swaps the two bindings, so saved maps always have one command per key.
+// Editable plugin-provided keyboard shortcuts (Settings > Shortcuts).
 import { useState, type KeyboardEvent } from "react";
 import { HOTKEY_ACTIONS, comboFromEvent, findConflicts, formatCombo, type HotkeyAction } from "@polyth/hotkeys";
 import { resetKeymap, setBinding, useKeymap } from "../../hotkeys.ts";
@@ -25,12 +24,21 @@ export default function ShortcutsPage() {
 
   return (
     <>
-      <PageHead title="Shortcuts" blurb="Click a binding and press the new key combo. If it is already used, the commands swap shortcuts. Esc cancels." />
-      {HOTKEY_ACTIONS.map(({ id, label }) => (
+      <PageHead title="Shortcuts" blurb="Plugins provide these actions. Click a binding and press a new key combo; conflicts stay visible until you resolve them. Esc cancels." />
+      {HOTKEY_ACTIONS.map(({ id, label, pluginName }) => {
+        const conflictLabels = HOTKEY_ACTIONS
+          .filter((action) => action.id !== id && map[action.id] === map[id])
+          .map((action) => action.label);
+        return (
         <div key={id} className="set-row">
           <div className="set-row-text">
             <div className="set-row-label">{label}</div>
-            {conflicts.has(id) && <div className="set-row-hint set-conflict">Conflicts with another shortcut</div>}
+            <div className="set-row-hint">Provided by {pluginName} plugin</div>
+            {conflicts.has(id) && (
+              <div className="set-row-hint set-conflict" role="alert">
+                Conflicts with {conflictLabels.join(", ")}
+              </div>
+            )}
           </div>
           <div className="set-row-control">
             {editing === id ? (
@@ -51,7 +59,8 @@ export default function ShortcutsPage() {
             )}
           </div>
         </div>
-      ))}
+        );
+      })}
       <button className="ghost-link" onClick={resetKeymap}>Reset all to defaults →</button>
     </>
   );

@@ -13,7 +13,6 @@ stored.set("polyth.settings", JSON.stringify({
   density: "compact",
   productName: "Legacy name",
   chatWidth: "wide",
-  reducedMotion: true,
 }));
 
 const product = await import("../src/settings.ts");
@@ -23,8 +22,8 @@ test("legacy mixed settings migrate into independent versioned records", () => {
   const productSettings = product.loadSettings();
   assert.equal(productSettings.productName, "Legacy name");
   assert.equal(productSettings.theme, "midnight");
+  assert.equal(productSettings.fontFamily, "sans");
   assert.equal(ui.getUiSettings().chatWidth, "wide");
-  assert.equal(ui.getUiSettings().reducedMotion, true);
 
   assert.ok(stored.has(product.SETTINGS_KEY));
   assert.ok(stored.has(ui.UI_SETTINGS_KEY));

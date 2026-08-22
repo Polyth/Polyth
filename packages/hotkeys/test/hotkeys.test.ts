@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
   DEFAULT_KEYMAP,
+  HOTKEY_ACTIONS,
   comboFromEvent,
   findConflicts,
   formatCombo,
@@ -26,6 +27,7 @@ test("defaults match the current shell bindings", () => {
   assert.equal(DEFAULT_KEYMAP.searchSessions, "mod+shift+f");
   assert.equal(DEFAULT_KEYMAP.settings, "mod+,");
   assert.equal(DEFAULT_KEYMAP.newSession, "mod+n");
+  assert.ok(HOTKEY_ACTIONS.every((action) => action.pluginName.length > 0));
 });
 
 test("normalizeCombo orders modifiers and rejects junk", () => {
@@ -66,16 +68,16 @@ test("findConflicts flags duplicate combos", () => {
   assert.deepEqual(findConflicts(DEFAULT_KEYMAP), []);
 });
 
-test("legacy conflicts are repaired and new collisions swap owners", () => {
+test("stored and newly assigned collisions remain visible for resolution", () => {
   const repaired = parseKeymap(JSON.stringify({ palette: DEFAULT_KEYMAP.searchFiles }));
-  assert.deepEqual(findConflicts(repaired), []);
+  assert.deepEqual(findConflicts(repaired).sort(), ["palette", "searchFiles"]);
   assert.equal(repaired.palette, DEFAULT_KEYMAP.searchFiles);
-  assert.equal(repaired.searchFiles, DEFAULT_KEYMAP.palette);
+  assert.equal(repaired.searchFiles, DEFAULT_KEYMAP.searchFiles);
 
   const rebound = rebindKeymap(DEFAULT_KEYMAP, "newSession", DEFAULT_KEYMAP.palette);
-  assert.deepEqual(findConflicts(rebound), []);
+  assert.deepEqual(findConflicts(rebound).sort(), ["newSession", "palette"]);
   assert.equal(rebound.newSession, DEFAULT_KEYMAP.palette);
-  assert.equal(rebound.palette, DEFAULT_KEYMAP.newSession);
+  assert.equal(rebound.palette, DEFAULT_KEYMAP.palette);
   assert.deepEqual(parseKeymap(serializeKeymap(rebound)), rebound);
 });
 

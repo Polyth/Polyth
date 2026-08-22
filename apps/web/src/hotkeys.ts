@@ -1,5 +1,5 @@
-// Reactive wrapper around @polyth/hotkeys: the shell matches keydowns against
-// this map; Settings > Shortcuts edits it. Persists under polyth.hotkeys.
+// Reactive wrapper around plugin-attributed @polyth/hotkeys actions: the shell
+// matches keydowns against this map; Settings edits and persists it locally.
 import { useSyncExternalStore } from "react";
 import {
   DEFAULT_KEYMAP,

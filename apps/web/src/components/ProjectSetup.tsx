@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { applyPreset, completePresetSetup } from "../workspacePresets.ts";
+import { completeProjectSetup } from "../projectSetup.ts";
 import { focusComposer, setOverlay } from "../store.ts";
 import { useWidgetCatalog } from "../widgets/catalog.ts";
 import { ensureWidgets, updateWidgetLayout, type WidgetAudience } from "../widgets/widgetLayout.ts";
@@ -7,45 +7,66 @@ import {
   MAX_SETUP_WIDGETS,
   MIN_SETUP_WIDGETS,
   WORKFLOW_OPTIONS,
-  applyWorkspaceSetup,
+  applyProjectSetup,
   createSetupDraft,
   validSetupWidgetCount,
   workflowOption,
+  type ProjectSetupDraft,
   type SetupWorkflow,
-  type WorkspaceSetupDraft,
-} from "../widgets/workspaceSetup.ts";
+} from "../widgets/projectSetupLayout.ts";
 import "../widgets/builtinWidgets.tsx";
 import { announce } from "./a11y/live.tsx";
 import { useModalSurface } from "./a11y/Dialog.tsx";
 
 const MODE_COPY: Array<[WidgetAudience, string, string]> = [
-  ["simple", "Simple", "A calm workspace with essential controls and friendly names."],
+  ["simple", "Simple", "A calm project with essential controls and friendly names."],
   ["standard", "Standard", "Everyday project tools with detail when you need it."],
   ["power", "Power", "All technical controls, advanced widgets, and status detail."],
 ];
 
 const STEP_LABELS = ["Workflow", "Control", "Widgets", "Review"] as const;
 
-function workflowPreset(workflow: SetupWorkflow): "build-debug" | "plan-coordinate" | "design-explore" | null {
-  if (workflow === "build-debug") return "build-debug";
-  if (workflow === "plan-coordinate") return "plan-coordinate";
-  if (workflow === "design-explore") return "design-explore";
-  return null;
-}
-
-export default function PresetSetup() {
+export default function ProjectSetup() {
   const widgets = useWidgetCatalog();
   const [step, setStep] = useState(0);
-  const [draft, setDraft] = useState<WorkspaceSetupDraft>(() => createSetupDraft());
+  const [draft, setDraft] = useState<ProjectSetupDraft>(() => createSetupDraft());
   const panelRef = useRef<HTMLDivElement>(null);
   const exitFocus = useRef<"restore" | "composer">("restore");
 
+  const suggestedIds = (workflow: SetupWorkflow, audience: WidgetAudience): string[] => {
+    const preferred = workflowOption(workflow).suggestedWidgetIds;
+    const rank: Record<WidgetAudience, number> = { simple: 0, standard: 1, power: 2 };
+    const available = widgets.filter(
+      (widget) => rank[widget.audience ?? "standard"] <= rank[audience],
+    );
+    return [
+      ...available.filter((widget) => preferred.includes(widget.id)),
+      ...available.filter((widget) => !preferred.includes(widget.id) && widget.recommended),
+      ...available.filter((widget) => !preferred.includes(widget.id) && !widget.recommended),
+    ].map((widget) => widget.id).slice(0, MAX_SETUP_WIDGETS);
+  };
+
   useEffect(() => {
     ensureWidgets(widgets);
+    if (widgets.length === 0) return;
+    setDraft((current) => {
+      const available = new Set(widgets.map((widget) => widget.id));
+      const retained = current.widgetIds.filter((id) => available.has(id));
+      const filled = [...new Set([
+        ...retained,
+        ...suggestedIds(current.workflow, current.audience),
+      ])].slice(0, MAX_SETUP_WIDGETS);
+      return filled.join("|") === current.widgetIds.join("|")
+        ? current
+        : { ...current, widgetIds: filled };
+    });
+    // Catalog registration is the only dependency; the draft is reconciled
+    // inside the updater so a user choice is never replaced by a stale render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [widgets]);
 
   const dismiss = () => {
-    completePresetSetup();
+    completeProjectSetup();
     setOverlay(null);
   };
 
@@ -64,31 +85,33 @@ export default function PresetSetup() {
   });
 
   const availableSuggestions = useMemo(() => {
-    const preferred = workflowOption(draft.workflow).suggestedWidgetIds;
-    const rank: Record<WidgetAudience, number> = { simple: 0, standard: 1, power: 2 };
-    return widgets
-      .filter((widget) => preferred.includes(widget.id) || widget.recommended)
-      .filter((widget) => rank[widget.audience ?? "standard"] <= rank[draft.audience])
-      .slice(0, 8);
-  }, [draft.workflow, draft.audience, widgets]);
+    const ids = new Set([
+      ...draft.widgetIds,
+      ...suggestedIds(draft.workflow, draft.audience),
+    ]);
+    return [...ids]
+      .map((id) => widgets.find((widget) => widget.id === id))
+      .filter((widget) => widget !== undefined)
+      .slice(0, MAX_SETUP_WIDGETS);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [draft.workflow, draft.audience, draft.widgetIds, widgets]);
 
   const chooseWorkflow = (workflow: SetupWorkflow) => {
-    const option = workflowOption(workflow);
     setDraft((current) => ({
       ...current,
       workflow,
-      widgetIds: option.suggestedWidgetIds.filter((id) => widgets.some((widget) => widget.id === id)).slice(0, 8),
+      widgetIds: suggestedIds(workflow, current.audience),
     }));
   };
 
-  const apply = () => {
+  const finish = () => {
     if (!validSetupWidgetCount(draft.widgetIds)) return;
-    // Setup is a commit boundary, not an interactive drag: persist the final
-    // layout synchronously before closing so an immediate reload sees exactly
-    // the reviewed audience, visibility, and placement.
-    updateWidgetLayout((current) => applyWorkspaceSetup(current, draft, widgets), { immediate: true });
-    applyPreset(workflowPreset(draft.workflow));
-    announce(`${workflowOption(draft.workflow).label} setup applied with ${draft.widgetIds.length} widgets in ${draft.audience} mode.`);
+    updateWidgetLayout(
+      (current) => applyProjectSetup(current, draft, widgets),
+      { immediate: true },
+    );
+    completeProjectSetup();
+    announce(`${workflowOption(draft.workflow).label} setup applied to this project with ${draft.widgetIds.length} widgets in ${draft.audience} mode.`);
     exitFocus.current = "composer";
     setOverlay(null);
   };
@@ -103,23 +126,23 @@ export default function PresetSetup() {
   };
 
   return (
-    <div className="preset-scrim" onMouseDown={(event) => { if (event.target === event.currentTarget) dismiss(); }}>
+    <div className="project-setup-scrim" onMouseDown={(event) => { if (event.target === event.currentTarget) dismiss(); }}>
       <div
-        className="preset-setup guided-setup"
+        className="project-setup guided-setup"
         ref={panelRef}
         role="dialog"
         aria-modal="true"
-        aria-labelledby="preset-setup-heading"
-        aria-describedby="preset-setup-desc"
+        aria-labelledby="project-setup-heading"
+        aria-describedby="project-setup-desc"
         tabIndex={-1}
       >
         <header className="guided-setup-head">
           <div>
-            <span className="preset-kicker">Optional setup</span>
-            <h1 id="preset-setup-heading">Choose a setup</h1>
-            <p id="preset-setup-desc">Start close to what you need. You can change everything later.</p>
+            <span className="project-setup-kicker">Project setup</span>
+            <h1 id="project-setup-heading">Set up this project</h1>
+            <p id="project-setup-desc">Choose a starting canvas for this project. You can change everything later.</p>
           </div>
-          <button className="preset-close" onClick={dismiss} aria-label="Close workspace setup">×</button>
+          <button className="project-setup-close" onClick={dismiss} aria-label="Close project setup">×</button>
         </header>
 
         <ol className="guided-setup-steps" aria-label="Setup progress">
@@ -133,7 +156,7 @@ export default function PresetSetup() {
         <div className="guided-setup-body">
           {step === 0 && (
             <section>
-              <div className="guided-step-title"><span>Step 1 of 4</span><h2>What kind of work should stay nearby?</h2><p>This only chooses a starting arrangement.</p></div>
+              <div className="guided-step-title"><span>Step 1 of 4</span><h2>What kind of work should stay nearby?</h2><p>This only chooses a starting arrangement for this project.</p></div>
               <div className="guided-workflow-grid">
                 {WORKFLOW_OPTIONS.map((option) => (
                   <button
@@ -162,7 +185,11 @@ export default function PresetSetup() {
                     key={id}
                     className={`setup-choice${draft.audience === id ? " selected" : ""}`}
                     aria-pressed={draft.audience === id}
-                    onClick={() => setDraft((current) => ({ ...current, audience: id }))}
+                    onClick={() => setDraft((current) => ({
+                      ...current,
+                      audience: id,
+                      widgetIds: suggestedIds(current.workflow, id),
+                    }))}
                   >
                     <span className={`guided-mode-preview mode-${id}`} aria-hidden="true"><i /><i /><i /><i /></span>
                     <strong>{label}</strong>
@@ -205,7 +232,7 @@ export default function PresetSetup() {
 
           {step === 3 && (
             <section>
-              <div className="guided-step-title"><span>Step 4 of 4</span><h2>Your starting workspace</h2><p>Review the choices below. Nothing is locked.</p></div>
+              <div className="guided-step-title"><span>Step 4 of 4</span><h2>Your project canvas</h2><p>Review the choices below. Nothing is locked.</p></div>
               <div className="guided-review">
                 <article><span>Workflow</span><strong>{workflowOption(draft.workflow).label}</strong><button type="button" onClick={() => setStep(0)}>Edit</button></article>
                 <article><span>Control</span><strong>{MODE_COPY.find(([id]) => id === draft.audience)?.[1]}</strong><button type="button" onClick={() => setStep(1)}>Edit</button></article>
@@ -223,12 +250,12 @@ export default function PresetSetup() {
         </div>
 
         <footer className="guided-setup-foot">
-          <button type="button" className="preset-skip" onClick={dismiss}>Skip for now</button>
+          <button type="button" className="project-setup-skip" onClick={dismiss}>Skip for now</button>
           <span />
           {step > 0 && <button type="button" onClick={() => setStep((current) => current - 1)}>Back</button>}
           {step < 3
             ? <button type="button" className="btn-accent" onClick={() => setStep((current) => current + 1)}>Continue</button>
-            : <button type="button" className="btn-accent" disabled={!validSetupWidgetCount(draft.widgetIds)} onClick={apply}>Apply setup</button>}
+            : <button type="button" className="btn-accent" disabled={!validSetupWidgetCount(draft.widgetIds)} onClick={finish}>Finish setup</button>}
         </footer>
       </div>
     </div>

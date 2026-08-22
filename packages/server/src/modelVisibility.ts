@@ -21,8 +21,11 @@ export interface ProviderCatalogModel {
   /** "providerID/modelID" toggle key. */
   key: string;
   name: string;
+  providerName?: string;
   context?: number;
   cost?: { input: number; output: number };
+  capabilities?: string[];
+  variants?: string[];
   connected: boolean;
   enabled: boolean;
 }
@@ -128,8 +131,11 @@ export function buildProviderCatalog(models: ModelDescriptor[], state: Visibilit
       modelID: m.modelID,
       key,
       name: m.name || m.modelID,
+      ...(m.providerName ? { providerName: m.providerName } : {}),
       ...(m.context !== undefined ? { context: m.context } : {}),
       ...(m.cost ? { cost: m.cost } : {}),
+      ...(m.capabilities ? { capabilities: m.capabilities } : {}),
+      ...(m.variants ? { variants: m.variants } : {}),
       connected: m.connected !== false,
       enabled: entry.enabled && !state.disabledModels.includes(key),
     });

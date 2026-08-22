@@ -1,7 +1,6 @@
-// Editable hotkey map. Combos are stored as "mod+shift+k" strings ("mod" =
-// ⌘ on Apple platforms, Ctrl elsewhere). The shell matches keydown events
-// against the map; Settings > Shortcuts edits and persists it under
-// localStorage "polyth.hotkeys".
+// Editable plugin-attributed hotkey map. Combos are stored as "mod+shift+k"
+// strings ("mod" = ⌘ on Apple platforms, Ctrl elsewhere). The shell matches
+// keydown events against the map; Settings edits and persists it locally.
 
 export type HotkeyAction =
   | "palette"
@@ -16,16 +15,16 @@ export type HotkeyAction =
 
 export const HOTKEYS_KEY = "polyth.hotkeys";
 
-export const HOTKEY_ACTIONS: ReadonlyArray<{ id: HotkeyAction; label: string }> = [
-  { id: "palette", label: "Command palette" },
-  { id: "searchFiles", label: "Search files" },
-  { id: "searchSessions", label: "Search sessions" },
-  { id: "settings", label: "Settings" },
-  { id: "newSession", label: "New session" },
-  { id: "focusComposer", label: "Focus composer" },
-  { id: "viewFiles", label: "Files view" },
-  { id: "viewGit", label: "Git view" },
-  { id: "viewTerminal", label: "Terminal view" },
+export const HOTKEY_ACTIONS: ReadonlyArray<{ id: HotkeyAction; label: string; pluginName: string }> = [
+  { id: "palette", label: "Command palette", pluginName: "Core" },
+  { id: "searchFiles", label: "Search files", pluginName: "Files" },
+  { id: "searchSessions", label: "Search sessions", pluginName: "Sessions" },
+  { id: "settings", label: "Settings", pluginName: "Core" },
+  { id: "newSession", label: "New session", pluginName: "Sessions" },
+  { id: "focusComposer", label: "Focus composer", pluginName: "Composer" },
+  { id: "viewFiles", label: "Files view", pluginName: "Files" },
+  { id: "viewGit", label: "Git view", pluginName: "Git" },
+  { id: "viewTerminal", label: "Terminal view", pluginName: "Terminal" },
 ];
 
 export const DEFAULT_KEYMAP: Record<HotkeyAction, string> = {
@@ -99,7 +98,7 @@ export function parseKeymap(raw: string | null): Record<HotkeyAction, string> {
   } catch {
     // defaults
   }
-  return resolveKeymapConflicts(map);
+  return map;
 }
 
 /** Repair legacy or hand-edited maps so each combo has one owner. When a
@@ -123,9 +122,8 @@ export function resolveKeymapConflicts(
   return next;
 }
 
-/** Assign one binding without creating a collision. The previous owner gets
- * the edited action's old combo, which makes rebinding predictable and fully
- * reversible instead of silently disabling a command. */
+/** Assign one binding. Collisions are retained so Settings can show both
+ * providers and let the user decide which command should move. */
 export function rebindKeymap(
   map: Record<HotkeyAction, string>,
   action: HotkeyAction,
@@ -133,11 +131,7 @@ export function rebindKeymap(
 ): Record<HotkeyAction, string> {
   const combo = normalizeCombo(rawCombo);
   if (!combo) return map;
-  const previous = map[action];
-  const owner = HOTKEY_ACTIONS.find(({ id }) => id !== action && map[id] === combo)?.id;
-  const next = { ...map, [action]: combo };
-  if (owner) next[owner] = previous;
-  return resolveKeymapConflicts(next);
+  return { ...map, [action]: combo };
 }
 
 export function serializeKeymap(map: Record<HotkeyAction, string>): string {

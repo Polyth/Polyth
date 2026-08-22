@@ -107,6 +107,11 @@ export function gitRoutes(deps: {
       json(200, await git.stashList(root));
       return true;
     }
+    if (path === "/api/git/identity" && method === "GET") {
+      const root = await projectRootOf(q("projectId"));
+      json(200, await git.identity(root));
+      return true;
+    }
     if (path === "/api/worktrees" && method === "GET") {
       const root = await projectRootOf(q("projectId"));
       json(200, (await git.isRepo(root)) ? await git.worktrees.list(root) : []);
@@ -156,6 +161,11 @@ export function gitRoutes(deps: {
       case "/api/git/fetch": await git.fetch(root, b.remote ? String(b.remote) : undefined); break;
       case "/api/git/pull": await git.pull(root, b.remote ? String(b.remote) : undefined); break;
       case "/api/git/push": await git.push(root, b.remote ? String(b.remote) : undefined); break;
+      case "/api/git/identity": {
+        await git.setIdentity(root, { name: String(b.name ?? ""), email: String(b.email ?? "") });
+        json(200, await git.identity(root));
+        return true;
+      }
       case "/api/worktrees": {
         json(200, await git.worktrees.create(root, {
           branch: String(b.branch ?? ""),

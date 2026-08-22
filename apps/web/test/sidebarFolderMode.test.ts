@@ -144,3 +144,51 @@ test("tree mode nests sessions under project worktrees", async () => {
     container.remove();
   }
 });
+
+test("header selection keeps one multi-session selection across projects", async () => {
+  const ticket = store.beginProjectListRequest();
+  store.publishProjectList(ticket, [project("alpha"), project("beta")]);
+  store.activateProject("alpha");
+  store.setSessions("alpha", sessionsByProject.alpha!);
+  store.setSessions("beta", sessionsByProject.beta!);
+  setSidebarViewMode("list");
+
+  const container = document.createElement("div");
+  document.body.appendChild(container);
+  const root = createRoot(container);
+  try {
+    await act(async () => { root.render(createElement(Sidebar)); });
+
+    const header = container.querySelector<HTMLElement>(".sidebar-head");
+    const select = header?.querySelector<HTMLButtonElement>('[aria-label="Select sessions"]');
+    assert.ok(select, "session selection is an icon control in the sidebar header");
+    assert.ok(!(header?.textContent ?? "").includes("Projects"), "the Projects heading is removed");
+
+    await act(async () => { click(select!); });
+    assert.equal(select!.getAttribute("aria-pressed"), "true");
+
+    const alphaCheck = container.querySelector<HTMLInputElement>('[aria-label="Select Alpha session one"]');
+    assert.ok(alphaCheck, "active-project sessions expose checkboxes");
+    await act(async () => { click(alphaCheck!); });
+    assert.match(container.querySelector(".session-bulk-actions")?.textContent ?? "", /1 selected/);
+
+    const betaCard = [...container.querySelectorAll<HTMLElement>(".project-card")]
+      .find((card) => (card.textContent ?? "").includes("beta"));
+    assert.ok(betaCard, "another project remains available while selecting");
+    await act(async () => { click(betaCard!); });
+    await act(async () => { await Promise.resolve(); });
+
+    const betaCheck = container.querySelector<HTMLInputElement>('[aria-label="Select Beta session"]');
+    assert.ok(betaCheck, "sessions from another project use the same selection mode");
+    await act(async () => { click(betaCheck!); });
+    assert.match(container.querySelector(".session-bulk-actions")?.textContent ?? "", /2 selected/);
+    assert.equal(
+      container.querySelectorAll<HTMLInputElement>(".session-check:checked").length,
+      1,
+      "the visible project reflects its selected session while the first selection remains retained",
+    );
+  } finally {
+    await act(async () => { root.unmount(); });
+    container.remove();
+  }
+});

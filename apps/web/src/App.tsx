@@ -3,7 +3,7 @@ import Sidebar from "./components/Sidebar.tsx";
 import Main from "./components/Main.tsx";
 import ContextRail from "./components/ContextRail.tsx";
 import StatusBar from "./components/StatusBar.tsx";
-import PresetSetup from "./components/PresetSetup.tsx";
+import ProjectSetup from "./components/ProjectSetup.tsx";
 import CommandPalette from "./components/CommandPalette.tsx";
 import SessionSearch from "./components/SessionSearch.tsx";
 import SettingsModal from "./components/SettingsModal.tsx";
@@ -11,7 +11,7 @@ import ProjectFolderDialog from "./components/ProjectFolderDialog.tsx";
 import ViewErrorBoundary from "./components/ViewErrorBoundary.ts";
 import { clearUiError, setOverlay, useStore } from "./store.ts";
 import { decideFirstRunSurface, markAutoPickerOffered, wasAutoPickerOffered } from "./projectOnboarding.ts";
-import { usePresetState } from "./workspacePresets.ts";
+import { useProjectSetupState } from "./projectSetup.ts";
 import { LiveRegion } from "./components/a11y/live.tsx";
 import WorktreeSessionDialog from "./components/WorktreeSessionDialog.tsx";
 import "./builtinCapabilities.ts";
@@ -35,7 +35,7 @@ export default function App() {
   const viewResetKey = useStore(
     (s) => `${s.activeProjectId ?? ""}:${s.activeSessionId ?? ""}:${s.activeView}`,
   );
-  const preset = usePresetState();
+  const projectSetup = useProjectSetupState();
   const registryStatus = useStore((s) => s.projectRegistry.status);
   const projectCount = useStore((s) => s.projectRegistry.projects.length);
   const hasActiveProject = useStore(
@@ -52,16 +52,15 @@ export default function App() {
   }, []);
 
   // UX-ONBOARDING coordinator: one pure decision over project-registry truth.
-  // `preset.setup` is not an input to picker admission — the picker opens only
-  // from a ready-empty registry, once per document, and never over another
-  // overlay. The episode flag is read in render; it only changes together with
-  // the overlay transition below, so the value is always current.
+  // Per-project setup is not an input to picker admission — the picker opens
+  // only from a ready-empty registry, once per document, and never over another
+  // overlay.
   const surface = decideFirstRunSurface({
     registryStatus,
     projectCount,
     hasValidActiveProject: hasActiveProject,
     pickerOfferedThisDocument: wasAutoPickerOffered(),
-    presetSetup: preset.setup,
+    projectSetup,
   });
 
   useEffect(() => {
@@ -71,11 +70,10 @@ export default function App() {
     }
   }, [surface, overlay]);
 
-  // Optional preset setup renders only after activeProjectId identifies a
-  // project in a ready registry, never over the picker or another dialog.
-  // Settings can reopen it explicitly (overlay === "onboarding").
-  const showPresetSetup =
-    overlay === "onboarding" || (surface === "preset-setup" && overlay === null);
+  // Project setup renders only after activeProjectId identifies a project in a
+  // ready registry, never over the picker or another dialog.
+  const showProjectSetup =
+    overlay === "onboarding" || (surface === "project-setup" && overlay === null);
 
   return (
     <div className={`app mode-${workspaceMode} view-${activeView}`}>
@@ -100,7 +98,7 @@ export default function App() {
       {overlay === "project-picker" && <ProjectFolderDialog onClose={() => setOverlay(null)} />}
       {overlay === "worktree-session" && <WorktreeSessionDialog />}
       <SettingsModal open={overlay === "settings"} onClose={() => setOverlay(null)} />
-      {showPresetSetup && <PresetSetup />}
+      {showProjectSetup && <ProjectSetup />}
       <LiveRegion />
     </div>
   );

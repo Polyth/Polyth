@@ -1,7 +1,5 @@
-// UX-PERSONAS capability-registry gates: pure metadata invariants, plain
-// disclosure grouping, registry replace/dispose semantics, resolution
-// stability across presets, and the built-in registration (navigation only,
-// never a filter).
+// Capability-registry gates: metadata invariants, disclosure grouping,
+// registry semantics, per-project placement resolution, and built-ins.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
@@ -10,7 +8,6 @@ import {
   resolveCapabilities, subscribeCapabilities,
   type CapabilityDescriptor,
 } from "../src/capabilities.ts";
-import { WORKSPACE_PRESETS, type WorkspacePresetId } from "../src/workspacePresets.ts";
 import {
   PANEL_OF_CAPABILITY, PANE_OF_CAPABILITY, VIEW_OF_CAPABILITY,
 } from "../src/builtinCapabilities.ts";
@@ -111,47 +108,41 @@ test("register/replace/dispose: replace by id, dispose by identity, listeners fi
 test("dynamically registered capability appears in resolution immediately with its default tier", () => {
   const dispose = registerCapability(fakeDescriptor("late-ext", { standardTier: "more", standardRank: 50 }));
   try {
-    for (const presetId of [null, ...WORKSPACE_PRESETS.map((p) => p.id)] as Array<WorkspacePresetId | null>) {
-      const resolved = resolveCapabilities(listCapabilities(), presetId);
-      const entry = resolved.find((r) => r.descriptor.id === "late-ext");
-      assert.ok(entry, `late-ext resolved under ${presetId ?? "standard"}`);
-      assert.equal(entry.tier, "more", "unknown-to-presets capability keeps its standard tier");
-    }
+    const resolved = resolveCapabilities(listCapabilities());
+    const entry = resolved.find((r) => r.descriptor.id === "late-ext");
+    assert.ok(entry);
+    assert.equal(entry.tier, "more");
   } finally {
     dispose();
   }
 });
 
-// ---- resolution stability across presets --------------------------------------
+// ---- per-project placement resolution ----------------------------------------
 
-test("presets re-place capabilities but never add or remove them", () => {
+test("placement overrides never add or remove capabilities", () => {
   const caps = listCapabilities();
-  const standardIds = resolveCapabilities(caps, null).map((r) => r.descriptor.id).sort();
-  for (const preset of WORKSPACE_PRESETS) {
-    const ids = resolveCapabilities(caps, preset.id).map((r) => r.descriptor.id).sort();
-    assert.deepEqual(ids, standardIds, `${preset.id} exposes exactly the same capability set`);
+  const standardIds = resolveCapabilities(caps).map((r) => r.descriptor.id).sort();
+  const movedIds = resolveCapabilities(caps, {
+    terminal: { tier: "primary", rank: 0.5 },
+  }).map((r) => r.descriptor.id).sort();
+  assert.deepEqual(movedIds, standardIds);
+});
+
+test("availability is a runtime property, independent of placement", () => {
+  const caps = listCapabilities();
+  for (const r of resolveCapabilities(caps)) {
+    assert.equal(typeof r.descriptor.available(), "boolean");
   }
 });
 
-test("availability is a runtime property, independent of preset selection", () => {
+test("resolution honors explicit overrides and is deterministically ordered", () => {
   const caps = listCapabilities();
-  for (const preset of WORKSPACE_PRESETS) {
-    for (const r of resolveCapabilities(caps, preset.id)) {
-      // available() takes no preset input; calling it under any preset returns
-      // the same runtime answer and never throws.
-      assert.equal(typeof r.descriptor.available(), "boolean");
-    }
-  }
-});
-
-test("resolution honors explicit overrides over presets and is deterministically ordered", () => {
-  const caps = listCapabilities();
-  const resolved = resolveCapabilities(caps, "plan-coordinate", {
+  const resolved = resolveCapabilities(caps, {
     terminal: { tier: "primary", rank: 0.5 },
   });
   const primary = resolved.filter((r) => r.tier === "primary").map((r) => r.descriptor.id);
   assert.ok(primary.includes("terminal"), "explicit promotion wins over the preset");
-  const again = resolveCapabilities(caps, "plan-coordinate", {
+  const again = resolveCapabilities(caps, {
     terminal: { tier: "primary", rank: 0.5 },
   });
   assert.deepEqual(

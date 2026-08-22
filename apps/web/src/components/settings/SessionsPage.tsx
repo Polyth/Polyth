@@ -1,14 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
-import type { ModelRef } from "@polyth/contracts";
 import { api } from "../../api.ts";
 import { setUiError, updateSettings, useStore } from "../../store.ts";
 import { friendlyError } from "../../settings.ts";
 import { setGlobalDefaultModel, setSessionDefaults, useSessionDefaults } from "../../sessionDefaults.ts";
 import { PageHead, Row } from "./parts.tsx";
-import { modelDisplayName, modelSupportsTextWorkflow } from "../../composer/discovery.ts";
+import { modelSupportsTextWorkflow } from "../../composer/discovery.ts";
 import { roleKind, useRolePrefs } from "../../rolePrefs.ts";
-
-const modelKey = (model: ModelRef): string => `${model.providerID}/${model.modelID}`;
+import ModelPicker from "../ModelPicker.tsx";
 
 export default function SessionsPage() {
   const models = useStore((s) => s.models);
@@ -40,11 +38,6 @@ export default function SessionsPage() {
     return () => { live = false; };
   }, [retentionDays]);
 
-  const modelFrom = (value: string): ModelRef | undefined => {
-    const model = textModels.find((candidate) => modelKey(candidate) === value);
-    return model ? { providerID: model.providerID, modelID: model.modelID } : undefined;
-  };
-
   const cleanup = async () => {
     setBusy(true);
     try {
@@ -69,22 +62,15 @@ export default function SessionsPage() {
         {defaultAgent && <> / <strong>{defaultAgent}</strong></>}
       </p>
       <Row label="Default Model" hint="The model selected when a project does not provide an override." itemId="sessions.defaultModel">
-        <select
-          aria-label="Default Model"
-          value={defaults.defaultModel ? modelKey(defaults.defaultModel) : ""}
-          onChange={(event) => {
-            const model = modelFrom(event.target.value);
+        <ModelPicker
+          direction="down"
+          models={textModels}
+          value={defaults.defaultModel}
+          onPick={(model) => {
             setGlobalDefaultModel(model);
-            updateSettings({ defaultModel: event.target.value });
+            updateSettings({ defaultModel: model ? `${model.providerID}/${model.modelID}` : "" });
           }}
-        >
-          <option value="">Not selected</option>
-          {textModels.map((model) => (
-            <option key={modelKey(model)} value={modelKey(model)}>
-              {modelDisplayName(model, textModels)}
-            </option>
-          ))}
-        </select>
+        />
       </Row>
       <Row label="Default Thinking" hint="Applied to models that offer thinking variants.">
         <select
@@ -107,24 +93,20 @@ export default function SessionsPage() {
         </select>
       </Row>
       <Row label="Small Model" hint="Override model for lightweight summaries and generated metadata.">
-        <select
-          aria-label="Small Model"
-          value={defaults.smallModel ? modelKey(defaults.smallModel) : ""}
-          onChange={(event) => setSessionDefaults({ smallModel: modelFrom(event.target.value) })}
-        >
-          <option value="">Not selected</option>
-          {textModels.map((model) => <option key={modelKey(model)} value={modelKey(model)}>{modelDisplayName(model, textModels)}</option>)}
-        </select>
+        <ModelPicker
+          direction="down"
+          models={textModels}
+          value={defaults.smallModel}
+          onPick={(smallModel) => setSessionDefaults({ smallModel })}
+        />
       </Row>
       <Row label="Changes Walkthrough Model" hint="Model used when generating a changes walkthrough.">
-        <select
-          aria-label="Changes Walkthrough Model"
-          value={defaults.walkthroughModel ? modelKey(defaults.walkthroughModel) : ""}
-          onChange={(event) => setSessionDefaults({ walkthroughModel: modelFrom(event.target.value) })}
-        >
-          <option value="">Not selected</option>
-          {textModels.map((model) => <option key={modelKey(model)} value={modelKey(model)}>{modelDisplayName(model, textModels)}</option>)}
-        </select>
+        <ModelPicker
+          direction="down"
+          models={textModels}
+          value={defaults.walkthroughModel}
+          onPick={(walkthroughModel) => setSessionDefaults({ walkthroughModel })}
+        />
       </Row>
 
       <div className="stat-label session-settings-heading">Session Retention</div>

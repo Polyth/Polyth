@@ -23,6 +23,7 @@ import SessionsPage from "./settings/SessionsPage.tsx";
 import AccessPage from "./settings/AccessPage.tsx";
 import PackagesPage from "./settings/PackagesPage.tsx";
 import WidgetsPage from "./settings/WidgetsPage.tsx";
+import { Icon } from "../icons.tsx";
 
 interface PageDef {
   id: string;
@@ -65,6 +66,35 @@ const BUILTIN: PageDef[] = [
   { id: "access", label: "Access", group: "System", nav: false, render: () => <AccessPage /> },
   { id: "about", label: "About", group: "System", nav: false, render: () => <AboutPage /> },
 ];
+
+const SETTINGS_ICON_BY_PAGE: Record<string, keyof typeof Icon> = {
+  general: "gear",
+  appearance: "palette",
+  chat: "chat",
+  notifications: "bell",
+  sessions: "session",
+  shortcuts: "keyboard",
+  projects: "files",
+  behavior: "pencil",
+  widgets: "widgets",
+  packages: "package",
+  voice: "mic",
+  usage: "usage",
+  git: "branch",
+  models: "context",
+  agents: "session",
+  mcp: "plug",
+  commands: "term",
+  integrations: "link",
+  plugins: "puzzle",
+  "secure-safe": "shield",
+  "home-assistant": "home",
+};
+
+function SettingsNavIcon({ pageId }: { pageId: string }) {
+  const Glyph = Icon[SETTINGS_ICON_BY_PAGE[pageId] ?? "puzzle"];
+  return <Glyph />;
+}
 
 export default function SettingsView({ onClose = () => setOverlay(null) }: { onClose?: () => void }) {
   const prefs = usePrefs();
@@ -321,7 +351,7 @@ export default function SettingsView({ onClose = () => setOverlay(null) }: { onC
                       if (mobile) setMobileStage("page");
                     }}
                   >
-                    {p.icon && <span className="settings-nav-icon" aria-hidden="true">{p.icon}</span>}
+                    <span className="settings-nav-icon" aria-hidden="true"><SettingsNavIcon pageId={p.id} /></span>
                     {p.label}
                   </button>
                 </Fragment>
