@@ -55,6 +55,7 @@ import SelectionMenu from "./SelectionMenu.tsx";
 import SlotHost from "./slots/SlotHost.ts";
 import type { RenderModel, RenderMessage, ToolMsg, AssistantMsg, TaskActivityMsg, UserMsg } from "../reduce.ts";
 import { Icon } from "../icons.tsx";
+import "./messagePinAction.tsx";
 
 /** One announcement per copy/mutation outcome; text is the accessible record,
  *  checkmarks only supplement it. Screen readers ignore repeats, so identical

@@ -46,7 +46,19 @@ export interface SessionEvent<T extends JsonObject = JsonObject> {
 }
 
 // Data payloads for the M1 vocabulary (all must stay JSON-serializable)
-export interface UserMessageData { text: string; attachments?: AttachmentRef[] }
+export interface CompactionRecoveryMetadata {
+  compactionSeq: number;
+  goalRestored?: boolean;
+  pinnedSourceSeqs?: number[];
+}
+export interface UserMessageData {
+  text: string;
+  attachments?: AttachmentRef[];
+  /** Model-visible recovery instructions kept separate from the visible bubble. */
+  recoveryContext?: string;
+  /** Durable dedup key proving this compaction was handled by this turn. */
+  compactionRecovery?: CompactionRecoveryMetadata;
+}
 export interface AssistantChunkData { partId: string; text: string }
 export interface AssistantReasoningChunkData { partId: string; text: string }
 export interface AssistantMessageData { partId: string; text: string; reasoning?: string; tokens?: TokenUsage; cost?: number }
@@ -92,6 +104,25 @@ export interface TokenUsage { input: number; output: number; reasoning?: number;
 export interface UsageRecordedData { model: ModelRef; tokens: TokenUsage; cost?: number }
 export interface GoalAttachedData { objective: string; budgetTokens?: number; maxContinuations?: number }
 export interface GoalAuditData { verdict: "keep" | "done" | "stuck"; consecutiveStuck: number; note?: string }
+export interface ContextPinnedData { sourceEventSeq: number }
+export interface ContextUnpinnedData { sourceEventSeq: number }
+export interface SessionCompactedData {
+  backendEventId?: string;
+}
+export interface CompactionPartRecordedData {
+  partId: string;
+  messageId?: string;
+  auto?: boolean;
+}
+export interface GoalContextRestoredData {
+  compactionSeq: number;
+  sourceMessageSeq: number;
+}
+export interface ContextRestoredData {
+  compactionSeq: number;
+  sourceMessageSeq: number;
+  pinnedSourceSeqs: number[];
+}
 export interface SessionRewoundData {
   /** The reverted user/message seq. That message and its following tail are hidden. */
   atSeq: number;
@@ -417,6 +448,9 @@ export interface SessionService {
   queueList?(sessionId: string): Promise<QueueItemDto[]>;
   queueReorder?(sessionId: string, ids: string[]): Promise<QueueItemDto[]>;
   queueRemove?(sessionId: string, queueId: string): Promise<void>;
+  /** Pin/unpin a model-visible message by its canonical source-event sequence. */
+  pinContext?(sessionId: string, sourceEventSeq: number): Promise<SessionEvent>;
+  unpinContext?(sessionId: string, sourceEventSeq: number): Promise<SessionEvent>;
   /** F14 import half: backend sessions not yet adopted (items) + how many the
    *  backend has in total, so the UI can tell "none exist" from "all imported". */
   backendSessions?(projectId: string): Promise<{ items: RuntimeSession[]; total: number }>;
@@ -535,6 +569,8 @@ export type RuntimeEvent =
   | { type: "permission/requested"; requestId: string; permission: string; patterns: string[]; metadata?: JsonObject; tool?: string }
   | { type: "question/asked"; requestId: string; questions: JsonObject[] }
   | ({ type: "secret/requested" } & SecretRequestData)
+  | { type: "session/compacted"; backendEventId?: string }
+  | { type: "compaction/part-recorded"; partId: string; messageId?: string; auto?: boolean }
   | { type: "turn/stopped"; reason: "completed" | "aborted" | "error"; error?: string }
   | { type: "usage/recorded"; model: ModelRef; tokens: TokenUsage; cost?: number }
   // Full revisioned snapshots (WP8): replay-deterministic task/subagent state.

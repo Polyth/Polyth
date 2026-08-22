@@ -4,7 +4,14 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { activeRewind, createStore, deriveMessages } from "@polyth/session";
+import {
+  activePinnedMessages,
+  activeRewind,
+  compactionRecoveryText,
+  createStore,
+  deriveMessages,
+  unrestoredCompactionSeq,
+} from "@polyth/session";
 import type { SessionEvent, SessionProjection } from "@polyth/contracts";
 
 function freshDir(): string {
@@ -154,6 +161,42 @@ test("deriveMessages: ignorable flag filters, consecutive same-role merges, ques
     { role: "assistant", parts: [{ type: "text", text: "Continue?" }] },
     { role: "user", parts: [{ type: "text", text: '{"go":"yes"}' }] },
   ]);
+});
+
+test("compaction recovery folds active pins and deduplicates from durable user metadata", () => {
+  const events: SessionEvent[] = [
+    ev(1, "user/message", { text: "preserve this requirement" }),
+    ev(2, "assistant/message", { partId: "a1", text: "preserve this finding" }),
+    ev(3, "context/pinned", { sourceEventSeq: 1 }, "s1", true),
+    ev(4, "context/pinned", { sourceEventSeq: 2 }, "s1", true),
+    ev(5, "context/unpinned", { sourceEventSeq: 1 }, "s1", true),
+    ev(6, "session/compacted", { backendEventId: "evt_c" }, "s1", true),
+  ];
+  assert.deepEqual(activePinnedMessages(events), [{
+    sourceEventSeq: 2,
+    role: "assistant",
+    text: "preserve this finding",
+  }]);
+  assert.equal(unrestoredCompactionSeq(events), 6);
+  const recoveryContext = compactionRecoveryText({
+    compactionSeq: 6,
+    objective: "Finish compaction resilience",
+    pinned: activePinnedMessages(events),
+  });
+  const recovered = [
+    ...events,
+    ev(7, "user/message", {
+      text: "continue",
+      recoveryContext,
+      compactionRecovery: { compactionSeq: 6, goalRestored: true, pinnedSourceSeqs: [2] },
+    }),
+  ];
+  assert.equal(unrestoredCompactionSeq(recovered), null);
+  const last = deriveMessages(recovered).at(-1);
+  assert.equal(last?.role, "user");
+  assert.match((last?.parts[0] as { text: string }).text, /Finish compaction resilience/);
+  assert.match((last?.parts[0] as { text: string }).text, /preserve this finding/);
+  assert.match((last?.parts[0] as { text: string }).text, /\n\ncontinue$/);
 });
 
 test("deriveMessages soft-rewind, redo, and replacement are replay-deterministic", () => {

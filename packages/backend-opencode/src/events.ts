@@ -80,6 +80,7 @@ export interface TranslateState {
   pendingDelta: Map<string, string>;
   emittedAssistant: Set<string>;
   emittedUsage: Set<string>;
+  compactionParts: Set<string>;
   lastTokens?: TokenUsage;
   lastCost?: number;
   // WP8: revisioned full snapshots of tasks and delegated agents. Revisions
@@ -99,6 +100,7 @@ export const createTranslateState = (): TranslateState => ({
   pendingDelta: new Map(),
   emittedAssistant: new Set(),
   emittedUsage: new Set(),
+  compactionParts: new Set(),
   taskRevision: 0,
   lastTaskKey: "",
   subagentRevision: 0,
@@ -171,6 +173,14 @@ export const translateOcEvent = (ev: OcEvent, state: TranslateState): RuntimeEve
   const out: RuntimeEvent[] = [];
   const p = ev.properties ?? {};
   const type = ev.type ?? "";
+
+  if (type === "session.compacted") {
+    out.push({
+      type: "session/compacted",
+      ...(ev.id ? { backendEventId: ev.id } : {}),
+    });
+    return out;
+  }
 
   if (type === "message.updated") {
     const info = asRecord(p.info);
@@ -267,6 +277,19 @@ export const translateOcEvent = (ev: OcEvent, state: TranslateState): RuntimeEve
             cost: state.lastCost,
           });
         }
+      }
+      return out;
+    }
+
+    if (partType === "compaction") {
+      if (!state.compactionParts.has(partId)) {
+        state.compactionParts.add(partId);
+        out.push({
+          type: "compaction/part-recorded",
+          partId,
+          ...(messageID ? { messageId: messageID } : {}),
+          ...(typeof part.auto === "boolean" ? { auto: part.auto } : {}),
+        });
       }
       return out;
     }

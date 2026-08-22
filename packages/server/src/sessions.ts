@@ -13,7 +13,7 @@ import type {
 import type { ProjectService } from "@polyth/contracts";
 import type { AutoAcceptStore, PermissionService } from "@polyth/permissions";
 import { resolveAutoAccept } from "@polyth/permissions";
-import { activeRewind, deriveMessages, effectiveHistory } from "@polyth/session";
+import { activeRewind, deriveMessages, effectiveHistory, recoveredUserText } from "@polyth/session";
 import { buildPermissionPreview, PERMISSION_ALLOWED_SCOPES } from "./permissionPreview.ts";
 import { sanitizeAttachments } from "./attachments.ts";
 
@@ -49,6 +49,17 @@ export interface OrgStore {
 export interface TurnHooks {
   onTurnCompleted?(sessionId: string, assistantText: string): void;
   onUsage?(sessionId: string, tokens: { input: number; output: number; reasoning?: number }): void;
+  /** Decorate the next admitted turn after compaction. The returned context is
+   *  persisted on user/message before it is sent to the runtime. */
+  beforeTurn?(
+    sessionId: string,
+    events: readonly SessionEvent[],
+  ): Promise<{
+    recoveryContext: string;
+    compactionSeq: number;
+    goalRestored: boolean;
+    pinnedSourceSeqs: number[];
+  } | null>;
 }
 
 /** Slash-command / snippet expansion seam. The commands plugin owns the syntax;
@@ -335,6 +346,26 @@ export function createSessionService(deps: {
           updatedAt: Date.now(),
         }));
         hooks.onUsage?.(sessionId, ev.tokens);
+        break;
+      }
+      case "session/compacted": {
+        const { type: _t, ...data } = ev;
+        await appendAndBroadcast(
+          sessionId,
+          "session/compacted",
+          data as unknown as JsonObject,
+          { ignorable: true, producerPlugin: "backend-opencode" },
+        );
+        break;
+      }
+      case "compaction/part-recorded": {
+        const { type: _t, ...data } = ev;
+        await appendAndBroadcast(
+          sessionId,
+          "compaction/part-recorded",
+          data as unknown as JsonObject,
+          { ignorable: true, producerPlugin: "backend-opencode" },
+        );
         break;
       }
       default: {
@@ -669,12 +700,25 @@ export function createSessionService(deps: {
           behaviorLogged.set(sessionId, cur.revision);
         }
       }
+      const decoration = hooks.beforeTurn
+        ? await hooks.beforeTurn(sessionId, await store.events(sessionId))
+        : null;
       // Resolved turn configuration lands in the durable log (not just the
       // mutable profile id), so replay is stable across profile edits. An
       // explicit clear (null) is recorded too — omitted means inherited.
-      await appendAndBroadcast(sessionId, "user/message", {
+      const message = await appendAndBroadcast(sessionId, "user/message", {
         text, ...(raw !== text ? { raw } : {}),
         ...(input.attachments ? { attachments: input.attachments as unknown as JsonObject[] } : {}),
+        ...(decoration ? {
+          recoveryContext: decoration.recoveryContext,
+          compactionRecovery: {
+            compactionSeq: decoration.compactionSeq,
+            ...(decoration.goalRestored ? { goalRestored: true } : {}),
+            ...(decoration.pinnedSourceSeqs.length
+              ? { pinnedSourceSeqs: decoration.pinnedSourceSeqs }
+              : {}),
+          },
+        } : {}),
         ...(input.agentProfileId !== undefined ? { agentProfileId: input.agentProfileId } : {}),
         ...(input.agentProfileId ? {
           ...(model ? { resolvedModel: model as unknown as JsonObject } : {}),
@@ -682,11 +726,25 @@ export function createSessionService(deps: {
         } : {}),
       });
       await rt.startTurn({
-        sessionId, text,
+        sessionId,
+        text: recoveredUserText(text, decoration?.recoveryContext),
         ...(input.attachments?.length ? { attachments: input.attachments } : {}),
         ...(model ? { model } : {}),
         ...(agent ? { agent } : {}),
       });
+      if (decoration?.goalRestored) {
+        await appendAndBroadcast(sessionId, "goal/context-restored", {
+          compactionSeq: decoration.compactionSeq,
+          sourceMessageSeq: message.seq,
+        }, { ignorable: true });
+      }
+      if (decoration?.pinnedSourceSeqs.length) {
+        await appendAndBroadcast(sessionId, "context/restored", {
+          compactionSeq: decoration.compactionSeq,
+          sourceMessageSeq: message.seq,
+          pinnedSourceSeqs: decoration.pinnedSourceSeqs,
+        }, { ignorable: true });
+      }
     } catch (err) {
       admitting.delete(sessionId);
       await appendAndBroadcast(sessionId, "turn/failed", { error: String(err) }, { ignorable: true });
@@ -941,6 +999,48 @@ export function createSessionService(deps: {
       const removed = await deps.queue.queueRemove(sessionId, queueId);
       if (!removed) throw Object.assign(new Error("queue item not found"), { code: "not-found" });
       await appendAndBroadcast(sessionId, "queue/removed", { queueId }, { ignorable: true });
+    },
+
+    async pinContext(sessionId, sourceEventSeq) {
+      return withSessionLock(sessionId, async () => {
+        if (!Number.isSafeInteger(sourceEventSeq) || sourceEventSeq <= 0) {
+          throw Object.assign(new Error("sourceEventSeq must be a positive event sequence"), { code: "invalid-input" });
+        }
+        if (!(await store.projection(sessionId))) {
+          throw Object.assign(new Error("session not found"), { code: "not-found" });
+        }
+        const source = (await store.events(sessionId)).find((event) => event.seq === sourceEventSeq);
+        if (source?.type !== "user/message" && source?.type !== "assistant/message") {
+          throw Object.assign(new Error("pin target must be a user or assistant message"), { code: "invalid-input" });
+        }
+        return appendAndBroadcast(
+          sessionId,
+          "context/pinned",
+          { sourceEventSeq },
+          { ignorable: true },
+        );
+      });
+    },
+
+    async unpinContext(sessionId, sourceEventSeq) {
+      return withSessionLock(sessionId, async () => {
+        if (!Number.isSafeInteger(sourceEventSeq) || sourceEventSeq <= 0) {
+          throw Object.assign(new Error("sourceEventSeq must be a positive event sequence"), { code: "invalid-input" });
+        }
+        if (!(await store.projection(sessionId))) {
+          throw Object.assign(new Error("session not found"), { code: "not-found" });
+        }
+        const source = (await store.events(sessionId)).find((event) => event.seq === sourceEventSeq);
+        if (source?.type !== "user/message" && source?.type !== "assistant/message") {
+          throw Object.assign(new Error("pin target must be a user or assistant message"), { code: "invalid-input" });
+        }
+        return appendAndBroadcast(
+          sessionId,
+          "context/unpinned",
+          { sourceEventSeq },
+          { ignorable: true },
+        );
+      });
     },
 
     async abort(sessionId) { await sessionRuntime.get(sessionId)?.abort(sessionId); },

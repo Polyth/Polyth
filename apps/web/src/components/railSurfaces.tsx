@@ -33,13 +33,19 @@ function ContextView() {
   const events = useStore((s) => (s.activeSessionId ? s.events[s.activeSessionId] : undefined) ?? NO_EVENTS);
   if (!session) return <div className="rail-empty">Session status, usage, and pinned context will appear here.</div>;
 
-  // Pinned files = context/pinned minus context/unpinned (last event wins per path).
-  const pinned = new Map<string, boolean>();
+  // Pinned messages = context/pinned minus context/unpinned (last event wins).
+  const pinned = new Map<number, boolean>();
   for (const e of events) {
-    if (e.type === "context/pinned") pinned.set(String((e.data as Record<string, unknown>).path ?? ""), true);
-    if (e.type === "context/unpinned") pinned.set(String((e.data as Record<string, unknown>).path ?? ""), false);
+    const sourceEventSeq = Number((e.data as Record<string, unknown>).sourceEventSeq);
+    if (!Number.isSafeInteger(sourceEventSeq)) continue;
+    if (e.type === "context/pinned") pinned.set(sourceEventSeq, true);
+    if (e.type === "context/unpinned") pinned.set(sourceEventSeq, false);
   }
-  const pinnedPaths = [...pinned.entries()].filter(([, v]) => v).map(([k]) => k);
+  const pinnedMessages = [...pinned.entries()]
+    .filter(([, active]) => active)
+    .map(([seq]) => events.find((event) => event.seq === seq))
+    .filter((event): event is SessionEvent =>
+      !!event && (event.type === "user/message" || event.type === "assistant/message"));
   const activeModel = model.contextUsage?.model ?? model.turn?.model ?? session.model;
   const descriptor = activeModel
     ? models.find((candidate) =>
@@ -92,9 +98,12 @@ function ContextView() {
         <span className="mono">{model.totals.cost > 0 ? fmtCost(model.totals.cost) : "—"}</span>
       </div>
       <div className="stat-label">Pinned</div>
-      {pinnedPaths.length === 0 && <div className="muted" style={{ fontSize: 12.5 }}>Nothing pinned yet.</div>}
-      {pinnedPaths.map((p) => (
-        <div key={p} className="pinned-file mono">{p}</div>
+      {pinnedMessages.length === 0 && <div className="muted" style={{ fontSize: 12.5 }}>Nothing pinned yet.</div>}
+      {pinnedMessages.map((event) => (
+        <div key={event.seq} className="pinned-file">
+          <span className="mono">#{event.seq}</span>{" "}
+          {String((event.data as Record<string, unknown>).text ?? "").slice(0, 120)}
+        </div>
       ))}
     </div>
   );

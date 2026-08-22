@@ -29,6 +29,82 @@ export interface AttentionCounts { questions: number; permissions: number }
 
 export interface SearchHit { sessionId: string; field: "message"; snippet: string }
 
+export interface PinnedMessageContext {
+  sourceEventSeq: number;
+  role: "user" | "assistant";
+  text: string;
+}
+
+/** Fold pin/unpin events against their canonical message source rows. */
+export function activePinnedMessages(events: readonly SessionEvent[]): PinnedMessageContext[] {
+  const active = new Map<number, boolean>();
+  for (const event of events) {
+    if (event.type !== "context/pinned" && event.type !== "context/unpinned") continue;
+    const seq = Number((event.data as { sourceEventSeq?: unknown }).sourceEventSeq);
+    if (Number.isSafeInteger(seq) && seq > 0) active.set(seq, event.type === "context/pinned");
+  }
+  const bySeq = new Map(events.map((event) => [event.seq, event]));
+  const out: PinnedMessageContext[] = [];
+  for (const [sourceEventSeq, pinned] of active) {
+    if (!pinned) continue;
+    const source = bySeq.get(sourceEventSeq);
+    if (source?.type !== "user/message" && source?.type !== "assistant/message") continue;
+    const text = (source.data as { text?: unknown }).text;
+    if (typeof text !== "string" || !text.trim()) continue;
+    out.push({
+      sourceEventSeq,
+      role: source.type === "user/message" ? "user" : "assistant",
+      text,
+    });
+  }
+  return out.sort((a, b) => a.sourceEventSeq - b.sourceEventSeq);
+}
+
+/** Latest upstream compaction not already carried by an admitted user turn. */
+export function unrestoredCompactionSeq(events: readonly SessionEvent[]): number | null {
+  let latest = 0;
+  const restored = new Set<number>();
+  for (const event of events) {
+    if (event.type === "session/compacted") latest = event.seq;
+    if (event.type === "user/message") {
+      const seq = Number(
+        (event.data as { compactionRecovery?: { compactionSeq?: unknown } })
+          .compactionRecovery?.compactionSeq,
+      );
+      if (Number.isSafeInteger(seq) && seq > 0) restored.add(seq);
+    }
+  }
+  return latest > 0 && !restored.has(latest) ? latest : null;
+}
+
+export function compactionRecoveryText(input: {
+  compactionSeq: number;
+  objective?: string;
+  pinned: readonly PinnedMessageContext[];
+}): string {
+  const lines = [
+    `<polyth-compaction-recovery compaction-seq="${input.compactionSeq}">`,
+    "The upstream session compacted. Restore the durable context below before handling the new request.",
+  ];
+  if (input.objective?.trim()) {
+    lines.push("", "Active objective:", input.objective.trim());
+  }
+  if (input.pinned.length > 0) {
+    lines.push("", "User-pinned context:");
+    for (const pin of input.pinned) {
+      lines.push(
+        `[${pin.role} message, source event ${pin.sourceEventSeq}]`,
+        pin.text,
+      );
+    }
+  }
+  lines.push("</polyth-compaction-recovery>");
+  return lines.join("\n");
+}
+
+export const recoveredUserText = (text: string, recoveryContext?: string): string =>
+  recoveryContext ? `${recoveryContext}\n\n${text}` : text;
+
 export interface Store extends SessionPersistence {
   exportJsonl(sessionId: string): Promise<string>;
   // -- durable delivery queue (WP3) --
@@ -1182,7 +1258,13 @@ export function deriveMessages(events: SessionEvent[]): ModelMessage[] {
     const d = ev.data as Record<string, JsonObject>;
     switch (ev.type) {
       case "user/message":
-        pushText("user", String(d.text ?? ""));
+        pushText(
+          "user",
+          recoveredUserText(
+            String(d.text ?? ""),
+            typeof d.recoveryContext === "string" ? d.recoveryContext : undefined,
+          ),
+        );
         pushUserFiles(d.attachments);
         break;
       case "assistant/message": {

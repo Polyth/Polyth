@@ -3,7 +3,13 @@ import { mkdirSync, readFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createContext, loadPlugin } from "@polyth/kernel";
-import { createStore, deriveMessages } from "@polyth/session";
+import {
+  activePinnedMessages,
+  compactionRecoveryText,
+  createStore,
+  deriveMessages,
+  unrestoredCompactionSeq,
+} from "@polyth/session";
 import { CAP, type AgentRuntime, type Disposable, type JsonObject, type RuntimeEvent, type SessionEvent, type SessionProjection, type WalkthroughSource } from "@polyth/contracts";
 import {
   createBrowserToolBridge,
@@ -50,6 +56,7 @@ import { createHttpServer, type RouteHandler } from "./http.ts";
 import { packageRoutes } from "./routes/packages.ts";
 import { pluginAssetRoutes } from "./routes/pluginAssets.ts";
 import { goalRoutes } from "./routes/goals.ts";
+import { contextRoutes } from "./routes/context.ts";
 import { orgRoutes } from "./routes/org.ts";
 import { workspaceRoutes } from "./routes/workspace.ts";
 import { gitRoutes } from "./routes/git.ts";
@@ -462,6 +469,20 @@ export async function boot(opts: BootOptions = {}) {
       };
     },
     hooks: {
+      beforeTurn: async (sessionId, events) => {
+        const compactionSeq = unrestoredCompactionSeq(events);
+        if (compactionSeq === null) return null;
+        const goal = await ensureGoalState(sessionId);
+        const objective = goal?.status === "active" ? goal.objective : undefined;
+        const pinned = activePinnedMessages(events);
+        if (!objective && pinned.length === 0) return null;
+        return {
+          recoveryContext: compactionRecoveryText({ compactionSeq, objective, pinned }),
+          compactionSeq,
+          goalRestored: objective !== undefined,
+          pinnedSourceSeqs: pinned.map((item) => item.sourceEventSeq),
+        };
+      },
       onTurnCompleted: (sessionId, text) => {
         void (async () => {
           const state = await ensureGoalState(sessionId);
@@ -930,6 +951,7 @@ export async function boot(opts: BootOptions = {}) {
       return false;
     },
     goalRoutes(goals),
+    contextRoutes(sessions),
     orgRoutes({ projects, sessions, store }),
     workspaceRoutes({ projects, files, sessions }),
     assistRoutes({

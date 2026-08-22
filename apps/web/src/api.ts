@@ -538,6 +538,10 @@ export const api = {
     jfetch<SessionEvent>(`/api/sessions/${id}/rewind`, json("POST", { atSeq })),
   clearRewind: (id: string) =>
     jfetch<SessionEvent>(`/api/sessions/${id}/rewind/clear`, { method: "POST" }),
+  pinContext: (id: string, sourceEventSeq: number) =>
+    jfetch<SessionEvent>(`/api/sessions/${id}/context/pins/${sourceEventSeq}`, { method: "POST" }),
+  unpinContext: (id: string, sourceEventSeq: number) =>
+    jfetch<SessionEvent>(`/api/sessions/${id}/context/pins/${sourceEventSeq}`, { method: "DELETE" }),
   runShell: (id: string, command: string) =>
     jfetch<ShellTurnResult>(`/api/sessions/${id}/shell`, json("POST", { command })),
   archive: (id: string) => jfetch<void>(`/api/sessions/${id}/archive`, { method: "POST" }),
