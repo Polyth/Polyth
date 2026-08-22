@@ -130,13 +130,13 @@ function messageActionEntries(
     });
   };
   const entries: MessageActionEntry[] = [
-    { key: "md", label: "MD", name: copyActionName(role, "markdown"), run: () => doCopy("markdown") },
-    { key: "json", label: "JSON", name: copyActionName(role, "json"), run: () => doCopy("json") },
+    { key: "md", label: "Copy Markdown", name: copyActionName(role, "markdown"), run: () => doCopy("markdown") },
+    { key: "json", label: "Copy JSON", name: copyActionName(role, "json"), run: () => doCopy("json") },
   ];
   if (m.kind === "user" && opts.onRevert) {
     entries.push({
       key: "revert",
-      label: "Revert and edit",
+      label: "Revert & edit",
       name: revertActionName(m.time),
       run: () => opts.onRevert?.(m),
       ...(opts.revert && !opts.revert.enabled ? { disabledReason: opts.revert.reason } : {}),
@@ -146,7 +146,7 @@ function messageActionEntries(
   if (m.kind === "user" && opts.onFork) {
     entries.push({
       key: "fork",
-      label: "Fork and edit",
+      label: "Fork & edit",
       name: forkActionName(m.time),
       run: () => opts.onFork?.(m),
       ...(opts.fork && !opts.fork.enabled ? { disabledReason: opts.fork.reason } : {}),
@@ -168,6 +168,7 @@ function ActionButton({ entry, className }: { entry: MessageActionEntry; classNa
       className={className}
       aria-label={entry.name}
       title={entry.disabledReason ?? entry.name}
+      data-tooltip={entry.disabledReason ?? entry.label}
       disabled={entry.disabledReason !== undefined}
       onClick={entry.run}
       {...(entry.dataAttr ?? {})}
@@ -263,18 +264,19 @@ function MessageMeta({ m, announce, onRevert, onFork, revert, fork }: {
       <div className="msg-meta">
         <time className="msg-time" dateTime={timeIso(t)} aria-label={name}>{timeShort(t)}</time>
         <div className="msg-actions">
-          {entries.map((entry) => <ActionButton key={entry.key} entry={entry} className="small-btn" />)}
+          {entries.map((entry) => <ActionButton key={entry.key} entry={entry} className="msg-action-btn" />)}
         </div>
         <button
           ref={openerRef}
           className="msg-actions-entry"
           aria-label={actionsMenuName(m)}
+          title={actionsMenuName(m)}
           aria-haspopup="menu"
           aria-expanded={menuOpen}
           data-actions-seq={m.eventSeq}
           onClick={() => setMenuOpen((v) => !v)}
         >
-          ⋯
+          <Icon.more />
         </button>
         <SlotHost
           slot="session.message.actions"
@@ -302,6 +304,7 @@ function MessageMeta({ m, announce, onRevert, onFork, revert, fork }: {
                       ? <Icon.fork />
                       : <Icon.rewind />}
               </span>
+              <span className="msg-actions-item-label">{entry.label}</span>
             </button>
           ))}
         </div>

@@ -14,7 +14,7 @@ test("working status is compact and does not claim repository indexing", () => {
   assert.match(css, /\.focus-working-spinner\s*\{[^}]*width:\s*7px;[^}]*animation:\s*focus-working-pulse/s);
 });
 
-test("conversation rows omit visible role titles and keep subtle, opposed alignment", () => {
+test("conversation rows omit role chrome and keep assistant prose unboxed", () => {
   const timeline = read("../src/components/Timeline.tsx");
   const css = read("../src/styles.css");
 
@@ -23,14 +23,29 @@ test("conversation rows omit visible role titles and keep subtle, opposed alignm
   assert.match(css, /\.msg\.user\s*\{\s*align-items:\s*flex-end;/);
   assert.match(css, /\.msg\.assistant\s*\{\s*align-items:\s*flex-start;/);
   assert.match(css, /\.msg\.user \.bubble\s*\{[^}]*background:\s*color-mix/s);
-  assert.match(css, /\.msg\.assistant > \.bubble\s*\{[^}]*background:\s*color-mix/s);
+  assert.match(css, /\.msg\.assistant > \.bubble\s*\{[^}]*border:\s*0;[^}]*background:\s*transparent;/s);
 });
 
-test("thinking and command blocks share the light collapsible surface", () => {
+test("message actions use polished icon controls, visible labels, and tooltips", () => {
+  const timeline = read("../src/components/Timeline.tsx");
+  const css = read("../src/styles.css");
+
+  assert.match(timeline, /className="msg-action-btn"/);
+  assert.match(timeline, /data-tooltip=\{entry\.disabledReason \?\? entry\.label\}/);
+  assert.match(timeline, /<Icon\.more \/>/);
+  assert.match(timeline, /className="msg-actions-item-label">\{entry\.label\}/);
+  assert.match(css, /\.msg-action-btn\s*\{[^}]*border:\s*1px solid transparent;[^}]*background:\s*transparent;/s);
+  assert.match(css, /\.msg-action-btn::after\s*\{[^}]*content:\s*attr\(data-tooltip\);/s);
+  assert.match(css, /\.msg\.assistant \.msg-actions\s*\{[^}]*opacity:\s*\.72;[^}]*pointer-events:\s*auto;/s);
+  assert.match(css, /@media \(max-width:\s*480px\)\s*\{[^}]*\.msg-actions\s*\{\s*display:\s*none;/s);
+});
+
+test("thinking stays unboxed while command output keeps a light boundary", () => {
   const timeline = read("../src/components/Timeline.tsx");
   const css = read("../src/styles.css");
 
   assert.match(timeline, /<details className="reasoning" open=\{open\}>/);
   assert.match(timeline, /<details className=\{`tool-card/);
-  assert.match(css, /\.reasoning, \.tool-card\s*\{[^}]*background:\s*color-mix/s);
+  assert.match(css, /\.reasoning\s*\{[^}]*border:\s*0;[^}]*background:\s*transparent;/s);
+  assert.match(css, /\.tool-card\s*\{[^}]*border-color:\s*var\(--border-soft\);[^}]*background:\s*color-mix/s);
 });
