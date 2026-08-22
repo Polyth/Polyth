@@ -35,6 +35,13 @@ export type SessionUsageMetric =
   | "showOutput"
   | "showTotal";
 
+interface UsageMetricRow {
+  id: string;
+  label: string;
+  value: string;
+  detail?: string;
+}
+
 const SESSION_USAGE_METRICS: ReadonlyArray<{ id: SessionUsageMetric; label: string }> = [
   { id: "showContext", label: "Context window" },
   { id: "showCost", label: "Session cost" },
@@ -58,7 +65,7 @@ export function SessionUsageStats({
 }) {
   const total = model.totals.input + model.totals.output;
   const gauge = contextGauge(model, contextTokens);
-  const rows: Array<{ id: string; label: string; value: string; detail?: string } | null> = [
+  const rows: Array<UsageMetricRow | null> = [
     usageMetricVisible(config, "showContext")
       ? {
           id: "context",
@@ -83,7 +90,7 @@ export function SessionUsageStats({
     usageMetricVisible(config, "showCost")
       ? { id: "cost", label: "Cost", value: model.totals.cost > 0 ? fmtCost(model.totals.cost) : "—" }
       : null,
-  ].filter((row): row is NonNullable<typeof row> => row !== null);
+  ].filter((row): row is UsageMetricRow => row !== null);
   return (
     <div className="widget-stat-grid usage-session-stats">
       {rows.map((row) => (
