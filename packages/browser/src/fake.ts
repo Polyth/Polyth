@@ -37,6 +37,7 @@ export function createFakeDriver(web: FakeWeb): BrowserDriver {
       const typed = new Map<string, string>();
       const listeners = new Set<(ev: DriverPageEvent) => void>();
       let viewport = { width: opts.width, height: opts.height };
+      let colorScheme = opts.colorScheme;
       let closed = false;
       const emit = (ev: DriverPageEvent) => { for (const l of [...listeners]) l(ev); };
 
@@ -108,13 +109,16 @@ export function createFakeDriver(web: FakeWeb): BrowserDriver {
         async resize(next) {
           viewport = { ...next };
         },
+        async emulateColorScheme(next) {
+          colorScheme = next;
+        },
         async inspect(selector) {
           return {
             selector,
             tag: selector.startsWith("input") ? "input" : "div",
             text: pageOf(nav().url).text ?? "",
             rect: { x: 0, y: 0, width: viewport.width, height: viewport.height },
-            styles: { display: "block", position: "static" },
+            styles: { display: "block", position: "static", colorScheme },
           };
         },
         async screenshot() {

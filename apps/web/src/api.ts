@@ -51,6 +51,7 @@ export interface BrowserSessionDto {
   title: string;
   status: "starting" | "ready" | "closed" | "failed";
   viewport: { width: number; height: number; deviceScaleFactor: number };
+  colorScheme: "light" | "dark" | "no-preference";
   revision: number;
   engine: "chromium" | "fake" | "unavailable";
 }
@@ -72,6 +73,7 @@ export type BrowserActionDto =
   | { kind: "forward" }
   | { kind: "reload" }
   | { kind: "resize"; viewport: { width: number; height: number } }
+  | { kind: "color-scheme"; colorScheme: "light" | "dark" | "no-preference" }
   | { kind: "inspect"; selector: string };
 
 export interface WorkspaceSearchItemDto {
@@ -1069,7 +1071,13 @@ export const api = {
     jfetch<{ available: boolean; engine: "chromium" | "fake" | null; reason?: string }>(`/api/browser/capability`).catch(
       () => ({ available: false, engine: null, reason: "server unreachable" }),
     ),
-  browserCreate: (input: { projectId: string; sessionId?: string; url?: string; viewport?: { width: number; height: number } }) =>
+  browserCreate: (input: {
+    projectId: string;
+    sessionId?: string;
+    url?: string;
+    viewport?: { width: number; height: number };
+    colorScheme?: "light" | "dark" | "no-preference";
+  }) =>
     jfetch<BrowserSessionDto>(`/api/browser/sessions`, json("POST", input)),
   browserGet: (id: string) =>
     jfetch<BrowserSessionDto>(`/api/browser/sessions/${encodeURIComponent(id)}`),
@@ -1084,7 +1092,14 @@ export const api = {
       `/api/browser/sessions/${encodeURIComponent(id)}/actions`, json("POST", { action, actor }),
     ),
   browserObserve: (id: string, includeScreenshot = false, selector?: string) =>
-    jfetch<{ url: string; title: string; text: string; accessibilityDigest: string; screenshotRef?: string }>(
+    jfetch<{
+      url: string;
+      title: string;
+      text: string;
+      accessibilityDigest: string;
+      screenshotRef?: string;
+      screenshot?: { mime: string; data: string };
+    }>(
       `/api/browser/sessions/${encodeURIComponent(id)}/observe`, json("POST", {
         includeScreenshot,
         ...(selector ? { selector } : {}),

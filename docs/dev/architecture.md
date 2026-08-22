@@ -51,7 +51,7 @@ packages/session (node:sqlite WAL: events + projections + queue/org/profiles)
 | `knowledge` | Notes/plans/memories store (own SQLite) with revisions, tags, search; attaching logs `knowledge/attached` (exact revision + digest) before the model sees it. |
 | `github` | `gh`-CLI-backed repo/issues/PR list, PR detail/files/diff/comments, failure-first checks aggregation, guarded review submit + risk/confidence labels. No tokens stored. |
 | `usage` | Provider-neutral quota adapter contract: jittered polling, in-flight dedup, backoff, bounded last-good persistence, secret redaction, pace/prediction from multi-sample history. Real providers plug in via `data/quota-providers.json` (`createHttpQuotaProvider`): HTTP endpoint + bearer credential referenced by env-var name, so tokens never sit in config or reach the browser. |
-| `browser` | Agent-drivable Chromium (playwright-core) or fake driver: URL/origin policy (blocks unsafe schemes, private IPs, DNS rebinding, downloads), stale-frame rejection, redacted observations, JPEG frame stream, honest `unavailable` engine state. |
+| `browser` | Agent-drivable Chromium (playwright-core) or fake driver: URL/origin policy (blocks unsafe schemes, private IPs, DNS rebinding, downloads), stale-frame rejection, redacted observations, viewport + color-scheme emulation, JPEG frame stream, honest `unavailable` engine state. |
 | `dictation` | Server streaming dictation protocol: lifecycle via REST, PCM chunks via `/ws` with acks + `(id,seq)` dedupe + replay-from-last-ack, `SttAdapter` seam plus `createWhisperSttAdapter` (finalize-once WAV upload to any OpenAI-compatible `/audio/transcriptions` endpoint); the service takes an adapter *provider* so capability follows live settings. |
 | `models` | Model preference logic: favorites, provider/name/recent sort, search (shared by picker + settings). |
 | `hotkeys` | Keymap model: default bindings, user overrides, conflict detection, sequence matching. |
@@ -292,7 +292,8 @@ ignored by the web reducer (never crash).
   `AssistStrip` (F9: fresh recap under the last message + a dismissible
   suggestion chip that fills the composer and never sends),
   `ScheduleView`, `GoalsView`/`GoalStrip`, `MultiRunView`, `FusionView`,
-  `WalkthroughView`/`GeneratedWalkthrough`, `PreviewView` (iframe + browser driving),
+  `WalkthroughView`/`GeneratedWalkthrough`, `PreviewView` (iframe + browser driving,
+  device/color-scheme emulation, pointer/keyboard rectangular annotations, screenshot-to-chat),
   `TerminalView` (F12: tab strip with double-click rename and confirm-close
   while running; reconnects with backoff reusing the same terminal id, replay
   frames replace the local buffer so reattach never duplicates),
@@ -315,8 +316,9 @@ ignored by the web reducer (never crash).
   `/api/settings/*` routes.
 - `attachments.ts` (F2) — pending composer pills per session
   (`polyth.draft.att.<sessionId>`; the draft store owns text + pills): stat-verified
-  project-file/range refs, `_inbox/` uploads for drops/pastes, GitHub PR/issue URL
-  pills gated on the project's remote (`/api/github/repo`). Rendered by
+  project-file/range refs, `_inbox/` uploads for drops/pastes and annotated browser
+  captures, GitHub PR/issue URL pills gated on the project's remote
+  (`/api/github/repo`). Rendered by
   `AttachmentPills` (composer: removable; timeline: read-only) and the shared
   `FileRowActions` menu (Open / Copy path / Add to chat) on Files/Changes rows.
 - `notifications.ts` — kind-filtered, allowlisted-template, replay-deduped web

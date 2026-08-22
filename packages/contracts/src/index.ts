@@ -1291,6 +1291,8 @@ export interface InstalledPluginDto {
 
 // ---------------------------------------------------------------- browser (WP14)
 
+export type BrowserColorScheme = "light" | "dark" | "no-preference";
+
 export interface BrowserSessionDto {
   id: string;
   projectId: string;
@@ -1299,6 +1301,7 @@ export interface BrowserSessionDto {
   title: string;
   status: "starting" | "ready" | "closed" | "failed";
   viewport: { width: number; height: number; deviceScaleFactor: number };
+  colorScheme: BrowserColorScheme;
   revision: number;
   /** honest engine state: "chromium" when driven, "unavailable" for fallback */
   engine: "chromium" | "fake" | "unavailable";
@@ -1321,6 +1324,7 @@ export type BrowserAction =
   | { kind: "forward" }
   | { kind: "reload" }
   | { kind: "resize"; viewport: { width: number; height: number } }
+  | { kind: "color-scheme"; colorScheme: BrowserColorScheme }
   | { kind: "inspect"; selector: string };
 
 export interface BrowserObservation {

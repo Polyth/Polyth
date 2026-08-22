@@ -59,7 +59,7 @@ test("create + navigate share one context; frames carry increasing revisions", a
   await svc.close(s.id);
 });
 
-test("history, resize, text targets, scoped observations, and inspect map through the service", async () => {
+test("history, device resizing, color scheme, scoped observations, and inspect map through the service", async () => {
   const svc = createBrowserService({
     driver: createFakeDriver({
       pages: {
@@ -69,15 +69,19 @@ test("history, resize, text targets, scoped observations, and inspect map throug
     }),
     allowedOrigins: () => ["http://127.0.0.1:5173"],
   });
-  const s = await svc.create({ projectId: "p1", url: HOME });
+  const s = await svc.create({ projectId: "p1", url: HOME, colorScheme: "dark" });
+  assert.equal(s.colorScheme, "dark");
   const clicked = await svc.action(s.id, { kind: "click", target: { text: "Next", exact: true } }, "agent");
   assert.equal(clicked.session.url, `${HOME}next`);
   assert.equal((await svc.action(s.id, { kind: "back" }, "agent")).session.url, HOME);
   assert.equal((await svc.action(s.id, { kind: "forward" }, "agent")).session.url, `${HOME}next`);
   const resized = await svc.action(s.id, { kind: "resize", viewport: { width: 390, height: 844 } }, "agent");
   assert.deepEqual(resized.session.viewport, { width: 390, height: 844, deviceScaleFactor: 1 });
+  const recolored = await svc.action(s.id, { kind: "color-scheme", colorScheme: "light" }, "user");
+  assert.equal(recolored.session.colorScheme, "light");
   const inspected = await svc.action(s.id, { kind: "inspect", selector: "main" }, "agent");
   assert.equal((inspected.result as { selector?: string })?.selector, "main");
+  assert.equal((inspected.result as { styles?: { colorScheme?: string } })?.styles?.colorScheme, "light");
   assert.doesNotMatch(String((inspected.result as { text?: string })?.text), /sk-verysecret123/);
   assert.match(String((inspected.result as { text?: string })?.text), /\[redacted\]/i);
   assert.match((await svc.observe(s.id, { selector: "main" })).text, /second page/);

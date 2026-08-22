@@ -5,18 +5,26 @@
 import { useEffect, useRef, useState } from "react";
 import type { PreviewState } from "@polyth/contracts";
 import { api, type BrowserSessionDto } from "../api.ts";
+import { attachUpload, removeAttachment } from "../attachments.ts";
+import {
+  annotationViewportRect,
+  BROWSER_DEVICE_PRESETS,
+  containedImageRect,
+  devicePresetForViewport,
+  normalizedPointInImage,
+  normalizedRectInImage,
+  renderBrowserCapture,
+  type BrowserAnnotation,
+  type BrowserDevicePresetId,
+  type ImageRect,
+} from "../browserPreview.ts";
+import { sendMessage } from "../init.ts";
 import { useStore } from "../store.ts";
 import EmptyState from "./EmptyState.tsx";
 import { usePaneVisible } from "../workspace/paneVisibility.ts";
 
 type InspectorTab = "snapshot" | "console" | "activity";
-type DeviceSize = "mobile" | "tablet" | "desktop";
-
-const DEVICE_VIEWPORTS: Record<DeviceSize, { width: number; height: number }> = {
-  mobile: { width: 390, height: 844 },
-  tablet: { width: 768, height: 1024 },
-  desktop: { width: 1440, height: 900 },
-};
+type ColorScheme = "light" | "dark" | "no-preference";
 
 interface Capability {
   available: boolean;
@@ -45,10 +53,15 @@ export default function PreviewView() {
   const [typeText, setTypeText] = useState("");
   const [snapshotText, setSnapshotText] = useState("");
   const [inspectSelector, setInspectSelector] = useState("");
-  const [deviceSize, setDeviceSize] = useState<DeviceSize>("desktop");
+  const [annotating, setAnnotating] = useState(false);
+  const [annotations, setAnnotations] = useState<BrowserAnnotation[]>([]);
+  const [imageRect, setImageRect] = useState<ImageRect>({ left: 0, top: 0, width: 0, height: 0 });
+  const [captureBusy, setCaptureBusy] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
   const revisionRef = useRef(0);
   const imgRef = useRef<HTMLImageElement>(null);
+  const nextAnnotationId = useRef(1);
+  const annotationDragStart = useRef<{ x: number; y: number } | null>(null);
 
   const refresh = async () => {
     if (!projectId) return;
@@ -110,8 +123,13 @@ export default function PreviewView() {
             event?: { kind: string; message?: string; url?: string; actor?: string };
           };
           if (msg.type === "browser/frame" && msg.data) {
-            revisionRef.current = msg.revision ?? 0;
-            setFrame({ revision: msg.revision ?? 0, src: `data:${msg.mime};base64,${msg.data}` });
+            const revision = msg.revision ?? 0;
+            if (revision !== revisionRef.current) {
+              setAnnotations([]);
+              nextAnnotationId.current = 1;
+            }
+            revisionRef.current = revision;
+            setFrame({ revision, src: `data:${msg.mime};base64,${msg.data}` });
           } else if (msg.type === "browser/event" && msg.event) {
             const e = msg.event;
             setActivity((prev) => [...prev.slice(-99), `${e.kind}${e.actor ? ` (${e.actor})` : ""}${e.url ? ` ${e.url}` : ""}${e.message ? ` — ${e.message}` : ""}`]);
@@ -132,6 +150,27 @@ export default function PreviewView() {
       wsRef.current?.close();
     };
   }, [browser?.id]);
+
+  useEffect(() => {
+    const image = imgRef.current;
+    if (!image || !browser) return;
+    const update = () => {
+      setImageRect(containedImageRect(
+        image.clientWidth,
+        image.clientHeight,
+        browser.viewport.width,
+        browser.viewport.height,
+      ));
+    };
+    update();
+    if (typeof ResizeObserver === "undefined") {
+      window.addEventListener("resize", update);
+      return () => window.removeEventListener("resize", update);
+    }
+    const observer = new ResizeObserver(update);
+    observer.observe(image);
+    return () => observer.disconnect();
+  }, [browser?.viewport.width, browser?.viewport.height, frame?.revision]);
 
   // Console poll only while the inspector shows it AND the pane is visible.
   useEffect(() => {
@@ -187,6 +226,8 @@ export default function PreviewView() {
     await api.browserClose(browser.id).catch(() => {});
     setBrowser(null);
     setFrame(null);
+    setAnnotations([]);
+    setAnnotating(false);
     revisionRef.current = 0;
   };
 
@@ -254,27 +295,110 @@ export default function PreviewView() {
     }
   };
 
-  const capture = async () => {
-    if (!browser) return;
+  const annotationPoint = (clientX: number, clientY: number) => {
+    const image = imgRef.current;
+    if (!image) return null;
+    const bounds = image.getBoundingClientRect();
+    return { x: clientX - bounds.left, y: clientY - bounds.top };
+  };
+
+  const updateAnnotationSelection = (end: { x: number; y: number }) => {
+    const start = annotationDragStart.current;
+    if (!start) return;
+    const rect = normalizedRectInImage(start, end, imageRect);
+    if (!rect) return;
+    setAnnotations((current) => [{
+      id: current[0]?.id ?? nextAnnotationId.current++,
+      ...rect,
+      note: current[0]?.note ?? "",
+    }]);
+  };
+
+  const beginAnnotation = (event: React.PointerEvent<HTMLImageElement>) => {
+    if (!annotating) return;
+    const point = annotationPoint(event.clientX, event.clientY);
+    if (!point || !normalizedPointInImage(point.x, point.y, imageRect)) return;
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    annotationDragStart.current = point;
+    setAnnotations([]);
+  };
+
+  const moveAnnotation = (event: React.PointerEvent<HTMLImageElement>) => {
+    if (!annotating || !annotationDragStart.current) return;
+    const point = annotationPoint(event.clientX, event.clientY);
+    if (!point) return;
+    event.preventDefault();
+    updateAnnotationSelection(point);
+  };
+
+  const endAnnotation = (event: React.PointerEvent<HTMLImageElement>) => {
+    if (!annotating || !annotationDragStart.current) return;
+    const point = annotationPoint(event.clientX, event.clientY);
+    if (point) updateAnnotationSelection(point);
+    annotationDragStart.current = null;
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+  };
+
+  const captureToChat = async () => {
+    if (!browser || !projectId || !activeSessionId) return;
+    const annotation = annotations[0];
+    const comment = annotation?.note.trim() ?? "";
+    if (!annotation || annotation.width <= 0 || annotation.height <= 0 || !comment) return;
+    const targetProjectId = projectId;
+    const targetSessionId = activeSessionId;
+    setCaptureBusy(true);
+    setError("");
     try {
       const observation = await api.browserObserve(browser.id, true);
-      setSnapshotText(observation.screenshotRef
-        ? `Captured the current browser frame as ${observation.screenshotRef}.`
-        : "The browser returned no capture.");
+      if (!observation.screenshot) throw new Error("The browser returned no capture.");
+      const source = `data:${observation.screenshot.mime};base64,${observation.screenshot.data}`;
+      const file = await renderBrowserCapture(source, [{ ...annotation, note: comment }]);
+      const attached = await attachUpload(targetProjectId, targetSessionId, file);
+      if (!attached.ok) throw new Error(attached.reason);
+      const sent = await sendMessage(comment, undefined, undefined, {
+        targetSessionId,
+        attachments: [attached.ref],
+      });
+      if (!sent) {
+        throw new Error("The annotated screenshot is attached to the draft, but the message was not sent.");
+      }
+      removeAttachment(targetSessionId, attached.ref.id);
+      const selected = annotationViewportRect(annotation, browser.viewport);
+      setSnapshotText(
+        `Sent ${attached.ref.name} to chat with the selected ${selected.width}×${selected.height} area.`,
+      );
       setTab("snapshot");
       setInspectorOpen(true);
+      setAnnotations([]);
+      setAnnotating(false);
     } catch (e) {
       setError(String(e));
+    } finally {
+      setCaptureBusy(false);
     }
   };
 
   const clickFrame = (e: React.MouseEvent<HTMLImageElement>) => {
     if (!browser || !frame || !imgRef.current) return;
-    const rect = imgRef.current.getBoundingClientRect();
-    const scaleX = browser.viewport.width / rect.width;
-    const scaleY = browser.viewport.height / rect.height;
-    const x = Math.round((e.clientX - rect.left) * scaleX);
-    const y = Math.round((e.clientY - rect.top) * scaleY);
+    const elementRect = imgRef.current.getBoundingClientRect();
+    const visibleImage = containedImageRect(
+      elementRect.width,
+      elementRect.height,
+      browser.viewport.width,
+      browser.viewport.height,
+    );
+    const point = normalizedPointInImage(
+      e.clientX - elementRect.left,
+      e.clientY - elementRect.top,
+      visibleImage,
+    );
+    if (!point) return;
+    if (annotating) return;
+    const x = Math.round(point.x * browser.viewport.width);
+    const y = Math.round(point.y * browser.viewport.height);
     // the click carries the frame revision it was aimed at (stale clicks 409)
     void act({ kind: "click", target: { point: { x, y }, frameRevision: frame.revision } });
   };
@@ -355,20 +479,46 @@ export default function PreviewView() {
           <>
             <select
               className="browser-device"
-              aria-label="Browser device size"
-              value={deviceSize}
+              aria-label="Browser device preset"
+              value={devicePresetForViewport(browser.viewport.width, browser.viewport.height)}
               onChange={(event) => {
-                const next = event.target.value as DeviceSize;
-                setDeviceSize(next);
-                void act({ kind: "resize", viewport: DEVICE_VIEWPORTS[next] });
+                const preset = BROWSER_DEVICE_PRESETS.find(
+                  (candidate) => candidate.id === event.target.value as BrowserDevicePresetId,
+                );
+                if (preset) void act({ kind: "resize", viewport: { width: preset.width, height: preset.height } });
               }}
             >
-              <option value="mobile">Mobile</option>
-              <option value="tablet">Tablet</option>
-              <option value="desktop">Desktop</option>
+              {BROWSER_DEVICE_PRESETS.map((preset) => (
+                <option key={preset.id} value={preset.id}>
+                  {preset.label} · {preset.width}×{preset.height}
+                </option>
+              ))}
+            </select>
+            <select
+              className="browser-scheme"
+              aria-label="Emulated color scheme"
+              value={browser.colorScheme}
+              onChange={(event) => void act({
+                kind: "color-scheme",
+                colorScheme: event.target.value as ColorScheme,
+              })}
+            >
+              <option value="no-preference">Scheme: default</option>
+              <option value="light">Scheme: light</option>
+              <option value="dark">Scheme: dark</option>
             </select>
             <button className="small-btn" onClick={() => void takeSnapshot()} title="Read visible text and accessibility details">Snapshot</button>
-            <button className="small-btn" onClick={() => void capture()} title="Capture the current browser frame">Capture</button>
+            <button
+              className={`small-btn ${annotating ? "active" : ""}`}
+              aria-pressed={annotating}
+              onClick={() => {
+                setAnnotating((current) => !current);
+                setAnnotations([]);
+              }}
+              title="Select an area of the current frame and comment on it"
+            >
+              Annotate
+            </button>
             <button className="small-btn" aria-pressed={agentPaused} onClick={() => void togglePause()} title="Pause or resume agent control of this browser">
               {agentPaused ? "Resume agent" : "Pause agent"}
             </button>
@@ -397,16 +547,49 @@ export default function PreviewView() {
           {browserMode ? (
             frame ? (
               <div className="browser-frame-wrap">
-                <img
-                  ref={imgRef}
-                  src={frame.src}
-                  alt={`Browser: ${browser?.title || browser?.url || ""}`}
-                  className="browser-frame-img"
-                  onClick={clickFrame}
-                />
+                <div className="browser-frame-stage">
+                  <img
+                    ref={imgRef}
+                    src={frame.src}
+                    alt={`Browser: ${browser?.title || browser?.url || ""}`}
+                    className={`browser-frame-img ${annotating ? "annotating" : ""}`}
+                    draggable={false}
+                    onClick={clickFrame}
+                    onPointerDown={beginAnnotation}
+                    onPointerMove={moveAnnotation}
+                    onPointerUp={endAnnotation}
+                    onPointerCancel={() => { annotationDragStart.current = null; }}
+                    onLoad={(event) => setImageRect(containedImageRect(
+                      event.currentTarget.clientWidth,
+                      event.currentTarget.clientHeight,
+                      browser.viewport.width,
+                      browser.viewport.height,
+                    ))}
+                  />
+                  <div className="browser-annotation-layer" aria-label="Browser annotations">
+                    {annotations.map((annotation, index) => annotation.width > 0 && annotation.height > 0 ? (
+                      <div
+                        key={annotation.id}
+                        className="browser-annotation-box"
+                        style={{
+                          left: imageRect.left + annotation.x * imageRect.width,
+                          top: imageRect.top + annotation.y * imageRect.height,
+                          width: annotation.width * imageRect.width,
+                          height: annotation.height * imageRect.height,
+                        }}
+                        aria-label={`Annotation ${index + 1}${annotation.note ? `: ${annotation.note}` : ""}`}
+                        role="img"
+                      >
+                        <span>{index + 1}</span>
+                      </div>
+                    ) : null)}
+                  </div>
+                </div>
                 <div className="browser-frame-bar">
                   <span className="mono">{browser?.url}</span>
-                  <span className="muted">rev {frame.revision} · {browser?.engine}</span>
+                  <span className="muted">
+                    rev {frame.revision} · {browser?.engine} · {browser.viewport.width}×{browser.viewport.height}
+                  </span>
                   <input
                     value={typeText}
                     onChange={(e) => setTypeText(e.target.value)}
@@ -421,6 +604,68 @@ export default function PreviewView() {
                     aria-label="Type into the page"
                   />
                 </div>
+                {(annotating || annotations.length > 0) && (
+                  <div className="browser-annotation-editor">
+                    <div className="browser-annotation-header">
+                      <span aria-live="polite">
+                        {annotations[0]?.width
+                          ? `Selected ${annotationViewportRect(annotations[0], browser.viewport).width}×${annotationViewportRect(annotations[0], browser.viewport).height}`
+                          : "Drag a rectangle over the preview, then add a comment."}
+                      </span>
+                      {!annotations[0]?.width && (
+                        <button
+                          className="small-btn"
+                          onClick={() => setAnnotations([{
+                            id: nextAnnotationId.current++,
+                            x: 0.25,
+                            y: 0.25,
+                            width: 0.5,
+                            height: 0.5,
+                            note: "",
+                          }])}
+                        >
+                          Select center area
+                        </button>
+                      )}
+                    </div>
+                    <div className="browser-annotation-row">
+                      <label className="sr-only" htmlFor="browser-annotation-comment">Annotation comment</label>
+                      <input
+                        id="browser-annotation-comment"
+                        value={annotations[0]?.note ?? ""}
+                        maxLength={4000}
+                        disabled={!annotations[0]?.width}
+                        onChange={(event) => setAnnotations((current) =>
+                          current[0] ? [{ ...current[0], note: event.target.value }] : current)}
+                        onKeyDown={(event) => {
+                          if (event.key === "Enter" && !event.shiftKey && annotations[0]?.note.trim()) {
+                            event.preventDefault();
+                            void captureToChat();
+                          }
+                        }}
+                        placeholder="Comment on this area…"
+                      />
+                      <button
+                        className="primary-btn"
+                        disabled={captureBusy || !activeSessionId || !annotations[0]?.note.trim()}
+                        onClick={() => void captureToChat()}
+                        title={activeSessionId ? "Send the annotated screenshot to the active chat" : "Open a chat session first"}
+                      >
+                        {captureBusy ? "Sending…" : "Send to chat"}
+                      </button>
+                      <button
+                        className="small-btn"
+                        disabled={captureBusy}
+                        onClick={() => {
+                          setAnnotations([]);
+                          setAnnotating(false);
+                        }}
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
             ) : (
               <EmptyState title="Connecting to browser" description="Waiting for the first controlled-browser frame." />

@@ -54,6 +54,7 @@ export function createChromiumDriver(executablePath: string): BrowserDriver {
       const context = await browser.newContext({
         viewport: { width: opts.width, height: opts.height },
         deviceScaleFactor: opts.deviceScaleFactor,
+        colorScheme: opts.colorScheme,
         acceptDownloads: false,
         javaScriptEnabled: true,
         serviceWorkers: "block",
@@ -180,6 +181,9 @@ export function createChromiumDriver(executablePath: string): BrowserDriver {
         },
         async resize(viewport) {
           await page.setViewportSize(viewport);
+        },
+        async emulateColorScheme(colorScheme) {
+          await page.emulateMedia({ colorScheme });
         },
         async inspect(selector) {
           const loc = page.locator(selector).first();
