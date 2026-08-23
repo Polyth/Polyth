@@ -15,6 +15,7 @@ export const GIT_TOUR: PackageOnboardingTour = {
       title: "Work the repository from a pane",
       body: "Toggle the Source control pane with Mod+Shift+G. Stage or unstage files, write a commit message, review diffs in Unified or Split layout, and manage branches, worktrees, and stashes.",
       highlight: "Source control",
+      highlightWhere: "pane",
       media: { kind: "pattern", pattern: "tiles" },
     },
     {
@@ -22,6 +23,7 @@ export const GIT_TOUR: PackageOnboardingTour = {
       title: "Pending changes at a glance",
       body: "The Workspace files changed widget sits just above the composer, counting changed files and added or removed lines while agents work.",
       highlight: "Workspace files changed",
+      highlightWhere: "composer",
       media: { kind: "pattern", pattern: "rays" },
     },
     {

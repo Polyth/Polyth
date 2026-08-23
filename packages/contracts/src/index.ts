@@ -696,13 +696,24 @@ export interface PackageOnboardingMedia {
   pattern?: string;
 }
 
+/** Where a step's highlighted control lives, so the overlay can caption it
+ * honestly ("In these settings" vs "In the workspace pane" etc.). */
+export type PackageOnboardingHighlightWhere =
+  | "settings"
+  | "workspace"
+  | "pane"
+  | "composer"
+  | "header";
+
 export interface PackageOnboardingStep {
   id: string;
   title: string;
   /** Short plain-text copy; a sentence or two per step. */
   body: string;
-  /** Name of the settings option/control this step explains, if any. */
+  /** Exact UI label of the control this step explains, if any. */
   highlight?: string;
+  /** Location of the highlighted control. Defaults to "settings". */
+  highlightWhere?: PackageOnboardingHighlightWhere;
   media?: PackageOnboardingMedia;
 }
 

@@ -5,11 +5,25 @@
 // Esc dismisses WITHOUT persisting (the tour returns next session); the
 // explicit skip buttons persist through packages/onboarding/prefs.ts.
 import { useEffect, useRef, useSyncExternalStore } from "react";
-import type { PackageOnboardingMedia } from "../packages/onboarding/types.ts";
+import type {
+  PackageOnboardingHighlightWhere,
+  PackageOnboardingMedia,
+} from "../packages/onboarding/types.ts";
 import {
   closePackageTour, getPackageTourState, nextPackageTourStep,
   previousPackageTourStep, setPackageTourStep, subscribePackageTour,
 } from "../packages/onboarding/controller.ts";
+
+/** Caption for the highlight card, keyed by where the control actually lives
+ * (a settings row, a full workspace view, a docked pane, the strip above the
+ * composer, or the header). */
+const HIGHLIGHT_WHERE_LABELS: Record<PackageOnboardingHighlightWhere, string> = {
+  settings: "In these settings",
+  workspace: "In the workspace",
+  pane: "In the workspace pane",
+  composer: "Above the composer",
+  header: "In the workspace header",
+};
 
 const WAVE_BARS = [16, 34, 22, 52, 78, 44, 96, 118, 66, 104, 82, 48, 70, 36, 24, 14];
 const WAVE_ACCENT = new Set([5, 6, 7, 8, 9]);
@@ -202,7 +216,7 @@ export default function PackageTourOverlay() {
             <div className="package-tour-highlight">
               <span className="package-tour-highlight-mark" aria-hidden="true">◎</span>
               <div>
-                <span>In these settings</span>
+                <span>{HIGHLIGHT_WHERE_LABELS[current.highlightWhere ?? "settings"]}</span>
                 <strong>{current.highlight}</strong>
               </div>
             </div>
