@@ -1612,16 +1612,41 @@ html.light .error-banner { color: #a1352b; }
 .browser-history { display: inline-flex; gap: 4px; }
 .browser-toolbar { flex-wrap: wrap; }
 .browser-toolbar .browser-address { min-width: min(320px, 45%); }
-.browser-toolbar select { max-width: 190px; font-size: 11px; padding: 5px 7px; }
-.browser-device { width: 92px; }
+.browser-toolbar select { max-width: 220px; font-size: 11px; padding: 5px 7px; }
+.browser-device { width: 184px; }
+.browser-scheme { width: 126px; }
 .browser-frame-wrap { display: flex; flex-direction: column; width: 100%; height: 100%; }
-.browser-frame-img { flex: 1; min-height: 0; object-fit: contain; background: #fff; cursor: crosshair; width: 100%; }
+.browser-frame-stage { position: relative; flex: 1; min-height: 0; }
+.browser-frame-img {
+  position: absolute; inset: 0; object-fit: contain; background: #fff;
+  cursor: crosshair; width: 100%; height: 100%;
+}
+.browser-frame-img.annotating { cursor: crosshair; touch-action: none; user-select: none; }
+.browser-annotation-layer { position: absolute; inset: 0; pointer-events: none; }
+.browser-annotation-box {
+  position: absolute; z-index: 1; border: 3px solid var(--red);
+  background: color-mix(in srgb, var(--red) 14%, transparent);
+  box-shadow: 0 1px 6px rgb(0 0 0 / .42);
+}
+.browser-annotation-box > span {
+  position: absolute; left: -12px; top: -12px; display: grid; place-items: center;
+  width: 24px; height: 24px; border: 2px solid #fff; border-radius: 50%;
+  color: #fff; background: var(--red); font-size: 11px; font-weight: 750;
+}
 .browser-frame-bar {
   display: flex; align-items: center; gap: 10px; padding: 4px 10px;
   border-top: 1px solid var(--border-soft); font-size: 11px;
 }
 .browser-frame-bar .mono { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 40%; }
 .browser-frame-bar input { flex: 1; min-width: 120px; font-size: 12px; padding: 3px 8px; }
+.browser-annotation-editor {
+  display: flex; flex-direction: column; gap: 5px; max-height: 180px; overflow-y: auto;
+  padding: 6px 10px; border-top: 1px solid var(--border-soft); background: var(--panel);
+}
+.browser-annotation-header { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 11px; }
+.browser-annotation-header > span { flex: 1; }
+.browser-annotation-row { display: grid; grid-template-columns: minmax(120px, 1fr) auto auto; gap: 6px; align-items: center; }
+.browser-annotation-row input { min-width: 0; font-size: 12px; padding: 4px 7px; }
 .browser-console { display: flex; flex-direction: column; gap: 2px; margin-top: 8px; }
 .browser-console-line { font-size: 11px; word-break: break-word; }
 .browser-console-line.error { color: var(--danger, #e5534b); }
@@ -5540,6 +5565,89 @@ body[data-quick-actions="false"] [data-widget-id="core.quick-actions"] { display
   .rail-workspace .git-page { padding: 10px 12px; }
   .git-page .view-title { font-size: 16px; }
   .editor-tree { max-height: 34vh; }
+}
+
+/* Spec-driven tracks (knowledge package slot contribution). */
+.tracks-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px;
+}
+.tracks-intro { margin-top: 3px; font-size: 12px; }
+.track-create-form,
+.track-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--border-soft);
+  border-radius: 10px;
+  background: var(--surface-raised);
+}
+.track-create-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.track-status {
+  padding: 2px 6px;
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+.track-status-running { color: var(--blue); border-color: color-mix(in srgb, var(--blue) 45%, var(--border-soft)); }
+.track-status-blocked { color: var(--red); border-color: color-mix(in srgb, var(--red) 45%, var(--border-soft)); }
+.track-status-completed { color: var(--green); border-color: color-mix(in srgb, var(--green) 45%, var(--border-soft)); }
+.track-progress,
+.track-docs {
+  color: var(--muted);
+  font-size: 11px;
+}
+.track-progress { display: flex; gap: 5px; }
+.track-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.track-step { display: flex; align-items: flex-start; gap: 8px; }
+.track-step-marker {
+  display: inline-grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  flex: 0 0 20px;
+  border-radius: 50%;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 11px;
+}
+.track-step-completed .track-step-marker { color: var(--green); }
+.track-step-running .track-step-marker { color: var(--blue); }
+.track-step-failed .track-step-marker { color: var(--red); }
+.track-step-content {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 12px;
+}
+.track-step-content small { overflow-wrap: anywhere; color: var(--muted); }
+.track-step-content details pre {
+  max-height: 160px;
+  overflow: auto;
+  white-space: pre-wrap;
+  font-size: 10px;
 }
 
 /* Project-scoped settings, Git personas, and editable role cards. */

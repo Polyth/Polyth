@@ -5,6 +5,7 @@
 import { randomUUID } from "node:crypto";
 import type {
   BrowserAction,
+  BrowserColorScheme,
   BrowserObservation,
   BrowserSessionDto,
   BrowserTarget,
@@ -50,6 +51,7 @@ export interface BrowserCreateInput {
   sessionId?: string;
   url?: string;
   viewport?: { width: number; height: number; deviceScaleFactor?: number };
+  colorScheme?: BrowserColorScheme;
 }
 
 export interface BrowserObserveOptions {
@@ -227,11 +229,13 @@ export function createBrowserService(opts: BrowserServiceOptions): BrowserServic
         title: "",
         status: "starting",
         viewport,
+        colorScheme: input.colorScheme ?? "no-preference",
         revision: 0,
         engine: driver.engine,
       };
       const page = await driver.open({
         ...viewport,
+        colorScheme: dto.colorScheme,
         guardNavigation: async (url) => {
           const decision = await checkUrl(url, policyOpts());
           if (!decision.ok) {
@@ -330,6 +334,14 @@ export function createBrowserService(opts: BrowserServiceOptions): BrowserServic
               };
               await s.page.resize(viewport);
               s.dto.viewport = { ...s.dto.viewport, ...viewport };
+              return;
+            }
+            case "color-scheme": {
+              if (action.colorScheme !== "light" && action.colorScheme !== "dark" && action.colorScheme !== "no-preference") {
+                throw err("invalid-input", "colorScheme must be light, dark, or no-preference");
+              }
+              await s.page.emulateColorScheme(action.colorScheme);
+              s.dto.colorScheme = action.colorScheme;
               return;
             }
             case "inspect": {

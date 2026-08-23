@@ -51,7 +51,7 @@ packages/session (node:sqlite WAL: events + projections + queue/org/profiles)
 | `knowledge` | Notes/plans/memories store (own SQLite) with revisions, tags, search; attaching logs `knowledge/attached` (exact revision + digest) before the model sees it. |
 | `github` | `gh`-CLI-backed repo/issues/PR list, PR detail/files/diff/comments, failure-first checks aggregation, guarded review submit + risk/confidence labels. No tokens stored. |
 | `usage` | Provider-neutral quota adapter contract: jittered polling, in-flight dedup, backoff, bounded last-good persistence, secret redaction, pace/prediction from multi-sample history. Real providers plug in via `data/quota-providers.json` (`createHttpQuotaProvider`): HTTP endpoint + bearer credential referenced by env-var name, so tokens never sit in config or reach the browser. |
-| `browser` | Agent-drivable Chromium (playwright-core) or fake driver: URL/origin policy (blocks unsafe schemes, private IPs, DNS rebinding, downloads), stale-frame rejection, redacted observations, JPEG frame stream, honest `unavailable` engine state. |
+| `browser` | Agent-drivable Chromium (playwright-core) or fake driver: URL/origin policy (blocks unsafe schemes, private IPs, DNS rebinding, downloads), stale-frame rejection, redacted observations, viewport + color-scheme emulation, JPEG frame stream, honest `unavailable` engine state. |
 | `dictation` | Server streaming dictation protocol: lifecycle via REST, PCM chunks via `/ws` with acks + `(id,seq)` dedupe + replay-from-last-ack, `SttAdapter` seam plus `createWhisperSttAdapter` (finalize-once WAV upload to any OpenAI-compatible `/audio/transcriptions` endpoint); the service takes an adapter *provider* so capability follows live settings. |
 | `models` | Model preference logic: favorites, provider/name/recent sort, search (shared by picker + settings). |
 | `hotkeys` | Keymap model: default bindings, user overrides, conflict detection, sequence matching. |
@@ -105,6 +105,8 @@ statically by the server with SPA fallback.
   notify seam to templated payloads (same allowlisted bounded semantics as the
   in-page notifier): subagent completions attribute to the parent session,
   aborted turns stay silent, and auto-accepted permissions never reach the seam.
+  Human-needed payloads bind `sessionId` + `requestId`; simple closed
+  single-choice questions may include at most two bounded quick answers.
 - `ws.ts` — `/ws` gateway: `subscribe` (gap-fill from the durable log, then live, seq-deduped),
   projections fan-out, per-socket rate limits, browser frame stream with newest-frame
   backpressure + `afterRevision` resume, dictation audio path with its own rate budget.
@@ -241,6 +243,7 @@ Workflows: `goal/attached|audit|completed|paused|resumed|stopped|stuck`,
 `walkthrough/generated`, `review/generated|risk-scored|submitted`,
 `pr/created|updated|merged` (F7 external writes, logged to the originating
 session before the response), `knowledge/attached`, `schedule/run-started`,
+`track/step-started|step-completed|step-failed`, `track/completed`,
 `browser/action-requested|action-completed|action-failed|observation`,
 `terminal/created|closed`, `behavior/instructions-applied`.
 
@@ -291,8 +294,10 @@ ignored by the web reducer (never crash).
   auto-submits),
   `AssistStrip` (F9: fresh recap under the last message + a dismissible
   suggestion chip that fills the composer and never sends),
-  `ScheduleView`, `GoalsView`/`GoalStrip`, `MultiRunView`, `FusionView`,
-  `WalkthroughView`/`GeneratedWalkthrough`, `PreviewView` (iframe + browser driving),
+  `ScheduleView`, `GoalsView`/`GoalStrip`, `TracksPanel` (Knowledge package
+  contribution through `workspace.right.tabs`), `MultiRunView`, `FusionView`,
+  `WalkthroughView`/`GeneratedWalkthrough`, `PreviewView` (iframe + browser driving,
+  device/color-scheme emulation, pointer/keyboard rectangular annotations, screenshot-to-chat),
   `TerminalView` (F12: tab strip with double-click rename and confirm-close
   while running; reconnects with backoff reusing the same terminal id, replay
   frames replace the local buffer so reattach never duplicates),
@@ -315,8 +320,9 @@ ignored by the web reducer (never crash).
   `/api/settings/*` routes.
 - `attachments.ts` (F2) — pending composer pills per session
   (`polyth.draft.att.<sessionId>`; the draft store owns text + pills): stat-verified
-  project-file/range refs, `_inbox/` uploads for drops/pastes, GitHub PR/issue URL
-  pills gated on the project's remote (`/api/github/repo`). Rendered by
+  project-file/range refs, `_inbox/` uploads for drops/pastes and annotated browser
+  captures, GitHub PR/issue URL pills gated on the project's remote
+  (`/api/github/repo`). Rendered by
   `AttachmentPills` (composer: removable; timeline: read-only) and the shared
   `FileRowActions` menu (Open / Copy path / Add to chat) on Files/Changes rows.
 - `notifications.ts` — kind-filtered, allowlisted-template, replay-deduped web
@@ -331,17 +337,27 @@ ignored by the web reducer (never crash).
   re-locks the UI (reload-on-unlock keeps store/WS state clean). Settings →
   Access lists remembered devices with per-device revoke and "Sign out
   everywhere".
-- Auto-accept + push (F18): the `Header` shows a loud pulsing chip while the
+- Auto-accept + push/PWA (F18 + OC-24-003/004): the `Header` shows a loud pulsing chip while the
   session's effective auto-accept is on (click toggles; server owns the
   policy); `reduce.ts` marks policy-resolved permissions `auto` so the
   timeline can label them. `push.ts` registers the root-scope service worker
-  (`sw.js`, plain JS copied verbatim to `dist/`), mints a `PushSubscription`
+  at authenticated app boot (`sw.js`, plain JS copied verbatim to `dist/`),
+  while `manifest.json` + 192/512 any/maskable icons make the root-scoped app
+  installable in standalone mode. Enabling push mints a `PushSubscription`
   against the server's VAPID key, and keeps the server list in sync;
   Settings → Notifications has the toggle + test button (needs a secure
   context — https or loopback). The worker shows notifications only when no
-  visible window exists and deep-links clicks: `postMessage` to an existing
-  tab (handled in `init.ts` via `installPushDeepLinks`) or a new window at
-  `/?session=<id>`, which `boot()` resolves and strips.
+  visible window exists. Permission pushes offer Allow once/Deny; a single
+  closed single-choice question with at most two options exposes those choices;
+  complex questions expose Answer/Reject and otherwise open the normal
+  stepper. Actions call the existing authenticated session APIs with the
+  payload's exact session/request pair. The session service serializes and
+  validates the pending request, reattaches its runtime after restart, appends
+  the resolution before replying, and rejects stale/cross-session duplicates.
+  Failed or ordinary clicks deep-link via `postMessage` to an existing tab
+  (handled in `init.ts` via `installPushDeepLinks`) or open
+  `/?session=<id>`, which `boot()` resolves and strips. Nothing in this path
+  implements a remote relay or E2EE pairing.
 
 ## UI slot model
 

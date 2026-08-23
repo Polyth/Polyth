@@ -25,6 +25,19 @@ handbook, the "this-pass" web-parity slice (P1–P8 from
 `docs/dev/implementation-order.md`) was implemented as eight contract-first
 commits, and the L-queue packages started landing.
 
+### Added — browser device emulation and annotated capture-to-chat
+
+- Controlled browser sessions now carry their emulated color scheme end to end;
+  Chromium applies it through media emulation, while light/dark/default changes
+  and responsive, phone, tablet, laptop, and desktop viewport presets are
+  available from the Preview toolbar and the agent browser-tool seam.
+- Preview frames support drag-selected rectangular annotations with comments,
+  plus a keyboard-only centered selection. `Send to chat` requests fresh server
+  pixels, appends the persisted browser observation before returning them,
+  renders the selection into a PNG, uploads
+  it to the session worktree, and sends the comment/image through the normal
+  attachment-backed user-message pipeline.
+
 ### Added — L1: message attachments on the wire (F2)
 
 - Contracts: `AttachmentRef` gained `kind` ("file" | "image" | "range" |

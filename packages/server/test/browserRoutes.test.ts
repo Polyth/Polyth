@@ -80,19 +80,56 @@ test("action-requested appends before the driver acts; completed after", async (
   assert.match(String(requested.actionSummary), /click a#next/);
 });
 
-test("observation appends before the payload returns, redacted", async () => {
+test("create and action routes apply viewport and color-scheme emulation", async () => {
+  const { calls, call } = makeHarness();
+  const created = await call("POST", "/api/browser/sessions", {
+    projectId: "p1",
+    sessionId: "sess1",
+    url: HOME,
+    viewport: { width: 390, height: 844 },
+    colorScheme: "dark",
+  });
+  assert.equal(created.status, 200);
+  const initial = created.payload as {
+    id: string;
+    viewport: { width: number; height: number };
+    colorScheme: string;
+  };
+  assert.deepEqual(initial.viewport, { width: 390, height: 844, deviceScaleFactor: 1 });
+  assert.equal(initial.colorScheme, "dark");
+  calls.length = 0;
+
+  const recolored = await call("POST", `/api/browser/sessions/${initial.id}/actions`, {
+    actor: "user",
+    action: { kind: "color-scheme", colorScheme: "light" },
+  });
+  assert.equal(recolored.status, 200);
+  assert.equal((recolored.payload as { session: { colorScheme: string } }).session.colorScheme, "light");
+  assert.match(String(calls[0]?.data?.actionSummary), /light color scheme/);
+});
+
+test("screenshot observation logs the persisted ref before returning UI-only pixels", async () => {
   const { calls, call } = makeHarness();
   const created = await call("POST", "/api/browser/sessions", { projectId: "p1", sessionId: "sess1", url: HOME });
   const id = (created.payload as { id: string }).id;
   calls.length = 0;
 
-  const obs = await call("POST", `/api/browser/sessions/${id}/observe`, {});
+  const obs = await call("POST", `/api/browser/sessions/${id}/observe`, { includeScreenshot: true });
   assert.equal(obs.status, 200);
   const appended = calls.find((c) => c.kind === "append" && c.type === "browser/observation");
   assert.ok(appended, "observation event appended");
-  const text = String((obs.payload as { text: string }).text);
+  const response = obs.payload as {
+    text: string;
+    screenshotRef?: string;
+    screenshot?: { mime: string; data: string };
+  };
+  const text = String(response.text);
   assert.ok(!text.includes("sk-12345678abc"));
   assert.equal(String(appended!.data!.text), text); // logged exactly what was returned
+  assert.match(response.screenshotRef ?? "", /\.webp$/);
+  assert.equal(response.screenshot?.mime, "image/webp");
+  assert.ok(response.screenshot?.data);
+  assert.equal("screenshot" in appended!.data!, false, "raw pixels stay out of the event log");
 });
 
 test("failed actions append action-failed with the policy code", async () => {

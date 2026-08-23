@@ -38,6 +38,7 @@ const summarize = (action: BrowserAction): string => {
     case "forward": return "go forward";
     case "reload": return "reload";
     case "resize": return `resize to ${action.viewport.width}×${action.viewport.height}`;
+    case "color-scheme": return `emulate ${action.colorScheme} color scheme`;
     case "inspect": return `inspect ${action.selector}`;
   }
 };
@@ -88,6 +89,13 @@ export function browserRoutes(deps: {
       if (path === "/api/browser/sessions" && method === "POST") {
         const b = await body();
         const viewport = b.viewport as { width?: number; height?: number } | undefined;
+        const colorScheme = b.colorScheme === "light" || b.colorScheme === "dark" || b.colorScheme === "no-preference"
+          ? b.colorScheme
+          : undefined;
+        if (b.colorScheme !== undefined && !colorScheme) {
+          json(400, { error: "invalid-input", message: "colorScheme must be light, dark, or no-preference" });
+          return true;
+        }
         const dto = await browser.create({
           projectId: String(b.projectId ?? ""),
           ...(b.sessionId ? { sessionId: String(b.sessionId) } : {}),
@@ -95,6 +103,7 @@ export function browserRoutes(deps: {
           ...(viewport && typeof viewport.width === "number" && typeof viewport.height === "number"
             ? { viewport: { width: viewport.width, height: viewport.height } }
             : {}),
+          ...(colorScheme ? { colorScheme } : {}),
         });
         json(200, dto);
         return true;
@@ -196,7 +205,18 @@ export function browserRoutes(deps: {
         // observation appends BEFORE it is returned to any caller (incl. agent)
         const linked = browser.get(id)?.sessionId;
         if (linked) await append(linked, "browser/observation", { browserSessionId: id, ...payload });
-        json(200, payload);
+        json(200, {
+          ...payload,
+          // Raw pixels are UI-only response data. The durable event carries the
+          // persisted screenshotRef, then the normal attachment send path logs
+          // the project-file ref before a model can see it.
+          ...(obs.screenshot ? {
+            screenshot: {
+              mime: obs.screenshot.mime,
+              data: Buffer.from(obs.screenshot.data).toString("base64"),
+            },
+          } : {}),
+        });
         return true;
       }
 

@@ -5,6 +5,7 @@ import { installGitPackage } from "./git.ts";
 import { installGithubPackage } from "./github.ts";
 import { installHomeAssistantPackage } from "./home-assistant.ts";
 import { installIntegrationsPackage } from "./integrations.ts";
+import { installKnowledgePackage } from "./knowledge.ts";
 import { installMcpPackage } from "./mcp.ts";
 import { installModelsPackage } from "./models.ts";
 import { installPluginsPackage } from "./plugins.ts";
@@ -26,6 +27,7 @@ const installers = new Map<string, PackageInstaller>([
   ["commands", installCommandsPackage],
   ["integrations", installIntegrationsPackage],
   ["plugins", installPluginsPackage],
+  ["knowledge", installKnowledgePackage],
   ["secure-safe", installSecureSafePackage],
   ["home-assistant", installHomeAssistantPackage],
 ]);

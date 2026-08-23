@@ -29,6 +29,18 @@ function b64uToBytes(s: string): Uint8Array {
   return out;
 }
 
+/** Register at app boot so the authenticated SPA is installable even before
+ *  push is enabled. Registration itself never asks for notification access. */
+export async function registerServiceWorker(): Promise<ServiceWorkerRegistration | null> {
+  if (
+    typeof navigator === "undefined"
+    || !("serviceWorker" in navigator)
+    || typeof window === "undefined"
+    || !window.isSecureContext
+  ) return null;
+  return navigator.serviceWorker.register("/sw.js", { scope: "/" });
+}
+
 export async function pushSubscription(): Promise<PushSubscription | null> {
   if (!pushSupported()) return null;
   const reg = await navigator.serviceWorker.getRegistration("/");
@@ -45,7 +57,8 @@ export async function enablePush(): Promise<void> {
   if (typeof Notification === "undefined" || Notification.permission !== "granted") {
     throw new Error("Notification permission was not granted.");
   }
-  const reg = await navigator.serviceWorker.register("/sw.js");
+  const reg = await registerServiceWorker();
+  if (!reg) throw new Error("The service worker could not be registered.");
   const { publicKey } = await api.pushKey();
   const sub = await reg.pushManager.subscribe({
     userVisibleOnly: true,

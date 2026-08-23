@@ -277,6 +277,9 @@ export function createGoalService(deps: GoalDeps): GoalService {
           }
           continue;
         }
+        // Audit-only recovery marker: it proves the objective was re-injected,
+        // but must not mutate the goal workflow state during replay.
+        if (ev.type === "goal/context-restored") continue;
         const d = ev.data as Partial<GoalState> & { verdict?: GoalVerdict };
         if (ev.type === "goal/attached") {
           state = {

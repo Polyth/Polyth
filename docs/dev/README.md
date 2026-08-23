@@ -3,8 +3,8 @@
 This is the working contract for adding features to Polyth. It describes the seams a
 feature must use, the invariants it must keep, and the checklist that makes a change
 mergeable. Read `architecture.md` for the system as it exists, `parity.md` for what is
-missing, `new-features.md` for the implement-now catalog, and `implementation-order.md`
-for sequencing.
+missing, `new-features.md` for the implement-now catalog, `tracks.md` for the
+spec-driven track lifecycle, and `implementation-order.md` for sequencing.
 
 ## The one-paragraph mental model
 

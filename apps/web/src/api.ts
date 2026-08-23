@@ -23,6 +23,8 @@ import type {
   PackageDescriptorDto,
   PreviewState,
   SystemInfoDto,
+  TrackCreateInput,
+  TrackDto,
   Project,
   ProjectPatch,
   QueueItemDto,
@@ -51,6 +53,7 @@ export interface BrowserSessionDto {
   title: string;
   status: "starting" | "ready" | "closed" | "failed";
   viewport: { width: number; height: number; deviceScaleFactor: number };
+  colorScheme: "light" | "dark" | "no-preference";
   revision: number;
   engine: "chromium" | "fake" | "unavailable";
 }
@@ -72,6 +75,7 @@ export type BrowserActionDto =
   | { kind: "forward" }
   | { kind: "reload" }
   | { kind: "resize"; viewport: { width: number; height: number } }
+  | { kind: "color-scheme"; colorScheme: "light" | "dark" | "no-preference" }
   | { kind: "inspect"; selector: string };
 
 export interface WorkspaceSearchItemDto {
@@ -356,7 +360,7 @@ export interface ScheduleTaskInputDto {
 }
 
 // ---- knowledge types (WP10) --------------------------------------------------
-export type KnowledgeKindDto = "note" | "plan" | "memory";
+export type KnowledgeKindDto = "note" | "spec" | "plan" | "memory";
 export interface KnowledgeListItemDto {
   id: string; projectId: string; kind: KnowledgeKindDto;
   title: string; snippet: string; bodyBytes: number; tags: string[];
@@ -538,6 +542,10 @@ export const api = {
     jfetch<SessionEvent>(`/api/sessions/${id}/rewind`, json("POST", { atSeq })),
   clearRewind: (id: string) =>
     jfetch<SessionEvent>(`/api/sessions/${id}/rewind/clear`, { method: "POST" }),
+  pinContext: (id: string, sourceEventSeq: number) =>
+    jfetch<SessionEvent>(`/api/sessions/${id}/context/pins/${sourceEventSeq}`, { method: "POST" }),
+  unpinContext: (id: string, sourceEventSeq: number) =>
+    jfetch<SessionEvent>(`/api/sessions/${id}/context/pins/${sourceEventSeq}`, { method: "DELETE" }),
   runShell: (id: string, command: string) =>
     jfetch<ShellTurnResult>(`/api/sessions/${id}/shell`, json("POST", { command })),
   archive: (id: string) => jfetch<void>(`/api/sessions/${id}/archive`, { method: "POST" }),
@@ -936,6 +944,22 @@ export const api = {
       `/api/sessions/${encodeURIComponent(sessionId)}/knowledge`, json("POST", { knowledgeId, revision }),
     ),
 
+  // ---- spec-driven tracks ------------------------------------------------------
+  trackList: (projectId: string) =>
+    jfetch<TrackDto[]>(`/api/tracks?projectId=${encodeURIComponent(projectId)}`).catch(
+      (): TrackDto[] => [],
+    ),
+  trackGet: (id: string) =>
+    jfetch<TrackDto>(`/api/tracks/${encodeURIComponent(id)}`),
+  trackCreate: (input: TrackCreateInput) =>
+    jfetch<TrackDto>("/api/tracks", json("POST", input)),
+  trackStart: (id: string, sessionId: string) =>
+    jfetch<TrackDto>(`/api/tracks/${encodeURIComponent(id)}/start`, json("POST", { sessionId })),
+  trackRetry: (id: string, sessionId?: string) =>
+    jfetch<TrackDto>(`/api/tracks/${encodeURIComponent(id)}/retry`, json("POST", { sessionId })),
+  trackCompleteStep: (id: string) =>
+    jfetch<TrackDto>(`/api/tracks/${encodeURIComponent(id)}/complete-step`, { method: "POST" }),
+
   // ---- github (gh CLI; fail-soft) --------------------------------------------
   githubStatus: (projectId: string) =>
     jfetch<GithubStatusDto>(`/api/github/status?projectId=${encodeURIComponent(projectId)}`).catch(
@@ -1065,7 +1089,13 @@ export const api = {
     jfetch<{ available: boolean; engine: "chromium" | "fake" | null; reason?: string }>(`/api/browser/capability`).catch(
       () => ({ available: false, engine: null, reason: "server unreachable" }),
     ),
-  browserCreate: (input: { projectId: string; sessionId?: string; url?: string; viewport?: { width: number; height: number } }) =>
+  browserCreate: (input: {
+    projectId: string;
+    sessionId?: string;
+    url?: string;
+    viewport?: { width: number; height: number };
+    colorScheme?: "light" | "dark" | "no-preference";
+  }) =>
     jfetch<BrowserSessionDto>(`/api/browser/sessions`, json("POST", input)),
   browserGet: (id: string) =>
     jfetch<BrowserSessionDto>(`/api/browser/sessions/${encodeURIComponent(id)}`),
@@ -1080,7 +1110,14 @@ export const api = {
       `/api/browser/sessions/${encodeURIComponent(id)}/actions`, json("POST", { action, actor }),
     ),
   browserObserve: (id: string, includeScreenshot = false, selector?: string) =>
-    jfetch<{ url: string; title: string; text: string; accessibilityDigest: string; screenshotRef?: string }>(
+    jfetch<{
+      url: string;
+      title: string;
+      text: string;
+      accessibilityDigest: string;
+      screenshotRef?: string;
+      screenshot?: { mime: string; data: string };
+    }>(
       `/api/browser/sessions/${encodeURIComponent(id)}/observe`, json("POST", {
         includeScreenshot,
         ...(selector ? { selector } : {}),

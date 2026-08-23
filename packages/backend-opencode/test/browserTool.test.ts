@@ -42,9 +42,10 @@ test("browser tool maps polyth-like actions onto the shared BrowserService", asy
     });
 
   try {
-    const opened = await call("browser.open", { url: HOME, viewport: "mobile" });
+    const opened = await call("browser.open", { url: HOME, viewport: "mobile", colorScheme: "dark" });
     assert.equal(opened.url, HOME);
     assert.deepEqual(opened.viewport, { width: 390, height: 844 });
+    assert.equal(opened.colorScheme, "dark");
     assert.equal(browser.list()[0]?.sessionId, "session-1");
 
     const snapshot = await call("browser.snapshot");
@@ -58,6 +59,8 @@ test("browser tool maps polyth-like actions onto the shared BrowserService", asy
 
     const resized = await call("browser.resize", { viewport: "desktop" });
     assert.deepEqual(resized.viewport, { width: 1440, height: 900 });
+    const recolored = await call("browser.colorScheme", { colorScheme: "light" });
+    assert.equal(recolored.colorScheme, "light");
 
     const backed = await call("browser.back");
     assert.equal(backed.url, HOME);

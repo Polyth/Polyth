@@ -20,6 +20,7 @@ const ACTIONS = [
   "browser.inspect",
   "browser.capture",
   "browser.resize",
+  "browser.colorScheme",
 ] as const;
 type BrowserToolAction = typeof ACTIONS[number];
 
@@ -101,6 +102,18 @@ const viewportFor = (value: unknown, required: boolean): { width: number; height
   return VIEWPORTS[name as keyof typeof VIEWPORTS];
 };
 
+const colorSchemeFor = (value: unknown, required: boolean): "light" | "dark" | "no-preference" | undefined => {
+  const colorScheme = nonEmpty(value);
+  if (!colorScheme) {
+    if (required) throw usage("colorScheme is required for browser.colorScheme");
+    return undefined;
+  }
+  if (colorScheme !== "light" && colorScheme !== "dark" && colorScheme !== "no-preference") {
+    throw usage("colorScheme must be light, dark, or no-preference");
+  }
+  return colorScheme;
+};
+
 const slug = (value: unknown): string => {
   const normalized = String(value ?? "page")
     .toLowerCase()
@@ -130,6 +143,7 @@ const publicSession = (session: BrowserSessionDto): JsonObject => ({
     width: session.viewport.width,
     height: session.viewport.height,
   },
+  colorScheme: session.colorScheme,
   revision: session.revision,
 });
 
@@ -183,12 +197,14 @@ export function createBrowserToolBridge(options: {
         throw usage("url must use http or https");
       }
       const viewport = viewportFor(parameters.viewport, false);
+      const colorScheme = colorSchemeFor(parameters.colorScheme, false);
       if (!session) {
         session = await options.browser.create({
           projectId: context.projectId,
           ...(canonicalSessionId ? { sessionId: canonicalSessionId } : {}),
           url: url.toString(),
           ...(viewport ? { viewport } : {}),
+          ...(colorScheme ? { colorScheme } : {}),
         });
       } else {
         if (options.browser.agentPaused(session.id)) {
@@ -196,6 +212,9 @@ export function createBrowserToolBridge(options: {
         }
         if (viewport) {
           session = (await options.browser.action(session.id, { kind: "resize", viewport }, "agent")).session;
+        }
+        if (colorScheme) {
+          session = (await options.browser.action(session.id, { kind: "color-scheme", colorScheme }, "agent")).session;
         }
         session = await options.browser.navigate(session.id, url.toString(), "agent");
       }
@@ -260,6 +279,8 @@ export function createBrowserToolBridge(options: {
       browserAction = { kind: "inspect", selector };
     } else if (action === "browser.resize") {
       browserAction = { kind: "resize", viewport: viewportFor(parameters.viewport, true)! };
+    } else if (action === "browser.colorScheme") {
+      browserAction = { kind: "color-scheme", colorScheme: colorSchemeFor(parameters.colorScheme, true)! };
     }
 
     if (action === "browser.capture") {
@@ -351,12 +372,13 @@ export function createBrowserToolPluginSource(): string {
     submit: { type: "boolean" },
     direction: { type: "string", enum: ["up", "down", "top", "bottom"] },
     viewport: { type: "string", enum: ["mobile", "tablet", "desktop", "fill"] },
+    colorScheme: { type: "string", enum: ["light", "dark", "no-preference"] },
     label: { type: "string", description: "Short filename label for browser.capture" },
   };
   return `export const PolythBrowserPlugin = async () => ({
   tool: {
     polyth_browser: {
-      description: ${JSON.stringify("Look at and interact with the controlled browser shared with Polyth. Use one browser.* action per call. Open a page, snapshot it, then use selectors to click, type, scroll, inspect, capture, or resize.")},
+      description: ${JSON.stringify("Look at and interact with the controlled browser shared with Polyth. Use one browser.* action per call. Open a page, snapshot it, then use selectors to click, type, scroll, inspect, capture, resize, or emulate a color scheme.")},
       args: {
         action: { type: "string", enum: ${JSON.stringify(ACTIONS)}, description: "Browser action to perform" },
         parameters: { type: "object", properties: ${JSON.stringify(parameters)}, additionalProperties: false, description: "Action inputs; use an empty object when none are needed" },

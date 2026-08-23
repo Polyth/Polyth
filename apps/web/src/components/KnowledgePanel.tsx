@@ -9,6 +9,7 @@ import { ago } from "../format.ts";
 const KINDS: Array<{ id: KnowledgeKindDto | ""; label: string }> = [
   { id: "", label: "All" },
   { id: "note", label: "Notes" },
+  { id: "spec", label: "Specs" },
   { id: "plan", label: "Plans" },
   { id: "memory", label: "Memory" },
 ];
@@ -85,6 +86,7 @@ export default function KnowledgePanel() {
         <div className="view-toolbar-row">
           <select value={editor.kind} onChange={(e) => setEditor({ ...editor, kind: e.target.value as KnowledgeKindDto })}>
             <option value="note">Note</option>
+            <option value="spec">Spec</option>
             <option value="plan">Plan</option>
             <option value="memory">Memory</option>
           </select>

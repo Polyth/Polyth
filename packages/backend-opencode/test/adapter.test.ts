@@ -758,6 +758,38 @@ test("a text part followed by stop yields exactly one finalized answer", () => {
   assert.deepEqual(flushAssistantOnIdle(st), []);
 });
 
+test("session compaction and compaction parts translate to canonical runtime events", () => {
+  const st = createTranslateState();
+  assert.deepEqual(
+    translateOcEvent({
+      id: "evt_compacted",
+      type: "session.compacted",
+      properties: { sessionID: "ses_1" },
+    }, st),
+    [{ type: "session/compacted", backendEventId: "evt_compacted" }],
+  );
+  const part = {
+    type: "message.part.updated",
+    properties: {
+      sessionID: "ses_1",
+      part: {
+        id: "prt_compaction",
+        type: "compaction",
+        messageID: "msg_summary",
+        sessionID: "ses_1",
+        auto: true,
+      },
+    },
+  };
+  assert.deepEqual(translateOcEvent(part, st), [{
+    type: "compaction/part-recorded",
+    partId: "prt_compaction",
+    messageId: "msg_summary",
+    auto: true,
+  }]);
+  assert.deepEqual(translateOcEvent(part, st), [], "repeated part snapshots are deduplicated");
+});
+
 test("real opencode provider list", { skip: process.env.POLYTH_REAL_OPENCODE !== "1" }, async () => {
   const { createOpenCodeRuntime } = await import("../src/index.ts");
   const runtime = await createOpenCodeRuntime({ cwd: "/tmp/oc-probe", port: 4579 });

@@ -172,6 +172,29 @@ test("rehydrate rebuilds goal state from the durable log", async () => {
   assert.equal(fresh.service.get("s1")?.maxContinuations, 5);
 });
 
+test("rehydrate treats context-restored markers as audit-only", () => {
+  const log: SessionEvent[] = [
+    {
+      id: "e1", sessionId: "s1", seq: 1, time: 1000, type: "goal/attached",
+      data: {
+        objective: "ship it", status: "active", continuations: 0,
+        maxContinuations: 5, tokensUsed: 0, budgetTokens: 1000, updatedAt: 900,
+      },
+      v: 1,
+    },
+    {
+      id: "e2", sessionId: "s1", seq: 2, time: 2000, type: "goal/context-restored",
+      data: { compactionSeq: 8, sourceMessageSeq: 9 },
+      ignorable: true, v: 1,
+    },
+  ];
+  const fresh = harness([]);
+  const state = fresh.service.rehydrate("s1", log);
+  assert.equal(state?.status, "active");
+  assert.equal(state?.objective, "ship it");
+  assert.equal(state?.updatedAt, 900, "recovery audit does not mutate workflow state");
+});
+
 test("stop removes the goal and emits goal/stopped", async () => {
   const h = harness([]);
   await h.service.attach("s1", { objective: "ship it" });

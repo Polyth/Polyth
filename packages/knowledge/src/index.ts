@@ -8,7 +8,7 @@ import { createHash, randomUUID } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 
-export type KnowledgeKind = "note" | "plan" | "memory";
+export type KnowledgeKind = "note" | "spec" | "plan" | "memory";
 
 export interface KnowledgeItem {
   id: string;
@@ -67,7 +67,7 @@ export interface KnowledgeStore {
 const err = (code: string, message: string) => Object.assign(new Error(message), { code });
 
 const LIMITS = { title: 200, bodyBytes: 256 * 1024, tags: 32, tagLen: 48 };
-const KINDS: KnowledgeKind[] = ["note", "plan", "memory"];
+const KINDS: KnowledgeKind[] = ["note", "spec", "plan", "memory"];
 const SOURCES: KnowledgeItem["source"][] = ["user", "agent", "import"];
 
 export const knowledgeDigest = (body: string): string =>
@@ -246,3 +246,5 @@ export function createKnowledgeStore(file: string, opts: { now?: () => number } 
     },
   };
 }
+
+export * from "./tracks.ts";

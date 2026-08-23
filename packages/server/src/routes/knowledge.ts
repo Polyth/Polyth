@@ -13,7 +13,7 @@ export interface KnowledgeRouteDeps {
   };
 }
 
-const KINDS: KnowledgeKind[] = ["note", "plan", "memory"];
+const KINDS: KnowledgeKind[] = ["note", "spec", "plan", "memory"];
 
 export function knowledgeRoutes(deps: KnowledgeRouteDeps): RouteHandler {
   const { knowledge } = deps;

@@ -9,7 +9,7 @@ import * as store from "./store.ts";
 import { resolveActiveProjectId } from "./projectRegistry.ts";
 import type { AttachmentRef, JsonObject, ModelRef, Project, SessionEvent } from "@polyth/contracts";
 import { suggestWorktreeBranch } from "./worktreeSessions.ts";
-import { installPushDeepLinks } from "./push.ts";
+import { installPushDeepLinks, registerServiceWorker } from "./push.ts";
 import { applyComposerSeed } from "./drafts.ts";
 import { forkSeedKey, rewindSeedKey } from "./messageActions.ts";
 import { getSessionDefaults, resolveSessionDefaultModel } from "./sessionDefaults.ts";
@@ -95,6 +95,9 @@ function startUrlSync(): void {
 }
 
 export function init(): void {
+  // PWA installability is independent from the opt-in push subscription.
+  // Auth has already succeeded before init(), so register without prompting.
+  void registerServiceWorker().catch((err) => console.warn("service worker registration failed", err));
   // UX-ONBOARDING boot: project, model, and agent hydration launch
   // independently and publish as soon as each settles. Awaiting a combined
   // Promise.all/allSettled before publishing any result is forbidden — a slow

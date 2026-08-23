@@ -58,6 +58,10 @@ await build({
   logLevel: "info",
 });
 await copyFile(join(here, "src/index.html"), join(dist, "index.html"));
-// F18: the service worker must live at the origin root (its own scope), so it
-// is copied verbatim instead of being bundled.
-await copyFile(join(here, "sw.js"), join(dist, "sw.js"));
+// PWA files live at the origin root and are copied verbatim instead of bundled.
+await Promise.all([
+  copyFile(join(here, "sw.js"), join(dist, "sw.js")),
+  copyFile(join(here, "manifest.json"), join(dist, "manifest.json")),
+  copyFile(join(here, "icon-192.png"), join(dist, "icon-192.png")),
+  copyFile(join(here, "icon-512.png"), join(dist, "icon-512.png")),
+]);

@@ -1,7 +1,7 @@
 // Driver seam: the session manager drives a page through this contract.
 // chromium.ts implements it with playwright-core; fake.ts implements it
 // in-memory for tests and for demo mode without a real engine.
-import type { BrowserTarget, JsonObject } from "@polyth/contracts";
+import type { BrowserColorScheme, BrowserTarget, JsonObject } from "@polyth/contracts";
 
 export interface DriverPageEvent {
   kind: "console" | "navigation" | "download-blocked" | "popup-blocked" | "crash" | "network";
@@ -36,6 +36,7 @@ export interface DriverPage {
   select(target: BrowserTarget, value: string): Promise<void>;
   wait(condition: "network-idle" | "selector", value?: string, timeoutMs?: number): Promise<void>;
   resize(viewport: { width: number; height: number }): Promise<void>;
+  emulateColorScheme(colorScheme: BrowserColorScheme): Promise<void>;
   inspect(selector: string): Promise<JsonObject>;
   screenshot(): Promise<{ data: Uint8Array; mime: string }>;
   observe(selector?: string): Promise<DriverObservation>;
@@ -48,6 +49,7 @@ export interface DriverOpenOptions {
   width: number;
   height: number;
   deviceScaleFactor: number;
+  colorScheme: BrowserColorScheme;
   /** Called for every navigation hop (incl. redirects); throw to block. */
   guardNavigation: (url: string) => Promise<void>;
 }

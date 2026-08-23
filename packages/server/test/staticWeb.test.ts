@@ -13,7 +13,8 @@ import { once } from "node:events";
 import type { Server } from "node:http";
 import { createHttpServer } from "../src/http.ts";
 
-const SHIPPED_INDEX = resolve(import.meta.dirname, "../../../apps/web/src/index.html");
+const SHIPPED_WEB = resolve(import.meta.dirname, "../../../apps/web");
+const SHIPPED_INDEX = join(SHIPPED_WEB, "src/index.html");
 
 async function startStaticServer(): Promise<{ server: Server; base: string }> {
   const webDist = join(mkdtempSync(join(tmpdir(), "polyth-static-")), "dist");
@@ -23,6 +24,9 @@ async function startStaticServer(): Promise<{ server: Server; base: string }> {
   writeFileSync(join(webDist, "main.js"), "export const boot = true;\n");
   writeFileSync(join(webDist, "main.css"), ":root { --ok: 1; }\n");
   writeFileSync(join(webDist, "sw.js"), "// service worker\n");
+  for (const file of ["manifest.json", "icon-192.png", "icon-512.png"]) {
+    copyFileSync(join(SHIPPED_WEB, file), join(webDist, file));
+  }
 
   const server = createHttpServer({
     sessions: {} as never,
