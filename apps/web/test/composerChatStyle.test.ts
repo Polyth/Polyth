@@ -42,6 +42,7 @@ test("message actions use one lightweight copy control and local hover zones", (
   assert.match(css, /\.msg > \.bubble:hover ~ \.msg-meta \.msg-actions,/);
   assert.doesNotMatch(css, /\.msg:hover \.msg-actions|\.msg\.assistant \.msg-actions\s*\{[^}]*pointer-events:\s*auto/s);
   assert.match(css, /\.msg-actions\s*\{[^}]*gap:\s*1px;/s);
+  assert.match(css, /@media \(hover:\s*none\) and \(pointer:\s*coarse\) and \(min-width:\s*481px\)/);
   assert.match(css, /@media \(max-width:\s*480px\)\s*\{[^}]*\.msg-actions\s*\{\s*display:\s*none;/s);
 });
 
