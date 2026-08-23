@@ -3,6 +3,8 @@ import TracksPanel from "../components/TracksPanel.tsx";
 import { registerCapability } from "../capabilities.ts";
 import { registerSlot } from "../slots.ts";
 import { setRailPlugin } from "../store.ts";
+import { registerPackageOnboarding } from "./onboarding/registry.ts";
+import { KNOWLEDGE_TOUR } from "./onboarding/tours/installed.ts";
 import { combineUnregister } from "./settingsPage.ts";
 
 export function installKnowledgePackage(): () => void {
@@ -24,5 +26,9 @@ export function installKnowledgePackage(): () => void {
     open: () => setRailPlugin("slot:tracks"),
     available: () => true,
   });
-  return combineUnregister(unregisterPanel, unregisterCapability);
+  return combineUnregister(
+    unregisterPanel,
+    unregisterCapability,
+    registerPackageOnboarding(KNOWLEDGE_TOUR),
+  );
 }

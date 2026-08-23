@@ -22,6 +22,14 @@ Object.defineProperty(globalThis, "localStorage", {
 
 // packagesList fake so bootPackages can run the real installers.
 const descriptors = new Map<string, PackageDescriptorDto>([
+  ["models", {
+    id: "models",
+    name: "Providers & Models",
+    description: "Model configuration.",
+    core: true,
+    enabled: true,
+    hasSettings: true,
+  }],
   ["git", {
     id: "git",
     name: "Git",
@@ -34,6 +42,78 @@ const descriptors = new Map<string, PackageDescriptorDto>([
     id: "dictation",
     name: "Voice & Dictation",
     description: "Voice controls.",
+    core: false,
+    enabled: true,
+    hasSettings: true,
+  }],
+  ["usage", {
+    id: "usage",
+    name: "Usage",
+    description: "Usage reporting.",
+    core: false,
+    enabled: true,
+    hasSettings: true,
+  }],
+  ["github", {
+    id: "github",
+    name: "GitHub",
+    description: "GitHub integration.",
+    core: false,
+    enabled: true,
+    hasSettings: false,
+  }],
+  ["knowledge", {
+    id: "knowledge",
+    name: "Knowledge",
+    description: "Project knowledge.",
+    core: false,
+    enabled: true,
+    hasSettings: false,
+  }],
+  ["home-assistant", {
+    id: "home-assistant",
+    name: "Home Assistant",
+    description: "Home controls.",
+    core: false,
+    enabled: true,
+    hasSettings: true,
+  }],
+  ["secure-safe", {
+    id: "secure-safe",
+    name: "Secure Safe",
+    description: "Credential handles.",
+    core: false,
+    enabled: true,
+    hasSettings: true,
+  }],
+  ["mcp", {
+    id: "mcp",
+    name: "MCP",
+    description: "MCP servers.",
+    core: false,
+    enabled: true,
+    hasSettings: true,
+  }],
+  ["commands", {
+    id: "commands",
+    name: "Commands",
+    description: "Reusable commands.",
+    core: false,
+    enabled: true,
+    hasSettings: true,
+  }],
+  ["plugins", {
+    id: "plugins",
+    name: "Plugins",
+    description: "Managed plugins.",
+    core: false,
+    enabled: true,
+    hasSettings: true,
+  }],
+  ["integrations", {
+    id: "integrations",
+    name: "Integrations",
+    description: "External integrations.",
     core: false,
     enabled: true,
     hasSettings: true,
@@ -67,6 +147,7 @@ const { canonicalTourPackageId, settingsPageToPackageId } =
   await import("../src/packages/onboarding/pageMap.ts");
 // Importing the package registry also registers the built-in tours.
 const { bootPackages } = await import("../src/packages/registry.ts");
+const { registerBuiltinPackageTours } = await import("../src/packages/onboarding/builtinTours.ts");
 
 const makeTour = (packageId: string, steps = 2): PackageOnboardingTour => ({
   packageId,
@@ -223,6 +304,27 @@ test("skip all onboardings stops every auto-show; preview still opens", () => {
   offDelta();
   offEpsilon();
   offGamma();
+});
+
+test("every built-in package surface has a substantial onboarding tour", async () => {
+  registerBuiltinPackageTours();
+  await bootPackages();
+
+  const expectedPackageIds = [
+    "session", "files", "projects", "behavior", "models", "permissions",
+    "notifications", "appearance", "general", "chat", "sessions", "shortcuts",
+    "access", "about", "git", "terminal", "preview", "browser", "goals",
+    "multirun", "workflow", "fusion", "walkthrough", "schedule", "usage",
+    "github", "knowledge", "voice", "home-assistant", "secure-safe", "mcp",
+    "commands", "plugins", "integrations", "packages", "widgets", "agents",
+  ];
+
+  for (const packageId of expectedPackageIds) {
+    const tour = getPackageOnboarding(packageId);
+    assert.ok(tour, `${packageId} has an onboarding tour`);
+    assert.ok(tour.steps.length >= 2, `${packageId} tour has at least two steps`);
+  }
+  assert.equal(getPackageOnboarding("dictation"), undefined, "voice is the only canonical dictation tour id");
 });
 
 test("package boot registers installer tours; disabling removes them; builtin tours stay", async () => {
