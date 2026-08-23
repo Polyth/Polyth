@@ -1119,7 +1119,7 @@ export default function Composer({
               onClick={() => setGoalFormOpen(true)}
             ><Icon.target /></button>
           )}
-          {simpleMode && ui.showDictate && (
+          {simpleMode && (
             <span className="composer-extensions composer-mobile-extensions">
               <SlotHost slot="composer.leading" context={slotContext} />
               <SlotHost slot="composer.trailing" context={slotContext} />
