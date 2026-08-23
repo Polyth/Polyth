@@ -7708,7 +7708,7 @@ html.light .session-bottom-nav { background: rgba(255, 255, 255, .9); }
     display: flex;
     gap: 0;
   }
-  .focus-conversation .msg.assistant .msg-actions {
+  .focus-conversation .msg:is(.assistant) .msg-actions {
     opacity: 1;
     pointer-events: auto;
     transform: none;
