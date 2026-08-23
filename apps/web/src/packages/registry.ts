@@ -14,6 +14,11 @@ import { combineUnregister } from "./settingsPage.ts";
 import { installUsagePackage } from "./usage.ts";
 import { installVoicePackage } from "./voice.ts";
 import { configurePackageReconcile, reconcilePackage } from "./reconcile.ts";
+import { registerBuiltinPackageTours } from "./onboarding/builtinTours.ts";
+
+// Tours for surfaces without an installer (built-in settings pages) exist for
+// the whole app session, independent of package enable/disable syncing.
+registerBuiltinPackageTours();
 
 type PackageInstaller = () => () => void;
 

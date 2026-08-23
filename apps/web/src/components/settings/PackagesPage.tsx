@@ -2,7 +2,28 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import type { PackageDescriptorDto } from "@polyth/contracts";
 import { api } from "../../api.ts";
 import { bootPackages, isPackageEnabled, subscribePackages } from "../../packages/registry.ts";
+import { maybeAutoShowPackageTour, openPackageTour } from "../../packages/onboarding/controller.ts";
+import { canonicalTourPackageId } from "../../packages/onboarding/pageMap.ts";
+import { getPackageOnboarding, subscribePackageOnboardings } from "../../packages/onboarding/registry.ts";
 import { EmptyState, PageHead } from "./parts.tsx";
+
+/** "Tour" replay button on a package tile — shown only when a tour is
+ * registered for the (canonical) package, and it always opens as a preview,
+ * even after the user skipped that tour or all onboardings. */
+function PackageTourButton({ descriptor }: { descriptor: PackageDescriptorDto }) {
+  const packageId = canonicalTourPackageId(descriptor.id);
+  if (!getPackageOnboarding(packageId)) return null;
+  return (
+    <button
+      type="button"
+      className="package-tour-btn"
+      aria-label={`Preview the ${descriptor.name} tour`}
+      onClick={() => openPackageTour(packageId, "preview")}
+    >
+      Tour
+    </button>
+  );
+}
 
 export default function PackagesPage() {
   const [packages, setPackages] = useState<PackageDescriptorDto[] | null>(null);
@@ -24,6 +45,10 @@ export default function PackagesPage() {
     return subscribePackages(() => { void load(); });
   }, [load]);
 
+  // Re-render tiles when tours register/unregister (package enable/disable).
+  const [, setToursAt] = useState(0);
+  useEffect(() => subscribePackageOnboardings(() => setToursAt((value) => value + 1)), []);
+
   const grouped = useMemo(() => ({
     core: packages?.filter((item) => item.core) ?? [],
     optional: packages?.filter((item) => !item.core) ?? [],
@@ -36,6 +61,8 @@ export default function PackagesPage() {
       const updated = await api.packagesSetEnabled(descriptor.id, enabled);
       setPackages((current) => current?.map((item) => item.id === updated.id ? updated : item) ?? null);
       await bootPackages();
+      // A freshly enabled package introduces itself once (unless skipped).
+      if (enabled) maybeAutoShowPackageTour(canonicalTourPackageId(descriptor.id));
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : String(cause));
       await load();
@@ -74,6 +101,7 @@ export default function PackagesPage() {
                     <p>{descriptor.description}</p>
                   </div>
                   <div className="package-tile-control">
+                    <PackageTourButton descriptor={descriptor} />
                     <span>{descriptor.enabled ? "Enabled" : "Disabled"}</span>
                     <button
                       type="button"
@@ -105,6 +133,7 @@ export default function PackagesPage() {
                     <p>{descriptor.description}</p>
                   </div>
                   <div className="package-tile-control">
+                    <PackageTourButton descriptor={descriptor} />
                     <span className="tag package-core-badge">Core</span>
                   </div>
                 </article>
