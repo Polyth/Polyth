@@ -7581,8 +7581,8 @@ html.light .session-bottom-nav { background: rgba(255, 255, 255, .9); }
   .hero-mark,
   .hero-sub,
   .hero-foot,
-  .hero > .starter-chips,
-  .composer-hero + .starter-chips { display: none; }
+  /* Chips render inside the composer root (Composer.tsx), not as a sibling. */
+  .hero .starter-chips { display: none; }
   .hero h2 {
     max-width: 340px;
     margin: 0;
