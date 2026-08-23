@@ -13,15 +13,15 @@ export const PACKAGES_TOUR: PackageOnboardingTour = {
     {
       id: "toggle",
       title: "Enable only what you need",
-      body: "Optional packages switch on or off at any time. Disabling one removes its settings page and widgets instantly — nothing to reinstall.",
-      highlight: "Enable/disable toggle",
+      body: "Each tile under Optional packages has a switch. Disabling one removes its settings page and widgets instantly — nothing to reinstall. Core packages stay on.",
+      highlight: "Optional packages",
       media: { kind: "pattern", pattern: "orbit" },
     },
     {
       id: "replay",
       title: "Revisit any tour",
       body: "Every package with an introduction keeps a Tour button on its tile here, so you can replay it whenever you like — even after skipping.",
-      highlight: "Tour button",
+      highlight: "Tour",
       media: { kind: "pattern", pattern: "rays" },
     },
   ],

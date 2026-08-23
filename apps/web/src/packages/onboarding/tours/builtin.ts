@@ -16,7 +16,7 @@ export const BUILTIN_TOURS: readonly PackageOnboardingTour[] = [
       {
         id: "chat",
         title: "Work from the session surface",
-        body: "Open a project session to talk with the agent, follow live progress, and return to the complete conversation after a reconnect.",
+        body: "Open a project session to talk with the agent and follow live progress. Mod+N starts a new session, Mod+I focuses the composer, and Mod+Shift+F searches session history.",
         highlight: "Chat",
         media: { kind: "pattern", pattern: "tiles" },
       },
@@ -35,7 +35,7 @@ export const BUILTIN_TOURS: readonly PackageOnboardingTour[] = [
       {
         id: "project-files",
         title: "Keep source beside the conversation",
-        body: "Open the file tree and editor as a workspace pane without leaving the active chat.",
+        body: "Toggle the Project files pane with Mod+Shift+E to browse and edit without leaving the active chat, or press Mod+P to search files from anywhere.",
         highlight: "Project files",
         media: { kind: "pattern", pattern: "tiles" },
       },
@@ -113,9 +113,16 @@ export const BUILTIN_TOURS: readonly PackageOnboardingTour[] = [
       {
         id: "decision",
         title: "Approve only the scope you intend",
-        body: "Allow a single action, remember approval for this session or project, or deny the request.",
+        body: "Allow once approves a single action, Always remembers it for this session or this project, and Deny rejects the request.",
         highlight: "Allow once",
         media: { kind: "pattern", pattern: "branches" },
+      },
+      {
+        id: "auto-approve",
+        title: "Skip prompts for trusted sessions",
+        body: "The Auto Approve toggle in the session header turns on automatic approval for the current or next session — switch it off to review each action again.",
+        highlight: "Auto Approve",
+        media: { kind: "pattern", pattern: "orbit" },
       },
     ],
   },
@@ -217,7 +224,7 @@ export const BUILTIN_TOURS: readonly PackageOnboardingTour[] = [
       {
         id: "enter",
         title: "Choose your send gesture",
-        body: "Keep Enter as send, or use it for new lines and send with Mod+Enter.",
+        body: "Keep Enter as send, or use it for new lines and send with Mod+Enter. In the composer, / expands commands, # expands snippets, @ attaches files — Mod+I focuses it from anywhere.",
         highlight: "Send on Enter",
         media: { kind: "pattern", pattern: "orbit" },
       },
@@ -236,7 +243,7 @@ export const BUILTIN_TOURS: readonly PackageOnboardingTour[] = [
       {
         id: "model",
         title: "Set the global model fallback",
-        body: "New sessions inherit this model unless their project supplies a different one.",
+        body: "New sessions (Mod+N) inherit this model unless their project supplies a different one.",
         highlight: "Default Model",
         media: { kind: "pattern", pattern: "orbit" },
       },
@@ -256,7 +263,7 @@ export const BUILTIN_TOURS: readonly PackageOnboardingTour[] = [
       {
         id: "overview",
         title: "Put common actions on the keyboard",
-        body: "Shortcuts collects core and plugin-provided actions in one editable keymap.",
+        body: "Shortcuts collects core and plugin-provided actions in one editable keymap. Defaults include Mod+K for the command palette, Mod+P to search files, and Mod+J for the terminal.",
         media: { kind: "pattern", pattern: "tiles" },
       },
       {
@@ -270,7 +277,7 @@ export const BUILTIN_TOURS: readonly PackageOnboardingTour[] = [
         id: "reset",
         title: "Return to known defaults",
         body: "Restore every bundled binding in one action if your keymap becomes crowded.",
-        highlight: "Reset all to defaults",
+        highlight: "Reset all to defaults →",
         media: { kind: "pattern", pattern: "orbit" },
       },
     ],
@@ -340,7 +347,7 @@ export const BUILTIN_TOURS: readonly PackageOnboardingTour[] = [
       {
         id: "surface",
         title: "Keep the shell close",
-        body: "Open the terminal pane without replacing Chat, then switch among independently running tabs.",
+        body: "Toggle the Terminal pane with Mod+J without replacing Chat, then switch among independently running tabs.",
         highlight: "Terminal",
         media: { kind: "pattern", pattern: "tiles" },
       },
@@ -444,7 +451,7 @@ export const BUILTIN_TOURS: readonly PackageOnboardingTour[] = [
       {
         id: "models",
         title: "Choose the comparison set",
-        body: "Filter the available catalog, select up to three models, and optionally run each with a specific agent role.",
+        body: "Filter the available catalog, select up to three models, and optionally pick the agent role the runs share before pressing Run.",
         highlight: "Filter models…",
         media: { kind: "pattern", pattern: "tiles" },
       },
