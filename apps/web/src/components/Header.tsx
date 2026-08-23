@@ -568,7 +568,7 @@ export default function Header() {
     <>
       <header className={`header${compact ? " header-compact" : ""}${chatSurface ? " header-chat" : ""}`}>
         {compact && <DrawerTrigger />}
-        {chatSurface && (
+        {compact && chatSurface && (
           <button
             className="icon-btn header-project-btn"
             aria-label={compact ? "Open projects and sessions" : "Add or open a project"}
