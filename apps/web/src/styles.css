@@ -5510,6 +5510,89 @@ body[data-quick-actions="false"] [data-widget-id="core.quick-actions"] { display
   .editor-tree { max-height: 34vh; }
 }
 
+/* Spec-driven tracks (knowledge package slot contribution). */
+.tracks-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 12px;
+}
+.tracks-intro { margin-top: 3px; font-size: 12px; }
+.track-create-form,
+.track-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--border-soft);
+  border-radius: 10px;
+  background: var(--surface-raised);
+}
+.track-create-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.track-status {
+  padding: 2px 6px;
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+.track-status-running { color: var(--blue); border-color: color-mix(in srgb, var(--blue) 45%, var(--border-soft)); }
+.track-status-blocked { color: var(--red); border-color: color-mix(in srgb, var(--red) 45%, var(--border-soft)); }
+.track-status-completed { color: var(--green); border-color: color-mix(in srgb, var(--green) 45%, var(--border-soft)); }
+.track-progress,
+.track-docs {
+  color: var(--muted);
+  font-size: 11px;
+}
+.track-progress { display: flex; gap: 5px; }
+.track-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.track-step { display: flex; align-items: flex-start; gap: 8px; }
+.track-step-marker {
+  display: inline-grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  flex: 0 0 20px;
+  border-radius: 50%;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 11px;
+}
+.track-step-completed .track-step-marker { color: var(--green); }
+.track-step-running .track-step-marker { color: var(--blue); }
+.track-step-failed .track-step-marker { color: var(--red); }
+.track-step-content {
+  display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 12px;
+}
+.track-step-content small { overflow-wrap: anywhere; color: var(--muted); }
+.track-step-content details pre {
+  max-height: 160px;
+  overflow: auto;
+  white-space: pre-wrap;
+  font-size: 10px;
+}
+
 /* Project-scoped settings, Git personas, and editable role cards. */
 .project-settings-card {
   margin: 0 0 10px; overflow: visible; border: 1px solid var(--border-soft);

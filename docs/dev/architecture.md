@@ -243,6 +243,7 @@ Workflows: `goal/attached|audit|completed|paused|resumed|stopped|stuck`,
 `walkthrough/generated`, `review/generated|risk-scored|submitted`,
 `pr/created|updated|merged` (F7 external writes, logged to the originating
 session before the response), `knowledge/attached`, `schedule/run-started`,
+`track/step-started|step-completed|step-failed`, `track/completed`,
 `browser/action-requested|action-completed|action-failed|observation`,
 `terminal/created|closed`, `behavior/instructions-applied`.
 
@@ -293,7 +294,8 @@ ignored by the web reducer (never crash).
   auto-submits),
   `AssistStrip` (F9: fresh recap under the last message + a dismissible
   suggestion chip that fills the composer and never sends),
-  `ScheduleView`, `GoalsView`/`GoalStrip`, `MultiRunView`, `FusionView`,
+  `ScheduleView`, `GoalsView`/`GoalStrip`, `TracksPanel` (Knowledge package
+  contribution through `workspace.right.tabs`), `MultiRunView`, `FusionView`,
   `WalkthroughView`/`GeneratedWalkthrough`, `PreviewView` (iframe + browser driving,
   device/color-scheme emulation, pointer/keyboard rectangular annotations, screenshot-to-chat),
   `TerminalView` (F12: tab strip with double-click rename and confirm-close

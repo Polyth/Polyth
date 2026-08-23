@@ -23,6 +23,8 @@ import type {
   PackageDescriptorDto,
   PreviewState,
   SystemInfoDto,
+  TrackCreateInput,
+  TrackDto,
   Project,
   ProjectPatch,
   QueueItemDto,
@@ -358,7 +360,7 @@ export interface ScheduleTaskInputDto {
 }
 
 // ---- knowledge types (WP10) --------------------------------------------------
-export type KnowledgeKindDto = "note" | "plan" | "memory";
+export type KnowledgeKindDto = "note" | "spec" | "plan" | "memory";
 export interface KnowledgeListItemDto {
   id: string; projectId: string; kind: KnowledgeKindDto;
   title: string; snippet: string; bodyBytes: number; tags: string[];
@@ -941,6 +943,22 @@ export const api = {
     jfetch<{ ok: true; eventSeq: number; revision: number }>(
       `/api/sessions/${encodeURIComponent(sessionId)}/knowledge`, json("POST", { knowledgeId, revision }),
     ),
+
+  // ---- spec-driven tracks ------------------------------------------------------
+  trackList: (projectId: string) =>
+    jfetch<TrackDto[]>(`/api/tracks?projectId=${encodeURIComponent(projectId)}`).catch(
+      (): TrackDto[] => [],
+    ),
+  trackGet: (id: string) =>
+    jfetch<TrackDto>(`/api/tracks/${encodeURIComponent(id)}`),
+  trackCreate: (input: TrackCreateInput) =>
+    jfetch<TrackDto>("/api/tracks", json("POST", input)),
+  trackStart: (id: string, sessionId: string) =>
+    jfetch<TrackDto>(`/api/tracks/${encodeURIComponent(id)}/start`, json("POST", { sessionId })),
+  trackRetry: (id: string, sessionId?: string) =>
+    jfetch<TrackDto>(`/api/tracks/${encodeURIComponent(id)}/retry`, json("POST", { sessionId })),
+  trackCompleteStep: (id: string) =>
+    jfetch<TrackDto>(`/api/tracks/${encodeURIComponent(id)}/complete-step`, { method: "POST" }),
 
   // ---- github (gh CLI; fail-soft) --------------------------------------------
   githubStatus: (projectId: string) =>

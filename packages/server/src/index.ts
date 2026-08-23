@@ -33,7 +33,7 @@ import { createMultirunService } from "@polyth/multirun";
 import { createWorkflowService } from "@polyth/workflow";
 import { createFusionService, synthesisPrompt } from "@polyth/fusion";
 import { createScheduleService, scanLoopsDir } from "@polyth/schedule";
-import { createKnowledgeStore } from "@polyth/knowledge";
+import { createKnowledgeStore, createTrackStore } from "@polyth/knowledge";
 import { createGithubService } from "@polyth/github";
 import {
   createFakeQuotaProvider,
@@ -91,6 +91,7 @@ import { createVoiceSettings } from "./voice.ts";
 import { voiceRoutes } from "./routes/voice.ts";
 import { buildNotePrompt, createAssistService, createAssistSettings, parseNoteReply, type AssistService } from "./assist.ts";
 import { assistRoutes } from "./routes/assist.ts";
+import { trackRoutes } from "./routes/tracks.ts";
 import { secureSafeRoutes } from "./routes/secureSafe.ts";
 import { createPluginContributionHub } from "./pluginContributions.ts";
 import { createWalkthroughJobService } from "./walkthroughs.ts";
@@ -99,6 +100,7 @@ import { createMultirunRunOne } from "./multirunRunner.ts";
 import { createWorkflowRunNode } from "./workflowRunner.ts";
 import { oneShot } from "./oneshot.ts";
 import { attachWs } from "./ws.ts";
+import { createTrackWorkflow, type TrackWorkflow } from "./tracks.ts";
 import { createRouteRegistry } from "./routeRegistry.ts";
 import { createPackageLifecycle } from "./packageLifecycle.ts";
 
@@ -302,6 +304,7 @@ export async function boot(opts: BootOptions = {}) {
 
   // --- goals workflow plugin (listens on the turn seam, never touches the loop)
   let goals: GoalService | null = null;
+  let trackWorkflow: TrackWorkflow | null = null;
   // F9 idle assist: created after `sessions` (it needs the runtime resolver);
   // the turn hook below only pings it, so a late assignment is safe.
   let assist: AssistService | null = null;
@@ -486,8 +489,13 @@ export async function boot(opts: BootOptions = {}) {
       onTurnCompleted: (sessionId, text) => {
         void (async () => {
           const state = await ensureGoalState(sessionId);
-          if (state?.status === "active") await goals?.onTurnCompleted(sessionId, text);
-        })().catch((err: unknown) => console.error("[polyth] goal audit failed", err));
+          if (state?.status === "active") {
+            await goals?.onTurnCompleted(sessionId, text);
+            if (goals?.get(sessionId)?.status === "completed") {
+              await trackWorkflow?.completeForSession(sessionId);
+            }
+          }
+        })().catch((err: unknown) => console.error("[polyth] goal/track completion failed", err));
         assist?.onTurnCompleted(sessionId);
       },
       onUsage: (sessionId, tokens) => goals?.recordUsage(sessionId, { ...tokens, cacheRead: 0, cacheWrite: 0 }),
@@ -653,6 +661,21 @@ export async function boot(opts: BootOptions = {}) {
   let loopTimer: ReturnType<typeof setInterval> | null = null;
 
   const knowledge = createKnowledgeStore(`${dataDir}/knowledge.db`);
+  const trackStore = createTrackStore({ file: `${dataDir}/tracks.json`, knowledge });
+  trackWorkflow = createTrackWorkflow({
+    tracks: trackStore,
+    goals,
+    schedule,
+    git,
+    terminals,
+    projects,
+    sessions,
+    append: async (sessionId, type, data) => {
+      const ev = await store.append(sessionId, type, data, { ignorable: true, producerPlugin: "tracks" });
+      broadcast.event(ev);
+      return ev;
+    },
+  });
 
   const github = createGithubService();
 
@@ -966,6 +989,7 @@ export async function boot(opts: BootOptions = {}) {
         return parseNoteReply(await assistComplete(sessionId, buildNotePrompt(transcript)));
       },
     }),
+    trackRoutes(trackWorkflow),
     sessionRetentionRoutes(sessions),
     controlRoutes(sessions),
     autoAcceptRoutes(sessions),
@@ -983,7 +1007,7 @@ export async function boot(opts: BootOptions = {}) {
   ];
   const routes: RouteHandler[] = [...staticCoreRoutes, routeRegistry.handler];
 
-  const allCapabilities = () => ["polyth.sessions", "polyth.sessionPersistence", "polyth.projects", "polyth.agentRuntime", "polyth.goals", "polyth.files", "polyth.commands", "polyth.git", "polyth.worktrees", "polyth.terminal", "polyth.preview", "polyth.multirun", "polyth.workflow", "polyth.fusion", "polyth.walkthrough", "polyth.schedule", "polyth.github", "polyth.control", "polyth.agentProfiles", "polyth.settings", "polyth.mcp", "polyth.plugins", "polyth.knowledge", "polyth.review", "polyth.usage", "polyth.browser", "polyth.voice", "polyth.assist", "polyth.homeAssistant", "polyth.secureSafe"];
+  const allCapabilities = () => ["polyth.sessions", "polyth.sessionPersistence", "polyth.projects", "polyth.agentRuntime", "polyth.goals", "polyth.files", "polyth.commands", "polyth.git", "polyth.worktrees", "polyth.terminal", "polyth.preview", "polyth.multirun", "polyth.workflow", "polyth.fusion", "polyth.walkthrough", "polyth.schedule", "polyth.tracks", "polyth.github", "polyth.control", "polyth.agentProfiles", "polyth.settings", "polyth.mcp", "polyth.plugins", "polyth.knowledge", "polyth.review", "polyth.usage", "polyth.browser", "polyth.voice", "polyth.assist", "polyth.homeAssistant", "polyth.secureSafe"];
 
   await packageLifecycle.startEnabled(packageRegistry);
 

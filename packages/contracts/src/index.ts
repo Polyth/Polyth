@@ -1071,7 +1071,7 @@ export interface ScheduleRunDto {
 
 // ---------------------------------------------------------------- knowledge (WP10)
 
-export type KnowledgeKind = "note" | "plan" | "memory";
+export type KnowledgeKind = "note" | "spec" | "plan" | "memory";
 export interface KnowledgeItem {
   id: string;
   projectId: string;
@@ -1091,6 +1091,71 @@ export interface KnowledgeAttachedData {
   title: string;
   body: string;
   digest: string;
+}
+
+// ---------------------------------------------------------------- spec-driven tracks
+
+export type TrackStatus = "draft" | "running" | "blocked" | "completed";
+export type TrackStepStatus = "pending" | "running" | "failed" | "completed";
+
+export interface TrackTestResult {
+  command: string;
+  exitCode: number | null;
+  timedOut: boolean;
+  truncated: boolean;
+  /** Bounded tail of the test output. */
+  output: string;
+  completedAt: number;
+}
+
+export interface TrackStepDto {
+  id: string;
+  title: string;
+  prompt: string;
+  testCommand: string;
+  commitMessage?: string;
+  status: TrackStepStatus;
+  sessionId?: string;
+  scheduleTaskId?: string;
+  startedAt?: number;
+  completedAt?: number;
+  commitSha?: string;
+  test?: TrackTestResult;
+  error?: string;
+}
+
+export interface TrackDto {
+  id: string;
+  projectId: string;
+  title: string;
+  status: TrackStatus;
+  specKnowledgeId: string;
+  planKnowledgeId: string;
+  planRevision: number;
+  steps: TrackStepDto[];
+  currentStep: number;
+  sessionId?: string;
+  budgetTokens?: number;
+  maxContinuations?: number;
+  revision: number;
+  createdAt: number;
+  updatedAt: number;
+}
+
+export interface TrackStepInput {
+  title: string;
+  prompt?: string;
+  testCommand: string;
+  commitMessage?: string;
+}
+
+export interface TrackCreateInput {
+  projectId: string;
+  title: string;
+  spec: string;
+  steps: TrackStepInput[];
+  budgetTokens?: number;
+  maxContinuations?: number;
 }
 
 // ---------------------------------------------------------------- quotas (WP12)
