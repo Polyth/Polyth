@@ -5,13 +5,11 @@
 // Selecting Chat hides the workspace layer (kept-alive) and the command path
 // restores the last Chat focus target or composer without remounting trees.
 import {
-  closeWorkspacePane, openWorkspacePane, setActiveView, setOverlay, setSidebarOpen, setUiError, useStore,
+  closeWorkspacePane, openWorkspacePane, setActiveView, setOverlay, setSidebarOpen, startNewSession, useStore,
 } from "../../store.ts";
 import { listSurfaces, useSurfaceVersion, workspaceSurfacesOf } from "../../surfaces.ts";
 import { Icon } from "../../icons.tsx";
-import { createSession } from "../../init.ts";
 import { displaySessionTitle } from "../../format.ts";
-import { friendlyError } from "../../settings.ts";
 
 export default function WorkspaceBottomNav() {
   const rail = useStore((s) => s.railPlugin);
@@ -46,8 +44,7 @@ export default function WorkspaceBottomNav() {
           disabled={!projectId}
           onClick={() => {
             if (!projectId) return;
-            void createSession(projectId).catch((error) =>
-              setUiError(friendlyError("Couldn’t create a session", error)));
+            startNewSession(projectId);
           }}
         >
           <Icon.plus />

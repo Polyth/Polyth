@@ -8,13 +8,12 @@
 // its UI-only revision polling pauses while hidden.
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { api, httpStatusOf } from "../../api.ts";
-import { clearEditorLocation, getState, useStore } from "../../store.ts";
+import { clearEditorLocation, useStore } from "../../store.ts";
 import { MarkdownDoc } from "../../markdown.tsx";
 import JsonTree, { tryParseJson } from "../../markdown/JsonTree.tsx";
 import { highlight, highlightLines, langOf } from "../../highlight.ts";
 import { formatFileChat, formatSelectionChat, lineRangeOf } from "../../chatclip.ts";
 import { requestComposerInsert } from "../../composerInsert.ts";
-import { createSession } from "../../init.ts";
 import { MOD } from "../../format.ts";
 import { useEscape } from "../../useEscape.ts";
 import { clampMenuPosition } from "../../selectionActions.ts";
@@ -205,10 +204,6 @@ export default function FilePane({ projectId, sessionId, resource: path, visible
   // ---- chat inserts ----------------------------------------------------------
   const insertToChat = (text: string) => {
     requestComposerInsert(text);
-    const st = getState();
-    if (!st.activeSessionId && st.activeProjectId) {
-      void createSession(st.activeProjectId).catch(() => {});
-    }
     setFlash("Added to chat ✓");
   };
 

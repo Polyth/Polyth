@@ -97,3 +97,25 @@ test("boot restoration keeps the restored workspace pane open", async () => {
   assert.equal(s.activeView, "session");
   assert.equal(getWorkspaceMode(), "widgets", "boot restoration preserves the saved workspace mode");
 });
+
+test("starting a new chat records only UI intent until the first send", () => {
+  const before = store.getState().sessions.map((session) => session.id);
+  store.startNewSession("p1", {
+    title: "Prepared chat",
+    draft: "Review this branch",
+    worktreePath: "/tmp/polyth-worktree",
+  });
+
+  const state = store.getState();
+  assert.equal(state.activeProjectId, "p1");
+  assert.equal(state.activeSessionId, null);
+  assert.deepEqual(state.sessions.map((session) => session.id), before, "no session projection is created");
+  assert.deepEqual(state.newSessionIntent, {
+    projectId: "p1",
+    title: "Prepared chat",
+    draft: "Review this branch",
+    worktreePath: "/tmp/polyth-worktree",
+  });
+  assert.equal(state.activeView, "session");
+  assert.equal(getWorkspaceMode(), "chat");
+});

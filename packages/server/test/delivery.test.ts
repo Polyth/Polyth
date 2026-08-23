@@ -304,20 +304,33 @@ test("queue order survives service restart and dispatches after reopen", async (
   await store2.close();
 });
 
-test("queue reorder validates permutations and remove is session-scoped", async () => {
+test("queue edit and reorder persist into dispatch while remove stays session-scoped", async () => {
   const fake = fakeRuntime();
-  const { sessions } = makeService(fake);
+  const { sessions, store } = makeService(fake);
   const { id } = await sessions.create({ projectId: "p1", title: "T" });
   await sessions.send(id, { text: "turn" });
   await flush();
   const a = await sessions.send(id, { text: "a", delivery: "queue" });
   const b = await sessions.send(id, { text: "b", delivery: "queue" });
+  const c = await sessions.send(id, { text: "c", delivery: "queue" });
+  const edited = await sessions.queueEdit!(id, a.queueId!, "  a edited  ");
+  assert.equal(edited.text, "a edited");
+  await assert.rejects(() => sessions.queueEdit!(id, a.queueId!, "  "), /required/);
   await assert.rejects(() => sessions.queueReorder!(id, [a.queueId!]), /permutation/);
-  const reordered = await sessions.queueReorder!(id, [b.queueId!, a.queueId!]);
-  assert.deepEqual(reordered.map((i) => i.text), ["b", "a"]);
-  await sessions.queueRemove!(id, b.queueId!);
-  assert.deepEqual((await sessions.queueList!(id)).map((i) => i.text), ["a"]);
+  const reordered = await sessions.queueReorder!(id, [b.queueId!, a.queueId!, c.queueId!]);
+  assert.deepEqual(reordered.map((i) => i.text), ["b", "a edited", "c"]);
+  await sessions.queueRemove!(id, c.queueId!);
+  assert.deepEqual((await sessions.queueList!(id)).map((i) => i.text), ["b", "a edited"]);
   await assert.rejects(() => sessions.queueRemove!(id, "nope"), /not found/);
+  const editEvent = (await store.events(id)).find((event) => event.type === "queue/edited");
+  assert.deepEqual(editEvent?.data, { queueId: a.queueId!, text: "a edited" });
+
+  fake.emit(id, { type: "turn/stopped", reason: "completed" });
+  await flush();
+  assert.deepEqual(fake.startedTexts, ["turn", "b"]);
+  fake.emit(id, { type: "turn/stopped", reason: "completed" });
+  await flush();
+  assert.deepEqual(fake.startedTexts, ["turn", "b", "a edited"]);
 });
 
 test("rewind rejects running turns, supports redo, and branches backend before replacement", async () => {

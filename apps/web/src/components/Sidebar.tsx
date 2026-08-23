@@ -4,10 +4,10 @@ import {
 } from "react";
 import {
   getState, useStore, activateProject, openWorkspacePane, openWorktreeSessionDialog, setOverlay,
-  setSidebarOpen, setUiError,
+  setSidebarOpen, setUiError, startNewSession,
 } from "../store.ts";
 import {
-  createSession, getSyncStatus, refreshSessions, renameProject, subscribeSyncStatus,
+  getSyncStatus, refreshSessions, renameProject, subscribeSyncStatus,
 } from "../init.ts";
 import { MOD } from "../format.ts";
 import { friendlyError } from "../settings.ts";
@@ -140,11 +140,8 @@ export default function Sidebar() {
 
   const onNewSession = () => {
     if (!activeProjectId) return;
-    // Close the drawer only after the session actually exists; a failure
-    // leaves it open with the existing error path.
-    void createSession(activeProjectId)
-      .then(closeDrawer)
-      .catch((e) => setUiError(friendlyError("Couldn’t create a session", e)));
+    startNewSession(activeProjectId);
+    closeDrawer();
   };
   const toggleSelectMode = () => {
     setSelectMode((current) => {
@@ -406,10 +403,8 @@ export default function Sidebar() {
                   >
                     <button role="menuitem" onClick={() => {
                       setProjectMenu(null);
-                      if (p.id !== activeProjectId) activateProject(p.id);
-                      void createSession(p.id)
-                        .then(closeDrawer)
-                        .catch((error) => setUiError(friendlyError("Couldn’t create a session", error)));
+                      startNewSession(p.id);
+                      closeDrawer();
                     }}>New session</button>
                     <button role="menuitem" onClick={() => {
                       setProjectMenu(null);

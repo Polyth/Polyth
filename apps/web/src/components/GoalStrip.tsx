@@ -3,6 +3,7 @@ import { useState, useEffect, useCallback } from "react";
 import { api, type GoalState } from "../api.ts";
 import { useStore } from "../store.ts";
 import { goalChecklist } from "../utils.ts";
+import Dialog from "./a11y/Dialog.tsx";
 import EmptyState from "./EmptyState.tsx";
 
 export function GoalStrip({ forceOpen = false }: { forceOpen?: boolean }) {
@@ -133,55 +134,64 @@ export function GoalAttachForm({ onDone }: { onDone: () => void }) {
   };
 
   return (
-    <div className="goal-attach">
-      <label className="goal-attach-label">
-        Objective
-        <textarea
-          rows={2}
-          placeholder="What should this session accomplish? One item per line becomes a checklist."
-          value={objective}
-          onChange={(e) => setObjective(e.target.value)}
-        />
-      </label>
-      <div className="goal-attach-row">
-        <label className="goal-attach-label">
-          Token budget
-          <input
-            type="number"
-            min={1}
-            step={1}
-            placeholder="e.g. 500000"
-            value={budget}
-            onChange={(e) => setBudget(e.target.value)}
-            aria-invalid={budgetError ? true : undefined}
-            aria-describedby={budgetError ? "goal-budget-error" : undefined}
-            style={{ width: 130 }}
-          />
-          {budgetError && <span id="goal-budget-error" className="form-error">{budgetError}</span>}
-        </label>
-        <label className="goal-attach-label">
-          Max continuations
-          <input
-            type="number"
-            min={1}
-            step={1}
-            placeholder="e.g. 12"
-            value={maxCont}
-            onChange={(e) => setMaxCont(e.target.value)}
-            aria-invalid={continuationError ? true : undefined}
-            aria-describedby={continuationError ? "goal-continuations-error" : undefined}
-            style={{ width: 130 }}
-          />
-          {continuationError && <span id="goal-continuations-error" className="form-error">{continuationError}</span>}
-        </label>
-        <span className="header-spacer" />
-        <button className="small-btn" onClick={onDone}>Cancel</button>
-        <button className="primary-btn goal-attach-submit" onClick={() => void submit()} disabled={busy || !objective.trim() || !!budgetError || !!continuationError}>
-          Attach
-        </button>
+    <Dialog title="Session goal" onClose={onDone} className="goal-dialog" initialFocus="textarea">
+      <div className="goal-dialog-head">
+        <span className="goal-dialog-mark" aria-hidden="true">◎</span>
+        <div>
+          <h2>Set a clear session goal</h2>
+          <p>Polyth will keep the objective and its limits visible while the agent works.</p>
+        </div>
+        <button className="icon-btn" aria-label="Close goal dialog" onClick={onDone}>×</button>
       </div>
-      {serverError && <div className="form-error" role="alert">{serverError}</div>}
-    </div>
+      <div className="goal-attach">
+        <label className="goal-attach-label goal-objective-field">
+          <span>Objective</span>
+          <textarea
+            rows={4}
+            placeholder="What should this session accomplish? One item per line becomes a checklist."
+            value={objective}
+            onChange={(e) => setObjective(e.target.value)}
+          />
+        </label>
+        <div className="goal-attach-row">
+          <label className="goal-attach-label">
+            <span>Token budget <small>Optional</small></span>
+            <input
+              type="number"
+              min={1}
+              step={1}
+              placeholder="500000"
+              value={budget}
+              onChange={(e) => setBudget(e.target.value)}
+              aria-invalid={budgetError ? true : undefined}
+              aria-describedby={budgetError ? "goal-budget-error" : undefined}
+            />
+            {budgetError && <span id="goal-budget-error" className="form-error">{budgetError}</span>}
+          </label>
+          <label className="goal-attach-label">
+            <span>Max continuations <small>Optional</small></span>
+            <input
+              type="number"
+              min={1}
+              step={1}
+              placeholder="12"
+              value={maxCont}
+              onChange={(e) => setMaxCont(e.target.value)}
+              aria-invalid={continuationError ? true : undefined}
+              aria-describedby={continuationError ? "goal-continuations-error" : undefined}
+            />
+            {continuationError && <span id="goal-continuations-error" className="form-error">{continuationError}</span>}
+          </label>
+        </div>
+        {serverError && <div className="form-error goal-dialog-error" role="alert">{serverError}</div>}
+        <div className="goal-dialog-actions">
+          <button className="small-btn" onClick={onDone}>Cancel</button>
+          <button className="primary-btn goal-attach-submit" onClick={() => void submit()} disabled={busy || !objective.trim() || !!budgetError || !!continuationError}>
+            {busy ? "Attaching…" : "Attach goal"}
+          </button>
+        </div>
+      </div>
+    </Dialog>
   );
 }
 

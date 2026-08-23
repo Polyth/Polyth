@@ -183,6 +183,10 @@ export function createHttpServer(deps: HttpDeps): Server {
         return json(res, 200, await sessions.queueReorder?.(m[1]!, ids) ?? []);
       }
       m = path.match(/^\/api\/sessions\/([^/]+)\/queue\/([^/]+)$/);
+      if (m && method === "PATCH") {
+        const b = await readBody(req);
+        return json(res, 200, await sessions.queueEdit?.(m[1]!, m[2]!, String(b.text ?? "")));
+      }
       if (m && method === "DELETE") {
         await sessions.queueRemove?.(m[1]!, m[2]!);
         return json(res, 200, { ok: true });

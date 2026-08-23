@@ -65,7 +65,13 @@ register("./tsxHooks.mjs", import.meta.url);
 
 const { act, createElement } = await import("react");
 const { createRoot } = await import("react-dom/client");
-const { getState, setModels, setOverlay } = await import("../src/store.ts");
+const {
+  activateSession,
+  getState,
+  setModels,
+  setOverlay,
+  setSessions,
+} = await import("../src/store.ts");
 const { installBuiltinMiniWidgets } = await import("../src/widgets/builtinMiniWidgets.tsx");
 const { default: Header } = await import("../src/components/Header.tsx");
 const { default: CommandPalette } = await import("../src/components/CommandPalette.tsx");
@@ -91,6 +97,17 @@ async function mounted(component: ReactNode) {
 }
 
 test("header Search and History open visibly distinct surfaces", async () => {
+  await act(async () => {
+    setSessions("audit-project", [{
+      id: "audit-session",
+      projectId: "audit-project",
+      title: "Audit session",
+      status: "idle",
+      createdAt: 1,
+      updatedAt: 1,
+    }]);
+    activateSession("audit-session");
+  });
   const header = await mounted(createElement(Header));
   try {
     const search = [...header.container.querySelectorAll<HTMLButtonElement>("button")]
@@ -104,7 +121,11 @@ test("header Search and History open visibly distinct surfaces", async () => {
     await act(async () => { history.click(); });
     assert.equal(getState().overlay, "search");
   } finally {
-    setOverlay(null);
+    await act(async () => {
+      setOverlay(null);
+      activateSession(null);
+      setSessions("audit-project", []);
+    });
     await header.unmount();
   }
 

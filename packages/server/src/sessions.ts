@@ -32,6 +32,7 @@ export interface Broadcaster {
 export interface QueueStore {
   enqueue(sessionId: string, text: string, delivery: DeliveryMode, attachments?: AttachmentRef[]): Promise<QueueItemDto>;
   queueList(sessionId: string): Promise<QueueItemDto[]>;
+  queueEdit(sessionId: string, queueId: string, text: string): Promise<QueueItemDto | undefined>;
   queueReorder(sessionId: string, ids: string[]): Promise<QueueItemDto[]>;
   queueRemove(sessionId: string, queueId: string): Promise<boolean>;
   queueShift(sessionId: string): Promise<QueueItemDto | undefined>;
@@ -987,6 +988,17 @@ export function createSessionService(deps: {
       const proj = await store.projection(sessionId);
       if (!proj) throw Object.assign(new Error("session not found"), { code: "not-found" });
       return deps.queue.queueList(sessionId);
+    },
+    async queueEdit(sessionId, queueId, text) {
+      if (!deps.queue) throw Object.assign(new Error("delivery queue unavailable"), { code: "unsupported" });
+      const proj = await store.projection(sessionId);
+      if (!proj) throw Object.assign(new Error("session not found"), { code: "not-found" });
+      const nextText = text.trim();
+      if (!nextText) throw Object.assign(new Error("queued message text is required"), { code: "invalid-input" });
+      const item = await deps.queue.queueEdit(sessionId, queueId, nextText);
+      if (!item) throw Object.assign(new Error("queue item not found"), { code: "not-found" });
+      await appendAndBroadcast(sessionId, "queue/edited", { queueId, text: nextText }, { ignorable: true });
+      return item;
     },
     async queueReorder(sessionId, ids) {
       if (!deps.queue) throw Object.assign(new Error("delivery queue unavailable"), { code: "unsupported" });

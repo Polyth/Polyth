@@ -76,6 +76,33 @@ test("queueReorder validates an exact permutation", async () => {
   }
 });
 
+test("queueEdit persists text while preserving queue metadata", async () => {
+  const dir = freshDir();
+  const dbPath = join(dir, "q.db");
+  const attachment = { id: "a1", name: "notes.txt", mime: "text/plain", size: 12, path: "notes.txt" };
+  let queueId = "";
+  {
+    const store = createStore(dbPath);
+    const item = await store.enqueue("s1", "before", "steer", [attachment]);
+    queueId = item.id;
+    const edited = await store.queueEdit("s1", item.id, "after");
+    assert.deepEqual(edited, { ...item, text: "after" });
+    assert.equal(await store.queueEdit("other-session", item.id, "wrong"), undefined);
+    await store.close();
+  }
+  const store = createStore(dbPath);
+  try {
+    const [persisted] = await store.queueList("s1");
+    assert.equal(persisted?.id, queueId);
+    assert.equal(persisted?.text, "after");
+    assert.equal(persisted?.delivery, "steer");
+    assert.equal(persisted?.position, 0);
+    assert.deepEqual(persisted?.attachments, [attachment]);
+  } finally {
+    await store.close();
+  }
+});
+
 test("queueRemove removes only the owning session's item", async () => {
   const store = createStore(join(freshDir(), "q.db"));
   try {

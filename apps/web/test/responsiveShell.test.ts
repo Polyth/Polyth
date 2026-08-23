@@ -90,6 +90,7 @@ test("compact sidebar is a drawer, never display:none with no way back", async (
 
 test("header owns the drawer trigger, compact view picker, and panel trigger", async () => {
   const header = await read("../src/components/Header.tsx");
+  const actions = await read("../src/widgets/builtinMiniWidgets.tsx");
   assert.ok(header.includes('aria-controls="polyth-session-drawer"'), "drawer trigger targets the drawer");
   assert.ok(header.includes("Open projects and sessions"), "drawer trigger accessible name");
   assert.ok(header.includes("NarrowPanelTrigger"), "registry-backed panel trigger rendered from the header");
@@ -98,8 +99,8 @@ test("header owns the drawer trigger, compact view picker, and panel trigger", a
   assert.ok(header.includes("VIEW_OF_CAPABILITY[c.descriptor.id]"), "compact picker maps capability descriptors to views");
   assert.ok(!header.includes("const VIEW_GROUPS"), "no duplicate hard-coded view list");
   assert.ok(
-    header.includes('"Turn off auto-accept" : "Turn on auto-accept"'),
-    "auto-accept control exposes the resulting action in its accessible name",
+    actions.includes('"Turn off auto-approve" : "Turn on auto-approve"'),
+    "placeable auto-approve control exposes the resulting action in its accessible name",
   );
 });
 
@@ -128,11 +129,12 @@ test("modal surfaces share the Dialog focus contract (no copied traps)", async (
   assert.ok(rail.includes("useRailSurfaceModel"), "trigger and host share one visibleSurfaces model");
 });
 
-test("drawer closes only after successful session activation", async () => {
+test("drawer opens existing sessions but new chat defers session creation", async () => {
   const list = await read("../src/components/sidebar/SessionList.tsx");
   assert.match(list, /openSession\(id\)\.then\(/, "close happens after openSession resolves");
   const sidebar = await read("../src/components/Sidebar.tsx");
-  assert.match(sidebar, /createSession\(activeProjectId\)\s*\n?\s*\.then\(closeDrawer\)/, "new-session closes the drawer only on success");
+  assert.ok(sidebar.includes("startNewSession(activeProjectId)"), "new chat enters the unsaved composer surface");
+  assert.ok(!sidebar.includes("createSession("), "new chat never posts a session before first send");
 });
 
 test("composer bar exposes the two-tier semantic groups without forking send", async () => {
@@ -145,16 +147,31 @@ test("composer bar exposes the two-tier semantic groups without forking send", a
   assert.ok(css.includes("repeat(2, minmax(0, 1fr))"), "phone selector grid contract");
 });
 
+test("composer active-run controls and mobile actions stay direct", async () => {
+  const composer = await read("../src/components/Composer.tsx");
+  const timeline = await read("../src/components/Timeline.tsx");
+  const goal = await read("../src/components/GoalStrip.tsx");
+  const css = await read("../src/styles.css");
+  assert.ok(composer.includes("<Icon.sendClock />"), "queue mode uses the clock-send icon");
+  assert.ok(composer.includes("Send now"), "queue options expose immediate delivery");
+  assert.ok(composer.includes("Stop without sending this draft"), "queue options expose stop");
+  assert.ok(composer.includes("composer-stop-primary"), "active sends become a primary stop control");
+  assert.ok(timeline.includes('className="msg-actions"'), "message actions remain inline");
+  assert.match(css, /Phone quick actions are immediately available[\s\S]*?\.focus-conversation \.msg \.msg-actions\s*\{[^}]*display:\s*flex/);
+  assert.ok(goal.includes("<Dialog title=\"Session goal\""), "goal parameters open in a focused modal");
+});
+
 test("Focus uses compact mobile composer controls without editor chrome", async () => {
   const composer = await read("../src/components/Composer.tsx");
+  const actions = await read("../src/widgets/builtinMiniWidgets.tsx");
   assert.ok(composer.includes('simpleMode && variant === "docked"'), "light controls are scoped to docked Focus");
   assert.ok(composer.includes('className="composer-extensions composer-mobile-extensions"'), "Focus exposes slotted mobile actions");
-  assert.ok(composer.includes("ui.showAutoApprove"), "Focus honors the auto-approve visibility preference");
-  assert.ok(composer.includes("ui.showGoals"), "Focus honors the goals visibility preference");
+  assert.ok(actions.includes('"permissions.auto-approve-composer-action"'), "auto-approve is a placeable composer action");
+  assert.ok(actions.includes('"session.goal-composer-action"'), "goals are a placeable composer action");
   assert.ok(composer.includes("<Icon.paperclip />"), "Focus exposes a paperclip attachment action");
   assert.ok(!composer.includes("<Icon.focus />"), "Focus removes the focused-editor header action");
-  assert.ok(composer.includes("<Icon.shield />"), "Focus exposes the auto-approve shield");
-  assert.ok(composer.includes("<Icon.target />"), "Focus exposes the goals target");
+  assert.ok(actions.includes("<Icon.shield />"), "Focus exposes the auto-approve shield");
+  assert.ok(actions.includes("<Icon.target />"), "Focus exposes the goals target");
   assert.ok(composer.includes("<Icon.send />"), "Focus uses a paper-plane send icon");
   const css = await read("../src/styles.css");
   assert.ok(css.includes(".composer-focus-light .chip-k { display: none; }"), "technical picker keys are hidden");

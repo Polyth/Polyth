@@ -40,6 +40,8 @@ test("model-visible vocabulary is unchanged (replay compatibility)", () => {
 test("composer-before is a first-class validated widget slot", () => {
   assert.ok(UI_SLOTS.includes("session.composer.before"));
   assert.equal(isUiSlot("session.composer.before"), true);
+  assert.ok(UI_SLOTS.includes("session.footer"));
+  assert.equal(isUiSlot("session.footer"), true);
   assert.equal(isUiSlot("session.composer.after"), false);
 });
 

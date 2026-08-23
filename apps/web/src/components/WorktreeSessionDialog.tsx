@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { api, type GitBranches, type Worktree } from "../api.ts";
-import { createSession } from "../init.ts";
-import { setOverlay, setSidebarOpen, useStore } from "../store.ts";
+import { setOverlay, setSidebarOpen, startNewSession, useStore } from "../store.ts";
 import { friendlyError } from "../settings.ts";
 import { suggestWorktreeBranch, worktreeLabel } from "../worktreeSessions.ts";
 import Dialog from "./a11y/Dialog.tsx";
@@ -101,8 +100,8 @@ export default function WorktreeSessionDialog() {
         worktreePath = (await api.createWorktree(request.projectId, branch.trim())).path;
       }
       if (!worktreePath) throw new Error("Choose a worktree.");
-      setProgress("Creating session…");
-      await createSession(request.projectId, {
+      setProgress("Preparing new chat…");
+      startNewSession(request.projectId, {
         ...(title.trim() ? { title: title.trim() } : {}),
         worktreePath,
       });
@@ -110,7 +109,7 @@ export default function WorktreeSessionDialog() {
       setSidebarOpen(false);
       setOverlay(null);
     } catch (cause) {
-      setError(friendlyError("Couldn’t create the worktree session", cause));
+      setError(friendlyError("Couldn’t prepare the worktree chat", cause));
       setProgress("");
       setBusy(false);
     }
@@ -191,7 +190,7 @@ export default function WorktreeSessionDialog() {
         <span className="header-spacer" />
         <button className="small-btn" disabled={busy} onClick={close}>Cancel</button>
         <button className="primary-btn" disabled={busy || loading || (mode === "existing" ? !selectedPath : !branch.trim())} onClick={() => void submit()}>
-          {busy ? "Creating…" : "Create session"}
+          {busy ? "Preparing…" : "Continue to composer"}
         </button>
       </div>
     </Dialog>

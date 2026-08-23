@@ -7,10 +7,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { clampMenuPosition, quoteForReply, selectionTitle } from "../selectionActions.ts";
 import { requestComposerInsert } from "../composerInsert.ts";
-import { copyText, saveDraft } from "../utils.ts";
-import { setUiError, useStore } from "../store.ts";
-import { api } from "../api.ts";
-import { openSession, refreshSessions } from "../init.ts";
+import { copyText } from "../utils.ts";
+import { startNewSession, useStore } from "../store.ts";
 
 const MENU_W = 270;
 const MENU_H = 34;
@@ -82,18 +80,14 @@ export default function SelectionMenu({ container }: {
 
   // Same bootstrap pattern as GithubView "+ session": the context lands as the
   // new session's draft (saved before it opens) — nothing is sent.
-  const newSession = async () => {
+  const newSession = () => {
     if (!projectId) return;
     const { text } = menu;
     dismiss();
-    try {
-      const { id } = await api.createSession({ projectId, title: selectionTitle(text) });
-      saveDraft(id, quoteForReply(text));
-      await openSession(id);
-      void refreshSessions(projectId);
-    } catch (e) {
-      setUiError(`Couldn’t start session: ${e instanceof Error ? e.message : String(e)}`);
-    }
+    startNewSession(projectId, {
+      title: selectionTitle(text),
+      draft: quoteForReply(text),
+    });
   };
 
   const copy = async () => {
@@ -115,7 +109,7 @@ export default function SelectionMenu({ container }: {
         : (
           <>
             <button className="small-btn" title="Quote the selection in the composer" onClick={quote}>Quote in reply</button>
-            <button className="small-btn" title="Start a new session with this selection as the draft" onClick={() => void newSession()} disabled={!projectId}>New session</button>
+            <button className="small-btn" title="Start a new session with this selection as the draft" onClick={newSession} disabled={!projectId}>New session</button>
             <button className="small-btn" title="Copy the selection" onClick={() => void copy()}>Copy</button>
           </>
         )}

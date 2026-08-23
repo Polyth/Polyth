@@ -2560,9 +2560,20 @@ body[data-chatwidth="wide"] .bubble, body[data-chatwidth="wide"] .reasoning, bod
   display: flex; align-items: center; gap: 8px; font-size: 12.5px;
   background: var(--elevated); border: 1px solid var(--hair-strong);
   border-radius: var(--radius-sm); padding: 5px 9px; box-shadow: var(--inset-hi);
+  cursor: grab;
 }
+.queue-chip.dragging { opacity: 0.5; }
+.queue-chip.drag-over { border-color: var(--accent); background: var(--accent-wash); }
+.queue-chip.editing { cursor: default; align-items: flex-start; }
+.queue-chip .queue-grip { color: var(--muted); font-size: 14px; }
 .queue-chip .queue-pos { color: var(--muted); font-variant-numeric: tabular-nums; }
 .queue-chip .queue-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.queue-chip .queue-edit {
+  flex: 1; min-width: 0; resize: vertical; font: inherit; line-height: 1.4;
+  color: inherit; background: var(--surface); border: 1px solid var(--accent-line);
+  border-radius: var(--radius-sm); padding: 4px 6px;
+}
+.queue-chip .queue-delivery { font-size: 10.5px; }
 .queue-chip button { background: none; border: 0; color: var(--muted); cursor: pointer; padding: 2px 4px; }
 .queue-chip button:hover { color: inherit; }
 .queue-chip button:disabled { opacity: 0.35; cursor: default; }
@@ -7701,4 +7712,203 @@ body[data-quick-actions="false"] [data-widget-id="core.quick-actions"] { display
     width: 35px;
     min-width: 35px;
   }
+}
+
+/* Configurable session actions and footer --------------------------------- */
+.session-pin {
+  width: 16px;
+  height: 16px;
+  display: inline-grid;
+  place-items: center;
+  color: var(--session-blue);
+  font-size: inherit;
+}
+.session-pin svg { width: 12px; height: 12px; fill: color-mix(in srgb, var(--session-blue) 16%, transparent); }
+.composer .composer-mobile-extensions .header-action {
+  width: 38px;
+  min-width: 38px;
+  height: 38px;
+  padding: 0;
+  border: 0;
+  border-radius: 11px;
+  color: var(--muted);
+  background: transparent;
+}
+.composer .composer-mobile-extensions .header-action > span { display: none; }
+.composer .composer-mobile-extensions .header-action:hover {
+  color: var(--text);
+  background: color-mix(in srgb, var(--text) 6%, transparent);
+}
+.composer-focus-hint {
+  margin-left: 2px;
+  color: var(--faint);
+  font: 500 9px/1 var(--mono);
+  white-space: nowrap;
+}
+.composer .composer-mobile-extensions .composer-auto-approve.on,
+.composer .composer-mobile-extensions .composer-goals.on {
+  color: var(--green);
+  background: color-mix(in srgb, var(--green) 11%, transparent);
+}
+.focus-conversation > .pending-changes-bar {
+  width: min(920px, calc(100% - 72px));
+  flex: none;
+  margin: 8px auto 0;
+}
+
+/* Goal editing is a focused modal, never an inline strip. */
+.goal-dialog {
+  width: min(580px, calc(100vw - 28px));
+  overflow: hidden;
+  border-color: color-mix(in srgb, var(--purple) 32%, var(--border));
+  border-radius: 20px;
+  background:
+    radial-gradient(circle at 8% 0%, color-mix(in srgb, var(--purple) 13%, transparent), transparent 35%),
+    var(--elevated);
+}
+.goal-dialog-head {
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr) 36px;
+  align-items: start;
+  gap: 12px;
+  padding: 20px 20px 16px;
+  border-bottom: 1px solid var(--border-soft);
+}
+.goal-dialog-head h2 { margin: 1px 0 4px; font-size: 18px; letter-spacing: -.02em; }
+.goal-dialog-head p { margin: 0; color: var(--muted); font-size: 11.5px; line-height: 1.45; }
+.goal-dialog-mark {
+  width: 42px;
+  height: 42px;
+  display: grid;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, var(--purple) 38%, var(--border-soft));
+  border-radius: 13px;
+  color: var(--purple);
+  background: color-mix(in srgb, var(--purple) 12%, transparent);
+  font-size: 23px;
+}
+.goal-dialog-head .icon-btn { width: 34px; height: 34px; border: 0; font-size: 20px; }
+.goal-dialog .goal-attach {
+  gap: 16px;
+  padding: 18px 20px 20px;
+  border: 0;
+  background: transparent;
+}
+.goal-dialog .goal-attach-label { gap: 7px; color: var(--text-dim); }
+.goal-dialog .goal-attach-label > span { display: flex; align-items: baseline; gap: 6px; }
+.goal-dialog .goal-attach-label small { color: var(--muted); font-size: 9px; font-weight: 500; }
+.goal-dialog .goal-attach textarea {
+  min-height: 112px;
+  padding: 12px;
+  border-color: var(--border-soft);
+  border-radius: 13px;
+  background: var(--chat-surface);
+  line-height: 1.5;
+}
+.goal-dialog .goal-attach-row { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.goal-dialog .goal-attach-row input { width: 100%; min-height: 42px; border-radius: 11px; }
+.goal-dialog-actions { display: flex; justify-content: flex-end; gap: 8px; padding-top: 2px; }
+.goal-dialog-actions button { min-height: 38px; padding-inline: 16px; border-radius: 10px; }
+.goal-dialog-error { padding: 9px 11px; border-radius: 9px; background: var(--red-wash); }
+
+/* Active-run primary control: Stop, or queued send with a matching menu. */
+.composer-send-split { position: relative; display: inline-flex; align-items: stretch; }
+.composer-send-split .composer-queue {
+  border-radius: 11px 0 0 11px;
+  padding-inline: 12px 9px;
+  box-shadow: none;
+}
+.composer-send-options {
+  width: 28px;
+  min-width: 28px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-left: 1px solid color-mix(in srgb, var(--accent-ink) 22%, transparent);
+  border-radius: 0 11px 11px 0;
+  background: var(--composer-green);
+  color: var(--accent-ink);
+}
+.composer-send-options svg { width: 12px; height: 12px; }
+.composer-send-menu {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 8px);
+  z-index: 60;
+  width: 248px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 5px;
+  border: 1px solid var(--border);
+  border-radius: 13px;
+  background: var(--elevated);
+  box-shadow: var(--shadow-lg);
+}
+.composer-send-menu button {
+  min-height: 50px;
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  padding: 7px 9px;
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+}
+.composer-send-menu button:hover { background: var(--chat-raised); }
+.composer-send-menu button > svg { width: 17px; height: 17px; color: var(--muted); }
+.composer-send-menu button > span { display: flex; flex-direction: column; gap: 2px; }
+.composer-send-menu strong { font-size: 11.5px; }
+.composer-send-menu small { color: var(--muted); font-size: 9.5px; }
+.composer-bar .composer-stop-primary {
+  min-width: 78px;
+  height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 0 12px;
+  border: 1px solid color-mix(in srgb, var(--red) 35%, var(--border));
+  border-radius: 11px;
+  background: color-mix(in srgb, var(--red) 9%, var(--elevated));
+  color: var(--red);
+}
+.composer-stop-primary svg { width: 15px; height: 15px; fill: currentColor; }
+.composer-simple .composer-stop-primary {
+  width: 44px;
+  min-width: 44px;
+  height: 44px;
+  padding: 0;
+  border-radius: 50%;
+}
+.composer-simple .composer-stop-primary .composer-action-label,
+.composer-simple .composer-queue .composer-action-label { display: none; }
+
+@media (max-width: 480px) {
+  .focus-conversation > .pending-changes-bar { width: calc(100% - 24px); margin-top: 6px; }
+  .composer-focus-hint { display: none; }
+  .goal-dialog-head { grid-template-columns: 38px minmax(0, 1fr) 34px; padding: 16px 15px 13px; }
+  .goal-dialog-mark { width: 38px; height: 38px; }
+  .goal-dialog .goal-attach { padding: 15px; }
+  .goal-dialog .goal-attach-row { grid-template-columns: 1fr; }
+
+  /* Phone quick actions are immediately available; no reveal tap or menu. */
+  .focus-conversation .msg .msg-actions {
+    display: flex;
+    opacity: 1;
+    pointer-events: auto;
+    transform: none;
+  }
+  .focus-conversation .msg .msg-action-btn {
+    width: 34px;
+    min-width: 34px;
+    height: 34px;
+    min-height: 34px;
+  }
+  .focus-conversation .msg .msg-actions-entry,
+  .focus-conversation .msg .msg-actions-popup { display: none; }
 }

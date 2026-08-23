@@ -53,7 +53,6 @@ import { noteModelUsed, useModelPrefs } from "../modelPrefs.ts";
 import { getUiSettings, useUiSettings } from "../uiPrefs.ts";
 import { migrateFavoritesOnce, profilesLoaded, useProfiles } from "../profiles.ts";
 import AgentProfileForm from "./AgentProfileForm.tsx";
-import PendingChangesBar from "./PendingChangesBar.tsx";
 import type { AgentProfile, ModelDescriptor } from "@polyth/contracts";
 import { agentPickerDefaultLabel, modelPickerDefaultLabel } from "../composerDefaults.ts";
 import { friendlyError, modKeyLabel, parseModelRef } from "../settings.ts";
@@ -62,6 +61,7 @@ import { useWorkspaceMode } from "../widgets/workspaceMode.ts";
 import ModelPicker, { modelContextLabel, modelModalities, modelSupportsThinking } from "./ModelPicker.tsx";
 import { useSessionDefaults } from "../sessionDefaults.ts";
 import { roleKind, useRolePrefs } from "../rolePrefs.ts";
+import { useShellMode } from "../responsiveShell.ts";
 
 function modelRefFromValue(value: string): { providerID: string; modelID: string } | undefined {
   if (!value) return undefined;
@@ -192,7 +192,10 @@ export default function Composer({
   const [goalFormOpen, setGoalFormOpen] = useState(false);
   const [autoApproveBusy, setAutoApproveBusy] = useState(false);
   const [newSessionAutoApprove, setNewSessionAutoApprove] = useState(false);
+  const [newSessionGoal, setNewSessionGoal] = useState(false);
   const [creatingSession, setCreatingSession] = useState(false);
+  const [deliveryMenuOpen, setDeliveryMenuOpen] = useState(false);
+  const deliveryMenuRef = useRef<HTMLDivElement>(null);
   const profiles = useProfiles();
   const models = useStore((s) => s.models);
   const chatModels = models.filter(modelSupportsTextWorkflow);
@@ -201,6 +204,7 @@ export default function Composer({
   const settings = useStore((s) => s.settings);
   const sessionDefaults = useSessionDefaults();
   const session = useStore((s) => s.sessions.find((x) => x.id === s.activeSessionId) ?? null);
+  const newSessionIntent = useStore((s) => s.newSessionIntent);
   const model = useActiveModel();
   const working = model.turn?.status === "working";
   const [techOpen, setTechOpen] = useState(false);
@@ -208,12 +212,15 @@ export default function Composer({
   const widgetMode = variant === "widget";
   const simpleMode = useWorkspaceMode() === "chat" || widgetMode;
   const lightFocusComposer = simpleMode && variant === "docked";
+  const shellLayout = useShellMode();
   const ui = useUiSettings();
 
   // IME-safe input: the DOM owns live text; `text` tracks committed edits only.
   const inputRef = useRef<TextInputHandle>(null);
   const sessionIdRef = useRef<string | null>(session?.id ?? null);
-  const [text, setText] = useState(() => (session?.id ? loadDraft(session.id) : ""));
+  const [text, setText] = useState(() => (
+    session?.id ? loadDraft(session.id) : newSessionIntent?.draft ?? ""
+  ));
   const committedTextRef = useRef(text);
   committedTextRef.current = text;
   const [focusMode, setFocusMode] = useState(false);
@@ -242,7 +249,7 @@ export default function Composer({
       saveDraft(outgoing, inputRef.current?.getText() ?? committedTextRef.current);
     }
     sessionIdRef.current = session?.id ?? null;
-    const t = session?.id ? loadDraft(session.id) : "";
+    const t = session?.id ? loadDraft(session.id) : newSessionIntent?.draft ?? "";
     setText(t);
     inputRef.current?.replaceText(t);
     historyCursor.current = emptyPromptHistoryCursor();
@@ -250,7 +257,23 @@ export default function Composer({
     setAcToken(null);
     acTokenRef.current = null;
     fileSearchSeq.current++;
-  }, [session?.id]);
+  }, [session?.id, newSessionIntent]);
+
+  useEffect(() => {
+    if (!deliveryMenuOpen) return;
+    const close = (event: PointerEvent) => {
+      if (!deliveryMenuRef.current?.contains(event.target as Node)) setDeliveryMenuOpen(false);
+    };
+    const escape = (event: globalThis.KeyboardEvent) => {
+      if (event.key === "Escape") setDeliveryMenuOpen(false);
+    };
+    document.addEventListener("pointerdown", close);
+    document.addEventListener("keydown", escape);
+    return () => {
+      document.removeEventListener("pointerdown", close);
+      document.removeEventListener("keydown", escape);
+    };
+  }, [deliveryMenuOpen]);
 
   // Pane and session transitions must not depend on the debounce. Flush the
   // canonical draft synchronously on pagehide and unmount.
@@ -398,7 +421,10 @@ export default function Composer({
     && cfg.profile.kind === "id"
     && !profiles.some((p) => cfg.profile.kind === "id" && p.id === cfg.profile.id);
 
-  const send = useCallback((override?: string) => {
+  const send = useCallback((
+    override?: string,
+    deliveryOverride?: "steer" | "queue" | "interrupt",
+  ) => {
     if (creatingSession) return;
     const t = (override ?? inputRef.current?.getText() ?? text).trim();
     const command = shellCommand(t);
@@ -410,7 +436,7 @@ export default function Composer({
     const target = sessionIdRef.current;
     // Pills leave the draft the moment the message leaves the composer.
     const atts = command === null ? takeAttachments(target) : [];
-    const delivery = working ? getUiSettings().followUpBehavior : undefined;
+    const delivery = working ? deliveryOverride ?? getUiSettings().followUpBehavior : undefined;
     const preferred = !session?.model
       ? sessionDefaults.defaultModel ?? parseModelRef(settings.defaultModel)
       : undefined;
@@ -460,18 +486,23 @@ export default function Composer({
     } else if (activeProjectId) {
       setCreatingSession(true);
       void (async () => {
-        let worktreePath: string | undefined;
+        let worktreePath = newSessionIntent?.worktreePath;
         if (newSessionTarget.kind === "worktree") {
           worktreePath = newSessionTarget.path;
         } else if (newSessionTarget.kind === "branch") {
           worktreePath = (await api.createWorktree(activeProjectId, newSessionTarget.branch)).path;
         }
-        await createSession(activeProjectId, worktreePath ? { worktreePath } : {});
+        await createSession(activeProjectId, {
+          ...(newSessionIntent?.title ? { title: newSessionIntent.title } : {}),
+          ...(worktreePath ? { worktreePath } : {}),
+        });
         const created = getState().activeSessionId;
         if (!created) throw new Error("The new session did not become active.");
         if (newSessionAutoApprove) await api.autoAcceptSet(created, "on");
+        if (newSessionGoal) await api.goalAttach(created, t);
         await deliver(created);
         setNewSessionAutoApprove(false);
+        setNewSessionGoal(false);
       })()
         .catch((error) => {
           setUiError(friendlyError("Couldn’t create the session", error));
@@ -499,7 +530,7 @@ export default function Composer({
     text, attachments, cfg, profileMissing, noModels, working, activeProjectId,
     session?.model, settings.defaultModel, sessionDefaults.defaultModel,
     sessionDefaults.defaultThinking, chatModels, creatingSession, newSessionTarget,
-    newSessionAutoApprove,
+    newSessionAutoApprove, newSessionGoal, newSessionIntent,
   ]);
 
   const applyCompletion = useCallback((item: AutocompleteItem) => {
@@ -683,9 +714,6 @@ export default function Composer({
     return attachGithubLink(projectId, sessionIdRef.current, url);
   };
 
-  // Bounded context for the composer.leading/trailing hosts (EXTENSION-SEAMS).
-  const slotContext = { sessionId: session?.id, projectId: activeProjectId ?? undefined, variant, working };
-
   // ---- execution configuration projections ------------------------------------
   const modelValue = cfg.model
     ? JSON.stringify({ providerID: cfg.model.providerID, modelID: cfg.model.modelID })
@@ -829,6 +857,23 @@ export default function Composer({
       .catch((error) => setUiError(friendlyError("Couldn’t change auto-approve", error)))
       .finally(() => setAutoApproveBusy(false));
   };
+  const toggleGoal = () => {
+    if (session) setGoalFormOpen(true);
+    else setNewSessionGoal((current) => !current);
+  };
+  // Bounded callbacks let the same configurable action widget live in either
+  // composer slot without owning session-creation state.
+  const slotContext = {
+    sessionId: session?.id,
+    projectId: activeProjectId ?? undefined,
+    variant,
+    working,
+    autoApproveOn,
+    autoApproveBusy,
+    toggleAutoApprove,
+    goalOn: newSessionGoal,
+    toggleGoal,
+  };
   const thinkingItems: PickerItem[] = [
     { id: "", label: "Default", group: "" },
     ...(selectedModel?.variants ?? []).map((variant) => ({ id: variant, label: variant, group: "" })),
@@ -838,6 +883,9 @@ export default function Composer({
     : undefined;
 
   const followUp = getUiSettings().followUpBehavior;
+  const sendDisabled = creatingSession
+    || (!text.trim() && attachments.length === 0)
+    || (!shellMode && (noModels || profileMissing));
   const starterChips = (
     <div className="starter-chips" aria-label="Suggestions">
       {STARTER_SUGGESTIONS.map((label) => (
@@ -858,7 +906,6 @@ export default function Composer({
 
   return (
     <div className={`${variant === "hero" ? "composer-hero" : "composer"}${simpleMode ? " composer-simple" : " composer-power"}${lightFocusComposer ? " composer-focus-light" : ""}`}>
-      {variant === "docked" && <PendingChangesBar model={model} />}
       <div
         className="composer-card"
         onDragOver={(e) => { const k = dragKind(e.dataTransfer); if (k) { e.preventDefault(); setDropHint(k); } }}
@@ -941,7 +988,9 @@ export default function Composer({
           placeholder={shellMode
             ? "Enter a workspace shell command…"
             : simpleMode
-              ? "Use @ / ! # for helpers"
+              ? shellLayout === "phone"
+                ? "Use @ / ! # for helpers"
+                : "Message the agent, tag @files, or use /commands and /skills"
               : "Ask anything…"}
           {...(acView ? {
             role: "combobox",
@@ -1110,28 +1159,10 @@ export default function Composer({
             onInsertCommand={menuCommand}
             onInsertSnippet={menuSnippet}
             onEnterShell={menuShell}
-            onAttachGoal={() => setGoalFormOpen(true)}
+            onAttachGoal={toggleGoal}
             attachGithub={attachGithub}
           />
-          {simpleMode && ui.showAutoApprove && (
-            <button
-              className={`icon-btn composer-auto-approve${autoApproveOn ? " on" : ""}`}
-              title={autoApproveOn ? "Turn off auto-approve" : "Turn on auto-approve"}
-              aria-label={autoApproveOn ? "Turn off auto-approve" : "Turn on auto-approve"}
-              aria-pressed={autoApproveOn}
-              disabled={autoApproveBusy}
-              onClick={toggleAutoApprove}
-            ><Icon.shield /></button>
-          )}
-          {simpleMode && ui.showGoals && (
-            <button
-              className="icon-btn composer-goals"
-              title={session ? "Attach or update goal" : "Goals become available after the session is created"}
-              aria-label={session ? "Attach or update goal" : "Goals become available after the session is created"}
-              disabled={!session}
-              onClick={() => setGoalFormOpen(true)}
-            ><Icon.target /></button>
-          )}
+          {simpleMode && <span className="composer-focus-hint">{modKeyLabel()}I to focus</span>}
           {simpleMode && (
             <span className="composer-extensions composer-mobile-extensions">
               <SlotHost slot="composer.leading" context={slotContext} />
@@ -1140,24 +1171,51 @@ export default function Composer({
           )}
           <span className="composer-primary">
             {working ? (
-              <>
-                <button className="send composer-delivery" onClick={() => send()}
-                  disabled={creatingSession || (!text.trim() && attachments.length === 0) || (!shellMode && (noModels || profileMissing))}
-                  aria-label={shellMode ? "Run shell command" : `${followUp === "steer" ? "Steer the current turn" : followUp === "interrupt" ? "Interrupt, then send" : "Queue until idle"}`}
-                  title={`Active turn — this message will ${followUp === "steer" ? "steer the current turn" : followUp === "interrupt" ? "interrupt, then send" : "queue until idle"}`}>
-                  {simpleMode
-                    ? <span className="send-plane" aria-hidden="true"><Icon.send /></span>
-                    : <>{shellMode ? "Run" : followUp === "steer" ? "Steer" : followUp === "interrupt" ? "Interrupt" : "Queue"} <span className="send-key">{settings.sendOnEnter ? "↵" : `${modKeyLabel()}↵`}</span></>}
+              followUp === "queue" && !sendDisabled ? (
+                <div className="composer-send-split" ref={deliveryMenuRef}>
+                  <button
+                    className="send composer-delivery composer-queue"
+                    onClick={() => send()}
+                    aria-label="Queue message until the current response finishes"
+                    title="Queue message until the current response finishes"
+                  >
+                    <Icon.sendClock /><span className="composer-action-label">Queue</span>
+                  </button>
+                  <button
+                    className="composer-send-options"
+                    aria-label="More active-run actions"
+                    aria-haspopup="menu"
+                    aria-expanded={deliveryMenuOpen}
+                    onClick={() => setDeliveryMenuOpen((open) => !open)}
+                  >
+                    <Icon.chevronDown />
+                  </button>
+                  {deliveryMenuOpen && (
+                    <div className="composer-send-menu" role="menu">
+                      <button role="menuitem" onClick={() => { setDeliveryMenuOpen(false); send(undefined, "interrupt"); }}>
+                        <Icon.send /><span><strong>Send now</strong><small>Stop the current response and send</small></span>
+                      </button>
+                      <button role="menuitem" onClick={() => { setDeliveryMenuOpen(false); void abortSession(); }}>
+                        <Icon.stop /><span><strong>Stop</strong><small>Stop without sending this draft</small></span>
+                      </button>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <button
+                  className="stop composer-stop-primary"
+                  title="Stop the current response"
+                  aria-label="Stop the current response"
+                  onClick={() => void abortSession()}
+                >
+                  <Icon.stop /><span className="composer-action-label">Stop</span>
                 </button>
-                <button className="stop" title="Stop the current response" aria-label="Stop the current response" onClick={() => void abortSession()}>
-                  Stop
-                </button>
-              </>
+              )
             ) : (
               <button className="send" onClick={() => send()}
                 title={shellMode ? "Run shell command" : "Send message"}
                 aria-label={shellMode ? "Run shell command" : "Send message"}
-                disabled={creatingSession || (!text.trim() && attachments.length === 0) || (!shellMode && (noModels || profileMissing))}>
+                disabled={sendDisabled}>
                 {simpleMode
                   ? <span className="send-plane" aria-hidden="true"><Icon.send /></span>
                   : <>{shellMode ? "Run" : "Send"} <span className="send-key">{settings.sendOnEnter ? "↵" : `${modKeyLabel()}↵`}</span></>}

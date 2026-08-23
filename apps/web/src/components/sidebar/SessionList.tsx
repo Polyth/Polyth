@@ -331,7 +331,7 @@ function SessionRow({
                   {worktreeLabel(s.branch, s.worktreePath)}
                 </span>
               )}
-              {s.pinned && <span className="session-pin" title="Pinned" aria-label="Pinned">◆</span>}
+              {s.pinned && <span className="session-pin" title="Pinned" aria-label="Pinned"><Icon.bookmark /></span>}
               <LabelDots ids={s.labelIds} labels={labels} />
               <StatusBadge s={s} />
               <AttentionBadges s={s} />

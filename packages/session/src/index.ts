@@ -110,6 +110,8 @@ export interface Store extends SessionPersistence {
   // -- durable delivery queue (WP3) --
   enqueue(sessionId: string, text: string, delivery: DeliveryMode, attachments?: AttachmentRef[]): Promise<QueueItemDto>;
   queueList(sessionId: string): Promise<QueueItemDto[]>;
+  /** Updates only the queued text; delivery, attachments, position, and timestamps stay unchanged. */
+  queueEdit(sessionId: string, queueId: string, text: string): Promise<QueueItemDto | undefined>;
   /** Validates ids are an exact permutation for the session; positions update transactionally. */
   queueReorder(sessionId: string, ids: string[]): Promise<QueueItemDto[]>;
   queueRemove(sessionId: string, queueId: string): Promise<boolean>;
@@ -588,6 +590,15 @@ export function createStore(dbPath: string): Store {
     return Promise.resolve(rows.map(rowToQueueItem));
   }
 
+  function queueEdit(sessionId: string, queueId: string, text: string): Promise<QueueItemDto | undefined> {
+    const result = prep("UPDATE session_queue SET text = ? WHERE session_id = ? AND queue_id = ?")
+      .run(text, sessionId, queueId);
+    if (Number(result.changes) === 0) return Promise.resolve(undefined);
+    const row = prep("SELECT * FROM session_queue WHERE session_id = ? AND queue_id = ?")
+      .get(sessionId, queueId) as unknown as QueueRow;
+    return Promise.resolve(rowToQueueItem(row));
+  }
+
   async function queueReorder(sessionId: string, ids: string[]): Promise<QueueItemDto[]> {
     db.exec("BEGIN IMMEDIATE");
     try {
@@ -1027,6 +1038,7 @@ export function createStore(dbPath: string): Store {
     exportJsonl,
     enqueue,
     queueList,
+    queueEdit,
     queueReorder,
     queueRemove,
     queueShift,

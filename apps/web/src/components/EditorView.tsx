@@ -8,7 +8,6 @@ import { api, type FileEntry } from "../api.ts";
 import { closeWorkspacePane, getState, openEditorFile, useStore } from "../store.ts";
 import EmptyState from "./EmptyState.tsx";
 import { requestComposerInsert } from "../composerInsert.ts";
-import { createSession } from "../init.ts";
 import { setDragPath } from "../dnd.ts";
 import { MOD } from "../format.ts";
 import { useEscape } from "../useEscape.ts";
@@ -163,10 +162,6 @@ export default function EditorView() {
   // ---- chat inserts ----------------------------------------------------------
   const attachPath = (fp: string) => {
     requestComposerInsert(`@${fp}`);
-    const st = getState();
-    if (!st.activeSessionId && st.activeProjectId) {
-      void createSession(st.activeProjectId).catch(() => {});
-    }
   };
 
   // ---- tree context menu actions ------------------------------------------------

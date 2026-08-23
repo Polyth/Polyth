@@ -47,6 +47,7 @@ test("model metadata reports deduplicated input and output modalities", () => {
 test("fresh mobile sessions expose project and branch targets", () => {
   const surface = read("../src/components/workspace/builtinSurfaces.tsx");
   const composer = read("../src/components/Composer.tsx");
+  const actions = read("../src/widgets/builtinMiniWidgets.tsx");
   const header = read("../src/components/Header.tsx");
   const css = read("../src/styles.css");
 
@@ -55,8 +56,8 @@ test("fresh mobile sessions expose project and branch targets", () => {
   assert.match(surface, /target: \{ kind: "branch", branch: candidate\.name \}/);
   assert.match(composer, /newSessionTarget\.kind === "branch"/);
   assert.match(composer, /Modalities: \{modalities\}/);
-  assert.match(composer, /composer-auto-approve/);
-  assert.match(composer, /composer-goals/);
+  assert.match(actions, /composer-auto-approve/);
+  assert.match(actions, /composer-goals/);
   assert.match(header, /displaySessionTitle\(session\.title, session\.id, firstUserText\)/);
   assert.match(header, /Composer controls/);
   assert.match(css, /\.polyth-gradient\s*\{[^}]*linear-gradient/s);

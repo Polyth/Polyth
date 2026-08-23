@@ -533,6 +533,8 @@ export const api = {
   // ---- delivery queue (WP3) -------------------------------------------------
   queueList: (id: string) =>
     jfetch<QueueItemDto[]>(`/api/sessions/${id}/queue`).catch((): QueueItemDto[] => []),
+  queueEdit: (id: string, queueId: string, text: string) =>
+    jfetch<QueueItemDto>(`/api/sessions/${id}/queue/${encodeURIComponent(queueId)}`, json("PATCH", { text })),
   queueReorder: (id: string, ids: string[]) =>
     jfetch<QueueItemDto[]>(`/api/sessions/${id}/queue/order`, json("PATCH", { ids })),
   queueRemove: (id: string, queueId: string) =>

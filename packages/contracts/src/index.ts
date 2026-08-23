@@ -446,6 +446,7 @@ export interface SessionService {
   /** Projection-only reconciliation after a linked worktree is removed. */
   markWorktreeMissing?(projectId: string, worktreePath: string): Promise<void>;
   queueList?(sessionId: string): Promise<QueueItemDto[]>;
+  queueEdit?(sessionId: string, queueId: string, text: string): Promise<QueueItemDto>;
   queueReorder?(sessionId: string, ids: string[]): Promise<QueueItemDto[]>;
   queueRemove?(sessionId: string, queueId: string): Promise<void>;
   /** Pin/unpin a model-visible message by its canonical source-event sequence. */
@@ -739,6 +740,7 @@ export const UI_SLOTS = [
   // parity slots (WP1): focused seams instead of mega-component imports
   "workspace.main.tabs", "workspace.right.tabs",
   "session.timeline.before", "session.timeline.after", "session.composer.before",
+  "session.footer",
   "session.message.actions",
   "sidebar.project.actions", "sidebar.session.actions",
   "workStatus.sections",
@@ -924,6 +926,7 @@ export interface QueueItemDto {
 
 export interface QueueEnqueuedData { queueId: string; text: string; delivery: string }
 export interface QueueDispatchedData { queueId: string }
+export interface QueueEditedData { queueId: string; text: string }
 export interface QueueReorderedData { ids: string[] }
 export interface QueueRemovedData { queueId: string }
 export interface DeliverySteeredData { text: string }

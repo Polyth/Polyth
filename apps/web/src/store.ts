@@ -55,6 +55,15 @@ export interface WorktreeSessionRequest {
   worktreePath?: string;
 }
 
+/** Pure UI intent for the session that will be created by the first send.
+ * It never appears in the canonical session list or event log. */
+export interface NewSessionIntent {
+  projectId: string;
+  draft: string;
+  title?: string;
+  worktreePath?: string;
+}
+
 export interface AppState {
   /** Canonical project-registry truth (UX-ONBOARDING): loading, failed, and
    *  ready are distinct; `projects` has this one owner. */
@@ -76,6 +85,7 @@ export interface AppState {
   uiError: string | null;
   overlay: Overlay;
   worktreeSessionRequest: WorktreeSessionRequest | null;
+  newSessionIntent: NewSessionIntent | null;
   paletteMode: PaletteMode;
   railPlugin: RailPlugin | null;
   /** Explicit user expansion of the open workspace pane (persisted per
@@ -109,6 +119,7 @@ let state: AppState = {
   uiError: null,
   overlay: null,
   worktreeSessionRequest: null,
+  newSessionIntent: null,
   paletteMode: "all",
   railPlugin: getRailPrefs().lastOpen, // F17: last-open surface survives reload
   paneExpanded: false,
@@ -234,6 +245,7 @@ export function applyProjectAdded(project: Project): void {
     projectRegistry,
     activeProjectId: project.id,
     activeSessionId: null,
+    newSessionIntent: null,
     gitBranch: "",
     editorFile: null,
     editorLocation: null,
@@ -255,6 +267,7 @@ export function applyProjectRemoved(id: string): void {
     projectRegistry,
     activeProjectId,
     activeSessionId: null,
+    newSessionIntent: null,
     gitBranch: "",
     editorFile: null,
     editorLocation: null,
@@ -299,6 +312,7 @@ export function activateProject(id: string | null): void {
     ?? (state.railPlugin !== null && paneSurfaceOf(state.railPlugin) !== null ? null : state.railPlugin);
   set({
     activeProjectId: id, activeSessionId: null, gitBranch: "",
+    newSessionIntent: null,
     editorFile: null, editorLocation: null, gitDiffPath: null,
     railPlugin, paneExpanded: restored !== null ? pane!.expanded : false, paneFullscreen: false,
   });
@@ -516,7 +530,31 @@ export function clearEditorLocation(): void {
 }
 export function activateSession(id: string | null): void {
   localStorage.setItem("polyth.activeSessionId", id ?? "");
-  set({ activeSessionId: id });
+  set({
+    activeSessionId: id,
+    ...(id !== null ? { newSessionIntent: null } : {}),
+  });
+}
+
+/** Enter the unsaved new-chat surface. The session is deliberately absent
+ * until Composer admits the first message. */
+export function startNewSession(
+  projectId: string,
+  options: Omit<NewSessionIntent, "projectId" | "draft"> & { draft?: string } = {},
+): void {
+  if (state.activeProjectId !== projectId) activateProject(projectId);
+  localStorage.setItem("polyth.activeSessionId", "");
+  set({
+    activeSessionId: null,
+    openingSessionId: null,
+    newSessionIntent: {
+      projectId,
+      draft: options.draft ?? "",
+      ...(options.title ? { title: options.title } : {}),
+      ...(options.worktreePath ? { worktreePath: options.worktreePath } : {}),
+    },
+  });
+  showSessionChat();
 }
 
 /** UX-FILES-TIMELINE-03 finding 8: a session switch always lands in that

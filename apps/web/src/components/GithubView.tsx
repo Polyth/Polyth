@@ -3,11 +3,8 @@
 // the detail surface (overview/files/checks/comments).
 import { useEffect, useState } from "react";
 import { api, type GithubIssueDto, type GithubPrDto, type GithubStatusDto } from "../api.ts";
-import { useStore, setUiError } from "../store.ts";
+import { setActiveView, setUiError, startNewSession, useStore } from "../store.ts";
 import { requestComposerInsert } from "../composerInsert.ts";
-import { setActiveView } from "../store.ts";
-import { openSession, refreshSessions } from "../init.ts";
-import { saveDraft } from "../utils.ts";
 import { friendlyError } from "../settings.ts";
 import PullRequestView from "./PullRequestView.tsx";
 import EmptyState from "./EmptyState.tsx";
@@ -101,21 +98,16 @@ export default function GithubView() {
   // F7 / OC-15-002/003: bootstrap a session from an issue or PR. The context
   // lands as the composer draft (saved before the session opens so the
   // composer restores it) — nothing is sent until the user does.
-  const startSession = async (item: GithubIssueDto | GithubPrDto, kind: Tab) => {
+  const startSession = (item: GithubIssueDto | GithubPrDto, kind: Tab) => {
     const label = kind === "prs" ? "PR" : "issue";
-    try {
-      const { id } = await api.createSession({ projectId, title: `${label} #${item.number}: ${item.title}`.slice(0, 80) });
-      saveDraft(id, [
+    startNewSession(projectId, {
+      title: `${label} #${item.number}: ${item.title}`.slice(0, 80),
+      draft: [
         `Work on GitHub ${label} #${item.number}: "${item.title}" (${item.url}).`,
         ...(kind === "prs" ? [`Head branch: ${(item as GithubPrDto).headRefName}.`] : []),
         `Start by reading the ${label} and summarizing what needs to happen.`,
-      ].join("\n"));
-      await openSession(id);
-      void refreshSessions(projectId);
-      setActiveView("session");
-    } catch (e) {
-      setUiError(friendlyError("Couldn’t start a session from GitHub", e));
-    }
+      ].join("\n"),
+    });
   };
 
   if (openPr !== null) {
@@ -187,7 +179,7 @@ export default function GithubView() {
           <div className="gh-list">
             {items.map((it) => (
               <ItemRow key={`${tab}-${it.number}`} item={it} kind={tab}
-                onStartSession={(item, kind) => void startSession(item, kind)}
+          onStartSession={startSession}
                 {...(tab === "prs" ? { onOpen: setOpenPr } : {})} />
             ))}
           </div>

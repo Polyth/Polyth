@@ -1,8 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
-import type { RenderModel } from "../reduce.ts";
 import { useGitStatus } from "../gitStatusStore.ts";
 import { selectPendingChanges } from "../pendingChanges.ts";
-import { openChanges, useStore } from "../store.ts";
+import { openChanges, useActiveModel, useStore } from "../store.ts";
 import { Icon } from "../icons.tsx";
 import { api } from "../api.ts";
 
@@ -23,7 +22,8 @@ export function summarizeUnifiedDiff(diff: string): DiffLineStats {
   return { additions, deletions };
 }
 
-export default function PendingChangesBar({ model }: { model: RenderModel }) {
+export default function PendingChangesBar() {
+  const model = useActiveModel();
   const projectId = useStore((state) => state.activeProjectId);
   const sessionId = useStore((state) => state.activeSessionId);
   const working = model.turn?.status === "working";
@@ -78,6 +78,7 @@ export default function PendingChangesBar({ model }: { model: RenderModel }) {
           <Icon.fileEdit />
         </span>
         {count} {count === 1 ? "file" : "files"}
+        <span className="pending-changes-location">changed in workspace</span>
         {diffStats && (
           <span
             className="pending-change-stats"

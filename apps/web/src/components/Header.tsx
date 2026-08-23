@@ -8,7 +8,6 @@ import { displaySessionTitle } from "../format.ts";
 import { friendlyError, shortcutLabel } from "../settings.ts";
 import { GoalAttachForm } from "./GoalStrip.tsx";
 import { contextGauge, type ContextGauge } from "../reduce.ts";
-import { api } from "../api.ts";
 import { useShellMode, type ShellMode } from "../responsiveShell.ts";
 import { NarrowPanelTrigger } from "./ContextRail.tsx";
 import Picker from "./Picker.tsx";
@@ -240,42 +239,6 @@ function ContextRing({ gauge }: { gauge: ContextGauge }) {
   );
 }
 
-/** F18: loud auto-accept indicator + toggle. The server owns the policy; the
- *  effective value rides the projection so an inherited "on" (subagent under
- *  an enabled parent) lights up too. Session-scoped only — never global.
- *  UX-A390: at phone the label is visually hidden (icon-only 44px target) but
- *  the accessible name always carries the on/off state — never color alone. */
-function AutoAcceptChip({ sessionId, effective }: { sessionId: string; effective: boolean }) {
-  const [busy, setBusy] = useState(false);
-  const toggle = () => {
-    if (busy) return;
-    setBusy(true);
-    // The response also reconciles pending requests server-side; the updated
-    // projection broadcast flips `effective` here without local state.
-    void api.autoAcceptSet(sessionId, effective ? "off" : "on")
-      .catch((e) => setUiError(friendlyError("Couldn’t change auto-accept", e)))
-      .finally(() => setBusy(false));
-  };
-  return (
-    <button
-      className={`auto-accept-chip ${effective ? "on" : ""}`}
-      title={effective
-        ? "Auto-accept is ON: permission requests in this session are approved automatically. Click to turn off."
-        : "Auto-accept permission requests in this session"}
-      aria-label={effective ? "Turn off auto-accept" : "Turn on auto-accept"}
-      aria-pressed={effective}
-      disabled={busy}
-      onClick={toggle}
-    >
-      <svg width="12" height="12" viewBox="0 0 16 16" aria-hidden="true" {...STROKE}>
-        <path d="M8 1.8 13.5 4v4.2c0 3.2-2.3 5.3-5.5 6-3.2-.7-5.5-2.8-5.5-6V4z" />
-        {effective && <path d="M5.4 8.2 7.2 10l3.4-3.6" />}
-      </svg>
-      <span className="auto-accept-text">{effective ? "Auto-accept on" : "Auto-accept"}</span>
-    </button>
-  );
-}
-
 /** UX-A390: one bounded current-view trigger replacing the desktop switcher
  *  in compact mode. Items derive from the same resolved capability list as
  *  desktop navigation. */
@@ -475,20 +438,6 @@ function MobileComposerControlsMenu() {
       icon: <Icon.mic />,
       toggle: () => setUiSettings({ showDictate: !ui.showDictate }),
     },
-    {
-      id: "auto-approve",
-      label: "Auto-approve",
-      on: ui.showAutoApprove,
-      icon: <Icon.shield />,
-      toggle: () => setUiSettings({ showAutoApprove: !ui.showAutoApprove }),
-    },
-    {
-      id: "goals",
-      label: "Goals",
-      on: ui.showGoals,
-      icon: <Icon.target />,
-      toggle: () => setUiSettings({ showGoals: !ui.showGoals }),
-    },
   ];
   return (
     <div className="mobile-composer-menu">
@@ -641,19 +590,6 @@ export default function Header() {
             slot="session.header.actions"
             context={{ sessionId: session.id, status: session.status, working: model.turn?.status === "working" }}
           />
-        )}
-        {workspaceMode === "chat" && !compact && session && (
-          <>
-            <button
-              className="header-action header-goal"
-              title="Attach or update goal"
-              aria-label="Attach or update goal"
-              onClick={() => setGoalFormOpen((value) => !value)}
-            >
-              <Icon.target />
-            </button>
-            <AutoAcceptChip sessionId={session.id} effective={session.autoAccept === true} />
-          </>
         )}
         {(!compact || !chatSurface) && (
           <div className="header-actions" aria-label="Application">

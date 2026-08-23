@@ -1,11 +1,11 @@
 import { HOTKEY_ACTIONS, matchAction, formatCombo, type HotkeyAction } from "@polyth/hotkeys";
 import { registerCommand } from "./commands.ts";
-import { createSession, exportSessionMarkdown, forkSession, abortSession } from "./init.ts";
+import { exportSessionMarkdown, forkSession, abortSession } from "./init.ts";
 import { MOD } from "./format.ts";
 import { getKeymap } from "./hotkeys.ts";
 import { readLastReply, stopSpeaking } from "./voice.tsx";
 import {
-  focusComposer, getState, openPalette, openSettingsPage, openWorktreeSessionDialog, setOverlay,
+  focusComposer, getState, openPalette, openSettingsPage, openWorktreeSessionDialog, setOverlay, startNewSession,
   toggleRailPlugin, toggleWorkspacePane,
   type RailPlugin,
 } from "./store.ts";
@@ -126,7 +126,7 @@ export function installShell(): void {
   registerCommand({
     id: "cmd.new", label: "New session", hint: hintOf("newSession"), group: "Session",
     when: () => !!getState().activeProjectId,
-    run: () => { const id = getState().activeProjectId; if (id) void createSession(id); },
+    run: () => { const id = getState().activeProjectId; if (id) startNewSession(id); },
   });
   registerCommand({
     id: "cmd.newWorktree", label: "New session in worktree", group: "Session",
@@ -195,7 +195,7 @@ const ACTIONS: Record<HotkeyAction, () => void> = {
   settings: () => setOverlay("settings"),
   newSession: () => {
     const id = getState().activeProjectId;
-    if (id) void createSession(id);
+    if (id) startNewSession(id);
   },
   focusComposer,
   // Workspace-pane shortcuts toggle so the same keys also close (and remain

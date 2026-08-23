@@ -30,6 +30,14 @@ const descriptors = new Map<string, PackageDescriptorDto>([
     enabled: true,
     hasSettings: true,
   }],
+  ["git", {
+    id: "git",
+    name: "Git",
+    description: "Source control.",
+    core: true,
+    enabled: true,
+    hasSettings: true,
+  }],
 ]);
 
 Object.defineProperty(globalThis, "fetch", {
@@ -58,18 +66,23 @@ test("package boot installs and removes package-owned settings and widgets", asy
   assert.ok(listSlots("settings.pages").some((item) => item.id === "usage"));
   assert.ok(listSlots("settings.pages").some((item) => item.id === "models"));
   assert.ok(listSlots("settings.pages").some((item) => item.id === "agents"));
+  assert.ok(listSlots("settings.pages").some((item) => item.id === "git"));
   assert.ok(listWidgets().some((item) => item.pluginId === "voice"));
   assert.ok(listWidgets().some((item) => item.pluginId === "usage"));
+  assert.equal(listWidgets().find((item) => item.id === "git.pending-changes")?.defaultSlot, "session.footer");
 
   descriptors.get("dictation")!.enabled = false;
   descriptors.get("usage")!.enabled = false;
+  descriptors.get("git")!.enabled = false;
   await bootPackages();
 
   assert.equal(isPackageEnabled("voice"), false);
   assert.equal(listSlots("settings.pages").some((item) => item.id === "voice"), false);
   assert.equal(listSlots("settings.pages").some((item) => item.id === "usage"), false);
+  assert.equal(listSlots("settings.pages").some((item) => item.id === "git"), false);
   assert.equal(listWidgets().some((item) => item.pluginId === "voice"), false);
   assert.equal(listWidgets().some((item) => item.pluginId === "usage"), false);
+  assert.equal(listWidgets().some((item) => item.pluginId === "git"), false);
   assert.equal(notifications, 2);
   unsubscribe();
 });

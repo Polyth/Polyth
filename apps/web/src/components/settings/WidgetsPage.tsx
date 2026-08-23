@@ -22,7 +22,7 @@ import { supportedWidgetSlots } from "../../widgets/widgetLibrary.ts";
 import "../../widgets/builtinWidgets.tsx";
 import { PageHead } from "./parts.tsx";
 
-type MiniPlaceId = "composer" | "session-header" | "app-header";
+type MiniPlaceId = "composer" | "session-header" | "session-footer" | "app-header";
 type PlaceId = CapabilityTier | MiniPlaceId;
 
 const CAPABILITY_PLACES: Array<{
@@ -62,8 +62,14 @@ const MINI_PLACES: Array<{
   {
     id: "session-header",
     title: "Session header actions",
-    description: "Actions that belong to the current session.",
+    description: "Toggle History, Goal, and Auto Approve in the top session strip.",
     slots: ["session.header.actions"],
+  },
+  {
+    id: "session-footer",
+    title: "Session footer",
+    description: "Widgets shown just above the message composer.",
+    slots: ["session.footer"],
   },
   {
     id: "app-header",

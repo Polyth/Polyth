@@ -34,6 +34,7 @@ function SessionHero() {
   const projects = useStore((s) => s.projectRegistry.projects);
   const projectId = useStore((s) => s.activeProjectId);
   const project = projects.find((candidate) => candidate.id === projectId) ?? null;
+  const newSessionIntent = useStore((s) => s.newSessionIntent);
   const branch = useStore((s) => s.gitBranch);
   const name = project?.name || project?.path || "this project";
   const [worktrees, setWorktrees] = useState<Worktree[]>([]);
@@ -55,7 +56,10 @@ function SessionHero() {
         if (!active) return;
         setWorktrees(nextWorktrees);
         setBranches(nextBranches);
-        const currentWorktree = nextWorktrees.find((worktree) =>
+        const requestedWorktree = newSessionIntent?.projectId === projectId
+          ? nextWorktrees.find((worktree) => worktree.path === newSessionIntent.worktreePath)
+          : undefined;
+        const currentWorktree = requestedWorktree ?? nextWorktrees.find((worktree) =>
           worktree.branch === (nextBranches.current || branch));
         setSelectedBranchId(currentWorktree?.isMain
           ? "main"
@@ -67,7 +71,7 @@ function SessionHero() {
         if (active) setBranchLoading(false);
       });
     return () => { active = false; };
-  }, [projectId]);
+  }, [projectId, newSessionIntent?.worktreePath]);
 
   const branchChoices = useMemo(() => {
     const linkedBranches = new Set(worktrees.map((worktree) => worktree.branch).filter(Boolean));
@@ -241,6 +245,10 @@ function SessionSurface() {
       {pendingPermissions.length > 0 && <PermissionBanner permissions={pendingPermissions} />}
       <SlotHost
         slot="session.composer.before"
+        context={{ projectId, sessionId, editing: false }}
+      />
+      <SlotHost
+        slot="session.footer"
         context={{ projectId, sessionId, editing: false }}
       />
       {archived && sessionId ? <ArchivedComposerGuard sessionId={sessionId} /> : <Composer />}
