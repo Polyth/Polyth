@@ -54,12 +54,12 @@ import { getUiSettings, useUiSettings } from "../uiPrefs.ts";
 import { migrateFavoritesOnce, profilesLoaded, useProfiles } from "../profiles.ts";
 import AgentProfileForm from "./AgentProfileForm.tsx";
 import PendingChangesBar from "./PendingChangesBar.tsx";
-import type { AgentProfile } from "@polyth/contracts";
+import type { AgentProfile, ModelDescriptor } from "@polyth/contracts";
 import { agentPickerDefaultLabel, modelPickerDefaultLabel } from "../composerDefaults.ts";
 import { modKeyLabel, parseModelRef } from "../settings.ts";
 import { Icon } from "../icons.tsx";
 import { useWorkspaceMode } from "../widgets/workspaceMode.ts";
-import ModelPicker, { modelContextLabel, modelSupportsThinking } from "./ModelPicker.tsx";
+import ModelPicker, { modelContextLabel, modelModalities, modelSupportsThinking } from "./ModelPicker.tsx";
 import { useSessionDefaults } from "../sessionDefaults.ts";
 import { roleKind, useRolePrefs } from "../rolePrefs.ts";
 
@@ -143,11 +143,56 @@ const STARTER_SUGGESTIONS = [
   "Help me get started",
 ] as const;
 
-export default function Composer({ variant = "docked" }: { variant?: "docked" | "hero" | "widget" }) {
+export type NewSessionTarget =
+  | { kind: "main" }
+  | { kind: "worktree"; path: string }
+  | { kind: "branch"; branch: string };
+
+function compactContext(context?: number): string {
+  if (!context) return "Unknown";
+  if (context >= 1_000_000) return `${Number((context / 1_000_000).toFixed(1))}M`;
+  if (context >= 1_000) return `${Math.round(context / 1_000)}K`;
+  return String(context);
+}
+
+function agentBadgeLabel(agent?: string): string {
+  const label = (agent || "Build").replace(/[-_]+/g, " ").trim();
+  return label ? label[0]!.toUpperCase() + label.slice(1) : "Build";
+}
+
+function ModelCapabilityMeta({ model }: { model?: ModelDescriptor }) {
+  const capabilities = model?.capabilities ?? [];
+  const modalities = model ? modelModalities(model) : "Text";
+  const hasImage = capabilities.some((capability) => capability.endsWith(":image"));
+  const hasAttachments = capabilities.includes("attachment");
+  return (
+    <div className="composer-model-meta">
+      <span className="composer-modality-icons" aria-hidden="true">
+        <Icon.text />
+        {hasImage && <Icon.image />}
+        {hasAttachments && <Icon.paperclip />}
+      </span>
+      <span>Modalities: {modalities}</span>
+      <i aria-hidden="true">•</i>
+      <span>Context: {compactContext(model?.context)}</span>
+    </div>
+  );
+}
+
+export default function Composer({
+  variant = "docked",
+  newSessionTarget = { kind: "main" },
+}: {
+  variant?: "docked" | "hero" | "widget";
+  newSessionTarget?: NewSessionTarget;
+}) {
   const [pinSeed, setPinSeed] = useState<{ providerID: string; modelID: string; name?: string } | null>(null);
   const [pinEdit, setPinEdit] = useState<AgentProfile | null>(null);
   const [createProfileOpen, setCreateProfileOpen] = useState(false);
   const [goalFormOpen, setGoalFormOpen] = useState(false);
+  const [autoApproveBusy, setAutoApproveBusy] = useState(false);
+  const [newSessionAutoApprove, setNewSessionAutoApprove] = useState(false);
+  const [creatingSession, setCreatingSession] = useState(false);
   const profiles = useProfiles();
   const models = useStore((s) => s.models);
   const chatModels = models.filter(modelSupportsTextWorkflow);
@@ -354,6 +399,7 @@ export default function Composer({ variant = "docked" }: { variant?: "docked" | 
     && !profiles.some((p) => cfg.profile.kind === "id" && p.id === cfg.profile.id);
 
   const send = useCallback((override?: string) => {
+    if (creatingSession) return;
     const t = (override ?? inputRef.current?.getText() ?? text).trim();
     const command = shellCommand(t);
     const hasPills = command === null && attachments.length > 0;
@@ -412,10 +458,23 @@ export default function Composer({ variant = "docked" }: { variant?: "docked" | 
     if (target) {
       void deliver(target);
     } else if (activeProjectId) {
-      void createSession(activeProjectId).then(() => {
+      setCreatingSession(true);
+      void (async () => {
+        let worktreePath: string | undefined;
+        if (newSessionTarget.kind === "worktree") {
+          worktreePath = newSessionTarget.path;
+        } else if (newSessionTarget.kind === "branch") {
+          worktreePath = (await api.createWorktree(activeProjectId, newSessionTarget.branch)).path;
+        }
+        await createSession(activeProjectId, worktreePath ? { worktreePath } : {});
         const created = getState().activeSessionId;
-        if (created) return deliver(created);
-      });
+        if (!created) throw new Error("The new session did not become active.");
+        if (newSessionAutoApprove) await api.autoAcceptSet(created, "on");
+        await deliver(created);
+        setNewSessionAutoApprove(false);
+      })()
+        .catch((error) => setUiError(friendlyError("Couldn’t create the session", error)))
+        .finally(() => setCreatingSession(false));
     }
     setText("");
     inputRef.current?.replaceText("");
@@ -426,7 +485,8 @@ export default function Composer({ variant = "docked" }: { variant?: "docked" | 
   }, [
     text, attachments, cfg, profileMissing, noModels, working, activeProjectId,
     session?.model, settings.defaultModel, sessionDefaults.defaultModel,
-    sessionDefaults.defaultThinking, chatModels,
+    sessionDefaults.defaultThinking, chatModels, creatingSession, newSessionTarget,
+    newSessionAutoApprove,
   ]);
 
   const applyCompletion = useCallback((item: AutocompleteItem) => {
@@ -743,6 +803,19 @@ export default function Composer({ variant = "docked" }: { variant?: "docked" | 
       ? chatModels.find((candidate) =>
           candidate.providerID === recommendedModel.providerID && candidate.modelID === recommendedModel.modelID)
       : undefined;
+  const activeAgent = cfg.agent ?? session?.agent ?? sessionDefaults.defaultAgent ?? chatAgents[0]?.name ?? "build";
+  const autoApproveOn = session ? session.autoAccept === true : newSessionAutoApprove;
+  const toggleAutoApprove = () => {
+    if (autoApproveBusy) return;
+    if (!session) {
+      setNewSessionAutoApprove((current) => !current);
+      return;
+    }
+    setAutoApproveBusy(true);
+    void api.autoAcceptSet(session.id, autoApproveOn ? "off" : "on")
+      .catch((error) => setUiError(friendlyError("Couldn’t change auto-approve", error)))
+      .finally(() => setAutoApproveBusy(false));
+  };
   const thinkingItems: PickerItem[] = [
     { id: "", label: "Default", group: "" },
     ...(selectedModel?.variants ?? []).map((variant) => ({ id: variant, label: variant, group: "" })),
@@ -809,6 +882,40 @@ export default function Composer({ variant = "docked" }: { variant?: "docked" | 
       {attachments.length > 0 && !noModels && (
         <div className="composer-attach-note">{ATTACHMENT_COMPAT_NOTE}</div>
       )}
+      {simpleMode && (
+        <div className="composer-model-header">
+          <span className="composer-provider-mark" aria-hidden="true">
+            {(selectedModel?.providerName ?? selectedModel?.providerID ?? "P").slice(0, 1).toUpperCase()}
+          </span>
+          {!noModels && (
+            <ModelPicker
+              models={chatModels}
+              value={cfg.model}
+              recommended={recommendedModel}
+              direction={variant === "hero" ? "down" : "up"}
+              onPick={(ref) => {
+                updateCfg(withExplicitModel(cfg, ref));
+                if (ref) noteModelUsed(`${ref.providerID}/${ref.modelID}`);
+              }}
+            />
+          )}
+          {chatAgents.length > 0 ? (
+            <Picker
+              className="composer-agent-badge"
+              label="Agent"
+              direction={variant === "hero" ? "down" : "up"}
+              items={agentItems}
+              value={agentValue}
+              onPick={pickAgent}
+              placeholder={agentBadgeLabel(activeAgent)}
+              ariaLabel={`Select agent type, current ${agentBadgeLabel(activeAgent)}`}
+            />
+          ) : (
+            <span className="agent-type-badge">{agentBadgeLabel(activeAgent)}</span>
+          )}
+          <ModelCapabilityMeta model={selectedModel} />
+        </div>
+      )}
       <div className="composer-input">
         {shellMode && <div className="composer-mode-label">Shell command · permission checked · output added to context</div>}
         <AdaptiveTextInput
@@ -820,7 +927,9 @@ export default function Composer({ variant = "docked" }: { variant?: "docked" | 
           ariaLabel="Message"
           placeholder={shellMode
             ? "Enter a workspace shell command…"
-            : "Ask anything…"}
+            : simpleMode
+              ? "Use @ / ! # for helpers"
+              : "Ask anything…"}
           {...(acView ? {
             role: "combobox",
             ariaAutocomplete: "list" as const,
@@ -910,7 +1019,7 @@ export default function Composer({ variant = "docked" }: { variant?: "docked" | 
           >
             Technical options
           </button>}
-          {!noModels && (
+          {!simpleMode && !noModels && (
             <>
               <ModelPicker
                 models={chatModels}
@@ -927,7 +1036,7 @@ export default function Composer({ variant = "docked" }: { variant?: "docked" | 
               />
             </>
           )}
-          {chatAgents.length > 0 && (
+          {!simpleMode && chatAgents.length > 0 && (
             <Picker
               className="picker-agent"
               label="Agent" direction="up" items={agentItems} value={agentValue} onPick={pickAgent}
@@ -935,7 +1044,7 @@ export default function Composer({ variant = "docked" }: { variant?: "docked" | 
               triggerIcon={<span className="agent-status-dot" />}
             />
           )}
-          {modelSupportsThinking(selectedModel) && (
+          {!simpleMode && modelSupportsThinking(selectedModel) && (
             <Picker
               className="picker-thinking"
               label="Thinking"
@@ -957,7 +1066,7 @@ export default function Composer({ variant = "docked" }: { variant?: "docked" | 
             />
           )}
         </div>
-        {!lightFocusComposer && (
+        {!simpleMode && (
           <div className="composer-extensions">
             <SlotHost slot="composer.leading" context={slotContext} />
             <SlotHost slot="composer.trailing" context={slotContext} />
@@ -991,19 +1100,36 @@ export default function Composer({ variant = "docked" }: { variant?: "docked" | 
             onAttachGoal={() => setGoalFormOpen(true)}
             attachGithub={attachGithub}
           />
-          {simpleMode && (
+          {simpleMode && ui.showAutoApprove && (
             <button
-              className="icon-btn composer-attach"
-              title="Attach files"
-              aria-label="Attach files"
-              onClick={() => fileInputRef.current?.click()}
-            ><Icon.paperclip /></button>
+              className={`icon-btn composer-auto-approve${autoApproveOn ? " on" : ""}`}
+              title={autoApproveOn ? "Turn off auto-approve" : "Turn on auto-approve"}
+              aria-label={autoApproveOn ? "Turn off auto-approve" : "Turn on auto-approve"}
+              aria-pressed={autoApproveOn}
+              disabled={autoApproveBusy}
+              onClick={toggleAutoApprove}
+            ><Icon.shield /></button>
+          )}
+          {simpleMode && ui.showGoals && (
+            <button
+              className="icon-btn composer-goals"
+              title={session ? "Attach or update goal" : "Goals become available after the session is created"}
+              aria-label={session ? "Attach or update goal" : "Goals become available after the session is created"}
+              disabled={!session}
+              onClick={() => setGoalFormOpen(true)}
+            ><Icon.target /></button>
+          )}
+          {simpleMode && ui.showDictate && (
+            <span className="composer-extensions composer-mobile-extensions">
+              <SlotHost slot="composer.leading" context={slotContext} />
+              <SlotHost slot="composer.trailing" context={slotContext} />
+            </span>
           )}
           <span className="composer-primary">
             {working ? (
               <>
                 <button className="send composer-delivery" onClick={() => send()}
-                  disabled={(!text.trim() && attachments.length === 0) || (!shellMode && (noModels || profileMissing))}
+                  disabled={creatingSession || (!text.trim() && attachments.length === 0) || (!shellMode && (noModels || profileMissing))}
                   aria-label={shellMode ? "Run shell command" : `${followUp === "steer" ? "Steer the current turn" : followUp === "interrupt" ? "Interrupt, then send" : "Queue until idle"}`}
                   title={`Active turn — this message will ${followUp === "steer" ? "steer the current turn" : followUp === "interrupt" ? "interrupt, then send" : "queue until idle"}`}>
                   {simpleMode
@@ -1018,7 +1144,7 @@ export default function Composer({ variant = "docked" }: { variant?: "docked" | 
               <button className="send" onClick={() => send()}
                 title={shellMode ? "Run shell command" : "Send message"}
                 aria-label={shellMode ? "Run shell command" : "Send message"}
-                disabled={(!text.trim() && attachments.length === 0) || (!shellMode && (noModels || profileMissing))}>
+                disabled={creatingSession || (!text.trim() && attachments.length === 0) || (!shellMode && (noModels || profileMissing))}>
                 {simpleMode
                   ? <span className="send-plane" aria-hidden="true"><Icon.send /></span>
                   : <>{shellMode ? "Run" : "Send"} <span className="send-key">{settings.sendOnEnter ? "↵" : `${modKeyLabel()}↵`}</span></>}

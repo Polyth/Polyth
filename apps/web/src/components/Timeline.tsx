@@ -27,6 +27,7 @@ import {
   mutationErrorMessage,
   promptJumpName,
   reasoningToggleName,
+  normalizedDuration,
   revertActionName,
   revertAvailability,
   rewindSeedKey,
@@ -56,6 +57,7 @@ import SlotHost from "./slots/SlotHost.ts";
 import type { RenderModel, RenderMessage, ToolMsg, AssistantMsg, TaskActivityMsg, UserMsg } from "../reduce.ts";
 import { Icon } from "../icons.tsx";
 import "./messagePinAction.tsx";
+import { modelContextLabel, modelModalities } from "./ModelPicker.tsx";
 
 /** One announcement per copy/mutation outcome; text is the accessible record,
  *  checkmarks only supplement it. Screen readers ignore repeats, so identical
@@ -123,6 +125,9 @@ function messageActionEntries(
     revert?: ActionAvailability;
     fork?: ActionAvailability;
     copyFormat: "markdown" | "json";
+    onGallery?: () => void;
+    onRegenerate?: () => void;
+    galleryAvailable?: boolean;
   },
 ): MessageActionEntry[] {
   const role = m.kind;
@@ -139,6 +144,23 @@ function messageActionEntries(
       run: doCopy,
     },
   ];
+  if (m.kind === "assistant") {
+    entries.push({
+      key: "gallery",
+      label: "Gallery",
+      name: "Open images from this assistant answer",
+      run: opts.onGallery ?? (() => {}),
+      ...(!opts.galleryAvailable ? { disabledReason: "No images in this answer" } : {}),
+    });
+    if (opts.onRegenerate) {
+      entries.push({
+        key: "regenerate",
+        label: "Regenerate",
+        name: "Regenerate this assistant answer",
+        run: opts.onRegenerate,
+      });
+    }
+  }
   if (m.kind === "user" && opts.onRevert) {
     entries.push({
       key: "revert",
@@ -164,6 +186,10 @@ function messageActionEntries(
 function ActionButton({ entry, className }: { entry: MessageActionEntry; className: string }) {
   const glyph = entry.key === "copy"
     ? <Icon.copy />
+    : entry.key === "gallery"
+      ? <Icon.image />
+      : entry.key === "regenerate"
+        ? <Icon.regenerate />
     : entry.key === "fork"
       ? <Icon.fork />
       : <Icon.rewind />;
@@ -193,11 +219,24 @@ function ActionButton({ entry, className }: { entry: MessageActionEntry; classNa
 // through the existing timeline scroll root. Escape/outside press close it,
 // action activation closes it, and focus returns to the opener (predecessor
 // UX-MSG-ACTIONS contract, placement only).
-function MessageMeta({ m, announce, onRevert, onFork, revert, fork }: {
+function MessageMeta({
+  m,
+  announce,
+  onRevert,
+  onFork,
+  onGallery,
+  onRegenerate,
+  galleryAvailable,
+  revert,
+  fork,
+}: {
   m: UserMsg | AssistantMsg;
   announce: Announce;
   onRevert?: (message: UserMsg) => void;
   onFork?: (message: UserMsg) => void;
+  onGallery?: () => void;
+  onRegenerate?: () => void;
+  galleryAvailable?: boolean;
   revert?: ActionAvailability;
   fork?: ActionAvailability;
 }) {
@@ -212,6 +251,9 @@ function MessageMeta({ m, announce, onRevert, onFork, revert, fork }: {
     revert,
     fork,
     copyFormat: prefs.messageCopyFormat,
+    onGallery,
+    onRegenerate,
+    galleryAvailable,
   });
   const [menuOpen, setMenuOpen] = useState(false);
   const openerRef = useRef<HTMLButtonElement>(null);
@@ -281,7 +323,18 @@ function MessageMeta({ m, announce, onRevert, onFork, revert, fork }: {
         {prefs.showMessageActions && (
           <>
             <div className="msg-actions">
-              {entries.map((entry) => <ActionButton key={entry.key} entry={entry} className="msg-action-btn" />)}
+              {entries.filter((entry) => entry.key !== "regenerate").map((entry) => (
+                <ActionButton key={entry.key} entry={entry} className="msg-action-btn" />
+              ))}
+              {m.kind === "assistant" && (
+                <SlotHost
+                  slot="session.message.actions"
+                  context={{ sessionId, kind: m.kind, messageId: m.id, eventSeq: m.eventSeq }}
+                />
+              )}
+              {entries.filter((entry) => entry.key === "regenerate").map((entry) => (
+                <ActionButton key={entry.key} entry={entry} className="msg-action-btn" />
+              ))}
             </div>
             <button
               ref={openerRef}
@@ -295,10 +348,12 @@ function MessageMeta({ m, announce, onRevert, onFork, revert, fork }: {
             >
               <Icon.more />
             </button>
-            <SlotHost
-              slot="session.message.actions"
-              context={{ sessionId, kind: m.kind, messageId: m.id, eventSeq: m.eventSeq }}
-            />
+            {m.kind === "user" && (
+              <SlotHost
+                slot="session.message.actions"
+                context={{ sessionId, kind: m.kind, messageId: m.id, eventSeq: m.eventSeq }}
+              />
+            )}
           </>
         )}
       </div>
@@ -317,6 +372,10 @@ function MessageMeta({ m, announce, onRevert, onFork, revert, fork }: {
               <span aria-hidden="true">
                 {entry.key === "copy"
                   ? <Icon.copy />
+                  : entry.key === "gallery"
+                    ? <Icon.image />
+                    : entry.key === "regenerate"
+                      ? <Icon.regenerate />
                   : entry.key === "fork"
                     ? <Icon.fork />
                     : <Icon.rewind />}
@@ -330,21 +389,72 @@ function MessageMeta({ m, announce, onRevert, onFork, revert, fork }: {
   );
 }
 
+function AssistantAgentHeader({ m }: { m: AssistantMsg }) {
+  const session = useStore((state) =>
+    state.sessions.find((candidate) => candidate.id === state.activeSessionId) ?? null);
+  const models = useStore((state) => state.models);
+  const modelRef = m.model ?? session?.model;
+  const descriptor = modelRef
+    ? models.find((candidate) =>
+        candidate.providerID === modelRef.providerID && candidate.modelID === modelRef.modelID)
+    : undefined;
+  const modelName = descriptor?.name ?? modelRef?.modelID ?? "Polyth";
+  const agent = (m.agent ?? session?.agent ?? "Build").replace(/[-_]+/g, " ");
+  const agentName = agent ? agent[0]!.toUpperCase() + agent.slice(1) : "Build";
+  const modality = descriptor ? modelModalities(descriptor) : "Text";
+  const modalityLabel = modality === "Text" ? "Text only" : modality;
+  const context = descriptor?.context
+    ? modelContextLabel(descriptor.context).replace(/\s+context$/, "").toUpperCase()
+    : "Unknown";
+  const duration = m.completedAt !== undefined
+    ? normalizedDuration(Math.max(0, m.completedAt - m.time))
+    : null;
+  return (
+    <header className="agent-reply-header">
+      <span className="agent-reply-mark" aria-hidden="true">
+        {(descriptor?.providerName ?? descriptor?.providerID ?? "P").slice(0, 1).toUpperCase()}
+      </span>
+      <span className="agent-reply-copy">
+        <span className="agent-reply-name">
+          <strong>{modelName}</strong>
+          <span className="agent-type-badge">{agentName}</span>
+        </span>
+        <span className="agent-reply-meta">
+          <span>{modalityLabel}</span>
+          <i aria-hidden="true">•</i>
+          <span>Context {context}</span>
+          {/unlimited/i.test(modelName) && <><i aria-hidden="true">•</i><span>Unlimited</span></>}
+          {duration && <><i aria-hidden="true">•</i><span>{duration}</span></>}
+        </span>
+      </span>
+    </header>
+  );
+}
+
 function AssistantView({
   m,
   announce,
   plan,
+  regeneratePrompt,
 }: {
   m: AssistantMsg;
   announce?: Announce;
   plan?: NonNullable<RenderModel["tasks"]>;
+  regeneratePrompt?: string;
 }) {
   const hasAnswer = m.text !== "" || !m.finalized;
+  const galleryAvailable = /!\[[^\]]*]\([^)]+\)/.test(m.text);
+  const openGallery = () => {
+    const message = Array.from(document.querySelectorAll<HTMLElement>(".msg.assistant"))
+      .find((candidate) => candidate.dataset.messageSeq === String(m.eventSeq));
+    message?.querySelector<HTMLButtonElement>(".md-img-btn")?.click();
+  };
   const articleProps = hasAnswer
     ? ({ role: "article", "aria-label": assistantArticleName(m.finalized, assistantTime(m)) } as const)
     : undefined;
   return (
-    <div className="msg assistant" {...(articleProps ?? {})}>
+    <div className="msg assistant" data-message-seq={m.eventSeq} {...(articleProps ?? {})}>
+      <AssistantAgentHeader m={m} />
       {m.reasoning !== "" && <Thinking m={m} announce={announce} />}
       {hasAnswer && (
         <div className="bubble" dir="auto">{renderMarkdown(m.text || "", m.id)}{!m.finalized && <span className="caret" />}</div>
@@ -369,7 +479,15 @@ function AssistantView({
           </ul>
         </section>
       )}
-      {m.finalized && m.text !== "" && announce && <MessageMeta m={m} announce={announce} />}
+      {m.finalized && m.text !== "" && announce && (
+        <MessageMeta
+          m={m}
+          announce={announce}
+          onGallery={openGallery}
+          galleryAvailable={galleryAvailable}
+          {...(regeneratePrompt ? { onRegenerate: () => { void sendMessage(regeneratePrompt); } } : {})}
+        />
+      )}
     </div>
   );
 }
@@ -525,10 +643,11 @@ function WorkedGroup({ g }: { g: WorkGroup }) {
   );
 }
 
-function MessageView({ m, announce, plan, onRevert, onFork, revert, fork }: {
+function MessageView({ m, announce, plan, regeneratePrompt, onRevert, onFork, revert, fork }: {
   m: RenderMessage;
   announce?: Announce;
   plan?: NonNullable<RenderModel["tasks"]>;
+  regeneratePrompt?: string;
   onRevert?: (message: UserMsg) => void;
   onFork?: (message: UserMsg) => void;
   revert?: ActionAvailability;
@@ -554,7 +673,9 @@ function MessageView({ m, announce, plan, onRevert, onFork, revert, fork }: {
       </div>
     );
   }
-  if (m.kind === "assistant") return <AssistantView m={m} announce={announce} plan={plan} />;
+  if (m.kind === "assistant") {
+    return <AssistantView m={m} announce={announce} plan={plan} regeneratePrompt={regeneratePrompt} />;
+  }
   if (m.kind === "task") return <TaskActivityRow activity={m} />;
   return <ToolCard m={m} />;
 }
@@ -1097,6 +1218,10 @@ export default function Timeline({ model }: { model: RenderModel }) {
                 key={r.id}
                 m={r}
                 plan={r.kind === "assistant" && r.id === latestAssistantId && model.tasks ? model.tasks : undefined}
+                regeneratePrompt={r.kind === "assistant"
+                  ? [...visibleMessages].reverse().find((message) =>
+                      message.kind === "user" && message.eventSeq < r.eventSeq)?.text
+                  : undefined}
                 announce={announce}
                 onRevert={revert}
                 onFork={fork}

@@ -310,6 +310,8 @@ export function AppearancePage() {
         <div className="appearance-menu-items">
           <label><Toggle on={ui.showTechnicalButtons} onChange={(showTechnicalButtons) => setUiSettings({ showTechnicalButtons })} label="Technical options" /><span>Technical</span></label>
           <label><Toggle on={ui.showDictate} onChange={(showDictate) => setUiSettings({ showDictate })} label="Dictation action" /><span>Dictation</span></label>
+          <label><Toggle on={ui.showAutoApprove} onChange={(showAutoApprove) => setUiSettings({ showAutoApprove })} label="Auto-approve action" /><span>Auto-approve</span></label>
+          <label><Toggle on={ui.showGoals} onChange={(showGoals) => setUiSettings({ showGoals })} label="Goals action" /><span>Goals</span></label>
           <label><Toggle on={ui.showQuickActions} onChange={(showQuickActions) => setUiSettings({ showQuickActions })} label="Quick actions" /><span>Quick actions</span></label>
         </div>
       </Row>

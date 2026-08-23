@@ -2,6 +2,7 @@ import { useState } from "react";
 import { api } from "../api.ts";
 import { registerSlot } from "../slots.ts";
 import { applyEvent, setUiError, useStore } from "../store.ts";
+import { Icon } from "../icons.tsx";
 
 function MessagePinAction({ sessionId, eventSeq }: { sessionId: string; eventSeq: number }) {
   const events = useStore((state) => state.events[sessionId] ?? []);
@@ -16,9 +17,10 @@ function MessagePinAction({ sessionId, eventSeq }: { sessionId: string; eventSeq
   const label = pinned ? "Unpin message from compaction context" : "Pin message for compaction context";
   return (
     <button
-      className="small-btn"
+      className="msg-action-btn msg-bookmark-action"
       aria-label={label}
       title={label}
+      data-tooltip={pinned ? "Unbookmark" : "Bookmark"}
       aria-pressed={pinned}
       disabled={busy}
       onClick={() => {
@@ -31,7 +33,7 @@ function MessagePinAction({ sessionId, eventSeq }: { sessionId: string; eventSeq
           .finally(() => setBusy(false));
       }}
     >
-      <span aria-hidden="true">{pinned ? "📌" : "♧"}</span>
+      <span aria-hidden="true"><Icon.bookmark /></span>
     </button>
   );
 }

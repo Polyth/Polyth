@@ -1,11 +1,16 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { register } from "node:module";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 
 register("./tsxHooks.mjs", import.meta.url);
 
 const { summarizeUnifiedDiff } = await import("../src/components/PendingChangesBar.tsx");
 const { shellCardCopyText } = await import("../src/components/Timeline.tsx");
+const { modelModalities } = await import("../src/components/ModelPicker.tsx");
+
+const read = (path: string) => readFileSync(resolve(import.meta.dirname, path), "utf8");
 
 test("workspace diff totals count content without file headers", () => {
   const diff = [
@@ -28,4 +33,31 @@ test("shell card copy combines the command and its result", () => {
     "npm test\n\nstarted\npid 42",
   );
   assert.equal(shellCardCopyText({ argv: ["npm", "test"] }), '{\n  "argv": [\n    "npm",\n    "test"\n  ]\n}');
+});
+
+test("model metadata reports deduplicated input and output modalities", () => {
+  assert.equal(modelModalities({
+    providerID: "test",
+    modelID: "vision",
+    name: "Vision",
+    capabilities: ["input:text", "input:image", "output:image", "toolcall"],
+  }), "Text, Image");
+});
+
+test("fresh mobile sessions expose project and branch targets", () => {
+  const surface = read("../src/components/workspace/builtinSurfaces.tsx");
+  const composer = read("../src/components/Composer.tsx");
+  const header = read("../src/components/Header.tsx");
+  const css = read("../src/styles.css");
+
+  assert.match(surface, /aria-label="Project for new session"/);
+  assert.match(surface, /aria-label="Branch for new session"/);
+  assert.match(surface, /target: \{ kind: "branch", branch: candidate\.name \}/);
+  assert.match(composer, /newSessionTarget\.kind === "branch"/);
+  assert.match(composer, /Modalities: \{modalities\}/);
+  assert.match(composer, /composer-auto-approve/);
+  assert.match(composer, /composer-goals/);
+  assert.match(header, /displaySessionTitle\(session\.title, session\.id, firstUserText\)/);
+  assert.match(header, /Composer controls/);
+  assert.match(css, /\.polyth-gradient\s*\{[^}]*linear-gradient/s);
 });

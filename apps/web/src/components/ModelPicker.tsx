@@ -10,11 +10,13 @@ import {
 import { useEscape } from "../useEscape.ts";
 
 export function modelModalities(model: ModelDescriptor): string {
-  const inputs = (model.capabilities ?? [])
-    .filter((capability) => capability.startsWith("input:") && capability !== "input:none")
-    .map((capability) => capability.slice("input:".length));
-  return inputs.length > 0
-    ? [...new Set(inputs)].map((value) => value[0]!.toUpperCase() + value.slice(1)).join(", ")
+  const modalities = (model.capabilities ?? [])
+    .filter((capability) =>
+      (capability.startsWith("input:") || capability.startsWith("output:"))
+      && !capability.endsWith(":none"))
+    .map((capability) => capability.slice(capability.indexOf(":") + 1));
+  return modalities.length > 0
+    ? [...new Set(modalities)].map((value) => value[0]!.toUpperCase() + value.slice(1)).join(", ")
     : "Text";
 }
 
