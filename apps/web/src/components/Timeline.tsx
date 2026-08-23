@@ -2,10 +2,12 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, typ
 import { renderMarkdown } from "../markdown.tsx";
 import { fmtDuration, fmtMs } from "../format.ts";
 import { groupWork, mergeThinking, promptIndex, toolSummary, copyText, loadDraft, type WorkGroup } from "../utils.ts";
-import { useUiSettings } from "../uiPrefs.ts";
+import { setUiSettings, useUiSettings } from "../uiPrefs.ts";
 import { forkSession, sendMessage } from "../init.ts";
 import { requestComposerReplace } from "../composerInsert.ts";
-import { applyEvent, openSettingsPage, setUiError, useStore } from "../store.ts";
+import {
+  applyEvent, openSettingsPage, setActiveView, setUiError, startNewSession, useStore,
+} from "../store.ts";
 import { api } from "../api.ts";
 import {
   COPY_REASONING_NAME,
@@ -57,7 +59,8 @@ import SlotHost from "./slots/SlotHost.ts";
 import type { RenderModel, RenderMessage, ToolMsg, AssistantMsg, TaskActivityMsg, UserMsg } from "../reduce.ts";
 import { Icon } from "../icons.tsx";
 import "./messagePinAction.tsx";
-import { modelContextLabel, modelModalities } from "./ModelPicker.tsx";
+import ProviderLogo from "./ProviderLogo.tsx";
+import { seedMultiRunPrompt } from "../multirunSeed.ts";
 
 /** One announcement per copy/mutation outcome; text is the accessible record,
  *  checkmarks only supplement it. Screen readers ignore repeats, so identical
@@ -389,10 +392,72 @@ function MessageMeta({
   );
 }
 
-function AssistantAgentHeader({ m }: { m: AssistantMsg }) {
+const RESPONSE_ACTION_ICON = {
+  copy: Icon.copy,
+  image: Icon.image,
+  plan: Icon.plan,
+  pin: Icon.bookmark,
+  session: Icon.newSession,
+  multirun: Icon.multirun,
+} as const;
+
+const RESPONSE_ACTION_LABEL = {
+  copy: "Copy answer",
+  image: "Save as image",
+  plan: "Save as plan",
+  pin: "Pin into context",
+  session: "Start new session from this answer",
+  multirun: "Start new multi-run from this answer",
+} as const;
+
+function downloadAnswerImage(text: string, title: string): boolean {
+  const canvas = document.createElement("canvas");
+  const context = canvas.getContext("2d");
+  if (!context) return false;
+  const width = 1200;
+  const padding = 72;
+  const lineHeight = 34;
+  context.font = "24px system-ui, sans-serif";
+  const lines: string[] = [];
+  for (const paragraph of text.split("\n")) {
+    const words = paragraph.split(/\s+/).filter(Boolean);
+    let line = "";
+    for (const word of words) {
+      const candidate = line ? `${line} ${word}` : word;
+      if (context.measureText(candidate).width > width - padding * 2 && line) {
+        lines.push(line);
+        line = word;
+      } else {
+        line = candidate;
+      }
+    }
+    lines.push(line);
+  }
+  canvas.width = width;
+  canvas.height = Math.max(260, padding * 2 + 54 + Math.min(lines.length, 120) * lineHeight);
+  context.fillStyle = "#111318";
+  context.fillRect(0, 0, canvas.width, canvas.height);
+  context.fillStyle = "#f4f6fa";
+  context.font = "700 30px system-ui, sans-serif";
+  context.fillText(title, padding, padding);
+  context.fillStyle = "#d7dce5";
+  context.font = "24px system-ui, sans-serif";
+  lines.slice(0, 120).forEach((line, index) => context.fillText(line, padding, padding + 54 + index * lineHeight));
+  const link = document.createElement("a");
+  link.download = `polyth-answer-${Date.now()}.png`;
+  link.href = canvas.toDataURL("image/png");
+  link.click();
+  return true;
+}
+
+function AssistantAgentHeader({ m, announce }: { m: AssistantMsg; announce?: Announce }) {
   const session = useStore((state) =>
     state.sessions.find((candidate) => candidate.id === state.activeSessionId) ?? null);
+  const projectId = useStore((state) => state.activeProjectId);
+  const events = useStore((state) => session ? state.events[session.id] ?? [] : []);
   const models = useStore((state) => state.models);
+  const prefs = useUiSettings();
+  const [pinBusy, setPinBusy] = useState(false);
   const modelRef = m.model ?? session?.model;
   const descriptor = modelRef
     ? models.find((candidate) =>
@@ -401,32 +466,92 @@ function AssistantAgentHeader({ m }: { m: AssistantMsg }) {
   const modelName = descriptor?.name ?? modelRef?.modelID ?? "Polyth";
   const agent = (m.agent ?? session?.agent ?? "Build").replace(/[-_]+/g, " ");
   const agentName = agent ? agent[0]!.toUpperCase() + agent.slice(1) : "Build";
-  const modality = descriptor ? modelModalities(descriptor) : "Text";
-  const modalityLabel = modality === "Text" ? "Text only" : modality;
-  const context = descriptor?.context
-    ? modelContextLabel(descriptor.context).replace(/\s+context$/, "").toUpperCase()
-    : "Unknown";
   const duration = m.completedAt !== undefined
     ? normalizedDuration(Math.max(0, m.completedAt - m.time))
-    : null;
+    : "Running";
+  let pinned = false;
+  for (const event of events) {
+    if (Number((event.data as { sourceEventSeq?: unknown }).sourceEventSeq) !== m.eventSeq) continue;
+    if (event.type === "context/pinned") pinned = true;
+    if (event.type === "context/unpinned") pinned = false;
+  }
+  const runAction = (id: (typeof prefs.responseActions)[number]) => {
+    if (id === "copy") {
+      void copyText(m.text).then((ok) => announce?.(ok ? "Answer copied" : "Couldn’t copy answer"));
+      return;
+    }
+    if (id === "image") {
+      announce?.(downloadAnswerImage(m.text, modelName) ? "Answer image saved" : "Couldn’t save answer image");
+      return;
+    }
+    if (id === "plan") {
+      if (!projectId) return;
+      void api.knowledgeCreate({
+        projectId,
+        kind: "plan",
+        title: `${modelName} plan · ${timeShort(assistantTime(m))}`,
+        body: m.text,
+        ...(session ? { sourceSessionId: session.id } : {}),
+      }).then(() => announce?.("Answer saved as a plan"))
+        .catch((error) => setUiError(error instanceof Error ? error.message : String(error)));
+      return;
+    }
+    if (id === "pin") {
+      if (!session || pinBusy) return;
+      setPinBusy(true);
+      void (pinned ? api.unpinContext(session.id, m.eventSeq) : api.pinContext(session.id, m.eventSeq))
+        .then(applyEvent)
+        .catch((error) => setUiError(error instanceof Error ? error.message : String(error)))
+        .finally(() => setPinBusy(false));
+      return;
+    }
+    if (id === "session") {
+      if (projectId) startNewSession(projectId, { draft: m.text });
+      return;
+    }
+    seedMultiRunPrompt(m.text);
+    setActiveView("multirun");
+  };
   return (
     <header className="agent-reply-header">
-      <span className="agent-reply-mark" aria-hidden="true">
-        {(descriptor?.providerName ?? descriptor?.providerID ?? "P").slice(0, 1).toUpperCase()}
-      </span>
-      <span className="agent-reply-copy">
-        <span className="agent-reply-name">
-          <strong>{modelName}</strong>
-          <span className="agent-type-badge">{agentName}</span>
+      <ProviderLogo
+        providerID={descriptor?.providerID ?? modelRef?.providerID}
+        providerName={descriptor?.providerName}
+        className="agent-reply-mark"
+      />
+      <strong className="agent-reply-model">{modelName}</strong>
+      <span className="agent-type-badge">{agentName}</span>
+      <span className="agent-reply-duration">{duration}</span>
+      <time dateTime={timeIso(assistantTime(m))}>{timeShort(assistantTime(m))}</time>
+      {m.finalized && (
+        <span className="agent-reply-actions" aria-label="Answer actions">
+          {prefs.responseActions.map((id) => {
+            const Glyph = RESPONSE_ACTION_ICON[id];
+            const label = id === "pin" && pinned ? "Unpin from context" : RESPONSE_ACTION_LABEL[id];
+            return (
+              <button
+                key={id}
+                className={id === "pin" && pinned ? "active" : ""}
+                aria-label={label}
+                title={label}
+                draggable
+                onDragStart={(event) => event.dataTransfer.setData("text/polyth-response-action", id)}
+                onDragOver={(event) => event.preventDefault()}
+                onDrop={(event) => {
+                  event.preventDefault();
+                  const dragged = event.dataTransfer.getData("text/polyth-response-action") as typeof id;
+                  if (!prefs.responseActions.includes(dragged) || dragged === id) return;
+                  const next = prefs.responseActions.filter((candidate) => candidate !== dragged);
+                  next.splice(next.indexOf(id), 0, dragged);
+                  setUiSettings({ responseActions: next });
+                }}
+                disabled={(id === "pin" && pinBusy) || ((id === "plan" || id === "session") && !projectId)}
+                onClick={() => runAction(id)}
+              ><Glyph /></button>
+            );
+          })}
         </span>
-        <span className="agent-reply-meta">
-          <span>{modalityLabel}</span>
-          <i aria-hidden="true">•</i>
-          <span>Context {context}</span>
-          {/unlimited/i.test(modelName) && <><i aria-hidden="true">•</i><span>Unlimited</span></>}
-          {duration && <><i aria-hidden="true">•</i><span>{duration}</span></>}
-        </span>
-      </span>
+      )}
     </header>
   );
 }
@@ -454,7 +579,7 @@ function AssistantView({
     : undefined;
   return (
     <div className="msg assistant" data-message-seq={m.eventSeq} {...(articleProps ?? {})}>
-      <AssistantAgentHeader m={m} />
+      <AssistantAgentHeader m={m} announce={announce} />
       {m.reasoning !== "" && <Thinking m={m} announce={announce} />}
       {hasAnswer && (
         <div className="bubble" dir="auto">{renderMarkdown(m.text || "", m.id)}{!m.finalized && <span className="caret" />}</div>
@@ -479,14 +604,8 @@ function AssistantView({
           </ul>
         </section>
       )}
-      {m.finalized && m.text !== "" && announce && (
-        <MessageMeta
-          m={m}
-          announce={announce}
-          onGallery={openGallery}
-          galleryAvailable={galleryAvailable}
-          {...(regeneratePrompt ? { onRegenerate: () => { void sendMessage(regeneratePrompt); } } : {})}
-        />
+      {m.finalized && m.text !== "" && announce && galleryAvailable && (
+        <button className="assistant-gallery-shortcut" onClick={openGallery}><Icon.image /> Open answer images</button>
       )}
     </div>
   );

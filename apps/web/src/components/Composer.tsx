@@ -58,10 +58,11 @@ import { agentPickerDefaultLabel, modelPickerDefaultLabel } from "../composerDef
 import { friendlyError, modKeyLabel, parseModelRef } from "../settings.ts";
 import { Icon } from "../icons.tsx";
 import { useWorkspaceMode } from "../widgets/workspaceMode.ts";
-import ModelPicker, { modelContextLabel, modelModalities, modelSupportsThinking } from "./ModelPicker.tsx";
+import ModelPicker, { modelContextLabel, modelSupportsThinking } from "./ModelPicker.tsx";
 import { useSessionDefaults } from "../sessionDefaults.ts";
 import { roleKind, useRolePrefs } from "../rolePrefs.ts";
 import { useShellMode } from "../responsiveShell.ts";
+import ProviderLogo from "./ProviderLogo.tsx";
 
 function modelRefFromValue(value: string): { providerID: string; modelID: string } | undefined {
   if (!value) return undefined;
@@ -162,7 +163,6 @@ function agentBadgeLabel(agent?: string): string {
 
 function ModelCapabilityMeta({ model }: { model?: ModelDescriptor }) {
   const capabilities = model?.capabilities ?? [];
-  const modalities = model ? modelModalities(model) : "Text";
   const hasImage = capabilities.some((capability) => capability.endsWith(":image"));
   const hasAttachments = capabilities.includes("attachment");
   return (
@@ -172,8 +172,6 @@ function ModelCapabilityMeta({ model }: { model?: ModelDescriptor }) {
         {hasImage && <Icon.image />}
         {hasAttachments && <Icon.paperclip />}
       </span>
-      <span>Modalities: {modalities}</span>
-      <i aria-hidden="true">•</i>
       <span>Context: {compactContext(model?.context)}</span>
     </div>
   );
@@ -944,9 +942,11 @@ export default function Composer({
       )}
       {simpleMode && (
         <div className="composer-model-header">
-          <span className="composer-provider-mark" aria-hidden="true">
-            {(selectedModel?.providerName ?? selectedModel?.providerID ?? "P").slice(0, 1).toUpperCase()}
-          </span>
+          <ProviderLogo
+            providerID={selectedModel?.providerID}
+            providerName={selectedModel?.providerName}
+            className="composer-provider-mark"
+          />
           {!noModels && (
             <ModelPicker
               models={chatModels}
@@ -1146,6 +1146,14 @@ export default function Composer({
               attachFiles(files);
             }}
           />
+          <button
+            type="button"
+            className="chip composer-add-files"
+            aria-label="Add files"
+            title="Add files"
+            disabled={!activeProjectId}
+            onClick={() => fileInputRef.current?.click()}
+          ><Icon.plus /></button>
           <ComposerAddMenu
             hasProject={!!activeProjectId}
             hasSession={!!session?.id}

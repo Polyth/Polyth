@@ -7,6 +7,11 @@ import type { NotificationKind } from "@polyth/contracts";
 export type FollowUpBehavior = "steer" | "queue" | "interrupt";
 export type NotificationKindPref = NotificationKind;
 export type MessageCopyFormat = "markdown" | "json";
+export type HeaderMetricId = "tokens" | "messages" | "duration" | "cost";
+export type ResponseActionId = "copy" | "image" | "plan" | "pin" | "session" | "multirun";
+
+export const HEADER_METRIC_IDS: readonly HeaderMetricId[] = ["tokens", "messages", "duration", "cost"];
+export const RESPONSE_ACTION_IDS: readonly ResponseActionId[] = ["copy", "image", "plan", "pin", "session", "multirun"];
 
 export interface UiSettings {
   density: "comfortable" | "balanced" | "compact";
@@ -41,6 +46,10 @@ export interface UiSettings {
   showMessageActions: boolean;
   /** Payload selected by the single message Copy action. */
   messageCopyFormat: MessageCopyFormat;
+  /** Visible session-header metrics, in drag-configured order. */
+  headerMetrics: HeaderMetricId[];
+  /** Assistant-header hover actions, in drag-configured order. */
+  responseActions: ResponseActionId[];
   /** JSON tree viewer defaults (WP4). */
   jsonTreeDefault: "tree" | "raw";
   jsonTreeDepth: number;
@@ -83,6 +92,8 @@ export const UI_DEFAULTS: UiSettings = {
   promptNavigator: "auto",
   showMessageActions: true,
   messageCopyFormat: "markdown",
+  headerMetrics: [...HEADER_METRIC_IDS],
+  responseActions: [...RESPONSE_ACTION_IDS],
   jsonTreeDefault: "tree",
   jsonTreeDepth: 2,
   editorAutosave: true,
@@ -97,6 +108,16 @@ export const UI_DEFAULTS: UiSettings = {
 };
 
 const NOTIFY_KINDS: NotificationKindPref[] = ["completed", "failed", "question", "permission", "subagent"];
+
+function orderedIds<T extends string>(value: unknown, allowed: readonly T[]): T[] {
+  if (!Array.isArray(value)) return [...allowed];
+  const seen = new Set<T>();
+  return value.filter((id): id is T => {
+    if (typeof id !== "string" || !allowed.includes(id as T) || seen.has(id as T)) return false;
+    seen.add(id as T);
+    return true;
+  });
+}
 
 export function parseUiSettings(raw: string | null): UiSettings {
   const d: UiSettings = { ...UI_DEFAULTS, mcpServers: [], notifyKinds: [...UI_DEFAULTS.notifyKinds], workStatusHiddenSections: [] };
@@ -127,6 +148,8 @@ export function parseUiSettings(raw: string | null): UiSettings {
       promptNavigator: data.promptNavigator === "on" || data.promptNavigator === "off" ? data.promptNavigator : "auto",
       showMessageActions: data.showMessageActions !== false,
       messageCopyFormat: data.messageCopyFormat === "json" ? "json" : "markdown",
+      headerMetrics: orderedIds(data.headerMetrics, HEADER_METRIC_IDS),
+      responseActions: orderedIds(data.responseActions, RESPONSE_ACTION_IDS),
       jsonTreeDefault: data.jsonTreeDefault === "raw" ? "raw" : "tree",
       jsonTreeDepth: Number.isFinite(Number(data.jsonTreeDepth)) && Number(data.jsonTreeDepth) >= 0 ? Math.min(8, Math.round(Number(data.jsonTreeDepth))) : 2,
       editorAutosave: data.editorAutosave !== false,

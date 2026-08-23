@@ -24,6 +24,7 @@ import { setWorkspaceMode, useWorkspaceMode } from "../widgets/workspaceMode.ts"
 import { useDismissibleMenu } from "./a11y/Menu.ts";
 import ChatMetrics from "./ChatMetrics.tsx";
 import { setUiSettings, useUiSettings } from "../uiPrefs.ts";
+import { setPlacementOverride } from "../capabilityLayout.ts";
 
 const STROKE = { fill: "none", stroke: "currentColor", strokeWidth: 1.5, strokeLinecap: "round", strokeLinejoin: "round" } as const;
 
@@ -93,10 +94,9 @@ function capabilityIcon(id: string): React.ReactNode {
   return EXTRA_ICONS[id] ?? <Icon.context />;
 }
 
-/** Primary navigation + the named More tools disclosure. Every surface
- *  resolves the same capability list — nothing is filtered out here; items
- *  that don't fit overflow into More tools, and an active overflowed item
- *  stays named in the header. */
+/** Primary navigation + its responsive overflow. Capabilities configured for
+ *  the right rail or technical menu are owned by those surfaces; only primary
+ *  header icons that do not fit create the More tools disclosure. */
 function CapabilityNav() {
   const resolved = useResolvedCapabilities();
   const view = useStore((s) => s.activeView);
@@ -161,9 +161,15 @@ function CapabilityNav() {
   const overflowedActive = primaries.slice(fit).find(isActive);
   if (overflowedActive) visible = [...visible.slice(0, Math.max(0, fit - 1)), overflowedActive];
   const visibleIds = new Set(visible.map((c) => c.descriptor.id));
-  // Everything else (overflowed primaries + more + technical) stays reachable
-  // through the named disclosure, grouped by user outcome.
-  const rest = resolved.filter((c) => !visibleIds.has(c.descriptor.id));
+  // The disclosure is a real overflow of configured header icons, not a
+  // permanent duplicate of right-rail and technical-menu capabilities. When
+  // every configured header icon fits, no empty More tools control is mounted.
+  const rest = primaries.filter((c) => !visibleIds.has(c.descriptor.id));
+  const reorderPrimary = (draggedId: string, targetId: string) => {
+    const ids = primaries.map((capability) => capability.descriptor.id).filter((id) => id !== draggedId);
+    ids.splice(ids.indexOf(targetId), 0, draggedId);
+    ids.forEach((id, rank) => setPlacementOverride(id, { tier: "primary", rank }));
+  };
 
   return (
     <nav className="view-switcher" aria-label="Workspace tools" ref={navRef}>
@@ -177,6 +183,16 @@ function CapabilityNav() {
               title={c.descriptor.label}
               aria-label={c.descriptor.label}
               aria-pressed={isActive(c)}
+              draggable
+              onDragStart={(event) => event.dataTransfer.setData("text/polyth-capability", c.descriptor.id)}
+              onDragOver={(event) => event.preventDefault()}
+              onDrop={(event) => {
+                event.preventDefault();
+                const draggedId = event.dataTransfer.getData("text/polyth-capability");
+                if (primaries.some((item) => item.descriptor.id === draggedId)) {
+                  reorderPrimary(draggedId, c.descriptor.id);
+                }
+              }}
               onClick={() => c.descriptor.open()}
             >
               {capabilityIcon(c.descriptor.id)}
@@ -184,7 +200,7 @@ function CapabilityNav() {
             </button>
           );
         })}
-        <div className="more-tools" ref={moreRef}>
+        {rest.length > 0 && <div className="more-tools" ref={moreRef}>
           <button
             ref={triggerRef}
             className="more-tools-trigger"
@@ -203,7 +219,7 @@ function CapabilityNav() {
               onClose={() => toggleMore(false)}
             />
           )}
-        </div>
+        </div>}
       </div>
     </nav>
   );

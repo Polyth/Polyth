@@ -46,7 +46,9 @@ test("message actions use one lightweight copy control and local hover zones", (
   assert.match(css, /@media \(max-width:\s*480px\)[\s\S]*\.msg\.assistant \.msg-actions\s*\{\s*display:\s*flex;/);
   assert.match(timeline, /key: "gallery"/);
   assert.match(timeline, /key: "regenerate"/);
-  assert.match(timeline, /<AssistantAgentHeader m=\{m\} \/>/);
+  assert.match(timeline, /<AssistantAgentHeader m=\{m\} announce=\{announce\} \/>/);
+  assert.match(timeline, /prefs\.responseActions\.map/);
+  assert.match(timeline, /Start new multi-run from this answer/);
 });
 
 test("thinking stays unboxed while command output keeps a light boundary", () => {

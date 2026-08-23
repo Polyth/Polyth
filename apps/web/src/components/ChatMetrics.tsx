@@ -1,8 +1,9 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import type { SessionProjection } from "@polyth/contracts";
 import type { RenderModel } from "../reduce.ts";
 import { fmtCost, fmtTokens } from "../format.ts";
 import { Icon } from "../icons.tsx";
+import { setUiSettings, useUiSettings, type HeaderMetricId } from "../uiPrefs.ts";
 
 export function formatMetricDuration(ms: number): string {
   const seconds = Math.max(0, Math.floor(ms / 1000));
@@ -32,6 +33,7 @@ export default function ChatMetrics({
   session: SessionProjection | null;
   model: RenderModel;
 }) {
+  const { headerMetrics } = useUiSettings();
   const working = model.turn?.status === "working";
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
@@ -43,24 +45,43 @@ export default function ChatMetrics({
   const tokens = model.totals.input + model.totals.output + model.totals.reasoning;
   const messages = model.messages.filter((message) =>
     message.kind === "user" || message.kind === "assistant").length;
-  const metrics = [
-    { label: "Tokens", value: fmtTokens(tokens).toUpperCase(), icon: <Icon.context /> },
-    { label: "Messages", value: String(messages), icon: <Icon.events /> },
-    { label: "Duration", value: formatMetricDuration(sessionDuration(session, model, now)), icon: <Icon.clock /> },
-    { label: "Cost", value: fmtCost(model.totals.cost), icon: <Icon.usage /> },
-  ];
+  const metrics: Record<HeaderMetricId, { label: string; value: string; icon: ReactNode }> = {
+    tokens: { label: "Tokens", value: fmtTokens(tokens).toUpperCase(), icon: <Icon.context /> },
+    messages: { label: "Messages", value: String(messages), icon: <Icon.events /> },
+    duration: { label: "Duration", value: formatMetricDuration(sessionDuration(session, model, now)), icon: <Icon.clock /> },
+    cost: { label: "Cost", value: fmtCost(model.totals.cost), icon: <Icon.usage /> },
+  };
 
   return (
     <div className="chat-metrics" aria-label="Session metrics">
-      {metrics.map((metric) => (
-        <div className="chat-metric" key={metric.label} title={`${metric.label}: ${metric.value}`}>
+      {headerMetrics.map((id) => {
+        const metric = metrics[id];
+        return (
+        <div
+          className="chat-metric"
+          key={id}
+          title={`${metric.label}: ${metric.value}`}
+          data-metric={id}
+          draggable
+            onDragStart={(event) => event.dataTransfer.setData("text/polyth-metric", id)}
+            onDragOver={(event) => event.preventDefault()}
+            onDrop={(event) => {
+              event.preventDefault();
+              const dragged = event.dataTransfer.getData("text/polyth-metric") as HeaderMetricId;
+              if (!headerMetrics.includes(dragged) || dragged === id) return;
+              const next = headerMetrics.filter((candidate) => candidate !== dragged);
+              next.splice(next.indexOf(id), 0, dragged);
+              setUiSettings({ headerMetrics: next });
+            }}
+        >
           <span className="chat-metric-icon" aria-hidden="true">{metric.icon}</span>
           <span>
             <small>{metric.label}</small>
             <strong>{metric.value}</strong>
           </span>
         </div>
-      ))}
+        );
+      })}
     </div>
   );
 }

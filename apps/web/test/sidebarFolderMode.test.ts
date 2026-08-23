@@ -103,14 +103,12 @@ test("tree mode nests sessions under project worktrees", async () => {
     assert.ok(container.querySelector(".session-list .session-org"), "list mode renders the active project sessions");
     assert.equal(container.querySelector(".project-tree-node"), null);
     const toggle = container.querySelector<HTMLElement>('[aria-label="Toggle project tree view"]');
-    assert.ok(toggle, "view-mode toggle rendered");
-    assert.equal(toggle!.getAttribute("aria-pressed"), "false");
+    assert.equal(toggle, null, "desktop renders no sidebar footer controls");
 
     // Tree mode: projects become expandable roots and the active project's
     // worktrees are already visible.
-    await act(async () => { click(toggle!); });
+    await act(async () => { setSidebarViewMode("tree"); });
     await act(async () => { await Promise.resolve(); });
-    assert.equal(toggle!.getAttribute("aria-pressed"), "true");
     assert.equal(localStorage.getItem(VIEW_MODE_KEY), "tree");
     const trees = [...container.querySelectorAll(".project-tree-node")];
     assert.equal(trees.length, 2, "each project renders as a tree root");
@@ -124,19 +122,18 @@ test("tree mode nests sessions under project worktrees", async () => {
     assert.match(alphaTree.textContent ?? "", /feature\/ui/);
     const betaTree = trees.find((tree) => (tree.textContent ?? "").includes("beta"))!;
     assert.equal(betaTree.querySelector(".project-tree-sessions"), null, "other projects start collapsed");
-    const betaChevron = betaTree.querySelector<HTMLElement>(".project-tree-chevron")!;
-    assert.equal(betaChevron.getAttribute("aria-expanded"), "false");
+    const betaCard = betaTree.querySelector<HTMLElement>(".project-card")!;
+    assert.equal(betaCard.getAttribute("aria-expanded"), "false");
 
     // Per-project expand reveals that project's sessions.
-    await act(async () => { click(betaChevron); });
+    await act(async () => { click(betaCard); });
     await act(async () => { await Promise.resolve(); });
-    assert.equal(betaChevron.getAttribute("aria-expanded"), "true");
+    assert.equal(betaCard.getAttribute("aria-expanded"), "true");
     assert.match(betaTree.textContent ?? "", /Beta session/);
     assert.equal(container.querySelector(".side-folder-bar"), null, "folder toolbar is removed");
 
     // Back to list mode restores the classic layout.
-    await act(async () => { click(toggle!); });
-    assert.equal(toggle!.getAttribute("aria-pressed"), "false");
+    await act(async () => { setSidebarViewMode("list"); });
     assert.ok(container.querySelector(".session-list .session-org"), "list layout restored");
     assert.equal(container.querySelector(".project-tree-node"), null);
   } finally {
@@ -162,7 +159,8 @@ test("header selection keeps one multi-session selection across projects", async
     const header = container.querySelector<HTMLElement>(".sidebar-head");
     const select = header?.querySelector<HTMLButtonElement>('[aria-label="Select sessions"]');
     assert.ok(select, "session selection is an icon control in the sidebar header");
-    assert.ok(!(header?.textContent ?? "").includes("Projects"), "the Projects heading is removed");
+    assert.equal(header?.querySelector(".sidebar-title"), null, "the visible Projects heading is removed");
+    assert.equal(header?.querySelector(".sr-only")?.textContent, "Projects and sessions", "the sidebar retains its accessible heading");
 
     await act(async () => { click(select!); });
     assert.equal(select!.getAttribute("aria-pressed"), "true");

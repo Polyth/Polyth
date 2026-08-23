@@ -13,6 +13,7 @@ import { listSlots, slotVersion, subscribeSlots, type SlotItem } from "../../slo
 import { useWidgetCatalog, type WidgetDef } from "../../widgets/catalog.ts";
 import {
   setWidgetConfig,
+  moveWidgetToSlot,
   updateWidgetLayout,
   useWidgetLayout,
   widgetDefinitionId,
@@ -106,12 +107,28 @@ export function placedWidgetItems(
     };
     return [{
       id: `widget:${instanceId}`,
-      order: widget.order ?? index,
+      // The persisted placement array is user ordered. Definition order only
+      // seeds that array; it must not override later drag-and-drop changes.
+      order: index,
       render: (hostContext: SlotContext) => createElement(
         widget.kind === "mini-widget" ? "span" : "div",
         {
           className: widget.kind === "mini-widget" ? "placed-mini-widget" : "placed-slot-widget",
           "data-widget-id": instanceId,
+          ...(widget.kind === "mini-widget" ? {
+            draggable: true,
+            onDragStart: (event: DragEvent) => {
+              event.dataTransfer?.setData("text/polyth-widget", instanceId);
+            },
+            onDragOver: (event: DragEvent) => event.preventDefault(),
+            onDrop: (event: DragEvent) => {
+              event.preventDefault();
+              const draggedId = event.dataTransfer?.getData("text/polyth-widget") ?? "";
+              const targetIndex = layout.slotPlacements[slot]?.indexOf(instanceId) ?? -1;
+              if (!draggedId || targetIndex < 0) return;
+              updateWidgetLayout((current) => moveWidgetToSlot(current, draggedId, slot, targetIndex));
+            },
+          } : {}),
         },
         widget.render({
           ...hostContext,

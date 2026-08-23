@@ -636,6 +636,10 @@ export function ProjectsPage() {
     const updated = await api.patchProject(projectId, { defaults: { model: model ?? null } });
     applyProjectUpsert(updated);
   };
+  const saveIcon = async (projectId: string, icon: string) => {
+    const updated = await api.patchProject(projectId, { icon: icon.trim().slice(0, 16) });
+    applyProjectUpsert(updated);
+  };
   return (
     <>
       <PageHead title="Projects" blurb="Project-specific model and canvas setup. Removing a project keeps its folder on disk." />
@@ -651,6 +655,21 @@ export function ProjectsPage() {
               onClick={() => { if (window.confirm(`Remove project "${p.name || p.path}" from Polyth?`)) void removeProject(p.id); }}
             >Remove</button>
           </header>
+          <div className="project-settings-options">
+            <div>
+              <strong>Project icon</strong>
+              <span>Use an emoji or short symbol in the Sessions sidebar.</span>
+            </div>
+            <input
+              className="project-icon-input"
+              defaultValue={p.icon ?? ""}
+              maxLength={16}
+              aria-label={`Custom icon for ${p.name || p.path}`}
+              placeholder="📁"
+              onBlur={(event) => void saveIcon(p.id, event.target.value)}
+              onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); }}
+            />
+          </div>
           <div className="project-settings-options">
             <div>
               <strong>Default model</strong>

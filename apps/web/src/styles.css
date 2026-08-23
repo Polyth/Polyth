@@ -7912,3 +7912,118 @@ body[data-quick-actions="false"] [data-widget-id="core.quick-actions"] { display
   .focus-conversation .msg .msg-actions-entry,
   .focus-conversation .msg .msg-actions-popup { display: none; }
 }
+
+/* Annotated desktop polish: compact project/session chrome and response tools. */
+.sidebar-head { min-height: 38px; padding-top: 8px; }
+.sidebar-actions { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 40px; }
+.sidebar-sort { position: relative; width: 40px; padding: 0; border: 0; background: transparent; }
+.sidebar-sort > button {
+  width: 40px; height: 40px; display: grid; place-items: center; padding: 0;
+  border: 1px solid var(--chat-border); border-radius: 9px;
+  background: var(--chat-raised); color: var(--text-dim);
+}
+.sidebar-sort-menu {
+  position: absolute; z-index: 80; top: calc(100% + 5px); right: 0; min-width: 170px;
+  display: flex; flex-direction: column; padding: 5px;
+  border: 1px solid var(--border); border-radius: 10px;
+  background: var(--elevated); box-shadow: var(--shadow-lg);
+}
+.sidebar-sort-menu button {
+  min-height: 34px; padding: 6px 9px; border: 0; border-radius: 7px;
+  background: transparent; color: var(--text-dim); text-align: left;
+}
+.sidebar-sort-menu button:hover { background: var(--raised); color: var(--text); }
+.project-card,
+.project-card.active,
+.project-card-shell,
+.project-card-shell:has(.project-card.active) { box-shadow: none !important; }
+.project-card-shell { grid-template-columns: minmax(0, 1fr) auto; }
+.project-card-shell .project-card { grid-column: 1; }
+.project-glyph > span { font-size: 16px; line-height: 1; }
+.session-btn { gap: 4px; padding-left: 8px; }
+.session-worktree-head { display: flex; align-items: center; min-height: 34px; }
+.session-worktree-head .session-worktree-toggle { width: auto; min-width: 0; flex: 1; overflow: hidden; }
+.session-worktree-empty-actions {
+  position: relative; z-index: 1; display: flex; gap: 2px; flex: none; opacity: 0; pointer-events: none;
+  transition: opacity 120ms ease;
+}
+.session-worktree-group:hover .session-worktree-empty-actions,
+.session-worktree-head:focus-within .session-worktree-empty-actions { opacity: 1; pointer-events: auto; }
+.session-worktree-empty-actions button {
+  width: 28px; height: 28px; display: grid; place-items: center; padding: 0;
+  border: 0; border-radius: 8px; background: transparent; color: var(--muted);
+}
+.session-worktree-empty-actions button:hover { color: var(--text); background: var(--raised); }
+.session-worktree-empty-actions button.danger:hover { color: var(--red); }
+.session-worktree-empty-actions svg { width: 13px; height: 13px; }
+.worktree-remove-options { display: grid; gap: 10px; padding: 18px 20px; }
+.worktree-remove-options label { display: flex; align-items: center; gap: 9px; font-size: 13px; }
+.side-foot { grid-template-columns: repeat(3, 42px); justify-content: space-between; box-shadow: none; }
+
+.header-chat { gap: 4px; }
+.header-chat .header-spacer { flex: 0 0 4px; }
+.header-chat .view-switcher { flex: 0 1 auto; }
+
+.provider-logo {
+  display: grid; place-items: center; flex: none; overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--accent) 32%, var(--border-soft));
+  background: color-mix(in srgb, var(--accent) 12%, var(--elevated));
+  color: var(--text); font-family: var(--sans); font-weight: 780; letter-spacing: -.04em;
+}
+.provider-anthropic, .provider-claude { background: #d97757; color: #fff; }
+.provider-openai { background: #101820; color: #fff; }
+.provider-google, .provider-gemini { background: #eaf1ff; color: #315acb; }
+.provider-github, .provider-copilot { background: #24292f; color: #fff; }
+.agent-reply-header {
+  width: 100%; min-height: 30px; align-items: center; gap: 6px; margin-bottom: 6px;
+  color: var(--muted); font-size: 10px; white-space: nowrap;
+}
+.agent-reply-mark { width: 24px; height: 24px; border-radius: 7px; font-size: 8px; box-shadow: none; }
+.agent-reply-model {
+  min-width: 0; max-width: 220px; overflow: hidden; color: var(--text-dim);
+  font-size: 11.5px; font-weight: 680; text-overflow: ellipsis;
+}
+.agent-reply-duration::before,
+.agent-reply-header > time::before { content: "·"; margin-right: 6px; color: var(--faint); }
+.agent-reply-actions {
+  display: inline-flex; align-items: center; gap: 2px; margin-left: auto;
+  opacity: .7; transition: opacity 120ms ease;
+}
+.agent-reply-header:hover .agent-reply-actions,
+.agent-reply-header:focus-within .agent-reply-actions { opacity: 1; }
+.agent-reply-actions button,
+.assistant-gallery-shortcut {
+  width: 28px; height: 28px; display: grid; place-items: center; padding: 0;
+  border: 1px solid transparent; border-radius: 8px; background: transparent;
+  color: var(--muted);
+}
+.agent-reply-actions button:hover,
+.agent-reply-actions button:focus-visible,
+.agent-reply-actions button.active { color: var(--accent); border-color: var(--border-soft); background: var(--raised); }
+.agent-reply-actions svg { width: 15px; height: 15px; shape-rendering: geometricPrecision; }
+.assistant-gallery-shortcut { width: auto; gap: 6px; font-size: 10.5px; }
+
+.composer-actions { gap: 4px; }
+.composer-add-files {
+  width: 30px; height: 30px; display: grid; place-items: center; padding: 0;
+  border-radius: 9px; color: var(--accent);
+}
+.composer-add-files svg { width: 15px; height: 15px; }
+.composer-provider-mark { font-size: 8px; box-shadow: none; }
+
+.widget-inline-config { margin-bottom: 14px; }
+.widget-order-list { display: flex; flex-wrap: wrap; gap: 7px; padding: 2px 0; }
+.widget-order-chip {
+  min-height: 34px; display: inline-flex; align-items: center; gap: 6px; padding: 5px 9px;
+  border: 1px solid var(--border-soft); border-radius: 9px; background: var(--elevated);
+  color: var(--text-dim); font-size: 12px; cursor: grab;
+}
+.widget-order-chip.hidden { opacity: .55; cursor: default; }
+.widget-drag-handle { color: var(--faint); letter-spacing: -3px; }
+.widget-place-chip[draggable="true"] { cursor: grab; }
+.project-icon-input { width: 74px; text-align: center; font-size: 18px; }
+
+@media (max-width: 820px) {
+  .side-foot { grid-template-columns: 42px minmax(0, 1fr) 42px 42px; }
+  .agent-reply-actions { opacity: 1; }
+}

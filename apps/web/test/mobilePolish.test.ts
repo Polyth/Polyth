@@ -55,7 +55,8 @@ test("fresh mobile sessions expose project and branch targets", () => {
   assert.match(surface, /aria-label="Branch for new session"/);
   assert.match(surface, /target: \{ kind: "branch", branch: candidate\.name \}/);
   assert.match(composer, /newSessionTarget\.kind === "branch"/);
-  assert.match(composer, /Modalities: \{modalities\}/);
+  assert.doesNotMatch(composer, /Modalities:/);
+  assert.match(composer, /aria-label="Add files"/);
   assert.match(actions, /composer-auto-approve/);
   assert.match(actions, /composer-goals/);
   assert.match(header, /displaySessionTitle\(session\.title, session\.id, firstUserText\)/);

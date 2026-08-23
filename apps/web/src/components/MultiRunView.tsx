@@ -6,6 +6,7 @@ import { fmtCost, fmtTokens, modelBadge } from "../format.ts";
 import { renderMarkdown } from "../markdown.tsx";
 import EmptyState from "./EmptyState.tsx";
 import { modelDisplayName, modelSupportsTextWorkflow } from "../composer/discovery.ts";
+import { consumeMultiRunPrompt } from "../multirunSeed.ts";
 
 function modelRefFromValue(value: string): ModelRef | undefined {
   if (!value) return undefined;
@@ -98,6 +99,8 @@ export default function MultiRunView() {
 
   useEffect(() => {
     setLive(null);
+    const seeded = consumeMultiRunPrompt();
+    if (seeded) setText(seeded);
   }, [sessionId]);
 
   const q = modelFilter.toLowerCase();
