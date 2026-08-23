@@ -7423,6 +7423,7 @@ html.light .session-bottom-nav { background: rgba(255, 255, 255, .9); }
   font-size: 10px;
   font-weight: 720;
   line-height: 1;
+  text-transform: capitalize;
 }
 .composer-agent-badge .picker-chip { max-width: 96px; }
 .composer-agent-badge .chip-k,
@@ -7506,7 +7507,9 @@ html.light .session-bottom-nav { background: rgba(255, 255, 255, .9); }
 .mobile-control-switch.on { background: var(--green); }
 .mobile-control-switch.on i { transform: translateX(13px); }
 
-@media (max-width: 600px) {
+/* Phone boundary only — the shell contract (responsiveShell.ts) is 820/480;
+   tablets keep the compact header, statusbar, and session bottom nav. */
+@media (max-width: 480px) {
   html, body, #root { min-height: 100%; min-height: 100dvh; }
   .app.mode-chat.view-session { min-height: 100dvh; background: var(--bg); }
   .mobile-chat-header {

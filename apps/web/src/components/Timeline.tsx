@@ -1001,6 +1001,17 @@ export default function Timeline({ model }: { model: RenderModel }) {
     [visibleMessages],
   );
   const showNav = prefs.promptNavigator === "on" || (prefs.promptNavigator === "auto" && prompts.length >= 3);
+  // Regenerate resends the user prompt that produced each answer. One forward
+  // pass — never a reverse scan per assistant row per streaming render.
+  const regenerateSources = useMemo(() => {
+    const bySeq = new Map<number, string>();
+    let lastUserText: string | undefined;
+    for (const message of visibleMessages) {
+      if (message.kind === "user") lastUserText = message.text;
+      else if (message.kind === "assistant" && lastUserText !== undefined) bySeq.set(message.eventSeq, lastUserText);
+    }
+    return bySeq;
+  }, [visibleMessages]);
   const turn = model.turn;
   const turnBroken = turn && (turn.status === "failed" || turn.status === "aborted");
   const lastUser = [...model.messages].reverse().find((m) => m.kind === "user");
@@ -1218,10 +1229,7 @@ export default function Timeline({ model }: { model: RenderModel }) {
                 key={r.id}
                 m={r}
                 plan={r.kind === "assistant" && r.id === latestAssistantId && model.tasks ? model.tasks : undefined}
-                regeneratePrompt={r.kind === "assistant"
-                  ? [...visibleMessages].reverse().find((message): message is UserMsg =>
-                      message.kind === "user" && message.eventSeq < r.eventSeq)?.text
-                  : undefined}
+                regeneratePrompt={r.kind === "assistant" ? regenerateSources.get(r.eventSeq) : undefined}
                 announce={announce}
                 onRevert={revert}
                 onFork={fork}

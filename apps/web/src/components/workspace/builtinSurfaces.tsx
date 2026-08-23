@@ -104,7 +104,7 @@ function SessionHero() {
     <div className="stage">
       <div className="hero">
         <div className="hero-mark">p</div>
-        <h2>What are we working on in <span className="polyth-gradient">polyth</span>?</h2>
+        <h2>What are we working on in <span className="polyth-gradient">{name}</span>?</h2>
         <div className="new-session-targets" aria-label="New session location">
           <label className="new-session-select">
             <span>Project</span>

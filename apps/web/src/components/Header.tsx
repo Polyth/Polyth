@@ -565,7 +565,9 @@ export default function Header() {
     setWorkspaceMode(next);
   };
 
-  if (compact && chatSurface) {
+  // The mock's phone header replaces the compact header only at phone widths;
+  // tablets (481–820px) keep the compact header with metrics and overflow.
+  if (mode === "phone" && chatSurface) {
     return (
       <header className="header header-compact header-chat mobile-chat-header">
         <DrawerTrigger />

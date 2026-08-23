@@ -6,8 +6,8 @@ import { loadDraft, saveDraft, type AutocompleteItem } from "../utils.ts";
 import SlotHost from "./slots/SlotHost.ts";
 import { dragKind, dropIntoSession } from "../dnd.ts";
 import {
-  attachGithubLink, attachUpload, parseGithubUrl, removeAttachment, takeAttachments,
-  tryAttachGithubUrl, usePendingAttachments, type GithubAttachResult,
+  addAttachment, attachGithubLink, attachUpload, parseGithubUrl, removeAttachment,
+  takeAttachments, tryAttachGithubUrl, usePendingAttachments, type GithubAttachResult,
 } from "../attachments.ts";
 import AttachmentPills from "./AttachmentPills.tsx";
 import { COMPOSER_INSERT, COMPOSER_REPLACE, drainInserts } from "../composerInsert.ts";
@@ -473,7 +473,20 @@ export default function Composer({
         await deliver(created);
         setNewSessionAutoApprove(false);
       })()
-        .catch((error) => setUiError(friendlyError("Couldn’t create the session", error)))
+        .catch((error) => {
+          setUiError(friendlyError("Couldn’t create the session", error));
+          // The draft was cleared optimistically below; a failed worktree or
+          // session creation must never lose the typed prompt or its pills.
+          // Restore only while still on the fresh-session surface — never into
+          // another session's draft.
+          if (sessionIdRef.current === null) {
+            if (!(inputRef.current?.getText() ?? "").trim()) {
+              setText(t);
+              inputRef.current?.replaceText(t);
+            }
+            for (const attachment of atts) addAttachment(null, attachment);
+          }
+        })
         .finally(() => setCreatingSession(false));
     }
     setText("");
