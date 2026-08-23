@@ -7464,14 +7464,6 @@ html.light .session-bottom-nav { background: rgba(255, 255, 255, .9); }
   font-size: 9px;
   line-height: 1.25;
 }
-.msg.assistant .msg-actions { opacity: 1; pointer-events: auto; transform: none; }
-.msg.assistant .msg-actions-entry {
-  display: inline-flex;
-  min-width: 28px;
-  min-height: 28px;
-  border: 1px solid transparent;
-  background: transparent;
-}
 .msg.assistant .msg-actions > .placed-mini-widget { display: contents; }
 .msg-bookmark-action[aria-pressed="true"] { color: var(--accent); background: var(--accent-wash); }
 
@@ -7715,6 +7707,16 @@ html.light .session-bottom-nav { background: rgba(255, 255, 255, .9); }
   .msg.assistant .msg-actions {
     display: flex;
     gap: 0;
+  }
+  .focus-conversation .msg.assistant .msg-actions {
+    opacity: 1;
+    pointer-events: auto;
+    transform: none;
+  }
+  .msg.assistant .msg-actions-entry {
+    display: inline-flex;
+    border: 1px solid transparent;
+    background: transparent;
   }
   .msg.assistant .msg-action-btn,
   .msg.assistant .msg-actions-entry {
