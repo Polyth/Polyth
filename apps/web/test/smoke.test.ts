@@ -385,6 +385,8 @@ test("parseUiSettings defaults invalid values and sanitizes MCP servers", () => 
     notifySound: "yes",
     confirmSessionArchive: true,
     autoScroll: false,
+    showMessageActions: false,
+    messageCopyFormat: "json",
     mcpServers: [null, { name: 1, url: "bad" }, ...servers],
   }));
 
@@ -398,6 +400,8 @@ test("parseUiSettings defaults invalid values and sanitizes MCP servers", () => 
       notifySound: parsed.notifySound,
       confirmSessionArchive: parsed.confirmSessionArchive,
       autoScroll: parsed.autoScroll,
+      showMessageActions: parsed.showMessageActions,
+      messageCopyFormat: parsed.messageCopyFormat,
     },
     {
       density: "compact",
@@ -408,10 +412,13 @@ test("parseUiSettings defaults invalid values and sanitizes MCP servers", () => 
       notifySound: false,
       confirmSessionArchive: true,
       autoScroll: false,
+      showMessageActions: false,
+      messageCopyFormat: "json",
     },
   );
   assert.equal(parsed.mcpServers.length, 32);
   assert.deepEqual(parsed.mcpServers[0], servers[0]);
+  assert.equal(parseUiSettings(JSON.stringify({ messageCopyFormat: "xml" })).messageCopyFormat, "markdown");
 });
 
 test("setUiSettings persists and applies visual data attributes", () => {

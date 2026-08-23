@@ -351,6 +351,16 @@ export function ChatPage() {
       <Row label="Thinking blocks" hint="Collapse merged reasoning into an expandable block." itemId="chat.thinking">
         <Toggle on={ui.collapsibleThinkingBlocks} onChange={(v) => setUiSettings({ collapsibleThinkingBlocks: v })} label="Collapsible thinking" />
       </Row>
+      <Row label="Message actions" hint="Show lightweight Copy, Revert, and Fork controls when a message is hovered or focused." itemId="chat.messageActions">
+        <Toggle on={ui.showMessageActions} onChange={(showMessageActions) => setUiSettings({ showMessageActions })} label="Message actions" />
+      </Row>
+      <Row label="Copy format" hint="Choose the payload used by the single Copy action on user and assistant messages." itemId="chat.copyFormat">
+        <Seg
+          value={ui.messageCopyFormat}
+          options={[["markdown", "Markdown"], ["json", "JSON"]]}
+          onChange={(messageCopyFormat) => setUiSettings({ messageCopyFormat })}
+        />
+      </Row>
       <Row label="Send on Enter" hint="When off, Enter inserts a newline and Mod+Enter sends. / for commands, # for snippets, @ to attach files." itemId="chat.sendOnEnter">
         <Toggle on={settings.sendOnEnter} onChange={(sendOnEnter) => updateSettings({ sendOnEnter })} label="Send on Enter" />
       </Row>

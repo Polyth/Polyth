@@ -122,22 +122,27 @@ function messageActionEntries(
     onFork?: (message: UserMsg) => void;
     revert?: ActionAvailability;
     fork?: ActionAvailability;
+    copyFormat: "markdown" | "json";
   },
 ): MessageActionEntry[] {
   const role = m.kind;
-  const doCopy = (format: "markdown" | "json") => {
-    void copyText(format === "markdown" ? copyMarkdown(m) : copyJson(m)).then((ok) => {
-      opts.announce(copyAnnouncement(ok ? format : "failed"));
+  const doCopy = () => {
+    void copyText(opts.copyFormat === "markdown" ? copyMarkdown(m) : copyJson(m)).then((ok) => {
+      opts.announce(copyAnnouncement(ok ? opts.copyFormat : "failed"));
     });
   };
   const entries: MessageActionEntry[] = [
-    { key: "md", label: "MD", name: copyActionName(role, "markdown"), run: () => doCopy("markdown") },
-    { key: "json", label: "JSON", name: copyActionName(role, "json"), run: () => doCopy("json") },
+    {
+      key: "copy",
+      label: `Copy as ${opts.copyFormat === "markdown" ? "Markdown" : "JSON"}`,
+      name: copyActionName(role, opts.copyFormat),
+      run: doCopy,
+    },
   ];
   if (m.kind === "user" && opts.onRevert) {
     entries.push({
       key: "revert",
-      label: "Revert and edit",
+      label: "Revert & edit",
       name: revertActionName(m.time),
       run: () => opts.onRevert?.(m),
       ...(opts.revert && !opts.revert.enabled ? { disabledReason: opts.revert.reason } : {}),
@@ -147,7 +152,7 @@ function messageActionEntries(
   if (m.kind === "user" && opts.onFork) {
     entries.push({
       key: "fork",
-      label: "Fork and edit",
+      label: "Fork & edit",
       name: forkActionName(m.time),
       run: () => opts.onFork?.(m),
       ...(opts.fork && !opts.fork.enabled ? { disabledReason: opts.fork.reason } : {}),
@@ -157,18 +162,17 @@ function messageActionEntries(
 }
 
 function ActionButton({ entry, className }: { entry: MessageActionEntry; className: string }) {
-  const glyph = entry.key === "md"
-    ? <Icon.markdown />
-    : entry.key === "json"
-      ? <Icon.json />
-      : entry.key === "fork"
-        ? <Icon.fork />
-        : <Icon.rewind />;
+  const glyph = entry.key === "copy"
+    ? <Icon.copy />
+    : entry.key === "fork"
+      ? <Icon.fork />
+      : <Icon.rewind />;
   return (
     <button
       className={className}
       aria-label={entry.name}
       title={entry.disabledReason ?? entry.name}
+      data-tooltip={entry.disabledReason ?? entry.label}
       disabled={entry.disabledReason !== undefined}
       onClick={entry.run}
       {...(entry.dataAttr ?? {})}
@@ -197,10 +201,18 @@ function MessageMeta({ m, announce, onRevert, onFork, revert, fork }: {
   revert?: ActionAvailability;
   fork?: ActionAvailability;
 }) {
+  const prefs = useUiSettings();
   const sessionId = useStore((s) => s.activeSessionId);
   const t = m.kind === "user" ? m.time : assistantTime(m);
   const name = m.kind === "user" ? sentName(t) : completedName(t);
-  const entries = messageActionEntries(m, { announce, onRevert, onFork, revert, fork });
+  const entries = messageActionEntries(m, {
+    announce,
+    onRevert,
+    onFork,
+    revert,
+    fork,
+    copyFormat: prefs.messageCopyFormat,
+  });
   const [menuOpen, setMenuOpen] = useState(false);
   const openerRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -208,6 +220,9 @@ function MessageMeta({ m, announce, onRevert, onFork, revert, fork }: {
     setMenuOpen(false);
     if (refocus) openerRef.current?.focus();
   }, []);
+  useEffect(() => {
+    if (!prefs.showMessageActions && menuOpen) setMenuOpen(false);
+  }, [prefs.showMessageActions, menuOpen]);
   useEffect(() => {
     if (!menuOpen) return;
     const onKey = (e: globalThis.KeyboardEvent) => {
@@ -263,26 +278,31 @@ function MessageMeta({ m, announce, onRevert, onFork, revert, fork }: {
     <>
       <div className="msg-meta">
         <time className="msg-time" dateTime={timeIso(t)} aria-label={name}>{timeShort(t)}</time>
-        <div className="msg-actions">
-          {entries.map((entry) => <ActionButton key={entry.key} entry={entry} className="small-btn" />)}
-        </div>
-        <button
-          ref={openerRef}
-          className="msg-actions-entry"
-          aria-label={actionsMenuName(m)}
-          aria-haspopup="menu"
-          aria-expanded={menuOpen}
-          data-actions-seq={m.eventSeq}
-          onClick={() => setMenuOpen((v) => !v)}
-        >
-          ⋯
-        </button>
-        <SlotHost
-          slot="session.message.actions"
-          context={{ sessionId, kind: m.kind, messageId: m.id, eventSeq: m.eventSeq }}
-        />
+        {prefs.showMessageActions && (
+          <>
+            <div className="msg-actions">
+              {entries.map((entry) => <ActionButton key={entry.key} entry={entry} className="msg-action-btn" />)}
+            </div>
+            <button
+              ref={openerRef}
+              className="msg-actions-entry"
+              aria-label={actionsMenuName(m)}
+              title={actionsMenuName(m)}
+              aria-haspopup="menu"
+              aria-expanded={menuOpen}
+              data-actions-seq={m.eventSeq}
+              onClick={() => setMenuOpen((v) => !v)}
+            >
+              <Icon.more />
+            </button>
+            <SlotHost
+              slot="session.message.actions"
+              context={{ sessionId, kind: m.kind, messageId: m.id, eventSeq: m.eventSeq }}
+            />
+          </>
+        )}
       </div>
-      {menuOpen && (
+      {prefs.showMessageActions && menuOpen && (
         <div ref={menuRef} className="msg-actions-popup" role="menu" aria-label={actionsMenuName(m)}>
           {entries.map((entry) => (
             <button
@@ -295,14 +315,13 @@ function MessageMeta({ m, announce, onRevert, onFork, revert, fork }: {
               onClick={() => { entry.run(); closeMenu(true); }}
             >
               <span aria-hidden="true">
-                {entry.key === "md"
-                  ? <Icon.markdown />
-                  : entry.key === "json"
-                    ? <Icon.json />
-                    : entry.key === "fork"
-                      ? <Icon.fork />
-                      : <Icon.rewind />}
+                {entry.key === "copy"
+                  ? <Icon.copy />
+                  : entry.key === "fork"
+                    ? <Icon.fork />
+                    : <Icon.rewind />}
               </span>
+              <span className="msg-actions-item-label">{entry.label}</span>
             </button>
           ))}
         </div>

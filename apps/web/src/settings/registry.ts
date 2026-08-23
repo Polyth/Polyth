@@ -72,6 +72,8 @@ const BUILTIN_ITEMS: SettingsSearchItem[] = [
   { id: "chat.width", pageId: "chat", label: "Conversation width", keywords: ["wide", "layout"], focusTarget: "chat.width" },
   { id: "chat.followUp", pageId: "chat", label: "While the agent is working", description: "Steer, queue, or interrupt", keywords: ["delivery", "steer", "queue", "interrupt"], focusTarget: "chat.followUp" },
   { id: "chat.thinking", pageId: "chat", label: "Thinking blocks", keywords: ["reasoning", "collapse"], focusTarget: "chat.thinking" },
+  { id: "chat.messageActions", pageId: "chat", label: "Message actions", description: "Show or hide Copy, Revert, and Fork controls", keywords: ["hover", "quick actions", "buttons"], focusTarget: "chat.messageActions" },
+  { id: "chat.copyFormat", pageId: "chat", label: "Copy format", description: "Copy messages as Markdown or JSON", keywords: ["clipboard", "markdown", "json"], focusTarget: "chat.copyFormat" },
   { id: "notifications.desktop", pageId: "notifications", label: "Desktop notification", keywords: ["alert", "browser"], focusTarget: "notifications.desktop" },
   { id: "notifications.sound", pageId: "notifications", label: "Completion sound", keywords: ["beep", "audio"], focusTarget: "notifications.sound" },
   { id: "behavior.confirmArchive", pageId: "behavior", label: "Confirm before archiving sessions", keywords: ["archive", "safety"], focusTarget: "behavior.confirmArchive" },
