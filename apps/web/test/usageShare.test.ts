@@ -68,10 +68,10 @@ test("provider usage distribution clamps invalid counters before drawing shares"
   ]);
 });
 
-test("Usage settings renders the provider distribution as an SVG donut", async () => {
-  const source = await readFile(new URL("../src/usage/projectUi.tsx", import.meta.url), "utf8");
-  const settings = await readFile(new URL("../src/components/settings/pages.tsx", import.meta.url), "utf8");
-  assert.match(source, /function ProviderUsageDonut/);
-  assert.match(source, /className="provider-share-donut"[\s\S]*?<svg/);
-  assert.match(settings, /<ProviderUsageDonut sessions=\{mine\} \/>/);
+test("Usage settings renders the dashboard provider spend as an SVG donut", async () => {
+  const source = await readFile(new URL("../src/usage/UsageDashboard.tsx", import.meta.url), "utf8");
+  const registration = await readFile(new URL("../src/packages/usage.ts", import.meta.url), "utf8");
+  assert.match(source, /function ProviderSpendDonut/);
+  assert.match(source, /className="usage-spend-donut"[\s\S]*?<svg/);
+  assert.match(registration, /component: UsageDashboard/);
 });

@@ -3,11 +3,9 @@
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { activateProject, applyProjectUpsert, openWorkspacePane, setAgents, setOverlay, updateSettings, useStore } from "../../store.ts";
 import { setUiSettings, useUiSettings } from "../../uiPrefs.ts";
-import { setProviderHidden, useUsagePrefs } from "../../usagePrefs.ts";
 import { requestNotifyPermission } from "../../notify.ts";
 import { disablePush, enablePush, pushSubscription, pushUnsupportedReason } from "../../push.ts";
 import { api, type GitStatus } from "../../api.ts";
-import { fmtCost, fmtTokens } from "../../format.ts";
 import { EmptyState, PageHead, Row, Seg, Toggle } from "./parts.tsx";
 import { refreshProfiles, useProfiles } from "../../profiles.ts";
 import { removeProject } from "../../init.ts";
@@ -26,17 +24,6 @@ import ModelPicker from "../ModelPicker.tsx";
 import Dialog from "../a11y/Dialog.tsx";
 import { modelSupportsTextWorkflow } from "../../composer/discovery.ts";
 import { removeGitPersona, saveGitPersona, useGitPersonas, type GitPersona } from "../../gitPersonas.ts";
-import {
-  ProviderUsageDonut,
-  projectUsageStats,
-  sessionTokens,
-  topProjectSessions,
-} from "../../usage/projectUi.tsx";
-import {
-  QuotaCard,
-  QuotaOverviewGrid,
-  useQuotaSnapshots,
-} from "../../usage/quotaUi.tsx";
 
 function ThemeSwatches({ theme }: { theme: ThemeSpec }) {
   return (
@@ -602,96 +589,6 @@ export function BehaviorPage() {
       <Row label="Slash commands & snippets" hint="Manage reusable prompts under Commands.">
         <span className="muted mono">/review · #alias</span>
       </Row>
-    </>
-  );
-}
-
-// ---- WP12: provider quota cards -------------------------------------------
-
-function QuotaSection() {
-  const { snapshots: snaps, refresh } = useQuotaSnapshots();
-  const prefs = useUsagePrefs();
-  const visible = snaps.filter((s) => !prefs.hiddenProviders.includes(s.providerId));
-  return (
-    <>
-      <div className="stat-label">Provider usage overview</div>
-      {snaps.length === 0 && (
-        <EmptyState title="No quota providers discovered" body="Providers appear automatically when OpenCode or Claude Code credentials exist. Credentials stay on the server and never reach the browser." />
-      )}
-      {visible.length > 0 && (
-        <QuotaOverviewGrid snapshots={visible} />
-      )}
-      {snaps.length > 0 && (
-        <div className="provider-filter" aria-label="Filter quota providers">
-          <div className="provider-filter-head">
-            <span>Shown providers</span>
-            <button type="button" onClick={() => snaps.forEach((s) => setProviderHidden(s.providerId, false))}>Show all</button>
-            <button type="button" onClick={() => snaps.forEach((s) => setProviderHidden(s.providerId, true))}>Hide all</button>
-          </div>
-          <div className="provider-filter-pills">
-            {snaps.map((s) => {
-              const shown = !prefs.hiddenProviders.includes(s.providerId);
-              return (
-                <button
-                  key={s.providerId}
-                  type="button"
-                  className={shown ? "active" : ""}
-                  aria-pressed={shown}
-                  onClick={() => setProviderHidden(s.providerId, shown)}
-                >
-                  <i aria-hidden="true" />
-                  <span>{s.providerId}</span>
-                  <b aria-hidden="true">{shown ? "✓" : "+"}</b>
-                </button>
-              );
-            })}
-          </div>
-        </div>
-      )}
-      {snaps.length > 0 && visible.length === 0 && (
-        <div className="muted" style={{ fontSize: 12 }}>All providers hidden — select one to show its card.</div>
-      )}
-      {visible.length > 0 && (
-        <>
-        <div className="stat-label">Provider details</div>
-        <div className="quota-grid">
-          {visible.map((s) => <QuotaCard key={s.providerId} snap={s} onRefresh={refresh} />)}
-        </div>
-        </>
-      )}
-    </>
-  );
-}
-
-export function UsagePage() {
-  const sessions = useStore((s) => s.sessions);
-  const projectId = useStore((s) => s.activeProjectId);
-  const mine = sessions.filter((s) => s.projectId === projectId);
-  const totals = projectUsageStats(mine);
-  const top = topProjectSessions(mine);
-  return (
-    <>
-      <PageHead title="Usage" blurb="Token and cost totals for the active project (from the session log)." />
-      {mine.length === 0 ? (
-        <EmptyState title="No sessions yet" body="Usage appears once sessions run in this project." />
-      ) : (
-        <>
-          <div className="set-usage-grid">
-            <div className="goal-stat-cell"><div className="goal-stat-k">Sessions</div><div className="goal-stat-v">{mine.length}</div></div>
-            <div className="goal-stat-cell"><div className="goal-stat-k">Tokens</div><div className="goal-stat-v mono">{fmtTokens(totals.tokens)}</div></div>
-            <div className="goal-stat-cell"><div className="goal-stat-k">Cost</div><div className="goal-stat-v mono">{totals.cost > 0 ? fmtCost(totals.cost) : "—"}</div></div>
-          </div>
-          <ProviderUsageDonut sessions={mine} />
-          <div className="stat-label">Top sessions</div>
-          {top.map((s) => (
-            <div key={s.id} className="stat-row">
-              <span className="k" style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", maxWidth: "60%" }}>{s.title || s.id}</span>
-              <span className="mono">{fmtTokens(sessionTokens(s))}{s.costTotal ? ` · ${fmtCost(s.costTotal)}` : ""}</span>
-            </div>
-          ))}
-        </>
-      )}
-      <QuotaSection />
     </>
   );
 }
