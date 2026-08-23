@@ -2635,18 +2635,19 @@ body[data-chatwidth="wide"] .bubble, body[data-chatwidth="wide"] .reasoning, bod
 
 /* message actions + prompt navigator (UX-MSG-ACTIONS / UX-TIMELINE-LAYOUT-01) */
 .msg { position: relative; }
-/* The footer is a separate normal-flow row beneath its body. Assistant
-   actions remain available like polyth's answer footer; user actions
-   reveal on hover/focus without moving the transcript. */
+/* The footer is a separate normal-flow row beneath its body. Actions reveal
+   only while the pointer is over the message body or its nearby footer zone,
+   or while keyboard focus is inside the row. */
 .msg-meta { display: flex; gap: 6px; align-items: center; justify-content: flex-end; margin-top: 3px; min-height: 28px; }
 .msg.assistant .msg-meta { justify-content: flex-start; align-self: stretch; }
 .msg-time { font-size: 11px; color: var(--muted); white-space: nowrap; }
 .msg-actions {
-  display: flex; gap: 2px; align-items: center;
+  display: flex; gap: 1px; align-items: center;
   opacity: 0; pointer-events: none; transform: translateY(-2px);
   transition: opacity 140ms ease, transform 140ms ease;
 }
-.msg:hover .msg-actions,
+.msg > .bubble:hover ~ .msg-meta .msg-actions,
+.msg > .msg-meta:hover .msg-actions,
 .msg-meta:focus-within .msg-actions,
 .msg-actions:focus-within { opacity: 1; pointer-events: auto; transform: none; }
 .msg-actions button[disabled] { opacity: 0.55; cursor: not-allowed; }
@@ -4153,13 +4154,13 @@ body[data-density="balanced"] .composer { padding-block: 10px; }
   color: var(--text-dim); font-size: 14px; line-height: 1.72;
 }
 .bubble > :last-child { margin-bottom: 0; }
-.msg-meta { padding: 2px 0 0; }
+.msg-meta { margin-top: 0; padding: 5px 0 0; }
 .msg.user .msg-meta { align-self: flex-end; }
 .msg-meta .msg-time { display: inline-flex; color: var(--faint); font-size: 10.5px; }
 .msg.user .msg-time { opacity: 0; transition: opacity 140ms ease; }
-.msg.user:hover .msg-time, .msg.user .msg-meta:focus-within .msg-time { opacity: 1; }
-.msg.assistant .msg-actions { opacity: .72; pointer-events: auto; transform: none; }
-.msg.assistant:hover .msg-actions, .msg.assistant .msg-meta:focus-within .msg-actions { opacity: 1; }
+.msg.user > .bubble:hover ~ .msg-meta .msg-time,
+.msg.user > .msg-meta:hover .msg-time,
+.msg.user .msg-meta:focus-within .msg-time { opacity: 1; }
 .reasoning {
   width: 100%; margin: 0 0 8px; border: 0; border-radius: 0;
   background: transparent;

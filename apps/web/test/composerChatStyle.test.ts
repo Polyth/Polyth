@@ -26,17 +26,22 @@ test("conversation rows omit role chrome and keep assistant prose unboxed", () =
   assert.match(css, /\.msg\.assistant > \.bubble\s*\{[^}]*border:\s*0;[^}]*background:\s*transparent;/s);
 });
 
-test("message actions use polished icon controls, visible labels, and tooltips", () => {
+test("message actions use one lightweight copy control and local hover zones", () => {
   const timeline = read("../src/components/Timeline.tsx");
   const css = read("../src/styles.css");
 
   assert.match(timeline, /className="msg-action-btn"/);
+  assert.match(timeline, /key: "copy"/);
+  assert.doesNotMatch(timeline, /key: "md"|key: "json"/);
+  assert.match(timeline, /prefs\.showMessageActions &&/);
   assert.match(timeline, /data-tooltip=\{entry\.disabledReason \?\? entry\.label\}/);
   assert.match(timeline, /<Icon\.more \/>/);
   assert.match(timeline, /className="msg-actions-item-label">\{entry\.label\}/);
   assert.match(css, /\.msg-action-btn\s*\{[^}]*border:\s*1px solid transparent;[^}]*background:\s*transparent;/s);
   assert.match(css, /\.msg-action-btn::after\s*\{[^}]*content:\s*attr\(data-tooltip\);/s);
-  assert.match(css, /\.msg\.assistant \.msg-actions\s*\{[^}]*opacity:\s*\.72;[^}]*pointer-events:\s*auto;/s);
+  assert.match(css, /\.msg > \.bubble:hover ~ \.msg-meta \.msg-actions,/);
+  assert.doesNotMatch(css, /\.msg:hover \.msg-actions|\.msg\.assistant \.msg-actions\s*\{[^}]*pointer-events:\s*auto/s);
+  assert.match(css, /\.msg-actions\s*\{[^}]*gap:\s*1px;/s);
   assert.match(css, /@media \(max-width:\s*480px\)\s*\{[^}]*\.msg-actions\s*\{\s*display:\s*none;/s);
 });
 

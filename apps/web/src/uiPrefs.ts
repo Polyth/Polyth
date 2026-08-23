@@ -5,6 +5,7 @@ import { useSyncExternalStore } from "react";
 
 export type FollowUpBehavior = "steer" | "queue" | "interrupt";
 export type NotificationKindPref = "completed" | "failed" | "question" | "permission" | "subagent";
+export type MessageCopyFormat = "markdown" | "json";
 
 export interface UiSettings {
   density: "comfortable" | "balanced" | "compact";
@@ -32,6 +33,10 @@ export interface UiSettings {
   thinkingDefaultExpanded: boolean;
   /** Prompt navigator rail (WP4). */
   promptNavigator: "auto" | "on" | "off";
+  /** Hover/focus controls below user and assistant messages. */
+  showMessageActions: boolean;
+  /** Payload selected by the single message Copy action. */
+  messageCopyFormat: MessageCopyFormat;
   /** JSON tree viewer defaults (WP4). */
   jsonTreeDefault: "tree" | "raw";
   jsonTreeDepth: number;
@@ -67,6 +72,8 @@ export const UI_DEFAULTS: UiSettings = {
   collapsibleThinkingBlocks: true,
   thinkingDefaultExpanded: false,
   promptNavigator: "auto",
+  showMessageActions: true,
+  messageCopyFormat: "markdown",
   jsonTreeDefault: "tree",
   jsonTreeDepth: 2,
   editorAutosave: true,
@@ -106,6 +113,8 @@ export function parseUiSettings(raw: string | null): UiSettings {
       collapsibleThinkingBlocks: data.collapsibleThinkingBlocks !== false,
       thinkingDefaultExpanded: data.thinkingDefaultExpanded === true,
       promptNavigator: data.promptNavigator === "on" || data.promptNavigator === "off" ? data.promptNavigator : "auto",
+      showMessageActions: data.showMessageActions !== false,
+      messageCopyFormat: data.messageCopyFormat === "json" ? "json" : "markdown",
       jsonTreeDefault: data.jsonTreeDefault === "raw" ? "raw" : "tree",
       jsonTreeDepth: Number.isFinite(Number(data.jsonTreeDepth)) && Number(data.jsonTreeDepth) >= 0 ? Math.min(8, Math.round(Number(data.jsonTreeDepth))) : 2,
       editorAutosave: data.editorAutosave !== false,

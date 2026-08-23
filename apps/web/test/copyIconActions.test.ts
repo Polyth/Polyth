@@ -12,9 +12,10 @@ test("copy and message actions are icon-only with hover and accessible names", a
   assert.match(copy, /title="Copy to clipboard"/);
   assert.match(copy, /<Icon\.(?:check|copy)/);
 
-  for (const icon of ["markdown", "json", "fork"]) {
+  for (const icon of ["copy", "fork", "rewind"]) {
     assert.match(timeline, new RegExp(`<Icon\\.${icon}`));
   }
+  assert.doesNotMatch(timeline, /<Icon\.(?:markdown|json)/);
   assert.match(timeline, /aria-label=\{entry\.name\}/);
   assert.match(timeline, /title=\{entry\.disabledReason \?\? entry\.name\}/);
   assert.doesNotMatch(timeline, />Copy MD<\/button>|>Copy JSON<\/button>|>Fork and edit<\/button>/);

@@ -417,26 +417,29 @@ test("names, copy announcements, focus retention, reasoning disclosure, stable t
     return {
       revert: scope.querySelector('button[aria-label^="Revert and edit"]')?.getAttribute("aria-label") ?? "",
       fork: scope.querySelector('button[aria-label^="Fork and edit"]')?.getAttribute("aria-label") ?? "",
-      copyMd: scope.querySelector('button[aria-label^="Copy user message as Markdown"]') !== null,
-      copyJson: scope.querySelector('button[aria-label^="Copy user message as JSON"]') !== null,
+      copy: scope.querySelector('button[aria-label^="Copy user message as Markdown"]') !== null,
+      copyCount: scope.querySelectorAll('.msg-actions button[aria-label^="Copy user message"]').length,
       menu: scope.querySelector(".msg-actions-entry")?.getAttribute("aria-label") ?? "",
       time: scope.querySelector("time.msg-time")?.getAttribute("aria-label") ?? "",
     };
   }, TEXTS.u2);
   assert.match(names.revert, /^Revert and edit user message sent .+\d/, `revert name: "${names.revert}"`);
   assert.match(names.fork, /^Fork and edit from user message sent .+\d/, `fork name: "${names.fork}"`);
-  assert.ok(names.copyMd && names.copyJson, "copy actions lack format-specific names");
+  assert.ok(names.copy, "unified copy action lacks its selected format name");
+  assert.equal(names.copyCount, 1, "message renders more than one copy action");
   assert.match(names.menu, /^Actions for user message sent .+\d/, `menu name: "${names.menu}"`);
   assert.match(names.time, /^Sent .+\d/, `time name: "${names.time}"`);
   const assistantNames = await page.evaluate(() => {
     const metas = Array.from(document.querySelectorAll(".msg.assistant .msg-meta"));
     const last = metas[metas.length - 1];
     return {
-      copyMd: last?.querySelector('button[aria-label="Copy assistant answer as Markdown"]') !== null,
+      copy: last?.querySelector('button[aria-label="Copy assistant answer as Markdown"]') !== null,
+      copyCount: last?.querySelectorAll('.msg-actions button[aria-label^="Copy assistant answer"]').length ?? 0,
       time: last?.querySelector("time.msg-time")?.getAttribute("aria-label") ?? "",
     };
   });
-  assert.ok(assistantNames.copyMd, "assistant copy action lacks a target name");
+  assert.ok(assistantNames.copy, "assistant copy action lacks a target name");
+  assert.equal(assistantNames.copyCount, 1, "assistant renders more than one copy action");
   assert.match(assistantNames.time, /^Completed .+\d/, `assistant time name: "${assistantNames.time}"`);
 
   // Copy as Markdown: exact text, one announcement, focus retained.
@@ -583,7 +586,7 @@ test("touch: 44px entries and menu rows, center taps hit the intended control, m
     assert.ok(menu.inScrollport, `${ctx}: menu escapes the visible scrollport`);
     assert.ok(menu.normalFlow, `${ctx}: menu is not normal-flow content`);
     assert.ok(!menu.coversOwnBody, `${ctx}: menu covers the message body it belongs to`);
-    assert.ok(menu.rows.length >= 4, `${ctx}: menu rows missing`);
+    assert.ok(menu.rows.length >= 3, `${ctx}: menu rows missing`);
     for (const row of menu.rows) {
       assert.ok(row.w >= 44 && row.h >= 44, `${ctx}: menu row "${row.name}" is ${row.w}x${row.h}`);
       assert.ok(row.name.length > 0, `${ctx}: menu row without an accessible name`);
