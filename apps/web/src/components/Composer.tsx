@@ -56,7 +56,7 @@ import AgentProfileForm from "./AgentProfileForm.tsx";
 import PendingChangesBar from "./PendingChangesBar.tsx";
 import type { AgentProfile, ModelDescriptor } from "@polyth/contracts";
 import { agentPickerDefaultLabel, modelPickerDefaultLabel } from "../composerDefaults.ts";
-import { modKeyLabel, parseModelRef } from "../settings.ts";
+import { friendlyError, modKeyLabel, parseModelRef } from "../settings.ts";
 import { Icon } from "../icons.tsx";
 import { useWorkspaceMode } from "../widgets/workspaceMode.ts";
 import ModelPicker, { modelContextLabel, modelModalities, modelSupportsThinking } from "./ModelPicker.tsx";

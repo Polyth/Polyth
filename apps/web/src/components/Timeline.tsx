@@ -1219,7 +1219,7 @@ export default function Timeline({ model }: { model: RenderModel }) {
                 m={r}
                 plan={r.kind === "assistant" && r.id === latestAssistantId && model.tasks ? model.tasks : undefined}
                 regeneratePrompt={r.kind === "assistant"
-                  ? [...visibleMessages].reverse().find((message) =>
+                  ? [...visibleMessages].reverse().find((message): message is UserMsg =>
                       message.kind === "user" && message.eventSeq < r.eventSeq)?.text
                   : undefined}
                 announce={announce}
