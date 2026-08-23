@@ -220,7 +220,7 @@ function ContextRing({ gauge }: { gauge: ContextGauge }) {
   return (
     <svg className={`ctx-ring ${gauge.level}`} width="30" height="30" viewBox="0 0 36 36" aria-label={label}>
       <title>{label}</title>
-      <circle cx="18" cy="18" r={r} fill="none" stroke="#343330" strokeWidth="2.6" />
+      <circle cx="18" cy="18" r={r} fill="none" stroke="var(--border)" strokeWidth="2.6" />
       <circle
         cx="18"
         cy="18"

@@ -1,13 +1,13 @@
 // Product-level preferences have their own versioned storage record. Older
 // builds shared `polyth.settings` with UI preferences, so load performs a
 // one-time copy without ever writing the legacy key again.
-import { applyThemeSetting } from "./theme.ts";
+import { applyThemeSetting, type AppearanceMode } from "./theme.ts";
 
 export interface PolythSettings {
-  /** Theme setting (F15): a preset id ("dark", "light", "midnight", …),
-   *  a custom theme id from polyth.customThemes, or "system" to follow the
-   *  OS scheme. Unknown ids resolve to the default dark preset. */
+  /** Color-palette identity: a preset id or custom theme id. */
   theme: string;
+  /** Light/dark rendering is independent from the selected palette. */
+  appearanceMode: AppearanceMode;
   density: "comfortable" | "balanced" | "compact";
   fontSize: number; // px, 12–18; scales the UI, not code blocks
   fontFamily: "sans" | "system" | "serif" | "mono";
@@ -24,7 +24,8 @@ export const SETTINGS_KEY = "polyth.productSettings.v1";
 export const LEGACY_SETTINGS_KEY = "polyth.settings";
 
 export const DEFAULT_SETTINGS: PolythSettings = {
-  theme: "light",
+  theme: "dark",
+  appearanceMode: "system",
   density: "comfortable",
   fontSize: 14,
   fontFamily: "sans",
@@ -52,8 +53,18 @@ function pickString(v: unknown, fallback: string): string {
 export function normalizeSettings(raw: unknown): PolythSettings {
   const r = (raw !== null && typeof raw === "object" ? raw : {}) as Record<string, unknown>;
   const d = DEFAULT_SETTINGS;
+  const oldTheme = pickString(r.theme, d.theme).trim() || d.theme;
+  const legacySystemTheme = oldTheme === "system";
+  const appearanceMode: AppearanceMode = legacySystemTheme
+    ? "system"
+    : r.appearanceMode === "dark" || r.appearanceMode === "light" || r.appearanceMode === "system"
+      ? r.appearanceMode
+      : d.appearanceMode;
   return {
-    theme: pickString(r.theme, d.theme).trim() || d.theme,
+    // Pre-appearance-mode builds stored "system" in the palette field. Keep
+    // following the OS, with Ember as the migrated palette identity.
+    theme: legacySystemTheme ? "dark" : oldTheme,
+    appearanceMode,
     density: r.density === "compact" || r.density === "balanced" ? r.density : "comfortable",
     fontSize: pickNumber(r.fontSize, d.fontSize, 12, 18),
     fontFamily: r.fontFamily === "system" || r.fontFamily === "serif" || r.fontFamily === "mono"
@@ -109,7 +120,7 @@ export function saveSettings(s: PolythSettings): void {
 export function applySettingsToDom(s: PolythSettings): void {
   if (typeof document === "undefined") return;
   const html = document.documentElement;
-  applyThemeSetting(s.theme);
+  applyThemeSetting(s.theme, s.appearanceMode);
   html.dataset.density = s.density;
   html.dataset.font = s.fontFamily;
   html.style.setProperty("--ui-font-size", `${s.fontSize}px`);

@@ -22,12 +22,19 @@ test("legacy mixed settings migrate into independent versioned records", () => {
   const productSettings = product.loadSettings();
   assert.equal(productSettings.productName, "Legacy name");
   assert.equal(productSettings.theme, "midnight");
+  assert.equal(productSettings.appearanceMode, "system");
   assert.equal(productSettings.fontFamily, "sans");
   assert.equal(ui.getUiSettings().chatWidth, "wide");
 
   assert.ok(stored.has(product.SETTINGS_KEY));
   assert.ok(stored.has(ui.UI_SETTINGS_KEY));
   assert.notEqual(product.SETTINGS_KEY, ui.UI_SETTINGS_KEY);
+});
+
+test("legacy system theme migrates to an independent system appearance mode", () => {
+  const migrated = product.normalizeSettings({ theme: "system" });
+  assert.equal(migrated.theme, "dark");
+  assert.equal(migrated.appearanceMode, "system");
 });
 
 test("saving either settings domain preserves the other domain byte-for-byte", () => {

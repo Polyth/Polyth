@@ -50,13 +50,13 @@ export function deriveSessionTitle(title: string, firstUserText?: string): strin
 
 export function providerColor(provider: string): string {
   const p = provider.toLowerCase();
-  if (p.includes("anthropic") || p.includes("claude")) return "#f49b5b";
-  if (p.includes("openai") || p.includes("gpt")) return "#8bcf6b";
-  if (p.includes("google") || p.includes("gemini")) return "#82bff4";
-  if (p.includes("xai") || p.includes("grok")) return "#c4a7ee";
-  if (p.includes("mistral")) return "#82bff4";
-  if (p.includes("meta") || p.includes("llama")) return "#e4bb62";
-  return "#a19e96";
+  if (p.includes("anthropic") || p.includes("claude")) return "var(--accent)";
+  if (p.includes("openai") || p.includes("gpt")) return "var(--green)";
+  if (p.includes("google") || p.includes("gemini")) return "var(--blue)";
+  if (p.includes("xai") || p.includes("grok")) return "var(--purple)";
+  if (p.includes("mistral")) return "var(--blue)";
+  if (p.includes("meta") || p.includes("llama")) return "var(--amber)";
+  return "var(--muted)";
 }
 
 // ---- session title display --------------------------------------------------
@@ -97,7 +97,7 @@ export function ago(ts: number, now = Date.now()): string {
 }
 
 export function modelBadge(model?: { providerID: string; modelID: string } | string): { label: string; color: string } {
-  if (!model) return { label: "default", color: "#a19e96" };
+  if (!model) return { label: "default", color: "var(--muted)" };
   if (typeof model === "string") {
     const slash = model.lastIndexOf("/");
     const prov = slash >= 0 ? model.slice(0, slash) : "";

@@ -825,9 +825,9 @@ test("applyTerminalChunk strips CSI, honours CR/BS, and caps buffer", () => {
 });
 
 test("providerColor maps known vendors; modelBadge splits provider/id", () => {
-  assert.equal(providerColor("anthropic"), "#f49b5b");
+  assert.equal(providerColor("anthropic"), "var(--accent)");
   assert.equal(modelBadge("openai/gpt-4o").label, "gpt-4o");
-  assert.equal(modelBadge({ providerID: "xai", modelID: "grok" }).color, "#c4a7ee");
+  assert.equal(modelBadge({ providerID: "xai", modelID: "grok" }).color, "var(--purple)");
 });
 
 // ---- highlight tokenizer ------------------------------------------------------

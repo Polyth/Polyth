@@ -3,8 +3,8 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import {
-  PRESET_THEMES, TOKEN_KEYS, parseCustomThemes, parseThemeJson, resolveTheme,
-  themeCssVars, validateTheme, type ThemeSpec,
+  PRESET_THEMES, TOKEN_KEYS, adaptThemeAppearance, parseCustomThemes, parseThemeJson,
+  resolveTheme, themeCssVars, validateTheme, type ThemeSpec,
 } from "../src/theme.ts";
 
 const HEX = /^#[0-9a-fA-F]{6}$/;
@@ -27,14 +27,14 @@ const validTheme = (): Record<string, unknown> => ({
   tokens: { ...PRESET_THEMES[0]!.tokens },
 });
 
-test("preset set: twenty-four themes, unique stable ids, both appearances, valid tokens", () => {
-  assert.equal(PRESET_THEMES.length, 24);
+test("preset set: thirty themes, unique stable ids, balanced native appearances, valid tokens", () => {
+  assert.equal(PRESET_THEMES.length, 30);
   assert.equal(new Set(PRESET_THEMES.map((t) => t.id)).size, PRESET_THEMES.length);
   // pre-F15 settings values keep resolving
   assert.ok(PRESET_THEMES.some((t) => t.id === "dark" && t.appearance === "dark"));
   assert.ok(PRESET_THEMES.some((t) => t.id === "light" && t.appearance === "light"));
-  assert.equal(PRESET_THEMES.filter((t) => t.appearance === "dark").length, 12);
-  assert.equal(PRESET_THEMES.filter((t) => t.appearance === "light").length, 12);
+  assert.equal(PRESET_THEMES.filter((t) => t.appearance === "dark").length, 15);
+  assert.equal(PRESET_THEMES.filter((t) => t.appearance === "light").length, 15);
   for (const preset of PRESET_THEMES) {
     for (const key of TOKEN_KEYS) assert.match(preset.tokens[key], HEX, `${preset.id}.${key}`);
   }
@@ -109,14 +109,45 @@ test("parseThemeJson reports the JSON parse reason", () => {
   assert.match(!res.ok ? res.error : "", /^invalid JSON: /);
 });
 
-test("resolveTheme: system follows the OS, ids resolve, unknown falls back", () => {
-  assert.equal(resolveTheme("system", { systemDark: true }).appearance, "dark");
-  assert.equal(resolveTheme("system", { systemDark: false }).appearance, "light");
-  assert.equal(resolveTheme("midnight").id, "midnight");
-  assert.equal(resolveTheme("light").id, "light");
+test("resolveTheme keeps palette identity while mode controls appearance", () => {
+  assert.equal(resolveTheme("midnight", "system", { systemDark: true }).appearance, "dark");
+  assert.equal(resolveTheme("midnight", "system", { systemDark: false }).appearance, "light");
+  assert.equal(resolveTheme("midnight", "light").id, "midnight");
+  assert.equal(resolveTheme("midnight", "light").appearance, "light");
+  assert.equal(resolveTheme("light", "dark").id, "light");
+  assert.equal(resolveTheme("light", "dark").appearance, "dark");
   const custom: ThemeSpec = { ...(PRESET_THEMES[1]!), id: "my-theme", name: "Mine" };
-  assert.equal(resolveTheme("my-theme", { custom: [custom] }).name, "Mine");
-  assert.equal(resolveTheme("deleted-theme").id, "light"); // default fallback
+  assert.equal(resolveTheme("my-theme", "light", { custom: [custom] }).name, "Mine");
+  assert.equal(resolveTheme("deleted-theme", "dark").id, "dark"); // default fallback
+});
+
+test("generated light and dark variants retain accessible text and primary actions", () => {
+  for (const preset of PRESET_THEMES) {
+    for (const appearance of ["dark", "light"] as const) {
+      const theme = adaptThemeAppearance(preset, appearance);
+      assert.equal(theme.id, preset.id);
+      assert.equal(theme.name, preset.name);
+      assert.equal(theme.appearance, appearance);
+      const surfaces = [
+        theme.tokens.bg,
+        theme.tokens.panel,
+        theme.tokens.elevated,
+        theme.tokens.raised,
+        theme.tokens.sunken,
+        theme.tokens.inputBg,
+      ];
+      for (const token of ["muted", "faint"] as const) {
+        for (const surface of surfaces) {
+          assert.ok(
+            contrast(theme.tokens[token], surface) >= 4.5,
+            `${preset.id}/${appearance}.${token} must meet 4.5:1 on ${surface}`,
+          );
+        }
+      }
+      assert.ok(contrast(theme.tokens.accentInk, theme.tokens.accent) >= 4.5);
+      assert.ok(contrast(theme.tokens.accentInk, theme.tokens.accentHi) >= 4.5);
+    }
+  }
 });
 
 test("themeCssVars maps roles, derives washes/rgb, and honors syntax overrides", () => {

@@ -16,25 +16,25 @@ function themeConfig(): Record<string, unknown> {
   const base: Record<string, unknown> = { startOnLoad: false, securityLevel: "strict", fontFamily: "inherit" };
   if (typeof document === "undefined") return { ...base, theme: "dark" };
   const css = getComputedStyle(document.documentElement);
-  const v = (name: string, fallback: string) => css.getPropertyValue(name).trim() || fallback;
+  const v = (name: string) => css.getPropertyValue(name).trim();
   const dark = !document.documentElement.classList.contains("light");
   return {
     ...base,
     theme: "base",
     themeVariables: {
       darkMode: dark,
-      background: v("--panel", dark ? "#191816" : "#f1ede6"),
-      primaryColor: v("--elevated", dark ? "#221f1c" : "#ffffff"),
-      primaryTextColor: v("--text", dark ? "#f0eee8" : "#2a2620"),
-      primaryBorderColor: v("--border", dark ? "#35322c" : "#d5cec1"),
-      secondaryColor: v("--raised", dark ? "#2a2724" : "#f3efe8"),
-      tertiaryColor: v("--sunken", dark ? "#0e0d0c" : "#e9e4da"),
-      lineColor: v("--muted", "#9c9890"),
-      textColor: v("--text", dark ? "#f0eee8" : "#2a2620"),
-      mainBkg: v("--elevated", dark ? "#221f1c" : "#ffffff"),
-      nodeBorder: v("--border", dark ? "#35322c" : "#d5cec1"),
-      clusterBkg: v("--panel", dark ? "#191816" : "#f1ede6"),
-      edgeLabelBackground: v("--panel", dark ? "#191816" : "#f1ede6"),
+      background: v("--panel"),
+      primaryColor: v("--elevated"),
+      primaryTextColor: v("--text"),
+      primaryBorderColor: v("--border"),
+      secondaryColor: v("--raised"),
+      tertiaryColor: v("--sunken"),
+      lineColor: v("--muted"),
+      textColor: v("--text"),
+      mainBkg: v("--elevated"),
+      nodeBorder: v("--border"),
+      clusterBkg: v("--panel"),
+      edgeLabelBackground: v("--panel"),
     },
   };
 }

@@ -1,8 +1,8 @@
 // F15 themes: a JSON token schema (surface/line/ink/brand/signal/syntax roles)
 // resolved to CSS custom properties at one apply point. Bundled presets plus
-// custom themes pasted as JSON (stored in localStorage polyth.customThemes);
-// theme "system" follows prefers-color-scheme live. Pure parts (validation,
-// resolution, CSS-var mapping) are DOM-free and tested.
+// custom themes pasted as JSON (stored in localStorage polyth.customThemes).
+// Palette identity and light/dark appearance are independent settings. Pure
+// parts (validation, adaptation, resolution, CSS-var mapping) are DOM-free.
 
 export interface ThemeTokens {
   /* surfaces */
@@ -27,6 +27,8 @@ export interface ThemeSpec {
   tokens: ThemeTokens;
   syntax?: ThemeSyntax;
 }
+
+export type AppearanceMode = "system" | "dark" | "light";
 
 export const TOKEN_KEYS: ReadonlyArray<keyof ThemeTokens> = [
   "bg", "panel", "elevated", "raised", "sunken", "inputBg",
@@ -192,6 +194,18 @@ export const PRESET_THEMES: ThemeSpec[] = [
     bg: "#17110d", panel: "#201813", elevated: "#2a211a", raised: "#352a21", sunken: "#100b08", inputBg: "#1b140f",
     border: "#493a2e", borderSoft: "#3a2e25", accent: "#e9a66f", accentHi: "#f1b884",
   }),
+  darkPreset("aurora", "Aurora", {
+    bg: "#071615", panel: "#0d201e", elevated: "#142b28", raised: "#1c3733", sunken: "#04100f", inputBg: "#091b19",
+    border: "#2c4b46", borderSoft: "#203c38", accent: "#75dfca", accentHi: "#91ead8",
+  }),
+  darkPreset("obsidian", "Obsidian Gold", {
+    bg: "#0d0d0f", panel: "#151519", elevated: "#1d1d23", raised: "#28272e", sunken: "#08080a", inputBg: "#111114",
+    border: "#3a3942", borderSoft: "#2c2b33", accent: "#eac66d", accentHi: "#f0d487",
+  }),
+  darkPreset("blackberry", "Blackberry", {
+    bg: "#160d18", panel: "#201324", elevated: "#2a1a30", raised: "#35223d", sunken: "#0f0811", inputBg: "#1b0f1e",
+    border: "#4a3152", borderSoft: "#3b2742", accent: "#dba2ed", accentHi: "#e5b6f2",
+  }),
   darkPreset("tokyo", "Tokyo Night", {
     bg: "#10131c", panel: "#171b28", elevated: "#1e2433", raised: "#283044", sunken: "#0a0d14", inputBg: "#131725",
     border: "#39435b", borderSoft: "#2c3448", accent: "#8aadf4", accentHi: "#9bb8fa",
@@ -228,6 +242,18 @@ export const PRESET_THEMES: ThemeSpec[] = [
     bg: "#f4fafb", panel: "#e8f2f4", elevated: "#ffffff", raised: "#eaf4f5", sunken: "#d9e8eb", inputBg: "#ffffff",
     border: "#bdd0d5", borderSoft: "#d3e0e3", accent: "#176675", accentHi: "#257382",
   }),
+  lightPreset("citrus", "Citrus Grove", {
+    bg: "#fbfaef", panel: "#f1f0d9", elevated: "#fffef8", raised: "#f4f3df", sunken: "#e5e4c9", inputBg: "#fffef8",
+    border: "#cfceb0", borderSoft: "#dfdec6", accent: "#526d12", accentHi: "#617d1d",
+  }),
+  lightPreset("terracotta", "Terracotta", {
+    bg: "#fcf7f3", panel: "#f4e9e2", elevated: "#ffffff", raised: "#f7ece6", sunken: "#eadbd2", inputBg: "#ffffff",
+    border: "#d5beb1", borderSoft: "#e5d5cc", accent: "#934225", accentHi: "#a34f30",
+  }),
+  lightPreset("lilac-haze", "Lilac Haze", {
+    bg: "#faf7fc", panel: "#f1eaf5", elevated: "#ffffff", raised: "#f3edf7", sunken: "#e5daeb", inputBg: "#ffffff",
+    border: "#cfc0d7", borderSoft: "#dfd4e5", accent: "#704187", accentHi: "#805095",
+  }),
   lightPreset("paper", "Clean Paper", {
     bg: "#fbfbfa", panel: "#f0f0ed", elevated: "#ffffff", raised: "#f3f3f0", sunken: "#e5e5e0", inputBg: "#ffffff",
     border: "#c9c9c2", borderSoft: "#ddddd7", accent: "#315b89", accentHi: "#3b6796",
@@ -238,7 +264,7 @@ export const PRESET_THEMES: ThemeSpec[] = [
   }),
 ];
 
-export const DEFAULT_THEME: ThemeSpec = PRESET_THEMES.find((theme) => theme.id === "light")!;
+export const DEFAULT_THEME: ThemeSpec = PRESET_THEMES.find((theme) => theme.id === "dark")!;
 
 // ---- validation ---------------------------------------------------------------
 
@@ -314,6 +340,124 @@ function hexToRgb(hex: string): [number, number, number] {
   return [parseInt(h.slice(1, 3), 16), parseInt(h.slice(3, 5), 16), parseInt(h.slice(5, 7), 16)];
 }
 
+function rgbToHsl(hex: string): [number, number, number] {
+  const [r8, g8, b8] = hexToRgb(hex);
+  const [r, g, b] = [r8 / 255, g8 / 255, b8 / 255];
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  const lightness = (max + min) / 2;
+  if (max === min) return [0, 0, lightness];
+  const delta = max - min;
+  const saturation = lightness > 0.5 ? delta / (2 - max - min) : delta / (max + min);
+  const hue = max === r
+    ? ((g - b) / delta + (g < b ? 6 : 0)) / 6
+    : max === g
+      ? ((b - r) / delta + 2) / 6
+      : ((r - g) / delta + 4) / 6;
+  return [hue, saturation, lightness];
+}
+
+function hslToHex(hue: number, saturation: number, lightness: number): string {
+  const hueToRgb = (p: number, q: number, t0: number): number => {
+    let t = t0;
+    if (t < 0) t += 1;
+    if (t > 1) t -= 1;
+    if (t < 1 / 6) return p + (q - p) * 6 * t;
+    if (t < 1 / 2) return q;
+    if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6;
+    return p;
+  };
+  const q = lightness < 0.5
+    ? lightness * (1 + saturation)
+    : lightness + saturation - lightness * saturation;
+  const p = 2 * lightness - q;
+  const channels = saturation === 0
+    ? [lightness, lightness, lightness]
+    : [hueToRgb(p, q, hue + 1 / 3), hueToRgb(p, q, hue), hueToRgb(p, q, hue - 1 / 3)];
+  return `#${channels.map((channel) => Math.round(channel * 255).toString(16).padStart(2, "0")).join("")}`;
+}
+
+function withLightness(source: string, lightness: number, saturationCap = 1): string {
+  const [hue, saturation] = rgbToHsl(source);
+  return hslToHex(hue, Math.min(saturation, saturationCap), lightness);
+}
+
+function relativeLuminance(hex: string): number {
+  const channels = hexToRgb(hex).map((channel) => channel / 255)
+    .map((channel) => channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4);
+  return 0.2126 * channels[0]! + 0.7152 * channels[1]! + 0.0722 * channels[2]!;
+}
+
+function contrastRatio(a: string, b: string): number {
+  const [lighter, darker] = [relativeLuminance(a), relativeLuminance(b)].sort((x, y) => y - x);
+  return (lighter! + 0.05) / (darker! + 0.05);
+}
+
+function readableInk(background: string): string {
+  const darkInk = "#101216";
+  const lightInk = "#ffffff";
+  return contrastRatio(darkInk, background) >= contrastRatio(lightInk, background) ? darkInk : lightInk;
+}
+
+function accessibleColor(source: string, ink: string, start: number, lighten: boolean): string {
+  let lightness = start;
+  let color = withLightness(source, lightness);
+  while (contrastRatio(color, ink) < 4.5 && lightness > 0.02 && lightness < 0.98) {
+    lightness += lighten ? 0.01 : -0.01;
+    color = withLightness(source, lightness);
+  }
+  return color;
+}
+
+/** Convert a palette's native preset to the requested appearance while keeping
+ * its hue identity. Native variants stay byte-for-byte stable; generated
+ * variants use role-specific luminance and re-check primary-action contrast. */
+export function adaptThemeAppearance(spec: ThemeSpec, appearance: "dark" | "light"): ThemeSpec {
+  if (spec.appearance === appearance) return spec;
+  const source = spec.tokens;
+  const dark = appearance === "dark";
+  const accentInk = dark ? "#101216" : "#ffffff";
+  const surface = (key: keyof ThemeTokens, darkL: number, lightL: number) =>
+    withLightness(source[key], dark ? darkL : lightL, 0.22);
+  const ink = (key: keyof ThemeTokens, darkL: number, lightL: number) =>
+    withLightness(source[key], dark ? darkL : lightL, 0.14);
+  const signal = (key: "green" | "amber" | "red" | "blue" | "purple") =>
+    withLightness(source[key], dark ? 0.7 : 0.38);
+  const syntax = spec.syntax
+    ? Object.fromEntries(Object.entries(spec.syntax).map(([key, color]) => [
+        key,
+        withLightness(color, dark ? 0.7 : 0.38),
+      ])) as ThemeSyntax
+    : undefined;
+  return {
+    ...spec,
+    appearance,
+    tokens: {
+      bg: surface("bg", 0.055, 0.97),
+      panel: surface("panel", 0.085, 0.93),
+      elevated: surface("elevated", 0.12, 0.99),
+      raised: surface("raised", 0.16, 0.95),
+      sunken: surface("sunken", 0.035, 0.88),
+      inputBg: surface("inputBg", 0.07, 0.99),
+      border: surface("border", 0.23, 0.76),
+      borderSoft: surface("borderSoft", 0.17, 0.85),
+      text: ink("text", 0.94, 0.13),
+      textDim: ink("textDim", 0.8, 0.24),
+      muted: ink("muted", 0.7, 0.31),
+      faint: ink("faint", 0.66, 0.35),
+      accent: accessibleColor(source.accent, accentInk, dark ? 0.67 : 0.37, dark),
+      accentInk,
+      accentHi: accessibleColor(source.accentHi, accentInk, dark ? 0.73 : 0.41, dark),
+      green: signal("green"),
+      amber: signal("amber"),
+      red: signal("red"),
+      blue: signal("blue"),
+      purple: signal("purple"),
+    },
+    ...(syntax ? { syntax } : {}),
+  };
+}
+
 const rgba = (hex: string, alpha: number): string => {
   const [r, g, b] = hexToRgb(hex);
   return `rgba(${r}, ${g}, ${b}, ${alpha})`;
@@ -346,9 +490,19 @@ export function themeCssVars(spec: ThemeSpec): Record<string, string> {
     "--accent": t.accent, "--accent-ink": t.accentInk, "--accent-hi": t.accentHi,
     "--accent-wash": rgba(t.accent, dark ? 0.13 : 0.12),
     "--accent-line": rgba(t.accent, dark ? 0.32 : 0.4),
+    "--focus-wash": rgba(t.accent, 0.1),
     "--accent-rgb": accentRgb,
     "--green": t.green, "--amber": t.amber, "--amber-rgb": amberRgb,
     "--red": t.red, "--blue": t.blue, "--purple": t.purple,
+    "--red-ink": readableInk(t.red),
+    "--surface-overlay": rgba(t.text, dark ? 0.022 : 0.025),
+    "--surface-overlay-hover": rgba(t.text, dark ? 0.045 : 0.04),
+    "--surface-overlay-strong": rgba(t.text, dark ? 0.09 : 0.08),
+    "--green-wash": rgba(t.green, 0.18),
+    "--amber-wash": rgba(t.amber, 0.18),
+    "--red-wash": rgba(t.red, 0.18),
+    "--blue-wash": rgba(t.blue, 0.18),
+    "--purple-wash": rgba(t.purple, 0.18),
     "--scrim": dark ? "rgba(9, 8, 7, 0.62)" : "rgba(60, 50, 35, 0.4)",
     "--shadow-lg": dark
       ? "0 40px 90px -24px rgba(0, 0, 0, 0.72), 0 8px 28px -12px rgba(0, 0, 0, 0.6)"
@@ -408,21 +562,20 @@ export function removeCustomTheme(id: string): ThemeSpec[] {
 
 // ---- resolution + apply --------------------------------------------------------
 
-/** Map the persisted theme setting to a concrete theme. "system" follows the
- *  OS scheme; unknown ids (e.g. a deleted custom theme) fall back to default. */
+/** Map a persisted palette and appearance mode to one concrete theme. Unknown
+ * palette ids (for example a deleted custom theme) fall back to Ember. */
 export function resolveTheme(
-  setting: string,
+  paletteId: string,
+  appearanceMode: AppearanceMode,
   opts: { systemDark?: boolean; custom?: ThemeSpec[] } = {},
 ): ThemeSpec {
-  if (setting === "system") {
-    const wantDark = opts.systemDark !== false;
-    return PRESET_THEMES.find((p) => p.appearance === (wantDark ? "dark" : "light")) ?? DEFAULT_THEME;
-  }
-  return (
-    PRESET_THEMES.find((p) => p.id === setting) ??
-    (opts.custom ?? []).find((t) => t.id === setting) ??
-    DEFAULT_THEME
-  );
+  const palette = PRESET_THEMES.find((preset) => preset.id === paletteId)
+    ?? (opts.custom ?? []).find((theme) => theme.id === paletteId)
+    ?? DEFAULT_THEME;
+  const appearance = appearanceMode === "system"
+    ? (opts.systemDark !== false ? "dark" : "light")
+    : appearanceMode;
+  return adaptThemeAppearance(palette, appearance);
 }
 
 /** Apply a concrete theme to <html>: CSS variables, the .light class for
@@ -434,28 +587,33 @@ export function applyTheme(spec: ThemeSpec): void {
   for (const [name, value] of Object.entries(themeCssVars(spec))) html.style.setProperty(name, value);
   html.classList.toggle("light", spec.appearance === "light");
   html.dataset.theme = spec.id;
+  html.dataset.appearance = spec.appearance;
   html.style.colorScheme = spec.appearance;
   window.dispatchEvent(new Event("polyth:theme"));
 }
 
-let appliedSetting: string | null = null;
+let appliedSetting: { paletteId: string; appearanceMode: AppearanceMode } | null = null;
 let systemWatch: MediaQueryList | null = null;
 
-/** Apply the persisted theme setting; installs the prefers-color-scheme
- *  listener once so "system" flips live without a reload. */
-export function applyThemeSetting(setting: string): void {
+/** Apply persisted palette + mode; System follows OS changes live. */
+export function applyThemeSetting(paletteId: string, appearanceMode: AppearanceMode): void {
   if (typeof document === "undefined") return;
-  appliedSetting = setting;
+  appliedSetting = { paletteId, appearanceMode };
   if (systemWatch === null && typeof matchMedia === "function") {
     systemWatch = matchMedia("(prefers-color-scheme: dark)");
     systemWatch.addEventListener?.("change", () => {
-      if (appliedSetting === "system") applyThemeSetting("system");
+      if (appliedSetting?.appearanceMode === "system") {
+        applyThemeSetting(appliedSetting.paletteId, appliedSetting.appearanceMode);
+      }
     });
   }
-  applyTheme(resolveTheme(setting, { systemDark: systemWatch?.matches ?? true, custom: loadCustomThemes() }));
+  applyTheme(resolveTheme(paletteId, appearanceMode, {
+    systemDark: systemWatch?.matches ?? true,
+    custom: loadCustomThemes(),
+  }));
 }
 
 /** Re-apply whatever setting is active (used to end a hover preview). */
 export function reapplyTheme(): void {
-  if (appliedSetting !== null) applyThemeSetting(appliedSetting);
+  if (appliedSetting !== null) applyThemeSetting(appliedSetting.paletteId, appliedSetting.appearanceMode);
 }

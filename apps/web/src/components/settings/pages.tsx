@@ -14,7 +14,7 @@ import ProjectFolderDialog from "../ProjectFolderDialog.tsx";
 import { parseMcpServersJson, type McpImportResult } from "../../mcpImport.ts";
 import {
   PRESET_THEMES, addCustomTheme, applyTheme, loadCustomThemes, parseThemeJson,
-  reapplyTheme, removeCustomTheme, resolveTheme, type ThemeSpec,
+  reapplyTheme, removeCustomTheme, resolveTheme, type AppearanceMode, type ThemeSpec,
 } from "../../theme.ts";
 import type { AssistSettingsDto } from "../../api.ts";
 import type { AgentDescriptor, AgentProfile, InstalledPluginDto, McpServerDto, McpTransport, ModelRef, SystemInfoDto } from "@polyth/contracts";
@@ -58,7 +58,7 @@ export function GeneralPage() {
 
 const EXAMPLE_THEME_HINT = 'Paste theme JSON: { "id": "my-theme", "name": "My theme", "appearance": "dark", "tokens": { "bg": "#101010", … } }';
 
-// F15: searchable grouped picker + system-follow + custom JSON themes.
+// F15: searchable palette picker + independent appearance mode + custom JSON.
 // Hover applies the candidate tokens live; leaving re-applies the saved pick.
 function ThemeSection() {
   const settings = useStore((s) => s.settings);
@@ -73,6 +73,13 @@ function ThemeSection() {
   // instead of an apply + restore per crossed row.
   const previewTimer = useRef<number | null>(null);
   const previewApplied = useRef(false);
+  const systemDark = typeof matchMedia === "function"
+    ? matchMedia("(prefers-color-scheme: dark)").matches
+    : true;
+  const effective = (theme: ThemeSpec) => resolveTheme(theme.id, settings.appearanceMode, {
+    custom: customs,
+    systemDark,
+  });
   const schedulePreview = (action: () => void) => {
     if (previewTimer.current !== null) window.clearTimeout(previewTimer.current);
     previewTimer.current = window.setTimeout(() => {
@@ -80,9 +87,9 @@ function ThemeSection() {
       action();
     }, 90);
   };
-  const preview = (t: ThemeSpec) => schedulePreview(() => {
+  const preview = (theme: ThemeSpec) => schedulePreview(() => {
     previewApplied.current = true;
-    applyTheme(t);
+    applyTheme(effective(theme));
   });
   const endPreview = () => {
     if (!previewApplied.current) {
@@ -110,7 +117,7 @@ function ThemeSection() {
     updateSettings({ theme: res.theme.id });
   };
   const copyCurrent = () => {
-    const current = resolveTheme(settings.theme, { custom: customs, systemDark: !document.documentElement.classList.contains("light") });
+    const current = resolveTheme(settings.theme, settings.appearanceMode, { custom: customs, systemDark });
     const draft = { ...current, id: "my-theme", name: "My theme" };
     void navigator.clipboard?.writeText(JSON.stringify(draft, null, 2));
   };
@@ -118,21 +125,20 @@ function ThemeSection() {
     setCustoms(removeCustomTheme(id));
     if (settings.theme === id) updateSettings({ theme: "dark" });
   };
-  const systemPreview = resolveTheme("system", {
-    systemDark: typeof matchMedia === "function" ? matchMedia("(prefers-color-scheme: dark)").matches : true,
-  });
   const choices = [
-    ...PRESET_THEMES.filter((theme) => theme.appearance === "dark").map((theme) => ({ group: "Dark", theme })),
-    ...PRESET_THEMES.filter((theme) => theme.appearance === "light").map((theme) => ({ group: "Light", theme })),
+    ...PRESET_THEMES.map((theme) => ({ group: "Bundled", theme })),
     ...customs.map((theme) => ({ group: "Custom", theme })),
-    { group: "System", theme: { ...systemPreview, id: "system", name: "System" } },
   ];
   const normalizedQuery = query.trim().toLowerCase();
   const filtered = normalizedQuery
     ? choices.filter(({ group, theme }) =>
-        `${theme.name} ${theme.id} ${theme.appearance} ${group}`.toLowerCase().includes(normalizedQuery))
+        `${theme.name} ${theme.id} ${group}`.toLowerCase().includes(normalizedQuery))
     : choices;
   const current = choices.find(({ theme }) => theme.id === settings.theme) ?? choices[0]!;
+  const currentEffective = effective(current.theme);
+  const appearanceLabel = settings.appearanceMode === "system"
+    ? `System · ${currentEffective.appearance}`
+    : `${currentEffective.appearance} appearance`;
   const pick = (id: string) => {
     updateSettings({ theme: id });
     setQuery("");
@@ -156,8 +162,8 @@ function ThemeSection() {
           aria-controls="theme-picker-options"
           onClick={() => setPickerOpen((open) => !open)}
         >
-          <ThemeSwatches theme={current.theme} />
-          <span><strong>{current.theme.name}</strong><small>{current.group} · {current.theme.appearance}</small></span>
+          <ThemeSwatches theme={currentEffective} />
+          <span><strong>{current.theme.name}</strong><small>{current.group} · {appearanceLabel}</small></span>
           <b aria-hidden="true">⌄</b>
         </button>
         {pickerOpen && (
@@ -180,29 +186,32 @@ function ThemeSection() {
               }}
             />
             <div className="theme-picker-list" id="theme-picker-list" role="listbox">
-              {(["Dark", "Light", "Custom", "System"] as const).map((group) => {
+              {(["Bundled", "Custom"] as const).map((group) => {
                 const groupChoices = filtered.filter((choice) => choice.group === group);
                 if (groupChoices.length === 0) return null;
                 return (
                   <section key={group}>
                     <div className="theme-picker-group">{group}</div>
-                    {groupChoices.map(({ theme }) => (
+                    {groupChoices.map(({ theme }) => {
+                      const rendered = effective(theme);
+                      return (
                       <button
                         key={`${group}:${theme.id}`}
                         role="option"
                         aria-selected={settings.theme === theme.id}
                         className={settings.theme === theme.id ? "active" : ""}
                         onClick={() => pick(theme.id)}
-                        onMouseEnter={() => preview(theme.id === "system" ? systemPreview : theme)}
+                        onMouseEnter={() => preview(theme)}
                         onMouseLeave={endPreview}
-                        onFocus={() => preview(theme.id === "system" ? systemPreview : theme)}
+                        onFocus={() => preview(theme)}
                         onBlur={endPreview}
                       >
-                        <ThemeSwatches theme={theme} />
-                        <span><strong>{theme.name}</strong><small>{theme.appearance}</small></span>
+                        <ThemeSwatches theme={rendered} />
+                        <span><strong>{theme.name}</strong><small>{rendered.appearance} palette</small></span>
                         <b aria-hidden="true">{settings.theme === theme.id ? "✓" : ""}</b>
                       </button>
-                    ))}
+                      );
+                    })}
                   </section>
                 );
               })}
@@ -212,7 +221,9 @@ function ThemeSection() {
         )}
       </div>
       <div className="theme-swatch-strip" aria-label="Quick theme preview">
-        {PRESET_THEMES.map((theme) => (
+        {PRESET_THEMES.map((theme) => {
+          const rendered = effective(theme);
+          return (
           <button
             key={theme.id}
             className={settings.theme === theme.id ? "active" : ""}
@@ -223,16 +234,17 @@ function ThemeSection() {
             onMouseLeave={endPreview}
             onFocus={() => preview(theme)}
             onBlur={endPreview}
-            style={{ "--theme-swatch": theme.tokens.accent } as CSSProperties}
+            style={{ "--theme-swatch": rendered.tokens.accent } as CSSProperties}
           />
-        ))}
+          );
+        })}
       </div>
       {customs.length > 0 && (
         <div className="theme-custom-list">
           {customs.map((t) => (
             <div key={t.id} className="theme-custom-row">
               <span className="mono">{t.id}</span>
-              <span className="muted">{t.name} · {t.appearance}</span>
+              <span className="muted">{t.name} · adapts to {settings.appearanceMode}</span>
               <span className="header-spacer" />
               <button className="small-btn danger-btn" onClick={() => removeCustom(t.id)}>Delete</button>
             </div>
@@ -267,6 +279,17 @@ export function AppearancePage() {
   return (
     <>
       <PageHead title="Appearance" blurb="Visual preferences, saved in this browser and applied immediately." />
+      <Row
+        label="Appearance"
+        hint="System follows your operating system. Every palette has both a light and dark rendering."
+        itemId="appearance.mode"
+      >
+        <Seg<AppearanceMode>
+          value={settings.appearanceMode}
+          options={[["system", "System"], ["dark", "Dark"], ["light", "Light"]]}
+          onChange={(appearanceMode) => updateSettings({ appearanceMode })}
+        />
+      </Row>
       <ThemeSection />
       <Row label="Interface font" hint="Choose the main typeface used throughout menus, settings, and conversations." itemId="appearance.fontFamily">
         <Seg
@@ -854,7 +877,7 @@ export function AgentsPage() {
         <div key={p.id} className="set-row">
           <div className="set-row-text">
             <div className="set-row-label">
-              <span className="profile-avatar" style={{ background: p.color ?? "#7aa2f7" }} />
+              <span className="profile-avatar" style={{ background: p.color ?? "var(--blue)" }} />
               {p.name}
             </div>
             <div className="set-row-hint mono">
