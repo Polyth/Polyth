@@ -3,7 +3,7 @@ import {
   closeWorkspacePane, getState, setActiveView, useActiveModel, useStore,
   openSettingsPage, setOverlay, setRailPlugin, setSidebarOpen, setUiError, type AppView,
 } from "../store.ts";
-import { forkSession, exportSessionMarkdown } from "../init.ts";
+import { forkSession, exportSessionMarkdown, refreshSessions } from "../init.ts";
 import { displaySessionTitle } from "../format.ts";
 import { friendlyError, shortcutLabel } from "../settings.ts";
 import { GoalAttachForm } from "./GoalStrip.tsx";
@@ -24,6 +24,7 @@ import CapabilityMenu from "./CapabilityMenu.tsx";
 import { setWorkspaceMode, useWorkspaceMode } from "../widgets/workspaceMode.ts";
 import { useDismissibleMenu } from "./a11y/Menu.ts";
 import ChatMetrics from "./ChatMetrics.tsx";
+import { setUiSettings, useUiSettings } from "../uiPrefs.ts";
 
 const STROKE = { fill: "none", stroke: "currentColor", strokeWidth: 1.5, strokeLinecap: "round", strokeLinejoin: "round" } as const;
 
@@ -455,6 +456,93 @@ function UserMenu() {
   );
 }
 
+function MobileComposerControlsMenu() {
+  const ui = useUiSettings();
+  const [open, setOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const onMenuKey = useDismissibleMenu({
+    open,
+    menuRef,
+    triggerRef,
+    onClose: () => setOpen(false),
+  });
+  const controls = [
+    {
+      id: "dictation",
+      label: "Microphone",
+      on: ui.showDictate,
+      icon: <Icon.mic />,
+      toggle: () => setUiSettings({ showDictate: !ui.showDictate }),
+    },
+    {
+      id: "auto-approve",
+      label: "Auto-approve",
+      on: ui.showAutoApprove,
+      icon: <Icon.shield />,
+      toggle: () => setUiSettings({ showAutoApprove: !ui.showAutoApprove }),
+    },
+    {
+      id: "goals",
+      label: "Goals",
+      on: ui.showGoals,
+      icon: <Icon.target />,
+      toggle: () => setUiSettings({ showGoals: !ui.showGoals }),
+    },
+  ];
+  return (
+    <div className="mobile-composer-menu">
+      <button
+        ref={triggerRef}
+        className="icon-btn mobile-header-action"
+        aria-label="Composer controls"
+        title="Composer controls"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        onClick={() => setOpen((value) => !value)}
+      >
+        <Icon.sliders />
+      </button>
+      {open && (
+        <div
+          ref={menuRef}
+          className="menu-popup mobile-composer-popup"
+          role="menu"
+          aria-label="Composer controls"
+          onKeyDown={onMenuKey}
+        >
+          <div className="mobile-composer-popup-title">Composer controls</div>
+          {controls.map((control) => (
+            <button
+              key={control.id}
+              role="menuitemcheckbox"
+              aria-checked={control.on}
+              onClick={control.toggle}
+            >
+              <span className="mobile-control-icon" aria-hidden="true">{control.icon}</span>
+              <span>{control.label}</span>
+              <span className={`mobile-control-switch${control.on ? " on" : ""}`} aria-hidden="true">
+                <i />
+              </span>
+            </button>
+          ))}
+          <div className="menu-sep" />
+          <button
+            role="menuitem"
+            onClick={() => {
+              setOpen(false);
+              window.dispatchEvent(new CustomEvent("polyth:open-settings"));
+            }}
+          >
+            <span className="mobile-control-icon" aria-hidden="true"><Icon.gear /></span>
+            <span>All settings</span>
+          </button>
+        </div>
+      )}
+    </div>
+  );
+}
+
 export default function Header() {
   const session = useStore((s) => s.sessions.find((x) => x.id === s.activeSessionId) ?? null);
   const project = useStore((s) => s.projectRegistry.projects.find((p) => p.id === s.activeProjectId) ?? null);
@@ -466,12 +554,50 @@ export default function Header() {
   const mode = useShellMode();
   const compact = mode !== "wide";
   const chatSurface = workspaceMode === "chat" && view === "session";
+  const firstUserText = model.messages.find((message) => message.kind === "user")?.text;
+  const mobileTitle = session
+    ? displaySessionTitle(session.title, session.id, firstUserText)
+    : "New session";
   useResizeFocusHandoff(mode);
   const switchWorkspaceMode = (next: "chat" | "widgets" | "edit") => {
     closeWorkspacePane();
     setActiveView("session");
     setWorkspaceMode(next);
   };
+
+  // The mock's phone header replaces the compact header only at phone widths;
+  // tablets (481–820px) keep the compact header with metrics and overflow.
+  if (mode === "phone" && chatSurface) {
+    return (
+      <header className="header header-compact header-chat mobile-chat-header">
+        <DrawerTrigger />
+        <button
+          className="mobile-session-title"
+          title={mobileTitle}
+          aria-label={`${mobileTitle}. Open projects and sessions`}
+          onClick={() => setSidebarOpen(true)}
+        >
+          <span>{mobileTitle}</span>
+          <Icon.chevronDown />
+        </button>
+        <span className="header-spacer" />
+        <button
+          className="icon-btn mobile-header-action"
+          aria-label="Refresh sessions"
+          title="Refresh sessions"
+          disabled={!project}
+          onClick={() => {
+            if (!project) return;
+            void refreshSessions(project.id).catch((error) =>
+              setUiError(friendlyError("Couldn’t refresh sessions", error)));
+          }}
+        >
+          <Icon.refresh />
+        </button>
+        <MobileComposerControlsMenu />
+      </header>
+    );
+  }
 
   return (
     <>

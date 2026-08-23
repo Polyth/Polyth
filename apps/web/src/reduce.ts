@@ -364,7 +364,18 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
       const partId = str(d, "partId") ?? "";
       let m = findAssistant(model, partId);
       if (!m) {
-        m = { kind: "assistant", id: partId, partId, eventSeq: ev.seq, text: "", reasoning: "", finalized: false, time: ev.time };
+        m = {
+          kind: "assistant",
+          id: partId,
+          partId,
+          eventSeq: ev.seq,
+          text: "",
+          reasoning: "",
+          finalized: false,
+          time: ev.time,
+          ...(model.turn?.model ? { model: model.turn.model } : {}),
+          ...(model.turn?.agent ? { agent: model.turn.agent } : {}),
+        };
         pushAssistant(model, m);
       }
       const text = str(d, "text") ?? "";
@@ -376,9 +387,22 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
       const partId = str(d, "partId") ?? "";
       let m = findAssistant(model, partId);
       if (!m) {
-        m = { kind: "assistant", id: partId, partId, eventSeq: ev.seq, text: "", reasoning: "", finalized: false, time: ev.time };
+        m = {
+          kind: "assistant",
+          id: partId,
+          partId,
+          eventSeq: ev.seq,
+          text: "",
+          reasoning: "",
+          finalized: false,
+          time: ev.time,
+          ...(model.turn?.model ? { model: model.turn.model } : {}),
+          ...(model.turn?.agent ? { agent: model.turn.agent } : {}),
+        };
         pushAssistant(model, m);
       }
+      if (!m.model && model.turn?.model) m.model = model.turn.model;
+      if (!m.agent && model.turn?.agent) m.agent = model.turn.agent;
       m.finalized = true;
       m.completedAt = ev.time; // semantic completion time, not first chunk
       const text = str(d, "text");

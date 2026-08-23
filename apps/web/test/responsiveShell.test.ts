@@ -145,16 +145,20 @@ test("composer bar exposes the two-tier semantic groups without forking send", a
   assert.ok(css.includes("repeat(2, minmax(0, 1fr))"), "phone selector grid contract");
 });
 
-test("Focus uses light composer controls without editor or privacy chrome", async () => {
+test("Focus uses compact mobile composer controls without editor chrome", async () => {
   const composer = await read("../src/components/Composer.tsx");
   assert.ok(composer.includes('simpleMode && variant === "docked"'), "light controls are scoped to docked Focus");
-  assert.ok(composer.includes("!lightFocusComposer && ("), "Focus suppresses extension toolbar controls");
+  assert.ok(composer.includes('className="composer-extensions composer-mobile-extensions"'), "Focus exposes slotted mobile actions");
+  assert.ok(composer.includes("ui.showAutoApprove"), "Focus honors the auto-approve visibility preference");
+  assert.ok(composer.includes("ui.showGoals"), "Focus honors the goals visibility preference");
   assert.ok(composer.includes("<Icon.paperclip />"), "Focus exposes a paperclip attachment action");
   assert.ok(!composer.includes("<Icon.focus />"), "Focus removes the focused-editor header action");
-  assert.ok(!composer.includes("<Icon.shield />"), "Focus removes the permissions/privacy header action");
+  assert.ok(composer.includes("<Icon.shield />"), "Focus exposes the auto-approve shield");
+  assert.ok(composer.includes("<Icon.target />"), "Focus exposes the goals target");
   assert.ok(composer.includes("<Icon.send />"), "Focus uses a paper-plane send icon");
   const css = await read("../src/styles.css");
   assert.ok(css.includes(".composer-focus-light .chip-k { display: none; }"), "technical picker keys are hidden");
+  assert.ok(css.includes('body[data-dictate="false"] .mic-btn'), "the microphone can be hidden without suppressing other slot items");
 });
 
 test("desktop header keeps brand, workspace modes, and a named utility cluster", async () => {

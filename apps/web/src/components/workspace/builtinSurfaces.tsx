@@ -4,9 +4,9 @@
 // built-ins once. Every built-in requires a project; the host renders the
 // standard project empty state when none is open. None require an open
 // session: the session surface shows its hero until one exists.
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Timeline from "../Timeline.tsx";
-import Composer from "../Composer.tsx";
+import Composer, { type NewSessionTarget } from "../Composer.tsx";
 import PermissionBanner from "../PermissionBanner.tsx";
 import QuestionCards from "../QuestionCards.tsx";
 import SecureSafeCard from "../SecureSafeCard.tsx";
@@ -17,7 +17,7 @@ import GoalsView from "../GoalsView.tsx";
 import WalkthroughView from "../WalkthroughView.tsx";
 import ScheduleView from "../ScheduleView.tsx";
 import GithubView from "../GithubView.tsx";
-import { setUiError, useActiveModel, useStore } from "../../store.ts";
+import { activateProject, setUiError, useActiveModel, useStore } from "../../store.ts";
 import { restoreSession } from "../../init.ts";
 import { friendlyError, shortcutLabel } from "../../settings.ts";
 import { composerBlockedByArchive, sessionSurfaceKind } from "../../sessionSurface.ts";
@@ -25,24 +25,132 @@ import { registerWorkspaceSurface } from "../../workspace/surfaceRegistry.ts";
 import WidgetCanvas from "../../widgets/WidgetCanvas.tsx";
 import { useWorkspaceMode } from "../../widgets/workspaceMode.ts";
 import SlotHost from "../slots/SlotHost.ts";
+import { api, type GitBranches, type Worktree } from "../../api.ts";
+import { Icon } from "../../icons.tsx";
 
 // Large polyth-style hero for a fresh session (or no session yet):
 // centered headline, the composer as an elevated card, and suggestion chips.
 function SessionHero() {
-  const project = useStore((s) => s.projectRegistry.projects.find((p) => p.id === s.activeProjectId) ?? null);
+  const projects = useStore((s) => s.projectRegistry.projects);
+  const projectId = useStore((s) => s.activeProjectId);
+  const project = projects.find((candidate) => candidate.id === projectId) ?? null;
   const branch = useStore((s) => s.gitBranch);
   const name = project?.name || project?.path || "this project";
+  const [worktrees, setWorktrees] = useState<Worktree[]>([]);
+  const [branches, setBranches] = useState<GitBranches>({ current: "", branches: [] });
+  const [branchLoading, setBranchLoading] = useState(false);
+  const [selectedBranchId, setSelectedBranchId] = useState("main");
+
+  useEffect(() => {
+    let active = true;
+    setSelectedBranchId("main");
+    if (!projectId) {
+      setWorktrees([]);
+      setBranches({ current: "", branches: [] });
+      return () => { active = false; };
+    }
+    setBranchLoading(true);
+    void Promise.all([api.listWorktrees(projectId), api.gitBranches(projectId)])
+      .then(([nextWorktrees, nextBranches]) => {
+        if (!active) return;
+        setWorktrees(nextWorktrees);
+        setBranches(nextBranches);
+        const currentWorktree = nextWorktrees.find((worktree) =>
+          worktree.branch === (nextBranches.current || branch));
+        setSelectedBranchId(currentWorktree?.isMain
+          ? "main"
+          : currentWorktree
+            ? `worktree:${currentWorktree.path}`
+            : "main");
+      })
+      .finally(() => {
+        if (active) setBranchLoading(false);
+      });
+    return () => { active = false; };
+  }, [projectId]);
+
+  const branchChoices = useMemo(() => {
+    const linkedBranches = new Set(worktrees.map((worktree) => worktree.branch).filter(Boolean));
+    const main = worktrees.find((worktree) => worktree.isMain);
+    const choices: Array<{ id: string; label: string; detail: string; target: NewSessionTarget }> = [{
+      id: "main",
+      label: main?.branch || branches.current || branch || "Main workspace",
+      detail: "Main workspace",
+      target: { kind: "main" },
+    }];
+    for (const worktree of worktrees.filter((candidate) => !candidate.isMain)) {
+      choices.push({
+        id: `worktree:${worktree.path}`,
+        label: worktree.branch || worktree.path.split("/").pop() || "Worktree",
+        detail: "Existing worktree",
+        target: { kind: "worktree", path: worktree.path },
+      });
+    }
+    for (const candidate of branches.branches) {
+      if (candidate.remote || linkedBranches.has(candidate.name)) continue;
+      choices.push({
+        id: `branch:${candidate.name}`,
+        label: candidate.name,
+        detail: "Open in a new worktree",
+        target: { kind: "branch", branch: candidate.name },
+      });
+    }
+    return choices;
+  }, [worktrees, branches, branch]);
+  const selectedTarget = branchChoices.find((choice) => choice.id === selectedBranchId)?.target
+    ?? { kind: "main" as const };
+
   return (
     <div className="stage">
       <div className="hero">
         <div className="hero-mark">p</div>
-        <h2>What are we working on in {name}?</h2>
+        <h2>What are we working on in <span className="polyth-gradient">{name}</span>?</h2>
+        <div className="new-session-targets" aria-label="New session location">
+          <label className="new-session-select">
+            <span>Project</span>
+            <span className="new-session-select-control">
+              <Icon.files />
+              <select
+                value={projectId ?? ""}
+                aria-label="Project for new session"
+                onChange={(event) => activateProject(event.target.value || null)}
+              >
+                {projects.map((candidate) => (
+                  <option key={candidate.id} value={candidate.id}>
+                    {candidate.name || candidate.path}
+                  </option>
+                ))}
+              </select>
+              <Icon.chevronDown />
+            </span>
+          </label>
+          <label className="new-session-select">
+            <span>Branch</span>
+            <span className="new-session-select-control">
+              <Icon.branch />
+              <select
+                value={selectedBranchId}
+                aria-label="Branch for new session"
+                disabled={branchLoading}
+                onChange={(event) => setSelectedBranchId(event.target.value)}
+              >
+                {branchLoading && <option value="main">Loading branches…</option>}
+                {!branchLoading && branchChoices.map((choice) => (
+                  <option key={choice.id} value={choice.id}>
+                    {choice.label} — {choice.detail}
+                  </option>
+                ))}
+              </select>
+              <Icon.chevronDown />
+            </span>
+          </label>
+        </div>
         <p className="hero-sub">
           Polyth is attached to <b>{name}</b>
           {branch ? <> on <span className="mono">{branch}</span></> : null}.
           {" "}Describe a task, or start from one of the suggestions below.
         </p>
-        <Composer variant="hero" />
+        <Composer variant="hero" newSessionTarget={selectedTarget} />
         <div className="hero-foot">
           <span className="kbd">{shortcutLabel("K")}</span> commands
           <span className="hero-sep">·</span>

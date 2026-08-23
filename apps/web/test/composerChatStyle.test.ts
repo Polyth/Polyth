@@ -43,7 +43,10 @@ test("message actions use one lightweight copy control and local hover zones", (
   assert.doesNotMatch(css, /\.msg:hover \.msg-actions|\.msg\.assistant \.msg-actions\s*\{[^}]*pointer-events:\s*auto/s);
   assert.match(css, /\.msg-actions\s*\{[^}]*gap:\s*1px;/s);
   assert.match(css, /@media \(hover:\s*none\) and \(pointer:\s*coarse\) and \(min-width:\s*481px\)/);
-  assert.match(css, /@media \(max-width:\s*480px\)\s*\{[^}]*\.msg-actions\s*\{\s*display:\s*none;/s);
+  assert.match(css, /@media \(max-width:\s*480px\)[\s\S]*\.msg\.assistant \.msg-actions\s*\{\s*display:\s*flex;/);
+  assert.match(timeline, /key: "gallery"/);
+  assert.match(timeline, /key: "regenerate"/);
+  assert.match(timeline, /<AssistantAgentHeader m=\{m\} \/>/);
 });
 
 test("thinking stays unboxed while command output keeps a light boundary", () => {

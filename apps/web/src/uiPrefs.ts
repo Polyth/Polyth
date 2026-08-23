@@ -51,6 +51,10 @@ export interface UiSettings {
   workStatusHiddenSections: string[];
   showTechnicalButtons: boolean;
   showDictate: boolean;
+  /** Composer shield control visibility; the session policy remains server-owned. */
+  showAutoApprove: boolean;
+  /** Composer target control visibility. */
+  showGoals: boolean;
   showQuickActions: boolean;
   /** MCP server entries (stored locally; runtime integration pending). */
   mcpServers: Array<{ name: string; url: string }>;
@@ -86,6 +90,8 @@ export const UI_DEFAULTS: UiSettings = {
   workStatusHiddenSections: [],
   showTechnicalButtons: true,
   showDictate: true,
+  showAutoApprove: true,
+  showGoals: true,
   showQuickActions: true,
   mcpServers: [],
 };
@@ -130,6 +136,8 @@ export function parseUiSettings(raw: string | null): UiSettings {
         : [],
       showTechnicalButtons: data.showTechnicalButtons !== false,
       showDictate: data.showDictate !== false,
+      showAutoApprove: data.showAutoApprove !== false,
+      showGoals: data.showGoals !== false,
       showQuickActions: data.showQuickActions !== false,
       mcpServers: Array.isArray(data.mcpServers)
         ? data.mcpServers
@@ -171,6 +179,8 @@ export function applyUiSettings(s: UiSettings = settings): void {
   b.dataset.chatwidth = s.chatWidth;
   b.dataset.technical = String(s.showTechnicalButtons);
   b.dataset.dictate = String(s.showDictate);
+  b.dataset.autoApprove = String(s.showAutoApprove);
+  b.dataset.goals = String(s.showGoals);
   b.dataset.quickActions = String(s.showQuickActions);
   b.style?.setProperty("--editor-font-size", `${s.editorFontSize}px`);
   const radii = s.rounding === "square"

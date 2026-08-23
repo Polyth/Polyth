@@ -75,18 +75,16 @@ export default function PendingChangesBar({ model }: { model: RenderModel }) {
     <div className="pending-changes-bar" role="status">
       <button className="pending-changes-main" onClick={() => openChanges()}>
         <span className="pending-changes-icon" aria-hidden="true">
-          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <path d="M4 4h11v11H4z" /><path d="m12 12 8-8M15 4h5v5" />
-          </svg>
+          <Icon.fileEdit />
         </span>
-        {count} {count === 1 ? "file" : "files"} changed <span className="pending-changes-location">in workspace</span>
+        {count} {count === 1 ? "file" : "files"}
         {diffStats && (
           <span
             className="pending-change-stats"
             aria-label={`${diffStats.additions} additions, ${diffStats.deletions} deletions`}
           >
             <span className="additions" aria-hidden="true">+{diffStats.additions}</span>
-            <span className="deletions" aria-hidden="true">−{diffStats.deletions}</span>
+            <span className="deletions" aria-hidden="true">-{diffStats.deletions}</span>
           </span>
         )}
       </button>
