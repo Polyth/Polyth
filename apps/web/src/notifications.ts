@@ -4,7 +4,10 @@
 // new session event is needed. Secrets are redacted and previews bounded
 // before anything reaches a native notification.
 
-export type NotifyKind = "completed" | "failed" | "question" | "permission" | "subagent";
+import type { NotificationKind } from "@polyth/contracts";
+
+/** Native and centre delivery share one normative kind contract. */
+export type NotifyKind = NotificationKind;
 
 export interface SessionSnapshot {
   id: string;

@@ -1483,6 +1483,23 @@ export interface NotificationPrefs {
   summarize: boolean;
 }
 
+/** One retained notification-centre row (NTF-01). Derived server state:
+ *  never a `SessionEvent`, never model-visible, never in the session log.
+ *  `id` is the REST/WS merge identity and mutation handle; `key` is the
+ *  stable transition key shared with the push payload (non-unique: a later
+ *  identical transition legitimately produces a new row). */
+export type NotificationRecord = {
+  id: string;
+  key: string;
+  kind: NotificationKind;
+  sessionId: string;
+  projectId: string;
+  title: string;
+  body: string;
+  ts: number;
+  read: boolean;
+};
+
 // Well-known capability keys
 export const CAP = {
   sessions: cap<SessionService>("polyth.sessions"),

@@ -2,9 +2,10 @@
 // versioned record; `polyth.settings` is read only as a one-time migration
 // source because older builds shared it with product-level settings.
 import { useSyncExternalStore } from "react";
+import type { NotificationKind } from "@polyth/contracts";
 
 export type FollowUpBehavior = "steer" | "queue" | "interrupt";
-export type NotificationKindPref = "completed" | "failed" | "question" | "permission" | "subagent";
+export type NotificationKindPref = NotificationKind;
 export type MessageCopyFormat = "markdown" | "json";
 
 export interface UiSettings {
@@ -24,6 +25,9 @@ export interface UiSettings {
   notifyOnlyWhenHidden: boolean;
   /** Notification body template; allowlisted vars {project} {session} {status} {preview}. */
   notifyTemplate: string;
+  /** NTF-01: keep read rows visible in the notification centre. Per-browser
+   *  display filter only — never disables recording or clears server data. */
+  notificationCentreHistory: boolean;
   confirmSessionArchive: boolean;
   autoScroll: boolean;
   /** Send behavior while a turn is active (WP3). */
@@ -66,6 +70,7 @@ export const UI_DEFAULTS: UiSettings = {
   notifyKinds: ["completed", "failed", "question", "permission"],
   notifyOnlyWhenHidden: true,
   notifyTemplate: "{session} — {status}",
+  notificationCentreHistory: true,
   confirmSessionArchive: false,
   autoScroll: true,
   followUpBehavior: "queue",
@@ -107,6 +112,7 @@ export function parseUiSettings(raw: string | null): UiSettings {
       notifyTemplate: typeof data.notifyTemplate === "string" && data.notifyTemplate.trim() !== ""
         ? data.notifyTemplate.slice(0, 200)
         : UI_DEFAULTS.notifyTemplate,
+      notificationCentreHistory: data.notificationCentreHistory !== false,
       confirmSessionArchive: data.confirmSessionArchive === true,
       autoScroll: data.autoScroll !== false,
       followUpBehavior: data.followUpBehavior === "steer" || data.followUpBehavior === "interrupt" ? data.followUpBehavior : "queue",

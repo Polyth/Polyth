@@ -9,7 +9,7 @@ import {
 } from "node:crypto";
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { dirname } from "node:path";
-import type { JsonObject, SessionProjection } from "@polyth/contracts";
+import type { JsonObject, NotificationKind, SessionProjection } from "@polyth/contracts";
 
 // ---- base64url helpers ---------------------------------------------------------
 
@@ -85,7 +85,7 @@ export function vapidAuthorization(endpoint: string, keys: VapidKeys, contact: s
 
 // ---- template payloads --------------------------------------------------------------
 
-export type PushKind = "completed" | "failed" | "question" | "permission" | "subagent";
+export type PushKind = NotificationKind;
 
 const STATUS_TEXT: Record<PushKind, string> = {
   completed: "finished",
@@ -98,11 +98,29 @@ const STATUS_TEXT: Record<PushKind, string> = {
 const MAX_VAR_CHARS = 80;
 const MAX_BODY_CHARS = 200;
 
+// NTF-01: same secret redaction as the in-page formatter — payloads persist in
+// the notification centre now, so a secret-shaped session title must never
+// reach the inbox file, the WS envelope, or a push endpoint.
+const SECRET_PATTERNS: RegExp[] = [
+  /\b(sk|pk|rk|ghp|gho|ghu|ghs|xoxb|xoxp|AKIA)[A-Za-z0-9_-]{12,}\b/g,
+  // whole header line: "authorization: Bearer x" must not leave the token behind
+  /\b(authorization|proxy-authorization)\s*[:=][^\n]+/gi,
+  /\b(api[_-]?key|token|secret|password|passwd)\s*[:=]\s*\S+/gi,
+  /\bbearer\s+[a-z0-9._~+/=-]{8,}/gi,
+  /eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{5,}/g,
+];
+
+export function redactPushText(text: string): string {
+  let out = text;
+  for (const p of SECRET_PATTERNS) out = out.replace(p, "[redacted]");
+  return out;
+}
+
 // Same allowlisted-variable semantics as the in-page notifier: unknown {vars}
-// stay literal, values are control-stripped and capped, output is bounded.
+// stay literal, values are control-stripped, redacted, and capped.
 const clip = (raw: string, cap: number): string => {
   // eslint-disable-next-line no-control-regex
-  const clean = raw.replace(/[\u0000-\u001f\u007f]/g, " ");
+  const clean = redactPushText(raw.replace(/[\u0000-\u001f\u007f]/g, " "));
   return clean.length > cap ? `${clean.slice(0, cap)}…` : clean;
 };
 
@@ -117,8 +135,14 @@ export type PushPayload = JsonObject & {
   sessionId: string;
   title: string;
   body: string;
-  /** Notification tag: repeats per (session, kind) replace instead of piling up. */
+  /** Notification tag: repeats of one transition replace instead of piling up. */
   tag: string;
+  /** Stable transition key (NTF-01), copied verbatim into the inbox record.
+   *  Empty ONLY on the /api/push/test path, which never records a row. */
+  key: string;
+  /** Trusted source project (NTF-01), read from the canonical projection.
+   *  Empty only on the keyless test path. */
+  projectId: string;
   /** Pending request identity. The service worker sends actions only when this
    *  is present; the authenticated session API still validates it is open. */
   requestId?: string;
@@ -169,6 +193,8 @@ export function buildPushPayload(kind: PushKind, opts: {
   sessionTitle: string;
   projectName?: string;
   statusText?: string;
+  key?: string;
+  projectId?: string;
   requestId?: string;
   questions?: JsonObject[];
 }): PushPayload {
@@ -180,7 +206,12 @@ export function buildPushPayload(kind: PushKind, opts: {
     sessionId: opts.sessionId,
     title: clip(`Polyth — ${session}`, MAX_VAR_CHARS + 10),
     body: clip(`${session} — ${status}`, MAX_BODY_CHARS),
-    tag: `polyth-${opts.sessionId}-${kind}`,
+    // The OS/browser tag derives from the stable key when one exists so
+    // centre rows and native notifications correlate; the keyless test path
+    // keeps the legacy (session, kind) tag.
+    tag: opts.key ? `polyth-${opts.key}` : `polyth-${opts.sessionId}-${kind}`,
+    key: opts.key ?? "",
+    projectId: opts.projectId ?? "",
     ...(opts.requestId ? { requestId: opts.requestId } : {}),
     ...(quickAnswers.length > 0 ? { quickAnswers } : {}),
   };
@@ -323,11 +354,18 @@ export function createPushService(opts: {
 
 /** Bridges the session service's notify seam to push payloads. Subagent
  *  completions attribute to the parent session (same as the in-page router);
- *  aborted turns stay silent. Fire-and-forget: push must never block a turn. */
+ *  aborted turns stay silent. Fire-and-forget: push must never block a turn.
+ *
+ *  NTF-01: this seam is the ONLY producer of notification-centre records —
+ *  every payload it emits carries the stable transition `key` and the trusted
+ *  source `projectId`, and calls `deps.send` exactly once per transition. */
 export function createPushNotifier(deps: {
   send(payload: PushPayload): Promise<unknown>;
   projection(sessionId: string): Promise<SessionProjection | undefined>;
   projectName?(projectId: string): Promise<string | undefined>;
+  /** Durable unresolved-request counters: question/permission keys derive
+   *  from the already-appended request state, never from a snapshot diff. */
+  attention?(sessionId: string): Promise<{ questions: number; permissions: number } | undefined>;
 }): {
   attention(sessionId: string, kind: "permission" | "question", requestId?: string, questions?: JsonObject[]): void;
   turnStopped(sessionId: string, reason: "completed" | "aborted" | "error"): void;
@@ -341,9 +379,15 @@ export function createPushNotifier(deps: {
       fire((async () => {
         const proj = await deps.projection(sessionId);
         if (!proj) return;
+        // The request event is durable before notify fires, so the open count
+        // already includes it. A missing counter dep degrades to count 1.
+        const counts = await deps.attention?.(sessionId);
+        const open = Math.max(1, (kind === "question" ? counts?.questions : counts?.permissions) ?? 1);
         await deps.send(buildPushPayload(kind, {
           sessionId,
           sessionTitle: proj.title,
+          key: `${sessionId}:${kind}:${open}`,
+          projectId: proj.projectId,
           ...(requestId ? { requestId } : {}),
           ...(questions ? { questions } : {}),
         }));
@@ -356,16 +400,24 @@ export function createPushNotifier(deps: {
         if (!proj) return;
         if (proj.parentId) {
           const parent = await deps.projection(proj.parentId);
+          // Parent and child must resolve to the same project before the
+          // payload is published (NTF-01); a missing/mismatched parent stays
+          // silent rather than creating a row with an unverified target.
+          if (!parent || parent.projectId !== proj.projectId) return;
           await deps.send(buildPushPayload("subagent", {
             sessionId: proj.parentId,
-            sessionTitle: parent?.title ?? "Delegated agent",
+            sessionTitle: parent.title,
             statusText: reason === "error" ? "delegated agent failed" : "delegated agent finished",
+            key: `${sessionId}:subagent:${reason === "error" ? "failed" : "idle"}`,
+            projectId: proj.projectId,
           }));
           return;
         }
         await deps.send(buildPushPayload(reason === "error" ? "failed" : "completed", {
           sessionId,
           sessionTitle: proj.title,
+          key: `${sessionId}:turn:${reason === "error" ? "failed" : "idle"}`,
+          projectId: proj.projectId,
         }));
       })());
     },

@@ -11,6 +11,7 @@ import { applySettingsToDom } from "./settings.ts";
 import { applyUiSettings } from "./uiPrefs.ts";
 import { getState } from "./store.ts";
 import { installBuiltinMiniWidgets } from "./widgets/builtinMiniWidgets.tsx";
+import { installNotificationCentre } from "./components/NotificationCentre.tsx";
 import { exposeWidgets } from "./widgets/catalog.ts";
 import { bootPackages } from "./packages/registry.ts";
 import App from "./App.tsx";
@@ -25,6 +26,8 @@ exposeCapabilities();
 exposeWorkspaceSurfaces();
 exposeWidgets();
 installBuiltinMiniWidgets();
+// NTF-01: bell + panel arrive through the slot registry, never via App.tsx.
+installNotificationCentre();
 // Palette commands + keyboard shortcuts: one install, synced with the
 // capability registry from then on (UX-PERSONAS: search sees every tool).
 installShell();

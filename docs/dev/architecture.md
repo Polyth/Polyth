@@ -188,7 +188,14 @@ are the only public `/api` paths — login mints an httpOnly SameSite=Strict
 PATCH `{setting: on|off|inherit}` — enabling reconciles pending requests),
 `/api/push/key` (VAPID public key + subscription count), `/api/push/subscribe`
 (POST registers the browser's PushSubscription, DELETE removes by endpoint),
-`/api/push/test` (POST sends a test notification to every subscription),
+`/api/push/test` (POST sends a test notification to every subscription; never
+creates a notification-centre row), `/api/notifications` (NTF-01: GET
+`{items, unread}` oldest-first from the server-owned inbox in
+`data/notifications.json`, optional `after=<ts>` cursor over strictly
+increasing timestamps while `unread` stays global; POST `read {ids}`,
+`read-all`, `clear` — bodies carry opaque notification ids only, never a
+project/session scope; rows are recorded at the push notifier's send sink,
+newest 200 retained FIFO),
 `/api/sessions/:id/goal*`.
 
 Errors are `{ error: code, message }` with mapped status; a dead OpenCode transport
@@ -204,7 +211,10 @@ Client → server: `subscribe {sessionId, afterSeq}`, `browser/subscribe
 {dictationId, seq, pcm(base64)}`.
 
 Server → client: `event {event: SessionEvent}` (gap-fill then live, seq-deduped),
-`projection {session}`, `browser/frame {revision, mime, data}`, `browser/event`,
+`projection {session}`, `notification/added {notification: NotificationRecord}`
+(NTF-01: unfiltered global fan-out after the inbox commit and before web push —
+never buffered into gap-fill state; REST `after=<ts>` owns reconnect catch-up),
+`browser/frame {revision, mime, data}`, `browser/event`,
 `dictation/state|ack|transcript|error`, `error {code}`.
 
 The client (`apps/web/src/sync.ts`) resends its subscription on reconnect and dedupes by

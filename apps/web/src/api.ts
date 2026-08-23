@@ -20,6 +20,7 @@ import type {
   ModelDescriptor,
   ModelRef,
   MultirunDto,
+  NotificationRecord,
   PackageDescriptorDto,
   PreviewState,
   SystemInfoDto,
@@ -1216,6 +1217,18 @@ export const api = {
   pushSubscribe: (sub: unknown) => jfetch<{ ok: boolean }>(`/api/push/subscribe`, json("POST", sub)),
   pushUnsubscribe: (endpoint: string) => jfetch<{ ok: boolean }>(`/api/push/subscribe`, json("DELETE", { endpoint })),
   pushTest: () => jfetch<{ sent: number; dropped: number }>(`/api/push/test`, json("POST", {})),
+
+  // ---- notification centre (NTF-01) -----------------------------------------------
+  listNotifications: (after?: number) =>
+    jfetch<{ items: NotificationRecord[]; unread: number }>(
+      `/api/notifications${after && after > 0 ? `?after=${after}` : ""}`,
+    ),
+  notificationsRead: (ids: string[]) =>
+    jfetch<{ updated: number; unread: number }>(`/api/notifications/read`, json("POST", { ids })),
+  notificationsReadAll: () =>
+    jfetch<{ updated: number; unread: number }>(`/api/notifications/read-all`, json("POST", {})),
+  notificationsClear: () =>
+    jfetch<{ cleared: number; unread: number }>(`/api/notifications/clear`, json("POST", {})),
 
   // ---- access control (F16) --------------------------------------------------------
   authStatus: () => jfetch<AuthStatusDto>(`/api/auth/status`),

@@ -76,6 +76,7 @@ const BUILTIN_ITEMS: SettingsSearchItem[] = [
   { id: "chat.copyFormat", pageId: "chat", label: "Copy format", description: "Copy messages as Markdown or JSON", keywords: ["clipboard", "markdown", "json"], focusTarget: "chat.copyFormat" },
   { id: "notifications.desktop", pageId: "notifications", label: "Desktop notification", keywords: ["alert", "browser"], focusTarget: "notifications.desktop" },
   { id: "notifications.sound", pageId: "notifications", label: "Completion sound", keywords: ["beep", "audio"], focusTarget: "notifications.sound" },
+  { id: "notifications.centreHistory", pageId: "notifications", label: "Centre history", description: "Keep read notifications visible in the notification centre", keywords: ["inbox", "bell", "read", "notification centre"], focusTarget: "notifications.centreHistory" },
   { id: "behavior.confirmArchive", pageId: "behavior", label: "Confirm before archiving sessions", keywords: ["archive", "safety"], focusTarget: "behavior.confirmArchive" },
   { id: "behavior.autosave", pageId: "behavior", label: "Editor autosave", keywords: ["save", "revision"], focusTarget: "behavior.autosave" },
   { id: "behavior.instructions", pageId: "behavior", label: "Global instructions", description: "Behavior text applied to every agent (global AGENTS.md)", keywords: ["agents.md", "system prompt", "rules"], focusTarget: "behavior.instructions" },

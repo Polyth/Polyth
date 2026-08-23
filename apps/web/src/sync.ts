@@ -2,11 +2,12 @@
 // subscription (per-session afterSeq) on open and dedupes by (sessionId, seq)
 // so replay/gap-fill never double-applies an event. DOM-free apart from the
 // browser's native WebSocket, which is only touched inside connect().
-import type { InstalledPluginDto, PackageDescriptorDto, SessionEvent, SessionProjection } from "@polyth/contracts";
+import type { InstalledPluginDto, NotificationKind, NotificationRecord, PackageDescriptorDto, SessionEvent, SessionProjection } from "@polyth/contracts";
 
 export type SyncInbound =
   | { type: "event"; event: SessionEvent }
   | { type: "projection"; session: SessionProjection }
+  | { type: "notification/added"; notification: NotificationRecord }
   | { type: "plugin/changed"; plugin: InstalledPluginDto }
   | { type: "package/changed"; package: PackageDescriptorDto }
   | { type: "error"; code: string; message: string };
@@ -31,6 +32,8 @@ export function createSeqDedupe(): SeqDedupe {
   };
 }
 
+const NOTIFICATION_KINDS: readonly NotificationKind[] = ["completed", "failed", "question", "permission", "subagent"];
+
 export function isSyncInbound(raw: unknown): raw is SyncInbound {
   if (typeof raw !== "object" || raw === null) return false;
   const m = raw as Record<string, unknown>;
@@ -41,6 +44,20 @@ export function isSyncInbound(raw: unknown): raw is SyncInbound {
   if (m.type === "projection") {
     const s = m.session as Record<string, unknown> | undefined;
     return !!s && typeof s.id === "string" && typeof s.status === "string";
+  }
+  if (m.type === "notification/added") {
+    // NTF-01: every required record field is validated; a malformed envelope
+    // is dropped silently like any other unknown message.
+    const n = m.notification as Record<string, unknown> | undefined;
+    return !!n
+      && typeof n.id === "string" && n.id.length > 0
+      && typeof n.key === "string" && n.key.length > 0
+      && NOTIFICATION_KINDS.includes(n.kind as NotificationKind)
+      && typeof n.sessionId === "string" && n.sessionId.length > 0
+      && typeof n.projectId === "string" && n.projectId.length > 0
+      && typeof n.title === "string" && typeof n.body === "string"
+      && typeof n.ts === "number" && Number.isFinite(n.ts)
+      && typeof n.read === "boolean";
   }
   if (m.type === "plugin/changed") {
     const plugin = m.plugin as Record<string, unknown> | undefined;
@@ -62,6 +79,7 @@ export function isSyncInbound(raw: unknown): raw is SyncInbound {
 export class SyncClient {
   private ws: WebSocket | null = null;
   private listeners = new Set<SyncListener>();
+  private openListeners = new Set<() => void>();
   private statusListeners = new Set<(status: SyncStatus) => void>();
   private status: SyncStatus = "disconnected";
   private dedupe = createSeqDedupe();
@@ -78,6 +96,15 @@ export class SyncClient {
     };
   }
 
+  /** Fires after every successful connection (first open AND each reconnect)
+   *  so callers can run REST catch-up (NTF-01) instead of polling. */
+  onOpen(cb: () => void): () => void {
+    this.openListeners.add(cb);
+    return () => {
+      this.openListeners.delete(cb);
+    };
+  }
+
   onStatus(cb: (status: SyncStatus) => void): () => void {
     this.statusListeners.add(cb);
     cb(this.status);
@@ -89,6 +116,7 @@ export class SyncClient {
   getStatus(): SyncStatus {
     return this.status;
   }
+
 
   setSubscription(sessionId: string | undefined, afterSeq = 0): void {
     this.sub = { sessionId, afterSeq };
@@ -104,6 +132,7 @@ export class SyncClient {
       this.backoff = 500;
       this.publishStatus("connected");
       this.sendSubscribe();
+      for (const cb of [...this.openListeners]) cb();
     };
     ws.onmessage = (e: MessageEvent) => {
       this.handle(String(e.data));

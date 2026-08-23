@@ -210,6 +210,78 @@ test("send encrypts per subscription, sets VAPID headers, drops 410 endpoints", 
   assert.deepEqual(await svc.send(payload), { sent: 1, dropped: 0 });
 });
 
+test("buildPushPayload redacts secret-shaped text before it can persist or transmit", () => {
+  const p = buildPushPayload("completed", {
+    sessionId: "s1",
+    sessionTitle: "Deploy with token: ghp_abcdefghijklmnop123456",
+    key: "s1:turn:idle",
+    projectId: "p1",
+  });
+  assert.doesNotMatch(p.title, /ghp_/);
+  assert.doesNotMatch(p.body, /ghp_/);
+  assert.match(p.body, /\[redacted\]/);
+
+  const bearer = buildPushPayload("failed", { sessionId: "s1", sessionTitle: "authorization: Bearer abc.def.ghi-jkl" });
+  assert.doesNotMatch(bearer.body, /abc\.def/);
+});
+
+test("buildPushPayload carries the stable key + projectId and derives the tag from the key", () => {
+  const keyed = buildPushPayload("completed", {
+    sessionId: "ses_1", sessionTitle: "Build", key: "ses_1:turn:idle", projectId: "p1",
+  });
+  assert.equal(keyed.key, "ses_1:turn:idle");
+  assert.equal(keyed.projectId, "p1");
+  assert.equal(keyed.tag, "polyth-ses_1:turn:idle");
+
+  // The keyless test path (/api/push/test) keeps the legacy tag; its empty
+  // key/projectId can never pass the recording sink's validation.
+  const keyless = buildPushPayload("completed", { sessionId: "ses_1", sessionTitle: "Build" });
+  assert.equal(keyless.key, "");
+  assert.equal(keyless.projectId, "");
+  assert.equal(keyless.tag, "polyth-ses_1-completed");
+});
+
+test("notifier supplies stable keys, durable attention counts, and the trusted projectId", async () => {
+  const sent: PushPayload[] = [];
+  const projections = new Map<string, SessionProjection>([
+    ["root", { id: "root", projectId: "p", title: "Root task", status: "working", createdAt: 1, updatedAt: 1 } as SessionProjection],
+    ["child", { id: "child", projectId: "p", parentId: "root", title: "Child task", status: "working", createdAt: 1, updatedAt: 1 } as SessionProjection],
+    ["stray", { id: "stray", projectId: "other", parentId: "root", title: "Stray", status: "working", createdAt: 1, updatedAt: 1 } as SessionProjection],
+    ["orphan", { id: "orphan", projectId: "p", parentId: "gone", title: "Orphan", status: "working", createdAt: 1, updatedAt: 1 } as SessionProjection],
+  ]);
+  const notifier = createPushNotifier({
+    send: async (p) => { sent.push(p); },
+    projection: async (id) => projections.get(id),
+    attention: async (id) => (id === "root" ? { questions: 2, permissions: 1 } : { questions: 0, permissions: 0 }),
+  });
+  // Each call is fire-and-forget; settle between them so arrival order is
+  // deterministic (cross-transition ordering is not part of the contract).
+  const settle = () => new Promise((r) => setTimeout(r, 10));
+
+  notifier.attention("root", "question");     // durable count 2 → :question:2
+  await settle();
+  notifier.attention("root", "permission");   // durable count 1 → :permission:1
+  await settle();
+  notifier.turnStopped("root", "completed");  // :turn:idle
+  await settle();
+  notifier.turnStopped("root", "error");      // :turn:failed
+  await settle();
+  notifier.turnStopped("child", "completed"); // child key, parent target, shared project
+  await settle();
+  notifier.turnStopped("stray", "completed"); // parent in another project → silent
+  await settle();
+  notifier.turnStopped("orphan", "completed"); // missing parent cannot verify project → silent
+  await settle();
+
+  assert.deepEqual(sent.map((p) => [p.kind, p.sessionId, p.key, p.projectId]), [
+    ["question", "root", "root:question:2", "p"],
+    ["permission", "root", "root:permission:1", "p"],
+    ["completed", "root", "root:turn:idle", "p"],
+    ["failed", "root", "root:turn:failed", "p"],
+    ["subagent", "root", "child:subagent:idle", "p"],
+  ]);
+});
+
 test("notifier: attention pushes, aborts stay silent, subagents attribute to parent", async () => {
   const sent: PushPayload[] = [];
   const projections = new Map<string, SessionProjection>([
@@ -220,12 +292,18 @@ test("notifier: attention pushes, aborts stay silent, subagents attribute to par
     send: async (p) => { sent.push(p); },
     projection: async (id) => projections.get(id),
   });
+  // Settle between fire-and-forget calls: arrival order across distinct
+  // transitions is not a contract, only per-transition delivery is.
   const settle = () => new Promise((r) => setTimeout(r, 10));
 
   notifier.attention("root", "permission");
+  await settle();
   notifier.turnStopped("root", "aborted"); // silent
+  await settle();
   notifier.turnStopped("root", "completed");
+  await settle();
   notifier.turnStopped("child", "error"); // attributes to the parent
+  await settle();
   notifier.attention("ghost", "question"); // unknown session: no payload
   await settle();
 

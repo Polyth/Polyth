@@ -433,6 +433,17 @@ export function NotificationsPage() {
         <Toggle on={ui.notifyOnlyWhenHidden} onChange={(v) => setUiSettings({ notifyOnlyWhenHidden: v })} label="Only when hidden" />
       </Row>
       <Row
+        label="Centre history"
+        hint="Keep read notifications visible in the notification centre."
+        itemId="notifications.centreHistory"
+      >
+        <Toggle
+          on={ui.notificationCentreHistory}
+          onChange={(v) => setUiSettings({ notificationCentreHistory: v })}
+          label="Centre history"
+        />
+      </Row>
+      <Row
         label="Template"
         hint="Variables: {project} {session} {status} {preview}. Values are redacted and capped."
         itemId="notifications.template"

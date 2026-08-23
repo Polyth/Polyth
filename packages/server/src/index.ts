@@ -82,6 +82,8 @@ import { createAuthService } from "./auth.ts";
 import { authRoutes } from "./routes/auth.ts";
 import { createPushNotifier, createPushService } from "./push.ts";
 import { pushRoutes } from "./routes/push.ts";
+import { createNotificationStore } from "./notifications.ts";
+import { notificationRoutes } from "./routes/notifications.ts";
 import { autoAcceptRoutes } from "./routes/autoAccept.ts";
 import { createBehaviorService } from "./behavior.ts";
 import { createMcpConfigService, mcpEntriesFromBackendConfig } from "./mcp.ts";
@@ -139,6 +141,7 @@ export async function boot(opts: BootOptions = {}) {
   const broadcast: Broadcaster = {
     event: (e: SessionEvent) => live?.event(e),
     projection: (p: SessionProjection) => live?.projection(p),
+    notification: (n) => live?.notification?.(n),
     pluginChanged: (plugin) => live?.pluginChanged?.(plugin),
     packageChanged: (pkg) => live?.packageChanged?.(pkg),
   };
@@ -442,9 +445,34 @@ export async function boot(opts: BootOptions = {}) {
   // notifier bridging the session service's attention/turn-stopped seam.
   // Auto-accepted permissions never reach this seam, so they never push.
   const push = createPushService({ file: `${dataDir}/push.json` });
+  // NTF-01: durable inbox recorded at the ONE transition-tight seam — the
+  // notifier's send sink, after buildPushPayload. Order per record: JSON
+  // store commit → unfiltered WS broadcast → web-push attempt. A push
+  // failure keeps the durable row; a store failure emits neither (contained
+  // by the notifier's fire-and-forget boundary). /api/push/test calls
+  // push.send directly and therefore never creates a centre row.
+  const notifications = createNotificationStore({ file: `${dataDir}/notifications.json` });
   const pushNotifier = createPushNotifier({
-    send: (payload) => push.send(payload),
+    send: async (payload) => {
+      const { key, projectId } = payload;
+      if (!key || !payload.sessionId || !projectId) {
+        throw Object.assign(new Error("notification payload missing key/session/project"), { code: "invalid-input" });
+      }
+      // Ownership: the target session (when it still exists) must belong to
+      // the payload's project before the record is published.
+      const target = await store.projection(payload.sessionId);
+      if (target && target.projectId !== projectId) {
+        throw Object.assign(new Error("notification target belongs to another project"), { code: "invalid-input" });
+      }
+      const record = await notifications.add({
+        key, kind: payload.kind, sessionId: payload.sessionId, projectId,
+        title: payload.title, body: payload.body,
+      });
+      broadcast.notification?.(record);
+      return push.send(payload);
+    },
     projection: (sessionId) => store.projection(sessionId),
+    attention: async (sessionId) => (await store.attentionFor([sessionId]))[sessionId],
   });
 
   const sessions = createSessionService({
@@ -994,6 +1022,7 @@ export async function boot(opts: BootOptions = {}) {
     controlRoutes(sessions),
     autoAcceptRoutes(sessions),
     pushRoutes(push),
+    notificationRoutes(notifications),
     profileRoutes({
       store,
       listModels: () => runtimeCatalog.models(),

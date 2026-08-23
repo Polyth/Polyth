@@ -6393,6 +6393,47 @@ body[data-quick-actions="false"] [data-widget-id="core.quick-actions"] { display
   .editor-tree { max-height: 34vh; }
 }
 
+/* ==================== NTF-01 notification centre =========================== */
+/* Header bell: relative anchor for the unread badge; the badge is absent at
+   zero and the accessible name always carries the exact count. */
+.notification-bell { position: relative; }
+.notification-bell.active { color: var(--accent); background: var(--accent-wash); }
+.notification-badge {
+  position: absolute; top: 1px; right: 0; min-width: 14px; height: 14px; padding: 0 3px;
+  border-radius: 8px; background: var(--accent); color: #211209;
+  font: 700 9px/14px var(--mono); text-align: center;
+}
+
+.notification-centre { display: flex; flex-direction: column; gap: 10px; }
+.ntc-toolbar { display: flex; flex-wrap: wrap; gap: 6px; }
+.ntc-error { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--danger, #e5534b); }
+.ntc-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+
+/* Rows are real buttons: one activation handler for pointer and Enter/Space,
+   a visible focus ring, and >=44px targets. Unread is never color alone —
+   rows also carry sr-only "unread" text and a stronger kind label. */
+.ntc-row {
+  display: flex; flex-direction: column; gap: 3px; width: 100%; min-height: 44px;
+  padding: 8px 10px; text-align: left; font: inherit; font-size: 12.5px; line-height: 1.45;
+  background: var(--elevated); border: 1px solid var(--border-soft); border-left-width: 3px;
+  border-radius: 9px; color: var(--text); cursor: pointer;
+}
+.ntc-row:hover:not(:disabled) { border-color: var(--accent); }
+.ntc-row:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+.ntc-row.unread { border-left-color: var(--accent); }
+.ntc-row:disabled { cursor: default; color: var(--muted); background: var(--sunken); }
+.ntc-top { display: flex; align-items: baseline; gap: 8px; }
+.ntc-kind { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.5px; color: var(--muted); }
+.ntc-row.unread .ntc-kind { color: var(--accent); }
+.ntc-time { margin-left: auto; font-size: 10.5px; color: var(--faint); white-space: nowrap; }
+.ntc-title { font-weight: 600; overflow-wrap: anywhere; }
+.ntc-body { color: var(--muted); overflow-wrap: anywhere; }
+.ntc-gone { font-size: 11px; font-style: italic; color: var(--faint); }
+
+/* Compact rail-sheet mode: toolbar/error actions grow to 44px targets. */
+.panel-sheet .ntc-toolbar .small-btn,
+.panel-sheet .ntc-error .small-btn { min-height: 44px; min-width: 44px; padding: 0 14px; }
+
 /* ========================= mobile UI polish =========================
    Session management and Focus chat share the reference's blue hierarchy,
    neutral cards, generous pills, and compact mobile chrome. */

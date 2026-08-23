@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import { resolve } from "node:path";
 import type {
   AgentProfile, AgentRuntime, AttachmentRef, AutoAcceptSetting, ChildSnapshotResult, CreateSessionInput, DeliveryMode,
-  Disposable, ForkDraft, ForkResult, JsonObject,
+  Disposable, ForkDraft, ForkResult, JsonObject, NotificationRecord,
   InstalledPluginDto, PackageDescriptorDto, QueueItemDto, RuntimeEvent,
   SecretRequestData, SecretResolvedData, SecureSafeKind, SecureSafeService,
   RuntimeSession, SendResult, SessionEvent, SessionFolderDto, SessionForkedData, SessionOrganizePatch, SessionProjection, SessionRef,
@@ -20,6 +20,10 @@ import { sanitizeAttachments } from "./attachments.ts";
 export interface Broadcaster {
   event(ev: SessionEvent): void;
   projection(p: SessionProjection): void;
+  /** NTF-01: unfiltered notification-centre fan-out. Optional so existing
+   *  fakes stay valid; inbox records never pass through appendAndBroadcast
+   *  or any session reducer. */
+  notification?(record: NotificationRecord): void;
   pluginChanged?(plugin: InstalledPluginDto): void;
   packageChanged?(pkg: PackageDescriptorDto): void;
 }

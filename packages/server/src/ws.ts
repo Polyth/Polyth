@@ -5,6 +5,7 @@ import type { IncomingMessage } from "node:http";
 import type { Socket } from "node:net";
 import type {
   InstalledPluginDto,
+  NotificationRecord,
   PackageDescriptorDto,
   SessionEvent,
   SessionProjection,
@@ -262,6 +263,13 @@ export function attachWs(
     },
     projection(p: SessionProjection) {
       for (const [ws] of clients) send(ws, { type: "projection", session: p });
+    },
+    notification(record: NotificationRecord) {
+      // NTF-01: global inbox fan-out — every authenticated socket receives it
+      // regardless of its active-session subscription. Never buffered into
+      // liveBuffer, never counted against afterSeq, never part of gap-fill;
+      // REST `after=<ts>` catch-up owns reconnect delivery.
+      for (const [ws] of clients) send(ws, { type: "notification/added", notification: record });
     },
     pluginChanged(plugin: InstalledPluginDto) {
       for (const [ws] of clients) send(ws, { type: "plugin/changed", plugin });

@@ -10,6 +10,7 @@ import { resolveActiveProjectId } from "./projectRegistry.ts";
 import type { AttachmentRef, JsonObject, ModelRef, Project, SessionEvent } from "@polyth/contracts";
 import { suggestWorktreeBranch } from "./worktreeSessions.ts";
 import { installPushDeepLinks, registerServiceWorker } from "./push.ts";
+import { notificationCentre } from "./notificationCentre.ts";
 import { applyComposerSeed } from "./drafts.ts";
 import { forkSeedKey, rewindSeedKey } from "./messageActions.ts";
 import { getSessionDefaults, resolveSessionDefaultModel } from "./sessionDefaults.ts";
@@ -279,14 +280,24 @@ function startSync(): void {
       flushTimer ??= setTimeout(flush, 0);
     } else if (msg.type === "projection") {
       store.upsertSession(msg.session);
+    } else if (msg.type === "notification/added") {
+      // NTF-01: global inbox rows bypass the session event batch entirely —
+      // they are derived state, never part of any session's log or reducer.
+      notificationCentre.append(msg.notification);
     } else if (msg.type === "package/changed") {
       reconcilePackage(msg.package);
     }
+  });
+  // Gap-fill on every successful (re)connect; merge-by-id makes the race with
+  // the initial bootstrap fetch safe. No polling.
+  sync.onOpen(() => {
+    void notificationCentre.catchUp();
   });
   void initPluginBridge(sync).catch((error) => {
     console.error("plugin bridge initialization failed", error);
   });
   sync.connect(`${proto}://${location.host}/ws`);
+  void notificationCentre.bootstrap();
 }
 
 // ---- session / project actions --------------------------------------------
