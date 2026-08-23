@@ -4,19 +4,58 @@
 // launcher and the same command path; it is navigation, not a modal dialog.
 // Selecting Chat hides the workspace layer (kept-alive) and the command path
 // restores the last Chat focus target or composer without remounting trees.
-import { closeWorkspacePane, openWorkspacePane, setActiveView, useStore } from "../../store.ts";
+import {
+  closeWorkspacePane, openWorkspacePane, setActiveView, setOverlay, setSidebarOpen, setUiError, useStore,
+} from "../../store.ts";
 import { listSurfaces, useSurfaceVersion, workspaceSurfacesOf } from "../../surfaces.ts";
 import { Icon } from "../../icons.tsx";
+import { createSession } from "../../init.ts";
+import { displaySessionTitle } from "../../format.ts";
+import { friendlyError } from "../../settings.ts";
 
 export default function WorkspaceBottomNav() {
   const rail = useStore((s) => s.railPlugin);
   const view = useStore((s) => s.activeView);
+  const projectId = useStore((s) => s.activeProjectId);
+  const session = useStore((s) => s.sessions.find((candidate) => candidate.id === s.activeSessionId) ?? null);
   useSurfaceVersion();
   const panes = workspaceSurfacesOf(listSurfaces());
-  if (panes.length === 0) return null;
 
   const paneOpen = panes.some((s) => s.id === rail);
   const chatCurrent = !paneOpen && view === "session";
+
+  if (chatCurrent) {
+    const title = displaySessionTitle(session?.title ?? "", session?.id);
+    const date = session ? new Date(session.createdAt).toISOString().slice(0, 10) : "Start a session";
+    return (
+      <nav className="workspace-bottom-nav session-bottom-nav" aria-label="Session">
+        <button className="session-nav-round" aria-label="Session history" onClick={() => setOverlay("search")}>
+          <Icon.rewind />
+        </button>
+        <button
+          className="session-nav-current"
+          aria-label={`Open sessions, current: ${title}`}
+          onClick={() => setSidebarOpen(true)}
+        >
+          <span>{session ? `${title} · ${date}` : date}</span>
+          <Icon.chevronDown />
+        </button>
+        <button
+          className="session-nav-round"
+          aria-label="New session"
+          disabled={!projectId}
+          onClick={() => {
+            if (!projectId) return;
+            void createSession(projectId).catch((error) =>
+              setUiError(friendlyError("Couldn’t create a session", error)));
+          }}
+        >
+          <Icon.plus />
+        </button>
+      </nav>
+    );
+  }
+  if (panes.length === 0) return null;
 
   return (
     <nav className="workspace-bottom-nav" aria-label="Workspace">

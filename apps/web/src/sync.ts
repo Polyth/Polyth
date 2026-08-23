@@ -12,6 +12,7 @@ export type SyncInbound =
   | { type: "error"; code: string; message: string };
 
 export type SyncListener = (msg: SyncInbound) => void;
+export type SyncStatus = "connecting" | "connected" | "disconnected";
 
 export interface SeqDedupe {
   has(sessionId: string, seq: number): boolean;
@@ -61,6 +62,8 @@ export function isSyncInbound(raw: unknown): raw is SyncInbound {
 export class SyncClient {
   private ws: WebSocket | null = null;
   private listeners = new Set<SyncListener>();
+  private statusListeners = new Set<(status: SyncStatus) => void>();
+  private status: SyncStatus = "disconnected";
   private dedupe = createSeqDedupe();
   private seenSeq = new Map<string, number>(); // sessionId -> last applied seq
   private sub: { sessionId?: string; afterSeq: number } | null = null;
@@ -75,6 +78,18 @@ export class SyncClient {
     };
   }
 
+  onStatus(cb: (status: SyncStatus) => void): () => void {
+    this.statusListeners.add(cb);
+    cb(this.status);
+    return () => {
+      this.statusListeners.delete(cb);
+    };
+  }
+
+  getStatus(): SyncStatus {
+    return this.status;
+  }
+
   setSubscription(sessionId: string | undefined, afterSeq = 0): void {
     this.sub = { sessionId, afterSeq };
     this.sendSubscribe();
@@ -82,10 +97,12 @@ export class SyncClient {
 
   connect(url: string): void {
     if (this.closed) return;
+    this.publishStatus("connecting");
     const ws = new WebSocket(url);
     this.ws = ws;
     ws.onopen = () => {
       this.backoff = 500;
+      this.publishStatus("connected");
       this.sendSubscribe();
     };
     ws.onmessage = (e: MessageEvent) => {
@@ -94,6 +111,7 @@ export class SyncClient {
     ws.onclose = () => {
       if (this.ws === ws) {
         this.ws = null;
+        this.publishStatus("disconnected");
         this.scheduleReconnect(url);
       }
     };
@@ -107,6 +125,13 @@ export class SyncClient {
     if (this.timer !== null) clearTimeout(this.timer);
     this.ws?.close();
     this.ws = null;
+    this.publishStatus("disconnected");
+  }
+
+  private publishStatus(status: SyncStatus): void {
+    if (status === this.status) return;
+    this.status = status;
+    for (const listener of [...this.statusListeners]) listener(status);
   }
 
   private scheduleReconnect(url: string): void {

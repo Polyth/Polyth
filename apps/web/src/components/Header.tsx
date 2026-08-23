@@ -23,6 +23,7 @@ import { Icon } from "../icons.tsx";
 import CapabilityMenu from "./CapabilityMenu.tsx";
 import { setWorkspaceMode, useWorkspaceMode } from "../widgets/workspaceMode.ts";
 import { useDismissibleMenu } from "./a11y/Menu.ts";
+import ChatMetrics from "./ChatMetrics.tsx";
 
 const STROKE = { fill: "none", stroke: "currentColor", strokeWidth: 1.5, strokeLinecap: "round", strokeLinejoin: "round" } as const;
 
@@ -458,11 +459,13 @@ export default function Header() {
   const session = useStore((s) => s.sessions.find((x) => x.id === s.activeSessionId) ?? null);
   const project = useStore((s) => s.projectRegistry.projects.find((p) => p.id === s.activeProjectId) ?? null);
   const model = useActiveModel();
+  const view = useStore((s) => s.activeView);
   const [goalFormOpen, setGoalFormOpen] = useState(false);
   const workspaceMode = useWorkspaceMode();
 
   const mode = useShellMode();
   const compact = mode !== "wide";
+  const chatSurface = workspaceMode === "chat" && view === "session";
   useResizeFocusHandoff(mode);
   const switchWorkspaceMode = (next: "chat" | "widgets" | "edit") => {
     closeWorkspacePane();
@@ -472,33 +475,48 @@ export default function Header() {
 
   return (
     <>
-      <header className={`header${compact ? " header-compact" : ""}`}>
+      <header className={`header${compact ? " header-compact" : ""}${chatSurface ? " header-chat" : ""}`}>
         {compact && <DrawerTrigger />}
-        <button className="header-brand" aria-label="Polyth home" onClick={() => switchWorkspaceMode("chat")}>
-          <span className="polyth-mark">p</span>
-          <strong>polyth</strong>
-        </button>
-        <div className="workspace-mode-switch" role="group" aria-label="Workspace view">
+        {chatSurface && (
           <button
-            className={workspaceMode === "chat" ? "active" : ""}
-            aria-pressed={workspaceMode === "chat"}
-            onClick={() => switchWorkspaceMode("chat")}
-          >Focus</button>
-          <button
-            className={workspaceMode !== "chat" ? "active" : ""}
-            aria-pressed={workspaceMode !== "chat"}
-            onClick={() => switchWorkspaceMode("widgets")}
-          >Canvas</button>
-        </div>
-        {workspaceMode === "chat" && <CapabilityNav />}
+            className="icon-btn header-project-btn"
+            aria-label={compact ? "Open projects and sessions" : "Add or open a project"}
+            title={compact ? project?.name || "Projects" : "Add or open a project"}
+            onClick={() => compact ? setSidebarOpen(true) : setOverlay("project-picker")}
+          >
+            <Icon.files />
+          </button>
+        )}
+        {(!compact || !chatSurface) && (
+          <button className="header-brand" aria-label="Polyth home" onClick={() => switchWorkspaceMode("chat")}>
+            <span className="polyth-mark">p</span>
+            <strong>polyth</strong>
+          </button>
+        )}
+        {(!compact || !chatSurface) && (
+          <div className="workspace-mode-switch" role="group" aria-label="Workspace view">
+            <button
+              className={workspaceMode === "chat" ? "active" : ""}
+              aria-pressed={workspaceMode === "chat"}
+              onClick={() => switchWorkspaceMode("chat")}
+            >Focus</button>
+            <button
+              className={workspaceMode !== "chat" ? "active" : ""}
+              aria-pressed={workspaceMode !== "chat"}
+              onClick={() => switchWorkspaceMode("widgets")}
+            >Canvas</button>
+          </div>
+        )}
+        {workspaceMode === "chat" && !compact && <CapabilityNav />}
+        {chatSurface && <ChatMetrics session={session} model={model} />}
         <span className="header-spacer" />
-        {workspaceMode === "chat" && session && (
+        {workspaceMode === "chat" && !compact && session && (
           <SlotHost
             slot="session.header.actions"
             context={{ sessionId: session.id, status: session.status, working: model.turn?.status === "working" }}
           />
         )}
-        {workspaceMode === "chat" && session && (
+        {workspaceMode === "chat" && !compact && session && (
           <>
             <button
               className="header-action header-goal"
@@ -511,16 +529,18 @@ export default function Header() {
             <AutoAcceptChip sessionId={session.id} effective={session.autoAccept === true} />
           </>
         )}
-        <div className="header-actions" aria-label="Application">
-          <SlotHost
-            slot="app.header.actions"
-            context={{ projectId: project?.id ?? null, sessionId: session?.id ?? null, workspaceMode }}
-          />
-        </div>
+        {(!compact || !chatSurface) && (
+          <div className="header-actions" aria-label="Application">
+            <SlotHost
+              slot="app.header.actions"
+              context={{ projectId: project?.id ?? null, sessionId: session?.id ?? null, workspaceMode }}
+            />
+          </div>
+        )}
         {workspaceMode === "chat" && (
           <OverflowMenu sessionId={session?.id ?? null} onGoal={() => setGoalFormOpen((value) => !value)} />
         )}
-        <UserMenu />
+        {(!compact || !chatSurface) && <UserMenu />}
       </header>
       {goalFormOpen && <GoalAttachForm onDone={() => setGoalFormOpen(false)} />}
     </>

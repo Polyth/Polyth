@@ -140,7 +140,10 @@ export default function ModelPicker({
         aria-expanded={open}
         onClick={() => setOpen((valueOpen) => !valueOpen)}
       >
-        <span className="picker-chip-text">{label}</span>
+        <span className="model-trigger-copy">
+          <small>Model</small>
+          <strong className="picker-chip-text">{label}</strong>
+        </span>
         {(current ?? fallback) && (
           <span className="model-trigger-meta">
             {modelModalities(current ?? fallback!)} · {modelContextLabel((current ?? fallback)?.context)}

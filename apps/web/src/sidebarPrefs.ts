@@ -96,6 +96,7 @@ export type SidebarViewMode = "list" | "tree";
 
 export function parseSidebarViewMode(raw: string | null): SidebarViewMode {
   // One-way migration from the removed project-folder presentation.
+  if (raw === null) return "tree";
   return raw === "tree" || raw === "folders" ? "tree" : "list";
 }
 

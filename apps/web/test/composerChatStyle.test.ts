@@ -51,7 +51,7 @@ test("thinking stays unboxed while command output keeps a light boundary", () =>
   const css = read("../src/styles.css");
 
   assert.match(timeline, /<details className="reasoning" open=\{open\}>/);
-  assert.match(timeline, /<details className=\{`tool-card/);
+  assert.match(timeline, /<div className=\{`tool-card/);
   assert.match(css, /\.reasoning\s*\{[^}]*border:\s*0;[^}]*background:\s*transparent;/s);
   assert.match(css, /\.tool-card\s*\{[^}]*border-color:\s*var\(--border-soft\);[^}]*background:\s*color-mix/s);
 });

@@ -59,7 +59,7 @@ import { agentPickerDefaultLabel, modelPickerDefaultLabel } from "../composerDef
 import { modKeyLabel, parseModelRef } from "../settings.ts";
 import { Icon } from "../icons.tsx";
 import { useWorkspaceMode } from "../widgets/workspaceMode.ts";
-import ModelPicker, { modelSupportsThinking } from "./ModelPicker.tsx";
+import ModelPicker, { modelContextLabel, modelSupportsThinking } from "./ModelPicker.tsx";
 import { useSessionDefaults } from "../sessionDefaults.ts";
 import { roleKind, useRolePrefs } from "../rolePrefs.ts";
 
@@ -74,6 +74,64 @@ function modelRefFromValue(value: string): { providerID: string; modelID: string
     // fall through
   }
   return undefined;
+}
+
+function ContextWindowPicker({ limit, used }: { limit?: number; used?: number }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  const value = limit
+    ? modelContextLabel(limit).replace(/\s+context$/, "").toUpperCase()
+    : "Unknown";
+  const usage = Math.max(0, used ?? 0);
+  const percent = limit ? Math.min(100, Math.round((usage / limit) * 100)) : null;
+  useEffect(() => {
+    if (!open) return;
+    const onPointerDown = (event: PointerEvent) => {
+      if (!ref.current?.contains(event.target as Node)) setOpen(false);
+    };
+    const onKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("pointerdown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [open]);
+  return (
+    <div className={`context-window-picker${open ? " open" : ""}`} ref={ref}>
+      <button
+        type="button"
+        className="context-window-chip"
+        title={limit ? `Model context window: ${limit.toLocaleString()} tokens` : "Context window unavailable"}
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        onClick={() => setOpen((valueOpen) => !valueOpen)}
+      >
+        <span>
+          <small>Context Window</small>
+          <strong>{value}</strong>
+        </span>
+        <Icon.chevronDown />
+      </button>
+      {open && <div className="context-window-pop" role="dialog" aria-label="Context window details">
+        <div>
+          <span>Model limit</span>
+          <strong>{limit ? limit.toLocaleString() : "Unavailable"}</strong>
+        </div>
+        <div>
+          <span>Current input</span>
+          <strong>{usage.toLocaleString()} tokens</strong>
+        </div>
+        {percent !== null && (
+          <div className="context-window-meter" aria-label={`${percent}% of context window used`}>
+            <i style={{ width: `${percent}%` }} />
+          </div>
+        )}
+      </div>}
+    </div>
+  );
 }
 
 const PROFILE_MISSING_NOTE = "Profile unavailable — choose another";
@@ -762,7 +820,7 @@ export default function Composer({ variant = "docked" }: { variant?: "docked" | 
           ariaLabel="Message"
           placeholder={shellMode
             ? "Enter a workspace shell command…"
-            : "Ask Polyth anything…"}
+            : "Ask anything…"}
           {...(acView ? {
             role: "combobox",
             ariaAutocomplete: "list" as const,
@@ -853,15 +911,21 @@ export default function Composer({ variant = "docked" }: { variant?: "docked" | 
             Technical options
           </button>}
           {!noModels && (
-            <ModelPicker
-              models={chatModels}
-              value={cfg.model}
-              recommended={recommendedModel}
-              onPick={(ref) => {
-                updateCfg(withExplicitModel(cfg, ref));
-                if (ref) noteModelUsed(`${ref.providerID}/${ref.modelID}`);
-              }}
-            />
+            <>
+              <ModelPicker
+                models={chatModels}
+                value={cfg.model}
+                recommended={recommendedModel}
+                onPick={(ref) => {
+                  updateCfg(withExplicitModel(cfg, ref));
+                  if (ref) noteModelUsed(`${ref.providerID}/${ref.modelID}`);
+                }}
+              />
+              <ContextWindowPicker
+                limit={selectedModel?.context}
+                used={model.contextUsage?.inputTokens}
+              />
+            </>
           )}
           {chatAgents.length > 0 && (
             <Picker

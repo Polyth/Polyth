@@ -375,12 +375,37 @@ function AssistantView({
 }
 
 // Long tool output stays clamped until "Show all" (UX-37).
-function ClampedPre({ cls, text }: { cls: string; text: string }) {
+function ShellOutput({ text }: { text: string }) {
+  let pidValuePending = false;
+  return (
+    <>
+      {text.split(/(\bstarted\b|\bpid\b|\b\d+\b)/gi).map((part, index) => {
+        const normalized = part.toLowerCase();
+        let className: string | undefined;
+        if (normalized === "started") className = "shell-started";
+        else if (normalized === "pid") {
+          className = "shell-pid";
+          pidValuePending = true;
+        } else if (/^\d+$/.test(part)) {
+          if (pidValuePending) className = "shell-pid";
+          pidValuePending = false;
+        } else if (pidValuePending && part.trim() && !/^[\s:=#-]+$/.test(part)) {
+          pidValuePending = false;
+        }
+        return <span key={`${index}:${part}`} className={className}>{part}</span>;
+      })}
+    </>
+  );
+}
+
+function ClampedPre({ cls, text, shell = false }: { cls: string; text: string; shell?: boolean }) {
   const [full, setFull] = useState(false);
   const long = text.split("\n").length > 24 || text.length > 2400;
   return (
     <div className="copy-wrap">
-      <pre className={`${cls}${full ? " full" : ""}`}>{text}</pre>
+      <pre className={`${cls}${shell ? " shell-output" : ""}${full ? " full" : ""}`}>
+        {shell ? <ShellOutput text={text} /> : text}
+      </pre>
       <CopyButton text={text} />
       {long && (
         <button className="small-btn show-all" onClick={() => setFull((v) => !v)}>
@@ -391,29 +416,56 @@ function ClampedPre({ cls, text }: { cls: string; text: string }) {
   );
 }
 
+export function shellCardCopyText(
+  input: ToolMsg["input"],
+  output?: string,
+  error?: string,
+): string {
+  const command = typeof input.command === "string"
+    ? input.command
+    : JSON.stringify(input, null, 2);
+  return [command, output, error].filter((part): part is string => typeof part === "string" && part.length > 0).join("\n\n");
+}
+
 function ToolCard({ m }: { m: ToolMsg }) {
   const done = m.status !== "pending";
+  const [open, setOpen] = useState(!done);
   const inputJson = JSON.stringify(m.input, null, 2);
   const summary = toolSummary(m.input);
+  const shell = /^(bash|shell|shell_command|run_shell)$/i.test(m.tool);
+  useEffect(() => setOpen(!done), [done]);
   return (
-    <details className={`tool-card ${m.status === "error" ? "error" : ""}`} open={!done}>
-      <summary className="tool-head">
-        <span className="tool-icon">
-          {m.status === "pending" ? (
-            <span className="spinner" />
-          ) : m.status === "done" ? (
-            <span className="ok">✓</span>
-          ) : (
-            <span className="err">✕</span>
-          )}
-        </span>
-        <span className="tool-name">{m.title || m.tool}</span>
-        {summary && <span className="mono muted" style={{ fontSize: 11, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{summary}</span>}
-        <span className="tool-dur">{m.finishTime !== undefined ? fmtMs(m.finishTime - m.time) : "running…"}</span>
-      </summary>
-      <div className="tool-body">
+    <div className={`tool-card${open ? " open" : ""}${shell ? " shell-command-card" : ""}${m.status === "error" ? " error" : ""}`}>
+      <div className="tool-head">
+        <button
+          type="button"
+          className="tool-disclosure"
+          aria-expanded={open}
+          onClick={() => setOpen((value) => !value)}
+        >
+          <span className="tool-chevron" aria-hidden="true"><Icon.chevronRight /></span>
+          <span className="tool-icon">
+            {m.status === "pending" ? (
+              <span className="spinner" />
+            ) : m.status === "done" ? (
+              <span className="ok">✓</span>
+            ) : (
+              <span className="err">✕</span>
+            )}
+          </span>
+          <span className="tool-name">{shell ? "Shell Command" : m.title || m.tool}</span>
+          {summary && <span className="mono muted" style={{ fontSize: 11, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{summary}</span>}
+          <span className="tool-dur">{m.finishTime !== undefined ? fmtMs(m.finishTime - m.time) : "running…"}</span>
+        </button>
+        {shell && (
+          <span className="tool-card-copy">
+            <CopyButton text={shellCardCopyText(m.input, m.output, m.error)} />
+          </span>
+        )}
+      </div>
+      {open && <div className="tool-body">
         <div className="tool-section">
-          <div className="tool-label">{m.tool} input</div>
+            <div className="tool-label">{shell ? "Command" : `${m.tool} input`}</div>
           <ClampedPre cls="json" text={inputJson} />
         </div>
         {m.error !== undefined && (
@@ -425,11 +477,11 @@ function ToolCard({ m }: { m: ToolMsg }) {
         {m.output !== undefined && (
           <div className="tool-section">
             <div className="tool-label">Output</div>
-            <ClampedPre cls="out" text={m.output} />
+            <ClampedPre cls="out" text={m.output} shell={shell} />
           </div>
         )}
-      </div>
-    </details>
+      </div>}
+    </div>
   );
 }
 

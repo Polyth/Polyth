@@ -18,6 +18,9 @@ import {
   reorderPinnedSessions,
   sortPinnedSessions,
 } from "../../sidebarPrefs.ts";
+import { Icon } from "../../icons.tsx";
+
+const INITIAL_VISIBLE_SESSIONS = 6;
 
 const STATUS_DOT: Record<string, string> = {
   working: "working", waiting: "waiting", idle: "idle",
@@ -25,7 +28,10 @@ const STATUS_DOT: Record<string, string> = {
 };
 
 function activityTime(updatedAt: number, relative: boolean): string {
-  if (relative) return ago(updatedAt);
+  if (relative) {
+    const value = ago(updatedAt);
+    return value === "0s" ? "now" : value;
+  }
   return new Date(updatedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
@@ -311,7 +317,9 @@ function SessionRow({
           onClick={() => onOpen(s.id)}
           onDoubleClick={() => { setTitle(s.title); setRenaming(true); }}
         >
-          <span className={`dot ${STATUS_DOT[s.status] ?? "idle"}`} />
+          <span className={`session-sync-icon ${STATUS_DOT[s.status] ?? "idle"}`} aria-hidden="true">
+            <Icon.sync />
+          </span>
           <span className="session-body">
             <span className="session-title-line">
               <span className="session-title">{displayTitle}</span>
@@ -363,7 +371,7 @@ function SessionRow({
           aria-haspopup="menu"
           aria-expanded={menuOpen}
           onClick={() => setMenuOpen((v) => !v)}
-        >⋯</button>
+        ><Icon.more /></button>
       </span>
       {menuOpen && (
         <div
@@ -418,11 +426,15 @@ function SessionRow({
 
 export default function SessionList({
   projectId,
+  query = "",
+  attentionOnly = false,
   selectMode = false,
   selectedSessionIds = new Set<string>(),
   onToggleSelected = () => {},
 }: {
   projectId: string;
+  query?: string;
+  attentionOnly?: boolean;
   selectMode?: boolean;
   selectedSessionIds?: ReadonlySet<string>;
   onToggleSelected?: (id: string) => void;
@@ -437,10 +449,14 @@ export default function SessionList({
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
   const [showArchived, setShowArchived] = useState(expandArchived);
   const [draggedPin, setDraggedPin] = useState<string | null>(null);
+  const [visibleCount, setVisibleCount] = useState(INITIAL_VISIBLE_SESSIONS);
 
   useEffect(() => {
     setShowArchived(expandArchived);
   }, [expandArchived]);
+  useEffect(() => {
+    setVisibleCount(INITIAL_VISIBLE_SESSIONS);
+  }, [projectId, query, attentionOnly]);
 
   const reloadOrg = () => {
     void api.listLabels().then(setLabels);
@@ -458,8 +474,27 @@ export default function SessionList({
     () => sessions.filter((s) => s.projectId === projectId).sort((a, b) => b.updatedAt - a.updatedAt),
     [sessions, projectId],
   );
-  const active = projectSessions.filter((s) => s.status !== "archived");
-  const archived = projectSessions.filter((s) => s.status === "archived");
+  const needle = query.trim().toLowerCase();
+  const matchesFilters = (session: SessionProjection) => {
+    if (needle && !session.title.toLowerCase().includes(needle)) return false;
+    if (!attentionOnly) return true;
+    return session.status === "working"
+      || session.status === "waiting"
+      || (session.attention?.questions ?? 0) > 0
+      || (session.attention?.permissions ?? 0) > 0;
+  };
+  const matchingActive = projectSessions.filter((s) => s.status !== "archived" && matchesFilters(s));
+  const orderedActive = [
+    ...sortPinnedSessions(matchingActive),
+    ...matchingActive.filter((session) => session.pinned === undefined),
+  ];
+  let active = orderedActive.slice(0, visibleCount);
+  const selectedActive = orderedActive.find((session) => session.id === activeSessionId);
+  if (selectedActive && !active.some((session) => session.id === selectedActive.id) && active.length > 0) {
+    active = [...active.slice(0, -1), selectedActive];
+  }
+  const archived = projectSessions.filter((s) => s.status === "archived" && matchesFilters(s));
+  const hiddenActive = Math.max(0, orderedActive.length - active.length);
   const pinned = sortPinnedSessions(active);
   const pinRank = new Map(pinned.map((session, index) => [session.id, index]));
   const mainWorktree = worktrees.find((worktree) => worktree.isMain);
@@ -572,7 +607,8 @@ export default function SessionList({
                 return next;
               })}
             >
-              <span aria-hidden="true">{isCollapsed ? "▸" : "▾"}</span>
+              <span className="session-worktree-chevron" aria-hidden="true">{isCollapsed ? "▸" : "▾"}</span>
+              <Icon.branch />
               <span className="session-worktree-name">{group.label}</span>
               <span className="muted">{group.sessions.length}</span>
             </button>
@@ -586,7 +622,16 @@ export default function SessionList({
         );
       })}
 
-      {active.length === 0 && <div className="empty" style={{ padding: "12px" }}>No sessions.</div>}
+      {hiddenActive > 0 && (
+        <button
+          className="show-more-sessions"
+          onClick={() => setVisibleCount((count) => count + INITIAL_VISIBLE_SESSIONS)}
+        >
+          Show more sessions <Icon.chevronDown />
+        </button>
+      )}
+
+      {matchingActive.length === 0 && <div className="empty session-list-empty">No matching sessions.</div>}
 
       {archived.length > 0 && (
         <div className="session-archived">

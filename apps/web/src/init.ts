@@ -1,6 +1,6 @@
 // Bootstrapping + user actions: REST load, WS wiring, session lifecycle.
 import { api } from "./api.ts";
-import { SyncClient } from "./sync.ts";
+import { SyncClient, type SyncStatus } from "./sync.ts";
 import { buildModel } from "./reduce.ts";
 import { displaySessionTitle, isPlaceholderTitle, modelToMarkdown, titleFromPrompt } from "./format.ts";
 import { friendlyError } from "./settings.ts";
@@ -17,6 +17,8 @@ import { initPluginBridge } from "./pluginBridge.ts";
 import { reconcilePackage } from "./packages/reconcile.ts";
 
 let sync: SyncClient | null = null;
+let syncStatus: SyncStatus = "disconnected";
+const syncStatusListeners = new Set<() => void>();
 let lastSubSession: string | undefined;
 let lastProject: string | null | undefined;
 let branchFetchedFor: string | null = null;
@@ -26,6 +28,21 @@ let branchFetchedFor: string | null = null;
 // (UX-FIXTURE-VISUAL P0 — header/status must derive from the resolved root).
 const branchKey = (projectId: string, sessionId: string | null): string =>
   `${projectId}\0${sessionId ?? ""}`;
+
+export function getSyncStatus(): SyncStatus {
+  return syncStatus;
+}
+
+export function subscribeSyncStatus(listener: () => void): () => void {
+  syncStatusListeners.add(listener);
+  return () => syncStatusListeners.delete(listener);
+}
+
+function publishSyncStatus(status: SyncStatus): void {
+  if (status === syncStatus) return;
+  syncStatus = status;
+  for (const listener of [...syncStatusListeners]) listener();
+}
 
 function fetchBranch(projectId: string, sessionId: string | null): void {
   const key = branchKey(projectId, sessionId);
@@ -242,6 +259,7 @@ async function refreshAgents(): Promise<void> {
 function startSync(): void {
   const proto = location.protocol === "https:" ? "wss" : "ws";
   sync = new SyncClient();
+  sync.onStatus(publishSyncStatus);
   // Micro-batched ingestion: a WS burst (reconnect gap-fill, fast streaming)
   // queues one browser task per message. A 0ms timer runs after every task
   // already in the queue, so the whole burst folds into a single applyEvents

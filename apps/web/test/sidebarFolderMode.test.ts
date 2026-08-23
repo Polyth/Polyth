@@ -64,8 +64,8 @@ const click = (el: Element) => el.dispatchEvent(new MouseEventCtor("click", { bu
 
 const project = (id: string): Project => ({ id, path: `/work/${id}`, name: id, createdAt: 1 });
 
-test("parseSidebarViewMode falls back to list; setter persists and round-trips", () => {
-  assert.equal(parseSidebarViewMode(null), "list");
+test("parseSidebarViewMode defaults to the session tree; setter persists and round-trips", () => {
+  assert.equal(parseSidebarViewMode(null), "tree");
   assert.equal(parseSidebarViewMode("bogus"), "list");
   assert.equal(parseSidebarViewMode("folders"), "tree", "legacy folder mode migrates");
   setSidebarViewMode("tree");

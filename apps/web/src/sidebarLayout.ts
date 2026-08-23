@@ -6,9 +6,9 @@ import { useSyncExternalStore } from "react";
 
 export const SIDEBAR_LAYOUT_KEY = "polyth.sidebar.layout";
 
-export const SIDEBAR_MIN_WIDTH = 200;
+export const SIDEBAR_MIN_WIDTH = 280;
 export const SIDEBAR_MAX_WIDTH = 440;
-export const SIDEBAR_DEFAULT_WIDTH = 272;
+export const SIDEBAR_DEFAULT_WIDTH = 332;
 /** Width of the collapsed rail that keeps the restore button reachable. */
 export const SIDEBAR_COLLAPSED_WIDTH = 46;
 
