@@ -101,50 +101,139 @@ test("320px source controls expose 44px tabs, copy actions, and chips", { skip: 
   assert.equal(targets.expandedFileRefHit, true, "file reference has an expanded 44px hit area");
 });
 
-test("320px commit composer stays out of changed-file tap targets", { skip: !CHROME }, async () => {
+test("narrow source-control shell keeps every change group above the commit composer", { skip: !CHROME }, async () => {
   assert.ok(page);
-  await page.setContent(`
-    <style>${css}</style>
-    <main class="view-page git-page">
-      <div class="git-master-detail">
-        <section class="git-master-pane">
-          <button id="disclosure" class="git-change-group-head" aria-expanded="true">Staged Changes</button>
-          <div class="git-change-group-body">
+  const changeGroups = [
+    { id: "staged", title: "Staged Changes" },
+    { id: "changes", title: "Changes" },
+    { id: "untracked", title: "Untracked" },
+  ];
+
+  for (const width of [320, 390, 428]) {
+    await page.setViewportSize({ width, height: 720 });
+    const groups = changeGroups.map((group) => `
+      <section class="git-change-group">
+        <button id="${group.id}-disclosure" data-tap class="git-change-group-head" aria-expanded="true">
+          ${group.title}<span class="git-count">4</span>
+        </button>
+        <div class="git-change-group-body">
+          ${Array.from({ length: 4 }, (_, index) => `
             <div class="git-file-row">
-              <button id="staged-file" class="git-file-main"><span class="git-file-path">src/staged.ts</span></button>
+              <button id="${group.id}-file-${index}" data-tap class="git-file-main">
+                <span class="git-file-letter">M</span>
+                <span class="git-file-path">src/${group.id}-${index}.ts</span>
+              </button>
             </div>
-          </div>
-        </section>
-        <section class="git-detail-pane"></section>
-      </div>
-      <section id="composer" class="git-commit-composer">
-        <div class="git-commit-heading">Commit staged changes</div>
-        <textarea class="commit-msg">message</textarea>
-        <div class="commit-row"><button>Commit</button></div>
+          `).join("")}
+        </div>
       </section>
-    </main>
-    <script>
-      document.querySelector('#disclosure').addEventListener('click', () => document.body.dataset.disclosure = 'clicked');
-      document.querySelector('#staged-file').addEventListener('click', () => document.body.dataset.file = 'clicked');
-    </script>
-  `);
+    `).join("");
 
-  const geometry = await page.evaluate(() => {
-    const master = document.querySelector(".git-master-detail")!.getBoundingClientRect();
-    const composer = document.querySelector("#composer")!.getBoundingClientRect();
-    return {
-      composerPosition: getComputedStyle(document.querySelector("#composer")!).position,
-      masterBottom: master.bottom,
-      composerTop: composer.top,
-    };
-  });
-  assert.equal(geometry.composerPosition, "static");
-  assert.ok(geometry.composerTop >= geometry.masterBottom, "composer must remain below the changed-files panel");
+    await page.setContent(`
+      <style>${css}</style>
+      <div class="app">
+        <header class="header">Polyth</header>
+        <div class="app-shell">
+          <aside class="rail rail-workspace rail-fullscreen">
+            <div class="rail-head"><span class="rail-title">Source control</span></div>
+            <div class="rail-body">
+              <main class="view-page git-page">
+                <header class="source-control-head">
+                  <div class="source-control-title">
+                    <h1 class="view-title">Source Control</h1>
+                    <span class="source-branch">feature/mobile-layout</span>
+                  </div>
+                  <div class="source-remote-actions">
+                    <button class="small-btn">Fetch</button>
+                    <button class="small-btn">Pull</button>
+                    <button class="small-btn">Push</button>
+                    <button class="small-btn icon-only">Refresh</button>
+                  </div>
+                </header>
+                <nav class="source-tabs">
+                  <button class="active">Changes 12</button>
+                  <button>Log</button>
+                  <button>Branches 3</button>
+                  <button>Stashes 1</button>
+                </nav>
+                <div class="git-changes-layout">
+                  <div class="git-master-detail">
+                    <section class="git-master-pane" aria-label="Changed files">
+                      <div class="git-pane-toolbar">
+                        <div><strong>Working tree</strong><span class="muted">12 changed files</span></div>
+                      </div>
+                      <div class="git-change-groups">${groups}</div>
+                    </section>
+                    <section class="git-detail-pane" aria-label="Change details"></section>
+                  </div>
+                  <section id="composer" class="git-commit-composer" aria-label="Commit staged changes">
+                    <div class="git-commit-heading"><strong>Commit 4 staged files</strong></div>
+                    <textarea class="commit-msg">message</textarea>
+                    <div class="commit-row"><button>Generate</button><button>Commit</button></div>
+                  </section>
+                </div>
+              </main>
+            </div>
+          </aside>
+        </div>
+      </div>
+      <script>
+        document.querySelectorAll("[data-tap]").forEach((target) => {
+          target.addEventListener("click", () => { document.body.dataset.lastTap = target.id; });
+        });
+      </script>
+    `);
 
-  await page.click("#disclosure");
-  await page.click("#staged-file");
-  assert.deepEqual(await page.evaluate(() => ({ ...document.body.dataset })), {
-    disclosure: "clicked",
-    file: "clicked",
-  });
+    const geometry = await page.evaluate(() => {
+      const bounds = (selector: string) => document.querySelector(selector)!.getBoundingClientRect();
+      const shell = bounds(".rail-body");
+      const sourcePage = bounds(".git-page");
+      const master = bounds(".git-master-detail");
+      const pane = document.querySelector<HTMLElement>(".git-master-pane")!;
+      const paneBounds = pane.getBoundingClientRect();
+      const composer = bounds("#composer");
+      return {
+        shellBottom: shell.bottom,
+        pageBottom: sourcePage.bottom,
+        masterBottom: master.bottom,
+        paneBottom: paneBounds.bottom,
+        paneClientHeight: pane.clientHeight,
+        paneScrollHeight: pane.scrollHeight,
+        composerTop: composer.top,
+        composerBottom: composer.bottom,
+      };
+    });
+    assert.ok(geometry.pageBottom <= geometry.shellBottom + 0.5, `${width}px page must stay inside the flex shell`);
+    assert.ok(geometry.composerBottom <= geometry.pageBottom + 0.5, `${width}px composer must stay inside the page`);
+    assert.ok(geometry.masterBottom <= geometry.composerTop + 0.5, `${width}px master panel overlaps the composer`);
+    assert.ok(geometry.paneBottom <= geometry.composerTop + 0.5, `${width}px changed-file pane overlaps the composer`);
+    assert.ok(geometry.paneScrollHeight > geometry.paneClientHeight, `${width}px changed-file pane must own overflow`);
+
+    for (const group of changeGroups) {
+      const selector = `#${group.id}-file-3`;
+      await page.locator(selector).scrollIntoViewIfNeeded();
+      const hit = await page.evaluate((targetSelector) => {
+        const target = document.querySelector<HTMLElement>(targetSelector)!;
+        const pane = document.querySelector(".git-master-pane")!.getBoundingClientRect();
+        const composer = document.querySelector("#composer")!.getBoundingClientRect();
+        const targetBounds = target.getBoundingClientRect();
+        const x = targetBounds.left + targetBounds.width / 2;
+        const y = targetBounds.top + targetBounds.height / 2;
+        return {
+          id: document.elementFromPoint(x, y)?.closest("button")?.id,
+          insidePane: targetBounds.top >= pane.top && targetBounds.bottom <= pane.bottom,
+          aboveComposer: targetBounds.bottom <= composer.top,
+        };
+      }, selector);
+      assert.equal(hit.id, `${group.id}-file-3`, `${width}px ${group.title} row must own its hit target`);
+      assert.equal(hit.insidePane, true, `${width}px ${group.title} row must scroll inside the list`);
+      assert.equal(hit.aboveComposer, true, `${width}px ${group.title} row must remain above the composer`);
+      await page.click(selector);
+      assert.equal(await page.evaluate(() => document.body.dataset.lastTap), `${group.id}-file-3`);
+    }
+
+    await page.locator("#untracked-disclosure").scrollIntoViewIfNeeded();
+    await page.click("#untracked-disclosure");
+    assert.equal(await page.evaluate(() => document.body.dataset.lastTap), "untracked-disclosure");
+  }
 });

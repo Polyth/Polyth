@@ -521,7 +521,7 @@ export default function GitView() {
       {showPrForm && <PrCreatePanel projectId={projectId} sessionId={sessionId} onClose={() => setShowPrForm(false)} />}
 
       {tab === "changes" && (
-        <>
+        <div className="git-changes-layout">
           <div className={`git-master-detail ${mobileDetail ? "detail-open" : ""}`}>
             <section className="git-master-pane" aria-label="Changed files">
               <div className="git-pane-toolbar">
@@ -676,7 +676,7 @@ export default function GitView() {
               </div>
             </section>
           )}
-        </>
+        </div>
       )}
 
       {tab === "log" && (
