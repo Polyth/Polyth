@@ -14,6 +14,16 @@ export function installUsagePackage(): () => void {
       icon: "📊",
       order: 50,
       component: UsageDashboard,
+      settingsItems: [
+        {
+          id: "usage.dashboard",
+          pageId: "usage",
+          label: "Usage dashboard",
+          description: "Workspace token, cost, model, and provider analytics",
+          keywords: ["spend", "tokens", "models", "providers", "quota"],
+          focusTarget: "usage.dashboard",
+        },
+      ],
     }),
     installUsagePlugin(),
     registerPackageOnboarding(USAGE_TOUR),

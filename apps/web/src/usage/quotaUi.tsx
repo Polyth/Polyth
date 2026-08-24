@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useSyncExternalStore } from "react";
 import {
   api,
   type QuotaPaceDto,
@@ -196,25 +196,114 @@ export function QuotaOverviewGrid({ snapshots }: { snapshots: readonly QuotaSnap
   );
 }
 
+const quotaErrorMessage = (value: unknown): string =>
+  value instanceof Error ? value.message : String(value);
+
+interface QuotaSnapshotState {
+  snapshots: QuotaSnapshotDto[];
+  loading: boolean;
+  error: string | null;
+}
+
+interface QuotaRequestResult {
+  snapshots: QuotaSnapshotDto[];
+  error?: unknown;
+}
+
+const quotaListeners = new Set<() => void>();
+let quotaState: QuotaSnapshotState = {
+  snapshots: [],
+  loading: true,
+  error: null,
+};
+let quotaRequest: Promise<void> | null = null;
+let quotaPollTimer: number | null = null;
+
+const publishQuotaState = (patch: Partial<QuotaSnapshotState>): void => {
+  quotaState = { ...quotaState, ...patch };
+  for (const listener of [...quotaListeners]) listener();
+};
+
+const runQuotaRequest = (
+  operation: () => Promise<QuotaRequestResult>,
+): Promise<void> => {
+  if (quotaRequest) return quotaRequest;
+  publishQuotaState({ loading: true, error: null });
+  quotaRequest = (async () => {
+    try {
+      const result = await operation();
+      publishQuotaState({
+        snapshots: result.snapshots,
+        error: result.error === undefined ? null : quotaErrorMessage(result.error),
+      });
+    } catch (cause) {
+      publishQuotaState({ error: quotaErrorMessage(cause) });
+    } finally {
+      publishQuotaState({ loading: false });
+      quotaRequest = null;
+    }
+  })();
+  return quotaRequest;
+};
+
+const reloadQuotaSnapshots = (): Promise<void> =>
+  runQuotaRequest(async () => ({ snapshots: await api.usageQuotas() }));
+
+const refreshQuotaSnapshot = (providerId: string): Promise<void> =>
+  runQuotaRequest(async () => {
+    await api.usageQuotasRefresh(providerId);
+    return { snapshots: await api.usageQuotas() };
+  });
+
+const refreshAllQuotaSnapshots = (): Promise<void> =>
+  runQuotaRequest(async () => {
+    const providerIds = quotaState.snapshots.map((snapshot) => snapshot.providerId);
+    if (providerIds.length === 0) return { snapshots: await api.usageQuotas() };
+    const outcomes = await Promise.allSettled(
+      providerIds.map((providerId) => api.usageQuotasRefresh(providerId)),
+    );
+    const snapshots = await api.usageQuotas();
+    const failed = outcomes.find((outcome) => outcome.status === "rejected");
+    return {
+      snapshots,
+      ...(failed?.status === "rejected" ? { error: failed.reason } : {}),
+    };
+  });
+
+const subscribeQuotaSnapshots = (listener: () => void): (() => void) => {
+  quotaListeners.add(listener);
+  if (quotaListeners.size === 1) {
+    void reloadQuotaSnapshots();
+    if (typeof window !== "undefined") {
+      quotaPollTimer = window.setInterval(() => void reloadQuotaSnapshots(), 60_000);
+    }
+  }
+  return () => {
+    quotaListeners.delete(listener);
+    if (quotaListeners.size === 0 && quotaPollTimer !== null && typeof window !== "undefined") {
+      window.clearInterval(quotaPollTimer);
+      quotaPollTimer = null;
+    }
+  };
+};
+
 export function useQuotaSnapshots(): {
   snapshots: QuotaSnapshotDto[];
-  reload: () => void;
-  refresh: (providerId: string) => void;
+  loading: boolean;
+  error: string | null;
+  reload: () => Promise<void>;
+  refresh: (providerId: string) => Promise<void>;
+  refreshAll: () => Promise<void>;
 } {
-  const [snapshots, setSnapshots] = useState<QuotaSnapshotDto[]>([]);
-  const reload = useCallback(() => {
-    void api.usageQuotas().then(setSnapshots);
-  }, []);
-  useEffect(() => {
-    reload();
-    const timer = window.setInterval(reload, 60_000);
-    return () => window.clearInterval(timer);
-  }, [reload]);
-  const refresh = useCallback((providerId: string) => {
-    void api.usageQuotasRefresh(providerId).then(
-      () => reload(),
-      () => reload(),
-    );
-  }, [reload]);
-  return { snapshots, reload, refresh };
+  const state = useSyncExternalStore(
+    subscribeQuotaSnapshots,
+    () => quotaState,
+    () => quotaState,
+  );
+  return {
+    ...state,
+    reload: reloadQuotaSnapshots,
+    refresh: refreshQuotaSnapshot,
+    refreshAll: refreshAllQuotaSnapshots,
+  };
 }

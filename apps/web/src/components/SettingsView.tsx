@@ -109,9 +109,14 @@ export default function SettingsView({ onClose = () => setOverlay(null) }: { onC
   const [cursor, setCursor] = useState(0);
   const paneRef = useRef<HTMLDivElement>(null);
   const modalRef = useRef<HTMLDivElement>(null);
+  const previousMobile = useRef(mobile);
 
   useEffect(() => {
-    if (mobile) setMobileStage("nav");
+    // A settings modal opened on mobile starts on the navigation stage, but
+    // crossing the breakpoint while a desktop page is already open should
+    // preserve that page instead of replacing it with the navigation list.
+    if (mobile && !previousMobile.current) setMobileStage("page");
+    previousMobile.current = mobile;
   }, [mobile]);
 
   useEffect(() => {
