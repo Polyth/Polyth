@@ -6732,6 +6732,11 @@ body[data-quick-actions="false"] [data-widget-id="core.quick-actions"] { display
   .usage-provider-detail-grid { grid-template-columns: 1fr; }
 }
 
+@media (min-width: 701px) and (max-width: 710px) {
+  .usage-view-tabs { width: 100%; margin: 0; }
+  .usage-layout-control { margin-left: auto; }
+}
+
 @media (max-width: 700px) {
   .settings-scrim:has(.settings-page-usage) { padding: 4vh 2vw; }
   .settings-page-usage {
