@@ -6,7 +6,8 @@
 import {
   memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState,
   type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent,
-  type ClipboardEvent as ReactClipboardEvent, type CSSProperties,
+  type ClipboardEvent as ReactClipboardEvent, type CompositionEvent as ReactCompositionEvent,
+  type CSSProperties,
 } from "react";
 import {
   ATTR_BLINK, ATTR_BOLD, ATTR_DIM, ATTR_HIDDEN, ATTR_INVERSE, ATTR_ITALIC,
@@ -38,6 +39,8 @@ interface CellSize { w: number; h: number }
 interface Range { start: number; end: number }
 
 interface Selection { anchor: TermPoint; focus: TermPoint }
+
+interface ContextMenuPosition { x: number; y: number }
 
 /** Normalized selection column range for one absolute row, or null. */
 function selRangeForRow(sel: Selection | null, row: number, cols: number): Range | null {
@@ -145,7 +148,7 @@ function renderRow(line: TermLine, cellW: number): React.ReactNode {
           style={hasStyle ? style : undefined}
           data-url={url}
           data-osc-link={oscLink > 0 ? oscLink : undefined}
-          title={url ? `${url} — Ctrl+click to open` : undefined}
+          title={url ? `${url} — Ctrl/Cmd+click to open` : undefined}
         >{text}</span>,
       );
     }
@@ -212,6 +215,7 @@ export default function TermPane(props: TermPaneProps) {
   const searchInputRef = useRef<HTMLInputElement>(null);
 
   const [, setTick] = useState(0);
+  const [searchEpoch, setSearchEpoch] = useState(0);
   const [cell, setCell] = useState<CellSize>(FALLBACK_CELL);
   const [viewportH, setViewportH] = useState(400);
   const [firstRow, setFirstRow] = useState(0);
@@ -224,10 +228,14 @@ export default function TermPane(props: TermPaneProps) {
   const [caseSensitive, setCaseSensitive] = useState(false);
   const [useRegex, setUseRegex] = useState(false);
   const [current, setCurrent] = useState(0);
+  const [contextMenu, setContextMenu] = useState<ContextMenuPosition | null>(null);
 
   const followRef = useRef(true);
   const selectingRef = useRef(false);
   const dragButtonRef = useRef(-1);
+  const lastMouseCellRef = useRef("");
+  const searchOpenRef = useRef(searchOpen);
+  searchOpenRef.current = searchOpen;
   const cellRef = useRef(cell);
   cellRef.current = cell;
 
@@ -239,8 +247,18 @@ export default function TermPane(props: TermPaneProps) {
   // ---- emulator subscription: coalesce updates to one paint per frame ----
   useEffect(() => {
     let pending = 0;
+    let searchTimer: ReturnType<typeof setTimeout> | undefined;
     const sub = emu.onUpdate(() => {
       if (!followRef.current) setBehind(true);
+      // Search needs to observe in-place cursor rewrites (progress bars, TUIs),
+      // not just appended rows. Throttle rescans so high-output sessions keep
+      // painting smoothly while an active query remains accurate.
+      if (searchOpenRef.current && !searchTimer) {
+        searchTimer = setTimeout(() => {
+          searchTimer = undefined;
+          setSearchEpoch((value) => value + 1);
+        }, 120);
+      }
       if (pending) return;
       pending = raf(() => { pending = 0; setTick((t) => t + 1); });
     });
@@ -252,6 +270,7 @@ export default function TermPane(props: TermPaneProps) {
       sub.dispose();
       bellSub.dispose();
       if (pending) caf(pending);
+      if (searchTimer) clearTimeout(searchTimer);
     };
   }, [emu]);
 
@@ -336,8 +355,7 @@ export default function TermPane(props: TermPaneProps) {
   const matches: TermMatch[] = useMemo(() => {
     if (!searchOpen || !query) return [];
     return searchBuffer(emu.rowInfo, emu.bufferLength(), query, { caseSensitive, regex: useRegex });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [searchOpen, query, caseSensitive, useRegex, total, emu, emu.line(total - 1)?.rev]);
+  }, [searchOpen, query, caseSensitive, useRegex, total, searchEpoch, emu]);
 
   const matchesByRow = useMemo(() => {
     const map = new Map<number, RowMatch[]>();
@@ -410,9 +428,16 @@ export default function TermPane(props: TermPaneProps) {
     }
   };
 
+  const onCompositionEnd = (e: ReactCompositionEvent<HTMLDivElement>) => {
+    if (!running || !e.data) return;
+    send(e.data);
+    scrollToBottom();
+  };
+
   // ---- keyboard ----
   const onKeyDown = (e: ReactKeyboardEvent<HTMLDivElement>) => {
     if ((e.nativeEvent as { isComposing?: boolean }).isComposing) return;
+    if (contextMenu) setContextMenu(null);
     const ctrl = e.ctrlKey;
     const shift = e.shiftKey;
     const meta = e.metaKey;
@@ -422,6 +447,15 @@ export default function TermPane(props: TermPaneProps) {
       e.preventDefault();
       setSearchOpen(true);
       setTimeout(() => searchInputRef.current?.select(), 0);
+      return;
+    }
+    // Clear the local terminal buffer without sending control bytes to the
+    // process (the shell keeps running, matching modern terminal panes).
+    if ((ctrl || meta) && shift && e.key.toLowerCase() === "k") {
+      e.preventDefault();
+      emu.clearBuffer();
+      setSelection(null);
+      scrollToBottom();
       return;
     }
     // copy: Ctrl+Shift+C / Ctrl+Insert / Cmd+C, plus Ctrl+C when text is selected
@@ -495,6 +529,8 @@ export default function TermPane(props: TermPaneProps) {
     return { row, col };
   };
 
+  const mouseButton = (button: number): number => button === 1 ? 1 : button === 2 ? 2 : 0;
+
   const reportMouse = (e: ReactMouseEvent, kind: "down" | "up"): boolean => {
     const modes = emu.modes();
     if (modes.mouseTracking === 0 || e.shiftKey || !running) return false;
@@ -502,11 +538,41 @@ export default function TermPane(props: TermPaneProps) {
     const screenRow = pt.row - emu.scrollbackLength();
     if (screenRow < 0) return false;
     const encoded = encodeMouseEvent({
-      button: e.button === 1 ? 1 : e.button === 2 ? 2 : 0,
+      button: mouseButton(e.button),
       col: Math.min(pt.col + 1, emu.cols()),
       row: Math.min(screenRow + 1, emu.rows()),
       kind,
       shift: e.shiftKey, alt: e.altKey, ctrl: e.ctrlKey,
+    }, { mouseTracking: modes.mouseTracking, mouseSgr: modes.mouseSgr });
+    if (encoded) send(encoded);
+    return encoded !== null;
+  };
+
+  const reportMouseMove = (e: {
+    clientX: number; clientY: number;
+    shiftKey?: boolean; altKey?: boolean; ctrlKey?: boolean;
+  }): boolean => {
+    const modes = emu.modes();
+    if (!running || e.shiftKey || (modes.mouseTracking !== 1002 && modes.mouseTracking !== 1003)) return false;
+    const pressed = dragButtonRef.current;
+    if (modes.mouseTracking === 1002 && pressed < 0) return false;
+    const pt = pointFromEvent(e);
+    const screenRow = pt.row - emu.scrollbackLength();
+    if (screenRow < 0 || screenRow >= emu.rows()) return false;
+    const col = Math.min(pt.col + 1, emu.cols());
+    const row = Math.min(screenRow + 1, emu.rows());
+    const key = `${pressed}:${col}:${row}`;
+    if (key === lastMouseCellRef.current) return true;
+    lastMouseCellRef.current = key;
+    const encoded = encodeMouseEvent({
+      // Button 3 means "no button" for DECSET 1003 any-motion reporting.
+      button: pressed >= 0 ? mouseButton(pressed) : 3,
+      col,
+      row,
+      kind: "move",
+      shift: e.shiftKey,
+      alt: e.altKey,
+      ctrl: e.ctrlKey,
     }, { mouseTracking: modes.mouseTracking, mouseSgr: modes.mouseSgr });
     if (encoded) send(encoded);
     return encoded !== null;
@@ -536,21 +602,27 @@ export default function TermPane(props: TermPaneProps) {
   };
 
   const onMouseDown = (e: ReactMouseEvent<HTMLDivElement>) => {
+    if (contextMenu) setContextMenu(null);
     bodyRef.current?.focus();
-    if (e.button !== 0) return;
     // links: ctrl/cmd+click opens
     const target = e.target as HTMLElement;
     const linkEl = target.closest?.("[data-url],[data-osc-link]") as HTMLElement | null;
-    if (linkEl && (e.ctrlKey || e.metaKey)) {
+    if (e.button === 0 && linkEl && (e.ctrlKey || e.metaKey)) {
       const osc = linkEl.dataset.oscLink;
       const url = osc ? emu.linkUrl(Number(osc)) : linkEl.dataset.url;
-      if (url && /^(https?|file):/i.test(url)) {
+      if (url && /^(https?|file|ftp|mailto):/i.test(url)) {
         e.preventDefault();
         window.open(url, "_blank", "noopener,noreferrer");
         return;
       }
     }
-    if (reportMouse(e, "down")) { dragButtonRef.current = e.button; e.preventDefault(); return; }
+    if (reportMouse(e, "down")) {
+      dragButtonRef.current = e.button;
+      lastMouseCellRef.current = "";
+      e.preventDefault();
+      return;
+    }
+    if (e.button !== 0) return;
     e.preventDefault();
     const pt = pointFromEvent(e);
     if (e.detail === 2) { selectWordAt(pt); return; }
@@ -564,6 +636,7 @@ export default function TermPane(props: TermPaneProps) {
 
   useEffect(() => {
     const onMove = (e: MouseEvent) => {
+      if (dragButtonRef.current >= 0 && reportMouseMove(e)) return;
       if (!selectingRef.current) return;
       const body = bodyRef.current;
       if (body) {
@@ -576,13 +649,15 @@ export default function TermPane(props: TermPaneProps) {
     };
     const onUp = (e: MouseEvent) => {
       if (dragButtonRef.current >= 0) {
+        const pressed = dragButtonRef.current;
         dragButtonRef.current = -1;
+        lastMouseCellRef.current = "";
         const modes = emu.modes();
         if (modes.mouseTracking !== 0 && running) {
           const pt = pointFromEvent(e);
           const screenRow = Math.max(0, pt.row - emu.scrollbackLength());
           const encoded = encodeMouseEvent({
-            button: 0, col: pt.col + 1, row: screenRow + 1, kind: "up",
+            button: mouseButton(pressed), col: pt.col + 1, row: screenRow + 1, kind: "up",
           }, { mouseTracking: modes.mouseTracking, mouseSgr: modes.mouseSgr });
           if (encoded) send(encoded);
         }
@@ -626,6 +701,19 @@ export default function TermPane(props: TermPaneProps) {
         : (modes.appCursorKeys ? "\x1bOB" : "\x1b[B");
       send(seq.repeat(lines));
     }
+  };
+
+  const onContextMenu = (e: ReactMouseEvent<HTMLDivElement>) => {
+    const tracking = emu.modes().mouseTracking !== 0;
+    if (tracking && !e.shiftKey) {
+      e.preventDefault();
+      return;
+    }
+    e.preventDefault();
+    setContextMenu({
+      x: Math.max(8, Math.min(e.clientX, window.innerWidth - 152)),
+      y: Math.max(8, Math.min(e.clientY, window.innerHeight - 126)),
+    });
   };
 
   // ---- focus reporting ----
@@ -730,9 +818,14 @@ export default function TermPane(props: TermPaneProps) {
         role="application"
         aria-label={`Terminal ${label}`}
         onKeyDown={onKeyDown}
+        onCompositionEnd={onCompositionEnd}
         onPaste={onPaste}
         onScroll={onScroll}
         onMouseDown={onMouseDown}
+        onMouseMove={(e) => {
+          if (reportMouseMove(e)) e.preventDefault();
+        }}
+        onContextMenu={onContextMenu}
         onWheel={onWheel}
         onFocus={onFocus}
         onBlur={onBlur}
@@ -757,6 +850,44 @@ export default function TermPane(props: TermPaneProps) {
           )}
         </div>
       </div>
+
+      {contextMenu && (
+        <div
+          className="term-context"
+          role="menu"
+          style={{ left: contextMenu.x, top: contextMenu.y }}
+          onMouseDown={(e) => e.stopPropagation()}
+        >
+          <button
+            role="menuitem"
+            disabled={!selection}
+            onClick={() => {
+              void copySelection();
+              setContextMenu(null);
+              bodyRef.current?.focus();
+            }}
+          >Copy <kbd>Ctrl+Shift+C</kbd></button>
+          <button
+            role="menuitem"
+            onClick={() => {
+              pasteFromClipboard();
+              setContextMenu(null);
+              bodyRef.current?.focus();
+            }}
+          >Paste <kbd>Ctrl+Shift+V</kbd></button>
+          <button
+            role="menuitem"
+            onClick={() => {
+              setSelection({
+                anchor: { row: 0, col: 0 },
+                focus: { row: Math.max(0, emu.bufferLength() - 1), col: emu.cols() },
+              });
+              setContextMenu(null);
+              bodyRef.current?.focus();
+            }}
+          >Select all</button>
+        </div>
+      )}
 
       {behind && !followRef.current && (
         <button className="term-follow" onClick={scrollToBottom} title="Scroll to bottom (Ctrl+Shift+End)">

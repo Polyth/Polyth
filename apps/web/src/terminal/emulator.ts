@@ -254,6 +254,7 @@ export function createTerminalEmulator(opts: EmulatorOptions = {}): TerminalEmul
   let mouseSgr = false;
   let focusReporting = false;
   let lineFeedMode = false;
+  let synchronizedOutput = false;
 
   // charsets
   let g0 = "B";
@@ -298,7 +299,13 @@ export function createTerminalEmulator(opts: EmulatorOptions = {}): TerminalEmul
   // ---- line/cell helpers ----
 
   const eraseCells = (line: TermLine, from: number, to: number) => {
-    for (let i = from; i < to && i < line.chars.length; i++) {
+    // Erasing either half of a wide glyph must erase the whole glyph. Leaving
+    // an orphaned head/tail corrupts column mapping, selection, and later edits.
+    let start = Math.max(0, from);
+    let end = Math.min(to, line.chars.length);
+    if (start > 0 && line.chars[start] === "") start--;
+    if (end < line.chars.length && line.chars[end] === "") end++;
+    for (let i = start; i < end; i++) {
       line.chars[i] = " ";
       line.fg[i] = COLOR_DEFAULT;
       line.bg[i] = curBg; // BCE: erase uses the current background
@@ -311,11 +318,18 @@ export function createTerminalEmulator(opts: EmulatorOptions = {}): TerminalEmul
   /** Clear the tail half if `col` lands on a wide glyph's head or tail. */
   const clearWideAt = (line: TermLine, col: number) => {
     if (col < 0 || col >= cols) return;
+    const clearPartner = (index: number) => {
+      line.chars[index] = " ";
+      line.fg[index] = COLOR_DEFAULT;
+      line.bg[index] = curBg;
+      line.attrs[index] = 0;
+      if (line.links) line.links[index] = 0;
+    };
     if (line.chars[col] === "" && col > 0) {
-      line.chars[col - 1] = " ";
-      line.chars[col] = " ";
+      clearPartner(col - 1);
+      clearPartner(col);
     } else if (col + 1 < cols && line.chars[col + 1] === "") {
-      line.chars[col + 1] = " ";
+      clearPartner(col + 1);
     }
   };
 
@@ -464,11 +478,13 @@ export function createTerminalEmulator(opts: EmulatorOptions = {}): TerminalEmul
     mouseSgr = false;
     focusReporting = false;
     lineFeedMode = false;
+    synchronizedOutput = false;
     cursorStyle = "block";
     cursorBlink = true;
     title = "";
     savedPrimary = null;
     savedAlt = null;
+    pendingHighSurrogate = "";
     markDirty();
   };
 
@@ -658,6 +674,12 @@ export function createTerminalEmulator(opts: EmulatorOptions = {}): TerminalEmul
         case 1005: break; // UTF-8 mouse coords: unsupported encoding, ignore
         case 1006: mouseSgr = on; break;
         case 1015: break; // urxvt mouse: ignore
+        case 2026:
+          // DEC private synchronized-output mode lets TUIs update a frame
+          // across multiple writes without exposing intermediate paints.
+          synchronizedOutput = on;
+          if (!on) markDirty();
+          break;
         case 47: if (on) enterAlt(false); else leaveAlt(); break;
         case 1047:
           if (on) enterAlt(true);
@@ -933,6 +955,10 @@ export function createTerminalEmulator(opts: EmulatorOptions = {}): TerminalEmul
   let oscEsc = false;
   let strEsc = false;
   let charsetTarget = 0;
+  // A WebSocket/decoder normally preserves code points, but the emulator API
+  // also accepts arbitrary chunks. Keep a trailing high surrogate so split
+  // emoji never become two invalid cells.
+  let pendingHighSurrogate = "";
 
   const executeC0 = (code: number) => {
     switch (code) {
@@ -953,7 +979,9 @@ export function createTerminalEmulator(opts: EmulatorOptions = {}): TerminalEmul
     }
   };
 
-  const write = (data: string) => {
+  const write = (chunk: string) => {
+    let data = pendingHighSurrogate + chunk;
+    pendingHighSurrogate = "";
     for (let i = 0; i < data.length; i++) {
       const code = data.charCodeAt(i);
       const ch = data[i]!;
@@ -962,16 +990,44 @@ export function createTerminalEmulator(opts: EmulatorOptions = {}): TerminalEmul
         if (code === 0x1b) { state = ESC; continue; }
         if (code < 0x20) { executeC0(code); markDirty(); continue; }
         if (code === 0x7f) continue;
+        // 8-bit C1 forms are still emitted by some ncurses/legacy tools.
+        if (code >= 0x80 && code <= 0x9f) {
+          switch (code) {
+            case 0x84: lineFeed(); break; // IND
+            case 0x85: lineFeed(); x = 0; break; // NEL
+            case 0x88: tabStops.add(x); break; // HTS
+            case 0x8d: reverseLineFeed(); break; // RI
+            case 0x90: case 0x98: case 0x9e: case 0x9f:
+              state = STR; strEsc = false; break;
+            case 0x9b:
+              state = CSI; csiPrefix = ""; csiParams = ""; csiIntermediate = ""; break;
+            case 0x9d:
+              state = OSC; oscBuf = ""; oscEsc = false; break;
+            default: break;
+          }
+          markDirty();
+          continue;
+        }
         // printable — handle surrogate pairs as one code point
         let cp = code;
         let glyph = ch;
-        if (code >= 0xd800 && code <= 0xdbff && i + 1 < data.length) {
+        if (code >= 0xd800 && code <= 0xdbff) {
+          if (i + 1 >= data.length) {
+            pendingHighSurrogate = ch;
+            continue;
+          }
           const lo = data.charCodeAt(i + 1);
           if (lo >= 0xdc00 && lo <= 0xdfff) {
             cp = (code - 0xd800) * 0x400 + (lo - 0xdc00) + 0x10000;
             glyph = ch + data[i + 1]!;
             i++;
+          } else {
+            cp = 0xfffd;
+            glyph = "\ufffd";
           }
+        } else if (code >= 0xdc00 && code <= 0xdfff) {
+          cp = 0xfffd;
+          glyph = "\ufffd";
         }
         printChar(glyph, cp);
         continue;
@@ -984,7 +1040,8 @@ export function createTerminalEmulator(opts: EmulatorOptions = {}): TerminalEmul
           case "P": case "X": case "^": case "_": state = STR; strEsc = false; break;
           case "(": state = CHARSET; charsetTarget = 0; break;
           case ")": state = CHARSET; charsetTarget = 1; break;
-          case "*": case "+": state = CHARSET; charsetTarget = -1; break;
+          case "*": case "+": case "-": case ".": case "/": case "%":
+            state = CHARSET; charsetTarget = -1; break;
           case "#": state = ESC_HASH; break;
           case "7": saveCursor(); state = GROUND; break;
           case "8": restoreCursor(); state = GROUND; markDirty(); break;
@@ -1049,7 +1106,7 @@ export function createTerminalEmulator(opts: EmulatorOptions = {}): TerminalEmul
       }
 
       if (state === OSC) {
-        if (code === 0x07) { oscDispatch(oscBuf); state = GROUND; continue; }
+        if (code === 0x07 || code === 0x9c) { oscDispatch(oscBuf); state = GROUND; continue; }
         if (oscEsc) {
           oscEsc = false;
           if (ch === "\\") { oscDispatch(oscBuf); state = GROUND; continue; }
@@ -1063,7 +1120,7 @@ export function createTerminalEmulator(opts: EmulatorOptions = {}): TerminalEmul
 
       if (state === STR) {
         // DCS/SOS/PM/APC — swallow until ST (ESC \) or BEL
-        if (code === 0x07) { state = GROUND; continue; }
+        if (code === 0x07 || code === 0x9c) { state = GROUND; continue; }
         if (strEsc) {
           strEsc = false;
           if (ch === "\\") { state = GROUND; }
@@ -1074,7 +1131,7 @@ export function createTerminalEmulator(opts: EmulatorOptions = {}): TerminalEmul
       }
     }
 
-    if (dirty) {
+    if (dirty && !synchronizedOutput) {
       dirty = false;
       for (const cb of updateCbs) cb();
     }
@@ -1093,6 +1150,10 @@ export function createTerminalEmulator(opts: EmulatorOptions = {}): TerminalEmul
       // never leave a dangling wide head at the edge
       if (width > 0 && line.chars[width - 1] !== "" && charWidth(line.chars[width - 1]!.codePointAt(0) ?? 32) === 2) {
         line.chars[width - 1] = " ";
+        line.fg[width - 1] = COLOR_DEFAULT;
+        line.bg[width - 1] = COLOR_DEFAULT;
+        line.attrs[width - 1] = 0;
+        if (line.links) line.links[width - 1] = 0;
       }
     } else {
       while (line.chars.length < width) {

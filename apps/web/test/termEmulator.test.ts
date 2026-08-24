@@ -301,6 +301,17 @@ test("wide chars occupy two cells; overwriting a half clears the glyph", () => {
   assert.equal(t.line(0)!.chars[1], "X");
 });
 
+test("erasing either half of a wide glyph clears the complete cell pair", () => {
+  const t = emu(10, 2);
+  t.write("A你B\x1b[1;3H\x1b[X"); // erase from the trailing half
+  const line = t.line(0)!;
+  assert.equal(line.chars[1], " ");
+  assert.equal(line.chars[2], " ");
+  assert.equal(line.chars[3], "B");
+  assert.equal(line.fg[1], COLOR_DEFAULT);
+  assert.equal(line.fg[2], COLOR_DEFAULT);
+});
+
 test("wide char at the margin wraps whole", () => {
   const t = emu(5, 3);
   t.write("abcd漢");
@@ -409,6 +420,18 @@ test("onUpdate coalesces per write and reports mutations", () => {
   assert.equal(updates, 2);
 });
 
+test("DEC synchronized output suppresses intermediate paints until release", () => {
+  const t = emu();
+  let updates = 0;
+  t.onUpdate(() => updates++);
+  t.write("\x1b[?2026hfirst");
+  t.write("\rsecond");
+  assert.equal(updates, 0);
+  assert.equal(rowText(t, 0), "second");
+  t.write("\x1b[?2026l");
+  assert.equal(updates, 1);
+});
+
 test("split escape sequences across write chunks parse correctly", () => {
   const t = emu(20, 3);
   t.write("\x1b[");
@@ -418,6 +441,31 @@ test("split escape sequences across write chunks parse correctly", () => {
   t.write("\x1b]2;spl");
   t.write("it\x07");
   assert.equal(t.title(), "split");
+  t.write("\r\x1b%Gutf8");
+  assert.equal(rowText(t, 0), "utf8", "ESC % G is consumed as charset selection");
+});
+
+test("split surrogate pairs remain one wide glyph", () => {
+  const t = emu(10, 2);
+  const smile = "😀";
+  t.write(smile[0]!);
+  assert.equal(t.cursor().x, 0, "high surrogate is buffered");
+  t.write(smile[1]!);
+  assert.equal(t.line(0)!.chars[0], smile);
+  assert.equal(t.line(0)!.chars[1], "");
+  assert.equal(t.cursor().x, 2);
+});
+
+test("8-bit C1 CSI, OSC, ST, IND, and NEL forms are accepted", () => {
+  const t = emu(20, 3);
+  t.write("\x9b31mred\x9b0m");
+  assert.equal(t.line(0)!.fg[0], 1);
+  t.write("\x9d2;c1 title\x9c");
+  assert.equal(t.title(), "c1 title");
+  t.write("\x9d8;;https://example.com\x9clink\x9d8;;\x9c");
+  assert.equal(t.linkUrl(t.line(0)!.links![3]!), "https://example.com");
+  t.write("\x85next\x84down");
+  assert.deepEqual(screenText(t), ["redlink", "next", "    down"]);
 });
 
 test("packRgb round-trips", () => {

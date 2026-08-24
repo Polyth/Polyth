@@ -919,7 +919,7 @@ export const api = {
     jfetch<TerminalInfo[]>(`/api/terminals?projectId=${encodeURIComponent(projectId)}`).catch(
       (): TerminalInfo[] => [],
     ),
-  createTerminal: (projectId: string, opts?: { sessionId?: string; cwd?: string; cols?: number; rows?: number }) =>
+  createTerminal: (projectId: string, opts?: { sessionId?: string; cwd?: string; cmd?: string; cols?: number; rows?: number }) =>
     jfetch<{ terminalId: string }>(`/api/terminals`, json("POST", { projectId, ...opts })),
   terminalInput: (terminalId: string, data: string) =>
     jfetch<{ ok: true }>(`/api/terminals/${terminalId}`, json("POST", { data })),

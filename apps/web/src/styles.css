@@ -2246,9 +2246,20 @@ input.notification-preview { font-family: var(--mono); font-size: 12.5px; min-wi
 .term-tab {
   border: none; border-radius: 0; color: var(--muted);
   padding: 5px 10px; font-size: 12px; font-family: var(--mono); background: transparent;
+  display: inline-flex; align-items: center; gap: 6px;
 }
 .term-tab:hover { background: var(--elevated); border-color: transparent; }
 .term-tab.active { color: var(--accent); background: var(--accent-wash); }
+.term-connection {
+  width: 6px; height: 6px; flex: 0 0 6px; border-radius: 50%;
+  background: var(--faint); box-shadow: 0 0 0 2px color-mix(in srgb, var(--faint) 15%, transparent);
+}
+.term-connection.connected { background: var(--green); box-shadow: 0 0 0 2px color-mix(in srgb, var(--green) 16%, transparent); }
+.term-connection.connecting, .term-connection.reconnecting {
+  background: var(--amber); box-shadow: 0 0 0 2px color-mix(in srgb, var(--amber) 16%, transparent);
+  animation: term-connect-pulse 1.1s ease-in-out infinite;
+}
+@keyframes term-connect-pulse { 50% { opacity: 0.35; } }
 .term-tab-x {
   border: none; border-left: 1px solid var(--border-soft); border-radius: 0;
   color: var(--muted); padding: 0 7px; font-size: 12px; background: transparent;
@@ -2361,6 +2372,22 @@ input.notification-preview { font-family: var(--mono); font-size: 12.5px; min-wi
 .term-search button:hover { color: var(--text); background: var(--raised); }
 .term-search button.on { color: var(--accent); background: var(--accent-wash); }
 .term-search button svg { width: 13px; height: 13px; }
+
+/* native-feeling terminal clipboard menu (Shift+right-click while a TUI owns mouse input) */
+.term-context {
+  position: fixed; z-index: 30; min-width: 144px;
+  display: flex; flex-direction: column; gap: 2px; padding: 5px;
+  border: 1px solid var(--border); border-radius: calc(7px * var(--corner-radius-scale));
+  background: var(--elevated); box-shadow: var(--shadow-lg);
+}
+.term-context button {
+  width: 100%; min-height: 28px; padding: 4px 7px; border: none;
+  display: flex; align-items: center; justify-content: space-between; gap: 14px;
+  background: transparent; color: var(--text); font-size: 11.5px; text-align: left;
+}
+.term-context button:hover:not(:disabled) { background: var(--raised); }
+.term-context button:disabled { color: var(--faint); }
+.term-context kbd { color: var(--muted); font: 10px var(--mono); }
 
 /* exited banner */
 .term-exit-note {

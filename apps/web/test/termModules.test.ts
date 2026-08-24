@@ -85,6 +85,11 @@ test("mouse encoding: SGR and legacy, wheel, tracking-mode gates", () => {
     encodeMouseEvent({ button: 0, col: 1, row: 1, kind: "move" }, { mouseTracking: 1002, mouseSgr: true }),
     "\x1b[<32;1;1M",
   );
+  assert.equal(
+    encodeMouseEvent({ button: 3, col: 8, row: 5, kind: "move" }, { mouseTracking: 1003, mouseSgr: true }),
+    "\x1b[<35;8;5M",
+    "1003 reports motion without a pressed button",
+  );
 });
 
 test("linkify finds URLs and trims trailing prose punctuation", () => {
@@ -102,6 +107,13 @@ test("linkify finds URLs and trims trailing prose punctuation", () => {
 
   const two = detectLinks("http://one.example.dev and https://two.example.dev/x");
   assert.equal(two.length, 2);
+
+  const extra = detectLinks("docs at www.example.dev, mailto:dev@example.dev or ftp://files.example.dev/a");
+  assert.deepEqual(extra.map((link) => link.url), [
+    "https://www.example.dev",
+    "mailto:dev@example.dev",
+    "ftp://files.example.dev/a",
+  ]);
 });
 
 test("search finds matches across scrollback with case and regex options", () => {

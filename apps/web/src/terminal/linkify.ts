@@ -8,13 +8,13 @@ export interface LinkRange {
   url: string;
 }
 
-const URL_RE = /(?:https?|file):\/\/[^\s<>"'`]+/g;
+const URL_RE = /(?:(?:https?|ftp|file):\/\/|mailto:|www\.)[^\s<>"'`]+/gi;
 const TRAILING = /[.,;:!?'"）)>\]}]+$/;
 
 /** Find URL ranges in one row of text; trailing punctuation is trimmed and
  *  a close-paren is kept only when the URL contains a matching open-paren. */
 export function detectLinks(text: string): LinkRange[] {
-  if (!text.includes("://")) return [];
+  if (!text.includes("://") && !/\b(?:mailto:|www\.)/i.test(text)) return [];
   const out: LinkRange[] = [];
   URL_RE.lastIndex = 0;
   let m: RegExpExecArray | null;
@@ -28,9 +28,10 @@ export function detectLinks(text: string): LinkRange[] {
       const closes = (trimmed.match(/\)/g) ?? []).length;
       if (opens > closes) trimmed += ")";
     }
-    url = trimmed;
-    if (url.length < 10) continue;
-    out.push({ start: m.index, end: m.index + url.length, url });
+    const shown = trimmed;
+    if (shown.length < 6) continue;
+    url = /^www\./i.test(shown) ? `https://${shown}` : shown;
+    out.push({ start: m.index, end: m.index + shown.length, url });
     if (out.length >= 32) break;
   }
   return out;
