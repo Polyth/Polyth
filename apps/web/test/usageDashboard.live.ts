@@ -51,6 +51,19 @@ after(async () => {
   await browser?.close().catch(() => {});
 });
 
+async function showUsage(page: Page): Promise<void> {
+  await page.evaluate(() => window.dispatchEvent(new CustomEvent("polyth:open-settings")));
+  await page.waitForSelector(".settings-shell", { state: "visible", timeout: 15_000 });
+  const usageNav = page.locator(".settings-nav-item", { hasText: "Usage" });
+  await usageNav.waitFor({ state: "visible", timeout: 15_000 });
+  await usageNav.click();
+  await page.waitForSelector(".usage-dashboard", { state: "visible", timeout: 15_000 });
+  await page.waitForSelector(".usage-cohort-chart svg", { state: "visible", timeout: 15_000 });
+  await page.waitForFunction(() =>
+    document.querySelector(".usage-dashboard")?.getAttribute("aria-busy") === "false");
+  await page.waitForTimeout(120);
+}
+
 async function openUsage(width: number, height = 900): Promise<Page> {
   const context = await browser.newContext({
     viewport: { width, height },
@@ -66,16 +79,7 @@ async function openUsage(width: number, height = 900): Promise<Page> {
   const page = await context.newPage();
   await page.goto(`${base}/p/${projectId}`, { waitUntil: "load" });
   await page.waitForSelector(".app", { state: "visible", timeout: 15_000 });
-  await page.evaluate(() => window.dispatchEvent(new CustomEvent("polyth:open-settings")));
-  await page.waitForSelector(".settings-shell", { state: "visible", timeout: 15_000 });
-  const usageNav = page.locator(".settings-nav-item", { hasText: "Usage" });
-  await usageNav.waitFor({ state: "visible", timeout: 15_000 });
-  await usageNav.click();
-  await page.waitForSelector(".usage-dashboard", { state: "visible", timeout: 15_000 });
-  await page.waitForSelector(".usage-cohort-chart svg", { state: "visible", timeout: 15_000 });
-  await page.waitForFunction(() =>
-    document.querySelector(".usage-dashboard")?.getAttribute("aria-busy") === "false");
-  await page.waitForTimeout(120);
+  await showUsage(page);
   return page;
 }
 
@@ -214,6 +218,8 @@ test("all usage controls update data, focus, hover, and provider visibility", as
   await page.locator('.usage-layout-control button[aria-label="Compact widgets"]').click();
   assert.equal(await page.locator(".usage-dashboard").evaluate((element) => element.classList.contains("usage-layout-compact")), true);
   await page.reload({ waitUntil: "load" });
+  await page.waitForSelector(".app", { state: "visible", timeout: 15_000 });
+  await showUsage(page);
   await page.waitForSelector(".usage-dashboard.usage-layout-compact", { state: "visible", timeout: 15_000 });
   assert.equal(await page.locator('.usage-range-control button[aria-label="90 day range"]').getAttribute("aria-pressed"), "true");
 

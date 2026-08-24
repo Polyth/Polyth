@@ -322,13 +322,15 @@ function CohortChart({
           })}
           {labels.map((label, index) => {
             if (!visibleLabelIndexes.has(index)) return null;
+            const first = index === 0;
+            const last = index === labels.length - 1;
             return (
               <text
                 className="usage-chart-x-label"
                 key={`${label}-${index}`}
-                x={barX(index) + barWidth / 2}
+                x={first ? left : last ? width - right : barX(index) + barWidth / 2}
                 y={height - 5}
-                textAnchor="middle"
+                textAnchor={first ? "start" : last ? "end" : "middle"}
               >
                 {label}
               </text>
