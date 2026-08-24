@@ -88,15 +88,16 @@ test("compact sidebar is a drawer, never display:none with no way back", async (
   assert.ok(css.includes("min(380px, 100vw)"), "sheet width contract");
 });
 
-test("header owns the drawer trigger, compact view picker, and panel trigger", async () => {
+test("header owns the drawer trigger and pane-aware compact view picker", async () => {
   const header = await read("../src/components/Header.tsx");
   const actions = await read("../src/widgets/builtinMiniWidgets.tsx");
   assert.ok(header.includes('aria-controls="polyth-session-drawer"'), "drawer trigger targets the drawer");
   assert.ok(header.includes("Open projects and sessions"), "drawer trigger accessible name");
-  assert.ok(header.includes("NarrowPanelTrigger"), "registry-backed panel trigger rendered from the header");
   assert.ok(header.includes("Change workspace view, current:"), "compact view trigger keeps the current label in its name");
   assert.ok(header.includes("const resolved = useResolvedCapabilities()"), "compact picker consumes the shared capability model");
   assert.ok(header.includes("VIEW_OF_CAPABILITY[c.descriptor.id]"), "compact picker maps capability descriptors to views");
+  assert.ok(header.includes("PANE_OF_CAPABILITY[c.descriptor.id]"), "compact picker keeps pane tools such as Browser reachable");
+  assert.ok(header.includes("mobileSheet"), "compact picker uses the touch-friendly mobile sheet");
   assert.ok(!header.includes("const VIEW_GROUPS"), "no duplicate hard-coded view list");
   assert.ok(
     actions.includes('"Turn off auto-approve" : "Turn on auto-approve"'),
@@ -313,17 +314,16 @@ test("timeline empty states defer starters to the hero", async () => {
   assert.ok(timeline.includes("This archived session has no messages."), "archived sessions get read-only copy");
 });
 
-test("header owns the capability disclosure while the rail renders configured tools", async () => {
+test("header and rail render configured capabilities without a duplicate disclosure", async () => {
   const header = await read("../src/components/Header.tsx");
   const rail = await read("../src/components/ContextRail.tsx");
-  const menu = await read("../src/components/CapabilityMenu.tsx");
   const store = await read("../src/store.ts");
-  assert.ok(header.includes("<CapabilityMenu"), "header consumes the shared disclosure");
+  assert.ok(header.includes("<CapabilityNav />"), "wide chat renders the configured primary capability navigation");
+  assert.ok(header.includes("primaries.map"), "the top rail renders resolved primary capabilities directly");
+  assert.ok(!header.includes("CapabilityMenu"), "the header has no competing overflow disclosure");
   assert.ok(!rail.includes("CapabilityMenu"), "rail dropped its duplicate More-tools picker");
   assert.ok(rail.includes("configuredRailSurfaces"), "rail renders only configured tool buttons");
   assert.ok(rail.includes("reorderRail"), "rail arranges surfaces by drag-reorder instead");
-  assert.ok(menu.includes('role="group"'), "disclosure uses grouped native buttons");
-  assert.ok(!menu.includes('role="menuitem"'), "disclosure does not claim unsupported menu arrow behavior");
   assert.ok(!store.includes("moreOpen:"), "dead global More-tools state stays removed");
   assert.ok(!store.includes("setMoreOpen"), "dead global More-tools action stays removed");
 });
