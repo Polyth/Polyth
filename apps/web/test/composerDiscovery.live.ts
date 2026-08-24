@@ -518,12 +518,12 @@ test("voice lifecycle: listening and failure are visible; transcripts stay draft
   await page.waitForSelector(".mic-btn:not([disabled])", { state: "visible" });
   assert.equal(await page.locator(".mic-control").count(), 1, "exactly one mic slot");
 
-  // Start: the control itself names the state.
+  // Start: the icon button exposes its state through its accessible name and status.
   await page.locator(".mic-btn").click();
   await page.waitForSelector(".mic-control.mic-listening", { state: "visible" });
   assert.equal((await page.locator(".mic-status").innerText()).trim(), "Listening…");
   assert.equal(await page.locator(".mic-btn").getAttribute("aria-pressed"), "true");
-  assert.equal((await page.locator(".mic-btn .mic-label").innerText()).trim(), "Stop dictation");
+  assert.equal(await page.locator(".mic-btn .mic-label").count(), 0, "dictation control stays icon-only");
   // One polite announcement carries the transition (textContent: the region
   // is visually hidden, so innerText reports empty).
   await page.waitForFunction(() =>

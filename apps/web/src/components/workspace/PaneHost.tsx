@@ -18,6 +18,7 @@ import {
   paneResourceTitle, subscribePaneProviders,
 } from "../../workspace/paneProviders.ts";
 import { PaneVisibilityContext, usePaneVisible } from "../../workspace/paneVisibility.ts";
+import { confirmAlert } from "../../alerts.ts";
 
 export interface PaneHostHandle {
   open(kind: string, resource: string, title?: string): void;
@@ -124,8 +125,13 @@ const PaneHost = forwardRef<PaneHostHandle, PaneHostProps>(function PaneHost(
     setPane((p) => {
       const t = p.tabs.find((x) => x.id === id);
       if (!t) return p;
-      if (!opts.force && isDirty(t) && !window.confirm(`Discard unsaved changes in ${t.title}?`)) {
+      if (!opts.force && isDirty(t)) {
         closed = false;
+        void confirmAlert(`Discard unsaved changes in ${t.title}?`, { title: "Discard changes", confirmLabel: "Discard" })
+          .then((confirmed) => {
+            if (!confirmed) return;
+            setPane((current) => closeTab(markDirty(current, id, false), id, { force: true }).state);
+          });
         return p;
       }
       return closeTab(markDirty(p, id, false), id, { force: true }).state;

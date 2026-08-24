@@ -403,6 +403,10 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
       }
       if (!m.model && model.turn?.model) m.model = model.turn.model;
       if (!m.agent && model.turn?.agent) m.agent = model.turn.agent;
+      // Chunks make an answer visible before its canonical message row exists.
+      // Actions such as pinning must nevertheless target that final row: the
+      // server deliberately rejects transient `assistant/chunk` events.
+      m.eventSeq = ev.seq;
       m.finalized = true;
       m.completedAt = ev.time; // semantic completion time, not first chunk
       const text = str(d, "text");

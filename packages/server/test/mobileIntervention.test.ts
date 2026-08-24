@@ -92,7 +92,10 @@ test("mobile interventions reattach, stay session-bound, and resolve each reques
   }, { ignorable: true });
   await store.append("original", "question/asked", {
     requestId: "que_1",
-    questions: [{ id: "choice", prompt: "Continue?", options: ["yes", "no"] }],
+    questions: [
+      { id: "choice", prompt: "Continue?", options: ["yes", "no"] },
+      { id: "details", prompt: "Any details?" },
+    ],
   }, { ignorable: true });
 
   await assert.rejects(
@@ -113,7 +116,7 @@ test("mobile interventions reattach, stay session-bound, and resolve each reques
   );
 
   const results = await Promise.allSettled([
-    sessions.replyQuestion("original", "que_1", { choice: "yes" }),
+    sessions.replyQuestion("original", "que_1", { choice: "yes", details: "Proceed carefully" }),
     sessions.replyQuestion("original", "que_1", { choice: "no" }),
   ]);
   assert.equal(results.filter((result) => result.status === "fulfilled").length, 1);
@@ -121,6 +124,7 @@ test("mobile interventions reattach, stay session-bound, and resolve each reques
   assert.equal((rejected?.reason as { code?: string }).code, "conflict");
   assert.equal(questionReplies.length, 1);
   assert.equal(questionReplies[0]!.logged, true, "durable answer precedes the runtime reply");
+  assert.deepEqual(questionReplies[0]!.answers, { answers: [["yes"], ["Proceed carefully"]] });
   assert.equal((await store.events("original")).filter((event) => event.type === "question/answered").length, 1);
   assert.equal((await store.projection("original"))?.status, "working");
 

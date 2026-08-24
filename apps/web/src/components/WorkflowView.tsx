@@ -13,6 +13,7 @@ import { openSession } from "../init.ts";
 import { useActiveModel, useStore } from "../store.ts";
 import { layerizeWorkflow, wouldWorkflowCycle } from "../workflowGraph.ts";
 import EmptyState from "./EmptyState.tsx";
+import { confirmAlert } from "../alerts.ts";
 
 const uid = (): string =>
   typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
@@ -156,8 +157,8 @@ export default function WorkflowView() {
     });
   };
 
-  const remove = () => {
-    if (!draft || !window.confirm(`Delete workflow “${draft.name}”?`)) return;
+  const remove = async () => {
+    if (!draft || !await confirmAlert(`Delete workflow “${draft.name}”?`, { title: "Delete workflow", confirmLabel: "Delete" })) return;
     void act("delete", async () => {
       await api.deleteWorkflow(draft.id);
       setWorkflows((current) => current.filter((workflow) => workflow.id !== draft.id));

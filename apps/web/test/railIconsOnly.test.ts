@@ -26,12 +26,14 @@ test("ContextRail omits the bottom add and More button group", async () => {
   assert.ok(!src.includes("moreToolsPicker"), "the old bottom button group is gone");
 });
 
-// UX-PANE-MODEL: Terminal and Preview are registered workspace surfaces
-// launched through the same strip buttons as everything else.
-test("ContextRail has no JUMPS rows — panes open through registered launchers", async () => {
+// UX-PANE-MODEL: registered panes and capabilities without a panel body use
+// the same strip launcher contract.
+test("ContextRail has no JUMPS rows — every placed capability gets a launcher", async () => {
   const src = await railSource();
   assert.ok(!src.includes("JUMPS"), "jump rows were replaced by workspace pane launchers");
-  assert.ok(src.includes("toggleRailPlugin(s.id)"), "strip buttons route through the shared toggle");
+  assert.ok(src.includes("onClick={s.activate}"), "strip buttons use their shared launcher");
+  assert.ok(src.includes('capability.tier === "more"'), "right-rail placement drives the button list");
+  assert.ok(src.includes("capability.descriptor.open()"), "capabilities without panel surfaces still open");
 });
 
 test("right-rail utilities use distinct semantic icons", async () => {

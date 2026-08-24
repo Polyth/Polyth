@@ -1,9 +1,11 @@
 import { useState } from "react";
 import { api } from "../api.ts";
 import { Icon } from "../icons.tsx";
-import { setOverlay, setUiError, useStore } from "../store.ts";
+import { COMPOSER_INPUT_SELECTOR, setOverlay, setUiError, useStore } from "../store.ts";
 import { friendlyError } from "../settings.ts";
 import { GoalAttachForm } from "../components/GoalStrip.tsx";
+import { requestComposerReplace } from "../composerInsert.ts";
+import { announce } from "../components/a11y/live.tsx";
 import { defineWidgetPlugin, registerWidgetPlugin } from "./catalog.ts";
 
 const SHELL_ACTION_SLOTS = [
@@ -20,15 +22,34 @@ const COMPOSER_ACTION_SLOTS = [
 function GoalAction({ context }: { context: Record<string, unknown> }) {
   const sessionId = typeof context.sessionId === "string" ? context.sessionId : null;
   const goalOn = context.goalOn === true;
+  const goalBusy = context.goalBusy === true;
   const suppliedToggle = typeof context.toggleGoal === "function"
     ? context.toggleGoal as () => void
     : null;
   const [open, setOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
   const activate = () => {
-    if (suppliedToggle) suppliedToggle();
-    else if (sessionId) setOpen(true);
+    if (suppliedToggle) {
+      suppliedToggle();
+      return;
+    }
+    const draft = document.querySelector<HTMLTextAreaElement>(COMPOSER_INPUT_SELECTOR)?.value.trim() ?? "";
+    if (!sessionId || !draft) {
+      if (sessionId) setOpen(true);
+      return;
+    }
+    setSaving(true);
+    void api.goalAttach(sessionId, draft)
+      .then(() => {
+        requestComposerReplace("");
+        announce("Goal attached.");
+      })
+      .catch((error) => setUiError(friendlyError("Couldn’t attach the goal", error)))
+      .finally(() => setSaving(false));
   };
-  const label = sessionId ? "Attach or update goal" : goalOn ? "First message is the goal" : "Use first message as goal";
+  const label = sessionId
+    ? "Save the current message as the goal, or attach a goal"
+    : goalOn ? "First message is the goal" : "Use first message as goal";
   return (
     <>
       <button
@@ -36,6 +57,7 @@ function GoalAction({ context }: { context: Record<string, unknown> }) {
         title={label}
         aria-label={label}
         aria-pressed={!sessionId ? goalOn : undefined}
+        disabled={goalBusy || saving}
         onClick={activate}
       >
         <Icon.target /><span>Goal</span>

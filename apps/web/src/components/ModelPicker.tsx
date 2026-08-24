@@ -81,6 +81,7 @@ interface ModelPickerProps {
   recommended?: ModelRef;
   onPick: (model?: ModelRef) => void;
   direction?: "up" | "down";
+  composerMeta?: string;
 }
 
 export default function ModelPicker({
@@ -89,6 +90,7 @@ export default function ModelPicker({
   recommended,
   onPick,
   direction: _direction = "down",
+  composerMeta,
 }: ModelPickerProps) {
   const prefs = useModelPrefs();
   const phone = useShellMode() === "phone";
@@ -266,8 +268,10 @@ export default function ModelPicker({
           className="model-trigger-logo"
         />
       )}
-      <span className="model-trigger-name">{label}</span>
-      <span className="model-trigger-caret" aria-hidden="true"><Icon.chevronDown /></span>
+      <span className={composerMeta ? "model-trigger-copy" : "model-trigger-name"}>
+        <span className="model-trigger-name">{label}</span>
+        {composerMeta && <span className="composer-model-meta">{composerMeta}</span>}
+      </span>
     </button>
   ) : (
     <button
@@ -290,13 +294,13 @@ export default function ModelPicker({
       <span className="model-trigger-copy">
         <small>Model</small>
         <strong className="picker-chip-text">{label}</strong>
+        {composerMeta && <span className="composer-model-meta">{composerMeta}</span>}
       </span>
       {selectedModel && (
         <span className="model-trigger-meta">
           {modelModalities(selectedModel)} · {modelContextLabel(selectedModel.context)}
         </span>
       )}
-      <span className="picker-caret" aria-hidden="true">▾</span>
     </button>
   );
 

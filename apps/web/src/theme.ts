@@ -138,7 +138,7 @@ export const PRESET_THEMES: ThemeSpec[] = [
       border: "#d5cec1", borderSoft: "#e2dcd2",
       text: "#2a2620", textDim: "#4d473e", muted: "#5b564e", faint: "#6a6357",
       accent: "#b54d00", accentInk: "#ffffff", accentHi: "#bd5700",
-      green: "#4d9432", amber: "#a97d14", red: "#c4453a", blue: "#2f6fae", purple: "#7a53b8",
+      green: "#347426", amber: "#7d5900", red: "#c4453a", blue: "#2f6fae", purple: "#7a53b8",
     },
   },
   {
@@ -151,7 +151,7 @@ export const PRESET_THEMES: ThemeSpec[] = [
       border: "#c6cfd8", borderSoft: "#d8dfe6",
       text: "#24292f", textDim: "#454c54", muted: "#4d535a", faint: "#57616c",
       accent: "#2d64ae", accentInk: "#f7fafc", accentHi: "#3870bb",
-      green: "#3e8636", amber: "#9a6d00", red: "#c03d33", blue: "#2f6fae", purple: "#7a53b8",
+      green: "#2f7428", amber: "#785400", red: "#c03d33", blue: "#2f6fae", purple: "#7a53b8",
     },
   },
   {
@@ -163,7 +163,7 @@ export const PRESET_THEMES: ThemeSpec[] = [
       border: "#d5cdb4", borderSoft: "#e2dbc4",
       text: "#3b4a51", textDim: "#586e75", muted: "#4b575c", faint: "#56656b",
       accent: "#2aa198", accentInk: "#002b36", accentHi: "#35b3aa",
-      green: "#859900", amber: "#b58900", red: "#dc322f", blue: "#268bd2", purple: "#6c71c4",
+      green: "#586b00", amber: "#765900", red: "#dc322f", blue: "#268bd2", purple: "#6c71c4",
     },
   },
   darkPreset("ocean", "Deep Ocean", {
@@ -473,6 +473,19 @@ const blend = (fg: string, bg: string, amount: number): string => {
   return `#${to2(mix(fr, br))}${to2(mix(fg_, bg_))}${to2(mix(fb, bb))}`;
 };
 
+/** Signal foreground adjusted against the real 18% wash on every app surface. */
+const signalOnWash = (signal: string, surfaces: string[], lighten: boolean): string => {
+  let lightness = rgbToHsl(signal)[2];
+  let color = signal;
+  const backgrounds = surfaces.map((surface) => blend(signal, surface, 0.18));
+  while (backgrounds.some((background) => contrastRatio(color, background) < 4.5)
+    && lightness > 0.02 && lightness < 0.98) {
+    lightness += lighten ? 0.01 : -0.01;
+    color = withLightness(signal, lightness);
+  }
+  return color;
+};
+
 /** Resolve a theme to the CSS custom properties it sets. One place derives
  *  every wash/hairline/rgb variant so custom themes only supply base roles. */
 export function themeCssVars(spec: ThemeSpec): Record<string, string> {
@@ -480,6 +493,7 @@ export function themeCssVars(spec: ThemeSpec): Record<string, string> {
   const dark = spec.appearance === "dark";
   const accentRgb = hexToRgb(t.accent).join(", ");
   const amberRgb = hexToRgb(t.amber).join(", ");
+  const surfaces = [t.bg, t.panel, t.elevated, t.raised, t.sunken, t.inputBg];
   return {
     "--bg": t.bg, "--panel": t.panel, "--elevated": t.elevated, "--raised": t.raised,
     "--sunken": t.sunken, "--input-bg": t.inputBg,
@@ -492,7 +506,10 @@ export function themeCssVars(spec: ThemeSpec): Record<string, string> {
     "--accent-line": rgba(t.accent, dark ? 0.32 : 0.4),
     "--focus-wash": rgba(t.accent, 0.1),
     "--accent-rgb": accentRgb,
-    "--green": t.green, "--amber": t.amber, "--amber-rgb": amberRgb,
+    "--green": t.green, "--amber": t.amber,
+    "--green-on-wash": signalOnWash(t.green, surfaces, dark),
+    "--amber-on-wash": signalOnWash(t.amber, surfaces, dark),
+    "--amber-rgb": amberRgb,
     "--red": t.red, "--blue": t.blue, "--purple": t.purple,
     "--red-ink": readableInk(t.red),
     "--surface-overlay": rgba(t.text, dark ? 0.022 : 0.025),

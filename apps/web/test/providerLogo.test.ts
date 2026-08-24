@@ -59,8 +59,8 @@ async function render(props: ProviderLogoProps): Promise<string> {
 
 test("known providers render accessible monochrome SVG marks", async () => {
   const providers = [
-    "anthropic",
     "claude",
+    "anthropic",
     "openai",
     "google",
     "gemini",
@@ -82,6 +82,10 @@ test("known providers render accessible monochrome SVG marks", async () => {
     "nvidia",
     "huggingface",
     "cohere",
+    "cerebras",
+    "kimi-for-coding",
+    "codex",
+    "command-code",
   ];
 
   for (const providerID of providers) {
@@ -95,10 +99,13 @@ test("known providers render accessible monochrome SVG marks", async () => {
   }
 
   const namedAlias = await render({ providerID: "private-endpoint", providerName: "Claude Enterprise" });
-  assert.match(namedAlias, /data-provider="anthropic"/);
+  assert.match(namedAlias, /data-provider="claude"/);
+
+  const kimiEndpoint = await render({ providerID: "kimi-for-coding" });
+  assert.match(kimiEndpoint, /data-provider="zai"/);
 });
 
-test("OpenCode variants resolve to distinct monochrome SVG marks", async () => {
+test("OpenCode variants use the OpenCode brand mark", async () => {
   const variants: Array<{ props: ProviderLogoProps; provider: string }> = [
     { props: { providerID: "opencode-zen" }, provider: "opencode-zen" },
     { props: { providerID: "private-endpoint", providerName: "OpenCode Zen" }, provider: "opencode-zen" },
@@ -112,7 +119,7 @@ test("OpenCode variants resolve to distinct monochrome SVG marks", async () => {
     const html = await render(props);
     assert.match(html, new RegExp(`data-provider="${provider}"`));
     assert.match(html, /<svg\b/);
-    assert.match(html, /stroke="currentColor"/);
+    assert.match(html, /fill="currentColor"/);
     assert.doesNotMatch(html, /#[\da-f]{3,8}\b/i);
   }
 

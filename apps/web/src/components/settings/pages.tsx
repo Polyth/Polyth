@@ -7,6 +7,7 @@ import { DEFAULT_SETTINGS, INTERFACE_FONTS } from "../../settings.ts";
 import { requestNotifyPermission } from "../../notify.ts";
 import { disablePush, enablePush, pushSubscription, pushUnsupportedReason } from "../../push.ts";
 import { api, type GitStatus } from "../../api.ts";
+import { confirmAlert } from "../../alerts.ts";
 import { EmptyState, PageHead, Row, Seg, Toggle } from "./parts.tsx";
 import { refreshProfiles, useProfiles } from "../../profiles.ts";
 import { removeProject } from "../../init.ts";
@@ -681,7 +682,7 @@ export function ProjectsPage() {
             </div>
             <button
               className="small-btn danger-btn"
-              onClick={() => { if (window.confirm(`Remove project "${p.name || p.path}" from Polyth?`)) void removeProject(p.id); }}
+              onClick={() => { void confirmAlert(`Remove project "${p.name || p.path}" from Polyth?`, { title: "Remove project", confirmLabel: "Remove" }).then((ok) => { if (ok) void removeProject(p.id); }); }}
             >Remove</button>
           </header>
           <div className="project-settings-options">
@@ -937,7 +938,7 @@ export function AgentsPage() {
             <button className="small-btn" onClick={() => void checkProfile(p)}>Validate</button>
             <button className="small-btn" onClick={() => setEditing(p)}>Edit</button>
             <button className="small-btn danger-btn"
-              onClick={() => { if (window.confirm(`Delete profile "${p.name}"?`)) void api.deleteProfile(p.id).then(() => refreshProfiles()); }}>
+              onClick={() => { void confirmAlert(`Delete profile "${p.name}"?`, { title: "Delete profile", confirmLabel: "Delete" }).then((ok) => { if (ok) void api.deleteProfile(p.id).then(() => refreshProfiles()); }); }}>
               Delete
             </button>
           </div>
@@ -1156,7 +1157,7 @@ export function McpPage() {
               <button className="small-btn" onClick={() => void api.mcpUpdate(s.id, { enabled: !s.enabled }, s.revision).then(refresh)}>
                 {s.enabled ? "Disable" : "Enable"}
               </button>
-              <button className="small-btn danger-btn" onClick={() => { if (window.confirm(`Remove MCP server "${s.name}"?`)) void api.mcpRemove(s.id).then(refresh); }}>
+              <button className="small-btn danger-btn" onClick={() => { void confirmAlert(`Remove MCP server "${s.name}"?`, { title: "Remove MCP server", confirmLabel: "Remove" }).then((ok) => { if (ok) void api.mcpRemove(s.id).then(refresh); }); }}>
                 Remove
               </button>
             </div>
@@ -1385,7 +1386,7 @@ export function ManagedPluginsSection() {
     const warning = active.length > 0
       ? `${active.length} widget${active.length === 1 ? "" : "s"} from "${plugin.name}" ${active.length === 1 ? "is" : "are"} in your layout. Uninstalling keeps a placeholder so you can remove or restore each one. Continue?`
       : `Remove plugin "${plugin.name}"?`;
-    if (!window.confirm(warning)) return;
+    if (!await confirmAlert(warning, { title: "Remove plugin", confirmLabel: "Remove" })) return;
     await api.pluginsRemove(plugin.id);
     setToast(`${plugin.name} removed.`);
     if (selected === plugin.id) setSelected(null);

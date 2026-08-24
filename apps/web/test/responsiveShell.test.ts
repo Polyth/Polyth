@@ -242,6 +242,26 @@ test("pending OpenCode changes render in the pinned Settings footer with an opaq
   );
 });
 
+test("pending OpenCode changes render in the pinned Settings footer with an opaque restart overlay", async () => {
+  const settings = await read("../src/components/SettingsView.tsx");
+  const restart = await read("../src/components/OpenCodeRestartControl.tsx");
+  const css = await read("../src/styles.css");
+  assert.match(
+    settings,
+    /<div className="nav-foot">\s*<SlotHost slot="settings\.footer" \/>/,
+    "Settings owns the restart-control host at the start of its pinned navigation footer",
+  );
+  assert.ok(
+    restart.includes('registerSlot("settings.footer", "opencode.apply-restart"'),
+    "the restart control no longer contributes to the main app sidebar",
+  );
+  assert.match(
+    css,
+    /\.opencode-restart-overlay\s*\{[^}]*background:\s*rgba\(0,\s*0,\s*0,\s*\.78\)/,
+    "the restart overlay strongly obscures the UI underneath",
+  );
+});
+
 test("open rails remain visible in every workspace mode", async () => {
   const rail = await read("../src/components/ContextRail.tsx");
   const css = await read("../src/styles.css");

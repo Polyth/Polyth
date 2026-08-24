@@ -91,6 +91,7 @@ import { pushRoutes } from "./routes/push.ts";
 import { createNotificationStore } from "./notifications.ts";
 import { notificationRoutes } from "./routes/notifications.ts";
 import { autoAcceptRoutes } from "./routes/autoAccept.ts";
+import { queueRoutes } from "./routes/queue.ts";
 import { createBehaviorService } from "./behavior.ts";
 import { createMcpConfigService, mcpEntriesFromBackendConfig } from "./mcp.ts";
 import { createSecureSafeService, secureSafeBehaviorSection } from "./secureSafe.ts";
@@ -1077,6 +1078,7 @@ export async function boot(opts: BootOptions = {}) {
     sessionRetentionRoutes(sessions),
     controlRoutes(sessions),
     autoAcceptRoutes(sessions),
+    queueRoutes(sessions),
     pushRoutes(push),
     notificationRoutes(notifications),
     profileRoutes({

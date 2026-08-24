@@ -446,7 +446,10 @@ export interface SessionService {
   /** Projection-only reconciliation after a linked worktree is removed. */
   markWorktreeMissing?(projectId: string, worktreePath: string): Promise<void>;
   queueList?(sessionId: string): Promise<QueueItemDto[]>;
+  /** Temporarily holds the queue head while it is edited in the composer. */
+  queueEditStart?(sessionId: string, queueId: string): Promise<QueueItemDto>;
   queueEdit?(sessionId: string, queueId: string, text: string): Promise<QueueItemDto>;
+  queueEditCancel?(sessionId: string, queueId: string): Promise<void>;
   queueReorder?(sessionId: string, ids: string[]): Promise<QueueItemDto[]>;
   queueRemove?(sessionId: string, queueId: string): Promise<void>;
   /** Pin/unpin a model-visible message by its canonical source-event sequence. */

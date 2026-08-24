@@ -20,6 +20,13 @@ function contrast(a: string, b: string): number {
   return (lighter! + 0.05) / (darker! + 0.05);
 }
 
+function blend(foreground: string, background: string, amount: number): string {
+  const fg = foreground.slice(1).match(/../g)!.map((value) => Number.parseInt(value, 16));
+  const bg = background.slice(1).match(/../g)!.map((value) => Number.parseInt(value, 16));
+  return `#${fg.map((channel, index) =>
+    Math.round(bg[index]! + (channel - bg[index]!) * amount).toString(16).padStart(2, "0")).join("")}`;
+}
+
 const validTheme = (): Record<string, unknown> => ({
   id: "my-theme",
   name: "My theme",
@@ -170,6 +177,27 @@ test("themeCssVars maps roles, derives washes/rgb, and honors syntax overrides",
   const vars = themeCssVars(withSyntax);
   assert.equal(vars["--syntax-kw"], "#ff0000");
   assert.equal(vars["--syntax-str"], PRESET_THEMES[0]!.tokens.green); // others keep defaults
+});
+
+test("signal foregrounds meet 4.5:1 on their actual 18% tinted washes", () => {
+  for (const preset of PRESET_THEMES) {
+    for (const appearance of ["dark", "light"] as const) {
+      const theme = adaptThemeAppearance(preset, appearance);
+      const vars = themeCssVars(theme);
+      const surfaces = [
+        theme.tokens.bg, theme.tokens.panel, theme.tokens.elevated,
+        theme.tokens.raised, theme.tokens.sunken, theme.tokens.inputBg,
+      ];
+      for (const signal of ["green", "amber"] as const) {
+        const foreground = vars[`--${signal}-on-wash`]!;
+        for (const surface of surfaces) {
+          const wash = blend(theme.tokens[signal], surface, 0.18);
+          const ratio = contrast(foreground, wash);
+          assert.ok(ratio >= 4.5, `${preset.id}/${appearance} ${signal} on ${wash} is ${ratio.toFixed(2)}:1`);
+        }
+      }
+    }
+  }
 });
 
 test("parseCustomThemes drops invalid entries, dedupes ids, survives garbage", () => {

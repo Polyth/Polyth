@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import type { UiSlot } from "@polyth/contracts";
 import { listCapabilities, useResolvedCapabilities } from "../../capabilities.ts";
 import { activateProject, useStore } from "../../store.ts";
+import { confirmAlert } from "../../alerts.ts";
 import {
   capabilityLayoutStorageKey, getCapabilityPlacements, setPlacementOverride,
   type CapabilityTier,
@@ -239,8 +240,8 @@ export default function WidgetsPage() {
     setOpenPlace(null);
   };
 
-  const resetAllPlacement = () => {
-    if (!window.confirm("Reset button placement and canvas layout to their defaults?")) return;
+  const resetAllPlacement = async () => {
+    if (!await confirmAlert("Reset button placement and canvas layout to their defaults?", { title: "Reset layout", confirmLabel: "Reset" })) return;
     for (const capability of listCapabilities()) {
       setPlacementOverride(capability.id, null);
     }
@@ -249,8 +250,8 @@ export default function WidgetsPage() {
     setNotice("Layout reset for this project.");
   };
 
-  const applyToAllProjects = () => {
-    if (!activeProjectId || !window.confirm("Apply this project’s widget and tool layout to every project?")) return;
+  const applyToAllProjects = async () => {
+    if (!activeProjectId || !await confirmAlert("Apply this project’s widget and tool layout to every project?", { title: "Apply layout to projects", confirmLabel: "Apply", destructive: false })) return;
     // Use the in-memory layout, rather than a possibly stale debounced storage
     // value. This makes Apply work immediately after dragging or adding a tool.
     const widgetLayout = serializeWidgetLayout(layout);
