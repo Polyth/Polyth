@@ -49,6 +49,13 @@ export function createChromiumDriver(executablePath: string): BrowserDriver {
 
   return {
     engine: "chromium",
+    async close() {
+      const active = browserP;
+      browserP = null;
+      if (active) {
+        try { await (await active).close(); } catch { /* already gone */ }
+      }
+    },
     async open(opts) {
       const browser = await launch();
       const context = await browser.newContext({

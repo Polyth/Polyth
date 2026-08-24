@@ -218,6 +218,22 @@ test("close destroys state; further calls fail with not-found; closeAll sweeps",
   assert.equal(svc.get(s2.id)?.status ?? "closed", "closed");
 });
 
+test("closeAll releases the underlying browser driver", async () => {
+  const fake = createFakeDriver(web());
+  let closed = 0;
+  const svc = createBrowserService({
+    driver: {
+      engine: fake.engine,
+      open: (options) => fake.open(options),
+      close: async () => { closed += 1; await fake.close(); },
+    },
+    allowedOrigins: () => ["http://127.0.0.1:5173"],
+  });
+  await svc.create({ projectId: "p1", url: HOME });
+  await svc.closeAll();
+  assert.equal(closed, 1);
+});
+
 test("session lifetime cap closes the browser automatically", async () => {
   const svc = service({ maxLifetimeMs: 30 });
   const s = await svc.create({ projectId: "p1", url: HOME });

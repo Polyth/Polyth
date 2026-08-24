@@ -31,6 +31,7 @@ const targetKey = (t: BrowserTarget): string => {
 export function createFakeDriver(web: FakeWeb): BrowserDriver {
   return {
     engine: "fake",
+    close: async () => {},
     async open(opts) {
       const history: string[] = [];
       let index = -1;

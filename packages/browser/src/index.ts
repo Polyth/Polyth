@@ -385,6 +385,7 @@ export function createBrowserService(opts: BrowserServiceOptions): BrowserServic
 
     async closeAll() {
       await Promise.all([...sessions.keys()].map(doClose));
+      await driver?.close();
     },
 
     pauseAgent(id, paused) {

@@ -59,4 +59,6 @@ export interface DriverOpenOptions {
 export interface BrowserDriver {
   engine: "chromium" | "fake";
   open(opts: DriverOpenOptions): Promise<DriverPage>;
+  /** Release the shared browser process after all page contexts are closed. */
+  close(): Promise<void>;
 }

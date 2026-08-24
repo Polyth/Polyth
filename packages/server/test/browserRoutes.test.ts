@@ -27,6 +27,7 @@ function makeHarness() {
   // wrap the driver so the test can see when page work actually happens
   const spied = {
     engine: driver.engine,
+    close: () => driver.close(),
     open: async (opts: Parameters<typeof driver.open>[0]) => {
       const page = await driver.open(opts);
       const origClick = page.click.bind(page);
