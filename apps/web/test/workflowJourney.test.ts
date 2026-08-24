@@ -178,6 +178,7 @@ test("workflow journey surfaces expose task launch, chat progress, HITL, stop, a
   );
   assert.match(composer, /workflowDraftText: text/);
   assert.match(composer, /workflowAttachmentCount: attachments\.length/);
+  assert.match(composer, /activeSessionId === target\) requestComposerReplace\(""\)/);
   assert.match(timeline, /<WorkflowTimelineCard run=\{model\.workflowRun\}/);
   assert.match(timeline, /model\.messages\.length === 0 && !model\.workflowRun/);
   assert.match(await source("../src/components/WorkflowTimelineCard.tsx"), /handOffWorkflowLaunch/);

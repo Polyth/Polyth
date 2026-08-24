@@ -10,7 +10,12 @@ import {
   takeAttachments, tryAttachGithubUrl, usePendingAttachments, type GithubAttachResult,
 } from "../attachments.ts";
 import AttachmentPills from "./AttachmentPills.tsx";
-import { COMPOSER_INSERT, COMPOSER_REPLACE, drainInserts } from "../composerInsert.ts";
+import {
+  COMPOSER_INSERT,
+  COMPOSER_REPLACE,
+  drainInserts,
+  requestComposerReplace,
+} from "../composerInsert.ts";
 import { activeToken, completeToken, shellCommand, type PromptToken } from "../composer/language.ts";
 import {
   ATTACHMENT_COMPAT_NOTE,
@@ -916,6 +921,11 @@ export default function Composer({
     historyCursor.current = emptyPromptHistoryCursor();
     const target = sessionIdRef.current;
     if (target) saveDraft(target, "");
+    // A workflow/run-started event can replace the empty-session hero composer
+    // before the launch request resolves. This callback may therefore belong
+    // to an unmounted instance; notify the currently mounted composer too, but
+    // never clear a different session if navigation happened meanwhile.
+    if (getState().activeSessionId === target) requestComposerReplace("");
   };
   // Bounded callbacks let the same configurable action widget live in either
   // composer slot without owning session-creation state.
