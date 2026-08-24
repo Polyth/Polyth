@@ -261,8 +261,8 @@ const BUILTINS: WidgetDef[] = [
     defaultSize: { w: 6, h: 4 }, audience: "power", render: () => <ActivityWidget />,
   },
   {
-    id: "preview.app", pluginId: "preview", title: "Preview",
-    description: "Start and view the project preview.", zone: "bottom",
+    id: "browser.app", pluginId: "browser", title: "Browser",
+    description: "Browse pages with agents and point at elements for chat context.", zone: "bottom",
     defaultSize: { w: 12, h: 6 }, audience: "standard", render: () => <PreviewView />,
   },
   {
@@ -351,8 +351,8 @@ const BUILTIN_WIDGET_META: Record<string, Partial<WidgetDef>> = {
     supportedZones: ["left", "main", "right", "bottom"], minSize: { w: 4, h: 3 },
     maxSize: { w: 12, h: 50 }, resizable: true, scope: "workspace",
   },
-  "preview.app": {
-    pluginName: "Core workspace", category: "preview",
+  "browser.app": {
+    pluginName: "Core workspace", category: "browser",
     supportedZones: ["main", "bottom", "floating"], minSize: { w: 8, h: 5 },
     maxSize: { w: 12, h: 50 }, resizable: true, floating: true, scope: "workspace",
   },

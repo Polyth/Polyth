@@ -47,7 +47,7 @@ export interface CapabilityMeta {
 export const BUILTIN_CAPABILITY_META: CapabilityMeta[] = [
   { id: "session", label: "Chat", plainDescription: "Talk with Polyth about your project.", keywords: ["session", "conversation", "chat"], standardTier: "primary", standardRank: 0 },
   { id: "files", label: "Project files", plainDescription: "Browse and edit the files in your project.", keywords: ["files", "editor", "tree", "quick open"], standardTier: "primary", standardRank: 1 },
-  { id: "preview", label: "Preview", plainDescription: "See the running result while you work.", keywords: ["live preview", "browser", "app"], standardTier: "primary", standardRank: 2 },
+  { id: "browser", label: "Browser", plainDescription: "Browse with agents and point at page elements.", keywords: ["browser", "element picker", "agent browser", "app"], standardTier: "primary", standardRank: 2 },
   { id: "goals", label: "Goals & progress", plainDescription: "Track goals and how the work is going.", keywords: ["goals", "progress", "status"], standardTier: "primary", standardRank: 3 },
   { id: "multirun", label: "Compare responses", technicalLabel: "Multi-Run", plainDescription: "Ask several ways at once and compare the answers.", keywords: ["multi-run", "multirun", "compare models"], standardTier: "more", standardRank: 10 },
   { id: "workflow", label: "Workflows", technicalLabel: "DAG orchestration", plainDescription: "Coordinate agent roles in dependency-based pipelines.", keywords: ["workflow", "dag", "orchestration", "multi-agent"], standardTier: "more", standardRank: 11 },
@@ -72,7 +72,7 @@ export const TECHNICAL_GROUP_LABEL = "Technical options";
 
 const GROUP_OF: Record<string, string> = {
   files: "Work with the project",
-  preview: "Work with the project",
+  browser: "Work with the project",
   goals: "Work with the project",
   knowledge: "Work with the project",
   context: "Work with the project",

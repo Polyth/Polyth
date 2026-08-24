@@ -8,7 +8,6 @@ import { displaySessionTitle } from "../format.ts";
 import { friendlyError } from "../settings.ts";
 import { contextGauge, type ContextGauge } from "../reduce.ts";
 import { useShellMode, type ShellMode } from "../responsiveShell.ts";
-import { NarrowPanelTrigger } from "./ContextRail.tsx";
 import Picker from "./Picker.tsx";
 import type { PickerItem } from "../picker.ts";
 import {
@@ -76,7 +75,7 @@ const ICONS: Record<AppView, React.ReactNode> = {
 // Icons for capabilities that are not full views (panels, settings pages).
 const EXTRA_ICONS: Record<string, React.ReactNode> = {
   files: <Icon.files />,
-  preview: <Icon.globe />,
+  browser: <Icon.globe />,
   git: <Icon.tree />,
   terminal: <Icon.term />,
   usage: <Icon.usage />,
@@ -170,27 +169,33 @@ function ContextRing({ gauge }: { gauge: ContextGauge }) {
   );
 }
 
-/** UX-A390: one bounded current-view trigger replacing the desktop switcher
- *  in compact mode. Items derive from the same resolved capability list as
- *  desktop navigation. */
+/** One bounded workspace picker for compact layouts. Pane capabilities belong
+ * here too: otherwise primary tools such as Browser disappear below 821px. */
 function CompactViewPicker({ view }: { view: AppView }) {
   const resolved = useResolvedCapabilities();
-  const views = resolved.filter((c) => VIEW_OF_CAPABILITY[c.descriptor.id] !== undefined);
-  const items: PickerItem[] = views.map((c) => ({
-    id: VIEW_OF_CAPABILITY[c.descriptor.id]!,
+  const rail = useStore((s) => s.railPlugin);
+  const destinations = resolved.filter((c) =>
+    VIEW_OF_CAPABILITY[c.descriptor.id] !== undefined
+    || PANE_OF_CAPABILITY[c.descriptor.id] !== undefined);
+  const items: PickerItem[] = destinations.map((c) => ({
+    id: c.descriptor.id,
     label: c.descriptor.label,
     group: c.tier === "primary" ? "" : c.tier === "more" ? "More tools" : TECHNICAL_GROUP_LABEL,
   }));
-  const current = items.find((i) => i.id === view)?.label ?? view;
+  const currentId = destinations.find((c) => PANE_OF_CAPABILITY[c.descriptor.id] === rail)?.descriptor.id
+    ?? destinations.find((c) => VIEW_OF_CAPABILITY[c.descriptor.id] === view)?.descriptor.id
+    ?? "session";
+  const current = items.find((i) => i.id === currentId)?.label ?? "Workspace";
   return (
     <Picker
       className="header-view-picker"
       label="View"
       ariaLabel={`Change workspace view, current: ${current}`}
-      triggerIcon={ICONS[view]}
+      triggerIcon={capabilityIcon(currentId)}
       items={items}
-      value={view}
-      onPick={(id) => views.find((c) => VIEW_OF_CAPABILITY[c.descriptor.id] === id)?.descriptor.open()}
+      value={currentId}
+      onPick={(id) => destinations.find((c) => c.descriptor.id === id)?.descriptor.open()}
+      mobileSheet
     />
   );
 }
@@ -436,6 +441,7 @@ export default function Header() {
           <Icon.chevronDown />
         </button>
         {sessionMenuOpen && <SessionMenu onClose={() => setSessionMenuOpen(false)} />}
+        <CompactViewPicker view={view} />
         <span className="header-spacer" />
         <button
           className="icon-btn mobile-header-action"
@@ -470,6 +476,7 @@ export default function Header() {
             <Icon.files />
           </button>
         )}
+        {compact && chatSurface && <CompactViewPicker view={view} />}
         {(!compact || !chatSurface) && (
           <button className="header-brand" aria-label="Polyth home" onClick={() => switchWorkspaceMode("chat")}>
             <span className="polyth-mark">p</span>

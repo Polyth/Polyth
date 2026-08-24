@@ -31,6 +31,7 @@ const targetKey = (t: BrowserTarget): string => {
 export function createFakeDriver(web: FakeWeb): BrowserDriver {
   return {
     engine: "fake",
+    close: async () => {},
     async open(opts) {
       const history: string[] = [];
       let index = -1;
@@ -96,6 +97,22 @@ export function createFakeDriver(web: FakeWeb): BrowserDriver {
           const cur = pageOf(nav().url);
           const dest = cur.links?.[targetKey(target)];
           if (dest) await land(dest, true);
+        },
+        async point(point) {
+          return {
+            selector: "main",
+            tag: "main",
+            role: "main",
+            name: pageOf(nav().url).title,
+            text: pageOf(nav().url).text ?? "",
+            rect: {
+              x: Math.max(0, Math.min(point.x, viewport.width - 1)),
+              y: Math.max(0, Math.min(point.y, viewport.height - 1)),
+              width: Math.max(1, Math.min(240, viewport.width)),
+              height: Math.max(1, Math.min(80, viewport.height)),
+            },
+            attributes: {},
+          };
         },
         async type(target, text) {
           typed.set(targetKey(target), text);

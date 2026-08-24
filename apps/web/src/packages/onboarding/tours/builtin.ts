@@ -368,34 +368,6 @@ export const BUILTIN_TOURS: readonly PackageOnboardingTour[] = [
     ],
   },
   {
-    packageId: "preview",
-    title: "Preview",
-    steps: [
-      {
-        id: "overview",
-        title: "See the running project",
-        body: "Preview starts or adopts a project development server and keeps its rendered output beside the conversation.",
-        media: { kind: "pattern", pattern: "rays" },
-      },
-      {
-        id: "start",
-        title: "Launch from the workspace",
-        body: "Start the configured preview, switch among discovered addresses, and stop it when the run is finished.",
-        highlight: "Start",
-        highlightWhere: "pane",
-        media: { kind: "pattern", pattern: "orbit" },
-      },
-      {
-        id: "inspect",
-        title: "Watch runtime details",
-        body: "Open the inspector to review the preview address, status, and browser diagnostics when available.",
-        highlight: "Inspector",
-        highlightWhere: "pane",
-        media: { kind: "pattern", pattern: "tiles" },
-      },
-    ],
-  },
-  {
     packageId: "browser",
     title: "Browser",
     steps: [
@@ -407,17 +379,17 @@ export const BUILTIN_TOURS: readonly PackageOnboardingTour[] = [
       },
       {
         id: "open",
-        title: "Upgrade a preview to browser control",
-        body: "Open a controlled session from Preview when a browser engine is available.",
-        highlight: "Browser",
+        title: "Open any page",
+        body: "Enter an HTTP(S) address, including a local project page, and use the same isolated browser as every agent in the session.",
+        highlight: "Open browser",
         highlightWhere: "pane",
         media: { kind: "pattern", pattern: "branches" },
       },
       {
         id: "observe",
-        title: "Capture useful page context",
-        body: "Read visible text and accessibility details, or mark an area and send the annotated capture to chat.",
-        highlight: "Snapshot",
+        title: "Point at real elements",
+        body: "Point at any rendered element to send its selector, role, text, bounds, and annotated screenshot to chat.",
+        highlight: "Point",
         highlightWhere: "pane",
         media: { kind: "pattern", pattern: "rays" },
       },

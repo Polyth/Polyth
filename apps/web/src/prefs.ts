@@ -5,7 +5,7 @@ import { useSyncExternalStore } from "react";
 
 export type PersonaId = "engineer" | "manager" | "creator" | "blank";
 export type PluginId =
-  | "session" | "goals" | "files" | "git" | "preview" | "terminal"
+  | "session" | "goals" | "files" | "git" | "browser" | "terminal"
   | "context" | "usage" | "events" | "multirun" | "fusion" | "walkthrough"
   | "schedule" | "github" | "dictation" | "knowledge";
 
@@ -15,15 +15,15 @@ export interface Prefs {
 }
 
 const LEGACY_PERSONA_PLUGINS: Record<PersonaId, PluginId[]> = {
-  engineer: ["session", "files", "git", "preview", "terminal", "context", "usage", "events", "goals", "multirun", "fusion", "walkthrough", "schedule", "github", "dictation", "knowledge"],
+  engineer: ["session", "files", "git", "browser", "terminal", "context", "usage", "events", "goals", "multirun", "fusion", "walkthrough", "schedule", "github", "dictation", "knowledge"],
   manager: ["session", "files", "context", "usage", "goals", "multirun", "fusion", "walkthrough", "knowledge"],
-  creator: ["session", "preview", "files"],
+  creator: ["session", "browser", "files"],
   blank: ["session", "files", "context", "usage"],
 };
 
 /** Kept as legacy search keywords and slot-prop compatibility labels. */
 export const PLUGIN_LABELS: Record<PluginId, string> = {
-  session: "Session", goals: "Goals", files: "Files", git: "Git", preview: "Preview",
+  session: "Session", goals: "Goals", files: "Files", git: "Git", browser: "Browser",
   terminal: "Terminal", context: "Context", usage: "Usage", events: "Events",
   multirun: "Multi-Run", fusion: "Fusion", walkthrough: "Walkthrough",
   schedule: "Schedule", github: "GitHub", dictation: "Dictation", knowledge: "Knowledge",
@@ -39,7 +39,10 @@ export function parsePrefs(raw: string | null): Prefs {
   try {
     const data = JSON.parse(raw ?? "") as Partial<Prefs>;
     const persona = data.persona && data.persona in LEGACY_PERSONA_PLUGINS ? data.persona : null;
-    const plugins = Array.isArray(data.plugins) ? data.plugins.filter(isPlugin) : [];
+    const rawPlugins = (data as { plugins?: unknown }).plugins;
+    const plugins = Array.isArray(rawPlugins)
+      ? rawPlugins.map((id) => id === "preview" ? "browser" : id).filter(isPlugin)
+      : [];
     return {
       persona,
       plugins: persona && plugins.length === 0

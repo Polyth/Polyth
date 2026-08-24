@@ -1034,28 +1034,6 @@ export interface TerminalClosedData {
   exitCode: number | null;
 }
 
-// ---------------------------------------------------------------- preview (M3)
-
-export type PreviewStatus = "off" | "starting" | "running";
-
-export interface PreviewState {
-  url: string | null;
-  /** Local URLs announced by the process and/or discovered from listeners.
-   * `url` is the currently selected reachable candidate. */
-  urls?: string[];
-  status: PreviewStatus;
-  port?: number;
-  command?: string;
-}
-
-export interface PreviewStartInput {
-  projectId: string;
-  /** override detected script; run as a shell command with PORT env set */
-  command?: string;
-  /** explicit port; omitted = OS-assigned free port */
-  port?: number;
-}
-
 // ================================================================ parity contracts (WP1)
 // All additions below are optional/additive: old event logs, JSON stores and
 // clients keep working; unknown events stay ignorable.
@@ -1593,6 +1571,9 @@ export type BrowserTarget =
 
 export type BrowserAction =
   | { kind: "click"; target: BrowserTarget }
+  /** Resolve the DOM element under a revisioned screenshot point without
+   * interacting with it. Used by the user-facing element picker. */
+  | { kind: "point"; target: Extract<BrowserTarget, { point: unknown }> }
   | { kind: "type"; target: BrowserTarget; text: string; submit?: boolean }
   | { kind: "press"; key: string }
   | { kind: "scroll"; x?: number; y?: number; target?: BrowserTarget }
