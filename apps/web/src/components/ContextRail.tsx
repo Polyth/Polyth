@@ -215,7 +215,12 @@ export default function ContextRail() {
     activate: () => toggleRailPlugin(surface.id),
   });
   const configuredRailButtons: RailButton[] = resolved
-    .filter((capability) => capability.tier === "more" && capability.descriptor.available())
+    // Terminal is a guaranteed workspace launcher. Keep it in the right rail
+    // even when an older per-project layout still records its former
+    // "technical" tier (or a customized primary placement).
+    .filter((capability) =>
+      (capability.tier === "more" || capability.descriptor.id === "terminal")
+      && capability.descriptor.available())
     .map((capability) => {
       const surface = surfaceByCapability.get(capability.descriptor.id);
       if (surface) return buttonForSurface(surface);

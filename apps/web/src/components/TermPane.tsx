@@ -445,6 +445,7 @@ export default function TermPane(props: TermPaneProps) {
     // find
     if ((ctrl || meta) && shift && e.key.toLowerCase() === "f") {
       e.preventDefault();
+      e.stopPropagation();
       setSearchOpen(true);
       setTimeout(() => searchInputRef.current?.select(), 0);
       return;

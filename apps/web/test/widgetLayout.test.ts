@@ -9,6 +9,7 @@ import {
   canPlaceWidget,
   createDefaultWidgetLayout,
   duplicateWidget,
+  ensureWidgets,
   getWidgetLayout,
   getWidgetSaveStatus,
   moveWidget,
@@ -366,7 +367,20 @@ test("layouts persist independently under project-specific keys", () => {
     },
   });
 
+  ensureWidgets([{
+    id: "terminal.open-action",
+    pluginId: "terminal",
+    kind: "mini-widget",
+    defaultSlot: "app.header.actions",
+    defaultVisible: true,
+  }]);
   activateProject("layout-project-alpha");
+  assert.equal(getWidgetLayout().widgets["terminal.open-action"]?.visible, true);
+  assert.deepEqual(
+    getWidgetLayout().slotPlacements["app.header.actions"]?.includes("terminal.open-action"),
+    true,
+    "registered toolbar actions survive the first project activation",
+  );
   updateWidgetLayout((current) => ({
     ...current,
     audience: "power",

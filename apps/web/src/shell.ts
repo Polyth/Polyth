@@ -208,6 +208,10 @@ const ACTIONS: Record<HotkeyAction, () => void> = {
 };
 
 function onKey(e: KeyboardEvent): void {
+  // Focused surfaces get first refusal. React handlers run before this window
+  // listener while the event bubbles, so a terminal-local shortcut such as
+  // Ctrl+Shift+F can prevent the global Session history action.
+  if (e.defaultPrevented) return;
   // IME composition keydowns (incl. legacy keyCode 229) never trigger shortcuts.
   if (e.isComposing || e.keyCode === 229) return;
   if (e.key === "Escape") { setOverlay(null); return; }

@@ -51,7 +51,21 @@ const google: ProviderCatalogDto = {
 
 (globalThis as { fetch?: unknown }).fetch = async (input: string | URL | Request) => {
   const url = String(input);
-  const body = url === "/api/providers" ? [google] : [];
+  const body = url === "/api/providers"
+    ? [google]
+    : url.startsWith("/api/git/status")
+      ? {
+          branch: null,
+          ahead: 0,
+          behind: 0,
+          staged: [],
+          unstaged: [],
+          untracked: [],
+          conflicted: [],
+          clean: true,
+          isRepo: false,
+        }
+      : [];
   return {
     ok: true,
     status: 200,
@@ -66,7 +80,9 @@ register("./tsxHooks.mjs", import.meta.url);
 const { act, createElement } = await import("react");
 const { createRoot } = await import("react-dom/client");
 const {
+  activateProject,
   activateSession,
+  closeWorkspacePane,
   getState,
   setModels,
   setOverlay,
@@ -74,6 +90,7 @@ const {
 } = await import("../src/store.ts");
 const { installBuiltinMiniWidgets } = await import("../src/widgets/builtinMiniWidgets.tsx");
 const { default: Header } = await import("../src/components/Header.tsx");
+const { default: ContextRail } = await import("../src/components/ContextRail.tsx");
 const { default: CommandPalette } = await import("../src/components/CommandPalette.tsx");
 const { default: SessionSearch } = await import("../src/components/SessionSearch.tsx");
 const { default: ModelsPage } = await import("../src/components/settings/ModelsPage.tsx");
@@ -96,8 +113,9 @@ async function mounted(component: ReactNode) {
   };
 }
 
-test("header Search and History open visibly distinct surfaces", async () => {
+test("header and right rail expose Terminal after project activation", async () => {
   await act(async () => {
+    activateProject("audit-project");
     setSessions("audit-project", [{
       id: "audit-session",
       projectId: "audit-project",
@@ -109,12 +127,21 @@ test("header Search and History open visibly distinct surfaces", async () => {
     activateSession("audit-session");
   });
   const header = await mounted(createElement(Header));
+  const rail = await mounted(createElement(ContextRail));
   try {
     const search = [...header.container.querySelectorAll<HTMLButtonElement>("button")]
       .find((button) => button.textContent?.trim() === "Search");
     const history = [...header.container.querySelectorAll<HTMLButtonElement>("button")]
       .find((button) => button.textContent?.trim() === "History");
-    assert.ok(search && history);
+    const terminal = header.container.querySelector<HTMLButtonElement>(
+      '.header-action[aria-label="Open Terminal (Ctrl+`)"]',
+    );
+    const terminalRail = rail.container.querySelector<HTMLButtonElement>(
+      '.rail-icon[data-pane-launcher="terminal"]',
+    );
+    assert.ok(search && history && terminal);
+    assert.equal(terminal.title, "Open Terminal (Ctrl+`)");
+    assert.equal(terminalRail?.title, "Open Terminal (Ctrl+`)");
 
     await act(async () => { search.click(); });
     assert.equal(getState().overlay, "palette");
@@ -123,10 +150,13 @@ test("header Search and History open visibly distinct surfaces", async () => {
   } finally {
     await act(async () => {
       setOverlay(null);
+      closeWorkspacePane();
       activateSession(null);
+      activateProject(null);
       setSessions("audit-project", []);
     });
     await header.unmount();
+    await rail.unmount();
   }
 
   const searchSurface = await mounted(createElement(CommandPalette));
