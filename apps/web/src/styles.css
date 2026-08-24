@@ -5904,7 +5904,6 @@ body[data-quick-actions="false"] [data-widget-id="core.quick-actions"] { display
   color: var(--text);
   box-shadow: var(--shadow-lg);
 }
-.settings-page-usage > .settings-nav { display: flex; }
 .settings-page-usage .settings-pane { min-width: 0; background: var(--bg); }
 .settings-page-usage .settings-pane-head { display: flex; }
 .settings-page-usage .modal-foot { display: flex; }
