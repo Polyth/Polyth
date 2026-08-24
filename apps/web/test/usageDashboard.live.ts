@@ -157,6 +157,15 @@ async function auditPopulatedChart(page: Page, width: number): Promise<ChartAudi
 
 test("populated charts render cleanly at desktop and 400px mobile", async () => {
   const reports: ChartAudit[] = [];
+  const combinations: Array<{
+    width: number;
+    range: number;
+    metric: string;
+    bars: number;
+    labels: string[];
+    boundsOk: boolean;
+    overflow: number;
+  }> = [];
   for (const width of [1280, 400]) {
     const page = await openUsage(width);
     const report = await auditPopulatedChart(page, width);
@@ -184,9 +193,38 @@ test("populated charts render cleanly at desktop and 400px mobile", async () => 
     await page.locator(".usage-time-card").screenshot({
       path: join(artifacts, width === 1280 ? "populated-chart-desktop.png" : "populated-chart-mobile-400.png"),
     });
+
+    for (const range of [7, 30, 90]) {
+      await page.locator(`.usage-range-control button[aria-label="${range} day range"]`).click();
+      for (const metric of ["Tokens", "Cost", "Sessions"]) {
+        await page.locator('.usage-metric-toggle[aria-label="Chart metric"] button', { hasText: metric }).click();
+        await page.waitForTimeout(40);
+        const state = await auditPopulatedChart(page, width);
+        combinations.push({
+          width,
+          range,
+          metric,
+          bars: state.bars,
+          labels: state.axisLabels,
+          boundsOk: state.boundsOk,
+          overflow: Math.max(state.documentOverflow, state.paneOverflow, state.dashboardOverflow),
+        });
+        assert.ok(state.bars > 0, `${width}px ${range}d ${metric}: populated chart has no bars`);
+        assert.equal(state.boundsOk, true, `${width}px ${range}d ${metric}: labels or legend escape their card`);
+        assert.ok(
+          Math.max(state.documentOverflow, state.paneOverflow, state.dashboardOverflow) <= 1,
+          `${width}px ${range}d ${metric}: chart creates horizontal overflow`,
+        );
+        assert.equal(state.legend.length, 5, `${width}px ${range}d ${metric}: provider legend changed shape`);
+        if (metric === "Cost") {
+          assert.ok(state.axisLabels.some((label) => label.includes("$")), `${width}px ${range}d: cost axis is not formatted as currency`);
+        }
+      }
+    }
     await closePage(page);
   }
   await writeFile(join(artifacts, "populated-chart-geometry.json"), JSON.stringify(reports, null, 2));
+  await writeFile(join(artifacts, "populated-chart-combinations.json"), JSON.stringify(combinations, null, 2));
 });
 
 test("all usage controls update data, focus, hover, and provider visibility", async () => {
