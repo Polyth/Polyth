@@ -300,4 +300,5 @@ export function installBuiltinMiniWidgets(): void {
   if (installed) return;
   installed = true;
   registerWidgetPlugin(SHELL_ACTIONS_PLUGIN);
+  registerWidgetPlugin(WORKFLOW_WIDGET_PLUGIN);
 }
