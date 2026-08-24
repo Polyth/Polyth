@@ -93,7 +93,7 @@ test("workflow journey surfaces expose task launch, chat progress, HITL, stop, a
   assert.match(launcher, /api\.runWorkflow/);
   assert.match(composer, /workflowDraftText: text/);
   assert.match(timeline, /<WorkflowTimelineCard run=\{model\.workflowRun\}/);
-  assert.match(workflow, /Review &amp; respond/);
+  assert.match(workflow, /Review & respond/);
   assert.match(workflow, /Retry full workflow/);
   assert.match(workflow, /Stop run/);
   assert.match(miniWidgets, /workflow\.active-run/);
