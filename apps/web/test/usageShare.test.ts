@@ -103,4 +103,13 @@ test("Usage settings keeps the Polyth shell and offers rich dashboard views", as
   assert.doesNotMatch(styles, /--usage-bg: #0d0e10/);
   assert.match(styles, /\.usage-status-pill\.session-only/);
   assert.match(styles, /@media \(max-width: 700px\)[\s\S]*?\.usage-providers-card tbody tr/);
+  assert.match(styles, /\.usage-spend-legend > \.usage-card-empty \{[\s\S]*?width: 100%;[\s\S]*?min-width: 0;[\s\S]*?align-self: stretch;/);
+  assert.match(styles, /\.usage-spend-legend > \.usage-card-empty strong \{[\s\S]*?overflow-wrap: normal;[\s\S]*?word-break: normal;[\s\S]*?white-space: normal;/);
+  assert.match(styles, /\.usage-provider-error \{[\s\S]*?padding: 9px 10px;/);
+
+  const usageMobileStart = styles.indexOf("@media (max-width: 480px) {", styles.indexOf(".usage-dashboard {"));
+  const usageMobileEnd = styles.indexOf("@media (prefers-reduced-motion: reduce)", usageMobileStart);
+  const usageMobileStyles = styles.slice(usageMobileStart, usageMobileEnd);
+  assert.match(usageMobileStyles, /\.usage-eyebrow \{ font-size: 8\.5px; letter-spacing: \.075em; line-height: 1\.35; \}/);
+  assert.match(usageMobileStyles, /\.usage-spend-legend \{[\s\S]*?width: 100%;[\s\S]*?min-width: 0;[\s\S]*?max-width: none;/);
 });
