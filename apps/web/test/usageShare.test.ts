@@ -83,8 +83,12 @@ test("Usage settings keeps the Polyth shell and offers rich dashboard views", as
   assert.match(source, /Session cohorts by latest turn/);
   assert.match(source, /complete recorded totals—not usage generated during the bucket/);
   assert.match(source, /<table className="sr-only">/);
+  assert.match(source, /<th scope="col">Provider<\/th>/);
   assert.match(source, /role="progressbar"/);
   assert.match(source, /className="usage-quota-alert" role="alert"/);
+  assert.match(source, /className="usage-chart-empty" role="status"/);
+  assert.match(source, /aria-label=\{`\$\{hidden \? "Show" : "Hide"\} \$\{provider\.label\} in breakdowns`\}/);
+  assert.match(source, /value > 0 && value < \.0001 \? "<\$0\.0001"/);
   assert.match(source, /Ranges use each session’s latest turn and include its full recorded totals/);
   assert.match(source, /new ResizeObserver/);
   assert.doesNotMatch(source, /role="(?:tab|radio)"/);
@@ -112,6 +116,8 @@ test("Usage settings keeps the Polyth shell and offers rich dashboard views", as
   const usageMobileStart = styles.indexOf("@media (max-width: 480px) {", styles.indexOf(".usage-dashboard {"));
   const usageMobileEnd = styles.indexOf("@media (prefers-reduced-motion: reduce)", usageMobileStart);
   const usageMobileStyles = styles.slice(usageMobileStart, usageMobileEnd);
-  assert.match(usageMobileStyles, /\.usage-eyebrow \{ font-size: 8\.5px; letter-spacing: \.075em; line-height: 1\.35; \}/);
+  assert.match(usageMobileStyles, /\.usage-eyebrow \{ font-size: 9\.5px; letter-spacing: \.075em; line-height: 1\.35; \}/);
   assert.match(usageMobileStyles, /\.usage-spend-legend \{[\s\S]*?width: 100%;[\s\S]*?min-width: 0;[\s\S]*?max-width: none;/);
+  assert.match(styles, /\.usage-view-tabs button \{ flex: 1; min-height: var\(--tap\); \}/);
+  assert.match(styles, /\.usage-layout-compact \.usage-cohort-chart \{ height: 174px; \}/);
 });

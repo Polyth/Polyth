@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
-import { fmtCost, fmtTokens } from "../format.ts";
+import { fmtTokens } from "../format.ts";
 import { Icon } from "../icons.tsx";
 import { useStore } from "../store.ts";
 import {
@@ -38,13 +38,18 @@ const seriesAccent = (index = 0): string =>
 const providerPreferenceId = (provider: UsageProviderSummary): string =>
   provider.snapshot?.providerId ?? provider.id;
 
-const formatMoney = (value: number): string =>
-  new Intl.NumberFormat("en-US", {
+const formatMoney = (value: number): string => {
+  if (value > 0 && value < .0001) return "<$0.0001";
+  return new Intl.NumberFormat("en-US", {
     style: "currency",
     currency: "USD",
     minimumFractionDigits: 2,
     maximumFractionDigits: value > 0 && value < 1 ? 4 : 2,
   }).format(value);
+};
+
+const formatRate = (value: number): string =>
+  value > 0 && value < .0001 ? "<$0.0001" : `$${value.toFixed(4)}`;
 
 const formatRange = (start: number, end: number): string => {
   const startDate = new Date(start);
@@ -245,72 +250,81 @@ function CohortChart({
   const populated = allValues.some((value) => value > 0);
   const metricLabel = metric === "cost" ? "Cost" : metric === "tokens" ? "Tokens" : "Sessions";
   const formatAxis = (value: number) => metric === "cost"
-    ? `$${value < 1 ? value.toFixed(2) : Math.round(value)}`
+    ? formatMoney(value)
     : metric === "tokens"
       ? fmtTokens(Math.round(value))
       : String(Math.round(value));
+  const maximumLabelCount = Math.min(6, Math.max(2, Math.floor(chartWidth / 88)));
+  const renderedLabelCount = Math.min(labels.length, maximumLabelCount);
+  const visibleLabelIndexes = new Set(
+    renderedLabelCount <= 1
+      ? [0]
+      : Array.from(
+          { length: renderedLabelCount },
+          (_, index) => Math.round(index * (labels.length - 1) / (renderedLabelCount - 1)),
+        ),
+  );
 
   return (
     <div className="usage-cohort-chart" ref={chartRef}>
-      <svg viewBox={`0 0 ${width} ${height}`} role="img">
-        <title>{`${metricLabel} from full session totals by latest-turn cohort`}</title>
-        <desc>
-          {populated
-            ? `Each session appears once, in the date bucket containing its latest turn. The ${metricLabel.toLowerCase()} values are cumulative session totals, not usage generated during that bucket. Detailed values follow the chart.`
-            : `${emptyTitle}. ${emptyText}`}
-        </desc>
-        {[0, .25, .5, .75, 1].map((fraction) => {
-          const y = top + chartHeight * fraction;
-          const value = maximum * (1 - fraction);
-          return (
-            <g key={fraction}>
-              <line className="usage-chart-gridline" x1={left} x2={width - right} y1={y} y2={y} />
-              <text className="usage-chart-y-label" x={left - 9} y={y + 3} textAnchor="end">
-                {formatAxis(value)}
-              </text>
-            </g>
-          );
-        })}
-        {labels.map((label, pointIndex) => {
-          let stackedValue = 0;
-          return series.map((item, seriesIndex) => {
-            const value = item.values[pointIndex] ?? 0;
-            const bottomValue = stackedValue;
-            stackedValue += value;
-            if (value <= 0) return null;
-            const y = pointY(stackedValue);
+      {populated && (
+        <svg viewBox={`0 0 ${width} ${height}`} role="img">
+          <title>{`${metricLabel} from full session totals by latest-turn cohort`}</title>
+          <desc>
+            {`Each session appears once, in the date bucket containing its latest turn. The ${metricLabel.toLowerCase()} values are cumulative session totals, not usage generated during that bucket. Detailed values follow the chart.`}
+          </desc>
+          {[0, .25, .5, .75, 1].map((fraction) => {
+            const y = top + chartHeight * fraction;
+            const value = maximum * (1 - fraction);
             return (
-              <rect
-                key={`${item.providerId}-${pointIndex}`}
-                className="usage-chart-bar"
-                x={barX(pointIndex)}
-                y={y}
-                width={barWidth}
-                height={Math.max(1, pointY(bottomValue) - y)}
-                rx="2"
-                fill={seriesAccent(seriesIndex)}
-              >
-                <title>{`${item.label}: ${formatAxis(value)} from sessions with a latest turn in ${label}`}</title>
-              </rect>
+              <g key={fraction}>
+                <line className="usage-chart-gridline" x1={left} x2={width - right} y1={y} y2={y} />
+                <text className="usage-chart-y-label" x={left - 9} y={y + 3} textAnchor="end">
+                  {formatAxis(value)}
+                </text>
+              </g>
             );
-          });
-        })}
-        {labels.map((label, index) => {
-          const every = Math.max(1, Math.ceil(labels.length / 6));
-          if (index % every !== 0 && index !== labels.length - 1) return null;
-          return (
-            <text
-              className="usage-chart-x-label"
-              key={`${label}-${index}`}
-              x={barX(index) + barWidth / 2}
-              y={height - 5}
-              textAnchor="middle"
-            >
-              {label}
-            </text>
-          );
-        })}
-      </svg>
+          })}
+          {labels.map((label, pointIndex) => {
+            let stackedValue = 0;
+            return series.map((item, seriesIndex) => {
+              const value = item.values[pointIndex] ?? 0;
+              const bottomValue = stackedValue;
+              stackedValue += value;
+              if (value <= 0) return null;
+              const y = pointY(stackedValue);
+              return (
+                <rect
+                  key={`${item.providerId}-${pointIndex}`}
+                  className="usage-chart-bar"
+                  x={barX(pointIndex)}
+                  y={y}
+                  width={barWidth}
+                  height={Math.max(1, pointY(bottomValue) - y)}
+                  rx="2"
+                  fill={seriesAccent(seriesIndex)}
+                >
+                  <title>{`${item.label}: ${formatAxis(value)} from sessions with a latest turn in ${label}`}</title>
+                </rect>
+              );
+            });
+          })}
+          {labels.map((label, index) => {
+            if (!visibleLabelIndexes.has(index)) return null;
+            return (
+              <text
+                className="usage-chart-x-label"
+                key={`${label}-${index}`}
+                x={barX(index) + barWidth / 2}
+                y={height - 5}
+                textAnchor="middle"
+              >
+                {label}
+              </text>
+            );
+          })}
+        </svg>
+      )}
       {populated && (
         <table className="sr-only">
           <caption>{`${metricLabel} from full session totals by latest-turn cohort and provider`}</caption>
@@ -333,7 +347,7 @@ function CohortChart({
         </table>
       )}
       {!populated && (
-        <div className="usage-chart-empty">
+        <div className="usage-chart-empty" role="status">
           <span><Icon.usage /></span>
           <strong>{emptyTitle}</strong>
           <small>{emptyText}</small>
@@ -566,7 +580,7 @@ function CostPulse({ data }: { data: ReturnType<typeof buildUsageDashboardData> 
         <div><span>Sessions counted</span><strong>{data.totals.sessions.toLocaleString()}</strong></div>
         <div><span>Selected range</span><strong>{data.rangeDays} days</strong></div>
         <div><span>Per session</span><strong>{formatMoney(averageSession)}</strong></div>
-        <div><span>Per 1K tokens</span><strong>{fmtCost(data.totals.averageCostPerThousand)}</strong></div>
+        <div><span>Per 1K tokens</span><strong>{formatRate(data.totals.averageCostPerThousand)}</strong></div>
       </div>
       <p>Sessions are selected by latest turn. Values are their full recorded totals, not daily billing or a provider invoice.</p>
     </article>
@@ -607,12 +621,12 @@ function ProviderTable({
         <table>
           <thead>
             <tr>
-              <th>Provider</th>
-              <th>Spend</th>
-              <th>Tokens</th>
-              <th>Sessions</th>
-              <th>Remaining / limit</th>
-              <th>Status</th>
+              <th scope="col">Provider</th>
+              <th scope="col">Spend</th>
+              <th scope="col">Tokens</th>
+              <th scope="col">Sessions</th>
+              <th scope="col">Remaining / limit</th>
+              <th scope="col">Status</th>
             </tr>
           </thead>
           <tbody>
@@ -778,7 +792,12 @@ function ProviderDetails({
                 )}
               </div>
               <footer>
-                <button type="button" className="small-btn" onClick={() => setProviderHidden(preferenceId, !hidden)}>
+                <button
+                  type="button"
+                  className="small-btn"
+                  aria-label={`${hidden ? "Show" : "Hide"} ${provider.label} in breakdowns`}
+                  onClick={() => setProviderHidden(preferenceId, !hidden)}
+                >
                   {hidden ? "Show in breakdowns" : "Hide from breakdowns"}
                 </button>
                 {provider.snapshot && (
@@ -854,8 +873,11 @@ export function UsageDashboard(): ReactNode {
   const refreshAll = async () => {
     if (refreshing || quotaLoading) return;
     setRefreshing(true);
-    await refreshQuotaFeeds();
-    setRefreshing(false);
+    try {
+      await refreshQuotaFeeds();
+    } finally {
+      setRefreshing(false);
+    }
   };
   const quotaBusy = quotaLoading || refreshing;
 
@@ -974,7 +996,7 @@ export function UsageDashboard(): ReactNode {
             />
             <StatCard
               label="Cost / 1K tokens"
-              value={data.totals.tokens > 0 ? fmtCost(data.totals.averageCostPerThousand) : "$0.0000"}
+              value={data.totals.tokens > 0 ? formatRate(data.totals.averageCostPerThousand) : "$0.0000"}
               trend={data.trends.averageCostPerThousand}
               icon="compare"
               tone="var(--amber)"

@@ -6286,7 +6286,7 @@ body[data-quick-actions="false"] [data-widget-id="core.quick-actions"] { display
 .usage-chart-x-label { fill: var(--muted); font-size: 10px; }
 .usage-chart-empty {
   position: absolute;
-  inset: 36px 0 34px;
+  inset: 8px 0 12px;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -6747,36 +6747,51 @@ body[data-quick-actions="false"] [data-widget-id="core.quick-actions"] { display
     border: 1px solid var(--border);
     border-radius: calc(16px * var(--corner-radius-scale));
   }
+  .settings-page-usage .settings-mobile-back,
+  .settings-page-usage .close-btn,
+  .settings-page-usage .modal-foot .btn-accent {
+    min-height: var(--tap);
+  }
+  .settings-page-usage .close-btn { width: var(--tap); }
+  .settings-page-usage .modal-foot { height: 64px; }
   .usage-dashboard-hero { padding: 16px; }
   .usage-dashboard-hero h2 { font-size: 17px; }
   .usage-dashboard-toolbar { padding: 8px 14px; }
   .usage-view-tabs { width: 100%; margin: 0; }
-  .usage-view-tabs button { flex: 1; min-height: 42px; }
+  .usage-view-tabs button { flex: 1; min-height: var(--tap); }
   .usage-range-control { flex: 1; }
-  .usage-range-control button { flex: 1; min-height: 40px; }
-  .usage-layout-control button { width: 40px; height: 40px; }
-  .usage-refresh-button { width: 44px; height: 44px; }
-  .usage-icon-button { width: 44px; height: 44px; }
+  .usage-range-control button { flex: 1; min-height: var(--tap); }
+  .usage-layout-control button { width: var(--tap); height: var(--tap); }
+  .usage-refresh-button { width: var(--tap); height: var(--tap); }
+  .usage-icon-button { width: var(--tap); height: var(--tap); }
   .usage-quota-alert { align-items: flex-start; flex-wrap: wrap; margin: 10px 12px 0; }
   .usage-quota-alert > span { flex-basis: calc(100% - 26px); }
-  .usage-quota-alert .small-btn { min-height: 40px; margin-left: 24px; }
+  .usage-quota-alert .small-btn { min-height: var(--tap); margin-left: 24px; }
   .usage-dashboard-content { gap: 10px; padding: 14px 12px 22px; }
   .usage-stat-grid { gap: 8px; }
   .usage-stat-card { min-height: 112px; padding: 12px; }
   .usage-card-heading { min-height: 61px; padding-inline: 12px; }
+  .usage-card-heading p,
+  .usage-chart-legend > span,
+  .usage-card-empty span { font-size: 10.5px; line-height: 1.45; }
+  .usage-chart-method { font-size: 10.5px; }
   .usage-time-card .usage-card-heading { align-items: flex-start; flex-direction: column; }
   .usage-time-card .usage-metric-toggle { width: 100%; }
-  .usage-time-card .usage-metric-toggle button { flex: 1; min-height: 40px; }
+  .usage-time-card .usage-metric-toggle button { flex: 1; min-height: var(--tap); }
   .usage-cohort-chart { height: 205px; margin-inline: 8px; }
   .usage-spend-content { grid-template-columns: 1fr; }
   .usage-spend-donut { width: 148px; }
   .usage-spend-legend { width: 100%; max-width: 300px; justify-self: center; }
   .usage-action-strip { align-items: stretch; flex-wrap: wrap; }
   .usage-action-strip > div { flex-basis: calc(100% - 44px); }
-  .usage-action-strip button { flex: 1; justify-content: center; min-height: 40px; }
+  .usage-action-strip button { flex: 1; justify-content: center; min-height: var(--tap); }
   .usage-provider-view-intro { align-items: stretch; flex-wrap: wrap; gap: 12px 24px; }
-  .usage-provider-view-intro button { width: 100%; min-height: 40px; justify-content: center; margin: 0; }
-  .usage-provider-detail-card > footer button { min-height: 40px; }
+  .usage-provider-view-intro button { width: 100%; min-height: var(--tap); justify-content: center; margin: 0; }
+  .usage-provider-detail-card > footer button { min-height: var(--tap); }
+  .usage-layout-compact .usage-stat-card { min-height: 96px; padding-block: 10px; }
+  .usage-layout-compact .usage-card-heading { min-height: 54px; }
+  .usage-layout-compact .usage-cohort-chart { height: 174px; }
+  .usage-layout-compact .usage-spend-content { min-height: 160px; }
   .usage-table-scroll { overflow: visible; padding: 10px; }
   .usage-providers-card table,
   .usage-providers-card tbody { min-width: 0; display: block; }
@@ -6831,8 +6846,8 @@ body[data-quick-actions="false"] [data-widget-id="core.quick-actions"] { display
 @media (max-width: 480px) {
   .usage-dashboard-hero { grid-template-columns: 38px minmax(0, 1fr); gap: 10px; padding-inline: 14px; }
   .usage-hero-mark { width: 38px; height: 38px; }
-  .usage-eyebrow { font-size: 8.5px; letter-spacing: .075em; line-height: 1.35; }
-  .usage-dashboard-hero p { font-size: 10px; }
+  .usage-eyebrow { font-size: 9.5px; letter-spacing: .075em; line-height: 1.35; }
+  .usage-dashboard-hero p { font-size: 11.5px; }
   .usage-spend-legend {
     width: 100%;
     min-width: 0;
@@ -6844,10 +6859,30 @@ body[data-quick-actions="false"] [data-widget-id="core.quick-actions"] { display
   .usage-cost-grid { grid-template-columns: 1fr; }
   .usage-model-card .usage-card-heading { align-items: flex-start; flex-direction: column; }
   .usage-model-card .usage-metric-toggle { width: 100%; }
-  .usage-model-card .usage-metric-toggle button { flex: 1; min-height: 40px; }
+  .usage-model-card .usage-metric-toggle button { flex: 1; min-height: var(--tap); }
   .usage-provider-detail-card { padding: 12px; }
   .usage-provider-detail-stats { gap: 4px; }
   .usage-provider-detail-stats > div { padding: 7px; }
+}
+
+@media (pointer: coarse) {
+  .settings-page-usage .settings-mobile-back,
+  .settings-page-usage .close-btn,
+  .settings-page-usage .modal-foot .btn-accent,
+  .usage-dashboard .small-btn,
+  .usage-view-tabs button,
+  .usage-range-control button,
+  .usage-layout-control button,
+  .usage-metric-toggle button {
+    min-height: var(--tap);
+  }
+  .usage-range-control button { min-width: var(--tap); }
+  .usage-layout-control button,
+  .usage-refresh-button,
+  .usage-icon-button {
+    width: var(--tap);
+    height: var(--tap);
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
