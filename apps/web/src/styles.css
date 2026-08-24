@@ -3621,6 +3621,11 @@ body[data-chatwidth="wide"] .bubble, body[data-chatwidth="wide"] .reasoning, bod
 }
 .mcp-import-preview { display: flex; flex-direction: column; gap: 3px; padding: 4px 2px; }
 .secret-redacted { color: var(--muted); }
+.opencode-plugin-section {
+  margin: 12px 0 22px;
+  padding-bottom: 20px;
+  border-bottom: 1px solid var(--border-soft);
+}
 
 /* Secure Safe settings: metadata list plus write-only add form */
 .secure-safe-note {

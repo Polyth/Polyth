@@ -78,6 +78,7 @@ import { controlRoutes } from "./routes/control.ts";
 import { snippetRoutes } from "./routes/snippets.ts";
 import { profileRoutes } from "./routes/profiles.ts";
 import { settingsRoutes } from "./routes/settings.ts";
+import { opencodePluginRoutes } from "./routes/opencodePlugins.ts";
 import { sshRoutes } from "./routes/ssh.ts";
 import { browserRoutes } from "./routes/browser.ts";
 import { browseRoutes } from "./routes/browse.ts";
@@ -830,7 +831,6 @@ export async function boot(opts: BootOptions = {}) {
   };
   const settingsRoute = settingsRoutes({
     behavior, mcp, plugins: pluginRegistry,
-    backendConfig: () => configApplier.readConfig(),
     saveRole: async (name, role) => {
       await configApplier.applyAgent(name, role);
       const current = (await runtimeCatalog.agents()).find((agent) => agent.name === name);
@@ -852,6 +852,7 @@ export async function boot(opts: BootOptions = {}) {
       capabilities: allCapabilities(),
     }),
   });
+  const pluginRoute = chainRoutes(opencodePluginRoutes(configApplier), settingsRoute);
 
   registerPackageRoute("git", gitRoutes({
     projects, sessions, git,
@@ -1015,7 +1016,7 @@ export async function boot(opts: BootOptions = {}) {
   registerPackageRoute("mcp", async (request) =>
     request.path.startsWith("/api/mcp/") ? settingsRoute(request) : false);
   registerPackageRoute("plugins", async (request) =>
-    request.path.startsWith("/api/plugins") ? settingsRoute(request) : false);
+    request.path.startsWith("/api/plugins") ? pluginRoute(request) : false);
 
   const staticCoreRoutes: RouteHandler[] = [
     authRoutes(auth),

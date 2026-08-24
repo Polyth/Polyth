@@ -1,4 +1,4 @@
-import { ManagedPluginsSection } from "../components/settings/pages.tsx";
+import { PluginsPage } from "../components/settings/pages.tsx";
 import { registerPackageOnboarding } from "./onboarding/registry.ts";
 import { PLUGINS_TOUR } from "./onboarding/tours/installed.ts";
 import { combineUnregister, installSettingsPage } from "./settingsPage.ts";
@@ -12,8 +12,16 @@ export function installPluginsPackage(): () => void {
       group: "Customize",
       icon: "🧩",
       order: 20,
-      component: ManagedPluginsSection,
+      component: PluginsPage,
       settingsItems: [
+        {
+          id: "plugins.opencode",
+          pageId: "plugins",
+          label: "OpenCode plugins",
+          description: "Import plugin configuration from JSON",
+          keywords: ["opencode", "json", "otto", "runtime"],
+          focusTarget: "plugins.opencode",
+        },
         {
           id: "plugins.managed",
           pageId: "plugins",

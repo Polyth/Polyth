@@ -1420,6 +1420,42 @@ export interface McpServerDto {
   revision: number;
 }
 
+/** One entry in OpenCode's `plugin` config array. Tuple entries carry the
+ * plugin's JSON-serializable options without exposing Polyth's managed-plugin
+ * installation surface. */
+export type OpenCodePluginConfigEntry = string | [string, JsonObject];
+
+export interface OpenCodePluginEntryDto {
+  spec: string;
+  options?: JsonObject;
+}
+
+/** Pure paste-parser result used by the settings preview. */
+export interface OpenCodePluginPreviewDto {
+  entries: OpenCodePluginEntryDto[];
+  errors: string[];
+  /** Top-level config keys intentionally not imported in this v1 flow. */
+  ignoredKeys: string[];
+}
+
+export interface OpenCodePluginListResponseDto {
+  plugins: OpenCodePluginEntryDto[];
+}
+
+export interface OpenCodePluginImportRequestDto {
+  plugins: OpenCodePluginConfigEntry[];
+}
+
+export interface OpenCodePluginImportResponseDto extends OpenCodePluginListResponseDto {
+  imported: string[];
+  restartRequired: true;
+}
+
+export interface OpenCodePluginRemoveResponseDto extends OpenCodePluginListResponseDto {
+  removed: boolean;
+  restartRequired: boolean;
+}
+
 // ---------------------------------------------------------------- Secure Safe (OC-22-008)
 
 export type SecureSafeKind = "env" | "token" | "password";

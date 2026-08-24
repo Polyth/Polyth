@@ -21,6 +21,10 @@ import type {
   ModelRef,
   MultirunDto,
   NotificationRecord,
+  OpenCodePluginImportRequestDto,
+  OpenCodePluginImportResponseDto,
+  OpenCodePluginListResponseDto,
+  OpenCodePluginRemoveResponseDto,
   PackageDescriptorDto,
   PreviewState,
   SystemInfoDto,
@@ -658,8 +662,15 @@ export const api = {
     jfetch<VisibilityStateDto>(`/api/models/enabled`, json("POST", { key, enabled })),
   saveRole: (name: string, input: { prompt?: string; model?: ModelRef; mode: AgentDescriptor["mode"] }) =>
     jfetch<AgentDescriptor>(`/api/settings/roles/${encodeURIComponent(name)}`, json("PUT", input)),
-  opencodePlugins: () =>
-    jfetch<{ plugins: string[] }>("/api/plugins/opencode").catch((): { plugins: string[] } => ({ plugins: [] })),
+  opencodePluginsList: () =>
+    jfetch<OpenCodePluginListResponseDto>("/api/plugins/opencode"),
+  opencodePluginsImport: (input: OpenCodePluginImportRequestDto) =>
+    jfetch<OpenCodePluginImportResponseDto>("/api/plugins/opencode/import", json("POST", input)),
+  opencodePluginRemove: (spec: string) =>
+    jfetch<OpenCodePluginRemoveResponseDto>(
+      `/api/plugins/opencode/${encodeURIComponent(spec)}`,
+      { method: "DELETE" },
+    ),
 
   // ---- host directory browsing (folder picker; localhost-only route) --------
   browseHost: (path?: string, hidden?: boolean) =>

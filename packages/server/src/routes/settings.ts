@@ -12,8 +12,6 @@ export interface SettingsRouteDeps {
   mcp: McpConfigService;
   plugins: PluginRegistry;
   systemInfo(local: boolean): SystemInfoDto;
-  /** Parsed backend config (opencode.json) for read-only surfaces. */
-  backendConfig?(): Promise<Record<string, unknown>>;
   saveRole?(name: string, role: { prompt?: string; model?: ModelRef; mode: AgentDescriptor["mode"] }): Promise<AgentDescriptor>;
 }
 
@@ -129,19 +127,6 @@ export function settingsRoutes(deps: SettingsRouteDeps): RouteHandler {
       // Honest state: interactive MCP authorization needs the backend bridge,
       // which the current adapter does not expose. Not silently swallowed.
       rc.json(501, { error: "unsupported", message: "MCP authorization requires the backend bridge; configure credentials as secrets instead" });
-      return true;
-    }
-
-    // ---- OpenCode-configured plugins (read-only; secrets never included) ----------
-    if (path === "/api/plugins/opencode" && method === "GET") {
-      let plugins: string[] = [];
-      if (deps.backendConfig) {
-        try {
-          const cfg = await deps.backendConfig();
-          if (Array.isArray(cfg.plugin)) plugins = cfg.plugin.filter((p): p is string => typeof p === "string");
-        } catch { /* corrupt/missing backend config → empty list, not an error */ }
-      }
-      rc.json(200, { plugins });
       return true;
     }
 

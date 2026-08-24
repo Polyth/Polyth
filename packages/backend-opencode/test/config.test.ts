@@ -41,6 +41,66 @@ test("applyMcp refuses to overwrite a corrupt backend config", async () => {
   assert.equal(readFileSync(join(dir, "opencode.json"), "utf8"), "{corrupt", "corrupt file untouched");
 });
 
+test("applyPlugins merges and deduplicates string and tuple entries by spec", async () => {
+  const dir = tmp();
+  writeFileSync(join(dir, "opencode.json"), JSON.stringify({
+    $schema: "https://opencode.ai/config.json",
+    plugin: ["existing", ["configured", { old: true }]],
+    mcp: { ctx: { type: "local", command: ["ctx"] } },
+    provider: { anthropic: { name: "Anthropic" } },
+    agent: { review: { mode: "subagent" } },
+  }));
+  const applier = createConfigApplier({ configDir: dir });
+  const plugins = await applier.applyPlugins([
+    "@otto-assistant/opencode-claude",
+    ["configured", { old: false, mode: "strict" }],
+    "@otto-assistant/opencode-claude",
+  ]);
+  assert.deepEqual(plugins, [
+    "existing",
+    ["configured", { old: false, mode: "strict" }],
+    "@otto-assistant/opencode-claude",
+  ]);
+  const cfg = JSON.parse(readFileSync(join(dir, "opencode.json"), "utf8"));
+  assert.equal(cfg.$schema, "https://opencode.ai/config.json");
+  assert.deepEqual(cfg.mcp, { ctx: { type: "local", command: ["ctx"] } });
+  assert.deepEqual(cfg.provider, { anthropic: { name: "Anthropic" } });
+  assert.deepEqual(cfg.agent, { review: { mode: "subagent" } });
+  assert.deepEqual(cfg.plugin, plugins);
+});
+
+test("plugin edits parse JSONC and remove tuple entries atomically", async () => {
+  const dir = tmp();
+  const file = join(dir, "opencode.jsonc");
+  writeFileSync(file, `{
+    // user-owned config
+    "$schema": "https://opencode.ai/config.json",
+    "plugin": ["keep", ["remove-me", { "enabled": true, }],],
+    "provider": { "claude-code": { "name": "Claude Code", }, },
+  }`);
+  const applier = createConfigApplier({ configDir: dir });
+  assert.deepEqual(await applier.listPlugins(), ["keep", ["remove-me", { enabled: true }]]);
+  const result = await applier.removePlugin("remove-me");
+  assert.equal(result.removed, true);
+  assert.deepEqual(result.plugins, ["keep"]);
+  const cfg = JSON.parse(readFileSync(file, "utf8"));
+  assert.deepEqual(cfg.plugin, ["keep"]);
+  assert.deepEqual(cfg.provider, { "claude-code": { name: "Claude Code" } });
+});
+
+test("applyPlugins validates every entry before leaving config untouched", async () => {
+  const dir = tmp();
+  const file = join(dir, "opencode.json");
+  const original = JSON.stringify({ plugin: ["keep"], provider: { x: {} } });
+  writeFileSync(file, original);
+  const applier = createConfigApplier({ configDir: dir });
+  await assert.rejects(
+    () => applier.applyPlugins(["valid", ["broken", "options-must-be-an-object"]]),
+    /must be a package spec or/,
+  );
+  assert.equal(readFileSync(file, "utf8"), original);
+});
+
 test("readConfig returns {} for a missing file and parses an existing one", async () => {
   const dir = tmp();
   const applier = createConfigApplier({ configDir: dir });
