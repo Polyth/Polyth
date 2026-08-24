@@ -67,7 +67,8 @@ test("fresh mobile sessions expose project and branch targets", () => {
   assert.match(workflowLauncher, /composer-workflow/);
   assert.match(css, /\.composer-mobile \.composer-workflow,/);
   assert.match(css, /\.composer-mobile \.composer-workflow:active,/);
-  assert.match(css, /\.composer-mobile\.composer-collapsed \.composer-workflow \{ display: none; \}/);
+  assert.match(css, /\.composer-mobile\.composer-collapsed:not\(\.composer-has-draft\) \.composer-workflow \{ display: none; \}/);
+  assert.match(css, /\.composer-mobile\.composer-has-draft \.composer-workflow \{ display: inline-flex; \}/);
   assert.match(header, /displaySessionTitle\(session\.title, session\.id, firstUserText\)/);
   assert.match(header, /Composer controls/);
   assert.match(css, /\.polyth-gradient\s*\{[^}]*linear-gradient/s);
