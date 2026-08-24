@@ -3,12 +3,26 @@ import {
   api, type ChecksSummaryDto, type PrCheckDto, type PrCommentDto,
   type PrDetailDto, type PrFileDto,
 } from "../api.ts";
+import { highlight, langOf } from "../highlight.ts";
 import { Icon } from "../icons.tsx";
+import { MarkdownDoc } from "../markdown.tsx";
 import { splitPrDiff } from "../prDiff.ts";
+import { friendlyError } from "../settings.ts";
 import { useStore } from "../store.ts";
 import EmptyState from "./EmptyState.tsx";
 
 type Tab = "overview" | "files" | "checks" | "comments";
+type PrSection = "detail" | "files" | "diff" | "checks" | "comments";
+
+/** GitHub descriptions may contain hidden Cursor coordination comments.
+ * Markdown parsers intentionally do not execute HTML, but those comments
+ * should remain hidden rather than appearing as literal marker text. */
+export function stripCursorMarkers(markdown: string): string {
+  return markdown
+    .replace(/<!--[\s\S]*?-->/g, "")
+    .replace(/^\s*(?:(?:begin|end|start|stop)[_\s-]+cursor(?:[_\s:-].*)?|cursor(?:_[a-z0-9-]+)+)\s*$/gim, "")
+    .trim();
+}
 
 function ChecksRing({ summary }: { summary: ChecksSummaryDto }) {
   const passing = summary.counts.success ?? 0;
@@ -34,17 +48,17 @@ function CheckRow({ check }: { check: PrCheckDto }) {
   );
 }
 
-function DiffLines({ diff }: { diff: string }) {
+function DiffLines({ diff, path }: { diff: string; path: string }) {
   let oldLine = 0;
   let newLine = 0;
   return (
-    <pre className="git-diff pr-diff">
+    <div className="git-diff pr-diff" role="table" aria-label={`Patch for ${path}`}>
       {diff.split("\n").map((line, index) => {
         const hunk = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(line);
         if (hunk) {
           oldLine = Number(hunk[1]);
           newLine = Number(hunk[2]);
-          return <div key={index} className="git-diff-line diff-hunk"><span className="pr-diff-ln" /><span>{line}</span></div>;
+          return <div key={index} className="git-diff-line diff-hunk" role="row" aria-label={line}><span className="pr-diff-ln" aria-hidden="true" /><code role="cell">{line}</code></div>;
         }
         const metadata = line.startsWith("diff --git ") || line.startsWith("index ") || line.startsWith("--- ") || line.startsWith("+++ ") || line.startsWith("new file ") || line.startsWith("deleted file ") || line.startsWith("similarity ");
         let oldShown = "";
@@ -60,14 +74,17 @@ function DiffLines({ diff }: { diff: string }) {
           oldShown = String(oldLine++);
           newShown = String(newLine++);
         }
+        const lineLabel = oldShown && newShown
+          ? `old line ${oldShown}, new line ${newShown}`
+          : oldShown ? `old line ${oldShown}` : newShown ? `new line ${newShown}` : "diff metadata";
         return (
-          <div key={index} className={`git-diff-line ${className}`}>
-            <span className="pr-diff-ln"><i>{oldShown}</i><i>{newShown}</i></span>
-            <span>{line}</span>
+          <div key={index} className={`git-diff-line ${className}`} role="row" aria-label={lineLabel}>
+            <span className="pr-diff-ln" aria-hidden="true"><i>{oldShown}</i><i>{newShown}</i></span>
+            <code role="cell" dangerouslySetInnerHTML={{ __html: highlight(line, langOf(path)) }} />
           </div>
         );
       })}
-    </pre>
+    </div>
   );
 }
 
@@ -85,6 +102,8 @@ export default function PullRequestView({ number, onClose }: { number: number; o
   const [checks, setChecks] = useState<{ checks: PrCheckDto[]; summary: ChecksSummaryDto } | null>(null);
   const [comments, setComments] = useState<PrCommentDto[]>([]);
   const [reason, setReason] = useState("");
+  const [sectionErrors, setSectionErrors] = useState<Partial<Record<PrSection, string>>>({});
+  const [reloadKey, setReloadKey] = useState(0);
   const [loading, setLoading] = useState(true);
   const [reviewBody, setReviewBody] = useState("");
   const [reviewEvent, setReviewEvent] = useState<"COMMENT" | "APPROVE" | "REQUEST_CHANGES">("COMMENT");
@@ -98,13 +117,24 @@ export default function PullRequestView({ number, onClose }: { number: number; o
   const [editTitle, setEditTitle] = useState("");
   const [editBody, setEditBody] = useState("");
   const [editBusy, setEditBusy] = useState(false);
+  const [reviewBusy, setReviewBusy] = useState(false);
 
-  const loadChecks = useCallback(() => {
+  const loadChecks = useCallback(async () => {
     if (!projectId) return Promise.resolve();
-    return api.githubPrChecks(projectId, number).then((result) => {
-      if (result.ok) setChecks(result.data);
-      else setReason(result.reason);
-    });
+    try {
+      const result = await api.githubPrChecks(projectId, number);
+      if (result.ok) {
+        setChecks(result.data);
+        setSectionErrors((current) => {
+          const { checks: _checks, ...rest } = current;
+          return rest;
+        });
+      } else {
+        setSectionErrors((current) => ({ ...current, checks: result.reason }));
+      }
+    } catch (cause) {
+      setSectionErrors((current) => ({ ...current, checks: friendlyError("Couldn’t load checks", cause) }));
+    }
   }, [projectId, number]);
 
   useEffect(() => {
@@ -113,25 +143,64 @@ export default function PullRequestView({ number, onClose }: { number: number; o
     setLoading(true);
     setReason("");
     setDiffReason("");
-    void Promise.all([
-      api.githubPrDetail(projectId, number).then((result) => {
-        if (!active) return;
-        if (result.ok) setDetail(result.data); else setReason(result.reason);
-      }),
-      api.githubPrFiles(projectId, number).then((result) => {
-        if (active && result.ok) setFiles(result.data);
-      }),
-      api.githubPrComments(projectId, number).then((result) => {
-        if (active && result.ok) setComments(result.data);
-      }),
-      api.githubPrDiff(projectId, number).then((result) => {
-        if (!active) return;
-        if (result.ok) setRawDiff(result.data); else setDiffReason(result.reason);
-      }),
+    setSectionErrors({});
+    const recordError = (section: PrSection, message: string) => {
+      if (active) setSectionErrors((current) => ({ ...current, [section]: message }));
+    };
+    const tasks = [
+      (async () => {
+        try {
+          const result = await api.githubPrDetail(projectId, number);
+          if (!active) return;
+          if (result.ok) setDetail(result.data);
+          else {
+            setReason(result.reason);
+            recordError("detail", result.reason);
+          }
+        } catch (cause) {
+          const message = friendlyError("Couldn’t load pull request details", cause);
+          if (active) setReason(message);
+          recordError("detail", message);
+        }
+      })(),
+      (async () => {
+        try {
+          const result = await api.githubPrFiles(projectId, number);
+          if (!active) return;
+          if (result.ok) setFiles(result.data); else recordError("files", result.reason);
+        } catch (cause) {
+          recordError("files", friendlyError("Couldn’t load changed files", cause));
+        }
+      })(),
+      (async () => {
+        try {
+          const result = await api.githubPrComments(projectId, number);
+          if (!active) return;
+          if (result.ok) setComments(result.data); else recordError("comments", result.reason);
+        } catch (cause) {
+          recordError("comments", friendlyError("Couldn’t load comments", cause));
+        }
+      })(),
+      (async () => {
+        try {
+          const result = await api.githubPrDiff(projectId, number);
+          if (!active) return;
+          if (result.ok) setRawDiff(result.data);
+          else {
+            setDiffReason(result.reason);
+            recordError("diff", result.reason);
+          }
+        } catch (cause) {
+          const message = friendlyError("Couldn’t load the pull request patch", cause);
+          if (active) setDiffReason(message);
+          recordError("diff", message);
+        }
+      })(),
       loadChecks(),
-    ]).finally(() => { if (active) setLoading(false); });
+    ];
+    void Promise.allSettled(tasks).finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
-  }, [projectId, number, loadChecks]);
+  }, [projectId, number, loadChecks, reloadKey]);
 
   useEffect(() => {
     const pending = checks?.checks.some((check) => check.status === "queued" || check.status === "in_progress") ?? false;
@@ -204,12 +273,14 @@ export default function PullRequestView({ number, onClose }: { number: number; o
   };
 
   const submitReview = async () => {
+    if (reviewBusy) return;
     setWriteMsg("");
     const needsConfirm = reviewEvent !== "COMMENT";
     if (needsConfirm && !confirmWrite) {
       setWriteMsg("Confirm the approval or change request before submitting.");
       return;
     }
+    setReviewBusy(true);
     const result = await api.githubSubmitReview(number, {
       projectId,
       event: reviewEvent,
@@ -218,6 +289,7 @@ export default function PullRequestView({ number, onClose }: { number: number; o
       ...(needsConfirm ? { confirm: true } : {}),
       ...(sessionId ? { sessionId } : {}),
     }).catch((cause: unknown) => ({ ok: false as const, reason: cause instanceof Error ? cause.message : String(cause) }));
+    setReviewBusy(false);
     if (result.ok) {
       setWriteMsg(`Review submitted (${reviewEvent.toLowerCase().replace("_", " ")}).`);
       setReviewBody("");
@@ -256,18 +328,18 @@ export default function PullRequestView({ number, onClose }: { number: number; o
         <button className="small-btn pr-back" onClick={onClose}><Icon.back /> Pull requests</button>
         {detail && (
           <div className="pr-title-block">
-            <div>
+            <div className="pr-title-meta">
               <span className={`gh-state ${detail.state.toLowerCase()}${detail.isDraft ? " draft" : ""}`}>{detail.isDraft ? "draft" : detail.state.toLowerCase()}</span>
               <span className="gh-number mono">#{detail.number}</span>
             </div>
-            <a href={detail.url} target="_blank" rel="noreferrer">{detail.title}</a>
+            <h1><a href={detail.url} target="_blank" rel="noreferrer">{detail.title} <Icon.external /><span className="sr-only">(opens on GitHub)</span></a></h1>
             <span className="muted">{detail.author} wants to merge <span className="mono">{detail.headRefName}</span> into <span className="mono">{detail.baseRefName}</span></span>
           </div>
         )}
         {checks && <div className="pr-check-pill"><ChecksRing summary={checks.summary} /><span className={`checks-headline hl-${checks.summary.state}`}>{checks.summary.headline}</span></div>}
       </header>
 
-      {reason && !detail && <EmptyState title="Couldn’t load pull request" description={reason} />}
+      {reason && !detail && <EmptyState title="Couldn’t load pull request" description={reason} actionLabel="Retry" onAction={() => setReloadKey((key) => key + 1)} />}
 
       {detail && (
         <>
@@ -290,7 +362,12 @@ export default function PullRequestView({ number, onClose }: { number: number; o
                 <div><span>Changed files</span><strong>{detail.changedFiles}</strong></div>
                 <div><span>Lines added</span><strong className="positive">+{detail.additions}</strong></div>
                 <div><span>Lines removed</span><strong className="negative">−{detail.deletions}</strong></div>
-                <div><span>Merge status</span><strong>{detail.mergeable.toLowerCase()}</strong></div>
+                <div>
+                  <span>Merge status</span>
+                  <strong className={`merge-status-badge st-${detail.mergeable.toLowerCase()}`}>
+                    {detail.mergeable === "MERGEABLE" ? "Ready" : detail.mergeable === "CONFLICTING" ? "Conflicts" : "Checking"}
+                  </strong>
+                </div>
               </section>
               <div className="pr-overview-head">
                 <div>
@@ -314,7 +391,11 @@ export default function PullRequestView({ number, onClose }: { number: number; o
                     <button className="primary-btn" disabled={editBusy || !editTitle.trim()} onClick={() => void saveEdit()}>{editBusy ? "Saving…" : "Save changes"}</button>
                   </div>
                 </div>
-              ) : <pre className="pr-body">{detail.body || "No description was provided."}</pre>}
+              ) : (
+                <div className="pr-body markdown-body">
+                  {detail.body ? <MarkdownDoc text={stripCursorMarkers(detail.body)} keyBase={`pr-${detail.number}-body`} /> : <p>No description was provided.</p>}
+                </div>
+              )}
 
               {detail.state === "OPEN" && (
                 <section className="pr-merge-area">
@@ -350,7 +431,18 @@ export default function PullRequestView({ number, onClose }: { number: number; o
                 <button className="small-btn" disabled={diffFiles.length === 0} onClick={() => setExpandedFiles(new Set(diffFiles.map((file) => file.path)))}>Expand all</button>
                 <button className="small-btn" disabled={expandedFiles.size === 0} onClick={() => setExpandedFiles(new Set())}>Collapse all</button>
               </div>
-              {diffReason && <div className="source-inline-status error">The patch could not be loaded: {diffReason}</div>}
+              {sectionErrors.files && (
+                <div className="source-inline-status error" role="alert">
+                  <span>Changed-file metadata could not be loaded: {sectionErrors.files}</span>
+                  <button className="small-btn" onClick={() => setReloadKey((key) => key + 1)}>Retry</button>
+                </div>
+              )}
+              {diffReason && (
+                <div className="source-inline-status error" role="alert">
+                  <span>The patch could not be loaded: {diffReason}</span>
+                  <button className="small-btn" onClick={() => setReloadKey((key) => key + 1)}>Retry</button>
+                </div>
+              )}
               {files.length === 0 && diffFiles.length === 0 && <EmptyState title="No changed files" description="No file changes are available for this pull request." />}
               {diffFiles.map((file) => {
                 const stat = fileStats.get(file.path);
@@ -358,13 +450,13 @@ export default function PullRequestView({ number, onClose }: { number: number; o
                 return (
                   <article key={file.path} className={`pr-file-card ${expanded ? "expanded" : ""}`}>
                     <button className="pr-file-head" aria-expanded={expanded} onClick={() => toggleFile(file.path)}>
-                      <span className="git-folder-chevron">{expanded ? <Icon.chevronDown /> : <Icon.chevronRight />}</span>
+                      <span className={`git-folder-chevron${expanded ? " expanded" : ""}`} aria-hidden="true"><Icon.chevronRight /></span>
                       <span className="mono pr-file-path" title={file.path}>
                         {file.previousPath && <span className="muted">{file.previousPath} → </span>}{file.path}
                       </span>
                       {stat && <span className="pr-file-stat"><span className="positive">+{stat.additions}</span><span className="negative">−{stat.deletions}</span></span>}
                     </button>
-                    {expanded && <DiffLines diff={file.diff} />}
+                    {expanded && <DiffLines diff={file.diff} path={file.path} />}
                   </article>
                 );
               })}
@@ -378,8 +470,14 @@ export default function PullRequestView({ number, onClose }: { number: number; o
 
           {tab === "checks" && (
             <div className="checks-summary">
-              {!checks && <div className="source-skeleton skeleton-panel" />}
-              {checks && (
+              {!checks && !sectionErrors.checks && <div className="source-skeleton skeleton-panel" />}
+              {sectionErrors.checks && (
+                <div className="source-inline-status error" role="alert">
+                  <span>Checks could not be loaded: {sectionErrors.checks}</span>
+                  <button className="small-btn" onClick={() => void loadChecks()}>Retry</button>
+                </div>
+              )}
+              {checks && checks.summary.total > 0 && (
                 <section className="check-summary-cards">
                   <div className="success"><span>Passing</span><strong>{passing}</strong></div>
                   <div className="failure"><span>Failing</span><strong>{failing}</strong></div>
@@ -399,7 +497,13 @@ export default function PullRequestView({ number, onClose }: { number: number; o
 
           {tab === "comments" && (
             <div className="pr-comments">
-              {comments.length === 0 && <EmptyState title="No conversation yet" description="Reviews and comments on this pull request will appear here." />}
+              {sectionErrors.comments && (
+                <div className="source-inline-status error" role="alert">
+                  <span>Conversation could not be loaded: {sectionErrors.comments}</span>
+                  <button className="small-btn" onClick={() => setReloadKey((key) => key + 1)}>Retry</button>
+                </div>
+              )}
+              {!sectionErrors.comments && comments.length === 0 && <EmptyState title="No conversation yet" description="Reviews and comments on this pull request will appear here." />}
               <div className="pr-thread">
                 {comments.map((comment) => (
                   <article key={comment.id} className="pr-comment">
@@ -412,7 +516,7 @@ export default function PullRequestView({ number, onClose }: { number: number; o
                         <a href={comment.url} target="_blank" rel="noreferrer" className="muted">{comment.createdAt ? new Date(comment.createdAt).toLocaleString() : ""}</a>
                       </header>
                       {comment.path && <div className="pr-comment-location mono">{comment.path}{comment.line ? `:${comment.line}` : ""}</div>}
-                      <div className="pr-comment-body">{comment.body}</div>
+                      <div className="pr-comment-body markdown-body"><MarkdownDoc text={stripCursorMarkers(comment.body)} keyBase={`pr-comment-${comment.id}`} /></div>
                     </div>
                   </article>
                 ))}
@@ -424,17 +528,20 @@ export default function PullRequestView({ number, onClose }: { number: number; o
                 </div>
                 <textarea rows={4} placeholder="Leave a thoughtful review…" value={reviewBody} onChange={(event) => setReviewBody(event.target.value)} />
                 <div className="pr-review-actions">
-                  <select value={reviewEvent} onChange={(event) => {
-                    setReviewEvent(event.target.value as typeof reviewEvent);
-                    setConfirmWrite(false);
-                  }}>
-                    <option value="COMMENT">Comment</option>
-                    <option value="APPROVE">Approve</option>
-                    <option value="REQUEST_CHANGES">Request changes</option>
-                  </select>
+                  <label className="pr-review-kind">
+                    <span>Review type</span>
+                    <select aria-label="Review type" value={reviewEvent} disabled={reviewBusy} onChange={(event) => {
+                      setReviewEvent(event.target.value as typeof reviewEvent);
+                      setConfirmWrite(false);
+                    }}>
+                      <option value="COMMENT">Comment</option>
+                      <option value="APPROVE">Approve</option>
+                      <option value="REQUEST_CHANGES">Request changes</option>
+                    </select>
+                  </label>
                   {reviewEvent !== "COMMENT" && <label className="source-confirm"><input type="checkbox" checked={confirmWrite} onChange={(event) => setConfirmWrite(event.target.checked)} /> Confirm {reviewEvent === "APPROVE" ? "approval" : "change request"}</label>}
                   <span className="header-spacer" />
-                  <button className="primary-btn" disabled={!reviewBody.trim() && reviewEvent !== "APPROVE"} onClick={() => void submitReview()}>Submit review</button>
+                  <button className="primary-btn" disabled={reviewBusy || (!reviewBody.trim() && reviewEvent !== "APPROVE")} onClick={() => void submitReview()}>{reviewBusy ? "Submitting…" : "Submit review"}</button>
                 </div>
                 {writeMsg && <div className={writeMsg.startsWith("Submit failed") ? "form-error" : "knowledge-notice"} role="status">{writeMsg}</div>}
               </section>

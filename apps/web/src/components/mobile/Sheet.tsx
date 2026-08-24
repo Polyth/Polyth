@@ -4,8 +4,8 @@
 // While any sheet is open the page behind it never scrolls
 // (html[data-sheet="open"]).
 import { useEffect, useRef, type ReactNode } from "react";
-import { useEscape } from "../../useEscape.ts";
 import { Icon } from "../../icons.tsx";
+import { useModalSurface } from "../a11y/Dialog.tsx";
 
 export interface SheetSearch {
   value: string;
@@ -34,6 +34,36 @@ function lockPageScroll(): () => void {
   };
 }
 
+/** Inert every sibling outside the branch containing the active sheet.
+ * This keeps screen-reader and keyboard navigation inside a nested, non-portal
+ * sheet without making the sheet's own application root inert. */
+function inertSheetBackground(backdrop: HTMLElement): () => void {
+  const changed: Array<{ element: HTMLElement; inert: boolean; ariaHidden: string | null }> = [];
+  let branch: HTMLElement = backdrop;
+  while (branch.parentElement) {
+    const parent = branch.parentElement;
+    for (const child of parent.children) {
+      if (child === branch || !(child instanceof HTMLElement)) continue;
+      changed.push({
+        element: child,
+        inert: child.hasAttribute("inert"),
+        ariaHidden: child.getAttribute("aria-hidden"),
+      });
+      child.setAttribute("inert", "");
+      child.setAttribute("aria-hidden", "true");
+    }
+    branch = parent;
+    if (parent === document.body) break;
+  }
+  return () => {
+    for (const item of changed) {
+      if (!item.inert) item.element.removeAttribute("inert");
+      if (item.ariaHidden === null) item.element.removeAttribute("aria-hidden");
+      else item.element.setAttribute("aria-hidden", item.ariaHidden);
+    }
+  };
+}
+
 export default function Sheet({
   title,
   onClose,
@@ -53,16 +83,23 @@ export default function Sheet({
   action?: SheetAction;
 }) {
   const panelRef = useRef<HTMLDivElement>(null);
-  useEscape(true, onClose);
-  useEffect(() => lockPageScroll(), []);
+  const backdropRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
-    // Focus lands on the search field when there is one, else on the panel,
-    // so the keyboard user is inside the dialog immediately.
-    const panel = panelRef.current;
-    if (!panel) return;
-    const field = panel.querySelector<HTMLInputElement>(".sheet-search input");
-    (field ?? panel).focus();
+    const unlock = lockPageScroll();
+    const restoreBackground = backdropRef.current
+      ? inertSheetBackground(backdropRef.current)
+      : () => {};
+    return () => {
+      restoreBackground();
+      unlock();
+    };
   }, []);
+  useModalSurface({
+    open: true,
+    onClose,
+    containerRef: panelRef,
+    ...(search ? { initialFocus: ".sheet-search input" } : {}),
+  });
 
   const classes = ["sheet"];
   if (size === "tall") classes.push("sheet-tall");
@@ -70,6 +107,7 @@ export default function Sheet({
 
   return (
     <div
+      ref={backdropRef}
       className="sheet-backdrop"
       onClick={(event) => {
         if (event.target === event.currentTarget) onClose();

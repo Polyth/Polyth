@@ -3,6 +3,7 @@ import { api, type GitBranches, type GitFileEntry, type GitGraphEntry, type GitS
 import { layoutGraph, type GraphRow } from "../git/graph.ts";
 import { setGitPrefs, splitDiffRows, useGitPrefs } from "../gitPrefs.ts";
 import { refreshGitStatus, useGitStatus } from "../gitStatusStore.ts";
+import { highlight, langOf } from "../highlight.ts";
 import { Icon } from "../icons.tsx";
 import {
   commentState, hunkDigest, loadComments, saveComments, splitHunks,
@@ -13,11 +14,19 @@ import { openWorktreeSessionDialog, setGitBranch, setUiError, useStore } from ".
 import { diffStat } from "../utils.ts";
 import { setPaneLastResource } from "../workspace/panePrefs.ts";
 import CopyButton from "./CopyButton.tsx";
+import Dialog from "./a11y/Dialog.tsx";
 import EmptyState from "./EmptyState.tsx";
 import PrCreatePanel from "./PrCreatePanel.tsx";
 
 type GitTab = "changes" | "log" | "branches" | "stashes";
 type RemoteStep = "fetch" | "pull" | "push";
+type BranchGroup = "local" | "remote";
+interface ConfirmRequest {
+  title: string;
+  description: string;
+  confirmLabel: string;
+  action: () => Promise<unknown>;
+}
 
 const STATUS_LETTER: Record<string, { letter: string; cls: string; label: string }> = {
   added: { letter: "A", cls: "staged", label: "Added" },
@@ -67,7 +76,7 @@ function GitFileRow({ file, selected, busy, onOpen, onStage, onDiscard }: {
   const { letter, cls, label } = fileLetter(file);
   return (
     <div className={`git-file-row ${selected ? "selected" : ""}`}>
-      <button type="button" className="git-file-main" onClick={onOpen}>
+      <button type="button" className="git-file-main" aria-current={selected ? "true" : undefined} onClick={onOpen}>
         <span className={`git-file-letter ${cls}`} title={label} aria-label={label}>{letter}</span>
         <span className="git-file-path" title={file.origPath ? `${file.origPath} → ${file.path}` : file.path}>
           {file.origPath ? <><span className="muted">{file.origPath} → </span>{file.path}</> : file.path}
@@ -102,13 +111,12 @@ function ChangeSection({ id, title, files, closed, selected, busy, onToggle, onO
   return (
     <section className="git-change-group">
       <button className="git-change-group-head" type="button" aria-expanded={!closed} onClick={() => onToggle(id)}>
-        <span className="git-folder-chevron" aria-hidden="true">{closed ? <Icon.chevronRight /> : <Icon.chevronDown />}</span>
+        <span className={`git-folder-chevron${closed ? "" : " expanded"}`} aria-hidden="true"><Icon.chevronRight /></span>
         <span>{title}</span>
         <span className="git-count">{files.length}</span>
       </button>
       {!closed && (
         <div className="git-change-group-body">
-          {files.length === 0 && <div className="git-group-empty">No files</div>}
           {files.map((file) => (
             <GitFileRow
               key={`${id}:${file.path}`}
@@ -143,9 +151,13 @@ export default function GitView() {
   const [selected, setSelected] = useState<{ path: string; staged: boolean } | null>(null);
   const [diff, setDiff] = useState("");
   const [diffLoading, setDiffLoading] = useState(false);
+  const [diffError, setDiffError] = useState("");
+  const [diffRetry, setDiffRetry] = useState(0);
   const [commitSel, setCommitSel] = useState<string | null>(null);
   const [commitDiff, setCommitDiff] = useState("");
   const [commitDiffLoading, setCommitDiffLoading] = useState(false);
+  const [commitDiffError, setCommitDiffError] = useState("");
+  const [commitDiffRetry, setCommitDiffRetry] = useState(0);
   const [mobileDetail, setMobileDetail] = useState(false);
   const [commitMsg, setCommitMsg] = useState("");
   const [newBranch, setNewBranch] = useState("");
@@ -164,6 +176,11 @@ export default function GitView() {
   const [draftText, setDraftText] = useState("");
   const [graphQuery, setGraphQuery] = useState("");
   const [graphRef, setGraphRef] = useState("");
+  const [graphLoading, setGraphLoading] = useState(false);
+  const [branchQuery, setBranchQuery] = useState("");
+  const [closedBranchGroups, setClosedBranchGroups] = useState<ReadonlySet<BranchGroup>>(new Set(["remote"]));
+  const [branchLimits, setBranchLimits] = useState<Record<BranchGroup, number>>({ local: 30, remote: 30 });
+  const [confirmRequest, setConfirmRequest] = useState<ConfirmRequest | null>(null);
 
   const refresh = useCallback(async (showLoading = false) => {
     if (!projectId) return;
@@ -226,25 +243,38 @@ export default function GitView() {
     if (!projectId || !selected || status?.isRepo === false) return;
     let active = true;
     setDiff("");
+    setDiffError("");
     setDiffLoading(true);
     setDraft(null);
     void api.gitDiff(projectId, selected.path, selected.staged, prefs.ignoreWhitespace, sessionId ?? undefined)
       .then((result) => { if (active) setDiff(result.diff); })
+      .catch((cause) => {
+        if (active) setDiffError(friendlyError("Couldn’t load the file diff", cause));
+      })
       .finally(() => { if (active) setDiffLoading(false); });
     return () => { active = false; };
-  }, [projectId, sessionId, selected, status?.isRepo, prefs.ignoreWhitespace]);
+  }, [projectId, sessionId, selected, status?.isRepo, prefs.ignoreWhitespace, diffRetry]);
 
   useEffect(() => {
     if (!projectId || !commitSel) return;
     let active = true;
     setCommitDiff("");
+    setCommitDiffError("");
     setCommitDiffLoading(true);
     void api.gitShow(projectId, commitSel, prefs.ignoreWhitespace, sessionId ?? undefined)
       .then((result) => { if (active) setCommitDiff(result.diff); })
-      .catch((cause) => setUiError(friendlyError("Couldn’t load the commit diff", cause)))
+      .catch((cause) => {
+        if (active) setCommitDiffError(friendlyError("Couldn’t load the commit diff", cause));
+      })
       .finally(() => { if (active) setCommitDiffLoading(false); });
     return () => { active = false; };
-  }, [projectId, sessionId, commitSel, prefs.ignoreWhitespace]);
+  }, [projectId, sessionId, commitSel, prefs.ignoreWhitespace, commitDiffRetry]);
+
+  useEffect(() => {
+    if (!remoteStatus) return;
+    const timer = window.setTimeout(() => setRemoteStatus(null), remoteStatus.error ? 6_000 : 3_500);
+    return () => window.clearTimeout(timer);
+  }, [remoteStatus]);
 
   const run = async (action: () => Promise<unknown>) => {
     setBusy(true);
@@ -289,10 +319,17 @@ export default function GitView() {
   };
 
   const loadMoreGraph = async () => {
-    if (!projectId) return;
-    const more = await api.gitGraph(projectId, GRAPH_PAGE, graph.length, sessionId ?? undefined);
-    setGraph((current) => [...current, ...more]);
-    if (more.length < GRAPH_PAGE) setGraphDone(true);
+    if (!projectId || graphLoading) return;
+    setGraphLoading(true);
+    try {
+      const more = await api.gitGraph(projectId, GRAPH_PAGE, graph.length, sessionId ?? undefined);
+      setGraph((current) => [...current, ...more]);
+      if (more.length < GRAPH_PAGE) setGraphDone(true);
+    } catch (cause) {
+      setUiError(friendlyError("Couldn’t load older commits", cause));
+    } finally {
+      setGraphLoading(false);
+    }
   };
 
   const all = status ? [...status.conflicted, ...status.staged, ...status.unstaged, ...status.untracked] : [];
@@ -354,7 +391,7 @@ export default function GitView() {
     { id: "staged", title: "Staged Changes", files: status?.staged ?? [] },
     { id: "changes", title: "Changes", files: status?.unstaged ?? [] },
     { id: "untracked", title: "Untracked", files: status?.untracked ?? [] },
-  ];
+  ].filter((group) => group.files.length > 0);
 
   const persistComments = (next: ReviewComment[]) => {
     setComments(next);
@@ -382,7 +419,8 @@ export default function GitView() {
         <div className="source-remote-actions" aria-label="Remote repository actions">
           {(["fetch", "pull", "push"] as const).map((step) => (
             <button key={step} className="small-btn source-action-btn" disabled={busyRemote !== null || busy} onClick={() => void runRemote(step)}>
-              <Icon.sync /> <span>{busyRemote === step ? `${step[0]!.toUpperCase()}${step.slice(1)}ing…` : `${step[0]!.toUpperCase()}${step.slice(1)}`}</span>
+              {step === "fetch" ? <Icon.fetch /> : step === "pull" ? <Icon.pull /> : <Icon.push />}
+              <span>{busyRemote === step ? `${step[0]!.toUpperCase()}${step.slice(1)}ing…` : `${step[0]!.toUpperCase()}${step.slice(1)}`}</span>
             </button>
           ))}
           <button className="small-btn icon-only" title="Refresh source control" aria-label="Refresh source control" disabled={busy || busyRemote !== null} onClick={() => void refresh()}>
@@ -392,11 +430,28 @@ export default function GitView() {
       </header>
 
       {remoteStatus && (
-        <div className={`source-inline-status ${remoteStatus.error ? "error" : "success"}`} role="status">
+        <div className={`source-inline-status ${remoteStatus.error ? "error" : "success"}`} role={remoteStatus.error ? "alert" : "status"}>
           {remoteStatus.error
             ? `${remoteStatus.step} failed: ${remoteStatus.error}`
             : `${remoteStatus.step[0]!.toUpperCase()}${remoteStatus.step.slice(1)} completed.`}
         </div>
+      )}
+
+      {confirmRequest && (
+        <Dialog title={confirmRequest.title} onClose={() => setConfirmRequest(null)} initialFocus=".danger-btn">
+          <div className="source-confirm-dialog">
+            <h2>{confirmRequest.title}</h2>
+            <p>{confirmRequest.description}</p>
+            <div className="source-confirm-dialog-actions">
+              <button className="small-btn" onClick={() => setConfirmRequest(null)}>Cancel</button>
+              <button className="primary-btn danger-btn" disabled={busy} onClick={() => {
+                const request = confirmRequest;
+                setConfirmRequest(null);
+                void run(request.action);
+              }}>{confirmRequest.confirmLabel}</button>
+            </div>
+          </div>
+        </Dialog>
       )}
 
       <nav className="source-tabs" aria-label="Source control views">
@@ -472,11 +527,12 @@ export default function GitView() {
                     onStage={(file) => void run(() => file.staged
                       ? api.gitUnstage(projectId, [file.path], sessionId ?? undefined)
                       : api.gitStage(projectId, [file.path], sessionId ?? undefined))}
-                    onDiscard={(file) => {
-                      if (window.confirm(`Discard changes in ${file.path}?`)) {
-                        void run(() => api.gitDiscard(projectId, [file.path], sessionId ?? undefined));
-                      }
-                    }}
+                    onDiscard={(file) => setConfirmRequest({
+                      title: "Discard file changes?",
+                      description: `All uncommitted changes in ${file.path} will be permanently discarded.`,
+                      confirmLabel: "Discard changes",
+                      action: () => api.gitDiscard(projectId, [file.path], sessionId ?? undefined),
+                    })}
                   />
                 ))}
               </div>
@@ -504,16 +560,21 @@ export default function GitView() {
                     {(addCount + delCount > 0) && <span className="diff-stat"><span>+{addCount}</span><span>−{delCount}</span></span>}
                   </div>
                   <DiffPrefsToolbar />
-                  {diffLoading ? <DiffSkeleton /> : prefs.layout === "split" ? (
-                    <DiffContent diff={diff} split wrap={prefs.wrap} />
+                  {diffLoading ? <DiffSkeleton /> : diffError ? (
+                    <div className="source-inline-status error" role="alert">
+                      <span>{diffError}</span>
+                      <button className="small-btn" onClick={() => setDiffRetry((value) => value + 1)}>Retry</button>
+                    </div>
+                  ) : prefs.layout === "split" ? (
+                    <DiffContent diff={diff} path={selected.path} split wrap={prefs.wrap} />
                   ) : (
                     <div className="copy-wrap">
                       <pre className={`git-diff git-diff-page${prefs.wrap ? " wrap" : ""}`}>
                         {hunks.length === 0 && diff.split("\n").map((line, index) => (
-                          <div key={index} className="git-diff-line"><span className="git-diff-ln">{index + 1}</span><span>{line}</span></div>
+                          <div key={index} className="git-diff-line"><span className="git-diff-ln">{index + 1}</span><DiffCode line={line} path={selected.path} /></div>
                         ))}
                         {hunks.map((hunk, index) => (
-                          <HunkBlock key={index} hunk={hunk} onComment={() => {
+                          <HunkBlock key={index} hunk={hunk} path={selected.path} onComment={() => {
                             setDraft({ digest: hunkDigest(hunk), line: hunk.startNew });
                             setDraftText("");
                           }} />
@@ -600,13 +661,13 @@ export default function GitView() {
               {graphQuery && <button className="source-search-clear" aria-label="Clear search" onClick={() => setGraphQuery("")}>×</button>}
             </div>
             <div className="git-ref-chips" aria-label="Filter by branch">
-              <button className={!graphRef ? "active" : ""} onClick={() => setGraphRef("")}>All branches</button>
-              {branchChips.map((ref) => <button key={ref} className={graphRef === ref ? "active" : ""} onClick={() => setGraphRef(ref)}>{ref}</button>)}
+              <button className={!graphRef ? "active" : ""} aria-pressed={!graphRef} onClick={() => setGraphRef("")}>All branches</button>
+              {branchChips.map((ref) => <button key={ref} className={graphRef === ref ? "active" : ""} aria-pressed={graphRef === ref} onClick={() => setGraphRef(ref)}>{ref}</button>)}
             </div>
             <div className="git-graph">
               {visibleGraph.length === 0 && <div className="git-filter-empty">No commits match this filter.</div>}
               {visibleGraph.map(({ commit, row }) => (
-                <button key={commit.sha} className={`git-graph-row ${commitSel === commit.sha ? "selected" : ""}`} onClick={() => {
+                <button key={commit.sha} className={`git-graph-row ${commitSel === commit.sha ? "selected" : ""}`} aria-current={commitSel === commit.sha ? "true" : undefined} onClick={() => {
                   setCommitSel(commit.sha);
                   setSelected(null);
                   setMobileDetail(true);
@@ -622,7 +683,7 @@ export default function GitView() {
                 </button>
               ))}
             </div>
-            {!graphDone && graph.length > 0 && <button className="small-btn git-load-more" onClick={() => void loadMoreGraph()}>Load older commits</button>}
+            {!graphDone && graph.length > 0 && <button className="small-btn git-load-more" disabled={graphLoading} onClick={() => void loadMoreGraph()}>{graphLoading ? "Loading older commits…" : "Load older commits"}</button>}
           </section>
           <section className="git-detail-pane">
             {commitSel && (
@@ -639,7 +700,12 @@ export default function GitView() {
                   {selectedCommit && <span className="muted">{selectedCommit.author} · {new Date(selectedCommit.date).toLocaleString()}</span>}
                 </div>
                 <DiffPrefsToolbar />
-                {commitDiffLoading ? <DiffSkeleton /> : <DiffContent diff={commitDiff} split={prefs.layout === "split"} wrap={prefs.wrap} />}
+                {commitDiffLoading ? <DiffSkeleton /> : commitDiffError ? (
+                  <div className="source-inline-status error" role="alert">
+                    <span>{commitDiffError}</span>
+                    <button className="small-btn" onClick={() => setCommitDiffRetry((value) => value + 1)}>Retry</button>
+                  </div>
+                ) : <DiffContent diff={commitDiff} split={prefs.layout === "split"} wrap={prefs.wrap} />}
               </>
             )}
           </section>
@@ -673,19 +739,49 @@ export default function GitView() {
           <div className="git-resource-grid">
             <section className="git-resource-card">
               <div className="stat-label">Current branch</div>
-              <div className="git-current-branch"><Icon.branch /><span className="mono">{status?.branch || "detached HEAD"}</span><span className="tag">current</span></div>
+              <div className="git-current-branch" aria-current="true"><Icon.branch /><span className="mono">{status?.branch || "detached HEAD"}</span><span className="tag">current</span></div>
+              <div className="source-search git-branch-search">
+                <Icon.search />
+                <input value={branchQuery} placeholder="Search local and remote branches" aria-label="Search branches" onChange={(event) => setBranchQuery(event.target.value)} />
+                {branchQuery && <button className="source-search-clear" aria-label="Clear branch search" onClick={() => setBranchQuery("")}>×</button>}
+              </div>
               {(["Local", "Remote"] as const).map((label) => {
-                const remote = label === "Remote";
-                const rows = branches.branches.filter((branch) => !branch.current && Boolean(branch.remote) === remote && (!remote || (branch.name !== branch.remote && !branch.name.endsWith("/HEAD"))));
+                const group: BranchGroup = label === "Remote" ? "remote" : "local";
+                const remote = group === "remote";
+                const normalized = branchQuery.trim().toLowerCase();
+                const rows = branches.branches.filter((branch) =>
+                  !branch.current
+                  && Boolean(branch.remote) === remote
+                  && (!remote || (branch.name !== branch.remote && !branch.name.endsWith("/HEAD")))
+                  && (!normalized || branch.name.toLowerCase().includes(normalized)));
+                const closed = closedBranchGroups.has(group);
+                const shown = rows.slice(0, branchLimits[group]);
                 return (
                   <div key={label} className="git-branch-section">
-                    <div className="stat-label">{label} ({rows.length})</div>
-                    {rows.length === 0 && <div className="git-group-empty">No {label.toLowerCase()} branches</div>}
-                    {rows.map((branch) => (
-                      <button key={branch.name} className="git-branch-row" disabled={busy} onClick={() => void run(() => api.gitCheckout(projectId, branch.name, sessionId ?? undefined))}>
-                        <Icon.branch /><span className="mono">{branch.name}</span><span className="header-spacer" /><span className="muted">Checkout</span>
-                      </button>
-                    ))}
+                    <button className="git-branch-section-head" aria-expanded={!closed} onClick={() => setClosedBranchGroups((current) => {
+                      const next = new Set(current);
+                      if (next.has(group)) next.delete(group); else next.add(group);
+                      return next;
+                    })}>
+                      <span className={`git-folder-chevron${closed ? "" : " expanded"}`} aria-hidden="true"><Icon.chevronRight /></span>
+                      <span>{label}</span>
+                      <span className="git-count">{rows.length}</span>
+                    </button>
+                    {!closed && (
+                      <div className="git-branch-list">
+                        {rows.length === 0 && <div className="git-group-empty">{normalized ? `No matching ${label.toLowerCase()} branches` : `No ${label.toLowerCase()} branches`}</div>}
+                        {shown.map((branch) => (
+                          <button key={branch.name} className="git-branch-row" disabled={busy} onClick={() => void run(() => api.gitCheckout(projectId, branch.name, sessionId ?? undefined))}>
+                            <Icon.branch /><span className="mono git-branch-row-name" title={branch.name}>{branch.name}</span><span className="header-spacer" /><span className="muted">Checkout</span>
+                          </button>
+                        ))}
+                        {shown.length < rows.length && (
+                          <button className="small-btn git-branch-load-more" onClick={() => setBranchLimits((current) => ({ ...current, [group]: current[group] + 30 }))}>
+                            Show 30 more <span className="muted">({rows.length - shown.length} remaining)</span>
+                          </button>
+                        )}
+                      </div>
+                    )}
                   </div>
                 );
               })}
@@ -703,9 +799,12 @@ export default function GitView() {
                     </div>
                     <span className={`tag ${tree.isMain ? "green" : ""}`}>{tree.isMain ? "main" : "linked"}</span>
                     <button className="small-btn" title={`New session in ${tree.branch ?? "this worktree"}`} onClick={() => openWorktreeSessionDialog(projectId, tree.path)}><Icon.session /> Session</button>
-                    {!tree.isMain && <button className="small-btn icon-only danger-btn" title="Remove worktree" aria-label={`Remove worktree ${tree.branch ?? tree.path}`} disabled={busy} onClick={() => {
-                      if (window.confirm(`Remove worktree ${tree.path}?`)) void run(() => api.removeWorktree(projectId, tree.path, true));
-                    }}><Icon.trash /></button>}
+                    {!tree.isMain && <button className="small-btn icon-only danger-btn" title="Remove worktree" aria-label={`Remove worktree ${tree.branch ?? tree.path}`} disabled={busy} onClick={() => setConfirmRequest({
+                      title: "Remove worktree?",
+                      description: `The linked worktree at ${tree.path} will be removed. Uncommitted work in it may be lost.`,
+                      confirmLabel: "Remove worktree",
+                      action: () => api.removeWorktree(projectId, tree.path, true),
+                    })}><Icon.trash /></button>}
                   </article>
                 ))}
               </div>
@@ -743,9 +842,12 @@ export default function GitView() {
                   </div>
                   <span className="header-spacer" />
                   <button className="small-btn" disabled={busy} onClick={() => void run(() => api.gitStashApply(projectId, stash.ref, sessionId ?? undefined))}>Apply</button>
-                  <button className="small-btn danger-btn" disabled={busy} onClick={() => {
-                    if (window.confirm(`Drop ${stash.ref}? This cannot be undone.`)) void run(() => api.gitStashDrop(projectId, stash.ref, sessionId ?? undefined));
-                  }}>Drop</button>
+                  <button className="small-btn danger-btn" disabled={busy} onClick={() => setConfirmRequest({
+                    title: "Drop stash?",
+                    description: `${stash.ref} will be permanently deleted. This cannot be undone.`,
+                    confirmLabel: "Drop stash",
+                    action: () => api.gitStashDrop(projectId, stash.ref, sessionId ?? undefined),
+                  })}>Drop</button>
                 </article>
               ))}
             </div>
@@ -756,7 +858,12 @@ export default function GitView() {
   );
 }
 
-function HunkBlock({ hunk, onComment }: { hunk: DiffHunk; onComment: () => void }) {
+function DiffCode({ line, path }: { line: string; path?: string }) {
+  if (!path) return <span>{line}</span>;
+  return <span dangerouslySetInnerHTML={{ __html: highlight(line, langOf(path)) }} />;
+}
+
+function HunkBlock({ hunk, path, onComment }: { hunk: DiffHunk; path: string; onComment: () => void }) {
   let lineNumber = hunk.startNew;
   return (
     <>
@@ -771,7 +878,7 @@ function HunkBlock({ hunk, onComment }: { hunk: DiffHunk; onComment: () => void 
         if (line.startsWith("+")) { className = "diff-add"; shown = String(lineNumber++); }
         else if (line.startsWith("-")) className = "diff-del";
         else shown = String(lineNumber++);
-        return <div key={index} className={`git-diff-line ${className}`}><span className="git-diff-ln">{shown}</span><span>{line}</span></div>;
+        return <div key={index} className={`git-diff-line ${className}`}><span className="git-diff-ln">{shown}</span><DiffCode line={line} path={path} /></div>;
       })}
     </>
   );
@@ -782,8 +889,8 @@ function DiffPrefsToolbar() {
   return (
     <div className="diff-prefs">
       <div className="diff-layout-toggle">
-        <button className={prefs.layout === "unified" ? "active" : ""} onClick={() => setGitPrefs({ layout: "unified" })}>Unified</button>
-        <button className={prefs.layout === "split" ? "active" : ""} onClick={() => setGitPrefs({ layout: "split" })}>Split</button>
+        <button className={prefs.layout === "unified" ? "active" : ""} aria-pressed={prefs.layout === "unified"} onClick={() => setGitPrefs({ layout: "unified" })}>Unified</button>
+        <button className={prefs.layout === "split" ? "active" : ""} aria-pressed={prefs.layout === "split"} onClick={() => setGitPrefs({ layout: "split" })}>Split</button>
       </div>
       <label><input type="checkbox" checked={prefs.ignoreWhitespace} onChange={(event) => setGitPrefs({ ignoreWhitespace: event.target.checked })} /> Ignore whitespace</label>
       <label><input type="checkbox" checked={prefs.wrap} onChange={(event) => setGitPrefs({ wrap: event.target.checked })} /> Wrap lines</label>
@@ -791,12 +898,15 @@ function DiffPrefsToolbar() {
   );
 }
 
-function DiffContent({ diff, split, wrap }: { diff: string; split: boolean; wrap: boolean }) {
+function DiffContent({ diff, path, split, wrap }: { diff: string; path?: string; split: boolean; wrap: boolean }) {
   if (!diff) return <EmptyState title="No textual diff" description="This file may be binary, unchanged, or represented by metadata only." />;
   if (!split) {
+    const lines = diff.split("\n");
     return (
       <div className="copy-wrap">
-        <pre className={`git-diff git-diff-page${wrap ? " wrap" : ""}`}>{diff}</pre>
+        <pre className={`git-diff git-diff-page${wrap ? " wrap" : ""}`}>
+          {lines.map((line, index) => <DiffCode key={index} line={`${line}${index < lines.length - 1 ? "\n" : ""}`} {...(path ? { path } : {})} />)}
+        </pre>
         <CopyButton text={diff} />
       </div>
     );
@@ -806,8 +916,8 @@ function DiffContent({ diff, split, wrap }: { diff: string; split: boolean; wrap
       <div className={`split-diff${wrap ? " wrap" : ""}`}>
         {splitDiffRows(diff).map((row, index) => (
           <div className={`split-diff-row ${row.kind}`} key={index}>
-            <code className={row.left.startsWith("-") ? "diff-del" : ""}>{row.left}</code>
-            <code className={row.right.startsWith("+") ? "diff-add" : ""}>{row.right}</code>
+            <code className={row.left.startsWith("-") ? "diff-del" : ""}><DiffCode line={row.left} {...(path ? { path } : {})} /></code>
+            <code className={row.right.startsWith("+") ? "diff-add" : ""}><DiffCode line={row.right} {...(path ? { path } : {})} /></code>
           </div>
         ))}
       </div>

@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useGitStatus } from "../gitStatusStore.ts";
 import { selectPendingChanges } from "../pendingChanges.ts";
 import { openChanges, useActiveModel, useStore } from "../store.ts";
 import { Icon } from "../icons.tsx";
 import { api } from "../api.ts";
+import { useDismissibleMenu } from "./a11y/Menu.ts";
 
 export interface DiffLineStats {
   additions: number;
@@ -35,6 +36,15 @@ export default function PendingChangesBar() {
   const changeKey = `${selected.source}:${[...selected.paths].sort().join("\0")}`;
   const [dismissedKey, setDismissedKey] = useState("");
   const [diffStats, setDiffStats] = useState<DiffLineStats | null>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const onMenuKeyDown = useDismissibleMenu({
+    open: menuOpen,
+    menuRef,
+    triggerRef,
+    onClose: () => setMenuOpen(false),
+  });
 
   useEffect(() => {
     let cancelled = false;
@@ -88,16 +98,26 @@ export default function PendingChangesBar() {
           </span>
         )}
       </button>
-      <details className="pending-changes-files">
-        <summary aria-label="List changed files"><Icon.chevronDown /></summary>
-        <div className="pending-changes-menu">
+      <div className="pending-changes-files">
+        <button
+          ref={triggerRef}
+          className="pending-changes-trigger"
+          aria-label="List changed files"
+          aria-haspopup="menu"
+          aria-expanded={menuOpen}
+          onClick={() => setMenuOpen((open) => !open)}
+        ><Icon.chevronDown /></button>
+        {menuOpen && <div ref={menuRef} className="pending-changes-menu" role="menu" aria-label="Changed files" onKeyDown={onMenuKeyDown}>
           {selected.paths.map((path) => (
-            <button key={path} className="mono" title={path} onClick={() => openChanges(path)}>
+            <button key={path} role="menuitem" className="mono" title={path} onClick={() => {
+              setMenuOpen(false);
+              openChanges(path);
+            }}>
               {path}
             </button>
           ))}
-        </div>
-      </details>
+        </div>}
+      </div>
       <button
         className="pending-changes-dismiss"
         aria-label="Dismiss changed files"

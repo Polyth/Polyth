@@ -1,9 +1,10 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { api, type GithubIssueDto, type GithubPrDto, type GithubStatusDto } from "../api.ts";
 import { requestComposerInsert } from "../composerInsert.ts";
 import { Icon } from "../icons.tsx";
 import { friendlyError } from "../settings.ts";
 import { setActiveView, startNewSession, useStore } from "../store.ts";
+import { useDismissibleMenu } from "./a11y/Menu.ts";
 import EmptyState from "./EmptyState.tsx";
 import PullRequestView from "./PullRequestView.tsx";
 
@@ -29,6 +30,23 @@ function GithubCard({ item, kind, onOpen, onStartSession }: {
 }) {
   const pr = kind === "prs" ? item as GithubPrDto : null;
   const ref = `${kind === "prs" ? "PR" : "issue"} #${item.number}`;
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const onMenuKeyDown = useDismissibleMenu({
+    open: menuOpen,
+    menuRef,
+    triggerRef,
+    onClose: () => setMenuOpen(false),
+  });
+  const askInChat = () => {
+    requestComposerInsert(`Look at GitHub ${ref}: "${item.title}" (${item.url}).`);
+    setActiveView("session");
+  };
+  const runMenuAction = (action: () => void) => {
+    setMenuOpen(false);
+    action();
+  };
   return (
     <article className="gh-card">
       <div className="gh-card-main">
@@ -37,19 +55,37 @@ function GithubCard({ item, kind, onOpen, onStartSession }: {
           <span className="gh-number mono">#{item.number}</span>
           <span className="gh-meta">updated {relativeDate(item.updatedAt)}</span>
         </div>
-        <a className="gh-card-title" href={item.url} target="_blank" rel="noreferrer">{item.title}</a>
+        <a className="gh-card-title" href={item.url} target="_blank" rel="noreferrer">
+          <span>{item.title}</span><Icon.external /><span className="sr-only">(opens on GitHub)</span>
+        </a>
         <div className="gh-card-meta">
           <span>by <strong>{item.author}</strong></span>
           {pr && <span className="gh-branch mono"><Icon.branch /> {pr.headRefName}</span>}
         </div>
       </div>
       <div className="gh-card-actions">
-        {pr && onOpen && <button className="primary-btn" onClick={() => onOpen(item.number)}>Review details</button>}
-        <button className="small-btn" title={`Start a session for this ${ref}`} onClick={() => onStartSession(item, kind)}><Icon.session /> New session</button>
-        <button className="small-btn" title="Add this context to chat" onClick={() => {
-          requestComposerInsert(`Look at GitHub ${ref}: "${item.title}" (${item.url}).`);
-          setActiveView("session");
-        }}><Icon.chat /> Ask in chat</button>
+        {pr && onOpen
+          ? <button className="primary-btn gh-card-primary" onClick={() => onOpen(item.number)}>Review details</button>
+          : <button className="primary-btn gh-card-primary" title={`Start a session for this ${ref}`} onClick={() => onStartSession(item, kind)}><Icon.session /> New session</button>}
+        {pr && <button className="small-btn gh-action-secondary" title={`Start a session for this ${ref}`} onClick={() => onStartSession(item, kind)}><Icon.session /> New session</button>}
+        <button className="small-btn gh-action-secondary" title="Add this context to chat" onClick={askInChat}><Icon.chat /> Ask in chat</button>
+        <div className="gh-card-overflow">
+          <button
+            ref={triggerRef}
+            className="small-btn icon-only"
+            aria-label={`More actions for ${ref}`}
+            aria-haspopup="menu"
+            aria-expanded={menuOpen}
+            onClick={() => setMenuOpen((open) => !open)}
+          ><Icon.more /></button>
+          {menuOpen && (
+            <div ref={menuRef} className="gh-card-menu" role="menu" onKeyDown={onMenuKeyDown}>
+              {pr && <button role="menuitem" onClick={() => runMenuAction(() => onStartSession(item, kind))}><Icon.session /> New session</button>}
+              <button role="menuitem" onClick={() => runMenuAction(askInChat)}><Icon.chat /> Ask in chat</button>
+              <a role="menuitem" href={item.url} target="_blank" rel="noreferrer"><Icon.external /> Open on GitHub</a>
+            </div>
+          )}
+        </div>
       </div>
     </article>
   );
@@ -196,7 +232,7 @@ export default function GithubView() {
           <section className="gh-repo-card">
             <span className="gh-repo-icon"><Icon.github /></span>
             <div className="gh-repo-copy">
-              <a className="gh-repo-name" href={status.repo.url} target="_blank" rel="noreferrer">{status.repo.owner}/{status.repo.name}</a>
+              <a className="gh-repo-name" href={status.repo.url} target="_blank" rel="noreferrer">{status.repo.owner}/{status.repo.name} <Icon.external /><span className="sr-only">(opens on GitHub)</span></a>
               <span className="muted">{status.repo.description || "GitHub repository"}</span>
             </div>
             <div className="gh-repo-meta">
@@ -207,8 +243,8 @@ export default function GithubView() {
 
           <div className="gh-list-controls">
             <div className="source-tabs gh-tabs" aria-label="GitHub resource type">
-              <button className={tab === "issues" ? "active" : ""} onClick={() => { setTab("issues"); setFilter("all"); }}>Issues <span>{issues.length}</span></button>
-              <button className={tab === "prs" ? "active" : ""} onClick={() => { setTab("prs"); setFilter("all"); }}>Pull requests <span>{prs.length}</span></button>
+              <button className={tab === "issues" ? "active" : ""} aria-current={tab === "issues" ? "page" : undefined} onClick={() => { setTab("issues"); setFilter("all"); }}>Issues <span>{issues.length}</span></button>
+              <button className={tab === "prs" ? "active" : ""} aria-current={tab === "prs" ? "page" : undefined} onClick={() => { setTab("prs"); setFilter("all"); }}>Pull requests <span>{prs.length}</span></button>
             </div>
             <div className="source-search gh-search">
               <Icon.search />
@@ -216,7 +252,7 @@ export default function GithubView() {
               {query && <button className="source-search-clear" aria-label="Clear search" onClick={() => setQuery("")}>×</button>}
             </div>
             <div className="gh-filter-chips" aria-label="Filter list">
-              {filters.map((item) => <button key={item.id} className={filter === item.id ? "active" : ""} onClick={() => setFilter(item.id)}>{item.label}</button>)}
+              {filters.map((item) => <button key={item.id} className={filter === item.id ? "active" : ""} aria-pressed={filter === item.id} onClick={() => setFilter(item.id)}>{item.label}</button>)}
             </div>
           </div>
 

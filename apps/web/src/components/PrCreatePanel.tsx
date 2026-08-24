@@ -14,6 +14,7 @@ export default function PrCreatePanel({ projectId, sessionId, onClose, onCreated
   const [body, setBody] = useState("");
   const [base, setBase] = useState("");
   const [baseHint, setBaseHint] = useState("");
+  const [headHint, setHeadHint] = useState("");
   const [draft, setDraft] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [creating, setCreating] = useState(false);
@@ -22,11 +23,16 @@ export default function PrCreatePanel({ projectId, sessionId, onClose, onCreated
 
   useEffect(() => {
     let stale = false;
-    void api.githubRepo(projectId).then((r) => {
-      if (!stale && r.ok && r.data.defaultBranch) setBaseHint(r.data.defaultBranch);
-    });
+    void Promise.allSettled([
+      api.githubRepo(projectId).then((result) => {
+        if (!stale && result.ok && result.data.defaultBranch) setBaseHint(result.data.defaultBranch);
+      }),
+      api.gitBranches(projectId, sessionId ?? undefined).then((result) => {
+        if (!stale && result.current) setHeadHint(result.current);
+      }),
+    ]);
     return () => { stale = true; };
-  }, [projectId]);
+  }, [projectId, sessionId]);
 
   const generate = async () => {
     setGenerating(true);
@@ -82,6 +88,11 @@ export default function PrCreatePanel({ projectId, sessionId, onClose, onCreated
         </div>
         <span className="tag">External write</span>
       </div>
+      <div className="pr-compare-summary" aria-label={`Compare ${headHint || "current branch"} into ${base.trim() || baseHint || "default branch"}`}>
+        <span><small>Head</small><strong className="mono" title={headHint || "current branch"}>{headHint || "current branch"}</strong></span>
+        <span className="pr-compare-arrow" aria-hidden="true">→</span>
+        <span><small>Base</small><strong className="mono" title={base.trim() || baseHint || "default branch"}>{base.trim() || baseHint || "default branch"}</strong></span>
+      </div>
       <label className="pr-create-field">
         <span>Title</span>
         <input
@@ -124,7 +135,7 @@ export default function PrCreatePanel({ projectId, sessionId, onClose, onCreated
           {creating ? "Creating…" : "Create PR"}
         </button>
       </div>
-      {error && <div className="form-error">{error}</div>}
+      {error && <div className="form-error" role="alert">{error}</div>}
     </div>
   );
 }

@@ -17,17 +17,21 @@ export interface ContextChoice {
 }
 
 export default function SessionContextBar({
+  projectId,
   projectName,
   projects,
   onPickProject,
+  selectedBranchId,
   branchName,
   branches,
   branchLoading,
   onPickBranch,
 }: {
+  projectId: string | null;
   projectName: string;
   projects: ContextChoice[];
   onPickProject: (id: string) => void;
+  selectedBranchId: string;
   branchName: string;
   branches: ContextChoice[];
   branchLoading?: boolean;
@@ -89,7 +93,7 @@ export default function SessionContextBar({
                 key={choice.id}
                 title={choice.label}
                 {...(choice.detail ? { meta: choice.detail } : {})}
-                selected={choice.label === projectName}
+                selected={choice.id === projectId}
                 onClick={() => pick(() => onPickProject(choice.id))}
               />
             ))}
@@ -105,7 +109,7 @@ export default function SessionContextBar({
                 key={choice.id}
                 title={choice.label}
                 {...(choice.detail ? { meta: choice.detail } : {})}
-                selected={choice.label === branchName}
+                selected={choice.id === selectedBranchId}
                 onClick={() => pick(() => onPickBranch(choice.id))}
               />
             ))}

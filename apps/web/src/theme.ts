@@ -138,7 +138,7 @@ export const PRESET_THEMES: ThemeSpec[] = [
       border: "#d5cec1", borderSoft: "#e2dcd2",
       text: "#2a2620", textDim: "#4d473e", muted: "#5b564e", faint: "#6a6357",
       accent: "#b54d00", accentInk: "#ffffff", accentHi: "#bd5700",
-      green: "#4d9432", amber: "#a97d14", red: "#c4453a", blue: "#2f6fae", purple: "#7a53b8",
+      green: "#347426", amber: "#7d5900", red: "#c4453a", blue: "#2f6fae", purple: "#7a53b8",
     },
   },
   {
@@ -151,7 +151,7 @@ export const PRESET_THEMES: ThemeSpec[] = [
       border: "#c6cfd8", borderSoft: "#d8dfe6",
       text: "#24292f", textDim: "#454c54", muted: "#4d535a", faint: "#57616c",
       accent: "#2d64ae", accentInk: "#f7fafc", accentHi: "#3870bb",
-      green: "#3e8636", amber: "#9a6d00", red: "#c03d33", blue: "#2f6fae", purple: "#7a53b8",
+      green: "#2f7428", amber: "#785400", red: "#c03d33", blue: "#2f6fae", purple: "#7a53b8",
     },
   },
   {
@@ -163,7 +163,7 @@ export const PRESET_THEMES: ThemeSpec[] = [
       border: "#d5cdb4", borderSoft: "#e2dbc4",
       text: "#3b4a51", textDim: "#586e75", muted: "#4b575c", faint: "#56656b",
       accent: "#2aa198", accentInk: "#002b36", accentHi: "#35b3aa",
-      green: "#859900", amber: "#b58900", red: "#dc322f", blue: "#268bd2", purple: "#6c71c4",
+      green: "#586b00", amber: "#765900", red: "#dc322f", blue: "#268bd2", purple: "#6c71c4",
     },
   },
   darkPreset("ocean", "Deep Ocean", {
