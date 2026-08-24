@@ -217,7 +217,8 @@ export interface GitStatus {
   untracked: GitFileEntry[];
   conflicted: GitFileEntry[];
   clean?: boolean;
-  isRepo: boolean;
+  /** Explicit false for plain folders; omitted by older servers. */
+  isRepo?: boolean;
 }
 export interface GitDiffResult { path: string; diff: string }
 export interface GitBranches {
