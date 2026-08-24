@@ -110,11 +110,15 @@ function validateOptions(options: WorkflowRunOptionsDto | undefined): void {
   if (options.permissions !== undefined && options.permissions !== "auto" && options.permissions !== "manual") {
     throw workflowError("permissions must be auto or manual");
   }
-  if (options.maxParallel !== undefined && (!Number.isFinite(options.maxParallel) || options.maxParallel < 1)) {
-    throw workflowError("maxParallel must be a finite number >= 1");
+  if (options.maxParallel !== undefined && (
+    !Number.isInteger(options.maxParallel) || options.maxParallel < 1 || options.maxParallel > 32
+  )) {
+    throw workflowError("maxParallel must be a whole number from 1 to 32");
   }
-  if (options.nodeTimeoutMs !== undefined && (!Number.isFinite(options.nodeTimeoutMs) || options.nodeTimeoutMs < 1_000)) {
-    throw workflowError("nodeTimeoutMs must be a finite number >= 1000");
+  if (options.nodeTimeoutMs !== undefined && (
+    !Number.isInteger(options.nodeTimeoutMs) || options.nodeTimeoutMs < 1_000
+  )) {
+    throw workflowError("nodeTimeoutMs must be a whole number >= 1000");
   }
 }
 

@@ -3,7 +3,12 @@ import type { WorkflowRunDto } from "@polyth/contracts";
 import { setActiveView, useStore, type AppView } from "../store.ts";
 import { isWorkspaceSurface, listSurfaces } from "../surfaces.ts";
 import { api } from "../api.ts";
-import { workflowFinishedCount, workflowHumanWait } from "../workflowRun.ts";
+import {
+  prioritizeWorkflowRuns,
+  workflowFinishedCount,
+  workflowHumanWait,
+} from "../workflowRun.ts";
+import { handOffWorkflowLaunch } from "../workflowLaunch.ts";
 
 // UX-PANE-MODEL: Files/Git/Terminal/Preview are workspace panes beside Chat,
 // not primary views — the open pane is appended to the label instead.
@@ -29,8 +34,9 @@ export default function StatusBar() {
   const session = useStore((s) => s.sessions.find((x) => x.id === s.activeSessionId) ?? null);
   const view = useStore((s) => s.activeView);
   const rail = useStore((s) => s.railPlugin);
-  const [workflowState, setWorkflowState] = useState<{ projectId: string; run: WorkflowRunDto } | null>(null);
-  const activeWorkflow = workflowState && workflowState.projectId === project?.id ? workflowState.run : null;
+  const [workflowState, setWorkflowState] = useState<{ projectId: string; runs: WorkflowRunDto[] } | null>(null);
+  const activeWorkflows = workflowState && workflowState.projectId === project?.id ? workflowState.runs : [];
+  const activeWorkflow = activeWorkflows[0] ?? null;
   const paneTitle = rail !== null
     ? listSurfaces().find((s) => s.id === rail && isWorkspaceSurface(s))?.title ?? null
     : null;
@@ -46,8 +52,8 @@ export default function StatusBar() {
       void api.listWorkflowRuns(project.id)
         .then((runs) => {
           if (mounted) {
-            const run = runs.find((candidate) => candidate.status === "running");
-            setWorkflowState(run ? { projectId: project.id, run } : null);
+            const activeRuns = prioritizeWorkflowRuns(runs);
+            setWorkflowState(activeRuns.length > 0 ? { projectId: project.id, runs: activeRuns } : null);
           }
         })
         .catch(() => {});
@@ -82,12 +88,23 @@ export default function StatusBar() {
   if (session?.agent) {
     segments.push({ key: "agent", node: <span className="sb sb-agent">{session.agent} agent</span> });
   }
-  if (activeWorkflow) {
+  if (activeWorkflow && project) {
     const complete = workflowFinishedCount(activeWorkflow);
     const waits = activeWorkflow.nodes.map(workflowHumanWait);
     const waitingForPermission = waits.includes("permission");
     const waitingForAnswer = waits.includes("answer");
     const actionLabel = waitingForPermission ? "Approval needed" : waitingForAnswer ? "Answer needed" : null;
+    const workflowLabel = activeWorkflows.length > 1 ? `${activeWorkflows.length} workflows` : activeWorkflow.name;
+    const openWorkflow = () => {
+      handOffWorkflowLaunch({
+        projectId: activeWorkflow.projectId ?? project.id,
+        ...(activeWorkflow.parentSessionId ? { sessionId: activeWorkflow.parentSessionId } : {}),
+        workflowId: activeWorkflow.workflowId,
+        input: activeWorkflow.input,
+        run: activeWorkflow,
+      });
+      setActiveView("workflow");
+    };
     segments.push({
       key: "workflow",
       node: (
@@ -95,11 +112,11 @@ export default function StatusBar() {
           type="button"
           className={`sb sb-workflow${actionLabel ? " waiting" : ""}`}
           title={actionLabel ? `Workflow action required: ${actionLabel.toLowerCase()}` : "Open active workflow"}
-          aria-label={`${actionLabel ?? activeWorkflow.name}, ${complete} of ${activeWorkflow.nodes.length} nodes finished. Open workflow`}
-          onClick={() => setActiveView("workflow")}
+          aria-label={`${actionLabel ?? workflowLabel}, ${complete} of ${activeWorkflow.nodes.length} nodes finished. Open workflow`}
+          onClick={openWorkflow}
         >
           <span className="workflow-status-spinner" aria-hidden="true" />
-          <span className="sb-text">{actionLabel ?? activeWorkflow.name} · {complete}/{activeWorkflow.nodes.length}</span>
+          <span className="sb-text">{actionLabel ?? workflowLabel} · {complete}/{activeWorkflow.nodes.length}</span>
         </button>
       ),
     });

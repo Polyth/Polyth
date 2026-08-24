@@ -12,6 +12,7 @@ export interface WorkflowLauncherProps {
   projectId?: string;
   sessionId?: string;
   draftText: string;
+  attachmentCount?: number;
   consumeDraft: () => void;
 }
 
@@ -19,6 +20,7 @@ export default function WorkflowLauncher({
   projectId,
   sessionId,
   draftText,
+  attachmentCount = 0,
   consumeDraft,
 }: WorkflowLauncherProps) {
   const [open, setOpen] = useState(false);
@@ -58,6 +60,7 @@ export default function WorkflowLauncher({
   };
 
   const openLauncher = () => {
+    if (!projectId) return;
     setTask(draftText);
     setOpen(true);
   };
@@ -162,6 +165,11 @@ export default function WorkflowLauncher({
               onChange={(event) => { setTask(event.target.value); setError(""); }}
             />
             <small id="workflow-launch-task-help">This text is not sent as a normal chat message. It is logged as the workflow input.</small>
+            {attachmentCount > 0 && (
+              <small className="workflow-launch-attachment-note" role="note">
+                {attachmentCount} {attachmentCount === 1 ? "attachment stays" : "attachments stay"} in this chat draft and will not be shared with workflow nodes.
+              </small>
+            )}
           </label>
           {error && !loadFailed && <div className="form-error workflow-error" role="alert">{error}</div>}
           {loading ? (
@@ -189,7 +197,13 @@ export default function WorkflowLauncher({
                     <strong>{workflow.name}</strong>
                     <small>{workflow.nodes.length} {workflow.nodes.length === 1 ? "node" : "nodes"} · {workflow.defaults?.permissions === "manual" ? "manual approval" : "auto approve"}</small>
                   </span>
-                  <button type="button" className="small-btn workflow-button" disabled={!!busyId} onClick={() => openBuilder(workflow.id)}>
+                  <button
+                    type="button"
+                    className="small-btn workflow-button"
+                    disabled={!!busyId}
+                    aria-label={`Edit ${workflow.name} workflow`}
+                    onClick={() => openBuilder(workflow.id)}
+                  >
                     Edit
                   </button>
                   <button
@@ -197,6 +211,7 @@ export default function WorkflowLauncher({
                     className="primary-btn workflow-button"
                     disabled={!task.trim() || !!busyId}
                     title={!task.trim() ? "Enter a task before running" : `Run ${workflow.name}`}
+                    aria-label={`Run ${workflow.name} workflow`}
                     aria-busy={busyId === workflow.id}
                     onClick={() => void run(workflow)}
                   >

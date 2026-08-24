@@ -6,6 +6,7 @@ import { buildModel } from "../src/reduce.ts";
 import { handOffWorkflowLaunch, takeWorkflowLaunch } from "../src/workflowLaunch.ts";
 import {
   fresherWorkflowRun,
+  prioritizeWorkflowRuns,
   workflowHumanWait,
   workflowNodeDetail,
 } from "../src/workflowRun.ts";
@@ -124,6 +125,37 @@ test("workflow status helpers keep action-required and terminal states honest", 
   assert.equal(fresherWorkflowRun(stopped, running)?.status, "stopped");
 });
 
+test("global workflow indicators prioritize action-required runs", () => {
+  const background = {
+    id: "newer",
+    workflowId: "background",
+    name: "Background",
+    input: "Run checks",
+    status: "running" as const,
+    startedAt: 20,
+    layers: [["check"]],
+    nodes: [{ id: "check", role: "Checker", status: "running" as const, activity: "thinking" }],
+  };
+  const blocked = {
+    ...background,
+    id: "older",
+    workflowId: "approval",
+    name: "Approval",
+    startedAt: 10,
+    nodes: [{
+      id: "review",
+      role: "Reviewer",
+      status: "running" as const,
+      activity: "awaiting permission: bash",
+    }],
+  };
+  const finished = { ...background, id: "finished", status: "done" as const };
+  assert.deepEqual(
+    prioritizeWorkflowRuns([background, finished, blocked]).map((run) => run.id),
+    ["older", "newer"],
+  );
+});
+
 test("workflow journey surfaces expose task launch, chat progress, HITL, stop, and retry", async () => {
   const [launcher, composer, timeline, workflow, miniWidgets, status] = await Promise.all([
     source("../src/components/WorkflowLauncher.tsx"),
@@ -136,7 +168,9 @@ test("workflow journey surfaces expose task launch, chat progress, HITL, stop, a
   assert.match(launcher, /Your draft becomes the shared task/);
   assert.match(launcher, /api\.runWorkflow/);
   assert.match(composer, /workflowDraftText: text/);
+  assert.match(composer, /workflowAttachmentCount: attachments\.length/);
   assert.match(timeline, /<WorkflowTimelineCard run=\{model\.workflowRun\}/);
+  assert.match(timeline, /model\.messages\.length === 0 && !model\.workflowRun/);
   assert.match(await source("../src/components/WorkflowTimelineCard.tsx"), /handOffWorkflowLaunch/);
   assert.match(workflow, /Review & respond/);
   assert.match(workflow, /Retry full workflow/);

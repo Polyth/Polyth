@@ -4,7 +4,12 @@ import { api } from "../api.ts";
 import { Icon } from "../icons.tsx";
 import { setActiveView, setOverlay, setUiError, useStore } from "../store.ts";
 import { friendlyError } from "../settings.ts";
-import { workflowFinishedCount, workflowHumanWait } from "../workflowRun.ts";
+import {
+  prioritizeWorkflowRuns,
+  workflowFinishedCount,
+  workflowHumanWait,
+} from "../workflowRun.ts";
+import { handOffWorkflowLaunch } from "../workflowLaunch.ts";
 import { GoalAttachForm } from "../components/GoalStrip.tsx";
 import WorkflowLauncher from "../components/WorkflowLauncher.tsx";
 import { defineWidgetPlugin, registerWidgetPlugin } from "./catalog.ts";
@@ -94,6 +99,7 @@ function WorkflowAction({ context }: { context: Record<string, unknown> }) {
       projectId={typeof context.projectId === "string" ? context.projectId : undefined}
       sessionId={typeof context.sessionId === "string" ? context.sessionId : undefined}
       draftText={typeof context.workflowDraftText === "string" ? context.workflowDraftText : ""}
+      attachmentCount={typeof context.workflowAttachmentCount === "number" ? context.workflowAttachmentCount : 0}
       consumeDraft={typeof context.consumeWorkflowDraft === "function"
         ? context.consumeWorkflowDraft as () => void
         : () => {}}
@@ -103,8 +109,9 @@ function WorkflowAction({ context }: { context: Record<string, unknown> }) {
 
 function WorkflowRunIndicator() {
   const projectId = useStore((state) => state.activeProjectId);
-  const [workflowState, setWorkflowState] = useState<{ projectId: string; run: WorkflowRunDto } | null>(null);
-  const run = workflowState && workflowState.projectId === projectId ? workflowState.run : null;
+  const [workflowState, setWorkflowState] = useState<{ projectId: string; runs: WorkflowRunDto[] } | null>(null);
+  const runs = workflowState && workflowState.projectId === projectId ? workflowState.runs : [];
+  const run = runs[0] ?? null;
   useEffect(() => {
     if (!projectId) {
       setWorkflowState(null);
@@ -116,8 +123,8 @@ function WorkflowRunIndicator() {
       void api.listWorkflowRuns(projectId)
         .then((runs) => {
           if (!active) return;
-          const activeRun = runs.find((candidate) => candidate.status === "running");
-          setWorkflowState(activeRun ? { projectId, run: activeRun } : null);
+          const activeRuns = prioritizeWorkflowRuns(runs);
+          setWorkflowState(activeRuns.length > 0 ? { projectId, runs: activeRuns } : null);
         })
         .catch(() => {});
     };
@@ -125,22 +132,33 @@ function WorkflowRunIndicator() {
     const timer = setInterval(refresh, 1_200);
     return () => { active = false; clearInterval(timer); };
   }, [projectId]);
-  if (!run) return null;
+  if (!run || !projectId) return null;
   const done = workflowFinishedCount(run);
   const waits = run.nodes.map(workflowHumanWait);
   const waitingForPermission = waits.includes("permission");
   const waitingForAnswer = waits.includes("answer");
   const actionLabel = waitingForPermission ? "Approval needed" : waitingForAnswer ? "Answer needed" : null;
+  const runLabel = runs.length > 1 ? `${runs.length} workflows` : run.name;
+  const openRun = () => {
+    handOffWorkflowLaunch({
+      projectId: run.projectId ?? projectId,
+      ...(run.parentSessionId ? { sessionId: run.parentSessionId } : {}),
+      workflowId: run.workflowId,
+      input: run.input,
+      run,
+    });
+    setActiveView("workflow");
+  };
   return (
     <button
       type="button"
       className={`header-action workflow-run-indicator${actionLabel ? " waiting" : ""}`}
       title={actionLabel ? `Workflow action required: ${actionLabel.toLowerCase()}` : "Open active workflow"}
-      aria-label={`${actionLabel ?? run.name}, ${done} of ${run.nodes.length} nodes finished. Open workflow`}
-      onClick={() => setActiveView("workflow")}
+      aria-label={`${actionLabel ?? runLabel}, ${done} of ${run.nodes.length} nodes finished. Open workflow`}
+      onClick={openRun}
     >
       <span className="workflow-status-spinner" aria-hidden="true" />
-      <span aria-live="polite">{actionLabel ?? `${run.name} ${done}/${run.nodes.length}`}</span>
+      <span aria-live="polite">{actionLabel ?? `${runLabel} ${done}/${run.nodes.length}`}</span>
     </button>
   );
 }

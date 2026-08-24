@@ -91,6 +91,18 @@ test("invalid definitions and empty run inputs are rejected", async () => {
   }), /cycle/);
   const workflow = h.service.create({ projectId: "p", name: "Valid", nodes: [node("a")], edges: [] });
   await assert.rejects(() => h.service.start(workflow.id, "session", "  "), /input/);
+  await assert.rejects(
+    () => h.service.start(workflow.id, "session", "Task", { maxParallel: 1.5 }),
+    /whole number from 1 to 32/,
+  );
+  await assert.rejects(
+    () => h.service.start(workflow.id, "session", "Task", { maxParallel: 33 }),
+    /whole number from 1 to 32/,
+  );
+  await assert.rejects(
+    () => h.service.start(workflow.id, "session", "Task", { nodeTimeoutMs: 1_500.5 }),
+    /whole number >= 1000/,
+  );
 });
 
 test("engine executes layers in order and caps concurrency within a layer", async () => {

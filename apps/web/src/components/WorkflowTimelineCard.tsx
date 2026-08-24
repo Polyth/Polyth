@@ -1,12 +1,14 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { WorkflowRunDto, WorkflowRunNodeDto } from "@polyth/contracts";
 import { api } from "../api.ts";
 import { openSession } from "../init.ts";
 import { Icon } from "../icons.tsx";
 import { getState, setActiveView, setUiError } from "../store.ts";
 import { handOffWorkflowLaunch } from "../workflowLaunch.ts";
+import { friendlyError } from "../settings.ts";
 import {
   WORKFLOW_STATUS_LABEL,
+  fresherWorkflowRun,
   workflowFinishedCount,
   workflowHumanWait,
   workflowNodeDetail,
@@ -16,62 +18,66 @@ const needsHuman = (node: WorkflowRunNodeDto): boolean => workflowHumanWait(node
 
 export default function WorkflowTimelineCard({ run }: { run: WorkflowRunDto }) {
   const [stopping, setStopping] = useState(false);
-  const complete = workflowFinishedCount(run);
-  const waiting = run.nodes.filter(needsHuman);
-  const percent = run.nodes.length ? Math.round((complete / run.nodes.length) * 100) : 0;
+  const [apiRun, setApiRun] = useState<WorkflowRunDto | null>(null);
+  useEffect(() => setApiRun(null), [run.id]);
+  const shownRun = fresherWorkflowRun(apiRun, run) ?? run;
+  const complete = workflowFinishedCount(shownRun);
+  const waiting = shownRun.nodes.filter(needsHuman);
+  const percent = shownRun.nodes.length ? Math.round((complete / shownRun.nodes.length) * 100) : 0;
 
   const stop = () => {
-    if (stopping || run.status !== "running") return;
+    if (stopping || shownRun.status !== "running") return;
     setStopping(true);
-    void api.stopWorkflowRun(run.id)
-      .catch((cause) => setUiError(`Couldn’t stop workflow: ${cause instanceof Error ? cause.message : String(cause)}`))
+    void api.stopWorkflowRun(shownRun.id)
+      .then(setApiRun)
+      .catch((cause) => setUiError(friendlyError("Couldn’t stop the workflow", cause)))
       .finally(() => setStopping(false));
   };
 
   const viewWorkflow = () => {
-    const projectId = run.projectId ?? getState().activeProjectId;
+    const projectId = shownRun.projectId ?? getState().activeProjectId;
     if (projectId) {
       handOffWorkflowLaunch({
         projectId,
-        ...(run.parentSessionId ? { sessionId: run.parentSessionId } : {}),
-        workflowId: run.workflowId,
-        input: run.input,
-        run,
+        ...(shownRun.parentSessionId ? { sessionId: shownRun.parentSessionId } : {}),
+        workflowId: shownRun.workflowId,
+        input: shownRun.input,
+        run: shownRun,
       });
     }
     setActiveView("workflow");
   };
 
   return (
-    <section className={`workflow-timeline-card status-${run.status}`} aria-label={`Workflow ${run.name}, ${WORKFLOW_STATUS_LABEL[run.status]}`}>
+    <section className={`workflow-timeline-card status-${shownRun.status}`} aria-label={`Workflow ${shownRun.name}, ${WORKFLOW_STATUS_LABEL[shownRun.status]}`}>
       <header>
         <span className="workflow-timeline-icon" aria-hidden="true"><Icon.workflow /></span>
         <span>
           <small>Workflow</small>
-          <strong>{run.name}</strong>
+          <strong>{shownRun.name}</strong>
         </span>
-        <b className={`status-${run.status}`} role="status" aria-live="polite">
-          {WORKFLOW_STATUS_LABEL[run.status]}
+        <b className={`status-${shownRun.status}`} role="status" aria-live="polite">
+          {WORKFLOW_STATUS_LABEL[shownRun.status]}
         </b>
       </header>
-      <p title={run.input}>{run.input}</p>
+      <p title={shownRun.input}>{shownRun.input}</p>
       <div
         className="workflow-timeline-progress"
         role="progressbar"
         aria-label="Workflow progress"
         aria-valuemin={0}
-        aria-valuemax={run.nodes.length}
+        aria-valuemax={shownRun.nodes.length}
         aria-valuenow={complete}
-        aria-valuetext={`${complete} of ${run.nodes.length} nodes finished`}
+        aria-valuetext={`${complete} of ${shownRun.nodes.length} nodes finished`}
       >
         <i style={{ width: `${percent}%` }} />
       </div>
       <div className="workflow-timeline-summary">
-        <span>{complete}/{run.nodes.length} nodes finished</span>
+        <span>{complete}/{shownRun.nodes.length} nodes finished</span>
         {waiting.length > 0 && <strong>{waiting.length} waiting for you</strong>}
       </div>
       <ul>
-        {run.nodes.map((node) => (
+        {shownRun.nodes.map((node) => (
           <li key={node.id} className={`status-${node.status}${needsHuman(node) ? " needs-human" : ""}`}>
             <span aria-hidden="true">
               {node.status === "done" ? "✓" : node.status === "error" ? "×" : node.status === "running" ? "●" : "○"}
@@ -97,12 +103,13 @@ export default function WorkflowTimelineCard({ run }: { run: WorkflowRunDto }) {
         <button type="button" className="small-btn workflow-button" onClick={viewWorkflow}>
           View workflow
         </button>
-        {run.status === "running" && (
+        {shownRun.status === "running" && (
           <button
             type="button"
             className="small-btn danger-btn workflow-button"
             disabled={stopping}
             aria-busy={stopping}
+            aria-label={`Stop ${shownRun.name} workflow run`}
             onClick={stop}
           >
             <Icon.stop />{stopping ? "Stopping…" : "Stop run"}

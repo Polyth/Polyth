@@ -1326,7 +1326,7 @@ export default function Timeline({ model }: { model: RenderModel }) {
         onScroll={onScroll}
       >
         <SlotHost slot="session.timeline.before" context={slotSummary} />
-        {model.messages.length === 0 && (
+        {model.messages.length === 0 && !model.workflowRun && (
           <div className="empty">
             <div>{emptyCopy}</div>
           </div>

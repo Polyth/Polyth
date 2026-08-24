@@ -125,7 +125,10 @@ async function progressFromEvent(
   }
   if (event.type === "assistant/message") {
     const partId = eventString(event, "partId") ?? event.id;
-    parts.set(partId, eventString(event, "text") ?? "");
+    const text = eventString(event, "text");
+    // Some runtime adapters emit a terminal assistant marker without
+    // repeating the streamed text. Never erase chunks already collected.
+    if (text !== undefined) parts.set(partId, text);
     return { activity: "writing", output: [...parts.values()].join("\n\n") };
   }
   return null;

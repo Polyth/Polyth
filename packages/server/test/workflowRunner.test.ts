@@ -77,6 +77,36 @@ test("workflow timeout error is human-readable and aborts the child", async () =
   assert.equal(aborted, true);
 });
 
+test("terminal assistant markers do not erase streamed workflow output", async () => {
+  const updates: Array<Record<string, unknown>> = [];
+  const sessions = {
+    create: async () => ({ id: "child" }),
+    autoAcceptSet: async () => ({ setting: "on", effective: true }),
+    send: async () => ({}),
+    events: async () => [
+      event(1, "assistant/chunk", { partId: "answer", text: "kept output" }),
+      event(2, "assistant/message", { partId: "answer" }),
+      event(3, "turn/stopped", { reason: "completed" }),
+    ],
+    abort: async () => {},
+  } as unknown as SessionService;
+
+  const result = await createWorkflowRunNode(sessions)({
+    parentSessionId: "parent",
+    runId: "run",
+    workflowId: "workflow",
+    projectId: "project",
+    node: { id: "node", role: "Writer", prompt: "Write" },
+    prompt: "Write the answer",
+    permissions: "auto",
+    timeoutMs: 1_000,
+    signal: new AbortController().signal,
+  }, async (patch) => { updates.push(patch); });
+
+  assert.equal(result.output, "kept output");
+  assert.equal(updates.at(-1)?.output, "kept output");
+});
+
 test("stopping during permission setup aborts the child before sending work", async () => {
   let releaseSetup!: () => void;
   let setupStarted!: () => void;

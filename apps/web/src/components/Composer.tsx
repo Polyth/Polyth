@@ -930,6 +930,7 @@ export default function Composer({
     goalOn: newSessionGoal,
     toggleGoal,
     workflowDraftText: text,
+    workflowAttachmentCount: attachments.length,
     consumeWorkflowDraft,
   };
   const thinkingItems: PickerItem[] = [

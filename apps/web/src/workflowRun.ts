@@ -22,6 +22,22 @@ export function workflowFinishedCount(run: WorkflowRunDto): number {
   return run.nodes.filter(workflowNodeFinished).length;
 }
 
+/** Put action-required runs first, then the newest run. Global indicators use
+ * this ordering so an older blocked run cannot be hidden by newer background
+ * work. */
+export function prioritizeWorkflowRuns(runs: readonly WorkflowRunDto[]): WorkflowRunDto[] {
+  return runs
+    .filter((run) => run.status === "running")
+    .slice()
+    .sort((left, right) => {
+      const leftNeedsHuman = left.nodes.some((node) => workflowHumanWait(node) !== null);
+      const rightNeedsHuman = right.nodes.some((node) => workflowHumanWait(node) !== null);
+      return Number(rightNeedsHuman) - Number(leftNeedsHuman)
+        || right.startedAt - left.startedAt
+        || right.id.localeCompare(left.id);
+    });
+}
+
 export function workflowHumanWait(node: WorkflowRunNodeDto): "permission" | "answer" | null {
   if (node.status !== "running") return null;
   const activity = node.activity ?? "";

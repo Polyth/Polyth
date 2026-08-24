@@ -13,6 +13,7 @@ import { api } from "../api.ts";
 import { modelDisplayName, modelSupportsTextWorkflow } from "../composer/discovery.ts";
 import { openSession } from "../init.ts";
 import { Icon } from "../icons.tsx";
+import { friendlyError } from "../settings.ts";
 import { showSessionChat, useActiveModel, useStore } from "../store.ts";
 import { layerizeWorkflow, wouldWorkflowCycle } from "../workflowGraph.ts";
 import { takeWorkflowLaunch, type WorkflowLaunchIntent } from "../workflowLaunch.ts";
@@ -155,7 +156,7 @@ export default function WorkflowView() {
     } catch (cause) {
       if (sequence !== loadSequence.current) return;
       setLoadFailed(true);
-      setError(`Could not load workflows: ${cause instanceof Error ? cause.message : String(cause)}`);
+      setError(friendlyError("Couldn’t load workflows", cause));
     } finally {
       if (sequence === loadSequence.current) setLoading(false);
     }
@@ -259,7 +260,7 @@ export default function WorkflowView() {
     try {
       await fn();
     } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
+      setError(friendlyError(`Couldn’t ${label} workflow`, cause));
     } finally {
       actionInFlight.current = false;
       setBusy("");
@@ -832,6 +833,8 @@ export default function WorkflowView() {
                         type="button"
                         className="small-btn danger-btn workflow-button"
                         disabled={isBusy}
+                        aria-busy={busy === "stop"}
+                        aria-label={`Stop ${shownRun.name} workflow run`}
                         onClick={stop}
                       >
                         <Icon.stop />{busy === "stop" ? "Stopping…" : "Stop run"}
@@ -842,6 +845,7 @@ export default function WorkflowView() {
                       className="primary-btn workflow-button"
                       disabled={!sessionId || !runInput.trim() || dirty || parallelValue === null
                         || timeoutValue === null || shownRun?.status === "running" || isBusy}
+                      aria-busy={busy === "run"}
                       title={!sessionId
                         ? "Open a parent session before running a workflow"
                         : dirty
@@ -956,6 +960,7 @@ export default function WorkflowView() {
                         type="button"
                         className="primary-btn workflow-button"
                         disabled={isBusy || dirty || !shownRun.parentSessionId}
+                        aria-busy={busy === "retry"}
                         title={!shownRun.parentSessionId
                           ? "This older run does not include its parent session"
                           : dirty

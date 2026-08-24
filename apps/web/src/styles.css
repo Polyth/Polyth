@@ -3156,6 +3156,11 @@ html[data-density="compact"] .set-row { padding: 9px 0; }
 .workflow-launch-heading p { margin: 3px 0 0; color: var(--muted); font-size: 11.5px; line-height: 1.4; }
 .workflow-launch-task { padding: 14px 18px 10px; }
 .workflow-launch-task small { color: var(--faint); font-size: 10px; line-height: 1.4; }
+.workflow-launch-task .workflow-launch-attachment-note {
+  padding: 7px 9px; border: 1px solid color-mix(in srgb, var(--amber) 35%, var(--border));
+  border-radius: var(--radius-sm); background: color-mix(in srgb, var(--amber) 7%, var(--bg));
+  color: var(--amber);
+}
 .workflow-launch-dialog > .workflow-error { margin: 0 18px 10px; }
 .workflow-launch-list {
   min-height: 0; max-height: min(330px, 42vh); display: flex; flex-direction: column; gap: 6px;
@@ -3202,6 +3207,9 @@ html[data-density="compact"] .set-row { padding: 9px 0; }
 .workflow-timeline-card > p { max-height: 4.2em; margin: 0; overflow: hidden; color: var(--text-dim); font-size: 11px; line-height: 1.4; }
 .workflow-timeline-progress { height: 4px; overflow: hidden; border-radius: 999px; background: var(--sunken); }
 .workflow-timeline-progress i { display: block; height: 100%; border-radius: inherit; background: var(--accent); transition: width 180ms ease; }
+.workflow-timeline-card.status-done .workflow-timeline-progress i { background: var(--green); }
+.workflow-timeline-card.status-error .workflow-timeline-progress i { background: var(--red); }
+.workflow-timeline-card.status-stopped .workflow-timeline-progress i { background: var(--muted); }
 .workflow-timeline-summary { display: flex; justify-content: space-between; color: var(--muted); font-size: 10px; }
 .workflow-timeline-summary strong { color: var(--amber); }
 .workflow-timeline-card ul { display: flex; flex-direction: column; gap: 4px; margin: 0; padding: 0; list-style: none; }
