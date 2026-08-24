@@ -6,6 +6,7 @@ import { friendlyError } from "../settings.ts";
 import { getState, setActiveView, setUiError } from "../store.ts";
 import { handOffWorkflowLaunch } from "../workflowLaunch.ts";
 import { publishWorkflowRun } from "../workflowMonitor.ts";
+import { requestComposerReplace } from "../composerInsert.ts";
 import { Icon } from "../icons.tsx";
 import Dialog from "./a11y/Dialog.tsx";
 
@@ -80,6 +81,8 @@ export default function WorkflowLauncher({
 
   const run = async (workflow: WorkflowDto) => {
     if (!projectId || !task.trim() || busyId) return;
+    const submittedTask = task.trim();
+    let draftConsumed = false;
     setBusyId(workflow.id);
     setError("");
     try {
@@ -89,12 +92,12 @@ export default function WorkflowLauncher({
         parentSessionId = getState().activeSessionId ?? undefined;
       }
       if (!parentSessionId) throw new Error("The parent session could not be created.");
-      const started = await api.runWorkflow(workflow.id, parentSessionId, task.trim());
-      // Consume immediately after the server accepts the run. openSession()
-      // and workflow-run publication can remount Composer; clearing through
-      // the old launcher's callback after either remount would leave the
-      // replacement composer showing the submitted draft.
+      // The server logs and broadcasts workflow/run-started before its HTTP
+      // response resolves. Clear first so that event cannot replace the empty
+      // hero Composer and seed its replacement with the submitted draft.
       consumeDraft();
+      draftConsumed = true;
+      const started = await api.runWorkflow(workflow.id, parentSessionId, submittedTask);
       publishWorkflowRun(started);
       await openSession(parentSessionId, { showChat: false }).catch((cause) => {
         setUiError(friendlyError("Workflow started, but the parent timeline couldn’t refresh", cause));
@@ -103,12 +106,13 @@ export default function WorkflowLauncher({
         projectId,
         sessionId: parentSessionId,
         workflowId: workflow.id,
-        input: task.trim(),
+        input: submittedTask,
         run: started,
       });
       setOpen(false);
       setActiveView("workflow");
     } catch (cause) {
+      if (draftConsumed) requestComposerReplace(submittedTask);
       setError(friendlyError("Couldn’t start the workflow", cause));
     } finally {
       setBusyId("");

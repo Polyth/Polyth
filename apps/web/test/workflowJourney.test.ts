@@ -169,13 +169,14 @@ test("workflow journey surfaces expose task launch, chat progress, HITL, stop, a
   assert.match(launcher, /Your draft becomes the shared task/);
   assert.match(launcher, /api\.runWorkflow/);
   assert.ok(
-    launcher.indexOf("consumeDraft();") < launcher.indexOf("await openSession(parentSessionId"),
-    "the accepted workflow consumes the draft before parent-session refresh can remount Composer",
+    launcher.indexOf("consumeDraft();") < launcher.indexOf("await api.runWorkflow"),
+    "the workflow consumes the draft before run-started can remount Composer",
   );
   assert.ok(
     launcher.indexOf("consumeDraft();") < launcher.indexOf("publishWorkflowRun(started);"),
     "the accepted workflow consumes the draft before global indicators can remount Composer",
   );
+  assert.match(launcher, /if \(draftConsumed\) requestComposerReplace\(submittedTask\)/);
   assert.match(composer, /workflowDraftText: text/);
   assert.match(composer, /workflowAttachmentCount: attachments\.length/);
   assert.match(composer, /activeSessionId === target\) requestComposerReplace\(""\)/);

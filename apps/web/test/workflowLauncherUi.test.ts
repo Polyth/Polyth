@@ -86,6 +86,60 @@ test("composer workflow action opens the launcher with the live draft", async ()
   }
 });
 
+test("failed workflow start restores the consumed composer draft", async () => {
+  const widget = WORKFLOW_WIDGET_PLUGIN.widgets?.find((item) => item.id === "workflow.composer-action");
+  assert.ok(widget);
+  const originalListWorkflows = api.listWorkflows;
+  const originalRunWorkflow = api.runWorkflow;
+  api.listWorkflows = async () => [workflow];
+  api.runWorkflow = async () => { throw new Error("synthetic start failure"); };
+  let consumed = 0;
+  let restored = "";
+  const onReplace = (event: Event) => {
+    restored = (event as CustomEvent<string>).detail;
+    event.preventDefault();
+  };
+  window.addEventListener("polyth:composer-replace", onReplace);
+
+  const container = document.createElement("div");
+  document.body.appendChild(container);
+  const root = createRoot(container);
+  try {
+    await act(async () => {
+      root.render(widget.render({
+        projectId: "project",
+        sessionId: "session",
+        editing: false,
+        instanceId: "workflow.composer-action",
+        config: {},
+        updateConfig: () => {},
+        workflowDraftText: "Audit the release candidate",
+        workflowAttachmentCount: 0,
+        consumeWorkflowDraft: () => { consumed++; },
+      }));
+    });
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>(".composer-workflow")?.click();
+      await Promise.resolve();
+    });
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('button[aria-label="Run Release review workflow"]')?.click();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    assert.equal(consumed, 1);
+    assert.equal(restored, "Audit the release candidate");
+    assert.match(container.textContent ?? "", /Couldn’t start the workflow/);
+  } finally {
+    window.removeEventListener("polyth:composer-replace", onReplace);
+    api.listWorkflows = originalListWorkflows;
+    api.runWorkflow = originalRunWorkflow;
+    await act(async () => { root.unmount(); });
+    container.remove();
+  }
+});
+
 test("running workflow card exposes manual permission handoff", async () => {
   const run: WorkflowRunDto = {
     id: "run",
