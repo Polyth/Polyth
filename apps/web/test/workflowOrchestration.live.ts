@@ -418,6 +418,7 @@ test("complete workflow journey remains synchronized, accessible, and responsive
       assert.ok(target.height >= 44, `timeline@${width}: ${target.label} is only ${target.height}px tall`);
     }
 
+    await phone.locator(".composer-editor").click();
     await phone.getByRole("button", { name: "Browse workflows" }).click();
     await phone.waitForSelector(".workflow-launch-dialog", { state: "visible" });
     await assertNoOverflow(phone, `launcher@${width}`);
