@@ -62,7 +62,6 @@ async function openUsage(width: number, height = 900): Promise<Page> {
   await context.addInitScript(() => {
     localStorage.setItem("polyth.prefs", JSON.stringify({ persona: "engineer", plugins: [] }));
     localStorage.setItem("polyth.packageTours.v1", JSON.stringify({ skippedAll: true, completed: {} }));
-    localStorage.removeItem("polyth.usagePrefs");
   });
   const page = await context.newPage();
   await page.goto(`${base}/p/${projectId}`, { waitUntil: "load" });
@@ -162,7 +161,7 @@ test("populated charts render cleanly at desktop and 400px mobile", async () => 
     assert.ok(report.bars >= 30, `${width}px: expected a populated stacked chart, got ${report.bars} bars`);
     assert.ok(report.colors.length >= 5, `${width}px: provider series colors collapsed to ${report.colors.length}`);
     assert.equal(report.legend.length, 5, `${width}px: expected four providers plus Other`);
-    assert.ok(report.legend.some((label) => /^Other \(3\)$/.test(label)), `${width}px: collapsed Other legend is missing`);
+    assert.ok(report.legend.some((label) => label.endsWith("Other (3)")), `${width}px: collapsed Other legend is missing`);
     assert.ok(report.axisLabels.length >= 7, `${width}px: chart axis labels are missing`);
     assert.equal(report.documentOverflow <= 1, true, `${width}px: document overflows by ${report.documentOverflow}px`);
     assert.equal(report.paneOverflow <= 1, true, `${width}px: settings pane overflows by ${report.paneOverflow}px`);
