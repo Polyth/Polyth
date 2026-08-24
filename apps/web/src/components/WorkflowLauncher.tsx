@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
 import type { WorkflowDto } from "@polyth/contracts";
 import { api } from "../api.ts";
-import { createSession } from "../init.ts";
+import { createSession, openSession } from "../init.ts";
 import { friendlyError } from "../settings.ts";
-import { getState, setActiveView } from "../store.ts";
+import { getState, setActiveView, setUiError } from "../store.ts";
 import { handOffWorkflowLaunch } from "../workflowLaunch.ts";
 import { Icon } from "../icons.tsx";
 import Dialog from "./a11y/Dialog.tsx";
@@ -86,6 +86,9 @@ export default function WorkflowLauncher({
       }
       if (!parentSessionId) throw new Error("The parent session could not be created.");
       const started = await api.runWorkflow(workflow.id, parentSessionId, task.trim());
+      await openSession(parentSessionId, { showChat: false }).catch((cause) => {
+        setUiError(friendlyError("Workflow started, but the parent timeline couldn’t refresh", cause));
+      });
       consumeDraft();
       handOffWorkflowLaunch({
         projectId,
