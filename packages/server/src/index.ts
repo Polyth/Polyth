@@ -242,7 +242,6 @@ export async function boot(opts: BootOptions = {}) {
     let restarting: Promise<void> | null = null;
 
     const respawnOnce = async (): Promise<void> => {
-      runtimesByProject.delete(key);
       innerSub.dispose();
       await inner.dispose().catch(() => {});
       inner = await spawnRuntime(projectId, cwd);
