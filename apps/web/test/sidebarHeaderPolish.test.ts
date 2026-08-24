@@ -45,9 +45,9 @@ test("header and composer controls are configurable and purpose-specific", async
     source("../src/components/settings/WidgetsPage.tsx"),
     source("../src/components/ChatMetrics.tsx"),
   ]);
-  assert.match(header, /const rest = primaries\.filter\(\(c\) => !visibleIds\.has\(c\.descriptor\.id\)\)/);
-  assert.match(header, /rest\.length > 0/);
-  assert.doesNotMatch(header, /const rest = resolved\.filter/);
+  assert.match(header, /const primaries = resolved\.filter\(\(c\) => c\.tier === "primary"/);
+  assert.match(header, /primaries\.map/);
+  assert.doesNotMatch(header, /const rest = /);
   assert.doesNotMatch(composer, /Modalities:/);
   assert.match(composer, /aria-label="Add files"/);
   assert.doesNotMatch(widgets, /Session header stats|Response hover actions|Technical menu/);
@@ -71,6 +71,6 @@ test("assistant response header carries identity, timing, and configured actions
   assert.match(timeline, /className="agent-reply-duration"/);
   assert.match(timeline, /timeShort\(assistantTime\(m\)\)/);
   const response = timeline.indexOf("<div className=\"bubble\"");
-  const footer = timeline.lastIndexOf("<AssistantAgentHeader m={m} announce={announce} />");
+  const footer = timeline.lastIndexOf("<AssistantAgentHeader m={m} announce={announce} turn={turn} />");
   assert.ok(footer > response, "assistant identity and actions follow the response body");
 });

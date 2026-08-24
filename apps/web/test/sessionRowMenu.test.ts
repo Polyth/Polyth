@@ -39,6 +39,7 @@ const { act, createElement } = await import("react");
 const { createRoot } = await import("react-dom/client");
 const { activateProject, setSessions } = await import("../src/store.ts");
 const { default: SessionList } = await import("../src/components/sidebar/SessionList.tsx");
+const { default: AlertDialog } = await import("../src/components/AlertDialog.tsx");
 
 const session = (over: Partial<SessionProjection>): SessionProjection => ({
   id: "s", projectId: "p1", title: "session", status: "idle",
@@ -60,7 +61,12 @@ async function mountList() {
   const container = document.createElement("div");
   document.body.appendChild(container);
   const root = createRoot(container);
-  await act(async () => { root.render(createElement(SessionList, { projectId: "p1" })); });
+  await act(async () => {
+    root.render(createElement("div", null,
+      createElement(SessionList, { projectId: "p1" }),
+      createElement(AlertDialog),
+    ));
+  });
   return {
     container,
     unmount: async () => {
@@ -148,12 +154,6 @@ test("pinned chats are first across worktrees and their menu offers Unpin", asyn
 
 test("every permanent delete confirms; running sessions include activity context", async () => {
   const { container, unmount } = await mountList();
-  const confirms: string[] = [];
-  let confirmAnswer = false;
-  (globalThis.window as unknown as { confirm: (msg?: string) => boolean }).confirm = (msg?: string) => {
-    confirms.push(msg ?? "");
-    return confirmAnswer;
-  };
   try {
     // Idle: a declined confirmation sends nothing.
     const idleRow = rowOf(container, "Idle session");
@@ -164,18 +164,27 @@ test("every permanent delete confirms; running sessions include activity context
     const idleDelete = [...container.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')]
       .find((b) => b.textContent?.trim() === "Delete");
     await act(async () => { idleDelete!.click(); });
-    assert.equal(confirms.length, 1, "idle delete confirms first");
-    assert.match(confirms[0]!, /permanently removes the session and its history/i);
+    const idleDialog = container.querySelector<HTMLElement>('[role="dialog"][aria-label="Delete session"]');
+    assert.ok(idleDialog, "idle delete opens the themed confirmation first");
+    assert.match(idleDialog.textContent ?? "", /permanently removes the session and its history/i);
+    await act(async () => {
+      idleDialog.querySelector<HTMLButtonElement>(".small-btn")!.click();
+    });
     assert.equal(fetchCalls.filter((c) => c.method === "DELETE").length, 0, "declined idle delete changes nothing");
 
     // Accepting the same idle confirmation issues the delete.
-    confirmAnswer = true;
     await act(async () => {
       idleRow.dispatchEvent(new MouseEventCtor("contextmenu", { bubbles: true, cancelable: true }));
     });
     const idleDelete2 = [...container.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')]
       .find((b) => b.textContent?.trim() === "Delete");
     await act(async () => { idleDelete2!.click(); });
+    const idleDialog2 = container.querySelector<HTMLElement>('[role="dialog"][aria-label="Delete session"]');
+    assert.ok(idleDialog2);
+    await act(async () => {
+      idleDialog2.querySelector<HTMLButtonElement>(".alert-confirm")!.click();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
     assert.ok(
       fetchCalls.some((c) => c.method === "DELETE" && c.url === "/api/sessions/s-idle"),
       `confirmed DELETE issued (got: ${JSON.stringify(fetchCalls)})`,
@@ -190,7 +199,6 @@ test("every permanent delete confirms; running sessions include activity context
     });
 
     // Running: confirmation additionally warns about active work.
-    confirmAnswer = false;
     const runRow = rowOf(container, "Running session");
     await act(async () => {
       runRow.dispatchEvent(new MouseEventCtor("contextmenu", { bubbles: true, cancelable: true }));
@@ -199,18 +207,27 @@ test("every permanent delete confirms; running sessions include activity context
     const runDelete = [...container.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')]
       .find((b) => b.textContent?.trim() === "Delete");
     await act(async () => { runDelete!.click(); });
-    assert.equal(confirms.length, 3, "running delete confirms first");
-    assert.match(confirms[2]!, /still running|permanently/i);
+    const runDialog = container.querySelector<HTMLElement>('[role="dialog"][aria-label="Delete session"]');
+    assert.ok(runDialog, "running delete opens the themed confirmation first");
+    assert.match(runDialog.textContent ?? "", /still running|permanently/i);
+    await act(async () => {
+      runDialog.querySelector<HTMLButtonElement>(".small-btn")!.click();
+    });
     assert.equal(fetchCalls.filter((c) => c.method === "DELETE").length, 0, "declined confirm deletes nothing");
 
     // Accepted confirm goes through.
-    confirmAnswer = true;
     await act(async () => {
       runRow.dispatchEvent(new MouseEventCtor("contextmenu", { bubbles: true, cancelable: true }));
     });
     const runDelete2 = [...container.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')]
       .find((b) => b.textContent?.trim() === "Delete");
     await act(async () => { runDelete2!.click(); });
+    const runDialog2 = container.querySelector<HTMLElement>('[role="dialog"][aria-label="Delete session"]');
+    assert.ok(runDialog2);
+    await act(async () => {
+      runDialog2.querySelector<HTMLButtonElement>(".alert-confirm")!.click();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
     assert.ok(fetchCalls.some((c) => c.method === "DELETE" && c.url === "/api/sessions/s-run"));
   } finally {
     await unmount();

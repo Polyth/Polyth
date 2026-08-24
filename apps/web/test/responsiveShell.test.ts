@@ -209,7 +209,7 @@ test("Settings uses a focused desktop dialog without a widget preview inspector"
   const css = await read("../src/styles.css");
   const widgets = await read("../src/components/settings/WidgetsPage.tsx");
   assert.ok(settings.includes('className="scrim settings-scrim"'), "Settings owns viewport-specific scrim geometry");
-  assert.ok(css.includes("width: min(92vw, 780px); max-width: 780px; height: 92vh"), "Settings has a 780px desktop width cap");
+  assert.ok(css.includes("width: min(92vw, 800px); max-width: 800px; height: 92vh"), "Settings has an 800px desktop width cap");
   assert.doesNotMatch(css, /\.settings-shell\s*\{[^}]*min-width:\s*1100px/, "Settings no longer forces an 1100px minimum width");
   assert.ok(!widgets.includes("widget-inspector"), "widget settings no longer render a preview inspector");
 });
@@ -310,7 +310,7 @@ test("shared menu, destructive, failed-turn, and header-action contracts stay wi
   assert.ok(header.includes("useDismissibleMenu"), "the user menu consumes the shared menu contract");
   assert.ok(actions.includes('setOverlay("palette")'), "Search opens the command/action palette");
   assert.ok(actions.includes('setOverlay("search")'), "History opens session history search");
-  assert.ok(sessions.includes("window.confirm"), "every permanent session deletion is guarded");
+  assert.ok(sessions.includes("confirmAlert"), "every permanent session deletion is guarded by the themed alert contract");
   assert.ok(plugins.includes('disabled={!sourceValid}'), "plugin install stays disabled until minimally valid");
   assert.match(css, /\.turn-error\s*\{[^}]*display:\s*flex[^}]*flex-wrap:\s*wrap[^}]*gap:\s*8px/);
 });
@@ -333,17 +333,17 @@ test("timeline empty states defer starters to the hero", async () => {
   assert.ok(timeline.includes("This archived session has no messages."), "archived sessions get read-only copy");
 });
 
-test("header owns the capability disclosure while the rail renders configured tools", async () => {
+test("header renders primary capabilities while the rail renders configured tools", async () => {
   const header = await read("../src/components/Header.tsx");
   const rail = await read("../src/components/ContextRail.tsx");
-  const menu = await read("../src/components/CapabilityMenu.tsx");
   const store = await read("../src/store.ts");
-  assert.ok(header.includes("<CapabilityMenu"), "header consumes the shared disclosure");
-  assert.ok(!rail.includes("CapabilityMenu"), "rail dropped its duplicate More-tools picker");
-  assert.ok(rail.includes("configuredRailSurfaces"), "rail renders only configured tool buttons");
+  assert.ok(header.includes("function CapabilityNav"), "header owns the primary capability navigation");
+  assert.ok(header.includes('c.tier === "primary"'), "header limits its capability rail to primary tools");
+  assert.ok(header.includes("primaries.map"), "header renders the resolved primary capability list");
+  assert.ok(!header.includes("CapabilityMenu"), "header creates no implicit overflow disclosure");
+  assert.ok(rail.includes("configuredRailButtons"), "rail renders only configured tool buttons");
+  assert.ok(rail.includes('capability.descriptor.id === "terminal"'), "Terminal remains a guaranteed rail launcher");
   assert.ok(rail.includes("reorderRail"), "rail arranges surfaces by drag-reorder instead");
-  assert.ok(menu.includes('role="group"'), "disclosure uses grouped native buttons");
-  assert.ok(!menu.includes('role="menuitem"'), "disclosure does not claim unsupported menu arrow behavior");
   assert.ok(!store.includes("moreOpen:"), "dead global More-tools state stays removed");
   assert.ok(!store.includes("setMoreOpen"), "dead global More-tools action stays removed");
 });
