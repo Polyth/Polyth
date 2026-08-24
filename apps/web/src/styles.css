@@ -2287,7 +2287,7 @@ input.notification-preview { font-family: var(--mono); font-size: 12.5px; min-wi
   .browser-icon-btn { width: 44px; height: 44px; min-width: 44px; }
   .browser-address { height: 44px; }
   .browser-address input { height: 42px; font-size: 12px; }
-  .browser-address-submit { width: 42px; height: 40px; min-width: 42px; }
+  .browser-address-submit { width: 44px; height: 44px; min-width: 44px; }
   .browser-tools-row select, .browser-tool-btn { min-height: 44px; }
   .browser-tool-btn { padding-inline: 10px; }
   .browser-frame-bar { min-height: 48px; }
