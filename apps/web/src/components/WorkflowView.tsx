@@ -248,7 +248,6 @@ export default function WorkflowView() {
       if (!canSave || parallelValue === null || timeoutValue === null) {
         throw new Error("Fix the highlighted workflow fields before saving.");
       }
-      if (!layers?.ok) throw new Error(layers?.error ?? "Invalid workflow graph");
       const updated = await api.updateWorkflow(draft.id, {
         name: draft.name.trim(),
         nodes: draft.nodes,
