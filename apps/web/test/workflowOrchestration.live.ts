@@ -356,7 +356,16 @@ test("complete workflow journey remains synchronized, accessible, and responsive
   const timeline = page.locator(".workflow-timeline-card");
   await timeline.waitFor({ state: "visible" });
   assert.match(await timeline.getAttribute("aria-label") ?? "", /Workflow Release pipeline, Running/);
-  assert.equal(await editor.inputValue(), "", "the workflow launch consumes the submitted draft");
+  const consumedDraft = await page.evaluate((sessionId) => ({
+    dom: (document.querySelector(".composer-editor") as HTMLTextAreaElement | null)?.value,
+    stored: localStorage.getItem(`polyth.draft.${sessionId}`),
+    url: location.pathname,
+  }), SESSIONS.main);
+  assert.deepEqual(
+    consumedDraft,
+    { dom: "", stored: null, url: `/p/${PROJECT_ID}/s/${SESSIONS.main}` },
+    "the workflow launch consumes the submitted draft",
+  );
   await page.screenshot({ path: join(ARTIFACTS, "workflow_running_timeline.png") });
 
   const stop = timeline.getByRole("button", { name: "Stop Release pipeline workflow run" });
