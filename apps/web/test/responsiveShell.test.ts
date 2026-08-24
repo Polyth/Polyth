@@ -303,13 +303,14 @@ test("timeline empty states defer starters to the hero", async () => {
   assert.ok(timeline.includes("This archived session has no messages."), "archived sessions get read-only copy");
 });
 
-test("header and rail share one capability disclosure", async () => {
+test("the header owns the single capability disclosure; the rail reorders in place", async () => {
   const header = await read("../src/components/Header.tsx");
   const rail = await read("../src/components/ContextRail.tsx");
   const menu = await read("../src/components/CapabilityMenu.tsx");
   const store = await read("../src/store.ts");
   assert.ok(header.includes("<CapabilityMenu"), "header consumes the shared disclosure");
-  assert.ok(rail.includes("<CapabilityMenu"), "rail consumes the shared disclosure");
+  assert.ok(!rail.includes("CapabilityMenu"), "rail dropped its duplicate More-tools picker");
+  assert.ok(rail.includes("reorderRail"), "rail arranges surfaces by drag-reorder instead");
   assert.ok(menu.includes('role="group"'), "disclosure uses grouped native buttons");
   assert.ok(!menu.includes('role="menuitem"'), "disclosure does not claim unsupported menu arrow behavior");
   assert.ok(!store.includes("moreOpen:"), "dead global More-tools state stays removed");
