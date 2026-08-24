@@ -19,7 +19,13 @@ import {
   saveDraft,
   toolSummary,
 } from "../src/utils.ts";
-import { drainInserts, queueInsert, requestComposerInsert } from "../src/composerInsert.ts";
+import {
+  drainComposerReplacement,
+  drainInserts,
+  queueInsert,
+  requestComposerInsert,
+  requestComposerReplace,
+} from "../src/composerInsert.ts";
 import { ago, deriveSessionTitle, fmtDuration, fmtMs, fullSessionTitle, modKey, modelBadge, providerColor } from "../src/format.ts";
 import { parsePrefs } from "../src/prefs.ts";
 import { filterPalette, type PaletteCommand } from "../src/commands.ts";
@@ -1027,6 +1033,14 @@ test("requestComposerInsert queues when no composer consumes the event", () => {
   // Node has no window: the insert must land in the queue, not vanish.
   assert.equal(requestComposerInsert("@x.ts "), false);
   assert.deepEqual(drainInserts(), ["@x.ts "]);
+});
+
+test("composer replacement queue keeps the newest replacement across an unmounted gap", () => {
+  drainComposerReplacement();
+  assert.equal(requestComposerReplace("stale"), false);
+  assert.equal(requestComposerReplace("accepted"), false);
+  assert.equal(drainComposerReplacement(), "accepted");
+  assert.equal(drainComposerReplacement(), undefined);
 });
 
 test("filterPickerItems handles empty and case-insensitive grouped searches", () => {

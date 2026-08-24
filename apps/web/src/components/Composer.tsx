@@ -13,6 +13,7 @@ import AttachmentPills from "./AttachmentPills.tsx";
 import {
   COMPOSER_INSERT,
   COMPOSER_REPLACE,
+  drainComposerReplacement,
   drainInserts,
   requestComposerReplace,
 } from "../composerInsert.ts";
@@ -439,12 +440,18 @@ export default function Composer({
   // the event consumed; anything queued while unmounted drains now. Inserts go
   // through the command handle so an active composition is never interrupted.
   useEffect(() => {
+    const replaceText = (detail: string) => {
+      setText(detail);
+      inputRef.current?.replaceText(detail);
+    };
     const insert = (detail: string) => {
       const h = inputRef.current;
       if (!h) return;
       const cur = h.getText();
       h.replaceText(cur ? `${cur} ${detail}` : detail);
     };
+    const queuedReplacement = drainComposerReplacement();
+    if (queuedReplacement !== undefined) replaceText(queuedReplacement);
     for (const queued of drainInserts()) insert(queued);
     const handler = (e: Event) => {
       const detail = (e as CustomEvent).detail;
@@ -457,8 +464,7 @@ export default function Composer({
       const detail = (e as CustomEvent).detail;
       if (typeof detail !== "string") return;
       e.preventDefault();
-      setText(detail);
-      inputRef.current?.replaceText(detail);
+      replaceText(detail);
       inputRef.current?.focus();
     };
     window.addEventListener(COMPOSER_INSERT, handler);
