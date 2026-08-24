@@ -93,14 +93,14 @@ export default function ComposerAddMenu(props: ComposerAddMenuProps) {
         ref={triggerRef}
         type="button"
         className="chip composer-add-trigger"
-        aria-label="Add context or use a composer tool"
+        aria-label="More composer tools"
         aria-haspopup="menu"
         aria-expanded={open}
         {...(open ? { "aria-controls": "composer-add-menu" } : {})}
         onClick={() => setOpen((v) => !v)}
       >
-        <span aria-hidden="true" className="composer-add-icon"><Icon.plus /></span>
-        <span className="composer-add-label">Add</span>
+        <span aria-hidden="true" className="composer-add-icon"><Icon.more /></span>
+        <span className="composer-add-label">Tools</span>
       </button>
       {open && (
         <>

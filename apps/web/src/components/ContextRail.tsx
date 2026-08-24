@@ -18,11 +18,10 @@ import {
 } from "react";
 import SlotHost, { useSlotVersion } from "./slots/SlotHost.ts";
 import {
-  closeWorkspacePane, collapseWorkspacePane, expandWorkspacePane, setOverlay, setPaneFullscreen,
-  getState, setActiveView, setRailPlugin, setSidebarOpen, toggleRailPlugin, useActiveModel, useStore,
+  closeWorkspacePane, collapseWorkspacePane, expandWorkspacePane, setPaneFullscreen,
+  getState, setRailPlugin, setSidebarOpen, toggleRailPlugin, useActiveModel, useStore,
 } from "../store.ts";
 import { Icon } from "../icons.tsx";
-import { useEscape } from "../useEscape.ts";
 import { useGitStatus } from "../gitStatusStore.ts";
 import { gitChangedFiles } from "../pendingChanges.ts";
 import {
@@ -36,7 +35,6 @@ import { useResolvedCapabilities } from "../capabilities.ts";
 import { getWorkspacePanePrefs, setPanePreferredWidth } from "../workspace/panePrefs.ts";
 import { chatDockViability, dockGuardTargets } from "../workspace/dockGuard.ts";
 import { PaneVisibilityContext } from "../workspace/paneVisibility.ts";
-import CapabilityMenu from "./CapabilityMenu.tsx";
 import "./railSurfaces.tsx";
 import { setPlacementOverride } from "../capabilityLayout.ts";
 
@@ -153,24 +151,25 @@ export default function ContextRail() {
   const projectId = useStore((s) => s.activeProjectId);
   const paneExpanded = useStore((s) => s.paneExpanded);
   const resolved = useResolvedCapabilities();
-  const [moreOpen, setMoreOpen] = useState(false);
-  const [railEditOpen, setRailEditOpen] = useState(false);
-  const moreTriggerRef = useRef<HTMLButtonElement>(null);
-  useEscape(moreOpen, () => {
-    setMoreOpen(false);
-    moreTriggerRef.current?.focus();
-  });
   const presentation = open?.presentation;
   const capabilityById = new Map(resolved.map((capability) => [capability.descriptor.id, capability]));
-  const tierOf = (surface: RailSurface) => capabilityById.get(surface.capabilityId ?? surface.id)?.tier ?? "more";
-  const configuredRailSurfaces = surfaces.filter((surface) => tierOf(surface) === "more");
+  const configuredRailSurfaces = surfaces.filter((surface) =>
+    (capabilityById.get(surface.capabilityId ?? surface.id)?.tier ?? "more") === "more");
   const railButtons = open && !configuredRailSurfaces.some((surface) => surface.id === open.id)
     ? [open, ...configuredRailSurfaces]
     : configuredRailSurfaces;
-  const nextRank = (tier: "primary" | "more" | "technical") =>
-    Math.max(-1, ...resolved.filter((capability) => capability.tier === tier).map((capability) => capability.rank)) + 1;
-  const placeSurface = (surface: RailSurface, tier: "primary" | "more" | "technical") => {
-    setPlacementOverride(surface.capabilityId ?? surface.id, { tier, rank: nextRank(tier) });
+  const reorderRail = (draggedId: string, targetId: string) => {
+    if (!configuredRailSurfaces.some((surface) => surface.id === draggedId)
+      || !configuredRailSurfaces.some((surface) => surface.id === targetId)
+      || draggedId === targetId) return;
+    const ordered = configuredRailSurfaces
+      .map((surface) => surface.id)
+      .filter((surfaceId) => surfaceId !== draggedId);
+    ordered.splice(ordered.indexOf(targetId), 0, draggedId);
+    ordered.forEach((surfaceId, rank) => {
+      const surface = surfaces.find((candidate) => candidate.id === surfaceId);
+      if (surface) setPlacementOverride(surface.capabilityId ?? surface.id, { tier: "more", rank });
+    });
   };
 
   // Keep-alive: panels stay mounted once visited so their state survives
@@ -507,79 +506,6 @@ export default function ContextRail() {
     containerRef: paneRef,
   });
 
-  const moreToolsPicker = (
-    <>
-      <button
-        ref={moreTriggerRef}
-        className="rail-icon strip-btn strip-more"
-        title="More tools"
-        aria-label="More tools"
-        aria-expanded={moreOpen}
-        aria-controls="rail-capability-menu"
-        onClick={() => setMoreOpen((v) => !v)}
-      >
-        <span className="strip-more-text" aria-hidden="true">More</span>
-      </button>
-      {moreOpen && (
-        <>
-          <div className="menu-backdrop" onClick={() => setMoreOpen(false)} />
-          <CapabilityMenu
-            id="rail-capability-menu"
-            className="strip-picker more-tools-popup"
-            capabilities={resolved.filter((capability) => capability.descriptor.id !== "session")}
-            onClose={() => setMoreOpen(false)}
-            manageAction={() => {
-              setActiveView("session");
-              window.dispatchEvent(new CustomEvent("polyth:open-settings"));
-            }}
-          />
-        </>
-      )}
-    </>
-  );
-
-  const railEditor = (
-    <div className="rail-edit-shell">
-      <button
-        className="rail-icon strip-btn rail-add-button"
-        title="Add or move workspace buttons"
-        aria-label="Add or move workspace buttons"
-        aria-expanded={railEditOpen}
-        onClick={() => setRailEditOpen((value) => !value)}
-      ><Icon.plus /></button>
-      {railEditOpen && (
-        <div className="rail-edit-menu" role="group" aria-label="Configure workspace buttons">
-          <div className="rail-edit-title">Workspace buttons</div>
-          {surfaces.map((surface) => {
-            const tier = tierOf(surface);
-            return (
-              <div key={surface.id} className="rail-edit-row">
-                <span>{surface.title}</span>
-                <button
-                  className={tier === "more" ? "active" : ""}
-                  aria-label={`Show ${surface.title} in right rail`}
-                  title="Right rail"
-                  onClick={() => placeSurface(surface, "more")}
-                >→</button>
-                <button
-                  className={tier === "primary" ? "active" : ""}
-                  aria-label={`Show ${surface.title} in top strip`}
-                  title="Top strip"
-                  onClick={() => placeSurface(surface, "primary")}
-                >↑</button>
-                <button
-                  aria-label={`Remove ${surface.title} button`}
-                  title="Remove button"
-                  onClick={() => placeSurface(surface, "technical")}
-                >×</button>
-              </div>
-            );
-          })}
-        </div>
-      )}
-    </div>
-  );
-
   return (
     <>
       {compactContext && <div className="menu-backdrop sheet-backdrop" onClick={() => setRailPlugin(null)} />}
@@ -654,6 +580,13 @@ export default function ContextRail() {
                   title={s.title}
                   aria-label={s.title}
                   aria-pressed={rail === s.id}
+                  draggable
+                  onDragStart={(event) => event.dataTransfer.setData("text/polyth-rail", s.id)}
+                  onDragOver={(event) => event.preventDefault()}
+                  onDrop={(event) => {
+                    event.preventDefault();
+                    reorderRail(event.dataTransfer.getData("text/polyth-rail"), s.id);
+                  }}
                   {...(s.presentation ? { "data-pane-launcher": s.id } : {})}
                   onClick={() => setRailPlugin(s.id)}
                 >
@@ -661,9 +594,6 @@ export default function ContextRail() {
                   <Badge n={badgeOf(s)} />
                 </button>
               ))}
-              <span className="strip-spacer" />
-              {railEditor}
-              {moreToolsPicker}
             </div>
           )}
           {kept.map((s) => {
@@ -694,6 +624,13 @@ export default function ContextRail() {
               title={s.title}
               aria-label={s.title}
               aria-pressed={rail === s.id}
+              draggable
+              onDragStart={(event) => event.dataTransfer.setData("text/polyth-rail", s.id)}
+              onDragOver={(event) => event.preventDefault()}
+              onDrop={(event) => {
+                event.preventDefault();
+                reorderRail(event.dataTransfer.getData("text/polyth-rail"), s.id);
+              }}
               {...(s.presentation ? { "data-pane-launcher": s.id } : {})}
               onClick={() => toggleRailPlugin(s.id)}
             >
@@ -701,9 +638,6 @@ export default function ContextRail() {
               <Badge n={badgeOf(s)} />
             </button>
             ))}
-            <span className="strip-spacer" />
-            {railEditor}
-            {moreToolsPicker}
           </div>
         )}
       </aside>

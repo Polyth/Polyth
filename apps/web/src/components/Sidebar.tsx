@@ -55,6 +55,7 @@ export default function Sidebar() {
   const [selectedSessionIds, setSelectedSessionIds] = useState<ReadonlySet<string>>(new Set());
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState<"recent" | "name">("recent");
+  const [sortOpen, setSortOpen] = useState(false);
   const [attentionOnly, setAttentionOnly] = useState(false);
   const syncStatus = useSyncExternalStore(subscribeSyncStatus, getSyncStatus, () => "disconnected");
   const host = typeof location === "undefined" ? "Local server" : location.host;
@@ -250,7 +251,7 @@ export default function Sidebar() {
         )}
         {!collapsed && (<>
         <div className="sidebar-head">
-          <h2 className="sidebar-title">Sessions</h2>
+          <h2 className="sr-only">Projects and sessions</h2>
           <button
             className={`icon-btn sidebar-select-toggle${selectMode ? " active" : ""}`}
             title={selectMode ? "Cancel session selection" : "Select sessions"}
@@ -278,15 +279,25 @@ export default function Sidebar() {
           >
             <Icon.plus /> Add project
           </button>
-          <label className="sidebar-sort">
-            <Icon.filter />
-            <span className="sr-only">Sort projects</span>
-            <select value={sort} onChange={(event) => setSort(event.target.value as "recent" | "name")}>
-              <option value="recent">Sort: Recent</option>
-              <option value="name">Sort: Name</option>
-            </select>
-            <Icon.chevronDown />
-          </label>
+          <div className="sidebar-sort">
+            <button
+              aria-label={`Sort projects, currently ${sort}`}
+              title="Sort projects"
+              aria-haspopup="menu"
+              aria-expanded={sortOpen}
+              onClick={() => setSortOpen((open) => !open)}
+            ><Icon.sort /></button>
+            {sortOpen && (
+              <div className="sidebar-sort-menu" role="menu">
+                <button role="menuitemradio" aria-checked={sort === "recent"} onClick={() => { setSort("recent"); setSortOpen(false); }}>
+                  Recent activity {sort === "recent" ? "✓" : ""}
+                </button>
+                <button role="menuitemradio" aria-checked={sort === "name"} onClick={() => { setSort("name"); setSortOpen(false); }}>
+                  Project name {sort === "name" ? "✓" : ""}
+                </button>
+              </div>
+            )}
+          </div>
         </div>
         <div className="sidebar-search">
           <Icon.search />
@@ -330,9 +341,6 @@ export default function Sidebar() {
             <div className="empty side-projects-status" role="status">No matching sessions.</div>
           )}
           {visibleProjects.map((p) => {
-            const projectSessionCount = sessions.filter(
-              (session) => session.projectId === p.id && session.status !== "archived",
-            ).length;
             const projectQuery = query.trim()
               && `${p.name} ${p.path}`.toLowerCase().includes(query.trim().toLowerCase())
               ? ""
@@ -352,17 +360,10 @@ export default function Sidebar() {
               </div>
             ) : (
               <div className="project-card-shell">
-                {viewMode === "tree" && (
-                  <button
-                    className={`project-tree-chevron${expandedTrees.has(p.id) ? " open" : ""}`}
-                    aria-expanded={expandedTrees.has(p.id)}
-                    aria-label={`${expandedTrees.has(p.id) ? "Collapse" : "Expand"} sessions for ${p.name || p.path}`}
-                    onClick={() => toggleTree(p.id)}
-                  >{expandedTrees.has(p.id) ? "▾" : "▸"}</button>
-                )}
                 <button
                   className={`project-card ${p.id === activeProjectId ? "active" : ""}`}
                   aria-current={p.id === activeProjectId ? "true" : undefined}
+                  aria-expanded={viewMode === "tree" ? expandedTrees.has(p.id) : undefined}
                   onClick={() => {
                     if (p.id !== activeProjectId) activateProject(p.id);
                     if (viewMode === "tree") toggleTree(p.id);
@@ -371,17 +372,12 @@ export default function Sidebar() {
                   onDoubleClick={() => { setRenamingProject(p.id); setProjectName(p.name); }}
                 >
                   <span className="project-glyph" style={p.color ? { color: p.color } : undefined}>
-                    <Icon.files />
+                    {p.icon ? <span aria-hidden="true">{p.icon}</span> : <Icon.files />}
                   </span>
                   <span className="project-meta">
-                    <span className="project-name" title={p.path}>{p.icon ? `${p.icon} ` : ""}{p.name || p.path}</span>
+                    <span className="project-name" title={p.path}>{p.name || p.path}</span>
                     <span className="project-path">{p.path}</span>
                   </span>
-                  {projectSessionCount > 0 && (
-                    <span className="project-count" aria-label={`${projectSessionCount} active sessions`}>
-                      <i aria-hidden="true" />{projectSessionCount}
-                    </span>
-                  )}
                 </button>
                 <button
                   className="project-menu-btn"
@@ -480,35 +476,37 @@ export default function Sidebar() {
             context={{ projectId: activeProjectId, sessionId: activeSessionId, expanded }}
           />
         </div>
-        <div className="side-foot">
-          <button
-            className="sidebar-layout-btn"
-            title={viewMode === "tree" ? "Switch to project list" : "Show project and session hierarchy"}
-            aria-label="Toggle project tree view"
-            aria-pressed={viewMode === "tree"}
-            onClick={() => setSidebarViewMode(viewMode === "tree" ? "list" : "tree")}
-          >
-            {viewMode === "tree" ? <Icon.hierarchy /> : <Icon.list />}
-          </button>
-          <div className="sidebar-connection" aria-label={`${host}, ${syncStatus}`}>
-            <strong>{host}</strong>
-            <span className={syncStatus}><i aria-hidden="true" />{
-              syncStatus === "connected" ? "Connected" : syncStatus === "connecting" ? "Connecting" : "Reconnecting"
-            }</span>
+        {compact && (
+          <div className="side-foot">
+            <button
+              className="sidebar-layout-btn"
+              title={viewMode === "tree" ? "Switch to project list" : "Show project and session hierarchy"}
+              aria-label="Toggle project tree view"
+              aria-pressed={viewMode === "tree"}
+              onClick={() => setSidebarViewMode(viewMode === "tree" ? "list" : "tree")}
+            >
+              {viewMode === "tree" ? <Icon.hierarchy /> : <Icon.list />}
+            </button>
+            <div className="sidebar-connection" aria-label={`${host}, ${syncStatus}`}>
+              <strong>{host}</strong>
+              <span className={syncStatus}><i aria-hidden="true" />{
+                syncStatus === "connected" ? "Connected" : syncStatus === "connecting" ? "Connecting" : "Reconnecting"
+              }</span>
+            </div>
+            <button
+              className="sidebar-switch-btn"
+              title="Refresh sessions"
+              aria-label="Refresh sessions"
+              disabled={!activeProjectId}
+              onClick={() => { if (activeProjectId) void refreshSessions(activeProjectId); }}
+            >
+              <Icon.shuffle />
+            </button>
+            <button className="settings-btn" aria-label="Settings" title={`Settings (${MOD} ,)`} onClick={() => setOverlay("settings")}>
+              <Icon.gear />
+            </button>
           </div>
-          <button
-            className="sidebar-switch-btn"
-            title="Refresh sessions"
-            aria-label="Refresh sessions"
-            disabled={!activeProjectId}
-            onClick={() => { if (activeProjectId) void refreshSessions(activeProjectId); }}
-          >
-            <Icon.shuffle />
-          </button>
-          <button className="settings-btn" aria-label="Settings" title={`Settings (${MOD} ,)`} onClick={() => setOverlay("settings")}>
-            <Icon.gear />
-          </button>
-        </div>
+        )}
         </>)}
         {!compact && !collapsed && (
           <div

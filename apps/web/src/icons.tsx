@@ -45,6 +45,7 @@ export const Icon = {
   list: () => <svg {...s}><path d="M8 6h13M8 12h13M8 18h13"/><path d="M3 6h.01M3 12h.01M3 18h.01"/></svg>,
   hierarchy: () => <svg {...s}><path d="M6 3v12M6 7h8M6 15h8"/><rect x="14" y="4.5" width="7" height="5" rx="1"/><rect x="14" y="12.5" width="7" height="5" rx="1"/></svg>,
   filter: () => <svg {...s}><path d="M4 5h16l-6.5 7.2V19l-3 1.5v-8.3Z"/></svg>,
+  sort: () => <svg {...s}><path d="M4 7h11M4 12h8M4 17h5"/><path d="m17 14 3 3 3-3M20 17V5"/></svg>,
   target: () => <svg {...s}><circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="4.25"/><circle cx="12" cy="12" r="1" fill="currentColor" stroke="none"/><path d="m15 9 6-6M17.5 3H21v3.5M9 15l-4.5 4.5M12 1.5V5M22.5 12H19"/></svg>,
   sync: () => <svg {...s}><path d="M20 7h-5V2"/><path d="M4 17h5v5"/><path d="M5.1 9A8 8 0 0 1 18.4 5.6L20 7M4 17l1.6 1.4A8 8 0 0 0 18.9 15"/></svg>,
   shuffle: () => <svg {...s}><path d="M3 6h2.5c5 0 7 12 12 12H21"/><path d="m18 15 3 3-3 3"/><path d="M3 18h2.5c2.1 0 3.7-2.1 5.2-4.6"/><path d="M13.2 8.9C14.5 7.2 15.9 6 17.5 6H21"/><path d="m18 3 3 3-3 3"/></svg>,
@@ -69,4 +70,8 @@ export const Icon = {
   regenerate: () => <svg {...s}><path d="M20 7v5h-5"/><path d="M19.2 12A7.3 7.3 0 1 0 17 17.2"/></svg>,
   fileEdit: () => <svg {...s}><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h9"/><path d="M14 3v5h5"/><path d="m13 18 6.8-6.8a1.7 1.7 0 0 1 2.4 2.4L15.4 20.4 12 21Z"/></svg>,
   text: () => <svg {...s}><path d="M5 5h14M12 5v14M8.5 19h7"/></svg>,
+  download: () => <svg {...s}><path d="M12 3v12M7 10l5 5 5-5"/><path d="M4 20h16"/></svg>,
+  plan: () => <svg {...s}><rect x="4" y="3" width="16" height="18" rx="2"/><path d="m8 8 1.5 1.5L12 7M14 9h3M8 14h9M8 17h6"/></svg>,
+  newSession: () => <svg {...s}><path d="M4 5h11a3 3 0 0 1 3 3v8H9l-5 4V5Z"/><path d="M19 2v6M16 5h6"/></svg>,
+  multirun: () => <svg {...s}><path d="M4 5h5M4 12h5M4 19h5M15 5h5M15 12h5M15 19h5"/><path d="M9 5c4 0 2 7 6 7M9 19c4 0 2-7 6-7"/></svg>,
 };

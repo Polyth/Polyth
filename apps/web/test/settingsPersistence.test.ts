@@ -49,3 +49,15 @@ test("saving either settings domain preserves the other domain byte-for-byte", (
   assert.equal(ui.getUiSettings().chatWidth, "normal");
   assert.equal(stored.get("polyth.settings")?.includes("Legacy name"), true, "migration source remains read-only");
 });
+
+test("header metric and response action layouts preserve order and reject unknown ids", () => {
+  const parsed = ui.parseUiSettings(JSON.stringify({
+    headerMetrics: ["cost", "tokens", "bogus", "cost"],
+    responseActions: ["pin", "copy", "unknown"],
+  }));
+  assert.deepEqual(parsed.headerMetrics, ["cost", "tokens"]);
+  assert.deepEqual(parsed.responseActions, ["pin", "copy"]);
+  const defaults = ui.parseUiSettings(null);
+  assert.deepEqual(defaults.headerMetrics, [...ui.HEADER_METRIC_IDS]);
+  assert.deepEqual(defaults.responseActions, [...ui.RESPONSE_ACTION_IDS]);
+});

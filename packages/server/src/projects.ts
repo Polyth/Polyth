@@ -3,7 +3,7 @@ import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
 import { existsSync } from "node:fs";
 import { basename, dirname, resolve } from "node:path";
 import { randomUUID } from "node:crypto";
-import type { Project, ProjectPatch, ProjectService } from "@polyth/contracts";
+import type { Project, ProjectPatch, ProjectRemote, ProjectService } from "@polyth/contracts";
 
 export function createProjectService(dataDir: string): ProjectService {
   const file = `${dataDir}/projects.json`;
@@ -39,6 +39,28 @@ export function createProjectService(dataDir: string): ProjectService {
     async remove(id) {
       items = items.filter((p) => p.id !== id);
       persist();
+    },
+
+    // Remote-bound project: `path` lives on the machine behind `remote`, so
+    // the local existence check does not apply. Callers (the SSH routes)
+    // validate the path on the remote host before registering.
+    async addRemote(path, remote: ProjectRemote, name?: string): Promise<Project> {
+      if (!path.startsWith("/")) {
+        throw Object.assign(new Error("remote path must be absolute"), { code: "invalid-input" });
+      }
+      const existing = items.find((p) =>
+        p.path === path && p.remote?.connectionId === remote.connectionId);
+      if (existing) return existing;
+      const project: Project = {
+        id: randomUUID(),
+        path,
+        name: name || basename(path) || path,
+        createdAt: Date.now(),
+        remote: { kind: remote.kind, connectionId: remote.connectionId },
+      };
+      items.push(project);
+      persist();
+      return project;
     },
 
     async update(id, patch: ProjectPatch): Promise<Project> {

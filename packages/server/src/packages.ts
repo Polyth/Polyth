@@ -41,6 +41,7 @@ export const BUILTIN_PACKAGES = [
   { id: "dictation", name: "Voice & Dictation", description: "Speech-to-text dictation and spoken replies.", core: false, enabled: true, settingsGroup: "Workspace", icon: "🎤", hasSettings: true },
   { id: "home-assistant", name: "Home Assistant", description: "Home Assistant entities and controls.", core: false, enabled: false, settingsGroup: "Customize", icon: "🏠", hasSettings: true },
   { id: "secure-safe", name: "Secure Safe", description: "Write-only credential handles and secret policy.", core: false, enabled: true, settingsGroup: "Engineering", icon: "🔒", hasSettings: true },
+  { id: "ssh", name: "SSH Remotes", description: "SSH connections and remote projects whose agent runs on the host.", core: false, enabled: true, settingsGroup: "Engineering", icon: "🖧", hasSettings: true },
   { id: "mcp", name: "MCP", description: "Model Context Protocol server configuration.", core: false, enabled: true, settingsGroup: "Engineering", icon: "🔌", hasSettings: true },
   { id: "commands", name: "Commands", description: "Reusable project command definitions.", core: false, enabled: true, settingsGroup: "Engineering", icon: "/", hasSettings: true },
   { id: "plugins", name: "Plugins", description: "Managed plugin installation and configuration.", core: false, enabled: true, settingsGroup: "Customize", icon: "🧩", hasSettings: true },

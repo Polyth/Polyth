@@ -4,16 +4,19 @@
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 import type { SessionProjection, WorkspaceLabel } from "@polyth/contracts";
 import { api, type Worktree } from "../../api.ts";
-import { getState, setSidebarOpen, setUiError, useStore } from "../../store.ts";
+import {
+  getState, openWorktreeSessionDialog, setSidebarOpen, setUiError, startNewSession, useStore,
+} from "../../store.ts";
 import { openSession, archiveSession, deleteSession, restoreSession, forkSession, refreshSessions } from "../../init.ts";
 import { sessionStatusBadge } from "../../sessionBadges.ts";
-import { ago, deriveSessionTitle, fmtDuration, fullSessionTitle } from "../../format.ts";
+import { deriveSessionTitle, fmtDuration, fullSessionTitle } from "../../format.ts";
 import { friendlyError } from "../../settings.ts";
 import { getUiSettings } from "../../uiPrefs.ts";
 import { firstUserText } from "../../utils.ts";
 import { announce } from "../a11y/live.tsx";
 import { worktreeLabel } from "../../worktreeSessions.ts";
 import SlotHost from "../slots/SlotHost.ts";
+import Dialog from "../a11y/Dialog.tsx";
 import {
   reorderPinnedSessions,
   sortPinnedSessions,
@@ -22,17 +25,24 @@ import { Icon } from "../../icons.tsx";
 
 const INITIAL_VISIBLE_SESSIONS = 6;
 
-const STATUS_DOT: Record<string, string> = {
-  working: "working", waiting: "waiting", idle: "idle",
-  finished: "finished", failed: "failed", archived: "archived",
-};
-
-function activityTime(updatedAt: number, relative: boolean): string {
-  if (relative) {
-    const value = ago(updatedAt);
-    return value === "0s" ? "now" : value;
+export function sessionActivityLabel(
+  s: Pick<SessionProjection, "updatedAt" | "status" | "attention">,
+  relative: boolean,
+  now = Date.now(),
+): string {
+  if (!relative) {
+    return new Date(s.updatedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   }
-  return new Date(updatedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  const age = Math.max(0, now - s.updatedAt);
+  const read = (s.attention?.unread ?? 0) === 0;
+  const stale = age >= 24 * 60 * 60_000;
+  if (read && stale && s.status !== "working" && s.status !== "waiting") return "";
+  if (age < 60_000) return "now";
+  if (age < 60 * 60_000) return `${Math.floor(age / 60_000)} min`;
+  if (age < 24 * 60 * 60_000) return `${Math.floor(age / 3_600_000)} hr`;
+  if (age < 48 * 60 * 60_000) return "Yesterday";
+  if (age < 7 * 24 * 60 * 60_000) return `${Math.floor(age / 86_400_000)} days`;
+  return new Date(s.updatedAt).toLocaleDateString([], { month: "short", day: "numeric" });
 }
 
 function AttentionBadges({ s }: { s: SessionProjection }) {
@@ -317,9 +327,6 @@ function SessionRow({
           onClick={() => onOpen(s.id)}
           onDoubleClick={() => { setTitle(s.title); setRenaming(true); }}
         >
-          <span className={`session-sync-icon ${STATUS_DOT[s.status] ?? "idle"}`} aria-hidden="true">
-            <Icon.sync />
-          </span>
           <span className="session-body">
             <span className="session-title-line">
               <span className="session-title">{displayTitle}</span>
@@ -344,7 +351,9 @@ function SessionRow({
               {s.worktreeState === "missing" ? "worktree missing" : s.status === "working" ? "Agent working" : s.status}
             </span>
           </span>
-          <span className="session-time">{activityTime(s.updatedAt, relativeTime)}</span>
+          {sessionActivityLabel(s, relativeTime) && (
+            <span className="session-time">{sessionActivityLabel(s, relativeTime)}</span>
+          )}
         </button>
       )}
       <span className="session-quick">
@@ -450,6 +459,9 @@ export default function SessionList({
   const [showArchived, setShowArchived] = useState(expandArchived);
   const [draggedPin, setDraggedPin] = useState<string | null>(null);
   const [visibleCount, setVisibleCount] = useState(INITIAL_VISIBLE_SESSIONS);
+  const [removeTarget, setRemoveTarget] = useState<Worktree | null>(null);
+  const [deleteBranch, setDeleteBranch] = useState(false);
+  const [removeBusy, setRemoveBusy] = useState(false);
 
   useEffect(() => {
     setShowArchived(expandArchived);
@@ -498,10 +510,12 @@ export default function SessionList({
   const pinned = sortPinnedSessions(active);
   const pinRank = new Map(pinned.map((session, index) => [session.id, index]));
   const mainWorktree = worktrees.find((worktree) => worktree.isMain);
+  const worktreeKey = (session: SessionProjection): string =>
+    !session.worktreePath || session.worktreePath === mainWorktree?.path ? "__main__" : session.worktreePath;
 
   const byWorktree = new Map<string, SessionProjection[]>();
   for (const s of active) {
-    const key = !s.worktreePath || s.worktreePath === mainWorktree?.path ? "__main__" : s.worktreePath;
+    const key = worktreeKey(s);
     byWorktree.set(key, [...(byWorktree.get(key) ?? []), s]);
   }
   for (const grouped of byWorktree.values()) {
@@ -522,11 +536,13 @@ export default function SessionList({
       key: "__main__",
       label: mainWorktree?.branch || "Main worktree",
       sessions: byWorktree.get("__main__") ?? [],
+      worktree: mainWorktree ?? null,
     },
     ...worktrees.filter((worktree) => !worktree.isMain).map((worktree) => ({
       key: worktree.path,
       label: worktree.branch || worktreeLabel(null, worktree.path),
       sessions: byWorktree.get(worktree.path) ?? [],
+      worktree,
     })),
     ...[...byWorktree.entries()]
       .filter(([path]) => path !== "__main__" && !knownWorktreePaths.has(path))
@@ -534,6 +550,7 @@ export default function SessionList({
         key: path,
         label: worktreeLabel(grouped[0]?.branch ?? null, path),
         sessions: grouped,
+        worktree: null,
       })),
   ];
 
@@ -594,24 +611,48 @@ export default function SessionList({
     <div className="session-org">
       {worktreeGroups.map((group) => {
         const isCollapsed = collapsed.has(group.key);
+        const isEmptyWorktree = !projectSessions.some((session) => worktreeKey(session) === group.key);
         return (
           <div key={group.key} className="session-worktree-group" data-worktree={group.key}>
-            <button
-              className="session-worktree-toggle"
-              aria-expanded={!isCollapsed}
-              aria-label={`${isCollapsed ? "Expand" : "Collapse"} ${group.label} worktree`}
-              onClick={() => setCollapsed((prev) => {
-                const next = new Set(prev);
-                if (next.has(group.key)) next.delete(group.key);
-                else next.add(group.key);
-                return next;
-              })}
-            >
-              <span className="session-worktree-chevron" aria-hidden="true">{isCollapsed ? "▸" : "▾"}</span>
-              <Icon.branch />
-              <span className="session-worktree-name">{group.label}</span>
-              <span className="muted">{group.sessions.length}</span>
-            </button>
+            <div className="session-worktree-head">
+              <button
+                className="session-worktree-toggle"
+                aria-expanded={!isCollapsed}
+                aria-label={`${isCollapsed ? "Expand" : "Collapse"} ${group.label} worktree`}
+                onClick={() => setCollapsed((prev) => {
+                  const next = new Set(prev);
+                  if (next.has(group.key)) next.delete(group.key);
+                  else next.add(group.key);
+                  return next;
+                })}
+              >
+                <span className="session-worktree-chevron" aria-hidden="true">{isCollapsed ? "▸" : "▾"}</span>
+                <Icon.branch />
+                <span className="session-worktree-name">{group.label}</span>
+              </button>
+              {isEmptyWorktree && (
+                <span className="session-worktree-empty-actions">
+                  <button
+                    title={`New session in ${group.label}`}
+                    aria-label={`New session in ${group.label}`}
+                    onClick={() => group.key === "__main__"
+                      ? startNewSession(projectId)
+                      : openWorktreeSessionDialog(projectId, group.key)}
+                  ><Icon.plus /></button>
+                  {group.worktree && !group.worktree.isMain && (
+                    <button
+                      className="danger"
+                      title={`Delete ${group.label} worktree`}
+                      aria-label={`Delete ${group.label} worktree`}
+                      onClick={() => {
+                        setDeleteBranch(false);
+                        setRemoveTarget(group.worktree);
+                      }}
+                    ><Icon.trash /></button>
+                  )}
+                </span>
+              )}
+            </div>
             {!isCollapsed && (
               <div className="session-worktree-sessions">
                 {group.sessions.map((session) => row(session, session.pinned !== undefined))}
@@ -640,6 +681,36 @@ export default function SessionList({
           </button>
           {showArchived && archived.map((session) => row(session))}
         </div>
+      )}
+      {removeTarget && (
+        <Dialog title={`Delete ${worktreeLabel(removeTarget.branch, removeTarget.path)} worktree`} onClose={() => { if (!removeBusy) setRemoveTarget(null); }}>
+          <div className="dialog-head">
+            <div><h2>Delete empty worktree?</h2><p className="muted">{removeTarget.path}</p></div>
+            <button className="icon-btn" aria-label="Close" disabled={removeBusy} onClick={() => setRemoveTarget(null)}>×</button>
+          </div>
+          <div className="worktree-remove-options">
+            <label><input type="checkbox" checked readOnly /> Delete the local worktree checkout</label>
+            <label>
+              <input type="checkbox" checked={deleteBranch} onChange={(event) => setDeleteBranch(event.target.checked)} />
+              Also delete its dedicated branch{removeTarget.branch ? ` (${removeTarget.branch})` : ""}
+            </label>
+          </div>
+          <div className="dialog-foot">
+            <button className="small-btn" disabled={removeBusy} onClick={() => setRemoveTarget(null)}>Cancel</button>
+            <span className="header-spacer" />
+            <button
+              className="primary-btn danger-btn"
+              disabled={removeBusy}
+              onClick={() => {
+                setRemoveBusy(true);
+                void api.removeWorktree(projectId, removeTarget.path, deleteBranch)
+                  .then(() => { setRemoveTarget(null); reloadOrg(); })
+                  .catch((error) => setUiError(friendlyError("Couldn’t remove the worktree", error)))
+                  .finally(() => setRemoveBusy(false));
+              }}
+            >{removeBusy ? "Deleting…" : "Delete worktree"}</button>
+          </div>
+        </Dialog>
       )}
     </div>
   );

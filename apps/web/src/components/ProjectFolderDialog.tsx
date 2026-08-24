@@ -12,6 +12,7 @@
 // never BODY.
 import { useCallback, useEffect, useRef, useState } from "react";
 import Dialog from "./a11y/Dialog.tsx";
+import SlotHost from "./slots/SlotHost.ts";
 import { announce } from "./a11y/live.tsx";
 import { api, type BrowseEntryDto } from "../api.ts";
 import { addProject } from "../init.ts";
@@ -181,6 +182,17 @@ export default function ProjectFolderDialog({
     }
   };
 
+  /** Success completion for alternative project sources contributed through
+   *  the `project.create.options` slot (e.g. SSH remotes): the source already
+   *  created and activated the project, so the picker closes with success
+   *  semantics and hands focus forward exactly like a local open. */
+  const completeExternally = () => {
+    outcomeRef.current = "success";
+    onOpened?.(getState().projectRegistry.projects.find((p) => p.id === getState().activeProjectId)?.path ?? "");
+    onClose();
+    focusAfterActivation();
+  };
+
   const createFolder = async () => {
     const name = newName.trim();
     if (!name || busy) return;
@@ -348,6 +360,10 @@ export default function ProjectFolderDialog({
         {error && <div ref={errorRef} tabIndex={-1} className="form-error folder-error" role="alert">{error}</div>}
 
         <div className="folder-foot">
+          <SlotHost
+            slot="project.create.options"
+            context={{ busy, onProjectOpened: completeExternally }}
+          />
           {creating ? (
             <span className="folder-newname">
               <input

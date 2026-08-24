@@ -103,6 +103,12 @@ export type {
   OpenCodeBrowserToolConfig,
 } from "./browserTool.ts";
 
+export {
+  createRemoteOpenCodeRuntime,
+  probeRemoteOpenCode,
+} from "./remote.ts";
+export type { RemoteOpenCodeOptions, RemoteOpenCodeProbe } from "./remote.ts";
+
 const CAPABILITIES: RuntimeCapabilities = {
   streaming: true,
   permissions: true,
@@ -114,7 +120,7 @@ const CAPABILITIES: RuntimeCapabilities = {
   steering: true,
 };
 
-const LISTEN_RE = /opencode server listening on https?:\/\/[^\s:]+:(\d+)/i;
+export const LISTEN_RE = /opencode server listening on https?:\/\/[^\s:]+:(\d+)/i;
 
 type Listener = (sessionId: string, ev: RuntimeEvent) => void;
 
@@ -282,7 +288,7 @@ export const flattenModels = (body: ProviderList): ModelDescriptor[] => {
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-const waitReady = async (client: OpenCodeClient, timeoutMs: number): Promise<void> => {
+export const waitReady = async (client: OpenCodeClient, timeoutMs: number): Promise<void> => {
   const start = Date.now();
   let last = "";
   while (Date.now() - start < timeoutMs) {
