@@ -71,9 +71,11 @@ export function registerSidebarGrouping(desc: GroupingDescriptor): () => void {
  *  command as the header, rail, compact Tools, Settings, and shortcuts.
  *  Search matches plain and technical terms; shortcuts never check a preset. */
 function capabilityCommand(d: CapabilityDescriptor): () => void {
+  const terminal = d.id === "terminal";
   return registerCommand({
     id: `capability.${d.id}`,
-    label: d.label,
+    label: terminal ? "Open Terminal" : d.label,
+    ...(terminal ? { hint: hintOf("viewTerminal") } : {}),
     group: "Workspace",
     keywords: [
       ...(d.technicalLabel ? [d.technicalLabel] : []),

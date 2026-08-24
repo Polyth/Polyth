@@ -16,6 +16,7 @@ import {
   useEffect, useLayoutEffect, useRef, useState,
   type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent,
 } from "react";
+import { formatCombo } from "@polyth/hotkeys";
 import SlotHost, { useSlotVersion } from "./slots/SlotHost.ts";
 import {
   closeWorkspacePane, collapseWorkspacePane, expandWorkspacePane, setPaneFullscreen,
@@ -38,6 +39,8 @@ import { chatDockViability, dockGuardTargets } from "../workspace/dockGuard.ts";
 import { PaneVisibilityContext } from "../workspace/paneVisibility.ts";
 import "./railSurfaces.tsx";
 import { setPlacementOverride } from "../capabilityLayout.ts";
+import { MOD } from "../format.ts";
+import { useKeymap } from "../hotkeys.ts";
 
 const NO_EVENTS: never[] = [];
 /** Fallback separator chrome before the real element is measured. */
@@ -185,6 +188,8 @@ export default function ContextRail() {
   const paneExpanded = useStore((s) => s.paneExpanded);
   const view = useStore((s) => s.activeView);
   const resolved = useResolvedCapabilities();
+  const keymap = useKeymap();
+  const terminalShortcut = formatCombo(keymap.viewTerminal, MOD === "⌘");
   const presentation = open?.presentation;
   const badgeOf = (surface: RailSurface): number => surface.badge?.(ctx) ?? 0;
   const surfaceByCapability = new Map(surfaces.map((surface) => [surface.capabilityId ?? surface.id, surface]));
@@ -200,7 +205,9 @@ export default function ContextRail() {
   const buttonForSurface = (surface: RailSurface): RailButton => ({
     id: surface.capabilityId ?? surface.id,
     capabilityId: surface.capabilityId ?? surface.id,
-    title: surface.title,
+    title: surface.id === "terminal"
+      ? `Open Terminal (${terminalShortcut})`
+      : surface.title,
     icon: surface.icon,
     badge: badgeOf(surface),
     presentation: surface.presentation,

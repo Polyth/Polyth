@@ -9,8 +9,11 @@ register("./tsxHooks.mjs", import.meta.url);
 
 const { defineWidgetPlugin, listWidgets, registerWidgetPlugin } = await import("../src/widgets/catalog.ts");
 const { BUILTIN_WIDGET_PLUGINS } = await import("../src/widgets/builtinWidgets.tsx");
+const { installBuiltinMiniWidgets } = await import("../src/widgets/builtinMiniWidgets.tsx");
 const { installUsagePlugin, USAGE_WIDGET_PLUGIN } = await import("../src/widgets/usagePlugin.tsx");
 const { installGithubPlugin, GITHUB_WIDGET_PLUGIN } = await import("../src/widgets/githubPlugin.tsx");
+
+installBuiltinMiniWidgets();
 
 test("built-in catalog covers the complete default canvas", () => {
   const widgets = listWidgets();
@@ -43,6 +46,15 @@ test("feature-owned Git and Terminal widgets contribute through the catalog slot
     assert.equal(contributions.get(id)?.meta?.pluginId, pluginId);
     assert.equal(listWidgets().find((widget) => widget.id === id)?.pluginId, pluginId);
   }
+});
+
+test("Terminal contributes a default top-toolbar launcher through the widget registry", () => {
+  const action = listWidgets().find((widget) => widget.id === "terminal.open-action");
+  assert.equal(action?.pluginId, "terminal");
+  assert.equal(action?.title, "Open Terminal");
+  assert.equal(action?.defaultSlot, "app.header.actions");
+  assert.equal(action?.defaultVisible, true);
+  assert.equal(action?.kind, "mini-widget");
 });
 
 test("Usage plugin owns all package-declared usage widgets", () => {

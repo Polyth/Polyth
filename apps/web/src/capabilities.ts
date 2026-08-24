@@ -40,10 +40,10 @@ export interface CapabilityMeta {
 }
 
 /** The standard arrangement: primary = Chat; Project files; Preview;
- *  Goals & progress. Everything else lives in More tools or Technical
- *  options — placed, never filtered out. Old searchable names (Git,
- *  Multi-Run, Fusion, plugin, …) stay as keywords so existing users are
- *  not stranded. */
+ *  Goals & progress. Frequently used tools live in More, while advanced
+ *  configuration stays under Technical options — placed, never filtered out.
+ *  Old searchable names (Git, Multi-Run, Fusion, plugin, …) stay as keywords
+ *  so existing users are not stranded. */
 export const BUILTIN_CAPABILITY_META: CapabilityMeta[] = [
   { id: "session", label: "Chat", plainDescription: "Talk with Polyth about your project.", keywords: ["session", "conversation", "chat"], standardTier: "primary", standardRank: 0 },
   { id: "files", label: "Project files", plainDescription: "Browse and edit the files in your project.", keywords: ["files", "editor", "tree", "quick open"], standardTier: "primary", standardRank: 1 },
@@ -60,7 +60,7 @@ export const BUILTIN_CAPABILITY_META: CapabilityMeta[] = [
   { id: "context", label: "Context", plainDescription: "What Polyth is currently looking at.", keywords: ["context", "pinned", "session status"], standardTier: "more", standardRank: 18 },
   { id: "voice", label: "Voice input", technicalLabel: "Dictation", plainDescription: "Talk instead of typing.", keywords: ["voice", "dictation", "microphone", "speech"], standardTier: "more", standardRank: 19 },
   { id: "git", label: "Source control", technicalLabel: "Git", plainDescription: "Review and manage changes to the code.", keywords: ["git", "worktrees", "branch", "diff", "changes"], standardTier: "technical", standardRank: 30 },
-  { id: "terminal", label: "Terminal", plainDescription: "Run commands in the project workspace.", keywords: ["terminal", "shell", "console"], standardTier: "technical", standardRank: 31 },
+  { id: "terminal", label: "Terminal", plainDescription: "Run commands in the project workspace.", keywords: ["terminal", "shell", "console"], standardTier: "more", standardRank: 20 },
   { id: "models-agents", label: "Models & agents", plainDescription: "Choose which model and agent Polyth uses.", keywords: ["model", "agent", "profile", "provider"], standardTier: "technical", standardRank: 32 },
   { id: "events", label: "Event log", plainDescription: "The raw record of everything in a session.", keywords: ["events", "log", "debug"], standardTier: "technical", standardRank: 33 },
   { id: "diagnostics", label: "Extension diagnostics", technicalLabel: "Plugins", plainDescription: "Inspect installed extensions and their logs.", keywords: ["plugin", "extension", "install", "logs"], standardTier: "technical", standardRank: 34 },

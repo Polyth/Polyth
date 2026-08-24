@@ -81,6 +81,12 @@ test("technical capabilities group under Technical options", () => {
   }
 });
 
+test("Terminal is a default right-rail tool even though its disclosure group stays technical", () => {
+  const terminal = BUILTIN_CAPABILITY_META.find((capability) => capability.id === "terminal");
+  assert.equal(terminal?.standardTier, "more");
+  assert.equal(capabilityGroup("terminal"), TECHNICAL_GROUP_LABEL);
+});
+
 // ---- registry semantics ------------------------------------------------------
 
 test("register/replace/dispose: replace by id, dispose by identity, listeners fire", async () => {
