@@ -45,9 +45,9 @@ test("header and composer controls are configurable and purpose-specific", async
     source("../src/components/settings/WidgetsPage.tsx"),
     source("../src/components/ChatMetrics.tsx"),
   ]);
-  assert.match(header, /const rest = primaries\.filter\(\(c\) => !visibleIds\.has\(c\.descriptor\.id\)\)/);
-  assert.match(header, /rest\.length > 0/);
-  assert.doesNotMatch(header, /const rest = resolved\.filter/);
+  assert.match(header, /const primaries = resolved\.filter\(\(c\) => c\.tier === "primary" && c\.descriptor\.available\(\)\)/);
+  assert.match(header, /\{primaries\.map\(\(c\) => \{/);
+  assert.doesNotMatch(header, /const rest = /);
   assert.doesNotMatch(composer, /Modalities:/);
   assert.match(composer, /aria-label="Add files"/);
   assert.doesNotMatch(widgets, /Session header stats|Response hover actions|Technical menu/);

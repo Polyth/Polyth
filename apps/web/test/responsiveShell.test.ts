@@ -313,17 +313,16 @@ test("timeline empty states defer starters to the hero", async () => {
   assert.ok(timeline.includes("This archived session has no messages."), "archived sessions get read-only copy");
 });
 
-test("header owns the capability disclosure while the rail renders configured tools", async () => {
+test("header and rail render only their configured capability placements", async () => {
   const header = await read("../src/components/Header.tsx");
   const rail = await read("../src/components/ContextRail.tsx");
-  const menu = await read("../src/components/CapabilityMenu.tsx");
   const store = await read("../src/store.ts");
-  assert.ok(header.includes("<CapabilityMenu"), "header consumes the shared disclosure");
+  assert.ok(!header.includes("<CapabilityMenu"), "header does not invent an overflow placement");
+  assert.ok(header.includes("primaries.map"), "header renders configured primary tools directly");
+  assert.ok(header.includes("top rail never creates an implicit overflow menu"), "header documents placement ownership");
   assert.ok(!rail.includes("CapabilityMenu"), "rail dropped its duplicate More-tools picker");
   assert.ok(rail.includes("configuredRailSurfaces"), "rail renders only configured tool buttons");
   assert.ok(rail.includes("reorderRail"), "rail arranges surfaces by drag-reorder instead");
-  assert.ok(menu.includes('role="group"'), "disclosure uses grouped native buttons");
-  assert.ok(!menu.includes('role="menuitem"'), "disclosure does not claim unsupported menu arrow behavior");
   assert.ok(!store.includes("moreOpen:"), "dead global More-tools state stays removed");
   assert.ok(!store.includes("setMoreOpen"), "dead global More-tools action stays removed");
 });
