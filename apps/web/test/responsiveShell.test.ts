@@ -330,7 +330,10 @@ test("shared menu, destructive, failed-turn, and header-action contracts stay wi
   assert.ok(header.includes("useDismissibleMenu"), "the user menu consumes the shared menu contract");
   assert.ok(actions.includes('setOverlay("palette")'), "Search opens the command/action palette");
   assert.ok(actions.includes('setOverlay("search")'), "History opens session history search");
-  assert.ok(sessions.includes("confirmAlert("), "every permanent session deletion is guarded");
+  assert.ok(
+    sessions.includes("confirmAlert("),
+    "every permanent session deletion is guarded by the themed alert contract",
+  );
   assert.ok(plugins.includes('disabled={!sourceValid}'), "plugin install stays disabled until minimally valid");
   assert.match(css, /\.turn-error\s*\{[^}]*display:\s*flex[^}]*flex-wrap:\s*wrap[^}]*gap:\s*8px/);
 });
@@ -356,16 +359,23 @@ test("timeline empty states defer starters to the hero", async () => {
   assert.ok(timeline.includes("This archived session has no messages."), "archived sessions get read-only copy");
 });
 
-test("header and rail render configured capabilities without a duplicate disclosure", async () => {
+test("header renders configured primary capabilities and permanent Terminal launchers", async () => {
   const header = await read("../src/components/Header.tsx");
   const rail = await read("../src/components/ContextRail.tsx");
   const store = await read("../src/store.ts");
+  assert.ok(header.includes("function CapabilityNav"), "header owns the primary capability navigation");
   assert.ok(header.includes("useResolvedCapabilities"), "header resolves configured top-rail capabilities");
-  assert.ok(header.includes("<CapabilityNav />"), "wide chat renders the configured primary capability navigation");
-  assert.ok(header.includes("primaries.map"), "the top rail renders resolved primary capabilities directly");
-  assert.ok(!header.includes("CapabilityMenu"), "the header has no competing overflow disclosure");
-  assert.ok(!rail.includes("CapabilityMenu"), "rail dropped its duplicate More-tools picker");
+  assert.ok(header.includes("<CapabilityNav />"), "wide chat renders the primary capability navigation");
+  assert.ok(header.includes('c.tier === "primary"'), "header limits its capability rail to primary tools");
+  assert.ok(header.includes("topRail.map"), "header renders the resolved top capability rail");
+  assert.ok(
+    header.includes('c.descriptor.id === "terminal" && c.descriptor.available()'),
+    "Terminal remains a permanent top-rail launcher",
+  );
+  assert.ok(!header.includes("CapabilityMenu"), "header creates no implicit overflow disclosure");
+  assert.ok(!rail.includes("CapabilityMenu"), "rail creates no duplicate More-tools picker");
   assert.ok(rail.includes("configuredRailButtons"), "rail renders only configured tool buttons");
+  assert.ok(rail.includes('capability.descriptor.id === "terminal"'), "Terminal remains a guaranteed rail launcher");
   assert.ok(rail.includes("reorderRail"), "rail arranges surfaces by drag-reorder instead");
   assert.ok(!store.includes("moreOpen:"), "dead global More-tools state stays removed");
   assert.ok(!store.includes("setMoreOpen"), "dead global More-tools action stays removed");

@@ -62,6 +62,7 @@ export const Icon = {
   discard: () => <svg {...s}><path d="M3 6h18M8 6V4h8v2M19 6l-1 15H6L5 6M10 10v7M14 10v7"/></svg>,
   close: () => <svg {...s}><path d="m6 6 12 12M18 6 6 18"/></svg>,
   chevronDown: () => <svg {...s}><path d="m6 9 6 6 6-6"/></svg>,
+  chevronUp: () => <svg {...s}><path d="m6 15 6-6 6 6"/></svg>,
   chevronRight: () => <svg {...s}><path d="m9 6 6 6-6 6"/></svg>,
   back: () => <svg {...s}><path d="m15 18-6-6 6-6"/><path d="M9 12h10"/></svg>,
   commit: () => <svg {...s}><circle cx="12" cy="12" r="4"/><path d="M3 12h5M16 12h5"/></svg>,

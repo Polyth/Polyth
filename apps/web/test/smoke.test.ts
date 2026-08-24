@@ -6,7 +6,6 @@ import { buildModel, emptyModel, reduceEvent, type GoalState } from "../src/redu
 import { createSeqDedupe } from "../src/sync.ts";
 import { registerSlot, listSlots, renderSlot } from "../src/slots.ts";
 import {
-  applyTerminalChunk,
   copyText,
   diffStat,
   filterCommands,
@@ -826,12 +825,6 @@ test("goalChecklist splits lines and strikes completed items", () => {
   assert.equal(open[0]!.done, false);
   const done = goalChecklist("- a\n- b", "completed");
   assert.equal(done[1]!.done, true);
-});
-
-test("applyTerminalChunk strips CSI, honours CR/BS, and caps buffer", () => {
-  assert.equal(applyTerminalChunk("", "hi\x1b[31m!\x1b[0m"), "hi!");
-  assert.equal(applyTerminalChunk("abc", "\b\bX"), "aX");
-  assert.equal(applyTerminalChunk("one\nxx", "\rYY"), "one\nYY");
 });
 
 test("providerColor maps known vendors; modelBadge splits provider/id", () => {

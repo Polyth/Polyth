@@ -45,8 +45,10 @@ test("header and composer controls are configurable and purpose-specific", async
     source("../src/components/settings/WidgetsPage.tsx"),
     source("../src/components/ChatMetrics.tsx"),
   ]);
-  assert.match(header, /const primaries = resolved\.filter\(\(c\) => c\.tier === "primary" && c\.descriptor\.available\(\)\)/);
-  assert.match(header, /primaries\.map/);
+  assert.match(header, /const primaries = resolved\.filter\(\(c\) =>[\s\S]*?c\.tier === "primary"/);
+  assert.match(header, /topRail\.map/);
+  assert.match(header, /const terminal = resolved\.find/);
+  assert.doesNotMatch(header, /const rest = /);
   assert.doesNotMatch(header, /visibleIds|rest\.length > 0/);
   assert.doesNotMatch(composer, /Modalities:/);
   assert.match(composer, /aria-label="Add files"/);
@@ -68,9 +70,9 @@ test("assistant response header carries identity, timing, and configured actions
     "Start new multi-run from this answer",
   ]) assert.ok(timeline.includes(label), `${label} is available`);
   assert.match(timeline, /<ProviderLogo/);
-  assert.match(timeline, /className="agent-reply-duration"/);
+  assert.match(timeline, /className="agent-reply-item agent-reply-duration"/);
   assert.match(timeline, /timeShort\(assistantTime\(m\)\)/);
   const response = timeline.indexOf("<div className=\"bubble\"");
-  const footer = timeline.lastIndexOf("<AssistantAgentHeader m={m} announce={announce} />");
+  const footer = timeline.lastIndexOf("<AssistantAgentHeader m={m} announce={announce} turn={turn} />");
   assert.ok(footer > response, "assistant identity and actions follow the response body");
 });

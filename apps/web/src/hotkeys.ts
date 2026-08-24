@@ -4,6 +4,7 @@ import { useSyncExternalStore } from "react";
 import {
   DEFAULT_KEYMAP,
   HOTKEYS_KEY,
+  normalizeCombo,
   parseKeymap,
   rebindKeymap,
   serializeKeymap,
@@ -12,8 +13,34 @@ import {
 
 type Keymap = Record<HotkeyAction, string>;
 
+const TERMINAL_SHORTCUT_MIGRATION_KEY = "polyth.hotkeys.terminalBacktick.v1";
+
 const read = (): string | null => {
-  try { return localStorage.getItem(HOTKEYS_KEY); } catch { return null; }
+  try {
+    let raw = localStorage.getItem(HOTKEYS_KEY);
+    if (localStorage.getItem(TERMINAL_SHORTCUT_MIGRATION_KEY) !== "1") {
+      // Some older clients persisted the complete keymap rather than only
+      // overrides, leaving the former Ctrl+J default pinned forever. Migrate
+      // that exact legacy value once; later user-selected Ctrl+J bindings stay.
+      try {
+        const stored = JSON.parse(raw ?? "") as Record<string, unknown>;
+        if (
+          typeof stored.viewTerminal === "string"
+          && normalizeCombo(stored.viewTerminal) === "mod+j"
+        ) {
+          delete stored.viewTerminal;
+          raw = JSON.stringify(stored);
+          localStorage.setItem(HOTKEYS_KEY, raw);
+        }
+      } catch {
+        // Invalid storage already falls back through parseKeymap().
+      }
+      localStorage.setItem(TERMINAL_SHORTCUT_MIGRATION_KEY, "1");
+    }
+    return raw;
+  } catch {
+    return null;
+  }
 };
 const write = (v: string): void => {
   try { localStorage.setItem(HOTKEYS_KEY, v); } catch { /* private mode */ }

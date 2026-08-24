@@ -81,7 +81,11 @@ export const MAX_GRID_ROWS = 50;
 /** Removed shell actions stay retired even when an older persisted layout
  * still describes them as visible. This is a migration deny-list, not a
  * second placement system. */
-const RETIRED_WIDGET_IDS = new Set(["shell.new-session", "core.composer"]);
+const RETIRED_WIDGET_IDS = new Set([
+  "shell.new-session",
+  "core.composer",
+  "terminal.open-action",
+]);
 export const WIDGET_ZONE_SLOTS: Record<WidgetZone, UiSlot> = {
   header: "workspace.header",
   left: "workspace.left",
@@ -126,6 +130,17 @@ export const BUILTIN_WIDGET_IDS = [
   "usage.sessions-table",
   "usage.quota-summary",
 ] as const;
+
+/** Definitions registered by built-ins/plugins must survive project switches.
+ * Registration happens before init() selects the persisted active project, so
+ * rebuilding from BUILTIN_WIDGET_IDS alone would otherwise drop every
+ * mini-widget (including header launchers) at that first switch. */
+const ensuredDefinitions = new Map<string, WidgetLayoutDefinition>(
+  BUILTIN_WIDGET_IDS.map((id) => [id, { id }]),
+);
+
+const knownWidgetDefinitions = (): WidgetLayoutDefinition[] =>
+  [...ensuredDefinitions.values()];
 
 const DEFAULT_ZONE: Record<string, WidgetZone> = {
   "core.quick-actions": "header",
@@ -982,7 +997,7 @@ const write = (layout: WidgetLayout, projectId: string | null): boolean => {
 };
 
 let activeProjectId = getState().activeProjectId;
-let state = parseWidgetLayout(read(activeProjectId));
+let state = parseWidgetLayout(read(activeProjectId), knownWidgetDefinitions());
 const listeners = new Set<() => void>();
 const statusListeners = new Set<() => void>();
 let history: WidgetLayout[] = [];
@@ -1021,7 +1036,7 @@ subscribeStore(() => {
   if (nextProjectId === activeProjectId) return;
   flushWrite();
   activeProjectId = nextProjectId;
-  state = parseWidgetLayout(read(activeProjectId));
+  state = parseWidgetLayout(read(activeProjectId), knownWidgetDefinitions());
   history = [];
   saveStatus = "saved";
   for (const listener of [...listeners]) listener();
@@ -1084,6 +1099,7 @@ export function ensureWidgetIds(ids: readonly string[]): void {
 }
 
 export function ensureWidgets(definitions: readonly WidgetLayoutDefinition[]): void {
+  for (const definition of definitions) ensuredDefinitions.set(definition.id, definition);
   const missing = definitions.filter((definition) => !(definition.id in state.widgets));
   const defaults = createDefaultWidgetLayout(definitions);
   const zones = Object.fromEntries(WIDGET_ZONES.map((zone) => [

@@ -1,10 +1,12 @@
 // Terminal service tests: real long-lived child (`cat`) for I/O roundtrip.
+// The suite passes in both process modes — real PTY (optional node-pty) and
+// the pipe fallback; mode-specific behavior is tested explicitly below.
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { basename, join } from "node:path";
-import { createReplayBuffer, createTerminalService } from "../src/index.ts";
+import { createReplayBuffer, createTerminalService, hasRealPty } from "../src/index.ts";
 
 let cwd: string;
 const services: ReturnType<typeof createTerminalService>[] = [];
@@ -148,6 +150,48 @@ test("live onData decodes UTF-8 split across chunk boundaries via the replay pat
   const info = t.get(id);
   assert.equal(info?.running, false);
   assert.equal(info?.exitCode, 0);
+});
+
+// ------------------------------------------------- PTY / pipe process modes
+
+test("pipe mode exports COLUMNS/LINES matching the requested grid", async () => {
+  const t = createTerminalService({ forcePipe: true });
+  services.push(t);
+  const result = await t.run(
+    { projectId: "p", cwd, cmd: "printenv COLUMNS LINES", cols: 97, rows: 41 },
+    { timeoutMs: 5_000 },
+  );
+  assert.equal(result.exitCode, 0);
+  assert.match(result.output, /97\s+41/);
+});
+
+test("pipe-mode resize is a safe no-op signal (stored size clamps)", async () => {
+  const t = createTerminalService({ forcePipe: true });
+  services.push(t);
+  const { id } = await t.create({ projectId: "p", cwd, cmd: "cat" });
+  assert.doesNotThrow(() => t.resize(id, 150, 50));
+  assert.doesNotThrow(() => t.resize(id, -5, 999999)); // clamped, never throws
+  assert.equal(t.get(id)?.running, true);
+  await t.close(id);
+});
+
+test("real PTY sessions allocate a tty with the requested size", { skip: !hasRealPty() }, async () => {
+  const t = newService();
+  const result = await t.run(
+    { projectId: "p", cwd, cmd: "tty; stty size", cols: 100, rows: 40 },
+    { timeoutMs: 10_000 },
+  );
+  assert.equal(result.exitCode, 0);
+  assert.match(result.output, /\/dev\/(pts|tty)/, "stdin is a real tty");
+  assert.match(result.output, /40 100/, "PTY carries the requested rows/cols");
+});
+
+test("real PTY resize propagates to the child", { skip: !hasRealPty() }, async () => {
+  const t = newService();
+  const { id } = await t.create({ projectId: "p", cwd, cmd: "sleep 3", cols: 80, rows: 24 });
+  assert.doesNotThrow(() => t.resize(id, 132, 43));
+  assert.equal(t.get(id)?.running, true);
+  await t.close(id);
 });
 
 test("rename mutates the title; replay survives socket-free reads; unknown ids are undefined", async () => {

@@ -1,10 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { formatCombo } from "@polyth/hotkeys";
 import {
   closeWorkspacePane, getState, setActiveView, useActiveModel, useStore,
-  openSettingsPage, setOverlay, setRailPlugin, setSidebarOpen, setUiError, type AppView,
+  openSettingsPage, setOverlay, setRailPlugin, setSidebarOpen, setUiError,
+  toggleWorkspacePane, type AppView,
 } from "../store.ts";
 import { refreshSessions } from "../init.ts";
-import { displaySessionTitle } from "../format.ts";
+import { displaySessionTitle, MOD } from "../format.ts";
 import { friendlyError } from "../settings.ts";
 import { contextGauge, type ContextGauge } from "../reduce.ts";
 import { useShellMode, type ShellMode } from "../responsiveShell.ts";
@@ -24,6 +26,7 @@ import { dismissKeyboard } from "../mobileViewport.ts";
 import SessionMenu from "./mobile/SessionMenu.tsx";
 import { useSheetTrigger } from "./mobile/sheetTrigger.ts";
 import { api, type GithubStatusDto } from "../api.ts";
+import { useKeymap } from "../hotkeys.ts";
 
 const STROKE = { fill: "none", stroke: "currentColor", strokeWidth: 1.5, strokeLinecap: "round", strokeLinejoin: "round" } as const;
 
@@ -93,12 +96,13 @@ function capabilityIcon(id: string): React.ReactNode {
   return EXTRA_ICONS[id] ?? <Icon.context />;
 }
 
-/** The centered top rail renders the buttons chosen in Widgets & Layout.
- *  Right-rail and technical capabilities stay on their configured surfaces;
- *  the top rail never creates an implicit overflow menu. */
+/** The centered top rail renders primary capabilities plus the permanent
+ *  Terminal launcher. Terminal must remain alongside the primary controls
+ *  instead of depending on a customizable app.header.actions placement. */
 function CapabilityNav() {
   const resolved = useResolvedCapabilities();
   const ui = useUiSettings();
+  const keymap = useKeymap();
   const view = useStore((s) => s.activeView);
   const rail = useStore((s) => s.railPlugin);
   const paneFullscreen = useStore((s) => s.paneFullscreen);
@@ -112,7 +116,16 @@ function CapabilityNav() {
     return panel !== undefined && rail === panel;
   };
 
-  const primaries = resolved.filter((c) => c.tier === "primary" && c.descriptor.available());
+  const primaries = resolved.filter((c) =>
+    c.tier === "primary" && c.descriptor.id !== "terminal" && c.descriptor.available());
+  const terminal = resolved.find((c) =>
+    c.descriptor.id === "terminal" && c.descriptor.available());
+  const filesIndex = primaries.findIndex((c) => c.descriptor.id === "files");
+  const terminalIndex = filesIndex < 0 ? primaries.length : filesIndex + 1;
+  const topRail = terminal
+    ? [...primaries.slice(0, terminalIndex), terminal, ...primaries.slice(terminalIndex)]
+    : primaries;
+  const terminalLabel = `Open Terminal (${formatCombo(keymap.viewTerminal, MOD === "⌘")})`;
 
   return (
     <nav
@@ -120,15 +133,17 @@ function CapabilityNav() {
       aria-label={`Workspace tools, ${ui.topRailAlignment === "left" ? "left of center" : "centered"}`}
     >
       <div className="view-switcher-pill">
-        {primaries.map((c) => {
+        {topRail.map((c) => {
+          const terminalAction = c.descriptor.id === "terminal";
+          const label = terminalAction ? terminalLabel : c.descriptor.label;
           return (
             <button
               key={c.descriptor.id}
               className={`view-icon ${isActive(c) ? "active" : ""}`}
-              title={c.descriptor.label}
-              aria-label={c.descriptor.label}
+              title={label}
+              aria-label={label}
               aria-pressed={isActive(c)}
-              onClick={() => c.descriptor.open()}
+              onClick={() => terminalAction ? toggleWorkspacePane("terminal") : c.descriptor.open()}
             >
               {capabilityIcon(c.descriptor.id)}
             </button>
