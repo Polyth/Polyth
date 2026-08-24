@@ -82,6 +82,8 @@ test("Usage settings keeps the Polyth shell and offers rich dashboard views", as
   assert.match(source, /<table className="sr-only">/);
   assert.match(source, /role="progressbar"/);
   assert.match(source, /className="usage-quota-alert" role="alert"/);
+  assert.match(source, /Ranges use each session’s latest activity and include its full recorded totals/);
+  assert.match(source, /new ResizeObserver/);
   assert.doesNotMatch(source, /role="(?:tab|radio)"/);
   assert.doesNotMatch(source, /usage-dashboard-sidebar/);
   assert.match(quota, /loading: boolean/);

@@ -1,4 +1,4 @@
-import { useMemo, useState, type CSSProperties, type ReactNode } from "react";
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { fmtCost, fmtTokens } from "../format.ts";
 import { Icon } from "../icons.tsx";
 import { useStore } from "../store.ts";
@@ -58,6 +58,23 @@ const formatRange = (start: number, end: number): string => {
 const aggregateSeries = (series: readonly UsageChartSeries[], points: number): number[] =>
   Array.from({ length: points }, (_, point) =>
     series.reduce((total, item) => total + (item.values[point] ?? 0), 0));
+
+const collapseChartSeries = (
+  series: readonly UsageChartSeries[],
+  maximumSeries = SERIES_ACCENTS.length,
+): UsageChartSeries[] => {
+  if (series.length <= maximumSeries) return [...series];
+  const featured = series.slice(0, maximumSeries - 1);
+  const remainder = series.slice(maximumSeries - 1);
+  return [
+    ...featured,
+    {
+      providerId: "__other__",
+      label: `Other (${remainder.length})`,
+      values: aggregateSeries(remainder, series[0]?.values.length ?? 0),
+    },
+  ];
+};
 
 function TrendBadge({ trend, compact = false }: { trend: UsageTrend | null; compact?: boolean }) {
   if (!trend) {
@@ -177,8 +194,30 @@ function AreaChart({
   emptyTitle: string;
   emptyText: string;
 }) {
-  const width = 720;
-  const height = 236;
+  const chartRef = useRef<HTMLDivElement>(null);
+  const [chartSize, setChartSize] = useState({ width: 720, height: 236 });
+  useEffect(() => {
+    const element = chartRef.current;
+    if (!element) return;
+    const updateSize = () => {
+      const bounds = element.getBoundingClientRect();
+      const next = {
+        width: Math.max(280, Math.round(bounds.width)),
+        height: Math.max(170, Math.round(bounds.height)),
+      };
+      setChartSize((current) =>
+        current.width === next.width && current.height === next.height ? current : next);
+    };
+    updateSize();
+    if (typeof ResizeObserver === "undefined") {
+      window.addEventListener("resize", updateSize);
+      return () => window.removeEventListener("resize", updateSize);
+    }
+    const observer = new ResizeObserver(updateSize);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
+  const { width, height } = chartSize;
   const top = 12;
   const bottom = 32;
   const left = 54;
@@ -200,9 +239,9 @@ function AreaChart({
       : String(Math.round(value));
 
   return (
-    <div className="usage-area-chart">
+    <div className="usage-area-chart" ref={chartRef}>
       <svg viewBox={`0 0 ${width} ${height}`} role="img">
-        <title>{`${metricLabel} usage over time`}</title>
+        <title>{`${metricLabel} session totals by latest activity`}</title>
         <desc>
           {populated
             ? `${series.length} visible ${series.length === 1 ? "provider is" : "providers are"} charted across ${labels.length} date buckets. Detailed values follow the chart.`
@@ -269,7 +308,7 @@ function AreaChart({
       </svg>
       {populated && (
         <table className="sr-only">
-          <caption>{`${metricLabel} usage over time by provider`}</caption>
+          <caption>{`${metricLabel} session totals by latest activity and provider`}</caption>
           <thead>
             <tr>
               <th scope="col">Provider</th>
@@ -309,17 +348,18 @@ function UsageOverTime({
   hiddenCount: number;
 }) {
   const [metric, setMetric] = useState<UsageChartMetric>("tokens");
-  const series = data.chart[metric].filter((item) => visibleProviderIds.has(item.providerId));
+  const visibleSeries = data.chart[metric].filter((item) => visibleProviderIds.has(item.providerId));
+  const series = collapseChartSeries(visibleSeries);
   const hiddenActivity = hiddenCount > 0 && data.chart[metric].some(
     (item) => !visibleProviderIds.has(item.providerId) && item.values.some((value) => value > 0),
   );
   return (
     <article className="usage-dashboard-card usage-time-card">
       <SectionHeading
-        title="Usage over time"
-        description="Session activity, grouped by visible providers"
+        title="Session totals by latest activity"
+        description="Full session counters grouped by visible providers"
         aside={(
-          <div className="usage-metric-toggle" aria-label="Chart metric">
+          <div className="usage-metric-toggle" role="group" aria-label="Chart metric">
             {(["tokens", "cost", "requests"] as const).map((item) => (
               <button
                 type="button"
@@ -347,7 +387,9 @@ function UsageOverTime({
         {series.map((item, index) => (
           <span key={item.providerId}>
             <i style={{ background: seriesAccent(index) }} />
-            <ProviderLogo providerID={item.providerId} providerName={item.label} className="usage-legend-logo" />
+            {item.providerId === "__other__"
+              ? <span className="usage-other-provider" aria-hidden="true">+</span>
+              : <ProviderLogo providerID={item.providerId} providerName={item.label} className="usage-legend-logo" />}
             {item.label}
           </span>
         ))}
@@ -459,7 +501,7 @@ function ModelBreakdown({
         title="Model breakdown"
         description="Highest-use models in this period"
         aside={(
-          <div className="usage-metric-toggle" aria-label="Model breakdown metric">
+          <div className="usage-metric-toggle" role="group" aria-label="Model breakdown metric">
             {(["tokens", "cost"] as const).map((item) => (
               <button
                 type="button"
@@ -502,24 +544,22 @@ function ModelBreakdown({
 }
 
 function CostPulse({ data }: { data: ReturnType<typeof buildUsageDashboardData> }) {
-  const dailyPace = data.totals.cost / data.rangeDays;
-  const monthlyPace = dailyPace * 30;
   const averageSession = data.totals.sessions > 0 ? data.totals.cost / data.totals.sessions : 0;
   return (
     <article className="usage-dashboard-card usage-cost-card">
-      <SectionHeading title="Cost pulse" description="Spend pace for the selected range" />
+      <SectionHeading title="Cost context" description="Recorded totals for sessions active in range" />
       <div className="usage-cost-total">
-        <span>Recorded spend</span>
+        <span>Full recorded session spend</span>
         <strong>{formatMoney(data.totals.cost)}</strong>
         <TrendBadge trend={data.trends.cost} />
       </div>
       <div className="usage-cost-grid">
-        <div><span>Daily pace</span><strong>{formatMoney(dailyPace)}</strong></div>
-        <div><span>30-day pace</span><strong>{formatMoney(monthlyPace)}</strong></div>
+        <div><span>Sessions counted</span><strong>{data.totals.sessions.toLocaleString()}</strong></div>
+        <div><span>Selected range</span><strong>{data.rangeDays} days</strong></div>
         <div><span>Per session</span><strong>{formatMoney(averageSession)}</strong></div>
         <div><span>Per 1K tokens</span><strong>{fmtCost(data.totals.averageCostPerThousand)}</strong></div>
       </div>
-      <p>Projection uses the selected period’s daily average; it is not a provider invoice.</p>
+      <p>Sessions are selected by latest activity. Values are their full recorded totals, not daily billing or a provider invoice.</p>
     </article>
   );
 }
@@ -527,7 +567,17 @@ function CostPulse({ data }: { data: ReturnType<typeof buildUsageDashboardData> 
 function ProviderStatus({ provider }: { provider: UsageProviderSummary }) {
   const state = !provider.snapshot ? "session-only" : provider.stale ? "stale" : "fresh";
   const label = state === "session-only" ? "Session only" : state === "stale" ? "Stale" : "Fresh";
-  return <span className={`usage-status-pill ${state}`}><i />{label}</span>;
+  return (
+    <span
+      className={`usage-status-pill ${state}`}
+      title={state === "stale" ? provider.snapshot?.error?.message : undefined}
+      aria-label={state === "stale" && provider.snapshot?.error?.message
+        ? `Stale quota feed: ${provider.snapshot.error.message}`
+        : label}
+    >
+      <i />{label}
+    </span>
+  );
 }
 
 function ProviderTable({
@@ -672,14 +722,20 @@ function ProviderDetails({
                 />
                 <div>
                   <h3>{provider.label}</h3>
-                  <p>{provider.snapshot?.accountLabel ?? provider.id}</p>
+                  <p title={provider.snapshot?.accountLabel ?? provider.id}>{provider.snapshot?.accountLabel ?? provider.id}</p>
                 </div>
                 <ProviderStatus provider={provider} />
               </header>
+              {provider.stale && provider.snapshot?.error?.message && (
+                <div className="usage-provider-error" role="status">
+                  <Icon.usage />
+                  <span>{provider.snapshot.error.message}</span>
+                </div>
+              )}
               <div className="usage-provider-detail-stats">
                 <div><span>Spend</span><strong>{formatMoney(provider.cost)}</strong></div>
                 <div><span>Tokens</span><strong>{fmtTokens(provider.tokens)}</strong></div>
-                <div><span>Sessions</span><strong>{provider.sessions}</strong></div>
+                <div><span>Sessions</span><strong>{provider.sessions.toLocaleString()}</strong></div>
               </div>
               <div className="usage-provider-windows">
                 {provider.snapshot?.windows.map((quota) => {
@@ -688,7 +744,7 @@ function ProviderDetails({
                   return (
                     <div key={quota.id} className="usage-provider-window">
                       <div>
-                        <span>{quota.label}</span>
+                        <span title={quota.label}>{quota.label}</span>
                         <strong>{fmtQuota(quota.used, quota.unit)} <small>/ {fmtQuota(quota.limit, quota.unit)}</small></strong>
                       </div>
                       <span
@@ -800,8 +856,8 @@ export function UsageDashboard(): ReactNode {
         <div className="usage-hero-mark"><Icon.usage /></div>
         <div>
           <span className="usage-eyebrow">Workspace telemetry</span>
-          <h2>Understand the work behind every token.</h2>
-          <p>Session totals come from Polyth’s event history. Provider limits are refreshed from connected quota feeds.</p>
+          <h2>Understand the sessions behind every token.</h2>
+          <p>Ranges use each session’s latest activity and include its full recorded totals. Provider limits come from connected quota feeds.</p>
         </div>
         <div className="usage-hero-status" aria-live="polite">
           {quotaLoading ? (
