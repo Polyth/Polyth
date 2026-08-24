@@ -4401,9 +4401,16 @@ body[data-chatwidth="wide"] .bubble, body[data-chatwidth="wide"] .reasoning, bod
   .header { height: 56px; min-height: 56px; padding: 0 8px; gap: 4px; }
   /* Primary phone views use their dedicated session title header. Secondary
      views keep the generic header, where the written brand would otherwise
-     push the trailing user-menu target outside a 320px viewport. */
+     push the trailing user-menu target outside a 320px viewport. App-level
+     actions remain available through the user/system menu on this compact
+     surface; keeping their desktop row would make the header overflow. */
   .app:not(.view-session) > .header .header-brand { padding-inline: 2px; }
   .app:not(.view-session) > .header .header-brand strong { display: none; }
+  .app:not(.view-session) > .header .header-actions { display: none; }
+  .app:not(.view-session) > .header .header-profile {
+    width: var(--tap); height: var(--tap); justify-content: center; padding: 0;
+  }
+  .app:not(.view-session) > .header .header-profile b { display: none; }
   .header-sub { display: none; }
   .header .ctx-ring { display: none; }
   .auto-accept-chip { width: 44px; height: 44px; min-width: 44px; padding: 0; justify-content: center; }
