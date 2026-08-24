@@ -26,6 +26,7 @@ import {
 } from "../sidebarLayout.ts";
 import { api } from "../api.ts";
 import { announce } from "./a11y/live.tsx";
+import ProjectAppearanceDialog from "./ProjectAppearanceDialog.tsx";
 
 /** Close the drawer only when it is actually open (avoids no-op re-renders
  *  in wide mode, where the sidebar is a plain inline column). */
@@ -56,6 +57,7 @@ export default function Sidebar() {
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState<"recent" | "name">("recent");
   const [sortOpen, setSortOpen] = useState(false);
+  const [appearanceProjectId, setAppearanceProjectId] = useState<string | null>(null);
   const [attentionOnly, setAttentionOnly] = useState(false);
   const syncStatus = useSyncExternalStore(subscribeSyncStatus, getSyncStatus, () => "disconnected");
   const host = typeof location === "undefined" ? "Local server" : location.host;
@@ -366,7 +368,7 @@ export default function Sidebar() {
                   aria-expanded={viewMode === "tree" ? expandedTrees.has(p.id) : undefined}
                   onClick={() => {
                     if (p.id !== activeProjectId) activateProject(p.id);
-                    if (viewMode === "tree") toggleTree(p.id);
+                    if (viewMode === "tree" && !expandedTrees.has(p.id)) toggleTree(p.id);
                     else closeDrawer();
                   }}
                   onDoubleClick={() => { setRenamingProject(p.id); setProjectName(p.name); }}
@@ -379,6 +381,16 @@ export default function Sidebar() {
                     <span className="project-path">{p.path}</span>
                   </span>
                 </button>
+                <button
+                  className="project-new-session"
+                  title={`New chat in ${p.name || p.path}`}
+                  aria-label={`New chat in ${p.name || p.path}`}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    startNewSession(p.id);
+                    closeDrawer();
+                  }}
+                ><Icon.plus /></button>
                 <button
                   className="project-menu-btn"
                   aria-label={`Actions for ${p.name || p.path}`}
@@ -415,6 +427,10 @@ export default function Sidebar() {
                       setRenamingProject(p.id);
                       setProjectName(p.name);
                     }}>Rename project</button>
+                    <button role="menuitem" onClick={() => {
+                      setProjectMenu(null);
+                      setAppearanceProjectId(p.id);
+                    }}>Project appearance…</button>
                     <button role="menuitem" onClick={() => {
                       setProjectMenu(null);
                       if (p.id !== activeProjectId) activateProject(p.id);
@@ -526,6 +542,10 @@ export default function Sidebar() {
       {importingProject && (
         <ImportSessionsDialog projectId={importingProject} onClose={() => setImportingProject(null)} />
       )}
+      {appearanceProjectId && (() => {
+        const target = projects.find((candidate) => candidate.id === appearanceProjectId);
+        return target ? <ProjectAppearanceDialog project={target} onClose={() => setAppearanceProjectId(null)} /> : null;
+      })()}
     </>
   );
 }

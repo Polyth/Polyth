@@ -393,6 +393,16 @@ export async function renameProject(id: string, name: string): Promise<void> {
   store.applyProjectUpsert(updated);
 }
 
+/** Persist presentation metadata in the project registry, rather than as a
+ * browser-only sidebar preference. */
+export async function updateProjectAppearance(
+  id: string,
+  patch: { color?: string; icon?: string },
+): Promise<void> {
+  const updated = await api.patchProject(id, patch);
+  store.applyProjectUpsert(updated);
+}
+
 export async function removeProject(id: string): Promise<void> {
   await api.deleteProject(id);
   store.applyProjectRemoved(id);

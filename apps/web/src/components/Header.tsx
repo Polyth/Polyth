@@ -3,10 +3,9 @@ import {
   closeWorkspacePane, getState, setActiveView, useActiveModel, useStore,
   openSettingsPage, setOverlay, setRailPlugin, setSidebarOpen, setUiError, type AppView,
 } from "../store.ts";
-import { forkSession, exportSessionMarkdown, refreshSessions } from "../init.ts";
+import { refreshSessions } from "../init.ts";
 import { displaySessionTitle } from "../format.ts";
-import { friendlyError, shortcutLabel } from "../settings.ts";
-import { GoalAttachForm } from "./GoalStrip.tsx";
+import { friendlyError } from "../settings.ts";
 import { contextGauge, type ContextGauge } from "../reduce.ts";
 import { useShellMode, type ShellMode } from "../responsiveShell.ts";
 import { NarrowPanelTrigger } from "./ContextRail.tsx";
@@ -24,6 +23,8 @@ import { setWorkspaceMode, useWorkspaceMode } from "../widgets/workspaceMode.ts"
 import { useDismissibleMenu } from "./a11y/Menu.ts";
 import ChatMetrics from "./ChatMetrics.tsx";
 import { setUiSettings, useUiSettings } from "../uiPrefs.ts";
+import { dismissKeyboard } from "../mobileViewport.ts";
+import SessionMenu from "./mobile/SessionMenu.tsx";
 import { setPlacementOverride } from "../capabilityLayout.ts";
 
 const STROKE = { fill: "none", stroke: "currentColor", strokeWidth: 1.5, strokeLinecap: "round", strokeLinejoin: "round" } as const;
@@ -342,58 +343,9 @@ function useResizeFocusHandoff(mode: ShellMode) {
   }, [mode]);
 }
 
-function OverflowMenu({ sessionId, onGoal }: { sessionId: string | null; onGoal: () => void }) {
-  const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!open) return;
-    const onDown = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setOpen(false);
-    };
-    document.addEventListener("mousedown", onDown);
-    document.addEventListener("keydown", onKey);
-    return () => {
-      document.removeEventListener("mousedown", onDown);
-      document.removeEventListener("keydown", onKey);
-    };
-  }, [open]);
-
+function SettingsButton() {
   return (
-    <div className="overflow-menu" ref={ref}>
-      <button
-        className="icon-btn overflow-trigger"
-        title="More actions"
-        aria-label="More actions"
-        aria-expanded={open}
-        onClick={() => setOpen((v) => !v)}
-      >···</button>
-      {open && (
-        <div className="menu-popup" role="menu">
-          {sessionId !== null && (
-            <>
-              <button role="menuitem" onClick={() => { setOpen(false); onGoal(); }}>Attach goal…</button>
-              <button
-                role="menuitem"
-                onClick={() => {
-                  setOpen(false);
-                  void forkSession(sessionId).catch((e) => setUiError(friendlyError("Couldn’t fork the session", e)));
-                }}
-              >Fork session</button>
-              <button role="menuitem" onClick={() => { setOpen(false); exportSessionMarkdown(); }}>Export Markdown</button>
-              <div className="menu-sep" />
-            </>
-          )}
-          <button
-            role="menuitem"
-            onClick={() => { setOpen(false); window.dispatchEvent(new CustomEvent("polyth:open-settings")); }}
-          >Settings<span className="menu-kbd">{shortcutLabel(",")}</span></button>
-        </div>
-      )}
-    </div>
+    <button className="icon-btn overflow-trigger" title="Settings" aria-label="Settings" onClick={() => setOverlay("settings")}><Icon.gear /></button>
   );
 }
 
@@ -513,11 +465,11 @@ export default function Header() {
   const project = useStore((s) => s.projectRegistry.projects.find((p) => p.id === s.activeProjectId) ?? null);
   const model = useActiveModel();
   const view = useStore((s) => s.activeView);
-  const [goalFormOpen, setGoalFormOpen] = useState(false);
   const workspaceMode = useWorkspaceMode();
 
   const mode = useShellMode();
   const compact = mode !== "wide";
+  const [sessionMenuOpen, setSessionMenuOpen] = useState(false);
   const chatSurface = workspaceMode === "chat" && view === "session";
   const firstUserText = model.messages.find((message) => message.kind === "user")?.text;
   const mobileTitle = session
@@ -536,15 +488,20 @@ export default function Header() {
     return (
       <header className="header header-compact header-chat mobile-chat-header">
         <DrawerTrigger />
+        {/* UX-MOBILE-01 §21: the whole title is the target and it opens a real
+            session menu (new / rename / fork / archive / recent). */}
         <button
           className="mobile-session-title"
           title={mobileTitle}
-          aria-label={`${mobileTitle}. Open projects and sessions`}
-          onClick={() => setSidebarOpen(true)}
+          aria-label={`${mobileTitle}. Session menu`}
+          aria-haspopup="dialog"
+          aria-expanded={sessionMenuOpen}
+          onClick={() => void dismissKeyboard().then(() => setSessionMenuOpen(true))}
         >
           <span>{mobileTitle}</span>
           <Icon.chevronDown />
         </button>
+        {sessionMenuOpen && <SessionMenu onClose={() => setSessionMenuOpen(false)} />}
         <span className="header-spacer" />
         <button
           className="icon-btn mobile-header-action"
@@ -601,14 +558,14 @@ export default function Header() {
         {workspaceMode === "chat" && !compact && <CapabilityNav />}
         {chatSurface && <ChatMetrics session={session} model={model} />}
         <span className="header-spacer" />
-        {workspaceMode === "chat" && !compact && session && (
-          <SlotHost
-            slot="session.header.actions"
-            context={{ sessionId: session.id, status: session.status, working: model.turn?.status === "working" }}
-          />
-        )}
         {(!compact || !chatSurface) && (
           <div className="header-actions" aria-label="Application">
+            {workspaceMode === "chat" && session && (
+              <SlotHost
+                slot="session.header.actions"
+                context={{ sessionId: session.id, status: session.status, working: model.turn?.status === "working" }}
+              />
+            )}
             <SlotHost
               slot="app.header.actions"
               context={{ projectId: project?.id ?? null, sessionId: session?.id ?? null, workspaceMode }}
@@ -616,11 +573,10 @@ export default function Header() {
           </div>
         )}
         {workspaceMode === "chat" && (
-          <OverflowMenu sessionId={session?.id ?? null} onGoal={() => setGoalFormOpen((value) => !value)} />
+          <SettingsButton />
         )}
         {(!compact || !chatSurface) && <UserMenu />}
       </header>
-      {goalFormOpen && <GoalAttachForm onDone={() => setGoalFormOpen(false)} />}
     </>
   );
 }

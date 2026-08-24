@@ -51,6 +51,39 @@
   --radius-lg: 12px;
   --radius-xl: 16px;
   --gutter: 24px;
+
+  /* UX-MOBILE-01 §35/§36/§37/§57: one set of mobile-first layout tokens.
+     Spacing is a 4/8 rhythm, radii follow geometry (small controls → cards →
+     surfaces → sheets), and every interactive box is at least --tap. */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --screen-gutter: 16px;
+  --tap: 44px;
+  --control-h-sm: 32px;
+  --control-h: 40px;
+  --control-h-lg: 48px;
+  --radius-control: 12px;
+  --radius-card: 16px;
+  --radius-surface: 20px;
+  --radius-sheet: 24px;
+  /* 16px minimum for anything focusable: below it iOS Safari zooms the page
+     on focus, which is the real cause of the "layout falls apart" bug (§32). */
+  --font-input: 16px;
+  --font-title: 32px;
+  --font-title-lh: 38px;
+  --font-label: 14px;
+  --font-meta: 12px;
+  --font-meta-lh: 16px;
+  /* Published by mobileViewport.ts; the literals are the pre-JS fallback. */
+  --visual-vh: 100dvh;
+  --keyboard-inset: 0px;
+  --visual-offset: 0px;
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
   --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
   --ui-font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   /* semantic token aliases (WP9): migrate components gradually, old names stay */
@@ -589,12 +622,6 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
 }
 .hero-sub b { color: var(--text-dim); font-weight: 560; }
 .hero-sub .mono { color: var(--text-dim); }
-.hero-foot {
-  margin-top: 26px; display: flex; align-items: center; gap: 8px;
-  font-size: 11.5px; color: var(--faint);
-}
-.hero-foot .kbd { font-size: 10px; }
-.hero-sep { opacity: 0.4; }
 .hero-open-project { margin-top: 18px; padding: 9px 18px; border-radius: var(--radius); font-size: 13px; cursor: pointer; }
 .side-open-project { display: block; width: 100%; background: none; border: 0; cursor: pointer; line-height: 1.5; }
 .side-open-project:hover { color: var(--text); }
@@ -826,8 +853,6 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
 .composer-bar .stop { background: var(--red); border-color: var(--red); color: var(--red-ink); height: 30px; padding: 0 18px; min-width: 88px; border-radius: 9px; font-weight: 600; }
 .composer-notice { color: var(--muted); font-size: 12px; }
 
-.starter-chips { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; margin-top: 20px; }
-.composer .starter-chips { margin: 0 0 10px; justify-content: flex-start; }
 .chip {
   display: inline-flex; align-items: center; gap: 8px; height: 32px; padding: 0 13px;
   border: 1px solid var(--hair); border-radius: 999px; background: var(--surface-overlay);
@@ -858,6 +883,11 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
   background: color-mix(in srgb, var(--elevated) 88%, var(--blue));
   padding: 12px var(--gutter);
   display: flex; flex-direction: column; gap: 10px;
+}
+.focus-conversation > .question-cards {
+  box-sizing: border-box;
+  width: min(768px, calc(100% - 48px));
+  align-self: center;
 }
 .question-card { display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; background: var(--elevated); border: 1px solid var(--hair-strong); border-radius: var(--radius-lg); }
 .question-card .q-title { color: var(--accent); font-weight: 600; font-size: 12.5px; }
@@ -2488,7 +2518,7 @@ body[data-chatwidth="wide"] .bubble, body[data-chatwidth="wide"] .reasoning, bod
 .folder-dialog-title { font-size: 15.5px; font-weight: 650; letter-spacing: -0.01em; }
 .folder-dialog-subtitle { color: var(--muted); font-size: 12px; margin-top: 3px; }
 .folder-toolbar { display: flex; align-items: center; gap: 8px; padding: 6px 18px 10px; }
-.folder-toolbar .small-btn { height: 36px; min-width: 34px; flex-shrink: 0; font-family: var(--mono); }
+.folder-toolbar .small-btn { height: 40px; min-width: 40px; flex-shrink: 0; font-family: var(--mono); font-size: 15px; }
 .folder-path {
   flex: 1; min-width: 0; height: 36px; padding: 0 11px;
   background: var(--sunken); color: var(--text);
@@ -2535,6 +2565,7 @@ body[data-chatwidth="wide"] .bubble, body[data-chatwidth="wide"] .reasoning, bod
 .folder-error { margin: 6px 18px 0; }
 .folder-foot { display: flex; align-items: center; gap: 12px; padding: 12px 18px 16px; }
 .folder-foot .ghost-link { display: inline-flex; align-items: center; gap: 6px; margin: 0; }
+.folder-clone { color: var(--accent); }
 .folder-selected {
   min-width: 0; max-width: 46%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   direction: rtl; text-align: left; color: var(--muted); font-size: 10.5px;
@@ -2743,28 +2774,18 @@ body[data-chatwidth="wide"] .bubble, body[data-chatwidth="wide"] .reasoning, bod
   border-bottom: 1px solid var(--hair);
 }
 .timeline-open { flex: none; margin-inline-start: auto; align-self: flex-start; }
-/* Reserved latest-reveal region (§2.4): mounted between the scrollport and
-   the composer while the reader holds a position away from the tail. It
-   consumes layout space; it never paints over the tail clearance. */
+/* Latest reveal floats over the tail instead of consuming transcript space. */
 .timeline-reveal {
-  flex: none; display: flex; justify-content: center;
-  padding-block: 6px 8px;
-  padding-inline: max(var(--gutter), calc((100% - 768px) / 2));
-  border-top: 1px solid var(--hair);
+  position: absolute; z-index: 4; left: 50%; bottom: 18px; translate: -50% 0;
+  pointer-events: none;
 }
 .jump-latest {
-  display: inline-flex; align-items: center; gap: 7px;
-  min-height: 30px; padding: 3px 14px; border-radius: 999px;
+  width: 34px; min-width: 34px; height: 34px; min-height: 34px; padding: 0;
+  display: grid; place-items: center; border-radius: 50%; pointer-events: auto;
   border: 1px solid var(--accent-line); background: var(--accent-wash);
-  color: var(--text); font-size: 12.5px; font-weight: 550;
+  color: var(--text); font-size: 18px; font-weight: 700; line-height: 1;
 }
 .jump-latest:hover { background: var(--elevated); border-color: var(--accent); }
-/* Nonessential Ember progress affordance while streaming; the reduced-motion
-   block kills the pulse globally and the name/operation never change. */
-.jump-latest-dot {
-  width: 7px; height: 7px; border-radius: 50%; background: var(--accent); flex: none;
-  animation: pulse 2s ease-in-out infinite;
-}
 .rewound-tail {
   border: 1px dashed var(--border); border-radius: var(--radius); color: var(--muted);
   background: color-mix(in srgb, var(--surface) 75%, transparent);
@@ -3533,8 +3554,6 @@ body[data-chatwidth="wide"] .bubble, body[data-chatwidth="wide"] .reasoning, bod
   /* Hero and stage: wrapped, reachable, no clipped primary action. */
   .hero h2 { font-size: clamp(22px, 8vw, 30px); }
   .hero-sub { margin: 10px 0 22px; }
-  .hero-foot { flex-wrap: wrap; justify-content: center; row-gap: 6px; }
-  .starter-chips .chip { max-width: 100%; height: auto; min-height: 36px; white-space: normal; text-align: left; }
 
   /* Status bar priority: project identity/status at the start, current view
      at the end; branch/model/agent stay in drawer/header/panels. */
@@ -4053,6 +4072,8 @@ body[data-density="balanced"] .composer { padding-block: 10px; }
   margin: 6px 0 16px; padding-bottom: 14px; border-bottom: 1px solid var(--border-soft);
 }
 .widget-placement-toolbar .widget-save-state { margin: 0 auto 0 0; }
+.widget-project-scope { display: inline-flex; align-items: center; gap: 7px; color: var(--muted); font-size: 11px; }
+.widget-project-scope select { max-width: 190px; height: 32px; }
 .widget-place-grid { display: grid; grid-template-columns: repeat(2, minmax(260px, 1fr)); gap: 12px; }
 .widget-place-card {
   min-width: 0; padding: 15px; border: 1px solid var(--border-soft);
@@ -4136,7 +4157,7 @@ body[data-density="balanced"] .composer { padding-block: 10px; }
   position: absolute; top: 16px; right: 22px; z-index: 8; height: 34px; display: flex; align-items: center; gap: 7px;
   padding: 0 12px; border-color: var(--border-soft); background: var(--elevated); color: var(--text-dim); box-shadow: 0 4px 18px -14px rgba(0,0,0,.25);
 }
-.timeline { padding-block: 48px 48px; padding-inline: max(36px, calc((100% - 820px) / 2)); gap: 18px; }
+.timeline { padding-block: 48px 48px; padding-inline: max(var(--gutter), calc((100% - 768px) / 2)); gap: 18px; }
 .msg { gap: 0; }
 .msg.user { align-items: flex-end; }
 .msg.assistant { align-items: flex-start; }
@@ -4201,7 +4222,7 @@ body[data-density="balanced"] .composer { padding-block: 10px; }
 .message-plan-card li.done { color: var(--muted); text-decoration: line-through; }
 .message-plan-card li.done span, .message-plan-card li.active span { color: var(--accent); }
 .focus-working {
-  width: min(860px, calc(100% - 72px)); margin: 0 auto 8px; display: flex; align-items: center; gap: 7px;
+  width: min(768px, calc(100% - 48px)); margin: 0 auto 8px; display: flex; align-items: center; gap: 7px;
   color: var(--faint); font-size: 10.5px;
 }
 .focus-working-spinner {
@@ -4211,7 +4232,8 @@ body[data-density="balanced"] .composer { padding-block: 10px; }
 }
 @keyframes focus-working-pulse { 0%, 100% { opacity: .35; transform: scale(.85); } 50% { opacity: .9; transform: scale(1); } }
 @media (prefers-reduced-motion: reduce) { .focus-working-spinner { animation: none; } }
-.focus-conversation > .composer { border: 0; padding: 12px max(36px, calc((100% - 920px) / 2)) 24px; background: var(--elevated); }
+.focus-conversation > .composer { border: 0; padding: 12px max(var(--gutter), calc((100% - 768px) / 2)) 24px; background: var(--elevated); }
+.focus-conversation > .archived-guard { padding-inline: max(var(--gutter), calc((100% - 768px) / 2)); }
 .composer-simple .composer-card { border-radius: 22px; border-color: var(--border); background: var(--elevated); box-shadow: 0 14px 36px -28px rgba(30,25,20,.45); }
 .composer-simple .composer-card textarea { min-height: 92px; padding: 19px 20px 8px; font-size: 13.5px; }
 .composer-simple .composer-bar { min-height: 58px; padding: 8px 10px 10px; border: 0; flex-wrap: nowrap; }
@@ -7274,44 +7296,6 @@ body[data-quick-actions="false"] [data-widget-id="core.quick-actions"] { display
   color: transparent;
 }
 
-.new-session-targets {
-  width: 100%;
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 10px;
-  margin: 24px 0 12px;
-}
-.new-session-select { min-width: 0; display: flex; flex-direction: column; gap: 6px; text-align: left; }
-.new-session-select > span:first-child { color: var(--muted); font-size: 10px; font-weight: 650; }
-.new-session-select-control {
-  height: 46px;
-  min-width: 0;
-  display: grid;
-  grid-template-columns: 18px minmax(0, 1fr) 16px;
-  align-items: center;
-  gap: 7px;
-  padding: 0 11px;
-  border: 1px solid var(--border-soft);
-  border-radius: 13px;
-  background: var(--elevated);
-  color: var(--muted);
-}
-.new-session-select-control > svg { width: 16px; height: 16px; }
-.new-session-select-control select {
-  width: 100%;
-  min-width: 0;
-  height: 100%;
-  padding: 0;
-  border: 0;
-  outline: 0;
-  appearance: none;
-  background: transparent;
-  color: var(--text);
-  font-size: 12px;
-  font-weight: 620;
-  text-overflow: ellipsis;
-}
-
 .composer-model-header {
   order: 1;
   min-width: 0;
@@ -7384,9 +7368,6 @@ body[data-quick-actions="false"] [data-widget-id="core.quick-actions"] { display
 }
 .composer-model-meta i,
 .agent-reply-meta i { font-style: normal; opacity: .65; }
-.composer-modality-icons { display: inline-flex; align-items: center; gap: 2px; color: var(--muted); }
-.composer-modality-icons svg { width: 11px; height: 11px; stroke-width: 1.7; }
-
 .agent-reply-header {
   max-width: 100%;
   display: flex;
@@ -7512,137 +7493,11 @@ body[data-quick-actions="false"] [data-widget-id="core.quick-actions"] { display
   .app.mode-chat.view-session .statusbar { display: none; }
   .app.mode-chat.view-session .workspace { padding-bottom: 0; }
 
-  .stage {
-    align-items: flex-start;
-    justify-content: flex-start;
-    padding: clamp(30px, 8vh, 72px) 16px max(24px, env(safe-area-inset-bottom, 0px));
-    background: color-mix(in srgb, var(--bg) 94%, var(--elevated));
-  }
+  .stage { background: color-mix(in srgb, var(--bg) 94%, var(--elevated)); }
   .stage::before { opacity: .35; }
-  .hero { max-width: 520px; align-items: stretch; margin-inline: auto; }
-  .hero-mark,
-  .hero-sub,
-  .hero-foot,
-  /* Chips render inside the composer root (Composer.tsx), not as a sibling. */
-  .hero .starter-chips { display: none; }
-  .hero h2 {
-    max-width: 340px;
-    margin: 0;
-    background: none;
-    color: var(--text);
-    font-size: clamp(27px, 8.5vw, 36px);
-    font-weight: 630;
-    line-height: 1.08;
-    letter-spacing: -.045em;
-    text-align: left;
-    text-wrap: balance;
-  }
-  html.light .hero h2 { color: var(--text); }
-  .new-session-targets { margin: 24px 0 16px; gap: 8px; }
-  .new-session-select-control { height: 48px; padding-inline: 10px; background: var(--elevated); }
-  .new-session-select-control select { font-size: 11px; }
 
-  .composer-hero { width: 100%; }
-  .composer-simple .composer-card {
-    overflow: visible;
-    border: 1px solid transparent;
-    border-radius: 17px;
-    background:
-      linear-gradient(var(--elevated), var(--elevated)) padding-box,
-      linear-gradient(110deg, var(--blue), var(--purple), var(--red), var(--amber)) border-box;
-    box-shadow: 0 18px 45px -34px color-mix(in srgb, var(--text) 38%, transparent);
-  }
-  .composer-simple .composer-model-header { order: 1; }
-  .composer-simple .composer-input { order: 2; }
-  .composer-simple .composer-actions { order: 3; }
-  .composer-simple .composer-selectors { display: none; }
-  .composer-simple .composer-bar { display: contents; }
-  .composer-simple .composer-card textarea {
-    min-height: 82px;
-    max-height: min(30vh, 180px);
-    padding: 15px 15px 5px;
-    font-size: 13px;
-    line-height: 1.5;
-  }
-  .composer-simple .composer-sigil-hint { display: none; }
-  .composer-simple .composer-actions {
-    min-height: 54px;
-    display: flex;
-    align-items: center;
-    flex-wrap: nowrap;
-    gap: 2px;
-    padding: 4px 7px 8px;
-  }
-  .composer-simple .composer-add { display: inline-flex; order: 0; }
-  .composer-simple .composer-add-trigger,
-  .composer-simple .composer-auto-approve,
-  .composer-simple .composer-goals,
-  .composer-simple .composer-mobile-extensions .mic-btn {
-    width: 38px;
-    min-width: 38px;
-    height: 38px;
-    min-height: 38px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    padding: 0;
-    border: 0;
-    border-radius: 11px;
-    background: transparent;
-    color: var(--muted);
-  }
-  .composer-simple .composer-add-trigger:hover,
-  .composer-simple .composer-auto-approve:hover,
-  .composer-simple .composer-goals:hover,
-  .composer-simple .composer-mobile-extensions .mic-btn:hover {
-    color: var(--text);
-    background: color-mix(in srgb, var(--text) 6%, transparent);
-  }
-  .composer-simple .composer-auto-approve.on {
-    color: var(--green);
-    background: color-mix(in srgb, var(--green) 11%, transparent);
-  }
-  .composer-simple .composer-mobile-extensions {
-    order: 3;
-    display: inline-flex;
-    align-items: center;
-    padding: 0;
-  }
-  .composer-simple .composer-mobile-extensions .placed-mini-widget,
-  .composer-simple .composer-mobile-extensions .mic-control { display: contents; }
-  .composer-simple .composer-mobile-extensions .mic-label,
-  .composer-simple .composer-mobile-extensions .mic-status,
-  .composer-simple .composer-mobile-extensions .mic-retry,
-  .composer-simple .composer-mobile-extensions .mic-settings { display: none; }
-  .composer-simple .composer-actions svg { width: 18px; height: 18px; stroke-width: 1.8; }
-  .composer-simple .composer-primary { order: 5; margin-left: auto; }
-  .composer-simple .composer-bar .send {
-    width: 40px;
-    min-width: 40px;
-    height: 40px;
-    border-radius: 12px;
-    background: var(--text);
-    color: var(--bg);
-    box-shadow: none;
-  }
-  .composer-simple .composer-bar .send:hover:not(:disabled) {
-    background: var(--text-dim);
-    color: var(--bg);
-  }
-  .composer-simple .composer-bar .send svg { width: 17px; height: 17px; }
-  .composer-simple .model-picker-pop {
-    position: fixed;
-    inset: auto 8px calc(8px + env(safe-area-inset-bottom, 0px));
-    z-index: 150;
-    width: auto;
-    max-height: min(70dvh, 560px);
-  }
-  .composer-agent-badge .picker-pop {
-    position: fixed;
-    inset: auto 8px calc(8px + env(safe-area-inset-bottom, 0px));
-    z-index: 150;
-    width: auto;
-  }
+  /* The phone composer, starters, context bar, and sheet system are owned by
+     the UX-MOBILE-01 section at the end of this file. */
 
   .focus-conversation { background: color-mix(in srgb, var(--bg) 94%, var(--elevated)); }
   .timeline { padding: 22px 16px 24px; gap: 18px; }
@@ -7701,18 +7556,6 @@ body[data-quick-actions="false"] [data-widget-id="core.quick-actions"] { display
   .pending-changes-files { margin-left: auto; }
 }
 
-@media (max-width: 360px) {
-  .new-session-targets { grid-template-columns: 1fr; }
-  .hero h2 { max-width: 300px; }
-  .composer-model-meta { font-size: 8px; }
-  .composer-simple .composer-add-trigger,
-  .composer-simple .composer-auto-approve,
-  .composer-simple .composer-goals,
-  .composer-simple .composer-mobile-extensions .mic-btn {
-    width: 35px;
-    min-width: 35px;
-  }
-}
 
 /* Configurable session actions and footer --------------------------------- */
 .session-pin {
@@ -7751,9 +7594,35 @@ body[data-quick-actions="false"] [data-widget-id="core.quick-actions"] { display
   background: color-mix(in srgb, var(--green) 11%, transparent);
 }
 .focus-conversation > .pending-changes-bar {
-  width: min(920px, calc(100% - 72px));
+  width: min(768px, calc(100% - 48px));
+  flex: none;
+  min-height: 28px;
+  margin: 8px auto 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+.focus-conversation > .placed-slot-widget:has(.pending-changes-bar) {
+  width: min(768px, calc(100% - 48px));
+  margin: 8px auto 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+.focus-conversation > .placed-mini-widget:has(.pending-changes-bar) {
+  display: block;
+  width: min(768px, calc(100% - 48px));
   flex: none;
   margin: 8px auto 0;
+}
+.focus-conversation > .placed-mini-widget:has(.pending-changes-bar) > .pending-changes-bar { width: 100%; }
+.pending-changes-bar {
+  min-height: 28px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
 }
 
 /* Goal editing is a focused modal, never an inline strip. */
@@ -8049,8 +7918,9 @@ body[data-quick-actions="false"] [data-widget-id="core.quick-actions"] { display
 .side-foot { grid-template-columns: repeat(3, 42px); justify-content: space-between; box-shadow: none; }
 
 .header-chat { gap: 4px; }
-.header-chat .header-spacer { flex: 0 0 4px; }
+.header-chat .header-spacer { flex: 1 1 auto; min-width: 12px; }
 .header-chat .view-switcher { flex: 0 1 auto; }
+.header-actions, .header-user-menu, .header .overflow-trigger { flex: none; }
 
 .provider-logo {
   display: grid; place-items: center; flex: none; overflow: hidden;
@@ -8111,9 +7981,803 @@ body[data-quick-actions="false"] [data-widget-id="core.quick-actions"] { display
 .widget-place-chip[draggable="true"] { cursor: grab; }
 .project-icon-input { width: 74px; text-align: center; font-size: 18px; }
 
+/* Project rows stay calm until they are acted on. The new-chat affordance is
+   available to keyboard users as well as on hover, without competing with the
+   project name as the primary target. */
+.project-new-session {
+  position: absolute; right: 34px; top: 50%; translate: 0 -50%; z-index: 1;
+  width: 28px; height: 28px; display: grid; place-items: center; padding: 0;
+  border: 1px solid transparent; border-radius: 8px; background: transparent;
+  color: var(--accent); opacity: 0; pointer-events: none;
+}
+.project-new-session svg { width: 15px; height: 15px; }
+.project-card-shell:hover .project-new-session,
+.project-card-shell:focus-within .project-new-session { opacity: 1; pointer-events: auto; }
+.project-new-session:hover, .project-new-session:focus-visible { border-color: var(--border-soft); background: var(--raised); }
+
+.project-appearance-dialog { width: min(420px, calc(100vw - 32px)); }
+.project-appearance-body { display: grid; gap: 14px; padding: 20px; }
+.project-appearance-body p { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
+.project-appearance-body > label { display: grid; gap: 6px; color: var(--text-dim); font-size: 12px; font-weight: 650; }
+.project-appearance-body input:not([type="color"]) { height: 36px; padding: 0 10px; }
+.project-color-input { display: flex; align-items: center; gap: 10px; }
+.project-color-input input { width: 42px; height: 32px; padding: 2px; border-radius: 8px; }
+.project-color-input code { color: var(--muted); }
+.project-appearance-body .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
+
 @media (max-width: 820px) {
   .side-foot { grid-template-columns: 42px minmax(0, 1fr) 42px 42px; }
   .agent-reply-actions { opacity: 1; }
+  .timeline { padding-inline: 12px; }
+  .focus-conversation > .question-cards,
+  .focus-conversation > .placed-mini-widget:has(.pending-changes-bar) { width: calc(100% - 24px); }
+  .focus-conversation > .placed-mini-widget:has(.pending-changes-bar) > .pending-changes-bar { margin: 0; }
+}
+
+/* =========================================================================
+   UX-MOBILE-01 — mobile-first new chat
+   -------------------------------------------------------------------------
+   One place owns the redesigned surfaces: the shared sheet system, the
+   three-zone fresh-session screen (empty state · starters · sticky
+   interaction dock), the compact project/branch context bar, and the
+   adaptive composer. Geometry follows the VISUAL viewport (mobileViewport.ts)
+   so the on-screen keyboard never covers an active control, and every
+   interactive box is at least --tap.
+   ========================================================================= */
+
+/* ---- shared sheet system (§28/§46) -------------------------------------- */
+.sheet-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 220;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  padding-top: max(var(--space-5), var(--safe-top));
+  background: var(--scrim);
+}
+.sheet {
+  position: relative;
+  width: min(560px, 100%);
+  min-height: 0;
+  /* Never 100vh: the visible band is what the user can actually reach. */
+  max-height: calc(var(--visual-vh, 100dvh) - max(var(--space-5), var(--safe-top)));
+  /* Sit above the keyboard instead of behind it (§21/§47). */
+  margin-bottom: var(--keyboard-inset, 0px);
+  display: flex;
+  flex-direction: column;
+  padding-bottom: max(var(--space-2), var(--safe-bottom));
+  border: 1px solid var(--border-soft);
+  border-bottom: 0;
+  border-radius: var(--radius-sheet) var(--radius-sheet) 0 0;
+  background: var(--panel);
+  box-shadow: var(--shadow-lg);
+  touch-action: manipulation;
+  animation: sheet-rise 190ms cubic-bezier(.22, .61, .36, 1);
+  transition: transform 140ms ease;
+}
+.sheet-tall { height: calc(var(--visual-vh, 100dvh) - max(var(--space-5), var(--safe-top))); }
+@keyframes sheet-rise { from { transform: translateY(18px); opacity: .55; } to { transform: none; opacity: 1; } }
+@media (prefers-reduced-motion: reduce) {
+  .sheet { animation: none; transition: none; }
+}
+/* The page behind a sheet never scrolls (§24). */
+html[data-sheet="open"], html[data-sheet="open"] body { overflow: hidden; }
+
+.sheet-grabber {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 22px;
+  padding-top: 8px;
+  cursor: grab;
+  touch-action: none;
+}
+.sheet-grabber i {
+  width: 38px;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--hair-strong);
+}
+.sheet-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3) var(--space-2) var(--space-4);
+}
+.sheet-title {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  color: var(--text);
+  font-size: 17px;
+  font-weight: 650;
+  letter-spacing: -.01em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sheet-head-action,
+.sheet-close {
+  flex: none;
+  min-width: var(--tap);
+  height: var(--tap);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 var(--space-2);
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--text-dim);
+  font-size: var(--font-label);
+  font-weight: 600;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+.sheet-head-action[aria-pressed="true"] { color: var(--accent); }
+.sheet-head-action:active,
+.sheet-close:active { background: var(--elevated); }
+.sheet-search {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0 var(--space-4) var(--space-2);
+  padding: 0 var(--space-3);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-control);
+  background: var(--input-bg);
+  color: var(--muted);
+}
+.sheet-search input {
+  flex: 1;
+  min-width: 0;
+  height: var(--control-h-lg);
+  padding: 0;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: var(--text);
+  /* 16px: below this iOS zooms the page on focus (§32). */
+  font-size: var(--font-input);
+}
+.sheet-search input::-webkit-search-cancel-button { display: none; }
+.sheet-search-clear {
+  flex: none;
+  width: 32px;
+  height: 32px;
+  display: inline-grid;
+  place-items: center;
+  border: 0;
+  border-radius: 999px;
+  background: var(--elevated);
+  color: var(--muted);
+  cursor: pointer;
+}
+.sheet-body {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+  padding: 0 var(--space-2) var(--space-2);
+}
+.sheet-foot {
+  flex: none;
+  padding: var(--space-2) var(--space-3) 0;
+  border-top: 1px solid var(--hair);
+}
+.sheet-foot-action {
+  width: 100%;
+  min-height: var(--tap);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--accent);
+  font-size: var(--font-label);
+  font-weight: 620;
+  cursor: pointer;
+}
+.sheet-foot-action svg { width: 18px; height: 18px; }
+.sheet-section { padding-top: var(--space-1); }
+.sheet-section-head {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin: 0;
+  padding: var(--space-2) var(--space-3) var(--space-1);
+  background: var(--panel);
+  color: var(--faint);
+  font-size: var(--font-meta);
+  font-weight: 650;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+.sheet-section-head small { color: var(--faint); font-weight: 600; }
+.sheet-section-toggle {
+  flex: 1;
+  min-height: var(--tap);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  letter-spacing: inherit;
+  text-transform: inherit;
+  cursor: pointer;
+}
+.sheet-section-toggle small { margin-right: auto; }
+.sheet-section-caret { display: inline-flex; transition: transform 140ms ease; }
+.sheet-section-caret svg { width: 16px; height: 16px; }
+.sheet-section-caret:not(.open) { transform: rotate(-90deg); }
+.sheet-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-width: 0;
+  border-radius: var(--radius-control);
+}
+.sheet-row.selected { background: var(--accent-wash); }
+.sheet-row-main {
+  flex: 1;
+  min-width: 0;
+  min-height: 52px;
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-1) var(--space-3);
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+.sheet-row-main:active { background: var(--elevated); }
+.sheet-row-icon { flex: none; display: inline-flex; color: var(--muted); }
+.sheet-row-icon svg { width: 18px; height: 18px; }
+.sheet-row-copy { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.sheet-row-copy strong {
+  overflow: hidden;
+  font-size: 15px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sheet-row-copy small {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: var(--font-meta);
+  line-height: var(--font-meta-lh);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.sheet-row-check { flex: none; display: inline-flex; color: var(--accent); }
+.sheet-row-tools { flex: none; display: inline-flex; align-items: center; }
+.sheet-row-star,
+.sheet-row-tool {
+  flex: none;
+  width: var(--tap);
+  height: var(--tap);
+  display: inline-grid;
+  place-items: center;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--faint);
+  font-size: 17px;
+  line-height: 1;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+.sheet-row-star svg { width: 18px; height: 18px; }
+.sheet-row-star.on { color: var(--accent); }
+.sheet-row-star.on svg { fill: currentColor; }
+.sheet-row-tool:disabled { opacity: .35; cursor: default; }
+.sheet-row-tool.danger { color: var(--red); }
+.sheet-row-tool svg { width: 17px; height: 17px; }
+.sheet-empty { margin: 0; padding: var(--space-5) var(--space-4); color: var(--muted); font-size: var(--font-label); text-align: center; }
+
+/* Starter authoring form */
+.starter-form { display: flex; flex-direction: column; gap: var(--space-4); padding: var(--space-2) var(--space-3) var(--space-4); }
+.starter-field { display: flex; flex-direction: column; gap: var(--space-2); }
+.starter-field > span { color: var(--muted); font-size: var(--font-meta); font-weight: 650; letter-spacing: .04em; text-transform: uppercase; }
+.starter-field input,
+.starter-field textarea {
+  width: 100%;
+  min-width: 0;
+  padding: var(--space-3);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-control);
+  background: var(--input-bg);
+  color: var(--text);
+  font-size: var(--font-input);
+  font-family: inherit;
+  line-height: 1.45;
+  resize: vertical;
+}
+.starter-field input { height: var(--control-h-lg); padding-block: 0; }
+.starter-icon-choices { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.starter-icon-choice {
+  width: var(--tap);
+  height: var(--tap);
+  display: inline-grid;
+  place-items: center;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-control);
+  background: var(--elevated);
+  color: var(--text-dim);
+  cursor: pointer;
+}
+.starter-icon-choice.on { border-color: var(--accent-line); background: var(--accent-wash); color: var(--accent); }
+.starter-icon-choice svg { width: 19px; height: 19px; }
+.starter-form-actions { display: flex; justify-content: flex-end; gap: var(--space-2); }
+.starter-form-actions button { min-height: var(--tap); padding-inline: var(--space-4); border-radius: var(--radius-control); }
+
+/* Wider viewports keep one behavior model but a centered, bounded dialog. */
+@media (min-width: 481px) {
+  .sheet-backdrop { align-items: center; padding: var(--space-5); }
+  .sheet {
+    max-height: min(calc(var(--visual-vh, 100dvh) - var(--space-6)), 720px);
+    border: 1px solid var(--border-soft);
+    border-radius: var(--radius-sheet);
+    padding-bottom: var(--space-2);
+  }
+  .sheet-tall { height: min(calc(var(--visual-vh, 100dvh) - var(--space-6)), 720px); }
+  .sheet-grabber { display: none; }
+}
+
+/* ---- fresh-session screen: three zones (§2) ----------------------------- */
+.stage-new {
+  --dock-bg: var(--bg);
+  align-items: stretch;
+  justify-content: flex-start;
+  padding: 0;
+  overflow: hidden;
+}
+.stage-new .hero {
+  flex: 1;
+  min-height: 0;
+  max-width: none;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+}
+.hero-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-4);
+  padding: var(--space-6) var(--screen-gutter) var(--space-5);
+}
+.hero-body > * { width: 100%; max-width: 640px; }
+.stage-new .hero h2 {
+  margin: 0;
+  background: none;
+  color: var(--text);
+  font-size: var(--font-title);
+  font-weight: 600;
+  line-height: var(--font-title-lh);
+  letter-spacing: -.03em;
+  text-align: center;
+  text-wrap: balance;
+}
+/* §2: the project name stays branded, but delicately — it must not be the
+   loudest thing on the screen. */
+.hero-body .polyth-gradient {
+  background-image: linear-gradient(96deg, var(--accent), color-mix(in srgb, var(--purple) 65%, var(--accent)));
+}
+.stage-new .hero-sub {
+  margin: 0;
+  max-width: 420px;
+  color: var(--muted);
+  font-size: var(--font-label);
+  line-height: 1.5;
+  text-align: center;
+}
+.hero-starters {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-2);
+}
+.starter-chip {
+  max-width: 100%;
+  min-height: var(--tap);
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 0 var(--space-4);
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  background: var(--elevated);
+  color: var(--text-dim);
+  font-size: var(--font-label);
+  font-weight: 560;
+  line-height: 1;
+  cursor: pointer;
+  touch-action: manipulation;
+  transition: background-color 120ms ease, border-color 120ms ease, transform 120ms ease;
+}
+.starter-chip:hover { color: var(--text); border-color: var(--border); }
+.starter-chip:active { transform: scale(.98); background: var(--raised); }
+.starter-chip-icon { flex: none; display: inline-flex; color: var(--muted); }
+.starter-chip-icon svg { width: 17px; height: 17px; }
+.starter-chip-text { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.starter-chip-add { width: var(--tap); padding: 0; justify-content: center; }
+.starter-chip-add svg { width: 20px; height: 20px; }
+@media (prefers-reduced-motion: reduce) {
+  .starter-chip { transition: none; }
+  .starter-chip:active { transform: none; }
+}
+
+/* §50: recent work stays a light list — never a dashboard of cards. */
+.hero-recent { display: flex; flex-direction: column; gap: var(--space-1); }
+.hero-recent-head {
+  margin: 0 0 var(--space-1) var(--space-2);
+  color: var(--faint);
+  font-size: var(--font-meta);
+  font-weight: 650;
+  letter-spacing: .06em;
+  text-transform: uppercase;
+}
+.hero-recent ul { margin: 0; padding: 0; list-style: none; }
+.hero-recent-row {
+  width: 100%;
+  min-height: var(--tap);
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: 0 var(--space-2);
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--text-dim);
+  font-size: var(--font-label);
+  text-align: left;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+.hero-recent-row:hover { color: var(--text); background: var(--elevated); }
+.hero-recent-row:active { background: var(--raised); }
+.hero-recent-title { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.hero-recent-time { flex: none; color: var(--faint); font-size: var(--font-meta); }
+
+/* Sticky interaction zone: context + composer, always above the keyboard. */
+.hero-dock {
+  flex: none;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-2) var(--screen-gutter) max(var(--space-3), var(--safe-bottom));
+  background: linear-gradient(180deg, transparent, var(--dock-bg) 26%);
+}
+.hero-dock > * { width: 100%; max-width: 720px; margin-inline: auto; }
+
+/* ---- project / branch context bar (§5/§6/§8) ---------------------------- */
+.session-context-bar { display: flex; align-items: center; gap: var(--space-1); min-width: 0; }
+.context-selector { flex: 1 1 50%; min-width: 0; display: flex; }
+.context-trigger {
+  flex: 1;
+  min-width: 0;
+  min-height: var(--tap);
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: 0 var(--space-2);
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--text-dim);
+  font-size: var(--font-label);
+  font-weight: 570;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+.context-trigger:hover { color: var(--text); background: var(--elevated); }
+.context-trigger:active { background: var(--raised); }
+.context-trigger:disabled { opacity: .6; cursor: default; }
+.context-trigger-icon { flex: none; display: inline-flex; color: var(--muted); }
+.context-trigger-icon svg { width: 17px; height: 17px; }
+.context-trigger-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.context-trigger-caret { flex: none; display: inline-flex; color: var(--faint); }
+.context-trigger-caret svg { width: 15px; height: 15px; }
+.context-sep { flex: none; width: 1px; height: 18px; background: var(--hair-strong); }
+
+/* ---- adaptive composer chrome shared by every width --------------------- */
+.model-trigger-mobile {
+  min-width: 0;
+  min-height: var(--tap);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 0 var(--space-1);
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--text);
+  font-size: 16px;
+  font-weight: 620;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+.model-trigger-mobile:active { background: var(--raised); }
+.model-trigger-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.model-trigger-caret { flex: none; display: inline-flex; color: var(--muted); }
+.model-trigger-caret svg { width: 16px; height: 16px; }
+
+/* ---- phone (≤480px): composition, keyboard, tap targets ----------------- */
+@media (max-width: 480px) {
+  /* §29/§31/§45: the shell is exactly as tall as the VISIBLE viewport, so an
+     open keyboard shrinks the app instead of hiding the composer under it. */
+  .app { height: var(--visual-vh, 100dvh); }
+  .app.mode-chat.view-session { height: var(--visual-vh, 100dvh); min-height: 0; }
+
+  /* §33/§34: no child may widen the viewport. */
+  html, body { max-width: 100%; overflow-x: hidden; }
+  .app, .workspace, .main, .stage, .hero, .hero-body, .hero-dock,
+  .session-context-bar, .composer-card { min-width: 0; max-width: 100%; }
+  /* §32: 16px minimum kills Safari's auto-zoom-on-focus, which is what made
+     the layout "fall apart" — not the zoom gesture itself. */
+  input, textarea, select { font-size: max(16px, 1em); }
+  button, a, [role="button"] { touch-action: manipulation; }
+
+  .stage-new { --dock-bg: color-mix(in srgb, var(--bg) 94%, var(--elevated)); }
+  .hero-body { padding: var(--space-5) var(--screen-gutter) var(--space-4); }
+  .stage-new .hero h2 { font-size: clamp(26px, 7.6vw, 32px); line-height: 1.18; }
+  /* Last-resort guard: on a very short band (small phone + tall keyboard)
+     the dock scrolls instead of clipping its own send button. */
+  .hero-dock {
+    gap: 2px;
+    padding-inline: var(--space-3);
+    max-height: 100%;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
+
+  /* §43: with the keyboard up the empty state yields — the dock never moves. */
+  body[data-keyboard="open"] .hero-body { justify-content: flex-start; padding-top: var(--space-3); }
+  body[data-keyboard="open"] .hero-sub,
+  body[data-keyboard="open"] .hero-recent { display: none; }
+  body[data-keyboard="open"] .stage-new .hero h2 { font-size: 21px; line-height: 1.25; }
+  /* A short visible band (small phone + tall keyboard, or landscape) can not
+     hold both zones: the empty state stands down completely and the model
+     metadata folds away, so context + composer always fit (§43). */
+  body[data-band="short"] .hero-body { display: none; }
+  body[data-band="short"] .composer-mobile .composer-model-meta { display: none; }
+  body[data-band="short"] .composer-mobile .composer-model-header { padding-block: 0; }
+
+  /* ---- header: two actions, ≥44px targets (§19/§21/§37) ---- */
+  .mobile-chat-header .header-drawer-btn,
+  .mobile-header-action {
+    width: var(--tap);
+    height: var(--tap);
+    min-width: var(--tap);
+  }
+  .mobile-session-title { height: var(--tap); font-size: 13px; }
+
+  /* §37/§55: the session drawer opened from this screen is a touch surface
+     too — its controls get real hit areas, whatever the glyph size. */
+  .sidebar .icon-btn,
+  .sidebar-layout-btn,
+  .sidebar-switch-btn,
+  .settings-btn,
+  .sidebar-select-toggle,
+  .project-new-session,
+  .project-menu-btn,
+  .sidebar-sort > button,
+  .sidebar-search > button,
+  .session-worktree-empty-actions > button {
+    min-width: var(--tap);
+    min-height: var(--tap);
+  }
+  .session-worktree-toggle,
+  .sidebar .session-row { min-height: var(--tap); }
+
+  /* ---- composer ---- */
+  .composer-simple .composer-selectors { display: none; }
+  .composer-simple .composer-bar { display: contents; }
+  .composer-simple .composer-sigil-hint,
+  .composer-mobile .composer-focus-hint { display: none; }
+  .composer-mobile .composer-card {
+    display: flex;
+    overflow: visible;
+    border: 1px solid var(--border-soft);
+    border-radius: var(--radius-surface);
+    background: var(--elevated);
+    box-shadow: 0 10px 30px -26px color-mix(in srgb, var(--text) 55%, transparent);
+    transition: border-color 160ms ease, box-shadow 160ms ease;
+  }
+  /* §11/§15: the gradient is a focus / active-run accent, never permanent
+     chrome that turns the composer into an advertisement. */
+  .composer-mobile .composer-card:focus-within,
+  .composer-mobile .composer-card:has(.composer-stop-primary) {
+    border-color: transparent;
+    background:
+      linear-gradient(var(--elevated), var(--elevated)) padding-box,
+      linear-gradient(110deg, var(--blue), var(--purple), var(--red), var(--amber)) border-box;
+  }
+
+  /* Collapsed (§10): one 56px row — add · placeholder · voice. */
+  .composer-mobile.composer-collapsed .composer-card {
+    flex-direction: row;
+    align-items: center;
+    gap: var(--space-1);
+    min-height: 56px;
+    padding: 0 var(--space-2);
+  }
+  .composer-mobile.composer-collapsed .composer-model-header { display: none; }
+  .composer-mobile.composer-collapsed .composer-actions { display: contents; }
+  .composer-mobile.composer-collapsed .composer-add { order: 1; }
+  .composer-mobile.composer-collapsed .composer-input { order: 2; flex: 1 1 auto; min-width: 0; }
+  .composer-mobile.composer-collapsed .composer-mobile-extensions { order: 3; }
+  .composer-mobile.composer-collapsed .composer-primary { order: 4; }
+  .composer-mobile.composer-collapsed .composer-card textarea {
+    min-height: 44px;
+    max-height: 44px;
+    padding: 12px 0;
+    overflow: hidden;
+  }
+  /* §51: the resting row carries add · prompt · voice and nothing else.
+     Session switches (auto-approve, goals) appear once the composer is in
+     use, so a 320px screen never has to fit five controls in one line. */
+  .composer-mobile.composer-collapsed .composer-auto-approve,
+  .composer-mobile.composer-collapsed .composer-goals { display: none; }
+
+  /* Expanded (§11/§42): model + mode header, metadata microtext, actions. */
+  .composer-mobile.composer-expanded .composer-card { flex-direction: column; padding: 0; }
+  .composer-mobile .composer-model-header {
+    order: 1;
+    min-width: 0;
+    display: grid;
+    grid-template-columns: 28px minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 0 var(--space-2);
+    padding: var(--space-1) var(--space-3) 0;
+  }
+  .composer-mobile .composer-input { order: 2; }
+  .composer-mobile .composer-actions { order: 3; }
+  .composer-mobile .composer-model-meta {
+    grid-column: 2 / -1;
+    padding-bottom: var(--space-1);
+    color: var(--muted);
+    font-size: var(--font-meta);
+    line-height: var(--font-meta-lh);
+    letter-spacing: .01em;
+  }
+  /* §9: the whole model name is the target, not a 12px chevron. */
+  .composer-mobile .composer-model-header .model-picker { width: 100%; min-width: 0; }
+  .composer-mobile .composer-model-header .model-trigger-mobile { width: 100%; }
+  /* §10/§14: Build is a mode control with a caret, inside a 44px touch box. */
+  .composer-mobile .composer-agent-badge {
+    min-height: var(--tap);
+    display: inline-flex;
+    align-items: center;
+  }
+  .composer-mobile .composer-agent-badge .picker-chip {
+    min-height: var(--control-h-sm);
+    max-width: 132px;
+    gap: 3px;
+    padding: 0 10px 0 12px;
+    font-size: 13px;
+  }
+  .composer-mobile .composer-agent-badge .picker-caret {
+    display: inline-flex;
+    color: inherit;
+    font-size: 11px;
+    opacity: .8;
+  }
+  .composer-mobile .composer-card textarea {
+    min-height: 26px;
+    /* §20: grows with the text, then scrolls internally. */
+    max-height: 42dvh;
+    padding: var(--space-2) var(--space-3) 0;
+    font-size: var(--font-input);
+    line-height: 1.45;
+  }
+  .composer-mobile .composer-actions {
+    min-height: 52px;
+    display: flex;
+    align-items: center;
+    flex-wrap: nowrap;
+    gap: var(--space-1);
+    padding: var(--space-1) var(--space-2) var(--space-2);
+  }
+  .composer-mobile .composer-add { display: inline-flex; }
+  .composer-mobile .composer-primary { margin-left: auto; }
+  .composer-mobile .composer-mobile-extensions { display: inline-flex; align-items: center; padding: 0; }
+  .composer-mobile .composer-mobile-extensions .placed-mini-widget,
+  .composer-mobile .composer-mobile-extensions .mic-control { display: contents; }
+  .composer-mobile .composer-mobile-extensions .mic-label,
+  .composer-mobile .composer-mobile-extensions .mic-status,
+  .composer-mobile .composer-mobile-extensions .mic-retry,
+  .composer-mobile .composer-mobile-extensions .mic-settings { display: none; }
+  .composer-mobile .composer-add-label { display: none; }
+
+  /* §37: every composer control is a ≥44px box, whatever the glyph size. */
+  .composer-mobile .composer-add-trigger,
+  .composer-mobile .composer-auto-approve,
+  .composer-mobile .composer-goals,
+  .composer-mobile .composer-mobile-extensions .mic-btn {
+    width: var(--tap);
+    min-width: var(--tap);
+    height: var(--tap);
+    min-height: var(--tap);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    border: 0;
+    border-radius: var(--radius-control);
+    background: transparent;
+    color: var(--muted);
+  }
+  .composer-mobile .composer-add-trigger:active,
+  .composer-mobile .composer-auto-approve:active,
+  .composer-mobile .composer-goals:active,
+  .composer-mobile .composer-mobile-extensions .mic-btn:active {
+    color: var(--text);
+    background: color-mix(in srgb, var(--text) 8%, transparent);
+  }
+  .composer-mobile .composer-auto-approve.on {
+    color: var(--green);
+    background: color-mix(in srgb, var(--green) 11%, transparent);
+  }
+  .composer-mobile .composer-actions svg { width: 20px; height: 20px; stroke-width: 1.8; }
+  .composer-mobile .composer-bar .send,
+  .composer-mobile .composer-bar .stop {
+    width: var(--tap);
+    min-width: var(--tap);
+    height: var(--tap);
+    padding: 0;
+    border: 0;
+    border-radius: 999px;
+    background: var(--text);
+    color: var(--bg);
+    box-shadow: none;
+  }
+  .composer-mobile .composer-bar .send svg,
+  .composer-mobile .composer-bar .stop svg { width: 18px; height: 18px; }
+  /* §16: a disabled send is quiet, never a heavy grey block. */
+  .composer-mobile .composer-bar .send:disabled {
+    background: color-mix(in srgb, var(--text) 10%, transparent);
+    color: var(--faint);
+  }
+  .composer-mobile .composer-action-label { display: none; }
+
+  /* §16/§18: empty draft → microphone, typed draft → send. Never both. */
+  .composer-mobile:not(.composer-has-draft) .composer-primary .send { display: none; }
+  .composer-mobile.composer-has-draft .composer-mobile-extensions .mic-btn { display: none; }
+  body[data-dictate="false"] .composer-mobile:not(.composer-has-draft) .composer-primary .send {
+    display: inline-flex;
+  }
+
+  /* Docked (in-conversation) composer keeps the same sticky contract. */
+  .focus-conversation > .composer.composer-mobile {
+    padding: var(--space-1) var(--space-3) max(var(--space-2), var(--safe-bottom));
+  }
 }
 
 /* ---------- SSH remotes (settings page + remote-project picker) ---------- */

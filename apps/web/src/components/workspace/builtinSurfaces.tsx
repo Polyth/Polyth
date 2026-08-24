@@ -18,8 +18,8 @@ import WalkthroughView from "../WalkthroughView.tsx";
 import ScheduleView from "../ScheduleView.tsx";
 import GithubView from "../GithubView.tsx";
 import { activateProject, setUiError, useActiveModel, useStore } from "../../store.ts";
-import { restoreSession } from "../../init.ts";
-import { friendlyError, shortcutLabel } from "../../settings.ts";
+import { openSession, restoreSession } from "../../init.ts";
+import { friendlyError } from "../../settings.ts";
 import { composerBlockedByArchive, sessionSurfaceKind } from "../../sessionSurface.ts";
 import { registerWorkspaceSurface } from "../../workspace/surfaceRegistry.ts";
 import WidgetCanvas from "../../widgets/WidgetCanvas.tsx";
@@ -27,9 +27,25 @@ import { useWorkspaceMode } from "../../widgets/workspaceMode.ts";
 import SlotHost from "../slots/SlotHost.ts";
 import { api, type GitBranches, type Worktree } from "../../api.ts";
 import { Icon } from "../../icons.tsx";
+import SessionContextBar, { type ContextChoice } from "../mobile/SessionContextBar.tsx";
+import StarterPicker, { StarterIcon } from "../mobile/StarterPicker.tsx";
+import { requestComposerInsert } from "../../composerInsert.ts";
+import { useGitStatus } from "../../gitStatusStore.ts";
+import { useShellMode } from "../../responsiveShell.ts";
+import { tapFeedback } from "../../haptics.ts";
+import { ago, displaySessionTitle } from "../../format.ts";
+import {
+  noteStarterUsed,
+  starterContextFrom,
+  useStarterPrefs,
+  visibleStarters,
+} from "../../starters.ts";
 
-// Large polyth-style hero for a fresh session (or no session yet):
-// centered headline, the composer as an elevated card, and suggestion chips.
+// UX-MOBILE-01 §2: the fresh-session screen is three zones — top navigation
+// (Header), a calm centered empty state with quick starters, and ONE sticky
+// interaction zone (project/branch context + composer) pinned above the
+// keyboard. Project and branch never split the page between the headline and
+// the composer any more.
 function SessionHero() {
   const projects = useStore((s) => s.projectRegistry.projects);
   const projectId = useStore((s) => s.activeProjectId);
@@ -103,66 +119,120 @@ function SessionHero() {
   }, [worktrees, branches, branch]);
   const selectedTarget = branchChoices.find((choice) => choice.id === selectedBranchId)?.target
     ?? { kind: "main" as const };
+  const currentBranchLabel = branchChoices.find((choice) => choice.id === selectedBranchId)?.label
+    ?? branches.current
+    ?? branch
+    ?? "main";
+
+  // Quick starters (§3/§35): pinned first, then suggestions that follow the
+  // real workspace state — a dirty worktree offers review/commit work, a clean
+  // one offers exploration and planning.
+  const shell = useShellMode();
+  const gitStatus = useGitStatus(projectId, false);
+  const starterPrefs = useStarterPrefs();
+  const [starterPickerOpen, setStarterPickerOpen] = useState(false);
+  const starterContext = useMemo(
+    () => starterContextFrom(gitStatus, { hasHistory: false, lastTurnFinished: false }),
+    [gitStatus],
+  );
+  const chips = useMemo(
+    () => visibleStarters(starterPrefs, starterContext, shell === "phone" ? 2 : 3),
+    [starterPrefs, starterContext, shell],
+  );
+  const runStarter = (prompt: string, id?: string) => {
+    if (id) noteStarterUsed(id);
+    if (shell === "phone") tapFeedback();
+    requestComposerInsert(prompt);
+  };
+
+  const projectChoices: ContextChoice[] = projects.map((candidate) => ({
+    id: candidate.id,
+    label: candidate.name || candidate.path,
+    detail: candidate.name ? candidate.path : "",
+  }));
 
   return (
-    <div className="stage">
+    <div className="stage stage-new">
       <div className="hero">
-        <div className="hero-mark">p</div>
-        <h2>What are we working on in <span className="polyth-gradient">{name}</span>?</h2>
-        <div className="new-session-targets" aria-label="New session location">
-          <label className="new-session-select">
-            <span>Project</span>
-            <span className="new-session-select-control">
-              <Icon.files />
-              <select
-                value={projectId ?? ""}
-                aria-label="Project for new session"
-                onChange={(event) => activateProject(event.target.value || null)}
+        <div className="hero-body">
+          <h2>What are we working on in <span className="polyth-gradient">{name}</span>?</h2>
+          <p className="hero-sub">Start a task or continue where you left off.</p>
+          <div className="hero-starters" aria-label="Quick starters">
+            {chips.map((starter) => (
+              <button
+                key={starter.id}
+                type="button"
+                className="starter-chip"
+                title={starter.description ?? starter.label}
+                onClick={() => runStarter(starter.prompt, starter.id)}
               >
-                {projects.map((candidate) => (
-                  <option key={candidate.id} value={candidate.id}>
-                    {candidate.name || candidate.path}
-                  </option>
-                ))}
-              </select>
-              <Icon.chevronDown />
-            </span>
-          </label>
-          <label className="new-session-select">
-            <span>Branch</span>
-            <span className="new-session-select-control">
-              <Icon.branch />
-              <select
-                value={selectedBranchId}
-                aria-label="Branch for new session"
-                disabled={branchLoading}
-                onChange={(event) => setSelectedBranchId(event.target.value)}
-              >
-                {branchLoading && <option value="main">Loading branches…</option>}
-                {!branchLoading && branchChoices.map((choice) => (
-                  <option key={choice.id} value={choice.id}>
-                    {choice.label} — {choice.detail}
-                  </option>
-                ))}
-              </select>
-              <Icon.chevronDown />
-            </span>
-          </label>
+                <span className="starter-chip-icon" aria-hidden="true"><StarterIcon id={starter.icon} /></span>
+                <span className="starter-chip-text">{starter.label}</span>
+              </button>
+            ))}
+            <button
+              type="button"
+              className="starter-chip starter-chip-add"
+              aria-label="Add a starter"
+              title="Add a starter"
+              onClick={() => setStarterPickerOpen(true)}
+            >
+              <Icon.plus />
+            </button>
+          </div>
+          <RecentSessions projectId={projectId} />
         </div>
-        <p className="hero-sub">
-          Polyth is attached to <b>{name}</b>
-          {branch ? <> on <span className="mono">{branch}</span></> : null}.
-          {" "}Describe a task, or start from one of the suggestions below.
-        </p>
-        <Composer variant="hero" newSessionTarget={selectedTarget} />
-        <div className="hero-foot">
-          <span className="kbd">{shortcutLabel("K")}</span> commands
-          <span className="hero-sep">·</span>
-          <span className="kbd">{shortcutLabel("N")}</span> new session
-          <span className="hero-sep">·</span>
-          <span className="kbd">{shortcutLabel(",")}</span> settings
+        <div className="hero-dock">
+          <SessionContextBar
+            projectName={name}
+            projects={projectChoices}
+            onPickProject={(id) => activateProject(id || null)}
+            branchName={currentBranchLabel}
+            branches={branchChoices.map((choice) => ({ id: choice.id, label: choice.label, detail: choice.detail }))}
+            {...(branchLoading ? { branchLoading: true } : {})}
+            onPickBranch={setSelectedBranchId}
+          />
+          <Composer variant="hero" newSessionTarget={selectedTarget} />
         </div>
       </div>
+      {starterPickerOpen && (
+        <StarterPicker
+          context={starterContext}
+          onPick={(starter) => runStarter(starter.prompt)}
+          onClose={() => setStarterPickerOpen(false)}
+        />
+      )}
+    </div>
+  );
+}
+
+/** §50: recent work stays a light, bounded list — the new-chat screen is a
+ *  starting point, never a dashboard. Three rows, no cards, no metrics. */
+function RecentSessions({ projectId }: { projectId: string | null }) {
+  const sessions = useStore((s) => s.sessions);
+  const recent = useMemo(() => sessions
+    .filter((session) => session.projectId === projectId && session.status !== "archived")
+    .sort((a, b) => (b.lastTurnAt ?? b.updatedAt) - (a.lastTurnAt ?? a.updatedAt))
+    .slice(0, 3), [sessions, projectId]);
+  if (recent.length === 0) return null;
+  return (
+    <div className="hero-recent">
+      <h3 className="hero-recent-head">Recent</h3>
+      <ul>
+        {recent.map((session) => (
+          <li key={session.id}>
+            <button
+              type="button"
+              className="hero-recent-row"
+              onClick={() => void openSession(session.id).catch((error) =>
+                setUiError(friendlyError("Couldn’t open the session", error)))}
+            >
+              <span className="hero-recent-title">{displaySessionTitle(session.title, session.id)}</span>
+              <span className="hero-recent-time">{ago(session.lastTurnAt ?? session.updatedAt)}</span>
+            </button>
+          </li>
+        ))}
+      </ul>
     </div>
   );
 }

@@ -7,6 +7,10 @@ import {
 } from "react";
 import { filterPickerItems, type PickerItem } from "../picker.ts";
 import { useEscape } from "../useEscape.ts";
+import { useShellMode } from "../responsiveShell.ts";
+import { dismissKeyboard } from "../mobileViewport.ts";
+import { tapFeedback } from "../haptics.ts";
+import Sheet, { SheetRow } from "./mobile/Sheet.tsx";
 
 const MAX_SHOWN = 200;
 
@@ -42,6 +46,10 @@ export interface PickerProps {
   ariaLabel?: string;
   /** Icon rendered in place of the uppercase label key (compact triggers). */
   triggerIcon?: ReactNode;
+  /** UX-MOBILE-01 §46: open as the shared bottom sheet on phones instead of a
+   *  desktop popover. Opt-in, so only the surfaces redesigned for touch (the
+   *  composer's mode selector) change behavior. */
+  mobileSheet?: boolean;
 }
 
 export default function Picker({
@@ -58,8 +66,10 @@ export default function Picker({
   className,
   ariaLabel,
   triggerIcon,
+  mobileSheet,
 }: PickerProps) {
   const multi = values !== undefined;
+  const asSheet = useShellMode() === "phone" && mobileSheet === true;
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState("");
   const [active, setActive] = useState(0);
@@ -70,9 +80,19 @@ export default function Picker({
 
   const close = () => {
     setOpen(false);
-    triggerRef.current?.focus();
+    if (!asSheet) triggerRef.current?.focus();
   };
-  useEscape(open, close);
+  useEscape(open && !asSheet, close);
+  // §22: never raise a sheet under an open keyboard.
+  const toggleOpen = () => {
+    if (open) {
+      close();
+      return;
+    }
+    setQ("");
+    if (asSheet) void dismissKeyboard().then(() => setOpen(true));
+    else setOpen(true);
+  };
 
   const hits = useMemo(() => filterPickerItems(items, q), [items, q]);
   const shown = hits.slice(0, MAX_SHOWN);
@@ -88,6 +108,7 @@ export default function Picker({
 
   const isCurrent = (id: string) => (multi ? values.includes(id) : id === value);
   const pick = (id: string) => {
+    if (asSheet) tapFeedback();
     onPick(id);
     if (!multi) close();
   };
@@ -127,14 +148,11 @@ export default function Picker({
         className="chip picker-chip"
         title={ariaLabel ?? label}
         aria-label={ariaLabel}
-        aria-haspopup="listbox"
+        aria-haspopup={asSheet ? "dialog" : "listbox"}
         aria-expanded={open}
-        aria-controls={open ? listId : undefined}
+        aria-controls={open && !asSheet ? listId : undefined}
         disabled={disabled}
-        onClick={() => {
-          setOpen((v) => !v);
-          setQ("");
-        }}
+        onClick={toggleOpen}
       >
         {triggerIcon
           ? <span className="picker-trigger-icon" aria-hidden="true">{triggerIcon}</span>
@@ -142,7 +160,47 @@ export default function Picker({
         <span className="picker-chip-text">{chipText}</span>
         <span className="picker-caret">▾</span>
       </button>
-      {open && (
+      {open && asSheet && (
+        <Sheet
+          title={label}
+          className="picker-sheet"
+          onClose={close}
+          {...(items.length > 8 ? {
+            search: {
+              value: q,
+              onChange: setQ,
+              placeholder: `Search ${label.toLowerCase()}`,
+              ariaLabel: `Filter ${label}`,
+            },
+          } : {})}
+        >
+          <div role="listbox" aria-label={label}>
+            {shown.map((it) => (
+              <SheetRow
+                key={it.id || "(default)"}
+                title={it.label}
+                {...(it.detail ? { meta: it.detail } : {})}
+                selected={isCurrent(it.id)}
+                onClick={() => pick(it.id)}
+              />
+            ))}
+            {shown.length === 0 && <p className="sheet-empty">No matches</p>}
+          </div>
+          {footerAction && (
+            <button
+              type="button"
+              className="sheet-foot-action"
+              aria-disabled={footerAction.disabledReason ? true : undefined}
+              onClick={() => {
+                if (footerAction.disabledReason) return;
+                close();
+                footerAction.run();
+              }}
+            >{footerAction.label}</button>
+          )}
+        </Sheet>
+      )}
+      {open && !asSheet && (
         <>
           <div className="menu-backdrop" onClick={close} />
           <div className={`picker-pop ${direction}`}>

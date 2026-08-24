@@ -20,6 +20,10 @@ export interface ComposerAddMenuProps {
   snippets: CatalogState<SnippetDef>;
   /** Menu opens upward from the docked composer, downward from the hero. */
   direction: "up" | "down";
+  /** UX-MOBILE-01 §17/§19: on phones this IS the single `+` control — the
+   *  separate upload chip is not rendered, so `+` and `⋮` never sit side by
+   *  side as two abstract menus. */
+  trigger?: "tools" | "add";
   onUpload: () => void;
   onInsertMention: () => void;
   onInsertCommand: () => void;
@@ -93,14 +97,16 @@ export default function ComposerAddMenu(props: ComposerAddMenuProps) {
         ref={triggerRef}
         type="button"
         className="chip composer-add-trigger"
-        aria-label="More composer tools"
+        aria-label={props.trigger === "add" ? "Add files, context, and tools" : "More composer tools"}
         aria-haspopup="menu"
         aria-expanded={open}
         {...(open ? { "aria-controls": "composer-add-menu" } : {})}
         onClick={() => setOpen((v) => !v)}
       >
-        <span aria-hidden="true" className="composer-add-icon"><Icon.more /></span>
-        <span className="composer-add-label">Tools</span>
+        <span aria-hidden="true" className="composer-add-icon">
+          {props.trigger === "add" ? <Icon.plus /> : <Icon.more />}
+        </span>
+        <span className="composer-add-label">{props.trigger === "add" ? "Add" : "Tools"}</span>
       </button>
       {open && (
         <>

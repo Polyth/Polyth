@@ -4,6 +4,7 @@ import {
   MODEL_PREFS_KEY,
   parseModelPrefs,
   recordRecent,
+  reorderFavorite,
   reorderProvider,
   serializeModelPrefs,
   setProviderExpanded,
@@ -34,6 +35,11 @@ export function getModelPrefs(): ModelPrefs {
 
 export function toggleModelFavorite(key: string): void {
   commit(toggleFavorite(prefs, key));
+}
+
+/** Favorites reorder — only reachable from an explicit Edit mode (§27). */
+export function reorderModelFavorites(draggedKey: string, targetKey: string): void {
+  commit(reorderFavorite(prefs, draggedKey, targetKey));
 }
 
 export function setModelSort(sort: ModelSort): void {

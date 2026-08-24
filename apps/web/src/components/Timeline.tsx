@@ -1424,15 +1424,12 @@ export default function Timeline({ model }: { model: RenderModel }) {
           containerRef={ref}
         />
       )}
-      </div>
       {showJump && (
         <div className="timeline-reveal">
-          <button className="jump-latest" onClick={jumpToLatest}>
-            {turn?.status === "working" && <span className="jump-latest-dot" aria-hidden="true" />}
-            {JUMP_TO_LATEST_NAME}
-          </button>
+          <button className="jump-latest" aria-label={JUMP_TO_LATEST_NAME} title={JUMP_TO_LATEST_NAME} onClick={jumpToLatest}>↓</button>
         </div>
       )}
+      </div>
       <SelectionMenu container={ref} />
       {timelineOpen && (
         <TimelineDialog
