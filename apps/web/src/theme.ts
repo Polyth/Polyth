@@ -486,12 +486,45 @@ const signalOnWash = (signal: string, surfaces: string[], lighten: boolean): str
   return color;
 };
 
+/** Theme-aware ANSI 16-color palette for the terminal: chromatic slots come
+ *  from the theme's signal tokens (red/green/amber/blue/purple; cyan blends
+ *  green+blue), monochrome slots from the ink/surface roles. Bright variants
+ *  shift lightness toward the readable direction for the appearance. */
+export function termAnsiPalette(spec: ThemeSpec): string[] {
+  const t = spec.tokens;
+  const dark = spec.appearance === "dark";
+  const bright = (hex: string): string => {
+    const [, , lightness] = rgbToHsl(hex);
+    return withLightness(hex, Math.max(0.06, Math.min(0.96, lightness + (dark ? 0.09 : -0.07))));
+  };
+  const cyan = blend(t.green, t.blue, 0.5);
+  const black = dark ? blend(t.text, t.sunken, 0.32) : blend(t.text, t.sunken, 0.88);
+  const brightBlack = dark ? blend(t.text, t.sunken, 0.5) : blend(t.text, t.sunken, 0.7);
+  const white = dark ? t.textDim : blend(t.text, t.sunken, 0.35);
+  const brightWhite = dark ? withLightness(t.text, 0.97) : withLightness(t.text, 0.08);
+  return [
+    black, t.red, t.green, t.amber, t.blue, t.purple, cyan, white,
+    brightBlack, bright(t.red), bright(t.green), bright(t.amber), bright(t.blue), bright(t.purple), bright(cyan), brightWhite,
+  ];
+}
+
 /** Resolve a theme to the CSS custom properties it sets. One place derives
  *  every wash/hairline/rgb variant so custom themes only supply base roles. */
 export function themeCssVars(spec: ThemeSpec): Record<string, string> {
   const t = spec.tokens;
   const dark = spec.appearance === "dark";
   const accentRgb = hexToRgb(t.accent).join(", ");
+  const ansi = termAnsiPalette(spec);
+  const termVars: Record<string, string> = {
+    "--term-bg": t.sunken,
+    "--term-fg": t.text,
+    "--term-cursor": t.accent,
+    "--term-sel": rgba(t.accent, dark ? 0.34 : 0.28),
+    "--term-find": rgba(t.amber, dark ? 0.4 : 0.45),
+    "--term-find-cur": rgba(t.accent, dark ? 0.55 : 0.4),
+    "--term-link": t.blue,
+  };
+  for (let i = 0; i < 16; i++) termVars[`--term-a${i}`] = ansi[i]!;
   const amberRgb = hexToRgb(t.amber).join(", ");
   const surfaces = [t.bg, t.panel, t.elevated, t.raised, t.sunken, t.inputBg];
   return {
@@ -532,6 +565,7 @@ export function themeCssVars(spec: ThemeSpec): Record<string, string> {
     "--syntax-cmt": spec.syntax?.cmt ?? t.faint,
     "--syntax-num": spec.syntax?.num ?? t.amber,
     "--syntax-punc": spec.syntax?.punc ?? t.muted,
+    ...termVars,
   };
 }
 

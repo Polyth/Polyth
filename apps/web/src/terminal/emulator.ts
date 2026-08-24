@@ -71,6 +71,27 @@ export interface RowInfo {
 
 export interface TermPoint { row: number; col: number }
 
+/** Text + column map of one line (pure; shared by rowInfo and the renderer). */
+export function lineInfo(line: TermLine): RowInfo {
+  let hasWide = false;
+  for (let i = 0; i < line.chars.length; i++) {
+    if (line.chars[i] === "") { hasWide = true; break; }
+  }
+  if (!hasWide) {
+    return { text: line.chars.join("").replace(/\s+$/, ""), map: null };
+  }
+  let text = "";
+  const map: number[] = [];
+  for (let col = 0; col < line.chars.length; col++) {
+    const chr = line.chars[col]!;
+    if (chr === "") continue;
+    for (let k = 0; k < chr.length; k++) map.push(col);
+    text += chr;
+  }
+  map.push(line.chars.length);
+  return { text: text.replace(/\s+$/, ""), map };
+}
+
 export interface EmuDisposable { dispose(): void }
 
 export interface TerminalEmulator {
@@ -1150,23 +1171,7 @@ export function createTerminalEmulator(opts: EmulatorOptions = {}): TerminalEmul
   const rowInfo = (index: number): RowInfo => {
     const line = lineAt(index);
     if (!line) return { text: "", map: null };
-    let hasWide = false;
-    for (let i = 0; i < line.chars.length; i++) {
-      if (line.chars[i] === "") { hasWide = true; break; }
-    }
-    if (!hasWide) {
-      return { text: line.chars.join("").replace(/\s+$/, ""), map: null };
-    }
-    let text = "";
-    const map: number[] = [];
-    for (let col = 0; col < line.chars.length; col++) {
-      const chr = line.chars[col]!;
-      if (chr === "") continue;
-      for (let k = 0; k < chr.length; k++) map.push(col);
-      text += chr;
-    }
-    map.push(line.chars.length);
-    return { text: text.replace(/\s+$/, ""), map };
+    return lineInfo(line);
   };
 
   const getText = (a: TermPoint, b: TermPoint): string => {
