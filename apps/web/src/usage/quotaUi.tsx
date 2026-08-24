@@ -11,6 +11,7 @@ import {
   setGroupCollapsed,
   useUsagePrefs,
 } from "../usagePrefs.ts";
+import ProviderLogo from "../components/ProviderLogo.tsx";
 
 export function fmtQuota(n: number, unit: QuotaWindowDto["unit"]): string {
   if (unit === "currency") return `$${n.toFixed(2)}`;
@@ -120,6 +121,7 @@ export function QuotaCard({
   return (
     <div className={`quota-card ${snap.stale ? "quota-stale" : ""}`}>
       <div className="quota-card-head">
+        <ProviderLogo providerID={snap.providerId} className="quota-provider-logo" />
         <strong>{snap.providerId}</strong>
         {snap.accountLabel && <span className="muted">{snap.accountLabel}</span>}
         {snap.stale && <span className="tag" title={snap.error?.message}>stale</span>}

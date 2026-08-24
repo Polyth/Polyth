@@ -2,6 +2,7 @@ import { useMemo, useState, type CSSProperties, type ReactNode } from "react";
 import { fmtCost, fmtTokens } from "../format.ts";
 import { setOverlay, useStore } from "../store.ts";
 import { setProviderHidden, useUsagePrefs } from "../usagePrefs.ts";
+import ProviderLogo from "../components/ProviderLogo.tsx";
 import { fmtQuota, paceText, useQuotaSnapshots } from "./quotaUi.tsx";
 import {
   buildUsageDashboardData,
@@ -28,24 +29,19 @@ type GlyphName =
   | "tokens"
   | "usage";
 
-const PROVIDER_FALLBACKS = ["#7C5CFC", "#22C879", "#FF8A66", "#4CA8FF", "#E7B84B"] as const;
+const SERIES_ACCENTS = [
+  "var(--accent)",
+  "var(--green)",
+  "var(--blue)",
+  "var(--purple)",
+  "var(--amber)",
+] as const;
 
 const cssVar = (name: string, value: string): CSSProperties =>
   ({ [name]: value }) as CSSProperties;
 
-const providerAccentId = (providerId: string, index = 0): string => {
-  const normalized = providerId.toLowerCase();
-  if (normalized.includes("anthropic") || normalized.includes("claude")) return "#FF986B";
-  if (normalized.includes("openrouter")) return "#8A6DFF";
-  if (normalized.includes("opencode") || normalized.includes("fake-provider")) return "#22C879";
-  if (normalized.includes("openai") || normalized.includes("gpt")) return "#4CA8FF";
-  if (normalized.includes("google") || normalized.includes("gemini")) return "#78A9FF";
-  if (normalized.includes("xai") || normalized.includes("grok")) return "#D58CFF";
-  return PROVIDER_FALLBACKS[index % PROVIDER_FALLBACKS.length]!;
-};
-
-const providerAccent = (provider: UsageProviderSummary, index = 0): string =>
-  providerAccentId(provider.id, index);
+const seriesAccent = (index = 0): string =>
+  SERIES_ACCENTS[index % SERIES_ACCENTS.length]!;
 
 const providerPreferenceId = (provider: UsageProviderSummary): string =>
   provider.snapshot?.providerId ?? provider.id;
@@ -73,30 +69,6 @@ function Glyph({ name }: { name: GlyphName }) {
   if (name === "chevron") return <svg {...common}><path d="m9 6 6 6-6 6" /></svg>;
   if (name === "arrow") return <svg {...common}><path d="M12 19V5m-5 5 5-5 5 5" /></svg>;
   return <svg {...common}><path d="m12 3 1.7 5.3H19l-4.3 3.2 1.7 5.2-4.4-3.2-4.4 3.2 1.7-5.2L5 8.3h5.3L12 3Z" /></svg>;
-}
-
-function ProviderMark({
-  provider,
-  index = 0,
-  size = "regular",
-}: {
-  provider: UsageProviderSummary;
-  index?: number;
-  size?: "small" | "regular" | "large";
-}) {
-  const accent = providerAccent(provider, index);
-  const letters = provider.label === "OpenCode Go"
-    ? "OC"
-    : provider.label.split(/\s+/).map((word) => word[0]).join("").slice(0, 2).toUpperCase();
-  return (
-    <span
-      className={`usage-provider-mark usage-provider-mark-${size}`}
-      style={{ ...cssVar("--provider-accent", accent) }}
-      aria-hidden="true"
-    >
-      {letters}
-    </span>
-  );
 }
 
 function TrendBadge({ trend, compact = false }: { trend: UsageTrend | null; compact?: boolean }) {
@@ -213,14 +185,18 @@ function UsageSidebar({
             <span>{providers.filter((provider) => !provider.stale).length}</span>
           </div>
           <div className="usage-sidebar-providers">
-            {providers.slice(0, 5).map((provider, index) => (
+            {providers.slice(0, 5).map((provider) => (
               <button type="button" key={provider.id} onClick={() => onView("providers")}>
                 <span className={`usage-status-dot ${provider.stale ? "inactive" : ""}`} />
                 <span>
                   <strong>{provider.label}</strong>
                   <small>{provider.remainingPercent === null ? "Usage connected" : `${provider.remainingPercent}% remaining`}</small>
                 </span>
-                <ProviderMark provider={provider} index={index} size="small" />
+                <ProviderLogo
+                  providerID={provider.id}
+                  providerName={provider.label}
+                  className="usage-provider-mark usage-provider-mark-small"
+                />
               </button>
             ))}
             {providers.length === 0 && (
@@ -363,8 +339,8 @@ function AreaChart({
         <defs>
           {series.map((item, index) => (
             <linearGradient key={item.providerId} id={`usage-gradient-${index}`} x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor={providerAccentId(item.providerId, index)} stopOpacity=".32" />
-              <stop offset="100%" stopColor={providerAccentId(item.providerId, index)} stopOpacity="0" />
+              <stop offset="0%" stopColor={seriesAccent(index)} stopOpacity=".32" />
+              <stop offset="100%" stopColor={seriesAccent(index)} stopOpacity="0" />
             </linearGradient>
           ))}
         </defs>
@@ -386,7 +362,7 @@ function AreaChart({
           );
         })}
         {series.map((item, index) => {
-          const accent = providerAccentId(item.providerId, index);
+          const accent = seriesAccent(index);
           const line = item.values.map((value, pointIndex) =>
             `${pointIndex === 0 ? "M" : "L"} ${pointX(pointIndex)} ${pointY(value)}`).join(" ");
           const area = `${line} L ${pointX(labels.length - 1)} ${top + chartHeight} L ${pointX(0)} ${top + chartHeight} Z`;
@@ -467,7 +443,12 @@ function UsageOverTime({
       <div className="usage-chart-legend">
         {data.chart[metric].map((item, index) => (
           <span key={item.providerId}>
-            <i style={{ background: providerAccent(data.providers.find((provider) => provider.id === item.providerId)!, index) }} />
+            <ProviderLogo
+              providerID={item.providerId}
+              providerName={item.label}
+              className="usage-legend-logo"
+            />
+            <i style={{ background: seriesAccent(index) }} />
             {item.label}
           </span>
         ))}
@@ -490,7 +471,7 @@ function ProviderSpendDonut({
     const share = total > 0 ? provider.cost / total : 0;
     const start = offset;
     offset += share * 100;
-    return { provider, share, offset: start, accent: providerAccent(provider, index) };
+    return { provider, share, offset: start, accent: seriesAccent(index) };
   });
   return (
     <article className="usage-dashboard-card usage-spend-card">
@@ -524,6 +505,11 @@ function ProviderSpendDonut({
         <div className="usage-spend-legend">
           {arcs.map(({ provider, share, accent }) => (
             <div key={provider.id}>
+              <ProviderLogo
+                providerID={provider.id}
+                providerName={provider.label}
+                className="usage-legend-logo"
+              />
               <i style={{ background: accent }} />
               <span>{provider.label}</span>
               <strong>{formatMoney(provider.cost)}</strong>
@@ -565,11 +551,15 @@ function ProviderTable({ providers }: { providers: UsageProviderSummary[] }) {
             </tr>
           </thead>
           <tbody>
-            {providers.map((provider, index) => (
+            {providers.map((provider) => (
               <tr key={provider.id}>
                 <td data-label="Provider">
                   <span className="usage-provider-cell">
-                    <ProviderMark provider={provider} index={index} />
+                    <ProviderLogo
+                      providerID={provider.id}
+                      providerName={provider.label}
+                      className="usage-provider-mark usage-provider-mark-regular"
+                    />
                     <span><strong>{provider.label}</strong><small>{provider.id}</small></span>
                   </span>
                 </td>
@@ -657,9 +647,13 @@ function ProviderDetails({
           const preferenceId = providerPreferenceId(provider);
           const hidden = hiddenProviders.includes(preferenceId);
           return (
-            <article className="usage-provider-detail-card" key={provider.id} style={cssVar("--provider-accent", providerAccent(provider, index))}>
+            <article className="usage-provider-detail-card" key={provider.id} style={cssVar("--provider-accent", seriesAccent(index))}>
               <header>
-                <ProviderMark provider={provider} index={index} size="large" />
+                <ProviderLogo
+                  providerID={provider.id}
+                  providerName={provider.label}
+                  className="usage-provider-mark usage-provider-mark-large"
+                />
                 <div>
                   <h2>{provider.label}</h2>
                   <p>{provider.snapshot?.accountLabel ?? provider.id}</p>

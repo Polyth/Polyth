@@ -15,6 +15,7 @@ import { tapFeedback } from "../haptics.ts";
 import Sheet, { SheetRow, SheetSection } from "./mobile/Sheet.tsx";
 import { useSheetTrigger } from "./mobile/sheetTrigger.ts";
 import { Icon } from "../icons.tsx";
+import ProviderLogo from "./ProviderLogo.tsx";
 
 export function modelModalities(model: ModelDescriptor): string {
   const modalities = (model.capabilities ?? [])
@@ -107,7 +108,8 @@ export default function ModelPicker({
     ? models.find((model) =>
         model.providerID === recommended.providerID && model.modelID === recommended.modelID)
     : undefined;
-  const label = current?.name ?? fallback?.name ?? "Auto";
+  const selectedModel = current ?? fallback;
+  const label = selectedModel?.name ?? "Auto";
   const q = query.trim().toLowerCase();
   const filtered = models.filter((model) =>
     !q || [model.name, model.modelID, model.providerID, model.providerName ?? ""]
@@ -254,6 +256,13 @@ export default function ModelPicker({
       aria-expanded={open}
       {...triggerHandlers}
     >
+      {selectedModel && (
+        <ProviderLogo
+          providerID={selectedModel.providerID}
+          providerName={selectedModel.providerName}
+          className="model-trigger-logo"
+        />
+      )}
       <span className="model-trigger-name">{label}</span>
       <span className="model-trigger-caret" aria-hidden="true"><Icon.chevronDown /></span>
     </button>
@@ -268,13 +277,20 @@ export default function ModelPicker({
       aria-expanded={open}
       onClick={toggleOpen}
     >
+      {selectedModel && (
+        <ProviderLogo
+          providerID={selectedModel.providerID}
+          providerName={selectedModel.providerName}
+          className="model-trigger-logo"
+        />
+      )}
       <span className="model-trigger-copy">
         <small>Model</small>
         <strong className="picker-chip-text">{label}</strong>
       </span>
-      {(current ?? fallback) && (
+      {selectedModel && (
         <span className="model-trigger-meta">
-          {modelModalities(current ?? fallback!)} · {modelContextLabel((current ?? fallback)?.context)}
+          {modelModalities(selectedModel)} · {modelContextLabel(selectedModel.context)}
         </span>
       )}
       <span className="picker-caret" aria-hidden="true">▾</span>
@@ -330,6 +346,11 @@ export default function ModelPicker({
                       aria-expanded={expanded}
                       onClick={() => setModelProviderExpanded(provider.id, !expanded)}
                     >
+                      <ProviderLogo
+                        providerID={provider.id}
+                        providerName={provider.name}
+                        className="model-provider-logo"
+                      />
                       <span>{provider.name}</span>
                       <small>{items.length}</small>
                       <span className={`sheet-section-caret${expanded ? " open" : ""}`} aria-hidden="true">
@@ -390,6 +411,11 @@ export default function ModelPicker({
                       onClick={() => setModelProviderExpanded(provider.id, !expanded)}
                     >
                       <span className="model-provider-grip" aria-hidden="true">⠿</span>
+                      <ProviderLogo
+                        providerID={provider.id}
+                        providerName={provider.name}
+                        className="model-provider-logo"
+                      />
                       <strong>{provider.name}</strong>
                       <small>{items.length}</small>
                       <span aria-hidden="true">{expanded ? "⌄" : "›"}</span>

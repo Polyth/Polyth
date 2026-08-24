@@ -6,6 +6,12 @@ import { modelBadge } from "../format.ts";
 import { renderMarkdown } from "../markdown.tsx";
 import EmptyState from "./EmptyState.tsx";
 import { modelDisplayName, modelSupportsTextWorkflow } from "../composer/discovery.ts";
+import ProviderLogo from "./ProviderLogo.tsx";
+
+const providerIdFromModel = (model: string): string => {
+  const slash = model.lastIndexOf("/");
+  return slash > 0 ? model.slice(0, slash) : model;
+};
 
 export default function FusionView() {
   const sessionId = useStore((s) => s.activeSessionId);
@@ -104,16 +110,18 @@ export default function FusionView() {
           />
           {shownChips.map((m) => {
             const key = `${m.providerID}/${m.modelID}`;
-            const badge = modelBadge(m);
             const on = picked.includes(key);
             return (
               <button
                 key={key}
                 className={`model-chip ${on ? "on" : ""}`}
-                style={on ? { borderColor: badge.color } : undefined}
                 onClick={() => toggle(key)}
               >
-                <i style={{ background: badge.color }} />
+                <ProviderLogo
+                  providerID={m.providerID}
+                  providerName={m.providerName}
+                  className="model-chip-provider-logo"
+                />
                 {modelDisplayName(m, textModels)}
               </button>
             );
@@ -139,7 +147,13 @@ export default function FusionView() {
               return (
                 <div key={w.model} className="weight-card">
                   <div className="weight-card-row">
-                    <span className="weight-name"><i style={{ background: badge.color }} />{w.model}</span>
+                    <span className="weight-name">
+                      <ProviderLogo
+                        providerID={providerIdFromModel(w.model)}
+                        className="model-chip-provider-logo"
+                      />
+                      {w.model}
+                    </span>
                     <span className="weight-pct">{Math.round((w.weight / total) * 100)}%</span>
                   </div>
                   <div className="weight-track">

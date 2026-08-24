@@ -1,6 +1,7 @@
 import type { SessionProjection } from "@polyth/contracts";
 import { fmtTokens } from "../format.ts";
 import { providerUsageDistribution } from "../usageShare.ts";
+import ProviderLogo from "../components/ProviderLogo.tsx";
 
 const PROVIDER_SHARE_COLORS = [
   "var(--accent)",
@@ -98,6 +99,7 @@ export function ProviderUsageDonut({ sessions }: { sessions: readonly SessionPro
       <div className="provider-share-legend">
         {arcs.map((provider) => (
           <div key={provider.providerId}>
+            <ProviderLogo providerID={provider.providerId} className="provider-share-logo" />
             <i style={{ background: provider.color }} />
             <span>{provider.providerId}</span>
             <strong>{Math.round(provider.share * 100)}%</strong>

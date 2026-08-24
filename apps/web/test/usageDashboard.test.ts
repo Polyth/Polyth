@@ -101,3 +101,22 @@ test("dashboard merges provider aliases used by sessions and quota adapters", ()
   assert.equal(dashboard.providers[0]?.snapshot?.providerId, "claude");
   assert.equal(dashboard.providers[0]?.remainingPercent, 25);
 });
+
+test("dashboard keeps OpenCode variants distinct with accurate labels", () => {
+  const dashboard = buildUsageDashboardData([
+    session("go-session", "opencode-go", now - DAY_MS, 1_000, .02),
+    session("zen-session", "opencode-zen", now - DAY_MS, 2_000, .03),
+    session("generic-session", "opencode", now - DAY_MS, 500, .01),
+  ], [], 7, now);
+
+  assert.deepEqual(
+    dashboard.providers
+      .map(({ id, label }) => ({ id, label }))
+      .sort((a, b) => a.id.localeCompare(b.id)),
+    [
+      { id: "opencode", label: "OpenCode" },
+      { id: "opencode-go", label: "OpenCode Go" },
+      { id: "opencode-zen", label: "OpenCode Zen" },
+    ],
+  );
+});
