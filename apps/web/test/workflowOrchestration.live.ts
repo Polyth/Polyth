@@ -12,7 +12,7 @@ import { access, mkdir, writeFile } from "node:fs/promises";
 import { constants } from "node:fs";
 import { join } from "node:path";
 import type { Browser, BrowserContext, Page } from "playwright-core";
-import type { JsonObject, WorkflowRunDto } from "@polyth/contracts";
+import type { JsonObject, SessionProjection, WorkflowRunDto } from "@polyth/contracts";
 import {
   FIXTURE_BIN,
   FIXTURE_DATA,
@@ -145,7 +145,10 @@ async function chromiumPath(): Promise<string> {
   throw new Error("Chrome/Chromium executable not found");
 }
 
-const eventData = (run: WorkflowRunDto): JsonObject => ({
+const jsonData = (value: unknown): JsonObject =>
+  JSON.parse(JSON.stringify(value)) as JsonObject;
+
+const eventData = (run: WorkflowRunDto): JsonObject => jsonData({
   runId: run.id,
   workflowId: run.workflowId,
   projectId: run.projectId!,
@@ -165,7 +168,11 @@ before(async () => {
 
   const { createStore } = await import("../../../packages/session/src/index.ts");
   const store = createStore(join(FIXTURE_DATA, "sessions.db"));
-  const projection = (id: string, title: string, status = "idle") => ({
+  const projection = (
+    id: string,
+    title: string,
+    status: SessionProjection["status"] = "idle",
+  ): SessionProjection => ({
     id,
     projectId: PROJECT_ID,
     title,
@@ -176,11 +183,11 @@ before(async () => {
 
   await store.append(MANUAL_PARENT, "session/created", { title: "Manual approval parent" }, { ignorable: true });
   await store.append(MANUAL_PARENT, "workflow/run-started", eventData(manualRun), { ignorable: true });
-  await store.append(MANUAL_PARENT, "workflow/node-progress", {
+  await store.append(MANUAL_PARENT, "workflow/node-progress", jsonData({
     runId: manualRun.id,
     nodeId: "review",
     node: manualRun.nodes[0]!,
-  }, { ignorable: true });
+  }), { ignorable: true });
   await store.upsertProjection(projection(MANUAL_PARENT, "Manual approval parent"));
 
   await store.append(MANUAL_CHILD, "session/created", { title: "Reviewer child session" }, { ignorable: true });
@@ -196,11 +203,11 @@ before(async () => {
 
   await store.append(ERROR_PARENT, "session/created", { title: "Failed workflow parent" }, { ignorable: true });
   await store.append(ERROR_PARENT, "workflow/run-started", eventData(errorRun), { ignorable: true });
-  await store.append(ERROR_PARENT, "workflow/node-progress", {
+  await store.append(ERROR_PARENT, "workflow/node-progress", jsonData({
     runId: errorRun.id,
     nodeId: "recover",
     node: errorRun.nodes[0]!,
-  }, { ignorable: true });
+  }), { ignorable: true });
   await store.append(ERROR_PARENT, "workflow/run-completed", {
     runId: errorRun.id,
     status: "error",
