@@ -68,7 +68,7 @@ test("assistant response header carries identity, timing, and configured actions
     "Start new multi-run from this answer",
   ]) assert.ok(timeline.includes(label), `${label} is available`);
   assert.match(timeline, /<ProviderLogo/);
-  assert.match(timeline, /className="agent-reply-duration"/);
+  assert.match(timeline, /className="agent-reply-item agent-reply-duration"/);
   assert.match(timeline, /timeShort\(assistantTime\(m\)\)/);
   const response = timeline.indexOf("<div className=\"bubble\"");
   const footer = timeline.lastIndexOf("<AssistantAgentHeader m={m} announce={announce} turn={turn} />");
