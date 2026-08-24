@@ -341,7 +341,7 @@ test("complete workflow journey remains synchronized, accessible, and responsive
   await page.keyboard.press("Shift+Tab");
   assert.equal(await page.evaluate(() => document.activeElement?.getAttribute("aria-label")), "Close workflow launcher");
   await page.keyboard.press("Shift+Tab");
-  assert.equal(await page.evaluate(() => document.activeElement?.textContent?.trim()), "Create workflow");
+  assert.equal(await page.evaluate(() => document.activeElement?.textContent?.trim()), "Open workflow builder");
   await page.keyboard.press("Tab");
   assert.equal(await page.evaluate(() => document.activeElement?.getAttribute("aria-label")), "Close workflow launcher");
 
