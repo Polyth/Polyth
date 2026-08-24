@@ -1,13 +1,36 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useGitStatus } from "../gitStatusStore.ts";
 import { selectPendingChanges } from "../pendingChanges.ts";
 import { openChanges, useActiveModel, useStore } from "../store.ts";
 import { Icon } from "../icons.tsx";
 import { api } from "../api.ts";
+import { useDismissibleMenu } from "./a11y/Menu.ts";
 
 export interface DiffLineStats {
   additions: number;
   deletions: number;
+}
+
+export interface PendingChangesMenuPosition {
+  left: number;
+  bottom: number;
+  width: number;
+}
+
+/** Position the fixed menu inside a 12px viewport gutter, even beside narrow composers. */
+export function pendingChangesMenuPosition(
+  trigger: Pick<DOMRect, "right" | "top">,
+  viewport: { width: number; height: number },
+): PendingChangesMenuPosition {
+  const gutter = 12;
+  const width = Math.max(0, Math.min(420, viewport.width - gutter * 2));
+  const idealLeft = trigger.right - width;
+  const left = Math.max(gutter, Math.min(idealLeft, viewport.width - width - gutter));
+  return {
+    left,
+    bottom: Math.max(gutter, viewport.height - trigger.top + 8),
+    width,
+  };
 }
 
 /** Count unified-diff content lines while excluding the file headers. */
@@ -35,6 +58,38 @@ export default function PendingChangesBar() {
   const changeKey = `${selected.source}:${[...selected.paths].sort().join("\0")}`;
   const [dismissedKey, setDismissedKey] = useState("");
   const [diffStats, setDiffStats] = useState<DiffLineStats | null>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [menuPosition, setMenuPosition] = useState<PendingChangesMenuPosition | null>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const onMenuKeyDown = useDismissibleMenu({
+    open: menuOpen,
+    menuRef,
+    triggerRef,
+    onClose: () => setMenuOpen(false),
+  });
+
+  useLayoutEffect(() => {
+    if (!menuOpen || !triggerRef.current) {
+      setMenuPosition(null);
+      return;
+    }
+    const update = () => {
+      const trigger = triggerRef.current;
+      if (!trigger) return;
+      setMenuPosition(pendingChangesMenuPosition(trigger.getBoundingClientRect(), {
+        width: window.innerWidth,
+        height: window.innerHeight,
+      }));
+    };
+    update();
+    window.addEventListener("resize", update);
+    window.addEventListener("scroll", update, true);
+    return () => {
+      window.removeEventListener("resize", update);
+      window.removeEventListener("scroll", update, true);
+    };
+  }, [menuOpen]);
 
   useEffect(() => {
     let cancelled = false;
@@ -88,16 +143,26 @@ export default function PendingChangesBar() {
           </span>
         )}
       </button>
-      <details className="pending-changes-files">
-        <summary aria-label="List changed files"><Icon.chevronDown /></summary>
-        <div className="pending-changes-menu">
+      <div className="pending-changes-files">
+        <button
+          ref={triggerRef}
+          className="pending-changes-trigger"
+          aria-label="List changed files"
+          aria-haspopup="menu"
+          aria-expanded={menuOpen}
+          onClick={() => setMenuOpen((open) => !open)}
+        ><Icon.chevronDown /></button>
+        {menuOpen && <div ref={menuRef} className="pending-changes-menu" role="menu" aria-label="Changed files" style={menuPosition ?? undefined} onKeyDown={onMenuKeyDown}>
           {selected.paths.map((path) => (
-            <button key={path} className="mono" title={path} onClick={() => openChanges(path)}>
+            <button key={path} role="menuitem" className="mono" title={path} onClick={() => {
+              setMenuOpen(false);
+              openChanges(path);
+            }}>
               {path}
             </button>
           ))}
-        </div>
-      </details>
+        </div>}
+      </div>
       <button
         className="pending-changes-dismiss"
         aria-label="Dismiss changed files"

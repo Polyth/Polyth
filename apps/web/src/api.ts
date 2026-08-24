@@ -209,17 +209,20 @@ export interface GitFileEntry {
   origPath?: string;
 }
 export interface GitStatus {
-  branch: string;
+  branch: string | null;
   ahead: number;
   behind: number;
   staged: GitFileEntry[];
   unstaged: GitFileEntry[];
   untracked: GitFileEntry[];
   conflicted: GitFileEntry[];
+  clean?: boolean;
+  /** Explicit false for plain folders; omitted by older servers. */
+  isRepo?: boolean;
 }
 export interface GitDiffResult { path: string; diff: string }
 export interface GitBranches {
-  current: string;
+  current: string | null;
   branches: Array<{ name: string; current: boolean; remote?: string }>;
 }
 export interface GitLogEntry {
@@ -243,7 +246,7 @@ export interface GitStash {
 // ---- worktree types --------------------------------------------------------
 export interface Worktree {
   path: string;
-  branch: string;
+  branch: string | null;
   head: string;
   isMain: boolean;
 }
@@ -672,9 +675,7 @@ export const api = {
 
   // ---- git (§12) -----------------------------------------------------------
   gitStatus: (projectId: string, sessionId?: string) =>
-    jfetch<GitStatus>(`/api/git/status?projectId=${encodeURIComponent(projectId)}${sessionId ? `&sessionId=${encodeURIComponent(sessionId)}` : ""}`).catch((): GitStatus => ({
-      branch: "", ahead: 0, behind: 0, staged: [], unstaged: [], untracked: [], conflicted: [],
-    })),
+    jfetch<GitStatus>(`/api/git/status?projectId=${encodeURIComponent(projectId)}${sessionId ? `&sessionId=${encodeURIComponent(sessionId)}` : ""}`),
   gitIdentity: (projectId: string) =>
     jfetch<{ name: string; email: string }>(`/api/git/identity?projectId=${encodeURIComponent(projectId)}`),
   gitIdentitySet: (projectId: string, identity: { name: string; email: string }) =>
@@ -682,7 +683,7 @@ export const api = {
   gitDiff: (projectId: string, filePath: string, staged?: boolean, ignoreWhitespace?: boolean, sessionId?: string) =>
     jfetch<GitDiffResult>(
       `/api/git/diff?projectId=${encodeURIComponent(projectId)}&path=${encodeURIComponent(filePath)}${staged ? "&staged=true" : ""}${ignoreWhitespace ? "&ignoreWhitespace=true" : ""}${sessionId ? `&sessionId=${encodeURIComponent(sessionId)}` : ""}`,
-    ).catch((): GitDiffResult => ({ path: filePath, diff: "" })),
+    ),
   gitShow: (projectId: string, sha: string, ignoreWhitespace?: boolean, sessionId?: string) =>
     jfetch<{ sha: string; diff: string }>(
       `/api/git/show?projectId=${encodeURIComponent(projectId)}&sha=${encodeURIComponent(sha)}${ignoreWhitespace ? "&ignoreWhitespace=true" : ""}${sessionId ? `&sessionId=${encodeURIComponent(sessionId)}` : ""}`,
@@ -700,25 +701,19 @@ export const api = {
       (): { message: "" } => ({ message: "" }),
     ),
   gitBranches: (projectId: string, sessionId?: string) =>
-    jfetch<GitBranches>(`/api/git/branches?projectId=${encodeURIComponent(projectId)}${sessionId ? `&sessionId=${encodeURIComponent(sessionId)}` : ""}`).catch(
-      (): GitBranches => ({ current: "", branches: [] }),
-    ),
+    jfetch<GitBranches>(`/api/git/branches?projectId=${encodeURIComponent(projectId)}${sessionId ? `&sessionId=${encodeURIComponent(sessionId)}` : ""}`),
   gitBranch: (projectId: string, name: string, from?: string, sessionId?: string) =>
     jfetch<{ ok: true }>(`/api/git/branch`, json("POST", { projectId, name, from, ...(sessionId ? { sessionId } : {}) })),
   gitCheckout: (projectId: string, name: string, sessionId?: string) =>
     jfetch<{ ok: true }>(`/api/git/checkout`, json("POST", { projectId, name, ...(sessionId ? { sessionId } : {}) })),
   gitLog: (projectId: string, limit = 20, sessionId?: string) =>
-    jfetch<GitLogEntry[]>(`/api/git/log?projectId=${encodeURIComponent(projectId)}&limit=${limit}${sessionId ? `&sessionId=${encodeURIComponent(sessionId)}` : ""}`).catch(
-      (): GitLogEntry[] => [],
-    ),
+    jfetch<GitLogEntry[]>(`/api/git/log?projectId=${encodeURIComponent(projectId)}&limit=${limit}${sessionId ? `&sessionId=${encodeURIComponent(sessionId)}` : ""}`),
   gitGraph: (projectId: string, limit = 40, skip = 0, sessionId?: string) =>
-    jfetch<GitGraphEntry[]>(`/api/git/graph?projectId=${encodeURIComponent(projectId)}&limit=${limit}&skip=${skip}${sessionId ? `&sessionId=${encodeURIComponent(sessionId)}` : ""}`).catch(
-      (): GitGraphEntry[] => [],
-    ),
+    jfetch<GitGraphEntry[]>(`/api/git/graph?projectId=${encodeURIComponent(projectId)}&limit=${limit}&skip=${skip}${sessionId ? `&sessionId=${encodeURIComponent(sessionId)}` : ""}`),
   gitFolder: (projectId: string, folder: string, op: "stage" | "unstage" | "discard", sessionId?: string) =>
     jfetch<{ ok: true }>(`/api/git/folder`, json("POST", { projectId, folder, op, ...(sessionId ? { sessionId } : {}) })),
   gitStashes: (projectId: string, sessionId?: string) =>
-    jfetch<GitStash[]>(`/api/git/stashes?projectId=${encodeURIComponent(projectId)}${sessionId ? `&sessionId=${encodeURIComponent(sessionId)}` : ""}`).catch((): GitStash[] => []),
+    jfetch<GitStash[]>(`/api/git/stashes?projectId=${encodeURIComponent(projectId)}${sessionId ? `&sessionId=${encodeURIComponent(sessionId)}` : ""}`),
   gitStashPush: (projectId: string, message?: string, sessionId?: string) =>
     jfetch<{ created: boolean }>(`/api/git/stash`, json("POST", { projectId, message, ...(sessionId ? { sessionId } : {}) })),
   gitStashApply: (projectId: string, ref: string, sessionId?: string) =>
@@ -734,9 +729,7 @@ export const api = {
 
   // ---- worktrees (§12) -----------------------------------------------------
   listWorktrees: (projectId: string) =>
-    jfetch<Worktree[]>(`/api/worktrees?projectId=${encodeURIComponent(projectId)}`).catch(
-      (): Worktree[] => [],
-    ),
+    jfetch<Worktree[]>(`/api/worktrees?projectId=${encodeURIComponent(projectId)}`),
   createWorktree: (projectId: string, branch: string, wtPath?: string, base?: string) =>
     jfetch<Worktree>(`/api/worktrees`, json("POST", { projectId, branch, path: wtPath, base })),
   removeWorktree: (projectId: string, wtPath: string, deleteBranch?: boolean) =>
@@ -1009,6 +1002,10 @@ export const api = {
   githubPrComments: (projectId: string, number: number) =>
     jfetch<GhListResult<PrCommentDto[]>>(`/api/github/pr/comments?projectId=${encodeURIComponent(projectId)}&number=${number}`).catch(
       (): GhListResult<PrCommentDto[]> => ({ ok: false, reason: "server unreachable" }),
+    ),
+  githubPrDiff: (projectId: string, number: number) =>
+    jfetch<GhListResult<string>>(`/api/github/pr/diff?projectId=${encodeURIComponent(projectId)}&number=${number}`).catch(
+      (): GhListResult<string> => ({ ok: false, reason: "server unreachable" }),
     ),
   githubSubmitReview: (number: number, input: {
     projectId: string; event: "COMMENT" | "APPROVE" | "REQUEST_CHANGES"; body: string;

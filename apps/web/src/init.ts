@@ -60,7 +60,7 @@ function fetchBranch(projectId: string, sessionId: string | null): void {
         && current.activeProjectId === projectId
         && current.activeSessionId === sessionId
       ) {
-        store.setGitBranch(st.branch);
+        store.setGitBranch(st.branch ?? "");
       }
     })
     .catch(() => {

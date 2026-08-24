@@ -1,63 +1,129 @@
-// PR detail surface (WP11): overview, changed files, checks grouped
-// failure-first with an accessible ring, and review comments. Reads fail soft;
-// the two writes (submit review, publish labels) are explicit confirmed
-// actions and never happen automatically.
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   api, type ChecksSummaryDto, type PrCheckDto, type PrCommentDto,
   type PrDetailDto, type PrFileDto,
 } from "../api.ts";
+import { highlight, langOf } from "../highlight.ts";
+import { Icon } from "../icons.tsx";
+import { MarkdownDoc } from "../markdown.tsx";
+import { parsePrDiffLines, splitPrDiff } from "../prDiff.ts";
+import { friendlyError } from "../settings.ts";
 import { useStore } from "../store.ts";
 import EmptyState from "./EmptyState.tsx";
 
 type Tab = "overview" | "files" | "checks" | "comments";
+type PrSection = "detail" | "files" | "diff" | "checks" | "comments";
+
+/** Hide HTML comments and Cursor's agent footer without altering fenced examples. */
+export function stripCursorMarkers(markdown: string): string {
+  const stripOutsideFence = (text: string): string => text
+    .replace(/<!--[\s\S]*?-->/g, "")
+    .replace(/<div\b[^>]*>[\s\S]*?<\/div>/gi, (block) =>
+      /(?:cursor_ref=pr_footer|cursor\.com\/(?:agents|background-agent))/i.test(block) ? "" : block)
+    .replace(/^\s*(?:(?:begin|end|start|stop)[_\s-]+cursor(?:[_\s:-].*)?|cursor(?:_[a-z0-9-]+)+)\s*$/gim, "");
+
+  const output: string[] = [];
+  let outside: string[] = [];
+  let fence: { char: string; length: number } | null = null;
+  const flushOutside = () => {
+    if (outside.length > 0) output.push(stripOutsideFence(outside.join("\n")));
+    outside = [];
+  };
+  for (const line of markdown.split("\n")) {
+    const marker = /^\s*(`{3,}|~{3,})/.exec(line)?.[1];
+    if (!fence && marker) {
+      flushOutside();
+      fence = { char: marker[0]!, length: marker.length };
+      output.push(line);
+    } else if (fence) {
+      output.push(line);
+      if (marker?.[0] === fence.char && marker.length >= fence.length) fence = null;
+    } else {
+      outside.push(line);
+    }
+  }
+  flushOutside();
+  return output.join("\n").trim();
+}
+
+export function reviewMessageTone(message: string): "error" | "warning" | "success" {
+  if (message.startsWith("Submit failed")) return "error";
+  if (message.startsWith("Confirm ")) return "warning";
+  return "success";
+}
 
 function ChecksRing({ summary }: { summary: ChecksSummaryDto }) {
-  const ok = summary.counts.success ?? 0;
-  const failed = (summary.counts.failure ?? 0) + (summary.counts.action_required ?? 0) + (summary.counts.timed_out ?? 0);
+  const passing = summary.counts.success ?? 0;
+  const failing = (summary.counts.failure ?? 0) + (summary.counts.action_required ?? 0) + (summary.counts.timed_out ?? 0);
   const running = (summary.counts.queued ?? 0) + (summary.counts.in_progress ?? 0);
   const total = Math.max(1, summary.total);
-  const seg = (n: number) => (n / total) * 360;
-  const gradient = `conic-gradient(var(--red) 0deg ${seg(failed)}deg, var(--amber) ${seg(failed)}deg ${seg(failed + running)}deg, var(--green) ${seg(failed + running)}deg ${seg(failed + running + ok)}deg, var(--border) ${seg(failed + running + ok)}deg 360deg)`;
-  return (
-    <span
-      className="checks-ring"
-      role="img"
-      aria-label={`${summary.headline}: ${failed} failing, ${running} running, ${ok} passing of ${summary.total}`}
-      style={{ background: gradient }}
-    />
-  );
+  const segment = (count: number) => (count / total) * 360;
+  const gradient = `conic-gradient(var(--red) 0deg ${segment(failing)}deg, var(--amber) ${segment(failing)}deg ${segment(failing + running)}deg, var(--green) ${segment(failing + running)}deg ${segment(failing + running + passing)}deg, var(--border) ${segment(failing + running + passing)}deg 360deg)`;
+  return <span className="checks-ring" role="img" aria-label={`${summary.headline}: ${failing} failing, ${running} running, ${passing} passing`} style={{ background: gradient }} />;
 }
 
 function CheckRow({ check }: { check: PrCheckDto }) {
   return (
-    <div className="check-row">
+    <article className="check-row">
       <span className={`check-dot st-${check.status}`} />
-      <span className="check-name">{check.name}</span>
-      {check.workflow && <span className="muted">{check.workflow}</span>}
+      <div className="check-copy">
+        <strong className="check-name">{check.name}</strong>
+        {check.workflow && <span className="muted">{check.workflow}</span>}
+      </div>
       <span className="check-status">{check.status.replace(/_/g, " ")}</span>
-      {check.url && <a className="small-btn" href={check.url} target="_blank" rel="noreferrer">logs</a>}
+      {check.url && <a className="small-btn" href={check.url} target="_blank" rel="noreferrer">View logs</a>}
+    </article>
+  );
+}
+
+function DiffLines({ diff, path }: { diff: string; path: string }) {
+  return (
+    <div className="git-diff pr-diff" role="table" aria-label={`Patch for ${path}`}>
+      {parsePrDiffLines(diff).map((row, index) => {
+        const oldShown = row.oldLine === undefined ? "" : String(row.oldLine);
+        const newShown = row.newLine === undefined ? "" : String(row.newLine);
+        const className = row.kind === "hunk"
+          ? "diff-hunk"
+          : row.kind === "add"
+            ? "diff-add"
+            : row.kind === "delete"
+              ? "diff-del"
+              : row.kind === "context" ? "" : "diff-meta";
+        const lineLabel = oldShown && newShown
+          ? `old line ${oldShown}, new line ${newShown}`
+          : oldShown ? `old line ${oldShown}` : newShown ? `new line ${newShown}` : "diff metadata";
+        return (
+          <div key={index} className={`git-diff-line ${className}`} role="row" aria-label={lineLabel}>
+            <span className="pr-diff-ln" aria-hidden="true"><i>{oldShown}</i><i>{newShown}</i></span>
+            <code role="cell" dangerouslySetInnerHTML={{ __html: highlight(row.text, langOf(path)) }} />
+          </div>
+        );
+      })}
     </div>
   );
 }
 
+const initials = (name: string): string => name.split(/[\s-]+/).slice(0, 2).map((part) => part[0]?.toUpperCase() ?? "").join("") || "?";
+
 export default function PullRequestView({ number, onClose }: { number: number; onClose: () => void }) {
-  const projectId = useStore((s) => s.activeProjectId);
-  const sessionId = useStore((s) => s.activeSessionId);
+  const projectId = useStore((state) => state.activeProjectId);
+  const sessionId = useStore((state) => state.activeSessionId);
   const [tab, setTab] = useState<Tab>("overview");
   const [detail, setDetail] = useState<PrDetailDto | null>(null);
   const [files, setFiles] = useState<PrFileDto[]>([]);
+  const [rawDiff, setRawDiff] = useState("");
+  const [diffReason, setDiffReason] = useState("");
+  const [expandedFiles, setExpandedFiles] = useState<ReadonlySet<string>>(new Set());
   const [checks, setChecks] = useState<{ checks: PrCheckDto[]; summary: ChecksSummaryDto } | null>(null);
   const [comments, setComments] = useState<PrCommentDto[]>([]);
   const [reason, setReason] = useState("");
-
-  // review submit form
+  const [sectionErrors, setSectionErrors] = useState<Partial<Record<PrSection, string>>>({});
+  const [reloadKey, setReloadKey] = useState(0);
+  const [loading, setLoading] = useState(true);
   const [reviewBody, setReviewBody] = useState("");
   const [reviewEvent, setReviewEvent] = useState<"COMMENT" | "APPROVE" | "REQUEST_CHANGES">("COMMENT");
   const [confirmWrite, setConfirmWrite] = useState(false);
   const [writeMsg, setWriteMsg] = useState("");
-
-  // F7: merge (destructive remote write) + title/body edit
   const [mergeStrategy, setMergeStrategy] = useState<"squash" | "merge" | "rebase">("squash");
   const [mergeConfirm, setMergeConfirm] = useState(false);
   const [mergeBusy, setMergeBusy] = useState(false);
@@ -66,41 +132,111 @@ export default function PullRequestView({ number, onClose }: { number: number; o
   const [editTitle, setEditTitle] = useState("");
   const [editBody, setEditBody] = useState("");
   const [editBusy, setEditBusy] = useState(false);
+  const [reviewBusy, setReviewBusy] = useState(false);
 
-  const loadChecks = useCallback(() => {
-    if (!projectId) return;
-    void api.githubPrChecks(projectId, number).then((r) => {
-      if (r.ok) setChecks(r.data);
-      else setReason(r.reason);
-    });
+  const loadChecks = useCallback(async () => {
+    if (!projectId) return Promise.resolve();
+    try {
+      const result = await api.githubPrChecks(projectId, number);
+      if (result.ok) {
+        setChecks(result.data);
+        setSectionErrors((current) => {
+          const { checks: _checks, ...rest } = current;
+          return rest;
+        });
+      } else {
+        setSectionErrors((current) => ({ ...current, checks: result.reason }));
+      }
+    } catch (cause) {
+      setSectionErrors((current) => ({ ...current, checks: friendlyError("Couldn’t load checks", cause) }));
+    }
   }, [projectId, number]);
 
   useEffect(() => {
     if (!projectId) return;
+    let active = true;
+    setLoading(true);
     setReason("");
-    void api.githubPrDetail(projectId, number).then((r) => {
-      if (r.ok) setDetail(r.data); else setReason(r.reason);
-    });
-    void api.githubPrFiles(projectId, number).then((r) => { if (r.ok) setFiles(r.data); });
-    void api.githubPrComments(projectId, number).then((r) => { if (r.ok) setComments(r.data); });
-    loadChecks();
-  }, [projectId, number, loadChecks]);
+    setDiffReason("");
+    setSectionErrors({});
+    const recordError = (section: PrSection, message: string) => {
+      if (active) setSectionErrors((current) => ({ ...current, [section]: message }));
+    };
+    const tasks = [
+      (async () => {
+        try {
+          const result = await api.githubPrDetail(projectId, number);
+          if (!active) return;
+          if (result.ok) setDetail(result.data);
+          else {
+            setReason(result.reason);
+            recordError("detail", result.reason);
+          }
+        } catch (cause) {
+          const message = friendlyError("Couldn’t load pull request details", cause);
+          if (active) setReason(message);
+          recordError("detail", message);
+        }
+      })(),
+      (async () => {
+        try {
+          const result = await api.githubPrFiles(projectId, number);
+          if (!active) return;
+          if (result.ok) setFiles(result.data); else recordError("files", result.reason);
+        } catch (cause) {
+          recordError("files", friendlyError("Couldn’t load changed files", cause));
+        }
+      })(),
+      (async () => {
+        try {
+          const result = await api.githubPrComments(projectId, number);
+          if (!active) return;
+          if (result.ok) setComments(result.data); else recordError("comments", result.reason);
+        } catch (cause) {
+          recordError("comments", friendlyError("Couldn’t load comments", cause));
+        }
+      })(),
+      (async () => {
+        try {
+          const result = await api.githubPrDiff(projectId, number);
+          if (!active) return;
+          if (result.ok) setRawDiff(result.data);
+          else {
+            setDiffReason(result.reason);
+            recordError("diff", result.reason);
+          }
+        } catch (cause) {
+          const message = friendlyError("Couldn’t load the pull request patch", cause);
+          if (active) setDiffReason(message);
+          recordError("diff", message);
+        }
+      })(),
+      loadChecks(),
+    ];
+    void Promise.allSettled(tasks).finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
+  }, [projectId, number, loadChecks, reloadKey]);
 
-  // poll checks only while some check is nonterminal and the surface is visible
   useEffect(() => {
-    const pending = checks?.checks.some((c) => c.status === "queued" || c.status === "in_progress") ?? false;
+    const pending = checks?.checks.some((check) => check.status === "queued" || check.status === "in_progress") ?? false;
     if (!pending) return;
-    const t = setInterval(loadChecks, 10_000);
-    return () => clearInterval(t);
+    const timer = setInterval(() => void loadChecks(), 10_000);
+    return () => clearInterval(timer);
   }, [checks, loadChecks]);
+
+  const diffFiles = useMemo(() => splitPrDiff(rawDiff), [rawDiff]);
+  const fileStats = useMemo(() => new Map(files.map((file) => [file.path, file])), [files]);
+
+  useEffect(() => {
+    if (diffFiles[0]) setExpandedFiles(new Set([diffFiles[0].path]));
+  }, [rawDiff]);
 
   if (!projectId) return null;
 
   const reloadDetail = () => {
-    void api.githubPrDetail(projectId, number).then((r) => { if (r.ok) setDetail(r.data); });
+    void api.githubPrDetail(projectId, number).then((result) => { if (result.ok) setDetail(result.data); });
   };
 
-  // Merge stays disabled with the reason until GitHub reports MERGEABLE.
   const mergeBlock = !detail ? "loading"
     : detail.state !== "OPEN" ? `pull request is ${detail.state.toLowerCase()}`
     : detail.isDraft ? "draft pull requests cannot be merged"
@@ -112,223 +248,326 @@ export default function PullRequestView({ number, onClose }: { number: number; o
     if (mergeBlock || !mergeConfirm) return;
     setMergeBusy(true);
     setMergeMsg("");
-    const r = await api.githubPrMerge({
-      projectId, number, strategy: mergeStrategy,
+    const result = await api.githubPrMerge({
+      projectId,
+      number,
+      strategy: mergeStrategy,
       ...(sessionId ? { sessionId } : {}),
-    }).catch((e: unknown) => ({ ok: false as const, reason: e instanceof Error ? e.message : String(e) }));
+    }).catch((cause: unknown) => ({ ok: false as const, reason: cause instanceof Error ? cause.message : String(cause) }));
     setMergeBusy(false);
     setMergeConfirm(false);
-    if (r.ok) {
-      // remote merge via GitHub — distinct from a local `git merge`
-      setMergeMsg(`Merged via GitHub (${mergeStrategy}).`);
+    if (result.ok) {
+      setMergeMsg(`Merged via GitHub using ${mergeStrategy}.`);
       reloadDetail();
     } else {
-      setMergeMsg(`Merge failed: ${r.reason}`);
+      setMergeMsg(`Merge failed: ${result.reason}`);
     }
   };
 
   const saveEdit = async () => {
     if (!detail) return;
-    if (editTitle.trim() === detail.title && editBody === detail.body) { setEditing(false); return; }
+    if (editTitle.trim() === detail.title && editBody === detail.body) {
+      setEditing(false);
+      return;
+    }
     setEditBusy(true);
-    const r = await api.githubPrUpdate({
-      projectId, number,
+    const result = await api.githubPrUpdate({
+      projectId,
+      number,
       ...(editTitle.trim() !== detail.title ? { title: editTitle.trim() } : {}),
       ...(editBody !== detail.body ? { body: editBody } : {}),
       ...(sessionId ? { sessionId } : {}),
-    }).catch((e: unknown) => ({ ok: false as const, reason: e instanceof Error ? e.message : String(e) }));
+    }).catch((cause: unknown) => ({ ok: false as const, reason: cause instanceof Error ? cause.message : String(cause) }));
     setEditBusy(false);
-    if (r.ok) {
+    if (result.ok) {
       setEditing(false);
       reloadDetail();
     } else {
-      setMergeMsg(`Update failed: ${r.reason}`);
+      setMergeMsg(`Update failed: ${result.reason}`);
     }
   };
 
   const submitReview = async () => {
+    if (reviewBusy) return;
     setWriteMsg("");
     const needsConfirm = reviewEvent !== "COMMENT";
-    if (needsConfirm && !confirmWrite) { setWriteMsg("Tick the confirmation box to approve or request changes."); return; }
-    const r = await api.githubSubmitReview(number, {
-      projectId, event: reviewEvent, body: reviewBody,
+    if (needsConfirm && !confirmWrite) {
+      setWriteMsg("Confirm the approval or change request before submitting.");
+      return;
+    }
+    setReviewBusy(true);
+    const result = await api.githubSubmitReview(number, {
+      projectId,
+      event: reviewEvent,
+      body: reviewBody,
       ...(detail?.headRefOid ? { commitSha: detail.headRefOid } : {}),
       ...(needsConfirm ? { confirm: true } : {}),
       ...(sessionId ? { sessionId } : {}),
-    }).catch((e: unknown) => ({ ok: false as const, reason: e instanceof Error ? e.message : String(e) }));
-    if (r.ok) {
-      setWriteMsg(`Review submitted (${reviewEvent.toLowerCase()}).`);
+    }).catch((cause: unknown) => ({ ok: false as const, reason: cause instanceof Error ? cause.message : String(cause) }));
+    setReviewBusy(false);
+    if (result.ok) {
+      setWriteMsg(`Review submitted (${reviewEvent.toLowerCase().replace("_", " ")}).`);
       setReviewBody("");
       setConfirmWrite(false);
-      void api.githubPrComments(projectId, number).then((c) => { if (c.ok) setComments(c.data); });
+      void api.githubPrComments(projectId, number).then((next) => { if (next.ok) setComments(next.data); });
     } else {
-      setWriteMsg(`Submit failed: ${r.reason}`);
+      setWriteMsg(`Submit failed: ${result.reason}`);
     }
   };
 
+  const toggleFile = (path: string) => {
+    setExpandedFiles((current) => {
+      const next = new Set(current);
+      if (next.has(path)) next.delete(path); else next.add(path);
+      return next;
+    });
+  };
+
+  const passing = checks?.summary.counts.success ?? 0;
+  const failing = (checks?.summary.counts.failure ?? 0) + (checks?.summary.counts.action_required ?? 0) + (checks?.summary.counts.timed_out ?? 0);
+  const pending = (checks?.summary.counts.queued ?? 0) + (checks?.summary.counts.in_progress ?? 0);
+  const writeTone = reviewMessageTone(writeMsg);
+
+  if (loading && !detail) {
+    return (
+      <div className="pr-surface" aria-busy="true" aria-label="Loading pull request">
+        <div className="source-skeleton skeleton-title" />
+        <div className="source-skeleton skeleton-tabs" />
+        <div className="source-skeleton skeleton-panel" />
+      </div>
+    );
+  }
+
   return (
     <div className="pr-surface">
-      <div className="view-toolbar-row">
-        <button className="small-btn" onClick={onClose}>← Back</button>
+      <header className="pr-head">
+        <button className="small-btn pr-back" onClick={onClose}><Icon.back /> Pull requests</button>
         {detail && (
-          <>
-            <span className={`gh-state ${detail.state.toLowerCase()}${detail.isDraft ? " draft" : ""} pr-state`}>
-              {detail.isDraft ? "draft" : detail.state.toLowerCase()}
-            </span>
-            <a className="gh-title" href={detail.url} target="_blank" rel="noreferrer">
-              <span className="gh-number mono">#{detail.number}</span> {detail.title}
-            </a>
-          </>
+          <div className="pr-title-block">
+            <div className="pr-title-meta">
+              <span className={`gh-state ${detail.state.toLowerCase()}${detail.isDraft ? " draft" : ""}`}>{detail.isDraft ? "draft" : detail.state.toLowerCase()}</span>
+              <span className="gh-number mono">#{detail.number}</span>
+            </div>
+            <h1><a href={detail.url} target="_blank" rel="noreferrer">{detail.title} <Icon.external /><span className="sr-only">(opens on GitHub)</span></a></h1>
+            <span className="muted">{detail.author} wants to merge <span className="mono">{detail.headRefName}</span> into <span className="mono">{detail.baseRefName}</span></span>
+          </div>
         )}
-        <span className="header-spacer" />
-        {checks && <><ChecksRing summary={checks.summary} /><span className={`checks-headline hl-${checks.summary.state}`}>{checks.summary.headline}</span></>}
-      </div>
+        {checks && <div className="pr-check-pill"><ChecksRing summary={checks.summary} /><span className={`checks-headline hl-${checks.summary.state}`}>{checks.summary.headline}</span></div>}
+      </header>
 
-      {reason && !detail && <EmptyState title="Couldn’t load pull request" description={reason} />}
+      {reason && !detail && <EmptyState title="Couldn’t load pull request" description={reason} actionLabel="Retry" onAction={() => setReloadKey((key) => key + 1)} />}
 
       {detail && (
         <>
-          <div className="seg pr-tabbar">
-            <button className={tab === "overview" ? "on" : ""} onClick={() => setTab("overview")}>Overview</button>
-            <button className={tab === "files" ? "on" : ""} onClick={() => setTab("files")}>Files ({detail.changedFiles})</button>
-            <button className={tab === "checks" ? "on" : ""} onClick={() => setTab("checks")}>Checks ({checks?.summary.total ?? 0})</button>
-            <button className={tab === "comments" ? "on" : ""} onClick={() => setTab("comments")}>Comments ({comments.length})</button>
-          </div>
+          <nav className="pr-tabbar" aria-label="Pull request sections">
+            {([
+              ["overview", "Overview", null],
+              ["files", "Files", detail.changedFiles],
+              ["checks", "Checks", checks?.summary.total ?? 0],
+              ["comments", "Comments", comments.length],
+            ] as const).map(([id, label, count]) => (
+              <button key={id} className={tab === id ? "active" : ""} aria-current={tab === id ? "page" : undefined} onClick={() => setTab(id)}>
+                {label}{count !== null && <span>{count}</span>}
+              </button>
+            ))}
+          </nav>
 
           {tab === "overview" && (
             <div className="pr-overview">
-              <div className="sched-meta">
-                <span>{detail.author}</span>
-                <span>·</span>
-                <span className="mono">{detail.headRefName} → {detail.baseRefName}</span>
-                <span>·</span>
-                <span className="mono" title="head commit">{detail.headRefOid.slice(0, 8)}</span>
-                <span>·</span>
-                <span><span className="diff-add">+{detail.additions}</span> <span className="diff-del">−{detail.deletions}</span></span>
-                <span>·</span>
-                <span>{detail.mergeable.toLowerCase()}</span>
-                <span className="header-spacer" />
-                {detail.state === "OPEN" && !editing && (
-                  <button className="small-btn" onClick={() => { setEditTitle(detail.title); setEditBody(detail.body); setEditing(true); }}>
-                    Edit
-                  </button>
-                )}
+              <section className="pr-summary-cards">
+                <div><span>Changed files</span><strong>{detail.changedFiles}</strong></div>
+                <div><span>Lines added</span><strong className="positive">+{detail.additions}</strong></div>
+                <div><span>Lines removed</span><strong className="negative">−{detail.deletions}</strong></div>
+                <div>
+                  <span>Merge status</span>
+                  <strong className={`merge-status-badge st-${detail.mergeable.toLowerCase()}`}>
+                    {detail.mergeable === "MERGEABLE" ? "Ready" : detail.mergeable === "CONFLICTING" ? "Conflicts" : "Checking"}
+                  </strong>
+                </div>
+              </section>
+              <div className="pr-overview-head">
+                <div>
+                  <h2>Description</h2>
+                  <span className="muted">Updated {new Date(detail.updatedAt).toLocaleString()}</span>
+                </div>
+                {detail.state === "OPEN" && !editing && <button className="small-btn" onClick={() => {
+                  setEditTitle(detail.title);
+                  setEditBody(detail.body);
+                  setEditing(true);
+                }}><Icon.pencil /> Edit</button>}
               </div>
 
               {editing ? (
                 <div className="pr-edit-form">
-                  <input value={editTitle} placeholder="Title…" onChange={(e) => setEditTitle(e.target.value)} />
-                  <textarea rows={6} placeholder="Description…" value={editBody} onChange={(e) => setEditBody(e.target.value)} />
+                  <label>Title<input value={editTitle} placeholder="Title…" onChange={(event) => setEditTitle(event.target.value)} /></label>
+                  <label>Description<textarea rows={7} placeholder="Description…" value={editBody} onChange={(event) => setEditBody(event.target.value)} /></label>
                   <div className="view-toolbar-row">
                     <span className="header-spacer" />
                     <button className="small-btn" disabled={editBusy} onClick={() => setEditing(false)}>Cancel</button>
-                    <button className="primary-btn" disabled={editBusy || !editTitle.trim()} onClick={() => void saveEdit()}>
-                      {editBusy ? "Saving…" : "Save"}
-                    </button>
+                    <button className="primary-btn" disabled={editBusy || !editTitle.trim()} onClick={() => void saveEdit()}>{editBusy ? "Saving…" : "Save changes"}</button>
                   </div>
                 </div>
               ) : (
-                <pre className="pr-body">{detail.body || "No description."}</pre>
+                <div className="pr-body markdown-body">
+                  {detail.body ? <MarkdownDoc text={stripCursorMarkers(detail.body)} keyBase={`pr-${detail.number}-body`} /> : <p>No description was provided.</p>}
+                </div>
               )}
 
-              {/* F7: merge — a destructive remote write, gated on mergeability and
-                  an explicit confirmation. Branch deletion is deliberately not here. */}
               {detail.state === "OPEN" && (
-                <div className="pr-merge-area">
-                  <div className="stat-label">Merge (external write)</div>
-                  <div className="view-toolbar-row">
-                    <select value={mergeStrategy} disabled={!!mergeBlock || mergeBusy}
-                      onChange={(e) => setMergeStrategy(e.target.value as typeof mergeStrategy)}>
+                <section className="pr-merge-area">
+                  <div>
+                    <strong>Merge pull request</strong>
+                    <span className="muted">{mergeBlock ? `Unavailable: ${mergeBlock}.` : "This updates the repository on GitHub."}</span>
+                  </div>
+                  <div className="pr-merge-controls">
+                    <select value={mergeStrategy} disabled={!!mergeBlock || mergeBusy} aria-label="Merge strategy" onChange={(event) => setMergeStrategy(event.target.value as typeof mergeStrategy)}>
                       <option value="squash">Squash and merge</option>
-                      <option value="merge">Merge commit</option>
+                      <option value="merge">Create merge commit</option>
                       <option value="rebase">Rebase and merge</option>
                     </select>
-                    {!mergeBlock && (
-                      <label className="sched-every">
-                        <input type="checkbox" checked={mergeConfirm} onChange={(e) => setMergeConfirm(e.target.checked)} />
-                        I confirm this merge
-                      </label>
-                    )}
-                    <span className="header-spacer" />
-                    <button className="primary-btn" disabled={!!mergeBlock || !mergeConfirm || mergeBusy}
-                      title={mergeBlock ?? `Merge #${number} via GitHub (${mergeStrategy})`}
-                      onClick={() => void doMerge()}>
+                    {!mergeBlock && <label className="source-confirm"><input type="checkbox" checked={mergeConfirm} onChange={(event) => setMergeConfirm(event.target.checked)} /> I confirm this merge</label>}
+                    <button className="primary-btn" disabled={!!mergeBlock || !mergeConfirm || mergeBusy} title={mergeBlock ?? `Merge #${number}`} onClick={() => void doMerge()}>
                       {mergeBusy ? "Merging…" : "Merge pull request"}
                     </button>
                   </div>
-                  {mergeBlock && <div className="set-muted">Merge unavailable: {mergeBlock}.</div>}
-                </div>
+                </section>
               )}
-              {mergeMsg && (
-                <div className={/failed/.test(mergeMsg) ? "form-error" : "knowledge-notice"} role="status">{mergeMsg}</div>
-              )}
+              {mergeMsg && <div className={/failed/.test(mergeMsg) ? "form-error" : "knowledge-notice"} role="status">{mergeMsg}</div>}
             </div>
           )}
 
           {tab === "files" && (
             <div className="pr-files">
-              {files.length === 0 && <EmptyState title="No changed files" description="No file list is available for this pull request." />}
-              {files.map((f) => (
-                <div key={f.path} className="pr-file-row">
-                  <span className="mono pr-file-path">{f.path}</span>
-                  <span className="diff-add">+{f.additions}</span>
-                  <span className="diff-del">−{f.deletions}</span>
+              <div className="pr-files-toolbar">
+                <div>
+                  <strong>{detail.changedFiles} changed {detail.changedFiles === 1 ? "file" : "files"}</strong>
+                  <span><span className="positive">+{detail.additions}</span> <span className="negative">−{detail.deletions}</span></span>
                 </div>
+                <span className="header-spacer" />
+                <button className="small-btn" disabled={diffFiles.length === 0} onClick={() => setExpandedFiles(new Set(diffFiles.map((file) => file.path)))}>Expand all</button>
+                <button className="small-btn" disabled={expandedFiles.size === 0} onClick={() => setExpandedFiles(new Set())}>Collapse all</button>
+              </div>
+              {sectionErrors.files && (
+                <div className="source-inline-status error" role="alert">
+                  <span>Changed-file metadata could not be loaded: {sectionErrors.files}</span>
+                  <button className="small-btn" onClick={() => setReloadKey((key) => key + 1)}>Retry</button>
+                </div>
+              )}
+              {diffReason && (
+                <div className="source-inline-status error" role="alert">
+                  <span>The patch could not be loaded: {diffReason}</span>
+                  <button className="small-btn" onClick={() => setReloadKey((key) => key + 1)}>Retry</button>
+                </div>
+              )}
+              {files.length === 0 && diffFiles.length === 0 && <EmptyState title="No changed files" description="No file changes are available for this pull request." />}
+              {diffFiles.map((file) => {
+                const stat = fileStats.get(file.path);
+                const expanded = expandedFiles.has(file.path);
+                return (
+                  <article key={file.path} className={`pr-file-card ${expanded ? "expanded" : ""}`}>
+                    <button className="pr-file-head" aria-expanded={expanded} onClick={() => toggleFile(file.path)}>
+                      <span className={`git-folder-chevron${expanded ? " expanded" : ""}`} aria-hidden="true"><Icon.chevronRight /></span>
+                      <span className="mono pr-file-path" title={file.path}>
+                        {file.previousPath && <span className="muted">{file.previousPath} → </span>}{file.path}
+                      </span>
+                      {stat && <span className="pr-file-stat"><span className="positive">+{stat.additions}</span><span className="negative">−{stat.deletions}</span></span>}
+                    </button>
+                    {expanded && <DiffLines diff={file.diff} path={file.path} />}
+                  </article>
+                );
+              })}
+              {diffFiles.length === 0 && files.map((file) => (
+                <article key={file.path} className="pr-file-card">
+                  <div className="pr-file-head static"><span className="mono pr-file-path">{file.path}</span><span className="pr-file-stat"><span className="positive">+{file.additions}</span><span className="negative">−{file.deletions}</span></span></div>
+                </article>
               ))}
             </div>
           )}
 
           {tab === "checks" && (
             <div className="checks-summary">
-              {!checks && <div className="set-muted">Loading checks…</div>}
-              {checks && checks.summary.total === 0 && <EmptyState title="No checks" description="No checks were reported for this commit." />}
-              {checks?.summary.groups.map((g) => (
-                <div key={g.id} className="checks-group">
-                  <div className="stat-label">{g.label} ({g.checks.length})</div>
-                  {g.checks.map((c) => <CheckRow key={c.id} check={c} />)}
+              {!checks && !sectionErrors.checks && <div className="source-skeleton skeleton-panel" />}
+              {sectionErrors.checks && (
+                <div className="source-inline-status error" role="alert">
+                  <span>Checks could not be loaded: {sectionErrors.checks}</span>
+                  <button className="small-btn" onClick={() => void loadChecks()}>Retry</button>
                 </div>
+              )}
+              {checks && checks.summary.total > 0 && (
+                <section className="check-summary-cards">
+                  <div className="success"><span>Passing</span><strong>{passing}</strong></div>
+                  <div className="failure"><span>Failing</span><strong>{failing}</strong></div>
+                  <div className="pending"><span>In progress</span><strong>{pending}</strong></div>
+                  <div><span>Total</span><strong>{checks.summary.total}</strong></div>
+                </section>
+              )}
+              {checks && checks.summary.total === 0 && <EmptyState title="No checks" description="No checks were reported for this commit." />}
+              {checks?.summary.groups.map((group) => (
+                <section key={group.id} className="checks-group">
+                  <div className="checks-group-head"><strong>{group.label}</strong><span>{group.checks.length}</span></div>
+                  {group.checks.map((check) => <CheckRow key={check.id} check={check} />)}
+                </section>
               ))}
             </div>
           )}
 
           {tab === "comments" && (
             <div className="pr-comments">
-              {comments.length === 0 && <EmptyState title="No comments yet" description="Reviews and comments will appear here." />}
-              {comments.map((c) => (
-                <div key={c.id} className="pr-comment">
-                  <div className="pr-comment-head">
-                    <strong>{c.author}</strong>
-                    {c.reviewState && <span className="tag">{c.reviewState.toLowerCase().replace(/_/g, " ")}</span>}
-                    {c.outdated && <span className="tag">outdated</span>}
-                    <span className="muted">{c.createdAt ? new Date(c.createdAt).toLocaleString() : ""}</span>
-                  </div>
-                  {c.path && <div className="mono muted" style={{ fontSize: "calc(11.5px * var(--ui-font-scale, 1))" }}>{c.path}{c.line ? `:${c.line}` : ""}</div>}
-                  <div className="pr-comment-body">{c.body}</div>
+              {sectionErrors.comments && (
+                <div className="source-inline-status error" role="alert">
+                  <span>Conversation could not be loaded: {sectionErrors.comments}</span>
+                  <button className="small-btn" onClick={() => setReloadKey((key) => key + 1)}>Retry</button>
                 </div>
-              ))}
-
-              <div className="pr-review-form">
-                <div className="stat-label">Submit a review (external write)</div>
-                <textarea rows={3} placeholder="Review comment…" value={reviewBody} onChange={(e) => setReviewBody(e.target.value)} />
-                <div className="view-toolbar-row">
-                  <select value={reviewEvent} onChange={(e) => setReviewEvent(e.target.value as typeof reviewEvent)}>
-                    <option value="COMMENT">Comment</option>
-                    <option value="APPROVE">Approve</option>
-                    <option value="REQUEST_CHANGES">Request changes</option>
-                  </select>
-                  {reviewEvent !== "COMMENT" && (
-                    <label className="sched-every">
-                      <input type="checkbox" checked={confirmWrite} onChange={(e) => setConfirmWrite(e.target.checked)} />
-                      I confirm this {reviewEvent === "APPROVE" ? "approval" : "change request"}
-                    </label>
-                  )}
-                  <span className="header-spacer" />
-                  <button className="primary-btn" disabled={!reviewBody.trim() && reviewEvent !== "APPROVE"} onClick={() => void submitReview()}>
-                    Submit review
-                  </button>
-                </div>
-                {writeMsg && <div className={writeMsg.startsWith("Submit failed") ? "form-error" : "knowledge-notice"}>{writeMsg}</div>}
+              )}
+              {!sectionErrors.comments && comments.length === 0 && <EmptyState title="No conversation yet" description="Reviews and comments on this pull request will appear here." />}
+              <div className="pr-thread">
+                {comments.map((comment) => (
+                  <article key={comment.id} className="pr-comment">
+                    <span className="pr-comment-avatar" aria-hidden="true">{initials(comment.author)}</span>
+                    <div className="pr-comment-card">
+                      <header className="pr-comment-head">
+                        <strong>{comment.author}</strong>
+                        {comment.reviewState && <span className="tag">{comment.reviewState.toLowerCase().replace(/_/g, " ")}</span>}
+                        {comment.outdated && <span className="tag">outdated</span>}
+                        <a href={comment.url} target="_blank" rel="noreferrer" className="muted">{comment.createdAt ? new Date(comment.createdAt).toLocaleString() : ""}</a>
+                      </header>
+                      {comment.path && <div className="pr-comment-location mono">{comment.path}{comment.line ? `:${comment.line}` : ""}</div>}
+                      <div className="pr-comment-body markdown-body"><MarkdownDoc text={stripCursorMarkers(comment.body)} keyBase={`pr-comment-${comment.id}`} /></div>
+                    </div>
+                  </article>
+                ))}
               </div>
+              <section className="pr-review-form">
+                <div>
+                  <strong>Submit a review</strong>
+                  <span className="muted">This posts directly to GitHub.</span>
+                </div>
+                <textarea rows={4} placeholder="Leave a thoughtful review…" value={reviewBody} onChange={(event) => setReviewBody(event.target.value)} />
+                <div className="pr-review-actions">
+                  <label className="pr-review-kind">
+                    <span>Review type</span>
+                    <select aria-label="Review type" value={reviewEvent} disabled={reviewBusy} onChange={(event) => {
+                      setReviewEvent(event.target.value as typeof reviewEvent);
+                      setConfirmWrite(false);
+                    }}>
+                      <option value="COMMENT">Comment</option>
+                      <option value="APPROVE">Approve</option>
+                      <option value="REQUEST_CHANGES">Request changes</option>
+                    </select>
+                  </label>
+                  {reviewEvent !== "COMMENT" && <label className="source-confirm"><input type="checkbox" checked={confirmWrite} onChange={(event) => setConfirmWrite(event.target.checked)} /> Confirm {reviewEvent === "APPROVE" ? "approval" : "change request"}</label>}
+                  <span className="header-spacer" />
+                  <button className="primary-btn" disabled={reviewBusy || (!reviewBody.trim() && reviewEvent !== "APPROVE")} onClick={() => void submitReview()}>{reviewBusy ? "Submitting…" : "Submit review"}</button>
+                </div>
+                {writeMsg && (
+                  <div
+                    className={writeTone === "error" ? "form-error" : writeTone === "warning" ? "form-warning" : "knowledge-notice"}
+                    role={writeTone === "success" ? "status" : "alert"}
+                  >
+                    {writeMsg}
+                  </div>
+                )}
+              </section>
             </div>
           )}
         </>

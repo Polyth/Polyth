@@ -7,9 +7,10 @@ import {
   BUILTIN_CAPABILITY_META, registerCapability, type CapabilityMeta,
 } from "./capabilities.ts";
 import {
-  closeWorkspacePane, openSettingsPage, openWorkspacePane, setActiveView, setRailPlugin, type AppView,
+  openSettingsPage, openWorkspacePane, setActiveView, setRailPlugin, setSidebarOpen, type AppView,
 } from "./store.ts";
 import { speechSupport } from "@polyth/dictation";
+import { setWorkspaceMode } from "./widgets/workspaceMode.ts";
 
 /** Capability id → full workspace view, used for active-state highlighting.
  *  Panel/settings capabilities have no view and never show as "active". */
@@ -53,7 +54,11 @@ function openOf(meta: CapabilityMeta): () => void {
   const view = VIEW_OF_CAPABILITY[meta.id];
   if (view) {
     return () => {
-      if (view === "session") closeWorkspacePane();
+      // Primary destinations must become the visible workspace, not merely
+      // update underneath a pane, compact rail sheet, or sidebar drawer.
+      setRailPlugin(null);
+      setSidebarOpen(false);
+      setWorkspaceMode("chat");
       setActiveView(view);
     };
   }

@@ -156,9 +156,15 @@ export function renderBlocks(blocks: Block[], keyBase: string): ReactNode[] {
         return <CodeBlock key={k} lang={b.lang} text={b.text} />;
       case "list": {
         const L = b.ordered ? "ol" : "ul";
+        const hasTasks = b.items.some((item) => item.checked !== undefined);
         return (
-          <L key={k}>
-            {b.items.map((item, j) => <li key={j}>{renderInline(item, `${k}-i${j}`)}</li>)}
+          <L key={k} className={hasTasks ? "md-task-list" : undefined}>
+            {b.items.map((item, j) => (
+              <li key={j} className={item.checked === undefined ? undefined : "md-task-item"}>
+                {item.checked !== undefined && <input type="checkbox" checked={item.checked} disabled aria-label={item.checked ? "Completed task" : "Incomplete task"} />}
+                <span>{renderInline(item.inline, `${k}-i${j}`)}</span>
+              </li>
+            ))}
           </L>
         );
       }
