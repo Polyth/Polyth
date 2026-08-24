@@ -6106,6 +6106,7 @@ body[data-quick-actions="false"] [data-widget-id="core.quick-actions"] { display
 .usage-refresh-button svg,
 .usage-icon-button svg { width: 14px; height: 14px; }
 .usage-refresh-button.refreshing svg { animation: usage-spin .7s linear infinite; }
+@keyframes usage-spin { to { transform: rotate(360deg); } }
 .usage-refresh-button:disabled,
 .usage-icon-button:disabled {
   opacity: .55;

@@ -256,7 +256,7 @@ function CohortChart({
         <title>{`${metricLabel} from full session totals by latest-activity cohort`}</title>
         <desc>
           {populated
-            ? `Each session appears once, in the date bucket containing its latest activity. ${metricLabel} are cumulative session totals, not usage generated during that bucket. Detailed values follow the chart.`
+            ? `Each session appears once, in the date bucket containing its latest activity. The ${metricLabel.toLowerCase()} values are cumulative session totals, not usage generated during that bucket. Detailed values follow the chart.`
             : `${emptyTitle}. ${emptyText}`}
         </desc>
         {[0, .25, .5, .75, 1].map((fraction) => {
