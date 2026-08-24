@@ -111,8 +111,8 @@ test("focused terminal owns Ctrl+Shift+F while Ctrl+` still reaches the shell", 
     assert.ok(container.querySelector(".term-search"), "terminal search opens");
     assert.equal(getState().overlay, null, "Session history stays closed");
 
-    body.focus();
     await act(async () => {
+      body.focus();
       body.dispatchEvent(new dom.KeyboardEvent("keydown", {
         key: "`",
         ctrlKey: true,
