@@ -6732,7 +6732,7 @@ body[data-quick-actions="false"] [data-widget-id="core.quick-actions"] { display
   .usage-provider-detail-grid { grid-template-columns: 1fr; }
 }
 
-@media (min-width: 701px) and (max-width: 710px) {
+@media (min-width: 701px) and (max-width: 760px) {
   .usage-view-tabs { width: 100%; margin: 0; }
   .usage-layout-control { margin-left: auto; }
 }

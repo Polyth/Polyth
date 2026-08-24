@@ -107,7 +107,7 @@ test("Usage settings keeps the Polyth shell and offers rich dashboard views", as
   assert.match(styles, /\.usage-spend-legend > \.usage-card-empty \{[\s\S]*?width: 100%;[\s\S]*?min-width: 0;[\s\S]*?align-self: stretch;/);
   assert.match(styles, /\.usage-spend-legend > \.usage-card-empty strong \{[\s\S]*?overflow-wrap: normal;[\s\S]*?word-break: normal;[\s\S]*?white-space: normal;/);
   assert.match(styles, /\.usage-provider-error \{[\s\S]*?padding: 9px 10px;/);
-  assert.match(styles, /@media \(min-width: 701px\) and \(max-width: 710px\) \{[\s\S]*?\.usage-view-tabs \{ width: 100%; margin: 0; \}/);
+  assert.match(styles, /@media \(min-width: 701px\) and \(max-width: 760px\) \{[\s\S]*?\.usage-view-tabs \{ width: 100%; margin: 0; \}/);
 
   const usageMobileStart = styles.indexOf("@media (max-width: 480px) {", styles.indexOf(".usage-dashboard {"));
   const usageMobileEnd = styles.indexOf("@media (prefers-reduced-motion: reduce)", usageMobileStart);
