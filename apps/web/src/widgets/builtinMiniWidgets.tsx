@@ -10,6 +10,7 @@ import {
   workflowHumanWait,
 } from "../workflowRun.ts";
 import { handOffWorkflowLaunch } from "../workflowLaunch.ts";
+import { subscribeWorkflowRuns } from "../workflowMonitor.ts";
 import { GoalAttachForm } from "../components/GoalStrip.tsx";
 import WorkflowLauncher from "../components/WorkflowLauncher.tsx";
 import { defineWidgetPlugin, registerWidgetPlugin } from "./catalog.ts";
@@ -130,7 +131,22 @@ function WorkflowRunIndicator() {
     };
     refresh();
     const timer = setInterval(refresh, 1_200);
-    return () => { active = false; clearInterval(timer); };
+    const unsubscribe = subscribeWorkflowRuns((updated) => {
+      if (updated.projectId && updated.projectId !== projectId) return;
+      setWorkflowState((current) => {
+        const existing = current?.projectId === projectId ? current.runs : [];
+        const activeRuns = prioritizeWorkflowRuns([
+          updated,
+          ...existing.filter((run) => run.id !== updated.id),
+        ]);
+        return activeRuns.length > 0 ? { projectId, runs: activeRuns } : null;
+      });
+    });
+    return () => {
+      active = false;
+      clearInterval(timer);
+      unsubscribe();
+    };
   }, [projectId]);
   if (!run || !projectId) return null;
   const done = workflowFinishedCount(run);

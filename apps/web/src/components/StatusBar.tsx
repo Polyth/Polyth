@@ -9,6 +9,7 @@ import {
   workflowHumanWait,
 } from "../workflowRun.ts";
 import { handOffWorkflowLaunch } from "../workflowLaunch.ts";
+import { subscribeWorkflowRuns } from "../workflowMonitor.ts";
 
 // UX-PANE-MODEL: Files/Git/Terminal/Preview are workspace panes beside Chat,
 // not primary views — the open pane is appended to the label instead.
@@ -60,9 +61,21 @@ export default function StatusBar() {
     };
     refresh();
     const timer = setInterval(refresh, 1_200);
+    const unsubscribe = subscribeWorkflowRuns((updated) => {
+      if (updated.projectId && updated.projectId !== project.id) return;
+      setWorkflowState((current) => {
+        const existing = current?.projectId === project.id ? current.runs : [];
+        const activeRuns = prioritizeWorkflowRuns([
+          updated,
+          ...existing.filter((run) => run.id !== updated.id),
+        ]);
+        return activeRuns.length > 0 ? { projectId: project.id, runs: activeRuns } : null;
+      });
+    });
     return () => {
       mounted = false;
       clearInterval(timer);
+      unsubscribe();
     };
   }, [project?.id]);
 

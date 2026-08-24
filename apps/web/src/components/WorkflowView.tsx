@@ -17,6 +17,7 @@ import { friendlyError } from "../settings.ts";
 import { showSessionChat, useActiveModel, useStore } from "../store.ts";
 import { layerizeWorkflow, wouldWorkflowCycle } from "../workflowGraph.ts";
 import { takeWorkflowLaunch, type WorkflowLaunchIntent } from "../workflowLaunch.ts";
+import { publishWorkflowRun } from "../workflowMonitor.ts";
 import {
   WORKFLOW_STATUS_LABEL,
   fresherWorkflowRun,
@@ -389,6 +390,7 @@ export default function WorkflowView() {
         maxParallel: parallelValue,
         nodeTimeoutMs: timeoutValue * 1_000,
       });
+      publishWorkflowRun(started);
       setRunInput(input);
       setLiveRun(started);
       setProjectRuns((current) => [started, ...current.filter((candidate) => candidate.id !== started.id)]);
@@ -412,6 +414,7 @@ export default function WorkflowView() {
           nodeTimeoutMs: (timeoutValue ?? 1_800) * 1_000,
         },
       );
+      publishWorkflowRun(started);
       setRunInput(shownRun.input);
       setLiveRun(started);
       setProjectRuns((current) => [started, ...current.filter((candidate) => candidate.id !== started.id)]);
@@ -422,6 +425,7 @@ export default function WorkflowView() {
     if (!shownRun) return;
     void act("stop", async () => {
       const stopped = await api.stopWorkflowRun(shownRun.id);
+      publishWorkflowRun(stopped);
       setLiveRun(stopped);
       setProjectRuns((current) => current.map((candidate) => candidate.id === stopped.id ? stopped : candidate));
     });

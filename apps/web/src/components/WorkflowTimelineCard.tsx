@@ -5,6 +5,7 @@ import { openSession } from "../init.ts";
 import { Icon } from "../icons.tsx";
 import { getState, setActiveView, setUiError } from "../store.ts";
 import { handOffWorkflowLaunch } from "../workflowLaunch.ts";
+import { publishWorkflowRun } from "../workflowMonitor.ts";
 import { friendlyError } from "../settings.ts";
 import {
   WORKFLOW_STATUS_LABEL,
@@ -29,7 +30,10 @@ export default function WorkflowTimelineCard({ run }: { run: WorkflowRunDto }) {
     if (stopping || shownRun.status !== "running") return;
     setStopping(true);
     void api.stopWorkflowRun(shownRun.id)
-      .then(setApiRun)
+      .then((stopped) => {
+        setApiRun(stopped);
+        publishWorkflowRun(stopped);
+      })
       .catch((cause) => setUiError(friendlyError("Couldn’t stop the workflow", cause)))
       .finally(() => setStopping(false));
   };
