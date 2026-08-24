@@ -425,7 +425,7 @@ test("complete workflow journey remains synchronized, accessible, and responsive
     const dialogBox = await phone.locator(".workflow-launch-dialog").boundingBox();
     assert.ok(dialogBox && dialogBox.width <= width - 20 + 1, `launcher@${width}: dialog is too wide`);
     await phone.keyboard.press("Escape");
-    await phone.getByRole("button", { name: "View workflow" }).click();
+    await phone.getByRole("button", { name: "View workflow", exact: true }).click();
     await phone.waitForSelector(".workflow-page", { state: "visible" });
     await assertNoOverflow(phone, `workflow view@${width}`);
     await phone.screenshot({ path: join(ARTIFACTS, `workflow_mobile_${width}.png`), fullPage: false });
