@@ -12,8 +12,46 @@ Companion docs: `docs/dev/architecture.md` (the system as built),
 `docs/dev/new-features.md` (specs F1–F18 for the remaining gaps),
 `docs/dev/implementation-order.md` (sequencing P1–P8 done, L1–L13 next),
 `docs/dev/HANDOFF.md` (the live handoff), `docs/parity/polyth-parity.yaml`
-(209-row status matrix: 66 implemented, 42 implementing, 100 planned,
+(209-row status matrix: 98 implemented, 35 implementing, 75 planned,
 1 intentionally-changed).
+
+---
+
+## Unreleased — branch `feat/ssh-connection-plugin-dcfd` (2026-08-23)
+
+Commits `92b11d2`, `e47c6c1` and the docs/parity follow-up.
+
+### Added — SSH remotes: projects on servers, the agent runs on the host
+
+- New `packages/ssh` feature package: a saved SSH-server inventory
+  (`data/ssh-connections.json` — host/port/user/auth mode and at most a
+  private-key file *path*; never passwords or key material, auth is the user's
+  SSH agent or ssh_config) driving one multiplexed OpenSSH connection per host
+  (`ControlMaster`, with `ControlPersist` idle disconnect) and exposing
+  connect/disconnect/status plus cheap local mux health checks. The package
+  implements the new generic `RemoteHost` exec/start/forward seam from
+  contracts and knows nothing about OpenCode.
+- `backend-opencode` gained `createRemoteOpenCodeRuntime`: a project bound to a
+  server probes for the `opencode` binary and the workspace path, starts
+  `opencode serve` ON the host (remote PID file for orphan reaping,
+  port-collision retry), and reaches it through an SSH `-L` forward — the
+  coding agent runs next to the files and only the conversation crosses the
+  wire. Unreachable host, auth failure, missing binary, and missing path each
+  surface as distinct, honest errors.
+- Server: `/api/ssh/*` RouteHandler registered at the composition root —
+  connection CRUD (secrets rejected on write, never returned), connect /
+  disconnect / status, a round-trip test that also probes the remote runtime,
+  remote directory browse, and remote project creation; deleting a connection
+  with bound projects refuses. `Project` carries an optional `remote` binding
+  (`projects.addRemote`), and the runtime pool picks the remote or local
+  runtime per project.
+- Web: Settings → SSH Remotes (inventory CRUD, connect/disconnect, test with
+  latency + remote `opencode` version) and an "Open on a server…" source in
+  the project picker contributed through the new `project.create.options` UI
+  slot — a remote directory browser with optional folder creation.
+- Parity matrix: OC-21-007 (saved servers + reachability) implemented;
+  OC-21-008 (SSH remote managed/external) implementing — the managed
+  install/upgrade half is not built.
 
 ---
 

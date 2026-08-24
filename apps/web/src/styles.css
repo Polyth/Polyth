@@ -8027,3 +8027,21 @@ body[data-quick-actions="false"] [data-widget-id="core.quick-actions"] { display
   .side-foot { grid-template-columns: 42px minmax(0, 1fr) 42px 42px; }
   .agent-reply-actions { opacity: 1; }
 }
+
+/* ---------- SSH remotes (settings page + remote-project picker) ---------- */
+.tag-err { color: var(--red); border-color: var(--red); }
+.ssh-row-label { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; }
+.ssh-project-dialog { gap: 0; }
+.ssh-dialog-server {
+  display: flex; flex-direction: column; gap: 6px; margin: 0 18px;
+  font-size: 12px; font-weight: 600;
+}
+.ssh-dialog-server select { align-self: flex-start; max-width: 100%; font-weight: 400; }
+.ssh-remote-list { height: min(34vh, 260px); }
+.ssh-dialog-meta { display: flex; align-items: flex-end; gap: 16px; margin: 0 18px; }
+.ssh-dialog-name { display: flex; flex-direction: column; gap: 6px; font-size: 12px; font-weight: 600; }
+.ssh-dialog-name input { height: 30px; padding: 0 9px; font-size: 12.5px; font-weight: 400; }
+.ssh-dialog-create {
+  display: inline-flex; align-items: center; gap: 7px; padding-bottom: 7px;
+  color: var(--muted); font-size: 12px;
+}

@@ -15,8 +15,11 @@ import {
   createBrowserToolBridge,
   createConfigApplier,
   createOpenCodeRuntime,
+  createRemoteOpenCodeRuntime,
+  probeRemoteOpenCode,
   type OpenCodeAdapterOptions,
 } from "@polyth/backend-opencode";
+import { createSshService } from "@polyth/ssh";
 import {
   createPluginRegistry,
   type ServerPluginFactory,
@@ -75,6 +78,7 @@ import { controlRoutes } from "./routes/control.ts";
 import { snippetRoutes } from "./routes/snippets.ts";
 import { profileRoutes } from "./routes/profiles.ts";
 import { settingsRoutes } from "./routes/settings.ts";
+import { sshRoutes } from "./routes/ssh.ts";
 import { browserRoutes } from "./routes/browser.ts";
 import { browseRoutes } from "./routes/browse.ts";
 import { dictationRoutes } from "./routes/dictation.ts";
@@ -161,6 +165,11 @@ export async function boot(opts: BootOptions = {}) {
   root.provide(CAP.projects, projects);
   const permissions = createPermissionService(dataDir);
 
+  // --- SSH remotes: connection inventory + multiplexed OpenSSH transport.
+  // Remote-bound projects run their agent runtime ON the remote host (see
+  // spawnRuntime below); this service never speaks OpenCode itself.
+  const ssh = createSshService({ file: `${dataDir}/ssh.json` });
+
   // --- per-project opencode runtime pool (lazy spawn, one serve process per project)
   const runtimesByProject = new Map<string, Promise<AgentRuntime>>();
   const sessionIdMap = new Map<string, string>(); // canonical -> backend
@@ -180,6 +189,18 @@ export async function boot(opts: BootOptions = {}) {
     cwd ?? (await projects.get(projectId))?.path ?? process.cwd();
 
   const spawnRuntime = async (projectId: string, cwd: string): Promise<AgentRuntime> => {
+    // Remote-bound projects run `opencode serve` ON the remote host through
+    // the SSH transport (one multiplexed channel + one forwarded port). The
+    // browser-tool bridge is a local loopback endpoint the remote cannot
+    // reach, so it is not registered for remote runtimes.
+    const remoteBinding = (await projects.get(projectId))?.remote;
+    if (remoteBinding?.kind === "ssh") {
+      return createRemoteOpenCodeRuntime({
+        host: ssh.host(remoteBinding.connectionId),
+        remotePath: cwd,
+        sessionIdMap,
+      });
+    }
     const browserTool = browserToolBridge.register({ projectId, cwd });
     try {
       const runtime = await createOpenCodeRuntime({
@@ -984,6 +1005,12 @@ export async function boot(opts: BootOptions = {}) {
     },
   }));
   registerPackageRoute("commands", snippetRoutes({ projects, commands }));
+  registerPackageRoute("ssh", sshRoutes({
+    ssh, projects,
+    // The runtime probe goes through backend-opencode — the route itself
+    // never learns anything OpenCode-specific.
+    probeRuntime: (connectionId) => probeRemoteOpenCode(ssh.host(connectionId)),
+  }), { onDisable: () => ssh.disconnectAll() });
   registerPackageRoute("secure-safe", secureSafeRoutes(secureSafe));
   registerPackageRoute("mcp", async (request) =>
     request.path.startsWith("/api/mcp/") ? settingsRoute(request) : false);
@@ -1036,7 +1063,7 @@ export async function boot(opts: BootOptions = {}) {
   ];
   const routes: RouteHandler[] = [...staticCoreRoutes, routeRegistry.handler];
 
-  const allCapabilities = () => ["polyth.sessions", "polyth.sessionPersistence", "polyth.projects", "polyth.agentRuntime", "polyth.goals", "polyth.files", "polyth.commands", "polyth.git", "polyth.worktrees", "polyth.terminal", "polyth.preview", "polyth.multirun", "polyth.workflow", "polyth.fusion", "polyth.walkthrough", "polyth.schedule", "polyth.tracks", "polyth.github", "polyth.control", "polyth.agentProfiles", "polyth.settings", "polyth.mcp", "polyth.plugins", "polyth.knowledge", "polyth.review", "polyth.usage", "polyth.browser", "polyth.voice", "polyth.assist", "polyth.homeAssistant", "polyth.secureSafe"];
+  const allCapabilities = () => ["polyth.sessions", "polyth.sessionPersistence", "polyth.projects", "polyth.agentRuntime", "polyth.goals", "polyth.files", "polyth.commands", "polyth.git", "polyth.worktrees", "polyth.terminal", "polyth.preview", "polyth.multirun", "polyth.workflow", "polyth.fusion", "polyth.walkthrough", "polyth.schedule", "polyth.tracks", "polyth.github", "polyth.control", "polyth.agentProfiles", "polyth.settings", "polyth.mcp", "polyth.plugins", "polyth.knowledge", "polyth.review", "polyth.usage", "polyth.browser", "polyth.voice", "polyth.assist", "polyth.homeAssistant", "polyth.secureSafe", "polyth.ssh"];
 
   await packageLifecycle.startEnabled(packageRegistry);
 
@@ -1067,6 +1094,7 @@ export async function boot(opts: BootOptions = {}) {
     await terminals.closeAll().catch(() => {});
     await preview.stopAll().catch(() => {});
     for (const p of runtimesByProject.values()) await (await p.catch(() => null))?.dispose().catch(() => {});
+    await ssh.disconnectAll().catch(() => {});
     await root.dispose();
     await store.close();
     server.close();

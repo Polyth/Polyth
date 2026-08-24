@@ -38,6 +38,10 @@ import type {
   SessionProjection,
   SessionRef,
   ShellTurnResult,
+  SshBrowseDto,
+  SshConnectionDto,
+  SshConnectionInput,
+  SshConnectionStatusDto,
   TerminalInfo,
   WalkthroughStepDto,
   WorkflowDto,
@@ -1189,6 +1193,30 @@ export const api = {
       json("POST", { entityId, temperature }),
     ),
 
+  // ---- SSH remotes ---------------------------------------------------------------
+  sshConnections: () =>
+    jfetch<{ items: SshConnectionWithStatus[] }>("/api/ssh/connections"),
+  sshCreateConnection: (input: SshConnectionInput) =>
+    jfetch<SshConnectionDto>("/api/ssh/connections", json("POST", input)),
+  sshUpdateConnection: (id: string, input: SshConnectionInput) =>
+    jfetch<SshConnectionDto>(`/api/ssh/connections/${encodeURIComponent(id)}`, json("PATCH", input)),
+  sshDeleteConnection: (id: string) =>
+    jfetch<{ ok: boolean }>(`/api/ssh/connections/${encodeURIComponent(id)}`, { method: "DELETE" }),
+  sshConnect: (id: string) =>
+    jfetch<SshConnectionStatusDto>(`/api/ssh/connections/${encodeURIComponent(id)}/connect`, json("POST", {})),
+  sshDisconnect: (id: string) =>
+    jfetch<SshConnectionStatusDto>(`/api/ssh/connections/${encodeURIComponent(id)}/disconnect`, json("POST", {})),
+  sshStatus: (id: string) =>
+    jfetch<SshConnectionStatusDto>(`/api/ssh/connections/${encodeURIComponent(id)}/status`),
+  sshTest: (id: string) =>
+    jfetch<SshTestResultDto>(`/api/ssh/connections/${encodeURIComponent(id)}/test`, json("POST", {})),
+  sshBrowse: (connectionId: string, path?: string) =>
+    jfetch<SshBrowseDto>(
+      `/api/ssh/browse?connectionId=${encodeURIComponent(connectionId)}${path ? `&path=${encodeURIComponent(path)}` : ""}`,
+    ),
+  sshCreateProject: (input: { connectionId: string; path: string; name?: string; createDirectory?: boolean }) =>
+    jfetch<Project>("/api/ssh/projects", json("POST", input)),
+
   // ---- idle assist (F9): recap + suggestion, chat→note --------------------------
   assistSettings: () => jfetch<AssistSettingsDto>(`/api/settings/assist`),
   assistSettingsSave: (patch: Partial<AssistSettingsDto>) =>
@@ -1251,6 +1279,13 @@ export const api = {
   authLogoutAll: () => jfetch<{ ok: boolean }>(`/api/auth/logout-all`, json("POST", {})),
   authSessions: () => jfetch<AuthDeviceDto[]>(`/api/auth/sessions`),
   authRevoke: (id: string) => jfetch<{ ok: boolean }>(`/api/auth/sessions/${encodeURIComponent(id)}`, { method: "DELETE" }),
+};
+
+// ---- SSH remotes DTOs -----------------------------------------------------------
+export type SshConnectionWithStatus = SshConnectionDto & { status?: SshConnectionStatusDto };
+export type SshTestResultDto = SshConnectionStatusDto & {
+  /** Agent-runtime availability on the remote (probed only on success). */
+  runtime?: { ok: boolean; version?: string; message?: string };
 };
 
 // ---- access control DTOs (F16) ------------------------------------------------------

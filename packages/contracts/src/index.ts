@@ -640,11 +640,21 @@ export interface ProjectDefaults {
   worktreeBehavior?: "project-root" | "fresh-worktree";
 }
 
+/** Binding of a project to a workspace on a remote machine. When present,
+ * `Project.path` is the path ON that machine and the agent runtime runs there
+ * (see `RemoteHost`); local filesystem features degrade honestly. */
+export interface ProjectRemote {
+  kind: "ssh";
+  /** SSH connection id from the SSH connection inventory. */
+  connectionId: string;
+}
+
 export interface Project {
   id: string; path: string; name: string;
   color?: string; icon?: string; createdAt: number;
   defaults?: ProjectDefaults;
   labelIds?: string[];
+  remote?: ProjectRemote;
 }
 
 export interface ProjectPatch {
@@ -662,6 +672,9 @@ export interface ProjectService {
   get(id: string): Promise<Project | undefined>;
   /** PATCH metadata/defaults; optional so old fakes remain valid. */
   update?(id: string, patch: ProjectPatch): Promise<Project>;
+  /** Register a project whose path lives on a remote machine — the local
+   *  existence check does not apply. Optional so old fakes remain valid. */
+  addRemote?(path: string, remote: ProjectRemote, name?: string): Promise<Project>;
 }
 
 // ---------------------------------------------------------------- packages
@@ -723,6 +736,82 @@ export interface HomeAssistantEntityDto {
   lastUpdated: string;
 }
 
+// ---------------------------------------------------------------- SSH remotes
+
+/** How the OpenSSH client authenticates. Password auth is intentionally not
+ * supported: Polyth delegates authentication to the user's OpenSSH setup
+ * (agent, default keys, ssh_config) or an explicit identity FILE PATH — no
+ * secret material is ever stored or returned. */
+export type SshAuthMode = "agent" | "identity-file";
+
+export interface SshConnectionDto {
+  id: string;
+  name: string;
+  /** Hostname, IP, or an ssh_config Host alias. */
+  host: string;
+  port?: number;
+  user?: string;
+  authMode: SshAuthMode;
+  /** Private-key path on the LOCAL machine (never key content). */
+  identityFile?: string;
+  createdAt: number;
+}
+
+export interface SshConnectionInput {
+  name?: string;
+  host?: string;
+  port?: number;
+  user?: string;
+  authMode?: SshAuthMode;
+  identityFile?: string;
+}
+
+export type SshConnectionState = "connected" | "disconnected" | "unreachable" | "auth-failed";
+
+export interface SshConnectionStatusDto {
+  id: string;
+  state: SshConnectionState;
+  checkedAt: number;
+  /** Round-trip time of the last real probe (test), not of mux checks. */
+  latencyMs?: number;
+  message?: string;
+}
+
+export interface SshBrowseEntryDto { name: string; path: string }
+export interface SshBrowseDto {
+  path: string;
+  parent: string | null;
+  home: string;
+  entries: SshBrowseEntryDto[];
+}
+
+/** Generic transport to a machine reachable over an established connection.
+ * Implemented by the SSH feature package and consumed by backend-opencode to
+ * run the agent runtime ON the remote host — the transport itself knows
+ * nothing about OpenCode. */
+export interface RemoteProcessHandle {
+  /** Combined stdout+stderr of the remote process, as it streams in. */
+  onOutput(cb: (chunk: string) => void): Disposable;
+  onExit(cb: (code: number | null) => void): Disposable;
+  /** Best-effort termination of the remote process. */
+  kill(): Promise<void>;
+}
+
+export interface RemoteForwardHandle extends Disposable {
+  localPort: number;
+}
+
+export interface RemoteHost {
+  /** Human-readable identity for error messages (e.g. "user@host"). */
+  label: string;
+  /** Run a command to completion (bounded output, POSIX sh on the far side). */
+  exec(command: string, opts?: { timeoutMs?: number }): Promise<{ code: number; stdout: string; stderr: string }>;
+  /** Start a long-lived remote process whose output can be observed. */
+  start(command: string): Promise<RemoteProcessHandle>;
+  /** Forward a fresh local port to `remotePort` on the remote loopback. */
+  forward(remotePort: number): Promise<RemoteForwardHandle>;
+}
+
 // ---------------------------------------------------------------- UI contributions (host + client shared shapes)
 
 /** Canonical slot vocabulary — the runtime list backs `UiSlot` so the
@@ -739,6 +828,8 @@ export const UI_SLOTS = [
   "workspace.right", "workspace.bottom", "workspace.floating",
   // parity slots (WP1): focused seams instead of mega-component imports
   "workspace.main.tabs", "workspace.right.tabs",
+  // project creation sources beyond the local folder picker (e.g. SSH remotes)
+  "project.create.options",
   "session.timeline.before", "session.timeline.after", "session.composer.before",
   "session.footer",
   "session.message.actions",

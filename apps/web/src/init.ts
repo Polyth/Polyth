@@ -373,6 +373,21 @@ export async function createProject(path: string, name?: string): Promise<Projec
   return p;
 }
 
+/** SSH-remote project: same atomic upsert-and-activate transition as
+ *  addProject — the POST response is authoritative and already carries the
+ *  remote binding validated on the server. */
+export async function addSshProject(input: {
+  connectionId: string;
+  path: string;
+  name?: string;
+  createDirectory?: boolean;
+}): Promise<Project> {
+  const p = await api.sshCreateProject(input);
+  store.applyProjectAdded(p);
+  void refreshProjects("reconcile");
+  return p;
+}
+
 export async function renameProject(id: string, name: string): Promise<void> {
   const updated = await api.patchProject(id, { name });
   store.applyProjectUpsert(updated);
