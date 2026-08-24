@@ -274,6 +274,7 @@ interface OpenOptions {
   sessionId: string;
   runs?: WorkflowRunDto[];
   record?: boolean;
+  storage?: Record<string, string>;
 }
 
 async function openApp(options: OpenOptions): Promise<Page> {
@@ -284,7 +285,15 @@ async function openApp(options: OpenOptions): Promise<Page> {
     ...(options.record ? { recordVideo: { dir: ARTIFACTS, size: { width: options.width, height: options.height } } } : {}),
   });
   contexts.push(context);
-  await context.addInitScript(({ persona, projectId }: { persona: string; projectId: string }) => {
+  await context.addInitScript(({
+    persona,
+    projectId,
+    storage,
+  }: {
+    persona: string;
+    projectId: string;
+    storage: Record<string, string>;
+  }) => {
     localStorage.setItem("polyth.prefs", persona);
     localStorage.setItem(`polyth.projectSetup.v1.${projectId}`, "completed");
     localStorage.setItem(`polyth.workspaceMode.v1.${projectId}`, "chat");
@@ -292,7 +301,8 @@ async function openApp(options: OpenOptions): Promise<Page> {
       version: 1,
       placements: { workflow: { tier: "primary", rank: 4 } },
     }));
-  }, { persona: PERSONA, projectId: PROJECT_ID });
+    for (const [key, value] of Object.entries(storage)) localStorage.setItem(key, value);
+  }, { persona: PERSONA, projectId: PROJECT_ID, storage: options.storage ?? {} });
   if (options.runs) {
     await context.route("**/api/workflow-runs?projectId=*", (route) =>
       route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(options.runs) }));
@@ -355,6 +365,47 @@ async function assertTouchTargets(page: Page, selector: string, label: string): 
     );
   }
 }
+
+test("chat page load repairs a hidden workflow launcher placement", async () => {
+  const staleLayout = JSON.stringify({
+    version: 1,
+    audience: "standard",
+    zones: { header: [], left: [], main: [], right: [], bottom: [], floating: [] },
+    slotPlacements: { "composer.trailing": ["workflow.composer-action"] },
+    widgets: {
+      "workflow.composer-action": {
+        visible: false,
+        size: { w: 4, h: 1 },
+        position: { x: 0, y: 0 },
+        definitionId: "workflow.composer-action",
+        pluginId: "workflow",
+      },
+    },
+  });
+  const page = await openApp({
+    width: 1280,
+    height: 900,
+    sessionId: SESSIONS.main,
+    storage: { [`polyth.widgetLayout.${PROJECT_ID}`]: staleLayout },
+  });
+
+  const composer = page.locator(".composer-simple");
+  await composer.waitFor({ state: "visible" });
+  const launcher = composer.locator(".composer-workflow");
+  assert.equal(await launcher.count(), 1, "chat must mount exactly one workflow launcher");
+  assert.equal((await launcher.textContent())?.trim(), "Run workflow");
+  assert.equal(await launcher.getAttribute("aria-haspopup"), "dialog");
+  const repaired = await page.evaluate(
+    (key) => JSON.parse(localStorage.getItem(key) ?? "{}").widgets?.["workflow.composer-action"]?.visible,
+    `polyth.widgetLayout.${PROJECT_ID}`,
+  );
+  assert.equal(repaired, true, "page load repairs the stale hidden placement");
+
+  await launcher.click();
+  await page.getByRole("dialog", { name: "Run a workflow" }).waitFor({ state: "visible" });
+  await page.screenshot({ path: join(ARTIFACTS, "workflow_launcher_hidden_layout_repaired.png") });
+  await page.context().close();
+});
 
 test("complete workflow journey remains synchronized, accessible, and responsive", async () => {
   const page = await openApp({

@@ -190,6 +190,7 @@ export const WORKFLOW_WIDGET_PLUGIN = defineWidgetPlugin({
     defaultSlot: "composer.trailing",
     supportedSlots: COMPOSER_ACTION_SLOTS,
     defaultVisible: true,
+    requiredVisible: true,
     defaultSize: { w: 1, h: 1 },
     resizable: false,
     audience: "simple",

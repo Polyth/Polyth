@@ -100,8 +100,8 @@ export function placedWidgetItems(
   return (layout.slotPlacements[slot] ?? []).flatMap((instanceId, index) => {
     const placement = layout.widgets[instanceId];
     const widget = byId.get(widgetDefinitionId(layout, instanceId));
-    if (!placement?.visible || !widget) return [];
-    if (placement.showIn && !placement.showIn.includes(layout.audience)) return [];
+    if (!placement || !widget || (!placement.visible && !widget.requiredVisible)) return [];
+    if (!widget.requiredVisible && placement.showIn && !placement.showIn.includes(layout.audience)) return [];
     const updateConfig = (config: Parameters<typeof setWidgetConfig>[2]) => {
       updateWidgetLayout((current) => setWidgetConfig(current, instanceId, config));
     };

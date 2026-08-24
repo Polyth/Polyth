@@ -87,6 +87,28 @@ test("catalog definitions provide plugin default zones and sizes", () => {
   assert.equal(layout.widgets["sample.widget"]?.visible, false);
 });
 
+test("package-required widgets repair hidden persistence and reject hide mutations", () => {
+  const definition = {
+    id: "workflow.composer-action",
+    pluginId: "workflow",
+    kind: "mini-widget" as const,
+    defaultSlot: "composer.trailing" as const,
+    defaultVisible: true,
+    requiredVisible: true,
+  };
+  const initial = createDefaultWidgetLayout([definition]);
+  assert.equal(initial.widgets[definition.id]?.visible, true);
+  assert.equal(initial.widgets[definition.id]?.requiredVisible, true);
+  assert.equal(setWidgetVisible(initial, definition.id, false), initial);
+
+  const stale = JSON.parse(serializeWidgetLayout(initial)) as typeof initial;
+  stale.widgets[definition.id]!.visible = false;
+  const repaired = parseWidgetLayout(JSON.stringify(stale), [definition]);
+  assert.equal(repaired.widgets[definition.id]?.visible, true);
+  assert.equal(repaired.widgets[definition.id]?.requiredVisible, true);
+  assert.equal(widgetSlotOf(repaired, definition.id), "composer.trailing");
+});
+
 test("recommended spawn size fits title chrome without becoming a hard minimum", () => {
   const definition = {
     id: "sample.verbose",

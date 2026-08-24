@@ -43,6 +43,7 @@ test("workflow package declares a visible, placeable composer action", () => {
   assert.equal(widget.defaultSlot, "composer.trailing");
   assert.deepEqual(widget.supportedSlots, ["composer.leading", "composer.trailing"]);
   assert.equal(widget.defaultVisible, true);
+  assert.equal(widget.requiredVisible, true);
   assert.equal(widget.order, 50);
   assert.equal(typeof widget.render, "function");
 });
