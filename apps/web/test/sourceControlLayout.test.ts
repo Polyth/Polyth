@@ -100,3 +100,51 @@ test("320px source controls expose 44px tabs, copy actions, and chips", { skip: 
   }
   assert.equal(targets.expandedFileRefHit, true, "file reference has an expanded 44px hit area");
 });
+
+test("320px commit composer stays out of changed-file tap targets", { skip: !CHROME }, async () => {
+  assert.ok(page);
+  await page.setContent(`
+    <style>${css}</style>
+    <main class="view-page git-page">
+      <div class="git-master-detail">
+        <section class="git-master-pane">
+          <button id="disclosure" class="git-change-group-head" aria-expanded="true">Staged Changes</button>
+          <div class="git-change-group-body">
+            <div class="git-file-row">
+              <button id="staged-file" class="git-file-main"><span class="git-file-path">src/staged.ts</span></button>
+            </div>
+          </div>
+        </section>
+        <section class="git-detail-pane"></section>
+      </div>
+      <section id="composer" class="git-commit-composer">
+        <div class="git-commit-heading">Commit staged changes</div>
+        <textarea class="commit-msg">message</textarea>
+        <div class="commit-row"><button>Commit</button></div>
+      </section>
+    </main>
+    <script>
+      document.querySelector('#disclosure').addEventListener('click', () => document.body.dataset.disclosure = 'clicked');
+      document.querySelector('#staged-file').addEventListener('click', () => document.body.dataset.file = 'clicked');
+    </script>
+  `);
+
+  const geometry = await page.evaluate(() => {
+    const master = document.querySelector(".git-master-detail")!.getBoundingClientRect();
+    const composer = document.querySelector("#composer")!.getBoundingClientRect();
+    return {
+      composerPosition: getComputedStyle(document.querySelector("#composer")!).position,
+      masterBottom: master.bottom,
+      composerTop: composer.top,
+    };
+  });
+  assert.equal(geometry.composerPosition, "static");
+  assert.ok(geometry.composerTop >= geometry.masterBottom, "composer must remain below the changed-files panel");
+
+  await page.click("#disclosure");
+  await page.click("#staged-file");
+  assert.deepEqual(await page.evaluate(() => ({ ...document.body.dataset })), {
+    disclosure: "clicked",
+    file: "clicked",
+  });
+});

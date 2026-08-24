@@ -14,18 +14,12 @@ import EmptyState from "./EmptyState.tsx";
 type Tab = "overview" | "files" | "checks" | "comments";
 type PrSection = "detail" | "files" | "diff" | "checks" | "comments";
 
-/** GitHub descriptions may contain hidden Cursor coordination comments.
- * Markdown parsers intentionally do not execute HTML, but those comments
- * should remain hidden rather than appearing as literal marker text. */
+/** Hide HTML comments and Cursor's agent footer without altering fenced examples. */
 export function stripCursorMarkers(markdown: string): string {
   const stripOutsideFence = (text: string): string => text
-    .replace(/<!--[\s\S]*?-->/g, (comment) => {
-      const words = comment.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim().split(/\s+/);
-      const cursor = words.includes("cursor");
-      const marker = words.some((word) =>
-        ["metadata", "marker", "review", "footer", "agent", "generated", "start", "end", "begin", "stop"].includes(word));
-      return cursor && marker ? "" : comment;
-    })
+    .replace(/<!--[\s\S]*?-->/g, "")
+    .replace(/<div\b[^>]*>[\s\S]*?<\/div>/gi, (block) =>
+      /(?:cursor_ref=pr_footer|cursor\.com\/(?:agents|background-agent))/i.test(block) ? "" : block)
     .replace(/^\s*(?:(?:begin|end|start|stop)[_\s-]+cursor(?:[_\s:-].*)?|cursor(?:_[a-z0-9-]+)+)\s*$/gim, "");
 
   const output: string[] = [];
@@ -50,6 +44,12 @@ export function stripCursorMarkers(markdown: string): string {
   }
   flushOutside();
   return output.join("\n").trim();
+}
+
+export function reviewMessageTone(message: string): "error" | "warning" | "success" {
+  if (message.startsWith("Submit failed")) return "error";
+  if (message.startsWith("Confirm ")) return "warning";
+  return "success";
 }
 
 function ChecksRing({ summary }: { summary: ChecksSummaryDto }) {
@@ -326,6 +326,7 @@ export default function PullRequestView({ number, onClose }: { number: number; o
   const passing = checks?.summary.counts.success ?? 0;
   const failing = (checks?.summary.counts.failure ?? 0) + (checks?.summary.counts.action_required ?? 0) + (checks?.summary.counts.timed_out ?? 0);
   const pending = (checks?.summary.counts.queued ?? 0) + (checks?.summary.counts.in_progress ?? 0);
+  const writeTone = reviewMessageTone(writeMsg);
 
   if (loading && !detail) {
     return (
@@ -558,7 +559,14 @@ export default function PullRequestView({ number, onClose }: { number: number; o
                   <span className="header-spacer" />
                   <button className="primary-btn" disabled={reviewBusy || (!reviewBody.trim() && reviewEvent !== "APPROVE")} onClick={() => void submitReview()}>{reviewBusy ? "Submitting…" : "Submit review"}</button>
                 </div>
-                {writeMsg && <div className={writeMsg.startsWith("Submit failed") ? "form-error" : "knowledge-notice"} role="status">{writeMsg}</div>}
+                {writeMsg && (
+                  <div
+                    className={writeTone === "error" ? "form-error" : writeTone === "warning" ? "form-warning" : "knowledge-notice"}
+                    role={writeTone === "success" ? "status" : "alert"}
+                  >
+                    {writeMsg}
+                  </div>
+                )}
               </section>
             </div>
           )}

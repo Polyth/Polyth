@@ -199,3 +199,27 @@ test("PR diff handles quoted rename and mode-only metadata without inventing lin
     ],
   );
 });
+
+test("PR diff treats --- and +++ lines inside hunks as file content", () => {
+  const rows = parsePrDiffLines([
+    "diff --git a/notes.md b/notes.md",
+    "--- a/notes.md",
+    "+++ b/notes.md",
+    "@@ -10,2 +10,2 @@",
+    "--- old heading",
+    "+++ new heading",
+    " context",
+  ].join("\n"));
+
+  assert.deepEqual(
+    rows.slice(1).map(({ text, kind, oldLine, newLine }) => ({ text, kind, oldLine, newLine })),
+    [
+      { text: "--- a/notes.md", kind: "meta", oldLine: undefined, newLine: undefined },
+      { text: "+++ b/notes.md", kind: "meta", oldLine: undefined, newLine: undefined },
+      { text: "@@ -10,2 +10,2 @@", kind: "hunk", oldLine: undefined, newLine: undefined },
+      { text: "--- old heading", kind: "delete", oldLine: 10, newLine: undefined },
+      { text: "+++ new heading", kind: "add", oldLine: undefined, newLine: 10 },
+      { text: " context", kind: "context", oldLine: 11, newLine: 11 },
+    ],
+  );
+});

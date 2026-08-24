@@ -7,11 +7,12 @@ import { resolve } from "node:path";
 register("./tsxHooks.mjs", import.meta.url);
 
 const { summarizeUnifiedDiff } = await import("../src/components/PendingChangesBar.tsx");
-const { stripCursorMarkers } = await import("../src/components/PullRequestView.tsx");
+const { reviewMessageTone, stripCursorMarkers } = await import("../src/components/PullRequestView.tsx");
 const { shellCardCopyText } = await import("../src/components/Timeline.tsx");
 const { modelModalities } = await import("../src/components/ModelPicker.tsx");
 const { parseMarkdown } = await import("../src/markdown/parse.ts");
 const { renderBlocks } = await import("../src/markdown/render.tsx");
+const { MarkdownDoc } = await import("../src/markdown.tsx");
 const { createElement, Fragment } = await import("react");
 const { renderToStaticMarkup } = await import("react-dom/server");
 
@@ -32,28 +33,33 @@ test("workspace diff totals count content without file headers", () => {
   assert.deepEqual(summarizeUnifiedDiff(diff), { additions: 2, deletions: 1 });
 });
 
-test("pull request markdown removes Cursor markers but preserves other comments and fenced code", () => {
-  assert.equal(
-    stripCursorMarkers([
-      "<!-- CURSOR_METADATA_START -->",
-      "## Summary",
-      "- keeps **GFM** content",
-      "<!-- internal note preserved -->",
-      "CURSOR_REVIEW_MARKER",
-      "```html",
-      "<!-- CURSOR_METADATA_START -->",
-      "```",
-    ].join("\n")),
-    [
-      "## Summary",
-      "- keeps **GFM** content",
-      "<!-- internal note preserved -->",
-      "",
-      "```html",
-      "<!-- CURSOR_METADATA_START -->",
-      "```",
-    ].join("\n"),
-  );
+test("pull request markdown hides HTML comments and the Cursor footer outside code fences", () => {
+  const cleaned = stripCursorMarkers([
+    "<!-- CURSOR_AGENT_PR_BODY_BEGIN -->",
+    "## Summary",
+    "- keeps **GFM** content",
+    "<!-- ordinary internal note -->",
+    "CURSOR_REVIEW_MARKER",
+    '<div><a href="https://cursor.com/agents/bc-123?cursor_ref=pr_footer&cursor_cta=open_in_web">Open in Web</a></div>',
+    "```html",
+    "<!-- shown as a code example -->",
+    "```",
+    "<!-- CURSOR_AGENT_PR_BODY_END -->",
+  ].join("\n"));
+
+  assert.match(cleaned, /## Summary/);
+  assert.doesNotMatch(cleaned, /ordinary internal note|CURSOR_REVIEW_MARKER|cursor_ref=pr_footer|Open in Web/);
+  assert.match(cleaned, /<!-- shown as a code example -->/);
+
+  const html = renderToStaticMarkup(createElement(MarkdownDoc, { text: cleaned, keyBase: "pr-body" }));
+  assert.doesNotMatch(html, /ordinary internal note|CURSOR_REVIEW_MARKER|Open in Web/);
+  assert.match(html, /shown as a code example/);
+});
+
+test("blocked reviews use warning semantics instead of success styling", () => {
+  assert.equal(reviewMessageTone("Confirm the approval or change request before submitting."), "warning");
+  assert.equal(reviewMessageTone("Submit failed: unavailable"), "error");
+  assert.equal(reviewMessageTone("Review submitted (approve)."), "success");
 });
 
 test("GFM task-list items render as checked and unchecked controls", () => {

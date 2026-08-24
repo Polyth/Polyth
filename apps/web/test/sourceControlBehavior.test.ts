@@ -27,8 +27,9 @@ register("./tsxHooks.mjs", import.meta.url);
 
 const { act, createElement } = await import("react");
 const { createRoot } = await import("react-dom/client");
+const { renderToStaticMarkup } = await import("react-dom/server");
 const { activateProject } = await import("../src/store.ts");
-const { default: GitView } = await import("../src/components/GitView.tsx");
+const { default: GitView, DiffContent } = await import("../src/components/GitView.tsx");
 const { api } = await import("../src/api.ts");
 const { pendingChangesMenuPosition } = await import("../src/components/PendingChangesBar.tsx");
 
@@ -60,6 +61,28 @@ const response = (body: unknown, status = 200): Response =>
 test("gitDiff rejects HTTP failures instead of returning an empty patch", async () => {
   globalThis.fetch = async () => response({ message: "diff exploded" }, 500);
   await assert.rejects(api.gitDiff("error-project", "src/app.ts"), /diff exploded/);
+});
+
+test("commit diffs highlight each file using its own language", () => {
+  const diff = [
+    "commit abc123",
+    "Author: Test",
+    "",
+    "diff --git a/src/value.ts b/src/value.ts",
+    "--- a/src/value.ts",
+    "+++ b/src/value.ts",
+    "@@ -0,0 +1 @@",
+    "+const answer = 42;",
+    "diff --git a/tools/run.py b/tools/run.py",
+    "--- a/tools/run.py",
+    "+++ b/tools/run.py",
+    "@@ -0,0 +1 @@",
+    "+def run():",
+  ].join("\n");
+  const html = renderToStaticMarkup(createElement(DiffContent, { diff, split: false, wrap: false }));
+
+  assert.match(html, /data-diff-path="src\/value\.ts"[\s\S]*class="tok-kw">const<\/span>/);
+  assert.match(html, /data-diff-path="tools\/run\.py"[\s\S]*class="tok-kw">def<\/span>/);
 });
 
 test("GitView exposes diff Retry and refreshes an open selection after staging", async () => {
@@ -124,6 +147,52 @@ test("GitView exposes diff Retry and refreshes an open selection after staging",
     assert.match(view.container.textContent ?? "", /Staged changes/);
     assert.match(view.container.textContent ?? "", /\+staged-new/);
     assert.ok(diffAttempts >= 3, "selection change reloads the patch");
+  } finally {
+    await view.unmount();
+    activateProject(null);
+  }
+});
+
+test("GitView keeps staged-file and disclosure taps available without a detail composer overlay", async () => {
+  const projectId = "git-composer-project";
+  globalThis.fetch = async (input) => {
+    const url = String(input);
+    if (url.startsWith("/api/git/status")) {
+      return response({
+        branch: "main", ahead: 0, behind: 0, conflicted: [], unstaged: [], untracked: [],
+        staged: [{ path: "src/staged.ts", status: "modified", staged: true }],
+        isRepo: true,
+      });
+    }
+    if (url.startsWith("/api/git/branches")) return response({ current: "main", branches: [{ name: "main", current: true }] });
+    if (url.startsWith("/api/worktrees") || url.startsWith("/api/git/graph") || url.startsWith("/api/git/stashes")) return response([]);
+    if (url.startsWith("/api/git/diff")) return response({ path: "src/staged.ts", diff: "@@ -1 +1 @@\n-old\n+new" });
+    throw new Error(`Unexpected request: ${url}`);
+  };
+
+  activateProject(projectId);
+  const view = await mounted(createElement(GitView));
+  try {
+    assert.ok(view.container.querySelector(".git-commit-composer"), "composer is available on the change list");
+    const disclosure = view.container.querySelector<HTMLButtonElement>(".git-change-group-head");
+    assert.ok(disclosure);
+    await act(async () => { disclosure.click(); });
+    assert.equal(disclosure.getAttribute("aria-expanded"), "false", "composer does not block disclosure taps");
+    await act(async () => { disclosure.click(); });
+
+    const file = view.container.querySelector<HTMLButtonElement>(".git-file-main");
+    assert.ok(file);
+    await act(async () => {
+      file.click();
+      await delay(20);
+    });
+    assert.ok(view.container.querySelector(".git-master-detail.detail-open"), "file tap opens detail mode");
+    assert.equal(view.container.querySelector(".git-commit-composer"), null, "composer is removed while detail is open");
+
+    const back = view.container.querySelector<HTMLButtonElement>(".git-mobile-detail-head button");
+    assert.ok(back);
+    await act(async () => { back.click(); });
+    assert.ok(view.container.querySelector(".git-commit-composer"), "composer returns after navigating back");
   } finally {
     await view.unmount();
     activateProject(null);

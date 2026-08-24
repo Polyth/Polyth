@@ -375,7 +375,6 @@ export default function GitView() {
   }, [graph, graphRows, graphQuery, graphRef]);
   const fileComments = comments.filter((comment) => comment.path === selected?.path);
   const selectedCommit = graph.find((commit) => commit.sha === commitSel);
-  const commitDiffPath = useMemo(() => splitPrDiff(commitDiff)[0]?.path, [commitDiff]);
   const { add: addCount, del: delCount } = diffStat(diff);
 
   if (!projectId) return <EmptyState title="No project selected" description="Open a project to inspect its source control." />;
@@ -654,8 +653,8 @@ export default function GitView() {
             </section>
           </div>
 
-          {status && status.staged.length > 0 && (
-            <section className={`git-commit-composer${mobileDetail ? " detail-open" : ""}`} aria-label="Commit staged changes">
+          {status && status.staged.length > 0 && !mobileDetail && (
+            <section className="git-commit-composer" aria-label="Commit staged changes">
               <div className="git-commit-heading">
                 <strong>Commit {status.staged.length} staged {status.staged.length === 1 ? "file" : "files"}</strong>
                 <span className="muted">Changes are committed to <span className="mono">{status.branch || "HEAD"}</span></span>
@@ -733,7 +732,7 @@ export default function GitView() {
                     <span>{commitDiffError}</span>
                     <button className="small-btn" onClick={() => setCommitDiffRetry((value) => value + 1)}>Retry</button>
                   </div>
-                ) : <DiffContent diff={commitDiff} path={commitDiffPath} split={prefs.layout === "split"} wrap={prefs.wrap} />}
+                ) : <DiffContent diff={commitDiff} split={prefs.layout === "split"} wrap={prefs.wrap} />}
               </>
             )}
           </section>
@@ -926,15 +925,50 @@ function DiffPrefsToolbar() {
   );
 }
 
-function DiffContent({ diff, path, split, wrap }: { diff: string; path?: string; split: boolean; wrap: boolean }) {
+interface DiffSyntaxSection {
+  diff: string;
+  path?: string;
+}
+
+/** Keep commit metadata unhighlighted and detect syntax independently for each file patch. */
+export function diffSyntaxSections(diff: string, path?: string): DiffSyntaxSection[] {
+  if (path) return [{ diff, path }];
+  const firstFileHeader = diff.search(/^diff --git /m);
+  if (firstFileHeader < 0) return [{ diff }];
+
+  const sections: DiffSyntaxSection[] = [];
+  const prelude = diff.slice(0, firstFileHeader);
+  if (prelude) sections.push({ diff: prelude });
+  for (const file of splitPrDiff(diff.slice(firstFileHeader))) {
+    sections.push({ diff: file.diff, path: file.path });
+  }
+  return sections;
+}
+
+export function DiffContent({ diff, path, split, wrap }: { diff: string; path?: string; split: boolean; wrap: boolean }) {
   if (!diff) return <EmptyState title="No textual diff" description="This file may be binary, unchanged, or represented by metadata only." />;
+  const sections = diffSyntaxSections(diff, path);
   if (!split) {
-    const lines = diff.split("\n");
     return (
       <div className="copy-wrap">
-        <pre className={`git-diff git-diff-page${wrap ? " wrap" : ""}`}>
-          {lines.map((line, index) => <DiffCode key={index} line={`${line}${index < lines.length - 1 ? "\n" : ""}`} {...(path ? { path } : {})} />)}
-        </pre>
+        {sections.map((section, sectionIndex) => {
+          const lines = section.diff.split("\n");
+          return (
+            <pre
+              className={`git-diff git-diff-page${wrap ? " wrap" : ""}`}
+              data-diff-path={section.path}
+              key={`${section.path ?? "metadata"}:${sectionIndex}`}
+            >
+              {lines.map((line, index) => (
+                <DiffCode
+                  key={index}
+                  line={`${line}${index < lines.length - 1 ? "\n" : ""}`}
+                  {...(section.path ? { path: section.path } : {})}
+                />
+              ))}
+            </pre>
+          );
+        })}
         <CopyButton text={diff} />
       </div>
     );
@@ -942,10 +976,14 @@ function DiffContent({ diff, path, split, wrap }: { diff: string; path?: string;
   return (
     <div className="copy-wrap">
       <div className={`split-diff${wrap ? " wrap" : ""}`}>
-        {splitDiffRows(diff).map((row, index) => (
-          <div className={`split-diff-row ${row.kind}`} key={index}>
-            <code className={row.left.startsWith("-") ? "diff-del" : ""}><DiffCode line={row.left} {...(path ? { path } : {})} /></code>
-            <code className={row.right.startsWith("+") ? "diff-add" : ""}><DiffCode line={row.right} {...(path ? { path } : {})} /></code>
+        {sections.map((section, sectionIndex) => (
+          <div className="split-diff-section" data-diff-path={section.path} key={`${section.path ?? "metadata"}:${sectionIndex}`}>
+            {splitDiffRows(section.diff).map((row, index) => (
+              <div className={`split-diff-row ${row.kind}`} key={index}>
+                <code className={row.left.startsWith("-") ? "diff-del" : ""}><DiffCode line={row.left} {...(section.path ? { path: section.path } : {})} /></code>
+                <code className={row.right.startsWith("+") ? "diff-add" : ""}><DiffCode line={row.right} {...(section.path ? { path: section.path } : {})} /></code>
+              </div>
+            ))}
           </div>
         ))}
       </div>

@@ -28,9 +28,6 @@ const headerPaths = (header: string): [string, string] | null => {
   return tokens?.length === 2 ? [tokens[0]!, tokens[1]!] : null;
 };
 
-const metadataLine = (line: string): boolean =>
-  /^(?:diff --git |index |--- |\+\+\+ |new file mode |deleted file mode |old mode |new mode |similarity index |dissimilarity index |rename from |rename to |copy from |copy to |Binary files |GIT binary patch$)/.test(line);
-
 /** Parse display rows without assigning source line numbers to patch metadata or sentinels. */
 export function parsePrDiffLines(diff: string): PrDiffLine[] {
   let oldLine = 0;
@@ -45,7 +42,7 @@ export function parsePrDiffLines(diff: string): PrDiffLine[] {
       return { text, kind: "hunk" };
     }
     if (text === "\\ No newline at end of file") return { text, kind: "sentinel" };
-    if (!inHunk || metadataLine(text)) return { text, kind: "meta" };
+    if (!inHunk) return { text, kind: "meta" };
     if (text.startsWith("+")) return { text, kind: "add", newLine: newLine++ };
     if (text.startsWith("-")) return { text, kind: "delete", oldLine: oldLine++ };
     if (text.startsWith(" ")) {

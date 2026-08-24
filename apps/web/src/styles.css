@@ -807,6 +807,7 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
   border-radius: 5px; padding: 3px 5px; letter-spacing: 0.02em;
 }
 .form-error { color: var(--red); font-size: 12px; overflow-wrap: anywhere; }
+.form-warning { color: var(--amber); font-size: 12px; overflow-wrap: anywhere; }
 .loop-error-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 2px 0; }
 .form-actions { display: flex; justify-content: flex-end; gap: 6px; }
 .primary-btn { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); font-weight: 700; }
@@ -9204,7 +9205,7 @@ html[data-sheet="open"], html[data-sheet="open"] body { overflow: hidden; }
   .diff-layout-toggle button { flex: 1; min-height: 40px; }
   .hunk-comment-btn { min-width: 44px; min-height: 44px; opacity: 1; }
   .git-commit-composer {
-    bottom: max(0px, env(safe-area-inset-bottom, 0px)); grid-template-columns: 1fr; gap: 8px;
+    position: static; bottom: auto; grid-template-columns: 1fr; gap: 8px;
     margin-inline: -2px; padding: 10px; border-color: var(--accent-line);
   }
   .git-commit-heading .muted { display: none; }
@@ -9531,9 +9532,9 @@ button:not(:disabled):active { box-shadow: inset 0 1px 3px color-mix(in srgb, bl
     color: var(--muted); font-size: 12px; text-align: right;
   }
   .git-commit-composer {
+    position: static; bottom: auto;
     grid-template-columns: minmax(0, 1fr); gap: 8px; margin-inline: -2px; padding: 10px;
   }
-  .git-commit-composer.detail-open { display: none; }
   .git-commit-composer .commit-row { justify-content: stretch; }
   .git-commit-composer .commit-row > * { flex: 1; }
   .git-resource-grid { grid-template-columns: minmax(0, 1fr); }
