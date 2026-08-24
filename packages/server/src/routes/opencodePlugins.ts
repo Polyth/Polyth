@@ -31,11 +31,14 @@ export function opencodePluginRoutes(config: Pick<
 
     if (path === "/api/plugins/opencode/import" && method === "POST") {
       const request = await body();
-      const raw = request.plugins;
+      // Accept the normalized Polyth request as well as an OpenCode config
+      // object copied directly from opencode.json.
+      const field = Object.prototype.hasOwnProperty.call(request, "plugins") ? "plugins" : "plugin";
+      const raw = request[field];
       if (!Array.isArray(raw)) {
-        throw Object.assign(new Error("plugins must be an array"), {
+        throw Object.assign(new Error(`${field} must be an array`), {
           code: "invalid-input",
-          field: "plugins",
+          field,
         });
       }
       const plugins = await config.applyPlugins(raw);

@@ -82,6 +82,28 @@ test("OpenCode plugin import merges once and preserves unrelated config", async 
   assert.deepEqual(config.mcp, { docs: { type: "remote", url: "https://docs.example/mcp" } });
 });
 
+test("OpenCode plugin import accepts a pasted OpenCode config object", async () => {
+  const dir = tmp();
+  const file = join(dir, "opencode.json");
+  writeFileSync(file, JSON.stringify({
+    provider: { existing: { name: "Existing provider" } },
+  }));
+  const { call } = harness(dir);
+  const result = await call("POST", "/api/plugins/opencode/import", {
+    $schema: "https://opencode.ai/config.json",
+    plugin: ["@otto-assistant/opencode-claude"],
+  });
+  assert.equal(result.status, 200);
+  assert.deepEqual(result.payload, {
+    plugins: [{ spec: "@otto-assistant/opencode-claude" }],
+    imported: ["@otto-assistant/opencode-claude"],
+    restartRequired: true,
+  });
+  const config = JSON.parse(readFileSync(file, "utf8"));
+  assert.deepEqual(config.provider, { existing: { name: "Existing provider" } });
+  assert.deepEqual(config.plugin, ["@otto-assistant/opencode-claude"]);
+});
+
 test("OpenCode plugin import rejects the whole request before writing", async () => {
   const dir = tmp();
   const file = join(dir, "opencode.json");
