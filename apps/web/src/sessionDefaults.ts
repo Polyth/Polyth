@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from "react";
-import type { ModelRef } from "@polyth/contracts";
+import type { ModelRef, ProjectDefaults } from "@polyth/contracts";
 
 export const SESSION_DEFAULTS_KEY = "polyth.sessionDefaults";
 
@@ -53,8 +53,27 @@ export function parseSessionDefaults(raw: string | null): SessionDefaults {
 export function resolveSessionDefaultModel(
   projectDefault?: ModelRef | null,
   globalDefault?: ModelRef,
+  availableFallback?: ModelRef,
 ): ModelRef | undefined {
-  return projectDefault || globalDefault;
+  return projectDefault || globalDefault || availableFallback;
+}
+
+/** Existing project defaults predate the toggle, so a stored model implies
+ * enabled memory until the user explicitly turns it off. */
+export function projectRemembersModelSelection(defaults?: ProjectDefaults): boolean {
+  return defaults?.rememberModelSelection ?? defaults?.model != null;
+}
+
+export function resolveProjectModelDefault(
+  defaults?: ProjectDefaults,
+  globalDefault?: ModelRef,
+  availableFallback?: ModelRef,
+): ModelRef | undefined {
+  return resolveSessionDefaultModel(
+    projectRemembersModelSelection(defaults) ? defaults?.model : null,
+    globalDefault,
+    availableFallback,
+  );
 }
 
 function read(): SessionDefaults {

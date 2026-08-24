@@ -160,18 +160,15 @@ test("guard: a stage with no composer (empty state) is viable", () => {
   assert.equal(chatDockViability(asEl(chat), FLOOR), "viable");
 });
 
-test("guard: the fresh-session hero (stage + composer-hero) is judged, not failed (PANE-VERIFY-02 shape)", () => {
-  // Before the repair a composer-less `.composer` lookup returned false for
-  // this exact reload shape and promoted — then self-cancelled into the
-  // maximum-update-depth loop.
+test("guard: the fresh-session stage uses the shared composer and is judged (PANE-VERIFY-02 shape)", () => {
   const chat = new FakeEl({ cls: "workspace", rect: [0, 0, 450, 900] });
   new FakeDoc(chat);
   const stage = new FakeEl({ cls: "stage", rect: [0, 0, 450, 900] });
-  const hero = new FakeEl({ cls: "composer-hero", rect: [40, 300, 370, 260] });
+  const composer = new FakeEl({ cls: "composer composer-chat", rect: [40, 300, 370, 260] });
   const send = new FakeEl({ tag: "button", rect: [330, 500, 70, 32] });
   chat.add(stage);
-  stage.add(hero);
-  hero.add(send);
+  stage.add(composer);
+  composer.add(send);
   assert.equal(chatDockViability(asEl(chat), FLOOR), "viable");
 });
 

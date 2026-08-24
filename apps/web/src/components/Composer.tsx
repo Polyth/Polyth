@@ -1,7 +1,27 @@
-import { useState, useRef, useEffect, useCallback, type ClipboardEvent, type KeyboardEvent } from "react";
-import { getState, useActiveModel, useStore, setUiError, openSettingsPage } from "../store.ts";
-import { sendMessage, abortSession, createSession } from "../init.ts";
-import { api, type ComposerCatalogResult, type SlashCommand, type SnippetDef } from "../api.ts";
+import { useState, useRef, useEffect, useCallback, useMemo, type ClipboardEvent, type KeyboardEvent } from "react";
+import {
+  activateProject,
+  getState,
+  openSettingsPage,
+  setUiError,
+  startNewSession,
+  useActiveModel,
+  useStore,
+} from "../store.ts";
+import {
+  sendMessage,
+  abortSession,
+  createSession,
+  rememberProjectModelSelection,
+} from "../init.ts";
+import {
+  api,
+  type ComposerCatalogResult,
+  type GitBranches,
+  type SlashCommand,
+  type SnippetDef,
+  type Worktree,
+} from "../api.ts";
 import { loadDraft, saveDraft, type AutocompleteItem } from "../utils.ts";
 import SlotHost from "./slots/SlotHost.ts";
 import { dragKind, dropIntoSession } from "../dnd.ts";
@@ -17,8 +37,6 @@ import {
   catalogFromResult,
   commandAutocomplete,
   fileAutocomplete,
-  modelDisplayName,
-  modelDetail,
   modelSupportsTextWorkflow,
   OPEN_PROJECT_FIRST,
   planCommandInsert,
@@ -48,21 +66,30 @@ import ComposerFocusDialog from "./ComposerFocusDialog.tsx";
 import QueuedMessageList from "./QueuedMessageList.tsx";
 import { GoalAttachForm } from "./GoalStrip.tsx";
 import { announce } from "./a11y/live.tsx";
-import { isFavorite, modelKey, sortModels } from "@polyth/models";
-import { noteModelUsed, useModelPrefs } from "../modelPrefs.ts";
+import { noteModelUsed } from "../modelPrefs.ts";
 import { getUiSettings, useUiSettings } from "../uiPrefs.ts";
 import { migrateFavoritesOnce, profilesLoaded, useProfiles } from "../profiles.ts";
 import AgentProfileForm from "./AgentProfileForm.tsx";
-import type { AgentProfile, ModelDescriptor, QueueItemDto } from "@polyth/contracts";
-import { agentPickerDefaultLabel, modelPickerDefaultLabel } from "../composerDefaults.ts";
+import type {
+  AgentProfile,
+  ModelDescriptor,
+  ModelRef,
+  QueueItemDto,
+  SessionProjection,
+} from "@polyth/contracts";
+import { agentPickerDefaultLabel } from "../composerDefaults.ts";
 import { friendlyError, modKeyLabel, parseModelRef } from "../settings.ts";
 import { Icon } from "../icons.tsx";
 import { useWorkspaceMode } from "../widgets/workspaceMode.ts";
 import ModelPicker, { modelContextLabel, modelMetaLine, modelSupportsThinking } from "./ModelPicker.tsx";
-import { useSessionDefaults } from "../sessionDefaults.ts";
+import { resolveProjectModelDefault, useSessionDefaults } from "../sessionDefaults.ts";
 import { roleKind, useRolePrefs } from "../rolePrefs.ts";
 import { useShellMode } from "../responsiveShell.ts";
 import { useViewportMetrics } from "../mobileViewport.ts";
+import SessionContextBar, {
+  type ContextChoice,
+  type SessionContextBarProps,
+} from "./mobile/SessionContextBar.tsx";
 
 function modelRefFromValue(value: string): { providerID: string; modelID: string } | undefined {
   if (!value) return undefined;
@@ -137,10 +164,150 @@ function ContextWindowPicker({ limit, used }: { limit?: number; used?: number })
 
 const PROFILE_MISSING_NOTE = "Profile unavailable — choose another";
 
-export type NewSessionTarget =
+type NewSessionTarget =
   | { kind: "main" }
   | { kind: "worktree"; path: string }
   | { kind: "branch"; branch: string };
+
+type LocationChoice = ContextChoice & {
+  target: NewSessionTarget;
+};
+
+/** Project/worktree context is composer chrome, not fresh-session chrome.
+ * Keeping it here makes every chat call site render the same complete entity. */
+function useComposerLocation(session: SessionProjection | null): {
+  contextBar: SessionContextBarProps;
+  newSessionTarget: NewSessionTarget;
+} {
+  const projects = useStore((state) => state.projectRegistry.projects);
+  const projectId = useStore((state) => state.activeProjectId);
+  const newSessionIntent = useStore((state) => state.newSessionIntent);
+  const branch = useStore((state) => state.gitBranch);
+  const project = projects.find((candidate) => candidate.id === projectId) ?? null;
+  const intendedWorktree = session?.worktreePath
+    ?? (newSessionIntent?.projectId === projectId ? newSessionIntent.worktreePath : undefined);
+  const [worktrees, setWorktrees] = useState<Worktree[]>([]);
+  const [branches, setBranches] = useState<GitBranches>({ current: "", branches: [] });
+  const [branchLoading, setBranchLoading] = useState(false);
+  const [selectedBranchId, setSelectedBranchId] = useState(
+    intendedWorktree ? `worktree:${intendedWorktree}` : "main",
+  );
+
+  useEffect(() => {
+    let active = true;
+    setSelectedBranchId(intendedWorktree ? `worktree:${intendedWorktree}` : "main");
+    if (!projectId) {
+      setWorktrees([]);
+      setBranches({ current: "", branches: [] });
+      return () => { active = false; };
+    }
+    setBranchLoading(true);
+    void Promise.all([api.listWorktrees(projectId), api.gitBranches(projectId, session?.id)])
+      .then(([nextWorktrees, nextBranches]) => {
+        if (!active) return;
+        setWorktrees(nextWorktrees);
+        setBranches(nextBranches);
+        const currentWorktree = intendedWorktree
+          ? nextWorktrees.find((worktree) => worktree.path === intendedWorktree)
+          : nextWorktrees.find((worktree) =>
+              worktree.branch === (nextBranches.current || session?.branch || branch));
+        setSelectedBranchId(currentWorktree?.isMain
+          ? "main"
+          : currentWorktree
+            ? `worktree:${currentWorktree.path}`
+            : intendedWorktree
+              ? `worktree:${intendedWorktree}`
+              : "main");
+      })
+      .catch((error) => {
+        if (active) setUiError(friendlyError("Couldn’t load worktrees", error));
+      })
+      .finally(() => {
+        if (active) setBranchLoading(false);
+      });
+    return () => { active = false; };
+  }, [projectId, session?.id, session?.worktreePath, session?.branch, newSessionIntent?.worktreePath, branch]);
+
+  const branchChoices = useMemo<LocationChoice[]>(() => {
+    const linkedBranches = new Set(worktrees.map((worktree) => worktree.branch).filter(Boolean));
+    const main = worktrees.find((worktree) => worktree.isMain);
+    const choices: LocationChoice[] = [{
+      id: "main",
+      label: main?.branch || branches.current || branch || "Main workspace",
+      detail: "Main workspace",
+      target: { kind: "main" },
+    }];
+    for (const worktree of worktrees.filter((candidate) => !candidate.isMain)) {
+      choices.push({
+        id: `worktree:${worktree.path}`,
+        label: worktree.branch || worktree.path.split("/").pop() || "Worktree",
+        detail: "Existing worktree",
+        target: { kind: "worktree", path: worktree.path },
+      });
+    }
+    for (const candidate of branches.branches) {
+      if (candidate.remote || linkedBranches.has(candidate.name)) continue;
+      choices.push({
+        id: `branch:${candidate.name}`,
+        label: candidate.name,
+        detail: "Open in a new worktree",
+        target: { kind: "branch", branch: candidate.name },
+      });
+    }
+    return choices;
+  }, [worktrees, branches, branch]);
+
+  const selectedChoice = branchChoices.find((choice) => choice.id === selectedBranchId);
+  const newSessionTarget = selectedChoice?.target
+    ?? (intendedWorktree
+      ? { kind: "worktree" as const, path: intendedWorktree }
+      : { kind: "main" as const });
+  const branchName = selectedChoice?.label
+    || session?.branch
+    || branch
+    || intendedWorktree?.split("/").pop()
+    || "Main workspace";
+  const projectName = project?.name || project?.path || "No project";
+  const projectChoices: ContextChoice[] = projects.map((candidate) => ({
+    id: candidate.id,
+    label: candidate.name || candidate.path,
+    detail: candidate.name ? candidate.path : "",
+  }));
+
+  const pickBranch = (id: string) => {
+    const choice = branchChoices.find((candidate) => candidate.id === id);
+    if (!choice || id === selectedBranchId) return;
+    setSelectedBranchId(id);
+    if (!session || !projectId) return;
+
+    if (choice.target.kind === "main") {
+      startNewSession(projectId);
+    } else if (choice.target.kind === "worktree") {
+      startNewSession(projectId, { worktreePath: choice.target.path });
+    } else {
+      setBranchLoading(true);
+      void api.createWorktree(projectId, choice.target.branch)
+        .then((worktree) => startNewSession(projectId, { worktreePath: worktree.path }))
+        .catch((error) => setUiError(friendlyError("Couldn’t create the worktree", error)))
+        .finally(() => setBranchLoading(false));
+    }
+  };
+
+  return {
+    newSessionTarget,
+    contextBar: {
+      projectName,
+      ...(projectId ? { projectId } : {}),
+      projects: projectChoices,
+      onPickProject: (id) => activateProject(id || null),
+      branchName,
+      branchId: selectedBranchId,
+      branches: branchChoices,
+      ...(branchLoading ? { branchLoading: true } : {}),
+      onPickBranch: pickBranch,
+    },
+  };
+}
 
 function compactContext(context?: number): string {
   if (!context) return "Unknown";
@@ -230,10 +397,8 @@ type QueueEdit = {
 
 export default function Composer({
   variant = "docked",
-  newSessionTarget = { kind: "main" },
 }: {
-  variant?: "docked" | "hero" | "widget";
-  newSessionTarget?: NewSessionTarget;
+  variant?: "docked" | "widget";
 }) {
   const [pinSeed, setPinSeed] = useState<{ providerID: string; modelID: string; name?: string } | null>(null);
   const [pinEdit, setPinEdit] = useState<AgentProfile | null>(null);
@@ -255,13 +420,14 @@ export default function Composer({
   const sessionDefaults = useSessionDefaults();
   const session = useStore((s) => s.sessions.find((x) => x.id === s.activeSessionId) ?? null);
   const newSessionIntent = useStore((s) => s.newSessionIntent);
+  const { contextBar, newSessionTarget } = useComposerLocation(session);
   const model = useActiveModel();
   const working = model.turn?.status === "working";
   const [techOpen, setTechOpen] = useState(false);
   const noModels = chatModels.length === 0;
   const widgetMode = variant === "widget";
   const simpleMode = useWorkspaceMode() === "chat" || widgetMode;
-  const lightFocusComposer = simpleMode && variant === "docked";
+  const lightFocusComposer = simpleMode && !widgetMode;
   const shellLayout = useShellMode();
   const ui = useUiSettings();
 
@@ -439,6 +605,14 @@ export default function Composer({
   // Strict independent command/snippet outcomes; an HTTP failure is
   // `unavailable`, never a successful empty list.
   const activeProjectId = useStore((s) => s.activeProjectId);
+  const activeProject = useStore((s) =>
+    s.projectRegistry.projects.find((candidate) => candidate.id === s.activeProjectId));
+  const globalDefaultModel = sessionDefaults.defaultModel ?? parseModelRef(settings.defaultModel);
+  const preferredModel = resolveProjectModelDefault(
+    activeProject?.defaults,
+    globalDefaultModel,
+    chatModels[0],
+  );
   const [catalog, setCatalog] = useState<ComposerCatalogResult | null>(null);
   const catalogSeq = useRef(0);
 
@@ -617,12 +791,9 @@ export default function Composer({
     // Pills leave the draft the moment the message leaves the composer.
     const atts = command === null ? takeAttachments(target) : [];
     const delivery = working ? deliveryOverride ?? getUiSettings().followUpBehavior : undefined;
-    const preferred = !session?.model
-      ? sessionDefaults.defaultModel ?? parseModelRef(settings.defaultModel)
-      : undefined;
     const cfgSent = cfg;
     const wire = wireProfileId(cfgSent);
-    const selected = cfgSent.model ?? session?.model ?? preferred;
+    const selected = cfgSent.model ?? session?.model ?? preferredModel;
     const selectedDescriptor = selected
       ? chatModels.find((candidate) =>
           candidate.providerID === selected.providerID && candidate.modelID === selected.modelID)
@@ -666,7 +837,9 @@ export default function Composer({
     } else if (activeProjectId) {
       setCreatingSession(true);
       void (async () => {
-        let worktreePath = newSessionIntent?.worktreePath;
+        let worktreePath = newSessionTarget.kind === "main"
+          ? undefined
+          : newSessionIntent?.worktreePath;
         if (newSessionTarget.kind === "worktree") {
           worktreePath = newSessionTarget.path;
         } else if (newSessionTarget.kind === "branch") {
@@ -708,7 +881,7 @@ export default function Composer({
     acTokenRef.current = null;
   }, [
     text, attachments, cfg, profileMissing, noModels, working, activeProjectId, queueEdit, queueEditSaving,
-    session?.model, settings.defaultModel, sessionDefaults.defaultModel,
+    session?.model, preferredModel,
     sessionDefaults.defaultThinking, chatModels, creatingSession, newSessionTarget,
     newSessionAutoApprove, newSessionGoal, newSessionIntent,
   ]);
@@ -896,9 +1069,6 @@ export default function Composer({
   };
 
   // ---- execution configuration projections ------------------------------------
-  const modelValue = cfg.model
-    ? JSON.stringify({ providerID: cfg.model.providerID, modelID: cfg.model.modelID })
-    : "";
   const agentValue = cfg.agent ?? "";
   const selectedProfileId = cfg.profile.kind === "id"
     ? cfg.profile.id
@@ -906,9 +1076,6 @@ export default function Composer({
     ? ""
     : (session?.agentProfileId ?? "");
 
-  // Favorites float first (Settings > Providers & Models); picking records recency.
-  const modelPrefs = useModelPrefs();
-  const preferredModel = sessionDefaults.defaultModel ?? parseModelRef(settings.defaultModel);
   const recommendedModel = session?.model && chatModels.some((candidate) =>
     candidate.providerID === session.model?.providerID && candidate.modelID === session.model?.modelID)
     ? session.model
@@ -916,35 +1083,15 @@ export default function Composer({
         candidate.providerID === preferredModel.providerID && candidate.modelID === preferredModel.modelID)
       ? preferredModel
       : chatModels[0];
-  const modelItems: PickerItem[] = [
-    {
-      id: "",
-      label: `Auto · ${modelPickerDefaultLabel(undefined, chatModels, recommendedModel).replace(/^Default:\s*/, "")}`,
-      group: "Recommended",
-      detail: "Let Polyth use your current workspace default",
-    },
-    ...sortModels(chatModels, modelPrefs).filter((model) => !(
-      recommendedModel
-      && model.providerID === recommendedModel.providerID
-      && model.modelID === recommendedModel.modelID
-    )).map((m) => {
-      const fav = isFavorite(modelPrefs, modelKey(m));
-      const recent = modelPrefs.recents.includes(modelKey(m));
-      return {
-        id: JSON.stringify({ providerID: m.providerID, modelID: m.modelID }),
-        label: `${fav ? "★ " : ""}${modelDisplayName(m, chatModels)}`,
-        group: fav ? "Favorites" : recent ? "Recent" : "All models",
-        // Honest model detail: provider + numeric context + reported
-        // connection only. No cost/modality/variant/attachment guesses.
-        detail: modelDetail(m),
-        keywords: [m.providerID, m.modelID],
-      };
-    }),
-  ];
-  const pickModel = (value: string) => {
-    const ref = modelRefFromValue(value);
+  const pickComposerModel = (ref?: ModelRef) => {
+    if (!ref) return;
     updateCfg(withExplicitModel(cfg, ref));
-    if (ref) noteModelUsed(`${ref.providerID}/${ref.modelID}`);
+    noteModelUsed(`${ref.providerID}/${ref.modelID}`);
+    if (activeProjectId) {
+      void rememberProjectModelSelection(activeProjectId, ref).catch((error) => {
+        setUiError(friendlyError("Couldn’t remember the project model", error));
+      });
+    }
   };
   const chatAgents = agents.filter((agent) =>
     roleKind(agent, rolePrefs) === "main" && agent.name.toLowerCase() !== "compaction");
@@ -1016,7 +1163,6 @@ export default function Composer({
     } : {}),
   });
 
-  const currentModelLabel = modelItems.find((i) => i.id === modelValue)?.label ?? modelItems[0]!.label;
   const currentAgentLabel = agentItems.find((i) => i.id === agentValue)?.label ?? agentItems[0]!.label;
   const selectedModel = cfg.model
     ? chatModels.find((candidate) =>
@@ -1093,8 +1239,9 @@ export default function Composer({
   return (
     <div
       ref={rootRef}
-      className={`${variant === "hero" ? "composer-hero" : "composer"}${simpleMode ? " composer-simple" : " composer-power"}${lightFocusComposer ? " composer-focus-light" : ""}${stateClass}`}
+      className={`composer ${widgetMode ? "composer-widget" : "composer-chat"}${simpleMode ? " composer-simple" : " composer-power"}${lightFocusComposer ? " composer-focus-light" : ""}${stateClass}`}
     >
+      <SessionContextBar {...contextBar} />
       <div
         className="composer-card"
         onDragOver={(e) => { const k = dragKind(e.dataTransfer); if (k) { e.preventDefault(); setDropHint(k); } }}
@@ -1145,11 +1292,8 @@ export default function Composer({
               value={cfg.model}
               recommended={recommendedModel}
               composerMeta={modelCapabilityMeta(selectedModel)}
-              direction={variant === "hero" ? "down" : "up"}
-              onPick={(ref) => {
-                updateCfg(withExplicitModel(cfg, ref));
-                if (ref) noteModelUsed(`${ref.providerID}/${ref.modelID}`);
-              }}
+              direction="up"
+              onPick={pickComposerModel}
             />
           )}
           {/* Reasoning effort stays reachable on phones as a compact slider
@@ -1169,7 +1313,7 @@ export default function Composer({
                 className="composer-agent-badge"
                 label="Mode"
                 mobileSheet
-                direction={variant === "hero" ? "down" : "up"}
+                direction="up"
                 items={agentItems}
                 value={agentValue}
                 onPick={pickAgent}
@@ -1289,10 +1433,7 @@ export default function Composer({
                 models={chatModels}
                 value={cfg.model}
                 recommended={recommendedModel}
-                onPick={(ref) => {
-                  updateCfg(withExplicitModel(cfg, ref));
-                  if (ref) noteModelUsed(`${ref.providerID}/${ref.modelID}`);
-                }}
+                onPick={pickComposerModel}
               />
               <ContextWindowPicker
                 limit={selectedModel?.context}
@@ -1363,7 +1504,7 @@ export default function Composer({
             draftText={text}
             commands={commandCatalog}
             snippets={snippetCatalog}
-            direction={variant === "hero" ? "down" : "up"}
+            direction="up"
             trigger={phoneLayout ? "add" : "tools"}
             onUpload={() => fileInputRef.current?.click()}
             onInsertMention={menuMention}

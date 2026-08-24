@@ -643,6 +643,8 @@ export interface ProjectDefaults {
   agent?: string | null;
   /** null explicitly inherits the browser's global session default. */
   model?: ModelRef | null;
+  /** Persist composer model choices as this project's default. */
+  rememberModelSelection?: boolean;
   groupingMode?: string;
   worktreeBehavior?: "project-root" | "fresh-worktree";
 }

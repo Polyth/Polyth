@@ -116,6 +116,15 @@ export function createProjectService(dataDir: string): ProjectService {
         else project.icon = patch.icon;
       }
       if (patch.defaults !== undefined) {
+        if (!patch.defaults || typeof patch.defaults !== "object" || Array.isArray(patch.defaults)) {
+          throw Object.assign(new Error("defaults must be an object"), { code: "invalid-input" });
+        }
+        if (
+          patch.defaults.rememberModelSelection !== undefined
+          && typeof patch.defaults.rememberModelSelection !== "boolean"
+        ) {
+          throw Object.assign(new Error("rememberModelSelection must be boolean"), { code: "invalid-input" });
+        }
         // shallow-merge defaults so a partial patch never wipes other defaults
         project.defaults = { ...project.defaults, ...patch.defaults };
       }

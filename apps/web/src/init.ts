@@ -13,7 +13,11 @@ import { installPushDeepLinks, registerServiceWorker } from "./push.ts";
 import { notificationCentre } from "./notificationCentre.ts";
 import { applyComposerSeed } from "./drafts.ts";
 import { forkSeedKey, rewindSeedKey } from "./messageActions.ts";
-import { getSessionDefaults, resolveSessionDefaultModel } from "./sessionDefaults.ts";
+import {
+  getSessionDefaults,
+  projectRemembersModelSelection,
+  resolveProjectModelDefault,
+} from "./sessionDefaults.ts";
 import { initPluginBridge } from "./pluginBridge.ts";
 import { reconcilePackage } from "./packages/reconcile.ts";
 
@@ -407,6 +411,16 @@ export async function updateProjectAppearance(
   store.applyProjectUpsert(updated);
 }
 
+/** Save a composer choice only for projects that opted into model memory. */
+export async function rememberProjectModelSelection(id: string, model: ModelRef): Promise<void> {
+  const project = store.getState().projectRegistry.projects.find((candidate) => candidate.id === id);
+  if (!projectRemembersModelSelection(project?.defaults)) return;
+  const updated = await api.patchProject(id, {
+    defaults: { rememberModelSelection: true, model },
+  });
+  store.applyProjectUpsert(updated);
+}
+
 export async function removeProject(id: string): Promise<void> {
   await api.deleteProject(id);
   store.applyProjectRemoved(id);
@@ -440,8 +454,8 @@ async function createDefaultWorktree(projectId: string, title?: string): Promise
 export async function createSession(projectId: string, opts: CreateSessionOptions = {}): Promise<void> {
   const project = store.getState().projectRegistry.projects.find((candidate) => candidate.id === projectId);
   const defaults = getSessionDefaults();
-  const model = opts.model ?? resolveSessionDefaultModel(
-    project?.defaults?.model,
+  const model = opts.model ?? resolveProjectModelDefault(
+    project?.defaults,
     defaults.defaultModel,
   );
   const agent = opts.agent ?? project?.defaults?.agent ?? defaults.defaultAgent;

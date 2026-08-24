@@ -126,14 +126,14 @@ export default function SessionContextBar({
   onPickBranch,
 }: SessionContextBarProps) {
   return (
-    <div className="session-context-bar" aria-label="New session location">
+    <div className="session-context-bar" aria-label="Chat location">
       <ContextSelector
         kind="project"
         value={projectName}
         selectedId={projectId}
         choices={projects}
         sheetTitle="Project"
-        ariaLabel={`Project for new session, current ${projectName}`}
+        ariaLabel={`Project, current ${projectName}`}
         onPick={onPickProject}
       />
       <span className="context-sep" aria-hidden="true" />
@@ -144,7 +144,7 @@ export default function SessionContextBar({
         choices={branches}
         {...(branchLoading ? { disabled: true } : {})}
         sheetTitle="Branch or worktree"
-        ariaLabel={`Branch for new session, current ${branchName}`}
+        ariaLabel={`Worktree, current ${branchName}`}
         onPick={onPickBranch}
       />
     </div>

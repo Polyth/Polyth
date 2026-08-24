@@ -144,12 +144,23 @@ test("drawer opens existing sessions but new chat defers session creation", asyn
 
 test("composer bar exposes the two-tier semantic groups without forking send", async () => {
   const composer = await read("../src/components/Composer.tsx");
+  const surfaces = await read("../src/components/workspace/builtinSurfaces.tsx");
   for (const cls of ["composer-selectors", "composer-extensions", "composer-actions", "composer-primary"]) {
     assert.ok(composer.includes(cls), `composer bar renders .${cls}`);
   }
   assert.equal(composer.match(/const send = useCallback/g)?.length, 1, "exactly one send() path");
+  assert.equal(
+    surfaces.match(/<Composer \/>/g)?.length,
+    2,
+    "fresh and existing sessions instantiate the same default composer",
+  );
+  assert.ok(composer.includes("<SessionContextBar {...contextBar} />"), "the shared composer owns both location selectors");
+  assert.ok(!surfaces.includes("SessionContextBar"), "no chat surface assembles a partial composer");
+  assert.ok(!composer.includes("composer-hero"), "the composer has no fresh-session visual fork");
+  assert.ok(!surfaces.includes('variant="hero"'), "the session surface does not request a fresh-session variant");
   const css = await read("../src/styles.css");
   assert.ok(css.includes("repeat(2, minmax(0, 1fr))"), "phone selector grid contract");
+  assert.ok(!css.includes(".composer-hero"), "fresh and existing sessions share one composer selector");
 });
 
 test("composer active-run controls and mobile actions stay direct", async () => {
@@ -169,7 +180,7 @@ test("composer active-run controls and mobile actions stay direct", async () => 
 test("Focus uses compact mobile composer controls without editor chrome", async () => {
   const composer = await read("../src/components/Composer.tsx");
   const actions = await read("../src/widgets/builtinMiniWidgets.tsx");
-  assert.ok(composer.includes('simpleMode && variant === "docked"'), "light controls are scoped to docked Focus");
+  assert.ok(composer.includes("simpleMode && !widgetMode"), "light controls are shared by fresh and existing chats");
   assert.ok(composer.includes('className="composer-extensions composer-mobile-extensions"'), "Focus exposes slotted mobile actions");
   assert.ok(actions.includes('"permissions.auto-approve-composer-action"'), "auto-approve is a placeable composer action");
   assert.ok(actions.includes('"session.goal-composer-action"'), "goals are a placeable composer action");
@@ -324,12 +335,15 @@ test("shared menu, destructive, failed-turn, and header-action contracts stay wi
   assert.match(css, /\.turn-error\s*\{[^}]*display:\s*flex[^}]*flex-wrap:\s*wrap[^}]*gap:\s*8px/);
 });
 
-test("hero and docked composers expose the shared stable focus target", async () => {
+test("fresh and existing chats expose the shared composer and stable focus target", async () => {
   const composer = await read("../src/components/Composer.tsx");
   const input = await read("../src/components/input/AdaptiveTextInput.tsx");
   const store = await read("../src/store.ts");
-  assert.ok(composer.includes('variant === "hero" ? "composer-hero" : "composer"'), "one component owns both variants");
-  assert.ok(composer.includes('data-composer-input=""'), "both variants mark the shared input");
+  assert.ok(
+    composer.includes('className={`composer ${widgetMode ? "composer-widget" : "composer-chat"}'),
+    "one component owns both chat states",
+  );
+  assert.ok(composer.includes('data-composer-input=""'), "both chat states mark the shared input");
   assert.ok(input.includes("data-composer-input={dataComposerInput}"), "the marker reaches the textarea");
   assert.ok(store.includes('COMPOSER_INPUT_SELECTOR = "[data-composer-input]"'), "focus uses the stable marker");
   assert.ok(store.includes("export function focusComposer()"), "one focus command is exported");

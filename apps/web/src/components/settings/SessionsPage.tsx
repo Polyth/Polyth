@@ -23,6 +23,14 @@ export default function SessionsPage() {
     : mainAgents.find((agent) => agent.name.toLowerCase() === "build")?.name
       ?? mainAgents[0]?.name
     ?? "";
+  const defaultModel = (defaults.defaultModel
+    ? textModels.find((model) =>
+        model.providerID === defaults.defaultModel?.providerID
+        && model.modelID === defaults.defaultModel.modelID)
+    : undefined) ?? textModels[0];
+  const defaultModelRef = defaultModel
+    ? { providerID: defaultModel.providerID, modelID: defaultModel.modelID }
+    : undefined;
   const thinkingOptions = [...new Set(models.flatMap((model) => model.variants ?? []))];
   const [eligible, setEligible] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
@@ -58,7 +66,7 @@ export default function SessionsPage() {
       <PageHead title="Sessions" blurb="Set defaults and retention for sessions." />
       <div className="stat-label session-settings-heading">Session Defaults</div>
       <p className="session-default-summary">
-        New sessions will start with: <strong>OpenCode agent default</strong>
+        New sessions will start with: <strong>{defaultModel?.name ?? "No model available"}</strong>
         {defaultAgent && <> / <strong>{defaultAgent}</strong></>}
       </p>
       <Row label="Default Model" hint="The model selected when a project does not provide an override." itemId="sessions.defaultModel">
@@ -66,6 +74,7 @@ export default function SessionsPage() {
           direction="down"
           models={textModels}
           value={defaults.defaultModel}
+          recommended={defaultModelRef}
           onPick={(model) => {
             setGlobalDefaultModel(model);
             updateSettings({ defaultModel: model ? `${model.providerID}/${model.modelID}` : "" });
@@ -97,6 +106,7 @@ export default function SessionsPage() {
           direction="down"
           models={textModels}
           value={defaults.smallModel}
+          recommended={defaultModelRef}
           onPick={(smallModel) => setSessionDefaults({ smallModel })}
         />
       </Row>
@@ -105,6 +115,7 @@ export default function SessionsPage() {
           direction="down"
           models={textModels}
           value={defaults.walkthroughModel}
+          recommended={defaultModelRef}
           onPick={(walkthroughModel) => setSessionDefaults({ walkthroughModel })}
         />
       </Row>

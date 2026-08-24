@@ -90,7 +90,7 @@ test("model metadata reports deduplicated input and output modalities", () => {
   }), "Text, Image");
 });
 
-test("fresh mobile sessions expose project and branch targets", () => {
+test("all mobile chat composers expose project and worktree targets", () => {
   const surface = read("../src/components/workspace/builtinSurfaces.tsx");
   const contextBar = read("../src/components/mobile/SessionContextBar.tsx");
   const composer = read("../src/components/Composer.tsx");
@@ -98,12 +98,13 @@ test("fresh mobile sessions expose project and branch targets", () => {
   const header = read("../src/components/Header.tsx");
   const css = read("../src/styles.css");
 
-  // UX-MOBILE-01 §5: the selectors moved out of the middle of the page into
-  // the compact context bar above the composer — without losing either target.
-  assert.match(surface, /<SessionContextBar/);
-  assert.match(contextBar, /Project for new session, current \$\{projectName\}/);
-  assert.match(contextBar, /Branch for new session, current \$\{branchName\}/);
-  assert.match(surface, /target: \{ kind: "branch", branch: candidate\.name \}/);
+  // UX-MOBILE-01 §5: the compact context bar belongs to the shared composer,
+  // so fresh and existing chats cannot assemble different control sets.
+  assert.doesNotMatch(surface, /<SessionContextBar/);
+  assert.match(composer, /<SessionContextBar \{\.\.\.contextBar\} \/>/);
+  assert.match(contextBar, /Project, current \$\{projectName\}/);
+  assert.match(contextBar, /Worktree, current \$\{branchName\}/);
+  assert.match(composer, /target: \{ kind: "branch", branch: candidate\.name \}/);
   assert.match(composer, /newSessionTarget\.kind === "branch"/);
   assert.doesNotMatch(composer, /Modalities:/);
   assert.match(composer, /aria-label="Add files"/);

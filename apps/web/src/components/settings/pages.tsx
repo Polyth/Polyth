@@ -1,9 +1,18 @@
 // The simpler settings pages: General, Appearance, Chat, Notifications,
 // Behavior, Usage, Projects, Git, Agents, MCP, Plugins.
 import { useEffect, useRef, useState, type CSSProperties } from "react";
-import { activateProject, applyProjectUpsert, openWorkspacePane, setAgents, setOverlay, updateSettings, useStore } from "../../store.ts";
+import {
+  activateProject,
+  applyProjectUpsert,
+  openWorkspacePane,
+  setAgents,
+  setOverlay,
+  setUiError,
+  updateSettings,
+  useStore,
+} from "../../store.ts";
 import { UI_DEFAULTS, setUiSettings, useUiSettings } from "../../uiPrefs.ts";
-import { DEFAULT_SETTINGS, INTERFACE_FONTS } from "../../settings.ts";
+import { DEFAULT_SETTINGS, friendlyError, INTERFACE_FONTS } from "../../settings.ts";
 import { requestNotifyPermission } from "../../notify.ts";
 import { disablePush, enablePush, pushSubscription, pushUnsupportedReason } from "../../push.ts";
 import { api, type GitStatus } from "../../api.ts";
@@ -38,6 +47,11 @@ import ModelPicker from "../ModelPicker.tsx";
 import Dialog from "../a11y/Dialog.tsx";
 import { modelSupportsTextWorkflow } from "../../composer/discovery.ts";
 import { removeGitPersona, saveGitPersona, useGitPersonas, type GitPersona } from "../../gitPersonas.ts";
+import {
+  projectRemembersModelSelection,
+  resolveSessionDefaultModel,
+  useSessionDefaults,
+} from "../../sessionDefaults.ts";
 
 function ThemeSwatches({ theme }: { theme: ThemeSpec }) {
   return (
@@ -661,14 +675,45 @@ export function ProjectsPage() {
   const projects = useStore((s) => s.projectRegistry.projects);
   const activeProjectId = useStore((s) => s.activeProjectId);
   const models = useStore((s) => s.models).filter(modelSupportsTextWorkflow);
+  const sessionDefaults = useSessionDefaults();
   const [picking, setPicking] = useState(false);
+  const globalModel = resolveSessionDefaultModel(null, sessionDefaults.defaultModel, models[0]);
+  const globalModelName = globalModel
+    ? models.find((model) =>
+        model.providerID === globalModel.providerID && model.modelID === globalModel.modelID)?.name
+      ?? globalModel.modelID
+    : "No model available";
   const saveModel = async (projectId: string, model?: ModelRef) => {
-    const updated = await api.patchProject(projectId, { defaults: { model: model ?? null } });
-    applyProjectUpsert(updated);
+    if (!model) return;
+    try {
+      const updated = await api.patchProject(projectId, {
+        defaults: { rememberModelSelection: true, model },
+      });
+      applyProjectUpsert(updated);
+    } catch (error) {
+      setUiError(friendlyError("Couldn’t save the project model", error));
+    }
+  };
+  const setModelMemory = async (projectId: string, enabled: boolean) => {
+    try {
+      const project = projects.find((candidate) => candidate.id === projectId);
+      const updated = await api.patchProject(projectId, {
+        defaults: enabled
+          ? { rememberModelSelection: true, model: project?.defaults?.model ?? globalModel ?? null }
+          : { rememberModelSelection: false },
+      });
+      applyProjectUpsert(updated);
+    } catch (error) {
+      setUiError(friendlyError("Couldn’t update project model memory", error));
+    }
   };
   const saveIcon = async (projectId: string, icon: string) => {
-    const updated = await api.patchProject(projectId, { icon: icon.trim().slice(0, 16) });
-    applyProjectUpsert(updated);
+    try {
+      const updated = await api.patchProject(projectId, { icon: icon.trim().slice(0, 16) });
+      applyProjectUpsert(updated);
+    } catch (error) {
+      setUiError(friendlyError("Couldn’t save the project icon", error));
+    }
   };
   return (
     <>
@@ -700,18 +745,36 @@ export function ProjectsPage() {
               onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); }}
             />
           </div>
-          <div className="project-settings-options">
+          <div className="project-settings-options" data-settings-item="projects.modelMemory">
             <div>
-              <strong>Default model</strong>
-              <span>Overrides the global default for new sessions.</span>
+              <strong>Remember model selection</strong>
+              <span>
+                {projectRemembersModelSelection(p.defaults)
+                  ? "The last model chosen in this project becomes its default."
+                  : `Off — new sessions use ${globalModelName}.`}
+              </span>
             </div>
-            <ModelPicker
-              direction="down"
-              models={models}
-              value={p.defaults?.model ?? undefined}
-              onPick={(model) => void saveModel(p.id, model)}
+            <Toggle
+              on={projectRemembersModelSelection(p.defaults)}
+              onChange={(enabled) => void setModelMemory(p.id, enabled)}
+              label={`Remember model selection for ${p.name || p.path}`}
             />
           </div>
+          {projectRemembersModelSelection(p.defaults) && (
+            <div className="project-settings-options project-settings-model">
+              <div>
+                <strong>Remembered model</strong>
+                <span>Updated whenever you choose a model in this project.</span>
+              </div>
+              <ModelPicker
+                direction="down"
+                models={models}
+                value={p.defaults?.model ?? undefined}
+                recommended={globalModel}
+                onPick={(model) => void saveModel(p.id, model)}
+              />
+            </div>
+          )}
           <div className="project-settings-options" data-settings-item="projects.canvas">
             <div>
               <strong>Canvas setup</strong>
@@ -835,8 +898,10 @@ export function GitPage() {
 function RoleEditor({ role, onClose }: { role: AgentDescriptor; onClose: () => void }) {
   const models = useStore((state) => state.models).filter(modelSupportsTextWorkflow);
   const agents = useStore((state) => state.agents);
+  const defaults = useSessionDefaults();
+  const defaultModel = resolveSessionDefaultModel(null, defaults.defaultModel, models[0]);
   const [prompt, setPrompt] = useState(role.prompt ?? "");
-  const [model, setModel] = useState<ModelRef | undefined>(role.model);
+  const [model, setModel] = useState<ModelRef | undefined>(role.model ?? defaultModel);
   const [mode, setMode] = useState<AgentDescriptor["mode"]>(role.mode === "all" ? "primary" : role.mode);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -864,8 +929,8 @@ function RoleEditor({ role, onClose }: { role: AgentDescriptor; onClose: () => v
         </label>
         <label>
           <span>Provider & model</span>
-          <ModelPicker direction="down" models={models} value={model} onPick={setModel} />
-          <small>Uses the same searchable picker and favorites as the composer. Auto inherits OpenCode’s default.</small>
+          <ModelPicker direction="down" models={models} value={model} recommended={defaultModel} onPick={setModel} />
+          <small>Uses the same searchable picker and favorites as the composer.</small>
         </label>
         <label>
           <span>System prompt</span>
@@ -880,12 +945,22 @@ function RoleEditor({ role, onClose }: { role: AgentDescriptor; onClose: () => v
 
 export function AgentsPage() {
   const agents = useStore((s) => s.agents);
+  const models = useStore((s) => s.models).filter(modelSupportsTextWorkflow);
+  const defaults = useSessionDefaults();
   const profiles = useProfiles();
   const [editingRole, setEditingRole] = useState<AgentDescriptor | null>(null);
   const [editing, setEditing] = useState<AgentProfile | null>(null);
   const [creating, setCreating] = useState(false);
   const [repairsFor, setRepairsFor] = useState<Record<string, string>>({});
   const configurableAgents = agents.filter((agent) => agent.name.toLowerCase() !== "compaction");
+  const defaultModel = resolveSessionDefaultModel(null, defaults.defaultModel, models[0]);
+  const modelLabel = (model?: ModelRef) => {
+    const resolved = model ?? defaultModel;
+    if (!resolved) return "No model available";
+    return models.find((candidate) =>
+      candidate.providerID === resolved.providerID && candidate.modelID === resolved.modelID)?.name
+      ?? resolved.modelID;
+  };
   const checkProfile = async (p: AgentProfile) => {
     const r = await api.validateProfile(p.id).catch(() => null);
     setRepairsFor((m) => ({
@@ -905,7 +980,7 @@ export function AgentsPage() {
               <header><span className="role-card-icon">{agent.name.slice(0, 1).toUpperCase()}</span><div><strong>{agent.name}</strong><span className={`tag role-kind ${agent.mode}`}>{agent.mode === "subagent" ? "Subagent" : "Main agent"}</span></div></header>
               <p>{agent.description || "A configurable OpenCode role."}</p>
               <div className="role-card-meta">
-                <span><b>Model</b>{agent.model ? `${agent.model.providerID}/${agent.model.modelID}` : "Auto"}</span>
+                <span><b>Model</b>{modelLabel(agent.model)}</span>
                 <span><b>Prompt</b>{agent.prompt?.trim() ? `${agent.prompt.trim().slice(0, 72)}${agent.prompt.trim().length > 72 ? "…" : ""}` : "OpenCode default"}</span>
               </div>
               <button className="small-btn" onClick={() => setEditingRole(agent)}>Edit role</button>

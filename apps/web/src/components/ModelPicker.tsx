@@ -113,8 +113,8 @@ export default function ModelPicker({
     ? models.find((model) =>
         model.providerID === recommended.providerID && model.modelID === recommended.modelID)
     : undefined;
-  const selectedModel = current ?? fallback;
-  const label = selectedModel?.name ?? "Auto";
+  const selectedModel = current ?? fallback ?? models[0];
+  const label = selectedModel?.name ?? "No model";
   const q = query.trim().toLowerCase();
   const filtered = models.filter((model) =>
     !q || [model.name, model.modelID, model.providerID, model.providerName ?? ""]
@@ -144,14 +144,14 @@ export default function ModelPicker({
     setQuery("");
     setEditing(false);
   };
-  const choose = (model?: ModelDescriptor) => {
+  const choose = (model: ModelDescriptor) => {
     if (phone) tapFeedback();
-    onPick(model ? { providerID: model.providerID, modelID: model.modelID } : undefined);
+    onPick({ providerID: model.providerID, modelID: model.modelID });
     close();
     if (!phone) triggerRef.current?.focus();
   };
-  const isSelected = (model: ModelDescriptor) => current
-    ? current.providerID === model.providerID && current.modelID === model.modelID
+  const isSelected = (model: ModelDescriptor) => selectedModel
+    ? selectedModel.providerID === model.providerID && selectedModel.modelID === model.modelID
     : false;
 
   // §22: tapping the model while typing dismisses the keyboard FIRST, then
@@ -328,13 +328,6 @@ export default function ModelPicker({
           } : {})}
         >
           <div role="listbox" aria-label="Models">
-            <SheetRow
-              title="Auto"
-              meta="Workspace default"
-              selected={!current}
-              onClick={() => choose()}
-              ariaLabel="Use the workspace default model"
-            />
             {favorites.length > 0 && (
               <SheetSection title="Favorites" count={favorites.length}>
                 {favorites.map((model) => sheetRow(model, "favorites"))}
@@ -385,10 +378,6 @@ export default function ModelPicker({
               onChange={(event) => setQuery(event.target.value)}
             />
             <div className="model-picker-list" role="listbox" aria-label="Models">
-              <div className="model-picker-row model-picker-auto" role="option" aria-selected={!current} onClick={() => choose()}>
-                <span className="model-picker-check" aria-hidden="true">{!current ? "✓" : ""}</span>
-                <span className="model-picker-copy"><strong>Auto</strong><small>Workspace default</small></span>
-              </div>
               {favorites.length > 0 && (
                 <section className="model-provider-section favorites">
                   <div className="model-provider-head static"><span>★</span><strong>Favorites</strong><small>{favorites.length}</small></div>

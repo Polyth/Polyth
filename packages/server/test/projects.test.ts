@@ -70,3 +70,34 @@ test("project metadata PATCH is served by the project route", async () => {
     await new Promise<void>((resolve) => server.close(() => resolve()));
   }
 });
+
+test("project model memory is persisted without erasing the remembered model", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "polyth-projects-"));
+  const root = join(dir, "workspace");
+  mkdirSync(root);
+  const projects = createProjectService(dir);
+  const project = await projects.add(root);
+  const model = { providerID: "openai", modelID: "gpt-5" };
+
+  const enabled = await projects.update!(project.id, {
+    defaults: { rememberModelSelection: true, model },
+  });
+  assert.deepEqual(enabled.defaults, { rememberModelSelection: true, model });
+
+  const disabled = await projects.update!(project.id, {
+    defaults: { rememberModelSelection: false },
+  });
+  assert.deepEqual(disabled.defaults, { rememberModelSelection: false, model });
+
+  const reloaded = createProjectService(dir);
+  assert.deepEqual((await reloaded.get!(project.id))?.defaults, {
+    rememberModelSelection: false,
+    model,
+  });
+  await assert.rejects(
+    () => reloaded.update!(project.id, {
+      defaults: { rememberModelSelection: "yes" } as never,
+    }),
+    /rememberModelSelection must be boolean/,
+  );
+});
