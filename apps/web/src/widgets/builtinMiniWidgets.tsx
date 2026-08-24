@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { api } from "../api.ts";
 import { Icon } from "../icons.tsx";
-import { setOverlay, setUiError, useStore } from "../store.ts";
+import { setActiveView, setOverlay, setUiError, useStore } from "../store.ts";
 import { friendlyError } from "../settings.ts";
 import { GoalAttachForm } from "../components/GoalStrip.tsx";
 import { defineWidgetPlugin, registerWidgetPlugin } from "./catalog.ts";
@@ -82,6 +82,38 @@ function AutoApproveAction({ context }: { context: Record<string, unknown> }) {
     </button>
   );
 }
+
+function WorkflowAction() {
+  return (
+    <button
+      className="header-action composer-workflow"
+      onClick={() => setActiveView("workflow")}
+      title="Open workflows"
+      aria-label="Open workflows"
+    >
+      <Icon.workflow /><span>Workflows</span>
+    </button>
+  );
+}
+
+export const WORKFLOW_WIDGET_PLUGIN = defineWidgetPlugin({
+  id: "workflow",
+  name: "Workflows",
+  widgets: [{
+    id: "workflow.composer-action",
+    title: "Workflows",
+    description: "Open the workflow composer.",
+    kind: "mini-widget",
+    defaultSlot: "composer.trailing",
+    supportedSlots: COMPOSER_ACTION_SLOTS,
+    defaultVisible: true,
+    defaultSize: { w: 1, h: 1 },
+    resizable: false,
+    audience: "simple",
+    order: 50,
+    render: () => <WorkflowAction />,
+  }],
+});
 
 const SHELL_ACTIONS_PLUGIN = defineWidgetPlugin({
   id: "shell-actions",

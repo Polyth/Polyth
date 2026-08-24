@@ -63,6 +63,10 @@ test("fresh mobile sessions expose project and branch targets", () => {
   assert.match(composer, /aria-label="Add files"/);
   assert.match(actions, /composer-auto-approve/);
   assert.match(actions, /composer-goals/);
+  assert.match(actions, /composer-workflow/);
+  assert.match(css, /\.composer-mobile \.composer-workflow,/);
+  assert.match(css, /\.composer-mobile \.composer-workflow:active,/);
+  assert.match(css, /\.composer-mobile\.composer-collapsed \.composer-workflow \{ display: none; \}/);
   assert.match(header, /displaySessionTitle\(session\.title, session\.id, firstUserText\)/);
   assert.match(header, /Composer controls/);
   assert.match(css, /\.polyth-gradient\s*\{[^}]*linear-gradient/s);

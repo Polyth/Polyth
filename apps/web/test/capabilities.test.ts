@@ -154,9 +154,13 @@ test("resolution honors explicit overrides and is deterministically ordered", ()
 
 // ---- built-in registration ----------------------------------------------------
 
-test("all built-in metadata is registered with open + available attached", async () => {
+test("core built-ins register immediately while optional workflow waits for its package installer", async () => {
   await import("../src/builtinCapabilities.ts");
   for (const m of BUILTIN_CAPABILITY_META) {
+    if (m.id === "workflow") {
+      assert.equal(getCapability(m.id), null);
+      continue;
+    }
     const d = getCapability(m.id);
     assert.ok(d, `${m.id} registered`);
     assert.equal(typeof d.open, "function");

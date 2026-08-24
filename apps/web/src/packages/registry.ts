@@ -14,6 +14,7 @@ import { installSshPackage } from "./ssh.ts";
 import { combineUnregister } from "./settingsPage.ts";
 import { installUsagePackage } from "./usage.ts";
 import { installVoicePackage } from "./voice.ts";
+import { installWorkflowPackage } from "./workflow.ts";
 import { configurePackageReconcile, reconcilePackage } from "./reconcile.ts";
 import { registerBuiltinPackageTours } from "./onboarding/builtinTours.ts";
 
@@ -37,6 +38,7 @@ const installers = new Map<string, PackageInstaller>([
   ["secure-safe", installSecureSafePackage],
   ["home-assistant", installHomeAssistantPackage],
   ["ssh", installSshPackage],
+  ["workflow", installWorkflowPackage],
 ]);
 
 // Some backend package names describe the implementation package rather than

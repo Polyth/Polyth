@@ -68,6 +68,9 @@ function openOf(meta: CapabilityMeta): () => void {
 }
 
 for (const meta of BUILTIN_CAPABILITY_META) {
+  // Optional package capabilities are registered by their web installers so
+  // package disablement removes every navigation and composer entry together.
+  if (meta.id === "workflow") continue;
   registerCapability({
     ...meta,
     open: openOf(meta),
