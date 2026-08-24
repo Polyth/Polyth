@@ -196,25 +196,67 @@ export function QuotaOverviewGrid({ snapshots }: { snapshots: readonly QuotaSnap
   );
 }
 
+const quotaErrorMessage = (value: unknown): string =>
+  value instanceof Error ? value.message : String(value);
+
 export function useQuotaSnapshots(): {
   snapshots: QuotaSnapshotDto[];
-  reload: () => void;
-  refresh: (providerId: string) => void;
+  loading: boolean;
+  error: string | null;
+  reload: () => Promise<void>;
+  refresh: (providerId: string) => Promise<void>;
+  refreshAll: () => Promise<void>;
 } {
   const [snapshots, setSnapshots] = useState<QuotaSnapshotDto[]>([]);
-  const reload = useCallback(() => {
-    void api.usageQuotas().then(setSnapshots);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const reload = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      setSnapshots(await api.usageQuotas());
+    } catch (cause) {
+      setError(quotaErrorMessage(cause));
+    } finally {
+      setLoading(false);
+    }
   }, []);
   useEffect(() => {
-    reload();
-    const timer = window.setInterval(reload, 60_000);
+    void reload();
+    const timer = window.setInterval(() => void reload(), 60_000);
     return () => window.clearInterval(timer);
   }, [reload]);
-  const refresh = useCallback((providerId: string) => {
-    void api.usageQuotasRefresh(providerId).then(
-      () => reload(),
-      () => reload(),
-    );
-  }, [reload]);
-  return { snapshots, reload, refresh };
+  const refresh = useCallback(async (providerId: string) => {
+    setLoading(true);
+    setError(null);
+    try {
+      await api.usageQuotasRefresh(providerId);
+      setSnapshots(await api.usageQuotas());
+    } catch (cause) {
+      setError(quotaErrorMessage(cause));
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+  const refreshAll = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      if (snapshots.length > 0) {
+        const outcomes = await Promise.allSettled(
+          snapshots.map((snapshot) => api.usageQuotasRefresh(snapshot.providerId)),
+        );
+        const failed = outcomes.find((outcome) => outcome.status === "rejected");
+        setSnapshots(await api.usageQuotas());
+        if (failed?.status === "rejected") throw failed.reason;
+      } else {
+        setSnapshots(await api.usageQuotas());
+      }
+    } catch (cause) {
+      setError(quotaErrorMessage(cause));
+    } finally {
+      setLoading(false);
+    }
+  }, [snapshots]);
+  return { snapshots, loading, error, reload, refresh, refreshAll };
 }

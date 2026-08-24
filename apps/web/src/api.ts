@@ -1053,7 +1053,7 @@ export const api = {
 
   // ---- provider quotas (WP12; telemetry, never session data) --------------------
   usageQuotas: () =>
-    jfetch<QuotaSnapshotDto[]>(`/api/usage/quotas`).catch((): QuotaSnapshotDto[] => []),
+    jfetch<QuotaSnapshotDto[]>(`/api/usage/quotas`),
   usageQuotasRefresh: (providerId: string) =>
     jfetch<QuotaSnapshotDto>(`/api/usage/quotas/refresh`, json("POST", { providerId })),
 

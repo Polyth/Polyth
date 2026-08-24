@@ -132,9 +132,15 @@ function SessionUsageWidget({ config }: WidgetRenderContext) {
 }
 
 function ProviderQuotasWidget() {
-  const { snapshots, refresh } = useQuotaSnapshots();
+  const { snapshots, refresh, loading, error } = useQuotaSnapshots();
   const prefs = useUsagePrefs();
   const visible = snapshots.filter((snapshot) => !prefs.hiddenProviders.includes(snapshot.providerId));
+  if (loading && snapshots.length === 0) {
+    return <div className="widget-empty" role="status">Loading provider quotas…</div>;
+  }
+  if (error && snapshots.length === 0) {
+    return <div className="widget-empty" role="alert">Provider quotas are unavailable. {error}</div>;
+  }
   return (
     <div className="usage-widget-panel">
       {snapshots.length === 0 && (
@@ -228,10 +234,12 @@ function SessionsTableWidget({ projectId }: { projectId: string | null }) {
 }
 
 function QuotaSummaryWidget() {
-  const { snapshots } = useQuotaSnapshots();
+  const { snapshots, loading, error } = useQuotaSnapshots();
   const prefs = useUsagePrefs();
   const visible = snapshots.filter((snapshot) => !prefs.hiddenProviders.includes(snapshot.providerId));
   const stats = quotaSnapshotStats(visible);
+  if (loading && snapshots.length === 0) return <div className="widget-empty" role="status">Loading quota summary…</div>;
+  if (error && snapshots.length === 0) return <div className="widget-empty" role="alert">Quota summary is unavailable. {error}</div>;
   if (snapshots.length === 0) return <div className="widget-empty">No providers discovered from OpenCode or Claude Code.</div>;
   return (
     <div className="usage-quota-summary">

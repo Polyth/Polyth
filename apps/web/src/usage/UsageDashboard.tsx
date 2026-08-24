@@ -45,8 +45,14 @@ const formatMoney = (value: number): string =>
   }).format(value);
 
 const formatRange = (start: number, end: number): string => {
-  const formatter = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric" });
-  return `${formatter.format(start)} – ${formatter.format(end)}`;
+  const startDate = new Date(start);
+  const endDate = new Date(end);
+  const sameYear = startDate.getFullYear() === endDate.getFullYear();
+  const short = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric" });
+  const dated = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric" });
+  return sameYear
+    ? `${short.format(start)} – ${short.format(end)}, ${endDate.getFullYear()}`
+    : `${dated.format(start)} – ${dated.format(end)}`;
 };
 
 const aggregateSeries = (series: readonly UsageChartSeries[], points: number): number[] =>
@@ -55,15 +61,29 @@ const aggregateSeries = (series: readonly UsageChartSeries[], points: number): n
 
 function TrendBadge({ trend, compact = false }: { trend: UsageTrend | null; compact?: boolean }) {
   if (!trend) {
-    return <span className={`usage-trend usage-trend-none${compact ? " compact" : ""}`}>{compact ? "—" : "No prior data"}</span>;
+    return (
+      <span
+        className={`usage-trend usage-trend-none${compact ? " compact" : ""}`}
+        aria-label="No prior data"
+      >
+        <span aria-hidden="true">{compact ? "—" : "No prior data"}</span>
+      </span>
+    );
   }
   const rounded = Math.round(Math.abs(trend.percent));
   const direction = trend.direction === "up" ? "↑" : trend.direction === "down" ? "↓" : "→";
+  const accessibleLabel = trend.direction === "flat"
+    ? "No change from the previous period"
+    : `${rounded} percent ${trend.direction === "up" ? "increase" : "decrease"} from the previous period`;
   return (
-    <span className={`usage-trend usage-trend-${trend.direction}${compact ? " compact" : ""}`}>
-      <span aria-hidden="true">{direction}</span>
-      {trend.direction === "flat" ? "0%" : `${rounded}%`}
-      {!compact && <span> from previous</span>}
+    <span
+      className={`usage-trend usage-trend-${trend.direction}${compact ? " compact" : ""}`}
+      aria-label={accessibleLabel}
+    >
+      <span aria-hidden="true">
+        {direction} {trend.direction === "flat" ? "0%" : `${rounded}%`}
+        {!compact && " from previous"}
+      </span>
     </span>
   );
 }
@@ -148,10 +168,14 @@ function AreaChart({
   labels,
   series,
   metric,
+  emptyTitle,
+  emptyText,
 }: {
   labels: string[];
   series: UsageChartSeries[];
   metric: UsageChartMetric;
+  emptyTitle: string;
+  emptyText: string;
 }) {
   const width = 720;
   const height = 236;
@@ -168,6 +192,7 @@ function AreaChart({
     : left + index / (labels.length - 1) * chartWidth;
   const pointY = (value: number) => top + chartHeight - value / maximum * chartHeight;
   const populated = allValues.some((value) => value > 0);
+  const metricLabel = metric === "cost" ? "Cost" : metric === "tokens" ? "Token" : "Session";
   const formatAxis = (value: number) => metric === "cost"
     ? `$${value < 1 ? value.toFixed(2) : Math.round(value)}`
     : metric === "tokens"
@@ -176,7 +201,13 @@ function AreaChart({
 
   return (
     <div className="usage-area-chart">
-      <svg viewBox={`0 0 ${width} ${height}`} role="img" aria-label={`${metric} usage over time`}>
+      <svg viewBox={`0 0 ${width} ${height}`} role="img">
+        <title>{`${metricLabel} usage over time`}</title>
+        <desc>
+          {populated
+            ? `${series.length} visible ${series.length === 1 ? "provider is" : "providers are"} charted across ${labels.length} date buckets. Detailed values follow the chart.`
+            : `${emptyTitle}. ${emptyText}`}
+        </desc>
         <defs>
           {series.map((item, index) => (
             <linearGradient key={item.providerId} id={`usage-${metric}-gradient-${index}`} x1="0" y1="0" x2="0" y2="1">
@@ -236,24 +267,57 @@ function AreaChart({
           );
         })}
       </svg>
+      {populated && (
+        <table className="sr-only">
+          <caption>{`${metricLabel} usage over time by provider`}</caption>
+          <thead>
+            <tr>
+              <th scope="col">Provider</th>
+              {labels.map((label, index) => <th scope="col" key={`${label}-${index}`}>{label}</th>)}
+            </tr>
+          </thead>
+          <tbody>
+            {series.map((item) => (
+              <tr key={item.providerId}>
+                <th scope="row">{item.label}</th>
+                {item.values.map((value, index) => (
+                  <td key={index}>{formatAxis(value)}</td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
       {!populated && (
         <div className="usage-chart-empty">
           <span><Icon.usage /></span>
-          <strong>No usage in this period</strong>
-          <small>Charts fill in as sessions record tokens and cost.</small>
+          <strong>{emptyTitle}</strong>
+          <small>{emptyText}</small>
         </div>
       )}
     </div>
   );
 }
 
-function UsageOverTime({ data }: { data: ReturnType<typeof buildUsageDashboardData> }) {
+function UsageOverTime({
+  data,
+  visibleProviderIds,
+  hiddenCount,
+}: {
+  data: ReturnType<typeof buildUsageDashboardData>;
+  visibleProviderIds: ReadonlySet<string>;
+  hiddenCount: number;
+}) {
   const [metric, setMetric] = useState<UsageChartMetric>("tokens");
+  const series = data.chart[metric].filter((item) => visibleProviderIds.has(item.providerId));
+  const hiddenActivity = hiddenCount > 0 && data.chart[metric].some(
+    (item) => !visibleProviderIds.has(item.providerId) && item.values.some((value) => value > 0),
+  );
   return (
     <article className="usage-dashboard-card usage-time-card">
       <SectionHeading
         title="Usage over time"
-        description="Session activity, grouped by provider"
+        description="Session activity, grouped by visible providers"
         aside={(
           <div className="usage-metric-toggle" aria-label="Chart metric">
             {(["tokens", "cost", "requests"] as const).map((item) => (
@@ -270,9 +334,17 @@ function UsageOverTime({ data }: { data: ReturnType<typeof buildUsageDashboardDa
           </div>
         )}
       />
-      <AreaChart labels={data.chart.labels} series={data.chart[metric]} metric={metric} />
+      <AreaChart
+        labels={data.chart.labels}
+        series={series}
+        metric={metric}
+        emptyTitle={hiddenActivity ? "All activity is hidden" : "No usage in this period"}
+        emptyText={hiddenActivity
+          ? "Show a provider to include its activity in breakdowns."
+          : "Charts fill in as sessions record tokens and cost."}
+      />
       <div className="usage-chart-legend">
-        {data.chart[metric].map((item, index) => (
+        {series.map((item, index) => (
           <span key={item.providerId}>
             <i style={{ background: seriesAccent(index) }} />
             <ProviderLogo providerID={item.providerId} providerName={item.label} className="usage-legend-logo" />
@@ -294,9 +366,11 @@ interface SpendEntry {
 function ProviderSpendDonut({
   providers,
   onViewProviders,
+  hiddenSpend,
 }: {
   providers: UsageProviderSummary[];
   onViewProviders: () => void;
+  hiddenSpend: boolean;
 }) {
   const withSpend = providers.filter((provider) => provider.cost > 0);
   const total = withSpend.reduce((sum, provider) => sum + provider.cost, 0);
@@ -357,8 +431,10 @@ function ProviderSpendDonut({
           ))}
           {arcs.length === 0 && (
             <div className="usage-card-empty">
-              <strong>No spend recorded</strong>
-              <span>Cost appears when the active model reports it.</span>
+              <strong>{hiddenSpend ? "All spend is hidden" : "No spend recorded"}</strong>
+              <span>{hiddenSpend
+                ? "Show a provider to include its spend in breakdowns."
+                : "Cost appears when the active model reports it."}</span>
             </div>
           )}
         </div>
@@ -367,7 +443,13 @@ function ProviderSpendDonut({
   );
 }
 
-function ModelBreakdown({ models }: { models: UsageModelSummary[] }) {
+function ModelBreakdown({
+  models,
+  hiddenActivity,
+}: {
+  models: UsageModelSummary[];
+  hiddenActivity: boolean;
+}) {
   const [metric, setMetric] = useState<"tokens" | "cost">("tokens");
   const shown = models.slice(0, 6);
   const maximum = Math.max(1, ...shown.map((model) => model[metric]));
@@ -408,8 +490,10 @@ function ModelBreakdown({ models }: { models: UsageModelSummary[] }) {
         ))}
         {shown.length === 0 && (
           <div className="usage-card-empty">
-            <strong>No model activity yet</strong>
-            <span>Models appear after a session runs in this workspace.</span>
+            <strong>{hiddenActivity ? "All model activity is hidden" : "No model activity yet"}</strong>
+            <span>{hiddenActivity
+              ? "Show a provider to include its models in breakdowns."
+              : "Models appear after a session runs in this workspace."}</span>
           </div>
         )}
       </div>
@@ -440,13 +524,25 @@ function CostPulse({ data }: { data: ReturnType<typeof buildUsageDashboardData> 
   );
 }
 
-function ProviderTable({ providers }: { providers: UsageProviderSummary[] }) {
+function ProviderStatus({ provider }: { provider: UsageProviderSummary }) {
+  const state = !provider.snapshot ? "session-only" : provider.stale ? "stale" : "fresh";
+  const label = state === "session-only" ? "Session only" : state === "stale" ? "Stale" : "Fresh";
+  return <span className={`usage-status-pill ${state}`}><i />{label}</span>;
+}
+
+function ProviderTable({
+  providers,
+  allProvidersHidden,
+}: {
+  providers: UsageProviderSummary[];
+  allProvidersHidden: boolean;
+}) {
   return (
     <article className="usage-dashboard-card usage-providers-card">
       <SectionHeading
         title="Provider activity"
-        description="Session totals and current quota health"
-        aside={<span className="usage-live-badge"><i /> Session log + quota feeds</span>}
+        description="Session totals and quota feed health"
+        aside={<span className="usage-source-badge">Project scoped</span>}
       />
       <div className="usage-table-scroll">
         <table>
@@ -482,7 +578,14 @@ function ProviderTable({ providers }: { providers: UsageProviderSummary[] }) {
                   ) : (
                     <div className="usage-limit-cell">
                       <div><span>{provider.remainingPercent}%</span><small>{provider.quotaWindow?.label}</small></div>
-                      <span className="usage-limit-track">
+                      <span
+                        className="usage-limit-track"
+                        role="progressbar"
+                        aria-label={`${provider.label} quota remaining`}
+                        aria-valuemin={0}
+                        aria-valuemax={100}
+                        aria-valuenow={provider.remainingPercent}
+                      >
                         <i
                           className={provider.remainingPercent < 20 ? "critical" : provider.remainingPercent < 40 ? "warning" : ""}
                           style={{ width: `${provider.remainingPercent}%` }}
@@ -492,13 +595,15 @@ function ProviderTable({ providers }: { providers: UsageProviderSummary[] }) {
                   )}
                 </td>
                 <td data-label="Status">
-                  <span className={`usage-status-pill ${provider.stale ? "stale" : ""}`}><i />{provider.stale ? "Stale" : "Active"}</span>
+                  <ProviderStatus provider={provider} />
                 </td>
               </tr>
             ))}
             {providers.length === 0 && (
               <tr className="usage-provider-empty-row">
-                <td colSpan={6}>No provider activity in this period.</td>
+                <td colSpan={6}>{allProvidersHidden
+                  ? "All providers are hidden from breakdowns."
+                  : "No provider activity in this period."}</td>
               </tr>
             )}
           </tbody>
@@ -522,7 +627,9 @@ function UsageActionStrip({
       <span className="usage-action-icon"><Icon.sliders /></span>
       <div>
         <strong>Shape this dashboard</strong>
-        <span>{hiddenCount > 0 ? `${hiddenCount} provider${hiddenCount === 1 ? " is" : "s are"} hidden from summary widgets.` : "All discovered providers are included in summary widgets."}</span>
+        <span>{hiddenCount > 0
+          ? `${hiddenCount} provider${hiddenCount === 1 ? " is" : "s are"} hidden from provider breakdowns. Workspace totals still include all activity.`
+          : "All discovered providers are included in provider breakdowns."}</span>
       </div>
       <button type="button" className="small-btn" onClick={onProviders}>Provider visibility</button>
       <button type="button" className="small-btn" onClick={onAddProvider}><Icon.plus /> Add provider</button>
@@ -535,11 +642,13 @@ function ProviderDetails({
   hiddenProviders,
   onAddProvider,
   onRefresh,
+  quotaBusy,
 }: {
   providers: UsageProviderSummary[];
   hiddenProviders: string[];
   onAddProvider: () => void;
-  onRefresh: (providerId: string) => void;
+  onRefresh: (providerId: string) => void | Promise<void>;
+  quotaBusy: boolean;
 }) {
   return (
     <div className="usage-provider-view" data-settings-item="usage.providers">
@@ -565,7 +674,7 @@ function ProviderDetails({
                   <h3>{provider.label}</h3>
                   <p>{provider.snapshot?.accountLabel ?? provider.id}</p>
                 </div>
-                <span className={`usage-status-pill ${provider.stale ? "stale" : ""}`}><i />{provider.stale ? "Stale" : "Active"}</span>
+                <ProviderStatus provider={provider} />
               </header>
               <div className="usage-provider-detail-stats">
                 <div><span>Spend</span><strong>{formatMoney(provider.cost)}</strong></div>
@@ -582,7 +691,14 @@ function ProviderDetails({
                         <span>{quota.label}</span>
                         <strong>{fmtQuota(quota.used, quota.unit)} <small>/ {fmtQuota(quota.limit, quota.unit)}</small></strong>
                       </div>
-                      <span className="usage-provider-window-track">
+                      <span
+                        className="usage-provider-window-track"
+                        role="progressbar"
+                        aria-label={`${provider.label} ${quota.label} used`}
+                        aria-valuemin={0}
+                        aria-valuemax={100}
+                        aria-valuenow={Math.round(used * 100)}
+                      >
                         <i className={used >= .8 ? "warning" : ""} style={{ width: `${used * 100}%` }} />
                       </span>
                       <p>{pace ? paceText(pace, quota) : quota.resetsAt ? `Resets ${new Date(quota.resetsAt).toLocaleString()}` : "Live quota usage"}</p>
@@ -598,10 +714,16 @@ function ProviderDetails({
               </div>
               <footer>
                 <button type="button" className="small-btn" onClick={() => setProviderHidden(preferenceId, !hidden)}>
-                  {hidden ? "Show in summaries" : "Hide from summaries"}
+                  {hidden ? "Show in breakdowns" : "Hide from breakdowns"}
                 </button>
                 {provider.snapshot && (
-                  <button type="button" className="small-btn" onClick={() => onRefresh(provider.snapshot!.providerId)}>
+                  <button
+                    type="button"
+                    className="small-btn"
+                    disabled={quotaBusy}
+                    aria-label={`Refresh ${provider.label} quota feed`}
+                    onClick={() => void onRefresh(provider.snapshot!.providerId)}
+                  >
                     <Icon.refresh /> Refresh
                   </button>
                 )}
@@ -626,7 +748,14 @@ export function UsageDashboard(): ReactNode {
   const sessions = useStore((state) => state.sessions);
   const projectId = useStore((state) => state.activeProjectId);
   const projectSessions = sessions.filter((session) => session.projectId === projectId);
-  const { snapshots, reload, refresh } = useQuotaSnapshots();
+  const {
+    snapshots,
+    reload,
+    refresh,
+    refreshAll: refreshQuotaFeeds,
+    loading: quotaLoading,
+    error: quotaError,
+  } = useQuotaSnapshots();
   const prefs = useUsagePrefs();
   const [view, setView] = useState<DashboardView>("overview");
   const [layout, setLayout] = useState<DashboardLayout>("expanded");
@@ -639,6 +768,9 @@ export function UsageDashboard(): ReactNode {
   const visibleProviders = data.providers.filter(
     (provider) => !prefs.hiddenProviders.includes(providerPreferenceId(provider)),
   );
+  const visibleProviderIds = new Set(visibleProviders.map((provider) => provider.id));
+  const hiddenCount = data.providers.length - visibleProviders.length;
+  const allProvidersHidden = data.providers.length > 0 && visibleProviders.length === 0;
   const tokenSeries = aggregateSeries(data.chart.tokens, data.chart.labels.length);
   const costSeries = aggregateSeries(data.chart.cost, data.chart.labels.length);
   const sessionSeries = aggregateSeries(data.chart.requests, data.chart.labels.length);
@@ -650,15 +782,20 @@ export function UsageDashboard(): ReactNode {
   const staleFeeds = snapshots.length - freshFeeds;
   const averageSessionCost = data.totals.sessions > 0 ? data.totals.cost / data.totals.sessions : 0;
   const addProvider = () => window.dispatchEvent(new CustomEvent("polyth:settings-page", { detail: "models" }));
-  const refreshAll = () => {
+  const refreshAll = async () => {
+    if (refreshing || quotaLoading) return;
     setRefreshing(true);
-    if (snapshots.length === 0) reload();
-    for (const snapshot of snapshots) refresh(snapshot.providerId);
-    window.setTimeout(() => setRefreshing(false), 700);
+    await refreshQuotaFeeds();
+    setRefreshing(false);
   };
+  const quotaBusy = quotaLoading || refreshing;
 
   return (
-    <div className={`usage-dashboard usage-layout-${layout}`} data-settings-item="usage.dashboard">
+    <div
+      className={`usage-dashboard usage-layout-${layout}`}
+      data-settings-item="usage.dashboard"
+      aria-busy={quotaBusy}
+    >
       <section className="usage-dashboard-hero">
         <div className="usage-hero-mark"><Icon.usage /></div>
         <div>
@@ -666,28 +803,40 @@ export function UsageDashboard(): ReactNode {
           <h2>Understand the work behind every token.</h2>
           <p>Session totals come from Polyth’s event history. Provider limits are refreshed from connected quota feeds.</p>
         </div>
-        <div className="usage-hero-status">
-          <span className={staleFeeds > 0 ? "warning" : ""}><i />{freshFeeds} fresh feed{freshFeeds === 1 ? "" : "s"}</span>
+        <div className="usage-hero-status" aria-live="polite">
+          {quotaLoading ? (
+            <span className="loading"><Icon.refresh /> Loading quota feeds</span>
+          ) : quotaError ? (
+            <span className="error"><i /> Quota feeds unavailable</span>
+          ) : snapshots.length === 0 ? (
+            <span className="neutral"><i /> Session data only</span>
+          ) : (
+            <span className={staleFeeds > 0 ? "warning" : ""}>
+              <i />{staleFeeds > 0
+                ? `${freshFeeds}/${snapshots.length} feeds fresh`
+                : `${freshFeeds} fresh feed${freshFeeds === 1 ? "" : "s"}`}
+            </span>
+          )}
           <small>{formatRange(data.rangeStart, data.rangeEnd)}</small>
         </div>
       </section>
 
       <div className="usage-dashboard-toolbar">
-        <div className="usage-view-tabs" role="tablist" aria-label="Usage view">
-          <button type="button" role="tab" aria-selected={view === "overview"} className={view === "overview" ? "active" : ""} onClick={() => setView("overview")}>
+        <div className="usage-view-tabs" role="group" aria-label="Usage view">
+          <button type="button" aria-pressed={view === "overview"} className={view === "overview" ? "active" : ""} onClick={() => setView("overview")}>
             <Icon.widgets /> Overview
           </button>
-          <button type="button" role="tab" aria-selected={view === "providers"} className={view === "providers" ? "active" : ""} onClick={() => setView("providers")}>
+          <button type="button" aria-pressed={view === "providers"} className={view === "providers" ? "active" : ""} onClick={() => setView("providers")}>
             <Icon.list /> Providers
           </button>
         </div>
         <span className="usage-toolbar-spacer" />
-        <div className="usage-range-control" role="radiogroup" aria-label="Usage range">
+        <div className="usage-range-control" role="group" aria-label="Usage range">
           {([7, 30, 90] as const).map((days) => (
             <button
               type="button"
-              role="radio"
-              aria-checked={rangeDays === days}
+              aria-pressed={rangeDays === days}
+              aria-label={`${days} day range`}
               className={rangeDays === days ? "active" : ""}
               key={days}
               onClick={() => setRangeDays(days)}
@@ -696,23 +845,33 @@ export function UsageDashboard(): ReactNode {
             </button>
           ))}
         </div>
-        <div className="usage-layout-control" aria-label="Dashboard density">
-          <button type="button" className={layout === "expanded" ? "active" : ""} aria-pressed={layout === "expanded"} onClick={() => setLayout("expanded")} title="Expanded widgets">
+        <div className="usage-layout-control" role="group" aria-label="Dashboard density">
+          <button type="button" className={layout === "expanded" ? "active" : ""} aria-label="Expanded widgets" aria-pressed={layout === "expanded"} onClick={() => setLayout("expanded")} title="Expanded widgets">
             <Icon.widgets /><span>Expanded</span>
           </button>
-          <button type="button" className={layout === "compact" ? "active" : ""} aria-pressed={layout === "compact"} onClick={() => setLayout("compact")} title="Compact widgets">
+          <button type="button" className={layout === "compact" ? "active" : ""} aria-label="Compact widgets" aria-pressed={layout === "compact"} onClick={() => setLayout("compact")} title="Compact widgets">
             <Icon.list /><span>Compact</span>
           </button>
         </div>
         <button
           type="button"
-          className={`usage-refresh-button${refreshing ? " refreshing" : ""}`}
-          aria-label="Refresh provider usage"
-          onClick={refreshAll}
+          className={`usage-refresh-button${quotaBusy ? " refreshing" : ""}`}
+          aria-label={quotaBusy ? "Refreshing provider quota feeds" : "Refresh provider quota feeds"}
+          title={quotaBusy ? "Refreshing provider quota feeds" : "Refresh provider quota feeds"}
+          disabled={quotaBusy}
+          onClick={() => void refreshAll()}
         >
           <Icon.refresh />
         </button>
       </div>
+
+      {quotaError && (
+        <div className="usage-quota-alert" role="alert">
+          <Icon.usage />
+          <span><strong>Quota feeds could not be loaded.</strong> Session totals remain available. {quotaError}</span>
+          <button type="button" className="small-btn" disabled={quotaBusy} onClick={() => void reload()}>Retry</button>
+        </div>
+      )}
 
       {view === "overview" ? (
         <div className="usage-dashboard-content">
@@ -741,7 +900,7 @@ export function UsageDashboard(): ReactNode {
               trend={data.trends.sessions}
               icon="events"
               tone="var(--blue)"
-              detail={`${visibleProviders.length} provider${visibleProviders.length === 1 ? "" : "s"}`}
+              detail={`${visibleProviders.length} provider${visibleProviders.length === 1 ? "" : "s"} shown`}
               series={sessionSeries}
             />
             <StatCard
@@ -756,19 +915,26 @@ export function UsageDashboard(): ReactNode {
           </section>
 
           <section className="usage-primary-grid">
-            <UsageOverTime data={data} />
+            <UsageOverTime data={data} visibleProviderIds={visibleProviderIds} hiddenCount={hiddenCount} />
             <CostPulse data={data} />
           </section>
 
           <section className="usage-breakdown-grid">
-            <ProviderSpendDonut providers={visibleProviders} onViewProviders={() => setView("providers")} />
-            <ModelBreakdown models={data.models.filter((model) =>
-              visibleProviders.some((provider) => provider.id === model.providerId))} />
+            <ProviderSpendDonut
+              providers={visibleProviders}
+              hiddenSpend={data.providers.some((provider) =>
+                !visibleProviderIds.has(provider.id) && provider.cost > 0)}
+              onViewProviders={() => setView("providers")}
+            />
+            <ModelBreakdown
+              models={data.models.filter((model) => visibleProviderIds.has(model.providerId))}
+              hiddenActivity={data.models.some((model) => !visibleProviderIds.has(model.providerId))}
+            />
           </section>
 
-          <ProviderTable providers={visibleProviders} />
+          <ProviderTable providers={visibleProviders} allProvidersHidden={allProvidersHidden} />
           <UsageActionStrip
-            hiddenCount={data.providers.length - visibleProviders.length}
+            hiddenCount={hiddenCount}
             onProviders={() => setView("providers")}
             onAddProvider={addProvider}
           />
@@ -780,6 +946,7 @@ export function UsageDashboard(): ReactNode {
             hiddenProviders={prefs.hiddenProviders}
             onAddProvider={addProvider}
             onRefresh={refresh}
+            quotaBusy={quotaBusy}
           />
         </div>
       )}
