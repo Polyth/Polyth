@@ -1517,7 +1517,7 @@ export const en = {
   "settings.registry.whileTheAgentIsWorking": "While the agent is working",
   "settings.registry.workspaceButtonPlaces": "Workspace button places",
   "settings.registry.worktreeBehavior": "Worktree behavior",
-  "settings.sessionspage.appliedToModelsThatOfferThinkingVariants": "Applied to models that offer thinking variants.",
+  "settings.sessionspage.appliedToModelsThatOfferThinkingVariants": "Fallback for models without a saved thinking effort.",
   "settings.sessionspage.archiveEligibleSessions": "Archive eligible sessions",
   "settings.sessionspage.archiveEverySessionThatCurrentlyMeetsThe": "Archive every session that currently meets the retention rule.",
   "settings.sessionspage.archiving": "Archiving…",

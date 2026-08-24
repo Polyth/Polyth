@@ -4,13 +4,14 @@ import { copyText } from "../utils.ts";
 import { Icon } from "../icons.tsx";
 import { tr } from "../i18n/index.ts";
 
-export default function CopyButton({ text }: { text: string }) {
+export default function CopyButton({ text, label = tr("copybutton.copyToClipboard") }: { text: string; label?: string }) {
   const [done, setDone] = useState(false);
+  const actionLabel = done ? "Copied" : label;
   return (
     <button
       className="copy-btn"
-      title={tr("copybutton.copyToClipboard")}
-      aria-label={tr("copybutton.copyToClipboard")}
+      title={actionLabel}
+      aria-label={actionLabel}
       onClick={(e) => {
         e.stopPropagation();
         void copyText(text).then((ok) => {

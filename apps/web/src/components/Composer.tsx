@@ -89,6 +89,7 @@ import { Icon } from "../icons.tsx";
 import { useWorkspaceMode } from "../widgets/workspaceMode.ts";
 import ModelPicker, { modelContextLabel, modelMetaLine, modelSupportsThinking } from "./ModelPicker.tsx";
 import { resolveProjectModelDefault, useSessionDefaults } from "../sessionDefaults.ts";
+import { getModelThinking, setModelThinking } from "../thinkingPrefs.ts";
 import { roleKind, useRolePrefs } from "../rolePrefs.ts";
 import { useShellMode } from "../responsiveShell.ts";
 import { useViewportMetrics } from "../mobileViewport.ts";
@@ -817,7 +818,9 @@ export default function Composer({
       ? chatModels.find((candidate) =>
           candidate.providerID === selected.providerID && candidate.modelID === selected.modelID)
       : undefined;
-    const requestedThinking = cfgSent.thinking ?? sessionDefaults.defaultThinking;
+    const requestedThinking = cfgSent.thinking
+      ?? getModelThinking(selected)
+      ?? sessionDefaults.defaultThinking;
     const sentThinking = requestedThinking && selectedDescriptor?.variants?.includes(requestedThinking)
       ? requestedThinking
       : undefined;
@@ -1106,7 +1109,9 @@ export default function Composer({
       : chatModels[0];
   const pickComposerModel = (ref?: ModelRef) => {
     if (!ref) return;
-    updateCfg(withExplicitModel(cfg, ref));
+    // A pending effort belongs to the old model. The selected model's saved
+    // value is derived at send/render time, so never carry this one across.
+    updateCfg(withExplicitThinking(withExplicitModel(cfg, ref), undefined));
     noteModelUsed(`${ref.providerID}/${ref.modelID}`);
     if (activeProjectId) {
       void rememberProjectModelSelection(activeProjectId, ref).catch((error) => {
@@ -1192,6 +1197,16 @@ export default function Composer({
       ? chatModels.find((candidate) =>
           candidate.providerID === recommendedModel.providerID && candidate.modelID === recommendedModel.modelID)
       : undefined;
+  const requestedSelectedThinking = cfg.thinking
+    ?? getModelThinking(selectedModel)
+    ?? sessionDefaults.defaultThinking;
+  const selectedThinking = requestedSelectedThinking && selectedModel?.variants?.includes(requestedSelectedThinking)
+    ? requestedSelectedThinking
+    : undefined;
+  const pickThinking = (thinking: string | undefined) => {
+    if (selectedModel) setModelThinking(selectedModel, thinking);
+    updateCfg(withExplicitThinking(cfg, thinking));
+  };
   const activeAgent = cfg.agent ?? session?.agent ?? sessionDefaults.defaultAgent ?? chatAgents[0]?.name ?? "build";
   const autoApproveOn = session ? session.autoAccept === true : newSessionAutoApprove;
   const toggleAutoApprove = () => {
@@ -1339,8 +1354,8 @@ export default function Composer({
               <ThinkingSlider
                 className="composer-thinking-badge"
                 variants={thinkingVariants}
-                value={cfg.thinking}
-                onPick={(thinking) => updateCfg(withExplicitThinking(cfg, thinking || undefined))}
+                value={selectedThinking}
+                onPick={(thinking) => pickThinking(thinking || undefined)}
               />
             )}
             {chatAgents.length > 0 ? (
@@ -1485,8 +1500,8 @@ export default function Composer({
             <ThinkingSlider
               className="picker-thinking"
               variants={thinkingVariants}
-              value={cfg.thinking}
-              onPick={(thinking) => updateCfg(withExplicitThinking(cfg, thinking || undefined))}
+              value={selectedThinking}
+              onPick={(thinking) => pickThinking(thinking || undefined)}
             />
           )}
           {!simpleMode && ui.showTechnicalButtons && techOpen && (

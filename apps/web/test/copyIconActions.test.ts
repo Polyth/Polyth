@@ -8,8 +8,9 @@ test("copy and message actions are icon-only with hover and accessible names", a
     readFile(new URL("../src/components/Timeline.tsx", import.meta.url), "utf8"),
   ]);
 
-  assert.match(copy, /aria-label=\{tr\("copybutton\.copyToClipboard"\)\}/);
-  assert.match(copy, /title=\{tr\("copybutton\.copyToClipboard"\)\}/);
+  assert.match(copy, /label = tr\("copybutton\.copyToClipboard"\)/);
+  assert.match(copy, /aria-label=\{actionLabel\}/);
+  assert.match(copy, /title=\{actionLabel\}/);
   assert.match(copy, /<Icon\.(?:check|copy)/);
 
   for (const icon of ["copy", "fork", "rewind"]) {

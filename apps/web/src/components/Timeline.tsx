@@ -86,7 +86,8 @@ function Thinking({ m }: { m: AssistantMsg }) {
         onClick={(e) => { e.preventDefault(); setOpen((v) => !v); }}
         style={{ display: "flex", gap: 8, alignItems: "baseline" }}
       >
-        <span>{tr("timeline.thinking")}{m.finalized ? "" : "…"}</span>
+        <span className="reasoning-brain" aria-hidden="true" title={tr("timeline.thinking")}>🧠</span>
+        <span className="sr-only">{tr("timeline.thinking")}{m.finalized ? "" : "…"}</span>
         {!open && <span className="muted reasoning-preview">{preview}</span>}
       </summary>
       {open && (
@@ -661,15 +662,14 @@ function ShellOutput({ text }: { text: string }) {
   );
 }
 
-function ClampedPre({ cls, text, shell = false }: { cls: string; text: string; shell?: boolean }) {
+function ClampedPre({ cls, text, shell = false, maxLines = 24 }: { cls: string; text: string; shell?: boolean; maxLines?: number }) {
   const [full, setFull] = useState(false);
-  const long = text.split("\n").length > 24 || text.length > 2400;
+  const long = text.split("\n").length > maxLines || text.length > 2400;
   return (
     <div className="copy-wrap">
-      <pre className={`${cls}${shell ? " shell-output" : ""}${full ? " full" : ""}`}>
+      <pre className={`${cls}${shell ? " shell-output" : ""}${maxLines === 5 ? " clamp-five" : ""}${full ? " full" : ""}`}>
         {shell ? <ShellOutput text={text} /> : text}
       </pre>
-      <CopyButton text={text} />
       {long && (
         <button className="small-btn show-all" onClick={() => setFull((v) => !v)}>
           {full ? tr("timeline.collapse") : tr("timeline.showAll")}
@@ -679,14 +679,53 @@ function ClampedPre({ cls, text, shell = false }: { cls: string; text: string; s
   );
 }
 
+function shellCommandText(input: ToolMsg["input"]): string {
+  return typeof input.command === "string" ? input.command : JSON.stringify(input, null, 2);
+}
+
+function ToolStatus({ m }: { m: ToolMsg }) {
+  const [now, setNow] = useState(() => Date.now());
+  const pending = m.status === "pending";
+  useEffect(() => {
+    if (!pending) return;
+    const timer = window.setInterval(() => setNow(Date.now()), 500);
+    return () => window.clearInterval(timer);
+  }, [pending]);
+
+  const elapsed = fmtMs(Math.max(0, (m.finishTime ?? now) - m.time));
+  if (pending) {
+    return <span className="tool-status running"><span className="spinner" aria-hidden="true" />Running · {elapsed}</span>;
+  }
+  if (m.status === "error") {
+    return <span className="tool-status error"><span aria-hidden="true">×</span> Failed · {elapsed}</span>;
+  }
+  return <span className="tool-status done"><span aria-hidden="true">✓</span> Completed · {elapsed}</span>;
+}
+
+function ToolSection({ label, text, cls, shell = false, maxLines }: {
+  label: string;
+  text: string;
+  cls: string;
+  shell?: boolean;
+  maxLines?: number;
+}) {
+  return (
+    <div className={`tool-section${label === "Error" ? " error" : ""}`}>
+      <div className="tool-section-head">
+        <div className="tool-label">{label}</div>
+        <CopyButton text={text} label={`Copy ${label.toLowerCase()}`} />
+      </div>
+      <ClampedPre cls={cls} text={text} shell={shell} maxLines={maxLines} />
+    </div>
+  );
+}
+
 export function shellCardCopyText(
   input: ToolMsg["input"],
   output?: string,
   error?: string,
 ): string {
-  const command = typeof input.command === "string"
-    ? input.command
-    : JSON.stringify(input, null, 2);
+  const command = shellCommandText(input);
   return [command, output, error].filter((part): part is string => typeof part === "string" && part.length > 0).join("\n\n");
 }
 
@@ -696,6 +735,7 @@ function ToolCard({ m }: { m: ToolMsg }) {
   const inputJson = JSON.stringify(m.input, null, 2);
   const summary = toolSummary(m.input);
   const shell = /^(bash|shell|shell_command|run_shell)$/i.test(m.tool);
+  const command = shellCommandText(m.input);
   useEffect(() => setOpen(!done), [done]);
   return (
     <div className={`tool-card${open ? " open" : ""}${shell ? " shell-command-card" : ""}${m.status === "error" ? " error" : ""}`}>
@@ -707,41 +747,26 @@ function ToolCard({ m }: { m: ToolMsg }) {
           onClick={() => setOpen((value) => !value)}
         >
           <span className="tool-chevron" aria-hidden="true"><Icon.chevronRight /></span>
-          <span className="tool-icon">
-            {m.status === "pending" ? (
-              <span className="spinner" />
-            ) : m.status === "done" ? (
-              <span className="ok">✓</span>
-            ) : (
-              <span className="err">✕</span>
-            )}
-          </span>
+          <span className="tool-icon" aria-hidden="true">{shell ? <Icon.term /> : <Icon.events />}</span>
           <span className="tool-name">{shell ? tr("timeline.shellCommand") : m.title || m.tool}</span>
-          {summary && <span className="mono muted" style={{ fontSize: "calc(11px * var(--ui-font-scale, 1))", flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{summary}</span>}
-          <span className="tool-dur">{m.finishTime !== undefined ? fmtMs(m.finishTime - m.time) : tr("timeline.running")}</span>
+          {summary && <span className="tool-preview">{summary}</span>}
+          <ToolStatus m={m} />
         </button>
         {shell && (
           <span className="tool-card-copy">
-            <CopyButton text={shellCardCopyText(m.input, m.output, m.error)} />
+            <CopyButton text={command} label="Copy command" />
           </span>
         )}
       </div>
       {open && <div className="tool-body">
-        <div className="tool-section">
-            <div className="tool-label">{shell ? tr("timeline.command") : tr("timeline.valueInput", { tool: m.tool })}</div>
-          <ClampedPre cls="json" text={inputJson} />
-        </div>
+        <ToolSection label={shell ? "Command" : `${m.tool} input`} text={shell ? command : inputJson} cls={shell ? "tool-command" : "json"} maxLines={shell ? 5 : undefined} />
         {m.error !== undefined && (
-          <div className="tool-section error">
-            <div className="tool-label">{tr("common.error")}</div>
-            <ClampedPre cls="json" text={m.error} />
-          </div>
+          <ToolSection label="Error" text={m.error} cls="out" shell={shell} />
         )}
         {m.output !== undefined && (
-          <div className="tool-section">
-            <div className="tool-label">{tr("timeline.output")}</div>
-            <ClampedPre cls="out" text={m.output} shell={shell} />
-          </div>
+          m.output.trim()
+            ? <ToolSection label="Output" text={m.output} cls="out" shell={shell} />
+            : <div className="tool-section"><div className="tool-label">Output</div><div className="tool-empty">No output</div></div>
         )}
       </div>}
     </div>

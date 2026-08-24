@@ -347,7 +347,7 @@ test("reasoning effort stays reachable on phones, beside the model name", async 
   );
   assert.ok(cluster.includes("modelSupportsThinking(selectedModel)"), "it only exists for models that report variants");
   assert.ok(cluster.includes("<ThinkingSlider"), "thinking uses a discrete slider, not a picker");
-  assert.ok(cluster.includes("withExplicitThinking(cfg, thinking || undefined)"), "slider changes route through the composer config");
+  assert.ok(cluster.includes("pickThinking(thinking || undefined)"), "slider saves the effort and updates the composer config");
   assert.ok(composer.includes("const THINKING_LABELS"), "backend variant strings get display labels");
 
   // A tap on any header control blurs the input; collapsing on that blur would

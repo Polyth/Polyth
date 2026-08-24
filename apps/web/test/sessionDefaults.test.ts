@@ -6,6 +6,11 @@ import {
   resolveProjectModelDefault,
   resolveSessionDefaultModel,
 } from "../src/sessionDefaults.ts";
+import {
+  parseThinkingPrefs,
+  serializeThinkingPrefs,
+  thinkingModelKey,
+} from "../src/thinkingPrefs.ts";
 
 const project = { providerID: "anthropic", modelID: "claude-project" };
 const global = { providerID: "openai", modelID: "gpt-global" };
@@ -45,4 +50,18 @@ test("session defaults parser accepts only complete model references", () => {
   assert.deepEqual(parseSessionDefaults("not json"), {});
   assert.deepEqual(parseSessionDefaults('{"defaultModel":{"providerID":"openai"}}'), {});
   assert.deepEqual(parseSessionDefaults('{"defaultModel":{"providerID":"","modelID":"gpt"}}'), {});
+});
+
+test("thinking preferences are model-scoped, corruption-safe, and deterministic", () => {
+  const gpt = { providerID: "openai", modelID: "gpt-5" };
+  const claude = { providerID: "anthropic", modelID: "claude-4" };
+  assert.equal(thinkingModelKey(gpt), "openai/gpt-5");
+  assert.deepEqual(parseThinkingPrefs('{"openai/gpt-5":"high","bad":3,"":"low"}'), {
+    "openai/gpt-5": "high",
+  });
+  assert.deepEqual(parseThinkingPrefs("not json"), {});
+  assert.equal(
+    serializeThinkingPrefs({ [thinkingModelKey(gpt)]: "high", [thinkingModelKey(claude)]: "low" }),
+    '{"anthropic/claude-4":"low","openai/gpt-5":"high"}',
+  );
 });
