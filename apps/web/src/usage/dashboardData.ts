@@ -80,6 +80,11 @@ const sessionTokens = (session: SessionProjection): number =>
 const sessionCost = (session: SessionProjection): number =>
   finiteNonNegative(session.costTotal);
 
+const sessionActivityAt = (session: SessionProjection): number =>
+  typeof session.lastTurnAt === "number" && Number.isFinite(session.lastTurnAt)
+    ? session.lastTurnAt
+    : session.updatedAt;
+
 const canonicalProviderId = (providerId: string): string => {
   const normalized = providerId.trim().toLowerCase();
   if (normalized === "claude" || normalized === "claude-code") return "anthropic";
@@ -166,8 +171,14 @@ export function buildUsageDashboardData(
   const rangeEnd = now;
   const rangeStart = now - rangeDays * DAY_MS;
   const previousStart = rangeStart - rangeDays * DAY_MS;
-  const current = sessions.filter((session) => session.updatedAt >= rangeStart && session.updatedAt <= rangeEnd);
-  const previous = sessions.filter((session) => session.updatedAt >= previousStart && session.updatedAt < rangeStart);
+  const current = sessions.filter((session) => {
+    const activityAt = sessionActivityAt(session);
+    return activityAt >= rangeStart && activityAt <= rangeEnd;
+  });
+  const previous = sessions.filter((session) => {
+    const activityAt = sessionActivityAt(session);
+    return activityAt >= previousStart && activityAt < rangeStart;
+  });
   const totals = sumSessions(current);
   const previousTotals = sumSessions(previous);
 
@@ -249,7 +260,7 @@ export function buildUsageDashboardData(
           if (sessionProviderId(session) !== provider.id) continue;
           const index = Math.min(
             bucketCount - 1,
-            Math.max(0, Math.floor((session.updatedAt - rangeStart) / bucketMs)),
+            Math.max(0, Math.floor((sessionActivityAt(session) - rangeStart) / bucketMs)),
           );
           values[index] = (values[index] ?? 0) + metricValue(session, metric);
         }

@@ -92,8 +92,8 @@ function TrendBadge({ trend, compact = false }: { trend: UsageTrend | null; comp
   const rounded = Math.round(Math.abs(trend.percent));
   const direction = trend.direction === "up" ? "↑" : trend.direction === "down" ? "↓" : "→";
   const accessibleLabel = trend.direction === "flat"
-    ? "No change from the previous period"
-    : `${rounded} percent ${trend.direction === "up" ? "increase" : "decrease"} from the previous period`;
+    ? "No change from the previous range"
+    : `${rounded} percent ${trend.direction === "up" ? "increase" : "decrease"} from the previous range`;
   return (
     <span
       className={`usage-trend usage-trend-${trend.direction}${compact ? " compact" : ""}`}
@@ -101,7 +101,7 @@ function TrendBadge({ trend, compact = false }: { trend: UsageTrend | null; comp
     >
       <span aria-hidden="true">
         {direction} {trend.direction === "flat" ? "0%" : `${rounded}%`}
-        {!compact && " from previous"}
+        {!compact && " vs prior range"}
       </span>
     </span>
   );
@@ -253,10 +253,10 @@ function CohortChart({
   return (
     <div className="usage-cohort-chart" ref={chartRef}>
       <svg viewBox={`0 0 ${width} ${height}`} role="img">
-        <title>{`${metricLabel} from full session totals by latest-activity cohort`}</title>
+        <title>{`${metricLabel} from full session totals by latest-turn cohort`}</title>
         <desc>
           {populated
-            ? `Each session appears once, in the date bucket containing its latest activity. The ${metricLabel.toLowerCase()} values are cumulative session totals, not usage generated during that bucket. Detailed values follow the chart.`
+            ? `Each session appears once, in the date bucket containing its latest turn. The ${metricLabel.toLowerCase()} values are cumulative session totals, not usage generated during that bucket. Detailed values follow the chart.`
             : `${emptyTitle}. ${emptyText}`}
         </desc>
         {[0, .25, .5, .75, 1].map((fraction) => {
@@ -290,7 +290,7 @@ function CohortChart({
                 rx="2"
                 fill={seriesAccent(seriesIndex)}
               >
-                <title>{`${item.label}: ${formatAxis(value)} from sessions last active ${label}`}</title>
+                <title>{`${item.label}: ${formatAxis(value)} from sessions with a latest turn in ${label}`}</title>
               </rect>
             );
           });
@@ -313,7 +313,7 @@ function CohortChart({
       </svg>
       {populated && (
         <table className="sr-only">
-          <caption>{`${metricLabel} from full session totals by latest-activity cohort and provider`}</caption>
+          <caption>{`${metricLabel} from full session totals by latest-turn cohort and provider`}</caption>
           <thead>
             <tr>
               <th scope="col">Provider</th>
@@ -343,7 +343,7 @@ function CohortChart({
   );
 }
 
-function UsageOverTime({
+function SessionCohorts({
   data,
   visibleProviderIds,
   hiddenCount,
@@ -361,7 +361,7 @@ function UsageOverTime({
   return (
     <article className="usage-dashboard-card usage-time-card">
       <SectionHeading
-        title="Session cohorts by latest activity"
+        title="Session cohorts by latest turn"
         description={`${data.chart.labels.length} equal rolling buckets · ${Math.round(data.chart.bucketHours)} hours each`}
         aside={(
           <div className="usage-metric-toggle" role="group" aria-label="Chart metric">
@@ -383,13 +383,13 @@ function UsageOverTime({
         labels={data.chart.labels}
         series={series}
         metric={metric}
-        emptyTitle={hiddenActivity ? "All activity is hidden" : "No usage in this period"}
+        emptyTitle={hiddenActivity ? "All activity is hidden" : "No sessions last active in this range"}
         emptyText={hiddenActivity
           ? "Show a provider to include its activity in breakdowns."
           : "Cohorts fill in as sessions record tokens and cost."}
       />
       <p className="usage-chart-method">
-        Each session appears once in the bucket containing its latest activity. Token and cost
+        Each session appears once in the bucket containing its latest turn. Token and cost
         values are that session’s complete recorded totals—not usage generated during the bucket.
       </p>
       <div className="usage-chart-legend">
@@ -508,7 +508,7 @@ function ModelBreakdown({
     <article className="usage-dashboard-card usage-model-card">
       <SectionHeading
         title="Model breakdown"
-        description="Highest-use models in this period"
+        description="Highest-use models among sessions last active in range"
         aside={(
           <div className="usage-metric-toggle" role="group" aria-label="Model breakdown metric">
             {(["tokens", "cost"] as const).map((item) => (
@@ -568,7 +568,7 @@ function CostPulse({ data }: { data: ReturnType<typeof buildUsageDashboardData> 
         <div><span>Per session</span><strong>{formatMoney(averageSession)}</strong></div>
         <div><span>Per 1K tokens</span><strong>{fmtCost(data.totals.averageCostPerThousand)}</strong></div>
       </div>
-      <p>Sessions are selected by latest activity. Values are their full recorded totals, not daily billing or a provider invoice.</p>
+      <p>Sessions are selected by latest turn. Values are their full recorded totals, not daily billing or a provider invoice.</p>
     </article>
   );
 }
@@ -662,7 +662,7 @@ function ProviderTable({
               <tr className="usage-provider-empty-row">
                 <td colSpan={6}>{allProvidersHidden
                   ? "All providers are hidden from breakdowns."
-                  : "No provider activity in this period."}</td>
+                  : "No sessions last active in this range."}</td>
               </tr>
             )}
           </tbody>
@@ -870,7 +870,7 @@ export function UsageDashboard(): ReactNode {
         <div>
           <span className="usage-eyebrow">Workspace telemetry</span>
           <h2>Understand the sessions behind every token.</h2>
-          <p>Ranges use each session’s latest activity and include its full recorded totals. Provider limits come from connected quota feeds.</p>
+          <p>Ranges use each session’s latest turn and include its full recorded totals. Provider limits come from connected quota feeds.</p>
         </div>
         <div className="usage-hero-status" aria-live="polite">
           {quotaLoading ? (
@@ -978,13 +978,13 @@ export function UsageDashboard(): ReactNode {
               trend={data.trends.averageCostPerThousand}
               icon="compare"
               tone="var(--amber)"
-              detail={`${rangeDays}-day average`}
+              detail={`${rangeDays}-day cohort ratio`}
               series={averageSeries}
             />
           </section>
 
           <section className="usage-primary-grid">
-            <UsageOverTime data={data} visibleProviderIds={visibleProviderIds} hiddenCount={hiddenCount} />
+            <SessionCohorts data={data} visibleProviderIds={visibleProviderIds} hiddenCount={hiddenCount} />
             <CostPulse data={data} />
           </section>
 

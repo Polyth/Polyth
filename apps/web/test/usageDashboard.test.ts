@@ -102,7 +102,7 @@ test("dashboard keeps configured providers visible without fabricating activity"
   }]);
 });
 
-test("dashboard cohorts assign each cumulative session total to latest activity once", () => {
+test("dashboard cohorts assign each cumulative session total to latest turn once", () => {
   const dashboard = buildUsageDashboardData([
     session("older", "openai", now - 5.5 * DAY_MS, 1_000, .01),
     session("newer", "openai", now - .5 * DAY_MS, 4_000, .04),
@@ -114,6 +114,17 @@ test("dashboard cohorts assign each cumulative session total to latest activity 
   assert.equal(tokens.reduce((sum, value) => sum + value, 0), 5_000);
   assert.equal(costs.reduce((sum, value) => sum + value, 0), .05);
   assert.ok(dashboard.chart.labels.every((label) => label.length > 0));
+});
+
+test("dashboard uses latest turn time instead of later metadata updates", () => {
+  const metadataUpdated = session("metadata-update", "openai", now - .5 * DAY_MS, 2_000, .02);
+  metadataUpdated.lastTurnAt = now - 8 * DAY_MS;
+
+  const dashboard = buildUsageDashboardData([metadataUpdated], [], 7, now);
+  assert.equal(dashboard.totals.sessions, 0);
+  assert.equal(dashboard.providers[0]?.sessions, 0);
+  assert.equal(dashboard.providers[0]?.trends.sessions?.direction, "down");
+  assert.deepEqual(dashboard.chart.sessions, []);
 });
 
 test("dashboard merges provider aliases used by sessions and quota adapters", () => {

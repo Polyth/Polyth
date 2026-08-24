@@ -80,12 +80,12 @@ test("Usage settings keeps the Polyth shell and offers rich dashboard views", as
   assert.match(source, /function CostPulse/);
   assert.match(source, /aria-label="Dashboard density"/);
   assert.match(source, /setUsageDashboardPrefs/);
-  assert.match(source, /Session cohorts by latest activity/);
+  assert.match(source, /Session cohorts by latest turn/);
   assert.match(source, /complete recorded totals—not usage generated during the bucket/);
   assert.match(source, /<table className="sr-only">/);
   assert.match(source, /role="progressbar"/);
   assert.match(source, /className="usage-quota-alert" role="alert"/);
-  assert.match(source, /Ranges use each session’s latest activity and include its full recorded totals/);
+  assert.match(source, /Ranges use each session’s latest turn and include its full recorded totals/);
   assert.match(source, /new ResizeObserver/);
   assert.doesNotMatch(source, /role="(?:tab|radio)"/);
   assert.doesNotMatch(source, /usage-dashboard-sidebar/);
