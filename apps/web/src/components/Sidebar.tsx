@@ -618,6 +618,10 @@ export default function Sidebar() {
             context={{ projectId: activeProjectId, sessionId: activeSessionId, expanded }}
           />
         </div>
+        <SlotHost
+          slot="sidebar.footer"
+          context={{ projectId: activeProjectId, sessionId: activeSessionId, expanded }}
+        />
         </>)}
         {!compact && !collapsed && (
           <div

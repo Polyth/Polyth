@@ -21,6 +21,12 @@ import type {
   ModelRef,
   MultirunDto,
   NotificationRecord,
+  OpenCodeApplyRestartResponseDto,
+  OpenCodePendingResponseDto,
+  OpenCodePluginImportRequestDto,
+  OpenCodePluginImportResponseDto,
+  OpenCodePluginListResponseDto,
+  OpenCodePluginRemoveResponseDto,
   PackageDescriptorDto,
   PreviewState,
   SystemInfoDto,
@@ -194,6 +200,12 @@ function json(method: string, body?: unknown): RequestInit {
     body: body === undefined ? undefined : JSON.stringify(body),
   };
 }
+
+const pendingMutation = <T>(request: Promise<T>): Promise<T> =>
+  request.then((value) => {
+    if (typeof window !== "undefined") window.dispatchEvent(new Event("polyth:opencode-pending"));
+    return value;
+  });
 
 export interface Health {
   ok: boolean;
@@ -620,10 +632,10 @@ export const api = {
   systemInfo: () => jfetch<SystemInfoDto>("/api/system/info"),
   mcpList: () => jfetch<McpServerDto[]>("/api/mcp/servers").catch((): McpServerDto[] => []),
   mcpCreate: (input: { name: string; transport: McpTransport; secrets?: Record<string, string>; enabled?: boolean }) =>
-    jfetch<McpServerDto>("/api/mcp/servers", json("POST", input)),
+    pendingMutation(jfetch<McpServerDto>("/api/mcp/servers", json("POST", input))),
   mcpUpdate: (id: string, patch: { name?: string; transport?: McpTransport; secrets?: Record<string, string>; enabled?: boolean }, expectedRevision: number) =>
-    jfetch<McpServerDto>(`/api/mcp/servers/${encodeURIComponent(id)}`, json("PATCH", { ...patch, expectedRevision })),
-  mcpRemove: (id: string) => jfetch<{ ok: boolean }>(`/api/mcp/servers/${encodeURIComponent(id)}`, { method: "DELETE" }),
+    pendingMutation(jfetch<McpServerDto>(`/api/mcp/servers/${encodeURIComponent(id)}`, json("PATCH", { ...patch, expectedRevision }))),
+  mcpRemove: (id: string) => pendingMutation(jfetch<{ ok: boolean }>(`/api/mcp/servers/${encodeURIComponent(id)}`, { method: "DELETE" })),
   mcpTest: (id: string) => jfetch<{ ok: boolean; message: string }>(`/api/mcp/servers/${encodeURIComponent(id)}/test`, json("POST", {})),
   /** F10: spec-named probe — same reachability check, stores status/lastError. */
   mcpProbe: (id: string) => jfetch<{ ok: boolean; message: string }>(`/api/mcp/servers/${encodeURIComponent(id)}/probe`, json("POST", {})),
@@ -660,13 +672,24 @@ export const api = {
   // ---- provider/model visibility (Providers & Models settings) --------------
   listProviders: () => jfetch<ProviderCatalogDto[]>("/api/providers"),
   setProviderEnabled: (id: string, enabled: boolean) =>
-    jfetch<VisibilityStateDto>(`/api/providers/${encodeURIComponent(id)}/enabled`, json("POST", { enabled })),
+    pendingMutation(jfetch<VisibilityStateDto>(`/api/providers/${encodeURIComponent(id)}/enabled`, json("POST", { enabled }))),
   setModelEnabled: (key: string, enabled: boolean) =>
-    jfetch<VisibilityStateDto>(`/api/models/enabled`, json("POST", { key, enabled })),
+    pendingMutation(jfetch<VisibilityStateDto>(`/api/models/enabled`, json("POST", { key, enabled }))),
   saveRole: (name: string, input: { prompt?: string; model?: ModelRef; mode: AgentDescriptor["mode"] }) =>
-    jfetch<AgentDescriptor>(`/api/settings/roles/${encodeURIComponent(name)}`, json("PUT", input)),
-  opencodePlugins: () =>
-    jfetch<{ plugins: string[] }>("/api/plugins/opencode").catch((): { plugins: string[] } => ({ plugins: [] })),
+    pendingMutation(jfetch<AgentDescriptor>(`/api/settings/roles/${encodeURIComponent(name)}`, json("PUT", input))),
+  opencodePluginsList: () =>
+    jfetch<OpenCodePluginListResponseDto>("/api/plugins/opencode"),
+  opencodePluginsImport: (input: OpenCodePluginImportRequestDto) =>
+    pendingMutation(jfetch<OpenCodePluginImportResponseDto>("/api/plugins/opencode/import", json("POST", input))),
+  opencodePluginRemove: (spec: string) =>
+    pendingMutation(jfetch<OpenCodePluginRemoveResponseDto>(
+      `/api/plugins/opencode/${encodeURIComponent(spec)}`,
+      { method: "DELETE" },
+    )),
+  opencodePending: () =>
+    jfetch<OpenCodePendingResponseDto>("/api/opencode/pending"),
+  opencodeApplyRestart: () =>
+    jfetch<OpenCodeApplyRestartResponseDto>("/api/opencode/apply-restart", json("POST", {})),
 
   // ---- host directory browsing (folder picker; localhost-only route) --------
   browseHost: (path?: string, hidden?: boolean) =>
