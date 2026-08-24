@@ -188,13 +188,13 @@ test("widget heights support tall canvases up to the grid row limit", () => {
   assert.deepEqual(layout.widgets["core.chat"]?.size, { w: 12, h: MAX_GRID_ROWS });
 });
 
-test("persisted retired New session widget is removed from header placements", () => {
+test("persisted retired shell widgets are removed from header placements", () => {
   const parsed = parseWidgetLayout(JSON.stringify({
     version: 1,
     audience: "standard",
     zones: { header: [], left: [], main: [], right: [], bottom: [], floating: [] },
     slotPlacements: {
-      "app.header.actions": ["shell.new-session", "sample.search"],
+      "app.header.actions": ["shell.new-session", "terminal.open-action", "sample.search"],
     },
     widgets: {
       "shell.new-session": {
@@ -204,6 +204,14 @@ test("persisted retired New session widget is removed from header placements", (
         definitionId: "shell.new-session",
         pluginId: "shell-actions",
         title: "New session",
+      },
+      "terminal.open-action": {
+        visible: true,
+        size: { w: 1, h: 1 },
+        position: { x: 0, y: 0 },
+        definitionId: "terminal.open-action",
+        pluginId: "terminal",
+        title: "Open Terminal",
       },
       "sample.search": {
         visible: true,
@@ -219,6 +227,7 @@ test("persisted retired New session widget is removed from header placements", (
   }]);
 
   assert.equal("shell.new-session" in parsed.widgets, false);
+  assert.equal("terminal.open-action" in parsed.widgets, false);
   assert.deepEqual(parsed.slotPlacements["app.header.actions"], ["sample.search"]);
 });
 
@@ -368,18 +377,18 @@ test("layouts persist independently under project-specific keys", () => {
   });
 
   ensureWidgets([{
-    id: "terminal.open-action",
-    pluginId: "terminal",
+    id: "shell.search",
+    pluginId: "shell-actions",
     kind: "mini-widget",
     defaultSlot: "app.header.actions",
     defaultVisible: true,
   }]);
   activateProject("layout-project-alpha");
-  assert.equal(getWidgetLayout().widgets["terminal.open-action"]?.visible, true);
+  assert.equal(getWidgetLayout().widgets["shell.search"]?.visible, true);
   assert.deepEqual(
-    getWidgetLayout().slotPlacements["app.header.actions"]?.includes("terminal.open-action"),
+    getWidgetLayout().slotPlacements["app.header.actions"]?.includes("shell.search"),
     true,
-    "registered toolbar actions survive the first project activation",
+    "registered mini-widget actions survive the first project activation",
   );
   updateWidgetLayout((current) => ({
     ...current,

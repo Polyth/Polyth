@@ -81,7 +81,11 @@ export const MAX_GRID_ROWS = 50;
 /** Removed shell actions stay retired even when an older persisted layout
  * still describes them as visible. This is a migration deny-list, not a
  * second placement system. */
-const RETIRED_WIDGET_IDS = new Set(["shell.new-session", "core.composer"]);
+const RETIRED_WIDGET_IDS = new Set([
+  "shell.new-session",
+  "core.composer",
+  "terminal.open-action",
+]);
 export const WIDGET_ZONE_SLOTS: Record<WidgetZone, UiSlot> = {
   header: "workspace.header",
   left: "workspace.left",

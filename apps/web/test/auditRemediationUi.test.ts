@@ -113,7 +113,7 @@ async function mounted(component: ReactNode) {
   };
 }
 
-test("header and right rail expose Terminal after project activation", async () => {
+test("header primary rail exposes a permanent Terminal toggle after project activation", async () => {
   await act(async () => {
     activateProject("audit-project");
     setSessions("audit-project", [{
@@ -134,7 +134,7 @@ test("header and right rail expose Terminal after project activation", async () 
     const history = [...header.container.querySelectorAll<HTMLButtonElement>("button")]
       .find((button) => button.textContent?.trim() === "History");
     const terminal = header.container.querySelector<HTMLButtonElement>(
-      '.header-action[aria-label="Open Terminal (Ctrl+`)"]',
+      '.view-switcher .view-icon[aria-label="Open Terminal (Ctrl+`)"]',
     );
     const terminalRail = rail.container.querySelector<HTMLButtonElement>(
       '.rail-icon[data-pane-launcher="terminal"]',
@@ -142,6 +142,18 @@ test("header and right rail expose Terminal after project activation", async () 
     assert.ok(search && history && terminal);
     assert.equal(terminal.title, "Open Terminal (Ctrl+`)");
     assert.equal(terminalRail?.title, "Open Terminal (Ctrl+`)");
+    assert.deepEqual(
+      [...header.container.querySelectorAll<HTMLButtonElement>(".view-switcher .view-icon")]
+        .map((button) => button.getAttribute("aria-label")),
+      ["Chat", "Project files", "Open Terminal (Ctrl+`)", "Preview", "Goals & progress"],
+    );
+
+    await act(async () => { terminal.click(); });
+    assert.equal(getState().railPlugin, "terminal");
+    assert.equal(terminal.getAttribute("aria-pressed"), "true");
+    await act(async () => { terminal.click(); });
+    assert.equal(getState().railPlugin, null);
+    assert.equal(terminal.getAttribute("aria-pressed"), "false");
 
     await act(async () => { search.click(); });
     assert.equal(getState().overlay, "palette");

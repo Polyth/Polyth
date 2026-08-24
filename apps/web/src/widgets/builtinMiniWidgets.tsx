@@ -1,15 +1,12 @@
 import { useState } from "react";
-import { formatCombo } from "@polyth/hotkeys";
 import { api } from "../api.ts";
 import { Icon } from "../icons.tsx";
-import { COMPOSER_INPUT_SELECTOR, openWorkspacePane, setOverlay, setUiError, useStore } from "../store.ts";
+import { COMPOSER_INPUT_SELECTOR, setOverlay, setUiError, useStore } from "../store.ts";
 import { friendlyError } from "../settings.ts";
 import { GoalAttachForm } from "../components/GoalStrip.tsx";
 import { requestComposerReplace } from "../composerInsert.ts";
 import { announce } from "../components/a11y/live.tsx";
 import { defineWidgetPlugin, registerWidgetPlugin } from "./catalog.ts";
-import { MOD } from "../format.ts";
-import { useKeymap } from "../hotkeys.ts";
 
 const SHELL_ACTION_SLOTS = [
   "app.header.actions",
@@ -104,22 +101,6 @@ function AutoApproveAction({ context }: { context: Record<string, unknown> }) {
       onClick={toggle}
     >
       <Icon.shield /><span>Auto Approve</span>
-    </button>
-  );
-}
-
-function TerminalAction() {
-  const keymap = useKeymap();
-  const shortcut = formatCombo(keymap.viewTerminal, MOD === "⌘");
-  const label = `Open Terminal (${shortcut})`;
-  return (
-    <button
-      className="header-action"
-      title={label}
-      aria-label={label}
-      onClick={() => openWorkspacePane("terminal")}
-    >
-      <Icon.term /><span>Terminal</span>
     </button>
   );
 }
@@ -241,30 +222,10 @@ const SHELL_ACTIONS_PLUGIN = defineWidgetPlugin({
   ],
 });
 
-const TERMINAL_ACTIONS_PLUGIN = defineWidgetPlugin({
-  id: "terminal",
-  name: "Terminal",
-  widgets: [{
-    id: "terminal.open-action",
-    title: "Open Terminal",
-    description: "Open the project terminal from the application toolbar.",
-    kind: "mini-widget",
-    defaultSlot: "app.header.actions",
-    supportedSlots: SHELL_ACTION_SLOTS,
-    defaultVisible: true,
-    defaultSize: { w: 1, h: 1 },
-    resizable: false,
-    audience: "simple",
-    order: 15,
-    render: () => <TerminalAction />,
-  }],
-});
-
 let installed = false;
 
 export function installBuiltinMiniWidgets(): void {
   if (installed) return;
   installed = true;
   registerWidgetPlugin(SHELL_ACTIONS_PLUGIN);
-  registerWidgetPlugin(TERMINAL_ACTIONS_PLUGIN);
 }

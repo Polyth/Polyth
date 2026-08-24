@@ -48,13 +48,11 @@ test("feature-owned Git and Terminal widgets contribute through the catalog slot
   }
 });
 
-test("Terminal contributes a default top-toolbar launcher through the widget registry", () => {
-  const action = listWidgets().find((widget) => widget.id === "terminal.open-action");
-  assert.equal(action?.pluginId, "terminal");
-  assert.equal(action?.title, "Open Terminal");
-  assert.equal(action?.defaultSlot, "app.header.actions");
-  assert.equal(action?.defaultVisible, true);
-  assert.equal(action?.kind, "mini-widget");
+test("Terminal header launcher is not dependent on the configurable widget registry", () => {
+  assert.equal(listWidgets().some((widget) => widget.id === "terminal.open-action"), false);
+  const search = listWidgets().find((widget) => widget.id === "shell.search");
+  assert.equal(search?.defaultSlot, "app.header.actions");
+  assert.equal(search?.kind, "mini-widget");
 });
 
 test("Usage plugin owns all package-declared usage widgets", () => {
