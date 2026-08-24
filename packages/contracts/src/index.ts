@@ -696,6 +696,52 @@ export interface PackageDescriptorDto {
   hasSettings: boolean;
 }
 
+// ------------------------------------------------ package onboarding tours
+
+/** Visual for a tour step: either a real screenshot (`kind: "image"` + `src`)
+ * or a named decorative pattern (`kind: "pattern"` + `pattern`) the web app
+ * draws itself, so tours need no bundled assets. */
+export interface PackageOnboardingMedia {
+  kind: "image" | "pattern";
+  /** Image URL, required when kind is "image". */
+  src?: string;
+  /** Pattern key (e.g. "branches", "waveform", "tiles", "orbit", "rays"),
+   * used when kind is "pattern". Unknown keys fall back to a typographic
+   * treatment of the tour title. */
+  pattern?: string;
+}
+
+/** Where a step's highlighted control lives, so the overlay can caption it
+ * honestly ("In these settings" vs "In the workspace pane" etc.). */
+export type PackageOnboardingHighlightWhere =
+  | "settings"
+  | "workspace"
+  | "pane"
+  | "composer"
+  | "header";
+
+export interface PackageOnboardingStep {
+  id: string;
+  title: string;
+  /** Short plain-text copy; a sentence or two per step. */
+  body: string;
+  /** Exact UI label of the control this step explains, if any. */
+  highlight?: string;
+  /** Location of the highlighted control. Defaults to "settings". */
+  highlightWhere?: PackageOnboardingHighlightWhere;
+  media?: PackageOnboardingMedia;
+}
+
+/** A package's multi-step introduction overlay. Tours are registered
+ * client-side (by the package installer or the built-in tour list) and shown
+ * over the settings modal; skip/complete flags are pure UI preference state
+ * and never enter the session event log. */
+export interface PackageOnboardingTour {
+  packageId: string;
+  title: string;
+  steps: PackageOnboardingStep[];
+}
+
 // ---------------------------------------------------------------- Home Assistant
 
 export interface HomeAssistantEntitySelection {

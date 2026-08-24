@@ -23,6 +23,9 @@ import SessionsPage from "./settings/SessionsPage.tsx";
 import AccessPage from "./settings/AccessPage.tsx";
 import PackagesPage from "./settings/PackagesPage.tsx";
 import WidgetsPage from "./settings/WidgetsPage.tsx";
+import PackageTourOverlay from "./PackageTourOverlay.tsx";
+import { maybeAutoShowPackageTour } from "../packages/onboarding/controller.ts";
+import { settingsPageToPackageId } from "../packages/onboarding/pageMap.ts";
 import { Icon } from "../icons.tsx";
 
 interface PageDef {
@@ -184,6 +187,13 @@ export default function SettingsView({ onClose = () => setOverlay(null) }: { onC
       (a, b) => groupOrder.indexOf(a.group) - groupOrder.indexOf(b.group),
     );
   }, [prefs, visibleSlotItems]);
+
+  // First visit to a package's settings page auto-opens its tour (unless the
+  // user skipped it, skipped all onboardings, or already saw it this session).
+  useEffect(() => {
+    const packageId = settingsPageToPackageId(active, visibleSlotItems);
+    if (packageId) maybeAutoShowPackageTour(packageId);
+  }, [active, visibleSlotItems]);
 
   useEffect(() => {
     const navigate = (event: Event) => {
@@ -399,6 +409,8 @@ export default function SettingsView({ onClose = () => setOverlay(null) }: { onC
           </div>
         </div>
       </div>
+      {/* Package tour layers above the settings modal; renders null when closed. */}
+      <PackageTourOverlay />
     </div>
   );
 }

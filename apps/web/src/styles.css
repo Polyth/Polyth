@@ -7782,6 +7782,94 @@ body[data-quick-actions="false"] [data-widget-id="core.quick-actions"] { display
   .focus-conversation .msg .msg-actions-popup { display: none; }
 }
 
+/* ------------------------- Package onboarding tours ------------------------ */
+/* Per-package introduction overlay stacked above the settings modal. */
+.package-tour-scrim { z-index: 140; padding: 4vh 24px; }
+.package-tour {
+  width: min(460px, 94vw); max-height: 92vh; display: flex; flex-direction: column; overflow: hidden;
+  background: var(--panel); border: 1px solid var(--border); border-radius: 18px;
+  box-shadow: var(--shadow-lg); outline: none;
+  animation: rise 0.22s cubic-bezier(0.2, 0.8, 0.3, 1);
+}
+.package-tour-media {
+  position: relative; height: 168px; flex: none; overflow: hidden;
+  border-bottom: 1px solid var(--hair);
+  background:
+    radial-gradient(130% 150% at 88% -30%, rgba(var(--accent-rgb), 0.22), transparent 58%),
+    linear-gradient(168deg, color-mix(in srgb, var(--panel) 70%, var(--bg)), var(--sunken));
+}
+.package-tour-shot { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; }
+.package-tour-art { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.package-tour-art .art-line { fill: none; stroke: var(--hair-strong); stroke-width: 2; }
+.package-tour-art .art-line.art-accent { stroke: rgba(var(--accent-rgb), 0.55); }
+.package-tour-art .art-node { fill: var(--raised); stroke: var(--hair-strong); stroke-width: 2; }
+.package-tour-art .art-node.art-accent { fill: var(--accent); stroke: rgba(var(--accent-rgb), 0.35); }
+.package-tour-art .art-bar { fill: var(--hair-strong); }
+.package-tour-art .art-bar.art-accent { fill: var(--accent); }
+.package-tour-art .art-tile { fill: var(--hair-strong); }
+.package-tour-art .art-tile.art-accent { fill: rgba(var(--accent-rgb), 0.8); }
+.package-tour-art .art-ring { fill: none; stroke: var(--hair-strong); stroke-width: 1.5; }
+.package-tour-art .art-ring.art-accent { stroke: rgba(var(--accent-rgb), 0.5); }
+.package-tour-art .art-glyph {
+  fill: rgba(var(--accent-rgb), 0.16);
+  font: 800 148px Inter, ui-sans-serif, sans-serif; letter-spacing: -0.06em;
+}
+.package-tour-body {
+  display: flex; flex-direction: column; gap: 10px; padding: 20px 24px 6px;
+  overflow-y: auto; animation: fade 0.18s ease-out;
+}
+.package-tour-kicker {
+  color: var(--accent); font-size: 10.5px; font-weight: 700;
+  letter-spacing: 0.08em; text-transform: uppercase;
+}
+.package-tour h2 { margin: 0; font-size: 18px; font-weight: 650; letter-spacing: -0.02em; }
+.package-tour-copy { margin: 0; color: var(--text-dim); font-size: 13px; line-height: 1.6; }
+.package-tour-highlight {
+  display: flex; gap: 11px; align-items: center; margin-top: 2px; padding: 10px 13px;
+  border: 1px solid var(--accent-line); border-radius: 12px; background: var(--accent-wash);
+}
+.package-tour-highlight-mark { color: var(--accent); font-size: 17px; line-height: 1; }
+.package-tour-highlight > div { min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+.package-tour-highlight > div > span {
+  color: var(--muted); font-size: 9.5px; font-weight: 650;
+  letter-spacing: 0.05em; text-transform: uppercase;
+}
+.package-tour-highlight strong { color: var(--text); font-size: 12.5px; }
+.package-tour-foot { display: flex; align-items: center; gap: 10px; padding: 14px 24px 6px; }
+.package-tour-dots { display: flex; align-items: center; gap: 6px; margin-right: auto; }
+.package-tour-dot {
+  width: 7px; height: 7px; padding: 0; border: none; border-radius: 999px;
+  background: var(--hair-strong); transition: width 0.18s ease, background 0.18s ease;
+}
+.package-tour-dot:hover { background: var(--muted); border-color: transparent; }
+.package-tour-dot.active { width: 20px; background: var(--accent); }
+.package-tour-count { margin-left: 4px; color: var(--faint); font-size: 11px; font-variant-numeric: tabular-nums; }
+.package-tour-actions { display: flex; gap: 8px; }
+.package-tour-skips {
+  display: flex; align-items: center; justify-content: center; gap: 9px;
+  padding: 8px 24px 16px; color: var(--faint); font-size: 11px;
+}
+.package-tour-skip {
+  padding: 0; border: none; background: transparent; color: var(--faint);
+  font-size: 11px; font-weight: 550;
+  text-decoration: underline; text-underline-offset: 3px; text-decoration-color: transparent;
+}
+.package-tour-skip:hover {
+  color: var(--text-dim); background: transparent; border-color: transparent;
+  text-decoration-color: currentColor;
+}
+/* "Tour" replay button on Settings → Packages tiles. */
+.package-tour-btn {
+  height: 25px; padding: 0 11px; border: 1px solid var(--hair-strong); border-radius: 999px;
+  background: transparent; color: var(--muted); font-size: 10px; font-weight: 650;
+}
+.package-tour-btn:hover { color: var(--accent); border-color: var(--accent-line); background: var(--accent-wash); }
+.package-tile-control .package-tour-btn { margin-right: auto; }
+@media (max-width: 700px) {
+  .package-tour-scrim { padding: 3vh 12px; }
+  .package-tour-media { height: 136px; }
+}
+
 /* Annotated desktop polish: compact project/session chrome and response tools. */
 .sidebar-head { min-height: 38px; padding-top: 8px; }
 .sidebar-actions { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 40px; }

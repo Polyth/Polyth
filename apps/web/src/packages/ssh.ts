@@ -1,6 +1,8 @@
 import { createElement } from "react";
 import { registerSlot } from "../slots.ts";
 import { combineUnregister, installSettingsPage } from "./settingsPage.ts";
+import { registerPackageOnboarding } from "./onboarding/registry.ts";
+import { SSH_TOUR } from "./onboarding/tours/installed.ts";
 import SshSettings from "../components/ssh/SshSettings.tsx";
 import SshProjectSource from "../components/ssh/SshProjectSource.tsx";
 
@@ -30,5 +32,6 @@ export function installSshPackage(): () => void {
       (props) => createElement(SshProjectSource, props),
       10,
     ),
+    registerPackageOnboarding(SSH_TOUR),
   );
 }

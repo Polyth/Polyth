@@ -1,4 +1,6 @@
 import { HomeAssistantSettings, installHomeAssistantPlugin } from "../widgets/homeAssistantPlugin.tsx";
+import { registerPackageOnboarding } from "./onboarding/registry.ts";
+import { HOME_ASSISTANT_TOUR } from "./onboarding/tours/installed.ts";
 import { combineUnregister, installSettingsPage } from "./settingsPage.ts";
 
 export function installHomeAssistantPackage(): () => void {
@@ -13,5 +15,6 @@ export function installHomeAssistantPackage(): () => void {
       component: HomeAssistantSettings,
     }),
     installHomeAssistantPlugin(),
+    registerPackageOnboarding(HOME_ASSISTANT_TOUR),
   );
 }

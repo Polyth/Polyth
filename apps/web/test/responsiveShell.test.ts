@@ -315,7 +315,9 @@ test("header owns the capability disclosure while the rail renders configured to
   const menu = await read("../src/components/CapabilityMenu.tsx");
   const store = await read("../src/store.ts");
   assert.ok(header.includes("<CapabilityMenu"), "header consumes the shared disclosure");
+  assert.ok(!rail.includes("CapabilityMenu"), "rail dropped its duplicate More-tools picker");
   assert.ok(rail.includes("configuredRailSurfaces"), "rail renders only configured tool buttons");
+  assert.ok(rail.includes("reorderRail"), "rail arranges surfaces by drag-reorder instead");
   assert.ok(menu.includes('role="group"'), "disclosure uses grouped native buttons");
   assert.ok(!menu.includes('role="menuitem"'), "disclosure does not claim unsupported menu arrow behavior");
   assert.ok(!store.includes("moreOpen:"), "dead global More-tools state stays removed");

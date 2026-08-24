@@ -1,5 +1,7 @@
 import VoicePage from "../components/settings/VoicePage.tsx";
 import { installVoice } from "../voice.tsx";
+import { registerPackageOnboarding } from "./onboarding/registry.ts";
+import { VOICE_TOUR } from "./onboarding/tours/voice.ts";
 import { combineUnregister, installSettingsPage } from "./settingsPage.ts";
 
 export function installVoicePackage(): () => void {
@@ -23,5 +25,6 @@ export function installVoicePackage(): () => void {
       ],
     }),
     installVoice(),
+    registerPackageOnboarding(VOICE_TOUR),
   );
 }

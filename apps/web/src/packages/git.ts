@@ -2,6 +2,8 @@ import { createElement } from "react";
 import { GitPage } from "../components/settings/pages.tsx";
 import PendingChangesBar from "../components/PendingChangesBar.tsx";
 import { defineWidgetPlugin, registerWidgetPlugin } from "../widgets/catalog.ts";
+import { registerPackageOnboarding } from "./onboarding/registry.ts";
+import { GIT_TOUR } from "./onboarding/tours/git.ts";
 import { combineUnregister, installSettingsPage } from "./settingsPage.ts";
 
 const GIT_SESSION_WIDGETS = defineWidgetPlugin({
@@ -35,5 +37,6 @@ export function installGitPackage(): () => void {
       component: GitPage,
     }),
     registerWidgetPlugin(GIT_SESSION_WIDGETS),
+    registerPackageOnboarding(GIT_TOUR),
   );
 }
