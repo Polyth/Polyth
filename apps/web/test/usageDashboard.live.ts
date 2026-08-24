@@ -225,7 +225,9 @@ test("all usage controls update data, focus, hover, and provider visibility", as
 
   const overviewButton = page.locator(".usage-view-tabs button", { hasText: "Overview" });
   await overviewButton.focus();
-  const focus = await overviewButton.evaluate((element) => {
+  await page.keyboard.press("Tab");
+  const keyboardFocusedView = page.locator(".usage-view-tabs button", { hasText: "Providers" });
+  const focus = await keyboardFocusedView.evaluate((element) => {
     const style = getComputedStyle(element);
     return { width: parseFloat(style.outlineWidth), style: style.outlineStyle };
   });
