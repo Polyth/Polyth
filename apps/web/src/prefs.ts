@@ -39,8 +39,9 @@ export function parsePrefs(raw: string | null): Prefs {
   try {
     const data = JSON.parse(raw ?? "") as Partial<Prefs>;
     const persona = data.persona && data.persona in LEGACY_PERSONA_PLUGINS ? data.persona : null;
-    const plugins = Array.isArray(data.plugins)
-      ? data.plugins.map((id) => id === "preview" ? "browser" : id).filter(isPlugin)
+    const rawPlugins = (data as { plugins?: unknown }).plugins;
+    const plugins = Array.isArray(rawPlugins)
+      ? rawPlugins.map((id) => id === "preview" ? "browser" : id).filter(isPlugin)
       : [];
     return {
       persona,

@@ -385,10 +385,10 @@ export default function PreviewView() {
         throw new Error("The annotated screenshot is attached to the draft, but the message was not sent.");
       }
       removeAttachment(targetSessionId, attached.ref.id);
-      const selected = annotationViewportRect(annotation, browser.viewport);
-      setSnapshotText(
-        `Sent ${attached.ref.name} to chat with the selected ${selected.width}×${selected.height} area.`,
-      );
+      const selected = annotation ? annotationViewportRect(annotation, browser.viewport) : null;
+      setSnapshotText(selected
+        ? `Sent ${attached.ref.name} to chat with the selected ${selected.width}×${selected.height} area.`
+        : `Sent ${attached.ref.name} and browser element context to chat.`);
       setTab("snapshot");
       setInspectorOpen(true);
       setAnnotations([]);
