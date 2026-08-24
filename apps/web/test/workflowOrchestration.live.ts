@@ -280,6 +280,20 @@ async function openApp(options: OpenOptions): Promise<Page> {
   await context.addInitScript(({ persona, projectId }: { persona: string; projectId: string }) => {
     localStorage.setItem("polyth.prefs", persona);
     localStorage.setItem(`polyth.projectSetup.v1.${projectId}`, "completed");
+    const probe: Array<{ kind: string; value: unknown }> = [];
+    (window as unknown as { __workflowProbe: typeof probe }).__workflowProbe = probe;
+    const dispatch = window.dispatchEvent.bind(window);
+    window.dispatchEvent = (event: Event): boolean => {
+      if (event.type === "polyth:composer-replace") {
+        probe.push({ kind: "replace", value: (event as CustomEvent).detail });
+      }
+      return dispatch(event);
+    };
+    const removeItem = Storage.prototype.removeItem;
+    Storage.prototype.removeItem = function removeWorkflowItem(key: string): void {
+      if (key.startsWith("polyth.draft.")) probe.push({ kind: "remove", value: key });
+      removeItem.call(this, key);
+    };
   }, { persona: PERSONA, projectId: PROJECT_ID });
   if (options.runs) {
     await context.route("**/api/workflow-runs?projectId=*", (route) =>
@@ -360,12 +374,11 @@ test("complete workflow journey remains synchronized, accessible, and responsive
     dom: (document.querySelector(".composer-editor") as HTMLTextAreaElement | null)?.value,
     stored: localStorage.getItem(`polyth.draft.${sessionId}`),
     url: location.pathname,
+    probe: (window as unknown as { __workflowProbe?: unknown[] }).__workflowProbe ?? [],
   }), SESSIONS.main);
-  assert.deepEqual(
-    consumedDraft,
-    { dom: "", stored: null, url: `/p/${PROJECT_ID}/s/${SESSIONS.main}` },
-    "the workflow launch consumes the submitted draft",
-  );
+  assert.equal(consumedDraft.dom, "", `the workflow launch consumes the submitted draft: ${JSON.stringify(consumedDraft)}`);
+  assert.equal(consumedDraft.stored, null, `the consumed workflow draft is not persisted: ${JSON.stringify(consumedDraft)}`);
+  assert.equal(consumedDraft.url, `/p/${PROJECT_ID}/s/${SESSIONS.main}`);
   await page.screenshot({ path: join(ARTIFACTS, "workflow_running_timeline.png") });
 
   const stop = timeline.getByRole("button", { name: "Stop Release pipeline workflow run" });
