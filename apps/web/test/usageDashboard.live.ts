@@ -349,9 +349,15 @@ test("usage labels expose valid names and meet AA text contrast", async () => {
   const page = await openUsage(1280);
   const contrastRatios = (selectors: string[]) => page.evaluate((targets) => {
     type Rgb = { r: number; g: number; b: number };
-    const parse = (value: string): Rgb => {
+    type Rgba = Rgb & { a: number };
+    const parse = (value: string): Rgba => {
       const values = value.match(/[\d.]+/g)?.map(Number) ?? [];
-      return { r: values[0] ?? 0, g: values[1] ?? 0, b: values[2] ?? 0 };
+      return {
+        r: values[0] ?? 0,
+        g: values[1] ?? 0,
+        b: values[2] ?? 0,
+        a: values[3] ?? 1,
+      };
     };
     const luminance = ({ r, g, b }: Rgb) => {
       const channel = (value: number) => {
@@ -361,11 +367,22 @@ test("usage labels expose valid names and meet AA text contrast", async () => {
       return .2126 * channel(r) + .7152 * channel(g) + .0722 * channel(b);
     };
     const background = (element: Element): Rgb => {
+      const layers: Rgba[] = [];
       for (let current: Element | null = element; current; current = current.parentElement) {
-        const color = getComputedStyle(current).backgroundColor;
-        if (!color.endsWith(", 0)") && color !== "rgba(0, 0, 0, 0)") return parse(color);
+        const color = parse(getComputedStyle(current).backgroundColor);
+        if (color.a > 0) layers.push(color);
+        if (color.a >= 1) break;
       }
-      return { r: 255, g: 255, b: 255 };
+      let result: Rgb = { r: 255, g: 255, b: 255 };
+      for (let index = layers.length - 1; index >= 0; index -= 1) {
+        const layer = layers[index]!;
+        result = {
+          r: layer.r * layer.a + result.r * (1 - layer.a),
+          g: layer.g * layer.a + result.g * (1 - layer.a),
+          b: layer.b * layer.a + result.b * (1 - layer.a),
+        };
+      }
+      return result;
     };
     return targets.flatMap((selector) =>
       Array.from(document.querySelectorAll<HTMLElement>(selector)).map((element) => {
