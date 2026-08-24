@@ -105,6 +105,7 @@ interface RowProps {
   onPinDragStart: (id: string) => void;
   onPinDrop: (targetId: string) => void;
   contextLabel?: string;
+  pinnedWorktreeLabel?: string;
 }
 
 /** Finding 4 guard: destructive quick actions confirm first while the agent
@@ -166,7 +167,7 @@ function useShiftArmed(): boolean {
 function SessionRow({
   s, activeSessionId, labels, eventsTitle, relativeTime, selectMode, selected,
   onToggleSelect, onChanged, onOpen, onTogglePin, pinnedSection, onPinDragStart, onPinDrop,
-  contextLabel,
+  contextLabel, pinnedWorktreeLabel,
 }: RowProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [renaming, setRenaming] = useState(false);
@@ -352,7 +353,15 @@ function SessionRow({
             }
           }}
         >
-          <span className="session-title">{displayTitle}</span>
+          <span className="session-title">
+            {pinnedSection && <span className="session-pin-icon" title="Pinned" aria-label="Pinned"><Icon.pin /></span>}
+            <span className="session-title-text">{displayTitle}</span>
+            {pinnedWorktreeLabel && (
+              <span className="session-worktree-label" title={`Worktree: ${pinnedWorktreeLabel}`}>
+                <Icon.branch />{pinnedWorktreeLabel}
+              </span>
+            )}
+          </span>
           {contextLabel && <span className="session-search-context">{contextLabel}</span>}
           <span className="session-status-zone">
             <AttentionBadges status={rowStatus} />
@@ -503,19 +512,21 @@ export default function SessionList({
       || (session.attention?.permissions ?? 0) > 0;
   };
   const matchingActive = projectSessions.filter((s) => s.status !== "archived" && matchesFilters(s));
-  const orderedActive = [
-    ...sortPinnedSessions(matchingActive),
-    ...matchingActive.filter((session) => session.pinned === undefined),
-  ];
-  let active = searchMode ? orderedActive : orderedActive.slice(0, visibleCount);
+  // Pinned chats belong to one project-level section, rather than their
+  // individual worktree buckets. This keeps them at the top even when their
+  // worktree is collapsed or appears later in the list.
+  const pinned = sortPinnedSessions(matchingActive);
+  const unpinnedActive = matchingActive.filter((session) => session.pinned === undefined);
+  const orderedActive = [...pinned, ...unpinnedActive];
+  let active = searchMode
+    ? orderedActive
+    : [...pinned, ...unpinnedActive.slice(0, Math.max(0, visibleCount - pinned.length))];
   const selectedActive = orderedActive.find((session) => session.id === activeSessionId);
   if (!searchMode && selectedActive && !active.some((session) => session.id === selectedActive.id) && active.length > 0) {
     active = [...active.slice(0, -1), selectedActive];
   }
   const archived = projectSessions.filter((s) => s.status === "archived" && matchesFilters(s));
   const hiddenActive = searchMode ? 0 : Math.max(0, orderedActive.length - active.length);
-  const pinned = sortPinnedSessions(active);
-  const pinRank = new Map(pinned.map((session, index) => [session.id, index]));
   const mainWorktree = worktrees.find((worktree) => worktree.isMain);
   const worktreeKey = (session: SessionProjection): string =>
     !session.worktreePath || session.worktreePath === mainWorktree?.path ? "__main__" : session.worktreePath;
@@ -524,21 +535,12 @@ export default function SessionList({
     : projectSessions.filter((session) => worktreeKey(session) === removeTarget.path);
 
   const byWorktree = new Map<string, SessionProjection[]>();
-  for (const s of active) {
+  for (const s of active.filter((session) => session.pinned === undefined)) {
     const key = worktreeKey(s);
     byWorktree.set(key, [...(byWorktree.get(key) ?? []), s]);
   }
   for (const grouped of byWorktree.values()) {
-    grouped.sort((a, b) => {
-      const aRank = pinRank.get(a.id);
-      const bRank = pinRank.get(b.id);
-      if (aRank !== undefined || bRank !== undefined) {
-        if (aRank === undefined) return 1;
-        if (bRank === undefined) return -1;
-        return aRank - bRank;
-      }
-      return b.updatedAt - a.updatedAt;
-    });
+    grouped.sort((a, b) => b.updatedAt - a.updatedAt);
   }
   const knownWorktreePaths = new Set(worktrees.filter((worktree) => !worktree.isMain).map((worktree) => worktree.path));
   const worktreeGroups = [
@@ -593,7 +595,12 @@ export default function SessionList({
     }
   };
 
-  const row = (s: SessionProjection, pinnedSection = false, contextLabel?: string) => (
+  const row = (
+    s: SessionProjection,
+    pinnedSection = false,
+    contextLabel?: string,
+    pinnedWorktreeLabel?: string,
+  ) => (
     <SessionRow
       key={s.id}
       s={s}
@@ -615,6 +622,7 @@ export default function SessionList({
       onPinDragStart={setDraggedPin}
       onPinDrop={(targetId) => void dropPin(targetId)}
       contextLabel={contextLabel}
+      pinnedWorktreeLabel={pinnedWorktreeLabel}
     />
   );
 
@@ -645,6 +653,11 @@ export default function SessionList({
 
   return (
     <div className="session-org">
+      {pinned.length > 0 && (
+        <div className="session-pinned" aria-label="Pinned chats">
+          {pinned.map((session) => row(session, true, undefined, worktreeNameForSession(session)))}
+        </div>
+      )}
       {worktreeGroups.map((group) => {
         const isCollapsed = collapsed.has(group.key);
         return (
@@ -686,7 +699,7 @@ export default function SessionList({
             </div>
             {!isCollapsed && (
               <div className="session-worktree-sessions">
-                {group.sessions.map((session) => row(session, session.pinned !== undefined))}
+                {group.sessions.map((session) => row(session))}
                 {group.sessions.length === 0 && <div className="empty session-worktree-empty">No sessions</div>}
               </div>
             )}
