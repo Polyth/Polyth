@@ -639,19 +639,6 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
 }
 .project-path { display: none; }
 
-.branch-row {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  min-height: var(--nav-row-branch);
-  margin: 0;
-  padding-left: var(--nav-indent-worktree);
-  color: var(--muted);
-  font-size: var(--nav-branch-size);
-  font-weight: 600;
-}
-.branch-row svg { width: 14px; height: 14px; flex: none; }
-.branch-row .mono { color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .session-worktree-group { position: relative; z-index: 1; margin: 0; }
 /* Worktree groups are sibling stacking contexts. When a session menu escapes
    one group, this raises that entire group above the rows in later groups. */

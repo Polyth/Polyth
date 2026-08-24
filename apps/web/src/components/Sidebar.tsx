@@ -63,7 +63,6 @@ export default function Sidebar() {
   // Honest presentation state for app.nav contributions: on desktop the
   // sidebar is always expanded regardless of the mobile drawer flag.
   const expanded = useSidebarExpanded(drawerOpen);
-  const branch = useStore((s) => s.gitBranch);
   const project = projects.find((p) => p.id === activeProjectId) ?? null;
   const [renamingProject, setRenamingProject] = useState<string | null>(null);
   const [projectName, setProjectName] = useState("");
@@ -632,10 +631,6 @@ export default function Sidebar() {
               </div>
             );
           })}
-          {query.trim() === "" && effectiveViewMode === "list" && project && branch && (
-            <div className="branch-row"><Icon.tree /><span className="mono">{branch}</span></div>
-          )}
-
           {query.trim() === "" && effectiveViewMode === "list" && project && (
             <div className="session-list">
               <SessionList

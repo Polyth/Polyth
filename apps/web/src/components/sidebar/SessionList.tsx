@@ -544,14 +544,11 @@ export default function SessionList({
   for (const grouped of byWorktree.values()) {
     grouped.sort((a, b) => b.updatedAt - a.updatedAt);
   }
+  // A project's checkout is its root, not another branch in the navigation.
+  // Only linked worktrees get their own expandable subtrees.
+  const mainSessions = byWorktree.get("__main__") ?? [];
   const knownWorktreePaths = new Set(worktrees.filter((worktree) => !worktree.isMain).map((worktree) => worktree.path));
   const worktreeGroups = [
-    {
-      key: tr("sidebar.sessionlist.main"),
-      label: mainWorktree?.branch || tr("sidebar.sessionlist.mainWorktree"),
-      sessions: byWorktree.get(tr("sidebar.sessionlist.main")) ?? [],
-      worktree: mainWorktree ?? null,
-    },
     ...worktrees.filter((worktree) => !worktree.isMain).map((worktree) => ({
       key: worktree.path,
       label: worktree.branch || worktreeLabel(null, worktree.path),
@@ -629,9 +626,9 @@ export default function SessionList({
   );
 
   const worktreeNameForSession = (session: SessionProjection): string => {
-    if (session.branch) return session.branch;
     const key = worktreeKey(session);
-    if (key === "__main__") return mainWorktree?.branch || tr("sidebar.sessionlist.mainWorktree");
+    if (key === "__main__") return tr("sidebar.sessionlist.mainWorktree");
+    if (session.branch) return session.branch;
     return worktrees.find((worktree) => worktree.path === key)?.branch || worktreeLabel(null, key);
   };
   const startInWorktree = (key: string) => {
@@ -658,6 +655,11 @@ export default function SessionList({
       {pinned.length > 0 && (
         <div className="session-pinned" aria-label="Pinned chats">
           {pinned.map((session) => row(session, true, undefined, worktreeNameForSession(session)))}
+        </div>
+      )}
+      {mainSessions.length > 0 && (
+        <div className="session-project-sessions session-worktree-sessions">
+          {mainSessions.map((session) => row(session))}
         </div>
       )}
       {worktreeGroups.map((group) => {

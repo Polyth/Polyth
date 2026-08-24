@@ -92,6 +92,7 @@ test("tree mode nests sessions under project worktrees", async () => {
   store.activateProject("alpha");
   store.setSessions("alpha", sessionsByProject.alpha!);
   store.setSessions("beta", sessionsByProject.beta!);
+  store.setGitBranch("trunk");
   setSidebarViewMode("list");
 
   const container = document.createElement("div");
@@ -101,6 +102,7 @@ test("tree mode nests sessions under project worktrees", async () => {
     await act(async () => { root.render(createElement(Sidebar)); });
 
     assert.ok(container.querySelector(".session-list .session-org"), "list mode renders the active project sessions");
+    assert.equal(container.querySelector(".branch-row"), null, "the project root never exposes its current branch");
     assert.equal(container.querySelector(".project-tree-node"), null);
     const toggle = container.querySelector<HTMLElement>('[aria-label="Toggle project tree view"]');
     assert.equal(toggle, null, "desktop renders no sidebar footer controls");
@@ -118,7 +120,7 @@ test("tree mode nests sessions under project worktrees", async () => {
       "active project tree nests the real SessionList",
     );
     assert.match(alphaTree.textContent ?? "", /Alpha session one/);
-    assert.match(alphaTree.textContent ?? "", /master/);
+    assert.doesNotMatch(alphaTree.textContent ?? "", /master/, "the project root does not expose its current branch");
     assert.match(alphaTree.textContent ?? "", /feature\/ui/);
     const betaTree = trees.find((tree) => (tree.textContent ?? "").includes("beta"))!;
     assert.equal(betaTree.querySelector(".project-tree-sessions"), null, "other projects start collapsed");
