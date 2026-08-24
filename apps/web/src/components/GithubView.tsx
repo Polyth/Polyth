@@ -1,58 +1,66 @@
-// GitHub view: repo card + issues/PRs lists over the gh CLI. Fails soft with
-// the reason (gh missing, signed out, no GitHub remote). Selecting a PR opens
-// the detail surface (overview/files/checks/comments).
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { api, type GithubIssueDto, type GithubPrDto, type GithubStatusDto } from "../api.ts";
-import { setActiveView, setUiError, startNewSession, useStore } from "../store.ts";
 import { requestComposerInsert } from "../composerInsert.ts";
+import { Icon } from "../icons.tsx";
 import { friendlyError } from "../settings.ts";
-import PullRequestView from "./PullRequestView.tsx";
+import { setActiveView, startNewSession, useStore } from "../store.ts";
 import EmptyState from "./EmptyState.tsx";
+import PullRequestView from "./PullRequestView.tsx";
 
 type Tab = "issues" | "prs";
+type Filter = "all" | "open" | "closed" | "draft" | "ready";
 
-function ItemRow({ item, kind, onOpen, onStartSession }: {
+const relativeDate = (raw: string): string => {
+  const time = new Date(raw).getTime();
+  if (!Number.isFinite(time)) return "";
+  const delta = Math.max(0, Date.now() - time);
+  const days = Math.floor(delta / 86_400_000);
+  if (days > 0) return `${days}d ago`;
+  const hours = Math.floor(delta / 3_600_000);
+  if (hours > 0) return `${hours}h ago`;
+  return `${Math.max(1, Math.floor(delta / 60_000))}m ago`;
+};
+
+function GithubCard({ item, kind, onOpen, onStartSession }: {
   item: GithubIssueDto | GithubPrDto;
   kind: Tab;
-  onOpen?: (n: number) => void;
+  onOpen?: (number: number) => void;
   onStartSession: (item: GithubIssueDto | GithubPrDto, kind: Tab) => void;
 }) {
-  const pr = kind === "prs" ? (item as GithubPrDto) : null;
+  const pr = kind === "prs" ? item as GithubPrDto : null;
   const ref = `${kind === "prs" ? "PR" : "issue"} #${item.number}`;
   return (
-    <div className="gh-row">
-      <span className={`gh-state ${item.state.toLowerCase()}${pr?.isDraft ? " draft" : ""}`}>
-        {pr?.isDraft ? "draft" : item.state.toLowerCase()}
-      </span>
-      <a className="gh-title" href={item.url} target="_blank" rel="noreferrer" title={item.title}>
-        <span className="gh-number mono">#{item.number}</span> {item.title}
-      </a>
-      {pr && <span className="gh-branch mono">{pr.headRefName}</span>}
-      <span className="gh-meta">{item.author}{item.updatedAt ? ` · ${new Date(item.updatedAt).toLocaleDateString()}` : ""}</span>
-      {pr && onOpen && (
-        <button className="small-btn" title="Open PR details, checks, and comments" onClick={() => onOpen(item.number)}>Details</button>
-      )}
-      <button
-        className="small-btn"
-        title={`Start a new session with this ${kind === "prs" ? "PR" : "issue"} as the first draft`}
-        onClick={() => onStartSession(item, kind)}
-      >+ session</button>
-      <button
-        className="small-btn"
-        title="Ask about this in the session composer"
-        onClick={() => {
+    <article className="gh-card">
+      <div className="gh-card-main">
+        <div className="gh-card-kicker">
+          <span className={`gh-state ${item.state.toLowerCase()}${pr?.isDraft ? " draft" : ""}`}>{pr?.isDraft ? "draft" : item.state.toLowerCase()}</span>
+          <span className="gh-number mono">#{item.number}</span>
+          <span className="gh-meta">updated {relativeDate(item.updatedAt)}</span>
+        </div>
+        <a className="gh-card-title" href={item.url} target="_blank" rel="noreferrer">{item.title}</a>
+        <div className="gh-card-meta">
+          <span>by <strong>{item.author}</strong></span>
+          {pr && <span className="gh-branch mono"><Icon.branch /> {pr.headRefName}</span>}
+        </div>
+      </div>
+      <div className="gh-card-actions">
+        {pr && onOpen && <button className="primary-btn" onClick={() => onOpen(item.number)}>Review details</button>}
+        <button className="small-btn" title={`Start a session for this ${ref}`} onClick={() => onStartSession(item, kind)}><Icon.session /> New session</button>
+        <button className="small-btn" title="Add this context to chat" onClick={() => {
           requestComposerInsert(`Look at GitHub ${ref}: "${item.title}" (${item.url}).`);
           setActiveView("session");
-        }}
-      >→ chat</button>
-    </div>
+        }}><Icon.chat /> Ask in chat</button>
+      </div>
+    </article>
   );
 }
 
 export default function GithubView() {
-  const projectId = useStore((s) => s.activeProjectId);
+  const projectId = useStore((state) => state.activeProjectId);
   const [status, setStatus] = useState<GithubStatusDto | null>(null);
   const [tab, setTab] = useState<Tab>("issues");
+  const [filter, setFilter] = useState<Filter>("all");
+  const [query, setQuery] = useState("");
   const [issues, setIssues] = useState<GithubIssueDto[]>([]);
   const [prs, setPrs] = useState<GithubPrDto[]>([]);
   const [reason, setReason] = useState("");
@@ -73,17 +81,21 @@ export default function GithubView() {
     setPrs([]);
     void (async () => {
       try {
-        const st = await api.githubStatus(projectId);
+        const nextStatus = await api.githubStatus(projectId);
         if (!active) return;
-        setStatus(st);
-        if (!st.repo) {
-          setReason(st.reason ?? "No GitHub repository detected.");
+        setStatus(nextStatus);
+        if (!nextStatus.repo) {
+          setReason(nextStatus.reason ?? "No GitHub repository detected.");
           return;
         }
-        const [i, p] = await Promise.all([api.githubIssues(projectId), api.githubPrs(projectId)]);
+        if (!nextStatus.authenticated) {
+          setReason(nextStatus.reason ?? "Sign in with GitHub CLI to load repository activity.");
+          return;
+        }
+        const [issueResult, prResult] = await Promise.all([api.githubIssues(projectId), api.githubPrs(projectId)]);
         if (!active) return;
-        if (i.ok) setIssues(i.data); else setReason(i.reason);
-        if (p.ok) setPrs(p.data); else setReason(p.reason);
+        if (issueResult.ok) setIssues(issueResult.data); else setReason(issueResult.reason);
+        if (prResult.ok) setPrs(prResult.data); else setReason(prResult.reason);
       } catch (cause) {
         if (active) setReason(friendlyError("Couldn’t load GitHub data", cause));
       } finally {
@@ -93,12 +105,8 @@ export default function GithubView() {
     return () => { active = false; };
   }, [projectId, reloadKey]);
 
-  if (!projectId) return <EmptyState title="No project selected" description="Open a project to browse its GitHub repository." />;
-
-  // F7 / OC-15-002/003: bootstrap a session from an issue or PR. The context
-  // lands as the composer draft (saved before the session opens so the
-  // composer restores it) — nothing is sent until the user does.
   const startSession = (item: GithubIssueDto | GithubPrDto, kind: Tab) => {
+    if (!projectId) return;
     const label = kind === "prs" ? "PR" : "issue";
     startNewSession(projectId, {
       title: `${label} #${item.number}: ${item.title}`.slice(0, 80),
@@ -110,78 +118,119 @@ export default function GithubView() {
     });
   };
 
+  const items = useMemo(() => {
+    const source: Array<GithubIssueDto | GithubPrDto> = tab === "issues" ? issues : prs;
+    const normalized = query.trim().toLowerCase();
+    return source.filter((item) => {
+      const pr = tab === "prs" ? item as GithubPrDto : null;
+      const matchesQuery = !normalized || [item.title, item.author, String(item.number), pr?.headRefName ?? ""].some((value) => value.toLowerCase().includes(normalized));
+      const state = item.state.toLowerCase();
+      const matchesFilter = filter === "all"
+        || (filter === "draft" && pr?.isDraft)
+        || (filter === "ready" && pr && !pr.isDraft && state === "open")
+        || filter === state;
+      return matchesQuery && matchesFilter;
+    });
+  }, [filter, issues, prs, query, tab]);
+
+  if (!projectId) return <EmptyState title="No project selected" description="Open a project to browse its GitHub repository." />;
+
   if (openPr !== null) {
-    return (
-      <div className="view-page">
-        <PullRequestView number={openPr} onClose={() => setOpenPr(null)} />
-      </div>
-    );
+    return <div className="view-page github-page"><PullRequestView number={openPr} onClose={() => setOpenPr(null)} /></div>;
   }
 
-  const items = tab === "issues" ? issues : prs;
+  const filters: Array<{ id: Filter; label: string }> = tab === "prs"
+    ? [{ id: "all", label: "All" }, { id: "ready", label: "Ready" }, { id: "draft", label: "Drafts" }]
+    : [{ id: "all", label: "All" }, { id: "open", label: "Open" }, { id: "closed", label: "Closed" }];
 
   return (
-    <div className="view-page">
-      <div>
-        <h2 className="view-title">GitHub</h2>
-        <p className="view-sub">Repo, issues and pull requests via the local gh CLI — Polyth stores no tokens.</p>
-      </div>
+    <div className="view-page github-page">
+      <header className="github-head">
+        <div>
+          <h1 className="view-title">GitHub</h1>
+          <p className="view-sub">Issues and pull requests for this project.</p>
+        </div>
+        <button className="small-btn" disabled={loading} onClick={() => setReloadKey((key) => key + 1)}><Icon.refresh /> Refresh</button>
+      </header>
 
-      {loading && !status && <div className="set-muted" role="status">Loading repository activity…</div>}
-      {!loading && !status && reason && (
+      {loading && !status && (
+        <div className="gh-skeleton-list" aria-label="Loading GitHub activity" aria-busy="true">
+          <div className="source-skeleton gh-skeleton" /><div className="source-skeleton gh-skeleton" /><div className="source-skeleton gh-skeleton" />
+        </div>
+      )}
+
+      {!loading && !status && reason && <EmptyState title="Couldn’t load GitHub" description={reason} actionLabel="Retry" onAction={() => setReloadKey((key) => key + 1)} />}
+
+      {status && !status.installed && (
         <EmptyState
-          title="Couldn’t load GitHub data"
-          description={reason}
-          actionLabel="Retry"
+          title="GitHub CLI isn’t installed"
+          description="Install the GitHub CLI from cli.github.com, then run gh auth login. Polyth never stores your GitHub token."
+          actionLabel="Check again"
           onAction={() => setReloadKey((key) => key + 1)}
         />
       )}
-      {status && !status.installed && (
-        <EmptyState title="GitHub CLI not found" description="Install gh from cli.github.com, then authenticate with gh auth login." />
-      )}
-      {status && status.installed && !status.repo && (
-        <EmptyState title="No GitHub repository" description={reason || "No GitHub repository was detected for this project."} />
+
+      {status?.installed && !status.repo && (
+        <EmptyState
+          title="No GitHub repository found"
+          description={reason || "Add a GitHub remote to this repository, then refresh."}
+          actionLabel="Check again"
+          onAction={() => setReloadKey((key) => key + 1)}
+        />
       )}
 
-      {status?.repo && (
+      {status?.repo && !status.authenticated && (
+        <div className="gh-connect-state">
+          <span className="gh-connect-icon"><Icon.github /></span>
+          <div>
+            <h2>Connect GitHub CLI</h2>
+            <p>{reason || "Run gh auth login in your terminal, then return here to review issues and pull requests."}</p>
+            <code>gh auth login</code>
+          </div>
+          <button className="primary-btn" onClick={() => setReloadKey((key) => key + 1)}>I’ve signed in</button>
+        </div>
+      )}
+
+      {status?.repo && status.authenticated && (
         <>
-          <div className="gh-repo-card">
-            <div>
-              <a className="gh-repo-name" href={status.repo.url} target="_blank" rel="noreferrer">
-                {status.repo.owner}/{status.repo.name}
-              </a>
-              {status.repo.description && <div className="muted">{status.repo.description}</div>}
+          <section className="gh-repo-card">
+            <span className="gh-repo-icon"><Icon.github /></span>
+            <div className="gh-repo-copy">
+              <a className="gh-repo-name" href={status.repo.url} target="_blank" rel="noreferrer">{status.repo.owner}/{status.repo.name}</a>
+              <span className="muted">{status.repo.description || "GitHub repository"}</span>
             </div>
             <div className="gh-repo-meta">
-              <span className="tag">{status.repo.isPrivate ? "private" : "public"}</span>
-              <span className="tag mono">{status.repo.defaultBranch}</span>
-              {!status.authenticated && <span className="tag">signed out</span>}
+              <span className="tag">{status.repo.isPrivate ? "Private" : "Public"}</span>
+              <span className="tag mono"><Icon.branch /> {status.repo.defaultBranch}</span>
+            </div>
+          </section>
+
+          <div className="gh-list-controls">
+            <div className="source-tabs gh-tabs" aria-label="GitHub resource type">
+              <button className={tab === "issues" ? "active" : ""} onClick={() => { setTab("issues"); setFilter("all"); }}>Issues <span>{issues.length}</span></button>
+              <button className={tab === "prs" ? "active" : ""} onClick={() => { setTab("prs"); setFilter("all"); }}>Pull requests <span>{prs.length}</span></button>
+            </div>
+            <div className="source-search gh-search">
+              <Icon.search />
+              <input value={query} placeholder={`Search ${tab === "issues" ? "issues" : "pull requests"}`} aria-label={`Search ${tab}`} onChange={(event) => setQuery(event.target.value)} />
+              {query && <button className="source-search-clear" aria-label="Clear search" onClick={() => setQuery("")}>×</button>}
+            </div>
+            <div className="gh-filter-chips" aria-label="Filter list">
+              {filters.map((item) => <button key={item.id} className={filter === item.id ? "active" : ""} onClick={() => setFilter(item.id)}>{item.label}</button>)}
             </div>
           </div>
 
-          <div className="seg">
-            <button className={tab === "issues" ? "on" : ""} onClick={() => setTab("issues")}>Issues ({issues.length})</button>
-            <button className={tab === "prs" ? "on" : ""} onClick={() => setTab("prs")}>Pull requests ({prs.length})</button>
-          </div>
-
-          {loading && <div className="set-muted">Loading repository activity…</div>}
-          {!loading && reason && items.length === 0 && (
+          {loading && <div className="gh-skeleton-list" aria-label="Loading repository activity" aria-busy="true"><div className="source-skeleton gh-skeleton" /><div className="source-skeleton gh-skeleton" /></div>}
+          {!loading && reason && (tab === "issues" ? issues : prs).length === 0 && <EmptyState title="Couldn’t load repository activity" description={reason} actionLabel="Retry" onAction={() => setReloadKey((key) => key + 1)} />}
+          {!loading && !reason && items.length === 0 && (
             <EmptyState
-              title="Couldn’t load GitHub data"
-              description={reason}
-              actionLabel="Retry"
-              onAction={() => setReloadKey((key) => key + 1)}
+              title={query || filter !== "all" ? "No matching results" : `No ${tab === "issues" ? "issues" : "pull requests"}`}
+              description={query || filter !== "all" ? "Try a different search or clear the active filter." : "New repository activity will appear here."}
+              {...(query || filter !== "all" ? { actionLabel: "Clear filters", onAction: () => { setQuery(""); setFilter("all"); } } : {})}
             />
           )}
-          {!loading && !reason && items.length === 0 && (
-            <EmptyState title={`No open ${tab === "issues" ? "issues" : "pull requests"}`} description="New repository activity will appear here." />
-          )}
           <div className="gh-list">
-            {items.map((it) => (
-              <ItemRow key={`${tab}-${it.number}`} item={it} kind={tab}
-          onStartSession={startSession}
-                {...(tab === "prs" ? { onOpen: setOpenPr } : {})} />
-            ))}
+            {items.map((item) => <GithubCard key={`${tab}-${item.number}`} item={item} kind={tab} onStartSession={startSession} {...(tab === "prs" ? { onOpen: setOpenPr } : {})} />)}
           </div>
         </>
       )}

@@ -75,43 +75,52 @@ export default function PrCreatePanel({ projectId, sessionId, onClose, onCreated
 
   return (
     <div className="pr-create-panel">
-      <div className="stat-label">Create pull request (external write)</div>
-      <div className="view-toolbar-row">
+      <div className="pr-create-head">
+        <div>
+          <strong>Create pull request</strong>
+          <span className="muted">Review the title and description before publishing to GitHub.</span>
+        </div>
+        <span className="tag">External write</span>
+      </div>
+      <label className="pr-create-field">
+        <span>Title</span>
         <input
           value={title}
           placeholder="Pull request title…"
           onChange={(e) => setTitle(e.target.value)}
-          style={{ flex: 1 }}
         />
-      </div>
-      <textarea
-        rows={5}
-        placeholder="Description (markdown)…"
-        value={body}
-        onChange={(e) => setBody(e.target.value)}
-      />
-      <div className="view-toolbar-row">
-        <label className="sched-every">
-          base
+      </label>
+      <label className="pr-create-field">
+        <span>Description</span>
+        <textarea
+          rows={6}
+          placeholder="Describe the change in Markdown…"
+          value={body}
+          onChange={(e) => setBody(e.target.value)}
+        />
+      </label>
+      <div className="pr-create-options">
+        <label className="pr-create-field compact">
+          <span>Base branch</span>
           <input
             className="mono"
             value={base}
             placeholder={baseHint || "default branch"}
             onChange={(e) => setBase(e.target.value)}
-            style={{ width: 140 }}
           />
         </label>
-        <label className="sched-every">
+        <label className="source-confirm">
           <input type="checkbox" checked={draft} onChange={(e) => setDraft(e.target.checked)} />
-          Draft
+          Create as draft
         </label>
+      </div>
+      <div className="pr-create-actions">
         <span className="header-spacer" />
         <button className="small-btn" disabled={generating || creating} onClick={() => void generate()}>
-          {generating ? "…" : "✦ Generate with AI"}
+          {generating ? "Generating…" : "✦ Generate with AI"}
         </button>
         <button className="small-btn" disabled={creating} onClick={onClose}>Cancel</button>
-        <button className="primary-btn" style={{ padding: "5px 14px", fontSize: 12 }}
-          disabled={creating || !title.trim()} onClick={() => void create()}>
+        <button className="primary-btn" disabled={creating || !title.trim()} onClick={() => void create()}>
           {creating ? "Creating…" : "Create PR"}
         </button>
       </div>

@@ -1,24 +1,23 @@
-// Changes-first Git surface (WP7): grouped file changes with folder actions up
-// top, then branches/worktrees, then a commit graph with refs and pagination.
-// The right pane shows hunk-by-hunk diffs where local review comments anchor
-// by content digest and turn Outdated when the source moves on.
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { api, type GitBranches, type GitFileEntry, type GitGraphEntry, type GitStash, type Worktree } from "../api.ts";
-import { openWorktreeSessionDialog, useStore, setGitBranch, setUiError } from "../store.ts";
-import { setPaneLastResource } from "../workspace/panePrefs.ts";
-import { diffStat } from "../utils.ts";
-import { friendlyError } from "../settings.ts";
 import { layoutGraph, type GraphRow } from "../git/graph.ts";
+import { setGitPrefs, splitDiffRows, useGitPrefs } from "../gitPrefs.ts";
+import { refreshGitStatus, useGitStatus } from "../gitStatusStore.ts";
+import { Icon } from "../icons.tsx";
 import {
   commentState, hunkDigest, loadComments, saveComments, splitHunks,
   type DiffHunk, type ReviewComment,
 } from "../review/anchors.ts";
+import { friendlyError } from "../settings.ts";
+import { openWorktreeSessionDialog, setGitBranch, setUiError, useStore } from "../store.ts";
+import { diffStat } from "../utils.ts";
+import { setPaneLastResource } from "../workspace/panePrefs.ts";
 import CopyButton from "./CopyButton.tsx";
 import EmptyState from "./EmptyState.tsx";
 import PrCreatePanel from "./PrCreatePanel.tsx";
-import { setGitPrefs, splitDiffRows, useGitPrefs } from "../gitPrefs.ts";
-import { refreshGitStatus, useGitStatus } from "../gitStatusStore.ts";
-import { Icon } from "../icons.tsx";
+
+type GitTab = "changes" | "log" | "branches" | "stashes";
+type RemoteStep = "fetch" | "pull" | "push";
 
 const STATUS_LETTER: Record<string, { letter: string; cls: string; label: string }> = {
   added: { letter: "A", cls: "staged", label: "Added" },
@@ -31,67 +30,123 @@ const STATUS_LETTER: Record<string, { letter: string; cls: string; label: string
   conflicted: { letter: "!", cls: "conflict", label: "Conflicted" },
 };
 
-function fileLetter(f: GitFileEntry): { letter: string; cls: string; label: string } {
-  const hit = STATUS_LETTER[f.status];
-  if (hit) return f.staged && f.status !== "conflicted" ? { ...hit, cls: "staged" } : hit;
-  return { letter: "M", cls: f.staged ? "staged" : "unstaged", label: "Modified" };
-}
-
-function GitFileMain({ file, onOpen }: { file: GitFileEntry; onOpen: () => void }) {
-  const { letter, cls, label } = fileLetter(file);
-  return (
-    <button type="button" className="git-file-main" onClick={onOpen}>
-      <span className={`git-file-letter ${cls}`} title={label} aria-label={label}>{letter}</span>
-      <span className="git-file-path" title={file.origPath ? `${file.origPath} → ${file.path}` : file.path}>
-        {file.origPath ? <><span className="muted">{file.origPath} → </span>{file.path}</> : file.path}
-      </span>
-    </button>
-  );
-}
-
-const dirOf = (p: string) => p.split("/").slice(0, -1).join("/");
-
-/** Typed confirmation for destructive bulk actions. */
-function confirmTyped(what: string): boolean {
-  const typed = window.prompt(`This cannot be undone. Type "discard" to ${what}:`);
-  return typed?.trim().toLowerCase() === "discard";
-}
-
-const GRAPH_PAGE = 30;
+const GRAPH_PAGE = 40;
 const LANE_W = 12;
+
+function fileLetter(file: GitFileEntry): { letter: string; cls: string; label: string } {
+  const hit = STATUS_LETTER[file.status];
+  if (hit) return file.staged && file.status !== "conflicted" ? { ...hit, cls: "staged" } : hit;
+  return { letter: "M", cls: file.staged ? "staged" : "unstaged", label: "Modified" };
+}
 
 function GraphSvg({ row }: { row: GraphRow }) {
   const width = Math.max(row.width, 1) * LANE_W;
   const cx = row.lane * LANE_W + LANE_W / 2;
   return (
-    <svg className="graph-svg" width={width} height={24} aria-hidden="true">
-      {row.through.map((l) => (
-        <line key={`t${l}`} x1={l * LANE_W + LANE_W / 2} y1={0} x2={l * LANE_W + LANE_W / 2} y2={24} className="graph-line" />
+    <svg className="graph-svg" width={width} height={32} aria-hidden="true">
+      {row.through.map((lane) => (
+        <line key={`t${lane}`} x1={lane * LANE_W + LANE_W / 2} y1={0} x2={lane * LANE_W + LANE_W / 2} y2={32} className="graph-line" />
       ))}
-      {row.edges.map((l, i) => (
-        <line key={`e${i}`} x1={cx} y1={12} x2={l * LANE_W + LANE_W / 2} y2={24} className="graph-line" />
+      {row.edges.map((lane, index) => (
+        <line key={`e${index}`} x1={cx} y1={16} x2={lane * LANE_W + LANE_W / 2} y2={32} className="graph-line" />
       ))}
-      <line x1={cx} y1={0} x2={cx} y2={12} className="graph-line" opacity={row.lane === 0 && row.through.length === 0 && row.edges.length <= 1 ? 0.6 : 1} />
-      <circle cx={cx} cy={12} r={3.5} className={row.edges.length > 1 ? "graph-dot merge" : "graph-dot"} />
+      <line x1={cx} y1={0} x2={cx} y2={16} className="graph-line" />
+      <circle cx={cx} cy={16} r={4} className={row.edges.length > 1 ? "graph-dot merge" : "graph-dot"} />
     </svg>
   );
 }
 
+function GitFileRow({ file, selected, busy, onOpen, onStage, onDiscard }: {
+  file: GitFileEntry;
+  selected: boolean;
+  busy: boolean;
+  onOpen: () => void;
+  onStage: () => void;
+  onDiscard?: () => void;
+}) {
+  const { letter, cls, label } = fileLetter(file);
+  return (
+    <div className={`git-file-row ${selected ? "selected" : ""}`}>
+      <button type="button" className="git-file-main" onClick={onOpen}>
+        <span className={`git-file-letter ${cls}`} title={label} aria-label={label}>{letter}</span>
+        <span className="git-file-path" title={file.origPath ? `${file.origPath} → ${file.path}` : file.path}>
+          {file.origPath ? <><span className="muted">{file.origPath} → </span>{file.path}</> : file.path}
+        </span>
+      </button>
+      <span className="git-file-actions">
+        <button className="small-btn icon-only" title={file.staged ? "Unstage" : "Stage"} aria-label={`${file.staged ? "Unstage" : "Stage"} ${file.path}`} disabled={busy} onClick={onStage}>
+          {file.staged ? <Icon.unstage /> : <Icon.stage />}
+        </button>
+        {onDiscard && (
+          <button className="small-btn icon-only danger-btn" title="Discard" aria-label={`Discard ${file.path}`} disabled={busy} onClick={onDiscard}>
+            <Icon.trash />
+          </button>
+        )}
+      </span>
+    </div>
+  );
+}
+
+function ChangeSection({ id, title, files, closed, selected, busy, onToggle, onOpen, onStage, onDiscard }: {
+  id: string;
+  title: string;
+  files: GitFileEntry[];
+  closed: boolean;
+  selected: { path: string; staged: boolean } | null;
+  busy: boolean;
+  onToggle: (id: string) => void;
+  onOpen: (file: GitFileEntry) => void;
+  onStage: (file: GitFileEntry) => void;
+  onDiscard: (file: GitFileEntry) => void;
+}) {
+  return (
+    <section className="git-change-group">
+      <button className="git-change-group-head" type="button" aria-expanded={!closed} onClick={() => onToggle(id)}>
+        <span className="git-folder-chevron" aria-hidden="true">{closed ? <Icon.chevronRight /> : <Icon.chevronDown />}</span>
+        <span>{title}</span>
+        <span className="git-count">{files.length}</span>
+      </button>
+      {!closed && (
+        <div className="git-change-group-body">
+          {files.length === 0 && <div className="git-group-empty">No files</div>}
+          {files.map((file) => (
+            <GitFileRow
+              key={`${id}:${file.path}`}
+              file={file}
+              selected={selected?.path === file.path && selected.staged === file.staged}
+              busy={busy}
+              onOpen={() => onOpen(file)}
+              onStage={() => onStage(file)}
+              {...(!file.staged && file.status !== "untracked" ? { onDiscard: () => onDiscard(file) } : {})}
+            />
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
 export default function GitView() {
-  const projectId = useStore((s) => s.activeProjectId);
-  const sessionId = useStore((s) => s.activeSessionId);
-  const diffPath = useStore((s) => s.gitDiffPath);
-  const status = useGitStatus(projectId, false, sessionId);
-  const [branches, setBranches] = useState<GitBranches>({ current: "", branches: [] });
+  const projectId = useStore((state) => state.activeProjectId);
+  const sessionId = useStore((state) => state.activeSessionId);
+  const diffPath = useStore((state) => state.gitDiffPath);
+  const status = useGitStatus(projectId, true, sessionId);
+  const prefs = useGitPrefs();
+  const [tab, setTab] = useState<GitTab>("changes");
+  const [branches, setBranches] = useState<GitBranches>({ current: null, branches: [] });
   const [trees, setTrees] = useState<Worktree[]>([]);
   const [graph, setGraph] = useState<GitGraphEntry[]>([]);
   const [stashes, setStashes] = useState<GitStash[]>([]);
   const [graphDone, setGraphDone] = useState(false);
-  const [loadError, setLoadError] = useState(false);
-  const [sel, setSel] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState("");
+  const [selected, setSelected] = useState<{ path: string; staged: boolean } | null>(null);
   const [diff, setDiff] = useState("");
+  const [diffLoading, setDiffLoading] = useState(false);
   const [commitSel, setCommitSel] = useState<string | null>(null);
   const [commitDiff, setCommitDiff] = useState("");
+  const [commitDiffLoading, setCommitDiffLoading] = useState(false);
+  const [mobileDetail, setMobileDetail] = useState(false);
   const [commitMsg, setCommitMsg] = useState("");
   const [newBranch, setNewBranch] = useState("");
   const [newTree, setNewTree] = useState("");
@@ -100,518 +155,623 @@ export default function GitView() {
   const [showTreeForm, setShowTreeForm] = useState(false);
   const [showPrForm, setShowPrForm] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [busyRemote, setBusyRemote] = useState<RemoteStep | null>(null);
+  const [remoteStatus, setRemoteStatus] = useState<{ step: RemoteStep; error?: string } | null>(null);
   const [generating, setGenerating] = useState(false);
-  const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(new Set());
+  const [closedGroups, setClosedGroups] = useState<ReadonlySet<string>>(new Set());
   const [comments, setComments] = useState<ReviewComment[]>([]);
   const [draft, setDraft] = useState<{ digest: string; line: number } | null>(null);
   const [draftText, setDraftText] = useState("");
-  const [syncSteps, setSyncSteps] = useState<Array<{ step: "fetch" | "pull" | "push"; error?: string }>>([]);
-  const prefs = useGitPrefs();
+  const [graphQuery, setGraphQuery] = useState("");
+  const [graphRef, setGraphRef] = useState("");
 
-  const refresh = useCallback(async () => {
+  const refresh = useCallback(async (showLoading = false) => {
     if (!projectId) return;
+    if (showLoading) setLoading(true);
+    setLoadError("");
     try {
-      const [s, b, w, g, stashRows] = await Promise.all([
-        refreshGitStatus(projectId, sessionId),
+      const nextStatus = await refreshGitStatus(projectId, sessionId);
+      if (!nextStatus) throw new Error("The Git service did not respond.");
+      if (!nextStatus.isRepo) {
+        setBranches({ current: null, branches: [] });
+        setTrees([]);
+        setGraph([]);
+        setStashes([]);
+        return;
+      }
+      const [nextBranches, nextTrees, nextGraph, nextStashes] = await Promise.all([
         api.gitBranches(projectId, sessionId ?? undefined),
         api.listWorktrees(projectId),
         api.gitGraph(projectId, GRAPH_PAGE, 0, sessionId ?? undefined),
         api.gitStashes(projectId, sessionId ?? undefined),
       ]);
-      if (!s) throw new Error("git status unavailable");
-      setBranches(b);
-      setTrees(w);
-      setGraph(g);
-      setStashes(stashRows);
-      setGraphDone(g.length < GRAPH_PAGE);
-      setLoadError(false);
-      if (b.current) setGitBranch(b.current);
-    } catch {
-      setLoadError(true);
+      setBranches(nextBranches);
+      setTrees(nextTrees);
+      setGraph(nextGraph);
+      setStashes(nextStashes);
+      setGraphDone(nextGraph.length < GRAPH_PAGE);
+      if (nextBranches.current) setGitBranch(nextBranches.current);
+    } catch (cause) {
+      setLoadError(friendlyError("Couldn’t load source control", cause));
+    } finally {
+      setLoading(false);
     }
   }, [projectId, sessionId]);
 
-  useEffect(() => { void refresh(); }, [refresh]);
-
-  // openChanges(path) channel: selecting a changed file elsewhere (sidebar,
-  // chat file pills, adapters) selects that exact diff in THIS canonical
-  // instance — there is no separate reduced changes implementation.
   useEffect(() => {
-    if (diffPath) {
-      setCommitSel(null);
-      setSel(diffPath);
-    }
-  }, [diffPath]);
-
-  // The selected diff is the surface's provider resource (project-scoped).
-  useEffect(() => {
-    if (projectId && sel) setPaneLastResource(projectId, "git", `changes:${sel}`);
-  }, [projectId, sel]);
+    setSelected(null);
+    setCommitSel(null);
+    setMobileDetail(false);
+    void refresh(true);
+  }, [refresh]);
 
   useEffect(() => {
     setComments(projectId ? loadComments(projectId) : []);
   }, [projectId]);
 
   useEffect(() => {
-    if (!projectId || !sel || !status) return;
-    const staged = status.staged.some((f) => f.path === sel);
-    void api.gitDiff(projectId, sel, staged, prefs.ignoreWhitespace, sessionId ?? undefined).then((d) => setDiff(d.diff));
+    if (!diffPath || !status) return;
+    const file = [...status.staged, ...status.unstaged, ...status.untracked, ...status.conflicted].find((candidate) => candidate.path === diffPath);
+    setTab("changes");
+    setCommitSel(null);
+    setSelected({ path: diffPath, staged: file?.staged ?? false });
+    setMobileDetail(true);
+  }, [diffPath, status]);
+
+  useEffect(() => {
+    if (projectId && selected) setPaneLastResource(projectId, "git", `changes:${selected.path}`);
+  }, [projectId, selected]);
+
+  useEffect(() => {
+    if (!projectId || !selected || !status?.isRepo) return;
+    let active = true;
+    setDiff("");
+    setDiffLoading(true);
     setDraft(null);
-  }, [projectId, sessionId, sel, status, prefs.ignoreWhitespace]);
+    void api.gitDiff(projectId, selected.path, selected.staged, prefs.ignoreWhitespace, sessionId ?? undefined)
+      .then((result) => { if (active) setDiff(result.diff); })
+      .finally(() => { if (active) setDiffLoading(false); });
+    return () => { active = false; };
+  }, [projectId, sessionId, selected, status?.isRepo, prefs.ignoreWhitespace]);
 
   useEffect(() => {
     if (!projectId || !commitSel) return;
+    let active = true;
+    setCommitDiff("");
+    setCommitDiffLoading(true);
     void api.gitShow(projectId, commitSel, prefs.ignoreWhitespace, sessionId ?? undefined)
-      .then((result) => setCommitDiff(result.diff))
-      .catch((err) => setUiError(friendlyError("Couldn’t load the commit diff", err)));
+      .then((result) => { if (active) setCommitDiff(result.diff); })
+      .catch((cause) => setUiError(friendlyError("Couldn’t load the commit diff", cause)))
+      .finally(() => { if (active) setCommitDiffLoading(false); });
+    return () => { active = false; };
   }, [projectId, sessionId, commitSel, prefs.ignoreWhitespace]);
 
-  const hunks = useMemo(() => splitHunks(diff), [diff]);
-  const graphRows = useMemo(() => layoutGraph(graph), [graph]);
-
-  if (!projectId) return <EmptyState title="No project selected" description="Open a project to inspect its git state." />;
-  if (loadError) return <EmptyState title="Not a git repository" description="Git data could not be loaded for this project." />;
-
-  const run = async (fn: () => Promise<unknown>) => {
+  const run = async (action: () => Promise<unknown>) => {
     setBusy(true);
     try {
-      await fn();
+      await action();
       await refresh();
-    } catch (e) {
-      setUiError(friendlyError("Couldn’t update the repository", e));
+    } catch (cause) {
+      setUiError(friendlyError("Couldn’t update the repository", cause));
     } finally {
       setBusy(false);
     }
   };
 
-  const all = status ? [...status.staged, ...status.unstaged, ...status.untracked, ...status.conflicted] : [];
+  const runRemote = async (step: RemoteStep) => {
+    if (!projectId) return;
+    setBusyRemote(step);
+    setRemoteStatus(null);
+    try {
+      const action = step === "fetch" ? api.gitFetch : step === "pull" ? api.gitPull : api.gitPush;
+      await action(projectId, "origin", sessionId ?? undefined);
+      setRemoteStatus({ step });
+      await refresh();
+    } catch (cause) {
+      setRemoteStatus({ step, error: cause instanceof Error ? cause.message : String(cause) });
+    } finally {
+      setBusyRemote(null);
+    }
+  };
+
+  const openFile = (file: GitFileEntry) => {
+    setCommitSel(null);
+    setSelected({ path: file.path, staged: file.staged });
+    setMobileDetail(true);
+  };
+
+  const toggleGroup = (id: string) => {
+    setClosedGroups((current) => {
+      const next = new Set(current);
+      if (next.has(id)) next.delete(id); else next.add(id);
+      return next;
+    });
+  };
+
+  const loadMoreGraph = async () => {
+    if (!projectId) return;
+    const more = await api.gitGraph(projectId, GRAPH_PAGE, graph.length, sessionId ?? undefined);
+    setGraph((current) => [...current, ...more]);
+    if (more.length < GRAPH_PAGE) setGraphDone(true);
+  };
+
+  const all = status ? [...status.conflicted, ...status.staged, ...status.unstaged, ...status.untracked] : [];
+  const hunks = useMemo(() => splitHunks(diff), [diff]);
+  const graphRows = useMemo(() => layoutGraph(graph), [graph]);
+  const branchChips = useMemo(() => {
+    const refs = new Set<string>();
+    for (const commit of graph) {
+      for (const ref of commit.refs) {
+        if (!ref.startsWith("tag: ")) refs.add(ref.replace(/^HEAD -> /, ""));
+      }
+    }
+    return [...refs].slice(0, 12);
+  }, [graph]);
+  const visibleGraph = useMemo(() => {
+    const query = graphQuery.trim().toLowerCase();
+    return graph.map((commit, index) => ({ commit, row: graphRows[index] }))
+      .filter(({ commit }) => {
+        const refMatch = !graphRef || commit.refs.some((ref) => ref.replace(/^HEAD -> /, "") === graphRef);
+        const queryMatch = !query || [commit.subject, commit.author, commit.shortSha, ...commit.refs].some((value) => value.toLowerCase().includes(query));
+        return refMatch && queryMatch;
+      });
+  }, [graph, graphRows, graphQuery, graphRef]);
+  const fileComments = comments.filter((comment) => comment.path === selected?.path);
+  const selectedCommit = graph.find((commit) => commit.sha === commitSel);
   const { add: addCount, del: delCount } = diffStat(diff);
 
-  // ---- folder grouping (changes-first surface) --------------------------------
-  const groups = new Map<string, GitFileEntry[]>();
-  for (const f of all) {
-    const d = dirOf(f.path);
-    const list = groups.get(d) ?? [];
-    list.push(f);
-    groups.set(d, list);
+  if (!projectId) return <EmptyState title="No project selected" description="Open a project to inspect its source control." />;
+
+  if (loading && !status) {
+    return (
+      <div className="view-page git-page" aria-busy="true" aria-label="Loading source control">
+        <div className="source-skeleton skeleton-title" />
+        <div className="source-skeleton skeleton-tabs" />
+        <div className="source-skeleton skeleton-panel" />
+      </div>
+    );
   }
-  const groupKeys = [...groups.keys()].sort();
+
+  if (loadError && !status) {
+    return <EmptyState title="Source control unavailable" description={loadError} actionLabel="Retry" onAction={() => void refresh(true)} />;
+  }
+
+  if (status && !status.isRepo) {
+    return (
+      <div className="view-page git-page">
+        <EmptyState
+          title="This folder isn’t a Git repository"
+          description="Initialize Git in this project or open a repository. Source control actions stay hidden until Git metadata is available."
+          actionLabel="Check again"
+          onAction={() => void refresh(true)}
+        />
+      </div>
+    );
+  }
+
+  const changeGroups = [
+    { id: "merge", title: "Merge Changes", files: status?.conflicted ?? [] },
+    { id: "staged", title: "Staged Changes", files: status?.staged ?? [] },
+    { id: "changes", title: "Changes", files: status?.unstaged ?? [] },
+    { id: "untracked", title: "Untracked", files: status?.untracked ?? [] },
+  ];
 
   const persistComments = (next: ReviewComment[]) => {
     setComments(next);
     saveComments(projectId, next);
   };
 
-  const fileComments = comments.filter((c) => c.path === sel);
-
-  const loadMoreGraph = async () => {
-    const more = await api.gitGraph(projectId, GRAPH_PAGE, graph.length, sessionId ?? undefined);
-    setGraph((g) => [...g, ...more]);
-    if (more.length < GRAPH_PAGE) setGraphDone(true);
-  };
-
-  const syncRepository = async () => {
-    setBusy(true);
-    const results: Array<{ step: "fetch" | "pull" | "push"; error?: string }> = [];
-    for (const [step, action] of [
-      ["fetch", api.gitFetch],
-      ["pull", api.gitPull],
-      ["push", api.gitPush],
-    ] as const) {
-      try {
-        await action(projectId, "origin", sessionId ?? undefined);
-        results.push({ step });
-      } catch (err) {
-        results.push({ step, error: err instanceof Error ? err.message : String(err) });
-      }
-      setSyncSteps([...results]);
-    }
-    await refresh();
-    setBusy(false);
+  const selectTab = (next: GitTab) => {
+    setTab(next);
+    setMobileDetail(false);
   };
 
   return (
     <div className="view-page git-page">
-      <div className="goals-head workspace-toolbar">
-        <h1 className="view-title">Git &amp; Worktrees</h1>
-        <span className="header-spacer" />
-        <button className="small-btn icon-only" title="Sync repository" aria-label="Sync repository" disabled={busy} onClick={() => void syncRepository()}><Icon.sync /></button>
-        <button className="small-btn icon-only" title="New worktree session" aria-label="New worktree session" onClick={() => openWorktreeSessionDialog(projectId)}><Icon.session /></button>
-        <button className={`small-btn icon-only ${showBranchForm ? "active" : ""}`} title="New branch" aria-label="New branch" aria-pressed={showBranchForm} onClick={() => { setShowBranchForm((v) => !v); setShowTreeForm(false); setShowPrForm(false); }}><Icon.branch /></button>
-        <button className={`small-btn icon-only ${showTreeForm ? "active" : ""}`} title="New worktree" aria-label="New worktree" aria-pressed={showTreeForm} onClick={() => { setShowTreeForm((v) => !v); setShowBranchForm(false); setShowPrForm(false); }}><Icon.worktree /></button>
-        <button className={`small-btn icon-only ${showPrForm ? "active" : ""}`} title="Create pull request" aria-label="Create pull request" aria-pressed={showPrForm} onClick={() => { setShowPrForm((v) => !v); setShowBranchForm(false); setShowTreeForm(false); }}><Icon.pullRequest /></button>
-      </div>
-      {syncSteps.length > 0 && (
-        <div className="git-sync-steps" role="status">
-          {syncSteps.map((result) => (
-            <span key={result.step} className={result.error ? "err" : "ok"} title={result.error}>
-              {result.error ? "✕" : "✓"} {result.step}{result.error ? `: ${result.error}` : ""}
+      <header className="source-control-head">
+        <div className="source-control-title">
+          <h1 className="view-title">Source Control</h1>
+          <span className="source-branch"><Icon.branch /> <span className="mono">{status?.branch || "detached HEAD"}</span></span>
+          {status && (status.ahead > 0 || status.behind > 0) && (
+            <span className="git-ahead-behind">
+              {status.ahead > 0 && <span className="ahead">↑ {status.ahead}</span>}
+              {status.behind > 0 && <span className="behind">↓ {status.behind}</span>}
             </span>
+          )}
+        </div>
+        <div className="source-remote-actions" aria-label="Remote repository actions">
+          {(["fetch", "pull", "push"] as const).map((step) => (
+            <button key={step} className="small-btn source-action-btn" disabled={busyRemote !== null || busy} onClick={() => void runRemote(step)}>
+              <Icon.sync /> <span>{busyRemote === step ? `${step[0]!.toUpperCase()}${step.slice(1)}ing…` : `${step[0]!.toUpperCase()}${step.slice(1)}`}</span>
+            </button>
           ))}
+          <button className="small-btn icon-only" title="Refresh source control" aria-label="Refresh source control" disabled={busy || busyRemote !== null} onClick={() => void refresh()}>
+            <Icon.refresh />
+          </button>
+        </div>
+      </header>
+
+      {remoteStatus && (
+        <div className={`source-inline-status ${remoteStatus.error ? "error" : "success"}`} role="status">
+          {remoteStatus.error
+            ? `${remoteStatus.step} failed: ${remoteStatus.error}`
+            : `${remoteStatus.step[0]!.toUpperCase()}${remoteStatus.step.slice(1)} completed.`}
         </div>
       )}
 
+      <nav className="source-tabs" aria-label="Source control views">
+        {([
+          ["changes", `Changes${all.length ? ` ${all.length}` : ""}`],
+          ["log", "Log"],
+          ["branches", `Branches ${branches.branches.length}`],
+          ["stashes", `Stashes ${stashes.length}`],
+        ] as const).map(([id, label]) => (
+          <button key={id} className={tab === id ? "active" : ""} aria-current={tab === id ? "page" : undefined} onClick={() => selectTab(id)}>{label}</button>
+        ))}
+      </nav>
+
       {showBranchForm && (
-        <div className="view-toolbar-row">
-          <input value={newBranch} placeholder="new-branch-name" onChange={(e) => setNewBranch(e.target.value)} />
-          <button className="small-btn" disabled={busy || !newBranch.trim()}
-            onClick={() => void run(async () => { await api.gitBranch(projectId, newBranch.trim(), undefined, sessionId ?? undefined); setNewBranch(""); setShowBranchForm(false); })}>
-            Create
-          </button>
+        <div className="source-inline-form">
+          <label htmlFor="git-new-branch">Create a branch</label>
+          <input id="git-new-branch" className="mono" value={newBranch} placeholder="feature/branch-name" onChange={(event) => setNewBranch(event.target.value)} />
+          <button className="primary-btn" disabled={busy || !newBranch.trim()} onClick={() => void run(async () => {
+            await api.gitBranch(projectId, newBranch.trim(), undefined, sessionId ?? undefined);
+            setNewBranch("");
+            setShowBranchForm(false);
+            setTab("branches");
+          })}>Create branch</button>
+          <button className="small-btn" onClick={() => setShowBranchForm(false)}>Cancel</button>
         </div>
       )}
       {showTreeForm && (
-        <div className="view-toolbar-row">
-          <input value={newTree} placeholder="branch for the worktree" onChange={(e) => setNewTree(e.target.value)} />
-          <button className="small-btn" disabled={busy || !newTree.trim()}
-            onClick={() => void run(async () => { await api.createWorktree(projectId, newTree.trim()); setNewTree(""); setShowTreeForm(false); })}>
-            Create
-          </button>
+        <div className="source-inline-form">
+          <label htmlFor="git-new-worktree">Create a worktree</label>
+          <input id="git-new-worktree" className="mono" value={newTree} placeholder="branch for the worktree" onChange={(event) => setNewTree(event.target.value)} />
+          <button className="primary-btn" disabled={busy || !newTree.trim()} onClick={() => void run(async () => {
+            await api.createWorktree(projectId, newTree.trim());
+            setNewTree("");
+            setShowTreeForm(false);
+            setTab("branches");
+          })}>Create worktree</button>
+          <button className="small-btn" onClick={() => setShowTreeForm(false)}>Cancel</button>
         </div>
       )}
-      {showPrForm && (
-        <PrCreatePanel
-          projectId={projectId}
-          sessionId={sessionId}
-          onClose={() => setShowPrForm(false)}
-        />
-      )}
+      {showPrForm && <PrCreatePanel projectId={projectId} sessionId={sessionId} onClose={() => setShowPrForm(false)} />}
 
-      <div className="git-grid">
-        <div className="git-col">
-          {/* ---- changes first ------------------------------------------------ */}
-          <div className="stat-label git-changes-head workspace-toolbar">
-            <span>Changes ({all.length})</span>
-            {status && all.length > 0 && (
-              <span className="git-ahead-behind">
-                {status.staged.length > 0 && <span className="ahead">{status.staged.length} staged</span>}
-                {status.unstaged.length + status.untracked.length > 0 && <span className="behind">{status.unstaged.length + status.untracked.length} unstaged</span>}
-                {status.conflicted.length > 0 && <span style={{ color: "var(--red)" }}>{status.conflicted.length} conflicted</span>}
-              </span>
-            )}
-            <span className="header-spacer" />
-            <button className={`small-btn icon-only ${prefs.changesView === "flat" ? "active" : ""}`} title="Flat view" aria-label="Flat view" aria-pressed={prefs.changesView === "flat"} onClick={() => setGitPrefs({ changesView: "flat" })}><Icon.list /></button>
-            <button className={`small-btn icon-only ${prefs.changesView === "tree" ? "active" : ""}`} title="Tree view" aria-label="Tree view" aria-pressed={prefs.changesView === "tree"} onClick={() => setGitPrefs({ changesView: "tree" })}><Icon.hierarchy /></button>
-            {status && (status.unstaged.length + status.untracked.length) > 0 && (
-              <button className="small-btn icon-only" title="Stage all" aria-label="Stage all" disabled={busy}
-                onClick={() => void run(() => api.gitFolder(projectId, "", "stage", sessionId ?? undefined))}>
-                <Icon.stage />
-              </button>
-            )}
-            {status && status.staged.length > 0 && (
-              <button className="small-btn icon-only" title="Unstage all" aria-label="Unstage all" disabled={busy}
-                onClick={() => void run(() => api.gitFolder(projectId, "", "unstage", sessionId ?? undefined))}>
-                <Icon.unstage />
-              </button>
-            )}
-          </div>
-          <div className="git-changes">
-            {all.length === 0 && <div className="muted" style={{ fontSize: 12.5, padding: "4px 0" }}>Working tree clean.</div>}
-            {prefs.changesView === "flat" && all.map((f) => {
-              return (
-                <div key={`${f.path}:${f.staged}`} className={`git-file-row ${sel === f.path ? "selected" : ""}`}>
-                  <GitFileMain file={f} onOpen={() => { setCommitSel(null); setSel(f.path); }} />
-                  <span className="git-file-actions">
-                    {f.staged
-                      ? <button className="small-btn icon-only" title="Unstage" aria-label={`Unstage ${f.path}`} disabled={busy} onClick={() => void run(() => api.gitUnstage(projectId, [f.path], sessionId ?? undefined))}><Icon.unstage /></button>
-                      : <button className="small-btn icon-only" title="Stage" aria-label={`Stage ${f.path}`} disabled={busy} onClick={() => void run(() => api.gitStage(projectId, [f.path], sessionId ?? undefined))}><Icon.stage /></button>}
-                    {!f.staged && f.status !== "untracked" && (
-                      <button className="small-btn icon-only danger-btn" title="Discard" aria-label={`Discard ${f.path}`} disabled={busy}
-                        onClick={() => { if (window.confirm(`Discard ${f.path}?`)) void run(() => api.gitDiscard(projectId, [f.path], sessionId ?? undefined)); }}><Icon.trash /></button>
-                    )}
-                  </span>
+      {tab === "changes" && (
+        <>
+          <div className={`git-master-detail ${mobileDetail ? "detail-open" : ""}`}>
+            <section className="git-master-pane" aria-label="Changed files">
+              <div className="git-pane-toolbar">
+                <div>
+                  <strong>Working tree</strong>
+                  <span className="muted">{all.length === 0 ? "Clean" : `${all.length} changed ${all.length === 1 ? "file" : "files"}`}</span>
                 </div>
-              );
-            })}
-            {prefs.changesView === "tree" && groupKeys.map((dir) => {
-              const files = groups.get(dir)!;
-              const open = !collapsed.has(dir);
-              return (
-                <div key={dir || "."} className="git-folder-group">
-                  <div className="git-folder-row">
-                    <button
-                      className="git-folder-toggle"
-                      aria-expanded={open}
-                      onClick={() => setCollapsed((c) => {
-                        const n = new Set(c);
-                        if (n.has(dir)) n.delete(dir); else n.add(dir);
-                        return n;
-                      })}
-                    >
-                      <span className="git-folder-chevron" aria-hidden="true">{open ? <Icon.chevronDown /> : <Icon.chevronRight />}</span>
-                      <span className="mono">{dir || "(root)"}</span> <span className="muted">({files.length})</span>
-                    </button>
-                    <span className="git-file-actions">
-                      {files.some((f) => !f.staged && f.status !== "conflicted") && (
-                        <button className="small-btn icon-only" title="Stage folder" aria-label={`Stage ${dir || "root"} folder`} disabled={busy}
-                          onClick={() => void run(() => api.gitFolder(projectId, dir, "stage", sessionId ?? undefined))}><Icon.stage /></button>
-                      )}
-                      {files.some((f) => f.staged) && (
-                        <button className="small-btn icon-only" title="Unstage folder" aria-label={`Unstage ${dir || "root"} folder`} disabled={busy}
-                          onClick={() => void run(() => api.gitFolder(projectId, dir, "unstage", sessionId ?? undefined))}><Icon.unstage /></button>
-                      )}
-                      {files.some((f) => !f.staged) && (
-                        <button className="small-btn icon-only danger-btn" title="Discard folder changes" aria-label={`Discard changes in ${dir || "root"} folder`} disabled={busy}
-                          onClick={() => { if (confirmTyped(`discard all changes under ${dir || "the repository root"}`)) void run(() => api.gitFolder(projectId, dir, "discard", sessionId ?? undefined)); }}><Icon.trash /></button>
-                      )}
-                    </span>
-                  </div>
-                  {open && files.map((f) => {
-                    return (
-                      <div key={`${f.path}:${f.staged}`} className={`git-file-row ${sel === f.path ? "selected" : ""}`}>
-                        <GitFileMain file={f} onOpen={() => { setCommitSel(null); setSel(f.path); }} />
-                        <span className="git-file-actions">
-                          {f.staged
-                            ? <button className="small-btn icon-only" title="Unstage" aria-label={`Unstage ${f.path}`} disabled={busy} onClick={() => void run(() => api.gitUnstage(projectId, [f.path], sessionId ?? undefined))}><Icon.unstage /></button>
-                            : <button className="small-btn icon-only" title="Stage" aria-label={`Stage ${f.path}`} disabled={busy} onClick={() => void run(() => api.gitStage(projectId, [f.path], sessionId ?? undefined))}><Icon.stage /></button>}
-                          {!f.staged && f.status !== "untracked" && (
-                            <button className="small-btn icon-only danger-btn" title="Discard" aria-label={`Discard ${f.path}`} disabled={busy}
-                              onClick={() => { if (window.confirm(`Discard ${f.path}?`)) void run(() => api.gitDiscard(projectId, [f.path], sessionId ?? undefined)); }}><Icon.trash /></button>
-                          )}
-                        </span>
-                      </div>
-                    );
-                  })}
-                </div>
-              );
-            })}
-          </div>
-
-          <div className="stat-label">Branch</div>
-          <div className="git-branch-card">
-            <span className="mono" style={{ fontWeight: 650 }}>{status?.branch || "—"}</span>
-            {status && (status.ahead > 0 || status.behind > 0) && (
-              <span className="git-ahead-behind">
-                {status.ahead > 0 && <span className="ahead">↑{status.ahead}</span>}
-                {status.behind > 0 && <span className="behind">↓{status.behind}</span>}
-              </span>
-            )}
-          </div>
-          {(() => {
-            // LOCAL/REMOTE sections; bare remote refs (e.g. "origin") are dropped (UX-27).
-            const others = branches.branches.filter((b) => !b.current);
-            const local = others.filter((b) => !b.remote);
-            const remote = others.filter((b) => b.remote && b.name !== b.remote && !b.name.endsWith("/HEAD"));
-            const section = (label: string, list: typeof others) => list.length > 0 && (
-              <div className="git-branch-list">
-                <div className="stat-label">{label}</div>
-                {list.map((b) => (
-                  <button key={b.name} className="git-branch-row" disabled={busy} title={b.name}
-                    onClick={() => void run(() => api.gitCheckout(projectId, b.name, sessionId ?? undefined))}>
-                    <span className="mono">{b.name}</span>
+                <span className="header-spacer" />
+                {(status?.unstaged.length || status?.untracked.length || status?.conflicted.length) ? (
+                  <button className="small-btn" disabled={busy} onClick={() => void run(() => api.gitFolder(projectId, "", "stage", sessionId ?? undefined))}>
+                    <Icon.stage /> Stage all
                   </button>
-                ))}
-              </div>
-            );
-            return <>{section("Local", local)}{section("Remote", remote)}</>;
-          })()}
-
-          <div className="stat-label">Worktrees ({trees.length})</div>
-          {trees.length === 0 && <div className="muted" style={{ fontSize: 12.5 }}>No linked worktrees — sessions run in the project root.</div>}
-          {trees.map((t) => (
-            <div key={t.path} className="git-wt-card">
-              <div className="mono" style={{ fontWeight: 600 }}>
-                {t.branch}
-                <span className={`ctx-badge ${t.isMain ? "green" : ""}`} style={{ marginLeft: 6 }}>{t.isMain ? "main" : "linked"}</span>
-              </div>
-              <div className="muted" style={{ fontSize: 11 }}>{t.path} · {t.head.slice(0, 7)}</div>
-              {!t.isMain && (
-                <div className="git-wt-actions">
-                  <button className="small-btn icon-only git-wt-session" title="New session" aria-label={`New session in ${t.branch}`} disabled={busy} onClick={() => openWorktreeSessionDialog(projectId, t.path)}>
-                    <Icon.session />
+                ) : null}
+                {status && status.staged.length > 0 && (
+                  <button className="small-btn icon-only" title="Unstage all" aria-label="Unstage all" disabled={busy} onClick={() => void run(() => api.gitFolder(projectId, "", "unstage", sessionId ?? undefined))}>
+                    <Icon.unstage />
                   </button>
-                  <button className="small-btn icon-only danger-btn git-wt-remove" title="Remove worktree" aria-label={`Remove worktree ${t.branch}`} disabled={busy}
-                    onClick={() => { if (window.confirm(`Remove worktree ${t.path}?`)) void run(() => api.removeWorktree(projectId, t.path, true)); }}>
-                    <Icon.trash />
-                  </button>
-                </div>
-              )}
-            </div>
-          ))}
-
-          <div className="stat-label">Stashes ({stashes.length})</div>
-          <div className="view-toolbar-row">
-            <input value={stashMessage} placeholder="stash message (optional)" onChange={(event) => setStashMessage(event.target.value)} />
-            <button className="small-btn" disabled={busy || all.length === 0}
-              onClick={() => void run(async () => { await api.gitStashPush(projectId, stashMessage.trim() || undefined, sessionId ?? undefined); setStashMessage(""); setSel(null); })}>
-              Stash
-            </button>
-          </div>
-          {stashes.map((stash) => (
-            <div className="git-stash-row" key={stash.ref}>
-              <span className="mono">{stash.ref}</span>
-              <span className="git-subj" title={stash.message}>{stash.message.replace(/^On [^:]+:\s*/, "")}</span>
-              <button className="small-btn" disabled={busy} onClick={() => void run(() => api.gitStashApply(projectId, stash.ref, sessionId ?? undefined))}>Apply</button>
-              <button className="small-btn danger-btn" disabled={busy}
-                onClick={() => { if (window.confirm(`Drop ${stash.ref}?`)) void run(() => api.gitStashDrop(projectId, stash.ref, sessionId ?? undefined)); }}>
-                Drop
-              </button>
-            </div>
-          ))}
-
-          {/* ---- commit graph -------------------------------------------------- */}
-          <div className="stat-label">Graph</div>
-          {graph.length === 0 && <div className="muted" style={{ fontSize: 12.5 }}>No commits yet.</div>}
-          <div className="git-graph">
-            {graph.map((c, i) => (
-              <button key={c.sha} className={`git-graph-row ${commitSel === c.sha ? "selected" : ""}`}
-                title={`${c.author} · ${new Date(c.date).toLocaleString()}${c.parents.length > 1 ? " · merge" : ""}`}
-                onClick={() => { setSel(null); setCommitSel(c.sha); }}>
-                {graphRows[i] && <GraphSvg row={graphRows[i]!} />}
-                <span className="git-sha">{c.shortSha}</span>
-                {c.refs.map((r) => (
-                  <span key={r} className={`graph-ref${r.startsWith("tag: ") ? " tag" : ""}`}>{r.replace(/^tag: /, "⌂ ")}</span>
-                ))}
-                <span className="git-subj">{c.subject}</span>
-              </button>
-            ))}
-          </div>
-          {!graphDone && graph.length > 0 && (
-            <button className="small-btn" onClick={() => void loadMoreGraph()}>Load more…</button>
-          )}
-        </div>
-
-        <div className="git-col git-col-right">
-          {commitSel ? (
-            <>
-              <div className="wt-file" title={commitSel}>
-                Commit {graph.find((commit) => commit.sha === commitSel)?.shortSha ?? commitSel.slice(0, 7)}
-                {" · "}{graph.find((commit) => commit.sha === commitSel)?.subject ?? ""}
+                )}
               </div>
-              <DiffPrefsToolbar />
-              <DiffContent diff={commitDiff} split={prefs.layout === "split"} wrap={prefs.wrap} />
-            </>
-          ) : all.length === 0 ? (
-            <EmptyState title="No changes" description="The working tree is clean. Edits in this project will show up here." />
-          ) : sel === null ? (
-            <EmptyState title="Pick a file" description="Select a changed file to view its diff." />
-          ) : (
-            <>
-              <div className="wt-file" title={sel}>{sel}</div>
-              <DiffPrefsToolbar />
-              {prefs.layout === "split" ? (
-                <DiffContent diff={diff} split wrap={prefs.wrap} />
-              ) : <div className="copy-wrap">
-                <pre className={`git-diff git-diff-page${prefs.wrap ? " wrap" : ""}`}>
-                  {hunks.length === 0 && diff.split("\n").map((line, i) => (
-                    <div key={i} className="git-diff-line">
-                      <span className="git-diff-ln">{i + 1}</span>
-                      <span>{line}</span>
-                    </div>
-                  ))}
-                  {hunks.map((h, hi) => (
-                    <HunkBlock
-                      key={hi}
-                      hunk={h}
-                      onComment={() => { setDraft({ digest: hunkDigest(h), line: h.startNew }); setDraftText(""); }}
-                    />
-                  ))}
-                </pre>
-                <CopyButton text={diff} />
-              </div>}
-
-              {draft && (
-                <div className="review-draft">
-                  <textarea
-                    autoFocus
-                    rows={2}
-                    placeholder={`Review note near line ${draft.line}…`}
-                    value={draftText}
-                    onChange={(e) => setDraftText(e.target.value)}
+              <div className="git-change-groups">
+                {changeGroups.map((group) => (
+                  <ChangeSection
+                    key={group.id}
+                    {...group}
+                    closed={closedGroups.has(group.id)}
+                    selected={selected}
+                    busy={busy}
+                    onToggle={toggleGroup}
+                    onOpen={openFile}
+                    onStage={(file) => void run(() => file.staged
+                      ? api.gitUnstage(projectId, [file.path], sessionId ?? undefined)
+                      : api.gitStage(projectId, [file.path], sessionId ?? undefined))}
+                    onDiscard={(file) => {
+                      if (window.confirm(`Discard changes in ${file.path}?`)) {
+                        void run(() => api.gitDiscard(projectId, [file.path], sessionId ?? undefined));
+                      }
+                    }}
                   />
-                  <div className="commit-row">
-                    <button className="small-btn" onClick={() => setDraft(null)}>Cancel</button>
-                    <button className="primary-btn" style={{ padding: "4px 12px", fontSize: 12 }} disabled={!draftText.trim()}
-                      onClick={() => {
-                        persistComments([
-                          ...comments,
-                          { id: `rc_${Date.now().toString(36)}`, path: sel, digest: draft.digest, line: draft.line, text: draftText.trim(), createdAt: Date.now() },
-                        ]);
-                        setDraft(null);
-                      }}>
-                      Add note
-                    </button>
+                ))}
+              </div>
+            </section>
+            <section className="git-detail-pane" aria-label="Change details">
+              {selected && (
+                <div className="git-mobile-detail-head">
+                  <button className="small-btn" onClick={() => setMobileDetail(false)}><Icon.back /> Changes</button>
+                  <span className="mono" title={selected.path}>{selected.path}</span>
+                </div>
+              )}
+              {!selected ? (
+                <EmptyState
+                  title={all.length === 0 ? "Working tree clean" : "Select a file to review"}
+                  description={all.length === 0 ? "Local edits will appear here as soon as they are detected." : "Choose a file from the change list to inspect its diff."}
+                />
+              ) : (
+                <>
+                  <div className="git-detail-title">
+                    <div>
+                      <strong title={selected.path}>{selected.path}</strong>
+                      <span className="muted">{selected.staged ? "Staged changes" : "Working tree changes"}</span>
+                    </div>
+                    <span className="header-spacer" />
+                    {(addCount + delCount > 0) && <span className="diff-stat"><span>+{addCount}</span><span>−{delCount}</span></span>}
                   </div>
-                </div>
-              )}
-
-              {fileComments.length > 0 && (
-                <div className="review-list">
-                  <div className="stat-label">Review notes ({fileComments.length})</div>
-                  {fileComments.map((c) => {
-                    const state = commentState(c, hunks);
-                    return (
-                      <div key={c.id} className={`review-note${state === "outdated" ? " outdated" : ""}`}>
-                        <div className="review-note-head">
-                          <span className="mono">L{c.line}</span>
-                          {state === "outdated" && <span className="tag">Outdated</span>}
-                          <span className="header-spacer" />
-                          <button className="small-btn icon-only" title="Remove review note" aria-label="Remove review note" onClick={() => persistComments(comments.filter((x) => x.id !== c.id))}><Icon.close /></button>
-                        </div>
-                        <div className="review-note-text">{c.text}</div>
+                  <DiffPrefsToolbar />
+                  {diffLoading ? <DiffSkeleton /> : prefs.layout === "split" ? (
+                    <DiffContent diff={diff} split wrap={prefs.wrap} />
+                  ) : (
+                    <div className="copy-wrap">
+                      <pre className={`git-diff git-diff-page${prefs.wrap ? " wrap" : ""}`}>
+                        {hunks.length === 0 && diff.split("\n").map((line, index) => (
+                          <div key={index} className="git-diff-line"><span className="git-diff-ln">{index + 1}</span><span>{line}</span></div>
+                        ))}
+                        {hunks.map((hunk, index) => (
+                          <HunkBlock key={index} hunk={hunk} onComment={() => {
+                            setDraft({ digest: hunkDigest(hunk), line: hunk.startNew });
+                            setDraftText("");
+                          }} />
+                        ))}
+                      </pre>
+                      <CopyButton text={diff} />
+                    </div>
+                  )}
+                  {draft && (
+                    <div className="review-draft">
+                      <textarea autoFocus rows={3} placeholder={`Review note near line ${draft.line}…`} value={draftText} onChange={(event) => setDraftText(event.target.value)} />
+                      <div className="commit-row">
+                        <button className="small-btn" onClick={() => setDraft(null)}>Cancel</button>
+                        <button className="primary-btn" disabled={!draftText.trim()} onClick={() => {
+                          persistComments([...comments, {
+                            id: `rc_${Date.now().toString(36)}`,
+                            path: selected.path,
+                            digest: draft.digest,
+                            line: draft.line,
+                            text: draftText.trim(),
+                            createdAt: Date.now(),
+                          }]);
+                          setDraft(null);
+                        }}>Add note</button>
                       </div>
-                    );
-                  })}
-                </div>
+                    </div>
+                  )}
+                  {fileComments.length > 0 && (
+                    <div className="review-list">
+                      <div className="stat-label">Review notes ({fileComments.length})</div>
+                      {fileComments.map((comment) => {
+                        const anchorState = commentState(comment, hunks);
+                        return (
+                          <div key={comment.id} className={`review-note${anchorState === "outdated" ? " outdated" : ""}`}>
+                            <div className="review-note-head">
+                              <span className="mono">L{comment.line}</span>
+                              {anchorState === "outdated" && <span className="tag">Outdated</span>}
+                              <span className="header-spacer" />
+                              <button className="small-btn icon-only" title="Remove review note" aria-label="Remove review note" onClick={() => persistComments(comments.filter((item) => item.id !== comment.id))}><Icon.close /></button>
+                            </div>
+                            <div className="review-note-text">{comment.text}</div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </>
               )}
-            </>
-          )}
+            </section>
+          </div>
 
           {status && status.staged.length > 0 && (
-            <div className="commit-area">
-              <textarea
-                className="commit-msg"
-                rows={2}
-                placeholder="Commit message…"
-                value={commitMsg}
-                onChange={(e) => setCommitMsg(e.target.value)}
-              />
-              <div className="commit-row">
-                <button className="small-btn" disabled={generating || busy}
-                  onClick={() => { setGenerating(true); void api.gitCommitMessage(projectId, sessionId ?? undefined).then((r) => { if (r.message) setCommitMsg(r.message); }).finally(() => setGenerating(false)); }}>
-                  {generating ? "…" : "✦ Generate with AI"}
-                </button>
-                <button className="primary-btn" style={{ padding: "5px 14px", fontSize: 12 }}
-                  disabled={!commitMsg.trim() || busy}
-                  onClick={() => void run(async () => { await api.gitCommit(projectId, commitMsg.trim(), sessionId ?? undefined); setCommitMsg(""); setSel(null); })}>
-                  Commit
-                </button>
+            <section className="git-commit-composer" aria-label="Commit staged changes">
+              <div className="git-commit-heading">
+                <strong>Commit {status.staged.length} staged {status.staged.length === 1 ? "file" : "files"}</strong>
+                <span className="muted">Changes are committed to <span className="mono">{status.branch || "HEAD"}</span></span>
               </div>
-            </div>
+              <textarea className="commit-msg" rows={2} placeholder="Commit message…" value={commitMsg} onChange={(event) => setCommitMsg(event.target.value)} />
+              <div className="commit-row">
+                <button className="small-btn" disabled={generating || busy} onClick={() => {
+                  setGenerating(true);
+                  void api.gitCommitMessage(projectId, sessionId ?? undefined)
+                    .then((result) => { if (result.message) setCommitMsg(result.message); })
+                    .finally(() => setGenerating(false));
+                }}>{generating ? "Generating…" : "✦ Generate"}</button>
+                <button className="primary-btn" disabled={!commitMsg.trim() || busy} onClick={() => void run(async () => {
+                  await api.gitCommit(projectId, commitMsg.trim(), sessionId ?? undefined);
+                  setCommitMsg("");
+                  setSelected(null);
+                  setMobileDetail(false);
+                })}>{busy ? "Committing…" : "Commit"}</button>
+              </div>
+            </section>
           )}
-          {sel && (addCount + delCount > 0) && (
-            <div className="muted" style={{ fontSize: 11.5 }}>
-              <span style={{ color: "var(--green)" }}>+{addCount}</span>{" "}
-              <span style={{ color: "var(--red)" }}>-{delCount}</span>
+        </>
+      )}
+
+      {tab === "log" && (
+        <div className={`git-master-detail git-log-layout ${mobileDetail ? "detail-open" : ""}`}>
+          <section className="git-master-pane">
+            <div className="source-search">
+              <Icon.search />
+              <input value={graphQuery} placeholder="Search commits, authors, or refs" aria-label="Search commit log" onChange={(event) => setGraphQuery(event.target.value)} />
+              {graphQuery && <button className="source-search-clear" aria-label="Clear search" onClick={() => setGraphQuery("")}>×</button>}
+            </div>
+            <div className="git-ref-chips" aria-label="Filter by branch">
+              <button className={!graphRef ? "active" : ""} onClick={() => setGraphRef("")}>All branches</button>
+              {branchChips.map((ref) => <button key={ref} className={graphRef === ref ? "active" : ""} onClick={() => setGraphRef(ref)}>{ref}</button>)}
+            </div>
+            <div className="git-graph">
+              {visibleGraph.length === 0 && <div className="git-filter-empty">No commits match this filter.</div>}
+              {visibleGraph.map(({ commit, row }) => (
+                <button key={commit.sha} className={`git-graph-row ${commitSel === commit.sha ? "selected" : ""}`} onClick={() => {
+                  setCommitSel(commit.sha);
+                  setSelected(null);
+                  setMobileDetail(true);
+                }}>
+                  {row && <GraphSvg row={row} />}
+                  <span className="git-graph-copy">
+                    <span className="git-graph-subject">{commit.subject}</span>
+                    <span className="git-graph-meta">{commit.author} · {new Date(commit.date).toLocaleDateString()} · <span className="mono">{commit.shortSha}</span></span>
+                  </span>
+                  <span className="git-graph-refs">
+                    {commit.refs.slice(0, 2).map((ref) => <span key={ref} className={`graph-ref${ref.startsWith("tag: ") ? " tag" : ""}`}>{ref.replace(/^tag: /, "⌂ ")}</span>)}
+                  </span>
+                </button>
+              ))}
+            </div>
+            {!graphDone && graph.length > 0 && <button className="small-btn git-load-more" onClick={() => void loadMoreGraph()}>Load older commits</button>}
+          </section>
+          <section className="git-detail-pane">
+            {commitSel && (
+              <div className="git-mobile-detail-head">
+                <button className="small-btn" onClick={() => setMobileDetail(false)}><Icon.back /> Log</button>
+                <span className="mono">{selectedCommit?.shortSha ?? commitSel.slice(0, 7)}</span>
+              </div>
+            )}
+            {!commitSel ? <EmptyState title="Select a commit" description="Choose a commit to inspect its complete patch." /> : (
+              <>
+                <div className="git-commit-detail-head">
+                  <span className="git-sha">{selectedCommit?.shortSha ?? commitSel.slice(0, 7)}</span>
+                  <strong>{selectedCommit?.subject}</strong>
+                  {selectedCommit && <span className="muted">{selectedCommit.author} · {new Date(selectedCommit.date).toLocaleString()}</span>}
+                </div>
+                <DiffPrefsToolbar />
+                {commitDiffLoading ? <DiffSkeleton /> : <DiffContent diff={commitDiff} split={prefs.layout === "split"} wrap={prefs.wrap} />}
+              </>
+            )}
+          </section>
+        </div>
+      )}
+
+      {tab === "branches" && (
+        <div className="git-resource-page">
+          <div className="git-resource-head">
+            <div>
+              <h2>Branches &amp; worktrees</h2>
+              <p>Switch context or start an isolated workspace.</p>
+            </div>
+            <span className="header-spacer" />
+            <button className="small-btn" onClick={() => {
+              setShowBranchForm(true);
+              setShowTreeForm(false);
+              setShowPrForm(false);
+            }}><Icon.branch /> New branch</button>
+            <button className="small-btn" onClick={() => {
+              setShowTreeForm(true);
+              setShowBranchForm(false);
+              setShowPrForm(false);
+            }}><Icon.worktree /> New worktree</button>
+            <button className="primary-btn" onClick={() => {
+              setShowPrForm(true);
+              setShowBranchForm(false);
+              setShowTreeForm(false);
+            }}><Icon.pullRequest /> Create PR</button>
+          </div>
+          <div className="git-resource-grid">
+            <section className="git-resource-card">
+              <div className="stat-label">Current branch</div>
+              <div className="git-current-branch"><Icon.branch /><span className="mono">{status?.branch || "detached HEAD"}</span><span className="tag">current</span></div>
+              {(["Local", "Remote"] as const).map((label) => {
+                const remote = label === "Remote";
+                const rows = branches.branches.filter((branch) => !branch.current && Boolean(branch.remote) === remote && (!remote || (branch.name !== branch.remote && !branch.name.endsWith("/HEAD"))));
+                return (
+                  <div key={label} className="git-branch-section">
+                    <div className="stat-label">{label} ({rows.length})</div>
+                    {rows.length === 0 && <div className="git-group-empty">No {label.toLowerCase()} branches</div>}
+                    {rows.map((branch) => (
+                      <button key={branch.name} className="git-branch-row" disabled={busy} onClick={() => void run(() => api.gitCheckout(projectId, branch.name, sessionId ?? undefined))}>
+                        <Icon.branch /><span className="mono">{branch.name}</span><span className="header-spacer" /><span className="muted">Checkout</span>
+                      </button>
+                    ))}
+                  </div>
+                );
+              })}
+            </section>
+            <section className="git-resource-card">
+              <div className="stat-label">Worktrees ({trees.length})</div>
+              {trees.length === 0 && <EmptyState title="No linked worktrees" description="New sessions currently run in the project root." />}
+              <div className="git-worktree-list">
+                {trees.map((tree) => (
+                  <article key={tree.path} className="git-wt-card">
+                    <div className="git-wt-copy">
+                      <strong className="mono">{tree.branch ?? "detached HEAD"}</strong>
+                      <span className="muted mono" title={tree.path}>{tree.path}</span>
+                      <span className="muted mono">{tree.head.slice(0, 7)}</span>
+                    </div>
+                    <span className={`tag ${tree.isMain ? "green" : ""}`}>{tree.isMain ? "main" : "linked"}</span>
+                    <button className="small-btn" title={`New session in ${tree.branch ?? "this worktree"}`} onClick={() => openWorktreeSessionDialog(projectId, tree.path)}><Icon.session /> Session</button>
+                    {!tree.isMain && <button className="small-btn icon-only danger-btn" title="Remove worktree" aria-label={`Remove worktree ${tree.branch ?? tree.path}`} disabled={busy} onClick={() => {
+                      if (window.confirm(`Remove worktree ${tree.path}?`)) void run(() => api.removeWorktree(projectId, tree.path, true));
+                    }}><Icon.trash /></button>}
+                  </article>
+                ))}
+              </div>
+              <button className="small-btn git-new-session-btn" onClick={() => openWorktreeSessionDialog(projectId)}><Icon.session /> New worktree session</button>
+            </section>
+          </div>
+        </div>
+      )}
+
+      {tab === "stashes" && (
+        <div className="git-resource-page">
+          <div className="git-resource-head">
+            <div>
+              <h2>Stashes</h2>
+              <p>Temporarily set aside local changes without creating a commit.</p>
+            </div>
+          </div>
+          <div className="git-stash-composer">
+            <label htmlFor="stash-message">Stash current changes</label>
+            <input id="stash-message" value={stashMessage} placeholder="Optional message" onChange={(event) => setStashMessage(event.target.value)} />
+            <button className="primary-btn" disabled={busy || all.length === 0} onClick={() => void run(async () => {
+              await api.gitStashPush(projectId, stashMessage.trim() || undefined, sessionId ?? undefined);
+              setStashMessage("");
+              setSelected(null);
+            })}>Stash {all.length > 0 ? `${all.length} ${all.length === 1 ? "file" : "files"}` : "changes"}</button>
+          </div>
+          {stashes.length === 0 ? <EmptyState title="No stashes" description="Saved work-in-progress changes will appear here." /> : (
+            <div className="git-stash-list">
+              {stashes.map((stash) => (
+                <article className="git-stash-card" key={stash.ref}>
+                  <span className="git-stash-icon"><Icon.commit /></span>
+                  <div>
+                    <strong>{stash.message.replace(/^On [^:]+:\s*/, "") || "Stashed changes"}</strong>
+                    <span className="muted"><span className="mono">{stash.ref}</span> · {new Date(stash.date).toLocaleString()}</span>
+                  </div>
+                  <span className="header-spacer" />
+                  <button className="small-btn" disabled={busy} onClick={() => void run(() => api.gitStashApply(projectId, stash.ref, sessionId ?? undefined))}>Apply</button>
+                  <button className="small-btn danger-btn" disabled={busy} onClick={() => {
+                    if (window.confirm(`Drop ${stash.ref}? This cannot be undone.`)) void run(() => api.gitStashDrop(projectId, stash.ref, sessionId ?? undefined));
+                  }}>Drop</button>
+                </article>
+              ))}
             </div>
           )}
         </div>
-      </div>
+      )}
     </div>
   );
 }
 
 function HunkBlock({ hunk, onComment }: { hunk: DiffHunk; onComment: () => void }) {
-  let ln = hunk.startNew;
+  let lineNumber = hunk.startNew;
   return (
     <>
       <div className="git-diff-line diff-hunk">
         <span className="git-diff-ln" />
         <span>{hunk.header}</span>
-        <button className="hunk-comment-btn" title="Add review note for this hunk" onClick={onComment}>💬</button>
+        <button className="hunk-comment-btn" title="Add review note for this hunk" aria-label="Add review note" onClick={onComment}>+</button>
       </div>
-      {hunk.body.map((line, i) => {
-        let cls = "";
+      {hunk.body.map((line, index) => {
+        let className = "";
         let shown = "";
-        if (line.startsWith("+")) { cls = "diff-add"; shown = String(ln++); }
-        else if (line.startsWith("-")) { cls = "diff-del"; }
-        else { shown = String(ln++); }
-        return (
-          <div key={i} className={`git-diff-line ${cls}`}>
-            <span className="git-diff-ln">{shown}</span>
-            <span>{line}</span>
-          </div>
-        );
+        if (line.startsWith("+")) { className = "diff-add"; shown = String(lineNumber++); }
+        else if (line.startsWith("-")) className = "diff-del";
+        else shown = String(lineNumber++);
+        return <div key={index} className={`git-diff-line ${className}`}><span className="git-diff-ln">{shown}</span><span>{line}</span></div>;
       })}
     </>
   );
@@ -621,16 +781,18 @@ function DiffPrefsToolbar() {
   const prefs = useGitPrefs();
   return (
     <div className="diff-prefs">
-      <button className={`small-btn ${prefs.layout === "unified" ? "active" : ""}`} onClick={() => setGitPrefs({ layout: "unified" })}>Unified</button>
-      <button className={`small-btn ${prefs.layout === "split" ? "active" : ""}`} onClick={() => setGitPrefs({ layout: "split" })}>Split</button>
+      <div className="diff-layout-toggle">
+        <button className={prefs.layout === "unified" ? "active" : ""} onClick={() => setGitPrefs({ layout: "unified" })}>Unified</button>
+        <button className={prefs.layout === "split" ? "active" : ""} onClick={() => setGitPrefs({ layout: "split" })}>Split</button>
+      </div>
       <label><input type="checkbox" checked={prefs.ignoreWhitespace} onChange={(event) => setGitPrefs({ ignoreWhitespace: event.target.checked })} /> Ignore whitespace</label>
-      <label><input type="checkbox" checked={prefs.wrap} onChange={(event) => setGitPrefs({ wrap: event.target.checked })} /> Wrap</label>
+      <label><input type="checkbox" checked={prefs.wrap} onChange={(event) => setGitPrefs({ wrap: event.target.checked })} /> Wrap lines</label>
     </div>
   );
 }
 
 function DiffContent({ diff, split, wrap }: { diff: string; split: boolean; wrap: boolean }) {
-  if (!diff) return <div className="empty" style={{ padding: 12 }}>No diff.</div>;
+  if (!diff) return <EmptyState title="No textual diff" description="This file may be binary, unchanged, or represented by metadata only." />;
   if (!split) {
     return (
       <div className="copy-wrap">
@@ -650,6 +812,14 @@ function DiffContent({ diff, split, wrap }: { diff: string; split: boolean; wrap
         ))}
       </div>
       <CopyButton text={diff} />
+    </div>
+  );
+}
+
+function DiffSkeleton() {
+  return (
+    <div className="diff-skeleton" aria-label="Loading diff" aria-busy="true">
+      <span /><span /><span /><span /><span />
     </div>
   );
 }
