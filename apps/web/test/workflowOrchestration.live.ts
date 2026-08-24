@@ -339,9 +339,11 @@ test("complete workflow journey remains synchronized, accessible, and responsive
   assert.equal(await dialog.getAttribute("aria-modal"), "true");
   assert.equal(await dialog.getAttribute("aria-describedby"), "workflow-launch-description");
   await page.keyboard.press("Shift+Tab");
+  assert.equal(await page.evaluate(() => document.activeElement?.getAttribute("aria-label")), "Close workflow launcher");
+  await page.keyboard.press("Shift+Tab");
   assert.equal(await page.evaluate(() => document.activeElement?.textContent?.trim()), "Create workflow");
   await page.keyboard.press("Tab");
-  assert.equal(await page.evaluate(() => document.activeElement?.tagName), "TEXTAREA");
+  assert.equal(await page.evaluate(() => document.activeElement?.getAttribute("aria-label")), "Close workflow launcher");
 
   await dialog.getByRole("button", { name: "Run Release pipeline workflow" }).click();
   await page.waitForSelector(".workflow-page", { state: "visible" });
