@@ -7,7 +7,7 @@ import {
   setSidebarOpen, setUiError, startNewSession,
 } from "../store.ts";
 import {
-  getSyncStatus, refreshSessions, renameProject, subscribeSyncStatus,
+  getSyncStatus, reconnectSync, refreshSessions, renameProject, subscribeSyncStatus,
 } from "../init.ts";
 import { MOD } from "../format.ts";
 import { friendlyError } from "../settings.ts";
@@ -27,6 +27,21 @@ import {
 import { api } from "../api.ts";
 import { announce } from "./a11y/live.tsx";
 import ProjectAppearanceDialog from "./ProjectAppearanceDialog.tsx";
+
+const EXPANDED_PROJECTS_KEY = "polyth.sidebar.expandedProjects";
+
+function loadExpandedProjects(activeProjectId: string | null): ReadonlySet<string> {
+  try {
+    const raw = JSON.parse(localStorage.getItem(EXPANDED_PROJECTS_KEY) ?? "[]") as unknown;
+    if (Array.isArray(raw)) {
+      const ids = raw.filter((id): id is string => typeof id === "string");
+      if (ids.length > 0) return new Set(ids);
+    }
+  } catch {
+    // Corrupt or unavailable UI storage falls back to revealing the active project.
+  }
+  return new Set(activeProjectId ? [activeProjectId] : []);
+}
 
 /** Close the drawer only when it is actually open (avoids no-op re-renders
  *  in wide mode, where the sidebar is a plain inline column). */
@@ -57,6 +72,9 @@ export default function Sidebar() {
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState<"recent" | "name">("recent");
   const [sortOpen, setSortOpen] = useState(false);
+  const [filterOpen, setFilterOpen] = useState(false);
+  const [connectionOpen, setConnectionOpen] = useState(false);
+  const [globalMenuOpen, setGlobalMenuOpen] = useState(false);
   const [appearanceProjectId, setAppearanceProjectId] = useState<string | null>(null);
   const [attentionOnly, setAttentionOnly] = useState(false);
   const syncStatus = useSyncExternalStore(subscribeSyncStatus, getSyncStatus, () => "disconnected");
@@ -66,11 +84,18 @@ export default function Sidebar() {
   // into worktrees and sessions. Expansion is per-project UI state.
   const viewMode = useSidebarViewMode();
   const [expandedTrees, setExpandedTrees] = useState<ReadonlySet<string>>(
-    () => new Set(activeProjectId ? [activeProjectId] : []),
+    () => loadExpandedProjects(activeProjectId),
   );
   useEffect(() => {
+    try {
+      localStorage.setItem(EXPANDED_PROJECTS_KEY, JSON.stringify([...expandedTrees]));
+    } catch {
+      // UI expansion persistence is best effort.
+    }
+  }, [expandedTrees]);
+  useEffect(() => {
     // The active project always reveals its worktree/session branch.
-    if (!activeProjectId || viewMode !== "tree") return;
+    if (!activeProjectId) return;
     setExpandedTrees((prev) => (prev.has(activeProjectId) ? prev : new Set(prev).add(activeProjectId)));
   }, [activeProjectId, viewMode]);
   const toggleTree = (id: string) => {
@@ -98,7 +123,8 @@ export default function Sidebar() {
       if (!needle) return true;
       if (`${candidate.name} ${candidate.path}`.toLowerCase().includes(needle)) return true;
       return sessions.some((session) =>
-        session.projectId === candidate.id && session.title.toLowerCase().includes(needle));
+        session.projectId === candidate.id
+        && `${session.title} ${session.branch ?? ""} ${session.worktreePath ?? ""}`.toLowerCase().includes(needle));
     });
     return filtered.sort((a, b) => {
       if (sort === "name") return (a.name || a.path).localeCompare(b.name || b.path);
@@ -114,6 +140,9 @@ export default function Sidebar() {
   // drawer-open preference.
   const mode = useShellMode();
   const compact = mode !== "wide";
+  // Compact navigation is always the complete project → worktree → session
+  // tree. Desktop keeps the user's optional list-mode preference.
+  const effectiveViewMode = compact ? "tree" : viewMode;
   // Finding 2: wide-mode width + collapse persist across reloads; the compact
   // drawer keeps its own responsive geometry and ignores both.
   const layout = useSidebarLayout();
@@ -123,6 +152,10 @@ export default function Sidebar() {
   const navRef = useRef<HTMLElement>(null);
   const projectMenuRef = useRef<HTMLDivElement>(null);
   const projectMenuTriggerRef = useRef<HTMLButtonElement>(null);
+  const sortRef = useRef<HTMLDivElement>(null);
+  const filterRef = useRef<HTMLDivElement>(null);
+  const connectionRef = useRef<HTMLDivElement>(null);
+  const globalMenuRef = useRef<HTMLDivElement>(null);
   const onProjectMenuKey = useDismissibleMenu({
     open: projectMenu !== null,
     menuRef: projectMenuRef,
@@ -140,12 +173,29 @@ export default function Sidebar() {
     onClose: () => setSidebarOpen(false),
     containerRef: navRef,
   });
-
-  const onNewSession = () => {
-    if (!activeProjectId) return;
-    startNewSession(activeProjectId);
-    closeDrawer();
-  };
+  useEffect(() => {
+    if (!sortOpen && !filterOpen && !connectionOpen && !globalMenuOpen) return;
+    const onPointerDown = (event: MouseEvent) => {
+      const target = event.target as Node;
+      if (sortOpen && !sortRef.current?.contains(target)) setSortOpen(false);
+      if (filterOpen && !filterRef.current?.contains(target)) setFilterOpen(false);
+      if (connectionOpen && !connectionRef.current?.contains(target)) setConnectionOpen(false);
+      if (globalMenuOpen && !globalMenuRef.current?.contains(target)) setGlobalMenuOpen(false);
+    };
+    const onKeyDown = (event: globalThis.KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      setSortOpen(false);
+      setFilterOpen(false);
+      setConnectionOpen(false);
+      setGlobalMenuOpen(false);
+    };
+    document.addEventListener("mousedown", onPointerDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", onPointerDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [connectionOpen, filterOpen, globalMenuOpen, sortOpen]);
   const toggleSelectMode = () => {
     setSelectMode((current) => {
       if (current) setSelectedSessionIds(new Set());
@@ -252,43 +302,97 @@ export default function Sidebar() {
           </div>
         )}
         {!collapsed && (<>
-        <div className="sidebar-head">
-          <h2 className="sr-only">Projects and sessions</h2>
+        <div className="sidebar-service-bar">
+          <div className="sidebar-search">
+            <Icon.search />
+            <input
+              type="search"
+              value={query}
+              placeholder="Search sessions…"
+              aria-label="Search projects, worktrees, and sessions"
+              onChange={(event) => setQuery(event.target.value)}
+            />
+            {query && (
+              <button
+                className="sidebar-search-clear"
+                aria-label="Clear session search"
+                title="Clear search"
+                onClick={() => setQuery("")}
+              >×</button>
+            )}
+          </div>
+          <div className="sidebar-popover-anchor" ref={connectionRef}>
+            <button
+              className={`sidebar-service-btn sidebar-connection-dot ${syncStatus}`}
+              aria-label={`Server connection: ${syncStatus}`}
+              title={`Server connection: ${syncStatus}`}
+              aria-haspopup="dialog"
+              aria-expanded={connectionOpen}
+              onClick={() => setConnectionOpen((open) => !open)}
+            ><span aria-hidden="true" /></button>
+            {connectionOpen && (
+              <div className="sidebar-service-popover sidebar-connection-popover" role="dialog" aria-label="Server connection details">
+                <strong>{syncStatus === "connected" ? "Connected" : syncStatus === "connecting" ? "Connecting" : "Connection problem"}</strong>
+                <span>{host}</span>
+                <button onClick={() => { reconnectSync(); setConnectionOpen(false); }}>Reconnect</button>
+              </div>
+            )}
+          </div>
           <button
-            className={`icon-btn sidebar-select-toggle${selectMode ? " active" : ""}`}
-            title={selectMode ? "Cancel session selection" : "Select sessions"}
-            aria-label={selectMode ? "Cancel session selection" : "Select sessions"}
-            aria-pressed={selectMode}
-            onClick={toggleSelectMode}
-          ><Icon.select /></button>
+            className="sidebar-service-btn"
+            aria-label="Settings"
+            title={`Settings (${MOD} ,)`}
+            onClick={() => setOverlay("settings")}
+          ><Icon.gear /></button>
+          <div className="sidebar-popover-anchor" ref={globalMenuRef}>
+            <button
+              className="sidebar-service-btn"
+              aria-label="More sidebar actions"
+              title="More sidebar actions"
+              aria-haspopup="menu"
+              aria-expanded={globalMenuOpen}
+              onClick={() => setGlobalMenuOpen((open) => !open)}
+            ><Icon.more /></button>
+            {globalMenuOpen && (
+              <div className="sidebar-service-popover sidebar-global-menu" role="menu">
+                <button role="menuitem" disabled={registry.status === "loading"} onClick={() => {
+                  setGlobalMenuOpen(false);
+                  setOverlay("project-picker");
+                }}>Add project</button>
+                <button role="menuitemcheckbox" aria-checked={selectMode} onClick={() => {
+                  toggleSelectMode();
+                  setGlobalMenuOpen(false);
+                }}>{selectMode ? "Cancel session selection" : "Select sessions"}</button>
+                {!compact && (
+                  <button role="menuitem" onClick={() => {
+                    setSidebarViewMode(viewMode === "tree" ? "list" : "tree");
+                    setGlobalMenuOpen(false);
+                  }}>{viewMode === "tree" ? "Use project list" : "Use project tree"}</button>
+                )}
+              </div>
+            )}
+          </div>
           {compact && (
             <button
-              className="icon-btn drawer-close"
+              className="sidebar-service-btn drawer-close"
               title="Close projects and sessions"
               aria-label="Close projects and sessions"
               onClick={() => setSidebarOpen(false)}
             >×</button>
           )}
         </div>
-        <div className="sidebar-actions">
-          <button className="sidebar-new-chat" onClick={onNewSession} disabled={!activeProjectId}>
-            <Icon.plus /> New chat
-          </button>
-          <button
-            className="sidebar-add-project"
-            disabled={registry.status === "loading"}
-            onClick={() => setOverlay("project-picker")}
-          >
-            <Icon.plus /> Add project
-          </button>
-          <div className="sidebar-sort">
+        <div className="sidebar-list-controls">
+          <div className="sidebar-sort" ref={sortRef}>
             <button
-              aria-label={`Sort projects, currently ${sort}`}
-              title="Sort projects"
+              className="sidebar-sort-trigger"
+              aria-label={`Sort sessions, currently ${sort === "recent" ? "recent activity" : "project name"}`}
               aria-haspopup="menu"
               aria-expanded={sortOpen}
               onClick={() => setSortOpen((open) => !open)}
-            ><Icon.sort /></button>
+            >
+              <span>{sort === "recent" ? "Recent activity" : "Project name"}</span>
+              <span aria-hidden="true">▾</span>
+            </button>
             {sortOpen && (
               <div className="sidebar-sort-menu" role="menu">
                 <button role="menuitemradio" aria-checked={sort === "recent"} onClick={() => { setSort("recent"); setSortOpen(false); }}>
@@ -300,25 +404,35 @@ export default function Sidebar() {
               </div>
             )}
           </div>
-        </div>
-        <div className="sidebar-search">
-          <Icon.search />
-          <input
-            type="search"
-            value={query}
-            placeholder="Search"
-            aria-label="Search projects and sessions"
-            onChange={(event) => setQuery(event.target.value)}
-          />
-          <button
-            className={attentionOnly ? "active" : ""}
-            aria-label={attentionOnly ? "Show all sessions" : "Show sessions needing attention"}
-            aria-pressed={attentionOnly}
-            title={attentionOnly ? "Show all sessions" : "Show sessions needing attention"}
-            onClick={() => setAttentionOnly((value) => !value)}
-          >
-            <Icon.filter />
-          </button>
+          <span className="sidebar-controls-spacer" />
+          <div className="sidebar-filter" ref={filterRef}>
+            <button
+              className={attentionOnly ? "active" : ""}
+              aria-label="Filter sessions"
+              aria-pressed={attentionOnly}
+              aria-haspopup="menu"
+              aria-expanded={filterOpen}
+              onClick={() => setFilterOpen((open) => !open)}
+            >
+              <Icon.filter />
+              <span>Filter</span>
+            </button>
+            {filterOpen && (
+              <div className="sidebar-filter-menu" role="menu">
+                <button
+                  role="menuitemcheckbox"
+                  aria-checked={attentionOnly}
+                  onClick={() => setAttentionOnly((value) => !value)}
+                >
+                  <span aria-hidden="true">{attentionOnly ? "✓" : ""}</span>
+                  Needs attention
+                </button>
+                {attentionOnly && (
+                  <button role="menuitem" onClick={() => { setAttentionOnly(false); setFilterOpen(false); }}>Clear filters</button>
+                )}
+              </div>
+            )}
+          </div>
         </div>
         <div className="side-scroll">
           {selectMode && (
@@ -342,11 +456,33 @@ export default function Sidebar() {
           {registry.status === "ready" && projects.length > 0 && visibleProjects.length === 0 && (
             <div className="empty side-projects-status" role="status">No matching sessions.</div>
           )}
-          {visibleProjects.map((p) => {
+          {query.trim() !== "" && (
+            <div className="sidebar-search-results" aria-label="Session search results">
+              {visibleProjects.map((p) => {
+                const projectMatches = `${p.name} ${p.path}`.toLowerCase().includes(query.trim().toLowerCase());
+                return (
+                  <SessionList
+                    key={p.id}
+                    projectId={p.id}
+                    query={projectMatches ? "" : query}
+                    attentionOnly={attentionOnly}
+                    selectMode={selectMode}
+                    selectedSessionIds={selectedSessionIds}
+                    onToggleSelected={toggleSelectedSession}
+                    searchMode
+                    searchProjectName={p.name || p.path}
+                  />
+                );
+              })}
+            </div>
+          )}
+          {query.trim() === "" && visibleProjects.map((p) => {
             const projectQuery = query.trim()
               && `${p.name} ${p.path}`.toLowerCase().includes(query.trim().toLowerCase())
               ? ""
               : query;
+            const projectSessionCount = sessions.filter((session) =>
+              session.projectId === p.id && session.status !== "archived").length;
             const card = renamingProject === p.id ? (
               <div className="project-card project-rename">
                 <input
@@ -365,14 +501,17 @@ export default function Sidebar() {
                 <button
                   className={`project-card ${p.id === activeProjectId ? "active" : ""}`}
                   aria-current={p.id === activeProjectId ? "true" : undefined}
-                  aria-expanded={viewMode === "tree" ? expandedTrees.has(p.id) : undefined}
+                  aria-expanded={effectiveViewMode === "tree" ? expandedTrees.has(p.id) : undefined}
                   onClick={() => {
                     if (p.id !== activeProjectId) activateProject(p.id);
-                    if (viewMode === "tree" && !expandedTrees.has(p.id)) toggleTree(p.id);
+                    if (effectiveViewMode === "tree") toggleTree(p.id);
                     else closeDrawer();
                   }}
                   onDoubleClick={() => { setRenamingProject(p.id); setProjectName(p.name); }}
                 >
+                  {effectiveViewMode === "tree" && (
+                    <span className="project-tree-chevron" aria-hidden="true">{expandedTrees.has(p.id) ? "▾" : "▸"}</span>
+                  )}
                   <span className="project-glyph" style={p.color ? { color: p.color } : undefined}>
                     {p.icon ? <span aria-hidden="true">{p.icon}</span> : <Icon.files />}
                   </span>
@@ -380,6 +519,7 @@ export default function Sidebar() {
                     <span className="project-name" title={p.path}>{p.name || p.path}</span>
                     <span className="project-path">{p.path}</span>
                   </span>
+                  <span className="project-count" aria-label={`${projectSessionCount} sessions`}>{projectSessionCount}</span>
                 </button>
                 <button
                   className="project-new-session"
@@ -411,11 +551,6 @@ export default function Sidebar() {
                   >
                     <button role="menuitem" onClick={() => {
                       setProjectMenu(null);
-                      startNewSession(p.id);
-                      closeDrawer();
-                    }}>New session</button>
-                    <button role="menuitem" onClick={() => {
-                      setProjectMenu(null);
                       openWorktreeSessionDialog(p.id);
                     }}>New session in worktree…</button>
                     <button role="menuitem" onClick={() => {
@@ -434,12 +569,6 @@ export default function Sidebar() {
                     <button role="menuitem" onClick={() => {
                       setProjectMenu(null);
                       if (p.id !== activeProjectId) activateProject(p.id);
-                      if (viewMode === "tree" && !expandedTrees.has(p.id)) toggleTree(p.id);
-                      setSelectMode(true);
-                    }}>Select sessions</button>
-                    <button role="menuitem" onClick={() => {
-                      setProjectMenu(null);
-                      if (p.id !== activeProjectId) activateProject(p.id);
                       openWorkspacePane("git");
                     }}>Source control (Git &amp; worktrees)</button>
                     <SlotHost slot="sidebar.project.actions" context={{ projectId: p.id }} />
@@ -447,7 +576,7 @@ export default function Sidebar() {
                 )}
               </div>
             );
-            if (viewMode !== "tree") return <div key={p.id} className="project-entry">{card}</div>;
+            if (effectiveViewMode !== "tree") return <div key={p.id} className="project-entry">{card}</div>;
             return (
               <div key={p.id} className="project-tree-node">
                 {card}
@@ -466,11 +595,11 @@ export default function Sidebar() {
               </div>
             );
           })}
-          {viewMode === "list" && project && branch && (
+          {query.trim() === "" && effectiveViewMode === "list" && project && branch && (
             <div className="branch-row"><Icon.tree /><span className="mono">{branch}</span></div>
           )}
 
-          {viewMode === "list" && project && (
+          {query.trim() === "" && effectiveViewMode === "list" && project && (
             <div className="session-list">
               <SessionList
                 projectId={project.id}
@@ -492,37 +621,6 @@ export default function Sidebar() {
             context={{ projectId: activeProjectId, sessionId: activeSessionId, expanded }}
           />
         </div>
-        {compact && (
-          <div className="side-foot">
-            <button
-              className="sidebar-layout-btn"
-              title={viewMode === "tree" ? "Switch to project list" : "Show project and session hierarchy"}
-              aria-label="Toggle project tree view"
-              aria-pressed={viewMode === "tree"}
-              onClick={() => setSidebarViewMode(viewMode === "tree" ? "list" : "tree")}
-            >
-              {viewMode === "tree" ? <Icon.hierarchy /> : <Icon.list />}
-            </button>
-            <div className="sidebar-connection" aria-label={`${host}, ${syncStatus}`}>
-              <strong>{host}</strong>
-              <span className={syncStatus}><i aria-hidden="true" />{
-                syncStatus === "connected" ? "Connected" : syncStatus === "connecting" ? "Connecting" : "Reconnecting"
-              }</span>
-            </div>
-            <button
-              className="sidebar-switch-btn"
-              title="Refresh sessions"
-              aria-label="Refresh sessions"
-              disabled={!activeProjectId}
-              onClick={() => { if (activeProjectId) void refreshSessions(activeProjectId); }}
-            >
-              <Icon.shuffle />
-            </button>
-            <button className="settings-btn" aria-label="Settings" title={`Settings (${MOD} ,)`} onClick={() => setOverlay("settings")}>
-              <Icon.gear />
-            </button>
-          </div>
-        )}
         </>)}
         {!compact && !collapsed && (
           <div

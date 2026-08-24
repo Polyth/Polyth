@@ -1,6 +1,7 @@
 // Findings 4+5 (UX-SHELL-CONSOLIDATION-02), mounted through a real React
 // root: right-clicking a session row opens that row's action menu (the same
-// menu the ellipsis anchors) with delete/archive/pin items, correct ARIA
+// menu available through right-click, long-press, and keyboard) with
+// delete/archive/pin items, correct ARIA
 // menu roles, and the keyboard contract (focus lands in the menu, arrows
 // cycle, Escape closes back to the button). Every permanent deletion confirms,
 // with additional activity context for a running session.
@@ -102,7 +103,7 @@ test("right-click opens the row-scoped menu with delete/archive/pin and menu ARI
       document.activeElement!.dispatchEvent(new KeyboardEventCtor("keydown", { key: "Escape", bubbles: true, cancelable: true }));
     });
     assert.equal(container.querySelector('[role="menu"]'), null, "Escape closes the menu");
-    assert.equal(document.activeElement?.getAttribute("aria-label"), "Menu for Idle session");
+    assert.equal(document.activeElement?.getAttribute("aria-label"), "Open Idle session");
   } finally {
     await unmount();
   }

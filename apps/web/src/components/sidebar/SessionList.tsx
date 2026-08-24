@@ -5,11 +5,11 @@ import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "reac
 import type { SessionProjection, WorkspaceLabel } from "@polyth/contracts";
 import { api, type Worktree } from "../../api.ts";
 import {
-  getState, openWorktreeSessionDialog, setSidebarOpen, setUiError, startNewSession, useStore,
+  getState, setSidebarOpen, setUiError, startNewSession, useStore,
 } from "../../store.ts";
 import { openSession, archiveSession, deleteSession, restoreSession, forkSession, refreshSessions } from "../../init.ts";
-import { sessionStatusBadge } from "../../sessionBadges.ts";
-import { deriveSessionTitle, fmtDuration, fullSessionTitle } from "../../format.ts";
+import { sessionRowStatus, type SessionRowStatus } from "../../sessionBadges.ts";
+import { deriveSessionTitle, fullSessionTitle } from "../../format.ts";
 import { friendlyError } from "../../settings.ts";
 import { getUiSettings } from "../../uiPrefs.ts";
 import { firstUserText } from "../../utils.ts";
@@ -34,26 +34,35 @@ export function sessionActivityLabel(
     return new Date(s.updatedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   }
   const age = Math.max(0, now - s.updatedAt);
-  const read = (s.attention?.unread ?? 0) === 0;
-  const stale = age >= 24 * 60 * 60_000;
-  if (read && stale && s.status !== "working" && s.status !== "waiting") return "";
   if (age < 60_000) return "now";
-  if (age < 60 * 60_000) return `${Math.floor(age / 60_000)} min`;
-  if (age < 24 * 60 * 60_000) return `${Math.floor(age / 3_600_000)} hr`;
-  if (age < 48 * 60 * 60_000) return "Yesterday";
-  if (age < 7 * 24 * 60 * 60_000) return `${Math.floor(age / 86_400_000)} days`;
+  if (age < 60 * 60_000) return `${Math.floor(age / 60_000)}m`;
+  if (age < 24 * 60 * 60_000) return `${Math.floor(age / 3_600_000)}h`;
+  if (age < 7 * 24 * 60 * 60_000) return `${Math.floor(age / 86_400_000)}d`;
   return new Date(s.updatedAt).toLocaleDateString([], { month: "short", day: "numeric" });
 }
 
-function AttentionBadges({ s }: { s: SessionProjection }) {
-  const a = s.attention;
-  if (!a || (a.questions === 0 && a.permissions === 0)) return null;
-  return (
-    <span className="attn-badges">
-      {a.questions > 0 && <span className="attn-badge q" title={`${a.questions} open question(s)`}>?{a.questions}</span>}
-      {a.permissions > 0 && <span className="attn-badge p" title={`${a.permissions} open permission(s)`}>!{a.permissions}</span>}
-    </span>
-  );
+function sidebarElapsed(ms: number): string {
+  const totalSeconds = Math.max(0, Math.floor(ms / 1000));
+  const seconds = totalSeconds % 60;
+  const totalMinutes = Math.floor(totalSeconds / 60);
+  const minutes = totalMinutes % 60;
+  const hours = Math.floor(totalMinutes / 60);
+  return hours > 0
+    ? `${hours}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`
+    : `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+}
+
+function AttentionBadges({ status }: { status: SessionRowStatus }) {
+  if (status.kind === "needs-approval") {
+    return <span className="session-status-indicator approval" title="Approval required" aria-label="Approval required"><span aria-hidden>✓</span></span>;
+  }
+  if (status.kind === "needs-reply") {
+    return <span className="session-status-indicator reply" title="Reply needed" aria-label="Reply needed"><span aria-hidden>◇</span></span>;
+  }
+  if (status.kind === "unread") {
+    return <span className="session-status-indicator unread" title="Unread activity" aria-label="Unread activity"><span aria-hidden>●</span></span>;
+  }
+  return null;
 }
 
 /** Re-render clock for the running badge's elapsed label (paused when off). */
@@ -68,38 +77,16 @@ function useNowTick(enabled: boolean, intervalMs = 30_000): number {
   return now;
 }
 
-/** Finding 3: derived status badge — running (elapsed), waiting, completed,
- *  merged (lite: worktree cleanup signal). Read + nothing pending → nothing. */
-function StatusBadge({ s }: { s: SessionProjection }) {
-  const now = useNowTick(s.status === "working");
-  const badge = sessionStatusBadge(s, now);
-  if (!badge) return null;
-  if (badge.kind === "running") {
+function StatusBadge({ status }: { status: SessionRowStatus }) {
+  if (status.kind === "working") {
     return (
-      <span className="status-badge running" title={`Agent running for ${fmtDuration(badge.elapsedMs)}`}>
-        <span className="status-badge-spin" aria-hidden>●</span> {fmtDuration(badge.elapsedMs)}
+      <span className="session-status-indicator working" title={`Agent working for ${sidebarElapsed(status.elapsedMs)}`} aria-label={`Agent working for ${sidebarElapsed(status.elapsedMs)}`}>
+        <span className="session-status-pulse" aria-hidden>◌</span>
+        <span aria-hidden>{sidebarElapsed(status.elapsedMs)}</span>
       </span>
     );
   }
-  if (badge.kind === "waiting") {
-    return <span className="status-badge waiting" title="Waiting on your answer" aria-label="Waiting on a question">?</span>;
-  }
-  if (badge.kind === "merged") {
-    return <span className="status-badge merged" title="Worktree removed — branch merged/cleaned up">merged</span>;
-  }
-  return <span className="status-badge completed" title="Turn completed">✓ done</span>;
-}
-
-function LabelDots({ ids, labels }: { ids: string[] | undefined; labels: WorkspaceLabel[] }) {
-  if (!ids || ids.length === 0) return null;
-  return (
-    <span className="label-dots">
-      {ids.map((id) => {
-        const l = labels.find((x) => x.id === id);
-        return l ? <span key={id} className="label-dot" title={l.name} style={{ background: l.color }} /> : null;
-      })}
-    </span>
-  );
+  return null;
 }
 
 interface RowProps {
@@ -117,6 +104,7 @@ interface RowProps {
   pinnedSection: boolean;
   onPinDragStart: (id: string) => void;
   onPinDrop: (targetId: string) => void;
+  contextLabel?: string;
 }
 
 /** Finding 4 guard: destructive quick actions confirm first while the agent
@@ -178,6 +166,7 @@ function useShiftArmed(): boolean {
 function SessionRow({
   s, activeSessionId, labels, eventsTitle, relativeTime, selectMode, selected,
   onToggleSelect, onChanged, onOpen, onTogglePin, pinnedSection, onPinDragStart, onPinDrop,
+  contextLabel,
 }: RowProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [renaming, setRenaming] = useState(false);
@@ -188,7 +177,11 @@ function SessionRow({
   const shiftHeld = useShiftArmed();
   const quickArmed = hovered && shiftHeld;
   const menuRef = useRef<HTMLDivElement>(null);
-  const menuBtnRef = useRef<HTMLButtonElement>(null);
+  const sessionBtnRef = useRef<HTMLButtonElement>(null);
+  const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const longPressOpenedRef = useRef(false);
+  const now = useNowTick(s.status === "working", 1_000);
+  const rowStatus = sessionRowStatus(s, now);
 
   // Both mouse and pointer flavors are wired (idempotent, so duplicates are
   // harmless): pointer events cover inputs that never synthesize mouseenter,
@@ -199,6 +192,19 @@ function SessionRow({
     sampleShiftModifier(event.shiftKey);
   };
   const hoverEnd = () => setHovered(false);
+  const cancelLongPress = () => {
+    if (longPressTimerRef.current !== null) clearTimeout(longPressTimerRef.current);
+    longPressTimerRef.current = null;
+  };
+  const startLongPress = () => {
+    cancelLongPress();
+    longPressOpenedRef.current = false;
+    longPressTimerRef.current = setTimeout(() => {
+      longPressTimerRef.current = null;
+      longPressOpenedRef.current = true;
+      setMenuOpen(true);
+    }, 550);
+  };
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -208,9 +214,10 @@ function SessionRow({
     document.addEventListener("mousedown", h);
     return () => document.removeEventListener("mousedown", h);
   }, [menuOpen]);
+  useEffect(() => () => cancelLongPress(), []);
 
   // Menu keyboard contract: focus lands on the first item on open; arrows
-  // cycle; Escape closes and returns focus to the row's menu button.
+  // cycle; Escape closes and returns focus to the session button.
   useEffect(() => {
     if (!menuOpen) return;
     menuRef.current?.querySelector<HTMLButtonElement>('[role^="menuitem"]')?.focus();
@@ -221,7 +228,7 @@ function SessionRow({
       e.preventDefault();
       e.stopPropagation();
       setMenuOpen(false);
-      menuBtnRef.current?.focus();
+      sessionBtnRef.current?.focus();
       return;
     }
     if (e.key !== "ArrowDown" && e.key !== "ArrowUp" && e.key !== "Home" && e.key !== "End") return;
@@ -280,10 +287,11 @@ function SessionRow({
   };
   const displayTitle = deriveSessionTitle(s.title, eventsTitle);
   const hoverTitle = fullSessionTitle(s.title, eventsTitle);
+  const activityLabel = sessionActivityLabel(s, relativeTime);
 
   return (
     <div
-      className={`session-row ${s.id === activeSessionId ? "active" : ""} ${s.status === "archived" ? "archived" : ""}${quickArmed ? " quick-armed" : ""}`}
+      className={`session-row ${rowStatus.kind}${contextLabel ? " search-result" : ""} ${s.id === activeSessionId ? "active" : ""} ${s.status === "archived" ? "archived" : ""}${quickArmed ? " quick-armed" : ""}`}
       draggable={pinnedSection}
       onDragStart={() => { if (pinnedSection) onPinDragStart(s.id); }}
       onDragOver={(event) => { if (pinnedSection) event.preventDefault(); }}
@@ -294,8 +302,6 @@ function SessionRow({
       onPointerEnter={hoverUpdate}
       onPointerMove={hoverUpdate}
       onPointerLeave={hoverEnd}
-      // Finding 5: right-click opens this row's action menu — the same menu
-      // (and handlers) the ellipsis button anchors, so one action model.
       onContextMenu={(event) => { event.preventDefault(); setMenuOpen(true); }}
     >
       {selectMode && (
@@ -321,39 +327,44 @@ function SessionRow({
         />
       ) : (
         <button
+          ref={sessionBtnRef}
           className="session-btn"
           aria-current={s.id === activeSessionId ? "true" : undefined}
+          aria-label={`Open ${displayTitle}`}
           title={hoverTitle}
-          onClick={() => onOpen(s.id)}
+          onClick={(event) => {
+            if (longPressOpenedRef.current) {
+              event.preventDefault();
+              longPressOpenedRef.current = false;
+              return;
+            }
+            onOpen(s.id);
+          }}
           onDoubleClick={() => { setTitle(s.title); setRenaming(true); }}
+          onTouchStart={startLongPress}
+          onTouchEnd={cancelLongPress}
+          onTouchCancel={cancelLongPress}
+          onTouchMove={cancelLongPress}
+          onKeyDown={(event) => {
+            if (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10")) {
+              event.preventDefault();
+              setMenuOpen(true);
+            }
+          }}
         >
-          <span className="session-body">
-            <span className="session-title-line">
-              <span className="session-title">{displayTitle}</span>
-              {s.worktreePath && (
-                <span
-                  className={`session-worktree-badge${s.worktreeState === "missing" ? " missing" : ""}`}
-                  title={`${s.worktreeState === "missing" ? "Missing worktree" : "Worktree"}: ${s.worktreePath}`}
-                >
-                  {worktreeLabel(s.branch, s.worktreePath)}
-                </span>
-              )}
-              {s.pinned && <span className="session-pin" title="Pinned" aria-label="Pinned"><Icon.bookmark /></span>}
-              <LabelDots ids={s.labelIds} labels={labels} />
-              <StatusBadge s={s} />
-              <AttentionBadges s={s} />
-              <SlotHost
-                slot="session.list.badges"
-                context={{ sessionId: s.id, questions: s.attention?.questions ?? 0, permissions: s.attention?.permissions ?? 0 }}
-              />
-            </span>
-            <span className="session-sub">
-              {s.worktreeState === "missing" ? "worktree missing" : s.status === "working" ? "Agent working" : s.status}
-            </span>
+          <span className="session-title">{displayTitle}</span>
+          {contextLabel && <span className="session-search-context">{contextLabel}</span>}
+          <span className="session-status-zone">
+            <AttentionBadges status={rowStatus} />
+            <StatusBadge status={rowStatus} />
+            {(rowStatus.kind === "regular" || rowStatus.kind === "unread") && activityLabel && (
+              <span className="session-time">{activityLabel}</span>
+            )}
+            <SlotHost
+              slot="session.list.badges"
+              context={{ sessionId: s.id, questions: s.attention?.questions ?? 0, permissions: s.attention?.permissions ?? 0 }}
+            />
           </span>
-          {sessionActivityLabel(s, relativeTime) && (
-            <span className="session-time">{sessionActivityLabel(s, relativeTime)}</span>
-          )}
         </button>
       )}
       <span className="session-quick">
@@ -371,16 +382,6 @@ function SessionRow({
           aria-label={`Delete ${s.title || "session"}`}
           onClick={quickDelete}
         >✕</button>
-      </span>
-      <span className="session-actions">
-        <button
-          ref={menuBtnRef}
-          title="Session menu"
-          aria-label={`Menu for ${s.title || "session"}`}
-          aria-haspopup="menu"
-          aria-expanded={menuOpen}
-          onClick={() => setMenuOpen((v) => !v)}
-        ><Icon.more /></button>
       </span>
       {menuOpen && (
         <div
@@ -440,6 +441,8 @@ export default function SessionList({
   selectMode = false,
   selectedSessionIds = new Set<string>(),
   onToggleSelected = () => {},
+  searchMode = false,
+  searchProjectName = "",
 }: {
   projectId: string;
   query?: string;
@@ -447,6 +450,8 @@ export default function SessionList({
   selectMode?: boolean;
   selectedSessionIds?: ReadonlySet<string>;
   onToggleSelected?: (id: string) => void;
+  searchMode?: boolean;
+  searchProjectName?: string;
 }) {
   const sessions = useStore((st) => st.sessions);
   const activeSessionId = useStore((st) => st.activeSessionId);
@@ -462,6 +467,8 @@ export default function SessionList({
   const [removeTarget, setRemoveTarget] = useState<Worktree | null>(null);
   const [deleteBranch, setDeleteBranch] = useState(false);
   const [removeBusy, setRemoveBusy] = useState(false);
+  const [worktreeMenu, setWorktreeMenu] = useState<string | null>(null);
+  const worktreeMenuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     setShowArchived(expandArchived);
@@ -469,6 +476,21 @@ export default function SessionList({
   useEffect(() => {
     setVisibleCount(INITIAL_VISIBLE_SESSIONS);
   }, [projectId, query, attentionOnly]);
+  useEffect(() => {
+    if (worktreeMenu === null) return;
+    const close = (event: MouseEvent) => {
+      if (!worktreeMenuRef.current?.contains(event.target as Node)) setWorktreeMenu(null);
+    };
+    const escape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setWorktreeMenu(null);
+    };
+    document.addEventListener("mousedown", close);
+    document.addEventListener("keydown", escape);
+    return () => {
+      document.removeEventListener("mousedown", close);
+      document.removeEventListener("keydown", escape);
+    };
+  }, [worktreeMenu]);
 
   const reloadOrg = () => {
     void api.listLabels().then(setLabels);
@@ -488,7 +510,10 @@ export default function SessionList({
   );
   const needle = query.trim().toLowerCase();
   const matchesFilters = (session: SessionProjection) => {
-    if (needle && !session.title.toLowerCase().includes(needle)) return false;
+    if (
+      needle
+      && !`${session.title} ${session.branch ?? ""} ${session.worktreePath ?? ""}`.toLowerCase().includes(needle)
+    ) return false;
     if (!attentionOnly) return true;
     return session.status === "working"
       || session.status === "waiting"
@@ -500,13 +525,13 @@ export default function SessionList({
     ...sortPinnedSessions(matchingActive),
     ...matchingActive.filter((session) => session.pinned === undefined),
   ];
-  let active = orderedActive.slice(0, visibleCount);
+  let active = searchMode ? orderedActive : orderedActive.slice(0, visibleCount);
   const selectedActive = orderedActive.find((session) => session.id === activeSessionId);
-  if (selectedActive && !active.some((session) => session.id === selectedActive.id) && active.length > 0) {
+  if (!searchMode && selectedActive && !active.some((session) => session.id === selectedActive.id) && active.length > 0) {
     active = [...active.slice(0, -1), selectedActive];
   }
   const archived = projectSessions.filter((s) => s.status === "archived" && matchesFilters(s));
-  const hiddenActive = Math.max(0, orderedActive.length - active.length);
+  const hiddenActive = searchMode ? 0 : Math.max(0, orderedActive.length - active.length);
   const pinned = sortPinnedSessions(active);
   const pinRank = new Map(pinned.map((session, index) => [session.id, index]));
   const mainWorktree = worktrees.find((worktree) => worktree.isMain);
@@ -583,7 +608,7 @@ export default function SessionList({
     }
   };
 
-  const row = (s: SessionProjection, pinnedSection = false) => (
+  const row = (s: SessionProjection, pinnedSection = false, contextLabel?: string) => (
     <SessionRow
       key={s.id}
       s={s}
@@ -604,8 +629,34 @@ export default function SessionList({
       pinnedSection={pinnedSection}
       onPinDragStart={setDraggedPin}
       onPinDrop={(targetId) => void dropPin(targetId)}
+      contextLabel={contextLabel}
     />
   );
+
+  const worktreeNameForSession = (session: SessionProjection): string => {
+    if (session.branch) return session.branch;
+    const key = worktreeKey(session);
+    if (key === "__main__") return mainWorktree?.branch || "Main worktree";
+    return worktrees.find((worktree) => worktree.path === key)?.branch || worktreeLabel(null, key);
+  };
+  const startInWorktree = (key: string) => {
+    startNewSession(projectId, key === "__main__" ? {} : { worktreePath: key });
+    if (getState().sidebarOpen) setSidebarOpen(false);
+  };
+
+  if (searchMode) {
+    const results = [...orderedActive, ...archived].sort((a, b) => b.updatedAt - a.updatedAt);
+    return (
+      <div className="session-org session-search-mode">
+        {results.map((session) => row(
+          session,
+          false,
+          `${searchProjectName} · ${worktreeNameForSession(session)}`,
+        ))}
+        {results.length === 0 && <div className="empty session-list-empty">No matching sessions.</div>}
+      </div>
+    );
+  }
 
   return (
     <div className="session-org">
@@ -629,29 +680,46 @@ export default function SessionList({
                 <span className="session-worktree-chevron" aria-hidden="true">{isCollapsed ? "▸" : "▾"}</span>
                 <Icon.branch />
                 <span className="session-worktree-name">{group.label}</span>
+                <span className="session-worktree-count" aria-label={`${group.sessions.length} sessions`}>{group.sessions.length}</span>
               </button>
-              {isEmptyWorktree && (
-                <span className="session-worktree-empty-actions">
-                  <button
-                    title={`New session in ${group.label}`}
-                    aria-label={`New session in ${group.label}`}
-                    onClick={() => group.key === "__main__"
-                      ? startNewSession(projectId)
-                      : openWorktreeSessionDialog(projectId, group.key)}
-                  ><Icon.plus /></button>
-                  {group.worktree && !group.worktree.isMain && (
-                    <button
-                      className="danger"
-                      title={`Delete ${group.label} worktree`}
-                      aria-label={`Delete ${group.label} worktree`}
-                      onClick={() => {
-                        setDeleteBranch(false);
-                        setRemoveTarget(group.worktree);
-                      }}
-                    ><Icon.trash /></button>
-                  )}
-                </span>
-              )}
+              <span className="session-worktree-actions">
+                <button
+                  title={`New session in ${group.label}`}
+                  aria-label={`New session in ${group.label}`}
+                  onClick={() => startInWorktree(group.key)}
+                ><Icon.plus /></button>
+                <button
+                  title={`Actions for ${group.label}`}
+                  aria-label={`Actions for ${group.label} worktree`}
+                  aria-haspopup="menu"
+                  aria-expanded={worktreeMenu === group.key}
+                  onClick={() => setWorktreeMenu((current) => current === group.key ? null : group.key)}
+                ><Icon.more /></button>
+                {worktreeMenu === group.key && (
+                  <div
+                    className="worktree-actions-menu"
+                    role="menu"
+                    aria-label={`Actions for ${group.label} worktree`}
+                    ref={worktreeMenuRef}
+                  >
+                    <button role="menuitem" onClick={() => {
+                      setWorktreeMenu(null);
+                      startInWorktree(group.key);
+                    }}>New session</button>
+                    {group.worktree && !group.worktree.isMain && isEmptyWorktree && (
+                      <button
+                        role="menuitem"
+                        className="danger"
+                        onClick={() => {
+                          setWorktreeMenu(null);
+                          setDeleteBranch(false);
+                          setRemoveTarget(group.worktree);
+                        }}
+                      >Delete worktree…</button>
+                    )}
+                  </div>
+                )}
+              </span>
             </div>
             {!isCollapsed && (
               <div className="session-worktree-sessions">

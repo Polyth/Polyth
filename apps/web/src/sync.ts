@@ -88,6 +88,7 @@ export class SyncClient {
   private backoff = 500; // ms, 500 → 5000
   private timer: ReturnType<typeof setTimeout> | null = null;
   private closed = false;
+  private url: string | null = null;
 
   onEvent(cb: SyncListener): () => void {
     this.listeners.add(cb);
@@ -125,6 +126,7 @@ export class SyncClient {
 
   connect(url: string): void {
     if (this.closed) return;
+    this.url = url;
     this.publishStatus("connecting");
     const ws = new WebSocket(url);
     this.ws = ws;
@@ -147,6 +149,21 @@ export class SyncClient {
     ws.onerror = () => {
       ws.close(); // onclose fires → reconnect
     };
+  }
+
+  /** Immediately replace the current transport while preserving subscription
+   * and replay state. The superseded socket cannot schedule a second retry. */
+  reconnect(): void {
+    const url = this.url;
+    if (this.closed || url === null) return;
+    if (this.timer !== null) {
+      clearTimeout(this.timer);
+      this.timer = null;
+    }
+    const previous = this.ws;
+    this.ws = null;
+    previous?.close();
+    this.connect(url);
   }
 
   close(): void {

@@ -156,14 +156,16 @@ test("header selection keeps one multi-session selection across projects", async
   try {
     await act(async () => { root.render(createElement(Sidebar)); });
 
-    const header = container.querySelector<HTMLElement>(".sidebar-head");
-    const select = header?.querySelector<HTMLButtonElement>('[aria-label="Select sessions"]');
-    assert.ok(select, "session selection is an icon control in the sidebar header");
-    assert.equal(header?.querySelector(".sidebar-title"), null, "the visible Projects heading is removed");
-    assert.equal(header?.querySelector(".sr-only")?.textContent, "Projects and sessions", "the sidebar retains its accessible heading");
+    const serviceBar = container.querySelector<HTMLElement>(".sidebar-service-bar");
+    const more = serviceBar?.querySelector<HTMLButtonElement>('[aria-label="More sidebar actions"]');
+    assert.ok(more, "the service bar exposes global actions");
+    await act(async () => { click(more!); });
+    const select = container.querySelector<HTMLButtonElement>('[role="menuitemcheckbox"]');
+    assert.ok(select, "session selection lives in the global overflow menu");
+    assert.equal(serviceBar?.querySelector(".sidebar-title"), null, "the service bar has no visible Sessions title");
+    assert.equal(container.querySelector(".sr-only")?.textContent, "Projects and sessions", "the sidebar retains its accessible heading");
 
     await act(async () => { click(select!); });
-    assert.equal(select!.getAttribute("aria-pressed"), "true");
 
     const alphaCheck = container.querySelector<HTMLInputElement>('[aria-label="Select Alpha session one"]');
     assert.ok(alphaCheck, "active-project sessions expose checkboxes");

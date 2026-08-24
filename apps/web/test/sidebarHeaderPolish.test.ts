@@ -4,27 +4,33 @@ import { readFile } from "node:fs/promises";
 
 const source = (path: string) => readFile(new URL(path, import.meta.url), "utf8");
 
-test("sidebar removes labels, row ornaments, project counts, and the entire desktop footer", async () => {
+test("sidebar uses contextual tree actions and no permanent footer", async () => {
   const [sidebar, sessions, styles] = await Promise.all([
     source("../src/components/Sidebar.tsx"),
     source("../src/components/sidebar/SessionList.tsx"),
     source("../src/styles.css"),
   ]);
   assert.doesNotMatch(sidebar, /className="sidebar-title">Sessions/);
-  assert.doesNotMatch(sidebar, /project-tree-chevron/);
-  assert.doesNotMatch(sidebar, /project-count/);
-  assert.match(sidebar, /\{compact && \(\s*<div className="side-foot">/);
+  assert.match(sidebar, /project-tree-chevron/);
+  assert.match(sidebar, /project-count/);
+  assert.match(sidebar, /className="project-new-session"/);
+  assert.doesNotMatch(sidebar, /className="side-foot"/);
+  assert.match(sidebar, /className="sidebar-service-bar"/);
+  assert.match(sidebar, /className="sidebar-list-controls"/);
+  assert.match(sidebar, /Clear session search/);
+  assert.match(sidebar, /Server connection:/);
+  assert.match(sidebar, />Reconnect</);
   assert.doesNotMatch(sessions, /session-sync-icon/);
   assert.match(sessions, /sessionActivityLabel/);
-  assert.match(sessions, /session-worktree-empty-actions/);
+  assert.match(sessions, /session-worktree-actions/);
   assert.match(sessions, /const isEmptyWorktree = !projectSessions\.some/);
-  assert.match(sessions, /openWorktreeSessionDialog\(projectId, group\.key\)/);
+  assert.match(sessions, /startNewSession\(projectId, key === "__main__" \? \{\} : \{ worktreePath: key \}\)/);
   assert.match(sessions, /group\.worktree && !group\.worktree\.isMain/);
   assert.match(sessions, /setRemoveTarget\(group\.worktree\)/);
   assert.match(sessions, /Delete empty worktree\?/);
   assert.match(sessions, /api\.removeWorktree\(projectId, removeTarget\.path, deleteBranch\)/);
-  assert.match(styles, /\.session-worktree-head \.session-worktree-toggle \{ width: auto;/);
-  assert.match(styles, /\.session-worktree-empty-actions \{[\s\S]*?flex: none;/);
+  assert.match(styles, /\.session-worktree-toggle\s*\{[\s\S]*?width: auto;/);
+  assert.match(styles, /\.session-worktree-actions\s*\{[\s\S]*?flex: none;/);
 });
 
 test("header and composer controls are configurable and purpose-specific", async () => {

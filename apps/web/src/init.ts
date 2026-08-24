@@ -39,6 +39,10 @@ export function subscribeSyncStatus(listener: () => void): () => void {
   return () => syncStatusListeners.delete(listener);
 }
 
+export function reconnectSync(): void {
+  sync?.reconnect();
+}
+
 function publishSyncStatus(status: SyncStatus): void {
   if (status === syncStatus) return;
   syncStatus = status;

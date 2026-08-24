@@ -133,7 +133,11 @@ test("drawer opens existing sessions but new chat defers session creation", asyn
   const list = await read("../src/components/sidebar/SessionList.tsx");
   assert.match(list, /openSession\(id\)\.then\(/, "close happens after openSession resolves");
   const sidebar = await read("../src/components/Sidebar.tsx");
-  assert.ok(sidebar.includes("startNewSession(activeProjectId)"), "new chat enters the unsaved composer surface");
+  assert.ok(sidebar.includes("startNewSession(p.id)"), "project plus enters the unsaved composer surface");
+  assert.ok(
+    list.includes('startNewSession(projectId, key === "__main__" ? {} : { worktreePath: key })'),
+    "worktree plus enters the unsaved composer with its contextual target",
+  );
   assert.ok(!sidebar.includes("createSession("), "new chat never posts a session before first send");
 });
 
