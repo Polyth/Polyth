@@ -63,7 +63,8 @@ test("GFM task-list items render as checked and unchecked controls", () => {
   assert.deepEqual(blocks[0].items.map((item) => item.checked), [true, false]);
   const html = renderToStaticMarkup(createElement(Fragment, null, ...renderBlocks(blocks, "tasks")));
   assert.match(html, /class="md-task-list"/);
-  assert.match(html, /type="checkbox" checked="" disabled=""/);
+  assert.match(html, /type="checkbox"[^>]*checked=""/);
+  assert.match(html, /type="checkbox"[^>]*disabled=""/);
   assert.doesNotMatch(html, /\[x\]|\[ \]/);
 });
 

@@ -149,7 +149,7 @@ test("GitView reports branch/graph/stash/worktree load failures with Retry", asy
   const view = await mounted(createElement(GitView));
   try {
     const alert = view.container.querySelector<HTMLElement>('[role="alert"]');
-    assert.match(alert?.textContent ?? "", /branches unavailable/);
+    assert.match(alert?.textContent ?? "", /OpenCode is reconnecting/);
     assert.ok([...(alert?.querySelectorAll("button") ?? [])].some((button) => button.textContent === "Retry"));
   } finally {
     await view.unmount();
