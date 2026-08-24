@@ -38,7 +38,7 @@ export function OpenCodeRestartControl() {
           onClick={() => void apply()}
         >
           <span className="opencode-restart-icon" aria-hidden="true">↻</span>
-          <span>Apply and restart</span>
+          <span>Apply &amp; restart</span>
           <span className="opencode-restart-count" aria-label={`${pending.count} pending changes`}>{pending.count}</span>
         </button>
       </div>
