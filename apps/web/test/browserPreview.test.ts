@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   annotationViewportRect,
   BROWSER_DEVICE_PRESETS,
+  browserApprovalRequired,
   browserElementContext,
   captureFileName,
   containedImageRect,
@@ -71,6 +72,17 @@ test("capture filenames are deterministic, safe PNG names", () => {
     captureFileName(new Date("2026-08-22T20:30:40.123Z")),
     "browser-2026-08-22T20-30-40-123Z.png",
   );
+});
+
+test("external navigation approval uses the typed code and supports legacy messages", () => {
+  assert.equal(browserApprovalRequired(Object.assign(
+    new Error("external origin https://example.com needs a per-origin approval"),
+    { code: "approval-required" },
+  )), true);
+  assert.equal(browserApprovalRequired(new Error(
+    "external origin https://example.com needs a per-origin approval",
+  )), true);
+  assert.equal(browserApprovalRequired(new Error("DNS lookup failed")), false);
 });
 
 test("pointed elements produce precise model-facing browser context", () => {

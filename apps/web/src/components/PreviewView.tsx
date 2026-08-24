@@ -7,6 +7,7 @@ import { attachUpload, removeAttachment } from "../attachments.ts";
 import {
   annotationViewportRect,
   BROWSER_DEVICE_PRESETS,
+  browserApprovalRequired,
   browserElementContext,
   containedImageRect,
   devicePresetForViewport,
@@ -188,7 +189,7 @@ export default function PreviewView() {
         } catch (navigationError) {
           const message = String(navigationError);
           if (
-            (message.includes("approval-required") || message.includes("needs approval"))
+            browserApprovalRequired(navigationError)
             && window.confirm(`Approve this origin for the internal browser?\n\n${message}`)
           ) {
             await api.browserApprove(requestedUrl);
@@ -226,7 +227,7 @@ export default function PreviewView() {
       setBrowser(await api.browserNavigate(browser.id, raw, "user"));
     } catch (e) {
       const msg = String(e);
-      if (msg.includes("approval-required") || msg.includes("needs")) {
+      if (browserApprovalRequired(e)) {
         if (window.confirm(`This origin is outside the allowed list.\n\n${msg}\n\nApprove it for this run?`)) {
           try {
             await api.browserApprove(raw);

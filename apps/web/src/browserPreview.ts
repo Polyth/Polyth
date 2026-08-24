@@ -29,6 +29,15 @@ export interface BrowserPointedElement {
   attributes?: Record<string, string>;
 }
 
+/** Approval errors carry a stable code; the message fallback keeps the UI
+ * compatible with older servers whose fetch wrapper did not preserve it. */
+export function browserApprovalRequired(error: unknown): boolean {
+  const code = (error as { code?: unknown } | null)?.code;
+  if (code === "approval-required") return true;
+  const message = error instanceof Error ? error.message : String(error);
+  return message.includes("approval-required") || /\bneeds\b.*\bapproval\b/i.test(message);
+}
+
 /** Model-facing text paired with the pointed-element screenshot attachment. */
 export function browserElementContext(url: string, element: BrowserPointedElement): string {
   return [
