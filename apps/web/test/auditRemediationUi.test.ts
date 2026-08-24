@@ -145,7 +145,7 @@ test("header primary rail exposes a permanent Terminal toggle after project acti
     assert.deepEqual(
       [...header.container.querySelectorAll<HTMLButtonElement>(".view-switcher .view-icon")]
         .map((button) => button.getAttribute("aria-label")),
-      ["Chat", "Project files", "Open Terminal (Ctrl+`)", "Preview", "Goals & progress"],
+      ["Chat", "Project files", "Open Terminal (Ctrl+`)", "Browser", "Goals & progress"],
     );
 
     await act(async () => { terminal.click(); });
