@@ -9,6 +9,9 @@ export const BROWSER_DEVICE_PRESETS = [
 
 export type BrowserDevicePresetId = typeof BROWSER_DEVICE_PRESETS[number]["id"];
 
+export const BROWSER_INSPECTOR_TABS = ["snapshot", "console", "activity"] as const;
+export type BrowserInspectorTab = typeof BROWSER_INSPECTOR_TABS[number];
+
 export interface BrowserAnnotation {
   id: number;
   /** Normalized coordinates keep a selected area tied to the captured frame. */
@@ -27,6 +30,34 @@ export interface BrowserPointedElement {
   text?: string;
   rect: { x: number; y: number; width: number; height: number };
   attributes?: Record<string, string>;
+}
+
+/** One compact, stable label for the selected-element editor. Browser text can
+ * include an entire page (especially for html/body), so never render it raw. */
+export function browserPointedElementLabel(
+  element: Pick<BrowserPointedElement, "name" | "text" | "selector">,
+  maxLength = 120,
+): string {
+  const raw = (element.name || element.text || element.selector).replace(/\s+/g, " ").trim();
+  if (raw.length <= maxLength) return raw;
+  return `${raw.slice(0, Math.max(0, maxLength - 1)).trimEnd()}…`;
+}
+
+/** WAI-ARIA tab-list navigation with wraparound. */
+export function browserInspectorTabFromKey(
+  current: BrowserInspectorTab,
+  key: string,
+): BrowserInspectorTab | null {
+  const index = BROWSER_INSPECTOR_TABS.indexOf(current);
+  if (key === "Home") return BROWSER_INSPECTOR_TABS[0];
+  if (key === "End") return BROWSER_INSPECTOR_TABS.at(-1) ?? null;
+  if (key === "ArrowRight" || key === "ArrowDown") {
+    return BROWSER_INSPECTOR_TABS[(index + 1) % BROWSER_INSPECTOR_TABS.length] ?? null;
+  }
+  if (key === "ArrowLeft" || key === "ArrowUp") {
+    return BROWSER_INSPECTOR_TABS[(index - 1 + BROWSER_INSPECTOR_TABS.length) % BROWSER_INSPECTOR_TABS.length] ?? null;
+  }
+  return null;
 }
 
 /** Approval errors carry a stable code; the message fallback keeps the UI

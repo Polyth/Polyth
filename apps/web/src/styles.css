@@ -2039,7 +2039,13 @@ input.notification-preview { font-family: var(--mono); font-size: 12.5px; min-wi
   border: 1px solid transparent; border-radius: var(--radius-sm);
   background: transparent; color: var(--muted); text-decoration: none;
 }
-.browser-icon-btn:hover { color: var(--text); border-color: var(--border); background: var(--elevated); }
+.browser-icon-btn:hover:not(:disabled), a.browser-icon-btn:hover { color: var(--text); border-color: var(--border); background: var(--elevated); }
+.browser-icon-btn:active:not(:disabled), .browser-address-submit:active:not(:disabled), .browser-tool-btn:active:not(:disabled) {
+  transform: translateY(1px);
+}
+.browser-icon-btn:disabled:hover, .browser-tool-btn:disabled:hover {
+  border-color: transparent; background: transparent;
+}
 .browser-icon-btn svg { width: 14px; height: 14px; }
 .browser-forward svg { transform: rotate(180deg); }
 .browser-address {
@@ -2074,6 +2080,7 @@ input.notification-preview { font-family: var(--mono); font-size: 12.5px; min-wi
   height: 28px; max-width: 180px; padding: 3px 24px 3px 7px;
   border-color: var(--border-soft); background-color: var(--elevated); font-size: 11px;
 }
+.browser-tools-row select:disabled { opacity: .5; cursor: default; }
 .browser-device { width: 156px; }
 .browser-scheme { width: 112px; }
 .browser-tool-divider { width: 1px; height: 18px; margin-inline: 2px; background: var(--border-soft); }
@@ -2148,7 +2155,7 @@ input.notification-preview { font-family: var(--mono); font-size: 12.5px; min-wi
   border-color: var(--accent); background: color-mix(in srgb, var(--accent) 14%, transparent);
 }
 .browser-annotation-box > span {
-  position: absolute; left: -11px; top: -11px; display: grid; place-items: center;
+  position: absolute; left: 3px; top: 3px; display: grid; place-items: center;
   width: 22px; height: 22px; border: 2px solid #fff; border-radius: 50%;
   color: #fff; background: var(--red); font-size: 11px; font-weight: 750;
   box-shadow: 0 2px 7px rgb(0 0 0 / .3);
@@ -2162,7 +2169,9 @@ input.notification-preview { font-family: var(--mono); font-size: 12.5px; min-wi
 .browser-frame-info { min-width: 0; flex: 1; display: flex; align-items: center; gap: 6px; }
 .browser-live-dot { width: 7px; height: 7px; flex: none; border-radius: 50%; background: var(--faint); }
 .browser-live-dot.connected { background: var(--green); box-shadow: 0 0 0 3px color-mix(in srgb, var(--green) 13%, transparent); }
-.browser-live-dot.connecting, .browser-live-dot.reconnecting { background: var(--amber); }
+.browser-live-dot.connecting, .browser-live-dot.reconnecting, .browser-live-dot.paused {
+  background: var(--amber); box-shadow: 0 0 0 3px color-mix(in srgb, var(--amber) 13%, transparent);
+}
 .browser-frame-title {
   min-width: 0; max-width: 50%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   color: var(--text); font-size: 11px; font-weight: 650;
@@ -2213,6 +2222,9 @@ input.notification-preview { font-family: var(--mono); font-size: 12.5px; min-wi
 }
 .browser-status-badge.ready { color: var(--green); border-color: color-mix(in srgb, var(--green) 35%, var(--border)); background: var(--green-wash); }
 .browser-status-badge.failed { color: var(--red); border-color: color-mix(in srgb, var(--red) 35%, var(--border)); background: var(--red-wash); }
+.browser-status-badge.connecting, .browser-status-badge.reconnecting, .browser-status-badge.paused {
+  color: var(--amber); border-color: color-mix(in srgb, var(--amber) 35%, var(--border)); background: var(--amber-wash);
+}
 .browser-console { display: flex; flex-direction: column; gap: 3px; }
 .browser-console-line {
   display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 7px; align-items: start;
@@ -2297,7 +2309,7 @@ input.notification-preview { font-family: var(--mono); font-size: 12.5px; min-wi
   .browser-address input { height: 42px; font-size: 12px; }
   .browser-address-submit { width: 44px; height: 44px; min-width: 44px; }
   .browser-tools-row select, .browser-tool-btn { min-height: 44px; }
-  .browser-tool-btn { padding-inline: 10px; }
+  .browser-tool-btn { padding-inline: 8px; }
   .browser-frame-bar { min-height: 48px; }
   .browser-type-form { height: 38px; }
   .browser-annotation-row input, .browser-annotation-row button { min-height: 44px; }
@@ -2305,8 +2317,17 @@ input.notification-preview { font-family: var(--mono); font-size: 12.5px; min-wi
 }
 
 @media (max-width: 480px) {
-  .browser-confirm-dialog .dialog-foot { flex-wrap: wrap; }
-  .browser-confirm-dialog .dialog-foot button { min-height: 44px; }
+  .browser-tools-row .browser-tool-btn {
+    flex-direction: column; gap: 1px; padding: 3px 2px; font-size: 9px; line-height: 1.1;
+  }
+  .browser-tools-row .browser-tool-btn > span {
+    display: block; width: 100%; overflow: hidden; text-overflow: ellipsis;
+  }
+  .browser-confirm-dialog .dialog-foot {
+    display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px;
+  }
+  .browser-confirm-dialog .dialog-foot .header-spacer, .browser-dialog-note { display: none; }
+  .browser-confirm-dialog .dialog-foot button { width: 100%; min-height: 44px; }
   .browser-dialog-body { grid-template-columns: 1fr; padding: 16px; }
 }
 

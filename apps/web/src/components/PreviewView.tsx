@@ -7,8 +7,11 @@ import { attachUpload, removeAttachment } from "../attachments.ts";
 import {
   annotationViewportRect,
   BROWSER_DEVICE_PRESETS,
+  BROWSER_INSPECTOR_TABS,
   browserApprovalRequired,
   browserElementContext,
+  browserInspectorTabFromKey,
+  browserPointedElementLabel,
   containedImageRect,
   devicePresetForViewport,
   normalizedPointInImage,
@@ -16,6 +19,7 @@ import {
   renderBrowserCapture,
   type BrowserAnnotation,
   type BrowserDevicePresetId,
+  type BrowserInspectorTab,
   type BrowserPointedElement,
   type ImageRect,
 } from "../browserPreview.ts";
@@ -27,7 +31,6 @@ import Dialog from "./a11y/Dialog.tsx";
 import { Icon } from "../icons.tsx";
 import { friendlyError } from "../settings.ts";
 
-type InspectorTab = "snapshot" | "console" | "activity";
 type ColorScheme = "light" | "dark" | "no-preference";
 type BrowserConnection = "idle" | "connecting" | "connected" | "reconnecting";
 
@@ -49,7 +52,7 @@ export default function PreviewView() {
   // frame subscription (WebSocket) below stays attached.
   const visible = usePaneVisible();
   const [urlInput, setUrlInput] = useState("");
-  const [tab, setTab] = useState<InspectorTab>("console");
+  const [tab, setTab] = useState<BrowserInspectorTab>("console");
   const [inspectorOpen, setInspectorOpen] = useState(false);
   const [operation, setOperation] = useState<string | null>(null);
   const [error, setError] = useState("");
@@ -75,10 +78,14 @@ export default function PreviewView() {
   const wsRef = useRef<WebSocket | null>(null);
   const revisionRef = useRef(0);
   const imgRef = useRef<HTMLImageElement>(null);
+  const inspectorButtonRef = useRef<HTMLButtonElement>(null);
   const nextAnnotationId = useRef(1);
   const annotationDragStart = useRef<{ x: number; y: number } | null>(null);
   const approvalDescriptionId = useId();
   const frameStatusId = useId();
+  const inspectorId = useId();
+  const inspectorPanelId = useId();
+  const inspectorTabId = (item: BrowserInspectorTab) => `${inspectorId}-${item}`;
 
   useEffect(() => {
     let cancelled = false;
@@ -578,10 +585,17 @@ export default function PreviewView() {
       <div
         className="preview-view"
         onKeyDown={(event) => {
-          if (event.key === "Escape" && (annotating || pointing || annotations.length > 0)) {
-            event.preventDefault();
-            event.stopPropagation();
-            clearSelection();
+          if (event.key === "Escape") {
+            if (annotating || pointing || annotations.length > 0) {
+              event.preventDefault();
+              event.stopPropagation();
+              clearSelection();
+            } else if (inspectorOpen) {
+              event.preventDefault();
+              event.stopPropagation();
+              setInspectorOpen(false);
+              requestAnimationFrame(() => inspectorButtonRef.current?.focus());
+            }
           }
         }}
       >
@@ -758,10 +772,12 @@ export default function PreviewView() {
                 <span>{agentPaused ? "Resume" : "Pause agent"}</span>
               </button>
               <button
+                ref={inspectorButtonRef}
                 type="button"
                 className={`browser-tool-btn${inspectorOpen ? " active" : ""}`}
                 aria-label="Inspector"
                 aria-pressed={inspectorOpen}
+                aria-controls={inspectorId}
                 disabled={busy}
                 title="Toggle browser inspector"
                 onClick={() => setInspectorOpen((value) => !value)}
@@ -852,7 +868,7 @@ export default function PreviewView() {
 
                   <div className="browser-frame-bar" id={frameStatusId}>
                     <div className="browser-frame-info">
-                      <span className={`browser-live-dot ${connection}`} aria-hidden="true" />
+                      <span className={`browser-live-dot ${agentPaused ? "paused" : connection}`} aria-hidden="true" />
                       <span className="browser-frame-title" title={browser.title || browser.url}>
                         {browser.title || "Untitled page"}
                       </span>
@@ -891,7 +907,7 @@ export default function PreviewView() {
                       <div className="browser-annotation-header">
                         <span aria-live="polite">
                           {pointedElement
-                            ? <>Selected <code>{`<${pointedElement.tag}>`}</code> · {pointedElement.name || pointedElement.text || pointedElement.selector}</>
+                            ? <>Selected <code>{`<${pointedElement.tag}>`}</code> · {browserPointedElementLabel(pointedElement)}</>
                             : pointing
                               ? "Choose an element in the page preview."
                               : annotations[0]?.width
@@ -983,22 +999,38 @@ export default function PreviewView() {
           </div>
 
           {inspectorOpen && browserMode && (
-            <aside className="inspector browser-inspector" aria-label="Browser inspector">
+            <aside id={inspectorId} className="inspector browser-inspector" aria-label="Browser inspector">
               <div className="inspector-tabs" role="tablist" aria-label="Inspector views">
-                {(["snapshot", "console", "activity"] as const).map((item) => (
+                {BROWSER_INSPECTOR_TABS.map((item) => (
                   <button
                     key={item}
+                    id={inspectorTabId(item)}
                     type="button"
                     role="tab"
                     aria-selected={tab === item}
+                    aria-controls={inspectorPanelId}
+                    tabIndex={tab === item ? 0 : -1}
                     className={`tab ${tab === item ? "active" : ""}`}
                     onClick={() => setTab(item)}
+                    onKeyDown={(event) => {
+                      const next = browserInspectorTabFromKey(tab, event.key);
+                      if (!next) return;
+                      event.preventDefault();
+                      setTab(next);
+                      requestAnimationFrame(() => document.getElementById(inspectorTabId(next))?.focus());
+                    }}
                   >
                     {item[0]!.toUpperCase() + item.slice(1)}
                   </button>
                 ))}
               </div>
-              <div className="inspector-body" role="tabpanel" tabIndex={0}>
+              <div
+                id={inspectorPanelId}
+                className="inspector-body"
+                role="tabpanel"
+                aria-labelledby={inspectorTabId(tab)}
+                tabIndex={0}
+              >
                 <div className="browser-inspector-summary">
                   <div className="stat-row">
                     <span className="k">Page</span>
@@ -1006,7 +1038,9 @@ export default function PreviewView() {
                   </div>
                   <div className="stat-row">
                     <span className="k">Status</span>
-                    <span className={`browser-status-badge ${browser.status}`}>{connectionLabel[connection]}</span>
+                    <span className={`browser-status-badge ${browser.status} ${agentPaused ? "paused" : connection}`}>
+                      {connectionLabel[connection]}
+                    </span>
                   </div>
                   <div className="stat-row">
                     <span className="k">Engine</span>

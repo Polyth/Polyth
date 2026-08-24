@@ -5,6 +5,8 @@ import {
   BROWSER_DEVICE_PRESETS,
   browserApprovalRequired,
   browserElementContext,
+  browserInspectorTabFromKey,
+  browserPointedElementLabel,
   captureFileName,
   containedImageRect,
   devicePresetForViewport,
@@ -101,4 +103,28 @@ test("pointed elements produce precise model-facing browser context", () => {
     "Text: Save changes",
     "Bounds: x=40, y=80, width=120, height=36",
   ].join("\n"));
+});
+
+test("pointed-element UI labels normalize and bound page-sized text", () => {
+  assert.equal(browserPointedElementLabel({
+    name: "",
+    text: "  Save\n\n changes  ",
+    selector: "#save",
+  }), "Save changes");
+  assert.equal(browserPointedElementLabel({
+    text: "x".repeat(200),
+    selector: "html",
+  }, 12), "xxxxxxxxxxx…");
+  assert.equal(browserPointedElementLabel({ selector: "#fallback" }), "#fallback");
+});
+
+test("inspector tabs support roving arrow, Home, and End navigation", () => {
+  assert.equal(browserInspectorTabFromKey("snapshot", "ArrowRight"), "console");
+  assert.equal(browserInspectorTabFromKey("activity", "ArrowRight"), "snapshot");
+  assert.equal(browserInspectorTabFromKey("snapshot", "ArrowLeft"), "activity");
+  assert.equal(browserInspectorTabFromKey("console", "ArrowDown"), "activity");
+  assert.equal(browserInspectorTabFromKey("activity", "ArrowUp"), "console");
+  assert.equal(browserInspectorTabFromKey("activity", "Home"), "snapshot");
+  assert.equal(browserInspectorTabFromKey("snapshot", "End"), "activity");
+  assert.equal(browserInspectorTabFromKey("console", "Enter"), null);
 });
