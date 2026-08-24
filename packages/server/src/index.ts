@@ -79,6 +79,7 @@ import { snippetRoutes } from "./routes/snippets.ts";
 import { profileRoutes } from "./routes/profiles.ts";
 import { settingsRoutes } from "./routes/settings.ts";
 import { opencodePluginRoutes } from "./routes/opencodePlugins.ts";
+import { opencodePendingRoutes } from "./routes/opencodePending.ts";
 import { sshRoutes } from "./routes/ssh.ts";
 import { browserRoutes } from "./routes/browser.ts";
 import { browseRoutes } from "./routes/browse.ts";
@@ -110,6 +111,7 @@ import { attachWs } from "./ws.ts";
 import { createTrackWorkflow, type TrackWorkflow } from "./tracks.ts";
 import { createRouteRegistry } from "./routeRegistry.ts";
 import { createPackageLifecycle } from "./packageLifecycle.ts";
+import { createDeferredConfigApplier, createOpenCodePendingService } from "./opencodePending.ts";
 
 /** POLYTH_SMALL_MODEL="provider/model-id" — cheap model for auditors/commit messages. */
 const smallModel = (): { providerID: string; modelID: string } | undefined => {
@@ -173,6 +175,7 @@ export async function boot(opts: BootOptions = {}) {
 
   // --- per-project opencode runtime pool (lazy spawn, one serve process per project)
   const runtimesByProject = new Map<string, Promise<AgentRuntime>>();
+  const runtimeRestarters = new Map<string, () => Promise<void>>();
   const sessionIdMap = new Map<string, string>(); // canonical -> backend
 
   const isTransportError = (err: unknown): boolean =>
@@ -236,14 +239,21 @@ export async function boot(opts: BootOptions = {}) {
     const listeners = new Set<(sessionId: string, ev: RuntimeEvent) => void>();
     const fanout = (sessionId: string, ev: RuntimeEvent) => { for (const cb of listeners) cb(sessionId, ev); };
     let innerSub = inner.onEvent(fanout);
+    let restarting: Promise<void> | null = null;
 
-    const respawn = async (): Promise<void> => {
+    const respawnOnce = async (): Promise<void> => {
       runtimesByProject.delete(key);
       innerSub.dispose();
-      void inner.dispose().catch(() => {});
+      await inner.dispose().catch(() => {});
       inner = await spawnRuntime(projectId, cwd);
       innerSub = inner.onEvent(fanout);
       runtimesByProject.set(key, Promise.resolve(facade));
+    };
+    const respawn = (): Promise<void> => {
+      if (!restarting) {
+        restarting = respawnOnce().finally(() => { restarting = null; });
+      }
+      return restarting;
     };
 
     // Read-only lookups are idempotent, so they get the same respawn-once
@@ -300,8 +310,14 @@ export async function boot(opts: BootOptions = {}) {
         listeners.add(cb);
         return { dispose: () => { listeners.delete(cb); } };
       },
-      dispose: () => { runtimesByProject.delete(key); return inner.dispose(); },
+      dispose: () => {
+        runtimesByProject.delete(key);
+        runtimeRestarters.delete(key);
+        innerSub.dispose();
+        return inner.dispose();
+      },
     };
+    runtimeRestarters.set(key, respawn);
     return facade;
   };
 
@@ -323,6 +339,11 @@ export async function boot(opts: BootOptions = {}) {
         p.catch(() => runtimesByProject.delete(key)); // allow retry
       }
       return p;
+    },
+    async restartAll() {
+      const restarters = [...runtimeRestarters.values()];
+      await Promise.all(restarters.map((restart) => restart()));
+      return restarters.length;
     },
   };
   const runtimeCatalog = createRuntimeCatalog({ projects, runtimes });
@@ -407,7 +428,11 @@ export async function boot(opts: BootOptions = {}) {
   };
 
   // --- WP9: behavior instructions, MCP config, managed plugins (adapter-applied)
-  const configApplier = createConfigApplier();
+  const directConfigApplier = createConfigApplier();
+  const pendingOpenCode = createOpenCodePendingService({
+    restart: () => runtimes.restartAll?.() ?? Promise.resolve(0),
+  });
+  const configApplier = createDeferredConfigApplier(directConfigApplier, pendingOpenCode);
   let refreshSafeBehavior: () => Promise<void> = async () => {};
   const secureSafe = createSecureSafeService({
     dataDir,
@@ -462,6 +487,9 @@ export async function boot(opts: BootOptions = {}) {
       console.warn("[polyth] MCP seed from backend config skipped", err);
     }
   }
+  // Boot reconciliation happens before any runtime can be created. From this
+  // point on, user mutations are staged until the unified apply/restart action.
+  configApplier.enableStaging();
 
   // --- F18: web push (VAPID keys minted once into the data dir) + the
   // notifier bridging the session service's attention/turn-stopped seam.
@@ -1020,6 +1048,7 @@ export async function boot(opts: BootOptions = {}) {
 
   const staticCoreRoutes: RouteHandler[] = [
     authRoutes(auth),
+    opencodePendingRoutes(pendingOpenCode),
     packageRoutes(packageRegistry),
     pluginAssetRoutes({ plugins: pluginRegistry, pluginsDir }),
     async (rc) => {

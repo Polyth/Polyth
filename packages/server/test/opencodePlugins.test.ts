@@ -5,17 +5,25 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createConfigApplier } from "@polyth/backend-opencode";
 import type { RouteRequest } from "../src/http.ts";
+import { createDeferredConfigApplier, createOpenCodePendingService } from "../src/opencodePending.ts";
+import { opencodePendingRoutes } from "../src/routes/opencodePending.ts";
 import { opencodePluginRoutes } from "../src/routes/opencodePlugins.ts";
 
 const tmp = () => mkdtempSync(join(tmpdir(), "polyth-oc-plugins-"));
 
 const harness = (dir: string) => {
-  const route = opencodePluginRoutes(createConfigApplier({ configDir: dir }));
+  let restarts = 0;
+  const pending = createOpenCodePendingService({
+    restart: async () => { restarts += 1; return 2; },
+  });
+  const config = createDeferredConfigApplier(createConfigApplier({ configDir: dir }), pending);
+  config.enableStaging();
+  const routes = [opencodePluginRoutes(config), opencodePendingRoutes(pending)];
   const call = async (method: string, path: string, input: Record<string, unknown> = {}) => {
     let status = 0;
     let payload: unknown;
     const url = new URL(`http://polyth.test${path}`);
-    const handled = await route({
+    const request = {
       req: {},
       res: {},
       url,
@@ -26,10 +34,17 @@ const harness = (dir: string) => {
         status = code;
         payload = value;
       },
-    } as unknown as RouteRequest);
+    } as unknown as RouteRequest;
+    let handled = false;
+    for (const route of routes) {
+      if (await route(request)) {
+        handled = true;
+        break;
+      }
+    }
     return { handled, status, payload };
   };
-  return { call };
+  return { call, restarts: () => restarts };
 };
 
 test("OpenCode plugin routes list strings and option tuples", async () => {
@@ -74,12 +89,28 @@ test("OpenCode plugin import merges once and preserves unrelated config", async 
       { spec: "configured", options: { mode: "strict" } },
     ],
     imported: ["@otto-assistant/opencode-claude", "configured"],
-    restartRequired: true,
+    pendingRestart: true,
   });
-  const config = JSON.parse(readFileSync(file, "utf8"));
+  let config = JSON.parse(readFileSync(file, "utf8"));
   assert.equal(config.$schema, "https://opencode.ai/config.json");
   assert.deepEqual(config.provider, { "claude-code": { name: "Claude Code" } });
   assert.deepEqual(config.mcp, { docs: { type: "remote", url: "https://docs.example/mcp" } });
+  assert.deepEqual(config.plugin, ["existing"], "staged plugins do not touch live config");
+
+  assert.deepEqual((await call("GET", "/api/opencode/pending")).payload, {
+    changes: [{ id: "plugins", kind: "plugins", label: "OpenCode plugins" }],
+    count: 1,
+  });
+  assert.deepEqual((await call("POST", "/api/opencode/apply-restart")).payload, {
+    applied: 1,
+    restarted: 2,
+  });
+  config = JSON.parse(readFileSync(file, "utf8"));
+  assert.deepEqual(config.plugin, [
+    "existing",
+    "@otto-assistant/opencode-claude",
+    ["configured", { mode: "strict" }],
+  ]);
 });
 
 test("OpenCode plugin import accepts a pasted OpenCode config object", async () => {
@@ -97,10 +128,13 @@ test("OpenCode plugin import accepts a pasted OpenCode config object", async () 
   assert.deepEqual(result.payload, {
     plugins: [{ spec: "@otto-assistant/opencode-claude" }],
     imported: ["@otto-assistant/opencode-claude"],
-    restartRequired: true,
+    pendingRestart: true,
   });
-  const config = JSON.parse(readFileSync(file, "utf8"));
+  let config = JSON.parse(readFileSync(file, "utf8"));
   assert.deepEqual(config.provider, { existing: { name: "Existing provider" } });
+  assert.equal(config.plugin, undefined);
+  await call("POST", "/api/opencode/apply-restart");
+  config = JSON.parse(readFileSync(file, "utf8"));
   assert.deepEqual(config.plugin, ["@otto-assistant/opencode-claude"]);
 });
 
@@ -119,21 +153,25 @@ test("OpenCode plugin import rejects the whole request before writing", async ()
   assert.equal(readFileSync(file, "utf8"), original);
 });
 
-test("OpenCode plugin remove matches tuple spec and reports restart", async () => {
+test("OpenCode plugin remove stages tuple removal until apply and restart", async () => {
   const dir = tmp();
   writeFileSync(join(dir, "opencode.json"), JSON.stringify({
     plugin: [["@scope/remove", { enabled: true }], "keep"],
     provider: { x: {} },
   }));
-  const { call } = harness(dir);
+  const { call, restarts } = harness(dir);
   const result = await call("DELETE", `/api/plugins/opencode/${encodeURIComponent("@scope/remove")}`);
   assert.equal(result.status, 200);
   assert.deepEqual(result.payload, {
     plugins: [{ spec: "keep" }],
     removed: true,
-    restartRequired: true,
+    pendingRestart: true,
   });
-  const config = JSON.parse(readFileSync(join(dir, "opencode.json"), "utf8"));
+  let config = JSON.parse(readFileSync(join(dir, "opencode.json"), "utf8"));
+  assert.deepEqual(config.plugin, [["@scope/remove", { enabled: true }], "keep"]);
+  await call("POST", "/api/opencode/apply-restart");
+  assert.equal(restarts(), 1);
+  config = JSON.parse(readFileSync(join(dir, "opencode.json"), "utf8"));
   assert.deepEqual(config.plugin, ["keep"]);
   assert.deepEqual(config.provider, { x: {} });
 });

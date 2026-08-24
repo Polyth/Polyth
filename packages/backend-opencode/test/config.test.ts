@@ -88,6 +88,25 @@ test("plugin edits parse JSONC and remove tuple entries atomically", async () =>
   assert.deepEqual(cfg.provider, { "claude-code": { name: "Claude Code" } });
 });
 
+test("replacePlugins applies an exact validated list and preserves other config", async () => {
+  const dir = tmp();
+  const file = join(dir, "opencode.json");
+  writeFileSync(file, JSON.stringify({
+    plugin: ["old"],
+    provider: { anthropic: { name: "Anthropic" } },
+  }));
+  const applier = createConfigApplier({ configDir: dir });
+  await applier.replacePlugins([["configured", { mode: "strict" }], "next"]);
+  let cfg = JSON.parse(readFileSync(file, "utf8"));
+  assert.deepEqual(cfg.plugin, [["configured", { mode: "strict" }], "next"]);
+  assert.deepEqual(cfg.provider, { anthropic: { name: "Anthropic" } });
+
+  await applier.replacePlugins([]);
+  cfg = JSON.parse(readFileSync(file, "utf8"));
+  assert.equal("plugin" in cfg, false);
+  assert.deepEqual(cfg.provider, { anthropic: { name: "Anthropic" } });
+});
+
 test("applyPlugins validates every entry before leaving config untouched", async () => {
   const dir = tmp();
   const file = join(dir, "opencode.json");

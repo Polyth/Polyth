@@ -51,7 +51,7 @@ export function opencodePluginRoutes(config: Pick<
       const response: OpenCodePluginImportResponseDto = {
         ...listResponse(plugins),
         imported,
-        restartRequired: true,
+        pendingRestart: true,
       };
       json(200, response);
       return true;
@@ -63,7 +63,7 @@ export function opencodePluginRoutes(config: Pick<
       const response: OpenCodePluginRemoveResponseDto = {
         ...listResponse(result.plugins),
         removed: result.removed,
-        restartRequired: result.removed,
+        pendingRestart: result.removed,
       };
       json(200, response);
       return true;

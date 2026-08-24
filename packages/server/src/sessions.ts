@@ -41,6 +41,8 @@ export interface QueueStore {
 export interface RuntimePool {
   /** `cwd` overrides the project root — that is how worktree sessions are isolated. */
   forProject(projectId: string, cwd?: string): Promise<AgentRuntime>;
+  /** Restart all currently live runtime facades in place. */
+  restartAll?(): Promise<number>;
 }
 
 /** Organization seams implemented by @polyth/session's Store (WP5). */

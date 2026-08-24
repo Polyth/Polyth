@@ -866,6 +866,7 @@ export interface RemoteHost {
  *  server-managed manifest boundary can reject unknown slot names. */
 export const UI_SLOTS = [
   "app.nav", "app.header.actions", "session.header.actions", "session.list.badges",
+  "sidebar.footer",
   "composer.leading", "composer.trailing", "contextRail.tabs",
   "settings.pages", "commandPalette.commands",
   // Widget definitions enter through the catalog/settings seams. The six
@@ -1448,12 +1449,35 @@ export interface OpenCodePluginImportRequestDto {
 
 export interface OpenCodePluginImportResponseDto extends OpenCodePluginListResponseDto {
   imported: string[];
-  restartRequired: true;
+  pendingRestart: true;
 }
 
 export interface OpenCodePluginRemoveResponseDto extends OpenCodePluginListResponseDto {
   removed: boolean;
-  restartRequired: boolean;
+  pendingRestart: boolean;
+}
+
+export type OpenCodePendingChangeKind =
+  | "agent"
+  | "behavior"
+  | "mcp"
+  | "plugins"
+  | "provider-visibility";
+
+export interface OpenCodePendingChangeDto {
+  id: string;
+  kind: OpenCodePendingChangeKind;
+  label: string;
+}
+
+export interface OpenCodePendingResponseDto {
+  changes: OpenCodePendingChangeDto[];
+  count: number;
+}
+
+export interface OpenCodeApplyRestartResponseDto {
+  applied: number;
+  restarted: number;
 }
 
 // ---------------------------------------------------------------- Secure Safe (OC-22-008)

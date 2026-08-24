@@ -1212,7 +1212,7 @@ function OpenCodePluginsSection() {
       setText("");
       setPreview(null);
       setNotice(
-        `${result.imported.length} OpenCode plugin${result.imported.length === 1 ? "" : "s"} saved. Restart required to load the new configuration.`,
+        `${result.imported.length} OpenCode plugin${result.imported.length === 1 ? "" : "s"} staged.`,
       );
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -1229,7 +1229,7 @@ function OpenCodePluginsSection() {
     try {
       const result = await api.opencodePluginRemove(plugin.spec);
       setPlugins(result.plugins);
-      if (result.removed) setNotice(`${plugin.spec} removed. Restart required to unload it.`);
+      if (result.removed) setNotice(`${plugin.spec} removal staged.`);
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {

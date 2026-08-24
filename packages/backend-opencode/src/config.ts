@@ -33,6 +33,8 @@ export interface BackendConfigApplier {
   listPlugins(): Promise<OpenCodePluginConfigEntry[]>;
   /** Merge entries into OpenCode's `plugin` array, deduplicated by package spec. */
   applyPlugins(plugins: unknown[]): Promise<OpenCodePluginConfigEntry[]>;
+  /** Replace OpenCode's plugin list with a validated desired state. */
+  replacePlugins(plugins: unknown[]): Promise<OpenCodePluginConfigEntry[]>;
   /** Remove every string/tuple entry matching a package spec. */
   removePlugin(spec: string): Promise<{ plugins: OpenCodePluginConfigEntry[]; removed: boolean }>;
   /** Mirror provider/model visibility into the backend config, preserving all
@@ -245,6 +247,18 @@ export function createConfigApplier(opts: { configDir?: string } = {}): BackendC
         }
         await atomicWrite(configPath, `${JSON.stringify({ ...existing, plugin: merged }, null, 2)}\n`);
         return merged;
+      });
+    },
+
+    async replacePlugins(raw: unknown[]): Promise<OpenCodePluginConfigEntry[]> {
+      const plugins = normalizePluginEntries(raw);
+      return mutatePlugins(async () => {
+        const existing = await readExisting();
+        const next = { ...existing };
+        if (plugins.length > 0) next.plugin = plugins;
+        else delete next.plugin;
+        await atomicWrite(configPath, `${JSON.stringify(next, null, 2)}\n`);
+        return plugins;
       });
     },
 
