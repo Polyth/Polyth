@@ -52,6 +52,7 @@ import {
 import { createDictationService, createWhisperSttAdapter } from "@polyth/dictation";
 import { createHomeAssistantServerPlugin } from "@polyth/home-assistant";
 import { createProjectService } from "./projects.ts";
+import { projectRoutes } from "./routes/projects.ts";
 import { createPackageRegistry } from "./packages.ts";
 import { createSessionService, type Broadcaster, type RuntimePool } from "./sessions.ts";
 import { createRuntimeCatalog } from "./runtimeCatalog.ts";
@@ -916,6 +917,7 @@ export async function boot(opts: BootOptions = {}) {
   registerPackageRoute("preview", previewRoutes({ projects, sessions, preview }), {
     onDisable: () => preview.stopAll(),
   });
+  registerPackageRoute("projects", projectRoutes(projects));
   registerPackageRoute("browser", chainRoutes(
     browserToolBridge.route,
     browserRoutes({ browser, append: appendLogged, shotsDir: `${dataDir}/browser-shots` }),

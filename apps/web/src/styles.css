@@ -223,11 +223,12 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
      the smallest setting must not be inflated back to a medium-sized label. */
   --nav-session-size: var(--ui-font-size, 14px);
   --nav-meta-size: calc(var(--ui-font-size, 14px) * 1.071);
-  /* The icon/sign stacks resolve to one shared text column: project, worktree,
-     and session labels no longer jump horizontally between tree levels. */
-  --nav-indent-project: 4px;
-  --nav-indent-worktree: 18px;
-  --nav-indent-session: 64px;
+  /* Projects and worktrees retain their visual nesting. Session rows have no
+     leading icon, so their text starts just inside the worktree rather than
+     spending a full icon column on empty space. */
+  --nav-indent-project: 0px;
+  --nav-indent-worktree: 8px;
+  --nav-indent-session: 26px;
   /* Cap unusually long status content, but do not reserve this entire width
      for a short timestamp such as “11m”. */
   --nav-status-width: 56px;
@@ -497,7 +498,7 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
 .project-card-shell {
   position: relative;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 36px 36px;
+  grid-template-columns: minmax(0, 1fr) repeat(3, 36px);
   align-items: center;
   min-height: var(--nav-row-project);
   margin-bottom: 2px;
@@ -516,7 +517,7 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
   isolation: isolate;
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: 4px;
   width: 100%;
   min-width: 0;
   min-height: var(--nav-row-project);
@@ -549,7 +550,7 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
 .project-card:hover { background: transparent; }
 .project-card:hover::before { background: var(--elevated); opacity: 1; }
 .project-tree-toggle-sign {
-  width: 18px;
+  width: 14px;
   flex: none;
   color: var(--muted);
   font-size: calc(var(--ui-font-size, 14px) * 1.3);
@@ -558,8 +559,11 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
   text-align: center;
 }
 .project-new-session,
+.project-worktree-btn,
 .project-menu-btn {
   position: static;
+  display: grid;
+  place-items: center;
   width: 36px;
   height: 36px;
   padding: 0;
@@ -569,8 +573,10 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
 }
 .project-new-session { color: var(--accent); }
 .project-new-session:hover,
+.project-worktree-btn:hover,
 .project-menu-btn:hover { color: var(--text); background: var(--panel); }
 .project-new-session svg,
+.project-worktree-btn svg,
 .project-menu-btn svg { width: 16px; height: 16px; }
 .project-actions-menu {
   position: absolute; z-index: 45; top: calc(100% + 4px); right: 4px; min-width: 190px;
@@ -579,6 +585,8 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
 }
 .project-actions-menu button { border: 0; background: transparent; text-align: left; padding: 7px 9px; }
 .project-actions-menu button:hover { background: var(--raised); }
+.project-menu-separator { height: 1px; margin: 5px 4px; background: var(--border-soft); }
+.project-actions-menu .project-menu-close { color: var(--danger, #c43d3d); }
 .project-glyph {
   width: 28px;
   height: 28px;
@@ -592,6 +600,8 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
   font: 650 var(--nav-project-size)/1 var(--ui-font-family, var(--sans));
 }
 .project-glyph svg { width: 17px; height: 17px; }
+.project-glyph img { width: 19px; height: 19px; object-fit: contain; }
+.project-glyph-mask { width: 19px; height: 19px; display: block; background: currentColor; -webkit-mask-position: center; -webkit-mask-repeat: no-repeat; -webkit-mask-size: contain; mask-position: center; mask-repeat: no-repeat; mask-size: contain; }
 .project-meta { min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 1px; }
 .project-name {
   overflow: hidden;
@@ -608,7 +618,7 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
 .branch-row {
   display: flex;
   align-items: center;
-  gap: 7px;
+  gap: 4px;
   min-height: var(--nav-row-branch);
   margin: 0;
   padding-left: var(--nav-indent-worktree);
@@ -616,7 +626,7 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
   font-size: var(--nav-branch-size);
   font-weight: 600;
 }
-.branch-row svg { width: 16px; height: 16px; flex: none; }
+.branch-row svg { width: 14px; height: 14px; flex: none; }
 .branch-row .mono { color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .session-worktree-group { position: relative; z-index: 1; margin: 0; }
 /* Worktree groups are sibling stacking contexts. When a session menu escapes
@@ -636,7 +646,7 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
   min-height: var(--nav-row-branch);
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 4px;
   flex: 1;
   overflow: hidden;
   padding: 0 6px 0 var(--nav-worktree-row-indent, var(--nav-indent-worktree));
@@ -651,9 +661,9 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
 .session-worktree-toggle > * { position: relative; z-index: 1; }
 .session-worktree-toggle:hover { color: var(--text); background: transparent; }
 .session-worktree-toggle:hover::before { background: var(--elevated); opacity: 1; }
-.session-worktree-toggle > svg { width: 16px; height: 16px; flex: none; color: var(--session-blue, var(--accent)); }
+.session-worktree-toggle > svg { width: 14px; height: 14px; flex: none; color: var(--session-blue, var(--accent)); }
 .session-worktree-toggle-sign {
-  width: 18px;
+  width: 14px;
   flex: none;
   color: var(--muted);
   font-size: calc(var(--ui-font-size, 14px) * 1.3);
@@ -1813,8 +1823,8 @@ input.notification-preview { font-family: var(--mono); font-size: 12.5px; min-wi
   display: flex; align-items: center; gap: 9px;
   width: min(420px, calc(100vw - 32px)); padding: 11px 10px 11px 13px;
   background: color-mix(in srgb, var(--elevated) 92%, var(--red-wash)); color: var(--text);
-  border: 1px solid color-mix(in srgb, var(--red) 48%, var(--border)); border-radius: var(--radius-lg);
-  box-shadow: var(--shadow-lg);
+  border: 1px solid color-mix(in srgb, var(--red) 48%, var(--border)); border-radius: calc(24px * var(--corner-radius-scale));
+  box-shadow: 0 3px 12px rgba(0, 0, 0, 0.16);
   font-size: 12.5px; line-height: 1.45;
   animation: toast-in 0.18s ease-out;
 }
@@ -3000,22 +3010,11 @@ body[data-chatwidth="wide"] .bubble, body[data-chatwidth="wide"] .reasoning, bod
 .worktree-session-dialog { width: min(620px, 94vw); }
 .worktree-session-body { display: flex; flex-direction: column; gap: 14px; padding: 4px 16px 10px; }
 .worktree-session-field { display: flex; flex-direction: column; gap: 6px; font-size: 12px; font-weight: 600; }
-.worktree-session-field input { width: 100%; }
+.worktree-session-field input,
+.worktree-session-field select { width: 100%; }
 .worktree-session-field small { font-weight: 400; }
-.worktree-mode-tabs { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; padding: 3px; border-radius: calc(9px * var(--corner-radius-scale)); background: var(--sunken); }
-.worktree-mode-tabs button { border-color: transparent; background: transparent; }
-.worktree-mode-tabs button.active { border-color: var(--border-soft); background: var(--elevated); color: var(--text); box-shadow: var(--inset-hi); }
-.worktree-search { width: 100%; }
-.worktree-choice-list { display: flex; flex-direction: column; gap: 5px; max-height: 280px; overflow: auto; }
-.worktree-choice {
-  display: flex; align-items: flex-start; gap: 9px; padding: 9px 10px;
-  border: 1px solid var(--border-soft); border-radius: var(--radius-sm); background: var(--panel); cursor: pointer;
-}
-.worktree-choice.selected { border-color: var(--accent-line); background: var(--accent-wash); }
-.worktree-choice input { margin-top: 3px; }
-.worktree-choice span { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-.worktree-choice strong { font: 600 12px/1.3 var(--mono); }
-.worktree-choice small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--muted); font: 11px/1.3 var(--mono); }
+.worktree-field-warning { color: var(--danger, #c43d3d); }
+.worktree-checkout-note { margin: -2px 0 0; color: var(--muted); font-size: 11.5px; }
 .dialog-md { width: min(560px, 92vw); }
 .dialog-lg { width: min(880px, 94vw); }
 .dialog-full { width: 96vw; height: 92vh; }
@@ -6956,7 +6955,7 @@ body[data-quick-actions="false"] [data-widget-id="core.quick-actions"] { display
   background: var(--chat-surface);
   border-color: var(--chat-border);
 }
-.side-scroll { padding: 6px 10px 14px; }
+.side-scroll { padding: 6px 6px 14px; }
 .project-select-btn { display: none; }
 .project-menu-btn svg { width: 16px; height: 16px; }
 .show-more-sessions {
@@ -7804,7 +7803,8 @@ body[data-quick-actions="false"] [data-widget-id="core.quick-actions"] { display
 
 
 /* Configurable session actions and footer --------------------------------- */
-.composer .composer-mobile-extensions .header-action {
+.composer .composer-mobile-extensions .header-action,
+.composer-hero .composer-mobile-extensions .header-action {
   width: 38px;
   min-width: 38px;
   height: 38px;
@@ -7814,13 +7814,17 @@ body[data-quick-actions="false"] [data-widget-id="core.quick-actions"] { display
   color: var(--muted);
   background: transparent;
 }
-.composer .composer-mobile-extensions .header-action > span { display: none; }
-.composer .composer-mobile-extensions .header-action:hover {
+.composer .composer-mobile-extensions .header-action > span,
+.composer-hero .composer-mobile-extensions .header-action > span { display: none; }
+.composer .composer-mobile-extensions .header-action:hover,
+.composer-hero .composer-mobile-extensions .header-action:hover {
   color: var(--text);
   background: color-mix(in srgb, var(--text) 6%, transparent);
 }
 .composer .composer-mobile-extensions .composer-auto-approve.on,
-.composer .composer-mobile-extensions .composer-goals.on {
+.composer .composer-mobile-extensions .composer-goals.on,
+.composer-hero .composer-mobile-extensions .composer-auto-approve.on,
+.composer-hero .composer-mobile-extensions .composer-goals.on {
   color: var(--green);
   background: color-mix(in srgb, var(--green) 11%, transparent);
 }
@@ -8212,7 +8216,7 @@ body[data-quick-actions="false"] [data-widget-id="core.quick-actions"] { display
 .widget-place-chip[draggable="true"] { cursor: grab; }
 .project-icon-input { width: 74px; text-align: center; font-size: 18px; }
 
-.project-appearance-dialog { width: min(420px, calc(100vw - 32px)); }
+.project-appearance-dialog { width: min(460px, calc(100vw - 32px)); }
 .project-appearance-body { display: grid; gap: 14px; padding: 20px; }
 .project-appearance-body p { margin: 0; color: var(--muted); font-size: 12px; line-height: 1.5; }
 .project-appearance-body > label { display: grid; gap: 6px; color: var(--text-dim); font-size: 12px; font-weight: 650; }
@@ -8221,6 +8225,17 @@ body[data-quick-actions="false"] [data-widget-id="core.quick-actions"] { display
 .project-color-input input { width: 42px; height: 32px; padding: 2px; border-radius: calc(8px * var(--corner-radius-scale)); }
 .project-color-input code { color: var(--muted); }
 .project-appearance-body .dialog-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 4px; }
+.project-icon-picker { display: grid; gap: 7px; }
+.project-appearance-label { color: var(--text-dim); font-size: 12px; font-weight: 650; }
+.project-icon-search { height: 34px; padding: 0 10px; }
+.project-icon-options { display: grid; grid-template-columns: repeat(6, 56px); gap: 7px; max-height: 260px; overflow-y: auto; padding: 1px; }
+.project-icon-options button { width: 56px; height: 56px; padding: 0; font-size: 18px; display: grid; place-items: center; }
+.project-icon-art { width: 32px; height: 32px; display: block; -webkit-mask-position: center; -webkit-mask-repeat: no-repeat; -webkit-mask-size: contain; mask-position: center; mask-repeat: no-repeat; mask-size: contain; }
+.project-icon-options small { grid-column: 1 / -1; }
+.project-icon-options button.selected { border-color: var(--accent-line); background: var(--accent-wash); }
+.project-icon-upload-row { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.project-icon-preview { width: 28px; height: 28px; object-fit: contain; }
+.project-icon-picker small { color: var(--muted); font-size: 11px; }
 
 @media (max-width: 820px) {
   .timeline { padding-inline: 12px; }
@@ -8831,6 +8846,7 @@ html[data-sheet="open"], html[data-sheet="open"] body { overflow: hidden; }
   .sidebar .icon-btn,
   .sidebar-service-btn,
   .project-new-session,
+  .project-worktree-btn,
   .project-menu-btn,
   .sidebar-sort-trigger,
   .sidebar-filter > button,

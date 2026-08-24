@@ -338,6 +338,10 @@ export interface SessionRef { id: string }
 export interface TurnRef { turnId: string }
 export interface UserTurnInput {
   text: string;
+  /** Request a durable title derived from this first prompt when the session
+   *  still has a placeholder title. The client owns the user preference; the
+   *  server owns the append + projection update. */
+  autoTitle?: boolean;
   attachments?: AttachmentRef[];
   model?: ModelRef;
   agent?: string;

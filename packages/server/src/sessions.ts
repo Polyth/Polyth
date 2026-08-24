@@ -161,6 +161,30 @@ export function createSessionService(deps: {
   const replyText = (sessionId: string): string =>
     [...(turnReply.get(sessionId)?.values() ?? [])].filter((t) => t.trim()).join("\n\n");
 
+  const isPlaceholderTitle = (title: string, sessionId: string): boolean => {
+    const value = title.trim().toLowerCase();
+    return value === "" || value === "new session" || value === "untitled session"
+      || value === "untitled" || value === "(untitled)" || value === "(untitled session)"
+      || title.trim() === sessionId || title.trim().startsWith("ses_") || /^[0-9a-f-]{8,}$/i.test(title.trim());
+  };
+
+  const titleFromPrompt = (text: string): string => {
+    const line = text.split("\n").find((candidate) => candidate.trim() !== "") ?? "";
+    const title = line.replace(/\s+/g, " ").trim();
+    return title.length <= 48 ? title : `${title.slice(0, 47).trimEnd()}…`;
+  };
+
+  /** Metadata is durable too: a projection broadcast must never erase a
+   * client-only title update after the first turn starts. */
+  const autoTitle = async (sessionId: string, text: string): Promise<void> => {
+    const title = titleFromPrompt(text);
+    if (!title) return;
+    const current = await store.projection(sessionId);
+    if (!current || !isPlaceholderTitle(current.title, sessionId)) return;
+    await appendAndBroadcast(sessionId, "session/metadata-changed", { title }, { ignorable: true });
+    await updateProjection(sessionId, { title });
+  };
+
   const secureSafeKind = (value: unknown): SecureSafeKind | undefined =>
     value === "env" || value === "token" || value === "password" ? value : undefined;
 
@@ -777,6 +801,7 @@ export function createSessionService(deps: {
           ...(agent ? { resolvedAgent: agent } : {}),
         } : {}),
       });
+      if (input.autoTitle) await autoTitle(sessionId, raw);
       await rt.startTurn({
         sessionId,
         text: recoveredUserText(text, decoration?.recoveryContext),
@@ -1364,12 +1389,14 @@ export function createSessionService(deps: {
     },
 
     async rename(sessionId, title) {
-      const t = title.trim();
-      if (!t || t.length > 200) throw Object.assign(new Error("title required (≤200 chars)"), { code: "invalid-input" });
-      const proj = await store.projection(sessionId);
-      if (!proj) throw Object.assign(new Error("session not found"), { code: "not-found" });
-      await appendAndBroadcast(sessionId, "session/metadata-changed", { title: t }, { ignorable: true });
-      await updateProjection(sessionId, { title: t });
+      return withSessionLock(sessionId, async () => {
+        const t = title.trim();
+        if (!t || t.length > 200) throw Object.assign(new Error("title required (≤200 chars)"), { code: "invalid-input" });
+        const proj = await store.projection(sessionId);
+        if (!proj) throw Object.assign(new Error("session not found"), { code: "not-found" });
+        await appendAndBroadcast(sessionId, "session/metadata-changed", { title: t }, { ignorable: true });
+        await updateProjection(sessionId, { title: t });
+      });
     },
 
     async organize(sessionId, patch: SessionOrganizePatch) {
