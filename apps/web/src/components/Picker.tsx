@@ -11,6 +11,7 @@ import { useShellMode } from "../responsiveShell.ts";
 import { dismissKeyboard } from "../mobileViewport.ts";
 import { tapFeedback } from "../haptics.ts";
 import Sheet, { SheetRow } from "./mobile/Sheet.tsx";
+import { useSheetTrigger } from "./mobile/sheetTrigger.ts";
 
 const MAX_SHOWN = 200;
 
@@ -90,9 +91,15 @@ export default function Picker({
       return;
     }
     setQ("");
-    if (asSheet) void dismissKeyboard().then(() => setOpen(true));
-    else setOpen(true);
+    if (asSheet) {
+      // Open first, dismiss the keyboard after: see sheetTrigger.ts.
+      setOpen(true);
+      void dismissKeyboard();
+    } else {
+      setOpen(true);
+    }
   };
+  const triggerHandlers = useSheetTrigger(asSheet, toggleOpen);
 
   const hits = useMemo(() => filterPickerItems(items, q), [items, q]);
   const shown = hits.slice(0, MAX_SHOWN);
@@ -152,7 +159,7 @@ export default function Picker({
         aria-expanded={open}
         aria-controls={open && !asSheet ? listId : undefined}
         disabled={disabled}
-        onClick={toggleOpen}
+        {...triggerHandlers}
       >
         {triggerIcon
           ? <span className="picker-trigger-icon" aria-hidden="true">{triggerIcon}</span>

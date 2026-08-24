@@ -273,9 +273,7 @@ function ThemeSection() {
 export function AppearancePage() {
   const ui = useUiSettings();
   const settings = useStore((s) => s.settings);
-  const fontPct = ((settings.fontSize - 12) / 6) * 100;
   const editorFontPct = ((ui.editorFontSize - 11) / 13) * 100;
-  const setFontSize = (fontSize: number) => updateSettings({ fontSize });
   return (
     <>
       <PageHead title="Appearance" blurb="Visual preferences, saved in this browser and applied immediately." />
@@ -292,28 +290,26 @@ export function AppearancePage() {
       </Row>
       <ThemeSection />
       <Row label="Interface font" hint="Choose the main typeface used throughout menus, settings, and conversations." itemId="appearance.fontFamily">
-        <Seg
+        <select
+          aria-label="Interface font"
           value={settings.fontFamily}
-          options={[["sans", "Modern"], ["system", "System"], ["serif", "Serif"], ["mono", "Mono"]]}
-          onChange={(fontFamily) => updateSettings({ fontFamily })}
-        />
+          onChange={(event) => updateSettings({ fontFamily: event.target.value as typeof settings.fontFamily })}
+        >
+          <option value="sans">Inter</option>
+          <option value="system">System UI</option>
+          <option value="serif">Georgia</option>
+          <option value="mono">Monospace</option>
+        </select>
       </Row>
       <Row label="Density" hint="Choose airy, balanced, or compact spacing across panels." itemId="appearance.density">
         <Seg value={ui.density} options={[["comfortable", "Comfortable"], ["balanced", "Balanced"], ["compact", "Compact"]]} onChange={(density) => { setUiSettings({ density }); updateSettings({ density }); }} />
       </Row>
-      <Row label="Interface font size" hint="Scales interface text except code blocks and the terminal." itemId="appearance.fontSize">
-        <div className="rng">
-          <input
-            type="range"
-            min={12}
-            max={18}
-            value={settings.fontSize}
-            aria-label="Interface font size"
-            style={{ "--p": `${fontPct}%` } as CSSProperties}
-            onChange={(e) => setFontSize(Number(e.target.value))}
-          />
-          <span className="rng-val">{settings.fontSize}px</span>
-        </div>
+      <Row label="Interface scale" hint="Increase or decrease text throughout Polyth. Code and terminal text have their own setting below." itemId="appearance.fontSize">
+        <Seg
+          value={settings.fontSize}
+          options={[[12, "Small"], [13, "Smaller"], [14, "Medium"], [16, "Large"], [18, "Extra large"]]}
+          onChange={(fontSize) => updateSettings({ fontSize })}
+        />
       </Row>
       <Row label="Editor font size" hint="Composer, file editor, diffs, terminal input, and code blocks (11–24 px)." itemId="appearance.editorFontSize">
         <div className="rng">
@@ -329,9 +325,8 @@ export function AppearancePage() {
       <Row label="Corner rounding" hint="Apply square, compact, or generously rounded corners across the interface." itemId="appearance.rounding">
         <Seg value={ui.rounding} options={[["square", "Square"], ["compact", "Compact"], ["rounded", "Rounded"]]} onChange={(rounding) => setUiSettings({ rounding })} />
       </Row>
-      <Row label="Menu items" hint="Choose which optional actions appear in the composer and workspace menus." itemId="appearance.menuItems">
+      <Row label="Optional actions" hint="Choose which optional actions appear while you compose." itemId="appearance.menuItems">
         <div className="appearance-menu-items">
-          <label><Toggle on={ui.showTechnicalButtons} onChange={(showTechnicalButtons) => setUiSettings({ showTechnicalButtons })} label="Technical options" /><span>Technical</span></label>
           <label><Toggle on={ui.showDictate} onChange={(showDictate) => setUiSettings({ showDictate })} label="Dictation action" /><span>Dictation</span></label>
           <label><Toggle on={ui.showQuickActions} onChange={(showQuickActions) => setUiSettings({ showQuickActions })} label="Quick actions" /><span>Quick actions</span></label>
         </div>

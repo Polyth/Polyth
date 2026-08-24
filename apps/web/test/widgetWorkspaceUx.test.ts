@@ -84,9 +84,9 @@ test("canvas top row is placeable and editing borders use theme colors", async (
 test("settings uses named button places without canvas layout controls", async () => {
   const source = await readFile(new URL("../src/components/settings/WidgetsPage.tsx", import.meta.url), "utf8");
   for (const place of [
-    "Focus header",
-    "More tools / right rail",
-    "Technical menu",
+    "Top rail",
+    "Right rail",
+    "Response actions",
     "Composer actions",
     "Session footer",
     "Header actions",
@@ -100,6 +100,9 @@ test("settings uses named button places without canvas layout controls", async (
     "WidgetLibraryOverlay",
     "Build & Debug",
     "Who is this for",
+    "More tools / right rail",
+    "Technical menu",
+    "Session header stats",
   ]) {
     assert.ok(!source.includes(removed), `${removed} stays out of widget settings`);
   }

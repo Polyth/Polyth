@@ -213,6 +213,10 @@ export function applyUiSettings(s: UiSettings = settings): void {
       : ["8px", "10px", "10px", "12px", "16px"];
   ["--radius-sm", "--radius", "--radius-md", "--radius-lg", "--radius-xl"]
     .forEach((name, index) => b.style?.setProperty(name, radii[index]!));
+  b.style?.setProperty("--radius-control", radii[1]!);
+  b.style?.setProperty("--radius-card", radii[3]!);
+  b.style?.setProperty("--radius-surface", radii[4]!);
+  b.style?.setProperty("--radius-sheet", radii[4]!);
 }
 
 export function getUiSettings(): UiSettings {

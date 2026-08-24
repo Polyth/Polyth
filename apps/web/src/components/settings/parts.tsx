@@ -21,7 +21,7 @@ export function Toggle({ on, onChange, label }: { on: boolean; onChange: (v: boo
   );
 }
 
-export function Seg<T extends string>({ value, options, onChange }: {
+export function Seg<T extends string | number>({ value, options, onChange }: {
   value: T;
   options: Array<[T, string]>;
   onChange: (v: T) => void;
@@ -45,10 +45,10 @@ export function EmptyState({ title, body }: { title: string; body?: string }) {
 }
 
 export function PageHead({ title, blurb }: { title: string; blurb?: string }) {
-  return (
-    <div className="set-page-head">
-      <h3>{title}</h3>
-      {blurb && <p className="muted">{blurb}</p>}
-    </div>
-  );
+  // The settings shell already owns the page title. Keeping a second heading
+  // (and a generic description) here made every page read like two titles.
+  // Keep this component as a compatibility seam for contributed pages.
+  void title;
+  void blurb;
+  return null;
 }

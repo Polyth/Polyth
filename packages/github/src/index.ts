@@ -71,6 +71,8 @@ export interface CurrentPrSummary {
 export interface GithubStatus {
   installed: boolean;
   authenticated: boolean;
+  /** Public profile data from the authenticated GitHub account. Never includes tokens. */
+  user: { login: string; avatarUrl: string } | null;
   repo: GithubRepo | null;
   reason?: string;
 }
@@ -237,12 +239,11 @@ export function createGithubService(deps: { exec?: ExecFn } = {}): GithubService
     repo,
 
     async status(cwd) {
-      let installed = true;
       let authenticated = false;
       try {
         await exec("gh", ["--version"], { cwd });
       } catch (e) {
-        return { installed: false, authenticated: false, repo: null, reason: reasonOf(e) };
+        return { installed: false, authenticated: false, user: null, repo: null, reason: reasonOf(e) };
       }
       try {
         await exec("gh", ["auth", "status"], { cwd });
@@ -250,10 +251,17 @@ export function createGithubService(deps: { exec?: ExecFn } = {}): GithubService
       } catch {
         authenticated = false;
       }
+      const account = authenticated
+        ? await ghJson<{ login?: string; avatar_url?: string }>(cwd, ["api", "user"])
+        : null;
+      const user = account?.ok && typeof account.data.login === "string" && typeof account.data.avatar_url === "string"
+        ? { login: account.data.login, avatarUrl: account.data.avatar_url }
+        : null;
       const r = await repo(cwd);
       return {
-        installed,
+        installed: true,
         authenticated,
+        user,
         repo: r.ok ? r.data : null,
         ...(r.ok ? {} : { reason: r.reason }),
       };

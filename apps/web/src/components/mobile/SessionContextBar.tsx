@@ -1,19 +1,95 @@
-// UX-MOBILE-01 §5/§6/§8: the compact project/branch context bar docked above
-// the composer on the fresh-session screen. Both targets stay one tap away
-// without splitting the page between the headline and the composer; each
-// trigger opens the shared bottom sheet to switch.
+// UX-MOBILE-01 §5/§6/§8: the "where am I?" row. Project and branch live
+// directly above the composer as compact selectors — no permanent Project /
+// Branch labels, no full-width fields in the middle of the screen. The whole
+// name is the touch target (never a 12px chevron), long names truncate with an
+// ellipsis instead of widening the viewport, and both open the shared sheet.
 import { useState } from "react";
 import Sheet, { SheetRow } from "./Sheet.tsx";
 import { Icon } from "../../icons.tsx";
-import { useShellMode } from "../../responsiveShell.ts";
 import { dismissKeyboard } from "../../mobileViewport.ts";
-import { tapFeedback } from "../../haptics.ts";
+import { useSheetTrigger } from "./sheetTrigger.ts";
 
-/** One switchable target: a project or a branch/worktree destination. */
 export interface ContextChoice {
   id: string;
   label: string;
-  detail: string;
+  detail?: string;
+}
+
+function ContextSelector({
+  kind,
+  value,
+  choices,
+  disabled,
+  sheetTitle,
+  ariaLabel,
+  onPick,
+}: {
+  kind: "project" | "branch";
+  value: string;
+  choices: ContextChoice[];
+  disabled?: boolean;
+  sheetTitle: string;
+  ariaLabel: string;
+  onPick: (id: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const current = choices.find((choice) => choice.label === value)?.id;
+  // §22: open on pointer-down, then dismiss the keyboard — a click can be
+  // swallowed by the reflow the dismissal causes (see sheetTrigger.ts).
+  const triggerHandlers = useSheetTrigger(true, () => {
+    setOpen(true);
+    void dismissKeyboard();
+  });
+  return (
+    <div className={`context-selector context-selector-${kind}`}>
+      <button
+        type="button"
+        className="context-trigger"
+        aria-label={ariaLabel}
+        aria-haspopup="dialog"
+        aria-expanded={open}
+        title={value}
+        disabled={disabled}
+        {...triggerHandlers}
+      >
+        <span className="context-trigger-icon" aria-hidden="true">
+          {kind === "project" ? <Icon.files /> : <Icon.branch />}
+        </span>
+        <span className="context-trigger-name">{value}</span>
+        <span className="context-trigger-caret" aria-hidden="true"><Icon.chevronDown /></span>
+      </button>
+      {open && (
+        <Sheet title={sheetTitle} className="context-sheet" onClose={() => setOpen(false)}>
+          <div role="listbox" aria-label={sheetTitle}>
+            {choices.map((choice) => (
+              <SheetRow
+                key={choice.id}
+                title={choice.label}
+                {...(choice.detail ? { meta: choice.detail } : {})}
+                icon={kind === "project" ? <Icon.files /> : <Icon.branch />}
+                selected={choice.id === current}
+                onClick={() => {
+                  onPick(choice.id);
+                  setOpen(false);
+                }}
+              />
+            ))}
+            {choices.length === 0 && <p className="sheet-empty">Nothing to choose here yet.</p>}
+          </div>
+        </Sheet>
+      )}
+    </div>
+  );
+}
+
+export interface SessionContextBarProps {
+  projectName: string;
+  projects: ContextChoice[];
+  onPickProject: (id: string) => void;
+  branchName: string;
+  branches: ContextChoice[];
+  branchLoading?: boolean;
+  onPickBranch: (id: string) => void;
 }
 
 export default function SessionContextBar({
@@ -24,95 +100,27 @@ export default function SessionContextBar({
   branches,
   branchLoading,
   onPickBranch,
-}: {
-  projectName: string;
-  projects: ContextChoice[];
-  onPickProject: (id: string) => void;
-  branchName: string;
-  branches: ContextChoice[];
-  branchLoading?: boolean;
-  onPickBranch: (id: string) => void;
-}) {
-  const phone = useShellMode() === "phone";
-  const [open, setOpen] = useState<"project" | "branch" | null>(null);
-
-  // §22: never raise a sheet under an open keyboard.
-  const openPicker = (which: "project" | "branch") => {
-    if (phone) void dismissKeyboard().then(() => setOpen(which));
-    else setOpen(which);
-  };
-  const pick = (choose: () => void) => {
-    if (phone) tapFeedback();
-    choose();
-    setOpen(null);
-  };
-
+}: SessionContextBarProps) {
   return (
-    <div className="session-context-bar">
-      <span className="context-selector">
-        <button
-          type="button"
-          className="context-trigger"
-          title={projectName}
-          aria-label={`Project for new session, current ${projectName}`}
-          aria-haspopup="dialog"
-          aria-expanded={open === "project"}
-          onClick={() => openPicker("project")}
-        >
-          <span className="context-trigger-icon" aria-hidden="true"><Icon.files /></span>
-          <span className="context-trigger-name">{projectName}</span>
-          <span className="context-trigger-caret" aria-hidden="true"><Icon.chevronDown /></span>
-        </button>
-      </span>
+    <div className="session-context-bar" aria-label="New session location">
+      <ContextSelector
+        kind="project"
+        value={projectName}
+        choices={projects}
+        sheetTitle="Project"
+        ariaLabel={`Project for new session, current ${projectName}`}
+        onPick={onPickProject}
+      />
       <span className="context-sep" aria-hidden="true" />
-      <span className="context-selector">
-        <button
-          type="button"
-          className="context-trigger"
-          title={branchName}
-          aria-label={`Branch for new session, current ${branchName}`}
-          aria-haspopup="dialog"
-          aria-expanded={open === "branch"}
-          disabled={branchLoading === true}
-          onClick={() => openPicker("branch")}
-        >
-          <span className="context-trigger-icon" aria-hidden="true"><Icon.branch /></span>
-          <span className="context-trigger-name">{branchLoading ? "Loading…" : branchName}</span>
-          <span className="context-trigger-caret" aria-hidden="true"><Icon.chevronDown /></span>
-        </button>
-      </span>
-      {open === "project" && (
-        <Sheet title="Project" onClose={() => setOpen(null)}>
-          <div role="listbox" aria-label="Projects">
-            {projects.map((choice) => (
-              <SheetRow
-                key={choice.id}
-                title={choice.label}
-                {...(choice.detail ? { meta: choice.detail } : {})}
-                selected={choice.label === projectName}
-                onClick={() => pick(() => onPickProject(choice.id))}
-              />
-            ))}
-            {projects.length === 0 && <p className="sheet-empty">No projects yet</p>}
-          </div>
-        </Sheet>
-      )}
-      {open === "branch" && (
-        <Sheet title="Branch" onClose={() => setOpen(null)}>
-          <div role="listbox" aria-label="Branches">
-            {branches.map((choice) => (
-              <SheetRow
-                key={choice.id}
-                title={choice.label}
-                {...(choice.detail ? { meta: choice.detail } : {})}
-                selected={choice.label === branchName}
-                onClick={() => pick(() => onPickBranch(choice.id))}
-              />
-            ))}
-            {branches.length === 0 && <p className="sheet-empty">No branches found</p>}
-          </div>
-        </Sheet>
-      )}
+      <ContextSelector
+        kind="branch"
+        value={branchLoading ? "Loading…" : branchName}
+        choices={branches}
+        {...(branchLoading ? { disabled: true } : {})}
+        sheetTitle="Branch or worktree"
+        ariaLabel={`Branch for new session, current ${branchName}`}
+        onPick={onPickBranch}
+      />
     </div>
   );
 }

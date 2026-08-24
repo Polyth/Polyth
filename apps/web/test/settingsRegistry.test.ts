@@ -59,7 +59,10 @@ test("Widgets & Layout exposes place-first workspace and composer controls", asy
   assert.match(packages, /<PageHead title="Packages"/);
   assert.match(widgets, /data-settings-item=\{index === 0 \? "widgets\.capabilities"/);
   assert.match(widgets, /data-settings-item=\{index === 0 \? "widgets\.actions"/);
-  assert.match(widgets, /Focus header/);
+  assert.match(widgets, /Where buttons appear/);
+  assert.match(widgets, /Top rail/);
+  assert.match(widgets, /Right rail/);
+  assert.doesNotMatch(widgets, /More tools \/ right rail|Technical menu|Session header stats/);
   assert.match(widgets, /Composer actions/);
   assert.doesNotMatch(widgets, /Top &amp; side workspace buttons|Workspace preview|Choose a starting layout|Help me set up|WidgetLibraryOverlay/);
 });

@@ -45,8 +45,9 @@ test("header and composer controls are configurable and purpose-specific", async
   assert.doesNotMatch(header, /const rest = resolved\.filter/);
   assert.doesNotMatch(composer, /Modalities:/);
   assert.match(composer, /aria-label="Add files"/);
-  assert.match(widgets, /Session header stats/);
-  assert.match(widgets, /Response hover actions/);
+  assert.doesNotMatch(widgets, /Session header stats|Response hover actions|Technical menu/);
+  assert.match(widgets, /Response actions/);
+  assert.match(widgets, /Where buttons appear/);
   assert.match(widgets, /draggable/);
   assert.match(metrics, /headerMetrics\.map/);
 });
@@ -64,4 +65,7 @@ test("assistant response header carries identity, timing, and configured actions
   assert.match(timeline, /<ProviderLogo/);
   assert.match(timeline, /className="agent-reply-duration"/);
   assert.match(timeline, /timeShort\(assistantTime\(m\)\)/);
+  const response = timeline.indexOf("<div className=\"bubble\"");
+  const footer = timeline.lastIndexOf("<AssistantAgentHeader m={m} announce={announce} />");
+  assert.ok(footer > response, "assistant identity and actions follow the response body");
 });

@@ -13,6 +13,7 @@ import { useShellMode } from "../responsiveShell.ts";
 import { dismissKeyboard } from "../mobileViewport.ts";
 import { tapFeedback } from "../haptics.ts";
 import Sheet, { SheetRow, SheetSection } from "./mobile/Sheet.tsx";
+import { useSheetTrigger } from "./mobile/sheetTrigger.ts";
 import { Icon } from "../icons.tsx";
 
 export function modelModalities(model: ModelDescriptor): string {
@@ -153,9 +154,16 @@ export default function ModelPicker({
       close();
       return;
     }
-    if (phone) void dismissKeyboard().then(() => setOpen(true));
-    else setOpen(true);
+    if (phone) {
+      // Open immediately, then let the keyboard go: the sheet must never wait
+      // for a click that the keyboard-dismiss reflow can swallow.
+      setOpen(true);
+      void dismissKeyboard();
+    } else {
+      setOpen(true);
+    }
   };
+  const triggerHandlers = useSheetTrigger(phone, toggleOpen);
 
   const star = (model: ModelDescriptor, variant: "row" | "sheet" = "row") => {
     const favorite = isFavorite(prefs, modelKey(model));
@@ -244,7 +252,7 @@ export default function ModelPicker({
       aria-label={`Select model, current ${label}`}
       aria-haspopup="dialog"
       aria-expanded={open}
-      onClick={toggleOpen}
+      {...triggerHandlers}
     >
       <span className="model-trigger-name">{label}</span>
       <span className="model-trigger-caret" aria-hidden="true"><Icon.chevronDown /></span>

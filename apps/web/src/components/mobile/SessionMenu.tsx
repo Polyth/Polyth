@@ -1,144 +1,133 @@
-// UX-MOBILE-01 §21: the phone header's session menu. The whole title is the
-// trigger; this sheet is the real menu behind it — new / rename / fork /
-// archive plus a short recent-session list, all one tap deep.
+// UX-MOBILE-01 §21: the header title is a real session menu, not a chevron
+// that only opens a drawer. New session, rename, fork, archive, the last few
+// sessions, and the route to everything else — on the shared sheet system.
 import { useState } from "react";
 import Sheet, { SheetRow, SheetSection } from "./Sheet.tsx";
-import { Icon } from "../../icons.tsx";
 import { api } from "../../api.ts";
+import { openSession, refreshSessions } from "../../init.ts";
 import {
-  archiveSession, forkSession, openSession, refreshSessions,
-} from "../../init.ts";
-import { setUiError, startNewSession, useStore } from "../../store.ts";
-import { friendlyError } from "../../settings.ts";
-import { announce } from "../a11y/live.tsx";
+  setOverlay, setSidebarOpen, setUiError, startNewSession, useStore,
+} from "../../store.ts";
 import { ago, displaySessionTitle } from "../../format.ts";
-import { tapFeedback } from "../../haptics.ts";
-
-const RECENT_LIMIT = 3;
+import { friendlyError } from "../../settings.ts";
+import { Icon } from "../../icons.tsx";
 
 export default function SessionMenu({ onClose }: { onClose: () => void }) {
   const projectId = useStore((s) => s.activeProjectId);
-  const session = useStore((s) => s.sessions.find((x) => x.id === s.activeSessionId) ?? null);
+  const sessionId = useStore((s) => s.activeSessionId);
   const sessions = useStore((s) => s.sessions);
-  const [renaming, setRenaming] = useState(false);
-  const [title, setTitle] = useState(session?.title ?? "");
+  const session = sessions.find((candidate) => candidate.id === sessionId) ?? null;
+  const [renaming, setRenaming] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
 
   const recent = sessions
-    .filter((candidate) =>
-      candidate.projectId === projectId
-      && candidate.status !== "archived"
-      && candidate.id !== session?.id)
+    .filter((candidate) => candidate.projectId === projectId
+      && candidate.id !== sessionId
+      && candidate.status !== "archived")
     .sort((a, b) => (b.lastTurnAt ?? b.updatedAt) - (a.lastTurnAt ?? a.updatedAt))
-    .slice(0, RECENT_LIMIT);
+    .slice(0, 5);
 
-  const run = (action: () => void) => {
-    tapFeedback();
-    onClose();
-    action();
+  const run = (work: Promise<unknown>, whatFailed: string) => {
+    setBusy(true);
+    void work
+      .then(() => { if (projectId) return refreshSessions(projectId); })
+      .catch((error) => setUiError(friendlyError(whatFailed, error)))
+      .finally(() => { setBusy(false); onClose(); });
   };
 
-  const doRename = async () => {
-    const next = title.trim();
-    setRenaming(false);
-    if (!session || !next || next === session.title) return;
-    try {
-      await api.renameSession(session.id, next);
-      announce(`Session renamed to ${next}`);
-      if (projectId) await refreshSessions(projectId);
-    } catch (error) {
-      setUiError(friendlyError("Couldn’t rename the session", error));
-    }
-    onClose();
-  };
-
-  return (
-    <Sheet title={session ? displaySessionTitle(session.title, session.id) : "Session"} onClose={onClose}>
-      {renaming && session ? (
-        <form
-          className="starter-form"
-          onSubmit={(event) => {
-            event.preventDefault();
-            void doRename();
-          }}
-        >
+  if (renaming !== null && session) {
+    return (
+      <Sheet title="Rename session" className="session-menu-sheet" onClose={() => setRenaming(null)}>
+        <div className="starter-form">
           <label className="starter-field">
-            <span>Session name</span>
+            <span>Title</span>
             <input
-              autoFocus
-              value={title}
-              placeholder={displaySessionTitle(session.title, session.id)}
-              onChange={(event) => setTitle(event.target.value)}
+              value={renaming}
+              maxLength={120}
+              placeholder="Session title"
+              onChange={(event) => setRenaming(event.target.value)}
             />
           </label>
           <div className="starter-form-actions">
-            <button type="button" onClick={() => setRenaming(false)}>Cancel</button>
-            <button type="submit" className="primary-btn" disabled={title.trim() === ""}>Rename</button>
+            <button type="button" className="ghost-btn" onClick={() => setRenaming(null)}>Cancel</button>
+            <button
+              type="button"
+              className="primary-btn"
+              disabled={busy || renaming.trim() === ""}
+              onClick={() => run(api.renameSession(session.id, renaming.trim()), "Couldn’t rename the session")}
+            >Save</button>
           </div>
-        </form>
-      ) : (
-        <>
-          <div role="group" aria-label="Session actions">
+        </div>
+      </Sheet>
+    );
+  }
+
+  return (
+    <Sheet title="Session" className="session-menu-sheet" onClose={onClose}>
+      <div role="listbox" aria-label="Session actions">
+        <SheetRow
+          title="New session"
+          meta="Start fresh in this project"
+          icon={<Icon.newSession />}
+          onClick={() => {
+            if (projectId) startNewSession(projectId);
+            onClose();
+          }}
+        />
+        {session && (
+          <>
             <SheetRow
-              title="New session"
-              meta="Start fresh in this project"
-              icon={<Icon.newSession />}
-              onClick={() => run(() => {
-                if (projectId) startNewSession(projectId);
-              })}
+              title="Rename…"
+              icon={<Icon.pencil />}
+              onClick={() => setRenaming(session.title)}
             />
-            {session && (
+            <SheetRow
+              title="Duplicate as a new session"
+              meta="Fork the conversation so far"
+              icon={<Icon.fork />}
+              onClick={() => run(
+                api.fork(session.id).then((forked) => openSession(forked.id)),
+                "Couldn’t duplicate the session",
+              )}
+            />
+            <SheetRow
+              title="Archive"
+              meta="Keep it read-only in history"
+              icon={<Icon.bookmark />}
+              onClick={() => run(api.archive(session.id), "Couldn’t archive the session")}
+            />
+          </>
+        )}
+        {recent.length > 0 && (
+          <SheetSection title="Recent sessions" count={recent.length}>
+            {recent.map((candidate) => (
               <SheetRow
-                title="Rename"
-                meta="Give this session a clear name"
-                icon={<Icon.pencil />}
+                key={candidate.id}
+                title={displaySessionTitle(candidate.title, candidate.id)}
+                meta={ago(candidate.lastTurnAt ?? candidate.updatedAt)}
+                icon={<Icon.chat />}
                 onClick={() => {
-                  setTitle(session.title);
-                  setRenaming(true);
+                  void openSession(candidate.id).catch((error) =>
+                    setUiError(friendlyError("Couldn’t open the session", error)));
+                  onClose();
                 }}
               />
-            )}
-            {session && (
-              <SheetRow
-                title="Fork"
-                meta="Branch a copy from here"
-                icon={<Icon.fork />}
-                onClick={() => run(() => {
-                  void forkSession(session.id).catch((error) =>
-                    setUiError(friendlyError("Couldn’t fork the session", error)));
-                })}
-              />
-            )}
-            {session && (
-              <SheetRow
-                title="Archive"
-                meta="Move it out of the active list"
-                icon={<Icon.trash />}
-                onClick={() => run(() => {
-                  void archiveSession(session.id)
-                    .then(() => announce("Session archived"))
-                    .catch((error) => setUiError(friendlyError("Couldn’t archive the session", error)));
-                })}
-              />
-            )}
-          </div>
-          {recent.length > 0 && (
-            <SheetSection title="Recent" count={recent.length}>
-              {recent.map((candidate) => (
-                <SheetRow
-                  key={candidate.id}
-                  title={displaySessionTitle(candidate.title, candidate.id)}
-                  meta={ago(candidate.lastTurnAt ?? candidate.updatedAt)}
-                  icon={<Icon.session />}
-                  onClick={() => run(() => {
-                    void openSession(candidate.id).catch((error) =>
-                      setUiError(friendlyError("Couldn’t open the session", error)));
-                  })}
-                />
-              ))}
-            </SheetSection>
-          )}
-        </>
-      )}
+            ))}
+          </SheetSection>
+        )}
+        <SheetSection title="More">
+          <SheetRow
+            title="All projects and sessions"
+            icon={<Icon.files />}
+            onClick={() => { setSidebarOpen(true); onClose(); }}
+          />
+          <SheetRow
+            title="Settings"
+            icon={<Icon.gear />}
+            onClick={() => { setOverlay("settings"); onClose(); }}
+          />
+        </SheetSection>
+      </div>
     </Sheet>
   );
 }

@@ -21,11 +21,12 @@ import { Icon } from "../icons.tsx";
 import CapabilityMenu from "./CapabilityMenu.tsx";
 import { setWorkspaceMode, useWorkspaceMode } from "../widgets/workspaceMode.ts";
 import { useDismissibleMenu } from "./a11y/Menu.ts";
-import ChatMetrics from "./ChatMetrics.tsx";
 import { setUiSettings, useUiSettings } from "../uiPrefs.ts";
 import { dismissKeyboard } from "../mobileViewport.ts";
 import SessionMenu from "./mobile/SessionMenu.tsx";
+import { useSheetTrigger } from "./mobile/sheetTrigger.ts";
 import { setPlacementOverride } from "../capabilityLayout.ts";
+import { api, type GithubStatusDto } from "../api.ts";
 
 const STROKE = { fill: "none", stroke: "currentColor", strokeWidth: 1.5, strokeLinecap: "round", strokeLinejoin: "round" } as const;
 
@@ -343,13 +344,7 @@ function useResizeFocusHandoff(mode: ShellMode) {
   }, [mode]);
 }
 
-function SettingsButton() {
-  return (
-    <button className="icon-btn overflow-trigger" title="Settings" aria-label="Settings" onClick={() => setOverlay("settings")}><Icon.gear /></button>
-  );
-}
-
-function UserMenu() {
+function UserMenu({ githubUser }: { githubUser: GithubStatusDto["user"] }) {
   const [open, setOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -368,12 +363,17 @@ function UserMenu() {
       <button
         ref={triggerRef}
         className="header-profile"
-        aria-label="User menu"
+        aria-label={githubUser ? `${githubUser.login}'s user menu` : "User menu"}
         aria-haspopup="menu"
         aria-expanded={open}
         onClick={() => setOpen((value) => !value)}
       >
-        <span>PO</span><b aria-hidden="true">⌄</b>
+        <span className="header-profile-avatar">
+          {githubUser
+            ? <img src={githubUser.avatarUrl} alt="" referrerPolicy="no-referrer" />
+            : <Icon.session />}
+        </span>
+        <b aria-hidden="true">⌄</b>
       </button>
       {open && (
         <div className="menu-popup user-menu-popup" role="menu" aria-label="User and system" ref={menuRef} onKeyDown={onMenuKey}>
@@ -466,10 +466,17 @@ export default function Header() {
   const model = useActiveModel();
   const view = useStore((s) => s.activeView);
   const workspaceMode = useWorkspaceMode();
+  const [githubUser, setGithubUser] = useState<GithubStatusDto["user"]>(null);
 
   const mode = useShellMode();
   const compact = mode !== "wide";
   const [sessionMenuOpen, setSessionMenuOpen] = useState(false);
+  // §22: pointer-down activation — a click can be lost to the keyboard-dismiss
+  // reflow (see components/mobile/sheetTrigger.ts).
+  const sessionMenuTrigger = useSheetTrigger(mode === "phone", () => {
+    setSessionMenuOpen(true);
+    void dismissKeyboard();
+  });
   const chatSurface = workspaceMode === "chat" && view === "session";
   const firstUserText = model.messages.find((message) => message.kind === "user")?.text;
   const mobileTitle = session
@@ -481,6 +488,20 @@ export default function Header() {
     setActiveView("session");
     setWorkspaceMode(next);
   };
+
+  // The fixed user menu uses the public profile reported by gh when available.
+  // It remains a local account icon when GitHub is unavailable or unsigned-in.
+  useEffect(() => {
+    if (!project?.id) {
+      setGithubUser(null);
+      return;
+    }
+    let stale = false;
+    void api.githubStatus(project.id).then((status) => {
+      if (!stale) setGithubUser(status.authenticated ? status.user : null);
+    });
+    return () => { stale = true; };
+  }, [project?.id]);
 
   // The mock's phone header replaces the compact header only at phone widths;
   // tablets (481–820px) keep the compact header with metrics and overflow.
@@ -496,7 +517,7 @@ export default function Header() {
           aria-label={`${mobileTitle}. Session menu`}
           aria-haspopup="dialog"
           aria-expanded={sessionMenuOpen}
-          onClick={() => void dismissKeyboard().then(() => setSessionMenuOpen(true))}
+          {...sessionMenuTrigger}
         >
           <span>{mobileTitle}</span>
           <Icon.chevronDown />
@@ -517,6 +538,7 @@ export default function Header() {
           <Icon.refresh />
         </button>
         <MobileComposerControlsMenu />
+        <UserMenu githubUser={githubUser} />
       </header>
     );
   }
@@ -556,7 +578,6 @@ export default function Header() {
           </div>
         )}
         {workspaceMode === "chat" && !compact && <CapabilityNav />}
-        {chatSurface && <ChatMetrics session={session} model={model} />}
         <span className="header-spacer" />
         {(!compact || !chatSurface) && (
           <div className="header-actions" aria-label="Application">
@@ -572,10 +593,7 @@ export default function Header() {
             />
           </div>
         )}
-        {workspaceMode === "chat" && (
-          <SettingsButton />
-        )}
-        {(!compact || !chatSurface) && <UserMenu />}
+        {(!compact || !chatSurface) && <UserMenu githubUser={githubUser} />}
       </header>
     </>
   );

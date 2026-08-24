@@ -62,7 +62,7 @@ import ModelPicker, { modelContextLabel, modelMetaLine, modelSupportsThinking } 
 import { useSessionDefaults } from "../sessionDefaults.ts";
 import { roleKind, useRolePrefs } from "../rolePrefs.ts";
 import { useShellMode } from "../responsiveShell.ts";
-import { getViewportMetrics } from "../mobileViewport.ts";
+import { useViewportMetrics } from "../mobileViewport.ts";
 import ProviderLogo from "./ProviderLogo.tsx";
 
 function modelRefFromValue(value: string): { providerID: string; modelID: string } | undefined {
@@ -150,6 +150,17 @@ function compactContext(context?: number): string {
   return String(context);
 }
 
+/** Reasoning-effort variants are backend strings ("low", "xhigh", "thinking").
+ *  Display only — the id sent to the backend is always the raw variant. */
+const THINKING_LABELS: Record<string, string> = { xhigh: "X-High", none: "None" };
+
+function thinkingLabel(variant: string): string {
+  const known = THINKING_LABELS[variant.toLowerCase()];
+  if (known) return known;
+  const label = variant.replace(/[-_]+/g, " ").trim();
+  return label ? label[0]!.toUpperCase() + label.slice(1) : variant;
+}
+
 function agentBadgeLabel(agent?: string): string {
   const label = (agent || "Build").replace(/[-_]+/g, " ").trim();
   return label ? label[0]!.toUpperCase() + label.slice(1) : "Build";
@@ -212,9 +223,23 @@ export default function Composer({
   committedTextRef.current = text;
   const [focusMode, setFocusMode] = useState(false);
   // UX-MOBILE-01 §9/§10/§11/§42: on phones the composer is a compact resting
-  // control that expands into the full model/mode surface on focus. Text,
-  // attachments, an active run, and shell mode all count as "in use".
+  // control that expands into the full model/mode surface once the user
+  // engages with it. Text, attachments, an active run, and shell mode all
+  // count as "in use".
+  //
+  // Engagement is deliberately NOT plain input focus: tapping the model,
+  // thinking, or mode control blurs the textarea, and collapsing on that blur
+  // would unmount the control under the finger before its click ever lands.
+  // The composer stays engaged until a pointer goes down outside it.
   const [inputFocused, setInputFocused] = useState(false);
+  const rootRef = useRef<HTMLDivElement>(null);
+
+  // UX-MOBILE-01 §31/§45: keyboard geometry is one source of truth —
+  // mobileViewport.ts publishes --visual-vh / --keyboard-inset / --viewport-shift
+  // and the phone CSS keeps the frame on the visible band. The composer reads
+  // the metrics for auto-grow; it never re-derives its own transform.
+  const isPhone = shellLayout === "phone";
+
   const historyCursor = useRef(emptyPromptHistoryCursor());
   const applyingHistory = useRef(false);
   const historyItems = promptHistory(model.messages);
@@ -249,6 +274,22 @@ export default function Composer({
     acTokenRef.current = null;
     fileSearchSeq.current++;
   }, [session?.id, newSessionIntent]);
+
+  // Disengage on the first pointer press outside the composer (including its
+  // sheets, which render inside this subtree).
+  useEffect(() => {
+    if (!inputFocused) return;
+    const onPointerDown = (event: PointerEvent) => {
+      const target = event.target as HTMLElement | null;
+      if (rootRef.current?.contains(target)) return;
+      // Sheets are portalled to <body>; a press inside one is still composer
+      // interaction and must not collapse the surface behind it.
+      if (target?.closest?.(".sheet-backdrop")) return;
+      setInputFocused(false);
+    };
+    document.addEventListener("pointerdown", onPointerDown, true);
+    return () => document.removeEventListener("pointerdown", onPointerDown, true);
+  }, [inputFocused]);
 
   useEffect(() => {
     if (!deliveryMenuOpen) return;
@@ -367,14 +408,18 @@ export default function Composer({
   // Auto-grow (§20). The ceiling follows the VISUAL viewport, so an open
   // keyboard shrinks the input instead of pushing the send button offscreen;
   // past the ceiling the textarea scrolls internally.
+  // Re-grow when the visible band changes (keyboard, toolbar, rotation):
+  // the cap depends on it, so a text-only trigger is not enough. Reactive —
+  // reading getViewportMetrics() during render never re-fires on change.
+  const bandHeight = useViewportMetrics().height;
   useEffect(() => {
     const el = inputRef.current?.element();
     if (!el) return;
-    const visible = getViewportMetrics().height || window.innerHeight;
+    const visible = bandHeight || window.innerHeight;
     // Phones collapse to zero first: `auto` resolves to the `rows` attribute,
     // which would keep an empty composer three lines tall (§7). Wider layouts
     // keep the roomier three-row resting size.
-    const phone = shellLayout === "phone";
+    const phone = isPhone;
     el.style.height = phone ? "0px" : "auto";
     // 42% of the visible band, but never so much that the composer's own
     // chrome (model header, actions, context bar) is pushed off a short
@@ -383,7 +428,7 @@ export default function Composer({
       ? Math.max(44, Math.min(visible * 0.42, visible - 240))
       : visible * 0.42;
     el.style.height = `${Math.min(el.scrollHeight + 2, cap)}px`;
-  }, [text, inputFocused, shellLayout]);
+  }, [text, inputFocused, isPhone, bandHeight]);
 
   // Composer inserts (Files @, drag-drop, starter chips). preventDefault marks
   // the event consumed; anything queued while unmounted drains now. Inserts go
@@ -879,8 +924,12 @@ export default function Composer({
     toggleGoal,
   };
   const thinkingItems: PickerItem[] = [
-    { id: "", label: "Default", group: "" },
-    ...(selectedModel?.variants ?? []).map((variant) => ({ id: variant, label: variant, group: "" })),
+    { id: "", label: "Auto", group: "", detail: "The model's default reasoning effort" },
+    ...(selectedModel?.variants ?? []).map((variant) => ({
+      id: variant,
+      label: thinkingLabel(variant),
+      group: "",
+    })),
   ];
   const defaultThinking = selectedModel?.variants?.includes(sessionDefaults.defaultThinking ?? "")
     ? sessionDefaults.defaultThinking
@@ -890,7 +939,7 @@ export default function Composer({
   const sendDisabled = creatingSession
     || (!text.trim() && attachments.length === 0)
     || (!shellMode && (noModels || profileMissing));
-  const phoneLayout = shellLayout === "phone";
+  const phoneLayout = isPhone;
   const hasDraft = text.trim() !== "" || attachments.length > 0;
   const expanded = !phoneLayout || inputFocused || hasDraft || working || shellMode;
   const stateClass = phoneLayout
@@ -898,7 +947,10 @@ export default function Composer({
     : "";
 
   return (
-    <div className={`${variant === "hero" ? "composer-hero" : "composer"}${simpleMode ? " composer-simple" : " composer-power"}${lightFocusComposer ? " composer-focus-light" : ""}${stateClass}`}>
+    <div
+      ref={rootRef}
+      className={`${variant === "hero" ? "composer-hero" : "composer"}${simpleMode ? " composer-simple" : " composer-power"}${lightFocusComposer ? " composer-focus-light" : ""}${stateClass}`}
+    >
       <div
         className="composer-card"
         onDragOver={(e) => { const k = dragKind(e.dataTransfer); if (k) { e.preventDefault(); setDropHint(k); } }}
@@ -954,21 +1006,41 @@ export default function Composer({
               }}
             />
           )}
-          {chatAgents.length > 0 ? (
-            <Picker
-              className="composer-agent-badge"
-              label="Mode"
-              mobileSheet
-              direction={variant === "hero" ? "down" : "up"}
-              items={agentItems}
-              value={agentValue}
-              onPick={pickAgent}
-              placeholder={agentBadgeLabel(activeAgent)}
-              ariaLabel={`Select agent mode, current ${agentBadgeLabel(activeAgent)}`}
-            />
-          ) : (
-            <span className="agent-type-badge">{agentBadgeLabel(activeAgent)}</span>
-          )}
+          {/* UX-MOBILE-01 §59: reasoning effort stays reachable on phones —
+              a compact control immediately right of the model name, opening
+              the same sheet as every other selector. It only exists for models
+              that actually report variants. */}
+          <span className="composer-mode-cluster">
+            {modelSupportsThinking(selectedModel) && (
+              <Picker
+                className="composer-thinking-badge"
+                label="Thinking"
+                mobileSheet
+                direction={variant === "hero" ? "down" : "up"}
+                items={thinkingItems}
+                value={cfg.thinking ?? defaultThinking ?? ""}
+                onPick={(thinking) => updateCfg(withExplicitThinking(cfg, thinking || undefined))}
+                placeholder="Auto"
+                ariaLabel={`Select thinking effort, current ${thinkingLabel(cfg.thinking ?? defaultThinking ?? "Auto")}`}
+                triggerIcon={<span className="thinking-glyph" aria-hidden="true">◌</span>}
+              />
+            )}
+            {chatAgents.length > 0 ? (
+              <Picker
+                className="composer-agent-badge"
+                label="Mode"
+                mobileSheet
+                direction={variant === "hero" ? "down" : "up"}
+                items={agentItems}
+                value={agentValue}
+                onPick={pickAgent}
+                placeholder={agentBadgeLabel(activeAgent)}
+                ariaLabel={`Select agent mode, current ${agentBadgeLabel(activeAgent)}`}
+              />
+            ) : (
+              <span className="agent-type-badge">{agentBadgeLabel(activeAgent)}</span>
+            )}
+          </span>
           <ModelCapabilityMeta model={selectedModel} />
         </div>
       )}
@@ -998,7 +1070,7 @@ export default function Composer({
           onTextChange={onTextChange}
           onKeyIntercept={onKeyIntercept}
           onPaste={onPaste}
-          onFocusChange={setInputFocused}
+          onFocusChange={(focused) => { if (focused) setInputFocused(true); }}
         />
         {!widgetMode && !shellMode && !text && !acView && (
           <div className="composer-sigil-hint" aria-hidden="true">

@@ -390,7 +390,9 @@ export interface CurrentPrSummaryDto {
   changedFiles: number; additions: number; deletions: number;
 }
 export interface GithubStatusDto {
-  installed: boolean; authenticated: boolean; repo: GithubRepoDto | null; reason?: string;
+  installed: boolean; authenticated: boolean;
+  user: { login: string; avatarUrl: string } | null;
+  repo: GithubRepoDto | null; reason?: string;
 }
 export type GhListResult<T> = { ok: true; data: T } | { ok: false; reason: string };
 
@@ -972,7 +974,7 @@ export const api = {
   // ---- github (gh CLI; fail-soft) --------------------------------------------
   githubStatus: (projectId: string) =>
     jfetch<GithubStatusDto>(`/api/github/status?projectId=${encodeURIComponent(projectId)}`).catch(
-      (): GithubStatusDto => ({ installed: false, authenticated: false, repo: null, reason: "server unreachable" }),
+      (): GithubStatusDto => ({ installed: false, authenticated: false, user: null, repo: null, reason: "server unreachable" }),
     ),
   githubRepo: (projectId: string) =>
     jfetch<GhListResult<GithubRepoDto>>(`/api/github/repo?projectId=${encodeURIComponent(projectId)}`).catch(

@@ -1,128 +1,429 @@
-// Quick starters for the fresh-session hero (UX-MOBILE-01 §3/§35): a small
-// catalog of one-tap prompts whose suggestions follow the real workspace
-// state — a dirty worktree offers review/commit work, a clean one offers
-// exploration and planning. Pins and custom starters persist locally
-// (pure UI preference; never in the session event log).
+// UX-MOBILE-01 §6/§7/§35: the starter system behind the new-chat quick
+// actions. Starters are a real, ordered, user-owned model — not decorative
+// hardcoded chips:
+//
+//   * built-ins ship with the app and can be hidden but never deleted;
+//   * the visible chips are CONTEXT-SENSITIVE (dirty worktree, conflicts, a
+//     just-finished run, and a clean repo each surface different work);
+//   * users pin (favorite), hide, reorder, and create their own;
+//   * commands and skills discovered for the project join the same catalog.
+//
+// Everything that decides ordering or visibility is a pure function so the
+// contract is testable without a DOM.
 import { useSyncExternalStore } from "react";
-import type { GitStatus } from "./api.ts";
+
+/** Icon ids are keys of the one shared icon set (icons.tsx) — never ad-hoc art. */
+export type StarterIconId =
+  | "target" | "branch" | "files" | "plan" | "book" | "shield" | "term"
+  | "pencil" | "search" | "commit" | "check" | "chat" | "puzzle" | "sync"
+  | "fileEdit" | "list" | "bookmark";
+
+export type StarterSource = "builtin" | "custom" | "command" | "skill";
 
 export interface Starter {
+  /** Stable id: `builtin:*`, `custom:*`, `command:*`, `skill:*`. */
   id: string;
+  /** Chip text. Short — it has to survive a 320px viewport. */
   label: string;
+  /** Prompt handed to the composer. */
   prompt: string;
+  icon: StarterIconId;
+  /** One-line explanation shown in the picker (§34). */
   description?: string;
-  /** StarterIcon key (see components/mobile/StarterPicker.tsx). */
-  icon: string;
+  source: StarterSource;
 }
 
-/** Workspace signals that select which suggestions fit right now. */
-export interface StarterContext {
-  dirty: boolean;
-  hasHistory: boolean;
-  lastTurnFinished: boolean;
-}
+// ---- built-in catalog -------------------------------------------------------
 
-export interface StarterPrefs {
-  pinned: string[];
-  custom: Starter[];
-  used: Record<string, number>;
-}
-
-interface CatalogStarter extends Starter {
-  /** Omitted = fits every context. */
-  fits?: (context: StarterContext) => boolean;
-}
-
-export const STARTER_CATALOG: readonly CatalogStarter[] = [
+export const BUILTIN_STARTERS: readonly Starter[] = [
   {
-    id: "review-changes",
-    label: "Review my changes",
-    prompt: "Review my uncommitted changes and point out problems or risky spots before I commit.",
-    description: "Walk the pending diff before committing",
-    icon: "diff",
-    fits: (context) => context.dirty,
+    id: "builtin:explore",
+    label: "Explore codebase",
+    prompt: "Explore this codebase and give me a short tour: entry points, main modules, and how they fit together.",
+    icon: "search",
+    description: "Get oriented in an unfamiliar project",
+    source: "builtin",
   },
   {
-    id: "commit-message",
-    label: "Write a commit message",
-    prompt: "Look at the staged and unstaged changes and draft a clear, conventional commit message.",
-    description: "Summarize the pending diff",
+    id: "builtin:catch-up",
+    label: "Catch me up",
+    prompt: "Catch me up on what changed recently in this project and what is still in flight.",
+    icon: "sync",
+    description: "Summarize recent work and open threads",
+    source: "builtin",
+  },
+  {
+    id: "builtin:review-changes",
+    label: "Review changes",
+    prompt: "Review my uncommitted changes: correctness, edge cases, and anything I should clean up before committing.",
+    icon: "fileEdit",
+    description: "Read the working tree diff and report findings",
+    source: "builtin",
+  },
+  {
+    id: "builtin:explain-diff",
+    label: "Explain diff",
+    prompt: "Explain what my current diff does, file by file, in plain language.",
+    icon: "files",
+    description: "Narrate the working tree diff",
+    source: "builtin",
+  },
+  {
+    id: "builtin:fix-tests",
+    label: "Fix failing tests",
+    prompt: "Run the test suite, find what fails, and fix the failures.",
+    icon: "check",
+    description: "Run tests and repair what breaks",
+    source: "builtin",
+  },
+  {
+    id: "builtin:commit",
+    label: "Commit changes",
+    prompt: "Stage my changes and write a commit message that explains why, not just what.",
     icon: "commit",
-    fits: (context) => context.dirty,
+    description: "Prepare a clean commit",
+    source: "builtin",
   },
   {
-    id: "continue-work",
-    label: "Continue where I left off",
-    prompt: "Look at the current uncommitted changes and continue the work in progress.",
-    description: "Pick the in-progress work back up",
-    icon: "resume",
-    fits: (context) => context.dirty || context.hasHistory,
+    id: "builtin:resolve-conflicts",
+    label: "Resolve conflicts",
+    prompt: "Walk through the merge conflicts in this worktree and resolve them, explaining each decision.",
+    icon: "branch",
+    description: "Work through conflicted files",
+    source: "builtin",
   },
   {
-    id: "explore-code",
-    label: "Explore the codebase",
-    prompt: "Give me a guided tour of this codebase: the main packages, how they fit together, and where to start reading.",
-    description: "Orient in an unfamiliar project",
-    icon: "explore",
-    fits: (context) => !context.dirty,
+    id: "builtin:review-result",
+    label: "Review result",
+    prompt: "Review what you just produced: what changed, what is still missing, and what could break.",
+    icon: "list",
+    description: "Audit the agent's last piece of work",
+    source: "builtin",
   },
   {
-    id: "plan-feature",
+    id: "builtin:continue",
+    label: "Continue work",
+    prompt: "Continue where we left off — restate the plan first, then take the next step.",
+    icon: "sync",
+    description: "Resume the previous task",
+    source: "builtin",
+  },
+  {
+    id: "builtin:plan-feature",
     label: "Plan a feature",
-    prompt: "Help me plan a new feature: I'll describe it, then break it into concrete implementation steps for this codebase.",
-    description: "Turn an idea into implementation steps",
+    prompt: "Help me plan a feature: clarify the goal, list the steps, and flag the risky parts before any code.",
     icon: "plan",
-    fits: (context) => !context.dirty,
+    description: "Turn an idea into a concrete plan",
+    source: "builtin",
   },
   {
-    id: "fix-bug",
-    label: "Fix a bug",
-    prompt: "Help me track down a bug: I'll describe the symptom, then let's find the root cause and fix it.",
-    description: "Hypothesis-driven debugging",
-    icon: "bug",
+    id: "builtin:weigh-options",
+    label: "Weigh my options",
+    prompt: "I need to choose between a few approaches. Lay out the trade-offs and recommend one.",
+    icon: "target",
+    description: "Compare approaches and pick one",
+    source: "builtin",
   },
   {
-    id: "improve-tests",
-    label: "Improve test coverage",
-    prompt: "Find the weakest-tested parts of this project and add focused tests for them.",
-    description: "Strengthen the safety net",
-    icon: "tests",
-    fits: (context) => !context.dirty,
+    id: "builtin:debug",
+    label: "Debug an issue",
+    prompt: "Help me debug an issue: ask for the symptom, form hypotheses, and test them one at a time.",
+    icon: "term",
+    description: "Work a bug down to its cause",
+    source: "builtin",
+  },
+  {
+    id: "builtin:debt",
+    label: "Find tech debt",
+    prompt: "Find the technical debt that actually hurts here and rank it by payoff.",
+    icon: "shield",
+    description: "Rank the debt worth paying down",
+    source: "builtin",
+  },
+  {
+    id: "builtin:architecture",
+    label: "Understand architecture",
+    prompt: "Explain the architecture of this project: boundaries, data flow, and the rules a change has to respect.",
+    icon: "book",
+    description: "Map the structure and its rules",
+    source: "builtin",
   },
 ];
 
-export const STARTER_PREFS_KEY = "polyth.starters.v1";
+const BUILTIN_BY_ID = new Map(BUILTIN_STARTERS.map((starter) => [starter.id, starter]));
 
-const EMPTY_PREFS: StarterPrefs = { pinned: [], custom: [], used: {} };
+// ---- context-sensitive selection -------------------------------------------
+
+export interface StarterContext {
+  /** Files with any working-tree change (staged + unstaged + untracked). */
+  changedFiles: number;
+  /** Conflicted paths in the current worktree. */
+  conflicted: number;
+  /** Commits ahead of the upstream branch. */
+  ahead: number;
+  /** The session already holds messages. */
+  hasHistory: boolean;
+  /** The agent finished a turn in this session (nothing running now). */
+  lastTurnFinished: boolean;
+}
+
+export const EMPTY_STARTER_CONTEXT: StarterContext = {
+  changedFiles: 0,
+  conflicted: 0,
+  ahead: 0,
+  hasHistory: false,
+  lastTurnFinished: false,
+};
+
+/**
+ * Ordered built-in ids for a workspace state (§35/§49). Pure and total: the
+ * clean-repo list always terminates the sequence, so callers can slice any
+ * length and still get sensible starters.
+ */
+export function contextualStarterIds(context: StarterContext): string[] {
+  const ids: string[] = [];
+  const push = (...candidates: string[]) => {
+    for (const id of candidates) if (!ids.includes(id)) ids.push(id);
+  };
+  if (context.conflicted > 0) push("builtin:resolve-conflicts", "builtin:review-changes");
+  if (context.lastTurnFinished) push("builtin:review-result", "builtin:continue");
+  if (context.changedFiles > 0) push("builtin:review-changes", "builtin:fix-tests", "builtin:commit", "builtin:explain-diff");
+  if (context.ahead > 0) push("builtin:catch-up");
+  if (context.hasHistory) push("builtin:continue");
+  push("builtin:explore", "builtin:plan-feature", "builtin:debt", "builtin:architecture", "builtin:weigh-options", "builtin:debug");
+  return ids;
+}
+
+/** Working-tree counts → starter context. Keeps git shape out of components. */
+export function starterContextFrom(
+  status: {
+    staged?: unknown[]; unstaged?: unknown[]; untracked?: unknown[]; conflicted?: unknown[]; ahead?: number;
+  } | null | undefined,
+  session: { hasHistory: boolean; lastTurnFinished: boolean },
+): StarterContext {
+  return {
+    changedFiles: (status?.staged?.length ?? 0) + (status?.unstaged?.length ?? 0) + (status?.untracked?.length ?? 0),
+    conflicted: status?.conflicted?.length ?? 0,
+    ahead: status?.ahead ?? 0,
+    hasHistory: session.hasHistory,
+    lastTurnFinished: session.lastTurnFinished,
+  };
+}
+
+// ---- preferences ------------------------------------------------------------
+
+export interface CustomStarter {
+  id: string;
+  label: string;
+  prompt: string;
+  icon: StarterIconId;
+}
+
+export interface StarterPrefs {
+  /** Pinned starters, in the user's drag order. They lead the chip row. */
+  pinned: string[];
+  /** Built-ins the user removed from suggestions. Never deleted, only hidden. */
+  hidden: string[];
+  /** Most-recently used first. */
+  recents: string[];
+  custom: CustomStarter[];
+}
+
+export const STARTER_PREFS_KEY = "polyth.starters.v1";
+export const STARTER_RECENTS_MAX = 8;
+export const STARTER_CUSTOM_MAX = 64;
+
+export const STARTER_PREFS_DEFAULTS: StarterPrefs = { pinned: [], hidden: [], recents: [], custom: [] };
+
+const ICON_IDS: readonly StarterIconId[] = [
+  "target", "branch", "files", "plan", "book", "shield", "term",
+  "pencil", "search", "commit", "check", "chat", "puzzle", "sync",
+  "fileEdit", "list", "bookmark",
+];
+
+export function isStarterIcon(value: unknown): value is StarterIconId {
+  return typeof value === "string" && ICON_IDS.includes(value as StarterIconId);
+}
+
+const strings = (value: unknown, max: number): string[] =>
+  Array.isArray(value)
+    ? [...new Set(value.filter((item): item is string => typeof item === "string" && item !== ""))].slice(0, max)
+    : [];
 
 export function parseStarterPrefs(raw: string | null): StarterPrefs {
-  if (!raw) return EMPTY_PREFS;
   try {
-    const parsed: unknown = JSON.parse(raw);
-    if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) return EMPTY_PREFS;
-    const record = parsed as Record<string, unknown>;
-    const pinned = Array.isArray(record.pinned)
-      ? record.pinned.filter((id): id is string => typeof id === "string" && id.length > 0)
+    const data = JSON.parse(raw ?? "") as Partial<StarterPrefs>;
+    const custom = Array.isArray(data.custom)
+      ? data.custom
+          .filter((item): item is CustomStarter =>
+            !!item && typeof item.id === "string" && typeof item.label === "string" && typeof item.prompt === "string")
+          .map((item) => ({
+            id: item.id,
+            label: item.label.slice(0, 40),
+            prompt: item.prompt.slice(0, 4000),
+            icon: isStarterIcon(item.icon) ? item.icon : "bookmark",
+          }))
+          .slice(0, STARTER_CUSTOM_MAX)
       : [];
-    const custom = Array.isArray(record.custom)
-      ? record.custom.filter((entry): entry is Starter =>
-          typeof entry === "object" && entry !== null
-          && typeof (entry as Starter).id === "string" && (entry as Starter).id.length > 0
-          && typeof (entry as Starter).label === "string"
-          && typeof (entry as Starter).prompt === "string"
-          && typeof (entry as Starter).icon === "string")
-      : [];
-    const used: Record<string, number> = {};
-    if (typeof record.used === "object" && record.used !== null && !Array.isArray(record.used)) {
-      for (const [id, count] of Object.entries(record.used as Record<string, unknown>)) {
-        if (id && typeof count === "number" && Number.isFinite(count) && count > 0) used[id] = count;
-      }
-    }
-    return { pinned, custom, used };
+    return {
+      pinned: strings(data.pinned, 32),
+      hidden: strings(data.hidden, 64),
+      recents: strings(data.recents, STARTER_RECENTS_MAX),
+      custom,
+    };
   } catch {
-    return EMPTY_PREFS;
+    return { ...STARTER_PREFS_DEFAULTS };
   }
 }
+
+export function serializeStarterPrefs(prefs: StarterPrefs): string {
+  return JSON.stringify(prefs);
+}
+
+// ---- pure prefs transitions -------------------------------------------------
+
+export function togglePinned(prefs: StarterPrefs, id: string): StarterPrefs {
+  const pinned = prefs.pinned.includes(id)
+    ? prefs.pinned.filter((item) => item !== id)
+    : [...prefs.pinned, id];
+  return { ...prefs, pinned, hidden: prefs.hidden.filter((item) => item !== id) };
+}
+
+export function setHidden(prefs: StarterPrefs, id: string, hidden: boolean): StarterPrefs {
+  return {
+    ...prefs,
+    hidden: hidden
+      ? [...new Set([...prefs.hidden, id])]
+      : prefs.hidden.filter((item) => item !== id),
+    pinned: hidden ? prefs.pinned.filter((item) => item !== id) : prefs.pinned,
+  };
+}
+
+export function recordStarterUse(prefs: StarterPrefs, id: string): StarterPrefs {
+  return { ...prefs, recents: [id, ...prefs.recents.filter((item) => item !== id)].slice(0, STARTER_RECENTS_MAX) };
+}
+
+/** Move `dragged` in front of `target` inside the pinned order (§27). */
+export function reorderPinned(prefs: StarterPrefs, dragged: string, target: string): StarterPrefs {
+  if (dragged === target || !prefs.pinned.includes(dragged) || !prefs.pinned.includes(target)) return prefs;
+  const pinned = prefs.pinned.filter((item) => item !== dragged);
+  pinned.splice(pinned.indexOf(target), 0, dragged);
+  return { ...prefs, pinned };
+}
+
+export function withCustomStarter(prefs: StarterPrefs, starter: CustomStarter): StarterPrefs {
+  const custom = prefs.custom.some((item) => item.id === starter.id)
+    ? prefs.custom.map((item) => (item.id === starter.id ? starter : item))
+    : [...prefs.custom, starter].slice(0, STARTER_CUSTOM_MAX);
+  return { ...prefs, custom };
+}
+
+export function withoutCustomStarter(prefs: StarterPrefs, id: string): StarterPrefs {
+  return {
+    ...prefs,
+    custom: prefs.custom.filter((item) => item.id !== id),
+    pinned: prefs.pinned.filter((item) => item !== id),
+    recents: prefs.recents.filter((item) => item !== id),
+  };
+}
+
+// ---- catalog + visible chips ------------------------------------------------
+
+export interface StarterCatalogInput {
+  /** Project slash commands discovered for the composer. */
+  commands?: Array<{ name: string; description?: string }>;
+  /** Skills/snippets available in the workspace. */
+  skills?: Array<{ name: string; description?: string }>;
+}
+
+export function commandStarter(command: { name: string; description?: string }): Starter {
+  return {
+    id: `command:${command.name}`,
+    label: `/${command.name}`,
+    prompt: `/${command.name}`,
+    icon: "term",
+    ...(command.description ? { description: command.description } : {}),
+    source: "command",
+  };
+}
+
+export function skillStarter(skill: { name: string; description?: string }): Starter {
+  return {
+    id: `skill:${skill.name}`,
+    label: skill.name,
+    prompt: `#${skill.name}`,
+    icon: "puzzle",
+    ...(skill.description ? { description: skill.description } : {}),
+    source: "skill",
+  };
+}
+
+export function customToStarter(custom: CustomStarter): Starter {
+  return { id: custom.id, label: custom.label, prompt: custom.prompt, icon: custom.icon, source: "custom" };
+}
+
+/** Everything selectable, by id — built-ins, customs, commands, skills. */
+export function starterIndex(prefs: StarterPrefs, input: StarterCatalogInput = {}): Map<string, Starter> {
+  const index = new Map<string, Starter>(BUILTIN_BY_ID);
+  for (const custom of prefs.custom) index.set(custom.id, customToStarter(custom));
+  for (const command of input.commands ?? []) index.set(`command:${command.name}`, commandStarter(command));
+  for (const skill of input.skills ?? []) index.set(`skill:${skill.name}`, skillStarter(skill));
+  return index;
+}
+
+/**
+ * The chips shown under the empty state: pinned first (user intent wins),
+ * then context-sensitive suggestions, hidden ids removed, deduplicated and
+ * clipped to `limit`.
+ */
+export function visibleStarters(
+  prefs: StarterPrefs,
+  context: StarterContext,
+  limit: number,
+  input: StarterCatalogInput = {},
+): Starter[] {
+  const index = starterIndex(prefs, input);
+  const ordered: Starter[] = [];
+  const take = (id: string) => {
+    if (prefs.hidden.includes(id) || ordered.some((item) => item.id === id)) return;
+    const starter = index.get(id);
+    if (starter) ordered.push(starter);
+  };
+  for (const id of prefs.pinned) take(id);
+  for (const id of contextualStarterIds(context)) take(id);
+  return ordered.slice(0, Math.max(0, limit));
+}
+
+/** Named picker categories, in display order (§48). Empty groups are dropped. */
+export function starterCategories(
+  prefs: StarterPrefs,
+  context: StarterContext,
+  input: StarterCatalogInput = {},
+): Array<{ id: string; title: string; starters: Starter[] }> {
+  const index = starterIndex(prefs, input);
+  const resolve = (ids: readonly string[]): Starter[] =>
+    ids.map((id) => index.get(id)).filter((item): item is Starter => item !== undefined);
+  const groups = [
+    { id: "favorites", title: "Favorites", starters: resolve(prefs.pinned) },
+    { id: "recent", title: "Recent", starters: resolve(prefs.recents.filter((id) => !prefs.pinned.includes(id))) },
+    { id: "suggested", title: "Suggested here", starters: resolve(contextualStarterIds(context).slice(0, 4)) },
+    { id: "builtin", title: "Built-in", starters: [...BUILTIN_STARTERS] },
+    { id: "custom", title: "Custom", starters: prefs.custom.map(customToStarter) },
+    { id: "skills", title: "Skills", starters: (input.skills ?? []).map(skillStarter) },
+    { id: "commands", title: "Commands", starters: (input.commands ?? []).map(commandStarter) },
+  ];
+  return groups.filter((group) => group.starters.length > 0);
+}
+
+/** Case-insensitive filter across label, description, and prompt. */
+export function matchesStarter(starter: Starter, query: string): boolean {
+  const q = query.trim().toLowerCase();
+  if (q === "") return true;
+  return [starter.label, starter.description ?? "", starter.prompt]
+    .some((text) => text.toLowerCase().includes(q));
+}
+
+// ---- reactive store ---------------------------------------------------------
 
 const read = (): string | null => {
   try { return localStorage.getItem(STARTER_PREFS_KEY); } catch { return null; }
@@ -134,94 +435,59 @@ const write = (value: string): void => {
 let prefs: StarterPrefs = parseStarterPrefs(read());
 const listeners = new Set<() => void>();
 
-const commit = (next: StarterPrefs): void => {
+function commit(next: StarterPrefs): void {
   prefs = next;
-  write(JSON.stringify(prefs));
+  write(serializeStarterPrefs(prefs));
   for (const listener of [...listeners]) listener();
-};
+}
 
 export function getStarterPrefs(): StarterPrefs {
   return prefs;
 }
 
+export function toggleStarterPinned(id: string): void {
+  commit(togglePinned(prefs, id));
+}
+
+export function setStarterHidden(id: string, hidden: boolean): void {
+  commit(setHidden(prefs, id, hidden));
+}
+
+export function noteStarterUsed(id: string): void {
+  commit(recordStarterUse(prefs, id));
+}
+
+export function reorderStarters(dragged: string, target: string): void {
+  commit(reorderPinned(prefs, dragged, target));
+}
+
+export function newCustomStarterId(): string {
+  const random = typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
+    ? crypto.randomUUID()
+    : `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
+  return `custom:${random}`;
+}
+
+export function saveCustomStarter(starter: CustomStarter): void {
+  commit(togglePinnedOnCreate(withCustomStarter(prefs, starter), starter.id));
+}
+
+/** A starter the user just authored is theirs: it joins the pinned row. */
+function togglePinnedOnCreate(next: StarterPrefs, id: string): StarterPrefs {
+  return next.pinned.includes(id) ? next : { ...next, pinned: [...next.pinned, id] };
+}
+
+export function deleteCustomStarter(id: string): void {
+  commit(withoutCustomStarter(prefs, id));
+}
+
 export function useStarterPrefs(): StarterPrefs {
   return useSyncExternalStore(
-    (callback) => {
-      listeners.add(callback);
-      return () => { listeners.delete(callback); };
+    (listener) => {
+      listeners.add(listener);
+      return () => { listeners.delete(listener); };
     },
     getStarterPrefs,
     getStarterPrefs,
   );
-}
-
-export function toggleStarterPinned(id: string): void {
-  const pinned = prefs.pinned.includes(id)
-    ? prefs.pinned.filter((candidate) => candidate !== id)
-    : [...prefs.pinned, id];
-  commit({ ...prefs, pinned });
-}
-
-/** Adds a user-authored starter and pins it so it shows up immediately. */
-export function addCustomStarter(input: Omit<Starter, "id">): Starter {
-  const starter: Starter = { ...input, id: `custom-${Date.now().toString(36)}` };
-  commit({
-    ...prefs,
-    custom: [...prefs.custom, starter],
-    pinned: [...prefs.pinned, starter.id],
-  });
-  return starter;
-}
-
-export function removeCustomStarter(id: string): void {
-  commit({
-    ...prefs,
-    custom: prefs.custom.filter((starter) => starter.id !== id),
-    pinned: prefs.pinned.filter((candidate) => candidate !== id),
-  });
-}
-
-/** Usage counts break suggestion ties toward what this person actually taps. */
-export function noteStarterUsed(id: string): void {
-  commit({ ...prefs, used: { ...prefs.used, [id]: (prefs.used[id] ?? 0) + 1 } });
-}
-
-export function starterContextFrom(
-  status: GitStatus | null,
-  session: { hasHistory: boolean; lastTurnFinished: boolean },
-): StarterContext {
-  const dirty = status !== null
-    && status.staged.length + status.unstaged.length + status.untracked.length + status.conflicted.length > 0;
-  return { dirty, hasHistory: session.hasHistory, lastTurnFinished: session.lastTurnFinished };
-}
-
-export function allStarters(prefs: StarterPrefs): Starter[] {
-  return [...STARTER_CATALOG, ...prefs.custom];
-}
-
-/** Chips for the hero: pinned first (in pin order), then context-fitting
- *  suggestions ordered by personal usage, capped at `max`. */
-export function visibleStarters(
-  prefs: StarterPrefs,
-  context: StarterContext,
-  max: number,
-): Starter[] {
-  const byId = new Map<string, CatalogStarter>();
-  for (const starter of STARTER_CATALOG) byId.set(starter.id, starter);
-  for (const starter of prefs.custom) byId.set(starter.id, starter);
-
-  const result: Starter[] = [];
-  for (const id of prefs.pinned) {
-    const starter = byId.get(id);
-    if (starter && result.length < max) result.push(starter);
-  }
-  const suggestions = STARTER_CATALOG
-    .filter((starter) => !prefs.pinned.includes(starter.id))
-    .filter((starter) => starter.fits === undefined || starter.fits(context))
-    .sort((a, b) => (prefs.used[b.id] ?? 0) - (prefs.used[a.id] ?? 0));
-  for (const starter of suggestions) {
-    if (result.length >= max) break;
-    result.push(starter);
-  }
-  return result;
 }

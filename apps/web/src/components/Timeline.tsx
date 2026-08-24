@@ -579,7 +579,6 @@ function AssistantView({
     : undefined;
   return (
     <div className="msg assistant" data-message-seq={m.eventSeq} {...(articleProps ?? {})}>
-      <AssistantAgentHeader m={m} announce={announce} />
       {m.reasoning !== "" && <Thinking m={m} announce={announce} />}
       {hasAnswer && (
         <div className="bubble" dir="auto">{renderMarkdown(m.text || "", m.id)}{!m.finalized && <span className="caret" />}</div>
@@ -607,6 +606,7 @@ function AssistantView({
       {m.finalized && m.text !== "" && announce && galleryAvailable && (
         <button className="assistant-gallery-shortcut" onClick={openGallery}><Icon.image /> Open answer images</button>
       )}
+      <AssistantAgentHeader m={m} announce={announce} />
     </div>
   );
 }

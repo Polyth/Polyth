@@ -416,7 +416,7 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
 .brand i {
   display: grid; place-items: center; width: 24px; height: 24px; border-radius: 8px;
   background: linear-gradient(160deg, color-mix(in srgb, var(--accent) 72%, white), var(--accent) 55%, color-mix(in srgb, var(--accent) 84%, black));
-  color: var(--accent-ink); font: 700 14px/1 Inter, ui-sans-serif, sans-serif; letter-spacing: -0.04em; font-style: normal;
+  color: var(--accent-ink); font: 700 14px/1 var(--ui-font-family); letter-spacing: -0.04em; font-style: normal;
   box-shadow: 0 2px 8px -2px rgba(var(--accent-rgb), 0.55), inset 0 1px 0 rgba(255, 255, 255, 0.4);
 }
 .icon-btn { width: 28px; height: 28px; padding: 0; font-size: 18px; line-height: 1; border-color: transparent; color: var(--muted); }
@@ -4441,6 +4441,10 @@ body[data-density="balanced"] .composer { padding-block: 10px; }
   border: 0; border-radius: 10px; color: var(--muted); font-size: 11.5px;
 }
 .header-actions { display: flex; align-items: center; gap: 2px; }
+/* Header actions are compact controls regardless of viewport width. Their
+   accessible names remain on the button; labels belong in tooltips and menus. */
+.header-actions .header-action { width: 34px; padding: 0; }
+.header-actions .header-action > span { display: none; }
 .placed-mini-widget { display: contents; }
 .placed-slot-widget { min-width: 0; }
 .focus-conversation > .placed-slot-widget {
@@ -4494,10 +4498,13 @@ body[data-density="balanced"] .composer { padding-block: 10px; }
 .header-user-menu { position: relative; flex: none; }
 .header-profile { display: flex; align-items: center; gap: 6px; padding: 0 4px; border: 0; background: transparent; }
 .user-menu-popup { top: calc(100% + 7px); min-width: 180px; }
-.header-profile > span {
+.header-profile-avatar {
   display: grid; place-items: center; width: 31px; height: 31px; border-radius: 50%;
   background: var(--raised); color: var(--text); font-size: 10px; font-weight: 700;
+  overflow: hidden;
 }
+.header-profile-avatar svg { width: 17px; height: 17px; }
+.header-profile-avatar img { display: block; width: 100%; height: 100%; object-fit: cover; }
 .header-profile b { color: var(--faint); font-size: 10px; }
 .workspace-mode-switch {
   height: 36px; gap: 2px; padding: 3px; border-color: var(--border-soft); background: var(--bg); border-radius: 11px;
@@ -7368,6 +7375,28 @@ body[data-quick-actions="false"] [data-widget-id="core.quick-actions"] { display
 .composer-agent-badge .chip-k,
 .composer-agent-badge .picker-caret { display: none; }
 .composer-agent-badge .picker-chip-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Model chrome cluster: reasoning effort, then the agent mode — both sit
+   immediately right of the model name (UX-MOBILE-01 §59). */
+.composer-mode-cluster { min-width: 0; display: inline-flex; align-items: center; gap: 5px; }
+.composer-thinking-badge .picker-chip {
+  min-height: 25px;
+  max-width: 108px;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 8px;
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  background: var(--surface-overlay);
+  color: var(--text-dim);
+  font-size: 10px;
+  font-weight: 680;
+  line-height: 1;
+}
+.composer-thinking-badge .chip-k,
+.composer-thinking-badge .picker-caret { display: none; }
+.composer-thinking-badge .picker-trigger-icon { color: var(--purple); }
+.composer-thinking-badge .picker-chip-text { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .composer-model-meta {
   grid-column: 2 / -1;
   min-width: 0;
@@ -7986,8 +8015,10 @@ body[data-quick-actions="false"] [data-widget-id="core.quick-actions"] { display
   position: relative;
   width: min(560px, 100%);
   min-height: 0;
-  /* Never 100vh: the visible band is what the user can actually reach. */
-  max-height: calc(var(--visual-vh, 100dvh) - max(var(--space-5), var(--safe-top)));
+  /* Never 100vh: the visible band is what the user can actually reach —
+     measured in CSS px against the visual viewport so the page's own
+     counter-shift (it follows the keyboard) can not move the band. */
+  max-height: calc(var(--visual-vh, 100dvh) - max(var(--space-5), var(--safe-top)) - var(--keyboard-inset, 0px));
   /* Sit above the keyboard instead of behind it (§21/§47). */
   margin-bottom: var(--keyboard-inset, 0px);
   display: flex;
@@ -8002,7 +8033,7 @@ body[data-quick-actions="false"] [data-widget-id="core.quick-actions"] { display
   animation: sheet-rise 190ms cubic-bezier(.22, .61, .36, 1);
   transition: transform 140ms ease;
 }
-.sheet-tall { height: calc(var(--visual-vh, 100dvh) - max(var(--space-5), var(--safe-top))); }
+.sheet-tall { height: calc(var(--visual-vh, 100dvh) - max(var(--space-5), var(--safe-top)) - var(--keyboard-inset, 0px)); }
 @keyframes sheet-rise { from { transform: translateY(18px); opacity: .55; } to { transform: none; opacity: 1; } }
 @media (prefers-reduced-motion: reduce) {
   .sheet { animation: none; transition: none; }
@@ -8348,6 +8379,22 @@ html[data-sheet="open"], html[data-sheet="open"] body { overflow: hidden; }
   justify-content: center;
   gap: var(--space-2);
 }
+.hero-widget-host { display: flex; flex-direction: column; gap: var(--space-3); }
+.hero-widget { min-width: 0; }
+.hero-widget-settings {
+  align-self: center;
+  width: var(--tap);
+  height: var(--tap);
+  display: inline-grid;
+  place-items: center;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--faint);
+  cursor: pointer;
+}
+.hero-widget-settings:active { color: var(--text); background: var(--elevated); }
+.hero-widget-settings svg { width: 18px; height: 18px; }
 .starter-chip {
   max-width: 100%;
   min-height: var(--tap);
@@ -8476,10 +8523,23 @@ html[data-sheet="open"], html[data-sheet="open"] body { overflow: hidden; }
 
 /* ---- phone (≤480px): composition, keyboard, tap targets ----------------- */
 @media (max-width: 480px) {
-  /* §29/§31/§45: the shell is exactly as tall as the VISIBLE viewport, so an
-     open keyboard shrinks the app instead of hiding the composer under it. */
-  .app { height: var(--visual-vh, 100dvh); }
-  .app.mode-chat.view-session { height: var(--visual-vh, 100dvh); min-height: 0; }
+  /* §29/§31/§45: use the browser's visual viewport as the shell height.
+     `interactive-widget=resizes-content` asks supporting browsers to resize
+     the layout viewport too; Safari falls back to its native focus scroll.
+     Do NOT add a compensating translate/margin here: Safari already moves the
+     layout viewport, and double-compensation is precisely what sent the dock
+     beyond the keyboard in the reported screenshot. */
+  .app,
+  .app.mode-chat.view-session {
+    height: var(--visual-vh, 100dvh);
+    min-height: 0;
+  }
+  .app.mode-chat.view-session .mobile-chat-header {
+    position: sticky;
+    top: 0;
+    z-index: 40;
+  }
+
 
   /* §33/§34: no child may widen the viewport. */
   html, body { max-width: 100%; overflow-x: hidden; }
@@ -8508,12 +8568,6 @@ html[data-sheet="open"], html[data-sheet="open"] body { overflow: hidden; }
   body[data-keyboard="open"] .hero-sub,
   body[data-keyboard="open"] .hero-recent { display: none; }
   body[data-keyboard="open"] .stage-new .hero h2 { font-size: 21px; line-height: 1.25; }
-  /* A short visible band (small phone + tall keyboard, or landscape) can not
-     hold both zones: the empty state stands down completely and the model
-     metadata folds away, so context + composer always fit (§43). */
-  body[data-band="short"] .hero-body { display: none; }
-  body[data-band="short"] .composer-mobile .composer-model-meta { display: none; }
-  body[data-band="short"] .composer-mobile .composer-model-header { padding-block: 0; }
 
   /* ---- header: two actions, ≥44px targets (§19/§21/§37) ---- */
   .mobile-chat-header .header-drawer-btn,
@@ -8547,12 +8601,29 @@ html[data-sheet="open"], html[data-sheet="open"] body { overflow: hidden; }
   .composer-mobile .composer-card {
     display: flex;
     overflow: visible;
+    min-height: 0;
     border: 1px solid var(--border-soft);
     border-radius: var(--radius-surface);
     background: var(--elevated);
     box-shadow: 0 10px 30px -26px color-mix(in srgb, var(--text) 55%, transparent);
     transition: border-color 160ms ease, box-shadow 160ms ease;
   }
+  /* A short visible band (small phone + tall keyboard, or landscape) can not
+     hold both zones: the empty state stands down completely and the model
+     metadata folds away, so context + composer always fit (§43). */
+  body[data-band="short"] .hero-body { display: none; }
+  body[data-band="short"] .composer-mobile .composer-model-meta { display: none; }
+  body[data-band="short"] .composer-mobile .composer-model-header { padding-block: 0; }
+  /* On a band too short for header + expanded card, the card scrolls inside
+     the dock instead of spilling past it (the model row may leave; send may
+     never leave). */
+  body[data-band="short"] .composer-mobile.composer-expanded .composer-card {
+    flex: 1 1 0;
+    max-height: 100%;
+    overflow-y: auto;
+  }
+  body[data-band="short"] .composer-mobile .composer-input { min-height: 0; overflow: hidden; }
+
   /* §11/§15: the gradient is a focus / active-run accent, never permanent
      chrome that turns the composer into an advertisement. */
   .composer-mobile .composer-card:focus-within,
@@ -8613,12 +8684,27 @@ html[data-sheet="open"], html[data-sheet="open"] body { overflow: hidden; }
   /* §9: the whole model name is the target, not a 12px chevron. */
   .composer-mobile .composer-model-header .model-picker { width: 100%; min-width: 0; }
   .composer-mobile .composer-model-header .model-trigger-mobile { width: 100%; }
-  /* §10/§14: Build is a mode control with a caret, inside a 44px touch box. */
-  .composer-mobile .composer-agent-badge {
+  /* §10/§14: Build is a mode control with a caret, inside a 44px touch box.
+     Thinking effort gets the same treatment right beside the model name. */
+  .composer-mobile .composer-agent-badge,
+  .composer-mobile .composer-thinking-badge {
     min-height: var(--tap);
     display: inline-flex;
     align-items: center;
   }
+  .composer-mobile .composer-thinking-badge .picker-chip {
+    min-height: var(--control-h-sm);
+    max-width: 118px;
+    gap: 3px;
+    padding: 0 8px 0 9px;
+    font-size: 12px;
+  }
+  .composer-mobile .composer-thinking-badge .picker-caret {
+    display: inline-flex;
+    color: var(--muted);
+    font-size: 10px;
+  }
+  .composer-mobile .composer-thinking-badge .thinking-glyph { font-size: 12px; }
   .composer-mobile .composer-agent-badge .picker-chip {
     min-height: var(--control-h-sm);
     max-width: 132px;
@@ -8739,4 +8825,129 @@ html[data-sheet="open"], html[data-sheet="open"] body { overflow: hidden; }
 .ssh-dialog-create {
   display: inline-flex; align-items: center; gap: 7px; padding-bottom: 7px;
   color: var(--muted); font-size: 12px;
+}
+
+/* ---------- settings: shared visual controls ---------- */
+/* These are intentionally late in the cascade. The settings values need to
+   reach both the older shell surfaces and the newer focused conversation. */
+html[data-font="sans"] { --ui-font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+html[data-font="system"] { --ui-font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+html[data-font="serif"] { --ui-font-family: Georgia, "Times New Roman", serif; }
+html[data-font="mono"] { --ui-font-family: var(--mono); }
+
+/* The root size drives all rem-based UI. Explicit high-traffic text surfaces
+   inherit it too, so the named scale is visible in navigation, settings,
+   conversation, and the composer rather than only in a few default labels. */
+body,
+button,
+input,
+select,
+textarea,
+.sidebar,
+.header,
+.settings-shell,
+.timeline,
+.composer { font-family: var(--ui-font-family); }
+
+/* The font picker is global, including code, editors, and terminal surfaces.
+   Choosing Monospace restores the traditional code-oriented treatment. */
+html[data-font] body :is(code, pre, .mono, .git-diff, .files-viewer-content, .shell-output) { font-family: var(--ui-font-family); }
+
+/* Roundness now covers the surfaces that historically used fixed values,
+   including bubbles, cards, menus, and mobile controls. */
+body[data-rounding] :is(button, input, select, textarea) { border-radius: var(--radius-control); }
+body[data-rounding] :is(.bubble, .tool-card, .reasoning, .widget-place-card, .project-settings-card, .role-card) { border-radius: var(--radius-card); }
+body[data-rounding] :is(.modal, .dialog, .settings-shell, .msg-actions-popup, .mobile-composer-popup) { border-radius: var(--radius-sheet); }
+
+/* Comfortable and compact are shared layout modes, rather than a few sidebar
+   exceptions. The compact values preserve usable controls while tightening
+   every primary work surface. */
+body[data-density="comfortable"] { --density-gap: 16px; --density-pad: 12px; }
+body[data-density="balanced"] { --density-gap: 12px; --density-pad: 10px; }
+body[data-density="compact"] { --density-gap: 8px; --density-pad: 8px; }
+body[data-density] .timeline { gap: var(--density-gap); }
+body[data-density] .bubble { padding: var(--density-pad) calc(var(--density-pad) + 2px); }
+body[data-density] .set-row { padding-block: calc(var(--density-pad) - 1px); }
+body[data-density] .widget-place-card { padding: calc(var(--density-pad) + 3px); }
+body[data-density="compact"] .header,
+body[data-density="compact"] .sidebar-head { min-height: 44px; }
+body[data-density="comfortable"] .header { min-height: 60px; }
+
+/* ---------- Widgets & Layout: placement map and reliable toolbar ---------- */
+.widget-placement-toolbar {
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+  padding: 12px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-card);
+  background: var(--panel);
+}
+.widget-placement-toolbar .widget-save-state { margin: 0; min-width: 150px; }
+.widget-project-scope { min-height: 34px; gap: 9px; font-size: 12px; color: var(--text-dim); }
+.widget-project-scope select { min-width: min(230px, 50vw); max-width: 330px; height: 34px; }
+.widget-toolbar-actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 7px; }
+.widget-toolbar-actions button { min-height: 34px; padding-inline: 11px; }
+.widget-reset-button { color: var(--red); border-color: color-mix(in srgb, var(--red) 30%, var(--border)); }
+.widget-reset-button:hover { color: var(--red); background: var(--red-wash); }
+
+.widget-interface-map {
+  display: grid;
+  grid-template-columns: minmax(190px, .8fr) minmax(330px, 1.2fr);
+  gap: 16px;
+  align-items: center;
+  margin: 16px 0;
+  padding: 15px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-card);
+  background: linear-gradient(145deg, color-mix(in srgb, var(--accent) 5%, var(--elevated)), var(--panel));
+}
+.widget-interface-map h3 { margin: 0; font-size: 13px; }
+.widget-interface-map p { margin: 5px 0 0; color: var(--muted); font-size: 11px; line-height: 1.45; }
+.widget-interface-diagram {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 7px;
+  padding: 8px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-surface);
+  background: var(--bg);
+}
+.widget-map-target {
+  min-height: 54px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 2px;
+  padding: 8px 10px;
+  border-color: var(--border-soft);
+  background: var(--elevated);
+  text-align: left;
+}
+.widget-map-target:hover,
+.widget-map-target:focus-visible { border-color: var(--accent-line); background: var(--accent-wash); }
+.widget-map-target strong { font-size: 11px; }
+.widget-map-target small { color: var(--muted); font-size: 9.5px; }
+.widget-surface-flash { animation: widget-surface-flash 1.4s ease; }
+@keyframes widget-surface-flash { 0%, 100% { box-shadow: none; } 35% { box-shadow: 0 0 0 3px var(--accent-line); } }
+
+/* The response identity and actions are a footer. They follow the answer,
+   its plan, and any generated-image shortcut instead of pre-empting prose. */
+.msg.assistant .agent-reply-header {
+  width: 100%;
+  margin: 12px 0 0;
+  padding-top: 9px;
+  border-top: 1px solid var(--hair);
+}
+.msg.assistant .agent-reply-actions { margin-left: auto; }
+
+@media (max-width: 700px) {
+  .widget-interface-map { grid-template-columns: 1fr; }
+  .widget-placement-toolbar { align-items: stretch; }
+  .widget-project-scope { justify-content: space-between; }
+  .widget-project-scope select { min-width: 0; flex: 1; }
+  .widget-toolbar-actions { justify-content: stretch; }
+  .widget-toolbar-actions button { flex: 1; }
 }
