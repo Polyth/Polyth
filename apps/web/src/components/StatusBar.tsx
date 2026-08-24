@@ -30,7 +30,7 @@ export default function StatusBar() {
   const view = useStore((s) => s.activeView);
   const rail = useStore((s) => s.railPlugin);
   const [workflowState, setWorkflowState] = useState<{ projectId: string; run: WorkflowRunDto } | null>(null);
-  const activeWorkflow = workflowState?.projectId === project?.id ? workflowState.run : null;
+  const activeWorkflow = workflowState && workflowState.projectId === project?.id ? workflowState.run : null;
   const paneTitle = rail !== null
     ? listSurfaces().find((s) => s.id === rail && isWorkspaceSurface(s))?.title ?? null
     : null;

@@ -104,7 +104,7 @@ function WorkflowAction({ context }: { context: Record<string, unknown> }) {
 function WorkflowRunIndicator() {
   const projectId = useStore((state) => state.activeProjectId);
   const [workflowState, setWorkflowState] = useState<{ projectId: string; run: WorkflowRunDto } | null>(null);
-  const run = workflowState?.projectId === projectId ? workflowState.run : null;
+  const run = workflowState && workflowState.projectId === projectId ? workflowState.run : null;
   useEffect(() => {
     if (!projectId) {
       setWorkflowState(null);
