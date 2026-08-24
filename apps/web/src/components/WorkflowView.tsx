@@ -785,7 +785,15 @@ export default function WorkflowView() {
                         </div>
                         {node.activity && <span className="workflow-node-activity">{node.activity}</span>}
                         {node.error && <div className="form-error" role="alert">{node.error}</div>}
-                        {node.output && <pre className="workflow-node-output">{node.output}</pre>}
+                        {node.output && (
+                          <pre
+                            className="workflow-node-output"
+                            tabIndex={0}
+                            aria-label={`${node.role} output`}
+                          >
+                            {node.output}
+                          </pre>
+                        )}
                         {!node.activity && !node.error && !node.output && (
                           <span className="muted workflow-node-waiting">
                             {node.status === "queued" ? "Waiting for dependencies…" : "No output yet."}
