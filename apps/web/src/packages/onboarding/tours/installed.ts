@@ -275,6 +275,41 @@ export const PLUGINS_TOUR: PackageOnboardingTour = {
   ],
 };
 
+export const SSH_TOUR: PackageOnboardingTour = {
+  packageId: "ssh",
+  title: "SSH Remotes",
+  steps: [
+    {
+      id: "overview",
+      title: "Run coding agents on your servers",
+      body: "SSH Remotes keeps an inventory of servers so projects opened there run their agent on that machine over one multiplexed connection.",
+      media: { kind: "pattern", pattern: "branches" },
+    },
+    {
+      id: "add",
+      title: "Register a server without secrets",
+      body: "Add a name, host or ssh_config alias, and optional user and port, then authenticate with your SSH agent or a private-key file path. Passwords are never stored.",
+      highlight: "+ Server",
+      media: { kind: "pattern", pattern: "tiles" },
+    },
+    {
+      id: "test",
+      title: "Prove the connection end to end",
+      body: "Test measures the round trip and probes whether the agent runtime is installed on the remote, while Connect and Disconnect manage the shared link.",
+      highlight: "Test",
+      media: { kind: "pattern", pattern: "orbit" },
+    },
+    {
+      id: "remote-projects",
+      title: "Open projects on the server",
+      body: "From the project picker, choose Open on a server… to browse remote folders — the agent runs next to the files and only the conversation travels over SSH.",
+      highlight: "⌁ Open on a server…",
+      highlightWhere: "workspace",
+      media: { kind: "pattern", pattern: "rays" },
+    },
+  ],
+};
+
 export const INTEGRATIONS_TOUR: PackageOnboardingTour = {
   packageId: "integrations",
   title: "Integrations",

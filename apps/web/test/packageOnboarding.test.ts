@@ -118,6 +118,14 @@ const descriptors = new Map<string, PackageDescriptorDto>([
     enabled: true,
     hasSettings: true,
   }],
+  ["ssh", {
+    id: "ssh",
+    name: "SSH Remotes",
+    description: "Remote servers over SSH.",
+    core: false,
+    enabled: true,
+    hasSettings: true,
+  }],
 ]);
 
 Object.defineProperty(globalThis, "fetch", {
@@ -316,7 +324,8 @@ test("every built-in package surface has a substantial onboarding tour", async (
     "access", "about", "git", "terminal", "preview", "browser", "goals",
     "multirun", "workflow", "fusion", "walkthrough", "schedule", "usage",
     "github", "knowledge", "voice", "home-assistant", "secure-safe", "mcp",
-    "commands", "plugins", "integrations", "packages", "widgets", "agents",
+    "commands", "plugins", "integrations", "ssh", "packages", "widgets",
+    "agents",
   ];
 
   for (const packageId of expectedPackageIds) {
