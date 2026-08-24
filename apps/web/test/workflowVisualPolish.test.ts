@@ -18,4 +18,5 @@ test("workflow surfaces preserve visual and keyboard polish", async () => {
   assert.match(styles, /\.workflow-dependency:hover:not\(\.disabled\)/);
   assert.match(styles, /\.workflow-node-activity \{[^}]*overflow-wrap: anywhere;/);
   assert.match(styles, /\.workflow-node-output \{[^}]*overscroll-behavior: contain;/);
+  assert.match(styles, /\.app:not\(\.view-session\) > \.header \.header-brand strong \{ display: none; \}/);
 });

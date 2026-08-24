@@ -4399,6 +4399,11 @@ body[data-chatwidth="wide"] .bubble, body[data-chatwidth="wide"] .reasoning, bod
    prioritized status bar, and wrapped hero. */
 @media (max-width: 480px) {
   .header { height: 56px; min-height: 56px; padding: 0 8px; gap: 4px; }
+  /* Primary phone views use their dedicated session title header. Secondary
+     views keep the generic header, where the written brand would otherwise
+     push the trailing user-menu target outside a 320px viewport. */
+  .app:not(.view-session) > .header .header-brand { padding-inline: 2px; }
+  .app:not(.view-session) > .header .header-brand strong { display: none; }
   .header-sub { display: none; }
   .header .ctx-ring { display: none; }
   .auto-accept-chip { width: 44px; height: 44px; min-width: 44px; padding: 0; justify-content: center; }
