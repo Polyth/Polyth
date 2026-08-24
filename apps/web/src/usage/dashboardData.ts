@@ -26,6 +26,16 @@ export interface UsageProviderSummary {
   stale: boolean;
 }
 
+export interface UsageModelSummary {
+  id: string;
+  label: string;
+  providerId: string;
+  providerLabel: string;
+  sessions: number;
+  tokens: number;
+  cost: number;
+}
+
 export interface UsageChartSeries {
   providerId: string;
   label: string;
@@ -49,6 +59,7 @@ export interface UsageDashboardData {
     averageCostPerThousand: UsageTrend | null;
   };
   providers: UsageProviderSummary[];
+  models: UsageModelSummary[];
   chart: {
     labels: string[];
     tokens: UsageChartSeries[];
@@ -59,8 +70,14 @@ export interface UsageDashboardData {
 
 const DAY_MS = 24 * 60 * 60_000;
 
+const finiteNonNegative = (value: number | undefined): number =>
+  typeof value === "number" && Number.isFinite(value) ? Math.max(0, value) : 0;
+
 const sessionTokens = (session: SessionProjection): number =>
-  (session.tokenTotals?.input ?? 0) + (session.tokenTotals?.output ?? 0);
+  finiteNonNegative(session.tokenTotals?.input) + finiteNonNegative(session.tokenTotals?.output);
+
+const sessionCost = (session: SessionProjection): number =>
+  finiteNonNegative(session.costTotal);
 
 const canonicalProviderId = (providerId: string): string => {
   const normalized = providerId.trim().toLowerCase();
@@ -71,6 +88,9 @@ const canonicalProviderId = (providerId: string): string => {
 
 const sessionProviderId = (session: SessionProjection): string =>
   canonicalProviderId(session.model?.providerID || "Default");
+
+const sessionModelId = (session: SessionProjection): string =>
+  session.model?.modelID?.trim() || "Automatic";
 
 const displayProvider = (providerId: string): string => {
   const normalized = providerId.trim().toLowerCase();
@@ -112,7 +132,7 @@ const primaryQuotaWindow = (snapshot: QuotaSnapshotDto | undefined): QuotaWindow
 
 const sumSessions = (sessions: readonly SessionProjection[]) => {
   const tokens = sessions.reduce((sum, session) => sum + sessionTokens(session), 0);
-  const cost = sessions.reduce((sum, session) => sum + (session.costTotal ?? 0), 0);
+  const cost = sessions.reduce((sum, session) => sum + sessionCost(session), 0);
   return {
     sessions: sessions.length,
     tokens,
@@ -123,7 +143,7 @@ const sumSessions = (sessions: readonly SessionProjection[]) => {
 
 const metricValue = (session: SessionProjection, metric: UsageChartMetric): number => {
   if (metric === "tokens") return sessionTokens(session);
-  if (metric === "cost") return session.costTotal ?? 0;
+  if (metric === "cost") return sessionCost(session);
   return 1;
 };
 
@@ -181,6 +201,31 @@ export function buildUsageDashboardData(
     b.sessions - a.sessions ||
     a.label.localeCompare(b.label));
 
+  const byModel = new Map<string, UsageModelSummary>();
+  for (const session of current) {
+    const providerId = sessionProviderId(session);
+    const modelId = sessionModelId(session);
+    const id = `${providerId}/${modelId}`;
+    const summary = byModel.get(id) ?? {
+      id,
+      label: modelId,
+      providerId,
+      providerLabel: displayProvider(providerId),
+      sessions: 0,
+      tokens: 0,
+      cost: 0,
+    };
+    summary.sessions += 1;
+    summary.tokens += sessionTokens(session);
+    summary.cost += sessionCost(session);
+    byModel.set(id, summary);
+  }
+  const models = [...byModel.values()].sort((a, b) =>
+    b.cost - a.cost ||
+    b.tokens - a.tokens ||
+    b.sessions - a.sessions ||
+    a.label.localeCompare(b.label));
+
   const bucketCount = rangeDays === 7 ? 7 : rangeDays === 30 ? 10 : 12;
   const bucketMs = (rangeEnd - rangeStart) / bucketCount;
   const labels = Array.from({ length: bucketCount }, (_, index) =>
@@ -217,6 +262,7 @@ export function buildUsageDashboardData(
       ),
     },
     providers,
+    models,
     chart: {
       labels,
       tokens: makeSeries("tokens"),

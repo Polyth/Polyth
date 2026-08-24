@@ -56,6 +56,15 @@ test("dashboard derives current-period totals, trends, and provider quota health
     dashboard.chart.tokens.flatMap((provider) => provider.values).reduce((sum, value) => sum + value, 0),
     4_000,
   );
+  assert.deepEqual(dashboard.models.map((model) => ({
+    id: model.id,
+    sessions: model.sessions,
+    tokens: model.tokens,
+    cost: model.cost,
+  })), [
+    { id: "openai/openai-model", sessions: 1, tokens: 3_000, cost: .03 },
+    { id: "anthropic/anthropic-model", sessions: 1, tokens: 1_000, cost: .02 },
+  ]);
 
   const claude = dashboard.providers.find((provider) => provider.id === "anthropic");
   assert.equal(claude?.label, "Claude");
@@ -100,6 +109,27 @@ test("dashboard merges provider aliases used by sessions and quota adapters", ()
   assert.equal(dashboard.providers[0]?.label, "Claude");
   assert.equal(dashboard.providers[0]?.snapshot?.providerId, "claude");
   assert.equal(dashboard.providers[0]?.remainingPercent, 25);
+});
+
+test("dashboard groups model activity within canonical providers", () => {
+  const one = session("one", "claude", now - DAY_MS, 1_000, .01);
+  const two = session("two", "anthropic", now - DAY_MS, 2_000, .02);
+  const three = session("three", "anthropic", now - DAY_MS, 500, .005);
+  one.model = { providerID: "claude", modelID: "sonnet" };
+  two.model = { providerID: "anthropic", modelID: "sonnet" };
+  three.model = { providerID: "anthropic", modelID: "haiku" };
+
+  const dashboard = buildUsageDashboardData([one, two, three], [], 7, now);
+
+  assert.deepEqual(dashboard.models.map((model) => ({
+    id: model.id,
+    provider: model.providerLabel,
+    sessions: model.sessions,
+    tokens: model.tokens,
+  })), [
+    { id: "anthropic/sonnet", provider: "Claude", sessions: 2, tokens: 3_000 },
+    { id: "anthropic/haiku", provider: "Claude", sessions: 1, tokens: 500 },
+  ]);
 });
 
 test("dashboard keeps OpenCode variants distinct with accurate labels", () => {
