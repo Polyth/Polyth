@@ -277,9 +277,10 @@ async function openApp(options: OpenOptions): Promise<Page> {
     ...(options.record ? { recordVideo: { dir: ARTIFACTS, size: { width: options.width, height: options.height } } } : {}),
   });
   contexts.push(context);
-  await context.addInitScript((persona: string) => {
+  await context.addInitScript(({ persona, projectId }: { persona: string; projectId: string }) => {
     localStorage.setItem("polyth.prefs", persona);
-  }, PERSONA);
+    localStorage.setItem(`polyth.projectSetup.v1.${projectId}`, "completed");
+  }, { persona: PERSONA, projectId: PROJECT_ID });
   if (options.runs) {
     await context.route("**/api/workflow-runs?projectId=*", (route) =>
       route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(options.runs) }));
