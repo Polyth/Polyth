@@ -57,6 +57,11 @@ export default function WorkflowLauncher({
     if (!busyId) setOpen(false);
   };
 
+  const openLauncher = () => {
+    setTask(draftText);
+    setOpen(true);
+  };
+
   const openBuilder = (workflowId?: string) => {
     if (!projectId || busyId) return;
     handOffWorkflowLaunch({
@@ -105,7 +110,7 @@ export default function WorkflowLauncher({
         type="button"
         className={`header-action composer-workflow${open ? " on" : ""}`}
         disabled={!projectId}
-        onClick={() => setOpen(true)}
+        onClick={openLauncher}
         title={!projectId
           ? "Open a project to use workflows"
           : hasDraft
