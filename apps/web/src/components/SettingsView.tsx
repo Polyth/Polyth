@@ -7,7 +7,7 @@ import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from "
 import { consumePendingSettingsPage, setOverlay } from "../store.ts";
 import { listSlots } from "../slots.ts";
 import { isPackageEnabled, subscribePackages } from "../packages/registry.ts";
-import { useSlotVersion } from "./slots/SlotHost.ts";
+import SlotHost, { useSlotVersion } from "./slots/SlotHost.ts";
 import { usePrefs } from "../prefs.ts";
 import {
   registerSettingsItems, searchSettingsItems,
@@ -369,6 +369,7 @@ export default function SettingsView({ onClose = () => setOverlay(null) }: { onC
             </nav>
           )}
           <div className="nav-foot">
+            <SlotHost slot="settings.footer" />
             <span>Changes save automatically</span>
           </div>
         </nav>

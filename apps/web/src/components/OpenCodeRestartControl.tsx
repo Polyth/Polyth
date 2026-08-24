@@ -50,5 +50,5 @@ export function OpenCodeRestartControl() {
 }
 
 export function installOpenCodeRestartControl(): () => void {
-  return registerSlot("sidebar.footer", "opencode.apply-restart", () => <OpenCodeRestartControl />);
+  return registerSlot("settings.footer", "opencode.apply-restart", () => <OpenCodeRestartControl />);
 }

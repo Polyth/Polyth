@@ -868,7 +868,7 @@ export const UI_SLOTS = [
   "app.nav", "app.header.actions", "session.header.actions", "session.list.badges",
   "sidebar.footer",
   "composer.leading", "composer.trailing", "contextRail.tabs",
-  "settings.pages", "commandPalette.commands",
+  "settings.pages", "settings.footer", "commandPalette.commands",
   // Widget definitions enter through the catalog/settings seams. The six
   // workspace slots are first-class placement targets alongside panel and
   // toolbar slots, rather than a canvas-only parallel vocabulary.

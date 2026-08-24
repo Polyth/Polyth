@@ -434,9 +434,7 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
 
 .opencode-restart-control {
   flex: none;
-  padding: 8px 10px max(10px, env(safe-area-inset-bottom, 0px));
-  border-top: 1px solid var(--border-soft);
-  background: var(--panel);
+  width: 100%;
 }
 .opencode-restart-button {
   width: 100%;
@@ -476,7 +474,7 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
   place-content: center;
   justify-items: center;
   gap: 14px;
-  background: rgba(0, 0, 0, .45);
+  background: rgba(0, 0, 0, .78);
   color: #fff;
   font-size: 13px;
   font-weight: 650;
