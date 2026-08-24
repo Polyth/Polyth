@@ -401,6 +401,7 @@ test("chat page load repairs a hidden workflow launcher placement", async () => 
   );
   assert.equal(repaired, true, "page load repairs the stale hidden placement");
 
+  await composer.screenshot({ path: join(ARTIFACTS, "workflow_launcher_button_repaired.png") });
   await launcher.click();
   await page.getByRole("dialog", { name: "Run a workflow" }).waitFor({ state: "visible" });
   await page.screenshot({ path: join(ARTIFACTS, "workflow_launcher_hidden_layout_repaired.png") });
