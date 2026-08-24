@@ -78,6 +78,7 @@ export default function PreviewView() {
   const wsRef = useRef<WebSocket | null>(null);
   const revisionRef = useRef(0);
   const imgRef = useRef<HTMLImageElement>(null);
+  const addressInputRef = useRef<HTMLInputElement>(null);
   const inspectorButtonRef = useRef<HTMLButtonElement>(null);
   const nextAnnotationId = useRef(1);
   const annotationDragStart = useRef<{ x: number; y: number } | null>(null);
@@ -646,6 +647,7 @@ export default function PreviewView() {
             >
               <span className="browser-address-icon" aria-hidden="true"><Icon.globe /></span>
               <input
+                ref={addressInputRef}
                 value={urlInput}
                 onChange={(event) => setUrlInput(event.target.value)}
                 placeholder="https://example.com"
@@ -1179,6 +1181,7 @@ export default function PreviewView() {
           }}
           className="browser-confirm-dialog"
           initialFocus=".browser-keep-open"
+          resolveRestoreFocus={(opener) => opener ?? addressInputRef.current}
         >
           <div className="dialog-head">
             <span>Close browser session?</span>
