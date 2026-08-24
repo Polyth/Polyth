@@ -708,6 +708,7 @@ export default function PreviewView() {
               <button
                 type="button"
                 className="browser-tool-btn"
+                aria-label="Snapshot"
                 disabled={busy}
                 onClick={() => void takeSnapshot()}
                 title="Read visible text and accessibility details"
@@ -717,6 +718,7 @@ export default function PreviewView() {
               <button
                 type="button"
                 className={`browser-tool-btn${annotating ? " active" : ""}`}
+                aria-label="Annotate"
                 aria-pressed={annotating}
                 disabled={busy}
                 onClick={() => {
@@ -731,6 +733,7 @@ export default function PreviewView() {
               <button
                 type="button"
                 className={`browser-tool-btn${pointing ? " active" : ""}`}
+                aria-label="Point"
                 aria-pressed={pointing}
                 disabled={busy}
                 onClick={() => {
@@ -745,6 +748,7 @@ export default function PreviewView() {
               <button
                 type="button"
                 className={`browser-tool-btn${agentPaused ? " active" : ""}`}
+                aria-label={agentPaused ? "Resume agent" : "Pause agent"}
                 aria-pressed={agentPaused}
                 disabled={busy}
                 onClick={() => void togglePause()}
@@ -756,6 +760,7 @@ export default function PreviewView() {
               <button
                 type="button"
                 className={`browser-tool-btn${inspectorOpen ? " active" : ""}`}
+                aria-label="Inspector"
                 aria-pressed={inspectorOpen}
                 disabled={busy}
                 title="Toggle browser inspector"
@@ -766,6 +771,7 @@ export default function PreviewView() {
               <button
                 type="button"
                 className="browser-tool-btn danger-btn"
+                aria-label="Close"
                 disabled={busy}
                 onClick={() => setCloseConfirmOpen(true)}
                 title="Close the browser session"

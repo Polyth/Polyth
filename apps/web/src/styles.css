@@ -2271,7 +2271,15 @@ input.notification-preview { font-family: var(--mono); font-size: 12.5px; min-wi
   .browser-history { gap: 2px; }
   .browser-address-icon { display: none; }
   .browser-address input { padding-left: 8px; }
+  .browser-tools-row {
+    display: grid; grid-template-columns: repeat(6, minmax(0, 1fr));
+    gap: 4px; overflow: visible; padding-bottom: 1px;
+  }
+  .browser-tools-row select { width: auto; max-width: none; }
+  .browser-tools-row .browser-device, .browser-tools-row .browser-scheme { grid-column: span 3; }
   .browser-tool-divider { display: none; }
+  .browser-tool-btn { width: 100%; justify-content: center; padding-inline: 4px; }
+  .browser-tool-btn > span { display: none; }
   .browser-frame-info { max-width: 48%; }
   .browser-frame-title { display: none; }
   .browser-frame-meta { overflow: hidden; text-overflow: ellipsis; }
