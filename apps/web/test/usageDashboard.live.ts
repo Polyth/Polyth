@@ -320,3 +320,27 @@ test("usage layout has no horizontal overflow across every responsive breakpoint
   }
   await writeFile(join(artifacts, "responsive-breakpoints.json"), JSON.stringify(reports, null, 2));
 });
+
+test("resizing an open usage page from desktop to mobile preserves the page", async () => {
+  const page = await openUsage(1280);
+  await page.setViewportSize({ width: 400, height: 900 });
+  await page.waitForSelector(".settings-shell.settings-mobile-page .usage-dashboard", {
+    state: "visible",
+    timeout: 15_000,
+  });
+
+  const state = await page.evaluate(() => {
+    const dashboard = document.querySelector<HTMLElement>(".usage-dashboard")!;
+    const bounds = dashboard.getBoundingClientRect();
+    return {
+      width: bounds.width,
+      documentOverflow: document.documentElement.scrollWidth - document.documentElement.clientWidth,
+      dashboardOverflow: dashboard.scrollWidth - dashboard.clientWidth,
+    };
+  });
+  assert.ok(state.width > 0, "usage dashboard collapsed after crossing the mobile breakpoint");
+  assert.ok(state.documentOverflow <= 1, `resized document overflows by ${state.documentOverflow}px`);
+  assert.ok(state.dashboardOverflow <= 1, `resized dashboard overflows by ${state.dashboardOverflow}px`);
+
+  await closePage(page);
+});
