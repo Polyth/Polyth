@@ -271,8 +271,13 @@ test("all usage controls update data, focus, hover, and provider visibility", as
   });
   assert.ok(focus.width >= 2 && focus.style !== "none", `focus ring is not visible: ${JSON.stringify(focus)}`);
 
+  await page.locator(".settings-pane-body").evaluate((element) => {
+    element.scrollTop = element.scrollHeight;
+  });
   await page.locator(".usage-view-tabs button", { hasText: "Providers" }).click();
   await page.waitForSelector(".usage-provider-view", { state: "visible" });
+  await page.waitForFunction(() =>
+    document.querySelector<HTMLElement>(".settings-pane-body")?.scrollTop === 0);
   assert.equal(await page.locator(".usage-provider-detail-card").count(), 7);
   const fakeCard = page.locator(".usage-provider-detail-card", { hasText: "Fake Provider" });
   await fakeCard.locator("button", { hasText: "Refresh" }).click();

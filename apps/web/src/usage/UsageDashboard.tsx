@@ -850,12 +850,17 @@ export function UsageDashboard(): ReactNode {
   } = useQuotaSnapshots();
   const prefs = useUsagePrefs();
   const { view, layout, rangeDays } = prefs.dashboard;
+  const dashboardRef = useRef<HTMLDivElement>(null);
   const setView = (next: "overview" | "providers") =>
     setUsageDashboardPrefs({ view: next });
   const setLayout = (next: "expanded" | "compact") =>
     setUsageDashboardPrefs({ layout: next });
   const setRangeDays = (next: UsageRangeDays) =>
     setUsageDashboardPrefs({ rangeDays: next });
+  useEffect(() => {
+    const pane = dashboardRef.current?.closest<HTMLElement>(".settings-pane-body");
+    if (pane) pane.scrollTop = 0;
+  }, [view]);
   const [refreshing, setRefreshing] = useState(false);
   const data = useMemo(
     () => buildUsageDashboardData(projectSessions, snapshots, rangeDays),
@@ -894,6 +899,7 @@ export function UsageDashboard(): ReactNode {
       className={`usage-dashboard usage-layout-${layout}`}
       data-settings-item="usage.dashboard"
       aria-busy={quotaBusy}
+      ref={dashboardRef}
     >
       <section className="usage-dashboard-hero">
         <div className="usage-hero-mark"><Icon.usage /></div>
