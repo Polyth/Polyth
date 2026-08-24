@@ -370,7 +370,6 @@ export default function SettingsView({ onClose = () => setOverlay(null) }: { onC
           )}
           <div className="nav-foot">
             <SlotHost slot="settings.footer" />
-            <span>Changes save automatically</span>
           </div>
         </nav>
         <div className="modal-main settings-pane">
@@ -401,11 +400,6 @@ export default function SettingsView({ onClose = () => setOverlay(null) }: { onC
             {/* A page that throws must not white-screen the whole app —
                 Settings renders outside App's main view boundary. */}
             <ViewErrorBoundary resetKey={current.id} inline>{current.render()}</ViewErrorBoundary>
-          </div>
-          <div className="modal-foot">
-            <span className="modal-note">Changes are saved as you edit</span>
-            <span className="header-spacer" />
-            <button className="btn-accent" onClick={onClose}>Done</button>
           </div>
         </div>
       </div>

@@ -338,7 +338,6 @@ export default function WidgetLibraryOverlay({
             <li><b>✓</b><span><strong>Zone compatibility</strong><small>Only zones where a widget fits become active.</small></span></li>
           </ul>
         </div>
-        <footer><span>Changes save automatically</span><b>{layout.widgets[draggedId ?? ""] ? slotLabel(widgetSlotOf(layout, draggedId ?? "") ?? "workspace.main") : ""}</b></footer>
       </aside>
     </div>
   );

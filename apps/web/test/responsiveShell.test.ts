@@ -208,10 +208,18 @@ test("Settings uses a focused desktop dialog without a widget preview inspector"
   const settings = await read("../src/components/SettingsView.tsx");
   const css = await read("../src/styles.css");
   const widgets = await read("../src/components/settings/WidgetsPage.tsx");
+  const widgetLibrary = await read("../src/components/settings/WidgetLibraryOverlay.tsx");
+  const tours = await read("../src/packages/onboarding/tours/builtin.ts");
   assert.ok(settings.includes('className="scrim settings-scrim"'), "Settings owns viewport-specific scrim geometry");
   assert.ok(css.includes("width: min(92vw, 780px); max-width: 780px; height: 92vh"), "Settings has a 780px desktop width cap");
   assert.doesNotMatch(css, /\.settings-shell\s*\{[^}]*min-width:\s*1100px/, "Settings no longer forces an 1100px minimum width");
   assert.ok(!widgets.includes("widget-inspector"), "widget settings no longer render a preview inspector");
+  assert.doesNotMatch(
+    [settings, widgets, widgetLibrary, tours].join("\n"),
+    /changes (?:are )?save(?:d)? automatically|changes are saved as you edit/i,
+    "Settings does not show automatic-save assurances",
+  );
+  assert.ok(!settings.includes('className="modal-foot"'), "Settings does not render the save-and-Done footer");
 });
 
 test("pending OpenCode changes render in the pinned Settings footer with an opaque restart overlay", async () => {
