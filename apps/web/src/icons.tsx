@@ -13,6 +13,7 @@ export const Icon = {
   home: () => <svg {...s}><path d="m3 11 9-8 9 8"/><path d="M5 10v10h14V10M9 20v-6h6v6"/></svg>,
   puzzle: () => <svg {...s}><path d="M19 13h-2.2a2 2 0 1 1 0-4H19V5a2 2 0 0 0-2-2h-4v2.2a2 2 0 1 1-4 0V3H5a2 2 0 0 0-2 2v4h2.2a2 2 0 1 1 0 4H3v4a2 2 0 0 0 2 2h4v-2.2a2 2 0 1 1 4 0V19h4a2 2 0 0 0 2-2Z"/></svg>,
   plus: () => <svg {...s}><path d="M12 5v14M5 12h14"/></svg>,
+  question: () => <svg {...s}><path d="M20 11.5A7.5 7.5 0 0 1 12.5 19H8l-4 2.5V15A7.5 7.5 0 1 1 20 11.5Z"/><path d="M10.1 9.3a2.2 2.2 0 1 1 3.7 1.6c-.9.8-1.8 1.2-1.8 2.5M12 15.2h.01"/></svg>,
   search: () => <svg {...s}><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>,
   tree: () => <svg {...s}><circle cx="6" cy="6" r="2"/><circle cx="6" cy="18" r="2"/><circle cx="17" cy="12" r="2"/><path d="M6 8v8"/><path d="M6 8c0 4 3 5.8 8.8 5.8"/></svg>,
   files: () => <svg {...s}><path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7Z"/></svg>,

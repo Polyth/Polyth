@@ -256,7 +256,7 @@ export default function WorkflowView() {
               onClick={() => setSelectedId(workflow.id)}
             >
               <strong>{workflow.name}</strong>
-              <span className="muted" style={{ display: "block", fontSize: 11 }}>{workflow.nodes.length} nodes</span>
+              <span className="muted" style={{ display: "block", fontSize: "calc(11px * var(--ui-font-scale, 1))" }}>{workflow.nodes.length} nodes</span>
             </button>
           ))}
         </aside>
@@ -347,7 +347,7 @@ export default function WorkflowView() {
                     </div>
                     {draft.nodes.length > 1 && (
                       <fieldset style={{ border: 0, padding: 0, margin: 0 }}>
-                        <legend className="muted" style={{ fontSize: 12, marginBottom: 4 }}>Depends on</legend>
+                        <legend className="muted" style={{ fontSize: "calc(12px * var(--ui-font-scale, 1))", marginBottom: 4 }}>Depends on</legend>
                         <div className="view-toolbar-row">
                           {draft.nodes.filter((source) => source.id !== node.id).map((source) => {
                             const checked = draft.edges.some((edge) => edge.source === source.id && edge.target === node.id);

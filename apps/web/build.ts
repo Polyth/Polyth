@@ -1,7 +1,8 @@
 // Bundle apps/web to dist/ — runnable from repo root: node apps/web/build.ts
 import { build } from "esbuild";
-import { copyFile, mkdir, rm } from "node:fs/promises";
+import { copyFile, mkdir, readFile, rm } from "node:fs/promises";
 import { join } from "node:path";
+import { scaleUiFontSizes } from "./fontScaleCss.ts";
 
 const here = import.meta.dirname;
 const dist = join(here, "dist");
@@ -16,6 +17,16 @@ const reactExternals = [
   "react/jsx-runtime",
   "react/jsx-dev-runtime",
 ];
+
+const uiFontScalePlugin = {
+  name: "ui-font-scale",
+  setup(buildApi: { onLoad(options: { filter: RegExp }, callback: (args: { path: string }) => Promise<{ contents: string; loader: "css" }>): void }) {
+    buildApi.onLoad({ filter: /styles\.css$/ }, async (args) => ({
+      contents: scaleUiFontSizes(await readFile(args.path, "utf8")),
+      loader: "css",
+    }));
+  },
+};
 
 // Plugin bundles leave React external. These entries are built together with
 // splitting so the shell and every hot-loaded plugin resolve one React graph.
@@ -54,6 +65,7 @@ await build({
   chunkNames: "chunks/[name]-[hash]",
   assetNames: "assets/[name]-[hash]",
   loader: { ".css": "css" },
+  plugins: [uiFontScalePlugin],
   define: { "process.env.NODE_ENV": '"production"' },
   logLevel: "info",
 });

@@ -195,7 +195,7 @@ export default function FusionView() {
           <section className="fusion-disagreements">
             <div className="stat-label">Disagreements</div>
             {shown.disagreements.length === 0 ? (
-              <div className="muted" style={{ fontSize: 12.5 }}>No disagreements recorded.</div>
+              <div className="muted" style={{ fontSize: "calc(12.5px * var(--ui-font-scale, 1))" }}>No disagreements recorded.</div>
             ) : (
               shown.disagreements.map((d, i) => (
                 <div key={i} className="disagree-card">{d}</div>

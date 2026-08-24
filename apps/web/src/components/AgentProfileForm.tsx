@@ -161,7 +161,7 @@ export default function AgentProfileForm({ existing, seed, lockModel, onClose, o
         <button className="small-btn" disabled={busy || !name.trim() || !providerID || !modelID} onClick={() => void save(false)}>
           Save
         </button>
-        <button className="primary-btn" style={{ padding: "5px 14px", fontSize: 12 }}
+        <button className="primary-btn" style={{ padding: "5px 14px", fontSize: "calc(12px * var(--ui-font-scale, 1))" }}
           disabled={busy || !name.trim() || !providerID || !modelID} onClick={() => void save(true)}>
           Save and use
         </button>

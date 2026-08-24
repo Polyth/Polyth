@@ -12,6 +12,7 @@ import { dismissKeyboard } from "../mobileViewport.ts";
 import { tapFeedback } from "../haptics.ts";
 import Sheet, { SheetRow } from "./mobile/Sheet.tsx";
 import { useSheetTrigger } from "./mobile/sheetTrigger.ts";
+import { usePopoverPlacement } from "../usePopoverPlacement.ts";
 
 const MAX_SHOWN = 200;
 
@@ -60,7 +61,7 @@ export default function Picker({
   values,
   onPick,
   placeholder = "Default",
-  direction = "down",
+  direction: _direction = "down",
   disabled,
   trailingAction,
   footerAction,
@@ -76,8 +77,10 @@ export default function Picker({
   const [active, setActive] = useState(0);
   const listRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
+  const popoverRef = useRef<HTMLDivElement>(null);
   const pickerId = useId();
   const listId = `${pickerId}-listbox`;
+  const direction = usePopoverPlacement(open && !asSheet, triggerRef, popoverRef);
 
   const close = () => {
     setOpen(false);
@@ -210,7 +213,7 @@ export default function Picker({
       {open && !asSheet && (
         <>
           <div className="menu-backdrop" onClick={close} />
-          <div className={`picker-pop ${direction}`}>
+          <div ref={popoverRef} className={`picker-pop ${direction}`}>
             <input
               autoFocus
               value={q}

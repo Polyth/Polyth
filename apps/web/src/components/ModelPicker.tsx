@@ -16,6 +16,7 @@ import Sheet, { SheetRow, SheetSection } from "./mobile/Sheet.tsx";
 import { useSheetTrigger } from "./mobile/sheetTrigger.ts";
 import { Icon } from "../icons.tsx";
 import ProviderLogo from "./ProviderLogo.tsx";
+import { usePopoverPlacement } from "../usePopoverPlacement.ts";
 
 export function modelModalities(model: ModelDescriptor): string {
   const modalities = (model.capabilities ?? [])
@@ -87,7 +88,7 @@ export default function ModelPicker({
   value,
   recommended,
   onPick,
-  direction = "up",
+  direction: _direction = "down",
 }: ModelPickerProps) {
   const prefs = useModelPrefs();
   const phone = useShellMode() === "phone";
@@ -96,6 +97,8 @@ export default function ModelPicker({
   const [editing, setEditing] = useState(false);
   const [draggedProvider, setDraggedProvider] = useState<string | null>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
+  const popoverRef = useRef<HTMLDivElement>(null);
+  const direction = usePopoverPlacement(open && !phone, triggerRef, popoverRef);
   useEscape(open && !phone, () => {
     setOpen(false);
     triggerRef.current?.focus();
@@ -369,7 +372,7 @@ export default function ModelPicker({
       {open && !phone && (
         <>
           <div className="menu-backdrop" onClick={close} />
-          <div className={`picker-pop model-picker-pop ${direction}`}>
+          <div ref={popoverRef} className={`picker-pop model-picker-pop ${direction}`}>
             <input
               autoFocus
               value={query}

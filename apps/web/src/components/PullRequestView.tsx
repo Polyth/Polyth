@@ -302,7 +302,7 @@ export default function PullRequestView({ number, onClose }: { number: number; o
                     {c.outdated && <span className="tag">outdated</span>}
                     <span className="muted">{c.createdAt ? new Date(c.createdAt).toLocaleString() : ""}</span>
                   </div>
-                  {c.path && <div className="mono muted" style={{ fontSize: 11.5 }}>{c.path}{c.line ? `:${c.line}` : ""}</div>}
+                  {c.path && <div className="mono muted" style={{ fontSize: "calc(11.5px * var(--ui-font-scale, 1))" }}>{c.path}{c.line ? `:${c.line}` : ""}</div>}
                   <div className="pr-comment-body">{c.body}</div>
                 </div>
               ))}

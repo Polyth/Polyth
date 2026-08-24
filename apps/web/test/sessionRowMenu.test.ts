@@ -86,6 +86,7 @@ test("right-click opens the row-scoped menu with delete/archive/pin and menu ARI
     });
     const menu = container.querySelector<HTMLElement>('[role="menu"]');
     assert.ok(menu, "context menu opened");
+    assert.ok(row.classList.contains("menu-open"), "open row is raised above subsequent sidebar rows");
     // Scoped to the exact row that was right-clicked.
     assert.equal(menu!.getAttribute("aria-label"), "Actions for Idle session");
     const items = [...menu!.querySelectorAll<HTMLElement>('[role^="menuitem"]')].map((b) => b.textContent?.trim());

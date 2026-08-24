@@ -57,7 +57,7 @@ function AttentionBadges({ status }: { status: SessionRowStatus }) {
     return <span className="session-status-indicator approval" title="Approval required" aria-label="Approval required"><span aria-hidden>✓</span></span>;
   }
   if (status.kind === "needs-reply") {
-    return <span className="session-status-indicator reply" title="Reply needed" aria-label="Reply needed"><span aria-hidden>◇</span></span>;
+    return <span className="session-status-indicator reply" title="Reply needed" aria-label="Reply needed"><span className="session-question-icon" aria-hidden><Icon.question /></span></span>;
   }
   if (status.kind === "unread") {
     return <span className="session-status-indicator unread" title="Unread activity" aria-label="Unread activity"><span aria-hidden>●</span></span>;
@@ -291,7 +291,7 @@ function SessionRow({
 
   return (
     <div
-      className={`session-row ${rowStatus.kind}${contextLabel ? " search-result" : ""} ${s.id === activeSessionId ? "active" : ""} ${s.status === "archived" ? "archived" : ""}${quickArmed ? " quick-armed" : ""}`}
+      className={`session-row ${rowStatus.kind}${contextLabel ? " search-result" : ""} ${s.id === activeSessionId ? "active" : ""} ${s.status === "archived" ? "archived" : ""}${quickArmed ? " quick-armed" : ""}${menuOpen ? " menu-open" : ""}`}
       draggable={pinnedSection}
       onDragStart={() => { if (pinnedSection) onPinDragStart(s.id); }}
       onDragOver={(event) => { if (pinnedSection) event.preventDefault(); }}
@@ -467,8 +467,6 @@ export default function SessionList({
   const [removeTarget, setRemoveTarget] = useState<Worktree | null>(null);
   const [deleteBranch, setDeleteBranch] = useState(false);
   const [removeBusy, setRemoveBusy] = useState(false);
-  const [worktreeMenu, setWorktreeMenu] = useState<string | null>(null);
-  const worktreeMenuRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     setShowArchived(expandArchived);
@@ -476,22 +474,6 @@ export default function SessionList({
   useEffect(() => {
     setVisibleCount(INITIAL_VISIBLE_SESSIONS);
   }, [projectId, query, attentionOnly]);
-  useEffect(() => {
-    if (worktreeMenu === null) return;
-    const close = (event: MouseEvent) => {
-      if (!worktreeMenuRef.current?.contains(event.target as Node)) setWorktreeMenu(null);
-    };
-    const escape = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setWorktreeMenu(null);
-    };
-    document.addEventListener("mousedown", close);
-    document.addEventListener("keydown", escape);
-    return () => {
-      document.removeEventListener("mousedown", close);
-      document.removeEventListener("keydown", escape);
-    };
-  }, [worktreeMenu]);
-
   const reloadOrg = () => {
     void api.listLabels().then(setLabels);
     void api.listWorktrees(projectId).then(setWorktrees);
@@ -537,6 +519,9 @@ export default function SessionList({
   const mainWorktree = worktrees.find((worktree) => worktree.isMain);
   const worktreeKey = (session: SessionProjection): string =>
     !session.worktreePath || session.worktreePath === mainWorktree?.path ? "__main__" : session.worktreePath;
+  const sessionsForRemoval = removeTarget === null
+    ? []
+    : projectSessions.filter((session) => worktreeKey(session) === removeTarget.path);
 
   const byWorktree = new Map<string, SessionProjection[]>();
   for (const s of active) {
@@ -662,7 +647,6 @@ export default function SessionList({
     <div className="session-org">
       {worktreeGroups.map((group) => {
         const isCollapsed = collapsed.has(group.key);
-        const isEmptyWorktree = !projectSessions.some((session) => worktreeKey(session) === group.key);
         return (
           <div key={group.key} className="session-worktree-group" data-worktree={group.key}>
             <div className="session-worktree-head">
@@ -677,10 +661,9 @@ export default function SessionList({
                   return next;
                 })}
               >
-                <span className="session-worktree-chevron" aria-hidden="true">{isCollapsed ? "▸" : "▾"}</span>
+                <span className="session-worktree-toggle-sign" aria-hidden="true">{isCollapsed ? "+" : "−"}</span>
                 <Icon.branch />
                 <span className="session-worktree-name">{group.label}</span>
-                <span className="session-worktree-count" aria-label={`${group.sessions.length} sessions`}>{group.sessions.length}</span>
               </button>
               <span className="session-worktree-actions">
                 <button
@@ -688,36 +671,16 @@ export default function SessionList({
                   aria-label={`New session in ${group.label}`}
                   onClick={() => startInWorktree(group.key)}
                 ><Icon.plus /></button>
-                <button
-                  title={`Actions for ${group.label}`}
-                  aria-label={`Actions for ${group.label} worktree`}
-                  aria-haspopup="menu"
-                  aria-expanded={worktreeMenu === group.key}
-                  onClick={() => setWorktreeMenu((current) => current === group.key ? null : group.key)}
-                ><Icon.more /></button>
-                {worktreeMenu === group.key && (
-                  <div
-                    className="worktree-actions-menu"
-                    role="menu"
-                    aria-label={`Actions for ${group.label} worktree`}
-                    ref={worktreeMenuRef}
-                  >
-                    <button role="menuitem" onClick={() => {
-                      setWorktreeMenu(null);
-                      startInWorktree(group.key);
-                    }}>New session</button>
-                    {group.worktree && !group.worktree.isMain && isEmptyWorktree && (
-                      <button
-                        role="menuitem"
-                        className="danger"
-                        onClick={() => {
-                          setWorktreeMenu(null);
-                          setDeleteBranch(false);
-                          setRemoveTarget(group.worktree);
-                        }}
-                      >Delete worktree…</button>
-                    )}
-                  </div>
+                {group.worktree && !group.worktree.isMain && (
+                  <button
+                    className="danger"
+                    title={`Delete ${group.label} worktree and its sessions`}
+                    aria-label={`Delete ${group.label} worktree and all of its sessions`}
+                    onClick={() => {
+                      setDeleteBranch(false);
+                      setRemoveTarget(group.worktree);
+                    }}
+                  ><Icon.trash /></button>
                 )}
               </span>
             </div>
@@ -753,11 +716,12 @@ export default function SessionList({
       {removeTarget && (
         <Dialog title={`Delete ${worktreeLabel(removeTarget.branch, removeTarget.path)} worktree`} onClose={() => { if (!removeBusy) setRemoveTarget(null); }}>
           <div className="dialog-head">
-            <div><h2>Delete empty worktree?</h2><p className="muted">{removeTarget.path}</p></div>
+            <div><h2>Delete worktree and its sessions?</h2><p className="muted">{removeTarget.path}</p></div>
             <button className="icon-btn" aria-label="Close" disabled={removeBusy} onClick={() => setRemoveTarget(null)}>×</button>
           </div>
           <div className="worktree-remove-options">
             <label><input type="checkbox" checked readOnly /> Delete the local worktree checkout</label>
+            <label><input type="checkbox" checked readOnly /> Permanently delete {sessionsForRemoval.length} session{sessionsForRemoval.length === 1 ? "" : "s"} in this worktree</label>
             <label>
               <input type="checkbox" checked={deleteBranch} onChange={(event) => setDeleteBranch(event.target.checked)} />
               Also delete its dedicated branch{removeTarget.branch ? ` (${removeTarget.branch})` : ""}
@@ -771,8 +735,9 @@ export default function SessionList({
               disabled={removeBusy}
               onClick={() => {
                 setRemoveBusy(true);
-                void api.removeWorktree(projectId, removeTarget.path, deleteBranch)
-                  .then(() => { setRemoveTarget(null); reloadOrg(); })
+                void Promise.all(sessionsForRemoval.map((session) => deleteSession(session.id)))
+                  .then(() => api.removeWorktree(projectId, removeTarget.path, deleteBranch))
+                  .then(() => { setRemoveTarget(null); onChanged(); })
                   .catch((error) => setUiError(friendlyError("Couldn’t remove the worktree", error)))
                   .finally(() => setRemoveBusy(false));
               }}

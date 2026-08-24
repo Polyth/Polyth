@@ -691,7 +691,7 @@ function ToolCard({ m }: { m: ToolMsg }) {
             )}
           </span>
           <span className="tool-name">{shell ? "Shell Command" : m.title || m.tool}</span>
-          {summary && <span className="mono muted" style={{ fontSize: 11, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{summary}</span>}
+          {summary && <span className="mono muted" style={{ fontSize: "calc(11px * var(--ui-font-scale, 1))", flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{summary}</span>}
           <span className="tool-dur">{m.finishTime !== undefined ? fmtMs(m.finishTime - m.time) : "running…"}</span>
         </button>
         {shell && (
@@ -748,7 +748,7 @@ function WorkedGroup({ g }: { g: WorkGroup }) {
   const updates = g.tasks.length > 0 ? ` · ${g.tasks.length} task ${g.tasks.length === 1 ? "update" : "updates"}` : "";
   return (
     <div className="msg assistant">
-      <button className="goal-toggle muted" style={{ fontSize: 11.5, marginBottom: 6 }} onClick={() => setOpen((v) => !v)}>
+      <button className="goal-toggle muted" style={{ fontSize: "calc(11.5px * var(--ui-font-scale, 1))", marginBottom: 6 }} onClick={() => setOpen((v) => !v)}>
         <span className="goal-chevron">{open ? "▾" : "▸"}</span>
         {running ? "Working" : "Worked"} for {fmtDuration(g.ms)} · {g.tools.length} steps{updates}
         {failed && <span style={{ color: "var(--red)" }}>· {g.tools.filter((t) => t.status === "error").length} failed</span>}

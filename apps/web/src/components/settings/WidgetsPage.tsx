@@ -36,7 +36,7 @@ const CAPABILITY_PLACES: Array<{
   {
     id: "primary",
     title: "Top rail",
-    description: "Workspace tools in the top strip. Drag to choose their order.",
+    description: "Centered workspace tools at the top. Drag to choose their order.",
   },
   {
     // "more" is the durable placement value used by ContextRail. Present it
@@ -99,7 +99,7 @@ const INTERFACE_SURFACES: Array<{
   label: string;
   description: string;
 }> = [
-  { id: "top-rail", label: "Top rail", description: "Workspace and header buttons" },
+  { id: "top-rail", label: "Top rail", description: "Centered workspace buttons at the top" },
   { id: "app-header", label: "Header actions", description: "At the end of the top rail" },
   { id: "right-rail", label: "Right rail", description: "Panel buttons on the right edge" },
   { id: "response-footer", label: "Response actions", description: "After each agent response" },
@@ -346,6 +346,21 @@ export default function WidgetsPage() {
                   onClick={() => setOpenPlace(openPlace === place.id ? null : place.id)}
                 >＋</button>
               </header>
+              {place.id === "primary" && (
+                <label className="widget-top-rail-position">
+                  <span>Position</span>
+                  <select
+                    aria-label="Chat top rail position"
+                    value={ui.topRailAlignment}
+                    onChange={(event) => setUiSettings({
+                      topRailAlignment: event.target.value === "left" ? "left" : "center",
+                    })}
+                  >
+                    <option value="center">Centered</option>
+                    <option value="left">Left of center</option>
+                  </select>
+                </label>
+              )}
               <div className="widget-place-chips">
                 {placed.length === 0 && <span className="widget-place-empty">No buttons placed</span>}
                 {placed.map((capability) => (

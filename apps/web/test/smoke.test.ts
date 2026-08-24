@@ -424,6 +424,7 @@ test("parseUiSettings defaults invalid values and sanitizes MCP servers", () => 
 test("setUiSettings persists and applies visual data attributes", () => {
   const values = new Map<string, string>();
   const dataset: Record<string, string> = {};
+  const styles = new Map<string, string>();
   Object.defineProperty(globalThis, "localStorage", {
     configurable: true,
     value: {
@@ -433,7 +434,7 @@ test("setUiSettings persists and applies visual data attributes", () => {
   });
   Object.defineProperty(globalThis, "document", {
     configurable: true,
-    value: { body: { dataset } },
+    value: { body: { dataset, style: { setProperty: (name: string, value: string) => styles.set(name, value) } } },
   });
 
   setUiSettings({ density: "compact", fontSize: "s", rounding: "rounded", chatWidth: "wide" });
@@ -448,6 +449,12 @@ test("setUiSettings persists and applies visual data attributes", () => {
     quickActions: "true",
   });
   assert.deepEqual(parseUiSettings(values.get(UI_SETTINGS_KEY) ?? null), getUiSettings());
+  assert.equal(styles.get("--corner-radius-scale"), "1.5");
+  assert.equal(styles.get("--radius-control"), "14px");
+
+  setUiSettings({ rounding: "square" });
+  assert.equal(styles.get("--corner-radius-scale"), "0");
+  assert.equal(styles.get("--radius-control"), "0px");
 
   Object.defineProperty(globalThis, "document", { configurable: true, value: undefined });
   assert.doesNotThrow(() => applyUiSettings());

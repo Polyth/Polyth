@@ -108,6 +108,20 @@ test("settings uses named button places without canvas layout controls", async (
   }
 });
 
+test("chat top rail is configured directly without a More tools overflow", async () => {
+  const source = await readFile(new URL("../src/components/Header.tsx", import.meta.url), "utf8");
+  assert.match(source, />Chat<\/button>/);
+  assert.doesNotMatch(source, />More tools</);
+  assert.doesNotMatch(source, /CapabilityMenu/);
+});
+
+test("widget settings exposes a persistent Chat top rail position", async () => {
+  const source = await readFile(new URL("../src/components/settings/WidgetsPage.tsx", import.meta.url), "utf8");
+  assert.match(source, /Chat top rail position/);
+  assert.match(source, /Left of center/);
+  assert.match(source, /topRailAlignment/);
+});
+
 test("widget library searches capabilities and combines plugin, size, zone, and tab filters", () => {
   const hits = filterWidgetLibrary(WIDGETS, {
     query: "diff",

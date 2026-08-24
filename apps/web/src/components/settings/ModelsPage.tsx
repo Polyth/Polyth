@@ -253,7 +253,7 @@ export default function ModelsPage() {
                       </div>
                     );
                   })}
-                  {p.models.length === 0 && <div className="muted" style={{ fontSize: 12, padding: "4px 8px" }}>No matches in this provider.</div>}
+                  {p.models.length === 0 && <div className="muted" style={{ fontSize: "calc(12px * var(--ui-font-scale, 1))", padding: "4px 8px" }}>No matches in this provider.</div>}
                 </div>
               )}
             </div>

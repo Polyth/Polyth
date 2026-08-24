@@ -110,7 +110,7 @@ export default function PrCreatePanel({ projectId, sessionId, onClose, onCreated
           {generating ? "…" : "✦ Generate with AI"}
         </button>
         <button className="small-btn" disabled={creating} onClick={onClose}>Cancel</button>
-        <button className="primary-btn" style={{ padding: "5px 14px", fontSize: 12 }}
+        <button className="primary-btn" style={{ padding: "5px 14px", fontSize: "calc(12px * var(--ui-font-scale, 1))" }}
           disabled={creating || !title.trim()} onClick={() => void create()}>
           {creating ? "Creating…" : "Create PR"}
         </button>

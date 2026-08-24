@@ -193,9 +193,11 @@ function SessionHero() {
         <div className="hero-dock">
           <SessionContextBar
             projectName={name}
+            projectId={projectId ?? undefined}
             projects={projectChoices}
             onPickProject={(id) => activateProject(id || null)}
             branchName={currentBranchLabel}
+            branchId={selectedBranchId}
             branches={branchChoices.map((choice) => ({ id: choice.id, label: choice.label, detail: choice.detail }))}
             {...(branchLoading ? { branchLoading: true } : {})}
             onPickBranch={setSelectedBranchId}

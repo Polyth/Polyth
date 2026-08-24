@@ -306,7 +306,7 @@ export default function GitView() {
             )}
           </div>
           <div className="git-changes">
-            {all.length === 0 && <div className="muted" style={{ fontSize: 12.5, padding: "4px 0" }}>Working tree clean.</div>}
+            {all.length === 0 && <div className="muted" style={{ fontSize: "calc(12.5px * var(--ui-font-scale, 1))", padding: "4px 0" }}>Working tree clean.</div>}
             {prefs.changesView === "flat" && all.map((f) => {
               return (
                 <div key={`${f.path}:${f.staged}`} className={`git-file-row ${sel === f.path ? "selected" : ""}`}>
@@ -407,14 +407,14 @@ export default function GitView() {
           })()}
 
           <div className="stat-label">Worktrees ({trees.length})</div>
-          {trees.length === 0 && <div className="muted" style={{ fontSize: 12.5 }}>No linked worktrees — sessions run in the project root.</div>}
+          {trees.length === 0 && <div className="muted" style={{ fontSize: "calc(12.5px * var(--ui-font-scale, 1))" }}>No linked worktrees — sessions run in the project root.</div>}
           {trees.map((t) => (
             <div key={t.path} className="git-wt-card">
               <div className="mono" style={{ fontWeight: 600 }}>
                 {t.branch}
                 <span className={`ctx-badge ${t.isMain ? "green" : ""}`} style={{ marginLeft: 6 }}>{t.isMain ? "main" : "linked"}</span>
               </div>
-              <div className="muted" style={{ fontSize: 11 }}>{t.path} · {t.head.slice(0, 7)}</div>
+              <div className="muted" style={{ fontSize: "calc(11px * var(--ui-font-scale, 1))" }}>{t.path} · {t.head.slice(0, 7)}</div>
               {!t.isMain && (
                 <div className="git-wt-actions">
                   <button className="small-btn icon-only git-wt-session" title="New session" aria-label={`New session in ${t.branch}`} disabled={busy} onClick={() => openWorktreeSessionDialog(projectId, t.path)}>
@@ -451,7 +451,7 @@ export default function GitView() {
 
           {/* ---- commit graph -------------------------------------------------- */}
           <div className="stat-label">Graph</div>
-          {graph.length === 0 && <div className="muted" style={{ fontSize: 12.5 }}>No commits yet.</div>}
+          {graph.length === 0 && <div className="muted" style={{ fontSize: "calc(12.5px * var(--ui-font-scale, 1))" }}>No commits yet.</div>}
           <div className="git-graph">
             {graph.map((c, i) => (
               <button key={c.sha} className={`git-graph-row ${commitSel === c.sha ? "selected" : ""}`}
@@ -521,7 +521,7 @@ export default function GitView() {
                   />
                   <div className="commit-row">
                     <button className="small-btn" onClick={() => setDraft(null)}>Cancel</button>
-                    <button className="primary-btn" style={{ padding: "4px 12px", fontSize: 12 }} disabled={!draftText.trim()}
+                    <button className="primary-btn" style={{ padding: "4px 12px", fontSize: "calc(12px * var(--ui-font-scale, 1))" }} disabled={!draftText.trim()}
                       onClick={() => {
                         persistComments([
                           ...comments,
@@ -571,7 +571,7 @@ export default function GitView() {
                   onClick={() => { setGenerating(true); void api.gitCommitMessage(projectId, sessionId ?? undefined).then((r) => { if (r.message) setCommitMsg(r.message); }).finally(() => setGenerating(false)); }}>
                   {generating ? "…" : "✦ Generate with AI"}
                 </button>
-                <button className="primary-btn" style={{ padding: "5px 14px", fontSize: 12 }}
+                <button className="primary-btn" style={{ padding: "5px 14px", fontSize: "calc(12px * var(--ui-font-scale, 1))" }}
                   disabled={!commitMsg.trim() || busy}
                   onClick={() => void run(async () => { await api.gitCommit(projectId, commitMsg.trim(), sessionId ?? undefined); setCommitMsg(""); setSel(null); })}>
                   Commit
@@ -580,7 +580,7 @@ export default function GitView() {
             </div>
           )}
           {sel && (addCount + delCount > 0) && (
-            <div className="muted" style={{ fontSize: 11.5 }}>
+            <div className="muted" style={{ fontSize: "calc(11.5px * var(--ui-font-scale, 1))" }}>
               <span style={{ color: "var(--green)" }}>+{addCount}</span>{" "}
               <span style={{ color: "var(--red)" }}>-{delCount}</span>
             </div>

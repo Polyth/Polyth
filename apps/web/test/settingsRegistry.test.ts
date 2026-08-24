@@ -19,7 +19,7 @@ test("fold strips diacritics and case", () => {
 });
 
 test("search matches label, description, and keywords; groups carry page labels", () => {
-  const byLabel = searchSettingsItems("editor font", PAGES);
+  const byLabel = searchSettingsItems("terminal font", PAGES);
   assert.ok(byLabel.some((h) => h.item.id === "appearance.editorFontSize"));
   assert.equal(byLabel.find((h) => h.item.id === "appearance.editorFontSize")!.pageLabel, "Appearance");
 
@@ -62,6 +62,7 @@ test("Widgets & Layout exposes place-first workspace and composer controls", asy
   assert.match(widgets, /Where buttons appear/);
   assert.match(widgets, /Top rail/);
   assert.match(widgets, /Right rail/);
+  assert.match(widgets, /Centered workspace tools at the top/);
   assert.doesNotMatch(widgets, /More tools \/ right rail|Technical menu|Session header stats/);
   assert.match(widgets, /Composer actions/);
   assert.doesNotMatch(widgets, /Top &amp; side workspace buttons|Workspace preview|Choose a starting layout|Help me set up|WidgetLibraryOverlay/);

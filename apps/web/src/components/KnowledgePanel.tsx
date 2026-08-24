@@ -97,7 +97,7 @@ export default function KnowledgePanel() {
         <input placeholder="Title" value={editor.title} onChange={(e) => setEditor({ ...editor, title: e.target.value })} />
         <textarea rows={10} placeholder="Body (Markdown welcome)" value={editor.body} onChange={(e) => setEditor({ ...editor, body: e.target.value })} />
         <input placeholder="Tags, comma separated" value={editor.tags} onChange={(e) => setEditor({ ...editor, tags: e.target.value })} />
-        {editor.id !== null && <div className="muted" style={{ fontSize: 12 }}>Editing revision {editor.revision}; saving bumps it.</div>}
+        {editor.id !== null && <div className="muted" style={{ fontSize: "calc(12px * var(--ui-font-scale, 1))" }}>Editing revision {editor.revision}; saving bumps it.</div>}
         {error && <div className="form-error">{error}</div>}
       </div>
     );
@@ -157,7 +157,7 @@ export default function KnowledgePanel() {
           </div>
         </div>
       ))}
-      {total > items.length && <div className="muted" style={{ fontSize: 12 }}>{total - items.length} more not shown — refine your search.</div>}
+      {total > items.length && <div className="muted" style={{ fontSize: "calc(12px * var(--ui-font-scale, 1))" }}>{total - items.length} more not shown — refine your search.</div>}
     </div>
   );
 }
