@@ -7,6 +7,42 @@ import type {
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === "object" && !Array.isArray(value);
 
+export interface PluginSpecInfo {
+  /** Short human-readable label, e.g. "opencode-claude" for "@otto-assistant/opencode-claude@1.2.0". */
+  name: string;
+  /** The full spec, doubling as the on-disk path for file: entries. */
+  path: string;
+  kind: "npm" | "file" | "url" | "other";
+  version?: string;
+  description: string;
+}
+
+/** Package specs carry no metadata of their own — this derives a readable
+ * name/path/description straight from the spec string for display. */
+export function describePluginSpec(spec: string): PluginSpecInfo {
+  if (spec.startsWith("file:")) {
+    const path = spec.slice("file:".length);
+    const base = path.split("/").filter(Boolean).pop() ?? path;
+    return { name: base.replace(/\.[cm]?[jt]s$/, ""), path, kind: "file", description: "Local plugin file" };
+  }
+  if (/^https?:/.test(spec)) {
+    const base = spec.split("/").filter(Boolean).pop() ?? spec;
+    return { name: base, path: spec, kind: "url", description: "Remote plugin script" };
+  }
+  const body = spec.startsWith("npm:") ? spec.slice("npm:".length) : spec;
+  const match = /^(@[^/]+\/[^@]+|[^@]+)(?:@(.+))?$/.exec(body);
+  if (!match) return { name: spec, path: spec, kind: "other", description: "Plugin" };
+  const [, pkg, version] = match;
+  const name = pkg!.includes("/") ? pkg!.split("/").pop()! : pkg!;
+  return {
+    name,
+    path: spec,
+    kind: "npm",
+    ...(version ? { version } : {}),
+    description: version ? `npm package · v${version}` : "npm package",
+  };
+}
+
 const validSpec = (value: unknown): string | null => {
   if (typeof value !== "string" || !value.trim()) return null;
   const spec = value.trim();

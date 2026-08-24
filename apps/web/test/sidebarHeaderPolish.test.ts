@@ -73,6 +73,7 @@ test("assistant response header carries identity, timing, and configured actions
   assert.match(timeline, /className="agent-reply-item agent-reply-duration"/);
   assert.match(timeline, /timeShort\(assistantTime\(m\)\)/);
   const response = timeline.indexOf("<div className=\"bubble\"");
-  const footer = timeline.lastIndexOf("<AssistantAgentHeader m={m} announce={announce} turn={turn} />");
+  const footer = timeline.lastIndexOf("<AssistantAgentHeader m={m} announce={announce} turn={turn} preliminary={preliminary} />");
   assert.ok(footer > response, "assistant identity and actions follow the response body");
+  assert.match(timeline, /agent-reply-header-preliminary/);
 });

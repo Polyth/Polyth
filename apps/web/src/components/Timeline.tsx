@@ -445,11 +445,14 @@ function AssistantAgentHeader({
   m,
   announce,
   turn,
+  preliminary,
 }: {
   m: AssistantMsg;
   announce?: Announce;
   /** Present only for the terminal assistant answer of the current turn. */
   turn?: RenderModel["turn"];
+  /** A finalized interim update from the turn currently in progress. */
+  preliminary: boolean;
 }) {
   const session = useStore((state) =>
     state.sessions.find((candidate) => candidate.id === state.activeSessionId) ?? null);
@@ -517,6 +520,14 @@ function AssistantAgentHeader({
     seedMultiRunPrompt(m.text);
     setActiveView("multirun");
   };
+  if (preliminary) {
+    return (
+      <header className="agent-reply-header agent-reply-header-preliminary">
+        <time className="agent-reply-item" dateTime={timeIso(assistantTime(m))}>{timeShort(assistantTime(m))}</time>
+      </header>
+    );
+  }
+
   return (
     <header className="agent-reply-header">
       <ProviderLogo
@@ -573,12 +584,14 @@ function AssistantView({
   plan,
   regeneratePrompt,
   turn,
+  preliminary = false,
 }: {
   m: AssistantMsg;
   announce?: Announce;
   plan?: NonNullable<RenderModel["tasks"]>;
   regeneratePrompt?: string;
   turn?: RenderModel["turn"];
+  preliminary?: boolean;
 }) {
   const hasAnswer = m.text !== "" || !m.finalized;
   const galleryAvailable = /!\[[^\]]*]\([^)]+\)/.test(m.text);
@@ -591,7 +604,7 @@ function AssistantView({
     ? ({ role: "article", "aria-label": assistantArticleName(m.finalized, assistantTime(m)) } as const)
     : undefined;
   return (
-    <div className="msg assistant" data-message-seq={m.eventSeq} {...(articleProps ?? {})}>
+    <div className={`msg assistant${preliminary ? " assistant-preliminary" : ""}`} data-message-seq={m.eventSeq} {...(articleProps ?? {})}>
       {m.reasoning !== "" && <Thinking m={m} />}
       {hasAnswer && (
         <div className="bubble" dir="auto">{renderMarkdown(m.text || "", m.id)}{!m.finalized && <span className="caret" />}</div>
@@ -619,7 +632,7 @@ function AssistantView({
       {m.finalized && m.text !== "" && announce && galleryAvailable && (
         <button className="assistant-gallery-shortcut" onClick={openGallery}><Icon.image /> {tr("timeline.openAnswerImages")}</button>
       )}
-      {m.finalized && hasAnswer && <AssistantAgentHeader m={m} announce={announce} turn={turn} />}
+      {m.finalized && hasAnswer && <AssistantAgentHeader m={m} announce={announce} turn={turn} preliminary={preliminary} />}
     </div>
   );
 }
@@ -777,12 +790,13 @@ function WorkedGroup({ g }: { g: WorkGroup }) {
   );
 }
 
-function MessageView({ m, announce, plan, regeneratePrompt, turn, onRevert, onFork, revert, fork }: {
+function MessageView({ m, announce, plan, regeneratePrompt, turn, preliminary, onRevert, onFork, revert, fork }: {
   m: RenderMessage;
   announce?: Announce;
   plan?: NonNullable<RenderModel["tasks"]>;
   regeneratePrompt?: string;
   turn?: RenderModel["turn"];
+  preliminary?: boolean;
   onRevert?: (message: UserMsg) => void;
   onFork?: (message: UserMsg) => void;
   revert?: ActionAvailability;
@@ -809,7 +823,7 @@ function MessageView({ m, announce, plan, regeneratePrompt, turn, onRevert, onFo
     );
   }
   if (m.kind === "assistant") {
-    return <AssistantView m={m} announce={announce} plan={plan} regeneratePrompt={regeneratePrompt} turn={turn} />;
+    return <AssistantView m={m} announce={announce} plan={plan} regeneratePrompt={regeneratePrompt} turn={turn} preliminary={preliminary} />;
   }
   if (m.kind === "task") return <TaskActivityRow activity={m} />;
   return <ToolCard m={m} />;
@@ -1324,8 +1338,10 @@ export default function Timeline({
                 key={r.id}
                 m={r}
                 plan={r.kind === "assistant" && r.id === latestAssistantId && model.tasks ? model.tasks : undefined}
-                regeneratePrompt={r.kind === "assistant" ? regenerateSources.get(r.eventSeq) : undefined}
-                turn={r.kind === "assistant" && r.id === latestAssistantId && turn?.status !== "working" ? turn : undefined}
+                    regeneratePrompt={r.kind === "assistant" ? regenerateSources.get(r.eventSeq) : undefined}
+                    turn={r.kind === "assistant" && r.id === latestAssistantId && turn?.status !== "working" ? turn : undefined}
+                    preliminary={r.kind === "assistant" && turn?.status === "working"
+                      && (turn.startedAt === undefined || r.time >= turn.startedAt)}
                 announce={announce}
                 onRevert={revert}
                 onFork={fork}

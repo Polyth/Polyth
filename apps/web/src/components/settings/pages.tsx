@@ -23,7 +23,7 @@ import { removeProject } from "../../init.ts";
 import AgentProfileForm from "../AgentProfileForm.tsx";
 import ProjectFolderDialog from "../ProjectFolderDialog.tsx";
 import { parseMcpServersJson, type McpImportResult } from "../../mcpImport.ts";
-import { parseOpenCodePluginJson } from "../../pluginImport.ts";
+import { describePluginSpec, parseOpenCodePluginJson } from "../../pluginImport.ts";
 import {
   PRESET_THEMES, addCustomTheme, applyTheme, loadCustomThemes, parseThemeJson,
   reapplyTheme, removeCustomTheme, resolveTheme, type AppearanceMode, type ThemeSpec,
@@ -1377,19 +1377,24 @@ function OpenCodePluginsSection() {
         {plugins.length === 0 && (
           <EmptyState title="No OpenCode plugins configured" body="Paste JSON below to add one without changing providers, MCP servers, agents, or other config." />
         )}
-        {plugins.map((plugin) => (
-          <div className="set-row" key={plugin.spec}>
-            <div className="set-row-text">
-              <div className="set-row-label mono">{plugin.spec}</div>
-              <div className="set-row-hint">
-                {plugin.options ? `Options: ${JSON.stringify(plugin.options)}` : "Default options"}
+        {plugins.map((plugin) => {
+          const info = describePluginSpec(plugin.spec);
+          return (
+            <div className="set-row" key={plugin.spec}>
+              <div className="set-row-text">
+                <div className="set-row-label">{info.name}</div>
+                <div className="set-row-hint mono">{info.path}</div>
+                <div className="set-row-hint">
+                  {info.description}
+                  {plugin.options && ` · Options: ${JSON.stringify(plugin.options)}`}
+                </div>
+              </div>
+              <div className="set-row-control">
+                <button className="small-btn danger-btn" disabled={busy} onClick={() => void remove(plugin)}>Remove</button>
               </div>
             </div>
-            <div className="set-row-control">
-              <button className="small-btn danger-btn" disabled={busy} onClick={() => void remove(plugin)}>Remove</button>
-            </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
       <div className="mcp-form">
         <div className="stat-label">

@@ -8126,8 +8126,9 @@ html[dir="rtl"] input[type="number"] {
 }
 .timeline { padding-top: 40px; }
 .tool-card {
-  overflow: hidden;
-  border-color: var(--chat-border);
+  overflow: visible;
+  padding: 6px 12px 10px;
+  border: 0;
   border-radius: calc(11px * var(--corner-radius-scale));
   background: var(--chat-surface);
 }
@@ -8139,13 +8140,13 @@ html[dir="rtl"] input[type="number"] {
   align-items: center;
   gap: 8px;
   flex: 1;
-  padding: 8px 11px;
+  padding: 8px 0;
   border: 0;
   color: inherit;
   background: transparent;
   text-align: left;
 }
-.tool-disclosure:hover { background: var(--chat-raised); }
+.tool-disclosure:hover { background: transparent; color: var(--text); }
 .tool-chevron { width: 15px; height: 15px; display: grid; place-items: center; flex: none; color: var(--muted); transition: transform 120ms ease; }
 .tool-chevron svg { width: 13px; height: 13px; }
 .tool-card.open .tool-chevron { transform: rotate(90deg); }
@@ -8166,9 +8167,10 @@ html[dir="rtl"] input[type="number"] {
   background: transparent;
 }
 .tool-card-copy .copy-btn:hover { color: var(--text); background: var(--chat-raised); }
-.tool-body { padding: 0 10px 10px; }
+.tool-body { padding: 0 0 0 23px; }
 .tool-body pre {
-  border-color: var(--chat-border);
+  padding: 10px;
+  border: 0;
   border-radius: calc(9px * var(--corner-radius-scale));
   background: var(--chat-bg);
 }
@@ -9347,8 +9349,19 @@ html[dir="rtl"] input[type="number"] {
   width: var(--control-h); min-width: var(--control-h); height: var(--control-h);
   display: grid; place-items: center; padding: 0;
   border-radius: var(--radius-control); color: var(--accent);
+  transform: translate(2px, 3px);
 }
+.composer-add-files:hover { transform: translate(2px, 3px); }
+.composer-mobile .composer-add { transform: translate(2px, 3px); }
+.composer-mobile .composer-add-trigger:hover { transform: none; }
 .composer-add-files svg { width: 15px; height: 15px; }
+/* Keep the compact composer controls easy to scan without changing their
+   established hit areas: use a 20px glyph size. */
+.composer-add-files svg,
+.composer-add-trigger .composer-add-icon > svg,
+.mic-icon > svg,
+.composer-goals > svg,
+.composer-auto-approve > svg { width: 20px; height: 20px; }
 .run-provider-logo { width: 22px; height: 22px; }
 
 .widget-inline-config { margin-bottom: 14px; }
@@ -11313,6 +11326,14 @@ body[data-density="comfortable"] .header { min-height: 60px; }
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.msg.assistant .agent-reply-header-preliminary {
+  width: auto;
+  min-height: 0;
+  margin-top: 7px;
+}
+.msg.assistant .agent-reply-header-preliminary .agent-reply-item::before { content: none; }
+.msg.assistant-preliminary > .bubble hr { display: none; }
+.msg.assistant > .bubble pre { border: 0; }
 
 /* Conversation-tail controls ------------------------------------------------
    The portal anchor is immediately before the composer. Its zero-height box
