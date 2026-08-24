@@ -79,7 +79,7 @@ test("chat composer keeps the Run workflow launcher mounted after project activa
     assert.ok(input);
     await act(async () => {
       input.value = "Audit the release candidate";
-      input.dispatchEvent(new dom.Event("input", { bubbles: true }));
+      input.dispatchEvent(new Event("input", { bubbles: true }));
     });
     await act(async () => {
       trigger?.click();
