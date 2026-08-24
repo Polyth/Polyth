@@ -84,6 +84,9 @@ export default function Sheet({
 }) {
   const panelRef = useRef<HTMLDivElement>(null);
   const backdropRef = useRef<HTMLDivElement>(null);
+  const openerRef = useRef<HTMLElement | null>(
+    typeof document === "undefined" ? null : document.activeElement as HTMLElement | null,
+  );
   useEffect(() => {
     const unlock = lockPageScroll();
     const restoreBackground = backdropRef.current
@@ -92,6 +95,10 @@ export default function Sheet({
     return () => {
       restoreBackground();
       unlock();
+      const opener = openerRef.current;
+      requestAnimationFrame(() => {
+        if (opener?.isConnected) opener.focus();
+      });
     };
   }, []);
   useModalSurface({
@@ -99,6 +106,7 @@ export default function Sheet({
     onClose,
     containerRef: panelRef,
     ...(search ? { initialFocus: ".sheet-search input" } : {}),
+    resolveRestoreFocus: () => null,
   });
 
   const classes = ["sheet"];
