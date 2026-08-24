@@ -2879,19 +2879,31 @@ html[data-density="compact"] .set-row { padding: 9px 0; }
 }
 .workflow-page-icon svg { width: 20px; height: 20px; }
 .workflow-error {
-  padding: 10px 12px; border: 1px solid color-mix(in srgb, var(--red) 35%, var(--border));
+  min-height: 42px; display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  padding: 8px 10px 8px 12px; border: 1px solid color-mix(in srgb, var(--red) 35%, var(--border));
   border-radius: var(--radius-md); background: color-mix(in srgb, var(--red) 7%, var(--elevated));
 }
+.workflow-error > span { min-width: 0; flex: 1; }
+.workflow-error-retry { flex: none; min-height: 30px; color: var(--text); background: var(--elevated); }
 .workflow-layout {
   min-width: 0; display: grid; grid-template-columns: minmax(210px, 260px) minmax(0, 1fr);
   gap: 14px; align-items: start;
 }
 .workflow-main { min-width: 0; display: flex; flex-direction: column; gap: 14px; }
-.workflow-main > .empty-state { min-height: 300px; border: 1px dashed var(--hair-strong); border-radius: var(--radius-lg); }
+.workflow-main > .empty-state,
+.workflow-main-loading {
+  min-height: 300px; border: 1px dashed var(--hair-strong); border-radius: var(--radius-lg);
+}
+.workflow-main-loading {
+  display: flex; align-items: center; justify-content: center; gap: 9px;
+  color: var(--muted); font-size: 12px;
+}
 .workflow-sidebar { position: sticky; top: 0; max-height: calc(100dvh - 108px); padding: 12px; overflow-y: auto; }
 .workflow-section-heading { min-width: 0; display: flex; align-items: center; gap: 10px; }
 .workflow-section-heading > div { min-width: 0; display: flex; flex: 1; flex-direction: column; gap: 2px; }
-.workflow-section-heading strong { color: var(--text); font-size: 13px; }
+.workflow-section-heading h2 {
+  margin: 0; color: var(--text); font-size: 13px; font-weight: 700; line-height: 1.35;
+}
 .workflow-section-heading > div > span { color: var(--muted); font-size: 11px; line-height: 1.35; }
 .workflow-button {
   min-height: 34px; display: inline-flex; align-items: center; justify-content: center; gap: 6px;
@@ -2899,9 +2911,11 @@ html[data-density="compact"] .set-row { padding: 9px 0; }
 }
 .workflow-button svg { flex: none; width: 14px; height: 14px; }
 .workflow-button:active:not(:disabled) { transform: translateY(1px); }
+.workflow-button:disabled { transform: none; }
 .workflow-button.primary-btn {
   border: 1px solid var(--accent); border-radius: calc(7px * var(--corner-radius-scale));
 }
+.workflow-button.primary-btn:disabled:hover { border-color: var(--accent); background: var(--accent); }
 .workflow-button.danger-btn:hover:not(:disabled) {
   border-color: color-mix(in srgb, var(--red) 55%, var(--border));
   background: color-mix(in srgb, var(--red) 7%, var(--elevated));
@@ -2944,6 +2958,13 @@ html[data-density="compact"] .set-row { padding: 9px 0; }
 .workflow-editor-header { gap: 14px; }
 .workflow-editor-toolbar { display: flex; align-items: end; gap: 10px; }
 .workflow-editor-actions { display: flex; align-items: center; gap: 6px; }
+.workflow-save-state {
+  min-width: max-content; margin-right: 2px; color: var(--green);
+  font-size: 10px; font-weight: 650; white-space: nowrap;
+}
+.workflow-save-state::before { content: "✓"; margin-right: 4px; }
+.workflow-save-state.dirty { color: var(--amber); }
+.workflow-save-state.dirty::before { content: "●"; font-size: 7px; vertical-align: 1px; }
 .workflow-field { min-width: 0; display: flex; flex-direction: column; gap: 5px; }
 .workflow-field > span {
   color: var(--muted); font-size: 10.5px; font-weight: 650; letter-spacing: .025em;
@@ -2952,6 +2973,12 @@ html[data-density="compact"] .set-row { padding: 9px 0; }
 .workflow-field select,
 .workflow-field textarea { width: 100%; }
 .workflow-field textarea { line-height: 1.5; }
+.workflow-field-error {
+  margin-top: -1px; color: var(--red); font-size: 10px; font-weight: 500; line-height: 1.35;
+}
+.workflow-field :is(input, select, textarea)[aria-invalid="true"] {
+  border-color: color-mix(in srgb, var(--red) 65%, var(--border));
+}
 .workflow-field input:hover,
 .workflow-field select:hover,
 .workflow-field textarea:hover { border-color: var(--hair-strong); }
@@ -2976,6 +3003,7 @@ html[data-density="compact"] .set-row { padding: 9px 0; }
   background: var(--bg); color: var(--text-dim); font-size: 10.5px; overflow-wrap: anywhere;
 }
 .workflow-layer-chip b { color: var(--accent); font-size: 9px; letter-spacing: .035em; text-transform: uppercase; }
+.workflow-graph-error { min-height: 28px; display: inline-flex; align-items: center; }
 .workflow-node-grid {
   min-width: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(310px, 100%), 1fr));
   gap: 12px; align-items: start;
@@ -3024,7 +3052,12 @@ html[data-density="compact"] .set-row { padding: 9px 0; }
   padding: 3px 8px; border: 1px solid var(--hair); border-radius: 999px;
   background: var(--bg); color: var(--muted); font-size: 9.5px; font-weight: 700;
 }
+.workflow-status > span { display: inline-grid; place-items: center; }
 .workflow-status svg { width: 12px; height: 12px; }
+.workflow-status-spinner {
+  width: 11px; height: 11px; border: 1.5px solid currentColor;
+  border-right-color: transparent; border-radius: 50%; animation: spin 700ms linear infinite;
+}
 .workflow-status.status-running { border-color: var(--accent-line); background: var(--accent-wash); color: var(--accent); }
 .workflow-status.status-done { border-color: color-mix(in srgb, var(--green) 35%, var(--border)); color: var(--green); }
 .workflow-status.status-error { border-color: color-mix(in srgb, var(--red) 35%, var(--border)); color: var(--red); }
@@ -3040,6 +3073,9 @@ html[data-density="compact"] .set-row { padding: 9px 0; }
   display: block; height: 100%; border-radius: inherit; background: var(--green);
   transition: width 180ms ease;
 }
+.workflow-run-progress.status-running span { background: var(--accent); }
+.workflow-run-progress.status-error span { background: var(--red); }
+.workflow-run-progress.status-stopped span { background: var(--muted); }
 .workflow-run-grid {
   min-width: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(min(280px, 100%), 1fr));
   gap: 10px;
@@ -3067,7 +3103,13 @@ html[data-density="compact"] .set-row { padding: 9px 0; }
   .workflow-editor-actions .workflow-button { flex: 1; }
   .workflow-layers { grid-template-columns: 1fr; gap: 8px; }
   .workflow-run-options { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-  .workflow-button { min-height: 40px; }
+  .workflow-button,
+  .workflow-node-delete,
+  .workflow-dependency { min-height: var(--tap); }
+  .workflow-node-delete { width: var(--tap); min-width: var(--tap); }
+  .workflow-error-retry { min-height: var(--tap); }
+  .workflow-field input,
+  .workflow-field select { min-height: var(--tap); }
 }
 
 @media (max-width: 620px) {
@@ -3095,6 +3137,7 @@ html[data-density="compact"] .set-row { padding: 9px 0; }
   .workflow-run-form,
   .workflow-run-card { padding: 12px; }
   .workflow-editor-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .workflow-save-state { grid-column: 1 / -1; min-height: 18px; margin: 0; }
   .workflow-editor-actions .primary-btn { grid-column: 1 / -1; }
   .workflow-node-selects,
   .workflow-run-options { grid-template-columns: 1fr; }
@@ -7913,6 +7956,10 @@ body[data-quick-actions="false"] [data-widget-id="core.quick-actions"] { display
   color: var(--green);
   background: color-mix(in srgb, var(--green) 11%, transparent);
 }
+.composer .composer-workflow.on {
+  color: var(--accent);
+  background: var(--accent-wash);
+}
 .focus-conversation > .pending-changes-bar {
   width: min(768px, calc(100% - 48px));
   flex: none;
@@ -9063,9 +9110,13 @@ html[data-sheet="open"], html[data-sheet="open"] body { overflow: hidden; }
     color: var(--muted);
   }
   .composer-mobile .composer-add-trigger:active,
+  .composer-mobile .composer-add-trigger:focus-visible,
   .composer-mobile .composer-auto-approve:active,
+  .composer-mobile .composer-auto-approve:focus-visible,
   .composer-mobile .composer-goals:active,
+  .composer-mobile .composer-goals:focus-visible,
   .composer-mobile .composer-workflow:active,
+  .composer-mobile .composer-workflow:focus-visible,
   .composer-mobile .composer-mobile-extensions .mic-btn:active {
     color: var(--text);
     background: color-mix(in srgb, var(--text) 8%, transparent);

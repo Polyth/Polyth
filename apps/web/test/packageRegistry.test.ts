@@ -64,6 +64,7 @@ const { bootPackages, isPackageEnabled, subscribePackages } =
 const { listSlots } = await import("../src/slots.ts");
 const { listWidgets } = await import("../src/widgets/catalog.ts");
 const { getCapability } = await import("../src/capabilities.ts");
+const { getState, setActiveView } = await import("../src/store.ts");
 
 test("package boot installs and removes package-owned settings and widgets", async () => {
   let notifications = 0;
@@ -82,6 +83,7 @@ test("package boot installs and removes package-owned settings and widgets", asy
   assert.ok(getCapability("workflow"), "enabled workflow package installs its navigation capability");
   assert.equal(listWidgets().find((item) => item.id === "workflow.composer-action")?.defaultSlot, "composer.trailing");
 
+  setActiveView("workflow");
   descriptors.get("dictation")!.enabled = false;
   descriptors.get("usage")!.enabled = false;
   descriptors.get("git")!.enabled = false;
@@ -97,6 +99,7 @@ test("package boot installs and removes package-owned settings and widgets", asy
   assert.equal(listWidgets().some((item) => item.pluginId === "git"), false);
   assert.equal(getCapability("workflow"), null);
   assert.equal(listWidgets().some((item) => item.pluginId === "workflow"), false);
+  assert.equal(getState().activeView, "session", "disabling the active workflow package returns to chat");
   assert.equal(notifications, 2);
   unsubscribe();
 });

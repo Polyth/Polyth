@@ -32,6 +32,7 @@ function GoalAction({ context }: { context: Record<string, unknown> }) {
   return (
     <>
       <button
+        type="button"
         className={`header-action composer-goals${goalOn ? " on" : ""}`}
         title={label}
         aria-label={label}
@@ -71,6 +72,7 @@ function AutoApproveAction({ context }: { context: Record<string, unknown> }) {
   };
   return (
     <button
+      type="button"
       className={`header-action composer-auto-approve${on ? " on" : ""}`}
       title={on ? "Turn off auto-approve" : "Turn on auto-approve"}
       aria-label={on ? "Turn off auto-approve" : "Turn on auto-approve"}
@@ -84,12 +86,15 @@ function AutoApproveAction({ context }: { context: Record<string, unknown> }) {
 }
 
 function WorkflowAction() {
+  const active = useStore((state) => state.activeView === "workflow");
   return (
     <button
-      className="header-action composer-workflow"
+      type="button"
+      className={`header-action composer-workflow${active ? " on" : ""}`}
       onClick={() => setActiveView("workflow")}
-      title="Open workflows"
-      aria-label="Open workflows"
+      title={active ? "Workflows are open" : "Open workflows"}
+      aria-label={active ? "Workflows are open" : "Open workflows"}
+      aria-pressed={active}
     >
       <Icon.workflow /><span>Workflows</span>
     </button>
