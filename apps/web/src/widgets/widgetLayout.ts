@@ -111,7 +111,7 @@ export const BUILTIN_WIDGET_IDS = [
   "core.quick-actions",
   "session.work-status",
   "session.activity",
-  "preview.app",
+  "browser.app",
   "files.explorer",
   "files.project-map",
   "github.overview",
@@ -148,7 +148,7 @@ const DEFAULT_ZONE: Record<string, WidgetZone> = {
   "usage.sessions-table": "right",
   "schedule.tasks": "right",
   "terminal.shell": "bottom",
-  "preview.app": "bottom",
+  "browser.app": "bottom",
 };
 
 const DEFAULT_SLOT_BY_ID: Record<string, UiSlot> = {
@@ -168,7 +168,7 @@ const DEFAULT_SIZE_BY_ID: Record<string, WidgetSize> = {
   "knowledge.notes": { w: 6, h: 5 },
   "session.work-status": { w: 6, h: 4 },
   "session.activity": { w: 6, h: 4 },
-  "preview.app": { w: 12, h: 6 },
+  "browser.app": { w: 12, h: 6 },
   "github.overview": { w: 6, h: 6 },
   "schedule.tasks": { w: 6, h: 5 },
   "multirun.runs": { w: 12, h: 6 },

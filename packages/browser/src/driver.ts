@@ -30,6 +30,8 @@ export interface DriverPage {
   reload(): Promise<DriverNav>;
   stop(): Promise<void>;
   click(target: BrowserTarget): Promise<void>;
+  /** Describe the element at viewport coordinates without mutating the page. */
+  point(point: { x: number; y: number }): Promise<JsonObject>;
   type(target: BrowserTarget, text: string, submit?: boolean): Promise<void>;
   press(key: string): Promise<void>;
   scroll(x: number, y: number, target?: BrowserTarget): Promise<void>;

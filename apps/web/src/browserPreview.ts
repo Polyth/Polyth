@@ -19,6 +19,28 @@ export interface BrowserAnnotation {
   note: string;
 }
 
+export interface BrowserPointedElement {
+  selector: string;
+  tag: string;
+  role?: string;
+  name?: string;
+  text?: string;
+  rect: { x: number; y: number; width: number; height: number };
+  attributes?: Record<string, string>;
+}
+
+/** Model-facing text paired with the pointed-element screenshot attachment. */
+export function browserElementContext(url: string, element: BrowserPointedElement): string {
+  return [
+    "[Browser element]",
+    `URL: ${url}`,
+    `Selector: ${element.selector}`,
+    `Element: <${element.tag}>${element.role ? ` role="${element.role}"` : ""}${element.name ? ` name="${element.name}"` : ""}`,
+    element.text ? `Text: ${element.text}` : "",
+    `Bounds: x=${element.rect.x}, y=${element.rect.y}, width=${element.rect.width}, height=${element.rect.height}`,
+  ].filter(Boolean).join("\n");
+}
+
 export interface ImageRect {
   left: number;
   top: number;

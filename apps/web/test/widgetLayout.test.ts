@@ -66,7 +66,7 @@ test("default widget layout contains every built-in exactly once", () => {
   assert.equal(widgetSlotOf(layout, "usage.session"), "session.composer.before");
   assert.equal(widgetSlotOf(layout, "github.pr-summary"), "session.composer.before");
   assert.equal(layout.widgets["core.chat"]?.visible, true);
-  assert.equal(layout.widgets["preview.app"]?.visible, false);
+  assert.equal(layout.widgets["browser.app"]?.visible, false);
   for (const id of [
     "core.chat", "goals.current", "files.project-map", "git.recent",
     "session.work-status", "knowledge.notes", "session.activity", "core.quick-actions",
@@ -105,15 +105,15 @@ test("recommended spawn size fits title chrome without becoming a hard minimum",
 });
 
 test("layout serializes and parses visibility, size, audience, and zone order", () => {
-  let layout = createDefaultWidgetLayout(["core.chat", "terminal.shell", "preview.app"]);
+  let layout = createDefaultWidgetLayout(["core.chat", "terminal.shell", "browser.app"]);
   layout = moveWidget(layout, "terminal.shell", "main", 0);
-  layout = setWidgetVisible(layout, "preview.app", true);
-  layout = setWidgetSize(layout, "preview.app", { w: 9, h: 7 });
+  layout = setWidgetVisible(layout, "browser.app", true);
+  layout = setWidgetSize(layout, "browser.app", { w: 9, h: 7 });
   layout = { ...layout, audience: "power" };
 
   const parsed = parseWidgetLayout(
     serializeWidgetLayout(layout),
-    ["core.chat", "terminal.shell", "preview.app"],
+    ["core.chat", "terminal.shell", "browser.app"],
   );
   assert.deepEqual(parsed, layout);
   assert.deepEqual(parsed.zones.main.slice(0, 2), ["terminal.shell", "core.chat"]);

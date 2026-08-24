@@ -97,9 +97,9 @@ test("package routes list packages and update enablement", async () => {
   assert.equal(listed.status, 200);
   assert.equal((listed.payload as { packages: unknown[] }).packages.length, BUILTIN_PACKAGES.length);
 
-  const updated = await call("PATCH", "/api/packages/preview", { enabled: false });
+  const updated = await call("PATCH", "/api/packages/browser", { enabled: false });
   assert.equal(updated.handled, true);
   assert.equal(updated.status, 200);
   assert.equal((updated.payload as { enabled: boolean }).enabled, false);
-  assert.equal(registry.isEnabled("preview"), false);
+  assert.equal(registry.isEnabled("browser"), false);
 });

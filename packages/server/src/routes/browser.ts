@@ -29,6 +29,7 @@ const STATUS: Record<string, number> = {
 const summarize = (action: BrowserAction): string => {
   switch (action.kind) {
     case "click": return `click ${targetText(action.target)}`;
+    case "point": return `point at ${targetText(action.target)}`;
     case "type": return `type into ${targetText(action.target)} (${action.text.length} chars${action.submit ? ", submit" : ""})`;
     case "press": return `press ${action.key}`;
     case "scroll": return action.target ? `scroll to ${targetText(action.target)}` : `scroll ${action.x ?? 0},${action.y ?? 0}`;

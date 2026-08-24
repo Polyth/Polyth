@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   annotationViewportRect,
   BROWSER_DEVICE_PRESETS,
+  browserElementContext,
   captureFileName,
   containedImageRect,
   devicePresetForViewport,
@@ -70,4 +71,22 @@ test("capture filenames are deterministic, safe PNG names", () => {
     captureFileName(new Date("2026-08-22T20:30:40.123Z")),
     "browser-2026-08-22T20-30-40-123Z.png",
   );
+});
+
+test("pointed elements produce precise model-facing browser context", () => {
+  assert.equal(browserElementContext("http://127.0.0.1:4400/settings", {
+    selector: "#save-profile",
+    tag: "button",
+    role: "button",
+    name: "Save",
+    text: "Save changes",
+    rect: { x: 40, y: 80, width: 120, height: 36 },
+  }), [
+    "[Browser element]",
+    "URL: http://127.0.0.1:4400/settings",
+    "Selector: #save-profile",
+    "Element: <button> role=\"button\" name=\"Save\"",
+    "Text: Save changes",
+    "Bounds: x=40, y=80, width=120, height=36",
+  ].join("\n"));
 });

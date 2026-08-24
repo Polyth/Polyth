@@ -301,7 +301,7 @@ export function createBrowserService(opts: BrowserServiceOptions): BrowserServic
         throw err(decision.code, decision.reason);
       }
       return enqueue(s, async () => {
-        await withTimeout(s.page.goto(url), actionTimeoutMs, "navigate");
+        await withTimeout(s.page.goto(decision.url), actionTimeoutMs, "navigate");
         syncNav(s);
         await captureFrame(s);
         return { ...s.dto };
@@ -319,6 +319,10 @@ export function createBrowserService(opts: BrowserServiceOptions): BrowserServic
         const work = async (): Promise<void> => {
           switch (action.kind) {
             case "click": return s.page.click(action.target);
+            case "point": {
+              result = redactJsonObject(await s.page.point(action.target.point), opts.secrets ?? []);
+              return;
+            }
             case "type": return s.page.type(action.target, action.text, action.submit);
             case "press": return s.page.press(action.key);
             case "scroll": return s.page.scroll(action.x ?? 0, action.y ?? 0, action.target);
@@ -352,7 +356,9 @@ export function createBrowserService(opts: BrowserServiceOptions): BrowserServic
         };
         await withTimeout(work(), actionTimeoutMs, `action ${action.kind}`);
         syncNav(s);
-        await captureFrame(s);
+        // Pointing is read-only. Keeping the revision stable means the returned
+        // element geometry still describes the frame the user clicked.
+        if (action.kind !== "point") await captureFrame(s);
         return { actionId, session: { ...s.dto }, ...(result ? { result } : {}) };
       });
     },
@@ -429,7 +435,7 @@ export function createBrowserService(opts: BrowserServiceOptions): BrowserServic
  *  frame the user/agent is no longer looking at must never land. */
 function validateTargets(action: BrowserAction, currentRevision: number): void {
   const targets: BrowserTarget[] = [];
-  if (action.kind === "click" || action.kind === "type" || action.kind === "select") targets.push(action.target);
+  if (action.kind === "click" || action.kind === "point" || action.kind === "type" || action.kind === "select") targets.push(action.target);
   if (action.kind === "scroll" && action.target) targets.push(action.target);
   for (const t of targets) {
     if ("point" in t && t.frameRevision < currentRevision) {

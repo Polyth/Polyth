@@ -2048,9 +2048,10 @@ input.notification-preview { font-family: var(--mono); font-size: 12.5px; min-wi
 .browser-frame-stage { position: relative; flex: 1; min-height: 0; }
 .browser-frame-img {
   position: absolute; inset: 0; object-fit: contain; background: #fff;
-  cursor: crosshair; width: 100%; height: 100%;
+  cursor: pointer; width: 100%; height: 100%;
 }
 .browser-frame-img.annotating { cursor: crosshair; touch-action: none; user-select: none; }
+.browser-frame-img.pointing { cursor: crosshair; }
 .browser-annotation-layer { position: absolute; inset: 0; pointer-events: none; }
 .browser-annotation-box {
   position: absolute; z-index: 1; border: 3px solid var(--red);

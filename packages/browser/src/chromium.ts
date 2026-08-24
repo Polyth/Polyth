@@ -151,6 +151,79 @@ export function createChromiumDriver(executablePath: string): BrowserDriver {
           else if ("point" in target) { await page.mouse.click(target.point.x, target.point.y); }
           await refreshTitle();
         },
+        async point(point) {
+          return page.evaluate(({ x, y }) => {
+            const element = document.elementFromPoint(x, y);
+            if (!(element instanceof Element)) throw new Error(`no element at (${x}, ${y})`);
+
+            const quote = (value: string) =>
+              typeof CSS !== "undefined" && typeof CSS.escape === "function"
+                ? CSS.escape(value)
+                : value.replace(/[^a-zA-Z0-9_-]/g, (char) => `\\${char}`);
+            const unique = (selector: string) => {
+              try { return document.querySelectorAll(selector).length === 1; } catch { return false; }
+            };
+            const selectorFor = (node: Element): string => {
+              const testId = node.getAttribute("data-testid");
+              if (testId) {
+                const candidate = `[data-testid="${testId.replace(/["\\]/g, "\\$&")}"]`;
+                if (unique(candidate)) return candidate;
+              }
+              if (node.id) {
+                const candidate = `#${quote(node.id)}`;
+                if (unique(candidate)) return candidate;
+              }
+              const parts: string[] = [];
+              let current: Element | null = node;
+              while (current && current !== document.documentElement) {
+                let part = current.tagName.toLowerCase();
+                const parent: Element | null = current.parentElement;
+                if (parent) {
+                  const siblings = [...parent.children].filter((child) => child.tagName === current!.tagName);
+                  if (siblings.length > 1) part += `:nth-of-type(${siblings.indexOf(current) + 1})`;
+                }
+                parts.unshift(part);
+                const candidate = parts.join(" > ");
+                if (unique(candidate)) return candidate;
+                current = parent;
+              }
+              return parts.join(" > ") || node.tagName.toLowerCase();
+            };
+            const tag = element.tagName.toLowerCase();
+            const implicitRole: Record<string, string> = {
+              a: "link", button: "button", select: "combobox", textarea: "textbox",
+              img: "img", nav: "navigation", main: "main", form: "form",
+            };
+            const role = element.getAttribute("role")
+              ?? (tag === "input"
+                ? ((element.getAttribute("type") ?? "text") === "checkbox" ? "checkbox" : "textbox")
+                : implicitRole[tag]);
+            const name = element.getAttribute("aria-label")
+              ?? element.getAttribute("title")
+              ?? (element.textContent ?? "").trim().replace(/\s+/g, " ").slice(0, 160);
+            const rect = element.getBoundingClientRect();
+            const attributes = Object.fromEntries(
+              ["id", "class", "data-testid", "name", "type", "aria-label", "title"]
+                .map((key) => [key, element.getAttribute(key)] as const)
+                .filter((entry): entry is readonly [string, string] => entry[1] !== null)
+                .map(([key, value]) => [key, value.slice(0, 300)]),
+            );
+            return {
+              selector: selectorFor(element),
+              tag,
+              ...(role ? { role } : {}),
+              ...(name ? { name } : {}),
+              text: (element.textContent ?? "").trim().replace(/\s+/g, " ").slice(0, 500),
+              rect: {
+                x: Math.round(rect.x),
+                y: Math.round(rect.y),
+                width: Math.round(rect.width),
+                height: Math.round(rect.height),
+              },
+              attributes,
+            };
+          }, point);
+        },
         async type(target, text, submit) {
           const loc = locate(target);
           if (loc) {

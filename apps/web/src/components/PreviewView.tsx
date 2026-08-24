@@ -1,14 +1,13 @@
-// Preview + controlled browser: one surface (WP14). With an engine available
-// the pane streams a server-owned browser (shared user/agent context, frames
-// over /ws with reconnect-at-revision). Without one it stays an honest iframe
-// preview and says why control is unavailable.
+// Shared internal browser: one server-owned page context operated by the user,
+// primary agent, and subagents. Revisioned frames stream over /ws; element
+// pointing turns screenshot coordinates into durable chat context.
 import { useEffect, useRef, useState } from "react";
-import type { PreviewState } from "@polyth/contracts";
 import { api, type BrowserSessionDto } from "../api.ts";
 import { attachUpload, removeAttachment } from "../attachments.ts";
 import {
   annotationViewportRect,
   BROWSER_DEVICE_PRESETS,
+  browserElementContext,
   containedImageRect,
   devicePresetForViewport,
   normalizedPointInImage,
@@ -16,6 +15,7 @@ import {
   renderBrowserCapture,
   type BrowserAnnotation,
   type BrowserDevicePresetId,
+  type BrowserPointedElement,
   type ImageRect,
 } from "../browserPreview.ts";
 import { sendMessage } from "../init.ts";
@@ -38,7 +38,6 @@ export default function PreviewView() {
   // Kept alive while hidden: UI-only polling pauses; the canonical browser
   // frame subscription (WebSocket) below stays attached.
   const visible = usePaneVisible();
-  const [state, setState] = useState<PreviewState>({ url: null, status: "off" });
   const [urlInput, setUrlInput] = useState("");
   const [tab, setTab] = useState<InspectorTab>("console");
   const [inspectorOpen, setInspectorOpen] = useState(false);
@@ -54,6 +53,8 @@ export default function PreviewView() {
   const [snapshotText, setSnapshotText] = useState("");
   const [inspectSelector, setInspectSelector] = useState("");
   const [annotating, setAnnotating] = useState(false);
+  const [pointing, setPointing] = useState(false);
+  const [pointedElement, setPointedElement] = useState<BrowserPointedElement | null>(null);
   const [annotations, setAnnotations] = useState<BrowserAnnotation[]>([]);
   const [imageRect, setImageRect] = useState<ImageRect>({ left: 0, top: 0, width: 0, height: 0 });
   const [captureBusy, setCaptureBusy] = useState(false);
@@ -63,14 +64,6 @@ export default function PreviewView() {
   const nextAnnotationId = useRef(1);
   const annotationDragStart = useRef<{ x: number; y: number } | null>(null);
 
-  const refresh = async () => {
-    if (!projectId) return;
-    const got = await api.previewGet(projectId, activeSessionId ?? undefined);
-    setState(got);
-    if (got.url && !urlInput) setUrlInput(got.url);
-  };
-
-  useEffect(() => { void refresh(); }, [projectId, activeSessionId]);
   useEffect(() => { void api.browserCapability().then(setCap); }, []);
   useEffect(() => {
     if (!projectId) {
@@ -99,12 +92,6 @@ export default function PreviewView() {
   useEffect(() => {
     if (browser?.url) setUrlInput(browser.url);
   }, [browser?.url]);
-  useEffect(() => {
-    if (!projectId || state.status !== "starting" || !visible) return;
-    const t = setInterval(() => void refresh(), 1000);
-    return () => clearInterval(t);
-  }, [projectId, state.status, visible]);
-
   // Frame stream: subscribe over /ws; reconnect resumes at the last revision.
   useEffect(() => {
     if (!browser) return;
@@ -126,6 +113,7 @@ export default function PreviewView() {
             const revision = msg.revision ?? 0;
             if (revision !== revisionRef.current) {
               setAnnotations([]);
+              setPointedElement(null);
               nextAnnotationId.current = 1;
             }
             revisionRef.current = revision;
@@ -181,43 +169,41 @@ export default function PreviewView() {
     return () => clearInterval(t);
   }, [browser?.id, inspectorOpen, tab, visible]);
 
-  const start = async () => {
-    if (!projectId) return;
-    setBusy(true);
-    setError("");
-    try {
-      const got = await api.previewStart(projectId, undefined, activeSessionId ?? undefined);
-      setUrlInput(got.url);
-      setState({ url: got.url, urls: [got.url], status: "starting", port: got.port });
-      if (browser) await navigate(got.url);
-    } catch (e) {
-      setError(String(e));
-    }
-    setBusy(false);
-  };
-
-  const stop = async () => {
-    if (!projectId) return;
-    setBusy(true);
-    await api.previewStop(projectId, activeSessionId ?? undefined).catch(() => {});
-    await refresh();
-    setBusy(false);
-  };
-
   const openBrowser = async () => {
     if (!projectId) return;
+    setBusy(true);
     setError("");
     try {
       const dto = await api.browserCreate({
         projectId,
         ...(activeSessionId ? { sessionId: activeSessionId } : {}),
-        ...(state.url ? { url: state.url } : {}),
       });
       revisionRef.current = 0;
       setBrowser(dto);
+      let opened = dto;
+      const requestedUrl = urlInput.trim();
+      if (requestedUrl) {
+        try {
+          opened = await api.browserNavigate(dto.id, requestedUrl, "user");
+        } catch (navigationError) {
+          const message = String(navigationError);
+          if (
+            (message.includes("approval-required") || message.includes("needs approval"))
+            && window.confirm(`Approve this origin for the internal browser?\n\n${message}`)
+          ) {
+            await api.browserApprove(requestedUrl);
+            opened = await api.browserNavigate(dto.id, requestedUrl, "user");
+          } else {
+            throw navigationError;
+          }
+        }
+      }
+      setBrowser(opened);
       setActivity([]);
     } catch (e) {
       setError(String(e));
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -228,6 +214,8 @@ export default function PreviewView() {
     setFrame(null);
     setAnnotations([]);
     setAnnotating(false);
+    setPointing(false);
+    setPointedElement(null);
     revisionRef.current = 0;
   };
 
@@ -342,11 +330,37 @@ export default function PreviewView() {
     }
   };
 
+  const pointAtFrame = async (x: number, y: number) => {
+    if (!browser || !frame) return;
+    const result = await act({
+      kind: "point",
+      target: { point: { x, y }, frameRevision: frame.revision },
+    });
+    if (!result) return;
+    const element = result as unknown as BrowserPointedElement;
+    if (!element.selector || !element.tag || !element.rect) {
+      setError("The browser could not identify an element at that point.");
+      return;
+    }
+    setPointedElement(element);
+    const rect = element.rect;
+    setAnnotations([{
+      id: nextAnnotationId.current++,
+      x: Math.max(0, rect.x) / browser.viewport.width,
+      y: Math.max(0, rect.y) / browser.viewport.height,
+      width: Math.min(browser.viewport.width - Math.max(0, rect.x), Math.max(1, rect.width)) / browser.viewport.width,
+      height: Math.min(browser.viewport.height - Math.max(0, rect.y), Math.max(1, rect.height)) / browser.viewport.height,
+      note: "",
+    }]);
+    setPointing(false);
+    setAnnotating(false);
+  };
+
   const captureToChat = async () => {
     if (!browser || !projectId || !activeSessionId) return;
     const annotation = annotations[0];
     const comment = annotation?.note.trim() ?? "";
-    if (!annotation || annotation.width <= 0 || annotation.height <= 0 || !comment) return;
+    if (!pointedElement && (!annotation || annotation.width <= 0 || annotation.height <= 0 || !comment)) return;
     const targetProjectId = projectId;
     const targetSessionId = activeSessionId;
     setCaptureBusy(true);
@@ -355,10 +369,15 @@ export default function PreviewView() {
       const observation = await api.browserObserve(browser.id, true);
       if (!observation.screenshot) throw new Error("The browser returned no capture.");
       const source = `data:${observation.screenshot.mime};base64,${observation.screenshot.data}`;
-      const file = await renderBrowserCapture(source, [{ ...annotation, note: comment }]);
+      const file = await renderBrowserCapture(
+        source,
+        annotation ? [{ ...annotation, note: comment }] : [],
+      );
       const attached = await attachUpload(targetProjectId, targetSessionId, file);
       if (!attached.ok) throw new Error(attached.reason);
-      const sent = await sendMessage(comment, undefined, undefined, {
+      const elementContext = pointedElement ? browserElementContext(browser.url, pointedElement) : "";
+      const message = [comment, elementContext].filter(Boolean).join("\n\n");
+      const sent = await sendMessage(message, undefined, undefined, {
         targetSessionId,
         attachments: [attached.ref],
       });
@@ -374,6 +393,8 @@ export default function PreviewView() {
       setInspectorOpen(true);
       setAnnotations([]);
       setAnnotating(false);
+      setPointing(false);
+      setPointedElement(null);
     } catch (e) {
       setError(String(e));
     } finally {
@@ -399,6 +420,10 @@ export default function PreviewView() {
     if (annotating) return;
     const x = Math.round(point.x * browser.viewport.width);
     const y = Math.round(point.y * browser.viewport.height);
+    if (pointing) {
+      void pointAtFrame(x, y);
+      return;
+    }
     // the click carries the frame revision it was aimed at (stale clicks 409)
     void act({ kind: "click", target: { point: { x, y }, frameRevision: frame.revision } });
   };
@@ -410,15 +435,8 @@ export default function PreviewView() {
     setAgentPaused(next);
   };
 
-  if (!projectId) return <EmptyState title="No project selected" description="Open a project to start a live preview." />;
+  if (!projectId) return <EmptyState title="No project selected" description="Open a project to use the internal browser." />;
 
-  const frameSrc = urlInput || state.url || "";
-  const host = (() => {
-    try { return frameSrc ? new URL(frameSrc).host : ""; } catch { return frameSrc; }
-  })();
-  const statusCopy = state.status === "running"
-    ? `running · ${host || (state.port ? `:${state.port}` : "")}`
-    : state.status === "starting" ? "starting…" : "off";
   const browserMode = !!browser && browser.status !== "closed";
 
   return (
@@ -436,7 +454,7 @@ export default function PreviewView() {
           onSubmit={(e) => {
             e.preventDefault();
             if (browserMode) void navigate(urlInput);
-            else setState((s) => ({ ...s, url: urlInput || s.url }));
+            else void openBrowser();
           }}
         >
           <input
@@ -445,34 +463,13 @@ export default function PreviewView() {
             placeholder="localhost:5173"
             aria-label="Address"
           />
-          {state.urls && state.urls.length > 1 && (
-            <select
-              aria-label="Discovered preview address"
-              value={state.urls.includes(urlInput) ? urlInput : ""}
-              onChange={(event) => {
-                if (!event.target.value) return;
-                setUrlInput(event.target.value);
-                if (browserMode) void navigate(event.target.value);
-              }}
-            >
-              <option value="">Discovered…</option>
-              {state.urls.map((url) => <option key={url} value={url}>{url}</option>)}
-            </select>
-          )}
         </form>
-        {!browserMode && <button className="small-btn" title="Refresh" onClick={() => void refresh()}>↻</button>}
-        {frameSrc && (
-          <a className="small-btn" href={browserMode && browser ? browser.url : frameSrc} target="_blank" rel="noreferrer" title="Open in a new tab">↗</a>
+        {browserMode && browser.url !== "about:blank" && (
+          <a className="small-btn" href={browser.url} target="_blank" rel="noreferrer" title="Open in a new tab">↗</a>
         )}
-        {state.status === "off" ? (
-          <button className="primary-btn" onClick={() => void start()} disabled={busy}>Start</button>
-        ) : (
-          <button className="small-btn danger-btn" onClick={() => void stop()} disabled={busy}>Stop</button>
-        )}
-        <span className={`preview-status ${state.status}`}>{statusCopy}</span>
         {cap?.available && !browserMode && (
-          <button className="small-btn" onClick={() => void openBrowser()} title="Open the controlled browser (shared with the agent)">
-            Browser
+          <button className="primary-btn" onClick={() => void openBrowser()} disabled={busy} title="Open a browser shared with all agents">
+            {busy ? "Opening…" : "Open browser"}
           </button>
         )}
         {browserMode && (
@@ -513,11 +510,26 @@ export default function PreviewView() {
               aria-pressed={annotating}
               onClick={() => {
                 setAnnotating((current) => !current);
+                setPointing(false);
                 setAnnotations([]);
+                setPointedElement(null);
               }}
               title="Select an area of the current frame and comment on it"
             >
               Annotate
+            </button>
+            <button
+              className={`small-btn ${pointing ? "active" : ""}`}
+              aria-pressed={pointing}
+              onClick={() => {
+                setPointing((current) => !current);
+                setAnnotating(false);
+                setAnnotations([]);
+                setPointedElement(null);
+              }}
+              title="Point at a page element and add its DOM context to chat"
+            >
+              Point
             </button>
             <button className="small-btn" aria-pressed={agentPaused} onClick={() => void togglePause()} title="Pause or resume agent control of this browser">
               {agentPaused ? "Resume agent" : "Pause agent"}
@@ -538,7 +550,7 @@ export default function PreviewView() {
       </div>
       {cap && !cap.available && (
         <div className="browser-unavailable" role="note">
-          Browser engine unavailable — control disabled, iframe preview only. {cap.reason}
+          Internal browser unavailable. {cap.reason}
         </div>
       )}
       {error && <div className="form-error" style={{ padding: "6px 12px" }}>{error}</div>}
@@ -552,7 +564,7 @@ export default function PreviewView() {
                     ref={imgRef}
                     src={frame.src}
                     alt={`Browser: ${browser?.title || browser?.url || ""}`}
-                    className={`browser-frame-img ${annotating ? "annotating" : ""}`}
+                    className={`browser-frame-img ${annotating ? "annotating" : ""} ${pointing ? "pointing" : ""}`}
                     draggable={false}
                     onClick={clickFrame}
                     onPointerDown={beginAnnotation}
@@ -604,15 +616,19 @@ export default function PreviewView() {
                     aria-label="Type into the page"
                   />
                 </div>
-                {(annotating || annotations.length > 0) && (
+                {(annotating || pointing || annotations.length > 0) && (
                   <div className="browser-annotation-editor">
                     <div className="browser-annotation-header">
                       <span aria-live="polite">
-                        {annotations[0]?.width
-                          ? `Selected ${annotationViewportRect(annotations[0], browser.viewport).width}×${annotationViewportRect(annotations[0], browser.viewport).height}`
-                          : "Drag a rectangle over the preview, then add a comment."}
+                        {pointedElement
+                          ? `Pointed at <${pointedElement.tag}> · ${pointedElement.selector}`
+                          : pointing
+                            ? "Click any element in the page to identify it."
+                            : annotations[0]?.width
+                              ? `Selected ${annotationViewportRect(annotations[0], browser.viewport).width}×${annotationViewportRect(annotations[0], browser.viewport).height}`
+                              : "Drag a rectangle over the browser, then add a comment."}
                       </span>
-                      {!annotations[0]?.width && (
+                      {!pointing && !annotations[0]?.width && (
                         <button
                           className="small-btn"
                           onClick={() => setAnnotations([{
@@ -638,16 +654,16 @@ export default function PreviewView() {
                         onChange={(event) => setAnnotations((current) =>
                           current[0] ? [{ ...current[0], note: event.target.value }] : current)}
                         onKeyDown={(event) => {
-                          if (event.key === "Enter" && !event.shiftKey && annotations[0]?.note.trim()) {
+                          if (event.key === "Enter" && !event.shiftKey && (pointedElement || annotations[0]?.note.trim())) {
                             event.preventDefault();
                             void captureToChat();
                           }
                         }}
-                        placeholder="Comment on this area…"
+                        placeholder={pointedElement ? "Optional instruction about this element…" : "Comment on this area…"}
                       />
                       <button
                         className="primary-btn"
-                        disabled={captureBusy || !activeSessionId || !annotations[0]?.note.trim()}
+                        disabled={captureBusy || !activeSessionId || (!pointedElement && !annotations[0]?.note.trim())}
                         onClick={() => void captureToChat()}
                         title={activeSessionId ? "Send the annotated screenshot to the active chat" : "Open a chat session first"}
                       >
@@ -659,6 +675,8 @@ export default function PreviewView() {
                         onClick={() => {
                           setAnnotations([]);
                           setAnnotating(false);
+                          setPointing(false);
+                          setPointedElement(null);
                         }}
                       >
                         Cancel
@@ -670,14 +688,12 @@ export default function PreviewView() {
             ) : (
               <EmptyState title="Connecting to browser" description="Waiting for the first controlled-browser frame." />
             )
-          ) : frameSrc ? (
-            <iframe title="Preview" src={frameSrc} className="preview-frame" />
           ) : (
             <EmptyState
-              title="Preview is inactive"
-              description="Start the project dev server and mirror it in this pane."
-              actionLabel="Start"
-              onAction={() => void start()}
+              title="Internal browser"
+              description="Open any HTTP(S) page in a browser shared with the active agent and its subagents."
+              actionLabel={cap?.available ? "Open browser" : undefined}
+              onAction={cap?.available ? () => void openBrowser() : undefined}
             />
           )}
         </div>
@@ -691,9 +707,8 @@ export default function PreviewView() {
               ))}
             </div>
             <div className="inspector-body">
-              <div className="stat-row"><span className="k">URL</span><span className="mono">{browserMode ? browser?.url : host || "—"}</span></div>
-              <div className="stat-row"><span className="k">Port</span><span className="mono">{state.port ?? "—"}</span></div>
-              <div className="stat-row"><span className="k">Status</span><span>{statusCopy}</span></div>
+              <div className="stat-row"><span className="k">URL</span><span className="mono">{browser?.url ?? "—"}</span></div>
+              <div className="stat-row"><span className="k">Status</span><span>{browser?.status ?? "closed"}</span></div>
               {browserMode && <div className="stat-row"><span className="k">Engine</span><span>{browser?.engine}{agentPaused ? " · agent paused" : ""}</span></div>}
               {tab === "snapshot" && (
                 browserMode ? (

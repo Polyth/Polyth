@@ -29,7 +29,7 @@ export const PANE_OF_CAPABILITY: Partial<Record<string, string>> = {
   files: "files",
   git: "git",
   terminal: "terminal",
-  preview: "preview",
+  browser: "browser",
 };
 
 /** Rail surface opened by a capability (panels rather than full views). */

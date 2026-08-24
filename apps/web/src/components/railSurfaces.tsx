@@ -170,7 +170,7 @@ registerSurface({
   presentation: pane({ defaultRatio: 0.6, minWidth: 380, preferredMaxWidth: 760, escape: "content" }),
 });
 registerSurface({
-  id: "preview", title: "Preview", capabilityId: "preview", order: 4, icon: Icon.globe,
+  id: "browser", title: "Browser", capabilityId: "browser", order: 4, icon: Icon.globe,
   component: PreviewView, presentation: pane({ defaultRatio: 0.45, minWidth: 380, preferredMaxWidth: 760 }),
 });
 
