@@ -348,7 +348,7 @@ test("header and rail render configured capabilities without duplicate disclosur
   assert.ok(header.includes("useResolvedCapabilities"), "header resolves configured top-rail capabilities");
   assert.ok(!header.includes("CapabilityMenu"), "header does not restore the removed disclosure");
   assert.ok(!rail.includes("CapabilityMenu"), "rail dropped its duplicate More-tools picker");
-  assert.ok(rail.includes("configuredRailSurfaces"), "rail renders only configured tool buttons");
+  assert.ok(rail.includes("configuredRailButtons"), "rail renders only configured tool buttons");
   assert.ok(rail.includes("reorderRail"), "rail arranges surfaces by drag-reorder instead");
   assert.ok(!store.includes("moreOpen:"), "dead global More-tools state stays removed");
   assert.ok(!store.includes("setMoreOpen"), "dead global More-tools action stays removed");
