@@ -6,7 +6,7 @@ import {
 import { highlight, langOf } from "../highlight.ts";
 import { Icon } from "../icons.tsx";
 import { MarkdownDoc } from "../markdown.tsx";
-import { splitPrDiff } from "../prDiff.ts";
+import { parsePrDiffLines, splitPrDiff } from "../prDiff.ts";
 import { friendlyError } from "../settings.ts";
 import { useStore } from "../store.ts";
 import EmptyState from "./EmptyState.tsx";
@@ -18,10 +18,38 @@ type PrSection = "detail" | "files" | "diff" | "checks" | "comments";
  * Markdown parsers intentionally do not execute HTML, but those comments
  * should remain hidden rather than appearing as literal marker text. */
 export function stripCursorMarkers(markdown: string): string {
-  return markdown
-    .replace(/<!--[\s\S]*?-->/g, "")
-    .replace(/^\s*(?:(?:begin|end|start|stop)[_\s-]+cursor(?:[_\s:-].*)?|cursor(?:_[a-z0-9-]+)+)\s*$/gim, "")
-    .trim();
+  const stripOutsideFence = (text: string): string => text
+    .replace(/<!--[\s\S]*?-->/g, (comment) => {
+      const words = comment.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim().split(/\s+/);
+      const cursor = words.includes("cursor");
+      const marker = words.some((word) =>
+        ["metadata", "marker", "review", "footer", "agent", "generated", "start", "end", "begin", "stop"].includes(word));
+      return cursor && marker ? "" : comment;
+    })
+    .replace(/^\s*(?:(?:begin|end|start|stop)[_\s-]+cursor(?:[_\s:-].*)?|cursor(?:_[a-z0-9-]+)+)\s*$/gim, "");
+
+  const output: string[] = [];
+  let outside: string[] = [];
+  let fence: { char: string; length: number } | null = null;
+  const flushOutside = () => {
+    if (outside.length > 0) output.push(stripOutsideFence(outside.join("\n")));
+    outside = [];
+  };
+  for (const line of markdown.split("\n")) {
+    const marker = /^\s*(`{3,}|~{3,})/.exec(line)?.[1];
+    if (!fence && marker) {
+      flushOutside();
+      fence = { char: marker[0]!, length: marker.length };
+      output.push(line);
+    } else if (fence) {
+      output.push(line);
+      if (marker?.[0] === fence.char && marker.length >= fence.length) fence = null;
+    } else {
+      outside.push(line);
+    }
+  }
+  flushOutside();
+  return output.join("\n").trim();
 }
 
 function ChecksRing({ summary }: { summary: ChecksSummaryDto }) {
@@ -49,38 +77,25 @@ function CheckRow({ check }: { check: PrCheckDto }) {
 }
 
 function DiffLines({ diff, path }: { diff: string; path: string }) {
-  let oldLine = 0;
-  let newLine = 0;
   return (
     <div className="git-diff pr-diff" role="table" aria-label={`Patch for ${path}`}>
-      {diff.split("\n").map((line, index) => {
-        const hunk = /^@@ -(\d+)(?:,\d+)? \+(\d+)(?:,\d+)? @@/.exec(line);
-        if (hunk) {
-          oldLine = Number(hunk[1]);
-          newLine = Number(hunk[2]);
-          return <div key={index} className="git-diff-line diff-hunk" role="row" aria-label={line}><span className="pr-diff-ln" aria-hidden="true" /><code role="cell">{line}</code></div>;
-        }
-        const metadata = line.startsWith("diff --git ") || line.startsWith("index ") || line.startsWith("--- ") || line.startsWith("+++ ") || line.startsWith("new file ") || line.startsWith("deleted file ") || line.startsWith("similarity ");
-        let oldShown = "";
-        let newShown = "";
-        let className = metadata ? "diff-meta" : "";
-        if (!metadata && line.startsWith("+")) {
-          newShown = String(newLine++);
-          className = "diff-add";
-        } else if (!metadata && line.startsWith("-")) {
-          oldShown = String(oldLine++);
-          className = "diff-del";
-        } else if (!metadata && line !== "\\ No newline at end of file") {
-          oldShown = String(oldLine++);
-          newShown = String(newLine++);
-        }
+      {parsePrDiffLines(diff).map((row, index) => {
+        const oldShown = row.oldLine === undefined ? "" : String(row.oldLine);
+        const newShown = row.newLine === undefined ? "" : String(row.newLine);
+        const className = row.kind === "hunk"
+          ? "diff-hunk"
+          : row.kind === "add"
+            ? "diff-add"
+            : row.kind === "delete"
+              ? "diff-del"
+              : row.kind === "context" ? "" : "diff-meta";
         const lineLabel = oldShown && newShown
           ? `old line ${oldShown}, new line ${newShown}`
           : oldShown ? `old line ${oldShown}` : newShown ? `new line ${newShown}` : "diff metadata";
         return (
           <div key={index} className={`git-diff-line ${className}`} role="row" aria-label={lineLabel}>
             <span className="pr-diff-ln" aria-hidden="true"><i>{oldShown}</i><i>{newShown}</i></span>
-            <code role="cell" dangerouslySetInnerHTML={{ __html: highlight(line, langOf(path)) }} />
+            <code role="cell" dangerouslySetInnerHTML={{ __html: highlight(row.text, langOf(path)) }} />
           </div>
         );
       })}

@@ -473,6 +473,19 @@ const blend = (fg: string, bg: string, amount: number): string => {
   return `#${to2(mix(fr, br))}${to2(mix(fg_, bg_))}${to2(mix(fb, bb))}`;
 };
 
+/** Signal foreground adjusted against the real 18% wash on every app surface. */
+const signalOnWash = (signal: string, surfaces: string[], lighten: boolean): string => {
+  let lightness = rgbToHsl(signal)[2];
+  let color = signal;
+  const backgrounds = surfaces.map((surface) => blend(signal, surface, 0.18));
+  while (backgrounds.some((background) => contrastRatio(color, background) < 4.5)
+    && lightness > 0.02 && lightness < 0.98) {
+    lightness += lighten ? 0.01 : -0.01;
+    color = withLightness(signal, lightness);
+  }
+  return color;
+};
+
 /** Resolve a theme to the CSS custom properties it sets. One place derives
  *  every wash/hairline/rgb variant so custom themes only supply base roles. */
 export function themeCssVars(spec: ThemeSpec): Record<string, string> {
@@ -480,6 +493,7 @@ export function themeCssVars(spec: ThemeSpec): Record<string, string> {
   const dark = spec.appearance === "dark";
   const accentRgb = hexToRgb(t.accent).join(", ");
   const amberRgb = hexToRgb(t.amber).join(", ");
+  const surfaces = [t.bg, t.panel, t.elevated, t.raised, t.sunken, t.inputBg];
   return {
     "--bg": t.bg, "--panel": t.panel, "--elevated": t.elevated, "--raised": t.raised,
     "--sunken": t.sunken, "--input-bg": t.inputBg,
@@ -492,7 +506,10 @@ export function themeCssVars(spec: ThemeSpec): Record<string, string> {
     "--accent-line": rgba(t.accent, dark ? 0.32 : 0.4),
     "--focus-wash": rgba(t.accent, 0.1),
     "--accent-rgb": accentRgb,
-    "--green": t.green, "--amber": t.amber, "--amber-rgb": amberRgb,
+    "--green": t.green, "--amber": t.amber,
+    "--green-on-wash": signalOnWash(t.green, surfaces, dark),
+    "--amber-on-wash": signalOnWash(t.amber, surfaces, dark),
+    "--amber-rgb": amberRgb,
     "--red": t.red, "--blue": t.blue, "--purple": t.purple,
     "--red-ink": readableInk(t.red),
     "--surface-overlay": rgba(t.text, dark ? 0.022 : 0.025),

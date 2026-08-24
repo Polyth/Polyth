@@ -60,7 +60,7 @@ function GithubCard({ item, kind, onOpen, onStartSession }: {
         </a>
         <div className="gh-card-meta">
           <span>by <strong>{item.author}</strong></span>
-          {pr && <span className="gh-branch mono"><Icon.branch /> {pr.headRefName}</span>}
+          {pr && <span className="gh-branch mono" title={pr.headRefName}><Icon.branch /><span>{pr.headRefName}</span></span>}
         </div>
       </div>
       <div className="gh-card-actions">
@@ -232,12 +232,14 @@ export default function GithubView() {
           <section className="gh-repo-card">
             <span className="gh-repo-icon"><Icon.github /></span>
             <div className="gh-repo-copy">
-              <a className="gh-repo-name" href={status.repo.url} target="_blank" rel="noreferrer">{status.repo.owner}/{status.repo.name} <Icon.external /><span className="sr-only">(opens on GitHub)</span></a>
-              <span className="muted">{status.repo.description || "GitHub repository"}</span>
+              <a className="gh-repo-name" href={status.repo.url} target="_blank" rel="noreferrer" title={`${status.repo.owner}/${status.repo.name}`}>
+                <span>{status.repo.owner}/{status.repo.name}</span><Icon.external /><span className="sr-only">(opens on GitHub)</span>
+              </a>
+              <span className="muted" title={status.repo.description || "GitHub repository"}>{status.repo.description || "GitHub repository"}</span>
             </div>
             <div className="gh-repo-meta">
               <span className="tag">{status.repo.isPrivate ? "Private" : "Public"}</span>
-              <span className="tag mono"><Icon.branch /> {status.repo.defaultBranch}</span>
+              <span className="tag mono gh-default-branch" title={status.repo.defaultBranch}><Icon.branch /><span>{status.repo.defaultBranch}</span></span>
             </div>
           </section>
 

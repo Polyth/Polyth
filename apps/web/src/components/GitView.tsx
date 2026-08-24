@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { api, type GitBranches, type GitFileEntry, type GitGraphEntry, type GitStash, type Worktree } from "../api.ts";
+import { api, type GitBranches, type GitFileEntry, type GitGraphEntry, type GitStash, type GitStatus, type Worktree } from "../api.ts";
 import { layoutGraph, type GraphRow } from "../git/graph.ts";
 import { setGitPrefs, splitDiffRows, useGitPrefs } from "../gitPrefs.ts";
 import { refreshGitStatus, useGitStatus } from "../gitStatusStore.ts";
 import { highlight, langOf } from "../highlight.ts";
 import { Icon } from "../icons.tsx";
+import { splitPrDiff } from "../prDiff.ts";
 import {
   commentState, hunkDigest, loadComments, saveComments, splitHunks,
   type DiffHunk, type ReviewComment,
@@ -41,6 +42,18 @@ const STATUS_LETTER: Record<string, { letter: string; cls: string; label: string
 
 const GRAPH_PAGE = 40;
 const LANE_W = 12;
+
+type GitSelection = { path: string; staged: boolean };
+
+/** Keep an open diff attached to the file's current staged/unstaged location. */
+export function reconcileGitSelection(selection: GitSelection | null, status: GitStatus): GitSelection | null {
+  if (!selection) return null;
+  const files = [...status.conflicted, ...status.staged, ...status.unstaged, ...status.untracked];
+  const exact = files.find((file) => file.path === selection.path && file.staged === selection.staged);
+  const moved = files.find((file) => file.path === selection.path);
+  const next = exact ?? moved;
+  return next ? { path: next.path, staged: next.staged } : null;
+}
 
 function fileLetter(file: GitFileEntry): { letter: string; cls: string; label: string } {
   const hit = STATUS_LETTER[file.status];
@@ -148,7 +161,7 @@ export default function GitView() {
   const [graphDone, setGraphDone] = useState(false);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState("");
-  const [selected, setSelected] = useState<{ path: string; staged: boolean } | null>(null);
+  const [selected, setSelected] = useState<GitSelection | null>(null);
   const [diff, setDiff] = useState("");
   const [diffLoading, setDiffLoading] = useState(false);
   const [diffError, setDiffError] = useState("");
@@ -182,19 +195,20 @@ export default function GitView() {
   const [branchLimits, setBranchLimits] = useState<Record<BranchGroup, number>>({ local: 30, remote: 30 });
   const [confirmRequest, setConfirmRequest] = useState<ConfirmRequest | null>(null);
 
-  const refresh = useCallback(async (showLoading = false) => {
-    if (!projectId) return;
+  const refresh = useCallback(async (showLoading = false): Promise<GitStatus | null> => {
+    if (!projectId) return null;
     if (showLoading) setLoading(true);
     setLoadError("");
+    let nextStatus: GitStatus | null = null;
     try {
-      const nextStatus = await refreshGitStatus(projectId, sessionId);
+      nextStatus = await refreshGitStatus(projectId, sessionId);
       if (!nextStatus) throw new Error("The Git service did not respond.");
       if (nextStatus.isRepo === false) {
         setBranches({ current: null, branches: [] });
         setTrees([]);
         setGraph([]);
         setStashes([]);
-        return;
+        return nextStatus;
       }
       const [nextBranches, nextTrees, nextGraph, nextStashes] = await Promise.all([
         api.gitBranches(projectId, sessionId ?? undefined),
@@ -213,6 +227,7 @@ export default function GitView() {
     } finally {
       setLoading(false);
     }
+    return nextStatus;
   }, [projectId, sessionId]);
 
   useEffect(() => {
@@ -280,7 +295,12 @@ export default function GitView() {
     setBusy(true);
     try {
       await action();
-      await refresh();
+      const nextStatus = await refresh();
+      if (nextStatus) {
+        const nextSelected = reconcileGitSelection(selected, nextStatus);
+        setSelected(nextSelected);
+        if (selected && !nextSelected) setMobileDetail(false);
+      }
     } catch (cause) {
       setUiError(friendlyError("Couldn’t update the repository", cause));
     } finally {
@@ -355,6 +375,7 @@ export default function GitView() {
   }, [graph, graphRows, graphQuery, graphRef]);
   const fileComments = comments.filter((comment) => comment.path === selected?.path);
   const selectedCommit = graph.find((commit) => commit.sha === commitSel);
+  const commitDiffPath = useMemo(() => splitPrDiff(commitDiff)[0]?.path, [commitDiff]);
   const { add: addCount, del: delCount } = diffStat(diff);
 
   if (!projectId) return <EmptyState title="No project selected" description="Open a project to inspect its source control." />;
@@ -434,6 +455,13 @@ export default function GitView() {
           {remoteStatus.error
             ? `${remoteStatus.step} failed: ${remoteStatus.error}`
             : `${remoteStatus.step[0]!.toUpperCase()}${remoteStatus.step.slice(1)} completed.`}
+        </div>
+      )}
+
+      {loadError && status && (
+        <div className="source-inline-status error" role="alert">
+          <span>{loadError}</span>
+          <button className="small-btn" disabled={loading} onClick={() => void refresh(true)}>Retry</button>
         </div>
       )}
 
@@ -627,7 +655,7 @@ export default function GitView() {
           </div>
 
           {status && status.staged.length > 0 && (
-            <section className="git-commit-composer" aria-label="Commit staged changes">
+            <section className={`git-commit-composer${mobileDetail ? " detail-open" : ""}`} aria-label="Commit staged changes">
               <div className="git-commit-heading">
                 <strong>Commit {status.staged.length} staged {status.staged.length === 1 ? "file" : "files"}</strong>
                 <span className="muted">Changes are committed to <span className="mono">{status.branch || "HEAD"}</span></span>
@@ -665,7 +693,7 @@ export default function GitView() {
               {branchChips.map((ref) => <button key={ref} className={graphRef === ref ? "active" : ""} aria-pressed={graphRef === ref} onClick={() => setGraphRef(ref)}>{ref}</button>)}
             </div>
             <div className="git-graph">
-              {visibleGraph.length === 0 && <div className="git-filter-empty">No commits match this filter.</div>}
+              {!loadError && visibleGraph.length === 0 && <div className="git-filter-empty">No commits match this filter.</div>}
               {visibleGraph.map(({ commit, row }) => (
                 <button key={commit.sha} className={`git-graph-row ${commitSel === commit.sha ? "selected" : ""}`} aria-current={commitSel === commit.sha ? "true" : undefined} onClick={() => {
                   setCommitSel(commit.sha);
@@ -705,7 +733,7 @@ export default function GitView() {
                     <span>{commitDiffError}</span>
                     <button className="small-btn" onClick={() => setCommitDiffRetry((value) => value + 1)}>Retry</button>
                   </div>
-                ) : <DiffContent diff={commitDiff} split={prefs.layout === "split"} wrap={prefs.wrap} />}
+                ) : <DiffContent diff={commitDiff} path={commitDiffPath} split={prefs.layout === "split"} wrap={prefs.wrap} />}
               </>
             )}
           </section>
@@ -769,7 +797,7 @@ export default function GitView() {
                     </button>
                     {!closed && (
                       <div className="git-branch-list">
-                        {rows.length === 0 && <div className="git-group-empty">{normalized ? `No matching ${label.toLowerCase()} branches` : `No ${label.toLowerCase()} branches`}</div>}
+                        {!loadError && rows.length === 0 && <div className="git-group-empty">{normalized ? `No matching ${label.toLowerCase()} branches` : `No ${label.toLowerCase()} branches`}</div>}
                         {shown.map((branch) => (
                           <button key={branch.name} className="git-branch-row" disabled={busy} onClick={() => void run(() => api.gitCheckout(projectId, branch.name, sessionId ?? undefined))}>
                             <Icon.branch /><span className="mono git-branch-row-name" title={branch.name}>{branch.name}</span><span className="header-spacer" /><span className="muted">Checkout</span>
@@ -788,7 +816,7 @@ export default function GitView() {
             </section>
             <section className="git-resource-card">
               <div className="stat-label">Worktrees ({trees.length})</div>
-              {trees.length === 0 && <EmptyState title="No linked worktrees" description="New sessions currently run in the project root." />}
+              {!loadError && trees.length === 0 && <EmptyState title="No linked worktrees" description="New sessions currently run in the project root." />}
               <div className="git-worktree-list">
                 {trees.map((tree) => (
                   <article key={tree.path} className="git-wt-card">
@@ -831,7 +859,7 @@ export default function GitView() {
               setSelected(null);
             })}>Stash {all.length > 0 ? `${all.length} ${all.length === 1 ? "file" : "files"}` : "changes"}</button>
           </div>
-          {stashes.length === 0 ? <EmptyState title="No stashes" description="Saved work-in-progress changes will appear here." /> : (
+          {!loadError && stashes.length === 0 ? <EmptyState title="No stashes" description="Saved work-in-progress changes will appear here." /> : stashes.length > 0 ? (
             <div className="git-stash-list">
               {stashes.map((stash) => (
                 <article className="git-stash-card" key={stash.ref}>
@@ -851,7 +879,7 @@ export default function GitView() {
                 </article>
               ))}
             </div>
-          )}
+          ) : null}
         </div>
       )}
     </div>

@@ -10,6 +10,10 @@ const { summarizeUnifiedDiff } = await import("../src/components/PendingChangesB
 const { stripCursorMarkers } = await import("../src/components/PullRequestView.tsx");
 const { shellCardCopyText } = await import("../src/components/Timeline.tsx");
 const { modelModalities } = await import("../src/components/ModelPicker.tsx");
+const { parseMarkdown } = await import("../src/markdown/parse.ts");
+const { renderBlocks } = await import("../src/markdown/render.tsx");
+const { createElement, Fragment } = await import("react");
+const { renderToStaticMarkup } = await import("react-dom/server");
 
 const read = (path: string) => readFileSync(resolve(import.meta.dirname, path), "utf8");
 
@@ -28,17 +32,39 @@ test("workspace diff totals count content without file headers", () => {
   assert.deepEqual(summarizeUnifiedDiff(diff), { additions: 2, deletions: 1 });
 });
 
-test("pull request markdown removes hidden Cursor and HTML markers", () => {
+test("pull request markdown removes Cursor markers but preserves other comments and fenced code", () => {
   assert.equal(
     stripCursorMarkers([
       "<!-- CURSOR_METADATA_START -->",
       "## Summary",
       "- keeps **GFM** content",
-      "<!-- internal note that must stay hidden -->",
+      "<!-- internal note preserved -->",
       "CURSOR_REVIEW_MARKER",
+      "```html",
+      "<!-- CURSOR_METADATA_START -->",
+      "```",
     ].join("\n")),
-    "## Summary\n- keeps **GFM** content",
+    [
+      "## Summary",
+      "- keeps **GFM** content",
+      "<!-- internal note preserved -->",
+      "",
+      "```html",
+      "<!-- CURSOR_METADATA_START -->",
+      "```",
+    ].join("\n"),
   );
+});
+
+test("GFM task-list items render as checked and unchecked controls", () => {
+  const blocks = parseMarkdown("- [x] shipped\n- [ ] follow up");
+  assert.equal(blocks[0]?.kind, "list");
+  if (blocks[0]?.kind !== "list") throw new Error("expected list");
+  assert.deepEqual(blocks[0].items.map((item) => item.checked), [true, false]);
+  const html = renderToStaticMarkup(createElement(Fragment, null, ...renderBlocks(blocks, "tasks")));
+  assert.match(html, /class="md-task-list"/);
+  assert.match(html, /type="checkbox" checked="" disabled=""/);
+  assert.doesNotMatch(html, /\[x\]|\[ \]/);
 });
 
 test("shell card copy combines the command and its result", () => {

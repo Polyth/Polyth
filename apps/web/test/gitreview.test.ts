@@ -4,7 +4,7 @@ import assert from "node:assert";
 import { layoutGraph } from "../src/git/graph.ts";
 import { commentState, hunkDigest, splitHunks, type ReviewComment } from "../src/review/anchors.ts";
 import { GIT_PREFS_KEY, getGitPrefs, parseGitPrefs, setGitPrefs, splitDiffRows } from "../src/gitPrefs.ts";
-import { splitPrDiff } from "../src/prDiff.ts";
+import { parsePrDiffLines, splitPrDiff } from "../src/prDiff.ts";
 
 test("graph: linear history stays in lane 0", () => {
   const rows = layoutGraph([
@@ -149,4 +149,53 @@ test("PR diff keeps deletion paths and handles empty patches", () => {
   ].join("\n"));
   assert.equal(files[0]!.path, "obsolete.txt");
   assert.deepEqual(splitPrDiff(""), []);
+});
+
+test("PR diff handles quoted rename and mode-only metadata without inventing line numbers", () => {
+  const files = splitPrDiff([
+    'diff --git "a/docs/old name.md" "b/docs/new name.md"',
+    "similarity index 100%",
+    "rename from docs/old name.md",
+    "rename to docs/new name.md",
+    'diff --git "a/bin/tool script" "b/bin/tool script"',
+    "old mode 100644",
+    "new mode 100755",
+  ].join("\n"));
+  assert.deepEqual(
+    files.map(({ path, previousPath }) => ({ path, previousPath })),
+    [
+      { path: "docs/new name.md", previousPath: "docs/old name.md" },
+      { path: "bin/tool script", previousPath: undefined },
+    ],
+  );
+
+  const rows = parsePrDiffLines([
+    "diff --git a/a.ts b/a.ts",
+    "old mode 100644",
+    "new mode 100755",
+    "--- a/a.ts",
+    "+++ b/a.ts",
+    "@@ -4,2 +4,2 @@",
+    " context",
+    "-old",
+    "+new",
+    "\\ No newline at end of file",
+    "",
+  ].join("\n"));
+  assert.deepEqual(
+    rows.map(({ kind, oldLine, newLine }) => ({ kind, oldLine, newLine })),
+    [
+      { kind: "meta", oldLine: undefined, newLine: undefined },
+      { kind: "meta", oldLine: undefined, newLine: undefined },
+      { kind: "meta", oldLine: undefined, newLine: undefined },
+      { kind: "meta", oldLine: undefined, newLine: undefined },
+      { kind: "meta", oldLine: undefined, newLine: undefined },
+      { kind: "hunk", oldLine: undefined, newLine: undefined },
+      { kind: "context", oldLine: 4, newLine: 4 },
+      { kind: "delete", oldLine: 5, newLine: undefined },
+      { kind: "add", oldLine: undefined, newLine: 5 },
+      { kind: "sentinel", oldLine: undefined, newLine: undefined },
+      { kind: "meta", oldLine: undefined, newLine: undefined },
+    ],
+  );
 });
