@@ -212,7 +212,7 @@ test("narrow source-control shell keeps every change group above the commit comp
     for (const group of changeGroups) {
       const selector = `#${group.id}-file-3`;
       await page.locator(selector).scrollIntoViewIfNeeded();
-      const hit = await page.evaluate((targetSelector) => {
+      const targetHit: { id?: string; insidePane: boolean; aboveComposer: boolean } = await page.evaluate((targetSelector) => {
         const target = document.querySelector<HTMLElement>(targetSelector)!;
         const pane = document.querySelector(".git-master-pane")!.getBoundingClientRect();
         const composer = document.querySelector("#composer")!.getBoundingClientRect();
@@ -225,9 +225,9 @@ test("narrow source-control shell keeps every change group above the commit comp
           aboveComposer: targetBounds.bottom <= composer.top,
         };
       }, selector);
-      assert.equal(hit.id, `${group.id}-file-3`, `${width}px ${group.title} row must own its hit target`);
-      assert.equal(hit.insidePane, true, `${width}px ${group.title} row must scroll inside the list`);
-      assert.equal(hit.aboveComposer, true, `${width}px ${group.title} row must remain above the composer`);
+      assert.equal(targetHit.id, `${group.id}-file-3`, `${width}px ${group.title} row must own its hit target`);
+      assert.equal(targetHit.insidePane, true, `${width}px ${group.title} row must scroll inside the list`);
+      assert.equal(targetHit.aboveComposer, true, `${width}px ${group.title} row must remain above the composer`);
       await page.click(selector);
       assert.equal(await page.evaluate(() => document.body.dataset.lastTap), `${group.id}-file-3`);
     }
