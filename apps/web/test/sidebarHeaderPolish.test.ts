@@ -45,8 +45,9 @@ test("header and composer controls are configurable and purpose-specific", async
     source("../src/components/settings/WidgetsPage.tsx"),
     source("../src/components/ChatMetrics.tsx"),
   ]);
-  assert.match(header, /const primaries = resolved\.filter\(\(c\) => c\.tier === "primary"/);
-  assert.match(header, /primaries\.map/);
+  assert.match(header, /const primaries = resolved\.filter\(\(c\) =>[\s\S]*?c\.tier === "primary"/);
+  assert.match(header, /topRail\.map/);
+  assert.match(header, /const terminal = resolved\.find/);
   assert.doesNotMatch(header, /const rest = /);
   assert.doesNotMatch(composer, /Modalities:/);
   assert.match(composer, /aria-label="Add files"/);

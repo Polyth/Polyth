@@ -339,7 +339,11 @@ test("header renders primary capabilities while the rail renders configured tool
   const store = await read("../src/store.ts");
   assert.ok(header.includes("function CapabilityNav"), "header owns the primary capability navigation");
   assert.ok(header.includes('c.tier === "primary"'), "header limits its capability rail to primary tools");
-  assert.ok(header.includes("primaries.map"), "header renders the resolved primary capability list");
+  assert.ok(header.includes("topRail.map"), "header renders the resolved top capability rail");
+  assert.ok(
+    header.includes('c.descriptor.id === "terminal" && c.descriptor.available()'),
+    "Terminal remains a permanent top-rail launcher",
+  );
   assert.ok(!header.includes("CapabilityMenu"), "header creates no implicit overflow disclosure");
   assert.ok(rail.includes("configuredRailButtons"), "rail renders only configured tool buttons");
   assert.ok(rail.includes('capability.descriptor.id === "terminal"'), "Terminal remains a guaranteed rail launcher");
