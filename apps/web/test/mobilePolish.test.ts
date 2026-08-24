@@ -12,7 +12,6 @@ const { shellCardCopyText } = await import("../src/components/Timeline.tsx");
 const { modelModalities } = await import("../src/components/ModelPicker.tsx");
 const { parseMarkdown } = await import("../src/markdown/parse.ts");
 const { renderBlocks } = await import("../src/markdown/render.tsx");
-const { MarkdownDoc } = await import("../src/markdown.tsx");
 const { createElement, Fragment } = await import("react");
 const { renderToStaticMarkup } = await import("react-dom/server");
 
@@ -51,7 +50,7 @@ test("pull request markdown hides HTML comments and the Cursor footer outside co
   assert.doesNotMatch(cleaned, /ordinary internal note|CURSOR_REVIEW_MARKER|cursor_ref=pr_footer|Open in Web/);
   assert.match(cleaned, /<!-- shown as a code example -->/);
 
-  const html = renderToStaticMarkup(createElement(MarkdownDoc, { text: cleaned, keyBase: "pr-body" }));
+  const html = renderToStaticMarkup(createElement(Fragment, null, ...renderBlocks(parseMarkdown(cleaned), "pr-body")));
   assert.doesNotMatch(html, /ordinary internal note|CURSOR_REVIEW_MARKER|Open in Web/);
   assert.match(html, /shown as a code example/);
 });
