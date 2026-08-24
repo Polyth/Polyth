@@ -5989,19 +5989,19 @@ body[data-quick-actions="false"] [data-widget-id="core.quick-actions"] { display
   border: 1px solid color-mix(in srgb, var(--green) 30%, var(--border-soft));
   border-radius: 999px;
   background: var(--green-wash);
-  color: var(--green);
+  color: var(--text);
   font-size: 10.5px;
   font-weight: 600;
 }
 .usage-hero-status > span.warning {
   border-color: color-mix(in srgb, var(--amber) 30%, var(--border-soft));
   background: var(--amber-wash);
-  color: var(--amber);
+  color: var(--text);
 }
 .usage-hero-status > span.error {
   border-color: color-mix(in srgb, var(--red) 30%, var(--border-soft));
   background: var(--red-wash);
-  color: var(--red);
+  color: var(--text);
 }
 .usage-hero-status > span.neutral,
 .usage-hero-status > span.loading {
@@ -6014,8 +6014,11 @@ body[data-quick-actions="false"] [data-widget-id="core.quick-actions"] { display
   width: 6px;
   height: 6px;
   border-radius: 50%;
-  background: currentColor;
+  background: var(--green);
 }
+.usage-hero-status > span.warning i { background: var(--amber); }
+.usage-hero-status > span.error i { background: var(--red); }
+.usage-hero-status > span.neutral i { background: var(--muted); }
 .usage-hero-status > span.loading svg {
   width: 12px;
   height: 12px;
@@ -6078,7 +6081,8 @@ body[data-quick-actions="false"] [data-widget-id="core.quick-actions"] { display
 .usage-layout-control button.active,
 .usage-metric-toggle button.active {
   background: var(--accent-wash);
-  color: var(--accent);
+  color: var(--text);
+  font-weight: 650;
   box-shadow: var(--inset-hi);
 }
 .usage-view-tabs svg,
@@ -6235,8 +6239,8 @@ body[data-quick-actions="false"] [data-widget-id="core.quick-actions"] { display
   font-weight: 600;
   white-space: nowrap;
 }
-.usage-trend-up > span:first-child { color: var(--amber); }
-.usage-trend-down > span:first-child { color: var(--green); }
+.usage-trend-up > span:last-child,
+.usage-trend-down > span:last-child { color: var(--text-dim); }
 .usage-trend-flat,
 .usage-trend-none { color: var(--faint); font-weight: 500; }
 .usage-trend.compact { font-size: 9.5px; }
@@ -6532,17 +6536,19 @@ body[data-quick-actions="false"] [data-widget-id="core.quick-actions"] { display
   border: 1px solid color-mix(in srgb, var(--green) 28%, var(--border-soft));
   border-radius: 999px;
   background: var(--green-wash);
-  color: var(--green);
+  color: var(--text);
   font-size: 9.5px;
   font-weight: 600;
 }
-.usage-status-pill i { width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
-.usage-status-pill.stale { border-color: color-mix(in srgb, var(--amber) 28%, var(--border-soft)); background: var(--amber-wash); color: var(--amber); }
+.usage-status-pill i { width: 5px; height: 5px; border-radius: 50%; background: var(--green); }
+.usage-status-pill.stale { border-color: color-mix(in srgb, var(--amber) 28%, var(--border-soft)); background: var(--amber-wash); color: var(--text); }
+.usage-status-pill.stale i { background: var(--amber); }
 .usage-status-pill.session-only {
   border-color: var(--border);
   background: var(--sunken);
-  color: var(--muted);
+  color: var(--text-dim);
 }
+.usage-status-pill.session-only i { background: var(--muted); }
 .usage-provider-empty-row td { height: 84px; color: var(--faint); text-align: center; }
 .usage-source-badge {
   display: inline-flex;
@@ -6599,7 +6605,7 @@ body[data-quick-actions="false"] [data-widget-id="core.quick-actions"] { display
   margin-left: auto;
   border-color: var(--accent-line);
   background: var(--accent-wash);
-  color: var(--accent);
+  color: var(--text);
   font-size: 10.5px;
 }
 .usage-provider-view-intro button svg { width: 12px; height: 12px; }
@@ -6670,7 +6676,7 @@ body[data-quick-actions="false"] [data-widget-id="core.quick-actions"] { display
   color: var(--muted);
   font-size: 9.5px;
 }
-.usage-provider-detail-card > footer button:hover { border-color: var(--accent-line); background: var(--accent-wash); color: var(--accent); }
+.usage-provider-detail-card > footer button:hover { border-color: var(--accent-line); background: var(--accent-wash); color: var(--text); }
 .usage-provider-detail-card > footer svg { width: 11px; height: 11px; }
 .usage-provider-connect-empty {
   min-height: 250px;

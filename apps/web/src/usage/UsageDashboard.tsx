@@ -97,10 +97,8 @@ const collapseChartSeries = (
 function TrendBadge({ trend, compact = false }: { trend: UsageTrend | null; compact?: boolean }) {
   if (!trend) {
     return (
-      <span
-        className={`usage-trend usage-trend-none${compact ? " compact" : ""}`}
-        aria-label="No prior data"
-      >
+      <span className={`usage-trend usage-trend-none${compact ? " compact" : ""}`}>
+        <span className="sr-only">No prior data</span>
         <span aria-hidden="true">{compact ? "—" : "No prior data"}</span>
       </span>
     );
@@ -111,10 +109,8 @@ function TrendBadge({ trend, compact = false }: { trend: UsageTrend | null; comp
     ? "No change from the previous range"
     : `${rounded} percent ${trend.direction === "up" ? "increase" : "decrease"} from the previous range`;
   return (
-    <span
-      className={`usage-trend usage-trend-${trend.direction}${compact ? " compact" : ""}`}
-      aria-label={accessibleLabel}
-    >
+    <span className={`usage-trend usage-trend-${trend.direction}${compact ? " compact" : ""}`}>
+      <span className="sr-only">{accessibleLabel}</span>
       <span aria-hidden="true">
         {direction} {trend.direction === "flat" ? "0%" : `${rounded}%`}
         {!compact && " vs prior range"}
@@ -603,15 +599,14 @@ function CostPulse({ data }: { data: ReturnType<typeof buildUsageDashboardData> 
 function ProviderStatus({ provider }: { provider: UsageProviderSummary }) {
   const state = !provider.snapshot ? "session-only" : provider.stale ? "stale" : "fresh";
   const label = state === "session-only" ? "Session only" : state === "stale" ? "Stale" : "Fresh";
+  const error = state === "stale" ? provider.snapshot?.error?.message : undefined;
   return (
     <span
       className={`usage-status-pill ${state}`}
-      title={state === "stale" ? provider.snapshot?.error?.message : undefined}
-      aria-label={state === "stale" && provider.snapshot?.error?.message
-        ? `Stale quota feed: ${provider.snapshot.error.message}`
-        : label}
+      title={error}
     >
-      <i />{label}
+      <i aria-hidden="true" />{label}
+      {error && <span className="sr-only"> quota feed: {error}</span>}
     </span>
   );
 }

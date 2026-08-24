@@ -344,3 +344,70 @@ test("resizing an open usage page from desktop to mobile preserves the page", as
 
   await closePage(page);
 });
+
+test("usage labels expose valid names and meet AA text contrast", async () => {
+  const page = await openUsage(1280);
+  const contrastRatios = (selectors: string[]) => page.evaluate((targets) => {
+    type Rgb = { r: number; g: number; b: number };
+    const parse = (value: string): Rgb => {
+      const values = value.match(/[\d.]+/g)?.map(Number) ?? [];
+      return { r: values[0] ?? 0, g: values[1] ?? 0, b: values[2] ?? 0 };
+    };
+    const luminance = ({ r, g, b }: Rgb) => {
+      const channel = (value: number) => {
+        const ratio = value / 255;
+        return ratio <= .03928 ? ratio / 12.92 : ((ratio + .055) / 1.055) ** 2.4;
+      };
+      return .2126 * channel(r) + .7152 * channel(g) + .0722 * channel(b);
+    };
+    const background = (element: Element): Rgb => {
+      for (let current: Element | null = element; current; current = current.parentElement) {
+        const color = getComputedStyle(current).backgroundColor;
+        if (!color.endsWith(", 0)") && color !== "rgba(0, 0, 0, 0)") return parse(color);
+      }
+      return { r: 255, g: 255, b: 255 };
+    };
+    return targets.flatMap((selector) =>
+      Array.from(document.querySelectorAll<HTMLElement>(selector)).map((element) => {
+        const foreground = parse(getComputedStyle(element).color);
+        const light = luminance(foreground);
+        const dark = luminance(background(element));
+        return {
+          selector,
+          text: element.textContent?.trim() ?? "",
+          ratio: (Math.max(light, dark) + .05) / (Math.min(light, dark) + .05),
+        };
+      }));
+  }, selectors);
+
+  assert.equal(await page.locator(".usage-trend[aria-label]").count(), 0);
+  assert.equal(
+    await page.locator(".usage-trend").count(),
+    await page.locator(".usage-trend > .sr-only").count(),
+    "every visual trend needs equivalent screen-reader text",
+  );
+
+  const overviewRatios = await contrastRatios([
+    ".usage-view-tabs button.active",
+    ".usage-range-control button.active",
+    ".usage-layout-control button.active",
+    ".usage-metric-toggle button.active",
+    ".usage-trend-up > span:last-child",
+    ".usage-trend-down > span:last-child",
+  ]);
+  for (const item of overviewRatios) {
+    assert.ok(item.ratio >= 4.5, `${item.selector} "${item.text}" contrast is ${item.ratio.toFixed(2)}:1`);
+  }
+
+  await page.locator(".usage-view-tabs button", { hasText: "Providers" }).click();
+  await page.waitForSelector(".usage-provider-detail-card", { state: "visible" });
+  const providerRatios = await contrastRatios([
+    ".usage-status-pill",
+    ".usage-provider-view-intro button",
+  ]);
+  for (const item of providerRatios) {
+    assert.ok(item.ratio >= 4.5, `${item.selector} "${item.text}" contrast is ${item.ratio.toFixed(2)}:1`);
+  }
+
+  await closePage(page);
+});
