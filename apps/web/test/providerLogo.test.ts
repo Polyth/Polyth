@@ -159,10 +159,10 @@ test("provider surfaces use ProviderLogo without brand palette rules", () => {
     "run-provider-logo",
     "set-provider-logo",
     "usage-legend-logo",
+    "usage-model-logo",
     "usage-provider-mark",
     "usage-provider-mark-large",
     "usage-provider-mark-regular",
-    "usage-provider-mark-small",
   ].sort();
   const bareLogoClasses = providerLogoClassNames();
   assert.deepEqual(bareLogoClasses, expectedLogoClasses, "every ProviderLogo CSS class is audited");
