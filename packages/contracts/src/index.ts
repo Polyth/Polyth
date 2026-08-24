@@ -237,8 +237,13 @@ export interface WorkflowRunNodeDto {
 export interface WorkflowRunDto {
   id: string;
   workflowId: string;
+  /** Owning project and parent log are included for project-wide monitoring. */
+  projectId?: string;
+  parentSessionId?: string;
   name: string;
   input: string;
+  /** Effective options make an honest full-run retry possible after navigation. */
+  options?: Required<WorkflowRunOptionsDto>;
   status: WorkflowRunStatus;
   startedAt: number;
   finishedAt?: number;
@@ -249,8 +254,11 @@ export interface WorkflowRunDto {
 export interface WorkflowRunStartedData {
   runId: string;
   workflowId: string;
+  projectId?: string;
+  parentSessionId?: string;
   name: string;
   input: string;
+  options?: Required<WorkflowRunOptionsDto>;
   startedAt: number;
   layers: string[][];
   nodes: WorkflowRunNodeDto[];

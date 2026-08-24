@@ -117,6 +117,11 @@ test("engine executes layers in order and caps concurrency within a layer", asyn
     ],
   });
   const startedRun = await h.service.start(workflow.id, "parent", "Do work", { maxParallel: 2 });
+  assert.equal(startedRun.projectId, "p");
+  assert.equal(startedRun.parentSessionId, "parent");
+  assert.equal(startedRun.options?.maxParallel, 2);
+  assert.equal(h.service.listRuns("p")[0]?.id, startedRun.id);
+  assert.equal(h.service.listRuns("other").length, 0);
   const run = await terminal(h.service, startedRun.id);
 
   assert.equal(peak, 2);
@@ -125,6 +130,13 @@ test("engine executes layers in order and caps concurrency within a layer", asyn
   assert.deepEqual(run.layers, [["a", "b", "c"], ["final"]]);
   assert.ok(run.nodes.every((entry) => entry.status === "done"));
   assert.equal(h.events[0]?.type, "workflow/run-started");
+  assert.equal(h.events[0]?.data.parentSessionId, "parent");
+  assert.deepEqual(h.events[0]?.data.options, {
+    pipe: "ancestors",
+    permissions: "auto",
+    maxParallel: 2,
+    nodeTimeoutMs: 1_800_000,
+  });
   assert.equal(h.events.at(-1)?.type, "workflow/run-completed");
   assert.ok(h.events.some((event) => event.type === "workflow/node-progress"));
 });

@@ -26,6 +26,12 @@ const wait = (ms: number, signal: AbortSignal): Promise<void> =>
     signal.addEventListener("abort", stopped, { once: true });
   });
 
+const timeoutLabel = (ms: number): string => {
+  if (ms % 60_000 === 0) return `${ms / 60_000} ${ms === 60_000 ? "minute" : "minutes"}`;
+  if (ms % 1_000 === 0) return `${ms / 1_000} ${ms === 1_000 ? "second" : "seconds"}`;
+  return `${ms}ms`;
+};
+
 function eventString(event: SessionEvent, key: string): string | undefined {
   const value = (event.data as JsonObject)[key];
   return typeof value === "string" ? value : undefined;
@@ -66,7 +72,7 @@ export function createWorkflowRunNode(sessions: SessionService): RunNodeFn {
         if (context.signal.aborted) throw abortError();
         if (Date.now() >= deadline) {
           await sessions.abort(sessionId).catch(() => {});
-          throw new Error(`workflow node timed out after ${context.timeoutMs}ms`);
+          throw new Error(`Timed out after ${timeoutLabel(context.timeoutMs)}. Open the child session to review its last activity.`);
         }
 
         const events = await sessions.events(sessionId, afterSeq);

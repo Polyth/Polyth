@@ -1,9 +1,11 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import type { WorkflowRunDto } from "@polyth/contracts";
 import { api } from "../api.ts";
 import { Icon } from "../icons.tsx";
 import { setActiveView, setOverlay, setUiError, useStore } from "../store.ts";
 import { friendlyError } from "../settings.ts";
 import { GoalAttachForm } from "../components/GoalStrip.tsx";
+import WorkflowLauncher from "../components/WorkflowLauncher.tsx";
 import { defineWidgetPlugin, registerWidgetPlugin } from "./catalog.ts";
 
 const SHELL_ACTION_SLOTS = [
@@ -85,18 +87,49 @@ function AutoApproveAction({ context }: { context: Record<string, unknown> }) {
   );
 }
 
-function WorkflowAction() {
-  const active = useStore((state) => state.activeView === "workflow");
+function WorkflowAction({ context }: { context: Record<string, unknown> }) {
+  return (
+    <WorkflowLauncher
+      projectId={typeof context.projectId === "string" ? context.projectId : undefined}
+      sessionId={typeof context.sessionId === "string" ? context.sessionId : undefined}
+      draftText={typeof context.workflowDraftText === "string" ? context.workflowDraftText : ""}
+      consumeDraft={typeof context.consumeWorkflowDraft === "function"
+        ? context.consumeWorkflowDraft as () => void
+        : () => {}}
+    />
+  );
+}
+
+function WorkflowRunIndicator() {
+  const projectId = useStore((state) => state.activeProjectId);
+  const [run, setRun] = useState<WorkflowRunDto | null>(null);
+  useEffect(() => {
+    if (!projectId) {
+      setRun(null);
+      return;
+    }
+    let active = true;
+    const refresh = () => {
+      void api.listWorkflowRuns(projectId)
+        .then((runs) => { if (active) setRun(runs.find((candidate) => candidate.status === "running") ?? null); })
+        .catch(() => {});
+    };
+    refresh();
+    const timer = setInterval(refresh, 1_200);
+    return () => { active = false; clearInterval(timer); };
+  }, [projectId]);
+  if (!run) return null;
+  const done = run.nodes.filter((node) => node.status !== "queued" && node.status !== "running").length;
+  const waiting = run.nodes.some((node) => /awaiting (permission|answer)/i.test(node.activity ?? ""));
   return (
     <button
       type="button"
-      className={`header-action composer-workflow${active ? " on" : ""}`}
+      className={`header-action workflow-run-indicator${waiting ? " waiting" : ""}`}
+      title={waiting ? "Workflow needs your approval" : "Open active workflow"}
       onClick={() => setActiveView("workflow")}
-      title={active ? "Workflows are open" : "Open workflows"}
-      aria-label={active ? "Workflows are open" : "Open workflows"}
-      aria-pressed={active}
     >
-      <Icon.workflow /><span>Workflows</span>
+      <span className="workflow-status-spinner" aria-hidden="true" />
+      <span>{waiting ? "Approval needed" : `${run.name} ${done}/${run.nodes.length}`}</span>
     </button>
   );
 }
@@ -107,7 +140,7 @@ export const WORKFLOW_WIDGET_PLUGIN = defineWidgetPlugin({
   widgets: [{
     id: "workflow.composer-action",
     title: "Workflows",
-    description: "Open the workflow composer.",
+    description: "Choose a workflow and run the current draft, or open the builder.",
     kind: "mini-widget",
     defaultSlot: "composer.trailing",
     supportedSlots: COMPOSER_ACTION_SLOTS,
@@ -116,7 +149,20 @@ export const WORKFLOW_WIDGET_PLUGIN = defineWidgetPlugin({
     resizable: false,
     audience: "simple",
     order: 50,
-    render: () => <WorkflowAction />,
+    render: (context) => <WorkflowAction context={context} />,
+  }, {
+    id: "workflow.active-run",
+    title: "Active workflow",
+    description: "Show active workflow progress and approval needs in the session header.",
+    kind: "mini-widget",
+    defaultSlot: "session.header.actions",
+    supportedSlots: ["session.header.actions", "app.header.actions"],
+    defaultVisible: true,
+    defaultSize: { w: 1, h: 1 },
+    resizable: false,
+    audience: "simple",
+    order: 45,
+    render: () => <WorkflowRunIndicator />,
   }],
 });
 

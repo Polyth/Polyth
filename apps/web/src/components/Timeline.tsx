@@ -61,6 +61,7 @@ import { Icon } from "../icons.tsx";
 import "./messagePinAction.tsx";
 import ProviderLogo from "./ProviderLogo.tsx";
 import { seedMultiRunPrompt } from "../multirunSeed.ts";
+import WorkflowTimelineCard from "./WorkflowTimelineCard.tsx";
 
 /** One announcement per copy/mutation outcome; text is the accessible record,
  *  checkmarks only supplement it. Screen readers ignore repeats, so identical
@@ -1357,6 +1358,7 @@ export default function Timeline({ model }: { model: RenderModel }) {
               />
             )
         ))}
+        {model.workflowRun && <WorkflowTimelineCard run={model.workflowRun} />}
         {/* The dock confirmation sits OUTSIDE the collapsible tail: it must be
             visible even while the reverted items stay folded away. */}
         {confirmRestore && model.rewind && undoneRows.length > 0 && (

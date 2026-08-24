@@ -910,6 +910,13 @@ export default function Composer({
     if (session) setGoalFormOpen(true);
     else setNewSessionGoal((current) => !current);
   };
+  const consumeWorkflowDraft = () => {
+    setText("");
+    inputRef.current?.replaceText("");
+    historyCursor.current = emptyPromptHistoryCursor();
+    const target = sessionIdRef.current;
+    if (target) saveDraft(target, "");
+  };
   // Bounded callbacks let the same configurable action widget live in either
   // composer slot without owning session-creation state.
   const slotContext = {
@@ -922,6 +929,8 @@ export default function Composer({
     toggleAutoApprove,
     goalOn: newSessionGoal,
     toggleGoal,
+    workflowDraftText: text,
+    consumeWorkflowDraft,
   };
   const thinkingItems: PickerItem[] = [
     { id: "", label: "Auto", group: "", detail: "The model's default reasoning effort" },

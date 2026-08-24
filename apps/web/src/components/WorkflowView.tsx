@@ -13,8 +13,9 @@ import { api } from "../api.ts";
 import { modelDisplayName, modelSupportsTextWorkflow } from "../composer/discovery.ts";
 import { openSession } from "../init.ts";
 import { Icon } from "../icons.tsx";
-import { useActiveModel, useStore } from "../store.ts";
+import { showSessionChat, useActiveModel, useStore } from "../store.ts";
 import { layerizeWorkflow, wouldWorkflowCycle } from "../workflowGraph.ts";
+import { takeWorkflowLaunch, type WorkflowLaunchIntent } from "../workflowLaunch.ts";
 import EmptyState from "./EmptyState.tsx";
 
 const uid = (): string =>
@@ -81,6 +82,7 @@ export default function WorkflowView() {
   const agents = useStore((state) => state.agents);
   const eventRun = useActiveModel().workflowRun;
   const [workflows, setWorkflows] = useState<WorkflowDto[]>([]);
+  const [projectRuns, setProjectRuns] = useState<WorkflowRunDto[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [draft, setDraft] = useState<WorkflowDto | null>(null);
   const [runInput, setRunInput] = useState("");
@@ -95,13 +97,20 @@ export default function WorkflowView() {
   const [error, setError] = useState("");
   const loadSequence = useRef(0);
   const actionInFlight = useRef(false);
+  const loadedSelection = useRef<string | null>(null);
+  const launchIntent = useRef<WorkflowLaunchIntent | null>(null);
+  const loadedRun = useRef<WorkflowRunDto | null>(null);
 
   const reload = useCallback(async () => {
     const sequence = ++loadSequence.current;
     if (!projectId) {
       setWorkflows([]);
+      setProjectRuns([]);
       setSelectedId(null);
       setDraft(null);
+      loadedSelection.current = null;
+      launchIntent.current = null;
+      loadedRun.current = null;
       setLoading(false);
       setLoadFailed(false);
       return;
@@ -110,11 +119,26 @@ export default function WorkflowView() {
     setLoadFailed(false);
     setError("");
     try {
-      const next = await api.listWorkflows(projectId);
+      const [next, projectRuns] = await Promise.all([
+        api.listWorkflows(projectId),
+        api.listWorkflowRuns(projectId),
+      ]);
       if (sequence !== loadSequence.current) return;
+      const launch = takeWorkflowLaunch(projectId);
+      const run = launch?.run
+        ?? projectRuns.find((candidate) => candidate.status === "running")
+        ?? projectRuns[0]
+        ?? null;
+      launchIntent.current = launch;
+      loadedRun.current = run;
       setWorkflows(next);
+      setProjectRuns(projectRuns);
       setSelectedId((current) =>
-        current && next.some((workflow) => workflow.id === current)
+        launch?.workflowId && next.some((workflow) => workflow.id === launch.workflowId)
+          ? launch.workflowId
+          : run && next.some((workflow) => workflow.id === run.workflowId)
+            ? run.workflowId
+            : current && next.some((workflow) => workflow.id === current)
           ? current
           : next[0]?.id ?? null);
       setError("");
@@ -134,21 +158,33 @@ export default function WorkflowView() {
 
   useEffect(() => {
     const selected = workflows.find((workflow) => workflow.id === selectedId);
+    if ((selected?.id ?? null) === loadedSelection.current) return;
+    loadedSelection.current = selected?.id ?? null;
     setDraft(selected ? cloneWorkflow(selected) : null);
     setPipe(selected?.defaults?.pipe ?? "ancestors");
     setPermissions(selected?.defaults?.permissions ?? "auto");
     setMaxParallel(String(selected?.defaults?.maxParallel ?? 4));
     setNodeTimeoutSeconds(String(Math.max(1, Math.round((selected?.defaults?.nodeTimeoutMs ?? 1_800_000) / 1_000))));
-    setRunInput("");
-    setLiveRun(null);
-  }, [selectedId, workflows]);
+    const launch = launchIntent.current?.workflowId === selected?.id || (!launchIntent.current?.workflowId && selected)
+      ? launchIntent.current
+      : null;
+    const run = loadedRun.current?.workflowId === selected?.id
+      ? loadedRun.current
+      : projectRuns.find((candidate) => candidate.workflowId === selected?.id) ?? null;
+    setRunInput(launch?.input ?? "");
+    setLiveRun(launch?.run ?? run);
+    launchIntent.current = null;
+    loadedRun.current = null;
+  }, [selectedId, workflows, projectRuns]);
 
   const layers = useMemo(
     () => draft ? layerizeWorkflow(draft) : null,
     [draft],
   );
   const eventRunForDraft = draft && eventRun?.workflowId === draft.id ? eventRun : null;
-  const shownRun = liveRun && eventRunForDraft?.id !== liveRun.id ? liveRun : eventRunForDraft ?? liveRun;
+  const shownRun = liveRun && eventRunForDraft
+    ? eventRunForDraft.startedAt > liveRun.startedAt ? eventRunForDraft : liveRun
+    : liveRun ?? eventRunForDraft;
   const selectedWorkflow = workflows.find((workflow) => workflow.id === selectedId) ?? null;
   const parallelValue = positiveWholeNumber(maxParallel, 32);
   const timeoutValue = positiveWholeNumber(nodeTimeoutSeconds);
@@ -327,28 +363,71 @@ export default function WorkflowView() {
     });
   };
 
-  const run = () => {
+  const run = (inputOverride?: string) => {
     if (!draft || !sessionId) return;
     void act("run", async () => {
       if (definitionDirty) throw new Error("Save workflow changes before starting a run.");
       if (parallelValue === null || timeoutValue === null) {
         throw new Error("Fix the highlighted run options before starting.");
       }
-      const started = await api.runWorkflow(draft.id, sessionId, runInput.trim(), {
+      const input = (inputOverride ?? runInput).trim();
+      if (!input) throw new Error("Describe a task before starting the workflow.");
+      const started = await api.runWorkflow(draft.id, sessionId, input, {
         pipe,
         permissions,
         maxParallel: parallelValue,
         nodeTimeoutMs: timeoutValue * 1_000,
       });
+      setRunInput(input);
       setLiveRun(started);
+      setProjectRuns((current) => [started, ...current.filter((candidate) => candidate.id !== started.id)]);
+    });
+  };
+
+  const retry = () => {
+    if (!draft || !shownRun) return;
+    const parentSessionId = shownRun.parentSessionId ?? sessionId;
+    if (!parentSessionId) return;
+    void act("retry", async () => {
+      if (definitionDirty) throw new Error("Save workflow changes before retrying.");
+      const started = await api.runWorkflow(
+        draft.id,
+        parentSessionId,
+        shownRun.input,
+        shownRun.options ?? {
+          pipe,
+          permissions,
+          maxParallel: parallelValue ?? 4,
+          nodeTimeoutMs: (timeoutValue ?? 1_800) * 1_000,
+        },
+      );
+      setRunInput(shownRun.input);
+      setLiveRun(started);
+      setProjectRuns((current) => [started, ...current.filter((candidate) => candidate.id !== started.id)]);
     });
   };
 
   const stop = () => {
     if (!shownRun) return;
     void act("stop", async () => {
-      setLiveRun(await api.stopWorkflowRun(shownRun.id));
+      const stopped = await api.stopWorkflowRun(shownRun.id);
+      setLiveRun(stopped);
+      setProjectRuns((current) => current.map((candidate) => candidate.id === stopped.id ? stopped : candidate));
     });
+  };
+
+  const returnToChat = () => {
+    if (dirty && !window.confirm("Leave the workflow builder with unsaved changes?")) return;
+    showSessionChat();
+  };
+
+  const openParentChat = () => {
+    const parent = shownRun?.parentSessionId;
+    if (parent && parent !== sessionId) {
+      void openSession(parent);
+      return;
+    }
+    showSessionChat();
   };
 
   const finishedNodes = shownRun?.nodes.filter((node) => node.status !== "queued" && node.status !== "running").length ?? 0;
@@ -367,6 +446,9 @@ export default function WorkflowView() {
           <h1 className="view-title">Workflows</h1>
           <p className="view-sub">Coordinate agent roles in dependency-based pipelines.</p>
         </div>
+        <button type="button" className="small-btn workflow-back-chat" onClick={returnToChat}>
+          <Icon.back />Back to chat
+        </button>
       </header>
 
       {error && (
@@ -674,6 +756,11 @@ export default function WorkflowView() {
                       <option value="auto">Auto approve</option>
                       <option value="manual">Manual review</option>
                     </select>
+                    <small className="workflow-option-help">
+                      {permissions === "manual"
+                        ? "Tool calls pause the node. Open its child session to approve or deny."
+                        : "Allowed tool calls continue automatically; deny rules still apply."}
+                    </small>
                   </label>
                   <label className="workflow-field">
                     <span>Parallel agents</span>
@@ -708,6 +795,9 @@ export default function WorkflowView() {
                     />
                     {timeoutValue === null && (
                       <small id="workflow-timeout-error" className="workflow-field-error">Enter a positive whole number.</small>
+                    )}
+                    {timeoutValue !== null && (
+                      <small className="workflow-option-help">Per node; timed-out nodes fail and skip dependants.</small>
                     )}
                   </label>
                 </div>
@@ -748,7 +838,7 @@ export default function WorkflowView() {
                               : shownRun?.status === "running"
                                 ? "A workflow run is already active"
                                 : "Run this workflow"}
-                      onClick={run}
+                      onClick={() => run()}
                     >
                       <Icon.workflow />{busy === "run" ? "Starting…" : "Run workflow"}
                     </button>
@@ -766,6 +856,30 @@ export default function WorkflowView() {
                     <StatusBadge status={shownRun.status} />
                     <span className="workflow-run-count">{finishedNodes}/{shownRun.nodes.length} finished</span>
                   </div>
+                  {shownRun.nodes.some((node) => node.status === "running" && /awaiting (permission|answer)/i.test(node.activity ?? "")) && (
+                    <div className="workflow-run-notice waiting" role="alert">
+                      <Icon.shield />
+                      <span>
+                        <strong>This workflow needs you.</strong>
+                        A child session is paused for approval or an answer. Use its highlighted action below.
+                      </span>
+                    </div>
+                  )}
+                  {shownRun.status === "error" && (
+                    <div className="workflow-run-notice error" role="alert">
+                      <Icon.close />
+                      <span>
+                        <strong>The workflow failed.</strong>
+                        Review the node error below. Retry runs the full workflow again so dependencies stay consistent.
+                      </span>
+                    </div>
+                  )}
+                  {shownRun.status === "stopped" && (
+                    <div className="workflow-run-notice">
+                      <Icon.stop />
+                      <span><strong>The run was stopped.</strong> Running child turns were aborted and queued nodes did not start.</span>
+                    </div>
+                  )}
                   <div
                     className={`workflow-run-progress status-${shownRun.status}`}
                     role="progressbar"
@@ -777,13 +891,17 @@ export default function WorkflowView() {
                     <span style={{ width: `${shownRun.nodes.length ? (finishedNodes / shownRun.nodes.length) * 100 : 0}%` }} />
                   </div>
                   <div className="workflow-run-grid">
-                    {shownRun.nodes.map((node) => (
-                      <article key={node.id} className={`sched-card workflow-run-card status-${node.status}`}>
+                    {shownRun.nodes.map((node) => {
+                      const needsHuman = node.status === "running" && /awaiting (permission|answer)/i.test(node.activity ?? "");
+                      return (
+                      <article key={node.id} className={`sched-card workflow-run-card status-${node.status}${needsHuman ? " needs-human" : ""}`}>
                         <div className="workflow-run-card-heading">
                           <strong>{node.role}</strong>
                           <StatusBadge status={node.status} />
                         </div>
-                        {node.activity && <span className="workflow-node-activity">{node.activity}</span>}
+                        {needsHuman
+                          ? <span className="workflow-node-activity needs-human"><Icon.shield />Waiting for your approval or answer</span>
+                          : node.activity && <span className="workflow-node-activity">{node.activity}</span>}
                         {node.error && <div className="form-error" role="alert">{node.error}</div>}
                         {node.output && (
                           <pre
@@ -802,14 +920,31 @@ export default function WorkflowView() {
                         {node.sessionId && (
                           <button
                             type="button"
-                            className="small-btn workflow-button workflow-open-session"
+                            className={`small-btn workflow-button workflow-open-session${needsHuman ? " primary-btn" : ""}`}
                             onClick={() => void openSession(node.sessionId!)}
                           >
-                            Open session<Icon.chevronRight />
+                            {needsHuman ? "Review & respond" : "Open child session"}<Icon.chevronRight />
                           </button>
                         )}
                       </article>
-                    ))}
+                    );})}
+                  </div>
+                  <div className="workflow-results-actions">
+                    {shownRun.parentSessionId && (
+                      <button type="button" className="small-btn workflow-button" onClick={openParentChat}>
+                        <Icon.session />Open parent chat
+                      </button>
+                    )}
+                    {shownRun.status !== "running" && (
+                      <button
+                        type="button"
+                        className="primary-btn workflow-button"
+                        disabled={isBusy || definitionDirty}
+                        onClick={retry}
+                      >
+                        <Icon.workflow />{busy === "retry" ? "Starting…" : shownRun.status === "error" ? "Retry full workflow" : "Run again"}
+                      </button>
+                    )}
                   </div>
                 </section>
               )}

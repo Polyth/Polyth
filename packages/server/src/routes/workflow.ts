@@ -87,6 +87,10 @@ export function workflowRoutes(workflow: WorkflowService): RouteHandler {
       json(200, workflow.create(input));
       return true;
     }
+    if (path === "/api/workflow-runs" && method === "GET") {
+      json(200, workflow.listRuns(url.searchParams.get("projectId") ?? undefined));
+      return true;
+    }
 
     let match = path.match(/^\/api\/workflow-runs\/([^/]+)(?:\/(stop))?$/);
     if (match) {
