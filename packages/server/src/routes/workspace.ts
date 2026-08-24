@@ -3,7 +3,7 @@
 // root and nothing else. A sessionId resolves the session's worktreePath
 // before the project root so Files can never read or write the wrong
 // checkout (UX-FIXTURE-VISUAL P0 — same resolver contract as git/terminal/
-// preview routes).
+// browser routes).
 import type { ProjectService, SessionService } from "@polyth/contracts";
 import type { FileService } from "@polyth/files";
 import type { RouteHandler } from "../http.ts";

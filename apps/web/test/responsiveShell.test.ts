@@ -88,15 +88,16 @@ test("compact sidebar is a drawer, never display:none with no way back", async (
   assert.ok(css.includes("min(380px, 100vw)"), "sheet width contract");
 });
 
-test("header owns the drawer trigger, compact view picker, and panel trigger", async () => {
+test("header owns the drawer trigger and pane-aware compact view picker", async () => {
   const header = await read("../src/components/Header.tsx");
   const actions = await read("../src/widgets/builtinMiniWidgets.tsx");
   assert.ok(header.includes('aria-controls="polyth-session-drawer"'), "drawer trigger targets the drawer");
   assert.ok(header.includes("Open projects and sessions"), "drawer trigger accessible name");
-  assert.ok(header.includes("NarrowPanelTrigger"), "registry-backed panel trigger rendered from the header");
   assert.ok(header.includes("Change workspace view, current:"), "compact view trigger keeps the current label in its name");
   assert.ok(header.includes("const resolved = useResolvedCapabilities()"), "compact picker consumes the shared capability model");
   assert.ok(header.includes("VIEW_OF_CAPABILITY[c.descriptor.id]"), "compact picker maps capability descriptors to views");
+  assert.ok(header.includes("PANE_OF_CAPABILITY[c.descriptor.id]"), "compact picker keeps pane tools such as Browser reachable");
+  assert.ok(header.includes("mobileSheet"), "compact picker uses the touch-friendly mobile sheet");
   assert.ok(!header.includes("const VIEW_GROUPS"), "no duplicate hard-coded view list");
   assert.ok(
     actions.includes('"Turn off auto-approve" : "Turn on auto-approve"'),
@@ -143,12 +144,23 @@ test("drawer opens existing sessions but new chat defers session creation", asyn
 
 test("composer bar exposes the two-tier semantic groups without forking send", async () => {
   const composer = await read("../src/components/Composer.tsx");
+  const surfaces = await read("../src/components/workspace/builtinSurfaces.tsx");
   for (const cls of ["composer-selectors", "composer-extensions", "composer-actions", "composer-primary"]) {
     assert.ok(composer.includes(cls), `composer bar renders .${cls}`);
   }
   assert.equal(composer.match(/const send = useCallback/g)?.length, 1, "exactly one send() path");
+  assert.equal(
+    surfaces.match(/<Composer \/>/g)?.length,
+    2,
+    "fresh and existing sessions instantiate the same default composer",
+  );
+  assert.ok(composer.includes("<SessionContextBar {...contextBar} />"), "the shared composer owns both location selectors");
+  assert.ok(!surfaces.includes("SessionContextBar"), "no chat surface assembles a partial composer");
+  assert.ok(!composer.includes("composer-hero"), "the composer has no fresh-session visual fork");
+  assert.ok(!surfaces.includes('variant="hero"'), "the session surface does not request a fresh-session variant");
   const css = await read("../src/styles.css");
   assert.ok(css.includes("repeat(2, minmax(0, 1fr))"), "phone selector grid contract");
+  assert.ok(!css.includes(".composer-hero"), "fresh and existing sessions share one composer selector");
 });
 
 test("composer active-run controls and mobile actions stay direct", async () => {
@@ -168,7 +180,7 @@ test("composer active-run controls and mobile actions stay direct", async () => 
 test("Focus uses compact mobile composer controls without editor chrome", async () => {
   const composer = await read("../src/components/Composer.tsx");
   const actions = await read("../src/widgets/builtinMiniWidgets.tsx");
-  assert.ok(composer.includes('simpleMode && variant === "docked"'), "light controls are scoped to docked Focus");
+  assert.ok(composer.includes("simpleMode && !widgetMode"), "light controls are shared by fresh and existing chats");
   assert.ok(composer.includes('className="composer-extensions composer-mobile-extensions"'), "Focus exposes slotted mobile actions");
   assert.ok(actions.includes('"permissions.auto-approve-composer-action"'), "auto-approve is a placeable composer action");
   assert.ok(actions.includes('"session.goal-composer-action"'), "goals are a placeable composer action");
@@ -208,10 +220,18 @@ test("Settings uses a focused desktop dialog without a widget preview inspector"
   const settings = await read("../src/components/SettingsView.tsx");
   const css = await read("../src/styles.css");
   const widgets = await read("../src/components/settings/WidgetsPage.tsx");
+  const widgetLibrary = await read("../src/components/settings/WidgetLibraryOverlay.tsx");
+  const tours = await read("../src/packages/onboarding/tours/builtin.ts");
   assert.ok(settings.includes('className="scrim settings-scrim"'), "Settings owns viewport-specific scrim geometry");
   assert.ok(css.includes("width: min(92vw, 800px); max-width: 800px; height: 92vh"), "Settings has an 800px desktop width cap");
   assert.doesNotMatch(css, /\.settings-shell\s*\{[^}]*min-width:\s*1100px/, "Settings no longer forces an 1100px minimum width");
   assert.ok(!widgets.includes("widget-inspector"), "widget settings no longer render a preview inspector");
+  assert.doesNotMatch(
+    [settings, widgets, widgetLibrary, tours].join("\n"),
+    /changes (?:are )?save(?:d)? automatically|changes are saved as you edit/i,
+    "Settings does not show automatic-save assurances",
+  );
+  assert.ok(!settings.includes('className="modal-foot"'), "Settings does not render the save-and-Done footer");
 });
 
 test("pending OpenCode changes render in the pinned Settings footer with an opaque restart overlay", async () => {
@@ -310,17 +330,23 @@ test("shared menu, destructive, failed-turn, and header-action contracts stay wi
   assert.ok(header.includes("useDismissibleMenu"), "the user menu consumes the shared menu contract");
   assert.ok(actions.includes('setOverlay("palette")'), "Search opens the command/action palette");
   assert.ok(actions.includes('setOverlay("search")'), "History opens session history search");
-  assert.ok(sessions.includes("confirmAlert"), "every permanent session deletion is guarded by the themed alert contract");
+  assert.ok(
+    sessions.includes("confirmAlert("),
+    "every permanent session deletion is guarded by the themed alert contract",
+  );
   assert.ok(plugins.includes('disabled={!sourceValid}'), "plugin install stays disabled until minimally valid");
   assert.match(css, /\.turn-error\s*\{[^}]*display:\s*flex[^}]*flex-wrap:\s*wrap[^}]*gap:\s*8px/);
 });
 
-test("hero and docked composers expose the shared stable focus target", async () => {
+test("fresh and existing chats expose the shared composer and stable focus target", async () => {
   const composer = await read("../src/components/Composer.tsx");
   const input = await read("../src/components/input/AdaptiveTextInput.tsx");
   const store = await read("../src/store.ts");
-  assert.ok(composer.includes('variant === "hero" ? "composer-hero" : "composer"'), "one component owns both variants");
-  assert.ok(composer.includes('data-composer-input=""'), "both variants mark the shared input");
+  assert.ok(
+    composer.includes('className={`composer ${widgetMode ? "composer-widget" : "composer-chat"}'),
+    "one component owns both chat states",
+  );
+  assert.ok(composer.includes('data-composer-input=""'), "both chat states mark the shared input");
   assert.ok(input.includes("data-composer-input={dataComposerInput}"), "the marker reaches the textarea");
   assert.ok(store.includes('COMPOSER_INPUT_SELECTOR = "[data-composer-input]"'), "focus uses the stable marker");
   assert.ok(store.includes("export function focusComposer()"), "one focus command is exported");
@@ -333,11 +359,13 @@ test("timeline empty states defer starters to the hero", async () => {
   assert.ok(timeline.includes("This archived session has no messages."), "archived sessions get read-only copy");
 });
 
-test("header renders primary capabilities while the rail renders configured tools", async () => {
+test("header renders configured primary capabilities and permanent Terminal launchers", async () => {
   const header = await read("../src/components/Header.tsx");
   const rail = await read("../src/components/ContextRail.tsx");
   const store = await read("../src/store.ts");
   assert.ok(header.includes("function CapabilityNav"), "header owns the primary capability navigation");
+  assert.ok(header.includes("useResolvedCapabilities"), "header resolves configured top-rail capabilities");
+  assert.ok(header.includes("<CapabilityNav />"), "wide chat renders the primary capability navigation");
   assert.ok(header.includes('c.tier === "primary"'), "header limits its capability rail to primary tools");
   assert.ok(header.includes("topRail.map"), "header renders the resolved top capability rail");
   assert.ok(
@@ -345,6 +373,7 @@ test("header renders primary capabilities while the rail renders configured tool
     "Terminal remains a permanent top-rail launcher",
   );
   assert.ok(!header.includes("CapabilityMenu"), "header creates no implicit overflow disclosure");
+  assert.ok(!rail.includes("CapabilityMenu"), "rail creates no duplicate More-tools picker");
   assert.ok(rail.includes("configuredRailButtons"), "rail renders only configured tool buttons");
   assert.ok(rail.includes('capability.descriptor.id === "terminal"'), "Terminal remains a guaranteed rail launcher");
   assert.ok(rail.includes("reorderRail"), "rail arranges surfaces by drag-reorder instead");

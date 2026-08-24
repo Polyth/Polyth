@@ -115,7 +115,7 @@ export const BUILTIN_WIDGET_IDS = [
   "core.quick-actions",
   "session.work-status",
   "session.activity",
-  "preview.app",
+  "browser.app",
   "files.explorer",
   "files.project-map",
   "github.overview",
@@ -163,7 +163,7 @@ const DEFAULT_ZONE: Record<string, WidgetZone> = {
   "usage.sessions-table": "right",
   "schedule.tasks": "right",
   "terminal.shell": "bottom",
-  "preview.app": "bottom",
+  "browser.app": "bottom",
 };
 
 const DEFAULT_SLOT_BY_ID: Record<string, UiSlot> = {
@@ -183,7 +183,7 @@ const DEFAULT_SIZE_BY_ID: Record<string, WidgetSize> = {
   "knowledge.notes": { w: 6, h: 5 },
   "session.work-status": { w: 6, h: 4 },
   "session.activity": { w: 6, h: 4 },
-  "preview.app": { w: 12, h: 6 },
+  "browser.app": { w: 12, h: 6 },
   "github.overview": { w: 6, h: 6 },
   "schedule.tasks": { w: 6, h: 5 },
   "multirun.runs": { w: 12, h: 6 },
@@ -369,6 +369,36 @@ export function parseWidgetLayout(
     };
     if (!data || data.version !== 1 || typeof data.zones !== "object" || typeof data.widgets !== "object") {
       return fallback;
+    }
+    // The standalone Preview package was replaced by Browser. Preserve the
+    // old widget's placement, visibility, size, and position under its new id.
+    const legacyPreview = data.widgets["preview.app"];
+    if (legacyPreview && definitionById.has("browser.app")) {
+      const persistedBrowser = data.widgets["browser.app"];
+      data.widgets = {
+        ...data.widgets,
+        "browser.app": persistedBrowser ?? {
+          ...legacyPreview,
+          definitionId: "browser.app",
+          pluginId: "browser",
+          title: "Browser",
+        },
+      };
+      delete data.widgets["preview.app"];
+      for (const zone of [...WIDGET_ZONES, "top"] as const) {
+        const ids = data.zones[zone];
+        if (Array.isArray(ids) && ids.includes("preview.app")) {
+          data.zones[zone] = [...new Set(ids.map((value) =>
+            value === "preview.app" ? "browser.app" : value))];
+        }
+      }
+      for (const slot of UI_SLOTS) {
+        const ids = data.slotPlacements?.[slot];
+        if (Array.isArray(ids) && ids.includes("preview.app")) {
+          data.slotPlacements![slot] = [...new Set(ids.map((value) =>
+            value === "preview.app" ? "browser.app" : value))];
+        }
+      }
     }
     // `core.composer` and `core.chat` used to render the same surface. Migrate
     // the retired duplicate into the canonical conversation widget so an

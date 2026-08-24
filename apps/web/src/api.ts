@@ -28,7 +28,6 @@ import type {
   OpenCodePluginListResponseDto,
   OpenCodePluginRemoveResponseDto,
   PackageDescriptorDto,
-  PreviewState,
   SystemInfoDto,
   TrackCreateInput,
   TrackDto,
@@ -77,6 +76,7 @@ export type BrowserTargetDto =
 
 export type BrowserActionDto =
   | { kind: "click"; target: BrowserTargetDto }
+  | { kind: "point"; target: Extract<BrowserTargetDto, { point: unknown }> }
   | { kind: "type"; target: BrowserTargetDto; text: string; submit?: boolean }
   | { kind: "press"; key: string }
   | { kind: "scroll"; x?: number; y?: number; target?: BrowserTargetDto }
@@ -547,7 +547,7 @@ export const api = {
 
   // agentProfileId: string selects a profile, null explicitly clears the
   // session's stored profile, omitted inherits it (UX-COMPOSER-DISC).
-  sendMessage: (id: string, body: { text: string; attachments?: AttachmentRef[]; model?: JsonObject; agent?: string; delivery?: string; dismissPending?: boolean; agentProfileId?: string | null }) =>
+  sendMessage: (id: string, body: { text: string; autoTitle?: boolean; attachments?: AttachmentRef[]; model?: JsonObject; agent?: string; delivery?: string; dismissPending?: boolean; agentProfileId?: string | null }) =>
     jfetch<SendResult>(`/api/sessions/${id}/message`, json("POST", body)),
   abort: (id: string) => jfetch<void>(`/api/sessions/${id}/abort`, { method: "POST" }),
   renameSession: (id: string, title: string) =>
@@ -1077,7 +1077,7 @@ export const api = {
 
   // ---- provider quotas (WP12; telemetry, never session data) --------------------
   usageQuotas: () =>
-    jfetch<QuotaSnapshotDto[]>(`/api/usage/quotas`).catch((): QuotaSnapshotDto[] => []),
+    jfetch<QuotaSnapshotDto[]>(`/api/usage/quotas`),
   usageQuotasRefresh: (providerId: string) =>
     jfetch<QuotaSnapshotDto>(`/api/usage/quotas/refresh`, json("POST", { providerId })),
 
@@ -1109,17 +1109,7 @@ export const api = {
   deleteSnippet: (projectId: string, scope: "user" | "project", alias: string) =>
     jfetch<{ ok: boolean }>(`/api/snippets`, json("DELETE", { projectId, scope, alias })),
 
-  // ---- M3: preview ---------------------------------------------------------
-  previewStart: (projectId: string, command?: string, sessionId?: string) =>
-    jfetch<{ url: string; port: number }>(`/api/preview/start`, json("POST", { projectId, command, ...(sessionId ? { sessionId } : {}) })),
-  previewGet: (projectId: string, sessionId?: string) =>
-    jfetch<PreviewState>(`/api/preview?projectId=${encodeURIComponent(projectId)}${sessionId ? `&sessionId=${encodeURIComponent(sessionId)}` : ""}`).catch(
-      (): PreviewState => ({ url: null, status: "off" }),
-    ),
-  previewStop: (projectId: string, sessionId?: string) =>
-    jfetch<{ ok: true }>(`/api/preview/stop`, json("POST", { projectId, ...(sessionId ? { sessionId } : {}) })),
-
-  // ---- controlled browser (WP14) ---------------------------------------------
+  // ---- shared internal browser ------------------------------------------------
   browserCapability: () =>
     jfetch<{ available: boolean; engine: "chromium" | "fake" | null; reason?: string }>(`/api/browser/capability`).catch(
       () => ({ available: false, engine: null, reason: "server unreachable" }),

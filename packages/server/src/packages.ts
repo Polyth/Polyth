@@ -27,8 +27,7 @@ export const BUILTIN_PACKAGES = [
 
   { id: "git", name: "Git", description: "Source control status, diffs, commits, and worktrees.", core: false, enabled: true, settingsGroup: "Engineering", icon: "⎇", hasSettings: true },
   { id: "terminal", name: "Terminal", description: "Project-scoped terminal sessions.", core: false, enabled: true, settingsGroup: "Engineering", icon: "⌨", hasSettings: false },
-  { id: "preview", name: "Preview", description: "Run and view project previews.", core: false, enabled: true, settingsGroup: "Engineering", icon: "▶", hasSettings: false },
-  { id: "browser", name: "Browser", description: "Controlled browser sessions and observations.", core: false, enabled: true, settingsGroup: "Engineering", icon: "🌐", hasSettings: false },
+  { id: "browser", name: "Browser", description: "A shared internal browser for users, agents, and element context.", core: false, enabled: true, settingsGroup: "Engineering", icon: "🌐", hasSettings: false },
   { id: "goals", name: "Goals", description: "Goal tracking and completion audits.", core: false, enabled: true, settingsGroup: "Workspace", icon: "◎", hasSettings: false },
   { id: "multirun", name: "Multirun", description: "Run prompts across multiple models.", core: false, enabled: true, settingsGroup: "Engineering", icon: "⑂", hasSettings: false },
   { id: "workflow", name: "Workflows", description: "Orchestrate multi-agent DAG pipelines.", core: false, enabled: true, settingsGroup: "Engineering", icon: "◇", hasSettings: false },

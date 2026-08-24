@@ -321,7 +321,7 @@ test("every built-in package surface has a substantial onboarding tour", async (
   const expectedPackageIds = [
     "session", "files", "projects", "behavior", "models", "permissions",
     "notifications", "appearance", "general", "chat", "sessions", "shortcuts",
-    "access", "about", "git", "terminal", "preview", "browser", "goals",
+    "access", "about", "git", "terminal", "browser", "goals",
     "multirun", "workflow", "fusion", "walkthrough", "schedule", "usage",
     "github", "knowledge", "voice", "home-assistant", "secure-safe", "mcp",
     "commands", "plugins", "integrations", "ssh", "packages", "widgets",

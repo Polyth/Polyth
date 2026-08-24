@@ -68,10 +68,57 @@ test("provider usage distribution clamps invalid counters before drawing shares"
   ]);
 });
 
-test("Usage settings renders the dashboard provider spend as an SVG donut", async () => {
+test("Usage settings keeps the Polyth shell and offers rich dashboard views", async () => {
   const source = await readFile(new URL("../src/usage/UsageDashboard.tsx", import.meta.url), "utf8");
+  const quota = await readFile(new URL("../src/usage/quotaUi.tsx", import.meta.url), "utf8");
+  const api = await readFile(new URL("../src/api.ts", import.meta.url), "utf8");
   const registration = await readFile(new URL("../src/packages/usage.ts", import.meta.url), "utf8");
+  const styles = await readFile(new URL("../src/styles.css", import.meta.url), "utf8");
   assert.match(source, /function ProviderSpendDonut/);
   assert.match(source, /className="usage-spend-donut"[\s\S]*?<svg/);
+  assert.match(source, /function ModelBreakdown/);
+  assert.match(source, /function CostPulse/);
+  assert.match(source, /aria-label="Dashboard density"/);
+  assert.match(source, /setUsageDashboardPrefs/);
+  assert.match(source, /Session cohorts by latest turn/);
+  assert.match(source, /complete recorded totals—not usage generated during the bucket/);
+  assert.match(source, /<table className="sr-only">/);
+  assert.match(source, /<th scope="col">Provider<\/th>/);
+  assert.match(source, /role="progressbar"/);
+  assert.match(source, /className="usage-quota-alert" role="alert"/);
+  assert.match(source, /className="usage-chart-empty" role="status"/);
+  assert.match(source, /aria-label=\{`\$\{hidden \? "Show" : "Hide"\} \$\{provider\.label\} in breakdowns`\}/);
+  assert.match(source, /value > 0 && value < \.0001 \? "<\$0\.0001"/);
+  assert.match(source, /const formatChartMoney[\s\S]*?value < \.001 \? 5 : value < 1 \? 4 : 2/);
+  assert.match(source, /Ranges use each session’s latest turn and include its full recorded totals/);
+  assert.match(source, /new ResizeObserver/);
+  assert.doesNotMatch(source, /role="(?:tab|radio)"/);
+  assert.doesNotMatch(source, /usage-dashboard-sidebar/);
+  assert.match(quota, /loading: boolean/);
+  assert.match(quota, /error: string \| null/);
+  assert.match(quota, /useSyncExternalStore/);
+  assert.match(quota, /quotaListeners\.size === 1/);
+  assert.equal(quota.match(/setInterval/g)?.length, 1, "quota polling has one shared timer");
+  assert.doesNotMatch(api, /usageQuotas:[\s\S]{0,120}\.catch\(/);
   assert.match(registration, /component: UsageDashboard/);
+  assert.match(registration, /id: "usage.dashboard"/);
+  assert.doesNotMatch(styles, /\.settings-page-usage > \.settings-nav \{ display: flex; \}/);
+  assert.match(styles, /\.settings-mobile-page \.settings-nav \{ display: none; \}/);
+  assert.match(styles, /--usage-bg: var\(--bg\)/);
+  assert.doesNotMatch(styles, /full dark analytics workspace/);
+  assert.doesNotMatch(styles, /--usage-bg: #0d0e10/);
+  assert.match(styles, /\.usage-status-pill\.session-only/);
+  assert.match(styles, /@media \(max-width: 700px\)[\s\S]*?\.usage-providers-card tbody tr/);
+  assert.match(styles, /\.usage-spend-legend > \.usage-card-empty \{[\s\S]*?width: 100%;[\s\S]*?min-width: 0;[\s\S]*?align-self: stretch;/);
+  assert.match(styles, /\.usage-spend-legend > \.usage-card-empty strong \{[\s\S]*?overflow-wrap: normal;[\s\S]*?word-break: normal;[\s\S]*?white-space: normal;/);
+  assert.match(styles, /\.usage-provider-error \{[\s\S]*?padding: 9px 10px;/);
+  assert.match(styles, /@media \(min-width: 701px\) and \(max-width: 760px\) \{[\s\S]*?\.usage-view-tabs \{ width: 100%; margin: 0; \}/);
+
+  const usageMobileStart = styles.indexOf("@media (max-width: 480px) {", styles.indexOf(".usage-dashboard {"));
+  const usageMobileEnd = styles.indexOf("@media (prefers-reduced-motion: reduce)", usageMobileStart);
+  const usageMobileStyles = styles.slice(usageMobileStart, usageMobileEnd);
+  assert.match(usageMobileStyles, /\.usage-eyebrow \{ font-size: 9\.5px; letter-spacing: \.075em; line-height: 1\.35; \}/);
+  assert.match(usageMobileStyles, /\.usage-spend-legend \{[\s\S]*?width: 100%;[\s\S]*?min-width: 0;[\s\S]*?max-width: none;/);
+  assert.match(styles, /\.usage-view-tabs button \{ flex: 1; min-height: var\(--tap\); \}/);
+  assert.match(styles, /\.usage-layout-compact \.usage-cohort-chart \{ height: 174px; \}/);
 });

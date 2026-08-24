@@ -2,7 +2,7 @@ import type { SessionProjection } from "@polyth/contracts";
 import type { QuotaSnapshotDto, QuotaWindowDto } from "../api.ts";
 
 export type UsageRangeDays = 7 | 30 | 90;
-export type UsageChartMetric = "tokens" | "cost" | "requests";
+export type UsageChartMetric = "tokens" | "cost" | "sessions";
 
 export interface UsageTrend {
   percent: number;
@@ -24,6 +24,16 @@ export interface UsageProviderSummary {
   quotaWindow?: QuotaWindowDto;
   remainingPercent: number | null;
   stale: boolean;
+}
+
+export interface UsageModelSummary {
+  id: string;
+  label: string;
+  providerId: string;
+  providerLabel: string;
+  sessions: number;
+  tokens: number;
+  cost: number;
 }
 
 export interface UsageChartSeries {
@@ -49,18 +59,31 @@ export interface UsageDashboardData {
     averageCostPerThousand: UsageTrend | null;
   };
   providers: UsageProviderSummary[];
+  models: UsageModelSummary[];
   chart: {
     labels: string[];
+    bucketHours: number;
     tokens: UsageChartSeries[];
     cost: UsageChartSeries[];
-    requests: UsageChartSeries[];
+    sessions: UsageChartSeries[];
   };
 }
 
 const DAY_MS = 24 * 60 * 60_000;
 
+const finiteNonNegative = (value: number | undefined): number =>
+  typeof value === "number" && Number.isFinite(value) ? Math.max(0, value) : 0;
+
 const sessionTokens = (session: SessionProjection): number =>
-  (session.tokenTotals?.input ?? 0) + (session.tokenTotals?.output ?? 0);
+  finiteNonNegative(session.tokenTotals?.input) + finiteNonNegative(session.tokenTotals?.output);
+
+const sessionCost = (session: SessionProjection): number =>
+  finiteNonNegative(session.costTotal);
+
+const sessionActivityAt = (session: SessionProjection): number =>
+  typeof session.lastTurnAt === "number" && Number.isFinite(session.lastTurnAt)
+    ? session.lastTurnAt
+    : session.updatedAt;
 
 const canonicalProviderId = (providerId: string): string => {
   const normalized = providerId.trim().toLowerCase();
@@ -71,6 +94,9 @@ const canonicalProviderId = (providerId: string): string => {
 
 const sessionProviderId = (session: SessionProjection): string =>
   canonicalProviderId(session.model?.providerID || "Default");
+
+const sessionModelId = (session: SessionProjection): string =>
+  session.model?.modelID?.trim() || "Automatic";
 
 const displayProvider = (providerId: string): string => {
   const normalized = providerId.trim().toLowerCase();
@@ -112,7 +138,7 @@ const primaryQuotaWindow = (snapshot: QuotaSnapshotDto | undefined): QuotaWindow
 
 const sumSessions = (sessions: readonly SessionProjection[]) => {
   const tokens = sessions.reduce((sum, session) => sum + sessionTokens(session), 0);
-  const cost = sessions.reduce((sum, session) => sum + (session.costTotal ?? 0), 0);
+  const cost = sessions.reduce((sum, session) => sum + sessionCost(session), 0);
   return {
     sessions: sessions.length,
     tokens,
@@ -123,12 +149,18 @@ const sumSessions = (sessions: readonly SessionProjection[]) => {
 
 const metricValue = (session: SessionProjection, metric: UsageChartMetric): number => {
   if (metric === "tokens") return sessionTokens(session);
-  if (metric === "cost") return session.costTotal ?? 0;
+  if (metric === "cost") return sessionCost(session);
   return 1;
 };
 
 const shortDate = (timestamp: number): string =>
   new Intl.DateTimeFormat("en", { month: "short", day: "numeric" }).format(timestamp);
+
+const bucketLabel = (start: number, end: number): string => {
+  const first = shortDate(start);
+  const last = shortDate(Math.max(start, end - 1));
+  return first === last ? first : `${first}–${last}`;
+};
 
 export function buildUsageDashboardData(
   sessions: readonly SessionProjection[],
@@ -139,8 +171,14 @@ export function buildUsageDashboardData(
   const rangeEnd = now;
   const rangeStart = now - rangeDays * DAY_MS;
   const previousStart = rangeStart - rangeDays * DAY_MS;
-  const current = sessions.filter((session) => session.updatedAt >= rangeStart && session.updatedAt <= rangeEnd);
-  const previous = sessions.filter((session) => session.updatedAt >= previousStart && session.updatedAt < rangeStart);
+  const current = sessions.filter((session) => {
+    const activityAt = sessionActivityAt(session);
+    return activityAt >= rangeStart && activityAt <= rangeEnd;
+  });
+  const previous = sessions.filter((session) => {
+    const activityAt = sessionActivityAt(session);
+    return activityAt >= previousStart && activityAt < rangeStart;
+  });
   const totals = sumSessions(current);
   const previousTotals = sumSessions(previous);
 
@@ -181,10 +219,37 @@ export function buildUsageDashboardData(
     b.sessions - a.sessions ||
     a.label.localeCompare(b.label));
 
+  const byModel = new Map<string, UsageModelSummary>();
+  for (const session of current) {
+    const providerId = sessionProviderId(session);
+    const modelId = sessionModelId(session);
+    const id = `${providerId}/${modelId}`;
+    const summary = byModel.get(id) ?? {
+      id,
+      label: modelId,
+      providerId,
+      providerLabel: displayProvider(providerId),
+      sessions: 0,
+      tokens: 0,
+      cost: 0,
+    };
+    summary.sessions += 1;
+    summary.tokens += sessionTokens(session);
+    summary.cost += sessionCost(session);
+    byModel.set(id, summary);
+  }
+  const models = [...byModel.values()].sort((a, b) =>
+    b.cost - a.cost ||
+    b.tokens - a.tokens ||
+    b.sessions - a.sessions ||
+    a.label.localeCompare(b.label));
+
   const bucketCount = rangeDays === 7 ? 7 : rangeDays === 30 ? 10 : 12;
   const bucketMs = (rangeEnd - rangeStart) / bucketCount;
-  const labels = Array.from({ length: bucketCount }, (_, index) =>
-    shortDate(rangeStart + bucketMs * (index + 1)));
+  const labels = Array.from({ length: bucketCount }, (_, index) => {
+    const start = rangeStart + bucketMs * index;
+    return bucketLabel(start, start + bucketMs);
+  });
 
   const makeSeries = (metric: UsageChartMetric): UsageChartSeries[] =>
     providers
@@ -195,7 +260,7 @@ export function buildUsageDashboardData(
           if (sessionProviderId(session) !== provider.id) continue;
           const index = Math.min(
             bucketCount - 1,
-            Math.max(0, Math.floor((session.updatedAt - rangeStart) / bucketMs)),
+            Math.max(0, Math.floor((sessionActivityAt(session) - rangeStart) / bucketMs)),
           );
           values[index] = (values[index] ?? 0) + metricValue(session, metric);
         }
@@ -217,11 +282,13 @@ export function buildUsageDashboardData(
       ),
     },
     providers,
+    models,
     chart: {
       labels,
+      bucketHours: bucketMs / (60 * 60_000),
       tokens: makeSeries("tokens"),
       cost: makeSeries("cost"),
-      requests: makeSeries("requests"),
+      sessions: makeSeries("sessions"),
     },
   };
 }

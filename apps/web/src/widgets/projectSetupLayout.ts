@@ -41,10 +41,10 @@ export const WORKFLOW_OPTIONS: readonly WorkflowOption[] = [
   {
     id: "build-debug",
     label: "Build & debug",
-    description: "Code, changes, terminal, preview, and live activity.",
+    description: "Code, changes, terminal, internal browser, and live activity.",
     suggestedWidgetIds: [
       "core.chat", "files.explorer", "git.recent", "terminal.shell",
-      "preview.app", "session.work-status", "session.activity",
+      "browser.app", "session.work-status", "session.activity",
     ],
   },
   {
@@ -68,9 +68,9 @@ export const WORKFLOW_OPTIONS: readonly WorkflowOption[] = [
   {
     id: "design-explore",
     label: "Design & explore",
-    description: "Ideas, previews, project context, and quick actions.",
+    description: "Ideas, browser context, project context, and quick actions.",
     suggestedWidgetIds: [
-      "core.chat", "preview.app", "files.project-map", "knowledge.notes",
+      "core.chat", "browser.app", "files.project-map", "knowledge.notes",
       "core.quick-actions", "goals.current",
     ],
   },

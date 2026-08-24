@@ -49,6 +49,7 @@ test("header and composer controls are configurable and purpose-specific", async
   assert.match(header, /topRail\.map/);
   assert.match(header, /const terminal = resolved\.find/);
   assert.doesNotMatch(header, /const rest = /);
+  assert.doesNotMatch(header, /visibleIds|rest\.length > 0/);
   assert.doesNotMatch(composer, /Modalities:/);
   assert.match(composer, /aria-label="Add files"/);
   assert.doesNotMatch(widgets, /Session header stats|Response hover actions|Technical menu/);

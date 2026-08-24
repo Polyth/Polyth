@@ -31,7 +31,6 @@ import { createFileService, MAX_RAW_BYTES } from "@polyth/files";
 import { createCommandService } from "@polyth/commands";
 import { createGitService } from "@polyth/git";
 import { createTerminalService } from "@polyth/terminal";
-import { createPreviewService } from "@polyth/preview";
 import { createMultirunService } from "@polyth/multirun";
 import { createWorkflowService } from "@polyth/workflow";
 import { createFusionService, synthesisPrompt } from "@polyth/fusion";
@@ -47,11 +46,12 @@ import {
 } from "@polyth/usage";
 import {
   createBrowserService, createChromiumDriver, createFakeDriver, demoWeb,
-  findChromiumExecutable, originOf,
+  findChromiumExecutable,
 } from "@polyth/browser";
 import { createDictationService, createWhisperSttAdapter } from "@polyth/dictation";
 import { createHomeAssistantServerPlugin } from "@polyth/home-assistant";
 import { createProjectService } from "./projects.ts";
+import { projectRoutes } from "./routes/projects.ts";
 import { createPackageRegistry } from "./packages.ts";
 import { createSessionService, type Broadcaster, type RuntimePool } from "./sessions.ts";
 import { createRuntimeCatalog } from "./runtimeCatalog.ts";
@@ -64,7 +64,6 @@ import { orgRoutes } from "./routes/org.ts";
 import { workspaceRoutes } from "./routes/workspace.ts";
 import { gitRoutes } from "./routes/git.ts";
 import { terminalRoutes, attachTerminalWs } from "./routes/terminal.ts";
-import { previewRoutes } from "./routes/preview.ts";
 import { multirunRoutes } from "./routes/multirun.ts";
 import { workflowRoutes } from "./routes/workflow.ts";
 import { fusionRoutes } from "./routes/fusion.ts";
@@ -370,18 +369,9 @@ export async function boot(opts: BootOptions = {}) {
       ? { replayBytes: Number(process.env.POLYTH_TERM_REPLAY_BYTES) }
       : {}),
   });
-  const preview = createPreviewService();
 
-  // --- controlled browser (WP14): Chromium if configured/found, fake driver
-  // behind POLYTH_FAKE_BROWSER=1, otherwise an honest "unavailable" state that
-  // keeps the iframe preview as the fallback surface.
-  const previewOrigins = new Set<string>();
-  preview.onStatusChange((_pid, st) => {
-    for (const candidate of st.urls ?? (st.url ? [st.url] : [])) {
-      const o = originOf(candidate);
-      if (o) previewOrigins.add(o);
-    }
-  });
+  // --- internal browser: Chromium if configured/found, fake driver behind
+  // POLYTH_FAKE_BROWSER=1, otherwise an honest unavailable state.
   const chromiumPath = process.env.POLYTH_FAKE_BROWSER === "1" ? null : await findChromiumExecutable();
   const browserDriver = process.env.POLYTH_FAKE_BROWSER === "1"
     ? createFakeDriver(demoWeb())
@@ -391,7 +381,6 @@ export async function boot(opts: BootOptions = {}) {
   const browser = createBrowserService({
     driver: browserDriver,
     unavailableReason: "browser engine unavailable: no Chromium executable found (set POLYTH_CHROMIUM_PATH)",
-    allowedOrigins: () => [...previewOrigins],
   });
   const browserToolBridge = createBrowserToolBridge({
     browser,
@@ -913,9 +902,7 @@ export async function boot(opts: BootOptions = {}) {
       },
     },
   }), { onDisable: () => terminals.closeAll() });
-  registerPackageRoute("preview", previewRoutes({ projects, sessions, preview }), {
-    onDisable: () => preview.stopAll(),
-  });
+  registerPackageRoute("projects", projectRoutes(projects));
   registerPackageRoute("browser", chainRoutes(
     browserToolBridge.route,
     browserRoutes({ browser, append: appendLogged, shotsDir: `${dataDir}/browser-shots` }),
@@ -1094,7 +1081,7 @@ export async function boot(opts: BootOptions = {}) {
   ];
   const routes: RouteHandler[] = [...staticCoreRoutes, routeRegistry.handler];
 
-  const allCapabilities = () => ["polyth.sessions", "polyth.sessionPersistence", "polyth.projects", "polyth.agentRuntime", "polyth.goals", "polyth.files", "polyth.commands", "polyth.git", "polyth.worktrees", "polyth.terminal", "polyth.preview", "polyth.multirun", "polyth.workflow", "polyth.fusion", "polyth.walkthrough", "polyth.schedule", "polyth.tracks", "polyth.github", "polyth.control", "polyth.agentProfiles", "polyth.settings", "polyth.mcp", "polyth.plugins", "polyth.knowledge", "polyth.review", "polyth.usage", "polyth.browser", "polyth.voice", "polyth.assist", "polyth.homeAssistant", "polyth.secureSafe", "polyth.ssh"];
+  const allCapabilities = () => ["polyth.sessions", "polyth.sessionPersistence", "polyth.projects", "polyth.agentRuntime", "polyth.goals", "polyth.files", "polyth.commands", "polyth.git", "polyth.worktrees", "polyth.terminal", "polyth.multirun", "polyth.workflow", "polyth.fusion", "polyth.walkthrough", "polyth.schedule", "polyth.tracks", "polyth.github", "polyth.control", "polyth.agentProfiles", "polyth.settings", "polyth.mcp", "polyth.plugins", "polyth.knowledge", "polyth.review", "polyth.usage", "polyth.browser", "polyth.voice", "polyth.assist", "polyth.homeAssistant", "polyth.secureSafe", "polyth.ssh"];
 
   await packageLifecycle.startEnabled(packageRegistry);
 
@@ -1123,7 +1110,6 @@ export async function boot(opts: BootOptions = {}) {
     await browser.closeAll().catch(() => {});
     await pluginRegistry.dispose().catch(() => {});
     await terminals.closeAll().catch(() => {});
-    await preview.stopAll().catch(() => {});
     for (const p of runtimesByProject.values()) await (await p.catch(() => null))?.dispose().catch(() => {});
     await ssh.disconnectAll().catch(() => {});
     await root.dispose();

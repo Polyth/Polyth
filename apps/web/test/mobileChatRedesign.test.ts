@@ -442,10 +442,12 @@ test("haptics are opt-in, bounded, and respect reduced motion", async () => {
 
 test("the fresh-session screen is three zones with a sticky interaction dock", async () => {
   const surface = await read("../src/components/workspace/builtinSurfaces.tsx");
+  const composer = await read("../src/components/Composer.tsx");
   assert.ok(surface.includes('className="stage stage-new"'));
   assert.ok(surface.includes('className="hero-body"'), "empty state and starters scroll together");
   assert.ok(surface.includes('className="hero-dock"'), "context bar and composer share the sticky zone");
-  assert.ok(surface.includes("<SessionContextBar"), "project and branch live above the composer");
+  assert.ok(composer.includes("<SessionContextBar {...contextBar} />"), "project and branch live inside every composer");
+  assert.ok(!surface.includes("SessionContextBar"), "the fresh surface cannot fork composer controls");
   assert.ok(!surface.includes("new-session-targets"), "the full-width mid-page selectors are gone");
   assert.ok(!surface.includes("hero-mark"), "the decorative mark no longer competes with the headline");
   assert.ok(surface.includes("visibleStarters"), "chips come from the starter system");

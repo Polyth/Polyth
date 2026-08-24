@@ -84,7 +84,7 @@ const BUILTIN_ITEMS: SettingsSearchItem[] = [
   { id: "widgets.actions", pageId: "widgets", label: "Composer and header actions", description: "Show or hide composer, session header, and app header buttons", keywords: ["composer", "actions", "mini widgets", "toolbar"], focusTarget: "widgets.actions" },
   { id: "about.info", pageId: "about", label: "Application URL", description: "Server address, data directory, and capabilities", keywords: ["about", "version", "health", "url"], focusTarget: "about.info" },
   { id: "sessions.defaultModel", pageId: "sessions", label: "Global default model", description: "Default model for new sessions and projects", keywords: ["session", "provider", "model"], focusTarget: "sessions.defaultModel" },
-  { id: "sessions.projectModel", pageId: "sessions", label: "Project default model", description: "Per-project model override", keywords: ["session", "project", "inherit", "global"], focusTarget: "sessions.projectModel" },
+  { id: "projects.modelMemory", pageId: "projects", label: "Remember project model selection", description: "Use the last selected model for new sessions in each project", keywords: ["session", "project", "model", "default", "memory"], focusTarget: "projects.modelMemory" },
   { id: "git.personas", pageId: "git", label: "Git personas", description: "Repository-local commit author identities", keywords: ["author", "email", "identity"], focusTarget: "git.personas" },
   { id: "sessions.worktree", pageId: "sessions", label: "Worktree behavior", keywords: ["session", "fresh worktree", "project root"], focusTarget: "sessions.worktree" },
 ];

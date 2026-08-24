@@ -50,6 +50,13 @@ test("browser tool maps polyth-like actions onto the shared BrowserService", asy
 
     const snapshot = await call("browser.snapshot");
     assert.match(String(snapshot.text), /Welcome/);
+    const subagentSnapshot = await bridge.execute(registration.token, {
+      action: "browser.snapshot",
+      parameters: {},
+      context: { sessionID: "backend-subagent-1", directory: cwd },
+    });
+    assert.equal(subagentSnapshot.browserSessionId, opened.browserSessionId);
+    assert.match(String(subagentSnapshot.text), /Welcome/);
 
     const clicked = await call("browser.click", { text: "Next" });
     assert.equal(clicked.url, `${HOME}next`);

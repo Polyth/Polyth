@@ -7,7 +7,7 @@ import {
   setSidebarOpen, setUiError, startNewSession,
 } from "../store.ts";
 import {
-  getSyncStatus, reconnectSync, refreshSessions, renameProject, subscribeSyncStatus,
+  getSyncStatus, reconnectSync, refreshSessions, removeProject, renameProject, subscribeSyncStatus,
 } from "../init.ts";
 import { MOD } from "../format.ts";
 import { friendlyError } from "../settings.ts";
@@ -27,6 +27,7 @@ import {
 import { api } from "../api.ts";
 import { announce } from "./a11y/live.tsx";
 import ProjectAppearanceDialog from "./ProjectAppearanceDialog.tsx";
+import { confirmAlert } from "../alerts.ts";
 
 const EXPANDED_PROJECTS_KEY = "polyth.sidebar.expandedProjects";
 
@@ -511,7 +512,13 @@ export default function Sidebar() {
                     <span className="project-tree-toggle-sign" aria-hidden="true">{expandedTrees.has(p.id) ? "−" : "+"}</span>
                   )}
                   <span className="project-glyph" style={p.color ? { color: p.color } : undefined}>
-                    {p.icon ? <span aria-hidden="true">{p.icon}</span> : <Icon.files />}
+                    {p.icon
+                      ? p.icon.startsWith("/assets/project-icons/")
+                        ? <span className="project-glyph-mask" aria-hidden="true" style={{ WebkitMaskImage: `url("${p.icon}")`, maskImage: `url("${p.icon}")` }} />
+                        : p.icon.startsWith("data:image/")
+                          ? <img src={p.icon} alt="" />
+                        : <span aria-hidden="true">{p.icon}</span>
+                      : <Icon.files />}
                   </span>
                   <span className="project-meta">
                     <span className="project-name" title={p.path}>{p.name || p.path}</span>
@@ -528,6 +535,15 @@ export default function Sidebar() {
                     closeDrawer();
                   }}
                 ><Icon.plus /></button>
+                <button
+                  className="project-worktree-btn"
+                  title={`Open or create a worktree for ${p.name || p.path}`}
+                  aria-label={`Open or create a worktree for ${p.name || p.path}`}
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    openWorktreeSessionDialog(p.id);
+                  }}
+                ><Icon.worktree /></button>
                 <button
                   className="project-menu-btn"
                   aria-label={`Actions for ${p.name || p.path}`}
@@ -568,6 +584,14 @@ export default function Sidebar() {
                       if (p.id !== activeProjectId) activateProject(p.id);
                       openWorkspacePane("git");
                     }}>Source control (Git &amp; worktrees)</button>
+                    <div className="project-menu-separator" role="separator" />
+                    <button className="project-menu-close" role="menuitem" onClick={() => {
+                      setProjectMenu(null);
+                      void confirmAlert(
+                        `Close “${p.name || p.path}”? This removes it from Polyth but keeps its folder and files on disk.`,
+                        { title: "Close project", confirmLabel: "Close project" },
+                      ).then((ok) => { if (ok) void removeProject(p.id); });
+                    }}>Close project</button>
                     <SlotHost slot="sidebar.project.actions" context={{ projectId: p.id }} />
                   </div>
                 )}

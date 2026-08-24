@@ -2,10 +2,8 @@ import { useEffect, useMemo, useState } from "react";
 import { api, type GitBranches, type Worktree } from "../api.ts";
 import { setOverlay, setSidebarOpen, startNewSession, useStore } from "../store.ts";
 import { friendlyError } from "../settings.ts";
-import { suggestWorktreeBranch, worktreeLabel } from "../worktreeSessions.ts";
+import { randomWorktreeSlug, suggestWorktreeBranch } from "../worktreeSessions.ts";
 import Dialog from "./a11y/Dialog.tsx";
-
-type Mode = "existing" | "new";
 
 export default function WorktreeSessionDialog() {
   const request = useStore((state) => state.worktreeSessionRequest);
@@ -13,15 +11,14 @@ export default function WorktreeSessionDialog() {
   const project = useStore((state) =>
     state.projectRegistry.projects.find(
       (candidate) => candidate.id === state.worktreeSessionRequest?.projectId,
-    ) ?? null
+    ) ?? null,
   );
   const [worktrees, setWorktrees] = useState<Worktree[]>([]);
   const [branches, setBranches] = useState<GitBranches>({ current: "", branches: [] });
-  const [mode, setMode] = useState<Mode>("new");
-  const [selectedPath, setSelectedPath] = useState("");
-  const [query, setQuery] = useState("");
   const [title, setTitle] = useState("");
   const [branch, setBranch] = useState("");
+  const [baseBranch, setBaseBranch] = useState("");
+  const [branchSeed, setBranchSeed] = useState(randomWorktreeSlug);
   const [branchTouched, setBranchTouched] = useState(false);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
@@ -37,79 +34,83 @@ export default function WorktreeSessionDialog() {
     let active = true;
     setLoading(true);
     setError("");
-    setQuery("");
     setTitle("");
     setBranchTouched(false);
+    setBranchSeed(randomWorktreeSlug());
     void Promise.all([
       api.listWorktrees(request.projectId),
       api.gitBranches(request.projectId),
     ]).then(([nextWorktrees, nextBranches]) => {
       if (!active) return;
-      const linked = nextWorktrees.filter((worktree) => !worktree.isMain);
-      const preselected = linked.find((worktree) => worktree.path === request.worktreePath);
       setWorktrees(nextWorktrees);
       setBranches(nextBranches);
-      setSelectedPath(preselected?.path ?? linked[0]?.path ?? "");
-      setMode(preselected || linked.length > 0 ? "existing" : "new");
+      setBaseBranch(nextBranches.current ?? nextBranches.branches.find((item) => item.current)?.name ?? "");
       setLoading(false);
     }).catch((cause) => {
       if (!active) return;
-      setError(friendlyError("Couldn’t load worktrees", cause));
+      setError(friendlyError("Couldn’t load branches", cause));
       setLoading(false);
     });
     return () => { active = false; };
-  }, [request?.projectId, request?.worktreePath]);
+  }, [request?.projectId]);
 
-  const linkedWorktrees = useMemo(
-    () => worktrees.filter((worktree) => !worktree.isMain),
+  const linkedBranches = useMemo(
+    () => new Set(worktrees.map((worktree) => worktree.branch).filter((value): value is string => !!value)),
     [worktrees],
   );
-  const takenBranches = useMemo(
-    () => [
-      ...worktrees.map((worktree) => worktree.branch).filter((value): value is string => !!value),
-      ...branches.branches.map((item) => item.name),
-    ],
-    [worktrees, branches],
+  const localBranches = useMemo(
+    () => branches.branches.filter((item) => !item.remote),
+    [branches],
   );
   const suggestion = useMemo(
-    () => suggestWorktreeBranch(template, title || "session", takenBranches),
-    [template, title, takenBranches],
+    () => suggestWorktreeBranch(template, branchSeed, [...linkedBranches, ...localBranches.map((item) => item.name)]),
+    [template, branchSeed, linkedBranches, localBranches],
   );
   useEffect(() => {
     if (!branchTouched) setBranch(suggestion);
   }, [suggestion, branchTouched]);
 
-  const filtered = useMemo(() => {
-    const terms = query.toLowerCase().trim().split(/\s+/).filter(Boolean);
-    if (terms.length === 0) return linkedWorktrees;
-    return linkedWorktrees.filter((worktree) => {
-      const haystack = `${worktree.branch ?? ""} ${worktree.path}`.toLowerCase();
-      return terms.every((term) => haystack.includes(term));
-    });
-  }, [linkedWorktrees, query]);
+  const branchName = branch.trim();
+  const selectedExistingBranch = localBranches.find((item) => item.name === branchName) ?? null;
+  const branchAlreadyCheckedOut = !!selectedExistingBranch && linkedBranches.has(branchName);
+  const createsBranch = !!branchName && !selectedExistingBranch;
+  const status = !branchName
+    ? "Enter a branch name to continue."
+    : branchAlreadyCheckedOut
+      ? "This branch already has a linked worktree. Choose another branch or name."
+      : selectedExistingBranch
+        ? `A new checkout will be created for the existing branch ${branchName}.`
+        : `A new branch will be created from ${baseBranch || "the current commit"}.`;
 
   const submit = async () => {
     if (!request) return;
+    if (!branchName) {
+      setError("Branch name is required.");
+      return;
+    }
+    if (branchAlreadyCheckedOut) {
+      setError("That branch already has a linked worktree.");
+      return;
+    }
     setBusy(true);
     setError("");
     try {
-      let worktreePath = selectedPath;
-      if (mode === "new") {
-        if (!branch.trim()) throw new Error("Branch name is required.");
-        setProgress("Creating worktree…");
-        worktreePath = (await api.createWorktree(request.projectId, branch.trim())).path;
-      }
-      if (!worktreePath) throw new Error("Choose a worktree.");
-      setProgress("Preparing new chat…");
+      setProgress("Creating worktree…");
+      const worktreePath = (await api.createWorktree(
+        request.projectId,
+        branchName,
+        undefined,
+        createsBranch && baseBranch ? baseBranch : undefined,
+      )).path;
+      setProgress("Opening chat…");
       startNewSession(request.projectId, {
         ...(title.trim() ? { title: title.trim() } : {}),
         worktreePath,
       });
-      setProgress("");
       setSidebarOpen(false);
       setOverlay(null);
     } catch (cause) {
-      setError(friendlyError("Couldn’t prepare the worktree chat", cause));
+      setError(friendlyError("Couldn’t create the worktree chat", cause));
       setProgress("");
       setBusy(false);
     }
@@ -117,80 +118,58 @@ export default function WorktreeSessionDialog() {
 
   if (!request) return null;
   return (
-    <Dialog title="New session in worktree" onClose={close} className="worktree-session-dialog" initialFocus="input">
+    <Dialog title="New worktree" onClose={close} className="worktree-session-dialog" initialFocus="input">
       <div className="dialog-head">
         <div>
-          <h2>New session in worktree</h2>
-          <p className="muted">Run the session, terminal, preview, and Git tools in an isolated checkout.</p>
+          <h2>New worktree</h2>
+          <p className="muted">Create an isolated checkout and start a chat there.</p>
         </div>
         <button className="icon-btn" aria-label="Close dialog" disabled={busy} onClick={close}>×</button>
       </div>
 
       <div className="worktree-session-body">
         <label className="worktree-session-field">
-          <span>Session title <span className="muted">(optional)</span></span>
+          <span>Chat name <span className="muted">(optional)</span></span>
           <input value={title} placeholder={`Work in ${project?.name ?? "this project"}`} onChange={(event) => setTitle(event.target.value)} />
         </label>
 
-        <div className="worktree-mode-tabs" role="tablist" aria-label="Worktree source">
-          <button role="tab" aria-selected={mode === "existing"} className={mode === "existing" ? "active" : ""}
-            disabled={loading || linkedWorktrees.length === 0} onClick={() => setMode("existing")}>
-            Existing worktree
-          </button>
-          <button role="tab" aria-selected={mode === "new"} className={mode === "new" ? "active" : ""}
-            disabled={loading} onClick={() => setMode("new")}>
-            New branch
-          </button>
-        </div>
-
-        {loading ? <div className="empty">Loading worktrees…</div> : mode === "existing" ? (
-          <>
-            <input
-              className="worktree-search"
-              value={query}
-              placeholder="Filter by branch or path…"
-              onChange={(event) => setQuery(event.target.value)}
-            />
-            <div className="worktree-choice-list" role="radiogroup" aria-label="Existing worktrees">
-              {filtered.map((worktree) => (
-                <label className={`worktree-choice ${selectedPath === worktree.path ? "selected" : ""}`} key={worktree.path}>
-                  <input
-                    type="radio"
-                    name="worktree"
-                    checked={selectedPath === worktree.path}
-                    onChange={() => setSelectedPath(worktree.path)}
-                  />
-                  <span>
-                    <strong>{worktreeLabel(worktree.branch, worktree.path)}</strong>
-                    <small>{worktree.path}</small>
-                  </span>
-                </label>
-              ))}
-              {filtered.length === 0 && <div className="empty">No linked worktrees match.</div>}
-            </div>
-          </>
-        ) : (
+        {loading ? <div className="empty">Loading branches…</div> : <>
           <label className="worktree-session-field">
             <span>Branch</span>
             <input
               className="mono"
               value={branch}
               placeholder={suggestion}
-              onChange={(event) => { setBranch(event.target.value); setBranchTouched(true); }}
+              list="worktree-branches"
+              onChange={(event) => { setBranch(event.target.value); setBranchTouched(true); setError(""); }}
+              aria-describedby="worktree-branch-status"
             />
-            <small className="muted">Suggested from <code>{template || "feat/{slug}"}</code>. The checkout folder is created automatically.</small>
+            <datalist id="worktree-branches">
+              {localBranches.filter((item) => !linkedBranches.has(item.name)).map((item) => <option key={item.name} value={item.name} />)}
+            </datalist>
+            <small id="worktree-branch-status" className={branchAlreadyCheckedOut ? "worktree-field-warning" : "muted"}>{status}</small>
           </label>
-        )}
+
+          {createsBranch && <label className="worktree-session-field">
+            <span>Base branch</span>
+            <select value={baseBranch} onChange={(event) => setBaseBranch(event.target.value)}>
+              {localBranches.map((item) => <option key={item.name} value={item.name}>{item.name}</option>)}
+            </select>
+            <small className="muted">The new branch starts from this branch.</small>
+          </label>}
+
+          <p className="worktree-checkout-note">The checkout folder is created automatically.</p>
+        </>}
 
         {error && <div className="inline-error" role="alert">{error}</div>}
       </div>
 
       <div className="dialog-foot">
-        <span className="muted">{progress || (mode === "new" ? "The worktree is created before the session is registered." : "The existing checkout is reused.")}</span>
+        <span className="muted">{progress || "A new chat opens as soon as the worktree is ready."}</span>
         <span className="header-spacer" />
         <button className="small-btn" disabled={busy} onClick={close}>Cancel</button>
-        <button className="primary-btn" disabled={busy || loading || (mode === "existing" ? !selectedPath : !branch.trim())} onClick={() => void submit()}>
-          {busy ? "Preparing…" : "Continue to composer"}
+        <button className="primary-btn" disabled={busy || loading || !branchName || branchAlreadyCheckedOut} onClick={() => void submit()}>
+          {busy ? progress || "Creating…" : "Create worktree & start chat"}
         </button>
       </div>
     </Dialog>

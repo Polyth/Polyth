@@ -10,7 +10,7 @@ Polyth is a local web app for project-scoped OpenCode coding-agent sessions: a N
 - `packages/session` — append-only `node:sqlite` WAL event store, projections, queue, `deriveMessages`.
 - `packages/backend-opencode` — the ONLY OpenCode integration: spawns/attaches `opencode serve`, translates SSE to runtime events.
 - `packages/server` — composition root: HTTP/WS gateway, `RouteHandler` chain, per-project runtime pool, broadcast, auth, static web.
-- Feature packages (one dir each under `packages/`): permissions, goals, files, git, commands, terminal, preview, multirun, fusion, walkthrough, schedule, knowledge, github, usage, browser, dictation, models, hotkeys, plugins.
+- Feature packages (one dir each under `packages/`): permissions, goals, files, git, commands, terminal, multirun, fusion, walkthrough, schedule, knowledge, github, usage, browser, dictation, models, hotkeys, plugins.
 
 ## Non-negotiable rules
 

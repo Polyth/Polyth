@@ -17,9 +17,9 @@ export type DockViability = "viable" | "blocked" | "pending";
 
 /** Chat body containers: the message timeline or the fresh-session stage. */
 const TIMELINE_SELECTOR = ".timeline-wrap, .stage";
-/** Both composer variants — the hero card is a composer too (a fresh session
- *  with a typed draft was exactly the PANE-VERIFY-02 reload shape). */
-const COMPOSER_SELECTOR = ".composer, .composer-hero";
+/** The shared composer covers both fresh and existing sessions. A fresh
+ *  session with a typed draft was exactly the PANE-VERIFY-02 reload shape. */
+const COMPOSER_SELECTOR = ".composer";
 const ACTION_SELECTOR = "button, textarea, [role=button]";
 
 /** True when `hit` reaches `action`'s center through an intentional transient

@@ -1,11 +1,12 @@
 // Bundle apps/web to dist/ — runnable from repo root: node apps/web/build.ts
 import { build } from "esbuild";
-import { copyFile, mkdir, readFile, rm } from "node:fs/promises";
+import { copyFile, cp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { scaleUiFontSizes } from "./fontScaleCss.ts";
 
 const here = import.meta.dirname;
 const dist = join(here, "dist");
+const projectIcons = join(here, "src", "assets", "project-icons");
 
 await rm(dist, { recursive: true, force: true });
 await mkdir(dist, { recursive: true });
@@ -70,6 +71,11 @@ await build({
   logLevel: "info",
 });
 await copyFile(join(here, "src/index.html"), join(dist, "index.html"));
+const projectIconNames = (await readdir(projectIcons))
+  .filter((name) => name.endsWith(".svg"))
+  .sort();
+await cp(projectIcons, join(dist, "assets", "project-icons"), { recursive: true });
+await writeFile(join(dist, "project-icons.json"), JSON.stringify(projectIconNames));
 // PWA files live at the origin root and are copied verbatim instead of bundled.
 await Promise.all([
   copyFile(join(here, "sw.js"), join(dist, "sw.js")),

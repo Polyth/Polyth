@@ -57,7 +57,7 @@ async function render(props: ProviderLogoProps): Promise<string> {
   return renderToStaticMarkup(createElement(ProviderLogo, props));
 }
 
-test("known providers render accessible monochrome SVG marks", async () => {
+test("known providers render decorative monochrome SVG marks", async () => {
   const providers = [
     "claude",
     "anthropic",
@@ -90,8 +90,9 @@ test("known providers render accessible monochrome SVG marks", async () => {
 
   for (const providerID of providers) {
     const html = await render({ providerID });
-    assert.match(html, /role="img"/, `${providerID} has an image role`);
-    assert.match(html, /aria-label="[^"]+ provider"/, `${providerID} has an accessible name`);
+    assert.match(html, /aria-hidden="true"/, `${providerID} is hidden beside visible provider text`);
+    assert.doesNotMatch(html, /role="img"/, `${providerID} does not duplicate the adjacent name`);
+    assert.doesNotMatch(html, /aria-label=/, `${providerID} does not duplicate the adjacent name`);
     assert.match(html, /<svg\b/, `${providerID} renders an SVG`);
     assert.match(html, /(?:fill|stroke)="currentColor"/, `${providerID} inherits the theme color`);
     assert.doesNotMatch(html, /#[\da-f]{3,8}\b/i, `${providerID} does not render a palette color`);
@@ -165,10 +166,10 @@ test("provider surfaces use ProviderLogo without brand palette rules", () => {
     "run-provider-logo",
     "set-provider-logo",
     "usage-legend-logo",
+    "usage-model-logo",
     "usage-provider-mark",
     "usage-provider-mark-large",
     "usage-provider-mark-regular",
-    "usage-provider-mark-small",
   ].sort();
   const bareLogoClasses = providerLogoClassNames();
   assert.deepEqual(bareLogoClasses, expectedLogoClasses, "every ProviderLogo CSS class is audited");

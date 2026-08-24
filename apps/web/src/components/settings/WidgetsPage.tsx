@@ -282,13 +282,15 @@ export default function WidgetsPage() {
             {projects.map((project) => <option key={project.id} value={project.id}>{project.name || project.path}</option>)}
           </select>
         </label>
-        <span className={`widget-save-state ${storeStatus.saveStatus}`} role="status">
-          {storeStatus.saveStatus === "saving"
-            ? "Saving…"
-            : storeStatus.saveStatus === "error"
-              ? <>Couldn’t save <button type="button" onClick={retryWidgetSave}>Retry</button></>
-              : notice || "Changes saved automatically"}
-        </span>
+        {(storeStatus.saveStatus !== "saved" || notice !== "") && (
+          <span className={`widget-save-state ${storeStatus.saveStatus}`} role="status">
+            {storeStatus.saveStatus === "saving"
+              ? "Saving…"
+              : storeStatus.saveStatus === "error"
+                ? <>Couldn’t save <button type="button" onClick={retryWidgetSave}>Retry</button></>
+                : notice}
+          </span>
+        )}
         <div className="widget-toolbar-actions">
           <button type="button" onClick={undoWidgetLayout} disabled={!storeStatus.canUndo}>Undo</button>
           <button type="button" onClick={applyToAllProjects} disabled={!activeProjectId || projects.length < 2}>Apply to all projects</button>

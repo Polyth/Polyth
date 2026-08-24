@@ -28,9 +28,9 @@ test("sidebar geometry scales type from ui font size and density controls rows",
     "--nav-branch-size",
     "--nav-session-size",
     "--nav-meta-size",
-    "--nav-indent-project: 4px",
-    "--nav-indent-worktree: 18px",
-    "--nav-indent-session: 64px",
+    "--nav-indent-project: 0px",
+    "--nav-indent-worktree: 8px",
+    "--nav-indent-session: 26px",
     "--nav-status-width: 56px",
   ]) assert.ok(css.includes(variable), `${variable} is part of the sidebar geometry contract`);
 
@@ -49,6 +49,10 @@ test("sidebar geometry scales type from ui font size and density controls rows",
     "session hover does not also receive the global button background");
   assert.match(css, /--ui-font-scale:\s*1;/,
     "the build applies the interface font scale to fixed-pixel text rules");
+  assert.match(css, /\.project-card-shell\s*\{[\s\S]*?grid-template-columns:\s*minmax\(0,\s*1fr\) repeat\(3,\s*36px\)/,
+    "each project action has a dedicated, equally sized grid cell");
+  assert.match(css, /\.project-new-session,[\s\S]*?\.project-menu-btn\s*\{[\s\S]*?place-items:\s*center;/,
+    "project action glyphs are centered inside their hover targets");
   assert.doesNotMatch(css, /#root\s*\{[^}]*\bzoom\s*:/,
     "font scaling must not resize layout geometry");
   for (const density of ["compact", "balanced", "comfortable"]) {

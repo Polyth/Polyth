@@ -338,6 +338,10 @@ export interface SessionRef { id: string }
 export interface TurnRef { turnId: string }
 export interface UserTurnInput {
   text: string;
+  /** Request a durable title derived from this first prompt when the session
+   *  still has a placeholder title. The client owns the user preference; the
+   *  server owns the append + projection update. */
+  autoTitle?: boolean;
   attachments?: AttachmentRef[];
   model?: ModelRef;
   agent?: string;
@@ -639,6 +643,8 @@ export interface ProjectDefaults {
   agent?: string | null;
   /** null explicitly inherits the browser's global session default. */
   model?: ModelRef | null;
+  /** Persist composer model choices as this project's default. */
+  rememberModelSelection?: boolean;
   groupingMode?: string;
   worktreeBehavior?: "project-root" | "fresh-worktree";
 }
@@ -1028,28 +1034,6 @@ export interface TerminalClosedData {
   terminalId: string;
   projectId: string;
   exitCode: number | null;
-}
-
-// ---------------------------------------------------------------- preview (M3)
-
-export type PreviewStatus = "off" | "starting" | "running";
-
-export interface PreviewState {
-  url: string | null;
-  /** Local URLs announced by the process and/or discovered from listeners.
-   * `url` is the currently selected reachable candidate. */
-  urls?: string[];
-  status: PreviewStatus;
-  port?: number;
-  command?: string;
-}
-
-export interface PreviewStartInput {
-  projectId: string;
-  /** override detected script; run as a shell command with PORT env set */
-  command?: string;
-  /** explicit port; omitted = OS-assigned free port */
-  port?: number;
 }
 
 // ================================================================ parity contracts (WP1)
@@ -1589,6 +1573,9 @@ export type BrowserTarget =
 
 export type BrowserAction =
   | { kind: "click"; target: BrowserTarget }
+  /** Resolve the DOM element under a revisioned screenshot point without
+   * interacting with it. Used by the user-facing element picker. */
+  | { kind: "point"; target: Extract<BrowserTarget, { point: unknown }> }
   | { kind: "type"; target: BrowserTarget; text: string; submit?: boolean }
   | { kind: "press"; key: string }
   | { kind: "scroll"; x?: number; y?: number; target?: BrowserTarget }
