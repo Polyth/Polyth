@@ -104,7 +104,7 @@ test("focused terminal owns Ctrl+Shift+F while Ctrl+` still reaches the shell", 
       cancelable: true,
     });
     await act(async () => {
-      body.dispatchEvent(find);
+      body.dispatchEvent(find as unknown as Event);
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
     assert.equal(find.defaultPrevented, true);
@@ -118,7 +118,7 @@ test("focused terminal owns Ctrl+Shift+F while Ctrl+` still reaches the shell", 
         ctrlKey: true,
         bubbles: true,
         cancelable: true,
-      }));
+      }) as unknown as Event);
     });
     assert.equal(getState().railPlugin, "terminal");
     assert.deepEqual(sent, [], "the shell shortcut is not sent to the PTY");
