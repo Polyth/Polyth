@@ -9287,6 +9287,12 @@ html[data-sheet="open"], html[data-sheet="open"] body { overflow: hidden; }
     background: transparent;
     color: var(--muted);
   }
+  /* Beat the legacy `.composer .composer-mobile-extensions .header-action`
+     width without using !important: workflow remains a full touch target. */
+  .composer.composer-mobile .composer-mobile-extensions .composer-workflow {
+    width: var(--tap);
+    min-width: var(--tap);
+  }
   .composer-mobile .composer-add-trigger:active,
   .composer-mobile .composer-add-trigger:focus-visible,
   .composer-mobile .composer-auto-approve:active,
