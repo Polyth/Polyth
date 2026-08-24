@@ -355,6 +355,36 @@ export function parseWidgetLayout(
     if (!data || data.version !== 1 || typeof data.zones !== "object" || typeof data.widgets !== "object") {
       return fallback;
     }
+    // The standalone Preview package was replaced by Browser. Preserve the
+    // old widget's placement, visibility, size, and position under its new id.
+    const legacyPreview = data.widgets["preview.app"];
+    if (legacyPreview && definitionById.has("browser.app")) {
+      const persistedBrowser = data.widgets["browser.app"];
+      data.widgets = {
+        ...data.widgets,
+        "browser.app": persistedBrowser ?? {
+          ...legacyPreview,
+          definitionId: "browser.app",
+          pluginId: "browser",
+          title: "Browser",
+        },
+      };
+      delete data.widgets["preview.app"];
+      for (const zone of [...WIDGET_ZONES, "top"] as const) {
+        const ids = data.zones[zone];
+        if (Array.isArray(ids) && ids.includes("preview.app")) {
+          data.zones[zone] = [...new Set(ids.map((value) =>
+            value === "preview.app" ? "browser.app" : value))];
+        }
+      }
+      for (const slot of UI_SLOTS) {
+        const ids = data.slotPlacements?.[slot];
+        if (Array.isArray(ids) && ids.includes("preview.app")) {
+          data.slotPlacements![slot] = [...new Set(ids.map((value) =>
+            value === "preview.app" ? "browser.app" : value))];
+        }
+      }
+    }
     // `core.composer` and `core.chat` used to render the same surface. Migrate
     // the retired duplicate into the canonical conversation widget so an
     // existing visible canvas never loses its chat during catalog cleanup.

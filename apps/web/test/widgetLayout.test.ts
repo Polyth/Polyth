@@ -248,6 +248,33 @@ test("persisted composer widget migrates to the conversation widget", () => {
   assert.deepEqual(parsed.widgets["core.chat"]?.position, { x: 1, y: 0 });
 });
 
+test("persisted preview widget migrates to the shared browser widget", () => {
+  const parsed = parseWidgetLayout(JSON.stringify({
+    version: 1,
+    audience: "standard",
+    zones: {
+      header: [],
+      left: [],
+      main: [],
+      right: [],
+      bottom: ["preview.app"],
+      floating: [],
+    },
+    widgets: {
+      "preview.app": {
+        visible: true,
+        size: { w: 11, h: 8 },
+        position: { x: 1, y: 2 },
+      },
+    },
+  }), ["browser.app"]);
+
+  assert.equal("preview.app" in parsed.widgets, false);
+  assert.deepEqual(parsed.zones.bottom, ["browser.app"]);
+  assert.equal(parsed.widgets["browser.app"]?.visible, true);
+  assert.deepEqual(parsed.widgets["browser.app"]?.size, { w: 11, h: 8 });
+});
+
 test("invalid persisted layouts fall back to defaults", () => {
   assert.deepEqual(
     parseWidgetLayout("not json", ["core.chat"]),

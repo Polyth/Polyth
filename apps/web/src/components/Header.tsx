@@ -76,7 +76,7 @@ const ICONS: Record<AppView, React.ReactNode> = {
 // Icons for capabilities that are not full views (panels, settings pages).
 const EXTRA_ICONS: Record<string, React.ReactNode> = {
   files: <Icon.files />,
-  preview: <Icon.globe />,
+  browser: <Icon.globe />,
   git: <Icon.tree />,
   terminal: <Icon.term />,
   usage: <Icon.usage />,

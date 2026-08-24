@@ -347,6 +347,7 @@ test("parsePrefs restores persona, drops unknown plugins, and fills empty lists"
   const creator = parsePrefs(JSON.stringify({ persona: "creator", plugins: [] }));
   assert.equal(creator.persona, "creator");
   assert.deepEqual(creator.plugins, ["session", "browser", "files"]);
+  assert.deepEqual(parsePrefs(JSON.stringify({ plugins: ["preview"] })).plugins, ["browser"]);
 });
 
 test("model preference wrapper updates and persists favorites, sort, and recents", () => {
