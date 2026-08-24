@@ -287,6 +287,11 @@ async function openApp(options: OpenOptions): Promise<Page> {
   await context.addInitScript(({ persona, projectId }: { persona: string; projectId: string }) => {
     localStorage.setItem("polyth.prefs", persona);
     localStorage.setItem(`polyth.projectSetup.v1.${projectId}`, "completed");
+    localStorage.setItem(`polyth.workspaceMode.v1.${projectId}`, "chat");
+    localStorage.setItem(`polyth.capabilityLayout.v1.${projectId}`, JSON.stringify({
+      version: 1,
+      placements: { workflow: { tier: "primary", rank: 4 } },
+    }));
   }, { persona: PERSONA, projectId: PROJECT_ID });
   if (options.runs) {
     await context.route("**/api/workflow-runs?projectId=*", (route) =>
@@ -300,6 +305,7 @@ async function openApp(options: OpenOptions): Promise<Page> {
   await page.goto(`${BASE}/p/${PROJECT_ID}/s/${options.sessionId}`, { waitUntil: "load" });
   await page.waitForSelector(".app", { timeout: 15_000 });
   await page.waitForSelector(".composer-card", { state: "visible", timeout: 15_000 });
+  await page.waitForSelector(".app.mode-chat.view-session", { state: "visible", timeout: 15_000 });
   await page.waitForTimeout(150);
   return page;
 }
@@ -325,6 +331,31 @@ async function assertNoOverflow(page: Page, label: string): Promise<void> {
   assert.deepEqual(geometry.overflowing, [], `${label}: interactive controls leave the viewport`);
 }
 
+async function assertTouchTargets(page: Page, selector: string, label: string): Promise<void> {
+  const targets = await page.locator(selector).evaluateAll((elements) =>
+    elements
+      .filter((element) => {
+        const box = element.getBoundingClientRect();
+        const style = getComputedStyle(element);
+        return box.width > 0 && box.height > 0 && style.visibility !== "hidden";
+      })
+      .map((element) => {
+        const box = element.getBoundingClientRect();
+        return {
+          label: element.getAttribute("aria-label") ?? element.textContent?.trim() ?? element.tagName,
+          width: box.width,
+          height: box.height,
+        };
+      }));
+  assert.ok(targets.length > 0, `${label}: no visible targets found`);
+  for (const target of targets) {
+    assert.ok(
+      target.width >= 44 && target.height >= 44,
+      `${label}: ${target.label} is only ${target.width}×${target.height}px`,
+    );
+  }
+}
+
 test("complete workflow journey remains synchronized, accessible, and responsive", async () => {
   const page = await openApp({
     width: 1280,
@@ -335,9 +366,18 @@ test("complete workflow journey remains synchronized, accessible, and responsive
   const context = page.context();
   const video = page.video();
 
+  // The header capability is builder-only. Running a saved workflow belongs
+  // to the Chat composer launcher, not to the header navigation control.
+  const headerWorkflow = page.locator(".view-switcher").getByRole("button", { name: "Workflows" });
+  await headerWorkflow.click();
+  await page.waitForSelector(".workflow-page", { state: "visible" });
+  assert.equal(await page.getByRole("dialog", { name: "Run a workflow" }).count(), 0);
+  await page.getByRole("button", { name: "Back to chat" }).click();
+  await page.waitForSelector(".app.mode-chat.view-session", { state: "visible" });
+
   const editor = page.locator(".composer-editor");
   await editor.fill("Audit release candidate 42");
-  const launcherButton = page.getByRole("button", { name: "Run draft with a workflow" });
+  const launcherButton = page.getByRole("button", { name: "Run workflow" });
   await launcherButton.focus();
   await launcherButton.click();
   const dialog = page.getByRole("dialog", { name: "Run a workflow" });
@@ -354,15 +394,12 @@ test("complete workflow journey remains synchronized, accessible, and responsive
   assert.equal(await page.evaluate(() => document.activeElement?.getAttribute("aria-label")), "Close workflow launcher");
 
   await dialog.getByRole("button", { name: "Run Release pipeline workflow" }).click();
-  await page.waitForSelector(".workflow-page", { state: "visible" });
-  await page.waitForSelector(".workflow-run-results .workflow-status.status-running", { state: "visible" });
-  await page.waitForSelector(".workflow-run-indicator", { state: "visible" });
-  await page.waitForSelector(".sb-workflow", { state: "visible" });
-  assert.match(await page.locator(".workflow-run-form textarea").inputValue(), /Audit release candidate 42/);
-
-  await page.getByRole("button", { name: "Back to chat" }).click();
+  await page.waitForSelector(".app.mode-chat.view-session", { state: "visible" });
+  assert.equal(await page.locator(".workflow-page").count(), 0, "composer launch must remain in Chat");
   const timeline = page.locator(".workflow-timeline-card");
   await timeline.waitFor({ state: "visible" });
+  await page.waitForSelector(".workflow-run-indicator", { state: "visible" });
+  await page.waitForSelector(".sb-workflow", { state: "visible" });
   assert.match(await timeline.getAttribute("aria-label") ?? "", /Workflow Release pipeline, Running/);
   const consumedDraft = await page.evaluate((sessionId) => ({
     dom: (document.querySelector(".composer-editor") as HTMLTextAreaElement | null)?.value,
@@ -392,7 +429,10 @@ test("complete workflow journey remains synchronized, accessible, and responsive
   if (video) await video.saveAs(join(ARTIFACTS, "workflow_complete_journey.webm"));
 
   const manual = await openApp({ width: 1280, height: 900, sessionId: MANUAL_PARENT, runs: [manualRun] });
+  await manual.waitForSelector(".app.mode-chat.view-session", { state: "visible" });
   await manual.waitForSelector(".workflow-timeline-card .needs-human", { state: "visible" });
+  await manual.waitForSelector(".workflow-run-indicator.waiting", { state: "visible" });
+  await manual.waitForSelector(".sb-workflow", { state: "visible" });
   assert.match(await manual.locator(".workflow-timeline-summary").textContent() ?? "", /1 waiting for you/);
   await manual.getByRole("button", { name: "Review and respond in Reviewer child session" }).click();
   await manual.waitForSelector(".perm-banner", { state: "visible" });
@@ -414,27 +454,23 @@ test("complete workflow journey remains synchronized, accessible, and responsive
 
   for (const width of [375, 320]) {
     const phone = await openApp({ width, height: width === 375 ? 812 : 700, sessionId: MANUAL_PARENT, runs: [manualRun] });
+    await phone.waitForSelector(".app.mode-chat.view-session", { state: "visible" });
     await phone.waitForSelector(".workflow-timeline-card", { state: "visible" });
     await assertNoOverflow(phone, `timeline@${width}`);
-    const touchTargets = await phone.locator(".workflow-timeline-card button").evaluateAll((buttons) =>
-      buttons.map((button) => {
-        const box = button.getBoundingClientRect();
-        return { label: button.textContent?.trim(), width: box.width, height: box.height };
-      }));
-    for (const target of touchTargets) {
-      assert.ok(target.height >= 44, `timeline@${width}: ${target.label} is only ${target.height}px tall`);
-    }
+    await assertTouchTargets(phone, ".workflow-timeline-card button", `timeline@${width}`);
 
     await phone.locator(".composer-editor").click();
-    await phone.getByRole("button", { name: "Browse workflows" }).click();
+    await phone.getByRole("button", { name: "Run workflow" }).click();
     await phone.waitForSelector(".workflow-launch-dialog", { state: "visible" });
     await assertNoOverflow(phone, `launcher@${width}`);
+    await assertTouchTargets(phone, ".workflow-launch-dialog button", `launcher@${width}`);
     const dialogBox = await phone.locator(".workflow-launch-dialog").boundingBox();
     assert.ok(dialogBox && dialogBox.width <= width - 20 + 1, `launcher@${width}: dialog is too wide`);
     await phone.keyboard.press("Escape");
     await phone.getByRole("button", { name: "View workflow", exact: true }).click();
     await phone.waitForSelector(".workflow-page", { state: "visible" });
     await assertNoOverflow(phone, `workflow view@${width}`);
+    await assertTouchTargets(phone, ".workflow-page button", `workflow view@${width}`);
     await phone.screenshot({ path: join(ARTIFACTS, `workflow_mobile_${width}.png`), fullPage: false });
     await phone.context().close();
   }
