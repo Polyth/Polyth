@@ -59,18 +59,19 @@ export function parseOpenCodePluginJson(text: string): OpenCodePluginPreviewDto 
     };
   }
 
-  let rawEntries: unknown;
+  let rawEntries: unknown[];
   let ignoredKeys: string[] = [];
   if (Array.isArray(parsed)) {
     rawEntries = parsed;
   } else if (typeof parsed === "string") {
     rawEntries = [parsed];
   } else if (isRecord(parsed)) {
-    rawEntries = parsed.plugin;
+    const plugin = parsed.plugin;
     ignoredKeys = Object.keys(parsed).filter((key) => key !== "$schema" && key !== "plugin");
-    if (!Array.isArray(rawEntries)) {
+    if (!Array.isArray(plugin)) {
       return { entries: [], errors: ['expected a "plugin" array in the OpenCode config'], ignoredKeys };
     }
+    rawEntries = plugin;
   } else {
     return { entries: [], errors: ["expected a plugin array or OpenCode config object"], ignoredKeys: [] };
   }
