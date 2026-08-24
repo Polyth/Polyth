@@ -168,6 +168,10 @@ test("workflow journey surfaces expose task launch, chat progress, HITL, stop, a
   ]);
   assert.match(launcher, /Your draft becomes the shared task/);
   assert.match(launcher, /api\.runWorkflow/);
+  assert.ok(
+    launcher.indexOf("consumeDraft();") < launcher.indexOf("await openSession(parentSessionId"),
+    "the accepted workflow consumes the draft before parent-session refresh can remount Composer",
+  );
   assert.match(composer, /workflowDraftText: text/);
   assert.match(composer, /workflowAttachmentCount: attachments\.length/);
   assert.match(timeline, /<WorkflowTimelineCard run=\{model\.workflowRun\}/);

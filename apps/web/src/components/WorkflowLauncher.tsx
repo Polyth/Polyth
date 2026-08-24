@@ -91,10 +91,14 @@ export default function WorkflowLauncher({
       if (!parentSessionId) throw new Error("The parent session could not be created.");
       const started = await api.runWorkflow(workflow.id, parentSessionId, task.trim());
       publishWorkflowRun(started);
+      // Consume immediately after the server accepts the run. openSession()
+      // can remount Composer while refreshing the parent event log; clearing
+      // through the old launcher's callback after that remount would leave the
+      // replacement composer showing the submitted draft.
+      consumeDraft();
       await openSession(parentSessionId, { showChat: false }).catch((cause) => {
         setUiError(friendlyError("Workflow started, but the parent timeline couldn’t refresh", cause));
       });
-      consumeDraft();
       handOffWorkflowLaunch({
         projectId,
         sessionId: parentSessionId,
