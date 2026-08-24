@@ -2,12 +2,12 @@
 import { api } from "./api.ts";
 import { SyncClient, type SyncStatus } from "./sync.ts";
 import { buildModel } from "./reduce.ts";
-import { displaySessionTitle, isPlaceholderTitle, modelToMarkdown, titleFromPrompt } from "./format.ts";
+import { displaySessionTitle, isPlaceholderTitle, modelToMarkdown } from "./format.ts";
 import { friendlyError } from "./settings.ts";
 import { formatAppUrl, parseAppUrl } from "./router.ts";
 import * as store from "./store.ts";
 import { resolveActiveProjectId } from "./projectRegistry.ts";
-import type { AttachmentRef, JsonObject, ModelRef, Project, SessionEvent } from "@polyth/contracts";
+import type { AttachmentRef, JsonObject, ModelRef, Project, ProjectPatch, SessionEvent } from "@polyth/contracts";
 import { suggestWorktreeBranch } from "./worktreeSessions.ts";
 import { installPushDeepLinks, registerServiceWorker } from "./push.ts";
 import { notificationCentre } from "./notificationCentre.ts";
@@ -60,7 +60,7 @@ function fetchBranch(projectId: string, sessionId: string | null): void {
         && current.activeProjectId === projectId
         && current.activeSessionId === sessionId
       ) {
-        store.setGitBranch(st.branch);
+        store.setGitBranch(st.branch ?? "");
       }
     })
     .catch(() => {
@@ -401,7 +401,7 @@ export async function renameProject(id: string, name: string): Promise<void> {
  * browser-only sidebar preference. */
 export async function updateProjectAppearance(
   id: string,
-  patch: { color?: string; icon?: string },
+  patch: ProjectPatch,
 ): Promise<void> {
   const updated = await api.patchProject(id, patch);
   store.applyProjectUpsert(updated);
@@ -517,16 +517,16 @@ export interface SendOptions {
 export async function sendMessage(text: string, model?: JsonObject, agent?: string, opts?: SendOptions): Promise<boolean> {
   const id = opts?.targetSessionId ?? store.getState().activeSessionId;
   if (!id) return false;
-  // If the stored title is still a placeholder, derive one from the first
-  // prompt so the sidebar/header update immediately (display-only upsert).
+  // The server records an auto title with the first admitted user message.
+  // Keeping this durable prevents later projection broadcasts, refreshes, and
+  // reconnects from restoring the "New session" placeholder.
   const session = store.getState().sessions.find((s) => s.id === id);
-  if (store.getState().settings.autoTitleSessions && session && isPlaceholderTitle(session.title, session.id)) {
-    const derived = titleFromPrompt(text);
-    if (derived) store.upsertSession({ ...session, title: derived, updatedAt: Date.now() });
-  }
+  const autoTitle = store.getState().settings.autoTitleSessions
+    && !!session
+    && isPlaceholderTitle(session.title, session.id);
   try {
     await api.sendMessage(id, {
-      text, model, agent,
+      text, model, agent, ...(autoTitle ? { autoTitle: true } : {}),
       ...(opts?.attachments?.length ? { attachments: opts.attachments } : {}),
       ...(opts?.delivery ? { delivery: opts.delivery } : {}),
       ...(opts?.dismissPending ? { dismissPending: true } : {}),

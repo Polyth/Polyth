@@ -7,7 +7,7 @@ import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from "
 import { consumePendingSettingsPage, setOverlay } from "../store.ts";
 import { listSlots } from "../slots.ts";
 import { isPackageEnabled, subscribePackages } from "../packages/registry.ts";
-import { useSlotVersion } from "./slots/SlotHost.ts";
+import SlotHost, { useSlotVersion } from "./slots/SlotHost.ts";
 import { usePrefs } from "../prefs.ts";
 import {
   registerSettingsItems, searchSettingsItems,
@@ -311,9 +311,6 @@ export default function SettingsView({ onClose = () => setOverlay(null) }: { onC
         aria-describedby={mobile ? undefined : "settings-close-hint"}
       >
         <nav className="modal-nav settings-nav">
-          <div className="settings-nav-head">
-            <h2><span className="polyth-mark">p</span> polyth</h2>
-          </div>
           <input
             className="settings-nav-search"
             value={filter}
@@ -374,7 +371,7 @@ export default function SettingsView({ onClose = () => setOverlay(null) }: { onC
             </nav>
           )}
           <div className="nav-foot">
-            <span>Changes save automatically</span>
+            <SlotHost slot="settings.footer" />
           </div>
         </nav>
         <div className="modal-main settings-pane">
@@ -405,11 +402,6 @@ export default function SettingsView({ onClose = () => setOverlay(null) }: { onC
             {/* A page that throws must not white-screen the whole app —
                 Settings renders outside App's main view boundary. */}
             <ViewErrorBoundary resetKey={current.id} inline>{current.render()}</ViewErrorBoundary>
-          </div>
-          <div className="modal-foot">
-            <span className="modal-note">Changes are saved as you edit</span>
-            <span className="header-spacer" />
-            <button className="btn-accent" onClick={onClose}>Done</button>
           </div>
         </div>
       </div>

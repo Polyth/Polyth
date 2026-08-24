@@ -16,7 +16,7 @@ export type Block =
   | { kind: "heading"; level: number; inline: Inline[] }
   | { kind: "para"; inline: Inline[] }
   | { kind: "code"; lang: string; text: string; closed: boolean }
-  | { kind: "list"; ordered: boolean; items: Inline[][] }
+  | { kind: "list"; ordered: boolean; items: Array<{ inline: Inline[]; checked?: boolean }> }
   | { kind: "quote"; blocks: Block[] }
   | { kind: "table"; header: Inline[][]; rows: Inline[][][] }
   | { kind: "hr" }
@@ -99,7 +99,16 @@ export function parseMarkdown(text: string): Block[] {
   };
   const flushList = () => {
     if (list) {
-      out.push({ kind: "list", ordered: list.ordered, items: list.items.map(parseInline) });
+      out.push({
+        kind: "list",
+        ordered: list.ordered,
+        items: list.items.map((item) => {
+          const task = /^\[([ xX])\]\s+(.*)$/.exec(item);
+          return task
+            ? { inline: parseInline(task[2]!), checked: task[1]!.toLowerCase() === "x" }
+            : { inline: parseInline(item) };
+        }),
+      });
       list = null;
     }
   };
@@ -197,7 +206,7 @@ export function collectImages(blocks: Block[]): Array<{ src: string; alt: string
   const walk = (bs: Block[]) => {
     for (const b of bs) {
       if (b.kind === "para" || b.kind === "heading") walkInline(b.inline);
-      else if (b.kind === "list") b.items.forEach(walkInline);
+      else if (b.kind === "list") b.items.forEach((item) => walkInline(item.inline));
       else if (b.kind === "quote") walk(b.blocks);
       else if (b.kind === "table") { b.header.forEach(walkInline); b.rows.forEach((r) => r.forEach(walkInline)); }
     }

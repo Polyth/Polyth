@@ -7,6 +7,7 @@ import { existsSync, mkdirSync } from "node:fs";
 import { readFile, rename, writeFile, unlink } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import type { JsonObject, JsonValue, OpenCodePluginConfigEntry } from "@polyth/contracts";
 
 export interface McpApplyEntry {
   name: string;
@@ -28,6 +29,14 @@ export interface BackendConfigApplier {
   applyBehavior(text: string): Promise<number>;
   /** Replace the "mcp" block of the backend config, preserving all other keys. */
   applyMcp(entries: McpApplyEntry[]): Promise<void>;
+  /** Read valid entries from OpenCode's `plugin` array. */
+  listPlugins(): Promise<OpenCodePluginConfigEntry[]>;
+  /** Merge entries into OpenCode's `plugin` array, deduplicated by package spec. */
+  applyPlugins(plugins: unknown[]): Promise<OpenCodePluginConfigEntry[]>;
+  /** Replace OpenCode's plugin list with a validated desired state. */
+  replacePlugins(plugins: unknown[]): Promise<OpenCodePluginConfigEntry[]>;
+  /** Remove every string/tuple entry matching a package spec. */
+  removePlugin(spec: string): Promise<{ plugins: OpenCodePluginConfigEntry[]; removed: boolean }>;
   /** Mirror provider/model visibility into the backend config, preserving all
    *  other keys (including unrelated per-provider options). */
   applyProviderVisibility(v: ProviderVisibilityApply): Promise<void>;
@@ -113,6 +122,56 @@ async function atomicWrite(path: string, data: string): Promise<void> {
   }
 }
 
+const invalidPluginEntry = (message: string): Error =>
+  Object.assign(new Error(message), { code: "invalid-input", field: "plugins" });
+
+const isJsonValue = (value: unknown): value is JsonValue => {
+  if (value === null || typeof value === "string" || typeof value === "boolean") return true;
+  if (typeof value === "number") return Number.isFinite(value);
+  if (Array.isArray(value)) return value.every(isJsonValue);
+  if (typeof value !== "object") return false;
+  return Object.values(value as Record<string, unknown>).every(isJsonValue);
+};
+
+const normalizePluginSpec = (value: unknown, index?: number): string => {
+  if (typeof value !== "string" || !value.trim()) {
+    throw invalidPluginEntry(`plugin${index === undefined ? "" : ` entry ${index + 1}`} needs a non-empty package spec`);
+  }
+  const spec = value.trim();
+  if (spec.length > 1024 || /[\u0000-\u001f\u007f]/.test(spec)) {
+    throw invalidPluginEntry(`plugin spec "${spec.slice(0, 80)}" is invalid`);
+  }
+  return spec;
+};
+
+/** Validate user/config data without writing. */
+export function normalizePluginEntries(raw: unknown): OpenCodePluginConfigEntry[] {
+  if (!Array.isArray(raw)) throw invalidPluginEntry("plugins must be an array");
+  const bySpec = new Map<string, OpenCodePluginConfigEntry>();
+  const order: string[] = [];
+  raw.forEach((entry, index) => {
+    let normalized: OpenCodePluginConfigEntry;
+    if (typeof entry === "string") {
+      normalized = normalizePluginSpec(entry, index);
+    } else if (
+      Array.isArray(entry)
+      && entry.length === 2
+      && entry[1] !== null
+      && typeof entry[1] === "object"
+      && !Array.isArray(entry[1])
+      && isJsonValue(entry[1])
+    ) {
+      normalized = [normalizePluginSpec(entry[0], index), entry[1] as JsonObject];
+    } else {
+      throw invalidPluginEntry(`plugin entry ${index + 1} must be a package spec or [spec, options] tuple`);
+    }
+    const spec = typeof normalized === "string" ? normalized : normalized[0];
+    if (!bySpec.has(spec)) order.push(spec);
+    bySpec.set(spec, normalized);
+  });
+  return order.map((spec) => bySpec.get(spec)!);
+}
+
 export function createConfigApplier(opts: { configDir?: string } = {}): BackendConfigApplier {
   const dir = opts.configDir ?? defaultConfigDir();
   mkdirSync(dir, { recursive: true });
@@ -122,6 +181,7 @@ export function createConfigApplier(opts: { configDir?: string } = {}): BackendC
   // OpenCode supports both spellings. Update the file the user already owns so
   // plugin entries (including commandcode) remain in the effective config.
   const configPath = existsSync(jsoncPath) ? jsoncPath : jsonPath;
+  let pluginWrite = Promise.resolve();
 
   // Missing file is fine (fresh install); a corrupt one must not be
   // silently clobbered — callers roll their stores back on throw.
@@ -139,6 +199,17 @@ export function createConfigApplier(opts: { configDir?: string } = {}): BackendC
     }
   };
 
+  const pluginsFrom = (config: Record<string, unknown>): OpenCodePluginConfigEntry[] =>
+    config.plugin === undefined ? [] : normalizePluginEntries(config.plugin);
+
+  // Serialize plugin mutations so simultaneous imports/removals cannot both
+  // read the same base and lose one another before their atomic renames.
+  const mutatePlugins = <T>(work: () => Promise<T>): Promise<T> => {
+    const run = pluginWrite.then(work, work);
+    pluginWrite = run.then(() => undefined, () => undefined);
+    return run;
+  };
+
   return {
     behaviorPath: () => agentsPath,
     configPath: () => configPath,
@@ -147,6 +218,65 @@ export function createConfigApplier(opts: { configDir?: string } = {}): BackendC
     async applyBehavior(text: string): Promise<number> {
       await atomicWrite(agentsPath, text);
       return Buffer.byteLength(text, "utf8");
+    },
+
+    async listPlugins(): Promise<OpenCodePluginConfigEntry[]> {
+      return pluginsFrom(await readExisting());
+    },
+
+    async applyPlugins(raw: unknown[]): Promise<OpenCodePluginConfigEntry[]> {
+      const imported = normalizePluginEntries(raw);
+      return mutatePlugins(async () => {
+        const existing = await readExisting();
+        const current = pluginsFrom(existing);
+        const merged = [...current];
+        const positions = new Map(current.map((entry, index) => [
+          typeof entry === "string" ? entry : entry[0],
+          index,
+        ]));
+        for (const entry of imported) {
+          const spec = typeof entry === "string" ? entry : entry[0];
+          const position = positions.get(spec);
+          if (position === undefined) {
+            positions.set(spec, merged.length);
+            merged.push(entry);
+          } else {
+            // Imported options are authoritative for that package spec.
+            merged[position] = entry;
+          }
+        }
+        await atomicWrite(configPath, `${JSON.stringify({ ...existing, plugin: merged }, null, 2)}\n`);
+        return merged;
+      });
+    },
+
+    async replacePlugins(raw: unknown[]): Promise<OpenCodePluginConfigEntry[]> {
+      const plugins = normalizePluginEntries(raw);
+      return mutatePlugins(async () => {
+        const existing = await readExisting();
+        const next = { ...existing };
+        if (plugins.length > 0) next.plugin = plugins;
+        else delete next.plugin;
+        await atomicWrite(configPath, `${JSON.stringify(next, null, 2)}\n`);
+        return plugins;
+      });
+    },
+
+    async removePlugin(rawSpec: string): Promise<{ plugins: OpenCodePluginConfigEntry[]; removed: boolean }> {
+      const spec = normalizePluginSpec(rawSpec);
+      return mutatePlugins(async () => {
+        const existing = await readExisting();
+        const current = pluginsFrom(existing);
+        const plugins = current.filter((entry) => (typeof entry === "string" ? entry : entry[0]) !== spec);
+        const removed = plugins.length !== current.length;
+        if (removed) {
+          const next = { ...existing };
+          if (plugins.length > 0) next.plugin = plugins;
+          else delete next.plugin;
+          await atomicWrite(configPath, `${JSON.stringify(next, null, 2)}\n`);
+        }
+        return { plugins, removed };
+      });
     },
 
     async applyProviderVisibility(v: ProviderVisibilityApply): Promise<void> {

@@ -41,6 +41,8 @@ export interface QueueStore {
 export interface RuntimePool {
   /** `cwd` overrides the project root — that is how worktree sessions are isolated. */
   forProject(projectId: string, cwd?: string): Promise<AgentRuntime>;
+  /** Restart all currently live runtime facades in place. */
+  restartAll?(): Promise<number>;
 }
 
 /** Organization seams implemented by @polyth/session's Store (WP5). */
@@ -130,6 +132,26 @@ export function createSessionService(deps: {
   // sessions whose turn admission is in flight (startTurn sent, turn/started
   // not yet observed) — a concurrent send must treat these as active
   const admitting = new Set<string>();
+  // Composer edits are short-lived, server-owned holds. Without this, a turn
+  // completing while the user edits the queue head can dispatch and delete the
+  // row before the edit is saved. Holds expire so a closed browser never
+  // stalls delivery indefinitely.
+  const queueEditHolds = new Map<string, Map<string, number>>();
+  const QUEUE_EDIT_HOLD_MS = 10 * 60_000;
+  const releaseQueueEditHold = (sessionId: string, queueId: string): void => {
+    const holds = queueEditHolds.get(sessionId);
+    if (!holds) return;
+    holds.delete(queueId);
+    if (holds.size === 0) queueEditHolds.delete(sessionId);
+  };
+  const queueEditHeld = (sessionId: string, queueId: string): boolean => {
+    const holds = queueEditHolds.get(sessionId);
+    const expiresAt = holds?.get(queueId);
+    if (!expiresAt) return false;
+    if (expiresAt > Date.now()) return true;
+    releaseQueueEditHold(sessionId, queueId);
+    return false;
+  };
   const behaviorLogged = new Map<string, string>(); // sessionId -> behavior revision already in the log
   // sessionId -> parts of the current turn's assistant reply, keyed by partId in
   // arrival order. Models may finalize parts out of order (a reasoning-as-text
@@ -138,6 +160,30 @@ export function createSessionService(deps: {
   const turnReply = new Map<string, Map<string, string>>();
   const replyText = (sessionId: string): string =>
     [...(turnReply.get(sessionId)?.values() ?? [])].filter((t) => t.trim()).join("\n\n");
+
+  const isPlaceholderTitle = (title: string, sessionId: string): boolean => {
+    const value = title.trim().toLowerCase();
+    return value === "" || value === "new session" || value === "untitled session"
+      || value === "untitled" || value === "(untitled)" || value === "(untitled session)"
+      || title.trim() === sessionId || title.trim().startsWith("ses_") || /^[0-9a-f-]{8,}$/i.test(title.trim());
+  };
+
+  const titleFromPrompt = (text: string): string => {
+    const line = text.split("\n").find((candidate) => candidate.trim() !== "") ?? "";
+    const title = line.replace(/\s+/g, " ").trim();
+    return title.length <= 48 ? title : `${title.slice(0, 47).trimEnd()}…`;
+  };
+
+  /** Metadata is durable too: a projection broadcast must never erase a
+   * client-only title update after the first turn starts. */
+  const autoTitle = async (sessionId: string, text: string): Promise<void> => {
+    const title = titleFromPrompt(text);
+    if (!title) return;
+    const current = await store.projection(sessionId);
+    if (!current || !isPlaceholderTitle(current.title, sessionId)) return;
+    await appendAndBroadcast(sessionId, "session/metadata-changed", { title }, { ignorable: true });
+    await updateProjection(sessionId, { title });
+  };
 
   const secureSafeKind = (value: unknown): SecureSafeKind | undefined =>
     value === "env" || value === "token" || value === "password" ? value : undefined;
@@ -452,6 +498,29 @@ export function createSessionService(deps: {
     return questions.size + perms.size + secrets.size;
   };
 
+  /** OpenCode's question endpoint accepts answers by question position
+   * (`string[][]`), while the UI keeps an ID-keyed answer map so drafts remain
+   * stable when questions are rendered as a stepper. Preserve the latter in
+   * the event log, but translate it at the runtime boundary. */
+  const openCodeQuestionReply = (questions: JsonObject[], answers: JsonObject): JsonObject => {
+    const raw = answers as Record<string, unknown>;
+    // Keep compatibility with callers that already use OpenCode's native
+    // payload (for example integrations replying outside the React UI).
+    if (Array.isArray(raw.answers)) return { answers: raw.answers };
+    return {
+      answers: questions.map((question, index) => {
+        const id = typeof question.id === "string" && question.id
+          ? question.id
+          : `q${index + 1}`;
+        // Numeric keys support logs produced by the earlier single-question
+        // surface, whose answer key was the question index.
+        const value = raw[id] ?? raw[String(index)];
+        if (Array.isArray(value)) return value.filter((item): item is string => typeof item === "string");
+        return typeof value === "string" ? [value] : [];
+      }),
+    };
+  };
+
   /** Truthful Revert/Fork eligibility, evaluated fresh under the session lock.
    *  Live runtime admission + durable unresolved requests are authoritative; a
    *  stale `working` projection from an interrupted process must not turn the
@@ -638,6 +707,8 @@ export function createSessionService(deps: {
     const proj = await store.projection(sessionId);
     if (!proj || proj.status === "archived") return;
     if (turnActive(sessionId)) return;
+    const queued = await deps.queue.queueList(sessionId);
+    if (queued[0] && queueEditHeld(sessionId, queued[0].id)) return;
     const item = await deps.queue.queueShift(sessionId);
     if (!item) return;
     if (turnActive(sessionId)) {
@@ -730,6 +801,7 @@ export function createSessionService(deps: {
           ...(agent ? { resolvedAgent: agent } : {}),
         } : {}),
       });
+      if (input.autoTitle) await autoTitle(sessionId, raw);
       await rt.startTurn({
         sessionId,
         text: recoveredUserText(text, decoration?.recoveryContext),
@@ -989,6 +1061,15 @@ export function createSessionService(deps: {
       if (!proj) throw Object.assign(new Error("session not found"), { code: "not-found" });
       return deps.queue.queueList(sessionId);
     },
+    async queueEditStart(sessionId, queueId) {
+      if (!deps.queue) throw Object.assign(new Error("delivery queue unavailable"), { code: "unsupported" });
+      const item = (await deps.queue.queueList(sessionId)).find((candidate) => candidate.id === queueId);
+      if (!item) throw Object.assign(new Error("queued message has already started"), { code: "conflict" });
+      const holds = queueEditHolds.get(sessionId) ?? new Map<string, number>();
+      holds.set(queueId, Date.now() + QUEUE_EDIT_HOLD_MS);
+      queueEditHolds.set(sessionId, holds);
+      return item;
+    },
     async queueEdit(sessionId, queueId, text) {
       if (!deps.queue) throw Object.assign(new Error("delivery queue unavailable"), { code: "unsupported" });
       const proj = await store.projection(sessionId);
@@ -998,7 +1079,13 @@ export function createSessionService(deps: {
       const item = await deps.queue.queueEdit(sessionId, queueId, nextText);
       if (!item) throw Object.assign(new Error("queue item not found"), { code: "not-found" });
       await appendAndBroadcast(sessionId, "queue/edited", { queueId, text: nextText }, { ignorable: true });
+      releaseQueueEditHold(sessionId, queueId);
+      void dispatchQueue(sessionId);
       return item;
+    },
+    async queueEditCancel(sessionId, queueId) {
+      releaseQueueEditHold(sessionId, queueId);
+      void dispatchQueue(sessionId);
     },
     async queueReorder(sessionId, ids) {
       if (!deps.queue) throw Object.assign(new Error("delivery queue unavailable"), { code: "unsupported" });
@@ -1302,12 +1389,14 @@ export function createSessionService(deps: {
     },
 
     async rename(sessionId, title) {
-      const t = title.trim();
-      if (!t || t.length > 200) throw Object.assign(new Error("title required (≤200 chars)"), { code: "invalid-input" });
-      const proj = await store.projection(sessionId);
-      if (!proj) throw Object.assign(new Error("session not found"), { code: "not-found" });
-      await appendAndBroadcast(sessionId, "session/metadata-changed", { title: t }, { ignorable: true });
-      await updateProjection(sessionId, { title: t });
+      return withSessionLock(sessionId, async () => {
+        const t = title.trim();
+        if (!t || t.length > 200) throw Object.assign(new Error("title required (≤200 chars)"), { code: "invalid-input" });
+        const proj = await store.projection(sessionId);
+        if (!proj) throw Object.assign(new Error("session not found"), { code: "not-found" });
+        await appendAndBroadcast(sessionId, "session/metadata-changed", { title: t }, { ignorable: true });
+        await updateProjection(sessionId, { title: t });
+      });
     },
 
     async organize(sessionId, patch: SessionOrganizePatch) {
@@ -1545,7 +1634,10 @@ export function createSessionService(deps: {
         if (answers && (answers as { __reject?: boolean }).__reject) {
           await rt.replyQuestion(sessionId, requestId, { action: "reject" });
         } else {
-          await rt.replyQuestion(sessionId, requestId, answers);
+          const questions = Array.isArray((original.data as { questions?: unknown }).questions)
+            ? (original.data as { questions: JsonObject[] }).questions
+            : [];
+          await rt.replyQuestion(sessionId, requestId, openCodeQuestionReply(questions, answers));
         }
         if (proj.status === "waiting" && openRequestCount([...priorEvents, answered]) === 0) {
           await updateProjection(sessionId, { status: "working" });

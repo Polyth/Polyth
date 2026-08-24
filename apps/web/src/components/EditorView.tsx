@@ -18,6 +18,7 @@ import PaneHost, { type PaneHostHandle } from "./workspace/PaneHost.tsx";
 import FileRowActions from "./FileRowActions.tsx";
 import { ChevronGlyph, FileTypeGlyph, FolderGlyph, fileTypeKeyOf } from "../editor/fileTreeIcons.tsx";
 import { Icon } from "../icons.tsx";
+import { confirmAlert, promptAlert } from "../alerts.ts";
 import "./editor/FilePane.tsx"; // registers the "file" pane provider
 import "../workspace/mainSlotPanes.ts"; // registers the "plugin" slot bridge
 
@@ -167,7 +168,7 @@ export default function EditorView() {
   // ---- tree context menu actions ------------------------------------------------
   const ctxRename = async (entry: FileEntry) => {
     if (!projectId) return;
-    const to = window.prompt("Rename / move to:", entry.path)?.trim();
+    const to = (await promptAlert("Rename or move this item.", { title: "Rename / move", initialValue: entry.path, confirmLabel: "Rename" }))?.trim();
     if (!to || to === entry.path) return;
     try {
       await api.filesRename(projectId, entry.path, to, sid);
@@ -180,7 +181,7 @@ export default function EditorView() {
 
   const ctxDelete = async (entry: FileEntry) => {
     if (!projectId) return;
-    if (!window.confirm(`Delete ${entry.path}${entry.dir ? " and its contents" : ""}?`)) return;
+    if (!await confirmAlert(`Delete ${entry.path}${entry.dir ? " and its contents" : ""}?`, { title: "Delete item", confirmLabel: "Delete" })) return;
     try {
       await api.filesDelete(projectId, entry.path, sid);
       await loadDir(parentOf(entry.path));
@@ -192,7 +193,7 @@ export default function EditorView() {
 
   const ctxNew = async (dirPath: string, kind: "file" | "folder") => {
     if (!projectId) return;
-    const name = window.prompt(`New ${kind} name:`)?.trim();
+    const name = (await promptAlert(`Enter the new ${kind} name.`, { title: `New ${kind}`, confirmLabel: "Create" }))?.trim();
     if (!name) return;
     const rel = dirPath ? `${dirPath}/${name}` : name;
     try {

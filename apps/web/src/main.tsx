@@ -13,6 +13,7 @@ import { startMobileViewport } from "./mobileViewport.ts";
 import { getState } from "./store.ts";
 import { installBuiltinMiniWidgets } from "./widgets/builtinMiniWidgets.tsx";
 import { installNotificationCentre } from "./components/NotificationCentre.tsx";
+import { installOpenCodeRestartControl } from "./components/OpenCodeRestartControl.tsx";
 import { exposeWidgets } from "./widgets/catalog.ts";
 import { bootPackages } from "./packages/registry.ts";
 import App from "./App.tsx";
@@ -32,6 +33,7 @@ exposeWidgets();
 installBuiltinMiniWidgets();
 // NTF-01: bell + panel arrive through the slot registry, never via App.tsx.
 installNotificationCentre();
+installOpenCodeRestartControl();
 // Palette commands + keyboard shortcuts: one install, synced with the
 // capability registry from then on (UX-PERSONAS: search sees every tool).
 installShell();

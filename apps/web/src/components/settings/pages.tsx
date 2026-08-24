@@ -7,18 +7,31 @@ import { DEFAULT_SETTINGS, INTERFACE_FONTS } from "../../settings.ts";
 import { requestNotifyPermission } from "../../notify.ts";
 import { disablePush, enablePush, pushSubscription, pushUnsupportedReason } from "../../push.ts";
 import { api, type GitStatus } from "../../api.ts";
+import { confirmAlert } from "../../alerts.ts";
 import { EmptyState, PageHead, Row, Seg, Toggle } from "./parts.tsx";
 import { refreshProfiles, useProfiles } from "../../profiles.ts";
 import { removeProject } from "../../init.ts";
 import AgentProfileForm from "../AgentProfileForm.tsx";
 import ProjectFolderDialog from "../ProjectFolderDialog.tsx";
 import { parseMcpServersJson, type McpImportResult } from "../../mcpImport.ts";
+import { parseOpenCodePluginJson } from "../../pluginImport.ts";
 import {
   PRESET_THEMES, addCustomTheme, applyTheme, loadCustomThemes, parseThemeJson,
   reapplyTheme, removeCustomTheme, resolveTheme, type AppearanceMode, type ThemeSpec,
 } from "../../theme.ts";
 import type { AssistSettingsDto } from "../../api.ts";
-import type { AgentDescriptor, AgentProfile, InstalledPluginDto, McpServerDto, McpTransport, ModelRef, SystemInfoDto } from "@polyth/contracts";
+import type {
+  AgentDescriptor,
+  AgentProfile,
+  InstalledPluginDto,
+  McpServerDto,
+  McpTransport,
+  ModelRef,
+  OpenCodePluginConfigEntry,
+  OpenCodePluginEntryDto,
+  OpenCodePluginPreviewDto,
+  SystemInfoDto,
+} from "@polyth/contracts";
 import { useWidgetCatalog } from "../../widgets/catalog.ts";
 import { useWidgetLayout } from "../../widgets/widgetLayout.ts";
 import ModelPicker from "../ModelPicker.tsx";
@@ -669,7 +682,7 @@ export function ProjectsPage() {
             </div>
             <button
               className="small-btn danger-btn"
-              onClick={() => { if (window.confirm(`Remove project "${p.name || p.path}" from Polyth?`)) void removeProject(p.id); }}
+              onClick={() => { void confirmAlert(`Remove project "${p.name || p.path}" from Polyth?`, { title: "Remove project", confirmLabel: "Remove" }).then((ok) => { if (ok) void removeProject(p.id); }); }}
             >Remove</button>
           </header>
           <div className="project-settings-options">
@@ -925,7 +938,7 @@ export function AgentsPage() {
             <button className="small-btn" onClick={() => void checkProfile(p)}>Validate</button>
             <button className="small-btn" onClick={() => setEditing(p)}>Edit</button>
             <button className="small-btn danger-btn"
-              onClick={() => { if (window.confirm(`Delete profile "${p.name}"?`)) void api.deleteProfile(p.id).then(() => refreshProfiles()); }}>
+              onClick={() => { void confirmAlert(`Delete profile "${p.name}"?`, { title: "Delete profile", confirmLabel: "Delete" }).then((ok) => { if (ok) void api.deleteProfile(p.id).then(() => refreshProfiles()); }); }}>
               Delete
             </button>
           </div>
@@ -1144,7 +1157,7 @@ export function McpPage() {
               <button className="small-btn" onClick={() => void api.mcpUpdate(s.id, { enabled: !s.enabled }, s.revision).then(refresh)}>
                 {s.enabled ? "Disable" : "Enable"}
               </button>
-              <button className="small-btn danger-btn" onClick={() => { if (window.confirm(`Remove MCP server "${s.name}"?`)) void api.mcpRemove(s.id).then(refresh); }}>
+              <button className="small-btn danger-btn" onClick={() => { void confirmAlert(`Remove MCP server "${s.name}"?`, { title: "Remove MCP server", confirmLabel: "Remove" }).then((ok) => { if (ok) void api.mcpRemove(s.id).then(refresh); }); }}>
                 Remove
               </button>
             </div>
@@ -1160,6 +1173,155 @@ export function McpPage() {
         </div>
       )}
     </>
+  );
+}
+
+const OTTO_PLUGIN_EXAMPLE = `{
+  "$schema": "https://opencode.ai/config.json",
+  "plugin": ["@otto-assistant/opencode-claude"]
+}`;
+
+function OpenCodePluginsSection() {
+  const [plugins, setPlugins] = useState<OpenCodePluginEntryDto[]>([]);
+  const [text, setText] = useState("");
+  const [preview, setPreview] = useState<OpenCodePluginPreviewDto | null>(null);
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const refresh = async () => {
+    try {
+      const result = await api.opencodePluginsList();
+      setPlugins(result.plugins);
+      setError("");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  };
+  useEffect(() => { void refresh(); }, []);
+
+  const importPlugins = async () => {
+    if (!preview || preview.errors.length > 0 || preview.entries.length === 0) return;
+    setBusy(true);
+    setError("");
+    setNotice("");
+    const entries: OpenCodePluginConfigEntry[] = preview.entries.map((entry) =>
+      entry.options ? [entry.spec, entry.options] : entry.spec);
+    try {
+      const result = await api.opencodePluginsImport({ plugins: entries });
+      setPlugins(result.plugins);
+      setText("");
+      setPreview(null);
+      setNotice(
+        `${result.imported.length} OpenCode plugin${result.imported.length === 1 ? "" : "s"} staged.`,
+      );
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const remove = async (plugin: OpenCodePluginEntryDto) => {
+    if (!window.confirm(`Remove OpenCode plugin "${plugin.spec}" from opencode.json?`)) return;
+    setBusy(true);
+    setError("");
+    setNotice("");
+    try {
+      const result = await api.opencodePluginRemove(plugin.spec);
+      setPlugins(result.plugins);
+      if (result.removed) setNotice(`${plugin.spec} removal staged.`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <section className="opencode-plugin-section" data-settings-item="plugins.opencode">
+      <div className="plugin-library-head">
+        <div>
+          <strong>OpenCode plugins</strong>
+          <span>Paste a package spec, plugin array, or OpenCode config. Only the plugin array is merged into opencode.json.</span>
+        </div>
+        <span>{plugins.length} configured</span>
+      </div>
+      <div className="mcp-list">
+        {plugins.length === 0 && (
+          <EmptyState title="No OpenCode plugins configured" body="Paste JSON below to add one without changing providers, MCP servers, agents, or other config." />
+        )}
+        {plugins.map((plugin) => (
+          <div className="set-row" key={plugin.spec}>
+            <div className="set-row-text">
+              <div className="set-row-label mono">{plugin.spec}</div>
+              <div className="set-row-hint">
+                {plugin.options ? `Options: ${JSON.stringify(plugin.options)}` : "Default options"}
+              </div>
+            </div>
+            <div className="set-row-control">
+              <button className="small-btn danger-btn" disabled={busy} onClick={() => void remove(plugin)}>Remove</button>
+            </div>
+          </div>
+        ))}
+      </div>
+      <div className="mcp-form">
+        <div className="stat-label">
+          Import OpenCode plugin JSON <span className="muted">(string entries and [spec, options] tuples are supported)</span>
+        </div>
+        <textarea
+          rows={7}
+          className="mono"
+          aria-label="OpenCode plugin JSON"
+          placeholder={OTTO_PLUGIN_EXAMPLE}
+          value={text}
+          onChange={(event) => {
+            setText(event.target.value);
+            setPreview(null);
+            setError("");
+            setNotice("");
+          }}
+        />
+        {preview && (
+          <div className="mcp-import-preview" aria-live="polite">
+            {preview.entries.map((entry) => {
+              const existing = plugins.some((plugin) => plugin.spec === entry.spec);
+              return (
+                <div key={entry.spec} className="set-row-hint mono">
+                  {existing ? "↻" : "+"} {entry.spec}
+                  {entry.options && ` · ${JSON.stringify(entry.options)}`}
+                  {existing && <span> — existing entry will be updated</span>}
+                </div>
+              );
+            })}
+            {preview.ignoredKeys.length > 0 && (
+              <div className="set-row-hint">
+                Not imported: {preview.ignoredKeys.join(", ")}. Those config keys remain unchanged.
+              </div>
+            )}
+            {preview.errors.map((message, index) => <div className="form-error" key={index}>{message}</div>)}
+          </div>
+        )}
+        <div className="mcp-form-row">
+          <button
+            className="small-btn"
+            disabled={busy || !text.trim()}
+            onClick={() => setPreview(parseOpenCodePluginJson(text))}
+          >
+            Preview
+          </button>
+          <button
+            className="small-btn"
+            disabled={busy || !preview || preview.entries.length === 0 || preview.errors.length > 0}
+            onClick={() => void importPlugins()}
+          >
+            {busy ? "Importing…" : `Import ${preview?.entries.length ?? 0} plugin${(preview?.entries.length ?? 0) === 1 ? "" : "s"}`}
+          </button>
+        </div>
+      </div>
+      {error && <div className="form-error">{error}</div>}
+      {notice && <div className="plugin-toast" role="status"><span>{notice}</span><button type="button" onClick={() => setNotice("")}>Dismiss</button></div>}
+    </section>
   );
 }
 
@@ -1224,7 +1386,7 @@ export function ManagedPluginsSection() {
     const warning = active.length > 0
       ? `${active.length} widget${active.length === 1 ? "" : "s"} from "${plugin.name}" ${active.length === 1 ? "is" : "are"} in your layout. Uninstalling keeps a placeholder so you can remove or restore each one. Continue?`
       : `Remove plugin "${plugin.name}"?`;
-    if (!window.confirm(warning)) return;
+    if (!await confirmAlert(warning, { title: "Remove plugin", confirmLabel: "Remove" })) return;
     await api.pluginsRemove(plugin.id);
     setToast(`${plugin.name} removed.`);
     if (selected === plugin.id) setSelected(null);
@@ -1238,7 +1400,7 @@ export function ManagedPluginsSection() {
   return (
     <div className="plugin-library" data-settings-item="plugins.managed">
       <div className="plugin-library-head">
-        <div><strong>Plugin library</strong><span>Extensions contribute widgets, commands, tools, settings, and workspace surfaces.</span></div>
+        <div><strong>Managed Polyth plugins</strong><span>Extensions with a polyth-plugin.json manifest contribute widgets, commands, tools, settings, and workspace surfaces.</span></div>
         <span>{plugins.length} installed</span>
       </div>
       {plugins.length === 0 && (
@@ -1314,6 +1476,16 @@ export function ManagedPluginsSection() {
       {error && <div className="form-error">{error}</div>}
       {toast && <div className="plugin-toast" role="status"><span>{toast}</span><button type="button" onClick={() => setToast("")}>Dismiss</button></div>}
     </div>
+  );
+}
+
+export function PluginsPage() {
+  return (
+    <>
+      <PageHead title="Plugins" blurb="Configure OpenCode runtime plugins or install managed Polyth UI extensions." />
+      <OpenCodePluginsSection />
+      <ManagedPluginsSection />
+    </>
   );
 }
 

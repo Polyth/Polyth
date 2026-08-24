@@ -338,6 +338,10 @@ export interface SessionRef { id: string }
 export interface TurnRef { turnId: string }
 export interface UserTurnInput {
   text: string;
+  /** Request a durable title derived from this first prompt when the session
+   *  still has a placeholder title. The client owns the user preference; the
+   *  server owns the append + projection update. */
+  autoTitle?: boolean;
   attachments?: AttachmentRef[];
   model?: ModelRef;
   agent?: string;
@@ -446,7 +450,10 @@ export interface SessionService {
   /** Projection-only reconciliation after a linked worktree is removed. */
   markWorktreeMissing?(projectId: string, worktreePath: string): Promise<void>;
   queueList?(sessionId: string): Promise<QueueItemDto[]>;
+  /** Temporarily holds the queue head while it is edited in the composer. */
+  queueEditStart?(sessionId: string, queueId: string): Promise<QueueItemDto>;
   queueEdit?(sessionId: string, queueId: string, text: string): Promise<QueueItemDto>;
+  queueEditCancel?(sessionId: string, queueId: string): Promise<void>;
   queueReorder?(sessionId: string, ids: string[]): Promise<QueueItemDto[]>;
   queueRemove?(sessionId: string, queueId: string): Promise<void>;
   /** Pin/unpin a model-visible message by its canonical source-event sequence. */
@@ -866,8 +873,9 @@ export interface RemoteHost {
  *  server-managed manifest boundary can reject unknown slot names. */
 export const UI_SLOTS = [
   "app.nav", "app.header.actions", "session.header.actions", "session.list.badges",
+  "sidebar.footer",
   "composer.leading", "composer.trailing", "contextRail.tabs",
-  "settings.pages", "commandPalette.commands",
+  "settings.pages", "settings.footer", "commandPalette.commands",
   // Widget definitions enter through the catalog/settings seams. The six
   // workspace slots are first-class placement targets alongside panel and
   // toolbar slots, rather than a canvas-only parallel vocabulary.
@@ -1418,6 +1426,65 @@ export interface McpServerDto {
   status: McpStatus;
   lastError?: string;
   revision: number;
+}
+
+/** One entry in OpenCode's `plugin` config array. Tuple entries carry the
+ * plugin's JSON-serializable options without exposing Polyth's managed-plugin
+ * installation surface. */
+export type OpenCodePluginConfigEntry = string | [string, JsonObject];
+
+export interface OpenCodePluginEntryDto {
+  spec: string;
+  options?: JsonObject;
+}
+
+/** Pure paste-parser result used by the settings preview. */
+export interface OpenCodePluginPreviewDto {
+  entries: OpenCodePluginEntryDto[];
+  errors: string[];
+  /** Top-level config keys intentionally not imported in this v1 flow. */
+  ignoredKeys: string[];
+}
+
+export interface OpenCodePluginListResponseDto {
+  plugins: OpenCodePluginEntryDto[];
+}
+
+export interface OpenCodePluginImportRequestDto {
+  plugins: OpenCodePluginConfigEntry[];
+}
+
+export interface OpenCodePluginImportResponseDto extends OpenCodePluginListResponseDto {
+  imported: string[];
+  pendingRestart: true;
+}
+
+export interface OpenCodePluginRemoveResponseDto extends OpenCodePluginListResponseDto {
+  removed: boolean;
+  pendingRestart: boolean;
+}
+
+export type OpenCodePendingChangeKind =
+  | "agent"
+  | "behavior"
+  | "mcp"
+  | "plugins"
+  | "provider-visibility";
+
+export interface OpenCodePendingChangeDto {
+  id: string;
+  kind: OpenCodePendingChangeKind;
+  label: string;
+}
+
+export interface OpenCodePendingResponseDto {
+  changes: OpenCodePendingChangeDto[];
+  count: number;
+}
+
+export interface OpenCodeApplyRestartResponseDto {
+  applied: number;
+  restarted: number;
 }
 
 // ---------------------------------------------------------------- Secure Safe (OC-22-008)

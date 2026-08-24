@@ -28,10 +28,10 @@ test("sidebar geometry scales type from ui font size and density controls rows",
     "--nav-branch-size",
     "--nav-session-size",
     "--nav-meta-size",
-    "--nav-indent-project: 4px",
-    "--nav-indent-worktree: 18px",
-    "--nav-indent-session: 64px",
-    "--nav-status-width: 76px",
+    "--nav-indent-project: 0px",
+    "--nav-indent-worktree: 8px",
+    "--nav-indent-session: 26px",
+    "--nav-status-width: 56px",
   ]) assert.ok(css.includes(variable), `${variable} is part of the sidebar geometry contract`);
 
   assert.match(css, /--nav-project-size:\s*calc\(var\(--ui-font-size,\s*14px\)\s*\*\s*1\.143\)/);
@@ -49,6 +49,10 @@ test("sidebar geometry scales type from ui font size and density controls rows",
     "session hover does not also receive the global button background");
   assert.match(css, /--ui-font-scale:\s*1;/,
     "the build applies the interface font scale to fixed-pixel text rules");
+  assert.match(css, /\.project-card-shell\s*\{[\s\S]*?grid-template-columns:\s*minmax\(0,\s*1fr\) repeat\(3,\s*36px\)/,
+    "each project action has a dedicated, equally sized grid cell");
+  assert.match(css, /\.project-new-session,[\s\S]*?\.project-menu-btn\s*\{[\s\S]*?place-items:\s*center;/,
+    "project action glyphs are centered inside their hover targets");
   assert.doesNotMatch(css, /#root\s*\{[^}]*\bzoom\s*:/,
     "font scaling must not resize layout geometry");
   for (const density of ["compact", "balanced", "comfortable"]) {
@@ -60,7 +64,10 @@ test("sidebar geometry scales type from ui font size and density controls rows",
     "balanced density remains compact");
   assert.match(css, /html\[data-density="comfortable"\] \.sidebar,[\s\S]*?--nav-row-project:\s*44px;[\s\S]*?--nav-row-branch:\s*40px;[\s\S]*?--nav-row-session:\s*38px;/,
     "comfortable density adds only a small amount of breathing room");
-  assert.match(css, /\.session-btn\s*\{[\s\S]*?grid-template-columns:\s*minmax\(0,\s*1fr\) var\(--nav-status-width\)/);
+  assert.match(css, /\.session-btn\s*\{[\s\S]*?grid-template-columns:\s*minmax\(0,\s*1fr\) fit-content\(var\(--nav-status-width\)\)/,
+    "the status column only takes the width its content needs");
+  assert.match(css, /\.session-quick\s*\{[\s\S]*?right:\s*8px/,
+    "Shift quick actions align with the session row's right content inset");
   assert.doesNotMatch(css, /\.session-actions\b/);
   assert.doesNotMatch(css, /\.session-sync-icon\b/);
 });

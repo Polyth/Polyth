@@ -12,6 +12,7 @@ import { sessionRowStatus, type SessionRowStatus } from "../../sessionBadges.ts"
 import { deriveSessionTitle, fullSessionTitle } from "../../format.ts";
 import { friendlyError } from "../../settings.ts";
 import { getUiSettings } from "../../uiPrefs.ts";
+import { confirmAlert } from "../../alerts.ts";
 import { firstUserText } from "../../utils.ts";
 import { announce } from "../a11y/live.tsx";
 import { worktreeLabel } from "../../worktreeSessions.ts";
@@ -245,19 +246,19 @@ function SessionRow({
     items[next]?.focus();
   };
 
-  const quickArchive = () => {
+  const quickArchive = async () => {
     const label = s.title || "session";
-    if (needsDestructiveConfirm(s) && !window.confirm(`Archive "${label}"? The agent is still running or waiting on you.`)) return;
-    if (!needsDestructiveConfirm(s) && getUiSettings().confirmSessionArchive && !window.confirm(`Archive "${label}"?`)) return;
+    if (needsDestructiveConfirm(s) && !await confirmAlert(`Archive "${label}"? The agent is still running or waiting on you.`, { title: "Archive active session", confirmLabel: "Archive" })) return;
+    if (!needsDestructiveConfirm(s) && getUiSettings().confirmSessionArchive && !await confirmAlert(`Archive "${label}"?`, { title: "Archive session", confirmLabel: "Archive" })) return;
     void archiveSession(s.id)
       .then(() => { announce(`Archived ${label}`); onChanged(); })
       .catch((e) => setUiError(friendlyError("Couldn’t archive the session", e)));
   };
 
-  const quickDelete = () => {
+  const quickDelete = async () => {
     const label = s.title || "session";
     const activity = needsDestructiveConfirm(s) ? " The agent is still running or waiting on you." : "";
-    if (!window.confirm(`Delete "${label}"?${activity} This permanently removes the session and its history.`)) return;
+    if (!await confirmAlert(`Delete "${label}"?${activity} This permanently removes the session and its history.`, { title: "Delete session", confirmLabel: "Delete" })) return;
     void deleteSession(s.id)
       .then(() => { announce(`Deleted ${label}`); onChanged(); })
       .catch((e) => setUiError(friendlyError("Couldn’t delete the session", e)));
@@ -383,7 +384,7 @@ function SessionRow({
             title={`Archive ${s.title || "session"} (Shift+hover quick action)`}
             aria-label={`Archive ${s.title || "session"}`}
             onClick={quickArchive}
-          >⤓</button>
+          ><Icon.download /></button>
         )}
         <button
           className="session-quick-btn danger"

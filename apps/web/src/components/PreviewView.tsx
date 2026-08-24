@@ -5,6 +5,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { PreviewState } from "@polyth/contracts";
 import { api, type BrowserSessionDto } from "../api.ts";
+import { confirmAlert } from "../alerts.ts";
 import { attachUpload, removeAttachment } from "../attachments.ts";
 import {
   annotationViewportRect,
@@ -239,7 +240,7 @@ export default function PreviewView() {
     } catch (e) {
       const msg = String(e);
       if (msg.includes("approval-required") || msg.includes("needs")) {
-        if (window.confirm(`This origin is outside the allowed list.\n\n${msg}\n\nApprove it for this run?`)) {
+        if (await confirmAlert(`This origin is outside the allowed list.\n\n${msg}\n\nApprove it for this run?`, { title: "Approve origin", confirmLabel: "Approve", destructive: false })) {
           try {
             await api.browserApprove(raw);
             setBrowser(await api.browserNavigate(browser.id, raw, "user"));

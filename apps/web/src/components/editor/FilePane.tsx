@@ -20,6 +20,7 @@ import { clampMenuPosition } from "../../selectionActions.ts";
 import { copyText } from "../../utils.ts";
 import { getEditorPrefs, setEditorPreviewDefault, useUiSettings } from "../../uiPrefs.ts";
 import { Icon } from "../../icons.tsx";
+import { confirmAlert } from "../../alerts.ts";
 import {
   autosaveDelay,
   beginLiveFileSave,
@@ -601,7 +602,7 @@ export default function FilePane({ projectId, sessionId, resource: path, visible
                 role="menuitem"
                 onClick={() => {
                   setMenu(null);
-                  if (window.confirm("Discard unsaved changes?")) setBuf(doc.content);
+                  void confirmAlert("Discard unsaved changes?", { title: "Discard changes", confirmLabel: "Discard" }).then((ok) => { if (ok) setBuf(doc.content); });
                 }}
               >
                 Discard changes…

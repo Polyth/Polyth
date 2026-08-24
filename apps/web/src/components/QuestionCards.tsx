@@ -11,6 +11,7 @@ import {
 } from "../questionSerializers.ts";
 import AdaptiveTextInput from "./input/AdaptiveTextInput.tsx";
 import { announce } from "./a11y/live.tsx";
+import { Icon } from "../icons.tsx";
 
 // Draft answers survive card remounts (tab switches, WS reconnect replays).
 const drafts = new Map<string, AnswerMap>();
@@ -138,8 +139,18 @@ function QuestionStepper({ q }: { q: PendingQuestion }) {
           {items.length > 1 ? ` — step ${step + 1} of ${items.length}` : ""}
         </span>
         <span className="question-copy">
-          <button className="small-btn" onClick={() => copyText(questionsToMarkdown(items, answers), "Markdown")}>Copy md</button>
-          <button className="small-btn" onClick={() => copyText(questionsToJson(q.requestId, items, answers), "JSON")}>Copy json</button>
+          <button
+            className="question-copy-btn"
+            aria-label="Copy questions as Markdown"
+            title="Copy as Markdown"
+            onClick={() => copyText(questionsToMarkdown(items, answers), "Markdown")}
+          ><Icon.markdown /></button>
+          <button
+            className="question-copy-btn"
+            aria-label="Copy questions as JSON"
+            title="Copy as JSON"
+            onClick={() => copyText(questionsToJson(q.requestId, items, answers), "JSON")}
+          ><Icon.json /></button>
         </span>
       </div>
       {items.length > 1 && (

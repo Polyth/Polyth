@@ -611,7 +611,7 @@ export const BUILTIN_TOURS: readonly PackageOnboardingTour[] = [
       {
         id: "actions",
         title: "Choose compact actions",
-        body: "Add or hide buttons around the composer and application headers. Changes save automatically.",
+        body: "Add or hide buttons around the composer and application headers.",
         highlight: "Composer actions",
         media: { kind: "pattern", pattern: "orbit" },
       },
