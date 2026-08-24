@@ -14,6 +14,7 @@ import {
   NOTIFICATION_KIND_LABELS, bellBadge, bellName, canOpenNotification, centreRows,
   notificationCentre, useNotificationCentre, type NotificationCentre,
 } from "../notificationCentre.ts";
+import { defineWidgetPlugin, registerWidgetPlugin } from "../widgets/catalog.ts";
 
 /** The rail-surface id the workspace.right.tabs slot bridge derives for the
  *  panel — what the bell toggles and hosts persist as the open surface. */
@@ -162,15 +163,35 @@ export function NotificationCentrePanel({
   );
 }
 
+const NOTIFICATION_WIDGET_PLUGIN = defineWidgetPlugin({
+  id: "notification-centre",
+  name: "Notifications",
+  widgets: [
+    {
+      id: "notification.bell",
+      title: "Notifications",
+      description: "Open the notification centre and see unread activity.",
+      kind: "mini-widget",
+      defaultSlot: "app.header.actions",
+      supportedSlots: ["app.header.actions"],
+      defaultVisible: true,
+      defaultSize: { w: 1, h: 1 },
+      resizable: false,
+      audience: "simple",
+      order: 20,
+      render: () => <NotificationBell />,
+    },
+  ],
+});
+
 let installed = false;
 
-/** Idempotent boot registration (called from main.tsx like the other built-in
- *  installs). The Header and ContextRail hosts render whatever the registry
- *  holds — neither is edited for these two contributions. */
+/** Idempotent boot registration. The bell is a layout-managed header widget;
+ * the notification panel remains a slot contribution for the rail bridge. */
 export function installNotificationCentre(): void {
   if (installed) return;
   installed = true;
-  registerSlot("app.header.actions", "notification-bell", () => <NotificationBell />, 10);
+  registerWidgetPlugin(NOTIFICATION_WIDGET_PLUGIN);
   registerSlot(
     "workspace.right.tabs",
     "notification-centre",

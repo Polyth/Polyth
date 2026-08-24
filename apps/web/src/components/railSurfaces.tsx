@@ -98,7 +98,7 @@ function ContextView() {
         <span className="mono">{model.totals.cost > 0 ? fmtCost(model.totals.cost) : "—"}</span>
       </div>
       <div className="stat-label">Pinned</div>
-      {pinnedMessages.length === 0 && <div className="muted" style={{ fontSize: 12.5 }}>Nothing pinned yet.</div>}
+      {pinnedMessages.length === 0 && <div className="muted" style={{ fontSize: "calc(12.5px * var(--ui-font-scale, 1))" }}>Nothing pinned yet.</div>}
       {pinnedMessages.map((event) => (
         <div key={event.seq} className="pinned-file">
           <span className="mono">#{event.seq}</span>{" "}

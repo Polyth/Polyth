@@ -86,6 +86,7 @@ test("right-click opens the row-scoped menu with delete/archive/pin and menu ARI
     });
     const menu = container.querySelector<HTMLElement>('[role="menu"]');
     assert.ok(menu, "context menu opened");
+    assert.ok(row.classList.contains("menu-open"), "open row is raised above subsequent sidebar rows");
     // Scoped to the exact row that was right-clicked.
     assert.equal(menu!.getAttribute("aria-label"), "Actions for Idle session");
     const items = [...menu!.querySelectorAll<HTMLElement>('[role^="menuitem"]')].map((b) => b.textContent?.trim());
@@ -106,6 +107,42 @@ test("right-click opens the row-scoped menu with delete/archive/pin and menu ARI
     assert.equal(document.activeElement?.getAttribute("aria-label"), "Open Idle session");
   } finally {
     await unmount();
+  }
+});
+
+test("pinned chats are first across worktrees and their menu offers Unpin", async () => {
+  activateProject("p1");
+  setSessions("p1", [
+    session({ id: "other", title: "Other worktree", branch: "feature/other", worktreePath: "/repo-other" }),
+    session({ id: "pinned", title: "Pinned worktree", branch: "feature/pinned", worktreePath: "/repo-pinned", pinned: { position: 0 } }),
+  ]);
+  const container = document.createElement("div");
+  document.body.appendChild(container);
+  const root = createRoot(container);
+  try {
+    await act(async () => { root.render(createElement(SessionList, { projectId: "p1" })); });
+    const org = container.querySelector<HTMLElement>(".session-org");
+    const pinned = container.querySelector<HTMLElement>(".session-pinned");
+    assert.ok(org && pinned, "pinned section is rendered");
+    assert.equal(org!.firstElementChild, pinned, "pinned chats lead the worktree groups");
+    assert.match(pinned!.textContent ?? "", /feature\/pinned/, "pinned chat retains its worktree label");
+    assert.ok(pinned!.querySelector(".session-pin-icon"), "pinned chat shows a pin icon");
+    assert.equal(
+      container.querySelectorAll('.session-worktree-sessions .session-row').length,
+      1,
+      "the pinned chat is not repeated inside its worktree",
+    );
+
+    const pinnedRow = rowOf(container, "Pinned worktree");
+    await act(async () => {
+      pinnedRow.dispatchEvent(new MouseEventCtor("contextmenu", { bubbles: true, cancelable: true }));
+    });
+    const items = [...pinnedRow.querySelectorAll<HTMLElement>('[role^="menuitem"]')].map((item) => item.textContent?.trim());
+    assert.ok(items.includes("Unpin"), `pinned row offers Unpin (got: ${items.join(", ")})`);
+    assert.ok(!items.includes("Pin to top"), "pinned row does not offer Pin to top");
+  } finally {
+    await act(async () => { root.unmount(); });
+    container.remove();
   }
 });
 

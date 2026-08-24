@@ -2,7 +2,8 @@
 // Behavior, Usage, Projects, Git, Agents, MCP, Plugins.
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { activateProject, applyProjectUpsert, openWorkspacePane, setAgents, setOverlay, updateSettings, useStore } from "../../store.ts";
-import { setUiSettings, useUiSettings } from "../../uiPrefs.ts";
+import { UI_DEFAULTS, setUiSettings, useUiSettings } from "../../uiPrefs.ts";
+import { DEFAULT_SETTINGS, INTERFACE_FONTS } from "../../settings.ts";
 import { requestNotifyPermission } from "../../notify.ts";
 import { disablePush, enablePush, pushSubscription, pushUnsupportedReason } from "../../push.ts";
 import { api, type GitStatus } from "../../api.ts";
@@ -273,9 +274,14 @@ function ThemeSection() {
 export function AppearancePage() {
   const ui = useUiSettings();
   const settings = useStore((s) => s.settings);
-  const fontPct = ((settings.fontSize - 12) / 6) * 100;
   const editorFontPct = ((ui.editorFontSize - 11) / 13) * 100;
-  const setFontSize = (fontSize: number) => updateSettings({ fontSize });
+  const resetFontSizes = () => {
+    updateSettings({ fontSize: DEFAULT_SETTINGS.fontSize });
+    // `fontSize` is retained in the older UI-preferences record for
+    // backwards compatibility, so restore it alongside the active editor
+    // setting as well.
+    setUiSettings({ fontSize: UI_DEFAULTS.fontSize, editorFontSize: UI_DEFAULTS.editorFontSize });
+  };
   return (
     <>
       <PageHead title="Appearance" blurb="Visual preferences, saved in this browser and applied immediately." />
@@ -291,47 +297,58 @@ export function AppearancePage() {
         />
       </Row>
       <ThemeSection />
-      <Row label="Interface font" hint="Choose the main typeface used throughout menus, settings, and conversations." itemId="appearance.fontFamily">
-        <Seg
+      <Row label="Interface font" hint="Choose from clean UI faces and programmer favorites. Fonts use your installed copy, then fall back safely." itemId="appearance.fontFamily">
+        <select
+          aria-label="Interface font"
           value={settings.fontFamily}
-          options={[["sans", "Modern"], ["system", "System"], ["serif", "Serif"], ["mono", "Mono"]]}
-          onChange={(fontFamily) => updateSettings({ fontFamily })}
-        />
+          onChange={(event) => updateSettings({ fontFamily: event.target.value as typeof settings.fontFamily })}
+        >
+          <optgroup label="UI sans-serif">
+            {INTERFACE_FONTS.filter((font) => !font.mono && font.id !== "serif").map((font) => (
+              <option key={font.id} value={font.id}>{font.label}</option>
+            ))}
+          </optgroup>
+          <optgroup label="Serif">
+            {INTERFACE_FONTS.filter((font) => font.id === "serif").map((font) => (
+              <option key={font.id} value={font.id}>{font.label}</option>
+            ))}
+          </optgroup>
+          <optgroup label="Programmer monospace — ligatures off">
+            {INTERFACE_FONTS.filter((font) => font.mono).map((font) => (
+              <option key={font.id} value={font.id}>{font.label}</option>
+            ))}
+          </optgroup>
+        </select>
       </Row>
       <Row label="Density" hint="Choose airy, balanced, or compact spacing across panels." itemId="appearance.density">
         <Seg value={ui.density} options={[["comfortable", "Comfortable"], ["balanced", "Balanced"], ["compact", "Compact"]]} onChange={(density) => { setUiSettings({ density }); updateSettings({ density }); }} />
       </Row>
-      <Row label="Interface font size" hint="Scales interface text except code blocks and the terminal." itemId="appearance.fontSize">
-        <div className="rng">
-          <input
-            type="range"
-            min={12}
-            max={18}
-            value={settings.fontSize}
-            aria-label="Interface font size"
-            style={{ "--p": `${fontPct}%` } as CSSProperties}
-            onChange={(e) => setFontSize(Number(e.target.value))}
-          />
-          <span className="rng-val">{settings.fontSize}px</span>
-        </div>
+      <Row label="Interface scale" hint="Increase or decrease text throughout Polyth. Code and terminal text have their own setting below." itemId="appearance.fontSize">
+        <Seg
+          value={settings.fontSize}
+          options={[[12, "Small"], [13, "Smaller"], [14, "Medium"], [16, "Large"], [18, "Extra large"]]}
+          onChange={(fontSize) => updateSettings({ fontSize })}
+        />
       </Row>
-      <Row label="Editor font size" hint="Composer, file editor, diffs, terminal input, and code blocks (11–24 px)." itemId="appearance.editorFontSize">
+      <Row label="Terminal font size" hint="Set the font size used in terminal input and output (11–24 px)." itemId="appearance.editorFontSize">
         <div className="rng">
           <input
             type="range" min={11} max={24} value={ui.editorFontSize}
-            aria-label="Editor font size in pixels"
+            aria-label="Terminal font size in pixels"
             style={{ "--p": `${editorFontPct}%` } as CSSProperties}
             onChange={(e) => setUiSettings({ editorFontSize: Number(e.target.value) })}
           />
           <span className="rng-val">{ui.editorFontSize}px</span>
         </div>
       </Row>
+      <Row label="Reset font sizes" hint="Restore the interface and terminal font sizes to their default 14 px.">
+        <button className="small-btn" type="button" onClick={resetFontSizes}>Reset to defaults</button>
+      </Row>
       <Row label="Corner rounding" hint="Apply square, compact, or generously rounded corners across the interface." itemId="appearance.rounding">
         <Seg value={ui.rounding} options={[["square", "Square"], ["compact", "Compact"], ["rounded", "Rounded"]]} onChange={(rounding) => setUiSettings({ rounding })} />
       </Row>
-      <Row label="Menu items" hint="Choose which optional actions appear in the composer and workspace menus." itemId="appearance.menuItems">
+      <Row label="Optional actions" hint="Choose which optional actions appear while you compose." itemId="appearance.menuItems">
         <div className="appearance-menu-items">
-          <label><Toggle on={ui.showTechnicalButtons} onChange={(showTechnicalButtons) => setUiSettings({ showTechnicalButtons })} label="Technical options" /><span>Technical</span></label>
           <label><Toggle on={ui.showDictate} onChange={(showDictate) => setUiSettings({ showDictate })} label="Dictation action" /><span>Dictation</span></label>
           <label><Toggle on={ui.showQuickActions} onChange={(showQuickActions) => setUiSettings({ showQuickActions })} label="Quick actions" /><span>Quick actions</span></label>
         </div>

@@ -32,6 +32,7 @@ register("./tsxHooks.mjs", import.meta.url);
 const { act, createElement } = await import("react");
 const { createRoot } = await import("react-dom/client");
 const { listSlots } = await import("../src/slots.ts");
+const { listWidgets } = await import("../src/widgets/catalog.ts");
 const { slotSurfaces } = await import("../src/surfaces.ts");
 const { getState, setRailPlugin, setSessions } = await import("../src/store.ts");
 const { setUiSettings } = await import("../src/uiPrefs.ts");
@@ -93,12 +94,13 @@ async function mount(element: ReactNode) {
   };
 }
 
-test("install contributes bell + panel through the slot registry (no host edits)", () => {
+test("install contributes a layout-managed bell and a slot-backed panel", () => {
   installNotificationCentre();
   installNotificationCentre(); // idempotent
 
-  const bells = listSlots("app.header.actions").filter((i) => i.id === "notification-bell");
+  const bells = listWidgets().filter((widget) => widget.id === "notification.bell");
   assert.equal(bells.length, 1);
+  assert.equal(bells[0]!.defaultSlot, "app.header.actions");
 
   const tabs = listSlots("workspace.right.tabs").filter((i) => i.id === "notification-centre");
   assert.equal(tabs.length, 1);

@@ -11,6 +11,8 @@ import { useShellMode } from "../responsiveShell.ts";
 import { dismissKeyboard } from "../mobileViewport.ts";
 import { tapFeedback } from "../haptics.ts";
 import Sheet, { SheetRow } from "./mobile/Sheet.tsx";
+import { useSheetTrigger } from "./mobile/sheetTrigger.ts";
+import { usePopoverPlacement } from "../usePopoverPlacement.ts";
 
 const MAX_SHOWN = 200;
 
@@ -59,7 +61,7 @@ export default function Picker({
   values,
   onPick,
   placeholder = "Default",
-  direction = "down",
+  direction: _direction = "down",
   disabled,
   trailingAction,
   footerAction,
@@ -75,8 +77,10 @@ export default function Picker({
   const [active, setActive] = useState(0);
   const listRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
+  const popoverRef = useRef<HTMLDivElement>(null);
   const pickerId = useId();
   const listId = `${pickerId}-listbox`;
+  const direction = usePopoverPlacement(open && !asSheet, triggerRef, popoverRef);
 
   const close = () => {
     setOpen(false);
@@ -90,9 +94,15 @@ export default function Picker({
       return;
     }
     setQ("");
-    if (asSheet) void dismissKeyboard().then(() => setOpen(true));
-    else setOpen(true);
+    if (asSheet) {
+      // Open first, dismiss the keyboard after: see sheetTrigger.ts.
+      setOpen(true);
+      void dismissKeyboard();
+    } else {
+      setOpen(true);
+    }
   };
+  const triggerHandlers = useSheetTrigger(asSheet, toggleOpen);
 
   const hits = useMemo(() => filterPickerItems(items, q), [items, q]);
   const shown = hits.slice(0, MAX_SHOWN);
@@ -152,7 +162,7 @@ export default function Picker({
         aria-expanded={open}
         aria-controls={open && !asSheet ? listId : undefined}
         disabled={disabled}
-        onClick={toggleOpen}
+        {...triggerHandlers}
       >
         {triggerIcon
           ? <span className="picker-trigger-icon" aria-hidden="true">{triggerIcon}</span>
@@ -203,7 +213,7 @@ export default function Picker({
       {open && !asSheet && (
         <>
           <div className="menu-backdrop" onClick={close} />
-          <div className={`picker-pop ${direction}`}>
+          <div ref={popoverRef} className={`picker-pop ${direction}`}>
             <input
               autoFocus
               value={q}

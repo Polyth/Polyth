@@ -37,6 +37,12 @@ test("legacy system theme migrates to an independent system appearance mode", ()
   assert.equal(migrated.appearanceMode, "system");
 });
 
+test("interface font catalog accepts programmer fonts and rejects unknown values", () => {
+  assert.equal(product.normalizeSettings({ fontFamily: "jetbrains-mono" }).fontFamily, "jetbrains-mono");
+  assert.equal(product.normalizeSettings({ fontFamily: "unknown-font" }).fontFamily, "sans");
+  assert.ok(product.INTERFACE_FONTS.filter((font) => font.mono).length >= 15);
+});
+
 test("saving either settings domain preserves the other domain byte-for-byte", () => {
   const uiBefore = stored.get(ui.UI_SETTINGS_KEY);
   product.saveSettings({ ...product.loadSettings(), productName: "Product only" });
@@ -60,4 +66,10 @@ test("header metric and response action layouts preserve order and reject unknow
   const defaults = ui.parseUiSettings(null);
   assert.deepEqual(defaults.headerMetrics, [...ui.HEADER_METRIC_IDS]);
   assert.deepEqual(defaults.responseActions, [...ui.RESPONSE_ACTION_IDS]);
+});
+
+test("top rail alignment defaults to center and accepts only supported positions", () => {
+  assert.equal(ui.parseUiSettings(null).topRailAlignment, "center");
+  assert.equal(ui.parseUiSettings(JSON.stringify({ topRailAlignment: "left" })).topRailAlignment, "left");
+  assert.equal(ui.parseUiSettings(JSON.stringify({ topRailAlignment: "floating" })).topRailAlignment, "center");
 });

@@ -390,7 +390,6 @@ export default function SettingsView({ onClose = () => setOverlay(null) }: { onC
               <>
                 <div className="settings-pane-head-copy">
                   <div className="modal-title settings-pane-title">{current.label}</div>
-                  <div className="modal-desc">Configure this part of your Polyth workspace.</div>
                 </div>
                 <span className="dialog-hint" id="settings-close-hint"><kbd>Esc</kbd> close</span>
                 <button className="close-btn" onClick={onClose} aria-label="Close">×</button>

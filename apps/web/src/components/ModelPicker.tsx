@@ -13,7 +13,10 @@ import { useShellMode } from "../responsiveShell.ts";
 import { dismissKeyboard } from "../mobileViewport.ts";
 import { tapFeedback } from "../haptics.ts";
 import Sheet, { SheetRow, SheetSection } from "./mobile/Sheet.tsx";
+import { useSheetTrigger } from "./mobile/sheetTrigger.ts";
 import { Icon } from "../icons.tsx";
+import ProviderLogo from "./ProviderLogo.tsx";
+import { usePopoverPlacement } from "../usePopoverPlacement.ts";
 
 export function modelModalities(model: ModelDescriptor): string {
   const modalities = (model.capabilities ?? [])
@@ -85,7 +88,7 @@ export default function ModelPicker({
   value,
   recommended,
   onPick,
-  direction = "up",
+  direction: _direction = "down",
 }: ModelPickerProps) {
   const prefs = useModelPrefs();
   const phone = useShellMode() === "phone";
@@ -94,6 +97,8 @@ export default function ModelPicker({
   const [editing, setEditing] = useState(false);
   const [draggedProvider, setDraggedProvider] = useState<string | null>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
+  const popoverRef = useRef<HTMLDivElement>(null);
+  const direction = usePopoverPlacement(open && !phone, triggerRef, popoverRef);
   useEscape(open && !phone, () => {
     setOpen(false);
     triggerRef.current?.focus();
@@ -106,7 +111,8 @@ export default function ModelPicker({
     ? models.find((model) =>
         model.providerID === recommended.providerID && model.modelID === recommended.modelID)
     : undefined;
-  const label = current?.name ?? fallback?.name ?? "Auto";
+  const selectedModel = current ?? fallback;
+  const label = selectedModel?.name ?? "Auto";
   const q = query.trim().toLowerCase();
   const filtered = models.filter((model) =>
     !q || [model.name, model.modelID, model.providerID, model.providerName ?? ""]
@@ -153,9 +159,16 @@ export default function ModelPicker({
       close();
       return;
     }
-    if (phone) void dismissKeyboard().then(() => setOpen(true));
-    else setOpen(true);
+    if (phone) {
+      // Open immediately, then let the keyboard go: the sheet must never wait
+      // for a click that the keyboard-dismiss reflow can swallow.
+      setOpen(true);
+      void dismissKeyboard();
+    } else {
+      setOpen(true);
+    }
   };
+  const triggerHandlers = useSheetTrigger(phone, toggleOpen);
 
   const star = (model: ModelDescriptor, variant: "row" | "sheet" = "row") => {
     const favorite = isFavorite(prefs, modelKey(model));
@@ -244,8 +257,15 @@ export default function ModelPicker({
       aria-label={`Select model, current ${label}`}
       aria-haspopup="dialog"
       aria-expanded={open}
-      onClick={toggleOpen}
+      {...triggerHandlers}
     >
+      {selectedModel && (
+        <ProviderLogo
+          providerID={selectedModel.providerID}
+          providerName={selectedModel.providerName}
+          className="model-trigger-logo"
+        />
+      )}
       <span className="model-trigger-name">{label}</span>
       <span className="model-trigger-caret" aria-hidden="true"><Icon.chevronDown /></span>
     </button>
@@ -260,13 +280,20 @@ export default function ModelPicker({
       aria-expanded={open}
       onClick={toggleOpen}
     >
+      {selectedModel && (
+        <ProviderLogo
+          providerID={selectedModel.providerID}
+          providerName={selectedModel.providerName}
+          className="model-trigger-logo"
+        />
+      )}
       <span className="model-trigger-copy">
         <small>Model</small>
         <strong className="picker-chip-text">{label}</strong>
       </span>
-      {(current ?? fallback) && (
+      {selectedModel && (
         <span className="model-trigger-meta">
-          {modelModalities(current ?? fallback!)} · {modelContextLabel((current ?? fallback)?.context)}
+          {modelModalities(selectedModel)} · {modelContextLabel(selectedModel.context)}
         </span>
       )}
       <span className="picker-caret" aria-hidden="true">▾</span>
@@ -322,6 +349,11 @@ export default function ModelPicker({
                       aria-expanded={expanded}
                       onClick={() => setModelProviderExpanded(provider.id, !expanded)}
                     >
+                      <ProviderLogo
+                        providerID={provider.id}
+                        providerName={provider.name}
+                        className="model-provider-logo"
+                      />
                       <span>{provider.name}</span>
                       <small>{items.length}</small>
                       <span className={`sheet-section-caret${expanded ? " open" : ""}`} aria-hidden="true">
@@ -340,7 +372,7 @@ export default function ModelPicker({
       {open && !phone && (
         <>
           <div className="menu-backdrop" onClick={close} />
-          <div className={`picker-pop model-picker-pop ${direction}`}>
+          <div ref={popoverRef} className={`picker-pop model-picker-pop ${direction}`}>
             <input
               autoFocus
               value={query}
@@ -382,6 +414,11 @@ export default function ModelPicker({
                       onClick={() => setModelProviderExpanded(provider.id, !expanded)}
                     >
                       <span className="model-provider-grip" aria-hidden="true">⠿</span>
+                      <ProviderLogo
+                        providerID={provider.id}
+                        providerName={provider.name}
+                        className="model-provider-logo"
+                      />
                       <strong>{provider.name}</strong>
                       <small>{items.length}</small>
                       <span aria-hidden="true">{expanded ? "⌄" : "›"}</span>

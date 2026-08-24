@@ -84,9 +84,9 @@ test("canvas top row is placeable and editing borders use theme colors", async (
 test("settings uses named button places without canvas layout controls", async () => {
   const source = await readFile(new URL("../src/components/settings/WidgetsPage.tsx", import.meta.url), "utf8");
   for (const place of [
-    "Focus header",
-    "More tools / right rail",
-    "Technical menu",
+    "Top rail",
+    "Right rail",
+    "Response actions",
     "Composer actions",
     "Session footer",
     "Header actions",
@@ -100,9 +100,26 @@ test("settings uses named button places without canvas layout controls", async (
     "WidgetLibraryOverlay",
     "Build & Debug",
     "Who is this for",
+    "More tools / right rail",
+    "Technical menu",
+    "Session header stats",
   ]) {
     assert.ok(!source.includes(removed), `${removed} stays out of widget settings`);
   }
+});
+
+test("chat top rail is configured directly without a More tools overflow", async () => {
+  const source = await readFile(new URL("../src/components/Header.tsx", import.meta.url), "utf8");
+  assert.match(source, />Chat<\/button>/);
+  assert.doesNotMatch(source, />More tools</);
+  assert.doesNotMatch(source, /CapabilityMenu/);
+});
+
+test("widget settings exposes a persistent Chat top rail position", async () => {
+  const source = await readFile(new URL("../src/components/settings/WidgetsPage.tsx", import.meta.url), "utf8");
+  assert.match(source, /Chat top rail position/);
+  assert.match(source, /Left of center/);
+  assert.match(source, /topRailAlignment/);
 });
 
 test("widget library searches capabilities and combines plugin, size, zone, and tab filters", () => {

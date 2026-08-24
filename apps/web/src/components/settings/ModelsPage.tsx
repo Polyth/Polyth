@@ -12,10 +12,10 @@ import {
   useModelPrefs,
 } from "../../modelPrefs.ts";
 import { setModels, useStore } from "../../store.ts";
-import { providerColor } from "../../format.ts";
 import { api, type ProviderCatalogDto, type VisibilityStateDto } from "../../api.ts";
 import { EmptyState, PageHead, Seg, Toggle } from "./parts.tsx";
 import { modelDisplayName } from "../../composer/discovery.ts";
+import ProviderLogo from "../ProviderLogo.tsx";
 
 type Scope = "connected" | "all";
 
@@ -164,7 +164,7 @@ export default function ModelsPage() {
             aria-pressed={providerFilter === p.id}
             onClick={() => setProviderFilter(providerFilter === p.id ? null : p.id)}
           >
-            <span className="set-model-dot" style={{ background: providerColor(p.id) }} />
+            <ProviderLogo providerID={p.id} providerName={p.name} className="set-provider-logo" />
             {p.name}
           </button>
         ))}
@@ -200,7 +200,7 @@ export default function ModelsPage() {
                 >
                   <span className="provider-drag" aria-hidden="true">⠿</span>
                   <span className={`provider-chevron ${expanded ? "open" : ""}`} aria-hidden="true">›</span>
-                  <span className="set-model-dot" style={{ background: providerColor(p.id) }} />
+                  <ProviderLogo providerID={p.id} providerName={p.name} className="set-provider-logo" />
                   <span className="provider-name">{p.name}</span>
                   {!p.connected && <span className="tag provider-tag">not connected</span>}
                   <span className="provider-count mono">{enabledCount}/{p.models.length}</span>
@@ -253,7 +253,7 @@ export default function ModelsPage() {
                       </div>
                     );
                   })}
-                  {p.models.length === 0 && <div className="muted" style={{ fontSize: 12, padding: "4px 8px" }}>No matches in this provider.</div>}
+                  {p.models.length === 0 && <div className="muted" style={{ fontSize: "calc(12px * var(--ui-font-scale, 1))", padding: "4px 8px" }}>No matches in this provider.</div>}
                 </div>
               )}
             </div>

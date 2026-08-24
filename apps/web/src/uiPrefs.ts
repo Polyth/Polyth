@@ -9,6 +9,7 @@ export type NotificationKindPref = NotificationKind;
 export type MessageCopyFormat = "markdown" | "json";
 export type HeaderMetricId = "tokens" | "messages" | "duration" | "cost";
 export type ResponseActionId = "copy" | "image" | "plan" | "pin" | "session" | "multirun";
+export type TopRailAlignment = "center" | "left";
 
 export const HEADER_METRIC_IDS: readonly HeaderMetricId[] = ["tokens", "messages", "duration", "cost"];
 export const RESPONSE_ACTION_IDS: readonly ResponseActionId[] = ["copy", "image", "plan", "pin", "session", "multirun"];
@@ -50,6 +51,8 @@ export interface UiSettings {
   headerMetrics: HeaderMetricId[];
   /** Assistant-header hover actions, in drag-configured order. */
   responseActions: ResponseActionId[];
+  /** Placement of the configured Chat top rail in the application header. */
+  topRailAlignment: TopRailAlignment;
   /** JSON tree viewer defaults (WP4). */
   jsonTreeDefault: "tree" | "raw";
   jsonTreeDepth: number;
@@ -94,6 +97,7 @@ export const UI_DEFAULTS: UiSettings = {
   messageCopyFormat: "markdown",
   headerMetrics: [...HEADER_METRIC_IDS],
   responseActions: [...RESPONSE_ACTION_IDS],
+  topRailAlignment: "center",
   jsonTreeDefault: "tree",
   jsonTreeDepth: 2,
   editorAutosave: true,
@@ -150,6 +154,7 @@ export function parseUiSettings(raw: string | null): UiSettings {
       messageCopyFormat: data.messageCopyFormat === "json" ? "json" : "markdown",
       headerMetrics: orderedIds(data.headerMetrics, HEADER_METRIC_IDS),
       responseActions: orderedIds(data.responseActions, RESPONSE_ACTION_IDS),
+      topRailAlignment: data.topRailAlignment === "left" ? "left" : "center",
       jsonTreeDefault: data.jsonTreeDefault === "raw" ? "raw" : "tree",
       jsonTreeDepth: Number.isFinite(Number(data.jsonTreeDepth)) && Number(data.jsonTreeDepth) >= 0 ? Math.min(8, Math.round(Number(data.jsonTreeDepth))) : 2,
       editorAutosave: data.editorAutosave !== false,
@@ -207,12 +212,17 @@ export function applyUiSettings(s: UiSettings = settings): void {
   b.dataset.quickActions = String(s.showQuickActions);
   b.style?.setProperty("--editor-font-size", `${s.editorFontSize}px`);
   const radii = s.rounding === "square"
-    ? ["2px", "3px", "4px", "6px", "8px"]
+    ? ["0px", "0px", "0px", "0px", "0px"]
     : s.rounding === "rounded"
       ? ["12px", "14px", "16px", "20px", "24px"]
       : ["8px", "10px", "10px", "12px", "16px"];
+  b.style?.setProperty("--corner-radius-scale", s.rounding === "square" ? "0" : s.rounding === "rounded" ? "1.5" : "1");
   ["--radius-sm", "--radius", "--radius-md", "--radius-lg", "--radius-xl"]
     .forEach((name, index) => b.style?.setProperty(name, radii[index]!));
+  b.style?.setProperty("--radius-control", radii[1]!);
+  b.style?.setProperty("--radius-card", radii[3]!);
+  b.style?.setProperty("--radius-surface", radii[4]!);
+  b.style?.setProperty("--radius-sheet", radii[4]!);
 }
 
 export function getUiSettings(): UiSettings {

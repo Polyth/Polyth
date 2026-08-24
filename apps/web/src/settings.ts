@@ -3,14 +3,51 @@
 // one-time copy without ever writing the legacy key again.
 import { applyThemeSetting, type AppearanceMode } from "./theme.ts";
 
+export const INTERFACE_FONTS = [
+  { id: "sans", label: "Inter", stack: 'Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif', mono: false },
+  { id: "geist", label: "Geist", stack: 'Geist, Inter, ui-sans-serif, system-ui, sans-serif', mono: false },
+  { id: "system", label: "System UI", stack: 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif', mono: false },
+  { id: "ibm-plex-sans", label: "IBM Plex Sans", stack: '"IBM Plex Sans", Inter, ui-sans-serif, system-ui, sans-serif', mono: false },
+  { id: "source-sans", label: "Source Sans 3", stack: '"Source Sans 3", "Source Sans Pro", Inter, ui-sans-serif, sans-serif', mono: false },
+  { id: "atkinson", label: "Atkinson Hyperlegible", stack: '"Atkinson Hyperlegible", Inter, ui-sans-serif, system-ui, sans-serif', mono: false },
+  { id: "serif", label: "Charter", stack: 'Charter, "Bitstream Charter", "Sitka Text", Georgia, serif', mono: false },
+  { id: "mono", label: "System Monospace", stack: 'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace', mono: true },
+  { id: "berkeley-mono", label: "Berkeley Mono", stack: '"Berkeley Mono", ui-monospace, Menlo, Consolas, monospace', mono: true },
+  { id: "geist-mono", label: "Geist Mono", stack: '"Geist Mono", ui-monospace, Menlo, Consolas, monospace', mono: true },
+  { id: "jetbrains-mono", label: "JetBrains Mono", stack: '"JetBrains Mono", ui-monospace, Menlo, Consolas, monospace', mono: true },
+  { id: "commit-mono", label: "Commit Mono", stack: '"Commit Mono", ui-monospace, Menlo, Consolas, monospace', mono: true },
+  { id: "cascadia-mono", label: "Cascadia Mono", stack: '"Cascadia Mono", Cascadia, Consolas, ui-monospace, monospace', mono: true },
+  { id: "fira-code", label: "Fira Code", stack: '"Fira Code", "Fira Mono", ui-monospace, Menlo, Consolas, monospace', mono: true },
+  { id: "iosevka", label: "Iosevka", stack: 'Iosevka, "Iosevka Term", ui-monospace, Menlo, Consolas, monospace', mono: true },
+  { id: "ibm-plex-mono", label: "IBM Plex Mono", stack: '"IBM Plex Mono", ui-monospace, Menlo, Consolas, monospace', mono: true },
+  { id: "source-code-pro", label: "Source Code Pro", stack: '"Source Code Pro", ui-monospace, Menlo, Consolas, monospace', mono: true },
+  { id: "roboto-mono", label: "Roboto Mono", stack: '"Roboto Mono", ui-monospace, Menlo, Consolas, monospace', mono: true },
+  { id: "inconsolata", label: "Inconsolata", stack: 'Inconsolata, ui-monospace, Menlo, Consolas, monospace', mono: true },
+  { id: "ubuntu-mono", label: "Ubuntu Mono", stack: '"Ubuntu Mono", ui-monospace, Menlo, Consolas, monospace', mono: true },
+  { id: "menlo", label: "Menlo", stack: 'Menlo, "SF Mono", ui-monospace, Consolas, monospace', mono: true },
+  { id: "consolas", label: "Consolas", stack: 'Consolas, "Cascadia Mono", ui-monospace, Menlo, monospace', mono: true },
+  { id: "monaco", label: "Monaco", stack: 'Monaco, Menlo, "SF Mono", ui-monospace, Consolas, monospace', mono: true },
+  { id: "deja-vu-sans-mono", label: "DejaVu Sans Mono", stack: '"DejaVu Sans Mono", "Liberation Mono", ui-monospace, monospace', mono: true },
+] as const;
+
+export type InterfaceFont = (typeof INTERFACE_FONTS)[number]["id"];
+
+export function isInterfaceFont(value: unknown): value is InterfaceFont {
+  return typeof value === "string" && INTERFACE_FONTS.some((font) => font.id === value);
+}
+
+function interfaceFont(value: InterfaceFont) {
+  return INTERFACE_FONTS.find((font) => font.id === value) ?? INTERFACE_FONTS[0];
+}
+
 export interface PolythSettings {
   /** Color-palette identity: a preset id or custom theme id. */
   theme: string;
   /** Light/dark rendering is independent from the selected palette. */
   appearanceMode: AppearanceMode;
   density: "comfortable" | "balanced" | "compact";
-  fontSize: number; // px, 12–18; scales the UI, not code blocks
-  fontFamily: "sans" | "system" | "serif" | "mono";
+  fontSize: number; // px, 12–18; scales interface text, not code blocks
+  fontFamily: InterfaceFont;
   productName: string; // brand label in the sidebar + document title
   relativeTime: boolean; // "2m ago" vs absolute times in the session list
   sendOnEnter: boolean; // Enter sends; off → Enter is newline, Mod+Enter sends
@@ -67,9 +104,7 @@ export function normalizeSettings(raw: unknown): PolythSettings {
     appearanceMode,
     density: r.density === "compact" || r.density === "balanced" ? r.density : "comfortable",
     fontSize: pickNumber(r.fontSize, d.fontSize, 12, 18),
-    fontFamily: r.fontFamily === "system" || r.fontFamily === "serif" || r.fontFamily === "mono"
-      ? r.fontFamily
-      : "sans",
+    fontFamily: isInterfaceFont(r.fontFamily) ? r.fontFamily : d.fontFamily,
     productName: pickString(r.productName, d.productName).trim() || d.productName,
     relativeTime: pickBool(r.relativeTime, d.relativeTime),
     sendOnEnter: pickBool(r.sendOnEnter, d.sendOnEnter),
@@ -123,7 +158,11 @@ export function applySettingsToDom(s: PolythSettings): void {
   applyThemeSetting(s.theme, s.appearanceMode);
   html.dataset.density = s.density;
   html.dataset.font = s.fontFamily;
+  const font = interfaceFont(s.fontFamily);
+  html.dataset.fontKind = font.mono ? "mono" : "prose";
+  html.style.setProperty("--ui-font-family", font.stack);
   html.style.setProperty("--ui-font-size", `${s.fontSize}px`);
+  html.style.setProperty("--ui-font-scale", String(s.fontSize / DEFAULT_SETTINGS.fontSize));
   document.title = s.productName;
 }
 

@@ -18,14 +18,13 @@ import {
 import { PANEL_OF_CAPABILITY, PANE_OF_CAPABILITY, VIEW_OF_CAPABILITY } from "../builtinCapabilities.ts";
 import SlotHost from "./slots/SlotHost.ts";
 import { Icon } from "../icons.tsx";
-import CapabilityMenu from "./CapabilityMenu.tsx";
 import { setWorkspaceMode, useWorkspaceMode } from "../widgets/workspaceMode.ts";
 import { useDismissibleMenu } from "./a11y/Menu.ts";
-import ChatMetrics from "./ChatMetrics.tsx";
 import { setUiSettings, useUiSettings } from "../uiPrefs.ts";
 import { dismissKeyboard } from "../mobileViewport.ts";
 import SessionMenu from "./mobile/SessionMenu.tsx";
-import { setPlacementOverride } from "../capabilityLayout.ts";
+import { useSheetTrigger } from "./mobile/sheetTrigger.ts";
+import { api, type GithubStatusDto } from "../api.ts";
 
 const STROKE = { fill: "none", stroke: "currentColor", strokeWidth: 1.5, strokeLinecap: "round", strokeLinejoin: "round" } as const;
 
@@ -95,58 +94,15 @@ function capabilityIcon(id: string): React.ReactNode {
   return EXTRA_ICONS[id] ?? <Icon.context />;
 }
 
-/** Primary navigation + its responsive overflow. Capabilities configured for
- *  the right rail or technical menu are owned by those surfaces; only primary
- *  header icons that do not fit create the More tools disclosure. */
+/** The centered top rail renders the buttons chosen in Widgets & Layout.
+ *  Right-rail and technical capabilities stay on their configured surfaces;
+ *  the top rail never creates an implicit overflow menu. */
 function CapabilityNav() {
   const resolved = useResolvedCapabilities();
+  const ui = useUiSettings();
   const view = useStore((s) => s.activeView);
   const rail = useStore((s) => s.railPlugin);
   const paneFullscreen = useStore((s) => s.paneFullscreen);
-  const navRef = useRef<HTMLElement>(null);
-  const [fit, setFit] = useState(8);
-  const [moreOpen, setMoreOpen] = useState(false);
-  const moreRef = useRef<HTMLDivElement>(null);
-  const triggerRef = useRef<HTMLButtonElement>(null);
-
-  // Overflow: primary items that don't fit move into More tools; they never
-  // disappear. The nav is a flex-grow container whose width tracks the free
-  // header space (never its own contents — measuring content width would
-  // oscillate). ~36px per icon button + room for the named trigger.
-  useEffect(() => {
-    const el = navRef.current;
-    if (!el || typeof ResizeObserver === "undefined") return;
-    const compute = () => setFit(Math.max(1, Math.floor((el.clientWidth - 110) / 36)));
-    compute();
-    const ro = new ResizeObserver(compute);
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
-
-  useEffect(() => {
-    if (!moreOpen) return;
-    const onDown = (e: MouseEvent) => {
-      if (moreRef.current && !moreRef.current.contains(e.target as Node)) toggleMore(false);
-    };
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.stopPropagation();
-        toggleMore(false);
-        triggerRef.current?.focus();
-      }
-    };
-    document.addEventListener("mousedown", onDown);
-    document.addEventListener("keydown", onKey, true);
-    return () => {
-      document.removeEventListener("mousedown", onDown);
-      document.removeEventListener("keydown", onKey, true);
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [moreOpen]);
-
-  const toggleMore = (open: boolean) => {
-    setMoreOpen(open);
-  };
 
   const isActive = (c: ResolvedCapability): boolean => {
     const v = VIEW_OF_CAPABILITY[c.descriptor.id];
@@ -158,69 +114,27 @@ function CapabilityNav() {
   };
 
   const primaries = resolved.filter((c) => c.tier === "primary" && c.descriptor.available());
-  let visible = primaries.slice(0, fit);
-  const overflowedActive = primaries.slice(fit).find(isActive);
-  if (overflowedActive) visible = [...visible.slice(0, Math.max(0, fit - 1)), overflowedActive];
-  const visibleIds = new Set(visible.map((c) => c.descriptor.id));
-  // The disclosure is a real overflow of configured header icons, not a
-  // permanent duplicate of right-rail and technical-menu capabilities. When
-  // every configured header icon fits, no empty More tools control is mounted.
-  const rest = primaries.filter((c) => !visibleIds.has(c.descriptor.id));
-  const reorderPrimary = (draggedId: string, targetId: string) => {
-    const ids = primaries.map((capability) => capability.descriptor.id).filter((id) => id !== draggedId);
-    ids.splice(ids.indexOf(targetId), 0, draggedId);
-    ids.forEach((id, rank) => setPlacementOverride(id, { tier: "primary", rank }));
-  };
 
   return (
-    <nav className="view-switcher" aria-label="Workspace tools" ref={navRef}>
+    <nav
+      className={`view-switcher top-rail-${ui.topRailAlignment}`}
+      aria-label={`Workspace tools, ${ui.topRailAlignment === "left" ? "left of center" : "centered"}`}
+    >
       <div className="view-switcher-pill">
-        {visible.map((c) => {
-          const overflowed = c === overflowedActive;
+        {primaries.map((c) => {
           return (
             <button
               key={c.descriptor.id}
-              className={`view-icon ${isActive(c) ? "active" : ""} ${overflowed ? "view-icon-named" : ""}`}
+              className={`view-icon ${isActive(c) ? "active" : ""}`}
               title={c.descriptor.label}
               aria-label={c.descriptor.label}
               aria-pressed={isActive(c)}
-              draggable
-              onDragStart={(event) => event.dataTransfer.setData("text/polyth-capability", c.descriptor.id)}
-              onDragOver={(event) => event.preventDefault()}
-              onDrop={(event) => {
-                event.preventDefault();
-                const draggedId = event.dataTransfer.getData("text/polyth-capability");
-                if (primaries.some((item) => item.descriptor.id === draggedId)) {
-                  reorderPrimary(draggedId, c.descriptor.id);
-                }
-              }}
               onClick={() => c.descriptor.open()}
             >
               {capabilityIcon(c.descriptor.id)}
-              {overflowed && <span className="view-icon-label">{c.descriptor.label}</span>}
             </button>
           );
         })}
-        {rest.length > 0 && <div className="more-tools" ref={moreRef}>
-          <button
-            ref={triggerRef}
-            className="more-tools-trigger"
-            aria-expanded={moreOpen}
-            aria-controls="header-capability-menu"
-            onClick={() => toggleMore(!moreOpen)}
-          >
-            More tools
-          </button>
-          {moreOpen && (
-            <CapabilityMenu
-              id="header-capability-menu"
-              className="more-tools-popup"
-              capabilities={rest}
-              collapseTechnical
-              onClose={() => toggleMore(false)}
-            />
-          )}
-        </div>}
       </div>
     </nav>
   );
@@ -343,13 +257,7 @@ function useResizeFocusHandoff(mode: ShellMode) {
   }, [mode]);
 }
 
-function SettingsButton() {
-  return (
-    <button className="icon-btn overflow-trigger" title="Settings" aria-label="Settings" onClick={() => setOverlay("settings")}><Icon.gear /></button>
-  );
-}
-
-function UserMenu() {
+function UserMenu({ githubUser }: { githubUser: GithubStatusDto["user"] }) {
   const [open, setOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -368,12 +276,17 @@ function UserMenu() {
       <button
         ref={triggerRef}
         className="header-profile"
-        aria-label="User menu"
+        aria-label={githubUser ? `${githubUser.login}'s user menu` : "User menu"}
         aria-haspopup="menu"
         aria-expanded={open}
         onClick={() => setOpen((value) => !value)}
       >
-        <span>PO</span><b aria-hidden="true">⌄</b>
+        <span className="header-profile-avatar">
+          {githubUser
+            ? <img src={githubUser.avatarUrl} alt="" referrerPolicy="no-referrer" />
+            : <Icon.session />}
+        </span>
+        <b aria-hidden="true">⌄</b>
       </button>
       {open && (
         <div className="menu-popup user-menu-popup" role="menu" aria-label="User and system" ref={menuRef} onKeyDown={onMenuKey}>
@@ -466,10 +379,17 @@ export default function Header() {
   const model = useActiveModel();
   const view = useStore((s) => s.activeView);
   const workspaceMode = useWorkspaceMode();
+  const [githubUser, setGithubUser] = useState<GithubStatusDto["user"]>(null);
 
   const mode = useShellMode();
   const compact = mode !== "wide";
   const [sessionMenuOpen, setSessionMenuOpen] = useState(false);
+  // §22: pointer-down activation — a click can be lost to the keyboard-dismiss
+  // reflow (see components/mobile/sheetTrigger.ts).
+  const sessionMenuTrigger = useSheetTrigger(mode === "phone", () => {
+    setSessionMenuOpen(true);
+    void dismissKeyboard();
+  });
   const chatSurface = workspaceMode === "chat" && view === "session";
   const firstUserText = model.messages.find((message) => message.kind === "user")?.text;
   const mobileTitle = session
@@ -481,6 +401,20 @@ export default function Header() {
     setActiveView("session");
     setWorkspaceMode(next);
   };
+
+  // The fixed user menu uses the public profile reported by gh when available.
+  // It remains a local account icon when GitHub is unavailable or unsigned-in.
+  useEffect(() => {
+    if (!project?.id) {
+      setGithubUser(null);
+      return;
+    }
+    let stale = false;
+    void api.githubStatus(project.id).then((status) => {
+      if (!stale) setGithubUser(status.authenticated ? status.user : null);
+    });
+    return () => { stale = true; };
+  }, [project?.id]);
 
   // The mock's phone header replaces the compact header only at phone widths;
   // tablets (481–820px) keep the compact header with metrics and overflow.
@@ -496,7 +430,7 @@ export default function Header() {
           aria-label={`${mobileTitle}. Session menu`}
           aria-haspopup="dialog"
           aria-expanded={sessionMenuOpen}
-          onClick={() => void dismissKeyboard().then(() => setSessionMenuOpen(true))}
+          {...sessionMenuTrigger}
         >
           <span>{mobileTitle}</span>
           <Icon.chevronDown />
@@ -517,6 +451,7 @@ export default function Header() {
           <Icon.refresh />
         </button>
         <MobileComposerControlsMenu />
+        <UserMenu githubUser={githubUser} />
       </header>
     );
   }
@@ -547,7 +482,7 @@ export default function Header() {
               className={workspaceMode === "chat" ? "active" : ""}
               aria-pressed={workspaceMode === "chat"}
               onClick={() => switchWorkspaceMode("chat")}
-            >Focus</button>
+            >Chat</button>
             <button
               className={workspaceMode !== "chat" ? "active" : ""}
               aria-pressed={workspaceMode !== "chat"}
@@ -556,7 +491,6 @@ export default function Header() {
           </div>
         )}
         {workspaceMode === "chat" && !compact && <CapabilityNav />}
-        {chatSurface && <ChatMetrics session={session} model={model} />}
         <span className="header-spacer" />
         {(!compact || !chatSurface) && (
           <div className="header-actions" aria-label="Application">
@@ -572,10 +506,7 @@ export default function Header() {
             />
           </div>
         )}
-        {workspaceMode === "chat" && (
-          <SettingsButton />
-        )}
-        {(!compact || !chatSurface) && <UserMenu />}
+        {(!compact || !chatSurface) && <UserMenu githubUser={githubUser} />}
       </header>
     </>
   );

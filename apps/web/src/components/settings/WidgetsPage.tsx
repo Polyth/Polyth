@@ -1,9 +1,9 @@
 import { useEffect, useState } from "react";
 import type { UiSlot } from "@polyth/contracts";
-import { useResolvedCapabilities } from "../../capabilities.ts";
+import { listCapabilities, useResolvedCapabilities } from "../../capabilities.ts";
 import { activateProject, useStore } from "../../store.ts";
 import {
-  capabilityLayoutStorageKey, setPlacementOverride,
+  capabilityLayoutStorageKey, getCapabilityPlacements, setPlacementOverride,
   type CapabilityTier,
 } from "../../capabilityLayout.ts";
 import { useWidgetCatalog, type WidgetDef } from "../../widgets/catalog.ts";
@@ -16,18 +16,16 @@ import {
   updateWidgetLayout,
   useWidgetLayout,
   useWidgetStoreStatus,
-  widgetLayoutStorageKey, widgetSlotOf,
+  serializeWidgetLayout, widgetLayoutStorageKey, widgetSlotOf,
   type WidgetLayoutMutation,
 } from "../../widgets/widgetLayout.ts";
 import { supportedWidgetSlots } from "../../widgets/widgetLibrary.ts";
 import "../../widgets/builtinWidgets.tsx";
 import { PageHead } from "./parts.tsx";
-import {
-  HEADER_METRIC_IDS, RESPONSE_ACTION_IDS, setUiSettings, useUiSettings,
-  type HeaderMetricId, type ResponseActionId,
-} from "../../uiPrefs.ts";
+import { RESPONSE_ACTION_IDS, setUiSettings, useUiSettings, type ResponseActionId } from "../../uiPrefs.ts";
 
 type MiniPlaceId = "composer" | "session-footer" | "app-header";
+type InterfaceSurfaceId = "top-rail" | "right-rail" | "response-footer" | MiniPlaceId;
 type PlaceId = CapabilityTier | MiniPlaceId;
 
 const CAPABILITY_PLACES: Array<{
@@ -37,18 +35,15 @@ const CAPABILITY_PLACES: Array<{
 }> = [
   {
     id: "primary",
-    title: "Focus header",
-    description: "Primary tools shown in the top strip while you work.",
+    title: "Top rail",
+    description: "Centered workspace tools at the top. Drag to choose their order.",
   },
   {
+    // "more" is the durable placement value used by ContextRail. Present it
+    // as the physical destination users see, never as an ambiguous menu.
     id: "more",
-    title: "More tools / right rail",
-    description: "Tools kept close by without filling the primary header.",
-  },
-  {
-    id: "technical",
-    title: "Technical menu",
-    description: "Advanced tools available from the technical section.",
+    title: "Right rail",
+    description: "Panel buttons along the right edge. Drag to choose their order.",
   },
 ];
 
@@ -61,7 +56,7 @@ const MINI_PLACES: Array<{
   {
     id: "composer",
     title: "Composer actions",
-    description: "Buttons shown before or after the message composer.",
+    description: "Buttons beside the message composer.",
     slots: ["composer.leading", "composer.trailing"],
   },
   {
@@ -73,7 +68,7 @@ const MINI_PLACES: Array<{
   {
     id: "app-header",
     title: "Header actions",
-    description: "Application and active-session actions shown together in the app header.",
+    description: "Application and active-session actions at the end of the top rail.",
     slots: ["session.header.actions", "app.header.actions"],
   },
 ];
@@ -99,9 +94,19 @@ function MiniWidgetPicker({
   );
 }
 
-const HEADER_METRIC_LABELS: Record<HeaderMetricId, string> = {
-  tokens: "Tokens", messages: "Messages", duration: "Duration", cost: "Cost",
-};
+const INTERFACE_SURFACES: Array<{
+  id: InterfaceSurfaceId;
+  label: string;
+  description: string;
+}> = [
+  { id: "top-rail", label: "Top rail", description: "Centered workspace buttons at the top" },
+  { id: "app-header", label: "Header actions", description: "At the end of the top rail" },
+  { id: "right-rail", label: "Right rail", description: "Panel buttons on the right edge" },
+  { id: "response-footer", label: "Response actions", description: "After each agent response" },
+  { id: "composer", label: "Composer", description: "Beside your message" },
+  { id: "session-footer", label: "Session footer", description: "Above the composer" },
+];
+
 const RESPONSE_ACTION_LABELS: Record<ResponseActionId, string> = {
   copy: "Copy answer",
   image: "Save as image",
@@ -170,6 +175,7 @@ export default function WidgetsPage() {
   const projects = useStore((state) => state.projectRegistry.projects);
   const activeProjectId = useStore((state) => state.activeProjectId);
   const [openPlace, setOpenPlace] = useState<PlaceId | null>(null);
+  const [notice, setNotice] = useState("");
 
   useEffect(() => {
     ensureWidgets(widgets);
@@ -204,8 +210,8 @@ export default function WidgetsPage() {
     ids.forEach((id, rank) => setPlacementOverride(id, { tier, rank }));
   };
 
-  const removeCapability = (id: string, tier: CapabilityTier) => {
-    placeCapability(id, tier === "technical" ? "more" : "technical");
+  const moveCapabilityToOtherRail = (id: string, tier: CapabilityTier) => {
+    placeCapability(id, tier === "primary" ? "more" : "primary");
   };
 
   const miniWidgetsFor = (slots: readonly UiSlot[]): WidgetDef[] => miniWidgets.filter((widget) => {
@@ -235,34 +241,43 @@ export default function WidgetsPage() {
 
   const resetAllPlacement = () => {
     if (!window.confirm("Reset button placement and canvas layout to their defaults?")) return;
-    for (const capability of availableCapabilities) {
-      setPlacementOverride(capability.descriptor.id, null);
+    for (const capability of listCapabilities()) {
+      setPlacementOverride(capability.id, null);
     }
     resetWidgetLayout(widgets);
     setOpenPlace(null);
+    setNotice("Layout reset for this project.");
   };
 
   const applyToAllProjects = () => {
     if (!activeProjectId || !window.confirm("Apply this project’s widget and tool layout to every project?")) return;
-    const widgetLayout = localStorage.getItem(widgetLayoutStorageKey(activeProjectId));
-    const capabilityLayout = localStorage.getItem(capabilityLayoutStorageKey(activeProjectId));
+    // Use the in-memory layout, rather than a possibly stale debounced storage
+    // value. This makes Apply work immediately after dragging or adding a tool.
+    const widgetLayout = serializeWidgetLayout(layout);
+    const capabilityLayout = JSON.stringify({ version: 1, placements: getCapabilityPlacements() });
     for (const project of projects) {
       if (project.id === activeProjectId) continue;
-      if (widgetLayout === null) localStorage.removeItem(widgetLayoutStorageKey(project.id));
-      else localStorage.setItem(widgetLayoutStorageKey(project.id), widgetLayout);
-      if (capabilityLayout === null) localStorage.removeItem(capabilityLayoutStorageKey(project.id));
-      else localStorage.setItem(capabilityLayoutStorageKey(project.id), capabilityLayout);
+      localStorage.setItem(widgetLayoutStorageKey(project.id), widgetLayout);
+      localStorage.setItem(capabilityLayoutStorageKey(project.id), capabilityLayout);
     }
+    setNotice(`Applied to ${projects.length - 1} other project${projects.length === 2 ? "" : "s"}.`);
+  };
+
+  const showSurface = (surface: InterfaceSurfaceId) => {
+    const target = document.querySelector<HTMLElement>(`[data-widget-surface="${surface}"]`);
+    target?.scrollIntoView({ behavior: "smooth", block: "center" });
+    target?.classList.add("widget-surface-flash");
+    window.setTimeout(() => target?.classList.remove("widget-surface-flash"), 1400);
   };
 
   return (
     <>
-      <PageHead title="Widgets & Layout" blurb="Choose where workspace and composer buttons appear." />
+      <PageHead title="Widgets & Layout" />
 
       <div className="widget-placement-toolbar">
         <label className="widget-project-scope">
-          Configure project
-          <select value={activeProjectId ?? ""} onChange={(event) => activateProject(event.target.value)}>
+          <span>Layout for</span>
+          <select aria-label="Project layout" value={activeProjectId ?? ""} onChange={(event) => activateProject(event.target.value || null)}>
             {projects.map((project) => <option key={project.id} value={project.id}>{project.name || project.path}</option>)}
           </select>
         </label>
@@ -271,25 +286,33 @@ export default function WidgetsPage() {
             ? "Saving…"
             : storeStatus.saveStatus === "error"
               ? <>Couldn’t save <button type="button" onClick={retryWidgetSave}>Retry</button></>
-              : "Changes saved automatically"}
+              : notice || "Changes saved automatically"}
         </span>
-        <button type="button" onClick={undoWidgetLayout} disabled={!storeStatus.canUndo}>Undo</button>
-        <button type="button" onClick={applyToAllProjects} disabled={!activeProjectId || projects.length < 2}>Apply to all projects</button>
-        <button type="button" onClick={resetAllPlacement}>Reset layout</button>
+        <div className="widget-toolbar-actions">
+          <button type="button" onClick={undoWidgetLayout} disabled={!storeStatus.canUndo}>Undo</button>
+          <button type="button" onClick={applyToAllProjects} disabled={!activeProjectId || projects.length < 2}>Apply to all projects</button>
+          <button type="button" className="widget-reset-button" onClick={resetAllPlacement}>Reset layout</button>
+        </div>
       </div>
 
+      <section className="widget-interface-map" aria-labelledby="widget-interface-map-title">
+        <div>
+          <h3 id="widget-interface-map-title">Where buttons appear</h3>
+          <p>Choose a part of the interface to jump to its controls. Response actions sit after an agent’s answer.</p>
+        </div>
+        <div className="widget-interface-diagram" aria-label="Interface placement map">
+          {INTERFACE_SURFACES.map((surface) => (
+            <button type="button" key={surface.id} className={`widget-map-target map-${surface.id}`} onClick={() => showSurface(surface.id)}>
+              <strong>{surface.label}</strong>
+              <small>{surface.description}</small>
+            </button>
+          ))}
+        </div>
+      </section>
+
       <div className="widget-place-grid widget-inline-config">
-        <section className="widget-place-card" data-settings-item="widgets.headerMetrics">
-          <header><div><h3>Session header stats</h3><p>Show, hide, and drag every metric into position.</p></div></header>
-          <OrderedToggleList
-            all={HEADER_METRIC_IDS}
-            selected={ui.headerMetrics}
-            labels={HEADER_METRIC_LABELS}
-            onChange={(headerMetrics) => setUiSettings({ headerMetrics })}
-          />
-        </section>
-        <section className="widget-place-card" data-settings-item="widgets.responseActions">
-          <header><div><h3>Response hover actions</h3><p>Choose and order the widgets shown in assistant response headers.</p></div></header>
+        <section className="widget-place-card" data-widget-surface="response-footer" data-settings-item="widgets.responseActions">
+          <header><div><h3>Response actions</h3><p>Choose and order actions shown after a completed agent response.</p></div></header>
           <OrderedToggleList
             all={RESPONSE_ACTION_IDS}
             selected={ui.responseActions}
@@ -306,6 +329,7 @@ export default function WidgetsPage() {
           return (
             <section
               className="widget-place-card"
+              data-widget-surface={place.id === "more" ? "right-rail" : "top-rail"}
               data-settings-item={index === 0 ? "widgets.capabilities" : undefined}
               key={place.id}
             >
@@ -322,6 +346,21 @@ export default function WidgetsPage() {
                   onClick={() => setOpenPlace(openPlace === place.id ? null : place.id)}
                 >＋</button>
               </header>
+              {place.id === "primary" && (
+                <label className="widget-top-rail-position">
+                  <span>Position</span>
+                  <select
+                    aria-label="Chat top rail position"
+                    value={ui.topRailAlignment}
+                    onChange={(event) => setUiSettings({
+                      topRailAlignment: event.target.value === "left" ? "left" : "center",
+                    })}
+                  >
+                    <option value="center">Centered</option>
+                    <option value="left">Left of center</option>
+                  </select>
+                </label>
+              )}
               <div className="widget-place-chips">
                 {placed.length === 0 && <span className="widget-place-empty">No buttons placed</span>}
                 {placed.map((capability) => (
@@ -339,11 +378,11 @@ export default function WidgetsPage() {
                         reorderCapabilities(placed, draggedId, capability.descriptor.id, place.id);
                       }
                     }}
-                    title={`Move ${capability.descriptor.label} out of ${place.title}`}
-                    aria-label={`Move ${capability.descriptor.label} out of ${place.title}`}
-                    onClick={() => removeCapability(capability.descriptor.id, place.id)}
+                    title={`Drag to reorder ${capability.descriptor.label} in the ${place.title.toLowerCase()}`}
+                    aria-label={`${place.title} tool: ${capability.descriptor.label}. Drag to reorder.`}
+                    onClick={() => moveCapabilityToOtherRail(capability.descriptor.id, place.id)}
                   >
-                    {capability.descriptor.label}<span aria-hidden="true">×</span>
+                    {capability.descriptor.label}<span aria-hidden="true">↔</span>
                   </button>
                 ))}
               </div>
@@ -377,6 +416,7 @@ export default function WidgetsPage() {
           return (
             <section
               className="widget-place-card"
+              data-widget-surface={place.id}
               data-settings-item={index === 0 ? "widgets.actions" : undefined}
               key={place.id}
             >

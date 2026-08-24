@@ -73,15 +73,15 @@ function RunHistory({ taskId }: { taskId: string }) {
       });
     return () => { active = false; };
   }, [taskId, reloadKey]);
-  if (loading) return <div className="muted" style={{ fontSize: 12 }} role="status">Loading runs…</div>;
+  if (loading) return <div className="muted" style={{ fontSize: "calc(12px * var(--ui-font-scale, 1))" }} role="status">Loading runs…</div>;
   if (loadError) {
     return (
-      <div className="muted" style={{ fontSize: 12 }} role="status">
+      <div className="muted" style={{ fontSize: "calc(12px * var(--ui-font-scale, 1))" }} role="status">
         Couldn’t load runs. <button className="small-btn" onClick={() => setReloadKey((key) => key + 1)}>Retry</button>
       </div>
     );
   }
-  if (runs.length === 0) return <div className="muted" style={{ fontSize: 12 }}>No runs recorded yet.</div>;
+  if (runs.length === 0) return <div className="muted" style={{ fontSize: "calc(12px * var(--ui-font-scale, 1))" }}>No runs recorded yet.</div>;
   return (
     <div className="sched-runs">
       {runs.map((r) => (

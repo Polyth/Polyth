@@ -64,7 +64,7 @@ function ServerEndpointForm({ server, onSaved }: { server: VoiceSettingsDto; onS
 
       {msg && <div className={/Saved/.test(msg) ? "knowledge-notice" : "form-error"}>{msg}</div>}
       <div className="mcp-form-row">
-        <span className="muted" style={{ fontSize: 11.5 }}>
+        <span className="muted" style={{ fontSize: "calc(11.5px * var(--ui-font-scale, 1))" }}>
           Keys are read from the server's environment by NAME — values are never stored or shown.
         </span>
         <span className="header-spacer" />

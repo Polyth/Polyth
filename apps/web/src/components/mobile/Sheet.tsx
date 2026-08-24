@@ -1,230 +1,231 @@
-// UX-MOBILE-01 §21–§24: the shared bottom sheet. Phones slide it up from the
-// bottom edge above the keyboard inset; wider viewports render the same
-// component as a centered bounded dialog (styles.css owns that switch).
-// While any sheet is open the page behind it never scrolls
-// (html[data-sheet="open"]).
-import { useEffect, useRef, type ReactNode } from "react";
-import { Icon } from "../../icons.tsx";
+// UX-MOBILE-01 §28/§46: ONE bottom-sheet system for every mobile overlay —
+// model picker, agent/mode picker, project picker, branch picker, starter
+// picker. They share the radius, backdrop, grabber, swipe-to-dismiss, search
+// pattern, focus contract, and keyboard geometry, so behavior never depends on
+// which control was tapped.
+//
+// Geometry rules that make the sheet keyboard-safe:
+//   * height is capped against --visual-vh (mobileViewport.ts), never 100vh;
+//   * the panel sits above --keyboard-inset, so the keyboard can never cover
+//     it (§21, §47);
+//   * the search field is NEVER autofocused (§25) — opening a sheet must not
+//     summon the keyboard; focus starts on the sheet itself.
+import {
+  useCallback, useEffect, useRef, useState,
+  type PointerEvent as ReactPointerEvent, type ReactNode,
+} from "react";
+import { createPortal } from "react-dom";
 import { useModalSurface } from "../a11y/Dialog.tsx";
+
+/** Drag distance (CSS px) past which releasing dismisses the sheet. */
+export const SHEET_DISMISS_DISTANCE = 88;
 
 export interface SheetSearch {
   value: string;
   onChange: (value: string) => void;
   placeholder: string;
-  ariaLabel: string;
+  /** Accessible name; defaults to the placeholder. */
+  ariaLabel?: string;
 }
 
-/** Optional head action next to the close button (e.g. Edit/Done toggles). */
-export interface SheetAction {
-  label: string;
-  pressed?: boolean;
-  onClick: () => void;
+export interface SheetProps {
+  title: string;
+  onClose: () => void;
+  children: ReactNode;
+  /** Sticky search row under the title. Rendered unfocused (§25). */
+  search?: SheetSearch;
+  /** Trailing control in the title row (e.g. Edit / Done for reordering). */
+  action?: { label: string; onClick: () => void; pressed?: boolean };
+  /** Pinned footer (e.g. "Create a starter…"). */
+  footer?: ReactNode;
+  className?: string;
+  /** `tall` reserves near-fullscreen height for long, searchable lists. */
+  size?: "auto" | "tall";
 }
 
-// Nested sheets share the scroll lock; only the last one to close releases it.
+/** Body scroll lock: a sheet is modal, the page behind it must not scroll. */
 let openSheets = 0;
-
-function lockPageScroll(): () => void {
-  if (typeof document === "undefined") return () => {};
-  openSheets += 1;
-  document.documentElement.dataset.sheet = "open";
-  return () => {
-    openSheets = Math.max(0, openSheets - 1);
-    if (openSheets === 0) delete document.documentElement.dataset.sheet;
-  };
-}
-
-/** Inert every sibling outside the branch containing the active sheet.
- * This keeps screen-reader and keyboard navigation inside a nested, non-portal
- * sheet without making the sheet's own application root inert. */
-function inertSheetBackground(backdrop: HTMLElement): () => void {
-  const changed: Array<{ element: HTMLElement; inert: boolean; ariaHidden: string | null }> = [];
-  let branch: HTMLElement = backdrop;
-  while (branch.parentElement) {
-    const parent = branch.parentElement;
-    for (const child of parent.children) {
-      if (child === branch || !(child instanceof HTMLElement)) continue;
-      changed.push({
-        element: child,
-        inert: child.hasAttribute("inert"),
-        ariaHidden: child.getAttribute("aria-hidden"),
-      });
-      child.setAttribute("inert", "");
-      child.setAttribute("aria-hidden", "true");
-    }
-    branch = parent;
-    if (parent === document.body) break;
-  }
-  return () => {
-    for (const item of changed) {
-      if (!item.inert) item.element.removeAttribute("inert");
-      if (item.ariaHidden === null) item.element.removeAttribute("aria-hidden");
-      else item.element.setAttribute("aria-hidden", item.ariaHidden);
-    }
-  };
-}
 
 export default function Sheet({
   title,
   onClose,
   children,
-  className,
-  size,
   search,
   action,
-}: {
-  title: string;
-  onClose: () => void;
-  children: ReactNode;
-  className?: string;
-  /** "tall" pins the sheet to the full visible band (model catalog). */
-  size?: "tall";
-  search?: SheetSearch;
-  action?: SheetAction;
-}) {
+  footer,
+  className,
+  size = "auto",
+}: SheetProps) {
   const panelRef = useRef<HTMLDivElement>(null);
-  const backdropRef = useRef<HTMLDivElement>(null);
-  const openerRef = useRef<HTMLElement | null>(
-    typeof document === "undefined" ? null : document.activeElement as HTMLElement | null,
-  );
-  useEffect(() => {
-    const unlock = lockPageScroll();
-    const restoreBackground = backdropRef.current
-      ? inertSheetBackground(backdropRef.current)
-      : () => {};
-    return () => {
-      restoreBackground();
-      unlock();
-      const opener = openerRef.current;
-      requestAnimationFrame(() => {
-        if (opener?.isConnected) opener.focus();
-      });
-    };
-  }, []);
+  const [drag, setDrag] = useState(0);
+  const dragFrom = useRef<number | null>(null);
+  /** A pointer press has started inside this sheet (see the ghost-click guard). */
+  const pointerInside = useRef(false);
+
   useModalSurface({
     open: true,
     onClose,
     containerRef: panelRef,
-    ...(search ? { initialFocus: ".sheet-search input" } : {}),
-    resolveRestoreFocus: () => null,
+    // The panel itself takes focus: sheets open silently, without raising the
+    // keyboard through an autofocused search field.
+    initialFocus: "[data-sheet-focus]",
   });
 
-  const classes = ["sheet"];
-  if (size === "tall") classes.push("sheet-tall");
-  if (className) classes.push(className);
+  useEffect(() => {
+    openSheets += 1;
+    document.documentElement.dataset.sheet = "open";
+    return () => {
+      openSheets = Math.max(0, openSheets - 1);
+      if (openSheets === 0) delete document.documentElement.dataset.sheet;
+    };
+  }, []);
 
-  return (
+  // Escape closes the TOPMOST sheet wherever focus happens to be. The panel's
+  // own key handler (useModalSurface) only sees keys while focus is inside it,
+  // and a tap on a non-interactive part of a sheet can park focus on <body>.
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      const sheets = [...document.querySelectorAll(".sheet-backdrop")];
+      if (sheets[sheets.length - 1] !== panelRef.current?.parentElement) return;
+      event.stopPropagation();
+      onClose();
+    };
+    document.addEventListener("keydown", onKeyDown, true);
+    return () => document.removeEventListener("keydown", onKeyDown, true);
+  }, [onClose]);
+
+  const endDrag = useCallback((distance: number) => {
+    dragFrom.current = null;
+    if (distance >= SHEET_DISMISS_DISTANCE) onClose();
+    else setDrag(0);
+  }, [onClose]);
+
+  const onGrabberDown = (event: ReactPointerEvent<HTMLDivElement>) => {
+    dragFrom.current = event.clientY;
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+  };
+  const onGrabberMove = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (dragFrom.current === null) return;
+    setDrag(Math.max(0, event.clientY - dragFrom.current));
+  };
+  const onGrabberUp = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (dragFrom.current === null) return;
+    endDrag(Math.max(0, event.clientY - dragFrom.current));
+    event.currentTarget.releasePointerCapture?.(event.pointerId);
+  };
+
+  const surface = (
     <div
-      ref={backdropRef}
       className="sheet-backdrop"
-      onClick={(event) => {
-        if (event.target === event.currentTarget) onClose();
+      // Ghost-click guard. The gesture that opens a sheet finishes with a
+      // click delivered at the finger's position — which the sheet now covers,
+      // so a row right under the trigger would be "chosen" instantly. A
+      // pointer click with no matching pointer-down inside the sheet is that
+      // ghost; keyboard activation (detail 0) is never swallowed.
+      onPointerDownCapture={() => { pointerInside.current = true; }}
+      onClickCapture={(event) => {
+        if (event.detail > 0 && !pointerInside.current) {
+          event.stopPropagation();
+          event.preventDefault();
+        }
+        pointerInside.current = false;
       }}
+      onPointerDown={(event) => { if (event.target === event.currentTarget) onClose(); }}
     >
       <div
         ref={panelRef}
-        className={classes.join(" ")}
         role="dialog"
         aria-modal="true"
         aria-label={title}
         tabIndex={-1}
+        data-sheet-focus=""
+        className={`sheet sheet-${size}${className ? ` ${className}` : ""}`}
+        style={drag > 0 ? { transform: `translateY(${drag}px)` } : undefined}
+        onPointerDown={(event) => {
+          // Keep focus (and therefore Escape and the Tab trap) inside the
+          // sheet when a press lands on non-interactive chrome.
+          const target = event.target as HTMLElement | null;
+          if (!target?.closest("button, a, input, textarea, select, [tabindex]")) {
+            panelRef.current?.focus();
+          }
+        }}
       >
-        <div className="sheet-grabber" aria-hidden="true" onClick={onClose}><i /></div>
+        <div
+          className="sheet-grabber"
+          onPointerDown={onGrabberDown}
+          onPointerMove={onGrabberMove}
+          onPointerUp={onGrabberUp}
+          onPointerCancel={() => { dragFrom.current = null; setDrag(0); }}
+        >
+          <i aria-hidden="true" />
+        </div>
         <div className="sheet-head">
           <h2 className="sheet-title">{title}</h2>
           {action && (
             <button
               type="button"
               className="sheet-head-action"
-              aria-pressed={action.pressed === true}
+              aria-pressed={action.pressed}
               onClick={action.onClick}
             >
               {action.label}
             </button>
           )}
-          <button type="button" className="sheet-close" aria-label="Close" onClick={onClose}>
-            <Icon.close />
+          <button type="button" className="sheet-close" aria-label={`Close ${title}`} onClick={onClose}>
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
+              <path d="m6 6 12 12M18 6 6 18" />
+            </svg>
           </button>
         </div>
         {search && (
           <div className="sheet-search">
-            <Icon.search />
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true">
+              <circle cx="11" cy="11" r="7" /><path d="m21 21-4.3-4.3" />
+            </svg>
             <input
               type="search"
               value={search.value}
               placeholder={search.placeholder}
-              aria-label={search.ariaLabel}
+              aria-label={search.ariaLabel ?? search.placeholder}
+              enterKeyHint="search"
+              autoComplete="off"
+              autoCorrect="off"
+              spellCheck={false}
               onChange={(event) => search.onChange(event.target.value)}
             />
-            {search.value && (
+            {search.value !== "" && (
               <button
                 type="button"
                 className="sheet-search-clear"
                 aria-label="Clear search"
                 onClick={() => search.onChange("")}
               >
-                <Icon.close />
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+                  <path d="m6 6 12 12M18 6 6 18" />
+                </svg>
               </button>
             )}
           </div>
         )}
         <div className="sheet-body">{children}</div>
+        {footer && <div className="sheet-foot">{footer}</div>}
       </div>
     </div>
   );
+
+  // Portalled to <body> on purpose: a `position: fixed` sheet rendered inside
+  // its trigger's subtree is captured by any ancestor that creates a
+  // containing block — the docked composer's own backdrop-filter did exactly
+  // that, trapping the picker inside a 60px strip where it looked like it
+  // never opened. The portal makes the sheet independent of where it is used.
+  return typeof document !== "undefined" && document.body
+    ? createPortal(surface, document.body)
+    : surface;
 }
 
-/** One tappable row: ≥52px main target, optional icon, meta line, selection
- *  check, and trailing per-row tools that never also pick the row. */
-export function SheetRow({
-  title,
-  meta,
-  icon,
-  selected,
-  onClick,
-  ariaLabel,
-  trailing,
-}: {
-  title: string;
-  meta?: string;
-  icon?: ReactNode;
-  selected?: boolean;
-  onClick: () => void;
-  ariaLabel?: string;
-  trailing?: ReactNode;
-}) {
-  return (
-    <div className={`sheet-row${selected ? " selected" : ""}`}>
-      <button
-        type="button"
-        className="sheet-row-main"
-        role="option"
-        aria-selected={selected === true}
-        aria-label={ariaLabel}
-        onClick={onClick}
-      >
-        {icon && <span className="sheet-row-icon" aria-hidden="true">{icon}</span>}
-        <span className="sheet-row-copy">
-          <strong>{title}</strong>
-          {meta && <small>{meta}</small>}
-        </span>
-        {selected && <span className="sheet-row-check" aria-hidden="true"><Icon.check /></span>}
-      </button>
-      {trailing}
-    </div>
-  );
-}
-
-/** Titled group of rows with a sticky uppercase head and an optional count. */
-export function SheetSection({
-  title,
-  count,
-  children,
-}: {
-  title: string;
-  count?: number;
-  children: ReactNode;
-}) {
+/** Sticky category header inside a sheet body. */
+export function SheetSection({ title, count, children }: { title: string; count?: number; children: ReactNode }) {
   return (
     <section className="sheet-section">
       <h3 className="sheet-section-head">
@@ -233,5 +234,46 @@ export function SheetSection({
       </h3>
       {children}
     </section>
+  );
+}
+
+export interface SheetRowProps {
+  title: string;
+  meta?: ReactNode;
+  icon?: ReactNode;
+  selected?: boolean;
+  onClick: () => void;
+  /** Trailing control (favorite star, drag handle). Never picks the row. */
+  trailing?: ReactNode;
+  ariaLabel?: string;
+}
+
+/** One ≥48px list row: title, optional metadata microtext, optional trailing. */
+export function SheetRow({ title, meta, icon, selected, onClick, trailing, ariaLabel }: SheetRowProps) {
+  return (
+    <div className={`sheet-row${selected ? " selected" : ""}`} role="presentation">
+      <button
+        type="button"
+        className="sheet-row-main"
+        role="option"
+        aria-selected={selected ?? false}
+        aria-label={ariaLabel ?? title}
+        onClick={onClick}
+      >
+        {icon && <span className="sheet-row-icon" aria-hidden="true">{icon}</span>}
+        <span className="sheet-row-copy">
+          <strong>{title}</strong>
+          {meta && <small>{meta}</small>}
+        </span>
+        {selected && (
+          <span className="sheet-row-check" aria-hidden="true">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+              <path d="m5 12 4 4L19 6" />
+            </svg>
+          </span>
+        )}
+      </button>
+      {trailing}
+    </div>
   );
 }

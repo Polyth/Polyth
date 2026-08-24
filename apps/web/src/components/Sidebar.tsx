@@ -481,8 +481,6 @@ export default function Sidebar() {
               && `${p.name} ${p.path}`.toLowerCase().includes(query.trim().toLowerCase())
               ? ""
               : query;
-            const projectSessionCount = sessions.filter((session) =>
-              session.projectId === p.id && session.status !== "archived").length;
             const card = renamingProject === p.id ? (
               <div className="project-card project-rename">
                 <input
@@ -510,7 +508,7 @@ export default function Sidebar() {
                   onDoubleClick={() => { setRenamingProject(p.id); setProjectName(p.name); }}
                 >
                   {effectiveViewMode === "tree" && (
-                    <span className="project-tree-chevron" aria-hidden="true">{expandedTrees.has(p.id) ? "▾" : "▸"}</span>
+                    <span className="project-tree-toggle-sign" aria-hidden="true">{expandedTrees.has(p.id) ? "−" : "+"}</span>
                   )}
                   <span className="project-glyph" style={p.color ? { color: p.color } : undefined}>
                     {p.icon ? <span aria-hidden="true">{p.icon}</span> : <Icon.files />}
@@ -519,7 +517,6 @@ export default function Sidebar() {
                     <span className="project-name" title={p.path}>{p.name || p.path}</span>
                     <span className="project-path">{p.path}</span>
                   </span>
-                  <span className="project-count" aria-label={`${projectSessionCount} sessions`}>{projectSessionCount}</span>
                 </button>
                 <button
                   className="project-new-session"

@@ -121,7 +121,7 @@ export default function GoalsView() {
           <div>
             <div className="stat-label">Audit trail</div>
             <div className="audit-list">
-              {audits.length === 0 && <div className="muted" style={{ fontSize: 13 }}>No audits yet — the auditor runs after each continuation.</div>}
+              {audits.length === 0 && <div className="muted" style={{ fontSize: "calc(13px * var(--ui-font-scale, 1))" }}>No audits yet — the auditor runs after each continuation.</div>}
               {audits.map((a) => (
                 <div key={a.id} className="audit-row">
                   <span className="audit-time mono">{a.time}</span>

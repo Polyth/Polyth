@@ -10,6 +10,7 @@ test("fails soft when gh is missing", async () => {
   const svc = createGithubService({ exec: async () => enoent() });
   const status = await svc.status("/tmp");
   assert.equal(status.installed, false);
+  assert.equal(status.user, null);
   assert.equal(status.repo, null);
   assert.match(status.reason ?? "", /not installed/);
 
@@ -28,6 +29,7 @@ test("fails soft when unauthenticated or outside a GitHub repo", async () => {
   const status = await svc.status("/repo");
   assert.equal(status.installed, true);
   assert.equal(status.authenticated, false);
+  assert.equal(status.user, null);
   assert.equal(status.repo, null);
   assert.match(status.reason ?? "", /not connected to a GitHub repository/);
 });
@@ -35,6 +37,7 @@ test("fails soft when unauthenticated or outside a GitHub repo", async () => {
 test("parses repo, issues, and PR lists from gh JSON output", async () => {
   const exec: ExecFn = async (_bin, args) => {
     if (args[0] === "--version" || args[0] === "auth") return { stdout: "ok", stderr: "" };
+    if (args[0] === "api") return { stdout: JSON.stringify({ login: "kat", avatar_url: "https://avatars.githubusercontent.com/u/1" }), stderr: "" };
     if (args[0] === "repo") {
       return {
         stdout: JSON.stringify({
@@ -66,6 +69,7 @@ test("parses repo, issues, and PR lists from gh JSON output", async () => {
 
   const status = await svc.status("/repo");
   assert.equal(status.authenticated, true);
+  assert.deepEqual(status.user, { login: "kat", avatarUrl: "https://avatars.githubusercontent.com/u/1" });
   assert.equal(status.repo?.owner, "acme");
   assert.equal(status.repo?.defaultBranch, "master");
   assert.equal(status.repo?.description, "");

@@ -11,6 +11,7 @@ import {
   setGroupCollapsed,
   useUsagePrefs,
 } from "../usagePrefs.ts";
+import ProviderLogo from "../components/ProviderLogo.tsx";
 
 export function fmtQuota(n: number, unit: QuotaWindowDto["unit"]): string {
   if (unit === "currency") return `$${n.toFixed(2)}`;
@@ -59,7 +60,7 @@ export function QuotaWindowRow({
       </div>
       {pace && <div className="quota-pace">{paceText(pace, w)}</div>}
       {w.resetsAt !== undefined && (
-        <div className="muted" style={{ fontSize: 11 }}>resets {new Date(w.resetsAt).toLocaleString()}</div>
+        <div className="muted" style={{ fontSize: "calc(11px * var(--ui-font-scale, 1))" }}>resets {new Date(w.resetsAt).toLocaleString()}</div>
       )}
     </div>
   );
@@ -120,12 +121,13 @@ export function QuotaCard({
   return (
     <div className={`quota-card ${snap.stale ? "quota-stale" : ""}`}>
       <div className="quota-card-head">
+        <ProviderLogo providerID={snap.providerId} className="quota-provider-logo" />
         <strong>{snap.providerId}</strong>
         {snap.accountLabel && <span className="muted">{snap.accountLabel}</span>}
         {snap.stale && <span className="tag" title={snap.error?.message}>stale</span>}
         <span className="header-spacer" />
         {snap.fetchedAt > 0 && (
-          <span className="muted" style={{ fontSize: 11 }}>{new Date(snap.fetchedAt).toLocaleTimeString()}</span>
+          <span className="muted" style={{ fontSize: "calc(11px * var(--ui-font-scale, 1))" }}>{new Date(snap.fetchedAt).toLocaleTimeString()}</span>
         )}
         <button type="button" className="small-btn" onClick={() => onRefresh(snap.providerId)}>Refresh</button>
       </div>
@@ -155,7 +157,7 @@ export function QuotaCard({
         );
       })}
       {snap.windows.length === 0 && (
-        <div className="muted" style={{ fontSize: 12 }}>No quota data yet.</div>
+        <div className="muted" style={{ fontSize: "calc(12px * var(--ui-font-scale, 1))" }}>No quota data yet.</div>
       )}
     </div>
   );

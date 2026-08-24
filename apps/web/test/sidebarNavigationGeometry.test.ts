@@ -28,18 +28,38 @@ test("sidebar geometry scales type from ui font size and density controls rows",
     "--nav-branch-size",
     "--nav-session-size",
     "--nav-meta-size",
-    "--nav-indent-project: 12px",
-    "--nav-indent-worktree: 28px",
-    "--nav-indent-session: 44px",
+    "--nav-indent-project: 4px",
+    "--nav-indent-worktree: 18px",
+    "--nav-indent-session: 64px",
     "--nav-status-width: 76px",
   ]) assert.ok(css.includes(variable), `${variable} is part of the sidebar geometry contract`);
 
-  assert.match(css, /--nav-project-size:\s*calc\(var\(--ui-font-size,\s*14px\)\s*\*\s*1\.357\)/);
-  assert.match(css, /--nav-session-size:\s*calc\(var\(--ui-font-size,\s*14px\)\s*\*\s*1\.214\)/);
+  assert.match(css, /--nav-project-size:\s*calc\(var\(--ui-font-size,\s*14px\)\s*\*\s*1\.143\)/);
+  assert.match(css, /--nav-branch-size:\s*calc\(var\(--ui-font-size,\s*14px\)\s*\*\s*1\.071\)/);
+  assert.match(css, /--nav-session-size:\s*var\(--ui-font-size,\s*14px\)/,
+    "session titles respect the selected interface size without inflation");
   assert.match(css, /--nav-meta-size:\s*calc\(var\(--ui-font-size,\s*14px\)\s*\*\s*1\.071\)/);
+  assert.match(css, /\.session-status-zone\s*\{[\s\S]*?font-size:\s*calc\(var\(--nav-session-size\) \* \.86\)/,
+    "session counters scale proportionally with the title size");
+  assert.doesNotMatch(css, /\.project-card\.active::before/,
+    "the active project does not receive a row highlight");
+  assert.match(css, /\.session-row\.active \.session-btn::before\s*\{[\s\S]*?left:\s*calc\(var\(--nav-session-row-indent, var\(--nav-indent-session\)\) - 12px\)/,
+    "the active session highlight is larger than its hover surface");
+  assert.match(css, /\.session-btn:hover\s*\{\s*background:\s*transparent;/,
+    "session hover does not also receive the global button background");
+  assert.match(css, /--ui-font-scale:\s*1;/,
+    "the build applies the interface font scale to fixed-pixel text rules");
+  assert.doesNotMatch(css, /#root\s*\{[^}]*\bzoom\s*:/,
+    "font scaling must not resize layout geometry");
   for (const density of ["compact", "balanced", "comfortable"]) {
     assert.match(css, new RegExp(`(?:html|body)\\[data-density="${density}"\\] \\.sidebar`));
   }
+  assert.match(css, /html\[data-density="compact"\] \.sidebar,[\s\S]*?--nav-row-project:\s*40px;[\s\S]*?--nav-row-branch:\s*36px;[\s\S]*?--nav-row-session:\s*34px;/,
+    "compact density substantially tightens every row in the project tree");
+  assert.match(css, /html\[data-density="balanced"\] \.sidebar,[\s\S]*?--nav-row-project:\s*42px;[\s\S]*?--nav-row-branch:\s*38px;[\s\S]*?--nav-row-session:\s*36px;/,
+    "balanced density remains compact");
+  assert.match(css, /html\[data-density="comfortable"\] \.sidebar,[\s\S]*?--nav-row-project:\s*44px;[\s\S]*?--nav-row-branch:\s*40px;[\s\S]*?--nav-row-session:\s*38px;/,
+    "comfortable density adds only a small amount of breathing room");
   assert.match(css, /\.session-btn\s*\{[\s\S]*?grid-template-columns:\s*minmax\(0,\s*1fr\) var\(--nav-status-width\)/);
   assert.doesNotMatch(css, /\.session-actions\b/);
   assert.doesNotMatch(css, /\.session-sync-icon\b/);

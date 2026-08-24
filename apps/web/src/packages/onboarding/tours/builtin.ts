@@ -604,8 +604,8 @@ export const BUILTIN_TOURS: readonly PackageOnboardingTour[] = [
       {
         id: "tools",
         title: "Arrange workspace tools",
-        body: "Move available capabilities among the primary header, More tools, and the technical menu.",
-        highlight: "Focus header",
+        body: "Move available capabilities between the centered Chat top rail and the right rail.",
+        highlight: "Chat top rail",
         media: { kind: "pattern", pattern: "branches" },
       },
       {

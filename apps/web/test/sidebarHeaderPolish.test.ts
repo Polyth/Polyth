@@ -11,8 +11,8 @@ test("sidebar uses contextual tree actions and no permanent footer", async () =>
     source("../src/styles.css"),
   ]);
   assert.doesNotMatch(sidebar, /className="sidebar-title">Sessions/);
-  assert.match(sidebar, /project-tree-chevron/);
-  assert.match(sidebar, /project-count/);
+  assert.match(sidebar, /project-tree-toggle-sign/);
+  assert.doesNotMatch(sidebar, /project-count/);
   assert.match(sidebar, /className="project-new-session"/);
   assert.doesNotMatch(sidebar, /className="side-foot"/);
   assert.match(sidebar, /className="sidebar-service-bar"/);
@@ -23,14 +23,19 @@ test("sidebar uses contextual tree actions and no permanent footer", async () =>
   assert.doesNotMatch(sessions, /session-sync-icon/);
   assert.match(sessions, /sessionActivityLabel/);
   assert.match(sessions, /session-worktree-actions/);
-  assert.match(sessions, /const isEmptyWorktree = !projectSessions\.some/);
+  assert.match(sessions, /session-worktree-toggle-sign/);
+  assert.doesNotMatch(sessions, /session-worktree-count/);
   assert.match(sessions, /startNewSession\(projectId, key === "__main__" \? \{\} : \{ worktreePath: key \}\)/);
   assert.match(sessions, /group\.worktree && !group\.worktree\.isMain/);
   assert.match(sessions, /setRemoveTarget\(group\.worktree\)/);
-  assert.match(sessions, /Delete empty worktree\?/);
+  assert.match(sessions, /Delete worktree and its sessions\?/);
+  assert.match(sessions, /Promise\.all\(sessionsForRemoval\.map\(\(session\) => deleteSession\(session\.id\)\)\)/);
   assert.match(sessions, /api\.removeWorktree\(projectId, removeTarget\.path, deleteBranch\)/);
   assert.match(styles, /\.session-worktree-toggle\s*\{[\s\S]*?width: auto;/);
   assert.match(styles, /\.session-worktree-actions\s*\{[\s\S]*?flex: none;/);
+  assert.match(styles, /\.session-worktree-head:hover \.session-worktree-actions,[\s\S]*?opacity: 1;/);
+  assert.doesNotMatch(styles, /\.project-tree-sessions::before/);
+  assert.match(styles, /\.session-btn::before\s*\{[\s\S]*?border-radius:\s*calc\(8px \* var\(--corner-radius-scale\)\)/);
 });
 
 test("header and composer controls are configurable and purpose-specific", async () => {
@@ -45,8 +50,9 @@ test("header and composer controls are configurable and purpose-specific", async
   assert.doesNotMatch(header, /const rest = resolved\.filter/);
   assert.doesNotMatch(composer, /Modalities:/);
   assert.match(composer, /aria-label="Add files"/);
-  assert.match(widgets, /Session header stats/);
-  assert.match(widgets, /Response hover actions/);
+  assert.doesNotMatch(widgets, /Session header stats|Response hover actions|Technical menu/);
+  assert.match(widgets, /Response actions/);
+  assert.match(widgets, /Where buttons appear/);
   assert.match(widgets, /draggable/);
   assert.match(metrics, /headerMetrics\.map/);
 });
@@ -64,4 +70,7 @@ test("assistant response header carries identity, timing, and configured actions
   assert.match(timeline, /<ProviderLogo/);
   assert.match(timeline, /className="agent-reply-duration"/);
   assert.match(timeline, /timeShort\(assistantTime\(m\)\)/);
+  const response = timeline.indexOf("<div className=\"bubble\"");
+  const footer = timeline.lastIndexOf("<AssistantAgentHeader m={m} announce={announce} />");
+  assert.ok(footer > response, "assistant identity and actions follow the response body");
 });

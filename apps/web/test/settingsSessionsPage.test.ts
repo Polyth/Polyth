@@ -90,7 +90,9 @@ test("settings Sessions page renders defaults and never lists sessions", async (
     await act(async () => { root.render(createElement(SessionsPage)); });
     await act(async () => { await Promise.resolve(); });
     const text = container.textContent ?? "";
-    assert.match(text, /Set defaults and retention for sessions/);
+    // The settings shell owns the sole page title; page content starts with
+    // the first meaningful section instead of repeating a subtitle.
+    assert.doesNotMatch(text, /Set defaults and retention for sessions/);
     assert.match(text, /Session Defaults/);
     assert.match(text, /New sessions will start with/);
     assert.match(text, /Default Model/);

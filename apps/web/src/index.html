@@ -2,7 +2,13 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <!-- UX-MOBILE-01 §45: resizes-content makes the OS shrink the layout
+         viewport when the keyboard appears. Without it the page's bottom
+         edge stays below the keyboard and the keyboard is hidden behind it:
+         the composer is still "at the bottom of the page" — just offscreen.
+         interactive-widget is harmlessly ignored by engines that use
+         visualViewport geometry instead (iOS Safari 15.4+). -->
+    <meta name="viewport" content="width=device-width, initial-scale=1, interactive-widget=resizes-content" />
     <meta name="theme-color" content="#1b1713" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />

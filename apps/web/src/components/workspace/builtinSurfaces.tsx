@@ -22,6 +22,7 @@ import { openSession, restoreSession } from "../../init.ts";
 import { friendlyError } from "../../settings.ts";
 import { composerBlockedByArchive, sessionSurfaceKind } from "../../sessionSurface.ts";
 import { registerWorkspaceSurface } from "../../workspace/surfaceRegistry.ts";
+import { registerSlot } from "../../slots.ts";
 import WidgetCanvas from "../../widgets/WidgetCanvas.tsx";
 import { useWorkspaceMode } from "../../widgets/workspaceMode.ts";
 import SlotHost from "../slots/SlotHost.ts";
@@ -33,13 +34,19 @@ import { requestComposerInsert } from "../../composerInsert.ts";
 import { useGitStatus } from "../../gitStatusStore.ts";
 import { useShellMode } from "../../responsiveShell.ts";
 import { tapFeedback } from "../../haptics.ts";
+import { dismissKeyboard } from "../../mobileViewport.ts";
+import { useSheetTrigger } from "../mobile/sheetTrigger.ts";
+import { HeroWidget, HeroWidgetSettings } from "../mobile/HeroWidgets.tsx";
 import { ago, displaySessionTitle } from "../../format.ts";
 import {
   noteStarterUsed,
   starterContextFrom,
   useStarterPrefs,
   visibleStarters,
+  type Starter,
 } from "../../starters.ts";
+
+const NOOP_STARTER = (_prompt: string, _id?: string): void => {};
 
 // UX-MOBILE-01 §2: the fresh-session screen is three zones — top navigation
 // (Header), a calm centered empty state with quick starters, and ONE sticky
@@ -131,6 +138,13 @@ function SessionHero() {
   const gitStatus = useGitStatus(projectId, false);
   const starterPrefs = useStarterPrefs();
   const [starterPickerOpen, setStarterPickerOpen] = useState(false);
+  const [heroWidgetsOpen, setHeroWidgetsOpen] = useState(false);
+  // §22: pointer-down activation, like every other sheet trigger.
+  const starterPickerTrigger = useSheetTrigger(shell === "phone", () => {
+    setStarterPickerOpen(true);
+    void dismissKeyboard();
+  });
+  const heroWidgetsTrigger = useSheetTrigger(shell === "phone", () => setHeroWidgetsOpen(true));
   const starterContext = useMemo(
     () => starterContextFrom(gitStatus, { hasHistory: false, lastTurnFinished: false }),
     [gitStatus],
@@ -157,39 +171,33 @@ function SessionHero() {
         <div className="hero-body">
           <h2>What are we working on in <span className="polyth-gradient">{name}</span>?</h2>
           <p className="hero-sub">Start a task or continue where you left off.</p>
-          <div className="hero-starters" aria-label="Quick starters">
-            {chips.map((starter) => (
-              <button
-                key={starter.id}
-                type="button"
-                className="starter-chip"
-                title={starter.description ?? starter.label}
-                onClick={() => runStarter(starter.prompt, starter.id)}
-              >
-                <span className="starter-chip-icon" aria-hidden="true"><StarterIcon id={starter.icon} /></span>
-                <span className="starter-chip-text">{starter.label}</span>
-              </button>
-            ))}
-            <button
-              type="button"
-              className="starter-chip starter-chip-add"
-              aria-label="Add a starter"
-              title="Add a starter"
-              onClick={() => setStarterPickerOpen(true)}
-            >
-              <Icon.plus />
-            </button>
+          <div className="hero-widget-host">
+            <SlotHost
+              slot="session.empty.widgets"
+              context={{
+                projectId,
+                chips,
+                runStarter,
+                starterPickerTrigger,
+              }}
+            />
           </div>
-          <RecentSessions projectId={projectId} />
+          <button
+            type="button"
+            className="hero-widget-settings"
+            aria-label="Customize new chat widgets"
+            title="Customize new chat widgets"
+            {...heroWidgetsTrigger}
+          ><Icon.sliders /></button>
         </div>
         <div className="hero-dock">
           <SessionContextBar
-            projectId={projectId}
             projectName={name}
+            projectId={projectId ?? undefined}
             projects={projectChoices}
             onPickProject={(id) => activateProject(id || null)}
-            selectedBranchId={selectedBranchId}
             branchName={currentBranchLabel}
+            branchId={selectedBranchId}
             branches={branchChoices.map((choice) => ({ id: choice.id, label: choice.label, detail: choice.detail }))}
             {...(branchLoading ? { branchLoading: true } : {})}
             onPickBranch={setSelectedBranchId}
@@ -204,7 +212,46 @@ function SessionHero() {
           onClose={() => setStarterPickerOpen(false)}
         />
       )}
+      {heroWidgetsOpen && <HeroWidgetSettings onClose={() => setHeroWidgetsOpen(false)} />}
     </div>
+  );
+}
+
+function HeroStartersWidget({
+  chips,
+  runStarter,
+  starterPickerTrigger,
+}: {
+  chips: Starter[];
+  runStarter: (prompt: string, id?: string) => void;
+  starterPickerTrigger: Record<string, unknown>;
+}) {
+  return (
+    <HeroWidget id="starters">
+      <div className="hero-starters" aria-label="Quick starters">
+        {chips.map((starter) => (
+          <button
+            key={starter.id}
+            type="button"
+            className="starter-chip"
+            title={starter.description ?? starter.label}
+            onClick={() => runStarter(starter.prompt, starter.id)}
+          >
+            <span className="starter-chip-icon" aria-hidden="true"><StarterIcon id={starter.icon} /></span>
+            <span className="starter-chip-text">{starter.label}</span>
+          </button>
+        ))}
+        <button
+          type="button"
+          className="starter-chip starter-chip-add"
+          aria-label="Add a starter"
+          title="Add a starter"
+          {...starterPickerTrigger}
+        >
+          <Icon.plus />
+        </button>
+      </div>
+    </HeroWidget>
   );
 }
 
@@ -218,7 +265,7 @@ function RecentSessions({ projectId }: { projectId: string | null }) {
     .slice(0, 3), [sessions, projectId]);
   if (recent.length === 0) return null;
   return (
-    <div className="hero-recent">
+    <HeroWidget id="recent"><div className="hero-recent">
       <h3 className="hero-recent-head">Recent</h3>
       <ul>
         {recent.map((session) => (
@@ -235,7 +282,7 @@ function RecentSessions({ projectId }: { projectId: string | null }) {
           </li>
         ))}
       </ul>
-    </div>
+    </div></HeroWidget>
   );
 }
 
@@ -327,6 +374,21 @@ function SessionSurface() {
     </div>
   );
 }
+
+// Fresh-session widgets are slot contributions, not SessionHero internals.
+// Plugins can register another `session.empty.widgets` contribution (a
+// project briefing, a rotating prompt rail, etc.) without editing this view;
+// built-ins remain locally hideable/reorderable through HeroWidgetSettings.
+registerSlot("session.empty.widgets", "builtin.hero-starters", (context) => (
+  <HeroStartersWidget
+    chips={(context.chips as Starter[] | undefined) ?? []}
+    runStarter={(context.runStarter as ((prompt: string, id?: string) => void)) ?? NOOP_STARTER}
+    starterPickerTrigger={(context.starterPickerTrigger as Record<string, unknown> | undefined) ?? {}}
+  />
+), 10);
+registerSlot("session.empty.widgets", "builtin.hero-recent", (context) => (
+  <RecentSessions projectId={(context.projectId as string | null | undefined) ?? null} />
+), 20);
 
 // Ids stay the built-in AppView names this slice; store.ts keeps persisting
 // the union. Orders mirror the header's view groups: chat, then workflows.

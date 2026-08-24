@@ -16,6 +16,7 @@ import {
   quotaSnapshotStats,
   useQuotaSnapshots,
 } from "../usage/quotaUi.tsx";
+import ProviderLogo from "../components/ProviderLogo.tsx";
 import {
   setProviderHidden,
   useUsagePrefs,
@@ -149,6 +150,7 @@ function ProviderQuotasWidget() {
                 checked={!prefs.hiddenProviders.includes(snapshot.providerId)}
                 onChange={(event) => setProviderHidden(snapshot.providerId, !event.target.checked)}
               />
+              <ProviderLogo providerID={snapshot.providerId} className="quota-provider-logo" />
               {snapshot.providerId}
             </label>
           ))}

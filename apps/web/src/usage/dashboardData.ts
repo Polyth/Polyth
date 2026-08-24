@@ -66,7 +66,6 @@ const canonicalProviderId = (providerId: string): string => {
   const normalized = providerId.trim().toLowerCase();
   if (normalized === "claude" || normalized === "claude-code") return "anthropic";
   if (normalized === "gemini") return "google";
-  if (normalized === "opencode-go") return "opencode";
   return providerId;
 };
 
@@ -80,8 +79,9 @@ const displayProvider = (providerId: string): string => {
     claude: "Claude",
     "claude-code": "Claude",
     openai: "OpenAI",
-    opencode: "OpenCode Go",
+    opencode: "OpenCode",
     "opencode-go": "OpenCode Go",
+    "opencode-zen": "OpenCode Zen",
     openrouter: "OpenRouter",
     google: "Gemini",
     gemini: "Gemini",

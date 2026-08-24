@@ -136,7 +136,7 @@ const SHELL_ACTIONS_PLUGIN = defineWidgetPlugin({
       audience: "simple",
       order: 30,
       render: () => (
-        <button className="header-action" onClick={() => setOverlay("settings")}>
+        <button className="header-action" title="Settings" aria-label="Settings" onClick={() => setOverlay("settings")}>
           <Icon.gear /><span>Settings</span>
         </button>
       ),

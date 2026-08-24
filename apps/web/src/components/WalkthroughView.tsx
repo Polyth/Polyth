@@ -56,7 +56,7 @@ export default function WalkthroughView() {
         </div>
         <span className="header-spacer" />
         {mode === "session" && steps.length > 0 && (
-          <span className="muted" style={{ fontSize: 12, marginRight: 8, whiteSpace: "nowrap" }}>
+          <span className="muted" style={{ fontSize: "calc(12px * var(--ui-font-scale, 1))", marginRight: 8, whiteSpace: "nowrap" }}>
             Step {index + 1}/{steps.length} · {approved} ✓ · {rejected} ✕
           </span>
         )}

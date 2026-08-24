@@ -579,7 +579,6 @@ function AssistantView({
     : undefined;
   return (
     <div className="msg assistant" data-message-seq={m.eventSeq} {...(articleProps ?? {})}>
-      <AssistantAgentHeader m={m} announce={announce} />
       {m.reasoning !== "" && <Thinking m={m} announce={announce} />}
       {hasAnswer && (
         <div className="bubble" dir="auto">{renderMarkdown(m.text || "", m.id)}{!m.finalized && <span className="caret" />}</div>
@@ -607,6 +606,7 @@ function AssistantView({
       {m.finalized && m.text !== "" && announce && galleryAvailable && (
         <button className="assistant-gallery-shortcut" onClick={openGallery}><Icon.image /> Open answer images</button>
       )}
+      <AssistantAgentHeader m={m} announce={announce} />
     </div>
   );
 }
@@ -691,7 +691,7 @@ function ToolCard({ m }: { m: ToolMsg }) {
             )}
           </span>
           <span className="tool-name">{shell ? "Shell Command" : m.title || m.tool}</span>
-          {summary && <span className="mono muted" style={{ fontSize: 11, flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{summary}</span>}
+          {summary && <span className="mono muted" style={{ fontSize: "calc(11px * var(--ui-font-scale, 1))", flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{summary}</span>}
           <span className="tool-dur">{m.finishTime !== undefined ? fmtMs(m.finishTime - m.time) : "running…"}</span>
         </button>
         {shell && (
@@ -748,7 +748,7 @@ function WorkedGroup({ g }: { g: WorkGroup }) {
   const updates = g.tasks.length > 0 ? ` · ${g.tasks.length} task ${g.tasks.length === 1 ? "update" : "updates"}` : "";
   return (
     <div className="msg assistant">
-      <button className="goal-toggle muted" style={{ fontSize: 11.5, marginBottom: 6 }} onClick={() => setOpen((v) => !v)}>
+      <button className="goal-toggle muted" style={{ fontSize: "calc(11.5px * var(--ui-font-scale, 1))", marginBottom: 6 }} onClick={() => setOpen((v) => !v)}>
         <span className="goal-chevron">{open ? "▾" : "▸"}</span>
         {running ? "Working" : "Worked"} for {fmtDuration(g.ms)} · {g.tools.length} steps{updates}
         {failed && <span style={{ color: "var(--red)" }}>· {g.tools.filter((t) => t.status === "error").length} failed</span>}

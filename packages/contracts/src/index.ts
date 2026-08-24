@@ -880,6 +880,10 @@ export const UI_SLOTS = [
   "project.create.options",
   "session.timeline.before", "session.timeline.after", "session.composer.before",
   "session.footer",
+  // Fresh-session widgets (starters, recents, or a plugin replacement). This
+  // is deliberately a slot rather than a SessionHero import: idle-screen
+  // information density is user-configurable and plugins can replace it.
+  "session.empty.widgets",
   "session.message.actions",
   "sidebar.project.actions", "sidebar.session.actions",
   "workStatus.sections",

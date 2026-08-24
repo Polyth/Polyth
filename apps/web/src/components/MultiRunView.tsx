@@ -2,11 +2,12 @@ import { useEffect, useState } from "react";
 import type { ModelRef, MultirunDto, MultirunRunDto } from "@polyth/contracts";
 import { api } from "../api.ts";
 import { useActiveModel, useStore } from "../store.ts";
-import { fmtCost, fmtTokens, modelBadge } from "../format.ts";
+import { fmtCost, fmtTokens } from "../format.ts";
 import { renderMarkdown } from "../markdown.tsx";
 import EmptyState from "./EmptyState.tsx";
 import { modelDisplayName, modelSupportsTextWorkflow } from "../composer/discovery.ts";
 import { consumeMultiRunPrompt } from "../multirunSeed.ts";
+import ProviderLogo from "./ProviderLogo.tsx";
 
 function modelRefFromValue(value: string): ModelRef | undefined {
   if (!value) return undefined;
@@ -32,14 +33,14 @@ function RunCard({
   picked: boolean;
   onPick: () => void;
 }) {
-  const badge = modelBadge(run.model);
   const tokens = (run.tokens?.input ?? 0) + (run.tokens?.output ?? 0);
   return (
     <article className={`run-card ${picked ? "picked" : ""} ${run.status}`}>
       <div className="run-card-head">
         <div className="run-card-title">
           <span className={`dot ${run.status === "running" || run.status === "pending" ? "working" : run.status === "completed" ? "idle" : "failed"}`} />
-          <span className="run-model-name" style={{ color: badge.color }}>{modelLabel}</span>
+          {run.model && <ProviderLogo providerID={run.model.providerID} className="run-provider-logo" />}
+          <span className="run-model-name">{modelLabel}</span>
         </div>
         <span className="run-card-agent">{run.agent ?? "build"} agent</span>
       </div>
