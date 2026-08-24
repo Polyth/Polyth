@@ -172,7 +172,7 @@ export default function GitView() {
     try {
       const nextStatus = await refreshGitStatus(projectId, sessionId);
       if (!nextStatus) throw new Error("The Git service did not respond.");
-      if (!nextStatus.isRepo) {
+      if (nextStatus.isRepo === false) {
         setBranches({ current: null, branches: [] });
         setTrees([]);
         setGraph([]);
@@ -223,7 +223,7 @@ export default function GitView() {
   }, [projectId, selected]);
 
   useEffect(() => {
-    if (!projectId || !selected || !status?.isRepo) return;
+    if (!projectId || !selected || status?.isRepo === false) return;
     let active = true;
     setDiff("");
     setDiffLoading(true);
@@ -336,7 +336,7 @@ export default function GitView() {
     return <EmptyState title="Source control unavailable" description={loadError} actionLabel="Retry" onAction={() => void refresh(true)} />;
   }
 
-  if (status && !status.isRepo) {
+  if (status?.isRepo === false) {
     return (
       <div className="view-page git-page">
         <EmptyState
