@@ -6,7 +6,10 @@
 import type { SessionProjection } from "@polyth/contracts";
 import type { RenderModel } from "./reduce.ts";
 
-export type SurfaceModel = Pick<RenderModel, "messages" | "permissions" | "questions" | "secrets">;
+export type SurfaceModel = Pick<
+  RenderModel,
+  "messages" | "permissions" | "questions" | "secrets" | "workflowRun"
+>;
 
 export interface PendingCounts {
   questions: number;
@@ -22,8 +25,8 @@ export function pendingCounts(model: SurfaceModel): PendingCounts {
   };
 }
 
-/** True only when there is genuinely nothing to act on: no messages, no
- *  unresolved question/permission/secret, and the session is not archived. */
+/** True only when there is genuinely nothing to act on: no messages, workflow
+ *  run, unresolved question/permission/secret, and the session is not archived. */
 export function showSessionHero(
   sessionId: string | null,
   model: SurfaceModel,
@@ -31,6 +34,7 @@ export function showSessionHero(
 ): boolean {
   if (!sessionId) return true;
   if (session?.status === "archived") return false;
+  if (model.workflowRun) return false;
   const pending = pendingCounts(model);
   return model.messages.length === 0
     && pending.questions === 0

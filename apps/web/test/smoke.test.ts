@@ -1266,7 +1266,7 @@ test("session surface: unresolved replay is loading, never the fresh-session her
   // UX-TIMELINE-LAYOUT-01 §8 initial replay (verifier finding 3): while a
   // canonical event load is in flight, an otherwise-fresh surface presents
   // as loading; a populated surface stays visible during a session switch.
-  const fresh: SurfaceModel = { messages: [], permissions: [], questions: [], secrets: [] };
+  const fresh: SurfaceModel = { messages: [], permissions: [], questions: [], secrets: [], workflowRun: null };
   const populated = {
     messages: [{ kind: "user" }],
     permissions: [],
@@ -1288,6 +1288,21 @@ test("session surface: unresolved replay is loading, never the fresh-session her
   // one loads, and once messages exist the loading claim is irrelevant.
   assert.equal(sessionSurfaceKind("s1", "s2", populated, idle), "session");
   assert.equal(sessionSurfaceKind("s1", null, populated, idle), "session");
+  const workflowOnly = {
+    ...fresh,
+    workflowRun: {
+      id: "run",
+      workflowId: "workflow",
+      name: "Release",
+      input: "Ship",
+      status: "stopped",
+      startedAt: 1,
+      finishedAt: 2,
+      layers: [["review"]],
+      nodes: [{ id: "review", role: "Reviewer", status: "stopped" }],
+    },
+  } as unknown as SurfaceModel;
+  assert.equal(sessionSurfaceKind("s1", null, workflowOnly, idle), "session");
 
   // Archived and pending-request sessions never regress to hero or loading.
   assert.equal(sessionSurfaceKind("s1", null, fresh, { status: "archived" }), "session");
