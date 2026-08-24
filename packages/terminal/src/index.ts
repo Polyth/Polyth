@@ -1,17 +1,47 @@
 // Project-scoped terminal sessions. Pure host logic (no HTTP/WS — the server
 // maps routes onto this, like git/files). Each session is a spawned user
-// shell; stdin/stdout/stderr are piped, so bidirectional I/O works for line
-// commands.
+// shell.
 //
-// ponytail: no real PTY (node-pty is not installed). Full-screen apps (vim,
-// htop) will misrender and resize only forwards SIGWINCH. Upgrade path: `npm i
-// node-pty`, spawn via pty.spawn(shell, ["-i"], {cwd, cols, rows, env}) and
-// wire onData/onExit — the service surface below stays identical.
+// PTY: when the optional `node-pty` dependency is installed the shell runs on
+// a real pseudo-terminal (full-screen apps, prompts, true resize). Without it
+// we fall back to pipes: bidirectional I/O works for line commands, COLUMNS/
+// LINES are exported at spawn, and resize forwards SIGWINCH. The service
+// surface is identical either way.
 import { spawn, type ChildProcess } from "node:child_process";
 import { randomUUID } from "node:crypto";
+import { createRequire } from "node:module";
 import { basename } from "node:path";
 import { StringDecoder } from "node:string_decoder";
 import type { Disposable, TerminalCreateInput, TerminalInfo } from "@polyth/contracts";
+
+// ------------------------------------------------------------- optional PTY
+
+/** Minimal slice of the node-pty surface we use (no @types dependency). */
+interface NodePty {
+  pid: number;
+  write(data: string): void;
+  resize(cols: number, rows: number): void;
+  kill(signal?: string): void;
+  onData(cb: (data: string) => void): void;
+  onExit(cb: (ev: { exitCode: number; signal?: number }) => void): void;
+}
+
+interface NodePtyModule {
+  spawn(file: string, args: string[] | string, options: {
+    name: string; cols: number; rows: number; cwd: string;
+    env: Record<string, string>;
+  }): NodePty;
+}
+
+let nodePty: NodePtyModule | null = null;
+try {
+  nodePty = createRequire(import.meta.url)("node-pty") as NodePtyModule;
+} catch {
+  nodePty = null; // optional dependency absent or failed to build — pipe mode
+}
+
+/** True when the optional node-pty module loaded (real PTY available). */
+export const hasRealPty = (): boolean => nodePty !== null;
 
 // ---------------------------------------------------------------- replay ring
 
@@ -76,7 +106,12 @@ interface TermSession {
   cwd: string;
   title: string;
   cmd?: string;
-  proc: ChildProcess;
+  /** Exactly one of these is set: real PTY or pipe-backed child. */
+  pty: NodePty | null;
+  proc: ChildProcess | null;
+  pid: number | undefined;
+  cols: number;
+  rows: number;
   createdAt: number;
   running: boolean;
   exitCode?: number | null;
@@ -119,16 +154,21 @@ const toInfo = (s: TermSession): TerminalInfo => ({
   ...(s.exitCode !== undefined ? { exitCode: s.exitCode } : {}),
 });
 
-export function createTerminalService(opts: { replayBytes?: number } = {}): TerminalService {
+export function createTerminalService(opts: { replayBytes?: number; forcePipe?: boolean } = {}): TerminalService {
   const sessions = new Map<string, TermSession>();
   const dataCbs = new Set<(id: string, data: string) => void>();
   const exitCbs = new Set<(id: string, exitCode: number | null) => void>();
   const replayBytes = opts.replayBytes ?? DEFAULT_REPLAY_BYTES;
+  const usePty = !opts.forcePipe && nodePty !== null && process.env.POLYTH_NO_PTY !== "1";
 
-  const killGroup = (proc: ChildProcess, signal: NodeJS.Signals) => {
-    if (proc.pid === undefined) return;
-    try { process.kill(-proc.pid, signal); } catch { /* already gone */ }
-    try { proc.kill(signal); } catch { /* already gone */ }
+  const killGroup = (s: TermSession, signal: NodeJS.Signals) => {
+    // node-pty children are session leaders, pipe children get detached=false —
+    // try the process group first, then the process itself
+    if (s.pid !== undefined) {
+      try { process.kill(-s.pid, signal); } catch { /* already gone */ }
+    }
+    try { s.pty?.kill(signal); } catch { /* already gone */ }
+    try { s.proc?.kill(signal); } catch { /* already gone */ }
   };
 
   const emitExit = (s: TermSession, exitCode: number | null) => {
@@ -138,35 +178,82 @@ export function createTerminalService(opts: { replayBytes?: number } = {}): Term
     for (const cb of exitCbs) cb(s.id, exitCode);
   };
 
+  const clampCols = (v: number | undefined, def: number, max: number) =>
+    Math.max(2, Math.min(Math.floor(v ?? def) || def, max));
+
   const service: TerminalService = {
     async create(input) {
       const id = randomUUID();
       const cwd = input.cwd ?? input.projectId; // route resolves projectId -> path
       const title = basename(cwd) || cwd;
-      const env = { ...process.env, TERM: "xterm-256color" };
-      const proc = input.cmd
-        ? spawn(input.cmd, { cwd, shell: true, env })
-        : spawn(defaultShell(), ["-i"], { cwd, env });
-      proc.on("error", () => emitExit(s, null));
-      proc.on("exit", (code) => emitExit(s, typeof code === "number" ? code : null));
-      // no real tty -> bash -i prints a "cannot set terminal process group"
-      // warning to stderr; harmless, forwarded to the client like any output
-      const push = (chunk: Buffer) => {
-        if (!s.running) return;
-        s.replay.push(chunk); // raw bytes, byte-exact within the cap
-        // StringDecoder holds split multi-byte sequences until they complete,
-        // so a chunk boundary can never corrupt live UTF-8 output (OC#1181)
-        const text = s.decoder.write(chunk);
+      const cols = clampCols(input.cols, 120, 500);
+      const rows = clampCols(input.rows, 32, 200);
+      // node-pty expects concrete string values; process.env's type permits
+      // undefined, so discard those entries before passing the environment on.
+      const env = Object.fromEntries(
+        Object.entries(process.env).filter((entry): entry is [string, string] => entry[1] !== undefined),
+      );
+      env.TERM = "xterm-256color";
+      env.COLORTERM = "truecolor";
+
+      const s: TermSession = {
+        id, projectId: input.projectId, cwd, title, cmd: input.cmd,
+        pty: null, proc: null, pid: undefined, cols, rows,
+        createdAt: Date.now(), running: true,
+        replay: createReplayBuffer(replayBytes), decoder: new StringDecoder("utf8"),
+      };
+
+      const emitText = (text: string) => {
         if (!text) return;
         for (const cb of dataCbs) cb(id, text);
       };
-      proc.stdout?.on("data", push);
-      proc.stderr?.on("data", push);
-      const s: TermSession = {
-        id, projectId: input.projectId, cwd, title, cmd: input.cmd,
-        proc, createdAt: Date.now(), running: true,
-        replay: createReplayBuffer(replayBytes), decoder: new StringDecoder("utf8"),
-      };
+
+      let spawned = false;
+      if (usePty && nodePty) {
+        try {
+          const shell = defaultShell();
+          const args = input.cmd ? ["-c", input.cmd] : ["-i"];
+          const pty = nodePty.spawn(shell, args, {
+            name: "xterm-256color", cols, rows, cwd, env,
+          });
+          pty.onData((data) => {
+            if (!s.running) return;
+            s.replay.push(Buffer.from(data, "utf8")); // byte-exact within the cap
+            emitText(data);
+          });
+          pty.onExit(({ exitCode }) => emitExit(s, typeof exitCode === "number" ? exitCode : null));
+          s.pty = pty;
+          s.pid = pty.pid;
+          spawned = true;
+        } catch {
+          spawned = false; // PTY allocation failed — fall back to pipes below
+        }
+      }
+
+      if (!spawned) {
+        // pipe fallback: export the grid so line tools wrap correctly; bash -i
+        // prints a harmless "cannot set terminal process group" warning that is
+        // forwarded to the client like any output
+        env.COLUMNS = String(cols);
+        env.LINES = String(rows);
+        const proc = input.cmd
+          ? spawn(input.cmd, { cwd, shell: true, env })
+          : spawn(defaultShell(), ["-i"], { cwd, env });
+        proc.on("error", () => emitExit(s, null));
+        proc.on("exit", (code) => emitExit(s, typeof code === "number" ? code : null));
+        const push = (chunk: Buffer) => {
+          if (!s.running) return;
+          s.replay.push(chunk); // raw bytes, byte-exact within the cap
+          // StringDecoder holds split multi-byte sequences until they complete,
+          // so a chunk boundary can never corrupt live UTF-8 output (OC#1181)
+          emitText(s.decoder.write(chunk));
+        };
+        proc.stdout?.on("data", push);
+        proc.stderr?.on("data", push);
+        s.proc = proc;
+        s.pid = proc.pid;
+      }
+
       sessions.set(id, s);
       return { id };
     },
@@ -222,22 +309,32 @@ export function createTerminalService(opts: { replayBytes?: number } = {}): Term
     write(id, data) {
       const s = sessions.get(id);
       if (!s || !s.running) return;
-      try { s.proc.stdin?.write(data); } catch { /* process gone */ }
+      try {
+        if (s.pty) s.pty.write(data);
+        else s.proc?.stdin?.write(data);
+      } catch { /* process gone */ }
     },
 
     resize(id, cols, rows) {
       const s = sessions.get(id);
       if (!s || !s.running) return;
-      // ponytail: no PTY means no real terminal size; SIGWINCH at least wakes
-      // the shell (bash re-reads LINES/COLUMNS). node-pty gives true resize.
-      try { killGroup(s.proc, "SIGWINCH"); } catch { /* ignore */ }
+      s.cols = clampCols(cols, s.cols, 500);
+      s.rows = clampCols(rows, s.rows, 200);
+      if (s.pty) {
+        // real PTY: the kernel delivers SIGWINCH with the new size
+        try { s.pty.resize(s.cols, s.rows); } catch { /* ignore */ }
+        return;
+      }
+      // pipe fallback: no real terminal size; SIGWINCH at least wakes the
+      // shell (bash re-reads LINES/COLUMNS)
+      try { killGroup(s, "SIGWINCH"); } catch { /* ignore */ }
     },
 
     async close(id) {
       const s = sessions.get(id);
       if (!s) return;
-      killGroup(s.proc, "SIGTERM");
-      const grace = setTimeout(() => killGroup(s.proc, "SIGKILL"), 1000);
+      killGroup(s, "SIGTERM");
+      const grace = setTimeout(() => killGroup(s, "SIGKILL"), 1000);
       const onExit = () => { clearTimeout(grace); sessions.delete(id); };
       if (!s.running) { onExit(); return; }
       // wait for the exit event, with a hard fallback

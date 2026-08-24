@@ -4,5 +4,8 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts"
+  },
+  "optionalDependencies": {
+    "node-pty": "^1.1.0"
   }
 }
