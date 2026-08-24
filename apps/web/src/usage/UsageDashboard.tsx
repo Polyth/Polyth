@@ -51,6 +51,17 @@ const formatMoney = (value: number): string => {
 const formatRate = (value: number): string =>
   value > 0 && value < .0001 ? "<$0.0001" : `$${value.toFixed(4)}`;
 
+const formatChartMoney = (value: number): string => {
+  if (value === 0) return "$0";
+  const fractionDigits = value < .001 ? 5 : value < 1 ? 4 : 2;
+  return new Intl.NumberFormat("en-US", {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: 0,
+    maximumFractionDigits: fractionDigits,
+  }).format(value);
+};
+
 const formatRange = (start: number, end: number): string => {
   const startDate = new Date(start);
   const endDate = new Date(end);
@@ -250,7 +261,7 @@ function CohortChart({
   const populated = allValues.some((value) => value > 0);
   const metricLabel = metric === "cost" ? "Cost" : metric === "tokens" ? "Tokens" : "Sessions";
   const formatAxis = (value: number) => metric === "cost"
-    ? formatMoney(value)
+    ? formatChartMoney(value)
     : metric === "tokens"
       ? fmtTokens(Math.round(value))
       : String(Math.round(value));
