@@ -13,6 +13,8 @@ Object.assign(globalThis, {
   HTMLElement: dom.HTMLElement,
   Element: dom.Element,
   Node: dom.Node,
+  Event: dom.Event,
+  CustomEvent: dom.CustomEvent,
 });
 Object.defineProperty(globalThis, "navigator", { value: dom.navigator, configurable: true });
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
