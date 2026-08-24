@@ -78,7 +78,6 @@ export default function PendingChangesBar() {
           <Icon.fileEdit />
         </span>
         {count} {count === 1 ? "file" : "files"}
-        <span className="pending-changes-location">changed in workspace</span>
         {diffStats && (
           <span
             className="pending-change-stats"

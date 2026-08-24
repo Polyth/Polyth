@@ -58,6 +58,17 @@ export function toggleFavorite(p: ModelPrefs, key: string): ModelPrefs {
   };
 }
 
+/** Move `draggedKey` in front of `targetKey` inside the saved favorites order.
+ *  Favorites are a user-curated list (the mobile picker's Edit mode reorders
+ *  them); unknown keys and self-moves are no-ops. */
+export function reorderFavorite(p: ModelPrefs, draggedKey: string, targetKey: string): ModelPrefs {
+  if (draggedKey === targetKey) return p;
+  if (!p.favorites.includes(draggedKey) || !p.favorites.includes(targetKey)) return p;
+  const favorites = p.favorites.filter((k) => k !== draggedKey);
+  favorites.splice(favorites.indexOf(targetKey), 0, draggedKey);
+  return { ...p, favorites };
+}
+
 export function recordRecent(p: ModelPrefs, key: string): ModelPrefs {
   return { ...p, recents: [key, ...p.recents.filter((k) => k !== key)].slice(0, 20) };
 }

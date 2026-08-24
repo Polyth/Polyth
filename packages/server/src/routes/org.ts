@@ -13,6 +13,13 @@ export function orgRoutes(deps: {
   const { projects, sessions, store } = deps;
 
   return async ({ path, method, url, body, json }) => {
+    if (path === "/api/projects/clone" && method === "POST") {
+      if (!projects.clone) { json(501, { error: "unsupported" }); return true; }
+      const b = await body();
+      json(200, await projects.clone(String(b.repository ?? ""), String(b.parentPath ?? "")));
+      return true;
+    }
+
     // ---- project PATCH -----------------------------------------------------
     let m = path.match(/^\/api\/projects\/([^/]+)$/);
     if (m && method === "PATCH") {

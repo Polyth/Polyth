@@ -668,6 +668,8 @@ export interface ProjectService {
   list(): Promise<Project[]>;
   add(path: string, name?: string): Promise<Project>;
   create(path: string, name?: string): Promise<Project>;
+  /** Clone a Git repository into a new child of `parentPath`, then register it. */
+  clone?(repository: string, parentPath: string): Promise<Project>;
   remove(id: string): Promise<void>;
   get(id: string): Promise<Project | undefined>;
   /** PATCH metadata/defaults; optional so old fakes remain valid. */

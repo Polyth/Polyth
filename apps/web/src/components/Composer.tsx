@@ -58,10 +58,11 @@ import { agentPickerDefaultLabel, modelPickerDefaultLabel } from "../composerDef
 import { friendlyError, modKeyLabel, parseModelRef } from "../settings.ts";
 import { Icon } from "../icons.tsx";
 import { useWorkspaceMode } from "../widgets/workspaceMode.ts";
-import ModelPicker, { modelContextLabel, modelSupportsThinking } from "./ModelPicker.tsx";
+import ModelPicker, { modelContextLabel, modelMetaLine, modelSupportsThinking } from "./ModelPicker.tsx";
 import { useSessionDefaults } from "../sessionDefaults.ts";
 import { roleKind, useRolePrefs } from "../rolePrefs.ts";
 import { useShellMode } from "../responsiveShell.ts";
+import { getViewportMetrics } from "../mobileViewport.ts";
 import ProviderLogo from "./ProviderLogo.tsx";
 
 function modelRefFromValue(value: string): { providerID: string; modelID: string } | undefined {
@@ -136,13 +137,6 @@ function ContextWindowPicker({ limit, used }: { limit?: number; used?: number })
 }
 
 const PROFILE_MISSING_NOTE = "Profile unavailable — choose another";
-const STARTER_SUGGESTIONS = [
-  "Explore this project",
-  "Explain what’s here",
-  "Plan a next step",
-  "Review recent work",
-  "Help me get started",
-] as const;
 
 export type NewSessionTarget =
   | { kind: "main" }
@@ -161,18 +155,13 @@ function agentBadgeLabel(agent?: string): string {
   return label ? label[0]!.toUpperCase() + label.slice(1) : "Build";
 }
 
+// UX-MOBILE-01 §13/§40/§41: one muted microtext line — `Text · Image · 500K`.
+// No mixed glyph set, no "Context:" label competing for primary space.
 function ModelCapabilityMeta({ model }: { model?: ModelDescriptor }) {
-  const capabilities = model?.capabilities ?? [];
-  const hasImage = capabilities.some((capability) => capability.endsWith(":image"));
-  const hasAttachments = capabilities.includes("attachment");
+  const line = modelMetaLine(model);
   return (
     <div className="composer-model-meta">
-      <span className="composer-modality-icons" aria-hidden="true">
-        <Icon.text />
-        {hasImage && <Icon.image />}
-        {hasAttachments && <Icon.paperclip />}
-      </span>
-      <span>Context: {compactContext(model?.context)}</span>
+      {line || `Context ${compactContext(model?.context)}`}
     </div>
   );
 }
@@ -222,6 +211,10 @@ export default function Composer({
   const committedTextRef = useRef(text);
   committedTextRef.current = text;
   const [focusMode, setFocusMode] = useState(false);
+  // UX-MOBILE-01 §9/§10/§11/§42: on phones the composer is a compact resting
+  // control that expands into the full model/mode surface on focus. Text,
+  // attachments, an active run, and shell mode all count as "in use".
+  const [inputFocused, setInputFocused] = useState(false);
   const historyCursor = useRef(emptyPromptHistoryCursor());
   const applyingHistory = useRef(false);
   const historyItems = promptHistory(model.messages);
@@ -371,13 +364,26 @@ export default function Composer({
     if (models.length > 0) void migrateFavoritesOnce(models);
   }, [models]);
 
-  // Auto-grow up to 40vh based on committed text.
+  // Auto-grow (§20). The ceiling follows the VISUAL viewport, so an open
+  // keyboard shrinks the input instead of pushing the send button offscreen;
+  // past the ceiling the textarea scrolls internally.
   useEffect(() => {
     const el = inputRef.current?.element();
     if (!el) return;
-    el.style.height = "auto";
-    el.style.height = `${Math.min(el.scrollHeight + 2, window.innerHeight * 0.4)}px`;
-  }, [text]);
+    const visible = getViewportMetrics().height || window.innerHeight;
+    // Phones collapse to zero first: `auto` resolves to the `rows` attribute,
+    // which would keep an empty composer three lines tall (§7). Wider layouts
+    // keep the roomier three-row resting size.
+    const phone = shellLayout === "phone";
+    el.style.height = phone ? "0px" : "auto";
+    // 42% of the visible band, but never so much that the composer's own
+    // chrome (model header, actions, context bar) is pushed off a short
+    // keyboard-squeezed viewport.
+    const cap = phone
+      ? Math.max(44, Math.min(visible * 0.42, visible - 240))
+      : visible * 0.42;
+    el.style.height = `${Math.min(el.scrollHeight + 2, cap)}px`;
+  }, [text, inputFocused, shellLayout]);
 
   // Composer inserts (Files @, drag-drop, starter chips). preventDefault marks
   // the event consumed; anything queued while unmounted drains now. Inserts go
@@ -884,26 +890,15 @@ export default function Composer({
   const sendDisabled = creatingSession
     || (!text.trim() && attachments.length === 0)
     || (!shellMode && (noModels || profileMissing));
-  const starterChips = (
-    <div className="starter-chips" aria-label="Suggestions">
-      {STARTER_SUGGESTIONS.map((label) => (
-        <button
-          key={label}
-          className="chip"
-          onClick={() => {
-            setText(label);
-            inputRef.current?.replaceText(label);
-            inputRef.current?.focus();
-          }}
-        >
-          <span aria-hidden="true">✦</span>{label}
-        </button>
-      ))}
-    </div>
-  );
+  const phoneLayout = shellLayout === "phone";
+  const hasDraft = text.trim() !== "" || attachments.length > 0;
+  const expanded = !phoneLayout || inputFocused || hasDraft || working || shellMode;
+  const stateClass = phoneLayout
+    ? ` composer-mobile ${expanded ? "composer-expanded" : "composer-collapsed"}${hasDraft ? " composer-has-draft" : ""}`
+    : "";
 
   return (
-    <div className={`${variant === "hero" ? "composer-hero" : "composer"}${simpleMode ? " composer-simple" : " composer-power"}${lightFocusComposer ? " composer-focus-light" : ""}`}>
+    <div className={`${variant === "hero" ? "composer-hero" : "composer"}${simpleMode ? " composer-simple" : " composer-power"}${lightFocusComposer ? " composer-focus-light" : ""}${stateClass}`}>
       <div
         className="composer-card"
         onDragOver={(e) => { const k = dragKind(e.dataTransfer); if (k) { e.preventDefault(); setDropHint(k); } }}
@@ -962,13 +957,14 @@ export default function Composer({
           {chatAgents.length > 0 ? (
             <Picker
               className="composer-agent-badge"
-              label="Agent"
+              label="Mode"
+              mobileSheet
               direction={variant === "hero" ? "down" : "up"}
               items={agentItems}
               value={agentValue}
               onPick={pickAgent}
               placeholder={agentBadgeLabel(activeAgent)}
-              ariaLabel={`Select agent type, current ${agentBadgeLabel(activeAgent)}`}
+              ariaLabel={`Select agent mode, current ${agentBadgeLabel(activeAgent)}`}
             />
           ) : (
             <span className="agent-type-badge">{agentBadgeLabel(activeAgent)}</span>
@@ -1002,6 +998,7 @@ export default function Composer({
           onTextChange={onTextChange}
           onKeyIntercept={onKeyIntercept}
           onPaste={onPaste}
+          onFocusChange={setInputFocused}
         />
         {!widgetMode && !shellMode && !text && !acView && (
           <div className="composer-sigil-hint" aria-hidden="true">
@@ -1146,14 +1143,18 @@ export default function Composer({
               attachFiles(files);
             }}
           />
-          <button
-            type="button"
-            className="chip composer-add-files"
-            aria-label="Add files"
-            title="Add files"
-            disabled={!activeProjectId}
-            onClick={() => fileInputRef.current?.click()}
-          ><Icon.plus /></button>
+          {/* §17/§19: phones get ONE `+` (the Add menu, which owns Upload).
+              Wider layouts keep the direct upload chip beside it. */}
+          {!phoneLayout && (
+            <button
+              type="button"
+              className="chip composer-add-files"
+              aria-label="Add files"
+              title="Add files"
+              disabled={!activeProjectId}
+              onClick={() => fileInputRef.current?.click()}
+            ><Icon.plus /></button>
+          )}
           <ComposerAddMenu
             hasProject={!!activeProjectId}
             hasSession={!!session?.id}
@@ -1162,6 +1163,7 @@ export default function Composer({
             commands={commandCatalog}
             snippets={snippetCatalog}
             direction={variant === "hero" ? "down" : "up"}
+            trigger={phoneLayout ? "add" : "tools"}
             onUpload={() => fileInputRef.current?.click()}
             onInsertMention={menuMention}
             onInsertCommand={menuCommand}
@@ -1170,7 +1172,7 @@ export default function Composer({
             onAttachGoal={toggleGoal}
             attachGithub={attachGithub}
           />
-          {simpleMode && <span className="composer-focus-hint">{modKeyLabel()}I to focus</span>}
+          {simpleMode && !phoneLayout && <span className="composer-focus-hint">{modKeyLabel()}I to focus</span>}
           {simpleMode && (
             <span className="composer-extensions composer-mobile-extensions">
               <SlotHost slot="composer.leading" context={slotContext} />
@@ -1260,7 +1262,6 @@ export default function Composer({
       )}
       {goalFormOpen && <GoalAttachForm onDone={() => setGoalFormOpen(false)} />}
       </div>
-      {!widgetMode && (variant === "hero" || (model.messages.length === 0 && !working)) && starterChips}
     </div>
   );
 }

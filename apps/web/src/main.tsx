@@ -9,6 +9,7 @@ import { installShell } from "./shell.ts";
 import { exposeWorkspaceSurfaces } from "./workspace/surfaceRegistry.ts";
 import { applySettingsToDom } from "./settings.ts";
 import { applyUiSettings } from "./uiPrefs.ts";
+import { startMobileViewport } from "./mobileViewport.ts";
 import { getState } from "./store.ts";
 import { installBuiltinMiniWidgets } from "./widgets/builtinMiniWidgets.tsx";
 import { installNotificationCentre } from "./components/NotificationCentre.tsx";
@@ -20,6 +21,9 @@ import "./styles.css";
 
 applySettingsToDom(getState().settings);
 applyUiSettings();
+// UX-MOBILE-01: publish visual-viewport geometry before first paint so the
+// sticky interaction zone is never laid out against a stale 100vh.
+startMobileViewport();
 exposeSlots();
 exposeSurfaces();
 exposeCapabilities();

@@ -1,8 +1,9 @@
 import { useEffect, useState } from "react";
 import type { UiSlot } from "@polyth/contracts";
 import { useResolvedCapabilities } from "../../capabilities.ts";
+import { activateProject, useStore } from "../../store.ts";
 import {
-  setPlacementOverride,
+  capabilityLayoutStorageKey, setPlacementOverride,
   type CapabilityTier,
 } from "../../capabilityLayout.ts";
 import { useWidgetCatalog, type WidgetDef } from "../../widgets/catalog.ts";
@@ -15,7 +16,7 @@ import {
   updateWidgetLayout,
   useWidgetLayout,
   useWidgetStoreStatus,
-  widgetSlotOf,
+  widgetLayoutStorageKey, widgetSlotOf,
   type WidgetLayoutMutation,
 } from "../../widgets/widgetLayout.ts";
 import { supportedWidgetSlots } from "../../widgets/widgetLibrary.ts";
@@ -26,7 +27,7 @@ import {
   type HeaderMetricId, type ResponseActionId,
 } from "../../uiPrefs.ts";
 
-type MiniPlaceId = "composer" | "session-header" | "session-footer" | "app-header";
+type MiniPlaceId = "composer" | "session-footer" | "app-header";
 type PlaceId = CapabilityTier | MiniPlaceId;
 
 const CAPABILITY_PLACES: Array<{
@@ -64,12 +65,6 @@ const MINI_PLACES: Array<{
     slots: ["composer.leading", "composer.trailing"],
   },
   {
-    id: "session-header",
-    title: "Session header actions",
-    description: "Toggle History, Goal, and Auto Approve in the top session strip.",
-    slots: ["session.header.actions"],
-  },
-  {
     id: "session-footer",
     title: "Session footer",
     description: "Widgets shown just above the message composer.",
@@ -77,9 +72,9 @@ const MINI_PLACES: Array<{
   },
   {
     id: "app-header",
-    title: "App header actions",
-    description: "Application-wide actions, separate from Focus tools.",
-    slots: ["app.header.actions"],
+    title: "Header actions",
+    description: "Application and active-session actions shown together in the app header.",
+    slots: ["session.header.actions", "app.header.actions"],
   },
 ];
 
@@ -172,6 +167,8 @@ export default function WidgetsPage() {
   const ui = useUiSettings();
   const storeStatus = useWidgetStoreStatus();
   const capabilities = useResolvedCapabilities();
+  const projects = useStore((state) => state.projectRegistry.projects);
+  const activeProjectId = useStore((state) => state.activeProjectId);
   const [openPlace, setOpenPlace] = useState<PlaceId | null>(null);
 
   useEffect(() => {
@@ -245,11 +242,30 @@ export default function WidgetsPage() {
     setOpenPlace(null);
   };
 
+  const applyToAllProjects = () => {
+    if (!activeProjectId || !window.confirm("Apply this project’s widget and tool layout to every project?")) return;
+    const widgetLayout = localStorage.getItem(widgetLayoutStorageKey(activeProjectId));
+    const capabilityLayout = localStorage.getItem(capabilityLayoutStorageKey(activeProjectId));
+    for (const project of projects) {
+      if (project.id === activeProjectId) continue;
+      if (widgetLayout === null) localStorage.removeItem(widgetLayoutStorageKey(project.id));
+      else localStorage.setItem(widgetLayoutStorageKey(project.id), widgetLayout);
+      if (capabilityLayout === null) localStorage.removeItem(capabilityLayoutStorageKey(project.id));
+      else localStorage.setItem(capabilityLayoutStorageKey(project.id), capabilityLayout);
+    }
+  };
+
   return (
     <>
       <PageHead title="Widgets & Layout" blurb="Choose where workspace and composer buttons appear." />
 
       <div className="widget-placement-toolbar">
+        <label className="widget-project-scope">
+          Configure project
+          <select value={activeProjectId ?? ""} onChange={(event) => activateProject(event.target.value)}>
+            {projects.map((project) => <option key={project.id} value={project.id}>{project.name || project.path}</option>)}
+          </select>
+        </label>
         <span className={`widget-save-state ${storeStatus.saveStatus}`} role="status">
           {storeStatus.saveStatus === "saving"
             ? "Saving…"
@@ -258,6 +274,7 @@ export default function WidgetsPage() {
               : "Changes saved automatically"}
         </span>
         <button type="button" onClick={undoWidgetLayout} disabled={!storeStatus.canUndo}>Undo</button>
+        <button type="button" onClick={applyToAllProjects} disabled={!activeProjectId || projects.length < 2}>Apply to all projects</button>
         <button type="button" onClick={resetAllPlacement}>Reset layout</button>
       </div>
 

@@ -168,7 +168,13 @@ test("Focus uses compact mobile composer controls without editor chrome", async 
   assert.ok(composer.includes('className="composer-extensions composer-mobile-extensions"'), "Focus exposes slotted mobile actions");
   assert.ok(actions.includes('"permissions.auto-approve-composer-action"'), "auto-approve is a placeable composer action");
   assert.ok(actions.includes('"session.goal-composer-action"'), "goals are a placeable composer action");
-  assert.ok(composer.includes("<Icon.paperclip />"), "Focus exposes a paperclip attachment action");
+  // UX-MOBILE-01 §17/§19: phones expose ONE `+` (the Add menu owns Upload);
+  // wider layouts keep the direct upload chip beside it.
+  assert.ok(composer.includes('aria-label="Add files"'), "wider layouts keep a direct upload control");
+  assert.ok(
+    composer.includes('trigger={phoneLayout ? "add" : "tools"}'),
+    "the phone add menu is the single plus control",
+  );
   assert.ok(!composer.includes("<Icon.focus />"), "Focus removes the focused-editor header action");
   assert.ok(actions.includes("<Icon.shield />"), "Focus exposes the auto-approve shield");
   assert.ok(actions.includes("<Icon.target />"), "Focus exposes the goals target");
@@ -303,13 +309,13 @@ test("timeline empty states defer starters to the hero", async () => {
   assert.ok(timeline.includes("This archived session has no messages."), "archived sessions get read-only copy");
 });
 
-test("header and rail share one capability disclosure", async () => {
+test("header owns the capability disclosure while the rail renders configured tools", async () => {
   const header = await read("../src/components/Header.tsx");
   const rail = await read("../src/components/ContextRail.tsx");
   const menu = await read("../src/components/CapabilityMenu.tsx");
   const store = await read("../src/store.ts");
   assert.ok(header.includes("<CapabilityMenu"), "header consumes the shared disclosure");
-  assert.ok(rail.includes("<CapabilityMenu"), "rail consumes the shared disclosure");
+  assert.ok(rail.includes("configuredRailSurfaces"), "rail renders only configured tool buttons");
   assert.ok(menu.includes('role="group"'), "disclosure uses grouped native buttons");
   assert.ok(!menu.includes('role="menuitem"'), "disclosure does not claim unsupported menu arrow behavior");
   assert.ok(!store.includes("moreOpen:"), "dead global More-tools state stays removed");

@@ -745,15 +745,17 @@ test("zoomed 720×450@2x hero is fully reachable and reflows in one dimension", 
     path: `/p/${PROJECT}`, ready: ".hero .send",
   });
 
+  // UX-MOBILE-01: the empty state scrolls inside .hero-body while the
+  // interaction dock (context bar + composer) stays pinned in .hero-dock.
   const geo = await page.evaluate(() => {
     const stage = document.querySelector(".stage")!;
-    stage.scrollTop = 0;
+    const body = document.querySelector(".hero-body")!;
+    body.scrollTop = 0;
     const stageRect = stage.getBoundingClientRect();
-    const first = document.querySelector(".hero-mark")!.getBoundingClientRect();
-    stage.scrollTop = stage.scrollHeight;
-    const maxTop = stage.scrollTop;
-    const chips = Array.from(document.querySelectorAll(".starter-chips .chip, .hero-foot"));
-    const last = chips.length > 0 ? chips[chips.length - 1]!.getBoundingClientRect() : null;
+    const first = document.querySelector(".hero h2")!.getBoundingClientRect();
+    body.scrollTop = body.scrollHeight;
+    const maxTop = body.scrollTop;
+    const last = document.querySelector(".hero-dock .composer-card")?.getBoundingClientRect() ?? null;
     return {
       firstTopAtOrigin: first.top,
       stageTop: stageRect.top,
@@ -761,7 +763,7 @@ test("zoomed 720×450@2x hero is fully reachable and reflows in one dimension", 
       lastBottomAtMax: last ? last.bottom : null,
       maxTop,
       docOverflowX: document.documentElement.scrollWidth - document.documentElement.clientWidth,
-      stageOverflowX: stage.scrollWidth - stage.clientWidth,
+      stageOverflowX: body.scrollWidth - body.clientWidth,
     };
   });
   assert.ok(geo.firstTopAtOrigin >= geo.stageTop - 1, `hero starts ${geo.firstTopAtOrigin} above the stage origin ${geo.stageTop}`);

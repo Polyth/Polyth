@@ -46,13 +46,17 @@ test("model metadata reports deduplicated input and output modalities", () => {
 
 test("fresh mobile sessions expose project and branch targets", () => {
   const surface = read("../src/components/workspace/builtinSurfaces.tsx");
+  const contextBar = read("../src/components/mobile/SessionContextBar.tsx");
   const composer = read("../src/components/Composer.tsx");
   const actions = read("../src/widgets/builtinMiniWidgets.tsx");
   const header = read("../src/components/Header.tsx");
   const css = read("../src/styles.css");
 
-  assert.match(surface, /aria-label="Project for new session"/);
-  assert.match(surface, /aria-label="Branch for new session"/);
+  // UX-MOBILE-01 §5: the selectors moved out of the middle of the page into
+  // the compact context bar above the composer — without losing either target.
+  assert.match(surface, /<SessionContextBar/);
+  assert.match(contextBar, /Project for new session, current \$\{projectName\}/);
+  assert.match(contextBar, /Branch for new session, current \$\{branchName\}/);
   assert.match(surface, /target: \{ kind: "branch", branch: candidate\.name \}/);
   assert.match(composer, /newSessionTarget\.kind === "branch"/);
   assert.doesNotMatch(composer, /Modalities:/);

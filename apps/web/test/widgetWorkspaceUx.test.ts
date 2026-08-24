@@ -88,9 +88,8 @@ test("settings uses named button places without canvas layout controls", async (
     "More tools / right rail",
     "Technical menu",
     "Composer actions",
-    "Session header actions",
     "Session footer",
-    "App header actions",
+    "Header actions",
   ]) {
     assert.ok(source.includes(place), `${place} is a named settings place`);
   }

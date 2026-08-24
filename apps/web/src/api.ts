@@ -515,6 +515,8 @@ export const api = {
     jfetch<Project>("/api/projects", json("POST", { path, name })),
   createProject: (path: string, name?: string) =>
     jfetch<Project>("/api/projects/create", json("POST", { path, name })),
+  cloneProject: (repository: string, parentPath: string) =>
+    jfetch<Project>("/api/projects/clone", json("POST", { repository, parentPath })),
   deleteProject: (id: string) => jfetch<void>(`/api/projects/${id}`, { method: "DELETE" }),
   patchProject: (id: string, patch: ProjectPatch) =>
     jfetch<Project>(`/api/projects/${id}`, json("PATCH", patch)),
