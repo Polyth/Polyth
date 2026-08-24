@@ -4,6 +4,7 @@ import { api } from "../api.ts";
 import { Icon } from "../icons.tsx";
 import { setActiveView, setOverlay, setUiError, useStore } from "../store.ts";
 import { friendlyError } from "../settings.ts";
+import { workflowFinishedCount, workflowHumanWait } from "../workflowRun.ts";
 import { GoalAttachForm } from "../components/GoalStrip.tsx";
 import WorkflowLauncher from "../components/WorkflowLauncher.tsx";
 import { defineWidgetPlugin, registerWidgetPlugin } from "./catalog.ts";
@@ -102,16 +103,22 @@ function WorkflowAction({ context }: { context: Record<string, unknown> }) {
 
 function WorkflowRunIndicator() {
   const projectId = useStore((state) => state.activeProjectId);
-  const [run, setRun] = useState<WorkflowRunDto | null>(null);
+  const [workflowState, setWorkflowState] = useState<{ projectId: string; run: WorkflowRunDto } | null>(null);
+  const run = workflowState?.projectId === projectId ? workflowState.run : null;
   useEffect(() => {
     if (!projectId) {
-      setRun(null);
+      setWorkflowState(null);
       return;
     }
+    setWorkflowState((current) => current?.projectId === projectId ? current : null);
     let active = true;
     const refresh = () => {
       void api.listWorkflowRuns(projectId)
-        .then((runs) => { if (active) setRun(runs.find((candidate) => candidate.status === "running") ?? null); })
+        .then((runs) => {
+          if (!active) return;
+          const activeRun = runs.find((candidate) => candidate.status === "running");
+          setWorkflowState(activeRun ? { projectId, run: activeRun } : null);
+        })
         .catch(() => {});
     };
     refresh();
@@ -119,17 +126,21 @@ function WorkflowRunIndicator() {
     return () => { active = false; clearInterval(timer); };
   }, [projectId]);
   if (!run) return null;
-  const done = run.nodes.filter((node) => node.status !== "queued" && node.status !== "running").length;
-  const waiting = run.nodes.some((node) => /awaiting (permission|answer)/i.test(node.activity ?? ""));
+  const done = workflowFinishedCount(run);
+  const waits = run.nodes.map(workflowHumanWait);
+  const waitingForPermission = waits.includes("permission");
+  const waitingForAnswer = waits.includes("answer");
+  const actionLabel = waitingForPermission ? "Approval needed" : waitingForAnswer ? "Answer needed" : null;
   return (
     <button
       type="button"
-      className={`header-action workflow-run-indicator${waiting ? " waiting" : ""}`}
-      title={waiting ? "Workflow needs your approval" : "Open active workflow"}
+      className={`header-action workflow-run-indicator${actionLabel ? " waiting" : ""}`}
+      title={actionLabel ? `Workflow action required: ${actionLabel.toLowerCase()}` : "Open active workflow"}
+      aria-label={`${actionLabel ?? run.name}, ${done} of ${run.nodes.length} nodes finished. Open workflow`}
       onClick={() => setActiveView("workflow")}
     >
       <span className="workflow-status-spinner" aria-hidden="true" />
-      <span>{waiting ? "Approval needed" : `${run.name} ${done}/${run.nodes.length}`}</span>
+      <span aria-live="polite">{actionLabel ?? `${run.name} ${done}/${run.nodes.length}`}</span>
     </button>
   );
 }

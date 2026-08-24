@@ -49,20 +49,26 @@ export function createWorkflowRunNode(sessions: SessionService): RunNodeFn {
       ...(context.node.model ? { model: context.node.model } : {}),
       ...(context.node.agent ? { agent: context.node.agent } : {}),
     });
-    await onUpdate({ sessionId, activity: "configuring permissions" });
-
-    if (!sessions.autoAcceptSet) {
-      if (context.permissions === "auto") {
-        throw Object.assign(new Error("workflow auto-permission policy is unavailable"), { code: "unsupported" });
-      }
-    } else {
-      await sessions.autoAcceptSet(sessionId, context.permissions === "auto" ? "on" : "off");
-    }
-
     const stop = () => { void sessions.abort(sessionId).catch(() => {}); };
     context.signal.addEventListener("abort", stop, { once: true });
     try {
-      await onUpdate({ activity: "queued" });
+      if (context.signal.aborted) {
+        stop();
+        throw abortError();
+      }
+      await onUpdate({ sessionId, activity: "configuring permissions" });
+
+      if (!sessions.autoAcceptSet) {
+        if (context.permissions === "auto") {
+          throw Object.assign(new Error("workflow auto-permission policy is unavailable"), { code: "unsupported" });
+        }
+      } else {
+        await sessions.autoAcceptSet(sessionId, context.permissions === "auto" ? "on" : "off");
+      }
+
+      if (context.signal.aborted) throw abortError();
+      await onUpdate({ activity: "starting agent" });
+      if (context.signal.aborted) throw abortError();
       await sessions.send(sessionId, { text: context.prompt });
 
       const deadline = Date.now() + context.timeoutMs;
@@ -108,6 +114,9 @@ async function progressFromEvent(
   if (event.type === "permission/resolved") return { activity: "thinking" };
   if (event.type === "question/asked" || event.type === "secret/requested") {
     return { activity: "awaiting answer" };
+  }
+  if (event.type === "question/answered" || event.type === "secret/resolved") {
+    return { activity: "thinking" };
   }
   if (event.type === "assistant/chunk") {
     const partId = eventString(event, "partId") ?? event.id;

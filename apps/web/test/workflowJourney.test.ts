@@ -4,6 +4,11 @@ import { readFile } from "node:fs/promises";
 import type { SessionEvent } from "@polyth/contracts";
 import { buildModel } from "../src/reduce.ts";
 import { handOffWorkflowLaunch, takeWorkflowLaunch } from "../src/workflowLaunch.ts";
+import {
+  fresherWorkflowRun,
+  workflowHumanWait,
+  workflowNodeDetail,
+} from "../src/workflowRun.ts";
 
 const source = (path: string) => readFile(new URL(path, import.meta.url), "utf8");
 
@@ -80,6 +85,45 @@ test("workflow event replay preserves global monitoring and retry metadata", () 
   assert.equal(run?.nodes[0]?.sessionId, "child");
 });
 
+test("workflow status helpers keep action-required and terminal states honest", () => {
+  assert.equal(workflowHumanWait({
+    id: "permission",
+    role: "Reviewer",
+    status: "running",
+    activity: "awaiting permission: bash",
+  }), "permission");
+  assert.equal(workflowHumanWait({
+    id: "answer",
+    role: "Reviewer",
+    status: "running",
+    activity: "awaiting answer",
+  }), "answer");
+  assert.equal(workflowNodeDetail({
+    id: "failed",
+    role: "Reviewer",
+    status: "error",
+    error: "The review command failed",
+  }), "The review command failed");
+
+  const running = {
+    id: "run",
+    workflowId: "workflow",
+    name: "Release",
+    input: "Ship",
+    status: "running" as const,
+    startedAt: 1,
+    layers: [["review"]],
+    nodes: [{ id: "review", role: "Reviewer", status: "running" as const }],
+  };
+  const stopped = {
+    ...running,
+    status: "stopped" as const,
+    finishedAt: 2,
+    nodes: [{ id: "review", role: "Reviewer", status: "stopped" as const }],
+  };
+  assert.equal(fresherWorkflowRun(stopped, running)?.status, "stopped");
+});
+
 test("workflow journey surfaces expose task launch, chat progress, HITL, stop, and retry", async () => {
   const [launcher, composer, timeline, workflow, miniWidgets, status] = await Promise.all([
     source("../src/components/WorkflowLauncher.tsx"),
@@ -93,6 +137,7 @@ test("workflow journey surfaces expose task launch, chat progress, HITL, stop, a
   assert.match(launcher, /api\.runWorkflow/);
   assert.match(composer, /workflowDraftText: text/);
   assert.match(timeline, /<WorkflowTimelineCard run=\{model\.workflowRun\}/);
+  assert.match(await source("../src/components/WorkflowTimelineCard.tsx"), /handOffWorkflowLaunch/);
   assert.match(workflow, /Review & respond/);
   assert.match(workflow, /Retry full workflow/);
   assert.match(workflow, /Stop run/);

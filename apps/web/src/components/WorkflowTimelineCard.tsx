@@ -3,17 +3,20 @@ import type { WorkflowRunDto, WorkflowRunNodeDto } from "@polyth/contracts";
 import { api } from "../api.ts";
 import { openSession } from "../init.ts";
 import { Icon } from "../icons.tsx";
-import { setActiveView, setUiError } from "../store.ts";
+import { getState, setActiveView, setUiError } from "../store.ts";
+import { handOffWorkflowLaunch } from "../workflowLaunch.ts";
+import {
+  WORKFLOW_STATUS_LABEL,
+  workflowFinishedCount,
+  workflowHumanWait,
+  workflowNodeDetail,
+} from "../workflowRun.ts";
 
-const finished = (node: WorkflowRunNodeDto): boolean =>
-  node.status !== "queued" && node.status !== "running";
-
-const needsHuman = (node: WorkflowRunNodeDto): boolean =>
-  node.status === "running" && /awaiting (permission|answer)/i.test(node.activity ?? "");
+const needsHuman = (node: WorkflowRunNodeDto): boolean => workflowHumanWait(node) !== null;
 
 export default function WorkflowTimelineCard({ run }: { run: WorkflowRunDto }) {
   const [stopping, setStopping] = useState(false);
-  const complete = run.nodes.filter(finished).length;
+  const complete = workflowFinishedCount(run);
   const waiting = run.nodes.filter(needsHuman);
   const percent = run.nodes.length ? Math.round((complete / run.nodes.length) * 100) : 0;
 
@@ -25,18 +28,42 @@ export default function WorkflowTimelineCard({ run }: { run: WorkflowRunDto }) {
       .finally(() => setStopping(false));
   };
 
+  const viewWorkflow = () => {
+    const projectId = run.projectId ?? getState().activeProjectId;
+    if (projectId) {
+      handOffWorkflowLaunch({
+        projectId,
+        ...(run.parentSessionId ? { sessionId: run.parentSessionId } : {}),
+        workflowId: run.workflowId,
+        input: run.input,
+        run,
+      });
+    }
+    setActiveView("workflow");
+  };
+
   return (
-    <section className={`workflow-timeline-card status-${run.status}`} aria-label={`Workflow ${run.name}, ${run.status}`}>
+    <section className={`workflow-timeline-card status-${run.status}`} aria-label={`Workflow ${run.name}, ${WORKFLOW_STATUS_LABEL[run.status]}`}>
       <header>
         <span className="workflow-timeline-icon" aria-hidden="true"><Icon.workflow /></span>
         <span>
           <small>Workflow</small>
           <strong>{run.name}</strong>
         </span>
-        <b>{run.status === "running" ? "Running" : run.status === "done" ? "Complete" : run.status === "error" ? "Failed" : "Stopped"}</b>
+        <b className={`status-${run.status}`} role="status" aria-live="polite">
+          {WORKFLOW_STATUS_LABEL[run.status]}
+        </b>
       </header>
-      <p>{run.input}</p>
-      <div className="workflow-timeline-progress" role="progressbar" aria-valuemin={0} aria-valuemax={run.nodes.length} aria-valuenow={complete}>
+      <p title={run.input}>{run.input}</p>
+      <div
+        className="workflow-timeline-progress"
+        role="progressbar"
+        aria-label="Workflow progress"
+        aria-valuemin={0}
+        aria-valuemax={run.nodes.length}
+        aria-valuenow={complete}
+        aria-valuetext={`${complete} of ${run.nodes.length} nodes finished`}
+      >
         <i style={{ width: `${percent}%` }} />
       </div>
       <div className="workflow-timeline-summary">
@@ -51,22 +78,33 @@ export default function WorkflowTimelineCard({ run }: { run: WorkflowRunDto }) {
             </span>
             <span>
               <strong>{node.role}</strong>
-              <small>{needsHuman(node) ? "Waiting for your approval" : node.error ?? node.activity ?? node.status}</small>
+              <small title={workflowNodeDetail(node)}>{workflowNodeDetail(node)}</small>
             </span>
-            {node.sessionId && needsHuman(node) && (
-              <button type="button" className="small-btn" onClick={() => void openSession(node.sessionId!)}>
-                Review &amp; respond
+            {node.sessionId && (
+              <button
+                type="button"
+                className={`small-btn workflow-button${needsHuman(node) ? " primary-btn" : ""}`}
+                aria-label={`${needsHuman(node) ? "Review and respond in" : "Open"} ${node.role} child session`}
+                onClick={() => void openSession(node.sessionId!)}
+              >
+                {needsHuman(node) ? "Review & respond" : "Open session"}
               </button>
             )}
           </li>
         ))}
       </ul>
       <footer>
-        <button type="button" className="small-btn" onClick={() => setActiveView("workflow")}>
+        <button type="button" className="small-btn workflow-button" onClick={viewWorkflow}>
           View workflow
         </button>
         {run.status === "running" && (
-          <button type="button" className="small-btn danger-btn" disabled={stopping} onClick={stop}>
+          <button
+            type="button"
+            className="small-btn danger-btn workflow-button"
+            disabled={stopping}
+            aria-busy={stopping}
+            onClick={stop}
+          >
             <Icon.stop />{stopping ? "Stopping…" : "Stop run"}
           </button>
         )}

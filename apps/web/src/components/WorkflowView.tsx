@@ -16,6 +16,13 @@ import { Icon } from "../icons.tsx";
 import { showSessionChat, useActiveModel, useStore } from "../store.ts";
 import { layerizeWorkflow, wouldWorkflowCycle } from "../workflowGraph.ts";
 import { takeWorkflowLaunch, type WorkflowLaunchIntent } from "../workflowLaunch.ts";
+import {
+  WORKFLOW_STATUS_LABEL,
+  fresherWorkflowRun,
+  workflowFinishedCount,
+  workflowHumanWait,
+  workflowHumanWaitLabel,
+} from "../workflowRun.ts";
 import EmptyState from "./EmptyState.tsx";
 
 const uid = (): string =>
@@ -48,15 +55,6 @@ const positiveWholeNumber = (value: string, maximum?: number): number | null => 
   return parsed;
 };
 
-const statusLabel: Record<WorkflowNodeStatus | WorkflowRunStatus, string> = {
-  queued: "Queued",
-  running: "Running",
-  done: "Complete",
-  error: "Failed",
-  skipped: "Skipped",
-  stopped: "Stopped",
-};
-
 function StatusIcon({ status }: { status: WorkflowNodeStatus | WorkflowRunStatus }) {
   if (status === "done") return <Icon.check />;
   if (status === "error") return <Icon.close />;
@@ -68,9 +66,9 @@ function StatusIcon({ status }: { status: WorkflowNodeStatus | WorkflowRunStatus
 
 function StatusBadge({ status }: { status: WorkflowNodeStatus | WorkflowRunStatus }) {
   return (
-    <span className={`workflow-status status-${status}`} aria-label={`Status: ${statusLabel[status]}`}>
+    <span className={`workflow-status status-${status}`} aria-label={`Status: ${WORKFLOW_STATUS_LABEL[status]}`}>
       <span aria-hidden="true"><StatusIcon status={status} /></span>
-      {statusLabel[status]}
+      {WORKFLOW_STATUS_LABEL[status]}
     </span>
   );
 }
@@ -98,6 +96,7 @@ export default function WorkflowView() {
   const loadSequence = useRef(0);
   const actionInFlight = useRef(false);
   const loadedSelection = useRef<string | null>(null);
+  const loadedProject = useRef<string | null>(null);
   const launchIntent = useRef<WorkflowLaunchIntent | null>(null);
   const loadedRun = useRef<WorkflowRunDto | null>(null);
 
@@ -109,11 +108,22 @@ export default function WorkflowView() {
       setSelectedId(null);
       setDraft(null);
       loadedSelection.current = null;
+      loadedProject.current = null;
       launchIntent.current = null;
       loadedRun.current = null;
       setLoading(false);
       setLoadFailed(false);
       return;
+    }
+    if (loadedProject.current !== projectId) {
+      loadedProject.current = projectId;
+      setWorkflows([]);
+      setProjectRuns([]);
+      setSelectedId(null);
+      setDraft(null);
+      loadedSelection.current = null;
+      launchIntent.current = null;
+      loadedRun.current = null;
     }
     setLoading(true);
     setLoadFailed(false);
@@ -144,9 +154,6 @@ export default function WorkflowView() {
       setError("");
     } catch (cause) {
       if (sequence !== loadSequence.current) return;
-      setWorkflows([]);
-      setSelectedId(null);
-      setDraft(null);
       setLoadFailed(true);
       setError(`Could not load workflows: ${cause instanceof Error ? cause.message : String(cause)}`);
     } finally {
@@ -182,9 +189,7 @@ export default function WorkflowView() {
     [draft],
   );
   const eventRunForDraft = draft && eventRun?.workflowId === draft.id ? eventRun : null;
-  const shownRun = liveRun && eventRunForDraft
-    ? eventRunForDraft.startedAt > liveRun.startedAt ? eventRunForDraft : liveRun
-    : liveRun ?? eventRunForDraft;
+  const shownRun = fresherWorkflowRun(liveRun, eventRunForDraft);
   const selectedWorkflow = workflows.find((workflow) => workflow.id === selectedId) ?? null;
   const parallelValue = positiveWholeNumber(maxParallel, 32);
   const timeoutValue = positiveWholeNumber(nodeTimeoutSeconds);
@@ -218,7 +223,12 @@ export default function WorkflowView() {
     const refresh = async () => {
       try {
         const next = await api.getWorkflowRun(shownRun.id);
-        if (active) setLiveRun(next);
+        if (active) {
+          setLiveRun(next);
+          setProjectRuns((current) => current.some((candidate) => candidate.id === next.id)
+            ? current.map((candidate) => candidate.id === next.id ? next : candidate)
+            : [next, ...current]);
+        }
       } catch {
         // The parent session event log remains the durable fallback.
       }
@@ -366,7 +376,7 @@ export default function WorkflowView() {
   const run = (inputOverride?: string) => {
     if (!draft || !sessionId) return;
     void act("run", async () => {
-      if (definitionDirty) throw new Error("Save workflow changes before starting a run.");
+      if (dirty) throw new Error("Save workflow changes before starting a run.");
       if (parallelValue === null || timeoutValue === null) {
         throw new Error("Fix the highlighted run options before starting.");
       }
@@ -389,7 +399,7 @@ export default function WorkflowView() {
     const parentSessionId = shownRun.parentSessionId ?? sessionId;
     if (!parentSessionId) return;
     void act("retry", async () => {
-      if (definitionDirty) throw new Error("Save workflow changes before retrying.");
+      if (dirty) throw new Error("Save workflow changes before retrying.");
       const started = await api.runWorkflow(
         draft.id,
         parentSessionId,
@@ -421,16 +431,21 @@ export default function WorkflowView() {
     showSessionChat();
   };
 
+  const openLinkedSession = (targetSessionId: string) => {
+    if (dirty && !window.confirm("Discard your unsaved workflow changes and open this session?")) return;
+    void openSession(targetSessionId);
+  };
+
   const openParentChat = () => {
     const parent = shownRun?.parentSessionId;
     if (parent && parent !== sessionId) {
-      void openSession(parent);
+      openLinkedSession(parent);
       return;
     }
-    showSessionChat();
+    returnToChat();
   };
 
-  const finishedNodes = shownRun?.nodes.filter((node) => node.status !== "queued" && node.status !== "running").length ?? 0;
+  const finishedNodes = shownRun ? workflowFinishedCount(shownRun) : 0;
   const selectWorkflow = (id: string) => {
     if (id === selectedId) return;
     if (dirty && !window.confirm("Discard your unsaved workflow changes?")) return;
@@ -803,7 +818,7 @@ export default function WorkflowView() {
                 </div>
                 <div className="workflow-run-footer">
                   <span className="muted">
-                    {definitionDirty
+                    {dirty
                       ? "Save workflow changes before starting a run."
                       : !sessionId
                         ? "Open a session to use as the parent run log."
@@ -825,11 +840,11 @@ export default function WorkflowView() {
                     <button
                       type="button"
                       className="primary-btn workflow-button"
-                      disabled={!sessionId || !runInput.trim() || definitionDirty || parallelValue === null
+                      disabled={!sessionId || !runInput.trim() || dirty || parallelValue === null
                         || timeoutValue === null || shownRun?.status === "running" || isBusy}
                       title={!sessionId
                         ? "Open a parent session before running a workflow"
-                        : definitionDirty
+                        : dirty
                           ? "Save workflow changes before running"
                           : !runInput.trim()
                             ? "Describe a task before running"
@@ -856,7 +871,7 @@ export default function WorkflowView() {
                     <StatusBadge status={shownRun.status} />
                     <span className="workflow-run-count">{finishedNodes}/{shownRun.nodes.length} finished</span>
                   </div>
-                  {shownRun.nodes.some((node) => node.status === "running" && /awaiting (permission|answer)/i.test(node.activity ?? "")) && (
+                  {shownRun.nodes.some((node) => workflowHumanWait(node) !== null) && (
                     <div className="workflow-run-notice waiting" role="alert">
                       <Icon.shield />
                       <span>
@@ -892,7 +907,7 @@ export default function WorkflowView() {
                   </div>
                   <div className="workflow-run-grid">
                     {shownRun.nodes.map((node) => {
-                      const needsHuman = node.status === "running" && /awaiting (permission|answer)/i.test(node.activity ?? "");
+                      const needsHuman = workflowHumanWait(node) !== null;
                       return (
                       <article key={node.id} className={`sched-card workflow-run-card status-${node.status}${needsHuman ? " needs-human" : ""}`}>
                         <div className="workflow-run-card-heading">
@@ -900,7 +915,7 @@ export default function WorkflowView() {
                           <StatusBadge status={node.status} />
                         </div>
                         {needsHuman
-                          ? <span className="workflow-node-activity needs-human"><Icon.shield />Waiting for your approval or answer</span>
+                          ? <span className="workflow-node-activity needs-human"><Icon.shield />{workflowHumanWaitLabel(node)}</span>
                           : node.activity && <span className="workflow-node-activity">{node.activity}</span>}
                         {node.error && <div className="form-error" role="alert">{node.error}</div>}
                         {node.output && (
@@ -921,7 +936,8 @@ export default function WorkflowView() {
                           <button
                             type="button"
                             className={`small-btn workflow-button workflow-open-session${needsHuman ? " primary-btn" : ""}`}
-                            onClick={() => void openSession(node.sessionId!)}
+                            aria-label={`${needsHuman ? "Review and respond in" : "Open"} ${node.role} child session`}
+                            onClick={() => openLinkedSession(node.sessionId!)}
                           >
                             {needsHuman ? "Review & respond" : "Open child session"}<Icon.chevronRight />
                           </button>
@@ -939,7 +955,14 @@ export default function WorkflowView() {
                       <button
                         type="button"
                         className="primary-btn workflow-button"
-                        disabled={isBusy || definitionDirty}
+                        disabled={isBusy || dirty || !shownRun.parentSessionId}
+                        title={!shownRun.parentSessionId
+                          ? "This older run does not include its parent session"
+                          : dirty
+                            ? "Save workflow changes before retrying"
+                            : shownRun.status === "error"
+                              ? "Retry the full workflow"
+                              : "Run the workflow again"}
                         onClick={retry}
                       >
                         <Icon.workflow />{busy === "retry" ? "Starting…" : shownRun.status === "error" ? "Retry full workflow" : "Run again"}

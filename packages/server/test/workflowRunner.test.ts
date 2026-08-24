@@ -76,3 +76,44 @@ test("workflow timeout error is human-readable and aborts the child", async () =
   );
   assert.equal(aborted, true);
 });
+
+test("stopping during permission setup aborts the child before sending work", async () => {
+  let releaseSetup!: () => void;
+  let setupStarted!: () => void;
+  const setupGate = new Promise<void>((resolve) => { releaseSetup = resolve; });
+  const started = new Promise<void>((resolve) => { setupStarted = resolve; });
+  let aborted = false;
+  let sent = false;
+  const sessions = {
+    create: async () => ({ id: "child" }),
+    autoAcceptSet: async () => {
+      setupStarted();
+      await setupGate;
+      return { setting: "off", effective: false };
+    },
+    send: async () => { sent = true; return {}; },
+    events: async () => [],
+    abort: async () => { aborted = true; },
+  } as unknown as SessionService;
+  const controller = new AbortController();
+
+  const run = createWorkflowRunNode(sessions)({
+    parentSessionId: "parent",
+    runId: "run",
+    workflowId: "workflow",
+    projectId: "project",
+    node: { id: "node", role: "Reviewer", prompt: "Review" },
+    prompt: "Review the change",
+    permissions: "manual",
+    timeoutMs: 1_000,
+    signal: controller.signal,
+  }, async () => {});
+  await started;
+  controller.abort();
+  releaseSetup();
+
+  await assert.rejects(run, (cause: unknown) =>
+    cause instanceof Error && cause.name === "AbortError");
+  assert.equal(aborted, true);
+  assert.equal(sent, false);
+});

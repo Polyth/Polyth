@@ -3,6 +3,7 @@ import type { WorkflowRunDto } from "@polyth/contracts";
 import { setActiveView, useStore, type AppView } from "../store.ts";
 import { isWorkspaceSurface, listSurfaces } from "../surfaces.ts";
 import { api } from "../api.ts";
+import { workflowFinishedCount, workflowHumanWait } from "../workflowRun.ts";
 
 // UX-PANE-MODEL: Files/Git/Terminal/Preview are workspace panes beside Chat,
 // not primary views — the open pane is appended to the label instead.
@@ -28,21 +29,26 @@ export default function StatusBar() {
   const session = useStore((s) => s.sessions.find((x) => x.id === s.activeSessionId) ?? null);
   const view = useStore((s) => s.activeView);
   const rail = useStore((s) => s.railPlugin);
-  const [activeWorkflow, setActiveWorkflow] = useState<WorkflowRunDto | null>(null);
+  const [workflowState, setWorkflowState] = useState<{ projectId: string; run: WorkflowRunDto } | null>(null);
+  const activeWorkflow = workflowState?.projectId === project?.id ? workflowState.run : null;
   const paneTitle = rail !== null
     ? listSurfaces().find((s) => s.id === rail && isWorkspaceSurface(s))?.title ?? null
     : null;
 
   useEffect(() => {
     if (!project?.id) {
-      setActiveWorkflow(null);
+      setWorkflowState(null);
       return;
     }
+    setWorkflowState((current) => current?.projectId === project.id ? current : null);
     let mounted = true;
     const refresh = () => {
       void api.listWorkflowRuns(project.id)
         .then((runs) => {
-          if (mounted) setActiveWorkflow(runs.find((run) => run.status === "running") ?? null);
+          if (mounted) {
+            const run = runs.find((candidate) => candidate.status === "running");
+            setWorkflowState(run ? { projectId: project.id, run } : null);
+          }
         })
         .catch(() => {});
     };
@@ -77,26 +83,30 @@ export default function StatusBar() {
     segments.push({ key: "agent", node: <span className="sb sb-agent">{session.agent} agent</span> });
   }
   if (activeWorkflow) {
-    const complete = activeWorkflow.nodes.filter((node) => node.status !== "queued" && node.status !== "running").length;
-    const waiting = activeWorkflow.nodes.some((node) => /awaiting (permission|answer)/i.test(node.activity ?? ""));
+    const complete = workflowFinishedCount(activeWorkflow);
+    const waits = activeWorkflow.nodes.map(workflowHumanWait);
+    const waitingForPermission = waits.includes("permission");
+    const waitingForAnswer = waits.includes("answer");
+    const actionLabel = waitingForPermission ? "Approval needed" : waitingForAnswer ? "Answer needed" : null;
     segments.push({
       key: "workflow",
       node: (
         <button
           type="button"
-          className={`sb sb-workflow${waiting ? " waiting" : ""}`}
-          title={waiting ? "Workflow needs your approval" : "Open active workflow"}
+          className={`sb sb-workflow${actionLabel ? " waiting" : ""}`}
+          title={actionLabel ? `Workflow action required: ${actionLabel.toLowerCase()}` : "Open active workflow"}
+          aria-label={`${actionLabel ?? activeWorkflow.name}, ${complete} of ${activeWorkflow.nodes.length} nodes finished. Open workflow`}
           onClick={() => setActiveView("workflow")}
         >
           <span className="workflow-status-spinner" aria-hidden="true" />
-          <span className="sb-text">{waiting ? "Approval needed" : activeWorkflow.name} · {complete}/{activeWorkflow.nodes.length}</span>
+          <span className="sb-text">{actionLabel ?? activeWorkflow.name} · {complete}/{activeWorkflow.nodes.length}</span>
         </button>
       ),
     });
   }
 
   return (
-    <div className="statusbar">
+    <div className="statusbar" role="status" aria-live="polite">
       {segments.map((s, i) => (
         <Fragment key={s.key}>
           {i > 0 && <span className="sb-sep" aria-hidden />}
