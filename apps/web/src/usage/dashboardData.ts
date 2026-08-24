@@ -2,7 +2,7 @@ import type { SessionProjection } from "@polyth/contracts";
 import type { QuotaSnapshotDto, QuotaWindowDto } from "../api.ts";
 
 export type UsageRangeDays = 7 | 30 | 90;
-export type UsageChartMetric = "tokens" | "cost" | "requests";
+export type UsageChartMetric = "tokens" | "cost" | "sessions";
 
 export interface UsageTrend {
   percent: number;
@@ -62,9 +62,10 @@ export interface UsageDashboardData {
   models: UsageModelSummary[];
   chart: {
     labels: string[];
+    bucketHours: number;
     tokens: UsageChartSeries[];
     cost: UsageChartSeries[];
-    requests: UsageChartSeries[];
+    sessions: UsageChartSeries[];
   };
 }
 
@@ -150,6 +151,12 @@ const metricValue = (session: SessionProjection, metric: UsageChartMetric): numb
 const shortDate = (timestamp: number): string =>
   new Intl.DateTimeFormat("en", { month: "short", day: "numeric" }).format(timestamp);
 
+const bucketLabel = (start: number, end: number): string => {
+  const first = shortDate(start);
+  const last = shortDate(Math.max(start, end - 1));
+  return first === last ? first : `${first}–${last}`;
+};
+
 export function buildUsageDashboardData(
   sessions: readonly SessionProjection[],
   snapshots: readonly QuotaSnapshotDto[],
@@ -228,8 +235,10 @@ export function buildUsageDashboardData(
 
   const bucketCount = rangeDays === 7 ? 7 : rangeDays === 30 ? 10 : 12;
   const bucketMs = (rangeEnd - rangeStart) / bucketCount;
-  const labels = Array.from({ length: bucketCount }, (_, index) =>
-    shortDate(rangeStart + bucketMs * (index + 1)));
+  const labels = Array.from({ length: bucketCount }, (_, index) => {
+    const start = rangeStart + bucketMs * index;
+    return bucketLabel(start, start + bucketMs);
+  });
 
   const makeSeries = (metric: UsageChartMetric): UsageChartSeries[] =>
     providers
@@ -265,9 +274,10 @@ export function buildUsageDashboardData(
     models,
     chart: {
       labels,
+      bucketHours: bucketMs / (60 * 60_000),
       tokens: makeSeries("tokens"),
       cost: makeSeries("cost"),
-      requests: makeSeries("requests"),
+      sessions: makeSeries("sessions"),
     },
   };
 }

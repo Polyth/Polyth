@@ -241,8 +241,7 @@ export default function ProviderLogo({
     <span
       className={`provider-logo provider-${key ?? "other"}${className ? ` ${className}` : ""}`}
       data-provider={key ?? "other"}
-      role="img"
-      aria-label={`${label} provider`}
+      aria-hidden="true"
       title={label}
     >
       {key ? <SvgMark provider={key} /> : <span className="provider-logo-fallback">{fallback}</span>}

@@ -2,7 +2,11 @@ import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNod
 import { fmtCost, fmtTokens } from "../format.ts";
 import { Icon } from "../icons.tsx";
 import { useStore } from "../store.ts";
-import { setProviderHidden, useUsagePrefs } from "../usagePrefs.ts";
+import {
+  setProviderHidden,
+  setUsageDashboardPrefs,
+  useUsagePrefs,
+} from "../usagePrefs.ts";
 import ProviderLogo from "../components/ProviderLogo.tsx";
 import { fmtQuota, paceText, useQuotaSnapshots } from "./quotaUi.tsx";
 import {
@@ -15,8 +19,6 @@ import {
   type UsageTrend,
 } from "./dashboardData.ts";
 
-type DashboardView = "overview" | "providers";
-type DashboardLayout = "expanded" | "compact";
 type IconName = keyof typeof Icon;
 
 const SERIES_ACCENTS = [
@@ -105,24 +107,33 @@ function TrendBadge({ trend, compact = false }: { trend: UsageTrend | null; comp
   );
 }
 
-function MiniSparkline({ values, tone }: { values: readonly number[]; tone: string }) {
+function MiniCohortBars({ values, tone }: { values: readonly number[]; tone: string }) {
   const width = 112;
   const height = 32;
   const maximum = Math.max(1, ...values);
-  const points = values.map((value, index) => {
-    const x = values.length <= 1 ? 0 : index / (values.length - 1) * width;
-    const y = height - value / maximum * (height - 4) - 2;
-    return `${x},${y}`;
-  }).join(" ");
+  const slotWidth = values.length > 0 ? width / values.length : width;
+  const barWidth = Math.max(2, slotWidth * .58);
   return (
     <svg
-      className="usage-stat-sparkline"
+      className="usage-stat-cohorts"
       style={cssVar("--spark-tone", tone)}
       viewBox={`0 0 ${width} ${height}`}
       preserveAspectRatio="none"
       aria-hidden="true"
     >
-      <polyline points={points || `0,${height} ${width},${height}`} />
+      {values.map((value, index) => {
+        const barHeight = value / maximum * (height - 3);
+        return (
+          <rect
+            key={index}
+            x={index * slotWidth + (slotWidth - barWidth) / 2}
+            y={height - barHeight}
+            width={barWidth}
+            height={barHeight}
+            rx="1"
+          />
+        );
+      })}
     </svg>
   );
 }
@@ -156,7 +167,7 @@ function StatCard({
         <TrendBadge trend={trend} />
         <span>{detail}</span>
       </div>
-      <MiniSparkline values={series} tone={tone} />
+      <MiniCohortBars values={series} tone={tone} />
     </article>
   );
 }
@@ -181,7 +192,7 @@ function SectionHeading({
   );
 }
 
-function AreaChart({
+function CohortChart({
   labels,
   series,
   metric,
@@ -225,13 +236,14 @@ function AreaChart({
   const chartWidth = width - left - right;
   const chartHeight = height - top - bottom;
   const allValues = series.flatMap((item) => item.values);
-  const maximum = Math.max(1, ...allValues);
-  const pointX = (index: number) => labels.length <= 1
-    ? left
-    : left + index / (labels.length - 1) * chartWidth;
+  const bucketTotals = aggregateSeries(series, labels.length);
+  const maximum = Math.max(1, ...bucketTotals);
+  const bucketWidth = labels.length > 0 ? chartWidth / labels.length : chartWidth;
+  const barWidth = Math.min(42, Math.max(10, bucketWidth * .62));
+  const barX = (index: number) => left + bucketWidth * index + (bucketWidth - barWidth) / 2;
   const pointY = (value: number) => top + chartHeight - value / maximum * chartHeight;
   const populated = allValues.some((value) => value > 0);
-  const metricLabel = metric === "cost" ? "Cost" : metric === "tokens" ? "Token" : "Session";
+  const metricLabel = metric === "cost" ? "Cost" : metric === "tokens" ? "Tokens" : "Sessions";
   const formatAxis = (value: number) => metric === "cost"
     ? `$${value < 1 ? value.toFixed(2) : Math.round(value)}`
     : metric === "tokens"
@@ -239,22 +251,14 @@ function AreaChart({
       : String(Math.round(value));
 
   return (
-    <div className="usage-area-chart" ref={chartRef}>
+    <div className="usage-cohort-chart" ref={chartRef}>
       <svg viewBox={`0 0 ${width} ${height}`} role="img">
-        <title>{`${metricLabel} session totals by latest activity`}</title>
+        <title>{`${metricLabel} from full session totals by latest-activity cohort`}</title>
         <desc>
           {populated
-            ? `${series.length} visible ${series.length === 1 ? "provider is" : "providers are"} charted across ${labels.length} date buckets. Detailed values follow the chart.`
+            ? `Each session appears once, in the date bucket containing its latest activity. ${metricLabel} are cumulative session totals, not usage generated during that bucket. Detailed values follow the chart.`
             : `${emptyTitle}. ${emptyText}`}
         </desc>
-        <defs>
-          {series.map((item, index) => (
-            <linearGradient key={item.providerId} id={`usage-${metric}-gradient-${index}`} x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0%" stopColor={seriesAccent(index)} stopOpacity=".26" />
-              <stop offset="100%" stopColor={seriesAccent(index)} stopOpacity="0" />
-            </linearGradient>
-          ))}
-        </defs>
         {[0, .25, .5, .75, 1].map((fraction) => {
           const y = top + chartHeight * fraction;
           const value = maximum * (1 - fraction);
@@ -267,28 +271,29 @@ function AreaChart({
             </g>
           );
         })}
-        {series.map((item, index) => {
-          const line = item.values.map((value, pointIndex) =>
-            `${pointIndex === 0 ? "M" : "L"} ${pointX(pointIndex)} ${pointY(value)}`).join(" ");
-          const area = `${line} L ${pointX(labels.length - 1)} ${top + chartHeight} L ${pointX(0)} ${top + chartHeight} Z`;
-          return (
-            <g key={item.providerId}>
-              <path d={area} fill={`url(#usage-${metric}-gradient-${index})`} />
-              <path className="usage-chart-line" d={line} stroke={seriesAccent(index)} />
-              {item.values.map((value, pointIndex) => value > 0 && (
-                <circle
-                  key={pointIndex}
-                  className="usage-chart-point"
-                  cx={pointX(pointIndex)}
-                  cy={pointY(value)}
-                  r="3"
-                  fill={seriesAccent(index)}
-                >
-                  <title>{`${item.label}: ${formatAxis(value)} on ${labels[pointIndex]}`}</title>
-                </circle>
-              ))}
-            </g>
-          );
+        {labels.map((label, pointIndex) => {
+          let stackedValue = 0;
+          return series.map((item, seriesIndex) => {
+            const value = item.values[pointIndex] ?? 0;
+            const bottomValue = stackedValue;
+            stackedValue += value;
+            if (value <= 0) return null;
+            const y = pointY(stackedValue);
+            return (
+              <rect
+                key={`${item.providerId}-${pointIndex}`}
+                className="usage-chart-bar"
+                x={barX(pointIndex)}
+                y={y}
+                width={barWidth}
+                height={Math.max(1, pointY(bottomValue) - y)}
+                rx="2"
+                fill={seriesAccent(seriesIndex)}
+              >
+                <title>{`${item.label}: ${formatAxis(value)} from sessions last active ${label}`}</title>
+              </rect>
+            );
+          });
         })}
         {labels.map((label, index) => {
           const every = Math.max(1, Math.ceil(labels.length / 6));
@@ -297,9 +302,9 @@ function AreaChart({
             <text
               className="usage-chart-x-label"
               key={`${label}-${index}`}
-              x={pointX(index)}
+              x={barX(index) + barWidth / 2}
               y={height - 5}
-              textAnchor={index === 0 ? "start" : index === labels.length - 1 ? "end" : "middle"}
+              textAnchor="middle"
             >
               {label}
             </text>
@@ -308,7 +313,7 @@ function AreaChart({
       </svg>
       {populated && (
         <table className="sr-only">
-          <caption>{`${metricLabel} session totals by latest activity and provider`}</caption>
+          <caption>{`${metricLabel} from full session totals by latest-activity cohort and provider`}</caption>
           <thead>
             <tr>
               <th scope="col">Provider</th>
@@ -356,11 +361,11 @@ function UsageOverTime({
   return (
     <article className="usage-dashboard-card usage-time-card">
       <SectionHeading
-        title="Session totals by latest activity"
-        description="Full session counters grouped by visible providers"
+        title="Session cohorts by latest activity"
+        description={`${data.chart.labels.length} equal rolling buckets · ${Math.round(data.chart.bucketHours)} hours each`}
         aside={(
           <div className="usage-metric-toggle" role="group" aria-label="Chart metric">
-            {(["tokens", "cost", "requests"] as const).map((item) => (
+            {(["tokens", "cost", "sessions"] as const).map((item) => (
               <button
                 type="button"
                 className={metric === item ? "active" : ""}
@@ -374,15 +379,19 @@ function UsageOverTime({
           </div>
         )}
       />
-      <AreaChart
+      <CohortChart
         labels={data.chart.labels}
         series={series}
         metric={metric}
         emptyTitle={hiddenActivity ? "All activity is hidden" : "No usage in this period"}
         emptyText={hiddenActivity
           ? "Show a provider to include its activity in breakdowns."
-          : "Charts fill in as sessions record tokens and cost."}
+          : "Cohorts fill in as sessions record tokens and cost."}
       />
+      <p className="usage-chart-method">
+        Each session appears once in the bucket containing its latest activity. Token and cost
+        values are that session’s complete recorded totals—not usage generated during the bucket.
+      </p>
       <div className="usage-chart-legend">
         {series.map((item, index) => (
           <span key={item.providerId}>
@@ -813,9 +822,13 @@ export function UsageDashboard(): ReactNode {
     error: quotaError,
   } = useQuotaSnapshots();
   const prefs = useUsagePrefs();
-  const [view, setView] = useState<DashboardView>("overview");
-  const [layout, setLayout] = useState<DashboardLayout>("expanded");
-  const [rangeDays, setRangeDays] = useState<UsageRangeDays>(7);
+  const { view, layout, rangeDays } = prefs.dashboard;
+  const setView = (next: "overview" | "providers") =>
+    setUsageDashboardPrefs({ view: next });
+  const setLayout = (next: "expanded" | "compact") =>
+    setUsageDashboardPrefs({ layout: next });
+  const setRangeDays = (next: UsageRangeDays) =>
+    setUsageDashboardPrefs({ rangeDays: next });
   const [refreshing, setRefreshing] = useState(false);
   const data = useMemo(
     () => buildUsageDashboardData(projectSessions, snapshots, rangeDays),
@@ -829,7 +842,7 @@ export function UsageDashboard(): ReactNode {
   const allProvidersHidden = data.providers.length > 0 && visibleProviders.length === 0;
   const tokenSeries = aggregateSeries(data.chart.tokens, data.chart.labels.length);
   const costSeries = aggregateSeries(data.chart.cost, data.chart.labels.length);
-  const sessionSeries = aggregateSeries(data.chart.requests, data.chart.labels.length);
+  const sessionSeries = aggregateSeries(data.chart.sessions, data.chart.labels.length);
   const averageSeries = costSeries.map((cost, index) => {
     const tokens = tokenSeries[index] ?? 0;
     return tokens > 0 ? cost / tokens * 1_000 : 0;

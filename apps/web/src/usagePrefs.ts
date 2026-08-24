@@ -84,11 +84,24 @@ export interface UsagePrefs {
   hiddenProviders: string[];
   /** Collapsed quota groups as "providerId/family" keys. */
   collapsedGroups: string[];
+  /** Browser-local dashboard presentation, restored whenever Settings remounts. */
+  dashboard: UsageDashboardPrefs;
 }
 
 export const USAGE_PREFS_KEY = "polyth.usagePrefs";
 
 const MAX_ENTRIES = 128;
+const DEFAULT_DASHBOARD_PREFS: UsageDashboardPrefs = {
+  view: "overview",
+  layout: "expanded",
+  rangeDays: 7,
+};
+
+export interface UsageDashboardPrefs {
+  view: "overview" | "providers";
+  layout: "expanded" | "compact";
+  rangeDays: 7 | 30 | 90;
+}
 
 const stringList = (value: unknown): string[] =>
   Array.isArray(value)
@@ -98,12 +111,24 @@ const stringList = (value: unknown): string[] =>
 export function parseUsagePrefs(raw: string | null): UsagePrefs {
   try {
     const data = JSON.parse(raw ?? "") as Partial<UsagePrefs>;
+    const dashboard = data.dashboard as Partial<UsageDashboardPrefs> | undefined;
     return {
       hiddenProviders: stringList(data.hiddenProviders),
       collapsedGroups: stringList(data.collapsedGroups),
+      dashboard: {
+        view: dashboard?.view === "providers" ? "providers" : "overview",
+        layout: dashboard?.layout === "compact" ? "compact" : "expanded",
+        rangeDays: dashboard?.rangeDays === 30 || dashboard?.rangeDays === 90
+          ? dashboard.rangeDays
+          : 7,
+      },
     };
   } catch {
-    return { hiddenProviders: [], collapsedGroups: [] };
+    return {
+      hiddenProviders: [],
+      collapsedGroups: [],
+      dashboard: { ...DEFAULT_DASHBOARD_PREFS },
+    };
   }
 }
 
@@ -133,6 +158,10 @@ export function setProviderHidden(providerId: string, hidden: boolean): void {
 
 export function setGroupCollapsed(key: string, collapsed: boolean): void {
   save({ ...prefs, collapsedGroups: toggled(prefs.collapsedGroups, key, collapsed) });
+}
+
+export function setUsageDashboardPrefs(patch: Partial<UsageDashboardPrefs>): void {
+  save({ ...prefs, dashboard: { ...prefs.dashboard, ...patch } });
 }
 
 export function useUsagePrefs(): UsagePrefs {

@@ -79,6 +79,9 @@ test("Usage settings keeps the Polyth shell and offers rich dashboard views", as
   assert.match(source, /function ModelBreakdown/);
   assert.match(source, /function CostPulse/);
   assert.match(source, /aria-label="Dashboard density"/);
+  assert.match(source, /setUsageDashboardPrefs/);
+  assert.match(source, /Session cohorts by latest activity/);
+  assert.match(source, /complete recorded totals—not usage generated during the bucket/);
   assert.match(source, /<table className="sr-only">/);
   assert.match(source, /role="progressbar"/);
   assert.match(source, /className="usage-quota-alert" role="alert"/);
@@ -88,11 +91,16 @@ test("Usage settings keeps the Polyth shell and offers rich dashboard views", as
   assert.doesNotMatch(source, /usage-dashboard-sidebar/);
   assert.match(quota, /loading: boolean/);
   assert.match(quota, /error: string \| null/);
+  assert.match(quota, /useSyncExternalStore/);
+  assert.match(quota, /quotaListeners\.size === 1/);
+  assert.equal(quota.match(/setInterval/g)?.length, 1, "quota polling has one shared timer");
   assert.doesNotMatch(api, /usageQuotas:[\s\S]{0,120}\.catch\(/);
   assert.match(registration, /component: UsageDashboard/);
   assert.match(registration, /id: "usage.dashboard"/);
   assert.match(styles, /\.settings-page-usage > \.settings-nav \{ display: flex; \}/);
   assert.match(styles, /--usage-bg: var\(--bg\)/);
+  assert.doesNotMatch(styles, /full dark analytics workspace/);
+  assert.doesNotMatch(styles, /--usage-bg: #0d0e10/);
   assert.match(styles, /\.usage-status-pill\.session-only/);
   assert.match(styles, /@media \(max-width: 700px\)[\s\S]*?\.usage-providers-card tbody tr/);
 });

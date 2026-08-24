@@ -52,9 +52,14 @@ test("dashboard derives current-period totals, trends, and provider quota health
   assert.equal(Math.round(dashboard.trends.cost!.percent), 400);
   assert.equal(dashboard.trends.averageCostPerThousand!.direction, "down");
   assert.equal(dashboard.chart.labels.length, 7);
+  assert.equal(dashboard.chart.bucketHours, 24);
   assert.equal(
     dashboard.chart.tokens.flatMap((provider) => provider.values).reduce((sum, value) => sum + value, 0),
     4_000,
+  );
+  assert.equal(
+    dashboard.chart.sessions.flatMap((provider) => provider.values).reduce((sum, value) => sum + value, 0),
+    2,
   );
   assert.deepEqual(dashboard.models.map((model) => ({
     id: model.id,
@@ -82,6 +87,7 @@ test("dashboard keeps configured providers visible without fabricating activity"
 
   assert.equal(dashboard.totals.sessions, 0);
   assert.equal(dashboard.trends.tokens, null);
+  assert.equal(dashboard.chart.bucketHours, 72);
   assert.deepEqual(dashboard.chart.tokens, []);
   assert.deepEqual(dashboard.providers.map((provider) => ({
     id: provider.id,
@@ -94,6 +100,20 @@ test("dashboard keeps configured providers visible without fabricating activity"
     remaining: null,
     stale: true,
   }]);
+});
+
+test("dashboard cohorts assign each cumulative session total to latest activity once", () => {
+  const dashboard = buildUsageDashboardData([
+    session("older", "openai", now - 5.5 * DAY_MS, 1_000, .01),
+    session("newer", "openai", now - .5 * DAY_MS, 4_000, .04),
+  ], [], 7, now);
+
+  const tokens = dashboard.chart.tokens[0]!.values;
+  const costs = dashboard.chart.cost[0]!.values;
+  assert.equal(tokens.filter((value) => value > 0).length, 2);
+  assert.equal(tokens.reduce((sum, value) => sum + value, 0), 5_000);
+  assert.equal(costs.reduce((sum, value) => sum + value, 0), .05);
+  assert.ok(dashboard.chart.labels.every((label) => label.length > 0));
 });
 
 test("dashboard merges provider aliases used by sessions and quota adapters", () => {
