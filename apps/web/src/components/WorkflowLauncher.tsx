@@ -99,18 +99,10 @@ export default function WorkflowLauncher({
       draftConsumed = true;
       const started = await api.runWorkflow(workflow.id, parentSessionId, submittedTask);
       publishWorkflowRun(started);
-      await openSession(parentSessionId, { showChat: false }).catch((cause) => {
+      await openSession(parentSessionId).catch((cause) => {
         setUiError(friendlyError("Workflow started, but the parent timeline couldn’t refresh", cause));
       });
-      handOffWorkflowLaunch({
-        projectId,
-        sessionId: parentSessionId,
-        workflowId: workflow.id,
-        input: submittedTask,
-        run: started,
-      });
       setOpen(false);
-      setActiveView("workflow");
     } catch (cause) {
       if (draftConsumed) requestComposerReplace(submittedTask);
       setError(friendlyError("Couldn’t start the workflow", cause));
@@ -119,7 +111,6 @@ export default function WorkflowLauncher({
     }
   };
 
-  const hasDraft = draftText.trim().length > 0;
   return (
     <>
       <button
@@ -129,14 +120,14 @@ export default function WorkflowLauncher({
         onClick={openLauncher}
         title={!projectId
           ? "Open a project to use workflows"
-          : hasDraft
+          : draftText.trim()
             ? "Choose a workflow for this draft"
-            : "Browse and run workflows"}
-        aria-label={hasDraft ? "Run draft with a workflow" : "Browse workflows"}
+            : "Choose a workflow to run"}
+        aria-label="Run workflow"
         aria-haspopup="dialog"
         aria-expanded={open}
       >
-        <Icon.workflow /><span>{hasDraft ? "Run workflow" : "Workflows"}</span>
+        <Icon.workflow /><span>Run workflow</span>
       </button>
       {open && (
         <Dialog

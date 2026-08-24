@@ -176,6 +176,14 @@ test("workflow journey surfaces expose task launch, chat progress, HITL, stop, a
     launcher.indexOf("consumeDraft();") < launcher.indexOf("publishWorkflowRun(started);"),
     "the accepted workflow consumes the draft before global indicators can remount Composer",
   );
+  assert.match(launcher, /await openSession\(parentSessionId\)/);
+  const runStart = launcher.indexOf("const run = async");
+  const directRun = launcher.slice(runStart, launcher.indexOf("\n  return (", runStart));
+  assert.doesNotMatch(
+    directRun,
+    /setActiveView\("workflow"\)/,
+    "starting from the composer stays in Chat so the event-backed timeline card is visible",
+  );
   assert.match(launcher, /if \(draftConsumed\) requestComposerReplace\(submittedTask\)/);
   assert.match(composer, /workflowDraftText: text/);
   assert.match(composer, /workflowAttachmentCount: attachments\.length/);

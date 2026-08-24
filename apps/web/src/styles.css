@@ -9176,9 +9176,12 @@ html[data-sheet="open"], html[data-sheet="open"] body { overflow: hidden; }
   /* §51: the resting row carries add · prompt · voice and nothing else.
      Session switches (auto-approve, goals) appear once the composer is in
      use, so a 320px screen never has to fit five controls in one line. */
-  .composer-mobile.composer-collapsed .composer-auto-approve,
-  .composer-mobile.composer-collapsed .composer-goals,
-  .composer-mobile.composer-collapsed .composer-workflow { display: none; }
+  .composer-mobile.composer-collapsed:not(.composer-has-draft) .composer-auto-approve,
+  .composer-mobile.composer-collapsed:not(.composer-has-draft) .composer-goals,
+  .composer-mobile.composer-collapsed:not(.composer-has-draft) .composer-workflow { display: none; }
+  /* A restored draft can briefly precede the expanded-state render. Keep the
+     run action reachable throughout that transition at narrow widths. */
+  .composer-mobile.composer-has-draft .composer-workflow { display: inline-flex; }
 
   /* Expanded (§11/§42): model + mode header, metadata microtext, actions. */
   .composer-mobile.composer-expanded .composer-card { flex-direction: column; padding: 0; }

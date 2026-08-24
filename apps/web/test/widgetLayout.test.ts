@@ -9,6 +9,7 @@ import {
   canPlaceWidget,
   createDefaultWidgetLayout,
   duplicateWidget,
+  ensureWidgets,
   getWidgetLayout,
   getWidgetSaveStatus,
   moveWidget,
@@ -384,6 +385,34 @@ test("layouts persist independently under project-specific keys", () => {
   activateProject("layout-project-alpha");
   assert.equal(getWidgetLayout().audience, "power", "switching back restores that project's canvas");
   assert.equal(getWidgetSaveStatus(), "saved");
+});
+
+test("registered mini-widgets remain placed when the active project changes", () => {
+  const definition = {
+    id: "workflow.chat-launcher",
+    pluginId: "workflow",
+    title: "Run workflow",
+    description: "Run the current chat draft through a workflow.",
+    kind: "mini-widget" as const,
+    defaultSlot: "composer.trailing" as const,
+    supportedSlots: ["composer.leading", "composer.trailing"] as const,
+    defaultVisible: true,
+    audience: "simple" as const,
+  };
+  ensureWidgets([definition]);
+
+  activateProject("layout-project-with-workflow");
+  const first = getWidgetLayout();
+  assert.equal(first.widgets[definition.id]?.visible, true);
+  assert.ok(first.slotPlacements["composer.trailing"]?.includes(definition.id));
+
+  activateProject("layout-second-project-with-workflow");
+  const second = getWidgetLayout();
+  assert.equal(second.widgets[definition.id]?.visible, true);
+  assert.ok(
+    second.slotPlacements["composer.trailing"]?.includes(definition.id),
+    "project-scoped layout parsing keeps registered composer actions",
+  );
 });
 
 test("the legacy global layout migrates to only the first project that loads it", () => {

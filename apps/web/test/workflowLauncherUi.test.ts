@@ -24,8 +24,11 @@ register("./tsxHooks.mjs", import.meta.url);
 const { act, createElement } = await import("react");
 const { createRoot } = await import("react-dom/client");
 const { api } = await import("../src/api.ts");
-const { getState, setActiveView } = await import("../src/store.ts");
-const { WORKFLOW_WIDGET_PLUGIN } = await import("../src/widgets/builtinMiniWidgets.tsx");
+const { activateProject, getState, setActiveView, setModels } = await import("../src/store.ts");
+const { setWorkspaceMode } = await import("../src/widgets/workspaceMode.ts");
+const { installBuiltinMiniWidgets, WORKFLOW_WIDGET_PLUGIN } =
+  await import("../src/widgets/builtinMiniWidgets.tsx");
+const { default: Composer } = await import("../src/components/Composer.tsx");
 const { default: WorkflowTimelineCard } = await import("../src/components/WorkflowTimelineCard.tsx");
 
 const workflow: WorkflowDto = {
@@ -38,6 +41,61 @@ const workflow: WorkflowDto = {
   createdAt: 1,
   updatedAt: 1,
 };
+
+test("chat composer keeps the Run workflow launcher mounted after project activation", async () => {
+  const originalComposerCatalog = api.composerCatalog;
+  const originalListWorkflows = api.listWorkflows;
+  api.composerCatalog = async () => ({
+    commands: { ok: true, items: [] },
+    snippets: { ok: true, items: [] },
+  });
+  api.listWorkflows = async () => [workflow];
+  installBuiltinMiniWidgets();
+  activateProject("chat-launcher-project");
+  setWorkspaceMode("chat");
+  setModels([{
+    providerID: "test",
+    modelID: "chat",
+    name: "Chat",
+    connected: true,
+  }]);
+
+  const container = document.createElement("div");
+  document.body.appendChild(container);
+  const root = createRoot(container);
+  try {
+    await act(async () => {
+      root.render(createElement(Composer));
+      await Promise.resolve();
+    });
+
+    const composer = container.querySelector(".composer-simple");
+    assert.ok(composer, "Chat mode renders the simple composer");
+    const trigger = composer.querySelector<HTMLButtonElement>(".composer-workflow");
+    assert.equal(trigger?.textContent?.trim(), "Run workflow");
+    assert.equal(trigger?.getAttribute("aria-label"), "Run workflow");
+
+    const input = composer.querySelector<HTMLTextAreaElement>('[aria-label="Message"]');
+    assert.ok(input);
+    await act(async () => {
+      input.value = "Audit the release candidate";
+      input.dispatchEvent(new dom.Event("input", { bubbles: true }));
+    });
+    await act(async () => {
+      trigger?.click();
+      await Promise.resolve();
+    });
+    assert.equal(
+      container.querySelector<HTMLTextAreaElement>(".workflow-launch-task textarea")?.value,
+      "Audit the release candidate",
+    );
+  } finally {
+    api.composerCatalog = originalComposerCatalog;
+    api.listWorkflows = originalListWorkflows;
+    await act(async () => { root.unmount(); });
+    container.remove();
+  }
+});
 
 test("composer workflow action opens the launcher with the live draft", async () => {
   const widget = WORKFLOW_WIDGET_PLUGIN.widgets?.find((item) => item.id === "workflow.composer-action");
@@ -66,6 +124,7 @@ test("composer workflow action opens the launcher with the live draft", async ()
 
     const trigger = container.querySelector<HTMLButtonElement>(".composer-workflow");
     assert.equal(trigger?.textContent?.trim(), "Run workflow");
+    assert.equal(trigger?.getAttribute("aria-label"), "Run workflow");
     assert.equal(trigger?.getAttribute("aria-haspopup"), "dialog");
 
     await act(async () => {

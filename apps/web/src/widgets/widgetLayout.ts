@@ -127,6 +127,19 @@ export const BUILTIN_WIDGET_IDS = [
   "usage.quota-summary",
 ] as const;
 
+// Catalog registrations can happen before the first project is activated.
+// Keep their definitions available when a project switch reparses its
+// project-scoped layout; otherwise every non-BUILTIN mini-widget disappears
+// from the new layout even though its package remains registered and enabled.
+const ensuredDefinitions = new Map<string, WidgetLayoutDefinition>();
+
+function knownLayoutDefinitions(): readonly (string | WidgetLayoutDefinition)[] {
+  return [
+    ...BUILTIN_WIDGET_IDS.filter((id) => !ensuredDefinitions.has(id)),
+    ...ensuredDefinitions.values(),
+  ];
+}
+
 const DEFAULT_ZONE: Record<string, WidgetZone> = {
   "core.quick-actions": "header",
   "goals.current": "header",
@@ -991,7 +1004,7 @@ subscribeStore(() => {
   if (nextProjectId === activeProjectId) return;
   flushWrite();
   activeProjectId = nextProjectId;
-  state = parseWidgetLayout(read(activeProjectId));
+  state = parseWidgetLayout(read(activeProjectId), knownLayoutDefinitions());
   history = [];
   saveStatus = "saved";
   for (const listener of [...listeners]) listener();
@@ -1054,6 +1067,7 @@ export function ensureWidgetIds(ids: readonly string[]): void {
 }
 
 export function ensureWidgets(definitions: readonly WidgetLayoutDefinition[]): void {
+  for (const definition of definitions) ensuredDefinitions.set(definition.id, definition);
   const missing = definitions.filter((definition) => !(definition.id in state.widgets));
   const defaults = createDefaultWidgetLayout(definitions);
   const zones = Object.fromEntries(WIDGET_ZONES.map((zone) => [
