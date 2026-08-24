@@ -1,6 +1,7 @@
 import { useEffect, useState, type FormEvent } from "react";
 import type { SecureSafeEntryDto } from "@polyth/contracts";
 import { api } from "../../api.ts";
+import { confirmAlert } from "../../alerts.ts";
 import { EmptyState, PageHead } from "./parts.tsx";
 
 export default function SecureSafePage() {
@@ -53,7 +54,7 @@ export default function SecureSafePage() {
   };
 
   const remove = async (entry: SecureSafeEntryDto) => {
-    if (!window.confirm(`Delete the Secure Safe handle "${entry.handle}"?`)) return;
+    if (!await confirmAlert(`Delete the Secure Safe handle "${entry.handle}"?`, { title: "Delete Secure Safe handle", confirmLabel: "Delete" })) return;
     setError("");
     try {
       await api.deleteSecureSafe(entry.id);

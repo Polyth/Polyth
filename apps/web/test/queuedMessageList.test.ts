@@ -82,13 +82,17 @@ test("moveQueuedItem preserves metadata while assigning the new positions", () =
   assert.deepEqual(reordered.map((item) => item.position), [0, 1, 2]);
 });
 
-test("queued messages can be edited and drag-reordered through the persisted APIs", async () => {
+test("queued messages hand editing to the composer and drag-reorder through the persisted API", async () => {
   const container = document.createElement("div");
   document.body.appendChild(container);
   const root = createRoot(container);
+  let editing: QueueItemDto | undefined;
   try {
     await act(async () => {
-      root.render(createElement(QueuedMessageList, { sessionId: "s1" }));
+      root.render(createElement(QueuedMessageList, {
+        sessionId: "s1",
+        onEdit: (item: QueueItemDto) => { editing = item; },
+      }));
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
     assert.equal(container.querySelectorAll(".queue-chip").length, 3);
@@ -96,25 +100,24 @@ test("queued messages can be edited and drag-reordered through the persisted API
     const edit = container.querySelector<HTMLElement>('button[aria-label="Edit queued message 1"]');
     assert.ok(edit);
     await act(async () => { click(edit); });
-    const textarea = container.querySelector<HTMLTextAreaElement>('textarea[aria-label="Edit queued message 1"]');
-    assert.ok(textarea);
+    assert.equal(editing?.id, "q1", "the parent composer owns the edit buffer");
+    assert.equal(container.querySelector("textarea"), null, "queue rows never render an inline editor");
+    assert.equal(container.querySelector('[aria-label*="Move queued message"]'), null, "dragging replaces arrow reorder controls");
     await act(async () => {
-      const setter = Object.getOwnPropertyDescriptor(dom.HTMLTextAreaElement.prototype, "value")?.set;
-      assert.ok(setter);
-      setter.call(textarea, "first edited");
-      textarea.dispatchEvent(new Event("input", { bubbles: true }));
+      root.render(createElement(QueuedMessageList, {
+        sessionId: "s1",
+        editingId: "q1",
+        onEdit: (item: QueueItemDto) => { editing = item; },
+      }));
     });
-    const save = container.querySelector<HTMLElement>('button[aria-label="Save queued message 1"]');
-    assert.ok(save);
+    assert.equal(container.querySelectorAll(".queue-chip").length, 2, "the active edit leaves the queue list");
+    assert.equal(container.textContent?.includes("first"), false, "the queued text lives only in the composer while editing");
     await act(async () => {
-      click(save);
-      await new Promise((resolve) => setTimeout(resolve, 0));
+      root.render(createElement(QueuedMessageList, {
+        sessionId: "s1",
+        onEdit: (item: QueueItemDto) => { editing = item; },
+      }));
     });
-    assert.deepEqual(mutations.at(-1), {
-      path: "/api/sessions/s1/queue/q1",
-      body: { text: "first edited" },
-    });
-    assert.equal(container.querySelector(".queue-text")?.textContent, "first edited");
 
     const chips = [...container.querySelectorAll<HTMLElement>(".queue-chip")];
     await act(async () => { drag(chips[0]!, "dragstart"); });
@@ -129,7 +132,7 @@ test("queued messages can be edited and drag-reordered through the persisted API
     });
     assert.deepEqual(
       [...container.querySelectorAll(".queue-text")].map((element) => element.textContent),
-      ["second", "third", "first edited"],
+      ["second", "third", "first"],
     );
   } finally {
     await act(async () => { root.unmount(); });

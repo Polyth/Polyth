@@ -53,7 +53,7 @@ import { noteModelUsed, useModelPrefs } from "../modelPrefs.ts";
 import { getUiSettings, useUiSettings } from "../uiPrefs.ts";
 import { migrateFavoritesOnce, profilesLoaded, useProfiles } from "../profiles.ts";
 import AgentProfileForm from "./AgentProfileForm.tsx";
-import type { AgentProfile, ModelDescriptor } from "@polyth/contracts";
+import type { AgentProfile, ModelDescriptor, QueueItemDto } from "@polyth/contracts";
 import { agentPickerDefaultLabel, modelPickerDefaultLabel } from "../composerDefaults.ts";
 import { friendlyError, modKeyLabel, parseModelRef } from "../settings.ts";
 import { Icon } from "../icons.tsx";
@@ -63,7 +63,6 @@ import { useSessionDefaults } from "../sessionDefaults.ts";
 import { roleKind, useRolePrefs } from "../rolePrefs.ts";
 import { useShellMode } from "../responsiveShell.ts";
 import { useViewportMetrics } from "../mobileViewport.ts";
-import ProviderLogo from "./ProviderLogo.tsx";
 
 function modelRefFromValue(value: string): { providerID: string; modelID: string } | undefined {
   if (!value) return undefined;
@@ -161,6 +160,55 @@ function thinkingLabel(variant: string): string {
   return label ? label[0]!.toUpperCase() + label.slice(1) : variant;
 }
 
+/** A discrete effort control: every model-reported variant is a fixed stop,
+ * with Auto retained as the first stop so an explicit override can be cleared. */
+function ThinkingSlider({
+  className,
+  variants,
+  value,
+  onPick,
+}: {
+  className?: string;
+  variants: readonly string[];
+  value?: string;
+  onPick: (thinking: string | undefined) => void;
+}) {
+  const [dragging, setDragging] = useState(false);
+  const options = ["", ...variants];
+  const selected = Math.max(0, options.indexOf(value ?? ""));
+  const selectedOption = options[selected] ?? "";
+  const label = selectedOption ? thinkingLabel(selectedOption) : "Auto";
+  return (
+    <label className={`thinking-slider${className ? ` ${className}` : ""}`}>
+      <span className="thinking-slider-label">
+        <span className="thinking-glyph" aria-hidden="true">◌</span>
+        <output>{label}</output>
+      </span>
+      <span className="thinking-slider-track">
+        <input
+          type="range"
+          min={0}
+          max={options.length - 1}
+          step={1}
+          value={selected}
+          aria-label={`Thinking effort: ${label}`}
+          onChange={(event) => onPick(options[Number(event.target.value)] || undefined)}
+          onPointerDown={() => setDragging(true)}
+          onPointerUp={() => setDragging(false)}
+          onPointerCancel={() => setDragging(false)}
+          onBlur={() => setDragging(false)}
+        />
+        <span className="thinking-slider-stops" aria-hidden="true">
+          {options.map((option, index) => (
+            <i key={option || "auto"} className={index <= selected ? "active" : ""} />
+          ))}
+        </span>
+        {dragging && <span className="thinking-slider-tooltip" role="tooltip">Thinking: {label}</span>}
+      </span>
+    </label>
+  );
+}
+
 function agentBadgeLabel(agent?: string): string {
   const label = (agent || "Build").replace(/[-_]+/g, " ").trim();
   return label ? label[0]!.toUpperCase() + label.slice(1) : "Build";
@@ -168,14 +216,17 @@ function agentBadgeLabel(agent?: string): string {
 
 // UX-MOBILE-01 §13/§40/§41: one muted microtext line — `Text · Image · 500K`.
 // No mixed glyph set, no "Context:" label competing for primary space.
-function ModelCapabilityMeta({ model }: { model?: ModelDescriptor }) {
+function modelCapabilityMeta(model?: ModelDescriptor): string {
   const line = modelMetaLine(model);
-  return (
-    <div className="composer-model-meta">
-      {line || `Context ${compactContext(model?.context)}`}
-    </div>
-  );
+  return line || `Context ${compactContext(model?.context)}`;
 }
+
+type QueueEdit = {
+  id: string;
+  sessionId: string;
+  /** Preserve an unrelated composer draft while the queued item is edited. */
+  draftBefore: string;
+};
 
 export default function Composer({
   variant = "docked",
@@ -188,6 +239,7 @@ export default function Composer({
   const [pinEdit, setPinEdit] = useState<AgentProfile | null>(null);
   const [createProfileOpen, setCreateProfileOpen] = useState(false);
   const [goalFormOpen, setGoalFormOpen] = useState(false);
+  const [goalAttachBusy, setGoalAttachBusy] = useState(false);
   const [autoApproveBusy, setAutoApproveBusy] = useState(false);
   const [newSessionAutoApprove, setNewSessionAutoApprove] = useState(false);
   const [newSessionGoal, setNewSessionGoal] = useState(false);
@@ -219,6 +271,11 @@ export default function Composer({
   const [text, setText] = useState(() => (
     session?.id ? loadDraft(session.id) : newSessionIntent?.draft ?? ""
   ));
+  const [queueEdit, setQueueEdit] = useState<QueueEdit | null>(null);
+  const [queueEditStarting, setQueueEditStarting] = useState(false);
+  const [queueEditSaving, setQueueEditSaving] = useState(false);
+  const queueEditRef = useRef<QueueEdit | null>(null);
+  queueEditRef.current = queueEdit;
   const committedTextRef = useRef(text);
   committedTextRef.current = text;
   const [focusMode, setFocusMode] = useState(false);
@@ -262,7 +319,11 @@ export default function Composer({
   useEffect(() => {
     const outgoing = sessionIdRef.current;
     if (outgoing !== null && outgoing !== (session?.id ?? null)) {
-      saveDraft(outgoing, inputRef.current?.getText() ?? committedTextRef.current);
+      const editing = queueEditRef.current;
+      saveDraft(outgoing, editing?.sessionId === outgoing
+        ? editing.draftBefore
+        : inputRef.current?.getText() ?? committedTextRef.current);
+      if (editing?.sessionId === outgoing) void api.queueEditCancel(outgoing, editing.id).catch(() => {});
     }
     sessionIdRef.current = session?.id ?? null;
     const t = session?.id ? loadDraft(session.id) : newSessionIntent?.draft ?? "";
@@ -273,6 +334,9 @@ export default function Composer({
     setAcToken(null);
     acTokenRef.current = null;
     fileSearchSeq.current++;
+    setQueueEdit(null);
+    setQueueEditStarting(false);
+    setQueueEditSaving(false);
   }, [session?.id, newSessionIntent]);
 
   // Disengage on the first pointer press outside the composer (including its
@@ -312,22 +376,27 @@ export default function Composer({
   useEffect(() => {
     const flush = () => {
       const id = sessionIdRef.current;
-      if (id !== null) saveDraft(id, inputRef.current?.getText() ?? committedTextRef.current);
+      const editing = queueEditRef.current;
+      if (id !== null) saveDraft(id, editing?.sessionId === id
+        ? editing.draftBefore
+        : inputRef.current?.getText() ?? committedTextRef.current);
     };
     window.addEventListener("pagehide", flush);
     return () => {
       window.removeEventListener("pagehide", flush);
       flush();
+      const editing = queueEditRef.current;
+      if (editing) void api.queueEditCancel(editing.sessionId, editing.id).catch(() => {});
     };
   }, []);
 
   // Debounced draft persistence of committed text.
   useEffect(() => {
     const id = session?.id;
-    if (!id) return;
+    if (!id || queueEdit?.sessionId === id) return;
     const t = setTimeout(() => saveDraft(id, text), 250);
     return () => clearTimeout(t);
-  }, [session?.id, text]);
+  }, [session?.id, text, queueEdit]);
 
   // Drag-and-drop: tree paths and desktop files become attachment pills.
   const [dropHint, setDropHint] = useState<"path" | "files" | null>(null);
@@ -470,19 +539,81 @@ export default function Composer({
     && cfg.profile.kind === "id"
     && !profiles.some((p) => cfg.profile.kind === "id" && p.id === cfg.profile.id);
 
+  const beginQueuedEdit = useCallback((item: QueueItemDto) => {
+    if (queueEditRef.current || queueEditStarting) {
+      announce("Finish editing the current queued message first.");
+      return;
+    }
+    const target = sessionIdRef.current;
+    if (!target || target !== item.sessionId) return;
+    setQueueEditStarting(true);
+    void api.queueEditStart(target, item.id)
+      .then((reserved) => {
+        if (sessionIdRef.current !== target) {
+          void api.queueEditCancel(target, reserved.id);
+          return;
+        }
+        const draftBefore = inputRef.current?.getText() ?? committedTextRef.current;
+        // The queue text is an editing buffer, not this session's normal draft.
+        // Save any existing composer text before replacing it so it can return
+        // immediately after this queued message is updated.
+        saveDraft(target, draftBefore);
+        setQueueEdit({ id: reserved.id, sessionId: target, draftBefore });
+        setText(reserved.text);
+        inputRef.current?.replaceText(reserved.text);
+        inputRef.current?.focus();
+        setInputFocused(true);
+        announce(`Editing queued message ${reserved.position + 1} in the composer.`);
+      })
+      .catch((error) => setUiError(friendlyError("Couldn’t start editing queued message", error)))
+      .finally(() => setQueueEditStarting(false));
+  }, [queueEditStarting]);
+
+  const cancelQueuedEdit = useCallback((): boolean => {
+    const editing = queueEditRef.current;
+    if (!editing) return false;
+    setQueueEdit(null);
+    setText(editing.draftBefore);
+    inputRef.current?.replaceText(editing.draftBefore);
+    saveDraft(editing.sessionId, editing.draftBefore);
+    void api.queueEditCancel(editing.sessionId, editing.id).catch(() => {});
+    announce("Queued message editing cancelled.");
+    return true;
+  }, []);
+
   const send = useCallback((
     override?: string,
     deliveryOverride?: "steer" | "queue" | "interrupt",
   ) => {
     if (creatingSession) return;
     const t = (override ?? inputRef.current?.getText() ?? text).trim();
+    const target = sessionIdRef.current;
+    if (queueEdit) {
+      if (!target || target !== queueEdit.sessionId || !t || queueEditSaving) return;
+      const editing = queueEdit;
+      setQueueEditSaving(true);
+      void api.queueEdit(target, editing.id, t)
+        .then(() => {
+          // The server updates the existing queue row, so it retains its
+          // position and delivery metadata instead of becoming a new message.
+          if (queueEditRef.current?.id === editing.id) setQueueEdit(null);
+          if (sessionIdRef.current !== target) return;
+          setText(editing.draftBefore);
+          inputRef.current?.replaceText(editing.draftBefore);
+          saveDraft(target, editing.draftBefore);
+          historyCursor.current = emptyPromptHistoryCursor();
+          announce(`Queued message ${editing.id} updated in place.`);
+        })
+        .catch((error) => setUiError(friendlyError("Couldn’t update queued message", error)))
+        .finally(() => setQueueEditSaving(false));
+      return;
+    }
     const command = shellCommand(t);
     const hasPills = command === null && attachments.length > 0;
     if ((!t && !hasPills) || (command === null && noModels) || command === "") return;
     if (command === null && profileMissing) return;
     // Capture the target session at send time — project/session switches must
     // never reroute a send (delivery admission handles active turns server-side).
-    const target = sessionIdRef.current;
     // Pills leave the draft the moment the message leaves the composer.
     const atts = command === null ? takeAttachments(target) : [];
     const delivery = working ? deliveryOverride ?? getUiSettings().followUpBehavior : undefined;
@@ -576,7 +707,7 @@ export default function Composer({
     setAcToken(null);
     acTokenRef.current = null;
   }, [
-    text, attachments, cfg, profileMissing, noModels, working, activeProjectId,
+    text, attachments, cfg, profileMissing, noModels, working, activeProjectId, queueEdit, queueEditSaving,
     session?.model, settings.defaultModel, sessionDefaults.defaultModel,
     sessionDefaults.defaultThinking, chatModels, creatingSession, newSessionTarget,
     newSessionAutoApprove, newSessionGoal, newSessionIntent,
@@ -629,6 +760,7 @@ export default function Composer({
   const onKeyIntercept = (e: KeyboardEvent<HTMLTextAreaElement>, composing: boolean): boolean => {
     // IME composition: never send, never navigate autocomplete, never hotkey.
     if (composing) return false;
+    if (e.key === "Escape" && cancelQueuedEdit()) return true;
     if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === "Enter") {
       setFocusMode(true);
       return true;
@@ -907,8 +1039,28 @@ export default function Composer({
       .finally(() => setAutoApproveBusy(false));
   };
   const toggleGoal = () => {
-    if (session) setGoalFormOpen(true);
-    else setNewSessionGoal((current) => !current);
+    const objective = (inputRef.current?.getText() ?? text).trim();
+    if (!objective) {
+      if (session) setGoalFormOpen(true);
+      else setNewSessionGoal((current) => !current);
+      return;
+    }
+    if (!session) {
+      setNewSessionGoal(true);
+      announce("This message will be saved as the goal when you send it.");
+      return;
+    }
+    if (goalAttachBusy) return;
+    setGoalAttachBusy(true);
+    void api.goalAttach(session.id, objective)
+      .then(() => {
+        setText("");
+        inputRef.current?.replaceText("");
+        saveDraft(session.id, "");
+        announce("Goal attached.");
+      })
+      .catch((error) => setUiError(friendlyError("Couldn’t attach the goal", error)))
+      .finally(() => setGoalAttachBusy(false));
   };
   // Bounded callbacks let the same configurable action widget live in either
   // composer slot without owning session-creation state.
@@ -921,24 +1073,16 @@ export default function Composer({
     autoApproveBusy,
     toggleAutoApprove,
     goalOn: newSessionGoal,
+    goalBusy: goalAttachBusy,
     toggleGoal,
   };
-  const thinkingItems: PickerItem[] = [
-    { id: "", label: "Auto", group: "", detail: "The model's default reasoning effort" },
-    ...(selectedModel?.variants ?? []).map((variant) => ({
-      id: variant,
-      label: thinkingLabel(variant),
-      group: "",
-    })),
-  ];
-  const defaultThinking = selectedModel?.variants?.includes(sessionDefaults.defaultThinking ?? "")
-    ? sessionDefaults.defaultThinking
-    : undefined;
+  const thinkingVariants = selectedModel?.variants ?? [];
 
   const followUp = getUiSettings().followUpBehavior;
   const sendDisabled = creatingSession
-    || (!text.trim() && attachments.length === 0)
-    || (!shellMode && (noModels || profileMissing));
+    || queueEditSaving
+    || (queueEdit ? !text.trim() : (!text.trim() && attachments.length === 0))
+    || (!queueEdit && !shellMode && (noModels || profileMissing));
   const phoneLayout = isPhone;
   const hasDraft = text.trim() !== "" || attachments.length > 0;
   const expanded = !phoneLayout || inputFocused || hasDraft || working || shellMode;
@@ -977,7 +1121,13 @@ export default function Composer({
           {PROFILE_MISSING_NOTE}
         </div>
       )}
-      {session?.id && <QueuedMessageList sessionId={session.id} />}
+      {session?.id && (
+        <QueuedMessageList
+          sessionId={session.id}
+          editingId={queueEdit?.sessionId === session.id ? queueEdit.id : null}
+          onEdit={beginQueuedEdit}
+        />
+      )}
       {attachments.length > 0 && (
         <AttachmentPills
           attachments={attachments}
@@ -989,16 +1139,12 @@ export default function Composer({
       )}
       {simpleMode && (
         <div className="composer-model-header">
-          <ProviderLogo
-            providerID={selectedModel?.providerID}
-            providerName={selectedModel?.providerName}
-            className="composer-provider-mark"
-          />
           {!noModels && (
             <ModelPicker
               models={chatModels}
               value={cfg.model}
               recommended={recommendedModel}
+              composerMeta={modelCapabilityMeta(selectedModel)}
               direction={variant === "hero" ? "down" : "up"}
               onPick={(ref) => {
                 updateCfg(withExplicitModel(cfg, ref));
@@ -1006,23 +1152,16 @@ export default function Composer({
               }}
             />
           )}
-          {/* UX-MOBILE-01 §59: reasoning effort stays reachable on phones —
-              a compact control immediately right of the model name, opening
-              the same sheet as every other selector. It only exists for models
+          {/* Reasoning effort stays reachable on phones as a compact slider
+              immediately right of the model name. It only exists for models
               that actually report variants. */}
           <span className="composer-mode-cluster">
             {modelSupportsThinking(selectedModel) && (
-              <Picker
+              <ThinkingSlider
                 className="composer-thinking-badge"
-                label="Thinking"
-                mobileSheet
-                direction={variant === "hero" ? "down" : "up"}
-                items={thinkingItems}
-                value={cfg.thinking ?? defaultThinking ?? ""}
+                variants={thinkingVariants}
+                value={cfg.thinking}
                 onPick={(thinking) => updateCfg(withExplicitThinking(cfg, thinking || undefined))}
-                placeholder="Auto"
-                ariaLabel={`Select thinking effort, current ${thinkingLabel(cfg.thinking ?? defaultThinking ?? "Auto")}`}
-                triggerIcon={<span className="thinking-glyph" aria-hidden="true">◌</span>}
               />
             )}
             {chatAgents.length > 0 ? (
@@ -1041,7 +1180,6 @@ export default function Composer({
               <span className="agent-type-badge">{agentBadgeLabel(activeAgent)}</span>
             )}
           </span>
-          <ModelCapabilityMeta model={selectedModel} />
         </div>
       )}
       <div className="composer-input">
@@ -1072,11 +1210,6 @@ export default function Composer({
           onPaste={onPaste}
           onFocusChange={(focused) => { if (focused) setInputFocused(true); }}
         />
-        {!widgetMode && !shellMode && !text && !acView && (
-          <div className="composer-sigil-hint" aria-hidden="true">
-            <span>@ files</span><span>/ commands</span><span>! shell</span><span># snippets</span>
-          </div>
-        )}
         {acView && (
           <div className="ac-popup">
             <div className="ac-header">{acView.kind === "cmd" ? "Commands" : acView.kind === "snip" ? "Snippets" : "Files"}</div>
@@ -1176,15 +1309,11 @@ export default function Composer({
             />
           )}
           {!simpleMode && modelSupportsThinking(selectedModel) && (
-            <Picker
+            <ThinkingSlider
               className="picker-thinking"
-              label="Thinking"
-              direction="up"
-              items={thinkingItems}
-              value={cfg.thinking ?? defaultThinking ?? ""}
+              variants={thinkingVariants}
+              value={cfg.thinking}
               onPick={(thinking) => updateCfg(withExplicitThinking(cfg, thinking || undefined))}
-              ariaLabel={`Select thinking effort, current ${cfg.thinking ?? defaultThinking ?? "Default"}`}
-              triggerIcon={<span className="thinking-glyph">◌</span>}
             />
           )}
           {!simpleMode && ui.showTechnicalButtons && techOpen && (
@@ -1244,7 +1373,6 @@ export default function Composer({
             onAttachGoal={toggleGoal}
             attachGithub={attachGithub}
           />
-          {simpleMode && !phoneLayout && <span className="composer-focus-hint">{modKeyLabel()}I to focus</span>}
           {simpleMode && (
             <span className="composer-extensions composer-mobile-extensions">
               <SlotHost slot="composer.leading" context={slotContext} />
@@ -1253,15 +1381,16 @@ export default function Composer({
           )}
           <span className="composer-primary">
             {working ? (
-              followUp === "queue" && !sendDisabled ? (
+              (queueEdit || (followUp === "queue" && !sendDisabled)) ? (
                 <div className="composer-send-split" ref={deliveryMenuRef}>
                   <button
                     className="send composer-delivery composer-queue"
                     onClick={() => send()}
-                    aria-label="Queue message until the current response finishes"
-                    title="Queue message until the current response finishes"
+                    aria-label={queueEdit ? "Save queued message in its current position" : "Queue message until the current response finishes"}
+                    title={queueEdit ? "Save queued message in its current position" : "Queue message until the current response finishes"}
+                    disabled={queueEdit ? queueEditSaving || !text.trim() : false}
                   >
-                    <Icon.sendClock /><span className="composer-action-label">Queue</span>
+                    <Icon.sendClock /><span className="composer-action-label">{queueEdit ? "Save" : "Queue"}</span>
                   </button>
                   <button
                     className="composer-send-options"
@@ -1269,13 +1398,14 @@ export default function Composer({
                     aria-haspopup="menu"
                     aria-expanded={deliveryMenuOpen}
                     onClick={() => setDeliveryMenuOpen((open) => !open)}
+                    disabled={queueEdit ? queueEditSaving || !text.trim() : false}
                   >
                     <Icon.chevronDown />
                   </button>
                   {deliveryMenuOpen && (
                     <div className="composer-send-menu" role="menu">
-                      <button role="menuitem" onClick={() => { setDeliveryMenuOpen(false); send(undefined, "interrupt"); }}>
-                        <Icon.send /><span><strong>Send now</strong><small>Stop the current response and send</small></span>
+                      <button role="menuitem" onClick={() => { setDeliveryMenuOpen(false); send(undefined, queueEdit ? undefined : "interrupt"); }}>
+                        <Icon.send /><span><strong>{queueEdit ? "Save queued message" : "Send now"}</strong><small>{queueEdit ? "Keep it in its current queue position" : "Stop the current response and send"}</small></span>
                       </button>
                       <button role="menuitem" onClick={() => { setDeliveryMenuOpen(false); void abortSession(); }}>
                         <Icon.stop /><span><strong>Stop</strong><small>Stop without sending this draft</small></span>

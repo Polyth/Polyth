@@ -283,14 +283,13 @@ function MicButton() {
     <span className={`mic-control mic-${error ? "failed" : phase}`}>
       <button
         type="button"
-        className={`chip mic-btn${phase === "listening" ? " listening" : ""}`}
+        className={`mic-btn${phase === "listening" ? " listening" : ""}`}
         aria-label={phase === "listening" ? "Stop dictation" : "Dictate"}
         {...(phase === "listening" ? { "aria-pressed": true } : {})}
         disabled={!availability.available || busy}
         onClick={() => (phase === "listening" ? stop() : start())}
       >
         <span aria-hidden="true" className="mic-icon"><Icon.mic /></span>
-        <span className="mic-label">{phase === "listening" ? "Stop dictation" : "Dictate"}</span>
       </button>
       {status && <span className="mic-status">{status}</span>}
       {error !== null && (

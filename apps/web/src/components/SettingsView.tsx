@@ -306,9 +306,6 @@ export default function SettingsView({ onClose = () => setOverlay(null) }: { onC
         aria-describedby={mobile ? undefined : "settings-close-hint"}
       >
         <nav className="modal-nav settings-nav">
-          <div className="settings-nav-head">
-            <h2><span className="polyth-mark">p</span> polyth</h2>
-          </div>
           <input
             className="settings-nav-search"
             value={filter}

@@ -4,6 +4,7 @@
 // or a hash in data/auth.json) — it never transits this page.
 import { useCallback, useEffect, useState } from "react";
 import { api, type AuthDeviceDto, type AuthStatusDto } from "../../api.ts";
+import { confirmAlert } from "../../alerts.ts";
 import { EmptyState, PageHead, Row } from "./parts.tsx";
 
 const when = (ts: number): string => new Date(ts).toLocaleString();
@@ -40,8 +41,8 @@ export default function AccessPage() {
   const revoke = (id: string) => {
     void api.authRevoke(id).then(refresh).catch((e) => setErr(e instanceof Error ? e.message : String(e)));
   };
-  const signOutAll = () => {
-    if (!window.confirm("Sign out every device, including this one?")) return;
+  const signOutAll = async () => {
+    if (!await confirmAlert("Sign out every device, including this one?", { title: "Sign out everywhere", confirmLabel: "Sign out" })) return;
     void api.authLogoutAll().then(() => location.reload()).catch((e) => setErr(e instanceof Error ? e.message : String(e)));
   };
 

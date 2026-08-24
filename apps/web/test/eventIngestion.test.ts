@@ -184,6 +184,7 @@ test("assistant chunks and tool results split across cache updates merge correct
   assert.ok(assistant && assistant.kind === "assistant");
   assert.equal(assistant.text, "Hello");
   assert.equal(assistant.finalized, true);
+  assert.equal(assistant.eventSeq, 6, "actions target the canonical assistant/message event, not a chunk");
   const tool = m2.messages.find((m) => m.kind === "tool");
   assert.ok(tool && tool.kind === "tool");
   assert.equal(tool.status, "done");

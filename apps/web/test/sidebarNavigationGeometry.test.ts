@@ -31,7 +31,7 @@ test("sidebar geometry scales type from ui font size and density controls rows",
     "--nav-indent-project: 4px",
     "--nav-indent-worktree: 18px",
     "--nav-indent-session: 64px",
-    "--nav-status-width: 76px",
+    "--nav-status-width: 56px",
   ]) assert.ok(css.includes(variable), `${variable} is part of the sidebar geometry contract`);
 
   assert.match(css, /--nav-project-size:\s*calc\(var\(--ui-font-size,\s*14px\)\s*\*\s*1\.143\)/);
@@ -60,7 +60,10 @@ test("sidebar geometry scales type from ui font size and density controls rows",
     "balanced density remains compact");
   assert.match(css, /html\[data-density="comfortable"\] \.sidebar,[\s\S]*?--nav-row-project:\s*44px;[\s\S]*?--nav-row-branch:\s*40px;[\s\S]*?--nav-row-session:\s*38px;/,
     "comfortable density adds only a small amount of breathing room");
-  assert.match(css, /\.session-btn\s*\{[\s\S]*?grid-template-columns:\s*minmax\(0,\s*1fr\) var\(--nav-status-width\)/);
+  assert.match(css, /\.session-btn\s*\{[\s\S]*?grid-template-columns:\s*minmax\(0,\s*1fr\) fit-content\(var\(--nav-status-width\)\)/,
+    "the status column only takes the width its content needs");
+  assert.match(css, /\.session-quick\s*\{[\s\S]*?right:\s*8px/,
+    "Shift quick actions align with the session row's right content inset");
   assert.doesNotMatch(css, /\.session-actions\b/);
   assert.doesNotMatch(css, /\.session-sync-icon\b/);
 });

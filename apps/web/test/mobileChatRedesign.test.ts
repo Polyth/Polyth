@@ -338,15 +338,16 @@ test("the composer is adaptive, with one primary action at a time", async () => 
 test("reasoning effort stays reachable on phones, beside the model name", async () => {
   const composer = await read("../src/components/Composer.tsx");
   const header = composer.slice(composer.indexOf('<div className="composer-model-header">'));
-  const cluster = header.slice(header.indexOf('<span className="composer-mode-cluster">'), header.indexOf("<ModelCapabilityMeta"));
+  const clusterStart = header.indexOf('<span className="composer-mode-cluster">');
+  const cluster = header.slice(clusterStart, header.indexOf("</span>\n        </div>", clusterStart));
   assert.ok(cluster.includes("composer-thinking-badge"), "§59: the thinking control lives in the model header");
   assert.ok(
     cluster.indexOf("composer-thinking-badge") < cluster.indexOf("composer-agent-badge"),
     "thinking sits between the model name and the mode chip",
   );
   assert.ok(cluster.includes("modelSupportsThinking(selectedModel)"), "it only exists for models that report variants");
-  assert.match(cluster, /className="composer-thinking-badge"[\s\S]*?mobileSheet/, "it opens the shared sheet");
-  assert.ok(cluster.includes("withExplicitThinking(cfg, thinking || undefined)"), "picking routes through the composer config");
+  assert.ok(cluster.includes("<ThinkingSlider"), "thinking uses a discrete slider, not a picker");
+  assert.ok(cluster.includes("withExplicitThinking(cfg, thinking || undefined)"), "slider changes route through the composer config");
   assert.ok(composer.includes("const THINKING_LABELS"), "backend variant strings get display labels");
 
   // A tap on any header control blurs the input; collapsing on that blur would

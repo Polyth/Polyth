@@ -332,6 +332,7 @@ function SessionSurface() {
   const openingSessionId = useStore((s) => s.openingSessionId);
   const session = useStore((s) => s.sessions.find((x) => x.id === s.activeSessionId) ?? null);
   const model = useActiveModel();
+  const [latestRevealAnchor, setLatestRevealAnchor] = useState<HTMLDivElement | null>(null);
 
   if (workspaceMode !== "chat") return <WidgetCanvas />;
 
@@ -351,7 +352,7 @@ function SessionSurface() {
   return (
     <div className="focus-conversation">
       <div className="timeline-wrap">
-        <Timeline model={model} />
+        <Timeline model={model} latestRevealTarget={latestRevealAnchor} />
       </div>
       {model.turn?.status === "working" && (
         <div className="focus-working" role="status">
@@ -370,6 +371,7 @@ function SessionSurface() {
         slot="session.footer"
         context={{ projectId, sessionId, editing: false }}
       />
+      <div ref={setLatestRevealAnchor} className="timeline-latest-reveal-anchor" />
       {archived && sessionId ? <ArchivedComposerGuard sessionId={sessionId} /> : <Composer />}
     </div>
   );

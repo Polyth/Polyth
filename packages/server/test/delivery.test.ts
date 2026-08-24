@@ -333,6 +333,27 @@ test("queue edit and reorder persist into dispatch while remove stays session-sc
   assert.deepEqual(fake.startedTexts, ["turn", "b", "a edited"]);
 });
 
+test("reserving a queued message keeps it from dispatching until its composer edit finishes", async () => {
+  const fake = fakeRuntime();
+  const { sessions, store } = makeService(fake);
+  const { id } = await sessions.create({ projectId: "p1", title: "T" });
+  await sessions.send(id, { text: "turn" });
+  await flush();
+  const queued = await sessions.send(id, { text: "edit me", delivery: "queue" });
+  await sessions.send(id, { text: "after me", delivery: "queue" });
+
+  const reserved = await sessions.queueEditStart!(id, queued.queueId!);
+  assert.equal(reserved.text, "edit me");
+  fake.emit(id, { type: "turn/stopped", reason: "completed" });
+  await flush();
+  assert.deepEqual(fake.startedTexts, ["turn"], "the held queue head does not disappear into dispatch");
+
+  await sessions.queueEdit!(id, queued.queueId!, "edited in composer");
+  await flush();
+  assert.deepEqual(fake.startedTexts, ["turn", "edited in composer"]);
+  await store.close();
+});
+
 test("rewind rejects running turns, supports redo, and branches backend before replacement", async () => {
   const fake = fakeRuntime();
   const { sessions, store } = makeService(fake);

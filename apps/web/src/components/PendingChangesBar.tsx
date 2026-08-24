@@ -33,6 +33,11 @@ export function pendingChangesMenuPosition(
   };
 }
 
+interface DiffStatsSnapshot {
+  changeKey: string;
+  value: DiffLineStats;
+}
+
 /** Count unified-diff content lines while excluding the file headers. */
 export function summarizeUnifiedDiff(diff: string): DiffLineStats {
   let additions = 0;
@@ -57,7 +62,7 @@ export default function PendingChangesBar() {
   );
   const changeKey = `${selected.source}:${[...selected.paths].sort().join("\0")}`;
   const [dismissedKey, setDismissedKey] = useState("");
-  const [diffStats, setDiffStats] = useState<DiffLineStats | null>(null);
+  const [diffStats, setDiffStats] = useState<DiffStatsSnapshot | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [menuPosition, setMenuPosition] = useState<PendingChangesMenuPosition | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -93,7 +98,6 @@ export default function PendingChangesBar() {
 
   useEffect(() => {
     let cancelled = false;
-    setDiffStats(null);
     if (!projectId || !status || selected.source !== "git") return;
 
     const requests: Array<Promise<DiffLineStats>> = [];
@@ -110,21 +114,25 @@ export default function PendingChangesBar() {
 
     void Promise.all(requests).then((parts) => {
       if (cancelled) return;
-      setDiffStats(parts.reduce<DiffLineStats>(
-        (total, part) => ({
-          additions: total.additions + part.additions,
-          deletions: total.deletions + part.deletions,
-        }),
-        { additions: 0, deletions: 0 },
-      ));
+      setDiffStats({
+        changeKey,
+        value: parts.reduce<DiffLineStats>(
+          (total, part) => ({
+            additions: total.additions + part.additions,
+            deletions: total.deletions + part.deletions,
+          }),
+          { additions: 0, deletions: 0 },
+        ),
+      });
     }).catch(() => {
-      if (!cancelled) setDiffStats(null);
+      // Preserve the last known totals during a transient refresh failure.
     });
     return () => { cancelled = true; };
   }, [changeKey, projectId, selected.source, sessionId, status]);
 
   if (selected.paths.length === 0 || dismissedKey === changeKey) return null;
   const count = selected.paths.length;
+  const visibleStats = diffStats?.changeKey === changeKey ? diffStats.value : null;
 
   return (
     <div className="pending-changes-bar" role="status">
@@ -133,13 +141,13 @@ export default function PendingChangesBar() {
           <Icon.fileEdit />
         </span>
         {count} {count === 1 ? "file" : "files"}
-        {diffStats && (
+        {visibleStats && (
           <span
             className="pending-change-stats"
-            aria-label={`${diffStats.additions} additions, ${diffStats.deletions} deletions`}
+            aria-label={`${visibleStats.additions} additions, ${visibleStats.deletions} deletions`}
           >
-            <span className="additions" aria-hidden="true">+{diffStats.additions}</span>
-            <span className="deletions" aria-hidden="true">-{diffStats.deletions}</span>
+            <span className="additions" aria-hidden="true">+{visibleStats.additions}</span>
+            <span className="deletions" aria-hidden="true">-{visibleStats.deletions}</span>
           </span>
         )}
       </button>
