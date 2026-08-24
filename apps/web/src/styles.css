@@ -5021,6 +5021,7 @@ body[data-density="balanced"] .composer { padding-block: 10px; }
 .app .overflow-trigger { width: 34px; height: 34px; }
 .app .workspace { background: var(--elevated); }
 .app.view-session .statusbar { display: none; }
+.app.view-session .statusbar:has(.sb-workflow) { display: flex; }
 .app.view-session.mode-widgets .railbar:not(.railbar-open),
 .app.view-session.mode-edit .railbar:not(.railbar-open) { display: none; }
 
@@ -8024,6 +8025,7 @@ body[data-quick-actions="false"] [data-widget-id="core.quick-actions"] { display
 
   .app.mode-chat.view-session > .session-bottom-nav,
   .app.mode-chat.view-session .statusbar { display: none; }
+  .app.mode-chat.view-session .statusbar:has(.sb-workflow) { display: flex; }
   .app.mode-chat.view-session .workspace { padding-bottom: 0; }
 
   .stage { background: color-mix(in srgb, var(--bg) 94%, var(--elevated)); }

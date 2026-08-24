@@ -157,13 +157,14 @@ test("global workflow indicators prioritize action-required runs", () => {
 });
 
 test("workflow journey surfaces expose task launch, chat progress, HITL, stop, and retry", async () => {
-  const [launcher, composer, timeline, workflow, miniWidgets, status] = await Promise.all([
+  const [launcher, composer, timeline, workflow, miniWidgets, status, styles] = await Promise.all([
     source("../src/components/WorkflowLauncher.tsx"),
     source("../src/components/Composer.tsx"),
     source("../src/components/Timeline.tsx"),
     source("../src/components/WorkflowView.tsx"),
     source("../src/widgets/builtinMiniWidgets.tsx"),
     source("../src/components/StatusBar.tsx"),
+    source("../src/styles.css"),
   ]);
   assert.match(launcher, /Your draft becomes the shared task/);
   assert.match(launcher, /api\.runWorkflow/);
@@ -177,4 +178,6 @@ test("workflow journey surfaces expose task launch, chat progress, HITL, stop, a
   assert.match(workflow, /Stop run/);
   assert.match(miniWidgets, /workflow\.active-run/);
   assert.match(status, /Approval needed/);
+  assert.match(styles, /\.app\.view-session \.statusbar:has\(\.sb-workflow\) \{ display: flex; \}/);
+  assert.match(styles, /\.app\.mode-chat\.view-session \.statusbar:has\(\.sb-workflow\) \{ display: flex; \}/);
 });
