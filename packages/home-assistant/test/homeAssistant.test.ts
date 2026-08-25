@@ -3,10 +3,11 @@ import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { RouteHandler } from "@polyth/contracts";
+import type { Plugin } from "@polyth/contracts";
+import type { ServerPackageHost } from "@polyth/plugins";
 import { createContext, loadPlugin } from "@polyth/kernel";
 import {
-  createHomeAssistantServerPlugin,
+  registerHomeAssistantPackage,
   createHomeAssistantService,
 } from "@polyth/home-assistant";
 
@@ -19,26 +20,47 @@ const response = (body: unknown, status = 200): Response =>
     headers: { "content-type": "application/json" },
   });
 
-test("server plugin owns its route for the enabled scope", async () => {
+test("server package exposes routes and mounts its kernel plugin per enable", async () => {
   const storageDir = mkdtempSync(join(tmpdir(), "polyth-home-assistant-plugin-"));
   const root = createContext("test-root");
-  const routes = new Set<RouteHandler>();
-  const plugin = createHomeAssistantServerPlugin({
+  let mounted = 0;
+  let disposedClean = 0;
+  const host = {
     pluginId: "home-assistant",
     storageDir,
-    routes: {
-      add(handler) {
-        routes.add(handler);
-        return { dispose: () => { routes.delete(handler); } };
-      },
-    },
+    routes: { add: () => ({ dispose() {} }) },
     root,
-  });
+    loadPlugin: async (plugin: Plugin) => {
+      mounted += 1;
+      const loaded = await loadPlugin(root, plugin, {});
+      return {
+        dispose: async () => {
+          disposedClean += 1;
+          await loaded.dispose();
+        },
+      };
+    },
+  } as unknown as ServerPackageHost;
 
-  const loaded = await loadPlugin(root, plugin, {});
-  assert.equal(routes.size, 1);
-  await loaded.dispose();
-  assert.equal(routes.size, 0);
+  const pkg = registerHomeAssistantPackage(host);
+  assert.equal(typeof pkg.routes, "function");
+
+  await pkg.onEnable?.();
+  assert.equal(mounted, 1);
+
+  // The route is live independent of the kernel plugin scope; the lifecycle
+  // wrapper (packages/server) adds/removes it around enable/disable.
+  let status = 0;
+  await pkg.routes!({
+    path: "/api/home-assistant/config",
+    method: "GET",
+    url: new URL("http://polyth.test/api/home-assistant/config"),
+    json: (code: number) => { status = code; },
+  } as never);
+  assert.equal(status, 200);
+
+  await pkg.onDisable?.();
+  assert.equal(disposedClean, 1);
   await root.dispose();
 });
 

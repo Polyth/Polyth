@@ -21,7 +21,7 @@ import {
   type WidgetContributionDescriptor,
 } from "@polyth/contracts";
 
-export { default as createHomeAssistantServerPlugin } from "./serverEntry.ts";
+export { default as registerHomeAssistantPackage } from "./serverEntry.ts";
 
 interface StoredHomeAssistantConfig {
   baseUrl: string;

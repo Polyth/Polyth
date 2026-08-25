@@ -1,25 +1,28 @@
 import { join } from "node:path";
-import type { Plugin } from "@polyth/contracts";
-import type { TrustedServerPluginHost } from "@polyth/plugins";
+import type { Disposable } from "@polyth/contracts";
+import type { ServerPackage, ServerPackageHost } from "@polyth/plugins";
 import {
   createHomeAssistantPlugin,
   createHomeAssistantService,
   homeAssistantRoutes,
 } from "./index.ts";
 
-export default function createHomeAssistantServerPlugin(
-  host: TrustedServerPluginHost,
-): Plugin {
+/** Discovered via the polyth.serverEntry marker in package.json. Routes join
+ *  the gateway while the package is enabled; the kernel plugin (capability +
+ *  widget contributions) mounts on enable and unmounts on disable. */
+export default function registerPackage(host: ServerPackageHost): ServerPackage {
   const service = createHomeAssistantService({
     file: join(host.storageDir, "home-assistant.json"),
   });
-  const plugin = createHomeAssistantPlugin(service);
+  let plugin: Disposable | null = null;
   return {
-    manifest: plugin.manifest,
-    async setup(context, config) {
-      await plugin.setup(context, config);
-      const route = host.routes.add(homeAssistantRoutes(service));
-      context.effect(() => route.dispose());
+    routes: homeAssistantRoutes(service),
+    async onEnable() {
+      plugin = await host.loadPlugin(createHomeAssistantPlugin(service));
+    },
+    async onDisable() {
+      await plugin?.dispose();
+      plugin = null;
     },
   };
 }

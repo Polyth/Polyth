@@ -22,8 +22,9 @@ import {
 import { createSshService } from "@polyth/ssh";
 import {
   createPluginRegistry,
-  type ServerPluginFactory,
-  type TrustedServerPluginHost,
+  createServerServiceRegistry,
+  serverServiceKey,
+  type ServerPackageHost,
 } from "@polyth/plugins";
 import { createAutoAcceptStore, createPermissionService } from "@polyth/permissions";
 import { createGoalService, type GoalService } from "@polyth/goals";
@@ -34,7 +35,7 @@ import { createTerminalService } from "@polyth/terminal";
 import { createMultirunService } from "@polyth/multirun";
 import { createWorkflowService } from "@polyth/workflow";
 import { createFusionService, synthesisPrompt } from "@polyth/fusion";
-import { createScheduleService, scanLoopsDir } from "@polyth/schedule";
+import { createScheduleService } from "@polyth/schedule";
 import { createKnowledgeStore, createTrackStore } from "@polyth/knowledge";
 import { createGithubService } from "@polyth/github";
 import {
@@ -49,7 +50,6 @@ import {
   findChromiumExecutable,
 } from "@polyth/browser";
 import { createDictationService, createWhisperSttAdapter } from "@polyth/dictation";
-import { createHomeAssistantServerPlugin } from "@polyth/home-assistant";
 import { createProjectService } from "./projects.ts";
 import { projectRoutes } from "./routes/projects.ts";
 import { createPackageRegistry } from "./packages.ts";
@@ -62,33 +62,21 @@ import { goalRoutes } from "./routes/goals.ts";
 import { contextRoutes } from "./routes/context.ts";
 import { orgRoutes } from "./routes/org.ts";
 import { workspaceRoutes } from "./routes/workspace.ts";
-import { gitRoutes } from "./routes/git.ts";
-import { terminalRoutes, attachTerminalWs } from "./routes/terminal.ts";
-import { multirunRoutes } from "./routes/multirun.ts";
-import { workflowRoutes } from "./routes/workflow.ts";
-import { fusionRoutes } from "./routes/fusion.ts";
-import { walkthroughRoutes } from "./routes/walkthrough.ts";
-import { scheduleRoutes } from "./routes/schedule.ts";
-import { usageRoutes } from "./routes/usage.ts";
+import { attachTerminalWs } from "./routes/terminal.ts";
 import { sessionRetentionRoutes } from "./routes/sessionRetention.ts";
-import { knowledgeRoutes } from "./routes/knowledge.ts";
-import { githubRoutes } from "./routes/github.ts";
 import { controlRoutes } from "./routes/control.ts";
-import { snippetRoutes } from "./routes/snippets.ts";
 import { profileRoutes } from "./routes/profiles.ts";
 import { settingsRoutes } from "./routes/settings.ts";
 import { opencodePluginRoutes } from "./routes/opencodePlugins.ts";
 import { opencodePendingRoutes } from "./routes/opencodePending.ts";
-import { sshRoutes } from "./routes/ssh.ts";
-import { browserRoutes } from "./routes/browser.ts";
 import { browseRoutes } from "./routes/browse.ts";
-import { dictationRoutes } from "./routes/dictation.ts";
 import { createAuthService } from "./auth.ts";
 import { authRoutes } from "./routes/auth.ts";
 import { createPushNotifier, createPushService } from "./push.ts";
 import { pushRoutes } from "./routes/push.ts";
 import { createNotificationStore } from "./notifications.ts";
 import { notificationRoutes } from "./routes/notifications.ts";
+import { registerDiscoveredPackages } from "./packageDiscovery.ts";
 import { autoAcceptRoutes } from "./routes/autoAccept.ts";
 import { queueRoutes } from "./routes/queue.ts";
 import { createBehaviorService } from "./behavior.ts";
@@ -96,11 +84,9 @@ import { createMcpConfigService, mcpEntriesFromBackendConfig } from "./mcp.ts";
 import { createSecureSafeService, secureSafeBehaviorSection } from "./secureSafe.ts";
 import { createModelVisibilityService } from "./modelVisibility.ts";
 import { createVoiceSettings } from "./voice.ts";
-import { voiceRoutes } from "./routes/voice.ts";
 import { buildNotePrompt, createAssistService, createAssistSettings, parseNoteReply, type AssistService } from "./assist.ts";
 import { assistRoutes } from "./routes/assist.ts";
 import { trackRoutes } from "./routes/tracks.ts";
-import { secureSafeRoutes } from "./routes/secureSafe.ts";
 import { createPluginContributionHub } from "./pluginContributions.ts";
 import { createWalkthroughJobService } from "./walkthroughs.ts";
 import { createReviewFlowService, createReviewService } from "./review.ts";
@@ -123,14 +109,12 @@ const smallModel = (): { providerID: string; modelID: string } | undefined => {
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 
-const BUILTIN_SERVER_PLUGINS: Record<string, ServerPluginFactory> = {
-  "home-assistant": createHomeAssistantServerPlugin,
-};
-
 export interface BootOptions {
   port?: number;
   dataDir?: string;
   opencode?: Partial<OpenCodeAdapterOptions>;
+  /** Workspace packages/ directory scanned for polyth.serverEntry markers. */
+  packagesDir?: string;
 }
 
 export { isPackageEnabled } from "./packages.ts";
@@ -457,7 +441,6 @@ export async function boot(opts: BootOptions = {}) {
     root,
     onChange: (plugin) => broadcast.pluginChanged?.(plugin),
   });
-  let homeAssistantPlugin: Disposable | null = null;
 
   // Provider/model visibility: seeds from opencode.json (disabled_providers +
   // provider blacklists), then mirrors every toggle back to it.
@@ -717,16 +700,6 @@ export async function boot(opts: BootOptions = {}) {
     },
   });
 
-  // Periodic .agents/loops reconciliation (rescan endpoint offers on-demand).
-  const loopSync = async () => {
-    for (const p of await projects.list()) {
-      try {
-        schedule.syncLoops(p.id, scanLoopsDir(p.path));
-      } catch { /* unreadable project dir */ }
-    }
-  };
-  let loopTimer: ReturnType<typeof setInterval> | null = null;
-
   const knowledge = createKnowledgeStore(`${dataDir}/knowledge.db`);
   const trackStore = createTrackStore({ file: `${dataDir}/tracks.json`, knowledge });
   trackWorkflow = createTrackWorkflow({
@@ -805,7 +778,6 @@ export async function boot(opts: BootOptions = {}) {
     review: (sessionId, source) => review.generate(sessionId, source),
     append: appendLogged,
   });
-  let flowTimer: ReturnType<typeof setInterval> | null = null;
 
   // --- F16 access control: OFF unless a password is configured. When on,
   // every /api + /ws answer requires the polyth_auth session cookie; login is
@@ -871,167 +843,80 @@ export async function boot(opts: BootOptions = {}) {
   });
   const pluginRoute = chainRoutes(opencodePluginRoutes(configApplier), settingsRoute);
 
-  registerPackageRoute("git", gitRoutes({
-    projects, sessions, git,
-    commitMessage: async (root) => {
-      const staged = await git.diff(root, { staged: true });
-      const diff = staged.diff.trim() || (await git.diff(root)).diff;
-      if (!diff.trim()) throw Object.assign(new Error("nothing to describe"), { code: "invalid-input" });
-      const project = (await projects.list()).find((p) => p.path === root);
-      const rt = await runtimes.forProject(project?.id ?? "__default__");
-      const text = await oneShot(rt, {
-        cwd: root,
-        ...(smallModel() ? { model: smallModel()! } : {}),
-        prompt: [
-          "Write a git commit message for the diff below. Output ONLY the message.",
-          "Format: a <=72 character imperative subject line; add a short body only if the change is non-obvious.",
-          "Do not use tools. Do not wrap the answer in code fences.",
-          "", "<diff>", diff.slice(0, 24_000), "</diff>",
-        ].join("\n"),
-      });
-      return text.replace(/^```[a-z]*\n?|```$/g, "").trim();
-    },
-  }));
-  registerPackageRoute("terminal", terminalRoutes({
-    projects, sessions, terminals,
-    events: {
-      append: async (sessionId, type, data) => {
-        const ev = await store.append(sessionId, type, data, { ignorable: true, producerPlugin: "terminal" });
-        broadcast.event(ev);
-        return ev;
-      },
-    },
-  }), { onDisable: () => terminals.closeAll() });
+  // Server-internal packages (no packages/<dir> counterpart) stay hand-wired.
   registerPackageRoute("projects", projectRoutes(projects));
-  registerPackageRoute("browser", chainRoutes(
-    browserToolBridge.route,
-    browserRoutes({ browser, append: appendLogged, shotsDir: `${dataDir}/browser-shots` }),
-  ), { onDisable: () => browser.closeAll() });
-  registerPackageRoute("dictation", chainRoutes(
-    dictationRoutes({ dictation }),
-    voiceRoutes({
-      voice: voiceSettings,
-      summarize: async (text) => {
-        const rt = await runtimes.forProject("__default__");
-        return oneShot(rt, {
-          cwd: process.cwd(),
-          ...(smallModel() ? { model: smallModel()! } : {}),
-          prompt: [
-            "Summarize the following assistant reply for text-to-speech playback.",
-            "Keep it under 3 sentences, plain prose, no markdown, no preamble.",
-            "", "<reply>", text.slice(0, 24_000), "</reply>",
-          ].join("\n"),
-        });
-      },
-    }),
-  ));
-  registerPackageRoute("multirun", multirunRoutes(multirun));
-  registerPackageRoute("workflow", workflowRoutes(workflow));
-  registerPackageRoute("fusion", fusionRoutes(fusion));
-  registerPackageRoute(
-    "walkthrough",
-    walkthroughRoutes({ store, broadcast, jobs: walkthroughJobs, review, flow: reviewFlow }),
-    {
-      onEnable() {
-        flowTimer = setInterval(() => void reviewFlow.tick(), 4_000);
-        flowTimer.unref?.();
-      },
-      onDisable() {
-        if (flowTimer) clearInterval(flowTimer);
-        flowTimer = null;
-      },
-    },
-  );
-  registerPackageRoute("schedule", scheduleRoutes({ schedule, projects }), {
-    onEnable() {
-      schedule.start();
-      void loopSync();
-      loopTimer = setInterval(() => void loopSync(), 60_000);
-      loopTimer.unref?.();
-    },
-    onDisable() {
-      schedule.stop();
-      if (loopTimer) clearInterval(loopTimer);
-      loopTimer = null;
-    },
-  });
-  registerPackageRoute("usage", usageRoutes(usage), {
-    onEnable: () => usage.start(),
-    onDisable: () => usage.stop(),
-  });
-  packageLifecycle.register("home-assistant", {
-    async onEnable() {
-      const host: TrustedServerPluginHost = {
-        pluginId: "home-assistant",
-        storageDir: dataDir,
-        routes: routeRegistry,
-        root,
-      };
-      const plugin = await BUILTIN_SERVER_PLUGINS["home-assistant"]!(host);
-      if (plugin.manifest.id !== host.pluginId) {
-        throw new Error(`builtin server plugin id mismatch: ${plugin.manifest.id}`);
-      }
-      homeAssistantPlugin = await loadPlugin(root, plugin, {});
-    },
-    async onDisable() {
-      await homeAssistantPlugin?.dispose();
-      homeAssistantPlugin = null;
-    },
-  });
-  registerPackageRoute("knowledge", knowledgeRoutes({
-    knowledge,
-    events: {
-      append: async (sessionId, type, data) => {
-        const ev = await store.append(sessionId, type, data, { producerPlugin: "knowledge" });
-        broadcast.event(ev);
-        return ev;
-      },
-    },
-  }));
-  registerPackageRoute("github", githubRoutes({
-    projects, github, append: appendLogged,
-    describe: async (root, base) => {
-      let baseRef = base;
-      if (!baseRef) {
-        const result = await github.repo(root);
-        baseRef = (result.ok && result.data.defaultBranch) || "main";
-      }
-      const diff = await git.diffRange(root, baseRef, "HEAD");
-      if (!diff.trim()) {
-        throw Object.assign(new Error(`no commits to describe against ${baseRef}`), { code: "invalid-input" });
-      }
-      const project = (await projects.list()).find((candidate) => candidate.path === root);
-      const rt = await runtimes.forProject(project?.id ?? "__default__");
-      const text = await oneShot(rt, {
-        cwd: root,
-        ...(smallModel() ? { model: smallModel()! } : {}),
-        prompt: [
-          "Write a pull request title and description for the diff below.",
-          "Line 1: a <=72 character imperative title. Then a blank line, then a concise",
-          "markdown description (what changed and why; a short bullet list is fine).",
-          "Do not use tools. Do not wrap the answer in code fences. Output nothing else.",
-          "", "<diff>", diff.slice(0, 24_000), "</diff>",
-        ].join("\n"),
-      });
-      const clean = text.replace(/^```[a-z]*\n?|```$/g, "").trim();
-      const newline = clean.indexOf("\n");
-      return newline === -1
-        ? { title: clean.slice(0, 72), body: "" }
-        : { title: clean.slice(0, newline).trim().slice(0, 200), body: clean.slice(newline + 1).trim() };
-    },
-  }));
-  registerPackageRoute("commands", snippetRoutes({ projects, commands }));
-  registerPackageRoute("ssh", sshRoutes({
-    ssh, projects,
-    // The runtime probe goes through backend-opencode — the route itself
-    // never learns anything OpenCode-specific.
-    probeRuntime: (connectionId) => probeRemoteOpenCode(ssh.host(connectionId)),
-  }), { onDisable: () => ssh.disconnectAll() });
-  registerPackageRoute("secure-safe", secureSafeRoutes(secureSafe));
   registerPackageRoute("mcp", async (request) =>
     request.path.startsWith("/api/mcp/") ? settingsRoute(request) : false);
   registerPackageRoute("plugins", async (request) =>
     request.path.startsWith("/api/plugins") ? pluginRoute(request) : false);
+
+  // --- autonomous package discovery: every workspace package that declares a
+  // polyth.serverEntry marker registers itself through the same lifecycle the
+  // hand-written registrations used. Shared service instances constructed
+  // above are published under well-known keys so feature serverEntries can
+  // resolve cross-package dependencies without composition-root edits.
+  const services = createServerServiceRegistry();
+  const provideService = <T,>(name: string, service: T): void =>
+    services.provide(serverServiceKey<T>(name), service);
+  provideService("permissions", permissions);
+  provideService("goals", goals!);
+  provideService("files", files);
+  provideService("git", git);
+  provideService("commands", commands);
+  provideService("terminal", terminals);
+  provideService("browser", browser);
+  provideService("browser.tool-bridge", browserToolBridge);
+  provideService("dictation", dictation);
+  provideService("voice.settings", voiceSettings);
+  provideService("multirun", multirun);
+  provideService("workflow", workflow);
+  provideService("fusion", fusion);
+  provideService("schedule", schedule);
+  provideService("knowledge", knowledge);
+  provideService("tracks.store", trackStore);
+  provideService("github", github);
+  provideService("usage", usage);
+  provideService("ssh", ssh);
+  // The probe stays bound here so no feature package ever imports
+  // backend-opencode; routes consuming it never learn OpenCode specifics.
+  provideService("ssh.probe-runtime", (connectionId: string) => probeRemoteOpenCode(ssh.host(connectionId)));
+  provideService("secure-safe", secureSafe);
+  provideService("walkthrough.jobs", walkthroughJobs);
+  provideService("review", review);
+  provideService("review.flow", reviewFlow);
+
+  const packageHost: Omit<ServerPackageHost, "pluginId"> = {
+    storageDir: dataDir,
+    routes: routeRegistry,
+    root,
+    projects,
+    sessions,
+    store,
+    broadcast,
+    runtimes,
+    services,
+    events: {
+      append: async (sessionId, type, data, eventOpts) => {
+        const ev = await store.append(sessionId, type, data, eventOpts);
+        broadcast.event(ev);
+        return ev;
+      },
+    },
+    oneShot,
+    smallModel,
+    resolveSessionRuntime,
+    loadPlugin: (plugin) => loadPlugin(root, plugin, {}),
+  };
+  const discoveredPackages = await registerDiscoveredPackages({
+    packagesDir: opts.packagesDir ?? resolve(__dirname, "../.."),
+    host: packageHost,
+    lifecycle: packageLifecycle,
+    routes: routeRegistry,
+    onError: (id, error) => console.error(`[polyth] server package "${id}" failed to load`, error),
+  });
+  if (discoveredPackages.length > 0) {
+    console.log(`[polyth] discovered server packages: ${discoveredPackages.join(", ")}`);
+  }
 
   const staticCoreRoutes: RouteHandler[] = [
     authRoutes(auth),
@@ -1104,8 +989,6 @@ export async function boot(opts: BootOptions = {}) {
     schedule.stop();
     usage.stop();
     assist?.stop();
-    if (loopTimer) clearInterval(loopTimer);
-    if (flowTimer) clearInterval(flowTimer);
     knowledge.close();
     await browser.closeAll().catch(() => {});
     await pluginRegistry.dispose().catch(() => {});

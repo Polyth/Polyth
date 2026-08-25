@@ -35,6 +35,23 @@ export {
   type ServerPluginFactory,
   type TrustedServerPluginHost,
 } from "./serverEntry.ts";
+export {
+  createServerServiceRegistry,
+  discoverServerPackages,
+  INFRASTRUCTURE_PACKAGE_DIRS,
+  loadServerPackage,
+  serverServiceKey,
+  type AppendEventOptions,
+  type DiscoveredServerPackage,
+  type ServerBroadcast,
+  type ServerOneShotOptions,
+  type ServerPackage,
+  type ServerPackageFactory,
+  type ServerPackageHost,
+  type ServerRuntimePool,
+  type ServerServiceRegistry,
+  type SessionRuntimeBinding,
+} from "./serverPackage.ts";
 export { buildUiBundle };
 
 const execFileAsync = promisify(execFile);
