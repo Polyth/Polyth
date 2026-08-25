@@ -11,6 +11,7 @@ import {
 } from "@polyth/plugins";
 import type { GitService } from "@polyth/git";
 import {
+  createGithubService,
   summarizeChecks,
   type GithubService,
   type MergeStrategy,
@@ -238,13 +239,14 @@ export function githubRoutes(deps: {
 }
 
 export default function registerPackage(host: ServerPackageHost): ServerPackage {
+  // Shared with the walkthrough package (PR diff capture) — published at load
+  // time under the well-known key.
+  const github = createGithubService();
+  host.services.provide(serverServiceKey<GithubService>("github"), github);
   let routes: RouteHandler | null = null;
   return {
     routes: async (request) => routes ? routes(request) : false,
     onEnable() {
-      const github = host.services.require(
-        serverServiceKey<GithubService>("github"),
-      );
       const git = host.services.require(serverServiceKey<GitService>("git"));
       routes ??= githubRoutes({
         projects: host.projects,

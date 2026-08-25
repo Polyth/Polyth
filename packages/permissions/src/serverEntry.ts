@@ -1,5 +1,16 @@
+import { join } from "node:path";
 import type { RouteHandler, SessionService } from "@polyth/contracts";
-import type { ServerPackage, ServerPackageHost } from "@polyth/plugins";
+import {
+  serverServiceKey,
+  type ServerPackage,
+  type ServerPackageHost,
+} from "@polyth/plugins";
+import {
+  createAutoAcceptStore,
+  createPermissionService,
+  type AutoAcceptStore,
+  type PermissionService,
+} from "./index.ts";
 
 export function autoAcceptRoutes(sessions: SessionService): RouteHandler {
   return async (request) => {
@@ -39,5 +50,16 @@ export function autoAcceptRoutes(sessions: SessionService): RouteHandler {
 }
 
 export default function registerPackage(host: ServerPackageHost): ServerPackage {
+  // Shared instances the session service depends on are created here (not in
+  // the composition root) and published at load time, so they exist even
+  // while this package's routes are disabled.
+  host.services.provide(
+    serverServiceKey<PermissionService>("permissions"),
+    createPermissionService(host.storageDir),
+  );
+  host.services.provide(
+    serverServiceKey<AutoAcceptStore>("permissions.auto-accept"),
+    createAutoAcceptStore(join(host.storageDir, "auto-accept.json")),
+  );
   return { routes: autoAcceptRoutes(host.sessions) };
 }

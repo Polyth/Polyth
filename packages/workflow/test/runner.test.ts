@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import type { SessionEvent, SessionService } from "@polyth/contracts";
-import { createWorkflowRunNode } from "../src/workflowRunner.ts";
+import { createWorkflowRunNode } from "../src/runner.ts";
 
 const event = (seq: number, type: string, data: Record<string, unknown>): SessionEvent => ({
   id: `event-${seq}`,

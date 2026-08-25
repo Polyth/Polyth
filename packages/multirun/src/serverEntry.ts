@@ -4,7 +4,8 @@ import {
   type ServerPackage,
   type ServerPackageHost,
 } from "@polyth/plugins";
-import type { MultirunRunSpec, MultirunService } from "./index.ts";
+import { createMultirunService, type MultirunRunSpec, type MultirunService } from "./index.ts";
+import { createMultirunRunOne } from "./runner.ts";
 
 const asModel = (value: unknown): ModelRef | undefined => {
   if (!value || typeof value !== "object") return undefined;
@@ -56,13 +57,13 @@ export function multirunRoutes(multirun: MultirunService): RouteHandler {
 }
 
 export default function registerPackage(host: ServerPackageHost): ServerPackage {
-  let routes: RouteHandler | null = null;
-  return {
-    routes: async (request) => routes ? routes(request) : false,
-    onEnable() {
-      routes ??= multirunRoutes(host.services.require(
-        serverServiceKey<MultirunService>("multirun"),
-      ));
-    },
-  };
+  // M3: runs resolve the parent session's project/runtime lazily, so they
+  // work for any session without composition-root wiring.
+  const multirun = createMultirunService({
+    append: (sessionId, type, data) =>
+      host.events.append(sessionId, type, data, { ignorable: true }),
+    runOne: createMultirunRunOne((sessionId) => host.resolveSessionRuntime(sessionId)),
+  });
+  host.services.provide(serverServiceKey<MultirunService>("multirun"), multirun);
+  return { routes: multirunRoutes(multirun) };
 }

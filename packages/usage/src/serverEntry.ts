@@ -1,10 +1,20 @@
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
 import type { RouteHandler } from "@polyth/contracts";
 import {
   serverServiceKey,
   type ServerPackage,
   type ServerPackageHost,
 } from "@polyth/plugins";
-import { buildProviderUsageOverview, type UsageService } from "./index.ts";
+import {
+  buildProviderUsageOverview,
+  createFakeQuotaProvider,
+  createHttpQuotaProvider,
+  createUsageService,
+  discoverQuotaProviders,
+  parseQuotaProviderSpecs,
+  type UsageService,
+} from "./index.ts";
 
 export function usageRoutes(usage: UsageService): RouteHandler {
   return async ({ path, method, json, body }) => {
@@ -36,17 +46,32 @@ export function usageRoutes(usage: UsageService): RouteHandler {
 }
 
 export default function registerPackage(host: ServerPackageHost): ServerPackage {
-  let routes: RouteHandler | null = null;
-  let usage: UsageService | null = null;
+  // WP12: quota telemetry. Built-in adapters discover the same OpenCode,
+  // Claude Code, and polyth-managed credentials as polyth. The
+  // browser only receives sanitized snapshots. The fake and hand-written HTTP
+  // adapter paths remain available for development and private providers.
+  const usage = createUsageService({ file: join(host.storageDir, "quotas.json") });
+  if (process.env.POLYTH_FAKE_QUOTAS === "1") usage.register(createFakeQuotaProvider());
+  try {
+    const specsRaw = readFileSync(join(host.storageDir, "quota-providers.json"), "utf8");
+    for (const spec of parseQuotaProviderSpecs(JSON.parse(specsRaw))) {
+      usage.register(createHttpQuotaProvider(spec));
+    }
+  } catch (e) {
+    if ((e as NodeJS.ErrnoException).code !== "ENOENT") {
+      console.error("[usage] quota-providers.json ignored:", e instanceof Error ? e.message : e);
+    }
+  }
+  for (const provider of discoverQuotaProviders()) usage.register(provider);
+  host.services.provide(serverServiceKey<UsageService>("usage"), usage);
+  const routes = usageRoutes(usage);
   return {
-    routes: async (request) => routes ? routes(request) : false,
+    routes,
     onEnable() {
-      usage = host.services.require(serverServiceKey<UsageService>("usage"));
-      routes ??= usageRoutes(usage);
       usage.start();
     },
     onDisable() {
-      usage?.stop();
+      usage.stop();
     },
   };
 }

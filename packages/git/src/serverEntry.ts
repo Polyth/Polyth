@@ -5,7 +5,7 @@ import {
   type ServerPackage,
   type ServerPackageHost,
 } from "@polyth/plugins";
-import { pathsUnder, type GitService } from "./index.ts";
+import { createGitService, pathsUnder, type GitService } from "./index.ts";
 
 export function assertGitRelativePath(value: string, allowEmpty = false): string {
   if (value.length === 0 && allowEmpty) return value;
@@ -187,11 +187,14 @@ export function gitRoutes(deps: {
 }
 
 export default function registerPackage(host: ServerPackageHost): ServerPackage {
+  // Shared with the session service (worktree validation), tracks, github, and
+  // walkthrough capture — published at load time under the well-known key.
+  const git = createGitService();
+  host.services.provide(serverServiceKey<GitService>("git"), git);
   let routes: RouteHandler | null = null;
   return {
     routes: async (request) => routes ? routes(request) : false,
     onEnable() {
-      const git = host.services.require(serverServiceKey<GitService>("git"));
       routes ??= gitRoutes({
         projects: host.projects,
         sessions: host.sessions,

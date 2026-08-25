@@ -9,7 +9,7 @@ import type { GeneratedWalkthroughDto, GeneratedWalkthroughStage, JsonObject, Se
 import {
   WALKTHROUGH_PROMPT_VERSION, buildWalkthroughPrompt, heuristicStages,
   parseGeneratedStages, parseUnifiedDiffText, sourceDigestOf,
-} from "@polyth/walkthrough";
+} from "./index.ts";
 
 export interface WalkthroughJobDeps {
   /** Capture the immutable source diff for a walkthrough source. */

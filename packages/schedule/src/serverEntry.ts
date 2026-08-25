@@ -1,3 +1,4 @@
+import { join } from "node:path";
 import type { ProjectService, RouteHandler } from "@polyth/contracts";
 import {
   serverServiceKey,
@@ -5,6 +6,7 @@ import {
   type ServerPackageHost,
 } from "@polyth/plugins";
 import {
+  createScheduleService,
   scanLoopsDir,
   type ScheduleCadence,
   type ScheduleService,
@@ -166,11 +168,46 @@ export function scheduleRoutes(deps: {
 }
 
 export default function registerPackage(host: ServerPackageHost): ServerPackage {
+  // Scheduled prompts: every run owns a VISIBLE session per its target mode;
+  // schedule/run-started is appended before the prompt so the durable log
+  // explains why the message arrived (all model flow stays in sessions).
+  const schedule = createScheduleService({
+    file: join(host.storageDir, "schedule.json"),
+    runner: {
+      run: async (task, runId) => {
+        const mode = task.target?.mode ?? (task.sessionId ? "existing-session" : "new-session-per-run");
+        let sessionId: string | undefined;
+        if (mode === "existing-session") {
+          sessionId = task.target?.sessionId ?? task.sessionId;
+          if (!sessionId || !(await host.store.projection(sessionId))) {
+            throw Object.assign(new Error("target session no longer exists"), { code: "not-found" });
+          }
+        } else if (mode === "dedicated-session") {
+          if (task.lastSessionId && (await host.store.projection(task.lastSessionId))) {
+            sessionId = task.lastSessionId;
+          }
+        }
+        if (!sessionId) {
+          const ref = await host.sessions.create({
+            projectId: task.projectId,
+            title: task.title ?? `Scheduled: ${task.prompt.slice(0, 48)}`,
+          });
+          sessionId = ref.id;
+        }
+        await host.events.append(sessionId, "schedule/run-started", {
+          taskId: task.id, runId,
+          ...(task.title ? { taskTitle: task.title } : {}),
+          ...(task.source === "loop-file" ? { source: "loop-file", ...(task.loopId ? { loopId: task.loopId } : {}) } : {}),
+        }, { ignorable: true, producerPlugin: "schedule" });
+        await host.sessions.send(sessionId, { text: task.prompt });
+        return { sessionId };
+      },
+    },
+  });
+  host.services.provide(serverServiceKey<ScheduleService>("schedule"), schedule);
   let routes: RouteHandler | null = null;
-  let schedule: ScheduleService | null = null;
   let loopTimer: ReturnType<typeof setInterval> | null = null;
   const loopSync = async () => {
-    if (!schedule) return;
     for (const project of await host.projects.list()) {
       try {
         schedule.syncLoops(project.id, scanLoopsDir(project.path));
@@ -182,9 +219,6 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
   return {
     routes: async (request) => routes ? routes(request) : false,
     onEnable() {
-      schedule = host.services.require(
-        serverServiceKey<ScheduleService>("schedule"),
-      );
       routes ??= scheduleRoutes({ schedule, projects: host.projects });
       schedule.start();
       void loopSync();
@@ -192,7 +226,7 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
       loopTimer.unref?.();
     },
     onDisable() {
-      schedule?.stop();
+      schedule.stop();
       if (loopTimer) clearInterval(loopTimer);
       loopTimer = null;
     },

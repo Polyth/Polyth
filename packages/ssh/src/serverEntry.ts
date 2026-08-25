@@ -1,3 +1,4 @@
+import { join } from "node:path";
 import type {
   Project,
   ProjectService,
@@ -9,7 +10,7 @@ import {
   type ServerPackage,
   type ServerPackageHost,
 } from "@polyth/plugins";
-import type { SshService } from "./index.ts";
+import { createSshService, type SshService } from "./index.ts";
 
 export interface SshRuntimeProbe {
   ok: boolean;
@@ -153,12 +154,18 @@ export function sshRoutes(deps: {
 }
 
 export default function registerPackage(host: ServerPackageHost): ServerPackage {
+  // SSH remotes: connection inventory + multiplexed OpenSSH transport.
+  // Remote-bound projects run their agent runtime ON the remote host (the
+  // composition root's runtime pool resolves this service lazily); this
+  // service never speaks OpenCode itself.
+  const ssh = createSshService({ file: join(host.storageDir, "ssh.json") });
+  host.services.provide(serverServiceKey<SshService>("ssh"), ssh);
   let routes: RouteHandler | null = null;
-  let ssh: SshService | null = null;
   return {
     routes: async (request) => routes ? routes(request) : false,
     onEnable() {
-      ssh = host.services.require(serverServiceKey<SshService>("ssh"));
+      // The probe stays bound in the composition root so no feature package
+      // ever imports backend-opencode; it is published after package load.
       routes ??= sshRoutes({
         ssh,
         projects: host.projects,
@@ -170,7 +177,7 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
       });
     },
     async onDisable() {
-      await ssh?.disconnectAll();
+      await ssh.disconnectAll();
     },
   };
 }

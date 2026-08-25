@@ -4,7 +4,7 @@ import {
   type ServerPackage,
   type ServerPackageHost,
 } from "@polyth/plugins";
-import type { CommandService, WriteScope } from "./index.ts";
+import { createCommandService, type CommandService, type WriteScope } from "./index.ts";
 
 export function snippetRoutes(deps: {
   projects: ProjectService;
@@ -69,15 +69,17 @@ export function snippetRoutes(deps: {
 }
 
 export default function registerPackage(host: ServerPackageHost): ServerPackage {
+  // The expansion service is shared with the session service (slash-command
+  // rewriting before the model sees the text), so it is published at load time.
+  const commands = createCommandService();
+  host.services.provide(serverServiceKey<CommandService>("commands"), commands);
   let routes: RouteHandler | null = null;
   return {
     routes: async (request) => routes ? routes(request) : false,
     onEnable() {
       routes ??= snippetRoutes({
         projects: host.projects,
-        commands: host.services.require(
-          serverServiceKey<CommandService>("commands"),
-        ),
+        commands,
       });
     },
   };

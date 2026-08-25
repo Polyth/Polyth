@@ -4,7 +4,11 @@ import {
   type ServerPackage,
   type ServerPackageHost,
 } from "@polyth/plugins";
-import type { DictationService } from "./index.ts";
+import {
+  createDictationService,
+  createWhisperSttAdapter,
+  type DictationService,
+} from "./index.ts";
 
 interface VoiceEngineSettings {
   baseUrl: string;
@@ -195,16 +199,32 @@ export function voiceRoutes(deps: {
 }
 
 export default function registerPackage(host: ServerPackageHost): ServerPackage {
+  // Streaming dictation (WP15/F8): the adapter provider re-reads the voice
+  // settings on every call, so saving an STT server URL flips the capability
+  // honestly without a restart; no URL = browser Web Speech. Voice settings
+  // are composition-root-owned and published before package discovery runs.
+  const voice = host.services.require(
+    serverServiceKey<VoiceSettingsService>("voice.settings"),
+  );
+  const dictation = createDictationService({
+    adapter: () => {
+      const stt = voice.get().stt;
+      if (!stt.baseUrl) return null;
+      const apiKey = voice.resolveKey("stt");
+      return createWhisperSttAdapter({
+        baseUrl: stt.baseUrl,
+        ...(stt.model ? { model: stt.model } : {}),
+        ...(stt.language ? { language: stt.language } : {}),
+        ...(apiKey ? { apiKey } : {}),
+      });
+    },
+    unavailableReason: "no speech-to-text engine configured; browser Web Speech is used instead",
+  });
+  host.services.provide(serverServiceKey<DictationService>("dictation"), dictation);
   let routes: RouteHandler | null = null;
   return {
     routes: async (request) => routes ? routes(request) : false,
     onEnable() {
-      const dictation = host.services.require(
-        serverServiceKey<DictationService>("dictation"),
-      );
-      const voice = host.services.require(
-        serverServiceKey<VoiceSettingsService>("voice.settings"),
-      );
       const dictationRoute = dictationRoutes(dictation);
       const voiceRoute = voiceRoutes({
         voice,

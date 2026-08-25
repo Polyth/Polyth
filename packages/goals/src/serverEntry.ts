@@ -4,7 +4,7 @@ import {
   type ServerPackage,
   type ServerPackageHost,
 } from "@polyth/plugins";
-import type { GoalService } from "./index.ts";
+import { createGoalService, type GoalService } from "./index.ts";
 
 export function goalRoutes(goals: GoalService): RouteHandler {
   return async ({ path, method, body, json }) => {
@@ -47,11 +47,30 @@ export function goalRoutes(goals: GoalService): RouteHandler {
 }
 
 export default function registerPackage(host: ServerPackageHost): ServerPackage {
+  // Goal workflow service: listens on the turn seam (via the composition
+  // root's hooks), never touches the agent loop itself.
+  const goals = createGoalService({
+    append: (sessionId, type, data) =>
+      host.events.append(sessionId, type, data, { ignorable: true }),
+    send: (sessionId, text) => host.sessions.send(sessionId, { text }),
+    complete: async (sessionId, prompt) => {
+      const proj = await host.store.projection(sessionId);
+      const project = proj ? await host.projects.get(proj.projectId) : null;
+      const rt = await host.runtimes.forProject(proj?.projectId ?? "__default__");
+      return host.oneShot(rt, {
+        cwd: project?.path ?? process.cwd(),
+        prompt,
+        ...(host.smallModel()
+          ? { model: host.smallModel()! }
+          : proj?.model ? { model: proj.model } : {}),
+      });
+    },
+  });
+  host.services.provide(serverServiceKey<GoalService>("goals"), goals);
   let routes: RouteHandler | null = null;
   return {
     routes: async (request) => routes ? routes(request) : false,
     onEnable() {
-      const goals = host.services.require(serverServiceKey<GoalService>("goals"));
       const goalRoute = goalRoutes(goals);
       routes ??= async (request) => {
         const match = request.path.match(/^\/api\/sessions\/([^/]+)\/goal(?:\/|$)/);

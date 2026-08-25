@@ -11,11 +11,15 @@ import {
   type ServerPackage,
   type ServerPackageHost,
 } from "@polyth/plugins";
+import { join } from "node:path";
 import {
+  createKnowledgeStore,
+  createTrackStore,
   knowledgeDigest,
   type KnowledgeKind,
   type KnowledgePatch,
   type KnowledgeStore,
+  type TrackStore,
 } from "./index.ts";
 
 interface TrackWorkflow {
@@ -193,13 +197,22 @@ export function trackRoutes(tracks: TrackWorkflow): RouteHandler {
 }
 
 export default function registerPackage(host: ServerPackageHost): ServerPackage {
+  // Durable stores are created at load time: the composition root's track
+  // workflow (a cross-cutting orchestration) consumes "tracks.store", and the
+  // knowledge DB must survive route disablement (only shutdown closes it).
+  const knowledge = createKnowledgeStore(join(host.storageDir, "knowledge.db"));
+  const trackStore = createTrackStore({
+    file: join(host.storageDir, "tracks.json"),
+    knowledge,
+  });
+  host.services.provide(serverServiceKey<KnowledgeStore>("knowledge"), knowledge);
+  host.services.provide(serverServiceKey<TrackStore>("tracks.store"), trackStore);
   let routes: RouteHandler | null = null;
   return {
     routes: async (request) => routes ? routes(request) : false,
     onEnable() {
-      const knowledge = host.services.require(
-        serverServiceKey<KnowledgeStore>("knowledge"),
-      );
+      // The track workflow is composed by the server AFTER package load (it
+      // spans goals, schedule, git, terminal, projects, and sessions).
       const tracks = host.services.require(
         serverServiceKey<TrackWorkflow>("tracks.workflow"),
       );

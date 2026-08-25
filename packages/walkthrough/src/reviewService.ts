@@ -8,7 +8,7 @@
 // merge, push, or publish; those stay separate explicit user actions.
 import { randomUUID } from "node:crypto";
 import type { JsonObject, ReviewAssessment, ReviewFlowState, SessionEvent, WalkthroughSource } from "@polyth/contracts";
-import { buildReviewPrompt, parseReviewAssessment, sourceDigestOf } from "@polyth/walkthrough";
+import { buildReviewPrompt, parseReviewAssessment, sourceDigestOf } from "./index.ts";
 
 export interface ReviewDeps {
   captureDiff: (source: WalkthroughSource) => Promise<string>;

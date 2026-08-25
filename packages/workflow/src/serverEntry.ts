@@ -1,3 +1,4 @@
+import { join } from "node:path";
 import type {
   ModelRef,
   RouteHandler,
@@ -10,11 +11,13 @@ import {
   type ServerPackage,
   type ServerPackageHost,
 } from "@polyth/plugins";
-import type {
-  WorkflowCreateInput,
-  WorkflowService,
-  WorkflowUpdateInput,
+import {
+  createWorkflowService,
+  type WorkflowCreateInput,
+  type WorkflowService,
+  type WorkflowUpdateInput,
 } from "./index.ts";
+import { createWorkflowRunNode } from "./runner.ts";
 
 const asModel = (value: unknown): ModelRef | undefined => {
   if (!value || typeof value !== "object") return undefined;
@@ -165,13 +168,17 @@ export function workflowRoutes(workflow: WorkflowService): RouteHandler {
 }
 
 export default function registerPackage(host: ServerPackageHost): ServerPackage {
-  let routes: RouteHandler | null = null;
-  return {
-    routes: async (request) => routes ? routes(request) : false,
-    onEnable() {
-      routes ??= workflowRoutes(host.services.require(
-        serverServiceKey<WorkflowService>("workflow"),
-      ));
-    },
-  };
+  // Every workflow node runs through the canonical session service, so nodes
+  // stay visible, permission-aware, abortable, and durably logged.
+  const workflow = createWorkflowService({
+    file: join(host.storageDir, "workflows.json"),
+    append: (sessionId, type, data) =>
+      host.events.append(sessionId, type, data, {
+        ignorable: true,
+        producerPlugin: "workflow",
+      }),
+    runNode: createWorkflowRunNode(host.sessions),
+  });
+  host.services.provide(serverServiceKey<WorkflowService>("workflow"), workflow);
+  return { routes: workflowRoutes(workflow) };
 }

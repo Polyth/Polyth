@@ -3,7 +3,7 @@
 // oneshot.ts but progressive instead of resolve-once, because the multirun
 // service needs to show per-run output as it streams in.
 import type { AgentRuntime, ModelRef } from "@polyth/contracts";
-import type { RunOneFn, RunUpdate } from "@polyth/multirun";
+import type { RunOneFn, RunUpdate } from "./index.ts";
 
 export interface MultirunRunnerOptions {
   timeoutMs?: number;

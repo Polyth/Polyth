@@ -1,5 +1,7 @@
+import { join } from "node:path";
 import type {
   GeneratedWalkthroughDto,
+  JsonObject,
   ReviewAssessment,
   ReviewFlowState,
   RouteHandler,
@@ -13,6 +15,8 @@ import {
   type ServerPackageHost,
 } from "@polyth/plugins";
 import { decisionEventType, deriveWalkthrough, stepEventData } from "./index.ts";
+import { createWalkthroughJobService } from "./jobs.ts";
+import { createReviewFlowService, createReviewService } from "./reviewService.ts";
 
 interface WalkthroughJobService {
   create(source: WalkthroughSource, sessionId?: string): Promise<GeneratedWalkthroughDto>;
@@ -194,30 +198,81 @@ export function walkthroughRoutes(deps: {
   };
 }
 
+/** Minimal structural views of the git/github services this package consumes
+ *  for diff capture — resolved lazily from the shared service registry, so
+ *  neither package is a build-time dependency. */
+interface DiffGitService {
+  diffHead(root: string): Promise<string>;
+  diffRange(root: string, base: string, head: string): Promise<string>;
+}
+interface DiffGithubService {
+  prDiff(
+    cwd: string,
+    number: number,
+  ): Promise<{ ok: true; data: string } | { ok: false; reason: string }>;
+}
+
 export default function registerPackage(host: ServerPackageHost): ServerPackage {
-  let routes: RouteHandler | null = null;
-  let flow: ReviewFlowService | null = null;
+  // WP11: generated walkthroughs, structured reviews, bounded review flow.
+  // The source diff is captured through git/gh only; the model call is a
+  // one-shot on the project's runtime (never a user session).
+  const captureDiff = async (source: WalkthroughSource): Promise<string> => {
+    const project = await host.projects.get(source.projectId);
+    if (!project) throw Object.assign(new Error("unknown project"), { code: "not-found" });
+    const git = host.services.require(serverServiceKey<DiffGitService>("git"));
+    if (source.kind === "working-tree") return git.diffHead(project.path);
+    if (source.kind === "range") return git.diffRange(project.path, source.base, source.head);
+    const github = host.services.require(serverServiceKey<DiffGithubService>("github"));
+    const r = await github.prDiff(project.path, source.number);
+    if (!r.ok) throw Object.assign(new Error(r.reason), { code: "invalid-input" });
+    return r.data;
+  };
+  const generate = async (source: WalkthroughSource, prompt: string): Promise<string> => {
+    const project = await host.projects.get(source.projectId);
+    const rt = await host.runtimes.forProject(source.projectId);
+    return host.oneShot(rt, {
+      cwd: project?.path ?? process.cwd(),
+      prompt,
+      ...(host.smallModel() ? { model: host.smallModel()! } : {}),
+      timeoutMs: 180_000,
+    });
+  };
+  const append = (sessionId: string, type: string, data: JsonObject) =>
+    host.events.append(sessionId, type, data, { ignorable: true, producerPlugin: "review" });
+
+  const jobs = createWalkthroughJobService({
+    captureDiff,
+    generate,
+    append,
+    cacheFile: join(host.storageDir, "walkthroughs.json"),
+    ...(host.smallModel()
+      ? { modelId: `${host.smallModel()!.providerID}/${host.smallModel()!.modelID}` }
+      : {}),
+  });
+  const review = createReviewService({ captureDiff, generate, append });
+  const flow = createReviewFlowService({
+    sessionStatus: async (sessionId) => (await host.store.projection(sessionId))?.status ?? null,
+    sessionProject: async (sessionId) => (await host.store.projection(sessionId))?.projectId ?? null,
+    send: async (sessionId, text) => { await host.sessions.send(sessionId, { text }); },
+    review: (sessionId, source) => review.generate(sessionId, source),
+    append,
+  });
+  host.services.provide(serverServiceKey<WalkthroughJobService>("walkthrough.jobs"), jobs);
+  host.services.provide(serverServiceKey<ReviewService>("review"), review);
+  host.services.provide(serverServiceKey<ReviewFlowService>("review.flow"), flow);
+
+  const routes = walkthroughRoutes({
+    store: host.store,
+    broadcast: host.broadcast,
+    jobs,
+    review,
+    flow,
+  });
   let flowTimer: ReturnType<typeof setInterval> | null = null;
   return {
-    routes: async (request) => routes ? routes(request) : false,
+    routes,
     onEnable() {
-      const jobs = host.services.require(
-        serverServiceKey<WalkthroughJobService>("walkthrough.jobs"),
-      );
-      const review = host.services.require(
-        serverServiceKey<ReviewService>("review"),
-      );
-      flow = host.services.require(
-        serverServiceKey<ReviewFlowService>("review.flow"),
-      );
-      routes ??= walkthroughRoutes({
-        store: host.store,
-        broadcast: host.broadcast,
-        jobs,
-        review,
-        flow,
-      });
-      flowTimer = setInterval(() => void flow?.tick(), 4_000);
+      flowTimer = setInterval(() => void flow.tick(), 4_000);
       flowTimer.unref?.();
     },
     onDisable() {

@@ -12,7 +12,15 @@ import {
   type ServerPackage,
   type ServerPackageHost,
 } from "@polyth/plugins";
-import { redactObservationText, type BrowserService } from "./index.ts";
+import {
+  createBrowserService,
+  createChromiumDriver,
+  createFakeDriver,
+  demoWeb,
+  findChromiumExecutable,
+  redactObservationText,
+  type BrowserService,
+} from "./index.ts";
 
 const STATUS: Record<string, number> = {
   "not-found": 404,
@@ -313,13 +321,28 @@ export function browserRoutes(deps: {
   };
 }
 
-export default function registerPackage(host: ServerPackageHost): ServerPackage {
+export default async function registerPackage(host: ServerPackageHost): Promise<ServerPackage> {
+  // Internal browser: Chromium if configured/found, fake driver behind
+  // POLYTH_FAKE_BROWSER=1, otherwise an honest unavailable state. Created at
+  // load time because the runtime pool's browser-tool bridge needs it even
+  // while this package's routes are disabled.
+  const chromiumPath = process.env.POLYTH_FAKE_BROWSER === "1" ? null : await findChromiumExecutable();
+  const driver = process.env.POLYTH_FAKE_BROWSER === "1"
+    ? createFakeDriver(demoWeb())
+    : chromiumPath
+      ? createChromiumDriver(chromiumPath)
+      : null;
+  const browser = createBrowserService({
+    driver,
+    unavailableReason: "browser engine unavailable: no Chromium executable found (set POLYTH_CHROMIUM_PATH)",
+  });
+  host.services.provide(serverServiceKey<BrowserService>("browser"), browser);
   let routes: RouteHandler | null = null;
-  let browser: BrowserService | null = null;
   return {
     routes: async (request) => routes ? routes(request) : false,
     onEnable() {
-      browser = host.services.require(serverServiceKey<BrowserService>("browser"));
+      // The bridge is composition-root-owned (only backend-opencode may talk
+      // to the OpenCode process); it is published after package load.
       const bridge = host.services.require(
         serverServiceKey<{ route: RouteHandler }>("browser.tool-bridge"),
       );
@@ -339,7 +362,7 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
       };
     },
     async onDisable() {
-      await browser?.closeAll();
+      await browser.closeAll();
     },
   };
 }

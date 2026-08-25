@@ -7,8 +7,8 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { JsonObject, SessionEvent, WalkthroughSource } from "@polyth/contracts";
-import { createWalkthroughJobService } from "../src/walkthroughs.ts";
-import { createReviewFlowService, createReviewService, type ReviewResult } from "../src/review.ts";
+import { createWalkthroughJobService } from "../src/jobs.ts";
+import { createReviewFlowService, createReviewService, type ReviewResult } from "../src/reviewService.ts";
 
 const DIFF = [
   "diff --git a/src/a.ts b/src/a.ts",
@@ -23,7 +23,7 @@ const makeLog = () => {
   const events: Logged[] = [];
   const append = async (sessionId: string, type: string, data: JsonObject): Promise<SessionEvent> => {
     events.push({ sessionId, type, data });
-    return { id: "e", sessionId, seq: events.length, time: Date.now(), type, data };
+    return { id: "e", sessionId, seq: events.length, time: Date.now(), type, data, v: 1 };
   };
   return { events, append };
 };

@@ -13,7 +13,7 @@ import {
   type ServerPackage,
   type ServerPackageHost,
 } from "@polyth/plugins";
-import type { TerminalService } from "./index.ts";
+import { createTerminalService, type TerminalService } from "./index.ts";
 
 export function terminalRoutes(deps: {
   projects: ProjectService;
@@ -214,12 +214,25 @@ export function attachTerminalWs(server: Server, deps: {
 }
 
 export default function registerPackage(host: ServerPackageHost): ServerPackage {
+  // POLYTH_TERM_REPLAY_BYTES caps per-PTY scrollback replay (default 200 KB).
+  // Shared with the session service (composer shell) and tracks — published at
+  // load time so it exists even while this package's routes are disabled.
+  const terminals = createTerminalService({
+    ...(Number(process.env.POLYTH_TERM_REPLAY_BYTES) > 0
+      ? { replayBytes: Number(process.env.POLYTH_TERM_REPLAY_BYTES) }
+      : {}),
+  });
+  host.services.provide(serverServiceKey<TerminalService>("terminal"), terminals);
+  // Order matters at the gateway: the session gateway aborts /ws upgrades it
+  // does not match, so this channel must claim /ws/terminal/:id first — the
+  // host runs these callbacks before attaching the core session WS.
+  host.onHttpServer(({ server, authorize }) => {
+    attachTerminalWs(server, { terminals, authorize });
+  });
   let routes: RouteHandler | null = null;
-  let terminals: TerminalService | null = null;
   return {
     routes: async (request) => routes ? routes(request) : false,
     onEnable() {
-      terminals = host.services.require(serverServiceKey<TerminalService>("terminal"));
       routes ??= terminalRoutes({
         projects: host.projects,
         sessions: host.sessions,
@@ -235,7 +248,7 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
       });
     },
     async onDisable() {
-      await terminals?.closeAll();
+      await terminals.closeAll();
     },
   };
 }

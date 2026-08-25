@@ -1,5 +1,5 @@
 import type { JsonObject, SessionEvent, SessionService } from "@polyth/contracts";
-import type { RunNodeFn, WorkflowNodeUpdate } from "@polyth/workflow";
+import type { RunNodeFn, WorkflowNodeUpdate } from "./index.ts";
 
 const abortError = (): Error => {
   const error = new Error("workflow run stopped");

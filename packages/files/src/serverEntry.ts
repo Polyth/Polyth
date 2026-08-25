@@ -4,7 +4,14 @@ import {
   type ServerPackage,
   type ServerPackageHost,
 } from "@polyth/plugins";
-import type { FileService } from "./index.ts";
+import { createFileService, MAX_RAW_BYTES, type FileService } from "./index.ts";
+
+/** Attachment existence/size verification seam consumed by the session
+ *  service (F2). Published so the composition root never imports this package. */
+export interface AttachmentStatService {
+  stat(root: string, rel: string): Promise<{ kind: "file" | "dir"; size: number }>;
+  maxBytes: number;
+}
 
 export function workspaceRoutes(deps: {
   projects: ProjectService;
@@ -135,6 +142,18 @@ export function workspaceRoutes(deps: {
 }
 
 export default function registerPackage(host: ServerPackageHost): ServerPackage {
+  const files = createFileService();
+  host.services.provide(serverServiceKey<FileService>("files"), files);
+  host.services.provide(
+    serverServiceKey<AttachmentStatService>("files.attachments"),
+    {
+      stat: async (root, rel) => {
+        const st = await files.stat(root, rel);
+        return { kind: st.kind, size: st.size };
+      },
+      maxBytes: MAX_RAW_BYTES,
+    },
+  );
   let routes: RouteHandler | null = null;
   return {
     routes: async (request) => routes ? routes(request) : false,
@@ -142,7 +161,7 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
       routes ??= workspaceRoutes({
         projects: host.projects,
         sessions: host.sessions,
-        files: host.services.require(serverServiceKey<FileService>("files")),
+        files,
       });
     },
   };

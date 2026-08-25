@@ -1,10 +1,16 @@
-import type { RouteHandler } from "@polyth/contracts";
+import type { ModelRef, RouteHandler } from "@polyth/contracts";
 import {
   serverServiceKey,
   type ServerPackage,
   type ServerPackageHost,
 } from "@polyth/plugins";
-import type { FusionService } from "./index.ts";
+import { createFusionService, synthesisPrompt, type FusionService } from "./index.ts";
+
+const parseModel = (raw?: string): ModelRef | undefined => {
+  if (!raw || !raw.includes("/")) return undefined;
+  const i = raw.indexOf("/");
+  return { providerID: raw.slice(0, i), modelID: raw.slice(i + 1) };
+};
 
 export function fusionRoutes(fusion: FusionService): RouteHandler {
   return async ({ path, method, body, json }) => {
@@ -34,13 +40,28 @@ export function fusionRoutes(fusion: FusionService): RouteHandler {
 }
 
 export default function registerPackage(host: ServerPackageHost): ServerPackage {
-  let routes: RouteHandler | null = null;
-  return {
-    routes: async (request) => routes ? routes(request) : false,
-    onEnable() {
-      routes ??= fusionRoutes(host.services.require(
-        serverServiceKey<FusionService>("fusion"),
-      ));
+  // M3: fusion resolves the parent session's project/runtime lazily, the same
+  // way multirun does, so it works for any session.
+  const fusion = createFusionService({
+    append: (sessionId, type, data) =>
+      host.events.append(sessionId, type, data, { ignorable: true }),
+    runModel: async ({ sessionId, model, prompt }) => {
+      const { rt, cwd } = await host.resolveSessionRuntime(sessionId);
+      return host.oneShot(rt, {
+        cwd,
+        prompt,
+        ...(parseModel(model) ? { model: parseModel(model)! } : {}),
+      });
     },
-  };
+    synthesize: async ({ sessionId, prompt, answers }) => {
+      const { rt, cwd, model } = await host.resolveSessionRuntime(sessionId);
+      return host.oneShot(rt, {
+        cwd,
+        prompt: synthesisPrompt(prompt, answers),
+        ...(host.smallModel() ? { model: host.smallModel()! } : model ? { model } : {}),
+      });
+    },
+  });
+  host.services.provide(serverServiceKey<FusionService>("fusion"), fusion);
+  return { routes: fusionRoutes(fusion) };
 }
