@@ -164,3 +164,75 @@ test("current PR summary route resolves the project and returns branch PR totals
   });
   assert.equal(calls.length, 1);
 });
+
+test("issue detail and comment routes resolve through the project-scoped service", async () => {
+  const { calls, call } = makeHarness({
+    exec: async (_bin, args) => {
+      const fields = args[args.indexOf("--json") + 1];
+      if (fields === "comments") {
+        return {
+          stdout: JSON.stringify({
+            comments: [{ id: "c1", author: { login: "kat" }, body: "hello", createdAt: "now", url: "comment-url" }],
+          }),
+          stderr: "",
+        };
+      }
+      return {
+        stdout: JSON.stringify({
+          number: 4, title: "Issue", state: "OPEN", author: { login: "sam" },
+          updatedAt: "u", createdAt: "c", url: "issue-url", body: "Details",
+        }),
+        stderr: "",
+      };
+    },
+  });
+
+  const detail = await call("GET", "/api/github/issue", {}, "?projectId=p1&number=4");
+  assert.equal(detail.status, 200);
+  assert.deepEqual(detail.payload, {
+    ok: true,
+    data: {
+      number: 4, title: "Issue", state: "OPEN", author: "sam",
+      updatedAt: "u", createdAt: "c", url: "issue-url", body: "Details",
+    },
+  });
+  const comments = await call("GET", "/api/github/issue/comments", {}, "?projectId=p1&number=4");
+  assert.equal(comments.status, 200);
+  assert.deepEqual((comments.payload as { data: unknown[] }).data, [
+    { id: "c1", author: "kat", body: "hello", createdAt: "now", url: "comment-url" },
+  ]);
+  assert.deepEqual(calls.map((entry) => entry.args?.slice(0, 3)), [
+    ["issue", "view", "4"],
+    ["issue", "view", "4"],
+  ]);
+});
+
+test("plain issue and PR comments append their session event before responding", async () => {
+  const { calls, call } = makeHarness({
+    exec: async (_bin, args, opts) => {
+      assert.equal(opts.input, args[0] === "issue" ? "issue reply" : "pr reply");
+      return { stdout: `https://github.com/a/r/${args[0]}/4#comment\n`, stderr: "" };
+    },
+  });
+
+  const empty = await call("POST", "/api/github/issue/4/comments", { projectId: "p1", body: " " });
+  assert.equal(empty.status, 400);
+  assert.equal(calls.length, 0);
+
+  const issue = await call("POST", "/api/github/issue/4/comments", {
+    projectId: "p1", body: " issue reply ", sessionId: "agent-session",
+  });
+  assert.equal(issue.status, 200);
+  const pr = await call("POST", "/api/github/pr/4/comments", {
+    projectId: "p1", body: "pr reply", sessionId: "agent-session",
+  });
+  assert.equal(pr.status, 200);
+  assert.deepEqual(calls.map((entry) => entry.kind === "gh" ? entry.args?.slice(0, 3).join(" ") : entry.type), [
+    "issue comment 4",
+    "issue/commented",
+    "pr comment 4",
+    "pr/commented",
+  ]);
+  assert.equal(calls[1]?.data?.body, "issue reply");
+  assert.equal(calls[3]?.data?.body, "pr reply");
+});

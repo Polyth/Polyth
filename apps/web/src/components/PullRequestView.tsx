@@ -11,6 +11,7 @@ import { parsePrDiffLines, splitPrDiff } from "../prDiff.ts";
 import { friendlyError } from "../settings.ts";
 import { useStore } from "../store.ts";
 import EmptyState from "./EmptyState.tsx";
+import GithubReplyPanel from "./GithubReplyPanel.tsx";
 
 type Tab = "overview" | "files" | "checks" | "comments";
 type PrSection = "detail" | "files" | "diff" | "checks" | "comments";
@@ -558,6 +559,21 @@ export default function PullRequestView({ number, onClose }: { number: number; o
                   </article>
                 ))}
               </div>
+              <GithubReplyPanel
+                projectId={projectId}
+                context={{
+                  kind: "pr",
+                  number: detail.number,
+                  title: detail.title,
+                  body: detail.body,
+                  url: detail.url,
+                  comments,
+                }}
+                onPublished={async () => {
+                  const next = await api.githubPrComments(projectId, number);
+                  if (next.ok) setComments(next.data);
+                }}
+              />
               <section className="pr-review-form">
                 <div>
                   <strong>{tr("pullrequestview.submitAReview")}</strong>

@@ -6,6 +6,7 @@ import { friendlyError } from "../settings.ts";
 import { setActiveView, startNewSession, useStore } from "../store.ts";
 import { useDismissibleMenu } from "./a11y/Menu.ts";
 import EmptyState from "./EmptyState.tsx";
+import IssueDetailView from "./IssueDetailView.tsx";
 import PullRequestView from "./PullRequestView.tsx";
 import { formatRelativeTime, tr } from "../i18n/index.ts";
 
@@ -26,7 +27,7 @@ const relativeDate = (raw: string): string => {
 function GithubCard({ item, kind, onOpen, onStartSession }: {
   item: GithubIssueDto | GithubPrDto;
   kind: Tab;
-  onOpen?: (number: number) => void;
+  onOpen: (number: number) => void;
   onStartSession: (item: GithubIssueDto | GithubPrDto, kind: Tab) => void;
 }) {
   const pr = kind === "prs" ? item as GithubPrDto : null;
@@ -57,19 +58,17 @@ function GithubCard({ item, kind, onOpen, onStartSession }: {
           <span className="gh-number mono">#{item.number}</span>
           <span className="gh-meta">{tr("githubview.updatedValue", { value: relativeDate(item.updatedAt) })}</span>
         </div>
-        <a className="gh-card-title" href={item.url} target="_blank" rel="noreferrer">
-          <span>{item.title}</span><Icon.external /><span className="sr-only">{tr("githubview.opensOnGithub")}</span>
-        </a>
+        <button className="gh-card-title" onClick={() => onOpen(item.number)}>
+          <span>{item.title}</span>
+        </button>
         <div className="gh-card-meta">
           <span>{tr("githubview.byValue", { author: item.author })}</span>
           {pr && <span className="gh-branch mono" title={pr.headRefName}><Icon.branch /><span>{pr.headRefName}</span></span>}
         </div>
       </div>
       <div className="gh-card-actions">
-        {pr && onOpen
-          ? <button className="primary-btn gh-card-primary" onClick={() => onOpen(item.number)}>{tr("githubview.reviewDetails")}</button>
-          : <button className="primary-btn gh-card-primary" title={tr("githubview.startASessionForThisValue", { ref })} onClick={() => onStartSession(item, kind)}><Icon.session /> {tr("githubview.newSession")}</button>}
-        {pr && <button className="small-btn gh-action-secondary" title={tr("githubview.startASessionForThisValue", { ref })} onClick={() => onStartSession(item, kind)}><Icon.session /> {tr("githubview.newSession")}</button>}
+        <button className="primary-btn gh-card-primary" onClick={() => onOpen(item.number)}>{tr("githubview.details")}</button>
+        <button className="small-btn gh-action-secondary" title={tr("githubview.startASessionForThisValue", { ref })} onClick={() => onStartSession(item, kind)}><Icon.session /> {tr("githubview.newSession")}</button>
         <button className="small-btn gh-action-secondary" title={tr("githubview.addThisContextToChat")} onClick={askInChat}><Icon.chat /> {tr("githubview.askInChat")}</button>
         <div className="gh-card-overflow">
           <button
@@ -82,7 +81,7 @@ function GithubCard({ item, kind, onOpen, onStartSession }: {
           ><Icon.more /></button>
           {menuOpen && (
             <div ref={menuRef} className="gh-card-menu" role="menu" onKeyDown={onMenuKeyDown}>
-              {pr && <button role="menuitem" onClick={() => runMenuAction(() => onStartSession(item, kind))}><Icon.session /> {tr("githubview.newSession")}</button>}
+              <button role="menuitem" onClick={() => runMenuAction(() => onStartSession(item, kind))}><Icon.session /> {tr("githubview.newSession")}</button>
               <button role="menuitem" onClick={() => runMenuAction(askInChat)}><Icon.chat /> {tr("githubview.askInChat")}</button>
               <a role="menuitem" href={item.url} target="_blank" rel="noreferrer"><Icon.external /> {tr("githubview.openOnGithub")}</a>
             </div>
@@ -103,7 +102,7 @@ export default function GithubView() {
   const [prs, setPrs] = useState<GithubPrDto[]>([]);
   const [reason, setReason] = useState("");
   const [loading, setLoading] = useState(false);
-  const [openPr, setOpenPr] = useState<number | null>(null);
+  const [openItem, setOpenItem] = useState<{ kind: Tab; number: number } | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
@@ -183,8 +182,14 @@ export default function GithubView() {
 
   if (!projectId) return <EmptyState title={tr("githubview.noProjectSelected")} description={tr("githubview.openAProjectToBrowseItsGithub")} />;
 
-  if (openPr !== null) {
-    return <div className="view-page github-page"><PullRequestView number={openPr} onClose={() => setOpenPr(null)} /></div>;
+  if (openItem !== null) {
+    return (
+      <div className="view-page github-page">
+        {openItem.kind === "prs"
+          ? <PullRequestView number={openItem.number} onClose={() => setOpenItem(null)} />
+          : <IssueDetailView number={openItem.number} onClose={() => setOpenItem(null)} />}
+      </div>
+    );
   }
 
   const filters: Array<{ id: Filter; label: string }> = tab === "prs"
@@ -280,7 +285,15 @@ export default function GithubView() {
             />
           )}
           <div className="gh-list">
-            {items.map((item) => <GithubCard key={`${tab}-${item.number}`} item={item} kind={tab} onStartSession={startSession} {...(tab === "prs" ? { onOpen: setOpenPr } : {})} />)}
+            {items.map((item) => (
+              <GithubCard
+                key={`${tab}-${item.number}`}
+                item={item}
+                kind={tab}
+                onStartSession={startSession}
+                onOpen={(number) => setOpenItem({ kind: tab, number })}
+              />
+            ))}
           </div>
         </>
       )}

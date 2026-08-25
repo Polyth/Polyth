@@ -10577,7 +10577,11 @@ html[data-sheet="open"], html[data-sheet="open"] body { overflow: hidden; }
 .gh-card-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; color: var(--muted); font-size: 11px; }
 .gh-state { width: auto; min-width: 50px; min-height: 20px; display: inline-grid; place-items: center; padding: 2px 7px; }
 .gh-card-kicker .gh-meta { margin-left: auto; }
-.gh-card-title { color: var(--text); text-decoration: none; font-size: 14px; line-height: 1.35; font-weight: 620; overflow-wrap: anywhere; }
+.gh-card-title {
+  width: fit-content; max-width: 100%; padding: 0; border: 0; background: transparent;
+  color: var(--text); text-decoration: none; font: inherit; font-size: 14px; line-height: 1.35;
+  font-weight: 620; overflow-wrap: anywhere; text-align: left; cursor: pointer;
+}
 .gh-card-title:hover { color: var(--accent); }
 .gh-card-meta strong { color: var(--text-dim); font-weight: 560; }
 .gh-card .gh-branch { display: inline-flex; align-items: center; gap: 4px; max-width: min(48vw, 340px); overflow: hidden; }
@@ -10702,6 +10706,99 @@ html[data-sheet="open"], html[data-sheet="open"] body { overflow: hidden; }
 .pr-review-form > div:first-child { display: flex; flex-direction: column; gap: 3px; }
 .pr-review-form textarea { min-height: 108px; font-size: 14px; }
 .pr-review-actions { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
+
+/* GitHub issue detail + direct/agent-assisted reply composer */
+.pr-external-link { margin-left: auto; flex: none; text-decoration: none; }
+.issue-detail-layout { display: flex; flex-direction: column; gap: 14px; }
+.issue-description-card,
+.issue-conversation {
+  overflow: hidden; border: 1px solid var(--hair-strong); border-radius: var(--radius-lg);
+  background: var(--elevated); box-shadow: var(--inset-hi);
+}
+.issue-description-card > header,
+.issue-section-heading {
+  min-height: 56px; display: flex; align-items: center; padding: 10px 14px;
+  border-bottom: 1px solid var(--hair); background: var(--surface-overlay);
+}
+.issue-description-card h2,
+.issue-section-heading h2 { margin: 0; font-size: 14px; }
+.issue-description-card > header > div,
+.issue-section-heading > div { display: flex; flex-direction: column; gap: 3px; }
+.issue-description-card .pr-body { min-height: 110px; padding: 16px; }
+.issue-conversation { padding-bottom: 14px; }
+.issue-conversation .pr-thread { padding: 14px 14px 0; }
+.issue-conversation > .empty-state { margin: 14px; }
+
+.gh-reply-panel {
+  position: relative; overflow: hidden; padding: 14px; border: 1px solid var(--accent-line);
+  border-radius: var(--radius-lg); background:
+    radial-gradient(circle at 0 0, color-mix(in srgb, var(--accent) 10%, transparent), transparent 44%),
+    var(--elevated);
+  box-shadow: var(--inset-hi); display: flex; flex-direction: column; gap: 10px;
+}
+.gh-reply-heading,
+.gh-reply-actions,
+.gh-agent-send { display: flex; align-items: center; gap: 9px; }
+.gh-reply-heading > div { display: flex; flex: 1; flex-direction: column; gap: 3px; }
+.gh-reply-panel > textarea {
+  width: 100%; min-height: 108px; padding: 10px 12px; resize: vertical;
+  border: 1px solid var(--hair-strong); border-radius: var(--radius-md);
+  background: var(--sunken); color: var(--text); line-height: 1.5;
+  transition: border-color 160ms ease, box-shadow 160ms ease;
+}
+.gh-reply-panel > textarea:focus {
+  outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-wash);
+}
+.gh-agent-drawer {
+  display: grid; grid-template-rows: 0fr; opacity: 0; transform: translateY(-10px);
+  transition: grid-template-rows 280ms ease, opacity 220ms ease, transform 280ms ease;
+}
+.gh-reply-panel.agent-open .gh-agent-drawer {
+  grid-template-rows: 1fr; opacity: 1; transform: translateY(0);
+}
+.gh-agent-drawer-inner {
+  min-height: 0; overflow: hidden; display: flex; flex-direction: column; gap: 10px;
+}
+.gh-agent-drawer-inner > header {
+  display: flex; align-items: center; gap: 10px; padding-top: 12px;
+  border-top: 1px solid var(--accent-line);
+}
+.gh-agent-drawer-inner > header > div { display: flex; flex-direction: column; gap: 2px; }
+.gh-agent-orb {
+  width: 30px; height: 30px; flex: none; border-radius: 10px;
+  background: radial-gradient(circle at 35% 30%, white 0 7%, var(--accent) 9% 35%, color-mix(in srgb, var(--accent) 38%, var(--elevated)) 70%);
+  box-shadow: 0 0 0 1px var(--accent-line), 0 7px 18px color-mix(in srgb, var(--accent) 22%, transparent);
+}
+.gh-agent-orb.working { animation: gh-agent-pulse 1.6s ease-in-out infinite; }
+@keyframes gh-agent-pulse {
+  50% { transform: translateY(-2px) scale(1.04); filter: brightness(1.15); }
+}
+.gh-agent-thinking {
+  min-height: 64px; display: flex; align-items: center; justify-content: center; gap: 5px;
+  border: 1px dashed var(--accent-line); border-radius: var(--radius-md); background: var(--accent-wash);
+  color: var(--muted); font-size: 12px;
+}
+.gh-agent-thinking i {
+  width: 6px; height: 6px; border-radius: 50%; background: var(--accent);
+  animation: gh-thinking-dot 1.2s ease-in-out infinite;
+}
+.gh-agent-thinking i:nth-child(2) { animation-delay: 120ms; }
+.gh-agent-thinking i:nth-child(3) { animation-delay: 240ms; margin-right: 4px; }
+@keyframes gh-thinking-dot { 50% { transform: translateY(-4px); opacity: .5; } }
+.gh-agent-response {
+  max-height: 380px; overflow: auto; padding: 14px; border: 1px solid var(--hair-strong);
+  border-radius: var(--radius-md); background: var(--sunken); font-size: 13.5px; line-height: 1.55;
+}
+.gh-agent-send {
+  justify-content: flex-end; padding-top: 2px;
+}
+.gh-agent-send .muted { margin-right: auto; }
+
+@media (prefers-reduced-motion: reduce) {
+  .gh-agent-drawer,
+  .gh-agent-orb.working,
+  .gh-agent-thinking i { transition: none; animation: none; }
+}
 
 @media (max-width: 1000px) {
   .git-resource-grid { grid-template-columns: 1fr; }

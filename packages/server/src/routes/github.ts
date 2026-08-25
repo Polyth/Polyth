@@ -27,8 +27,34 @@ export function githubRoutes(deps: {
   return async ({ path, method, url, json, body }) => {
     if (!path.startsWith("/api/github")) return false;
 
-    // ---- writes: explicit, guarded, idempotent ------------------------------
-    let w = path.match(/^\/api\/github\/pr\/(\d+)\/reviews$/);
+    // ---- writes: explicit and guarded ---------------------------------------
+    let w = path.match(/^\/api\/github\/(issue|pr)\/(\d+)\/comments$/);
+    if (w && method === "POST") {
+      const kind = w[1] as "issue" | "pr";
+      const number = Number(w[2]);
+      const b = await body();
+      const root = await rootOf(b.projectId ? String(b.projectId) : null);
+      const comment = String(b.body ?? "").trim();
+      if (!comment) {
+        json(400, { ok: false, reason: "comment body is required" });
+        return true;
+      }
+      const result = kind === "issue"
+        ? await deps.github.addIssueComment(root, number, comment)
+        : await deps.github.addPrComment(root, number, comment);
+      // Agent-generated text and the external write become durable before the
+      // success is exposed to the panel that initiated the publish.
+      if (result.ok && b.sessionId && deps.append) {
+        await deps.append(String(b.sessionId), `${kind}/commented`, {
+          number, body: comment, url: result.data.url,
+        });
+      }
+      json(200, result);
+      return true;
+    }
+
+    // ---- review writes: explicit, guarded, idempotent -----------------------
+    w = path.match(/^\/api\/github\/pr\/(\d+)\/reviews$/);
     if (w && method === "POST") {
       const number = Number(w[1]);
       const b = await body();
@@ -168,6 +194,8 @@ export function githubRoutes(deps: {
     if (path === "/api/github/status") { json(200, await deps.github.status(root)); return true; }
     if (path === "/api/github/repo") { json(200, await deps.github.repo(root)); return true; }
     if (path === "/api/github/issues") { json(200, await deps.github.issues(root, limit)); return true; }
+    if (path === "/api/github/issue") { json(200, await deps.github.getIssue(root, number)); return true; }
+    if (path === "/api/github/issue/comments") { json(200, await deps.github.getIssueComments(root, number)); return true; }
     if (path === "/api/github/prs") { json(200, await deps.github.prs(root, limit)); return true; }
     if (path === "/api/github/pr/current") {
       json(200, await deps.github.currentPrSummary(root));
