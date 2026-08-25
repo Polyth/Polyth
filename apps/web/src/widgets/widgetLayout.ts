@@ -31,6 +31,9 @@ export interface WidgetLayoutDefinition {
   defaultSlot?: UiSlot;
   supportedSlots?: readonly UiSlot[];
   defaultVisible?: boolean;
+  /** Package-required controls remain mounted while their definition is
+   * registered. Persisted customization may move them, but cannot hide them. */
+  requiredVisible?: boolean;
   order?: number;
   /** @deprecated Use defaultSlot. Kept for persisted v1/client compatibility. */
   zone?: WidgetZone;
@@ -52,6 +55,7 @@ export interface WidgetLayoutDefinition {
 
 export interface WidgetPlacement {
   visible: boolean;
+  requiredVisible?: boolean;
   size: WidgetSize;
   position: WidgetPosition;
   definitionId?: string;
@@ -292,7 +296,8 @@ function placementFor(
   position: WidgetPosition = { x: 0, y: 0 },
 ): WidgetPlacement {
   return {
-    visible,
+    visible: definition.requiredVisible === true ? true : visible,
+    ...(definition.requiredVisible === true ? { requiredVisible: true } : {}),
     size: recommendedWidgetSize(definition),
     position: clampPosition(position),
     definitionId: definition.id,
@@ -320,7 +325,9 @@ export function createDefaultWidgetLayout(
     if (RETIRED_WIDGET_IDS.has(id)) continue;
     const slot = defaultSlotFor(definition);
     const zone = widgetZoneFromSlot(slot);
-    const visible = definition.defaultVisible ?? DEFAULT_VISIBLE.has(id);
+    const visible = definition.requiredVisible === true
+      || definition.defaultVisible
+      || DEFAULT_VISIBLE.has(id);
     const size = recommendedWidgetSize(definition);
     if (zone && visible && x > 0 && x + size.w > 12) {
       x = 0;
@@ -496,7 +503,10 @@ export function parseWidgetLayout(
       const base = definition ? fallback.widgets[definition.id] : undefined;
       const definitionId = definition?.id ?? value?.definitionId ?? id;
       widgets[id] = {
-        visible: typeof value?.visible === "boolean" ? value.visible : base?.visible ?? false,
+        visible: definition?.requiredVisible === true
+          ? true
+          : typeof value?.visible === "boolean" ? value.visible : base?.visible ?? false,
+        ...(definition?.requiredVisible === true ? { requiredVisible: true } : {}),
         size: constrainedSize(value?.size ?? base?.size ?? DEFAULT_SIZE, definition),
         position: clampPosition(value?.position ?? base?.position),
         definitionId,
@@ -647,6 +657,7 @@ export function moveWidget(
 export function setWidgetVisible(layout: WidgetLayout, id: string, visible: boolean): WidgetLayout {
   const current = layout.widgets[id];
   if (!current || current.visible === visible) return layout;
+  if (current.requiredVisible && !visible) return layout;
   if (!visible) {
     return { ...layout, widgets: { ...layout.widgets, [id]: { ...current, visible: false } } };
   }
@@ -801,7 +812,7 @@ export function setWidgetShowIn(
   showIn: readonly WidgetAudience[],
 ): WidgetLayout {
   const current = layout.widgets[id];
-  if (!current) return layout;
+  if (!current || current.requiredVisible) return layout;
   const next = [...new Set(showIn.filter(isAudience))];
   if (
     current.showIn?.length === next.length
@@ -843,7 +854,7 @@ export function setWidgetIdentity(
 }
 
 export function forgetWidget(layout: WidgetLayout, id: string): WidgetLayout {
-  if (!layout.widgets[id]) return layout;
+  if (!layout.widgets[id] || layout.widgets[id]?.requiredVisible) return layout;
   const widgets = { ...layout.widgets };
   delete widgets[id];
   const zones = Object.fromEntries(
@@ -1131,12 +1142,14 @@ export function ensureWidgets(definitions: readonly WidgetLayoutDefinition[]): v
     const metadata = placementFor(definition, current.visible);
     const next = {
       ...current,
+      visible: definition.requiredVisible === true ? true : current.visible,
+      requiredVisible: metadata.requiredVisible,
       definitionId: definition.id,
       pluginId: metadata.pluginId,
       kind: metadata.kind,
       title: current.title ?? metadata.title,
       description: current.description ?? metadata.description,
-      showIn: current.showIn ?? metadata.showIn,
+      showIn: definition.requiredVisible === true ? metadata.showIn : current.showIn ?? metadata.showIn,
       scope: current.scope ?? metadata.scope,
     };
     if (JSON.stringify(next) !== JSON.stringify(current)) {

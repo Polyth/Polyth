@@ -15,14 +15,14 @@ import { tr } from "../i18n/index.ts";
 // UX-PANE-MODEL: Files/Git/Terminal/Preview are workspace panes beside Chat,
 // not primary views — the open pane is appended to the label instead.
 const VIEW_LABEL: Record<AppView, string> = {
-  session: "Chat",
-  goals: "Goals",
-  multirun: "Multi-run",
-  workflow: "Workflows",
-  fusion: "Fusion",
-  walkthrough: "Walkthrough",
-  schedule: "Schedule",
-  github: "GitHub",
+  session: tr("statusbar.chat"),
+  goals: tr("statusbar.goals"),
+  multirun: tr("widgets.builtinwidgets.multiRun"),
+  workflow: tr("statusbar.workflows"),
+  fusion: tr("statusbar.fusion"),
+  walkthrough: tr("statusbar.walkthrough"),
+  schedule: tr("statusbar.schedule"),
+  github: tr("statusbar.github"),
 };
 
 // UX-A390: every segment carries a stable key/class so narrow widths can
@@ -96,11 +96,11 @@ export default function StatusBar() {
   if (project) {
     segments.push({
       key: "model",
-      node: <span className="sb sb-model"><span className="mono">{session?.model?.modelID ?? "No model"}</span></span>,
+      node: <span className="sb sb-model"><span className="mono">{session?.model?.modelID ?? tr("statusbar.noModel")}</span></span>,
     });
   }
   if (session?.agent) {
-    segments.push({ key: "agent", node: <span className="sb sb-agent">{session.agent} agent</span> });
+    segments.push({ key: "agent", node: <span className="sb sb-agent">{session.agent} {tr("statusbar.agent")}</span> });
   }
   if (activeWorkflow && project) {
     const complete = workflowFinishedCount(activeWorkflow);

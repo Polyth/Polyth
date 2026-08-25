@@ -22,6 +22,7 @@ import WorkflowLauncher from "../components/WorkflowLauncher.tsx";
 import { requestComposerReplace } from "../composerInsert.ts";
 import { announce } from "../components/a11y/live.tsx";
 import { defineWidgetPlugin, registerWidgetPlugin } from "./catalog.ts";
+import { tr } from "../i18n/index.ts";
 
 const SHELL_ACTION_SLOTS = [
   "app.header.actions",
@@ -37,15 +38,34 @@ const COMPOSER_ACTION_SLOTS = [
 function GoalAction({ context }: { context: Record<string, unknown> }) {
   const sessionId = typeof context.sessionId === "string" ? context.sessionId : null;
   const goalOn = context.goalOn === true;
+  const goalBusy = context.goalBusy === true;
   const suppliedToggle = typeof context.toggleGoal === "function"
     ? context.toggleGoal as () => void
     : null;
   const [open, setOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
   const activate = () => {
-    if (suppliedToggle) suppliedToggle();
-    else if (sessionId) setOpen(true);
+    if (suppliedToggle) {
+      suppliedToggle();
+      return;
+    }
+    const draft = document.querySelector<HTMLTextAreaElement>(COMPOSER_INPUT_SELECTOR)?.value.trim() ?? "";
+    if (!sessionId || !draft) {
+      if (sessionId) setOpen(true);
+      return;
+    }
+    setSaving(true);
+    void api.goalAttach(sessionId, draft)
+      .then(() => {
+        requestComposerReplace("");
+        announce("Goal attached.");
+      })
+      .catch((error) => setUiError(friendlyError("Couldn’t attach the goal", error)))
+      .finally(() => setSaving(false));
   };
-  const label = sessionId ? "Attach or update goal" : goalOn ? "First message is the goal" : "Use first message as goal";
+  const label = sessionId
+    ? tr("widgets.builtinminiwidgets.saveTheCurrentMessageAsThe")
+    : goalOn ? tr("widgets.builtinminiwidgets.firstMessageIsTheGoal") : tr("widgets.builtinminiwidgets.useFirstMessageAsGoal");
   return (
     <>
       <button
@@ -54,9 +74,10 @@ function GoalAction({ context }: { context: Record<string, unknown> }) {
         title={label}
         aria-label={label}
         aria-pressed={!sessionId ? goalOn : undefined}
+        disabled={goalBusy || saving}
         onClick={activate}
       >
-        <Icon.target /><span>Goal</span>
+        <Icon.target /><span>{tr("widgets.builtinminiwidgets.goal")}</span>
       </button>
       {open && <GoalAttachForm onDone={() => setOpen(false)} />}
     </>
@@ -84,20 +105,20 @@ function AutoApproveAction({ context }: { context: Record<string, unknown> }) {
     if (!sessionId || disabled) return;
     setBusy(true);
     void api.autoAcceptSet(sessionId, on ? "off" : "on")
-      .catch((error) => setUiError(friendlyError("Couldn’t change auto-approve", error)))
+      .catch((error) => setUiError(friendlyError(tr("common.error"), error)))
       .finally(() => setBusy(false));
   };
   return (
     <button
       type="button"
       className={`header-action composer-auto-approve${on ? " on" : ""}`}
-      title={on ? "Turn off auto-approve" : "Turn on auto-approve"}
-      aria-label={on ? "Turn off auto-approve" : "Turn on auto-approve"}
+      title={on ? tr("widgets.builtinminiwidgets.turnOffAutoApprove") : tr("widgets.builtinminiwidgets.turnOnAutoApprove")}
+      aria-label={on ? tr("widgets.builtinminiwidgets.turnOffAutoApprove") : tr("widgets.builtinminiwidgets.turnOnAutoApprove")}
       aria-pressed={on}
       disabled={disabled}
       onClick={toggle}
     >
-      <Icon.shield /><span>Auto Approve</span>
+      <Icon.shield /><span>{tr("widgets.builtinminiwidgets.autoApprove")}</span>
     </button>
   );
 }
@@ -222,12 +243,12 @@ export const WORKFLOW_WIDGET_PLUGIN = defineWidgetPlugin({
 
 const SHELL_ACTIONS_PLUGIN = defineWidgetPlugin({
   id: "shell-actions",
-  name: "Application shell",
+  name: tr("widgets.builtinminiwidgets.applicationShell"),
   widgets: [
     {
       id: "shell.search",
-      title: "Search commands",
-      description: "Open commands and actions search.",
+      title: tr("widgets.builtinminiwidgets.searchCommands"),
+      description: tr("widgets.builtinminiwidgets.openCommandsAndActionsSearch"),
       kind: "mini-widget",
       defaultSlot: "app.header.actions",
       supportedSlots: SHELL_ACTION_SLOTS,
@@ -237,15 +258,15 @@ const SHELL_ACTIONS_PLUGIN = defineWidgetPlugin({
       audience: "simple",
       order: 10,
       render: () => (
-        <button className="header-action" onClick={() => setOverlay("palette")} aria-label="Search commands and actions">
-          <Icon.search /><span>Search</span>
+        <button className="header-action" onClick={() => setOverlay("palette")} aria-label={tr("widgets.builtinminiwidgets.searchCommandsAndActions")}>
+          <Icon.search /><span>{tr("common.search")}</span>
         </button>
       ),
     },
     {
       id: "shell.history",
-      title: "Session history",
-      description: "Search session history.",
+      title: tr("widgets.builtinminiwidgets.sessionHistory"),
+      description: tr("widgets.builtinminiwidgets.searchSessionHistory"),
       kind: "mini-widget",
       defaultSlot: "session.header.actions",
       supportedSlots: ["session.header.actions", "app.header.actions"],
@@ -255,15 +276,15 @@ const SHELL_ACTIONS_PLUGIN = defineWidgetPlugin({
       audience: "simple",
       order: 20,
       render: () => (
-        <button className="header-action" onClick={() => setOverlay("search")} aria-label="Search session history">
-          <Icon.clock /><span>History</span>
+        <button className="header-action" onClick={() => setOverlay("search")} aria-label={tr("widgets.builtinminiwidgets.searchSessionHistory2")}>
+          <Icon.clock /><span>{tr("widgets.builtinminiwidgets.history")}</span>
         </button>
       ),
     },
     {
       id: "shell.settings",
-      title: "Settings",
-      description: "Open application settings.",
+      title: tr("common.settings"),
+      description: tr("widgets.builtinminiwidgets.openApplicationSettings"),
       kind: "mini-widget",
       defaultSlot: "app.header.actions",
       supportedSlots: SHELL_ACTION_SLOTS,
@@ -273,15 +294,15 @@ const SHELL_ACTIONS_PLUGIN = defineWidgetPlugin({
       audience: "simple",
       order: 30,
       render: () => (
-        <button className="header-action" title="Settings" aria-label="Settings" onClick={() => setOverlay("settings")}>
-          <Icon.gear /><span>Settings</span>
+        <button className="header-action" title={tr("common.settings")} aria-label={tr("common.settings")} onClick={() => setOverlay("settings")}>
+          <Icon.gear /><span>{tr("common.settings")}</span>
         </button>
       ),
     },
     {
       id: "session.goal-action",
-      title: "Goal",
-      description: "Attach a goal, or use the first message as a new session goal.",
+      title: tr("widgets.builtinminiwidgets.goal"),
+      description: tr("widgets.builtinminiwidgets.attachAGoalOrUseTheFirst"),
       kind: "mini-widget",
       defaultSlot: "session.header.actions",
       supportedSlots: ["session.header.actions"],
@@ -294,8 +315,8 @@ const SHELL_ACTIONS_PLUGIN = defineWidgetPlugin({
     },
     {
       id: "session.goal-composer-action",
-      title: "Goal",
-      description: "Attach a goal, or use the first message as a new session goal.",
+      title: tr("widgets.builtinminiwidgets.goal"),
+      description: tr("widgets.builtinminiwidgets.attachAGoalOrUseTheFirst"),
       kind: "mini-widget",
       defaultSlot: "composer.leading",
       supportedSlots: COMPOSER_ACTION_SLOTS,
@@ -308,8 +329,8 @@ const SHELL_ACTIONS_PLUGIN = defineWidgetPlugin({
     },
     {
       id: "permissions.auto-approve-action",
-      title: "Auto Approve",
-      description: "Toggle automatic approval for the current or next session.",
+      title: tr("widgets.builtinminiwidgets.autoApprove"),
+      description: tr("widgets.builtinminiwidgets.toggleAutomaticApprovalForTheCurrentOr"),
       kind: "mini-widget",
       defaultSlot: "session.header.actions",
       supportedSlots: ["session.header.actions"],
@@ -322,8 +343,8 @@ const SHELL_ACTIONS_PLUGIN = defineWidgetPlugin({
     },
     {
       id: "permissions.auto-approve-composer-action",
-      title: "Auto Approve",
-      description: "Toggle automatic approval for the current or next session.",
+      title: tr("widgets.builtinminiwidgets.autoApprove"),
+      description: tr("widgets.builtinminiwidgets.toggleAutomaticApprovalForTheCurrentOr"),
       kind: "mini-widget",
       defaultSlot: "composer.leading",
       supportedSlots: COMPOSER_ACTION_SLOTS,

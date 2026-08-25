@@ -1,18 +1,17 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react";
+import { createPortal } from "react-dom";
 import { renderMarkdown } from "../markdown.tsx";
-import { fmtDuration, fmtMs } from "../format.ts";
+import { fmtDuration, fmtMs, fmtTokens } from "../format.ts";
 import { groupWork, mergeThinking, promptIndex, toolSummary, copyText, loadDraft, type WorkGroup } from "../utils.ts";
 import { setUiSettings, useUiSettings } from "../uiPrefs.ts";
 import { forkSession, sendMessage } from "../init.ts";
 import { requestComposerReplace } from "../composerInsert.ts";
 import {
-  applyEvent, openSettingsPage, setActiveView, setUiError, startNewSession, useStore,
+  applyEvent, setActiveView, setUiError, startNewSession, useStore,
 } from "../store.ts";
 import { api } from "../api.ts";
 import {
-  COPY_REASONING_NAME,
   JUMP_TO_LATEST_NAME,
-  OPEN_TIMELINE_NAME,
   PROMPT_NAV_NAME,
   actionsMenuName,
   assistantArticleName,
@@ -36,7 +35,7 @@ import {
   sentName,
   timeIso,
   timeShort,
-  turnFooterLine,
+  turnDurationMs,
   userArticleName,
   type ActionAvailability,
   type MutationGuards,
@@ -52,7 +51,6 @@ import {
 } from "../promptRail.ts";
 import { captureTimelineAnchor, loadTimelineAnchor, restoreScrollDelta, saveTimelineAnchor, type TimelineAnchor } from "../timelineAnchor.ts";
 import CopyButton from "./CopyButton.tsx";
-import Dialog from "./a11y/Dialog.tsx";
 import AttachmentPills from "./AttachmentPills.tsx";
 import SelectionMenu from "./SelectionMenu.tsx";
 import SlotHost from "./slots/SlotHost.ts";
@@ -73,14 +71,10 @@ type Announce = (text: string) => void;
 // plain block when the collapsible pref is off. UX-MSG-ACTIONS: the disclosure
 // is a native, keyboard-operable control with a purpose-and-target name and
 // truthful expanded state; expanding/collapsing appends no event.
-function Thinking({ m, announce }: { m: AssistantMsg; announce?: Announce }) {
+function Thinking({ m }: { m: AssistantMsg }) {
   const prefs = useUiSettings();
   const [open, setOpen] = useState(!m.finalized || prefs.thinkingDefaultExpanded);
   const preview = m.reasoning.split("\n").find((l) => l.trim()) ?? "";
-  const copyReasoning = async () => {
-    const ok = await copyText(m.reasoning);
-    announce?.(copyAnnouncement(ok ? "reasoning" : "failed"));
-  };
   if (!prefs.collapsibleThinkingBlocks) {
     return <div className="reasoning reasoning-flat"><div className="reasoning-body" dir="auto">{m.reasoning}</div></div>;
   }
@@ -92,18 +86,11 @@ function Thinking({ m, announce }: { m: AssistantMsg; announce?: Announce }) {
         onClick={(e) => { e.preventDefault(); setOpen((v) => !v); }}
         style={{ display: "flex", gap: 8, alignItems: "baseline" }}
       >
-        <span>Thinking{m.finalized ? "" : "…"}</span>
-        {!open && <span className="muted" style={{ fontStyle: "italic", flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{preview}</span>}
+        <span>{tr("timeline.thinking")}{m.finalized ? "" : "…"}</span>
+        {!open && <span className="muted reasoning-preview">{preview}</span>}
       </summary>
       {open && (
-        <div className="reasoning-body" dir="auto">
-          {m.reasoning}
-          <div className="reasoning-actions">
-            <button className="small-btn" aria-label={COPY_REASONING_NAME} title={COPY_REASONING_NAME} onClick={() => void copyReasoning()}>
-              <Icon.copy />
-            </button>
-          </div>
-        </div>
+        <div className="reasoning-body" dir="auto">{m.reasoning}</div>
       )}
     </details>
   );
@@ -144,7 +131,9 @@ function messageActionEntries(
   const entries: MessageActionEntry[] = [
     {
       key: "copy",
-      label: `Copy as ${opts.copyFormat === "markdown" ? "Markdown" : "JSON"}`,
+      label: tr("timeline.copyAsValue", {
+        value: opts.copyFormat === "markdown" ? tr("common.markdown") : tr("common.json"),
+      }),
       name: copyActionName(role, opts.copyFormat),
       run: doCopy,
     },
@@ -152,16 +141,16 @@ function messageActionEntries(
   if (m.kind === "assistant") {
     entries.push({
       key: "gallery",
-      label: "Gallery",
-      name: "Open images from this assistant answer",
+      label: tr("timeline.gallery"),
+      name: tr("timeline.openImagesFromThisAssistantAnswer"),
       run: opts.onGallery ?? (() => {}),
-      ...(!opts.galleryAvailable ? { disabledReason: "No images in this answer" } : {}),
+      ...(!opts.galleryAvailable ? { disabledReason: tr("timeline.noImagesInThisAnswer") } : {}),
     });
     if (opts.onRegenerate) {
       entries.push({
         key: "regenerate",
-        label: "Regenerate",
-        name: "Regenerate this assistant answer",
+        label: tr("timeline.regenerate"),
+        name: tr("timeline.regenerateThisAssistantAnswer"),
         run: opts.onRegenerate,
       });
     }
@@ -169,7 +158,7 @@ function messageActionEntries(
   if (m.kind === "user" && opts.onRevert) {
     entries.push({
       key: "revert",
-      label: "Revert & edit",
+      label: tr("timeline.revertEdit"),
       name: revertActionName(m.time),
       run: () => opts.onRevert?.(m),
       ...(opts.revert && !opts.revert.enabled ? { disabledReason: opts.revert.reason } : {}),
@@ -179,7 +168,7 @@ function messageActionEntries(
   if (m.kind === "user" && opts.onFork) {
     entries.push({
       key: "fork",
-      label: "Fork & edit",
+      label: tr("timeline.forkEdit"),
       name: forkActionName(m.time),
       run: () => opts.onFork?.(m),
       ...(opts.fork && !opts.fork.enabled ? { disabledReason: opts.fork.reason } : {}),
@@ -340,6 +329,12 @@ function MessageMeta({
               {entries.filter((entry) => entry.key === "regenerate").map((entry) => (
                 <ActionButton key={entry.key} entry={entry} className="msg-action-btn" />
               ))}
+              {m.kind === "user" && (
+                <SlotHost
+                  slot="session.message.actions"
+                  context={{ sessionId, kind: m.kind, messageId: m.id, eventSeq: m.eventSeq }}
+                />
+              )}
             </div>
             <button
               ref={openerRef}
@@ -353,12 +348,6 @@ function MessageMeta({
             >
               <Icon.more />
             </button>
-            {m.kind === "user" && (
-              <SlotHost
-                slot="session.message.actions"
-                context={{ sessionId, kind: m.kind, messageId: m.id, eventSeq: m.eventSeq }}
-              />
-            )}
           </>
         )}
       </div>
@@ -404,12 +393,12 @@ const RESPONSE_ACTION_ICON = {
 } as const;
 
 const RESPONSE_ACTION_LABEL = {
-  copy: "Copy answer",
-  image: "Save as image",
-  plan: "Save as plan",
-  pin: "Pin into context",
-  session: "Start new session from this answer",
-  multirun: "Start new multi-run from this answer",
+  copy: tr("timeline.copyAnswer"),
+  image: tr("timeline.saveAsImage"),
+  plan: tr("timeline.saveAsPlan"),
+  pin: tr("timeline.pinIntoContext"),
+  session: tr("timeline.startNewSessionFromThisAnswer"),
+  multirun: tr("timeline.startNewMultiRunFromThisAnswer"),
 } as const;
 
 function downloadAnswerImage(text: string, title: string): boolean {
@@ -452,7 +441,16 @@ function downloadAnswerImage(text: string, title: string): boolean {
   return true;
 }
 
-function AssistantAgentHeader({ m, announce }: { m: AssistantMsg; announce?: Announce }) {
+function AssistantAgentHeader({
+  m,
+  announce,
+  turn,
+}: {
+  m: AssistantMsg;
+  announce?: Announce;
+  /** Present only for the terminal assistant answer of the current turn. */
+  turn?: RenderModel["turn"];
+}) {
   const session = useStore((state) =>
     state.sessions.find((candidate) => candidate.id === state.activeSessionId) ?? null);
   const projectId = useStore((state) => state.activeProjectId);
@@ -460,17 +458,22 @@ function AssistantAgentHeader({ m, announce }: { m: AssistantMsg; announce?: Ann
   const models = useStore((state) => state.models);
   const prefs = useUiSettings();
   const [pinBusy, setPinBusy] = useState(false);
-  const modelRef = m.model ?? session?.model;
+  const modelRef = turn?.model ?? m.model ?? session?.model;
   const descriptor = modelRef
     ? models.find((candidate) =>
         candidate.providerID === modelRef.providerID && candidate.modelID === modelRef.modelID)
     : undefined;
   const modelName = descriptor?.name ?? modelRef?.modelID ?? "Polyth";
-  const agent = (m.agent ?? session?.agent ?? "Build").replace(/[-_]+/g, " ");
-  const agentName = agent ? agent[0]!.toUpperCase() + agent.slice(1) : "Build";
-  const duration = m.completedAt !== undefined
-    ? normalizedDuration(Math.max(0, m.completedAt - m.time))
-    : "Running";
+  const agent = (turn?.agent ?? m.agent ?? session?.agent ?? tr("composer.build")).replace(/[-_]+/g, " ");
+  const agentName = agent ? agent[0]!.toUpperCase() + agent.slice(1) : tr("composer.build");
+  const wholeTurnDuration = turnDurationMs(turn ?? null);
+  const duration = wholeTurnDuration !== null
+    ? normalizedDuration(wholeTurnDuration)
+    : m.completedAt !== undefined
+      ? normalizedDuration(Math.max(0, m.completedAt - m.time))
+      : null;
+  const usage = turn?.usage?.tokens;
+  const hasUsage = usage !== undefined && (usage.input > 0 || usage.output > 0);
   let pinned = false;
   for (const event of events) {
     if (Number((event.data as { sourceEventSeq?: unknown }).sourceEventSeq) !== m.eventSeq) continue;
@@ -479,11 +482,11 @@ function AssistantAgentHeader({ m, announce }: { m: AssistantMsg; announce?: Ann
   }
   const runAction = (id: (typeof prefs.responseActions)[number]) => {
     if (id === "copy") {
-      void copyText(m.text).then((ok) => announce?.(ok ? "Answer copied" : "Couldn’t copy answer"));
+      void copyText(m.text).then((ok) => announce?.(ok ? tr("timeline.answerCopied") : tr("timeline.couldnTCopyAnswer")));
       return;
     }
     if (id === "image") {
-      announce?.(downloadAnswerImage(m.text, modelName) ? "Answer image saved" : "Couldn’t save answer image");
+      announce?.(downloadAnswerImage(m.text, modelName) ? tr("timeline.answerImageSaved") : tr("timeline.couldnTSaveAnswerImage"));
       return;
     }
     if (id === "plan") {
@@ -491,10 +494,10 @@ function AssistantAgentHeader({ m, announce }: { m: AssistantMsg; announce?: Ann
       void api.knowledgeCreate({
         projectId,
         kind: "plan",
-        title: `${modelName} plan · ${timeShort(assistantTime(m))}`,
+        title: tr("timeline.valuePlanValue", { modelName: modelName, value: timeShort(assistantTime(m)) }),
         body: m.text,
         ...(session ? { sourceSessionId: session.id } : {}),
-      }).then(() => announce?.("Answer saved as a plan"))
+      }).then(() => announce?.(tr("timeline.answerSavedAsAPlan")))
         .catch((error) => setUiError(error instanceof Error ? error.message : String(error)));
       return;
     }
@@ -521,39 +524,45 @@ function AssistantAgentHeader({ m, announce }: { m: AssistantMsg; announce?: Ann
         providerName={descriptor?.providerName}
         className="agent-reply-mark"
       />
-      <strong className="agent-reply-model">{modelName}</strong>
-      <span className="agent-type-badge">{agentName}</span>
-      <span className="agent-reply-duration">{duration}</span>
-      <time dateTime={timeIso(assistantTime(m))}>{timeShort(assistantTime(m))}</time>
-      {m.finalized && (
-        <span className="agent-reply-actions" aria-label="Answer actions">
-          {prefs.responseActions.map((id) => {
-            const Glyph = RESPONSE_ACTION_ICON[id];
-            const label = id === "pin" && pinned ? "Unpin from context" : RESPONSE_ACTION_LABEL[id];
-            return (
-              <button
-                key={id}
-                className={id === "pin" && pinned ? "active" : ""}
-                aria-label={label}
-                title={label}
-                draggable
-                onDragStart={(event) => event.dataTransfer.setData("text/polyth-response-action", id)}
-                onDragOver={(event) => event.preventDefault()}
-                onDrop={(event) => {
-                  event.preventDefault();
-                  const dragged = event.dataTransfer.getData("text/polyth-response-action") as typeof id;
-                  if (!prefs.responseActions.includes(dragged) || dragged === id) return;
-                  const next = prefs.responseActions.filter((candidate) => candidate !== dragged);
-                  next.splice(next.indexOf(id), 0, dragged);
-                  setUiSettings({ responseActions: next });
-                }}
-                disabled={(id === "pin" && pinBusy) || ((id === "plan" || id === "session") && !projectId)}
-                onClick={() => runAction(id)}
-              ><Glyph /></button>
-            );
-          })}
+      <span className="agent-reply-item agent-reply-model">{modelName}</span>
+      <span className="agent-reply-item agent-reply-mode">{agentName}</span>
+      {duration && <span className="agent-reply-item agent-reply-duration">{duration}</span>}
+      {hasUsage && (
+        <span
+          className="agent-reply-item agent-reply-usage"
+          aria-label={tr("timeline.valueInputTokensAndValue", { input: usage.input, output: usage.output })}
+        >
+          {fmtTokens(usage.input)} <span aria-hidden="true">↓</span>{"\u00a0"}{fmtTokens(usage.output)} <span aria-hidden="true">↑</span>
         </span>
       )}
+      <time className="agent-reply-item" dateTime={timeIso(assistantTime(m))}>{timeShort(assistantTime(m))}</time>
+      <span className="agent-reply-actions" aria-label={tr("timeline.answerActions")}>
+        {prefs.responseActions.map((id) => {
+          const Glyph = RESPONSE_ACTION_ICON[id];
+          const label = id === "pin" && pinned ? tr("timeline.unpinFromContext") : RESPONSE_ACTION_LABEL[id];
+          return (
+            <button
+              key={id}
+              className={id === "pin" && pinned ? "active" : ""}
+              aria-label={label}
+              title={label}
+              draggable
+              onDragStart={(event) => event.dataTransfer.setData("text/polyth-response-action", id)}
+              onDragOver={(event) => event.preventDefault()}
+              onDrop={(event) => {
+                event.preventDefault();
+                const dragged = event.dataTransfer.getData("text/polyth-response-action") as typeof id;
+                if (!prefs.responseActions.includes(dragged) || dragged === id) return;
+                const next = prefs.responseActions.filter((candidate) => candidate !== dragged);
+                next.splice(next.indexOf(id), 0, dragged);
+                setUiSettings({ responseActions: next });
+              }}
+              disabled={(id === "pin" && pinBusy) || ((id === "plan" || id === "session") && !projectId)}
+              onClick={() => runAction(id)}
+            ><Glyph /></button>
+          );
+        })}
+      </span>
     </header>
   );
 }
@@ -563,16 +572,18 @@ function AssistantView({
   announce,
   plan,
   regeneratePrompt,
+  turn,
 }: {
   m: AssistantMsg;
   announce?: Announce;
   plan?: NonNullable<RenderModel["tasks"]>;
   regeneratePrompt?: string;
+  turn?: RenderModel["turn"];
 }) {
   const hasAnswer = m.text !== "" || !m.finalized;
   const galleryAvailable = /!\[[^\]]*]\([^)]+\)/.test(m.text);
   const openGallery = () => {
-    const message = Array.from(document.querySelectorAll<HTMLElement>(".msg.assistant"))
+    const message = Array.from(document.querySelectorAll<HTMLElement>(tr("timeline.msgAssistant")))
       .find((candidate) => candidate.dataset.messageSeq === String(m.eventSeq));
     message?.querySelector<HTMLButtonElement>(".md-img-btn")?.click();
   };
@@ -581,16 +592,16 @@ function AssistantView({
     : undefined;
   return (
     <div className="msg assistant" data-message-seq={m.eventSeq} {...(articleProps ?? {})}>
-      {m.reasoning !== "" && <Thinking m={m} announce={announce} />}
+      {m.reasoning !== "" && <Thinking m={m} />}
       {hasAnswer && (
         <div className="bubble" dir="auto">{renderMarkdown(m.text || "", m.id)}{!m.finalized && <span className="caret" />}</div>
       )}
       {plan && plan.items.length > 0 && (
-        <section className="message-plan-card" aria-label="Current task plan">
+        <section className="message-plan-card" aria-label={tr("timeline.currentTaskPlan")}>
           <div className="message-plan-head">
             <span className="message-plan-icon">✓</span>
-            <strong>Plan</strong>
-            <span>{plan.items.filter((item) => item.status === "done").length} of {plan.items.length}</span>
+            <strong>{tr("timeline.plan2")}</strong>
+            <span>{plan.items.filter((item) => item.status === "done").length} {tr("timeline.of")}{" "}{plan.items.length}</span>
           </div>
           <div className="message-plan-progress">
             <i style={{ width: `${Math.round((plan.items.filter((item) => item.status === "done").length / plan.items.length) * 100)}%` }} />
@@ -606,9 +617,9 @@ function AssistantView({
         </section>
       )}
       {m.finalized && m.text !== "" && announce && galleryAvailable && (
-        <button className="assistant-gallery-shortcut" onClick={openGallery}><Icon.image /> Open answer images</button>
+        <button className="assistant-gallery-shortcut" onClick={openGallery}><Icon.image /> {tr("timeline.openAnswerImages")}</button>
       )}
-      <AssistantAgentHeader m={m} announce={announce} />
+      {m.finalized && hasAnswer && <AssistantAgentHeader m={m} announce={announce} turn={turn} />}
     </div>
   );
 }
@@ -648,7 +659,7 @@ function ClampedPre({ cls, text, shell = false }: { cls: string; text: string; s
       <CopyButton text={text} />
       {long && (
         <button className="small-btn show-all" onClick={() => setFull((v) => !v)}>
-          {full ? "Collapse" : "Show all"}
+          {full ? tr("timeline.collapse") : tr("timeline.showAll")}
         </button>
       )}
     </div>
@@ -692,9 +703,9 @@ function ToolCard({ m }: { m: ToolMsg }) {
               <span className="err">✕</span>
             )}
           </span>
-          <span className="tool-name">{shell ? "Shell Command" : m.title || m.tool}</span>
+          <span className="tool-name">{shell ? tr("timeline.shellCommand") : m.title || m.tool}</span>
           {summary && <span className="mono muted" style={{ fontSize: "calc(11px * var(--ui-font-scale, 1))", flex: 1, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{summary}</span>}
-          <span className="tool-dur">{m.finishTime !== undefined ? fmtMs(m.finishTime - m.time) : "running…"}</span>
+          <span className="tool-dur">{m.finishTime !== undefined ? fmtMs(m.finishTime - m.time) : tr("timeline.running")}</span>
         </button>
         {shell && (
           <span className="tool-card-copy">
@@ -704,18 +715,18 @@ function ToolCard({ m }: { m: ToolMsg }) {
       </div>
       {open && <div className="tool-body">
         <div className="tool-section">
-            <div className="tool-label">{shell ? "Command" : `${m.tool} input`}</div>
+            <div className="tool-label">{shell ? tr("timeline.command") : tr("timeline.valueInput", { tool: m.tool })}</div>
           <ClampedPre cls="json" text={inputJson} />
         </div>
         {m.error !== undefined && (
           <div className="tool-section error">
-            <div className="tool-label">Error</div>
+            <div className="tool-label">{tr("common.error")}</div>
             <ClampedPre cls="json" text={m.error} />
           </div>
         )}
         {m.output !== undefined && (
           <div className="tool-section">
-            <div className="tool-label">Output</div>
+            <div className="tool-label">{tr("timeline.output")}</div>
             <ClampedPre cls="out" text={m.output} shell={shell} />
           </div>
         )}
@@ -726,12 +737,12 @@ function ToolCard({ m }: { m: ToolMsg }) {
 
 function TaskActivityRow({ activity }: { activity: TaskActivityMsg }) {
   const label = activity.action === "created"
-    ? "Task created"
+    ? tr("timeline.taskCreated")
     : activity.action === "started"
-      ? "Task started"
+      ? tr("timeline.taskStarted")
       : activity.action === "completed"
-        ? "Task completed"
-        : "Task failed";
+        ? tr("timeline.taskCompleted")
+        : tr("timeline.taskFailed");
   return (
     <div className={`task-activity ${activity.action}`}>
       <span className="task-activity-mark" aria-hidden="true">
@@ -747,13 +758,15 @@ function WorkedGroup({ g }: { g: WorkGroup }) {
   const failed = g.tools.some((t) => t.status === "error") || g.tasks.some((task) => task.action === "failed");
   const running = g.tools.some((t) => t.status === "pending") || g.tasks.some((task) => task.action === "started");
   const [open, setOpen] = useState(running || failed);
-  const updates = g.tasks.length > 0 ? ` · ${g.tasks.length} task ${g.tasks.length === 1 ? "update" : "updates"}` : "";
+  const updates = g.tasks.length > 0
+    ? ` · ${tr("timeline.taskUpdatesCount", { count: g.tasks.length })}`
+    : "";
   return (
     <div className="msg assistant">
       <button className="goal-toggle muted" style={{ fontSize: "calc(11.5px * var(--ui-font-scale, 1))", marginBottom: 6 }} onClick={() => setOpen((v) => !v)}>
         <span className="goal-chevron">{open ? "▾" : "▸"}</span>
-        {running ? "Working" : "Worked"} for {fmtDuration(g.ms)} · {g.tools.length} steps{updates}
-        {failed && <span style={{ color: "var(--red)" }}>· {g.tools.filter((t) => t.status === "error").length} failed</span>}
+        {running ? tr("timeline.working") : tr("timeline.worked")} {tr("timeline.for")}{" "}{fmtDuration(g.ms)} · {g.tools.length} {tr("timeline.steps")}{updates}
+        {failed && <span style={{ color: "var(--red)" }}>· {g.tools.filter((t) => t.status === "error").length} {tr("timeline.failed")}</span>}
       </button>
       {open && g.items.map((item) => (
         item.kind === "tool"
@@ -764,11 +777,12 @@ function WorkedGroup({ g }: { g: WorkGroup }) {
   );
 }
 
-function MessageView({ m, announce, plan, regeneratePrompt, onRevert, onFork, revert, fork }: {
+function MessageView({ m, announce, plan, regeneratePrompt, turn, onRevert, onFork, revert, fork }: {
   m: RenderMessage;
   announce?: Announce;
   plan?: NonNullable<RenderModel["tasks"]>;
   regeneratePrompt?: string;
+  turn?: RenderModel["turn"];
   onRevert?: (message: UserMsg) => void;
   onFork?: (message: UserMsg) => void;
   revert?: ActionAvailability;
@@ -784,7 +798,7 @@ function MessageView({ m, announce, plan, regeneratePrompt, onRevert, onFork, re
           )}
           {m.raw && m.raw !== m.text && (
             <div className="user-expanded-hint">
-              expanded from <code>{m.raw.split("\n")[0] ?? m.raw}</code>
+              {tr("timeline.expandedFrom")}{" "}<code>{m.raw.split("\n")[0] ?? m.raw}</code>
             </div>
           )}
         </div>
@@ -795,57 +809,10 @@ function MessageView({ m, announce, plan, regeneratePrompt, onRevert, onFork, re
     );
   }
   if (m.kind === "assistant") {
-    return <AssistantView m={m} announce={announce} plan={plan} regeneratePrompt={regeneratePrompt} />;
+    return <AssistantView m={m} announce={announce} plan={plan} regeneratePrompt={regeneratePrompt} turn={turn} />;
   }
   if (m.kind === "task") return <TaskActivityRow activity={m} />;
   return <ToolCard m={m} />;
-}
-
-function TimelineDialog({ prompts, onClose, onJump, onRevert, onFork, revert, fork, resolveRestoreFocus }: {
-  prompts: UserMsg[];
-  onClose: () => void;
-  onJump: (id: string) => void;
-  onRevert: (message: UserMsg) => void;
-  onFork: (message: UserMsg) => void;
-  revert: ActionAvailability;
-  fork: ActionAvailability;
-  resolveRestoreFocus?: (opener: HTMLElement | null) => HTMLElement | null;
-}) {
-  return (
-    <Dialog title="Session timeline" onClose={onClose} resolveRestoreFocus={resolveRestoreFocus}>
-      <div className="dialog-head">
-        <div>
-          <h2>Session timeline</h2>
-          <p className="muted">Jump, revert, or branch from any prompt.</p>
-        </div>
-        <button className="icon-btn" aria-label="Close timeline" onClick={onClose}>×</button>
-      </div>
-      <div className="timeline-dialog-list">
-        {prompts.map((message, index) => (
-          <div className="timeline-dialog-row" key={message.id}>
-            <button className="timeline-dialog-prompt" onClick={() => { onJump(message.id); onClose(); }}>
-              <span className="muted">{index + 1}</span>
-              <span dir="auto">{message.text.split("\n").find((line) => line.trim()) || "(empty prompt)"}</span>
-            </button>
-            <button
-              className="small-btn"
-              aria-label={revertActionName(message.time)}
-              title={revert.enabled ? revertActionName(message.time) : revert.reason}
-              disabled={!revert.enabled}
-              onClick={() => { onRevert(message); onClose(); }}
-            ><Icon.rewind /></button>
-            <button
-              className="small-btn"
-              aria-label={forkActionName(message.time)}
-              title={fork.enabled ? forkActionName(message.time) : fork.reason}
-              disabled={!fork.enabled}
-              onClick={() => { onFork(message); onClose(); }}
-            ><Icon.fork /></button>
-          </div>
-        ))}
-      </div>
-    </Dialog>
-  );
 }
 
 // Right-edge prompt rail (WP4, restyled after polyth PromptNavigatorRail):
@@ -857,15 +824,15 @@ function TimelineDialog({ prompts, onClose, onJump, onRevert, onFork, revert, fo
 // position, ticks swell in a proximity wave under the cursor, and hover/focus
 // reveals a recent-turns panel. Click jumps via the existing
 // jump()/scrollIntoView path. Presentation-only — no SessionEvent.
-function PromptNavigator({ prompts, onJump, onManage, containerRef }: {
+function PromptNavigator({ prompts, onJump, containerRef }: {
   prompts: Array<{ id: string; preview: string; text: string }>;
   onJump: (id: string) => void;
-  onManage: () => void;
   containerRef: RefObject<HTMLDivElement | null>;
 }) {
   const [active, setActive] = useState(-1);
   const [cursor, setCursor] = useState(-1);
   const [open, setOpen] = useState(false);
+  const [panelStart, setPanelStart] = useState(0);
   const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Scroll-spy: the active turn is the last prompt at/above the viewport
@@ -904,6 +871,7 @@ function PromptNavigator({ prompts, onJump, onManage, containerRef }: {
 
   const reveal = () => {
     if (closeTimer.current !== null) { clearTimeout(closeTimer.current); closeTimer.current = null; }
+    setPanelStart(Math.max(0, prompts.length - RAIL_PANEL_ROWS));
     setOpen(true);
   };
   // 160ms leave grace so the pointer can cross the gap into the panel.
@@ -914,8 +882,9 @@ function PromptNavigator({ prompts, onJump, onManage, containerRef }: {
 
   const { start, end } = railWindow(prompts.length, active);
   const visible = prompts.slice(start, end);
-  const recentStart = Math.max(0, prompts.length - RAIL_PANEL_ROWS);
-  const recent = prompts.slice(recentStart);
+  const maxPanelStart = Math.max(0, prompts.length - RAIL_PANEL_ROWS);
+  const currentPanelStart = Math.min(panelStart, maxPanelStart);
+  const panelPrompts = prompts.slice(currentPanelStart, currentPanelStart + RAIL_PANEL_ROWS);
   const jumpTo = (id: string) => { onJump(id); setOpen(false); setCursor(-1); };
 
   return (
@@ -924,7 +893,7 @@ function PromptNavigator({ prompts, onJump, onManage, containerRef }: {
       aria-label={PROMPT_NAV_NAME}
       onMouseEnter={reveal}
       onMouseLeave={scheduleClose}
-      onFocus={reveal}
+      onFocus={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) reveal(); }}
       onBlur={(e) => { if (!e.currentTarget.contains(e.relatedTarget as Node | null)) scheduleClose(); }}
     >
       <div
@@ -956,21 +925,18 @@ function PromptNavigator({ prompts, onJump, onManage, containerRef }: {
           );
         })}
       </div>
-      {open && recent.length > 0 && (
+      {open && panelPrompts.length > 0 && (
         <div className="prompt-nav-panel">
-          <div className="prompt-nav-panel-head">
-            <span>MANAGE TURNS{prompts.length > recent.length ? ` (${recentStart + 1}–${prompts.length} of ${prompts.length})` : ""}</span>
+          {currentPanelStart > 0 && (
             <button
-              className="prompt-nav-manage"
-              aria-label={OPEN_TIMELINE_NAME}
-              aria-haspopup="dialog"
-              onClick={() => { setOpen(false); onManage(); }}
-            >
-              <Icon.list />
-            </button>
-          </div>
-          {recent.map((p, i) => {
-            const index = recentStart + i;
+              className="prompt-nav-page"
+              aria-label={tr("timeline.showEarlierMessages")}
+              title={tr("timeline.showEarlierMessages")}
+              onClick={() => setPanelStart((value) => Math.max(0, value - RAIL_PANEL_ROWS))}
+            >↑</button>
+          )}
+          {panelPrompts.map((p, i) => {
+            const index = currentPanelStart + i;
             return (
               <button
                 key={p.id}
@@ -978,11 +944,18 @@ function PromptNavigator({ prompts, onJump, onManage, containerRef }: {
                 aria-current={index === active ? "true" : undefined}
                 onClick={() => jumpTo(p.id)}
               >
-                <span className="prompt-nav-row-index">{index + 1}</span>
-                <span className="prompt-nav-row-text">{p.preview || "(empty prompt)"}</span>
+                <span className="prompt-nav-row-text">{p.preview || tr("messageActions.emptyPrompt")}</span>
               </button>
             );
           })}
+          {currentPanelStart < maxPanelStart && (
+            <button
+              className="prompt-nav-page"
+              aria-label={tr("timeline.showLaterMessages")}
+              title={tr("timeline.showLaterMessages")}
+              onClick={() => setPanelStart((value) => Math.min(maxPanelStart, value + RAIL_PANEL_ROWS))}
+            >↓</button>
+          )}
         </div>
       )}
     </nav>
@@ -992,15 +965,18 @@ function PromptNavigator({ prompts, onJump, onManage, containerRef }: {
 // Footer under the last message once the turn ended: exactly one terminal
 // turn's own start/stop and usage (UX-MSG-ACTIONS) — see turnFooterLine().
 
-export default function Timeline({ model }: { model: RenderModel }) {
+export default function Timeline({
+  model,
+  latestRevealTarget,
+}: {
+  model: RenderModel;
+  /** An optional dock anchor places the latest-reveal control above the composer. */
+  latestRevealTarget?: HTMLElement | null;
+}) {
   const ref = useRef<HTMLDivElement>(null);
   const atBottom = useRef(true);
   const prefs = useUiSettings();
   const sessionId = useStore((s) => s.activeSessionId);
-  const [timelineOpen, setTimelineOpen] = useState(false);
-  // A prompt chosen from the CLOSING dialog hands focus to the jump target
-  // (never back to the dialog opener, never BODY) — §2.3.
-  const dialogFocusHandoff = useRef(false);
   // L13 windowing: only the last `limit` rows render (see timelineWindow.ts).
   const [limit, setLimit] = useState(TIMELINE_WINDOW);
   const anchor = useRef<{ scrollTop: number; scrollHeight: number } | null>(null);
@@ -1096,10 +1072,10 @@ export default function Timeline({ model }: { model: RenderModel }) {
   const archived = useStore((s) => s.sessions.find((x) => x.id === s.activeSessionId)?.status === "archived");
   const pendingQuestion = model.questions.some((question) => question.status === "pending");
   const emptyCopy = archived
-    ? "This archived session has no messages. Restore it below to continue."
+    ? tr("timeline.archivedSessionNoMessages")
     : pendingQuestion
-      ? "Answer the pending question below to continue."
-      : "No messages yet.";
+      ? tr("timeline.answerPendingQuestion")
+      : tr("timeline.noMessagesYet");
   const [queuedCount, setQueuedCount] = useState(0);
   useEffect(() => {
     if (!sessionId) { setQueuedCount(0); return; }
@@ -1111,16 +1087,11 @@ export default function Timeline({ model }: { model: RenderModel }) {
   const revertOk = revertAvailability(guards);
   const forkOk = forkAvailability(guards);
 
-  const footer = turnFooterLine(model);
   const visibleMessages = useMemo(() => model.messages.filter((message) => !message.undone), [model.version]);
   const undoneMessages = useMemo(() => model.messages.filter((message) => message.undone), [model.version]);
   const rows = useMemo(() => groupWork(mergeThinking(visibleMessages)), [visibleMessages]);
   const undoneRows = useMemo(() => groupWork(mergeThinking(undoneMessages)), [undoneMessages]);
   const prompts = useMemo(() => promptIndex(visibleMessages), [visibleMessages]);
-  const promptMessages = useMemo(
-    () => visibleMessages.filter((message): message is UserMsg => message.kind === "user"),
-    [visibleMessages],
-  );
   const showNav = prefs.promptNavigator === "on" || (prefs.promptNavigator === "auto" && prompts.length >= 3);
   // Regenerate resends the user prompt that produced each answer. One forward
   // pass — never a reverse scan per assistant row per streaming render.
@@ -1235,6 +1206,11 @@ export default function Timeline({ model }: { model: RenderModel }) {
     target.tabIndex = -1;
     target.focus({ preventScroll: true });
   };
+  const latestReveal = showJump && !pendingQuestion ? (
+    <div className="timeline-reveal">
+      <button className="jump-latest" aria-label={JUMP_TO_LATEST_NAME} title={JUMP_TO_LATEST_NAME} onClick={jumpToLatest}>↓</button>
+    </div>
+  ) : null;
   // Revert and edit: append the marker, then seed the composer with the exact
   // raw prompt + attachments (marker-owned; replay derives the same draft).
   const revert = (message: UserMsg) => {
@@ -1284,7 +1260,7 @@ export default function Timeline({ model }: { model: RenderModel }) {
       discardComposerSeed(sessionId);
       requestComposerReplace("");
       setConfirmRestore(false);
-      announce("Original timeline restored");
+      announce(tr("timeline.originalTimelineRestored"));
       requestAnimationFrame(() => {
         if (invoker && document.contains(invoker)) { invoker.focus(); return; }
         const el = ref.current;
@@ -1321,7 +1297,7 @@ export default function Timeline({ model }: { model: RenderModel }) {
       <div
         className="timeline"
         role="region"
-        aria-label="Conversation timeline"
+        aria-label={tr("timeline.conversationTimeline")}
         tabIndex={-1}
         ref={ref}
         onScroll={onScroll}
@@ -1335,11 +1311,9 @@ export default function Timeline({ model }: { model: RenderModel }) {
         {start > 0 && (
           <div className="timeline-earlier">
             <button className="small-btn" onClick={() => reveal(grownLimit(rows.length, limit))}>
-              Show {Math.min(TIMELINE_CHUNK, start)} earlier
-            </button>
+              {tr("timeline.show")}{" "}{Math.min(TIMELINE_CHUNK, start)} {tr("timeline.earlier")}</button>
             <button className="small-btn" onClick={() => reveal(rows.length)}>
-              Show all ({start} hidden)
-            </button>
+              {tr("timeline.showAll2")}{start} {tr("timeline.hidden")}</button>
           </div>
         )}
         {shownRows.map((r) => (
@@ -1351,6 +1325,7 @@ export default function Timeline({ model }: { model: RenderModel }) {
                 m={r}
                 plan={r.kind === "assistant" && r.id === latestAssistantId && model.tasks ? model.tasks : undefined}
                 regeneratePrompt={r.kind === "assistant" ? regenerateSources.get(r.eventSeq) : undefined}
+                turn={r.kind === "assistant" && r.id === latestAssistantId && turn?.status !== "working" ? turn : undefined}
                 announce={announce}
                 onRevert={revert}
                 onFork={fork}
@@ -1363,15 +1338,14 @@ export default function Timeline({ model }: { model: RenderModel }) {
         {/* The dock confirmation sits OUTSIDE the collapsible tail: it must be
             visible even while the reverted items stay folded away. */}
         {confirmRestore && model.rewind && undoneRows.length > 0 && (
-          <div className="rewound-confirm" role="group" aria-label="Confirm restore">
-            <span>You edited the draft. Restoring the original timeline discards it.</span>
+          <div className="rewound-confirm" role="group" aria-label={tr("timeline.confirmRestore")}>
+            <span>{tr("timeline.youEditedTheDraftRestoringTheOriginal")}</span>
             <button
               className="small-btn"
               onClick={(event) => restore({ confirmed: true, invoker: event.currentTarget })}
-            >Restore and discard the edited draft</button>
+            >{tr("timeline.restoreAndDiscardTheEditedDraft")}</button>
             <button className="small-btn" onClick={() => setConfirmRestore(false)}>
-              Keep editing the draft
-            </button>
+              {tr("timeline.keepEditingTheDraft")}</button>
           </div>
         )}
         {/* The collapsed tail exists only while the revert is ACTIVE. After a
@@ -1380,7 +1354,7 @@ export default function Timeline({ model }: { model: RenderModel }) {
         {model.rewind && undoneRows.length > 0 && (
           <details className="rewound-tail">
             <summary>
-              <span>{undoneMessages.length} reverted timeline {undoneMessages.length === 1 ? "item" : "items"}</span>
+              <span>{undoneMessages.length} {tr("timeline.revertedTimeline")}{" "}{undoneMessages.length === 1 ? tr("timeline.item") : tr("timeline.items")}</span>
               {model.rewind && !confirmRestore && (
                 <button
                   className="small-btn"
@@ -1388,7 +1362,7 @@ export default function Timeline({ model }: { model: RenderModel }) {
                     event.preventDefault();
                     restore({ invoker: event.currentTarget });
                   }}
-                >Restore original timeline</button>
+                >{tr("timeline.restoreOriginalTimeline")}</button>
               )}
             </summary>
             <div className="rewound-tail-body">
@@ -1403,19 +1377,20 @@ export default function Timeline({ model }: { model: RenderModel }) {
         {turnBroken && (
           <div className="turn-error" role="alert">
             <span className="turn-error-text">
-              {turn.status === "aborted" ? "Turn aborted" : "Turn failed"}
+              {turn.status === "aborted" ? tr("timeline.turnAborted") : tr("timeline.turnFailed")}
               {turn.error ? ` — ${turn.error}` : ""}
             </span>
-            {turn.error && <CopyButton text={turn.error} />}
             {lastUser && (
-              <button className="small-btn" onClick={() => void sendMessage(lastUser.text)}>Retry</button>
-            )}
-            {turn.status === "failed" && (
-              <button className="small-btn" onClick={() => openSettingsPage("models")}>Open settings</button>
+              <button
+                type="button"
+                className="turn-error-retry"
+                title={tr("timeline.retryTheLastMessage")}
+                aria-label={tr("timeline.retryTheLastMessage")}
+                onClick={() => void sendMessage(lastUser.text)}
+              ><Icon.refresh /></button>
             )}
           </div>
         )}
-        {footer && <div className="turn-footer">{footer}</div>}
         <div className="msg-live" role="status" aria-live="polite">{liveText}</div>
         <SlotHost slot="session.timeline.after" context={slotSummary} />
       </div>
@@ -1423,29 +1398,12 @@ export default function Timeline({ model }: { model: RenderModel }) {
         <PromptNavigator
           prompts={prompts}
           onJump={jump}
-          onManage={() => { dialogFocusHandoff.current = false; setTimelineOpen(true); }}
           containerRef={ref}
         />
       )}
-      {showJump && (
-        <div className="timeline-reveal">
-          <button className="jump-latest" aria-label={JUMP_TO_LATEST_NAME} title={JUMP_TO_LATEST_NAME} onClick={jumpToLatest}>↓</button>
-        </div>
-      )}
+      {latestReveal && (latestRevealTarget ? createPortal(latestReveal, latestRevealTarget) : latestReveal)}
       </div>
       <SelectionMenu container={ref} />
-      {timelineOpen && (
-        <TimelineDialog
-          prompts={promptMessages}
-          onClose={() => setTimelineOpen(false)}
-          onJump={(id) => { dialogFocusHandoff.current = true; jump(id, { focus: true }); }}
-          onRevert={revert}
-          onFork={fork}
-          revert={revertOk}
-          fork={forkOk}
-          resolveRestoreFocus={(opener) => (dialogFocusHandoff.current ? null : opener)}
-        />
-      )}
     </div>
   );
 }

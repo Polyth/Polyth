@@ -14,6 +14,8 @@ const { installBuiltinMiniWidgets, WORKFLOW_WIDGET_PLUGIN } =
 const { installUsagePlugin, USAGE_WIDGET_PLUGIN } = await import("../src/widgets/usagePlugin.tsx");
 const { installGithubPlugin, GITHUB_WIDGET_PLUGIN } = await import("../src/widgets/githubPlugin.tsx");
 
+installBuiltinMiniWidgets();
+
 test("built-in catalog covers the complete default canvas", () => {
   const widgets = listWidgets();
   const byId = new Map(widgets.map((widget) => [widget.id, widget]));
@@ -67,6 +69,13 @@ test("feature-owned Git and Terminal widgets contribute through the catalog slot
     assert.equal(contributions.get(id)?.meta?.pluginId, pluginId);
     assert.equal(listWidgets().find((widget) => widget.id === id)?.pluginId, pluginId);
   }
+});
+
+test("Terminal header launcher is not dependent on the configurable widget registry", () => {
+  assert.equal(listWidgets().some((widget) => widget.id === "terminal.open-action"), false);
+  const search = listWidgets().find((widget) => widget.id === "shell.search");
+  assert.equal(search?.defaultSlot, "app.header.actions");
+  assert.equal(search?.kind, "mini-widget");
 });
 
 test("Usage plugin owns all package-declared usage widgets", () => {
