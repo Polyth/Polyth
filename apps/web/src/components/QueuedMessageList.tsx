@@ -5,6 +5,7 @@ import type { QueueItemDto } from "@polyth/contracts";
 import { api } from "../api.ts";
 import { useStore } from "../store.ts";
 import { announce } from "./a11y/live.tsx";
+import { tr } from "../i18n/index.ts";
 
 const QUEUE_DRAG_TYPE = "application/x-polyth-queued-message";
 
@@ -53,7 +54,7 @@ export default function QueuedMessageList({
       const updated = await api.queueReorder(sessionId, next.map((item) => item.id));
       setItems(updated);
       const position = updated.findIndex((item) => item.id === movedId);
-      announce(`Queued message moved to position ${position + 1} of ${updated.length}`);
+      announce(tr("queuedmessagelist.queuedMessageMovedToPositionValueOf", { value: position + 1, length: updated.length }));
     } catch {
       refresh(); // reorder rejected (dispatch raced) — resync
     }
@@ -77,14 +78,14 @@ export default function QueuedMessageList({
   const remove = async (id: string) => {
     try {
       await api.queueRemove(sessionId, id);
-      announce("Queued message removed");
+      announce(tr("queuedmessagelist.queuedMessageRemoved"));
     } finally {
       refresh();
     }
   };
 
   return (
-    <div className="queue-list" role="list" aria-label={`${visibleItems.length} queued messages`}>
+    <div className="queue-list" role="list" aria-label={tr("queuedmessagelist.valueQueuedMessages", { length: visibleItems.length })}>
       {visibleItems.map((item) => (
         <div
           key={item.id}
@@ -105,9 +106,9 @@ export default function QueuedMessageList({
           <span className="queue-grip" aria-hidden="true">⠿</span>
           <span className="queue-pos">#{item.position + 1}</span>
           <span className="queue-text" title={item.text}>{item.text}</span>
-          <span className="muted queue-delivery">{item.delivery === "steer" ? "steer" : "queued"}</span>
-          <button aria-label={`Edit queued message ${item.position + 1}`} onClick={() => onEdit?.(item)}>✎</button>
-          <button aria-label={`Remove queued message ${item.position + 1}`} onClick={() => void remove(item.id)}>✕</button>
+          <span className="muted queue-delivery">{item.delivery === "steer" ? tr("queuedmessagelist.steer") : tr("queuedmessagelist.queued")}</span>
+          <button aria-label={tr("queuedmessagelist.editQueuedMessageValue", { value: item.position + 1 })} onClick={() => onEdit?.(item)}>✎</button>
+          <button aria-label={tr("queuedmessagelist.removeQueuedMessageValue", { value: item.position + 1 })} onClick={() => void remove(item.id)}>✕</button>
         </div>
       ))}
     </div>

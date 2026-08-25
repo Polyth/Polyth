@@ -1,10 +1,11 @@
-export const BROWSER_DEVICE_PRESETS = [
-  { id: "responsive", label: "Responsive", width: 1280, height: 800 },
-  { id: "iphone-14", label: "iPhone 14", width: 390, height: 844 },
-  { id: "pixel-7", label: "Pixel 7", width: 412, height: 915 },
-  { id: "ipad-mini", label: "iPad mini", width: 768, height: 1024 },
-  { id: "laptop", label: "Laptop", width: 1366, height: 768 },
-  { id: "desktop", label: "Desktop", width: 1440, height: 900 },
+
+import { tr } from "./i18n/index.ts";export const BROWSER_DEVICE_PRESETS = [
+  { id: "responsive", label: tr("browserpreview.responsive"), width: 1280, height: 800 },
+  { id: "iphone-14", label: tr("browserpreview.iphone14"), width: 390, height: 844 },
+  { id: "pixel-7", label: tr("browserpreview.pixel7"), width: 412, height: 915 },
+  { id: "ipad-mini", label: tr("browserpreview.ipadMini"), width: 768, height: 1024 },
+  { id: "laptop", label: tr("browserpreview.laptop"), width: 1366, height: 768 },
+  { id: "desktop", label: tr("browserpreview.desktop"), width: 1440, height: 900 },
 ] as const;
 
 export type BrowserDevicePresetId = typeof BROWSER_DEVICE_PRESETS[number]["id"];
@@ -174,7 +175,7 @@ const loadImage = (src: string): Promise<HTMLImageElement> =>
   new Promise((resolve, reject) => {
     const image = new Image();
     image.onload = () => resolve(image);
-    image.onerror = () => reject(new Error("Couldn’t decode the current browser frame."));
+    image.onerror = () => reject(new Error(tr("browserpreview.couldnTDecodeTheCurrentBrowserFrame")));
     image.src = src;
   });
 
@@ -190,7 +191,7 @@ export async function renderBrowserCapture(
   canvas.height = image.naturalHeight || image.height;
   const context = canvas.getContext("2d");
   if (!context || canvas.width <= 0 || canvas.height <= 0) {
-    throw new Error("Couldn’t prepare the browser capture.");
+    throw new Error(tr("browserpreview.couldnTPrepareTheBrowserCapture"));
   }
   context.drawImage(image, 0, 0, canvas.width, canvas.height);
 
@@ -250,7 +251,7 @@ export async function renderBrowserCapture(
   const blob = await new Promise<Blob>((resolve, reject) => {
     canvas.toBlob((value) => {
       if (value) resolve(value);
-      else reject(new Error("Couldn’t encode the browser capture."));
+      else reject(new Error(tr("browserpreview.couldnTEncodeTheBrowserCapture")));
     }, "image/png");
   });
   return new File([blob], fileName, { type: "image/png" });

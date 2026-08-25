@@ -5,6 +5,7 @@
 import { useState } from "react";
 import { useStore } from "../store.ts";
 import { requestComposerInsert } from "../composerInsert.ts";
+import { tr } from "../i18n/index.ts";
 
 // dismissals are ephemeral, in-memory only (never the event log / localStorage)
 const dismissed = new Set<string>();
@@ -29,15 +30,15 @@ export default function AssistStrip() {
   };
 
   return (
-    <div className="assist-strip" role="note" aria-label="Session recap and suggestion">
+    <div className="assist-strip" role="note" aria-label={tr("assiststrip.sessionRecapAndSuggestion")}>
       <div className="assist-recap">
-        <span className="assist-tag">recap</span>
+        <span className="assist-tag">{tr("assiststrip.recap")}</span>
         <span className="assist-recap-text">{assist.recap}</span>
-        <button className="assist-dismiss" aria-label="Dismiss recap" title="Dismiss" onClick={dismiss}>×</button>
+        <button className="assist-dismiss" aria-label={tr("assiststrip.dismissRecap")} title={tr("assiststrip.dismiss")} onClick={dismiss}>{tr("assiststrip.message")}</button>
       </div>
       <button
         className="assist-chip"
-        title="Fill the composer with this suggestion (does not send)"
+        title={tr("assiststrip.fillTheComposerWithThisSuggestionDoes")}
         onClick={() => { requestComposerInsert(assist.suggestion); dismiss(); }}
       >
         <span aria-hidden>↳</span> {assist.suggestion}

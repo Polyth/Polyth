@@ -28,6 +28,7 @@ import {
   type WidgetRenderContext,
   type WidgetSettingsContext,
 } from "./catalog.ts";
+import { tr } from "../i18n/index.ts";
 
 export type SessionUsageMetric =
   | "showContext"
@@ -44,21 +45,21 @@ interface UsageMetricRow {
 }
 
 const SESSION_USAGE_METRICS: ReadonlyArray<{ id: SessionUsageMetric; label: string }> = [
-  { id: "showContext", label: "Context window" },
-  { id: "showCost", label: "Session cost" },
-  { id: "showInput", label: "Input tokens" },
-  { id: "showOutput", label: "Output tokens" },
-  { id: "showTotal", label: "Total tokens" },
+  { id: "showContext", label: tr("widgets.usageplugin.contextWindow") },
+  { id: "showCost", label: tr("widgets.usageplugin.sessionCost") },
+  { id: "showInput", label: tr("widgets.usageplugin.inputTokens") },
+  { id: "showOutput", label: tr("widgets.usageplugin.outputTokens") },
+  { id: "showTotal", label: tr("widgets.usageplugin.totalTokens") },
 ];
 
 const SESSION_USAGE_SETTINGS = {
   type: "object",
   properties: {
-    showContext: { type: "boolean", title: "Context window", default: true },
-    showCost: { type: "boolean", title: "Session cost", default: true },
-    showInput: { type: "boolean", title: "Input tokens", default: true },
-    showOutput: { type: "boolean", title: "Output tokens", default: true },
-    showTotal: { type: "boolean", title: "Total tokens", default: true },
+    showContext: { type: "boolean", title: tr("widgets.usageplugin.contextWindow"), default: true },
+    showCost: { type: "boolean", title: tr("widgets.usageplugin.sessionCost"), default: true },
+    showInput: { type: "boolean", title: tr("widgets.usageplugin.inputTokens"), default: true },
+    showOutput: { type: "boolean", title: tr("widgets.usageplugin.outputTokens"), default: true },
+    showTotal: { type: "boolean", title: tr("widgets.usageplugin.totalTokens"), default: true },
   },
 } as const;
 
@@ -81,26 +82,26 @@ export function SessionUsageStats({
   if (usageMetricVisible(config, "showContext")) {
     rows.push({
       id: "context",
-      label: "Context",
-      value: gauge.known ? `${gauge.percent}%` : "Unknown",
+      label: tr("widgets.usageplugin.context"),
+      value: gauge.known ? `${gauge.percent}%` : tr("railsurfaces.unknown"),
       ...(gauge.known
         ? { detail: `${fmtTokens(gauge.inputTokens)} / ${fmtTokens(gauge.contextTokens)}` }
         : {}),
     });
   }
   if (usageMetricVisible(config, "showInput")) {
-    rows.push({ id: "input", label: "Input", value: fmtTokens(model.totals.input) });
+    rows.push({ id: "input", label: tr("widgets.usageplugin.input"), value: fmtTokens(model.totals.input) });
   }
   if (usageMetricVisible(config, "showOutput")) {
-    rows.push({ id: "output", label: "Output", value: fmtTokens(model.totals.output) });
+    rows.push({ id: "output", label: tr("widgets.usageplugin.output"), value: fmtTokens(model.totals.output) });
   }
   if (usageMetricVisible(config, "showTotal")) {
-    rows.push({ id: "total", label: "Total", value: fmtTokens(total) });
+    rows.push({ id: "total", label: tr("widgets.usageplugin.total"), value: fmtTokens(total) });
   }
   if (usageMetricVisible(config, "showCost")) {
     rows.push({
       id: "cost",
-      label: "Cost",
+      label: tr("widgets.usageplugin.cost"),
       value: model.totals.cost > 0 ? fmtCost(model.totals.cost) : "—",
     });
   }
@@ -113,7 +114,7 @@ export function SessionUsageStats({
           {row.detail && <small>{row.detail}</small>}
         </div>
       ))}
-      {rows.length === 0 && <div className="widget-empty">Choose metrics in widget settings.</div>}
+      {rows.length === 0 && <div className="widget-empty">{tr("widgets.usageplugin.chooseMetricsInWidgetSettings")}</div>}
     </div>
   );
 }
@@ -144,11 +145,11 @@ function ProviderQuotasWidget() {
   return (
     <div className="usage-widget-panel">
       {snapshots.length === 0 && (
-        <div className="widget-empty">No providers discovered. Sign in through OpenCode or Claude Code; credentials stay on the server.</div>
+        <div className="widget-empty">{tr("widgets.usageplugin.noProvidersDiscoveredSignInThroughOpencode")}</div>
       )}
       {visible.length > 0 && <QuotaOverviewGrid snapshots={visible} />}
       {snapshots.length > 0 && (
-        <div className="quota-visibility" aria-label="Visible quota providers">
+        <div className="quota-visibility" aria-label={tr("widgets.usageplugin.visibleQuotaProviders")}>
           {snapshots.map((snapshot) => (
             <label key={snapshot.providerId} className="plugin-toggle">
               <input
@@ -163,7 +164,7 @@ function ProviderQuotasWidget() {
         </div>
       )}
       {snapshots.length > 0 && visible.length === 0 && (
-        <div className="widget-empty">All providers are hidden.</div>
+        <div className="widget-empty">{tr("widgets.usageplugin.allProvidersAreHidden")}</div>
       )}
       {visible.length > 0 && (
         <div className="quota-grid">
@@ -180,14 +181,14 @@ function ProjectUsageWidget({ projectId }: { projectId: string | null }) {
   const sessions = useStore((state) => state.sessions);
   const mine = sessions.filter((session) => session.projectId === projectId);
   const totals = projectUsageStats(mine);
-  if (!projectId) return <div className="widget-empty">Choose a project to see usage.</div>;
-  if (mine.length === 0) return <div className="widget-empty">Usage appears once sessions run in this project.</div>;
+  if (!projectId) return <div className="widget-empty">{tr("widgets.usageplugin.chooseAProjectToSeeUsage")}</div>;
+  if (mine.length === 0) return <div className="widget-empty">{tr("widgets.usageplugin.usageAppearsOnceSessionsRunInThis")}</div>;
   return (
     <div className="usage-widget-panel">
       <div className="widget-stat-grid">
-        <div><span>Sessions</span><strong>{totals.sessions}</strong></div>
-        <div><span>Tokens</span><strong>{fmtTokens(totals.tokens)}</strong></div>
-        <div><span>Cost</span><strong>{totals.cost > 0 ? fmtCost(totals.cost) : "—"}</strong></div>
+        <div><span>{tr("widgets.usageplugin.sessions")}</span><strong>{totals.sessions}</strong></div>
+        <div><span>{tr("widgets.usageplugin.tokens")}</span><strong>{fmtTokens(totals.tokens)}</strong></div>
+        <div><span>{tr("widgets.usageplugin.cost")}</span><strong>{totals.cost > 0 ? fmtCost(totals.cost) : "—"}</strong></div>
       </div>
       <ProviderUsageDonut sessions={mine} />
     </div>
@@ -199,22 +200,22 @@ function SessionsTableWidget({ projectId }: { projectId: string | null }) {
   const [sort, setSort] = useState<SessionUsageSort>("cost");
   const mine = sessions.filter((session) => session.projectId === projectId);
   const top = topProjectSessions(mine, sort, 12);
-  if (!projectId) return <div className="widget-empty">Choose a project to rank sessions.</div>;
-  if (mine.length === 0) return <div className="widget-empty">No project sessions to rank yet.</div>;
+  if (!projectId) return <div className="widget-empty">{tr("widgets.usageplugin.chooseAProjectToRankSessions")}</div>;
+  if (mine.length === 0) return <div className="widget-empty">{tr("widgets.usageplugin.noProjectSessionsToRankYet")}</div>;
   return (
     <div className="usage-sessions-table">
       <table>
         <thead>
           <tr>
-            <th>Session</th>
+            <th>{tr("widgets.usageplugin.session")}</th>
             <th>
               <button type="button" className={sort === "tokens" ? "active" : ""} onClick={() => setSort("tokens")}>
-                Tokens {sort === "tokens" ? "↓" : ""}
+                {tr("widgets.usageplugin.tokens")}{" "}{sort === "tokens" ? "↓" : ""}
               </button>
             </th>
             <th>
               <button type="button" className={sort === "cost" ? "active" : ""} onClick={() => setSort("cost")}>
-                Cost {sort === "cost" ? "↓" : ""}
+                {tr("widgets.usageplugin.cost")}{" "}{sort === "cost" ? "↓" : ""}
               </button>
             </th>
           </tr>
@@ -238,14 +239,14 @@ function QuotaSummaryWidget() {
   const prefs = useUsagePrefs();
   const visible = snapshots.filter((snapshot) => !prefs.hiddenProviders.includes(snapshot.providerId));
   const stats = quotaSnapshotStats(visible);
-  if (loading && snapshots.length === 0) return <div className="widget-empty" role="status">Loading quota summary…</div>;
-  if (error && snapshots.length === 0) return <div className="widget-empty" role="alert">Quota summary is unavailable. {error}</div>;
-  if (snapshots.length === 0) return <div className="widget-empty">No providers discovered from OpenCode or Claude Code.</div>;
+  if (loading && snapshots.length === 0) return <div className="widget-empty" role="status">{tr("widgets.usageplugin.loadingQuotaSummary")}</div>;
+  if (error && snapshots.length === 0) return <div className="widget-empty" role="alert">{tr("widgets.usageplugin.quotaSummaryIsUnavailable")} {error}</div>;
+  if (snapshots.length === 0) return <div className="widget-empty">{tr("widgets.usageplugin.noProvidersDiscoveredFromOpencodeOrClaude")}</div>;
   return (
     <div className="usage-quota-summary">
-      <div><strong>{stats.providerCount}</strong><span>providers</span></div>
-      <div className={stats.attentionCount > 0 ? "warn" : ""}><strong>{stats.attentionCount}</strong><span>at 80%+</span></div>
-      <div><strong>{stats.staleCount}</strong><span>stale</span></div>
+      <div><strong>{stats.providerCount}</strong><span>{tr("widgets.usageplugin.providers")}</span></div>
+      <div className={stats.attentionCount > 0 ? "warn" : ""}><strong>{stats.attentionCount}</strong><span>{tr("widgets.usageplugin.at80")}</span></div>
+      <div><strong>{stats.staleCount}</strong><span>{tr("widgets.usageplugin.stale")}</span></div>
     </div>
   );
 }
@@ -253,15 +254,15 @@ function QuotaSummaryWidget() {
 function UsageWidgetSettings() {
   return (
     <div className="builtin-widget-settings">
-      <span>Uses usage data from the active workspace context</span>
-      <small>Provider visibility and collapsed quota groups follow Settings → Usage.</small>
+      <span>{tr("widgets.usageplugin.usesUsageDataFromTheActiveWorkspace")}</span>
+      <small>{tr("widgets.usageplugin.providerVisibilityAndCollapsedQuotaGroupsFollow")}</small>
     </div>
   );
 }
 
 function SessionUsageWidgetSettings({ config, updateConfig }: WidgetSettingsContext) {
   return (
-    <div className="widget-schema-settings" aria-label="Session usage metrics">
+    <div className="widget-schema-settings" aria-label={tr("widgets.usageplugin.sessionUsageMetrics")}>
       {SESSION_USAGE_METRICS.map((metric) => (
         <label key={metric.id}>
           <input
@@ -286,12 +287,12 @@ const RENDERERS: Record<string, (context: WidgetRenderContext) => ReactNode> = {
 
 export const USAGE_WIDGET_PLUGIN = defineWidgetPlugin({
   id: "usage",
-  name: "Usage",
+  name: tr("packages.usage.usage"),
   widgets: [
     {
       id: "usage.session",
-      title: "Session usage",
-      description: "Context-window, token, and cost totals for the active session.",
+      title: tr("widgets.usageplugin.sessionUsage"),
+      description: tr("widgets.usageplugin.contextWindowTokenAndCostTotalsFor"),
       kind: "widget",
       defaultSlot: "session.composer.before",
       supportedSlots: [
@@ -316,8 +317,8 @@ export const USAGE_WIDGET_PLUGIN = defineWidgetPlugin({
     },
     {
       id: "usage.quotas",
-      title: "Provider quotas",
-      description: "Provider quota windows, utilization charts, pace, and refresh controls.",
+      title: tr("widgets.usageplugin.providerQuotas"),
+      description: tr("widgets.usageplugin.providerQuotaWindowsUtilizationChartsPaceAnd"),
       kind: "widget",
       defaultSlot: "workspace.main",
       supportedSlots: ["workspace.main", "workspace.right", "workspace.bottom"],
@@ -335,8 +336,8 @@ export const USAGE_WIDGET_PLUGIN = defineWidgetPlugin({
     },
     {
       id: "usage.project",
-      title: "Project usage",
-      description: "Project session, token, and cost totals with provider distribution.",
+      title: tr("widgets.usageplugin.projectUsage"),
+      description: tr("widgets.usageplugin.projectSessionTokenAndCostTotalsWith"),
       kind: "widget",
       defaultSlot: "workspace.main",
       supportedSlots: ["workspace.left", "workspace.main", "workspace.right"],
@@ -354,8 +355,8 @@ export const USAGE_WIDGET_PLUGIN = defineWidgetPlugin({
     },
     {
       id: "usage.sessions-table",
-      title: "Top sessions",
-      description: "Rank active-project sessions by cost or token usage.",
+      title: tr("widgets.usageplugin.topSessions"),
+      description: tr("widgets.usageplugin.rankActiveProjectSessionsByCostOr"),
       kind: "widget",
       defaultSlot: "workspace.right",
       supportedSlots: ["workspace.main", "workspace.right", "workspace.bottom"],
@@ -372,8 +373,8 @@ export const USAGE_WIDGET_PLUGIN = defineWidgetPlugin({
     },
     {
       id: "usage.quota-summary",
-      title: "Quota summary",
-      description: "Compact provider, high-utilization, and stale-feed quota counts.",
+      title: tr("widgets.usageplugin.quotaSummary"),
+      description: tr("widgets.usageplugin.compactProviderHighUtilizationAndStaleFeed"),
       kind: "mini-widget",
       defaultSlot: "workspace.header",
       supportedSlots: ["workspace.header", "workspace.left", "workspace.right"],

@@ -5,6 +5,7 @@
 // before anything reaches a native notification.
 
 import type { NotificationKind } from "@polyth/contracts";
+import { tr } from "./i18n/index.ts";
 
 /** Native and centre delivery share one normative kind contract. */
 export type NotifyKind = NotificationKind;
@@ -84,7 +85,7 @@ export function diffNotifications(
 
   const varsFor = (s: SessionSnapshot, status: string, preview = ""): Record<string, string> => ({
     project: opts.projectNames?.get(s.projectId) ?? s.projectId,
-    session: s.title || "Session",
+    session: s.title || tr("notifications.session"),
     status,
     preview,
   });
@@ -104,9 +105,12 @@ export function diffNotifications(
             key: `${s.id}:subagent:${s.status}`,
             kind: "subagent",
             sessionId: s.parentId,
-            title: parent?.title || "Delegated agent",
+            title: parent?.title || tr("notifications.delegatedAgent"),
             body: renderTemplate(template, {
-              ...varsFor(parent ?? s, failed ? "delegated agent failed" : "delegated agent finished"),
+              ...varsFor(
+                parent ?? s,
+                failed ? tr("notifications.delegatedAgentFailed") : tr("notifications.delegatedAgentFinished"),
+              ),
               preview: s.title || "",
             }),
           });
@@ -116,8 +120,11 @@ export function diffNotifications(
           key: `${s.id}:turn:${s.status}`,
           kind: failed ? "failed" : "completed",
           sessionId: s.id,
-          title: s.title || "Session",
-          body: renderTemplate(template, varsFor(s, failed ? "failed" : "finished")),
+          title: s.title || tr("notifications.session"),
+          body: renderTemplate(
+            template,
+            varsFor(s, failed ? tr("notifications.failed") : tr("notifications.finished")),
+          ),
         });
       }
     }
@@ -130,8 +137,8 @@ export function diffNotifications(
         key: `${s.id}:question:${qNow}`,
         kind: "question",
         sessionId: s.id,
-        title: s.title || "Session",
-        body: renderTemplate(template, varsFor(s, "has a question for you")),
+        title: s.title || tr("notifications.session"),
+        body: renderTemplate(template, varsFor(s, tr("notifications.hasQuestionForYou"))),
       });
     }
     const pBefore = before.attention?.permissions ?? 0;
@@ -141,8 +148,8 @@ export function diffNotifications(
         key: `${s.id}:permission:${pNow}`,
         kind: "permission",
         sessionId: s.id,
-        title: s.title || "Session",
-        body: renderTemplate(template, varsFor(s, "needs a permission decision")),
+        title: s.title || tr("notifications.session"),
+        body: renderTemplate(template, varsFor(s, tr("notifications.needsPermissionDecision"))),
       });
     }
   }

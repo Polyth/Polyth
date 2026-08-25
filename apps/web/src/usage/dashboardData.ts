@@ -1,5 +1,6 @@
 import type { SessionProjection } from "@polyth/contracts";
 import type { QuotaSnapshotDto, QuotaWindowDto } from "../api.ts";
+import { getLocale, tr } from "../i18n/index.ts";
 
 export type UsageRangeDays = 7 | 30 | 90;
 export type UsageChartMetric = "tokens" | "cost" | "sessions";
@@ -100,6 +101,7 @@ const sessionModelId = (session: SessionProjection): string =>
 
 const displayProvider = (providerId: string): string => {
   const normalized = providerId.trim().toLowerCase();
+  if (normalized === "default") return tr("composer.default");
   const known: Record<string, string> = {
     anthropic: "Claude",
     claude: "Claude",
@@ -154,7 +156,7 @@ const metricValue = (session: SessionProjection, metric: UsageChartMetric): numb
 };
 
 const shortDate = (timestamp: number): string =>
-  new Intl.DateTimeFormat("en", { month: "short", day: "numeric" }).format(timestamp);
+  new Intl.DateTimeFormat(getLocale(), { month: "short", day: "numeric" }).format(timestamp);
 
 const bucketLabel = (start: number, end: number): string => {
   const first = shortDate(start);

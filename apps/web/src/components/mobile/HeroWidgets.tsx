@@ -4,6 +4,7 @@
 import { useSyncExternalStore, type ReactNode } from "react";
 import Sheet, { SheetRow } from "./Sheet.tsx";
 import { Icon } from "../../icons.tsx";
+import { tr } from "../../i18n/index.ts";
 
 export type HeroWidgetId = "starters" | "recent";
 
@@ -58,7 +59,7 @@ export function HeroWidget({ id, children }: { id: HeroWidgetId; children: React
 
 export function HeroWidgetSettings({ onClose }: { onClose: () => void }) {
   const value = useHeroWidgetPrefs();
-  const label: Record<HeroWidgetId, string> = { starters: "Quick starters", recent: "Recent sessions" };
+  const label: Record<HeroWidgetId, string> = { starters: tr("mobile.herowidgets.quickStarters"), recent: tr("mobile.herowidgets.recentSessions") };
   const move = (id: HeroWidgetId, delta: number) => {
     const at = value.order.indexOf(id);
     const target = value.order[at + delta];
@@ -69,24 +70,24 @@ export function HeroWidgetSettings({ onClose }: { onClose: () => void }) {
     commit({ ...value, order });
   };
   return (
-    <Sheet title="New chat widgets" className="hero-widget-sheet" onClose={onClose}>
-      <p className="sheet-empty">Choose what appears before the composer. Widgets can also be added by plugins.</p>
-      <div role="listbox" aria-label="New chat widgets">
+    <Sheet title={tr("mobile.herowidgets.newChatWidgets")} className="hero-widget-sheet" onClose={onClose}>
+      <p className="sheet-empty">{tr("mobile.herowidgets.chooseWhatAppearsBeforeTheComposerWidgets")}</p>
+      <div role="listbox" aria-label={tr("mobile.herowidgets.newChatWidgets")}>
         {value.order.map((id, index) => {
           const hidden = value.hidden.includes(id);
           return (
             <SheetRow
               key={id}
               title={label[id]}
-              meta={hidden ? "Hidden" : "Visible"}
+              meta={hidden ? tr("projectfolderdialog.hidden") : tr("mobile.herowidgets.visible")}
               icon={id === "starters" ? <Icon.target /> : <Icon.clock />}
               onClick={() => commit({
                 ...value,
                 hidden: hidden ? value.hidden.filter((item) => item !== id) : [...value.hidden, id],
               })}
               trailing={<span className="sheet-row-tools">
-                <button type="button" className="sheet-row-tool" aria-label={`Move ${label[id]} up`} disabled={index === 0} onClick={() => move(id, -1)}>↑</button>
-                <button type="button" className="sheet-row-tool" aria-label={`Move ${label[id]} down`} disabled={index === value.order.length - 1} onClick={() => move(id, 1)}>↓</button>
+                <button type="button" className="sheet-row-tool" aria-label={tr("mobile.herowidgets.moveValueUp", { value: label[id] })} disabled={index === 0} onClick={() => move(id, -1)}>↑</button>
+                <button type="button" className="sheet-row-tool" aria-label={tr("mobile.herowidgets.moveValueDown", { value: label[id] })} disabled={index === value.order.length - 1} onClick={() => move(id, 1)}>↓</button>
               </span>}
             />
           );

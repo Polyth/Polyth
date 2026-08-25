@@ -2,6 +2,7 @@
 // searchable descriptor; plugin pages may add items through their slot props.
 // Search is diacritic-insensitive and groups hits by page; the view routes to
 // the page then focuses/flashes the exact row via its focusTarget.
+import { tr } from "../i18n/index.ts";
 
 export interface SettingsSearchItem {
   id: string;
@@ -61,32 +62,33 @@ export function searchSettingsItems(
 // ---- built-in item descriptors ---------------------------------------------------
 
 const BUILTIN_ITEMS: SettingsSearchItem[] = [
-  { id: "projects.canvas", pageId: "projects", label: "Project canvas setup", description: "Per-project starting arrangement and widgets", keywords: ["preset", "starting setup", "workspace", "canvas"], focusTarget: "projects.canvas" },
-  { id: "appearance.theme", pageId: "appearance", label: "Theme", description: "Search bundled, system, and custom color themes", keywords: ["appearance", "dark", "light", "palette", "colors"], focusTarget: "appearance.theme" },
-  { id: "appearance.fontFamily", pageId: "appearance", label: "Interface font", keywords: ["typeface", "system", "serif", "sans", "mono"], focusTarget: "appearance.fontFamily" },
-  { id: "appearance.density", pageId: "appearance", label: "Density", keywords: ["compact", "balanced", "comfortable", "spacing"], focusTarget: "appearance.density" },
-  { id: "appearance.fontSize", pageId: "appearance", label: "Font size", keywords: ["text", "scale"], focusTarget: "appearance.fontSize" },
-  { id: "appearance.editorFontSize", pageId: "appearance", label: "Terminal font size", description: "Terminal input and output", keywords: ["terminal", "monospace", "code", "px"], focusTarget: "appearance.editorFontSize" },
-  { id: "appearance.rounding", pageId: "appearance", label: "Corner rounding", keywords: ["square", "rounded", "radius", "corners"], focusTarget: "appearance.rounding" },
-  { id: "appearance.menuItems", pageId: "appearance", label: "Menu items", description: "Optional composer and workspace actions", keywords: ["technical", "dictation", "quick actions", "toolbar"], focusTarget: "appearance.menuItems" },
-  { id: "chat.width", pageId: "chat", label: "Conversation width", keywords: ["wide", "layout"], focusTarget: "chat.width" },
-  { id: "chat.followUp", pageId: "chat", label: "While the agent is working", description: "Steer, queue, or interrupt", keywords: ["delivery", "steer", "queue", "interrupt"], focusTarget: "chat.followUp" },
-  { id: "chat.thinking", pageId: "chat", label: "Thinking blocks", keywords: ["reasoning", "collapse"], focusTarget: "chat.thinking" },
-  { id: "chat.messageActions", pageId: "chat", label: "Message actions", description: "Show or hide Copy, Revert, and Fork controls", keywords: ["hover", "quick actions", "buttons"], focusTarget: "chat.messageActions" },
-  { id: "chat.copyFormat", pageId: "chat", label: "Copy format", description: "Copy messages as Markdown or JSON", keywords: ["clipboard", "markdown", "json"], focusTarget: "chat.copyFormat" },
-  { id: "notifications.desktop", pageId: "notifications", label: "Desktop notification", keywords: ["alert", "browser"], focusTarget: "notifications.desktop" },
-  { id: "notifications.sound", pageId: "notifications", label: "Completion sound", keywords: ["beep", "audio"], focusTarget: "notifications.sound" },
-  { id: "notifications.centreHistory", pageId: "notifications", label: "Centre history", description: "Keep read notifications visible in the notification centre", keywords: ["inbox", "bell", "read", "notification centre"], focusTarget: "notifications.centreHistory" },
-  { id: "behavior.confirmArchive", pageId: "behavior", label: "Confirm before archiving sessions", keywords: ["archive", "safety"], focusTarget: "behavior.confirmArchive" },
-  { id: "behavior.autosave", pageId: "behavior", label: "Editor autosave", keywords: ["save", "revision"], focusTarget: "behavior.autosave" },
-  { id: "behavior.instructions", pageId: "behavior", label: "Global instructions", description: "Behavior text applied to every agent (global AGENTS.md)", keywords: ["agents.md", "system prompt", "rules"], focusTarget: "behavior.instructions" },
-  { id: "widgets.capabilities", pageId: "widgets", label: "Workspace button places", description: "Arrange tools in the centered Chat top rail and right rail", keywords: ["zones", "header", "rail", "buttons", "placement", "hide"], focusTarget: "widgets.capabilities" },
-  { id: "widgets.actions", pageId: "widgets", label: "Composer and header actions", description: "Show or hide composer, session header, and app header buttons", keywords: ["composer", "actions", "mini widgets", "toolbar"], focusTarget: "widgets.actions" },
-  { id: "about.info", pageId: "about", label: "Application URL", description: "Server address, data directory, and capabilities", keywords: ["about", "version", "health", "url"], focusTarget: "about.info" },
-  { id: "sessions.defaultModel", pageId: "sessions", label: "Global default model", description: "Default model for new sessions and projects", keywords: ["session", "provider", "model"], focusTarget: "sessions.defaultModel" },
-  { id: "projects.modelMemory", pageId: "projects", label: "Remember project model selection", description: "Use the last selected model for new sessions in each project", keywords: ["session", "project", "model", "default", "memory"], focusTarget: "projects.modelMemory" },
-  { id: "git.personas", pageId: "git", label: "Git personas", description: "Repository-local commit author identities", keywords: ["author", "email", "identity"], focusTarget: "git.personas" },
-  { id: "sessions.worktree", pageId: "sessions", label: "Worktree behavior", keywords: ["session", "fresh worktree", "project root"], focusTarget: "sessions.worktree" },
+  { id: "general.language", pageId: "general", label: tr("settings.registry.language"), description: tr("settings.registry.interfaceLanguageAndRegionalFormatting"), keywords: ["locale", "translation", "rtl"], focusTarget: "general.language" },
+  { id: "projects.canvas", pageId: "projects", label: tr("settings.registry.projectCanvasSetup"), description: tr("settings.registry.perProjectStartingArrangementAndWidgets"), keywords: ["preset", "starting setup", "workspace", "canvas"], focusTarget: "projects.canvas" },
+  { id: "appearance.theme", pageId: "appearance", label: tr("settings.registry.theme"), description: tr("settings.registry.searchBundledSystemAndCustomColorThemes"), keywords: ["appearance", "dark", "light", "palette", "colors"], focusTarget: "appearance.theme" },
+  { id: "appearance.fontFamily", pageId: "appearance", label: tr("settings.registry.interfaceFont"), keywords: ["typeface", "system", "serif", "sans", "mono"], focusTarget: "appearance.fontFamily" },
+  { id: "appearance.density", pageId: "appearance", label: tr("settings.registry.density"), keywords: ["compact", "balanced", "comfortable", "spacing"], focusTarget: "appearance.density" },
+  { id: "appearance.fontSize", pageId: "appearance", label: tr("settings.registry.fontSize"), keywords: ["text", "scale"], focusTarget: "appearance.fontSize" },
+  { id: "appearance.editorFontSize", pageId: "appearance", label: tr("settings.registry.terminalFontSize"), description: tr("settings.registry.terminalInputAndOutput"), keywords: ["terminal", "monospace", "code", "px"], focusTarget: "appearance.editorFontSize" },
+  { id: "appearance.rounding", pageId: "appearance", label: tr("settings.registry.cornerRounding"), keywords: ["square", "rounded", "radius", "corners"], focusTarget: "appearance.rounding" },
+  { id: "appearance.menuItems", pageId: "appearance", label: tr("settings.registry.menuItems"), description: tr("settings.registry.optionalComposerAndWorkspaceActions"), keywords: ["technical", "dictation", "quick actions", "toolbar"], focusTarget: "appearance.menuItems" },
+  { id: "chat.width", pageId: "chat", label: tr("settings.registry.conversationWidth"), keywords: ["wide", "layout"], focusTarget: "chat.width" },
+  { id: "chat.followUp", pageId: "chat", label: tr("settings.registry.whileTheAgentIsWorking"), description: tr("settings.registry.steerQueueOrInterrupt"), keywords: ["delivery", "steer", "queue", "interrupt"], focusTarget: "chat.followUp" },
+  { id: "chat.thinking", pageId: "chat", label: tr("settings.registry.thinkingBlocks"), keywords: ["reasoning", "collapse"], focusTarget: "chat.thinking" },
+  { id: "chat.messageActions", pageId: "chat", label: tr("settings.registry.messageActions"), description: tr("settings.registry.showOrHideCopyRevertAndFork"), keywords: ["hover", "quick actions", "buttons"], focusTarget: "chat.messageActions" },
+  { id: "chat.copyFormat", pageId: "chat", label: tr("settings.registry.copyFormat"), description: tr("settings.registry.copyMessagesAsMarkdownOrJson"), keywords: ["clipboard", "markdown", "json"], focusTarget: "chat.copyFormat" },
+  { id: "notifications.desktop", pageId: "notifications", label: tr("settings.registry.desktopNotification"), keywords: ["alert", "browser"], focusTarget: "notifications.desktop" },
+  { id: "notifications.sound", pageId: "notifications", label: tr("settings.registry.completionSound"), keywords: ["beep", "audio"], focusTarget: "notifications.sound" },
+  { id: "notifications.centreHistory", pageId: "notifications", label: tr("settings.registry.centreHistory"), description: tr("settings.registry.keepReadNotificationsVisibleInTheNotification"), keywords: ["inbox", "bell", "read", "notification centre"], focusTarget: "notifications.centreHistory" },
+  { id: "behavior.confirmArchive", pageId: "behavior", label: tr("settings.registry.confirmBeforeArchivingSessions"), keywords: ["archive", "safety"], focusTarget: "behavior.confirmArchive" },
+  { id: "behavior.autosave", pageId: "behavior", label: tr("settings.registry.editorAutosave"), keywords: ["save", "revision"], focusTarget: "behavior.autosave" },
+  { id: "behavior.instructions", pageId: "behavior", label: tr("settings.registry.globalInstructions"), description: tr("settings.registry.behaviorTextAppliedToEveryAgentGlobal"), keywords: ["agents.md", "system prompt", "rules"], focusTarget: "behavior.instructions" },
+  { id: "widgets.capabilities", pageId: "widgets", label: tr("settings.registry.workspaceButtonPlaces"), description: tr("settings.registry.arrangeToolsInTheCenteredChat"), keywords: ["zones", "header", "rail", "buttons", "placement", "hide"], focusTarget: "widgets.capabilities" },
+  { id: "widgets.actions", pageId: "widgets", label: tr("settings.registry.composerAndHeaderActions"), description: tr("settings.registry.showOrHideComposerSessionHeaderAnd"), keywords: ["composer", "actions", "mini widgets", "toolbar"], focusTarget: "widgets.actions" },
+  { id: "about.info", pageId: "about", label: tr("settings.registry.applicationUrl"), description: tr("settings.registry.serverAddressDataDirectoryAndCapabilities"), keywords: ["about", "version", "health", "url"], focusTarget: "about.info" },
+  { id: "sessions.defaultModel", pageId: "sessions", label: tr("settings.registry.globalDefaultModel"), description: tr("settings.registry.defaultModelForNewSessionsAndProjects"), keywords: ["session", "provider", "model"], focusTarget: "sessions.defaultModel" },
+  { id: "projects.modelMemory", pageId: "projects", label: tr("settings.registry.rememberProjectModelSelection"), description: tr("settings.registry.useTheLastSelectedModelForNew"), keywords: ["session", "project", "model", "default", "memory"], focusTarget: "projects.modelMemory" },
+  { id: "git.personas", pageId: "git", label: tr("settings.registry.gitPersonas"), description: tr("settings.registry.repositoryLocalCommitAuthorIdentities"), keywords: ["author", "email", "identity"], focusTarget: "git.personas" },
+  { id: "sessions.worktree", pageId: "sessions", label: tr("settings.registry.worktreeBehavior"), keywords: ["session", "fresh worktree", "project root"], focusTarget: "sessions.worktree" },
 ];
 
 registerSettingsItems(BUILTIN_ITEMS);

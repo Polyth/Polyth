@@ -4,6 +4,7 @@ import { setOverlay, setSidebarOpen, startNewSession, useStore } from "../store.
 import { friendlyError } from "../settings.ts";
 import { randomWorktreeSlug, suggestWorktreeBranch } from "../worktreeSessions.ts";
 import Dialog from "./a11y/Dialog.tsx";
+import { tr } from "../i18n/index.ts";
 
 export default function WorktreeSessionDialog() {
   const request = useStore((state) => state.worktreeSessionRequest);
@@ -48,7 +49,7 @@ export default function WorktreeSessionDialog() {
       setLoading(false);
     }).catch((cause) => {
       if (!active) return;
-      setError(friendlyError("Couldn’t load branches", cause));
+      setError(friendlyError(tr("worktreesessiondialog.couldnTLoadBranches"), cause));
       setLoading(false);
     });
     return () => { active = false; };
@@ -75,34 +76,34 @@ export default function WorktreeSessionDialog() {
   const branchAlreadyCheckedOut = !!selectedExistingBranch && linkedBranches.has(branchName);
   const createsBranch = !!branchName && !selectedExistingBranch;
   const status = !branchName
-    ? "Enter a branch name to continue."
+    ? tr("worktreesessiondialog.enterABranchNameTo")
     : branchAlreadyCheckedOut
-      ? "This branch already has a linked worktree. Choose another branch or name."
+      ? tr("worktreesessiondialog.thisBranchAlreadyHasA")
       : selectedExistingBranch
-        ? `A new checkout will be created for the existing branch ${branchName}.`
-        : `A new branch will be created from ${baseBranch || "the current commit"}.`;
+        ? tr("worktreesessiondialog.aNewCheckoutWillBe", { branch: branchName })
+        : tr("worktreesessiondialog.aNewBranchWillBe", { base: baseBranch || tr("worktreesessiondialog.theCurrentCommit") });
 
   const submit = async () => {
     if (!request) return;
     if (!branchName) {
-      setError("Branch name is required.");
+      setError(tr("worktreesessiondialog.branchNameIsRequired"));
       return;
     }
     if (branchAlreadyCheckedOut) {
-      setError("That branch already has a linked worktree.");
+      setError(tr("worktreesessiondialog.thatBranchAlreadyHasA"));
       return;
     }
     setBusy(true);
     setError("");
     try {
-      setProgress("Creating worktree…");
+      setProgress(tr("worktreesessiondialog.creatingWorktree"));
       const worktreePath = (await api.createWorktree(
         request.projectId,
         branchName,
         undefined,
         createsBranch && baseBranch ? baseBranch : undefined,
       )).path;
-      setProgress("Opening chat…");
+      setProgress(tr("worktreesessiondialog.openingChat"));
       startNewSession(request.projectId, {
         ...(title.trim() ? { title: title.trim() } : {}),
         worktreePath,
@@ -110,7 +111,7 @@ export default function WorktreeSessionDialog() {
       setSidebarOpen(false);
       setOverlay(null);
     } catch (cause) {
-      setError(friendlyError("Couldn’t create the worktree chat", cause));
+      setError(friendlyError(tr("worktreesessiondialog.couldnTCreateTheWorktreeChat"), cause));
       setProgress("");
       setBusy(false);
     }
@@ -118,24 +119,26 @@ export default function WorktreeSessionDialog() {
 
   if (!request) return null;
   return (
-    <Dialog title="New worktree" onClose={close} className="worktree-session-dialog" initialFocus="input">
+    <Dialog title={tr("worktreesessiondialog.newWorktree")} onClose={close} className="worktree-session-dialog" initialFocus="input">
       <div className="dialog-head">
         <div>
-          <h2>New worktree</h2>
-          <p className="muted">Create an isolated checkout and start a chat there.</p>
+          <h2>{tr("worktreesessiondialog.newWorktree")}</h2>
+          <p className="muted">{tr("worktreesessiondialog.createAnIsolatedCheckoutAnd")}</p>
         </div>
-        <button className="icon-btn" aria-label="Close dialog" disabled={busy} onClick={close}>×</button>
+        <button className="icon-btn" aria-label={tr("worktreesessiondialog.closeDialog")} disabled={busy} onClick={close}>{tr("worktreesessiondialog.message")}</button>
       </div>
 
       <div className="worktree-session-body">
         <label className="worktree-session-field">
-          <span>Chat name <span className="muted">(optional)</span></span>
-          <input value={title} placeholder={`Work in ${project?.name ?? "this project"}`} onChange={(event) => setTitle(event.target.value)} />
+          <span>{tr("worktreesessiondialog.chatName")} <span className="muted">{tr("worktreesessiondialog.optional")}</span></span>
+          <input value={title} placeholder={tr("worktreesessiondialog.workInValue", {
+            value: project?.name ?? tr("permissionbanner.thisProject"),
+          })} onChange={(event) => setTitle(event.target.value)} />
         </label>
 
-        {loading ? <div className="empty">Loading branches…</div> : <>
+        {loading ? <div className="empty">{tr("worktreesessiondialog.loadingBranches")}</div> : <>
           <label className="worktree-session-field">
-            <span>Branch</span>
+            <span>{tr("worktreesessiondialog.branch")}</span>
             <input
               className="mono"
               value={branch}
@@ -151,25 +154,25 @@ export default function WorktreeSessionDialog() {
           </label>
 
           {createsBranch && <label className="worktree-session-field">
-            <span>Base branch</span>
+            <span>{tr("worktreesessiondialog.baseBranch")}</span>
             <select value={baseBranch} onChange={(event) => setBaseBranch(event.target.value)}>
               {localBranches.map((item) => <option key={item.name} value={item.name}>{item.name}</option>)}
             </select>
-            <small className="muted">The new branch starts from this branch.</small>
+            <small className="muted">{tr("worktreesessiondialog.theNewBranchStartsFrom")}</small>
           </label>}
 
-          <p className="worktree-checkout-note">The checkout folder is created automatically.</p>
+          <p className="worktree-checkout-note">{tr("worktreesessiondialog.theCheckoutFolderIsCreatedAutomatically")}</p>
         </>}
 
         {error && <div className="inline-error" role="alert">{error}</div>}
       </div>
 
       <div className="dialog-foot">
-        <span className="muted">{progress || "A new chat opens as soon as the worktree is ready."}</span>
+        <span className="muted">{progress || tr("worktreesessiondialog.aNewChatOpensAs")}</span>
         <span className="header-spacer" />
-        <button className="small-btn" disabled={busy} onClick={close}>Cancel</button>
+        <button className="small-btn" disabled={busy} onClick={close}>{tr("common.cancel")}</button>
         <button className="primary-btn" disabled={busy || loading || !branchName || branchAlreadyCheckedOut} onClick={() => void submit()}>
-          {busy ? progress || "Creating…" : "Create worktree & start chat"}
+          {busy ? progress || tr("worktreesessiondialog.creating") : tr("worktreesessiondialog.createWorktreeStartChat")}
         </button>
       </div>
     </Dialog>

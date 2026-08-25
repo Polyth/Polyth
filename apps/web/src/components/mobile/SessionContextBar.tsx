@@ -9,6 +9,7 @@ import Picker from "../Picker.tsx";
 import { Icon } from "../../icons.tsx";
 import { dismissKeyboard } from "../../mobileViewport.ts";
 import { useSheetTrigger } from "./sheetTrigger.ts";
+import { tr } from "../../i18n/index.ts";
 import { useShellMode } from "../../responsiveShell.ts";
 
 export interface ContextChoice {
@@ -49,7 +50,9 @@ function ContextSelector({
     return (
       <Picker
         className={`context-selector context-selector-${kind}`}
-        label={kind === "project" ? "Project" : "Worktree"}
+        label={kind === "project"
+          ? tr("mobile.sessioncontextbar.project")
+          : tr("mobile.sessioncontextbar.worktree")}
         items={choices.map((choice) => ({ ...choice, group: "" }))}
         value={current}
         onPick={onPick}
@@ -94,7 +97,7 @@ function ContextSelector({
                 }}
               />
             ))}
-            {choices.length === 0 && <p className="sheet-empty">Nothing to choose here yet.</p>}
+            {choices.length === 0 && <p className="sheet-empty">{tr("mobile.sessioncontextbar.nothingToChooseHereYet")}</p>}
           </div>
         </Sheet>
       )}
@@ -126,25 +129,25 @@ export default function SessionContextBar({
   onPickBranch,
 }: SessionContextBarProps) {
   return (
-    <div className="session-context-bar" aria-label="Chat location">
+    <div className="session-context-bar" aria-label={tr("mobile.sessioncontextbar.chatLocation")}>
       <ContextSelector
         kind="project"
         value={projectName}
         selectedId={projectId}
         choices={projects}
-        sheetTitle="Project"
-        ariaLabel={`Project, current ${projectName}`}
+        sheetTitle={tr("mobile.sessioncontextbar.project")}
+        ariaLabel={tr("mobile.sessioncontextbar.projectCurrentValue", { projectName })}
         onPick={onPickProject}
       />
       <span className="context-sep" aria-hidden="true" />
       <ContextSelector
         kind="branch"
-        value={branchLoading ? "Loading…" : branchName}
+        value={branchLoading ? tr("common.loading") : branchName}
         selectedId={branchId}
         choices={branches}
         {...(branchLoading ? { disabled: true } : {})}
-        sheetTitle="Branch or worktree"
-        ariaLabel={`Worktree, current ${branchName}`}
+        sheetTitle={tr("mobile.sessioncontextbar.branchOrWorktree")}
+        ariaLabel={tr("mobile.sessioncontextbar.worktreeCurrentValue", { branchName })}
         onPick={onPickBranch}
       />
     </div>

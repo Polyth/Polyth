@@ -11,6 +11,7 @@ import {
 } from "../questionSerializers.ts";
 import AdaptiveTextInput from "./input/AdaptiveTextInput.tsx";
 import { announce } from "./a11y/live.tsx";
+import { tr } from "../i18n/index.ts";
 import { Icon } from "../icons.tsx";
 
 // Draft answers survive card remounts (tab switches, WS reconnect replays).
@@ -19,8 +20,8 @@ const drafts = new Map<string, AnswerMap>();
 const OTHER = "__other__";
 
 function copyText(text: string, what: string): void {
-  const done = () => announce(`${what} copied to clipboard`);
-  const fail = () => announce("Copy failed — clipboard unavailable");
+  const done = () => announce(tr("questioncards.valueCopiedToClipboard", { what: what }));
+  const fail = () => announce(tr("questioncards.copyFailedClipboardUnavailable"));
   try {
     void navigator.clipboard.writeText(text).then(done, fail);
   } catch {
@@ -85,7 +86,7 @@ function OptionField({ item, answer, onChange }: {
               else if (!otherOn) setSingle("");
             }}
           />
-          <span>Other</span>
+          <span>{tr("questioncards.other")}</span>
         </label>
       )}
       {item.allowOther && (
@@ -93,8 +94,8 @@ function OptionField({ item, answer, onChange }: {
           key={`${item.id}-other`}
           initialText={otherValue ?? ""}
           rows={1}
-          placeholder="Other answer…"
-          ariaLabel="Other answer"
+          placeholder={tr("questioncards.otherAnswer")}
+          ariaLabel={tr("questioncards.otherAnswer2")}
           onTextChange={setOther}
         />
       )}
@@ -134,27 +135,26 @@ function QuestionStepper({ q }: { q: PendingQuestion }) {
   return (
     <div className="question-card question-stepper">
       <div className="q-title">
-        Question from the agent
-        <span className="question-progress" aria-live="polite">
-          {items.length > 1 ? ` — step ${step + 1} of ${items.length}` : ""}
+        {tr("questioncards.questionFromTheAgent")}<span className="question-progress" aria-live="polite">
+          {items.length > 1 ? tr("questioncards.stepValueOfValue", { value: step + 1, length: items.length }) : ""}
         </span>
         <span className="question-copy">
           <button
             className="question-copy-btn"
-            aria-label="Copy questions as Markdown"
-            title="Copy as Markdown"
+            aria-label={tr("questioncards.copyQuestionsAsMarkdown")}
+            title={tr("questioncards.copyAsMarkdown")}
             onClick={() => copyText(questionsToMarkdown(items, answers), "Markdown")}
           ><Icon.markdown /></button>
           <button
             className="question-copy-btn"
-            aria-label="Copy questions as JSON"
-            title="Copy as JSON"
+            aria-label={tr("questioncards.copyQuestionsAsJson")}
+            title={tr("questioncards.copyAsJson")}
             onClick={() => copyText(questionsToJson(q.requestId, items, answers), "JSON")}
           ><Icon.json /></button>
         </span>
       </div>
       {items.length > 1 && (
-        <div className="question-tabs" role="tablist" aria-label="Questions">
+        <div className="question-tabs" role="tablist" aria-label={tr("questioncards.questions")}>
           {items.map((it, i) => (
             <button
               key={it.id}
@@ -170,13 +170,13 @@ function QuestionStepper({ q }: { q: PendingQuestion }) {
       )}
       <div className="question-body">
         {item.title && <div className="question-item-title">{item.title}</div>}
-        <label className="question-prompt">{item.prompt}{item.required ? "" : " (optional)"}</label>
+        <label className="question-prompt">{item.prompt}{item.required ? "" : tr("questioncards.optional")}</label>
         {item.type === "text" ? (
           <AdaptiveTextInput
             key={item.id}
             initialText={typeof answers[item.id] === "string" ? (answers[item.id] as string) : ""}
             rows={2}
-            placeholder="Answer…"
+            placeholder={tr("questioncards.answer")}
             ariaLabel={item.prompt}
             onTextChange={(t) => setAnswer(item.id, t)}
           />
@@ -186,15 +186,15 @@ function QuestionStepper({ q }: { q: PendingQuestion }) {
       </div>
       <div className="question-actions">
         {items.length > 1 && (
-          <button disabled={step === 0} onClick={() => setStep((s) => Math.max(0, s - 1))}>Back</button>
+          <button disabled={step === 0} onClick={() => setStep((s) => Math.max(0, s - 1))}>{tr("common.back")}</button>
         )}
-        {!last && <button onClick={() => setStep((s) => Math.min(items.length - 1, s + 1))}>Next</button>}
+        {!last && <button onClick={() => setStep((s) => Math.min(items.length - 1, s + 1))}>{tr("common.next")}</button>}
         {last && (
           <button className="primary" disabled={!canSubmit} onClick={submit}>
-            Submit{items.length > 1 ? " all" : ""}
+            {tr("common.submit")}{items.length > 1 ? tr("questioncards.all") : ""}
           </button>
         )}
-        <button className="danger" onClick={reject}>Reject</button>
+        <button className="danger" onClick={reject}>{tr("questioncards.reject")}</button>
       </div>
     </div>
   );

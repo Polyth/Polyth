@@ -8,21 +8,22 @@ import {
   type WidgetRenderContext,
   type WidgetSettingsContext,
 } from "./catalog.ts";
+import { tr } from "../i18n/index.ts";
 
 type GithubSummaryMetric = "showFiles" | "showAdditions" | "showDeletions";
 
 const SUMMARY_METRICS: ReadonlyArray<{ id: GithubSummaryMetric; label: string }> = [
-  { id: "showFiles", label: "Changed files" },
-  { id: "showAdditions", label: "Added lines" },
-  { id: "showDeletions", label: "Removed lines" },
+  { id: "showFiles", label: tr("widgets.githubplugin.changedFiles") },
+  { id: "showAdditions", label: tr("widgets.githubplugin.addedLines") },
+  { id: "showDeletions", label: tr("widgets.githubplugin.removedLines") },
 ];
 
 const PR_SUMMARY_SETTINGS = {
   type: "object",
   properties: {
-    showFiles: { type: "boolean", title: "Changed files", default: true },
-    showAdditions: { type: "boolean", title: "Added lines", default: true },
-    showDeletions: { type: "boolean", title: "Removed lines", default: true },
+    showFiles: { type: "boolean", title: tr("widgets.githubplugin.changedFiles"), default: true },
+    showAdditions: { type: "boolean", title: tr("widgets.githubplugin.addedLines"), default: true },
+    showDeletions: { type: "boolean", title: tr("widgets.githubplugin.removedLines"), default: true },
   },
 } as const;
 
@@ -38,18 +39,18 @@ export function GithubPrSummary({
 }) {
   const metrics: Array<{ id: string; label: string; value: string | number; className: string }> = [];
   if (metricVisible(config, "showFiles")) {
-    metrics.push({ id: "files", label: "Files", value: summary.changedFiles, className: "" });
+    metrics.push({ id: "files", label: tr("widgets.githubplugin.files"), value: summary.changedFiles, className: "" });
   }
   if (metricVisible(config, "showAdditions")) {
-    metrics.push({ id: "additions", label: "Added", value: `+${summary.additions}`, className: "positive" });
+    metrics.push({ id: "additions", label: tr("widgets.githubplugin.added"), value: `+${summary.additions}`, className: "positive" });
   }
   if (metricVisible(config, "showDeletions")) {
-    metrics.push({ id: "deletions", label: "Removed", value: `−${summary.deletions}`, className: "negative" });
+    metrics.push({ id: "deletions", label: tr("widgets.githubplugin.removed"), value: `−${summary.deletions}`, className: "negative" });
   }
   return (
     <div className="github-pr-summary">
       <a href={summary.url} target="_blank" rel="noreferrer">
-        <span>PR #{summary.number}</span>
+        <span>{tr("widgets.githubplugin.pr")}{summary.number}</span>
         <strong>{summary.title}</strong>
       </a>
       <div className="github-pr-summary-metrics">
@@ -59,7 +60,7 @@ export function GithubPrSummary({
             <strong className={metric.className}>{metric.value}</strong>
           </div>
         ))}
-        {metrics.length === 0 && <small>Choose metrics in widget settings.</small>}
+        {metrics.length === 0 && <small>{tr("widgets.githubplugin.chooseMetricsInWidgetSettings")}</small>}
       </div>
     </div>
   );
@@ -77,15 +78,15 @@ function GithubPrSummaryWidget({ projectId, config }: WidgetRenderContext) {
     return () => { active = false; };
   }, [projectId]);
 
-  if (!projectId) return <div className="widget-empty">Choose a project to inspect its pull request.</div>;
-  if (!result) return <div className="widget-empty" role="status">Loading current pull request…</div>;
+  if (!projectId) return <div className="widget-empty">{tr("widgets.githubplugin.chooseAProjectToInspectItsPull")}</div>;
+  if (!result) return <div className="widget-empty" role="status">{tr("widgets.githubplugin.loadingCurrentPullRequest")}</div>;
   if (!result.ok) return <div className="widget-empty">{result.reason}</div>;
   return <GithubPrSummary summary={result.data} config={config} />;
 }
 
 function GithubPrSummarySettings({ config, updateConfig }: WidgetSettingsContext) {
   return (
-    <div className="widget-schema-settings" aria-label="GitHub pull request metrics">
+    <div className="widget-schema-settings" aria-label={tr("widgets.githubplugin.githubPullRequestMetrics")}>
       {SUMMARY_METRICS.map((metric) => (
         <label key={metric.id}>
           <input
@@ -106,8 +107,8 @@ export const GITHUB_WIDGET_PLUGIN = defineWidgetPlugin({
   widgets: [
     {
       id: "github.pr-summary",
-      title: "Current pull request",
-      description: "Changed files and added/removed lines for the current branch pull request.",
+      title: tr("widgets.githubplugin.currentPullRequest"),
+      description: tr("widgets.githubplugin.changedFilesAndAddedRemovedLinesFor"),
       kind: "widget",
       defaultSlot: "session.composer.before",
       supportedSlots: [

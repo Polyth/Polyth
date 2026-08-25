@@ -905,6 +905,19 @@ export function isUiSlot(value: string): value is UiSlot {
   return (UI_SLOTS as readonly string[]).includes(value);
 }
 
+/** Canonical locale vocabulary — every message catalog covers all of these. */
+export const LOCALES = [
+  "uk", "en", "de", "fr", "pl", "pt-BR", "it", "es", "zh-CN", "bg", "ar", "pt",
+] as const;
+
+export type Locale = (typeof LOCALES)[number];
+
+/** Per-locale message catalogs a package contributes; the web app merges the
+ *  bundles from every package into one catalog per locale. English is the
+ *  canonical key set — `K` is derived from a package's `en` catalog so a
+ *  missing or extra key in any locale fails the typecheck. */
+export type LocaleBundle<K extends string = string> = Record<Locale, Record<K, string>>;
+
 export type WidgetKind = "widget" | "mini-widget";
 export type WidgetAudience = "simple" | "standard" | "power";
 export type WidgetScope = "global" | "workspace" | "plugin";

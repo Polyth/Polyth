@@ -10,6 +10,7 @@ import {
 import { useStore } from "../store.ts";
 import { parseDiffLines } from "../utils.ts";
 import EmptyState from "./EmptyState.tsx";
+import { tr } from "../i18n/index.ts";
 
 type SourceKind = WalkthroughSourceDto["kind"];
 
@@ -49,10 +50,9 @@ function AutoReviewBanner({ sessionId }: { sessionId: string }) {
   if (!flow) {
     return (
       <div className="auto-review-banner idle">
-        <span>Auto-review loop (opt-in): a reviewer model checks the working tree after each turn and hands findings back, bounded to a few iterations. It never merges, pushes, or publishes.</span>
+        <span>{tr("generatedwalkthrough.autoReviewLoopOptInAReviewer")}</span>
         <button className="small-btn" disabled={busy} onClick={() => void act(() => api.reviewFlowCreate(sessionId, 3))}>
-          Start auto-review
-        </button>
+          {tr("generatedwalkthrough.startAutoReview")}</button>
       </div>
     );
   }
@@ -60,17 +60,17 @@ function AutoReviewBanner({ sessionId }: { sessionId: string }) {
   return (
     <div className={`auto-review-banner ${flow.status}`}>
       <span className="tag">{flow.status}</span>
-      <span>Iteration {flow.iteration}/{flow.maxIterations}</span>
-      {flow.baseDigest && <span className="mono muted" title="reviewed source digest">{flow.baseDigest.slice(0, 8)}</span>}
+      <span>{tr("generatedwalkthrough.iteration")}{" "}{flow.iteration}/{flow.maxIterations}</span>
+      {flow.baseDigest && <span className="mono muted" title={tr("generatedwalkthrough.reviewedSourceDigest")}>{flow.baseDigest.slice(0, 8)}</span>}
       {flow.stoppedReason && <span className="muted">{flow.stoppedReason}</span>}
       <span className="header-spacer" />
-      {flow.status === "paused" && <button className="small-btn" disabled={busy} onClick={() => void act(() => api.reviewFlowAction(sessionId, "resume"))}>Resume</button>}
-      {active && <button className="small-btn" disabled={busy} onClick={() => void act(() => api.reviewFlowAction(sessionId, "pause"))}>Pause</button>}
+      {flow.status === "paused" && <button className="small-btn" disabled={busy} onClick={() => void act(() => api.reviewFlowAction(sessionId, "resume"))}>{tr("common.resume")}</button>}
+      {active && <button className="small-btn" disabled={busy} onClick={() => void act(() => api.reviewFlowAction(sessionId, "pause"))}>{tr("common.pause")}</button>}
       {(active || flow.status === "paused") && (
-        <button className="small-btn danger-btn" disabled={busy} onClick={() => void act(() => api.reviewFlowAction(sessionId, "stop"))}>Stop</button>
+        <button className="small-btn danger-btn" disabled={busy} onClick={() => void act(() => api.reviewFlowAction(sessionId, "stop"))}>{tr("common.stop")}</button>
       )}
       {!active && flow.status !== "paused" && (
-        <button className="small-btn" disabled={busy} onClick={() => void act(() => api.reviewFlowCreate(sessionId, 3))}>Restart</button>
+        <button className="small-btn" disabled={busy} onClick={() => void act(() => api.reviewFlowCreate(sessionId, 3))}>{tr("generatedwalkthrough.restart")}</button>
       )}
     </div>
   );
@@ -114,11 +114,11 @@ export default function GeneratedWalkthrough() {
     }
   }, [job]);
 
-  if (!projectId) return <EmptyState title="No project selected" description="Open a project to generate a walkthrough." />;
+  if (!projectId) return <EmptyState title={tr("generatedwalkthrough.noProjectSelected")} description={tr("generatedwalkthrough.openAProjectToGenerateAWalkthrough")} />;
 
   const generate = async () => {
     const source = sourceOf();
-    if (!source) { setError("Pick a valid source first."); return; }
+    if (!source) { setError(tr("generatedwalkthrough.pickAValidSourceFirst")); return; }
     setError("");
     setStale(false);
     setReview(null);
@@ -142,9 +142,9 @@ export default function GeneratedWalkthrough() {
     if (!review?.ok || kind !== "pull-request") return;
     const n = Number(prNumber);
     const r = await api.githubAddLabels(n, projectId, [
-      `risk:${review.assessment.riskScore}`, `confidence:${review.assessment.confidenceScore}`,
+      tr("generatedwalkthrough.riskValue", { riskScore: review.assessment.riskScore }), tr("generatedwalkthrough.confidenceValue", { confidenceScore: review.assessment.confidenceScore }),
     ]).catch((e: unknown) => ({ ok: false as const, reason: e instanceof Error ? e.message : String(e) }));
-    setLabelMsg(r.ok ? "Labels published." : `Label publish failed (review stays usable): ${r.reason}`);
+    setLabelMsg(r.ok ? tr("generatedwalkthrough.labelsPublished") : tr("generatedwalkthrough.labelPublishFailedReviewStaysUsableValue", { reason: r.reason }));
   };
 
   return (
@@ -153,41 +153,40 @@ export default function GeneratedWalkthrough() {
 
       <div className="walkthrough-source">
         <div className="seg">
-          <button className={kind === "working-tree" ? "on" : ""} onClick={() => setKind("working-tree")}>Working tree</button>
-          <button className={kind === "range" ? "on" : ""} onClick={() => setKind("range")}>Commit range</button>
-          <button className={kind === "pull-request" ? "on" : ""} onClick={() => setKind("pull-request")}>Pull request</button>
+          <button className={kind === "working-tree" ? "on" : ""} onClick={() => setKind("working-tree")}>{tr("generatedwalkthrough.workingTree")}</button>
+          <button className={kind === "range" ? "on" : ""} onClick={() => setKind("range")}>{tr("generatedwalkthrough.commitRange")}</button>
+          <button className={kind === "pull-request" ? "on" : ""} onClick={() => setKind("pull-request")}>{tr("generatedwalkthrough.pullRequest")}</button>
         </div>
         {kind === "range" && (
           <>
-            <input className="mono" style={{ width: 130 }} placeholder="base (e.g. main)" value={base} onChange={(e) => setBase(e.target.value)} />
-            <input className="mono" style={{ width: 130 }} placeholder="head" value={head} onChange={(e) => setHead(e.target.value)} />
+            <input className="mono" style={{ width: 130 }} placeholder={tr("generatedwalkthrough.baseEGMain")} value={base} onChange={(e) => setBase(e.target.value)} />
+            <input className="mono" style={{ width: 130 }} placeholder={tr("generatedwalkthrough.head")} value={head} onChange={(e) => setHead(e.target.value)} />
           </>
         )}
         {kind === "pull-request" && (
-          <input className="mono" style={{ width: 90 }} placeholder="PR #" value={prNumber} onChange={(e) => setPrNumber(e.target.value)} />
+          <input className="mono" style={{ width: 90 }} placeholder={tr("generatedwalkthrough.pr")} value={prNumber} onChange={(e) => setPrNumber(e.target.value)} />
         )}
         <span className="header-spacer" />
         {sessionId && (
           <button className="small-btn" disabled={reviewBusy} onClick={() => void generateReview()}>
-            {reviewBusy ? "Reviewing…" : "Generate review"}
+            {reviewBusy ? tr("generatedwalkthrough.reviewing") : tr("generatedwalkthrough.generateReview")}
           </button>
         )}
-        <button className="primary-btn" onClick={() => void generate()}>Generate walkthrough</button>
+        <button className="primary-btn" onClick={() => void generate()}>{tr("generatedwalkthrough.generateWalkthrough")}</button>
       </div>
       {error && <div className="form-error">{error}</div>}
 
-      {review && !review.ok && <div className="form-error">Review failed: {review.reason}</div>}
+      {review && !review.ok && <div className="form-error">{tr("generatedwalkthrough.reviewFailed")}{" "}{review.reason}</div>}
       {review?.ok && (
         <div className="review-card">
           <div className="view-toolbar-row">
-            <span className={`risk-badge risk-${review.assessment.riskScore}`}>risk {review.assessment.riskScore}/5</span>
-            <span className="tag">confidence {review.assessment.confidenceScore}/5</span>
-            <span className="mono muted" title="reviewed source digest">{review.sourceDigest.slice(0, 8)}</span>
+            <span className={`risk-badge risk-${review.assessment.riskScore}`}>{tr("generatedwalkthrough.risk")}{" "}{review.assessment.riskScore}/5</span>
+            <span className="tag">{tr("generatedwalkthrough.confidence")}{" "}{review.assessment.confidenceScore}/5</span>
+            <span className="mono muted" title={tr("generatedwalkthrough.reviewedSourceDigest")}>{review.sourceDigest.slice(0, 8)}</span>
             <span className="header-spacer" />
             {kind === "pull-request" && (
-              <button className="small-btn" title="Publish risk/confidence labels to the PR (external write)" onClick={() => void publishLabels()}>
-                Publish labels
-              </button>
+              <button className="small-btn" title={tr("generatedwalkthrough.publishRiskConfidenceLabelsToThePr")} onClick={() => void publishLabels()}>
+                {tr("generatedwalkthrough.publishLabels")}</button>
             )}
           </div>
           <div className="review-summary">{review.assessment.summary}</div>
@@ -205,19 +204,17 @@ export default function GeneratedWalkthrough() {
 
       {job && (job.status === "queued" || job.status === "running") && (
         <div className="view-toolbar-row">
-          <span className="muted">Generating walkthrough…</span>
-          <button className="small-btn" onClick={() => void api.walkthroughCancel(job.id).then(setJob)}>Cancel</button>
+          <span className="muted">{tr("generatedwalkthrough.generatingWalkthrough")}</span>
+          <button className="small-btn" onClick={() => void api.walkthroughCancel(job.id).then(setJob)}>{tr("common.cancel")}</button>
         </div>
       )}
-      {job?.status === "failed" && <div className="form-error">Walkthrough failed: {job.error}</div>}
+      {job?.status === "failed" && <div className="form-error">{tr("generatedwalkthrough.walkthroughFailed")}{" "}{job.error}</div>}
 
       {job?.status === "ready" && (
         <>
           {stale && (
             <div className="walkthrough-stale">
-              The source changed since this walkthrough was generated (digest {job.sourceDigest.slice(0, 8)}).
-              It stays reviewable against its snapshot — regenerate for the current state.
-            </div>
+              {tr("generatedwalkthrough.theSourceChangedSinceThisWalkthroughWas")}{" "}{job.sourceDigest.slice(0, 8)}{tr("generatedwalkthrough.itStaysReviewableAgainstItsSnapshotRegenerate")}</div>
           )}
           {job.stages.map((stage) => (
             <div key={stage.id} className="walkthrough-stage">

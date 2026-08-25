@@ -41,6 +41,7 @@ import {
 } from "../../editor/fileDocs.ts";
 import { registerPaneProvider, type PaneResourceContext } from "../../workspace/paneProviders.ts";
 import { usePaneActions } from "../workspace/PaneHost.tsx";
+import { tr } from "../../i18n/index.ts";
 
 const baseOf = (p: string) => p.split("/").pop() ?? p;
 const msg = (err: unknown) => (err instanceof Error ? err.message : String(err));
@@ -484,7 +485,7 @@ export default function FilePane({ projectId, sessionId, resource: path, visible
   useEffect(() => { syncEditScroll(); }, [editHl, wrap]); // eslint-disable-line react-hooks/exhaustive-deps
   /** Previewable kinds keep their switch visible in BOTH modes (finding 3). */
   const previewKind = doc && !readOnly ? previewKindForPath(doc.path) : null;
-  const previewName = previewKind === "json" ? "Tree" : "Preview";
+  const previewName = previewKind === "json" ? tr("markdown.render.tree") : tr("previewview.preview");
   // Previews render the LIVE buffer, not the saved snapshot — flipping the
   // switch while dirty must show the pending edits (they equal doc.content
   // when clean).
@@ -494,12 +495,12 @@ export default function FilePane({ projectId, sessionId, resource: path, visible
   );
 
   if (td.loading || (!doc && !error)) {
-    return <div className="editor-empty"><p className="muted">Loading {path}…</p></div>;
+    return <div className="editor-empty"><p className="muted">{tr("editor.filepane.loading")}{" "}{path}…</p></div>;
   }
   if (!doc) {
     return (
       <div className="editor-empty">
-        <p className="muted">Couldn’t open {path}.</p>
+        <p className="muted">{tr("editor.filepane.couldnTOpen")}{" "}{path}.</p>
         {error && <div className="files-error">{error}</div>}
       </div>
     );
@@ -511,27 +512,27 @@ export default function FilePane({ projectId, sessionId, resource: path, visible
         <span className="editor-path" title={doc.path}>
           {doc.path}
           {dirty && (
-            <span className="editor-dirty" title="Unsaved changes">
+            <span className="editor-dirty" title={tr("editor.filepane.unsavedChanges")}>
               {" "}•
             </span>
           )}
         </span>
         <span className="header-spacer" />
-        {live?.kind === "saving" && <span className="editor-save-state">Saving…</span>}
-        {live?.kind === "saved" && <span className="editor-save-state">Saved</span>}
+        {live?.kind === "saving" && <span className="editor-save-state">{tr("common.saving")}</span>}
+        {live?.kind === "saved" && <span className="editor-save-state">{tr("common.saved")}</span>}
         {flash && <span className="editor-flash">{flash}</span>}
-        <button className="small-btn icon-only" title="Close file (Esc)" aria-label="Close file" onClick={() => actions?.closeSelf("file", path)}><Icon.close /></button>
+        <button className="small-btn icon-only" title={tr("editor.filepane.closeFileEsc")} aria-label={tr("editor.filepane.closeFile")} onClick={() => actions?.closeSelf("file", path)}><Icon.close /></button>
       </div>
       <div className="editor-toolbar">
         {previewKind !== null && (
           <span className="editor-mode-switch">
-            <span className={`editor-mode-label${editing ? " on" : ""}`}>Edit</span>
+            <span className={`editor-mode-label${editing ? " on" : ""}`}>{tr("common.edit")}</span>
             <button
               className="switch switch-sm"
               role="switch"
               aria-checked={!editing}
-              aria-label={`${previewName} mode`}
-              title={editing ? `Show ${previewName.toLowerCase()}` : "Edit source"}
+              aria-label={tr("editor.filepane.valueMode", { previewName: previewName })}
+              title={editing ? tr("editor.filepane.showValue", { value: previewName.toLowerCase() }) : tr("editor.filepane.editSource")}
               onClick={() => setPreviewMode(editing)}
             >
               <i />
@@ -544,8 +545,8 @@ export default function FilePane({ projectId, sessionId, resource: path, visible
           <span className="editor-goto">
             <input
               autoFocus
-              placeholder="line[:end]"
-              aria-label="Go to line"
+              placeholder={tr("editor.filepane.lineEnd")}
+              aria-label={tr("editor.filepane.goToLine")}
               value={gotoVal}
               size={8}
               onChange={(e) => setGotoVal(e.target.value)}
@@ -563,7 +564,7 @@ export default function FilePane({ projectId, sessionId, resource: path, visible
           </span>
         )}
         {!readOnly && (editing || dirty) && (
-          <button className="small-btn icon-only" disabled={live?.kind === "saving" || !dirty} title={`Save (${MOD}S)`} aria-label="Save file" onClick={() => void save()}>
+          <button className="small-btn icon-only" disabled={live?.kind === "saving" || !dirty} title={tr("editor.filepane.saveValueS", { MOD: MOD })} aria-label={tr("editor.filepane.saveFile")} onClick={() => void save()}>
             <Icon.check />
           </button>
         )}
@@ -571,8 +572,8 @@ export default function FilePane({ projectId, sessionId, resource: path, visible
           className="small-btn icon-only editor-more-btn"
           aria-haspopup="menu"
           aria-expanded={menu !== null}
-          aria-label={`Actions for ${doc.path}`}
-          title="File actions"
+          aria-label={tr("editor.filepane.actionsForValue", { path: doc.path })}
+          title={tr("editor.filepane.fileActions")}
           onClick={(e) => {
             const r = e.currentTarget.getBoundingClientRect();
             openMenu(r.right - MENU_W, r.bottom + 4);
@@ -586,30 +587,29 @@ export default function FilePane({ projectId, sessionId, resource: path, visible
           <div
             className="ctx-menu"
             role="menu"
-            aria-label={`Actions for ${doc.path}`}
+            aria-label={tr("editor.filepane.actionsForValue", { path: doc.path })}
             style={{ left: menu.x, top: menu.y }}
             onClick={(e) => e.stopPropagation()}
           >
-            <button role="menuitem" onClick={() => { setMenu(null); addFile(); }}>Add file to chat</button>
-            <button role="menuitem" onClick={() => { setMenu(null); addSelection(); }}>{`Add selection to chat (${MOD}L)`}</button>
-            <button role="menuitem" onClick={() => { setMenu(null); void copyText(doc.path); }}>Copy path</button>
-            <button role="menuitem" onClick={() => { setMenu(null); setGotoOpen(true); }}>{`Go to line… (${MOD}G)`}</button>
+            <button role="menuitem" onClick={() => { setMenu(null); addFile(); }}>{tr("editor.filepane.addFileToChat")}</button>
+            <button role="menuitem" onClick={() => { setMenu(null); addSelection(); }}>{tr("editor.filepane.addSelectionToChatValueL", { MOD: MOD })}</button>
+            <button role="menuitem" onClick={() => { setMenu(null); void copyText(doc.path); }}>{tr("editor.filepane.copyPath")}</button>
+            <button role="menuitem" onClick={() => { setMenu(null); setGotoOpen(true); }}>{tr("editor.filepane.goToLineValueG", { MOD: MOD })}</button>
             <button role="menuitemcheckbox" aria-checked={wrap} onClick={() => setWrap((v) => !v)}>
-              {wrap ? "Wrap lines ✓" : "Wrap lines"}
+              {wrap ? tr("editor.filepane.wrapLines") : tr("editor.filepane.wrapLines2")}
             </button>
             {!readOnly && dirty && (
               <button
                 role="menuitem"
                 onClick={() => {
                   setMenu(null);
-                  void confirmAlert("Discard unsaved changes?", { title: "Discard changes", confirmLabel: "Discard" }).then((ok) => { if (ok) setBuf(doc.content); });
+                  void confirmAlert(tr("editor.filepane.discardUnsavedChanges"), { title: tr("common.discardChanges"), confirmLabel: tr("common.discard") }).then((ok) => { if (ok) setBuf(doc.content); });
                 }}
               >
-                Discard changes…
-              </button>
+                {tr("editor.filepane.discardChanges")}</button>
             )}
-            <button role="menuitem" onClick={() => { setMenu(null); setRenameTo(doc.path); }}>Rename / move…</button>
-            <button role="menuitem" className="danger" onClick={() => { setMenu(null); setConfirmDel(true); }}>Delete…</button>
+            <button role="menuitem" onClick={() => { setMenu(null); setRenameTo(doc.path); }}>{tr("editor.filepane.renameMove")}</button>
+            <button role="menuitem" className="danger" onClick={() => { setMenu(null); setConfirmDel(true); }}>{tr("editor.filepane.delete")}</button>
           </div>
         </div>
       )}
@@ -617,8 +617,8 @@ export default function FilePane({ projectId, sessionId, resource: path, visible
         <button
           className="editor-sel-hint"
           style={{ left: selHint.x, top: selHint.y }}
-          aria-label={`Add selection to chat (${MOD}L)`}
-          title={`Add selection to chat (${MOD}L)`}
+          aria-label={tr("editor.filepane.addSelectionToChatValueL", { MOD: MOD })}
+          title={tr("editor.filepane.addSelectionToChatValueL", { MOD: MOD })}
           onPointerDown={(e) => e.preventDefault() /* keep the selection + focus */}
           onClick={() => { addSelection(); setSelHint(null); }}
         >
@@ -636,46 +636,44 @@ export default function FilePane({ projectId, sessionId, resource: path, visible
               else if (e.key === "Escape") setRenameTo(null);
             }}
           />
-          <button className="small-btn" disabled={busy} onClick={() => void rename()}>Rename</button>
-          <button className="small-btn" onClick={() => setRenameTo(null)}>Cancel</button>
+          <button className="small-btn" disabled={busy} onClick={() => void rename()}>{tr("common.rename")}</button>
+          <button className="small-btn" onClick={() => setRenameTo(null)}>{tr("common.cancel")}</button>
         </div>
       )}
       {confirmDel && (
         <div className="editor-banner editor-conflict" role="alert">
-          <span>Delete {doc.path}?</span>
+          <span>{tr("common.delete")}{" "}{doc.path}?</span>
           <button className="small-btn danger-btn" disabled={busy} onClick={() => void remove()}>
-            Delete permanently
-          </button>
-          <button className="small-btn" onClick={() => setConfirmDel(false)}>Cancel</button>
+            {tr("editor.filepane.deletePermanently")}</button>
+          <button className="small-btn" onClick={() => setConfirmDel(false)}>{tr("common.cancel")}</button>
         </div>
       )}
       {live && !live.noticeDismissed && (live.kind === "external-change" || live.kind === "conflict") && (
         <div className="editor-banner editor-conflict" role="alert">
           <span>
-            File changed on disk.
-            {live.dirty ? " Your unsaved buffer is preserved." : " Reload to view the replacement."}
+            {tr("editor.filepane.fileChangedOnDisk")}{live.dirty ? tr("editor.filepane.yourUnsavedBufferIsPreserved") : tr("editor.filepane.reloadToViewTheReplacement")}
           </span>
-          <button className="small-btn" onClick={() => void reload()}>Reload from disk</button>
-          {live.dirty && <button className="small-btn danger-btn" onClick={() => void save({ force: true })}>Overwrite</button>}
-          <button className="small-btn icon-only" title="Dismiss file change notice" aria-label="Dismiss file change notice" onClick={() => { if (td.live) td.live = dismissLiveFileNotice(td.live); bumpDocs(); }}><Icon.close /></button>
+          <button className="small-btn" onClick={() => void reload()}>{tr("editor.filepane.reloadFromDisk")}</button>
+          {live.dirty && <button className="small-btn danger-btn" onClick={() => void save({ force: true })}>{tr("editor.filepane.overwrite")}</button>}
+          <button className="small-btn icon-only" title={tr("editor.filepane.dismissFileChangeNotice")} aria-label={tr("editor.filepane.dismissFileChangeNotice")} onClick={() => { if (td.live) td.live = dismissLiveFileNotice(td.live); bumpDocs(); }}><Icon.close /></button>
         </div>
       )}
       {live && !live.noticeDismissed && live.kind === "deleted" && (
         <div className="editor-banner editor-conflict" role="alert">
-          <span>File was deleted on disk.{live.dirty ? " Saving recreates it; your buffer is preserved." : ""}</span>
-          {live.dirty && <button className="small-btn danger-btn" onClick={() => void save({ force: true })}>Recreate</button>}
-          <button className="small-btn icon-only" title="Dismiss deleted file notice" aria-label="Dismiss deleted file notice" onClick={() => { if (td.live) td.live = dismissLiveFileNotice(td.live); bumpDocs(); }}><Icon.close /></button>
+          <span>{tr("editor.filepane.fileWasDeletedOnDisk")}{live.dirty ? tr("editor.filepane.savingRecreatesItYourBufferIsPreserved") : ""}</span>
+          {live.dirty && <button className="small-btn danger-btn" onClick={() => void save({ force: true })}>{tr("editor.filepane.recreate")}</button>}
+          <button className="small-btn icon-only" title={tr("editor.filepane.dismissDeletedFileNotice")} aria-label={tr("editor.filepane.dismissDeletedFileNotice")} onClick={() => { if (td.live) td.live = dismissLiveFileNotice(td.live); bumpDocs(); }}><Icon.close /></button>
         </div>
       )}
       {live && !live.noticeDismissed && live.kind === "check-failed" && (
         <div className="editor-banner" role="alert">
-          <span>Couldn’t check for external changes: {live.message}</span>
-          <button className="small-btn" onClick={() => void checkFile()}>Retry</button>
-          <button className="small-btn icon-only" title="Dismiss file check notice" aria-label="Dismiss file check notice" onClick={() => { if (td.live) td.live = dismissLiveFileNotice(td.live); bumpDocs(); }}><Icon.close /></button>
+          <span>{tr("editor.filepane.couldnTCheckForExternalChanges")}{" "}{live.message}</span>
+          <button className="small-btn" onClick={() => void checkFile()}>{tr("common.retry")}</button>
+          <button className="small-btn icon-only" title={tr("editor.filepane.dismissFileCheckNotice")} aria-label={tr("editor.filepane.dismissFileCheckNotice")} onClick={() => { if (td.live) td.live = dismissLiveFileNotice(td.live); bumpDocs(); }}><Icon.close /></button>
         </div>
       )}
-      {doc.truncated && <div className="editor-banner">Truncated — file exceeds 512 KB. Read-only.</div>}
-      {doc.tooLarge && <div className="editor-banner">Binary file detected. Read-only.</div>}
+      {doc.truncated && <div className="editor-banner">{tr("editor.filepane.truncatedFileExceeds512KbReadOnly")}</div>}
+      {doc.tooLarge && <div className="editor-banner">{tr("editor.filepane.binaryFileDetectedReadOnly")}</div>}
       {error && <div className="files-error editor-error">{error}</div>}
       {editing && !readOnly ? (
         <div
@@ -707,7 +705,7 @@ export default function FilePane({ projectId, sessionId, resource: path, visible
               value={buf}
               wrap={wrap ? "soft" : "off"}
               spellCheck={false}
-              aria-label={`Edit ${doc.path}`}
+              aria-label={tr("editor.filepane.editValue", { path: doc.path })}
               onChange={(e) => setBuf(e.target.value)}
               onCompositionStart={() => { td.composing = true; bumpDocs(); }}
               onCompositionEnd={() => { td.composing = false; bumpDocs(); }}
@@ -727,20 +725,19 @@ export default function FilePane({ projectId, sessionId, resource: path, visible
         <div className="editor-body editor-html-preview" ref={bodyRef}>
           <iframe
             className="html-preview-frame"
-            title={`Preview of ${doc.path}`}
+            title={tr("editor.filepane.previewOfValue", { path: doc.path })}
             sandbox="allow-scripts"
             srcDoc={htmlPreviewDocument(buf, `${window.location.origin}/`)}
           />
           <div className="html-preview-note muted">
-            Sandboxed preview — scripts are isolated and network access is blocked.
-          </div>
+            {tr("editor.filepane.sandboxedPreviewScriptsAreIsolatedAndNetwork")}</div>
         </div>
       ) : previewKind === "json" && !editing ? (
         <div className="editor-body editor-json-preview" ref={bodyRef}>
           {jsonValue !== undefined ? (
             <JsonTree value={jsonValue} defaultDepth={prefs.jsonTreeDepth} />
           ) : (
-            <div className="editor-banner">Not valid JSON — showing source instead.</div>
+            <div className="editor-banner">{tr("editor.filepane.notValidJsonShowingSourceInstead")}</div>
           )}
           {jsonValue === undefined && (
             <pre className="code-view editor-plain">{buf}</pre>

@@ -1,4 +1,5 @@
 import type { WidgetDef } from "./catalog.ts";
+import { tr } from "../i18n/index.ts";
 import type { UiSlot } from "@polyth/contracts";
 import {
   WIDGET_ZONES,
@@ -51,18 +52,18 @@ export function widgetSizeLabel(
 export function pluginDisplayName(widget: Pick<WidgetDef, "pluginId" | "pluginName">): string {
   if (widget.pluginName) return widget.pluginName;
   const special: Record<string, string> = {
-    session: "Core workspace",
-    commands: "Core workspace",
-    files: "Core workspace",
-    goals: "Core workspace",
-    terminal: "Core workspace",
-    preview: "Core workspace",
-    git: "Git tools",
-    walkthrough: "Git tools",
-    knowledge: "Knowledge",
-    browser: "Browser",
+    session: tr("widgets.widgetlibrary.coreWorkspace"),
+    commands: tr("widgets.widgetlibrary.coreWorkspace"),
+    files: tr("widgets.widgetlibrary.coreWorkspace"),
+    goals: tr("widgets.widgetlibrary.coreWorkspace"),
+    terminal: tr("widgets.widgetlibrary.coreWorkspace"),
+    preview: tr("widgets.widgetlibrary.coreWorkspace"),
+    git: tr("widgets.widgetlibrary.gitTools"),
+    walkthrough: tr("widgets.widgetlibrary.gitTools"),
+    knowledge: tr("capabilities.knowledge"),
+    browser: tr("packages.onboarding.tours.builtin.browser"),
     github: "GitHub",
-    mcp: "MCP / Tools",
+    mcp: tr("widgets.widgetlibrary.mcpTools"),
   };
   return special[widget.pluginId]
     ?? widget.pluginId.replace(/[-_]/g, " ").replace(/^\w/, (letter) => letter.toUpperCase());
@@ -189,7 +190,7 @@ export function missingWidgetPlaceholders(
         definitionId,
         pluginId: placement.pluginId,
         title: placement.title,
-        description: placement.description ?? "This widget’s plugin is disabled or missing.",
+        description: placement.description ?? tr("widgets.widgetlibrary.pluginDisabledOrMissing"),
         placement,
         zone,
         slot,

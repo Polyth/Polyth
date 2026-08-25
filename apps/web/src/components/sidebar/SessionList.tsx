@@ -23,6 +23,7 @@ import {
   sortPinnedSessions,
 } from "../../sidebarPrefs.ts";
 import { Icon } from "../../icons.tsx";
+import { formatRelativeTime, getLocale, tr } from "../../i18n/index.ts";
 
 const INITIAL_VISIBLE_SESSIONS = 6;
 
@@ -32,14 +33,14 @@ export function sessionActivityLabel(
   now = Date.now(),
 ): string {
   if (!relative) {
-    return new Date(s.updatedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+    return new Date(s.updatedAt).toLocaleTimeString(getLocale(), { hour: "2-digit", minute: "2-digit" });
   }
   const age = Math.max(0, now - s.updatedAt);
-  if (age < 60_000) return "now";
-  if (age < 60 * 60_000) return `${Math.floor(age / 60_000)}m`;
-  if (age < 24 * 60 * 60_000) return `${Math.floor(age / 3_600_000)}h`;
-  if (age < 7 * 24 * 60 * 60_000) return `${Math.floor(age / 86_400_000)}d`;
-  return new Date(s.updatedAt).toLocaleDateString([], { month: "short", day: "numeric" });
+  if (age < 60_000) return formatRelativeTime(0, "second", { numeric: "auto", style: "narrow" });
+  if (age < 60 * 60_000) return formatRelativeTime(-Math.floor(age / 60_000), "minute", { style: "narrow" });
+  if (age < 24 * 60 * 60_000) return formatRelativeTime(-Math.floor(age / 3_600_000), "hour", { style: "narrow" });
+  if (age < 7 * 24 * 60 * 60_000) return formatRelativeTime(-Math.floor(age / 86_400_000), "day", { style: "narrow" });
+  return new Date(s.updatedAt).toLocaleDateString(getLocale(), { month: "short", day: "numeric" });
 }
 
 function sidebarElapsed(ms: number): string {
@@ -55,13 +56,13 @@ function sidebarElapsed(ms: number): string {
 
 function AttentionBadges({ status }: { status: SessionRowStatus }) {
   if (status.kind === "needs-approval") {
-    return <span className="session-status-indicator approval" title="Approval required" aria-label="Approval required"><span aria-hidden>✓</span></span>;
+    return <span className="session-status-indicator approval" title={tr("sidebar.sessionlist.approvalRequired")} aria-label={tr("sidebar.sessionlist.approvalRequired")}><span aria-hidden>✓</span></span>;
   }
   if (status.kind === "needs-reply") {
-    return <span className="session-status-indicator reply" title="Reply needed" aria-label="Reply needed"><span className="session-question-icon" aria-hidden><Icon.question /></span></span>;
+    return <span className="session-status-indicator reply" title={tr("sidebar.sessionlist.replyNeeded")} aria-label={tr("sidebar.sessionlist.replyNeeded")}><span className="session-question-icon" aria-hidden><Icon.question /></span></span>;
   }
   if (status.kind === "unread") {
-    return <span className="session-status-indicator unread" title="Unread activity" aria-label="Unread activity"><span aria-hidden>●</span></span>;
+    return <span className="session-status-indicator unread" title={tr("sidebar.sessionlist.unreadActivity")} aria-label={tr("sidebar.sessionlist.unreadActivity")}><span aria-hidden>●</span></span>;
   }
   return null;
 }
@@ -81,7 +82,7 @@ function useNowTick(enabled: boolean, intervalMs = 30_000): number {
 function StatusBadge({ status }: { status: SessionRowStatus }) {
   if (status.kind === "working") {
     return (
-      <span className="session-status-indicator working" title={`Agent working for ${sidebarElapsed(status.elapsedMs)}`} aria-label={`Agent working for ${sidebarElapsed(status.elapsedMs)}`}>
+      <span className="session-status-indicator working" title={tr("sidebar.sessionlist.agentWorkingForValue", { value: sidebarElapsed(status.elapsedMs) })} aria-label={tr("sidebar.sessionlist.agentWorkingForValue", { value: sidebarElapsed(status.elapsedMs) })}>
         <span className="session-status-pulse" aria-hidden>◌</span>
         <span aria-hidden>{sidebarElapsed(status.elapsedMs)}</span>
       </span>
@@ -247,21 +248,21 @@ function SessionRow({
   };
 
   const quickArchive = async () => {
-    const label = s.title || "session";
-    if (needsDestructiveConfirm(s) && !await confirmAlert(`Archive "${label}"? The agent is still running or waiting on you.`, { title: "Archive active session", confirmLabel: "Archive" })) return;
-    if (!needsDestructiveConfirm(s) && getUiSettings().confirmSessionArchive && !await confirmAlert(`Archive "${label}"?`, { title: "Archive session", confirmLabel: "Archive" })) return;
+    const label = s.title || tr("sidebar.sessionlist.session");
+    if (needsDestructiveConfirm(s) && !await confirmAlert(tr("sidebar.sessionlist.archiveValueTheAgentIsStillRunning", { label: label }), { title: tr("sidebar.sessionlist.archiveActiveSession"), confirmLabel: tr("common.archive") })) return;
+    if (!needsDestructiveConfirm(s) && getUiSettings().confirmSessionArchive && !await confirmAlert(tr("sidebar.sessionlist.archiveValue", { label: label }), { title: tr("sidebar.sessionlist.archiveSession"), confirmLabel: tr("common.archive") })) return;
     void archiveSession(s.id)
-      .then(() => { announce(`Archived ${label}`); onChanged(); })
-      .catch((e) => setUiError(friendlyError("Couldn’t archive the session", e)));
+      .then(() => { announce(tr("sidebar.sessionlist.archivedValue", { label: label })); onChanged(); })
+      .catch((e) => setUiError(friendlyError(tr("common.error"), e)));
   };
 
   const quickDelete = async () => {
-    const label = s.title || "session";
-    const activity = needsDestructiveConfirm(s) ? " The agent is still running or waiting on you." : "";
-    if (!await confirmAlert(`Delete "${label}"?${activity} This permanently removes the session and its history.`, { title: "Delete session", confirmLabel: "Delete" })) return;
+    const label = s.title || tr("sidebar.sessionlist.session");
+    const activity = needsDestructiveConfirm(s) ? ` ${tr("sidebar.sessionlist.theAgentIsStillRunningOr")}` : "";
+    if (!await confirmAlert(tr("sidebar.sessionlist.deleteValueValueThisPermanentlyRemovesThe", { label: label, activity: activity }), { title: tr("sidebar.sessionlist.deleteSession"), confirmLabel: tr("common.delete") })) return;
     void deleteSession(s.id)
-      .then(() => { announce(`Deleted ${label}`); onChanged(); })
-      .catch((e) => setUiError(friendlyError("Couldn’t delete the session", e)));
+      .then(() => { announce(tr("sidebar.sessionlist.deletedValue", { label: label })); onChanged(); })
+      .catch((e) => setUiError(friendlyError(tr("common.error"), e)));
   };
 
   const doRename = async () => {
@@ -270,10 +271,10 @@ function SessionRow({
     if (!t || t === s.title) return;
     try {
       await api.renameSession(s.id, t);
-      announce(`Session renamed to ${t}`);
+      announce(tr("sidebar.sessionlist.sessionRenamedToValue", { t: t }));
       onChanged();
     } catch (e) {
-      setUiError(friendlyError("Couldn’t rename the session", e));
+      setUiError(friendlyError(tr("common.error"), e));
     }
   };
 
@@ -284,7 +285,7 @@ function SessionRow({
       await api.organizeSession(s.id, { labelIds: next });
       onChanged();
     } catch (e) {
-      setUiError(friendlyError("Couldn’t update session labels", e));
+      setUiError(friendlyError(tr("sidebar.sessionlist.couldnTUpdateSessionLabels"), e));
     }
   };
   const displayTitle = deriveSessionTitle(s.title, eventsTitle);
@@ -311,7 +312,7 @@ function SessionRow({
           type="checkbox"
           className="session-check"
           checked={selected}
-          aria-label={`Select ${s.title || "session"}`}
+          aria-label={tr("sidebar.sessionlist.selectValue", { value: s.title || tr("sidebar.sessionlist.session") })}
           onChange={() => onToggleSelect(s.id)}
         />
       )}
@@ -332,7 +333,7 @@ function SessionRow({
           ref={sessionBtnRef}
           className="session-btn"
           aria-current={s.id === activeSessionId ? "true" : undefined}
-          aria-label={`Open ${displayTitle}`}
+          aria-label={tr("sidebar.sessionlist.openValue", { displayTitle: displayTitle })}
           title={hoverTitle}
           onClick={(event) => {
             if (longPressOpenedRef.current) {
@@ -381,15 +382,15 @@ function SessionRow({
         {s.status !== "archived" && (
           <button
             className="session-quick-btn"
-            title={`Archive ${s.title || "session"} (Shift+hover quick action)`}
-            aria-label={`Archive ${s.title || "session"}`}
+            title={tr("sidebar.sessionlist.archiveValueShiftHoverQuickAction", { value: s.title || tr("sidebar.sessionlist.session") })}
+            aria-label={tr("sidebar.sessionlist.archiveValue2", { value: s.title || tr("sidebar.sessionlist.session") })}
             onClick={quickArchive}
           ><Icon.download /></button>
         )}
         <button
           className="session-quick-btn danger"
-          title={`Delete ${s.title || "session"} (Shift+hover quick action)`}
-          aria-label={`Delete ${s.title || "session"}`}
+          title={tr("sidebar.sessionlist.deleteValueShiftHoverQuickAction", { value: s.title || tr("sidebar.sessionlist.session") })}
+          aria-label={tr("sidebar.sessionlist.deleteValue", { value: s.title || tr("sidebar.sessionlist.session") })}
           onClick={quickDelete}
         >✕</button>
       </span>
@@ -397,23 +398,23 @@ function SessionRow({
         <div
           className="session-menu"
           role="menu"
-          aria-label={`Actions for ${s.title || "session"}`}
+          aria-label={tr("sidebar.sessionlist.actionsForValue", { value: s.title || tr("sidebar.sessionlist.session") })}
           ref={menuRef}
           onKeyDown={onMenuKey}
         >
-          <button role="menuitem" onClick={() => { setMenuOpen(false); setTitle(s.title); setRenaming(true); }}>Rename</button>
+          <button role="menuitem" onClick={() => { setMenuOpen(false); setTitle(s.title); setRenaming(true); }}>{tr("common.rename")}</button>
           <button role="menuitem" onClick={() => {
             setMenuOpen(false);
-            void forkSession(s.id).catch((e) => setUiError(friendlyError("Couldn’t fork the session", e)));
-          }}>Fork</button>
+            void forkSession(s.id).catch((e) => setUiError(friendlyError(tr("common.error"), e)));
+          }}>{tr("sidebar.sessionlist.fork")}</button>
           <button role="menuitem" onClick={() => { setMenuOpen(false); onTogglePin(s); }}>
-            {s.pinned ? "Unpin" : "Pin to top"}
+            {s.pinned ? tr("sidebar.sessionlist.unpin") : tr("sidebar.sessionlist.pinToTop")}
           </button>
           {s.status === "archived" ? (
             <button role="menuitem" onClick={() => {
               setMenuOpen(false);
-              void restoreSession(s.id).then(onChanged).catch((e) => setUiError(friendlyError("Couldn’t restore the session", e)));
-            }}>Restore</button>
+              void restoreSession(s.id).then(onChanged).catch((e) => setUiError(friendlyError(tr("common.error"), e)));
+            }}>{tr("common.restore")}</button>
           ) : (
             <button
               role="menuitem"
@@ -421,7 +422,7 @@ function SessionRow({
                 setMenuOpen(false);
                 quickArchive();
               }}
-            >Archive</button>
+            >{tr("common.archive")}</button>
           )}
           <button
             role="menuitem"
@@ -430,8 +431,8 @@ function SessionRow({
               setMenuOpen(false);
               quickDelete();
             }}
-          >Delete</button>
-          {labels.length > 0 && <div className="session-menu-head">Labels</div>}
+          >{tr("common.delete")}</button>
+          {labels.length > 0 && <div className="session-menu-head">{tr("sidebar.sessionlist.labels")}</div>}
           {labels.map((l) => (
             <button key={l.id} role="menuitemcheckbox" aria-checked={(s.labelIds ?? []).includes(l.id)} onClick={() => void toggleLabel(l.id)}>
               <span className="label-dot" style={{ background: l.color }} /> {l.name} {(s.labelIds ?? []).includes(l.id) ? "✓" : ""}
@@ -546,9 +547,9 @@ export default function SessionList({
   const knownWorktreePaths = new Set(worktrees.filter((worktree) => !worktree.isMain).map((worktree) => worktree.path));
   const worktreeGroups = [
     {
-      key: "__main__",
-      label: mainWorktree?.branch || "Main worktree",
-      sessions: byWorktree.get("__main__") ?? [],
+      key: tr("sidebar.sessionlist.main"),
+      label: mainWorktree?.branch || tr("sidebar.sessionlist.mainWorktree"),
+      sessions: byWorktree.get(tr("sidebar.sessionlist.main")) ?? [],
       worktree: mainWorktree ?? null,
     },
     ...worktrees.filter((worktree) => !worktree.isMain).map((worktree) => ({
@@ -573,7 +574,7 @@ export default function SessionList({
       await api.organizeSession(session.id, { pinned: session.pinned ? null : { position } });
       onChanged();
     } catch (error) {
-      setUiError(friendlyError(`Couldn’t ${session.pinned ? "unpin" : "pin"} the session`, error));
+      setUiError(friendlyError(tr("common.error"), error));
     }
   };
 
@@ -589,9 +590,9 @@ export default function SessionList({
           : api.organizeSession(session.id, { pinned: { position } }),
       ));
       onChanged();
-      announce("Pinned sessions reordered");
+      announce(tr("sidebar.sessionlist.pinnedSessionsReordered"));
     } catch (error) {
-      setUiError(friendlyError("Couldn’t reorder pinned sessions", error));
+      setUiError(friendlyError(tr("common.error"), error));
       onChanged();
     }
   };
@@ -630,7 +631,7 @@ export default function SessionList({
   const worktreeNameForSession = (session: SessionProjection): string => {
     if (session.branch) return session.branch;
     const key = worktreeKey(session);
-    if (key === "__main__") return mainWorktree?.branch || "Main worktree";
+    if (key === "__main__") return mainWorktree?.branch || tr("sidebar.sessionlist.mainWorktree");
     return worktrees.find((worktree) => worktree.path === key)?.branch || worktreeLabel(null, key);
   };
   const startInWorktree = (key: string) => {
@@ -647,7 +648,7 @@ export default function SessionList({
           false,
           `${searchProjectName} · ${worktreeNameForSession(session)}`,
         ))}
-        {results.length === 0 && <div className="empty session-list-empty">No matching sessions.</div>}
+        {results.length === 0 && <div className="empty session-list-empty">{tr("sidebar.sessionlist.noMatchingSessions")}</div>}
       </div>
     );
   }
@@ -667,7 +668,12 @@ export default function SessionList({
               <button
                 className="session-worktree-toggle"
                 aria-expanded={!isCollapsed}
-                aria-label={`${isCollapsed ? "Expand" : "Collapse"} ${group.label} worktree`}
+                aria-label={tr("sidebar.sessionlist.valueValueWorktree", {
+                  value: isCollapsed
+                    ? tr("sidebar.sessionlist.expand")
+                    : tr("sidebar.sessionlist.collapse"),
+                  label: group.label,
+                })}
                 onClick={() => setCollapsed((prev) => {
                   const next = new Set(prev);
                   if (next.has(group.key)) next.delete(group.key);
@@ -681,15 +687,15 @@ export default function SessionList({
               </button>
               <span className="session-worktree-actions">
                 <button
-                  title={`New session in ${group.label}`}
-                  aria-label={`New session in ${group.label}`}
+                  title={tr("sidebar.sessionlist.newSessionInValue", { label: group.label })}
+                  aria-label={tr("sidebar.sessionlist.newSessionInValue", { label: group.label })}
                   onClick={() => startInWorktree(group.key)}
                 ><Icon.plus /></button>
                 {group.worktree && !group.worktree.isMain && (
                   <button
                     className="danger"
-                    title={`Delete ${group.label} worktree and its sessions`}
-                    aria-label={`Delete ${group.label} worktree and all of its sessions`}
+                    title={tr("sidebar.sessionlist.deleteValueWorktreeAndIts", { label: group.label })}
+                    aria-label={tr("sidebar.sessionlist.deleteValueWorktreeAndAll", { label: group.label })}
                     onClick={() => {
                       setDeleteBranch(false);
                       setRemoveTarget(group.worktree);
@@ -701,7 +707,7 @@ export default function SessionList({
             {!isCollapsed && (
               <div className="session-worktree-sessions">
                 {group.sessions.map((session) => row(session))}
-                {group.sessions.length === 0 && <div className="empty session-worktree-empty">No sessions</div>}
+                {group.sessions.length === 0 && <div className="empty session-worktree-empty">{tr("sidebar.sessionlist.noSessions")}</div>}
               </div>
             )}
           </div>
@@ -713,36 +719,38 @@ export default function SessionList({
           className="show-more-sessions"
           onClick={() => setVisibleCount((count) => count + INITIAL_VISIBLE_SESSIONS)}
         >
-          Show more sessions <Icon.chevronDown />
+          {tr("sidebar.sessionlist.showMoreSessions")}{" "}<Icon.chevronDown />
         </button>
       )}
 
-      {matchingActive.length === 0 && <div className="empty session-list-empty">No matching sessions.</div>}
+      {matchingActive.length === 0 && <div className="empty session-list-empty">{tr("sidebar.sessionlist.noMatchingSessions")}</div>}
 
       {archived.length > 0 && (
         <div className="session-archived">
           <button className="session-folder-toggle" aria-expanded={showArchived} onClick={() => setShowArchived((v) => !v)}>
-            <span>{showArchived ? "▾" : "▸"}</span> Archived <span className="muted">{archived.length}</span>
+            <span>{showArchived ? "▾" : "▸"}</span> {tr("sidebar.sessionlist.archived")}{" "}<span className="muted">{archived.length}</span>
           </button>
           {showArchived && archived.map((session) => row(session))}
         </div>
       )}
       {removeTarget && (
-        <Dialog title={`Delete ${worktreeLabel(removeTarget.branch, removeTarget.path)} worktree`} onClose={() => { if (!removeBusy) setRemoveTarget(null); }}>
+        <Dialog title={tr("sidebar.sessionlist.deleteValueWorktree", { value: worktreeLabel(removeTarget.branch, removeTarget.path) })} onClose={() => { if (!removeBusy) setRemoveTarget(null); }}>
           <div className="dialog-head">
-            <div><h2>Delete worktree and its sessions?</h2><p className="muted">{removeTarget.path}</p></div>
-            <button className="icon-btn" aria-label="Close" disabled={removeBusy} onClick={() => setRemoveTarget(null)}>×</button>
+            <div><h2>{tr("sidebar.sessionlist.deleteWorktreeAndItsSessions")}</h2><p className="muted">{removeTarget.path}</p></div>
+            <button className="icon-btn" aria-label={tr("common.close")} disabled={removeBusy} onClick={() => setRemoveTarget(null)}>{tr("sidebar.sessionlist.message")}</button>
           </div>
           <div className="worktree-remove-options">
-            <label><input type="checkbox" checked readOnly /> Delete the local worktree checkout</label>
-            <label><input type="checkbox" checked readOnly /> Permanently delete {sessionsForRemoval.length} session{sessionsForRemoval.length === 1 ? "" : "s"} in this worktree</label>
+            <label><input type="checkbox" checked readOnly /> {tr("sidebar.sessionlist.deleteTheLocalWorktreeCheckout")}</label>
+            <label><input type="checkbox" checked readOnly /> {sessionsForRemoval.length === 1
+              ? tr("sidebar.sessionlist.permanentlyDeleteOneSessionIn")
+              : tr("sidebar.sessionlist.permanentlyDeleteValueSessionsIn", { count: sessionsForRemoval.length })}</label>
             <label>
               <input type="checkbox" checked={deleteBranch} onChange={(event) => setDeleteBranch(event.target.checked)} />
-              Also delete its dedicated branch{removeTarget.branch ? ` (${removeTarget.branch})` : ""}
+              {tr("sidebar.sessionlist.alsoDeleteItsDedicatedBranch")}{removeTarget.branch ? ` (${removeTarget.branch})` : ""}
             </label>
           </div>
           <div className="dialog-foot">
-            <button className="small-btn" disabled={removeBusy} onClick={() => setRemoveTarget(null)}>Cancel</button>
+            <button className="small-btn" disabled={removeBusy} onClick={() => setRemoveTarget(null)}>{tr("common.cancel")}</button>
             <span className="header-spacer" />
             <button
               className="primary-btn danger-btn"
@@ -752,10 +760,10 @@ export default function SessionList({
                 void Promise.all(sessionsForRemoval.map((session) => deleteSession(session.id)))
                   .then(() => api.removeWorktree(projectId, removeTarget.path, deleteBranch))
                   .then(() => { setRemoveTarget(null); onChanged(); })
-                  .catch((error) => setUiError(friendlyError("Couldn’t remove the worktree", error)))
+                  .catch((error) => setUiError(friendlyError(tr("sidebar.sessionlist.couldnTRemoveTheWorktree"), error)))
                   .finally(() => setRemoveBusy(false));
               }}
-            >{removeBusy ? "Deleting…" : "Delete worktree"}</button>
+            >{removeBusy ? tr("sidebar.sessionlist.deleting") : tr("sidebar.sessionlist.deleteWorktree")}</button>
           </div>
         </Dialog>
       )}

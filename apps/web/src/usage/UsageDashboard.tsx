@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
 import { fmtTokens } from "../format.ts";
+import { getLocale, tr } from "../i18n/index.ts";
 import { Icon } from "../icons.tsx";
 import { useStore } from "../store.ts";
 import {
@@ -40,7 +41,7 @@ const providerPreferenceId = (provider: UsageProviderSummary): string =>
 
 const formatMoney = (value: number): string => {
   if (value > 0 && value < .0001) return "<$0.0001";
-  return new Intl.NumberFormat("en-US", {
+  return new Intl.NumberFormat(getLocale(), {
     style: "currency",
     currency: "USD",
     minimumFractionDigits: 2,
@@ -54,7 +55,7 @@ const formatRate = (value: number): string =>
 const formatChartMoney = (value: number): string => {
   if (value === 0) return "$0";
   const fractionDigits = value < .001 ? 5 : value < 1 ? 4 : 2;
-  return new Intl.NumberFormat("en-US", {
+  return new Intl.NumberFormat(getLocale(), {
     style: "currency",
     currency: "USD",
     minimumFractionDigits: 0,
@@ -66,8 +67,8 @@ const formatRange = (start: number, end: number): string => {
   const startDate = new Date(start);
   const endDate = new Date(end);
   const sameYear = startDate.getFullYear() === endDate.getFullYear();
-  const short = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric" });
-  const dated = new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", year: "numeric" });
+  const short = new Intl.DateTimeFormat(getLocale(), { month: "short", day: "numeric" });
+  const dated = new Intl.DateTimeFormat(getLocale(), { month: "short", day: "numeric", year: "numeric" });
   return sameYear
     ? `${short.format(start)} – ${short.format(end)}, ${endDate.getFullYear()}`
     : `${dated.format(start)} – ${dated.format(end)}`;
@@ -88,7 +89,7 @@ const collapseChartSeries = (
     ...featured,
     {
       providerId: "__other__",
-      label: `Other (${remainder.length})`,
+      label: tr("usage.usagedashboard.otherValue", { count: remainder.length }),
       values: aggregateSeries(remainder, series[0]?.values.length ?? 0),
     },
   ];
@@ -98,22 +99,24 @@ function TrendBadge({ trend, compact = false }: { trend: UsageTrend | null; comp
   if (!trend) {
     return (
       <span className={`usage-trend usage-trend-none${compact ? " compact" : ""}`}>
-        <span className="sr-only">No prior data</span>
-        <span aria-hidden="true">{compact ? "—" : "No prior data"}</span>
+        <span className="sr-only">{tr("usage.usagedashboard.noPriorData")}</span>
+        <span aria-hidden="true">{compact ? "—" : tr("usage.usagedashboard.noPriorData")}</span>
       </span>
     );
   }
   const rounded = Math.round(Math.abs(trend.percent));
   const direction = trend.direction === "up" ? "↑" : trend.direction === "down" ? "↓" : "→";
   const accessibleLabel = trend.direction === "flat"
-    ? "No change from the previous range"
-    : `${rounded} percent ${trend.direction === "up" ? "increase" : "decrease"} from the previous range`;
+    ? tr("usage.usagedashboard.noChangeFromThePreviousRange")
+    : trend.direction === "up"
+      ? tr("usage.usagedashboard.valuePercentIncreaseFromThe", { percent: rounded })
+      : tr("usage.usagedashboard.valuePercentDecreaseFromThe", { percent: rounded });
   return (
     <span className={`usage-trend usage-trend-${trend.direction}${compact ? " compact" : ""}`}>
       <span className="sr-only">{accessibleLabel}</span>
       <span aria-hidden="true">
         {direction} {trend.direction === "flat" ? "0%" : `${rounded}%`}
-        {!compact && " vs prior range"}
+        {!compact && ` ${tr("usage.usagedashboard.vsPriorRange")}`}
       </span>
     </span>
   );
@@ -255,7 +258,7 @@ function CohortChart({
   const barX = (index: number) => left + bucketWidth * index + (bucketWidth - barWidth) / 2;
   const pointY = (value: number) => top + chartHeight - value / maximum * chartHeight;
   const populated = allValues.some((value) => value > 0);
-  const metricLabel = metric === "cost" ? "Cost" : metric === "tokens" ? "Tokens" : "Sessions";
+  const metricLabel = metric === "cost" ? tr("usage.usagedashboard.cost") : metric === "tokens" ? tr("usage.usagedashboard.tokens") : tr("usage.usagedashboard.sessions");
   const formatAxis = (value: number) => metric === "cost"
     ? formatChartMoney(value)
     : metric === "tokens"
@@ -276,9 +279,9 @@ function CohortChart({
     <div className="usage-cohort-chart" ref={chartRef}>
       {populated && (
         <svg viewBox={`0 0 ${width} ${height}`} role="img">
-          <title>{`${metricLabel} from full session totals by latest-turn cohort`}</title>
+          <title>{tr("usage.usagedashboard.valueFromFullSessionTotals", { metric: metricLabel })}</title>
           <desc>
-            {`Each session appears once, in the date bucket containing its latest turn. The ${metricLabel.toLowerCase()} values are cumulative session totals, not usage generated during that bucket. Detailed values follow the chart.`}
+            {tr("usage.usagedashboard.eachSessionAppearsOnceInThe", { metric: metricLabel.toLowerCase() })}
           </desc>
           {[0, .25, .5, .75, 1].map((fraction) => {
             const y = top + chartHeight * fraction;
@@ -311,7 +314,7 @@ function CohortChart({
                   rx="2"
                   fill={seriesAccent(seriesIndex)}
                 >
-                  <title>{`${item.label}: ${formatAxis(value)} from sessions with a latest turn in ${label}`}</title>
+                  <title>{tr("usage.usagedashboard.valueValueFromSessionsWith", { label: item.label, value: formatAxis(value), bucket: label })}</title>
                 </rect>
               );
             });
@@ -336,10 +339,10 @@ function CohortChart({
       )}
       {populated && (
         <table className="sr-only">
-          <caption>{`${metricLabel} from full session totals by latest-turn cohort and provider`}</caption>
+          <caption>{tr("usage.usagedashboard.valueFromFullSessionTotalsBy", { metric: metricLabel })}</caption>
           <thead>
             <tr>
-              <th scope="col">Provider</th>
+              <th scope="col">{tr("usage.usagedashboard.provider")}</th>
               {labels.map((label, index) => <th scope="col" key={`${label}-${index}`}>{label}</th>)}
             </tr>
           </thead>
@@ -384,10 +387,10 @@ function SessionCohorts({
   return (
     <article className="usage-dashboard-card usage-time-card">
       <SectionHeading
-        title="Session cohorts by latest turn"
-        description={`${data.chart.labels.length} equal rolling buckets · ${Math.round(data.chart.bucketHours)} hours each`}
+        title={tr("usage.usagedashboard.sessionCohortsByLatestTurn")}
+        description={tr("usage.usagedashboard.valueEqualRollingBucketsValue", { count: data.chart.labels.length, hours: Math.round(data.chart.bucketHours) })}
         aside={(
-          <div className="usage-metric-toggle" role="group" aria-label="Chart metric">
+          <div className="usage-metric-toggle" role="group" aria-label={tr("usage.usagedashboard.chartMetric")}>
             {(["tokens", "cost", "sessions"] as const).map((item) => (
               <button
                 type="button"
@@ -396,7 +399,7 @@ function SessionCohorts({
                 key={item}
                 onClick={() => setMetric(item)}
               >
-                {item[0]!.toUpperCase() + item.slice(1)}
+                {item === "tokens" ? tr("usage.usagedashboard.tokens") : item === "cost" ? tr("usage.usagedashboard.cost") : tr("usage.usagedashboard.sessions")}
               </button>
             ))}
           </div>
@@ -406,14 +409,13 @@ function SessionCohorts({
         labels={data.chart.labels}
         series={series}
         metric={metric}
-        emptyTitle={hiddenActivity ? "All activity is hidden" : "No sessions last active in this range"}
+        emptyTitle={hiddenActivity ? tr("usage.usagedashboard.allActivityIsHidden") : tr("usage.usagedashboard.noSessionsLastActiveIn")}
         emptyText={hiddenActivity
-          ? "Show a provider to include its activity in breakdowns."
-          : "Cohorts fill in as sessions record tokens and cost."}
+          ? tr("usage.usagedashboard.showAProviderToIncludeIts")
+          : tr("usage.usagedashboard.cohortsFillInAsSessions")}
       />
       <p className="usage-chart-method">
-        Each session appears once in the bucket containing its latest turn. Token and cost
-        values are that session’s complete recorded totals—not usage generated during the bucket.
+        {tr("usage.usagedashboard.eachSessionAppearsOnceInBucket")}
       </p>
       <div className="usage-chart-legend">
         {series.map((item, index) => (
@@ -455,7 +457,7 @@ function ProviderSpendDonut({
     providerId: provider.id,
   }));
   const otherCost = withSpend.slice(4).reduce((sum, provider) => sum + provider.cost, 0);
-  if (otherCost > 0) featured.push({ id: "other", label: "Other", cost: otherCost });
+  if (otherCost > 0) featured.push({ id: "other", label: tr("usage.usagedashboard.other"), cost: otherCost });
   let offset = 0;
   const arcs = featured.map((entry, index) => {
     const share = total > 0 ? entry.cost / total : 0;
@@ -467,12 +469,12 @@ function ProviderSpendDonut({
   return (
     <article className="usage-dashboard-card usage-spend-card">
       <SectionHeading
-        title="Cost by provider"
-        description="Where workspace spend is going"
-        aside={<button type="button" className="usage-icon-button" aria-label="View provider details" onClick={onViewProviders}><Icon.chevronRight /></button>}
+        title={tr("usage.usagedashboard.costByProvider")}
+        description={tr("usage.usagedashboard.whereWorkspaceSpendIsGoing")}
+        aside={<button type="button" className="usage-icon-button" aria-label={tr("usage.usagedashboard.viewProviderDetails")} onClick={onViewProviders}><Icon.chevronRight /></button>}
       />
       <div className="usage-spend-content">
-        <div className="usage-spend-donut" role="img" aria-label={`Provider spend totaling ${formatMoney(total)}`}>
+        <div className="usage-spend-donut" role="img" aria-label={tr("usage.usagedashboard.providerSpendTotalingValue", { total: formatMoney(total) })}>
           <svg viewBox="0 0 120 120" aria-hidden="true">
             <circle className="usage-spend-track" cx="60" cy="60" r="45" pathLength="100" />
             {arcs.map(({ entry, share, offset: arcOffset, accent }) => (
@@ -489,7 +491,7 @@ function ProviderSpendDonut({
               />
             ))}
           </svg>
-          <div><span>Total spend</span><strong>{formatMoney(total)}</strong></div>
+          <div><span>{tr("usage.usagedashboard.totalSpend")}</span><strong>{formatMoney(total)}</strong></div>
         </div>
         <div className="usage-spend-legend">
           {arcs.map(({ entry, share, accent }) => (
@@ -505,10 +507,10 @@ function ProviderSpendDonut({
           ))}
           {arcs.length === 0 && (
             <div className="usage-card-empty">
-              <strong>{hiddenSpend ? "All spend is hidden" : "No spend recorded"}</strong>
+              <strong>{hiddenSpend ? tr("usage.usagedashboard.allSpendIsHidden") : tr("usage.usagedashboard.noSpendRecorded")}</strong>
               <span>{hiddenSpend
-                ? "Show a provider to include its spend in breakdowns."
-                : "Cost appears when the active model reports it."}</span>
+                ? tr("usage.usagedashboard.showAProviderToIncludeSpend")
+                : tr("usage.usagedashboard.costAppearsWhenTheActive")}</span>
             </div>
           )}
         </div>
@@ -530,10 +532,10 @@ function ModelBreakdown({
   return (
     <article className="usage-dashboard-card usage-model-card">
       <SectionHeading
-        title="Model breakdown"
-        description="Highest-use models among sessions last active in range"
+        title={tr("usage.usagedashboard.modelBreakdown")}
+        description={tr("usage.usagedashboard.highestUseModelsAmongSessions")}
         aside={(
-          <div className="usage-metric-toggle" role="group" aria-label="Model breakdown metric">
+          <div className="usage-metric-toggle" role="group" aria-label={tr("usage.usagedashboard.modelBreakdownMetric")}>
             {(["tokens", "cost"] as const).map((item) => (
               <button
                 type="button"
@@ -542,7 +544,7 @@ function ModelBreakdown({
                 key={item}
                 onClick={() => setMetric(item)}
               >
-                {item === "tokens" ? "Tokens" : "Cost"}
+                {item === "tokens" ? tr("usage.usagedashboard.tokens") : tr("usage.usagedashboard.cost")}
               </button>
             ))}
           </div>
@@ -554,7 +556,7 @@ function ModelBreakdown({
             <ProviderLogo providerID={model.providerId} providerName={model.providerLabel} className="usage-model-logo" />
             <span className="usage-model-copy">
               <strong title={model.label}>{model.label}</strong>
-              <small>{model.providerLabel} · {model.sessions} session{model.sessions === 1 ? "" : "s"}</small>
+              <small>{model.providerLabel} · {model.sessions === 1 ? tr("usage.usagedashboard.oneSession") : tr("usage.usagedashboard.valueSessions", { count: model.sessions })}</small>
             </span>
             <span className="usage-model-value">{metric === "tokens" ? fmtTokens(model.tokens) : formatMoney(model.cost)}</span>
             <span className="usage-model-track">
@@ -564,10 +566,10 @@ function ModelBreakdown({
         ))}
         {shown.length === 0 && (
           <div className="usage-card-empty">
-            <strong>{hiddenActivity ? "All model activity is hidden" : "No model activity yet"}</strong>
+            <strong>{hiddenActivity ? tr("usage.usagedashboard.allModelActivityIsHidden") : tr("usage.usagedashboard.noModelActivityYet")}</strong>
             <span>{hiddenActivity
-              ? "Show a provider to include its models in breakdowns."
-              : "Models appear after a session runs in this workspace."}</span>
+              ? tr("usage.usagedashboard.showAProviderToIncludeModels")
+              : tr("usage.usagedashboard.modelsAppearAfterASession")}</span>
           </div>
         )}
       </div>
@@ -579,26 +581,26 @@ function CostPulse({ data }: { data: ReturnType<typeof buildUsageDashboardData> 
   const averageSession = data.totals.sessions > 0 ? data.totals.cost / data.totals.sessions : 0;
   return (
     <article className="usage-dashboard-card usage-cost-card">
-      <SectionHeading title="Cost context" description="Recorded totals for sessions active in range" />
+      <SectionHeading title={tr("usage.usagedashboard.costContext")} description={tr("usage.usagedashboard.recordedTotalsForSessionsActive")} />
       <div className="usage-cost-total">
-        <span>Full recorded session spend</span>
+        <span>{tr("usage.usagedashboard.fullRecordedSessionSpend")}</span>
         <strong>{formatMoney(data.totals.cost)}</strong>
         <TrendBadge trend={data.trends.cost} />
       </div>
       <div className="usage-cost-grid">
-        <div><span>Sessions counted</span><strong>{data.totals.sessions.toLocaleString()}</strong></div>
-        <div><span>Selected range</span><strong>{data.rangeDays} days</strong></div>
-        <div><span>Per session</span><strong>{formatMoney(averageSession)}</strong></div>
-        <div><span>Per 1K tokens</span><strong>{formatRate(data.totals.averageCostPerThousand)}</strong></div>
+        <div><span>{tr("usage.usagedashboard.sessionsCounted")}</span><strong>{data.totals.sessions.toLocaleString(getLocale())}</strong></div>
+        <div><span>{tr("usage.usagedashboard.selectedRange")}</span><strong>{tr("usage.usagedashboard.valueDays", { count: data.rangeDays })}</strong></div>
+        <div><span>{tr("usage.usagedashboard.perSession")}</span><strong>{formatMoney(averageSession)}</strong></div>
+        <div><span>{tr("usage.usagedashboard.per1kTokens")}</span><strong>{formatRate(data.totals.averageCostPerThousand)}</strong></div>
       </div>
-      <p>Sessions are selected by latest turn. Values are their full recorded totals, not daily billing or a provider invoice.</p>
+      <p>{tr("usage.usagedashboard.sessionsAreSelectedByLatest")}</p>
     </article>
   );
 }
 
 function ProviderStatus({ provider }: { provider: UsageProviderSummary }) {
   const state = !provider.snapshot ? "session-only" : provider.stale ? "stale" : "fresh";
-  const label = state === "session-only" ? "Session only" : state === "stale" ? "Stale" : "Fresh";
+  const label = state === "session-only" ? tr("usage.usagedashboard.sessionOnly") : state === "stale" ? tr("usage.usagedashboard.stale") : tr("usage.usagedashboard.fresh");
   const error = state === "stale" ? provider.snapshot?.error?.message : undefined;
   return (
     <span
@@ -606,7 +608,7 @@ function ProviderStatus({ provider }: { provider: UsageProviderSummary }) {
       title={error}
     >
       <i aria-hidden="true" />{label}
-      {error && <span className="sr-only"> quota feed: {error}</span>}
+      {error && <span className="sr-only"> {tr("usage.usagedashboard.quotaFeedValue", { error: error })}</span>}
     </span>
   );
 }
@@ -621,26 +623,26 @@ function ProviderTable({
   return (
     <article className="usage-dashboard-card usage-providers-card">
       <SectionHeading
-        title="Provider activity"
-        description="Session totals and quota feed health"
-        aside={<span className="usage-source-badge">Project scoped</span>}
+        title={tr("usage.usagedashboard.providerActivity")}
+        description={tr("usage.usagedashboard.sessionTotalsAndQuotaFeed")}
+        aside={<span className="usage-source-badge">{tr("usage.usagedashboard.projectScoped")}</span>}
       />
       <div className="usage-table-scroll">
         <table>
           <thead>
             <tr>
-              <th scope="col">Provider</th>
-              <th scope="col">Spend</th>
-              <th scope="col">Tokens</th>
-              <th scope="col">Sessions</th>
-              <th scope="col">Remaining / limit</th>
-              <th scope="col">Status</th>
+              <th scope="col">{tr("usage.usagedashboard.provider")}</th>
+              <th scope="col">{tr("usage.usagedashboard.spend")}</th>
+              <th scope="col">{tr("usage.usagedashboard.tokens")}</th>
+              <th scope="col">{tr("usage.usagedashboard.sessions")}</th>
+              <th scope="col">{tr("usage.usagedashboard.remainingLimit")}</th>
+              <th scope="col">{tr("usage.usagedashboard.status")}</th>
             </tr>
           </thead>
           <tbody>
             {providers.map((provider) => (
               <tr key={provider.id}>
-                <td data-label="Provider">
+                <td data-label={tr("usage.usagedashboard.provider")}>
                   <span className="usage-provider-cell">
                     <ProviderLogo
                       providerID={provider.id}
@@ -650,19 +652,19 @@ function ProviderTable({
                     <span><strong>{provider.label}</strong><small>{provider.id}</small></span>
                   </span>
                 </td>
-                <td data-label="Spend"><strong>{formatMoney(provider.cost)}</strong><TrendBadge trend={provider.trends.cost} compact /></td>
-                <td data-label="Tokens"><strong>{fmtTokens(provider.tokens)}</strong><TrendBadge trend={provider.trends.tokens} compact /></td>
-                <td data-label="Sessions"><strong>{provider.sessions.toLocaleString()}</strong><TrendBadge trend={provider.trends.sessions} compact /></td>
-                <td data-label="Remaining / limit">
+                <td data-label={tr("usage.usagedashboard.spend")}><strong>{formatMoney(provider.cost)}</strong><TrendBadge trend={provider.trends.cost} compact /></td>
+                <td data-label={tr("usage.usagedashboard.tokens")}><strong>{fmtTokens(provider.tokens)}</strong><TrendBadge trend={provider.trends.tokens} compact /></td>
+                <td data-label={tr("usage.usagedashboard.sessions")}><strong>{provider.sessions.toLocaleString(getLocale())}</strong><TrendBadge trend={provider.trends.sessions} compact /></td>
+                <td data-label={tr("usage.usagedashboard.remainingLimit")}>
                   {provider.remainingPercent === null ? (
-                    <span className="usage-limit-unavailable">Not available</span>
+                    <span className="usage-limit-unavailable">{tr("usage.usagedashboard.notAvailable")}</span>
                   ) : (
                     <div className="usage-limit-cell">
                       <div><span>{provider.remainingPercent}%</span><small>{provider.quotaWindow?.label}</small></div>
                       <span
                         className="usage-limit-track"
                         role="progressbar"
-                        aria-label={`${provider.label} quota remaining`}
+                        aria-label={tr("usage.usagedashboard.valueQuotaRemaining", { label: provider.label })}
                         aria-valuemin={0}
                         aria-valuemax={100}
                         aria-valuenow={provider.remainingPercent}
@@ -675,7 +677,7 @@ function ProviderTable({
                     </div>
                   )}
                 </td>
-                <td data-label="Status">
+                <td data-label={tr("usage.usagedashboard.status")}>
                   <ProviderStatus provider={provider} />
                 </td>
               </tr>
@@ -683,8 +685,8 @@ function ProviderTable({
             {providers.length === 0 && (
               <tr className="usage-provider-empty-row">
                 <td colSpan={6}>{allProvidersHidden
-                  ? "All providers are hidden from breakdowns."
-                  : "No sessions last active in this range."}</td>
+                  ? tr("usage.usagedashboard.allProvidersAreHiddenFrom")
+                  : tr("usage.usagedashboard.noSessionsLastActiveInThis")}</td>
               </tr>
             )}
           </tbody>
@@ -707,13 +709,13 @@ function UsageActionStrip({
     <section className="usage-action-strip">
       <span className="usage-action-icon"><Icon.sliders /></span>
       <div>
-        <strong>Shape this dashboard</strong>
+        <strong>{tr("usage.usagedashboard.shapeThisDashboard")}</strong>
         <span>{hiddenCount > 0
-          ? `${hiddenCount} provider${hiddenCount === 1 ? " is" : "s are"} hidden from provider breakdowns. Workspace totals still include all activity.`
-          : "All discovered providers are included in provider breakdowns."}</span>
+          ? (hiddenCount === 1 ? tr("usage.usagedashboard.oneProviderIsHiddenFrom") : tr("usage.usagedashboard.valueProvidersAreHiddenFrom", { count: hiddenCount }))
+          : tr("usage.usagedashboard.allDiscoveredProvidersAreIncluded")}</span>
       </div>
-      <button type="button" className="small-btn" onClick={onProviders}>Provider visibility</button>
-      <button type="button" className="small-btn" onClick={onAddProvider}><Icon.plus /> Add provider</button>
+      <button type="button" className="small-btn" onClick={onProviders}>{tr("usage.usagedashboard.providerVisibility")}</button>
+      <button type="button" className="small-btn" onClick={onAddProvider}><Icon.plus /> {tr("usage.usagedashboard.addProvider")}</button>
     </section>
   );
 }
@@ -734,10 +736,10 @@ function ProviderDetails({
   return (
     <div className="usage-provider-view" data-settings-item="usage.providers">
       <section className="usage-provider-view-intro">
-        <div><span>Discovered</span><strong>{providers.length}</strong></div>
-        <div><span>Fresh feeds</span><strong>{providers.filter((provider) => provider.snapshot && !provider.stale).length}</strong></div>
-        <div><span>Visible</span><strong>{providers.filter((provider) => !hiddenProviders.includes(providerPreferenceId(provider))).length}</strong></div>
-        <button type="button" className="small-btn" onClick={onAddProvider}><Icon.plus /> Add provider</button>
+        <div><span>{tr("usage.usagedashboard.discovered")}</span><strong>{providers.length}</strong></div>
+        <div><span>{tr("usage.usagedashboard.freshFeeds")}</span><strong>{providers.filter((provider) => provider.snapshot && !provider.stale).length}</strong></div>
+        <div><span>{tr("usage.usagedashboard.visible")}</span><strong>{providers.filter((provider) => !hiddenProviders.includes(providerPreferenceId(provider))).length}</strong></div>
+        <button type="button" className="small-btn" onClick={onAddProvider}><Icon.plus /> {tr("usage.usagedashboard.addProvider")}</button>
       </section>
       <div className="usage-provider-detail-grid">
         {providers.map((provider, index) => {
@@ -764,9 +766,9 @@ function ProviderDetails({
                 </div>
               )}
               <div className="usage-provider-detail-stats">
-                <div><span>Spend</span><strong>{formatMoney(provider.cost)}</strong></div>
-                <div><span>Tokens</span><strong>{fmtTokens(provider.tokens)}</strong></div>
-                <div><span>Sessions</span><strong>{provider.sessions.toLocaleString()}</strong></div>
+                <div><span>{tr("usage.usagedashboard.spend")}</span><strong>{formatMoney(provider.cost)}</strong></div>
+                <div><span>{tr("usage.usagedashboard.tokens")}</span><strong>{fmtTokens(provider.tokens)}</strong></div>
+                <div><span>{tr("usage.usagedashboard.sessions")}</span><strong>{provider.sessions.toLocaleString(getLocale())}</strong></div>
               </div>
               <div className="usage-provider-windows">
                 {provider.snapshot?.windows.map((quota) => {
@@ -781,21 +783,21 @@ function ProviderDetails({
                       <span
                         className="usage-provider-window-track"
                         role="progressbar"
-                        aria-label={`${provider.label} ${quota.label} used`}
+                        aria-label={tr("usage.usagedashboard.valueValueUsed", { label: provider.label, window: quota.label })}
                         aria-valuemin={0}
                         aria-valuemax={100}
                         aria-valuenow={Math.round(used * 100)}
                       >
                         <i className={used >= .8 ? "warning" : ""} style={{ width: `${used * 100}%` }} />
                       </span>
-                      <p>{pace ? paceText(pace, quota) : quota.resetsAt ? `Resets ${new Date(quota.resetsAt).toLocaleString()}` : "Live quota usage"}</p>
+                      <p>{pace ? paceText(pace, quota) : quota.resetsAt ? tr("usage.usagedashboard.resetsValue", { date: new Date(quota.resetsAt).toLocaleString(getLocale()) }) : tr("usage.usagedashboard.liveQuotaUsage")}</p>
                     </div>
                   );
                 })}
                 {!provider.snapshot?.windows.length && (
                   <div className="usage-provider-no-quota">
                     <Icon.usage />
-                    <span><strong>No quota feed</strong><small>Session totals are available; this provider does not expose limits.</small></span>
+                    <span><strong>{tr("usage.usagedashboard.noQuotaFeed")}</strong><small>{tr("usage.usagedashboard.sessionTotalsAreAvailableThis")}</small></span>
                   </div>
                 )}
               </div>
@@ -803,20 +805,20 @@ function ProviderDetails({
                 <button
                   type="button"
                   className="small-btn"
-                  aria-label={`${hidden ? "Show" : "Hide"} ${provider.label} in breakdowns`}
+                  aria-label={hidden ? tr("usage.usagedashboard.showValueInBreakdowns", { label: provider.label }) : tr("usage.usagedashboard.hideValueInBreakdowns", { label: provider.label })}
                   onClick={() => setProviderHidden(preferenceId, !hidden)}
                 >
-                  {hidden ? "Show in breakdowns" : "Hide from breakdowns"}
+                  {hidden ? tr("usage.usagedashboard.showInBreakdowns") : tr("usage.usagedashboard.hideFromBreakdowns")}
                 </button>
                 {provider.snapshot && (
                   <button
                     type="button"
                     className="small-btn"
                     disabled={quotaBusy}
-                    aria-label={`Refresh ${provider.label} quota feed`}
+                    aria-label={tr("usage.usagedashboard.refreshValueQuotaFeed", { label: provider.label })}
                     onClick={() => void onRefresh(provider.snapshot!.providerId)}
                   >
-                    <Icon.refresh /> Refresh
+                    <Icon.refresh /> {tr("common.refresh")}
                   </button>
                 )}
               </footer>
@@ -826,9 +828,9 @@ function ProviderDetails({
         {providers.length === 0 && (
           <article className="usage-provider-connect-empty">
             <span><Icon.plus /></span>
-            <h3>Connect your first provider</h3>
-            <p>Polyth discovers quota sources from configured model providers. Credential values stay on the server.</p>
-            <button type="button" className="small-btn" onClick={onAddProvider}>Open provider settings</button>
+            <h3>{tr("usage.usagedashboard.connectYourFirstProvider")}</h3>
+            <p>{tr("usage.usagedashboard.polythDiscoversQuotaSources")}</p>
+            <button type="button" className="small-btn" onClick={onAddProvider}>{tr("usage.usagedashboard.openProviderSettings")}</button>
           </article>
         )}
       </div>
@@ -904,22 +906,22 @@ export function UsageDashboard(): ReactNode {
       <section className="usage-dashboard-hero">
         <div className="usage-hero-mark"><Icon.usage /></div>
         <div>
-          <span className="usage-eyebrow">Workspace telemetry</span>
-          <h2>Understand the sessions behind every token.</h2>
-          <p>Ranges use each session’s latest turn and include its full recorded totals. Provider limits come from connected quota feeds.</p>
+          <span className="usage-eyebrow">{tr("usage.usagedashboard.workspaceTelemetry")}</span>
+          <h2>{tr("usage.usagedashboard.understandTheSessionsBehind")}</h2>
+          <p>{tr("usage.usagedashboard.rangesUseEachSessions")}</p>
         </div>
         <div className="usage-hero-status" aria-live="polite">
           {quotaLoading ? (
-            <span className="loading"><Icon.refresh /> Loading quota feeds</span>
+            <span className="loading"><Icon.refresh /> {tr("usage.usagedashboard.loadingQuotaFeeds")}</span>
           ) : quotaError ? (
-            <span className="error"><i /> Quota feeds unavailable</span>
+            <span className="error"><i /> {tr("usage.usagedashboard.quotaFeedsUnavailable")}</span>
           ) : snapshots.length === 0 ? (
-            <span className="neutral"><i /> Session data only</span>
+            <span className="neutral"><i /> {tr("usage.usagedashboard.sessionDataOnly")}</span>
           ) : (
             <span className={staleFeeds > 0 ? "warning" : ""}>
               <i />{staleFeeds > 0
-                ? `${freshFeeds}/${snapshots.length} feeds fresh`
-                : `${freshFeeds} fresh feed${freshFeeds === 1 ? "" : "s"}`}
+                ? tr("usage.usagedashboard.valueValueFeedsFresh", { fresh: freshFeeds, total: snapshots.length })
+                : freshFeeds === 1 ? tr("usage.usagedashboard.oneFreshFeed") : tr("usage.usagedashboard.valueFreshFeeds", { count: freshFeeds })}
             </span>
           )}
           <small>{formatRange(data.rangeStart, data.rangeEnd)}</small>
@@ -927,21 +929,21 @@ export function UsageDashboard(): ReactNode {
       </section>
 
       <div className="usage-dashboard-toolbar">
-        <div className="usage-view-tabs" role="group" aria-label="Usage view">
+        <div className="usage-view-tabs" role="group" aria-label={tr("usage.usagedashboard.usageView")}>
           <button type="button" aria-pressed={view === "overview"} className={view === "overview" ? "active" : ""} onClick={() => setView("overview")}>
-            <Icon.widgets /> Overview
+            <Icon.widgets /> {tr("usage.usagedashboard.overview")}
           </button>
           <button type="button" aria-pressed={view === "providers"} className={view === "providers" ? "active" : ""} onClick={() => setView("providers")}>
-            <Icon.list /> Providers
+            <Icon.list /> {tr("usage.usagedashboard.providers")}
           </button>
         </div>
         <span className="usage-toolbar-spacer" />
-        <div className="usage-range-control" role="group" aria-label="Usage range">
+        <div className="usage-range-control" role="group" aria-label={tr("usage.usagedashboard.usageRange")}>
           {([7, 30, 90] as const).map((days) => (
             <button
               type="button"
               aria-pressed={rangeDays === days}
-              aria-label={`${days} day range`}
+              aria-label={tr("usage.usagedashboard.valueDayRange", { days: days })}
               className={rangeDays === days ? "active" : ""}
               key={days}
               onClick={() => setRangeDays(days)}
@@ -950,19 +952,19 @@ export function UsageDashboard(): ReactNode {
             </button>
           ))}
         </div>
-        <div className="usage-layout-control" role="group" aria-label="Dashboard density">
-          <button type="button" className={layout === "expanded" ? "active" : ""} aria-label="Expanded widgets" aria-pressed={layout === "expanded"} onClick={() => setLayout("expanded")} title="Expanded widgets">
-            <Icon.widgets /><span>Expanded</span>
+        <div className="usage-layout-control" role="group" aria-label={tr("usage.usagedashboard.dashboardDensity")}>
+          <button type="button" className={layout === "expanded" ? "active" : ""} aria-label={tr("usage.usagedashboard.expandedWidgets")} aria-pressed={layout === "expanded"} onClick={() => setLayout("expanded")} title={tr("usage.usagedashboard.expandedWidgets")}>
+            <Icon.widgets /><span>{tr("usage.usagedashboard.expanded")}</span>
           </button>
-          <button type="button" className={layout === "compact" ? "active" : ""} aria-label="Compact widgets" aria-pressed={layout === "compact"} onClick={() => setLayout("compact")} title="Compact widgets">
-            <Icon.list /><span>Compact</span>
+          <button type="button" className={layout === "compact" ? "active" : ""} aria-label={tr("usage.usagedashboard.compactWidgets")} aria-pressed={layout === "compact"} onClick={() => setLayout("compact")} title={tr("usage.usagedashboard.compactWidgets")}>
+            <Icon.list /><span>{tr("usage.usagedashboard.compact")}</span>
           </button>
         </div>
         <button
           type="button"
           className={`usage-refresh-button${quotaBusy ? " refreshing" : ""}`}
-          aria-label={quotaBusy ? "Refreshing provider quota feeds" : "Refresh provider quota feeds"}
-          title={quotaBusy ? "Refreshing provider quota feeds" : "Refresh provider quota feeds"}
+          aria-label={quotaBusy ? tr("usage.usagedashboard.refreshingProviderQuotaFeeds") : tr("usage.usagedashboard.refreshProviderQuotaFeeds")}
+          title={quotaBusy ? tr("usage.usagedashboard.refreshingProviderQuotaFeeds") : tr("usage.usagedashboard.refreshProviderQuotaFeeds")}
           disabled={quotaBusy}
           onClick={() => void refreshAll()}
         >
@@ -973,48 +975,48 @@ export function UsageDashboard(): ReactNode {
       {quotaError && (
         <div className="usage-quota-alert" role="alert">
           <Icon.usage />
-          <span><strong>Quota feeds could not be loaded.</strong> Session totals remain available. {quotaError}</span>
-          <button type="button" className="small-btn" disabled={quotaBusy} onClick={() => void reload()}>Retry</button>
+          <span><strong>{tr("usage.usagedashboard.quotaFeedsCouldNotBe")}</strong> {tr("usage.usagedashboard.sessionTotalsRemainAvailable")} {quotaError}</span>
+          <button type="button" className="small-btn" disabled={quotaBusy} onClick={() => void reload()}>{tr("common.retry")}</button>
         </div>
       )}
 
       {view === "overview" ? (
         <div className="usage-dashboard-content">
-          <section className="usage-stat-grid" aria-label="Usage summary">
+          <section className="usage-stat-grid" aria-label={tr("usage.usagedashboard.usageSummary")}>
             <StatCard
-              label="Spend"
+              label={tr("usage.usagedashboard.spend")}
               value={formatMoney(data.totals.cost)}
               trend={data.trends.cost}
               icon="usage"
               tone="var(--accent)"
-              detail={`${formatMoney(averageSessionCost)} / session`}
+              detail={tr("usage.usagedashboard.valuePerSession2", { value: formatMoney(averageSessionCost) })}
               series={costSeries}
             />
             <StatCard
-              label="Tokens"
+              label={tr("usage.usagedashboard.tokens")}
               value={fmtTokens(data.totals.tokens)}
               trend={data.trends.tokens}
               icon="context"
               tone="var(--purple)"
-              detail={`${data.models.length} model${data.models.length === 1 ? "" : "s"}`}
+              detail={data.models.length === 1 ? tr("usage.usagedashboard.oneModel") : tr("usage.usagedashboard.valueModels", { count: data.models.length })}
               series={tokenSeries}
             />
             <StatCard
-              label="Sessions"
-              value={data.totals.sessions.toLocaleString()}
+              label={tr("usage.usagedashboard.sessions")}
+              value={data.totals.sessions.toLocaleString(getLocale())}
               trend={data.trends.sessions}
               icon="events"
               tone="var(--blue)"
-              detail={`${visibleProviders.length} provider${visibleProviders.length === 1 ? "" : "s"} shown`}
+              detail={visibleProviders.length === 1 ? tr("usage.usagedashboard.oneProviderShown") : tr("usage.usagedashboard.valueProvidersShown", { count: visibleProviders.length })}
               series={sessionSeries}
             />
             <StatCard
-              label="Cost / 1K tokens"
+              label={tr("usage.usagedashboard.cost1kTokens")}
               value={data.totals.tokens > 0 ? formatRate(data.totals.averageCostPerThousand) : "$0.0000"}
               trend={data.trends.averageCostPerThousand}
               icon="compare"
               tone="var(--amber)"
-              detail={`${rangeDays}-day cohort ratio`}
+              detail={tr("usage.usagedashboard.valueDayCohortRatio", { days: rangeDays })}
               series={averageSeries}
             />
           </section>

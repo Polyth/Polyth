@@ -9,6 +9,7 @@ import {
   type WidgetSize,
 } from "@polyth/contracts";
 import { getState, subscribeStore } from "../store.ts";
+import { tr } from "../i18n/index.ts";
 
 export type WidgetZone = "header" | "left" | "main" | "right" | "bottom" | "floating";
 export type { WidgetAudience, WidgetScope, WidgetSize } from "@polyth/contracts";
@@ -559,20 +560,26 @@ export function canPlaceWidget(
   definition: WidgetLayoutDefinition | undefined,
   target: WidgetPlacementTarget,
 ): WidgetPlacementCheck {
-  if (!definition) return { ok: false, reason: "This widget’s plugin is unavailable." };
+  if (!definition) {
+    return { ok: false, reason: tr("widgets.widgetlayout.widgetPluginUnavailable") };
+  }
   const slot = isWidgetZone(target) ? widgetSlotFromZone(target) : target;
   const supported = supportedSlotsFor(definition);
   if (!supported.includes(slot)) {
-    const zone = widgetZoneFromSlot(slot);
     return {
       ok: false,
-      reason: zone
-        ? `${definition.title ?? "This widget"} doesn’t fit in ${zone === "header" ? "the header" : `the ${zone} zone`}.`
-        : `${definition.title ?? "This widget"} can’t be placed in ${slot}.`,
+      reason: tr("widgets.widgetlayout.widgetDoesNotFitSelectedArea", {
+        widget: definition.title ?? tr("widgets.widgetlayout.thisWidget"),
+      }),
     };
   }
   if (slot === "workspace.header" && (definition.minSize?.h ?? definition.defaultSize?.h ?? 1) > 3) {
-    return { ok: false, reason: `${definition.title ?? "This widget"} needs more height than the header provides.` };
+    return {
+      ok: false,
+      reason: tr("widgets.widgetlayout.widgetNeedsMoreHeaderHeight", {
+        widget: definition.title ?? tr("widgets.widgetlayout.thisWidget"),
+      }),
+    };
   }
   return { ok: true };
 }
@@ -874,7 +881,7 @@ export function duplicateWidget(
       definitionId: definition.id,
       size,
       position: { x: current.position.x, y: current.position.y + current.size.h },
-      title: current.title ? `${current.title} copy` : definition.title ? `${definition.title} copy` : undefined,
+      title: current.title ? tr("widgets.widgetlayout.valueCopy", { title: current.title }) : definition.title ? tr("widgets.widgetlayout.valueCopy", { title: definition.title }) : undefined,
     },
   };
   const zone = widgetZoneFromSlot(slot);

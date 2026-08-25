@@ -12,6 +12,7 @@ import Mermaid from "./Mermaid.tsx";
 import MathTex from "./MathTex.tsx";
 import JsonTree, { tryParseJson } from "./JsonTree.tsx";
 import GalleryLightbox, { type GalleryImage } from "./Gallery.tsx";
+import { tr } from "../i18n/index.ts";
 
 interface DocContextValue {
   images: GalleryImage[];
@@ -29,7 +30,7 @@ function FileRefLink({ text, path, startLine, endLine, column }: {
   return (
     <button
       className="file-ref"
-      title={`Open ${path}${startLine ? ` at line ${startLine}` : ""}`}
+      title={tr("markdown.render.openValueValue", { path: path, value: startLine ? ` at line ${startLine}` : "" })}
       onClick={() => openEditorFile(path, {
         path,
         ...(startLine !== undefined ? { startLine } : {}),
@@ -65,7 +66,7 @@ function textWithRefs(text: string, keyBase: string, asCode: boolean): ReactNode
 function InlineImage({ src, alt }: { src: string; alt: string }) {
   const ctx = useContext(DocContext);
   const resolved = sanitizeImageSrc(src, { ...(ctx.projectId !== undefined ? { projectId: ctx.projectId } : {}) });
-  if (resolved === null) return <code className="md-blocked" title="blocked image source">{alt || src}</code>;
+  if (resolved === null) return <code className="md-blocked" title={tr("markdown.render.blockedImageSource")}>{alt || src}</code>;
   return (
     <button className="md-img-btn" title={alt || src} onClick={() => ctx.openGallery(resolved)}>
       <img className="md-img" src={resolved} alt={alt} loading="lazy" />
@@ -122,7 +123,7 @@ function CodeBlock({ lang, text }: { lang: string; text: string }) {
       <div className="copy-wrap json-block">
         <div className="json-block-bar">
           <button className="small-btn" aria-pressed={asTree} onClick={() => setAsTree((v) => !v)}>
-            {asTree ? "Raw" : "Tree"}
+            {asTree ? tr("markdown.render.raw") : tr("markdown.render.tree")}
           </button>
           <CopyButton text={text} />
         </div>

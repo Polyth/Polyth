@@ -3,6 +3,7 @@
 // groups). Prefs live in localStorage under polyth.usagePrefs — they are
 // telemetry display choices and never touch the event log or the server.
 import { useSyncExternalStore } from "react";
+import { tr } from "./i18n/index.ts";
 
 // ---- model-family grouping (pure) ------------------------------------------
 
@@ -22,7 +23,7 @@ const FAMILY_ALIAS: Record<string, string> = {
   phi: "phi",
 };
 
-const UPPER_LABELS = new Set(["gpt", "glm"]);
+const UPPER_LABELS = new Set([tr("usageprefs.gpt"), tr("usageprefs.glm")]);
 
 /** Derive a model family from a quota window id/label. Returns null when the
  *  text does not look like a model name (e.g. "requests-day", "Spend (month)")
@@ -68,7 +69,7 @@ export function groupQuotaWindows<W extends QuotaWindowLike>(windows: readonly W
     const key = family ?? "";
     let group = byKey.get(key);
     if (!group) {
-      group = { family, label: family ? familyLabel(family) : "General", windows: [] };
+      group = { family, label: family ? familyLabel(family) : tr("usageprefs.general"), windows: [] };
       byKey.set(key, group);
     }
     group.windows.push(w);

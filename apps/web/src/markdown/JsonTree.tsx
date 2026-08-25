@@ -1,6 +1,7 @@
 // Collapsible JSON tree (WP4). Fed by ```json code fences that parse cleanly;
 // anything that does not parse stays a plain code block upstream.
 import { useState } from "react";
+import { tr } from "../i18n/index.ts";
 
 type JsonValue = string | number | boolean | null | JsonValue[] | { [k: string]: JsonValue };
 
@@ -15,7 +16,7 @@ export function tryParseJson(text: string): JsonValue | undefined {
 }
 
 function Leaf({ v }: { v: string | number | boolean | null }) {
-  if (v === null) return <span className="jt-null">null</span>;
+  if (v === null) return <span className="jt-null">{tr("markdown.jsontree.null")}</span>;
   if (typeof v === "string") return <span className="jt-str">"{v}"</span>;
   if (typeof v === "boolean") return <span className="jt-bool">{String(v)}</span>;
   return <span className="jt-num">{String(v)}</span>;
@@ -39,7 +40,7 @@ function Node({ name, value, depth, defaultDepth }: { name?: string; value: Json
         <span className="jt-chevron">{open ? "▾" : "▸"}</span>
         {label}
         <span className="jt-brace">{brackets[0]}</span>
-        {!open && <span className="jt-count">{entries.length} {isArr ? "items" : "keys"}</span>}
+        {!open && <span className="jt-count">{entries.length} {isArr ? tr("markdown.jsontree.items") : tr("markdown.jsontree.keys")}</span>}
         {!open && <span className="jt-brace">{brackets[1]}</span>}
       </div>
       {open && entries.map(([k, v]) => (
@@ -52,7 +53,7 @@ function Node({ name, value, depth, defaultDepth }: { name?: string; value: Json
 
 export default function JsonTree({ value, defaultDepth = 2 }: { value: JsonValue; defaultDepth?: number }) {
   return (
-    <div className="json-tree" role="tree" aria-label="JSON tree">
+    <div className="json-tree" role="tree" aria-label={tr("markdown.jsontree.jsonTree")}>
       <Node value={value} depth={0} defaultDepth={Math.max(1, defaultDepth)} />
     </div>
   );

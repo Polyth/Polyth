@@ -9,6 +9,7 @@ import { clampMenuPosition, quoteForReply, selectionTitle } from "../selectionAc
 import { requestComposerInsert } from "../composerInsert.ts";
 import { copyText } from "../utils.ts";
 import { startNewSession, useStore } from "../store.ts";
+import { tr } from "../i18n/index.ts";
 
 const MENU_W = 270;
 const MENU_H = 34;
@@ -92,7 +93,7 @@ export default function SelectionMenu({ container }: {
 
   const copy = async () => {
     const ok = await copyText(menu.text);
-    setFlash(ok ? "Copied ✓" : "copy failed");
+    setFlash(ok ? tr("selectionmenu.copied") : tr("selectionmenu.copyFailed"));
     setTimeout(() => { setFlash(""); setMenu(null); }, 900);
   };
 
@@ -100,7 +101,7 @@ export default function SelectionMenu({ container }: {
     <div
       className="selection-menu"
       role="toolbar"
-      aria-label="Selection actions"
+      aria-label={tr("selectionmenu.selectionActions")}
       style={{ left: menu.x, top: menu.y }}
       onMouseDown={(e) => e.preventDefault()}
     >
@@ -108,9 +109,9 @@ export default function SelectionMenu({ container }: {
         ? <span className="selection-menu-flash">{flash}</span>
         : (
           <>
-            <button className="small-btn" title="Quote the selection in the composer" onClick={quote}>Quote in reply</button>
-            <button className="small-btn" title="Start a new session with this selection as the draft" onClick={newSession} disabled={!projectId}>New session</button>
-            <button className="small-btn" title="Copy the selection" onClick={() => void copy()}>Copy</button>
+            <button className="small-btn" title={tr("selectionmenu.quoteTheSelectionInTheComposer")} onClick={quote}>{tr("selectionmenu.quoteInReply")}</button>
+            <button className="small-btn" title={tr("selectionmenu.startANewSessionWithThisSelection")} onClick={newSession} disabled={!projectId}>{tr("selectionmenu.newSession")}</button>
+            <button className="small-btn" title={tr("selectionmenu.copyTheSelection")} onClick={() => void copy()}>{tr("common.copy")}</button>
           </>
         )}
     </div>

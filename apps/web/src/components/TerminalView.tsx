@@ -13,8 +13,16 @@ import { createTerminalEmulator, type TerminalEmulator } from "../terminal/emula
 import EmptyState from "./EmptyState.tsx";
 import TermPane from "./TermPane.tsx";
 import { Icon } from "../icons.tsx";
+import { tr } from "../i18n/index.ts";
 
 type ConnectionState = "connecting" | "connected" | "reconnecting" | "disconnected";
+
+function connectionLabel(connection: ConnectionState): string {
+  if (connection === "connected") return tr("terminalview.connected");
+  if (connection === "reconnecting") return tr("terminalview.reconnecting");
+  if (connection === "connecting") return tr("terminalview.connecting");
+  return tr("terminalview.disconnected");
+}
 
 interface Tab {
   id: string;
@@ -189,7 +197,7 @@ export default function TerminalView() {
     });
     const tab: Tab = {
       id: terminalId,
-      title: cmd ?? `shell · ${tabs.length + 1}`,
+      title: cmd ?? tr("terminalview.shellValue", { value: tabs.length + 1 }),
       running: true,
       connection: "connecting",
     };
@@ -316,7 +324,7 @@ export default function TerminalView() {
                 className="term-tab-rename"
                 value={renameVal}
                 autoFocus
-                aria-label="Terminal tab name"
+                aria-label={tr("terminalview.terminalTabName")}
                 onChange={(e) => setRenameVal(e.target.value)}
                 onBlur={() => commitRename(t.id)}
                 onKeyDown={(e) => {
@@ -327,23 +335,23 @@ export default function TerminalView() {
             ) : (
               <button
                 className={`term-tab ${t.id === tab?.id ? "active" : ""}`}
-                title={`${t.connection === "connected" ? "Connected" : t.connection === "reconnecting" ? "Reconnecting" : t.connection === "connecting" ? "Connecting" : "Disconnected"} · double-click to rename`}
+                title={tr("terminalview.statusDoubleClickToRename", { status: connectionLabel(t.connection) })}
                 onClick={() => setActive(t.id)}
                 onDoubleClick={() => startRename(t)}
               >
                 <span
                   className={`term-connection ${t.connection}`}
-                  aria-label={t.connection}
-                  title={t.connection}
+                  aria-label={connectionLabel(t.connection)}
+                  title={connectionLabel(t.connection)}
                 />
                 {t.title}
-                {!t.running && <span className="term-tab-dead"> ·exited</span>}
+                {!t.running && <span className="term-tab-dead"> {tr("terminalview.exited")}</span>}
               </button>
             )}
             <button
               className="term-tab-x"
-              title={`Close ${t.title}`}
-              aria-label={`Close ${t.title}`}
+              title={tr("terminalview.closeValue", { title: t.title })}
+              aria-label={tr("terminalview.closeValue", { title: t.title })}
               onClick={() => void closeTab(t.id)}
             ><Icon.close /></button>
           </span>
@@ -353,27 +361,27 @@ export default function TerminalView() {
           {tab && (
             <>
               <button
-                title="Find in terminal (Ctrl+Shift+F)"
-                aria-label="Find in terminal"
+                title={tr("terminalview.findInTerminalShortcut")}
+                aria-label={tr("terminalview.findInTerminal")}
                 onClick={() => setSearchSignal((n) => n + 1)}
               ><Icon.search /></button>
               <button
-                title="Clear terminal (Ctrl+Shift+K)"
-                aria-label="Clear terminal"
+                title={tr("terminalview.clearTerminalShortcut")}
+                aria-label={tr("terminalview.clearTerminal")}
                 onClick={clearActive}
               ><Icon.trash /></button>
             </>
           )}
-          <button className="term-new" title="New terminal" aria-label="New terminal" onClick={() => void spawn()} disabled={!projectId}><Icon.plus /></button>
+          <button className="term-new" title={tr("terminalview.newTerminal")} aria-label={tr("terminalview.newTerminal")} onClick={() => void spawn()} disabled={!projectId}><Icon.plus /></button>
         </span>
       </div>
 
-      {!projectId && <EmptyState title="No project selected" description="Open a project to use the terminal." />}
+      {!projectId && <EmptyState title={tr("terminalview.noProjectSelected")} description={tr("terminalview.openAProjectToUseTheTerminal")} />}
       {projectId && !tab && (
         <EmptyState
-          title="No terminal yet"
-          description="Open a shell in the project folder."
-          actionLabel="New terminal"
+          title={tr("terminalview.noTerminalYet")}
+          description={tr("terminalview.openAShellInTheProjectFolder")}
+          actionLabel={tr("terminalview.newTerminal")}
           onAction={() => void spawn()}
         />
       )}

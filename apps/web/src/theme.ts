@@ -3,6 +3,7 @@
 // custom themes pasted as JSON (stored in localStorage polyth.customThemes).
 // Palette identity and light/dark appearance are independent settings. Pure
 // parts (validation, adaptation, resolution, CSS-var mapping) are DOM-free.
+import { tr } from "./i18n/index.ts";
 
 export interface ThemeTokens {
   /* surfaces */
@@ -276,42 +277,44 @@ export type ThemeValidation = { ok: true; theme: ThemeSpec } | { ok: false; erro
 /** Validate untrusted theme JSON; failures carry the reason (F15 accept). */
 export function validateTheme(raw: unknown, opts: { allowPresetIds?: boolean } = {}): ThemeValidation {
   if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
-    return { ok: false, error: "theme must be a JSON object" };
+    return { ok: false, error: tr("theme.mustBeJsonObject") };
   }
   const t = raw as Partial<ThemeSpec> & { tokens?: Record<string, unknown>; syntax?: Record<string, unknown> };
   if (typeof t.id !== "string" || !ID_RE.test(t.id)) {
-    return { ok: false, error: "id must be a lowercase slug (letters, digits, dashes; max 32 chars)" };
+    return { ok: false, error: tr("theme.idMustBeLowercaseSlug") };
   }
   if (!opts.allowPresetIds && PRESET_THEMES.some((p) => p.id === t.id)) {
-    return { ok: false, error: `id "${t.id}" is reserved by a built-in theme` };
+    return { ok: false, error: tr("theme.idReserved", { id: t.id }) };
   }
   if (typeof t.name !== "string" || !t.name.trim() || t.name.length > 40) {
-    return { ok: false, error: "name must be a non-empty string (max 40 chars)" };
+    return { ok: false, error: tr("theme.nameMustBeNonEmpty") };
   }
   if (t.appearance !== "dark" && t.appearance !== "light") {
-    return { ok: false, error: 'appearance must be "dark" or "light"' };
+    return { ok: false, error: tr("theme.appearanceMustBeDarkOrLight") };
   }
   if (typeof t.tokens !== "object" || t.tokens === null) {
-    return { ok: false, error: "tokens must be an object of color roles" };
+    return { ok: false, error: tr("theme.tokensMustBeObject") };
   }
   const tokens = {} as ThemeTokens;
   for (const key of TOKEN_KEYS) {
     const v = t.tokens[key];
-    if (v === undefined) return { ok: false, error: `tokens.${key} is missing` };
+    if (v === undefined) return { ok: false, error: tr("theme.tokenMissing", { key }) };
     if (typeof v !== "string" || !HEX_RE.test(v)) {
-      return { ok: false, error: `tokens.${key} must be a hex color like #aabbcc` };
+      return { ok: false, error: tr("theme.tokenMustBeHex", { key }) };
     }
     tokens[key] = v;
   }
   let syntax: ThemeSyntax | undefined;
   if (t.syntax !== undefined) {
-    if (typeof t.syntax !== "object" || t.syntax === null) return { ok: false, error: "syntax must be an object" };
+    if (typeof t.syntax !== "object" || t.syntax === null) {
+      return { ok: false, error: tr("theme.syntaxMustBeObject") };
+    }
     syntax = {};
     for (const key of SYNTAX_KEYS) {
       const v = t.syntax[key];
       if (v === undefined) continue;
       if (typeof v !== "string" || !HEX_RE.test(v)) {
-        return { ok: false, error: `syntax.${key} must be a hex color like #aabbcc` };
+        return { ok: false, error: tr("theme.syntaxMustBeHex", { key }) };
       }
       syntax[key] = v;
     }
@@ -328,7 +331,10 @@ export function parseThemeJson(text: string): ThemeValidation {
   try {
     raw = JSON.parse(text);
   } catch (e) {
-    return { ok: false, error: `invalid JSON: ${e instanceof Error ? e.message : String(e)}` };
+    return {
+      ok: false,
+      error: tr("theme.invalidJson", { reason: e instanceof Error ? e.message : String(e) }),
+    };
   }
   return validateTheme(raw);
 }

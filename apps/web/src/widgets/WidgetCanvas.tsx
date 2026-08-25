@@ -34,18 +34,19 @@ import {
   supportedWidgetZones,
 } from "./widgetLibrary.ts";
 import "./builtinWidgets.tsx";
+import { tr } from "../i18n/index.ts";
 
 const GRID_GAP = 10;
 const GRID_ROW = 36;
 
 const SLOT_LABELS: Partial<Record<UiSlot, string>> = {
-  "session.composer.before": "Below chat / Above composer",
-  "workspace.header": "Header",
-  "workspace.left": "Left side",
-  "workspace.main": "Main workspace",
-  "workspace.right": "Right side",
-  "workspace.bottom": "Bottom strip",
-  "workspace.floating": "Floating",
+  "session.composer.before": tr("widgets.widgetcanvas.belowChatAboveComposer"),
+  "workspace.header": tr("widgets.widgetcanvas.header"),
+  "workspace.left": tr("widgets.widgetcanvas.leftSide"),
+  "workspace.main": tr("widgets.widgetcanvas.mainWorkspace"),
+  "workspace.right": tr("widgets.widgetcanvas.rightSide"),
+  "workspace.bottom": tr("widgets.widgetcanvas.bottomStrip"),
+  "workspace.floating": tr("widgets.widgetcanvas.floating"),
 };
 
 const slotLabel = (slot: UiSlot): string =>
@@ -283,14 +284,14 @@ function WidgetCard({
       <header className="widget-card-head widget-card-head-draggable" onPointerDown={startMove}>
         <button
           className="widget-drag"
-          aria-label={`Move ${placement.title ?? widget.title}`}
-          title="Drag to move"
+          aria-label={tr("widgets.widgetcanvas.moveValue", { value: placement.title ?? widget.title })}
+          title={tr("widgets.widgetcanvas.dragToMove")}
         >⠿</button>
         <strong>{placement.title ?? widget.title}</strong>
         <div className="widget-card-menu-shell" onPointerDown={(event) => event.stopPropagation()}>
           <button
             className="widget-card-more"
-            aria-label={`More options for ${widget.title}`}
+            aria-label={tr("widgets.widgetcanvas.moreOptionsForValue", { title: widget.title })}
             aria-expanded={menuOpen}
             onPointerDown={(event) => event.stopPropagation()}
             onClick={() => setMenuOpen((open) => !open)}
@@ -300,7 +301,7 @@ function WidgetCard({
               <button role="menuitem" onClick={() => {
                 setSettingsOpen(true);
                 setMenuOpen(false);
-              }}>Settings</button>
+              }}>{tr("common.settings")}</button>
               {widget.duplicatable && (
                 <button role="menuitem" onClick={() => {
                   updateWidgetLayout((current) => applyWidgetLayoutMutations(
@@ -309,7 +310,7 @@ function WidgetCard({
                     [widget],
                   ));
                   setMenuOpen(false);
-                }}>Duplicate</button>
+                }}>{tr("widgets.widgetcanvas.duplicate")}</button>
               )}
               <button role="menuitem" onClick={() => {
                 updateWidgetLayout((current) => applyWidgetLayoutMutations(
@@ -318,7 +319,7 @@ function WidgetCard({
                   [widget],
                 ));
                 setMenuOpen(false);
-              }}>Remove from canvas</button>
+              }}>{tr("widgets.widgetcanvas.removeFromCanvas")}</button>
             </div>
           )}
         </div>
@@ -327,11 +328,11 @@ function WidgetCard({
         {settingsOpen ? (
           <div className="widget-instance-settings">
             <header>
-              <strong>Widget settings</strong>
-              <button type="button" aria-label="Close widget settings" onClick={() => setSettingsOpen(false)}>×</button>
+              <strong>{tr("widgets.widgetcanvas.widgetSettings")}</strong>
+              <button type="button" aria-label={tr("widgets.widgetcanvas.closeWidgetSettings")} onClick={() => setSettingsOpen(false)}>{tr("widgets.widgetcanvas.message")}</button>
             </header>
             <label className="widget-placement-setting">
-              <span>Placement</span>
+              <span>{tr("widgets.widgetcanvas.placement")}</span>
               <select
                 value={widgetSlotOf(layout, instanceId) ?? widget.defaultSlot}
                 onChange={(event) => updateWidgetLayout((current) => applyWidgetLayoutMutations(
@@ -357,7 +358,7 @@ function WidgetCard({
                 })
               : widget.settingsSchema
                 ? <SchemaWidgetSettings schema={widget.settingsSchema} config={config} updateConfig={updateConfig} />
-                : <div className="builtin-widget-settings"><small>No additional options.</small></div>}
+                : <div className="builtin-widget-settings"><small>{tr("widgets.widgetcanvas.noAdditionalOptions")}</small></div>}
           </div>
         ) : (
           <ViewErrorBoundary resetKey={`${instanceId}:${projectId ?? ""}:${sessionId ?? ""}`} inline>
@@ -375,8 +376,8 @@ function WidgetCard({
       {widget.resizable !== false && (
         <button
           className="widget-resize-handle"
-          aria-label={`Resize ${widget.title}; use arrow keys`}
-          title="Drag to resize"
+          aria-label={tr("widgets.widgetcanvas.resizeValueUseArrowKeys", { title: widget.title })}
+          title={tr("widgets.widgetcanvas.dragToResize")}
           onPointerDown={startResize}
           onKeyDown={onResizeKey}
         >⌟</button>
@@ -398,16 +399,16 @@ function WidgetMenu({ widgets, onClose }: { widgets: WidgetDef[]; onClose: () =>
     groups.set(name, [...(groups.get(name) ?? []), widget]);
   }
   return (
-    <aside className="widget-add-panel widget-menu-single" aria-label="Add widgets">
+    <aside className="widget-add-panel widget-menu-single" aria-label={tr("widgets.widgetcanvas.addWidgets")}>
       <div className="widget-add-head">
-        <strong>Add widgets</strong>
-        <button className="icon-btn" aria-label="Close widget menu" onClick={onClose}>×</button>
+        <strong>{tr("widgets.widgetcanvas.addWidgets")}</strong>
+        <button className="icon-btn" aria-label={tr("widgets.widgetcanvas.closeWidgetMenu")} onClick={onClose}>{tr("widgets.widgetcanvas.message")}</button>
       </div>
       <input
         className="widget-menu-search"
         value={query}
-        placeholder="Search widgets…"
-        aria-label="Search widgets"
+        placeholder={tr("widgets.widgetcanvas.searchWidgets")}
+        aria-label={tr("widgets.widgetcanvas.searchWidgets2")}
         onChange={(event) => setQuery(event.target.value)}
       />
       <div className="widget-menu-list">
@@ -482,11 +483,11 @@ export default function WidgetCanvas() {
     <div className="widget-workspace">
       <button
         className="widget-menu-trigger"
-        aria-label="Add widgets"
+        aria-label={tr("widgets.widgetcanvas.addWidgets")}
         aria-expanded={menuOpen}
         onClick={() => setMenuOpen((open) => !open)}
       >
-        <Icon.plus /><span>Widgets</span>
+        <Icon.plus /><span>{tr("widgets.widgetcanvas.widgets")}</span>
       </button>
       <div className="widget-canvas-grid">
         {cards.map(({ instanceId, placement, widget }) => (
@@ -501,8 +502,7 @@ export default function WidgetCanvas() {
         ))}
         {cards.length === 0 && (
           <button className="widget-canvas-empty" onClick={() => setMenuOpen(true)}>
-            <Icon.plus /> Add your first widget
-          </button>
+            <Icon.plus /> {tr("widgets.widgetcanvas.addYourFirstWidget")}</button>
         )}
         <SlotHost
           slot="workspace.canvas"

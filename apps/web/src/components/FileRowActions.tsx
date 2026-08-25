@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import { copyText } from "../utils.ts";
 import { attachProjectFile } from "../attachments.ts";
 import { getState, setUiError } from "../store.ts";
+import { tr } from "../i18n/index.ts";
 
 export default function FileRowActions({ projectId, path, onOpen }: {
   projectId: string;
@@ -26,7 +27,7 @@ export default function FileRowActions({ projectId, path, onOpen }: {
   const addToChat = () => {
     setOpen(false);
     void attachProjectFile(projectId, getState().activeSessionId, path).then((r) => {
-      if (!r.ok) setUiError(`Couldn’t attach: ${r.reason}`);
+      if (!r.ok) setUiError(tr("composer.couldNotAttach", { reason: r.reason }));
     });
   };
 
@@ -34,18 +35,18 @@ export default function FileRowActions({ projectId, path, onOpen }: {
     <span className="file-row-actions" ref={rootRef} onClick={(e) => e.stopPropagation()}>
       <button
         className="small-btn"
-        title={`Actions for ${path}`}
-        aria-label={`Actions for ${path}`}
+        title={tr("filerowactions.actionsForValue", { path: path })}
+        aria-label={tr("filerowactions.actionsForValue", { path: path })}
         aria-expanded={open}
         onClick={() => setOpen((v) => !v)}
       >⋯</button>
       {open && (
         <div className="file-row-menu" role="menu">
           {onOpen && (
-            <button role="menuitem" onClick={() => { setOpen(false); onOpen(); }}>Open</button>
+            <button role="menuitem" onClick={() => { setOpen(false); onOpen(); }}>{tr("common.open")}</button>
           )}
-          <button role="menuitem" onClick={() => { setOpen(false); void copyText(path); }}>Copy path</button>
-          <button role="menuitem" onClick={addToChat}>Add to chat</button>
+          <button role="menuitem" onClick={() => { setOpen(false); void copyText(path); }}>{tr("filerowactions.copyPath")}</button>
+          <button role="menuitem" onClick={addToChat}>{tr("filerowactions.addToChat")}</button>
         </div>
       )}
     </span>

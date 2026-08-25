@@ -26,6 +26,7 @@ import { dismissKeyboard } from "../mobileViewport.ts";
 import SessionMenu from "./mobile/SessionMenu.tsx";
 import { useSheetTrigger } from "./mobile/sheetTrigger.ts";
 import { api, type GithubStatusDto } from "../api.ts";
+import { tr } from "../i18n/index.ts";
 import { useKeymap } from "../hotkeys.ts";
 
 const STROKE = { fill: "none", stroke: "currentColor", strokeWidth: 1.5, strokeLinecap: "round", strokeLinejoin: "round" } as const;
@@ -125,12 +126,14 @@ function CapabilityNav() {
   const topRail = terminal
     ? [...primaries.slice(0, terminalIndex), terminal, ...primaries.slice(terminalIndex)]
     : primaries;
-  const terminalLabel = `Open Terminal (${formatCombo(keymap.viewTerminal, MOD === "⌘")})`;
+  const terminalLabel = tr("terminalview.openTerminalShortcut", {
+    shortcut: formatCombo(keymap.viewTerminal, MOD === "⌘"),
+  });
 
   return (
     <nav
       className={`view-switcher top-rail-${ui.topRailAlignment}`}
-      aria-label={`Workspace tools, ${ui.topRailAlignment === "left" ? "left of center" : "centered"}`}
+      aria-label={ui.topRailAlignment === "left" ? tr("header.workspaceToolsLeftOfCenter") : tr("header.workspaceToolsCentered")}
     >
       <div className="view-switcher-pill">
         {topRail.map((c) => {
@@ -160,8 +163,8 @@ function ContextRing({ gauge }: { gauge: ContextGauge }) {
   const pct = gauge.known ? gauge.percent : 0;
   const dash = (pct / 100) * c;
   const label = gauge.known
-    ? `${pct}% context estimate (${gauge.inputTokens} of ${gauge.contextTokens} tokens)`
-    : "Context estimate unknown — model metadata unavailable";
+    ? tr("header.valueContextEstimateValueOfValueTokens", { pct: pct, inputTokens: gauge.inputTokens, contextTokens: gauge.contextTokens })
+    : tr("header.contextEstimateUnknownModelMetadataUnavailable");
   return (
     <svg className={`ctx-ring ${gauge.level}`} width="30" height="30" viewBox="0 0 36 36" aria-label={label}>
       <title>{label}</title>
@@ -195,17 +198,17 @@ function CompactViewPicker({ view }: { view: AppView }) {
   const items: PickerItem[] = destinations.map((c) => ({
     id: c.descriptor.id,
     label: c.descriptor.label,
-    group: c.tier === "primary" ? "" : c.tier === "more" ? "More tools" : TECHNICAL_GROUP_LABEL,
+    group: c.tier === "primary" ? "" : c.tier === "more" ? tr("header.moreTools") : TECHNICAL_GROUP_LABEL,
   }));
   const currentId = destinations.find((c) => PANE_OF_CAPABILITY[c.descriptor.id] === rail)?.descriptor.id
     ?? destinations.find((c) => VIEW_OF_CAPABILITY[c.descriptor.id] === view)?.descriptor.id
     ?? "session";
-  const current = items.find((i) => i.id === currentId)?.label ?? "Workspace";
+  const current = items.find((i) => i.id === currentId)?.label ?? tr("header.workspace");
   return (
     <Picker
       className="header-view-picker"
-      label="View"
-      ariaLabel={`Change workspace view, current: ${current}`}
+      label={tr("header.view")}
+      ariaLabel={tr("header.changeWorkspaceViewCurrentValue", { current: current })}
       triggerIcon={capabilityIcon(currentId)}
       items={items}
       value={currentId}
@@ -223,8 +226,8 @@ function DrawerTrigger() {
   return (
     <button
       className="icon-btn header-drawer-btn"
-      title="Open projects and sessions"
-      aria-label="Open projects and sessions"
+      title={tr("header.openProjectsAndSessions")}
+      aria-label={tr("header.openProjectsAndSessions")}
       aria-controls="polyth-session-drawer"
       aria-expanded={open}
       onClick={() => {
@@ -296,7 +299,7 @@ function UserMenu({ githubUser }: { githubUser: GithubStatusDto["user"] }) {
       <button
         ref={triggerRef}
         className="header-profile"
-        aria-label={githubUser ? `${githubUser.login}'s user menu` : "User menu"}
+        aria-label={githubUser ? tr("header.valueSUserMenu", { login: githubUser.login }) : tr("header.userMenu")}
         aria-haspopup="menu"
         aria-expanded={open}
         onClick={() => setOpen((value) => !value)}
@@ -309,11 +312,11 @@ function UserMenu({ githubUser }: { githubUser: GithubStatusDto["user"] }) {
         <b aria-hidden="true">⌄</b>
       </button>
       {open && (
-        <div className="menu-popup user-menu-popup" role="menu" aria-label="User and system" ref={menuRef} onKeyDown={onMenuKey}>
-          <button role="menuitem" onClick={() => go("access")}>Access &amp; security</button>
-          <button role="menuitem" onClick={() => go("about")}>About Polyth</button>
+        <div className="menu-popup user-menu-popup" role="menu" aria-label={tr("header.userAndSystem")} ref={menuRef} onKeyDown={onMenuKey}>
+          <button role="menuitem" onClick={() => go("access")}>{tr("header.accessAmpSecurity")}</button>
+          <button role="menuitem" onClick={() => go("about")}>{tr("header.aboutPolyth")}</button>
           <div className="menu-sep" />
-          <button role="menuitem" onClick={() => { setOpen(false); setOverlay("settings"); }}>All settings</button>
+          <button role="menuitem" onClick={() => { setOpen(false); setOverlay("settings"); }}>{tr("header.allSettings")}</button>
         </div>
       )}
     </div>
@@ -334,7 +337,7 @@ function MobileComposerControlsMenu() {
   const controls = [
     {
       id: "dictation",
-      label: "Microphone",
+      label: tr("header.microphone"),
       on: ui.showDictate,
       icon: <Icon.mic />,
       toggle: () => setUiSettings({ showDictate: !ui.showDictate }),
@@ -345,8 +348,8 @@ function MobileComposerControlsMenu() {
       <button
         ref={triggerRef}
         className="icon-btn mobile-header-action"
-        aria-label="Composer controls"
-        title="Composer controls"
+        aria-label={tr("header.composerControls")}
+        title={tr("header.composerControls")}
         aria-haspopup="menu"
         aria-expanded={open}
         onClick={() => setOpen((value) => !value)}
@@ -358,10 +361,10 @@ function MobileComposerControlsMenu() {
           ref={menuRef}
           className="menu-popup mobile-composer-popup"
           role="menu"
-          aria-label="Composer controls"
+          aria-label={tr("header.composerControls")}
           onKeyDown={onMenuKey}
         >
-          <div className="mobile-composer-popup-title">Composer controls</div>
+          <div className="mobile-composer-popup-title">{tr("header.composerControls")}</div>
           {controls.map((control) => (
             <button
               key={control.id}
@@ -385,7 +388,7 @@ function MobileComposerControlsMenu() {
             }}
           >
             <span className="mobile-control-icon" aria-hidden="true"><Icon.gear /></span>
-            <span>All settings</span>
+            <span>{tr("header.allSettings")}</span>
           </button>
         </div>
       )}
@@ -414,7 +417,7 @@ export default function Header() {
   const firstUserText = model.messages.find((message) => message.kind === "user")?.text;
   const mobileTitle = session
     ? displaySessionTitle(session.title, session.id, firstUserText)
-    : "New session";
+    : tr("header.newSession");
   useResizeFocusHandoff(mode);
   const switchWorkspaceMode = (next: "chat" | "widgets" | "edit") => {
     closeWorkspacePane();
@@ -447,7 +450,7 @@ export default function Header() {
         <button
           className="mobile-session-title"
           title={mobileTitle}
-          aria-label={`${mobileTitle}. Session menu`}
+          aria-label={tr("header.valueSessionMenu", { mobileTitle: mobileTitle })}
           aria-haspopup="dialog"
           aria-expanded={sessionMenuOpen}
           {...sessionMenuTrigger}
@@ -460,13 +463,13 @@ export default function Header() {
         <span className="header-spacer" />
         <button
           className="icon-btn mobile-header-action"
-          aria-label="Refresh sessions"
-          title="Refresh sessions"
+          aria-label={tr("header.refreshSessions")}
+          title={tr("header.refreshSessions")}
           disabled={!project}
           onClick={() => {
             if (!project) return;
             void refreshSessions(project.id).catch((error) =>
-              setUiError(friendlyError("Couldn’t refresh sessions", error)));
+              setUiError(friendlyError(tr("common.error"), error)));
           }}
         >
           <Icon.refresh />
@@ -484,8 +487,8 @@ export default function Header() {
         {compact && chatSurface && (
           <button
             className="icon-btn header-project-btn"
-            aria-label={compact ? "Open projects and sessions" : "Add or open a project"}
-            title={compact ? project?.name || "Projects" : "Add or open a project"}
+            aria-label={compact ? tr("header.openProjectsAndSessions") : tr("header.addOrOpenAProject")}
+            title={compact ? project?.name || tr("settings.pages.projects") : tr("header.addOrOpenAProject")}
             onClick={() => compact ? setSidebarOpen(true) : setOverlay("project-picker")}
           >
             <Icon.files />
@@ -493,29 +496,29 @@ export default function Header() {
         )}
         {compact && chatSurface && <CompactViewPicker view={view} />}
         {(!compact || !chatSurface) && (
-          <button className="header-brand" aria-label="Polyth home" onClick={() => switchWorkspaceMode("chat")}>
-            <span className="polyth-mark">p</span>
-            <strong>polyth</strong>
+          <button className="header-brand" aria-label={tr("header.polythHome")} onClick={() => switchWorkspaceMode("chat")}>
+            <span className="polyth-mark">{tr("header.p")}</span>
+            <strong>{tr("header.polyth")}</strong>
           </button>
         )}
         {(!compact || !chatSurface) && (
-          <div className="workspace-mode-switch" role="group" aria-label="Workspace view">
+          <div className="workspace-mode-switch" role="group" aria-label={tr("header.workspaceView")}>
             <button
               className={workspaceMode === "chat" ? "active" : ""}
               aria-pressed={workspaceMode === "chat"}
               onClick={() => switchWorkspaceMode("chat")}
-            >Chat</button>
+            >{tr("header.chat")}</button>
             <button
               className={workspaceMode !== "chat" ? "active" : ""}
               aria-pressed={workspaceMode !== "chat"}
               onClick={() => switchWorkspaceMode("widgets")}
-            >Canvas</button>
+            >{tr("header.canvas")}</button>
           </div>
         )}
         {workspaceMode === "chat" && !compact && <CapabilityNav />}
         <span className="header-spacer" />
         {(!compact || !chatSurface) && (
-          <div className="header-actions" aria-label="Application">
+          <div className="header-actions" aria-label={tr("header.application")}>
             {workspaceMode === "chat" && session && (
               <SlotHost
                 slot="session.header.actions"

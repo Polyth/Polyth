@@ -4,6 +4,7 @@
 import { useCallback, useSyncExternalStore } from "react";
 import type { AttachmentRef } from "@polyth/contracts";
 import { api } from "./api.ts";
+import { tr } from "./i18n/index.ts";
 
 export const MAX_PENDING_ATTACHMENTS = 16;
 const DRAFT_ATT = "polyth.draft.att.";
@@ -125,9 +126,11 @@ export async function attachProjectFile(
   try {
     st = await api.filesStat(projectId, path, sid);
   } catch {
-    return { ok: false, reason: `File not found: ${path}` };
+    return { ok: false, reason: tr("attachments.fileNotFoundValue", { path }) };
   }
-  if (st.kind !== "file") return { ok: false, reason: `Not a file: ${path}` };
+  if (st.kind !== "file") {
+    return { ok: false, reason: tr("attachments.notAFileValue", { path }) };
+  }
   const mime = st.mime || "application/octet-stream";
   const ref: AttachmentRef = {
     id: crypto.randomUUID(),
@@ -140,7 +143,12 @@ export async function attachProjectFile(
     ...(range ? { range } : {}),
   };
   if (!addAttachment(sessionId, ref)) {
-    return { ok: false, reason: `At most ${MAX_PENDING_ATTACHMENTS} attachments per message` };
+    return {
+      ok: false,
+      reason: tr("attachments.atMostValueAttachmentsPerMessage", {
+        count: MAX_PENDING_ATTACHMENTS,
+      }),
+    };
   }
   return { ok: true, ref };
 }
@@ -195,7 +203,7 @@ export function githubUrlMatchesRepo(
 export function githubUrlRef(parts: GithubUrlParts): AttachmentRef {
   return {
     id: crypto.randomUUID(),
-    name: `${parts.kind === "pull" ? "PR" : "Issue"} #${parts.number}`,
+    name: `${parts.kind === "pull" ? "PR" : tr("common.issue")} #${parts.number}`,
     mime: "text/uri-list",
     size: 0,
     kind: "url",
@@ -224,18 +232,29 @@ export function classifyGithubAttach(
   probe: { ok: true; repo: { owner: string; name: string } | null } | { ok: false; reason: string },
 ): { code: "ok" } | { code: "invalid-url" | "no-repo" | "repo-mismatch" | "request-failed"; reason: string } {
   if (!parts) {
-    return { code: "invalid-url", reason: "Enter a GitHub issue or pull request URL." };
+    return { code: "invalid-url", reason: tr("attachments.enterAGithubIssueOrPullRequestUrl") };
   }
   if (!probe.ok) {
-    return { code: "request-failed", reason: `Couldn’t check the project repository: ${probe.reason}` };
+    return {
+      code: "request-failed",
+      reason: tr("attachments.couldnTCheckTheProjectRepositoryValue", {
+        reason: probe.reason,
+      }),
+    };
   }
   if (!probe.repo) {
-    return { code: "no-repo", reason: "The active project has no detected GitHub repository." };
+    return {
+      code: "no-repo",
+      reason: tr("attachments.activeProjectHasNoDetectedGithubRepository"),
+    };
   }
   if (!githubUrlMatchesRepo(parts, probe.repo)) {
     return {
       code: "repo-mismatch",
-      reason: `That link points at ${parts.owner}/${parts.repo}, not this project’s repository (${probe.repo.owner}/${probe.repo.name}).`,
+      reason: tr("attachments.linkPointsAtValueNotThisProjectRepositoryValue", {
+        linkedRepo: `${parts.owner}/${parts.repo}`,
+        projectRepo: `${probe.repo.owner}/${probe.repo.name}`,
+      }),
     };
   }
   return { code: "ok" };
@@ -258,7 +277,13 @@ export async function attachGithubLink(
   if (verdict.code !== "ok") return { ok: false, code: verdict.code, reason: verdict.reason };
   const ref = githubUrlRef(parts!);
   if (!addAttachment(sessionId, ref)) {
-    return { ok: false, code: "limit", reason: `At most ${MAX_PENDING_ATTACHMENTS} attachments per message` };
+    return {
+      ok: false,
+      code: "limit",
+      reason: tr("attachments.atMostValueAttachmentsPerMessage", {
+        count: MAX_PENDING_ATTACHMENTS,
+      }),
+    };
   }
   return { ok: true, ref };
 }

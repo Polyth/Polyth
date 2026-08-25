@@ -23,6 +23,7 @@ import GitView from "./GitView.tsx";
 import TerminalView from "./TerminalView.tsx";
 import PreviewView from "./PreviewView.tsx";
 import KnowledgePanel from "./KnowledgePanel.tsx";
+import { getLocale, tr } from "../i18n/index.ts";
 
 const NO_EVENTS: SessionEvent[] = [];
 
@@ -31,7 +32,7 @@ function ContextView() {
   const models = useStore((s) => s.models);
   const model = useActiveModel();
   const events = useStore((s) => (s.activeSessionId ? s.events[s.activeSessionId] : undefined) ?? NO_EVENTS);
-  if (!session) return <div className="rail-empty">Session status, usage, and pinned context will appear here.</div>;
+  if (!session) return <div className="rail-empty">{tr("railsurfaces.sessionStatusUsageAndPinnedContextWill")}</div>;
 
   // Pinned messages = context/pinned minus context/unpinned (last event wins).
   const pinned = new Map<number, boolean>();
@@ -56,49 +57,49 @@ function ContextView() {
   return (
     <div>
       <div className="stat-row">
-        <span className="k">Status</span>
+        <span className="k">{tr("railsurfaces.status")}</span>
         <span className="status-line" style={{ padding: 0 }}>
           <span className={`dot ${session.status}`} />
           <span>{session.status}</span>
         </span>
       </div>
       <div className="stat-row">
-        <span className="k">Model</span>
+        <span className="k">{tr("railsurfaces.model")}</span>
         <span>{session.model ? `${session.model.providerID}/${session.model.modelID}` : "—"}</span>
       </div>
       <div className="stat-row">
-        <span className="k">Agent</span>
+        <span className="k">{tr("railsurfaces.agent")}</span>
         <span>{session.agent ?? "—"}</span>
       </div>
       <div className="stat-row">
-        <span className="k">Tokens</span>
+        <span className="k">{tr("railsurfaces.tokens")}</span>
         <span className="mono">{fmtTokens(model.totals.input + model.totals.output)}</span>
       </div>
       <div className="stat-row context-estimate-row">
-        <span className="k">Context estimate</span>
+        <span className="k">{tr("railsurfaces.contextEstimate")}</span>
         <span className="mono">
           {gauge.known
             ? `${fmtTokens(gauge.inputTokens)} / ${fmtTokens(gauge.contextTokens)} (${gauge.percent}%)`
-            : "Unknown"}
+            : tr("railsurfaces.unknown")}
         </span>
       </div>
       <div
         className={`context-meter ${gauge.level}`}
         role="meter"
-        aria-label={gauge.known ? `${gauge.percent}% context estimate` : "Context estimate unknown"}
+        aria-label={gauge.known ? tr("railsurfaces.valueContextEstimate", { percent: gauge.percent }) : tr("railsurfaces.contextEstimateUnknown")}
         aria-valuemin={0}
         aria-valuemax={100}
         {...(gauge.known ? { "aria-valuenow": gauge.percent } : {})}
       >
         <span style={{ width: `${gauge.known ? gauge.percent : 0}%` }} />
       </div>
-      {!gauge.known && <div className="muted context-estimate-note">Model context metadata is unavailable.</div>}
+      {!gauge.known && <div className="muted context-estimate-note">{tr("railsurfaces.modelContextMetadataIsUnavailable")}</div>}
       <div className="stat-row">
-        <span className="k">Cost</span>
+        <span className="k">{tr("railsurfaces.cost")}</span>
         <span className="mono">{model.totals.cost > 0 ? fmtCost(model.totals.cost) : "—"}</span>
       </div>
-      <div className="stat-label">Pinned</div>
-      {pinnedMessages.length === 0 && <div className="muted" style={{ fontSize: "calc(12.5px * var(--ui-font-scale, 1))" }}>Nothing pinned yet.</div>}
+      <div className="stat-label">{tr("railsurfaces.pinned")}</div>
+      {pinnedMessages.length === 0 && <div className="muted" style={{ fontSize: "calc(12.5px * var(--ui-font-scale, 1))" }}>{tr("railsurfaces.nothingPinnedYet")}</div>}
       {pinnedMessages.map((event) => (
         <div key={event.seq} className="pinned-file">
           <span className="mono">#{event.seq}</span>{" "}
@@ -114,18 +115,18 @@ function UsagePanel() {
   const total = model.totals.input + model.totals.output;
   return (
     <div>
-      <div className="stat-row"><span className="k">Input</span><span className="mono">{fmtTokens(model.totals.input)}</span></div>
-      <div className="stat-row"><span className="k">Output</span><span className="mono">{fmtTokens(model.totals.output)}</span></div>
-      <div className="stat-row"><span className="k">Total</span><span className="mono">{fmtTokens(total)}</span></div>
-      <div className="stat-row"><span className="k">Cost</span><span className="mono">{model.totals.cost > 0 ? fmtCost(model.totals.cost) : "—"}</span></div>
-      {total === 0 && <div className="rail-empty">Token and cost totals appear once the session runs.</div>}
+      <div className="stat-row"><span className="k">{tr("railsurfaces.input")}</span><span className="mono">{fmtTokens(model.totals.input)}</span></div>
+      <div className="stat-row"><span className="k">{tr("railsurfaces.output")}</span><span className="mono">{fmtTokens(model.totals.output)}</span></div>
+      <div className="stat-row"><span className="k">{tr("railsurfaces.total")}</span><span className="mono">{fmtTokens(total)}</span></div>
+      <div className="stat-row"><span className="k">{tr("railsurfaces.cost")}</span><span className="mono">{model.totals.cost > 0 ? fmtCost(model.totals.cost) : "—"}</span></div>
+      {total === 0 && <div className="rail-empty">{tr("railsurfaces.tokenAndCostTotalsAppearOnceThe")}</div>}
     </div>
   );
 }
 
 function ActiveEventsView() {
   const events = useStore((s) => (s.activeSessionId ? s.events[s.activeSessionId] : undefined) ?? NO_EVENTS);
-  if (events.length === 0) return <div className="empty">No events yet.</div>;
+  if (events.length === 0) return <div className="empty">{tr("railsurfaces.noEventsYet")}</div>;
   return (
     <div className="event-list">
       {[...events].reverse().map((e) => (
@@ -133,7 +134,7 @@ function ActiveEventsView() {
           <summary>
             <span className="e-seq">#{e.seq}</span>
             <span className="e-type">{e.type}</span>
-            <span className="e-time">{new Date(e.time).toLocaleTimeString()}</span>
+            <span className="e-time">{new Date(e.time).toLocaleTimeString(getLocale())}</span>
           </summary>
           <div className="event-json">
             <pre>{JSON.stringify(e, null, 2)}</pre>
@@ -156,31 +157,31 @@ function EventsView(props?: RailSurfaceComponentProps) {
 }
 
 registerSurface({
-  id: "files", title: "Project files", capabilityId: "files", order: 1, icon: Icon.files,
+  id: "files", title: tr("railsurfaces.projectFiles"), capabilityId: "files", order: 1, icon: Icon.files,
   component: EditorView, presentation: pane({ defaultRatio: 0.6, minWidth: 380, preferredMaxWidth: 760 }),
 });
 registerSurface({
-  id: "git", title: "Source control", capabilityId: "git", order: 2, icon: Icon.tree,
+  id: "git", title: tr("railsurfaces.sourceControl"), capabilityId: "git", order: 2, icon: Icon.tree,
   component: GitView, badge: (ctx) => ctx.changeCount,
   presentation: pane({ defaultRatio: 0.4, minWidth: 340, preferredMaxWidth: 640 }),
 });
 registerSurface({
-  id: "terminal", title: "Terminal", capabilityId: "terminal", order: 3, icon: Icon.term,
+  id: "terminal", title: tr("railsurfaces.terminal"), capabilityId: "terminal", order: 3, icon: Icon.term,
   component: TerminalView,
   presentation: pane({ defaultRatio: 0.6, minWidth: 380, preferredMaxWidth: 760, escape: "content" }),
 });
 registerSurface({
-  id: "browser", title: "Browser", capabilityId: "browser", order: 4, icon: Icon.globe,
+  id: "browser", title: tr("railsurfaces.browser"), capabilityId: "browser", order: 4, icon: Icon.globe,
   component: PreviewView, presentation: pane({ defaultRatio: 0.45, minWidth: 380, preferredMaxWidth: 760 }),
 });
 
-registerSurface({ id: "context", title: "Context", capabilityId: "context", order: 30, icon: Icon.context, component: ContextView });
-registerSurface({ id: "knowledge", title: "Knowledge", capabilityId: "knowledge", order: 40, icon: Icon.book, component: KnowledgePanel });
+registerSurface({ id: "context", title: tr("railsurfaces.context"), capabilityId: "context", order: 30, icon: Icon.context, component: ContextView });
+registerSurface({ id: "knowledge", title: tr("railsurfaces.knowledge"), capabilityId: "knowledge", order: 40, icon: Icon.book, component: KnowledgePanel });
 registerSurface({
-  id: "usage", title: "Usage", capabilityId: "usage", order: 50, icon: Icon.usage,
+  id: "usage", title: tr("railsurfaces.usage"), capabilityId: "usage", order: 50, icon: Icon.usage,
   component: UsagePanel,
 });
 registerSurface({
-  id: "events", title: "Events", capabilityId: "events", order: 60, icon: Icon.events,
+  id: "events", title: tr("railsurfaces.events"), capabilityId: "events", order: 60, icon: Icon.events,
   component: EventsView, badge: (ctx) => ctx.eventCount,
 });

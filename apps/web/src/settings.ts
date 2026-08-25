@@ -2,6 +2,7 @@
 // builds shared `polyth.settings` with UI preferences, so load performs a
 // one-time copy without ever writing the legacy key again.
 import { applyThemeSetting, type AppearanceMode } from "./theme.ts";
+import { tr } from "./i18n/index.ts";
 
 export const INTERFACE_FONTS = [
   { id: "sans", label: "Inter", stack: 'Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif', mono: false },
@@ -212,7 +213,7 @@ function shortMessage(raw: string): string {
 // (503, fetch failed, refused) collapse into one calm reconnect message.
 export function friendlyError(action: string, err: unknown): string {
   const raw = err instanceof Error ? err.message : String(err);
-  if (RECONNECT_RE.test(raw)) return "OpenCode is reconnecting. Try again in a moment.";
+  if (RECONNECT_RE.test(raw)) return tr("settings.openCodeReconnecting");
   const short = shortMessage(raw);
   return short ? `${action}: ${short}` : action;
 }

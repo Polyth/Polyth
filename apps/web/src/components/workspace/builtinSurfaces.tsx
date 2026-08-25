@@ -43,6 +43,7 @@ import {
   visibleStarters,
   type Starter,
 } from "../../starters.ts";
+import { tr } from "../../i18n/index.ts";
 
 const NOOP_STARTER = (_prompt: string, _id?: string): void => {};
 
@@ -55,7 +56,7 @@ function SessionHero() {
   const projects = useStore((s) => s.projectRegistry.projects);
   const projectId = useStore((s) => s.activeProjectId);
   const project = projects.find((candidate) => candidate.id === projectId) ?? null;
-  const name = project?.name || project?.path || "this project";
+  const name = project?.name || project?.path || tr("permissionbanner.thisProject");
 
   // Quick starters (§3/§35): pinned first, then suggestions that follow the
   // real workspace state — a dirty worktree offers review/commit work, a clean
@@ -89,8 +90,8 @@ function SessionHero() {
     <div className="stage stage-new">
       <div className="hero">
         <div className="hero-body">
-          <h2>What are we working on in <span className="polyth-gradient">{name}</span>?</h2>
-          <p className="hero-sub">Start a task or continue where you left off.</p>
+          <h2>{tr("workspace.builtinsurfaces.whatAreWeWorkingOnIn")}{" "}<span className="polyth-gradient">{name}</span>?</h2>
+          <p className="hero-sub">{tr("workspace.builtinsurfaces.startATaskOrContinueWhereYou")}</p>
           <div className="hero-widget-host">
             <SlotHost
               slot="session.empty.widgets"
@@ -105,8 +106,8 @@ function SessionHero() {
           <button
             type="button"
             className="hero-widget-settings"
-            aria-label="Customize new chat widgets"
-            title="Customize new chat widgets"
+            aria-label={tr("workspace.builtinsurfaces.customizeNewChatWidgets")}
+            title={tr("workspace.builtinsurfaces.customizeNewChatWidgets")}
             {...heroWidgetsTrigger}
           ><Icon.sliders /></button>
         </div>
@@ -137,7 +138,7 @@ function HeroStartersWidget({
 }) {
   return (
     <HeroWidget id="starters">
-      <div className="hero-starters" aria-label="Quick starters">
+      <div className="hero-starters" aria-label={tr("workspace.builtinsurfaces.quickStarters")}>
         {chips.map((starter) => (
           <button
             key={starter.id}
@@ -153,8 +154,8 @@ function HeroStartersWidget({
         <button
           type="button"
           className="starter-chip starter-chip-add"
-          aria-label="Add a starter"
-          title="Add a starter"
+          aria-label={tr("workspace.builtinsurfaces.addAStarter")}
+          title={tr("workspace.builtinsurfaces.addAStarter")}
           {...starterPickerTrigger}
         >
           <Icon.plus />
@@ -175,7 +176,7 @@ function RecentSessions({ projectId }: { projectId: string | null }) {
   if (recent.length === 0) return null;
   return (
     <HeroWidget id="recent"><div className="hero-recent">
-      <h3 className="hero-recent-head">Recent</h3>
+      <h3 className="hero-recent-head">{tr("workspace.builtinsurfaces.recent")}</h3>
       <ul>
         {recent.map((session) => (
           <li key={session.id}>
@@ -183,7 +184,7 @@ function RecentSessions({ projectId }: { projectId: string | null }) {
               type="button"
               className="hero-recent-row"
               onClick={() => void openSession(session.id).catch((error) =>
-                setUiError(friendlyError("Couldn’t open the session", error)))}
+                setUiError(friendlyError(tr("common.error"), error)))}
             >
               <span className="hero-recent-title">{displaySessionTitle(session.title, session.id)}</span>
               <span className="hero-recent-time">{ago(session.lastTurnAt ?? session.updatedAt)}</span>
@@ -203,7 +204,7 @@ function SessionLoading() {
     <div className="stage">
       <div className="session-loading" role="status">
         <span className="spinner" aria-hidden="true" />
-        <span>Loading session…</span>
+        <span>{tr("workspace.builtinsurfaces.loadingSession")}</span>
       </div>
     </div>
   );
@@ -216,20 +217,18 @@ function ArchivedComposerGuard({ sessionId }: { sessionId: string }) {
   return (
     <div className="archived-guard" role="status">
       <span className="archived-guard-text">
-        This session is archived and read-only. Restore it to continue the conversation.
-      </span>
+        {tr("workspace.builtinsurfaces.thisSessionIsArchivedAndReadOnly")}</span>
       <button
         className="primary-btn archived-restore-btn"
         disabled={busy}
         onClick={() => {
           setBusy(true);
           void restoreSession(sessionId)
-            .catch((e) => setUiError(friendlyError("Couldn’t restore the session", e)))
+            .catch((e) => setUiError(friendlyError(tr("common.error"), e)))
             .finally(() => setBusy(false));
         }}
       >
-        Restore and continue
-      </button>
+        {tr("workspace.builtinsurfaces.restoreAndContinue")}</button>
     </div>
   );
 }
@@ -266,7 +265,7 @@ function SessionSurface() {
       {model.turn?.status === "working" && (
         <div className="focus-working" role="status">
           <span className="focus-working-spinner" aria-hidden="true" />
-          <span>Working…</span>
+          <span>{tr("workspace.builtinsurfaces.working")}</span>
         </div>
       )}
       {pendingQuestions.length > 0 && <QuestionCards questions={pendingQuestions} />}
@@ -306,11 +305,11 @@ registerSlot("session.empty.widgets", "builtin.hero-recent", (context) => (
 // UX-PANE-MODEL: Files, Git, Terminal, and Preview are NOT primary surfaces —
 // they are canonical workspace panes registered in railSurfaces.tsx and
 // opened through openWorkspacePane() beside a still-mounted Chat.
-registerWorkspaceSurface({ id: "session", title: "Session", order: 0, plugin: "session", requires: "project", component: SessionSurface });
-registerWorkspaceSurface({ id: "goals", title: "Goals", order: 20, plugin: "goals", requires: "project", component: GoalsView });
-registerWorkspaceSurface({ id: "multirun", title: "Multi-Run", order: 21, plugin: "multirun", requires: "project", component: MultiRunView });
-registerWorkspaceSurface({ id: "workflow", title: "Workflows", order: 22, plugin: "workflow", requires: "project", component: WorkflowView });
-registerWorkspaceSurface({ id: "fusion", title: "Fusion", order: 23, plugin: "fusion", requires: "project", component: FusionView });
-registerWorkspaceSurface({ id: "walkthrough", title: "Walkthrough", order: 24, plugin: "walkthrough", requires: "project", component: WalkthroughView });
-registerWorkspaceSurface({ id: "schedule", title: "Schedule", order: 25, plugin: "schedule", requires: "project", component: ScheduleView });
-registerWorkspaceSurface({ id: "github", title: "GitHub", order: 26, plugin: "github", requires: "project", component: GithubView });
+registerWorkspaceSurface({ id: "session", title: tr("workspace.builtinsurfaces.session"), order: 0, plugin: "session", requires: "project", component: SessionSurface });
+registerWorkspaceSurface({ id: "goals", title: tr("workspace.builtinsurfaces.goals"), order: 20, plugin: "goals", requires: "project", component: GoalsView });
+registerWorkspaceSurface({ id: "multirun", title: tr("workspace.builtinsurfaces.multiRun"), order: 21, plugin: "multirun", requires: "project", component: MultiRunView });
+registerWorkspaceSurface({ id: "workflow", title: tr("workspace.builtinsurfaces.workflows"), order: 22, plugin: "workflow", requires: "project", component: WorkflowView });
+registerWorkspaceSurface({ id: "fusion", title: tr("workspace.builtinsurfaces.fusion"), order: 23, plugin: "fusion", requires: "project", component: FusionView });
+registerWorkspaceSurface({ id: "walkthrough", title: tr("workspace.builtinsurfaces.walkthrough"), order: 24, plugin: "walkthrough", requires: "project", component: WalkthroughView });
+registerWorkspaceSurface({ id: "schedule", title: tr("workspace.builtinsurfaces.schedule"), order: 25, plugin: "schedule", requires: "project", component: ScheduleView });
+registerWorkspaceSurface({ id: "github", title: tr("workspace.builtinsurfaces.github"), order: 26, plugin: "github", requires: "project", component: GithubView });

@@ -23,6 +23,7 @@ import {
   workspaceSurfaceVersion,
   type WorkspaceSurface,
 } from "../../workspace/surfaceRegistry.ts";
+import { tr } from "../../i18n/index.ts";
 
 /** Re-render whenever any surface registers, replaces, or disposes. */
 export function useWorkspaceSurfaceVersion(): number {
@@ -65,12 +66,12 @@ function ProjectEmptyState({ registry }: { registry: ProjectRegistryState }): Re
         "div",
         { className: "hero hero-project-loading" },
         createElement("div", { className: "hero-mark" }, "p"),
-        createElement("h2", null, "Loading your projects…"),
-        createElement("p", { className: "hero-sub" }, "Polyth is checking this server for saved projects."),
+        createElement("h2", null, tr("workspace.workspacehost.loadingProjects")),
+        createElement("p", { className: "hero-sub" }, tr("workspace.workspacehost.checkingSavedProjects")),
         createElement(
           "button",
           { className: "primary-btn hero-open-project", disabled: true },
-          "Choose a folder…",
+          tr("workspace.workspacehost.chooseFolder"),
         ),
       ),
     );
@@ -83,15 +84,15 @@ function ProjectEmptyState({ registry }: { registry: ProjectRegistryState }): Re
         "div",
         { className: "hero hero-project-failed" },
         createElement("div", { className: "hero-mark" }, "p"),
-        createElement("h2", null, "Couldn’t load projects"),
-        createElement("p", { className: "hero-sub" }, "Polyth couldn’t read the project list from this server."),
+        createElement("h2", null, tr("workspace.workspacehost.couldNotLoadProjects")),
+        createElement("p", { className: "hero-sub" }, tr("workspace.workspacehost.projectListUnavailable")),
         createElement(
           "button",
           {
             className: "primary-btn hero-retry-projects",
             onClick: () => { void refreshProjects("manual"); },
           },
-          "Retry",
+          tr("common.retry"),
         ),
         createElement("p", { className: "hero-status mono", role: "status" }, registry.error),
       ),
@@ -104,16 +105,16 @@ function ProjectEmptyState({ registry }: { registry: ProjectRegistryState }): Re
       "div",
       { className: "hero" },
       createElement("div", { className: "hero-mark" }, "p"),
-      createElement("h2", null, "Bring your work into focus."),
+      createElement("h2", null, tr("workspace.workspacehost.bringWorkIntoFocus")),
       createElement(
         "p",
         { className: "hero-sub" },
-        "Open a local project to start a session with its files, history, and tools.",
+        tr("workspace.workspacehost.openLocalProject"),
       ),
       createElement(
         "button",
         { className: "primary-btn hero-open-project", onClick: () => setOverlay("project-picker") },
-        "Choose a folder…",
+        tr("workspace.workspacehost.chooseFolder"),
       ),
     ),
   );
@@ -125,8 +126,12 @@ function SessionEmptyState({ title }: { title: string }): ReactNode {
     "div",
     { className: "empty-state" },
     createElement("span", { className: "empty-state-mark", "aria-hidden": true }, "○"),
-    createElement("h2", { className: "empty-state-title" }, "No session selected"),
-    createElement("p", { className: "empty-state-desc" }, `Open or start a session to use ${title}.`),
+    createElement("h2", { className: "empty-state-title" }, tr("workspace.workspacehost.noSessionSelected")),
+    createElement(
+      "p",
+      { className: "empty-state-desc" },
+      tr("workspace.workspacehost.openSessionToUseValue", { title }),
+    ),
   );
 }
 
@@ -136,8 +141,8 @@ function NoSurfaceEmptyState(): ReactNode {
     "div",
     { className: "empty-state" },
     createElement("span", { className: "empty-state-mark", "aria-hidden": true }, "○"),
-    createElement("h2", { className: "empty-state-title" }, "Nothing to show here yet"),
-    createElement("p", { className: "empty-state-desc" }, "No workspace surface is registered or enabled."),
+    createElement("h2", { className: "empty-state-title" }, tr("workspace.workspacehost.nothingToShow")),
+    createElement("p", { className: "empty-state-desc" }, tr("workspace.workspacehost.noSurfaceEnabled")),
   );
 }
 

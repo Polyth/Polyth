@@ -4,6 +4,7 @@ import {
   type PrDetailDto, type PrFileDto,
 } from "../api.ts";
 import { highlight, langOf } from "../highlight.ts";
+import { getLocale, tr } from "../i18n/index.ts";
 import { Icon } from "../icons.tsx";
 import { MarkdownDoc } from "../markdown.tsx";
 import { parsePrDiffLines, splitPrDiff } from "../prDiff.ts";
@@ -13,6 +14,7 @@ import EmptyState from "./EmptyState.tsx";
 
 type Tab = "overview" | "files" | "checks" | "comments";
 type PrSection = "detail" | "files" | "diff" | "checks" | "comments";
+type MessageTone = "error" | "warning" | "success";
 
 /** Hide HTML comments and Cursor's agent footer without altering fenced examples. */
 export function stripCursorMarkers(markdown: string): string {
@@ -46,7 +48,7 @@ export function stripCursorMarkers(markdown: string): string {
   return output.join("\n").trim();
 }
 
-export function reviewMessageTone(message: string): "error" | "warning" | "success" {
+export function reviewMessageTone(message: string): MessageTone {
   if (message.startsWith("Submit failed")) return "error";
   if (message.startsWith("Confirm ")) return "warning";
   return "success";
@@ -59,7 +61,14 @@ function ChecksRing({ summary }: { summary: ChecksSummaryDto }) {
   const total = Math.max(1, summary.total);
   const segment = (count: number) => (count / total) * 360;
   const gradient = `conic-gradient(var(--red) 0deg ${segment(failing)}deg, var(--amber) ${segment(failing)}deg ${segment(failing + running)}deg, var(--green) ${segment(failing + running)}deg ${segment(failing + running + passing)}deg, var(--border) ${segment(failing + running + passing)}deg 360deg)`;
-  return <span className="checks-ring" role="img" aria-label={`${summary.headline}: ${failing} failing, ${running} running, ${passing} passing`} style={{ background: gradient }} />;
+  return (
+    <span
+      className="checks-ring"
+      role="img"
+      aria-label={tr("pullrequestview.valueValueFailingValueRunningValuePassing", { headline: summary.headline, failed: failing, running: running, ok: passing, total: summary.total })}
+      style={{ background: gradient }}
+    />
+  );
 }
 
 function CheckRow({ check }: { check: PrCheckDto }) {
@@ -71,14 +80,14 @@ function CheckRow({ check }: { check: PrCheckDto }) {
         {check.workflow && <span className="muted">{check.workflow}</span>}
       </div>
       <span className="check-status">{check.status.replace(/_/g, " ")}</span>
-      {check.url && <a className="small-btn" href={check.url} target="_blank" rel="noreferrer">View logs</a>}
+      {check.url && <a className="small-btn" href={check.url} target="_blank" rel="noreferrer">{tr("pullrequestview.viewLogs")}</a>}
     </article>
   );
 }
 
 function DiffLines({ diff, path }: { diff: string; path: string }) {
   return (
-    <div className="git-diff pr-diff" role="table" aria-label={`Patch for ${path}`}>
+    <div className="git-diff pr-diff" role="table" aria-label={tr("pullrequestview.patchForValue", { path: path })}>
       {parsePrDiffLines(diff).map((row, index) => {
         const oldShown = row.oldLine === undefined ? "" : String(row.oldLine);
         const newShown = row.newLine === undefined ? "" : String(row.newLine);
@@ -90,8 +99,8 @@ function DiffLines({ diff, path }: { diff: string; path: string }) {
               ? "diff-del"
               : row.kind === "context" ? "" : "diff-meta";
         const lineLabel = oldShown && newShown
-          ? `old line ${oldShown}, new line ${newShown}`
-          : oldShown ? `old line ${oldShown}` : newShown ? `new line ${newShown}` : "diff metadata";
+          ? tr("pullrequestview.oldLineNewLineValue", { old: oldShown, new: newShown })
+          : oldShown ? tr("pullrequestview.oldLineValue", { old: oldShown }) : newShown ? tr("pullrequestview.newLineValue", { new: newShown }) : tr("pullrequestview.diffMetadata");
         return (
           <div key={index} className={`git-diff-line ${className}`} role="row" aria-label={lineLabel}>
             <span className="pr-diff-ln" aria-hidden="true"><i>{oldShown}</i><i>{newShown}</i></span>
@@ -124,10 +133,12 @@ export default function PullRequestView({ number, onClose }: { number: number; o
   const [reviewEvent, setReviewEvent] = useState<"COMMENT" | "APPROVE" | "REQUEST_CHANGES">("COMMENT");
   const [confirmWrite, setConfirmWrite] = useState(false);
   const [writeMsg, setWriteMsg] = useState("");
+  const [writeTone, setWriteTone] = useState<MessageTone>("success");
   const [mergeStrategy, setMergeStrategy] = useState<"squash" | "merge" | "rebase">("squash");
   const [mergeConfirm, setMergeConfirm] = useState(false);
   const [mergeBusy, setMergeBusy] = useState(false);
   const [mergeMsg, setMergeMsg] = useState("");
+  const [mergeFailed, setMergeFailed] = useState(false);
   const [editing, setEditing] = useState(false);
   const [editTitle, setEditTitle] = useState("");
   const [editBody, setEditBody] = useState("");
@@ -148,7 +159,7 @@ export default function PullRequestView({ number, onClose }: { number: number; o
         setSectionErrors((current) => ({ ...current, checks: result.reason }));
       }
     } catch (cause) {
-      setSectionErrors((current) => ({ ...current, checks: friendlyError("Couldn’t load checks", cause) }));
+      setSectionErrors((current) => ({ ...current, checks: friendlyError(tr("pullrequestview.couldntLoadChecks"), cause) }));
     }
   }, [projectId, number]);
 
@@ -173,7 +184,7 @@ export default function PullRequestView({ number, onClose }: { number: number; o
             recordError("detail", result.reason);
           }
         } catch (cause) {
-          const message = friendlyError("Couldn’t load pull request details", cause);
+          const message = friendlyError(tr("pullrequestview.couldntLoadPullRequestDetails"), cause);
           if (active) setReason(message);
           recordError("detail", message);
         }
@@ -184,7 +195,7 @@ export default function PullRequestView({ number, onClose }: { number: number; o
           if (!active) return;
           if (result.ok) setFiles(result.data); else recordError("files", result.reason);
         } catch (cause) {
-          recordError("files", friendlyError("Couldn’t load changed files", cause));
+          recordError("files", friendlyError(tr("pullrequestview.couldntLoadChangedFiles"), cause));
         }
       })(),
       (async () => {
@@ -193,7 +204,7 @@ export default function PullRequestView({ number, onClose }: { number: number; o
           if (!active) return;
           if (result.ok) setComments(result.data); else recordError("comments", result.reason);
         } catch (cause) {
-          recordError("comments", friendlyError("Couldn’t load comments", cause));
+          recordError("comments", friendlyError(tr("pullrequestview.couldntLoadComments"), cause));
         }
       })(),
       (async () => {
@@ -206,7 +217,7 @@ export default function PullRequestView({ number, onClose }: { number: number; o
             recordError("diff", result.reason);
           }
         } catch (cause) {
-          const message = friendlyError("Couldn’t load the pull request patch", cause);
+          const message = friendlyError(tr("pullrequestview.couldntLoadThePullRequestPatch"), cause);
           if (active) setDiffReason(message);
           recordError("diff", message);
         }
@@ -237,17 +248,19 @@ export default function PullRequestView({ number, onClose }: { number: number; o
     void api.githubPrDetail(projectId, number).then((result) => { if (result.ok) setDetail(result.data); });
   };
 
-  const mergeBlock = !detail ? "loading"
-    : detail.state !== "OPEN" ? `pull request is ${detail.state.toLowerCase()}`
-    : detail.isDraft ? "draft pull requests cannot be merged"
-    : detail.mergeable === "CONFLICTING" ? "has conflicts with the base branch"
-    : detail.mergeable !== "MERGEABLE" ? "GitHub has not confirmed mergeability yet — refresh"
+  // Merge stays disabled with the reason until GitHub reports MERGEABLE.
+  const mergeBlock = !detail ? tr("common.loading")
+    : detail.state !== "OPEN" ? tr("pullrequestview.pullRequestStateValue", { value: detail.state.toLowerCase() })
+    : detail.isDraft ? tr("pullrequestview.draftCannotMerge")
+    : detail.mergeable === "CONFLICTING" ? tr("pullrequestview.baseBranchConflicts")
+    : detail.mergeable !== "MERGEABLE" ? tr("pullrequestview.mergeabilityUnknown")
     : null;
 
   const doMerge = async () => {
     if (mergeBlock || !mergeConfirm) return;
     setMergeBusy(true);
     setMergeMsg("");
+    setMergeFailed(false);
     const result = await api.githubPrMerge({
       projectId,
       number,
@@ -257,10 +270,12 @@ export default function PullRequestView({ number, onClose }: { number: number; o
     setMergeBusy(false);
     setMergeConfirm(false);
     if (result.ok) {
-      setMergeMsg(`Merged via GitHub using ${mergeStrategy}.`);
+      // remote merge via GitHub — distinct from a local `git merge`
+      setMergeMsg(tr("pullrequestview.mergedViaGithub", { strategy: mergeStrategy }));
       reloadDetail();
     } else {
-      setMergeMsg(`Merge failed: ${result.reason}`);
+      setMergeFailed(true);
+      setMergeMsg(tr("pullrequestview.mergeFailedValue", { reason: result.reason }));
     }
   };
 
@@ -283,16 +298,19 @@ export default function PullRequestView({ number, onClose }: { number: number; o
       setEditing(false);
       reloadDetail();
     } else {
-      setMergeMsg(`Update failed: ${result.reason}`);
+      setMergeFailed(true);
+      setMergeMsg(tr("pullrequestview.updateFailedValue", { reason: result.reason }));
     }
   };
 
   const submitReview = async () => {
     if (reviewBusy) return;
     setWriteMsg("");
+    setWriteTone("success");
     const needsConfirm = reviewEvent !== "COMMENT";
     if (needsConfirm && !confirmWrite) {
-      setWriteMsg("Confirm the approval or change request before submitting.");
+      setWriteTone("warning");
+      setWriteMsg(tr("pullrequestview.confirmReviewAction"));
       return;
     }
     setReviewBusy(true);
@@ -306,12 +324,16 @@ export default function PullRequestView({ number, onClose }: { number: number; o
     }).catch((cause: unknown) => ({ ok: false as const, reason: cause instanceof Error ? cause.message : String(cause) }));
     setReviewBusy(false);
     if (result.ok) {
-      setWriteMsg(`Review submitted (${reviewEvent.toLowerCase().replace("_", " ")}).`);
+      setWriteTone("success");
+      setWriteMsg(tr("pullrequestview.reviewSubmittedValue", {
+        event: reviewEvent.toLowerCase().replaceAll("_", " "),
+      }));
       setReviewBody("");
       setConfirmWrite(false);
       void api.githubPrComments(projectId, number).then((next) => { if (next.ok) setComments(next.data); });
     } else {
-      setWriteMsg(`Submit failed: ${result.reason}`);
+      setWriteTone("error");
+      setWriteMsg(tr("pullrequestview.submitFailedValue", { reason: result.reason }));
     }
   };
 
@@ -326,11 +348,10 @@ export default function PullRequestView({ number, onClose }: { number: number; o
   const passing = checks?.summary.counts.success ?? 0;
   const failing = (checks?.summary.counts.failure ?? 0) + (checks?.summary.counts.action_required ?? 0) + (checks?.summary.counts.timed_out ?? 0);
   const pending = (checks?.summary.counts.queued ?? 0) + (checks?.summary.counts.in_progress ?? 0);
-  const writeTone = reviewMessageTone(writeMsg);
 
   if (loading && !detail) {
     return (
-      <div className="pr-surface" aria-busy="true" aria-label="Loading pull request">
+      <div className="pr-surface" aria-busy="true" aria-label={tr("pullrequestview.loadingPullRequest")}>
         <div className="source-skeleton skeleton-title" />
         <div className="source-skeleton skeleton-tabs" />
         <div className="source-skeleton skeleton-panel" />
@@ -341,30 +362,30 @@ export default function PullRequestView({ number, onClose }: { number: number; o
   return (
     <div className="pr-surface">
       <header className="pr-head">
-        <button className="small-btn pr-back" onClick={onClose}><Icon.back /> Pull requests</button>
+        <button className="small-btn pr-back" onClick={onClose}><Icon.back /> {tr("pullrequestview.pullRequests")}</button>
         {detail && (
           <div className="pr-title-block">
             <div className="pr-title-meta">
-              <span className={`gh-state ${detail.state.toLowerCase()}${detail.isDraft ? " draft" : ""}`}>{detail.isDraft ? "draft" : detail.state.toLowerCase()}</span>
+              <span className={`gh-state ${detail.state.toLowerCase()}${detail.isDraft ? " draft" : ""}`}>{detail.isDraft ? tr("pullrequestview.draft") : detail.state.toLowerCase()}</span>
               <span className="gh-number mono">#{detail.number}</span>
             </div>
-            <h1><a href={detail.url} target="_blank" rel="noreferrer">{detail.title} <Icon.external /><span className="sr-only">(opens on GitHub)</span></a></h1>
-            <span className="muted">{detail.author} wants to merge <span className="mono">{detail.headRefName}</span> into <span className="mono">{detail.baseRefName}</span></span>
+            <h1><a href={detail.url} target="_blank" rel="noreferrer">{detail.title} <Icon.external /><span className="sr-only">{tr("pullrequestview.opensOnGithub")}</span></a></h1>
+            <span className="muted">{detail.author} {tr("pullrequestview.wantsToMerge")} <span className="mono">{detail.headRefName}</span> {tr("pullrequestview.into")} <span className="mono">{detail.baseRefName}</span></span>
           </div>
         )}
         {checks && <div className="pr-check-pill"><ChecksRing summary={checks.summary} /><span className={`checks-headline hl-${checks.summary.state}`}>{checks.summary.headline}</span></div>}
       </header>
 
-      {reason && !detail && <EmptyState title="Couldn’t load pull request" description={reason} actionLabel="Retry" onAction={() => setReloadKey((key) => key + 1)} />}
+      {reason && !detail && <EmptyState title={tr("pullrequestview.couldnTLoadPullRequest")} description={reason} actionLabel={tr("common.retry")} onAction={() => setReloadKey((key) => key + 1)} />}
 
       {detail && (
         <>
-          <nav className="pr-tabbar" aria-label="Pull request sections">
+          <nav className="pr-tabbar" aria-label={tr("pullrequestview.pullRequestSections")}>
             {([
-              ["overview", "Overview", null],
-              ["files", "Files", detail.changedFiles],
-              ["checks", "Checks", checks?.summary.total ?? 0],
-              ["comments", "Comments", comments.length],
+              ["overview", tr("pullrequestview.overview"), null],
+              ["files", tr("pullrequestview.filesTab"), detail.changedFiles],
+              ["checks", tr("pullrequestview.checksTab"), checks?.summary.total ?? 0],
+              ["comments", tr("pullrequestview.commentsTab"), comments.length],
             ] as const).map(([id, label, count]) => (
               <button key={id} className={tab === id ? "active" : ""} aria-current={tab === id ? "page" : undefined} onClick={() => setTab(id)}>
                 {label}{count !== null && <span>{count}</span>}
@@ -375,64 +396,64 @@ export default function PullRequestView({ number, onClose }: { number: number; o
           {tab === "overview" && (
             <div className="pr-overview">
               <section className="pr-summary-cards">
-                <div><span>Changed files</span><strong>{detail.changedFiles}</strong></div>
-                <div><span>Lines added</span><strong className="positive">+{detail.additions}</strong></div>
-                <div><span>Lines removed</span><strong className="negative">−{detail.deletions}</strong></div>
+                <div><span>{tr("pullrequestview.changedFiles")}</span><strong>{detail.changedFiles}</strong></div>
+                <div><span>{tr("pullrequestview.linesAdded")}</span><strong className="positive">+{detail.additions}</strong></div>
+                <div><span>{tr("pullrequestview.linesRemoved")}</span><strong className="negative">−{detail.deletions}</strong></div>
                 <div>
-                  <span>Merge status</span>
+                  <span>{tr("pullrequestview.mergeStatus")}</span>
                   <strong className={`merge-status-badge st-${detail.mergeable.toLowerCase()}`}>
-                    {detail.mergeable === "MERGEABLE" ? "Ready" : detail.mergeable === "CONFLICTING" ? "Conflicts" : "Checking"}
+                    {detail.mergeable === "MERGEABLE" ? tr("pullrequestview.ready") : detail.mergeable === "CONFLICTING" ? tr("pullrequestview.conflicts") : tr("pullrequestview.checking")}
                   </strong>
                 </div>
               </section>
               <div className="pr-overview-head">
                 <div>
-                  <h2>Description</h2>
-                  <span className="muted">Updated {new Date(detail.updatedAt).toLocaleString()}</span>
+                  <h2>{tr("pullrequestview.descriptionHeading")}</h2>
+                  <span className="muted">{tr("pullrequestview.updatedValue", { date: new Date(detail.updatedAt).toLocaleString(getLocale()) })}</span>
                 </div>
                 {detail.state === "OPEN" && !editing && <button className="small-btn" onClick={() => {
                   setEditTitle(detail.title);
                   setEditBody(detail.body);
                   setEditing(true);
-                }}><Icon.pencil /> Edit</button>}
+                }}><Icon.pencil /> {tr("common.edit")}</button>}
               </div>
 
               {editing ? (
                 <div className="pr-edit-form">
-                  <label>Title<input value={editTitle} placeholder="Title…" onChange={(event) => setEditTitle(event.target.value)} /></label>
-                  <label>Description<textarea rows={7} placeholder="Description…" value={editBody} onChange={(event) => setEditBody(event.target.value)} /></label>
+                  <label>{tr("pullrequestview.titleLabel")}<input value={editTitle} placeholder={tr("pullrequestview.title")} onChange={(event) => setEditTitle(event.target.value)} /></label>
+                  <label>{tr("pullrequestview.descriptionHeading")}<textarea rows={7} placeholder={tr("pullrequestview.description")} value={editBody} onChange={(event) => setEditBody(event.target.value)} /></label>
                   <div className="view-toolbar-row">
                     <span className="header-spacer" />
-                    <button className="small-btn" disabled={editBusy} onClick={() => setEditing(false)}>Cancel</button>
-                    <button className="primary-btn" disabled={editBusy || !editTitle.trim()} onClick={() => void saveEdit()}>{editBusy ? "Saving…" : "Save changes"}</button>
+                    <button className="small-btn" disabled={editBusy} onClick={() => setEditing(false)}>{tr("common.cancel")}</button>
+                    <button className="primary-btn" disabled={editBusy || !editTitle.trim()} onClick={() => void saveEdit()}>{editBusy ? tr("common.saving") : tr("pullrequestview.saveChanges")}</button>
                   </div>
                 </div>
               ) : (
                 <div className="pr-body markdown-body">
-                  {detail.body ? <MarkdownDoc text={stripCursorMarkers(detail.body)} keyBase={`pr-${detail.number}-body`} /> : <p>No description was provided.</p>}
+                  {detail.body ? <MarkdownDoc text={stripCursorMarkers(detail.body)} keyBase={`pr-${detail.number}-body`} /> : <p>{tr("pullrequestview.noDescriptionWasProvided")}</p>}
                 </div>
               )}
 
               {detail.state === "OPEN" && (
                 <section className="pr-merge-area">
                   <div>
-                    <strong>Merge pull request</strong>
-                    <span className="muted">{mergeBlock ? `Unavailable: ${mergeBlock}.` : "This updates the repository on GitHub."}</span>
+                    <strong>{tr("pullrequestview.mergePullRequest")}</strong>
+                    <span className="muted">{mergeBlock ? tr("pullrequestview.unavailableValue", { reason: mergeBlock }) : tr("pullrequestview.thisUpdatesTheRepositoryOnGithub")}</span>
                   </div>
                   <div className="pr-merge-controls">
-                    <select value={mergeStrategy} disabled={!!mergeBlock || mergeBusy} aria-label="Merge strategy" onChange={(event) => setMergeStrategy(event.target.value as typeof mergeStrategy)}>
-                      <option value="squash">Squash and merge</option>
-                      <option value="merge">Create merge commit</option>
-                      <option value="rebase">Rebase and merge</option>
+                    <select value={mergeStrategy} disabled={!!mergeBlock || mergeBusy} aria-label={tr("pullrequestview.mergeStrategy")} onChange={(event) => setMergeStrategy(event.target.value as typeof mergeStrategy)}>
+                      <option value="squash">{tr("pullrequestview.squashAndMerge")}</option>
+                      <option value="merge">{tr("pullrequestview.createMergeCommit")}</option>
+                      <option value="rebase">{tr("pullrequestview.rebaseAndMerge")}</option>
                     </select>
-                    {!mergeBlock && <label className="source-confirm"><input type="checkbox" checked={mergeConfirm} onChange={(event) => setMergeConfirm(event.target.checked)} /> I confirm this merge</label>}
-                    <button className="primary-btn" disabled={!!mergeBlock || !mergeConfirm || mergeBusy} title={mergeBlock ?? `Merge #${number}`} onClick={() => void doMerge()}>
-                      {mergeBusy ? "Merging…" : "Merge pull request"}
+                    {!mergeBlock && <label className="source-confirm"><input type="checkbox" checked={mergeConfirm} onChange={(event) => setMergeConfirm(event.target.checked)} /> {tr("pullrequestview.iConfirmThisMerge")}</label>}
+                    <button className="primary-btn" disabled={!!mergeBlock || !mergeConfirm || mergeBusy} title={mergeBlock ?? tr("pullrequestview.mergeNumberValue", { number: number })} onClick={() => void doMerge()}>
+                      {mergeBusy ? tr("pullrequestview.merging") : tr("pullrequestview.mergePullRequest")}
                     </button>
                   </div>
                 </section>
               )}
-              {mergeMsg && <div className={/failed/.test(mergeMsg) ? "form-error" : "knowledge-notice"} role="status">{mergeMsg}</div>}
+              {mergeMsg && <div className={mergeFailed ? "form-error" : "knowledge-notice"} role="status">{mergeMsg}</div>}
             </div>
           )}
 
@@ -440,26 +461,26 @@ export default function PullRequestView({ number, onClose }: { number: number; o
             <div className="pr-files">
               <div className="pr-files-toolbar">
                 <div>
-                  <strong>{detail.changedFiles} changed {detail.changedFiles === 1 ? "file" : "files"}</strong>
+                  <strong>{detail.changedFiles === 1 ? tr("pullrequestview.oneChangedFile") : tr("pullrequestview.changedFilesValue", { count: detail.changedFiles })}</strong>
                   <span><span className="positive">+{detail.additions}</span> <span className="negative">−{detail.deletions}</span></span>
                 </div>
                 <span className="header-spacer" />
-                <button className="small-btn" disabled={diffFiles.length === 0} onClick={() => setExpandedFiles(new Set(diffFiles.map((file) => file.path)))}>Expand all</button>
-                <button className="small-btn" disabled={expandedFiles.size === 0} onClick={() => setExpandedFiles(new Set())}>Collapse all</button>
+                <button className="small-btn" disabled={diffFiles.length === 0} onClick={() => setExpandedFiles(new Set(diffFiles.map((file) => file.path)))}>{tr("pullrequestview.expandAll")}</button>
+                <button className="small-btn" disabled={expandedFiles.size === 0} onClick={() => setExpandedFiles(new Set())}>{tr("pullrequestview.collapseAll")}</button>
               </div>
               {sectionErrors.files && (
                 <div className="source-inline-status error" role="alert">
-                  <span>Changed-file metadata could not be loaded: {sectionErrors.files}</span>
-                  <button className="small-btn" onClick={() => setReloadKey((key) => key + 1)}>Retry</button>
+                  <span>{tr("pullrequestview.changedFileMetadataCouldNotBe", { reason: sectionErrors.files })}</span>
+                  <button className="small-btn" onClick={() => setReloadKey((key) => key + 1)}>{tr("common.retry")}</button>
                 </div>
               )}
               {diffReason && (
                 <div className="source-inline-status error" role="alert">
-                  <span>The patch could not be loaded: {diffReason}</span>
-                  <button className="small-btn" onClick={() => setReloadKey((key) => key + 1)}>Retry</button>
+                  <span>{tr("pullrequestview.thePatchCouldNotBeLoaded", { reason: diffReason })}</span>
+                  <button className="small-btn" onClick={() => setReloadKey((key) => key + 1)}>{tr("common.retry")}</button>
                 </div>
               )}
-              {files.length === 0 && diffFiles.length === 0 && <EmptyState title="No changed files" description="No file changes are available for this pull request." />}
+              {files.length === 0 && diffFiles.length === 0 && <EmptyState title={tr("pullrequestview.noChangedFiles")} description={tr("pullrequestview.noFileListIsAvailableForThis")} />}
               {diffFiles.map((file) => {
                 const stat = fileStats.get(file.path);
                 const expanded = expandedFiles.has(file.path);
@@ -489,19 +510,19 @@ export default function PullRequestView({ number, onClose }: { number: number; o
               {!checks && !sectionErrors.checks && <div className="source-skeleton skeleton-panel" />}
               {sectionErrors.checks && (
                 <div className="source-inline-status error" role="alert">
-                  <span>Checks could not be loaded: {sectionErrors.checks}</span>
-                  <button className="small-btn" onClick={() => void loadChecks()}>Retry</button>
+                  <span>{tr("pullrequestview.checksCouldNotBeLoaded", { reason: sectionErrors.checks })}</span>
+                  <button className="small-btn" onClick={() => void loadChecks()}>{tr("common.retry")}</button>
                 </div>
               )}
               {checks && checks.summary.total > 0 && (
                 <section className="check-summary-cards">
-                  <div className="success"><span>Passing</span><strong>{passing}</strong></div>
-                  <div className="failure"><span>Failing</span><strong>{failing}</strong></div>
-                  <div className="pending"><span>In progress</span><strong>{pending}</strong></div>
-                  <div><span>Total</span><strong>{checks.summary.total}</strong></div>
+                  <div className="success"><span>{tr("pullrequestview.passing")}</span><strong>{passing}</strong></div>
+                  <div className="failure"><span>{tr("pullrequestview.failing")}</span><strong>{failing}</strong></div>
+                  <div className="pending"><span>{tr("pullrequestview.inProgress")}</span><strong>{pending}</strong></div>
+                  <div><span>{tr("pullrequestview.total")}</span><strong>{checks.summary.total}</strong></div>
                 </section>
               )}
-              {checks && checks.summary.total === 0 && <EmptyState title="No checks" description="No checks were reported for this commit." />}
+              {checks && checks.summary.total === 0 && <EmptyState title={tr("pullrequestview.noChecks")} description={tr("pullrequestview.noChecksWereReportedForThisCommit")} />}
               {checks?.summary.groups.map((group) => (
                 <section key={group.id} className="checks-group">
                   <div className="checks-group-head"><strong>{group.label}</strong><span>{group.checks.length}</span></div>
@@ -515,11 +536,11 @@ export default function PullRequestView({ number, onClose }: { number: number; o
             <div className="pr-comments">
               {sectionErrors.comments && (
                 <div className="source-inline-status error" role="alert">
-                  <span>Conversation could not be loaded: {sectionErrors.comments}</span>
-                  <button className="small-btn" onClick={() => setReloadKey((key) => key + 1)}>Retry</button>
+                  <span>{tr("pullrequestview.conversationCouldNotBeLoaded", { reason: sectionErrors.comments })}</span>
+                  <button className="small-btn" onClick={() => setReloadKey((key) => key + 1)}>{tr("common.retry")}</button>
                 </div>
               )}
-              {!sectionErrors.comments && comments.length === 0 && <EmptyState title="No conversation yet" description="Reviews and comments on this pull request will appear here." />}
+              {!sectionErrors.comments && comments.length === 0 && <EmptyState title={tr("pullrequestview.noConversationYet")} description={tr("pullrequestview.reviewsAndCommentsWillAppearHere")} />}
               <div className="pr-thread">
                 {comments.map((comment) => (
                   <article key={comment.id} className="pr-comment">
@@ -528,8 +549,8 @@ export default function PullRequestView({ number, onClose }: { number: number; o
                       <header className="pr-comment-head">
                         <strong>{comment.author}</strong>
                         {comment.reviewState && <span className="tag">{comment.reviewState.toLowerCase().replace(/_/g, " ")}</span>}
-                        {comment.outdated && <span className="tag">outdated</span>}
-                        <a href={comment.url} target="_blank" rel="noreferrer" className="muted">{comment.createdAt ? new Date(comment.createdAt).toLocaleString() : ""}</a>
+                        {comment.outdated && <span className="tag">{tr("pullrequestview.outdated")}</span>}
+                        <a href={comment.url} target="_blank" rel="noreferrer" className="muted">{comment.createdAt ? new Date(comment.createdAt).toLocaleString(getLocale()) : ""}</a>
                       </header>
                       {comment.path && <div className="pr-comment-location mono">{comment.path}{comment.line ? `:${comment.line}` : ""}</div>}
                       <div className="pr-comment-body markdown-body"><MarkdownDoc text={stripCursorMarkers(comment.body)} keyBase={`pr-comment-${comment.id}`} /></div>
@@ -539,25 +560,25 @@ export default function PullRequestView({ number, onClose }: { number: number; o
               </div>
               <section className="pr-review-form">
                 <div>
-                  <strong>Submit a review</strong>
-                  <span className="muted">This posts directly to GitHub.</span>
+                  <strong>{tr("pullrequestview.submitAReview")}</strong>
+                  <span className="muted">{tr("pullrequestview.thisPostsDirectlyToGithub")}</span>
                 </div>
-                <textarea rows={4} placeholder="Leave a thoughtful review…" value={reviewBody} onChange={(event) => setReviewBody(event.target.value)} />
+                <textarea rows={4} placeholder={tr("pullrequestview.leaveAThoughtfulReview")} value={reviewBody} onChange={(event) => setReviewBody(event.target.value)} />
                 <div className="pr-review-actions">
                   <label className="pr-review-kind">
-                    <span>Review type</span>
-                    <select aria-label="Review type" value={reviewEvent} disabled={reviewBusy} onChange={(event) => {
+                    <span>{tr("pullrequestview.reviewType")}</span>
+                    <select aria-label={tr("pullrequestview.reviewType")} value={reviewEvent} disabled={reviewBusy} onChange={(event) => {
                       setReviewEvent(event.target.value as typeof reviewEvent);
                       setConfirmWrite(false);
                     }}>
-                      <option value="COMMENT">Comment</option>
-                      <option value="APPROVE">Approve</option>
-                      <option value="REQUEST_CHANGES">Request changes</option>
+                      <option value="COMMENT">{tr("pullrequestview.comment")}</option>
+                      <option value="APPROVE">{tr("pullrequestview.approve")}</option>
+                      <option value="REQUEST_CHANGES">{tr("pullrequestview.requestChanges")}</option>
                     </select>
                   </label>
-                  {reviewEvent !== "COMMENT" && <label className="source-confirm"><input type="checkbox" checked={confirmWrite} onChange={(event) => setConfirmWrite(event.target.checked)} /> Confirm {reviewEvent === "APPROVE" ? "approval" : "change request"}</label>}
+                  {reviewEvent !== "COMMENT" && <label className="source-confirm"><input type="checkbox" checked={confirmWrite} onChange={(event) => setConfirmWrite(event.target.checked)} /> {tr("pullrequestview.confirmValue", { value: reviewEvent === "APPROVE" ? tr("pullrequestview.approval") : tr("pullrequestview.changeRequest") })}</label>}
                   <span className="header-spacer" />
-                  <button className="primary-btn" disabled={reviewBusy || (!reviewBody.trim() && reviewEvent !== "APPROVE")} onClick={() => void submitReview()}>{reviewBusy ? "Submitting…" : "Submit review"}</button>
+                  <button className="primary-btn" disabled={reviewBusy || (!reviewBody.trim() && reviewEvent !== "APPROVE")} onClick={() => void submitReview()}>{reviewBusy ? tr("pullrequestview.submitting") : tr("pullrequestview.submitReview")}</button>
                 </div>
                 {writeMsg && (
                   <div

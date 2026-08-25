@@ -4,6 +4,7 @@ import { updateProjectAppearance } from "../init.ts";
 import { friendlyError } from "../settings.ts";
 import { setUiError } from "../store.ts";
 import Dialog from "./a11y/Dialog.tsx";
+import { tr } from "../i18n/index.ts";
 
 const DEFAULT_COLOR = "#9b4b2b";
 const MAX_ICON_BYTES = 512 * 1024;
@@ -16,8 +17,8 @@ function uploadedIcon(icon: string): boolean { return icon.startsWith("data:imag
 function readImage(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
-    reader.onerror = () => reject(new Error("Couldn’t read that icon."));
-    reader.onload = () => typeof reader.result === "string" ? resolve(reader.result) : reject(new Error("Couldn’t read that icon."));
+    reader.onerror = () => reject(new Error(tr("projectappearancedialog.couldnTReadThatIcon")));
+    reader.onload = () => typeof reader.result === "string" ? resolve(reader.result) : reject(new Error(tr("projectappearancedialog.couldnTReadThatIcon")));
     reader.readAsDataURL(file);
   });
 }
@@ -48,7 +49,7 @@ export default function ProjectAppearanceDialog({ project, onClose }: { project:
       await updateProjectAppearance(project.id, { name: name.trim(), icon: icon.trim(), color });
       onClose();
     } catch (error) {
-      setUiError(friendlyError("Couldn’t update project appearance", error));
+      setUiError(friendlyError(tr("common.error"), error));
     } finally {
       setSaving(false);
     }
@@ -60,40 +61,40 @@ export default function ProjectAppearanceDialog({ project, onClose }: { project:
     const accepted = ["image/png", "image/svg+xml", "image/x-icon", "image/vnd.microsoft.icon"];
     const hasAllowedExtension = /\.(?:png|svg|ico)$/i.test(file.name);
     if ((!accepted.includes(file.type) && !hasAllowedExtension) || file.size > MAX_ICON_BYTES) {
-      setUiError("Choose an SVG, ICO, or PNG icon up to 512 KiB.");
+      setUiError(tr("projectappearancedialog.chooseAnSvgIcoOrPngIcon"));
       return;
     }
     try { setIcon(await readImage(file)); }
-    catch (error) { setUiError(friendlyError("Couldn’t upload project icon", error)); }
+    catch (error) { setUiError(friendlyError(tr("projectappearancedialog.couldnTUploadProjectIcon"), error)); }
   };
   return (
-    <Dialog title="Project appearance" onClose={onClose} size="md" className="project-appearance-dialog">
+    <Dialog title={tr("projectappearancedialog.projectAppearance")} onClose={onClose} size="md" className="project-appearance-dialog">
       <div className="project-appearance-body">
-        <p>Set the title and marker shown for this project in the sidebar.</p>
-        <label>Project title<input autoFocus value={name} maxLength={120} placeholder="Project title" aria-label="Project title" onChange={(event) => setName(event.target.value)} /></label>
+        <p>{tr("projectappearancedialog.setTheTitleAndMarkerShown")}</p>
+        <label>{tr("projectappearancedialog.projectTitle")}<input autoFocus value={name} maxLength={120} placeholder={tr("projectappearancedialog.projectTitle")} aria-label={tr("projectappearancedialog.projectTitle")} onChange={(event) => setName(event.target.value)} /></label>
         <div className="project-icon-picker">
-          <span className="project-appearance-label">Icon</span>
-          <input className="project-icon-search" value={iconQuery} placeholder="Search item icons…" aria-label="Search project icons" onChange={(event) => setIconQuery(event.target.value)} />
-          <div className="project-icon-options" role="radiogroup" aria-label="Project icon library">
+          <span className="project-appearance-label">{tr("projectappearancedialog.icon")}</span>
+          <input className="project-icon-search" value={iconQuery} placeholder={tr("projectappearancedialog.searchItemIcons")} aria-label={tr("projectappearancedialog.searchProjectIcons")} onChange={(event) => setIconQuery(event.target.value)} />
+          <div className="project-icon-options" role="radiogroup" aria-label={tr("projectappearancedialog.projectIconLibrary")}>
             {visibleIcons.map((name) => {
               const value = iconPath(name);
               return <button key={name} type="button" role="radio" title={iconLabel(name)} aria-label={iconLabel(name)} aria-checked={icon === value} className={icon === value ? "selected" : ""} onClick={() => setIcon(value)}><span className="project-icon-art" aria-hidden="true" style={{ backgroundColor: color, WebkitMaskImage: `url("${value}")`, maskImage: `url("${value}")` }} /></button>;
             })}
-            {iconNames.length === 0 && <small className="muted">Loading icon library…</small>}
-            {iconNames.length > 0 && visibleIcons.length === 0 && <small className="muted">No icons match that search.</small>}
+            {iconNames.length === 0 && <small className="muted">{tr("projectappearancedialog.loadingIconLibrary")}</small>}
+            {iconNames.length > 0 && visibleIcons.length === 0 && <small className="muted">{tr("projectappearancedialog.noIconsMatchThatSearch")}</small>}
           </div>
           <div className="project-icon-upload-row">
-            {uploadedIcon(icon) && <img className="project-icon-preview" src={icon} alt="Selected project icon" />}
-            <button type="button" className="small-btn" onClick={() => uploadRef.current?.click()}>Upload SVG, ICO, or PNG</button>
-            {icon && <button type="button" className="small-btn" onClick={() => setIcon("")}>Clear</button>}
+            {uploadedIcon(icon) && <img className="project-icon-preview" src={icon} alt={tr("projectappearancedialog.selectedProjectIcon")} />}
+            <button type="button" className="small-btn" onClick={() => uploadRef.current?.click()}>{tr("projectappearancedialog.uploadSvgIcoOrPng")}</button>
+            {icon && <button type="button" className="small-btn" onClick={() => setIcon("")}>{tr("projectappearancedialog.clear")}</button>}
             <input ref={uploadRef} type="file" accept="image/png,image/svg+xml,image/x-icon,image/vnd.microsoft.icon,.png,.svg,.ico" hidden onChange={(event) => void upload(event)} />
           </div>
-          <small>{assetIcon(icon) ? `Selected: ${iconLabel(icon.split("/").pop() ?? "")}. ` : ""}Choose from the bundled icon library or upload an SVG, ICO, or PNG up to 512 KiB.</small>
+          <small>{assetIcon(icon) ? `${tr("projectappearancedialog.selectedValue", { name: iconLabel(icon.split("/").pop() ?? "") })} ` : ""}{tr("projectappearancedialog.chooseFromTheBundledIconLibrary")}</small>
         </div>
-        <label>Color<span className="project-color-input"><input type="color" value={color} onChange={(event) => setColor(event.target.value)} /><code>{color}</code></span></label>
+        <label>{tr("projectappearancedialog.color")}<span className="project-color-input"><input type="color" value={color} onChange={(event) => setColor(event.target.value)} /><code>{color}</code></span></label>
         <div className="dialog-actions">
-          <button type="button" onClick={onClose} disabled={saving}>Cancel</button>
-          <button type="button" className="primary-btn" onClick={() => void save()} disabled={saving || !name.trim()}>{saving ? "Saving…" : "Save"}</button>
+          <button type="button" onClick={onClose} disabled={saving}>{tr("common.cancel")}</button>
+          <button type="button" className="primary-btn" onClick={() => void save()} disabled={saving || !name.trim()}>{saving ? tr("common.saving") : tr("common.save")}</button>
         </div>
       </div>
     </Dialog>

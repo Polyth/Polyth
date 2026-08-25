@@ -15,6 +15,7 @@ import {
   validateSshForm,
   type SshFormValues,
 } from "./sshUi.ts";
+import { tr } from "../../i18n/index.ts";
 
 const errorText = (cause: unknown): string =>
   cause instanceof Error ? cause.message : String(cause);
@@ -22,9 +23,12 @@ const errorText = (cause: unknown): string =>
 const testSummary = (test: SshTestResultDto): string => {
   if (test.state !== "connected") return test.message ?? test.state;
   const runtime = test.runtime?.ok
-    ? `opencode ${test.runtime.version ?? "installed"}`
-    : test.runtime?.message ?? "runtime not probed";
-  return `round-trip ${test.latencyMs ?? "?"} ms · ${runtime}`;
+    ? `opencode ${test.runtime.version ?? tr("settings.sshsettings.installed")}`
+    : test.runtime?.message ?? tr("settings.sshsettings.runtimeNotProbed");
+  return tr("settings.sshsettings.roundTripValueMsValue", {
+    latency: test.latencyMs ?? "?",
+    runtime,
+  });
 };
 
 export default function SshSettings() {
@@ -99,12 +103,12 @@ export default function SshSettings() {
   return (
     <div data-settings-item="ssh-servers">
       <PageHead
-        title="SSH servers"
-        blurb="Projects opened on a server run their coding agent on that machine over one multiplexed SSH connection. Authentication uses your SSH agent, ssh_config, or a private-key file path — Polyth never stores passwords or keys."
+        title={tr("ssh.sshsettings.sshServers")}
+        blurb={tr("ssh.sshsettings.projectsOpenedOnAServerRunTheir")}
       />
 
       {items.length === 0 && editing === null && (
-        <EmptyState title="No servers yet" body="Add a server to open remote projects on it." />
+        <EmptyState title={tr("ssh.sshsettings.noServersYet")} body={tr("ssh.sshsettings.addAServerToOpenRemoteProjects")} />
       )}
 
       {items.map((conn) => {
@@ -119,10 +123,10 @@ export default function SshSettings() {
                 {conn.name}
                 <span className="tag mono">{connectionTarget(conn)}</span>
                 <span className={`tag tag-${badge.tone}`}>{badge.text}</span>
-                {bound > 0 && <span className="tag">{bound} project{bound === 1 ? "" : "s"}</span>}
+                {bound > 0 && <span className="tag">{bound} {tr("ssh.sshsettings.project")}{bound === 1 ? "" : tr("ssh.sshsettings.s")}</span>}
               </div>
               <div className="set-row-hint">
-                {conn.authMode === "identity-file" ? `key: ${conn.identityFile}` : "agent / ssh_config"}
+                {conn.authMode === "identity-file" ? tr("ssh.sshsettings.keyValue", { identityFile: conn.identityFile }) : tr("ssh.sshsettings.agentSshConfig")}
                 {conn.status?.message ? ` — ${conn.status.message}` : ""}
                 {test ? ` — ${testSummary(test)}` : ""}
               </div>
@@ -137,7 +141,7 @@ export default function SshSettings() {
                   await reload();
                 })}
               >
-                {busy ? "Working…" : "Test"}
+                {busy ? tr("ssh.sshsettings.working") : tr("ssh.sshsettings.test")}
               </button>
               {conn.status?.state === "connected" ? (
                 <button
@@ -145,26 +149,23 @@ export default function SshSettings() {
                   disabled={busy}
                   onClick={() => void withBusy(conn.id, async () => { await api.sshDisconnect(conn.id); await reload(); })}
                 >
-                  Disconnect
-                </button>
+                  {tr("ssh.sshsettings.disconnect")}</button>
               ) : (
                 <button
                   className="small-btn"
                   disabled={busy}
                   onClick={() => void withBusy(conn.id, async () => { await api.sshConnect(conn.id); await reload(); })}
                 >
-                  Connect
-                </button>
+                  {tr("ssh.sshsettings.connect")}</button>
               )}
-              <button className="small-btn" disabled={busy} onClick={() => startEdit(conn)}>Edit</button>
+              <button className="small-btn" disabled={busy} onClick={() => startEdit(conn)}>{tr("common.edit")}</button>
               <button
                 className="small-btn danger-btn"
                 disabled={busy}
-                title={bound > 0 ? "Remove the bound projects first" : "Delete this server"}
+                title={bound > 0 ? tr("ssh.sshsettings.removeTheBoundProjectsFirst") : tr("ssh.sshsettings.deleteThisServer")}
                 onClick={() => void withBusy(conn.id, async () => { await api.sshDeleteConnection(conn.id); await reload(); })}
               >
-                Delete
-              </button>
+                {tr("common.delete")}</button>
             </div>
           </div>
         );
@@ -172,41 +173,40 @@ export default function SshSettings() {
 
       {editing === null && (
         <div className="set-add-form">
-          <button className="small-btn" onClick={() => startEdit()}>+ Server</button>
+          <button className="small-btn" onClick={() => startEdit()}>{tr("ssh.sshsettings.server")}</button>
         </div>
       )}
 
       {editing !== null && (
         <form className="set-add-form set-add-col" onSubmit={(event) => void submit(event)}>
-          <div className="stat-label">{editing === "new" ? "Add server" : "Edit server"}</div>
+          <div className="stat-label">{editing === "new" ? tr("ssh.sshsettings.addServer") : tr("ssh.sshsettings.editServer")}</div>
           <div className="set-add-form">
-            <input value={form.name} placeholder="Name (e.g. build box)" aria-label="Server name" onChange={(e) => set({ name: e.target.value })} />
-            <input value={form.host} placeholder="Host or ssh_config alias" aria-label="Host" spellCheck={false} onChange={(e) => set({ host: e.target.value })} />
+            <input value={form.name} placeholder={tr("ssh.sshsettings.nameEGBuildBox")} aria-label={tr("ssh.sshsettings.serverName")} onChange={(e) => set({ name: e.target.value })} />
+            <input value={form.host} placeholder={tr("ssh.sshsettings.hostOrSshConfigAlias")} aria-label={tr("ssh.sshsettings.host")} spellCheck={false} onChange={(e) => set({ host: e.target.value })} />
           </div>
           <div className="set-add-form">
-            <input value={form.user} placeholder="User (optional)" aria-label="User" spellCheck={false} onChange={(e) => set({ user: e.target.value })} />
-            <input value={form.port} placeholder="Port (22)" aria-label="Port" inputMode="numeric" style={{ maxWidth: 110 }} onChange={(e) => set({ port: e.target.value })} />
+            <input value={form.user} placeholder={tr("ssh.sshsettings.userOptional")} aria-label={tr("ssh.sshsettings.user")} spellCheck={false} onChange={(e) => set({ user: e.target.value })} />
+            <input value={form.port} placeholder={tr("ssh.sshsettings.port22")} aria-label={tr("ssh.sshsettings.port")} inputMode="numeric" style={{ maxWidth: 110 }} onChange={(e) => set({ port: e.target.value })} />
             <select
               value={form.authMode}
-              aria-label="Authentication"
+              aria-label={tr("ssh.sshsettings.authentication")}
               onChange={(e) => set({ authMode: e.target.value === "identity-file" ? "identity-file" : "agent" })}
             >
-              <option value="agent">SSH agent / ssh_config</option>
-              <option value="identity-file">Private-key file path</option>
+              <option value="agent">{tr("ssh.sshsettings.sshAgentSshConfig")}</option>
+              <option value="identity-file">{tr("ssh.sshsettings.privateKeyFilePath")}</option>
             </select>
           </div>
           {form.authMode === "identity-file" && (
             <div className="set-add-form">
-              <input value={form.identityFile} placeholder="~/.ssh/id_ed25519" aria-label="Identity file" spellCheck={false} onChange={(e) => set({ identityFile: e.target.value })} />
+              <input value={form.identityFile} placeholder={tr("ssh.sshsettings.sshIdEd25519")} aria-label={tr("ssh.sshsettings.identityFile")} spellCheck={false} onChange={(e) => set({ identityFile: e.target.value })} />
             </div>
           )}
           <div className="set-row-hint">
-            Password login is not supported — keys or an agent only, so no secret ever reaches Polyth.
-          </div>
+            {tr("ssh.sshsettings.passwordLoginIsNotSupportedKeysOr")}</div>
           {formError && <div className="form-error" role="alert">{formError}</div>}
           <div className="set-add-form">
-            <button type="submit" className="small-btn">{editing === "new" ? "Add server" : "Save changes"}</button>
-            <button type="button" className="small-btn" onClick={() => setEditing(null)}>Cancel</button>
+            <button type="submit" className="small-btn">{editing === "new" ? tr("ssh.sshsettings.addServer") : tr("ssh.sshsettings.saveChanges")}</button>
+            <button type="button" className="small-btn" onClick={() => setEditing(null)}>{tr("common.cancel")}</button>
           </div>
         </form>
       )}

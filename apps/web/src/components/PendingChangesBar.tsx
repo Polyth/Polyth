@@ -4,6 +4,7 @@ import { selectPendingChanges } from "../pendingChanges.ts";
 import { openChanges, useActiveModel, useStore } from "../store.ts";
 import { Icon } from "../icons.tsx";
 import { api } from "../api.ts";
+import { tr } from "../i18n/index.ts";
 import { useDismissibleMenu } from "./a11y/Menu.ts";
 
 export interface DiffLineStats {
@@ -140,11 +141,11 @@ export default function PendingChangesBar() {
         <span className="pending-changes-icon" aria-hidden="true">
           <Icon.fileEdit />
         </span>
-        {count} {count === 1 ? "file" : "files"}
+        {count} {count === 1 ? tr("pendingchangesbar.file") : tr("pendingchangesbar.files")}
         {visibleStats && (
           <span
             className="pending-change-stats"
-            aria-label={`${visibleStats.additions} additions, ${visibleStats.deletions} deletions`}
+            aria-label={tr("pendingchangesbar.valueAdditionsValueDeletions", { additions: visibleStats.additions, deletions: visibleStats.deletions })}
           >
             <span className="additions" aria-hidden="true">+{visibleStats.additions}</span>
             <span className="deletions" aria-hidden="true">-{visibleStats.deletions}</span>
@@ -155,12 +156,13 @@ export default function PendingChangesBar() {
         <button
           ref={triggerRef}
           className="pending-changes-trigger"
-          aria-label="List changed files"
+          aria-label={tr("pendingchangesbar.listChangedFiles")}
           aria-haspopup="menu"
           aria-expanded={menuOpen}
           onClick={() => setMenuOpen((open) => !open)}
         ><Icon.chevronDown /></button>
-        {menuOpen && <div ref={menuRef} className="pending-changes-menu" role="menu" aria-label="Changed files" style={menuPosition ?? undefined} onKeyDown={onMenuKeyDown}>
+        {menuOpen && <div ref={menuRef} className="pending-changes-menu" role="menu" aria-label={tr("pendingchangesbar.changedFiles")} style={menuPosition ?? undefined} onKeyDown={onMenuKeyDown}>
+
           {selected.paths.map((path) => (
             <button key={path} role="menuitem" className="mono" title={path} onClick={() => {
               setMenuOpen(false);
@@ -173,12 +175,11 @@ export default function PendingChangesBar() {
       </div>
       <button
         className="pending-changes-dismiss"
-        aria-label="Dismiss changed files"
-        title="Dismiss until the file set changes"
+        aria-label={tr("pendingchangesbar.dismissChangedFiles")}
+        title={tr("pendingchangesbar.dismissUntilTheFileSetChanges")}
         onClick={() => setDismissedKey(changeKey)}
       >
-        ×
-      </button>
+        {tr("pendingchangesbar.message")}</button>
     </div>
   );
 }

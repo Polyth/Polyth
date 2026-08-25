@@ -5,6 +5,7 @@ import { useStore } from "../store.ts";
 import { goalChecklist } from "../utils.ts";
 import Dialog from "./a11y/Dialog.tsx";
 import EmptyState from "./EmptyState.tsx";
+import { formatNumber, tr } from "../i18n/index.ts";
 
 export function GoalStrip({ forceOpen = false }: { forceOpen?: boolean }) {
   const activeSessionId = useStore((s) => s.activeSessionId);
@@ -40,7 +41,7 @@ export function GoalStrip({ forceOpen = false }: { forceOpen?: boolean }) {
 
   if (!goal) {
     return forceOpen
-      ? <EmptyState title="No goal attached" description="Attach an objective from the session actions to track progress here." />
+      ? <EmptyState title={tr("goalstrip.noGoalAttached")} description={tr("goalstrip.attachAnObjectiveFromTheSessionActions")} />
       : null;
   }
 
@@ -57,7 +58,7 @@ export function GoalStrip({ forceOpen = false }: { forceOpen?: boolean }) {
   return (
     <div className={`goal-strip ${expanded ? "open" : "collapsed"}`}>
       <button className="goal-toggle" onClick={() => setOpen((v) => !v)} disabled={forceOpen}>
-        <span className="goal-label">Goal</span>
+        <span className="goal-label">{tr("goalstrip.goal")}</span>
         <span className={`goal-pill goal-pill-${goal.status}`}>{goal.status}</span>
         <span className="goal-objective">{objective}</span>
         <span className="goal-progress">{doneCount}/{items.length || 1}</span>
@@ -73,23 +74,23 @@ export function GoalStrip({ forceOpen = false }: { forceOpen?: boolean }) {
             </ul>
           )}
           <div className="goal-stats">
-            <span className="goal-stat">cont {goal.continuations}/{goal.maxContinuations}</span>
+            <span className="goal-stat">{tr("goalstrip.cont")}{" "}{goal.continuations}/{goal.maxContinuations}</span>
             <span className="goal-stat">
-              tok {goal.tokensUsed > 0 ? `${fmtK(goal.tokensUsed)}` : "0"}
+              {tr("goalstrip.tok")}{" "}{goal.tokensUsed > 0 ? `${fmtK(goal.tokensUsed)}` : "0"}
               {goal.budgetTokens > 0 ? `/${fmtK(goal.budgetTokens)}` : ""}
             </span>
             {goal.lastVerdict && (
-              <span className={`goal-stat goal-verdict-${goal.lastVerdict}`}>verdict: {goal.lastVerdict}</span>
+              <span className={`goal-stat goal-verdict-${goal.lastVerdict}`}>{tr("goalstrip.verdict")}{" "}{goal.lastVerdict}</span>
             )}
           </div>
           <div className="goal-actions">
             {isActive ? (
-              <button className="small-btn" onClick={() => void pause()} disabled={busy}>Pause</button>
+              <button className="small-btn" onClick={() => void pause()} disabled={busy}>{tr("common.pause")}</button>
             ) : goal.status === "paused" ? (
-              <button className="small-btn" onClick={() => void resume()} disabled={busy}>Resume</button>
+              <button className="small-btn" onClick={() => void resume()} disabled={busy}>{tr("common.resume")}</button>
             ) : null}
             {(isActive || goal.status === "paused") && (
-              <button className="small-btn danger-btn" onClick={() => void stop()} disabled={busy}>Stop</button>
+              <button className="small-btn danger-btn" onClick={() => void stop()} disabled={busy}>{tr("common.stop")}</button>
             )}
           </div>
         </>
@@ -128,34 +129,34 @@ export function GoalAttachForm({ onDone }: { onDone: () => void }) {
       );
       onDone();
     } catch (error) {
-      setServerError(error instanceof Error ? error.message : "Couldn’t attach the goal.");
+      setServerError(error instanceof Error ? error.message : tr("goalstrip.couldnTAttachTheGoal"));
     }
     setBusy(false);
   };
 
   return (
-    <Dialog title="Session goal" onClose={onDone} className="goal-dialog" initialFocus="textarea">
+    <Dialog title={tr("goalstrip.sessionGoal")} onClose={onDone} className="goal-dialog" initialFocus="textarea">
       <div className="goal-dialog-head">
         <span className="goal-dialog-mark" aria-hidden="true">◎</span>
         <div>
-          <h2>Set a clear session goal</h2>
-          <p>Polyth will keep the objective and its limits visible while the agent works.</p>
+          <h2>{tr("goalstrip.setAClearSessionGoal")}</h2>
+          <p>{tr("goalstrip.polythWillKeepTheObjectiveAndIts")}</p>
         </div>
-        <button className="icon-btn" aria-label="Close goal dialog" onClick={onDone}>×</button>
+        <button className="icon-btn" aria-label={tr("goalstrip.closeGoalDialog")} onClick={onDone}>{tr("goalstrip.message")}</button>
       </div>
       <div className="goal-attach">
         <label className="goal-attach-label goal-objective-field">
-          <span>Objective</span>
+          <span>{tr("goalstrip.objective")}</span>
           <textarea
             rows={4}
-            placeholder="What should this session accomplish? One item per line becomes a checklist."
+            placeholder={tr("goalstrip.whatShouldThisSessionAccomplishOneItem")}
             value={objective}
             onChange={(e) => setObjective(e.target.value)}
           />
         </label>
         <div className="goal-attach-row">
           <label className="goal-attach-label">
-            <span>Token budget <small>Optional</small></span>
+            <span>{tr("goalstrip.tokenBudget")}{" "}<small>{tr("goalstrip.optional")}</small></span>
             <input
               type="number"
               min={1}
@@ -169,7 +170,7 @@ export function GoalAttachForm({ onDone }: { onDone: () => void }) {
             {budgetError && <span id="goal-budget-error" className="form-error">{budgetError}</span>}
           </label>
           <label className="goal-attach-label">
-            <span>Max continuations <small>Optional</small></span>
+            <span>{tr("goalstrip.maxContinuations")}{" "}<small>{tr("goalstrip.optional")}</small></span>
             <input
               type="number"
               min={1}
@@ -185,9 +186,9 @@ export function GoalAttachForm({ onDone }: { onDone: () => void }) {
         </div>
         {serverError && <div className="form-error goal-dialog-error" role="alert">{serverError}</div>}
         <div className="goal-dialog-actions">
-          <button className="small-btn" onClick={onDone}>Cancel</button>
+          <button className="small-btn" onClick={onDone}>{tr("common.cancel")}</button>
           <button className="primary-btn goal-attach-submit" onClick={() => void submit()} disabled={busy || !objective.trim() || !!budgetError || !!continuationError}>
-            {busy ? "Attaching…" : "Attach goal"}
+            {busy ? tr("goalstrip.attaching") : tr("goalstrip.attachGoal")}
           </button>
         </div>
       </div>
@@ -196,7 +197,11 @@ export function GoalAttachForm({ onDone }: { onDone: () => void }) {
 }
 
 function fmtK(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
-  return `${n}`;
+  if (n >= 1_000_000) {
+    return `${formatNumber(n / 1_000_000, { minimumFractionDigits: 1, maximumFractionDigits: 1 })}M`;
+  }
+  if (n >= 1_000) {
+    return `${formatNumber(n / 1_000, { minimumFractionDigits: 1, maximumFractionDigits: 1 })}k`;
+  }
+  return formatNumber(n);
 }

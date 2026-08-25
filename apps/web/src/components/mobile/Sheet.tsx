@@ -16,6 +16,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import { useModalSurface } from "../a11y/Dialog.tsx";
+import { tr } from "../../i18n/index.ts";
 
 /** Drag distance (CSS px) past which releasing dismisses the sheet. */
 export const SHEET_DISMISS_DISTANCE = 88;
@@ -172,7 +173,7 @@ export default function Sheet({
               {action.label}
             </button>
           )}
-          <button type="button" className="sheet-close" aria-label={`Close ${title}`} onClick={onClose}>
+          <button type="button" className="sheet-close" aria-label={tr("mobile.sheet.closeValue", { title: title })} onClick={onClose}>
             <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round">
               <path d="m6 6 12 12M18 6 6 18" />
             </svg>
@@ -198,7 +199,7 @@ export default function Sheet({
               <button
                 type="button"
                 className="sheet-search-clear"
-                aria-label="Clear search"
+                aria-label={tr("mobile.sheet.clearSearch")}
                 onClick={() => search.onChange("")}
               >
                 <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">

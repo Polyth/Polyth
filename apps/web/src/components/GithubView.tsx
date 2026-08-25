@@ -7,6 +7,7 @@ import { setActiveView, startNewSession, useStore } from "../store.ts";
 import { useDismissibleMenu } from "./a11y/Menu.ts";
 import EmptyState from "./EmptyState.tsx";
 import PullRequestView from "./PullRequestView.tsx";
+import { formatRelativeTime, tr } from "../i18n/index.ts";
 
 type Tab = "issues" | "prs";
 type Filter = "all" | "open" | "closed" | "draft" | "ready";
@@ -16,10 +17,10 @@ const relativeDate = (raw: string): string => {
   if (!Number.isFinite(time)) return "";
   const delta = Math.max(0, Date.now() - time);
   const days = Math.floor(delta / 86_400_000);
-  if (days > 0) return `${days}d ago`;
+  if (days > 0) return formatRelativeTime(-days, "day");
   const hours = Math.floor(delta / 3_600_000);
-  if (hours > 0) return `${hours}h ago`;
-  return `${Math.max(1, Math.floor(delta / 60_000))}m ago`;
+  if (hours > 0) return formatRelativeTime(-hours, "hour");
+  return formatRelativeTime(-Math.max(1, Math.floor(delta / 60_000)), "minute");
 };
 
 function GithubCard({ item, kind, onOpen, onStartSession }: {
@@ -29,7 +30,8 @@ function GithubCard({ item, kind, onOpen, onStartSession }: {
   onStartSession: (item: GithubIssueDto | GithubPrDto, kind: Tab) => void;
 }) {
   const pr = kind === "prs" ? item as GithubPrDto : null;
-  const ref = `${kind === "prs" ? "PR" : "issue"} #${item.number}`;
+  const typeLabel = kind === "prs" ? tr("githubview.pr") : tr("githubview.issue");
+  const ref = `${typeLabel} #${item.number}`;
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef<HTMLDivElement>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -40,7 +42,7 @@ function GithubCard({ item, kind, onOpen, onStartSession }: {
     onClose: () => setMenuOpen(false),
   });
   const askInChat = () => {
-    requestComposerInsert(`Look at GitHub ${ref}: "${item.title}" (${item.url}).`);
+    requestComposerInsert(tr("githubview.lookAtGithubValue", { ref, title: item.title, url: item.url }));
     setActiveView("session");
   };
   const runMenuAction = (action: () => void) => {
@@ -51,38 +53,38 @@ function GithubCard({ item, kind, onOpen, onStartSession }: {
     <article className="gh-card">
       <div className="gh-card-main">
         <div className="gh-card-kicker">
-          <span className={`gh-state ${item.state.toLowerCase()}${pr?.isDraft ? " draft" : ""}`}>{pr?.isDraft ? "draft" : item.state.toLowerCase()}</span>
+          <span className={`gh-state ${item.state.toLowerCase()}${pr?.isDraft ? " draft" : ""}`}>{pr?.isDraft ? tr("githubview.draft") : item.state.toLowerCase()}</span>
           <span className="gh-number mono">#{item.number}</span>
-          <span className="gh-meta">updated {relativeDate(item.updatedAt)}</span>
+          <span className="gh-meta">{tr("githubview.updatedValue", { value: relativeDate(item.updatedAt) })}</span>
         </div>
         <a className="gh-card-title" href={item.url} target="_blank" rel="noreferrer">
-          <span>{item.title}</span><Icon.external /><span className="sr-only">(opens on GitHub)</span>
+          <span>{item.title}</span><Icon.external /><span className="sr-only">{tr("githubview.opensOnGithub")}</span>
         </a>
         <div className="gh-card-meta">
-          <span>by <strong>{item.author}</strong></span>
+          <span>{tr("githubview.byValue", { author: item.author })}</span>
           {pr && <span className="gh-branch mono" title={pr.headRefName}><Icon.branch /><span>{pr.headRefName}</span></span>}
         </div>
       </div>
       <div className="gh-card-actions">
         {pr && onOpen
-          ? <button className="primary-btn gh-card-primary" onClick={() => onOpen(item.number)}>Review details</button>
-          : <button className="primary-btn gh-card-primary" title={`Start a session for this ${ref}`} onClick={() => onStartSession(item, kind)}><Icon.session /> New session</button>}
-        {pr && <button className="small-btn gh-action-secondary" title={`Start a session for this ${ref}`} onClick={() => onStartSession(item, kind)}><Icon.session /> New session</button>}
-        <button className="small-btn gh-action-secondary" title="Add this context to chat" onClick={askInChat}><Icon.chat /> Ask in chat</button>
+          ? <button className="primary-btn gh-card-primary" onClick={() => onOpen(item.number)}>{tr("githubview.reviewDetails")}</button>
+          : <button className="primary-btn gh-card-primary" title={tr("githubview.startASessionForThisValue", { ref })} onClick={() => onStartSession(item, kind)}><Icon.session /> {tr("githubview.newSession")}</button>}
+        {pr && <button className="small-btn gh-action-secondary" title={tr("githubview.startASessionForThisValue", { ref })} onClick={() => onStartSession(item, kind)}><Icon.session /> {tr("githubview.newSession")}</button>}
+        <button className="small-btn gh-action-secondary" title={tr("githubview.addThisContextToChat")} onClick={askInChat}><Icon.chat /> {tr("githubview.askInChat")}</button>
         <div className="gh-card-overflow">
           <button
             ref={triggerRef}
             className="small-btn icon-only"
-            aria-label={`More actions for ${ref}`}
+            aria-label={tr("githubview.moreActionsForValue", { ref })}
             aria-haspopup="menu"
             aria-expanded={menuOpen}
             onClick={() => setMenuOpen((open) => !open)}
           ><Icon.more /></button>
           {menuOpen && (
             <div ref={menuRef} className="gh-card-menu" role="menu" onKeyDown={onMenuKeyDown}>
-              {pr && <button role="menuitem" onClick={() => runMenuAction(() => onStartSession(item, kind))}><Icon.session /> New session</button>}
-              <button role="menuitem" onClick={() => runMenuAction(askInChat)}><Icon.chat /> Ask in chat</button>
-              <a role="menuitem" href={item.url} target="_blank" rel="noreferrer"><Icon.external /> Open on GitHub</a>
+              {pr && <button role="menuitem" onClick={() => runMenuAction(() => onStartSession(item, kind))}><Icon.session /> {tr("githubview.newSession")}</button>}
+              <button role="menuitem" onClick={() => runMenuAction(askInChat)}><Icon.chat /> {tr("githubview.askInChat")}</button>
+              <a role="menuitem" href={item.url} target="_blank" rel="noreferrer"><Icon.external /> {tr("githubview.openOnGithub")}</a>
             </div>
           )}
         </div>
@@ -121,11 +123,11 @@ export default function GithubView() {
         if (!active) return;
         setStatus(nextStatus);
         if (!nextStatus.repo) {
-          setReason(nextStatus.reason ?? "No GitHub repository detected.");
+          setReason(nextStatus.reason ?? tr("githubview.noGithubRepositoryDetected"));
           return;
         }
         if (!nextStatus.authenticated) {
-          setReason(nextStatus.reason ?? "Sign in with GitHub CLI to load repository activity.");
+          setReason(nextStatus.reason ?? tr("githubview.signInWithGithubCliTo"));
           return;
         }
         const [issueResult, prResult] = await Promise.all([api.githubIssues(projectId), api.githubPrs(projectId)]);
@@ -133,7 +135,7 @@ export default function GithubView() {
         if (issueResult.ok) setIssues(issueResult.data); else setReason(issueResult.reason);
         if (prResult.ok) setPrs(prResult.data); else setReason(prResult.reason);
       } catch (cause) {
-        if (active) setReason(friendlyError("Couldn’t load GitHub data", cause));
+        if (active) setReason(friendlyError(tr("githubview.couldnTLoadGithubData"), cause));
       } finally {
         if (active) setLoading(false);
       }
@@ -141,15 +143,25 @@ export default function GithubView() {
     return () => { active = false; };
   }, [projectId, reloadKey]);
 
+  // F7 / OC-15-002/003: bootstrap a session from an issue or PR. The context
+  // lands as the composer draft (saved before the session opens so the
+  // composer restores it) — nothing is sent until the user does.
   const startSession = (item: GithubIssueDto | GithubPrDto, kind: Tab) => {
     if (!projectId) return;
-    const label = kind === "prs" ? "PR" : "issue";
+    const label = kind === "prs" ? tr("githubview.pr") : tr("githubview.issue");
     startNewSession(projectId, {
       title: `${label} #${item.number}: ${item.title}`.slice(0, 80),
       draft: [
-        `Work on GitHub ${label} #${item.number}: "${item.title}" (${item.url}).`,
-        ...(kind === "prs" ? [`Head branch: ${(item as GithubPrDto).headRefName}.`] : []),
-        `Start by reading the ${label} and summarizing what needs to happen.`,
+        tr("githubview.workOnGithubValue", {
+          label,
+          number: item.number,
+          title: item.title,
+          url: item.url,
+        }),
+        ...(kind === "prs"
+          ? [tr("githubview.headBranchValue", { branch: (item as GithubPrDto).headRefName })]
+          : []),
+        tr("githubview.startByReadingValue", { label }),
       ].join("\n"),
     });
   };
@@ -169,48 +181,48 @@ export default function GithubView() {
     });
   }, [filter, issues, prs, query, tab]);
 
-  if (!projectId) return <EmptyState title="No project selected" description="Open a project to browse its GitHub repository." />;
+  if (!projectId) return <EmptyState title={tr("githubview.noProjectSelected")} description={tr("githubview.openAProjectToBrowseItsGithub")} />;
 
   if (openPr !== null) {
     return <div className="view-page github-page"><PullRequestView number={openPr} onClose={() => setOpenPr(null)} /></div>;
   }
 
   const filters: Array<{ id: Filter; label: string }> = tab === "prs"
-    ? [{ id: "all", label: "All" }, { id: "ready", label: "Ready" }, { id: "draft", label: "Drafts" }]
-    : [{ id: "all", label: "All" }, { id: "open", label: "Open" }, { id: "closed", label: "Closed" }];
+    ? [{ id: "all", label: tr("githubview.all") }, { id: "ready", label: tr("githubview.ready") }, { id: "draft", label: tr("githubview.drafts") }]
+    : [{ id: "all", label: tr("githubview.all") }, { id: "open", label: tr("githubview.open") }, { id: "closed", label: tr("githubview.closed") }];
 
   return (
     <div className="view-page github-page">
       <header className="github-head">
         <div>
-          <h1 className="view-title">GitHub</h1>
-          <p className="view-sub">Issues and pull requests for this project.</p>
+          <h1 className="view-title">{tr("githubview.github")}</h1>
+          <p className="view-sub">{tr("githubview.issuesAndPullRequestsFor")}</p>
         </div>
-        <button className="small-btn" disabled={loading} onClick={() => setReloadKey((key) => key + 1)}><Icon.refresh /> Refresh</button>
+        <button className="small-btn" disabled={loading} onClick={() => setReloadKey((key) => key + 1)}><Icon.refresh /> {tr("common.refresh")}</button>
       </header>
 
       {loading && !status && (
-        <div className="gh-skeleton-list" aria-label="Loading GitHub activity" aria-busy="true">
+        <div className="gh-skeleton-list" aria-label={tr("githubview.loadingGithubActivity")} aria-busy="true">
           <div className="source-skeleton gh-skeleton" /><div className="source-skeleton gh-skeleton" /><div className="source-skeleton gh-skeleton" />
         </div>
       )}
 
-      {!loading && !status && reason && <EmptyState title="Couldn’t load GitHub" description={reason} actionLabel="Retry" onAction={() => setReloadKey((key) => key + 1)} />}
+      {!loading && !status && reason && <EmptyState title={tr("githubview.couldnTLoadGithub")} description={reason} actionLabel={tr("common.retry")} onAction={() => setReloadKey((key) => key + 1)} />}
 
       {status && !status.installed && (
         <EmptyState
-          title="GitHub CLI isn’t installed"
-          description="Install the GitHub CLI from cli.github.com, then run gh auth login. Polyth never stores your GitHub token."
-          actionLabel="Check again"
+          title={tr("githubview.githubCliIsnTInstalled")}
+          description={tr("githubview.installTheGithubCliFrom")}
+          actionLabel={tr("githubview.checkAgain")}
           onAction={() => setReloadKey((key) => key + 1)}
         />
       )}
 
       {status?.installed && !status.repo && (
         <EmptyState
-          title="No GitHub repository found"
-          description={reason || "Add a GitHub remote to this repository, then refresh."}
-          actionLabel="Check again"
+          title={tr("githubview.noGithubRepositoryFound")}
+          description={reason || tr("githubview.addAGithubRemoteTo")}
+          actionLabel={tr("githubview.checkAgain")}
           onAction={() => setReloadKey((key) => key + 1)}
         />
       )}
@@ -219,11 +231,11 @@ export default function GithubView() {
         <div className="gh-connect-state">
           <span className="gh-connect-icon"><Icon.github /></span>
           <div>
-            <h2>Connect GitHub CLI</h2>
-            <p>{reason || "Run gh auth login in your terminal, then return here to review issues and pull requests."}</p>
+            <h2>{tr("githubview.connectGithubCli")}</h2>
+            <p>{reason || tr("githubview.runGhAuthLoginIn")}</p>
             <code>gh auth login</code>
           </div>
-          <button className="primary-btn" onClick={() => setReloadKey((key) => key + 1)}>I’ve signed in</button>
+          <button className="primary-btn" onClick={() => setReloadKey((key) => key + 1)}>{tr("githubview.iVeSignedIn")}</button>
         </div>
       )}
 
@@ -235,36 +247,36 @@ export default function GithubView() {
               <a className="gh-repo-name" href={status.repo.url} target="_blank" rel="noreferrer" title={`${status.repo.owner}/${status.repo.name}`}>
                 <span>{status.repo.owner}/{status.repo.name}</span><Icon.external /><span className="sr-only">(opens on GitHub)</span>
               </a>
-              <span className="muted" title={status.repo.description || "GitHub repository"}>{status.repo.description || "GitHub repository"}</span>
+              <span className="muted" title={status.repo.description || tr("githubview.githubRepository")}>{status.repo.description || tr("githubview.githubRepository")}</span>
             </div>
             <div className="gh-repo-meta">
-              <span className="tag">{status.repo.isPrivate ? "Private" : "Public"}</span>
+              <span className="tag">{status.repo.isPrivate ? tr("githubview.private") : tr("githubview.public")}</span>
               <span className="tag mono gh-default-branch" title={status.repo.defaultBranch}><Icon.branch /><span>{status.repo.defaultBranch}</span></span>
             </div>
           </section>
 
           <div className="gh-list-controls">
-            <div className="source-tabs gh-tabs" aria-label="GitHub resource type">
-              <button className={tab === "issues" ? "active" : ""} aria-current={tab === "issues" ? "page" : undefined} onClick={() => { setTab("issues"); setFilter("all"); }}>Issues <span>{issues.length}</span></button>
-              <button className={tab === "prs" ? "active" : ""} aria-current={tab === "prs" ? "page" : undefined} onClick={() => { setTab("prs"); setFilter("all"); }}>Pull requests <span>{prs.length}</span></button>
+            <div className="source-tabs gh-tabs" aria-label={tr("githubview.githubResourceType")}>
+              <button className={tab === "issues" ? "active" : ""} aria-current={tab === "issues" ? "page" : undefined} onClick={() => { setTab("issues"); setFilter("all"); }}>{tr("githubview.issuesHeading")} <span>{issues.length}</span></button>
+              <button className={tab === "prs" ? "active" : ""} aria-current={tab === "prs" ? "page" : undefined} onClick={() => { setTab("prs"); setFilter("all"); }}>{tr("githubview.pullRequestsHeading")} <span>{prs.length}</span></button>
             </div>
             <div className="source-search gh-search">
               <Icon.search />
-              <input value={query} placeholder={`Search ${tab === "issues" ? "issues" : "pull requests"}`} aria-label={`Search ${tab}`} onChange={(event) => setQuery(event.target.value)} />
-              {query && <button className="source-search-clear" aria-label="Clear search" onClick={() => setQuery("")}>×</button>}
+              <input value={query} placeholder={tr("githubview.searchValue", { value: tab === "issues" ? tr("githubview.issuesLabel") : tr("githubview.pullRequestsLabel") })} aria-label={tr("githubview.searchValue", { value: tab === "issues" ? tr("githubview.issuesLabel") : tr("githubview.pullRequestsLabel") })} onChange={(event) => setQuery(event.target.value)} />
+              {query && <button className="source-search-clear" aria-label={tr("githubview.clearSearch")} onClick={() => setQuery("")}>×</button>}
             </div>
-            <div className="gh-filter-chips" aria-label="Filter list">
+            <div className="gh-filter-chips" aria-label={tr("githubview.filterList")}>
               {filters.map((item) => <button key={item.id} className={filter === item.id ? "active" : ""} aria-pressed={filter === item.id} onClick={() => setFilter(item.id)}>{item.label}</button>)}
             </div>
           </div>
 
-          {loading && <div className="gh-skeleton-list" aria-label="Loading repository activity" aria-busy="true"><div className="source-skeleton gh-skeleton" /><div className="source-skeleton gh-skeleton" /></div>}
-          {!loading && reason && (tab === "issues" ? issues : prs).length === 0 && <EmptyState title="Couldn’t load repository activity" description={reason} actionLabel="Retry" onAction={() => setReloadKey((key) => key + 1)} />}
+          {loading && <div className="gh-skeleton-list" aria-label={tr("githubview.loadingRepositoryActivity")} aria-busy="true"><div className="source-skeleton gh-skeleton" /><div className="source-skeleton gh-skeleton" /></div>}
+          {!loading && reason && (tab === "issues" ? issues : prs).length === 0 && <EmptyState title={tr("githubview.couldnTLoadRepositoryActivity")} description={reason} actionLabel={tr("common.retry")} onAction={() => setReloadKey((key) => key + 1)} />}
           {!loading && !reason && items.length === 0 && (
             <EmptyState
-              title={query || filter !== "all" ? "No matching results" : `No ${tab === "issues" ? "issues" : "pull requests"}`}
-              description={query || filter !== "all" ? "Try a different search or clear the active filter." : "New repository activity will appear here."}
-              {...(query || filter !== "all" ? { actionLabel: "Clear filters", onAction: () => { setQuery(""); setFilter("all"); } } : {})}
+              title={query || filter !== "all" ? tr("githubview.noMatchingResults") : tr("githubview.noValue", { value: tab === "issues" ? tr("githubview.issuesLabel") : tr("githubview.pullRequestsLabel") })}
+              description={query || filter !== "all" ? tr("githubview.tryADifferentSearchOr") : tr("githubview.newRepositoryActivityWillAppearHere")}
+              {...(query || filter !== "all" ? { actionLabel: tr("githubview.clearFilters"), onAction: () => { setQuery(""); setFilter("all"); } } : {})}
             />
           )}
           <div className="gh-list">

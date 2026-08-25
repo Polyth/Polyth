@@ -415,14 +415,24 @@ test("the phone header keeps two actions and a real session menu", async () => {
   const header = await read("../src/components/Header.tsx");
   const menu = await read("../src/components/mobile/SessionMenu.tsx");
   assert.ok(header.includes("<SessionMenu"), "the title opens the session menu");
-  assert.ok(header.includes('aria-label={`${mobileTitle}. Session menu`}'), "the whole title is the target");
+  assert.ok(
+    header.includes('aria-label={tr("header.valueSessionMenu", { mobileTitle: mobileTitle })}'),
+    "the whole title is the target",
+  );
   assert.ok(
     header.includes("useSheetTrigger(mode === \"phone\"")
     && header.includes("setSessionMenuOpen(true);"),
     "§22 again: the title opens on pointer-down, then dismisses the keyboard",
   );
-  for (const action of ["New session", "Rename…", "Duplicate as a new session", "Archive", "Recent sessions", "Settings"]) {
-    assert.ok(menu.includes(action), `${action} is reachable from the session menu`);
+  for (const key of [
+    "mobile.sessionmenu.newSession",
+    "mobile.sessionmenu.rename",
+    "mobile.sessionmenu.duplicateAsANewSession",
+    "common.archive",
+    "mobile.sessionmenu.recentSessions",
+    "common.settings",
+  ]) {
+    assert.ok(menu.includes(`tr("${key}")`), `${key} is reachable from the session menu`);
   }
   assert.ok(menu.includes('from "./Sheet.tsx"'), "the session menu is the same sheet");
 });

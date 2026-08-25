@@ -18,6 +18,7 @@ import {
   paneResourceTitle, subscribePaneProviders,
 } from "../../workspace/paneProviders.ts";
 import { PaneVisibilityContext, usePaneVisible } from "../../workspace/paneVisibility.ts";
+import { tr } from "../../i18n/index.ts";
 import { confirmAlert } from "../../alerts.ts";
 
 export interface PaneHostHandle {
@@ -127,7 +128,7 @@ const PaneHost = forwardRef<PaneHostHandle, PaneHostProps>(function PaneHost(
       if (!t) return p;
       if (!opts.force && isDirty(t)) {
         closed = false;
-        void confirmAlert(`Discard unsaved changes in ${t.title}?`, { title: "Discard changes", confirmLabel: "Discard" })
+        void confirmAlert(tr("workspace.panehost.discardUnsavedChangesInValue", { title: t.title }), { title: tr("common.discardChanges"), confirmLabel: tr("common.discard") })
           .then((confirmed) => {
             if (!confirmed) return;
             setPane((current) => closeTab(markDirty(current, id, false), id, { force: true }).state);
@@ -189,7 +190,7 @@ const PaneHost = forwardRef<PaneHostHandle, PaneHostProps>(function PaneHost(
   return (
     <section className="editor-pane">
       {pane.tabs.length > 0 && (
-        <div className="pane-tabs" role="tablist" aria-label="Open resources">
+        <div className="pane-tabs" role="tablist" aria-label={tr("workspace.panehost.openResources")}>
           {pane.tabs.map((t) => (
             <div
               key={t.id}
@@ -216,11 +217,11 @@ const PaneHost = forwardRef<PaneHostHandle, PaneHostProps>(function PaneHost(
               onAuxClick={(e) => { if (e.button === 1) requestClose(t.id); }}
             >
               <span className="pane-tab-title">{t.title}</span>
-              {isDirty(t) && <span className="pane-tab-dirty" title="Unsaved changes">•</span>}
+              {isDirty(t) && <span className="pane-tab-dirty" title={tr("workspace.panehost.unsavedChanges")}>•</span>}
               <button
                 className="pane-tab-close"
-                title="Close tab"
-                aria-label={`Close ${t.title}`}
+                title={tr("workspace.panehost.closeTab")}
+                aria-label={tr("workspace.panehost.closeValue", { title: t.title })}
                 onClick={(e) => { e.stopPropagation(); requestClose(t.id); }}
               >
                 ✕
@@ -232,11 +233,10 @@ const PaneHost = forwardRef<PaneHostHandle, PaneHostProps>(function PaneHost(
 
       {active?.unavailable && (
         <div className="editor-empty">
-          <p className="muted">This tab is unavailable.</p>
+          <p className="muted">{tr("workspace.panehost.thisTabIsUnavailable")}</p>
           <p className="muted editor-empty-hint">
-            It was contributed by a plugin that is no longer active. Close it, or re-enable the plugin.
-          </p>
-          <button className="small-btn" onClick={() => requestClose(active.id)}>Close tab</button>
+            {tr("workspace.panehost.itWasContributedByAPluginThat")}</p>
+          <button className="small-btn" onClick={() => requestClose(active.id)}>{tr("workspace.panehost.closeTab")}</button>
         </div>
       )}
 

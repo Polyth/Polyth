@@ -20,6 +20,7 @@ import {
 } from "./sessionDefaults.ts";
 import { initPluginBridge } from "./pluginBridge.ts";
 import { reconcilePackage } from "./packages/reconcile.ts";
+import { tr } from "./i18n/index.ts";
 
 let sync: SyncClient | null = null;
 let syncStatus: SyncStatus = "disconnected";
@@ -184,10 +185,10 @@ export async function refreshProjects(reason: ProjectRefreshReason = "manual"): 
   } catch (err) {
     console.error("project list failed", err);
     const hadSnapshot = store.getState().projectRegistry.status === "ready";
-    store.failProjectList(ticket, friendlyError("Couldn’t load projects", err));
+    store.failProjectList(ticket, friendlyError(tr("common.error"), err));
     if (hadSnapshot) {
       // Non-blocking refresh warning; known data stays usable.
-      store.setUiError(friendlyError("Couldn’t refresh the project list", err));
+      store.setUiError(friendlyError(tr("common.error"), err));
       if (reason === "reconcile" && reconcileRetryTimer === undefined) {
         reconcileRetryTimer = setTimeout(() => {
           reconcileRetryTimer = undefined;
@@ -223,7 +224,7 @@ async function restoreSelectionAfterReady(): Promise<void> {
         await openSession(fromUrl.sessionId, { showChat: false });
       } catch (err) {
         console.warn("session from URL not found, falling back", err);
-        store.setUiError("That session link couldn’t be opened — showing the project instead.");
+        store.setUiError(tr("init.sessionLinkCouldNotOpen"));
       }
     } else if (initial) {
       const savedSession = localStorage.getItem("polyth.activeSessionId");
@@ -551,7 +552,7 @@ export async function sendMessage(text: string, model?: JsonObject, agent?: stri
     return true;
   } catch (err) {
     console.error("send message failed", err);
-    store.setUiError(friendlyError("Couldn’t send the message", err));
+    store.setUiError(friendlyError(tr("common.error"), err));
     return false;
   }
 }
@@ -591,7 +592,7 @@ export async function replySecret(requestId: string, action: "save" | "dismiss",
     await api.replySecret(id, requestId, action, value);
   } catch (err) {
     console.error("secret reply failed", err);
-    store.setUiError(friendlyError("Couldn’t update Secure Safe", err));
+    store.setUiError(friendlyError(tr("common.error"), err));
     throw err;
   }
 }

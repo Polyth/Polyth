@@ -8,6 +8,7 @@ import EmptyState from "./EmptyState.tsx";
 import { modelDisplayName, modelSupportsTextWorkflow } from "../composer/discovery.ts";
 import { consumeMultiRunPrompt } from "../multirunSeed.ts";
 import ProviderLogo from "./ProviderLogo.tsx";
+import { tr } from "../i18n/index.ts";
 
 function modelRefFromValue(value: string): ModelRef | undefined {
   if (!value) return undefined;
@@ -42,13 +43,13 @@ function RunCard({
           {run.model && <ProviderLogo providerID={run.model.providerID} className="run-provider-logo" />}
           <span className="run-model-name">{modelLabel}</span>
         </div>
-        <span className="run-card-agent">{run.agent ?? "build"} agent</span>
+        <span className="run-card-agent">{run.agent ?? tr("composer.build")} {tr("multirunview.agent")}</span>
       </div>
       <div className="run-card-body">
         {run.error ? <div className="run-error">{run.error}</div> : renderMarkdown(run.output || (run.status === "running" || run.status === "pending" ? "…" : ""), run.id)}
       </div>
       <div className="run-card-meta">
-        <span>{tokens ? `${fmtTokens(tokens)} tok` : "—"}</span>
+        <span>{tokens ? tr("multirunview.valueTok", { value: fmtTokens(tokens) }) : "—"}</span>
         <span>{run.cost ? fmtCost(run.cost) : "—"}</span>
       </div>
       <button
@@ -56,7 +57,7 @@ function RunCard({
         disabled={run.status !== "completed" || picked}
         onClick={onPick}
       >
-        {picked ? "Picked ✓" : "Pick this run"}
+        {picked ? tr("multirunview.picked") : tr("multirunview.pickThisRun")}
       </button>
     </article>
   );
@@ -129,7 +130,7 @@ export default function MultiRunView() {
       })
       .filter((r) => r.model);
     if (runs.length === 0) {
-      setError("Pick at least one model.");
+      setError(tr("multirunview.pickAtLeastOneModel"));
       return;
     }
     setBusy(true);
@@ -154,7 +155,7 @@ export default function MultiRunView() {
     }
   };
   const modelLabelFor = (model?: ModelRef): string => {
-    if (!model) return "default";
+    if (!model) return tr("format.default");
     const descriptor = textModels.find((candidate) =>
       candidate.providerID === model.providerID && candidate.modelID === model.modelID);
     return descriptor
@@ -163,33 +164,33 @@ export default function MultiRunView() {
   };
 
   if (!sessionId) {
-    return <EmptyState title="No session open" description="Open a session to run the same prompt across models." />;
+    return <EmptyState title={tr("multirunview.noSessionOpen")} description={tr("multirunview.openASessionToRunTheSame")} />;
   }
 
   return (
     <div className="view-page">
       <div>
-        <h1 className="view-title">Multi-run</h1>
-        <p className="view-sub">Same prompt, several backends in parallel — pick the run that becomes canon.</p>
+        <h1 className="view-title">{tr("widgets.builtinwidgets.multiRun")}</h1>
+        <p className="view-sub">{tr("multirunview.samePromptSeveralBackendsInParallelPick")}</p>
       </div>
       <div className="view-toolbar">
         <textarea
           rows={2}
           value={text}
-          placeholder="Prompt to send to every run…"
+          placeholder={tr("multirunview.promptToSendToEveryRun")}
           onChange={(e) => setText(e.target.value)}
         />
         <input
           className="model-filter-input"
           type="text"
-          placeholder="Filter models…"
+          placeholder={tr("multirunview.filterModels")}
           value={modelFilter}
           onChange={(e) => setModelFilter(e.target.value)}
         />
         <div className="view-toolbar-row">
           {slots.map((v, i) => (
             <select key={i} value={v} onChange={(e) => setSlots((s) => s.map((x, j) => (j === i ? e.target.value : x)))}>
-              <option value="">Model {i + 1}</option>
+              <option value="">{tr("multirunview.model")}{" "}{i + 1}</option>
               {[...groups.entries()].map(([provider, ms]) => (
                 <optgroup key={provider} label={provider}>
                   {ms.map((m) => (
@@ -202,13 +203,13 @@ export default function MultiRunView() {
             </select>
           ))}
           <select value={agent} onChange={(e) => setAgent(e.target.value)}>
-            <option value="">Agent: Default</option>
+            <option value="">{tr("multirunview.agentDefault")}</option>
             {agents.map((a) => (
               <option key={a.name} value={a.name}>{a.name}</option>
             ))}
           </select>
           <button className="primary-btn" onClick={() => void start()} disabled={busy || !text.trim()}>
-            {busy ? "Starting…" : "Run"}
+            {busy ? tr("multirunview.starting") : tr("common.run")}
           </button>
         </div>
         {error && <div className="form-error">{error}</div>}
@@ -231,7 +232,7 @@ export default function MultiRunView() {
         </>
       )}
       {!shown && (
-        <EmptyState title="No runs yet" description="Pick up to three models and send a prompt to compare runs side by side." />
+        <EmptyState title={tr("multirunview.noRunsYet")} description={tr("multirunview.pickUpToThreeModelsAndSend")} />
       )}
     </div>
   );

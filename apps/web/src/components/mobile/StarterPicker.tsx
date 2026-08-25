@@ -20,6 +20,7 @@ import {
   type StarterContext,
   type StarterIconId,
 } from "../../starters.ts";
+import { tr } from "../../i18n/index.ts";
 
 const ICONS: Record<StarterIconId, () => React.ReactElement> = {
   target: Icon.target,
@@ -115,7 +116,9 @@ export default function StarterPicker({ context, commands, skills, onPick, onClo
         onClick={() => (editing && starter.source === "custom"
           ? setForm({ id: starter.id, label: starter.label, prompt: starter.prompt, icon: starter.icon })
           : pick(starter))}
-        ariaLabel={editing && starter.source === "custom" ? `Edit starter ${starter.label}` : `Start: ${starter.label}`}
+        ariaLabel={editing && starter.source === "custom"
+          ? tr("mobile.starterpicker.editStarterValue", { label: starter.label })
+          : tr("mobile.starterpicker.startValue", { label: starter.label })}
         trailing={editing ? (
           <span className="sheet-row-tools">
             {favoriteRow && (
@@ -123,14 +126,14 @@ export default function StarterPicker({ context, commands, skills, onPick, onClo
                 <button
                   type="button"
                   className="sheet-row-tool"
-                  aria-label={`Move ${starter.label} up`}
+                  aria-label={tr("mobile.starterpicker.moveValueUp", { label: starter.label })}
                   disabled={position <= 0}
                   onClick={() => moveFavorite(starter.id, -1)}
                 >↑</button>
                 <button
                   type="button"
                   className="sheet-row-tool"
-                  aria-label={`Move ${starter.label} down`}
+                  aria-label={tr("mobile.starterpicker.moveValueDown", { label: starter.label })}
                   disabled={position < 0 || position >= prefs.pinned.length - 1}
                   onClick={() => moveFavorite(starter.id, 1)}
                 >↓</button>
@@ -140,7 +143,7 @@ export default function StarterPicker({ context, commands, skills, onPick, onClo
               <button
                 type="button"
                 className="sheet-row-tool danger"
-                aria-label={`Delete starter ${starter.label}`}
+                aria-label={tr("mobile.starterpicker.deleteStarterValue", { label: starter.label })}
                 onClick={() => deleteCustomStarter(starter.id)}
               ><Icon.trash /></button>
             ) : (
@@ -148,8 +151,8 @@ export default function StarterPicker({ context, commands, skills, onPick, onClo
                 type="button"
                 className="sheet-row-tool"
                 aria-label={prefs.hidden.includes(starter.id)
-                  ? `Show ${starter.label} in suggestions`
-                  : `Hide ${starter.label} from suggestions`}
+                  ? tr("mobile.starterpicker.showValueInSuggestions", { label: starter.label })
+                  : tr("mobile.starterpicker.hideValueFromSuggestions", { label: starter.label })}
                 aria-pressed={prefs.hidden.includes(starter.id)}
                 onClick={() => setStarterHidden(starter.id, !prefs.hidden.includes(starter.id))}
               >{prefs.hidden.includes(starter.id) ? <Icon.check /> : <Icon.close />}</button>
@@ -159,7 +162,9 @@ export default function StarterPicker({ context, commands, skills, onPick, onClo
           <button
             type="button"
             className={`sheet-row-star${pinned ? " on" : ""}`}
-            aria-label={`${pinned ? "Unpin" : "Pin"} ${starter.label}`}
+            aria-label={pinned
+              ? tr("mobile.starterpicker.unpinValue", { value: starter.label })
+              : tr("mobile.starterpicker.pinValue", { value: starter.label })}
             aria-pressed={pinned}
             onClick={() => toggleStarterPinned(starter.id)}
           >
@@ -174,40 +179,40 @@ export default function StarterPicker({ context, commands, skills, onPick, onClo
     const valid = form.label.trim() !== "" && form.prompt.trim() !== "";
     return (
       <Sheet
-        title={form.id ? "Edit starter" : "New starter"}
+        title={form.id ? tr("mobile.starterpicker.editStarter") : tr("mobile.starterpicker.newStarter")}
         size="tall"
         className="starter-sheet"
         onClose={() => setForm(null)}
       >
         <div className="starter-form">
           <label className="starter-field">
-            <span>Name</span>
+            <span>{tr("mobile.starterpicker.name")}</span>
             <input
               value={form.label}
               maxLength={40}
-              placeholder="Review my changes"
+              placeholder={tr("mobile.starterpicker.reviewMyChanges")}
               onChange={(event) => setForm({ ...form, label: event.target.value })}
             />
           </label>
           <label className="starter-field">
-            <span>Prompt</span>
+            <span>{tr("mobile.starterpicker.prompt")}</span>
             <textarea
               value={form.prompt}
               rows={4}
-              placeholder="What should the agent do when this starter is tapped?"
+              placeholder={tr("mobile.starterpicker.whatShouldTheAgentDoWhenThis")}
               onChange={(event) => setForm({ ...form, prompt: event.target.value })}
             />
           </label>
           <div className="starter-field">
-            <span>Icon</span>
-            <div className="starter-icon-choices" role="radiogroup" aria-label="Starter icon">
+            <span>{tr("mobile.starterpicker.icon")}</span>
+            <div className="starter-icon-choices" role="radiogroup" aria-label={tr("mobile.starterpicker.starterIcon")}>
               {ICON_CHOICES.map((icon) => (
                 <button
                   key={icon}
                   type="button"
                   role="radio"
                   aria-checked={form.icon === icon}
-                  aria-label={`Icon ${icon}`}
+                  aria-label={tr("mobile.starterpicker.iconValue", { icon: icon })}
                   className={`starter-icon-choice${form.icon === icon ? " on" : ""}`}
                   onClick={() => setForm({ ...form, icon })}
                 ><StarterIcon id={icon} /></button>
@@ -215,7 +220,7 @@ export default function StarterPicker({ context, commands, skills, onPick, onClo
             </div>
           </div>
           <div className="starter-form-actions">
-            <button type="button" className="ghost-btn" onClick={() => setForm(null)}>Cancel</button>
+            <button type="button" className="ghost-btn" onClick={() => setForm(null)}>{tr("common.cancel")}</button>
             <button
               type="button"
               className="primary-btn"
@@ -229,7 +234,7 @@ export default function StarterPicker({ context, commands, skills, onPick, onClo
                 });
                 setForm(null);
               }}
-            >Save starter</button>
+            >{tr("mobile.starterpicker.saveStarter")}</button>
           </div>
         </div>
       </Sheet>
@@ -238,18 +243,18 @@ export default function StarterPicker({ context, commands, skills, onPick, onClo
 
   return (
     <Sheet
-      title="Add a starter"
+      title={tr("mobile.starterpicker.addAStarter")}
       size="tall"
       className="starter-sheet"
       onClose={onClose}
       search={{
         value: query,
         onChange: setQuery,
-        placeholder: "Search starters, commands, skills",
+        placeholder: tr("mobile.starterpicker.searchStartersCommandsSkills"),
         ariaLabel: "Search starters",
       }}
       action={{
-        label: editing ? "Done" : "Edit",
+        label: editing ? tr("common.done") : tr("common.edit"),
         pressed: editing,
         onClick: () => setEditing((value) => !value),
       }}
@@ -259,15 +264,15 @@ export default function StarterPicker({ context, commands, skills, onPick, onClo
           className="sheet-foot-action"
           onClick={() => setForm({ label: "", prompt: "", icon: "bookmark" })}
         >
-          <Icon.plus /><span>Create a starter…</span>
+          <Icon.plus /><span>{tr("mobile.starterpicker.createAStarter")}</span>
         </button>
       }
     >
-      <div role="listbox" aria-label="Starters">
+      <div role="listbox" aria-label={tr("mobile.starterpicker.starters")}>
         {results
           ? results.length > 0
-            ? <SheetSection title="Results" count={results.length}>{results.map((starter) => row(starter, "results"))}</SheetSection>
-            : <p className="sheet-empty">No starters match “{query}”.</p>
+            ? <SheetSection title={tr("mobile.starterpicker.results")} count={results.length}>{results.map((starter) => row(starter, "results"))}</SheetSection>
+            : <p className="sheet-empty">{tr("mobile.starterpicker.noStartersMatch")}{query}”.</p>
           : categories.map((category) => (
             <SheetSection key={category.id} title={category.title} count={category.starters.length}>
               {category.starters.map((starter) => row(starter, category.id))}

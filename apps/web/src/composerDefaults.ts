@@ -1,4 +1,5 @@
 import type { AgentDescriptor, ModelDescriptor } from "@polyth/contracts";
+import { tr } from "./i18n/index.ts";
 
 interface ModelRef {
   providerID: string;
@@ -11,12 +12,12 @@ export function modelPickerDefaultLabel(
   preferredModel?: ModelRef,
 ): string {
   const resolved = sessionModel ?? preferredModel ?? models[0];
-  if (!resolved) return "No model";
+  if (!resolved) return tr("composerDefaults.noModel");
   const descriptor = models.find(
     (model) => model.providerID === resolved.providerID && model.modelID === resolved.modelID,
   );
   const name = descriptor?.name || resolved.modelID;
-  return sessionModel ? name : `Default: ${name}`;
+  return sessionModel ? name : tr("composerDefaults.defaultValue", { value: name });
 }
 
 export function agentPickerDefaultLabel(
@@ -24,5 +25,7 @@ export function agentPickerDefaultLabel(
   agents: readonly AgentDescriptor[],
 ): string {
   if (sessionAgent) return sessionAgent;
-  return agents[0] ? `Default: ${agents[0].name}` : "No agent";
+  return agents[0]
+    ? tr("composerDefaults.defaultValue", { value: agents[0].name })
+    : tr("composerDefaults.noAgent");
 }

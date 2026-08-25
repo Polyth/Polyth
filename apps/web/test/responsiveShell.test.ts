@@ -92,15 +92,16 @@ test("header owns the drawer trigger and pane-aware compact view picker", async 
   const header = await read("../src/components/Header.tsx");
   const actions = await read("../src/widgets/builtinMiniWidgets.tsx");
   assert.ok(header.includes('aria-controls="polyth-session-drawer"'), "drawer trigger targets the drawer");
-  assert.ok(header.includes("Open projects and sessions"), "drawer trigger accessible name");
-  assert.ok(header.includes("Change workspace view, current:"), "compact view trigger keeps the current label in its name");
+  assert.ok(header.includes('tr("header.openProjectsAndSessions")'), "drawer trigger accessible name");
+  assert.ok(header.includes('tr("header.changeWorkspaceViewCurrentValue"'), "compact view trigger keeps the current label in its name");
   assert.ok(header.includes("const resolved = useResolvedCapabilities()"), "compact picker consumes the shared capability model");
   assert.ok(header.includes("VIEW_OF_CAPABILITY[c.descriptor.id]"), "compact picker maps capability descriptors to views");
   assert.ok(header.includes("PANE_OF_CAPABILITY[c.descriptor.id]"), "compact picker keeps pane tools such as Browser reachable");
   assert.ok(header.includes("mobileSheet"), "compact picker uses the touch-friendly mobile sheet");
   assert.ok(!header.includes("const VIEW_GROUPS"), "no duplicate hard-coded view list");
   assert.ok(
-    actions.includes('"Turn off auto-approve" : "Turn on auto-approve"'),
+    actions.includes('tr("widgets.builtinminiwidgets.turnOffAutoApprove")')
+      && actions.includes('tr("widgets.builtinminiwidgets.turnOnAutoApprove")'),
     "placeable auto-approve control exposes the resulting action in its accessible name",
   );
 });
@@ -169,12 +170,12 @@ test("composer active-run controls and mobile actions stay direct", async () => 
   const goal = await read("../src/components/GoalStrip.tsx");
   const css = await read("../src/styles.css");
   assert.ok(composer.includes("<Icon.sendClock />"), "queue mode uses the clock-send icon");
-  assert.ok(composer.includes("Send now"), "queue options expose immediate delivery");
-  assert.ok(composer.includes("Stop without sending this draft"), "queue options expose stop");
+  assert.ok(composer.includes('tr("composer.sendNow")'), "queue options expose immediate delivery");
+  assert.ok(composer.includes('tr("composer.stopWithoutSendingThisDraft")'), "queue options expose stop");
   assert.ok(composer.includes("composer-stop-primary"), "active sends become a primary stop control");
   assert.ok(timeline.includes('className="msg-actions"'), "message actions remain inline");
   assert.match(css, /Phone quick actions are immediately available[\s\S]*?\.focus-conversation \.msg \.msg-actions\s*\{[^}]*display:\s*flex/);
-  assert.ok(goal.includes("<Dialog title=\"Session goal\""), "goal parameters open in a focused modal");
+  assert.ok(goal.includes('<Dialog title={tr("goalstrip.sessionGoal")}'), "goal parameters open in a focused modal");
 });
 
 test("Focus uses compact mobile composer controls without editor chrome", async () => {
@@ -186,7 +187,7 @@ test("Focus uses compact mobile composer controls without editor chrome", async 
   assert.ok(actions.includes('"session.goal-composer-action"'), "goals are a placeable composer action");
   // UX-MOBILE-01 §17/§19: phones expose ONE `+` (the Add menu owns Upload);
   // wider layouts keep the direct upload chip beside it.
-  assert.ok(composer.includes('aria-label="Add files"'), "wider layouts keep a direct upload control");
+  assert.ok(composer.includes('aria-label={tr("composer.addFiles")}'), "wider layouts keep a direct upload control");
   assert.ok(
     composer.includes('trigger={phoneLayout ? "add" : "tools"}'),
     "the phone add menu is the single plus control",
@@ -204,14 +205,14 @@ test("desktop header keeps brand, workspace modes, and a named utility cluster",
   const header = await read("../src/components/Header.tsx");
   const actions = await read("../src/widgets/builtinMiniWidgets.tsx");
   const sidebar = await read("../src/components/Sidebar.tsx");
-  assert.ok(header.includes('<span className="polyth-mark">p</span>'), "stylized Polyth mark is visible");
-  assert.ok(header.includes("<strong>polyth</strong>"), "wordmark text is visible");
+  assert.ok(header.includes('<span className="polyth-mark">{tr("header.p")}</span>'), "localized Polyth mark is visible");
+  assert.ok(header.includes('<strong>{tr("header.polyth")}</strong>'), "localized wordmark text is visible");
   assert.ok(header.includes('className="workspace-mode-switch"'), "Focus and Canvas remain next to the brand");
   assert.ok(!header.includes("header-breadcrumbs"), "project and branch crumbs are removed");
   assert.ok(sidebar.includes('setOverlay("project-picker")'), "project switching remains available in the project sidebar");
   assert.ok(header.includes('<div className="header-actions"'), "utilities share one right-side cluster");
-  for (const label of ["Search", "History", "Settings"]) {
-    assert.ok(actions.includes(`<span>${label}</span>`), `${label} utility remains named`);
+  for (const key of ["common.search", "widgets.builtinminiwidgets.history", "common.settings"]) {
+    assert.ok(actions.includes(`<span>{tr("${key}")}</span>`), `${key} utility remains named`);
   }
   assert.ok(!header.includes('className="header-global-search"'), "Search is not duplicated in the header");
 });
@@ -355,8 +356,8 @@ test("fresh and existing chats expose the shared composer and stable focus targe
 test("timeline empty states defer starters to the hero", async () => {
   const timeline = await read("../src/components/Timeline.tsx");
   assert.ok(!timeline.includes("const STARTERS"), "the timeline no longer duplicates hero starters");
-  assert.ok(timeline.includes("Answer the pending question below to continue."), "pending questions get actionable copy");
-  assert.ok(timeline.includes("This archived session has no messages."), "archived sessions get read-only copy");
+  assert.ok(timeline.includes('tr("timeline.answerPendingQuestion")'), "pending questions get actionable copy");
+  assert.ok(timeline.includes('tr("timeline.archivedSessionNoMessages")'), "archived sessions get read-only copy");
 });
 
 test("header renders configured primary capabilities and permanent Terminal launchers", async () => {

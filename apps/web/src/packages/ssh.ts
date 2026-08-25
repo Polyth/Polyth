@@ -5,13 +5,14 @@ import { registerPackageOnboarding } from "./onboarding/registry.ts";
 import { SSH_TOUR } from "./onboarding/tours/installed.ts";
 import SshSettings from "../components/ssh/SshSettings.tsx";
 import SshProjectSource from "../components/ssh/SshProjectSource.tsx";
+import { tr } from "../i18n/index.ts";
 
 export function installSshPackage(): () => void {
   return combineUnregister(
     installSettingsPage({
       id: "ssh",
       packageId: "ssh",
-      label: "SSH Remotes",
+      label: tr("packages.ssh.sshRemotes"),
       group: "Engineering",
       icon: "🖧",
       order: 55,
@@ -20,7 +21,7 @@ export function installSshPackage(): () => void {
         {
           id: "ssh-servers",
           pageId: "ssh",
-          label: "SSH servers",
+          label: tr("packages.ssh.sshServers"),
           keywords: ["ssh", "remote", "server", "connection", "host"],
           focusTarget: "ssh-servers",
         },

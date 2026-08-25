@@ -12,6 +12,7 @@ import { dismissKeyboard } from "../mobileViewport.ts";
 import { tapFeedback } from "../haptics.ts";
 import Sheet, { SheetRow } from "./mobile/Sheet.tsx";
 import { useSheetTrigger } from "./mobile/sheetTrigger.ts";
+import { tr } from "../i18n/index.ts";
 import { usePopoverPlacement } from "../usePopoverPlacement.ts";
 
 const MAX_SHOWN = 200;
@@ -60,7 +61,7 @@ export default function Picker({
   value,
   values,
   onPick,
-  placeholder = "Default",
+  placeholder = tr("picker.default"),
   direction: _direction = "down",
   disabled,
   trailingAction,
@@ -179,7 +180,7 @@ export default function Picker({
             search: {
               value: q,
               onChange: setQ,
-              placeholder: `Search ${label.toLowerCase()}`,
+              placeholder: tr("picker.searchValue", { value: label.toLowerCase() }),
               ariaLabel: `Filter ${label}`,
             },
           } : {})}
@@ -194,7 +195,7 @@ export default function Picker({
                 onClick={() => pick(it.id)}
               />
             ))}
-            {shown.length === 0 && <p className="sheet-empty">No matches</p>}
+            {shown.length === 0 && <p className="sheet-empty">{tr("picker.noMatches")}</p>}
           </div>
           {footerAction && (
             <button
@@ -217,11 +218,11 @@ export default function Picker({
             <input
               autoFocus
               value={q}
-              placeholder={`Filter ${label.toLowerCase()}…`}
+              placeholder={tr("picker.filterValue", { value: label.toLowerCase() })}
               onChange={(e) => setQ(e.target.value)}
               onKeyDown={onKey}
               role="combobox"
-              aria-label={`Filter ${label}`}
+              aria-label={tr("picker.filterValue2", { label: label })}
               aria-autocomplete="list"
               aria-expanded="true"
               aria-controls={listId}
@@ -268,9 +269,9 @@ export default function Picker({
                   </div>
                 </Fragment>
               ))}
-              {shown.length === 0 && <div className="palette-empty">No matches</div>}
+              {shown.length === 0 && <div className="palette-empty">{tr("picker.noMatches")}</div>}
               {hits.length > MAX_SHOWN && (
-                <div className="picker-more">{hits.length - MAX_SHOWN} more — refine the filter</div>
+                <div className="picker-more">{hits.length - MAX_SHOWN} {tr("picker.moreRefineTheFilter")}</div>
               )}
             </div>
             {footerAction && (

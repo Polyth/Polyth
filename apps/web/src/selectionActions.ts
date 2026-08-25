@@ -3,6 +3,8 @@
 // these are the testable bits: markdown quoting for the composer, a session
 // title derived from the selection, and viewport clamping for the menu.
 
+import { tr } from "./i18n/index.ts";
+
 const MAX_QUOTE_CHARS = 4000;
 
 /** Markdown-quote a transcript selection for the composer: every line gets a
@@ -19,7 +21,7 @@ export function quoteForReply(raw: string): string {
 /** Session title for "new session from selection": first non-empty line, clipped. */
 export function selectionTitle(raw: string, cap = 60): string {
   const first = raw.replace(/\r\n?/g, "\n").split("\n").find((l) => l.trim())?.trim() ?? "";
-  if (!first) return "From selection";
+  if (!first) return tr("selectionActions.fromSelection");
   return first.length > cap ? `${first.slice(0, cap - 1)}…` : first;
 }
 

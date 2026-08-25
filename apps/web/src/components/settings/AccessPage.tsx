@@ -6,20 +6,21 @@ import { useCallback, useEffect, useState } from "react";
 import { api, type AuthDeviceDto, type AuthStatusDto } from "../../api.ts";
 import { confirmAlert } from "../../alerts.ts";
 import { EmptyState, PageHead, Row } from "./parts.tsx";
+import { getLocale, tr } from "../../i18n/index.ts";
 
-const when = (ts: number): string => new Date(ts).toLocaleString();
+const when = (ts: number): string => new Date(ts).toLocaleString(getLocale());
 
 /** "Chrome on macOS"-ish from a stored user-agent; raw prefix as fallback. */
 const deviceLabel = (ua: string): string => {
-  if (!ua) return "Unknown device";
+  if (!ua) return tr("settings.accesspage.unknownDevice");
   const browser =
-    /Edg\//.test(ua) ? "Edge" : /Firefox\//.test(ua) ? "Firefox"
-    : /Chrome\//.test(ua) ? "Chrome" : /Safari\//.test(ua) ? "Safari" : null;
+    /Edg\//.test(ua) ? tr("settings.accesspage.edge") : /Firefox\//.test(ua) ? tr("settings.accesspage.firefox")
+    : /Chrome\//.test(ua) ? tr("settings.accesspage.chrome") : /Safari\//.test(ua) ? tr("settings.accesspage.safari") : null;
   const os =
-    /Windows/.test(ua) ? "Windows" : /Mac OS X|Macintosh/.test(ua) ? "macOS"
-    : /Android/.test(ua) ? "Android" : /iPhone|iPad/.test(ua) ? "iOS"
-    : /Linux/.test(ua) ? "Linux" : null;
-  if (browser && os) return `${browser} on ${os}`;
+    /Windows/.test(ua) ? tr("settings.accesspage.windows") : /Mac OS X|Macintosh/.test(ua) ? tr("settings.accesspage.macos")
+    : /Android/.test(ua) ? tr("settings.accesspage.android") : /iPhone|iPad/.test(ua) ? tr("settings.accesspage.ios")
+    : /Linux/.test(ua) ? tr("settings.accesspage.linux") : null;
+  if (browser && os) return tr("settings.accesspage.valueOnValue", { browser: browser, os: os });
   return browser ?? os ?? ua.slice(0, 40);
 };
 
@@ -42,20 +43,20 @@ export default function AccessPage() {
     void api.authRevoke(id).then(refresh).catch((e) => setErr(e instanceof Error ? e.message : String(e)));
   };
   const signOutAll = async () => {
-    if (!await confirmAlert("Sign out every device, including this one?", { title: "Sign out everywhere", confirmLabel: "Sign out" })) return;
+    if (!await confirmAlert(tr("settings.accesspage.signOutEveryDeviceIncludingThisOne"), { title: tr("settings.accesspage.signOutEverywhere"), confirmLabel: tr("settings.accesspage.signOut") })) return;
     void api.authLogoutAll().then(() => location.reload()).catch((e) => setErr(e instanceof Error ? e.message : String(e)));
   };
 
-  if (err) return <><PageHead title="Access" /><EmptyState title="Server unreachable" body={err} /></>;
-  if (!status) return <><PageHead title="Access" /><EmptyState title="Loading…" /></>;
+  if (err) return <><PageHead title={tr("settings.accesspage.access")} /><EmptyState title={tr("settings.accesspage.serverUnreachable")} body={err} /></>;
+  if (!status) return <><PageHead title={tr("settings.accesspage.access")} /><EmptyState title={tr("common.loading")} /></>;
 
   if (!status.required) {
     return (
       <>
-        <PageHead title="Access" blurb="Optional UI password protecting every API and live connection." />
+        <PageHead title={tr("settings.accesspage.access")} blurb={tr("settings.accesspage.optionalUiPasswordProtectingEveryApiAnd")} />
         <EmptyState
-          title="No password set"
-          body="This server accepts every connection. To require a password, set POLYTH_UI_PASSWORD in the server environment (POLYTH_UI_PASSWORD_LOCALHOST=optional keeps localhost open) and restart."
+          title={tr("settings.accesspage.noPasswordSet")}
+          body={tr("settings.accesspage.thisServerAcceptsEveryConnectionToRequire")}
         />
       </>
     );
@@ -63,26 +64,28 @@ export default function AccessPage() {
 
   return (
     <>
-      <PageHead title="Access" blurb="A UI password protects this server. Devices below hold a remembered session." />
-      <Row label="Password protection" hint="Configured via POLYTH_UI_PASSWORD or data/auth.json on the server." itemId="access.protection">
-        <span className="tag">on</span>
+      <PageHead title={tr("settings.accesspage.access")} blurb={tr("settings.accesspage.aUiPasswordProtectsThisServerDevices")} />
+      <Row label={tr("settings.accesspage.passwordProtection")} hint={tr("settings.accesspage.configuredViaPolythUiPasswordOrData")} itemId="access.protection">
+        <span className="tag">{tr("settings.accesspage.on")}</span>
       </Row>
-      <div className="set-page-head"><h3>Remembered devices</h3></div>
+      <div className="set-page-head"><h3>{tr("settings.accesspage.rememberedDevices")}</h3></div>
       {devices.length === 0
-        ? <EmptyState title="No remembered devices" body="Sessions appear here after a successful login." />
+        ? <EmptyState title={tr("settings.accesspage.noRememberedDevices")} body={tr("settings.accesspage.sessionsAppearHereAfterASuccessfulLogin")} />
         : devices.map((d) => (
           <Row
             key={d.id}
-            label={`${deviceLabel(d.label)}${d.current ? " (this device)" : ""}`}
-            hint={`Signed in ${when(d.createdAt)} · last seen ${when(d.lastSeenAt)}`}
+            label={d.current
+              ? tr("settings.accesspage.valueThisDevice", { value: deviceLabel(d.label) })
+              : deviceLabel(d.label)}
+            hint={tr("settings.accesspage.signedInValueLastSeenValue", { value: when(d.createdAt), value2: when(d.lastSeenAt) })}
           >
             <button className="small-btn" onClick={() => revoke(d.id)}>
-              {d.current ? "Sign out" : "Revoke"}
+              {d.current ? tr("settings.accesspage.signOut") : tr("settings.accesspage.revoke")}
             </button>
           </Row>
         ))}
-      <Row label="Sign out everywhere" hint="Revokes every remembered device session, including this one." itemId="access.logout-all">
-        <button className="small-btn danger" onClick={signOutAll}>Sign out all devices</button>
+      <Row label={tr("settings.accesspage.signOutEverywhere")} hint={tr("settings.accesspage.revokesEveryRememberedDeviceSessionIncludingThis")} itemId="access.logout-all">
+        <button className="small-btn danger" onClick={signOutAll}>{tr("settings.accesspage.signOutAllDevices")}</button>
       </Row>
     </>
   );

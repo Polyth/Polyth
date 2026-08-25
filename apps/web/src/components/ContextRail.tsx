@@ -39,6 +39,7 @@ import { chatDockViability, dockGuardTargets } from "../workspace/dockGuard.ts";
 import { PaneVisibilityContext } from "../workspace/paneVisibility.ts";
 import "./railSurfaces.tsx";
 import { setPlacementOverride } from "../capabilityLayout.ts";
+import { tr } from "../i18n/index.ts";
 import { MOD } from "../format.ts";
 import { useKeymap } from "../hotkeys.ts";
 
@@ -155,7 +156,7 @@ const PANEL_ICON = (
  *  mode (the inline strip exists there instead). */
 export function NarrowPanelTrigger() {
   const { surfaces, open } = useRailSurfaceModel();
-  const label = open ? `Close ${open.title} panel` : "Open workspace panels";
+  const label = open ? tr("contextrail.closeValuePanel", { title: open.title }) : tr("contextrail.openWorkspacePanels");
   return (
     <button
       className="icon-btn narrow-panel-trigger"
@@ -206,7 +207,7 @@ export default function ContextRail() {
     id: surface.capabilityId ?? surface.id,
     capabilityId: surface.capabilityId ?? surface.id,
     title: surface.id === "terminal"
-      ? `Open Terminal (${terminalShortcut})`
+      ? tr("terminalview.openTerminalShortcut", { shortcut: terminalShortcut })
       : surface.title,
     icon: surface.icon,
     badge: badgeOf(surface),
@@ -608,7 +609,7 @@ export default function ContextRail() {
           style={compactContext ? undefined : paneStyle}
           role={compactContext ? "dialog" : "region"}
           aria-modal={compactContext || undefined}
-          aria-label={open?.title ?? "Panel"}
+          aria-label={open?.title ?? tr("contextrail.panel")}
           data-geometry-ready={!geometryPending}
           onKeyDown={onPaneKey}
           onPointerDownCapture={onLayerInteract}
@@ -622,7 +623,7 @@ export default function ContextRail() {
               tabIndex={0}
               role="separator"
               aria-orientation="vertical"
-              aria-label={`Resize ${open?.title ?? "panel"}`}
+              aria-label={tr("contextrail.resizeValue", { value: open?.title ?? tr("contextrail.panel") })}
               aria-valuemin={presentation && decision !== null ? presentation.minWidth : 240}
               aria-valuemax={presentation && decision !== null ? Math.max(decision.maxPane, presentation.minWidth) : 640}
               aria-valuenow={dockWidth}
@@ -635,8 +636,7 @@ export default function ContextRail() {
                 className="rail-toggle pane-back"
                 onClick={() => closeWorkspacePane()}
               >
-                ← Back to Chat
-              </button>
+                {tr("contextrail.backToChat")}</button>
             )}
             <span className="rail-title">{open?.title ?? ""}</span>
             <span className="header-spacer" />
@@ -644,23 +644,23 @@ export default function ContextRail() {
               <div className="rail-tabs"><SlotHost slot="contextRail.tabs" context={{ tab: rail, onSelect: toggleRailPlugin }} /></div>
             )}
             {isWorkspacePane && !layered && (
-              <button className="rail-toggle" onClick={expandWorkspacePane} title="Expand" aria-label={`Expand ${open?.title ?? "panel"}`}>⤢</button>
+              <button className="rail-toggle" onClick={expandWorkspacePane} title={tr("contextrail.expand")} aria-label={tr("contextrail.expandValue", { value: open?.title ?? tr("contextrail.panel") })}>⤢</button>
             )}
             {isWorkspacePane && layered && paneExpanded && !compact && (
-              <button className="rail-toggle" onClick={collapseWorkspacePane} title="Collapse" aria-label={`Collapse ${open?.title ?? "panel"}`}>⤡</button>
+              <button className="rail-toggle" onClick={collapseWorkspacePane} title={tr("contextrail.collapse")} aria-label={tr("contextrail.collapseValue", { value: open?.title ?? tr("contextrail.panel") })}>⤡</button>
             )}
             {isWorkspacePane && layered && !paneExpanded && !compact && measured && admits && (
-              <button className="rail-toggle" onClick={dockNow}>Dock beside Chat</button>
+              <button className="rail-toggle" onClick={dockNow}>{tr("contextrail.dockBesideChat")}</button>
             )}
             <button
               className="rail-toggle"
               onClick={() => (isWorkspacePane ? closeWorkspacePane() : setRailPlugin(null))}
-              title="Close panel"
-              aria-label="Close panel"
-            >{compactContext ? "×" : "»"}</button>
+              title={tr("contextrail.closePanel")}
+              aria-label={tr("contextrail.closePanel")}
+            >{compactContext ? tr("contextrail.message") : "»"}</button>
           </div>
           {compactContext && (
-            <div className="plugin-strip sheet-strip" aria-label="Workspace panels">
+            <div className="plugin-strip sheet-strip" aria-label={tr("contextrail.workspacePanels")}>
               {railButtons.map((s) => (
                 <button
                   key={s.id}
@@ -704,7 +704,7 @@ export default function ContextRail() {
         </div>
         )}
         {!compact && (
-          <div className="rail-icon-col plugin-strip" aria-label="Workspace panels">
+          <div className="rail-icon-col plugin-strip" aria-label={tr("contextrail.workspacePanels")}>
             {railButtons.map((s) => (
             <button
               key={s.id}

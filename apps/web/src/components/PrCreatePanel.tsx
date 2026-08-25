@@ -3,6 +3,7 @@
 // the user's explicit click. gh CLI does the write; Polyth stores no tokens.
 import { useEffect, useState } from "react";
 import { api } from "../api.ts";
+import { tr } from "../i18n/index.ts";
 
 export default function PrCreatePanel({ projectId, sessionId, onClose, onCreated }: {
   projectId: string;
@@ -69,11 +70,10 @@ export default function PrCreatePanel({ projectId, sessionId, onClose, onCreated
     return (
       <div className="pr-create-panel" role="status">
         <div className="knowledge-notice">
-          Pull request created:&nbsp;
-          <a href={created.url} target="_blank" rel="noreferrer" className="mono">#{created.number}</a>
+          {tr("prcreatepanel.pullRequestCreatedNbsp")}{" "}<a href={created.url} target="_blank" rel="noreferrer" className="mono">#{created.number}</a>
         </div>
         <div className="commit-row">
-          <button className="small-btn" onClick={onClose}>Close</button>
+          <button className="small-btn" onClick={onClose}>{tr("common.close")}</button>
         </div>
       </div>
     );
@@ -83,56 +83,56 @@ export default function PrCreatePanel({ projectId, sessionId, onClose, onCreated
     <div className="pr-create-panel">
       <div className="pr-create-head">
         <div>
-          <strong>Create pull request</strong>
-          <span className="muted">Review the title and description before publishing to GitHub.</span>
+          <strong>{tr("prcreatepanel.createPullRequest")}</strong>
+          <span className="muted">{tr("prcreatepanel.reviewTheTitleAndDescriptionBefore")}</span>
         </div>
-        <span className="tag">External write</span>
+        <span className="tag">{tr("prcreatepanel.externalWrite")}</span>
       </div>
-      <div className="pr-compare-summary" aria-label={`Compare ${headHint || "current branch"} into ${base.trim() || baseHint || "default branch"}`}>
-        <span><small>Head</small><strong className="mono" title={headHint || "current branch"}>{headHint || "current branch"}</strong></span>
+      <div className="pr-compare-summary" aria-label={tr("prcreatepanel.compareValueIntoValue", { head: headHint || tr("prcreatepanel.currentBranch"), base: base.trim() || baseHint || tr("prcreatepanel.defaultBranch") })}>
+        <span><small>{tr("prcreatepanel.head")}</small><strong className="mono" title={headHint || tr("prcreatepanel.currentBranch")}>{headHint || tr("prcreatepanel.currentBranch")}</strong></span>
         <span className="pr-compare-arrow" aria-hidden="true">→</span>
-        <span><small>Base</small><strong className="mono" title={base.trim() || baseHint || "default branch"}>{base.trim() || baseHint || "default branch"}</strong></span>
+        <span><small>{tr("prcreatepanel.base")}</small><strong className="mono" title={base.trim() || baseHint || tr("prcreatepanel.defaultBranch")}>{base.trim() || baseHint || tr("prcreatepanel.defaultBranch")}</strong></span>
       </div>
       <label className="pr-create-field">
-        <span>Title</span>
+        <span>{tr("prcreatepanel.title")}</span>
         <input
           value={title}
-          placeholder="Pull request title…"
+          placeholder={tr("prcreatepanel.pullRequestTitle")}
           onChange={(e) => setTitle(e.target.value)}
         />
       </label>
       <label className="pr-create-field">
-        <span>Description</span>
+        <span>{tr("prcreatepanel.description")}</span>
         <textarea
           rows={6}
-          placeholder="Describe the change in Markdown…"
+          placeholder={tr("prcreatepanel.describeTheChangeInMarkdown")}
           value={body}
           onChange={(e) => setBody(e.target.value)}
         />
       </label>
       <div className="pr-create-options">
         <label className="pr-create-field compact">
-          <span>Base branch</span>
+          <span>{tr("prcreatepanel.baseBranch")}</span>
           <input
             className="mono"
             value={base}
-            placeholder={baseHint || "default branch"}
+            placeholder={baseHint || tr("prcreatepanel.defaultBranch")}
             onChange={(e) => setBase(e.target.value)}
           />
         </label>
         <label className="source-confirm">
           <input type="checkbox" checked={draft} onChange={(e) => setDraft(e.target.checked)} />
-          Create as draft
+          {tr("prcreatepanel.createAsDraft")}
         </label>
       </div>
       <div className="pr-create-actions">
         <span className="header-spacer" />
         <button className="small-btn" disabled={generating || creating} onClick={() => void generate()}>
-          {generating ? "Generating…" : "✦ Generate with AI"}
+          {generating ? tr("prcreatepanel.generating") : tr("prcreatepanel.generateWithAi")}
         </button>
-        <button className="small-btn" disabled={creating} onClick={onClose}>Cancel</button>
+        <button className="small-btn" disabled={creating} onClick={onClose}>{tr("common.cancel")}</button>
         <button className="primary-btn" disabled={creating || !title.trim()} onClick={() => void create()}>
-          {creating ? "Creating…" : "Create PR"}
+          {creating ? tr("prcreatepanel.creating") : tr("prcreatepanel.createPr")}
         </button>
       </div>
       {error && <div className="form-error" role="alert">{error}</div>}

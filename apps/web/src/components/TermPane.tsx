@@ -20,6 +20,7 @@ import { detectLinks } from "../terminal/linkify.ts";
 import { searchBuffer, type TermMatch } from "../terminal/search.ts";
 import { copyText } from "../utils.ts";
 import { Icon } from "../icons.tsx";
+import { tr } from "../i18n/index.ts";
 
 const raf: (cb: () => void) => number =
   typeof requestAnimationFrame === "function"
@@ -148,7 +149,7 @@ function renderRow(line: TermLine, cellW: number): React.ReactNode {
           style={hasStyle ? style : undefined}
           data-url={url}
           data-osc-link={oscLink > 0 ? oscLink : undefined}
-          title={url ? `${url} — Ctrl/Cmd+click to open` : undefined}
+          title={url ? tr("terminalview.openLinkShortcut", { url }) : undefined}
         >{text}</span>,
       );
     }
@@ -767,8 +768,8 @@ export default function TermPane(props: TermPaneProps) {
             ref={searchInputRef}
             value={query}
             autoFocus
-            placeholder="Find"
-            aria-label="Find in terminal"
+            placeholder={tr("terminalview.find")}
+            aria-label={tr("terminalview.findInTerminal")}
             className={query && matches.length === 0 ? "no-match" : undefined}
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={(e) => {
@@ -786,29 +787,33 @@ export default function TermPane(props: TermPaneProps) {
           </span>
           <button
             className={caseSensitive ? "on" : undefined}
-            title="Match case"
-            aria-label="Match case"
+            title={tr("terminalview.matchCase")}
+            aria-label={tr("terminalview.matchCase")}
             onClick={() => setCaseSensitive((v) => !v)}
           >Aa</button>
           <button
             className={useRegex ? "on" : undefined}
-            title="Use regular expression"
-            aria-label="Use regular expression"
+            title={tr("terminalview.useRegularExpression")}
+            aria-label={tr("terminalview.useRegularExpression")}
             onClick={() => setUseRegex((v) => !v)}
           >.*</button>
           <button
-            title="Previous match (Shift+Enter)"
-            aria-label="Previous match"
+            title={tr("terminalview.previousMatchShortcut")}
+            aria-label={tr("terminalview.previousMatch")}
             disabled={matches.length === 0}
             onClick={() => gotoMatch((current - 1 + matches.length) % matches.length)}
           ><Icon.chevronUp /></button>
           <button
-            title="Next match (Enter)"
-            aria-label="Next match"
+            title={tr("terminalview.nextMatchShortcut")}
+            aria-label={tr("terminalview.nextMatch")}
             disabled={matches.length === 0}
             onClick={() => gotoMatch((current + 1) % matches.length)}
           ><Icon.chevronDown /></button>
-          <button title="Close (Escape)" aria-label="Close search" onClick={closeSearch}><Icon.close /></button>
+          <button
+            title={tr("terminalview.closeSearchShortcut")}
+            aria-label={tr("terminalview.closeSearch")}
+            onClick={closeSearch}
+          ><Icon.close /></button>
         </div>
       )}
 
@@ -817,7 +822,7 @@ export default function TermPane(props: TermPaneProps) {
         className={`term-body${modes.reverseVideo ? " reverse" : ""}`}
         tabIndex={0}
         role="application"
-        aria-label={`Terminal ${label}`}
+        aria-label={tr("terminalview.terminalValue", { title: label })}
         onKeyDown={onKeyDown}
         onCompositionEnd={onCompositionEnd}
         onPaste={onPaste}
@@ -867,7 +872,7 @@ export default function TermPane(props: TermPaneProps) {
               setContextMenu(null);
               bodyRef.current?.focus();
             }}
-          >Copy <kbd>Ctrl+Shift+C</kbd></button>
+          >{tr("terminalview.copy")} <kbd>Ctrl+Shift+C</kbd></button>
           <button
             role="menuitem"
             onClick={() => {
@@ -875,7 +880,7 @@ export default function TermPane(props: TermPaneProps) {
               setContextMenu(null);
               bodyRef.current?.focus();
             }}
-          >Paste <kbd>Ctrl+Shift+V</kbd></button>
+          >{tr("terminalview.paste")} <kbd>Ctrl+Shift+V</kbd></button>
           <button
             role="menuitem"
             onClick={() => {
@@ -886,18 +891,24 @@ export default function TermPane(props: TermPaneProps) {
               setContextMenu(null);
               bodyRef.current?.focus();
             }}
-          >Select all</button>
+          >{tr("terminalview.selectAll")}</button>
         </div>
       )}
 
       {behind && !followRef.current && (
-        <button className="term-follow" onClick={scrollToBottom} title="Scroll to bottom (Ctrl+Shift+End)">
-          <Icon.chevronDown /> New output
+        <button
+          className="term-follow"
+          onClick={scrollToBottom}
+          title={tr("terminalview.scrollToBottomShortcut")}
+        >
+          <Icon.chevronDown /> {tr("terminalview.newOutput")}
         </button>
       )}
       {!running && (
         <span className="term-exit-note">
-          process exited{props.exitCode !== undefined && props.exitCode !== null ? ` (code ${props.exitCode})` : ""}
+          {props.exitCode !== undefined && props.exitCode !== null
+            ? tr("terminalview.processExitedCodeValue", { code: props.exitCode })
+            : tr("terminalview.processExited")}
         </span>
       )}
     </div>

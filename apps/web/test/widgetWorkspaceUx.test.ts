@@ -83,15 +83,15 @@ test("canvas top row is placeable and editing borders use theme colors", async (
 
 test("settings uses named button places without canvas layout controls", async () => {
   const source = await readFile(new URL("../src/components/settings/WidgetsPage.tsx", import.meta.url), "utf8");
-  for (const place of [
-    "Top rail",
-    "Right rail",
-    "Response actions",
-    "Composer actions",
-    "Session footer",
-    "Header actions",
+  for (const key of [
+    "settings.widgetspage.topRail",
+    "settings.widgetspage.rightRail",
+    "settings.widgetspage.responseActions",
+    "settings.widgetspage.composerActions",
+    "settings.widgetspage.sessionFooter",
+    "settings.widgetspage.headerActions",
   ]) {
-    assert.ok(source.includes(place), `${place} is a named settings place`);
+    assert.ok(source.includes(`tr("${key}")`), `${key} is a named settings place`);
   }
   for (const removed of [
     "Choose a starting layout",
@@ -110,7 +110,7 @@ test("settings uses named button places without canvas layout controls", async (
 
 test("chat top rail is configured directly without a More tools overflow", async () => {
   const source = await readFile(new URL("../src/components/Header.tsx", import.meta.url), "utf8");
-  assert.match(source, />Chat<\/button>/);
+  assert.match(source, />\{tr\("header\.chat"\)\}<\/button>/);
   assert.doesNotMatch(source, />More tools</);
   assert.doesNotMatch(source, /CapabilityMenu/);
 });

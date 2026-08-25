@@ -17,9 +17,9 @@ test("sidebar uses contextual tree actions and no permanent footer", async () =>
   assert.doesNotMatch(sidebar, /className="side-foot"/);
   assert.match(sidebar, /className="sidebar-service-bar"/);
   assert.match(sidebar, /className="sidebar-list-controls"/);
-  assert.match(sidebar, /Clear session search/);
-  assert.match(sidebar, /Server connection:/);
-  assert.match(sidebar, />Reconnect</);
+  assert.match(sidebar, /tr\("sidebar\.clearSessionSearch"\)/);
+  assert.match(sidebar, /tr\("sidebar\.serverConnectionValue"/);
+  assert.match(sidebar, /tr\("sidebar\.reconnect"\)/);
   assert.doesNotMatch(sessions, /session-sync-icon/);
   assert.match(sessions, /sessionActivityLabel/);
   assert.match(sessions, /session-worktree-actions/);
@@ -28,7 +28,7 @@ test("sidebar uses contextual tree actions and no permanent footer", async () =>
   assert.match(sessions, /startNewSession\(projectId, key === "__main__" \? \{\} : \{ worktreePath: key \}\)/);
   assert.match(sessions, /group\.worktree && !group\.worktree\.isMain/);
   assert.match(sessions, /setRemoveTarget\(group\.worktree\)/);
-  assert.match(sessions, /Delete worktree and its sessions\?/);
+  assert.match(sessions, /tr\("sidebar\.sessionlist\.deleteWorktreeAndItsSessions"\)/);
   assert.match(sessions, /Promise\.all\(sessionsForRemoval\.map\(\(session\) => deleteSession\(session\.id\)\)\)/);
   assert.match(sessions, /api\.removeWorktree\(projectId, removeTarget\.path, deleteBranch\)/);
   assert.match(styles, /\.session-worktree-toggle\s*\{[\s\S]*?width: auto;/);
@@ -51,24 +51,24 @@ test("header and composer controls are configurable and purpose-specific", async
   assert.doesNotMatch(header, /const rest = /);
   assert.doesNotMatch(header, /visibleIds|rest\.length > 0/);
   assert.doesNotMatch(composer, /Modalities:/);
-  assert.match(composer, /aria-label="Add files"/);
+  assert.match(composer, /aria-label=\{tr\("composer\.addFiles"\)\}/);
   assert.doesNotMatch(widgets, /Session header stats|Response hover actions|Technical menu/);
-  assert.match(widgets, /Response actions/);
-  assert.match(widgets, /Where buttons appear/);
+  assert.match(widgets, /tr\("settings\.widgetspage\.responseActions"\)/);
+  assert.match(widgets, /tr\("settings\.widgetspage\.whereButtonsAppear"\)/);
   assert.match(widgets, /draggable/);
   assert.match(metrics, /headerMetrics\.map/);
 });
 
 test("assistant response header carries identity, timing, and configured actions", async () => {
   const timeline = await source("../src/components/Timeline.tsx");
-  for (const label of [
-    "Copy answer",
-    "Save as image",
-    "Save as plan",
-    "Pin into context",
-    "Start new session from this answer",
-    "Start new multi-run from this answer",
-  ]) assert.ok(timeline.includes(label), `${label} is available`);
+  for (const key of [
+    "timeline.copyAnswer",
+    "timeline.saveAsImage",
+    "timeline.saveAsPlan",
+    "timeline.pinIntoContext",
+    "timeline.startNewSessionFromThisAnswer",
+    "timeline.startNewMultiRunFromThisAnswer",
+  ]) assert.ok(timeline.includes(`tr("${key}")`), `${key} is available`);
   assert.match(timeline, /<ProviderLogo/);
   assert.match(timeline, /className="agent-reply-item agent-reply-duration"/);
   assert.match(timeline, /timeShort\(assistantTime\(m\)\)/);

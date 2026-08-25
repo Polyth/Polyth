@@ -86,6 +86,7 @@ import { resolveProjectModelDefault, useSessionDefaults } from "../sessionDefaul
 import { roleKind, useRolePrefs } from "../rolePrefs.ts";
 import { useShellMode } from "../responsiveShell.ts";
 import { useViewportMetrics } from "../mobileViewport.ts";
+import { formatNumber, getLocale, tr } from "../i18n/index.ts";
 import SessionContextBar, {
   type ContextChoice,
   type SessionContextBarProps,
@@ -109,7 +110,7 @@ function ContextWindowPicker({ limit, used }: { limit?: number; used?: number })
   const ref = useRef<HTMLDivElement>(null);
   const value = limit
     ? modelContextLabel(limit).replace(/\s+context$/, "").toUpperCase()
-    : "Unknown";
+    : tr("composer.unknown");
   const usage = Math.max(0, used ?? 0);
   const percent = limit ? Math.min(100, Math.round((usage / limit) * 100)) : null;
   useEffect(() => {
@@ -132,28 +133,28 @@ function ContextWindowPicker({ limit, used }: { limit?: number; used?: number })
       <button
         type="button"
         className="context-window-chip"
-        title={limit ? `Model context window: ${limit.toLocaleString()} tokens` : "Context window unavailable"}
+        title={limit ? tr("composer.modelContextWindowValueTokens", { value: limit.toLocaleString(getLocale()) }) : tr("composer.contextWindowUnavailable")}
         aria-haspopup="dialog"
         aria-expanded={open}
         onClick={() => setOpen((valueOpen) => !valueOpen)}
       >
         <span>
-          <small>Context Window</small>
+          <small>{tr("composer.contextWindow")}</small>
           <strong>{value}</strong>
         </span>
         <Icon.chevronDown />
       </button>
-      {open && <div className="context-window-pop" role="dialog" aria-label="Context window details">
+      {open && <div className="context-window-pop" role="dialog" aria-label={tr("composer.contextWindowDetails")}>
         <div>
-          <span>Model limit</span>
-          <strong>{limit ? limit.toLocaleString() : "Unavailable"}</strong>
+          <span>{tr("composer.modelLimit")}</span>
+          <strong>{limit ? limit.toLocaleString(getLocale()) : tr("common.unavailable")}</strong>
         </div>
         <div>
-          <span>Current input</span>
-          <strong>{usage.toLocaleString()} tokens</strong>
+          <span>{tr("composer.currentInput")}</span>
+          <strong>{usage.toLocaleString(getLocale())} {tr("composer.tokens")}</strong>
         </div>
         {percent !== null && (
-          <div className="context-window-meter" aria-label={`${percent}% of context window used`}>
+          <div className="context-window-meter" aria-label={tr("composer.valueOfContextWindowUsed", { percent: percent })}>
             <i style={{ width: `${percent}%` }} />
           </div>
         )}
@@ -162,7 +163,7 @@ function ContextWindowPicker({ limit, used }: { limit?: number; used?: number })
   );
 }
 
-const PROFILE_MISSING_NOTE = "Profile unavailable — choose another";
+const PROFILE_MISSING_NOTE = tr("composer.profileUnavailableChooseAnother");
 
 type NewSessionTarget =
   | { kind: "main" }
@@ -220,7 +221,7 @@ function useComposerLocation(session: SessionProjection | null): {
               : "main");
       })
       .catch((error) => {
-        if (active) setUiError(friendlyError("Couldn’t load worktrees", error));
+        if (active) setUiError(friendlyError(tr("composer.couldnTLoadWorktrees"), error));
       })
       .finally(() => {
         if (active) setBranchLoading(false);
@@ -233,15 +234,15 @@ function useComposerLocation(session: SessionProjection | null): {
     const main = worktrees.find((worktree) => worktree.isMain);
     const choices: LocationChoice[] = [{
       id: "main",
-      label: main?.branch || branches.current || branch || "Main workspace",
-      detail: "Main workspace",
+      label: main?.branch || branches.current || branch || tr("composer.mainWorkspace"),
+      detail: tr("composer.mainWorkspace"),
       target: { kind: "main" },
     }];
     for (const worktree of worktrees.filter((candidate) => !candidate.isMain)) {
       choices.push({
         id: `worktree:${worktree.path}`,
-        label: worktree.branch || worktree.path.split("/").pop() || "Worktree",
-        detail: "Existing worktree",
+        label: worktree.branch || worktree.path.split("/").pop() || tr("composer.worktree"),
+        detail: tr("composer.existingWorktree"),
         target: { kind: "worktree", path: worktree.path },
       });
     }
@@ -250,7 +251,7 @@ function useComposerLocation(session: SessionProjection | null): {
       choices.push({
         id: `branch:${candidate.name}`,
         label: candidate.name,
-        detail: "Open in a new worktree",
+        detail: tr("composer.openInANewWorktree"),
         target: { kind: "branch", branch: candidate.name },
       });
     }
@@ -266,8 +267,8 @@ function useComposerLocation(session: SessionProjection | null): {
     || session?.branch
     || branch
     || intendedWorktree?.split("/").pop()
-    || "Main workspace";
-  const projectName = project?.name || project?.path || "No project";
+    || tr("composer.mainWorkspace");
+  const projectName = project?.name || project?.path || tr("composer.noProject");
   const projectChoices: ContextChoice[] = projects.map((candidate) => ({
     id: candidate.id,
     label: candidate.name || candidate.path,
@@ -288,7 +289,7 @@ function useComposerLocation(session: SessionProjection | null): {
       setBranchLoading(true);
       void api.createWorktree(projectId, choice.target.branch)
         .then((worktree) => startNewSession(projectId, { worktreePath: worktree.path }))
-        .catch((error) => setUiError(friendlyError("Couldn’t create the worktree", error)))
+        .catch((error) => setUiError(friendlyError(tr("composer.couldnTCreateTheWorktree"), error)))
         .finally(() => setBranchLoading(false));
     }
   };
@@ -310,15 +311,17 @@ function useComposerLocation(session: SessionProjection | null): {
 }
 
 function compactContext(context?: number): string {
-  if (!context) return "Unknown";
-  if (context >= 1_000_000) return `${Number((context / 1_000_000).toFixed(1))}M`;
-  if (context >= 1_000) return `${Math.round(context / 1_000)}K`;
-  return String(context);
+  if (!context) return tr("composer.unknown");
+  if (context >= 1_000_000) {
+    return `${formatNumber(context / 1_000_000, { maximumFractionDigits: 1 })}M`;
+  }
+  if (context >= 1_000) return `${formatNumber(Math.round(context / 1_000))}K`;
+  return formatNumber(context);
 }
 
 /** Reasoning-effort variants are backend strings ("low", "xhigh", "thinking").
  *  Display only — the id sent to the backend is always the raw variant. */
-const THINKING_LABELS: Record<string, string> = { xhigh: "X-High", none: "None" };
+const THINKING_LABELS: Record<string, string> = { xhigh: "X-High", none: tr("common.none") };
 
 function thinkingLabel(variant: string): string {
   const known = THINKING_LABELS[variant.toLowerCase()];
@@ -344,7 +347,7 @@ function ThinkingSlider({
   const options = ["", ...variants];
   const selected = Math.max(0, options.indexOf(value ?? ""));
   const selectedOption = options[selected] ?? "";
-  const label = selectedOption ? thinkingLabel(selectedOption) : "Auto";
+  const label = selectedOption ? thinkingLabel(selectedOption) : tr("composer.auto");
   return (
     <label className={`thinking-slider${className ? ` ${className}` : ""}`}>
       <span className="thinking-slider-label">
@@ -358,7 +361,7 @@ function ThinkingSlider({
           max={options.length - 1}
           step={1}
           value={selected}
-          aria-label={`Thinking effort: ${label}`}
+          aria-label={tr("composer.thinkingEffortValue", { value: label })}
           onChange={(event) => onPick(options[Number(event.target.value)] || undefined)}
           onPointerDown={() => setDragging(true)}
           onPointerUp={() => setDragging(false)}
@@ -370,22 +373,22 @@ function ThinkingSlider({
             <i key={option || "auto"} className={index <= selected ? "active" : ""} />
           ))}
         </span>
-        {dragging && <span className="thinking-slider-tooltip" role="tooltip">Thinking: {label}</span>}
+        {dragging && <span className="thinking-slider-tooltip" role="tooltip">{tr("composer.thinkingValue", { value: label })}</span>}
       </span>
     </label>
   );
 }
 
 function agentBadgeLabel(agent?: string): string {
-  const label = (agent || "Build").replace(/[-_]+/g, " ").trim();
-  return label ? label[0]!.toUpperCase() + label.slice(1) : "Build";
+  const label = (agent || tr("composer.build")).replace(/[-_]+/g, " ").trim();
+  return label ? label[0]!.toUpperCase() + label.slice(1) : tr("composer.build");
 }
 
 // UX-MOBILE-01 §13/§40/§41: one muted microtext line — `Text · Image · 500K`.
 // No mixed glyph set, no "Context:" label competing for primary space.
 function modelCapabilityMeta(model?: ModelDescriptor): string {
   const line = modelMetaLine(model);
-  return line || `Context ${compactContext(model?.context)}`;
+  return line || tr("composer.contextValue", { value: compactContext(model?.context) });
 }
 
 type QueueEdit = {
@@ -576,7 +579,12 @@ export default function Composer({
     const target = sessionIdRef.current;
     for (const f of files) {
       void attachUpload(projectId, target, f).then((r) => {
-        if (!r.ok) setUiError(`Couldn’t attach ${f.name || "file"}: ${r.reason}`);
+        if (!r.ok) {
+          setUiError(tr("composer.couldNotAttachValue", {
+            name: f.name || tr("composer.discovery.file"),
+            reason: r.reason,
+          }));
+        }
       });
     }
   }, []);
@@ -715,7 +723,7 @@ export default function Composer({
 
   const beginQueuedEdit = useCallback((item: QueueItemDto) => {
     if (queueEditRef.current || queueEditStarting) {
-      announce("Finish editing the current queued message first.");
+      announce(tr("composer.finishEditingCurrentQueuedMessageFirst"));
       return;
     }
     const target = sessionIdRef.current;
@@ -737,7 +745,7 @@ export default function Composer({
         inputRef.current?.replaceText(reserved.text);
         inputRef.current?.focus();
         setInputFocused(true);
-        announce(`Editing queued message ${reserved.position + 1} in the composer.`);
+        announce(tr("composer.editingQueuedMessageValueInComposer", { position: reserved.position + 1 }));
       })
       .catch((error) => setUiError(friendlyError("Couldn’t start editing queued message", error)))
       .finally(() => setQueueEditStarting(false));
@@ -751,7 +759,7 @@ export default function Composer({
     inputRef.current?.replaceText(editing.draftBefore);
     saveDraft(editing.sessionId, editing.draftBefore);
     void api.queueEditCancel(editing.sessionId, editing.id).catch(() => {});
-    announce("Queued message editing cancelled.");
+    announce(tr("composer.queuedMessageEditingCancelled"));
     return true;
   }, []);
 
@@ -776,7 +784,7 @@ export default function Composer({
           inputRef.current?.replaceText(editing.draftBefore);
           saveDraft(target, editing.draftBefore);
           historyCursor.current = emptyPromptHistoryCursor();
-          announce(`Queued message ${editing.id} updated in place.`);
+          announce(tr("composer.queuedMessageValueUpdatedInPlace", { id: editing.id }));
         })
         .catch((error) => setUiError(friendlyError("Couldn’t update queued message", error)))
         .finally(() => setQueueEditSaving(false));
@@ -811,7 +819,9 @@ export default function Composer({
       : undefined;
     const deliver = (targetSessionId: string) => command !== null
       ? api.runShell(targetSessionId, command).catch(
-          (err) => setUiError(`Couldn’t run shell command: ${err instanceof Error ? err.message : String(err)}`),
+          (err) => setUiError(tr("composer.couldNotRunShellCommand", {
+            reason: err instanceof Error ? err.message : String(err),
+          })),
         )
       : sendMessage(
           t,
@@ -850,7 +860,7 @@ export default function Composer({
           ...(worktreePath ? { worktreePath } : {}),
         });
         const created = getState().activeSessionId;
-        if (!created) throw new Error("The new session did not become active.");
+        if (!created) throw new Error(tr("composer.theNewSessionDidNotBecomeActive"));
         if (newSessionAutoApprove) await api.autoAcceptSet(created, "on");
         if (newSessionGoal) await api.goalAttach(created, t);
         await deliver(created);
@@ -858,7 +868,7 @@ export default function Composer({
         setNewSessionGoal(false);
       })()
         .catch((error) => {
-          setUiError(friendlyError("Couldn’t create the session", error));
+          setUiError(friendlyError(tr("common.error"), error));
           // The draft was cleared optimistically below; a failed worktree or
           // session creation must never lose the typed prompt or its pills.
           // Restore only while still on the fresh-session surface — never into
@@ -1089,7 +1099,7 @@ export default function Composer({
     noteModelUsed(`${ref.providerID}/${ref.modelID}`);
     if (activeProjectId) {
       void rememberProjectModelSelection(activeProjectId, ref).catch((error) => {
-        setUiError(friendlyError("Couldn’t remember the project model", error));
+        setUiError(friendlyError(tr("composer.couldnTRememberTheProjectModel"), error));
       });
     }
   };
@@ -1122,20 +1132,20 @@ export default function Composer({
   const modelRowAction = {
     labelFor: (id: string) => {
       const ref = modelRefFromValue(id);
-      return ref && matchingProfiles(ref).length === 1 ? "Edit profile" : "Create profile";
+      return ref && matchingProfiles(ref).length === 1 ? tr("composer.editProfile") : tr("composer.createProfile");
     },
     nameFor: (id: string) => {
       const ref = modelRefFromValue(id);
-      if (!ref) return "Create profile";
+      if (!ref) return tr("composer.createProfile");
       const matching = matchingProfiles(ref);
-      if (matching.length === 1) return `Edit profile ${matching[0]!.name}`;
+      if (matching.length === 1) return tr("composer.editProfileValue", { name: matching[0]!.name });
       const m = models.find((x) => x.providerID === ref.providerID && x.modelID === ref.modelID);
-      return `Create profile from ${m?.name || ref.modelID}`;
+      return tr("composer.createProfileFromValue", { value: m?.name || ref.modelID });
     },
     onAction: pinModel,
   };
 
-  const noneLabel = "None";
+  const noneLabel = tr("common.none");
   const profileItems: PickerItem[] = [
     { id: "", label: noneLabel, group: "" },
     ...profiles.map((p) => ({
@@ -1149,7 +1159,7 @@ export default function Composer({
     updateCfg(id ? withProfile(cfg, id) : withProfileNone(cfg));
   };
   const currentProfileName = profileMissing
-    ? "Profile unavailable"
+    ? tr("composer.profileUnavailable")
     : profiles.find((p) => p.id === selectedProfileId)?.name ?? noneLabel;
   // Creation needs a connectable model; the reason is visible text with an
   // operable settings route, never a silent hidden action.
@@ -1157,8 +1167,8 @@ export default function Composer({
     label,
     run: () => setCreateProfileOpen(true),
     ...(noModels ? {
-      disabledReason: "Connect a model before creating a profile",
-      secondaryLabel: "Open model settings",
+      disabledReason: tr("composer.connectAModelBeforeCreatingAProfile"),
+      secondaryLabel: tr("composer.openModelSettings"),
       secondaryRun: () => openSettingsPage("models"),
     } : {}),
   });
@@ -1181,7 +1191,7 @@ export default function Composer({
     }
     setAutoApproveBusy(true);
     void api.autoAcceptSet(session.id, autoApproveOn ? "off" : "on")
-      .catch((error) => setUiError(friendlyError("Couldn’t change auto-approve", error)))
+      .catch((error) => setUiError(friendlyError(tr("common.error"), error)))
       .finally(() => setAutoApproveBusy(false));
   };
   const toggleGoal = () => {
@@ -1193,7 +1203,7 @@ export default function Composer({
     }
     if (!session) {
       setNewSessionGoal(true);
-      announce("This message will be saved as the goal when you send it.");
+      announce(tr("composer.thisMessageWillBeSavedAsTheGoal"));
       return;
     }
     if (goalAttachBusy) return;
@@ -1203,9 +1213,9 @@ export default function Composer({
         setText("");
         inputRef.current?.replaceText("");
         saveDraft(session.id, "");
-        announce("Goal attached.");
+        announce(tr("composer.goalAttached"));
       })
-      .catch((error) => setUiError(friendlyError("Couldn’t attach the goal", error)))
+      .catch((error) => setUiError(friendlyError(tr("composer.couldnTAttachTheGoal"), error)))
       .finally(() => setGoalAttachBusy(false));
   };
   // Bounded callbacks let the same configurable action widget live in either
@@ -1252,16 +1262,15 @@ export default function Composer({
           if (!k || !activeProjectId) return;
           e.preventDefault();
           void dropIntoSession(e.dataTransfer, activeProjectId, sessionIdRef.current,
-            (reason) => setUiError(`Couldn’t attach: ${reason}`));
+            (reason) => setUiError(tr("composer.couldNotAttach", { reason })));
         }}
       >
       {dropHint && (
-        <div className="drop-hint">{dropHint === "path" ? "Attach to chat" : "Drop to attach"}</div>
+        <div className="drop-hint">{dropHint === "path" ? tr("composer.attachToChat") : tr("composer.dropToAttach")}</div>
       )}
       {noModels && (
         <div className="composer-note" role="status">
-          No models available — check that the backend is running and configured.
-        </div>
+          {tr("composer.noModelsAvailableCheckThatTheBackend")}</div>
       )}
       {profileMissing && (
         <div className="composer-note composer-profile-missing" role="alert">
@@ -1311,14 +1320,14 @@ export default function Composer({
             {chatAgents.length > 0 ? (
               <Picker
                 className="composer-agent-badge"
-                label="Mode"
+                label={tr("composer.mode")}
                 mobileSheet
                 direction="up"
                 items={agentItems}
                 value={agentValue}
                 onPick={pickAgent}
                 placeholder={agentBadgeLabel(activeAgent)}
-                ariaLabel={`Select agent mode, current ${agentBadgeLabel(activeAgent)}`}
+                ariaLabel={tr("composer.selectAgentModeCurrentValue", { value: agentBadgeLabel(activeAgent) })}
               />
             ) : (
               <span className="agent-type-badge">{agentBadgeLabel(activeAgent)}</span>
@@ -1327,21 +1336,21 @@ export default function Composer({
         </div>
       )}
       <div className="composer-input">
-        {shellMode && <div className="composer-mode-label">Shell command · permission checked · output added to context</div>}
+        {shellMode && <div className="composer-mode-label">{tr("composer.shellCommandPermissionCheckedOutputAddedTo")}</div>}
         <AdaptiveTextInput
           ref={inputRef}
           data-composer-input=""
           initialText={text}
           rows={3}
           className="composer-editor"
-          ariaLabel="Message"
+          ariaLabel={tr("composer.message")}
           placeholder={shellMode
-            ? "Enter a workspace shell command…"
+            ? tr("composer.enterAWorkspaceShellCommand")
             : simpleMode
               ? shellLayout === "phone"
-                ? "Use @ / ! # for helpers"
-                : "Message the agent, tag @files, or use /commands and /skills"
-              : "Ask anything…"}
+                ? tr("composer.useForHelpers")
+                : tr("composer.messageTheAgentTagFilesOrUse")
+              : tr("composer.askAnything")}
           {...(acView ? {
             role: "combobox",
             ariaAutocomplete: "list" as const,
@@ -1356,13 +1365,13 @@ export default function Composer({
         />
         {acView && (
           <div className="ac-popup">
-            <div className="ac-header">{acView.kind === "cmd" ? "Commands" : acView.kind === "snip" ? "Snippets" : "Files"}</div>
+            <div className="ac-header">{acView.kind === "cmd" ? tr("composer.commands") : acView.kind === "snip" ? tr("composer.snippets") : tr("composer.files")}</div>
             {acOptions.length > 0 ? (
               <div
                 className="ac-list"
                 id="composer-autocomplete-list"
                 role="listbox"
-                aria-label={acView.kind === "cmd" ? "Commands" : acView.kind === "snip" ? "Snippets" : "Files"}
+                aria-label={acView.kind === "cmd" ? tr("composer.commands") : acView.kind === "snip" ? tr("composer.snippets") : tr("composer.files")}
               >
                 {acOptions.map((item, i) => (
                   <div
@@ -1395,16 +1404,15 @@ export default function Composer({
                     className="small-btn ac-create-snippet"
                     onClick={() => { setAcToken(null); openSettingsPage("commands"); }}
                   >
-                    Create a snippet…
-                  </button>
+                    {tr("composer.createASnippet")}</button>
                 )}
               </div>
             )}
             {acOptions.length > 0 && (
               <div className="ac-footer">
-                <span><kbd>↑↓</kbd> navigate</span>
-                <span><kbd>↵</kbd> / <kbd>Tab</kbd> insert</span>
-                <span><kbd>Esc</kbd> dismiss</span>
+                <span><kbd>↑↓</kbd> {tr("composer.navigate")}</span>
+                <span><kbd>↵</kbd> / <kbd>Tab</kbd> {tr("composer.insert")}</span>
+                <span><kbd>{tr("composer.esc")}</kbd> {tr("composer.dismiss")}</span>
               </div>
             )}
           </div>
@@ -1412,8 +1420,7 @@ export default function Composer({
       </div>
       {!simpleMode && techOpen && (
         <div className="composer-tech-help" role="note">
-          Type <kbd>!</kbd> for a shell command, <kbd>/</kbd> for commands, <kbd>#</kbd> for snippets, <kbd>@</kbd> to mention files.
-        </div>
+          {tr("composer.type")}{" "}<kbd>!</kbd> {tr("composer.forAShellCommand")}{" "}<kbd>/</kbd> {tr("composer.forCommands")}{" "}<kbd>#</kbd> {tr("composer.forSnippets")}{" "}<kbd>@</kbd> {tr("composer.toMentionFiles")}</div>
       )}
       <div className="composer-bar composer-row">
         <div className="composer-selectors">
@@ -1421,12 +1428,11 @@ export default function Composer({
             className="composer-tech-toggle"
             aria-expanded={techOpen}
             title={techOpen
-              ? "Hide model, agent, and syntax options"
-              : "Show model, agent, and syntax options"}
+              ? tr("composer.hideModelAgentAndSyntaxOptions")
+              : tr("composer.showModelAgentAndSyntaxOptions")}
             onClick={() => setTechOpen((open) => !open)}
           >
-            Technical options
-          </button>}
+            {tr("composer.technicalOptions")}</button>}
           {!simpleMode && !noModels && (
             <>
               <ModelPicker
@@ -1444,8 +1450,8 @@ export default function Composer({
           {!simpleMode && chatAgents.length > 0 && (
             <Picker
               className="picker-agent"
-              label="Agent" direction="up" items={agentItems} value={agentValue} onPick={pickAgent}
-              ariaLabel={`Select work mode, current ${currentAgentLabel}`}
+              label={tr("composer.agent")} direction="up" items={agentItems} value={agentValue} onPick={pickAgent}
+              ariaLabel={tr("composer.selectWorkModeCurrentValue", { value: currentAgentLabel })}
               triggerIcon={<span className="agent-status-dot" />}
             />
           )}
@@ -1460,10 +1466,10 @@ export default function Composer({
           {!simpleMode && ui.showTechnicalButtons && techOpen && (
             <Picker
               className="picker-profile"
-              label="Profile" direction="up" items={profileItems} value={selectedProfileId} onPick={pickProfile}
-              placeholder={profileMissing ? "Profile unavailable" : "None"}
-              ariaLabel={`Select profile, current ${currentProfileName}`}
-              footerAction={profileFooter("Create profile…")}
+              label={tr("composer.profile")} direction="up" items={profileItems} value={selectedProfileId} onPick={pickProfile}
+              placeholder={profileMissing ? tr("composer.profileUnavailable") : tr("common.none")}
+              ariaLabel={tr("composer.selectProfileCurrentValue", { value: currentProfileName })}
+              footerAction={profileFooter(tr("composer.createAProfile"))}
             />
           )}
         </div>
@@ -1491,8 +1497,8 @@ export default function Composer({
             <button
               type="button"
               className="chip composer-add-files"
-              aria-label="Add files"
-              title="Add files"
+              aria-label={tr("composer.addFiles")}
+              title={tr("composer.addFiles")}
               disabled={!activeProjectId}
               onClick={() => fileInputRef.current?.click()}
             ><Icon.plus /></button>
@@ -1527,15 +1533,15 @@ export default function Composer({
                   <button
                     className="send composer-delivery composer-queue"
                     onClick={() => send()}
-                    aria-label={queueEdit ? "Save queued message in its current position" : "Queue message until the current response finishes"}
-                    title={queueEdit ? "Save queued message in its current position" : "Queue message until the current response finishes"}
+                    aria-label={queueEdit ? tr("composer.saveQueuedMessageInIts") : tr("composer.queueMessageUntilTheCurrentResponseFinishes")}
+                    title={queueEdit ? tr("composer.saveQueuedMessageInIts") : tr("composer.queueMessageUntilTheCurrentResponseFinishes")}
                     disabled={queueEdit ? queueEditSaving || !text.trim() : false}
                   >
-                    <Icon.sendClock /><span className="composer-action-label">{queueEdit ? "Save" : "Queue"}</span>
+                    <Icon.sendClock /><span className="composer-action-label">{queueEdit ? tr("common.save") : tr("composer.queue")}</span>
                   </button>
                   <button
                     className="composer-send-options"
-                    aria-label="More active-run actions"
+                    aria-label={tr("composer.moreActiveRunActions")}
                     aria-haspopup="menu"
                     aria-expanded={deliveryMenuOpen}
                     onClick={() => setDeliveryMenuOpen((open) => !open)}
@@ -1546,10 +1552,10 @@ export default function Composer({
                   {deliveryMenuOpen && (
                     <div className="composer-send-menu" role="menu">
                       <button role="menuitem" onClick={() => { setDeliveryMenuOpen(false); send(undefined, queueEdit ? undefined : "interrupt"); }}>
-                        <Icon.send /><span><strong>{queueEdit ? "Save queued message" : "Send now"}</strong><small>{queueEdit ? "Keep it in its current queue position" : "Stop the current response and send"}</small></span>
+                        <Icon.send /><span><strong>{queueEdit ? tr("composer.saveQueuedMessage") : tr("composer.sendNow")}</strong><small>{queueEdit ? tr("composer.keepItInItsCurrent") : tr("composer.stopTheCurrentResponseAndSend")}</small></span>
                       </button>
                       <button role="menuitem" onClick={() => { setDeliveryMenuOpen(false); void abortSession(); }}>
-                        <Icon.stop /><span><strong>Stop</strong><small>Stop without sending this draft</small></span>
+                        <Icon.stop /><span><strong>{tr("common.stop")}</strong><small>{tr("composer.stopWithoutSendingThisDraft")}</small></span>
                       </button>
                     </div>
                   )}
@@ -1557,21 +1563,21 @@ export default function Composer({
               ) : (
                 <button
                   className="stop composer-stop-primary"
-                  title="Stop the current response"
-                  aria-label="Stop the current response"
+                  title={tr("composer.stopTheCurrentResponse")}
+                  aria-label={tr("composer.stopTheCurrentResponse")}
                   onClick={() => void abortSession()}
                 >
-                  <Icon.stop /><span className="composer-action-label">Stop</span>
+                  <Icon.stop /><span className="composer-action-label">{tr("common.stop")}</span>
                 </button>
               )
             ) : (
               <button className="send" onClick={() => send()}
-                title={shellMode ? "Run shell command" : "Send message"}
-                aria-label={shellMode ? "Run shell command" : "Send message"}
+                title={shellMode ? tr("composer.runShellCommand") : tr("composer.sendMessage")}
+                aria-label={shellMode ? tr("composer.runShellCommand") : tr("composer.sendMessage")}
                 disabled={sendDisabled}>
                 {simpleMode
                   ? <span className="send-plane" aria-hidden="true"><Icon.send /></span>
-                  : <>{shellMode ? "Run" : "Send"} <span className="send-key">{settings.sendOnEnter ? "↵" : `${modKeyLabel()}↵`}</span></>}
+                  : <>{shellMode ? tr("common.run") : tr("composer.sendNow")} <span className="send-key">{settings.sendOnEnter ? "↵" : `${modKeyLabel()}↵`}</span></>}
               </button>
             )}
           </span>

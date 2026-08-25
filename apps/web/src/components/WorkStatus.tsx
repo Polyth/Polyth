@@ -8,14 +8,15 @@ import type { RenderModel } from "../reduce.ts";
 import { setUiSettings, useUiSettings } from "../uiPrefs.ts";
 import { fmtCost, fmtTokens } from "../format.ts";
 import SlotHost from "./slots/SlotHost.ts";
+import { tr } from "../i18n/index.ts";
 
-const SECTIONS = ["usage", "tasks", "agents"] as const;
+const SECTIONS = [tr("workstatus.usage"), tr("workstatus.tasks"), tr("workstatus.agents")] as const;
 type SectionId = typeof SECTIONS[number];
 
 const SECTION_LABEL: Record<SectionId, string> = {
-  usage: "Usage",
-  tasks: "Tasks",
-  agents: "Delegated agents",
+  usage: tr("workstatus.usage2"),
+  tasks: tr("workstatus.tasks2"),
+  agents: tr("workstatus.delegatedAgents"),
 };
 
 function scrollToSection(id: SectionId) {
@@ -36,7 +37,7 @@ export function TrackerPills({ model }: { model: RenderModel }) {
     requestAnimationFrame(() => scrollToSection(id));
   };
   return (
-    <div className="tracker-pills" aria-label="Active work trackers">
+    <div className="tracker-pills" aria-label={tr("workstatus.activeWorkTrackers")}>
       {activeTask && (
         <button className="tracker-pill" title={activeTask.text} onClick={() => show("tasks")}>
           <span className="tracker-dot task" /> {activeTask.text.slice(0, 60)}
@@ -71,24 +72,24 @@ export default function WorkStatus({ model }: { model: RenderModel }) {
   if (visible.length === 0) {
     return (
       <div className="work-status all-hidden">
-        <span className="muted">Work status sections hidden.</span>
-        <button className="small-btn" onClick={restoreAll}>Restore sections</button>
+        <span className="muted">{tr("workstatus.workStatusSectionsHidden")}</span>
+        <button className="small-btn" onClick={restoreAll}>{tr("workstatus.restoreSections")}</button>
       </div>
     );
   }
 
   return (
-    <div className="work-status" aria-label="Work status">
+    <div className="work-status" aria-label={tr("workstatus.workStatus")}>
       {visible.includes("usage") && (
         <section className="work-status-section" id="ws-usage">
           <header>
             <span>{SECTION_LABEL.usage}</span>
-            <button className="ws-hide" title="Hide section" onClick={() => hide("usage")}>✕</button>
+            <button className="ws-hide" title={tr("workstatus.hideSection")} onClick={() => hide("usage")}>✕</button>
           </header>
           <div className="ws-body ws-usage">
-            <span className="mono">{fmtTokens(model.totals.input + model.totals.output)} tokens</span>
+            <span className="mono">{fmtTokens(model.totals.input + model.totals.output)} {tr("workstatus.tokens")}</span>
             {model.totals.cost > 0 && <span className="mono">{fmtCost(model.totals.cost)}</span>}
-            {model.turn?.status === "working" && <span className="tag">working</span>}
+            {model.turn?.status === "working" && <span className="tag">{tr("workstatus.working")}</span>}
           </div>
         </section>
       )}
@@ -96,7 +97,7 @@ export default function WorkStatus({ model }: { model: RenderModel }) {
         <section className="work-status-section" id="ws-tasks">
           <header>
             <span>{SECTION_LABEL.tasks} ({model.tasks.items.filter((t) => t.status === "done").length}/{model.tasks.items.length})</span>
-            <button className="ws-hide" title="Hide section" onClick={() => hide("tasks")}>✕</button>
+            <button className="ws-hide" title={tr("workstatus.hideSection")} onClick={() => hide("tasks")}>✕</button>
           </header>
           <div className="ws-body">
             {model.tasks.items.map((t) => (
@@ -114,7 +115,7 @@ export default function WorkStatus({ model }: { model: RenderModel }) {
         <section className="work-status-section" id="ws-agents">
           <header>
             <span>{SECTION_LABEL.agents} ({model.subagents.agents.length})</span>
-            <button className="ws-hide" title="Hide section" onClick={() => hide("agents")}>✕</button>
+            <button className="ws-hide" title={tr("workstatus.hideSection")} onClick={() => hide("agents")}>✕</button>
           </header>
           <div className="ws-body">
             {model.subagents.agents.map((a) => (
@@ -138,7 +139,7 @@ export default function WorkStatus({ model }: { model: RenderModel }) {
         }}
       />
       {hidden.length > 0 && (
-        <button className="ghost-link ws-restore" onClick={restoreAll}>Restore hidden sections →</button>
+        <button className="ghost-link ws-restore" onClick={restoreAll}>{tr("workstatus.restoreHiddenSections")}</button>
       )}
     </div>
   );

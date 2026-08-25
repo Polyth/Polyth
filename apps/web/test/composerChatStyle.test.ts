@@ -10,7 +10,7 @@ test("working status is compact and does not claim repository indexing", () => {
   const css = read("../src/styles.css");
 
   assert.doesNotMatch(surface, /Scanning repositories|indexing|usually takes a few seconds/i);
-  assert.match(surface, /<span>Working…<\/span>/);
+  assert.match(surface, /<span>\{tr\("workspace\.builtinsurfaces\.working"\)\}<\/span>/);
   assert.match(css, /\.focus-working-spinner\s*\{[^}]*width:\s*7px;[^}]*animation:\s*focus-working-pulse/s);
 });
 
@@ -48,7 +48,7 @@ test("message actions use one lightweight copy control and local hover zones", (
   assert.match(timeline, /key: "regenerate"/);
   assert.match(timeline, /<AssistantAgentHeader m=\{m\} announce=\{announce\} turn=\{turn\} \/>/);
   assert.match(timeline, /prefs\.responseActions\.map/);
-  assert.match(timeline, /Start new multi-run from this answer/);
+  assert.match(timeline, /tr\("timeline\.startNewMultiRunFromThisAnswer"\)/);
 });
 
 test("thinking stays unboxed while command output keeps a light boundary", () => {

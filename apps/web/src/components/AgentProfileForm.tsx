@@ -9,6 +9,7 @@ import { useStore } from "../store.ts";
 import { refreshProfiles } from "../profiles.ts";
 import Dialog from "./a11y/Dialog.tsx";
 import { modelDisplayName, modelSupportsTextWorkflow } from "../composer/discovery.ts";
+import { tr } from "../i18n/index.ts";
 
 export interface ProfileFormProps {
   /** Existing profile to edit, or a seed for a new one. */
@@ -88,20 +89,18 @@ export default function AgentProfileForm({ existing, seed, lockModel, onClose, o
   };
 
   return (
-    <Dialog title={existing ? "Edit profile" : "New agent profile"} onClose={onClose} className="profile-form" initialFocus="input">
+    <Dialog title={existing ? tr("agentprofileform.editProfile") : tr("agentprofileform.newAgentProfile")} onClose={onClose} className="profile-form" initialFocus="input">
       <div className="dialog-head">
-        <span>{existing ? "Edit profile" : "New agent profile"}</span>
+        <span>{existing ? tr("agentprofileform.editProfile") : tr("agentprofileform.newAgentProfile")}</span>
         <span className="header-spacer" />
         <button className="small-btn" onClick={onClose}>✕</button>
       </div>
       <div className="profile-form-body">
         <label>
-          Name
-          <input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Fast reviewer" />
+          {tr("agentprofileform.name")}<input value={name} onChange={(e) => setName(e.target.value)} placeholder={tr("agentprofileform.eGFastReviewer")} />
         </label>
         <label>
-          Model
-          {lockModel || existing ? (
+          {tr("agentprofileform.model")}{lockModel || existing ? (
             <span className="mono profile-model-locked">{providerID}/{modelID}</span>
           ) : (
             <select
@@ -112,7 +111,7 @@ export default function AgentProfileForm({ existing, seed, lockModel, onClose, o
                 setModelID(rest.join("/"));
               }}
             >
-              <option value="/">Pick a model…</option>
+              <option value="/">{tr("agentprofileform.pickAModel")}</option>
               {textModels.map((m) => (
                 <option key={`${m.providerID}/${m.modelID}`} value={`${m.providerID}/${m.modelID}`}>
                   {modelDisplayName(m, textModels)}
@@ -122,33 +121,29 @@ export default function AgentProfileForm({ existing, seed, lockModel, onClose, o
           )}
         </label>
         <label>
-          Agent
-          <select value={agent} onChange={(e) => setAgent(e.target.value)}>
-            <option value="">Default</option>
+          {tr("agentprofileform.agent")}<select value={agent} onChange={(e) => setAgent(e.target.value)}>
+            <option value="">{tr("agentprofileform.default")}</option>
             {agents.map((a) => <option key={a.name} value={a.name}>{a.name}</option>)}
           </select>
         </label>
         <label>
-          Thinking
-          <select value={thinking} onChange={(e) => setThinking(e.target.value)}>
-            {THINKING_LEVELS.map((l) => <option key={l || "default"} value={l}>{l || "default"}</option>)}
+          {tr("agentprofileform.thinking")}<select value={thinking} onChange={(e) => setThinking(e.target.value)}>
+            {THINKING_LEVELS.map((l) => <option key={l || "default"} value={l}>{l || tr("agentprofileform.default")}</option>)}
           </select>
         </label>
         <label>
-          Color
-          <input type="color" value={color} onChange={(e) => setColor(e.target.value)} />
+          {tr("agentprofileform.color")}<input type="color" value={color} onChange={(e) => setColor(e.target.value)} />
         </label>
         <label>
-          Notes
-          <textarea rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} />
+          {tr("agentprofileform.notes")}<textarea rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} />
         </label>
         {repairs.length > 0 && (
           <div className="profile-repair" role="alert">
-            <div className="stat-label">Needs repair</div>
+            <div className="stat-label">{tr("agentprofileform.needsRepair")}</div>
             {repairs.map((r, i) => (
               <div key={i} className="profile-repair-row">
-                <span>{r.reason} (<span className="mono">{r.from}</span> → <span className="mono">{r.to || "default"}</span>)</span>
-                <button className="small-btn" onClick={() => applyRepair(r)}>Apply</button>
+                <span>{r.reason} (<span className="mono">{r.from}</span> → <span className="mono">{r.to || tr("agentprofileform.default")}</span>)</span>
+                <button className="small-btn" onClick={() => applyRepair(r)}>{tr("common.apply")}</button>
               </div>
             ))}
           </div>
@@ -156,15 +151,13 @@ export default function AgentProfileForm({ existing, seed, lockModel, onClose, o
         {error && <div className="form-error">{error}</div>}
       </div>
       <div className="dialog-foot">
-        <button className="small-btn" onClick={onClose}>Cancel</button>
+        <button className="small-btn" onClick={onClose}>{tr("common.cancel")}</button>
         <span className="header-spacer" />
         <button className="small-btn" disabled={busy || !name.trim() || !providerID || !modelID} onClick={() => void save(false)}>
-          Save
-        </button>
+          {tr("common.save")}</button>
         <button className="primary-btn" style={{ padding: "5px 14px", fontSize: "calc(12px * var(--ui-font-scale, 1))" }}
           disabled={busy || !name.trim() || !providerID || !modelID} onClick={() => void save(true)}>
-          Save and use
-        </button>
+          {tr("agentprofileform.saveAndUse")}</button>
       </div>
     </Dialog>
   );

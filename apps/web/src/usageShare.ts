@@ -1,4 +1,5 @@
 import type { SessionProjection } from "@polyth/contracts";
+import { tr } from "./i18n/index.ts";
 
 export interface ProviderUsageShare {
   providerId: string;
@@ -19,6 +20,10 @@ const finiteNonNegative = (value: number | undefined): number =>
 
 const sessionTokens = (session: SessionProjection): number =>
   finiteNonNegative(session.tokenTotals?.input) + finiteNonNegative(session.tokenTotals?.output);
+
+export function providerUsageLabel(providerId: string): string {
+  return providerId === "Default" ? tr("composer.default") : providerId;
+}
 
 /** Project usage grouped by the provider recorded on each session. Sessions
  * without an explicit model stay visible as the human-facing Default group. */

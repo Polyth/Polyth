@@ -15,6 +15,7 @@ import {
   notificationCentre, useNotificationCentre, type NotificationCentre,
 } from "../notificationCentre.ts";
 import { defineWidgetPlugin, registerWidgetPlugin } from "../widgets/catalog.ts";
+import { getLocale, tr } from "../i18n/index.ts";
 
 /** The rail-surface id the workspace.right.tabs slot bridge derives for the
  *  panel — what the bell toggles and hosts persist as the open surface. */
@@ -35,7 +36,7 @@ export function NotificationBell({ centre = notificationCentre }: { centre?: Not
   return (
     <button
       className={`header-action notification-bell${open ? " active" : ""}`}
-      title="Notifications"
+      title={tr("notificationcentre.notifications")}
       aria-label={bellName(unread)}
       aria-expanded={open}
       onClick={() => toggleRailPlugin(NOTIFICATION_SURFACE_ID)}
@@ -54,8 +55,8 @@ export function NotificationBell({ centre = notificationCentre }: { centre?: Not
 function fmtWhen(ts: number): string {
   const d = new Date(ts);
   return d.toDateString() === new Date().toDateString()
-    ? d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
-    : d.toLocaleString([], { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+    ? d.toLocaleTimeString(getLocale(), { hour: "2-digit", minute: "2-digit" })
+    : d.toLocaleString(getLocale(), { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
 }
 
 function NotificationRow({
@@ -75,12 +76,12 @@ function NotificationRow({
       >
         <span className="ntc-top">
           <span className={`ntc-kind kind-${record.kind}`}>{NOTIFICATION_KIND_LABELS[record.kind]}</span>
-          {!record.read && <span className="sr-only">unread</span>}
+          {!record.read && <span className="sr-only">{tr("notificationcentre.unread")}</span>}
           <time className="ntc-time" dateTime={new Date(record.ts).toISOString()}>{fmtWhen(record.ts)}</time>
         </span>
         <span className="ntc-title">{record.title}</span>
         {record.body !== "" && <span className="ntc-body">{record.body}</span>}
-        {!alive && <span className="ntc-gone">Session no longer available</span>}
+        {!alive && <span className="ntc-gone">{tr("notificationcentre.sessionNoLongerAvailable")}</span>}
       </button>
     </li>
   );
@@ -115,36 +116,36 @@ export function NotificationCentrePanel({
           className="small-btn"
           disabled={state.unread === 0}
           onClick={() => void centre.markAllRead()}
-        >Mark all read</button>
+        >{tr("notificationcentre.markAllRead")}</button>
         {!confirmClear && (
           <button
             className="small-btn"
             disabled={state.items.length === 0}
             onClick={() => setConfirmClear(true)}
-          >Clear notifications</button>
+          >{tr("notificationcentre.clearNotifications")}</button>
         )}
         {confirmClear && (
           <>
             <button
               className="small-btn ntc-confirm"
               onClick={() => { setConfirmClear(false); void centre.clear(); }}
-            >Confirm clear</button>
-            <button className="small-btn" onClick={() => setConfirmClear(false)}>Cancel</button>
+            >{tr("notificationcentre.confirmClear")}</button>
+            <button className="small-btn" onClick={() => setConfirmClear(false)}>{tr("common.cancel")}</button>
           </>
         )}
       </div>
       {state.error !== null && (
         <div className="ntc-error" role="alert">
           <span>{state.error}</span>
-          <button className="small-btn" onClick={() => void centre.catchUp()}>Retry</button>
+          <button className="small-btn" onClick={() => void centre.catchUp()}>{tr("common.retry")}</button>
         </div>
       )}
-      {state.loading && rows.length === 0 && <div className="rail-empty">Loading notifications…</div>}
+      {state.loading && rows.length === 0 && <div className="rail-empty">{tr("notificationcentre.loadingNotifications")}</div>}
       {!state.loading && state.error === null && rows.length === 0 && (
         <div className="rail-empty">
           {state.items.length > 0
-            ? "No unread notifications"
-            : "Nothing here yet — completion, failure, question, and permission notices will collect in this inbox."}
+            ? tr("notificationcentre.noUnreadNotifications")
+            : tr("notificationcentre.nothingHereYetCompletionFailureQuestionAnd")}
         </div>
       )}
       {rows.length > 0 && (
@@ -165,12 +166,12 @@ export function NotificationCentrePanel({
 
 const NOTIFICATION_WIDGET_PLUGIN = defineWidgetPlugin({
   id: "notification-centre",
-  name: "Notifications",
+  name: tr("notificationcentre.notifications"),
   widgets: [
     {
       id: "notification.bell",
-      title: "Notifications",
-      description: "Open the notification centre and see unread activity.",
+      title: tr("notificationcentre.notifications"),
+      description: tr("notificationcentre.openTheNotificationCentreAndSeeUnread"),
       kind: "mini-widget",
       defaultSlot: "app.header.actions",
       supportedSlots: ["app.header.actions"],
@@ -197,6 +198,6 @@ export function installNotificationCentre(): void {
     "notification-centre",
     () => <NotificationCentrePanel />,
     0,
-    { title: "Notifications" },
+    { title: tr("notificationcentre.notifications") },
   );
 }

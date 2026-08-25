@@ -5,6 +5,7 @@ import { useState } from "react";
 import { replyPermission } from "../init.ts";
 import type { PendingPermission } from "../reduce.ts";
 import { Icon } from "../icons.tsx";
+import { tr } from "../i18n/index.ts";
 
 type AlwaysScope = "session" | "project";
 
@@ -27,8 +28,8 @@ function PermissionRow({ p }: { p: PendingPermission }) {
       <div className="perm-desc">
         <span className="permission-mode-icon" aria-hidden="true">{modeIcon(p.permission)}</span>
         <strong>{p.preview?.title ?? p.permission}</strong>
-        {!p.preview && p.tool ? ` via ${p.tool}` : ""}
-        {risk && <span className={`permission-risk risk-${risk}`}>{risk} risk</span>}
+        {!p.preview && p.tool ? tr("permissionbanner.viaValue", { tool: p.tool }) : ""}
+        {risk && <span className={`permission-risk risk-${risk}`}>{risk} {tr("permissionbanner.risk")}</span>}
       </div>
       {p.preview && p.preview.lines.length > 0 ? (
         <div className="permission-preview">
@@ -46,21 +47,21 @@ function PermissionRow({ p }: { p: PendingPermission }) {
         )
       )}
       <div className="perm-actions">
-        <button onClick={() => replyPermission(p.requestId, "once")}>Allow once</button>
+        <button onClick={() => replyPermission(p.requestId, "once")}>{tr("permissionbanner.allowOnce")}</button>
         {canAlways && (
           <span className="perm-always">
-            <button onClick={() => replyPermission(p.requestId, "always", scope)}>Always</button>
+            <button onClick={() => replyPermission(p.requestId, "always", scope)}>{tr("permissionbanner.always")}</button>
             <select
-              aria-label="Always scope"
+              aria-label={tr("permissionbanner.alwaysScope")}
               value={scope}
               onChange={(e) => setScope(e.target.value === "project" ? "project" : "session")}
             >
-              {scopes.includes("session") && <option value="session">this session</option>}
-              {scopes.includes("project") && <option value="project">this project</option>}
+              {scopes.includes("session") && <option value="session">{tr("permissionbanner.thisSession")}</option>}
+              {scopes.includes("project") && <option value="project">{tr("permissionbanner.thisProject")}</option>}
             </select>
           </span>
         )}
-        <button className="danger" onClick={() => replyPermission(p.requestId, "reject")}>Deny</button>
+        <button className="danger" onClick={() => replyPermission(p.requestId, "reject")}>{tr("permissionbanner.deny")}</button>
       </div>
     </div>
   );
@@ -75,7 +76,7 @@ export default function PermissionBanner({ permissions }: { permissions: Pending
       aria-live="assertive"
       aria-relevant="additions text"
     >
-      <div className="perm-title">Permission requested</div>
+      <div className="perm-title">{tr("permissionbanner.permissionRequested")}</div>
       {permissions.map((p) => (
         <PermissionRow key={p.requestId} p={p} />
       ))}

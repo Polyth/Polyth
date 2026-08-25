@@ -15,6 +15,7 @@ import type {
   WorkflowRunNodeDto,
 } from "@polyth/contracts";
 import { extractChangedFiles } from "./pendingChanges.ts";
+import { tr } from "./i18n/index.ts";
 
 export interface UserMsg {
   kind: "user";
@@ -438,7 +439,7 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
       if (t) {
         t.status = "done";
         t.output = str(d, "output") ?? "";
-        const title = str(d, "title");
+        const title = str(d, tr("reduce.title"));
         if (title !== undefined) t.title = title;
         const lateInput = obj(d, "input");
         if (lateInput && Object.keys(t.input).length === 0) t.input = lateInput; // opencode fills input late
@@ -668,7 +669,7 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
       const secret = model.secrets.find((item) => item.requestId === requestId);
       if (secret) {
         secret.status = "resolved";
-        const action = str(d, "action");
+        const action = str(d, tr("reduce.action"));
         if (action === "saved" || action === "dismissed") secret.action = action;
       }
       break;

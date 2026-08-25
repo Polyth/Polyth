@@ -13,6 +13,7 @@ import { openSession } from "../init.ts";
 import { useActiveModel, useStore } from "../store.ts";
 import { layerizeWorkflow, wouldWorkflowCycle } from "../workflowGraph.ts";
 import EmptyState from "./EmptyState.tsx";
+import { tr } from "../i18n/index.ts";
 import { confirmAlert } from "../alerts.ts";
 
 const uid = (): string =>
@@ -72,7 +73,7 @@ export default function WorkflowView() {
           : next[0]?.id ?? null);
       setError("");
     } catch (cause) {
-      setError(`Could not load workflows: ${cause instanceof Error ? cause.message : String(cause)}`);
+      setError(tr("workflowview.couldNotLoadWorkflowsValue", { value: cause instanceof Error ? cause.message : String(cause) }));
     }
   }, [projectId]);
 
@@ -110,7 +111,7 @@ export default function WorkflowView() {
   }, [shownRun?.id, shownRun?.status]);
 
   if (!projectId) {
-    return <EmptyState title="No project selected" description="Open a project to build agent workflows." />;
+    return <EmptyState title={tr("workflowview.noProjectSelected")} description={tr("workflowview.openAProjectToBuildAgentWorkflows")} />;
   }
 
   const act = async (label: string, fn: () => Promise<void>) => {
@@ -129,11 +130,11 @@ export default function WorkflowView() {
     const nodeId = uid();
     const created = await api.createWorkflow({
       projectId,
-      name: `Workflow ${workflows.length + 1}`,
+      name: tr("workflowview.workflowValue", { number: workflows.length + 1 }),
       nodes: [{
         id: nodeId,
-        role: "Worker",
-        prompt: "Complete the assigned workflow task.",
+        role: tr("workflowview.worker"),
+        prompt: tr("workflowview.completeTheAssignedWorkflowTask"),
       }],
       edges: [],
       defaults: { pipe: "ancestors", permissions: "auto", maxParallel: 4, nodeTimeoutMs: 1_800_000 },
@@ -145,7 +146,7 @@ export default function WorkflowView() {
   const save = () => {
     if (!draft) return;
     void act("save", async () => {
-      if (!layers?.ok) throw new Error(layers?.error ?? "Invalid workflow graph");
+      if (!layers?.ok) throw new Error(layers?.error ?? tr("workflowview.invalidWorkflowGraph"));
       const updated = await api.updateWorkflow(draft.id, {
         name: draft.name,
         nodes: draft.nodes,
@@ -158,7 +159,7 @@ export default function WorkflowView() {
   };
 
   const remove = async () => {
-    if (!draft || !await confirmAlert(`Delete workflow “${draft.name}”?`, { title: "Delete workflow", confirmLabel: "Delete" })) return;
+    if (!draft || !await confirmAlert(tr("workflowview.deleteWorkflowValue", { name: draft.name }), { title: tr("workflowview.deleteWorkflow"), confirmLabel: tr("common.delete") })) return;
     void act("delete", async () => {
       await api.deleteWorkflow(draft.id);
       setWorkflows((current) => current.filter((workflow) => workflow.id !== draft.id));
@@ -236,19 +237,19 @@ export default function WorkflowView() {
   return (
     <div className="view-page">
       <div>
-        <h1 className="view-title">Workflows</h1>
-        <p className="view-sub">Build a dependency graph of agent roles, then run each topological layer in parallel.</p>
+        <h1 className="view-title">{tr("workflowview.workflows")}</h1>
+        <p className="view-sub">{tr("workflowview.buildADependencyGraphOfAgentRoles")}</p>
       </div>
       {error && <div className="form-error" role="alert">{error}</div>}
 
       <div style={{ display: "grid", gridTemplateColumns: "minmax(190px, 0.28fr) minmax(0, 1fr)", gap: 12, alignItems: "start" }}>
         <aside className="sched-form">
           <div className="view-toolbar-row">
-            <strong>Definitions</strong>
+            <strong>{tr("workflowview.definitions")}</strong>
             <span className="header-spacer" />
-            <button className="small-btn" disabled={busy === "create"} onClick={create}>+ New</button>
+            <button className="small-btn" disabled={busy === "create"} onClick={create}>{tr("workflowview.new")}</button>
           </div>
-          {workflows.length === 0 && <span className="muted">No workflows yet.</span>}
+          {workflows.length === 0 && <span className="muted">{tr("workflowview.noWorkflowsYet")}</span>}
           {workflows.map((workflow) => (
             <button
               key={workflow.id}
@@ -257,31 +258,31 @@ export default function WorkflowView() {
               onClick={() => setSelectedId(workflow.id)}
             >
               <strong>{workflow.name}</strong>
-              <span className="muted" style={{ display: "block", fontSize: "calc(11px * var(--ui-font-scale, 1))" }}>{workflow.nodes.length} nodes</span>
+              <span className="muted" style={{ display: "block", fontSize: "calc(11px * var(--ui-font-scale, 1))" }}>{workflow.nodes.length} {tr("workflowview.nodes")}</span>
             </button>
           ))}
         </aside>
 
         <main style={{ minWidth: 0, display: "flex", flexDirection: "column", gap: 12 }}>
-          {!draft && <EmptyState title="No workflow selected" description="Create a workflow to start building a DAG." />}
+          {!draft && <EmptyState title={tr("workflowview.noWorkflowSelected")} description={tr("workflowview.createAWorkflowToStartBuildingA")} />}
           {draft && (
             <>
               <section className="sched-form">
                 <div className="view-toolbar-row">
                   <input
                     value={draft.name}
-                    aria-label="Workflow name"
+                    aria-label={tr("workflowview.workflowName")}
                     onChange={(event) => setDraft({ ...draft, name: event.target.value })}
                     style={{ flex: "1 1 260px", fontWeight: 650 }}
                   />
-                  <button className="small-btn" onClick={addNode}>+ Node</button>
-                  <button className="small-btn danger-btn" disabled={busy === "delete"} onClick={remove}>Delete</button>
+                  <button className="small-btn" onClick={addNode}>{tr("workflowview.node")}</button>
+                  <button className="small-btn danger-btn" disabled={busy === "delete"} onClick={remove}>{tr("common.delete")}</button>
                   <button className="primary-btn" disabled={busy === "save" || !layers?.ok} onClick={save}>
-                    {busy === "save" ? "Saving…" : "Save"}
+                    {busy === "save" ? tr("common.saving") : tr("common.save")}
                   </button>
                 </div>
-                <div className="view-toolbar-row" aria-label="Layer preview">
-                  <span className="stat-label" style={{ margin: 0 }}>Layers</span>
+                <div className="view-toolbar-row" aria-label={tr("workflowview.layerPreview")}>
+                  <span className="stat-label" style={{ margin: 0 }}>{tr("workflowview.layers")}</span>
                   {layers?.ok
                     ? layers.layers.map((layer, index) => (
                         <span key={index} className="kbd">
@@ -298,8 +299,8 @@ export default function WorkflowView() {
                     <div className="view-toolbar-row">
                       <input
                         value={node.role}
-                        aria-label={`Role for ${node.id}`}
-                        placeholder="Role"
+                        aria-label={tr("workflowview.roleForValue", { id: node.id })}
+                        placeholder={tr("workflowview.role")}
                         onChange={(event) => updateNode(node.id, { role: event.target.value })}
                         style={{ flex: 1, fontWeight: 650 }}
                       />
@@ -307,26 +308,25 @@ export default function WorkflowView() {
                         className="small-btn danger-btn"
                         disabled={draft.nodes.length === 1}
                         onClick={() => removeNode(node.id)}
-                        aria-label={`Delete ${node.role}`}
+                        aria-label={tr("workflowview.deleteValue", { role: node.role })}
                       >
-                        ×
-                      </button>
+                        {tr("workflowview.message")}</button>
                     </div>
                     <textarea
                       rows={5}
                       value={node.prompt}
-                      aria-label={`Prompt for ${node.role}`}
-                      placeholder="Instructions for this role…"
+                      aria-label={tr("workflowview.promptForValue", { role: node.role })}
+                      placeholder={tr("workflowview.instructionsForThisRole")}
                       onChange={(event) => updateNode(node.id, { prompt: event.target.value })}
                     />
                     <div className="view-toolbar-row">
                       <select
                         value={modelValue(node.model)}
-                        aria-label={`Model for ${node.role}`}
+                        aria-label={tr("workflowview.modelForValue", { role: node.role })}
                         onChange={(event) => updateNode(node.id, { model: parseModel(event.target.value) })}
                         style={{ flex: "1 1 160px" }}
                       >
-                        <option value="">Default model</option>
+                        <option value="">{tr("workflowview.defaultModel")}</option>
                         {models.map((model) => (
                           <option
                             key={`${model.providerID}/${model.modelID}`}
@@ -338,23 +338,23 @@ export default function WorkflowView() {
                       </select>
                       <select
                         value={node.agent ?? ""}
-                        aria-label={`Agent for ${node.role}`}
+                        aria-label={tr("workflowview.agentForValue", { role: node.role })}
                         onChange={(event) => updateNode(node.id, { agent: event.target.value || undefined })}
                         style={{ flex: "1 1 120px" }}
                       >
-                        <option value="">Default agent</option>
+                        <option value="">{tr("workflowview.defaultAgent")}</option>
                         {agents.map((agent) => <option key={agent.name} value={agent.name}>{agent.name}</option>)}
                       </select>
                     </div>
                     {draft.nodes.length > 1 && (
                       <fieldset style={{ border: 0, padding: 0, margin: 0 }}>
-                        <legend className="muted" style={{ fontSize: "calc(12px * var(--ui-font-scale, 1))", marginBottom: 4 }}>Depends on</legend>
+                        <legend className="muted" style={{ fontSize: "calc(12px * var(--ui-font-scale, 1))", marginBottom: 4 }}>{tr("workflowview.dependsOn")}</legend>
                         <div className="view-toolbar-row">
                           {draft.nodes.filter((source) => source.id !== node.id).map((source) => {
                             const checked = draft.edges.some((edge) => edge.source === source.id && edge.target === node.id);
                             const cycle = !checked && wouldWorkflowCycle(draft, source.id, node.id);
                             return (
-                              <label key={source.id} className="sched-every" title={cycle ? "This dependency would create a cycle" : ""}>
+                              <label key={source.id} className="sched-every" title={cycle ? tr("workflowview.thisDependencyWouldCreateACycle") : ""}>
                                 <input
                                   type="checkbox"
                                   checked={checked}
@@ -373,44 +373,40 @@ export default function WorkflowView() {
               </section>
 
               <section className="sched-form">
-                <strong>Run workflow</strong>
+                <strong>{tr("workflowview.runWorkflow")}</strong>
                 <textarea
                   rows={3}
                   value={runInput}
-                  placeholder="Describe the task for this workflow…"
+                  placeholder={tr("workflowview.describeTheTaskForThisWorkflow")}
                   onChange={(event) => setRunInput(event.target.value)}
                 />
                 <div className="view-toolbar-row">
-                  <label className="sched-every">Context
-                    <select value={pipe} onChange={(event) => setPipe(event.target.value as WorkflowPipeMode)}>
-                      <option value="ancestors">All ancestors</option>
-                      <option value="direct">Direct dependencies</option>
+                  <label className="sched-every">{tr("workflowview.context")}<select value={pipe} onChange={(event) => setPipe(event.target.value as WorkflowPipeMode)}>
+                      <option value="ancestors">{tr("workflowview.allAncestors")}</option>
+                      <option value="direct">{tr("workflowview.directDependencies")}</option>
                     </select>
                   </label>
-                  <label className="sched-every">Permissions
-                    <select value={permissions} onChange={(event) => setPermissions(event.target.value as WorkflowPermissionPolicy)}>
-                      <option value="auto">Auto approve</option>
-                      <option value="manual">Manual review</option>
+                  <label className="sched-every">{tr("workflowview.permissions")}<select value={permissions} onChange={(event) => setPermissions(event.target.value as WorkflowPermissionPolicy)}>
+                      <option value="auto">{tr("workflowview.autoApprove")}</option>
+                      <option value="manual">{tr("workflowview.manualReview")}</option>
                     </select>
                   </label>
-                  <label className="sched-every">Parallel
-                    <input type="number" min={1} max={32} value={maxParallel} onChange={(event) => setMaxParallel(Math.max(1, Number(event.target.value)))} style={{ width: 62 }} />
+                  <label className="sched-every">{tr("workflowview.parallel")}<input type="number" min={1} max={32} value={maxParallel} onChange={(event) => setMaxParallel(Math.max(1, Number(event.target.value)))} style={{ width: 62 }} />
                   </label>
-                  <label className="sched-every">Timeout (sec)
-                    <input type="number" min={1} value={nodeTimeoutSeconds} onChange={(event) => setNodeTimeoutSeconds(Math.max(1, Number(event.target.value)))} style={{ width: 82 }} />
+                  <label className="sched-every">{tr("workflowview.timeoutSec")}<input type="number" min={1} value={nodeTimeoutSeconds} onChange={(event) => setNodeTimeoutSeconds(Math.max(1, Number(event.target.value)))} style={{ width: 82 }} />
                   </label>
                   <span className="header-spacer" />
-                  {shownRun?.status === "running" && <button className="small-btn danger-btn" disabled={busy === "stop"} onClick={stop}>Stop</button>}
+                  {shownRun?.status === "running" && <button className="small-btn danger-btn" disabled={busy === "stop"} onClick={stop}>{tr("common.stop")}</button>}
                   <button
                     className="primary-btn"
                     disabled={!sessionId || !runInput.trim() || shownRun?.status === "running" || busy === "run"}
-                    title={sessionId ? "" : "Open a parent session before running a workflow"}
+                    title={sessionId ? "" : tr("workflowview.openAParentSessionBeforeRunningA")}
                     onClick={run}
                   >
-                    {busy === "run" ? "Starting…" : "Run"}
+                    {busy === "run" ? tr("workflowview.starting") : tr("common.run")}
                   </button>
                 </div>
-                {!sessionId && <span className="muted">Open a session to use as the parent run log.</span>}
+                {!sessionId && <span className="muted">{tr("workflowview.openASessionToUseAsThe")}</span>}
               </section>
 
               {shownRun && (
@@ -418,7 +414,7 @@ export default function WorkflowView() {
                   <div className="view-toolbar-row">
                     <strong>{shownRun.name}</strong>
                     <span className={`kbd status-${shownRun.status}`}>{shownRun.status}</span>
-                    <span className="muted">{shownRun.nodes.filter((node) => node.status === "done").length}/{shownRun.nodes.length} done</span>
+                    <span className="muted">{shownRun.nodes.filter((node) => node.status === "done").length}/{shownRun.nodes.length} {tr("workflowview.done")}</span>
                   </div>
                   <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: 10 }}>
                     {shownRun.nodes.map((node) => (
@@ -437,8 +433,7 @@ export default function WorkflowView() {
                         )}
                         {node.sessionId && (
                           <button className="small-btn" onClick={() => void openSession(node.sessionId!)}>
-                            Open session
-                          </button>
+                            {tr("workflowview.openSession")}</button>
                         )}
                       </article>
                     ))}

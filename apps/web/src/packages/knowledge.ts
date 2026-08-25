@@ -6,6 +6,7 @@ import { setRailPlugin } from "../store.ts";
 import { registerPackageOnboarding } from "./onboarding/registry.ts";
 import { KNOWLEDGE_TOUR } from "./onboarding/tours/installed.ts";
 import { combineUnregister } from "./settingsPage.ts";
+import { tr } from "../i18n/index.ts";
 
 export function installKnowledgePackage(): () => void {
   const unregisterPanel = registerSlot(
@@ -13,13 +14,13 @@ export function installKnowledgePackage(): () => void {
     "tracks",
     () => createElement(TracksPanel),
     1,
-    { title: "Tracks" },
+    { title: tr("packages.knowledge.tracks") },
   );
   const unregisterCapability = registerCapability({
     id: "tracks",
-    label: "Tracks",
+    label: tr("packages.knowledge.tracks"),
     technicalLabel: "Spec-driven tracks",
-    plainDescription: "Execute a saved feature spec one tested commit at a time.",
+    plainDescription: tr("packages.knowledge.executeASavedFeatureSpecOneTested"),
     keywords: ["track", "spec", "plan", "workflow", "atomic commit"],
     standardTier: "more",
     standardRank: 17,

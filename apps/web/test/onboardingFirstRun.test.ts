@@ -20,11 +20,13 @@ test("App always renders the operational shell", async () => {
 
 test("guided setup is explicitly scoped to the active project", async () => {
   const src = await setupSrc();
-  assert.ok(src.includes("Set up this project"), "project-scoped setup heading");
-  assert.ok(src.includes("Your project canvas"), "review is project-scoped");
-  assert.ok(src.includes("You can change everything later."), "setup explains that choices are reversible");
-  assert.ok(src.includes("Skip for now"), "skip remains explicit");
-  assert.ok(src.includes('["Workflow", "Control", "Widgets", "Review"]'), "all four steps are named");
+  assert.ok(src.includes('tr("projectsetup.setUpThisProject")'), "project-scoped setup heading");
+  assert.ok(src.includes('tr("projectsetup.yourProjectCanvas")'), "review is project-scoped");
+  assert.ok(src.includes('tr("projectsetup.youCanChangeEverythingLater")'), "setup explains that choices are reversible");
+  assert.ok(src.includes('tr("projectsetup.skipForNow")'), "skip remains explicit");
+  for (const key of ["workflow", "control", "widgets", "review"]) {
+    assert.ok(src.includes(`tr("projectsetup.${key}")`), `${key} setup step is named`);
+  }
   for (const banned of ["Continue as", "persona", "Persona"]) {
     assert.ok(!src.includes(banned), `setup panel must not contain "${banned}"`);
   }
@@ -35,7 +37,7 @@ test("guided choices stay in one draft and persist only from Finish setup", asyn
   assert.ok(src.includes("useState<ProjectSetupDraft>"), "one draft owns the four setup steps");
   assert.ok(src.includes("applyProjectSetup(current, draft, widgets)"), "Finish uses the shared layout engine");
   assert.ok(src.includes("aria-pressed="), "choices expose programmatic selected state");
-  assert.ok(src.includes(">Finish setup</button>"), "one named confirmation action persists the draft");
+  assert.ok(src.includes('{tr("projectsetup.finishSetup")}</button>'), "one named confirmation action persists the draft");
   assert.ok(src.includes("completeProjectSetup();"), "Finish records completion for the active project");
 });
 

@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { register } from "node:module";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { formatList, tr } from "../src/i18n/index.ts";
 
 register("./tsxHooks.mjs", import.meta.url);
 
@@ -87,7 +88,7 @@ test("model metadata reports deduplicated input and output modalities", () => {
     modelID: "vision",
     name: "Vision",
     capabilities: ["input:text", "input:image", "output:image", "toolcall"],
-  }), "Text, Image");
+  }), formatList([tr("modelpicker.text"), tr("modelpicker.image")]));
 });
 
 test("all mobile chat composers expose project and worktree targets", () => {
@@ -102,16 +103,16 @@ test("all mobile chat composers expose project and worktree targets", () => {
   // so fresh and existing chats cannot assemble different control sets.
   assert.doesNotMatch(surface, /<SessionContextBar/);
   assert.match(composer, /<SessionContextBar \{\.\.\.contextBar\} \/>/);
-  assert.match(contextBar, /Project, current \$\{projectName\}/);
-  assert.match(contextBar, /Worktree, current \$\{branchName\}/);
+  assert.match(contextBar, /tr\("mobile\.sessioncontextbar\.projectCurrentValue"/);
+  assert.match(contextBar, /tr\("mobile\.sessioncontextbar\.worktreeCurrentValue"/);
   assert.match(composer, /target: \{ kind: "branch", branch: candidate\.name \}/);
   assert.match(composer, /newSessionTarget\.kind === "branch"/);
   assert.doesNotMatch(composer, /Modalities:/);
-  assert.match(composer, /aria-label="Add files"/);
+  assert.match(composer, /aria-label=\{tr\("composer\.addFiles"\)\}/);
   assert.match(actions, /composer-auto-approve/);
   assert.match(actions, /composer-goals/);
   assert.match(header, /displaySessionTitle\(session\.title, session\.id, firstUserText\)/);
-  assert.match(header, /Composer controls/);
+  assert.match(header, /tr\("header\.composerControls"\)/);
   assert.match(css, /\.polyth-gradient\s*\{[^}]*linear-gradient/s);
 });
 
@@ -127,7 +128,7 @@ test("source-control surfaces keep responsive and accessible audit contracts", (
   assert.match(css, /@container source-surface \(max-width: 599px\)[\s\S]*\.gh-card-overflow/);
   assert.match(git, /aria-pressed=\{prefs\.layout === "unified"\}/);
   assert.doesNotMatch(git, /window\.confirm/);
-  assert.match(git, /Couldn’t load the file diff/);
+  assert.match(git, /tr\("gitview\.couldntLoadTheFileDiff"\)/);
   assert.match(github, /aria-pressed=\{filter === item\.id\}/);
   assert.match(pullRequest, /reviewBusy/);
   assert.match(pullRequest, /<MarkdownDoc/);

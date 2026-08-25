@@ -2,6 +2,7 @@
 import type { SlashCommand, SnippetDef } from "./api.ts";
 import type { JsonObject, SessionEvent } from "@polyth/contracts";
 import type { RenderMessage, TaskActivityMsg, ToolMsg, UserMsg } from "./reduce.ts";
+import { tr } from "./i18n/index.ts";
 
 /** Text of the first user message in a session's event log, if any. */
 export function firstUserText(events: readonly SessionEvent[] | undefined): string | undefined {
@@ -16,13 +17,25 @@ export interface AutocompleteItem {
   value: string;
 }
 
+export function commandDescription(command: SlashCommand): string {
+  if (command.scope !== "builtin") return command.description;
+  const descriptions: Readonly<Record<string, string>> = {
+    init: tr("commands.initDescription"),
+    review: tr("commands.reviewDescription"),
+    compact: tr("commands.compactDescription"),
+    summary: tr("commands.summaryDescription"),
+  };
+  return descriptions[command.name] ?? command.description;
+}
+
 export function filterCommands(cmds: SlashCommand[], prefix: string): AutocompleteItem[] {
   const q = prefix.toLowerCase();
   return cmds
-    .filter((c) => c.name.toLowerCase().includes(q) || c.description.toLowerCase().includes(q))
+    .filter((c) =>
+      c.name.toLowerCase().includes(q) || commandDescription(c).toLowerCase().includes(q))
     .map((c) => ({
       label: `/${c.name}`,
-      detail: c.description,
+      detail: commandDescription(c),
       value: `/${c.name} `,
     }));
 }
@@ -126,11 +139,13 @@ export function mergeThinking(messages: RenderMessage[]): RenderMessage[] {
 
 /** Message as Markdown for the copy action. */
 export function messageMarkdown(m: RenderMessage): string {
-  if (m.kind === "task") return `Task ${m.action}: ${m.text}`;
+  if (m.kind === "task") {
+    return tr("utils.taskValueValue", { action: m.action, text: m.text });
+  }
   if (m.kind === "tool") {
     const parts = [`### ${m.title || m.tool}`, "```json", JSON.stringify(m.input, null, 2), "```"];
     if (m.output) parts.push("", m.output);
-    if (m.error) parts.push("", `Error: ${m.error}`);
+    if (m.error) parts.push("", tr("utils.errorValue", { error: m.error }));
     return parts.join("\n");
   }
   return m.text;

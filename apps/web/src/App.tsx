@@ -19,6 +19,7 @@ import WorkspaceBottomNav from "./components/workspace/WorkspaceBottomNav.tsx";
 import Header from "./components/Header.tsx";
 import AlertDialog from "./components/AlertDialog.tsx";
 import { useWorkspaceMode } from "./widgets/workspaceMode.ts";
+import { tr } from "./i18n/index.ts";
 
 function ErrorBanner() {
   const message = useStore((s) => s.uiError);
@@ -26,7 +27,7 @@ function ErrorBanner() {
   return (
     <div className="error-banner" role="alert">
       <span className="error-banner-text">{message}</span>
-      <button className="error-banner-x" aria-label="Dismiss error" onClick={clearUiError}>×</button>
+      <button className="error-banner-x" aria-label={tr("app.dismissError")} onClick={clearUiError}>{tr("app.message")}</button>
     </div>
   );
 }

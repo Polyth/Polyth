@@ -27,6 +27,7 @@ import {
 import { api } from "../api.ts";
 import { announce } from "./a11y/live.tsx";
 import ProjectAppearanceDialog from "./ProjectAppearanceDialog.tsx";
+import { tr } from "../i18n/index.ts";
 import { confirmAlert } from "../alerts.ts";
 
 const EXPANDED_PROJECTS_KEY = "polyth.sidebar.expandedProjects";
@@ -79,7 +80,7 @@ export default function Sidebar() {
   const [appearanceProjectId, setAppearanceProjectId] = useState<string | null>(null);
   const [attentionOnly, setAttentionOnly] = useState(false);
   const syncStatus = useSyncExternalStore(subscribeSyncStatus, getSyncStatus, () => "disconnected");
-  const host = typeof location === "undefined" ? "Local server" : location.host;
+  const host = typeof location === "undefined" ? tr("sidebar.localServer") : location.host;
 
   // Persisted view mode: list shows the active project; tree expands projects
   // into worktrees and sessions. Expansion is per-project UI state.
@@ -220,17 +221,32 @@ export default function Sidebar() {
     try {
       const result = await api.bulkSessions(op, ids);
       const failNote = result.failed.length
-        ? `; ${result.failed.length} failed (${result.failed.map((failure) => failure.code).join(", ")})`
+        ? tr("sidebar.failedCountValue", {
+            count: result.failed.length,
+            codes: result.failed.map((failure) => failure.code).join(", "),
+          })
         : "";
-      announce(`${op === "archive" ? "Archived" : "Restored"} ${result.succeeded.length} session(s)${failNote}`);
+      const operation = op === "archive"
+        ? tr("sidebar.sessionlist.archived")
+        : tr("common.restore");
+      announce(result.succeeded.length === 1
+        ? tr("sidebar.valueOneSessionValue", { operation, failNote })
+        : tr("sidebar.valueSessionsValue", {
+            operation,
+            count: result.succeeded.length,
+            failNote,
+          }));
       if (result.failed.length > 0) {
-        setUiError(`Some sessions could not be ${op === "archive" ? "archived" : "restored"}: ${result.failed.map((failure) => `${failure.id.slice(0, 8)}:${failure.code}`).join(", ")}`);
+        setUiError(tr("sidebar.bulkSessionOperationFailed", {
+          operation: op === "archive" ? tr("common.archive") : tr("common.restore"),
+          failures: result.failed.map((failure) => `${failure.id.slice(0, 8)}:${failure.code}`).join(", "),
+        }));
       }
       setSelectedSessionIds(new Set());
       setSelectMode(false);
       await Promise.all([...affectedProjects].map((projectId) => refreshSessions(projectId)));
     } catch (error) {
-      setUiError(friendlyError(`Couldn’t ${op} the selected sessions`, error));
+      setUiError(friendlyError(tr("common.error"), error));
     }
   };
   const saveProjectName = async (id: string) => {
@@ -243,7 +259,7 @@ export default function Sidebar() {
       // no component-owned `setProjects(await listProjects())` write.
       await renameProject(id, name);
     } catch (e) {
-      setUiError(friendlyError("Couldn’t rename the project", e));
+      setUiError(friendlyError(tr("common.error"), e));
     }
   };
 
@@ -288,15 +304,15 @@ export default function Sidebar() {
         id="polyth-session-drawer"
         className={`sidebar ${drawerOpen ? "open" : ""}${collapsed ? " collapsed" : ""}`}
         style={!compact ? { width: collapsed ? SIDEBAR_COLLAPSED_WIDTH : width, minWidth: collapsed ? SIDEBAR_COLLAPSED_WIDTH : width } : undefined}
-        {...(compact ? { role: "dialog", "aria-modal": true, "aria-label": "Projects and sessions" } : {})}
+        {...(compact ? { role: "dialog", "aria-modal": true, "aria-label": tr("sidebar.projectsAndSessions") } : {})}
       >
-        <h2 className="sr-only">Projects and sessions</h2>
+        <h2 className="sr-only">{tr("sidebar.projectsAndSessions")}</h2>
         {collapsed && (
           <div className="sidebar-collapsed-rail">
             <button
               className="icon-btn sidebar-expand"
-              title="Expand projects and sessions"
-              aria-label="Expand projects and sessions"
+              title={tr("sidebar.expandProjectsAndSessions")}
+              aria-label={tr("sidebar.expandProjectsAndSessions")}
               aria-expanded="false"
               onClick={() => setSidebarLayout({ collapsed: false })}
             >»</button>
@@ -309,47 +325,47 @@ export default function Sidebar() {
             <input
               type="search"
               value={query}
-              placeholder="Search sessions…"
-              aria-label="Search projects, worktrees, and sessions"
+              placeholder={tr("sidebar.searchSessions")}
+              aria-label={tr("sidebar.searchProjectsWorktreesAndSessions")}
               onChange={(event) => setQuery(event.target.value)}
             />
             {query && (
               <button
                 className="sidebar-search-clear"
-                aria-label="Clear session search"
-                title="Clear search"
+                aria-label={tr("sidebar.clearSessionSearch")}
+                title={tr("sidebar.clearSearch")}
                 onClick={() => setQuery("")}
-              >×</button>
+              >{tr("sidebar.message")}</button>
             )}
           </div>
           <div className="sidebar-popover-anchor" ref={connectionRef}>
             <button
               className={`sidebar-service-btn sidebar-connection-dot ${syncStatus}`}
-              aria-label={`Server connection: ${syncStatus}`}
-              title={`Server connection: ${syncStatus}`}
+              aria-label={tr("sidebar.serverConnectionValue", { syncStatus: syncStatus })}
+              title={tr("sidebar.serverConnectionValue", { syncStatus: syncStatus })}
               aria-haspopup="dialog"
               aria-expanded={connectionOpen}
               onClick={() => setConnectionOpen((open) => !open)}
             ><span aria-hidden="true" /></button>
             {connectionOpen && (
-              <div className="sidebar-service-popover sidebar-connection-popover" role="dialog" aria-label="Server connection details">
-                <strong>{syncStatus === "connected" ? "Connected" : syncStatus === "connecting" ? "Connecting" : "Connection problem"}</strong>
+              <div className="sidebar-service-popover sidebar-connection-popover" role="dialog" aria-label={tr("sidebar.serverConnectionDetails")}>
+                <strong>{syncStatus === "connected" ? tr("sidebar.connected") : syncStatus === "connecting" ? tr("sidebar.connecting") : tr("sidebar.connectionProblem")}</strong>
                 <span>{host}</span>
-                <button onClick={() => { reconnectSync(); setConnectionOpen(false); }}>Reconnect</button>
+                <button onClick={() => { reconnectSync(); setConnectionOpen(false); }}>{tr("sidebar.reconnect")}</button>
               </div>
             )}
           </div>
           <button
             className="sidebar-service-btn"
-            aria-label="Settings"
-            title={`Settings (${MOD} ,)`}
+            aria-label={tr("common.settings")}
+            title={tr("sidebar.settingsValue", { MOD: MOD })}
             onClick={() => setOverlay("settings")}
           ><Icon.gear /></button>
           <div className="sidebar-popover-anchor" ref={globalMenuRef}>
             <button
               className="sidebar-service-btn"
-              aria-label="More sidebar actions"
-              title="More sidebar actions"
+              aria-label={tr("sidebar.moreSidebarActions")}
+              title={tr("sidebar.moreSidebarActions")}
               aria-haspopup="menu"
               aria-expanded={globalMenuOpen}
               onClick={() => setGlobalMenuOpen((open) => !open)}
@@ -359,16 +375,16 @@ export default function Sidebar() {
                 <button role="menuitem" disabled={registry.status === "loading"} onClick={() => {
                   setGlobalMenuOpen(false);
                   setOverlay("project-picker");
-                }}>Add project</button>
+                }}>{tr("sidebar.addProject")}</button>
                 <button role="menuitemcheckbox" aria-checked={selectMode} onClick={() => {
                   toggleSelectMode();
                   setGlobalMenuOpen(false);
-                }}>{selectMode ? "Cancel session selection" : "Select sessions"}</button>
+                }}>{selectMode ? tr("sidebar.cancelSessionSelection") : tr("sidebar.selectSessions")}</button>
                 {!compact && (
                   <button role="menuitem" onClick={() => {
                     setSidebarViewMode(viewMode === "tree" ? "list" : "tree");
                     setGlobalMenuOpen(false);
-                  }}>{viewMode === "tree" ? "Use project list" : "Use project tree"}</button>
+                  }}>{viewMode === "tree" ? tr("sidebar.useProjectList") : tr("sidebar.useProjectTree")}</button>
                 )}
               </div>
             )}
@@ -376,31 +392,33 @@ export default function Sidebar() {
           {compact && (
             <button
               className="sidebar-service-btn drawer-close"
-              title="Close projects and sessions"
-              aria-label="Close projects and sessions"
+              title={tr("sidebar.closeProjectsAndSessions")}
+              aria-label={tr("sidebar.closeProjectsAndSessions")}
               onClick={() => setSidebarOpen(false)}
-            >×</button>
+            >{tr("sidebar.message")}</button>
           )}
         </div>
         <div className="sidebar-list-controls">
           <div className="sidebar-sort" ref={sortRef}>
             <button
               className="sidebar-sort-trigger"
-              aria-label={`Sort sessions, currently ${sort === "recent" ? "recent activity" : "project name"}`}
+              aria-label={tr("sidebar.sortSessionsCurrentlyValue", {
+                value: sort === "recent" ? tr("sidebar.recentActivity") : tr("sidebar.projectName"),
+              })}
               aria-haspopup="menu"
               aria-expanded={sortOpen}
               onClick={() => setSortOpen((open) => !open)}
             >
-              <span>{sort === "recent" ? "Recent activity" : "Project name"}</span>
+              <span>{sort === "recent" ? tr("sidebar.recentActivity") : tr("sidebar.projectName")}</span>
               <span aria-hidden="true">▾</span>
             </button>
             {sortOpen && (
               <div className="sidebar-sort-menu" role="menu">
                 <button role="menuitemradio" aria-checked={sort === "recent"} onClick={() => { setSort("recent"); setSortOpen(false); }}>
-                  Recent activity {sort === "recent" ? "✓" : ""}
+                  {tr("sidebar.recentActivity")}{" "}{sort === "recent" ? "✓" : ""}
                 </button>
                 <button role="menuitemradio" aria-checked={sort === "name"} onClick={() => { setSort("name"); setSortOpen(false); }}>
-                  Project name {sort === "name" ? "✓" : ""}
+                  {tr("sidebar.projectName")}{" "}{sort === "name" ? "✓" : ""}
                 </button>
               </div>
             )}
@@ -409,14 +427,14 @@ export default function Sidebar() {
           <div className="sidebar-filter" ref={filterRef}>
             <button
               className={attentionOnly ? "active" : ""}
-              aria-label="Filter sessions"
+              aria-label={tr("sidebar.filterSessions")}
               aria-pressed={attentionOnly}
               aria-haspopup="menu"
               aria-expanded={filterOpen}
               onClick={() => setFilterOpen((open) => !open)}
             >
               <Icon.filter />
-              <span>Filter</span>
+              <span>{tr("sidebar.filter")}</span>
             </button>
             {filterOpen && (
               <div className="sidebar-filter-menu" role="menu">
@@ -426,10 +444,9 @@ export default function Sidebar() {
                   onClick={() => setAttentionOnly((value) => !value)}
                 >
                   <span aria-hidden="true">{attentionOnly ? "✓" : ""}</span>
-                  Needs attention
-                </button>
+                  {tr("sidebar.needsAttention")}</button>
                 {attentionOnly && (
-                  <button role="menuitem" onClick={() => { setAttentionOnly(false); setFilterOpen(false); }}>Clear filters</button>
+                  <button role="menuitem" onClick={() => { setAttentionOnly(false); setFilterOpen(false); }}>{tr("sidebar.clearFilters")}</button>
                 )}
               </div>
             )}
@@ -437,28 +454,27 @@ export default function Sidebar() {
         </div>
         <div className="side-scroll">
           {selectMode && (
-            <div className="session-bulk-actions" aria-label="Selected session actions">
-              <span>{selectedSessionIds.size === 0 ? "Select sessions" : `${selectedSessionIds.size} selected`}</span>
-              <button className="small-btn" disabled={selectedSessionIds.size === 0} onClick={() => void runBulk("archive")}>Archive</button>
-              <button className="small-btn" disabled={selectedSessionIds.size === 0} onClick={() => void runBulk("restore")}>Restore</button>
+            <div className="session-bulk-actions" aria-label={tr("sidebar.selectedSessionActions")}>
+              <span>{selectedSessionIds.size === 0 ? tr("sidebar.selectSessions") : tr("sidebar.valueSelected", { size: selectedSessionIds.size })}</span>
+              <button className="small-btn" disabled={selectedSessionIds.size === 0} onClick={() => void runBulk("archive")}>{tr("common.archive")}</button>
+              <button className="small-btn" disabled={selectedSessionIds.size === 0} onClick={() => void runBulk("restore")}>{tr("common.restore")}</button>
             </div>
           )}
           {registry.status === "loading" && (
-            <div className="empty side-projects-status" role="status">Loading projects…</div>
+            <div className="empty side-projects-status" role="status">{tr("sidebar.loadingProjects")}</div>
           )}
           {registry.status === "failed" && (
-            <div className="empty side-projects-status" role="status">Couldn’t load projects.</div>
+            <div className="empty side-projects-status" role="status">{tr("sidebar.couldnTLoadProjects")}</div>
           )}
           {registry.status === "ready" && projects.length === 0 && (
             <button className="empty side-open-project" onClick={() => setOverlay("project-picker")}>
-              No projects yet.<br />Choose a project path to start →
-            </button>
+              {tr("sidebar.noProjectsYet")}<br />{tr("sidebar.chooseAProjectPathToStart")}</button>
           )}
           {registry.status === "ready" && projects.length > 0 && visibleProjects.length === 0 && (
-            <div className="empty side-projects-status" role="status">No matching sessions.</div>
+            <div className="empty side-projects-status" role="status">{tr("sidebar.noMatchingSessions")}</div>
           )}
           {query.trim() !== "" && (
-            <div className="sidebar-search-results" aria-label="Session search results">
+            <div className="sidebar-search-results" aria-label={tr("sidebar.sessionSearchResults")}>
               {visibleProjects.map((p) => {
                 const projectMatches = `${p.name} ${p.path}`.toLowerCase().includes(query.trim().toLowerCase());
                 return (
@@ -527,8 +543,8 @@ export default function Sidebar() {
                 </button>
                 <button
                   className="project-new-session"
-                  title={`New chat in ${p.name || p.path}`}
-                  aria-label={`New chat in ${p.name || p.path}`}
+                  title={tr("sidebar.newChatInValue", { value: p.name || p.path })}
+                  aria-label={tr("sidebar.newChatInValue", { value: p.name || p.path })}
                   onClick={(event) => {
                     event.stopPropagation();
                     startNewSession(p.id);
@@ -546,7 +562,7 @@ export default function Sidebar() {
                 ><Icon.worktree /></button>
                 <button
                   className="project-menu-btn"
-                  aria-label={`Actions for ${p.name || p.path}`}
+                  aria-label={tr("sidebar.actionsForValue", { value: p.name || p.path })}
                   aria-haspopup="menu"
                   aria-expanded={projectMenu === p.id}
                   onClick={(event) => {
@@ -558,40 +574,40 @@ export default function Sidebar() {
                   <div
                     className="project-actions-menu"
                     role="menu"
-                    aria-label={`Actions for ${p.name || p.path}`}
+                    aria-label={tr("sidebar.actionsForValue", { value: p.name || p.path })}
                     ref={projectMenuRef}
                     onKeyDown={onProjectMenuKey}
                   >
                     <button role="menuitem" onClick={() => {
                       setProjectMenu(null);
                       openWorktreeSessionDialog(p.id);
-                    }}>New session in worktree…</button>
+                    }}>{tr("sidebar.newSessionInWorktree")}</button>
                     <button role="menuitem" onClick={() => {
                       setProjectMenu(null);
                       setImportingProject(p.id);
-                    }}>Import sessions…</button>
+                    }}>{tr("sidebar.importSessions")}</button>
                     <button role="menuitem" onClick={() => {
                       setProjectMenu(null);
                       setRenamingProject(p.id);
                       setProjectName(p.name);
-                    }}>Rename project</button>
+                    }}>{tr("sidebar.renameProject")}</button>
                     <button role="menuitem" onClick={() => {
                       setProjectMenu(null);
                       setAppearanceProjectId(p.id);
-                    }}>Project appearance…</button>
+                    }}>{tr("sidebar.projectAppearance")}</button>
                     <button role="menuitem" onClick={() => {
                       setProjectMenu(null);
                       if (p.id !== activeProjectId) activateProject(p.id);
                       openWorkspacePane("git");
-                    }}>Source control (Git &amp; worktrees)</button>
+                    }}>{tr("sidebar.sourceControlGitAmpWorktrees")}</button>
                     <div className="project-menu-separator" role="separator" />
                     <button className="project-menu-close" role="menuitem" onClick={() => {
                       setProjectMenu(null);
                       void confirmAlert(
-                        `Close “${p.name || p.path}”? This removes it from Polyth but keeps its folder and files on disk.`,
-                        { title: "Close project", confirmLabel: "Close project" },
+                        tr("sidebar.closeValueThisRemovesItFrom", { name: p.name || p.path }),
+                        { title: tr("sidebar.closeProject"), confirmLabel: tr("sidebar.closeProject") },
                       ).then((ok) => { if (ok) void removeProject(p.id); });
-                    }}>Close project</button>
+                    }}>{tr("sidebar.closeProject")}</button>
                     <SlotHost slot="sidebar.project.actions" context={{ projectId: p.id }} />
                   </div>
                 )}
@@ -652,7 +668,7 @@ export default function Sidebar() {
             className="sidebar-resize"
             role="separator"
             aria-orientation="vertical"
-            aria-label="Resize sidebar"
+            aria-label={tr("sidebar.resizeSidebar")}
             aria-valuenow={width}
             aria-valuemin={SIDEBAR_MIN_WIDTH}
             aria-valuemax={SIDEBAR_MAX_WIDTH}

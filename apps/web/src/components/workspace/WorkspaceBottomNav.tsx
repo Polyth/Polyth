@@ -10,6 +10,7 @@ import {
 import { listSurfaces, useSurfaceVersion, workspaceSurfacesOf } from "../../surfaces.ts";
 import { Icon } from "../../icons.tsx";
 import { displaySessionTitle } from "../../format.ts";
+import { tr } from "../../i18n/index.ts";
 
 export default function WorkspaceBottomNav() {
   const rail = useStore((s) => s.railPlugin);
@@ -26,13 +27,13 @@ export default function WorkspaceBottomNav() {
     const title = displaySessionTitle(session?.title ?? "", session?.id);
     const date = session ? new Date(session.createdAt).toISOString().slice(0, 10) : "Start a session";
     return (
-      <nav className="workspace-bottom-nav session-bottom-nav" aria-label="Session">
-        <button className="session-nav-round" aria-label="Session history" onClick={() => setOverlay("search")}>
+      <nav className="workspace-bottom-nav session-bottom-nav" aria-label={tr("workspace.workspacebottomnav.session")}>
+        <button className="session-nav-round" aria-label={tr("workspace.workspacebottomnav.sessionHistory")} onClick={() => setOverlay("search")}>
           <Icon.rewind />
         </button>
         <button
           className="session-nav-current"
-          aria-label={`Open sessions, current: ${title}`}
+          aria-label={tr("workspace.workspacebottomnav.openSessionsCurrentValue", { title: title })}
           onClick={() => setSidebarOpen(true)}
         >
           <span>{session ? `${title} · ${date}` : date}</span>
@@ -40,7 +41,7 @@ export default function WorkspaceBottomNav() {
         </button>
         <button
           className="session-nav-round"
-          aria-label="New session"
+          aria-label={tr("workspace.workspacebottomnav.newSession")}
           disabled={!projectId}
           onClick={() => {
             if (!projectId) return;
@@ -55,10 +56,10 @@ export default function WorkspaceBottomNav() {
   if (panes.length === 0) return null;
 
   return (
-    <nav className="workspace-bottom-nav" aria-label="Workspace">
+    <nav className="workspace-bottom-nav" aria-label={tr("workspace.workspacebottomnav.workspace")}>
       <button
         className={`wbn-item${chatCurrent ? " current" : ""}`}
-        aria-label="Chat"
+        aria-label={tr("workspace.workspacebottomnav.chat")}
         aria-current={chatCurrent ? "page" : undefined}
         onClick={() => {
           if (paneOpen) closeWorkspacePane();
@@ -66,7 +67,7 @@ export default function WorkspaceBottomNav() {
         }}
       >
         <Icon.context />
-        <span className="wbn-label">Chat</span>
+        <span className="wbn-label">{tr("workspace.workspacebottomnav.chat")}</span>
       </button>
       {panes.map((s) => {
         const current = rail === s.id;

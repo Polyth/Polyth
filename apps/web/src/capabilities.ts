@@ -13,6 +13,7 @@ import {
   getCapabilityPlacements, resolvePlacements, subscribeCapabilityLayout,
   type CapabilityTier, type ResolvedPlacement, type PlacementOverride,
 } from "./capabilityLayout.ts";
+import { tr } from "./i18n/index.ts";
 
 export interface CapabilityDescriptor {
   id: string;
@@ -45,45 +46,45 @@ export interface CapabilityMeta {
  *  Old searchable names (Git, Multi-Run, Fusion, plugin, …) stay as keywords
  *  so existing users are not stranded. */
 export const BUILTIN_CAPABILITY_META: CapabilityMeta[] = [
-  { id: "session", label: "Chat", plainDescription: "Talk with Polyth about your project.", keywords: ["session", "conversation", "chat"], standardTier: "primary", standardRank: 0 },
-  { id: "files", label: "Project files", plainDescription: "Browse and edit the files in your project.", keywords: ["files", "editor", "tree", "quick open"], standardTier: "primary", standardRank: 1 },
-  { id: "browser", label: "Browser", plainDescription: "Browse with agents and point at page elements.", keywords: ["browser", "element picker", "agent browser", "app"], standardTier: "primary", standardRank: 2 },
-  { id: "goals", label: "Goals & progress", plainDescription: "Track goals and how the work is going.", keywords: ["goals", "progress", "status"], standardTier: "primary", standardRank: 3 },
-  { id: "multirun", label: "Compare responses", technicalLabel: "Multi-Run", plainDescription: "Ask several ways at once and compare the answers.", keywords: ["multi-run", "multirun", "compare models"], standardTier: "more", standardRank: 10 },
-  { id: "workflow", label: "Workflows", technicalLabel: "DAG orchestration", plainDescription: "Coordinate agent roles in dependency-based pipelines.", keywords: ["workflow", "dag", "orchestration", "multi-agent"], standardTier: "more", standardRank: 11 },
-  { id: "fusion", label: "Combine drafts", technicalLabel: "Fusion", plainDescription: "Merge the best parts of several drafts.", keywords: ["fusion", "fuse models", "merge"], standardTier: "more", standardRank: 12 },
-  { id: "walkthrough", label: "Guided walkthrough", plainDescription: "A step-by-step guided review of the work.", keywords: ["walkthrough", "guide", "tour"], standardTier: "more", standardRank: 13 },
-  { id: "schedule", label: "Schedule", technicalLabel: "Scheduled prompts", plainDescription: "Run prompts on a schedule.", keywords: ["schedule", "scheduled prompts", "cron"], standardTier: "more", standardRank: 14 },
-  { id: "usage", label: "Usage & cost", plainDescription: "See what the work is using and costing.", keywords: ["usage", "cost", "tokens", "quota"], standardTier: "more", standardRank: 15 },
-  { id: "github", label: "GitHub", plainDescription: "Browse issues and pull requests for this project.", keywords: ["github", "issues", "pull requests", "pr"], standardTier: "more", standardRank: 16 },
-  { id: "knowledge", label: "Knowledge", plainDescription: "Notes and references Polyth can use.", keywords: ["knowledge", "notes", "docs"], standardTier: "more", standardRank: 17 },
-  { id: "context", label: "Context", plainDescription: "What Polyth is currently looking at.", keywords: ["context", "pinned", "session status"], standardTier: "more", standardRank: 18 },
-  { id: "voice", label: "Voice input", technicalLabel: "Dictation", plainDescription: "Talk instead of typing.", keywords: ["voice", "dictation", "microphone", "speech"], standardTier: "more", standardRank: 19 },
-  { id: "git", label: "Source control", technicalLabel: "Git", plainDescription: "Review and manage changes to the code.", keywords: ["git", "worktrees", "branch", "diff", "changes"], standardTier: "technical", standardRank: 30 },
-  { id: "terminal", label: "Terminal", plainDescription: "Run commands in the project workspace.", keywords: ["terminal", "shell", "console"], standardTier: "more", standardRank: 20 },
-  { id: "models-agents", label: "Models & agents", plainDescription: "Choose which model and agent Polyth uses.", keywords: ["model", "agent", "profile", "provider"], standardTier: "technical", standardRank: 32 },
-  { id: "events", label: "Event log", plainDescription: "The raw record of everything in a session.", keywords: ["events", "log", "debug"], standardTier: "technical", standardRank: 33 },
-  { id: "diagnostics", label: "Extension diagnostics", technicalLabel: "Plugins", plainDescription: "Inspect installed extensions and their logs.", keywords: ["plugin", "extension", "install", "logs"], standardTier: "technical", standardRank: 34 },
+  { id: "session", label: tr("capabilities.chat"), plainDescription: tr("capabilities.talkWithPolythAboutYourProject"), keywords: ["session", "conversation", "chat"], standardTier: "primary", standardRank: 0 },
+  { id: "files", label: tr("capabilities.projectFiles"), plainDescription: tr("capabilities.browseAndEditTheFilesInYour"), keywords: ["files", "editor", "tree", "quick open"], standardTier: "primary", standardRank: 1 },
+  { id: "browser", label: tr("capabilities.browser"), plainDescription: tr("capabilities.browseWithAgentsAndPointAt"), keywords: ["browser", "element picker", "agent browser", "app"], standardTier: "primary", standardRank: 2 },
+  { id: "goals", label: tr("capabilities.goalsProgress"), plainDescription: tr("capabilities.trackGoalsAndHowTheWorkIs"), keywords: ["goals", "progress", "status"], standardTier: "primary", standardRank: 3 },
+  { id: "multirun", label: tr("capabilities.compareResponses"), technicalLabel: "Multi-Run", plainDescription: tr("capabilities.askSeveralWaysAtOnceAndCompare"), keywords: ["multi-run", "multirun", "compare models"], standardTier: "more", standardRank: 10 },
+  { id: "workflow", label: tr("capabilities.workflows"), technicalLabel: "DAG orchestration", plainDescription: tr("capabilities.coordinateAgentRolesInDependencyBasedPipelines"), keywords: ["workflow", "dag", "orchestration", "multi-agent"], standardTier: "more", standardRank: 11 },
+  { id: "fusion", label: tr("capabilities.combineDrafts"), technicalLabel: "Fusion", plainDescription: tr("capabilities.mergeTheBestPartsOfSeveralDrafts"), keywords: ["fusion", "fuse models", "merge"], standardTier: "more", standardRank: 12 },
+  { id: "walkthrough", label: tr("capabilities.guidedWalkthrough"), plainDescription: tr("capabilities.aStepByStepGuidedReviewOf"), keywords: ["walkthrough", "guide", "tour"], standardTier: "more", standardRank: 13 },
+  { id: "schedule", label: tr("capabilities.schedule"), technicalLabel: "Scheduled prompts", plainDescription: tr("capabilities.runPromptsOnASchedule"), keywords: ["schedule", "scheduled prompts", "cron"], standardTier: "more", standardRank: 14 },
+  { id: "usage", label: tr("capabilities.usageCost"), plainDescription: tr("capabilities.seeWhatTheWorkIsUsingAnd"), keywords: ["usage", "cost", "tokens", "quota"], standardTier: "more", standardRank: 15 },
+  { id: "github", label: tr("capabilities.github"), plainDescription: tr("capabilities.browseIssuesAndPullRequestsForThis"), keywords: ["github", "issues", "pull requests", "pr"], standardTier: "more", standardRank: 16 },
+  { id: "knowledge", label: tr("capabilities.knowledge"), plainDescription: tr("capabilities.notesAndReferencesPolythCanUse"), keywords: ["knowledge", "notes", "docs"], standardTier: "more", standardRank: 17 },
+  { id: "context", label: tr("capabilities.context"), plainDescription: tr("capabilities.whatPolythIsCurrentlyLookingAt"), keywords: ["context", "pinned", "session status"], standardTier: "more", standardRank: 18 },
+  { id: "voice", label: tr("capabilities.voiceInput"), technicalLabel: "Dictation", plainDescription: tr("capabilities.talkInsteadOfTyping"), keywords: ["voice", "dictation", "microphone", "speech"], standardTier: "more", standardRank: 19 },
+  { id: "git", label: tr("capabilities.sourceControl"), technicalLabel: "Git", plainDescription: tr("capabilities.reviewAndManageChangesToTheCode"), keywords: ["git", "worktrees", "branch", "diff", "changes"], standardTier: "technical", standardRank: 30 },
+  { id: "terminal", label: tr("capabilities.terminal"), plainDescription: tr("capabilities.runCommandsInTheProjectWorkspace"), keywords: ["terminal", "shell", "console"], standardTier: "more", standardRank: 20 },
+  { id: "models-agents", label: tr("capabilities.modelsAgents"), plainDescription: tr("capabilities.chooseWhichModelAndAgentPolythUses"), keywords: ["model", "agent", "profile", "provider"], standardTier: "technical", standardRank: 32 },
+  { id: "events", label: tr("capabilities.eventLog"), plainDescription: tr("capabilities.theRawRecordOfEverythingInA"), keywords: ["events", "log", "debug"], standardTier: "technical", standardRank: 33 },
+  { id: "diagnostics", label: tr("capabilities.extensionDiagnostics"), technicalLabel: "Plugins", plainDescription: tr("capabilities.inspectInstalledExtensionsAndTheirLogs"), keywords: ["plugin", "extension", "install", "logs"], standardTier: "technical", standardRank: 34 },
 ];
 
 // ---- plain-language disclosure groups -----------------------------------------
 
-export const TECHNICAL_GROUP_LABEL = "Technical options";
+export const TECHNICAL_GROUP_LABEL = tr("capabilities.technicalOptions");
 
 const GROUP_OF: Record<string, string> = {
-  files: "Work with the project",
-  browser: "Work with the project",
-  goals: "Work with the project",
-  knowledge: "Work with the project",
-  context: "Work with the project",
-  voice: "Work with the project",
-  usage: "Plan and review",
-  schedule: "Plan and review",
-  walkthrough: "Plan and review",
-  github: "Plan and review",
-  multirun: "Compare and refine",
-  workflow: "Compare and refine",
-  fusion: "Compare and refine",
+  files: tr("capabilities.workWithTheProject"),
+  browser: tr("capabilities.workWithTheProject"),
+  goals: tr("capabilities.workWithTheProject"),
+  knowledge: tr("capabilities.workWithTheProject"),
+  context: tr("capabilities.workWithTheProject"),
+  voice: tr("capabilities.workWithTheProject"),
+  usage: tr("capabilities.planAndReview"),
+  schedule: tr("capabilities.planAndReview"),
+  walkthrough: tr("capabilities.planAndReview"),
+  github: tr("capabilities.planAndReview"),
+  multirun: tr("capabilities.compareAndRefine"),
+  workflow: tr("capabilities.compareAndRefine"),
+  fusion: tr("capabilities.compareAndRefine"),
   git: TECHNICAL_GROUP_LABEL,
   terminal: TECHNICAL_GROUP_LABEL,
   "models-agents": TECHNICAL_GROUP_LABEL,
@@ -94,14 +95,14 @@ const GROUP_OF: Record<string, string> = {
 /** Dynamically registered extensions default to the generic More tools group
  *  (and the `more` tier) and are searchable immediately. */
 export function capabilityGroup(id: string): string {
-  return GROUP_OF[id] ?? "More tools";
+  return GROUP_OF[id] ?? tr("capabilitymenu.moreTools");
 }
 
 export const GROUP_ORDER = [
-  "Work with the project",
-  "Plan and review",
-  "Compare and refine",
-  "More tools",
+  tr("capabilities.workWithTheProject"),
+  tr("capabilities.planAndReview"),
+  tr("capabilities.compareAndRefine"),
+  tr("capabilitymenu.moreTools"),
   TECHNICAL_GROUP_LABEL,
 ];
 

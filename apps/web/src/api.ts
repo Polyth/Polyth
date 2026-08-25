@@ -54,6 +54,7 @@ import type {
   WorkflowRunOptionsDto,
   WorkspaceLabel,
 } from "@polyth/contracts";
+import { tr } from "./i18n/index.ts";
 
 export interface BrowserSessionDto {
   id: string;
@@ -178,7 +179,11 @@ async function jfetch<T>(path: string, init?: RequestInit): Promise<T> {
       // non-JSON error body
     }
     throw Object.assign(
-      new Error(message ?? `HTTP ${res.status} ${res.statusText} — ${body}`),
+      new Error(message ?? tr("api.httpErrorValueValueValue", {
+        status: res.status,
+        statusText: res.statusText,
+        body,
+      })),
       { status: res.status, ...(code !== undefined ? { code } : {}) },
     );
   }
@@ -994,41 +999,53 @@ export const api = {
   // ---- github (gh CLI; fail-soft) --------------------------------------------
   githubStatus: (projectId: string) =>
     jfetch<GithubStatusDto>(`/api/github/status?projectId=${encodeURIComponent(projectId)}`).catch(
-      (): GithubStatusDto => ({ installed: false, authenticated: false, user: null, repo: null, reason: "server unreachable" }),
+      (): GithubStatusDto => ({
+        installed: false,
+        authenticated: false,
+        user: null,
+        repo: null,
+        reason: tr("settings.pages.serverUnreachable"),
+      }),
     ),
   githubRepo: (projectId: string) =>
     jfetch<GhListResult<GithubRepoDto>>(`/api/github/repo?projectId=${encodeURIComponent(projectId)}`).catch(
-      (): GhListResult<GithubRepoDto> => ({ ok: false, reason: "server unreachable" }),
+      (): GhListResult<GithubRepoDto> => ({ ok: false, reason: tr("settings.pages.serverUnreachable") }),
     ),
   githubIssues: (projectId: string, limit = 30) =>
     jfetch<GhListResult<GithubIssueDto[]>>(`/api/github/issues?projectId=${encodeURIComponent(projectId)}&limit=${limit}`).catch(
-      (): GhListResult<GithubIssueDto[]> => ({ ok: false, reason: "server unreachable" }),
+      (): GhListResult<GithubIssueDto[]> => ({ ok: false, reason: tr("settings.pages.serverUnreachable") }),
     ),
   githubPrs: (projectId: string, limit = 30) =>
     jfetch<GhListResult<GithubPrDto[]>>(`/api/github/prs?projectId=${encodeURIComponent(projectId)}&limit=${limit}`).catch(
-      (): GhListResult<GithubPrDto[]> => ({ ok: false, reason: "server unreachable" }),
+      (): GhListResult<GithubPrDto[]> => ({ ok: false, reason: tr("settings.pages.serverUnreachable") }),
     ),
   githubCurrentPrSummary: (projectId: string) =>
     jfetch<GhListResult<CurrentPrSummaryDto>>(
       `/api/github/pr/current?projectId=${encodeURIComponent(projectId)}`,
-    ).catch((): GhListResult<CurrentPrSummaryDto> => ({ ok: false, reason: "server unreachable" })),
+    ).catch((): GhListResult<CurrentPrSummaryDto> => ({
+      ok: false,
+      reason: tr("settings.pages.serverUnreachable"),
+    })),
 
   // ---- PR detail surfaces (WP11; fail-soft) ------------------------------------
   githubPrDetail: (projectId: string, number: number) =>
     jfetch<GhListResult<PrDetailDto>>(`/api/github/pr?projectId=${encodeURIComponent(projectId)}&number=${number}`).catch(
-      (): GhListResult<PrDetailDto> => ({ ok: false, reason: "server unreachable" }),
+      (): GhListResult<PrDetailDto> => ({ ok: false, reason: tr("settings.pages.serverUnreachable") }),
     ),
   githubPrFiles: (projectId: string, number: number) =>
     jfetch<GhListResult<PrFileDto[]>>(`/api/github/pr/files?projectId=${encodeURIComponent(projectId)}&number=${number}`).catch(
-      (): GhListResult<PrFileDto[]> => ({ ok: false, reason: "server unreachable" }),
+      (): GhListResult<PrFileDto[]> => ({ ok: false, reason: tr("settings.pages.serverUnreachable") }),
     ),
   githubPrChecks: (projectId: string, number: number) =>
     jfetch<GhListResult<{ checks: PrCheckDto[]; summary: ChecksSummaryDto }>>(
       `/api/github/pr/checks?projectId=${encodeURIComponent(projectId)}&number=${number}`,
-    ).catch((): GhListResult<{ checks: PrCheckDto[]; summary: ChecksSummaryDto }> => ({ ok: false, reason: "server unreachable" })),
+    ).catch((): GhListResult<{ checks: PrCheckDto[]; summary: ChecksSummaryDto }> => ({
+      ok: false,
+      reason: tr("settings.pages.serverUnreachable"),
+    })),
   githubPrComments: (projectId: string, number: number) =>
     jfetch<GhListResult<PrCommentDto[]>>(`/api/github/pr/comments?projectId=${encodeURIComponent(projectId)}&number=${number}`).catch(
-      (): GhListResult<PrCommentDto[]> => ({ ok: false, reason: "server unreachable" }),
+      (): GhListResult<PrCommentDto[]> => ({ ok: false, reason: tr("settings.pages.serverUnreachable") }),
     ),
   githubPrDiff: (projectId: string, number: number) =>
     jfetch<GhListResult<string>>(`/api/github/pr/diff?projectId=${encodeURIComponent(projectId)}&number=${number}`).catch(
@@ -1112,7 +1129,7 @@ export const api = {
   // ---- shared internal browser ------------------------------------------------
   browserCapability: () =>
     jfetch<{ available: boolean; engine: "chromium" | "fake" | null; reason?: string }>(`/api/browser/capability`).catch(
-      () => ({ available: false, engine: null, reason: "server unreachable" }),
+      () => ({ available: false, engine: null, reason: tr("settings.pages.serverUnreachable") }),
     ),
   browserCreate: (input: {
     projectId: string;
@@ -1162,7 +1179,7 @@ export const api = {
   // ---- streaming dictation (WP15; audio itself travels over /ws) ---------------
   dictationCapability: () =>
     jfetch<{ available: boolean; engine?: string; reason?: string }>(`/api/dictation/capability`).catch(
-      () => ({ available: false, reason: "server unreachable" }),
+      () => ({ available: false, reason: tr("settings.pages.serverUnreachable") }),
     ),
   dictationCreate: (input: { sessionId?: string; language?: string }) =>
     jfetch<DictationSessionDto>(`/api/dictation`, json("POST", input as JsonObject)),
@@ -1184,7 +1201,7 @@ export const api = {
     const res = await fetch(`/api/tts/speak`, json("POST", { text, ...opts }));
     if (!res.ok) {
       const body = await res.json().catch(() => ({})) as { message?: string };
-      throw new Error(body.message ?? `TTS failed: HTTP ${res.status}`);
+      throw new Error(body.message ?? tr("api.ttsFailedHttpValue", { status: res.status }));
     }
     return res.arrayBuffer();
   },
@@ -1289,7 +1306,7 @@ export const api = {
     return {
       ok: false,
       error: body.error ?? `http-${res.status}`,
-      message: body.message ?? `HTTP ${res.status}`,
+      message: body.message ?? tr("api.httpStatusValue", { status: res.status }),
       ...(typeof body.retryAfterSec === "number" ? { retryAfterSec: body.retryAfterSec } : {}),
     };
   },

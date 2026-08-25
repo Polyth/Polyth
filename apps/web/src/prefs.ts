@@ -2,6 +2,7 @@
 // reads persona/plugin membership for availability. Compatibility exports
 // remain while external plugin call sites move off them.
 import { useSyncExternalStore } from "react";
+import { tr } from "./i18n/index.ts";
 
 export type PersonaId = "engineer" | "manager" | "creator" | "blank";
 export type PluginId =
@@ -23,10 +24,10 @@ const LEGACY_PERSONA_PLUGINS: Record<PersonaId, PluginId[]> = {
 
 /** Kept as legacy search keywords and slot-prop compatibility labels. */
 export const PLUGIN_LABELS: Record<PluginId, string> = {
-  session: "Session", goals: "Goals", files: "Files", git: "Git", browser: "Browser",
-  terminal: "Terminal", context: "Context", usage: "Usage", events: "Events",
-  multirun: "Multi-Run", fusion: "Fusion", walkthrough: "Walkthrough",
-  schedule: "Schedule", github: "GitHub", dictation: "Dictation", knowledge: "Knowledge",
+  session: tr("prefs.session"), goals: tr("prefs.goals"), files: tr("prefs.files"), git: tr("prefs.git"), browser: tr("prefs.browser"),
+  terminal: tr("prefs.terminal"), context: tr("prefs.context"), usage: tr("prefs.usage"), events: tr("prefs.events"),
+  multirun: "Multi-Run", fusion: tr("prefs.fusion"), walkthrough: tr("prefs.walkthrough"),
+  schedule: tr("prefs.schedule"), github: tr("prefs.github"), dictation: tr("prefs.dictation"), knowledge: tr("prefs.knowledge"),
 };
 
 function isPlugin(id: unknown): id is PluginId {

@@ -14,6 +14,7 @@ import type {
 } from "@polyth/contracts";
 import { api } from "../api.ts";
 import { defineWidgetPlugin, registerWidgetPlugin } from "./catalog.ts";
+import { tr } from "../i18n/index.ts";
 
 const WORKSPACE_SLOTS = [
   "workspace.header",
@@ -29,7 +30,7 @@ const ACTION_SLOTS = [
 ] as const;
 
 const errorText = (error: unknown): string =>
-  error instanceof Error ? error.message : "Home Assistant request failed";
+  error instanceof Error ? error.message : tr("widgets.homeassistantplugin.requestFailed");
 
 const attribute = (entity: HomeAssistantEntityDto, key: string): JsonValue | undefined =>
   entity.attributes[key];
@@ -134,12 +135,14 @@ function ConnectionWidget() {
       <div className={`ha-status ha-status-${state}`}>
         <i aria-hidden="true" />
         <div>
-          <strong>{state === "connected" ? "Connected" : state === "unavailable" ? "Unavailable" : "Not configured"}</strong>
-          <span>{status?.version ? `Home Assistant ${status.version}` : status?.message || error || "Checking connection…"}</span>
+          <strong>{state === "connected" ? tr("widgets.homeassistantplugin.connected") : state === "unavailable" ? tr("common.unavailable") : tr("widgets.homeassistantplugin.notConfigured")}</strong>
+          <span>{status?.version
+            ? tr("widgets.homeassistantplugin.homeAssistantValue", { version: status.version })
+            : status?.message || error || tr("widgets.homeassistantplugin.checkingConnection")}</span>
         </div>
       </div>
       {status?.baseUrl && <code>{status.baseUrl}</code>}
-      <button type="button" onClick={() => void reload()}>Refresh</button>
+      <button type="button" onClick={() => void reload()}>{tr("common.refresh")}</button>
     </div>
   );
 }
@@ -149,8 +152,16 @@ function EntityStateWidget() {
   const entityId = config?.entities.stateEntityId ?? "";
   const { entities, error, loading, reload } = useEntities(entityId ? [entityId] : []);
   const entity = entities[0];
-  if (!entityId) return <Empty>Choose a state entity in this widget’s settings.</Empty>;
-  if (!entity) return <Empty>{error || configError || (loading ? "Loading entity…" : "Entity unavailable.")}</Empty>;
+  if (!entityId) return <Empty>{tr("widgets.homeassistantplugin.chooseAStateEntityInThisWidget")}</Empty>;
+  if (!entity) {
+    return (
+      <Empty>
+        {error || configError || (loading
+          ? tr("widgets.homeassistantplugin.loadingEntity")
+          : tr("widgets.homeassistantplugin.entityUnavailable"))}
+      </Empty>
+    );
+  }
   const useful = Object.entries(entity.attributes)
     .filter(([key, value]) => key !== "friendly_name" && typeof value !== "object")
     .slice(0, 4);
@@ -168,7 +179,7 @@ function EntityStateWidget() {
           ))}
         </dl>
       )}
-      <button type="button" onClick={() => void reload()}>Refresh state</button>
+      <button type="button" onClick={() => void reload()}>{tr("widgets.homeassistantplugin.refreshState")}</button>
     </div>
   );
 }
@@ -194,13 +205,17 @@ function LightWidget() {
       setActing(false);
     }
   };
-  if (!entityId) return <Empty>Choose a light entity in this widget’s settings.</Empty>;
+  if (!entityId) return <Empty>{tr("widgets.homeassistantplugin.chooseALightEntityInThisWidget")}</Empty>;
   return (
     <div className={`ha-light${on ? " is-on" : ""}`}>
       <button type="button" onClick={() => void toggle()} disabled={acting || loading}>
         <span aria-hidden="true">◉</span>
-        <strong>{entity ? entityName(entity) : "Light"}</strong>
-        <small>{acting ? "Switching…" : actionError || error || configError || (on ? "On" : "Off")}</small>
+        <strong>{entity ? entityName(entity) : tr("widgets.homeassistantplugin.light")}</strong>
+        <small>{acting
+          ? tr("widgets.homeassistantplugin.switching")
+          : actionError || error || configError || (on
+            ? tr("widgets.homeassistantplugin.on")
+            : tr("widgets.homeassistantplugin.off"))}</small>
       </button>
     </div>
   );
@@ -232,7 +247,7 @@ function ClimateSensorsWidget() {
       setActing(false);
     }
   };
-  if (ids.length === 0) return <Empty>Choose climate and sensor entities in this widget’s settings.</Empty>;
+  if (ids.length === 0) return <Empty>{tr("widgets.homeassistantplugin.chooseClimateAndSensorEntitiesInThis")}</Empty>;
   return (
     <div className="ha-climate">
       {climate && (
@@ -243,7 +258,7 @@ function ClimateSensorsWidget() {
           </div>
           <div className="ha-temperature">
             <button type="button" disabled={acting || !Number.isFinite(target)} onClick={() => void setTemperature(target - 0.5)}>−</button>
-            <span><small>Target</small><b>{Number.isFinite(target) ? `${target}°` : "—"}</b></span>
+            <span><small>{tr("widgets.homeassistantplugin.target")}</small><b>{Number.isFinite(target) ? `${target}°` : "—"}</b></span>
             <button type="button" disabled={acting || !Number.isFinite(target)} onClick={() => void setTemperature(target + 0.5)}>+</button>
           </div>
         </section>
@@ -257,7 +272,7 @@ function ClimateSensorsWidget() {
         ))}
       </div>
       {(actionError || error || configError) && <p className="ha-error">{actionError || error || configError}</p>}
-      {loading && <small className="ha-loading">Refreshing…</small>}
+      {loading && <small className="ha-loading">{tr("widgets.homeassistantplugin.refreshing")}</small>}
     </div>
   );
 }
@@ -301,7 +316,7 @@ export function HomeAssistantSettings() {
         },
       });
       setToken("");
-      setMessage(next.tokenConfigured ? "Saved and token configured." : "Saved. Add the long-lived token.");
+      setMessage(next.tokenConfigured ? tr("widgets.homeassistantplugin.savedAndTokenConfigured") : tr("widgets.homeassistantplugin.savedAddTheLongLivedToken"));
       await reload();
     } catch (cause) {
       setMessage(errorText(cause));
@@ -312,16 +327,16 @@ export function HomeAssistantSettings() {
 
   return (
     <form className="ha-settings" onSubmit={(event) => void save(event)}>
-      <label>Home Assistant URL<input value={baseUrl} onChange={(event) => setBaseUrl(event.target.value)} placeholder="http://homeassistant.local:8123" /></label>
-      <label>Token environment name<input value={tokenEnv} onChange={(event) => setTokenEnv(event.target.value)} placeholder="HOME_ASSISTANT_TOKEN" /></label>
-      <label>Long-lived token<input type="password" value={token} onChange={(event) => setToken(event.target.value)} placeholder={config?.tokenConfigured ? "Configured — leave blank to keep" : "Write-only token"} autoComplete="new-password" /></label>
-      <label>State entity<input value={stateEntityId} onChange={(event) => setStateEntityId(event.target.value)} placeholder="binary_sensor.front_door" /></label>
-      <label>Light entity<input value={lightEntityId} onChange={(event) => setLightEntityId(event.target.value)} placeholder="light.kitchen" /></label>
-      <label>Climate entity<input value={climateEntityId} onChange={(event) => setClimateEntityId(event.target.value)} placeholder="climate.downstairs" /></label>
-      <label>Sensor entities<input value={sensorEntityIds} onChange={(event) => setSensorEntityIds(event.target.value)} placeholder="sensor.temperature, sensor.humidity" /></label>
-      <small>The token value is write-only. Polyth returns only its environment-variable name and configured state.</small>
+      <label>{tr("widgets.homeassistantplugin.homeAssistantUrl")}<input value={baseUrl} onChange={(event) => setBaseUrl(event.target.value)} placeholder={tr("widgets.homeassistantplugin.httpHomeassistantLocal8123")} /></label>
+      <label>{tr("widgets.homeassistantplugin.tokenEnvironmentName")}<input value={tokenEnv} onChange={(event) => setTokenEnv(event.target.value)} placeholder={tr("widgets.homeassistantplugin.homeAssistantToken")} /></label>
+      <label>{tr("widgets.homeassistantplugin.longLivedToken")}<input type="password" value={token} onChange={(event) => setToken(event.target.value)} placeholder={config?.tokenConfigured ? tr("widgets.homeassistantplugin.configuredLeaveBlankToKeep") : tr("widgets.homeassistantplugin.writeOnlyToken")} autoComplete="new-password" /></label>
+      <label>{tr("widgets.homeassistantplugin.stateEntity")}<input value={stateEntityId} onChange={(event) => setStateEntityId(event.target.value)} placeholder={tr("widgets.homeassistantplugin.binarySensorFrontDoor")} /></label>
+      <label>{tr("widgets.homeassistantplugin.lightEntity")}<input value={lightEntityId} onChange={(event) => setLightEntityId(event.target.value)} placeholder={tr("widgets.homeassistantplugin.lightKitchen")} /></label>
+      <label>{tr("widgets.homeassistantplugin.climateEntity")}<input value={climateEntityId} onChange={(event) => setClimateEntityId(event.target.value)} placeholder={tr("widgets.homeassistantplugin.climateDownstairs")} /></label>
+      <label>{tr("widgets.homeassistantplugin.sensorEntities")}<input value={sensorEntityIds} onChange={(event) => setSensorEntityIds(event.target.value)} placeholder={tr("widgets.homeassistantplugin.sensorTemperatureSensorHumidity")} /></label>
+      <small>{tr("widgets.homeassistantplugin.theTokenValueIsWriteOnlyPolyth")}</small>
       {(message || error) && <p className="ha-settings-message">{message || error}</p>}
-      <button type="submit" disabled={saving}>{saving ? "Saving…" : "Save Home Assistant"}</button>
+      <button type="submit" disabled={saving}>{saving ? tr("common.saving") : tr("widgets.homeassistantplugin.saveHomeAssistant")}</button>
     </form>
   );
 }
@@ -334,9 +349,9 @@ function StatusAction() {
       type="button"
       className={`header-action ha-mini ha-status-${state}`}
       onClick={() => void reload()}
-      title={status?.message || error || "Refresh Home Assistant status"}
+      title={status?.message || error || tr("widgets.homeassistantplugin.refreshHomeAssistantStatus")}
     >
-      <i aria-hidden="true" /><span>Home</span>
+      <i aria-hidden="true" /><span>{tr("widgets.homeassistantplugin.home")}</span>
     </button>
   );
 }
@@ -367,9 +382,14 @@ function LightAction() {
       className={`header-action ha-mini-light${on ? " is-on" : ""}`}
       disabled={!entityId || acting}
       onClick={() => void toggle()}
-      title={error || (entityId ? `Turn ${entityId} ${on ? "off" : "on"}` : "Configure a Home Assistant light")}
+      title={error || (entityId
+        ? tr("widgets.homeassistantplugin.turnValueValue", {
+            entityId,
+            state: on ? tr("widgets.homeassistantplugin.off") : tr("widgets.homeassistantplugin.on"),
+          })
+        : tr("widgets.homeassistantplugin.configureAHomeAssistantLight"))}
     >
-      <span aria-hidden="true">◉</span><span>{acting ? "Switching…" : "Light"}</span>
+      <span aria-hidden="true">◉</span><span>{acting ? tr("widgets.homeassistantplugin.switching") : tr("widgets.homeassistantplugin.light")}</span>
     </button>
   );
 }
@@ -380,8 +400,8 @@ export const HOME_ASSISTANT_WIDGET_PLUGIN = defineWidgetPlugin({
   widgets: [
     {
       id: "home-assistant.connection",
-      title: "Home Assistant",
-      description: "Connection health and Home Assistant server details.",
+      title: tr("widgets.homeassistantplugin.homeAssistant"),
+      description: tr("widgets.homeassistantplugin.connectionHealthAndHomeAssistantServerDetails"),
       kind: "widget",
       defaultSlot: "workspace.right",
       supportedSlots: WORKSPACE_SLOTS,
@@ -397,8 +417,8 @@ export const HOME_ASSISTANT_WIDGET_PLUGIN = defineWidgetPlugin({
     },
     {
       id: "home-assistant.entity-state",
-      title: "Entity state",
-      description: "Live state and attributes for a selected Home Assistant entity.",
+      title: tr("widgets.homeassistantplugin.entityState"),
+      description: tr("widgets.homeassistantplugin.liveStateAndAttributesForASelected"),
       kind: "widget",
       defaultSlot: "workspace.right",
       supportedSlots: ["workspace.left", "workspace.main", "workspace.right"],
@@ -413,8 +433,8 @@ export const HOME_ASSISTANT_WIDGET_PLUGIN = defineWidgetPlugin({
     },
     {
       id: "home-assistant.light",
-      title: "Light control",
-      description: "See and toggle a configured Home Assistant light.",
+      title: tr("widgets.homeassistantplugin.lightControl"),
+      description: tr("widgets.homeassistantplugin.seeAndToggleAConfiguredHomeAssistant"),
       kind: "widget",
       defaultSlot: "workspace.header",
       supportedSlots: WORKSPACE_SLOTS,
@@ -430,8 +450,8 @@ export const HOME_ASSISTANT_WIDGET_PLUGIN = defineWidgetPlugin({
     },
     {
       id: "home-assistant.climate-sensors",
-      title: "Climate & sensors",
-      description: "Temperature controls and sensor readings from Home Assistant.",
+      title: tr("widgets.homeassistantplugin.climateSensors"),
+      description: tr("widgets.homeassistantplugin.temperatureControlsAndSensorReadingsFromHome"),
       kind: "widget",
       defaultSlot: "workspace.right",
       supportedSlots: ["workspace.left", "workspace.main", "workspace.right", "workspace.bottom"],
@@ -447,8 +467,8 @@ export const HOME_ASSISTANT_WIDGET_PLUGIN = defineWidgetPlugin({
     },
     {
       id: "home-assistant.status-action",
-      title: "Home status",
-      description: "Compact Home Assistant connection indicator.",
+      title: tr("widgets.homeassistantplugin.homeStatus"),
+      description: tr("widgets.homeassistantplugin.compactHomeAssistantConnectionIndicator"),
       kind: "mini-widget",
       defaultSlot: "app.header.actions",
       supportedSlots: ACTION_SLOTS,
@@ -463,8 +483,8 @@ export const HOME_ASSISTANT_WIDGET_PLUGIN = defineWidgetPlugin({
     },
     {
       id: "home-assistant.light-action",
-      title: "Quick light",
-      description: "Toggle the configured Home Assistant light from a toolbar or panel.",
+      title: tr("widgets.homeassistantplugin.quickLight"),
+      description: tr("widgets.homeassistantplugin.toggleTheConfiguredHomeAssistantLightFrom"),
       kind: "mini-widget",
       defaultSlot: "session.header.actions",
       supportedSlots: ACTION_SLOTS,

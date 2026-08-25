@@ -24,6 +24,7 @@ import { supportedWidgetSlots } from "../../widgets/widgetLibrary.ts";
 import "../../widgets/builtinWidgets.tsx";
 import { PageHead } from "./parts.tsx";
 import { RESPONSE_ACTION_IDS, setUiSettings, useUiSettings, type ResponseActionId } from "../../uiPrefs.ts";
+import { tr } from "../../i18n/index.ts";
 
 type MiniPlaceId = "composer" | "session-footer" | "app-header";
 type InterfaceSurfaceId = "top-rail" | "right-rail" | "response-footer" | MiniPlaceId;
@@ -36,15 +37,15 @@ const CAPABILITY_PLACES: Array<{
 }> = [
   {
     id: "primary",
-    title: "Top rail",
-    description: "Centered workspace tools at the top. Drag to choose their order.",
+    title: tr("settings.widgetspage.topRail"),
+    description: tr("settings.widgetspage.centeredWorkspaceToolsAtThe"),
   },
   {
     // "more" is the durable placement value used by ContextRail. Present it
     // as the physical destination users see, never as an ambiguous menu.
     id: "more",
-    title: "Right rail",
-    description: "Panel buttons along the right edge. Drag to choose their order.",
+    title: tr("settings.widgetspage.rightRail"),
+    description: tr("settings.widgetspage.panelButtonsAlongTheRightEdgeDrag"),
   },
 ];
 
@@ -56,20 +57,20 @@ const MINI_PLACES: Array<{
 }> = [
   {
     id: "composer",
-    title: "Composer actions",
-    description: "Buttons beside the message composer.",
+    title: tr("settings.widgetspage.composerActions"),
+    description: tr("settings.widgetspage.buttonsBesideTheMessageComposer"),
     slots: ["composer.leading", "composer.trailing"],
   },
   {
     id: "session-footer",
-    title: "Session footer",
-    description: "Widgets shown just above the message composer.",
+    title: tr("settings.widgetspage.sessionFooter"),
+    description: tr("settings.widgetspage.widgetsShownJustAboveTheMessageComposer"),
     slots: ["session.footer"],
   },
   {
     id: "app-header",
-    title: "Header actions",
-    description: "Application and active-session actions at the end of the top rail.",
+    title: tr("settings.widgetspage.headerActions"),
+    description: tr("settings.widgetspage.applicationAndActiveSessionActionsAtThe"),
     slots: ["session.header.actions", "app.header.actions"],
   },
 ];
@@ -84,7 +85,7 @@ function MiniWidgetPicker({
   return (
     <div className="widget-place-picker" role="menu">
       {widgets.length === 0
-        ? <p>No more buttons are available for this place.</p>
+        ? <p>{tr("settings.widgetspage.noMoreButtonsAreAvailableForThis")}</p>
         : widgets.map((widget) => (
             <button type="button" role="menuitem" key={widget.id} onClick={() => onPick(widget)}>
               <strong>{widget.title}</strong>
@@ -100,21 +101,21 @@ const INTERFACE_SURFACES: Array<{
   label: string;
   description: string;
 }> = [
-  { id: "top-rail", label: "Top rail", description: "Centered workspace buttons at the top" },
-  { id: "app-header", label: "Header actions", description: "At the end of the top rail" },
-  { id: "right-rail", label: "Right rail", description: "Panel buttons on the right edge" },
-  { id: "response-footer", label: "Response actions", description: "After each agent response" },
-  { id: "composer", label: "Composer", description: "Beside your message" },
-  { id: "session-footer", label: "Session footer", description: "Above the composer" },
+  { id: "top-rail", label: tr("settings.widgetspage.topRail"), description: tr("settings.widgetspage.centeredWorkspaceButtonsAtThe") },
+  { id: "app-header", label: tr("settings.widgetspage.headerActions"), description: tr("settings.widgetspage.atTheEndOfTheTopRail") },
+  { id: "right-rail", label: tr("settings.widgetspage.rightRail"), description: tr("settings.widgetspage.panelButtonsOnTheRightEdge") },
+  { id: "response-footer", label: tr("settings.widgetspage.responseActions"), description: tr("settings.widgetspage.afterEachAgentResponse") },
+  { id: "composer", label: tr("settings.widgetspage.composer"), description: tr("settings.widgetspage.besideYourMessage") },
+  { id: "session-footer", label: tr("settings.widgetspage.sessionFooter"), description: tr("settings.widgetspage.aboveTheComposer") },
 ];
 
 const RESPONSE_ACTION_LABELS: Record<ResponseActionId, string> = {
-  copy: "Copy answer",
-  image: "Save as image",
-  plan: "Save as plan",
-  pin: "Pin into context",
-  session: "New session from answer",
-  multirun: "New multi-run from answer",
+  copy: tr("settings.widgetspage.copyAnswer"),
+  image: tr("settings.widgetspage.saveAsImage"),
+  plan: tr("settings.widgetspage.saveAsPlan"),
+  pin: tr("settings.widgetspage.pinIntoContext"),
+  session: tr("settings.widgetspage.newSessionFromAnswer"),
+  multirun: tr("settings.widgetspage.newMultiRunFromAnswer"),
 };
 
 function OrderedToggleList<T extends string>({
@@ -241,17 +242,17 @@ export default function WidgetsPage() {
   };
 
   const resetAllPlacement = async () => {
-    if (!await confirmAlert("Reset button placement and canvas layout to their defaults?", { title: "Reset layout", confirmLabel: "Reset" })) return;
+    if (!await confirmAlert(tr("settings.widgetspage.resetButtonPlacementAndCanvasLayoutTo"), { title: tr("settings.widgetspage.resetLayout"), confirmLabel: tr("settings.widgetspage.reset") })) return;
     for (const capability of listCapabilities()) {
       setPlacementOverride(capability.id, null);
     }
     resetWidgetLayout(widgets);
     setOpenPlace(null);
-    setNotice("Layout reset for this project.");
+    setNotice(tr("settings.widgetspage.layoutResetForThisProject"));
   };
 
   const applyToAllProjects = async () => {
-    if (!activeProjectId || !await confirmAlert("Apply this project’s widget and tool layout to every project?", { title: "Apply layout to projects", confirmLabel: "Apply", destructive: false })) return;
+    if (!activeProjectId || !await confirmAlert(tr("settings.widgetspage.applyThisProjectSWidgetAndTool"), { title: tr("settings.widgetspage.applyLayoutToProjects"), confirmLabel: tr("common.apply"), destructive: false })) return;
     // Use the in-memory layout, rather than a possibly stale debounced storage
     // value. This makes Apply work immediately after dragging or adding a tool.
     const widgetLayout = serializeWidgetLayout(layout);
@@ -261,7 +262,10 @@ export default function WidgetsPage() {
       localStorage.setItem(widgetLayoutStorageKey(project.id), widgetLayout);
       localStorage.setItem(capabilityLayoutStorageKey(project.id), capabilityLayout);
     }
-    setNotice(`Applied to ${projects.length - 1} other project${projects.length === 2 ? "" : "s"}.`);
+    const count = projects.length - 1;
+    setNotice(count === 1
+      ? tr("settings.widgetspage.appliedToOneOtherProject")
+      : tr("settings.widgetspage.appliedToValueOtherProjects", { count }));
   };
 
   const showSurface = (surface: InterfaceSurfaceId) => {
@@ -273,37 +277,37 @@ export default function WidgetsPage() {
 
   return (
     <>
-      <PageHead title="Widgets & Layout" />
+      <PageHead title={tr("settings.widgetspage.widgetsLayout")} />
 
       <div className="widget-placement-toolbar">
         <label className="widget-project-scope">
-          <span>Layout for</span>
-          <select aria-label="Project layout" value={activeProjectId ?? ""} onChange={(event) => activateProject(event.target.value || null)}>
+          <span>{tr("settings.widgetspage.layoutFor")}</span>
+          <select aria-label={tr("settings.widgetspage.projectLayout")} value={activeProjectId ?? ""} onChange={(event) => activateProject(event.target.value || null)}>
             {projects.map((project) => <option key={project.id} value={project.id}>{project.name || project.path}</option>)}
           </select>
         </label>
         {(storeStatus.saveStatus !== "saved" || notice !== "") && (
           <span className={`widget-save-state ${storeStatus.saveStatus}`} role="status">
             {storeStatus.saveStatus === "saving"
-              ? "Saving…"
+              ? tr("common.saving")
               : storeStatus.saveStatus === "error"
-                ? <>Couldn’t save <button type="button" onClick={retryWidgetSave}>Retry</button></>
+                ? <>{tr("settings.widgetspage.couldnTSave")}{" "}<button type="button" onClick={retryWidgetSave}>{tr("common.retry")}</button></>
                 : notice}
           </span>
         )}
         <div className="widget-toolbar-actions">
-          <button type="button" onClick={undoWidgetLayout} disabled={!storeStatus.canUndo}>Undo</button>
-          <button type="button" onClick={applyToAllProjects} disabled={!activeProjectId || projects.length < 2}>Apply to all projects</button>
-          <button type="button" className="widget-reset-button" onClick={resetAllPlacement}>Reset layout</button>
+          <button type="button" onClick={undoWidgetLayout} disabled={!storeStatus.canUndo}>{tr("settings.widgetspage.undo")}</button>
+          <button type="button" onClick={applyToAllProjects} disabled={!activeProjectId || projects.length < 2}>{tr("settings.widgetspage.applyToAllProjects")}</button>
+          <button type="button" className="widget-reset-button" onClick={resetAllPlacement}>{tr("settings.widgetspage.resetLayout")}</button>
         </div>
       </div>
 
       <section className="widget-interface-map" aria-labelledby="widget-interface-map-title">
         <div>
-          <h3 id="widget-interface-map-title">Where buttons appear</h3>
-          <p>Choose a part of the interface to jump to its controls. Response actions sit after an agent’s answer.</p>
+          <h3 id="widget-interface-map-title">{tr("settings.widgetspage.whereButtonsAppear")}</h3>
+          <p>{tr("settings.widgetspage.chooseAPartOfTheInterfaceTo")}</p>
         </div>
-        <div className="widget-interface-diagram" aria-label="Interface placement map">
+        <div className="widget-interface-diagram" aria-label={tr("settings.widgetspage.interfacePlacementMap")}>
           {INTERFACE_SURFACES.map((surface) => (
             <button type="button" key={surface.id} className={`widget-map-target map-${surface.id}`} onClick={() => showSurface(surface.id)}>
               <strong>{surface.label}</strong>
@@ -315,7 +319,7 @@ export default function WidgetsPage() {
 
       <div className="widget-place-grid widget-inline-config">
         <section className="widget-place-card" data-widget-surface="response-footer" data-settings-item="widgets.responseActions">
-          <header><div><h3>Response actions</h3><p>Choose and order actions shown after a completed agent response.</p></div></header>
+          <header><div><h3>{tr("settings.widgetspage.responseActions")}</h3><p>{tr("settings.widgetspage.chooseAndOrderActionsShownAfterA")}</p></div></header>
           <OrderedToggleList
             all={RESPONSE_ACTION_IDS}
             selected={ui.responseActions}
@@ -344,7 +348,7 @@ export default function WidgetsPage() {
                 <button
                   type="button"
                   className="widget-place-add"
-                  aria-label={`Add a button to ${place.title}`}
+                  aria-label={tr("settings.widgetspage.addAButtonToValue", { title: place.title })}
                   aria-expanded={openPlace === place.id}
                   onClick={() => setOpenPlace(openPlace === place.id ? null : place.id)}
                 >＋</button>
@@ -365,7 +369,7 @@ export default function WidgetsPage() {
                 </label>
               )}
               <div className="widget-place-chips">
-                {placed.length === 0 && <span className="widget-place-empty">No buttons placed</span>}
+                {placed.length === 0 && <span className="widget-place-empty">{tr("settings.widgetspage.noButtonsPlaced")}</span>}
                 {placed.map((capability) => (
                   <button
                     type="button"
@@ -381,8 +385,8 @@ export default function WidgetsPage() {
                         reorderCapabilities(placed, draggedId, capability.descriptor.id, place.id);
                       }
                     }}
-                    title={`Drag to reorder ${capability.descriptor.label} in the ${place.title.toLowerCase()}`}
-                    aria-label={`${place.title} tool: ${capability.descriptor.label}. Drag to reorder.`}
+                    title={tr("settings.widgetspage.dragToReorderValueInTheValue", { label: capability.descriptor.label, value: place.title.toLowerCase() })}
+                    aria-label={tr("settings.widgetspage.valueToolValueDragToReorder", { title: place.title, label: capability.descriptor.label })}
                     onClick={() => moveCapabilityToOtherRail(capability.descriptor.id, place.id)}
                   >
                     {capability.descriptor.label}<span aria-hidden="true">↔</span>
@@ -392,7 +396,7 @@ export default function WidgetsPage() {
               {openPlace === place.id && (
                 <div className="widget-place-picker" role="menu">
                   {candidates.length === 0
-                    ? <p>All available tools are already here.</p>
+                    ? <p>{tr("settings.widgetspage.allAvailableToolsAreAlreadyHere")}</p>
                     : candidates.map((capability) => (
                         <button
                           type="button"
@@ -431,13 +435,13 @@ export default function WidgetsPage() {
                 <button
                   type="button"
                   className="widget-place-add"
-                  aria-label={`Add a button to ${place.title}`}
+                  aria-label={tr("settings.widgetspage.addAButtonToValue", { title: place.title })}
                   aria-expanded={openPlace === place.id}
                   onClick={() => setOpenPlace(openPlace === place.id ? null : place.id)}
                 >＋</button>
               </header>
               <div className="widget-place-chips">
-                {placed.length === 0 && <span className="widget-place-empty">No buttons placed</span>}
+                {placed.length === 0 && <span className="widget-place-empty">{tr("settings.widgetspage.noButtonsPlaced")}</span>}
                 {placed.map((widget) => (
                   <button
                     type="button"
@@ -455,11 +459,11 @@ export default function WidgetsPage() {
                         if (slot) mutate({ type: "place", id: draggedId, slot, index });
                       }
                     }}
-                    aria-label={`Hide ${widget.title} from ${place.title}`}
-                    title={`Hide ${widget.title} from ${place.title}`}
+                    aria-label={tr("settings.widgetspage.hideValueFromValue", { title: widget.title, title2: place.title })}
+                    title={tr("settings.widgetspage.hideValueFromValue", { title: widget.title, title2: place.title })}
                     onClick={() => mutate({ type: "visibility", id: widget.id, visible: false })}
                   >
-                    {widget.title}<span aria-hidden="true">×</span>
+                    {widget.title}<span aria-hidden="true">{tr("settings.widgetspage.message")}</span>
                   </button>
                 ))}
               </div>

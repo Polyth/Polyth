@@ -1,5 +1,6 @@
 // Pure helpers for the SSH remotes UI — DOM-free and node:test friendly.
 import type { SshConnectionDto, SshConnectionInput, SshConnectionState } from "@polyth/contracts";
+import { tr } from "../../i18n/index.ts";
 
 export interface SshFormValues {
   name: string;
@@ -29,17 +30,17 @@ export function formFromConnection(conn: SshConnectionDto): SshFormValues {
  *  Returns the first human-readable problem, or null when submittable. */
 export function validateSshForm(values: SshFormValues): string | null {
   const host = values.host.trim();
-  if (!host) return "Host is required.";
-  if (host.startsWith("-")) return "Host must not start with a dash.";
-  if (/\s/.test(host)) return "Host must not contain spaces.";
+  if (!host) return tr("ssh.sshui.hostRequired");
+  if (host.startsWith("-")) return tr("ssh.sshui.hostDash");
+  if (/\s/.test(host)) return tr("ssh.sshui.hostSpaces");
   const user = values.user.trim();
-  if (user && (/\s/.test(user) || user.includes("@"))) return "User must be a plain login name.";
+  if (user && (/\s/.test(user) || user.includes("@"))) return tr("ssh.sshui.userLogin");
   if (values.port.trim()) {
     const port = Number(values.port.trim());
-    if (!Number.isInteger(port) || port < 1 || port > 65535) return "Port must be between 1 and 65535.";
+    if (!Number.isInteger(port) || port < 1 || port > 65535) return tr("ssh.sshui.portRange");
   }
   if (values.authMode === "identity-file" && !values.identityFile.trim()) {
-    return "Choose a private-key file path or switch to agent auth.";
+    return tr("ssh.sshui.choosePrivateKey");
   }
   return null;
 }
@@ -65,11 +66,11 @@ export function connectionTarget(conn: Pick<SshConnectionDto, "host" | "user" | 
 export interface StateBadge { text: string; tone: "ok" | "muted" | "err" }
 
 export function stateBadge(state: SshConnectionState | undefined): StateBadge {
-  if (state === "connected") return { text: "Connected", tone: "ok" };
-  if (state === "auth-failed") return { text: "Auth failed", tone: "err" };
-  if (state === "unreachable") return { text: "Unreachable", tone: "err" };
-  if (state === "disconnected") return { text: "Disconnected", tone: "muted" };
-  return { text: "Unknown", tone: "muted" };
+  if (state === "connected") return { text: tr("ssh.sshui.connected"), tone: "ok" };
+  if (state === "auth-failed") return { text: tr("ssh.sshui.authFailed"), tone: "err" };
+  if (state === "unreachable") return { text: tr("ssh.sshui.unreachable"), tone: "err" };
+  if (state === "disconnected") return { text: tr("ssh.sshui.disconnected"), tone: "muted" };
+  return { text: tr("ssh.sshui.unknown"), tone: "muted" };
 }
 
 /** POSIX basename used to suggest a project name from the remote path. */

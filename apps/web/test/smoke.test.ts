@@ -41,6 +41,7 @@ import { agentPickerDefaultLabel, modelPickerDefaultLabel } from "../src/compose
 import { extractChangedFiles, selectPendingChanges } from "../src/pendingChanges.ts";
 import { sessionSurfaceKind, type SurfaceModel } from "../src/sessionSurface.ts";
 import { mergeThinking } from "../src/utils.ts";
+import { tr } from "../src/i18n/index.ts";
 import {
   JUMP_TO_LATEST_NAME,
   OPEN_TIMELINE_NAME,
@@ -66,6 +67,7 @@ import {
   rewindSeedKey,
   shouldApplySeed,
   timeIso,
+  timeFull,
   timeShort,
   turnDurationMs,
   turnFooterLine,
@@ -655,7 +657,7 @@ test("filterCommands matches name and description, case-insensitive", () => {
   const byName = filterCommands(cmds, "rev");
   assert.equal(byName.length, 1);
   assert.equal(byName[0]!.label, "/review");
-  const byDesc = filterCommands(cmds, "summarise");
+  const byDesc = filterCommands(cmds, tr("commands.compactDescription"));
   assert.equal(byDesc.length, 1);
   assert.equal(byDesc[0]!.label, "/compact");
   const all = filterCommands(cmds, "");
@@ -1211,16 +1213,23 @@ test("copy payloads: exact markdown, stable JSON with ISO+epoch time and sanitiz
 });
 
 test("purpose-and-target names and one announcement per copy outcome", () => {
-  assert.equal(copyActionName("user", "markdown"), "Copy user message as Markdown");
-  assert.equal(copyActionName("assistant", "json"), "Copy assistant answer as JSON");
-  assert.equal(copyAnnouncement("markdown"), "Message copied as Markdown");
-  assert.equal(copyAnnouncement("json"), "Message copied as JSON");
-  assert.equal(copyAnnouncement("reasoning"), "Reasoning copied");
-  assert.equal(copyAnnouncement("failed"), "Couldn’t copy message");
-  assert.equal(reasoningToggleName(false), "Show reasoning for assistant answer");
-  assert.equal(reasoningToggleName(true), "Hide reasoning for assistant answer");
-  assert.match(revertActionName(1_700_000_000_000), /^Revert and edit user message sent /);
-  assert.match(forkActionName(1_700_000_000_000), /^Fork and edit from user message sent /);
+  assert.equal(copyActionName("user", "markdown"), tr("messageActions.copyAs", {
+    target: tr("messageActions.userMessage"),
+    format: tr("common.markdown"),
+  }));
+  assert.equal(copyActionName("assistant", "json"), tr("messageActions.copyAs", {
+    target: tr("messageActions.assistantAnswer"),
+    format: tr("common.json"),
+  }));
+  assert.equal(copyAnnouncement("markdown"), tr("messageActions.copiedMarkdown"));
+  assert.equal(copyAnnouncement("json"), tr("messageActions.copiedJson"));
+  assert.equal(copyAnnouncement("reasoning"), tr("messageActions.reasoningCopied"));
+  assert.equal(copyAnnouncement("failed"), tr("messageActions.copyFailed"));
+  assert.equal(reasoningToggleName(false), tr("messageActions.showReasoning"));
+  assert.equal(reasoningToggleName(true), tr("messageActions.hideReasoning"));
+  const sentAt = 1_700_000_000_000;
+  assert.equal(revertActionName(sentAt), tr("messageActions.revertSentAt", { date: timeFull(sentAt) }));
+  assert.equal(forkActionName(sentAt), tr("messageActions.forkSentAt", { date: timeFull(sentAt) }));
   // Semantic time attributes: valid ISO dateTime, locale-formatted visuals.
   assert.equal(timeIso(0), "1970-01-01T00:00:00.000Z");
   assert.equal(typeof timeShort(1_700_000_000_000), "string");
@@ -1228,15 +1237,15 @@ test("purpose-and-target names and one announcement per copy outcome", () => {
 
 test("timeline layout names: purpose-and-target labels for nav, jump, and turn containers", () => {
   // Fixed control names (UX-TIMELINE-LAYOUT-01 §2.3/§2.4).
-  assert.equal(JUMP_TO_LATEST_NAME, "Jump to latest");
-  assert.equal(OPEN_TIMELINE_NAME, "Open session timeline");
-  assert.equal(PROMPT_NAV_NAME, "Prompts in this session");
+  assert.equal(JUMP_TO_LATEST_NAME, tr("messageActions.jumpToLatest"));
+  assert.equal(OPEN_TIMELINE_NAME, tr("messageActions.openTimeline"));
+  assert.equal(PROMPT_NAV_NAME, tr("messageActions.promptNavigation"));
 
   // Bounded previews: first non-empty line, truncated, honest about emptiness.
   assert.equal(boundedPromptPreview("Fix the flaky test\nplease"), "Fix the flaky test");
   assert.equal(boundedPromptPreview("\n\n  second line only  \n"), "second line only");
-  assert.equal(boundedPromptPreview(""), "(empty prompt)");
-  assert.equal(boundedPromptPreview("   \n \t "), "(empty prompt)");
+  assert.equal(boundedPromptPreview(""), tr("messageActions.emptyPrompt"));
+  assert.equal(boundedPromptPreview("   \n \t "), tr("messageActions.emptyPrompt"));
   const long = "x".repeat(200);
   const bounded = boundedPromptPreview(long);
   assert.equal(bounded.length, 80);
@@ -1246,14 +1255,20 @@ test("timeline layout names: purpose-and-target labels for nav, jump, and turn c
   // Ordered, window-aware prompt jump names carry position AND target.
   assert.equal(
     promptJumpName(0, 3, "Refactor the parser"),
-    "Jump to prompt 1 of 3: Refactor the parser",
+    tr("messageActions.jumpToPrompt", { index: 1, total: 3, prompt: "Refactor the parser" }),
   );
-  assert.equal(promptJumpName(2, 3, ""), "Jump to prompt 3 of 3: (empty prompt)");
+  assert.equal(promptJumpName(2, 3, ""), tr("messageActions.jumpToPrompt", {
+    index: 3,
+    total: 3,
+    prompt: tr("messageActions.emptyPrompt"),
+  }));
 
   // Turn container names: role via the accessible name, streaming is honest.
-  assert.match(userArticleName(1_700_000_000_000), /^User message sent .+\d/);
-  assert.match(assistantArticleName(true, 1_700_000_000_000), /^Assistant answer completed .+\d/);
-  assert.equal(assistantArticleName(false, 1_700_000_000_000), "Assistant answer streaming");
+  const sentAt = 1_700_000_000_000;
+  const fullTime = timeFull(sentAt);
+  assert.equal(userArticleName(sentAt), tr("messageActions.userSentAt", { date: fullTime }));
+  assert.equal(assistantArticleName(true, sentAt), tr("messageActions.assistantCompletedAt", { date: fullTime }));
+  assert.equal(assistantArticleName(false, sentAt), tr("messageActions.assistantStreaming"));
 });
 
 test("session surface: unresolved replay is loading, never the fresh-session hero", () => {
@@ -1355,11 +1370,19 @@ test("marker-owned seeds apply at most once and never overwrite edits or deliber
 
 test("typed mutation errors become bounded actionable messages", () => {
   const mismatch = Object.assign(new Error("child history diverged"), { code: "history-mismatch" });
-  assert.match(mutationErrorMessage("fork", mismatch), /Fork failed: the backend history/);
-  assert.match(mutationErrorMessage("fork", mismatch), /Nothing was changed/);
+  assert.equal(mutationErrorMessage("fork", mismatch), tr("messageActions.historyMismatch", {
+    action: tr("sidebar.sessionlist.fork"),
+  }));
   const conflict = Object.assign(new Error("busy"), { code: "conflict" });
-  assert.match(mutationErrorMessage("revert", conflict), /isn’t available right now/);
+  assert.equal(mutationErrorMessage("revert", conflict), tr("messageActions.sessionStateChanged", {
+    action: tr("messageActions.revert"),
+  }));
   const unsupported = Object.assign(new Error("nope"), { code: "unsupported" });
-  assert.match(mutationErrorMessage("fork", unsupported), /isn’t supported/);
-  assert.match(mutationErrorMessage("restore", new Error("boom")), /Couldn’t restore: boom/);
+  assert.equal(mutationErrorMessage("fork", unsupported), tr("messageActions.backendUnsupported", {
+    action: tr("sidebar.sessionlist.fork"),
+  }));
+  assert.equal(mutationErrorMessage("restore", new Error("boom")), tr("messageActions.actionFailedValue", {
+    action: tr("common.restore"),
+    message: "boom",
+  }));
 });

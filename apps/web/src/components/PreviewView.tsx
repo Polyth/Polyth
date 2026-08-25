@@ -30,6 +30,7 @@ import { usePaneVisible } from "../workspace/paneVisibility.ts";
 import Dialog from "./a11y/Dialog.tsx";
 import { Icon } from "../icons.tsx";
 import { friendlyError } from "../settings.ts";
+import { getLocale, tr } from "../i18n/index.ts";
 
 type ColorScheme = "light" | "dark" | "no-preference";
 type BrowserConnection = "idle" | "connecting" | "connected" | "reconnecting";
@@ -97,7 +98,7 @@ export default function PreviewView() {
           setCap({
             available: false,
             engine: null,
-            reason: friendlyError("Couldn’t check browser availability", cause),
+            reason: friendlyError(tr("previewview.couldnTCheckBrowserAvailability"), cause),
           });
         }
       });
@@ -120,7 +121,7 @@ export default function PreviewView() {
         setBrowser((current) => current?.id === next?.id ? current : next);
         if (next) revisionRef.current = 0;
       } catch (cause) {
-        if (!cancelled) setError(friendlyError("Couldn’t restore the browser", cause));
+        if (!cancelled) setError(friendlyError(tr("previewview.couldnTRestoreTheBrowser"), cause));
       }
     };
     void adopt();
@@ -251,7 +252,7 @@ export default function PreviewView() {
       setBrowser(opened);
       setActivity([]);
     } catch (e) {
-      setError(friendlyError("Couldn’t open the browser", e));
+      setError(friendlyError(tr("previewview.couldnTOpenTheBrowser"), e));
     } finally {
       setOperation(null);
     }
@@ -273,7 +274,7 @@ export default function PreviewView() {
       setCloseConfirmOpen(false);
       revisionRef.current = 0;
     } catch (cause) {
-      setError(friendlyError("Couldn’t close the browser", cause));
+      setError(friendlyError(tr("previewview.couldnTCloseTheBrowser"), cause));
     } finally {
       setOperation(null);
     }
@@ -283,7 +284,7 @@ export default function PreviewView() {
     const requestedUrl = raw.trim();
     if (!browser || operation) return;
     if (!requestedUrl) {
-      setError("Enter an HTTP(S) address to navigate.");
+      setError(tr("previewview.enterAnHttpSAddressToNavigate"));
       return;
     }
     setOperation("navigate");
@@ -299,7 +300,7 @@ export default function PreviewView() {
         setApprovalError("");
         return;
       }
-      setError(friendlyError("Navigation failed", e));
+      setError(friendlyError(tr("previewview.navigationFailed"), e));
     } finally {
       setOperation(null);
     }
@@ -314,7 +315,7 @@ export default function PreviewView() {
       setBrowser(await api.browserNavigate(browser.id, approval.url, "user"));
       setApproval(null);
     } catch (cause) {
-      setApprovalError(friendlyError("Couldn’t approve this origin", cause));
+      setApprovalError(friendlyError(tr("previewview.couldnTApproveThisOrigin"), cause));
     } finally {
       setOperation(null);
     }
@@ -329,7 +330,7 @@ export default function PreviewView() {
       setBrowser(session);
       return { ok: true, result: result ?? null };
     } catch (e) {
-      setError(friendlyError("Browser action failed", e));
+      setError(friendlyError(tr("previewview.browserActionFailed"), e));
       return { ok: false, result: null };
     } finally {
       setOperation(null);
@@ -343,14 +344,14 @@ export default function PreviewView() {
     try {
       const observation = await api.browserObserve(browser.id, false, selector);
       setSnapshotText([
-        `${observation.title || "Untitled"} — ${observation.url}`,
+        `${observation.title || tr("previewview.untitled")} — ${observation.url}`,
         observation.text,
         observation.accessibilityDigest,
       ].filter(Boolean).join("\n\n"));
       setTab("snapshot");
       setInspectorOpen(true);
     } catch (e) {
-      setError(friendlyError("Couldn’t read the page", e));
+      setError(friendlyError(tr("previewview.couldnTReadThePage"), e));
     } finally {
       setOperation(null);
     }
@@ -423,7 +424,7 @@ export default function PreviewView() {
     if (!outcome.ok || !outcome.result) return;
     const element = outcome.result as unknown as BrowserPointedElement;
     if (!element.selector || !element.tag || !element.rect) {
-      setError("The browser could not identify an element at that point.");
+      setError(tr("previewview.theBrowserCouldNotIdentify"));
       return;
     }
     setPointedElement(element);
@@ -459,7 +460,7 @@ export default function PreviewView() {
     setError("");
     try {
       const observation = await api.browserObserve(browser.id, true);
-      if (!observation.screenshot) throw new Error("The browser returned no capture.");
+      if (!observation.screenshot) throw new Error(tr("previewview.theBrowserReturnedNoCapture"));
       const source = `data:${observation.screenshot.mime};base64,${observation.screenshot.data}`;
       const file = await renderBrowserCapture(
         source,
@@ -474,13 +475,13 @@ export default function PreviewView() {
         attachments: [attached.ref],
       });
       if (!sent) {
-        throw new Error("The annotated screenshot is attached to the draft, but the message was not sent.");
+        throw new Error(tr("previewview.theAnnotatedScreenshotIsAttached"));
       }
       removeAttachment(targetSessionId, attached.ref.id);
       const selected = annotation ? annotationViewportRect(annotation, browser.viewport) : null;
       setSnapshotText(selected
-        ? `Sent ${attached.ref.name} to chat with the selected ${selected.width}×${selected.height} area.`
-        : `Sent ${attached.ref.name} and browser element context to chat.`);
+        ? tr("previewview.sentValueToChatWithSelectedArea", { name: attached.ref.name, width: selected.width, height: selected.height })
+        : tr("previewview.sentValueAndBrowserElementContext", { name: attached.ref.name }));
       setTab("snapshot");
       setInspectorOpen(true);
       setAnnotations([]);
@@ -488,7 +489,7 @@ export default function PreviewView() {
       setPointing(false);
       setPointedElement(null);
     } catch (e) {
-      setError(friendlyError("Couldn’t send the browser capture", e));
+      setError(friendlyError(tr("previewview.couldnTSendTheBrowserCapture"), e));
     } finally {
       setCaptureBusy(false);
     }
@@ -529,7 +530,7 @@ export default function PreviewView() {
       await api.browserPauseAgent(browser.id, next);
       setAgentPaused(next);
     } catch (cause) {
-      setError(friendlyError(next ? "Couldn’t pause agent control" : "Couldn’t resume agent control", cause));
+      setError(friendlyError(next ? tr("previewview.couldnTPauseAgentControl") : tr("previewview.couldnTResumeAgentControl"), cause));
     } finally {
       setOperation(null);
     }
@@ -559,15 +560,15 @@ export default function PreviewView() {
     }
   };
 
-  if (!projectId) return <EmptyState title="No project selected" description="Open a project to use the internal browser." />;
+  if (!projectId) return <EmptyState title={tr("previewview.noProjectSelected")} description={tr("previewview.openAProjectToUseTheInternalBrowser")} />;
 
   const browserMode = !!browser && browser.status !== "closed";
   const busy = operation !== null || captureBusy;
   const connectionLabel: Record<BrowserConnection, string> = {
-    idle: "Disconnected",
-    connecting: "Connecting",
-    connected: agentPaused ? "Agent paused" : "Live",
-    reconnecting: "Reconnecting",
+    idle: tr("previewview.disconnected"),
+    connecting: tr("previewview.connecting"),
+    connected: agentPaused ? tr("previewview.agentPaused") : tr("previewview.live"),
+    reconnecting: tr("previewview.reconnecting"),
   };
   let approvalOrigin = approval?.url ?? "";
   if (approval) {
@@ -600,15 +601,15 @@ export default function PreviewView() {
           }
         }}
       >
-        <div className="browser-chrome browser-toolbar" aria-label="Browser controls">
+        <div className="browser-chrome browser-toolbar" aria-label={tr("previewview.browserControls")}>
           <div className="browser-navigation-row">
             {browserMode && (
-              <span className="browser-history" role="group" aria-label="Page history">
+              <span className="browser-history" role="group" aria-label={tr("previewview.pageHistory")}>
                 <button
                   type="button"
                   className="browser-icon-btn"
-                  title="Back"
-                  aria-label="Back"
+                  title={tr("common.back")}
+                  aria-label={tr("common.back")}
                   disabled={busy}
                   onClick={() => void act({ kind: "back" })}
                 >
@@ -617,8 +618,8 @@ export default function PreviewView() {
                 <button
                   type="button"
                   className="browser-icon-btn browser-forward"
-                  title="Forward"
-                  aria-label="Forward"
+                  title={tr("previewview.forward")}
+                  aria-label={tr("previewview.forward")}
                   disabled={busy}
                   onClick={() => void act({ kind: "forward" })}
                 >
@@ -627,8 +628,8 @@ export default function PreviewView() {
                 <button
                   type="button"
                   className="browser-icon-btn"
-                  title="Reload"
-                  aria-label="Reload"
+                  title={tr("previewview.reload")}
+                  aria-label={tr("previewview.reload")}
                   disabled={busy}
                   onClick={() => void act({ kind: "reload" })}
                 >
@@ -638,7 +639,7 @@ export default function PreviewView() {
             )}
             <form
               className="url-pill browser-address"
-              aria-label="Browser address"
+              aria-label={tr("previewview.browserAddress")}
               onSubmit={(event) => {
                 event.preventDefault();
                 if (browserMode) void navigate(urlInput);
@@ -651,7 +652,7 @@ export default function PreviewView() {
                 value={urlInput}
                 onChange={(event) => setUrlInput(event.target.value)}
                 placeholder="https://example.com"
-                aria-label="Address"
+                aria-label={tr("previewview.address")}
                 autoCapitalize="none"
                 autoCorrect="off"
                 spellCheck={false}
@@ -661,8 +662,8 @@ export default function PreviewView() {
               <button
                 type="submit"
                 className="browser-address-submit"
-                aria-label={browserMode ? "Navigate" : "Open browser"}
-                title={browserMode ? "Navigate" : "Open browser"}
+                aria-label={browserMode ? tr("previewview.navigate") : tr("previewview.openBrowser")}
+                title={browserMode ? tr("previewview.navigate") : tr("previewview.openBrowser")}
                 disabled={busy || (!browserMode && cap?.available !== true)}
               >
                 {operation === "navigate" || operation === "open"
@@ -676,8 +677,8 @@ export default function PreviewView() {
                 href={browser.url}
                 target="_blank"
                 rel="noreferrer"
-                title="Open page in a new tab"
-                aria-label="Open page in a new tab"
+                title={tr("previewview.openPageInANewTab")}
+                aria-label={tr("previewview.openPageInANewTab")}
               >
                 <Icon.link />
               </a>
@@ -685,11 +686,11 @@ export default function PreviewView() {
           </div>
 
           {browserMode && (
-            <div className="browser-tools-row" aria-label="Browser tools">
+            <div className="browser-tools-row" aria-label={tr("previewview.browserTools")}>
               <select
                 className="browser-device"
-                aria-label="Browser device preset"
-                title="Viewport size"
+                aria-label={tr("previewview.browserDevicePreset")}
+                title={tr("previewview.viewportSize")}
                 disabled={busy}
                 value={devicePresetForViewport(browser.viewport.width, browser.viewport.height)}
                 onChange={(event) => {
@@ -707,8 +708,8 @@ export default function PreviewView() {
               </select>
               <select
                 className="browser-scheme"
-                aria-label="Emulated color scheme"
-                title="Emulated color scheme"
+                aria-label={tr("previewview.emulatedColorScheme")}
+                title={tr("previewview.emulatedColorScheme")}
                 disabled={busy}
                 value={browser.colorScheme}
                 onChange={(event) => void act({
@@ -716,25 +717,25 @@ export default function PreviewView() {
                   colorScheme: event.target.value as ColorScheme,
                 })}
               >
-                <option value="no-preference">System theme</option>
-                <option value="light">Light theme</option>
-                <option value="dark">Dark theme</option>
+                <option value="no-preference">{tr("previewview.systemTheme")}</option>
+                <option value="light">{tr("previewview.lightTheme")}</option>
+                <option value="dark">{tr("previewview.darkTheme")}</option>
               </select>
               <span className="browser-tool-divider" aria-hidden="true" />
               <button
                 type="button"
                 className="browser-tool-btn"
-                aria-label="Snapshot"
+                aria-label={tr("previewview.snapshot")}
                 disabled={busy}
                 onClick={() => void takeSnapshot()}
-                title="Read visible text and accessibility details"
+                title={tr("previewview.readVisibleTextAndAccessibility")}
               >
-                <Icon.image /><span>Snapshot</span>
+                <Icon.image /><span>{tr("previewview.snapshot")}</span>
               </button>
               <button
                 type="button"
                 className={`browser-tool-btn${annotating ? " active" : ""}`}
-                aria-label="Annotate"
+                aria-label={tr("previewview.annotate")}
                 aria-pressed={annotating}
                 disabled={busy}
                 onClick={() => {
@@ -742,14 +743,14 @@ export default function PreviewView() {
                   clearSelection();
                   setAnnotating(next);
                 }}
-                title="Select an area of the current frame and comment on it"
+                title={tr("previewview.selectAnAreaOfTheCurrentFrame")}
               >
-                <Icon.focus /><span>Annotate</span>
+                <Icon.focus /><span>{tr("previewview.annotate")}</span>
               </button>
               <button
                 type="button"
                 className={`browser-tool-btn${pointing ? " active" : ""}`}
-                aria-label="Point"
+                aria-label={tr("previewview.point")}
                 aria-pressed={pointing}
                 disabled={busy}
                 onClick={() => {
@@ -757,44 +758,44 @@ export default function PreviewView() {
                   clearSelection();
                   setPointing(next);
                 }}
-                title="Point at a page element and add its DOM context to chat"
+                title={tr("previewview.pointAtAPageElementAnd")}
               >
-                <Icon.target /><span>Point</span>
+                <Icon.target /><span>{tr("previewview.point")}</span>
               </button>
               <button
                 type="button"
                 className={`browser-tool-btn${agentPaused ? " active" : ""}`}
-                aria-label={agentPaused ? "Resume agent" : "Pause agent"}
+                aria-label={agentPaused ? tr("previewview.resumeAgent") : tr("previewview.pauseAgent")}
                 aria-pressed={agentPaused}
                 disabled={busy}
                 onClick={() => void togglePause()}
-                title="Pause or resume agent control of this browser"
+                title={tr("previewview.pauseOrResumeAgentControl")}
               >
                 {agentPaused ? <Icon.refresh /> : <Icon.stop />}
-                <span>{agentPaused ? "Resume" : "Pause agent"}</span>
+                <span>{agentPaused ? tr("previewview.resume") : tr("previewview.pauseAgent")}</span>
               </button>
               <button
                 ref={inspectorButtonRef}
                 type="button"
                 className={`browser-tool-btn${inspectorOpen ? " active" : ""}`}
-                aria-label="Inspector"
+                aria-label={tr("previewview.inspector")}
                 aria-pressed={inspectorOpen}
                 aria-controls={inspectorId}
                 disabled={busy}
-                title="Toggle browser inspector"
+                title={tr("previewview.toggleBrowserInspector")}
                 onClick={() => setInspectorOpen((value) => !value)}
               >
-                <Icon.sliders /><span>Inspector</span>
+                <Icon.sliders /><span>{tr("previewview.inspector")}</span>
               </button>
               <button
                 type="button"
                 className="browser-tool-btn danger-btn"
-                aria-label="Close"
+                aria-label={tr("common.close")}
                 disabled={busy}
                 onClick={() => setCloseConfirmOpen(true)}
-                title="Close the browser session"
+                title={tr("previewview.closeTheBrowserSession")}
               >
-                <Icon.close /><span>Close</span>
+                <Icon.close /><span>{tr("common.close")}</span>
               </button>
             </div>
           )}
@@ -804,7 +805,7 @@ export default function PreviewView() {
           <div className="browser-alert" role="alert">
             <Icon.shield />
             <span>{error}</span>
-            <button type="button" aria-label="Dismiss browser error" onClick={() => setError("")}>
+            <button type="button" aria-label={tr("previewview.dismissBrowserError")} onClick={() => setError("")}>
               <Icon.close />
             </button>
           </div>
@@ -819,7 +820,7 @@ export default function PreviewView() {
                     <img
                       ref={imgRef}
                       src={frame.src}
-                      alt={`Interactive browser frame: ${browser.title || browser.url || "Untitled page"}`}
+                      alt={tr("previewview.interactiveBrowserFrameValue", { title: browser.title || browser.url || tr("previewview.untitledPage") })}
                       className={`browser-frame-img${annotating ? " annotating" : ""}${pointing ? " pointing" : ""}`}
                       aria-describedby={frameStatusId}
                       role="button"
@@ -841,14 +842,14 @@ export default function PreviewView() {
                     {(annotating || pointing) && (
                       <div className="browser-frame-mode" role="status">
                         {operation === "point"
-                          ? <><span className="browser-spinner" aria-hidden="true" /> Identifying element…</>
+                          ? <><span className="browser-spinner" aria-hidden="true" /> {tr("previewview.identifyingElement")}</>
                           : pointing
-                            ? <><Icon.target /> Select an element</>
-                            : <><Icon.focus /> Drag to select an area</>}
+                            ? <><Icon.target /> {tr("previewview.selectAnElement")}</>
+                            : <><Icon.focus /> {tr("previewview.dragToSelectAnArea")}</>}
                         <kbd>Esc</kbd>
                       </div>
                     )}
-                    <div className="browser-annotation-layer" aria-label="Browser annotations">
+                    <div className="browser-annotation-layer" aria-label={tr("previewview.browserAnnotations")}>
                       {annotations.map((annotation, index) => annotation.width > 0 && annotation.height > 0 ? (
                         <div
                           key={annotation.id}
@@ -859,7 +860,7 @@ export default function PreviewView() {
                             width: annotation.width * imageRect.width,
                             height: annotation.height * imageRect.height,
                           }}
-                          aria-label={`${pointedElement ? "Pointed element" : "Annotation"} ${index + 1}${annotation.note ? `: ${annotation.note}` : ""}`}
+                          aria-label={`${pointedElement ? tr("previewview.pointedElement") : tr("previewview.annotation")} ${index + 1}${annotation.note ? `: ${annotation.note}` : ""}`}
                           role="img"
                         >
                           <span>{pointedElement ? <Icon.target /> : index + 1}</span>
@@ -872,7 +873,7 @@ export default function PreviewView() {
                     <div className="browser-frame-info">
                       <span className={`browser-live-dot ${agentPaused ? "paused" : connection}`} aria-hidden="true" />
                       <span className="browser-frame-title" title={browser.title || browser.url}>
-                        {browser.title || "Untitled page"}
+                        {browser.title || tr("previewview.untitledPage")}
                       </span>
                       <span className="browser-frame-meta" title={`${browser.engine} · revision ${frame.revision}`}>
                         {connectionLabel[connection]} · {browser.viewport.width}×{browser.viewport.height}
@@ -888,8 +889,8 @@ export default function PreviewView() {
                       <input
                         value={typeText}
                         onChange={(event) => setTypeText(event.target.value)}
-                        placeholder="Type in the focused page field…"
-                        aria-label="Type into the focused page field"
+                        placeholder={tr("previewview.typeInTheFocusedPageField")}
+                        aria-label={tr("previewview.typeIntoTheFocusedPageField")}
                         disabled={busy}
                       />
                       <button
@@ -897,9 +898,9 @@ export default function PreviewView() {
                         className="browser-type-button"
                         disabled={busy || !typeText}
                         onClick={() => void typeFocusedField(false)}
-                        title="Type without submitting"
+                        title={tr("previewview.typeWithoutSubmitting")}
                       >
-                        Type
+                        {tr("previewview.type")}
                       </button>
                     </form>
                   </div>
@@ -909,12 +910,12 @@ export default function PreviewView() {
                       <div className="browser-annotation-header">
                         <span aria-live="polite">
                           {pointedElement
-                            ? <>Selected <code>{`<${pointedElement.tag}>`}</code> · {browserPointedElementLabel(pointedElement)}</>
+                            ? <>{tr("previewview.selected")} <code>{`<${pointedElement.tag}>`}</code> · {browserPointedElementLabel(pointedElement)}</>
                             : pointing
-                              ? "Choose an element in the page preview."
+                              ? tr("previewview.chooseAnElementInThePagePreview")
                               : annotations[0]?.width
-                                ? `Selected ${annotationViewportRect(annotations[0], browser.viewport).width}×${annotationViewportRect(annotations[0], browser.viewport).height} area`
-                                : "Drag over the page preview to select an area."}
+                                ? tr("previewview.selectedValueArea", { width: annotationViewportRect(annotations[0], browser.viewport).width, height: annotationViewportRect(annotations[0], browser.viewport).height })
+                                : tr("previewview.dragOverThePagePreview")}
                         </span>
                         {!pointing && !annotations[0]?.width && (
                           <button
@@ -929,12 +930,12 @@ export default function PreviewView() {
                               note: "",
                             }])}
                           >
-                            Select center
+                            {tr("previewview.selectCenter")}
                           </button>
                         )}
                       </div>
                       <div className="browser-annotation-row">
-                        <label className="sr-only" htmlFor="browser-annotation-comment">Annotation comment</label>
+                        <label className="sr-only" htmlFor="browser-annotation-comment">{tr("previewview.annotationComment")}</label>
                         <input
                           id="browser-annotation-comment"
                           value={annotations[0]?.note ?? ""}
@@ -948,19 +949,19 @@ export default function PreviewView() {
                               void captureToChat();
                             }
                           }}
-                          placeholder={pointedElement ? "Optional instruction about this element…" : "Comment on this area…"}
+                          placeholder={pointedElement ? tr("previewview.optionalInstructionAboutThisElement") : tr("previewview.commentOnThisArea")}
                         />
                         <button
                           type="button"
                           className="primary-btn"
                           disabled={captureBusy || !activeSessionId || (!pointedElement && !annotations[0]?.note.trim())}
                           onClick={() => void captureToChat()}
-                          title={activeSessionId ? "Send the annotated screenshot to the active chat" : "Open a chat session first"}
+                          title={activeSessionId ? tr("previewview.sendTheAnnotatedScreenshot") : tr("previewview.openAChatSessionFirst")}
                         >
-                          {captureBusy ? "Sending…" : "Send to chat"}
+                          {captureBusy ? tr("previewview.sending") : tr("previewview.sendToChat")}
                         </button>
                         <button type="button" className="small-btn" disabled={captureBusy} onClick={clearSelection}>
-                          Cancel
+                          {tr("common.cancel")}
                         </button>
                       </div>
                     </div>
@@ -968,41 +969,41 @@ export default function PreviewView() {
                 </div>
               ) : browser.status === "failed" ? (
                 <EmptyState
-                  title="Browser stopped"
-                  description="The controlled browser could not produce a frame. Close this session and open a new one."
+                  title={tr("previewview.browserStopped")}
+                  description={tr("previewview.theControlledBrowserCouldNot")}
                   mark={<Icon.shield />}
                 />
               ) : (
                 <EmptyState
-                  title={connection === "reconnecting" ? "Reconnecting to browser" : "Connecting to browser"}
-                  description="Waiting for the first secure browser frame."
+                  title={connection === "reconnecting" ? tr("previewview.reconnectingToBrowser") : tr("previewview.connectingToBrowser")}
+                  description={tr("previewview.waitingForTheFirstSecure")}
                   mark={<span className="browser-spinner browser-spinner-large" />}
                 />
               )
             ) : cap === null ? (
               <EmptyState
-                title="Preparing browser"
-                description="Checking whether controlled Chromium is available."
+                title={tr("previewview.preparingBrowser")}
+                description={tr("previewview.checkingWhetherControlledChromium")}
                 mark={<span className="browser-spinner browser-spinner-large" />}
               />
             ) : cap.available ? (
               <EmptyState
-                title="Internal browser"
-                description="Enter an HTTP(S) address above to open a browser shared with the active agent and its subagents."
+                title={tr("previewview.internalBrowser")}
+                description={tr("previewview.enterAnHttpSAddressAbove")}
                 mark={<Icon.globe />}
               />
             ) : (
               <EmptyState
-                title="Browser unavailable"
-                description={cap.reason || "Controlled Chromium is not available in this environment."}
+                title={tr("previewview.browserUnavailable")}
+                description={cap.reason || tr("previewview.controlledChromiumIsNotAvailable")}
                 mark={<Icon.shield />}
               />
             )}
           </div>
 
           {inspectorOpen && browserMode && (
-            <aside id={inspectorId} className="inspector browser-inspector" aria-label="Browser inspector">
-              <div className="inspector-tabs" role="tablist" aria-label="Inspector views">
+            <aside id={inspectorId} className="inspector browser-inspector" aria-label={tr("previewview.browserInspector")}>
+              <div className="inspector-tabs" role="tablist" aria-label={tr("previewview.inspectorViews")}>
                 {BROWSER_INSPECTOR_TABS.map((item) => (
                   <button
                     key={item}
@@ -1022,7 +1023,7 @@ export default function PreviewView() {
                       requestAnimationFrame(() => document.getElementById(inspectorTabId(next))?.focus());
                     }}
                   >
-                    {item[0]!.toUpperCase() + item.slice(1)}
+                    {item === "snapshot" ? tr("previewview.snapshotTab") : item === "console" ? tr("previewview.consoleTab") : tr("previewview.activityTab")}
                   </button>
                 ))}
               </div>
@@ -1035,17 +1036,17 @@ export default function PreviewView() {
               >
                 <div className="browser-inspector-summary">
                   <div className="stat-row">
-                    <span className="k">Page</span>
+                    <span className="k">{tr("previewview.page")}</span>
                     <span className="browser-stat-value" title={browser.url}>{browser.title || browser.url}</span>
                   </div>
                   <div className="stat-row">
-                    <span className="k">Status</span>
+                    <span className="k">{tr("previewview.status")}</span>
                     <span className={`browser-status-badge ${browser.status} ${agentPaused ? "paused" : connection}`}>
                       {connectionLabel[connection]}
                     </span>
                   </div>
                   <div className="stat-row">
-                    <span className="k">Engine</span>
+                    <span className="k">{tr("previewview.engine")}</span>
                     <span>{browser.engine} · {browser.viewport.width}×{browser.viewport.height}</span>
                   </div>
                 </div>
@@ -1062,8 +1063,8 @@ export default function PreviewView() {
                             void inspect();
                           }
                         }}
-                        placeholder="CSS selector (optional)"
-                        aria-label="CSS selector"
+                        placeholder={tr("previewview.cssSelectorOptional")}
+                        aria-label={tr("previewview.cssSelector")}
                       />
                       <button
                         type="button"
@@ -1071,7 +1072,7 @@ export default function PreviewView() {
                         disabled={busy}
                         onClick={() => void takeSnapshot(inspectSelector.trim() || undefined)}
                       >
-                        Read
+                        {tr("previewview.read")}
                       </button>
                       <button
                         type="button"
@@ -1079,19 +1080,19 @@ export default function PreviewView() {
                         disabled={busy || !inspectSelector.trim()}
                         onClick={() => void inspect()}
                       >
-                        Inspect
+                        {tr("previewview.inspect")}
                       </button>
                     </div>
-                    <pre>{snapshotText || "Read the page for visible text and accessibility details, or inspect one CSS selector."}</pre>
+                    <pre>{snapshotText || tr("previewview.readThePageForVisibleText")}</pre>
                   </div>
                 )}
 
                 {tab === "console" && (
-                  <div className="browser-console" role="log" aria-label="Browser console">
-                    {consoleLines.length === 0 && <div className="browser-inspector-empty">No console output yet.</div>}
+                  <div className="browser-console" role="log" aria-label={tr("previewview.browserConsole")}>
+                    {consoleLines.length === 0 && <div className="browser-inspector-empty">{tr("previewview.noConsoleOutputYet")}</div>}
                     {consoleLines.map((line, index) => (
                       <div key={`${line.at}-${index}`} className={`browser-console-line ${line.level}`}>
-                        <time>{new Date(line.at).toLocaleTimeString()}</time>
+                        <time>{new Date(line.at).toLocaleTimeString(getLocale())}</time>
                         <span>{line.message}</span>
                       </div>
                     ))}
@@ -1099,8 +1100,8 @@ export default function PreviewView() {
                 )}
 
                 {tab === "activity" && (
-                  <div className="browser-console" role="log" aria-label="Browser activity">
-                    {activity.length === 0 && <div className="browser-inspector-empty">No agent or browser activity yet.</div>}
+                  <div className="browser-console" role="log" aria-label={tr("previewview.browserActivity")}>
+                    {activity.length === 0 && <div className="browser-inspector-empty">{tr("previewview.noAgentOrBrowserActivityYet")}</div>}
                     {activity.map((entry, index) => (
                       <div key={`${index}-${entry}`} className="browser-console-line">
                         <span>{entry}</span>
@@ -1116,7 +1117,7 @@ export default function PreviewView() {
 
       {approval && (
         <Dialog
-          title="Approve browser origin"
+          title={tr("previewview.approveBrowserOrigin")}
           onClose={() => {
             if (operation !== "approve") setApproval(null);
           }}
@@ -1125,11 +1126,11 @@ export default function PreviewView() {
           ariaDescribedBy={approvalDescriptionId}
         >
           <div className="dialog-head">
-            <span>Approve browser origin</span>
+            <span>{tr("previewview.approveBrowserOrigin")}</span>
             <button
               type="button"
               className="close-btn"
-              aria-label="Cancel origin approval"
+              aria-label={tr("previewview.cancelOriginApproval")}
               disabled={operation === "approve"}
               onClick={() => setApproval(null)}
             >
@@ -1141,17 +1142,17 @@ export default function PreviewView() {
             <div>
               <strong>{approvalOrigin}</strong>
               <p id={approvalDescriptionId}>
-                This origin is outside the browser’s current allowlist. Approving it lets this shared browser send requests to the origin for the rest of this run.
+                {tr("previewview.thisOriginIsOutsideTheBrowser")}
               </p>
               <details>
-                <summary>Why approval is required</summary>
+                <summary>{tr("previewview.whyApprovalIsRequired")}</summary>
                 <p>{approval.message}</p>
               </details>
               {approvalError && <div className="form-error" role="alert">{approvalError}</div>}
             </div>
           </div>
           <div className="dialog-foot">
-            <span className="browser-dialog-note">Approve only origins you trust.</span>
+            <span className="browser-dialog-note">{tr("previewview.approveOnlyOriginsYouTrust")}</span>
             <span className="header-spacer" />
             <button
               type="button"
@@ -1159,7 +1160,7 @@ export default function PreviewView() {
               disabled={operation === "approve"}
               onClick={() => setApproval(null)}
             >
-              Cancel
+              {tr("common.cancel")}
             </button>
             <button
               type="button"
@@ -1167,7 +1168,7 @@ export default function PreviewView() {
               disabled={operation === "approve"}
               onClick={() => void approveNavigation()}
             >
-              {operation === "approve" ? "Approving…" : "Approve and open"}
+              {operation === "approve" ? tr("previewview.approving") : tr("previewview.approveAndOpen")}
             </button>
           </div>
         </Dialog>
@@ -1175,7 +1176,7 @@ export default function PreviewView() {
 
       {closeConfirmOpen && browserMode && (
         <Dialog
-          title="Close browser session"
+          title={tr("previewview.closeBrowserSession")}
           onClose={() => {
             if (operation !== "close") setCloseConfirmOpen(false);
           }}
@@ -1184,11 +1185,11 @@ export default function PreviewView() {
           resolveRestoreFocus={(opener) => opener ?? addressInputRef.current}
         >
           <div className="dialog-head">
-            <span>Close browser session?</span>
+            <span>{tr("previewview.closeBrowserSessionQ")}</span>
             <button
               type="button"
               className="close-btn"
-              aria-label="Keep browser open"
+              aria-label={tr("previewview.keepBrowserOpen")}
               disabled={operation === "close"}
               onClick={() => setCloseConfirmOpen(false)}
             >
@@ -1198,8 +1199,8 @@ export default function PreviewView() {
           <div className="browser-dialog-body">
             <span className="browser-dialog-mark danger" aria-hidden="true"><Icon.close /></span>
             <div>
-              <strong>Browsing data will be cleared</strong>
-              <p>Closing destroys this browser context, including its cookies, local storage, and page history. This cannot be undone.</p>
+              <strong>{tr("previewview.browsingDataWillBeCleared")}</strong>
+              <p>{tr("previewview.closingDestroysThisBrowserContext")}</p>
             </div>
           </div>
           <div className="dialog-foot">
@@ -1210,7 +1211,7 @@ export default function PreviewView() {
               disabled={operation === "close"}
               onClick={() => setCloseConfirmOpen(false)}
             >
-              Keep open
+              {tr("previewview.keepOpen")}
             </button>
             <button
               type="button"
@@ -1218,7 +1219,7 @@ export default function PreviewView() {
               disabled={operation === "close"}
               onClick={() => void closeBrowser()}
             >
-              {operation === "close" ? "Closing…" : "Close browser"}
+              {operation === "close" ? tr("previewview.closing") : tr("previewview.closeBrowser")}
             </button>
           </div>
         </Dialog>

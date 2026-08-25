@@ -1,14 +1,17 @@
 // F2: attachment pills — removable in the composer, read-only on timeline
 // user messages. Images show a thumbnail from the sanitized raw endpoint.
 import type { AttachmentRef } from "@polyth/contracts";
+import { formatNumber, tr } from "../i18n/index.ts";
 
 const GLYPHS: Record<string, string> = { file: "▤", image: "▣", range: "¶", url: "↗" };
 
 function fmtSize(n: number): string {
   if (n <= 0) return "";
-  if (n < 1024) return `${n} B`;
-  if (n < 1048576) return `${(n / 1024).toFixed(1)} KB`;
-  return `${(n / 1048576).toFixed(1)} MB`;
+  if (n < 1024) return `${formatNumber(n)} B`;
+  if (n < 1048576) {
+    return `${formatNumber(n / 1024, { minimumFractionDigits: 1, maximumFractionDigits: 1 })} KB`;
+  }
+  return `${formatNumber(n / 1048576, { minimumFractionDigits: 1, maximumFractionDigits: 1 })} MB`;
 }
 
 export default function AttachmentPills({ attachments, onRemove }: {
@@ -18,7 +21,7 @@ export default function AttachmentPills({ attachments, onRemove }: {
 }) {
   if (attachments.length === 0) return null;
   return (
-    <div className="attachment-pills" aria-label="Attachments">
+    <div className="attachment-pills" aria-label={tr("attachmentpills.attachments")}>
       {attachments.map((a, i) => {
         const kind = a.kind ?? "file";
         const detail = kind === "url" ? a.url : a.path;
@@ -39,8 +42,8 @@ export default function AttachmentPills({ attachments, onRemove }: {
             {onRemove && (
               <button
                 className="att-remove"
-                aria-label={`Remove attachment ${a.name}`}
-                title="Remove attachment"
+                aria-label={tr("attachmentpills.removeAttachmentValue", { name: a.name })}
+                title={tr("attachmentpills.removeAttachment")}
                 onClick={() => onRemove(a.id)}
               >✕</button>
             )}

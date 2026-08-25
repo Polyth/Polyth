@@ -7,6 +7,7 @@ import { openSession } from "../init.ts";
 import { ago, deriveSessionTitle } from "../format.ts";
 import { firstUserText } from "../utils.ts";
 import Dialog from "./a11y/Dialog.tsx";
+import { tr } from "../i18n/index.ts";
 
 export default function SessionSearch() {
   const sessions = useStore((s) => s.sessions);
@@ -80,28 +81,26 @@ export default function SessionSearch() {
 
   return (
     <Dialog
-      title="Search sessions"
+      title={tr("sessionsearch.searchSessions")}
       onClose={() => setOverlay(null)}
       className="palette"
       backdropClassName="palette-overlay"
       initialFocus=".palette-input"
     >
       <div className="palette-heading">
-        <span className="palette-heading-title">Session history</span>
+        <span className="palette-heading-title">{tr("sessionsearch.sessionHistory")}</span>
         <span className="palette-heading-description">
-          Recent sessions and conversation content
-        </span>
+          {tr("sessionsearch.recentSessionsAndConversationContent")}</span>
       </div>
-      <input className="palette-input" value={q} placeholder="Search title, branch, labels, messages" onChange={(e) => setQ(e.target.value)} onKeyDown={onKey} />
+      <input className="palette-input" value={q} placeholder={tr("sessionsearch.searchTitleBranchLabelsMessages")} onChange={(e) => setQ(e.target.value)} onKeyDown={onKey} />
       <div className="palette-list">
-        {loading && <div className="palette-empty" role="status">Searching sessions…</div>}
+        {loading && <div className="palette-empty" role="status">{tr("sessionsearch.searchingSessions")}</div>}
         {!loading && searchFailed && (
           <div className="palette-empty" role="status">
-            Couldn’t search session contents.
-            <button className="small-btn palette-retry" onClick={() => setRetry((n) => n + 1)}>Retry</button>
+            {tr("sessionsearch.couldnTSearchSessionContents")}<button className="small-btn palette-retry" onClick={() => setRetry((n) => n + 1)}>{tr("common.retry")}</button>
           </div>
         )}
-        {!loading && !searchFailed && items.length === 0 && <div className="palette-empty">No sessions</div>}
+        {!loading && !searchFailed && items.length === 0 && <div className="palette-empty">{tr("sessionsearch.noSessions")}</div>}
         {items.map(({ s, matches }, n) => (
           <button
             key={s.id}
@@ -120,7 +119,7 @@ export default function SessionSearch() {
           </button>
         ))}
       </div>
-      <div className="palette-footer"><kbd>↑↓</kbd> navigate · <kbd>↵</kbd> open · <kbd>Esc</kbd> close</div>
+      <div className="palette-footer"><kbd>↑↓</kbd> {tr("sessionsearch.navigate")}{" "}<kbd>↵</kbd> {tr("sessionsearch.open")}{" "}<kbd>{tr("sessionsearch.esc")}</kbd> {tr("sessionsearch.close")}</div>
     </Dialog>
   );
 }

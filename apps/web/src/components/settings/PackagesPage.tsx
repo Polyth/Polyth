@@ -6,6 +6,64 @@ import { maybeAutoShowPackageTour, openPackageTour } from "../../packages/onboar
 import { canonicalTourPackageId } from "../../packages/onboarding/pageMap.ts";
 import { getPackageOnboarding, subscribePackageOnboardings } from "../../packages/onboarding/registry.ts";
 import { EmptyState, PageHead } from "./parts.tsx";
+import { tr, type TranslationKey } from "../../i18n/index.ts";
+
+const PACKAGE_NAME_KEYS: Readonly<Record<string, TranslationKey>> = {
+  git: "packages.git.git",
+  terminal: "capabilities.terminal",
+  preview: "capabilities.preview",
+  browser: "packages.onboarding.tours.builtin.browser",
+  goals: "statusbar.goals",
+  multirun: "packages.onboarding.tours.builtin.multirun",
+  workflow: "statusbar.workflows",
+  fusion: "statusbar.fusion",
+  walkthrough: "statusbar.walkthrough",
+  schedule: "statusbar.schedule",
+  usage: "packages.usage.usage",
+  knowledge: "capabilities.knowledge",
+  dictation: "settings.packagespage.voiceAndDictation",
+  "home-assistant": "packages.homeAssistant.homeAssistant",
+  "secure-safe": "packages.secureSafe.secureSafe",
+  ssh: "packages.ssh.sshRemotes",
+  mcp: "packages.mcp.mcp",
+  commands: "packages.commands.commands",
+  plugins: "packages.plugins.plugins",
+  integrations: "packages.integrations.integrations",
+};
+
+const PACKAGE_DESCRIPTION_KEYS: Readonly<Record<string, TranslationKey>> = {
+  git: "settings.packagespage.gitDescription",
+  terminal: "settings.packagespage.terminalDescription",
+  preview: "settings.packagespage.previewDescription",
+  browser: "settings.packagespage.browserDescription",
+  goals: "settings.packagespage.goalsDescription",
+  multirun: "settings.packagespage.multirunDescription",
+  workflow: "settings.packagespage.workflowDescription",
+  fusion: "settings.packagespage.fusionDescription",
+  walkthrough: "settings.packagespage.walkthroughDescription",
+  schedule: "settings.packagespage.scheduleDescription",
+  usage: "settings.packagespage.usageDescription",
+  github: "settings.packagespage.githubDescription",
+  knowledge: "settings.packagespage.knowledgeDescription",
+  dictation: "settings.packagespage.dictationDescription",
+  "home-assistant": "settings.packagespage.homeAssistantDescription",
+  "secure-safe": "settings.packagespage.secureSafeDescription",
+  ssh: "settings.packagespage.sshDescription",
+  mcp: "packages.mcp.modelContextProtocolServerConfiguration",
+  commands: "settings.packagespage.commandsDescription",
+  plugins: "settings.packagespage.pluginsDescription",
+  integrations: "settings.packagespage.integrationsDescription",
+};
+
+const packageName = (descriptor: PackageDescriptorDto): string => {
+  const key = PACKAGE_NAME_KEYS[descriptor.id];
+  return key ? tr(key) : descriptor.name;
+};
+
+const packageDescription = (descriptor: PackageDescriptorDto): string => {
+  const key = PACKAGE_DESCRIPTION_KEYS[descriptor.id];
+  return key ? tr(key) : descriptor.description;
+};
 
 /** "Tour" replay button on a package tile — shown only when a tour is
  * registered for the (canonical) package, and it always opens as a preview,
@@ -13,15 +71,15 @@ import { EmptyState, PageHead } from "./parts.tsx";
 function PackageTourButton({ descriptor }: { descriptor: PackageDescriptorDto }) {
   const packageId = canonicalTourPackageId(descriptor.id);
   if (!getPackageOnboarding(packageId)) return null;
+  const name = packageName(descriptor);
   return (
     <button
       type="button"
       className="package-tour-btn"
-      aria-label={`Preview the ${descriptor.name} tour`}
+      aria-label={tr("settings.packagespage.previewTheValueTour", { name })}
       onClick={() => openPackageTour(packageId, "preview")}
     >
-      Tour
-    </button>
+      {tr("settings.packagespage.tour")}</button>
   );
 }
 
@@ -74,41 +132,43 @@ export default function PackagesPage() {
   if (!packages && !error) {
     return (
       <>
-        <PageHead title="Packages" blurb="Enable or disable optional workspace features." />
-        <p className="muted">Loading installed Polyth packages…</p>
+        <PageHead title={tr("settings.packagespage.packages")} blurb={tr("settings.packagespage.enableOrDisableOptionalWorkspaceFeatures")} />
+        <p className="muted">{tr("settings.packagespage.loadingInstalledPolythPackages")}</p>
       </>
     );
   }
 
   return (
     <>
-      <PageHead title="Packages" blurb="Enable or disable optional workspace features." />
+      <PageHead title={tr("settings.packagespage.packages")} blurb={tr("settings.packagespage.enableOrDisableOptionalWorkspaceFeatures")} />
       {error && <div className="form-error" role="alert">{error}</div>}
-      {!packages && <EmptyState title="Packages unavailable" body="The package registry could not be loaded." />}
+      {!packages && <EmptyState title={tr("settings.packagespage.packagesUnavailable")} body={tr("settings.packagespage.thePackageRegistryCouldNotBeLoaded")} />}
       {packages && (
         <div className="packages-list">
           <section className="package-group" aria-labelledby="optional-packages-title">
             <div className="package-group-head">
-              <strong id="optional-packages-title">Optional packages</strong>
-              <span>{grouped.optional.filter((item) => item.enabled).length} enabled</span>
+              <strong id="optional-packages-title">{tr("settings.packagespage.optionalPackages")}</strong>
+              <span>{grouped.optional.filter((item) => item.enabled).length} {tr("settings.packagespage.enabled2")}</span>
             </div>
             <div className="package-grid">
               {grouped.optional.map((descriptor) => (
                 <article className={`package-tile ${descriptor.enabled ? "enabled" : "disabled"}`} key={descriptor.id}>
                   <span className="package-icon" aria-hidden="true">{descriptor.icon ?? "◇"}</span>
                   <div className="package-copy">
-                    <strong>{descriptor.name}</strong>
-                    <p>{descriptor.description}</p>
+                    <strong>{packageName(descriptor)}</strong>
+                    <p>{packageDescription(descriptor)}</p>
                   </div>
                   <div className="package-tile-control">
                     <PackageTourButton descriptor={descriptor} />
-                    <span>{descriptor.enabled ? "Enabled" : "Disabled"}</span>
+                    <span>{descriptor.enabled ? tr("settings.packagespage.enabled") : tr("settings.packagespage.disabled")}</span>
                     <button
                       type="button"
                       className={`package-toggle ${descriptor.enabled ? "on" : ""}`}
                       role="switch"
                       aria-checked={descriptor.enabled}
-                      aria-label={`${descriptor.enabled ? "Disable" : "Enable"} ${descriptor.name}`}
+                      aria-label={descriptor.enabled
+                        ? tr("settings.packagespage.disableValue", { value: packageName(descriptor) })
+                        : tr("settings.packagespage.enableValue", { value: packageName(descriptor) })}
                       disabled={busy === descriptor.id}
                       onClick={() => { void setEnabled(descriptor, !descriptor.enabled); }}
                     >
@@ -121,20 +181,20 @@ export default function PackagesPage() {
           </section>
           <section className="package-group" aria-labelledby="core-packages-title">
             <div className="package-group-head">
-              <strong id="core-packages-title">Core packages</strong>
-              <span>Always enabled</span>
+              <strong id="core-packages-title">{tr("settings.packagespage.corePackages")}</strong>
+              <span>{tr("settings.packagespage.alwaysEnabled")}</span>
             </div>
             <div className="package-grid">
               {grouped.core.map((descriptor) => (
                 <article className="package-tile package-tile-core enabled" key={descriptor.id}>
                   <span className="package-icon" aria-hidden="true">{descriptor.icon ?? "◆"}</span>
                   <div className="package-copy">
-                    <strong>{descriptor.name}</strong>
-                    <p>{descriptor.description}</p>
+                    <strong>{packageName(descriptor)}</strong>
+                    <p>{packageDescription(descriptor)}</p>
                   </div>
                   <div className="package-tile-control">
                     <PackageTourButton descriptor={descriptor} />
-                    <span className="tag package-core-badge">Core</span>
+                    <span className="tag package-core-badge">{tr("settings.packagespage.core")}</span>
                   </div>
                 </article>
               ))}
@@ -146,8 +206,7 @@ export default function PackagesPage() {
               className="ghost-link packages-plugin-link"
               onClick={() => window.dispatchEvent(new CustomEvent("polyth:settings-page", { detail: "plugins" }))}
             >
-              Manage third-party plugins →
-            </button>
+              {tr("settings.packagespage.manageThirdPartyPlugins")}</button>
           )}
         </div>
       )}

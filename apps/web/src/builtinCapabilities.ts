@@ -10,6 +10,7 @@ import {
   openSettingsPage, openWorkspacePane, setActiveView, setRailPlugin, setSidebarOpen, type AppView,
 } from "./store.ts";
 import { speechSupport } from "@polyth/dictation";
+import { tr } from "./i18n/index.ts";
 import { setWorkspaceMode } from "./widgets/workspaceMode.ts";
 
 /** Capability id → full workspace view, used for active-state highlighting.
@@ -80,7 +81,7 @@ for (const meta of BUILTIN_CAPABILITY_META) {
     // unavailable only for a real runtime prerequisite, never per preset.
     available: meta.id === "voice" ? voiceAvailable : () => true,
     ...(meta.id === "voice"
-      ? { unavailableReason: () => voiceAvailable() ? null : "Voice input isn’t supported in this browser." }
+      ? { unavailableReason: () => voiceAvailable() ? null : tr("settings.voicepage.notSupportedInThisBrowser") }
       : {}),
   });
 }

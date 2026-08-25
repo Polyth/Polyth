@@ -4,6 +4,7 @@
 // nothing here touches the session event log.
 import { createChunkBuffer, DICTATION_FORMAT, downsampleToPcm16 } from "@polyth/dictation";
 import { api } from "./api.ts";
+import { tr } from "./i18n/index.ts";
 
 export interface StreamingDictation {
   /** Stop capture, finalize on the server, resolve the final transcript. */
@@ -61,7 +62,7 @@ export async function startStreamingDictation(opts: {
       try { msg = JSON.parse(String(e.data)); } catch { return; }
       if (msg.type === "dictation/ack" && typeof msg.seq === "number") buffer.ack(msg.seq);
       else if (msg.type === "dictation/transcript" && typeof msg.text === "string") opts.onPartial?.(msg.text);
-      else if (msg.type === "dictation/error") fail(msg.message ?? msg.code ?? "dictation failed");
+      else if (msg.type === "dictation/error") fail(msg.message ?? msg.code ?? tr("dictationclient.dictationFailed"));
     };
     sock.onclose = () => {
       if (active && ws === sock) setTimeout(() => { if (active) connect(); }, 600);

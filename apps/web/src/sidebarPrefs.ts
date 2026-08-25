@@ -3,6 +3,7 @@
 // never arbitrary row rendering.
 import { useSyncExternalStore } from "react";
 import type { SessionProjection } from "@polyth/contracts";
+import { tr } from "./i18n/index.ts";
 
 export const GROUPING_KEY = "polyth.sidebar.groupingMode";
 
@@ -14,17 +15,17 @@ export interface GroupingDescriptor {
 }
 
 const STATUS_LABELS: Record<string, string> = {
-  working: "Working", waiting: "Waiting", idle: "Idle",
-  finished: "Finished", failed: "Failed", archived: "Archived",
+  working: tr("sidebarprefs.working"), waiting: tr("sidebarprefs.waiting"), idle: tr("sidebarprefs.idle"),
+  finished: tr("sidebarprefs.finished"), failed: tr("sidebarprefs.failed"), archived: tr("sidebarprefs.archived"),
 };
 
 export const BUILTIN_GROUPINGS: ReadonlyArray<GroupingDescriptor> = [
-  { id: "flat", label: "Flat" },
-  { id: "folder", label: "Folder" },
-  { id: "status", label: "Status", keyOf: (s) => STATUS_LABELS[s.status] ?? s.status },
+  { id: "flat", label: tr("sidebarprefs.flat") },
+  { id: "folder", label: tr("sidebarprefs.folder") },
+  { id: "status", label: tr("sidebarprefs.status"), keyOf: (s) => STATUS_LABELS[s.status] ?? s.status },
   {
     id: "worktree",
-    label: "Worktree",
+    label: tr("sidebarprefs.worktree"),
     keyOf: (s) => s.branch ?? (s.worktreePath ? s.worktreePath.split("/").pop() ?? s.worktreePath : "Main workspace"),
   },
 ];
@@ -36,10 +37,10 @@ const notify = (): void => { for (const l of [...listeners]) l(); };
 /** Contribute a grouping (plugins). keyOf is required for contributed modes. */
 export function registerGrouping(desc: GroupingDescriptor): () => void {
   if (!desc.id || typeof desc.keyOf !== "function") {
-    throw new Error("contributed groupings need an id and a pure keyOf()");
+    throw new Error(tr("sidebarprefs.contributedGroupingsNeedAnIdAndA"));
   }
   if (BUILTIN_GROUPINGS.some((g) => g.id === desc.id) || pluginGroupings.has(desc.id)) {
-    throw new Error(`grouping already registered: ${desc.id}`);
+    throw new Error(tr("sidebarprefs.groupingAlreadyRegisteredValue", { id: desc.id }));
   }
   pluginGroupings.set(desc.id, desc);
   notify();
@@ -175,7 +176,7 @@ export function groupSessions(
   if (!keyOf) return [{ key: mode, label: desc?.label ?? mode, sessions }];
   const buckets = new Map<string, SessionProjection[]>();
   for (const s of sessions) {
-    const key = keyOf(s) || "Other";
+    const key = keyOf(s) || tr("questioncards.other");
     const list = buckets.get(key) ?? [];
     list.push(s);
     buckets.set(key, list);

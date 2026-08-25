@@ -1,3 +1,5 @@
+import { tr } from "../i18n/index.ts";
+
 const PROVIDERS = [
   ["opencode-go", ["opencode-go", "opencode go"]],
   ["opencode-zen", ["opencode-zen", "opencode zen"]],
@@ -250,7 +252,7 @@ export default function ProviderLogo({
   const id = `${providerID ?? ""} ${providerName ?? ""}`.trim().toLowerCase() || "polyth";
   const key = findProviderKey(id);
   const fallback = (providerName || providerID || "P").trim().slice(0, 2).toUpperCase();
-  const label = providerName || providerID || "Polyth";
+  const label = providerName || providerID || tr("providerlogo.polyth");
   return (
     <span
       className={`provider-logo provider-${key ?? "other"}${className ? ` ${className}` : ""}`}

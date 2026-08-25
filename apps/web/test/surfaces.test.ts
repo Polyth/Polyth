@@ -110,5 +110,5 @@ test("the built-in Usage surface is always available and owns a zero-token empty
   const registration = source.slice(source.indexOf('id: "usage"'), source.indexOf('id: "events"'));
   assert.ok(registration.includes("component: UsagePanel"));
   assert.ok(!registration.includes("visible:"), "zero tokens never hide the Usage command");
-  assert.ok(source.includes("Token and cost totals appear once the session runs."));
+  assert.ok(source.includes('tr("railsurfaces.tokenAndCostTotalsAppearOnceThe")'));
 });

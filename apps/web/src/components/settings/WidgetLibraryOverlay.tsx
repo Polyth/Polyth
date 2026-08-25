@@ -24,18 +24,19 @@ import {
   type WidgetLibraryTab,
   type WidgetSizeFilter,
 } from "../../widgets/widgetLibrary.ts";
+import { tr } from "../../i18n/index.ts";
 
 const ZONE_LABEL: Record<WidgetZone, string> = {
-  header: "Header",
-  left: "Left side",
-  main: "Main workspace",
-  right: "Right side",
-  bottom: "Bottom strip",
-  floating: "Floating",
+  header: tr("settings.widgetlibraryoverlay.header"),
+  left: tr("settings.widgetlibraryoverlay.leftSide"),
+  main: tr("settings.widgetlibraryoverlay.mainWorkspace"),
+  right: tr("settings.widgetlibraryoverlay.rightSide"),
+  bottom: tr("settings.widgetlibraryoverlay.bottomStrip"),
+  floating: tr("settings.widgetlibraryoverlay.floating"),
 };
 
 const slotLabel = (slot: UiSlot): string => {
-  const zone = slot.startsWith("workspace.") ? slot.slice("workspace.".length) as WidgetZone : null;
+  const zone = slot.startsWith(tr("settings.widgetlibraryoverlay.workspace")) ? slot.slice(tr("settings.widgetlibraryoverlay.workspace").length) as WidgetZone : null;
   return zone && zone in ZONE_LABEL
     ? ZONE_LABEL[zone]
     : slot.split(".").map((part) => part[0]!.toUpperCase() + part.slice(1)).join(" · ");
@@ -80,12 +81,12 @@ function WidgetLibraryCard({
       <div className="widget-library-card-copy">
         <div className="widget-library-card-title">
           <strong>{widget.title}</strong>
-          <button type="button" aria-label={`More about ${widget.title}`} title={`${pluginDisplayName(widget)} widget`}>•••</button>
+          <button type="button" aria-label={tr("settings.widgetlibraryoverlay.moreAboutValue", { title: widget.title })} title={tr("settings.widgetlibraryoverlay.valueWidget", { value: pluginDisplayName(widget) })}>•••</button>
         </div>
         <p>{widget.description}</p>
         <div className="widget-library-meta">
-          <span>Size <b>{widgetSizeLabel(widget)[0]!.toUpperCase()}</b></span>
-          <span>Placements <b>{slots.map(slotLabel).join(", ")}</b></span>
+          <span>{tr("settings.widgetlibraryoverlay.size")}{" "}<b>{widgetSizeLabel(widget)[0]!.toUpperCase()}</b></span>
+          <span>{tr("settings.widgetlibraryoverlay.placements")}{" "}<b>{slots.map(slotLabel).join(", ")}</b></span>
         </div>
       </div>
       <button
@@ -93,9 +94,9 @@ function WidgetLibraryCard({
         className="widget-library-add"
         disabled={visible}
         onClick={() => onAdd(widget)}
-        aria-label={visible ? `${widget.title} is on the canvas` : `Add ${widget.title}`}
+        aria-label={visible ? tr("settings.widgetlibraryoverlay.valueIsOnTheCanvas", { title: widget.title }) : tr("settings.widgetlibraryoverlay.addValue", { title: widget.title })}
       >
-        {visible ? "Added" : <>Add <b aria-hidden="true">＋</b></>}
+        {visible ? tr("settings.widgetlibraryoverlay.added") : <>{tr("common.add")}{" "}<b aria-hidden="true">＋</b></>}
       </button>
     </article>
   );
@@ -133,7 +134,7 @@ export default function WidgetLibraryOverlay({
   const add = (widget: WidgetDef, target: UiSlot = defaultSlot(widget)) => {
     const check = canPlaceWidget(widget, target);
     if (!check.ok) {
-      setStatus(check.reason ?? "That zone is not compatible.");
+      setStatus(check.reason ?? tr("settings.widgetlibraryoverlay.zoneNotCompatible"));
       return;
     }
     updateWidgetLayout((current) => applyWidgetLayoutMutations(current, [
@@ -141,7 +142,10 @@ export default function WidgetLibraryOverlay({
       { type: "place", id: widget.id, slot: target },
     ], widgets));
     setRecent(noteWidgetUsed(widget.id));
-    setStatus(`${widget.title} added to ${slotLabel(target)}.`);
+    setStatus(tr("settings.widgetlibraryoverlay.valueAddedToValue", {
+      title: widget.title,
+      slot: slotLabel(target),
+    }));
   };
 
   const startDrag = (widget: WidgetDef, event: DragEvent<HTMLElement>) => {
@@ -153,7 +157,7 @@ export default function WidgetLibraryOverlay({
     setDragWidget(event.dataTransfer, widget.id);
     event.dataTransfer.effectAllowed = "copyMove";
     setDraggedId(widget.id);
-    setStatus(`You’re dragging: ${widget.title}`);
+    setStatus(tr("settings.widgetlibraryoverlay.youReDraggingValue", { title: widget.title }));
   };
 
   const drop = (target: WidgetZone, event: DragEvent<HTMLDivElement>) => {
@@ -175,44 +179,44 @@ export default function WidgetLibraryOverlay({
   const hasFilters = query !== "" || pluginId !== "all" || size !== "all" || zone !== "all";
 
   return (
-    <div className="widget-library-overlay" aria-label="Add widget">
+    <div className="widget-library-overlay" aria-label={tr("settings.widgetlibraryoverlay.addWidget")}>
       <section className="widget-library-browser">
         <header className="widget-library-heading">
           <div>
-            <h2>Add widget</h2>
-            <p>Browse and add widgets to your workspace. Drag to a zone or click Add.</p>
+            <h2>{tr("settings.widgetlibraryoverlay.addWidget")}</h2>
+            <p>{tr("settings.widgetlibraryoverlay.browseAndAddWidgetsToYourWorkspace")}</p>
           </div>
-          <span><kbd>Esc</kbd> close</span>
-          <button type="button" onClick={onClose} aria-label="Close widget library">×</button>
+          <span><kbd>{tr("settings.widgetlibraryoverlay.esc")}</kbd> {tr("settings.widgetlibraryoverlay.close")}</span>
+          <button type="button" onClick={onClose} aria-label={tr("settings.widgetlibraryoverlay.closeWidgetLibrary")}>{tr("settings.widgetlibraryoverlay.message")}</button>
         </header>
 
         <div className="widget-library-filters">
           <label className="widget-library-search">
             <span aria-hidden="true">⌕</span>
-            <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search widgets…" aria-label="Search widgets" />
+            <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={tr("settings.widgetlibraryoverlay.searchWidgets")} aria-label={tr("settings.widgetlibraryoverlay.searchWidgets2")} />
           </label>
-          <select aria-label="Filter by plugin" value={pluginId} onChange={(event) => setPluginId(event.target.value)}>
-            <option value="all">All plugins</option>
+          <select aria-label={tr("settings.widgetlibraryoverlay.filterByPlugin")} value={pluginId} onChange={(event) => setPluginId(event.target.value)}>
+            <option value="all">{tr("settings.widgetlibraryoverlay.allPlugins")}</option>
             {plugins.map(({ id, label }) => <option key={id} value={id}>{label}</option>)}
           </select>
-          <select aria-label="Filter by size" value={size} onChange={(event) => setSize(event.target.value as WidgetSizeFilter)}>
-            <option value="all">All sizes</option>
-            <option value="small">Small</option>
-            <option value="medium">Medium</option>
-            <option value="large">Large</option>
+          <select aria-label={tr("settings.widgetlibraryoverlay.filterBySize")} value={size} onChange={(event) => setSize(event.target.value as WidgetSizeFilter)}>
+            <option value="all">{tr("settings.widgetlibraryoverlay.allSizes")}</option>
+            <option value="small">{tr("settings.widgetlibraryoverlay.small")}</option>
+            <option value="medium">{tr("settings.widgetlibraryoverlay.medium")}</option>
+            <option value="large">{tr("settings.widgetlibraryoverlay.large")}</option>
           </select>
-          <select aria-label="Filter by zone" value={zone} onChange={(event) => setZone(event.target.value as WidgetZone | "all")}>
-            <option value="all">All zones</option>
+          <select aria-label={tr("settings.widgetlibraryoverlay.filterByZone")} value={zone} onChange={(event) => setZone(event.target.value as WidgetZone | "all")}>
+            <option value="all">{tr("settings.widgetlibraryoverlay.allZones")}</option>
             {Object.entries(ZONE_LABEL).map(([id, label]) => <option key={id} value={id}>{label}</option>)}
           </select>
-          <button type="button" className="widget-library-clear" disabled={!hasFilters} onClick={resetFilters}>Clear filters</button>
+          <button type="button" className="widget-library-clear" disabled={!hasFilters} onClick={resetFilters}>{tr("settings.widgetlibraryoverlay.clearFilters")}</button>
         </div>
 
-        <div className="widget-library-tabs" role="tablist" aria-label="Widget collections">
+        <div className="widget-library-tabs" role="tablist" aria-label={tr("settings.widgetlibraryoverlay.widgetCollections")}>
           {([
-            ["recommended", "Recommended"],
-            ["plugin", "By plugin"],
-            ["recent", "Recently used"],
+            ["recommended", tr("projectsetup.recommended")],
+            ["plugin", tr("settings.widgetlibraryoverlay.byPlugin")],
+            ["recent", tr("settings.widgetlibraryoverlay.recentlyUsed")],
           ] as const).map(([id, label]) => (
             <button key={id} role="tab" aria-selected={tab === id} className={tab === id ? "active" : ""} onClick={() => setTab(id)}>
               {label}
@@ -224,8 +228,8 @@ export default function WidgetLibraryOverlay({
           {tab === "recommended" ? (
             <section>
               <div className="widget-library-section-head">
-                <div><h3>Recommended for you</h3><p>Useful building blocks for your current workspace.</p></div>
-                <span>{Math.min(filtered.length, 6)} widgets</span>
+                <div><h3>{tr("settings.widgetlibraryoverlay.recommendedForYou")}</h3><p>{tr("settings.widgetlibraryoverlay.usefulBuildingBlocksForYourCurrentWorkspace")}</p></div>
+                <span>{Math.min(filtered.length, 6)} {tr("settings.widgetlibraryoverlay.widgets")}</span>
               </div>
               <div className="widget-library-card-grid">
                 {filtered.slice(0, 6).map((widget) => (
@@ -242,8 +246,8 @@ export default function WidgetLibraryOverlay({
           ) : (
             <section className="widget-library-plugin-groups">
               <div className="widget-library-section-head">
-                <div><h3>{tab === "recent" ? "Recently used" : "Widgets by plugin"}</h3><p>Widgets come from your installed plugins.</p></div>
-                <span>{filtered.length} widgets</span>
+                <div><h3>{tab === "recent" ? tr("settings.widgetlibraryoverlay.recentlyUsed") : tr("settings.widgetlibraryoverlay.widgetsByPlugin")}</h3><p>{tr("settings.widgetlibraryoverlay.widgetsComeFromYourInstalledPlugins")}</p></div>
+                <span>{filtered.length} {tr("settings.widgetlibraryoverlay.widgets")}</span>
               </div>
               {[...groups.entries()].map(([name, items], index) => (
                 <details key={name} open={index < 2 || tab === "recent"}>
@@ -265,26 +269,26 @@ export default function WidgetLibraryOverlay({
           )}
           {filtered.length === 0 && (
             <div className="widget-library-empty">
-              <strong>No matching widgets</strong>
-              <span>Clear a filter or try a different search.</span>
-              <button type="button" onClick={resetFilters}>Clear filters</button>
+              <strong>{tr("settings.widgetlibraryoverlay.noMatchingWidgets")}</strong>
+              <span>{tr("settings.widgetlibraryoverlay.clearAFilterOrTryADifferent")}</span>
+              <button type="button" onClick={resetFilters}>{tr("settings.widgetlibraryoverlay.clearFilters")}</button>
             </div>
           )}
         </div>
 
         <footer className="widget-library-footer">
-          <span>Can’t find what you need? Install a plugin to add more widgets.</span>
+          <span>{tr("settings.widgetlibraryoverlay.canTFindWhatYouNeedInstall")}</span>
           <button type="button" onClick={() => {
             onClose();
             window.dispatchEvent(new CustomEvent("polyth:settings-page", { detail: "plugins" }));
-          }}>Browse plugins →</button>
+          }}>{tr("settings.widgetlibraryoverlay.browsePlugins")}</button>
         </footer>
       </section>
 
-      <aside className="widget-library-preview" aria-label="Live workspace preview">
+      <aside className="widget-library-preview" aria-label={tr("settings.widgetlibraryoverlay.liveWorkspacePreview")}>
         <header>
-          <div><strong>Live Workspace Preview</strong><span>Drop a widget into a compatible zone.</span></div>
-          <span className="live-badge"><i /> Live</span>
+          <div><strong>{tr("settings.widgetlibraryoverlay.liveWorkspacePreview2")}</strong><span>{tr("settings.widgetlibraryoverlay.dropAWidgetIntoACompatibleZone")}</span></div>
+          <span className="live-badge"><i /> {tr("settings.widgetlibraryoverlay.live")}</span>
         </header>
         <div className={`widget-preview-canvas${dragged ? " is-dragging" : ""}`}>
           {(["header", "left", "main", "right", "bottom", "floating"] as const).map((target) => {
@@ -309,7 +313,7 @@ export default function WidgetLibraryOverlay({
                   event.dataTransfer.dropEffect = check.ok ? "move" : "none";
                 }}
                 onDrop={(event) => drop(target, event)}
-                aria-label={`${ZONE_LABEL[target]} drop zone`}
+                aria-label={tr("settings.widgetlibraryoverlay.valueDropZone", { value: ZONE_LABEL[target] })}
               >
                 <span>{ZONE_LABEL[target]}</span>
                 <div>
@@ -320,22 +324,24 @@ export default function WidgetLibraryOverlay({
                   ))}
                   {itemIds.length > 3 && <small>+{itemIds.length - 3}</small>}
                 </div>
-                {dragged && check.ok && <b>＋ Drop here</b>}
+                {dragged && check.ok && <b>{tr("settings.widgetlibraryoverlay.dropHere")}</b>}
                 {dragged && !check.ok && <em>{check.reason}</em>}
               </div>
             );
           })}
         </div>
         <div className="widget-preview-status" aria-live="polite">
-          {dragged ? <><WidgetGlyph widget={dragged} /><span><small>You’re dragging</small><strong>{dragged.title}</strong></span></> : <span>{status || "Drag a widget to preview where it can go."}</span>}
+          {dragged
+            ? <><WidgetGlyph widget={dragged} /><span><small>{tr("settings.widgetlibraryoverlay.youReDragging")}</small><strong>{dragged.title}</strong></span></>
+            : <span>{status || tr("settings.widgetlibraryoverlay.dragWidgetToPreview")}</span>}
         </div>
         <div className="widget-preview-tips">
-          <h3>Tips</h3>
+          <h3>{tr("settings.widgetlibraryoverlay.tips")}</h3>
           <ul>
-            <li><b>↔</b><span><strong>Drag and drop</strong><small>Move widgets directly into highlighted zones.</small></span></li>
-            <li><b>＋</b><span><strong>Quick add</strong><small>Add puts a widget in its preferred zone.</small></span></li>
-            <li><b>⌕</b><span><strong>Filter by plugin</strong><small>Narrow the library by source, size, or zone.</small></span></li>
-            <li><b>✓</b><span><strong>Zone compatibility</strong><small>Only zones where a widget fits become active.</small></span></li>
+            <li><b>↔</b><span><strong>{tr("settings.widgetlibraryoverlay.dragAndDrop")}</strong><small>{tr("settings.widgetlibraryoverlay.moveWidgetsDirectlyIntoHighlightedZones")}</small></span></li>
+            <li><b>＋</b><span><strong>{tr("settings.widgetlibraryoverlay.quickAdd")}</strong><small>{tr("settings.widgetlibraryoverlay.addPutsAWidgetInItsPreferred")}</small></span></li>
+            <li><b>⌕</b><span><strong>{tr("settings.widgetlibraryoverlay.filterByPlugin")}</strong><small>{tr("settings.widgetlibraryoverlay.narrowTheLibraryBySourceSizeOr")}</small></span></li>
+            <li><b>✓</b><span><strong>{tr("settings.widgetlibraryoverlay.zoneCompatibility")}</strong><small>{tr("settings.widgetlibraryoverlay.onlyZonesWhereAWidgetFitsBecome")}</small></span></li>
           </ul>
         </div>
       </aside>
