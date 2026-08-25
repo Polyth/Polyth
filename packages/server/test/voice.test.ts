@@ -7,7 +7,7 @@ import { mkdtempSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createVoiceSettings } from "../src/voice.ts";
-import { voiceRoutes } from "../src/routes/voice.ts";
+import { voiceRoutes } from "../../dictation/src/serverEntry.ts";
 import type { RouteRequest } from "../src/http.ts";
 
 const tmp = () => mkdtempSync(join(tmpdir(), "polyth-voice-"));

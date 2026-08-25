@@ -8,7 +8,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { JsonObject, SessionEvent } from "@polyth/contracts";
 import { createBrowserService, createFakeDriver } from "@polyth/browser";
-import { browserRoutes } from "../src/routes/browser.ts";
+import { browserRoutes } from "../../browser/src/serverEntry.ts";
 import type { RouteRequest } from "../src/http.ts";
 
 const HOME = "http://127.0.0.1:5173/";

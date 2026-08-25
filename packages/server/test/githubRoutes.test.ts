@@ -6,7 +6,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { JsonObject, ProjectService, SessionEvent } from "@polyth/contracts";
 import { createGithubService, type ExecFn } from "@polyth/github";
-import { githubRoutes } from "../src/routes/github.ts";
+import { githubRoutes } from "../../github/src/serverEntry.ts";
 import type { RouteRequest } from "../src/http.ts";
 
 interface Call { kind: "append" | "gh"; type?: string; data?: JsonObject; args?: string[] }

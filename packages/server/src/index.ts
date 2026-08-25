@@ -21,7 +21,6 @@ import {
 } from "@polyth/backend-opencode";
 import { createSshService } from "@polyth/ssh";
 import {
-  createPluginRegistry,
   createServerServiceRegistry,
   serverServiceKey,
   type ServerPackageHost,
@@ -31,7 +30,7 @@ import { createGoalService, type GoalService } from "@polyth/goals";
 import { createFileService, MAX_RAW_BYTES } from "@polyth/files";
 import { createCommandService } from "@polyth/commands";
 import { createGitService } from "@polyth/git";
-import { createTerminalService } from "@polyth/terminal";
+import { attachTerminalWs, createTerminalService } from "@polyth/terminal";
 import { createMultirunService } from "@polyth/multirun";
 import { createWorkflowService } from "@polyth/workflow";
 import { createFusionService, synthesisPrompt } from "@polyth/fusion";
@@ -57,17 +56,11 @@ import { createSessionService, type Broadcaster, type RuntimePool } from "./sess
 import { createRuntimeCatalog } from "./runtimeCatalog.ts";
 import { createHttpServer, type RouteHandler } from "./http.ts";
 import { packageRoutes } from "./routes/packages.ts";
-import { pluginAssetRoutes } from "./routes/pluginAssets.ts";
-import { goalRoutes } from "./routes/goals.ts";
 import { contextRoutes } from "./routes/context.ts";
 import { orgRoutes } from "./routes/org.ts";
-import { workspaceRoutes } from "./routes/workspace.ts";
-import { attachTerminalWs } from "./routes/terminal.ts";
 import { sessionRetentionRoutes } from "./routes/sessionRetention.ts";
 import { controlRoutes } from "./routes/control.ts";
-import { profileRoutes } from "./routes/profiles.ts";
 import { settingsRoutes } from "./routes/settings.ts";
-import { opencodePluginRoutes } from "./routes/opencodePlugins.ts";
 import { opencodePendingRoutes } from "./routes/opencodePending.ts";
 import { browseRoutes } from "./routes/browse.ts";
 import { createAuthService } from "./auth.ts";
@@ -77,7 +70,6 @@ import { pushRoutes } from "./routes/push.ts";
 import { createNotificationStore } from "./notifications.ts";
 import { notificationRoutes } from "./routes/notifications.ts";
 import { registerDiscoveredPackages } from "./packageDiscovery.ts";
-import { autoAcceptRoutes } from "./routes/autoAccept.ts";
 import { queueRoutes } from "./routes/queue.ts";
 import { createBehaviorService } from "./behavior.ts";
 import { createMcpConfigService, mcpEntriesFromBackendConfig } from "./mcp.ts";
@@ -86,8 +78,6 @@ import { createModelVisibilityService } from "./modelVisibility.ts";
 import { createVoiceSettings } from "./voice.ts";
 import { buildNotePrompt, createAssistService, createAssistSettings, parseNoteReply, type AssistService } from "./assist.ts";
 import { assistRoutes } from "./routes/assist.ts";
-import { trackRoutes } from "./routes/tracks.ts";
-import { createPluginContributionHub } from "./pluginContributions.ts";
 import { createWalkthroughJobService } from "./walkthroughs.ts";
 import { createReviewFlowService, createReviewService } from "./review.ts";
 import { createMultirunRunOne } from "./multirunRunner.ts";
@@ -431,16 +421,6 @@ export async function boot(opts: BootOptions = {}) {
   await secureSafe.syncForbiddenConfig();
   await refreshSafeBehavior();
   const mcp = createMcpConfigService({ file: `${dataDir}/mcp.json`, applier: configApplier });
-  const pluginHub = createPluginContributionHub();
-  const pluginsDir = `${dataDir}/plugins`;
-  const pluginRegistry = createPluginRegistry({
-    dir: pluginsDir,
-    trustedDir: process.env.POLYTH_TRUSTED_PLUGIN_DIR ?? `${dataDir}/trusted-plugins`,
-    slots: pluginHub.slots,
-    routes: routeRegistry,
-    root,
-    onChange: (plugin) => broadcast.pluginChanged?.(plugin),
-  });
 
   // Provider/model visibility: seeds from opencode.json (disabled_providers +
   // provider blacklists), then mirrors every toggle back to it.
@@ -789,12 +769,6 @@ export async function boot(opts: BootOptions = {}) {
     localhostOptional: process.env.POLYTH_UI_PASSWORD_LOCALHOST === "optional",
   });
 
-  const chainRoutes = (...handlers: RouteHandler[]): RouteHandler => async (request) => {
-    for (const handler of handlers) {
-      if (await handler(request)) return true;
-    }
-    return false;
-  };
   const registerPackageRoute = (
     id: string,
     handler: RouteHandler,
@@ -819,7 +793,7 @@ export async function boot(opts: BootOptions = {}) {
     });
   };
   const settingsRoute = settingsRoutes({
-    behavior, mcp, plugins: pluginRegistry,
+    behavior, mcp,
     saveRole: async (name, role) => {
       await configApplier.applyAgent(name, role);
       const current = (await runtimeCatalog.agents()).find((agent) => agent.name === name);
@@ -841,14 +815,11 @@ export async function boot(opts: BootOptions = {}) {
       capabilities: allCapabilities(),
     }),
   });
-  const pluginRoute = chainRoutes(opencodePluginRoutes(configApplier), settingsRoute);
 
   // Server-internal packages (no packages/<dir> counterpart) stay hand-wired.
   registerPackageRoute("projects", projectRoutes(projects));
   registerPackageRoute("mcp", async (request) =>
     request.path.startsWith("/api/mcp/") ? settingsRoute(request) : false);
-  registerPackageRoute("plugins", async (request) =>
-    request.path.startsWith("/api/plugins") ? pluginRoute(request) : false);
 
   // --- autonomous package discovery: every workspace package that declares a
   // polyth.serverEntry marker registers itself through the same lifecycle the
@@ -874,6 +845,7 @@ export async function boot(opts: BootOptions = {}) {
   provideService("schedule", schedule);
   provideService("knowledge", knowledge);
   provideService("tracks.store", trackStore);
+  provideService("tracks.workflow", trackWorkflow!);
   provideService("github", github);
   provideService("usage", usage);
   provideService("ssh", ssh);
@@ -884,6 +856,7 @@ export async function boot(opts: BootOptions = {}) {
   provideService("walkthrough.jobs", walkthroughJobs);
   provideService("review", review);
   provideService("review.flow", reviewFlow);
+  provideService("plugins.config", configApplier);
 
   const packageHost: Omit<ServerPackageHost, "pluginId"> = {
     storageDir: dataDir,
@@ -922,18 +895,8 @@ export async function boot(opts: BootOptions = {}) {
     authRoutes(auth),
     opencodePendingRoutes(pendingOpenCode),
     packageRoutes(packageRegistry),
-    pluginAssetRoutes({ plugins: pluginRegistry, pluginsDir }),
-    async (rc) => {
-      if (/^\/api\/sessions\/[^/]+\/goal/.test(rc.path)) {
-        const id = rc.path.split("/")[3]!;
-        await ensureGoalState(id);
-      }
-      return false;
-    },
-    goalRoutes(goals),
     contextRoutes(sessions),
     orgRoutes({ projects, sessions, store }),
-    workspaceRoutes({ projects, files, sessions }),
     assistRoutes({
       settings: assistSettings,
       projection: (sessionId) => store.projection(sessionId),
@@ -946,18 +909,11 @@ export async function boot(opts: BootOptions = {}) {
         return parseNoteReply(await assistComplete(sessionId, buildNotePrompt(transcript)));
       },
     }),
-    trackRoutes(trackWorkflow),
     sessionRetentionRoutes(sessions),
     controlRoutes(sessions),
-    autoAcceptRoutes(sessions),
     queueRoutes(sessions),
     pushRoutes(push),
     notificationRoutes(notifications),
-    profileRoutes({
-      store,
-      listModels: () => runtimeCatalog.models(),
-      listAgents: () => runtimeCatalog.agents(),
-    }),
     browseRoutes(),
     async (request) => {
       if (request.path.startsWith("/api/mcp/") || request.path.startsWith("/api/plugins")) return false;
@@ -991,7 +947,6 @@ export async function boot(opts: BootOptions = {}) {
     assist?.stop();
     knowledge.close();
     await browser.closeAll().catch(() => {});
-    await pluginRegistry.dispose().catch(() => {});
     await terminals.closeAll().catch(() => {});
     for (const p of runtimesByProject.values()) await (await p.catch(() => null))?.dispose().catch(() => {});
     await ssh.disconnectAll().catch(() => {});

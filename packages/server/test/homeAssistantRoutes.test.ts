@@ -6,7 +6,7 @@ import type {
 } from "@polyth/contracts";
 import type { HomeAssistantService } from "@polyth/home-assistant";
 import type { RouteRequest } from "../src/http.ts";
-import { homeAssistantRoutes } from "../src/routes/homeAssistant.ts";
+import { homeAssistantRoutes } from "@polyth/home-assistant";
 
 const CONFIG: HomeAssistantConfigDto = {
   baseUrl: "https://ha.example.test",

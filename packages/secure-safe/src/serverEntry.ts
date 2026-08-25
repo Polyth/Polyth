@@ -1,19 +1,28 @@
 import type {
+  RouteHandler,
   SecureSafeKind,
   SecureSafePatchInput,
   SecureSafeScope,
   SecureSafeService,
 } from "@polyth/contracts";
-import type { RouteHandler } from "../http.ts";
+import {
+  serverServiceKey,
+  type ServerPackage,
+  type ServerPackageHost,
+} from "@polyth/plugins";
 
 const kind = (value: unknown): SecureSafeKind => {
   if (value === "env" || value === "token" || value === "password") return value;
-  throw Object.assign(new Error("kind must be env, token, or password"), { code: "invalid-input" });
+  throw Object.assign(new Error("kind must be env, token, or password"), {
+    code: "invalid-input",
+  });
 };
 
 const scope = (value: unknown): SecureSafeScope => {
   if (value === "global" || value === "project") return value;
-  throw Object.assign(new Error("scope must be global or project"), { code: "invalid-input" });
+  throw Object.assign(new Error("scope must be global or project"), {
+    code: "invalid-input",
+  });
 };
 
 export function secureSafeRoutes(safe: SecureSafeService): RouteHandler {
@@ -34,12 +43,13 @@ export function secureSafeRoutes(safe: SecureSafeService): RouteHandler {
         ...(input.purpose !== undefined ? { purpose: String(input.purpose) } : {}),
         ...(input.kind !== undefined ? { kind: kind(input.kind) } : {}),
         ...(input.scope !== undefined ? { scope: scope(input.scope) } : {}),
-        ...(input.projectId !== undefined ? { projectId: String(input.projectId) } : {}),
+        ...(input.projectId !== undefined
+          ? { projectId: String(input.projectId) }
+          : {}),
         value: typeof input.value === "string" ? input.value : "",
       }));
       return true;
     }
-
     const match = path.match(/^\/api\/secure-safe\/([^/]+)$/);
     if (!match) return false;
     const id = decodeURIComponent(match[1]!);
@@ -64,5 +74,17 @@ export function secureSafeRoutes(safe: SecureSafeService): RouteHandler {
       return true;
     }
     return false;
+  };
+}
+
+export default function registerPackage(host: ServerPackageHost): ServerPackage {
+  let routes: RouteHandler | null = null;
+  return {
+    routes: async (request) => routes ? routes(request) : false,
+    onEnable() {
+      routes ??= secureSafeRoutes(host.services.require(
+        serverServiceKey<SecureSafeService>("secure-safe"),
+      ));
+    },
   };
 }

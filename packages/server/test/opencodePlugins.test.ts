@@ -7,7 +7,7 @@ import { createConfigApplier } from "@polyth/backend-opencode";
 import type { RouteRequest } from "../src/http.ts";
 import { createDeferredConfigApplier, createOpenCodePendingService } from "../src/opencodePending.ts";
 import { opencodePendingRoutes } from "../src/routes/opencodePending.ts";
-import { opencodePluginRoutes } from "../src/routes/opencodePlugins.ts";
+import { opencodePluginRoutes } from "../../plugins/src/serverEntry.ts";
 
 const tmp = () => mkdtempSync(join(tmpdir(), "polyth-oc-plugins-"));
 

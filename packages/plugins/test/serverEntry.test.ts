@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { RouteHandler } from "@polyth/contracts";
 import { createContext } from "@polyth/kernel";
-import { loadServerEntry } from "../src/serverEntry.ts";
+import { loadServerEntry } from "../src/trustedServerEntry.ts";
 
 const fixture = (): { rootDir: string; installDir: string } => {
   const rootDir = mkdtempSync(join(tmpdir(), "polyth-server-entry-"));

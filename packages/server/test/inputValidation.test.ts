@@ -7,9 +7,9 @@ import { once } from "node:events";
 import type { Project, ProjectService } from "@polyth/contracts";
 import { createGoalService } from "@polyth/goals";
 import { createHttpServer, type RouteHandler } from "../src/http.ts";
-import { goalRoutes } from "../src/routes/goals.ts";
-import { assertGitRelativePath, gitRoutes } from "../src/routes/git.ts";
-import { terminalRoutes } from "../src/routes/terminal.ts";
+import { goalRoutes } from "../../goals/src/serverEntry.ts";
+import { assertGitRelativePath, gitRoutes } from "../../git/src/serverEntry.ts";
+import { terminalRoutes } from "../../terminal/src/serverEntry.ts";
 
 const project: Project = { id: "p1", path: "/workspace/project", name: "project", createdAt: 1 };
 const projects: ProjectService = {

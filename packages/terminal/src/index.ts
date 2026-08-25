@@ -396,3 +396,5 @@ export function createTerminalService(opts: { replayBytes?: number; forcePipe?: 
 
   return service;
 }
+
+export { attachTerminalWs } from "./serverEntry.ts";

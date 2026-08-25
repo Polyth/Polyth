@@ -1,15 +1,20 @@
 import type {
   ModelRef,
+  RouteHandler,
   WorkflowEdgeDto,
   WorkflowNodeDto,
   WorkflowRunOptionsDto,
 } from "@polyth/contracts";
+import {
+  serverServiceKey,
+  type ServerPackage,
+  type ServerPackageHost,
+} from "@polyth/plugins";
 import type {
   WorkflowCreateInput,
   WorkflowService,
   WorkflowUpdateInput,
-} from "@polyth/workflow";
-import type { RouteHandler } from "../http.ts";
+} from "./index.ts";
 
 const asModel = (value: unknown): ModelRef | undefined => {
   if (!value || typeof value !== "object") return undefined;
@@ -28,7 +33,9 @@ const optionsOf = (value: unknown): WorkflowRunOptionsDto | undefined => {
   const raw = value as Record<string, unknown>;
   return {
     ...(raw.pipe === "direct" || raw.pipe === "ancestors" ? { pipe: raw.pipe } : {}),
-    ...(raw.permissions === "auto" || raw.permissions === "manual" ? { permissions: raw.permissions } : {}),
+    ...(raw.permissions === "auto" || raw.permissions === "manual"
+      ? { permissions: raw.permissions }
+      : {}),
     ...(raw.maxParallel !== undefined ? { maxParallel: Number(raw.maxParallel) } : {}),
     ...(raw.nodeTimeoutMs !== undefined ? { nodeTimeoutMs: Number(raw.nodeTimeoutMs) } : {}),
   };
@@ -125,7 +132,6 @@ export function workflowRoutes(workflow: WorkflowService): RouteHandler {
       return true;
     }
     if (match[2]) return false;
-
     if (method === "GET") {
       const found = workflow.get(id);
       if (!found) {
@@ -155,5 +161,17 @@ export function workflowRoutes(workflow: WorkflowService): RouteHandler {
       return true;
     }
     return false;
+  };
+}
+
+export default function registerPackage(host: ServerPackageHost): ServerPackage {
+  let routes: RouteHandler | null = null;
+  return {
+    routes: async (request) => routes ? routes(request) : false,
+    onEnable() {
+      routes ??= workflowRoutes(host.services.require(
+        serverServiceKey<WorkflowService>("workflow"),
+      ));
+    },
   };
 }

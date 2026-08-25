@@ -8,6 +8,8 @@ import type { RouteRequest } from "../src/http.ts";
 import { createRouteRegistry } from "../src/routeRegistry.ts";
 import { createPackageLifecycle } from "../src/packageLifecycle.ts";
 import { registerDiscoveredPackages } from "../src/packageDiscovery.ts";
+import { BUILTIN_PACKAGES } from "../src/packages.ts";
+import { discoverServerPackages } from "@polyth/plugins";
 
 const writePackage = (
   packagesDir: string,
@@ -87,4 +89,41 @@ test("each package receives its own pluginId on the shared host", async () => {
   await lifecycle.enable("second");
   assert.equal(await routes.handler(request("/api/id/first")), true);
   assert.equal(await routes.handler(request("/api/id/second")), true);
+});
+
+test("every server feature package is discoverable and has a matching descriptor", async () => {
+  const packagesDir = join(import.meta.dirname, "../..");
+  const discovered = await discoverServerPackages(packagesDir);
+  const expected = [
+    "browser",
+    "commands",
+    "dictation",
+    "files",
+    "fusion",
+    "git",
+    "github",
+    "goals",
+    "home-assistant",
+    "hotkeys",
+    "knowledge",
+    "models",
+    "multirun",
+    "permissions",
+    "plugins",
+    "schedule",
+    "secure-safe",
+    "ssh",
+    "terminal",
+    "usage",
+    "walkthrough",
+    "workflow",
+  ];
+  assert.deepEqual(discovered.map((pkg) => pkg.id), expected);
+  const descriptorIds = new Set<string>(
+    BUILTIN_PACKAGES.map((descriptor) => descriptor.id),
+  );
+  assert.deepEqual(
+    discovered.filter((pkg) => !descriptorIds.has(pkg.id)).map((pkg) => pkg.id),
+    [],
+  );
 });

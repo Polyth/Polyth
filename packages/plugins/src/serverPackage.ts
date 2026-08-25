@@ -25,7 +25,7 @@ import type {
   SessionProjection,
   SessionService,
 } from "@polyth/contracts";
-import type { TrustedServerPluginHost } from "./serverEntry.ts";
+import type { TrustedServerPluginHost } from "./trustedServerEntry.ts";
 
 const err = (code: string, message: string) => Object.assign(new Error(message), { code });
 
@@ -161,7 +161,6 @@ export const INFRASTRUCTURE_PACKAGE_DIRS: ReadonlySet<string> = new Set([
   "session",
   "backend-opencode",
   "server",
-  "plugins",
 ]);
 
 export interface DiscoveredServerPackage {

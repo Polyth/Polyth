@@ -10,7 +10,7 @@ import { createGoalService } from "@polyth/goals";
 import { createKnowledgeStore, createTrackStore } from "@polyth/knowledge";
 import { createScheduleService, type ScheduleTask } from "@polyth/schedule";
 import { createTerminalService } from "@polyth/terminal";
-import { trackRoutes } from "../src/routes/tracks.ts";
+import { trackRoutes } from "../../knowledge/src/serverEntry.ts";
 import { createTrackWorkflow } from "../src/tracks.ts";
 
 const dirs: string[] = [];

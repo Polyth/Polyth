@@ -22,6 +22,7 @@ export const BUILTIN_PACKAGES = [
   { id: "chat", name: "Chat", description: "Conversation and composer preferences.", core: true, enabled: true, settingsGroup: "Workspace", hasSettings: true },
   { id: "sessions", name: "Sessions", description: "Session defaults and retention preferences.", core: true, enabled: true, settingsGroup: "Workspace", hasSettings: true },
   { id: "shortcuts", name: "Shortcuts", description: "Keyboard shortcut configuration.", core: true, enabled: true, settingsGroup: "Workspace", hasSettings: true },
+  { id: "hotkeys", name: "Hotkeys Runtime", description: "Keyboard shortcut package registration.", core: true, enabled: true, hasSettings: false },
   { id: "access", name: "Access", description: "Application access and authentication.", core: true, enabled: true, settingsGroup: "System", hasSettings: true },
   { id: "about", name: "About", description: "Application version and system information.", core: true, enabled: true, settingsGroup: "System", hasSettings: true },
 

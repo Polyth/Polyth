@@ -7,7 +7,7 @@ import type { Project, ProjectRemote, ProjectService } from "@polyth/contracts";
 import { createSshService, type SshExecResult, type SshRunner } from "@polyth/ssh";
 import type { RouteRequest } from "../src/http.ts";
 import { createProjectService } from "../src/projects.ts";
-import { sshRoutes } from "../src/routes/ssh.ts";
+import { sshRoutes } from "../../ssh/src/serverEntry.ts";
 
 /** Scriptable fake `ssh` binary (same routing as the package tests). */
 function fakeRunner(dial: (command: string, dest: string) => SshExecResult) {
