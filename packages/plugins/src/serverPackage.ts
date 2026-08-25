@@ -83,12 +83,20 @@ export type AppendEventOptions = Partial<
   Pick<SessionEvent, "ignorable" | "surfaceOp" | "sourceEventSeqs" | "producerPlugin">
 >;
 
-/** Cross-package service seam. The composition root provides the shared
- *  instances it constructs (git, terminals, browser, …) under well-known keys
- *  (`serverServiceKey(name)`); packages provide their own services for others
- *  to consume. Resolve dependencies lazily (inside `onEnable` or route
- *  handlers), never at `registerPackage` time — load order between packages is
- *  alphabetical, not dependency-sorted. */
+/** Handed to `onHttpServer` callbacks once the gateway's HTTP server exists. */
+export interface HttpServerContext {
+  server: import("node:http").Server;
+  /** Gateway auth check for WS upgrade requests (F16 cookie sessions). */
+  authorize(request: import("node:http").IncomingMessage): boolean;
+}
+
+/** Cross-package service seam. Each discovered package constructs its own
+ *  services during `registerPackage` and provides them under well-known keys
+ *  (`serverServiceKey(name)`); the composition root only provides the few
+ *  infrastructure seams packages cannot build themselves (voice settings,
+ *  secure-safe, config applier, remote probe). Resolve dependencies lazily
+ *  (inside `onEnable` or route handlers), never at `registerPackage` time —
+ *  load order between packages is alphabetical, not dependency-sorted. */
 export interface ServerServiceRegistry {
   /** Register a service instance. Throws on a duplicate id. */
   provide<T>(key: CapabilityKey<T>, service: T): void;
@@ -124,6 +132,9 @@ export function createServerServiceRegistry(): ServerServiceRegistry {
  *  in `packages/server/src/index.ts`. */
 export interface ServerPackageHost extends TrustedServerPluginHost {
   projects: ProjectService;
+  /** Canonical session service. The reference is stable, but the service is
+   *  composed AFTER package load — capture it in closures freely, never invoke
+   *  its methods while `registerPackage` runs. */
   sessions: SessionService;
   /** Append-only session event store. Appends here are NOT broadcast; use
    *  `events.append` for the persist-then-broadcast pattern. */
@@ -150,6 +161,10 @@ export interface ServerPackageHost extends TrustedServerPluginHost {
   resolveSessionRuntime(sessionId: string): Promise<SessionRuntimeBinding>;
   /** Mount a kernel plugin on the composition root; dispose to unmount. */
   loadPlugin(plugin: Plugin): Promise<Disposable>;
+  /** Defer work until the gateway's HTTP server exists (e.g. attaching a WS
+   *  upgrade channel). Callbacks registered during package load run before the
+   *  core session gateway claims `/ws` upgrades, preserving upgrade priority. */
+  onHttpServer(cb: (ctx: HttpServerContext) => void): void;
 }
 
 // ---- discovery --------------------------------------------------------------------

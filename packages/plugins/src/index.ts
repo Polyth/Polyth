@@ -43,6 +43,7 @@ export {
   serverServiceKey,
   type AppendEventOptions,
   type DiscoveredServerPackage,
+  type HttpServerContext,
   type ServerBroadcast,
   type ServerOneShotOptions,
   type ServerPackage,
