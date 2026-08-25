@@ -333,6 +333,10 @@ export function createHttpServer(deps: HttpDeps): Server {
         // explain a failed exact-history branch, but shares 409 semantics.
         : e.code === "conflict" || e.code === "history-mismatch" ? 409
         : e.code === "payload-too-large" ? 413
+        // Dependency failures (unreachable SSH host, missing remote runtime,
+        // dead backend) are honest 503s with their actionable message — a
+        // masked 500 would hide "install opencode on <host>" from the user.
+        : e.code === "unavailable" ? 503
         : e.code === "unsupported" ? 501
         : 500;
       const message =

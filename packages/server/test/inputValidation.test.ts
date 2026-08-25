@@ -31,6 +31,12 @@ const probeRoutes: RouteHandler = async ({ path, body, json }) => {
   if (path === "/api/probe/internal") {
     throw new Error("database password and /workspace/private leaked");
   }
+  if (path === "/api/probe/unavailable") {
+    throw Object.assign(
+      new Error("opencode is not installed on dev@remote — install it there first"),
+      { code: "unavailable" },
+    );
+  }
   return false;
 };
 
@@ -111,6 +117,22 @@ test("invalid paths are sanitized 400s and internal faults alone use sanitized 5
     assert.deepEqual(await internal.json(), {
       error: "internal",
       message: "An internal server error occurred.",
+    });
+  } finally {
+    app.server.close();
+  }
+});
+
+test("unavailable dependencies are honest 503s that keep their actionable message", async () => {
+  const app = await start();
+  try {
+    // A remote-runtime failure (e.g. opencode missing on the SSH host) must
+    // never surface as a masked 500 — the user needs the install guidance.
+    const response = await fetch(`${app.base}/api/probe/unavailable`);
+    assert.equal(response.status, 503);
+    assert.deepEqual(await response.json(), {
+      error: "unavailable",
+      message: "opencode is not installed on dev@remote — install it there first",
     });
   } finally {
     app.server.close();

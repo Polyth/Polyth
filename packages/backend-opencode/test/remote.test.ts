@@ -147,6 +147,30 @@ test("remote runtime boots serve on the host, attaches through the forward, and 
   assert.equal(fake.forwards[0]!.cancelled, true);
 });
 
+test("remote invocations extend PATH with the standard opencode install locations", async () => {
+  const stub = await startStubServe();
+  const fake = createFakeHost({ stubPort: stub.port });
+  const runtime = await createRemoteOpenCodeRuntime({
+    host: fake.host,
+    remotePath: "/home/dev/app",
+    pickPort: () => 37002,
+    readyTimeoutMs: 5_000,
+    listenTimeoutMs: 5_000,
+  });
+  try {
+    // Non-interactive SSH shells never source the rc files the installer
+    // appends its PATH entry to, so both the probe and the serve start must
+    // resolve ~/.opencode/bin (and ~/.local/bin) installs on their own.
+    const pathPrefix = 'PATH="$HOME/.opencode/bin:$HOME/.local/bin:$PATH"';
+    const probeCmd = fake.execCalls.find((c) => c.includes("command -v"));
+    assert.ok(probeCmd?.includes(pathPrefix), `probe misses PATH prefix: ${probeCmd}`);
+    assert.ok(fake.startCommands[0]!.startsWith(pathPrefix), `serve misses PATH prefix: ${fake.startCommands[0]}`);
+  } finally {
+    await runtime.dispose();
+    stub.server.close();
+  }
+});
+
 test("remote port collisions retry with a fresh candidate", async () => {
   const stub = await startStubServe();
   const fake = createFakeHost({ stubPort: stub.port, busyPorts: [40001, 40002] });
