@@ -2,6 +2,7 @@
 // and a fullscreen dialog. Render errors degrade to the diagram source.
 import { useEffect, useId, useState } from "react";
 import Dialog from "../components/a11y/Dialog.tsx";
+import { tr } from "../i18n/index.ts";
 
 type MermaidApi = {
   initialize(cfg: Record<string, unknown>): void;
@@ -82,7 +83,7 @@ export default function Mermaid({ code }: { code: string }) {
     setError(null);
     void loadMermaid().then(async (api) => {
       if (stale) return;
-      if (!api) { setError("diagram renderer unavailable"); return; }
+      if (!api) { setError(tr("markdown.mermaid.diagramRendererUnavailable")); return; }
       try {
         api.initialize(themeConfig());
         const out = await api.render(`mmd-${id}-${Date.now().toString(36)}`, code);
@@ -97,7 +98,7 @@ export default function Mermaid({ code }: { code: string }) {
   if (error !== null) {
     return (
       <div className="mermaid-error">
-        <div className="mermaid-error-note">Mermaid failed: {error}</div>
+        <div className="mermaid-error-note">{tr("markdown.mermaid.mermaidFailed")}{" "}{error}</div>
         <pre><code>{code}</code></pre>
       </div>
     );
@@ -108,20 +109,20 @@ export default function Mermaid({ code }: { code: string }) {
   return (
     <div className="mermaid-wrap">
       <div className="mermaid-toolbar">
-        <button className="small-btn" aria-label="Zoom out" disabled={zoomIdx === 0} onClick={() => setZoomIdx((i) => Math.max(0, i - 1))}>−</button>
+        <button className="small-btn" aria-label={tr("markdown.mermaid.zoomOut")} disabled={zoomIdx === 0} onClick={() => setZoomIdx((i) => Math.max(0, i - 1))}>−</button>
         <span className="mermaid-zoom">{Math.round(zoom * 100)}%</span>
-        <button className="small-btn" aria-label="Zoom in" disabled={zoomIdx === ZOOMS.length - 1} onClick={() => setZoomIdx((i) => Math.min(ZOOMS.length - 1, i + 1))}>+</button>
-        <button className="small-btn" onClick={() => setFull(true)}>Fullscreen</button>
+        <button className="small-btn" aria-label={tr("markdown.mermaid.zoomIn")} disabled={zoomIdx === ZOOMS.length - 1} onClick={() => setZoomIdx((i) => Math.min(ZOOMS.length - 1, i + 1))}>+</button>
+        <button className="small-btn" onClick={() => setFull(true)}>{tr("markdown.mermaid.fullscreen")}</button>
       </div>
       <SvgPane svg={svg} zoom={zoom} />
       {full && (
-        <Dialog title="Diagram" size="full" onClose={() => setFull(false)}>
+        <Dialog title={tr("markdown.mermaid.diagram")} size="full" onClose={() => setFull(false)}>
           <div className="dialog-head">
-            <span className="dialog-title">Diagram</span>
+            <span className="dialog-title">{tr("markdown.mermaid.diagram")}</span>
             <span className="header-spacer" />
-            <button className="small-btn" aria-label="Zoom out" onClick={() => setZoomIdx((i) => Math.max(0, i - 1))}>−</button>
-            <button className="small-btn" aria-label="Zoom in" onClick={() => setZoomIdx((i) => Math.min(ZOOMS.length - 1, i + 1))}>+</button>
-            <button className="small-btn" onClick={() => setFull(false)}>Close</button>
+            <button className="small-btn" aria-label={tr("markdown.mermaid.zoomOut")} onClick={() => setZoomIdx((i) => Math.max(0, i - 1))}>−</button>
+            <button className="small-btn" aria-label={tr("markdown.mermaid.zoomIn")} onClick={() => setZoomIdx((i) => Math.min(ZOOMS.length - 1, i + 1))}>+</button>
+            <button className="small-btn" onClick={() => setFull(false)}>{tr("common.close")}</button>
           </div>
           <SvgPane svg={svg} zoom={zoom} />
         </Dialog>

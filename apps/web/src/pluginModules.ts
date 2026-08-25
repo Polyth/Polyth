@@ -1,4 +1,5 @@
 import type { ComponentType } from "react";
+import { tr } from "./i18n/index.ts";
 
 /**
  * Contract implemented by every managed plugin UI entry:
@@ -33,7 +34,7 @@ export async function loadPluginModule(
     || Array.isArray(loaded.modules)
     || Object.values(loaded.modules).some((component) => typeof component !== "function")
   ) {
-    throw new Error(`plugin "${pluginId}" UI entry must export a modules component map`);
+    throw new Error(tr("pluginmodules.pluginValueUiEntryMustExportA", { pluginId: pluginId }));
   }
 
   const exports = {

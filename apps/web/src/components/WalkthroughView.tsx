@@ -5,6 +5,7 @@ import { useStore } from "../store.ts";
 import { parseDiffLines } from "../utils.ts";
 import GeneratedWalkthrough from "./GeneratedWalkthrough.tsx";
 import EmptyState from "./EmptyState.tsx";
+import { tr } from "../i18n/index.ts";
 
 export default function WalkthroughView() {
   const sessionId = useStore((s) => s.activeSessionId);
@@ -47,17 +48,17 @@ export default function WalkthroughView() {
     <div className="view-page walkthrough-page">
       <div className="wt-header">
         <div>
-          <h1 className="view-title">Guided Changes Walkthrough</h1>
-          <p className="view-sub">Review each file edit in order — approve or reject one step at a time.</p>
+          <h1 className="view-title">{tr("walkthroughview.guidedChangesWalkthrough")}</h1>
+          <p className="view-sub">{tr("walkthroughview.reviewEachFileEditInOrderApprove")}</p>
         </div>
         <div className="seg" style={{ marginLeft: 12 }}>
-          <button className={mode === "session" ? "on" : ""} onClick={() => setMode("session")}>Session steps</button>
-          <button className={mode === "generated" ? "on" : ""} onClick={() => setMode("generated")}>Generate</button>
+          <button className={mode === "session" ? "on" : ""} onClick={() => setMode("session")}>{tr("walkthroughview.sessionSteps")}</button>
+          <button className={mode === "generated" ? "on" : ""} onClick={() => setMode("generated")}>{tr("walkthroughview.generate")}</button>
         </div>
         <span className="header-spacer" />
         {mode === "session" && steps.length > 0 && (
           <span className="muted" style={{ fontSize: "calc(12px * var(--ui-font-scale, 1))", marginRight: 8, whiteSpace: "nowrap" }}>
-            Step {index + 1}/{steps.length} · {approved} ✓ · {rejected} ✕
+            {tr("walkthroughview.step")}{" "}{index + 1}/{steps.length} · {approved} ✓ · {rejected} ✕
           </span>
         )}
         {mode === "session" && (
@@ -76,15 +77,14 @@ export default function WalkthroughView() {
 
       {mode === "generated" && <GeneratedWalkthrough />}
 
-      {mode === "session" && !sessionId && <EmptyState title="No session open" description="Open a session to review its file edits." />}
+      {mode === "session" && !sessionId && <EmptyState title={tr("walkthroughview.noSessionOpen")} description={tr("walkthroughview.openASessionToReviewItsFile")} />}
       {mode === "session" && sessionId && steps.length === 0 && (
-        <EmptyState title="No file edits yet" description="Write or patch a file in this session to generate a walkthrough." />
+        <EmptyState title={tr("walkthroughview.noFileEditsYet")} description={tr("walkthroughview.writeOrPatchAFileInThis")} />
       )}
 
       {mode === "session" && steps.length > 0 && pending === 0 && (
         <div className="prompt-echo">
-          ✓ Reviewed {steps.length} {steps.length === 1 ? "change" : "changes"} · {approved} approved · {rejected} rejected — continue in Git to commit.
-        </div>
+          {tr("walkthroughview.reviewed")}{" "}{steps.length} {steps.length === 1 ? tr("walkthroughview.change") : tr("walkthroughview.changes")} · {approved} {tr("walkthroughview.approved2")}{" "}{rejected} {tr("walkthroughview.rejectedContinueInGitToCommit")}</div>
       )}
 
       {mode === "session" && step && (
@@ -103,17 +103,17 @@ export default function WalkthroughView() {
               ))}
             </pre>
           </div>
-          <div className="wt-explain">{step.explanation || "No explanation attached to this step."}</div>
+          <div className="wt-explain">{step.explanation || tr("walkthroughview.noExplanation")}</div>
           <div className="wt-footer">
-            <button className="small-btn" disabled={index === 0} onClick={() => setIndex((i) => i - 1)}>← Prev</button>
+            <button className="small-btn" disabled={index === 0} onClick={() => setIndex((i) => i - 1)}>{tr("walkthroughview.prev")}</button>
             <div className="wt-footer-mid">
-              <button className="small-btn danger-btn" disabled={busy || step.status !== "pending"} onClick={() => void decide("reject")}>Reject</button>
-              <button className="small-btn" disabled={index >= steps.length - 1} onClick={() => setIndex((i) => i + 1)}>Skip</button>
+              <button className="small-btn danger-btn" disabled={busy || step.status !== "pending"} onClick={() => void decide("reject")}>{tr("walkthroughview.reject")}</button>
+              <button className="small-btn" disabled={index >= steps.length - 1} onClick={() => setIndex((i) => i + 1)}>{tr("common.skip")}</button>
               <button className="primary-btn wt-approve" disabled={busy || step.status !== "pending"} onClick={() => void decide("approve")}>
-                {step.status === "pending" ? "Approve" : step.status === "approved" ? "Approved ✓" : "Rejected"}
+                {step.status === "pending" ? tr("walkthroughview.approve") : step.status === "approved" ? tr("walkthroughview.approved") : tr("walkthroughview.rejected")}
               </button>
             </div>
-            <button className="small-btn" disabled={index >= steps.length - 1} onClick={() => setIndex((i) => i + 1)}>Next →</button>
+            <button className="small-btn" disabled={index >= steps.length - 1} onClick={() => setIndex((i) => i + 1)}>{tr("walkthroughview.next")}</button>
           </div>
         </>
       )}

@@ -4,6 +4,7 @@ import { HOTKEY_ACTIONS, comboFromEvent, findConflicts, formatCombo, type Hotkey
 import { resetKeymap, setBinding, useKeymap } from "../../hotkeys.ts";
 import { MOD } from "../../format.ts";
 import { PageHead } from "./parts.tsx";
+import { tr } from "../../i18n/index.ts";
 
 const IS_MAC = MOD === "⌘";
 
@@ -24,7 +25,7 @@ export default function ShortcutsPage() {
 
   return (
     <>
-      <PageHead title="Shortcuts" blurb="Plugins provide these actions. Click a binding and press a new key combo; conflicts stay visible until you resolve them. Esc cancels." />
+      <PageHead title={tr("settings.shortcutspage.shortcuts")} blurb={tr("settings.shortcutspage.pluginsProvideTheseActionsClickABinding")} />
       {HOTKEY_ACTIONS.map(({ id, label, pluginName }) => {
         const conflictLabels = HOTKEY_ACTIONS
           .filter((action) => action.id !== id && map[action.id] === map[id])
@@ -33,10 +34,10 @@ export default function ShortcutsPage() {
         <div key={id} className="set-row">
           <div className="set-row-text">
             <div className="set-row-label">{label}</div>
-            <div className="set-row-hint">Provided by {pluginName} plugin</div>
+            <div className="set-row-hint">{tr("settings.shortcutspage.providedBy")}{" "}{pluginName} {tr("settings.shortcutspage.plugin")}</div>
             {conflicts.has(id) && (
               <div className="set-row-hint set-conflict" role="alert">
-                Conflicts with {conflictLabels.join(", ")}
+                {tr("settings.shortcutspage.conflictsWith")}{" "}{conflictLabels.join(", ")}
               </div>
             )}
           </div>
@@ -47,13 +48,13 @@ export default function ShortcutsPage() {
                 data-hotkey-capture="true"
                 className="hotkey-capture"
                 value=""
-                placeholder="Press keys…"
+                placeholder={tr("settings.shortcutspage.pressKeys")}
                 onKeyDown={capture}
                 onBlur={() => setEditing(null)}
                 readOnly
               />
             ) : (
-              <button className="hotkey-kbd" title="Click to change" onClick={() => setEditing(id)}>
+              <button className="hotkey-kbd" title={tr("settings.shortcutspage.clickToChange")} onClick={() => setEditing(id)}>
                 <kbd>{formatCombo(map[id], IS_MAC)}</kbd>
               </button>
             )}
@@ -61,7 +62,7 @@ export default function ShortcutsPage() {
         </div>
         );
       })}
-      <button className="ghost-link" onClick={resetKeymap}>Reset all to defaults →</button>
+      <button className="ghost-link" onClick={resetKeymap}>{tr("settings.shortcutspage.resetAllToDefaults")}</button>
     </>
   );
 }

@@ -11,6 +11,9 @@ import {
 import {
   PANEL_OF_CAPABILITY, PANE_OF_CAPABILITY, VIEW_OF_CAPABILITY,
 } from "../src/builtinCapabilities.ts";
+import { getState, openWorkspacePane, setActiveView, setSidebarOpen } from "../src/store.ts";
+import { registerSurface } from "../src/surfaces.ts";
+import { getWorkspaceMode, setWorkspaceMode } from "../src/widgets/workspaceMode.ts";
 
 function fakeDescriptor(id: string, over: Partial<CapabilityDescriptor> = {}): CapabilityDescriptor {
   return {
@@ -76,6 +79,12 @@ test("technical capabilities group under Technical options", () => {
   for (const id of ["git", "terminal", "models-agents", "events", "diagnostics"]) {
     assert.equal(capabilityGroup(id), TECHNICAL_GROUP_LABEL, id);
   }
+});
+
+test("Terminal is a default right-rail tool even though its disclosure group stays technical", () => {
+  const terminal = BUILTIN_CAPABILITY_META.find((capability) => capability.id === "terminal");
+  assert.equal(terminal?.standardTier, "more");
+  assert.equal(capabilityGroup("terminal"), TECHNICAL_GROUP_LABEL);
 });
 
 // ---- registry semantics ------------------------------------------------------
@@ -178,5 +187,40 @@ test("every built-in capability opens one concrete destination", () => {
     const destinationKinds = [hasView, hasPanel, hasPane, isSettings].filter(Boolean);
     assert.ok(destinationKinds.length > 0, `${m.id} has a concrete destination`);
     assert.equal(destinationKinds.length, 1, `${m.id} has exactly one destination kind`);
+  }
+});
+
+test("primary capability navigation reveals GitHub above panes, rails, and the sidebar", () => {
+  const dispose = registerSurface({
+    id: "test-covering-pane",
+    title: "Covering pane",
+    order: 999,
+    component: () => null,
+    presentation: {
+      kind: "workspace",
+      defaultRatio: 0.5,
+      minWidth: 320,
+      preferredMaxWidth: 720,
+      keepAlive: true,
+      escape: "close",
+    },
+  });
+  try {
+    setActiveView("session");
+    assert.equal(openWorkspacePane("test-covering-pane"), true);
+    setSidebarOpen(true);
+    setWorkspaceMode("widgets");
+
+    getCapability("github")!.open();
+
+    assert.equal(getState().activeView, "github");
+    assert.equal(getState().railPlugin, null, "the covering pane is closed");
+    assert.equal(getState().sidebarOpen, false, "the compact drawer is closed");
+    assert.equal(getWorkspaceMode(), "chat", "the primary workspace is visible");
+  } finally {
+    setSidebarOpen(false);
+    setActiveView("session");
+    setWorkspaceMode("chat");
+    dispose();
   }
 });

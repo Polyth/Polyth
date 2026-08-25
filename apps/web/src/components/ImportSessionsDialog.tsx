@@ -9,6 +9,7 @@ import { refreshSessions } from "../init.ts";
 import { friendlyError } from "../settings.ts";
 import { ago } from "../format.ts";
 import Dialog from "./a11y/Dialog.tsx";
+import { tr } from "../i18n/index.ts";
 
 export default function ImportSessionsDialog({ projectId, onClose }: {
   projectId: string;
@@ -33,7 +34,7 @@ export default function ImportSessionsDialog({ projectId, onClose }: {
       setLoading(false);
     }).catch((cause) => {
       if (!active) return;
-      setError(friendlyError("Couldn’t list OpenCode sessions", cause));
+      setError(friendlyError(tr("common.error"), cause));
       setLoading(false);
     });
     return () => { active = false; };
@@ -57,7 +58,7 @@ export default function ImportSessionsDialog({ projectId, onClose }: {
       await refreshSessions(projectId);
       onClose();
     } catch (cause) {
-      setError(friendlyError("Couldn’t import the sessions", cause));
+      setError(friendlyError(tr("common.error"), cause));
       setBusy(false);
     }
   };
@@ -65,23 +66,23 @@ export default function ImportSessionsDialog({ projectId, onClose }: {
   const allOn = items.length > 0 && selected.size === items.length;
 
   return (
-    <Dialog title="Import sessions" onClose={() => { if (!busy) onClose(); }} className="import-sessions-dialog">
+    <Dialog title={tr("importsessionsdialog.importSessions")} onClose={() => { if (!busy) onClose(); }} className="import-sessions-dialog">
       <div className="dialog-head">
         <div>
-          <h2>Import sessions</h2>
-          <p className="muted">OpenCode sessions in this workspace that Polyth has not adopted yet.</p>
+          <h2>{tr("importsessionsdialog.importSessions")}</h2>
+          <p className="muted">{tr("importsessionsdialog.opencodeSessionsInThisWorkspaceThatPolyth")}</p>
         </div>
-        <button className="icon-btn" aria-label="Close dialog" disabled={busy} onClick={onClose}>×</button>
+        <button className="icon-btn" aria-label={tr("importsessionsdialog.closeDialog")} disabled={busy} onClick={onClose}>{tr("importsessionsdialog.message")}</button>
       </div>
 
       <div className="import-sessions-body">
-        {loading && <div className="empty">Looking for OpenCode sessions…</div>}
+        {loading && <div className="empty">{tr("importsessionsdialog.lookingForOpencodeSessions")}</div>}
         {/* distinct empty states (PS#766): nothing exists vs everything imported */}
         {!loading && !error && items.length === 0 && total === 0 && (
-          <div className="empty">No OpenCode sessions were found for this workspace.</div>
+          <div className="empty">{tr("importsessionsdialog.noOpencodeSessionsWereFoundForThis")}</div>
         )}
         {!loading && !error && items.length === 0 && total > 0 && (
-          <div className="empty">All {total} OpenCode session{total === 1 ? "" : "s"} here {total === 1 ? "is" : "are"} already imported.</div>
+          <div className="empty">{tr("importsessionsdialog.all")}{" "}{total} {tr("importsessionsdialog.opencodeSession")}{total === 1 ? "" : tr("importsessionsdialog.s")} {tr("importsessionsdialog.here")}{" "}{total === 1 ? tr("importsessionsdialog.is") : tr("importsessionsdialog.are")} {tr("importsessionsdialog.alreadyImported")}</div>
         )}
         {!loading && items.length > 0 && (
           <>
@@ -91,7 +92,7 @@ export default function ImportSessionsDialog({ projectId, onClose }: {
                 checked={allOn}
                 onChange={() => setSelected(allOn ? new Set() : new Set(items.map((s) => s.id)))}
               />
-              <span><strong>Select all</strong> <small className="muted">{selected.size} of {items.length}</small></span>
+              <span><strong>{tr("importsessionsdialog.selectAll")}</strong> <small className="muted">{selected.size} {tr("importsessionsdialog.of")}{" "}{items.length}</small></span>
             </label>
             <div className="import-session-list">
               {items.map((s) => (
@@ -99,7 +100,7 @@ export default function ImportSessionsDialog({ projectId, onClose }: {
                   <input type="checkbox" checked={selected.has(s.id)} onChange={() => toggle(s.id)} />
                   <span>
                     <strong>{s.title || s.id}</strong>
-                    <small className="muted">updated {ago(s.updatedAt)} ago · {s.id}</small>
+                    <small className="muted">{tr("importsessionsdialog.updated")}{" "}{ago(s.updatedAt)} {tr("importsessionsdialog.ago")}{" "}{s.id}</small>
                   </span>
                 </label>
               ))}
@@ -110,11 +111,11 @@ export default function ImportSessionsDialog({ projectId, onClose }: {
       </div>
 
       <div className="dialog-foot">
-        <span className="muted">History loads the first time an imported session is opened.</span>
+        <span className="muted">{tr("importsessionsdialog.historyLoadsTheFirstTimeAnImported")}</span>
         <span className="header-spacer" />
-        <button className="small-btn" disabled={busy} onClick={onClose}>Cancel</button>
+        <button className="small-btn" disabled={busy} onClick={onClose}>{tr("common.cancel")}</button>
         <button className="primary-btn" disabled={busy || loading || selected.size === 0} onClick={() => void doImport()}>
-          {busy ? "Importing…" : `Import ${selected.size || ""}`.trim()}
+          {busy ? tr("importsessionsdialog.importing") : `Import ${selected.size || ""}`.trim()}
         </button>
       </div>
     </Dialog>

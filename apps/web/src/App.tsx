@@ -17,7 +17,9 @@ import WorktreeSessionDialog from "./components/WorktreeSessionDialog.tsx";
 import "./builtinCapabilities.ts";
 import WorkspaceBottomNav from "./components/workspace/WorkspaceBottomNav.tsx";
 import Header from "./components/Header.tsx";
+import AlertDialog from "./components/AlertDialog.tsx";
 import { useWorkspaceMode } from "./widgets/workspaceMode.ts";
+import { tr } from "./i18n/index.ts";
 
 function ErrorBanner() {
   const message = useStore((s) => s.uiError);
@@ -25,7 +27,7 @@ function ErrorBanner() {
   return (
     <div className="error-banner" role="alert">
       <span className="error-banner-text">{message}</span>
-      <button className="error-banner-x" aria-label="Dismiss error" onClick={clearUiError}>×</button>
+      <button className="error-banner-x" aria-label={tr("app.dismissError")} onClick={clearUiError}>{tr("app.message")}</button>
     </div>
   );
 }
@@ -84,7 +86,6 @@ export default function App() {
             stays mounted underneath but is inert and out of the a11y tree — it
             consumes no hit area and cannot retain sequential focus. */}
         <div className="workspace" inert={paneFullscreen} aria-hidden={paneFullscreen || undefined}>
-          <ErrorBanner />
           <ViewErrorBoundary resetKey={viewResetKey}>
             <Main />
           </ViewErrorBoundary>
@@ -92,6 +93,8 @@ export default function App() {
         </div>
         <ContextRail />
       </div>
+      <ErrorBanner />
+      <AlertDialog />
       <WorkspaceBottomNav />
       {overlay === "palette" && <CommandPalette />}
       {overlay === "search" && <SessionSearch />}

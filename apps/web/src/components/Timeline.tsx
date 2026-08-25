@@ -62,6 +62,7 @@ import "./messagePinAction.tsx";
 import ProviderLogo from "./ProviderLogo.tsx";
 import { seedMultiRunPrompt } from "../multirunSeed.ts";
 import WorkflowTimelineCard from "./WorkflowTimelineCard.tsx";
+import { tr } from "../i18n/index.ts";
 
 /** One announcement per copy/mutation outcome; text is the accessible record,
  *  checkmarks only supplement it. Screen readers ignore repeats, so identical

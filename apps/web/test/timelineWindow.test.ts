@@ -12,12 +12,14 @@ import { grownLimit, hiddenCount, limitToInclude, windowStart, TIMELINE_CHUNK, T
   (el: { __position?: string }) => ({ position: el.__position ?? "static" });
 const { captureTimelineAnchor, restoreScrollDelta } = await import("../src/timelineAnchor.ts");
 
-test("timeline dialog uses labelled icon actions for revert and fork", async () => {
+test("timeline message actions use labelled icons for revert and fork", async () => {
   const source = await readFile(new URL("../src/components/Timeline.tsx", import.meta.url), "utf8");
-  const dialog = source.slice(source.indexOf("function TimelineDialog"), source.indexOf("// Right-edge prompt rail"));
-  assert.match(dialog, /aria-label=\{revertActionName\(message\.time\)\}[\s\S]*?<Icon\.rewind \/><\/button>/);
-  assert.match(dialog, /aria-label=\{forkActionName\(message\.time\)\}[\s\S]*?<Icon\.fork \/><\/button>/);
-  assert.doesNotMatch(dialog, />Revert and edit<\/button>/);
+  const actions = source.slice(source.indexOf("function messageActionEntries"), source.indexOf("function AssistantAgentHeader"));
+  assert.match(actions, /name: revertActionName\(m\.time\)/);
+  assert.match(actions, /name: forkActionName\(m\.time\)/);
+  assert.match(actions, /aria-label=\{entry\.name\}/);
+  assert.match(actions, /entry\.key === "fork"[\s\S]*?<Icon\.fork \/>[\s\S]*?: <Icon\.rewind \/>/);
+  assert.doesNotMatch(actions, />Revert and edit<\/button>/);
 });
 
 test("windowStart/hiddenCount: suffix window, nothing hidden for short sessions", () => {

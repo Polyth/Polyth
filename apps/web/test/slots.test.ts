@@ -218,5 +218,7 @@ test("contracts expose the runtime slot vocabulary used for validation", () => {
   assert.ok(isUiSlot("workspace.canvas"));
   assert.ok(isUiSlot("workspace.main"));
   assert.ok(isUiSlot("app.header.actions"));
+  assert.ok(isUiSlot("sidebar.footer"));
+  assert.ok(isUiSlot("settings.footer"));
   assert.ok(!isUiSlot("not.a.slot"));
 });

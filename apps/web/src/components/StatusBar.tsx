@@ -10,6 +10,7 @@ import {
 } from "../workflowRun.ts";
 import { handOffWorkflowLaunch } from "../workflowLaunch.ts";
 import { subscribeWorkflowRuns } from "../workflowMonitor.ts";
+import { tr } from "../i18n/index.ts";
 
 // UX-PANE-MODEL: Files/Git/Terminal/Preview are workspace panes beside Chat,
 // not primary views — the open pane is appended to the label instead.

@@ -1,27 +1,33 @@
 // Display helpers + markdown export (DOM-free).
 import type { RenderModel } from "./reduce.ts";
+import { formatNumber, tr } from "./i18n/index.ts";
 
 export function fmtMs(ms: number): string {
-  if (ms < 1000) return `${ms}ms`;
-  return `${(ms / 1000).toFixed(1)}s`;
+  if (ms < 1000) return `${formatNumber(ms)}ms`;
+  return `${formatNumber(ms / 1000, { minimumFractionDigits: 1, maximumFractionDigits: 1 })}s`;
 }
 
 /** Wall-clock span for "Worked for …" labels: 46s, 3m 1s, 1h 4m. */
 export function fmtDuration(ms: number): string {
   const s = Math.max(0, Math.round(ms / 1000));
-  if (s < 60) return `${s}s`;
-  if (s < 3600) return `${Math.floor(s / 60)}m ${s % 60}s`;
-  return `${Math.floor(s / 3600)}h ${Math.floor((s % 3600) / 60)}m`;
+  if (s < 60) return `${formatNumber(s)}s`;
+  if (s < 3600) return `${formatNumber(Math.floor(s / 60))}m ${formatNumber(s % 60)}s`;
+  return `${formatNumber(Math.floor(s / 3600))}h ${formatNumber(Math.floor((s % 3600) / 60))}m`;
 }
 
 export function fmtTokens(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
-  return `${n}`;
+  if (n >= 1_000_000) return `${formatNumber(n / 1_000_000, { minimumFractionDigits: 1, maximumFractionDigits: 1 })}M`;
+  if (n >= 1_000) return `${formatNumber(n / 1_000, { minimumFractionDigits: 1, maximumFractionDigits: 1 })}k`;
+  return formatNumber(n);
 }
 
 export function fmtCost(c: number): string {
-  return `$${c.toFixed(4)}`;
+  return formatNumber(c, {
+    style: "currency",
+    currency: "USD",
+    minimumFractionDigits: 4,
+    maximumFractionDigits: 4,
+  });
 }
 
 /** Platform modifier key label: ⌘ on Apple platforms, Ctrl elsewhere. */
@@ -61,7 +67,19 @@ export function providerColor(provider: string): string {
 
 // ---- session title display --------------------------------------------------
 
-const PLACEHOLDER_TITLES = new Set(["", "new session", "untitled session", "untitled", "(untitled)", "(untitled session)"]);
+const PLACEHOLDER_TITLES = new Set([
+  "",
+  "new session",
+  "untitled",
+  "(untitled)",
+  "untitled session",
+  "(untitled session)",
+  tr("format.newSession").toLowerCase(),
+  tr("format.untitledSession").toLowerCase(),
+  tr("format.untitled").toLowerCase(),
+  tr("format.untitled2").toLowerCase(),
+  tr("format.untitledSession2").toLowerCase(),
+]);
 
 export function isPlaceholderTitle(title: string, sessionId?: string): boolean {
   const t = title.trim();
@@ -82,7 +100,7 @@ export function titleFromPrompt(text: string, max = 48): string {
 export function displaySessionTitle(title: string, sessionId?: string, firstUserText?: string): string {
   if (!isPlaceholderTitle(title, sessionId)) return title.trim();
   if (firstUserText !== undefined && firstUserText.trim() !== "") return titleFromPrompt(firstUserText);
-  return "New session";
+  return tr("format.newSession");
 }
 
 /** Compact "time ago" for session rows: 45s, 3m, 6h, 2d. */
@@ -97,7 +115,7 @@ export function ago(ts: number, now = Date.now()): string {
 }
 
 export function modelBadge(model?: { providerID: string; modelID: string } | string): { label: string; color: string } {
-  if (!model) return { label: "default", color: "var(--muted)" };
+  if (!model) return { label: tr("format.default"), color: "var(--muted)" };
   if (typeof model === "string") {
     const slash = model.lastIndexOf("/");
     const prov = slash >= 0 ? model.slice(0, slash) : "";

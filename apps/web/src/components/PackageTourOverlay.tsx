@@ -13,16 +13,17 @@ import {
   closePackageTour, getPackageTourState, nextPackageTourStep,
   previousPackageTourStep, setPackageTourStep, subscribePackageTour,
 } from "../packages/onboarding/controller.ts";
+import { tr } from "../i18n/index.ts";
 
 /** Caption for the highlight card, keyed by where the control actually lives
  * (a settings row, a full workspace view, a docked pane, the strip above the
  * composer, or the header). */
 const HIGHLIGHT_WHERE_LABELS: Record<PackageOnboardingHighlightWhere, string> = {
-  settings: "In these settings",
-  workspace: "In the workspace",
-  pane: "In the workspace pane",
-  composer: "Above the composer",
-  header: "In the workspace header",
+  settings: tr("packagetouroverlay.inTheseSettings"),
+  workspace: tr("packagetouroverlay.inTheWorkspace"),
+  pane: tr("packagetouroverlay.inTheWorkspacePane"),
+  composer: tr("packagetouroverlay.aboveTheComposer"),
+  header: tr("packagetouroverlay.inTheWorkspaceHeader"),
 };
 
 const WAVE_BARS = [16, 34, 22, 52, 78, 44, 96, 118, 66, 104, 82, 48, 70, 36, 24, 14];
@@ -208,7 +209,7 @@ export default function PackageTourOverlay() {
         </div>
         <div className="package-tour-body" key={current.id}>
           <span className="package-tour-kicker">
-            {mode === "preview" ? "Package tour" : "Meet this package"} · {tour.title}
+            {mode === "preview" ? tr("packagetouroverlay.packageTour") : tr("packagetouroverlay.meetThisPackage")} · {tour.title}
           </span>
           <h2 id="package-tour-title">{current.title}</h2>
           <p className="package-tour-copy" id="package-tour-copy">{current.body}</p>
@@ -229,7 +230,7 @@ export default function PackageTourOverlay() {
                 key={item.id}
                 type="button"
                 className={`package-tour-dot${index === step ? " active" : ""}`}
-                aria-label={`Go to step ${index + 1} of ${tour.steps.length}`}
+                aria-label={tr("packagetouroverlay.goToStepValueOfValue", { value: index + 1, length: tour.steps.length })}
                 aria-current={index === step ? "step" : undefined}
                 onClick={() => setPackageTourStep(index)}
               />
@@ -238,21 +239,19 @@ export default function PackageTourOverlay() {
           </div>
           <div className="package-tour-actions">
             {step > 0 && (
-              <button type="button" className="btn-soft" onClick={previousPackageTourStep}>Back</button>
+              <button type="button" className="btn-soft" onClick={previousPackageTourStep}>{tr("common.back")}</button>
             )}
             <button type="button" className="btn-accent" onClick={nextPackageTourStep}>
-              {lastStep ? "Done" : "Next"}
+              {lastStep ? tr("common.done") : tr("common.next")}
             </button>
           </div>
         </div>
         <div className="package-tour-skips">
           <button type="button" className="package-tour-skip" onClick={() => closePackageTour("skip")}>
-            Skip this tour
-          </button>
+            {tr("packagetouroverlay.skipThisTour")}</button>
           <span aria-hidden="true">·</span>
           <button type="button" className="package-tour-skip" onClick={() => closePackageTour("skip-all")}>
-            Skip all onboardings
-          </button>
+            {tr("packagetouroverlay.skipAllOnboardings")}</button>
         </div>
       </div>
     </div>

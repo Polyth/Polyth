@@ -16,6 +16,7 @@ import {
   useEffect, useLayoutEffect, useRef, useState,
   type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type PointerEvent as ReactPointerEvent,
 } from "react";
+import { formatCombo } from "@polyth/hotkeys";
 import SlotHost, { useSlotVersion } from "./slots/SlotHost.ts";
 import {
   closeWorkspacePane, collapseWorkspacePane, expandWorkspacePane, setPaneFullscreen,
@@ -31,12 +32,16 @@ import {
 import { clampRailWidth, railWidthOf, setRailWidth } from "../railPrefs.ts";
 import { useShellMode } from "../responsiveShell.ts";
 import { useModalSurface } from "./a11y/Dialog.tsx";
-import { useResolvedCapabilities } from "../capabilities.ts";
+import { useResolvedCapabilities, type ResolvedCapability } from "../capabilities.ts";
+import { PANEL_OF_CAPABILITY, PANE_OF_CAPABILITY, VIEW_OF_CAPABILITY } from "../builtinCapabilities.ts";
 import { getWorkspacePanePrefs, setPanePreferredWidth } from "../workspace/panePrefs.ts";
 import { chatDockViability, dockGuardTargets } from "../workspace/dockGuard.ts";
 import { PaneVisibilityContext } from "../workspace/paneVisibility.ts";
 import "./railSurfaces.tsx";
 import { setPlacementOverride } from "../capabilityLayout.ts";
+import { tr } from "../i18n/index.ts";
+import { MOD } from "../format.ts";
+import { useKeymap } from "../hotkeys.ts";
 
 const NO_EVENTS: never[] = [];
 /** Fallback separator chrome before the real element is measured. */
@@ -72,6 +77,38 @@ interface RailSurfaceModel {
   open: RailSurface | null;
   ctx: RailSurfaceContext;
 }
+
+/** A strip item is either a registered panel surface or a capability whose
+ * destination is a full workspace view or a settings page. The Widgets page
+ * deliberately lets people place both kinds in the right rail, so the strip
+ * must not silently discard the latter just because it has no panel body. */
+interface RailButton {
+  id: string;
+  capabilityId: string;
+  title: string;
+  icon?: RailSurface["icon"];
+  badge: number;
+  presentation?: RailSurface["presentation"];
+  active: boolean;
+  activate: () => void;
+}
+
+const capabilityIcon = (id: string): RailSurface["icon"] => {
+  switch (id) {
+    case "session": return Icon.chat;
+    case "goals": return Icon.target;
+    case "multirun": return Icon.compare;
+    case "workflow": return Icon.hierarchy;
+    case "fusion": return Icon.fuse;
+    case "walkthrough": return Icon.list;
+    case "schedule": return Icon.clock;
+    case "github": return Icon.github;
+    case "voice": return Icon.mic;
+    case "models-agents": return Icon.gear;
+    case "diagnostics": return Icon.shield;
+    default: return Icon.context;
+  }
+};
 
 /** Shared surface model: the header trigger and the rail/sheet host derive
  *  from the same registry + visibility result, so they can never disagree.
@@ -119,7 +156,7 @@ const PANEL_ICON = (
  *  mode (the inline strip exists there instead). */
 export function NarrowPanelTrigger() {
   const { surfaces, open } = useRailSurfaceModel();
-  const label = open ? `Close ${open.title} panel` : "Open workspace panels";
+  const label = open ? tr("contextrail.closeValuePanel", { title: open.title }) : tr("contextrail.openWorkspacePanels");
   return (
     <button
       className="icon-btn narrow-panel-trigger"
@@ -150,25 +187,79 @@ export default function ContextRail() {
   const { rail, surfaces, open, ctx } = useRailSurfaceModel();
   const projectId = useStore((s) => s.activeProjectId);
   const paneExpanded = useStore((s) => s.paneExpanded);
+  const view = useStore((s) => s.activeView);
   const resolved = useResolvedCapabilities();
+  const keymap = useKeymap();
+  const terminalShortcut = formatCombo(keymap.viewTerminal, MOD === "⌘");
   const presentation = open?.presentation;
-  const capabilityById = new Map(resolved.map((capability) => [capability.descriptor.id, capability]));
-  const configuredRailSurfaces = surfaces.filter((surface) =>
-    (capabilityById.get(surface.capabilityId ?? surface.id)?.tier ?? "more") === "more");
-  const railButtons = open && !configuredRailSurfaces.some((surface) => surface.id === open.id)
-    ? [open, ...configuredRailSurfaces]
-    : configuredRailSurfaces;
+  const badgeOf = (surface: RailSurface): number => surface.badge?.(ctx) ?? 0;
+  const surfaceByCapability = new Map(surfaces.map((surface) => [surface.capabilityId ?? surface.id, surface]));
+  const activeCapability = (capability: ResolvedCapability): boolean => {
+    const id = capability.descriptor.id;
+    const activeView = VIEW_OF_CAPABILITY[id];
+    if (activeView !== undefined) return view === activeView;
+    const pane = PANE_OF_CAPABILITY[id];
+    if (pane !== undefined) return rail === pane;
+    const panel = PANEL_OF_CAPABILITY[id];
+    return panel !== undefined && rail === panel;
+  };
+  const buttonForSurface = (surface: RailSurface): RailButton => ({
+    id: surface.capabilityId ?? surface.id,
+    capabilityId: surface.capabilityId ?? surface.id,
+    title: surface.id === "terminal"
+      ? tr("terminalview.openTerminalShortcut", { shortcut: terminalShortcut })
+      : surface.title,
+    icon: surface.icon,
+    badge: badgeOf(surface),
+    presentation: surface.presentation,
+    active: rail === surface.id,
+    activate: () => toggleRailPlugin(surface.id),
+  });
+  const configuredRailButtons: RailButton[] = resolved
+    // Terminal is a guaranteed workspace launcher. Keep it in the right rail
+    // even when an older per-project layout still records its former
+    // "technical" tier (or a customized primary placement).
+    .filter((capability) =>
+      (capability.tier === "more" || capability.descriptor.id === "terminal")
+      && capability.descriptor.available())
+    .map((capability) => {
+      const surface = surfaceByCapability.get(capability.descriptor.id);
+      if (surface) return buttonForSurface(surface);
+      return {
+        id: capability.descriptor.id,
+        capabilityId: capability.descriptor.id,
+        title: capability.descriptor.label,
+        icon: capabilityIcon(capability.descriptor.id),
+        badge: 0,
+        active: activeCapability(capability),
+        activate: () => {
+          setRailPlugin(null);
+          capability.descriptor.open();
+        },
+      };
+    });
+  // Slot-contributed panels are not necessarily capabilities, but still
+  // belong in the rail and remain reorderable through their surface id.
+  for (const surface of surfaces) {
+    const capabilityId = surface.capabilityId ?? surface.id;
+    if (resolved.some((capability) => capability.descriptor.id === capabilityId)
+      || configuredRailButtons.some((button) => button.id === capabilityId)) continue;
+    configuredRailButtons.push(buttonForSurface(surface));
+  }
+  const openButton = open ? buttonForSurface(open) : null;
+  const railButtons = openButton && !configuredRailButtons.some((button) => button.id === openButton.id)
+    ? [openButton, ...configuredRailButtons]
+    : configuredRailButtons;
   const reorderRail = (draggedId: string, targetId: string) => {
-    if (!configuredRailSurfaces.some((surface) => surface.id === draggedId)
-      || !configuredRailSurfaces.some((surface) => surface.id === targetId)
+    if (!configuredRailButtons.some((button) => button.id === draggedId)
+      || !configuredRailButtons.some((button) => button.id === targetId)
       || draggedId === targetId) return;
-    const ordered = configuredRailSurfaces
-      .map((surface) => surface.id)
-      .filter((surfaceId) => surfaceId !== draggedId);
+    const ordered = configuredRailButtons
+      .map((button) => button.id)
+      .filter((buttonId) => buttonId !== draggedId);
     ordered.splice(ordered.indexOf(targetId), 0, draggedId);
-    ordered.forEach((surfaceId, rank) => {
-      const surface = surfaces.find((candidate) => candidate.id === surfaceId);
-      if (surface) setPlacementOverride(surface.capabilityId ?? surface.id, { tier: "more", rank });
+    ordered.forEach((capabilityId, rank) => {
+      setPlacementOverride(capabilityId, { tier: "more", rank });
     });
   };
 
@@ -486,8 +577,6 @@ export default function ContextRail() {
     collapseWorkspacePane();
   };
 
-  const badgeOf = (s: RailSurface): number => s.badge?.(ctx) ?? 0;
-
   const geometryPending = isWorkspacePane && !measured && !compact && !paneExpanded;
   const paneStyle: CSSProperties | undefined = open
     ? ({
@@ -520,7 +609,7 @@ export default function ContextRail() {
           style={compactContext ? undefined : paneStyle}
           role={compactContext ? "dialog" : "region"}
           aria-modal={compactContext || undefined}
-          aria-label={open?.title ?? "Panel"}
+          aria-label={open?.title ?? tr("contextrail.panel")}
           data-geometry-ready={!geometryPending}
           onKeyDown={onPaneKey}
           onPointerDownCapture={onLayerInteract}
@@ -534,7 +623,7 @@ export default function ContextRail() {
               tabIndex={0}
               role="separator"
               aria-orientation="vertical"
-              aria-label={`Resize ${open?.title ?? "panel"}`}
+              aria-label={tr("contextrail.resizeValue", { value: open?.title ?? tr("contextrail.panel") })}
               aria-valuemin={presentation && decision !== null ? presentation.minWidth : 240}
               aria-valuemax={presentation && decision !== null ? Math.max(decision.maxPane, presentation.minWidth) : 640}
               aria-valuenow={dockWidth}
@@ -547,8 +636,7 @@ export default function ContextRail() {
                 className="rail-toggle pane-back"
                 onClick={() => closeWorkspacePane()}
               >
-                ← Back to Chat
-              </button>
+                {tr("contextrail.backToChat")}</button>
             )}
             <span className="rail-title">{open?.title ?? ""}</span>
             <span className="header-spacer" />
@@ -556,30 +644,30 @@ export default function ContextRail() {
               <div className="rail-tabs"><SlotHost slot="contextRail.tabs" context={{ tab: rail, onSelect: toggleRailPlugin }} /></div>
             )}
             {isWorkspacePane && !layered && (
-              <button className="rail-toggle" onClick={expandWorkspacePane} title="Expand" aria-label={`Expand ${open?.title ?? "panel"}`}>⤢</button>
+              <button className="rail-toggle" onClick={expandWorkspacePane} title={tr("contextrail.expand")} aria-label={tr("contextrail.expandValue", { value: open?.title ?? tr("contextrail.panel") })}>⤢</button>
             )}
             {isWorkspacePane && layered && paneExpanded && !compact && (
-              <button className="rail-toggle" onClick={collapseWorkspacePane} title="Collapse" aria-label={`Collapse ${open?.title ?? "panel"}`}>⤡</button>
+              <button className="rail-toggle" onClick={collapseWorkspacePane} title={tr("contextrail.collapse")} aria-label={tr("contextrail.collapseValue", { value: open?.title ?? tr("contextrail.panel") })}>⤡</button>
             )}
             {isWorkspacePane && layered && !paneExpanded && !compact && measured && admits && (
-              <button className="rail-toggle" onClick={dockNow}>Dock beside Chat</button>
+              <button className="rail-toggle" onClick={dockNow}>{tr("contextrail.dockBesideChat")}</button>
             )}
             <button
               className="rail-toggle"
               onClick={() => (isWorkspacePane ? closeWorkspacePane() : setRailPlugin(null))}
-              title="Close panel"
-              aria-label="Close panel"
-            >{compactContext ? "×" : "»"}</button>
+              title={tr("contextrail.closePanel")}
+              aria-label={tr("contextrail.closePanel")}
+            >{compactContext ? tr("contextrail.message") : "»"}</button>
           </div>
           {compactContext && (
-            <div className="plugin-strip sheet-strip" aria-label="Workspace panels">
+            <div className="plugin-strip sheet-strip" aria-label={tr("contextrail.workspacePanels")}>
               {railButtons.map((s) => (
                 <button
                   key={s.id}
-                  className={`rail-icon strip-btn ${rail === s.id ? "active" : ""}`}
+                  className={`rail-icon strip-btn ${s.active ? "active" : ""}`}
                   title={s.title}
                   aria-label={s.title}
-                  aria-pressed={rail === s.id}
+                  aria-pressed={s.active}
                   draggable
                   onDragStart={(event) => event.dataTransfer.setData("text/polyth-rail", s.id)}
                   onDragOver={(event) => event.preventDefault()}
@@ -588,10 +676,10 @@ export default function ContextRail() {
                     reorderRail(event.dataTransfer.getData("text/polyth-rail"), s.id);
                   }}
                   {...(s.presentation ? { "data-pane-launcher": s.id } : {})}
-                  onClick={() => setRailPlugin(s.id)}
+                  onClick={s.activate}
                 >
                   {s.icon ? <s.icon /> : <Icon.context />}
-                  <Badge n={badgeOf(s)} />
+                  <Badge n={s.badge} />
                 </button>
               ))}
             </div>
@@ -616,14 +704,14 @@ export default function ContextRail() {
         </div>
         )}
         {!compact && (
-          <div className="rail-icon-col plugin-strip" aria-label="Workspace panels">
+          <div className="rail-icon-col plugin-strip" aria-label={tr("contextrail.workspacePanels")}>
             {railButtons.map((s) => (
             <button
               key={s.id}
-              className={`rail-icon strip-btn ${rail === s.id ? "active" : ""}`}
+              className={`rail-icon strip-btn ${s.active ? "active" : ""}`}
               title={s.title}
               aria-label={s.title}
-              aria-pressed={rail === s.id}
+              aria-pressed={s.active}
               draggable
               onDragStart={(event) => event.dataTransfer.setData("text/polyth-rail", s.id)}
               onDragOver={(event) => event.preventDefault()}
@@ -632,10 +720,10 @@ export default function ContextRail() {
                 reorderRail(event.dataTransfer.getData("text/polyth-rail"), s.id);
               }}
               {...(s.presentation ? { "data-pane-launcher": s.id } : {})}
-              onClick={() => toggleRailPlugin(s.id)}
+              onClick={s.activate}
             >
               {s.icon ? <s.icon /> : <Icon.context />}
-              <Badge n={badgeOf(s)} />
+              <Badge n={s.badge} />
             </button>
             ))}
           </div>

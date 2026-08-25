@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import { api, type GithubStatusDto } from "../../api.ts";
 import { setActiveView, setOverlay, useStore } from "../../store.ts";
 import { EmptyState, PageHead, Row } from "./parts.tsx";
+import { tr } from "../../i18n/index.ts";
 
 export default function IntegrationsPage() {
   const projectId = useStore((s) => s.activeProjectId);
@@ -28,34 +29,37 @@ export default function IntegrationsPage() {
 
   return (
     <>
-      <PageHead title="Integrations" blurb="External services wired through local CLIs — no tokens stored by Polyth." />
-      {!projectId && <EmptyState title="No active project" />}
+      <PageHead title={tr("settings.integrationspage.integrations")} blurb={tr("settings.integrationspage.externalServicesWiredThroughLocalClisNo")} />
+      {!projectId && <EmptyState title={tr("settings.integrationspage.noActiveProject")} />}
       {projectId && status && (
         <>
-          <Row label="GitHub CLI" hint={status.installed ? "gh is installed" : "Install gh from cli.github.com"}>
-            <span className={`tag ${status.installed ? "tag-ok" : ""}`}>{status.installed ? "installed" : "missing"}</span>
+          <Row label={tr("settings.integrationspage.githubCli")} hint={status.installed ? tr("settings.integrationspage.ghIsInstalled") : tr("settings.integrationspage.installGhFromCliGithubCom")}>
+            <span className={`tag ${status.installed ? "tag-ok" : ""}`}>{status.installed ? tr("settings.integrationspage.installed") : tr("settings.integrationspage.missing")}</span>
           </Row>
-          <Row label="Authentication" hint={status.authenticated ? "Signed in via gh auth" : "Run `gh auth login` in a terminal"}>
-            <span className={`tag ${status.authenticated ? "tag-ok" : ""}`}>{status.authenticated ? "signed in" : "signed out"}</span>
+          <Row label={tr("settings.integrationspage.authentication")} hint={status.authenticated ? tr("settings.integrationspage.signedInViaGhAuth") : tr("settings.integrationspage.runGhAuthLoginInATerminal")}>
+            <span className={`tag ${status.authenticated ? "tag-ok" : ""}`}>{status.authenticated ? tr("settings.integrationspage.signedIn") : tr("settings.integrationspage.signedOut")}</span>
           </Row>
           {status.repo ? (
             <>
-              <Row label="Repository" hint={status.repo.description || undefined}>
+              <Row label={tr("settings.integrationspage.repository")} hint={status.repo.description || undefined}>
                 <a className="mono" href={status.repo.url} target="_blank" rel="noreferrer">
                   {status.repo.owner}/{status.repo.name}
                 </a>
               </Row>
               {counts && (
-                <Row label="Open items">
-                  <span className="mono">{counts.issues} issues · {counts.prs} PRs</span>
+                <Row label={tr("settings.integrationspage.openItems")}>
+                  <span className="mono">{counts.issues} {tr("settings.integrationspage.issues")}{" "}{counts.prs} {tr("settings.integrationspage.prs")}</span>
                 </Row>
               )}
-              <Row label="Full view" hint="Browse issues and pull requests.">
-                <button className="small-btn" onClick={() => { setOverlay(null); setActiveView("github"); }}>Open GitHub view →</button>
+              <Row label={tr("settings.integrationspage.fullView")} hint={tr("settings.integrationspage.browseIssuesAndPullRequests")}>
+                <button className="small-btn" onClick={() => { setOverlay(null); setActiveView("github"); }}>{tr("settings.integrationspage.openGithubView")}</button>
               </Row>
             </>
           ) : (
-            <EmptyState title="No GitHub repository detected" body={status.reason ?? "This project has no GitHub remote."} />
+            <EmptyState
+              title={tr("settings.integrationspage.noGithubRepositoryDetected")}
+              body={status.reason ?? tr("settings.integrationspage.projectHasNoGithubRemote")}
+            />
           )}
         </>
       )}

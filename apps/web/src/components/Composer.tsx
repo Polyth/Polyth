@@ -1,7 +1,27 @@
-import { useState, useRef, useEffect, useCallback, type ClipboardEvent, type KeyboardEvent } from "react";
-import { getState, useActiveModel, useStore, setUiError, openSettingsPage } from "../store.ts";
-import { sendMessage, abortSession, createSession } from "../init.ts";
-import { api, type ComposerCatalogResult, type SlashCommand, type SnippetDef } from "../api.ts";
+import { useState, useRef, useEffect, useCallback, useMemo, type ClipboardEvent, type KeyboardEvent } from "react";
+import {
+  activateProject,
+  getState,
+  openSettingsPage,
+  setUiError,
+  startNewSession,
+  useActiveModel,
+  useStore,
+} from "../store.ts";
+import {
+  sendMessage,
+  abortSession,
+  createSession,
+  rememberProjectModelSelection,
+} from "../init.ts";
+import {
+  api,
+  type ComposerCatalogResult,
+  type GitBranches,
+  type SlashCommand,
+  type SnippetDef,
+  type Worktree,
+} from "../api.ts";
 import { loadDraft, saveDraft, type AutocompleteItem } from "../utils.ts";
 import SlotHost from "./slots/SlotHost.ts";
 import { dragKind, dropIntoSession } from "../dnd.ts";
@@ -23,8 +43,6 @@ import {
   catalogFromResult,
   commandAutocomplete,
   fileAutocomplete,
-  modelDisplayName,
-  modelDetail,
   modelSupportsTextWorkflow,
   OPEN_PROJECT_FIRST,
   planCommandInsert,
@@ -54,22 +72,31 @@ import ComposerFocusDialog from "./ComposerFocusDialog.tsx";
 import QueuedMessageList from "./QueuedMessageList.tsx";
 import { GoalAttachForm } from "./GoalStrip.tsx";
 import { announce } from "./a11y/live.tsx";
-import { isFavorite, modelKey, sortModels } from "@polyth/models";
-import { noteModelUsed, useModelPrefs } from "../modelPrefs.ts";
+import { noteModelUsed } from "../modelPrefs.ts";
 import { getUiSettings, useUiSettings } from "../uiPrefs.ts";
 import { migrateFavoritesOnce, profilesLoaded, useProfiles } from "../profiles.ts";
 import AgentProfileForm from "./AgentProfileForm.tsx";
-import type { AgentProfile, ModelDescriptor } from "@polyth/contracts";
-import { agentPickerDefaultLabel, modelPickerDefaultLabel } from "../composerDefaults.ts";
+import type {
+  AgentProfile,
+  ModelDescriptor,
+  ModelRef,
+  QueueItemDto,
+  SessionProjection,
+} from "@polyth/contracts";
+import { agentPickerDefaultLabel } from "../composerDefaults.ts";
 import { friendlyError, modKeyLabel, parseModelRef } from "../settings.ts";
 import { Icon } from "../icons.tsx";
 import { useWorkspaceMode } from "../widgets/workspaceMode.ts";
 import ModelPicker, { modelContextLabel, modelMetaLine, modelSupportsThinking } from "./ModelPicker.tsx";
-import { useSessionDefaults } from "../sessionDefaults.ts";
+import { resolveProjectModelDefault, useSessionDefaults } from "../sessionDefaults.ts";
 import { roleKind, useRolePrefs } from "../rolePrefs.ts";
 import { useShellMode } from "../responsiveShell.ts";
 import { useViewportMetrics } from "../mobileViewport.ts";
-import ProviderLogo from "./ProviderLogo.tsx";
+import { formatNumber, getLocale, tr } from "../i18n/index.ts";
+import SessionContextBar, {
+  type ContextChoice,
+  type SessionContextBarProps,
+} from "./mobile/SessionContextBar.tsx";
 
 function modelRefFromValue(value: string): { providerID: string; modelID: string } | undefined {
   if (!value) return undefined;
@@ -89,7 +116,7 @@ function ContextWindowPicker({ limit, used }: { limit?: number; used?: number })
   const ref = useRef<HTMLDivElement>(null);
   const value = limit
     ? modelContextLabel(limit).replace(/\s+context$/, "").toUpperCase()
-    : "Unknown";
+    : tr("composer.unknown");
   const usage = Math.max(0, used ?? 0);
   const percent = limit ? Math.min(100, Math.round((usage / limit) * 100)) : null;
   useEffect(() => {
@@ -112,28 +139,28 @@ function ContextWindowPicker({ limit, used }: { limit?: number; used?: number })
       <button
         type="button"
         className="context-window-chip"
-        title={limit ? `Model context window: ${limit.toLocaleString()} tokens` : "Context window unavailable"}
+        title={limit ? tr("composer.modelContextWindowValueTokens", { value: limit.toLocaleString(getLocale()) }) : tr("composer.contextWindowUnavailable")}
         aria-haspopup="dialog"
         aria-expanded={open}
         onClick={() => setOpen((valueOpen) => !valueOpen)}
       >
         <span>
-          <small>Context Window</small>
+          <small>{tr("composer.contextWindow")}</small>
           <strong>{value}</strong>
         </span>
         <Icon.chevronDown />
       </button>
-      {open && <div className="context-window-pop" role="dialog" aria-label="Context window details">
+      {open && <div className="context-window-pop" role="dialog" aria-label={tr("composer.contextWindowDetails")}>
         <div>
-          <span>Model limit</span>
-          <strong>{limit ? limit.toLocaleString() : "Unavailable"}</strong>
+          <span>{tr("composer.modelLimit")}</span>
+          <strong>{limit ? limit.toLocaleString(getLocale()) : tr("common.unavailable")}</strong>
         </div>
         <div>
-          <span>Current input</span>
-          <strong>{usage.toLocaleString()} tokens</strong>
+          <span>{tr("composer.currentInput")}</span>
+          <strong>{usage.toLocaleString(getLocale())} {tr("composer.tokens")}</strong>
         </div>
         {percent !== null && (
-          <div className="context-window-meter" aria-label={`${percent}% of context window used`}>
+          <div className="context-window-meter" aria-label={tr("composer.valueOfContextWindowUsed", { percent: percent })}>
             <i style={{ width: `${percent}%` }} />
           </div>
         )}
@@ -142,23 +169,165 @@ function ContextWindowPicker({ limit, used }: { limit?: number; used?: number })
   );
 }
 
-const PROFILE_MISSING_NOTE = "Profile unavailable — choose another";
+const PROFILE_MISSING_NOTE = tr("composer.profileUnavailableChooseAnother");
 
-export type NewSessionTarget =
+type NewSessionTarget =
   | { kind: "main" }
   | { kind: "worktree"; path: string }
   | { kind: "branch"; branch: string };
 
+type LocationChoice = ContextChoice & {
+  target: NewSessionTarget;
+};
+
+/** Project/worktree context is composer chrome, not fresh-session chrome.
+ * Keeping it here makes every chat call site render the same complete entity. */
+function useComposerLocation(session: SessionProjection | null): {
+  contextBar: SessionContextBarProps;
+  newSessionTarget: NewSessionTarget;
+} {
+  const projects = useStore((state) => state.projectRegistry.projects);
+  const projectId = useStore((state) => state.activeProjectId);
+  const newSessionIntent = useStore((state) => state.newSessionIntent);
+  const branch = useStore((state) => state.gitBranch);
+  const project = projects.find((candidate) => candidate.id === projectId) ?? null;
+  const intendedWorktree = session?.worktreePath
+    ?? (newSessionIntent?.projectId === projectId ? newSessionIntent.worktreePath : undefined);
+  const [worktrees, setWorktrees] = useState<Worktree[]>([]);
+  const [branches, setBranches] = useState<GitBranches>({ current: "", branches: [] });
+  const [branchLoading, setBranchLoading] = useState(false);
+  const [selectedBranchId, setSelectedBranchId] = useState(
+    intendedWorktree ? `worktree:${intendedWorktree}` : "main",
+  );
+
+  useEffect(() => {
+    let active = true;
+    setSelectedBranchId(intendedWorktree ? `worktree:${intendedWorktree}` : "main");
+    if (!projectId) {
+      setWorktrees([]);
+      setBranches({ current: "", branches: [] });
+      return () => { active = false; };
+    }
+    setBranchLoading(true);
+    void Promise.all([api.listWorktrees(projectId), api.gitBranches(projectId, session?.id)])
+      .then(([nextWorktrees, nextBranches]) => {
+        if (!active) return;
+        setWorktrees(nextWorktrees);
+        setBranches(nextBranches);
+        const currentWorktree = intendedWorktree
+          ? nextWorktrees.find((worktree) => worktree.path === intendedWorktree)
+          : nextWorktrees.find((worktree) =>
+              worktree.branch === (nextBranches.current || session?.branch || branch));
+        setSelectedBranchId(currentWorktree?.isMain
+          ? "main"
+          : currentWorktree
+            ? `worktree:${currentWorktree.path}`
+            : intendedWorktree
+              ? `worktree:${intendedWorktree}`
+              : "main");
+      })
+      .catch((error) => {
+        if (active) setUiError(friendlyError(tr("composer.couldnTLoadWorktrees"), error));
+      })
+      .finally(() => {
+        if (active) setBranchLoading(false);
+      });
+    return () => { active = false; };
+  }, [projectId, session?.id, session?.worktreePath, session?.branch, newSessionIntent?.worktreePath, branch]);
+
+  const branchChoices = useMemo<LocationChoice[]>(() => {
+    const linkedBranches = new Set(worktrees.map((worktree) => worktree.branch).filter(Boolean));
+    const main = worktrees.find((worktree) => worktree.isMain);
+    const choices: LocationChoice[] = [{
+      id: "main",
+      label: main?.branch || branches.current || branch || tr("composer.mainWorkspace"),
+      detail: tr("composer.mainWorkspace"),
+      target: { kind: "main" },
+    }];
+    for (const worktree of worktrees.filter((candidate) => !candidate.isMain)) {
+      choices.push({
+        id: `worktree:${worktree.path}`,
+        label: worktree.branch || worktree.path.split("/").pop() || tr("composer.worktree"),
+        detail: tr("composer.existingWorktree"),
+        target: { kind: "worktree", path: worktree.path },
+      });
+    }
+    for (const candidate of branches.branches) {
+      if (candidate.remote || linkedBranches.has(candidate.name)) continue;
+      choices.push({
+        id: `branch:${candidate.name}`,
+        label: candidate.name,
+        detail: tr("composer.openInANewWorktree"),
+        target: { kind: "branch", branch: candidate.name },
+      });
+    }
+    return choices;
+  }, [worktrees, branches, branch]);
+
+  const selectedChoice = branchChoices.find((choice) => choice.id === selectedBranchId);
+  const newSessionTarget = selectedChoice?.target
+    ?? (intendedWorktree
+      ? { kind: "worktree" as const, path: intendedWorktree }
+      : { kind: "main" as const });
+  const branchName = selectedChoice?.label
+    || session?.branch
+    || branch
+    || intendedWorktree?.split("/").pop()
+    || tr("composer.mainWorkspace");
+  const projectName = project?.name || project?.path || tr("composer.noProject");
+  const projectChoices: ContextChoice[] = projects.map((candidate) => ({
+    id: candidate.id,
+    label: candidate.name || candidate.path,
+    detail: candidate.name ? candidate.path : "",
+  }));
+
+  const pickBranch = (id: string) => {
+    const choice = branchChoices.find((candidate) => candidate.id === id);
+    if (!choice || id === selectedBranchId) return;
+    setSelectedBranchId(id);
+    if (!session || !projectId) return;
+
+    if (choice.target.kind === "main") {
+      startNewSession(projectId);
+    } else if (choice.target.kind === "worktree") {
+      startNewSession(projectId, { worktreePath: choice.target.path });
+    } else {
+      setBranchLoading(true);
+      void api.createWorktree(projectId, choice.target.branch)
+        .then((worktree) => startNewSession(projectId, { worktreePath: worktree.path }))
+        .catch((error) => setUiError(friendlyError(tr("composer.couldnTCreateTheWorktree"), error)))
+        .finally(() => setBranchLoading(false));
+    }
+  };
+
+  return {
+    newSessionTarget,
+    contextBar: {
+      projectName,
+      ...(projectId ? { projectId } : {}),
+      projects: projectChoices,
+      onPickProject: (id) => activateProject(id || null),
+      branchName,
+      branchId: selectedBranchId,
+      branches: branchChoices,
+      ...(branchLoading ? { branchLoading: true } : {}),
+      onPickBranch: pickBranch,
+    },
+  };
+}
+
 function compactContext(context?: number): string {
-  if (!context) return "Unknown";
-  if (context >= 1_000_000) return `${Number((context / 1_000_000).toFixed(1))}M`;
-  if (context >= 1_000) return `${Math.round(context / 1_000)}K`;
-  return String(context);
+  if (!context) return tr("composer.unknown");
+  if (context >= 1_000_000) {
+    return `${formatNumber(context / 1_000_000, { maximumFractionDigits: 1 })}M`;
+  }
+  if (context >= 1_000) return `${formatNumber(Math.round(context / 1_000))}K`;
+  return formatNumber(context);
 }
 
 /** Reasoning-effort variants are backend strings ("low", "xhigh", "thinking").
  *  Display only — the id sent to the backend is always the raw variant. */
-const THINKING_LABELS: Record<string, string> = { xhigh: "X-High", none: "None" };
+const THINKING_LABELS: Record<string, string> = { xhigh: "X-High", none: tr("common.none") };
 
 function thinkingLabel(variant: string): string {
   const known = THINKING_LABELS[variant.toLowerCase()];
@@ -167,33 +336,84 @@ function thinkingLabel(variant: string): string {
   return label ? label[0]!.toUpperCase() + label.slice(1) : variant;
 }
 
+/** A discrete effort control: every model-reported variant is a fixed stop,
+ * with Auto retained as the first stop so an explicit override can be cleared. */
+function ThinkingSlider({
+  className,
+  variants,
+  value,
+  onPick,
+}: {
+  className?: string;
+  variants: readonly string[];
+  value?: string;
+  onPick: (thinking: string | undefined) => void;
+}) {
+  const [dragging, setDragging] = useState(false);
+  const options = ["", ...variants];
+  const selected = Math.max(0, options.indexOf(value ?? ""));
+  const selectedOption = options[selected] ?? "";
+  const label = selectedOption ? thinkingLabel(selectedOption) : tr("composer.auto");
+  return (
+    <label className={`thinking-slider${className ? ` ${className}` : ""}`}>
+      <span className="thinking-slider-label">
+        <span className="thinking-glyph" aria-hidden="true">◌</span>
+        <output>{label}</output>
+      </span>
+      <span className="thinking-slider-track">
+        <input
+          type="range"
+          min={0}
+          max={options.length - 1}
+          step={1}
+          value={selected}
+          aria-label={tr("composer.thinkingEffortValue", { value: label })}
+          onChange={(event) => onPick(options[Number(event.target.value)] || undefined)}
+          onPointerDown={() => setDragging(true)}
+          onPointerUp={() => setDragging(false)}
+          onPointerCancel={() => setDragging(false)}
+          onBlur={() => setDragging(false)}
+        />
+        <span className="thinking-slider-stops" aria-hidden="true">
+          {options.map((option, index) => (
+            <i key={option || "auto"} className={index <= selected ? "active" : ""} />
+          ))}
+        </span>
+        {dragging && <span className="thinking-slider-tooltip" role="tooltip">{tr("composer.thinkingValue", { value: label })}</span>}
+      </span>
+    </label>
+  );
+}
+
 function agentBadgeLabel(agent?: string): string {
-  const label = (agent || "Build").replace(/[-_]+/g, " ").trim();
-  return label ? label[0]!.toUpperCase() + label.slice(1) : "Build";
+  const label = (agent || tr("composer.build")).replace(/[-_]+/g, " ").trim();
+  return label ? label[0]!.toUpperCase() + label.slice(1) : tr("composer.build");
 }
 
 // UX-MOBILE-01 §13/§40/§41: one muted microtext line — `Text · Image · 500K`.
 // No mixed glyph set, no "Context:" label competing for primary space.
-function ModelCapabilityMeta({ model }: { model?: ModelDescriptor }) {
+function modelCapabilityMeta(model?: ModelDescriptor): string {
   const line = modelMetaLine(model);
-  return (
-    <div className="composer-model-meta">
-      {line || `Context ${compactContext(model?.context)}`}
-    </div>
-  );
+  return line || tr("composer.contextValue", { value: compactContext(model?.context) });
 }
+
+type QueueEdit = {
+  id: string;
+  sessionId: string;
+  /** Preserve an unrelated composer draft while the queued item is edited. */
+  draftBefore: string;
+};
 
 export default function Composer({
   variant = "docked",
-  newSessionTarget = { kind: "main" },
 }: {
-  variant?: "docked" | "hero" | "widget";
-  newSessionTarget?: NewSessionTarget;
+  variant?: "docked" | "widget";
 }) {
   const [pinSeed, setPinSeed] = useState<{ providerID: string; modelID: string; name?: string } | null>(null);
   const [pinEdit, setPinEdit] = useState<AgentProfile | null>(null);
   const [createProfileOpen, setCreateProfileOpen] = useState(false);
   const [goalFormOpen, setGoalFormOpen] = useState(false);
+  const [goalAttachBusy, setGoalAttachBusy] = useState(false);
   const [autoApproveBusy, setAutoApproveBusy] = useState(false);
   const [newSessionAutoApprove, setNewSessionAutoApprove] = useState(false);
   const [newSessionGoal, setNewSessionGoal] = useState(false);
@@ -209,13 +429,14 @@ export default function Composer({
   const sessionDefaults = useSessionDefaults();
   const session = useStore((s) => s.sessions.find((x) => x.id === s.activeSessionId) ?? null);
   const newSessionIntent = useStore((s) => s.newSessionIntent);
+  const { contextBar, newSessionTarget } = useComposerLocation(session);
   const model = useActiveModel();
   const working = model.turn?.status === "working";
   const [techOpen, setTechOpen] = useState(false);
   const noModels = chatModels.length === 0;
   const widgetMode = variant === "widget";
   const simpleMode = useWorkspaceMode() === "chat" || widgetMode;
-  const lightFocusComposer = simpleMode && variant === "docked";
+  const lightFocusComposer = simpleMode && !widgetMode;
   const shellLayout = useShellMode();
   const ui = useUiSettings();
 
@@ -225,6 +446,11 @@ export default function Composer({
   const [text, setText] = useState(() => (
     session?.id ? loadDraft(session.id) : newSessionIntent?.draft ?? ""
   ));
+  const [queueEdit, setQueueEdit] = useState<QueueEdit | null>(null);
+  const [queueEditStarting, setQueueEditStarting] = useState(false);
+  const [queueEditSaving, setQueueEditSaving] = useState(false);
+  const queueEditRef = useRef<QueueEdit | null>(null);
+  queueEditRef.current = queueEdit;
   const committedTextRef = useRef(text);
   committedTextRef.current = text;
   const [focusMode, setFocusMode] = useState(false);
@@ -268,7 +494,11 @@ export default function Composer({
   useEffect(() => {
     const outgoing = sessionIdRef.current;
     if (outgoing !== null && outgoing !== (session?.id ?? null)) {
-      saveDraft(outgoing, inputRef.current?.getText() ?? committedTextRef.current);
+      const editing = queueEditRef.current;
+      saveDraft(outgoing, editing?.sessionId === outgoing
+        ? editing.draftBefore
+        : inputRef.current?.getText() ?? committedTextRef.current);
+      if (editing?.sessionId === outgoing) void api.queueEditCancel(outgoing, editing.id).catch(() => {});
     }
     sessionIdRef.current = session?.id ?? null;
     const t = session?.id ? loadDraft(session.id) : newSessionIntent?.draft ?? "";
@@ -279,6 +509,9 @@ export default function Composer({
     setAcToken(null);
     acTokenRef.current = null;
     fileSearchSeq.current++;
+    setQueueEdit(null);
+    setQueueEditStarting(false);
+    setQueueEditSaving(false);
   }, [session?.id, newSessionIntent]);
 
   // Disengage on the first pointer press outside the composer (including its
@@ -318,22 +551,27 @@ export default function Composer({
   useEffect(() => {
     const flush = () => {
       const id = sessionIdRef.current;
-      if (id !== null) saveDraft(id, inputRef.current?.getText() ?? committedTextRef.current);
+      const editing = queueEditRef.current;
+      if (id !== null) saveDraft(id, editing?.sessionId === id
+        ? editing.draftBefore
+        : inputRef.current?.getText() ?? committedTextRef.current);
     };
     window.addEventListener("pagehide", flush);
     return () => {
       window.removeEventListener("pagehide", flush);
       flush();
+      const editing = queueEditRef.current;
+      if (editing) void api.queueEditCancel(editing.sessionId, editing.id).catch(() => {});
     };
   }, []);
 
   // Debounced draft persistence of committed text.
   useEffect(() => {
     const id = session?.id;
-    if (!id) return;
+    if (!id || queueEdit?.sessionId === id) return;
     const t = setTimeout(() => saveDraft(id, text), 250);
     return () => clearTimeout(t);
-  }, [session?.id, text]);
+  }, [session?.id, text, queueEdit]);
 
   // Drag-and-drop: tree paths and desktop files become attachment pills.
   const [dropHint, setDropHint] = useState<"path" | "files" | null>(null);
@@ -347,7 +585,12 @@ export default function Composer({
     const target = sessionIdRef.current;
     for (const f of files) {
       void attachUpload(projectId, target, f).then((r) => {
-        if (!r.ok) setUiError(`Couldn’t attach ${f.name || "file"}: ${r.reason}`);
+        if (!r.ok) {
+          setUiError(tr("composer.couldNotAttachValue", {
+            name: f.name || tr("composer.discovery.file"),
+            reason: r.reason,
+          }));
+        }
       });
     }
   }, []);
@@ -376,6 +619,14 @@ export default function Composer({
   // Strict independent command/snippet outcomes; an HTTP failure is
   // `unavailable`, never a successful empty list.
   const activeProjectId = useStore((s) => s.activeProjectId);
+  const activeProject = useStore((s) =>
+    s.projectRegistry.projects.find((candidate) => candidate.id === s.activeProjectId));
+  const globalDefaultModel = sessionDefaults.defaultModel ?? parseModelRef(settings.defaultModel);
+  const preferredModel = resolveProjectModelDefault(
+    activeProject?.defaults,
+    globalDefaultModel,
+    chatModels[0],
+  );
   const [catalog, setCatalog] = useState<ComposerCatalogResult | null>(null);
   const catalogSeq = useRef(0);
 
@@ -481,28 +732,87 @@ export default function Composer({
     && cfg.profile.kind === "id"
     && !profiles.some((p) => cfg.profile.kind === "id" && p.id === cfg.profile.id);
 
+  const beginQueuedEdit = useCallback((item: QueueItemDto) => {
+    if (queueEditRef.current || queueEditStarting) {
+      announce(tr("composer.finishEditingCurrentQueuedMessageFirst"));
+      return;
+    }
+    const target = sessionIdRef.current;
+    if (!target || target !== item.sessionId) return;
+    setQueueEditStarting(true);
+    void api.queueEditStart(target, item.id)
+      .then((reserved) => {
+        if (sessionIdRef.current !== target) {
+          void api.queueEditCancel(target, reserved.id);
+          return;
+        }
+        const draftBefore = inputRef.current?.getText() ?? committedTextRef.current;
+        // The queue text is an editing buffer, not this session's normal draft.
+        // Save any existing composer text before replacing it so it can return
+        // immediately after this queued message is updated.
+        saveDraft(target, draftBefore);
+        setQueueEdit({ id: reserved.id, sessionId: target, draftBefore });
+        setText(reserved.text);
+        inputRef.current?.replaceText(reserved.text);
+        inputRef.current?.focus();
+        setInputFocused(true);
+        announce(tr("composer.editingQueuedMessageValueInComposer", { position: reserved.position + 1 }));
+      })
+      .catch((error) => setUiError(friendlyError("Couldn’t start editing queued message", error)))
+      .finally(() => setQueueEditStarting(false));
+  }, [queueEditStarting]);
+
+  const cancelQueuedEdit = useCallback((): boolean => {
+    const editing = queueEditRef.current;
+    if (!editing) return false;
+    setQueueEdit(null);
+    setText(editing.draftBefore);
+    inputRef.current?.replaceText(editing.draftBefore);
+    saveDraft(editing.sessionId, editing.draftBefore);
+    void api.queueEditCancel(editing.sessionId, editing.id).catch(() => {});
+    announce(tr("composer.queuedMessageEditingCancelled"));
+    return true;
+  }, []);
+
   const send = useCallback((
     override?: string,
     deliveryOverride?: "steer" | "queue" | "interrupt",
   ) => {
     if (creatingSession) return;
     const t = (override ?? inputRef.current?.getText() ?? text).trim();
+    const target = sessionIdRef.current;
+    if (queueEdit) {
+      if (!target || target !== queueEdit.sessionId || !t || queueEditSaving) return;
+      const editing = queueEdit;
+      setQueueEditSaving(true);
+      void api.queueEdit(target, editing.id, t)
+        .then(() => {
+          // The server updates the existing queue row, so it retains its
+          // position and delivery metadata instead of becoming a new message.
+          if (queueEditRef.current?.id === editing.id) setQueueEdit(null);
+          if (sessionIdRef.current !== target) return;
+          setText(editing.draftBefore);
+          inputRef.current?.replaceText(editing.draftBefore);
+          saveDraft(target, editing.draftBefore);
+          historyCursor.current = emptyPromptHistoryCursor();
+          announce(tr("composer.queuedMessageValueUpdatedInPlace", { id: editing.id }));
+        })
+        .catch((error) => setUiError(friendlyError("Couldn’t update queued message", error)))
+        .finally(() => setQueueEditSaving(false));
+      return;
+    }
     const command = shellCommand(t);
     const hasPills = command === null && attachments.length > 0;
     if ((!t && !hasPills) || (command === null && noModels) || command === "") return;
     if (command === null && profileMissing) return;
     // Capture the target session at send time — project/session switches must
     // never reroute a send (delivery admission handles active turns server-side).
-    const target = sessionIdRef.current;
     // Pills leave the draft the moment the message leaves the composer.
     const atts = command === null ? takeAttachments(target) : [];
     const delivery = working ? deliveryOverride ?? getUiSettings().followUpBehavior : undefined;
-    const preferred = !session?.model
-      ? sessionDefaults.defaultModel ?? parseModelRef(settings.defaultModel)
-      : undefined;
     const cfgSent = cfg;
     const wire = wireProfileId(cfgSent);
-    const selected = cfgSent.model ?? session?.model ?? preferred;
+    const selected = cfgSent.model ?? session?.model ?? preferredModel;
     const selectedDescriptor = selected
       ? chatModels.find((candidate) =>
           candidate.providerID === selected.providerID && candidate.modelID === selected.modelID)
@@ -520,7 +830,9 @@ export default function Composer({
       : undefined;
     const deliver = (targetSessionId: string) => command !== null
       ? api.runShell(targetSessionId, command).catch(
-          (err) => setUiError(`Couldn’t run shell command: ${err instanceof Error ? err.message : String(err)}`),
+          (err) => setUiError(tr("composer.couldNotRunShellCommand", {
+            reason: err instanceof Error ? err.message : String(err),
+          })),
         )
       : sendMessage(
           t,
@@ -546,7 +858,9 @@ export default function Composer({
     } else if (activeProjectId) {
       setCreatingSession(true);
       void (async () => {
-        let worktreePath = newSessionIntent?.worktreePath;
+        let worktreePath = newSessionTarget.kind === "main"
+          ? undefined
+          : newSessionIntent?.worktreePath;
         if (newSessionTarget.kind === "worktree") {
           worktreePath = newSessionTarget.path;
         } else if (newSessionTarget.kind === "branch") {
@@ -557,7 +871,7 @@ export default function Composer({
           ...(worktreePath ? { worktreePath } : {}),
         });
         const created = getState().activeSessionId;
-        if (!created) throw new Error("The new session did not become active.");
+        if (!created) throw new Error(tr("composer.theNewSessionDidNotBecomeActive"));
         if (newSessionAutoApprove) await api.autoAcceptSet(created, "on");
         if (newSessionGoal) await api.goalAttach(created, t);
         await deliver(created);
@@ -565,7 +879,7 @@ export default function Composer({
         setNewSessionGoal(false);
       })()
         .catch((error) => {
-          setUiError(friendlyError("Couldn’t create the session", error));
+          setUiError(friendlyError(tr("common.error"), error));
           // The draft was cleared optimistically below; a failed worktree or
           // session creation must never lose the typed prompt or its pills.
           // Restore only while still on the fresh-session surface — never into
@@ -587,8 +901,8 @@ export default function Composer({
     setAcToken(null);
     acTokenRef.current = null;
   }, [
-    text, attachments, cfg, profileMissing, noModels, working, activeProjectId,
-    session?.model, settings.defaultModel, sessionDefaults.defaultModel,
+    text, attachments, cfg, profileMissing, noModels, working, activeProjectId, queueEdit, queueEditSaving,
+    session?.model, preferredModel,
     sessionDefaults.defaultThinking, chatModels, creatingSession, newSessionTarget,
     newSessionAutoApprove, newSessionGoal, newSessionIntent,
   ]);
@@ -640,6 +954,7 @@ export default function Composer({
   const onKeyIntercept = (e: KeyboardEvent<HTMLTextAreaElement>, composing: boolean): boolean => {
     // IME composition: never send, never navigate autocomplete, never hotkey.
     if (composing) return false;
+    if (e.key === "Escape" && cancelQueuedEdit()) return true;
     if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === "Enter") {
       setFocusMode(true);
       return true;
@@ -775,9 +1090,6 @@ export default function Composer({
   };
 
   // ---- execution configuration projections ------------------------------------
-  const modelValue = cfg.model
-    ? JSON.stringify({ providerID: cfg.model.providerID, modelID: cfg.model.modelID })
-    : "";
   const agentValue = cfg.agent ?? "";
   const selectedProfileId = cfg.profile.kind === "id"
     ? cfg.profile.id
@@ -785,9 +1097,6 @@ export default function Composer({
     ? ""
     : (session?.agentProfileId ?? "");
 
-  // Favorites float first (Settings > Providers & Models); picking records recency.
-  const modelPrefs = useModelPrefs();
-  const preferredModel = sessionDefaults.defaultModel ?? parseModelRef(settings.defaultModel);
   const recommendedModel = session?.model && chatModels.some((candidate) =>
     candidate.providerID === session.model?.providerID && candidate.modelID === session.model?.modelID)
     ? session.model
@@ -795,35 +1104,15 @@ export default function Composer({
         candidate.providerID === preferredModel.providerID && candidate.modelID === preferredModel.modelID)
       ? preferredModel
       : chatModels[0];
-  const modelItems: PickerItem[] = [
-    {
-      id: "",
-      label: `Auto · ${modelPickerDefaultLabel(undefined, chatModels, recommendedModel).replace(/^Default:\s*/, "")}`,
-      group: "Recommended",
-      detail: "Let Polyth use your current workspace default",
-    },
-    ...sortModels(chatModels, modelPrefs).filter((model) => !(
-      recommendedModel
-      && model.providerID === recommendedModel.providerID
-      && model.modelID === recommendedModel.modelID
-    )).map((m) => {
-      const fav = isFavorite(modelPrefs, modelKey(m));
-      const recent = modelPrefs.recents.includes(modelKey(m));
-      return {
-        id: JSON.stringify({ providerID: m.providerID, modelID: m.modelID }),
-        label: `${fav ? "★ " : ""}${modelDisplayName(m, chatModels)}`,
-        group: fav ? "Favorites" : recent ? "Recent" : "All models",
-        // Honest model detail: provider + numeric context + reported
-        // connection only. No cost/modality/variant/attachment guesses.
-        detail: modelDetail(m),
-        keywords: [m.providerID, m.modelID],
-      };
-    }),
-  ];
-  const pickModel = (value: string) => {
-    const ref = modelRefFromValue(value);
+  const pickComposerModel = (ref?: ModelRef) => {
+    if (!ref) return;
     updateCfg(withExplicitModel(cfg, ref));
-    if (ref) noteModelUsed(`${ref.providerID}/${ref.modelID}`);
+    noteModelUsed(`${ref.providerID}/${ref.modelID}`);
+    if (activeProjectId) {
+      void rememberProjectModelSelection(activeProjectId, ref).catch((error) => {
+        setUiError(friendlyError(tr("composer.couldnTRememberTheProjectModel"), error));
+      });
+    }
   };
   const chatAgents = agents.filter((agent) =>
     roleKind(agent, rolePrefs) === "main" && agent.name.toLowerCase() !== "compaction");
@@ -854,20 +1143,20 @@ export default function Composer({
   const modelRowAction = {
     labelFor: (id: string) => {
       const ref = modelRefFromValue(id);
-      return ref && matchingProfiles(ref).length === 1 ? "Edit profile" : "Create profile";
+      return ref && matchingProfiles(ref).length === 1 ? tr("composer.editProfile") : tr("composer.createProfile");
     },
     nameFor: (id: string) => {
       const ref = modelRefFromValue(id);
-      if (!ref) return "Create profile";
+      if (!ref) return tr("composer.createProfile");
       const matching = matchingProfiles(ref);
-      if (matching.length === 1) return `Edit profile ${matching[0]!.name}`;
+      if (matching.length === 1) return tr("composer.editProfileValue", { name: matching[0]!.name });
       const m = models.find((x) => x.providerID === ref.providerID && x.modelID === ref.modelID);
-      return `Create profile from ${m?.name || ref.modelID}`;
+      return tr("composer.createProfileFromValue", { value: m?.name || ref.modelID });
     },
     onAction: pinModel,
   };
 
-  const noneLabel = "None";
+  const noneLabel = tr("common.none");
   const profileItems: PickerItem[] = [
     { id: "", label: noneLabel, group: "" },
     ...profiles.map((p) => ({
@@ -881,7 +1170,7 @@ export default function Composer({
     updateCfg(id ? withProfile(cfg, id) : withProfileNone(cfg));
   };
   const currentProfileName = profileMissing
-    ? "Profile unavailable"
+    ? tr("composer.profileUnavailable")
     : profiles.find((p) => p.id === selectedProfileId)?.name ?? noneLabel;
   // Creation needs a connectable model; the reason is visible text with an
   // operable settings route, never a silent hidden action.
@@ -889,13 +1178,12 @@ export default function Composer({
     label,
     run: () => setCreateProfileOpen(true),
     ...(noModels ? {
-      disabledReason: "Connect a model before creating a profile",
-      secondaryLabel: "Open model settings",
+      disabledReason: tr("composer.connectAModelBeforeCreatingAProfile"),
+      secondaryLabel: tr("composer.openModelSettings"),
       secondaryRun: () => openSettingsPage("models"),
     } : {}),
   });
 
-  const currentModelLabel = modelItems.find((i) => i.id === modelValue)?.label ?? modelItems[0]!.label;
   const currentAgentLabel = agentItems.find((i) => i.id === agentValue)?.label ?? agentItems[0]!.label;
   const selectedModel = cfg.model
     ? chatModels.find((candidate) =>
@@ -914,12 +1202,32 @@ export default function Composer({
     }
     setAutoApproveBusy(true);
     void api.autoAcceptSet(session.id, autoApproveOn ? "off" : "on")
-      .catch((error) => setUiError(friendlyError("Couldn’t change auto-approve", error)))
+      .catch((error) => setUiError(friendlyError(tr("common.error"), error)))
       .finally(() => setAutoApproveBusy(false));
   };
   const toggleGoal = () => {
-    if (session) setGoalFormOpen(true);
-    else setNewSessionGoal((current) => !current);
+    const objective = (inputRef.current?.getText() ?? text).trim();
+    if (!objective) {
+      if (session) setGoalFormOpen(true);
+      else setNewSessionGoal((current) => !current);
+      return;
+    }
+    if (!session) {
+      setNewSessionGoal(true);
+      announce(tr("composer.thisMessageWillBeSavedAsTheGoal"));
+      return;
+    }
+    if (goalAttachBusy) return;
+    setGoalAttachBusy(true);
+    void api.goalAttach(session.id, objective)
+      .then(() => {
+        setText("");
+        inputRef.current?.replaceText("");
+        saveDraft(session.id, "");
+        announce(tr("composer.goalAttached"));
+      })
+      .catch((error) => setUiError(friendlyError(tr("composer.couldnTAttachTheGoal"), error)))
+      .finally(() => setGoalAttachBusy(false));
   };
   const consumeWorkflowDraft = () => {
     setText("");
@@ -944,27 +1252,19 @@ export default function Composer({
     autoApproveBusy,
     toggleAutoApprove,
     goalOn: newSessionGoal,
+    goalBusy: goalAttachBusy,
     toggleGoal,
     workflowDraftText: text,
     workflowAttachmentCount: attachments.length,
     consumeWorkflowDraft,
   };
-  const thinkingItems: PickerItem[] = [
-    { id: "", label: "Auto", group: "", detail: "The model's default reasoning effort" },
-    ...(selectedModel?.variants ?? []).map((variant) => ({
-      id: variant,
-      label: thinkingLabel(variant),
-      group: "",
-    })),
-  ];
-  const defaultThinking = selectedModel?.variants?.includes(sessionDefaults.defaultThinking ?? "")
-    ? sessionDefaults.defaultThinking
-    : undefined;
+  const thinkingVariants = selectedModel?.variants ?? [];
 
   const followUp = getUiSettings().followUpBehavior;
   const sendDisabled = creatingSession
-    || (!text.trim() && attachments.length === 0)
-    || (!shellMode && (noModels || profileMissing));
+    || queueEditSaving
+    || (queueEdit ? !text.trim() : (!text.trim() && attachments.length === 0))
+    || (!queueEdit && !shellMode && (noModels || profileMissing));
   const phoneLayout = isPhone;
   const hasDraft = text.trim() !== "" || attachments.length > 0;
   const expanded = !phoneLayout || inputFocused || hasDraft || working || shellMode;
@@ -975,8 +1275,9 @@ export default function Composer({
   return (
     <div
       ref={rootRef}
-      className={`${variant === "hero" ? "composer-hero" : "composer"}${simpleMode ? " composer-simple" : " composer-power"}${lightFocusComposer ? " composer-focus-light" : ""}${stateClass}`}
+      className={`composer ${widgetMode ? "composer-widget" : "composer-chat"}${simpleMode ? " composer-simple" : " composer-power"}${lightFocusComposer ? " composer-focus-light" : ""}${stateClass}`}
     >
+      <SessionContextBar {...contextBar} />
       <div
         className="composer-card"
         onDragOver={(e) => { const k = dragKind(e.dataTransfer); if (k) { e.preventDefault(); setDropHint(k); } }}
@@ -987,23 +1288,28 @@ export default function Composer({
           if (!k || !activeProjectId) return;
           e.preventDefault();
           void dropIntoSession(e.dataTransfer, activeProjectId, sessionIdRef.current,
-            (reason) => setUiError(`Couldn’t attach: ${reason}`));
+            (reason) => setUiError(tr("composer.couldNotAttach", { reason })));
         }}
       >
       {dropHint && (
-        <div className="drop-hint">{dropHint === "path" ? "Attach to chat" : "Drop to attach"}</div>
+        <div className="drop-hint">{dropHint === "path" ? tr("composer.attachToChat") : tr("composer.dropToAttach")}</div>
       )}
       {noModels && (
         <div className="composer-note" role="status">
-          No models available — check that the backend is running and configured.
-        </div>
+          {tr("composer.noModelsAvailableCheckThatTheBackend")}</div>
       )}
       {profileMissing && (
         <div className="composer-note composer-profile-missing" role="alert">
           {PROFILE_MISSING_NOTE}
         </div>
       )}
-      {session?.id && <QueuedMessageList sessionId={session.id} />}
+      {session?.id && (
+        <QueuedMessageList
+          sessionId={session.id}
+          editingId={queueEdit?.sessionId === session.id ? queueEdit.id : null}
+          onEdit={beginQueuedEdit}
+        />
+      )}
       {attachments.length > 0 && (
         <AttachmentPills
           attachments={attachments}
@@ -1015,77 +1321,62 @@ export default function Composer({
       )}
       {simpleMode && (
         <div className="composer-model-header">
-          <ProviderLogo
-            providerID={selectedModel?.providerID}
-            providerName={selectedModel?.providerName}
-            className="composer-provider-mark"
-          />
           {!noModels && (
             <ModelPicker
               models={chatModels}
               value={cfg.model}
               recommended={recommendedModel}
-              direction={variant === "hero" ? "down" : "up"}
-              onPick={(ref) => {
-                updateCfg(withExplicitModel(cfg, ref));
-                if (ref) noteModelUsed(`${ref.providerID}/${ref.modelID}`);
-              }}
+              composerMeta={modelCapabilityMeta(selectedModel)}
+              direction="up"
+              onPick={pickComposerModel}
             />
           )}
-          {/* UX-MOBILE-01 §59: reasoning effort stays reachable on phones —
-              a compact control immediately right of the model name, opening
-              the same sheet as every other selector. It only exists for models
+          {/* Reasoning effort stays reachable on phones as a compact slider
+              immediately right of the model name. It only exists for models
               that actually report variants. */}
           <span className="composer-mode-cluster">
             {modelSupportsThinking(selectedModel) && (
-              <Picker
+              <ThinkingSlider
                 className="composer-thinking-badge"
-                label="Thinking"
-                mobileSheet
-                direction={variant === "hero" ? "down" : "up"}
-                items={thinkingItems}
-                value={cfg.thinking ?? defaultThinking ?? ""}
+                variants={thinkingVariants}
+                value={cfg.thinking}
                 onPick={(thinking) => updateCfg(withExplicitThinking(cfg, thinking || undefined))}
-                placeholder="Auto"
-                ariaLabel={`Select thinking effort, current ${thinkingLabel(cfg.thinking ?? defaultThinking ?? "Auto")}`}
-                triggerIcon={<span className="thinking-glyph" aria-hidden="true">◌</span>}
               />
             )}
             {chatAgents.length > 0 ? (
               <Picker
                 className="composer-agent-badge"
-                label="Mode"
+                label={tr("composer.mode")}
                 mobileSheet
-                direction={variant === "hero" ? "down" : "up"}
+                direction="up"
                 items={agentItems}
                 value={agentValue}
                 onPick={pickAgent}
                 placeholder={agentBadgeLabel(activeAgent)}
-                ariaLabel={`Select agent mode, current ${agentBadgeLabel(activeAgent)}`}
+                ariaLabel={tr("composer.selectAgentModeCurrentValue", { value: agentBadgeLabel(activeAgent) })}
               />
             ) : (
               <span className="agent-type-badge">{agentBadgeLabel(activeAgent)}</span>
             )}
           </span>
-          <ModelCapabilityMeta model={selectedModel} />
         </div>
       )}
       <div className="composer-input">
-        {shellMode && <div className="composer-mode-label">Shell command · permission checked · output added to context</div>}
+        {shellMode && <div className="composer-mode-label">{tr("composer.shellCommandPermissionCheckedOutputAddedTo")}</div>}
         <AdaptiveTextInput
           ref={inputRef}
           data-composer-input=""
           initialText={text}
           rows={3}
           className="composer-editor"
-          ariaLabel="Message"
+          ariaLabel={tr("composer.message")}
           placeholder={shellMode
-            ? "Enter a workspace shell command…"
+            ? tr("composer.enterAWorkspaceShellCommand")
             : simpleMode
               ? shellLayout === "phone"
-                ? "Use @ / ! # for helpers"
-                : "Message the agent, tag @files, or use /commands and /skills"
-              : "Ask anything…"}
+                ? tr("composer.useForHelpers")
+                : tr("composer.messageTheAgentTagFilesOrUse")
+              : tr("composer.askAnything")}
           {...(acView ? {
             role: "combobox",
             ariaAutocomplete: "list" as const,
@@ -1098,20 +1389,15 @@ export default function Composer({
           onPaste={onPaste}
           onFocusChange={(focused) => { if (focused) setInputFocused(true); }}
         />
-        {!widgetMode && !shellMode && !text && !acView && (
-          <div className="composer-sigil-hint" aria-hidden="true">
-            <span>@ files</span><span>/ commands</span><span>! shell</span><span># snippets</span>
-          </div>
-        )}
         {acView && (
           <div className="ac-popup">
-            <div className="ac-header">{acView.kind === "cmd" ? "Commands" : acView.kind === "snip" ? "Snippets" : "Files"}</div>
+            <div className="ac-header">{acView.kind === "cmd" ? tr("composer.commands") : acView.kind === "snip" ? tr("composer.snippets") : tr("composer.files")}</div>
             {acOptions.length > 0 ? (
               <div
                 className="ac-list"
                 id="composer-autocomplete-list"
                 role="listbox"
-                aria-label={acView.kind === "cmd" ? "Commands" : acView.kind === "snip" ? "Snippets" : "Files"}
+                aria-label={acView.kind === "cmd" ? tr("composer.commands") : acView.kind === "snip" ? tr("composer.snippets") : tr("composer.files")}
               >
                 {acOptions.map((item, i) => (
                   <div
@@ -1144,16 +1430,15 @@ export default function Composer({
                     className="small-btn ac-create-snippet"
                     onClick={() => { setAcToken(null); openSettingsPage("commands"); }}
                   >
-                    Create a snippet…
-                  </button>
+                    {tr("composer.createASnippet")}</button>
                 )}
               </div>
             )}
             {acOptions.length > 0 && (
               <div className="ac-footer">
-                <span><kbd>↑↓</kbd> navigate</span>
-                <span><kbd>↵</kbd> / <kbd>Tab</kbd> insert</span>
-                <span><kbd>Esc</kbd> dismiss</span>
+                <span><kbd>↑↓</kbd> {tr("composer.navigate")}</span>
+                <span><kbd>↵</kbd> / <kbd>Tab</kbd> {tr("composer.insert")}</span>
+                <span><kbd>{tr("composer.esc")}</kbd> {tr("composer.dismiss")}</span>
               </div>
             )}
           </div>
@@ -1161,8 +1446,7 @@ export default function Composer({
       </div>
       {!simpleMode && techOpen && (
         <div className="composer-tech-help" role="note">
-          Type <kbd>!</kbd> for a shell command, <kbd>/</kbd> for commands, <kbd>#</kbd> for snippets, <kbd>@</kbd> to mention files.
-        </div>
+          {tr("composer.type")}{" "}<kbd>!</kbd> {tr("composer.forAShellCommand")}{" "}<kbd>/</kbd> {tr("composer.forCommands")}{" "}<kbd>#</kbd> {tr("composer.forSnippets")}{" "}<kbd>@</kbd> {tr("composer.toMentionFiles")}</div>
       )}
       <div className="composer-bar composer-row">
         <div className="composer-selectors">
@@ -1170,22 +1454,18 @@ export default function Composer({
             className="composer-tech-toggle"
             aria-expanded={techOpen}
             title={techOpen
-              ? "Hide model, agent, and syntax options"
-              : "Show model, agent, and syntax options"}
+              ? tr("composer.hideModelAgentAndSyntaxOptions")
+              : tr("composer.showModelAgentAndSyntaxOptions")}
             onClick={() => setTechOpen((open) => !open)}
           >
-            Technical options
-          </button>}
+            {tr("composer.technicalOptions")}</button>}
           {!simpleMode && !noModels && (
             <>
               <ModelPicker
                 models={chatModels}
                 value={cfg.model}
                 recommended={recommendedModel}
-                onPick={(ref) => {
-                  updateCfg(withExplicitModel(cfg, ref));
-                  if (ref) noteModelUsed(`${ref.providerID}/${ref.modelID}`);
-                }}
+                onPick={pickComposerModel}
               />
               <ContextWindowPicker
                 limit={selectedModel?.context}
@@ -1196,30 +1476,26 @@ export default function Composer({
           {!simpleMode && chatAgents.length > 0 && (
             <Picker
               className="picker-agent"
-              label="Agent" direction="up" items={agentItems} value={agentValue} onPick={pickAgent}
-              ariaLabel={`Select work mode, current ${currentAgentLabel}`}
+              label={tr("composer.agent")} direction="up" items={agentItems} value={agentValue} onPick={pickAgent}
+              ariaLabel={tr("composer.selectWorkModeCurrentValue", { value: currentAgentLabel })}
               triggerIcon={<span className="agent-status-dot" />}
             />
           )}
           {!simpleMode && modelSupportsThinking(selectedModel) && (
-            <Picker
+            <ThinkingSlider
               className="picker-thinking"
-              label="Thinking"
-              direction="up"
-              items={thinkingItems}
-              value={cfg.thinking ?? defaultThinking ?? ""}
+              variants={thinkingVariants}
+              value={cfg.thinking}
               onPick={(thinking) => updateCfg(withExplicitThinking(cfg, thinking || undefined))}
-              ariaLabel={`Select thinking effort, current ${cfg.thinking ?? defaultThinking ?? "Default"}`}
-              triggerIcon={<span className="thinking-glyph">◌</span>}
             />
           )}
           {!simpleMode && ui.showTechnicalButtons && techOpen && (
             <Picker
               className="picker-profile"
-              label="Profile" direction="up" items={profileItems} value={selectedProfileId} onPick={pickProfile}
-              placeholder={profileMissing ? "Profile unavailable" : "None"}
-              ariaLabel={`Select profile, current ${currentProfileName}`}
-              footerAction={profileFooter("Create profile…")}
+              label={tr("composer.profile")} direction="up" items={profileItems} value={selectedProfileId} onPick={pickProfile}
+              placeholder={profileMissing ? tr("composer.profileUnavailable") : tr("common.none")}
+              ariaLabel={tr("composer.selectProfileCurrentValue", { value: currentProfileName })}
+              footerAction={profileFooter(tr("composer.createAProfile"))}
             />
           )}
         </div>
@@ -1247,8 +1523,8 @@ export default function Composer({
             <button
               type="button"
               className="chip composer-add-files"
-              aria-label="Add files"
-              title="Add files"
+              aria-label={tr("composer.addFiles")}
+              title={tr("composer.addFiles")}
               disabled={!activeProjectId}
               onClick={() => fileInputRef.current?.click()}
             ><Icon.plus /></button>
@@ -1260,7 +1536,7 @@ export default function Composer({
             draftText={text}
             commands={commandCatalog}
             snippets={snippetCatalog}
-            direction={variant === "hero" ? "down" : "up"}
+            direction="up"
             trigger={phoneLayout ? "add" : "tools"}
             onUpload={() => fileInputRef.current?.click()}
             onInsertMention={menuMention}
@@ -1270,7 +1546,6 @@ export default function Composer({
             onAttachGoal={toggleGoal}
             attachGithub={attachGithub}
           />
-          {simpleMode && !phoneLayout && <span className="composer-focus-hint">{modKeyLabel()}I to focus</span>}
           {simpleMode && (
             <span className="composer-extensions composer-mobile-extensions">
               <SlotHost slot="composer.leading" context={slotContext} />
@@ -1279,32 +1554,34 @@ export default function Composer({
           )}
           <span className="composer-primary">
             {working ? (
-              followUp === "queue" && !sendDisabled ? (
+              (queueEdit || (followUp === "queue" && !sendDisabled)) ? (
                 <div className="composer-send-split" ref={deliveryMenuRef}>
                   <button
                     className="send composer-delivery composer-queue"
                     onClick={() => send()}
-                    aria-label="Queue message until the current response finishes"
-                    title="Queue message until the current response finishes"
+                    aria-label={queueEdit ? tr("composer.saveQueuedMessageInIts") : tr("composer.queueMessageUntilTheCurrentResponseFinishes")}
+                    title={queueEdit ? tr("composer.saveQueuedMessageInIts") : tr("composer.queueMessageUntilTheCurrentResponseFinishes")}
+                    disabled={queueEdit ? queueEditSaving || !text.trim() : false}
                   >
-                    <Icon.sendClock /><span className="composer-action-label">Queue</span>
+                    <Icon.sendClock /><span className="composer-action-label">{queueEdit ? tr("common.save") : tr("composer.queue")}</span>
                   </button>
                   <button
                     className="composer-send-options"
-                    aria-label="More active-run actions"
+                    aria-label={tr("composer.moreActiveRunActions")}
                     aria-haspopup="menu"
                     aria-expanded={deliveryMenuOpen}
                     onClick={() => setDeliveryMenuOpen((open) => !open)}
+                    disabled={queueEdit ? queueEditSaving || !text.trim() : false}
                   >
                     <Icon.chevronDown />
                   </button>
                   {deliveryMenuOpen && (
                     <div className="composer-send-menu" role="menu">
-                      <button role="menuitem" onClick={() => { setDeliveryMenuOpen(false); send(undefined, "interrupt"); }}>
-                        <Icon.send /><span><strong>Send now</strong><small>Stop the current response and send</small></span>
+                      <button role="menuitem" onClick={() => { setDeliveryMenuOpen(false); send(undefined, queueEdit ? undefined : "interrupt"); }}>
+                        <Icon.send /><span><strong>{queueEdit ? tr("composer.saveQueuedMessage") : tr("composer.sendNow")}</strong><small>{queueEdit ? tr("composer.keepItInItsCurrent") : tr("composer.stopTheCurrentResponseAndSend")}</small></span>
                       </button>
                       <button role="menuitem" onClick={() => { setDeliveryMenuOpen(false); void abortSession(); }}>
-                        <Icon.stop /><span><strong>Stop</strong><small>Stop without sending this draft</small></span>
+                        <Icon.stop /><span><strong>{tr("common.stop")}</strong><small>{tr("composer.stopWithoutSendingThisDraft")}</small></span>
                       </button>
                     </div>
                   )}
@@ -1312,21 +1589,21 @@ export default function Composer({
               ) : (
                 <button
                   className="stop composer-stop-primary"
-                  title="Stop the current response"
-                  aria-label="Stop the current response"
+                  title={tr("composer.stopTheCurrentResponse")}
+                  aria-label={tr("composer.stopTheCurrentResponse")}
                   onClick={() => void abortSession()}
                 >
-                  <Icon.stop /><span className="composer-action-label">Stop</span>
+                  <Icon.stop /><span className="composer-action-label">{tr("common.stop")}</span>
                 </button>
               )
             ) : (
               <button className="send" onClick={() => send()}
-                title={shellMode ? "Run shell command" : "Send message"}
-                aria-label={shellMode ? "Run shell command" : "Send message"}
+                title={shellMode ? tr("composer.runShellCommand") : tr("composer.sendMessage")}
+                aria-label={shellMode ? tr("composer.runShellCommand") : tr("composer.sendMessage")}
                 disabled={sendDisabled}>
                 {simpleMode
                   ? <span className="send-plane" aria-hidden="true"><Icon.send /></span>
-                  : <>{shellMode ? "Run" : "Send"} <span className="send-key">{settings.sendOnEnter ? "↵" : `${modKeyLabel()}↵`}</span></>}
+                  : <>{shellMode ? tr("common.run") : tr("composer.sendNow")} <span className="send-key">{settings.sendOnEnter ? "↵" : `${modKeyLabel()}↵`}</span></>}
               </button>
             )}
           </span>

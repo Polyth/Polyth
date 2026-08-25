@@ -346,6 +346,10 @@ export interface SessionRef { id: string }
 export interface TurnRef { turnId: string }
 export interface UserTurnInput {
   text: string;
+  /** Request a durable title derived from this first prompt when the session
+   *  still has a placeholder title. The client owns the user preference; the
+   *  server owns the append + projection update. */
+  autoTitle?: boolean;
   attachments?: AttachmentRef[];
   model?: ModelRef;
   agent?: string;
@@ -454,7 +458,10 @@ export interface SessionService {
   /** Projection-only reconciliation after a linked worktree is removed. */
   markWorktreeMissing?(projectId: string, worktreePath: string): Promise<void>;
   queueList?(sessionId: string): Promise<QueueItemDto[]>;
+  /** Temporarily holds the queue head while it is edited in the composer. */
+  queueEditStart?(sessionId: string, queueId: string): Promise<QueueItemDto>;
   queueEdit?(sessionId: string, queueId: string, text: string): Promise<QueueItemDto>;
+  queueEditCancel?(sessionId: string, queueId: string): Promise<void>;
   queueReorder?(sessionId: string, ids: string[]): Promise<QueueItemDto[]>;
   queueRemove?(sessionId: string, queueId: string): Promise<void>;
   /** Pin/unpin a model-visible message by its canonical source-event sequence. */
@@ -644,6 +651,8 @@ export interface ProjectDefaults {
   agent?: string | null;
   /** null explicitly inherits the browser's global session default. */
   model?: ModelRef | null;
+  /** Persist composer model choices as this project's default. */
+  rememberModelSelection?: boolean;
   groupingMode?: string;
   worktreeBehavior?: "project-root" | "fresh-worktree";
 }
@@ -874,8 +883,9 @@ export interface RemoteHost {
  *  server-managed manifest boundary can reject unknown slot names. */
 export const UI_SLOTS = [
   "app.nav", "app.header.actions", "session.header.actions", "session.list.badges",
+  "sidebar.footer",
   "composer.leading", "composer.trailing", "contextRail.tabs",
-  "settings.pages", "commandPalette.commands",
+  "settings.pages", "settings.footer", "commandPalette.commands",
   // Widget definitions enter through the catalog/settings seams. The six
   // workspace slots are first-class placement targets alongside panel and
   // toolbar slots, rather than a canvas-only parallel vocabulary.
@@ -902,6 +912,19 @@ export type UiSlot = (typeof UI_SLOTS)[number];
 export function isUiSlot(value: string): value is UiSlot {
   return (UI_SLOTS as readonly string[]).includes(value);
 }
+
+/** Canonical locale vocabulary — every message catalog covers all of these. */
+export const LOCALES = [
+  "uk", "en", "de", "fr", "pl", "pt-BR", "it", "es", "zh-CN", "bg", "ar", "pt",
+] as const;
+
+export type Locale = (typeof LOCALES)[number];
+
+/** Per-locale message catalogs a package contributes; the web app merges the
+ *  bundles from every package into one catalog per locale. English is the
+ *  canonical key set — `K` is derived from a package's `en` catalog so a
+ *  missing or extra key in any locale fails the typecheck. */
+export type LocaleBundle<K extends string = string> = Record<Locale, Record<K, string>>;
 
 export type WidgetKind = "widget" | "mini-widget";
 export type WidgetAudience = "simple" | "standard" | "power";
@@ -1032,28 +1055,6 @@ export interface TerminalClosedData {
   terminalId: string;
   projectId: string;
   exitCode: number | null;
-}
-
-// ---------------------------------------------------------------- preview (M3)
-
-export type PreviewStatus = "off" | "starting" | "running";
-
-export interface PreviewState {
-  url: string | null;
-  /** Local URLs announced by the process and/or discovered from listeners.
-   * `url` is the currently selected reachable candidate. */
-  urls?: string[];
-  status: PreviewStatus;
-  port?: number;
-  command?: string;
-}
-
-export interface PreviewStartInput {
-  projectId: string;
-  /** override detected script; run as a shell command with PORT env set */
-  command?: string;
-  /** explicit port; omitted = OS-assigned free port */
-  port?: number;
 }
 
 // ================================================================ parity contracts (WP1)
@@ -1428,6 +1429,65 @@ export interface McpServerDto {
   revision: number;
 }
 
+/** One entry in OpenCode's `plugin` config array. Tuple entries carry the
+ * plugin's JSON-serializable options without exposing Polyth's managed-plugin
+ * installation surface. */
+export type OpenCodePluginConfigEntry = string | [string, JsonObject];
+
+export interface OpenCodePluginEntryDto {
+  spec: string;
+  options?: JsonObject;
+}
+
+/** Pure paste-parser result used by the settings preview. */
+export interface OpenCodePluginPreviewDto {
+  entries: OpenCodePluginEntryDto[];
+  errors: string[];
+  /** Top-level config keys intentionally not imported in this v1 flow. */
+  ignoredKeys: string[];
+}
+
+export interface OpenCodePluginListResponseDto {
+  plugins: OpenCodePluginEntryDto[];
+}
+
+export interface OpenCodePluginImportRequestDto {
+  plugins: OpenCodePluginConfigEntry[];
+}
+
+export interface OpenCodePluginImportResponseDto extends OpenCodePluginListResponseDto {
+  imported: string[];
+  pendingRestart: true;
+}
+
+export interface OpenCodePluginRemoveResponseDto extends OpenCodePluginListResponseDto {
+  removed: boolean;
+  pendingRestart: boolean;
+}
+
+export type OpenCodePendingChangeKind =
+  | "agent"
+  | "behavior"
+  | "mcp"
+  | "plugins"
+  | "provider-visibility";
+
+export interface OpenCodePendingChangeDto {
+  id: string;
+  kind: OpenCodePendingChangeKind;
+  label: string;
+}
+
+export interface OpenCodePendingResponseDto {
+  changes: OpenCodePendingChangeDto[];
+  count: number;
+}
+
+export interface OpenCodeApplyRestartResponseDto {
+  applied: number;
+  restarted: number;
+}
+
 // ---------------------------------------------------------------- Secure Safe (OC-22-008)
 
 export type SecureSafeKind = "env" | "token" | "password";
@@ -1534,6 +1594,9 @@ export type BrowserTarget =
 
 export type BrowserAction =
   | { kind: "click"; target: BrowserTarget }
+  /** Resolve the DOM element under a revisioned screenshot point without
+   * interacting with it. Used by the user-facing element picker. */
+  | { kind: "point"; target: Extract<BrowserTarget, { point: unknown }> }
   | { kind: "type"; target: BrowserTarget; text: string; submit?: boolean }
   | { kind: "press"; key: string }
   | { kind: "scroll"; x?: number; y?: number; target?: BrowserTarget }

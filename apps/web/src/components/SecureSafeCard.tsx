@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { replySecret } from "../init.ts";
 import type { PendingSecret } from "../reduce.ts";
+import { tr } from "../i18n/index.ts";
 
 function SecretRequest({ secret }: { secret: PendingSecret }) {
   const [value, setValue] = useState("");
@@ -24,20 +25,20 @@ function SecretRequest({ secret }: { secret: PendingSecret }) {
   return (
     <div className="secure-safe-request">
       <div className="secure-safe-details">
-        <div><span>Label</span><strong>{secret.label}</strong></div>
-        <div><span>Handle</span><code>{secret.handle}</code></div>
-        {secret.purpose && <div><span>Purpose</span><p>{secret.purpose}</p></div>}
-        {secret.existing && <div className="secure-safe-existing">Will update existing handle</div>}
+        <div><span>{tr("securesafecard.label")}</span><strong>{secret.label}</strong></div>
+        <div><span>{tr("securesafecard.handle")}</span><code>{secret.handle}</code></div>
+        {secret.purpose && <div><span>{tr("securesafecard.purpose")}</span><p>{secret.purpose}</p></div>}
+        {secret.existing && <div className="secure-safe-existing">{tr("securesafecard.willUpdateExistingHandle")}</div>}
       </div>
       <label className="secure-safe-value">
-        <span>Credential value</span>
+        <span>{tr("securesafecard.credentialValue")}</span>
         <input
           type="password"
           autoComplete="off"
           value={value}
           disabled={submitted}
-          placeholder="Enter value — it will not be shown again"
-          aria-label={`Credential value for ${secret.label}`}
+          placeholder={tr("securesafecard.enterValueItWillNotBeShown")}
+          aria-label={tr("securesafecard.credentialValueForValue", { label: secret.label })}
           onChange={(event) => setValue(event.target.value)}
           onKeyDown={(event) => {
             if (event.key === "Enter") {
@@ -49,9 +50,9 @@ function SecretRequest({ secret }: { secret: PendingSecret }) {
       </label>
       <div className="secure-safe-actions">
         <button className="primary" disabled={!value || submitted} onClick={save}>
-          {submitted ? "Submitted" : "Save to Secure Safe"}
+          {submitted ? tr("securesafecard.submitted") : tr("securesafecard.saveToSecureSafe")}
         </button>
-        <button disabled={submitted} onClick={dismiss}>Dismiss</button>
+        <button disabled={submitted} onClick={dismiss}>{tr("securesafecard.dismiss")}</button>
       </div>
     </div>
   );
@@ -66,7 +67,7 @@ export default function SecureSafeCard({ secrets }: { secrets: PendingSecret[] }
       aria-live="assertive"
       aria-relevant="additions text"
     >
-      <div className="secure-safe-title">Secure Safe — save credential</div>
+      <div className="secure-safe-title">{tr("securesafecard.secureSafeSaveCredential")}</div>
       {secrets.map((secret) => <SecretRequest key={secret.requestId} secret={secret} />)}
     </div>
   );

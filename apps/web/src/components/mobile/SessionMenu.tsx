@@ -11,6 +11,7 @@ import {
 import { ago, displaySessionTitle } from "../../format.ts";
 import { friendlyError } from "../../settings.ts";
 import { Icon } from "../../icons.tsx";
+import { tr } from "../../i18n/index.ts";
 
 export default function SessionMenu({ onClose }: { onClose: () => void }) {
   const projectId = useStore((s) => s.activeProjectId);
@@ -37,25 +38,25 @@ export default function SessionMenu({ onClose }: { onClose: () => void }) {
 
   if (renaming !== null && session) {
     return (
-      <Sheet title="Rename session" className="session-menu-sheet" onClose={() => setRenaming(null)}>
+      <Sheet title={tr("mobile.sessionmenu.renameSession")} className="session-menu-sheet" onClose={() => setRenaming(null)}>
         <div className="starter-form">
           <label className="starter-field">
-            <span>Title</span>
+            <span>{tr("mobile.sessionmenu.title")}</span>
             <input
               value={renaming}
               maxLength={120}
-              placeholder="Session title"
+              placeholder={tr("mobile.sessionmenu.sessionTitle")}
               onChange={(event) => setRenaming(event.target.value)}
             />
           </label>
           <div className="starter-form-actions">
-            <button type="button" className="ghost-btn" onClick={() => setRenaming(null)}>Cancel</button>
+            <button type="button" className="ghost-btn" onClick={() => setRenaming(null)}>{tr("common.cancel")}</button>
             <button
               type="button"
               className="primary-btn"
               disabled={busy || renaming.trim() === ""}
-              onClick={() => run(api.renameSession(session.id, renaming.trim()), "Couldn’t rename the session")}
-            >Save</button>
+              onClick={() => run(api.renameSession(session.id, renaming.trim()), tr("common.error"))}
+            >{tr("common.save")}</button>
           </div>
         </div>
       </Sheet>
@@ -63,11 +64,11 @@ export default function SessionMenu({ onClose }: { onClose: () => void }) {
   }
 
   return (
-    <Sheet title="Session" className="session-menu-sheet" onClose={onClose}>
-      <div role="listbox" aria-label="Session actions">
+    <Sheet title={tr("mobile.sessionmenu.session")} className="session-menu-sheet" onClose={onClose}>
+      <div role="listbox" aria-label={tr("mobile.sessionmenu.sessionActions")}>
         <SheetRow
-          title="New session"
-          meta="Start fresh in this project"
+          title={tr("mobile.sessionmenu.newSession")}
+          meta={tr("mobile.sessionmenu.startFreshInThisProject")}
           icon={<Icon.newSession />}
           onClick={() => {
             if (projectId) startNewSession(projectId);
@@ -77,29 +78,29 @@ export default function SessionMenu({ onClose }: { onClose: () => void }) {
         {session && (
           <>
             <SheetRow
-              title="Rename…"
+              title={tr("mobile.sessionmenu.rename")}
               icon={<Icon.pencil />}
               onClick={() => setRenaming(session.title)}
             />
             <SheetRow
-              title="Duplicate as a new session"
-              meta="Fork the conversation so far"
+              title={tr("mobile.sessionmenu.duplicateAsANewSession")}
+              meta={tr("mobile.sessionmenu.forkTheConversationSoFar")}
               icon={<Icon.fork />}
               onClick={() => run(
                 api.fork(session.id).then((forked) => openSession(forked.id)),
-                "Couldn’t duplicate the session",
+                tr("common.error"),
               )}
             />
             <SheetRow
-              title="Archive"
-              meta="Keep it read-only in history"
+              title={tr("common.archive")}
+              meta={tr("mobile.sessionmenu.keepItReadOnlyInHistory")}
               icon={<Icon.bookmark />}
-              onClick={() => run(api.archive(session.id), "Couldn’t archive the session")}
+              onClick={() => run(api.archive(session.id), tr("common.error"))}
             />
           </>
         )}
         {recent.length > 0 && (
-          <SheetSection title="Recent sessions" count={recent.length}>
+          <SheetSection title={tr("mobile.sessionmenu.recentSessions")} count={recent.length}>
             {recent.map((candidate) => (
               <SheetRow
                 key={candidate.id}
@@ -108,21 +109,21 @@ export default function SessionMenu({ onClose }: { onClose: () => void }) {
                 icon={<Icon.chat />}
                 onClick={() => {
                   void openSession(candidate.id).catch((error) =>
-                    setUiError(friendlyError("Couldn’t open the session", error)));
+                    setUiError(friendlyError(tr("common.error"), error)));
                   onClose();
                 }}
               />
             ))}
           </SheetSection>
         )}
-        <SheetSection title="More">
+        <SheetSection title={tr("common.more")}>
           <SheetRow
-            title="All projects and sessions"
+            title={tr("mobile.sessionmenu.allProjectsAndSessions")}
             icon={<Icon.files />}
             onClick={() => { setSidebarOpen(true); onClose(); }}
           />
           <SheetRow
-            title="Settings"
+            title={tr("common.settings")}
             icon={<Icon.gear />}
             onClick={() => { setOverlay("settings"); onClose(); }}
           />

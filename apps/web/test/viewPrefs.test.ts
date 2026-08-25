@@ -16,7 +16,7 @@ test("parseActiveView keeps primary view ids and migrates legacy panes to Chat",
   for (const view of ["session", "goals", "multirun", "fusion", "walkthrough", "schedule", "github"]) {
     assert.equal(parseActiveView(view), view);
   }
-  for (const pane of ["files", "preview", "git", "terminal"]) {
+  for (const pane of ["files", "browser", "preview", "git", "terminal"]) {
     assert.equal(parseActiveView(pane), "session");
   }
   assert.equal(parseActiveView(null), "session");

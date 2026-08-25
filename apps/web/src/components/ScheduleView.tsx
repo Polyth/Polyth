@@ -7,6 +7,7 @@ import { useStore } from "../store.ts";
 import { ago } from "../format.ts";
 import { normalizeScheduleList } from "../scheduleData.ts";
 import EmptyState from "./EmptyState.tsx";
+import { getLocale, tr } from "../i18n/index.ts";
 
 type CadenceKind = "at" | "every" | "cron";
 type TargetMode = "new-session-per-run" | "existing-session" | "dedicated-session";
@@ -28,25 +29,25 @@ function zoneChoices(): string[] {
 function fmtWhen(t: ScheduleTaskDto): string {
   const c = t.cadence;
   if (c?.kind === "cron") return `cron ${c.expression} (${c.timeZone})`;
-  if (c?.kind === "every") return `every ${c.everyMinutes} min`;
-  if (c?.kind === "at") return new Date(c.at).toLocaleString();
-  if (t.kind === "every") return `every ${t.everyMinutes} min`;
-  return t.at ? new Date(t.at).toLocaleString() : "—";
+  if (c?.kind === "every") return tr("scheduleview.everyMinutesValue", { minutes: c.everyMinutes });
+  if (c?.kind === "at") return new Date(c.at).toLocaleString(getLocale());
+  if (t.kind === "every") return tr("scheduleview.everyMinutesValue", { minutes: t.everyMinutes });
+  return t.at ? new Date(t.at).toLocaleString(getLocale()) : "—";
 }
 
 function fmtNext(t: ScheduleTaskDto): string {
-  if (!t.enabled) return "paused";
-  if (t.nextRunAt === null) return "done";
+  if (!t.enabled) return tr("scheduleview.paused");
+  if (t.nextRunAt === null) return tr("common.done");
   const delta = t.nextRunAt - Date.now();
-  if (delta <= 0) return "due now";
-  return `in ${ago(Date.now() - delta)}`;
+  if (delta <= 0) return tr("scheduleview.dueNow");
+  return tr("scheduleview.inValue", { value: ago(Date.now() - delta) });
 }
 
 function targetLabel(t: ScheduleTaskDto): string {
   const mode = t.target?.mode ?? (t.sessionId ? "existing-session" : "new-session-per-run");
-  if (mode === "existing-session") return "into existing session";
-  if (mode === "dedicated-session") return "dedicated session";
-  return "new session per run";
+  if (mode === "existing-session") return tr("scheduleview.existingSession");
+  if (mode === "dedicated-session") return tr("scheduleview.dedicatedSessionReusedAcrossRuns");
+  return tr("scheduleview.newSessionPerRun");
 }
 
 function RunHistory({ taskId }: { taskId: string }) {
@@ -73,23 +74,23 @@ function RunHistory({ taskId }: { taskId: string }) {
       });
     return () => { active = false; };
   }, [taskId, reloadKey]);
-  if (loading) return <div className="muted" style={{ fontSize: "calc(12px * var(--ui-font-scale, 1))" }} role="status">Loading runs…</div>;
+  if (loading) return <div className="muted" style={{ fontSize: "calc(12px * var(--ui-font-scale, 1))" }} role="status">{tr("scheduleview.loadingRuns")}</div>;
   if (loadError) {
     return (
       <div className="muted" style={{ fontSize: "calc(12px * var(--ui-font-scale, 1))" }} role="status">
-        Couldn’t load runs. <button className="small-btn" onClick={() => setReloadKey((key) => key + 1)}>Retry</button>
+        {tr("scheduleview.couldnTLoadRuns")}{" "}<button className="small-btn" onClick={() => setReloadKey((key) => key + 1)}>{tr("common.retry")}</button>
       </div>
     );
   }
-  if (runs.length === 0) return <div className="muted" style={{ fontSize: "calc(12px * var(--ui-font-scale, 1))" }}>No runs recorded yet.</div>;
+  if (runs.length === 0) return <div className="muted" style={{ fontSize: "calc(12px * var(--ui-font-scale, 1))" }}>{tr("scheduleview.noRunsRecordedYet")}</div>;
   return (
     <div className="sched-runs">
       {runs.map((r) => (
         <div key={r.runId} className={`sched-run status-${r.status}`}>
           <span className={`sched-run-dot ${r.status}`} />
-          <span className="mono">{new Date(r.startedAt).toLocaleString()}</span>
+          <span className="mono">{new Date(r.startedAt).toLocaleString(getLocale())}</span>
           <span>{r.status}</span>
-          {r.finishedAt !== undefined && <span className="muted">{Math.max(0, Math.round((r.finishedAt - r.startedAt) / 1000))}s</span>}
+          {r.finishedAt !== undefined && <span className="muted">{Math.max(0, Math.round((r.finishedAt - r.startedAt) / 1000))}{tr("scheduleview.s")}</span>}
           {r.error && <span className="sched-run-error">{r.error}</span>}
         </div>
       ))}
@@ -151,7 +152,7 @@ export default function ScheduleView() {
       })
       .catch((cause) => {
         setTasks([]);
-        setError(`Could not load scheduled prompts: ${cause instanceof Error ? cause.message : String(cause)}`);
+        setError(tr("scheduleview.couldNotLoadScheduledPromptsValue", { value: cause instanceof Error ? cause.message : String(cause) }));
       });
   }, [projectId]);
   useEffect(() => {
@@ -160,7 +161,7 @@ export default function ScheduleView() {
     return () => clearInterval(timer);
   }, [reload]);
 
-  if (!projectId) return <EmptyState title="No project selected" description="Open a project to schedule prompts." />;
+  if (!projectId) return <EmptyState title={tr("scheduleview.noProjectSelected")} description={tr("scheduleview.openAProjectToSchedulePrompts")} />;
 
   const run = async (fn: () => Promise<unknown>) => {
     try {
@@ -173,7 +174,7 @@ export default function ScheduleView() {
   };
 
   const create = () => void run(async () => {
-    if (!cadence) throw new Error("Pick a valid time, interval, or cron expression first.");
+    if (!cadence) throw new Error(tr("scheduleview.pickAValidTimeIntervalOrCron"));
     await api.scheduleCreate({
       projectId,
       prompt,
@@ -199,24 +200,23 @@ export default function ScheduleView() {
   return (
     <div className="view-page">
       <div>
-        <h2 className="view-title">Schedule</h2>
-        <p className="view-sub">Send a prompt once, on an interval, or on a cron cadence with a time zone. Loop files in <code>.agents/loops</code> appear here too. Runs while the Polyth server is up.</p>
+        <h2 className="view-title">{tr("scheduleview.schedule")}</h2>
+        <p className="view-sub">{tr("scheduleview.sendAPromptOnceOnAnInterval")}{" "}<code>.agents/loops</code> {tr("scheduleview.appearHereTooRunsWhileThePolyth")}</p>
       </div>
 
       <div className="sched-form">
-        <textarea rows={2} value={prompt} placeholder="Prompt to send, e.g. “Summarize overnight CI failures”" onChange={(e) => setPrompt(e.target.value)} />
+        <textarea rows={2} value={prompt} placeholder={tr("scheduleview.promptToSendEGSummarizeOvernight")} onChange={(e) => setPrompt(e.target.value)} />
         <div className="view-toolbar-row">
           <div className="seg">
-            <button className={kind === "at" ? "on" : ""} onClick={() => setKind("at")}>Once at</button>
-            <button className={kind === "every" ? "on" : ""} onClick={() => setKind("every")}>Every</button>
-            <button className={kind === "cron" ? "on" : ""} onClick={() => setKind("cron")}>Cron</button>
+            <button className={kind === "at" ? "on" : ""} onClick={() => setKind("at")}>{tr("scheduleview.onceAt")}</button>
+            <button className={kind === "every" ? "on" : ""} onClick={() => setKind("every")}>{tr("scheduleview.every")}</button>
+            <button className={kind === "cron" ? "on" : ""} onClick={() => setKind("cron")}>{tr("scheduleview.cron")}</button>
           </div>
           {kind === "at" && <input type="datetime-local" value={at} onChange={(e) => setAt(e.target.value)} />}
           {kind === "every" && (
             <label className="sched-every">
               <input type="number" min={1} value={every} onChange={(e) => setEvery(Math.max(1, Number(e.target.value)))} style={{ width: 72 }} />
-              minutes
-            </label>
+              {tr("scheduleview.minutes")}</label>
           )}
           {kind === "cron" && (
             <>
@@ -229,26 +229,25 @@ export default function ScheduleView() {
         </div>
         <div className="view-toolbar-row">
           <select value={targetMode} onChange={(e) => { setTargetMode(e.target.value as TargetMode); if (e.target.value !== "existing-session") setSessionId(""); }}>
-            <option value="new-session-per-run">New session per run</option>
-            <option value="existing-session">Existing session</option>
-            <option value="dedicated-session">Dedicated session (reused across runs)</option>
+            <option value="new-session-per-run">{tr("scheduleview.newSessionPerRun")}</option>
+            <option value="existing-session">{tr("scheduleview.existingSession")}</option>
+            <option value="dedicated-session">{tr("scheduleview.dedicatedSessionReusedAcrossRuns")}</option>
           </select>
           {targetMode === "existing-session" && (
             <select value={sessionId} onChange={(e) => setSessionId(e.target.value)}>
-              <option value="">Pick a session…</option>
+              <option value="">{tr("scheduleview.pickASession")}</option>
               {sessions.map((s) => <option key={s.id} value={s.id}>{s.title || s.id}</option>)}
             </select>
           )}
           <label className="sched-every">
-            If still running:
-            <select value={overlap} onChange={(e) => setOverlap(e.target.value as Overlap)}>
-              <option value="skip">Skip this run</option>
-              <option value="queue">Queue after</option>
-              <option value="parallel">Run in parallel</option>
+            {tr("scheduleview.ifStillRunning")}<select value={overlap} onChange={(e) => setOverlap(e.target.value as Overlap)}>
+              <option value="skip">{tr("scheduleview.skipThisRun")}</option>
+              <option value="queue">{tr("scheduleview.queueAfter")}</option>
+              <option value="parallel">{tr("scheduleview.runInParallel")}</option>
             </select>
           </label>
           <span className="header-spacer" />
-          <button className="primary-btn" disabled={!canCreate} onClick={create}>Schedule</button>
+          <button className="primary-btn" disabled={!canCreate} onClick={create}>{tr("scheduleview.schedule")}</button>
         </div>
         {previewError && <div className="form-error">{previewError}</div>}
         {preview && (
@@ -256,7 +255,7 @@ export default function ScheduleView() {
             <div className="sched-preview-desc">{preview.description}</div>
             {preview.runs.length > 0 && (
               <div className="sched-preview-runs">
-                Next: {preview.runs.map((ms) => new Date(ms).toLocaleString()).join("  ·  ")}
+                {tr("scheduleview.next")}{" "}{preview.runs.map((ms) => new Date(ms).toLocaleString(getLocale())).join("  ·  ")}
               </div>
             )}
           </div>
@@ -265,9 +264,9 @@ export default function ScheduleView() {
       </div>
 
       <div className="view-toolbar-row">
-        <span className="stat-label" style={{ margin: 0 }}>Tasks</span>
+        <span className="stat-label" style={{ margin: 0 }}>{tr("scheduleview.tasks")}</span>
         <span className="header-spacer" />
-        <button className="small-btn" title="Rescan .agents/loops for Markdown-managed tasks" onClick={rescan}>Rescan loops</button>
+        <button className="small-btn" title={tr("scheduleview.rescanAgentsLoopsForMarkdownManagedTasks")} onClick={rescan}>{tr("scheduleview.rescanLoops")}</button>
       </div>
       {loopErrors.length > 0 && (
         <div className="form-error" role="alert">
@@ -276,8 +275,8 @@ export default function ScheduleView() {
               <span><span className="mono">{e.path}</span>: {e.error}</span>
               <button
                 className="small-btn"
-                title="Dismiss until this file's error changes"
-                aria-label={`Dismiss loop error for ${e.path}`}
+                title={tr("scheduleview.dismissUntilThisFileSErrorChanges")}
+                aria-label={tr("scheduleview.dismissLoopErrorForValue", { path: e.path })}
                 onClick={() => void run(() => api.scheduleLoopErrorDismiss(projectId, e.path))}
               >
                 ✕
@@ -287,12 +286,12 @@ export default function ScheduleView() {
         </div>
       )}
 
-      {tasks.length === 0 && <EmptyState title="Nothing scheduled" description="Create a one-time, interval, or cron prompt with the form." />}
+      {tasks.length === 0 && <EmptyState title={tr("scheduleview.nothingScheduled")} description={tr("scheduleview.createAOneTimeIntervalOrCron")} />}
       {tasks.map((t) => (
         <div key={t.id} className={`sched-card ${t.enabled ? "" : "paused"}`}>
           <div className="sched-card-main">
             <div className="sched-prompt">
-              {t.source === "loop-file" && <span className="sched-loop-badge" title={t.sourcePath ?? "Managed by a loop file"}>loop</span>}
+              {t.source === "loop-file" && <span className="sched-loop-badge" title={t.sourcePath ?? tr("scheduleview.managedByLoopFile")}>{tr("scheduleview.loop")}</span>}
               {t.title ? <strong>{t.title}: </strong> : null}
               {t.prompt}
             </div>
@@ -300,26 +299,31 @@ export default function ScheduleView() {
               <span className="mono">{fmtWhen(t)}</span>
               <span>·</span>
               <span>{fmtNext(t)}</span>
-              {t.runs > 0 && <><span>·</span><span>{t.runs} run{t.runs === 1 ? "" : "s"}{t.lastRunAt ? `, last ${ago(t.lastRunAt)} ago` : ""}</span></>}
+              {t.runs > 0 && <><span>·</span><span>
+                {t.runs === 1
+                  ? tr("scheduleview.oneRun")
+                  : tr("scheduleview.valueRuns", { count: t.runs })}
+                {t.lastRunAt ? tr("scheduleview.lastValueAgo", { value: ago(t.lastRunAt) }) : ""}
+              </span></>}
               <span>·</span>
               <span>{targetLabel(t)}</span>
-              {t.overlapPolicy && t.overlapPolicy !== "parallel" && <><span>·</span><span>overlap: {t.overlapPolicy}</span></>}
+              {t.overlapPolicy && t.overlapPolicy !== "parallel" && <><span>·</span><span>{tr("scheduleview.overlap")}{" "}{t.overlapPolicy}</span></>}
             </div>
-            {t.parseError && <div className="form-error">Loop file problem: {t.parseError}</div>}
-            {t.lastError && <div className="form-error">Last run failed: {t.lastError}</div>}
+            {t.parseError && <div className="form-error">{tr("scheduleview.loopFileProblem")}{" "}{t.parseError}</div>}
+            {t.lastError && <div className="form-error">{tr("scheduleview.lastRunFailed")}{" "}{t.lastError}</div>}
             {historyFor === t.id && <RunHistory taskId={t.id} />}
           </div>
           <div className="sched-actions">
             <button className="small-btn" onClick={() => setHistoryFor(historyFor === t.id ? null : t.id)}>
-              {historyFor === t.id ? "Hide runs" : "Runs"}
+              {historyFor === t.id ? tr("scheduleview.hideRuns") : tr("scheduleview.runs")}
             </button>
-            <button className="small-btn" onClick={() => void run(() => api.scheduleRun(t.id))}>Run now</button>
+            <button className="small-btn" onClick={() => void run(() => api.scheduleRun(t.id))}>{tr("scheduleview.runNow")}</button>
             {t.source !== "loop-file" && (
               <>
                 <button className="small-btn" onClick={() => void run(() => api.schedulePause(t.id, t.enabled))}>
-                  {t.enabled ? "Pause" : "Resume"}
+                  {t.enabled ? tr("common.pause") : tr("common.resume")}
                 </button>
-                <button className="small-btn danger-btn" onClick={() => void run(() => api.scheduleDelete(t.id))}>Delete</button>
+                <button className="small-btn danger-btn" onClick={() => void run(() => api.scheduleDelete(t.id))}>{tr("common.delete")}</button>
               </>
             )}
           </div>

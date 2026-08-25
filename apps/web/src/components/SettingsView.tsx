@@ -7,7 +7,7 @@ import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from "
 import { consumePendingSettingsPage, setOverlay } from "../store.ts";
 import { listSlots } from "../slots.ts";
 import { isPackageEnabled, subscribePackages } from "../packages/registry.ts";
-import { useSlotVersion } from "./slots/SlotHost.ts";
+import SlotHost, { useSlotVersion } from "./slots/SlotHost.ts";
 import { usePrefs } from "../prefs.ts";
 import {
   registerSettingsItems, searchSettingsItems,
@@ -27,6 +27,7 @@ import PackageTourOverlay from "./PackageTourOverlay.tsx";
 import { maybeAutoShowPackageTour } from "../packages/onboarding/controller.ts";
 import { settingsPageToPackageId } from "../packages/onboarding/pageMap.ts";
 import { Icon } from "../icons.tsx";
+import { tr } from "../i18n/index.ts";
 
 interface PageDef {
   id: string;
@@ -56,19 +57,26 @@ function useMobileSettings() {
 }
 
 const BUILTIN: PageDef[] = [
-  { id: "general", label: "General", group: "Workspace", render: () => <GeneralPage /> },
-  { id: "appearance", label: "Appearance", group: "Workspace", render: () => <AppearancePage /> },
-  { id: "chat", label: "Chat", group: "Workspace", render: () => <ChatPage /> },
-  { id: "notifications", label: "Notifications", group: "Workspace", render: () => <NotificationsPage /> },
-  { id: "sessions", label: "Sessions", group: "Workspace", render: () => <SessionsPage /> },
-  { id: "shortcuts", label: "Shortcuts", group: "Workspace", render: () => <ShortcutsPage /> },
-  { id: "projects", label: "Projects", group: "Engineering", render: () => <ProjectsPage /> },
-  { id: "behavior", label: "Behavior", group: "Engineering", render: () => <BehaviorPage /> },
-  { id: "widgets", label: "Widgets & Layout", group: "Customize", icon: "◇", render: () => <WidgetsPage /> },
-  { id: "packages", label: "Packages", group: "Customize", icon: "📦", render: () => <PackagesPage /> },
-  { id: "access", label: "Access", group: "System", nav: false, render: () => <AccessPage /> },
-  { id: "about", label: "About", group: "System", nav: false, render: () => <AboutPage /> },
+  { id: "general", label: tr("settingsview.general"), group: "Workspace", render: () => <GeneralPage /> },
+  { id: "appearance", label: tr("settingsview.appearance"), group: "Workspace", render: () => <AppearancePage /> },
+  { id: "chat", label: tr("settingsview.chat"), group: "Workspace", render: () => <ChatPage /> },
+  { id: "notifications", label: tr("settingsview.notifications"), group: "Workspace", render: () => <NotificationsPage /> },
+  { id: "sessions", label: tr("settingsview.sessions"), group: "Workspace", render: () => <SessionsPage /> },
+  { id: "shortcuts", label: tr("settingsview.shortcuts"), group: "Workspace", render: () => <ShortcutsPage /> },
+  { id: "projects", label: tr("settingsview.projects"), group: "Engineering", render: () => <ProjectsPage /> },
+  { id: "behavior", label: tr("settingsview.behavior"), group: "Engineering", render: () => <BehaviorPage /> },
+  { id: "widgets", label: tr("settingsview.widgetsLayout"), group: "Customize", icon: "◇", render: () => <WidgetsPage /> },
+  { id: "packages", label: tr("settingsview.packages"), group: "Customize", icon: "📦", render: () => <PackagesPage /> },
+  { id: "access", label: tr("settingsview.access"), group: "System", nav: false, render: () => <AccessPage /> },
+  { id: "about", label: tr("settingsview.about"), group: "System", nav: false, render: () => <AboutPage /> },
 ];
+
+const GROUP_LABELS: Record<PageDef["group"], string> = {
+  Workspace: tr("settingsview.workspace"),
+  Engineering: tr("settingsview.engineering"),
+  Customize: tr("settingsview.customize"),
+  System: tr("settingsview.system"),
+};
 
 const SETTINGS_ICON_BY_PAGE: Record<string, keyof typeof Icon> = {
   general: "gear",
@@ -109,9 +117,14 @@ export default function SettingsView({ onClose = () => setOverlay(null) }: { onC
   const [cursor, setCursor] = useState(0);
   const paneRef = useRef<HTMLDivElement>(null);
   const modalRef = useRef<HTMLDivElement>(null);
+  const previousMobile = useRef(mobile);
 
   useEffect(() => {
-    if (mobile) setMobileStage("nav");
+    // A settings modal opened on mobile starts on the navigation stage, but
+    // crossing the breakpoint while a desktop page is already open should
+    // preserve that page instead of replacing it with the navigation list.
+    if (mobile && !previousMobile.current) setMobileStage("page");
+    previousMobile.current = mobile;
   }, [mobile]);
 
   useEffect(() => {
@@ -302,23 +315,20 @@ export default function SettingsView({ onClose = () => setOverlay(null) }: { onC
         onMouseDown={(e) => e.stopPropagation()}
         role="dialog"
         aria-modal="true"
-        aria-label="Settings"
+        aria-label={tr("common.settings")}
         aria-describedby={mobile ? undefined : "settings-close-hint"}
       >
         <nav className="modal-nav settings-nav">
-          <div className="settings-nav-head">
-            <h2><span className="polyth-mark">p</span> polyth</h2>
-          </div>
           <input
             className="settings-nav-search"
             value={filter}
-            placeholder="Search settings... ⌘K"
+            placeholder={tr("settingsview.searchSettingsK")}
             onChange={(e) => { setFilter(e.target.value); setCursor(0); }}
             onKeyDown={onSearchKey}
-            aria-label="Search settings"
+            aria-label={tr("settingsview.searchSettings")}
           />
           {q ? (
-            <div className="settings-results" role="listbox" aria-label="Settings search results">
+            <div className="settings-results" role="listbox" aria-label={tr("settingsview.settingsSearchResults")}>
               {itemHits.map((hit, i) => (
                 <button
                   key={hit.item.id}
@@ -341,17 +351,17 @@ export default function SettingsView({ onClose = () => setOverlay(null) }: { onC
                   onClick={() => gotoPage(p.id)}
                 >
                   <span className="settings-result-label">{p.label}</span>
-                  <span className="settings-result-page">page</span>
+                  <span className="settings-result-page">{tr("settingsview.page")}</span>
                 </button>
               ))}
-              {resultCount === 0 && <div className="palette-empty">No matches</div>}
+              {resultCount === 0 && <div className="palette-empty">{tr("settingsview.noMatches")}</div>}
             </div>
           ) : (
-            <nav className="settings-nav-list" aria-label="Settings pages">
+            <nav className="settings-nav-list" aria-label={tr("settingsview.settingsPages")}>
               {pages.filter((page) => page.nav !== false).map((p, index, navPages) => (
                 <Fragment key={p.id}>
                   {(index === 0 || navPages[index - 1]!.group !== p.group) && (
-                    <div className="settings-nav-group">{p.group}</div>
+                    <div className="settings-nav-group">{GROUP_LABELS[p.group]}</div>
                   )}
                   <button
                     className={`settings-nav-item ${current.id === p.id ? "active" : ""}`}
@@ -369,7 +379,7 @@ export default function SettingsView({ onClose = () => setOverlay(null) }: { onC
             </nav>
           )}
           <div className="nav-foot">
-            <span>Changes save automatically</span>
+            <SlotHost slot="settings.footer" />
           </div>
         </nav>
         <div className="modal-main settings-pane">
@@ -380,19 +390,18 @@ export default function SettingsView({ onClose = () => setOverlay(null) }: { onC
                   type="button"
                   className="settings-mobile-back"
                   onClick={() => setMobileStage("nav")}
-                  aria-label="Back to Settings"
+                  aria-label={tr("settingsview.backToSettings")}
                 >
-                  <span aria-hidden="true">←</span> Back
-                </button>
-                <button className="close-btn" onClick={onClose} aria-label="Close">×</button>
+                  <span aria-hidden="true">←</span> {tr("common.back")}</button>
+                <button className="close-btn" onClick={onClose} aria-label={tr("common.close")}>{tr("settingsview.message")}</button>
               </div>
             ) : (
               <>
                 <div className="settings-pane-head-copy">
                   <div className="modal-title settings-pane-title">{current.label}</div>
                 </div>
-                <span className="dialog-hint" id="settings-close-hint"><kbd>Esc</kbd> close</span>
-                <button className="close-btn" onClick={onClose} aria-label="Close">×</button>
+                <span className="dialog-hint" id="settings-close-hint"><kbd>{tr("settingsview.esc")}</kbd> {tr("settingsview.close")}</span>
+                <button className="close-btn" onClick={onClose} aria-label={tr("common.close")}>{tr("settingsview.message")}</button>
               </>
             )}
           </div>
@@ -400,11 +409,6 @@ export default function SettingsView({ onClose = () => setOverlay(null) }: { onC
             {/* A page that throws must not white-screen the whole app —
                 Settings renders outside App's main view boundary. */}
             <ViewErrorBoundary resetKey={current.id} inline>{current.render()}</ViewErrorBoundary>
-          </div>
-          <div className="modal-foot">
-            <span className="modal-note">Changes are saved as you edit</span>
-            <span className="header-spacer" />
-            <button className="btn-accent" onClick={onClose}>Done</button>
           </div>
         </div>
       </div>

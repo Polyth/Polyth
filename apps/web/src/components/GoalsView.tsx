@@ -3,11 +3,16 @@ import { GoalAttachForm } from "./GoalStrip.tsx";
 import { useActiveModel, useStore } from "../store.ts";
 import { api } from "../api.ts";
 import EmptyState from "./EmptyState.tsx";
+import { formatNumber, getLocale, tr } from "../i18n/index.ts";
 
 function fmtK(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
-  if (n >= 1_000) return `${(n / 1_000).toFixed(1)}k`;
-  return `${n}`;
+  if (n >= 1_000_000) {
+    return `${formatNumber(n / 1_000_000, { minimumFractionDigits: 1, maximumFractionDigits: 1 })}M`;
+  }
+  if (n >= 1_000) {
+    return `${formatNumber(n / 1_000, { minimumFractionDigits: 1, maximumFractionDigits: 1 })}k`;
+  }
+  return formatNumber(n);
 }
 
 const VERDICT_COLOR: Record<string, string> = {
@@ -27,14 +32,14 @@ export default function GoalsView() {
   const [busy, setBusy] = useState(false);
 
   if (!sessionId) {
-    return <EmptyState title="No session open" description="Open a session to attach a goal." />;
+    return <EmptyState title={tr("goalsview.noSessionOpen")} description={tr("goalsview.openASessionToAttachAGoal")} />;
   }
 
   const audits = events
     .filter((e) => e.type === "goal/audit")
     .map((e) => ({
       id: e.id,
-      time: new Date(e.time).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }),
+      time: new Date(e.time).toLocaleTimeString(getLocale(), { hour: "2-digit", minute: "2-digit" }),
       verdict: String((e.data as Record<string, unknown>).verdict ?? "keep"),
       note: String((e.data as Record<string, unknown>).note ?? ""),
     }));
@@ -51,19 +56,19 @@ export default function GoalsView() {
     <div className="view-page goals-page">
       <div className="goals-head">
         <div>
-          <h1 className="view-title">Session goals</h1>
-          <p className="view-sub">Attach an objective and let the auditor drive continuations to completion.</p>
+          <h1 className="view-title">{tr("goalsview.sessionGoals")}</h1>
+          <p className="view-sub">{tr("goalsview.attachAnObjectiveAndLetTheAuditor")}</p>
         </div>
         <span className="header-spacer" />
-        {!goal && !form && <button className="small-btn" onClick={() => setForm(true)}>Attach goal</button>}
+        {!goal && !form && <button className="small-btn" onClick={() => setForm(true)}>{tr("goalsview.attachGoal")}</button>}
       </div>
 
       {form && <GoalAttachForm onDone={() => setForm(false)} />}
       {!goal && !form && (
         <EmptyState
-          title="No goal yet"
-          description="Give this session an objective — Polyth keeps working until it is met."
-          actionLabel="Attach goal"
+          title={tr("goalsview.noGoalYet")}
+          description={tr("goalsview.giveThisSessionAnObjectivePolythKeeps")}
+          actionLabel={tr("goalsview.attachGoal")}
           onAction={() => setForm(true)}
         />
       )}
@@ -72,13 +77,13 @@ export default function GoalsView() {
         <>
           <div className="goal-card">
             <div className="goal-card-row">
-              <span className="goal-label">Objective</span>
+              <span className="goal-label">{tr("goalsview.objective")}</span>
               <span className={`goal-pill goal-pill-${goal.status}`}>{goal.status}</span>
             </div>
             <div className="goal-card-objective">{goal.objective}</div>
             <div>
               <div className="goal-budget-row">
-                <span>Token budget</span>
+                <span>{tr("goalsview.tokenBudget")}</span>
                 <span className="mono">{fmtK(goal.tokensUsed)}{goal.budgetTokens > 0 ? ` / ${fmtK(goal.budgetTokens)}` : ""}</span>
               </div>
               <div className="goal-budget-track">
@@ -87,19 +92,19 @@ export default function GoalsView() {
             </div>
             <div className="goal-stat-grid">
               <div className="goal-stat-cell">
-                <div className="goal-stat-k">Continuations</div>
+                <div className="goal-stat-k">{tr("goalsview.continuations")}</div>
                 <div className="goal-stat-v mono">{goal.continuations} / {goal.maxContinuations}</div>
               </div>
               <div className="goal-stat-cell">
-                <div className="goal-stat-k">Tokens</div>
+                <div className="goal-stat-k">{tr("goalsview.tokens")}</div>
                 <div className="goal-stat-v mono">{fmtK(goal.tokensUsed)}</div>
               </div>
               <div className="goal-stat-cell">
-                <div className="goal-stat-k">Status</div>
+                <div className="goal-stat-k">{tr("goalsview.status")}</div>
                 <div className="goal-stat-v">{goal.status}</div>
               </div>
               <div className="goal-stat-cell">
-                <div className="goal-stat-k">Last verdict</div>
+                <div className="goal-stat-k">{tr("goalsview.lastVerdict")}</div>
                 <div className="goal-stat-v" style={{ color: goal.lastVerdict ? VERDICT_COLOR[goal.lastVerdict] : undefined }}>
                   {goal.lastVerdict ?? "—"}
                 </div>
@@ -107,21 +112,21 @@ export default function GoalsView() {
             </div>
             <div className="goal-actions">
               {goal.status === "active" && (
-                <button className="small-btn" disabled={busy} onClick={() => void act(api.goalPause)}>Pause</button>
+                <button className="small-btn" disabled={busy} onClick={() => void act(api.goalPause)}>{tr("common.pause")}</button>
               )}
               {goal.status === "paused" && (
-                <button className="small-btn" disabled={busy} onClick={() => void act(api.goalResume)}>Resume</button>
+                <button className="small-btn" disabled={busy} onClick={() => void act(api.goalResume)}>{tr("common.resume")}</button>
               )}
               {(goal.status === "active" || goal.status === "paused") && (
-                <button className="small-btn danger-btn" disabled={busy} onClick={() => void act(api.goalStop)}>Stop</button>
+                <button className="small-btn danger-btn" disabled={busy} onClick={() => void act(api.goalStop)}>{tr("common.stop")}</button>
               )}
             </div>
           </div>
 
           <div>
-            <div className="stat-label">Audit trail</div>
+            <div className="stat-label">{tr("goalsview.auditTrail")}</div>
             <div className="audit-list">
-              {audits.length === 0 && <div className="muted" style={{ fontSize: "calc(13px * var(--ui-font-scale, 1))" }}>No audits yet — the auditor runs after each continuation.</div>}
+              {audits.length === 0 && <div className="muted" style={{ fontSize: "calc(13px * var(--ui-font-scale, 1))" }}>{tr("goalsview.noAuditsYetTheAuditorRunsAfter")}</div>}
               {audits.map((a) => (
                 <div key={a.id} className="audit-row">
                   <span className="audit-time mono">{a.time}</span>

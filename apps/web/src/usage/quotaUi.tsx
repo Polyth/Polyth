@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useSyncExternalStore } from "react";
 import {
   api,
   type QuotaPaceDto,
@@ -12,26 +12,44 @@ import {
   useUsagePrefs,
 } from "../usagePrefs.ts";
 import ProviderLogo from "../components/ProviderLogo.tsx";
+import { formatNumber, getLocale, tr } from "../i18n/index.ts";
 
 export function fmtQuota(n: number, unit: QuotaWindowDto["unit"]): string {
-  if (unit === "currency") return `$${n.toFixed(2)}`;
-  if (unit === "percent") return `${Math.round(n)}%`;
+  if (unit === "currency") {
+    return formatNumber(n, { style: "currency", currency: "USD", maximumFractionDigits: 2 });
+  }
+  if (unit === "percent") return `${formatNumber(Math.round(n))}%`;
   if (unit === "tokens") return fmtTokens(n);
-  return String(Math.round(n));
+  return formatNumber(Math.round(n));
 }
 
 export function paceText(pace: QuotaPaceDto | null, win: QuotaWindowDto): string {
   if (!pace) return "";
   const bits: string[] = [
-    `${Math.round(pace.usageFraction * 100)}% used, ${Math.round(pace.timeFraction * 100)}% of window elapsed (${pace.pace})`,
+    tr("usage.quotaui.usedWindowElapsed", {
+      usage: Math.round(pace.usageFraction * 100),
+      time: Math.round(pace.timeFraction * 100),
+      pace: pace.pace,
+    }),
   ];
   if (pace.predictedAtReset !== undefined) {
-    bits.push(`At current pace: ~${fmtQuota(pace.predictedAtReset, win.unit)} of ${fmtQuota(win.limit, win.unit)} by reset`);
+    bits.push(tr("usage.quotaui.currentPaceEstimate", {
+      predicted: fmtQuota(pace.predictedAtReset, win.unit),
+      limit: fmtQuota(win.limit, win.unit),
+    }));
   }
   if (pace.exhaustsAt !== undefined) {
-    bits.push(`may run out around ${new Date(pace.exhaustsAt).toLocaleTimeString()}`);
+    bits.push(tr("usage.quotaui.mayRunOutAround", {
+      time: new Date(pace.exhaustsAt).toLocaleTimeString(getLocale()),
+    }));
   }
   return bits.join(" · ");
+}
+
+function quotaWindowLabel(window: QuotaWindowDto): string {
+  if (window.id === "requests-day") return tr("usage.quotaui.requests24h");
+  if (window.id === "spend-month") return tr("usage.quotaui.spendMonth");
+  return window.label;
 }
 
 export function QuotaWindowRow({
@@ -42,10 +60,11 @@ export function QuotaWindowRow({
   pace: QuotaPaceDto | null;
 }) {
   const frac = w.limit > 0 ? Math.min(1, w.used / w.limit) : 0;
+  const label = quotaWindowLabel(w);
   return (
     <div className="quota-window">
       <div className="quota-window-head">
-        <span>{w.label}</span>
+        <span>{label}</span>
         <span className="mono">{fmtQuota(w.used, w.unit)} / {fmtQuota(w.limit, w.unit)}</span>
       </div>
       <div
@@ -54,13 +73,13 @@ export function QuotaWindowRow({
         aria-valuemin={0}
         aria-valuemax={100}
         aria-valuenow={Math.round(frac * 100)}
-        aria-label={w.label}
+        aria-label={label}
       >
         <div className={`quota-progress-fill ${pace?.pace ?? ""}`} style={{ width: `${frac * 100}%` }} />
       </div>
       {pace && <div className="quota-pace">{paceText(pace, w)}</div>}
       {w.resetsAt !== undefined && (
-        <div className="muted" style={{ fontSize: "calc(11px * var(--ui-font-scale, 1))" }}>resets {new Date(w.resetsAt).toLocaleString()}</div>
+        <div className="muted" style={{ fontSize: "calc(11px * var(--ui-font-scale, 1))" }}>{tr("usage.quotaui.resets")}{" "}{new Date(w.resetsAt).toLocaleString(getLocale())}</div>
       )}
     </div>
   );
@@ -79,7 +98,7 @@ export function ProviderQuotaChart({ snap }: { snap: QuotaSnapshotDto }) {
     ? Math.max(8, (width - gap * (windows.length - 1)) / windows.length)
     : width;
   return (
-    <div className="provider-quota-chart" role="img" aria-label={`${snap.providerId} quota utilization chart`}>
+    <div className="provider-quota-chart" role="img" aria-label={tr("usage.quotaui.valueQuotaUtilizationChart", { providerId: snap.providerId })}>
       <svg viewBox={`0 0 ${width} ${height}`} preserveAspectRatio="none" aria-hidden="true">
         <line x1="0" x2={width} y1={height * .2} y2={height * .2} />
         <line x1="0" x2={width} y1={height * .5} y2={height * .5} />
@@ -101,7 +120,9 @@ export function ProviderQuotaChart({ snap }: { snap: QuotaSnapshotDto }) {
       </svg>
       <div className="provider-quota-chart-labels">
         {windows.map((window) => (
-          <span key={window.id} title={window.label}>{Math.round(window.usedFraction * 100)}%</span>
+          <span key={window.id} title={quotaWindowLabel(window)}>
+            {formatNumber(Math.round(window.usedFraction * 100))}%
+          </span>
         ))}
       </div>
     </div>
@@ -124,12 +145,12 @@ export function QuotaCard({
         <ProviderLogo providerID={snap.providerId} className="quota-provider-logo" />
         <strong>{snap.providerId}</strong>
         {snap.accountLabel && <span className="muted">{snap.accountLabel}</span>}
-        {snap.stale && <span className="tag" title={snap.error?.message}>stale</span>}
+        {snap.stale && <span className="tag" title={snap.error?.message}>{tr("usage.quotaui.stale")}</span>}
         <span className="header-spacer" />
         {snap.fetchedAt > 0 && (
-          <span className="muted" style={{ fontSize: "calc(11px * var(--ui-font-scale, 1))" }}>{new Date(snap.fetchedAt).toLocaleTimeString()}</span>
+          <span className="muted" style={{ fontSize: "calc(11px * var(--ui-font-scale, 1))" }}>{new Date(snap.fetchedAt).toLocaleTimeString(getLocale())}</span>
         )}
-        <button type="button" className="small-btn" onClick={() => onRefresh(snap.providerId)}>Refresh</button>
+        <button type="button" className="small-btn" onClick={() => onRefresh(snap.providerId)}>{tr("common.refresh")}</button>
       </div>
       {snap.stale && snap.error && <div className="quota-error">{snap.error.message}</div>}
       {snap.windows.length > 0 && <ProviderQuotaChart snap={snap} />}
@@ -157,7 +178,7 @@ export function QuotaCard({
         );
       })}
       {snap.windows.length === 0 && (
-        <div className="muted" style={{ fontSize: "calc(12px * var(--ui-font-scale, 1))" }}>No quota data yet.</div>
+        <div className="muted" style={{ fontSize: "calc(12px * var(--ui-font-scale, 1))" }}>{tr("usage.quotaui.noQuotaDataYet")}</div>
       )}
     </div>
   );
@@ -188,33 +209,122 @@ export function QuotaOverviewGrid({ snapshots }: { snapshots: readonly QuotaSnap
   const stats = quotaSnapshotStats(snapshots);
   return (
     <div className="usage-overview-grid">
-      <div><span>Providers</span><strong>{stats.providerCount}</strong></div>
-      <div><span>Quota windows</span><strong>{stats.windowCount}</strong></div>
-      <div><span>At 80%+</span><strong className={stats.attentionCount > 0 ? "warn" : ""}>{stats.attentionCount}</strong></div>
-      <div><span>Stale feeds</span><strong>{stats.staleCount}</strong></div>
+      <div><span>{tr("usage.quotaui.providers")}</span><strong>{stats.providerCount}</strong></div>
+      <div><span>{tr("usage.quotaui.quotaWindows")}</span><strong>{stats.windowCount}</strong></div>
+      <div><span>{tr("usage.quotaui.at80")}</span><strong className={stats.attentionCount > 0 ? "warn" : ""}>{stats.attentionCount}</strong></div>
+      <div><span>{tr("usage.quotaui.staleFeeds")}</span><strong>{stats.staleCount}</strong></div>
     </div>
   );
 }
 
+const quotaErrorMessage = (value: unknown): string =>
+  value instanceof Error ? value.message : String(value);
+
+interface QuotaSnapshotState {
+  snapshots: QuotaSnapshotDto[];
+  loading: boolean;
+  error: string | null;
+}
+
+interface QuotaRequestResult {
+  snapshots: QuotaSnapshotDto[];
+  error?: unknown;
+}
+
+const quotaListeners = new Set<() => void>();
+let quotaState: QuotaSnapshotState = {
+  snapshots: [],
+  loading: true,
+  error: null,
+};
+let quotaRequest: Promise<void> | null = null;
+let quotaPollTimer: number | null = null;
+
+const publishQuotaState = (patch: Partial<QuotaSnapshotState>): void => {
+  quotaState = { ...quotaState, ...patch };
+  for (const listener of [...quotaListeners]) listener();
+};
+
+const runQuotaRequest = (
+  operation: () => Promise<QuotaRequestResult>,
+): Promise<void> => {
+  if (quotaRequest) return quotaRequest;
+  publishQuotaState({ loading: true, error: null });
+  quotaRequest = (async () => {
+    try {
+      const result = await operation();
+      publishQuotaState({
+        snapshots: result.snapshots,
+        error: result.error === undefined ? null : quotaErrorMessage(result.error),
+      });
+    } catch (cause) {
+      publishQuotaState({ error: quotaErrorMessage(cause) });
+    } finally {
+      publishQuotaState({ loading: false });
+      quotaRequest = null;
+    }
+  })();
+  return quotaRequest;
+};
+
+const reloadQuotaSnapshots = (): Promise<void> =>
+  runQuotaRequest(async () => ({ snapshots: await api.usageQuotas() }));
+
+const refreshQuotaSnapshot = (providerId: string): Promise<void> =>
+  runQuotaRequest(async () => {
+    await api.usageQuotasRefresh(providerId);
+    return { snapshots: await api.usageQuotas() };
+  });
+
+const refreshAllQuotaSnapshots = (): Promise<void> =>
+  runQuotaRequest(async () => {
+    const providerIds = quotaState.snapshots.map((snapshot) => snapshot.providerId);
+    if (providerIds.length === 0) return { snapshots: await api.usageQuotas() };
+    const outcomes = await Promise.allSettled(
+      providerIds.map((providerId) => api.usageQuotasRefresh(providerId)),
+    );
+    const snapshots = await api.usageQuotas();
+    const failed = outcomes.find((outcome) => outcome.status === "rejected");
+    return {
+      snapshots,
+      ...(failed?.status === "rejected" ? { error: failed.reason } : {}),
+    };
+  });
+
+const subscribeQuotaSnapshots = (listener: () => void): (() => void) => {
+  quotaListeners.add(listener);
+  if (quotaListeners.size === 1) {
+    void reloadQuotaSnapshots();
+    if (typeof window !== "undefined") {
+      quotaPollTimer = window.setInterval(() => void reloadQuotaSnapshots(), 60_000);
+    }
+  }
+  return () => {
+    quotaListeners.delete(listener);
+    if (quotaListeners.size === 0 && quotaPollTimer !== null && typeof window !== "undefined") {
+      window.clearInterval(quotaPollTimer);
+      quotaPollTimer = null;
+    }
+  };
+};
+
 export function useQuotaSnapshots(): {
   snapshots: QuotaSnapshotDto[];
-  reload: () => void;
-  refresh: (providerId: string) => void;
+  loading: boolean;
+  error: string | null;
+  reload: () => Promise<void>;
+  refresh: (providerId: string) => Promise<void>;
+  refreshAll: () => Promise<void>;
 } {
-  const [snapshots, setSnapshots] = useState<QuotaSnapshotDto[]>([]);
-  const reload = useCallback(() => {
-    void api.usageQuotas().then(setSnapshots);
-  }, []);
-  useEffect(() => {
-    reload();
-    const timer = window.setInterval(reload, 60_000);
-    return () => window.clearInterval(timer);
-  }, [reload]);
-  const refresh = useCallback((providerId: string) => {
-    void api.usageQuotasRefresh(providerId).then(
-      () => reload(),
-      () => reload(),
-    );
-  }, [reload]);
-  return { snapshots, reload, refresh };
+  const state = useSyncExternalStore(
+    subscribeQuotaSnapshots,
+    () => quotaState,
+    () => quotaState,
+  );
+  return {
+    ...state,
+    reload: reloadQuotaSnapshots,
+    refresh: refreshQuotaSnapshot,
+    refreshAll: refreshAllQuotaSnapshots,
+  };
 }

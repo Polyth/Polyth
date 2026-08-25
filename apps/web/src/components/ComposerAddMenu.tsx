@@ -10,6 +10,7 @@ import { parseGithubUrl, type GithubAttachResult } from "../attachments.ts";
 import { useEscape } from "../useEscape.ts";
 import Dialog from "./a11y/Dialog.tsx";
 import { Icon } from "../icons.tsx";
+import { tr } from "../i18n/index.ts";
 
 export interface ComposerAddMenuProps {
   hasProject: boolean;
@@ -97,7 +98,7 @@ export default function ComposerAddMenu(props: ComposerAddMenuProps) {
         ref={triggerRef}
         type="button"
         className="chip composer-add-trigger"
-        aria-label={props.trigger === "add" ? "Add files, context, and tools" : "More composer tools"}
+        aria-label={props.trigger === "add" ? tr("composeraddmenu.addFilesContextAndTools") : tr("composeraddmenu.moreComposerTools")}
         aria-haspopup="menu"
         aria-expanded={open}
         {...(open ? { "aria-controls": "composer-add-menu" } : {})}
@@ -106,7 +107,7 @@ export default function ComposerAddMenu(props: ComposerAddMenuProps) {
         <span aria-hidden="true" className="composer-add-icon">
           {props.trigger === "add" ? <Icon.plus /> : <Icon.more />}
         </span>
-        <span className="composer-add-label">{props.trigger === "add" ? "Add" : "Tools"}</span>
+        <span className="composer-add-label">{props.trigger === "add" ? tr("common.add") : tr("composeraddmenu.tools")}</span>
       </button>
       {open && (
         <>
@@ -115,7 +116,7 @@ export default function ComposerAddMenu(props: ComposerAddMenuProps) {
             id="composer-add-menu"
             ref={menuRef}
             role="menu"
-            aria-label="Add context or use a composer tool"
+            aria-label={tr("composeraddmenu.addContextOrUseAComposerTool")}
             className={`add-menu ${props.direction}`}
             onKeyDown={onMenuKey}
           >
@@ -178,31 +179,28 @@ function GithubLinkDialog({ attachGithub, onClose }: {
   };
 
   return (
-    <Dialog title="Link GitHub issue or pull request" onClose={onClose} className="github-link-dialog" initialFocus="input">
-      <h3 className="github-link-title">Link GitHub issue or pull request</h3>
+    <Dialog title={tr("composeraddmenu.linkGithubIssueOrPullRequest")} onClose={onClose} className="github-link-dialog" initialFocus="input">
+      <h3 className="github-link-title">{tr("composeraddmenu.linkGithubIssueOrPullRequest")}</h3>
       <p className="github-link-copy">
-        Polyth adds a reference to the matching project repository. It does not
-        import issue or pull-request contents.
-      </p>
+        {tr("composeraddmenu.polythAddsAReferenceToTheMatching")}</p>
       <input
         type="url"
-        placeholder="https://github.com/owner/repo/issues/123"
+        placeholder={tr("composeraddmenu.httpsGithubComOwnerRepoIssues123")}
         value={url}
         onChange={(e) => { setUrl(e.target.value); setError(""); }}
         onKeyDown={(e) => { if (e.key === "Enter") void submit(); }}
-        aria-label="GitHub issue or pull request URL"
+        aria-label={tr("composeraddmenu.githubIssueOrPullRequestUrl")}
       />
       {error && <div className="github-link-error" role="alert">{error}</div>}
       <div className="github-link-actions">
-        <button type="button" className="small-btn" onClick={onClose}>Cancel</button>
+        <button type="button" className="small-btn" onClick={onClose}>{tr("common.cancel")}</button>
         <button
           type="button"
           className="primary-btn"
           disabled={!valid || busy}
           onClick={() => void submit()}
         >
-          Add link
-        </button>
+          {tr("composeraddmenu.addLink")}</button>
       </div>
     </Dialog>
   );

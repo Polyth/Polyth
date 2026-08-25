@@ -21,8 +21,13 @@ import type {
   ModelRef,
   MultirunDto,
   NotificationRecord,
+  OpenCodeApplyRestartResponseDto,
+  OpenCodePendingResponseDto,
+  OpenCodePluginImportRequestDto,
+  OpenCodePluginImportResponseDto,
+  OpenCodePluginListResponseDto,
+  OpenCodePluginRemoveResponseDto,
   PackageDescriptorDto,
-  PreviewState,
   SystemInfoDto,
   TrackCreateInput,
   TrackDto,
@@ -49,6 +54,7 @@ import type {
   WorkflowRunOptionsDto,
   WorkspaceLabel,
 } from "@polyth/contracts";
+import { tr } from "./i18n/index.ts";
 
 export interface BrowserSessionDto {
   id: string;
@@ -71,6 +77,7 @@ export type BrowserTargetDto =
 
 export type BrowserActionDto =
   | { kind: "click"; target: BrowserTargetDto }
+  | { kind: "point"; target: Extract<BrowserTargetDto, { point: unknown }> }
   | { kind: "type"; target: BrowserTargetDto; text: string; submit?: boolean }
   | { kind: "press"; key: string }
   | { kind: "scroll"; x?: number; y?: number; target?: BrowserTargetDto }
@@ -172,7 +179,11 @@ async function jfetch<T>(path: string, init?: RequestInit): Promise<T> {
       // non-JSON error body
     }
     throw Object.assign(
-      new Error(message ?? `HTTP ${res.status} ${res.statusText} — ${body}`),
+      new Error(message ?? tr("api.httpErrorValueValueValue", {
+        status: res.status,
+        statusText: res.statusText,
+        body,
+      })),
       { status: res.status, ...(code !== undefined ? { code } : {}) },
     );
   }
@@ -195,6 +206,12 @@ function json(method: string, body?: unknown): RequestInit {
   };
 }
 
+const pendingMutation = <T>(request: Promise<T>): Promise<T> =>
+  request.then((value) => {
+    if (typeof window !== "undefined") window.dispatchEvent(new Event("polyth:opencode-pending"));
+    return value;
+  });
+
 export interface Health {
   ok: boolean;
   version: string;
@@ -209,17 +226,20 @@ export interface GitFileEntry {
   origPath?: string;
 }
 export interface GitStatus {
-  branch: string;
+  branch: string | null;
   ahead: number;
   behind: number;
   staged: GitFileEntry[];
   unstaged: GitFileEntry[];
   untracked: GitFileEntry[];
   conflicted: GitFileEntry[];
+  clean?: boolean;
+  /** Explicit false for plain folders; omitted by older servers. */
+  isRepo?: boolean;
 }
 export interface GitDiffResult { path: string; diff: string }
 export interface GitBranches {
-  current: string;
+  current: string | null;
   branches: Array<{ name: string; current: boolean; remote?: string }>;
 }
 export interface GitLogEntry {
@@ -243,7 +263,7 @@ export interface GitStash {
 // ---- worktree types --------------------------------------------------------
 export interface Worktree {
   path: string;
-  branch: string;
+  branch: string | null;
   head: string;
   isMain: boolean;
 }
@@ -532,7 +552,7 @@ export const api = {
 
   // agentProfileId: string selects a profile, null explicitly clears the
   // session's stored profile, omitted inherits it (UX-COMPOSER-DISC).
-  sendMessage: (id: string, body: { text: string; attachments?: AttachmentRef[]; model?: JsonObject; agent?: string; delivery?: string; dismissPending?: boolean; agentProfileId?: string | null }) =>
+  sendMessage: (id: string, body: { text: string; autoTitle?: boolean; attachments?: AttachmentRef[]; model?: JsonObject; agent?: string; delivery?: string; dismissPending?: boolean; agentProfileId?: string | null }) =>
     jfetch<SendResult>(`/api/sessions/${id}/message`, json("POST", body)),
   abort: (id: string) => jfetch<void>(`/api/sessions/${id}/abort`, { method: "POST" }),
   renameSession: (id: string, title: string) =>
@@ -541,8 +561,12 @@ export const api = {
   // ---- delivery queue (WP3) -------------------------------------------------
   queueList: (id: string) =>
     jfetch<QueueItemDto[]>(`/api/sessions/${id}/queue`).catch((): QueueItemDto[] => []),
+  queueEditStart: (id: string, queueId: string) =>
+    jfetch<QueueItemDto>(`/api/sessions/${id}/queue/${encodeURIComponent(queueId)}/edit`, { method: "POST" }),
   queueEdit: (id: string, queueId: string, text: string) =>
     jfetch<QueueItemDto>(`/api/sessions/${id}/queue/${encodeURIComponent(queueId)}`, json("PATCH", { text })),
+  queueEditCancel: (id: string, queueId: string) =>
+    jfetch<{ ok: true }>(`/api/sessions/${id}/queue/${encodeURIComponent(queueId)}/edit`, { method: "DELETE" }),
   queueReorder: (id: string, ids: string[]) =>
     jfetch<QueueItemDto[]>(`/api/sessions/${id}/queue/order`, json("PATCH", { ids })),
   queueRemove: (id: string, queueId: string) =>
@@ -613,10 +637,10 @@ export const api = {
   systemInfo: () => jfetch<SystemInfoDto>("/api/system/info"),
   mcpList: () => jfetch<McpServerDto[]>("/api/mcp/servers").catch((): McpServerDto[] => []),
   mcpCreate: (input: { name: string; transport: McpTransport; secrets?: Record<string, string>; enabled?: boolean }) =>
-    jfetch<McpServerDto>("/api/mcp/servers", json("POST", input)),
+    pendingMutation(jfetch<McpServerDto>("/api/mcp/servers", json("POST", input))),
   mcpUpdate: (id: string, patch: { name?: string; transport?: McpTransport; secrets?: Record<string, string>; enabled?: boolean }, expectedRevision: number) =>
-    jfetch<McpServerDto>(`/api/mcp/servers/${encodeURIComponent(id)}`, json("PATCH", { ...patch, expectedRevision })),
-  mcpRemove: (id: string) => jfetch<{ ok: boolean }>(`/api/mcp/servers/${encodeURIComponent(id)}`, { method: "DELETE" }),
+    pendingMutation(jfetch<McpServerDto>(`/api/mcp/servers/${encodeURIComponent(id)}`, json("PATCH", { ...patch, expectedRevision }))),
+  mcpRemove: (id: string) => pendingMutation(jfetch<{ ok: boolean }>(`/api/mcp/servers/${encodeURIComponent(id)}`, { method: "DELETE" })),
   mcpTest: (id: string) => jfetch<{ ok: boolean; message: string }>(`/api/mcp/servers/${encodeURIComponent(id)}/test`, json("POST", {})),
   /** F10: spec-named probe — same reachability check, stores status/lastError. */
   mcpProbe: (id: string) => jfetch<{ ok: boolean; message: string }>(`/api/mcp/servers/${encodeURIComponent(id)}/probe`, json("POST", {})),
@@ -653,13 +677,24 @@ export const api = {
   // ---- provider/model visibility (Providers & Models settings) --------------
   listProviders: () => jfetch<ProviderCatalogDto[]>("/api/providers"),
   setProviderEnabled: (id: string, enabled: boolean) =>
-    jfetch<VisibilityStateDto>(`/api/providers/${encodeURIComponent(id)}/enabled`, json("POST", { enabled })),
+    pendingMutation(jfetch<VisibilityStateDto>(`/api/providers/${encodeURIComponent(id)}/enabled`, json("POST", { enabled }))),
   setModelEnabled: (key: string, enabled: boolean) =>
-    jfetch<VisibilityStateDto>(`/api/models/enabled`, json("POST", { key, enabled })),
+    pendingMutation(jfetch<VisibilityStateDto>(`/api/models/enabled`, json("POST", { key, enabled }))),
   saveRole: (name: string, input: { prompt?: string; model?: ModelRef; mode: AgentDescriptor["mode"] }) =>
-    jfetch<AgentDescriptor>(`/api/settings/roles/${encodeURIComponent(name)}`, json("PUT", input)),
-  opencodePlugins: () =>
-    jfetch<{ plugins: string[] }>("/api/plugins/opencode").catch((): { plugins: string[] } => ({ plugins: [] })),
+    pendingMutation(jfetch<AgentDescriptor>(`/api/settings/roles/${encodeURIComponent(name)}`, json("PUT", input))),
+  opencodePluginsList: () =>
+    jfetch<OpenCodePluginListResponseDto>("/api/plugins/opencode"),
+  opencodePluginsImport: (input: OpenCodePluginImportRequestDto) =>
+    pendingMutation(jfetch<OpenCodePluginImportResponseDto>("/api/plugins/opencode/import", json("POST", input))),
+  opencodePluginRemove: (spec: string) =>
+    pendingMutation(jfetch<OpenCodePluginRemoveResponseDto>(
+      `/api/plugins/opencode/${encodeURIComponent(spec)}`,
+      { method: "DELETE" },
+    )),
+  opencodePending: () =>
+    jfetch<OpenCodePendingResponseDto>("/api/opencode/pending"),
+  opencodeApplyRestart: () =>
+    jfetch<OpenCodeApplyRestartResponseDto>("/api/opencode/apply-restart", json("POST", {})),
 
   // ---- host directory browsing (folder picker; localhost-only route) --------
   browseHost: (path?: string, hidden?: boolean) =>
@@ -672,9 +707,7 @@ export const api = {
 
   // ---- git (§12) -----------------------------------------------------------
   gitStatus: (projectId: string, sessionId?: string) =>
-    jfetch<GitStatus>(`/api/git/status?projectId=${encodeURIComponent(projectId)}${sessionId ? `&sessionId=${encodeURIComponent(sessionId)}` : ""}`).catch((): GitStatus => ({
-      branch: "", ahead: 0, behind: 0, staged: [], unstaged: [], untracked: [], conflicted: [],
-    })),
+    jfetch<GitStatus>(`/api/git/status?projectId=${encodeURIComponent(projectId)}${sessionId ? `&sessionId=${encodeURIComponent(sessionId)}` : ""}`),
   gitIdentity: (projectId: string) =>
     jfetch<{ name: string; email: string }>(`/api/git/identity?projectId=${encodeURIComponent(projectId)}`),
   gitIdentitySet: (projectId: string, identity: { name: string; email: string }) =>
@@ -682,7 +715,7 @@ export const api = {
   gitDiff: (projectId: string, filePath: string, staged?: boolean, ignoreWhitespace?: boolean, sessionId?: string) =>
     jfetch<GitDiffResult>(
       `/api/git/diff?projectId=${encodeURIComponent(projectId)}&path=${encodeURIComponent(filePath)}${staged ? "&staged=true" : ""}${ignoreWhitespace ? "&ignoreWhitespace=true" : ""}${sessionId ? `&sessionId=${encodeURIComponent(sessionId)}` : ""}`,
-    ).catch((): GitDiffResult => ({ path: filePath, diff: "" })),
+    ),
   gitShow: (projectId: string, sha: string, ignoreWhitespace?: boolean, sessionId?: string) =>
     jfetch<{ sha: string; diff: string }>(
       `/api/git/show?projectId=${encodeURIComponent(projectId)}&sha=${encodeURIComponent(sha)}${ignoreWhitespace ? "&ignoreWhitespace=true" : ""}${sessionId ? `&sessionId=${encodeURIComponent(sessionId)}` : ""}`,
@@ -700,25 +733,19 @@ export const api = {
       (): { message: "" } => ({ message: "" }),
     ),
   gitBranches: (projectId: string, sessionId?: string) =>
-    jfetch<GitBranches>(`/api/git/branches?projectId=${encodeURIComponent(projectId)}${sessionId ? `&sessionId=${encodeURIComponent(sessionId)}` : ""}`).catch(
-      (): GitBranches => ({ current: "", branches: [] }),
-    ),
+    jfetch<GitBranches>(`/api/git/branches?projectId=${encodeURIComponent(projectId)}${sessionId ? `&sessionId=${encodeURIComponent(sessionId)}` : ""}`),
   gitBranch: (projectId: string, name: string, from?: string, sessionId?: string) =>
     jfetch<{ ok: true }>(`/api/git/branch`, json("POST", { projectId, name, from, ...(sessionId ? { sessionId } : {}) })),
   gitCheckout: (projectId: string, name: string, sessionId?: string) =>
     jfetch<{ ok: true }>(`/api/git/checkout`, json("POST", { projectId, name, ...(sessionId ? { sessionId } : {}) })),
   gitLog: (projectId: string, limit = 20, sessionId?: string) =>
-    jfetch<GitLogEntry[]>(`/api/git/log?projectId=${encodeURIComponent(projectId)}&limit=${limit}${sessionId ? `&sessionId=${encodeURIComponent(sessionId)}` : ""}`).catch(
-      (): GitLogEntry[] => [],
-    ),
+    jfetch<GitLogEntry[]>(`/api/git/log?projectId=${encodeURIComponent(projectId)}&limit=${limit}${sessionId ? `&sessionId=${encodeURIComponent(sessionId)}` : ""}`),
   gitGraph: (projectId: string, limit = 40, skip = 0, sessionId?: string) =>
-    jfetch<GitGraphEntry[]>(`/api/git/graph?projectId=${encodeURIComponent(projectId)}&limit=${limit}&skip=${skip}${sessionId ? `&sessionId=${encodeURIComponent(sessionId)}` : ""}`).catch(
-      (): GitGraphEntry[] => [],
-    ),
+    jfetch<GitGraphEntry[]>(`/api/git/graph?projectId=${encodeURIComponent(projectId)}&limit=${limit}&skip=${skip}${sessionId ? `&sessionId=${encodeURIComponent(sessionId)}` : ""}`),
   gitFolder: (projectId: string, folder: string, op: "stage" | "unstage" | "discard", sessionId?: string) =>
     jfetch<{ ok: true }>(`/api/git/folder`, json("POST", { projectId, folder, op, ...(sessionId ? { sessionId } : {}) })),
   gitStashes: (projectId: string, sessionId?: string) =>
-    jfetch<GitStash[]>(`/api/git/stashes?projectId=${encodeURIComponent(projectId)}${sessionId ? `&sessionId=${encodeURIComponent(sessionId)}` : ""}`).catch((): GitStash[] => []),
+    jfetch<GitStash[]>(`/api/git/stashes?projectId=${encodeURIComponent(projectId)}${sessionId ? `&sessionId=${encodeURIComponent(sessionId)}` : ""}`),
   gitStashPush: (projectId: string, message?: string, sessionId?: string) =>
     jfetch<{ created: boolean }>(`/api/git/stash`, json("POST", { projectId, message, ...(sessionId ? { sessionId } : {}) })),
   gitStashApply: (projectId: string, ref: string, sessionId?: string) =>
@@ -734,9 +761,7 @@ export const api = {
 
   // ---- worktrees (§12) -----------------------------------------------------
   listWorktrees: (projectId: string) =>
-    jfetch<Worktree[]>(`/api/worktrees?projectId=${encodeURIComponent(projectId)}`).catch(
-      (): Worktree[] => [],
-    ),
+    jfetch<Worktree[]>(`/api/worktrees?projectId=${encodeURIComponent(projectId)}`),
   createWorktree: (projectId: string, branch: string, wtPath?: string, base?: string) =>
     jfetch<Worktree>(`/api/worktrees`, json("POST", { projectId, branch, path: wtPath, base })),
   removeWorktree: (projectId: string, wtPath: string, deleteBranch?: boolean) =>
@@ -901,7 +926,7 @@ export const api = {
     jfetch<TerminalInfo[]>(`/api/terminals?projectId=${encodeURIComponent(projectId)}`).catch(
       (): TerminalInfo[] => [],
     ),
-  createTerminal: (projectId: string, opts?: { sessionId?: string; cwd?: string; cols?: number; rows?: number }) =>
+  createTerminal: (projectId: string, opts?: { sessionId?: string; cwd?: string; cmd?: string; cols?: number; rows?: number }) =>
     jfetch<{ terminalId: string }>(`/api/terminals`, json("POST", { projectId, ...opts })),
   terminalInput: (terminalId: string, data: string) =>
     jfetch<{ ok: true }>(`/api/terminals/${terminalId}`, json("POST", { data })),
@@ -976,41 +1001,57 @@ export const api = {
   // ---- github (gh CLI; fail-soft) --------------------------------------------
   githubStatus: (projectId: string) =>
     jfetch<GithubStatusDto>(`/api/github/status?projectId=${encodeURIComponent(projectId)}`).catch(
-      (): GithubStatusDto => ({ installed: false, authenticated: false, user: null, repo: null, reason: "server unreachable" }),
+      (): GithubStatusDto => ({
+        installed: false,
+        authenticated: false,
+        user: null,
+        repo: null,
+        reason: tr("settings.pages.serverUnreachable"),
+      }),
     ),
   githubRepo: (projectId: string) =>
     jfetch<GhListResult<GithubRepoDto>>(`/api/github/repo?projectId=${encodeURIComponent(projectId)}`).catch(
-      (): GhListResult<GithubRepoDto> => ({ ok: false, reason: "server unreachable" }),
+      (): GhListResult<GithubRepoDto> => ({ ok: false, reason: tr("settings.pages.serverUnreachable") }),
     ),
   githubIssues: (projectId: string, limit = 30) =>
     jfetch<GhListResult<GithubIssueDto[]>>(`/api/github/issues?projectId=${encodeURIComponent(projectId)}&limit=${limit}`).catch(
-      (): GhListResult<GithubIssueDto[]> => ({ ok: false, reason: "server unreachable" }),
+      (): GhListResult<GithubIssueDto[]> => ({ ok: false, reason: tr("settings.pages.serverUnreachable") }),
     ),
   githubPrs: (projectId: string, limit = 30) =>
     jfetch<GhListResult<GithubPrDto[]>>(`/api/github/prs?projectId=${encodeURIComponent(projectId)}&limit=${limit}`).catch(
-      (): GhListResult<GithubPrDto[]> => ({ ok: false, reason: "server unreachable" }),
+      (): GhListResult<GithubPrDto[]> => ({ ok: false, reason: tr("settings.pages.serverUnreachable") }),
     ),
   githubCurrentPrSummary: (projectId: string) =>
     jfetch<GhListResult<CurrentPrSummaryDto>>(
       `/api/github/pr/current?projectId=${encodeURIComponent(projectId)}`,
-    ).catch((): GhListResult<CurrentPrSummaryDto> => ({ ok: false, reason: "server unreachable" })),
+    ).catch((): GhListResult<CurrentPrSummaryDto> => ({
+      ok: false,
+      reason: tr("settings.pages.serverUnreachable"),
+    })),
 
   // ---- PR detail surfaces (WP11; fail-soft) ------------------------------------
   githubPrDetail: (projectId: string, number: number) =>
     jfetch<GhListResult<PrDetailDto>>(`/api/github/pr?projectId=${encodeURIComponent(projectId)}&number=${number}`).catch(
-      (): GhListResult<PrDetailDto> => ({ ok: false, reason: "server unreachable" }),
+      (): GhListResult<PrDetailDto> => ({ ok: false, reason: tr("settings.pages.serverUnreachable") }),
     ),
   githubPrFiles: (projectId: string, number: number) =>
     jfetch<GhListResult<PrFileDto[]>>(`/api/github/pr/files?projectId=${encodeURIComponent(projectId)}&number=${number}`).catch(
-      (): GhListResult<PrFileDto[]> => ({ ok: false, reason: "server unreachable" }),
+      (): GhListResult<PrFileDto[]> => ({ ok: false, reason: tr("settings.pages.serverUnreachable") }),
     ),
   githubPrChecks: (projectId: string, number: number) =>
     jfetch<GhListResult<{ checks: PrCheckDto[]; summary: ChecksSummaryDto }>>(
       `/api/github/pr/checks?projectId=${encodeURIComponent(projectId)}&number=${number}`,
-    ).catch((): GhListResult<{ checks: PrCheckDto[]; summary: ChecksSummaryDto }> => ({ ok: false, reason: "server unreachable" })),
+    ).catch((): GhListResult<{ checks: PrCheckDto[]; summary: ChecksSummaryDto }> => ({
+      ok: false,
+      reason: tr("settings.pages.serverUnreachable"),
+    })),
   githubPrComments: (projectId: string, number: number) =>
     jfetch<GhListResult<PrCommentDto[]>>(`/api/github/pr/comments?projectId=${encodeURIComponent(projectId)}&number=${number}`).catch(
-      (): GhListResult<PrCommentDto[]> => ({ ok: false, reason: "server unreachable" }),
+      (): GhListResult<PrCommentDto[]> => ({ ok: false, reason: tr("settings.pages.serverUnreachable") }),
+    ),
+  githubPrDiff: (projectId: string, number: number) =>
+    jfetch<GhListResult<string>>(`/api/github/pr/diff?projectId=${encodeURIComponent(projectId)}&number=${number}`).catch(
+      (): GhListResult<string> => ({ ok: false, reason: "server unreachable" }),
     ),
   githubSubmitReview: (number: number, input: {
     projectId: string; event: "COMMENT" | "APPROVE" | "REQUEST_CHANGES"; body: string;
@@ -1055,7 +1096,7 @@ export const api = {
 
   // ---- provider quotas (WP12; telemetry, never session data) --------------------
   usageQuotas: () =>
-    jfetch<QuotaSnapshotDto[]>(`/api/usage/quotas`).catch((): QuotaSnapshotDto[] => []),
+    jfetch<QuotaSnapshotDto[]>(`/api/usage/quotas`),
   usageQuotasRefresh: (providerId: string) =>
     jfetch<QuotaSnapshotDto>(`/api/usage/quotas/refresh`, json("POST", { providerId })),
 
@@ -1087,20 +1128,10 @@ export const api = {
   deleteSnippet: (projectId: string, scope: "user" | "project", alias: string) =>
     jfetch<{ ok: boolean }>(`/api/snippets`, json("DELETE", { projectId, scope, alias })),
 
-  // ---- M3: preview ---------------------------------------------------------
-  previewStart: (projectId: string, command?: string, sessionId?: string) =>
-    jfetch<{ url: string; port: number }>(`/api/preview/start`, json("POST", { projectId, command, ...(sessionId ? { sessionId } : {}) })),
-  previewGet: (projectId: string, sessionId?: string) =>
-    jfetch<PreviewState>(`/api/preview?projectId=${encodeURIComponent(projectId)}${sessionId ? `&sessionId=${encodeURIComponent(sessionId)}` : ""}`).catch(
-      (): PreviewState => ({ url: null, status: "off" }),
-    ),
-  previewStop: (projectId: string, sessionId?: string) =>
-    jfetch<{ ok: true }>(`/api/preview/stop`, json("POST", { projectId, ...(sessionId ? { sessionId } : {}) })),
-
-  // ---- controlled browser (WP14) ---------------------------------------------
+  // ---- shared internal browser ------------------------------------------------
   browserCapability: () =>
     jfetch<{ available: boolean; engine: "chromium" | "fake" | null; reason?: string }>(`/api/browser/capability`).catch(
-      () => ({ available: false, engine: null, reason: "server unreachable" }),
+      () => ({ available: false, engine: null, reason: tr("settings.pages.serverUnreachable") }),
     ),
   browserCreate: (input: {
     projectId: string;
@@ -1150,7 +1181,7 @@ export const api = {
   // ---- streaming dictation (WP15; audio itself travels over /ws) ---------------
   dictationCapability: () =>
     jfetch<{ available: boolean; engine?: string; reason?: string }>(`/api/dictation/capability`).catch(
-      () => ({ available: false, reason: "server unreachable" }),
+      () => ({ available: false, reason: tr("settings.pages.serverUnreachable") }),
     ),
   dictationCreate: (input: { sessionId?: string; language?: string }) =>
     jfetch<DictationSessionDto>(`/api/dictation`, json("POST", input as JsonObject)),
@@ -1172,7 +1203,7 @@ export const api = {
     const res = await fetch(`/api/tts/speak`, json("POST", { text, ...opts }));
     if (!res.ok) {
       const body = await res.json().catch(() => ({})) as { message?: string };
-      throw new Error(body.message ?? `TTS failed: HTTP ${res.status}`);
+      throw new Error(body.message ?? tr("api.ttsFailedHttpValue", { status: res.status }));
     }
     return res.arrayBuffer();
   },
@@ -1277,7 +1308,7 @@ export const api = {
     return {
       ok: false,
       error: body.error ?? `http-${res.status}`,
-      message: body.message ?? `HTTP ${res.status}`,
+      message: body.message ?? tr("api.httpStatusValue", { status: res.status }),
       ...(typeof body.retryAfterSec === "number" ? { retryAfterSec: body.retryAfterSec } : {}),
     };
   },

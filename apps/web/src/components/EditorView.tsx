@@ -18,8 +18,10 @@ import PaneHost, { type PaneHostHandle } from "./workspace/PaneHost.tsx";
 import FileRowActions from "./FileRowActions.tsx";
 import { ChevronGlyph, FileTypeGlyph, FolderGlyph, fileTypeKeyOf } from "../editor/fileTreeIcons.tsx";
 import { Icon } from "../icons.tsx";
+import { confirmAlert, promptAlert } from "../alerts.ts";
 import "./editor/FilePane.tsx"; // registers the "file" pane provider
-import "../workspace/mainSlotPanes.ts"; // registers the "plugin" slot bridge
+import "../workspace/mainSlotPanes.ts";
+import { tr } from "../i18n/index.ts"; // registers the "plugin" slot bridge
 
 interface Row {
   e: FileEntry;
@@ -167,7 +169,7 @@ export default function EditorView() {
   // ---- tree context menu actions ------------------------------------------------
   const ctxRename = async (entry: FileEntry) => {
     if (!projectId) return;
-    const to = window.prompt("Rename / move to:", entry.path)?.trim();
+    const to = (await promptAlert(tr("editorview.renameOrMoveThisItem"), { title: tr("editorview.renameMoveTitle"), initialValue: entry.path, confirmLabel: tr("common.rename") }))?.trim();
     if (!to || to === entry.path) return;
     try {
       await api.filesRename(projectId, entry.path, to, sid);
@@ -180,7 +182,7 @@ export default function EditorView() {
 
   const ctxDelete = async (entry: FileEntry) => {
     if (!projectId) return;
-    if (!window.confirm(`Delete ${entry.path}${entry.dir ? " and its contents" : ""}?`)) return;
+    if (!await confirmAlert(tr("editorview.deleteValueValue", { path: entry.path, value: entry.dir ? tr("editorview.andItsContents") : "" }), { title: tr("editorview.deleteItem"), confirmLabel: tr("common.delete") })) return;
     try {
       await api.filesDelete(projectId, entry.path, sid);
       await loadDir(parentOf(entry.path));
@@ -192,7 +194,7 @@ export default function EditorView() {
 
   const ctxNew = async (dirPath: string, kind: "file" | "folder") => {
     if (!projectId) return;
-    const name = window.prompt(`New ${kind} name:`)?.trim();
+    const name = (await promptAlert(tr("editorview.enterTheNewValueName", { kind: kind }), { title: tr("editorview.newValue", { kind: kind }), confirmLabel: tr("common.create") }))?.trim();
     if (!name) return;
     const rel = dirPath ? `${dirPath}/${name}` : name;
     try {
@@ -263,15 +265,15 @@ export default function EditorView() {
     setCtx({ x: ev.clientX, y: ev.clientY, entry });
   };
 
-  if (!projectId) return <EmptyState title="No project selected" description="Open a project to browse and edit files." />;
+  if (!projectId) return <EmptyState title={tr("editorview.noProjectSelected")} description={tr("editorview.openAProjectToBrowseAndEdit")} />;
 
   return (
     <div className="editor-view">
-      <aside className="editor-tree" aria-label="Files">
+      <aside className="editor-tree" aria-label={tr("editorview.files")}>
         <div className="files-search">
           <input
             type="text"
-            placeholder="Search files…"
+            placeholder={tr("editorview.searchFiles")}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
             onKeyDown={(e) => {
@@ -283,15 +285,15 @@ export default function EditorView() {
               }
             }}
           />
-          <button className="small-btn icon-only" title="Search files" aria-label="Search files" onClick={() => void search()}><Icon.search /></button>
+          <button className="small-btn icon-only" title={tr("editorview.searchFiles2")} aria-label={tr("editorview.searchFiles2")} onClick={() => void search()}><Icon.search /></button>
         </div>
         {treeErr && <div className="files-error">{treeErr}</div>}
         {searchResults !== null ? (
           <div className="files-list">
             <div className="files-actions">
-              <button className="small-btn icon-only" title="Back to tree" aria-label="Back to tree" onClick={() => { setSearchResults(null); setQuery(""); }}><Icon.back /></button>
+              <button className="small-btn icon-only" title={tr("editorview.backToTree")} aria-label={tr("editorview.backToTree")} onClick={() => { setSearchResults(null); setQuery(""); }}><Icon.back /></button>
             </div>
-            {searchResults.length === 0 && <div className="empty">No matches.</div>}
+            {searchResults.length === 0 && <div className="empty">{tr("editorview.noMatches")}</div>}
             {searchResults.map((fp) => (
               <div key={fp} className="files-row" onClick={() => openFile(fp)}>
                 <span className="files-file-icon ft-icon" data-ft={fileTypeKeyOf(baseOf(fp))} aria-hidden>
@@ -304,11 +306,11 @@ export default function EditorView() {
           </div>
         ) : (
           <>
-            {rows.length === 0 && !treeErr && <div className="empty">Empty directory.</div>}
+            {rows.length === 0 && !treeErr && <div className="empty">{tr("editorview.emptyDirectory")}</div>}
             <div
               className="ft-tree"
               role="tree"
-              aria-label="Project files"
+              aria-label={tr("editorview.projectFiles")}
               tabIndex={0}
               onKeyDown={onTreeKey}
               aria-activedescendant={sel ? treeItemId(sel) : undefined}
@@ -349,8 +351,8 @@ export default function EditorView() {
                     {!e.dir && (
                       <button
                         className="ft-at"
-                        title={`Add ${e.path} to chat`}
-                        aria-label={`Add ${e.path} to chat`}
+                        title={tr("editorview.addValueToChat", { path: e.path })}
+                        aria-label={tr("editorview.addValueToChat", { path: e.path })}
                         tabIndex={-1}
                         onClick={(ev) => {
                           ev.stopPropagation();
@@ -377,18 +379,18 @@ export default function EditorView() {
             onClick={(e) => e.stopPropagation()}
           >
             {!ctx.entry.dir && (
-              <button role="menuitem" onClick={() => { openFile(ctx.entry.path); setCtx(null); }}>Open</button>
+              <button role="menuitem" onClick={() => { openFile(ctx.entry.path); setCtx(null); }}>{tr("common.open")}</button>
             )}
-            <button role="menuitem" onClick={() => { attachPath(ctx.entry.path); setCtx(null); }}>Add to chat</button>
-            <button role="menuitem" onClick={() => { void navigator.clipboard?.writeText(ctx.entry.path); setCtx(null); }}>Copy path</button>
+            <button role="menuitem" onClick={() => { attachPath(ctx.entry.path); setCtx(null); }}>{tr("editorview.addToChat")}</button>
+            <button role="menuitem" onClick={() => { void navigator.clipboard?.writeText(ctx.entry.path); setCtx(null); }}>{tr("editorview.copyPath")}</button>
             {ctx.entry.dir && (
               <>
-                <button role="menuitem" onClick={() => { void ctxNew(ctx.entry.path, "file"); setCtx(null); }}>New file…</button>
-                <button role="menuitem" onClick={() => { void ctxNew(ctx.entry.path, "folder"); setCtx(null); }}>New folder…</button>
+                <button role="menuitem" onClick={() => { void ctxNew(ctx.entry.path, "file"); setCtx(null); }}>{tr("editorview.newFile")}</button>
+                <button role="menuitem" onClick={() => { void ctxNew(ctx.entry.path, "folder"); setCtx(null); }}>{tr("editorview.newFolder")}</button>
               </>
             )}
-            <button role="menuitem" onClick={() => { void ctxRename(ctx.entry); setCtx(null); }}>Rename / move…</button>
-            <button role="menuitem" className="danger" onClick={() => { void ctxDelete(ctx.entry); setCtx(null); }}>Delete…</button>
+            <button role="menuitem" onClick={() => { void ctxRename(ctx.entry); setCtx(null); }}>{tr("editorview.renameMove")}</button>
+            <button role="menuitem" className="danger" onClick={() => { void ctxDelete(ctx.entry); setCtx(null); }}>{tr("editorview.delete")}</button>
           </div>
         </div>
       )}
@@ -400,10 +402,9 @@ export default function EditorView() {
         onActiveChange={onActiveChange}
         emptyBody={
           <div className="editor-empty">
-            <p className="muted">Select a file to view or edit.</p>
+            <p className="muted">{tr("editorview.selectAFileToViewOrEdit")}</p>
             <p className="muted editor-empty-hint">
-              Enter opens · @ adds to chat · {MOD}L sends a selection to the session · right-click for file actions
-            </p>
+              {tr("editorview.enterOpensAddsToChat")}{" "}{MOD}{tr("editorview.lSendsASelectionToTheSession")}</p>
           </div>
         }
       />

@@ -27,6 +27,7 @@ test("defaults match the current shell bindings", () => {
   assert.equal(DEFAULT_KEYMAP.searchSessions, "mod+shift+f");
   assert.equal(DEFAULT_KEYMAP.settings, "mod+,");
   assert.equal(DEFAULT_KEYMAP.newSession, "mod+n");
+  assert.equal(DEFAULT_KEYMAP.viewTerminal, "mod+`");
   assert.ok(HOTKEY_ACTIONS.every((action) => action.pluginName.length > 0));
 });
 
@@ -85,4 +86,5 @@ test("formatCombo renders mac glyphs and win/linux text", () => {
   assert.equal(formatCombo("mod+shift+e", true), "⌘⇧E");
   assert.equal(formatCombo("mod+shift+e", false), "Ctrl+Shift+E");
   assert.equal(formatCombo("mod+,", false), "Ctrl+,");
+  assert.equal(formatCombo("mod+`", false), "Ctrl+`");
 });

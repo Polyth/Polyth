@@ -4,6 +4,7 @@ import type {
   WidgetLayoutMutation,
   WidgetZone,
 } from "./widgetLayout.ts";
+import { tr } from "../i18n/index.ts";
 
 export interface WorkspaceCustomizePlan {
   mutations: WidgetLayoutMutation[];
@@ -31,7 +32,12 @@ export function planWorkspaceCustomization(
   widgets: readonly WidgetDef[],
 ): WorkspaceCustomizePlan {
   const text = request.trim().toLowerCase();
-  if (!text) return { mutations: [], message: "Describe one or more workspace changes." };
+  if (!text) {
+    return {
+      mutations: [],
+      message: tr("widgets.workspacecustomize.describeOneOrMoreWorkspaceChanges"),
+    };
+  }
   const mutations: WidgetLayoutMutation[] = [];
 
   const audience = (["simple", "standard", "power"] as const).find((value) => text.includes(value));
@@ -67,7 +73,7 @@ export function planWorkspaceCustomization(
     mutations,
     ...(density ? { density } : {}),
     message: count > 0
-      ? `${count} workspace ${count === 1 ? "change" : "changes"} ready.`
-      : "Try “compact”, “hide terminal”, “show notes”, or “move preview to bottom”.",
+      ? tr("widgets.workspacecustomize.workspaceChangesReady", { count })
+      : tr("widgets.workspacecustomize.tryCustomizationExamples"),
   };
 }

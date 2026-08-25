@@ -3,6 +3,10 @@ import assert from "node:assert/strict";
 import {
   annotationViewportRect,
   BROWSER_DEVICE_PRESETS,
+  browserApprovalRequired,
+  browserElementContext,
+  browserInspectorTabFromKey,
+  browserPointedElementLabel,
   captureFileName,
   containedImageRect,
   devicePresetForViewport,
@@ -70,4 +74,57 @@ test("capture filenames are deterministic, safe PNG names", () => {
     captureFileName(new Date("2026-08-22T20:30:40.123Z")),
     "browser-2026-08-22T20-30-40-123Z.png",
   );
+});
+
+test("external navigation approval uses the typed code and supports legacy messages", () => {
+  assert.equal(browserApprovalRequired(Object.assign(
+    new Error("external origin https://example.com needs a per-origin approval"),
+    { code: "approval-required" },
+  )), true);
+  assert.equal(browserApprovalRequired(new Error(
+    "external origin https://example.com needs a per-origin approval",
+  )), true);
+  assert.equal(browserApprovalRequired(new Error("DNS lookup failed")), false);
+});
+
+test("pointed elements produce precise model-facing browser context", () => {
+  assert.equal(browserElementContext("http://127.0.0.1:4400/settings", {
+    selector: "#save-profile",
+    tag: "button",
+    role: "button",
+    name: "Save",
+    text: "Save changes",
+    rect: { x: 40, y: 80, width: 120, height: 36 },
+  }), [
+    "[Browser element]",
+    "URL: http://127.0.0.1:4400/settings",
+    "Selector: #save-profile",
+    "Element: <button> role=\"button\" name=\"Save\"",
+    "Text: Save changes",
+    "Bounds: x=40, y=80, width=120, height=36",
+  ].join("\n"));
+});
+
+test("pointed-element UI labels normalize and bound page-sized text", () => {
+  assert.equal(browserPointedElementLabel({
+    name: "",
+    text: "  Save\n\n changes  ",
+    selector: "#save",
+  }), "Save changes");
+  assert.equal(browserPointedElementLabel({
+    text: "x".repeat(200),
+    selector: "html",
+  }, 12), "xxxxxxxxxxx…");
+  assert.equal(browserPointedElementLabel({ selector: "#fallback" }), "#fallback");
+});
+
+test("inspector tabs support roving arrow, Home, and End navigation", () => {
+  assert.equal(browserInspectorTabFromKey("snapshot", "ArrowRight"), "console");
+  assert.equal(browserInspectorTabFromKey("activity", "ArrowRight"), "snapshot");
+  assert.equal(browserInspectorTabFromKey("snapshot", "ArrowLeft"), "activity");
+  assert.equal(browserInspectorTabFromKey("console", "ArrowDown"), "activity");
+  assert.equal(browserInspectorTabFromKey("activity", "ArrowUp"), "console");
+  assert.equal(browserInspectorTabFromKey("activity", "Home"), "snapshot");
+  assert.equal(browserInspectorTabFromKey("snapshot", "End"), "activity");
+  assert.equal(browserInspectorTabFromKey("console", "Enter"), null);
 });

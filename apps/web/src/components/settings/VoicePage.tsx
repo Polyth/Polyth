@@ -7,6 +7,7 @@ import { speechSupport } from "@polyth/dictation";
 import { api, type VoiceSettingsDto } from "../../api.ts";
 import { setVoicePrefs, speak, stopSpeaking, useVoicePrefs } from "../../voice.tsx";
 import { EmptyState, PageHead, Row, Seg, Toggle } from "./parts.tsx";
+import { formatNumber, tr } from "../../i18n/index.ts";
 
 const LANGS = ["en-US", "en-GB", "de-DE", "fr-FR", "es-ES", "it-IT", "pt-BR", "ja-JP", "ko-KR", "zh-CN"];
 
@@ -15,17 +16,20 @@ function ServerEndpointForm({ server, onSaved }: { server: VoiceSettingsDto; onS
   const [tts, setTts] = useState(server.tts);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState("");
+  const [saveFailed, setSaveFailed] = useState(false);
 
   const save = async () => {
     setBusy(true);
     setMsg("");
+    setSaveFailed(false);
     try {
       const saved = await api.voiceSettingsSave({ stt, tts });
       onSaved(saved);
       setStt(saved.stt);
       setTts(saved.tts);
-      setMsg("Saved. The capability flips immediately — no restart needed.");
+      setMsg(tr("settings.voicepage.savedCapabilityUpdated"));
     } catch (e) {
+      setSaveFailed(true);
       setMsg(e instanceof Error ? e.message : String(e));
     } finally {
       setBusy(false);
@@ -34,41 +38,40 @@ function ServerEndpointForm({ server, onSaved }: { server: VoiceSettingsDto; onS
 
   return (
     <div className="mcp-form" data-settings-item="voice.server">
-      <div className="stat-label">Speech-to-text server <span className="muted">(OpenAI-compatible /audio/transcriptions)</span></div>
+      <div className="stat-label">{tr("settings.voicepage.speechToTextServer")}{" "}<span className="muted">{tr("settings.voicepage.openaiCompatibleAudioTranscriptions")}</span></div>
       <div className="mcp-form-row">
-        <input value={stt.baseUrl} placeholder="https://host/v1 (empty = browser only)"
-          onChange={(e) => setStt({ ...stt, baseUrl: e.target.value })} aria-label="STT base URL" />
-        <input value={stt.model} placeholder="model (whisper-1)" style={{ maxWidth: 140 }}
-          onChange={(e) => setStt({ ...stt, model: e.target.value })} aria-label="STT model" />
+        <input value={stt.baseUrl} placeholder={tr("settings.voicepage.httpsHostV1EmptyBrowserOnly")}
+          onChange={(e) => setStt({ ...stt, baseUrl: e.target.value })} aria-label={tr("settings.voicepage.sttBaseUrl")} />
+        <input value={stt.model} placeholder={tr("settings.voicepage.modelWhisper1")} style={{ maxWidth: 140 }}
+          onChange={(e) => setStt({ ...stt, model: e.target.value })} aria-label={tr("settings.voicepage.sttModel")} />
       </div>
       <div className="mcp-form-row">
-        <input value={stt.language} placeholder="language (en)" style={{ maxWidth: 120 }}
-          onChange={(e) => setStt({ ...stt, language: e.target.value })} aria-label="STT language" />
-        <input value={stt.apiKeyEnv} placeholder="API key env var name (e.g. WHISPER_API_KEY)"
-          onChange={(e) => setStt({ ...stt, apiKeyEnv: e.target.value })} aria-label="STT API key env var" />
-      </div>
-
-      <div className="stat-label">Text-to-speech server <span className="muted">(OpenAI-compatible /audio/speech; non-standard params are stripped)</span></div>
-      <div className="mcp-form-row">
-        <input value={tts.baseUrl} placeholder="https://host/v1 (empty = browser only)"
-          onChange={(e) => setTts({ ...tts, baseUrl: e.target.value })} aria-label="TTS base URL" />
-        <input value={tts.model} placeholder="model (tts-1)" style={{ maxWidth: 140 }}
-          onChange={(e) => setTts({ ...tts, model: e.target.value })} aria-label="TTS model" />
-      </div>
-      <div className="mcp-form-row">
-        <input value={tts.voice} placeholder="voice (alloy)" style={{ maxWidth: 120 }}
-          onChange={(e) => setTts({ ...tts, voice: e.target.value })} aria-label="TTS voice" />
-        <input value={tts.apiKeyEnv} placeholder="API key env var name"
-          onChange={(e) => setTts({ ...tts, apiKeyEnv: e.target.value })} aria-label="TTS API key env var" />
+        <input value={stt.language} placeholder={tr("settings.voicepage.languageEn")} style={{ maxWidth: 120 }}
+          onChange={(e) => setStt({ ...stt, language: e.target.value })} aria-label={tr("settings.voicepage.sttLanguage")} />
+        <input value={stt.apiKeyEnv} placeholder={tr("settings.voicepage.apiKeyEnvVarNameEG")}
+          onChange={(e) => setStt({ ...stt, apiKeyEnv: e.target.value })} aria-label={tr("settings.voicepage.sttApiKeyEnvVar")} />
       </div>
 
-      {msg && <div className={/Saved/.test(msg) ? "knowledge-notice" : "form-error"}>{msg}</div>}
+      <div className="stat-label">{tr("settings.voicepage.textToSpeechServer")}{" "}<span className="muted">{tr("settings.voicepage.openaiCompatibleAudioSpeechNonStandardParams")}</span></div>
+      <div className="mcp-form-row">
+        <input value={tts.baseUrl} placeholder={tr("settings.voicepage.httpsHostV1EmptyBrowserOnly")}
+          onChange={(e) => setTts({ ...tts, baseUrl: e.target.value })} aria-label={tr("settings.voicepage.ttsBaseUrl")} />
+        <input value={tts.model} placeholder={tr("settings.voicepage.modelTts1")} style={{ maxWidth: 140 }}
+          onChange={(e) => setTts({ ...tts, model: e.target.value })} aria-label={tr("settings.voicepage.ttsModel")} />
+      </div>
+      <div className="mcp-form-row">
+        <input value={tts.voice} placeholder={tr("settings.voicepage.voiceAlloy")} style={{ maxWidth: 120 }}
+          onChange={(e) => setTts({ ...tts, voice: e.target.value })} aria-label={tr("settings.voicepage.ttsVoice")} />
+        <input value={tts.apiKeyEnv} placeholder={tr("settings.voicepage.apiKeyEnvVarName")}
+          onChange={(e) => setTts({ ...tts, apiKeyEnv: e.target.value })} aria-label={tr("settings.voicepage.ttsApiKeyEnvVar")} />
+      </div>
+
+      {msg && <div className={saveFailed ? "form-error" : "knowledge-notice"}>{msg}</div>}
       <div className="mcp-form-row">
         <span className="muted" style={{ fontSize: "calc(11.5px * var(--ui-font-scale, 1))" }}>
-          Keys are read from the server's environment by NAME — values are never stored or shown.
-        </span>
+          {tr("settings.voicepage.keysAreReadFromTheServerS")}</span>
         <span className="header-spacer" />
-        <button className="small-btn" disabled={busy} onClick={() => void save()}>Save server settings</button>
+        <button className="small-btn" disabled={busy} onClick={() => void save()}>{tr("settings.voicepage.saveServerSettings")}</button>
       </div>
     </div>
   );
@@ -81,6 +84,7 @@ export default function VoicePage() {
   const [streaming, setStreaming] = useState<{ available: boolean; engine?: string; reason?: string } | null>(null);
   const [server, setServer] = useState<VoiceSettingsDto | null>(null);
   const [ttsTestMsg, setTtsTestMsg] = useState("");
+  const [ttsTestFailed, setTtsTestFailed] = useState(false);
 
   const refreshCapability = () => void api.dictationCapability().then(setStreaming);
   useEffect(() => {
@@ -98,91 +102,108 @@ export default function VoicePage() {
 
   const testServerTts = async () => {
     setTtsTestMsg("");
+    setTtsTestFailed(false);
     try {
-      await api.ttsSpeak("Polyth server voice check.");
-      setTtsTestMsg("✓ server returned an audio clip");
+      await api.ttsSpeak(tr("settings.voicepage.serverVoiceCheckSample"));
+      setTtsTestMsg(tr("settings.voicepage.serverReturnedAudioClip"));
     } catch (e) {
+      setTtsTestFailed(true);
       setTtsTestMsg(`✗ ${e instanceof Error ? e.message : String(e)}`);
     }
   };
 
   return (
     <>
-      <PageHead title="Voice" blurb="Dictation and read-aloud — browser engines by default, OpenAI-compatible servers when configured." />
+      <PageHead title={tr("settings.voicepage.voice")} blurb={tr("settings.voicepage.dictationAndReadAloudBrowserEnginesBy")} />
       {!support.stt && !support.tts && (
-        <EmptyState title="Speech is not supported in this browser" body="Dictation needs the Web Speech API (Chrome, Edge, Safari) or a configured server engine." />
+        <EmptyState title={tr("settings.voicepage.speechIsNotSupportedInThisBrowser")} body={tr("settings.voicepage.dictationNeedsTheWebSpeechApiChrome")} />
       )}
-      <Row label="Dictation" hint={support.stt || streaming?.available ? "Shows the mic button in the composer; your speech is inserted as text." : "Not supported in this browser."} itemId="voice.dictation">
-        <Toggle on={prefs.dictation} onChange={(v) => setVoicePrefs({ dictation: v })} label="Dictation" />
+      <Row label={tr("settings.voicepage.dictation")} hint={support.stt || streaming?.available ? tr("settings.voicepage.showsTheMicButtonInTheComposer") : tr("settings.voicepage.notSupportedInThisBrowser")} itemId="voice.dictation">
+        <Toggle on={prefs.dictation} onChange={(v) => setVoicePrefs({ dictation: v })} label={tr("settings.voicepage.dictation")} />
       </Row>
       <Row
-        label="Dictation engine"
+        label={tr("settings.voicepage.dictationEngine")}
         hint={streaming?.available
-          ? `Server transcription via ${streaming.engine} with reconnect-safe audio replay.`
-          : streaming?.reason ?? "No server speech-to-text engine; the browser engine is used."}
+          ? tr("settings.voicepage.serverTranscriptionViaValueWithReconnectSafe", { engine: streaming.engine })
+          : streaming?.reason ?? tr("settings.voicepage.browserEngineFallback")}
         itemId="voice.streaming"
       >
         <Seg
           value={prefs.sttEngine}
-          options={[["browser", "Browser"], ["server", "Server"]]}
+          options={[
+            ["browser", tr("packages.onboarding.tours.builtin.browser")],
+            ["server", tr("ssh.sshprojectsource.server")],
+          ]}
           onChange={(v) => setVoicePrefs({ sttEngine: v })}
         />
       </Row>
-      <Row label="Read replies aloud" hint="Speaks each completed assistant reply in the active session.">
-        <Toggle on={prefs.tts} onChange={(v) => setVoicePrefs({ tts: v })} label="Read replies aloud" />
+      <Row label={tr("settings.voicepage.readRepliesAloud")} hint={tr("settings.voicepage.speaksEachCompletedAssistantReplyInThe")}>
+        <Toggle on={prefs.tts} onChange={(v) => setVoicePrefs({ tts: v })} label={tr("settings.voicepage.readRepliesAloud")} />
       </Row>
       <Row
-        label="Read-aloud engine"
+        label={tr("settings.voicepage.readAloudEngine")}
         hint={server?.ttsConfigured
-          ? `Server clips from ${(() => { try { return new URL(server.tts.baseUrl).host; } catch { return server.tts.baseUrl; } })()} (buffered, then played through WebAudio).`
-          : "No text-to-speech server configured; the browser voice is used."}
+          ? tr("settings.voicepage.serverClipsFromValueBufferedThenPlayed", { value: (() => { try { return new URL(server.tts.baseUrl).host; } catch { return server.tts.baseUrl; } })() })
+          : tr("settings.voicepage.noTextToSpeechServerConfiguredThe")}
         itemId="voice.ttsEngine"
       >
         <Seg
           value={prefs.ttsEngine}
-          options={[["browser", "Browser"], ["server", "Server"]]}
+          options={[
+            ["browser", tr("packages.onboarding.tours.builtin.browser")],
+            ["server", tr("ssh.sshprojectsource.server")],
+          ]}
           onChange={(v) => setVoicePrefs({ ttsEngine: v })}
         />
       </Row>
-      <Row label="Summarize before speaking" hint="Long replies are condensed by the Small Model first; falls back to the full text." itemId="voice.summarize">
-        <Toggle on={prefs.summarize} onChange={(v) => setVoicePrefs({ summarize: v })} label="Summarize before speaking" />
+      <Row label={tr("settings.voicepage.summarizeBeforeSpeaking")} hint={tr("settings.voicepage.longRepliesAreCondensedByTheSmall")} itemId="voice.summarize">
+        <Toggle on={prefs.summarize} onChange={(v) => setVoicePrefs({ summarize: v })} label={tr("settings.voicepage.summarizeBeforeSpeaking")} />
       </Row>
-      <Row label="Language" hint="Used for both recognition and speech.">
+      <Row label={tr("settings.voicepage.language")} hint={tr("settings.voicepage.usedForBothRecognitionAndSpeech")}>
         <select value={prefs.lang} onChange={(e) => setVoicePrefs({ lang: e.target.value })}>
           {[prefs.lang, ...LANGS.filter((l) => l !== prefs.lang)].map((l) => <option key={l} value={l}>{l}</option>)}
         </select>
       </Row>
-      <Row label="Speech rate" hint={`${prefs.rate.toFixed(1)}×`}>
+      <Row label={tr("settings.voicepage.speechRate")} hint={tr("settings.voicepage.value", {
+        value: formatNumber(prefs.rate, { minimumFractionDigits: 1, maximumFractionDigits: 1 }),
+      })}>
         <input
           type="range" min={0.5} max={2} step={0.1} value={prefs.rate}
           onChange={(e) => setVoicePrefs({ rate: Number(e.target.value) })}
         />
       </Row>
-      <Row label="Pitch" hint={`${prefs.pitch.toFixed(1)}×`} itemId="voice.pitch">
+      <Row label={tr("settings.voicepage.pitch")} hint={tr("settings.voicepage.value", {
+        value: formatNumber(prefs.pitch, { minimumFractionDigits: 1, maximumFractionDigits: 1 }),
+      })} itemId="voice.pitch">
         <input
           type="range" min={0.5} max={2} step={0.1} value={prefs.pitch}
           onChange={(e) => setVoicePrefs({ pitch: Number(e.target.value) })}
         />
       </Row>
-      <Row label="Volume" hint={`${Math.round(prefs.volume * 100)}%`} itemId="voice.volume">
+      <Row label={tr("settings.voicepage.volume")} hint={`${Math.round(prefs.volume * 100)}%`} itemId="voice.volume">
         <input
           type="range" min={0} max={1} step={0.05} value={prefs.volume}
           onChange={(e) => setVoicePrefs({ volume: Number(e.target.value) })}
         />
       </Row>
       {voices.length > 0 && (
-        <Row label="Browser voice">
+        <Row label={tr("settings.voicepage.browserVoice")}>
           <select value={prefs.voice ?? ""} onChange={(e) => setVoicePrefs({ voice: e.target.value || undefined })}>
-            <option value="">Default</option>
+            <option value="">{tr("settings.voicepage.default")}</option>
             {voices.map((v) => <option key={v.name} value={v.name}>{v.name}</option>)}
           </select>
         </Row>
       )}
-      <Row label="Test">
-        <button className="small-btn" onClick={() => speak("Polyth voice check — this is how replies will sound.")}>Speak sample</button>
-        {server?.ttsConfigured && <button className="small-btn" onClick={() => void testServerTts()}>Test server TTS</button>}
-        <button className="small-btn" onClick={stopSpeaking}>Stop</button>
-        {ttsTestMsg && <span className={ttsTestMsg.startsWith("✓") ? "muted" : "form-error"}>{ttsTestMsg}</span>}
+      <Row label={tr("settings.voicepage.test")}>
+        <button
+          className="small-btn"
+          onClick={() => speak(tr("settings.voicepage.voiceCheckSample"))}
+        >
+          {tr("settings.voicepage.speakSample")}
+        </button>
+        {server?.ttsConfigured && <button className="small-btn" onClick={() => void testServerTts()}>{tr("settings.voicepage.testServerTts")}</button>}
+        <button className="small-btn" onClick={stopSpeaking}>{tr("common.stop")}</button>
+        {ttsTestMsg && <span className={ttsTestFailed ? "form-error" : "muted"}>{ttsTestMsg}</span>}
       </Row>
 
       {server && (

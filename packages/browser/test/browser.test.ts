@@ -79,6 +79,13 @@ test("history, device resizing, color scheme, scoped observations, and inspect m
   assert.deepEqual(resized.session.viewport, { width: 390, height: 844, deviceScaleFactor: 1 });
   const recolored = await svc.action(s.id, { kind: "color-scheme", colorScheme: "light" }, "user");
   assert.equal(recolored.session.colorScheme, "light");
+  const beforePointRevision = recolored.session.revision;
+  const pointed = await svc.action(s.id, {
+    kind: "point",
+    target: { point: { x: 20, y: 30 }, frameRevision: beforePointRevision },
+  }, "user");
+  assert.equal((pointed.result as { selector?: string })?.selector, "main");
+  assert.equal(pointed.session.revision, beforePointRevision, "read-only pointing keeps frame geometry current");
   const inspected = await svc.action(s.id, { kind: "inspect", selector: "main" }, "agent");
   assert.equal((inspected.result as { selector?: string })?.selector, "main");
   assert.equal((inspected.result as { styles?: { colorScheme?: string } })?.styles?.colorScheme, "light");
@@ -209,6 +216,22 @@ test("close destroys state; further calls fail with not-found; closeAll sweeps",
   const s2 = await svc.create({ projectId: "p1", url: HOME });
   await svc.closeAll();
   assert.equal(svc.get(s2.id)?.status ?? "closed", "closed");
+});
+
+test("closeAll releases the underlying browser driver", async () => {
+  const fake = createFakeDriver(web());
+  let closed = 0;
+  const svc = createBrowserService({
+    driver: {
+      engine: fake.engine,
+      open: (options) => fake.open(options),
+      close: async () => { closed += 1; await fake.close(); },
+    },
+    allowedOrigins: () => ["http://127.0.0.1:5173"],
+  });
+  await svc.create({ projectId: "p1", url: HOME });
+  await svc.closeAll();
+  assert.equal(closed, 1);
 });
 
 test("session lifetime cap closes the browser automatically", async () => {

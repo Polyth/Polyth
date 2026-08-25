@@ -1,7 +1,9 @@
 import { useEffect, useState, type FormEvent } from "react";
 import type { SecureSafeEntryDto } from "@polyth/contracts";
 import { api } from "../../api.ts";
+import { confirmAlert } from "../../alerts.ts";
 import { EmptyState, PageHead } from "./parts.tsx";
+import { tr } from "../../i18n/index.ts";
 
 export default function SecureSafePage() {
   const [entries, setEntries] = useState<SecureSafeEntryDto[]>([]);
@@ -53,7 +55,7 @@ export default function SecureSafePage() {
   };
 
   const remove = async (entry: SecureSafeEntryDto) => {
-    if (!window.confirm(`Delete the Secure Safe handle "${entry.handle}"?`)) return;
+    if (!await confirmAlert(tr("settings.securesafepage.deleteTheSecureSafeHandleValue", { handle: entry.handle }), { title: tr("settings.securesafepage.deleteSecureSafeHandle"), confirmLabel: tr("common.delete") })) return;
     setError("");
     try {
       await api.deleteSecureSafe(entry.id);
@@ -66,18 +68,19 @@ export default function SecureSafePage() {
   return (
     <>
       <PageHead
-        title="Secure Safe"
-        blurb="Store credentials behind reusable handles. Values are write-only and never returned by the API."
+        title={tr("settings.securesafepage.secureSafe")}
+        blurb={tr("settings.securesafepage.storeCredentialsBehindReusableHandlesValuesAre")}
       />
       <div className="secure-safe-note" role="note">
-        Agents may request or reference a handle, but cannot read its value. Never put credential
-        values in prompts, <code>AGENTS.md</code>, or project configuration.
-      </div>
+        {tr("settings.securesafepage.agentsMayRequestOrReferenceAHandle")}<code>{tr("settings.securesafepage.agentsMd")}</code>{tr("settings.securesafepage.orProjectConfiguration")}</div>
       <div className="secure-safe-settings-list" data-settings-item="secure-safe.entries">
-        <div className="stat-label">Saved handles ({entries.length})</div>
-        {loading && <div className="muted">Loading handles…</div>}
+        <div className="stat-label">{tr("settings.securesafepage.savedHandles")}{entries.length})</div>
+        {loading && <div className="muted">{tr("settings.securesafepage.loadingHandles")}</div>}
         {!loading && entries.length === 0 && !error && (
-          <EmptyState title="No saved handles" body="Add a credential below or respond to an agent request in chat." />
+          <EmptyState
+            title={tr("settings.securesafepage.noSavedHandles")}
+            body={tr("settings.securesafepage.addACredentialBelowOrRespondToAn")}
+          />
         )}
         {entries.map((entry) => (
           <div className="set-row" key={entry.handle}>
@@ -87,25 +90,25 @@ export default function SecureSafePage() {
               {entry.purpose && <div className="set-row-hint">{entry.purpose}</div>}
             </div>
             <div className="set-row-control">
-              <button className="small-btn danger-btn" onClick={() => void remove(entry)}>Delete</button>
+              <button className="small-btn danger-btn" onClick={() => void remove(entry)}>{tr("common.delete")}</button>
             </div>
           </div>
         ))}
       </div>
       <form className="secure-safe-form" onSubmit={(event) => void add(event)}>
-        <div className="stat-label">Add credential</div>
+        <div className="stat-label">{tr("settings.securesafepage.addCredential")}</div>
         <div className="secure-safe-form-row">
           <label>
-            <span>Label</span>
-            <input value={label} required placeholder="Deployment token" onChange={(event) => setLabel(event.target.value)} />
+            <span>{tr("settings.securesafepage.label")}</span>
+            <input value={label} required placeholder={tr("settings.securesafepage.deploymentToken")} onChange={(event) => setLabel(event.target.value)} />
           </label>
           <label>
-            <span>Handle</span>
+            <span>{tr("settings.securesafepage.handle")}</span>
             <input
               className="mono"
               value={handle}
               required
-              placeholder="deploy-token"
+              placeholder={tr("settings.securesafepage.deployToken")}
               autoCapitalize="none"
               spellCheck={false}
               onChange={(event) => setHandle(event.target.value)}
@@ -113,25 +116,25 @@ export default function SecureSafePage() {
           </label>
         </div>
         <label>
-          <span>Purpose <small>(optional)</small></span>
-          <input value={purpose} placeholder="Used for production deployments" onChange={(event) => setPurpose(event.target.value)} />
+          <span>{tr("settings.securesafepage.purpose")}{" "}<small>{tr("settings.securesafepage.optional")}</small></span>
+          <input value={purpose} placeholder={tr("settings.securesafepage.usedForProductionDeployments")} onChange={(event) => setPurpose(event.target.value)} />
         </label>
         <label>
-          <span>Credential value</span>
+          <span>{tr("settings.securesafepage.credentialValue")}</span>
           <input
             type="password"
             autoComplete="off"
             value={value}
             required
-            placeholder="Write-only value"
+            placeholder={tr("settings.securesafepage.writeOnlyValue")}
             onChange={(event) => setValue(event.target.value)}
           />
         </label>
         <div className="secure-safe-form-actions">
           <button className="small-btn" type="submit" disabled={busy || !handle.trim() || !label.trim() || !value}>
-            {busy ? "Saving…" : "Add to Secure Safe"}
+            {busy ? tr("common.saving") : tr("settings.securesafepage.addToSecureSafe")}
           </button>
-          <span className="muted">The value is cleared as soon as it is submitted.</span>
+          <span className="muted">{tr("settings.securesafepage.theValueIsClearedAsSoonAs")}</span>
         </div>
       </form>
       {error && <div className="form-error" role="alert">{error}</div>}

@@ -5,6 +5,7 @@ import {
   capabilityGroup,
   type ResolvedCapability,
 } from "../capabilities.ts";
+import { tr } from "../i18n/index.ts";
 
 interface CapabilityMenuProps {
   id: string;
@@ -38,7 +39,7 @@ export default function CapabilityMenu({
     .filter((group) => group.items.length > 0);
 
   return (
-    <div id={id} className={className} role="group" aria-label="More tools">
+    <div id={id} className={className} role="group" aria-label={tr("capabilitymenu.moreTools")}>
       {groups.map((group, groupIndex) => {
         const labelId = `${id}-group-${groupIndex}`;
         const itemsId = `${labelId}-items`;
@@ -66,7 +67,7 @@ export default function CapabilityMenu({
                   const available = capability.descriptor.available();
                   const reason = available
                     ? null
-                    : capability.descriptor.unavailableReason?.() ?? "Unavailable right now";
+                    : capability.descriptor.unavailableReason?.() ?? tr("capabilitymenu.unavailableRightNow");
                   const alias = capability.descriptor.technicalLabel
                     && capability.descriptor.technicalLabel !== capability.descriptor.label
                     ? ` (${capability.descriptor.technicalLabel})`
@@ -102,8 +103,7 @@ export default function CapabilityMenu({
             manageAction();
           }}
         >
-          Manage in Settings…
-        </button>
+          {tr("capabilitymenu.manageInSettings")}</button>
       )}
     </div>
   );

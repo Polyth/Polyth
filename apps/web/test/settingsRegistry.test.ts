@@ -54,17 +54,17 @@ test("Widgets & Layout exposes place-first workspace and composer controls", asy
   ]);
   assert.doesNotMatch(shell, /Change workspace preset|cmd\.customize/);
   assert.doesNotMatch(settings, /Choose a setup/);
-  assert.match(settings, /Widgets & Layout/);
-  assert.match(widgets, /<PageHead title="Widgets & Layout"/);
-  assert.match(packages, /<PageHead title="Packages"/);
+  assert.match(settings, /tr\("settingsview\.widgetsLayout"\)/);
+  assert.match(widgets, /<PageHead title=\{tr\("settings\.widgetspage\.widgetsLayout"\)\}/);
+  assert.match(packages, /<PageHead title=\{tr\("settings\.packagespage\.packages"\)\}/);
   assert.match(widgets, /data-settings-item=\{index === 0 \? "widgets\.capabilities"/);
   assert.match(widgets, /data-settings-item=\{index === 0 \? "widgets\.actions"/);
-  assert.match(widgets, /Where buttons appear/);
-  assert.match(widgets, /Top rail/);
-  assert.match(widgets, /Right rail/);
-  assert.match(widgets, /Centered workspace tools at the top/);
+  assert.match(widgets, /tr\("settings\.widgetspage\.whereButtonsAppear"\)/);
+  assert.match(widgets, /tr\("settings\.widgetspage\.topRail"\)/);
+  assert.match(widgets, /tr\("settings\.widgetspage\.rightRail"\)/);
+  assert.match(widgets, /tr\("settings\.widgetspage\.centeredWorkspaceButtonsAtThe"\)/);
   assert.doesNotMatch(widgets, /More tools \/ right rail|Technical menu|Session header stats/);
-  assert.match(widgets, /Composer actions/);
+  assert.match(widgets, /tr\("settings\.widgetspage\.composerActions"\)/);
   assert.doesNotMatch(widgets, /Top &amp; side workspace buttons|Workspace preview|Choose a starting layout|Help me set up|WidgetLibraryOverlay/);
 });
 

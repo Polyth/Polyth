@@ -16,6 +16,7 @@ import { api, type ProviderCatalogDto, type VisibilityStateDto } from "../../api
 import { EmptyState, PageHead, Seg, Toggle } from "./parts.tsx";
 import { modelDisplayName } from "../../composer/discovery.ts";
 import ProviderLogo from "../ProviderLogo.tsx";
+import { tr } from "../../i18n/index.ts";
 
 type Scope = "connected" | "all";
 
@@ -119,13 +120,13 @@ export default function ModelsPage() {
   const isOpen = (id: string) => query.length > 0 || prefs.expandedProviders.includes(id);
 
   if (providers === null && !error) {
-    return <><PageHead title="Providers & Models" /><EmptyState title="Loading catalog…" /></>;
+    return <><PageHead title={tr("settings.modelspage.providersModels")} /><EmptyState title={tr("settings.modelspage.loadingCatalog")} /></>;
   }
   if (providers !== null && providers.length === 0) {
     return (
       <>
-        <PageHead title="Providers & Models" />
-        <EmptyState title="No models available" body="Check that the backend is running and configured with providers." />
+        <PageHead title={tr("settings.modelspage.providersModels")} />
+        <EmptyState title={tr("settings.modelspage.noModelsAvailable")} body={tr("settings.modelspage.checkThatTheBackendIsRunningAnd")} />
       </>
     );
   }
@@ -135,28 +136,30 @@ export default function ModelsPage() {
   return (
     <>
       <PageHead
-        title="Providers & Models"
-        blurb="What the model picker offers. Toggles are written to the OpenCode config (disabled providers and per-provider blacklists), so every client sees the same catalog."
+        title={tr("settings.modelspage.providersModels")}
+        blurb={tr("settings.modelspage.whatTheModelPickerOffersTogglesAre")}
       />
       <div className="models-toolbar" data-settings-item="models.catalog">
         <input
           className="set-search models-search"
           value={q}
-          placeholder="Search models…"
-          aria-label="Search models"
+          placeholder={tr("settings.modelspage.searchModels")}
+          aria-label={tr("settings.modelspage.searchModels2")}
           onChange={(e) => setQ(e.target.value)}
         />
-        <Seg value={scope} options={[["connected", "Connected"], ["all", "All"]]} onChange={setScope} />
+        <Seg value={scope} options={[
+          ["connected", tr("sidebar.connected")],
+          ["all", tr("importsessionsdialog.all")],
+        ]} onChange={setScope} />
       </div>
 
-      <div className="provider-chips" role="group" aria-label="Filter by provider">
+      <div className="provider-chips" role="group" aria-label={tr("settings.modelspage.filterByProvider")}>
         <button
           className={`chip provider-chip ${providerFilter === null ? "on" : ""}`}
           aria-pressed={providerFilter === null}
           onClick={() => setProviderFilter(null)}
         >
-          All providers
-        </button>
+          {tr("settings.modelspage.allProviders")}</button>
         {chipProviders.map((p) => (
           <button
             key={p.id}
@@ -195,19 +198,24 @@ export default function ModelsPage() {
                 <button
                   className="provider-expand"
                   aria-expanded={expanded}
-                  aria-label={`${expanded ? "Collapse" : "Expand"} ${p.name}`}
+                  aria-label={expanded
+                    ? tr("settings.modelspage.collapseValue", { value: p.name })
+                    : tr("settings.modelspage.expandValue", { value: p.name })}
                   onClick={() => setModelProviderExpanded(p.id, !expanded)}
                 >
                   <span className="provider-drag" aria-hidden="true">⠿</span>
                   <span className={`provider-chevron ${expanded ? "open" : ""}`} aria-hidden="true">›</span>
                   <ProviderLogo providerID={p.id} providerName={p.name} className="set-provider-logo" />
                   <span className="provider-name">{p.name}</span>
-                  {!p.connected && <span className="tag provider-tag">not connected</span>}
+                  {!p.connected && <span className="tag provider-tag">{tr("settings.modelspage.notConnected")}</span>}
                   <span className="provider-count mono">{enabledCount}/{p.models.length}</span>
                 </button>
                 <Toggle
                   on={p.enabled}
-                  label={`${p.enabled ? "Disable" : "Enable"} provider ${p.name}`}
+                  label={tr("settings.modelspage.valueProviderValue", {
+                    value: p.enabled ? tr("settings.pages.disable") : tr("settings.pages.enable"),
+                    name: p.name,
+                  })}
                   onChange={(on) => void mutate(
                     p.id,
                     (catalog) => catalog.map((provider) => provider.id === p.id
@@ -226,7 +234,7 @@ export default function ModelsPage() {
                       <div key={m.key} className={`set-model-row ${m.enabled ? "" : "model-disabled"}`}>
                         <button
                           className={`star-btn ${fav ? "on" : ""}`}
-                          title={fav ? "Remove favorite" : "Add favorite"}
+                          title={fav ? tr("settings.modelspage.removeFavorite") : tr("settings.modelspage.addFavorite")}
                           aria-pressed={fav}
                           onClick={() => toggleModelFavorite(m.key)}
                         >{fav ? "★" : "☆"}</button>
@@ -237,9 +245,11 @@ export default function ModelsPage() {
                           className="switch switch-sm"
                           role="switch"
                           aria-checked={m.enabled}
-                          aria-label={`${m.enabled ? "Disable" : "Enable"} ${displayName}`}
+                          aria-label={m.enabled
+                            ? tr("settings.modelspage.disableValue", { value: displayName })
+                            : tr("settings.modelspage.enableValue", { value: displayName })}
                           disabled={busyKey === m.key || !p.enabled}
-                          title={!p.enabled ? "Enable the provider first" : m.enabled ? "Disable model" : "Enable model"}
+                          title={!p.enabled ? tr("settings.modelspage.enableTheProviderFirst") : m.enabled ? tr("settings.modelspage.disableModel") : tr("settings.modelspage.enableModel")}
                           onClick={() => void mutate(
                             m.key,
                             (catalog) => catalog.map((provider) => provider.id === p.id
@@ -253,13 +263,13 @@ export default function ModelsPage() {
                       </div>
                     );
                   })}
-                  {p.models.length === 0 && <div className="muted" style={{ fontSize: "calc(12px * var(--ui-font-scale, 1))", padding: "4px 8px" }}>No matches in this provider.</div>}
+                  {p.models.length === 0 && <div className="muted" style={{ fontSize: "calc(12px * var(--ui-font-scale, 1))", padding: "4px 8px" }}>{tr("settings.modelspage.noMatchesInThisProvider")}</div>}
                 </div>
               )}
             </div>
           );
         })}
-        {shown.length === 0 && <EmptyState title="No matches" body="Try the All scope or clear the search." />}
+        {shown.length === 0 && <EmptyState title={tr("settings.modelspage.noMatches")} body={tr("settings.modelspage.tryTheAllScopeOrClearThe")} />}
       </div>
     </>
   );

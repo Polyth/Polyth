@@ -1,36 +1,37 @@
 import type { PackageOnboardingTour } from "../types.ts";
+import { tr } from "../../../i18n/index.ts";
 
 export const GIT_TOUR: PackageOnboardingTour = {
   packageId: "git",
-  title: "Git",
+  title: tr("packages.onboarding.tours.git.git"),
   steps: [
     {
       id: "overview",
-      title: "Source control, in session",
-      body: "Git keeps the active project’s repository beside the conversation: status, staging, commits, branches, worktrees, and stashes without leaving the workspace.",
+      title: tr("packages.onboarding.tours.git.sourceControlInSession"),
+      body: tr("packages.onboarding.tours.git.gitKeepsTheActiveProjectSRepository"),
       media: { kind: "pattern", pattern: "branches" },
     },
     {
       id: "source-control",
-      title: "Work the repository from a pane",
-      body: "Toggle the Source control pane with Mod+Shift+G. Stage or unstage files, write a commit message, review diffs in Unified or Split layout, and manage branches, worktrees, and stashes.",
-      highlight: "Source control",
+      title: tr("packages.onboarding.tours.git.workTheRepositoryFromAPane"),
+      body: tr("packages.onboarding.tours.git.toggleTheSourceControlPaneWithMod"),
+      highlight: tr("packages.onboarding.tours.git.sourceControl"),
       highlightWhere: "pane",
       media: { kind: "pattern", pattern: "tiles" },
     },
     {
       id: "pending-changes",
-      title: "Pending changes at a glance",
-      body: "The Workspace files changed widget sits just above the composer, counting changed files and added or removed lines while agents work.",
-      highlight: "Workspace files changed",
+      title: tr("packages.onboarding.tours.git.pendingChangesAtAGlance"),
+      body: tr("packages.onboarding.tours.git.theWorkspaceFilesChangedWidgetSitsJust"),
+      highlight: tr("packages.onboarding.tours.git.workspaceFilesChanged"),
       highlightWhere: "composer",
       media: { kind: "pattern", pattern: "rays" },
     },
     {
       id: "personas",
-      title: "Commit as the right identity",
-      body: "On the Git settings page, save Git personas (label, author name, email) and apply one to write repository-local commit identity. The Branch name template accepts {slug} and {date}.",
-      highlight: "Git personas",
+      title: tr("packages.onboarding.tours.git.commitAsTheRightIdentity"),
+      body: tr("packages.onboarding.tours.git.onTheGitSettingsPageSaveGit"),
+      highlight: tr("packages.onboarding.tours.git.gitPersonas"),
       media: { kind: "pattern", pattern: "orbit" },
     },
   ],

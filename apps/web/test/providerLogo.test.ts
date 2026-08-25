@@ -57,10 +57,10 @@ async function render(props: ProviderLogoProps): Promise<string> {
   return renderToStaticMarkup(createElement(ProviderLogo, props));
 }
 
-test("known providers render accessible monochrome SVG marks", async () => {
+test("known providers render decorative monochrome SVG marks", async () => {
   const providers = [
-    "anthropic",
     "claude",
+    "anthropic",
     "openai",
     "google",
     "gemini",
@@ -82,12 +82,17 @@ test("known providers render accessible monochrome SVG marks", async () => {
     "nvidia",
     "huggingface",
     "cohere",
+    "cerebras",
+    "kimi-for-coding",
+    "codex",
+    "command-code",
   ];
 
   for (const providerID of providers) {
     const html = await render({ providerID });
-    assert.match(html, /role="img"/, `${providerID} has an image role`);
-    assert.match(html, /aria-label="[^"]+ provider"/, `${providerID} has an accessible name`);
+    assert.match(html, /aria-hidden="true"/, `${providerID} is hidden beside visible provider text`);
+    assert.doesNotMatch(html, /role="img"/, `${providerID} does not duplicate the adjacent name`);
+    assert.doesNotMatch(html, /aria-label=/, `${providerID} does not duplicate the adjacent name`);
     assert.match(html, /<svg\b/, `${providerID} renders an SVG`);
     assert.match(html, /(?:fill|stroke)="currentColor"/, `${providerID} inherits the theme color`);
     assert.doesNotMatch(html, /#[\da-f]{3,8}\b/i, `${providerID} does not render a palette color`);
@@ -95,10 +100,13 @@ test("known providers render accessible monochrome SVG marks", async () => {
   }
 
   const namedAlias = await render({ providerID: "private-endpoint", providerName: "Claude Enterprise" });
-  assert.match(namedAlias, /data-provider="anthropic"/);
+  assert.match(namedAlias, /data-provider="claude"/);
+
+  const kimiEndpoint = await render({ providerID: "kimi-for-coding" });
+  assert.match(kimiEndpoint, /data-provider="zai"/);
 });
 
-test("OpenCode variants resolve to distinct monochrome SVG marks", async () => {
+test("OpenCode variants use the OpenCode brand mark", async () => {
   const variants: Array<{ props: ProviderLogoProps; provider: string }> = [
     { props: { providerID: "opencode-zen" }, provider: "opencode-zen" },
     { props: { providerID: "private-endpoint", providerName: "OpenCode Zen" }, provider: "opencode-zen" },
@@ -112,7 +120,7 @@ test("OpenCode variants resolve to distinct monochrome SVG marks", async () => {
     const html = await render(props);
     assert.match(html, new RegExp(`data-provider="${provider}"`));
     assert.match(html, /<svg\b/);
-    assert.match(html, /stroke="currentColor"/);
+    assert.match(html, /fill="currentColor"/);
     assert.doesNotMatch(html, /#[\da-f]{3,8}\b/i);
   }
 
@@ -149,7 +157,6 @@ test("provider surfaces use ProviderLogo without brand palette rules", () => {
   assert.match(css, /\.provider-logo > svg\s*\{[^}]*width:\s*100%;[^}]*height:\s*100%/s);
   const expectedLogoClasses = [
     "agent-reply-mark",
-    "composer-provider-mark",
     "model-chip-provider-logo",
     "model-provider-logo",
     "model-trigger-logo",
@@ -159,10 +166,10 @@ test("provider surfaces use ProviderLogo without brand palette rules", () => {
     "run-provider-logo",
     "set-provider-logo",
     "usage-legend-logo",
+    "usage-model-logo",
     "usage-provider-mark",
     "usage-provider-mark-large",
     "usage-provider-mark-regular",
-    "usage-provider-mark-small",
   ].sort();
   const bareLogoClasses = providerLogoClassNames();
   assert.deepEqual(bareLogoClasses, expectedLogoClasses, "every ProviderLogo CSS class is audited");

@@ -5,13 +5,14 @@ import { useCallback, useEffect, useState } from "react";
 import { api, type KnowledgeItemDto, type KnowledgeKindDto, type KnowledgeListItemDto } from "../api.ts";
 import { useStore } from "../store.ts";
 import { ago } from "../format.ts";
+import { tr } from "../i18n/index.ts";
 
 const KINDS: Array<{ id: KnowledgeKindDto | ""; label: string }> = [
-  { id: "", label: "All" },
-  { id: "note", label: "Notes" },
-  { id: "spec", label: "Specs" },
-  { id: "plan", label: "Plans" },
-  { id: "memory", label: "Memory" },
+  { id: "", label: tr("knowledgepanel.all") },
+  { id: "note", label: tr("knowledgepanel.notes") },
+  { id: "spec", label: tr("knowledgepanel.specs") },
+  { id: "plan", label: tr("knowledgepanel.plans") },
+  { id: "memory", label: tr("knowledgepanel.memory") },
 ];
 
 interface EditorState {
@@ -46,7 +47,7 @@ export default function KnowledgePanel() {
   }, [projectId, kind, q]);
   useEffect(() => { reload(); }, [reload]);
 
-  if (!projectId) return <div className="rail-empty">Open a project to keep notes, plans, and memory.</div>;
+  if (!projectId) return <div className="rail-empty">{tr("knowledgepanel.openAProjectToKeepNotesPlans")}</div>;
 
   const run = async (fn: () => Promise<unknown>, doneMsg = "") => {
     try {
@@ -85,19 +86,19 @@ export default function KnowledgePanel() {
       <div className="knowledge-editor">
         <div className="view-toolbar-row">
           <select value={editor.kind} onChange={(e) => setEditor({ ...editor, kind: e.target.value as KnowledgeKindDto })}>
-            <option value="note">Note</option>
-            <option value="spec">Spec</option>
-            <option value="plan">Plan</option>
-            <option value="memory">Memory</option>
+            <option value="note">{tr("knowledgepanel.note")}</option>
+            <option value="spec">{tr("knowledgepanel.spec")}</option>
+            <option value="plan">{tr("knowledgepanel.plan")}</option>
+            <option value="memory">{tr("knowledgepanel.memory")}</option>
           </select>
           <span className="header-spacer" />
-          <button className="small-btn" onClick={() => setEditor(null)}>Cancel</button>
-          <button className="small-btn primary-btn" disabled={!editor.title.trim()} onClick={save}>Save</button>
+          <button className="small-btn" onClick={() => setEditor(null)}>{tr("common.cancel")}</button>
+          <button className="small-btn primary-btn" disabled={!editor.title.trim()} onClick={save}>{tr("common.save")}</button>
         </div>
-        <input placeholder="Title" value={editor.title} onChange={(e) => setEditor({ ...editor, title: e.target.value })} />
-        <textarea rows={10} placeholder="Body (Markdown welcome)" value={editor.body} onChange={(e) => setEditor({ ...editor, body: e.target.value })} />
-        <input placeholder="Tags, comma separated" value={editor.tags} onChange={(e) => setEditor({ ...editor, tags: e.target.value })} />
-        {editor.id !== null && <div className="muted" style={{ fontSize: "calc(12px * var(--ui-font-scale, 1))" }}>Editing revision {editor.revision}; saving bumps it.</div>}
+        <input placeholder={tr("knowledgepanel.title")} value={editor.title} onChange={(e) => setEditor({ ...editor, title: e.target.value })} />
+        <textarea rows={10} placeholder={tr("knowledgepanel.bodyMarkdownWelcome")} value={editor.body} onChange={(e) => setEditor({ ...editor, body: e.target.value })} />
+        <input placeholder={tr("knowledgepanel.tagsCommaSeparated")} value={editor.tags} onChange={(e) => setEditor({ ...editor, tags: e.target.value })} />
+        {editor.id !== null && <div className="muted" style={{ fontSize: "calc(12px * var(--ui-font-scale, 1))" }}>{tr("knowledgepanel.editingRevision")}{" "}{editor.revision}{tr("knowledgepanel.savingBumpsIt")}</div>}
         {error && <div className="form-error">{error}</div>}
       </div>
     );
@@ -106,12 +107,12 @@ export default function KnowledgePanel() {
   return (
     <div className="knowledge-panel">
       <div className="view-toolbar-row">
-        <input className="knowledge-search" placeholder="Search knowledge…" value={q} onChange={(e) => setQ(e.target.value)} />
+        <input className="knowledge-search" placeholder={tr("knowledgepanel.searchKnowledge")} value={q} onChange={(e) => setQ(e.target.value)} />
         {sessionId && (
           <button
             className="small-btn"
             disabled={distilling}
-            title="Distill the current session into a note draft (small model) — you review before saving"
+            title={tr("knowledgepanel.distillTheCurrentSessionIntoANote")}
             onClick={() => {
               setDistilling(true);
               void run(async () => {
@@ -119,9 +120,9 @@ export default function KnowledgePanel() {
                 setEditor({ ...EMPTY_EDITOR, title: draft.title, body: draft.body, sourceSessionId: sessionId });
               }).finally(() => setDistilling(false));
             }}
-          >{distilling ? "Distilling…" : "From chat"}</button>
+          >{distilling ? tr("knowledgepanel.distilling") : tr("knowledgepanel.fromChat")}</button>
         )}
-        <button className="small-btn" title="New knowledge item" onClick={() => setEditor({ ...EMPTY_EDITOR })}>New</button>
+        <button className="small-btn" title={tr("knowledgepanel.newKnowledgeItem")} onClick={() => setEditor({ ...EMPTY_EDITOR })}>{tr("common.new")}</button>
       </div>
       <div className="seg knowledge-kinds">
         {KINDS.map((k) => (
@@ -130,7 +131,7 @@ export default function KnowledgePanel() {
       </div>
       {error && <div className="form-error">{error}</div>}
       {notice && <div className="knowledge-notice">{notice}</div>}
-      {items.length === 0 && <div className="rail-empty">{q ? "No matches." : "No knowledge yet. Capture notes, plans, or memory for this project."}</div>}
+      {items.length === 0 && <div className="rail-empty">{q ? tr("knowledgepanel.noMatches") : tr("knowledgepanel.noKnowledgeYetCaptureNotesPlansOr")}</div>}
       {items.map((it) => (
         <div key={it.id} className="knowledge-card">
           <div className="knowledge-card-head">
@@ -139,25 +140,28 @@ export default function KnowledgePanel() {
           </div>
           {it.snippet && <div className="knowledge-snippet">{it.snippet}</div>}
           <div className="knowledge-meta">
-            <span>rev {it.revision}</span>
+            <span>{tr("knowledgepanel.rev")}{" "}{it.revision}</span>
             <span>·</span>
-            <span>{ago(it.updatedAt)} ago</span>
+            <span>{ago(it.updatedAt)} {tr("knowledgepanel.ago")}</span>
             {it.tags.length > 0 && <><span>·</span><span>{it.tags.join(", ")}</span></>}
           </div>
           <div className="knowledge-actions">
-            <button className="small-btn" onClick={() => openEdit(it.id)}>Edit</button>
+            <button className="small-btn" onClick={() => openEdit(it.id)}>{tr("common.edit")}</button>
             {sessionId && (
               <button
                 className="small-btn"
-                title="Log this exact revision into the current session"
-                onClick={() => void run(() => api.knowledgeAttach(sessionId, it.id, it.revision), "Attached to session")}
-              >Attach</button>
+                title={tr("knowledgepanel.logThisExactRevisionIntoTheCurrent")}
+                onClick={() => void run(
+                  () => api.knowledgeAttach(sessionId, it.id, it.revision),
+                  tr("knowledgepanel.attachedToSession"),
+                )}
+              >{tr("knowledgepanel.attach")}</button>
             )}
-            <button className="small-btn danger-btn" onClick={() => void run(() => api.knowledgeDelete(it.id))}>Delete</button>
+            <button className="small-btn danger-btn" onClick={() => void run(() => api.knowledgeDelete(it.id))}>{tr("common.delete")}</button>
           </div>
         </div>
       ))}
-      {total > items.length && <div className="muted" style={{ fontSize: "calc(12px * var(--ui-font-scale, 1))" }}>{total - items.length} more not shown — refine your search.</div>}
+      {total > items.length && <div className="muted" style={{ fontSize: "calc(12px * var(--ui-font-scale, 1))" }}>{total - items.length} {tr("knowledgepanel.moreNotShownRefineYourSearch")}</div>}
     </div>
   );
 }

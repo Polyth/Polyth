@@ -4,6 +4,7 @@ import type { RenderModel } from "../reduce.ts";
 import { fmtCost, fmtTokens } from "../format.ts";
 import { Icon } from "../icons.tsx";
 import { setUiSettings, useUiSettings, type HeaderMetricId } from "../uiPrefs.ts";
+import { tr } from "../i18n/index.ts";
 
 export function formatMetricDuration(ms: number): string {
   const seconds = Math.max(0, Math.floor(ms / 1000));
@@ -46,14 +47,14 @@ export default function ChatMetrics({
   const messages = model.messages.filter((message) =>
     message.kind === "user" || message.kind === "assistant").length;
   const metrics: Record<HeaderMetricId, { label: string; value: string; icon: ReactNode }> = {
-    tokens: { label: "Tokens", value: fmtTokens(tokens).toUpperCase(), icon: <Icon.context /> },
-    messages: { label: "Messages", value: String(messages), icon: <Icon.events /> },
-    duration: { label: "Duration", value: formatMetricDuration(sessionDuration(session, model, now)), icon: <Icon.clock /> },
-    cost: { label: "Cost", value: fmtCost(model.totals.cost), icon: <Icon.usage /> },
+    tokens: { label: tr("chatmetrics.tokens"), value: fmtTokens(tokens).toUpperCase(), icon: <Icon.context /> },
+    messages: { label: tr("chatmetrics.messages"), value: String(messages), icon: <Icon.events /> },
+    duration: { label: tr("chatmetrics.duration"), value: formatMetricDuration(sessionDuration(session, model, now)), icon: <Icon.clock /> },
+    cost: { label: tr("chatmetrics.cost"), value: fmtCost(model.totals.cost), icon: <Icon.usage /> },
   };
 
   return (
-    <div className="chat-metrics" aria-label="Session metrics">
+    <div className="chat-metrics" aria-label={tr("chatmetrics.sessionMetrics")}>
       {headerMetrics.map((id) => {
         const metric = metrics[id];
         return (

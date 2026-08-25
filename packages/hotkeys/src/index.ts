@@ -24,7 +24,7 @@ export const HOTKEY_ACTIONS: ReadonlyArray<{ id: HotkeyAction; label: string; pl
   { id: "focusComposer", label: "Focus composer", pluginName: "Composer" },
   { id: "viewFiles", label: "Files view", pluginName: "Files" },
   { id: "viewGit", label: "Git view", pluginName: "Git" },
-  { id: "viewTerminal", label: "Terminal view", pluginName: "Terminal" },
+  { id: "viewTerminal", label: "Open Terminal", pluginName: "Terminal" },
 ];
 
 export const DEFAULT_KEYMAP: Record<HotkeyAction, string> = {
@@ -36,7 +36,7 @@ export const DEFAULT_KEYMAP: Record<HotkeyAction, string> = {
   focusComposer: "mod+i",
   viewFiles: "mod+shift+e",
   viewGit: "mod+shift+g",
-  viewTerminal: "mod+j",
+  viewTerminal: "mod+`",
 };
 
 export interface KeyEventLike {

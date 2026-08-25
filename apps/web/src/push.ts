@@ -4,6 +4,7 @@
 // loopback fallback (localhost counts as secure), otherwise it reports
 // unsupported and the in-page notifier remains the only channel.
 import { api } from "./api.ts";
+import { tr } from "./i18n/index.ts";
 
 export function pushSupported(): boolean {
   return typeof navigator !== "undefined"
@@ -15,9 +16,9 @@ export function pushSupported(): boolean {
 
 /** Why push is unavailable, for the settings hint; null when it works. */
 export function pushUnsupportedReason(): string | null {
-  if (typeof navigator === "undefined" || !("serviceWorker" in navigator)) return "This browser has no service worker support.";
-  if (typeof window === "undefined" || !("PushManager" in window)) return "This browser has no Web Push support.";
-  if (!window.isSecureContext) return "Push needs a secure context — open Polyth over https or on localhost.";
+  if (typeof navigator === "undefined" || !("serviceWorker" in navigator)) return tr("push.noServiceWorker");
+  if (typeof window === "undefined" || !("PushManager" in window)) return tr("push.noWebPush");
+  if (!window.isSecureContext) return tr("push.secureContextRequired");
   return null;
 }
 
@@ -55,10 +56,10 @@ export async function enablePush(): Promise<void> {
     await Notification.requestPermission();
   }
   if (typeof Notification === "undefined" || Notification.permission !== "granted") {
-    throw new Error("Notification permission was not granted.");
+    throw new Error(tr("push.notificationPermissionWasNotGranted"));
   }
   const reg = await registerServiceWorker();
-  if (!reg) throw new Error("The service worker could not be registered.");
+  if (!reg) throw new Error(tr("push.theServiceWorkerCouldNotBeRegistered"));
   const { publicKey } = await api.pushKey();
   const sub = await reg.pushManager.subscribe({
     userVisibleOnly: true,

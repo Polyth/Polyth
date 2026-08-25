@@ -1,7 +1,8 @@
 import type { SessionProjection } from "@polyth/contracts";
 import { fmtTokens } from "../format.ts";
-import { providerUsageDistribution } from "../usageShare.ts";
+import { providerUsageDistribution, providerUsageLabel } from "../usageShare.ts";
 import ProviderLogo from "../components/ProviderLogo.tsx";
+import { formatNumber, tr } from "../i18n/index.ts";
 
 const PROVIDER_SHARE_COLORS = [
   "var(--accent)",
@@ -65,18 +66,20 @@ export function ProviderUsageDonut({ sessions }: { sessions: readonly SessionPro
   });
   const totalLabel = distribution.metric === "tokens"
     ? fmtTokens(distribution.total)
-    : `${distribution.total} session${distribution.total === 1 ? "" : "s"}`;
+    : distribution.total === 1
+      ? tr("usage.projectui.oneSession")
+      : tr("usage.projectui.valueSessions", { count: distribution.total });
 
   return (
     <section className="provider-share-card" aria-labelledby="provider-share-title">
       <div>
-        <div className="stat-label" id="provider-share-title">Usage by provider</div>
-        <p>Share of project {distribution.metric === "tokens" ? "tokens" : "sessions"}.</p>
+        <div className="stat-label" id="provider-share-title">{tr("usage.projectui.usageByProvider")}</div>
+        <p>{tr("usage.projectui.shareOfProject")}{" "}{distribution.metric === "tokens" ? tr("usage.projectui.tokens") : tr("usage.projectui.sessions")}.</p>
       </div>
       <div
         className="provider-share-donut"
         role="img"
-        aria-label={`Provider usage share by ${distribution.metric}`}
+        aria-label={tr("usage.projectui.providerUsageShareByValue", { metric: distribution.metric })}
       >
         <svg viewBox="0 0 120 120" aria-hidden="true">
           <circle className="provider-share-track" cx="60" cy="60" r="44" pathLength="100" />
@@ -94,15 +97,15 @@ export function ProviderUsageDonut({ sessions }: { sessions: readonly SessionPro
             />
           ))}
         </svg>
-        <div><strong>{totalLabel}</strong><span>total</span></div>
+        <div><strong>{totalLabel}</strong><span>{tr("usage.projectui.total")}</span></div>
       </div>
       <div className="provider-share-legend">
         {arcs.map((provider) => (
           <div key={provider.providerId}>
             <ProviderLogo providerID={provider.providerId} className="provider-share-logo" />
             <i style={{ background: provider.color }} />
-            <span>{provider.providerId}</span>
-            <strong>{Math.round(provider.share * 100)}%</strong>
+            <span>{providerUsageLabel(provider.providerId)}</span>
+            <strong>{formatNumber(provider.share, { style: "percent", maximumFractionDigits: 0 })}</strong>
           </div>
         ))}
       </div>

@@ -7,6 +7,7 @@ import { PageHead, Row } from "./parts.tsx";
 import { modelSupportsTextWorkflow } from "../../composer/discovery.ts";
 import { roleKind, useRolePrefs } from "../../rolePrefs.ts";
 import ModelPicker from "../ModelPicker.tsx";
+import { tr } from "../../i18n/index.ts";
 
 export default function SessionsPage() {
   const models = useStore((s) => s.models);
@@ -23,6 +24,14 @@ export default function SessionsPage() {
     : mainAgents.find((agent) => agent.name.toLowerCase() === "build")?.name
       ?? mainAgents[0]?.name
     ?? "";
+  const defaultModel = (defaults.defaultModel
+    ? textModels.find((model) =>
+        model.providerID === defaults.defaultModel?.providerID
+        && model.modelID === defaults.defaultModel.modelID)
+    : undefined) ?? textModels[0];
+  const defaultModelRef = defaultModel
+    ? { providerID: defaultModel.providerID, modelID: defaultModel.modelID }
+    : undefined;
   const thinkingOptions = [...new Set(models.flatMap((model) => model.variants ?? []))];
   const [eligible, setEligible] = useState<number | null>(null);
   const [busy, setBusy] = useState(false);
@@ -44,10 +53,12 @@ export default function SessionsPage() {
       const result = await api.runSessionRetention(retentionDays);
       setEligible(Math.max(0, result.eligibleCount - result.succeeded.length));
       if (result.failed.length > 0) {
-        setUiError(`${result.failed.length} eligible session(s) could not be archived.`);
+        setUiError(tr("settings.sessionspage.eligibleSessionsCouldNotArchive", {
+          count: result.failed.length,
+        }));
       }
     } catch (e) {
-      setUiError(friendlyError("Couldn’t clean up expired sessions", e));
+      setUiError(friendlyError(tr("common.error"), e));
     } finally {
       setBusy(false);
     }
@@ -55,84 +66,87 @@ export default function SessionsPage() {
 
   return (
     <>
-      <PageHead title="Sessions" blurb="Set defaults and retention for sessions." />
-      <div className="stat-label session-settings-heading">Session Defaults</div>
+      <PageHead title={tr("settings.sessionspage.sessions")} blurb={tr("settings.sessionspage.setDefaultsAndRetentionForSessions")} />
+      <div className="stat-label session-settings-heading">{tr("settings.sessionspage.sessionDefaults")}</div>
       <p className="session-default-summary">
-        New sessions will start with: <strong>OpenCode agent default</strong>
+        {tr("settings.sessionspage.newSessionsWillStartWith")}{" "}
+        <strong>{defaultModel?.name ?? tr("settings.sessionspage.noModelAvailable")}</strong>
         {defaultAgent && <> / <strong>{defaultAgent}</strong></>}
       </p>
-      <Row label="Default Model" hint="The model selected when a project does not provide an override." itemId="sessions.defaultModel">
+      <Row label={tr("settings.sessionspage.defaultModel")} hint={tr("settings.sessionspage.theModelSelectedWhenAProjectDoes")} itemId="sessions.defaultModel">
         <ModelPicker
           direction="down"
           models={textModels}
           value={defaults.defaultModel}
+          recommended={defaultModelRef}
           onPick={(model) => {
             setGlobalDefaultModel(model);
             updateSettings({ defaultModel: model ? `${model.providerID}/${model.modelID}` : "" });
           }}
         />
       </Row>
-      <Row label="Default Thinking" hint="Applied to models that offer thinking variants.">
+      <Row label={tr("settings.sessionspage.defaultThinking")} hint={tr("settings.sessionspage.appliedToModelsThatOfferThinkingVariants")}>
         <select
-          aria-label="Default Thinking"
+          aria-label={tr("settings.sessionspage.defaultThinking")}
           value={defaults.defaultThinking ?? ""}
           onChange={(event) => setSessionDefaults({ defaultThinking: event.target.value || undefined })}
         >
-          <option value="">Default</option>
+          <option value="">{tr("settings.sessionspage.default")}</option>
           {thinkingOptions.map((thinking) => <option key={thinking} value={thinking}>{thinking}</option>)}
         </select>
       </Row>
-      <Row label="Default Agent" hint="OpenCode role used when no project or session override is selected.">
+      <Row label={tr("settings.sessionspage.defaultAgent")} hint={tr("settings.sessionspage.opencodeRoleUsedWhenNoProjectOr")}>
         <select
-          aria-label="Default Agent"
+          aria-label={tr("settings.sessionspage.defaultAgent")}
           value={defaultAgent}
           onChange={(event) => setSessionDefaults({ defaultAgent: event.target.value || undefined })}
         >
-          <option value="">OpenCode agent default</option>
+          <option value="">{tr("settings.sessionspage.opencodeAgentDefault")}</option>
           {mainAgents.map((agent) => <option key={agent.name} value={agent.name}>{agent.name}</option>)}
         </select>
       </Row>
-      <Row label="Small Model" hint="Override model for lightweight summaries and generated metadata.">
+      <Row label={tr("settings.sessionspage.smallModel")} hint={tr("settings.sessionspage.overrideModelForLightweightSummariesAndGenerated")}>
         <ModelPicker
           direction="down"
           models={textModels}
           value={defaults.smallModel}
+          recommended={defaultModelRef}
           onPick={(smallModel) => setSessionDefaults({ smallModel })}
         />
       </Row>
-      <Row label="Changes Walkthrough Model" hint="Model used when generating a changes walkthrough.">
+      <Row label={tr("settings.sessionspage.changesWalkthroughModel")} hint={tr("settings.sessionspage.modelUsedWhenGeneratingAChangesWalkthrough")}>
         <ModelPicker
           direction="down"
           models={textModels}
           value={defaults.walkthroughModel}
+          recommended={defaultModelRef}
           onPick={(walkthroughModel) => setSessionDefaults({ walkthroughModel })}
         />
       </Row>
 
-      <div className="stat-label session-settings-heading">Session Retention</div>
-      <Row label="Retention Period" hint="Idle completed sessions older than this become eligible for cleanup.">
+      <div className="stat-label session-settings-heading">{tr("settings.sessionspage.sessionRetention")}</div>
+      <Row label={tr("settings.sessionspage.retentionPeriod")} hint={tr("settings.sessionspage.idleCompletedSessionsOlderThanThisBecome")}>
         <label className="retention-days">
           <input
             type="number"
             min={1}
             max={3650}
             value={retentionDays}
-            aria-label="Retention Period"
+            aria-label={tr("settings.sessionspage.retentionPeriod")}
             onChange={(event) => setSessionDefaults({ retentionDays: Number(event.target.value) || 1 })}
           />
-          <span>days</span>
+          <span>{tr("settings.sessionspage.days")}</span>
         </label>
       </Row>
       <p className="session-retention-note">
-        Expired sessions are archived only when you run manual cleanup. Running, waiting, and already archived sessions are skipped.
-      </p>
-      <Row label="Manual Cleanup" hint="Archive every session that currently meets the retention rule.">
+        {tr("settings.sessionspage.expiredSessionsAreArchivedOnlyWhenYou")}</p>
+      <Row label={tr("settings.sessionspage.manualCleanup")} hint={tr("settings.sessionspage.archiveEverySessionThatCurrentlyMeetsThe")}>
         <button className="small-btn" disabled={busy || !eligible} onClick={() => void cleanup()}>
-          {busy ? "Archiving…" : "Archive eligible sessions"}
+          {busy ? tr("settings.sessionspage.archiving") : tr("settings.sessionspage.archiveEligibleSessions")}
         </button>
       </Row>
       <div className="retention-eligible" role="status">
-        Eligible for archiving right now: <strong>{eligible ?? "…"}</strong>
+        {tr("settings.sessionspage.eligibleForArchivingRightNow")}{" "}<strong>{eligible ?? "…"}</strong>
       </div>
     </>
   );

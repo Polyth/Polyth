@@ -6,6 +6,7 @@
 import { createElement, type ReactNode } from "react";
 import { listSlots } from "../slots.ts";
 import { registerPaneProvider, type PaneResourceContext } from "./paneProviders.ts";
+import { tr } from "../i18n/index.ts";
 
 const SLOT = "workspace.main.tabs";
 
@@ -19,7 +20,7 @@ function PluginPaneBody(ctx: PaneResourceContext): ReactNode {
     return createElement(
       "div",
       { className: "editor-empty" },
-      createElement("p", { className: "muted" }, "This tab's plugin is no longer active."),
+      createElement("p", { className: "muted" }, tr("workspace.mainslotpanes.pluginNoLongerActive")),
     );
   }
   // Bounded context only: canonical ids + visibility. No filesystem authority,

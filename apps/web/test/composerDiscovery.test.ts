@@ -5,6 +5,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { SlashCommand, SnippetDef, StrictListResult } from "../src/api.ts";
+import { tr } from "../src/i18n/index.ts";
 
 const mem = new Map<string, string>();
 (globalThis as { localStorage?: unknown }).localStorage = {
@@ -116,20 +117,26 @@ test("add menu: exact rows, order, sigil hints, and no Skills/Variant", () => {
     snippets: { state: "empty" },
   });
   assert.deepEqual(rows.map((r) => r.label), [
-    "Add context", "Upload files…", "Mention project file…",
-    "Link GitHub issue or pull request…", "Attach goal…",
-    "Compose", "Commands", "Snippets", "Shell command",
+    tr("composer.discovery.addContext"),
+    tr("composer.discovery.uploadFiles"),
+    tr("composer.discovery.mentionProjectFile"),
+    tr("composer.discovery.linkGithubIssueOrPullRequest"),
+    tr("composer.discovery.attachGoal"),
+    tr("composer.discovery.compose"),
+    tr("composer.discovery.commands"),
+    tr("composer.discovery.snippets"),
+    tr("composer.discovery.shellCommand"),
   ]);
   const byId = new Map(rows.map((r) => [r.id, r]));
-  assert.equal(byId.get("upload")?.description, "Copies files into this project’s _inbox");
-  assert.equal(byId.get("github")?.description, "Adds a link only");
+  assert.equal(byId.get("upload")?.description, tr("composer.discovery.copiesFilesIntoThisProjectSInbox"));
+  assert.equal(byId.get("github")?.description, tr("composer.discovery.addsALinkOnly"));
   assert.equal(byId.get("mention")?.hint, "@");
   assert.equal(byId.get("commands")?.hint, "/");
   assert.equal(byId.get("snippets")?.hint, "#");
   assert.equal(byId.get("shell")?.hint, "!");
-  assert.equal(byId.get("shell")?.description, "Permission checked; output is added to context");
-  assert.equal(byId.get("commands")?.detail, "2 available");
-  assert.equal(byId.get("snippets")?.detail, "No snippets yet");
+  assert.equal(byId.get("shell")?.description, tr("composer.discovery.permissionCheckedOutputIsAddedToContext"));
+  assert.equal(byId.get("commands")?.detail, tr("composer.discovery.valueAvailable", { value: 2 }));
+  assert.equal(byId.get("snippets")?.detail, tr("composer.discovery.noSnippetsYet"));
   // capability honesty: nothing advertises Skills or a model Variant
   const all = JSON.stringify(rows).toLowerCase();
   assert.ok(!all.includes("skill"));
@@ -152,8 +159,8 @@ test("add menu: visible disabled reasons for missing project/session and drafted
   });
   assert.equal(drafted.find((r) => r.id === "shell")?.disabledReason, SHELL_DRAFT_BLOCK);
   assert.equal(drafted.find((r) => r.id === "goal"), undefined); // plugin off: row absent
-  assert.equal(drafted.find((r) => r.id === "commands")?.detail, "No commands available");
-  assert.equal(drafted.find((r) => r.id === "snippets")?.detail, "Currently unavailable");
+  assert.equal(drafted.find((r) => r.id === "commands")?.detail, tr("composer.discovery.noCommandsAvailable"));
+  assert.equal(drafted.find((r) => r.id === "snippets")?.detail, tr("composer.discovery.currentlyUnavailable"));
 });
 
 // ---------------------------------------------------------------- autocomplete
@@ -173,14 +180,14 @@ test("option ids derive from token kind + identity, never the array index", () =
 });
 
 test("command autocomplete states carry the exact honest copy", () => {
-  assert.equal(commandAutocomplete({ state: "loading" }, "").status?.text, "Loading commands…");
+  assert.equal(commandAutocomplete({ state: "loading" }, "").status?.text, tr("composer.discovery.loadingCommands"));
   assert.equal(
     commandAutocomplete({ state: "unavailable", reason: "500" }, "").status?.text,
-    "Commands are unavailable for this project.",
+    tr("composer.discovery.commandsUnavailable"),
   );
-  assert.equal(commandAutocomplete({ state: "empty" }, "").status?.text, "No commands available");
+  assert.equal(commandAutocomplete({ state: "empty" }, "").status?.text, tr("composer.discovery.noCommandsAvailable"));
   const avail = { state: "available" as const, items: [cmd("plan")] };
-  assert.equal(commandAutocomplete(avail, "zz").status?.text, "No commands match “zz”.");
+  assert.equal(commandAutocomplete(avail, "zz").status?.text, tr("composer.discovery.noCommandsMatch", { query: "zz" }));
   const hit = commandAutocomplete(avail, "pl");
   assert.equal(hit.status, null);
   assert.equal(hit.options[0]?.label, "/plan");
@@ -188,24 +195,24 @@ test("command autocomplete states carry the exact honest copy", () => {
 
 test("snippet autocomplete: empty state offers snippet creation; failure does not", () => {
   const empty = snippetAutocomplete({ state: "empty" }, "");
-  assert.equal(empty.status?.text, "No snippets yet.");
+  assert.equal(empty.status?.text, tr("composer.discovery.noSnippetsYet"));
   assert.equal(empty.status?.createSnippet, true);
   const down = snippetAutocomplete({ state: "unavailable", reason: "x" }, "");
-  assert.equal(down.status?.text, "Snippets are unavailable for this project.");
+  assert.equal(down.status?.text, tr("composer.discovery.snippetsUnavailable"));
   assert.ok(!down.status?.createSnippet);
-  assert.equal(snippetAutocomplete({ state: "loading" }, "").status?.text, "Loading snippets…");
+  assert.equal(snippetAutocomplete({ state: "loading" }, "").status?.text, tr("composer.discovery.loadingSnippets"));
   const avail = { state: "available" as const, items: [snip("sig")] };
-  assert.equal(snippetAutocomplete(avail, "zz").status?.text, "No snippets match “zz”.");
+  assert.equal(snippetAutocomplete(avail, "zz").status?.text, tr("composer.discovery.noSnippetsMatch", { query: "zz" }));
   assert.equal(snippetAutocomplete(avail, "si").options[0]?.label, "#sig");
 });
 
 test("file autocomplete: instruction, pending, empty, and results are distinct", () => {
   assert.equal(
     fileAutocomplete("", "done", []).status?.text,
-    "Type a file or folder name to search this project.",
+    tr("composer.discovery.typeFileOrFolder"),
   );
-  assert.equal(fileAutocomplete("src", "pending", []).status?.text, "Searching project files…");
-  assert.equal(fileAutocomplete("zz", "done", []).status?.text, "No project files match “zz”.");
+  assert.equal(fileAutocomplete("src", "pending", []).status?.text, tr("composer.discovery.searchingProjectFiles"));
+  assert.equal(fileAutocomplete("zz", "done", []).status?.text, tr("composer.discovery.noProjectFilesMatch", { query: "zz" }));
   const hits = fileAutocomplete("a", "done", [
     { path: "src/app.ts", kind: "file" }, { path: "src", kind: "dir" },
   ]);
@@ -221,10 +228,10 @@ test("model detail renders only contract-supplied fields — no cost/modality/va
   assert.equal(contextTokensLabel(undefined), null);
   assert.equal(contextTokensLabel("128k"), null); // non-numeric never rendered
   assert.equal(contextTokensLabel(0), null);
-  assert.equal(contextTokensLabel(128_000), "128k context");
-  assert.equal(contextTokensLabel(600), "600 context");
+  assert.equal(contextTokensLabel(128_000), tr("modelpicker.valueKContext", { value: 128 }));
+  assert.equal(contextTokensLabel(600), tr("modelpicker.valueContext", { value: 600 }));
   const full = modelDetail({ providerID: "anthropic", providerName: "Anthropic", context: 200_000, connected: false });
-  assert.equal(full, "Anthropic · 200k context · not connected");
+  assert.equal(full, `Anthropic · ${tr("modelpicker.valueKContext", { value: 200 })} · ${tr("settings.modelspage.notConnected")}`);
   const bare = modelDetail({ providerID: "openai" });
   assert.equal(bare, "openai");
   // absent/undefined fields never turn into claims
@@ -234,7 +241,7 @@ test("model detail renders only contract-supplied fields — no cost/modality/va
       assert.ok(!low.includes(banned), `${detail} must not claim ${banned}`);
     }
   }
-  assert.equal(ATTACHMENT_COMPAT_NOTE, "Attachment compatibility is not reported by this provider");
+  assert.equal(ATTACHMENT_COMPAT_NOTE, tr("composer.discovery.attachmentCompatibilityNotReported"));
 });
 
 test("text workflows reject reported non-text modalities and distinguish duplicate names", () => {

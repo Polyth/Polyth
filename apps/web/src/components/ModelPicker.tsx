@@ -17,6 +17,18 @@ import { useSheetTrigger } from "./mobile/sheetTrigger.ts";
 import { Icon } from "../icons.tsx";
 import ProviderLogo from "./ProviderLogo.tsx";
 import { usePopoverPlacement } from "../usePopoverPlacement.ts";
+import { formatList, formatNumber, tr } from "../i18n/index.ts";
+
+function modalityLabel(value: string): string {
+  const labels: Record<string, string> = {
+    text: tr("modelpicker.text"),
+    image: tr("modelpicker.image"),
+    audio: tr("modelpicker.audio"),
+    video: tr("modelpicker.video"),
+    pdf: tr("modelpicker.pdf"),
+  };
+  return labels[value.toLowerCase()] ?? value;
+}
 
 export function modelModalities(model: ModelDescriptor): string {
   const modalities = (model.capabilities ?? [])
@@ -25,15 +37,21 @@ export function modelModalities(model: ModelDescriptor): string {
       && !capability.endsWith(":none"))
     .map((capability) => capability.slice(capability.indexOf(":") + 1));
   return modalities.length > 0
-    ? [...new Set(modalities)].map((value) => value[0]!.toUpperCase() + value.slice(1)).join(", ")
-    : "Text";
+    ? formatList([...new Set(modalities)].map(modalityLabel))
+    : tr("modelpicker.text");
 }
 
 export function modelContextLabel(context?: number): string {
-  if (!context) return "Context unknown";
-  if (context >= 1_000_000) return `${Number((context / 1_000_000).toFixed(1))}m context`;
-  if (context >= 1_000) return `${Math.round(context / 1_000)}k context`;
-  return `${context} context`;
+  if (!context) return tr("modelpicker.contextUnknown");
+  if (context >= 1_000_000) {
+    return tr("modelpicker.valueMContext", {
+      value: formatNumber(context / 1_000_000, { maximumFractionDigits: 1 }),
+    });
+  }
+  if (context >= 1_000) {
+    return tr("modelpicker.valueKContext", { value: formatNumber(Math.round(context / 1_000)) });
+  }
+  return tr("modelpicker.valueContext", { value: formatNumber(context) });
 }
 
 /** Modalities in a stable reading order, with the acronyms spelled properly.
@@ -53,7 +71,7 @@ export function modelModalityLabels(model: ModelDescriptor): string[] {
     return (ra < 0 ? MODALITY_ORDER.length : ra) - (rb < 0 ? MODALITY_ORDER.length : rb)
       || a.localeCompare(b);
   });
-  return unique.map((value) => value === "pdf" ? "PDF" : value[0]!.toUpperCase() + value.slice(1));
+  return unique.map(modalityLabel);
 }
 
 /** UX-MOBILE-01 §13/§40: one calm metadata line — `Text · Image · 500K` —
@@ -63,10 +81,10 @@ export function modelMetaLine(model?: ModelDescriptor): string {
   const modalities = modelModalityLabels(model);
   const context = model.context
     ? model.context >= 1_000_000
-      ? `${Number((model.context / 1_000_000).toFixed(1))}M`
+      ? `${formatNumber(model.context / 1_000_000, { maximumFractionDigits: 1 })}M`
       : model.context >= 1_000
-        ? `${Math.round(model.context / 1_000)}K`
-        : String(model.context)
+        ? `${formatNumber(Math.round(model.context / 1_000))}K`
+        : formatNumber(model.context)
     : null;
   return [...modalities, ...(context ? [context] : [])].join(" · ");
 }
@@ -81,6 +99,7 @@ interface ModelPickerProps {
   recommended?: ModelRef;
   onPick: (model?: ModelRef) => void;
   direction?: "up" | "down";
+  composerMeta?: string;
 }
 
 export default function ModelPicker({
@@ -89,6 +108,7 @@ export default function ModelPicker({
   recommended,
   onPick,
   direction: _direction = "down",
+  composerMeta,
 }: ModelPickerProps) {
   const prefs = useModelPrefs();
   const phone = useShellMode() === "phone";
@@ -111,8 +131,8 @@ export default function ModelPicker({
     ? models.find((model) =>
         model.providerID === recommended.providerID && model.modelID === recommended.modelID)
     : undefined;
-  const selectedModel = current ?? fallback;
-  const label = selectedModel?.name ?? "Auto";
+  const selectedModel = current ?? fallback ?? models[0];
+  const label = selectedModel?.name ?? tr("modelpicker.noModel");
   const q = query.trim().toLowerCase();
   const filtered = models.filter((model) =>
     !q || [model.name, model.modelID, model.providerID, model.providerName ?? ""]
@@ -142,14 +162,14 @@ export default function ModelPicker({
     setQuery("");
     setEditing(false);
   };
-  const choose = (model?: ModelDescriptor) => {
+  const choose = (model: ModelDescriptor) => {
     if (phone) tapFeedback();
-    onPick(model ? { providerID: model.providerID, modelID: model.modelID } : undefined);
+    onPick({ providerID: model.providerID, modelID: model.modelID });
     close();
     if (!phone) triggerRef.current?.focus();
   };
-  const isSelected = (model: ModelDescriptor) => current
-    ? current.providerID === model.providerID && current.modelID === model.modelID
+  const isSelected = (model: ModelDescriptor) => selectedModel
+    ? selectedModel.providerID === model.providerID && selectedModel.modelID === model.modelID
     : false;
 
   // §22: tapping the model while typing dismisses the keyboard FIRST, then
@@ -175,8 +195,10 @@ export default function ModelPicker({
     return (
       <button
         className={`${variant === "sheet" ? "sheet-row-star" : "star-btn"}${favorite ? " on" : ""}`}
-        title={favorite ? "Remove favorite" : "Add favorite"}
-        aria-label={`${favorite ? "Remove" : "Add"} ${model.name} ${favorite ? "from" : "to"} favorites`}
+        title={favorite ? tr("modelpicker.removeFavorite") : tr("modelpicker.addFavorite")}
+        aria-label={favorite
+          ? tr("modelpicker.removeValueFromFavorites", { name: model.name })
+          : tr("modelpicker.addValueToFavorites", { name: model.name })}
         aria-pressed={favorite}
         onClick={(event) => {
           event.stopPropagation();
@@ -227,20 +249,20 @@ export default function ModelPicker({
       meta={modelMetaLine(model)}
       selected={isSelected(model)}
       onClick={() => choose(model)}
-      ariaLabel={`Use ${model.name}`}
+      ariaLabel={tr("modelpicker.useValue", { name: model.name })}
       trailing={editing && group === "favorites" ? (
         <span className="sheet-row-tools">
           <button
             type="button"
             className="sheet-row-tool"
-            aria-label={`Move ${model.name} up`}
+            aria-label={tr("modelpicker.moveValueUp", { name: model.name })}
             disabled={prefs.favorites.indexOf(modelKey(model)) <= 0}
             onClick={() => moveFavorite(model, -1)}
           >↑</button>
           <button
             type="button"
             className="sheet-row-tool"
-            aria-label={`Move ${model.name} down`}
+            aria-label={tr("modelpicker.moveValueDown", { name: model.name })}
             disabled={prefs.favorites.indexOf(modelKey(model)) >= prefs.favorites.length - 1}
             onClick={() => moveFavorite(model, 1)}
           >↓</button>
@@ -254,7 +276,7 @@ export default function ModelPicker({
       ref={triggerRef}
       className="model-trigger-mobile"
       type="button"
-      aria-label={`Select model, current ${label}`}
+      aria-label={tr("modelpicker.selectModelCurrentValue", { label: label })}
       aria-haspopup="dialog"
       aria-expanded={open}
       {...triggerHandlers}
@@ -266,16 +288,18 @@ export default function ModelPicker({
           className="model-trigger-logo"
         />
       )}
-      <span className="model-trigger-name">{label}</span>
-      <span className="model-trigger-caret" aria-hidden="true"><Icon.chevronDown /></span>
+      <span className={composerMeta ? "model-trigger-copy" : "model-trigger-name"}>
+        <span className="model-trigger-name">{label}</span>
+        {composerMeta && <span className="composer-model-meta">{composerMeta}</span>}
+      </span>
     </button>
   ) : (
     <button
       ref={triggerRef}
       className="chip picker-chip model-picker-trigger"
       type="button"
-      title={`Select model, current ${label}`}
-      aria-label={`Select model, current ${label}`}
+      title={tr("modelpicker.selectModelCurrentValue", { label: label })}
+      aria-label={tr("modelpicker.selectModelCurrentValue", { label: label })}
       aria-haspopup="listbox"
       aria-expanded={open}
       onClick={toggleOpen}
@@ -288,15 +312,15 @@ export default function ModelPicker({
         />
       )}
       <span className="model-trigger-copy">
-        <small>Model</small>
+        <small>{tr("modelpicker.model")}</small>
         <strong className="picker-chip-text">{label}</strong>
+        {composerMeta && <span className="composer-model-meta">{composerMeta}</span>}
       </span>
       {selectedModel && (
         <span className="model-trigger-meta">
           {modelModalities(selectedModel)} · {modelContextLabel(selectedModel.context)}
         </span>
       )}
-      <span className="picker-caret" aria-hidden="true">▾</span>
     </button>
   );
 
@@ -305,34 +329,27 @@ export default function ModelPicker({
       {trigger}
       {open && phone && (
         <Sheet
-          title="Model"
+          title={tr("modelpicker.model")}
           size="tall"
           className="model-sheet"
           onClose={close}
           search={{
             value: query,
             onChange: setQuery,
-            placeholder: "Search models",
-            ariaLabel: "Search models",
+            placeholder: tr("modelpicker.searchModels"),
+            ariaLabel: tr("modelpicker.searchModels"),
           }}
           {...(favorites.length > 1 ? {
             action: {
-              label: editing ? "Done" : "Edit",
+              label: editing ? tr("common.done") : tr("common.edit"),
               pressed: editing,
               onClick: () => setEditing((value) => !value),
             },
           } : {})}
         >
-          <div role="listbox" aria-label="Models">
-            <SheetRow
-              title="Auto"
-              meta="Workspace default"
-              selected={!current}
-              onClick={() => choose()}
-              ariaLabel="Use the workspace default model"
-            />
+          <div role="listbox" aria-label={tr("modelpicker.models")}>
             {favorites.length > 0 && (
-              <SheetSection title="Favorites" count={favorites.length}>
+              <SheetSection title={tr("modelpicker.favorites")} count={favorites.length}>
                 {favorites.map((model) => sheetRow(model, "favorites"))}
               </SheetSection>
             )}
@@ -365,7 +382,7 @@ export default function ModelPicker({
                 </section>
               );
             })}
-            {filtered.length === 0 && <p className="sheet-empty">No models match “{query}”.</p>}
+            {filtered.length === 0 && <p className="sheet-empty">{tr("modelpicker.noModelsMatch")}{query}”.</p>}
           </div>
         </Sheet>
       )}
@@ -376,18 +393,14 @@ export default function ModelPicker({
             <input
               autoFocus
               value={query}
-              placeholder="Search models…"
-              aria-label="Filter models"
+              placeholder={tr("modelpicker.searchModels2")}
+              aria-label={tr("modelpicker.filterModels")}
               onChange={(event) => setQuery(event.target.value)}
             />
-            <div className="model-picker-list" role="listbox" aria-label="Models">
-              <div className="model-picker-row model-picker-auto" role="option" aria-selected={!current} onClick={() => choose()}>
-                <span className="model-picker-check" aria-hidden="true">{!current ? "✓" : ""}</span>
-                <span className="model-picker-copy"><strong>Auto</strong><small>Workspace default</small></span>
-              </div>
+            <div className="model-picker-list" role="listbox" aria-label={tr("modelpicker.models")}>
               {favorites.length > 0 && (
                 <section className="model-provider-section favorites">
-                  <div className="model-provider-head static"><span>★</span><strong>Favorites</strong><small>{favorites.length}</small></div>
+                  <div className="model-provider-head static"><span>★</span><strong>{tr("modelpicker.favorites")}</strong><small>{favorites.length}</small></div>
                   <div>{favorites.map(row)}</div>
                 </section>
               )}
@@ -427,7 +440,7 @@ export default function ModelPicker({
                   </section>
                 );
               })}
-              {filtered.length === 0 && <div className="palette-empty">No models found</div>}
+              {filtered.length === 0 && <div className="palette-empty">{tr("modelpicker.noModelsFound")}</div>}
             </div>
           </div>
         </>

@@ -89,8 +89,12 @@ export interface OpenCodeAdapterOptions {
 
 export { createOpenCodeClient } from "./client.ts";
 export type { OpenCodeClient } from "./client.ts";
-export { createConfigApplier } from "./config.ts";
-export type { BackendConfigApplier, McpApplyEntry } from "./config.ts";
+export { createConfigApplier, normalizePluginEntries } from "./config.ts";
+export type {
+  BackendConfigApplier,
+  McpApplyEntry,
+  ProviderVisibilityApply,
+} from "./config.ts";
 export {
   BROWSER_TOOL_PATH,
   createBrowserToolBridge,

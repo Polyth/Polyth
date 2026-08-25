@@ -454,10 +454,10 @@ export default function WidgetsPage() {
                     }}
                     aria-label={widget.requiredVisible
                       ? `${widget.title} is required in ${place.title}`
-                      : `Hide ${widget.title} from ${place.title}`}
+                      : tr("settings.widgetspage.hideValueFromValue", { title: widget.title, title2: place.title })}
                     title={widget.requiredVisible
                       ? `${widget.title} is required while its package is enabled`
-                      : `Hide ${widget.title} from ${place.title}`}
+                      : tr("settings.widgetspage.hideValueFromValue", { title: widget.title, title2: place.title })}
                     aria-disabled={widget.requiredVisible || undefined}
                     onClick={() => {
                       if (!widget.requiredVisible) mutate({ type: "visibility", id: widget.id, visible: false });

@@ -4,9 +4,9 @@
 // built-ins once. Every built-in requires a project; the host renders the
 // standard project empty state when none is open. None require an open
 // session: the session surface shows its hero until one exists.
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import Timeline from "../Timeline.tsx";
-import Composer, { type NewSessionTarget } from "../Composer.tsx";
+import Composer from "../Composer.tsx";
 import PermissionBanner from "../PermissionBanner.tsx";
 import QuestionCards from "../QuestionCards.tsx";
 import SecureSafeCard from "../SecureSafeCard.tsx";
@@ -17,7 +17,7 @@ import GoalsView from "../GoalsView.tsx";
 import WalkthroughView from "../WalkthroughView.tsx";
 import ScheduleView from "../ScheduleView.tsx";
 import GithubView from "../GithubView.tsx";
-import { activateProject, setUiError, useActiveModel, useStore } from "../../store.ts";
+import { setUiError, useActiveModel, useStore } from "../../store.ts";
 import { openSession, restoreSession } from "../../init.ts";
 import { friendlyError } from "../../settings.ts";
 import { composerBlockedByArchive, sessionSurfaceKind } from "../../sessionSurface.ts";
@@ -26,9 +26,7 @@ import { registerSlot } from "../../slots.ts";
 import WidgetCanvas from "../../widgets/WidgetCanvas.tsx";
 import { useWorkspaceMode } from "../../widgets/workspaceMode.ts";
 import SlotHost from "../slots/SlotHost.ts";
-import { api, type GitBranches, type Worktree } from "../../api.ts";
 import { Icon } from "../../icons.tsx";
-import SessionContextBar, { type ContextChoice } from "../mobile/SessionContextBar.tsx";
 import StarterPicker, { StarterIcon } from "../mobile/StarterPicker.tsx";
 import { requestComposerInsert } from "../../composerInsert.ts";
 import { useGitStatus } from "../../gitStatusStore.ts";
@@ -45,6 +43,7 @@ import {
   visibleStarters,
   type Starter,
 } from "../../starters.ts";
+import { tr } from "../../i18n/index.ts";
 
 const NOOP_STARTER = (_prompt: string, _id?: string): void => {};
 
@@ -57,79 +56,7 @@ function SessionHero() {
   const projects = useStore((s) => s.projectRegistry.projects);
   const projectId = useStore((s) => s.activeProjectId);
   const project = projects.find((candidate) => candidate.id === projectId) ?? null;
-  const newSessionIntent = useStore((s) => s.newSessionIntent);
-  const branch = useStore((s) => s.gitBranch);
-  const name = project?.name || project?.path || "this project";
-  const [worktrees, setWorktrees] = useState<Worktree[]>([]);
-  const [branches, setBranches] = useState<GitBranches>({ current: "", branches: [] });
-  const [branchLoading, setBranchLoading] = useState(false);
-  const [selectedBranchId, setSelectedBranchId] = useState("main");
-
-  useEffect(() => {
-    let active = true;
-    setSelectedBranchId("main");
-    if (!projectId) {
-      setWorktrees([]);
-      setBranches({ current: "", branches: [] });
-      return () => { active = false; };
-    }
-    setBranchLoading(true);
-    void Promise.all([api.listWorktrees(projectId), api.gitBranches(projectId)])
-      .then(([nextWorktrees, nextBranches]) => {
-        if (!active) return;
-        setWorktrees(nextWorktrees);
-        setBranches(nextBranches);
-        const requestedWorktree = newSessionIntent?.projectId === projectId
-          ? nextWorktrees.find((worktree) => worktree.path === newSessionIntent.worktreePath)
-          : undefined;
-        const currentWorktree = requestedWorktree ?? nextWorktrees.find((worktree) =>
-          worktree.branch === (nextBranches.current || branch));
-        setSelectedBranchId(currentWorktree?.isMain
-          ? "main"
-          : currentWorktree
-            ? `worktree:${currentWorktree.path}`
-            : "main");
-      })
-      .finally(() => {
-        if (active) setBranchLoading(false);
-      });
-    return () => { active = false; };
-  }, [projectId, newSessionIntent?.worktreePath]);
-
-  const branchChoices = useMemo(() => {
-    const linkedBranches = new Set(worktrees.map((worktree) => worktree.branch).filter(Boolean));
-    const main = worktrees.find((worktree) => worktree.isMain);
-    const choices: Array<{ id: string; label: string; detail: string; target: NewSessionTarget }> = [{
-      id: "main",
-      label: main?.branch || branches.current || branch || "Main workspace",
-      detail: "Main workspace",
-      target: { kind: "main" },
-    }];
-    for (const worktree of worktrees.filter((candidate) => !candidate.isMain)) {
-      choices.push({
-        id: `worktree:${worktree.path}`,
-        label: worktree.branch || worktree.path.split("/").pop() || "Worktree",
-        detail: "Existing worktree",
-        target: { kind: "worktree", path: worktree.path },
-      });
-    }
-    for (const candidate of branches.branches) {
-      if (candidate.remote || linkedBranches.has(candidate.name)) continue;
-      choices.push({
-        id: `branch:${candidate.name}`,
-        label: candidate.name,
-        detail: "Open in a new worktree",
-        target: { kind: "branch", branch: candidate.name },
-      });
-    }
-    return choices;
-  }, [worktrees, branches, branch]);
-  const selectedTarget = branchChoices.find((choice) => choice.id === selectedBranchId)?.target
-    ?? { kind: "main" as const };
-  const currentBranchLabel = branchChoices.find((choice) => choice.id === selectedBranchId)?.label
-    ?? branches.current
-    ?? branch
-    ?? "main";
+  const name = project?.name || project?.path || tr("permissionbanner.thisProject");
 
   // Quick starters (§3/§35): pinned first, then suggestions that follow the
   // real workspace state — a dirty worktree offers review/commit work, a clean
@@ -159,18 +86,12 @@ function SessionHero() {
     requestComposerInsert(prompt);
   };
 
-  const projectChoices: ContextChoice[] = projects.map((candidate) => ({
-    id: candidate.id,
-    label: candidate.name || candidate.path,
-    detail: candidate.name ? candidate.path : "",
-  }));
-
   return (
     <div className="stage stage-new">
       <div className="hero">
         <div className="hero-body">
-          <h2>What are we working on in <span className="polyth-gradient">{name}</span>?</h2>
-          <p className="hero-sub">Start a task or continue where you left off.</p>
+          <h2>{tr("workspace.builtinsurfaces.whatAreWeWorkingOnIn")}{" "}<span className="polyth-gradient">{name}</span>?</h2>
+          <p className="hero-sub">{tr("workspace.builtinsurfaces.startATaskOrContinueWhereYou")}</p>
           <div className="hero-widget-host">
             <SlotHost
               slot="session.empty.widgets"
@@ -185,24 +106,13 @@ function SessionHero() {
           <button
             type="button"
             className="hero-widget-settings"
-            aria-label="Customize new chat widgets"
-            title="Customize new chat widgets"
+            aria-label={tr("workspace.builtinsurfaces.customizeNewChatWidgets")}
+            title={tr("workspace.builtinsurfaces.customizeNewChatWidgets")}
             {...heroWidgetsTrigger}
           ><Icon.sliders /></button>
         </div>
         <div className="hero-dock">
-          <SessionContextBar
-            projectName={name}
-            projectId={projectId ?? undefined}
-            projects={projectChoices}
-            onPickProject={(id) => activateProject(id || null)}
-            branchName={currentBranchLabel}
-            branchId={selectedBranchId}
-            branches={branchChoices.map((choice) => ({ id: choice.id, label: choice.label, detail: choice.detail }))}
-            {...(branchLoading ? { branchLoading: true } : {})}
-            onPickBranch={setSelectedBranchId}
-          />
-          <Composer variant="hero" newSessionTarget={selectedTarget} />
+          <Composer />
         </div>
       </div>
       {starterPickerOpen && (
@@ -228,7 +138,7 @@ function HeroStartersWidget({
 }) {
   return (
     <HeroWidget id="starters">
-      <div className="hero-starters" aria-label="Quick starters">
+      <div className="hero-starters" aria-label={tr("workspace.builtinsurfaces.quickStarters")}>
         {chips.map((starter) => (
           <button
             key={starter.id}
@@ -244,8 +154,8 @@ function HeroStartersWidget({
         <button
           type="button"
           className="starter-chip starter-chip-add"
-          aria-label="Add a starter"
-          title="Add a starter"
+          aria-label={tr("workspace.builtinsurfaces.addAStarter")}
+          title={tr("workspace.builtinsurfaces.addAStarter")}
           {...starterPickerTrigger}
         >
           <Icon.plus />
@@ -266,7 +176,7 @@ function RecentSessions({ projectId }: { projectId: string | null }) {
   if (recent.length === 0) return null;
   return (
     <HeroWidget id="recent"><div className="hero-recent">
-      <h3 className="hero-recent-head">Recent</h3>
+      <h3 className="hero-recent-head">{tr("workspace.builtinsurfaces.recent")}</h3>
       <ul>
         {recent.map((session) => (
           <li key={session.id}>
@@ -274,7 +184,7 @@ function RecentSessions({ projectId }: { projectId: string | null }) {
               type="button"
               className="hero-recent-row"
               onClick={() => void openSession(session.id).catch((error) =>
-                setUiError(friendlyError("Couldn’t open the session", error)))}
+                setUiError(friendlyError(tr("common.error"), error)))}
             >
               <span className="hero-recent-title">{displaySessionTitle(session.title, session.id)}</span>
               <span className="hero-recent-time">{ago(session.lastTurnAt ?? session.updatedAt)}</span>
@@ -294,7 +204,7 @@ function SessionLoading() {
     <div className="stage">
       <div className="session-loading" role="status">
         <span className="spinner" aria-hidden="true" />
-        <span>Loading session…</span>
+        <span>{tr("workspace.builtinsurfaces.loadingSession")}</span>
       </div>
     </div>
   );
@@ -307,20 +217,18 @@ function ArchivedComposerGuard({ sessionId }: { sessionId: string }) {
   return (
     <div className="archived-guard" role="status">
       <span className="archived-guard-text">
-        This session is archived and read-only. Restore it to continue the conversation.
-      </span>
+        {tr("workspace.builtinsurfaces.thisSessionIsArchivedAndReadOnly")}</span>
       <button
         className="primary-btn archived-restore-btn"
         disabled={busy}
         onClick={() => {
           setBusy(true);
           void restoreSession(sessionId)
-            .catch((e) => setUiError(friendlyError("Couldn’t restore the session", e)))
+            .catch((e) => setUiError(friendlyError(tr("common.error"), e)))
             .finally(() => setBusy(false));
         }}
       >
-        Restore and continue
-      </button>
+        {tr("workspace.builtinsurfaces.restoreAndContinue")}</button>
     </div>
   );
 }
@@ -332,6 +240,7 @@ function SessionSurface() {
   const openingSessionId = useStore((s) => s.openingSessionId);
   const session = useStore((s) => s.sessions.find((x) => x.id === s.activeSessionId) ?? null);
   const model = useActiveModel();
+  const [latestRevealAnchor, setLatestRevealAnchor] = useState<HTMLDivElement | null>(null);
 
   if (workspaceMode !== "chat") return <WidgetCanvas />;
 
@@ -351,12 +260,12 @@ function SessionSurface() {
   return (
     <div className="focus-conversation">
       <div className="timeline-wrap">
-        <Timeline model={model} />
+        <Timeline model={model} latestRevealTarget={latestRevealAnchor} />
       </div>
       {model.turn?.status === "working" && (
         <div className="focus-working" role="status">
           <span className="focus-working-spinner" aria-hidden="true" />
-          <span>Working…</span>
+          <span>{tr("workspace.builtinsurfaces.working")}</span>
         </div>
       )}
       {pendingQuestions.length > 0 && <QuestionCards questions={pendingQuestions} />}
@@ -370,6 +279,7 @@ function SessionSurface() {
         slot="session.footer"
         context={{ projectId, sessionId, editing: false }}
       />
+      <div ref={setLatestRevealAnchor} className="timeline-latest-reveal-anchor" />
       {archived && sessionId ? <ArchivedComposerGuard sessionId={sessionId} /> : <Composer />}
     </div>
   );
@@ -395,11 +305,11 @@ registerSlot("session.empty.widgets", "builtin.hero-recent", (context) => (
 // UX-PANE-MODEL: Files, Git, Terminal, and Preview are NOT primary surfaces —
 // they are canonical workspace panes registered in railSurfaces.tsx and
 // opened through openWorkspacePane() beside a still-mounted Chat.
-registerWorkspaceSurface({ id: "session", title: "Session", order: 0, plugin: "session", requires: "project", component: SessionSurface });
-registerWorkspaceSurface({ id: "goals", title: "Goals", order: 20, plugin: "goals", requires: "project", component: GoalsView });
-registerWorkspaceSurface({ id: "multirun", title: "Multi-Run", order: 21, plugin: "multirun", requires: "project", component: MultiRunView });
-registerWorkspaceSurface({ id: "workflow", title: "Workflows", order: 22, plugin: "workflow", requires: "project", component: WorkflowView });
-registerWorkspaceSurface({ id: "fusion", title: "Fusion", order: 23, plugin: "fusion", requires: "project", component: FusionView });
-registerWorkspaceSurface({ id: "walkthrough", title: "Walkthrough", order: 24, plugin: "walkthrough", requires: "project", component: WalkthroughView });
-registerWorkspaceSurface({ id: "schedule", title: "Schedule", order: 25, plugin: "schedule", requires: "project", component: ScheduleView });
-registerWorkspaceSurface({ id: "github", title: "GitHub", order: 26, plugin: "github", requires: "project", component: GithubView });
+registerWorkspaceSurface({ id: "session", title: tr("workspace.builtinsurfaces.session"), order: 0, plugin: "session", requires: "project", component: SessionSurface });
+registerWorkspaceSurface({ id: "goals", title: tr("workspace.builtinsurfaces.goals"), order: 20, plugin: "goals", requires: "project", component: GoalsView });
+registerWorkspaceSurface({ id: "multirun", title: tr("workspace.builtinsurfaces.multiRun"), order: 21, plugin: "multirun", requires: "project", component: MultiRunView });
+registerWorkspaceSurface({ id: "workflow", title: tr("workspace.builtinsurfaces.workflows"), order: 22, plugin: "workflow", requires: "project", component: WorkflowView });
+registerWorkspaceSurface({ id: "fusion", title: tr("workspace.builtinsurfaces.fusion"), order: 23, plugin: "fusion", requires: "project", component: FusionView });
+registerWorkspaceSurface({ id: "walkthrough", title: tr("workspace.builtinsurfaces.walkthrough"), order: 24, plugin: "walkthrough", requires: "project", component: WalkthroughView });
+registerWorkspaceSurface({ id: "schedule", title: tr("workspace.builtinsurfaces.schedule"), order: 25, plugin: "schedule", requires: "project", component: ScheduleView });
+registerWorkspaceSurface({ id: "github", title: tr("workspace.builtinsurfaces.github"), order: 26, plugin: "github", requires: "project", component: GithubView });

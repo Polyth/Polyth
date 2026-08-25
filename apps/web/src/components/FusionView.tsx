@@ -7,6 +7,7 @@ import { renderMarkdown } from "../markdown.tsx";
 import EmptyState from "./EmptyState.tsx";
 import { modelDisplayName, modelSupportsTextWorkflow } from "../composer/discovery.ts";
 import ProviderLogo from "./ProviderLogo.tsx";
+import { tr } from "../i18n/index.ts";
 
 const providerIdFromModel = (model: string): string => {
   const slash = model.lastIndexOf("/");
@@ -81,7 +82,7 @@ export default function FusionView() {
   };
 
   if (!sessionId) {
-    return <EmptyState title="No session open" description="Open a session to fuse answers from several models." />;
+    return <EmptyState title={tr("fusionview.noSessionOpen")} description={tr("fusionview.openASessionToFuseAnswersFrom")} />;
   }
 
   const weights = shown?.weights ?? [];
@@ -90,21 +91,21 @@ export default function FusionView() {
   return (
     <div className="view-page">
       <div>
-        <h1 className="view-title">Model fusion</h1>
-        <p className="view-sub">Synthesize several model outputs into one weighted answer.</p>
+        <h1 className="view-title">{tr("fusionview.modelFusion")}</h1>
+        <p className="view-sub">{tr("fusionview.synthesizeSeveralModelOutputsIntoOneWeighted")}</p>
       </div>
       <div className="view-toolbar">
         <textarea
           rows={2}
           value={text}
-          placeholder="Prompt to fuse across models…"
+          placeholder={tr("fusionview.promptToFuseAcrossModels")}
           onChange={(e) => setText(e.target.value)}
         />
         <div className="fusion-model-picks">
           <input
             className="model-filter-input"
             type="text"
-            placeholder="Filter models…"
+            placeholder={tr("fusionview.filterModels")}
             value={modelFilter}
             onChange={(e) => setModelFilter(e.target.value)}
           />
@@ -127,12 +128,12 @@ export default function FusionView() {
             );
           })}
           {filteredModels.length > MAX_CHIPS && (
-            <span className="muted">{filteredModels.length - MAX_CHIPS} more — refine filter</span>
+            <span className="muted">{filteredModels.length - MAX_CHIPS} {tr("fusionview.moreRefineFilter")}</span>
           )}
         </div>
         <div className="view-toolbar-row">
           <button className="primary-btn" onClick={() => void start()} disabled={busy || !text.trim() || picked.length === 0}>
-            {busy || running ? "Fusing…" : "Fuse"}
+            {busy || running ? tr("fusionview.fusing") : tr("fusionview.fuse")}
           </button>
         </div>
         {error && <div className="form-error">{error}</div>}
@@ -141,7 +142,7 @@ export default function FusionView() {
       {shown && (
         <div className="fusion-layout">
           <section className="fusion-contributors">
-            <div className="stat-label">Contributors</div>
+            <div className="stat-label">{tr("fusionview.contributors")}</div>
             {weights.map((w) => {
               const badge = modelBadge(w.model);
               return (
@@ -162,21 +163,21 @@ export default function FusionView() {
                 </div>
               );
             })}
-            {weights.length === 0 && <div className="empty" style={{ padding: 8 }}>Waiting for weights…</div>}
+            {weights.length === 0 && <div className="empty" style={{ padding: 8 }}>{tr("fusionview.waitingForWeights")}</div>}
           </section>
 
           <section className="fusion-answer">
-            <div className="stat-label">Fused answer</div>
+            <div className="stat-label">{tr("fusionview.fusedAnswer")}</div>
             {(promptFromLog || text) && (
               <div className="prompt-echo">
-                <span className="prompt-echo-label">Prompt</span>
+                <span className="prompt-echo-label">{tr("fusionview.prompt")}</span>
                 <span>{promptFromLog || text}</span>
               </div>
             )}
             <div className="fusion-answer-card">
-              {shown.error ? <div className="run-error">{shown.error}</div> : shown.answer ? renderMarkdown(shown.answer, shown.id) : <span className="muted">Synthesizing…</span>}
+              {shown.error ? <div className="run-error">{shown.error}</div> : shown.answer ? renderMarkdown(shown.answer, shown.id) : <span className="muted">{tr("fusionview.synthesizing")}</span>}
             </div>
-            <div className="stat-label">Attribution</div>
+            <div className="stat-label">{tr("fusionview.attribution")}</div>
             <div className="attr-bar">
               {weights.map((w) => {
                 const badge = modelBadge(w.model);
@@ -193,9 +194,9 @@ export default function FusionView() {
           </section>
 
           <section className="fusion-disagreements">
-            <div className="stat-label">Disagreements</div>
+            <div className="stat-label">{tr("fusionview.disagreements")}</div>
             {shown.disagreements.length === 0 ? (
-              <div className="muted" style={{ fontSize: "calc(12.5px * var(--ui-font-scale, 1))" }}>No disagreements recorded.</div>
+              <div className="muted" style={{ fontSize: "calc(12.5px * var(--ui-font-scale, 1))" }}>{tr("fusionview.noDisagreementsRecorded")}</div>
             ) : (
               shown.disagreements.map((d, i) => (
                 <div key={i} className="disagree-card">{d}</div>
@@ -205,7 +206,7 @@ export default function FusionView() {
         </div>
       )}
       {!shown && (
-        <EmptyState title="Nothing fused yet" description="Select models and fuse a prompt into one weighted answer." />
+        <EmptyState title={tr("fusionview.nothingFusedYet")} description={tr("fusionview.selectModelsAndFuseAPromptInto")} />
       )}
     </div>
   );

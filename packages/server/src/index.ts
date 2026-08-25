@@ -31,7 +31,6 @@ import { createFileService, MAX_RAW_BYTES } from "@polyth/files";
 import { createCommandService } from "@polyth/commands";
 import { createGitService } from "@polyth/git";
 import { createTerminalService } from "@polyth/terminal";
-import { createPreviewService } from "@polyth/preview";
 import { createMultirunService } from "@polyth/multirun";
 import { createWorkflowService } from "@polyth/workflow";
 import { createFusionService, synthesisPrompt } from "@polyth/fusion";
@@ -47,11 +46,12 @@ import {
 } from "@polyth/usage";
 import {
   createBrowserService, createChromiumDriver, createFakeDriver, demoWeb,
-  findChromiumExecutable, originOf,
+  findChromiumExecutable,
 } from "@polyth/browser";
 import { createDictationService, createWhisperSttAdapter } from "@polyth/dictation";
 import { createHomeAssistantServerPlugin } from "@polyth/home-assistant";
 import { createProjectService } from "./projects.ts";
+import { projectRoutes } from "./routes/projects.ts";
 import { createPackageRegistry } from "./packages.ts";
 import { createSessionService, type Broadcaster, type RuntimePool } from "./sessions.ts";
 import { createRuntimeCatalog } from "./runtimeCatalog.ts";
@@ -64,7 +64,6 @@ import { orgRoutes } from "./routes/org.ts";
 import { workspaceRoutes } from "./routes/workspace.ts";
 import { gitRoutes } from "./routes/git.ts";
 import { terminalRoutes, attachTerminalWs } from "./routes/terminal.ts";
-import { previewRoutes } from "./routes/preview.ts";
 import { multirunRoutes } from "./routes/multirun.ts";
 import { workflowRoutes } from "./routes/workflow.ts";
 import { fusionRoutes } from "./routes/fusion.ts";
@@ -78,6 +77,8 @@ import { controlRoutes } from "./routes/control.ts";
 import { snippetRoutes } from "./routes/snippets.ts";
 import { profileRoutes } from "./routes/profiles.ts";
 import { settingsRoutes } from "./routes/settings.ts";
+import { opencodePluginRoutes } from "./routes/opencodePlugins.ts";
+import { opencodePendingRoutes } from "./routes/opencodePending.ts";
 import { sshRoutes } from "./routes/ssh.ts";
 import { browserRoutes } from "./routes/browser.ts";
 import { browseRoutes } from "./routes/browse.ts";
@@ -89,6 +90,7 @@ import { pushRoutes } from "./routes/push.ts";
 import { createNotificationStore } from "./notifications.ts";
 import { notificationRoutes } from "./routes/notifications.ts";
 import { autoAcceptRoutes } from "./routes/autoAccept.ts";
+import { queueRoutes } from "./routes/queue.ts";
 import { createBehaviorService } from "./behavior.ts";
 import { createMcpConfigService, mcpEntriesFromBackendConfig } from "./mcp.ts";
 import { createSecureSafeService, secureSafeBehaviorSection } from "./secureSafe.ts";
@@ -109,6 +111,7 @@ import { attachWs } from "./ws.ts";
 import { createTrackWorkflow, type TrackWorkflow } from "./tracks.ts";
 import { createRouteRegistry } from "./routeRegistry.ts";
 import { createPackageLifecycle } from "./packageLifecycle.ts";
+import { createDeferredConfigApplier, createOpenCodePendingService } from "./opencodePending.ts";
 
 /** POLYTH_SMALL_MODEL="provider/model-id" — cheap model for auditors/commit messages. */
 const smallModel = (): { providerID: string; modelID: string } | undefined => {
@@ -172,6 +175,7 @@ export async function boot(opts: BootOptions = {}) {
 
   // --- per-project opencode runtime pool (lazy spawn, one serve process per project)
   const runtimesByProject = new Map<string, Promise<AgentRuntime>>();
+  const runtimeRestarters = new Map<string, () => Promise<void>>();
   const sessionIdMap = new Map<string, string>(); // canonical -> backend
 
   const isTransportError = (err: unknown): boolean =>
@@ -235,14 +239,20 @@ export async function boot(opts: BootOptions = {}) {
     const listeners = new Set<(sessionId: string, ev: RuntimeEvent) => void>();
     const fanout = (sessionId: string, ev: RuntimeEvent) => { for (const cb of listeners) cb(sessionId, ev); };
     let innerSub = inner.onEvent(fanout);
+    let restarting: Promise<void> | null = null;
 
-    const respawn = async (): Promise<void> => {
-      runtimesByProject.delete(key);
+    const respawnOnce = async (): Promise<void> => {
       innerSub.dispose();
-      void inner.dispose().catch(() => {});
+      await inner.dispose().catch(() => {});
       inner = await spawnRuntime(projectId, cwd);
       innerSub = inner.onEvent(fanout);
       runtimesByProject.set(key, Promise.resolve(facade));
+    };
+    const respawn = (): Promise<void> => {
+      if (!restarting) {
+        restarting = respawnOnce().finally(() => { restarting = null; });
+      }
+      return restarting;
     };
 
     // Read-only lookups are idempotent, so they get the same respawn-once
@@ -299,8 +309,14 @@ export async function boot(opts: BootOptions = {}) {
         listeners.add(cb);
         return { dispose: () => { listeners.delete(cb); } };
       },
-      dispose: () => { runtimesByProject.delete(key); return inner.dispose(); },
+      dispose: () => {
+        runtimesByProject.delete(key);
+        runtimeRestarters.delete(key);
+        innerSub.dispose();
+        return inner.dispose();
+      },
     };
+    runtimeRestarters.set(key, respawn);
     return facade;
   };
 
@@ -322,6 +338,11 @@ export async function boot(opts: BootOptions = {}) {
         p.catch(() => runtimesByProject.delete(key)); // allow retry
       }
       return p;
+    },
+    async restartAll() {
+      const restarters = [...runtimeRestarters.values()];
+      await Promise.all(restarters.map((restart) => restart()));
+      return restarters.length;
     },
   };
   const runtimeCatalog = createRuntimeCatalog({ projects, runtimes });
@@ -348,18 +369,9 @@ export async function boot(opts: BootOptions = {}) {
       ? { replayBytes: Number(process.env.POLYTH_TERM_REPLAY_BYTES) }
       : {}),
   });
-  const preview = createPreviewService();
 
-  // --- controlled browser (WP14): Chromium if configured/found, fake driver
-  // behind POLYTH_FAKE_BROWSER=1, otherwise an honest "unavailable" state that
-  // keeps the iframe preview as the fallback surface.
-  const previewOrigins = new Set<string>();
-  preview.onStatusChange((_pid, st) => {
-    for (const candidate of st.urls ?? (st.url ? [st.url] : [])) {
-      const o = originOf(candidate);
-      if (o) previewOrigins.add(o);
-    }
-  });
+  // --- internal browser: Chromium if configured/found, fake driver behind
+  // POLYTH_FAKE_BROWSER=1, otherwise an honest unavailable state.
   const chromiumPath = process.env.POLYTH_FAKE_BROWSER === "1" ? null : await findChromiumExecutable();
   const browserDriver = process.env.POLYTH_FAKE_BROWSER === "1"
     ? createFakeDriver(demoWeb())
@@ -369,7 +381,6 @@ export async function boot(opts: BootOptions = {}) {
   const browser = createBrowserService({
     driver: browserDriver,
     unavailableReason: "browser engine unavailable: no Chromium executable found (set POLYTH_CHROMIUM_PATH)",
-    allowedOrigins: () => [...previewOrigins],
   });
   const browserToolBridge = createBrowserToolBridge({
     browser,
@@ -406,7 +417,11 @@ export async function boot(opts: BootOptions = {}) {
   };
 
   // --- WP9: behavior instructions, MCP config, managed plugins (adapter-applied)
-  const configApplier = createConfigApplier();
+  const directConfigApplier = createConfigApplier();
+  const pendingOpenCode = createOpenCodePendingService({
+    restart: () => runtimes.restartAll?.() ?? Promise.resolve(0),
+  });
+  const configApplier = createDeferredConfigApplier(directConfigApplier, pendingOpenCode);
   let refreshSafeBehavior: () => Promise<void> = async () => {};
   const secureSafe = createSecureSafeService({
     dataDir,
@@ -461,6 +476,9 @@ export async function boot(opts: BootOptions = {}) {
       console.warn("[polyth] MCP seed from backend config skipped", err);
     }
   }
+  // Boot reconciliation happens before any runtime can be created. From this
+  // point on, user mutations are staged until the unified apply/restart action.
+  configApplier.enableStaging();
 
   // --- F18: web push (VAPID keys minted once into the data dir) + the
   // notifier bridging the session service's attention/turn-stopped seam.
@@ -830,7 +848,6 @@ export async function boot(opts: BootOptions = {}) {
   };
   const settingsRoute = settingsRoutes({
     behavior, mcp, plugins: pluginRegistry,
-    backendConfig: () => configApplier.readConfig(),
     saveRole: async (name, role) => {
       await configApplier.applyAgent(name, role);
       const current = (await runtimeCatalog.agents()).find((agent) => agent.name === name);
@@ -852,6 +869,7 @@ export async function boot(opts: BootOptions = {}) {
       capabilities: allCapabilities(),
     }),
   });
+  const pluginRoute = chainRoutes(opencodePluginRoutes(configApplier), settingsRoute);
 
   registerPackageRoute("git", gitRoutes({
     projects, sessions, git,
@@ -884,9 +902,7 @@ export async function boot(opts: BootOptions = {}) {
       },
     },
   }), { onDisable: () => terminals.closeAll() });
-  registerPackageRoute("preview", previewRoutes({ projects, sessions, preview }), {
-    onDisable: () => preview.stopAll(),
-  });
+  registerPackageRoute("projects", projectRoutes(projects));
   registerPackageRoute("browser", chainRoutes(
     browserToolBridge.route,
     browserRoutes({ browser, append: appendLogged, shotsDir: `${dataDir}/browser-shots` }),
@@ -1015,10 +1031,11 @@ export async function boot(opts: BootOptions = {}) {
   registerPackageRoute("mcp", async (request) =>
     request.path.startsWith("/api/mcp/") ? settingsRoute(request) : false);
   registerPackageRoute("plugins", async (request) =>
-    request.path.startsWith("/api/plugins") ? settingsRoute(request) : false);
+    request.path.startsWith("/api/plugins") ? pluginRoute(request) : false);
 
   const staticCoreRoutes: RouteHandler[] = [
     authRoutes(auth),
+    opencodePendingRoutes(pendingOpenCode),
     packageRoutes(packageRegistry),
     pluginAssetRoutes({ plugins: pluginRegistry, pluginsDir }),
     async (rc) => {
@@ -1048,6 +1065,7 @@ export async function boot(opts: BootOptions = {}) {
     sessionRetentionRoutes(sessions),
     controlRoutes(sessions),
     autoAcceptRoutes(sessions),
+    queueRoutes(sessions),
     pushRoutes(push),
     notificationRoutes(notifications),
     profileRoutes({
@@ -1063,7 +1081,7 @@ export async function boot(opts: BootOptions = {}) {
   ];
   const routes: RouteHandler[] = [...staticCoreRoutes, routeRegistry.handler];
 
-  const allCapabilities = () => ["polyth.sessions", "polyth.sessionPersistence", "polyth.projects", "polyth.agentRuntime", "polyth.goals", "polyth.files", "polyth.commands", "polyth.git", "polyth.worktrees", "polyth.terminal", "polyth.preview", "polyth.multirun", "polyth.workflow", "polyth.fusion", "polyth.walkthrough", "polyth.schedule", "polyth.tracks", "polyth.github", "polyth.control", "polyth.agentProfiles", "polyth.settings", "polyth.mcp", "polyth.plugins", "polyth.knowledge", "polyth.review", "polyth.usage", "polyth.browser", "polyth.voice", "polyth.assist", "polyth.homeAssistant", "polyth.secureSafe", "polyth.ssh"];
+  const allCapabilities = () => ["polyth.sessions", "polyth.sessionPersistence", "polyth.projects", "polyth.agentRuntime", "polyth.goals", "polyth.files", "polyth.commands", "polyth.git", "polyth.worktrees", "polyth.terminal", "polyth.multirun", "polyth.workflow", "polyth.fusion", "polyth.walkthrough", "polyth.schedule", "polyth.tracks", "polyth.github", "polyth.control", "polyth.agentProfiles", "polyth.settings", "polyth.mcp", "polyth.plugins", "polyth.knowledge", "polyth.review", "polyth.usage", "polyth.browser", "polyth.voice", "polyth.assist", "polyth.homeAssistant", "polyth.secureSafe", "polyth.ssh"];
 
   await packageLifecycle.startEnabled(packageRegistry);
 
@@ -1092,7 +1110,6 @@ export async function boot(opts: BootOptions = {}) {
     await browser.closeAll().catch(() => {});
     await pluginRegistry.dispose().catch(() => {});
     await terminals.closeAll().catch(() => {});
-    await preview.stopAll().catch(() => {});
     for (const p of runtimesByProject.values()) await (await p.catch(() => null))?.dispose().catch(() => {});
     await ssh.disconnectAll().catch(() => {});
     await root.dispose();

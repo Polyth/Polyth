@@ -7,9 +7,11 @@ import {
   BUILTIN_CAPABILITY_META, registerCapability, type CapabilityMeta,
 } from "./capabilities.ts";
 import {
-  closeWorkspacePane, openSettingsPage, openWorkspacePane, setActiveView, setRailPlugin, type AppView,
+  openSettingsPage, openWorkspacePane, setActiveView, setRailPlugin, setSidebarOpen, type AppView,
 } from "./store.ts";
 import { speechSupport } from "@polyth/dictation";
+import { tr } from "./i18n/index.ts";
+import { setWorkspaceMode } from "./widgets/workspaceMode.ts";
 
 /** Capability id → full workspace view, used for active-state highlighting.
  *  Panel/settings capabilities have no view and never show as "active". */
@@ -29,7 +31,7 @@ export const PANE_OF_CAPABILITY: Partial<Record<string, string>> = {
   files: "files",
   git: "git",
   terminal: "terminal",
-  preview: "preview",
+  browser: "browser",
 };
 
 /** Rail surface opened by a capability (panels rather than full views). */
@@ -53,7 +55,11 @@ function openOf(meta: CapabilityMeta): () => void {
   const view = VIEW_OF_CAPABILITY[meta.id];
   if (view) {
     return () => {
-      if (view === "session") closeWorkspacePane();
+      // Primary destinations must become the visible workspace, not merely
+      // update underneath a pane, compact rail sheet, or sidebar drawer.
+      setRailPlugin(null);
+      setSidebarOpen(false);
+      setWorkspaceMode("chat");
       setActiveView(view);
     };
   }
@@ -78,7 +84,7 @@ for (const meta of BUILTIN_CAPABILITY_META) {
     // unavailable only for a real runtime prerequisite, never per preset.
     available: meta.id === "voice" ? voiceAvailable : () => true,
     ...(meta.id === "voice"
-      ? { unavailableReason: () => voiceAvailable() ? null : "Voice input isn’t supported in this browser." }
+      ? { unavailableReason: () => voiceAvailable() ? null : tr("settings.voicepage.notSupportedInThisBrowser") }
       : {}),
   });
 }

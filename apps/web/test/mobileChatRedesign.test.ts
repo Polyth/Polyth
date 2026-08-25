@@ -338,15 +338,16 @@ test("the composer is adaptive, with one primary action at a time", async () => 
 test("reasoning effort stays reachable on phones, beside the model name", async () => {
   const composer = await read("../src/components/Composer.tsx");
   const header = composer.slice(composer.indexOf('<div className="composer-model-header">'));
-  const cluster = header.slice(header.indexOf('<span className="composer-mode-cluster">'), header.indexOf("<ModelCapabilityMeta"));
+  const clusterStart = header.indexOf('<span className="composer-mode-cluster">');
+  const cluster = header.slice(clusterStart, header.indexOf("</span>\n        </div>", clusterStart));
   assert.ok(cluster.includes("composer-thinking-badge"), "§59: the thinking control lives in the model header");
   assert.ok(
     cluster.indexOf("composer-thinking-badge") < cluster.indexOf("composer-agent-badge"),
     "thinking sits between the model name and the mode chip",
   );
   assert.ok(cluster.includes("modelSupportsThinking(selectedModel)"), "it only exists for models that report variants");
-  assert.match(cluster, /className="composer-thinking-badge"[\s\S]*?mobileSheet/, "it opens the shared sheet");
-  assert.ok(cluster.includes("withExplicitThinking(cfg, thinking || undefined)"), "picking routes through the composer config");
+  assert.ok(cluster.includes("<ThinkingSlider"), "thinking uses a discrete slider, not a picker");
+  assert.ok(cluster.includes("withExplicitThinking(cfg, thinking || undefined)"), "slider changes route through the composer config");
   assert.ok(composer.includes("const THINKING_LABELS"), "backend variant strings get display labels");
 
   // A tap on any header control blurs the input; collapsing on that blur would
@@ -424,14 +425,24 @@ test("the phone header keeps two actions and a real session menu", async () => {
   const header = await read("../src/components/Header.tsx");
   const menu = await read("../src/components/mobile/SessionMenu.tsx");
   assert.ok(header.includes("<SessionMenu"), "the title opens the session menu");
-  assert.ok(header.includes('aria-label={`${mobileTitle}. Session menu`}'), "the whole title is the target");
+  assert.ok(
+    header.includes('aria-label={tr("header.valueSessionMenu", { mobileTitle: mobileTitle })}'),
+    "the whole title is the target",
+  );
   assert.ok(
     header.includes("useSheetTrigger(mode === \"phone\"")
     && header.includes("setSessionMenuOpen(true);"),
     "§22 again: the title opens on pointer-down, then dismisses the keyboard",
   );
-  for (const action of ["New session", "Rename…", "Duplicate as a new session", "Archive", "Recent sessions", "Settings"]) {
-    assert.ok(menu.includes(action), `${action} is reachable from the session menu`);
+  for (const key of [
+    "mobile.sessionmenu.newSession",
+    "mobile.sessionmenu.rename",
+    "mobile.sessionmenu.duplicateAsANewSession",
+    "common.archive",
+    "mobile.sessionmenu.recentSessions",
+    "common.settings",
+  ]) {
+    assert.ok(menu.includes(`tr("${key}")`), `${key} is reachable from the session menu`);
   }
   assert.ok(menu.includes('from "./Sheet.tsx"'), "the session menu is the same sheet");
 });
@@ -451,10 +462,12 @@ test("haptics are opt-in, bounded, and respect reduced motion", async () => {
 
 test("the fresh-session screen is three zones with a sticky interaction dock", async () => {
   const surface = await read("../src/components/workspace/builtinSurfaces.tsx");
+  const composer = await read("../src/components/Composer.tsx");
   assert.ok(surface.includes('className="stage stage-new"'));
   assert.ok(surface.includes('className="hero-body"'), "empty state and starters scroll together");
   assert.ok(surface.includes('className="hero-dock"'), "context bar and composer share the sticky zone");
-  assert.ok(surface.includes("<SessionContextBar"), "project and branch live above the composer");
+  assert.ok(composer.includes("<SessionContextBar {...contextBar} />"), "project and branch live inside every composer");
+  assert.ok(!surface.includes("SessionContextBar"), "the fresh surface cannot fork composer controls");
   assert.ok(!surface.includes("new-session-targets"), "the full-width mid-page selectors are gone");
   assert.ok(!surface.includes("hero-mark"), "the decorative mark no longer competes with the headline");
   assert.ok(surface.includes("visibleStarters"), "chips come from the starter system");

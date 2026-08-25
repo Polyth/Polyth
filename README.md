@@ -30,6 +30,14 @@ Env: `PORT` (default 4400), `POLYTH_DATA_DIR` (default `./data`). The server bin
 - **Schedule and remember.** Recurring or one-shot prompts on at/every/cron cadences with time zones; a knowledge store of notes, plans, and memories you can attach to any chat.
 - **Connect out.** GitHub issues, PRs, and checks through the `gh` CLI; MCP servers; provider quota tracking; optional voice dictation and read-aloud via browser speech or your own OpenAI-compatible endpoints.
 
+### Open the terminal
+
+Use the **Terminal** button in the top toolbar or the terminal icon in the right rail.
+The default keyboard shortcut is <kbd>Ctrl</kbd>+<kbd>`</kbd> on Windows/Linux
+and <kbd>⌘</kbd>+<kbd>`</kbd> on macOS;
+it can be changed in **Settings → Shortcuts**. You can also open the command palette
+with **Ctrl/⌘+K** and choose **Open Terminal**.
+
 ## Make it yours
 
 ![The settings modal with searchable settings and left navigation.](docs/assets/readme/settings.png)

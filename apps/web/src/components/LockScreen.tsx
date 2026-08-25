@@ -4,6 +4,7 @@
 // stays 401 until login mints the polyth_auth cookie.
 import { useEffect, useRef, useState } from "react";
 import { api } from "../api.ts";
+import { tr } from "../i18n/index.ts";
 
 export default function LockScreen({ onUnlocked }: { onUnlocked: () => void }) {
   const [password, setPassword] = useState("");
@@ -39,15 +40,15 @@ export default function LockScreen({ onUnlocked }: { onUnlocked: () => void }) {
       }
       if (r.error === "rate-limited" && r.retryAfterSec) {
         setRetryAt(Date.now() + r.retryAfterSec * 1000);
-        setError("Too many attempts.");
+        setError(tr("lockscreen.tooManyAttempts"));
       } else if (r.error === "invalid-password") {
-        setError("Wrong password.");
+        setError(tr("lockscreen.wrongPassword"));
       } else {
         setError(r.message);
       }
       setPassword("");
     } catch {
-      setError("Couldn’t reach the server.");
+      setError(tr("lockscreen.couldnTReachTheServer"));
     } finally {
       setBusy(false);
     }
@@ -56,17 +57,17 @@ export default function LockScreen({ onUnlocked }: { onUnlocked: () => void }) {
   return (
     <div className="lock-screen">
       <form className="lock-card" onSubmit={submit}>
-        <span className="welcome-mark">p</span>
-        <h1>Polyth is locked</h1>
-        <p className="lock-hint">Enter the UI password to continue.</p>
+        <span className="welcome-mark">{tr("lockscreen.p")}</span>
+        <h1>{tr("lockscreen.polythIsLocked")}</h1>
+        <p className="lock-hint">{tr("lockscreen.enterTheUiPasswordToContinue")}</p>
         <input
           ref={inputRef}
           type="password"
           className="lock-input"
           value={password}
-          placeholder="Password"
+          placeholder={tr("lockscreen.password")}
           autoComplete="current-password"
-          aria-label="UI password"
+          aria-label={tr("lockscreen.uiPassword")}
           disabled={locked || busy}
           onChange={(e) => setPassword(e.target.value)}
         />
@@ -76,7 +77,7 @@ export default function LockScreen({ onUnlocked }: { onUnlocked: () => void }) {
           </p>
         )}
         <button className="primary-btn lock-submit" type="submit" disabled={locked || busy || !password}>
-          {busy ? "Checking…" : locked ? `Locked (${secondsLeft}s)` : "Unlock"}
+          {busy ? tr("lockscreen.checking") : locked ? tr("lockscreen.lockedValueS", { secondsLeft: secondsLeft }) : tr("lockscreen.unlock")}
         </button>
       </form>
     </div>

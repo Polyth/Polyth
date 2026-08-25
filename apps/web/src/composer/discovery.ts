@@ -5,6 +5,7 @@
 // No DOM, no fetch, no send path — components project this module's decisions.
 import type { SlashCommand, SnippetDef, StrictListResult } from "../api.ts";
 import { filterCommands, filterSnippets, type AutocompleteItem } from "../utils.ts";
+import { tr } from "../i18n/index.ts";
 
 // ---------------------------------------------------------------- catalogs
 
@@ -67,7 +68,7 @@ export function planCommandInsert(text: string, caret: number): InsertPlan {
   };
 }
 
-export const SHELL_DRAFT_BLOCK = "Send or clear this draft before entering Shell mode";
+export const SHELL_DRAFT_BLOCK = tr("composer.discovery.clearDraftBeforeShell");
 
 export type ShellEntryPlan =
   | { ok: true; text: string; caret: number }
@@ -101,15 +102,17 @@ export interface AddMenuRow {
   action?: AddMenuAction;
 }
 
-export const OPEN_PROJECT_FIRST = "Open a project first";
-export const OPEN_SESSION_FIRST = "Open a session first";
+export const OPEN_PROJECT_FIRST = tr("composer.discovery.openProjectFirst");
+export const OPEN_SESSION_FIRST = tr("composer.discovery.openSessionFirst");
 
 function catalogDetail(kind: "commands" | "snippets", state: CatalogState<unknown>): string {
-  if (state.state === "loading") return "Loading…";
-  if (state.state === "unavailable") return "Currently unavailable";
-  if (state.state === "empty") return kind === "commands" ? "No commands available" : "No snippets yet";
+  if (state.state === "loading") return tr("common.loading");
+  if (state.state === "unavailable") return tr("composer.discovery.currentlyUnavailable");
+  if (state.state === "empty") return kind === "commands"
+    ? tr("composer.discovery.noCommandsAvailable")
+    : tr("composer.discovery.noSnippetsYet");
   const n = state.items.length;
-  return `${n} available`;
+  return tr("composer.discovery.valueAvailable", { value: n });
 }
 
 export function addMenuRows(input: {
@@ -124,43 +127,43 @@ export function addMenuRows(input: {
   const shellBlock = needsProject
     ?? (input.draftText.trim() !== "" ? SHELL_DRAFT_BLOCK : undefined);
   const rows: AddMenuRow[] = [
-    { id: "group-context", kind: "group", label: "Add context" },
+    { id: "group-context", kind: "group", label: tr("composer.discovery.addContext") },
     {
-      id: "upload", kind: "item", label: "Upload files…", action: "upload",
-      description: "Copies files into this project’s _inbox",
+      id: "upload", kind: "item", label: tr("composer.discovery.uploadFiles"), action: "upload",
+      description: tr("composer.discovery.copiesFilesIntoThisProjectSInbox"),
       ...(needsProject ? { disabledReason: needsProject } : {}),
     },
     {
-      id: "mention", kind: "item", label: "Mention project file…", action: "mention", hint: "@",
+      id: "mention", kind: "item", label: tr("composer.discovery.mentionProjectFile"), action: "mention", hint: "@",
       ...(needsProject ? { disabledReason: needsProject } : {}),
     },
     {
-      id: "github", kind: "item", label: "Link GitHub issue or pull request…", action: "github",
-      description: "Adds a link only",
+      id: "github", kind: "item", label: tr("composer.discovery.linkGithubIssueOrPullRequest"), action: "github",
+      description: tr("composer.discovery.addsALinkOnly"),
       ...(needsProject ? { disabledReason: needsProject } : {}),
     },
   ];
   if (input.goalsEnabled) {
     rows.push({
-      id: "goal", kind: "item", label: "Attach goal…", action: "goal",
+      id: "goal", kind: "item", label: tr("composer.discovery.attachGoal"), action: "goal",
       ...(input.hasSession ? {} : { disabledReason: OPEN_SESSION_FIRST }),
     });
   }
   rows.push(
-    { id: "group-compose", kind: "group", label: "Compose" },
+    { id: "group-compose", kind: "group", label: tr("composer.discovery.compose") },
     {
-      id: "commands", kind: "item", label: "Commands", action: "commands", hint: "/",
+      id: "commands", kind: "item", label: tr("composer.discovery.commands"), action: "commands", hint: "/",
       detail: catalogDetail("commands", input.commands),
       ...(needsProject ? { disabledReason: needsProject } : {}),
     },
     {
-      id: "snippets", kind: "item", label: "Snippets", action: "snippets", hint: "#",
+      id: "snippets", kind: "item", label: tr("composer.discovery.snippets"), action: "snippets", hint: "#",
       detail: catalogDetail("snippets", input.snippets),
       ...(needsProject ? { disabledReason: needsProject } : {}),
     },
     {
-      id: "shell", kind: "item", label: "Shell command", action: "shell", hint: "!",
-      description: "Permission checked; output is added to context",
+      id: "shell", kind: "item", label: tr("composer.discovery.shellCommand"), action: "shell", hint: "!",
+      description: tr("composer.discovery.permissionCheckedOutputIsAddedToContext"),
       ...(shellBlock ? { disabledReason: shellBlock } : {}),
     },
   );
@@ -189,18 +192,18 @@ export function commandAutocomplete(
   catalog: CatalogState<SlashCommand>, query: string,
 ): AutocompleteViewState {
   if (catalog.state === "loading") {
-    return { kind: "cmd", options: [], status: { text: "Loading commands…" } };
+    return { kind: "cmd", options: [], status: { text: tr("composer.discovery.loadingCommands") } };
   }
   if (catalog.state === "unavailable") {
-    return { kind: "cmd", options: [], status: { text: "Commands are unavailable for this project." } };
+    return { kind: "cmd", options: [], status: { text: tr("composer.discovery.commandsUnavailable") } };
   }
   if (catalog.state === "empty") {
-    return { kind: "cmd", options: [], status: { text: "No commands available" } };
+    return { kind: "cmd", options: [], status: { text: tr("composer.discovery.noCommandsAvailable") } };
   }
   const options = filterCommands(catalog.items, query)
     .map((o) => ({ ...o, id: autocompleteOptionId("cmd", o.label.slice(1)) }));
   if (options.length === 0) {
-    return { kind: "cmd", options, status: { text: `No commands match “${query}”.` } };
+    return { kind: "cmd", options, status: { text: tr("composer.discovery.noCommandsMatch", { query }) } };
   }
   return { kind: "cmd", options, status: null };
 }
@@ -209,18 +212,18 @@ export function snippetAutocomplete(
   catalog: CatalogState<SnippetDef>, query: string,
 ): AutocompleteViewState {
   if (catalog.state === "loading") {
-    return { kind: "snip", options: [], status: { text: "Loading snippets…" } };
+    return { kind: "snip", options: [], status: { text: tr("composer.discovery.loadingSnippets") } };
   }
   if (catalog.state === "unavailable") {
-    return { kind: "snip", options: [], status: { text: "Snippets are unavailable for this project." } };
+    return { kind: "snip", options: [], status: { text: tr("composer.discovery.snippetsUnavailable") } };
   }
   if (catalog.state === "empty") {
-    return { kind: "snip", options: [], status: { text: "No snippets yet.", createSnippet: true } };
+    return { kind: "snip", options: [], status: { text: tr("composer.discovery.noSnippetsYet"), createSnippet: true } };
   }
   const options = filterSnippets(catalog.items, query)
     .map((o) => ({ ...o, id: autocompleteOptionId("snip", o.label.slice(1)) }));
   if (options.length === 0) {
-    return { kind: "snip", options, status: { text: `No snippets match “${query}”.` } };
+    return { kind: "snip", options, status: { text: tr("composer.discovery.noSnippetsMatch", { query }) } };
   }
   return { kind: "snip", options, status: null };
 }
@@ -231,18 +234,18 @@ export function fileAutocomplete(
   hits: Array<{ path: string; kind: "file" | "dir" }>,
 ): AutocompleteViewState {
   if (query.length === 0) {
-    return { kind: "file", options: [], status: { text: "Type a file or folder name to search this project." } };
+    return { kind: "file", options: [], status: { text: tr("composer.discovery.typeFileOrFolder") } };
   }
   if (phase !== "done") {
-    return { kind: "file", options: [], status: { text: "Searching project files…" } };
+    return { kind: "file", options: [], status: { text: tr("composer.discovery.searchingProjectFiles") } };
   }
   if (hits.length === 0) {
-    return { kind: "file", options: [], status: { text: `No project files match “${query}”.` } };
+    return { kind: "file", options: [], status: { text: tr("composer.discovery.noProjectFilesMatch", { query }) } };
   }
   const options = hits.map((h) => ({
     id: autocompleteOptionId("file", h.path),
     label: `@${h.path}`,
-    detail: h.kind === "dir" ? "folder" : "file",
+    detail: h.kind === "dir" ? tr("composer.discovery.folder") : tr("composer.discovery.file"),
     value: `@${h.path}${h.kind === "dir" ? "/" : " "}`,
   }));
   return { kind: "file", options, status: null };
@@ -253,7 +256,9 @@ export function fileAutocomplete(
 /** `ModelDescriptor.context` is a token count; render only when numeric. */
 export function contextTokensLabel(context: unknown): string | null {
   if (typeof context !== "number" || !Number.isFinite(context) || context <= 0) return null;
-  return context >= 1000 ? `${Math.round(context / 1000)}k context` : `${context} context`;
+  return context >= 1000
+    ? tr("modelpicker.valueKContext", { value: Math.round(context / 1000) })
+    : tr("modelpicker.valueContext", { value: context });
 }
 
 /** Honest model row detail: provider, numeric context, and connection only
@@ -265,7 +270,7 @@ export function modelDetail(m: {
   const parts: string[] = [m.providerName || m.providerID];
   const ctx = contextTokensLabel(m.context);
   if (ctx) parts.push(ctx);
-  if (m.connected === false) parts.push("not connected");
+  if (m.connected === false) parts.push(tr("settings.modelspage.notConnected"));
   return parts.join(" · ");
 }
 
@@ -297,4 +302,4 @@ export function modelDisplayName(
 }
 
 export const ATTACHMENT_COMPAT_NOTE =
-  "Attachment compatibility is not reported by this provider";
+  tr("composer.discovery.attachmentCompatibilityNotReported");

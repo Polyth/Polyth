@@ -17,14 +17,15 @@ import {
 import "../widgets/builtinWidgets.tsx";
 import { announce } from "./a11y/live.tsx";
 import { useModalSurface } from "./a11y/Dialog.tsx";
+import { tr } from "../i18n/index.ts";
 
 const MODE_COPY: Array<[WidgetAudience, string, string]> = [
-  ["simple", "Simple", "A calm project with essential controls and friendly names."],
-  ["standard", "Standard", "Everyday project tools with detail when you need it."],
-  ["power", "Power", "All technical controls, advanced widgets, and status detail."],
+  ["simple", tr("projectsetup.simple"), tr("projectsetup.simpleDescription")],
+  ["standard", tr("projectsetup.standard"), tr("projectsetup.standardDescription")],
+  ["power", tr("projectsetup.power"), tr("projectsetup.powerDescription")],
 ];
 
-const STEP_LABELS = ["Workflow", "Control", "Widgets", "Review"] as const;
+const STEP_LABELS = [tr("projectsetup.workflow"), tr("projectsetup.control"), tr("projectsetup.widgets"), tr("projectsetup.review")] as const;
 
 export default function ProjectSetup() {
   const widgets = useWidgetCatalog();
@@ -111,7 +112,7 @@ export default function ProjectSetup() {
       { immediate: true },
     );
     completeProjectSetup();
-    announce(`${workflowOption(draft.workflow).label} setup applied to this project with ${draft.widgetIds.length} widgets in ${draft.audience} mode.`);
+    announce(tr("projectsetup.valueSetupAppliedToThisProjectWith", { label: workflowOption(draft.workflow).label, length: draft.widgetIds.length, audience: draft.audience }));
     exitFocus.current = "composer";
     setOverlay(null);
   };
@@ -138,14 +139,14 @@ export default function ProjectSetup() {
       >
         <header className="guided-setup-head">
           <div>
-            <span className="project-setup-kicker">Project setup</span>
-            <h1 id="project-setup-heading">Set up this project</h1>
-            <p id="project-setup-desc">Choose a starting canvas for this project. You can change everything later.</p>
+            <span className="project-setup-kicker">{tr("projectsetup.projectSetup")}</span>
+            <h1 id="project-setup-heading">{tr("projectsetup.setUpThisProject")}</h1>
+            <p id="project-setup-desc">{tr("projectsetup.chooseAStartingCanvasForThisProject")}</p>
           </div>
-          <button className="project-setup-close" onClick={dismiss} aria-label="Close project setup">×</button>
+          <button className="project-setup-close" onClick={dismiss} aria-label={tr("projectsetup.closeProjectSetup")}>{tr("projectsetup.message")}</button>
         </header>
 
-        <ol className="guided-setup-steps" aria-label="Setup progress">
+        <ol className="guided-setup-steps" aria-label={tr("projectsetup.setupProgress")}>
           {STEP_LABELS.map((label, index) => (
             <li key={label} className={index === step ? "active" : index < step ? "done" : ""}>
               <span>{index < step ? "✓" : index + 1}</span><b>{label}</b>
@@ -156,7 +157,7 @@ export default function ProjectSetup() {
         <div className="guided-setup-body">
           {step === 0 && (
             <section>
-              <div className="guided-step-title"><span>Step 1 of 4</span><h2>What kind of work should stay nearby?</h2><p>This only chooses a starting arrangement for this project.</p></div>
+              <div className="guided-step-title"><span>{tr("projectsetup.step1Of4")}</span><h2>{tr("projectsetup.whatKindOfWorkShouldStayNearby")}</h2><p>{tr("projectsetup.thisOnlyChoosesAStartingArrangementFor")}</p></div>
               <div className="guided-workflow-grid">
                 {WORKFLOW_OPTIONS.map((option) => (
                   <button
@@ -177,7 +178,7 @@ export default function ProjectSetup() {
 
           {step === 1 && (
             <section>
-              <div className="guided-step-title"><span>Step 2 of 4</span><h2>How much control do you want up front?</h2><p>This changes presentation, not what Polyth can do.</p></div>
+              <div className="guided-step-title"><span>{tr("projectsetup.step2Of4")}</span><h2>{tr("projectsetup.howMuchControlDoYouWantUp")}</h2><p>{tr("projectsetup.thisChangesPresentationNotWhatPolythCan")}</p></div>
               <div className="guided-mode-grid">
                 {MODE_COPY.map(([id, label, description]) => (
                   <button
@@ -194,7 +195,7 @@ export default function ProjectSetup() {
                     <span className={`guided-mode-preview mode-${id}`} aria-hidden="true"><i /><i /><i /><i /></span>
                     <strong>{label}</strong>
                     <small>{description}</small>
-                    {id === "standard" && <em>Recommended</em>}
+                    {id === "standard" && <em>{tr("projectsetup.recommended")}</em>}
                   </button>
                 ))}
               </div>
@@ -203,7 +204,7 @@ export default function ProjectSetup() {
 
           {step === 2 && (
             <section>
-              <div className="guided-step-title"><span>Step 3 of 4</span><h2>Pick the widgets you want nearby</h2><p>Choose 5–8 now, or keep the suggested set.</p></div>
+              <div className="guided-step-title"><span>{tr("projectsetup.step3Of4")}</span><h2>{tr("projectsetup.pickTheWidgetsYouWantNearby")}</h2><p>{tr("projectsetup.choose58NowOrKeepThe")}</p></div>
               <div className="guided-widget-grid">
                 {availableSuggestions.map((widget) => {
                   const selected = draft.widgetIds.includes(widget.id);
@@ -223,20 +224,20 @@ export default function ProjectSetup() {
                 })}
               </div>
               <p className="guided-selection-count" role={!validSetupWidgetCount(draft.widgetIds) ? "alert" : undefined}>
-                {draft.widgetIds.length} selected · {draft.widgetIds.length < MIN_SETUP_WIDGETS
-                  ? `Choose at least ${MIN_SETUP_WIDGETS}.`
-                  : "You can add any plugin widget later."}
+                {draft.widgetIds.length} {tr("projectsetup.selected")}{" "}{draft.widgetIds.length < MIN_SETUP_WIDGETS
+                  ? tr("projectsetup.chooseAtLeastValue", { MIN_SETUP_WIDGETS: MIN_SETUP_WIDGETS })
+                  : tr("projectsetup.youCanAddAnyPluginWidgetLater")}
               </p>
             </section>
           )}
 
           {step === 3 && (
             <section>
-              <div className="guided-step-title"><span>Step 4 of 4</span><h2>Your project canvas</h2><p>Review the choices below. Nothing is locked.</p></div>
+              <div className="guided-step-title"><span>{tr("projectsetup.step4Of4")}</span><h2>{tr("projectsetup.yourProjectCanvas")}</h2><p>{tr("projectsetup.reviewTheChoicesBelowNothingIsLocked")}</p></div>
               <div className="guided-review">
-                <article><span>Workflow</span><strong>{workflowOption(draft.workflow).label}</strong><button type="button" onClick={() => setStep(0)}>Edit</button></article>
-                <article><span>Control</span><strong>{MODE_COPY.find(([id]) => id === draft.audience)?.[1]}</strong><button type="button" onClick={() => setStep(1)}>Edit</button></article>
-                <article><span>Widgets</span><strong>{draft.widgetIds.length} selected</strong><button type="button" onClick={() => setStep(2)}>Edit</button></article>
+                <article><span>{tr("projectsetup.workflow")}</span><strong>{workflowOption(draft.workflow).label}</strong><button type="button" onClick={() => setStep(0)}>{tr("common.edit")}</button></article>
+                <article><span>{tr("projectsetup.control")}</span><strong>{MODE_COPY.find(([id]) => id === draft.audience)?.[1]}</strong><button type="button" onClick={() => setStep(1)}>{tr("common.edit")}</button></article>
+                <article><span>{tr("projectsetup.widgets")}</span><strong>{draft.widgetIds.length} {tr("projectsetup.selected2")}</strong><button type="button" onClick={() => setStep(2)}>{tr("common.edit")}</button></article>
                 <div className="guided-review-widgets">
                   {draft.widgetIds.map((id) => {
                     const widget = widgets.find((item) => item.id === id);
@@ -244,18 +245,18 @@ export default function ProjectSetup() {
                   })}
                 </div>
               </div>
-              <div className="guided-review-note"><span aria-hidden="true">✦</span><p><strong>You can change everything later.</strong><small>Move, resize, hide, or add widgets from Settings → Widgets & Layout.</small></p></div>
+              <div className="guided-review-note"><span aria-hidden="true">✦</span><p><strong>{tr("projectsetup.youCanChangeEverythingLater")}</strong><small>{tr("projectsetup.moveResizeHideOrAddWidgetsFrom")}</small></p></div>
             </section>
           )}
         </div>
 
         <footer className="guided-setup-foot">
-          <button type="button" className="project-setup-skip" onClick={dismiss}>Skip for now</button>
+          <button type="button" className="project-setup-skip" onClick={dismiss}>{tr("projectsetup.skipForNow")}</button>
           <span />
-          {step > 0 && <button type="button" onClick={() => setStep((current) => current - 1)}>Back</button>}
+          {step > 0 && <button type="button" onClick={() => setStep((current) => current - 1)}>{tr("common.back")}</button>}
           {step < 3
-            ? <button type="button" className="btn-accent" onClick={() => setStep((current) => current + 1)}>Continue</button>
-            : <button type="button" className="btn-accent" disabled={!validSetupWidgetCount(draft.widgetIds)} onClick={finish}>Finish setup</button>}
+            ? <button type="button" className="btn-accent" onClick={() => setStep((current) => current + 1)}>{tr("common.continue")}</button>
+            : <button type="button" className="btn-accent" disabled={!validSetupWidgetCount(draft.widgetIds)} onClick={finish}>{tr("projectsetup.finishSetup")}</button>}
         </footer>
       </div>
     </div>

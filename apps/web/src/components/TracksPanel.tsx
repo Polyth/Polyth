@@ -4,6 +4,7 @@ import { api } from "../api.ts";
 import { ago } from "../format.ts";
 import { useStore } from "../store.ts";
 import { parseTrackSteps } from "../trackForm.ts";
+import { tr } from "../i18n/index.ts";
 
 export default function TracksPanel() {
   const projectId = useStore((state) => state.activeProjectId);
@@ -34,7 +35,7 @@ export default function TracksPanel() {
   }, [reload, tracks]);
 
   if (!projectId) {
-    return <div className="rail-empty">Open a project to create a spec-driven track.</div>;
+    return <div className="rail-empty">{tr("trackspanel.openAProjectToCreateASpec")}</div>;
   }
 
   const steps = parseTrackSteps(stepLines, testCommand);
@@ -74,53 +75,49 @@ export default function TracksPanel() {
     <div className="tracks-panel">
       <div className="view-toolbar-row">
         <div>
-          <strong>Spec-driven tracks</strong>
-          <div className="muted tracks-intro">Each verified plan step becomes one Git commit.</div>
+          <strong>{tr("trackspanel.specDrivenTracks")}</strong>
+          <div className="muted tracks-intro">{tr("trackspanel.eachVerifiedPlanStepBecomesOneGit")}</div>
         </div>
         <span className="header-spacer" />
         <button className="small-btn" onClick={() => setCreating((value) => !value)}>
-          {creating ? "Cancel" : "New track"}
+          {creating ? tr("common.cancel") : tr("trackspanel.newTrack")}
         </button>
       </div>
 
       {creating && (
         <div className="track-create-form">
           <label>
-            Track title
-            <input value={title} placeholder="Add offline sync" onChange={(event) => setTitle(event.target.value)} />
+            {tr("trackspanel.trackTitle")}<input value={title} placeholder={tr("trackspanel.addOfflineSync")} onChange={(event) => setTitle(event.target.value)} />
           </label>
           <label>
-            Feature spec
-            <textarea
+            {tr("trackspanel.featureSpec")}<textarea
               rows={7}
               value={spec}
-              placeholder="Problem, desired behavior, constraints, and acceptance criteria…"
+              placeholder={tr("trackspanel.problemDesiredBehaviorConstraintsAndAcceptanceCriteria")}
               onChange={(event) => setSpec(event.target.value)}
             />
           </label>
           <label>
-            Plan steps
-            <textarea
+            {tr("trackspanel.planSteps")}<textarea
               rows={5}
               value={stepLines}
-              placeholder={"One step per line\nOptional title :: detailed instructions"}
+              placeholder={tr("trackspanel.oneStepPerLineOptionalTitleDetailed")}
               onChange={(event) => setStepLines(event.target.value)}
             />
           </label>
           <label>
-            Test command for every step
-            <input
+            {tr("trackspanel.testCommandForEveryStep")}<input
               className="mono"
               value={testCommand}
-              placeholder="node --test packages/example/test/example.test.ts"
+              placeholder={tr("trackspanel.nodeTestPackagesExampleTestExampleTest")}
               onChange={(event) => setTestCommand(event.target.value)}
             />
           </label>
           <div className="view-toolbar-row">
-            <span className="muted">{steps.length} step{steps.length === 1 ? "" : "s"}</span>
+            <span className="muted">{steps.length} {tr("trackspanel.step")}{steps.length === 1 ? "" : tr("trackspanel.s")}</span>
             <span className="header-spacer" />
             <button className="primary-btn" disabled={!canCreate || busy === "create"} onClick={create}>
-              {busy === "create" ? "Creating…" : "Create spec + plan"}
+              {busy === "create" ? tr("trackspanel.creating") : tr("trackspanel.createSpecPlan")}
             </button>
           </div>
         </div>
@@ -129,7 +126,7 @@ export default function TracksPanel() {
       {error && <div className="form-error" role="alert">{error}</div>}
       {notice && <div className="knowledge-notice" role="status">{notice}</div>}
       {tracks.length === 0 && !creating && (
-        <div className="rail-empty">No tracks yet. Create one to save a feature spec and sequential implementation plan.</div>
+        <div className="rail-empty">{tr("trackspanel.noTracksYetCreateOneToSave")}</div>
       )}
 
       {tracks.map((track) => {
@@ -142,9 +139,9 @@ export default function TracksPanel() {
               <span className="knowledge-title">{track.title}</span>
             </div>
             <div className="track-progress">
-              <span>{completed}/{track.steps.length} steps</span>
+              <span>{completed}/{track.steps.length} {tr("trackspanel.steps")}</span>
               <span>·</span>
-              <span>updated {ago(track.updatedAt)} ago</span>
+              <span>{tr("trackspanel.updated")}{" "}{ago(track.updatedAt)} {tr("trackspanel.ago")}</span>
             </div>
             <ol className="track-steps">
               {track.steps.map((step, index) => (
@@ -155,11 +152,11 @@ export default function TracksPanel() {
                   <span className="track-step-content">
                     <strong>{step.title}</strong>
                     <small className="mono">{step.testCommand}</small>
-                    {step.commitSha && <small>commit <code>{step.commitSha.slice(0, 12)}</code></small>}
+                    {step.commitSha && <small>{tr("trackspanel.commit")}{" "}<code>{step.commitSha.slice(0, 12)}</code></small>}
                     {step.error && <small className="form-error">{step.error}</small>}
                     {step.test?.output && step.status === "failed" && (
                       <details>
-                        <summary>Test output</summary>
+                        <summary>{tr("trackspanel.testOutput")}</summary>
                         <pre>{step.test.output}</pre>
                       </details>
                     )}
@@ -168,37 +165,36 @@ export default function TracksPanel() {
               ))}
             </ol>
             <div className="track-docs">
-              Feature spec and managed plan are saved in Knowledge · plan rev {track.planRevision}
+              {tr("trackspanel.featureSpecAndManagedPlanAreSaved")}{" "}{track.planRevision}
             </div>
             <div className="knowledge-actions">
               {track.status === "draft" && (
                 <button
                   className="small-btn primary-btn"
                   disabled={!sessionId || busy === track.id}
-                  title={sessionId ? `Start ${active?.title ?? "next step"} in this session` : "Open a session first"}
-                  onClick={() => sessionId && void run(track.id, () => api.trackStart(track.id, sessionId), "Track started.")}
+                  title={sessionId ? tr("trackspanel.startValueInThisSession", {
+                    value: active?.title ?? tr("trackspanel.nextStep"),
+                  }) : tr("trackspanel.openASessionFirst")}
+                  onClick={() => sessionId && void run(track.id, () => api.trackStart(track.id, sessionId), tr("trackspanel.trackStarted"))}
                 >
-                  Start next step
-                </button>
+                  {tr("trackspanel.startNextStep")}</button>
               )}
               {track.status === "blocked" && (
                 <button
                   className="small-btn"
                   disabled={!sessionId || busy === track.id}
-                  onClick={() => sessionId && void run(track.id, () => api.trackRetry(track.id, sessionId), "Step retry started.")}
+                  onClick={() => sessionId && void run(track.id, () => api.trackRetry(track.id, sessionId), tr("trackspanel.stepRetryStarted"))}
                 >
-                  Retry step
-                </button>
+                  {tr("trackspanel.retryStep")}</button>
               )}
               {track.status === "running" && (
                 <button
                   className="small-btn"
                   disabled={busy === track.id}
-                  title="Normally automatic after the goal auditor reports done"
-                  onClick={() => void run(track.id, () => api.trackCompleteStep(track.id), "Step verified and committed.")}
+                  title={tr("trackspanel.normallyAutomaticAfterTheGoalAuditorReports")}
+                  onClick={() => void run(track.id, () => api.trackCompleteStep(track.id), tr("trackspanel.stepVerifiedAndCommitted"))}
                 >
-                  Finalize completed goal
-                </button>
+                  {tr("trackspanel.finalizeCompletedGoal")}</button>
               )}
             </div>
           </section>

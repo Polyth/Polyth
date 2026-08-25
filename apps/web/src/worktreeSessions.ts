@@ -11,6 +11,13 @@ export function worktreeSlug(value: string): string {
     .replace(/-+$/g, "") || "session";
 }
 
+/** A compact, branch-safe default for a new worktree. The user can always
+ * replace it before creation; randomness avoids collisions between quick
+ * worktrees that have no session title yet. */
+export function randomWorktreeSlug(): string {
+  return `worktree-${Math.random().toString(36).slice(2, 8)}`;
+}
+
 function safeBranch(raw: string): string {
   const parts = raw
     .split("/")

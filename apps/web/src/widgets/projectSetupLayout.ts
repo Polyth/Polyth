@@ -5,6 +5,7 @@ import {
   type WidgetLayout,
   type WidgetLayoutMutation,
 } from "./widgetLayout.ts";
+import { tr } from "../i18n/index.ts";
 
 export type SetupWorkflow =
   | "build-debug"
@@ -40,17 +41,17 @@ export interface WorkflowOption {
 export const WORKFLOW_OPTIONS: readonly WorkflowOption[] = [
   {
     id: "build-debug",
-    label: "Build & debug",
-    description: "Code, changes, terminal, preview, and live activity.",
+    label: tr("widgets.projectsetuplayout.buildDebug"),
+    description: tr("widgets.projectsetuplayout.codeChangesTerminalInternalBrowser"),
     suggestedWidgetIds: [
       "core.chat", "files.explorer", "git.recent", "terminal.shell",
-      "preview.app", "session.work-status", "session.activity",
+      "browser.app", "session.work-status", "session.activity",
     ],
   },
   {
     id: "plan-coordinate",
-    label: "Plan & coordinate",
-    description: "Goals, notes, schedule, progress, and review.",
+    label: tr("widgets.projectsetuplayout.planCoordinate"),
+    description: tr("widgets.projectsetuplayout.goalsNotesScheduleProgressAndReview"),
     suggestedWidgetIds: [
       "core.chat", "goals.current", "knowledge.notes", "schedule.tasks",
       "usage.session", "walkthrough.review",
@@ -58,8 +59,8 @@ export const WORKFLOW_OPTIONS: readonly WorkflowOption[] = [
   },
   {
     id: "research",
-    label: "Research",
-    description: "Conversation, notes, browser, GitHub, and sources.",
+    label: tr("widgets.projectsetuplayout.research2"),
+    description: tr("widgets.projectsetuplayout.conversationNotesBrowserGithubAndSources"),
     suggestedWidgetIds: [
       "core.chat", "knowledge.notes", "github.overview",
       "files.project-map", "core.quick-actions",
@@ -67,17 +68,17 @@ export const WORKFLOW_OPTIONS: readonly WorkflowOption[] = [
   },
   {
     id: "design-explore",
-    label: "Design & explore",
-    description: "Ideas, previews, project context, and quick actions.",
+    label: tr("widgets.projectsetuplayout.designExplore"),
+    description: tr("widgets.projectsetuplayout.ideasBrowserContextProjectContext"),
     suggestedWidgetIds: [
-      "core.chat", "preview.app", "files.project-map", "knowledge.notes",
+      "core.chat", "browser.app", "files.project-map", "knowledge.notes",
       "core.quick-actions", "goals.current",
     ],
   },
   {
     id: "write",
-    label: "Write",
-    description: "A calm composer with notes, goals, and references nearby.",
+    label: tr("widgets.projectsetuplayout.write2"),
+    description: tr("widgets.projectsetuplayout.aCalmComposerWithNotesGoalsAnd"),
     suggestedWidgetIds: [
       "core.chat", "knowledge.notes", "goals.current", "files.project-map",
       "core.quick-actions",
@@ -85,8 +86,8 @@ export const WORKFLOW_OPTIONS: readonly WorkflowOption[] = [
   },
   {
     id: "general",
-    label: "General assistant",
-    description: "A balanced place to ask, plan, build, and review.",
+    label: tr("widgets.projectsetuplayout.generalAssistant"),
+    description: tr("widgets.projectsetuplayout.aBalancedPlaceToAskPlanBuild"),
     suggestedWidgetIds: [
       "core.chat", "core.quick-actions", "goals.current", "files.project-map",
       "git.recent", "knowledge.notes", "session.work-status",

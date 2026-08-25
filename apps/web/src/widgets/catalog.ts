@@ -9,6 +9,7 @@ import {
   type WidgetSize,
   type WidgetZone,
 } from "./widgetLayout.ts";
+import { tr } from "../i18n/index.ts";
 
 export interface WidgetRenderContext extends Record<string, unknown> {
   projectId: string | null;
@@ -96,18 +97,18 @@ export function defineWidgetPlugin<T extends WidgetPlugin>(plugin: T): T {
 export function registerWidgetPlugin(plugin: WidgetPlugin): () => void {
   const ids = new Set<string>();
   const definitions = (plugin.widgets ?? []).map((widget): WidgetDef => {
-    if (ids.has(widget.id)) throw new Error(`plugin ${plugin.id} declares duplicate widget: ${widget.id}`);
+    if (ids.has(widget.id)) throw new Error(tr("widgets.catalog.pluginValueDeclaresDuplicateWidgetValue", { id: plugin.id, id2: widget.id }));
     ids.add(widget.id);
     const existing = registry.get(widget.id);
     if (existing && existing.pluginId !== plugin.id) {
-      throw new Error(`widget ${widget.id} is already owned by plugin ${existing.pluginId}`);
+      throw new Error(tr("widgets.catalog.widgetValueIsAlreadyOwnedByPlugin", { id: widget.id, pluginId: existing.pluginId }));
     }
     const defaultSlot = widget.defaultSlot ?? widgetSlotFromZone(widget.zone ?? "main");
     const supportedSlots = widget.supportedSlots
       ?? widget.supportedZones?.map(widgetSlotFromZone)
       ?? [defaultSlot];
     if (!supportedSlots.includes(defaultSlot)) {
-      throw new Error(`plugin ${plugin.id} widget ${widget.id} does not support its default slot ${defaultSlot}`);
+      throw new Error(tr("widgets.catalog.pluginValueWidgetValueDoesNotSupport", { id: plugin.id, id2: widget.id, defaultSlot: defaultSlot }));
     }
     return {
       ...widget,
@@ -154,7 +155,7 @@ function slotWidgets(): WidgetDef[] {
       pluginId: typeof meta.pluginId === "string" ? meta.pluginId : item.id.split(".")[0] ?? "plugin",
       ...(typeof meta.pluginName === "string" ? { pluginName: meta.pluginName } : {}),
       title: typeof meta.title === "string" ? meta.title : item.id.replace(/[._-]+/g, " "),
-      description: typeof meta.description === "string" ? meta.description : "Plugin-provided workspace widget.",
+      description: typeof meta.description === "string" ? meta.description : tr("widgets.catalog.pluginProvidedWorkspaceWidget"),
       ...(meta.kind === "widget" || meta.kind === "mini-widget" ? { kind: meta.kind } : {}),
       ...(typeof defaultSlot === "string" && isUiSlot(defaultSlot) ? { defaultSlot } : {}),
       ...(supportedSlots && supportedSlots.length > 0 ? { supportedSlots } : {}),

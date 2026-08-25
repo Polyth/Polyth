@@ -8,6 +8,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { Window } from "happy-dom";
+import { tr } from "../src/i18n/index.ts";
 
 // happy-dom globals must exist before react-dom/client (and the store's
 // localStorage-backed actions) initialize.
@@ -68,7 +69,7 @@ test("mounted host: late registration renders, disposal falls back deterministic
   const offs: Cleanup[] = [];
   try {
     // Nothing registered yet → honest empty workspace, no crash.
-    assert.match(container.textContent ?? "", /Nothing to show here yet/);
+    assert.match(container.textContent ?? "", new RegExp(tr("workspace.workspacehost.nothingToShow")));
 
     // Registration after the initial React mount must trigger a render.
     offs.push(probe("session", "session surface"));
@@ -105,13 +106,13 @@ test("mounted host: project and session requirements render standard empty state
     offs.push(probe("goals", "goals surface", { requires: "session" }));
     await act(async () => {});
     // Unknown project truth never masquerades as a successful empty list.
-    assert.match(container.textContent ?? "", /Loading your projects/);
+    assert.match(container.textContent ?? "", new RegExp(tr("workspace.workspacehost.loadingProjects")));
 
     await act(async () => {
       const ticket = beginProjectListRequest();
       failProjectList(ticket, "offline");
     });
-    assert.match(container.textContent ?? "", /Couldn’t load projects/);
+    assert.match(container.textContent ?? "", new RegExp(tr("workspace.workspacehost.couldNotLoadProjects")));
     assert.match(container.textContent ?? "", /offline/);
 
     await act(async () => {
@@ -119,13 +120,16 @@ test("mounted host: project and session requirements render standard empty state
       assert.equal(publishProjectList(ticket, []), "published");
     });
     // Ready-empty → the standard project empty state (not the surface).
-    assert.match(container.textContent ?? "", /Bring your work into focus/);
+    assert.match(container.textContent ?? "", new RegExp(tr("workspace.workspacehost.bringWorkIntoFocus")));
     assert.ok(container.querySelector(".hero-open-project"));
 
     // Project but no session → the standard session empty state.
     await act(async () => { activateProject("p1"); });
-    assert.match(container.textContent ?? "", /No session selected/);
-    assert.match(container.textContent ?? "", /Open or start a session to use goals surface\./);
+    assert.match(container.textContent ?? "", new RegExp(tr("workspace.workspacehost.noSessionSelected")));
+    assert.match(
+      container.textContent ?? "",
+      new RegExp(tr("workspace.workspacehost.openSessionToUseValue", { title: "goals surface" }).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")),
+    );
 
     // Session present → the surface renders with canonical ids available.
     await act(async () => { activateSession("s1"); });

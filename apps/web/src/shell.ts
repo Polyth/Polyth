@@ -16,6 +16,7 @@ import {
 import { announce } from "./components/a11y/live.tsx";
 import { listCapabilities, subscribeCapabilities, type CapabilityDescriptor } from "./capabilities.ts";
 import "./builtinCapabilities.ts";
+import { tr } from "./i18n/index.ts";
 
 /** Old palette labels preserved as extra search terms per capability so
  *  existing users' muscle memory ("Git & worktrees", "Fuse models") keeps
@@ -32,10 +33,12 @@ const LEGACY_SEARCH_TERMS: Record<string, string[]> = {
   github: ["GitHub issues & PRs"],
 };
 
-const RAIL: Array<[RailPlugin, string]> = [
-  ["context", "Context panel"], ["knowledge", "Knowledge panel"],
-  ["usage", "Usage panel"], ["events", "Event log"],
-];
+const RAIL = [
+  ["context", "capabilities.context"],
+  ["knowledge", "capabilities.knowledge"],
+  ["usage", "capabilities.usageCost"],
+  ["events", "capabilities.eventLog"],
+] as const satisfies ReadonlyArray<readonly [RailPlugin, Parameters<typeof tr>[0]]>;
 
 const IS_MAC = MOD === "⌘";
 // Live resolver: command hints must always reflect the current custom binding.
@@ -45,13 +48,13 @@ const hintOf = (action: HotkeyAction) => (): string => formatCombo(getKeymap()[a
 function registerGroupingCommand(g: GroupingDescriptor): () => void {
   return registerCommand({
     id: `sidebar.group-by.${g.id}`,
-    label: `Group sessions by: ${g.label}`,
-    group: "Sidebar",
+    label: tr("shell.groupSessionsByValue", { label: g.label }),
+    group: tr("shell.sidebar"),
     keywords: ["group by", "sidebar", "sort"],
     checked: () => getGroupingMode() === g.id,
     run: () => {
       setGroupingMode(g.id);
-      announce(`Sessions grouped by ${g.label}`);
+      announce(tr("shell.sessionsGroupedByValue", { label: g.label }));
     },
   });
 }
@@ -71,10 +74,12 @@ export function registerSidebarGrouping(desc: GroupingDescriptor): () => void {
  *  command as the header, rail, compact Tools, Settings, and shortcuts.
  *  Search matches plain and technical terms; shortcuts never check a preset. */
 function capabilityCommand(d: CapabilityDescriptor): () => void {
+  const terminal = d.id === "terminal";
   return registerCommand({
     id: `capability.${d.id}`,
-    label: d.label,
-    group: "Workspace",
+    label: terminal ? tr("terminalview.openTerminal") : d.label,
+    ...(terminal ? { hint: hintOf("viewTerminal") } : {}),
+    group: tr("shell.workspace"),
     keywords: [
       ...(d.technicalLabel ? [d.technicalLabel] : []),
       ...d.keywords,
@@ -114,22 +119,22 @@ function syncCapabilityCommands(): () => void {
 }
 
 export function installShell(): void {
-  registerCommand({ id: "cmd.palette", label: "Command palette", hint: hintOf("palette"), group: "Shell", run: () => openPalette("all") });
+  registerCommand({ id: "cmd.palette", label: tr("shell.commandPalette"), hint: hintOf("palette"), group: tr("shell.shell"), run: () => openPalette("all") });
   registerCommand({
-    id: "cmd.searchFiles", label: "Search files", hint: hintOf("searchFiles"), group: "Shell",
+    id: "cmd.searchFiles", label: tr("shell.searchFiles"), hint: hintOf("searchFiles"), group: tr("shell.shell"),
     keywords: ["quick open", "go to file"],
     run: () => openPalette("files"),
   });
-  registerCommand({ id: "cmd.search", label: "Search sessions", hint: hintOf("searchSessions"), group: "Shell", run: () => setOverlay("search") });
-  registerCommand({ id: "cmd.settings", label: "Settings", hint: hintOf("settings"), group: "Shell", run: () => setOverlay("settings") });
-  registerCommand({ id: "cmd.focusComposer", label: "Focus composer", hint: hintOf("focusComposer"), group: "Shell", run: focusComposer });
+  registerCommand({ id: "cmd.search", label: tr("shell.searchSessions"), hint: hintOf("searchSessions"), group: tr("shell.shell"), run: () => setOverlay("search") });
+  registerCommand({ id: "cmd.settings", label: tr("common.settings"), hint: hintOf("settings"), group: tr("shell.shell"), run: () => setOverlay("settings") });
+  registerCommand({ id: "cmd.focusComposer", label: tr("shell.focusComposer"), hint: hintOf("focusComposer"), group: tr("shell.shell"), run: focusComposer });
   registerCommand({
-    id: "cmd.new", label: "New session", hint: hintOf("newSession"), group: "Session",
+    id: "cmd.new", label: tr("shell.newSession"), hint: hintOf("newSession"), group: tr("shell.session"),
     when: () => !!getState().activeProjectId,
     run: () => { const id = getState().activeProjectId; if (id) startNewSession(id); },
   });
   registerCommand({
-    id: "cmd.newWorktree", label: "New session in worktree", group: "Session",
+    id: "cmd.newWorktree", label: tr("shell.newSessionInWorktree"), group: tr("shell.session"),
     keywords: ["branch", "isolated", "checkout"],
     when: () => !!getState().activeProjectId,
     run: () => {
@@ -138,33 +143,33 @@ export function installShell(): void {
     },
   });
   registerCommand({
-    id: "cmd.fork", label: "Fork session", group: "Session",
+    id: "cmd.fork", label: tr("shell.forkSession"), group: tr("shell.session"),
     when: () => !!getState().activeSessionId,
     run: () => { const id = getState().activeSessionId; if (id) void forkSession(id); },
   });
   registerCommand({
-    id: "cmd.abort", label: "Abort current turn", group: "Session",
+    id: "cmd.abort", label: tr("shell.abortCurrentTurn"), group: tr("shell.session"),
     when: () => !!getState().activeSessionId,
     run: () => void abortSession(),
   });
   registerCommand({
-    id: "cmd.export", label: "Export session", group: "Session",
+    id: "cmd.export", label: tr("shell.exportSession"), group: tr("shell.session"),
     run: exportSessionMarkdown, when: () => !!getState().activeSessionId,
   });
   registerCommand({
-    id: "voice.read", label: "Read last reply aloud", group: "Voice",
+    id: "voice.read", label: tr("shell.readLastReplyAloud"), group: tr("shell.voice"),
     when: () => !!getState().activeSessionId,
     run: readLastReply,
   });
   registerCommand({
-    id: "voice.stop", label: "Stop reading aloud", group: "Voice",
+    id: "voice.stop", label: tr("shell.stopReadingAloud"), group: tr("shell.voice"),
     run: stopSpeaking,
   });
   // Every registered, available capability is searchable regardless of tier.
   syncCapabilityCommands();
-  for (const [id, label] of RAIL) {
+  for (const [id, labelKey] of RAIL) {
     registerCommand({
-      id: `rail.${id}`, label, group: "Panels",
+      id: `rail.${id}`, label: tr(labelKey), group: tr("shell.panels"),
       run: () => toggleRailPlugin(id),
     });
   }
@@ -175,8 +180,8 @@ export function installShell(): void {
   for (const { id, label } of HOTKEY_ACTIONS) {
     registerCommand({
       id: `shortcut.${id}`,
-      label: `Change shortcut: ${label}`,
-      group: "Shortcuts",
+      label: tr("shell.changeShortcutValue", { label: label }),
+      group: tr("shell.shortcuts"),
       keywords: ["keybinding", "hotkey", "shortcut"],
       hint: hintOf(id),
       run: () => openSettingsPage("shortcuts"),
@@ -206,6 +211,10 @@ const ACTIONS: Record<HotkeyAction, () => void> = {
 };
 
 function onKey(e: KeyboardEvent): void {
+  // Focused surfaces get first refusal. React handlers run before this window
+  // listener while the event bubbles, so a terminal-local shortcut such as
+  // Ctrl+Shift+F can prevent the global Session history action.
+  if (e.defaultPrevented) return;
   // IME composition keydowns (incl. legacy keyCode 229) never trigger shortcuts.
   if (e.isComposing || e.keyCode === 229) return;
   if (e.key === "Escape") { setOverlay(null); return; }

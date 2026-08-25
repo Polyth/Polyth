@@ -20,6 +20,7 @@ import { api } from "./api.ts";
 import { startStreamingDictation, type StreamingDictation } from "./dictationClient.ts";
 import { announce } from "./components/a11y/live.tsx";
 import { Icon } from "./icons.tsx";
+import { tr } from "./i18n/index.ts";
 
 // ---- voice prefs store ------------------------------------------------------
 
@@ -143,7 +144,7 @@ export function readLastReply(): void {
 type MicPhase = "idle" | "starting" | "listening" | "transcribing";
 
 const boundedReason = (raw: unknown): string => {
-  const s = raw instanceof Error ? raw.message : String(raw ?? "microphone error");
+  const s = raw instanceof Error ? raw.message : String(raw ?? tr("voice.microphoneError"));
   return s.length > 120 ? `${s.slice(0, 117)}…` : s;
 };
 
@@ -176,18 +177,22 @@ function MicButton() {
 
   // The four truthful availability states (plus checking) for the idle control.
   const availability: { available: boolean; reason?: string; settings?: boolean } =
-    !prefs.dictation ? { available: false, reason: "Dictation is off", settings: true }
-    : serverStt && capability === null ? { available: false, reason: "Checking microphone…" }
+    !prefs.dictation ? { available: false, reason: tr("voice.dictationOff"), settings: true }
+    : serverStt && capability === null ? { available: false, reason: tr("voice.checkingMicrophone") }
     : serverStt && capability && !capability.available && !support.stt
-      ? { available: false, reason: capability.reason ?? "Server transcription unavailable", settings: true }
+      ? {
+          available: false,
+          reason: capability.reason ?? tr("voice.serverTranscriptionUnavailable"),
+          settings: true,
+        }
     : !serverStt && !support.stt
-      ? { available: false, reason: "Dictation is not supported in this browser", settings: true }
+      ? { available: false, reason: tr("voice.dictationUnsupported"), settings: true }
     : { available: true };
 
-  const status = error !== null ? `Dictation failed: ${error}`
-    : phase === "starting" ? "Starting microphone…"
-    : phase === "listening" ? "Listening…"
-    : phase === "transcribing" ? "Transcribing…"
+  const status = error !== null ? tr("voice.dictationFailedValue", { error })
+    : phase === "starting" ? tr("voice.startingMicrophone")
+    : phase === "listening" ? tr("voice.listening")
+    : phase === "transcribing" ? tr("voice.transcribing")
     : availability.available ? null
     : availability.reason ?? null;
 
@@ -246,7 +251,7 @@ function MicButton() {
         }
       }
     };
-    rec.onerror = (e) => fail(e.error ?? "microphone error");
+    rec.onerror = (e) => fail(e.error ?? tr("voice.microphoneError"));
     rec.onend = () => setPhase((p) => (p === "listening" ? "idle" : p));
     recRef.current = rec;
     rec.start();
@@ -283,25 +288,22 @@ function MicButton() {
     <span className={`mic-control mic-${error ? "failed" : phase}`}>
       <button
         type="button"
-        className={`chip mic-btn${phase === "listening" ? " listening" : ""}`}
-        aria-label={phase === "listening" ? "Stop dictation" : "Dictate"}
+        className={`mic-btn${phase === "listening" ? " listening" : ""}`}
+        aria-label={phase === "listening" ? tr("voice.stopDictation") : tr("voice.dictate")}
         {...(phase === "listening" ? { "aria-pressed": true } : {})}
         disabled={!availability.available || busy}
         onClick={() => (phase === "listening" ? stop() : start())}
       >
         <span aria-hidden="true" className="mic-icon"><Icon.mic /></span>
-        <span className="mic-label">{phase === "listening" ? "Stop dictation" : "Dictate"}</span>
       </button>
       {status && <span className="mic-status">{status}</span>}
       {error !== null && (
         <button type="button" className="small-btn mic-retry" onClick={start}>
-          Try again
-        </button>
+          {tr("voice.tryAgain")}</button>
       )}
       {showSettings && (
         <button type="button" className="small-btn mic-settings" onClick={() => openSettingsPage("voice")}>
-          Voice settings
-        </button>
+          {tr("voice.voiceSettings")}</button>
       )}
     </span>
   );
@@ -313,11 +315,11 @@ let uninstallVoice: (() => void) | null = null;
 
 const VOICE_WIDGET_PLUGIN = defineWidgetPlugin({
   id: "voice",
-  name: "Voice",
+  name: tr("packages.voice.voice"),
   widgets: [{
     id: "voice.mic",
-    title: "Dictate",
-    description: "Start or stop voice dictation.",
+    title: tr("voice.dictate"),
+    description: tr("voice.startOrStopVoiceDictation"),
     kind: "mini-widget",
     defaultSlot: "composer.leading",
     supportedSlots: [

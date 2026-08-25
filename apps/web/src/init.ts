@@ -2,20 +2,25 @@
 import { api } from "./api.ts";
 import { SyncClient, type SyncStatus } from "./sync.ts";
 import { buildModel } from "./reduce.ts";
-import { displaySessionTitle, isPlaceholderTitle, modelToMarkdown, titleFromPrompt } from "./format.ts";
+import { displaySessionTitle, isPlaceholderTitle, modelToMarkdown } from "./format.ts";
 import { friendlyError } from "./settings.ts";
 import { formatAppUrl, parseAppUrl } from "./router.ts";
 import * as store from "./store.ts";
 import { resolveActiveProjectId } from "./projectRegistry.ts";
-import type { AttachmentRef, JsonObject, ModelRef, Project, SessionEvent } from "@polyth/contracts";
+import type { AttachmentRef, JsonObject, ModelRef, Project, ProjectPatch, SessionEvent } from "@polyth/contracts";
 import { suggestWorktreeBranch } from "./worktreeSessions.ts";
 import { installPushDeepLinks, registerServiceWorker } from "./push.ts";
 import { notificationCentre } from "./notificationCentre.ts";
 import { applyComposerSeed } from "./drafts.ts";
 import { forkSeedKey, rewindSeedKey } from "./messageActions.ts";
-import { getSessionDefaults, resolveSessionDefaultModel } from "./sessionDefaults.ts";
+import {
+  getSessionDefaults,
+  projectRemembersModelSelection,
+  resolveProjectModelDefault,
+} from "./sessionDefaults.ts";
 import { initPluginBridge } from "./pluginBridge.ts";
 import { reconcilePackage } from "./packages/reconcile.ts";
+import { tr } from "./i18n/index.ts";
 
 let sync: SyncClient | null = null;
 let syncStatus: SyncStatus = "disconnected";
@@ -60,7 +65,7 @@ function fetchBranch(projectId: string, sessionId: string | null): void {
         && current.activeProjectId === projectId
         && current.activeSessionId === sessionId
       ) {
-        store.setGitBranch(st.branch);
+        store.setGitBranch(st.branch ?? "");
       }
     })
     .catch(() => {
@@ -180,10 +185,10 @@ export async function refreshProjects(reason: ProjectRefreshReason = "manual"): 
   } catch (err) {
     console.error("project list failed", err);
     const hadSnapshot = store.getState().projectRegistry.status === "ready";
-    store.failProjectList(ticket, friendlyError("Couldn’t load projects", err));
+    store.failProjectList(ticket, friendlyError(tr("common.error"), err));
     if (hadSnapshot) {
       // Non-blocking refresh warning; known data stays usable.
-      store.setUiError(friendlyError("Couldn’t refresh the project list", err));
+      store.setUiError(friendlyError(tr("common.error"), err));
       if (reason === "reconcile" && reconcileRetryTimer === undefined) {
         reconcileRetryTimer = setTimeout(() => {
           reconcileRetryTimer = undefined;
@@ -219,7 +224,7 @@ async function restoreSelectionAfterReady(): Promise<void> {
         await openSession(fromUrl.sessionId, { showChat: false });
       } catch (err) {
         console.warn("session from URL not found, falling back", err);
-        store.setUiError("That session link couldn’t be opened — showing the project instead.");
+        store.setUiError(tr("init.sessionLinkCouldNotOpen"));
       }
     } else if (initial) {
       const savedSession = localStorage.getItem("polyth.activeSessionId");
@@ -401,9 +406,19 @@ export async function renameProject(id: string, name: string): Promise<void> {
  * browser-only sidebar preference. */
 export async function updateProjectAppearance(
   id: string,
-  patch: { color?: string; icon?: string },
+  patch: ProjectPatch,
 ): Promise<void> {
   const updated = await api.patchProject(id, patch);
+  store.applyProjectUpsert(updated);
+}
+
+/** Save a composer choice only for projects that opted into model memory. */
+export async function rememberProjectModelSelection(id: string, model: ModelRef): Promise<void> {
+  const project = store.getState().projectRegistry.projects.find((candidate) => candidate.id === id);
+  if (!projectRemembersModelSelection(project?.defaults)) return;
+  const updated = await api.patchProject(id, {
+    defaults: { rememberModelSelection: true, model },
+  });
   store.applyProjectUpsert(updated);
 }
 
@@ -440,8 +455,8 @@ async function createDefaultWorktree(projectId: string, title?: string): Promise
 export async function createSession(projectId: string, opts: CreateSessionOptions = {}): Promise<void> {
   const project = store.getState().projectRegistry.projects.find((candidate) => candidate.id === projectId);
   const defaults = getSessionDefaults();
-  const model = opts.model ?? resolveSessionDefaultModel(
-    project?.defaults?.model,
+  const model = opts.model ?? resolveProjectModelDefault(
+    project?.defaults,
     defaults.defaultModel,
   );
   const agent = opts.agent ?? project?.defaults?.agent ?? defaults.defaultAgent;
@@ -517,16 +532,16 @@ export interface SendOptions {
 export async function sendMessage(text: string, model?: JsonObject, agent?: string, opts?: SendOptions): Promise<boolean> {
   const id = opts?.targetSessionId ?? store.getState().activeSessionId;
   if (!id) return false;
-  // If the stored title is still a placeholder, derive one from the first
-  // prompt so the sidebar/header update immediately (display-only upsert).
+  // The server records an auto title with the first admitted user message.
+  // Keeping this durable prevents later projection broadcasts, refreshes, and
+  // reconnects from restoring the "New session" placeholder.
   const session = store.getState().sessions.find((s) => s.id === id);
-  if (store.getState().settings.autoTitleSessions && session && isPlaceholderTitle(session.title, session.id)) {
-    const derived = titleFromPrompt(text);
-    if (derived) store.upsertSession({ ...session, title: derived, updatedAt: Date.now() });
-  }
+  const autoTitle = store.getState().settings.autoTitleSessions
+    && !!session
+    && isPlaceholderTitle(session.title, session.id);
   try {
     await api.sendMessage(id, {
-      text, model, agent,
+      text, model, agent, ...(autoTitle ? { autoTitle: true } : {}),
       ...(opts?.attachments?.length ? { attachments: opts.attachments } : {}),
       ...(opts?.delivery ? { delivery: opts.delivery } : {}),
       ...(opts?.dismissPending ? { dismissPending: true } : {}),
@@ -537,7 +552,7 @@ export async function sendMessage(text: string, model?: JsonObject, agent?: stri
     return true;
   } catch (err) {
     console.error("send message failed", err);
-    store.setUiError(friendlyError("Couldn’t send the message", err));
+    store.setUiError(friendlyError(tr("common.error"), err));
     return false;
   }
 }
@@ -577,7 +592,7 @@ export async function replySecret(requestId: string, action: "save" | "dismiss",
     await api.replySecret(id, requestId, action, value);
   } catch (err) {
     console.error("secret reply failed", err);
-    store.setUiError(friendlyError("Couldn’t update Secure Safe", err));
+    store.setUiError(friendlyError(tr("common.error"), err));
     throw err;
   }
 }

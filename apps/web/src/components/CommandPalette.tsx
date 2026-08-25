@@ -7,6 +7,7 @@ import { activateProject, openEditorFile, setOverlay, setUiError, useStore } fro
 import { openSession } from "../init.ts";
 import { announce } from "./a11y/live.tsx";
 import { useModalSurface } from "./a11y/Dialog.tsx";
+import { tr } from "../i18n/index.ts";
 
 type Entry =
   | { kind: "cmd"; id: string; cmd: PaletteCommand }
@@ -90,8 +91,8 @@ export default function CommandPalette() {
       } else {
         // openSession switches the owning project first, atomically.
         void openSession(id).catch(() => {
-          announce("That session no longer exists");
-          setUiError("That session no longer exists.");
+          announce(tr("commandpalette.thatSessionNoLongerExists"));
+          setUiError(tr("commandpalette.thatSessionNoLongerExists"));
         });
       }
     } else {
@@ -107,8 +108,10 @@ export default function CommandPalette() {
 
   const groupOf = (entry: Entry): string => {
     if (entry.kind === "cmd") return entry.cmd.group ?? "";
-    if (entry.kind === "workspace") return entry.item.kind === "project" ? "Projects" : "Sessions";
-    return "Files";
+    if (entry.kind === "workspace") {
+      return entry.item.kind === "project" ? tr("commandpalette.projects") : tr("commandpalette.sessions");
+    }
+    return tr("commandpalette.files");
   };
 
   const dirOf = (p: string): string => {
@@ -125,15 +128,14 @@ export default function CommandPalette() {
         onMouseDown={(e) => e.stopPropagation()}
         role="dialog"
         aria-modal="true"
-        aria-label="Command palette"
+        aria-label={tr("commandpalette.commandPalette")}
         aria-describedby="palette-close-hint"
         tabIndex={-1}
       >
       <div className="palette-heading">
-        <span className="palette-heading-title">Search workspace</span>
+        <span className="palette-heading-title">{tr("commandpalette.searchWorkspace")}</span>
         <span className="palette-heading-description">
-          Commands, projects, sessions, and files
-        </span>
+          {tr("commandpalette.commandsProjectsSessionsAndFiles")}</span>
       </div>
       <input
         className="palette-input"
@@ -143,12 +145,12 @@ export default function CommandPalette() {
         aria-controls="palette-listbox"
         aria-activedescendant={entries[i] ? `palette-opt-${i}` : undefined}
         aria-autocomplete="list"
-        placeholder={filesMode ? "Search files…" : "Search commands, projects, sessions, files… (is:archived)"}
+        placeholder={filesMode ? tr("commandpalette.searchFiles") : tr("commandpalette.searchCommandsProjectsSessionsFilesIsArchived")}
         onChange={(e) => setQ(e.target.value)}
         onKeyDown={onKey}
       />
-      <div className="palette-list" role="listbox" id="palette-listbox" aria-label="Palette results">
-        {entries.length === 0 && <div className="palette-empty">No matches</div>}
+      <div className="palette-list" role="listbox" id="palette-listbox" aria-label={tr("commandpalette.paletteResults")}>
+        {entries.length === 0 && <div className="palette-empty">{tr("commandpalette.noMatches")}</div>}
         {entries.map((entry, n) => (
           <Fragment key={entry.id}>
             {groupOf(entry) && (n === 0 || groupOf(entries[n - 1]!) !== groupOf(entry)) && (
@@ -165,11 +167,11 @@ export default function CommandPalette() {
                 {entry.kind === "cmd" && (
                   <>
                     {entry.cmd.checked && (
-                      <span className="palette-check" aria-hidden="true">{entry.cmd.checked() ? "✓" : "\u00a0"}</span>
+                      <span className="palette-check" aria-hidden="true">{entry.cmd.checked() ? "✓" : tr("commandpalette.u00a0")}</span>
                     )}
                     <span className="palette-label">
                       {entry.cmd.label}
-                      {entry.cmd.checked?.() && <span className="sr-only"> (current)</span>}
+                      {entry.cmd.checked?.() && <span className="sr-only"> {tr("commandpalette.current")}</span>}
                     </span>
                     {commandHint(entry.cmd) && <kbd>{commandHint(entry.cmd)}</kbd>}
                   </>
@@ -179,12 +181,12 @@ export default function CommandPalette() {
                     <span className="palette-col">
                       <span className="palette-label">
                         {entry.item.title}
-                        {entry.item.archived && <span className="palette-status archived"> archived</span>}
+                        {entry.item.archived && <span className="palette-status archived"> {tr("commandpalette.archived")}</span>}
                       </span>
                       {entry.item.subtitle && <span className="palette-sub">{entry.item.subtitle}</span>}
                     </span>
                     <span className="palette-meta">
-                      {entry.item.kind === "project" ? "switch project" : "open session"}
+                      {entry.item.kind === "project" ? tr("commandpalette.switchProject") : tr("commandpalette.openSession")}
                     </span>
                   </>
                 )}
@@ -194,14 +196,14 @@ export default function CommandPalette() {
                       <span className="palette-label mono">{baseOf(entry.hit.path)}</span>
                       {dirOf(entry.hit.path) && <span className="palette-sub mono">{dirOf(entry.hit.path)}</span>}
                     </span>
-                    <span className="palette-meta">{entry.hit.kind === "dir" ? "folder" : "open in editor"}</span>
+                    <span className="palette-meta">{entry.hit.kind === "dir" ? tr("commandpalette.folder") : tr("commandpalette.openInEditor")}</span>
                   </>
                 )}
             </button>
           </Fragment>
         ))}
       </div>
-      <div className="palette-footer" id="palette-close-hint"><kbd>Esc</kbd> close</div>
+      <div className="palette-footer" id="palette-close-hint"><kbd>{tr("commandpalette.esc")}</kbd> {tr("commandpalette.close")}</div>
       </div>
     </div>
   );

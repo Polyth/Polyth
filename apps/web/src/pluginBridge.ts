@@ -8,6 +8,7 @@ import {
 } from "./pluginModules.ts";
 import { registerSlot } from "./slots.ts";
 import type { SyncClient } from "./sync.ts";
+import { tr } from "./i18n/index.ts";
 
 type PluginSync = Pick<SyncClient, "onEvent">;
 type SlotRegistrar = typeof registerSlot;
@@ -89,7 +90,7 @@ export async function initPluginBridge(
         item.id,
         component
           ? (props) => createElement(component, { ...(item.props ?? {}), ...props })
-          : () => `Plugin widget: ${title}`,
+          : () => tr("pluginbridge.pluginWidgetValue", { title }),
         item.order ?? 0,
         meta,
       ));

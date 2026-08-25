@@ -3,6 +3,7 @@
 // custom themes pasted as JSON (stored in localStorage polyth.customThemes).
 // Palette identity and light/dark appearance are independent settings. Pure
 // parts (validation, adaptation, resolution, CSS-var mapping) are DOM-free.
+import { tr } from "./i18n/index.ts";
 
 export interface ThemeTokens {
   /* surfaces */
@@ -138,7 +139,7 @@ export const PRESET_THEMES: ThemeSpec[] = [
       border: "#d5cec1", borderSoft: "#e2dcd2",
       text: "#2a2620", textDim: "#4d473e", muted: "#5b564e", faint: "#6a6357",
       accent: "#b54d00", accentInk: "#ffffff", accentHi: "#bd5700",
-      green: "#4d9432", amber: "#a97d14", red: "#c4453a", blue: "#2f6fae", purple: "#7a53b8",
+      green: "#347426", amber: "#7d5900", red: "#c4453a", blue: "#2f6fae", purple: "#7a53b8",
     },
   },
   {
@@ -151,7 +152,7 @@ export const PRESET_THEMES: ThemeSpec[] = [
       border: "#c6cfd8", borderSoft: "#d8dfe6",
       text: "#24292f", textDim: "#454c54", muted: "#4d535a", faint: "#57616c",
       accent: "#2d64ae", accentInk: "#f7fafc", accentHi: "#3870bb",
-      green: "#3e8636", amber: "#9a6d00", red: "#c03d33", blue: "#2f6fae", purple: "#7a53b8",
+      green: "#2f7428", amber: "#785400", red: "#c03d33", blue: "#2f6fae", purple: "#7a53b8",
     },
   },
   {
@@ -163,7 +164,7 @@ export const PRESET_THEMES: ThemeSpec[] = [
       border: "#d5cdb4", borderSoft: "#e2dbc4",
       text: "#3b4a51", textDim: "#586e75", muted: "#4b575c", faint: "#56656b",
       accent: "#2aa198", accentInk: "#002b36", accentHi: "#35b3aa",
-      green: "#859900", amber: "#b58900", red: "#dc322f", blue: "#268bd2", purple: "#6c71c4",
+      green: "#586b00", amber: "#765900", red: "#dc322f", blue: "#268bd2", purple: "#6c71c4",
     },
   },
   darkPreset("ocean", "Deep Ocean", {
@@ -276,42 +277,44 @@ export type ThemeValidation = { ok: true; theme: ThemeSpec } | { ok: false; erro
 /** Validate untrusted theme JSON; failures carry the reason (F15 accept). */
 export function validateTheme(raw: unknown, opts: { allowPresetIds?: boolean } = {}): ThemeValidation {
   if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
-    return { ok: false, error: "theme must be a JSON object" };
+    return { ok: false, error: tr("theme.mustBeJsonObject") };
   }
   const t = raw as Partial<ThemeSpec> & { tokens?: Record<string, unknown>; syntax?: Record<string, unknown> };
   if (typeof t.id !== "string" || !ID_RE.test(t.id)) {
-    return { ok: false, error: "id must be a lowercase slug (letters, digits, dashes; max 32 chars)" };
+    return { ok: false, error: tr("theme.idMustBeLowercaseSlug") };
   }
   if (!opts.allowPresetIds && PRESET_THEMES.some((p) => p.id === t.id)) {
-    return { ok: false, error: `id "${t.id}" is reserved by a built-in theme` };
+    return { ok: false, error: tr("theme.idReserved", { id: t.id }) };
   }
   if (typeof t.name !== "string" || !t.name.trim() || t.name.length > 40) {
-    return { ok: false, error: "name must be a non-empty string (max 40 chars)" };
+    return { ok: false, error: tr("theme.nameMustBeNonEmpty") };
   }
   if (t.appearance !== "dark" && t.appearance !== "light") {
-    return { ok: false, error: 'appearance must be "dark" or "light"' };
+    return { ok: false, error: tr("theme.appearanceMustBeDarkOrLight") };
   }
   if (typeof t.tokens !== "object" || t.tokens === null) {
-    return { ok: false, error: "tokens must be an object of color roles" };
+    return { ok: false, error: tr("theme.tokensMustBeObject") };
   }
   const tokens = {} as ThemeTokens;
   for (const key of TOKEN_KEYS) {
     const v = t.tokens[key];
-    if (v === undefined) return { ok: false, error: `tokens.${key} is missing` };
+    if (v === undefined) return { ok: false, error: tr("theme.tokenMissing", { key }) };
     if (typeof v !== "string" || !HEX_RE.test(v)) {
-      return { ok: false, error: `tokens.${key} must be a hex color like #aabbcc` };
+      return { ok: false, error: tr("theme.tokenMustBeHex", { key }) };
     }
     tokens[key] = v;
   }
   let syntax: ThemeSyntax | undefined;
   if (t.syntax !== undefined) {
-    if (typeof t.syntax !== "object" || t.syntax === null) return { ok: false, error: "syntax must be an object" };
+    if (typeof t.syntax !== "object" || t.syntax === null) {
+      return { ok: false, error: tr("theme.syntaxMustBeObject") };
+    }
     syntax = {};
     for (const key of SYNTAX_KEYS) {
       const v = t.syntax[key];
       if (v === undefined) continue;
       if (typeof v !== "string" || !HEX_RE.test(v)) {
-        return { ok: false, error: `syntax.${key} must be a hex color like #aabbcc` };
+        return { ok: false, error: tr("theme.syntaxMustBeHex", { key }) };
       }
       syntax[key] = v;
     }
@@ -328,7 +331,10 @@ export function parseThemeJson(text: string): ThemeValidation {
   try {
     raw = JSON.parse(text);
   } catch (e) {
-    return { ok: false, error: `invalid JSON: ${e instanceof Error ? e.message : String(e)}` };
+    return {
+      ok: false,
+      error: tr("theme.invalidJson", { reason: e instanceof Error ? e.message : String(e) }),
+    };
   }
   return validateTheme(raw);
 }
@@ -473,13 +479,60 @@ const blend = (fg: string, bg: string, amount: number): string => {
   return `#${to2(mix(fr, br))}${to2(mix(fg_, bg_))}${to2(mix(fb, bb))}`;
 };
 
+/** Signal foreground adjusted against the real 18% wash on every app surface. */
+const signalOnWash = (signal: string, surfaces: string[], lighten: boolean): string => {
+  let lightness = rgbToHsl(signal)[2];
+  let color = signal;
+  const backgrounds = surfaces.map((surface) => blend(signal, surface, 0.18));
+  while (backgrounds.some((background) => contrastRatio(color, background) < 4.5)
+    && lightness > 0.02 && lightness < 0.98) {
+    lightness += lighten ? 0.01 : -0.01;
+    color = withLightness(signal, lightness);
+  }
+  return color;
+};
+
+/** Theme-aware ANSI 16-color palette for the terminal: chromatic slots come
+ *  from the theme's signal tokens (red/green/amber/blue/purple; cyan blends
+ *  green+blue), monochrome slots from the ink/surface roles. Bright variants
+ *  shift lightness toward the readable direction for the appearance. */
+export function termAnsiPalette(spec: ThemeSpec): string[] {
+  const t = spec.tokens;
+  const dark = spec.appearance === "dark";
+  const bright = (hex: string): string => {
+    const [, , lightness] = rgbToHsl(hex);
+    return withLightness(hex, Math.max(0.06, Math.min(0.96, lightness + (dark ? 0.09 : -0.07))));
+  };
+  const cyan = blend(t.green, t.blue, 0.5);
+  const black = dark ? blend(t.text, t.sunken, 0.32) : blend(t.text, t.sunken, 0.88);
+  const brightBlack = dark ? blend(t.text, t.sunken, 0.5) : blend(t.text, t.sunken, 0.7);
+  const white = dark ? t.textDim : blend(t.text, t.sunken, 0.35);
+  const brightWhite = dark ? withLightness(t.text, 0.97) : withLightness(t.text, 0.08);
+  return [
+    black, t.red, t.green, t.amber, t.blue, t.purple, cyan, white,
+    brightBlack, bright(t.red), bright(t.green), bright(t.amber), bright(t.blue), bright(t.purple), bright(cyan), brightWhite,
+  ];
+}
+
 /** Resolve a theme to the CSS custom properties it sets. One place derives
  *  every wash/hairline/rgb variant so custom themes only supply base roles. */
 export function themeCssVars(spec: ThemeSpec): Record<string, string> {
   const t = spec.tokens;
   const dark = spec.appearance === "dark";
   const accentRgb = hexToRgb(t.accent).join(", ");
+  const ansi = termAnsiPalette(spec);
+  const termVars: Record<string, string> = {
+    "--term-bg": t.sunken,
+    "--term-fg": t.text,
+    "--term-cursor": t.accent,
+    "--term-sel": rgba(t.accent, dark ? 0.34 : 0.28),
+    "--term-find": rgba(t.amber, dark ? 0.4 : 0.45),
+    "--term-find-cur": rgba(t.accent, dark ? 0.55 : 0.4),
+    "--term-link": t.blue,
+  };
+  for (let i = 0; i < 16; i++) termVars[`--term-a${i}`] = ansi[i]!;
   const amberRgb = hexToRgb(t.amber).join(", ");
+  const surfaces = [t.bg, t.panel, t.elevated, t.raised, t.sunken, t.inputBg];
   return {
     "--bg": t.bg, "--panel": t.panel, "--elevated": t.elevated, "--raised": t.raised,
     "--sunken": t.sunken, "--input-bg": t.inputBg,
@@ -492,7 +545,10 @@ export function themeCssVars(spec: ThemeSpec): Record<string, string> {
     "--accent-line": rgba(t.accent, dark ? 0.32 : 0.4),
     "--focus-wash": rgba(t.accent, 0.1),
     "--accent-rgb": accentRgb,
-    "--green": t.green, "--amber": t.amber, "--amber-rgb": amberRgb,
+    "--green": t.green, "--amber": t.amber,
+    "--green-on-wash": signalOnWash(t.green, surfaces, dark),
+    "--amber-on-wash": signalOnWash(t.amber, surfaces, dark),
+    "--amber-rgb": amberRgb,
     "--red": t.red, "--blue": t.blue, "--purple": t.purple,
     "--red-ink": readableInk(t.red),
     "--surface-overlay": rgba(t.text, dark ? 0.022 : 0.025),
@@ -515,6 +571,7 @@ export function themeCssVars(spec: ThemeSpec): Record<string, string> {
     "--syntax-cmt": spec.syntax?.cmt ?? t.faint,
     "--syntax-num": spec.syntax?.num ?? t.amber,
     "--syntax-punc": spec.syntax?.punc ?? t.muted,
+    ...termVars,
   };
 }
 

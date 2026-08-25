@@ -2,7 +2,13 @@ import { useEffect, useState } from "react";
 import type { WorkflowRunDto } from "@polyth/contracts";
 import { api } from "../api.ts";
 import { Icon } from "../icons.tsx";
-import { setActiveView, setOverlay, setUiError, useStore } from "../store.ts";
+import {
+  COMPOSER_INPUT_SELECTOR,
+  setActiveView,
+  setOverlay,
+  setUiError,
+  useStore,
+} from "../store.ts";
 import { friendlyError } from "../settings.ts";
 import {
   prioritizeWorkflowRuns,
@@ -13,6 +19,8 @@ import { handOffWorkflowLaunch } from "../workflowLaunch.ts";
 import { subscribeWorkflowRuns } from "../workflowMonitor.ts";
 import { GoalAttachForm } from "../components/GoalStrip.tsx";
 import WorkflowLauncher from "../components/WorkflowLauncher.tsx";
+import { requestComposerReplace } from "../composerInsert.ts";
+import { announce } from "../components/a11y/live.tsx";
 import { defineWidgetPlugin, registerWidgetPlugin } from "./catalog.ts";
 
 const SHELL_ACTION_SLOTS = [

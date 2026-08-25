@@ -20,6 +20,7 @@ import { COMPOSER_INPUT_SELECTOR, focusComposer, getState } from "../store.ts";
 import { getProjectSetupState } from "../projectSetup.ts";
 import { ago, MOD } from "../format.ts";
 import { Icon } from "../icons.tsx";
+import { tr } from "../i18n/index.ts";
 
 const folderIcon = (
   <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -54,8 +55,8 @@ function focusAfterActivation(): void {
 export default function ProjectFolderDialog({
   onClose,
   onOpened,
-  title = "Open a project",
-  subtitle = "Choose a local folder. Polyth never uploads your workspace.",
+  title = tr("projectfolderdialog.openAProject"),
+  subtitle = tr("projectfolderdialog.chooseLocalFolder"),
 }: {
   onClose: () => void;
   /** Called after the project has been added/activated. */
@@ -97,7 +98,7 @@ export default function ProjectFolderDialog({
       setSelected(null);
       // Directory changes announce the canonical current path politely.
       if (announcedPathRef.current !== null && announcedPathRef.current !== r.path) {
-        announce(`Current folder ${r.path}`);
+        announce(tr("projectfolderdialog.currentFolderValue", { path: r.path }));
       }
       announcedPathRef.current = r.path;
     } catch (e) {
@@ -143,7 +144,7 @@ export default function ProjectFolderDialog({
     if (busy) return;
     const next = !hidden;
     setHidden(next);
-    announce(next ? "Hidden folders shown" : "Hidden folders hidden");
+    announce(next ? tr("projectfolderdialog.hiddenFoldersShown") : tr("projectfolderdialog.hiddenFoldersHidden"));
     void load(path, next);
   };
 
@@ -165,10 +166,10 @@ export default function ProjectFolderDialog({
       const s = getState();
       const occurrences = s.projectRegistry.projects.filter((p) => p.id === project.id).length;
       if (occurrences !== 1 || s.activeProjectId !== project.id) {
-        throw new Error("The project didn’t activate — please try again.");
+        throw new Error(tr("projectfolderdialog.theProjectDidnTActivatePleaseTry"));
       }
       outcomeRef.current = "success";
-      announce(`Opened ${project.name || project.path}.`);
+      announce(tr("projectfolderdialog.openedValue", { value: project.name || project.path }));
       onOpened?.(target);
       onClose();
       focusAfterActivation();
@@ -268,17 +269,17 @@ export default function ProjectFolderDialog({
             <div className="folder-dialog-title">{title}</div>
             <div className="folder-dialog-subtitle">{subtitle}</div>
           </div>
-          <button className="icon-btn" aria-label="Close" disabled={busy} onClick={requestClose}>✕</button>
+          <button className="icon-btn" aria-label={tr("common.close")} disabled={busy} onClick={requestClose}>✕</button>
         </div>
 
         <div className="folder-toolbar">
-          <button className="small-btn" title="Home directory" aria-label="Go to home directory" disabled={busy} onClick={() => void load(home || "~")}>~</button>
-          <button className="small-btn" title="Parent folder" aria-label="Go to parent folder" disabled={busy || !parent} onClick={() => parent && void load(parent)}>↑</button>
+          <button className="small-btn" title={tr("projectfolderdialog.homeDirectory")} aria-label={tr("projectfolderdialog.goToHomeDirectory")} disabled={busy} onClick={() => void load(home || "~")}>~</button>
+          <button className="small-btn" title={tr("projectfolderdialog.parentFolder")} aria-label={tr("projectfolderdialog.goToParentFolder")} disabled={busy || !parent} onClick={() => parent && void load(parent)}>↑</button>
           <input
             ref={pathInputRef}
             className="folder-path mono"
             value={pathInput}
-            aria-label="Current path"
+            aria-label={tr("projectfolderdialog.currentPath")}
             spellCheck={false}
             disabled={busy}
             onChange={(e) => setPathInput(e.target.value)}
@@ -295,18 +296,17 @@ export default function ProjectFolderDialog({
             onClick={toggleHidden}
           >
             <span className="toggle-track" aria-hidden="true" />
-            Hidden
-          </button>
+            {tr("projectfolderdialog.hidden")}</button>
         </div>
 
-        <div className="folder-cols" aria-hidden="true"><span>Name</span><span>Modified</span></div>
+        <div className="folder-cols" aria-hidden="true"><span>{tr("projectfolderdialog.name")}</span><span>{tr("projectfolderdialog.modified")}</span></div>
 
         {/* The Parent row is a named navigation action, not a false listbox option. */}
         {parent && (
           <button
             type="button"
             className="folder-row folder-up folder-up-action"
-            aria-label="Open parent folder"
+            aria-label={tr("projectfolderdialog.openParentFolder")}
             disabled={busy}
             onClick={() => void load(parent)}
             onDoubleClick={() => void load(parent)}
@@ -321,7 +321,7 @@ export default function ProjectFolderDialog({
           ref={listRef}
           className="folder-list"
           role="listbox"
-          aria-label="Folders"
+          aria-label={tr("projectfolderdialog.folders")}
           tabIndex={0}
           aria-activedescendant={activeDescendant}
           aria-busy={busy || undefined}
@@ -344,17 +344,17 @@ export default function ProjectFolderDialog({
             >
               <span className="folder-row-icon">{folderIcon}</span>
               <span className="folder-row-name">{entry.name}</span>
-              <span className="folder-row-meta mono">{entry.modifiedAt ? `${ago(entry.modifiedAt)} ago` : ""}</span>
+              <span className="folder-row-meta mono">{entry.modifiedAt ? tr("projectfolderdialog.valueAgo", { value: ago(entry.modifiedAt) }) : ""}</span>
             </div>
           ))}
-          {entries.length === 0 && !error && <div className="folder-empty">No sub-folders here — open this folder itself, or create one.</div>}
+          {entries.length === 0 && !error && <div className="folder-empty">{tr("projectfolderdialog.noSubFoldersHereOpenThisFolder")}</div>}
         </div>
 
         <div className="folder-legend">
-          <span className="legend-item"><span className="kbd">↑</span><span className="kbd">↓</span> navigate</span>
-          <span className="legend-item"><span className="kbd">↵</span> enter folder</span>
-          <span className="legend-item"><span className="kbd">{MOD} ↵</span> open project</span>
-          <span className="legend-item"><span className="kbd">Esc</span> close</span>
+          <span className="legend-item"><span className="kbd">↑</span><span className="kbd">↓</span> {tr("projectfolderdialog.navigate")}</span>
+          <span className="legend-item"><span className="kbd">↵</span> {tr("projectfolderdialog.enterFolder")}</span>
+          <span className="legend-item"><span className="kbd">{MOD} ↵</span> {tr("projectfolderdialog.openProject2")}</span>
+          <span className="legend-item"><span className="kbd">{tr("projectfolderdialog.esc")}</span> {tr("projectfolderdialog.close")}</span>
         </div>
 
         {error && <div ref={errorRef} tabIndex={-1} className="form-error folder-error" role="alert">{error}</div>}
@@ -369,8 +369,8 @@ export default function ProjectFolderDialog({
               <input
                 autoFocus
                 value={newName}
-                placeholder="new-folder-name"
-                aria-label="New folder name"
+                placeholder={tr("projectfolderdialog.newFolderName2")}
+                aria-label={tr("projectfolderdialog.newFolderName")}
                 disabled={busy}
                 onChange={(e) => setNewName(e.target.value)}
                 onKeyDown={(e) => {
@@ -379,15 +379,15 @@ export default function ProjectFolderDialog({
                   else if (e.key === "Escape") { e.stopPropagation(); setCreating(false); }
                 }}
               />
-              <button className="small-btn" disabled={busy || !newName.trim()} onClick={() => void createFolder()}>Create</button>
+              <button className="small-btn" disabled={busy || !newName.trim()} onClick={() => void createFolder()}>{tr("common.create")}</button>
             </span>
           ) : (
-            <button className="ghost-link" disabled={busy} onClick={() => setCreating(true)}><Icon.plus /> New folder</button>
+            <button className="ghost-link" disabled={busy} onClick={() => setCreating(true)}><Icon.plus /> {tr("projectfolderdialog.newFolder")}</button>
           )}
           <span className="header-spacer" />
           <span className="folder-selected mono" title={selected ?? path}>{selected ?? path}</span>
           <button className="primary-btn folder-open-btn" disabled={busy || (!selected && !path)} onClick={() => void openProject()}>
-            {busy ? "Opening…" : "Open project"}
+            {busy ? tr("projectfolderdialog.opening") : tr("projectfolderdialog.openProject")}
           </button>
         </div>
       </div>

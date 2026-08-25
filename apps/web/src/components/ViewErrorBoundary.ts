@@ -4,6 +4,7 @@
 // every workspace surface (EXTENSION-SEAMS slice 2).
 import { Component, createElement, type ErrorInfo, type ReactNode } from "react";
 import { setActiveView } from "../store.ts";
+import { tr } from "../i18n/index.ts";
 
 interface ViewErrorBoundaryProps {
   /** Optional in the type so createElement callers may pass children last. */
@@ -45,19 +46,19 @@ export default class ViewErrorBoundary extends Component<ViewErrorBoundaryProps,
       "div",
       { className: "empty-state surface-error", role: "alert" },
       createElement("span", { className: "empty-state-mark", "aria-hidden": true }, "!"),
-      createElement("h2", { className: "empty-state-title" }, "This view couldn’t render"),
-      createElement("p", { className: "empty-state-desc" }, "The rest of your workspace is still available."),
+      createElement("h2", { className: "empty-state-title" }, tr("viewerrorboundary.viewCouldNotRender")),
+      createElement("p", { className: "empty-state-desc" }, tr("viewerrorboundary.workspaceStillAvailable")),
       createElement(
         "details",
         { className: "surface-error-details" },
-        createElement("summary", null, "Technical details"),
-        createElement("code", null, this.state.error.message || "Unknown rendering error"),
+        createElement("summary", null, tr("viewerrorboundary.technicalDetails")),
+        createElement("code", null, this.state.error.message || tr("viewerrorboundary.unknownRenderingError")),
       ),
       createElement(
         "div",
         { className: "surface-error-actions" },
-        createElement("button", { className: "primary-btn", onClick: this.retry }, "Try again"),
-        createElement("button", { onClick: () => setActiveView("session") }, "Return to session"),
+        createElement("button", { className: "primary-btn", onClick: this.retry }, tr("viewerrorboundary.tryAgain")),
+        createElement("button", { onClick: () => setActiveView("session") }, tr("viewerrorboundary.returnToSession")),
       ),
     );
     return this.props.inline ? card : createElement("main", { className: "main" }, card);

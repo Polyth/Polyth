@@ -3,7 +3,8 @@
   "version": "0.1.0",
   "type": "module",
   "exports": {
-    ".": "./src/index.ts"
+    ".": "./src/index.ts",
+    "./i18n": "./src/i18n/index.ts"
   },
   "dependencies": {
     "cron-parser": "^5.10.0"

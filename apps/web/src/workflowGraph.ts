@@ -1,4 +1,5 @@
 import type { WorkflowDto } from "@polyth/contracts";
+import { tr } from "./i18n/index.ts";
 
 type Graph = Pick<WorkflowDto, "nodes" | "edges">;
 export type WorkflowLayerResult =
@@ -7,19 +8,19 @@ export type WorkflowLayerResult =
 
 /** Client preview of the server's Kahn-layer validation. */
 export function layerizeWorkflow(graph: Graph): WorkflowLayerResult {
-  if (graph.nodes.length === 0) return { ok: false, error: "workflow has no nodes" };
+  if (graph.nodes.length === 0) return { ok: false, error: tr("workflowgraph.noNodes") };
   const ids = new Set(graph.nodes.map((node) => node.id));
   if (ids.size !== graph.nodes.length || ids.has("")) {
-    return { ok: false, error: "workflow node ids must be unique" };
+    return { ok: false, error: tr("workflowgraph.nodeIdsMustBeUnique") };
   }
   const indegree = new Map([...ids].map((id) => [id, 0]));
   const outgoing = new Map([...ids].map((id) => [id, [] as string[]]));
   const seen = new Set<string>();
   for (const edge of graph.edges) {
     if (!ids.has(edge.source) || !ids.has(edge.target)) {
-      return { ok: false, error: `edge ${edge.id} references a missing node` };
+      return { ok: false, error: tr("workflowgraph.edgeReferencesMissingNode", { id: edge.id }) };
     }
-    if (edge.source === edge.target) return { ok: false, error: "workflow contains a self-loop" };
+    if (edge.source === edge.target) return { ok: false, error: tr("workflowgraph.selfLoop") };
     const key = `${edge.source}\u0000${edge.target}`;
     if (seen.has(key)) continue;
     seen.add(key);
@@ -44,7 +45,7 @@ export function layerizeWorkflow(graph: Graph): WorkflowLayerResult {
   }
   return placed === ids.size
     ? { ok: true, layers }
-    : { ok: false, error: "workflow contains a cycle" };
+    : { ok: false, error: tr("workflowgraph.cycle") };
 }
 
 export function wouldWorkflowCycle(graph: Graph, source: string, target: string): boolean {

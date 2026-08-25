@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useSyncExternalStore } from "react";
 import { createRoot } from "react-dom/client";
 import { api } from "./api.ts";
 import { init } from "./init.ts";
@@ -13,8 +13,10 @@ import { startMobileViewport } from "./mobileViewport.ts";
 import { getState } from "./store.ts";
 import { installBuiltinMiniWidgets } from "./widgets/builtinMiniWidgets.tsx";
 import { installNotificationCentre } from "./components/NotificationCentre.tsx";
+import { installOpenCodeRestartControl } from "./components/OpenCodeRestartControl.tsx";
 import { exposeWidgets } from "./widgets/catalog.ts";
 import { bootPackages } from "./packages/registry.ts";
+import { getLocaleSnapshot, subscribeLocale } from "./i18n/index.ts";
 import App from "./App.tsx";
 import LockScreen from "./components/LockScreen.tsx";
 import "./styles.css";
@@ -32,6 +34,7 @@ exposeWidgets();
 installBuiltinMiniWidgets();
 // NTF-01: bell + panel arrive through the slot registry, never via App.tsx.
 installNotificationCentre();
+installOpenCodeRestartControl();
 // Palette commands + keyboard shortcuts: one install, synced with the
 // capability registry from then on (UX-PERSONAS: search sees every tool).
 installShell();
@@ -48,6 +51,7 @@ const bootOnce = (): void => {
 
 function Root() {
   const [phase, setPhase] = useState<"checking" | "locked" | "ready">("checking");
+  const locale = useSyncExternalStore(subscribeLocale, getLocaleSnapshot, getLocaleSnapshot);
 
   useEffect(() => {
     let cancelled = false;
@@ -70,9 +74,9 @@ function Root() {
   if (phase === "locked") {
     // After a mid-session revoke the store/WS state is stale — reload for a
     // clean slate; on the initial lock just proceed into the normal boot.
-    return <LockScreen onUnlocked={() => { if (booted) location.reload(); else setPhase("ready"); }} />;
+    return <LockScreen key={locale} onUnlocked={() => { if (booted) location.reload(); else setPhase("ready"); }} />;
   }
-  return <App />;
+  return <App key={locale} />;
 }
 
 createRoot(document.getElementById("root") as HTMLElement).render(<Root />);

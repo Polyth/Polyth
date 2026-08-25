@@ -72,6 +72,7 @@ const { PaneVisibilityContext } = await import("../src/workspace/paneVisibility.
 const { default: TerminalView } = await import("../src/components/TerminalView.tsx");
 
 const MouseEventCtor = (dom as unknown as { MouseEvent: typeof MouseEvent }).MouseEvent;
+const KeyboardEventCtor = (dom as unknown as { KeyboardEvent: typeof KeyboardEvent }).KeyboardEvent;
 
 async function mountTerminal() {
   activateProject("p-term");
@@ -153,6 +154,32 @@ test("activating over existing terminals adopts them instead of spawning", async
     assert.equal(FakeWebSocket.instances.length, sockets + 1, "adopted terminal attached");
     assert.match(FakeWebSocket.instances.at(-1)!.url, /\/ws\/terminal\/t-exist$/);
     assert.match(container.textContent ?? "", /existing shell/);
+  } finally {
+    await unmount();
+  }
+});
+
+test("typing during socket connection queues ordered input and flushes once", async () => {
+  listResponse = [];
+  const { container, render, unmount } = await mountTerminal();
+  try {
+    await render(true);
+    const socket = FakeWebSocket.instances.at(-1)!;
+    socket.readyState = 0;
+    const body = container.querySelector<HTMLElement>(".term-body");
+    assert.ok(body);
+    await act(async () => {
+      body!.dispatchEvent(new KeyboardEventCtor("keydown", { key: "a", bubbles: true }));
+      body!.dispatchEvent(new KeyboardEventCtor("keydown", { key: "b", bubbles: true }));
+    });
+    assert.equal(socket.sent.length, 0, "connecting socket receives no partial input");
+
+    socket.readyState = FakeWebSocket.OPEN;
+    await act(async () => { socket.onopen?.(); });
+    const frames = socket.sent.map((raw) => JSON.parse(raw) as { type: string; data?: string });
+    assert.equal(frames[0]!.type, "resize");
+    assert.deepEqual(frames[1], { type: "data", data: "ab" });
+    assert.equal(frames.length, 2, "queued keys flush in one ordered frame");
   } finally {
     await unmount();
   }

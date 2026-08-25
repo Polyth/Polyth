@@ -3,6 +3,7 @@
 // normalized QuestionItem form. Serializers never include hidden permission
 // or session metadata, or internal event envelope fields.
 import type { JsonObject, QuestionItem, QuestionOption } from "@polyth/contracts";
+import { tr } from "./i18n/index.ts";
 
 export type AnswerMap = Record<string, string | string[]>;
 
@@ -43,7 +44,11 @@ export function normalizeQuestions(raw: JsonObject[]): QuestionItem[] {
     return {
       id: str(item.id) ?? `q${i + 1}`,
       ...(str(item.title) ? { title: str(item.title)! } : {}),
-      prompt: str(item.prompt) ?? str(item.question) ?? str(item.text) ?? str(item.message) ?? `Question ${i + 1}`,
+      prompt: str(item.prompt)
+        ?? str(item.question)
+        ?? str(item.text)
+        ?? str(item.message)
+        ?? tr("questionserializers.questionValue", { number: i + 1 }),
       type,
       ...(options.length > 0 ? { options } : {}),
       required: item.required !== false,

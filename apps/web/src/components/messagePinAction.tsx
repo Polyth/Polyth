@@ -3,6 +3,7 @@ import { api } from "../api.ts";
 import { registerSlot } from "../slots.ts";
 import { applyEvent, setUiError, useStore } from "../store.ts";
 import { Icon } from "../icons.tsx";
+import { tr } from "../i18n/index.ts";
 
 function MessagePinAction({ sessionId, eventSeq }: { sessionId: string; eventSeq: number }) {
   const events = useStore((state) => state.events[sessionId] ?? []);
@@ -14,13 +15,13 @@ function MessagePinAction({ sessionId, eventSeq }: { sessionId: string; eventSeq
     if (event.type === "context/pinned") pinned = true;
     if (event.type === "context/unpinned") pinned = false;
   }
-  const label = pinned ? "Unpin message from compaction context" : "Pin message for compaction context";
+  const label = pinned ? tr("messagepinaction.unpinMessageFromCompactionContext") : tr("messagepinaction.pinMessageForCompactionContext");
   return (
     <button
       className="msg-action-btn msg-bookmark-action"
       aria-label={label}
       title={label}
-      data-tooltip={pinned ? "Unbookmark" : "Bookmark"}
+      data-tooltip={label}
       aria-pressed={pinned}
       disabled={busy}
       onClick={() => {

@@ -2,6 +2,7 @@
 // click opens the document-wide gallery with keyboard prev/next.
 import { useState } from "react";
 import Dialog from "../components/a11y/Dialog.tsx";
+import { tr } from "../i18n/index.ts";
 
 export interface GalleryImage { src: string; alt: string }
 
@@ -16,12 +17,12 @@ export default function GalleryLightbox({ images, start, onClose }: {
   const prev = () => setIdx((i) => (i - 1 + images.length) % images.length);
   const next = () => setIdx((i) => (i + 1) % images.length);
   return (
-    <Dialog title={`Image ${idx + 1} of ${images.length}`} size="full" className="gallery-dialog" onClose={onClose}>
+    <Dialog title={tr("markdown.gallery.imageValueOfValue", { value: idx + 1, length: images.length })} size="full" className="gallery-dialog" onClose={onClose}>
       <div className="dialog-head">
         <span className="dialog-title">{img.alt || img.src}</span>
         <span className="header-spacer" />
         <span className="muted">{idx + 1} / {images.length}</span>
-        <button className="small-btn" onClick={onClose}>Close</button>
+        <button className="small-btn" onClick={onClose}>{tr("common.close")}</button>
       </div>
       <div
         className="gallery-stage"
@@ -31,9 +32,9 @@ export default function GalleryLightbox({ images, start, onClose }: {
           else if (e.key === "ArrowRight") { e.preventDefault(); next(); }
         }}
       >
-        {images.length > 1 && <button className="gallery-nav prev" aria-label="Previous image" onClick={prev}>‹</button>}
+        {images.length > 1 && <button className="gallery-nav prev" aria-label={tr("markdown.gallery.previousImage")} onClick={prev}>‹</button>}
         <img className="gallery-img" src={img.src} alt={img.alt} />
-        {images.length > 1 && <button className="gallery-nav next" aria-label="Next image" onClick={next}>›</button>}
+        {images.length > 1 && <button className="gallery-nav next" aria-label={tr("markdown.gallery.nextImage")} onClick={next}>›</button>}
       </div>
     </Dialog>
   );

@@ -27,6 +27,7 @@ function makeHarness() {
   // wrap the driver so the test can see when page work actually happens
   const spied = {
     engine: driver.engine,
+    close: () => driver.close(),
     open: async (opts: Parameters<typeof driver.open>[0]) => {
       const page = await driver.open(opts);
       const origClick = page.click.bind(page);
@@ -106,6 +107,16 @@ test("create and action routes apply viewport and color-scheme emulation", async
   assert.equal(recolored.status, 200);
   assert.equal((recolored.payload as { session: { colorScheme: string } }).session.colorScheme, "light");
   assert.match(String(calls[0]?.data?.actionSummary), /light color scheme/);
+
+  const revision = (recolored.payload as { session: { revision: number } }).session.revision;
+  calls.length = 0;
+  const pointed = await call("POST", `/api/browser/sessions/${initial.id}/actions`, {
+    actor: "user",
+    action: { kind: "point", target: { point: { x: 10, y: 20 }, frameRevision: revision } },
+  });
+  assert.equal(pointed.status, 200);
+  assert.equal((pointed.payload as { result: { selector: string } }).result.selector, "main");
+  assert.match(String(calls[0]?.data?.actionSummary), /point at/);
 });
 
 test("screenshot observation logs the persisted ref before returning UI-only pixels", async () => {

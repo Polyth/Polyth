@@ -1,22 +1,51 @@
-import { useEffect, useRef, useState, type KeyboardEvent } from "react";
+// Terminal pane: tabs of real shells over /ws/terminal/:id. Each tab owns a
+// TerminalEmulator instance (VT parser + cell grid, src/terminal/emulator.ts)
+// that lives OUTSIDE React state — WS frames feed it directly and TermPane
+// subscribes for coalesced repaints. Replay frames rebuild the emulator from
+// scratch so reconnects never duplicate output (F12).
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { TerminalInfo } from "@polyth/contracts";
 import { api } from "../api.ts";
 import { useStore } from "../store.ts";
-import { applyTerminalChunk, nextTermBackoff } from "../utils.ts";
+import { nextTermBackoff } from "../utils.ts";
 import { usePaneVisible } from "../workspace/paneVisibility.ts";
+import { createTerminalEmulator, type TerminalEmulator } from "../terminal/emulator.ts";
 import EmptyState from "./EmptyState.tsx";
+import TermPane from "./TermPane.tsx";
 import { Icon } from "../icons.tsx";
+import { tr } from "../i18n/index.ts";
+
+type ConnectionState = "connecting" | "connected" | "reconnecting" | "disconnected";
+
+function connectionLabel(connection: ConnectionState): string {
+  if (connection === "connected") return tr("terminalview.connected");
+  if (connection === "reconnecting") return tr("terminalview.reconnecting");
+  if (connection === "connecting") return tr("terminalview.connecting");
+  return tr("terminalview.disconnected");
+}
 
 interface Tab {
   id: string;
   title: string;
-  buf: string;
   running: boolean;
+  exitCode?: number | null;
+  connection: ConnectionState;
+  customTitle?: boolean;
 }
 
 function wsUrl(id: string): string {
   const proto = location.protocol === "https:" ? "wss" : "ws";
   return `${proto}://${location.host}/ws/terminal/${id}`;
+}
+
+/** Theme color for OSC 10/11 queries (apps probe bg to pick dark/light). */
+function themeVar(name: string): string | undefined {
+  try {
+    const v = getComputedStyle(document.documentElement).getPropertyValue(name).trim();
+    return /^#[0-9a-fA-F]{6}$/.test(v) ? v : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 export default function TerminalView() {
@@ -28,6 +57,7 @@ export default function TerminalView() {
   const [active, setActive] = useState<string | null>(null);
   const [renaming, setRenaming] = useState<string | null>(null);
   const [renameVal, setRenameVal] = useState("");
+  const [searchSignal, setSearchSignal] = useState(0);
   // One-click terminal (finding 6): listLoaded flips true once the adopt fetch
   // below answered for the CURRENT project, so auto-spawn never fires on the
   // not-yet-known empty state. autoSpawnArmed re-arms on every hidden→visible
@@ -36,6 +66,9 @@ export default function TerminalView() {
   const [listLoaded, setListLoaded] = useState(false);
   const autoSpawnArmed = useRef(true);
   const sockets = useRef(new Map<string, WebSocket>());
+  // One emulator per terminal id — kept in a ref so background tabs keep
+  // ingesting output and scrollback survives tab switches.
+  const emus = useRef(new Map<string, TerminalEmulator>());
   // F12 reconnect state: per-terminal backoff + pending timers; `gone` marks
   // terminals we closed deliberately (or the server reported missing) so the
   // reconnect loop stops instead of resurrecting them.
@@ -43,9 +76,53 @@ export default function TerminalView() {
   const timers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
   const gone = useRef(new Set<string>());
   const mounted = useRef(true);
-  const preRef = useRef<HTMLPreElement>(null);
+  const projectRef = useRef(projectId);
+  projectRef.current = projectId;
+  // Preserve input ordering while a socket connects/reconnects. The old REST
+  // fallback launched one asynchronous request per key and could reorder fast
+  // typing; one bounded queue flushes atomically when the WS is healthy.
+  const pendingInput = useRef(new Map<string, string>());
+  // last measured grid, reused when spawning so new PTYs start near-correct
+  const lastSize = useRef({ cols: 120, rows: 32 });
+
+  const sendTo = useCallback((id: string, data: string) => {
+    const ws = sockets.current.get(id);
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: "data", data }));
+    } else {
+      const queued = (pendingInput.current.get(id) ?? "") + data;
+      pendingInput.current.set(id, queued.length > 64 * 1024 ? queued.slice(-64 * 1024) : queued);
+    }
+  }, []);
+
+  const getEmu = useCallback((id: string): TerminalEmulator => {
+    let emu = emus.current.get(id);
+    if (!emu) {
+      emu = createTerminalEmulator({
+        cols: lastSize.current.cols,
+        rows: lastSize.current.rows,
+        scrollback: 5000,
+        queryFg: themeVar("--term-fg"),
+        queryBg: themeVar("--term-bg"),
+      });
+      // DSR/DA/CPR replies go straight back to the PTY
+      emu.onResponse((data) => sendTo(id, data));
+      let lastTitle = "";
+      emu.onUpdate(() => {
+        const next = emu?.title() ?? "";
+        if (!next || next === lastTitle) return;
+        lastTitle = next;
+        setTabs((prev) => prev.map((tab) =>
+          tab.id === id && !tab.customTitle ? { ...tab, title: next.slice(0, 80) } : tab));
+      });
+      emus.current.set(id, emu);
+    }
+    return emu;
+  }, [sendTo]);
 
   const dropTab = (id: string) => {
+    emus.current.delete(id);
+    pendingInput.current.delete(id);
     setTabs((prev) => {
       const next = prev.filter((t) => t.id !== id);
       setActive((a) => (a === id ? next[0]?.id ?? null : a));
@@ -54,25 +131,40 @@ export default function TerminalView() {
   };
 
   const attach = (id: string) => {
-    if (!mounted.current || sockets.current.has(id) || gone.current.has(id)) return;
+    if (!mounted.current || !projectId || sockets.current.has(id) || gone.current.has(id)) return;
+    const attachedProject = projectId;
     const ws = new WebSocket(wsUrl(id));
     sockets.current.set(id, ws);
-    ws.onopen = () => backoffs.current.delete(id); // healthy again: reset backoff
+    ws.onopen = () => {
+      backoffs.current.delete(id); // healthy again: reset backoff
+      setTabs((prev) => prev.map((tab) =>
+        tab.id === id ? { ...tab, connection: "connected" } : tab));
+      // announce the real grid so the PTY matches what we render
+      const emu = emus.current.get(id);
+      if (emu) ws.send(JSON.stringify({ type: "resize", cols: emu.cols(), rows: emu.rows() }));
+      const queued = pendingInput.current.get(id);
+      if (queued) {
+        ws.send(JSON.stringify({ type: "data", data: queued }));
+        pendingInput.current.delete(id);
+      }
+    };
     ws.onmessage = (ev) => {
       let msg: { type?: string; data?: string; exitCode?: number | null; code?: string };
       try { msg = JSON.parse(String(ev.data)); } catch { return; }
       if (msg.type === "replay" && typeof msg.data === "string") {
-        // server replays the bounded scrollback on every attach — REPLACE the
-        // local buffer so reconnects never duplicate output
-        setTabs((prev) => prev.map((t) => t.id === id ? { ...t, buf: applyTerminalChunk("", msg.data!) } : t));
+        // server replays the bounded scrollback on every attach — rebuild the
+        // emulator from scratch so reconnects never duplicate output
+        const emu = getEmu(id);
+        emu.reset();
+        emu.write(msg.data);
       }
       if (msg.type === "data" && typeof msg.data === "string") {
-        setTabs((prev) => prev.map((t) => t.id === id ? { ...t, buf: applyTerminalChunk(t.buf, msg.data!) } : t));
+        getEmu(id).write(msg.data);
       }
       if (msg.type === "exit") {
         gone.current.add(id); // process ended — no point reconnecting
-        setTabs((prev) => prev.map((t) => t.id === id && t.running
-          ? { ...t, running: false, buf: applyTerminalChunk(t.buf, `\n[exit ${msg.exitCode ?? 0}]\n`) }
+        setTabs((prev) => prev.map((t) => t.id === id
+          ? { ...t, running: false, exitCode: msg.exitCode ?? null, connection: "disconnected" }
           : t));
       }
       if (msg.type === "error" && msg.code === "not-found") {
@@ -82,7 +174,9 @@ export default function TerminalView() {
     };
     ws.onclose = () => {
       if (sockets.current.get(id) === ws) sockets.current.delete(id);
-      if (!mounted.current || gone.current.has(id)) return;
+      if (!mounted.current || gone.current.has(id) || projectRef.current !== attachedProject) return;
+      setTabs((prev) => prev.map((tab) =>
+        tab.id === id && tab.running ? { ...tab, connection: "reconnecting" } : tab));
       // silent retry with backoff, reusing the SAME terminal id — the PTY
       // stays alive server-side and replays its scrollback on reattach
       const delay = backoffs.current.get(id) ?? nextTermBackoff(undefined);
@@ -98,10 +192,16 @@ export default function TerminalView() {
       ...(sessionId ? { sessionId } : {}),
       ...(session?.worktreePath ? { cwd: session.worktreePath } : {}),
       ...(cmd ? { cmd } : {}),
-      cols: 120,
-      rows: 32,
+      cols: lastSize.current.cols,
+      rows: lastSize.current.rows,
     });
-    const tab: Tab = { id: terminalId, title: cmd ?? `shell · ${tabs.length + 1}`, buf: "", running: true };
+    const tab: Tab = {
+      id: terminalId,
+      title: cmd ?? tr("terminalview.shellValue", { value: tabs.length + 1 }),
+      running: true,
+      connection: "connecting",
+    };
+    getEmu(terminalId);
     setTabs((prev) => [...prev, tab]);
     setActive(terminalId);
     attach(terminalId);
@@ -126,29 +226,48 @@ export default function TerminalView() {
     const title = renameVal.trim();
     setRenaming(null);
     if (!title) return;
-    setTabs((prev) => prev.map((t) => t.id === id ? { ...t, title } : t));
+    setTabs((prev) => prev.map((t) => t.id === id ? { ...t, title, customTitle: true } : t));
     void api.renameTerminal(id, title).catch(() => {});
   };
 
   // Adopt terminals that already exist for this project (e.g. after reload) —
   // the replay frame restores their visible scrollback on attach.
   useEffect(() => {
+    let cancelled = false;
     setListLoaded(false);
     autoSpawnArmed.current = true; // fresh project: one auto-spawn allowed again
-    if (!projectId) { setTabs([]); setActive(null); return; }
+    // TerminalView survives project switches. Detach the previous project's
+    // sockets without killing its PTYs; stale close handlers are generation-
+    // guarded in attach(), so they cannot reconnect into the new project.
+    for (const timer of timers.current.values()) clearTimeout(timer);
+    timers.current.clear();
+    for (const ws of sockets.current.values()) ws.close();
+    sockets.current.clear();
+    backoffs.current.clear();
+    gone.current.clear();
+    pendingInput.current.clear();
+    emus.current.clear();
+    setTabs([]);
+    setActive(null);
+    if (!projectId) return () => { cancelled = true; };
     void api.listTerminals(projectId).then((list: TerminalInfo[]) => {
-      setTabs((prev) => {
-        const known = new Set(prev.map((t) => t.id));
-        const extra = list.filter((t) => !known.has(t.id)).map((t) => ({
-          id: t.id, title: t.title || t.id.slice(0, 8), buf: "", running: t.running,
+      if (cancelled) return;
+      const adopted: Tab[] = list.map((t) => ({
+          id: t.id,
+          title: t.title || t.id.slice(0, 8),
+          running: t.running,
+          connection: "connecting",
+          ...(t.exitCode !== undefined ? { exitCode: t.exitCode } : {}),
         }));
-        extra.forEach((t) => attach(t.id));
-        const next = extra.length ? [...prev, ...extra] : prev;
-        if (!active && next.length > 0) setActive(next[0]!.id);
-        return next;
+      setTabs(adopted);
+      setActive(adopted[0]?.id ?? null);
+      adopted.forEach((terminal) => {
+        getEmu(terminal.id);
+        attach(terminal.id);
       });
       setListLoaded(true);
     });
+    return () => { cancelled = true; };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId]);
 
@@ -163,48 +282,37 @@ export default function TerminalView() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible, projectId, listLoaded, tabs.length]);
 
-  useEffect(() => () => {
-    mounted.current = false;
-    for (const timer of timers.current.values()) clearTimeout(timer);
-    timers.current.clear();
-    for (const ws of sockets.current.values()) ws.close();
-    sockets.current.clear();
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+      for (const timer of timers.current.values()) clearTimeout(timer);
+      timers.current.clear();
+      for (const ws of sockets.current.values()) ws.close();
+      sockets.current.clear();
+    };
   }, []);
 
-  useEffect(() => {
-    preRef.current?.scrollTo(0, preRef.current.scrollHeight);
-  }, [tabs, active]);
-
-  // Focus the terminal whenever the active tab changes (incl. first open).
-  useEffect(() => {
-    if (active) preRef.current?.focus();
-  }, [active]);
-
-  const send = (id: string, data: string) => {
-    const ws = sockets.current.get(id);
-    if (ws && ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({ type: "data", data }));
-    } else {
-      void api.terminalInput(id, data).catch(() => {});
-    }
-  };
-
-  const onKey = (e: KeyboardEvent<HTMLPreElement>) => {
-    if (!active) return;
-    e.preventDefault();
-    if (e.key === "Enter") { send(active, "\r"); return; }
-    if (e.key === "Backspace") { send(active, "\x7f"); return; }
-    if (e.key === "Tab") { send(active, "\t"); return; }
-    if (e.key === "ArrowUp") { send(active, "\x1b[A"); return; }
-    if (e.key === "ArrowDown") { send(active, "\x1b[B"); return; }
-    if (e.key === "ArrowRight") { send(active, "\x1b[C"); return; }
-    if (e.key === "ArrowLeft") { send(active, "\x1b[D"); return; }
-    if (e.key === "c" && e.ctrlKey) { send(active, "\x03"); return; }
-    if (e.key === "d" && e.ctrlKey) { send(active, "\x04"); return; }
-    if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) send(active, e.key);
-  };
-
   const tab = tabs.find((t) => t.id === active) ?? tabs[0];
+  const activeId = tab?.id ?? null;
+
+  const handlePaneResize = useCallback((cols: number, rows: number) => {
+    lastSize.current = { cols, rows };
+    if (!activeId) return;
+    const ws = sockets.current.get(activeId);
+    if (ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: "resize", cols, rows }));
+    }
+  }, [activeId]);
+
+  const handleSend = useCallback((data: string) => {
+    if (activeId) sendTo(activeId, data);
+  }, [activeId, sendTo]);
+
+  const clearActive = () => {
+    if (!activeId) return;
+    emus.current.get(activeId)?.clearBuffer();
+  };
 
   return (
     <div className="term-view">
@@ -216,7 +324,7 @@ export default function TerminalView() {
                 className="term-tab-rename"
                 value={renameVal}
                 autoFocus
-                aria-label="Terminal tab name"
+                aria-label={tr("terminalview.terminalTabName")}
                 onChange={(e) => setRenameVal(e.target.value)}
                 onBlur={() => commitRename(t.id)}
                 onKeyDown={(e) => {
@@ -227,44 +335,67 @@ export default function TerminalView() {
             ) : (
               <button
                 className={`term-tab ${t.id === tab?.id ? "active" : ""}`}
-                title="Double-click to rename"
+                title={tr("terminalview.statusDoubleClickToRename", { status: connectionLabel(t.connection) })}
                 onClick={() => setActive(t.id)}
                 onDoubleClick={() => startRename(t)}
               >
+                <span
+                  className={`term-connection ${t.connection}`}
+                  aria-label={connectionLabel(t.connection)}
+                  title={connectionLabel(t.connection)}
+                />
                 {t.title}
-                {!t.running && <span className="term-tab-dead"> ·exited</span>}
+                {!t.running && <span className="term-tab-dead"> {tr("terminalview.exited")}</span>}
               </button>
             )}
             <button
               className="term-tab-x"
-              title={`Close ${t.title}`}
-              aria-label={`Close ${t.title}`}
+              title={tr("terminalview.closeValue", { title: t.title })}
+              aria-label={tr("terminalview.closeValue", { title: t.title })}
               onClick={() => void closeTab(t.id)}
             ><Icon.close /></button>
           </span>
         ))}
         <span className="header-spacer" />
-        <button className="term-new" title="New terminal" aria-label="New terminal" onClick={() => void spawn()} disabled={!projectId}><Icon.plus /></button>
+        <span className="term-actions">
+          {tab && (
+            <>
+              <button
+                title={tr("terminalview.findInTerminalShortcut")}
+                aria-label={tr("terminalview.findInTerminal")}
+                onClick={() => setSearchSignal((n) => n + 1)}
+              ><Icon.search /></button>
+              <button
+                title={tr("terminalview.clearTerminalShortcut")}
+                aria-label={tr("terminalview.clearTerminal")}
+                onClick={clearActive}
+              ><Icon.trash /></button>
+            </>
+          )}
+          <button className="term-new" title={tr("terminalview.newTerminal")} aria-label={tr("terminalview.newTerminal")} onClick={() => void spawn()} disabled={!projectId}><Icon.plus /></button>
+        </span>
       </div>
 
-      {!projectId && <EmptyState title="No project selected" description="Open a project to use the terminal." />}
+      {!projectId && <EmptyState title={tr("terminalview.noProjectSelected")} description={tr("terminalview.openAProjectToUseTheTerminal")} />}
       {projectId && !tab && (
         <EmptyState
-          title="No terminal yet"
-          description="Open a shell in the project folder."
-          actionLabel="New terminal"
+          title={tr("terminalview.noTerminalYet")}
+          description={tr("terminalview.openAShellInTheProjectFolder")}
+          actionLabel={tr("terminalview.newTerminal")}
           onAction={() => void spawn()}
         />
       )}
       {tab && (
-        <pre
-          ref={preRef}
-          className="term-body"
-          tabIndex={0}
-          aria-label={`Terminal ${tab.title}`}
-          onKeyDown={onKey}
-          onClick={() => preRef.current?.focus()}
-        >{tab.buf || " "}<span className="term-caret" /></pre>
+        <TermPane
+          key={tab.id}
+          emu={getEmu(tab.id)}
+          label={tab.title}
+          running={tab.running}
+          exitCode={tab.exitCode}
+          send={handleSend}
+          onResize={handlePaneResize}
+          searchSignal={searchSignal}
+        />
       )}
     </div>
   );

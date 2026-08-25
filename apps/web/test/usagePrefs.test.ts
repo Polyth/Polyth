@@ -60,13 +60,26 @@ test("groupQuotaWindows without model windows yields a single unlabeled bucket",
 });
 
 test("parseUsagePrefs round-trips and survives garbage", () => {
-  const prefs = { hiddenProviders: ["anthropic"], collapsedGroups: ["openai/gpt"] };
+  const prefs = {
+    hiddenProviders: ["anthropic"],
+    collapsedGroups: ["openai/gpt"],
+    dashboard: { view: "providers", layout: "compact", rangeDays: 90 },
+  };
   assert.deepEqual(parseUsagePrefs(JSON.stringify(prefs)), prefs);
-  assert.deepEqual(parseUsagePrefs(null), { hiddenProviders: [], collapsedGroups: [] });
-  assert.deepEqual(parseUsagePrefs("not json"), { hiddenProviders: [], collapsedGroups: [] });
+  const defaults = {
+    hiddenProviders: [],
+    collapsedGroups: [],
+    dashboard: { view: "overview", layout: "expanded", rangeDays: 7 },
+  };
+  assert.deepEqual(parseUsagePrefs(null), defaults);
+  assert.deepEqual(parseUsagePrefs("not json"), defaults);
   // non-string entries are dropped
   assert.deepEqual(
-    parseUsagePrefs(JSON.stringify({ hiddenProviders: ["a", 1, null, ""], collapsedGroups: "nope" })),
-    { hiddenProviders: ["a"], collapsedGroups: [] },
+    parseUsagePrefs(JSON.stringify({
+      hiddenProviders: ["a", 1, null, ""],
+      collapsedGroups: "nope",
+      dashboard: { view: "invalid", layout: "invalid", rangeDays: 365 },
+    })),
+    { ...defaults, hiddenProviders: ["a"] },
   );
 });

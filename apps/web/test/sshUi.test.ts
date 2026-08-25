@@ -10,6 +10,7 @@ import {
   stateBadge,
   validateSshForm,
 } from "../src/components/ssh/sshUi.ts";
+import { tr } from "../src/i18n/index.ts";
 
 const conn = (over: Partial<SshConnectionDto> = {}): SshConnectionDto => ({
   id: "c1",
@@ -71,11 +72,11 @@ test("connectionTarget renders user@host and hides the default port", () => {
 });
 
 test("stateBadge maps connection states to text and tone", () => {
-  assert.deepEqual(stateBadge("connected"), { text: "Connected", tone: "ok" });
-  assert.deepEqual(stateBadge("auth-failed"), { text: "Auth failed", tone: "err" });
-  assert.deepEqual(stateBadge("unreachable"), { text: "Unreachable", tone: "err" });
-  assert.deepEqual(stateBadge("disconnected"), { text: "Disconnected", tone: "muted" });
-  assert.deepEqual(stateBadge(undefined), { text: "Unknown", tone: "muted" });
+  assert.deepEqual(stateBadge("connected"), { text: tr("ssh.sshui.connected"), tone: "ok" });
+  assert.deepEqual(stateBadge("auth-failed"), { text: tr("ssh.sshui.authFailed"), tone: "err" });
+  assert.deepEqual(stateBadge("unreachable"), { text: tr("ssh.sshui.unreachable"), tone: "err" });
+  assert.deepEqual(stateBadge("disconnected"), { text: tr("ssh.sshui.disconnected"), tone: "muted" });
+  assert.deepEqual(stateBadge(undefined), { text: tr("ssh.sshui.unknown"), tone: "muted" });
 });
 
 test("remoteBasename suggests a project name from a POSIX path", () => {

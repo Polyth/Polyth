@@ -583,7 +583,7 @@ export function updateSettings(patch: Partial<PolythSettings>): void {
 
 let uiErrorTimer: ReturnType<typeof setTimeout> | undefined;
 
-// Inline error banner (never window.alert). Auto-dismisses after 12s.
+// Transient error toast. Auto-dismisses after 12s.
 export function setUiError(message: string): void {
   if (uiErrorTimer !== undefined) clearTimeout(uiErrorTimer);
   uiErrorTimer = setTimeout(() => set({ uiError: null }), 12_000);

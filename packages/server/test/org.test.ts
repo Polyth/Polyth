@@ -75,6 +75,36 @@ test("rename validates and appends session/metadata-changed before projection", 
   await assert.rejects(() => sessions.rename!("nope", "x"), /not found/);
 });
 
+test("auto title persists the first prompt before turn projections can overwrite it", async () => {
+  const { sessions, store } = makeService();
+  const { id } = await sessions.create({ projectId: "p1" });
+
+  await sessions.send(id, { text: "  Fix the intermittent login test\nwith a deterministic clock", autoTitle: true });
+
+  const snapshot = await sessions.snapshot(id);
+  assert.equal(snapshot.title, "Fix the intermittent login test");
+  const events = await store.events(id);
+  const userIndex = events.findIndex((event) => event.type === "user/message");
+  const titleIndex = events.findIndex((event) => event.type === "session/metadata-changed");
+  assert.ok(userIndex >= 0, "the prompt is durable");
+  assert.ok(titleIndex > userIndex, "the durable title follows its source prompt");
+  assert.equal((events[titleIndex]!.data as { title?: string }).title, "Fix the intermittent login test");
+});
+
+test("auto title preserves an explicit title and respects the client preference", async () => {
+  const { sessions, store } = makeService();
+  const explicit = await sessions.create({ projectId: "p1", title: "Release checklist" });
+  const disabled = await sessions.create({ projectId: "p1" });
+
+  await sessions.send(explicit.id, { text: "Replace this title", autoTitle: true });
+  await sessions.send(disabled.id, { text: "Do not title this session" });
+
+  assert.equal((await sessions.snapshot(explicit.id)).title, "Release checklist");
+  assert.equal((await sessions.snapshot(disabled.id)).title, "New session");
+  assert.equal((await store.events(explicit.id)).filter((event) => event.type === "session/metadata-changed").length, 0);
+  assert.equal((await store.events(disabled.id)).filter((event) => event.type === "session/metadata-changed").length, 0);
+});
+
 test("organize assigns folders/labels; unknown or cross-project folder rejected", async () => {
   const { sessions, store } = makeService();
   const { id } = await sessions.create({ projectId: "p1", title: "S" });

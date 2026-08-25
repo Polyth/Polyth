@@ -1,1 +1,1 @@
-{"name":"@polyth/plugins","version":"0.1.0","type":"module","exports":{".":"./src/index.ts"},"dependencies":{"@polyth/contracts":"*","@polyth/kernel":"*","esbuild":"^0.28.2"}}
+{"name":"@polyth/plugins","version":"0.1.0","type":"module","exports":{".":"./src/index.ts","./i18n":"./src/i18n/index.ts"},"dependencies":{"@polyth/contracts":"*","@polyth/kernel":"*","esbuild":"^0.28.2"}}

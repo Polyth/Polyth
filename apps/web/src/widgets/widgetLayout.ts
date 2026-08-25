@@ -9,6 +9,7 @@ import {
   type WidgetSize,
 } from "@polyth/contracts";
 import { getState, subscribeStore } from "../store.ts";
+import { tr } from "../i18n/index.ts";
 
 export type WidgetZone = "header" | "left" | "main" | "right" | "bottom" | "floating";
 export type { WidgetAudience, WidgetScope, WidgetSize } from "@polyth/contracts";
@@ -30,9 +31,6 @@ export interface WidgetLayoutDefinition {
   defaultSlot?: UiSlot;
   supportedSlots?: readonly UiSlot[];
   defaultVisible?: boolean;
-  /** Package-required controls remain mounted while their definition is
-   * registered. Persisted customization may move them, but cannot hide them. */
-  requiredVisible?: boolean;
   order?: number;
   /** @deprecated Use defaultSlot. Kept for persisted v1/client compatibility. */
   zone?: WidgetZone;
@@ -54,7 +52,6 @@ export interface WidgetLayoutDefinition {
 
 export interface WidgetPlacement {
   visible: boolean;
-  requiredVisible?: boolean;
   size: WidgetSize;
   position: WidgetPosition;
   definitionId?: string;
@@ -85,7 +82,11 @@ export const MAX_GRID_ROWS = 50;
 /** Removed shell actions stay retired even when an older persisted layout
  * still describes them as visible. This is a migration deny-list, not a
  * second placement system. */
-const RETIRED_WIDGET_IDS = new Set(["shell.new-session", "core.composer"]);
+const RETIRED_WIDGET_IDS = new Set([
+  "shell.new-session",
+  "core.composer",
+  "terminal.open-action",
+]);
 export const WIDGET_ZONE_SLOTS: Record<WidgetZone, UiSlot> = {
   header: "workspace.header",
   left: "workspace.left",
@@ -115,7 +116,7 @@ export const BUILTIN_WIDGET_IDS = [
   "core.quick-actions",
   "session.work-status",
   "session.activity",
-  "preview.app",
+  "browser.app",
   "files.explorer",
   "files.project-map",
   "github.overview",
@@ -131,18 +132,16 @@ export const BUILTIN_WIDGET_IDS = [
   "usage.quota-summary",
 ] as const;
 
-// Catalog registrations can happen before the first project is activated.
-// Keep their definitions available when a project switch reparses its
-// project-scoped layout; otherwise every non-BUILTIN mini-widget disappears
-// from the new layout even though its package remains registered and enabled.
-const ensuredDefinitions = new Map<string, WidgetLayoutDefinition>();
+/** Definitions registered by built-ins/plugins must survive project switches.
+ * Registration happens before init() selects the persisted active project, so
+ * rebuilding from BUILTIN_WIDGET_IDS alone would otherwise drop every
+ * mini-widget (including header launchers) at that first switch. */
+const ensuredDefinitions = new Map<string, WidgetLayoutDefinition>(
+  BUILTIN_WIDGET_IDS.map((id) => [id, { id }]),
+);
 
-function knownLayoutDefinitions(): readonly (string | WidgetLayoutDefinition)[] {
-  return [
-    ...BUILTIN_WIDGET_IDS.filter((id) => !ensuredDefinitions.has(id)),
-    ...ensuredDefinitions.values(),
-  ];
-}
+const knownWidgetDefinitions = (): WidgetLayoutDefinition[] =>
+  [...ensuredDefinitions.values()];
 
 const DEFAULT_ZONE: Record<string, WidgetZone> = {
   "core.quick-actions": "header",
@@ -165,7 +164,7 @@ const DEFAULT_ZONE: Record<string, WidgetZone> = {
   "usage.sessions-table": "right",
   "schedule.tasks": "right",
   "terminal.shell": "bottom",
-  "preview.app": "bottom",
+  "browser.app": "bottom",
 };
 
 const DEFAULT_SLOT_BY_ID: Record<string, UiSlot> = {
@@ -185,7 +184,7 @@ const DEFAULT_SIZE_BY_ID: Record<string, WidgetSize> = {
   "knowledge.notes": { w: 6, h: 5 },
   "session.work-status": { w: 6, h: 4 },
   "session.activity": { w: 6, h: 4 },
-  "preview.app": { w: 12, h: 6 },
+  "browser.app": { w: 12, h: 6 },
   "github.overview": { w: 6, h: 6 },
   "schedule.tasks": { w: 6, h: 5 },
   "multirun.runs": { w: 12, h: 6 },
@@ -293,8 +292,7 @@ function placementFor(
   position: WidgetPosition = { x: 0, y: 0 },
 ): WidgetPlacement {
   return {
-    visible: definition.requiredVisible === true ? true : visible,
-    ...(definition.requiredVisible === true ? { requiredVisible: true } : {}),
+    visible,
     size: recommendedWidgetSize(definition),
     position: clampPosition(position),
     definitionId: definition.id,
@@ -322,9 +320,7 @@ export function createDefaultWidgetLayout(
     if (RETIRED_WIDGET_IDS.has(id)) continue;
     const slot = defaultSlotFor(definition);
     const zone = widgetZoneFromSlot(slot);
-    const visible = definition.requiredVisible === true
-      || definition.defaultVisible
-      || DEFAULT_VISIBLE.has(id);
+    const visible = definition.defaultVisible ?? DEFAULT_VISIBLE.has(id);
     const size = recommendedWidgetSize(definition);
     if (zone && visible && x > 0 && x + size.w > 12) {
       x = 0;
@@ -374,6 +370,36 @@ export function parseWidgetLayout(
     };
     if (!data || data.version !== 1 || typeof data.zones !== "object" || typeof data.widgets !== "object") {
       return fallback;
+    }
+    // The standalone Preview package was replaced by Browser. Preserve the
+    // old widget's placement, visibility, size, and position under its new id.
+    const legacyPreview = data.widgets["preview.app"];
+    if (legacyPreview && definitionById.has("browser.app")) {
+      const persistedBrowser = data.widgets["browser.app"];
+      data.widgets = {
+        ...data.widgets,
+        "browser.app": persistedBrowser ?? {
+          ...legacyPreview,
+          definitionId: "browser.app",
+          pluginId: "browser",
+          title: "Browser",
+        },
+      };
+      delete data.widgets["preview.app"];
+      for (const zone of [...WIDGET_ZONES, "top"] as const) {
+        const ids = data.zones[zone];
+        if (Array.isArray(ids) && ids.includes("preview.app")) {
+          data.zones[zone] = [...new Set(ids.map((value) =>
+            value === "preview.app" ? "browser.app" : value))];
+        }
+      }
+      for (const slot of UI_SLOTS) {
+        const ids = data.slotPlacements?.[slot];
+        if (Array.isArray(ids) && ids.includes("preview.app")) {
+          data.slotPlacements![slot] = [...new Set(ids.map((value) =>
+            value === "preview.app" ? "browser.app" : value))];
+        }
+      }
     }
     // `core.composer` and `core.chat` used to render the same surface. Migrate
     // the retired duplicate into the canonical conversation widget so an
@@ -470,10 +496,7 @@ export function parseWidgetLayout(
       const base = definition ? fallback.widgets[definition.id] : undefined;
       const definitionId = definition?.id ?? value?.definitionId ?? id;
       widgets[id] = {
-        visible: definition?.requiredVisible === true
-          ? true
-          : typeof value?.visible === "boolean" ? value.visible : base?.visible ?? false,
-        ...(definition?.requiredVisible === true ? { requiredVisible: true } : {}),
+        visible: typeof value?.visible === "boolean" ? value.visible : base?.visible ?? false,
         size: constrainedSize(value?.size ?? base?.size ?? DEFAULT_SIZE, definition),
         position: clampPosition(value?.position ?? base?.position),
         definitionId,
@@ -537,20 +560,26 @@ export function canPlaceWidget(
   definition: WidgetLayoutDefinition | undefined,
   target: WidgetPlacementTarget,
 ): WidgetPlacementCheck {
-  if (!definition) return { ok: false, reason: "This widget’s plugin is unavailable." };
+  if (!definition) {
+    return { ok: false, reason: tr("widgets.widgetlayout.widgetPluginUnavailable") };
+  }
   const slot = isWidgetZone(target) ? widgetSlotFromZone(target) : target;
   const supported = supportedSlotsFor(definition);
   if (!supported.includes(slot)) {
-    const zone = widgetZoneFromSlot(slot);
     return {
       ok: false,
-      reason: zone
-        ? `${definition.title ?? "This widget"} doesn’t fit in ${zone === "header" ? "the header" : `the ${zone} zone`}.`
-        : `${definition.title ?? "This widget"} can’t be placed in ${slot}.`,
+      reason: tr("widgets.widgetlayout.widgetDoesNotFitSelectedArea", {
+        widget: definition.title ?? tr("widgets.widgetlayout.thisWidget"),
+      }),
     };
   }
   if (slot === "workspace.header" && (definition.minSize?.h ?? definition.defaultSize?.h ?? 1) > 3) {
-    return { ok: false, reason: `${definition.title ?? "This widget"} needs more height than the header provides.` };
+    return {
+      ok: false,
+      reason: tr("widgets.widgetlayout.widgetNeedsMoreHeaderHeight", {
+        widget: definition.title ?? tr("widgets.widgetlayout.thisWidget"),
+      }),
+    };
   }
   return { ok: true };
 }
@@ -618,7 +647,6 @@ export function moveWidget(
 export function setWidgetVisible(layout: WidgetLayout, id: string, visible: boolean): WidgetLayout {
   const current = layout.widgets[id];
   if (!current || current.visible === visible) return layout;
-  if (current.requiredVisible && !visible) return layout;
   if (!visible) {
     return { ...layout, widgets: { ...layout.widgets, [id]: { ...current, visible: false } } };
   }
@@ -773,7 +801,7 @@ export function setWidgetShowIn(
   showIn: readonly WidgetAudience[],
 ): WidgetLayout {
   const current = layout.widgets[id];
-  if (!current || current.requiredVisible) return layout;
+  if (!current) return layout;
   const next = [...new Set(showIn.filter(isAudience))];
   if (
     current.showIn?.length === next.length
@@ -815,7 +843,7 @@ export function setWidgetIdentity(
 }
 
 export function forgetWidget(layout: WidgetLayout, id: string): WidgetLayout {
-  if (!layout.widgets[id] || layout.widgets[id]?.requiredVisible) return layout;
+  if (!layout.widgets[id]) return layout;
   const widgets = { ...layout.widgets };
   delete widgets[id];
   const zones = Object.fromEntries(
@@ -853,7 +881,7 @@ export function duplicateWidget(
       definitionId: definition.id,
       size,
       position: { x: current.position.x, y: current.position.y + current.size.h },
-      title: current.title ? `${current.title} copy` : definition.title ? `${definition.title} copy` : undefined,
+      title: current.title ? tr("widgets.widgetlayout.valueCopy", { title: current.title }) : definition.title ? tr("widgets.widgetlayout.valueCopy", { title: definition.title }) : undefined,
     },
   };
   const zone = widgetZoneFromSlot(slot);
@@ -976,7 +1004,7 @@ const write = (layout: WidgetLayout, projectId: string | null): boolean => {
 };
 
 let activeProjectId = getState().activeProjectId;
-let state = parseWidgetLayout(read(activeProjectId));
+let state = parseWidgetLayout(read(activeProjectId), knownWidgetDefinitions());
 const listeners = new Set<() => void>();
 const statusListeners = new Set<() => void>();
 let history: WidgetLayout[] = [];
@@ -1015,7 +1043,7 @@ subscribeStore(() => {
   if (nextProjectId === activeProjectId) return;
   flushWrite();
   activeProjectId = nextProjectId;
-  state = parseWidgetLayout(read(activeProjectId), knownLayoutDefinitions());
+  state = parseWidgetLayout(read(activeProjectId), knownWidgetDefinitions());
   history = [];
   saveStatus = "saved";
   for (const listener of [...listeners]) listener();
@@ -1103,14 +1131,12 @@ export function ensureWidgets(definitions: readonly WidgetLayoutDefinition[]): v
     const metadata = placementFor(definition, current.visible);
     const next = {
       ...current,
-      visible: definition.requiredVisible === true ? true : current.visible,
-      requiredVisible: metadata.requiredVisible,
       definitionId: definition.id,
       pluginId: metadata.pluginId,
       kind: metadata.kind,
       title: current.title ?? metadata.title,
       description: current.description ?? metadata.description,
-      showIn: definition.requiredVisible === true ? metadata.showIn : current.showIn ?? metadata.showIn,
+      showIn: current.showIn ?? metadata.showIn,
       scope: current.scope ?? metadata.scope,
     };
     if (JSON.stringify(next) !== JSON.stringify(current)) {

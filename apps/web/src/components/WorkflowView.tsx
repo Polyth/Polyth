@@ -26,6 +26,8 @@ import {
   workflowHumanWaitLabel,
 } from "../workflowRun.ts";
 import EmptyState from "./EmptyState.tsx";
+import { tr } from "../i18n/index.ts";
+import { confirmAlert } from "../alerts.ts";
 
 const uid = (): string =>
   typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
@@ -157,7 +159,9 @@ export default function WorkflowView() {
     } catch (cause) {
       if (sequence !== loadSequence.current) return;
       setLoadFailed(true);
-      setError(friendlyError("Couldn’t load workflows", cause));
+      setError(tr("workflowview.couldNotLoadWorkflowsValue", {
+        value: cause instanceof Error ? cause.message : String(cause),
+      }));
     } finally {
       if (sequence === loadSequence.current) setLoading(false);
     }
@@ -246,8 +250,8 @@ export default function WorkflowView() {
   if (!projectId) {
     return (
       <EmptyState
-        title="No project selected"
-        description="Open a project to build agent workflows."
+        title={tr("workflowview.noProjectSelected")}
+        description={tr("workflowview.openAProjectToBuildAgentWorkflows")}
         mark={<Icon.workflow />}
       />
     );
@@ -273,14 +277,15 @@ export default function WorkflowView() {
     void act("create", async () => {
       const nodeId = uid();
       let number = workflows.length + 1;
-      while (workflows.some((workflow) => workflow.name === `Workflow ${number}`)) number++;
+      while (workflows.some((workflow) =>
+        workflow.name === tr("workflowview.workflowValue", { number }))) number++;
       const created = await api.createWorkflow({
         projectId,
-        name: `Workflow ${number}`,
+        name: tr("workflowview.workflowValue", { number }),
         nodes: [{
           id: nodeId,
-          role: "Worker",
-          prompt: "Complete the assigned workflow task.",
+          role: tr("workflowview.worker"),
+          prompt: tr("workflowview.completeTheAssignedWorkflowTask"),
         }],
         edges: [],
         defaults: { pipe: "ancestors", permissions: "auto", maxParallel: 4, nodeTimeoutMs: 1_800_000 },
@@ -313,8 +318,14 @@ export default function WorkflowView() {
     });
   };
 
-  const remove = () => {
-    if (!draft || !window.confirm(`Delete workflow “${draft.name}”?`)) return;
+  const remove = async () => {
+    if (!draft || !await confirmAlert(
+      tr("workflowview.deleteWorkflowValue", { name: draft.name }),
+      {
+        title: tr("workflowview.deleteWorkflow"),
+        confirmLabel: tr("common.delete"),
+      },
+    )) return;
     void act("delete", async () => {
       await api.deleteWorkflow(draft.id);
       const index = workflows.findIndex((workflow) => workflow.id === draft.id);
@@ -463,8 +474,8 @@ export default function WorkflowView() {
       <header className="workflow-page-header">
         <span className="workflow-page-icon" aria-hidden><Icon.workflow /></span>
         <div>
-          <h1 className="view-title">Workflows</h1>
-          <p className="view-sub">Coordinate agent roles in dependency-based pipelines.</p>
+          <h1 className="view-title">{tr("workflowview.workflows")}</h1>
+          <p className="view-sub">{tr("capabilities.coordinateAgentRolesInDependencyBasedPipelines")}</p>
         </div>
         <button type="button" className="small-btn workflow-back-chat" onClick={returnToChat}>
           <Icon.back />Back to chat
@@ -486,7 +497,7 @@ export default function WorkflowView() {
         <aside className="sched-form workflow-sidebar" aria-label="Workflow definitions">
           <div className="workflow-section-heading">
             <div>
-              <h2>Definitions</h2>
+              <h2>{tr("workflowview.definitions")}</h2>
               <span>{workflows.length} saved</span>
             </div>
             <button
@@ -495,7 +506,7 @@ export default function WorkflowView() {
               disabled={isBusy || loading}
               onClick={create}
             >
-              <Icon.plus />{busy === "create" ? "Creating…" : "New"}
+              <Icon.plus />{busy === "create" ? "Creating…" : tr("workflowview.new").replace(/^\+\s*/, "")}
             </button>
           </div>
 
@@ -508,7 +519,7 @@ export default function WorkflowView() {
           {!loading && !loadFailed && workflows.length === 0 && (
             <div className="workflow-list-empty">
               <Icon.workflow />
-              <strong>No workflows yet</strong>
+              <strong>{tr("workflowview.noWorkflowsYet")}</strong>
               <span>Create one to coordinate a team of agents.</span>
             </div>
           )}
@@ -525,7 +536,7 @@ export default function WorkflowView() {
                 <span className="workflow-definition-icon" aria-hidden><Icon.workflow /></span>
                 <span className="workflow-definition-copy">
                   <strong>{workflow.name}</strong>
-                  <span>{workflow.nodes.length} {workflow.nodes.length === 1 ? "node" : "nodes"}</span>
+                  <span>{workflow.nodes.length} {tr("workflowview.nodes")}</span>
                 </span>
                 <Icon.chevronRight />
               </button>
@@ -559,7 +570,7 @@ export default function WorkflowView() {
               <section className="sched-form workflow-editor-header">
                 <div className="workflow-editor-toolbar">
                   <label className="workflow-field workflow-name-field">
-                    <span>Workflow name</span>
+                    <span>{tr("workflowview.workflowName")}</span>
                     <input
                       value={draft.name}
                       disabled={isBusy}
@@ -577,7 +588,7 @@ export default function WorkflowView() {
                       {dirty ? "Unsaved changes" : "Saved"}
                     </span>
                     <button type="button" className="small-btn workflow-button" disabled={isBusy} onClick={addNode}>
-                      <Icon.plus />Add node
+                      <Icon.plus />{tr("workflowview.node").replace(/^\+\s*/, "")}
                     </button>
                     <button
                       type="button"
@@ -586,7 +597,7 @@ export default function WorkflowView() {
                       title={shownRun?.status === "running" ? "Stop the active run before deleting this workflow" : "Delete workflow"}
                       onClick={remove}
                     >
-                      <Icon.trash />{busy === "delete" ? "Deleting…" : "Delete"}
+                      <Icon.trash />{busy === "delete" ? "Deleting…" : tr("common.delete")}
                     </button>
                     <button
                       type="button"
@@ -595,7 +606,7 @@ export default function WorkflowView() {
                       title={!canSave ? "Fix highlighted fields before saving" : !dirty ? "No unsaved changes" : "Save workflow"}
                       onClick={save}
                     >
-                      <Icon.check />{busy === "save" ? "Saving…" : "Save"}
+                      <Icon.check />{busy === "save" ? tr("common.saving") : tr("common.save")}
                     </button>
                   </div>
                 </div>
@@ -647,7 +658,7 @@ export default function WorkflowView() {
                     </div>
 
                     <label className="workflow-field">
-                      <span>Role</span>
+                      <span>{tr("workflowview.role")}</span>
                       <input
                         value={node.role}
                         disabled={isBusy}
@@ -687,7 +698,7 @@ export default function WorkflowView() {
                           disabled={isBusy}
                           onChange={(event) => updateNode(node.id, { model: parseModel(event.target.value) })}
                         >
-                          <option value="">Default model</option>
+                          <option value="">{tr("workflowview.defaultModel")}</option>
                           {models.map((model) => (
                             <option
                               key={`${model.providerID}/${model.modelID}`}
@@ -705,7 +716,7 @@ export default function WorkflowView() {
                           disabled={isBusy}
                           onChange={(event) => updateNode(node.id, { agent: event.target.value || undefined })}
                         >
-                          <option value="">Default agent</option>
+                          <option value="">{tr("workflowview.defaultAgent")}</option>
                           {agents.map((agent) => <option key={agent.name} value={agent.name}>{agent.name}</option>)}
                         </select>
                       </label>
@@ -713,7 +724,7 @@ export default function WorkflowView() {
 
                     {draft.nodes.length > 1 && (
                       <fieldset className="workflow-dependencies">
-                        <legend>Depends on</legend>
+                        <legend>{tr("workflowview.dependsOn")}</legend>
                         <p>Select the nodes that must finish before this one starts.</p>
                         <div className="workflow-dependency-list">
                           {draft.nodes.filter((source) => source.id !== node.id).map((source) => {
@@ -723,7 +734,7 @@ export default function WorkflowView() {
                               <label
                                 key={source.id}
                                 className={`workflow-dependency${checked ? " checked" : ""}${cycle ? " disabled" : ""}`}
-                                title={cycle ? "This dependency would create a cycle" : ""}
+                                title={cycle ? tr("workflowview.thisDependencyWouldCreateACycle") : ""}
                               >
                                 <input
                                   type="checkbox"
@@ -747,7 +758,7 @@ export default function WorkflowView() {
               <section className="sched-form workflow-run-form">
                 <div className="workflow-section-heading">
                   <div>
-                    <h2>Run workflow</h2>
+                    <h2>{tr("workflowview.runWorkflow")}</h2>
                     <span>Give every role one shared objective.</span>
                   </div>
                   {shownRun && <StatusBadge status={shownRun.status} />}
@@ -758,23 +769,23 @@ export default function WorkflowView() {
                     rows={3}
                     value={runInput}
                     disabled={isBusy}
-                    placeholder="Describe the task for this workflow…"
+                    placeholder={tr("workflowview.describeTheTaskForThisWorkflow")}
                     onChange={(event) => { setError(""); setRunInput(event.target.value); }}
                   />
                 </label>
                 <div className="workflow-run-options">
                   <label className="workflow-field">
-                    <span>Context</span>
+                    <span>{tr("workflowview.context")}</span>
                     <select disabled={isBusy} value={pipe} onChange={(event) => { setError(""); setPipe(event.target.value as WorkflowPipeMode); }}>
-                      <option value="ancestors">All ancestors</option>
-                      <option value="direct">Direct dependencies</option>
+                      <option value="ancestors">{tr("workflowview.allAncestors")}</option>
+                      <option value="direct">{tr("workflowview.directDependencies")}</option>
                     </select>
                   </label>
                   <label className="workflow-field">
-                    <span>Permissions</span>
+                    <span>{tr("workflowview.permissions")}</span>
                     <select disabled={isBusy} value={permissions} onChange={(event) => { setError(""); setPermissions(event.target.value as WorkflowPermissionPolicy); }}>
-                      <option value="auto">Auto approve</option>
-                      <option value="manual">Manual review</option>
+                      <option value="auto">{tr("workflowview.autoApprove")}</option>
+                      <option value="manual">{tr("workflowview.manualReview")}</option>
                     </select>
                     <small className="workflow-option-help">
                       {permissions === "manual"
@@ -783,7 +794,7 @@ export default function WorkflowView() {
                     </small>
                   </label>
                   <label className="workflow-field">
-                    <span>Parallel agents</span>
+                    <span>{tr("workflowview.parallel")}</span>
                     <input
                       type="number"
                       min={1}
@@ -801,7 +812,7 @@ export default function WorkflowView() {
                     )}
                   </label>
                   <label className="workflow-field">
-                    <span>Timeout (seconds)</span>
+                    <span>{tr("workflowview.timeoutSec")}</span>
                     <input
                       type="number"
                       min={1}
@@ -851,7 +862,7 @@ export default function WorkflowView() {
                         || timeoutValue === null || shownRun?.status === "running" || isBusy}
                       aria-busy={busy === "run"}
                       title={!sessionId
-                        ? "Open a parent session before running a workflow"
+                        ? tr("workflowview.openAParentSessionBeforeRunningA")
                         : dirty
                           ? "Save workflow changes before running"
                           : !runInput.trim()
@@ -863,7 +874,7 @@ export default function WorkflowView() {
                                 : "Run this workflow"}
                       onClick={() => run()}
                     >
-                      <Icon.workflow />{busy === "run" ? "Starting…" : "Run workflow"}
+                      <Icon.workflow />{busy === "run" ? tr("workflowview.starting") : tr("workflowview.runWorkflow")}
                     </button>
                   </div>
                 </div>

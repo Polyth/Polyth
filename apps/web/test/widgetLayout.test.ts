@@ -67,7 +67,7 @@ test("default widget layout contains every built-in exactly once", () => {
   assert.equal(widgetSlotOf(layout, "usage.session"), "session.composer.before");
   assert.equal(widgetSlotOf(layout, "github.pr-summary"), "session.composer.before");
   assert.equal(layout.widgets["core.chat"]?.visible, true);
-  assert.equal(layout.widgets["preview.app"]?.visible, false);
+  assert.equal(layout.widgets["browser.app"]?.visible, false);
   for (const id of [
     "core.chat", "goals.current", "files.project-map", "git.recent",
     "session.work-status", "knowledge.notes", "session.activity", "core.quick-actions",
@@ -128,15 +128,15 @@ test("recommended spawn size fits title chrome without becoming a hard minimum",
 });
 
 test("layout serializes and parses visibility, size, audience, and zone order", () => {
-  let layout = createDefaultWidgetLayout(["core.chat", "terminal.shell", "preview.app"]);
+  let layout = createDefaultWidgetLayout(["core.chat", "terminal.shell", "browser.app"]);
   layout = moveWidget(layout, "terminal.shell", "main", 0);
-  layout = setWidgetVisible(layout, "preview.app", true);
-  layout = setWidgetSize(layout, "preview.app", { w: 9, h: 7 });
+  layout = setWidgetVisible(layout, "browser.app", true);
+  layout = setWidgetSize(layout, "browser.app", { w: 9, h: 7 });
   layout = { ...layout, audience: "power" };
 
   const parsed = parseWidgetLayout(
     serializeWidgetLayout(layout),
-    ["core.chat", "terminal.shell", "preview.app"],
+    ["core.chat", "terminal.shell", "browser.app"],
   );
   assert.deepEqual(parsed, layout);
   assert.deepEqual(parsed.zones.main.slice(0, 2), ["terminal.shell", "core.chat"]);
@@ -210,13 +210,13 @@ test("widget heights support tall canvases up to the grid row limit", () => {
   assert.deepEqual(layout.widgets["core.chat"]?.size, { w: 12, h: MAX_GRID_ROWS });
 });
 
-test("persisted retired New session widget is removed from header placements", () => {
+test("persisted retired shell widgets are removed from header placements", () => {
   const parsed = parseWidgetLayout(JSON.stringify({
     version: 1,
     audience: "standard",
     zones: { header: [], left: [], main: [], right: [], bottom: [], floating: [] },
     slotPlacements: {
-      "app.header.actions": ["shell.new-session", "sample.search"],
+      "app.header.actions": ["shell.new-session", "terminal.open-action", "sample.search"],
     },
     widgets: {
       "shell.new-session": {
@@ -226,6 +226,14 @@ test("persisted retired New session widget is removed from header placements", (
         definitionId: "shell.new-session",
         pluginId: "shell-actions",
         title: "New session",
+      },
+      "terminal.open-action": {
+        visible: true,
+        size: { w: 1, h: 1 },
+        position: { x: 0, y: 0 },
+        definitionId: "terminal.open-action",
+        pluginId: "terminal",
+        title: "Open Terminal",
       },
       "sample.search": {
         visible: true,
@@ -241,6 +249,7 @@ test("persisted retired New session widget is removed from header placements", (
   }]);
 
   assert.equal("shell.new-session" in parsed.widgets, false);
+  assert.equal("terminal.open-action" in parsed.widgets, false);
   assert.deepEqual(parsed.slotPlacements["app.header.actions"], ["sample.search"]);
 });
 
@@ -269,6 +278,33 @@ test("persisted composer widget migrates to the conversation widget", () => {
   assert.deepEqual(parsed.zones.main, ["core.chat"]);
   assert.equal(parsed.widgets["core.chat"]?.visible, true);
   assert.deepEqual(parsed.widgets["core.chat"]?.position, { x: 1, y: 0 });
+});
+
+test("persisted preview widget migrates to the shared browser widget", () => {
+  const parsed = parseWidgetLayout(JSON.stringify({
+    version: 1,
+    audience: "standard",
+    zones: {
+      header: [],
+      left: [],
+      main: [],
+      right: [],
+      bottom: ["preview.app"],
+      floating: [],
+    },
+    widgets: {
+      "preview.app": {
+        visible: true,
+        size: { w: 11, h: 8 },
+        position: { x: 1, y: 2 },
+      },
+    },
+  }), ["browser.app"]);
+
+  assert.equal("preview.app" in parsed.widgets, false);
+  assert.deepEqual(parsed.zones.bottom, ["browser.app"]);
+  assert.equal(parsed.widgets["browser.app"]?.visible, true);
+  assert.deepEqual(parsed.widgets["browser.app"]?.size, { w: 11, h: 8 });
 });
 
 test("invalid persisted layouts fall back to defaults", () => {
@@ -389,7 +425,20 @@ test("layouts persist independently under project-specific keys", () => {
     },
   });
 
+  ensureWidgets([{
+    id: "shell.search",
+    pluginId: "shell-actions",
+    kind: "mini-widget",
+    defaultSlot: "app.header.actions",
+    defaultVisible: true,
+  }]);
   activateProject("layout-project-alpha");
+  assert.equal(getWidgetLayout().widgets["shell.search"]?.visible, true);
+  assert.deepEqual(
+    getWidgetLayout().slotPlacements["app.header.actions"]?.includes("shell.search"),
+    true,
+    "registered mini-widget actions survive the first project activation",
+  );
   updateWidgetLayout((current) => ({
     ...current,
     audience: "power",

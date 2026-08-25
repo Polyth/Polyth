@@ -7,6 +7,7 @@
 import { useSyncExternalStore } from "react";
 import type { NotificationKind, NotificationRecord } from "@polyth/contracts";
 import { api } from "./api.ts";
+import { tr } from "./i18n/index.ts";
 
 /** Mirror of the server's retention cap (newest 200 FIFO). */
 export const NOTIFICATION_CENTRE_CAP = 200;
@@ -41,8 +42,8 @@ export interface NotificationCentre {
   clear(): Promise<void>;
 }
 
-const RETRYABLE_ERROR = "Couldn’t update notifications. Check the connection and retry.";
-const LOAD_ERROR = "Couldn’t load notifications. Check the connection and retry.";
+const RETRYABLE_ERROR = tr("notificationcentre.couldNotUpdateNotifications");
+const LOAD_ERROR = tr("notificationcentre.couldNotLoadNotifications");
 
 export function createNotificationCentre(remote: NotificationCentreRemote): NotificationCentre {
   let state: NotificationCentreState = { items: [], unread: 0, loading: false, error: null };
@@ -190,16 +191,18 @@ export function useNotificationCentre(centre: NotificationCentre = notificationC
 
 /** Human labels so kind is never communicated by color alone. */
 export const NOTIFICATION_KIND_LABELS: Record<NotificationKind, string> = {
-  completed: "Completed",
-  failed: "Failed",
-  question: "Question",
-  permission: "Permission",
-  subagent: "Delegated agent",
+  completed: tr("notificationcentre.completed"),
+  failed: tr("notificationcentre.failed"),
+  question: tr("notificationcentre.question"),
+  permission: tr("notificationcentre.permission"),
+  subagent: tr("notificationcentre.delegatedAgent"),
 };
 
 /** Accessible bell name always carries the EXACT count, even above 99. */
 export function bellName(unread: number): string {
-  return unread > 0 ? `Notifications, ${unread} unread` : "Notifications, none unread";
+  return unread > 0
+    ? tr("notificationcentre.notificationsUnreadCount", { count: unread })
+    : tr("notificationcentre.notificationsNoneUnread");
 }
 
 /** Badge text: absent at zero, capped display above 99 (name keeps the count). */

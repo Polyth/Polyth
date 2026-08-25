@@ -1,30 +1,58 @@
 // The simpler settings pages: General, Appearance, Chat, Notifications,
 // Behavior, Usage, Projects, Git, Agents, MCP, Plugins.
 import { useEffect, useRef, useState, type CSSProperties } from "react";
-import { activateProject, applyProjectUpsert, openWorkspacePane, setAgents, setOverlay, updateSettings, useStore } from "../../store.ts";
+import {
+  activateProject,
+  applyProjectUpsert,
+  openWorkspacePane,
+  setAgents,
+  setOverlay,
+  setUiError,
+  updateSettings,
+  useStore,
+} from "../../store.ts";
 import { UI_DEFAULTS, setUiSettings, useUiSettings } from "../../uiPrefs.ts";
-import { DEFAULT_SETTINGS, INTERFACE_FONTS } from "../../settings.ts";
+import { DEFAULT_SETTINGS, friendlyError, INTERFACE_FONTS } from "../../settings.ts";
 import { requestNotifyPermission } from "../../notify.ts";
 import { disablePush, enablePush, pushSubscription, pushUnsupportedReason } from "../../push.ts";
 import { api, type GitStatus } from "../../api.ts";
+import { confirmAlert } from "../../alerts.ts";
 import { EmptyState, PageHead, Row, Seg, Toggle } from "./parts.tsx";
 import { refreshProfiles, useProfiles } from "../../profiles.ts";
 import { removeProject } from "../../init.ts";
 import AgentProfileForm from "../AgentProfileForm.tsx";
 import ProjectFolderDialog from "../ProjectFolderDialog.tsx";
 import { parseMcpServersJson, type McpImportResult } from "../../mcpImport.ts";
+import { parseOpenCodePluginJson } from "../../pluginImport.ts";
 import {
   PRESET_THEMES, addCustomTheme, applyTheme, loadCustomThemes, parseThemeJson,
   reapplyTheme, removeCustomTheme, resolveTheme, type AppearanceMode, type ThemeSpec,
 } from "../../theme.ts";
 import type { AssistSettingsDto } from "../../api.ts";
-import type { AgentDescriptor, AgentProfile, InstalledPluginDto, McpServerDto, McpTransport, ModelRef, SystemInfoDto } from "@polyth/contracts";
+import type {
+  AgentDescriptor,
+  AgentProfile,
+  InstalledPluginDto,
+  McpServerDto,
+  McpTransport,
+  ModelRef,
+  OpenCodePluginConfigEntry,
+  OpenCodePluginEntryDto,
+  OpenCodePluginPreviewDto,
+  SystemInfoDto,
+} from "@polyth/contracts";
 import { useWidgetCatalog } from "../../widgets/catalog.ts";
 import { useWidgetLayout } from "../../widgets/widgetLayout.ts";
 import ModelPicker from "../ModelPicker.tsx";
 import Dialog from "../a11y/Dialog.tsx";
 import { modelSupportsTextWorkflow } from "../../composer/discovery.ts";
 import { removeGitPersona, saveGitPersona, useGitPersonas, type GitPersona } from "../../gitPersonas.ts";
+import { getLocale, LOCALES, LOCALE_NAMES, setLocale, tr, type Locale } from "../../i18n/index.ts";
+import {
+  projectRemembersModelSelection,
+  resolveSessionDefaultModel,
+  useSessionDefaults,
+} from "../../sessionDefaults.ts";
 
 function ThemeSwatches({ theme }: { theme: ThemeSpec }) {
   return (
@@ -41,8 +69,21 @@ export function GeneralPage() {
   const settings = useStore((s) => s.settings);
   return (
     <>
-      <PageHead title="General" blurb="Application basics and browser-local behavior." />
-      <Row label="Product name" hint="Shown in the sidebar and window chrome." itemId="general.productName">
+      <PageHead title={tr("settings.pages.general")} blurb={tr("settings.pages.applicationBasicsAndBrowserLocalBehavior")} />
+      <Row label={tr("common.language")} hint={tr("common.languageHint")} itemId="general.language">
+        <select
+          className="inp"
+          value={getLocale()}
+          aria-label={tr("common.language")}
+          onChange={(event) => {
+            setLocale(event.target.value as Locale);
+            window.location.reload();
+          }}
+        >
+          {LOCALES.map((locale) => <option key={locale} value={locale}>{LOCALE_NAMES[locale]}</option>)}
+        </select>
+      </Row>
+      <Row label={tr("settings.pages.productName")} hint={tr("settings.pages.shownInTheSidebarAndWindowChrome")} itemId="general.productName">
         <input
           className="inp"
           value={settings.productName}
@@ -50,14 +91,12 @@ export function GeneralPage() {
           onBlur={() => { if (!settings.productName.trim()) updateSettings({ productName: "Polyth" }); }}
         />
       </Row>
-      <Row label="Relative timestamps" hint="Show session activity as “2m ago” instead of a clock time." itemId="general.relativeTime">
-        <Toggle on={settings.relativeTime} onChange={(relativeTime) => updateSettings({ relativeTime })} label="Relative timestamps" />
+      <Row label={tr("settings.pages.relativeTimestamps")} hint={tr("settings.pages.showSessionActivityAs2mAgoInstead")} itemId="general.relativeTime">
+        <Toggle on={settings.relativeTime} onChange={(relativeTime) => updateSettings({ relativeTime })} label={tr("settings.pages.relativeTimestamps")} />
       </Row>
     </>
   );
 }
-
-const EXAMPLE_THEME_HINT = 'Paste theme JSON: { "id": "my-theme", "name": "My theme", "appearance": "dark", "tokens": { "bg": "#101010", … } }';
 
 // F15: searchable palette picker + independent appearance mode + custom JSON.
 // Hover applies the candidate tokens live; leaving re-applies the saved pick.
@@ -119,16 +158,18 @@ function ThemeSection() {
   };
   const copyCurrent = () => {
     const current = resolveTheme(settings.theme, settings.appearanceMode, { custom: customs, systemDark });
-    const draft = { ...current, id: "my-theme", name: "My theme" };
+    const draft = { ...current, id: "my-theme", name: tr("settings.pages.myTheme") };
     void navigator.clipboard?.writeText(JSON.stringify(draft, null, 2));
   };
   const removeCustom = (id: string) => {
     setCustoms(removeCustomTheme(id));
     if (settings.theme === id) updateSettings({ theme: "dark" });
   };
+  const bundledGroup = tr("settings.pages.bundled");
+  const customGroup = tr("settings.pages.custom");
   const choices = [
-    ...PRESET_THEMES.map((theme) => ({ group: "Bundled", theme })),
-    ...customs.map((theme) => ({ group: "Custom", theme })),
+    ...PRESET_THEMES.map((theme) => ({ group: bundledGroup, theme })),
+    ...customs.map((theme) => ({ group: customGroup, theme })),
   ];
   const normalizedQuery = query.trim().toLowerCase();
   const filtered = normalizedQuery
@@ -137,9 +178,11 @@ function ThemeSection() {
     : choices;
   const current = choices.find(({ theme }) => theme.id === settings.theme) ?? choices[0]!;
   const currentEffective = effective(current.theme);
+  const appearanceName = (appearance: "dark" | "light") =>
+    appearance === "dark" ? tr("settings.pages.dark") : tr("settings.pages.light");
   const appearanceLabel = settings.appearanceMode === "system"
-    ? `System · ${currentEffective.appearance}`
-    : `${currentEffective.appearance} appearance`;
+    ? tr("settings.pages.systemValue", { appearance: appearanceName(currentEffective.appearance) })
+    : tr("settings.pages.valueAppearance", { appearance: appearanceName(currentEffective.appearance) });
   const pick = (id: string) => {
     updateSettings({ theme: id });
     setQuery("");
@@ -147,7 +190,7 @@ function ThemeSection() {
   };
   return (
     <div className="set-sec" data-settings-item="appearance.theme">
-      <div className="set-sec-title">Theme</div>
+      <div className="set-sec-title">{tr("settings.pages.theme")}</div>
       <div
         className="theme-picker"
         onBlur={(event) => {
@@ -174,9 +217,9 @@ function ThemeSection() {
               role="combobox"
               aria-expanded="true"
               aria-controls="theme-picker-list"
-              aria-label="Search themes"
+              aria-label={tr("settings.pages.searchThemes")}
               value={query}
-              placeholder={`Search ${choices.length} themes…`}
+              placeholder={tr("settings.pages.searchValueThemes", { length: choices.length })}
               onChange={(event) => setQuery(event.target.value)}
               onKeyDown={(event) => {
                 if (event.key === "Escape") {
@@ -187,7 +230,7 @@ function ThemeSection() {
               }}
             />
             <div className="theme-picker-list" id="theme-picker-list" role="listbox">
-              {(["Bundled", "Custom"] as const).map((group) => {
+              {[bundledGroup, customGroup].map((group) => {
                 const groupChoices = filtered.filter((choice) => choice.group === group);
                 if (groupChoices.length === 0) return null;
                 return (
@@ -208,7 +251,7 @@ function ThemeSection() {
                         onBlur={endPreview}
                       >
                         <ThemeSwatches theme={rendered} />
-                        <span><strong>{theme.name}</strong><small>{rendered.appearance} palette</small></span>
+                        <span><strong>{theme.name}</strong><small>{appearanceName(rendered.appearance)} {tr("settings.pages.palette")}</small></span>
                         <b aria-hidden="true">{settings.theme === theme.id ? "✓" : ""}</b>
                       </button>
                       );
@@ -216,12 +259,12 @@ function ThemeSection() {
                   </section>
                 );
               })}
-              {filtered.length === 0 && <div className="theme-picker-empty">No matching themes</div>}
+              {filtered.length === 0 && <div className="theme-picker-empty">{tr("settings.pages.noMatchingThemes")}</div>}
             </div>
           </div>
         )}
       </div>
-      <div className="theme-swatch-strip" aria-label="Quick theme preview">
+      <div className="theme-swatch-strip" aria-label={tr("settings.pages.quickThemePreview")}>
         {PRESET_THEMES.map((theme) => {
           const rendered = effective(theme);
           return (
@@ -229,7 +272,7 @@ function ThemeSection() {
             key={theme.id}
             className={settings.theme === theme.id ? "active" : ""}
             title={theme.name}
-            aria-label={`Use ${theme.name} theme`}
+            aria-label={tr("settings.pages.useValueTheme", { name: theme.name })}
             onClick={() => pick(theme.id)}
             onMouseEnter={() => preview(theme)}
             onMouseLeave={endPreview}
@@ -245,9 +288,9 @@ function ThemeSection() {
           {customs.map((t) => (
             <div key={t.id} className="theme-custom-row">
               <span className="mono">{t.id}</span>
-              <span className="muted">{t.name} · adapts to {settings.appearanceMode}</span>
+              <span className="muted">{t.name} {tr("settings.pages.adaptsTo")}{" "}{settings.appearanceMode}</span>
               <span className="header-spacer" />
-              <button className="small-btn danger-btn" onClick={() => removeCustom(t.id)}>Delete</button>
+              <button className="small-btn danger-btn" onClick={() => removeCustom(t.id)}>{tr("common.delete")}</button>
             </div>
           ))}
         </div>
@@ -256,14 +299,14 @@ function ThemeSection() {
         <textarea
           className="theme-import-input"
           rows={3}
-          placeholder={EXAMPLE_THEME_HINT}
+          placeholder={tr("settings.pages.pasteThemeJsonExample")}
           value={json}
           onChange={(e) => { setJson(e.target.value); setJsonError(""); }}
-          aria-label="Custom theme JSON"
+          aria-label={tr("settings.pages.customThemeJson")}
         />
         <div className="theme-import-actions">
-          <button className="small-btn" disabled={!json.trim()} onClick={importJson}>Import theme</button>
-          <button className="small-btn" onClick={copyCurrent} title="Copy the active theme as JSON to edit">Copy current as JSON</button>
+          <button className="small-btn" disabled={!json.trim()} onClick={importJson}>{tr("settings.pages.importTheme")}</button>
+          <button className="small-btn" onClick={copyCurrent} title={tr("settings.pages.copyTheActiveThemeAsJsonTo")}>{tr("settings.pages.copyCurrentAsJson")}</button>
         </div>
         {jsonError && <div className="form-error">{jsonError}</div>}
       </div>
@@ -284,73 +327,91 @@ export function AppearancePage() {
   };
   return (
     <>
-      <PageHead title="Appearance" blurb="Visual preferences, saved in this browser and applied immediately." />
+      <PageHead title={tr("settings.pages.appearance")} blurb={tr("settings.pages.visualPreferencesSavedInThisBrowserAnd")} />
       <Row
-        label="Appearance"
-        hint="System follows your operating system. Every palette has both a light and dark rendering."
+        label={tr("settings.pages.appearance")}
+        hint={tr("settings.pages.systemFollowsYourOperatingSystemEveryPalette")}
         itemId="appearance.mode"
       >
         <Seg<AppearanceMode>
           value={settings.appearanceMode}
-          options={[["system", "System"], ["dark", "Dark"], ["light", "Light"]]}
+          options={[
+            ["system", tr("settingsview.system")],
+            ["dark", tr("settings.pages.dark")],
+            ["light", tr("settings.pages.light")],
+          ]}
           onChange={(appearanceMode) => updateSettings({ appearanceMode })}
         />
       </Row>
       <ThemeSection />
-      <Row label="Interface font" hint="Choose from clean UI faces and programmer favorites. Fonts use your installed copy, then fall back safely." itemId="appearance.fontFamily">
+      <Row label={tr("settings.pages.interfaceFont")} hint={tr("settings.pages.chooseFromCleanUiFaces")} itemId="appearance.fontFamily">
         <select
-          aria-label="Interface font"
+          aria-label={tr("settings.pages.interfaceFont")}
           value={settings.fontFamily}
           onChange={(event) => updateSettings({ fontFamily: event.target.value as typeof settings.fontFamily })}
         >
-          <optgroup label="UI sans-serif">
+          <optgroup label={tr("settings.pages.uiSansSerif")}>
             {INTERFACE_FONTS.filter((font) => !font.mono && font.id !== "serif").map((font) => (
               <option key={font.id} value={font.id}>{font.label}</option>
             ))}
           </optgroup>
-          <optgroup label="Serif">
+          <optgroup label={tr("settings.pages.serif")}>
             {INTERFACE_FONTS.filter((font) => font.id === "serif").map((font) => (
               <option key={font.id} value={font.id}>{font.label}</option>
             ))}
           </optgroup>
-          <optgroup label="Programmer monospace — ligatures off">
+          <optgroup label={tr("settings.pages.programmerMonospaceLigaturesOff")}>
             {INTERFACE_FONTS.filter((font) => font.mono).map((font) => (
               <option key={font.id} value={font.id}>{font.label}</option>
             ))}
           </optgroup>
         </select>
       </Row>
-      <Row label="Density" hint="Choose airy, balanced, or compact spacing across panels." itemId="appearance.density">
-        <Seg value={ui.density} options={[["comfortable", "Comfortable"], ["balanced", "Balanced"], ["compact", "Compact"]]} onChange={(density) => { setUiSettings({ density }); updateSettings({ density }); }} />
+      <Row label={tr("settings.pages.density")} hint={tr("settings.pages.chooseAiryBalancedOrCompactSpacingAcross")} itemId="appearance.density">
+        <Seg value={ui.density} options={[
+          ["comfortable", tr("settings.pages.comfortable")],
+          ["balanced", tr("settings.pages.balanced")],
+          ["compact", tr("settings.pages.compact")],
+        ]} onChange={(density) => { setUiSettings({ density }); updateSettings({ density }); }} />
       </Row>
-      <Row label="Interface scale" hint="Increase or decrease text throughout Polyth. Code and terminal text have their own setting below." itemId="appearance.fontSize">
+      <Row label={tr("settings.pages.interfaceScale")} hint={tr("settings.pages.increaseOrDecreaseTextThroughoutPolythCode")} itemId="appearance.fontSize">
         <Seg
           value={settings.fontSize}
-          options={[[12, "Small"], [13, "Smaller"], [14, "Medium"], [16, "Large"], [18, "Extra large"]]}
+          options={[
+            [12, tr("settings.widgetlibraryoverlay.small")],
+            [13, tr("settings.pages.smaller")],
+            [14, tr("settings.widgetlibraryoverlay.medium")],
+            [16, tr("settings.widgetlibraryoverlay.large")],
+            [18, tr("settings.pages.extraLarge")],
+          ]}
           onChange={(fontSize) => updateSettings({ fontSize })}
         />
       </Row>
-      <Row label="Terminal font size" hint="Set the font size used in terminal input and output (11–24 px)." itemId="appearance.editorFontSize">
+      <Row label={tr("settings.pages.terminalFontSize")} hint={tr("settings.pages.setTheFontSizeUsed")} itemId="appearance.editorFontSize">
         <div className="rng">
           <input
             type="range" min={11} max={24} value={ui.editorFontSize}
-            aria-label="Terminal font size in pixels"
+            aria-label={tr("settings.pages.terminalFontSizeInPixels")}
             style={{ "--p": `${editorFontPct}%` } as CSSProperties}
             onChange={(e) => setUiSettings({ editorFontSize: Number(e.target.value) })}
           />
-          <span className="rng-val">{ui.editorFontSize}px</span>
+          <span className="rng-val">{ui.editorFontSize}{tr("settings.pages.px")}</span>
         </div>
       </Row>
-      <Row label="Reset font sizes" hint="Restore the interface and terminal font sizes to their default 14 px.">
-        <button className="small-btn" type="button" onClick={resetFontSizes}>Reset to defaults</button>
+      <Row label={tr("settings.pages.resetFontSizes")} hint={tr("settings.pages.restoreTheInterfaceAndTerminal")}>
+        <button className="small-btn" type="button" onClick={resetFontSizes}>{tr("settings.pages.resetToDefaults")}</button>
       </Row>
-      <Row label="Corner rounding" hint="Apply square, compact, or generously rounded corners across the interface." itemId="appearance.rounding">
-        <Seg value={ui.rounding} options={[["square", "Square"], ["compact", "Compact"], ["rounded", "Rounded"]]} onChange={(rounding) => setUiSettings({ rounding })} />
+      <Row label={tr("settings.pages.cornerRounding")} hint={tr("settings.pages.applySquareCompactOrGenerouslyRoundedCorners")} itemId="appearance.rounding">
+        <Seg value={ui.rounding} options={[
+          ["square", tr("settings.pages.square")],
+          ["compact", tr("settings.pages.compact")],
+          ["rounded", tr("settings.pages.rounded")],
+        ]} onChange={(rounding) => setUiSettings({ rounding })} />
       </Row>
-      <Row label="Optional actions" hint="Choose which optional actions appear while you compose." itemId="appearance.menuItems">
+      <Row label={tr("settings.pages.optionalActions")} hint={tr("settings.pages.chooseWhichOptionalActionsAppearWhileYou")} itemId="appearance.menuItems">
         <div className="appearance-menu-items">
-          <label><Toggle on={ui.showDictate} onChange={(showDictate) => setUiSettings({ showDictate })} label="Dictation action" /><span>Dictation</span></label>
-          <label><Toggle on={ui.showQuickActions} onChange={(showQuickActions) => setUiSettings({ showQuickActions })} label="Quick actions" /><span>Quick actions</span></label>
+          <label><Toggle on={ui.showDictate} onChange={(showDictate) => setUiSettings({ showDictate })} label={tr("settings.pages.dictationAction")} /><span>{tr("settings.pages.dictation")}</span></label>
+          <label><Toggle on={ui.showQuickActions} onChange={(showQuickActions) => setUiSettings({ showQuickActions })} label={tr("settings.pages.quickActions")} /><span>{tr("settings.pages.quickActions")}</span></label>
         </div>
       </Row>
     </>
@@ -368,48 +429,55 @@ export function ChatPage() {
   };
   return (
     <>
-      <PageHead title="Chat" blurb="Conversation layout and delivery preferences." />
-      <Row label="Conversation width" hint="Wide uses more of the window for messages and diffs." itemId="chat.width">
-        <Seg value={ui.chatWidth} options={[["normal", "Normal"], ["wide", "Wide"]]} onChange={(v) => setUiSettings({ chatWidth: v })} />
+      <PageHead title={tr("settings.pages.chat")} blurb={tr("settings.pages.conversationLayoutAndDeliveryPreferences")} />
+      <Row label={tr("settings.pages.conversationWidth")} hint={tr("settings.pages.wideUsesMoreOfTheWindowFor")} itemId="chat.width">
+        <Seg value={ui.chatWidth} options={[
+          ["normal", tr("settings.pages.normal")],
+          ["wide", tr("settings.pages.wide")],
+        ]} onChange={(v) => setUiSettings({ chatWidth: v })} />
       </Row>
-      <Row label="While the agent is working" hint="What Enter does during an active turn: steer redirects it, queue waits, interrupt aborts first." itemId="chat.followUp">
-        <Seg value={ui.followUpBehavior} options={[["steer", "Steer"], ["queue", "Queue"], ["interrupt", "Interrupt"]]} onChange={(v) => setUiSettings({ followUpBehavior: v })} />
+      <Row label={tr("settings.pages.whileTheAgentIsWorking")} hint={tr("settings.pages.whatEnterDoesDuringAnActiveTurn")} itemId="chat.followUp">
+        <Seg value={ui.followUpBehavior} options={[
+          ["steer", tr("settings.pages.steer")],
+          ["queue", tr("composer.queue")],
+          ["interrupt", tr("settings.pages.interrupt")],
+        ]} onChange={(v) => setUiSettings({ followUpBehavior: v })} />
       </Row>
-      <Row label="Thinking blocks" hint="Collapse merged reasoning into an expandable block." itemId="chat.thinking">
-        <Toggle on={ui.collapsibleThinkingBlocks} onChange={(v) => setUiSettings({ collapsibleThinkingBlocks: v })} label="Collapsible thinking" />
+      <Row label={tr("settings.pages.thinkingBlocks")} hint={tr("settings.pages.collapseMergedReasoningIntoAnExpandableBlock")} itemId="chat.thinking">
+        <Toggle on={ui.collapsibleThinkingBlocks} onChange={(v) => setUiSettings({ collapsibleThinkingBlocks: v })} label={tr("settings.pages.collapsibleThinking")} />
       </Row>
-      <Row label="Message actions" hint="Show lightweight Copy, Revert, and Fork controls when a message is hovered or focused." itemId="chat.messageActions">
-        <Toggle on={ui.showMessageActions} onChange={(showMessageActions) => setUiSettings({ showMessageActions })} label="Message actions" />
+      <Row label={tr("settings.pages.messageActions")} hint={tr("settings.pages.showLightweightCopyRevertAndForkControls")} itemId="chat.messageActions">
+        <Toggle on={ui.showMessageActions} onChange={(showMessageActions) => setUiSettings({ showMessageActions })} label={tr("settings.pages.messageActions")} />
       </Row>
-      <Row label="Copy format" hint="Choose the payload used by the single Copy action on user and assistant messages." itemId="chat.copyFormat">
+      <Row label={tr("settings.pages.copyFormat")} hint={tr("settings.pages.chooseThePayloadUsedByTheSingle")} itemId="chat.copyFormat">
         <Seg
           value={ui.messageCopyFormat}
-          options={[["markdown", "Markdown"], ["json", "JSON"]]}
+          options={[["markdown", tr("common.markdown")], ["json", tr("common.json")]]}
           onChange={(messageCopyFormat) => setUiSettings({ messageCopyFormat })}
         />
       </Row>
-      <Row label="Send on Enter" hint="When off, Enter inserts a newline and Mod+Enter sends. / for commands, # for snippets, @ to attach files." itemId="chat.sendOnEnter">
-        <Toggle on={settings.sendOnEnter} onChange={(sendOnEnter) => updateSettings({ sendOnEnter })} label="Send on Enter" />
+      <Row label={tr("settings.pages.sendOnEnter")} hint={tr("settings.pages.whenOffEnterInsertsANewlineAnd")} itemId="chat.sendOnEnter">
+        <Toggle on={settings.sendOnEnter} onChange={(sendOnEnter) => updateSettings({ sendOnEnter })} label={tr("settings.pages.sendOnEnter")} />
       </Row>
       {assist && (
         <Row
-          label="Idle recap & suggestion"
-          hint="After a session goes quiet, the small model writes a ≤20-word recap and one suggested next prompt. Spends tokens only while enabled; off by default."
+          label={tr("settings.pages.idleRecapSuggestion")}
+          hint={tr("settings.pages.afterASessionGoesQuietTheSmall")}
           itemId="chat.assist"
         >
-          <Toggle on={assist.enabled} onChange={(enabled) => saveAssist({ enabled })} label="Idle recap" />
+          <Toggle on={assist.enabled} onChange={(enabled) => saveAssist({ enabled })} label={tr("settings.pages.idleRecap")} />
         </Row>
       )}
       {assist?.enabled && (
-        <Row label="Quiet time" hint="Seconds of inactivity after a reply before the recap is generated (10–3600).">
+        <Row label={tr("settings.pages.quietTime")} hint={tr("settings.pages.secondsOfInactivityAfterAReplyBefore")}>
           <div className="editor-font-control">
             <input
               type="number" min={10} max={3600} value={assist.idleSeconds}
-              aria-label="Assist quiet time in seconds"
+              aria-label={tr("settings.pages.assistQuietTimeInSeconds")}
               onChange={(e) => setAssist({ ...assist, idleSeconds: Number(e.target.value) })}
               onBlur={(e) => saveAssist({ idleSeconds: Number(e.target.value) })}
             />
-            <span className="muted">s</span>
+            <span className="muted">{tr("settings.pages.s")}</span>
           </div>
         </Row>
       )}
@@ -418,11 +486,11 @@ export function ChatPage() {
 }
 
 const NOTIFY_KIND_LABELS: Array<[kind: "completed" | "failed" | "question" | "permission" | "subagent", label: string]> = [
-  ["completed", "Turn completed"],
-  ["failed", "Turn failed"],
-  ["question", "Agent question"],
-  ["permission", "Permission request"],
-  ["subagent", "Delegated agent finished"],
+  ["completed", tr("settings.pages.turnCompleted")],
+  ["failed", tr("settings.pages.turnFailed")],
+  ["question", tr("settings.pages.agentQuestion")],
+  ["permission", tr("settings.pages.permissionRequest")],
+  ["subagent", tr("settings.pages.delegatedAgentFinished")],
 ];
 
 export function NotificationsPage() {
@@ -436,22 +504,22 @@ export function NotificationsPage() {
   };
   return (
     <>
-      <PageHead title="Notifications" blurb="Get told when a session needs you while you're elsewhere." />
+      <PageHead title={tr("settings.pages.notifications")} blurb={tr("settings.pages.getToldWhenASessionNeedsYou")} />
       <Row
-        label="Desktop notification"
-        hint={denied ? "Notifications are blocked for this site in your browser settings." : "Native notification when an enabled event happens."}
+        label={tr("settings.pages.desktopNotification")}
+        hint={denied ? tr("settings.pages.notificationsAreBlockedForThisSiteIn") : tr("settings.pages.nativeNotificationWhenAnEnabledEventHappens")}
         itemId="notifications.desktop"
       >
         <Toggle
           on={ui.notifyOnComplete}
           onChange={(v) => { setUiSettings({ notifyOnComplete: v }); if (v) requestNotifyPermission(); }}
-          label="Desktop notification"
+          label={tr("settings.pages.desktopNotification")}
         />
       </Row>
-      <Row label="Completion sound" hint="Short beep when a turn completes." itemId="notifications.sound">
-        <Toggle on={ui.notifySound} onChange={(v) => setUiSettings({ notifySound: v })} label="Completion sound" />
+      <Row label={tr("settings.pages.completionSound")} hint={tr("settings.pages.shortBeepWhenATurnCompletes")} itemId="notifications.sound">
+        <Toggle on={ui.notifySound} onChange={(v) => setUiSettings({ notifySound: v })} label={tr("settings.pages.completionSound")} />
       </Row>
-      <Row label="Notify about" hint="Each event kind is independent." itemId="notifications.kinds">
+      <Row label={tr("settings.pages.notifyAbout")} hint={tr("settings.pages.eachEventKindIsIndependent")} itemId="notifications.kinds">
         <div className="notification-kind-list">
           {NOTIFY_KIND_LABELS.map(([kind, label]) => (
             <label key={kind}>
@@ -466,38 +534,38 @@ export function NotificationsPage() {
         </div>
       </Row>
       <Row
-        label="Only when hidden"
-        hint="Off: background sessions may notify while the tab is visible; the active session stays quiet either way."
+        label={tr("settings.pages.onlyWhenHidden")}
+        hint={tr("settings.pages.offBackgroundSessionsMayNotifyWhileThe")}
         itemId="notifications.onlyHidden"
       >
-        <Toggle on={ui.notifyOnlyWhenHidden} onChange={(v) => setUiSettings({ notifyOnlyWhenHidden: v })} label="Only when hidden" />
+        <Toggle on={ui.notifyOnlyWhenHidden} onChange={(v) => setUiSettings({ notifyOnlyWhenHidden: v })} label={tr("settings.pages.onlyWhenHidden")} />
       </Row>
       <Row
-        label="Centre history"
-        hint="Keep read notifications visible in the notification centre."
+        label={tr("settings.pages.centreHistory")}
+        hint={tr("settings.pages.keepReadNotificationsVisibleInTheNotification")}
         itemId="notifications.centreHistory"
       >
         <Toggle
           on={ui.notificationCentreHistory}
           onChange={(v) => setUiSettings({ notificationCentreHistory: v })}
-          label="Centre history"
+          label={tr("settings.pages.centreHistory")}
         />
       </Row>
       <Row
-        label="Template"
-        hint="Variables: {project} {session} {status} {preview}. Values are redacted and capped."
+        label={tr("settings.pages.template")}
+        hint={tr("settings.pages.variablesValueValueValueValueValuesAre")}
         itemId="notifications.template"
       >
         <input
           className="notification-preview"
           value={ui.notifyTemplate}
           onChange={(e) => setUiSettings({ notifyTemplate: e.target.value.slice(0, 200) })}
-          aria-label="Notification template"
+          aria-label={tr("settings.pages.notificationTemplate")}
         />
       </Row>
       {ui.notifyOnComplete && !granted && !denied && (
-        <Row label="Permission" hint="The browser will ask for permission once.">
-          <button className="small-btn" onClick={requestNotifyPermission}>Grant permission</button>
+        <Row label={tr("settings.pages.permission2")} hint={tr("settings.pages.theBrowserWillAskForPermissionOnce")}>
+          <button className="small-btn" onClick={requestNotifyPermission}>{tr("settings.pages.grantPermission")}</button>
         </Row>
       )}
       <PushRow />
@@ -530,25 +598,27 @@ function PushRow() {
   return (
     <>
       <Row
-        label="Push notifications"
-        hint={unsupported ?? "Delivered by the browser's push service even when this tab is closed. Clicking opens the session."}
+        label={tr("settings.pages.pushNotifications")}
+        hint={unsupported ?? tr("settings.pages.pushDeliveryHint")}
         itemId="notifications.push"
       >
         {unsupported
-          ? <span className="tag">unavailable</span>
-          : <Toggle on={on} onChange={toggle} label="Push notifications" />}
+          ? <span className="tag">{tr("settings.pages.unavailable")}</span>
+          : <Toggle on={on} onChange={toggle} label={tr("settings.pages.pushNotifications")} />}
       </Row>
       {on && !unsupported && (
-        <Row label="Test push" hint="Sends a test notification through the push service (hide the tab to see it).">
+        <Row label={tr("settings.pages.testPush")} hint={tr("settings.pages.sendsATestNotificationThroughThePush")}>
           <button
             className="small-btn"
             disabled={busy}
             onClick={() => {
               setTested("");
-              void api.pushTest().then((r) => setTested(`sent to ${r.sent} device${r.sent === 1 ? "" : "s"}`))
+              void api.pushTest().then((r) => setTested(r.sent === 1
+                ? tr("settings.pages.sentToOneDevice")
+                : tr("settings.pages.sentToValueDevices", { count: r.sent })))
                 .catch((e) => setErr(e instanceof Error ? e.message : String(e)));
             }}
-          >Send test</button>
+          >{tr("settings.pages.sendTest")}</button>
           {tested && <span className="muted">{tested}</span>}
         </Row>
       )}
@@ -588,7 +658,7 @@ function BehaviorInstructionsEditor() {
       setRevision(r.revision);
       setDirty(false);
       setState("ready");
-      setMessage("Saved and applied.");
+      setMessage(tr("settings.pages.savedAndApplied"));
     } catch (e) {
       const status = (e as { status?: number }).status;
       setState(status === 409 ? "conflict" : "error");
@@ -598,27 +668,27 @@ function BehaviorInstructionsEditor() {
 
   return (
     <div className="behavior-editor" data-settings-item="behavior.instructions">
-      <div className="stat-label">Global instructions <span className="muted">({pathLabel || "…"})</span></div>
+      <div className="stat-label">{tr("settings.pages.globalInstructions")}{" "}<span className="muted">({pathLabel || "…"})</span></div>
       <textarea
         rows={8}
         value={text}
-        placeholder="Instructions applied to every agent turn, e.g. coding conventions or tone."
+        placeholder={tr("settings.pages.instructionsAppliedToEveryAgentTurnE")}
         onChange={(e) => { setText(e.target.value); setDirty(true); }}
         disabled={state === "loading" || state === "saving"}
-        aria-label="Global behavior instructions"
+        aria-label={tr("settings.pages.globalBehaviorInstructions")}
       />
       <div className="behavior-editor-foot">
         {state === "conflict" ? (
           <div className="revision-conflict" role="alert">
-            <span>Changed elsewhere since you loaded it.</span>
-            <button className="small-btn" onClick={() => void load()}>Reload latest</button>
+            <span>{tr("settings.pages.changedElsewhereSinceYouLoadedIt")}</span>
+            <button className="small-btn" onClick={() => void load()}>{tr("settings.pages.reloadLatest")}</button>
           </div>
         ) : (
           <span className="muted">{message}</span>
         )}
         <span className="header-spacer" />
         <button className="small-btn" disabled={!dirty || state === "saving"} onClick={() => void save()}>
-          {state === "saving" ? "Saving…" : "Save & apply"}
+          {state === "saving" ? tr("common.saving") : tr("settings.pages.saveApply")}
         </button>
       </div>
     </div>
@@ -629,15 +699,15 @@ export function BehaviorPage() {
   const ui = useUiSettings();
   return (
     <>
-      <PageHead title="Behavior" blurb="Workspace safety, flow, and global agent instructions." />
-      <Row label="Confirm before archiving sessions" hint="Ask before a session is moved to the archive." itemId="behavior.confirmArchive">
-        <Toggle on={ui.confirmSessionArchive} onChange={(v) => setUiSettings({ confirmSessionArchive: v })} label="Confirm archive" />
+      <PageHead title={tr("settings.pages.behavior")} blurb={tr("settings.pages.workspaceSafetyFlowAndGlobalAgentInstructions")} />
+      <Row label={tr("settings.pages.confirmBeforeArchivingSessions")} hint={tr("settings.pages.askBeforeASessionIsMovedTo")} itemId="behavior.confirmArchive">
+        <Toggle on={ui.confirmSessionArchive} onChange={(v) => setUiSettings({ confirmSessionArchive: v })} label={tr("settings.pages.confirmArchive")} />
       </Row>
-      <Row label="Editor autosave" hint="Saves edits after a short pause. Revision-guarded: never overwrites a file changed on disk." itemId="behavior.autosave">
-        <Toggle on={ui.editorAutosave} onChange={(v) => setUiSettings({ editorAutosave: v })} label="Editor autosave" />
+      <Row label={tr("settings.pages.editorAutosave")} hint={tr("settings.pages.savesEditsAfterAShortPauseRevision")} itemId="behavior.autosave">
+        <Toggle on={ui.editorAutosave} onChange={(v) => setUiSettings({ editorAutosave: v })} label={tr("settings.pages.editorAutosave")} />
       </Row>
       <BehaviorInstructionsEditor />
-      <Row label="Slash commands & snippets" hint="Manage reusable prompts under Commands.">
+      <Row label={tr("settings.pages.slashCommandsSnippets")} hint={tr("settings.pages.manageReusablePromptsUnderCommands")}>
         <span className="muted mono">/review · #alias</span>
       </Row>
     </>
@@ -648,61 +718,110 @@ export function ProjectsPage() {
   const projects = useStore((s) => s.projectRegistry.projects);
   const activeProjectId = useStore((s) => s.activeProjectId);
   const models = useStore((s) => s.models).filter(modelSupportsTextWorkflow);
+  const sessionDefaults = useSessionDefaults();
   const [picking, setPicking] = useState(false);
+  const globalModel = resolveSessionDefaultModel(null, sessionDefaults.defaultModel, models[0]);
+  const globalModelName = globalModel
+    ? models.find((model) =>
+        model.providerID === globalModel.providerID && model.modelID === globalModel.modelID)?.name
+      ?? globalModel.modelID
+    : "No model available";
   const saveModel = async (projectId: string, model?: ModelRef) => {
-    const updated = await api.patchProject(projectId, { defaults: { model: model ?? null } });
-    applyProjectUpsert(updated);
+    if (!model) return;
+    try {
+      const updated = await api.patchProject(projectId, {
+        defaults: { rememberModelSelection: true, model },
+      });
+      applyProjectUpsert(updated);
+    } catch (error) {
+      setUiError(friendlyError("Couldn’t save the project model", error));
+    }
+  };
+  const setModelMemory = async (projectId: string, enabled: boolean) => {
+    try {
+      const project = projects.find((candidate) => candidate.id === projectId);
+      const updated = await api.patchProject(projectId, {
+        defaults: enabled
+          ? { rememberModelSelection: true, model: project?.defaults?.model ?? globalModel ?? null }
+          : { rememberModelSelection: false },
+      });
+      applyProjectUpsert(updated);
+    } catch (error) {
+      setUiError(friendlyError("Couldn’t update project model memory", error));
+    }
   };
   const saveIcon = async (projectId: string, icon: string) => {
-    const updated = await api.patchProject(projectId, { icon: icon.trim().slice(0, 16) });
-    applyProjectUpsert(updated);
+    try {
+      const updated = await api.patchProject(projectId, { icon: icon.trim().slice(0, 16) });
+      applyProjectUpsert(updated);
+    } catch (error) {
+      setUiError(friendlyError("Couldn’t save the project icon", error));
+    }
   };
   return (
     <>
-      <PageHead title="Projects" blurb="Project-specific model and canvas setup. Removing a project keeps its folder on disk." />
+      <PageHead title={tr("settings.pages.projects")} blurb={tr("settings.pages.projectSpecificModelAndCanvasSetupRemoving")} />
       {projects.map((p) => (
         <section key={p.id} className={`project-settings-card${p.id === activeProjectId ? " active" : ""}`}>
           <header>
             <div className="set-row-text">
-              <div className="set-row-label">{p.name || p.path}{p.id === activeProjectId && <span className="tag">active</span>}</div>
+              <div className="set-row-label">{p.name || p.path}{p.id === activeProjectId && <span className="tag">{tr("settings.pages.active")}</span>}</div>
               <div className="set-row-hint mono">{p.path}</div>
             </div>
             <button
               className="small-btn danger-btn"
-              onClick={() => { if (window.confirm(`Remove project "${p.name || p.path}" from Polyth?`)) void removeProject(p.id); }}
-            >Remove</button>
+              onClick={() => { void confirmAlert(tr("settings.pages.removeProjectValueFromPolyth", { value: p.name || p.path }), { title: tr("settings.pages.removeProject"), confirmLabel: tr("common.remove") }).then((ok) => { if (ok) void removeProject(p.id); }); }}
+            >{tr("common.remove")}</button>
           </header>
           <div className="project-settings-options">
             <div>
-              <strong>Project icon</strong>
-              <span>Use an emoji or short symbol in the Sessions sidebar.</span>
+              <strong>{tr("settings.pages.projectIcon")}</strong>
+              <span>{tr("settings.pages.useAnEmojiOrShortSymbolIn")}</span>
             </div>
             <input
               className="project-icon-input"
               defaultValue={p.icon ?? ""}
               maxLength={16}
-              aria-label={`Custom icon for ${p.name || p.path}`}
+              aria-label={tr("settings.pages.customIconForValue", { value: p.name || p.path })}
               placeholder="📁"
               onBlur={(event) => void saveIcon(p.id, event.target.value)}
               onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); }}
             />
           </div>
-          <div className="project-settings-options">
+          <div className="project-settings-options" data-settings-item="projects.modelMemory">
             <div>
-              <strong>Default model</strong>
-              <span>Overrides the global default for new sessions.</span>
+              <strong>{tr("settings.pages.rememberModelSelection")}</strong>
+              <span>
+                {projectRemembersModelSelection(p.defaults)
+                  ? tr("settings.pages.theLastModelChosenInThisProject")
+                  : tr("settings.pages.offNewSessionsUseValue", { model: globalModelName })}
+              </span>
             </div>
-            <ModelPicker
-              direction="down"
-              models={models}
-              value={p.defaults?.model ?? undefined}
-              onPick={(model) => void saveModel(p.id, model)}
+            <Toggle
+              on={projectRemembersModelSelection(p.defaults)}
+              onChange={(enabled) => void setModelMemory(p.id, enabled)}
+              label={tr("settings.pages.rememberModelSelectionForValue", { project: p.name || p.path })}
             />
           </div>
+          {projectRemembersModelSelection(p.defaults) && (
+            <div className="project-settings-options project-settings-model">
+              <div>
+                <strong>{tr("settings.pages.rememberedModel")}</strong>
+                <span>{tr("settings.pages.updatedWheneverYouChooseAModel")}</span>
+              </div>
+              <ModelPicker
+                direction="down"
+                models={models}
+                value={p.defaults?.model ?? undefined}
+                recommended={globalModel}
+                onPick={(model) => void saveModel(p.id, model)}
+              />
+            </div>
+          )}
           <div className="project-settings-options" data-settings-item="projects.canvas">
             <div>
-              <strong>Canvas setup</strong>
-              <span>Choose a starting layout, widgets, and workspace style for this project.</span>
+              <strong>{tr("settings.pages.canvasSetup")}</strong>
+              <span>{tr("settings.pages.chooseAStartingLayoutWidgetsAndWorkspace")}</span>
             </div>
             <button
               className="small-btn"
@@ -710,12 +829,12 @@ export function ProjectsPage() {
                 activateProject(p.id);
                 setOverlay("onboarding");
               }}
-            >Configure canvas…</button>
+            >{tr("settings.pages.configureCanvas")}</button>
           </div>
         </section>
       ))}
       <div className="set-add-form">
-        <button className="small-btn" onClick={() => setPicking(true)}>+ Open project folder…</button>
+        <button className="small-btn" onClick={() => setPicking(true)}>{tr("settings.pages.openProjectFolder")}</button>
       </div>
       {picking && <ProjectFolderDialog onClose={() => setPicking(false)} />}
     </>
@@ -741,11 +860,11 @@ function GitPersonas({ projectId }: { projectId: string }) {
   return (
     <section className="git-personas" data-settings-item="git.personas">
       <div className="settings-section-head">
-        <div><strong>Git personas</strong><span>Saved identities you can apply to this repository.</span></div>
-        <button className="small-btn" onClick={() => setDraft({ id: crypto.randomUUID(), label: "", name: "", email: "" })}>+ Persona</button>
+        <div><strong>{tr("settings.pages.gitPersonas")}</strong><span>{tr("settings.pages.savedIdentitiesYouCanApplyToThis")}</span></div>
+        <button className="small-btn" onClick={() => setDraft({ id: crypto.randomUUID(), label: "", name: "", email: "" })}>{tr("settings.pages.persona")}</button>
       </div>
       <div className="git-current-identity">
-        Current repository identity: <strong>{identity.name || "not set"}</strong>
+        {tr("settings.pages.currentRepositoryIdentity")}{" "}<strong>{identity.name || tr("settings.pages.notSet")}</strong>
         <span className="mono">{identity.email || "—"}</span>
       </div>
       {personas.map((persona) => {
@@ -754,27 +873,27 @@ function GitPersonas({ projectId }: { projectId: string }) {
           <div key={persona.id} className={`git-persona-row${active ? " active" : ""}`}>
             <span className="profile-avatar">{persona.label.slice(0, 1).toUpperCase()}</span>
             <span><strong>{persona.label}</strong><small>{persona.name} · {persona.email}</small></span>
-            {active && <span className="tag">in use</span>}
-            <button className="small-btn" disabled={active} onClick={() => void apply(persona)}>Use</button>
-            <button className="small-btn" onClick={() => setDraft(persona)}>Edit</button>
-            <button className="small-btn danger-btn" onClick={() => removeGitPersona(persona.id)}>Delete</button>
+            {active && <span className="tag">{tr("settings.pages.inUse")}</span>}
+            <button className="small-btn" disabled={active} onClick={() => void apply(persona)}>{tr("settings.pages.use")}</button>
+            <button className="small-btn" onClick={() => setDraft(persona)}>{tr("common.edit")}</button>
+            <button className="small-btn danger-btn" onClick={() => removeGitPersona(persona.id)}>{tr("common.delete")}</button>
           </div>
         );
       })}
-      {personas.length === 0 && <p className="muted">Add a work, personal, or bot identity. Applying one writes repository-local Git config.</p>}
+      {personas.length === 0 && <p className="muted">{tr("settings.pages.addAWorkPersonalOrBotIdentity")}</p>}
       {error && <div className="form-error">{error}</div>}
       {draft && (
-        <Dialog title={draft.label ? `Edit ${draft.label}` : "New Git persona"} onClose={() => setDraft(null)} className="profile-form" initialFocus="input">
-          <div className="dialog-head"><span>{draft.label ? `Edit ${draft.label}` : "New Git persona"}</span><span className="header-spacer" /><button className="small-btn" onClick={() => setDraft(null)}>✕</button></div>
+        <Dialog title={draft.label ? tr("settings.pages.editValue", { label: draft.label }) : tr("settings.pages.newGitPersona")} onClose={() => setDraft(null)} className="profile-form" initialFocus="input">
+          <div className="dialog-head"><span>{draft.label ? tr("settings.pages.editValue", { label: draft.label }) : tr("settings.pages.newGitPersona")}</span><span className="header-spacer" /><button className="small-btn" onClick={() => setDraft(null)}>✕</button></div>
           <div className="profile-form-body">
-            <label>Label<input value={draft.label} placeholder="Work" onChange={(event) => setDraft({ ...draft, label: event.target.value })} /></label>
-            <label>Commit author name<input value={draft.name} placeholder="Ada Lovelace" onChange={(event) => setDraft({ ...draft, name: event.target.value })} /></label>
-            <label>Commit email<input type="email" value={draft.email} placeholder="ada@example.com" onChange={(event) => setDraft({ ...draft, email: event.target.value })} /></label>
+            <label>{tr("settings.pages.label")}<input value={draft.label} placeholder={tr("settings.pages.work")} onChange={(event) => setDraft({ ...draft, label: event.target.value })} /></label>
+            <label>{tr("settings.pages.commitAuthorName")}<input value={draft.name} placeholder={tr("settings.pages.adaLovelace")} onChange={(event) => setDraft({ ...draft, name: event.target.value })} /></label>
+            <label>{tr("settings.pages.commitEmail")}<input type="email" value={draft.email} placeholder={tr("settings.pages.adaExampleCom")} onChange={(event) => setDraft({ ...draft, email: event.target.value })} /></label>
           </div>
           <div className="dialog-foot">
-            <button className="small-btn" onClick={() => setDraft(null)}>Cancel</button>
+            <button className="small-btn" onClick={() => setDraft(null)}>{tr("common.cancel")}</button>
             <span className="header-spacer" />
-            <button className="primary-btn" disabled={!draft.label.trim() || !draft.name.trim() || !draft.email.trim()} onClick={() => { saveGitPersona({ ...draft, label: draft.label.trim(), name: draft.name.trim(), email: draft.email.trim() }); setDraft(null); }}>Save persona</button>
+            <button className="primary-btn" disabled={!draft.label.trim() || !draft.name.trim() || !draft.email.trim()} onClick={() => { saveGitPersona({ ...draft, label: draft.label.trim(), name: draft.name.trim(), email: draft.email.trim() }); setDraft(null); }}>{tr("settings.pages.savePersona")}</button>
           </div>
         </Dialog>
       )}
@@ -790,28 +909,32 @@ export function GitPage() {
     if (!projectId) { setStatus(null); return; }
     void api.gitStatus(projectId).then(setStatus);
   }, [projectId]);
-  if (!projectId) return <><PageHead title="Git" /><EmptyState title="No active project" /></>;
+  if (!projectId) return <><PageHead title={tr("settings.pages.git")} /><EmptyState title={tr("settings.pages.noActiveProject")} /></>;
   const changes = status ? status.staged.length + status.unstaged.length + status.untracked.length + status.conflicted.length : 0;
   return (
     <>
-      <PageHead title="Git" blurb="Repository state for the active project." />
+      <PageHead title={tr("settings.pages.git")} blurb={tr("settings.pages.repositoryStateForTheActiveProject")} />
       {!status?.branch ? (
-        <EmptyState title="Not a git repository" body="Initialize a repo to use the Git view, changes panel, and worktrees." />
+        <EmptyState title={tr("settings.pages.notAGitRepository")} body={tr("settings.pages.initializeARepoToUseTheGit")} />
       ) : (
         <>
-          <Row label="Branch"><span className="mono">{status.branch}</span></Row>
-          <Row label="Working tree"><span className="mono">{changes === 0 ? "clean" : `${changes} changed file${changes === 1 ? "" : "s"}`}</span></Row>
-          <Row label="Ahead / behind"><span className="mono">↑{status.ahead} ↓{status.behind}</span></Row>
+          <Row label={tr("settings.pages.branch")}><span className="mono">{status.branch}</span></Row>
+          <Row label={tr("settings.pages.workingTree")}><span className="mono">{changes === 0
+            ? tr("settings.pages.clean")
+            : changes === 1
+              ? tr("settings.pages.oneChangedFile")
+              : tr("settings.pages.valueChangedFiles", { count: changes })}</span></Row>
+          <Row label={tr("settings.pages.aheadBehind")}><span className="mono">↑{status.ahead} ↓{status.behind}</span></Row>
           <GitPersonas projectId={projectId} />
-          <Row label="Branch name template" hint="Tokens: {slug} and {date}. Stored locally." itemId="git.branchTemplate">
+          <Row label={tr("settings.pages.branchNameTemplate")} hint={tr("settings.pages.tokensValueAndValueStoredLocally")} itemId="git.branchTemplate">
             <input
               className="inp inp-mono"
               value={settings.branchTemplate}
               onChange={(e) => updateSettings({ branchTemplate: e.target.value })}
             />
           </Row>
-          <Row label="Full view" hint="Stage, commit, branch, and manage worktrees.">
-            <button className="small-btn" onClick={() => { setOverlay(null); openWorkspacePane("git"); }}>Open Git view →</button>
+          <Row label={tr("settings.pages.fullView")} hint={tr("settings.pages.stageCommitBranchAndManageWorktrees")}>
+            <button className="small-btn" onClick={() => { setOverlay(null); openWorkspacePane("git"); }}>{tr("settings.pages.openGitView")}</button>
           </Row>
         </>
       )}
@@ -822,8 +945,10 @@ export function GitPage() {
 function RoleEditor({ role, onClose }: { role: AgentDescriptor; onClose: () => void }) {
   const models = useStore((state) => state.models).filter(modelSupportsTextWorkflow);
   const agents = useStore((state) => state.agents);
+  const defaults = useSessionDefaults();
+  const defaultModel = resolveSessionDefaultModel(null, defaults.defaultModel, models[0]);
   const [prompt, setPrompt] = useState(role.prompt ?? "");
-  const [model, setModel] = useState<ModelRef | undefined>(role.model);
+  const [model, setModel] = useState<ModelRef | undefined>(role.model ?? defaultModel);
   const [mode, setMode] = useState<AgentDescriptor["mode"]>(role.mode === "all" ? "primary" : role.mode);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -841,38 +966,51 @@ function RoleEditor({ role, onClose }: { role: AgentDescriptor; onClose: () => v
     }
   };
   return (
-    <Dialog title={`Edit ${role.name}`} onClose={onClose} className="role-editor" initialFocus="textarea">
-      <div className="dialog-head"><span>Edit role · {role.name}</span><span className="header-spacer" /><button className="small-btn" onClick={onClose}>✕</button></div>
+    <Dialog title={tr("settings.pages.editValue2", { name: role.name })} onClose={onClose} className="role-editor" initialFocus="textarea">
+      <div className="dialog-head"><span>{tr("settings.pages.editRole")}{" "}{role.name}</span><span className="header-spacer" /><button className="small-btn" onClick={onClose}>✕</button></div>
       <div className="role-editor-body">
         <label>
-          <span>Usage</span>
-          <Seg value={mode} options={[["primary", "Main agent"], ["subagent", "Subagent"]]} onChange={setMode} />
-          <small>Main agents can lead sessions. Subagents are delegated focused work.</small>
+          <span>{tr("settings.pages.usage")}</span>
+          <Seg value={mode} options={[
+            ["primary", tr("settings.pages.mainAgent")],
+            ["subagent", tr("settings.pages.subagent2")],
+          ]} onChange={setMode} />
+          <small>{tr("settings.pages.mainAgentsCanLeadSessionsSubagentsAre")}</small>
         </label>
         <label>
-          <span>Provider & model</span>
-          <ModelPicker direction="down" models={models} value={model} onPick={setModel} />
-          <small>Uses the same searchable picker and favorites as the composer. Auto inherits OpenCode’s default.</small>
+          <span>{tr("settings.pages.providerModel")}</span>
+          <ModelPicker direction="down" models={models} value={model} recommended={defaultModel} onPick={setModel} />
+          <small>{tr("settings.pages.usesTheSameSearchablePickerAndFavorites")}</small>
         </label>
         <label>
-          <span>System prompt</span>
-          <textarea rows={12} value={prompt} placeholder="Instructions that define this role’s behavior…" onChange={(event) => setPrompt(event.target.value)} />
+          <span>{tr("settings.pages.systemPrompt")}</span>
+          <textarea rows={12} value={prompt} placeholder={tr("settings.pages.instructionsThatDefineThisRoleSBehavior")} onChange={(event) => setPrompt(event.target.value)} />
         </label>
         {error && <div className="form-error">{error}</div>}
       </div>
-      <div className="dialog-foot"><button className="small-btn" onClick={onClose}>Cancel</button><span className="header-spacer" /><button className="primary-btn" disabled={busy} onClick={() => void save()}>{busy ? "Saving…" : "Save role"}</button></div>
+      <div className="dialog-foot"><button className="small-btn" onClick={onClose}>{tr("common.cancel")}</button><span className="header-spacer" /><button className="primary-btn" disabled={busy} onClick={() => void save()}>{busy ? tr("common.saving") : tr("settings.pages.saveRole")}</button></div>
     </Dialog>
   );
 }
 
 export function AgentsPage() {
   const agents = useStore((s) => s.agents);
+  const models = useStore((s) => s.models).filter(modelSupportsTextWorkflow);
+  const defaults = useSessionDefaults();
   const profiles = useProfiles();
   const [editingRole, setEditingRole] = useState<AgentDescriptor | null>(null);
   const [editing, setEditing] = useState<AgentProfile | null>(null);
   const [creating, setCreating] = useState(false);
   const [repairsFor, setRepairsFor] = useState<Record<string, string>>({});
   const configurableAgents = agents.filter((agent) => agent.name.toLowerCase() !== "compaction");
+  const defaultModel = resolveSessionDefaultModel(null, defaults.defaultModel, models[0]);
+  const modelLabel = (model?: ModelRef) => {
+    const resolved = model ?? defaultModel;
+    if (!resolved) return tr("settings.pages.noModelAvailable");
+    return models.find((candidate) =>
+      candidate.providerID === resolved.providerID && candidate.modelID === resolved.modelID)?.name
+      ?? resolved.modelID;
+  };
   const checkProfile = async (p: AgentProfile) => {
     const r = await api.validateProfile(p.id).catch(() => null);
     setRepairsFor((m) => ({
@@ -882,32 +1020,32 @@ export function AgentsPage() {
   };
   return (
     <>
-      <PageHead title="Roles" blurb="Shape how each OpenCode role works: its instructions, model, and where it can be used." />
+      <PageHead title={tr("settings.pages.roles")} blurb={tr("settings.pages.shapeHowEachOpencodeRoleWorksIts")} />
       {agents.length === 0 ? (
-        <EmptyState title="No agents reported" body="The backend did not report agent presets. Sessions run with the default agent." />
+        <EmptyState title={tr("settings.pages.noAgentsReported")} body={tr("settings.pages.theBackendDidNotReportAgentPresets")} />
       ) : (
         <div className="role-card-grid">
           {configurableAgents.map((agent) => (
             <article key={agent.name} className="role-card">
-              <header><span className="role-card-icon">{agent.name.slice(0, 1).toUpperCase()}</span><div><strong>{agent.name}</strong><span className={`tag role-kind ${agent.mode}`}>{agent.mode === "subagent" ? "Subagent" : "Main agent"}</span></div></header>
-              <p>{agent.description || "A configurable OpenCode role."}</p>
+              <header><span className="role-card-icon">{agent.name.slice(0, 1).toUpperCase()}</span><div><strong>{agent.name}</strong><span className={`tag role-kind ${agent.mode}`}>{agent.mode === "subagent" ? tr("settings.pages.subagent2") : tr("settings.pages.mainAgent")}</span></div></header>
+              <p>{agent.description || tr("settings.pages.configurableOpenCodeRole")}</p>
               <div className="role-card-meta">
-                <span><b>Model</b>{agent.model ? `${agent.model.providerID}/${agent.model.modelID}` : "Auto"}</span>
-                <span><b>Prompt</b>{agent.prompt?.trim() ? `${agent.prompt.trim().slice(0, 72)}${agent.prompt.trim().length > 72 ? "…" : ""}` : "OpenCode default"}</span>
+                <span><b>{tr("settings.pages.model")}</b>{modelLabel(agent.model)}</span>
+                <span><b>{tr("settings.pages.prompt")}</b>{agent.prompt?.trim() ? `${agent.prompt.trim().slice(0, 72)}${agent.prompt.trim().length > 72 ? "…" : ""}` : tr("settings.pages.opencodeDefault")}</span>
               </div>
-              <button className="small-btn" onClick={() => setEditingRole(agent)}>Edit role</button>
+              <button className="small-btn" onClick={() => setEditingRole(agent)}>{tr("settings.pages.editRole2")}</button>
             </article>
           ))}
         </div>
       )}
       {editingRole && <RoleEditor role={editingRole} onClose={() => setEditingRole(null)} />}
       <div className="stat-label" style={{ display: "flex", alignItems: "center", gap: 8 }} data-settings-item="agents.profiles">
-        <span>Agent profiles ({profiles.length})</span>
+        <span>{tr("settings.pages.agentProfiles")}{profiles.length})</span>
         <span className="header-spacer" />
-        <button className="small-btn" onClick={() => setCreating(true)}>+ Profile</button>
+        <button className="small-btn" onClick={() => setCreating(true)}>{tr("settings.pages.profile")}</button>
       </div>
       {profiles.length === 0 && (
-        <EmptyState title="No profiles yet" body="A profile bundles model, agent, and options into one atomic pick. Pin one from the model chooser or create one here." />
+        <EmptyState title={tr("settings.pages.noProfilesYet")} body={tr("settings.pages.aProfileBundlesModelAgentAndOptions")} />
       )}
       {profiles.map((p) => (
         <div key={p.id} className="set-row">
@@ -917,17 +1055,16 @@ export function AgentsPage() {
               {p.name}
             </div>
             <div className="set-row-hint mono">
-              {p.providerID}/{p.modelID}{p.agent ? ` · ${p.agent}` : ""}{p.thinking ? ` · think:${p.thinking}` : ""}
+              {p.providerID}/{p.modelID}{p.agent ? ` · ${p.agent}` : ""}{p.thinking ? tr("settings.pages.thinkValue", { thinking: p.thinking }) : ""}
             </div>
             {repairsFor[p.id] && <div className="set-row-hint">{repairsFor[p.id]}</div>}
           </div>
           <div className="set-row-control">
-            <button className="small-btn" onClick={() => void checkProfile(p)}>Validate</button>
-            <button className="small-btn" onClick={() => setEditing(p)}>Edit</button>
+            <button className="small-btn" onClick={() => void checkProfile(p)}>{tr("settings.pages.validate")}</button>
+            <button className="small-btn" onClick={() => setEditing(p)}>{tr("common.edit")}</button>
             <button className="small-btn danger-btn"
-              onClick={() => { if (window.confirm(`Delete profile "${p.name}"?`)) void api.deleteProfile(p.id).then(() => refreshProfiles()); }}>
-              Delete
-            </button>
+              onClick={() => { void confirmAlert(tr("settings.pages.deleteProfileValue", { name: p.name }), { title: tr("settings.pages.deleteProfile"), confirmLabel: tr("common.delete") }).then((ok) => { if (ok) void api.deleteProfile(p.id).then(() => refreshProfiles()); }); }}>
+              {tr("common.delete")}</button>
           </div>
         </div>
       ))}
@@ -987,38 +1124,38 @@ function McpServerForm({ existing, onDone }: { existing?: McpServerDto; onDone: 
   return (
     <div className="mcp-form">
       <div className="mcp-form-row">
-        <input value={name} placeholder="name" style={{ maxWidth: 140 }} onChange={(e) => setName(e.target.value)} aria-label="Server name" />
+        <input value={name} placeholder={tr("settings.pages.name")} style={{ maxWidth: 140 }} onChange={(e) => setName(e.target.value)} aria-label={tr("settings.pages.serverName")} />
         <Seg value={kind} options={[["stdio", "stdio"], ["http", "HTTP"]]} onChange={setKind} />
       </div>
       {kind === "stdio" ? (
         <div className="mcp-form-row">
-          <input value={command} placeholder="command (no shell)" style={{ maxWidth: 200 }} onChange={(e) => setCommand(e.target.value)} aria-label="Command" />
-          <input value={args} placeholder="args (space separated)" onChange={(e) => setArgs(e.target.value)} aria-label="Arguments" />
+          <input value={command} placeholder={tr("settings.pages.commandNoShell")} style={{ maxWidth: 200 }} onChange={(e) => setCommand(e.target.value)} aria-label={tr("settings.pages.command")} />
+          <input value={args} placeholder={tr("settings.pages.argsSpaceSeparated")} onChange={(e) => setArgs(e.target.value)} aria-label={tr("settings.pages.arguments")} />
         </div>
       ) : (
         <div className="mcp-form-row">
-          <input value={url} placeholder="https://host/mcp" onChange={(e) => setUrl(e.target.value)} aria-label="Server URL" />
+          <input value={url} placeholder={tr("settings.pages.httpsHostMcp")} onChange={(e) => setUrl(e.target.value)} aria-label={tr("settings.pages.serverUrl")} />
         </div>
       )}
       <div className="mcp-secrets">
-        <div className="stat-label">{kind === "stdio" ? "Environment secrets" : "Header secrets"} <span className="muted">(values stored server-side, never shown again)</span></div>
+        <div className="stat-label">{kind === "stdio" ? tr("settings.pages.environmentSecrets") : tr("settings.pages.headerSecrets")} <span className="muted">{tr("settings.pages.valuesStoredServerSideNeverShownAgain")}</span></div>
         {secretRows.map((row, i) => (
           <div key={i} className="mcp-form-row">
-            <input value={row.key} placeholder={kind === "stdio" ? "ENV_KEY" : "Header-Name"} style={{ maxWidth: 160 }}
+            <input value={row.key} placeholder={kind === "stdio" ? tr("settings.pages.envKey") : tr("settings.pages.headerName")} style={{ maxWidth: 160 }}
               onChange={(e) => setSecretRows((rs) => rs.map((r, j) => j === i ? { ...r, key: e.target.value } : r))} />
-            <input type="password" value={row.value} placeholder="value"
+            <input type="password" value={row.value} placeholder={tr("settings.pages.value")}
               onChange={(e) => setSecretRows((rs) => rs.map((r, j) => j === i ? { ...r, value: e.target.value } : r))} />
             <button className="small-btn" onClick={() => setSecretRows((rs) => rs.filter((_, j) => j !== i))}>✕</button>
           </div>
         ))}
-        <button className="ghost-link" onClick={() => setSecretRows((rs) => [...rs, { key: "", value: "" }])}>+ secret</button>
+        <button className="ghost-link" onClick={() => setSecretRows((rs) => [...rs, { key: "", value: "" }])}>{tr("settings.pages.secret")}</button>
       </div>
       {error && <div className="form-error">{error}</div>}
       <div className="mcp-form-row">
         <button className="small-btn" disabled={busy || !name.trim() || (kind === "stdio" ? !command.trim() : !url.trim())} onClick={() => void submit()}>
-          {existing ? "Save changes" : "Add server"}
+          {existing ? tr("settings.pages.saveChanges") : tr("settings.pages.addServer")}
         </button>
-        {existing && <button className="small-btn" disabled={busy} onClick={onDone}>Cancel</button>}
+        {existing && <button className="small-btn" disabled={busy} onClick={onDone}>{tr("common.cancel")}</button>}
       </div>
     </div>
   );
@@ -1054,11 +1191,11 @@ function McpImportForm({ existingNames, onDone }: { existingNames: string[]; onD
 
   return (
     <div className="mcp-form" data-settings-item="mcp.import">
-      <div className="stat-label">Import JSON <span className="muted">(mcpServers block — Claude or OpenCode shape; env/header values become write-only secrets)</span></div>
+      <div className="stat-label">{tr("settings.pages.importJson")}{" "}<span className="muted">{tr("settings.pages.mcpserversBlockClaudeOrOpencodeShapeEnv")}</span></div>
       <textarea
         rows={6}
         className="mono"
-        placeholder={'{\n  "mcpServers": {\n    "my-server": { "command": "npx", "args": ["-y", "some-mcp"], "env": { "API_KEY": "…" } }\n  }\n}'}
+        placeholder={tr("settings.pages.valueNN")}
         value={text}
         onChange={(e) => { setText(e.target.value); setPreview(null); setResults([]); }}
       />
@@ -1072,8 +1209,8 @@ function McpImportForm({ existingNames, onDone }: { existingNames: string[]; onD
                 {dup ? "⚠" : "+"} {entry.name} · {entry.transport.kind === "stdio"
                   ? `${entry.transport.command} ${entry.transport.args.join(" ")}`.trim()
                   : entry.transport.url}
-                {secretKeys.length > 0 && <span className="secret-redacted"> · secrets: {secretKeys.join(", ")}</span>}
-                {dup && <span> — name already exists, will fail</span>}
+                {secretKeys.length > 0 && <span className="secret-redacted"> {tr("settings.pages.secrets")}{" "}{secretKeys.join(", ")}</span>}
+                {dup && <span> {tr("settings.pages.nameAlreadyExistsWillFail")}</span>}
               </div>
             );
           })}
@@ -1085,12 +1222,15 @@ function McpImportForm({ existingNames, onDone }: { existingNames: string[]; onD
       ))}
       <div className="mcp-form-row">
         <button className="small-btn" disabled={busy || !text.trim()} onClick={() => setPreview(parseMcpServersJson(text))}>
-          Preview
-        </button>
+          {tr("settings.pages.preview")}</button>
         <button className="small-btn" disabled={busy || !preview || preview.entries.length === 0} onClick={() => void doImport()}>
-          {busy ? "Importing…" : `Import ${preview?.entries.length ?? 0} server${(preview?.entries.length ?? 0) === 1 ? "" : "s"}`}
+          {busy
+            ? tr("settings.pages.importing")
+            : (preview?.entries.length ?? 0) === 1
+              ? tr("settings.pages.importOneServer")
+              : tr("settings.pages.importValueServers", { count: preview?.entries.length ?? 0 })}
         </button>
-        <button className="small-btn" disabled={busy} onClick={onDone}>Cancel</button>
+        <button className="small-btn" disabled={busy} onClick={onDone}>{tr("common.cancel")}</button>
       </div>
     </div>
   );
@@ -1113,10 +1253,10 @@ export function McpPage() {
 
   return (
     <>
-      <PageHead title="MCP" blurb="Model Context Protocol servers, applied to the backend runtime. Secret values are write-only." />
+      <PageHead title={tr("settings.pages.mcp")} blurb={tr("settings.pages.modelContextProtocolServersAppliedToThe")} />
       <div className="mcp-list" data-settings-item="mcp.servers">
         {servers.length === 0 && !adding && (
-          <EmptyState title="No MCP servers configured" body="Add a stdio or HTTP server; the backend adapter applies the configuration." />
+          <EmptyState title={tr("settings.pages.noMcpServersConfigured")} body={tr("settings.pages.addAStdioOrHttpServerThe")} />
         )}
         {servers.map((s) => editingId === s.id ? (
           <McpServerForm key={s.id} existing={s} onDone={() => { setEditingId(null); refresh(); }} />
@@ -1129,24 +1269,23 @@ export function McpPage() {
                   ? `${s.transport.command} ${s.transport.args.join(" ")}`.trim()
                   : s.transport.url}
                 {s.transport.kind === "stdio" && s.transport.envKeys.length > 0 && (
-                  <span className="secret-redacted"> · env: {s.transport.envKeys.join(", ")}</span>
+                  <span className="secret-redacted"> {tr("settings.pages.env")}{" "}{s.transport.envKeys.join(", ")}</span>
                 )}
                 {s.transport.kind === "http" && s.transport.headersSecretRefs.length > 0 && (
-                  <span className="secret-redacted"> · headers: {s.transport.headersSecretRefs.join(", ")}</span>
+                  <span className="secret-redacted"> {tr("settings.pages.headers")}{" "}{s.transport.headersSecretRefs.join(", ")}</span>
                 )}
               </div>
               {(testMsg[s.id] || s.lastError) && <div className="set-row-hint">{testMsg[s.id] ?? s.lastError}</div>}
             </div>
             <div className="set-row-control">
               <span className={`tag mcp-status ${s.status}`}>{s.status}</span>
-              <button className="small-btn" title="Check reachability and store the result" onClick={() => void probe(s)}>Probe</button>
-              <button className="small-btn" onClick={() => setEditingId(s.id)}>Edit</button>
+              <button className="small-btn" title={tr("settings.pages.checkReachabilityAndStoreTheResult")} onClick={() => void probe(s)}>{tr("settings.pages.probe")}</button>
+              <button className="small-btn" onClick={() => setEditingId(s.id)}>{tr("common.edit")}</button>
               <button className="small-btn" onClick={() => void api.mcpUpdate(s.id, { enabled: !s.enabled }, s.revision).then(refresh)}>
-                {s.enabled ? "Disable" : "Enable"}
+                {s.enabled ? tr("settings.pages.disable") : tr("settings.pages.enable")}
               </button>
-              <button className="small-btn danger-btn" onClick={() => { if (window.confirm(`Remove MCP server "${s.name}"?`)) void api.mcpRemove(s.id).then(refresh); }}>
-                Remove
-              </button>
+              <button className="small-btn danger-btn" onClick={() => { void confirmAlert(tr("settings.pages.removeMcpServerValue", { name: s.name }), { title: tr("settings.pages.removeMcpServer"), confirmLabel: tr("common.remove") }).then((ok) => { if (ok) void api.mcpRemove(s.id).then(refresh); }); }}>
+                {tr("common.remove")}</button>
             </div>
           </div>
         ))}
@@ -1155,11 +1294,160 @@ export function McpPage() {
       {importing && <McpImportForm existingNames={servers.map((s) => s.name)} onDone={() => { setImporting(false); refresh(); }} />}
       {!adding && !importing && (
         <div className="mcp-form-row">
-          <button className="small-btn" onClick={() => setAdding(true)}>+ MCP server</button>
-          <button className="small-btn" onClick={() => setImporting(true)}>Import JSON…</button>
+          <button className="small-btn" onClick={() => setAdding(true)}>{tr("settings.pages.mcpServer")}</button>
+          <button className="small-btn" onClick={() => setImporting(true)}>{tr("settings.pages.importJson2")}</button>
         </div>
       )}
     </>
+  );
+}
+
+const OTTO_PLUGIN_EXAMPLE = `{
+  "$schema": "https://opencode.ai/config.json",
+  "plugin": ["@otto-assistant/opencode-claude"]
+}`;
+
+function OpenCodePluginsSection() {
+  const [plugins, setPlugins] = useState<OpenCodePluginEntryDto[]>([]);
+  const [text, setText] = useState("");
+  const [preview, setPreview] = useState<OpenCodePluginPreviewDto | null>(null);
+  const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const refresh = async () => {
+    try {
+      const result = await api.opencodePluginsList();
+      setPlugins(result.plugins);
+      setError("");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+  };
+  useEffect(() => { void refresh(); }, []);
+
+  const importPlugins = async () => {
+    if (!preview || preview.errors.length > 0 || preview.entries.length === 0) return;
+    setBusy(true);
+    setError("");
+    setNotice("");
+    const entries: OpenCodePluginConfigEntry[] = preview.entries.map((entry) =>
+      entry.options ? [entry.spec, entry.options] : entry.spec);
+    try {
+      const result = await api.opencodePluginsImport({ plugins: entries });
+      setPlugins(result.plugins);
+      setText("");
+      setPreview(null);
+      setNotice(
+        `${result.imported.length} OpenCode plugin${result.imported.length === 1 ? "" : "s"} staged.`,
+      );
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const remove = async (plugin: OpenCodePluginEntryDto) => {
+    if (!window.confirm(`Remove OpenCode plugin "${plugin.spec}" from opencode.json?`)) return;
+    setBusy(true);
+    setError("");
+    setNotice("");
+    try {
+      const result = await api.opencodePluginRemove(plugin.spec);
+      setPlugins(result.plugins);
+      if (result.removed) setNotice(`${plugin.spec} removal staged.`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <section className="opencode-plugin-section" data-settings-item="plugins.opencode">
+      <div className="plugin-library-head">
+        <div>
+          <strong>OpenCode plugins</strong>
+          <span>Paste a package spec, plugin array, or OpenCode config. Only the plugin array is merged into opencode.json.</span>
+        </div>
+        <span>{plugins.length} configured</span>
+      </div>
+      <div className="mcp-list">
+        {plugins.length === 0 && (
+          <EmptyState title="No OpenCode plugins configured" body="Paste JSON below to add one without changing providers, MCP servers, agents, or other config." />
+        )}
+        {plugins.map((plugin) => (
+          <div className="set-row" key={plugin.spec}>
+            <div className="set-row-text">
+              <div className="set-row-label mono">{plugin.spec}</div>
+              <div className="set-row-hint">
+                {plugin.options ? `Options: ${JSON.stringify(plugin.options)}` : "Default options"}
+              </div>
+            </div>
+            <div className="set-row-control">
+              <button className="small-btn danger-btn" disabled={busy} onClick={() => void remove(plugin)}>Remove</button>
+            </div>
+          </div>
+        ))}
+      </div>
+      <div className="mcp-form">
+        <div className="stat-label">
+          Import OpenCode plugin JSON <span className="muted">(string entries and [spec, options] tuples are supported)</span>
+        </div>
+        <textarea
+          rows={7}
+          className="mono"
+          aria-label="OpenCode plugin JSON"
+          placeholder={OTTO_PLUGIN_EXAMPLE}
+          value={text}
+          onChange={(event) => {
+            setText(event.target.value);
+            setPreview(null);
+            setError("");
+            setNotice("");
+          }}
+        />
+        {preview && (
+          <div className="mcp-import-preview" aria-live="polite">
+            {preview.entries.map((entry) => {
+              const existing = plugins.some((plugin) => plugin.spec === entry.spec);
+              return (
+                <div key={entry.spec} className="set-row-hint mono">
+                  {existing ? "↻" : "+"} {entry.spec}
+                  {entry.options && ` · ${JSON.stringify(entry.options)}`}
+                  {existing && <span> — existing entry will be updated</span>}
+                </div>
+              );
+            })}
+            {preview.ignoredKeys.length > 0 && (
+              <div className="set-row-hint">
+                Not imported: {preview.ignoredKeys.join(", ")}. Those config keys remain unchanged.
+              </div>
+            )}
+            {preview.errors.map((message, index) => <div className="form-error" key={index}>{message}</div>)}
+          </div>
+        )}
+        <div className="mcp-form-row">
+          <button
+            className="small-btn"
+            disabled={busy || !text.trim()}
+            onClick={() => setPreview(parseOpenCodePluginJson(text))}
+          >
+            Preview
+          </button>
+          <button
+            className="small-btn"
+            disabled={busy || !preview || preview.entries.length === 0 || preview.errors.length > 0}
+            onClick={() => void importPlugins()}
+          >
+            {busy ? "Importing…" : `Import ${preview?.entries.length ?? 0} plugin${(preview?.entries.length ?? 0) === 1 ? "" : "s"}`}
+          </button>
+        </div>
+      </div>
+      {error && <div className="form-error">{error}</div>}
+      {notice && <div className="plugin-toast" role="status"><span>{notice}</span><button type="button" onClick={() => setNotice("")}>Dismiss</button></div>}
+    </section>
   );
 }
 
@@ -1167,8 +1455,8 @@ function PluginLogViewer({ id }: { id: string }) {
   const [lines, setLines] = useState<Array<{ at: number; line: string }>>([]);
   useEffect(() => { void api.pluginsLogs(id).then(setLines).catch(() => setLines([])); }, [id]);
   return (
-    <div className="plugin-log" role="log" aria-label={`Logs for ${id}`}>
-      {lines.length === 0 && <span className="muted">No log output.</span>}
+    <div className="plugin-log" role="log" aria-label={tr("settings.pages.logsForValue", { id: id })}>
+      {lines.length === 0 && <span className="muted">{tr("settings.pages.noLogOutput")}</span>}
       {lines.map((l, i) => <div key={i} className="mono plugin-log-line">{l.line}</div>)}
     </div>
   );
@@ -1194,7 +1482,7 @@ export function ManagedPluginsSection() {
     try {
       const installed = await api.pluginsInstall(source.trim());
       setSource("");
-      setToast(`${installed.name} installed. Its contributions are available when you choose them.`);
+      setToast(tr("settings.pages.pluginInstalledContributionsAvailable", { name: installed.name }));
       refresh();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
@@ -1206,10 +1494,10 @@ export function ManagedPluginsSection() {
     try {
       const plugin = await api.pluginsOp(id, what);
       setToast(what === "disable"
-        ? `${plugin.name} disabled. Its widget placements are kept.`
+        ? tr("settings.pages.pluginDisabledPlacementsKept", { name: plugin.name })
         : what === "enable"
-          ? `${plugin.name} enabled. See what’s new in its contributions.`
-          : `${plugin.name} reloaded.`);
+          ? tr("settings.pages.pluginEnabledSeeContributions", { name: plugin.name })
+          : tr("settings.pages.pluginReloaded", { name: plugin.name }));
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     }
@@ -1222,11 +1510,14 @@ export function ManagedPluginsSection() {
       && (placement.pluginId === plugin.id
         || widgets.some((widget) => widget.id === placement.definitionId && widget.pluginId === plugin.id)));
     const warning = active.length > 0
-      ? `${active.length} widget${active.length === 1 ? "" : "s"} from "${plugin.name}" ${active.length === 1 ? "is" : "are"} in your layout. Uninstalling keeps a placeholder so you can remove or restore each one. Continue?`
-      : `Remove plugin "${plugin.name}"?`;
-    if (!window.confirm(warning)) return;
+      ? tr("settings.pages.pluginWidgetsInLayoutUninstallWarning", {
+          count: active.length,
+          name: plugin.name,
+        })
+      : tr("settings.pages.removePluginValue", { name: plugin.name });
+    if (!await confirmAlert(warning, { title: tr("settings.pages.removePlugin"), confirmLabel: tr("common.remove") })) return;
     await api.pluginsRemove(plugin.id);
-    setToast(`${plugin.name} removed.`);
+    setToast(tr("settings.pages.pluginRemoved", { name: plugin.name }));
     if (selected === plugin.id) setSelected(null);
     refresh();
   };
@@ -1238,11 +1529,14 @@ export function ManagedPluginsSection() {
   return (
     <div className="plugin-library" data-settings-item="plugins.managed">
       <div className="plugin-library-head">
-        <div><strong>Plugin library</strong><span>Extensions contribute widgets, commands, tools, settings, and workspace surfaces.</span></div>
-        <span>{plugins.length} installed</span>
+        <div><strong>{tr("settings.pages.managedPolythPlugins")}</strong><span>{tr("settings.pages.extensionsWithAPolythPlugin")}</span></div>
+        <span>{plugins.length} {tr("settings.pages.installed")}</span>
       </div>
       {plugins.length === 0 && (
-        <EmptyState title="No managed plugins installed" body='Install with "npm:@scope/name@version" or "file:folder" (relative to the trusted plugin directory).' />
+        <EmptyState
+          title={tr("settings.pages.noManagedPluginsInstalled")}
+          body={tr("settings.pages.installManagedPluginHint")}
+        />
       )}
       <div className="plugin-card-grid">
         {plugins.map((p) => {
@@ -1257,17 +1551,28 @@ export function ManagedPluginsSection() {
                   <strong>{p.name}</strong>
                   <small>{p.source}</small>
                 </span>
-                <span className={`tag mcp-status ${p.status === "ready" ? "connected" : p.status === "error" ? "error" : "disabled"}`}>{p.status}</span>
-                <p>{p.lastError || `${p.name} adds ${p.contributions.length || "workspace"} contributions to Polyth.`}</p>
+                <span className={`tag mcp-status ${p.status === "ready" ? "connected" : p.status === "error" ? "error" : "disabled"}`}>
+                  {p.status === "ready"
+                    ? tr("settings.pages.ready")
+                    : p.status === "error"
+                      ? tr("common.error")
+                      : p.status === "disabled"
+                        ? tr("settings.packagespage.disabled")
+                        : p.status}
+                </span>
+                <p>{p.lastError || tr("settings.pages.pluginContributionsCount", {
+                  name: p.name,
+                  count: p.contributions.length,
+                })}</p>
                 <span className="plugin-card-counts">
-                  <b>{widgetCount} widgets</b><b>{commandCount} commands</b><b>{toolCount} tools</b>
+                  <b>{widgetCount} {tr("settings.pages.widgets")}</b><b>{commandCount} {tr("settings.pages.commands")}</b><b>{toolCount} {tr("settings.pages.tools")}</b>
                 </span>
               </button>
               <div className="plugin-card-actions">
-                {p.update && <button type="button" onClick={() => void op(p.id, "reload")}>Update to {p.update.version}</button>}
-                <button type="button" onClick={() => void op(p.id, p.enabled ? "disable" : "enable")}>{p.enabled ? "Disable" : "Enable"}</button>
-                <button type="button" onClick={() => setLogsFor(logsFor === p.id ? null : p.id)}>Logs</button>
-                <button type="button" className="danger-btn" onClick={() => void remove(p)}>Uninstall</button>
+                {p.update && <button type="button" onClick={() => void op(p.id, "reload")}>{tr("settings.pages.updateTo")}{" "}{p.update.version}</button>}
+                <button type="button" onClick={() => void op(p.id, p.enabled ? "disable" : "enable")}>{p.enabled ? tr("settings.pages.disable") : tr("settings.pages.enable")}</button>
+                <button type="button" onClick={() => setLogsFor(logsFor === p.id ? null : p.id)}>{tr("settings.pages.logs")}</button>
+                <button type="button" className="danger-btn" onClick={() => void remove(p)}>{tr("settings.pages.uninstall")}</button>
               </div>
             </article>
           );
@@ -1277,8 +1582,8 @@ export function ManagedPluginsSection() {
         <section className="plugin-detail">
           <header>
             <span className="plugin-card-icon">{selectedPlugin.name.slice(0, 1).toUpperCase()}</span>
-            <div><strong>{selectedPlugin.name}</strong><small>v{selectedPlugin.version} · {selectedPlugin.source}</small></div>
-            <button type="button" onClick={() => setSelected(null)} aria-label="Close plugin details">×</button>
+            <div><strong>{selectedPlugin.name}</strong><small>{tr("settings.pages.v")}{selectedPlugin.version} · {selectedPlugin.source}</small></div>
+            <button type="button" onClick={() => setSelected(null)} aria-label={tr("settings.pages.closePluginDetails")}>{tr("settings.pages.message")}</button>
           </header>
           <div className="plugin-detail-tabs" role="tablist">
             {(["overview", "widgets", "commands", "tools", "settings", "permissions", "contributions"] as const).map((tab) => (
@@ -1288,12 +1593,12 @@ export function ManagedPluginsSection() {
             ))}
           </div>
           <div className="plugin-detail-body">
-            {detailTab === "overview" && <p>{selectedPlugin.enabled ? "Enabled and ready to contribute to your workspace." : "Disabled. Existing layout placements are kept until you enable or remove them."}</p>}
-            {detailTab === "widgets" && <p>{contributionCount(selectedPlugin, "widget.")} widget contributions. Installing a plugin never inserts them automatically.</p>}
-            {detailTab === "commands" && <p>{contributionCount(selectedPlugin, "command")} command contributions.</p>}
-            {detailTab === "tools" && <p>{selectedPlugin.capabilities.length ? selectedPlugin.capabilities.join(", ") : "No declared tools."}</p>}
-            {detailTab === "settings" && <p>{contributionCount(selectedPlugin, "settings.")} settings pages or controls.</p>}
-            {detailTab === "permissions" && <p><span className={`tag plugin-trust trust-${selectedPlugin.trust}`}>{selectedPlugin.trust}</span> Permissions are requested when the plugin needs them.</p>}
+            {detailTab === "overview" && <p>{selectedPlugin.enabled ? tr("settings.pages.enabledAndReadyToContributeToYour") : tr("settings.pages.disabledExistingLayoutPlacementsAreKeptUntil")}</p>}
+            {detailTab === "widgets" && <p>{contributionCount(selectedPlugin, "widget.")} {tr("settings.pages.widgetContributionsInstallingAPluginNeverInserts")}</p>}
+            {detailTab === "commands" && <p>{contributionCount(selectedPlugin, "command")} {tr("settings.pages.commandContributions")}</p>}
+            {detailTab === "tools" && <p>{selectedPlugin.capabilities.length ? selectedPlugin.capabilities.join(", ") : tr("settings.pages.noDeclaredTools")}</p>}
+            {detailTab === "settings" && <p>{contributionCount(selectedPlugin, "settings.")} {tr("settings.pages.settingsPagesOrControls")}</p>}
+            {detailTab === "permissions" && <p><span className={`tag plugin-trust trust-${selectedPlugin.trust}`}>{selectedPlugin.trust}</span> {tr("settings.pages.permissionsAreRequestedWhenThePluginNeeds")}</p>}
             {detailTab === "contributions" && (
               <ul>{selectedPlugin.contributions.map((item) => <li key={`${item.slot}:${item.id}`}><code>{item.slot}</code> {item.id}</li>)}</ul>
             )}
@@ -1304,16 +1609,26 @@ export function ManagedPluginsSection() {
       <div className="set-add-form">
         <input
           value={source}
-          placeholder="npm:@scope/name@1.0.0 or file:my-plugin"
+          placeholder={tr("settings.pages.npmScopeName100Or")}
           aria-invalid={source.length > 0 && !sourceValid ? true : undefined}
           onChange={(e) => setSource(e.target.value)}
           onKeyDown={(e) => { if (e.key === "Enter" && sourceValid) void install(); }}
         />
-        <button className="small-btn" disabled={!sourceValid} onClick={() => void install()}>Install</button>
+        <button className="small-btn" disabled={!sourceValid} onClick={() => void install()}>{tr("settings.pages.install")}</button>
       </div>
       {error && <div className="form-error">{error}</div>}
-      {toast && <div className="plugin-toast" role="status"><span>{toast}</span><button type="button" onClick={() => setToast("")}>Dismiss</button></div>}
+      {toast && <div className="plugin-toast" role="status"><span>{toast}</span><button type="button" onClick={() => setToast("")}>{tr("settings.pages.dismiss")}</button></div>}
     </div>
+  );
+}
+
+export function PluginsPage() {
+  return (
+    <>
+      <PageHead title="Plugins" blurb="Configure OpenCode runtime plugins or install managed Polyth UI extensions." />
+      <OpenCodePluginsSection />
+      <ManagedPluginsSection />
+    </>
   );
 }
 
@@ -1330,27 +1645,27 @@ export function AboutPage() {
       () => setCopied("copy blocked by the browser"),
     );
   };
-  if (err) return <><PageHead title="About" /><EmptyState title="Server unreachable" body={err} /></>;
-  if (!info) return <><PageHead title="About" /><EmptyState title="Loading…" /></>;
+  if (err) return <><PageHead title={tr("settings.pages.about")} /><EmptyState title={tr("settings.pages.serverUnreachable")} body={err} /></>;
+  if (!info) return <><PageHead title={tr("settings.pages.about")} /><EmptyState title={tr("common.loading")} /></>;
   return (
     <>
-      <PageHead title="About" blurb="Connection details for this Polyth server." />
+      <PageHead title={tr("settings.pages.about")} blurb={tr("settings.pages.connectionDetailsForThisPolythServer")} />
       <div data-settings-item="about.info">
-        <Row label="Version"><span className="mono">{info.version}</span></Row>
-        <Row label="Application URL" hint="The configured local address (never derived from request headers).">
+        <Row label={tr("settings.pages.version")}><span className="mono">{info.version}</span></Row>
+        <Row label={tr("settings.pages.applicationUrl")} hint={tr("settings.pages.theConfiguredLocalAddressNeverDerivedFrom")}>
           <span className="mono">{info.applicationUrl}</span>
-          <button className="small-btn" onClick={() => copy("URL", info.applicationUrl)}>Copy</button>
+          <button className="small-btn" onClick={() => copy("URL", info.applicationUrl)}>{tr("common.copy")}</button>
         </Row>
-        <Row label="Tunnel" hint={info.tunnelUrl ? "Public tunnel is configured." : "No tunnel configured."}>
+        <Row label={tr("settings.pages.tunnel")} hint={info.tunnelUrl ? tr("settings.pages.publicTunnelIsConfigured") : tr("settings.pages.noTunnelConfigured")}>
           {info.tunnelUrl
-            ? <><span className="mono">{info.tunnelUrl}</span><button className="small-btn" onClick={() => copy("tunnel", info.tunnelUrl!)}>Copy</button></>
-            : <span className="tag">none</span>}
+            ? <><span className="mono">{info.tunnelUrl}</span><button className="small-btn" onClick={() => copy("tunnel", info.tunnelUrl!)}>{tr("common.copy")}</button></>
+            : <span className="tag">{tr("settings.pages.none")}</span>}
         </Row>
-        <Row label="Data directory"><span className="mono">{info.dataDirLabel}</span></Row>
-        <Row label="Capabilities">
+        <Row label={tr("settings.pages.dataDirectory")}><span className="mono">{info.dataDirLabel}</span></Row>
+        <Row label={tr("settings.pages.capabilities")}>
           <span className="muted" style={{ maxWidth: 360, textAlign: "right" }}>{info.capabilities.join(", ")}</span>
         </Row>
-        {copied && <div className="muted" role="status">{copied === "copy blocked by the browser" ? copied : `${copied} copied.`}</div>}
+        {copied && <div className="muted" role="status">{copied === "copy blocked by the browser" ? copied : tr("settings.pages.valueCopied", { copied: copied })}</div>}
       </div>
     </>
   );
