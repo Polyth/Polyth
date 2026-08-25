@@ -98,6 +98,7 @@ test("every server feature package is discoverable and has a matching descriptor
     "browser",
     "commands",
     "dictation",
+    "example-feature",
     "files",
     "fusion",
     "git",

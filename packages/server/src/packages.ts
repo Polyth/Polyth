@@ -46,6 +46,7 @@ export const BUILTIN_PACKAGES = [
   { id: "commands", name: "Commands", description: "Reusable project command definitions.", core: false, enabled: true, settingsGroup: "Engineering", icon: "/", hasSettings: true },
   { id: "plugins", name: "Plugins", description: "Managed plugin installation and configuration.", core: false, enabled: true, settingsGroup: "Customize", icon: "🧩", hasSettings: true },
   { id: "integrations", name: "Integrations", description: "External service integrations.", core: false, enabled: true, settingsGroup: "Workspace", icon: "🔗", hasSettings: true },
+  { id: "example-feature", name: "Example Feature", description: "Proof-of-concept package registered via polyth.serverEntry discovery.", core: false, enabled: true, settingsGroup: "Customize", icon: "🧪", hasSettings: false },
 ] as const satisfies readonly PackageDescriptorDto[];
 
 type EnabledState = Record<string, boolean>;
