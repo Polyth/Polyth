@@ -942,6 +942,11 @@ export async function boot(opts: BootOptions = {}) {
   console.log(`[polyth] server on http://127.0.0.1:${port}  data=${dataDir}`);
 
   const shutdown = async () => {
+    for (const descriptor of packageRegistry.list().toReversed()) {
+      await packageLifecycle.disable(descriptor.id).catch((error: unknown) => {
+        console.error(`[polyth] package "${descriptor.id}" failed to disable during shutdown`, error);
+      });
+    }
     schedule.stop();
     usage.stop();
     assist?.stop();
