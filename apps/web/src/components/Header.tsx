@@ -47,12 +47,7 @@ const ICONS: Record<AppView, React.ReactNode> = {
       <rect x="2" y="3" width="3.2" height="10" rx="1" /><rect x="6.4" y="3" width="3.2" height="10" rx="1" /><rect x="10.8" y="3" width="3.2" height="10" rx="1" />
     </svg>
   ),
-  workflow: (
-    <svg width="16" height="16" viewBox="0 0 16 16" {...STROKE}>
-      <circle cx="3.5" cy="4" r="1.5" /><circle cx="3.5" cy="12" r="1.5" /><circle cx="12.5" cy="8" r="1.5" />
-      <path d="M5 4h2a2 2 0 0 1 2 2v.5M5 12h2a2 2 0 0 0 2-2v-.5M9 8h2" />
-    </svg>
-  ),
+  workflow: <Icon.workflow />,
   fusion: (
     <svg width="16" height="16" viewBox="0 0 16 16" {...STROKE}>
       <circle cx="6" cy="8" r="4.2" /><circle cx="10" cy="8" r="4.2" />

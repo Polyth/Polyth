@@ -459,11 +459,18 @@ export default function WidgetsPage() {
                         if (slot) mutate({ type: "place", id: draggedId, slot, index });
                       }
                     }}
-                    aria-label={tr("settings.widgetspage.hideValueFromValue", { title: widget.title, title2: place.title })}
-                    title={tr("settings.widgetspage.hideValueFromValue", { title: widget.title, title2: place.title })}
-                    onClick={() => mutate({ type: "visibility", id: widget.id, visible: false })}
+                    aria-label={widget.requiredVisible
+                      ? `${widget.title} is required in ${place.title}`
+                      : tr("settings.widgetspage.hideValueFromValue", { title: widget.title, title2: place.title })}
+                    title={widget.requiredVisible
+                      ? `${widget.title} is required while its package is enabled`
+                      : tr("settings.widgetspage.hideValueFromValue", { title: widget.title, title2: place.title })}
+                    aria-disabled={widget.requiredVisible || undefined}
+                    onClick={() => {
+                      if (!widget.requiredVisible) mutate({ type: "visibility", id: widget.id, visible: false });
+                    }}
                   >
-                    {widget.title}<span aria-hidden="true">{tr("settings.widgetspage.message")}</span>
+                    {widget.title}<span aria-hidden="true">{widget.requiredVisible ? "Required" : "×"}</span>
                   </button>
                 ))}
               </div>

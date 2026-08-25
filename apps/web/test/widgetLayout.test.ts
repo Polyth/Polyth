@@ -87,6 +87,28 @@ test("catalog definitions provide plugin default zones and sizes", () => {
   assert.equal(layout.widgets["sample.widget"]?.visible, false);
 });
 
+test("package-required widgets repair hidden persistence and reject hide mutations", () => {
+  const definition = {
+    id: "workflow.composer-action",
+    pluginId: "workflow",
+    kind: "mini-widget" as const,
+    defaultSlot: "composer.trailing" as const,
+    defaultVisible: true,
+    requiredVisible: true,
+  };
+  const initial = createDefaultWidgetLayout([definition]);
+  assert.equal(initial.widgets[definition.id]?.visible, true);
+  assert.equal(initial.widgets[definition.id]?.requiredVisible, true);
+  assert.equal(setWidgetVisible(initial, definition.id, false), initial);
+
+  const stale = JSON.parse(serializeWidgetLayout(initial)) as typeof initial;
+  stale.widgets[definition.id]!.visible = false;
+  const repaired = parseWidgetLayout(JSON.stringify(stale), [definition]);
+  assert.equal(repaired.widgets[definition.id]?.visible, true);
+  assert.equal(repaired.widgets[definition.id]?.requiredVisible, true);
+  assert.equal(widgetSlotOf(repaired, definition.id), "composer.trailing");
+});
+
 test("recommended spawn size fits title chrome without becoming a hard minimum", () => {
   const definition = {
     id: "sample.verbose",
@@ -434,6 +456,34 @@ test("layouts persist independently under project-specific keys", () => {
   activateProject("layout-project-alpha");
   assert.equal(getWidgetLayout().audience, "power", "switching back restores that project's canvas");
   assert.equal(getWidgetSaveStatus(), "saved");
+});
+
+test("registered mini-widgets remain placed when the active project changes", () => {
+  const definition = {
+    id: "workflow.chat-launcher",
+    pluginId: "workflow",
+    title: "Run workflow",
+    description: "Run the current chat draft through a workflow.",
+    kind: "mini-widget" as const,
+    defaultSlot: "composer.trailing" as const,
+    supportedSlots: ["composer.leading", "composer.trailing"] as const,
+    defaultVisible: true,
+    audience: "simple" as const,
+  };
+  ensureWidgets([definition]);
+
+  activateProject("layout-project-with-workflow");
+  const first = getWidgetLayout();
+  assert.equal(first.widgets[definition.id]?.visible, true);
+  assert.ok(first.slotPlacements["composer.trailing"]?.includes(definition.id));
+
+  activateProject("layout-second-project-with-workflow");
+  const second = getWidgetLayout();
+  assert.equal(second.widgets[definition.id]?.visible, true);
+  assert.ok(
+    second.slotPlacements["composer.trailing"]?.includes(definition.id),
+    "project-scoped layout parsing keeps registered composer actions",
+  );
 });
 
 test("the legacy global layout migrates to only the first project that loads it", () => {

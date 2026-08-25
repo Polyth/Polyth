@@ -13,6 +13,7 @@ import type {
   TokenUsage,
   WorkflowRunDto,
   WorkflowRunNodeDto,
+  WorkflowRunOptionsDto,
 } from "@polyth/contracts";
 import { extractChangedFiles } from "./pendingChanges.ts";
 import { tr } from "./i18n/index.ts";
@@ -850,8 +851,13 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
       model.workflowRun = {
         id: str(d, "runId") ?? "",
         workflowId: str(d, "workflowId") ?? "",
+        ...(str(d, "projectId") ? { projectId: str(d, "projectId") } : {}),
+        ...(str(d, "parentSessionId") ? { parentSessionId: str(d, "parentSessionId") } : {}),
         name: str(d, "name") ?? "",
         input: str(d, "input") ?? "",
+        ...(obj(d, "options")
+          ? { options: obj(d, "options") as unknown as Required<WorkflowRunOptionsDto> }
+          : {}),
         status: "running",
         startedAt: num(d, "startedAt") ?? ev.time,
         layers,

@@ -26,6 +26,12 @@ const wait = (ms: number, signal: AbortSignal): Promise<void> =>
     signal.addEventListener("abort", stopped, { once: true });
   });
 
+const timeoutLabel = (ms: number): string => {
+  if (ms % 60_000 === 0) return `${ms / 60_000} ${ms === 60_000 ? "minute" : "minutes"}`;
+  if (ms % 1_000 === 0) return `${ms / 1_000} ${ms === 1_000 ? "second" : "seconds"}`;
+  return `${ms}ms`;
+};
+
 function eventString(event: SessionEvent, key: string): string | undefined {
   const value = (event.data as JsonObject)[key];
   return typeof value === "string" ? value : undefined;
@@ -43,20 +49,26 @@ export function createWorkflowRunNode(sessions: SessionService): RunNodeFn {
       ...(context.node.model ? { model: context.node.model } : {}),
       ...(context.node.agent ? { agent: context.node.agent } : {}),
     });
-    await onUpdate({ sessionId, activity: "configuring permissions" });
-
-    if (!sessions.autoAcceptSet) {
-      if (context.permissions === "auto") {
-        throw Object.assign(new Error("workflow auto-permission policy is unavailable"), { code: "unsupported" });
-      }
-    } else {
-      await sessions.autoAcceptSet(sessionId, context.permissions === "auto" ? "on" : "off");
-    }
-
     const stop = () => { void sessions.abort(sessionId).catch(() => {}); };
     context.signal.addEventListener("abort", stop, { once: true });
     try {
-      await onUpdate({ activity: "queued" });
+      if (context.signal.aborted) {
+        stop();
+        throw abortError();
+      }
+      await onUpdate({ sessionId, activity: "configuring permissions" });
+
+      if (!sessions.autoAcceptSet) {
+        if (context.permissions === "auto") {
+          throw Object.assign(new Error("workflow auto-permission policy is unavailable"), { code: "unsupported" });
+        }
+      } else {
+        await sessions.autoAcceptSet(sessionId, context.permissions === "auto" ? "on" : "off");
+      }
+
+      if (context.signal.aborted) throw abortError();
+      await onUpdate({ activity: "starting agent" });
+      if (context.signal.aborted) throw abortError();
       await sessions.send(sessionId, { text: context.prompt });
 
       const deadline = Date.now() + context.timeoutMs;
@@ -66,7 +78,7 @@ export function createWorkflowRunNode(sessions: SessionService): RunNodeFn {
         if (context.signal.aborted) throw abortError();
         if (Date.now() >= deadline) {
           await sessions.abort(sessionId).catch(() => {});
-          throw new Error(`workflow node timed out after ${context.timeoutMs}ms`);
+          throw new Error(`Timed out after ${timeoutLabel(context.timeoutMs)}. Open the child session to review its last activity.`);
         }
 
         const events = await sessions.events(sessionId, afterSeq);
@@ -103,6 +115,9 @@ async function progressFromEvent(
   if (event.type === "question/asked" || event.type === "secret/requested") {
     return { activity: "awaiting answer" };
   }
+  if (event.type === "question/answered" || event.type === "secret/resolved") {
+    return { activity: "thinking" };
+  }
   if (event.type === "assistant/chunk") {
     const partId = eventString(event, "partId") ?? event.id;
     parts.set(partId, (parts.get(partId) ?? "") + (eventString(event, "text") ?? ""));
@@ -110,7 +125,10 @@ async function progressFromEvent(
   }
   if (event.type === "assistant/message") {
     const partId = eventString(event, "partId") ?? event.id;
-    parts.set(partId, eventString(event, "text") ?? "");
+    const text = eventString(event, "text");
+    // Some runtime adapters emit a terminal assistant marker without
+    // repeating the streamed text. Never erase chunks already collected.
+    if (text !== undefined) parts.set(partId, text);
     return { activity: "writing", output: [...parts.values()].join("\n\n") };
   }
   return null;

@@ -9,7 +9,8 @@ register("./tsxHooks.mjs", import.meta.url);
 
 const { defineWidgetPlugin, listWidgets, registerWidgetPlugin } = await import("../src/widgets/catalog.ts");
 const { BUILTIN_WIDGET_PLUGINS } = await import("../src/widgets/builtinWidgets.tsx");
-const { installBuiltinMiniWidgets } = await import("../src/widgets/builtinMiniWidgets.tsx");
+const { installBuiltinMiniWidgets, WORKFLOW_WIDGET_PLUGIN } =
+  await import("../src/widgets/builtinMiniWidgets.tsx");
 const { installUsagePlugin, USAGE_WIDGET_PLUGIN } = await import("../src/widgets/usagePlugin.tsx");
 const { installGithubPlugin, GITHUB_WIDGET_PLUGIN } = await import("../src/widgets/githubPlugin.tsx");
 
@@ -35,6 +36,28 @@ test("built-in catalog covers the complete default canvas", () => {
   assert.equal(byId.has("core.composer"), false);
   assert.ok((BUILTIN_WIDGET_PLUGINS.find((plugin) => plugin.id === "session")?.widgets?.length ?? 0) > 1);
   assert.ok((BUILTIN_WIDGET_PLUGINS.find((plugin) => plugin.id === "files")?.widgets?.length ?? 0) > 1);
+});
+
+test("workflow package declares a visible, placeable composer action", () => {
+  const widget = WORKFLOW_WIDGET_PLUGIN.widgets?.find((item) => item.id === "workflow.composer-action");
+  assert.ok(widget);
+  assert.equal(widget.kind, "mini-widget");
+  assert.equal(widget.defaultSlot, "composer.trailing");
+  assert.deepEqual(widget.supportedSlots, ["composer.leading", "composer.trailing"]);
+  assert.equal(widget.defaultVisible, true);
+  assert.equal(widget.requiredVisible, true);
+  assert.equal(widget.order, 50);
+  assert.equal(typeof widget.render, "function");
+});
+
+test("built-in mini-widget installer registers every workflow widget", () => {
+  installBuiltinMiniWidgets();
+  const widgets = listWidgets().filter((widget) => widget.pluginId === WORKFLOW_WIDGET_PLUGIN.id);
+  assert.deepEqual(
+    widgets.map((widget) => widget.id).sort(),
+    ["workflow.active-run", "workflow.composer-action"],
+  );
+  assert.ok(widgets.every((widget) => typeof widget.render === "function"));
 });
 
 test("feature-owned Git and Terminal widgets contribute through the catalog slot", () => {

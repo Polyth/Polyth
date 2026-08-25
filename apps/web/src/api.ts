@@ -900,6 +900,8 @@ export const api = {
       input,
       ...(options ? { options } : {}),
     })),
+  listWorkflowRuns: (projectId: string) =>
+    jfetch<WorkflowRunDto[]>(`/api/workflow-runs?projectId=${encodeURIComponent(projectId)}`),
   getWorkflowRun: (runId: string) =>
     jfetch<WorkflowRunDto>(`/api/workflow-runs/${encodeURIComponent(runId)}`),
   stopWorkflowRun: (runId: string) =>

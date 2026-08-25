@@ -35,6 +35,8 @@ export interface WidgetDef {
   defaultSlot?: UiSlot;
   supportedSlots?: readonly UiSlot[];
   defaultVisible?: boolean;
+  /** Package-required controls may be moved between supported slots but not hidden. */
+  requiredVisible?: boolean;
   order?: number;
   category?: string;
   capabilities?: readonly string[];
@@ -158,6 +160,7 @@ function slotWidgets(): WidgetDef[] {
       ...(typeof defaultSlot === "string" && isUiSlot(defaultSlot) ? { defaultSlot } : {}),
       ...(supportedSlots && supportedSlots.length > 0 ? { supportedSlots } : {}),
       ...(typeof meta.defaultVisible === "boolean" ? { defaultVisible: meta.defaultVisible } : {}),
+      ...(typeof meta.requiredVisible === "boolean" ? { requiredVisible: meta.requiredVisible } : {}),
       ...(typeof meta.order === "number" ? { order: meta.order } : {}),
       ...(typeof meta.category === "string" ? { category: meta.category } : {}),
       ...(Array.isArray(meta.capabilities)

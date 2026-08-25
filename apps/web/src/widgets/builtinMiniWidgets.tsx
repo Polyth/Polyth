@@ -1,9 +1,24 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
+import type { WorkflowRunDto } from "@polyth/contracts";
 import { api } from "../api.ts";
 import { Icon } from "../icons.tsx";
-import { COMPOSER_INPUT_SELECTOR, setOverlay, setUiError, useStore } from "../store.ts";
+import {
+  COMPOSER_INPUT_SELECTOR,
+  setActiveView,
+  setOverlay,
+  setUiError,
+  useStore,
+} from "../store.ts";
 import { friendlyError } from "../settings.ts";
+import {
+  prioritizeWorkflowRuns,
+  workflowFinishedCount,
+  workflowHumanWait,
+} from "../workflowRun.ts";
+import { handOffWorkflowLaunch } from "../workflowLaunch.ts";
+import { subscribeWorkflowRuns } from "../workflowMonitor.ts";
 import { GoalAttachForm } from "../components/GoalStrip.tsx";
+import WorkflowLauncher from "../components/WorkflowLauncher.tsx";
 import { requestComposerReplace } from "../composerInsert.ts";
 import { announce } from "../components/a11y/live.tsx";
 import { defineWidgetPlugin, registerWidgetPlugin } from "./catalog.ts";
@@ -54,6 +69,7 @@ function GoalAction({ context }: { context: Record<string, unknown> }) {
   return (
     <>
       <button
+        type="button"
         className={`header-action composer-goals${goalOn ? " on" : ""}`}
         title={label}
         aria-label={label}
@@ -94,6 +110,7 @@ function AutoApproveAction({ context }: { context: Record<string, unknown> }) {
   };
   return (
     <button
+      type="button"
       className={`header-action composer-auto-approve${on ? " on" : ""}`}
       title={on ? tr("widgets.builtinminiwidgets.turnOffAutoApprove") : tr("widgets.builtinminiwidgets.turnOnAutoApprove")}
       aria-label={on ? tr("widgets.builtinminiwidgets.turnOffAutoApprove") : tr("widgets.builtinminiwidgets.turnOnAutoApprove")}
@@ -105,6 +122,124 @@ function AutoApproveAction({ context }: { context: Record<string, unknown> }) {
     </button>
   );
 }
+
+function WorkflowAction({ context }: { context: Record<string, unknown> }) {
+  return (
+    <WorkflowLauncher
+      projectId={typeof context.projectId === "string" ? context.projectId : undefined}
+      sessionId={typeof context.sessionId === "string" ? context.sessionId : undefined}
+      draftText={typeof context.workflowDraftText === "string" ? context.workflowDraftText : ""}
+      attachmentCount={typeof context.workflowAttachmentCount === "number" ? context.workflowAttachmentCount : 0}
+      consumeDraft={typeof context.consumeWorkflowDraft === "function"
+        ? context.consumeWorkflowDraft as () => void
+        : () => {}}
+    />
+  );
+}
+
+function WorkflowRunIndicator() {
+  const projectId = useStore((state) => state.activeProjectId);
+  const [workflowState, setWorkflowState] = useState<{ projectId: string; runs: WorkflowRunDto[] } | null>(null);
+  const runs = workflowState && workflowState.projectId === projectId ? workflowState.runs : [];
+  const run = runs[0] ?? null;
+  useEffect(() => {
+    if (!projectId) {
+      setWorkflowState(null);
+      return;
+    }
+    setWorkflowState((current) => current?.projectId === projectId ? current : null);
+    let active = true;
+    const refresh = () => {
+      void api.listWorkflowRuns(projectId)
+        .then((runs) => {
+          if (!active) return;
+          const activeRuns = prioritizeWorkflowRuns(runs);
+          setWorkflowState(activeRuns.length > 0 ? { projectId, runs: activeRuns } : null);
+        })
+        .catch(() => {});
+    };
+    refresh();
+    const timer = setInterval(refresh, 1_200);
+    const unsubscribe = subscribeWorkflowRuns((updated) => {
+      if (updated.projectId && updated.projectId !== projectId) return;
+      setWorkflowState((current) => {
+        const existing = current?.projectId === projectId ? current.runs : [];
+        const activeRuns = prioritizeWorkflowRuns([
+          updated,
+          ...existing.filter((run) => run.id !== updated.id),
+        ]);
+        return activeRuns.length > 0 ? { projectId, runs: activeRuns } : null;
+      });
+    });
+    return () => {
+      active = false;
+      clearInterval(timer);
+      unsubscribe();
+    };
+  }, [projectId]);
+  if (!run || !projectId) return null;
+  const done = workflowFinishedCount(run);
+  const waits = run.nodes.map(workflowHumanWait);
+  const waitingForPermission = waits.includes("permission");
+  const waitingForAnswer = waits.includes("answer");
+  const actionLabel = waitingForPermission ? "Approval needed" : waitingForAnswer ? "Answer needed" : null;
+  const runLabel = runs.length > 1 ? `${runs.length} workflows` : run.name;
+  const openRun = () => {
+    handOffWorkflowLaunch({
+      projectId: run.projectId ?? projectId,
+      ...(run.parentSessionId ? { sessionId: run.parentSessionId } : {}),
+      workflowId: run.workflowId,
+      input: run.input,
+      run,
+    });
+    setActiveView("workflow");
+  };
+  return (
+    <button
+      type="button"
+      className={`header-action workflow-run-indicator${actionLabel ? " waiting" : ""}`}
+      title={actionLabel ? `Workflow action required: ${actionLabel.toLowerCase()}` : "Open active workflow"}
+      aria-label={`${actionLabel ?? runLabel}, ${done} of ${run.nodes.length} nodes finished. Open workflow`}
+      onClick={openRun}
+    >
+      <span className="workflow-status-spinner" aria-hidden="true" />
+      <span aria-live="polite">{actionLabel ?? `${runLabel} ${done}/${run.nodes.length}`}</span>
+    </button>
+  );
+}
+
+export const WORKFLOW_WIDGET_PLUGIN = defineWidgetPlugin({
+  id: "workflow",
+  name: "Workflows",
+  widgets: [{
+    id: "workflow.composer-action",
+    title: "Workflows",
+    description: "Choose a workflow and run the current draft, or open the builder.",
+    kind: "mini-widget",
+    defaultSlot: "composer.trailing",
+    supportedSlots: COMPOSER_ACTION_SLOTS,
+    defaultVisible: true,
+    requiredVisible: true,
+    defaultSize: { w: 1, h: 1 },
+    resizable: false,
+    audience: "simple",
+    order: 50,
+    render: (context) => <WorkflowAction context={context} />,
+  }, {
+    id: "workflow.active-run",
+    title: "Active workflow",
+    description: "Show active workflow progress and approval needs in the session header.",
+    kind: "mini-widget",
+    defaultSlot: "session.header.actions",
+    supportedSlots: ["session.header.actions", "app.header.actions"],
+    defaultVisible: true,
+    defaultSize: { w: 1, h: 1 },
+    resizable: false,
+    audience: "simple",
+    order: 45,
+    render: () => <WorkflowRunIndicator />,
+  }],
+});
 
 const SHELL_ACTIONS_PLUGIN = defineWidgetPlugin({
   id: "shell-actions",
@@ -229,4 +364,5 @@ export function installBuiltinMiniWidgets(): void {
   if (installed) return;
   installed = true;
   registerWidgetPlugin(SHELL_ACTIONS_PLUGIN);
+  registerWidgetPlugin(WORKFLOW_WIDGET_PLUGIN);
 }

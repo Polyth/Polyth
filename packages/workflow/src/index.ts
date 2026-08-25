@@ -74,6 +74,7 @@ export interface WorkflowService {
     input: string,
     options?: WorkflowRunOptionsDto,
   ): Promise<WorkflowRunDto>;
+  listRuns(projectId?: string): WorkflowRunDto[];
   getRun(runId: string): WorkflowRunDto | null;
   stop(runId: string): Promise<WorkflowRunDto>;
 }
@@ -109,11 +110,15 @@ function validateOptions(options: WorkflowRunOptionsDto | undefined): void {
   if (options.permissions !== undefined && options.permissions !== "auto" && options.permissions !== "manual") {
     throw workflowError("permissions must be auto or manual");
   }
-  if (options.maxParallel !== undefined && (!Number.isFinite(options.maxParallel) || options.maxParallel < 1)) {
-    throw workflowError("maxParallel must be a finite number >= 1");
+  if (options.maxParallel !== undefined && (
+    !Number.isInteger(options.maxParallel) || options.maxParallel < 1 || options.maxParallel > 32
+  )) {
+    throw workflowError("maxParallel must be a whole number from 1 to 32");
   }
-  if (options.nodeTimeoutMs !== undefined && (!Number.isFinite(options.nodeTimeoutMs) || options.nodeTimeoutMs < 1_000)) {
-    throw workflowError("nodeTimeoutMs must be a finite number >= 1000");
+  if (options.nodeTimeoutMs !== undefined && (
+    !Number.isInteger(options.nodeTimeoutMs) || options.nodeTimeoutMs < 1_000
+  )) {
+    throw workflowError("nodeTimeoutMs must be a whole number >= 1000");
   }
 }
 
@@ -377,8 +382,11 @@ export function createWorkflowService(deps: WorkflowDeps): WorkflowService {
       const run: WorkflowRunDto = {
         id: randomUUID(),
         workflowId: workflow.id,
+        projectId: workflow.projectId,
+        parentSessionId: sessionId.trim(),
         name: workflow.name,
         input: input.trim(),
+        options,
         status: "running",
         startedAt: now(),
         layers: validation.layers,
@@ -393,8 +401,11 @@ export function createWorkflowService(deps: WorkflowDeps): WorkflowService {
       await deps.append(sessionId, "workflow/run-started", jsonData({
         runId: run.id,
         workflowId: run.workflowId,
+        projectId: run.projectId,
+        parentSessionId: run.parentSessionId,
         name: run.name,
         input: run.input,
+        options: run.options,
         startedAt: run.startedAt,
         layers: run.layers,
         nodes: run.nodes,
@@ -422,6 +433,14 @@ export function createWorkflowService(deps: WorkflowDeps): WorkflowService {
         active.run.finishedAt = finishedAt;
       });
       return cloneRun(run);
+    },
+
+    listRuns(projectId) {
+      return [...runs.values()]
+        .map((active) => active.run)
+        .filter((run) => !projectId || run.projectId === projectId)
+        .sort((a, b) => b.startedAt - a.startedAt)
+        .map(cloneRun);
     },
 
     getRun(runId) {

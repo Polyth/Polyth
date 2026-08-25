@@ -14,8 +14,10 @@ import { installSshPackage } from "./ssh.ts";
 import { combineUnregister } from "./settingsPage.ts";
 import { installUsagePackage } from "./usage.ts";
 import { installVoicePackage } from "./voice.ts";
+import { installWorkflowPackage } from "./workflow.ts";
 import { configurePackageReconcile, reconcilePackage } from "./reconcile.ts";
 import { registerBuiltinPackageTours } from "./onboarding/builtinTours.ts";
+import { getState, setActiveView } from "../store.ts";
 
 // Tours for surfaces without an installer (built-in settings pages) exist for
 // the whole app session, independent of package enable/disable syncing.
@@ -37,6 +39,7 @@ const installers = new Map<string, PackageInstaller>([
   ["secure-safe", installSecureSafePackage],
   ["home-assistant", installHomeAssistantPackage],
   ["ssh", installSshPackage],
+  ["workflow", installWorkflowPackage],
 ]);
 
 // Some backend package names describe the implementation package rather than
@@ -100,6 +103,11 @@ async function syncPackages(): Promise<void> {
     if (active.has(id)) continue;
     const install = installers.get(id);
     if (install) active.set(id, install());
+  }
+  // An active optional view must not survive a cold boot where its package is
+  // already disabled (there is no installed disposer to perform the handoff).
+  if (!next.has("workflow") && getState().activeView === "workflow") {
+    setActiveView("session");
   }
 
   for (const listener of [...listeners]) listener();

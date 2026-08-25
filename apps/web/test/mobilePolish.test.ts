@@ -96,6 +96,7 @@ test("all mobile chat composers expose project and worktree targets", () => {
   const contextBar = read("../src/components/mobile/SessionContextBar.tsx");
   const composer = read("../src/components/Composer.tsx");
   const actions = read("../src/widgets/builtinMiniWidgets.tsx");
+  const workflowLauncher = read("../src/components/WorkflowLauncher.tsx");
   const header = read("../src/components/Header.tsx");
   const css = read("../src/styles.css");
 
@@ -111,6 +112,12 @@ test("all mobile chat composers expose project and worktree targets", () => {
   assert.match(composer, /aria-label=\{tr\("composer\.addFiles"\)\}/);
   assert.match(actions, /composer-auto-approve/);
   assert.match(actions, /composer-goals/);
+  assert.match(workflowLauncher, /composer-workflow/);
+  assert.match(css, /\.composer-mobile \.composer-workflow,/);
+  assert.match(css, /\.composer-mobile \.composer-workflow:active,/);
+  assert.match(css, /\.composer\.composer-mobile \.composer-mobile-extensions \.composer-workflow\s*\{[^}]*width:\s*var\(--tap\);[^}]*min-width:\s*var\(--tap\);/s);
+  assert.match(css, /\.composer-mobile\.composer-collapsed:not\(\.composer-has-draft\) \.composer-workflow \{ display: none; \}/);
+  assert.match(css, /\.composer-mobile\.composer-has-draft \.composer-workflow \{ display: inline-flex; \}/);
   assert.match(header, /displaySessionTitle\(session\.title, session\.id, firstUserText\)/);
   assert.match(header, /tr\("header\.composerControls"\)/);
   assert.match(css, /\.polyth-gradient\s*\{[^}]*linear-gradient/s);

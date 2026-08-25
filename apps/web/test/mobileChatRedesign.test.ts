@@ -385,6 +385,16 @@ test("phone CSS keeps the layout inside the visible viewport", async () => {
   assert.match(phone, /body\[data-band="short"\] \.hero-body \{ display: none; \}/, "a short band drops the empty state entirely");
   assert.match(phone, /composer-mobile:not\(\.composer-has-draft\) \.composer-primary \.send \{ display: none; \}/);
   assert.match(phone, /composer-mobile\.composer-has-draft \.composer-mobile-extensions \.mic-btn \{ display: none; \}/);
+  assert.match(
+    phone,
+    /composer-mobile\.composer-collapsed:not\(\.composer-has-draft\) \.composer-workflow \{ display: none; \}/,
+    "only an empty resting composer may hide the workflow action",
+  );
+  assert.match(
+    phone,
+    /composer-mobile\.composer-has-draft \.composer-workflow \{ display: inline-flex; \}/,
+    "a draft keeps Run workflow visible during narrow-layout transitions",
+  );
   assert.match(phone, /max-height: 42dvh/, "§20: the input stops growing and scrolls");
   assert.match(section, /margin-bottom: var\(--keyboard-inset, 0px\)/, "§21: sheets sit above the keyboard");
   assert.match(section, /max-height: calc\(var\(--visual-vh, 100dvh\)/, "§29: sheets are sized by the visible band");

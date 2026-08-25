@@ -1,6 +1,15 @@
-import { Fragment } from "react";
-import { useStore, type AppView } from "../store.ts";
+import { Fragment, useEffect, useState } from "react";
+import type { WorkflowRunDto } from "@polyth/contracts";
+import { setActiveView, useStore, type AppView } from "../store.ts";
 import { isWorkspaceSurface, listSurfaces } from "../surfaces.ts";
+import { api } from "../api.ts";
+import {
+  prioritizeWorkflowRuns,
+  workflowFinishedCount,
+  workflowHumanWait,
+} from "../workflowRun.ts";
+import { handOffWorkflowLaunch } from "../workflowLaunch.ts";
+import { subscribeWorkflowRuns } from "../workflowMonitor.ts";
 import { tr } from "../i18n/index.ts";
 
 // UX-PANE-MODEL: Files/Git/Terminal/Preview are workspace panes beside Chat,
@@ -27,9 +36,49 @@ export default function StatusBar() {
   const session = useStore((s) => s.sessions.find((x) => x.id === s.activeSessionId) ?? null);
   const view = useStore((s) => s.activeView);
   const rail = useStore((s) => s.railPlugin);
+  const [workflowState, setWorkflowState] = useState<{ projectId: string; runs: WorkflowRunDto[] } | null>(null);
+  const activeWorkflows = workflowState && workflowState.projectId === project?.id ? workflowState.runs : [];
+  const activeWorkflow = activeWorkflows[0] ?? null;
   const paneTitle = rail !== null
     ? listSurfaces().find((s) => s.id === rail && isWorkspaceSurface(s))?.title ?? null
     : null;
+
+  useEffect(() => {
+    if (!project?.id) {
+      setWorkflowState(null);
+      return;
+    }
+    setWorkflowState((current) => current?.projectId === project.id ? current : null);
+    let mounted = true;
+    const refresh = () => {
+      void api.listWorkflowRuns(project.id)
+        .then((runs) => {
+          if (mounted) {
+            const activeRuns = prioritizeWorkflowRuns(runs);
+            setWorkflowState(activeRuns.length > 0 ? { projectId: project.id, runs: activeRuns } : null);
+          }
+        })
+        .catch(() => {});
+    };
+    refresh();
+    const timer = setInterval(refresh, 1_200);
+    const unsubscribe = subscribeWorkflowRuns((updated) => {
+      if (updated.projectId && updated.projectId !== project.id) return;
+      setWorkflowState((current) => {
+        const existing = current?.projectId === project.id ? current.runs : [];
+        const activeRuns = prioritizeWorkflowRuns([
+          updated,
+          ...existing.filter((run) => run.id !== updated.id),
+        ]);
+        return activeRuns.length > 0 ? { projectId: project.id, runs: activeRuns } : null;
+      });
+    });
+    return () => {
+      mounted = false;
+      clearInterval(timer);
+      unsubscribe();
+    };
+  }, [project?.id]);
 
   const segments: Array<{ key: string; node: React.ReactNode }> = [];
   segments.push({
@@ -53,9 +102,42 @@ export default function StatusBar() {
   if (session?.agent) {
     segments.push({ key: "agent", node: <span className="sb sb-agent">{session.agent} {tr("statusbar.agent")}</span> });
   }
+  if (activeWorkflow && project) {
+    const complete = workflowFinishedCount(activeWorkflow);
+    const waits = activeWorkflow.nodes.map(workflowHumanWait);
+    const waitingForPermission = waits.includes("permission");
+    const waitingForAnswer = waits.includes("answer");
+    const actionLabel = waitingForPermission ? "Approval needed" : waitingForAnswer ? "Answer needed" : null;
+    const workflowLabel = activeWorkflows.length > 1 ? `${activeWorkflows.length} workflows` : activeWorkflow.name;
+    const openWorkflow = () => {
+      handOffWorkflowLaunch({
+        projectId: activeWorkflow.projectId ?? project.id,
+        ...(activeWorkflow.parentSessionId ? { sessionId: activeWorkflow.parentSessionId } : {}),
+        workflowId: activeWorkflow.workflowId,
+        input: activeWorkflow.input,
+        run: activeWorkflow,
+      });
+      setActiveView("workflow");
+    };
+    segments.push({
+      key: "workflow",
+      node: (
+        <button
+          type="button"
+          className={`sb sb-workflow${actionLabel ? " waiting" : ""}`}
+          title={actionLabel ? `Workflow action required: ${actionLabel.toLowerCase()}` : "Open active workflow"}
+          aria-label={`${actionLabel ?? workflowLabel}, ${complete} of ${activeWorkflow.nodes.length} nodes finished. Open workflow`}
+          onClick={openWorkflow}
+        >
+          <span className="workflow-status-spinner" aria-hidden="true" />
+          <span className="sb-text">{actionLabel ?? workflowLabel} · {complete}/{activeWorkflow.nodes.length}</span>
+        </button>
+      ),
+    });
+  }
 
   return (
-    <div className="statusbar">
+    <div className="statusbar" role="status" aria-live="polite">
       {segments.map((s, i) => (
         <Fragment key={s.key}>
           {i > 0 && <span className="sb-sep" aria-hidden />}

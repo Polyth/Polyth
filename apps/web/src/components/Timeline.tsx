@@ -59,6 +59,7 @@ import { Icon } from "../icons.tsx";
 import "./messagePinAction.tsx";
 import ProviderLogo from "./ProviderLogo.tsx";
 import { seedMultiRunPrompt } from "../multirunSeed.ts";
+import WorkflowTimelineCard from "./WorkflowTimelineCard.tsx";
 import { tr } from "../i18n/index.ts";
 
 /** One announcement per copy/mutation outcome; text is the accessible record,
@@ -1302,7 +1303,7 @@ export default function Timeline({
         onScroll={onScroll}
       >
         <SlotHost slot="session.timeline.before" context={slotSummary} />
-        {model.messages.length === 0 && (
+        {model.messages.length === 0 && !model.workflowRun && (
           <div className="empty">
             <div>{emptyCopy}</div>
           </div>
@@ -1333,6 +1334,7 @@ export default function Timeline({
               />
             )
         ))}
+        {model.workflowRun && <WorkflowTimelineCard run={model.workflowRun} />}
         {/* The dock confirmation sits OUTSIDE the collapsible tail: it must be
             visible even while the reverted items stay folded away. */}
         {confirmRestore && model.rewind && undoneRows.length > 0 && (
