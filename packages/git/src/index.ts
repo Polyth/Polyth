@@ -405,7 +405,18 @@ export function createGitService(opts: GitServiceOptions = {}): GitService {
 
     async pull(root, remote = "origin") {
       if (!/^[\w.-]{1,120}$/.test(remote)) throw Object.assign(new Error("invalid remote"), { code: "invalid-input" });
-      await run(root, ["pull", "--ff-only", remote]);
+      try {
+        await run(root, ["pull", "--ff-only", remote]);
+      } catch (error) {
+        const failure = error as Error & { cause?: unknown };
+        if (/not possible to fast-forward/i.test(`${failure.message} ${String(failure.cause ?? "")}`)) {
+          throw Object.assign(
+            new Error("Pull cannot fast-forward because local and remote histories have diverged. Rebase or merge your local commits, then try again."),
+            { code: "conflict" },
+          );
+        }
+        throw error;
+      }
     },
 
     async push(root, remote = "origin") {

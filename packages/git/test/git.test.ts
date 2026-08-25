@@ -292,3 +292,31 @@ test("fetch, pull, and push synchronize an explicit remote", async () => {
   assert.equal((await git.status(dir)).ahead, 0);
   await assert.rejects(() => git.fetch(dir, "--upload-pack=evil"), /invalid remote/);
 });
+
+test("pull reports divergent histories as a resolvable conflict", async () => {
+  const dir = repo();
+  const bare = mkdtempSync(join(tmpdir(), "polyth-remote-"));
+  const peerParent = mkdtempSync(join(tmpdir(), "polyth-peer-"));
+  dirs.push(bare, peerParent);
+  execFileSync("git", ["init", "--bare", "-q"], { cwd: bare });
+  const g = (...args: string[]) => execFileSync("git", args, { cwd: dir, stdio: "pipe" });
+  g("remote", "add", "origin", bare);
+  g("push", "-qu", "origin", "main");
+  execFileSync("git", ["symbolic-ref", "HEAD", "refs/heads/main"], { cwd: bare });
+  const peer = join(peerParent, "repo");
+  execFileSync("git", ["clone", "-q", bare, peer]);
+  const pg = (...args: string[]) => execFileSync("git", args, { cwd: peer, stdio: "pipe" });
+  pg("config", "user.email", "t@example.com");
+  pg("config", "user.name", "Peer");
+
+  writeFileSync(join(dir, "local.txt"), "local\n");
+  g("add", "."); g("commit", "-qm", "local change");
+  writeFileSync(join(peer, "remote.txt"), "remote\n");
+  pg("add", "."); pg("commit", "-qm", "remote change"); pg("push", "-q");
+
+  await assert.rejects(() => git.pull(dir), (error: Error & { code?: string }) => {
+    assert.equal(error.code, "conflict");
+    assert.match(error.message, /cannot fast-forward/);
+    return true;
+  });
+});
