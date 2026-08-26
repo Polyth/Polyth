@@ -69,7 +69,7 @@ function harness(dial: (command: string, dest: string) => SshExecResult) {
       const handled = await routes({
         req: {}, res: {}, url, path: url.pathname, method,
         body: async () => body,
-        json: (code, value) => { status = code; payload = value; },
+        json: (code: number, value: unknown) => { status = code; payload = value; },
       } as unknown as RouteRequest);
       return { handled, status, payload, error: null as null | { code?: string; message: string } };
     } catch (err) {

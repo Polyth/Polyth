@@ -40,7 +40,7 @@ function makeHarness(opts: { exec?: ExecFn; describe?: (root: string, base?: str
   } as unknown as ProjectService;
   const append = async (sessionId: string, type: string, data: JsonObject): Promise<SessionEvent> => {
     calls.push({ kind: "append", type, data, sessionId });
-    return { sessionId, seq: ++seq, ts: Date.now(), type, data } as SessionEvent;
+    return { sessionId, seq: ++seq, ts: Date.now(), type, data } as unknown as SessionEvent;
   };
   const sessions = {
     create: async (input: CreateSessionInput) => {

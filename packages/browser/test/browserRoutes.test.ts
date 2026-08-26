@@ -41,7 +41,7 @@ function makeHarness() {
   });
   const append = async (sessionId: string, type: string, data: JsonObject): Promise<SessionEvent> => {
     calls.push({ kind: "append", type, data });
-    return { sessionId, seq: ++seq, ts: Date.now(), type, data } as SessionEvent;
+    return { sessionId, seq: ++seq, ts: Date.now(), type, data } as unknown as SessionEvent;
   };
   const routes = browserRoutes({ browser, append, shotsDir: join(mkdtempSync(join(tmpdir(), "polyth-shots-")), "shots") });
 

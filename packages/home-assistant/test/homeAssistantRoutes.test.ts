@@ -76,7 +76,7 @@ function harness() {
       path: url.pathname,
       method,
       body: async () => body,
-      json: (code, value) => {
+      json: (code: number, value: unknown) => {
         status = code;
         payload = value;
       },

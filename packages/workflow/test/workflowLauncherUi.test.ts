@@ -26,8 +26,9 @@ const { createRoot } = await import("react-dom/client");
 const { api } = await import("@polyth/session/web-api");
 const { activateProject, getState, setActiveView, setModels, startNewSession } = await import("../../../apps/web/src/store.ts");
 const { setWorkspaceMode } = await import("../../../apps/web/src/widgets/workspaceMode.ts");
-const { installBuiltinMiniWidgets, WORKFLOW_WIDGET_PLUGIN } =
+const { installBuiltinMiniWidgets } =
   await import("../../../apps/web/src/widgets/builtinMiniWidgets.tsx");
+const { WORKFLOW_WIDGET_PLUGIN } = await import("../widgets/index.tsx");
 const { default: Composer } = await import("../../../apps/web/src/components/Composer.tsx");
 const { default: WorkflowTimelineCard } = await import("../widgets/WorkflowTimelineCard.tsx");
 

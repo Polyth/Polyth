@@ -9,8 +9,8 @@ register("./tsxHooks.mjs", import.meta.url);
 
 const { defineWidgetPlugin, listWidgets, registerWidgetPlugin } = await import("../src/widgets/catalog.ts");
 const { BUILTIN_WIDGET_PLUGINS } = await import("../src/widgets/builtinWidgets.tsx");
-const { installBuiltinMiniWidgets, WORKFLOW_WIDGET_PLUGIN } =
-  await import("../src/widgets/builtinMiniWidgets.tsx");
+const { installBuiltinMiniWidgets } = await import("../src/widgets/builtinMiniWidgets.tsx");
+const { WORKFLOW_WIDGET_PLUGIN } = await import("../../../packages/workflow/widgets/index.tsx");
 const { installUsagePlugin, USAGE_WIDGET_PLUGIN } = await import("../../../packages/usage/widgets/usagePlugin.tsx");
 const { installGithubPlugin, GITHUB_WIDGET_PLUGIN } = await import("../../../packages/github/widgets/githubPlugin.tsx");
 
@@ -21,21 +21,16 @@ test("built-in catalog covers the complete default canvas", () => {
   const byId = new Map(widgets.map((widget) => [widget.id, widget]));
   for (const [id, title] of [
     ["core.chat", "Conversation"],
-    ["goals.current", "Current Task Plan"],
-    ["files.project-map", "Project Map"],
-    ["git.recent", "Recent Changes"],
     ["session.work-status", "Agent Actions"],
-    ["knowledge.notes", "Notes / Memory"],
     ["session.activity", "Activity Timeline"],
     ["core.quick-actions", "Quick actions"],
   ] as const) {
     assert.equal(byId.get(id)?.title, title);
     assert.equal(typeof byId.get(id)?.render, "function");
-    assert.equal(typeof byId.get(id)?.settingsRender, "function");
   }
   assert.equal(byId.has("core.composer"), false);
   assert.ok((BUILTIN_WIDGET_PLUGINS.find((plugin) => plugin.id === "session")?.widgets?.length ?? 0) > 1);
-  assert.ok((BUILTIN_WIDGET_PLUGINS.find((plugin) => plugin.id === "files")?.widgets?.length ?? 0) > 1);
+  assert.equal(BUILTIN_WIDGET_PLUGINS.some((plugin) => plugin.id === "files"), false);
 });
 
 test("workflow package declares a visible, placeable composer action", () => {
@@ -50,24 +45,21 @@ test("workflow package declares a visible, placeable composer action", () => {
   assert.equal(typeof widget.render, "function");
 });
 
-test("built-in mini-widget installer registers every workflow widget", () => {
-  installBuiltinMiniWidgets();
+test("workflow package registers its own composer widget", () => {
+  const unregister = registerWidgetPlugin(WORKFLOW_WIDGET_PLUGIN);
   const widgets = listWidgets().filter((widget) => widget.pluginId === WORKFLOW_WIDGET_PLUGIN.id);
   assert.deepEqual(
     widgets.map((widget) => widget.id).sort(),
-    ["workflow.active-run", "workflow.composer-action"],
+    ["workflow.composer-action"],
   );
   assert.ok(widgets.every((widget) => typeof widget.render === "function"));
+  unregister();
 });
 
-test("feature-owned Git and Terminal widgets contribute through the catalog slot", () => {
+test("shell catalog has no static Git or Terminal contributions", () => {
   const contributions = new Map(listSlots("widget.catalog").map((item) => [item.id, item]));
-  for (const [id, pluginId] of [
-    ["git.recent", "git"],
-    ["terminal.shell", "terminal"],
-  ] as const) {
-    assert.equal(contributions.get(id)?.meta?.pluginId, pluginId);
-    assert.equal(listWidgets().find((widget) => widget.id === id)?.pluginId, pluginId);
+  for (const id of ["git.recent", "terminal.shell"]) {
+    assert.equal(contributions.has(id), false);
   }
 });
 

@@ -118,7 +118,7 @@ function fakeRuntime() {
     },
     onEvent(callback) {
       listeners.add(callback);
-      return { dispose: () => listeners.delete(callback) };
+      return { dispose: () => { listeners.delete(callback); } };
     },
     dispose: async () => {},
   };
