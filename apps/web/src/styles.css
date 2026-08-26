@@ -12137,7 +12137,7 @@ body[data-density="comfortable"] .header { min-height: 60px; }
   display: grid;
   place-items: center;
   padding: 18px;
-  background: color-mix(in srgb, var(--backdrop) 88%, transparent);
+  background: rgba(8, 10, 14, .68);
 }
 .execution-viewer {
   width: min(100%, 1040px);

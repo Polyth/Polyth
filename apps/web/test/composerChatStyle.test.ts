@@ -55,12 +55,13 @@ test("message actions use one lightweight copy control and local hover zones", (
   assert.match(timeline, /tr\("timeline\.startNewMultiRunFromThisAnswer"\)/);
 });
 
-test("thinking stays unboxed while command output keeps a light boundary", () => {
+test("thinking and execution rows stay unboxed in the conversation", () => {
   const timeline = read("../src/components/Timeline.tsx");
+  const execution = read("../src/components/ExecutionRow.tsx");
   const css = read("../src/styles.css");
 
   assert.match(timeline, /<details className="reasoning" open=\{open\}>/);
-  assert.match(timeline, /<div className=\{`tool-card/);
+  assert.match(execution, /<div className=\{`tool-card execution-row/);
   assert.match(css, /\.reasoning\s*\{[^}]*border:\s*0;[^}]*background:\s*transparent;/s);
-  assert.match(css, /\.tool-card\s*\{[^}]*border-color:\s*var\(--border-soft\);[^}]*background:\s*color-mix/s);
+  assert.match(css, /\.tool-card\.execution-row\s*\{[^}]*border:\s*0;[^}]*background:\s*transparent;/s);
 });
