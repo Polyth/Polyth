@@ -6,7 +6,7 @@ import { Icon } from "../../icons.tsx";
 import { tr } from "../../i18n/index.ts";
 import { railIconFor } from "../../railIcons.ts";
 import {
-  setRailPlugin, toggleRailPlugin, useStore,
+  setOverlay, setRailPlugin, toggleRailPlugin, useStore,
 } from "../../store.ts";
 import { useUiSettings } from "../../uiPrefs.ts";
 import { useRailSurfaceModel } from "../ContextRail.tsx";
@@ -92,7 +92,7 @@ export default function MobileNavigationRail() {
         active: false,
         open: () => {
           setRailPlugin(null);
-          window.dispatchEvent(new CustomEvent("polyth:open-settings"));
+          setOverlay("settings");
         },
       }];
     }
@@ -136,7 +136,9 @@ export default function MobileNavigationRail() {
             aria-current={item.active ? "page" : undefined}
             onClick={() => {
               item.open();
-              focusDestinationHeading();
+              // Settings owns a modal focus trap and performs its own initial
+              // focus handoff. Workspace destinations need this rail handoff.
+              if (item.id !== "settings") focusDestinationHeading();
             }}
           >
             <item.icon />

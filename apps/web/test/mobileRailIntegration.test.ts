@@ -10,6 +10,8 @@ Object.assign(globalThis, {
   location: dom.location,
   HTMLElement: dom.HTMLElement,
   Element: dom.Element,
+  Event: dom.Event,
+  CustomEvent: dom.CustomEvent,
   requestAnimationFrame: (callback: FrameRequestCallback) =>
     setTimeout(() => callback(Date.now()), 0) as unknown as number,
   cancelAnimationFrame: (id: number) => clearTimeout(id),
@@ -59,6 +61,7 @@ const {
 const { default: Header } = await import("../src/components/Header.tsx");
 const { default: ContextRail } = await import("../src/components/ContextRail.tsx");
 const { default: SettingsModal } = await import("../src/components/SettingsModal.tsx");
+const { installNotificationCentre } = await import("../src/components/NotificationCentre.tsx");
 const { bootPackages } = await import("../src/packages/registry.ts");
 const { closePackageTour } = await import("../src/packages/onboarding/controller.ts");
 
@@ -82,6 +85,7 @@ function MountedShell() {
 }
 
 test("mobile app header focuses workspace destinations without escaping a destination modal", async () => {
+  installNotificationCentre();
   await bootPackages();
   applyProjectUpsert({ id: "p1", name: "Project one", path: "/workspace", createdAt: Date.now() });
   activateProject("p1");
@@ -157,7 +161,11 @@ test("mobile app header focuses workspace destinations without escaping a destin
     });
     const settings = container.querySelector<HTMLElement>('[role="dialog"][aria-label="Settings"]');
     assert.ok(settings, "Settings shortcut opens Settings");
-    assert.ok(settings!.contains(document.activeElement), "focus moves inside Settings");
+    const onboarding = container.querySelector<HTMLElement>('.package-tour[role="dialog"]');
+    assert.ok(onboarding, "first Settings visit opens its onboarding above Settings");
+    assert.ok(onboarding!.contains(document.activeElement), "focus stays in the topmost onboarding dialog");
+    await act(async () => { closePackageTour("dismiss"); });
+    assert.ok(settings!.contains(document.activeElement), "dismissing onboarding returns focus inside Settings");
 
     await act(async () => {
       setOverlay(null);

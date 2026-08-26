@@ -98,6 +98,7 @@ test("all mobile chat composers expose project and worktree targets", () => {
   const actions = read("../src/widgets/builtinMiniWidgets.tsx");
   const workflowLauncher = read("../src/components/WorkflowLauncher.tsx");
   const header = read("../src/components/Header.tsx");
+  const bottomNavigation = read("../src/components/workspace/WorkspaceBottomNav.tsx");
   const mobileNavigation = read("../src/components/mobile/MobileNavigationRail.tsx");
   const css = read("../src/styles.css");
 
@@ -122,9 +123,10 @@ test("all mobile chat composers expose project and worktree targets", () => {
   );
   assert.match(css, /\.composer-mobile\.composer-collapsed:not\(\.composer-has-draft\) \.composer-workflow \{ display: none; \}/);
   assert.match(css, /\.composer-mobile\.composer-has-draft \.composer-workflow \{ display: inline-flex; \}/);
-  assert.match(header, /displaySessionTitle\(session\.title, session\.id, firstUserText\)/);
+  assert.match(bottomNavigation, /displaySessionTitle\(session\?\.title \?\? "", session\?\.id\)/);
   assert.match(header, /<MobileNavigationRail \/>/);
-  assert.match(mobileNavigation, /tr\("header\.microphone"\)/);
+  assert.match(header, /<WorkspaceBottomNav \/>/);
+  assert.match(mobileNavigation, /ui\.mobileShortcuts/);
   assert.match(css, /\.polyth-gradient\s*\{[^}]*linear-gradient/s);
 });
 
@@ -153,6 +155,10 @@ test("compact panels and timeline actions use current mobile geometry", () => {
   const finalMobile = css.slice(css.lastIndexOf("@media (max-width: 820px)"));
 
   assert.match(finalMobile, /\.panel-sheet\s*\{[^}]*top:\s*60px;[^}]*bottom:\s*0;[^}]*z-index:\s*30;/s);
+  assert.match(
+    finalMobile,
+    /\.app:has\(> \.workspace-bottom-nav\) :is\(\.rail-fullscreen, \.panel-sheet\)\s*\{[^}]*bottom:\s*calc\(72px \+ var\(--safe-bottom\)\);/s,
+  );
   assert.match(finalMobile, /\.panel-sheet-backdrop\s*\{\s*z-index:\s*29;/);
   assert.match(
     finalMobile,

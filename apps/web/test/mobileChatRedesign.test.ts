@@ -283,7 +283,6 @@ test("a sheet opens on pointer-down and survives the keyboard dismissal (§22)",
     ["../src/components/ModelPicker.tsx", "model"],
     ["../src/components/Picker.tsx", "mode/thinking"],
     ["../src/components/mobile/SessionContextBar.tsx", "project/branch"],
-    ["../src/components/Header.tsx", "session menu"],
     ["../src/components/workspace/builtinSurfaces.tsx", "starter"],
   ] as const) {
     const src = await read(rel);
