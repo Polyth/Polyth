@@ -421,13 +421,13 @@ test("geometry gate across viewports and shell states", async () => {
 
       if (state.id === "loaded" && h === 900 && !modalOpen) {
         artifacts[`geometry-${w}`] = report;
-        await page.screenshot({ path: join(ARTIFACTS, `shot-${w}-loaded.png`) });
+        await page.screenshot({ path: join(ARTIFACTS, `fix_redesign_shell_${w}.png`) });
       }
       await page.context().close();
       contexts.pop();
     }
   }
-  await writeFile(join(ARTIFACTS, "geometry.json"), JSON.stringify(artifacts, null, 2));
+  await writeFile(join(ARTIFACTS, "fix_redesign_geometry.json"), JSON.stringify(artifacts, null, 2));
 });
 
 // =============================================================================
@@ -634,6 +634,72 @@ test("top shortcut rail reaches Terminal at 390", async () => {
   contexts.pop();
 });
 
+test("mobile shortcut settings support long-press touch and keyboard sorting", async () => {
+  const page = await openApp({ width: 390, height: 900, path: `/p/${PROJECT}/s/${S_LOADED}`, ready: ".timeline .msg" });
+  await page.click(".mobile-shortcut-settings");
+  await page.waitForSelector('[role="dialog"][aria-label="Settings"]', { state: "visible" });
+  if (await page.locator(".package-tour").count()) {
+    await page.keyboard.press("Escape");
+    await page.waitForSelector(".package-tour", { state: "hidden" });
+  }
+  await page.getByRole("button", { name: "Widgets & Layout" }).click();
+  const card = page.locator('[data-settings-item="widgets.mobileShortcuts"]');
+  await card.waitFor({ state: "visible" });
+
+  const idsBefore = await card.locator("[data-widget-order-id]:not(.hidden)").evaluateAll((chips) =>
+    chips.map((chip) => (chip as HTMLElement).dataset.widgetOrderId!));
+  assert.ok(idsBefore.length >= 2, "fixture needs at least two visible mobile shortcuts");
+  const source = card.locator(`[data-widget-order-id="${idsBefore[1]}"] .widget-drag-handle`);
+  const target = card.locator(`[data-widget-order-id="${idsBefore[0]}"]`);
+  const sourceBox = await source.boundingBox();
+  const targetBox = await target.boundingBox();
+  assert.ok(sourceBox && targetBox, "touch-sort endpoints must be visible");
+
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send("Input.dispatchTouchEvent", {
+    type: "touchStart",
+    touchPoints: [{ x: sourceBox!.x + sourceBox!.width / 2, y: sourceBox!.y + sourceBox!.height / 2, id: 1 }],
+  });
+  await page.waitForTimeout(450);
+  await cdp.send("Input.dispatchTouchEvent", {
+    type: "touchMove",
+    touchPoints: [{ x: targetBox!.x + targetBox!.width / 2, y: targetBox!.y + targetBox!.height / 2, id: 1 }],
+  });
+  await page.waitForTimeout(80);
+  await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+  await page.waitForFunction(
+    ({ cardSelector, first }: { cardSelector: string; first: string }) =>
+      document.querySelector(`${cardSelector} [data-widget-order-id]:not(.hidden)`)?.getAttribute("data-widget-order-id") === first,
+    { cardSelector: '[data-settings-item="widgets.mobileShortcuts"]', first: idsBefore[1]! },
+  );
+
+  const firstHandle = card.locator("[data-widget-order-id]:not(.hidden) .widget-drag-handle").first();
+  await firstHandle.focus();
+  await page.keyboard.press("ArrowRight");
+  await page.waitForFunction(
+    ({ cardSelector, first }: { cardSelector: string; first: string }) =>
+      document.querySelector(`${cardSelector} [data-widget-order-id]:not(.hidden)`)?.getAttribute("data-widget-order-id") === first,
+    { cardSelector: '[data-settings-item="widgets.mobileShortcuts"]', first: idsBefore[0]! },
+  );
+
+  const hitBoxes = await card.locator("button, input").evaluateAll((controls) => controls
+    .filter((control) => {
+      const style = getComputedStyle(control);
+      return style.display !== "none" && style.visibility !== "hidden";
+    })
+    .map((control) => {
+      const rect = control.getBoundingClientRect();
+      return { name: control.getAttribute("aria-label") ?? control.textContent?.trim() ?? control.tagName, width: rect.width, height: rect.height };
+    }));
+  for (const box of hitBoxes) {
+    assert.ok(box.width >= 44 && box.height >= 44, `${box.name} is ${box.width}×${box.height}, needs 44×44`);
+  }
+  await page.screenshot({ path: join(ARTIFACTS, "fix_redesign_sorting_390.png") });
+
+  await page.context().close();
+  contexts.pop();
+});
+
 // =============================================================================
 // 6. Resize sequence keeps geometry, focus, and pressed state truthful
 // =============================================================================
@@ -748,8 +814,8 @@ test("zoomed 720×450@2x hero is fully reachable and reflows in one dimension", 
     assert.ok(ok, `Tab step ${i + 1}: focused control is offscreen at 200% zoom`);
   }
 
-  await page.screenshot({ path: join(ARTIFACTS, "shot-zoom-720x450@2x.png") });
-  await writeFile(join(ARTIFACTS, "geometry-zoom.json"), JSON.stringify(geo, null, 2));
+  await page.screenshot({ path: join(ARTIFACTS, "fix_redesign_zoom_720x450@2x.png") });
+  await writeFile(join(ARTIFACTS, "fix_redesign_geometry_zoom.json"), JSON.stringify(geo, null, 2));
   await page.context().close();
   contexts.pop();
 });
