@@ -87,11 +87,17 @@ test("320px source controls expose 44px tabs, copy actions, and chips", { skip: 
       return { width: box.width, height: box.height, left: box.left, top: box.top };
     };
     const file = rect("#file-ref");
+    const fileStyle = getComputedStyle(document.querySelector("#file-ref")!);
     return {
       log: rect("#log-tab"),
       copy: rect(".copy-btn"),
       chip: rect("#all-chip"),
       file,
+      viewport: window.innerWidth,
+      phoneMedia: matchMedia("(max-width: 480px)").matches,
+      fileMinWidth: fileStyle.minWidth,
+      fileMinHeight: fileStyle.minHeight,
+      fileDisplay: fileStyle.display,
     };
   });
   for (const [name, target] of Object.entries({
@@ -100,8 +106,11 @@ test("320px source controls expose 44px tabs, copy actions, and chips", { skip: 
     chip: targets.chip,
     file: targets.file,
   })) {
-    assert.ok(target.width >= 44, `${name} width is ${target.width}px`);
-    assert.ok(target.height >= 44, `${name} height is ${target.height}px`);
+    const detail = name === "file"
+      ? ` (viewport=${targets.viewport}, media=${targets.phoneMedia}, min=${targets.fileMinWidth}×${targets.fileMinHeight}, display=${targets.fileDisplay})`
+      : "";
+    assert.ok(target.width >= 44, `${name} width is ${target.width}px${detail}`);
+    assert.ok(target.height >= 44, `${name} height is ${target.height}px${detail}`);
   }
 });
 
