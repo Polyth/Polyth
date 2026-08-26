@@ -254,16 +254,53 @@ export function saveDraft(sessionId: string, text: string): void {
   }
 }
 
+function copyTextFallback(text: string): boolean {
+  if (typeof document === "undefined" || !document.body || typeof document.execCommand !== "function") {
+    return false;
+  }
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.setAttribute("readonly", "");
+  textarea.setAttribute("aria-hidden", "true");
+  textarea.style.position = "fixed";
+  textarea.style.inset = "0 auto auto 0";
+  textarea.style.opacity = "0";
+  textarea.style.pointerEvents = "none";
+  document.body.appendChild(textarea);
+  try {
+    textarea.select();
+    textarea.setSelectionRange(0, text.length);
+    return document.execCommand("copy");
+  } catch {
+    return false;
+  } finally {
+    textarea.remove();
+  }
+}
+
 /** Copy text to the clipboard; injectable for tests. Returns success. */
-export async function copyText(
+export function copyText(
   text: string,
   clip?: { writeText(t: string): Promise<void> },
 ): Promise<boolean> {
+  const clipboard = clip ?? (
+    typeof navigator !== "undefined"
+      && globalThis.isSecureContext === true
+      && typeof navigator.clipboard?.writeText === "function"
+      ? navigator.clipboard
+      : undefined
+  );
+  if (!clipboard) {
+    // Keep the legacy operation in the original user-gesture call stack.
+    return Promise.resolve(copyTextFallback(text));
+  }
   try {
-    await (clip ?? navigator.clipboard).writeText(text);
-    return true;
+    return clipboard.writeText(text).then(
+      () => true,
+      () => copyTextFallback(text),
+    );
   } catch {
-    return false;
+    return Promise.resolve(copyTextFallback(text));
   }
 }
 

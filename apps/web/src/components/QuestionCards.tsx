@@ -13,20 +13,19 @@ import AdaptiveTextInput from "./input/AdaptiveTextInput.tsx";
 import { announce } from "./a11y/live.tsx";
 import { tr } from "../i18n/index.ts";
 import { Icon } from "../icons.tsx";
+import { copyText } from "../utils.ts";
 
 // Draft answers survive card remounts (tab switches, WS reconnect replays).
 const drafts = new Map<string, AnswerMap>();
 
 const OTHER = "__other__";
 
-function copyText(text: string, what: string): void {
-  const done = () => announce(tr("questioncards.valueCopiedToClipboard", { what: what }));
-  const fail = () => announce(tr("questioncards.copyFailedClipboardUnavailable"));
-  try {
-    void navigator.clipboard.writeText(text).then(done, fail);
-  } catch {
-    fail();
-  }
+function copyQuestions(text: string, what: string): void {
+  void copyText(text).then((ok) => {
+    announce(ok
+      ? tr("questioncards.valueCopiedToClipboard", { what: what })
+      : tr("questioncards.copyFailedClipboardUnavailable"));
+  });
 }
 
 function OptionField({ item, answer, onChange }: {
@@ -143,13 +142,13 @@ function QuestionStepper({ q }: { q: PendingQuestion }) {
             className="question-copy-btn"
             aria-label={tr("questioncards.copyQuestionsAsMarkdown")}
             title={tr("questioncards.copyAsMarkdown")}
-            onClick={() => copyText(questionsToMarkdown(items, answers), "Markdown")}
+            onClick={() => copyQuestions(questionsToMarkdown(items, answers), "Markdown")}
           ><Icon.markdown /></button>
           <button
             className="question-copy-btn"
             aria-label={tr("questioncards.copyQuestionsAsJson")}
             title={tr("questioncards.copyAsJson")}
-            onClick={() => copyText(questionsToJson(q.requestId, items, answers), "JSON")}
+            onClick={() => copyQuestions(questionsToJson(q.requestId, items, answers), "JSON")}
           ><Icon.json /></button>
         </span>
       </div>
