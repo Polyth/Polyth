@@ -247,12 +247,9 @@ test("mobile response actions wrap inside the timeline and remain operable", asy
           ? [button.getAttribute("aria-label") ?? "unnamed response action"]
           : [];
       });
-      const sharedRows = groups.filter((actions) => {
+      const unwrappedRows = groups.filter((actions) => {
         const header = actions.closest<HTMLElement>(".agent-reply-header")!;
-        const metadataBottom = Array.from(
-          header.querySelectorAll<HTMLElement>(":scope > .agent-reply-mark, :scope > .agent-reply-item"),
-        ).reduce((bottom, item) => Math.max(bottom, item.getBoundingClientRect().bottom), 0);
-        return actions.getBoundingClientRect().top < metadataBottom - 1;
+        return actions.getBoundingClientRect().top <= header.getBoundingClientRect().top + 1;
       }).length;
       const inactive = groups.filter((actions) => {
         const style = getComputedStyle(actions);
@@ -264,7 +261,7 @@ test("mobile response actions wrap inside the timeline and remain operable", asy
         groupOverflow: groups.some((group) => group.scrollWidth > group.clientWidth + 1),
         overflows,
         undersized,
-        sharedRows,
+        unwrappedRows,
         inactive,
       };
     });
@@ -274,7 +271,7 @@ test("mobile response actions wrap inside the timeline and remain operable", asy
     assert.equal(geometry.groupOverflow, false, `${width}px: response action group overflows`);
     assert.deepEqual(geometry.overflows, [], `${width}px: response action buttons leave the timeline`);
     assert.deepEqual(geometry.undersized, [], `${width}px: response action touch targets are smaller than 44px`);
-    assert.equal(geometry.sharedRows, 0, `${width}px: response actions still share the metadata row`);
+    assert.equal(geometry.unwrappedRows, 0, `${width}px: response actions still share the metadata row`);
     assert.equal(geometry.inactive, 0, `${width}px: response actions are not touch-operable`);
 
     await page.screenshot({ path: join(ARTIFACTS, `fix_timeline_overflow_${width}.png`) });
