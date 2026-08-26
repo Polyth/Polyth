@@ -118,6 +118,7 @@ test("task tracker surfaces enforce mobile containment, touch, zoom, and safe-ar
   const css = await readFile(new URL("../src/widgets/taskTrackers.css", import.meta.url), "utf8");
   assert.match(css, /\.tt-board button,[\s\S]*min-height:\s*44px/);
   assert.match(css, /@container task-tracker \(max-width: 480px\)[\s\S]*font-size:\s*16px/);
+  assert.match(css, /@container task-tracker \(max-width: 480px\)[\s\S]*\.tt-empty[\s\S]*min-height:\s*0/);
   assert.match(css, /@container task-tracker \(max-width: 820px\)[\s\S]*\.tt-detail[\s\S]*position:\s*absolute/);
   assert.match(css, /@container task-tracker \(max-width: 560px\)[\s\S]*\.tt-board-header[\s\S]*flex-direction:\s*column/);
   assert.match(css, /\.tt-task-surface[\s\S]*overflow:\s*auto/);
