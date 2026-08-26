@@ -126,8 +126,8 @@ test("header owns the drawer trigger and registry-backed compact navigation rail
   assert.ok(navigation.includes('className="mobile-shortcut-track"'), "compact navigation is a swipeable icon rail instead of a select menu");
   assert.ok(!header.includes("const VIEW_GROUPS"), "no duplicate hard-coded view list");
   assert.ok(
-    actions.includes('tr("widgets.builtinminiwidgets.turnOffAutoApprove")')
-      && actions.includes('tr("widgets.builtinminiwidgets.turnOnAutoApprove")'),
+    actions.includes('"Turn off auto-approve"')
+      && actions.includes('"Turn on auto-approve"'),
     "placeable auto-approve control exposes the resulting action in its accessible name",
   );
 });
@@ -427,7 +427,7 @@ test("header renders configured primary capabilities and permanent Terminal laun
   assert.ok(rail.includes("configuredRailButtons"), "rail renders only configured tool buttons");
   assert.ok(rail.includes('capability.descriptor.id === "terminal"'), "Terminal remains a guaranteed rail launcher");
   assert.ok(!rail.includes("draggable"), "runtime rail buttons do not expose drag-only reordering");
-  assert.ok(widgets.includes("<MoveControls"), "Widgets settings expose explicit rail reorder controls");
+  assert.ok(widgets.includes("moveCapabilityToOtherRail"), "Widgets settings expose explicit rail placement controls");
   assert.ok(!store.includes("moreOpen:"), "dead global More-tools state stays removed");
   assert.ok(!store.includes("setMoreOpen"), "dead global More-tools action stays removed");
 });

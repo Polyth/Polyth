@@ -783,11 +783,6 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
 .project-card > * { position: relative; z-index: 1; }
 .project-card:hover { background: transparent; }
 .project-card:hover::before { background: var(--elevated); opacity: 1; }
-.project-card.active::before {
-  background: color-mix(in srgb, var(--accent) 15%, var(--elevated));
-  box-shadow: 0 0 14px color-mix(in srgb, var(--accent) 28%, transparent);
-  opacity: 1;
-}
 .project-new-session,
 .project-worktree-btn,
 .project-menu-btn {
@@ -3781,25 +3776,6 @@ color: var(--text-dim);
   }
 }
 
-@media (min-width: 1101px) {
-.strip-btn {
-    width: 100%;
-    grid-template-columns: 20px minmax(0, 1fr);
-    justify-content: start;
-    gap: 7px;
-    padding-inline: 8px;
-  }
-  .strip-btn::after {
-    content: attr(aria-label);
-    overflow: hidden;
-    color: var(--text-dim);
-    font-size: var(--font-meta);
-    font-weight: 560;
-    text-align: start;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-}
 /* ================== end UX-COMPOSER-DISC ================================== */
 
 @media (max-height: 560px) {
@@ -7470,6 +7446,8 @@ display: contents;
 
   .composer-mobile .composer-add-label { display: none; }
 .composer-mobile .composer-add-trigger,
+.composer-mobile .composer-auto-approve,
+.composer-mobile .composer-workflow,
 .composer-mobile .composer-goals {
 width: var(--tap);
     min-width: var(--tap);

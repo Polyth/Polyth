@@ -5,10 +5,12 @@ import { useResolvedCapabilities } from "../../capabilities.ts";
 import { Icon } from "../../icons.tsx";
 import { tr } from "../../i18n/index.ts";
 import { railIconFor } from "../../railIcons.ts";
+import { listSurfaces } from "../../surfaces.ts";
 import {
   setOverlay, setRailPlugin, toggleRailPlugin, useStore,
 } from "../../store.ts";
 import { useUiSettings } from "../../uiPrefs.ts";
+import { getWorkspaceSurface } from "../../workspace/surfaceRegistry.ts";
 import { useRailSurfaceModel } from "../ContextRail.tsx";
 
 interface ShortcutItem {
@@ -111,6 +113,9 @@ export default function MobileNavigationRail() {
     const destinationView = VIEW_OF_CAPABILITY[id];
     const pane = PANE_OF_CAPABILITY[id];
     const panel = PANEL_OF_CAPABILITY[id];
+    const workspaceSurface = getWorkspaceSurface(id);
+    const packageSurface = listSurfaces().find((surface) =>
+      (surface.capabilityId ?? surface.id) === id);
     return [{
       id,
       label: capability.descriptor.label,
@@ -119,7 +124,11 @@ export default function MobileNavigationRail() {
         ? view === destinationView && rail === null
         : pane !== undefined
           ? rail === pane
-          : panel !== undefined && rail === panel,
+          : panel !== undefined
+            ? rail === panel
+            : workspaceSurface !== undefined
+              ? view === id && rail === null
+              : packageSurface !== undefined && rail === packageSurface.id,
       open: capability.descriptor.open,
     }];
   });

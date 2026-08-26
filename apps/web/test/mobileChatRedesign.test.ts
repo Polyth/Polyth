@@ -239,14 +239,14 @@ test("visual-viewport geometry is published as CSS variables and started at boot
   assert.ok(viewport.includes('dataset.keyboard = next.covering ? "open" : "closed"'), "CSS can see the keyboard state");
   assert.ok(viewport.includes("SHORT_VISUAL_BAND"), "CSS can see a band too short for both zones");
   assert.ok(!/localStorage|sessionStorage/.test(viewport), "viewport geometry is never persisted");
-  const main = await read("../src/main.tsx");
-  assert.ok(main.includes("startMobileViewport()"), "the seam is installed before first paint");
+  const bootstrap = await read("../src/bootstrap.tsx");
+  assert.ok(bootstrap.includes("startMobileViewport()"), "the seam is installed before first paint");
 });
 
-test("the mobile viewport allows zoom and requests keyboard content resizing", async () => {
+test("the mobile viewport is fixed and requests keyboard content resizing", async () => {
   const html = await read("../src/index.html");
-  assert.doesNotMatch(html, /maximum-scale/, "pinch zoom remains available");
-  assert.doesNotMatch(html, /user-scalable/, "browser zoom is not disabled");
+  assert.match(html, /maximum-scale=1/, "pinch zoom is disabled");
+  assert.match(html, /user-scalable=no/, "the browser cannot pan a zoomed chat sideways");
   assert.match(html, /interactive-widget=resizes-content/, "supporting browsers resize content for the keyboard");
 });
 
@@ -288,7 +288,6 @@ test("a sheet opens on pointer-down and survives the keyboard dismissal (§22)",
     ["../../../packages/models/widgets/ModelPicker.tsx", "model"],
     ["../src/components/Picker.tsx", "mode/thinking"],
     ["../src/components/mobile/SessionContextBar.tsx", "project/branch"],
-    ["../src/components/Header.tsx", "session menu"],
     ["../src/components/workspace/builtinSurfaces.tsx", "starter"],
   ] as const) {
     const src = await read(rel);

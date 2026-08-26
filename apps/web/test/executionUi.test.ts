@@ -202,7 +202,7 @@ const { act, createElement } = await import("react");
 const { createRoot } = await import("react-dom/client");
 const { default: ExecutionRow } = await import("../src/components/ExecutionRow.tsx");
 const { WorkedGroup } = await import("../src/components/Timeline.tsx");
-const { default: PermissionBanner } = await import("../src/components/PermissionBanner.tsx");
+const { default: PermissionBanner } = await import("../../../packages/permissions/widgets/PermissionBanner.tsx");
 const { activateSession, getState, setSessions } = await import("../src/store.ts");
 
 test("execution row renders collapsed value first, expands inline, and opens level three on demand", async () => {

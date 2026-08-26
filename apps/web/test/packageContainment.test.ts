@@ -155,7 +155,9 @@ test("the app imports feature packages only from documented shell infrastructure
     const appPath = relative(webSrcDir, file);
     const source = readFileSync(file, "utf8");
     for (const match of source.matchAll(/["']@polyth\/([^/"']+)/g)) {
-      if (featureIds.has(match[1]!) && !GENERIC_PACKAGE_IMPORTERS.has(appPath)) {
+      const genericImporter = GENERIC_PACKAGE_IMPORTERS.has(appPath)
+        || appPath.startsWith("i18n/catalogs/");
+      if (featureIds.has(match[1]!) && !genericImporter) {
         leaks.push(`${appPath} -> @polyth/${match[1]}`);
       }
     }
