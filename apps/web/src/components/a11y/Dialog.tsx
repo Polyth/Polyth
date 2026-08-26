@@ -67,8 +67,12 @@ function lockBodyScroll(): () => void {
 }
 
 function isolateDocumentSiblings(root: HTMLElement | null): () => void {
-  if (!root) return () => {};
-  const siblings = [...document.body.children].filter((element) => element !== root);
+  const parent = root?.parentElement;
+  if (!root || !parent) return () => {};
+  // Dialogs normally render inside #root. Hiding body children in that case
+  // would inert #root itself, including the dialog. Isolate the backdrop's
+  // actual siblings so the modal remains exposed to focus and accessibility.
+  const siblings = [...parent.children].filter((element) => element !== root);
   const previous = siblings.map((element) => ({
     element,
     ariaHidden: element.getAttribute("aria-hidden"),

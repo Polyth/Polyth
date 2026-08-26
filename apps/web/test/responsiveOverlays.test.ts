@@ -39,6 +39,8 @@ test("modal primitives lock background scroll and retain touch dismissal", async
   assert.match(dialog, /export function useModalScrollLock/);
   assert.match(dialog, /documentElement\.dataset\.modalSurface = "open"/);
   assert.match(dialog, /useModalScrollLock\(enabled && open\)/);
+  assert.match(dialog, /root\?\.parentElement/);
+  assert.match(dialog, /\[\.\.\.parent\.children\]\.filter\(\(element\) => element !== root\)/);
   assert.match(dialog, /onPointerDown=\{\(e\) => \{ if \(e\.target === e\.currentTarget\) onClose\(\); \}\}/);
   assert.match(settings, /useModalScrollLock\(true\)/);
   assert.match(settings, /className="settings-mobile-nav-head"/);
