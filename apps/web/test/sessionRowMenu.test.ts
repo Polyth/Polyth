@@ -122,6 +122,29 @@ test("right-click opens the row-scoped menu with delete/archive/pin and menu ARI
   }
 });
 
+test("the visible session ellipsis opens the same menu and receives returned focus", async () => {
+  const { container, unmount } = await mountList();
+  try {
+    const row = rowOf(container, "Idle session");
+    const trigger = row.querySelector<HTMLButtonElement>(".session-menu-btn");
+    assert.ok(trigger, "session actions have a discoverable ellipsis trigger");
+    assert.equal(trigger!.getAttribute("aria-haspopup"), "menu");
+    await act(async () => { trigger!.click(); });
+    assert.ok(row.querySelector('[role="menu"]'), "ellipsis opens the row menu");
+    assert.equal(trigger!.getAttribute("aria-expanded"), "true");
+
+    await act(async () => {
+      document.activeElement!.dispatchEvent(new KeyboardEventCtor("keydown", {
+        key: "Escape", bubbles: true, cancelable: true,
+      }));
+    });
+    assert.equal(row.querySelector('[role="menu"]'), null);
+    assert.equal(document.activeElement, trigger, "focus returns to the ellipsis opener");
+  } finally {
+    await unmount();
+  }
+});
+
 test("right-click Copy session ID writes the exact row id to the clipboard", async () => {
   const { container, unmount } = await mountList();
   try {

@@ -4,7 +4,7 @@ import { readFile } from "node:fs/promises";
 
 const source = (path: string) => readFile(new URL(path, import.meta.url), "utf8");
 
-test("session rows reserve one right status zone and have no ellipsis action", async () => {
+test("session rows reserve one status zone and expose an aligned action menu", async () => {
   const sessions = await source("../src/components/sidebar/SessionList.tsx");
   const rowStart = sessions.indexOf("function SessionRow(");
   const rowEnd = sessions.indexOf("export default function SessionList", rowStart);
@@ -15,8 +15,9 @@ test("session rows reserve one right status zone and have no ellipsis action", a
   assert.match(row, /className="session-status-zone"/);
   assert.match(row, /<AttentionBadges status=\{rowStatus\} \/>/);
   assert.match(row, /<StatusBadge status=\{rowStatus\} \/>/);
-  assert.doesNotMatch(row, /session-actions/);
-  assert.doesNotMatch(row, /<Icon\.more/);
+  assert.match(row, /className="session-menu-btn"/);
+  assert.match(row, /<Icon\.more \/>/);
+  assert.match(row, /aria-haspopup="menu"/);
   assert.doesNotMatch(row, /session-title-line/);
   assert.match(row, /onTouchStart=\{startLongPress\}/);
 });
@@ -68,6 +69,10 @@ test("sidebar geometry scales type from ui font size and density controls rows",
     "the status column only takes the width its content needs");
   assert.match(css, /\.session-quick\s*\{[\s\S]*?right:\s*8px/,
     "Shift quick actions align with the session row's right content inset");
+  assert.match(css, /\.session-menu-btn\s*\{[\s\S]*?right:\s*0;[\s\S]*?width:\s*36px;[\s\S]*?border:\s*0;/,
+    "session and project action columns share a clean edge without a button outline");
+  assert.match(css, /@media \(max-width:\s*820px\)[\s\S]*?\.project-card-shell\s*\{[\s\S]*?repeat\(3,\s*var\(--tap\)\)/,
+    "mobile project actions use real grid tracks matching the session menu target");
   assert.doesNotMatch(css, /\.session-actions\b/);
   assert.doesNotMatch(css, /\.session-sync-icon\b/);
 });

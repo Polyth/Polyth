@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { formatCombo } from "@polyth/hotkeys";
 import {
   closeWorkspacePane, getState, setActiveView, useActiveModel, useStore,
@@ -10,10 +10,8 @@ import { displaySessionTitle, MOD } from "../format.ts";
 import { friendlyError } from "../settings.ts";
 import { contextGauge, type ContextGauge } from "../reduce.ts";
 import { useShellMode, type ShellMode } from "../responsiveShell.ts";
-import Picker from "./Picker.tsx";
-import type { PickerItem } from "../picker.ts";
 import {
-  TECHNICAL_GROUP_LABEL, useResolvedCapabilities,
+  useResolvedCapabilities,
   type ResolvedCapability,
 } from "../capabilities.ts";
 import { PANEL_OF_CAPABILITY, PANE_OF_CAPABILITY, VIEW_OF_CAPABILITY } from "../builtinCapabilities.ts";
@@ -21,9 +19,10 @@ import SlotHost from "./slots/SlotHost.ts";
 import { Icon } from "../icons.tsx";
 import { setWorkspaceMode, useWorkspaceMode } from "../widgets/workspaceMode.ts";
 import { useDismissibleMenu } from "./a11y/Menu.ts";
-import { setUiSettings, useUiSettings } from "../uiPrefs.ts";
+import { useUiSettings } from "../uiPrefs.ts";
 import { dismissKeyboard } from "../mobileViewport.ts";
 import SessionMenu from "./mobile/SessionMenu.tsx";
+import MobileNavigationRail from "./mobile/MobileNavigationRail.tsx";
 import { useSheetTrigger } from "./mobile/sheetTrigger.ts";
 import { api, type GithubStatusDto } from "../api.ts";
 import { tr } from "../i18n/index.ts";
@@ -182,37 +181,6 @@ function ContextRing({ gauge }: { gauge: ContextGauge }) {
   );
 }
 
-/** One bounded workspace picker for compact layouts. Pane capabilities belong
- * here too: otherwise primary tools such as Browser disappear below 821px. */
-function CompactViewPicker({ view }: { view: AppView }) {
-  const resolved = useResolvedCapabilities();
-  const rail = useStore((s) => s.railPlugin);
-  const destinations = resolved.filter((c) =>
-    VIEW_OF_CAPABILITY[c.descriptor.id] !== undefined
-    || PANE_OF_CAPABILITY[c.descriptor.id] !== undefined);
-  const items: PickerItem[] = destinations.map((c) => ({
-    id: c.descriptor.id,
-    label: c.descriptor.label,
-    group: c.tier === "primary" ? "" : c.tier === "more" ? tr("header.moreTools") : TECHNICAL_GROUP_LABEL,
-  }));
-  const currentId = destinations.find((c) => PANE_OF_CAPABILITY[c.descriptor.id] === rail)?.descriptor.id
-    ?? destinations.find((c) => VIEW_OF_CAPABILITY[c.descriptor.id] === view)?.descriptor.id
-    ?? "session";
-  const current = items.find((i) => i.id === currentId)?.label ?? tr("header.workspace");
-  return (
-    <Picker
-      className="header-view-picker"
-      label={tr("header.view")}
-      ariaLabel={tr("header.changeWorkspaceViewCurrentValue", { current: current })}
-      triggerIcon={capabilityIcon(currentId)}
-      items={items}
-      value={currentId}
-      onPick={(id) => destinations.find((c) => c.descriptor.id === id)?.descriptor.open()}
-      mobileSheet
-    />
-  );
-}
-
 /** UX-A390: the drawer trigger is the compact-mode entry to projects and
  *  sessions. Opening the drawer closes an open panel first — there is at most
  *  one shell-modal surface. */
@@ -318,79 +286,6 @@ function UserMenu({ githubUser }: { githubUser: GithubStatusDto["user"] }) {
   );
 }
 
-function MobileComposerControlsMenu() {
-  const ui = useUiSettings();
-  const [open, setOpen] = useState(false);
-  const menuRef = useRef<HTMLDivElement>(null);
-  const triggerRef = useRef<HTMLButtonElement>(null);
-  const onMenuKey = useDismissibleMenu({
-    open,
-    menuRef,
-    triggerRef,
-    onClose: () => setOpen(false),
-  });
-  const controls = [
-    {
-      id: "dictation",
-      label: tr("header.microphone"),
-      on: ui.showDictate,
-      icon: <Icon.mic />,
-      toggle: () => setUiSettings({ showDictate: !ui.showDictate }),
-    },
-  ];
-  return (
-    <div className="mobile-composer-menu">
-      <button
-        ref={triggerRef}
-        className="icon-btn mobile-header-action"
-        aria-label={tr("header.composerControls")}
-        title={tr("header.composerControls")}
-        aria-haspopup="menu"
-        aria-expanded={open}
-        onClick={() => setOpen((value) => !value)}
-      >
-        <Icon.sliders />
-      </button>
-      {open && (
-        <div
-          ref={menuRef}
-          className="menu-popup mobile-composer-popup"
-          role="menu"
-          aria-label={tr("header.composerControls")}
-          onKeyDown={onMenuKey}
-        >
-          <div className="mobile-composer-popup-title">{tr("header.composerControls")}</div>
-          {controls.map((control) => (
-            <button
-              key={control.id}
-              role="menuitemcheckbox"
-              aria-checked={control.on}
-              onClick={control.toggle}
-            >
-              <span className="mobile-control-icon" aria-hidden="true">{control.icon}</span>
-              <span>{control.label}</span>
-              <span className={`mobile-control-switch${control.on ? " on" : ""}`} aria-hidden="true">
-                <i />
-              </span>
-            </button>
-          ))}
-          <div className="menu-sep" />
-          <button
-            role="menuitem"
-            onClick={() => {
-              setOpen(false);
-              window.dispatchEvent(new CustomEvent("polyth:open-settings"));
-            }}
-          >
-            <span className="mobile-control-icon" aria-hidden="true"><Icon.gear /></span>
-            <span>{tr("header.allSettings")}</span>
-          </button>
-        </div>
-      )}
-    </div>
-  );
-}
-
 export default function Header() {
   const session = useStore((s) => s.sessions.find((x) => x.id === s.activeSessionId) ?? null);
   const project = useStore((s) => s.projectRegistry.projects.find((p) => p.id === s.activeProjectId) ?? null);
@@ -454,7 +349,6 @@ export default function Header() {
           <Icon.chevronDown />
         </button>
         {sessionMenuOpen && <SessionMenu onClose={() => setSessionMenuOpen(false)} />}
-        <CompactViewPicker view={view} />
         <span className="header-spacer" />
         <button
           className="icon-btn mobile-header-action"
@@ -469,8 +363,7 @@ export default function Header() {
         >
           <Icon.refresh />
         </button>
-        <MobileComposerControlsMenu />
-        <UserMenu githubUser={githubUser} />
+        <MobileNavigationRail />
         <SlotHost slot="app.window.controls" />
       </header>
     );
@@ -490,7 +383,6 @@ export default function Header() {
             <Icon.files />
           </button>
         )}
-        {compact && chatSurface && <CompactViewPicker view={view} />}
         {(!compact || !chatSurface) && (
           <button className="header-brand" aria-label={tr("header.polythHome")} onClick={() => switchWorkspaceMode("chat")}>
             <span className="polyth-mark">{tr("header.p")}</span>
@@ -527,6 +419,7 @@ export default function Header() {
             />
           </div>
         )}
+        {compact && <MobileNavigationRail />}
         {(!compact || !chatSurface) && <UserMenu githubUser={githubUser} />}
         <SlotHost slot="app.window.controls" />
       </header>

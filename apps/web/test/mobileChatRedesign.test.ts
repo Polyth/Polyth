@@ -453,6 +453,24 @@ test("the phone header keeps two actions and a real session menu", async () => {
   assert.ok(menu.includes('from "./Sheet.tsx"'), "the session menu is the same sheet");
 });
 
+test("compact views use the top capability rail without a fixed bottom menu", async () => {
+  const header = await read("../src/components/Header.tsx");
+  const navigation = await read("../src/components/mobile/MobileNavigationRail.tsx");
+  const app = await read("../src/App.tsx");
+  const css = await read("../src/styles.css");
+
+  assert.equal(
+    header.match(/<MobileNavigationRail \/>/g)?.length,
+    2,
+    "chat and general compact headers both render the same rail trigger",
+  );
+  assert.ok(navigation.includes("useResolvedCapabilities()"), "the rail follows configured capabilities");
+  assert.ok(navigation.includes("useRailSurfaceModel()"), "notification and plugin surfaces stay reachable");
+  assert.ok(navigation.includes("setUiSettings({ showDictate:"), "the replaced controls menu loses no dictation setting");
+  assert.doesNotMatch(app, /WorkspaceBottomNav/, "the shell does not mount a second navigation bar");
+  assert.doesNotMatch(css, /\.workspace-bottom-nav|\.session-bottom-nav/, "obsolete bottom-nav geometry is removed");
+});
+
 test("haptics are opt-in, bounded, and respect reduced motion", async () => {
   const haptics = await read("../src/haptics.ts");
   assert.ok(haptics.includes('matchMedia("(prefers-reduced-motion: reduce)")'), "reduced motion silences it");
