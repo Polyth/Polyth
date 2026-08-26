@@ -1,0 +1,16 @@
+{
+  "name": "@polyth/task-trackers",
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./widgets": "./widgets/index.ts"
+  },
+  "polyth": {
+    "serverEntry": "./src/serverEntry.ts"
+  },
+  "dependencies": {
+    "@polyth/contracts": "0.1.0",
+    "@polyth/plugins": "0.1.0"
+  }
+}
