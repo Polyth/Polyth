@@ -110,8 +110,23 @@ function CapabilityNav() {
     return panel !== undefined && rail === panel;
   };
 
-  const primaries = resolved.filter((c) =>
-    c.tier === "primary" && c.descriptor.id !== "terminal" && c.descriptor.available());
+  const eligiblePrimaries = resolved.filter((c) =>
+    (c.tier === "primary" || c.descriptor.id === "workflow")
+    && c.descriptor.id !== "terminal"
+    && c.descriptor.available());
+  // Workflows is package-owned and may retain its default "more" placement.
+  // Keep it beside Chat instead of at the clipped end of a busy session
+  // header, so enabling the package always creates a discoverable top-rail
+  // destination before the user has visited the builder.
+  const workflow = eligiblePrimaries.find((c) => c.descriptor.id === "workflow");
+  const primaries = workflow
+    ? [
+        ...eligiblePrimaries.filter((c) => c.descriptor.id === "session"),
+        workflow,
+        ...eligiblePrimaries.filter((c) =>
+          c.descriptor.id !== "session" && c.descriptor.id !== "workflow"),
+      ]
+    : eligiblePrimaries;
   const terminal = resolved.find((c) =>
     c.descriptor.id === "terminal" && c.descriptor.available());
   const filesIndex = primaries.findIndex((c) => c.descriptor.id === "files");
@@ -155,10 +170,24 @@ function CapabilityNav() {
 function CompactViewPicker({ view }: { view: AppView }) {
   const resolved = useResolvedCapabilities();
   const rail = useStore((s) => s.railPlugin);
-  const destinations = resolved.filter((c) =>
-    VIEW_OF_CAPABILITY[c.descriptor.id] !== undefined
-    || PANE_OF_CAPABILITY[c.descriptor.id] !== undefined
-    || PANEL_OF_CAPABILITY[c.descriptor.id] !== undefined);
+  const eligibleDestinations = resolved.filter((c) =>
+    c.descriptor.available()
+    && (VIEW_OF_CAPABILITY[c.descriptor.id] !== undefined
+      || PANE_OF_CAPABILITY[c.descriptor.id] !== undefined
+      || PANEL_OF_CAPABILITY[c.descriptor.id] !== undefined));
+  // Match the desktop rail's discoverability guarantee: Workflows is
+  // package-owned and normally belongs to More, but compact layouts have only
+  // this picker. Keep it immediately after Chat so phones and tablets never
+  // lose the destination among lower-priority tools.
+  const workflow = eligibleDestinations.find((c) => c.descriptor.id === "workflow");
+  const destinations = workflow
+    ? [
+        ...eligibleDestinations.filter((c) => c.descriptor.id === "session"),
+        workflow,
+        ...eligibleDestinations.filter((c) =>
+          c.descriptor.id !== "session" && c.descriptor.id !== "workflow"),
+      ]
+    : eligibleDestinations;
   const items: PickerItem[] = destinations.map((c) => ({
     id: c.descriptor.id,
     label: c.descriptor.label,
@@ -405,7 +434,7 @@ export default function Header() {
 
   return (
     <>
-      <header className={`header${compact ? " header-compact" : ""}${chatSurface ? " header-chat" : ""}`}>
+      <header className={`header${compact ? " header-compact" : ""}${chatSurface ? " header-chat" : " header-tool-view"}`}>
         {compact && <DrawerTrigger />}
         {compact && chatSurface && (
           <button
@@ -417,7 +446,7 @@ export default function Header() {
             <Icon.files />
           </button>
         )}
-        {compact && chatSurface && <CompactViewPicker view={view} />}
+        {compact && <CompactViewPicker view={view} />}
         {(!compact || !chatSurface) && (
           <button className="header-brand" aria-label={tr("header.polythHome")} onClick={() => switchWorkspaceMode("chat")}>
             <span className="polyth-mark">{tr("header.p")}</span>

@@ -1,24 +1,45 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { setLocale } from "../src/i18n/index.ts";
+import {
+  workflowNodeCount,
+  workflowStatusLabel,
+  workflowTimelineNodes,
+} from "../src/workflowRun.ts";
 
-const source = (path: string) => readFile(new URL(path, import.meta.url), "utf8");
+test("workflow labels use localized plural and status messages", () => {
+  setLocale("en");
+  assert.equal(workflowNodeCount(0), "0 nodes");
+  assert.equal(workflowNodeCount(1), "1 node");
+  assert.equal(workflowNodeCount(2), "2 nodes");
+  assert.equal(workflowStatusLabel("running"), "Running");
+  assert.equal(workflowStatusLabel("error"), "Failed");
+});
 
-test("workflow surfaces preserve visual and keyboard polish", async () => {
-  const [view, styles] = await Promise.all([
-    source("../src/components/WorkflowView.tsx"),
-    source("../src/styles.css"),
-  ]);
-
-  assert.match(view, /className="workflow-node-output"[\s\S]*?tabIndex=\{0\}/);
-  assert.match(view, /aria-label=\{`\$\{node\.role\} output`\}/);
-  assert.match(styles, /\.view-icon > svg \{ width: 16px; height: 16px; \}/);
-  assert.match(styles, /\.workflow-button\.primary-btn \{[\s\S]*?border-radius: var\(--radius-sm\)/);
-  assert.match(styles, /\.workflow-definition:hover:not\(:disabled\)/);
-  assert.match(styles, /\.workflow-dependency:hover:not\(\.disabled\)/);
-  assert.match(styles, /\.workflow-node-activity \{[^}]*overflow-wrap: anywhere;/);
-  assert.match(styles, /\.workflow-node-output \{[^}]*overscroll-behavior: contain;/);
-  assert.match(styles, /\.app:not\(\.view-session\) > \.header \.header-brand strong \{ display: none; \}/);
-  assert.match(styles, /\.app:not\(\.view-session\) > \.header \.header-actions \{ display: none; \}/);
-  assert.match(styles, /\.app:not\(\.view-session\) > \.header \.header-profile \{[\s\S]*?width: var\(--tap\); height: var\(--tap\)/);
+test("collapsed workflow windows expose exact omitted-range metadata", () => {
+  const run = {
+    id: "run",
+    workflowId: "workflow",
+    name: "Release",
+    input: "Ship",
+    status: "running" as const,
+    startedAt: 1,
+    layers: [],
+    nodes: Array.from({ length: 12 }, (_, index) => ({
+      id: `node-${index + 1}`,
+      role: `Node ${index + 1}`,
+      status: index < 7 ? "done" as const : index === 7 ? "running" as const : "queued" as const,
+    })),
+  };
+  const window = workflowTimelineNodes(run, false);
+  assert.deepEqual(
+    {
+      start: window.start,
+      end: window.end,
+      total: window.total,
+      truncatedBefore: window.truncatedBefore,
+      truncatedAfter: window.truncatedAfter,
+    },
+    { start: 5, end: 10, total: 12, truncatedBefore: true, truncatedAfter: true },
+  );
 });

@@ -117,6 +117,11 @@ test("header owns the drawer trigger and pane-aware compact view picker", async 
   assert.ok(header.includes("const resolved = useResolvedCapabilities()"), "compact picker consumes the shared capability model");
   assert.ok(header.includes("VIEW_OF_CAPABILITY[c.descriptor.id]"), "compact picker maps capability descriptors to views");
   assert.ok(header.includes("PANE_OF_CAPABILITY[c.descriptor.id]"), "compact picker keeps pane tools such as Browser reachable");
+  assert.ok(
+    header.includes('c.descriptor.id === "workflow"')
+      && header.includes('c.descriptor.id === "session"'),
+    "compact picker keeps package-owned Workflows beside Chat",
+  );
   assert.ok(header.includes("PANEL_OF_CAPABILITY[c.descriptor.id]"), "compact picker keeps panels such as Context reachable");
   assert.ok(header.includes("mobileSheet"), "compact picker uses the touch-friendly mobile sheet");
   assert.ok(!header.includes("const VIEW_GROUPS"), "no duplicate hard-coded view list");

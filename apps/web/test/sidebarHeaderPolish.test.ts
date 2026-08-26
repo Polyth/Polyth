@@ -53,7 +53,7 @@ test("header and composer controls are configurable and purpose-specific", async
     source("../src/components/settings/WidgetsPage.tsx"),
     source("../src/components/ChatMetrics.tsx"),
   ]);
-  assert.match(header, /const primaries = resolved\.filter\(\(c\) =>[\s\S]*?c\.tier === "primary"/);
+  assert.match(header, /const eligiblePrimaries = resolved\.filter\(\(c\) =>[\s\S]*?c\.tier === "primary"[\s\S]*?c\.descriptor\.id === "workflow"/);
   assert.match(header, /topRail\.map/);
   assert.match(header, /const terminal = resolved\.find/);
   assert.doesNotMatch(header, /const rest = /);

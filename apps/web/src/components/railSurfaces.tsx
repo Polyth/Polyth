@@ -170,21 +170,21 @@ function EventsView(props?: RailSurfaceComponentProps) {
 }
 
 registerSurface({
-  id: "files", title: tr("railsurfaces.projectFiles"), capabilityId: "files", order: 1, icon: RAIL_ICONS.files,
+  id: "files", title: tr("railsurfaces.projectFiles"), shortLabel: tr("prefs.files"), capabilityId: "files", order: 1, icon: RAIL_ICONS.files,
   component: EditorView, presentation: pane({ defaultRatio: 0.6, minWidth: 380, preferredMaxWidth: 760 }),
 });
 registerSurface({
-  id: "git", title: tr("railsurfaces.sourceControl"), capabilityId: "git", order: 2, icon: RAIL_ICONS.git,
+  id: "git", title: tr("railsurfaces.sourceControl"), shortLabel: tr("prefs.git"), capabilityId: "git", order: 2, icon: RAIL_ICONS.git,
   component: GitView, badge: (ctx) => ctx.changeCount,
   presentation: pane({ defaultRatio: 0.4, minWidth: 340, preferredMaxWidth: 640 }),
 });
 registerSurface({
-  id: "terminal", title: tr("railsurfaces.terminal"), capabilityId: "terminal", order: 3, icon: RAIL_ICONS.terminal,
+  id: "terminal", title: tr("railsurfaces.terminal"), shortLabel: tr("prefs.terminal"), capabilityId: "terminal", order: 3, icon: RAIL_ICONS.terminal,
   component: TerminalView,
   presentation: pane({ defaultRatio: 0.6, minWidth: 380, preferredMaxWidth: 760, escape: "content" }),
 });
 registerSurface({
-  id: "browser", title: tr("railsurfaces.browser"), capabilityId: "browser", order: 4, icon: RAIL_ICONS.browser,
+  id: "browser", title: tr("railsurfaces.browser"), shortLabel: tr("prefs.preview"), capabilityId: "browser", order: 4, icon: RAIL_ICONS.browser,
   component: PreviewView, presentation: pane({ defaultRatio: 0.45, minWidth: 380, preferredMaxWidth: 760 }),
 });
 

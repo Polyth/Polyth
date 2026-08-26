@@ -1,7 +1,8 @@
 import { BUILTIN_CAPABILITY_META, registerCapability } from "../capabilities.ts";
-import { getState, setActiveView } from "../store.ts";
+import { getState, setActiveView, setRailPlugin, setSidebarOpen } from "../store.ts";
 import { WORKFLOW_WIDGET_PLUGIN } from "../widgets/builtinMiniWidgets.tsx";
 import { registerWidgetPlugin } from "../widgets/catalog.ts";
+import { setWorkspaceMode } from "../widgets/workspaceMode.ts";
 import { combineUnregister } from "./settingsPage.ts";
 
 const workflowCapability = BUILTIN_CAPABILITY_META.find((meta) => meta.id === "workflow");
@@ -11,7 +12,12 @@ export function installWorkflowPackage(): () => void {
   const unregister = combineUnregister(
     registerCapability({
       ...workflowCapability,
-      open: () => setActiveView("workflow"),
+      open: () => {
+        setRailPlugin(null);
+        setSidebarOpen(false);
+        setWorkspaceMode("chat");
+        setActiveView("workflow");
+      },
       available: () => true,
     }),
     registerWidgetPlugin(WORKFLOW_WIDGET_PLUGIN),

@@ -717,7 +717,7 @@ export const es: AppMessages = {
   "packages.onboarding.tours.builtin.widgetsLayout": "Widgets y diseño",
   "packages.onboarding.tours.builtin.widgetsLayoutArrangesWorkspaceToolsComposerActions": "Widgets & Layout organiza las herramientas del espacio de trabajo, las acciones del compositor y los controles de estado compactos sin modificar el código del paquete.",
   "packages.onboarding.tours.builtin.workflows": "Flujos de trabajo",
-  "packages.onboarding.tours.builtin.workflowsBuildsADirectedGraphOfRoles": "Workflows crea un grafo dirigido de roles y, a continuación, ejecuta cada capa lista en paralelo, conservando un registro de la sesión principal.",
+  "packages.onboarding.tours.builtin.workflowsBuildsADirectedGraphOfRoles": "Los flujos de trabajo crean un grafo dirigido de roles y luego ejecutan cada capa lista en paralelo, conservando el registro de la sesión principal.",
   "packages.onboarding.tours.builtin.workFromTheSessionSurface": "Trabajo desde la superficie de la sesión",
   "packages.onboarding.tours.installed.addANameHostOrSshConfig": "Agregue un nombre, un host o un alias de ssh_config, y opcionalmente un usuario y un puerto. Luego, autentíquese con su agente SSH o con la ruta de un archivo de clave privada. Las contraseñas nunca se almacenan.",
   "packages.onboarding.tours.installed.addAnExplicitSource": "Agregar una fuente explícita",

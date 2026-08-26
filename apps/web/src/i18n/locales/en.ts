@@ -720,7 +720,7 @@ export const en = {
   "packages.onboarding.tours.builtin.widgetsLayout": "Widgets & Layout",
   "packages.onboarding.tours.builtin.widgetsLayoutArrangesWorkspaceToolsComposerActions": "Widgets & Layout arranges workspace tools, composer actions, and compact status controls without changing package code.",
   "packages.onboarding.tours.builtin.workflows": "Workflows",
-  "packages.onboarding.tours.builtin.workflowsBuildsADirectedGraphOfRoles": "Workflows builds a directed graph of roles, then runs each ready layer in parallel while preserving a parent-session log.",
+  "packages.onboarding.tours.builtin.workflowsBuildsADirectedGraphOfRoles": "Workflows build a directed graph of roles, then run each ready layer in parallel while preserving a parent-session log.",
   "packages.onboarding.tours.builtin.workFromTheSessionSurface": "Work from the session surface",
   "packages.onboarding.tours.installed.addANameHostOrSshConfig": "Add a name, host or ssh_config alias, and optional user and port, then authenticate with your SSH agent or a private-key file path. Passwords are never stored.",
   "packages.onboarding.tours.installed.addAnExplicitSource": "Add an explicit source",

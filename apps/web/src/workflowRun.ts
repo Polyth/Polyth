@@ -4,15 +4,18 @@ import type {
   WorkflowRunNodeDto,
   WorkflowRunStatus,
 } from "@polyth/contracts";
+import { formatNumber, getLocale, tr } from "./i18n/index.ts";
 
-export const WORKFLOW_STATUS_LABEL: Record<WorkflowNodeStatus | WorkflowRunStatus, string> = {
-  queued: "Queued",
-  running: "Running",
-  done: "Complete",
-  error: "Failed",
-  skipped: "Skipped",
-  stopped: "Stopped",
-};
+export function workflowStatusLabel(status: WorkflowNodeStatus | WorkflowRunStatus): string {
+  return tr(`workflowstatus.${status}`);
+}
+
+export function workflowNodeCount(count: number): string {
+  const key = new Intl.PluralRules(getLocale()).select(count) === "one"
+    ? "workflowcount.nodeOne"
+    : "workflowcount.nodeOther";
+  return tr(key, { count: formatNumber(count) });
+}
 
 export function workflowNodeFinished(node: WorkflowRunNodeDto): boolean {
   return node.status !== "queued" && node.status !== "running";
@@ -20,6 +23,57 @@ export function workflowNodeFinished(node: WorkflowRunNodeDto): boolean {
 
 export function workflowFinishedCount(run: WorkflowRunDto): number {
   return run.nodes.filter(workflowNodeFinished).length;
+}
+
+/**
+ * Keep long workflow timelines useful without making the conversation card
+ * dominate the page. The collapsed window follows the node that currently
+ * needs attention, is running, or is next in line.
+ */
+export interface WorkflowTimelineWindow {
+  nodes: WorkflowRunNodeDto[];
+  start: number;
+  end: number;
+  total: number;
+  truncatedBefore: boolean;
+  truncatedAfter: boolean;
+}
+
+export function workflowTimelineNodes(
+  run: WorkflowRunDto,
+  expanded: boolean,
+  limit = 6,
+): WorkflowTimelineWindow {
+  const total = run.nodes.length;
+  if (expanded || total <= limit) {
+    return {
+      nodes: run.nodes,
+      start: total > 0 ? 1 : 0,
+      end: total,
+      total,
+      truncatedBefore: false,
+      truncatedAfter: false,
+    };
+  }
+  const focusIndex = [
+    run.nodes.findIndex((node) => workflowHumanWait(node) !== null),
+    run.nodes.findIndex((node) => node.status === "running" || node.status === "error"),
+    run.nodes.findIndex((node) => !workflowNodeFinished(node)),
+  ].find((index) => index >= 0) ?? -1;
+  const safeIndex = focusIndex < 0 ? run.nodes.length - 1 : focusIndex;
+  const start = Math.max(0, Math.min(
+    safeIndex - Math.floor(limit / 2),
+    run.nodes.length - limit,
+  ));
+  const nodes = run.nodes.slice(start, start + limit);
+  return {
+    nodes,
+    start: start + 1,
+    end: start + nodes.length,
+    total,
+    truncatedBefore: start > 0,
+    truncatedAfter: start + nodes.length < total,
+  };
 }
 
 /** Put action-required runs first, then the newest run. Global indicators use
@@ -49,9 +103,9 @@ export function workflowHumanWait(node: WorkflowRunNodeDto): "permission" | "ans
 export function workflowHumanWaitLabel(node: WorkflowRunNodeDto): string | null {
   const wait = workflowHumanWait(node);
   return wait === "permission"
-    ? "Waiting for your approval"
+    ? tr("workflowtimeline.waitingForYourApproval")
     : wait === "answer"
-      ? "Waiting for your answer"
+      ? tr("workflowtimeline.waitingForYourAnswer")
       : null;
 }
 
@@ -59,7 +113,9 @@ export function workflowNodeDetail(node: WorkflowRunNodeDto): string {
   return workflowHumanWaitLabel(node)
     ?? node.error
     ?? node.activity
-    ?? (node.status === "queued" ? "Waiting for dependencies" : WORKFLOW_STATUS_LABEL[node.status]);
+    ?? (node.status === "queued"
+      ? tr("workflowtimeline.waitingForDependencies")
+      : workflowStatusLabel(node.status));
 }
 
 /**

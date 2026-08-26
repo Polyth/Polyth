@@ -86,7 +86,7 @@ test("chat composer keeps the Run workflow launcher mounted after project activa
       await Promise.resolve();
     });
     assert.equal(
-      container.querySelector<HTMLTextAreaElement>(".workflow-launch-task textarea")?.value,
+      document.querySelector<HTMLTextAreaElement>(".workflow-launch-task textarea")?.value,
       "Audit the release candidate",
     );
   } finally {
@@ -215,13 +215,127 @@ test("composer workflow action opens the launcher with the live draft", async ()
     });
 
     assert.equal(getState().activeView, "session", "opening the picker must not navigate to the builder");
-    assert.ok(container.querySelector('[role="dialog"][aria-label="Run a workflow"]'));
+    assert.ok(document.querySelector('[role="dialog"][aria-label="Run a workflow"]'));
     assert.equal(
-      container.querySelector<HTMLTextAreaElement>(".workflow-launch-task textarea")?.value,
+      document.querySelector(".workflow-launch-backdrop")?.parentElement,
+      document.body,
+      "the launcher escapes composer visual containing blocks",
+    );
+    assert.equal(
+      document.querySelector<HTMLTextAreaElement>(".workflow-launch-task textarea")?.value,
       "Audit the release candidate",
     );
-    assert.match(container.textContent ?? "", /Release review/);
-    assert.match(container.textContent ?? "", /manual approval/);
+    assert.match(document.body.textContent ?? "", /Release review/);
+    assert.match(document.body.textContent ?? "", /manual approval/);
+  } finally {
+    api.listWorkflows = originalListWorkflows;
+    await act(async () => { root.unmount(); });
+    container.remove();
+  }
+});
+
+test("workflow launcher does not claim the list is empty while it loads", async () => {
+  const widget = WORKFLOW_WIDGET_PLUGIN.widgets?.find((item) => item.id === "workflow.composer-action");
+  assert.ok(widget);
+  const originalListWorkflows = api.listWorkflows;
+  let finishLoading: ((items: WorkflowDto[]) => void) | undefined;
+  api.listWorkflows = () => new Promise<WorkflowDto[]>((resolve) => { finishLoading = resolve; });
+
+  const container = document.createElement("div");
+  document.body.appendChild(container);
+  const root = createRoot(container);
+  try {
+    await act(async () => {
+      root.render(widget.render({
+        projectId: "project",
+        sessionId: "session",
+        editing: false,
+        instanceId: "workflow.composer-action",
+        config: {},
+        updateConfig: () => {},
+        workflowDraftText: "",
+        workflowAttachmentCount: 0,
+        consumeWorkflowDraft: () => {},
+      }));
+    });
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>(".composer-workflow")?.click();
+      await Promise.resolve();
+    });
+    assert.match(document.querySelector(".workflow-launch-footer")?.textContent ?? "", /Open workflow builder/);
+    assert.doesNotMatch(document.querySelector(".workflow-launch-footer")?.textContent ?? "", /Create workflow/);
+    assert.equal(document.querySelectorAll(".workflow-launch-skeleton .workflow-launch-row").length, 3);
+    await act(async () => {
+      finishLoading?.([]);
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    assert.match(document.querySelector(".workflow-launch-empty")?.textContent ?? "", /Create workflow/);
+    assert.doesNotMatch(document.querySelector(".workflow-launch-footer")?.textContent ?? "", /Create workflow/);
+  } finally {
+    api.listWorkflows = originalListWorkflows;
+    await act(async () => { root.unmount(); });
+    container.remove();
+  }
+});
+
+test("workflow launcher retries a failed list without losing the task", async () => {
+  const widget = WORKFLOW_WIDGET_PLUGIN.widgets?.find((item) => item.id === "workflow.composer-action");
+  assert.ok(widget);
+  const originalListWorkflows = api.listWorkflows;
+  let attempts = 0;
+  api.listWorkflows = async () => {
+    attempts++;
+    if (attempts === 1) throw new Error("synthetic list failure");
+    return [workflow];
+  };
+
+  const container = document.createElement("div");
+  document.body.appendChild(container);
+  const root = createRoot(container);
+  try {
+    await act(async () => {
+      root.render(widget.render({
+        projectId: "project",
+        sessionId: "session",
+        editing: false,
+        instanceId: "workflow.composer-action",
+        config: {},
+        updateConfig: () => {},
+        workflowDraftText: "Keep this workflow task",
+        workflowAttachmentCount: 0,
+        consumeWorkflowDraft: () => {},
+      }));
+    });
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>(".composer-workflow")?.click();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    assert.match(document.body.textContent ?? "", /Workflows couldn’t be loaded/);
+    assert.equal(
+      (document.body.textContent ?? "").match(/Workflows couldn’t be loaded/g)?.length,
+      1,
+      "the failed state does not repeat its heading",
+    );
+    assert.equal(
+      document.querySelector<HTMLTextAreaElement>(".workflow-launch-task textarea")?.value,
+      "Keep this workflow task",
+    );
+
+    await act(async () => {
+      [...document.querySelectorAll<HTMLButtonElement>("button")]
+        .find((button) => button.textContent?.trim() === "Retry")
+        ?.click();
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    assert.equal(attempts, 2);
+    assert.match(document.body.textContent ?? "", /Release review/);
+    assert.equal(
+      document.querySelector<HTMLTextAreaElement>(".workflow-launch-task textarea")?.value,
+      "Keep this workflow task",
+    );
   } finally {
     api.listWorkflows = originalListWorkflows;
     await act(async () => { root.unmount(); });
@@ -266,14 +380,14 @@ test("failed workflow start restores the consumed composer draft", async () => {
       await Promise.resolve();
     });
     await act(async () => {
-      container.querySelector<HTMLButtonElement>('button[aria-label="Run Release review workflow"]')?.click();
+      document.querySelector<HTMLButtonElement>('button[aria-label="Run Release review workflow"]')?.click();
       await Promise.resolve();
       await Promise.resolve();
     });
 
     assert.equal(consumed, 1);
     assert.equal(restored, "Audit the release candidate");
-    assert.match(container.textContent ?? "", /Couldn’t start the workflow/);
+    assert.match(document.body.textContent ?? "", /Couldn’t start the workflow/);
   } finally {
     window.removeEventListener("polyth:composer-replace", onReplace);
     api.listWorkflows = originalListWorkflows;
@@ -313,6 +427,47 @@ test("running workflow card exposes manual permission handoff", async () => {
       container.querySelector(".needs-human button")?.getAttribute("aria-label"),
       "Review and respond in Reviewer child session",
     );
+  } finally {
+    await act(async () => { root.unmount(); });
+    container.remove();
+  }
+});
+
+test("long workflow cards expand and collapse without burying chat", async () => {
+  const run: WorkflowRunDto = {
+    id: "long-run",
+    workflowId: workflow.id,
+    projectId: workflow.projectId,
+    parentSessionId: "session",
+    name: "Release train",
+    input: "Audit every release stage",
+    status: "running",
+    startedAt: 1,
+    layers: [],
+    nodes: Array.from({ length: 12 }, (_, index) => ({
+      id: `stage-${index + 1}`,
+      role: `Stage ${index + 1}`,
+      status: index === 7 ? "running" : index < 7 ? "done" : "queued",
+    })),
+  };
+  const container = document.createElement("div");
+  document.body.appendChild(container);
+  const root = createRoot(container);
+  try {
+    await act(async () => { root.render(createElement(WorkflowTimelineCard, { run })); });
+    assert.equal(container.querySelectorAll(".workflow-timeline-card li").length, 6);
+    const toggle = container.querySelector<HTMLButtonElement>(".workflow-timeline-nodes-toggle");
+    assert.match(toggle?.textContent?.trim() ?? "", /Show all 12 nodes/);
+    assert.equal(toggle?.getAttribute("aria-expanded"), "false");
+    assert.match(container.querySelector(".workflow-timeline-range")?.textContent ?? "", /Showing 5–10 of 12/);
+
+    await act(async () => { toggle?.click(); });
+    assert.equal(container.querySelectorAll(".workflow-timeline-card li").length, 12);
+    assert.equal(toggle?.getAttribute("aria-expanded"), "true");
+    assert.match(toggle?.textContent?.trim() ?? "", /Show focused nodes/);
+
+    await act(async () => { toggle?.click(); });
+    assert.equal(container.querySelectorAll(".workflow-timeline-card li").length, 6);
   } finally {
     await act(async () => { root.unmount(); });
     container.remove();

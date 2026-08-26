@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import type { WorkflowDto } from "@polyth/contracts";
 import { api } from "../api.ts";
 import { createSession, openSession } from "../init.ts";
@@ -9,6 +10,9 @@ import { publishWorkflowRun } from "../workflowMonitor.ts";
 import { requestComposerReplace } from "../composerInsert.ts";
 import { Icon } from "../icons.tsx";
 import Dialog from "./a11y/Dialog.tsx";
+import { tr } from "../i18n/index.ts";
+import { workflowNodeCount } from "../workflowRun.ts";
+import WorkflowButtonContent from "./WorkflowButtonContent.tsx";
 
 export interface WorkflowLauncherProps {
   projectId?: string;
@@ -33,6 +37,12 @@ export default function WorkflowLauncher({
   const [loadAttempt, setLoadAttempt] = useState(0);
   const [busyId, setBusyId] = useState("");
   const [error, setError] = useState("");
+  const [closing, setClosing] = useState(false);
+  const closeTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => () => {
+    if (closeTimer.current) clearTimeout(closeTimer.current);
+  }, []);
 
   useEffect(() => {
     if (open) setTask(draftText);
@@ -50,7 +60,7 @@ export default function WorkflowLauncher({
         if (active) {
           setWorkflows([]);
           setLoadFailed(true);
-          setError(friendlyError("Couldn’t load workflows", cause));
+          setError(friendlyError(tr("common.error"), cause));
         }
       })
       .finally(() => { if (active) setLoading(false); });
@@ -58,12 +68,22 @@ export default function WorkflowLauncher({
   }, [open, projectId, loadAttempt]);
 
   const close = () => {
-    if (!busyId) setOpen(false);
+    if (busyId || closing) return;
+    const duration = typeof matchMedia === "function" && matchMedia("(prefers-reduced-motion: reduce)").matches
+      ? 0
+      : 130;
+    setClosing(true);
+    closeTimer.current = setTimeout(() => {
+      setOpen(false);
+      setClosing(false);
+      closeTimer.current = null;
+    }, duration);
   };
 
   const openLauncher = () => {
     if (!projectId) return;
     setTask(draftText);
+    setClosing(false);
     setOpen(true);
   };
 
@@ -88,10 +108,10 @@ export default function WorkflowLauncher({
     try {
       let parentSessionId = sessionId;
       if (!parentSessionId) {
-        await createSession(projectId, { title: `${workflow.name} workflow` });
+        await createSession(projectId, { title: tr("workflowlauncher.sessionTitleValue", { name: workflow.name }) });
         parentSessionId = getState().activeSessionId ?? undefined;
       }
-      if (!parentSessionId) throw new Error("The parent session could not be created.");
+      if (!parentSessionId) throw new Error(tr("workflowlauncher.parentCouldNotBeCreated"));
       // The server logs and broadcasts workflow/run-started before its HTTP
       // response resolves. Clear first so that event cannot replace the empty
       // hero Composer and seed its replacement with the submitted draft.
@@ -100,12 +120,12 @@ export default function WorkflowLauncher({
       const started = await api.runWorkflow(workflow.id, parentSessionId, submittedTask);
       publishWorkflowRun(started);
       await openSession(parentSessionId).catch((cause) => {
-        setUiError(friendlyError("Workflow started, but the parent timeline couldn’t refresh", cause));
+        setUiError(friendlyError(tr("workflowlauncher.couldNotStart"), cause));
       });
       setOpen(false);
     } catch (cause) {
       if (draftConsumed) requestComposerReplace(submittedTask);
-      setError(friendlyError("Couldn’t start the workflow", cause));
+      setError(friendlyError(tr("workflowlauncher.couldNotStart"), cause));
     } finally {
       setBusyId("");
     }
@@ -119,127 +139,151 @@ export default function WorkflowLauncher({
         disabled={!projectId}
         onClick={openLauncher}
         title={!projectId
-          ? "Open a project to use workflows"
+          ? tr("workflowlauncher.openProject")
           : draftText.trim()
-            ? "Choose a workflow for this draft"
-            : "Choose a workflow to run"}
-        aria-label="Run workflow"
+            ? tr("workflowlauncher.chooseWorkflowDraft")
+            : tr("workflowlauncher.chooseWorkflowRun")}
+        aria-label={tr("workflowview.runWorkflow")}
         aria-haspopup="dialog"
         aria-expanded={open}
       >
-        <Icon.workflow /><span>Run workflow</span>
+        <Icon.workflow /><span>{tr("workflowview.runWorkflow")}</span>
       </button>
-      {open && (
+      {open && typeof document !== "undefined" && createPortal(
         <Dialog
-          title="Run a workflow"
+          title={tr("workflowlauncher.title")}
           onClose={close}
           className="workflow-launch-dialog"
-          backdropClassName="workflow-launch-backdrop"
+          backdropClassName={`workflow-launch-backdrop${closing ? " is-closing" : ""}`}
           initialFocus="textarea"
           ariaDescribedBy="workflow-launch-description"
         >
           <header className="workflow-launch-heading">
             <span className="workflow-page-icon" aria-hidden="true"><Icon.workflow /></span>
             <div>
-              <h2>Run a workflow</h2>
-              <p id="workflow-launch-description">Choose a saved pipeline. Your draft becomes the shared task for every node.</p>
+              <h2>{tr("workflowlauncher.title")}</h2>
+              <p id="workflow-launch-description">{tr("workflowlauncher.chooseSavedPipeline")}</p>
             </div>
             <button
               type="button"
               className="icon-btn"
-              aria-label="Close workflow launcher"
-              disabled={!!busyId}
-              title={busyId ? "Wait for the workflow to start" : "Close workflow launcher"}
+              aria-label={tr("workflowlauncher.close")}
+              disabled={!!busyId || closing}
+              title={busyId ? tr("workflowlauncher.waitToClose") : tr("workflowlauncher.close")}
               onClick={close}
             >
               <Icon.close />
             </button>
           </header>
           <label className="workflow-field workflow-launch-task">
-            <span>Task</span>
+            <span>{tr("workflowlauncher.task")}</span>
             <textarea
               rows={4}
               value={task}
-              placeholder="Describe the task for this workflow…"
+              placeholder={tr("workflowlauncher.taskPlaceholder")}
               disabled={!!busyId}
               aria-describedby="workflow-launch-task-help"
               onChange={(event) => { setTask(event.target.value); setError(""); }}
             />
-            <small id="workflow-launch-task-help">This text is not sent as a normal chat message. It is logged as the workflow input.</small>
+            <small id="workflow-launch-task-help">{tr("workflowlauncher.taskHelp")}</small>
             {attachmentCount > 0 && (
               <small className="workflow-launch-attachment-note" role="note">
-                {attachmentCount} {attachmentCount === 1 ? "attachment stays" : "attachments stay"} in this chat draft and will not be shared with workflow nodes.
+                {tr(attachmentCount === 1
+                  ? "workflowlauncher.attachmentOne"
+                  : "workflowlauncher.attachmentOther", { count: attachmentCount })}
               </small>
             )}
           </label>
           {error && !loadFailed && <div className="form-error workflow-error" role="alert">{error}</div>}
           {loading ? (
-            <div className="workflow-list-state" role="status">
-              <span className="workflow-spinner" aria-hidden="true" />Loading workflows…
-            </div>
+            <ul className="workflow-launch-list workflow-launch-skeleton" role="status" aria-label={tr("workflowlauncher.loading")}>
+              {[0, 1, 2].map((item) => (
+                <li key={item} className="workflow-launch-row" aria-hidden="true">
+                  <span className="workflow-definition-icon workflow-skeleton-block" />
+                  <span><strong className="workflow-skeleton-line" /><small className="workflow-skeleton-line short" /></span>
+                  <span className="workflow-skeleton-button workflow-skeleton-block" />
+                </li>
+              ))}
+            </ul>
           ) : loadFailed ? (
             <div className="workflow-launch-empty workflow-launch-failed">
-              <strong>Workflows couldn’t be loaded</strong>
-              <span role="alert">{error} Your task is still here.</span>
+              <strong role="alert">{tr("workflowlauncher.couldNotLoad")}</strong>
+              <span>{error}. {tr("workflowlauncher.taskStillHere")}</span>
               <button
                 type="button"
                 className="small-btn workflow-button"
                 onClick={() => setLoadAttempt((attempt) => attempt + 1)}
               >
-                Retry
+                {tr("common.retry")}
               </button>
             </div>
           ) : workflows.length > 0 ? (
-            <ul className="workflow-launch-list" aria-label="Saved workflows">
+            <ul className="workflow-launch-list" aria-label={tr("workflowlauncher.savedWorkflows")}>
               {workflows.map((workflow) => (
                 <li key={workflow.id} className="workflow-launch-row">
                   <span className="workflow-definition-icon" aria-hidden="true"><Icon.workflow /></span>
                   <span>
                     <strong>{workflow.name}</strong>
-                    <small>{workflow.nodes.length} {workflow.nodes.length === 1 ? "node" : "nodes"} · {workflow.defaults?.permissions === "manual" ? "manual approval" : "auto approve"}</small>
+                    <small>{workflowNodeCount(workflow.nodes.length)} · {workflow.defaults?.permissions === "manual" ? tr("workflowlauncher.manualApproval") : tr("workflowlauncher.autoApprove")}</small>
                   </span>
                   <button
                     type="button"
                     className="small-btn workflow-button"
                     disabled={!!busyId}
-                    aria-label={`Edit ${workflow.name} workflow`}
+                    aria-label={tr("workflowlauncher.editValue", { name: workflow.name })}
                     onClick={() => openBuilder(workflow.id)}
                   >
-                    Edit
+                    {tr("common.edit")}
                   </button>
                   <button
                     type="button"
                     className="primary-btn workflow-button"
                     disabled={!task.trim() || !!busyId}
-                    title={!task.trim() ? "Enter a task before running" : `Run ${workflow.name}`}
-                    aria-label={`Run ${workflow.name} workflow`}
+                    title={!task.trim() ? tr("workflowlauncher.enterTaskBeforeRunning") : tr("workflowlauncher.runValue", { name: workflow.name })}
+                    aria-label={tr("workflowlauncher.runValue", { name: workflow.name })}
                     aria-busy={busyId === workflow.id}
                     onClick={() => void run(workflow)}
                   >
-                    {busyId === workflow.id ? "Starting…" : "Run"}
+                    <WorkflowButtonContent
+                      busy={busyId === workflow.id}
+                      idleLabel={tr("workflowlauncher.run")}
+                      busyLabel={tr("workflowlauncher.starting")}
+                    />
                   </button>
                 </li>
               ))}
             </ul>
           ) : (
             <div className="workflow-launch-empty">
-              <strong>No workflows saved yet</strong>
-              <span>Build a reusable agent pipeline, then return here to run it from Chat.</span>
+              <strong>{tr("workflowlauncher.noWorkflows")}</strong>
+              <span>{tr("workflowlauncher.buildReusablePipeline")}</span>
+              <button type="button" className="small-btn workflow-button" disabled={!!busyId} onClick={() => openBuilder()}>
+                <Icon.plus />{tr("workflowlauncher.createWorkflow")}
+              </button>
             </div>
           )}
           <footer className="workflow-launch-footer">
-            <button type="button" className="small-btn workflow-button" disabled={!!busyId} onClick={() => openBuilder()}>
-              <Icon.plus />{workflows.length ? "Open workflow builder" : "Create workflow"}
-            </button>
+            {(loading || loadFailed || workflows.length > 0) && (
+              <button
+                type="button"
+                className="small-btn workflow-button"
+                disabled={!!busyId}
+                aria-busy={false}
+                onClick={() => openBuilder()}
+              >
+                <Icon.plus />{tr("workflowlauncher.openBuilder")}
+              </button>
+            )}
             <span aria-live="polite">
               {busyId
-                ? "Starting workflow…"
+                ? tr("workflowlauncher.startingWorkflow")
                 : !task.trim() && workflows.length > 0
-                  ? "Enter a task to enable Run."
+                  ? tr("workflowlauncher.enterTaskToEnable")
                   : ""}
             </span>
           </footer>
-        </Dialog>
+        </Dialog>,
+        document.body,
       )}
     </>
   );

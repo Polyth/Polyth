@@ -9,6 +9,7 @@ import {
   prioritizeWorkflowRuns,
   workflowHumanWait,
   workflowNodeDetail,
+  workflowTimelineNodes,
 } from "../src/workflowRun.ts";
 
 const source = (path: string) => readFile(new URL(path, import.meta.url), "utf8");
@@ -156,6 +157,43 @@ test("global workflow indicators prioritize action-required runs", () => {
   );
 });
 
+test("long workflow timelines follow the node that currently needs attention", () => {
+  const run = {
+    id: "long-run",
+    workflowId: "workflow",
+    name: "Release",
+    input: "Ship",
+    status: "running" as const,
+    startedAt: 1,
+    layers: [],
+    nodes: Array.from({ length: 12 }, (_, index) => ({
+      id: `node-${index + 1}`,
+      role: `Node ${index + 1}`,
+      status: index < 7 ? "done" as const : index === 7 ? "running" as const : "queued" as const,
+    })),
+  };
+  assert.deepEqual(
+    workflowTimelineNodes(run, false).nodes.map((node) => node.id),
+    ["node-5", "node-6", "node-7", "node-8", "node-9", "node-10"],
+  );
+  assert.deepEqual(workflowTimelineNodes(run, false), {
+    nodes: run.nodes.slice(4, 10),
+    start: 5,
+    end: 10,
+    total: 12,
+    truncatedBefore: true,
+    truncatedAfter: true,
+  });
+  assert.equal(workflowTimelineNodes(run, true).nodes.length, 12);
+  const firstNeedsHuman = {
+    ...run,
+    nodes: run.nodes.map((node, index) => index === 0
+      ? { ...node, status: "running" as const, activity: "awaiting permission: bash" }
+      : node),
+  };
+  assert.equal(workflowTimelineNodes(firstNeedsHuman, false).nodes[0]?.id, "node-1");
+});
+
 test("workflow journey surfaces expose task launch, chat progress, HITL, stop, and retry", async () => {
   const [launcher, composer, timeline, workflow, miniWidgets, status, styles] = await Promise.all([
     source("../src/components/WorkflowLauncher.tsx"),
@@ -166,7 +204,7 @@ test("workflow journey surfaces expose task launch, chat progress, HITL, stop, a
     source("../src/components/StatusBar.tsx"),
     source("../src/styles.css"),
   ]);
-  assert.match(launcher, /Your draft becomes the shared task/);
+  assert.match(launcher, /tr\("workflowlauncher\.chooseSavedPipeline"\)/);
   assert.match(launcher, /api\.runWorkflow/);
   assert.ok(
     launcher.indexOf("consumeDraft();") < launcher.indexOf("await api.runWorkflow"),
@@ -191,9 +229,9 @@ test("workflow journey surfaces expose task launch, chat progress, HITL, stop, a
   assert.match(timeline, /<WorkflowTimelineCard run=\{model\.workflowRun\}/);
   assert.match(timeline, /model\.messages\.length === 0 && !model\.workflowRun/);
   assert.match(await source("../src/components/WorkflowTimelineCard.tsx"), /handOffWorkflowLaunch/);
-  assert.match(workflow, /Review & respond/);
-  assert.match(workflow, /Retry full workflow/);
-  assert.match(workflow, /Stop run/);
+  assert.match(workflow, /tr\("workflowview\.reviewAndRespond"\)/);
+  assert.match(workflow, /tr\("workflowview\.retryFull"\)/);
+  assert.match(workflow, /tr\("workflowview\.stopRun"\)/);
   assert.match(miniWidgets, /workflow\.active-run/);
   assert.match(status, /Approval needed/);
   assert.match(styles, /\.app\.view-session \.statusbar:has\(\.sb-workflow\) \{ display: flex; \}/);
