@@ -29,13 +29,21 @@ Object.defineProperty(dom, "matchMedia", {
     dispatchEvent: () => true,
   }),
 });
-(globalThis as { fetch?: unknown }).fetch = async () => ({
-  ok: true,
-  status: 200,
-  statusText: "OK",
-  json: async () => ({}),
-  text: async () => "{}",
-});
+(globalThis as { fetch?: unknown }).fetch = async (input: string | URL | Request) => {
+  const url = String(input);
+  const body = url.startsWith("/api/git/status")
+    ? { branch: "main", ahead: 0, behind: 0, staged: [], unstaged: [], untracked: [], conflicted: [] }
+    : url.startsWith("/api/github/status")
+      ? { installed: false, authenticated: false, user: null }
+      : [];
+  return {
+    ok: true,
+    status: 200,
+    statusText: "OK",
+    json: async () => body,
+    text: async () => JSON.stringify(body),
+  };
+};
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 register("./tsxHooks.mjs", import.meta.url);
