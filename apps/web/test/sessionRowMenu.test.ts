@@ -162,7 +162,7 @@ test("the visible session ellipsis opens the same menu and receives returned foc
 });
 
 test("Escape closes a session menu inside the real mobile Sidebar, not the drawer", async () => {
-  applyProjectUpsert({ id: "p1", name: "Project one", path: "/workspace" });
+  applyProjectUpsert({ id: "p1", name: "Project one", path: "/workspace", createdAt: Date.now() });
   activateProject("p1");
   setSessions("p1", [session({ id: "s-mobile", title: "Mobile session" })]);
   setSidebarOpen(true);

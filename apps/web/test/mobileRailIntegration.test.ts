@@ -8,6 +8,8 @@ Object.assign(globalThis, {
   window: dom as unknown as typeof globalThis & Window,
   document: dom.document as unknown as Document,
   location: dom.location,
+  HTMLElement: dom.HTMLElement,
+  Element: dom.Element,
   requestAnimationFrame: (callback: FrameRequestCallback) =>
     setTimeout(() => callback(Date.now()), 0) as unknown as number,
   cancelAnimationFrame: (id: number) => clearTimeout(id),
@@ -47,7 +49,7 @@ const { default: Header } = await import("../src/components/Header.tsx");
 const { default: ContextRail } = await import("../src/components/ContextRail.tsx");
 
 test("mobile app header navigates between full-screen workspace panes and focuses each heading", async () => {
-  applyProjectUpsert({ id: "p1", name: "Project one", path: "/workspace" });
+  applyProjectUpsert({ id: "p1", name: "Project one", path: "/workspace", createdAt: Date.now() });
   activateProject("p1");
   setActiveView("session");
   closeWorkspacePane();
