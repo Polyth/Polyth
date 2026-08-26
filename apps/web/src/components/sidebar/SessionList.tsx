@@ -13,7 +13,7 @@ import { deriveSessionTitle, fullSessionTitle } from "../../format.ts";
 import { friendlyError } from "../../settings.ts";
 import { getUiSettings } from "../../uiPrefs.ts";
 import { confirmAlert } from "../../alerts.ts";
-import { firstUserText } from "../../utils.ts";
+import { copyText, firstUserText } from "../../utils.ts";
 import { announce } from "../a11y/live.tsx";
 import { worktreeLabel } from "../../worktreeSessions.ts";
 import SlotHost from "../slots/SlotHost.ts";
@@ -288,6 +288,14 @@ function SessionRow({
       setUiError(friendlyError(tr("sidebar.sessionlist.couldnTUpdateSessionLabels"), e));
     }
   };
+  const copySessionId = async () => {
+    setMenuOpen(false);
+    if (await copyText(s.id)) {
+      announce(tr("sidebar.sessionlist.sessionIdCopied"));
+    } else {
+      setUiError(tr("questioncards.copyFailedClipboardUnavailable"));
+    }
+  };
   const displayTitle = deriveSessionTitle(s.title, eventsTitle);
   const hoverTitle = fullSessionTitle(s.title, eventsTitle);
   const activityLabel = sessionActivityLabel(s, relativeTime);
@@ -407,6 +415,9 @@ function SessionRow({
             setMenuOpen(false);
             void forkSession(s.id).catch((e) => setUiError(friendlyError(tr("common.error"), e)));
           }}>{tr("sidebar.sessionlist.fork")}</button>
+          <button role="menuitem" onClick={() => { void copySessionId(); }}>
+            {tr("sidebar.sessionlist.copySessionId")}
+          </button>
           <button role="menuitem" onClick={() => { setMenuOpen(false); onTogglePin(s); }}>
             {s.pinned ? tr("sidebar.sessionlist.unpin") : tr("sidebar.sessionlist.pinToTop")}
           </button>

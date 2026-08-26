@@ -433,6 +433,30 @@ export interface AutoAcceptDto {
   effective: boolean;
 }
 
+/** Durable + live diagnostics exposed to authenticated agent clients. Secret
+ * values are never present: pending requests contain opaque ids only. */
+export interface SessionDebugDto {
+  status: SessionStatus;
+  eventCount: number;
+  latestSeq: number;
+  lastEvent?: { seq: number; time: number; type: string };
+  runtime: {
+    attached: boolean;
+    activeTurn: boolean;
+    admissionPending: boolean;
+    turnId?: string;
+    backendSessionId?: string;
+    worktreePath?: string;
+  };
+  queue: QueueItemDto[];
+  pending: {
+    permissions: string[];
+    questions: string[];
+    secrets: string[];
+  };
+  recentErrors: Array<{ seq: number; time: number; type: string; message: string }>;
+}
+
 export interface SessionService {
   create(input: CreateSessionInput): Promise<SessionRef>;
   /** Result carries turnId for admitted turns or queueId+queued for deferred delivery. */
@@ -458,6 +482,8 @@ export interface SessionService {
   sync(projectId: string): Promise<SessionProjection[]>;
   snapshot(sessionId: string): Promise<SessionProjection>;
   events(sessionId: string, afterSeq?: number): Promise<SessionEvent[]>;
+  /** Read-only troubleshooting state. Does not attach or wake a runtime. */
+  debug?(sessionId: string): Promise<SessionDebugDto>;
   replyPermission(sessionId: string, requestId: string, reply: "once" | "always" | "reject", scope?: "session" | "project"): Promise<void>;
   replyQuestion(sessionId: string, requestId: string, answers: JsonObject): Promise<void>;
   replySecret?(sessionId: string, requestId: string, reply: { action: "save"; value: string } | { action: "dismiss" }): Promise<void>;
@@ -684,6 +710,48 @@ export interface Project {
   defaults?: ProjectDefaults;
   labelIds?: string[];
   remote?: ProjectRemote;
+}
+
+/** Agent-oriented project inventory with session activity counts. */
+export interface AgentProjectSummaryDto {
+  project: Project;
+  sessionCount: number;
+  activeSessionCount: number;
+  archivedSessionCount: number;
+  latestActivityAt?: number;
+}
+
+/** One cross-project session inventory row with a bounded recent event tail. */
+export interface AgentSessionSummaryDto {
+  session: SessionProjection;
+  project: Project | null;
+  eventCount: number;
+  latestSeq: number;
+  recentEvents: SessionEvent[];
+}
+
+export interface AgentSessionListDto {
+  projects: AgentProjectSummaryDto[];
+  sessions: AgentSessionSummaryDto[];
+  total: number;
+  limit: number;
+  offset: number;
+}
+
+/** Complete agent read model: canonical projection, conversation, state, and
+ * a bounded event window. The dedicated events endpoint pages the full log. */
+export interface AgentSessionDetailDto {
+  session: SessionProjection;
+  project: Project | null;
+  events: SessionEvent[];
+  messages: ModelMessage[];
+  state: SessionDebugDto;
+  eventWindow: {
+    total: number;
+    returned: number;
+    truncatedBeforeSeq?: number;
+  };
+  links: Record<string, string>;
 }
 
 export interface ProjectPatch {

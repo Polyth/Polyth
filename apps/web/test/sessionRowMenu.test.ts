@@ -18,6 +18,12 @@ Object.assign(globalThis, {
 });
 Object.defineProperty(globalThis, "navigator", { value: dom.navigator, configurable: true });
 Object.defineProperty(globalThis, "localStorage", { value: dom.localStorage, configurable: true });
+Object.defineProperty(globalThis, "isSecureContext", { value: true, configurable: true });
+let copiedText = "";
+Object.defineProperty(dom.navigator, "clipboard", {
+  value: { writeText: async (text: string) => { copiedText = text; } },
+  configurable: true,
+});
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 // Deterministic API seam: record calls, answer [] / {} like an empty server.
@@ -96,7 +102,7 @@ test("right-click opens the row-scoped menu with delete/archive/pin and menu ARI
     // Scoped to the exact row that was right-clicked.
     assert.equal(menu!.getAttribute("aria-label"), "Actions for Idle session");
     const items = [...menu!.querySelectorAll<HTMLElement>('[role^="menuitem"]')].map((b) => b.textContent?.trim());
-    for (const expected of ["Rename", "Fork", "Pin to top", "Archive", "Delete"]) {
+    for (const expected of ["Rename", "Fork", "Copy session ID", "Pin to top", "Archive", "Delete"]) {
       assert.ok(items.some((t) => t?.startsWith(expected)), `menu offers ${expected} (got: ${items.join(", ")})`);
     }
 
@@ -111,6 +117,28 @@ test("right-click opens the row-scoped menu with delete/archive/pin and menu ARI
     });
     assert.equal(container.querySelector('[role="menu"]'), null, "Escape closes the menu");
     assert.equal(document.activeElement?.getAttribute("aria-label"), "Open Idle session");
+  } finally {
+    await unmount();
+  }
+});
+
+test("right-click Copy session ID writes the exact row id to the clipboard", async () => {
+  const { container, unmount } = await mountList();
+  try {
+    copiedText = "";
+    const row = rowOf(container, "Idle session");
+    await act(async () => {
+      row.dispatchEvent(new MouseEventCtor("contextmenu", { bubbles: true, cancelable: true }));
+    });
+    const copy = [...row.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')]
+      .find((button) => button.textContent?.trim() === "Copy session ID");
+    assert.ok(copy, "copy action is available in the row context menu");
+    await act(async () => {
+      copy!.click();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    assert.equal(copiedText, "s-idle");
+    assert.equal(row.querySelector('[role="menu"]'), null, "successful copy closes the menu");
   } finally {
     await unmount();
   }

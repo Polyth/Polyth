@@ -7,7 +7,7 @@ import type {
   Disposable, ForkDraft, ForkResult, JsonObject, NotificationRecord,
   InstalledPluginDto, PackageDescriptorDto, QueueItemDto, RuntimeEvent,
   SecretRequestData, SecretResolvedData, SecureSafeKind, SecureSafeService,
-  RuntimeSession, SendResult, SessionEvent, SessionFolderDto, SessionForkedData, SessionOrganizePatch, SessionProjection, SessionRef,
+  RuntimeSession, SendResult, SessionDebugDto, SessionEvent, SessionFolderDto, SessionForkedData, SessionOrganizePatch, SessionProjection, SessionRef,
   SessionService, SessionPersistence, UserTurnInput,
 } from "@polyth/contracts";
 import type { ProjectService } from "@polyth/contracts";
@@ -504,6 +504,49 @@ export function createSessionService(deps: {
       else if (e.type === "secret/resolved") secrets.delete(rid);
     }
     return questions.size + perms.size + secrets.size;
+  };
+
+  const pendingRequestIds = (events: readonly SessionEvent[]): SessionDebugDto["pending"] => {
+    const questions = new Set<string>();
+    const permissions = new Set<string>();
+    const secrets = new Set<string>();
+    for (const event of events) {
+      const requestId = (event.data as { requestId?: unknown }).requestId;
+      if (typeof requestId !== "string" || !requestId) continue;
+      if (event.type === "question/asked") questions.add(requestId);
+      else if (event.type === "question/answered") questions.delete(requestId);
+      else if (event.type === "permission/requested") permissions.add(requestId);
+      else if (event.type === "permission/resolved") permissions.delete(requestId);
+      else if (event.type === "secret/requested") secrets.add(requestId);
+      else if (event.type === "secret/resolved") secrets.delete(requestId);
+    }
+    return {
+      permissions: [...permissions],
+      questions: [...questions],
+      secrets: [...secrets],
+    };
+  };
+
+  const recentSessionErrors = (
+    events: readonly SessionEvent[],
+  ): SessionDebugDto["recentErrors"] => {
+    const errors: SessionDebugDto["recentErrors"] = [];
+    for (const event of events) {
+      const data = event.data as Record<string, unknown>;
+      const failedStop = event.type === "turn/stopped" && data.reason === "error";
+      const failedType = event.type === "turn/failed"
+        || event.type === "tool/error"
+        || event.type.endsWith("/failed");
+      if (!failedStop && !failedType) continue;
+      const raw = data.error ?? data.message ?? data.reason ?? "unknown error";
+      errors.push({
+        seq: event.seq,
+        time: event.time,
+        type: event.type,
+        message: typeof raw === "string" ? raw : JSON.stringify(raw),
+      });
+    }
+    return errors.slice(-20);
   };
 
   /** OpenCode's question endpoint accepts answers by question position
@@ -1157,7 +1200,18 @@ export function createSessionService(deps: {
       });
     },
 
-    async abort(sessionId) { await sessionRuntime.get(sessionId)?.abort(sessionId); },
+    async abort(sessionId) {
+      const projection = await store.projection(sessionId);
+      if (!projection) throw Object.assign(new Error("session not found"), { code: "not-found" });
+      let runtime = sessionRuntime.get(sessionId);
+      // A persisted working/waiting projection may outlive the server process
+      // that originally attached it. Reattach before cancelling so an agent
+      // never receives a false-success no-op after a Polyth restart.
+      if (!runtime && (projection.status === "working" || projection.status === "waiting")) {
+        runtime = await ensureWired(sessionId, projection);
+      }
+      await runtime?.abort(sessionId);
+    },
 
     // UX-MSG-ACTIONS Fork: backend branch is prepared FIRST; the canonical
     // child (prefix + projection + one lineage marker) publishes in a single
@@ -1558,6 +1612,33 @@ export function createSessionService(deps: {
         }
       }
       return store.events(sessionId, afterSeq);
+    },
+
+    async debug(sessionId) {
+      const projection = await store.projection(sessionId);
+      if (!projection) throw Object.assign(new Error("session not found"), { code: "not-found" });
+      const events = await store.events(sessionId);
+      const lastEvent = events.at(-1);
+      const turnId = lastTurnId.get(sessionId);
+      return {
+        status: projection.status,
+        eventCount: events.length,
+        latestSeq: lastEvent?.seq ?? 0,
+        ...(lastEvent ? {
+          lastEvent: { seq: lastEvent.seq, time: lastEvent.time, type: lastEvent.type },
+        } : {}),
+        runtime: {
+          attached: sessionRuntime.has(sessionId),
+          activeTurn: turnActive(sessionId),
+          admissionPending: admitting.has(sessionId),
+          ...(turnId ? { turnId } : {}),
+          ...(projection.backendSessionId ? { backendSessionId: projection.backendSessionId } : {}),
+          ...(projection.worktreePath ? { worktreePath: projection.worktreePath } : {}),
+        },
+        queue: deps.queue ? await deps.queue.queueList(sessionId) : [],
+        pending: pendingRequestIds(events),
+        recentErrors: recentSessionErrors(events),
+      };
     },
 
     async replyPermission(sessionId, requestId, reply, scope) {

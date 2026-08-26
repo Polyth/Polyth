@@ -67,6 +67,7 @@ import { createTrackWorkflow, type TrackWorkflow, type TrackWorkflowDeps } from 
 import { createRouteRegistry } from "./routeRegistry.ts";
 import { createPackageLifecycle } from "./packageLifecycle.ts";
 import { createDeferredConfigApplier, createOpenCodePendingService } from "./opencodePending.ts";
+import { agentSessionRoutes, type AgentGoalService } from "./routes/agentSessions.ts";
 
 /** POLYTH_SMALL_MODEL="provider/model-id" — cheap model for auditors/commit messages. */
 const smallModel = (): { providerID: string; modelID: string } | undefined => {
@@ -767,6 +768,14 @@ export async function boot(opts: BootOptions = {}) {
     }),
     sessionRetentionRoutes(sessions),
     controlRoutes(sessions),
+    agentSessionRoutes({
+      sessions,
+      projects,
+      store,
+      capabilities: () => allCapabilities(),
+      goals: () => svc<AgentGoalService>("goals"),
+      version: "0.1.0",
+    }),
     queueRoutes(sessions),
     pushRoutes(push),
     notificationRoutes(notifications),
