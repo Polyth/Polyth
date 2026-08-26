@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { UiSlot } from "@polyth/contracts";
 import { listCapabilities, useResolvedCapabilities } from "../../capabilities.ts";
 import { activateProject, useStore } from "../../store.ts";
@@ -121,6 +121,19 @@ const RESPONSE_ACTION_LABELS: Record<ResponseActionId, string> = {
   multirun: tr("settings.widgetspage.newMultiRunFromAnswer"),
 };
 
+export function moveOrderedSelection<T extends string>(
+  selected: readonly T[],
+  item: T,
+  target: T,
+): T[] {
+  if (item === target || !selected.includes(item) || !selected.includes(target)) return [...selected];
+  const reordered = selected.filter((id) => id !== item);
+  reordered.splice(reordered.indexOf(target), 0, item);
+  return reordered;
+}
+
+const LONG_PRESS_MS = 350;
+
 function OrderedToggleList<T extends string>({
   all,
   selected,
@@ -133,38 +146,141 @@ function OrderedToggleList<T extends string>({
   onChange: (ids: T[]) => void;
 }) {
   const [dragged, setDragged] = useState<T | null>(null);
+  const [dragOver, setDragOver] = useState<T | null>(null);
+  const pointerDrag = useRef<{ id: T; pointerId: number; active: boolean; target: T } | null>(null);
+  const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const ordered = [...selected, ...all.filter((id) => !selected.includes(id))];
-  const move = (target: T) => {
-    if (!dragged || dragged === target) return;
-    const visible = selected.filter((id) => id !== dragged);
-    if (!selected.includes(dragged) || !selected.includes(target)) return;
-    visible.splice(visible.indexOf(target), 0, dragged);
-    onChange(visible);
+  const clearPointerDrag = () => {
+    if (longPressTimer.current !== null) clearTimeout(longPressTimer.current);
+    longPressTimer.current = null;
+    pointerDrag.current = null;
+    setDragged(null);
+    setDragOver(null);
+  };
+  useEffect(() => () => {
+    if (longPressTimer.current !== null) clearTimeout(longPressTimer.current);
+  }, []);
+
+  const move = (item: T, target: T) => {
+    const next = moveOrderedSelection(selected, item, target);
+    if (next.some((id, index) => id !== selected[index])) onChange(next);
+  };
+  const moveBy = (item: T, delta: -1 | 1) => {
+    const index = selected.indexOf(item);
+    const target = selected[index + delta];
+    if (index >= 0 && target) move(item, target);
+  };
+  const finishPointerDrag = (
+    event: React.PointerEvent<HTMLButtonElement>,
+    cancelled = false,
+  ) => {
+    const current = pointerDrag.current;
+    if (!current || current.pointerId !== event.pointerId) return;
+    if (current.active) {
+      event.preventDefault();
+      if (!cancelled) move(current.id, current.target);
+    }
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    clearPointerDrag();
   };
   return (
     <div className="widget-order-list">
       {ordered.map((id) => {
         const visible = selected.includes(id);
+        const index = selected.indexOf(id);
         return (
-          <label
+          <div
             key={id}
-            className={`widget-order-chip${visible ? "" : " hidden"}`}
+            className={`widget-order-chip${visible ? "" : " hidden"}${dragged === id ? " dragging" : ""}${dragOver === id ? " drag-over" : ""}`}
+            data-widget-order-id={id}
             draggable={visible}
-            onDragStart={() => setDragged(id)}
-            onDragEnd={() => setDragged(null)}
+            onDragStart={(event) => {
+              setDragged(id);
+              event.dataTransfer.setData("text/polyth-order-item", id);
+            }}
+            onDragEnd={() => {
+              setDragged(null);
+              setDragOver(null);
+            }}
             onDragOver={(event) => { if (visible) event.preventDefault(); }}
-            onDrop={() => move(id)}
+            onDragEnter={() => { if (visible && dragged !== id) setDragOver(id); }}
+            onDrop={(event) => {
+              event.preventDefault();
+              if (dragged) move(dragged, id);
+              setDragged(null);
+              setDragOver(null);
+            }}
           >
-            <span className="widget-drag-handle" aria-hidden="true">⋮⋮</span>
+            <button
+              type="button"
+              className="widget-drag-handle"
+              aria-label={`Reorder ${labels[id]}. Long press and drag, or use arrow keys.`}
+              disabled={!visible}
+              onKeyDown={(event) => {
+                if (event.key === "ArrowLeft" || event.key === "ArrowUp") {
+                  event.preventDefault();
+                  moveBy(id, -1);
+                } else if (event.key === "ArrowRight" || event.key === "ArrowDown") {
+                  event.preventDefault();
+                  moveBy(id, 1);
+                }
+              }}
+              onPointerDown={(event) => {
+                if (!visible || !event.isPrimary) return;
+                event.currentTarget.setPointerCapture(event.pointerId);
+                pointerDrag.current = { id, pointerId: event.pointerId, active: false, target: id };
+                longPressTimer.current = setTimeout(() => {
+                  if (!pointerDrag.current || pointerDrag.current.pointerId !== event.pointerId) return;
+                  pointerDrag.current.active = true;
+                  setDragged(id);
+                  setDragOver(id);
+                }, LONG_PRESS_MS);
+              }}
+              onPointerMove={(event) => {
+                const current = pointerDrag.current;
+                if (!current || current.pointerId !== event.pointerId || !current.active) return;
+                event.preventDefault();
+                const target = document.elementFromPoint(event.clientX, event.clientY)
+                  ?.closest<HTMLElement>("[data-widget-order-id]")
+                  ?.dataset.widgetOrderId as T | undefined;
+                if (target && selected.includes(target)) {
+                  current.target = target;
+                  setDragOver(target);
+                }
+              }}
+              onPointerUp={(event) => finishPointerDrag(event)}
+              onPointerCancel={(event) => finishPointerDrag(event, true)}
+            >
+              <span aria-hidden="true">⋮⋮</span>
+            </button>
             <input
               type="checkbox"
+              aria-label={`${visible ? "Hide" : "Show"} ${labels[id]}`}
               checked={visible}
               onChange={(event) => onChange(event.target.checked
                 ? [...selected, id]
                 : selected.filter((candidate) => candidate !== id))}
             />
-            <span>{labels[id]}</span>
-          </label>
+            <span className="widget-order-label">{labels[id]}</span>
+            {visible && (
+              <span className="widget-order-controls">
+                <button
+                  type="button"
+                  aria-label={`Move ${labels[id]} earlier`}
+                  disabled={index <= 0}
+                  onClick={() => moveBy(id, -1)}
+                >←</button>
+                <button
+                  type="button"
+                  aria-label={`Move ${labels[id]} later`}
+                  disabled={index < 0 || index >= selected.length - 1}
+                  onClick={() => moveBy(id, 1)}
+                >→</button>
+              </span>
+            )}
+          </div>
         );
       })}
     </div>

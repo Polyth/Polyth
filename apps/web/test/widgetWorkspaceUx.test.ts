@@ -125,6 +125,31 @@ test("widget settings exposes a persistent Chat top rail position", async () => 
   assert.match(source, /setUiSettings\(\{ mobileShortcuts \}\)/);
 });
 
+test("ordered settings chips support touch dragging and explicit keyboard moves", async () => {
+  const source = await readFile(new URL("../src/components/settings/WidgetsPage.tsx", import.meta.url), "utf8");
+  assert.match(source, /setPointerCapture\(event\.pointerId\)/, "touch sorting captures the long-press pointer");
+  assert.match(source, /LONG_PRESS_MS/, "touch sorting distinguishes a long press from a tap");
+  assert.match(source, /document\.elementFromPoint\(event\.clientX, event\.clientY\)/, "dragging resolves the chip under the finger");
+  assert.match(source, /event\.key === "ArrowLeft" \|\| event\.key === "ArrowUp"/, "reorder handles accept keyboard arrows");
+  assert.match(source, /Move \$\{labels\[id\]\} earlier/, "visible move-earlier control is exposed");
+  assert.match(source, /Move \$\{labels\[id\]\} later/, "visible move-later control is exposed");
+});
+
+test("critic-reported mobile controls use 44px hit boxes", async () => {
+  const css = await readFile(new URL("../src/styles.css", import.meta.url), "utf8");
+  for (const [name, pattern] of [
+    ["settings chip", /\.widget-order-chip\s*\{[^}]*min-height:\s*var\(--tap\)/s],
+    ["drag handle", /\.widget-drag-handle,[\s\S]*?\{[^}]*height:\s*var\(--tap\)/s],
+    ["settings checkbox", /\.widget-order-chip input\[type="checkbox"\]\s*\{[^}]*height:\s*var\(--tap\)/s],
+    ["file reference", /\.file-ref\s*\{[^}]*min-height:\s*var\(--tap\)/s],
+    ["model trigger", /\.composer-mobile \.composer-model-header \.model-trigger-mobile\s*\{[^}]*min-height:\s*var\(--tap\)/s],
+    ["thinking range", /\.composer-mobile \.composer-thinking-badge input\[type="range"\]\s*\{[^}]*height:\s*var\(--tap\)/s],
+    ["mode picker", /\.composer-mobile \.composer-agent-badge \.picker-chip\s*\{[^}]*min-height:\s*var\(--tap\)/s],
+  ] as const) {
+    assert.match(css, pattern, `${name} uses the shared 44px target`);
+  }
+});
+
 test("widget library searches capabilities and combines plugin, size, zone, and tab filters", () => {
   const hits = filterWidgetLibrary(WIDGETS, {
     query: "diff",

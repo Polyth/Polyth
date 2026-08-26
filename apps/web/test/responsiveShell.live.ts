@@ -282,12 +282,11 @@ const COMPOSER_CONTROLS: Array<[string, string]> = [
   ["stop", ".stop"],
 ];
 
-const COMPACT_HEADER: Array<[string, string]> = [
-  ["drawer", ".header-drawer-btn"],
-  ["viewChip", ".header-view-picker .picker-chip"],
-  ["autoAccept", ".auto-accept-chip"],
-  ["overflow", ".overflow-trigger"],
-  ["panels", ".narrow-panel-trigger"],
+const COMPACT_SHELL: Array<[string, string]> = [
+  ["topShortcut", ".mobile-shortcut"],
+  ["recents", '.session-nav-action[aria-label="Session history"]'],
+  ["sessionTitle", ".session-nav-current"],
+  ["newChat", '.session-nav-action[aria-label="New session"]'],
 ];
 
 const WIDE_HEADER: Array<[string, string]> = [
@@ -302,7 +301,7 @@ const SHEET_CONTROLS: Array<[string, string]> = [
 ];
 
 const TOUCH_LABELS = [
-  "drawer", "viewChip", "autoAccept", "overflow", "panels",
+  "topShortcut", "recents", "sessionTitle", "newChat",
   "attach", "expand", "send", "stop", "drawerClose", "sheetClose",
 ];
 
@@ -327,7 +326,7 @@ const STATES: StateSpec[] = [
     id: "panel",
     path: `/p/${PROJECT}/s/${S_LOADED}`,
     ready: ".timeline .msg",
-    storage: { "polyth.railPrefs": JSON.stringify({ lastOpen: "files", widths: {} }) },
+    storage: { "polyth.railPrefs": JSON.stringify({ lastOpen: "slot:notification-centre", widths: {} }) },
     sheetOnLoad: true,
   },
 ];
@@ -363,7 +362,7 @@ test("geometry gate across viewports and shell states", async () => {
         : railOverlay
           ? railControls
           : [
-              ...(mode === "wide" ? WIDE_HEADER : COMPACT_HEADER),
+              ...(mode === "wide" ? WIDE_HEADER : COMPACT_SHELL),
               ...COMPOSER_CONTROLS,
               ...(state.id === "panel" ? railControls : []),
             ];
@@ -378,7 +377,7 @@ test("geometry gate across viewports and shell states", async () => {
       if (modalOpen) {
         // Rule: background primary controls receive no pointer events while the
         // sheet is modal — the backdrop or sheet must win every center hit.
-        const bg = await collectGeometry(page, [["send", ".send"], ["drawer", ".header-drawer-btn"]]);
+        const bg = await collectGeometry(page, [["send", ".send"]]);
         for (const c of bg.controls) {
           assert.ok(!c.hitOk, `${ctx}: background ${c.label} still hittable under the modal sheet`);
         }
@@ -406,13 +405,15 @@ test("geometry gate across viewports and shell states", async () => {
 
       // Mode-specific structural truths.
       if (mode !== "wide" && !modalOpen) {
-        assert.ok(present(structural, "drawer"), `${ctx}: drawer trigger missing in ${mode} mode`);
-        assert.ok(present(structural, "viewChip"), `${ctx}: compact view picker missing`);
+        assert.ok(present(structural, "topShortcut"), `${ctx}: swipeable top shortcut rail missing`);
+        assert.ok(present(structural, "sessionTitle"), `${ctx}: bottom session title missing`);
+        assert.ok(present(structural, "recents"), `${ctx}: Recents action missing`);
+        assert.ok(present(structural, "newChat"), `${ctx}: New chat action missing`);
         assert.ok(!present(structural, "viewIcon"), `${ctx}: desktop view switcher visible in ${mode} mode`);
       }
       if (mode === "wide" && !modalOpen) {
         assert.ok(present(structural, "viewIcon"), `${ctx}: desktop view switcher missing in wide mode`);
-        assert.ok(!present(structural, "drawer"), `${ctx}: drawer trigger visible in wide mode`);
+        assert.ok(!present(structural, "sessionTitle"), `${ctx}: bottom session bar visible in wide mode`);
       }
       if (state.id === "working") {
         assert.ok(modalOpen || present(report, "stop"), `${ctx}: Stop missing during a working turn`);
@@ -472,8 +473,8 @@ test("session drawer modal contract at 390", async () => {
   assert.ok(closed.mainRight >= 389, `main ends at ${closed.mainRight}, layout width lost`);
   assert.ok(closed.hidden || closed.drawerRight <= 0, "closed drawer still shows inside the viewport");
 
-  // Open via the named trigger.
-  await page.click(".header-drawer-btn");
+  // Open via the permanent session-title action in the restored bottom bar.
+  await page.click(".session-nav-current");
   await page.waitForSelector(".sidebar.open", { state: "visible" });
   const open = await page.evaluate(() => {
     const el = document.querySelector("#polyth-session-drawer")!;
@@ -514,11 +515,11 @@ test("session drawer modal contract at 390", async () => {
   await page.keyboard.press("Escape");
   await page.waitForSelector(".sidebar.open", { state: "detached" }).catch(() => {});
   await page.waitForFunction(() => !document.querySelector(".sidebar")?.classList.contains("open"));
-  const focusRestored = await page.evaluate(() => document.activeElement?.classList.contains("header-drawer-btn") === true);
+  const focusRestored = await page.evaluate(() => document.activeElement?.classList.contains("session-nav-current") === true);
   assert.ok(focusRestored, "Escape did not restore focus to the drawer trigger");
 
   // Backdrop click closes.
-  await page.click(".header-drawer-btn");
+  await page.click(".session-nav-current");
   await page.waitForSelector(".sidebar-backdrop", { state: "visible" });
   await page.mouse.click(385, 450);
   await page.waitForFunction(() => !document.querySelector(".sidebar")?.classList.contains("open"));
@@ -526,7 +527,7 @@ test("session drawer modal contract at 390", async () => {
   // Keyboard activation: Enter opens the drawer, Enter on a session row
   // activates exactly one session target and closes the drawer only after the
   // session actually opened.
-  await page.focus(".header-drawer-btn");
+  await page.focus(".session-nav-current");
   await page.keyboard.press("Enter");
   await page.waitForSelector(".sidebar.open", { state: "visible" });
   const emptyRow = page.locator(`.session-row:has-text("Empty synthetic session") .session-btn`).first();
@@ -542,14 +543,31 @@ test("session drawer modal contract at 390", async () => {
 });
 
 // =============================================================================
-// 4. Panel sheet: registry strip, pressed truth, host reuse, mutual exclusion
+// 4. Top shortcuts: workspace panes + notification secondary rail
 // =============================================================================
 
-test("panel sheet contract at 390", async () => {
+test("top shortcut rail opens workspace and notification surfaces at 390", async () => {
   const page = await openApp({ width: 390, height: 900, path: `/p/${PROJECT}/s/${S_LOADED}`, ready: ".timeline .msg" });
 
-  // Open panels via the header trigger (registry-backed).
-  await page.click(".narrow-panel-trigger");
+  const files = page.locator('.mobile-shortcut[aria-label="Project files"]');
+  await files.focus();
+  await page.keyboard.press("Enter");
+  await page.waitForSelector('.rail-fullscreen[aria-label="Project files"] .rail-body', { state: "visible" });
+  const workspacePane = await page.locator('.rail-fullscreen[aria-label="Project files"]').evaluate((el) => {
+    const r = el.getBoundingClientRect();
+    return { width: r.width, role: el.getAttribute("role"), name: el.getAttribute("aria-label") };
+  });
+  assert.ok(workspacePane.width <= 390, `workspace pane wider than viewport: ${workspacePane.width}`);
+  assert.equal(workspacePane.role, "region");
+  assert.equal(workspacePane.name, "Project files");
+  assert.equal(await files.getAttribute("aria-current"), "page");
+  await page.keyboard.press("Escape");
+  await page.waitForSelector('.rail-fullscreen[aria-label="Project files"]', { state: "hidden" });
+
+  // Notifications remain a contextual sheet with their registered secondary
+  // rail; this is distinct from the full-screen workspace destinations.
+  const notifications = page.locator('.mobile-shortcut[aria-label="Notifications"]');
+  await notifications.click();
   await page.waitForSelector(".panel-sheet .rail-body", { state: "visible" });
   const sheet = await page.evaluate(() => {
     const el = document.querySelector("#polyth-panel-sheet")!;
@@ -559,68 +577,20 @@ test("panel sheet contract at 390", async () => {
   assert.ok(sheet.width <= 390, `sheet wider than viewport: ${sheet.width}`);
   assert.equal(sheet.role, "dialog");
   assert.equal(sheet.modal, "true");
-  assert.match(sheet.name ?? "", /panel$/i);
+  assert.equal(sheet.name, "Notifications");
+  assert.ok(await page.locator(".panel-sheet .sheet-strip").isVisible(), "notification secondary rail missing");
+  assert.equal(await notifications.getAttribute("aria-current"), "page");
 
-  // Pressed truth + keyed host reuse across Files → Changes → Context → Files.
-  const pressedTruth = () =>
-    page.evaluate(() => {
-      const btns = Array.from(document.querySelectorAll<HTMLElement>(".sheet-strip .strip-btn[aria-pressed]"));
-      const bodies = Array.from(document.querySelectorAll<HTMLElement>(".panel-sheet .rail-body"));
-      const visibleBodies = bodies.filter((b) => b.getBoundingClientRect().width > 0 && getComputedStyle(b).display !== "none");
-      const pressed = btns.filter((b) => b.getAttribute("aria-pressed") === "true").map((b) => b.getAttribute("title"));
-      return { pressed, visibleBodies: visibleBodies.length, totalBodies: bodies.length };
-    });
-
-  let t = await pressedTruth();
-  assert.deepEqual(t.pressed, ["Files"], `expected Files pressed, got ${t.pressed}`);
-  assert.equal(t.visibleBodies, 1, "exactly one panel host visible");
-
-  // Tag the Files host DOM node, then switch away and back: the keyed host must
-  // be the same node (no remount of a visited panel).
-  await page.evaluate(() => {
-    const body = document.querySelector<HTMLElement>(".panel-sheet .rail-body");
-    body!.dataset.a390Keep = "files-host";
-  });
-  await page.click('.sheet-strip .strip-btn[title="Changes"]');
-  await page.waitForFunction(() => document.querySelector('.sheet-strip .strip-btn[title="Changes"]')?.getAttribute("aria-pressed") === "true");
-  t = await pressedTruth();
-  assert.deepEqual(t.pressed, ["Changes"]);
-  assert.equal(t.visibleBodies, 1);
-
-  await page.click('.sheet-strip .strip-btn[title="Context"]');
-  await page.waitForFunction(() => document.querySelector('.sheet-strip .strip-btn[title="Context"]')?.getAttribute("aria-pressed") === "true");
-  t = await pressedTruth();
-  assert.deepEqual(t.pressed, ["Context"]);
-  assert.equal(t.totalBodies >= 3, true, "visited panels stay mounted (keep-alive)");
-
-  const filesHostKept = await page.evaluate(() => document.querySelector('[data-a390-keep="files-host"]') !== null);
-  assert.ok(filesHostKept, "Files host was remounted while switching panels");
-
-  // Escape closes the sheet and restores the panels trigger.
+  // Escape closes the sheet and restores its top-rail shortcut.
   await page.keyboard.press("Escape");
   await page.waitForFunction(() => {
     const el = document.querySelector("#polyth-panel-sheet");
     return el === null || (el as HTMLElement).style.display === "none";
   });
-  const back = await page.evaluate(() => document.activeElement?.classList.contains("narrow-panel-trigger") === true);
-  assert.ok(back, "Escape did not restore focus to the panels trigger");
-
-  // Backdrop close: at phone width the sheet is full-bleed (no exposed
-  // backdrop), so exercise the pointer path at 768 where the scrim is visible.
-  await page.click(".narrow-panel-trigger");
-  await page.waitForSelector(".panel-sheet .rail-body", { state: "visible" });
-  await page.setViewportSize({ width: 768, height: 900 });
-  await page.waitForTimeout(200);
-  await page.mouse.click(100, 450);
-  await page.waitForFunction(() => {
-    const el = document.querySelector("#polyth-panel-sheet");
-    return el === null || (el as HTMLElement).style.display === "none";
-  });
-  await page.setViewportSize({ width: 390, height: 900 });
-  await page.waitForTimeout(200);
+  assert.equal(await page.evaluate(() => document.activeElement?.getAttribute("aria-label")), "Notifications");
 
   // Mutual exclusion: the drawer and the panel sheet are never open at once.
-  await page.click(".header-drawer-btn");
+  await page.click(".session-nav-current");
   await page.waitForSelector(".sidebar.open", { state: "visible" });
   const withDrawer = await page.evaluate(() => ({
     sheetOpen: (() => { const el = document.querySelector("#polyth-panel-sheet"); return el !== null && (el as HTMLElement).style.display !== "none"; })(),
@@ -630,7 +600,7 @@ test("panel sheet contract at 390", async () => {
   assert.equal(withDrawer.sheetOpen, false, "sheet open while the drawer is the active modal");
   await page.keyboard.press("Escape");
   await page.waitForFunction(() => !document.querySelector(".sidebar")?.classList.contains("open"));
-  await page.click(".narrow-panel-trigger");
+  await notifications.click();
   await page.waitForSelector(".panel-sheet .rail-body", { state: "visible" });
   const withSheet = await page.evaluate(() => ({
     sheetOpen: (() => { const el = document.querySelector("#polyth-panel-sheet"); return el !== null && (el as HTMLElement).style.display !== "none"; })(),
@@ -644,25 +614,19 @@ test("panel sheet contract at 390", async () => {
 });
 
 // =============================================================================
-// 5. Compact view picker switches views (terminal) with keyboard support
+// 5. Top shortcut rail switches to Terminal with keyboard support
 // =============================================================================
 
-test("compact view picker reaches the terminal view at 390", async () => {
+test("top shortcut rail reaches Terminal at 390", async () => {
   const page = await openApp({ width: 390, height: 900, path: `/p/${PROJECT}/s/${S_LOADED}`, ready: ".timeline .msg" });
 
-  const chipName = await page.getAttribute(".header-view-picker .picker-chip", "aria-label");
-  assert.match(chipName ?? "", /^Change workspace view, current: /, "view chip must announce the current view");
-
-  await page.click(".header-view-picker .picker-chip");
-  await page.waitForSelector(".picker-pop input", { state: "visible" });
-  await page.fill(".picker-pop input", "terminal");
+  const terminal = page.locator('.mobile-shortcut[aria-label^="Open terminal"]');
+  await terminal.focus();
   await page.keyboard.press("Enter");
+  await page.waitForSelector('.rail-fullscreen[aria-label="Terminal"]', { state: "visible" });
+  assert.equal(await terminal.getAttribute("aria-current"), "page");
 
-  await page.waitForFunction(() => document.querySelector(".sb-view")?.textContent === "Terminal");
-  const after = await page.getAttribute(".header-view-picker .picker-chip", "aria-label");
-  assert.match(after ?? "", /current: Terminal$/, "chip name did not update to the new view");
-
-  const report = await collectGeometry(page, [...COMPACT_HEADER, ["viewChip2", ".header-view-picker .picker-chip"]]);
+  const report = await collectGeometry(page, COMPACT_SHELL);
   assertNoOverflow(report, "terminal@390x900");
   assertControlsInViewport(report, "terminal@390x900");
 
@@ -796,7 +760,7 @@ test("zoomed 720×450@2x hero is fully reachable and reflows in one dimension", 
 
 async function sampleDrawerMotion(page: Page): Promise<Array<{ ms: number; left: number; width: number }>> {
   return page.evaluate(async () => {
-    const btn = document.querySelector<HTMLElement>(".header-drawer-btn")!;
+    const btn = document.querySelector<HTMLElement>(".session-nav-current")!;
     const drawer = document.querySelector("#polyth-session-drawer")!;
     const samples: Array<{ ms: number; left: number; width: number }> = [];
     const grab = (ms: number) => {
@@ -890,9 +854,9 @@ test("reload at 390 restores working state and starts with the drawer closed", a
     }
   }, { id: S_LOADED, target: anchorSet.target });
 
-  // Open a panel so its last-open state persists, then reload with it open.
-  await page.click(".narrow-panel-trigger");
-  await page.waitForSelector(".panel-sheet .rail-body", { state: "visible" });
+  // Open the Files workspace shortcut so its last-open state persists.
+  await page.click('.mobile-shortcut[aria-label="Project files"]');
+  await page.waitForSelector('.rail-fullscreen[aria-label="Project files"] .rail-body', { state: "visible" });
 
   // The draft store debounces writes; require the flush before reloading.
   await page.waitForFunction(
@@ -902,18 +866,18 @@ test("reload at 390 restores working state and starts with the drawer closed", a
 
   await page.reload({ waitUntil: "load" });
   await page.waitForSelector(".app");
-  // Wait for the restored session (the sheet host alone renders pre-init).
+  // Wait for the restored session and workspace pane.
   await page.waitForSelector(".timeline .msg", { state: "visible", timeout: 15_000 });
-  await page.waitForSelector(".panel-sheet .rail-body", { state: "visible", timeout: 15_000 });
+  await page.waitForSelector('.rail-fullscreen[aria-label="Project files"] .rail-body', { state: "visible", timeout: 15_000 });
   await page.waitForTimeout(300);
 
   const restored = await page.evaluate((sessionId: string) => ({
     urlKeepsSession: location.pathname.includes(`/s/${sessionId}`),
-    panelPressed: document.querySelector('.sheet-strip .strip-btn[aria-pressed="true"]')?.getAttribute("title") ?? null,
+    paneName: document.querySelector(".rail-fullscreen")?.getAttribute("aria-label") ?? null,
     drawerOpen: document.querySelector(".sidebar")?.classList.contains("open") === true,
   }), S_LOADED);
   assert.ok(restored.urlKeepsSession, "reload lost the selected session");
-  assert.equal(restored.panelPressed, "Files", "reload lost the last-open panel");
+  assert.equal(restored.paneName, "Project files", "reload lost the last-open workspace pane");
   assert.equal(restored.drawerOpen, false, "drawer must start closed after reload");
 
   // The timeline restored the saved mid-scroll anchor, not the bottom.
@@ -930,12 +894,9 @@ test("reload at 390 restores working state and starts with the drawer closed", a
   assert.ok(anchorBack.max - anchorBack.scrollTop > 80,
     `restored anchor sits at the bottom (${anchorBack.scrollTop}/${anchorBack.max}), not the saved reading position`);
 
-  // Close the sheet to reach the composer; the draft and attachment survived.
+  // Close the workspace pane to reach the composer; the draft and attachment survived.
   await page.keyboard.press("Escape");
-  await page.waitForFunction(() => {
-    const el = document.querySelector("#polyth-panel-sheet");
-    return el === null || (el as HTMLElement).style.display === "none";
-  });
+  await page.waitForSelector('.rail-fullscreen[aria-label="Project files"]', { state: "hidden" });
   const draft = await page.inputValue(".composer-input textarea");
   assert.equal(draft, "draft line one\ndraft line two", "reload lost the draft");
   const attachmentBack = await page.locator('[aria-label="Attachments"]').count();
@@ -950,11 +911,11 @@ test("reload at 390 restores working state and starts with the drawer closed", a
 });
 
 // =============================================================================
-// 9b. Reload at 390 restores a non-default view; returning to Chat restores
+// 9b. Reload at 390 restores a workspace pane; returning to Chat restores
 //     the saved top-of-timeline anchor (the verifier's exact failing case)
 // =============================================================================
 
-test("reload at 390 restores the Terminal view and the top timeline anchor", async () => {
+test("reload at 390 restores Terminal and the top timeline anchor", async () => {
   const page = await openApp({ width: 390, height: 900, path: `/p/${PROJECT}/s/${S_LOADED}`, ready: ".timeline .msg" });
   const eventsBefore = await fetchEvents(page, S_LOADED);
 
@@ -972,39 +933,27 @@ test("reload at 390 restores the Terminal view and the top timeline anchor", asy
     }
   }, S_LOADED);
 
-  // Select the non-default Terminal view through the compact picker.
-  await page.click(".header-view-picker .picker-chip");
-  await page.waitForSelector(".picker-pop input", { state: "visible" });
-  await page.fill(".picker-pop input", "terminal");
-  await page.keyboard.press("Enter");
-  await page.waitForFunction(() => document.querySelector(".sb-view")?.textContent === "Terminal");
-  await page.waitForFunction(() => localStorage.getItem("polyth.activeView") === "terminal");
+  // Select Terminal through the permanent top shortcut rail.
+  await page.click('.mobile-shortcut[aria-label^="Open terminal"]');
+  await page.waitForSelector('.rail-fullscreen[aria-label="Terminal"]', { state: "visible" });
 
   await page.reload({ waitUntil: "load" });
   await page.waitForSelector(".app");
   await page.waitForFunction((id: string) => location.pathname.includes(`/s/${id}`), S_LOADED);
-  // The restored view must be the selected Terminal, not the Chat default.
-  await page.waitForFunction(
-    () => document.querySelector(".sb-view")?.textContent === "Terminal",
-    undefined,
-    { timeout: 15_000 },
-  );
-  const chip = await page.getAttribute(".header-view-picker .picker-chip", "aria-label");
-  assert.match(chip ?? "", /current: Terminal$/, "reload lost the selected view");
+  // The restored workspace pane must be Terminal, not the Chat default.
+  await page.waitForSelector('.rail-fullscreen[aria-label="Terminal"]', { state: "visible", timeout: 15_000 });
+  const terminalCurrent = await page.getAttribute('.mobile-shortcut[aria-label^="Open terminal"]', "aria-current");
+  assert.equal(terminalCurrent, "page", "reload lost the selected Terminal shortcut");
   const drawerOpen = await page.evaluate(() => document.querySelector(".sidebar")?.classList.contains("open") === true);
   assert.equal(drawerOpen, false, "drawer must start closed after reload");
 
   // Returning to Chat restores the saved top anchor, not the bottom.
-  await page.click(".header-view-picker .picker-chip");
-  await page.waitForSelector(".picker-pop input", { state: "visible" });
-  await page.fill(".picker-pop input", "chat");
-  await page.keyboard.press("Enter");
+  await page.click('.mobile-shortcut[aria-label="Chat"]');
   await page.waitForSelector(".timeline .msg", { state: "visible", timeout: 15_000 });
   await page.waitForFunction(() => {
     const el = document.querySelector<HTMLElement>(".timeline");
     return el !== null && el.scrollHeight - el.clientHeight > 400 && el.scrollTop <= 2;
   });
-  await page.waitForFunction(() => localStorage.getItem("polyth.activeView") === "session");
 
   // Event safety: view and anchor persistence never touch the session log.
   const eventsAfter = await fetchEvents(page, S_LOADED);
@@ -1028,7 +977,7 @@ test("keyboard and accessible-name gate at 390", async () => {
   });
   assert.ok(switcherGone, "desktop view switcher still rendered at 390");
 
-  // Tab order: header controls come before the composer editor and Send.
+  // Tab order: top shortcuts and bottom session actions precede the composer.
   // A non-empty draft first: a disabled Send is legitimately out of tab order.
   await page.fill(".composer-input textarea", "tab order probe");
   await page.evaluate(() => (document.activeElement as HTMLElement | null)?.blur());
@@ -1038,11 +987,10 @@ test("keyboard and accessible-name gate at 390", async () => {
     const tag = await page.evaluate(() => {
       const el = document.activeElement as HTMLElement | null;
       if (!el) return "";
-      if (el.classList.contains("header-drawer-btn")) return "drawer";
-      if (el.closest(".header-view-picker")) return "viewChip";
-      if (el.classList.contains("auto-accept-chip")) return "autoAccept";
-      if (el.classList.contains("overflow-trigger")) return "overflow";
-      if (el.classList.contains("narrow-panel-trigger")) return "panels";
+      if (el.classList.contains("mobile-shortcut")) return "topShortcut";
+      if (el.getAttribute("aria-label") === "Session history") return "recents";
+      if (el.classList.contains("session-nav-current")) return "sessionTitle";
+      if (el.getAttribute("aria-label") === "New session") return "newChat";
       if (el.tagName === "TEXTAREA") return "editor";
       if (el.classList.contains("send")) return "send";
       return "";
@@ -1051,14 +999,15 @@ test("keyboard and accessible-name gate at 390", async () => {
     if (order.includes("send")) break;
   }
   const idx = (k: string) => order.indexOf(k);
-  assert.ok(idx("drawer") >= 0, "drawer trigger unreachable by Tab");
-  assert.ok(idx("viewChip") > idx("drawer"), `view chip must follow drawer trigger (${order.join(",")})`);
-  assert.ok(idx("panels") > idx("viewChip"), `panels trigger must follow view chip (${order.join(",")})`);
-  assert.ok(idx("editor") > idx("panels"), `editor must follow header controls (${order.join(",")})`);
+  assert.ok(idx("topShortcut") >= 0, "top shortcuts unreachable by Tab");
+  assert.ok(idx("recents") > idx("topShortcut"), `Recents must follow the top rail (${order.join(",")})`);
+  assert.ok(idx("sessionTitle") > idx("recents"), `session title must follow Recents (${order.join(",")})`);
+  assert.ok(idx("newChat") > idx("sessionTitle"), `New chat must follow the session title (${order.join(",")})`);
+  assert.ok(idx("editor") > idx("newChat"), `editor must follow shell navigation (${order.join(",")})`);
   assert.ok(idx("send") > idx("editor"), `Send must follow the editor (${order.join(",")})`);
 
-  // Space activates the panels trigger; Escape closes only that top layer.
-  await page.focus(".narrow-panel-trigger");
+  // Space activates Notifications; Escape closes only that secondary rail.
+  await page.focus('.mobile-shortcut[aria-label="Notifications"]');
   await page.keyboard.press("Space");
   await page.waitForSelector(".panel-sheet .rail-body", { state: "visible" });
   await page.keyboard.press("Escape");
@@ -1067,11 +1016,6 @@ test("keyboard and accessible-name gate at 390", async () => {
     return el === null || (el as HTMLElement).style.display === "none";
   });
 
-  // Transient picker popover wins the next Escape without disturbing the shell.
-  await page.click(".header-view-picker .picker-chip");
-  await page.waitForSelector(".picker-pop", { state: "visible" });
-  await page.keyboard.press("Escape");
-  await page.waitForSelector(".picker-pop", { state: "detached" });
   const shellIntact = await page.evaluate(() => ({
     drawerOpen: document.querySelector(".sidebar")?.classList.contains("open") === true,
     sheetOpen: (() => { const el = document.querySelector("#polyth-panel-sheet"); return el !== null && (el as HTMLElement).style.display !== "none"; })(),
@@ -1081,15 +1025,15 @@ test("keyboard and accessible-name gate at 390", async () => {
 
   // Accessible names.
   const names = await page.evaluate(() => ({
-    drawer: document.querySelector(".header-drawer-btn")?.getAttribute("aria-label"),
-    viewChip: document.querySelector(".header-view-picker .picker-chip")?.getAttribute("aria-label"),
-    panels: document.querySelector(".narrow-panel-trigger")?.getAttribute("aria-label"),
-    autoAccept: document.querySelector(".auto-accept-chip")?.getAttribute("aria-label"),
+    rail: document.querySelector(".mobile-shortcut-rail")?.getAttribute("aria-label"),
+    sessionTitle: document.querySelector(".session-nav-current")?.getAttribute("aria-label"),
+    recents: document.querySelector('.session-nav-action[aria-label="Session history"]')?.getAttribute("aria-label"),
+    newChat: document.querySelector('.session-nav-action[aria-label="New session"]')?.getAttribute("aria-label"),
   }));
-  assert.equal(names.drawer, "Open projects and sessions");
-  assert.match(names.viewChip ?? "", /^Change workspace view, current: /);
-  assert.match(names.panels ?? "", /panels|panel/i);
-  assert.match(names.autoAccept ?? "", /^Auto-accept (on|off)/);
+  assert.equal(names.rail, "Quick navigation");
+  assert.match(names.sessionTitle ?? "", /^Open sessions, current:/);
+  assert.equal(names.recents, "Session history");
+  assert.equal(names.newChat, "New session");
 
   await page.context().close();
   contexts.pop();
@@ -1109,7 +1053,7 @@ test("bundled theme contrast for actionable text, icons, and focus", async () =>
       storage: { "polyth.settings": JSON.stringify({ theme }) },
     });
     await page.fill(".composer-input textarea", "hi"); // enable Send (disabled text is exempt)
-    await page.focus(".header-drawer-btn");
+    await page.focus('.mobile-shortcut[aria-label="Settings"]');
 
     const ratios = await page.evaluate(() => {
       type RGB = { r: number; g: number; b: number };
@@ -1172,8 +1116,8 @@ test("bundled theme contrast for actionable text, icons, and focus", async () =>
         if (!fg) return null;
         return ratio({ r: fg.r, g: fg.g, b: fg.b }, effBg(el));
       };
-      const drawerBtn = document.querySelector(".header-drawer-btn")!;
-      const outline = parse(getComputedStyle(drawerBtn).outlineColor);
+      const settingsShortcut = document.querySelector(".mobile-shortcut-settings")!;
+      const outline = parse(getComputedStyle(settingsShortcut).outlineColor);
       // The bundled primary-action token pair at both gradient endpoints:
       // accent-ink must clear 4.5:1 over --accent and over --accent-hi.
       const rootStyle = getComputedStyle(document.documentElement);
@@ -1184,10 +1128,10 @@ test("bundled theme contrast for actionable text, icons, and focus", async () =>
         send: textRatio(".send"),
         sendTokenAccent: ratio({ r: ink.r, g: ink.g, b: ink.b }, { r: accent.r, g: accent.g, b: accent.b }),
         sendTokenHi: ratio({ r: ink.r, g: ink.g, b: ink.b }, { r: accentHi.r, g: accentHi.g, b: accentHi.b }),
-        headerTitle: textRatio(".header-title"),
-        viewChipText: textRatio(".header-view-picker .picker-chip-text"),
-        drawerIcon: textRatio(".header-drawer-btn"),
-        focusOutline: outline ? ratio({ r: outline.r, g: outline.g, b: outline.b }, effBg(drawerBtn.parentElement!)) : null,
+        sessionTitle: textRatio(".session-nav-current strong"),
+        newChatText: textRatio('.session-nav-action[aria-label="New session"] span'),
+        shortcutIcon: textRatio(".mobile-shortcut-settings"),
+        focusOutline: outline ? ratio({ r: outline.r, g: outline.g, b: outline.b }, effBg(settingsShortcut.parentElement!)) : null,
       };
     });
 
@@ -1197,9 +1141,9 @@ test("bundled theme contrast for actionable text, icons, and focus", async () =>
     assert.ok((ratios.send ?? 0) >= 4.5, `${theme}: Send text contrast ${ratios.send?.toFixed(2)} < 4.5`);
     assert.ok(ratios.sendTokenAccent >= 4.5, `${theme}: accent-ink over accent is ${ratios.sendTokenAccent.toFixed(2)} < 4.5`);
     assert.ok(ratios.sendTokenHi >= 4.5, `${theme}: accent-ink over accent-hi is ${ratios.sendTokenHi.toFixed(2)} < 4.5`);
-    assert.ok((ratios.headerTitle ?? 0) >= 4.5, `${theme}: header title contrast ${ratios.headerTitle?.toFixed(2)} < 4.5`);
-    assert.ok((ratios.viewChipText ?? 0) >= 4.5, `${theme}: view chip text contrast ${ratios.viewChipText?.toFixed(2)} < 4.5`);
-    assert.ok((ratios.drawerIcon ?? 0) >= 3, `${theme}: drawer icon contrast ${ratios.drawerIcon?.toFixed(2)} < 3`);
+    assert.ok((ratios.sessionTitle ?? 0) >= 4.5, `${theme}: session title contrast ${ratios.sessionTitle?.toFixed(2)} < 4.5`);
+    assert.ok((ratios.newChatText ?? 0) >= 4.5, `${theme}: New chat contrast ${ratios.newChatText?.toFixed(2)} < 4.5`);
+    assert.ok((ratios.shortcutIcon ?? 0) >= 3, `${theme}: shortcut icon contrast ${ratios.shortcutIcon?.toFixed(2)} < 3`);
     assert.ok((ratios.focusOutline ?? 0) >= 3, `${theme}: focus outline contrast ${ratios.focusOutline?.toFixed(2)} < 3`);
 
     await page.context().close();

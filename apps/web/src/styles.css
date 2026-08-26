@@ -9610,12 +9610,34 @@ html[dir="rtl"] input[type="number"] {
 .widget-inline-config { margin-bottom: 14px; }
 .widget-order-list { display: flex; flex-wrap: wrap; gap: 7px; padding: 2px 0; }
 .widget-order-chip {
-  min-height: 34px; display: inline-flex; align-items: center; gap: 6px; padding: 5px 9px;
+  min-height: var(--tap); display: inline-flex; align-items: center; gap: 2px; padding: 0 4px;
   border: 1px solid var(--border-soft); border-radius: calc(9px * var(--corner-radius-scale)); background: var(--elevated);
   color: var(--text-dim); font-size: 12px; cursor: grab;
 }
 .widget-order-chip.hidden { opacity: .55; cursor: default; }
-.widget-drag-handle { color: var(--faint); letter-spacing: -3px; }
+.widget-order-chip.dragging { border-color: var(--accent); box-shadow: 0 0 0 2px var(--focus-wash); }
+.widget-order-chip.drag-over { background: var(--accent-wash); }
+.widget-drag-handle,
+.widget-order-controls > button {
+  width: var(--tap); min-width: var(--tap); height: var(--tap); min-height: var(--tap);
+  display: inline-grid; place-items: center; padding: 0; border: 0; background: transparent; color: var(--faint);
+}
+.widget-drag-handle { touch-action: none; cursor: grab; }
+.widget-drag-handle > span { letter-spacing: -3px; }
+.widget-order-chip input[type="checkbox"] {
+  width: var(--tap); min-width: var(--tap); height: var(--tap); min-height: var(--tap);
+  display: grid; place-content: center; margin: 0; appearance: none; border: 0; background: transparent; cursor: pointer;
+}
+.widget-order-chip input[type="checkbox"]::before {
+  content: ""; width: 16px; height: 16px; border: 1px solid var(--border); border-radius: 4px; background: var(--sunken);
+}
+.widget-order-chip input[type="checkbox"]:checked::before {
+  border-color: var(--accent); background: var(--accent); box-shadow: inset 0 0 0 3px var(--elevated);
+}
+.widget-order-label { min-width: 0; padding-inline: 5px; }
+.widget-order-controls { display: inline-flex; margin-left: 2px; }
+.widget-order-controls > button { color: var(--muted); font-size: 16px; cursor: pointer; }
+.widget-order-controls > button:disabled { opacity: .3; cursor: default; }
 .widget-place-chip[draggable="true"] { cursor: grab; }
 .project-icon-input { width: 74px; text-align: center; font-size: 18px; }
 
@@ -10230,6 +10252,19 @@ html[data-sheet="open"], html[data-sheet="open"] body { overflow: hidden; }
      the layout "fall apart" — not the zoom gesture itself. */
   input, textarea, select { font-size: max(16px, 1em); }
   button, a, [role="button"] { touch-action: manipulation; }
+  /* Inline links still need a real, measurable touch box. The negative block
+     margin keeps prose rhythm compact while the clickable element is 44px. */
+  .file-ref {
+    min-width: var(--tap);
+    min-height: var(--tap);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    margin-block: calc((1em - var(--tap)) / 2);
+    padding-inline: 4px;
+    vertical-align: middle;
+  }
+  .file-ref::after { display: none; }
 
   .stage-new { --dock-bg: color-mix(in srgb, var(--bg) 94%, var(--elevated)); }
   .hero-body { padding: var(--space-5) var(--screen-gutter) var(--space-4); }
@@ -10368,7 +10403,7 @@ html[data-sheet="open"], html[data-sheet="open"] body { overflow: hidden; }
   .composer-mobile .composer-model-header .model-picker { width: 100%; min-width: 0; }
   .composer-mobile .composer-model-header .model-trigger-mobile {
     width: 100%;
-    min-height: 26px;
+    min-height: var(--tap);
   }
   /* §10/§14: Build is a mode control with a caret, inside a 44px touch box.
      Thinking effort gets the same treatment right beside the model name. */
@@ -10379,10 +10414,15 @@ html[data-sheet="open"], html[data-sheet="open"] body { overflow: hidden; }
     align-items: center;
   }
   .composer-mobile .composer-thinking-badge { grid-template-columns: auto minmax(62px, 92px); }
-  .composer-mobile .composer-thinking-badge .thinking-slider-label { min-height: var(--control-h-sm); font-size: 11px; }
+  .composer-mobile .composer-thinking-badge .thinking-slider-label { min-height: var(--tap); font-size: 11px; }
   .composer-mobile .composer-thinking-badge .thinking-glyph { font-size: 12px; }
+  .composer-mobile .composer-thinking-badge .thinking-slider-track,
+  .composer-mobile .composer-thinking-badge input[type="range"] {
+    height: var(--tap);
+    min-height: var(--tap);
+  }
   .composer-mobile .composer-agent-badge .picker-chip {
-    min-height: var(--control-h-sm);
+    min-height: var(--tap);
     max-width: 132px;
     gap: 3px;
     padding: 0 10px 0 12px;
