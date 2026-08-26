@@ -5,12 +5,10 @@ import type { AgentDescriptor, McpTransport, ModelRef, SystemInfoDto } from "@po
 import type { RouteHandler } from "../http.ts";
 import type { BehaviorService } from "../behavior.ts";
 import type { McpConfigService } from "../mcp.ts";
-import type { PluginRegistry } from "@polyth/plugins";
 
 export interface SettingsRouteDeps {
   behavior: BehaviorService;
   mcp: McpConfigService;
-  plugins: PluginRegistry;
   systemInfo(local: boolean): SystemInfoDto;
   saveRole?(name: string, role: { prompt?: string; model?: ModelRef; mode: AgentDescriptor["mode"] }): Promise<AgentDescriptor>;
 }
@@ -127,40 +125,6 @@ export function settingsRoutes(deps: SettingsRouteDeps): RouteHandler {
       // Honest state: interactive MCP authorization needs the backend bridge,
       // which the current adapter does not expose. Not silently swallowed.
       rc.json(501, { error: "unsupported", message: "MCP authorization requires the backend bridge; configure credentials as secrets instead" });
-      return true;
-    }
-
-    // ---- managed plugins ----------------------------------------------------------
-    if (path === "/api/plugins" && method === "GET") {
-      rc.json(200, deps.plugins.list());
-      return true;
-    }
-    if (path === "/api/plugins/install" && method === "POST") {
-      const b = await rc.body();
-      rc.json(200, await deps.plugins.install(String(b.source ?? "")));
-      return true;
-    }
-    m = path.match(/^\/api\/plugins\/([^/]+)\/(reload|enable|disable|update)$/);
-    if (m && method === "POST") {
-      const id = m[1]!;
-      const op = m[2]!;
-      if (op === "enable") rc.json(200, await deps.plugins.enable(id));
-      else if (op === "disable") rc.json(200, await deps.plugins.disable(id));
-      else if (op === "reload") rc.json(200, await deps.plugins.reload(id));
-      else rc.json(501, { error: "unsupported", message: "in-place update is not implemented; remove and reinstall the newer version" });
-      return true;
-    }
-    m = path.match(/^\/api\/plugins\/([^/]+)\/logs$/);
-    if (m && method === "GET") {
-      rc.json(200, deps.plugins.logs(m[1]!, {
-        after: Number(rc.url.searchParams.get("after") ?? 0),
-        limit: Number(rc.url.searchParams.get("limit") ?? 200),
-      }));
-      return true;
-    }
-    m = path.match(/^\/api\/plugins\/([^/]+)$/);
-    if (m && method === "DELETE") {
-      rc.json(200, { ok: await deps.plugins.remove(m[1]!) });
       return true;
     }
 

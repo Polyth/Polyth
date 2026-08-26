@@ -22,6 +22,7 @@ export const BUILTIN_PACKAGES = [
   { id: "chat", name: "Chat", description: "Conversation and composer preferences.", core: true, enabled: true, settingsGroup: "Workspace", hasSettings: true },
   { id: "sessions", name: "Sessions", description: "Session defaults and retention preferences.", core: true, enabled: true, settingsGroup: "Workspace", hasSettings: true },
   { id: "shortcuts", name: "Shortcuts", description: "Keyboard shortcut configuration.", core: true, enabled: true, settingsGroup: "Workspace", hasSettings: true },
+  { id: "hotkeys", name: "Hotkeys Runtime", description: "Keyboard shortcut package registration.", core: true, enabled: true, hasSettings: false },
   { id: "access", name: "Access", description: "Application access and authentication.", core: true, enabled: true, settingsGroup: "System", hasSettings: true },
   { id: "about", name: "About", description: "Application version and system information.", core: true, enabled: true, settingsGroup: "System", hasSettings: true },
 
@@ -45,6 +46,7 @@ export const BUILTIN_PACKAGES = [
   { id: "commands", name: "Commands", description: "Reusable project command definitions.", core: false, enabled: true, settingsGroup: "Engineering", icon: "/", hasSettings: true },
   { id: "plugins", name: "Plugins", description: "Managed plugin installation and configuration.", core: false, enabled: true, settingsGroup: "Customize", icon: "🧩", hasSettings: true },
   { id: "integrations", name: "Integrations", description: "External service integrations.", core: false, enabled: true, settingsGroup: "Workspace", icon: "🔗", hasSettings: true },
+  { id: "example-feature", name: "Example Feature", description: "Proof-of-concept package registered via polyth.serverEntry discovery.", core: false, enabled: true, settingsGroup: "Customize", icon: "🧪", hasSettings: false },
 ] as const satisfies readonly PackageDescriptorDto[];
 
 type EnabledState = Record<string, boolean>;

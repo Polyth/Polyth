@@ -2,5 +2,9 @@
   "name": "@polyth/hotkeys",
   "version": "0.1.0",
   "type": "module",
-  "exports": { ".": "./src/index.ts", "./i18n": "./src/i18n/index.ts" }
+  "exports": { ".": "./src/index.ts", "./i18n": "./src/i18n/index.ts" },
+  "polyth": { "serverEntry": "./src/serverEntry.ts" },
+  "dependencies": {
+    "@polyth/plugins": "0.1.0"
+  }
 }

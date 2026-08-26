@@ -13,7 +13,7 @@ import type {
   UserTurnInput,
 } from "@polyth/contracts";
 import { createGithubService, type ExecFn } from "@polyth/github";
-import { githubRoutes } from "../src/routes/github.ts";
+import { githubRoutes } from "../../github/src/serverEntry.ts";
 import type { RouteRequest } from "../src/http.ts";
 
 interface Call {

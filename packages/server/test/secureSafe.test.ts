@@ -15,7 +15,7 @@ import { createStore } from "@polyth/session";
 import { createPermissionService } from "@polyth/permissions";
 import { createSecureSafeService } from "@polyth/secure-safe";
 import { createHttpServer } from "../src/http.ts";
-import { secureSafeRoutes } from "../src/routes/secureSafe.ts";
+import { secureSafeRoutes } from "../../secure-safe/src/serverEntry.ts";
 import { createSessionService, type Broadcaster } from "../src/sessions.ts";
 
 const tempDir = () => mkdtempSync(join(tmpdir(), "polyth-safe-server-"));

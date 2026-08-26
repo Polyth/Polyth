@@ -27,14 +27,32 @@ import {
   type WidgetScope,
   type WidgetSize,
 } from "@polyth/contracts";
-import { loadServerEntry } from "./serverEntry.ts";
+import { loadServerEntry } from "./trustedServerEntry.ts";
 import { buildUiBundle } from "./uiBundle.ts";
 
 export {
   loadServerEntry,
   type ServerPluginFactory,
   type TrustedServerPluginHost,
-} from "./serverEntry.ts";
+} from "./trustedServerEntry.ts";
+export {
+  createServerServiceRegistry,
+  discoverServerPackages,
+  INFRASTRUCTURE_PACKAGE_DIRS,
+  loadServerPackage,
+  serverServiceKey,
+  type AppendEventOptions,
+  type DiscoveredServerPackage,
+  type HttpServerContext,
+  type ServerBroadcast,
+  type ServerOneShotOptions,
+  type ServerPackage,
+  type ServerPackageFactory,
+  type ServerPackageHost,
+  type ServerRuntimePool,
+  type ServerServiceRegistry,
+  type SessionRuntimeBinding,
+} from "./serverPackage.ts";
 export { buildUiBundle };
 
 const execFileAsync = promisify(execFile);

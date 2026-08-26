@@ -407,3 +407,5 @@ export function createTerminalService(opts: {
 
   return service;
 }
+
+export { attachTerminalWs } from "./serverEntry.ts";
