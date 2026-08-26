@@ -45,8 +45,8 @@ test("sidebar uses contextual tree actions and no permanent footer", async () =>
     "the compact drawer has a safe-area-aware identity bar");
   assert.match(styles, /\.sidebar \.project-card-shell\s*\{\s*grid-template-columns:\s*minmax\(0, 1fr\) repeat\(3, var\(--tap\)\)/,
     "touch-sized project actions reserve explicit compact-drawer tracks");
-  assert.match(styles, /\.project-card\.active::before\s*\{[\s\S]*?box-shadow:/,
-    "the active project has a distinct but subtle glow");
+  assert.doesNotMatch(styles, /\.project-card\.active::before/,
+    "the active project does not receive a competing row glow");
 });
 
 test("header and composer controls are configurable and purpose-specific", async () => {
