@@ -282,9 +282,9 @@ const humanKey = (key: string): string => key
 function unwrapMcpValue(value: JsonValue): JsonValue {
   if (Array.isArray(value)) {
     if (value.length === 1) return unwrapMcpValue(value[0] ?? null);
-    const text = value.find((item) =>
+    const text = value.find((item): item is JsonObject =>
       item !== null && typeof item === "object" && !Array.isArray(item) && typeof item.text === "string");
-    if (text && !Array.isArray(text) && typeof text.text === "string") {
+    if (text && typeof text.text === "string") {
       try {
         return unwrapMcpValue(JSON.parse(text.text) as JsonValue);
       } catch {
@@ -373,6 +373,7 @@ export function reasoningMilestones(reasoning: string): string[] {
       .replace(/^(?:thinking|analysis|hmm|okay|ok|note to self)\b[.:,\s-]*/i, "")
       .replace(/\s+/g, " ")
       .trim())
+    .map((part) => part ? `${part[0]!.toUpperCase()}${part.slice(1)}` : part)
     .filter(Boolean);
   const useful = paragraphs.filter((part) => {
     if (part.length < 12) return false;

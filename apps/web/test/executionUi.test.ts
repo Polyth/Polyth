@@ -193,9 +193,11 @@ test("execution row renders collapsed value first, expands inline, and opens lev
     assert.match(viewer.textContent ?? "", /line 18/);
     const close = viewer.querySelector<HTMLButtonElement>(".execution-viewer-close");
     assert.ok(close);
-    close.focus();
+    const lastControl = viewer.querySelector<HTMLButtonElement>(".execution-viewer-tools button");
+    assert.ok(lastControl);
+    lastControl.focus();
     const tab = new dom.KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true });
-    close.dispatchEvent(tab);
+    lastControl.dispatchEvent(tab as unknown as Event);
     assert.equal(tab.defaultPrevented, true, "Tab is contained by the modal focus trap");
     await act(async () => close.click());
     assert.equal(document.body.querySelector(".execution-viewer"), null);
@@ -277,7 +279,10 @@ test("MCP and subagent executions render normalized first-class details", async 
         output: JSON.stringify({ title: "Fix execution UI", status: "open", nested: { raw: true } }),
       }),
     })));
-    await act(async () => container.querySelector<HTMLButtonElement>(".execution-summary")!.click());
+    const mcpSummary = container.querySelector<HTMLButtonElement>(".execution-summary")!;
+    if (mcpSummary.getAttribute("aria-expanded") !== "true") {
+      await act(async () => mcpSummary.click());
+    }
     const result = container.querySelector(".execution-mcp-result");
     assert.match(result?.textContent ?? "", /Title.*Fix execution UI.*Status.*open/s);
     assert.doesNotMatch(result?.textContent ?? "", /"nested"|"raw"/);
@@ -296,7 +301,10 @@ test("MCP and subagent executions render normalized first-class details", async 
         currentTask: "Checked 390px and 1280px",
       },
     })));
-    await act(async () => container.querySelector<HTMLButtonElement>(".execution-summary")!.click());
+    const subagentSummary = container.querySelector<HTMLButtonElement>(".execution-summary")!;
+    if (subagentSummary.getAttribute("aria-expanded") !== "true") {
+      await act(async () => subagentSummary.click());
+    }
     assert.match(
       container.querySelector(".execution-subagent-detail")?.textContent ?? "",
       /Responsive UI reviewer.*Completed.*Checked 390px and 1280px.*Open child session/s,

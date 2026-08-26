@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import { renderMarkdown } from "../markdown.tsx";
 import { fmtDuration, fmtTokens } from "../format.ts";
 import { groupWork, mergeThinking, promptIndex, copyText, loadDraft, type WorkGroup } from "../utils.ts";
-import { executionGroupLabel, reasoningMilestones } from "../execution.ts";
+import { executionGroupLabel, executionPresentation, reasoningMilestones } from "../execution.ts";
 import { setUiSettings, useUiSettings } from "../uiPrefs.ts";
 import { forkSession, sendMessage } from "../init.ts";
 import { requestComposerReplace } from "../composerInsert.ts";
