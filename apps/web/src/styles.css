@@ -12215,7 +12215,6 @@ body[data-density="comfortable"] .header { min-height: 60px; }
   width: 100vw;
   max-width: none;
   height: 100dvh;
-  min-height: 100vh;
   max-height: none;
   display: grid;
   grid-template-rows: auto auto minmax(0, 1fr);
