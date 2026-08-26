@@ -121,11 +121,11 @@ export default function CommandPalette() {
   const baseOf = (p: string): string => p.slice(p.lastIndexOf("/") + 1);
 
   return (
-    <div className="scrim palette-overlay" onMouseDown={(e) => { if (e.target === e.currentTarget) setOverlay(null); }}>
+    <div className="scrim palette-overlay" onPointerDown={(e) => { if (e.target === e.currentTarget) setOverlay(null); }}>
       <div
         ref={panelRef}
         className="dialog-panel palette"
-        onMouseDown={(e) => e.stopPropagation()}
+        onPointerDown={(e) => e.stopPropagation()}
         role="dialog"
         aria-modal="true"
         aria-label={tr("commandpalette.commandPalette")}

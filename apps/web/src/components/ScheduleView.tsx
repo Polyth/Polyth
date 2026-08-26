@@ -74,15 +74,32 @@ function RunHistory({ taskId }: { taskId: string }) {
       });
     return () => { active = false; };
   }, [taskId, reloadKey]);
-  if (loading) return <div className="muted" style={{ fontSize: "calc(12px * var(--ui-font-scale, 1))" }} role="status">{tr("scheduleview.loadingRuns")}</div>;
-  if (loadError) {
+  if (loading) {
     return (
-      <div className="muted" style={{ fontSize: "calc(12px * var(--ui-font-scale, 1))" }} role="status">
-        {tr("scheduleview.couldnTLoadRuns")}{" "}<button className="small-btn" onClick={() => setReloadKey((key) => key + 1)}>{tr("common.retry")}</button>
+      <div className="loading-state" role="status" aria-label={tr("scheduleview.loadingRuns")}>
+        <span /><span /><span />
       </div>
     );
   }
-  if (runs.length === 0) return <div className="muted" style={{ fontSize: "calc(12px * var(--ui-font-scale, 1))" }}>{tr("scheduleview.noRunsRecordedYet")}</div>;
+  if (loadError) {
+    return (
+      <div className="sched-runs-empty" role="status">
+        <EmptyState
+          title={tr("scheduleview.couldnTLoadRuns")}
+          description={loadError}
+          actionLabel={tr("common.retry")}
+          onAction={() => setReloadKey((key) => key + 1)}
+        />
+      </div>
+    );
+  }
+  if (runs.length === 0) {
+    return (
+      <div className="sched-runs-empty">
+        <EmptyState title={tr("scheduleview.noRunsRecordedYet")} description={tr("scheduleview.schedule")} />
+      </div>
+    );
+  }
   return (
     <div className="sched-runs">
       {runs.map((r) => (
@@ -215,13 +232,13 @@ export default function ScheduleView() {
           {kind === "at" && <input type="datetime-local" value={at} onChange={(e) => setAt(e.target.value)} />}
           {kind === "every" && (
             <label className="sched-every">
-              <input type="number" min={1} value={every} onChange={(e) => setEvery(Math.max(1, Number(e.target.value)))} style={{ width: 72 }} />
+              <input className="sched-every-value" type="number" min={1} value={every} onChange={(e) => setEvery(Math.max(1, Number(e.target.value)))} />
               {tr("scheduleview.minutes")}</label>
           )}
           {kind === "cron" && (
             <>
-              <input className="mono" style={{ width: 160 }} value={cronExpr} placeholder="0 9 * * 1-5" onChange={(e) => setCronExpr(e.target.value)} />
-              <select value={timeZone} onChange={(e) => setTimeZone(e.target.value)} style={{ maxWidth: 220 }}>
+              <input className="mono sched-cron-expression" value={cronExpr} placeholder="0 9 * * 1-5" onChange={(e) => setCronExpr(e.target.value)} />
+              <select className="sched-time-zone" value={timeZone} onChange={(e) => setTimeZone(e.target.value)}>
                 {zones.map((z) => <option key={z} value={z}>{z}</option>)}
               </select>
             </>

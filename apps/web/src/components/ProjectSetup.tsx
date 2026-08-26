@@ -127,7 +127,7 @@ export default function ProjectSetup() {
   };
 
   return (
-    <div className="project-setup-scrim" onMouseDown={(event) => { if (event.target === event.currentTarget) dismiss(); }}>
+    <div className="project-setup-scrim" onPointerDown={(event) => { if (event.target === event.currentTarget) dismiss(); }}>
       <div
         className="project-setup guided-setup"
         ref={panelRef}

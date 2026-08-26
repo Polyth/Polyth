@@ -7,7 +7,9 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import {
   COMPACT_MAX_WIDTH,
+  PHONE_LANDSCAPE_MAX_HEIGHT,
   PHONE_MAX_WIDTH,
+  shellModeForViewport,
   shellModeForWidth,
 } from "../src/responsiveShell.ts";
 
@@ -15,14 +17,16 @@ const read = (rel: string) => readFile(new URL(rel, import.meta.url), "utf8");
 
 // ---- pure width classifier -------------------------------------------------
 
-test("boundaries are the literal 820/480 contract", () => {
+test("boundaries are the literal compact and phone contracts", () => {
   assert.equal(COMPACT_MAX_WIDTH, 820);
   assert.equal(PHONE_MAX_WIDTH, 480);
+  assert.equal(PHONE_LANDSCAPE_MAX_HEIGHT, 480);
 });
 
 test("width classification is exact at and around every boundary", () => {
   assert.equal(shellModeForWidth(0), "phone");
   assert.equal(shellModeForWidth(320), "phone");
+  assert.equal(shellModeForWidth(375), "phone");
   assert.equal(shellModeForWidth(390), "phone");
   assert.equal(shellModeForWidth(480), "phone");
   assert.equal(shellModeForWidth(481), "compact");
@@ -44,14 +48,25 @@ test("classifier is monotonic: growing width never returns to a narrower mode", 
   }
 });
 
+test("short coarse-pointer viewports use the phone shell in landscape", () => {
+  assert.equal(shellModeForViewport(932, 430, true), "phone", "large landscape phone");
+  assert.equal(shellModeForViewport(844, 390, true), "phone", "standard landscape phone");
+  assert.equal(shellModeForViewport(821, 480, true), "phone", "height boundary is inclusive");
+  assert.equal(shellModeForViewport(932, 481, true), "wide", "tall coarse viewport stays wide");
+  assert.equal(shellModeForViewport(932, 430, false), "wide", "short desktop window stays wide");
+  assert.equal(shellModeForViewport(768, 430, false), "compact", "short fine-pointer compact window stays compact");
+});
+
 // ---- source-independent shell state rules ----------------------------------
 
-test("width alone selects shell mode: no pointer/hover/UA/touch signals, no persistence", async () => {
+test("shell mode uses bounded coarse-pointer detection without UA/touch sniffing or persistence", async () => {
   const raw = await read("../src/responsiveShell.ts");
   const src = raw.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, "");
-  for (const banned of ["pointer", "hover", "userAgent", "maxTouchPoints", "ontouch", "localStorage", "sessionStorage"]) {
+  for (const banned of ["hover", "userAgent", "maxTouchPoints", "ontouch", "localStorage", "sessionStorage"]) {
     assert.ok(!src.toLowerCase().includes(banned.toLowerCase()), `responsiveShell.ts must not use ${banned}`);
   }
+  assert.ok(src.includes("(pointer: coarse)"), "landscape phone query requires a coarse primary pointer");
+  assert.ok(src.includes("(max-height:"), "landscape phone query is height bounded");
   assert.ok(src.includes("matchMedia"), "useShellMode subscribes through matchMedia");
   assert.ok(src.includes("useSyncExternalStore"), "useShellMode is a useSyncExternalStore subscription");
 });
@@ -76,6 +91,11 @@ test("CSS carries the same literal width/height contracts", async () => {
   assert.ok(css.includes("(max-width: 820px)"), "compact boundary present in CSS");
   assert.ok(css.includes("(max-width: 480px)"), "phone boundary present in CSS");
   assert.ok(css.includes("(max-height: 600px)"), "short-height contract present in CSS");
+  assert.match(
+    css,
+    /body\[data-band="short"\] \.composer-mobile > \.session-context-bar\s*\{\s*display:\s*none/,
+    "short landscape/keyboard bands remove the duplicate context row before clipping primary composer controls",
+  );
 });
 
 test("compact sidebar is a drawer, never display:none with no way back", async () => {
@@ -97,6 +117,7 @@ test("header owns the drawer trigger and pane-aware compact view picker", async 
   assert.ok(header.includes("const resolved = useResolvedCapabilities()"), "compact picker consumes the shared capability model");
   assert.ok(header.includes("VIEW_OF_CAPABILITY[c.descriptor.id]"), "compact picker maps capability descriptors to views");
   assert.ok(header.includes("PANE_OF_CAPABILITY[c.descriptor.id]"), "compact picker keeps pane tools such as Browser reachable");
+  assert.ok(header.includes("PANEL_OF_CAPABILITY[c.descriptor.id]"), "compact picker keeps panels such as Context reachable");
   assert.ok(header.includes("mobileSheet"), "compact picker uses the touch-friendly mobile sheet");
   assert.ok(!header.includes("const VIEW_GROUPS"), "no duplicate hard-coded view list");
   assert.ok(
@@ -111,6 +132,7 @@ test("modal surfaces share the Dialog focus contract (no copied traps)", async (
   assert.ok(dialog.includes("export function useModalSurface"), "Dialog.tsx exports the reusable hook");
   const sidebar = await read("../src/components/Sidebar.tsx");
   const rail = await read("../src/components/ContextRail.tsx");
+  const css = await read("../src/styles.css");
   const projectSetup = await read("../src/components/ProjectSetup.tsx");
   const palette = await read("../src/components/CommandPalette.tsx");
   for (const [name, src] of [
@@ -126,6 +148,19 @@ test("modal surfaces share the Dialog focus contract (no copied traps)", async (
   assert.ok(
     rail.includes('id={compact ? "polyth-panel-sheet" : undefined}'),
     "compact sheet id matches the trigger without duplicating it on the desktop rail",
+  );
+  assert.ok(
+    rail.includes('className="menu-backdrop panel-sheet-backdrop"'),
+    "the panel backdrop does not inherit the shared mobile-sheet stacking layer",
+  );
+  assert.ok(
+    rail.includes('document.querySelector<HTMLElement>(".header-view-picker .picker-chip")'),
+    "a panel opened from the phone picker restores focus to that surviving trigger",
+  );
+  assert.match(
+    css,
+    /\.panel-sheet-backdrop\s*\{[^}]*z-index:\s*119[^}]*\}[\s\S]*?\.sheet-backdrop\s*\{[^}]*z-index:\s*220/s,
+    "the panel remains above its own backdrop while shared sheets stay topmost",
   );
   assert.ok(rail.includes("export function NarrowPanelTrigger"), "panel trigger exported for the header");
   assert.ok(rail.includes("useRailSurfaceModel"), "trigger and host share one visibleSurfaces model");
@@ -363,6 +398,7 @@ test("timeline empty states defer starters to the hero", async () => {
 test("header renders configured primary capabilities and permanent Terminal launchers", async () => {
   const header = await read("../src/components/Header.tsx");
   const rail = await read("../src/components/ContextRail.tsx");
+  const widgets = await read("../src/components/settings/WidgetsPage.tsx");
   const store = await read("../src/store.ts");
   assert.ok(header.includes("function CapabilityNav"), "header owns the primary capability navigation");
   assert.ok(header.includes("useResolvedCapabilities"), "header resolves configured top-rail capabilities");
@@ -377,7 +413,8 @@ test("header renders configured primary capabilities and permanent Terminal laun
   assert.ok(!rail.includes("CapabilityMenu"), "rail creates no duplicate More-tools picker");
   assert.ok(rail.includes("configuredRailButtons"), "rail renders only configured tool buttons");
   assert.ok(rail.includes('capability.descriptor.id === "terminal"'), "Terminal remains a guaranteed rail launcher");
-  assert.ok(rail.includes("reorderRail"), "rail arranges surfaces by drag-reorder instead");
+  assert.ok(!rail.includes("draggable"), "runtime rail buttons do not expose drag-only reordering");
+  assert.ok(widgets.includes("<MoveControls"), "Widgets settings expose explicit rail reorder controls");
   assert.ok(!store.includes("moreOpen:"), "dead global More-tools state stays removed");
   assert.ok(!store.includes("setMoreOpen"), "dead global More-tools action stays removed");
 });

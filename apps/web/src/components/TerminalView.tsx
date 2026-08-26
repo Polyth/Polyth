@@ -317,46 +317,57 @@ export default function TerminalView() {
   return (
     <div className="term-view">
       <div className="term-tabs">
-        {tabs.map((t) => (
-          <span key={t.id} className={`term-tab-group ${t.id === tab?.id ? "active" : ""}`}>
-            {renaming === t.id ? (
-              <input
-                className="term-tab-rename"
-                value={renameVal}
-                autoFocus
-                aria-label={tr("terminalview.terminalTabName")}
-                onChange={(e) => setRenameVal(e.target.value)}
-                onBlur={() => commitRename(t.id)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter") { e.preventDefault(); commitRename(t.id); }
-                  if (e.key === "Escape") setRenaming(null);
-                }}
-              />
-            ) : (
-              <button
-                className={`term-tab ${t.id === tab?.id ? "active" : ""}`}
-                title={tr("terminalview.statusDoubleClickToRename", { status: connectionLabel(t.connection) })}
-                onClick={() => setActive(t.id)}
-                onDoubleClick={() => startRename(t)}
-              >
-                <span
-                  className={`term-connection ${t.connection}`}
-                  aria-label={connectionLabel(t.connection)}
-                  title={connectionLabel(t.connection)}
+        <div className="term-tab-list" role="tablist" aria-label={tr("terminalview.terminalTabName")}>
+          {tabs.map((t) => (
+            <span key={t.id} className={`term-tab-group ${t.id === tab?.id ? "active" : ""}`}>
+              {renaming === t.id ? (
+                <input
+                  className="term-tab-rename"
+                  value={renameVal}
+                  autoFocus
+                  aria-label={tr("terminalview.terminalTabName")}
+                  onChange={(e) => setRenameVal(e.target.value)}
+                  onBlur={() => commitRename(t.id)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") { e.preventDefault(); commitRename(t.id); }
+                    if (e.key === "Escape") setRenaming(null);
+                  }}
                 />
-                {t.title}
-                {!t.running && <span className="term-tab-dead"> {tr("terminalview.exited")}</span>}
-              </button>
-            )}
-            <button
-              className="term-tab-x"
-              title={tr("terminalview.closeValue", { title: t.title })}
-              aria-label={tr("terminalview.closeValue", { title: t.title })}
-              onClick={() => void closeTab(t.id)}
-            ><Icon.close /></button>
-          </span>
-        ))}
-        <span className="header-spacer" />
+              ) : (
+                <button
+                  role="tab"
+                  aria-selected={t.id === tab?.id}
+                  className={`term-tab ${t.id === tab?.id ? "active" : ""}`}
+                  title={tr("terminalview.statusDoubleClickToRename", { status: connectionLabel(t.connection) })}
+                  onClick={() => setActive(t.id)}
+                  onDoubleClick={() => startRename(t)}
+                >
+                  <span
+                    className={`term-connection ${t.connection}`}
+                    aria-label={connectionLabel(t.connection)}
+                    title={connectionLabel(t.connection)}
+                  />
+                  {t.title}
+                  {!t.running && <span className="term-tab-dead"> {tr("terminalview.exited")}</span>}
+                </button>
+              )}
+              {renaming !== t.id && (
+                <button
+                  className="term-tab-rename-action"
+                  title={`${tr("common.rename")}: ${t.title}`}
+                  aria-label={`${tr("common.rename")}: ${t.title}`}
+                  onClick={() => startRename(t)}
+                ><Icon.pencil /></button>
+              )}
+              <button
+                className="term-tab-x"
+                title={tr("terminalview.closeValue", { title: t.title })}
+                aria-label={tr("terminalview.closeValue", { title: t.title })}
+                onClick={() => void closeTab(t.id)}
+              ><Icon.close /></button>
+            </span>
+          ))}
+        </div>
         <span className="term-actions">
           {tab && (
             <>

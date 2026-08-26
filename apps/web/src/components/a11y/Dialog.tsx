@@ -7,6 +7,25 @@
 import { useEffect, useRef, type ReactNode, type RefObject } from "react";
 
 const FOCUSABLE = 'a[href], button:not([disabled]), textarea:not([disabled]), input:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])';
+let openModalSurfaces = 0;
+
+/**
+ * Prevent the document behind a modal surface from moving while preserving
+ * scroll inside the surface itself. The counter keeps nested dialogs (for
+ * example the SSH picker over the project picker) locked until the final
+ * surface closes.
+ */
+export function useModalScrollLock(active: boolean): void {
+  useEffect(() => {
+    if (!active || typeof document === "undefined") return;
+    openModalSurfaces += 1;
+    document.documentElement.dataset.modalSurface = "open";
+    return () => {
+      openModalSurfaces = Math.max(0, openModalSurfaces - 1);
+      if (openModalSurfaces === 0) delete document.documentElement.dataset.modalSurface;
+    };
+  }, [active]);
+}
 
 export interface ModalSurfaceOptions {
   /** The surface is currently open and must behave as the active modal. */
@@ -45,6 +64,7 @@ export function useModalSurface({
   initialFocus,
   resolveRestoreFocus,
 }: ModalSurfaceOptions): void {
+  useModalScrollLock(enabled && open);
   const closeRef = useRef(onClose);
   closeRef.current = onClose;
   const resolverRef = useRef(resolveRestoreFocus);
@@ -155,7 +175,7 @@ export default function Dialog({
   return (
     <div
       className={`dialog-backdrop${backdropClassName ? ` ${backdropClassName}` : ""}`}
-      onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}
+      onPointerDown={(e) => { if (e.target === e.currentTarget) onClose(); }}
     >
       <div
         ref={panelRef}

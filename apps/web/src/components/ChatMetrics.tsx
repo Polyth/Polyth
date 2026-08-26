@@ -3,7 +3,7 @@ import type { SessionProjection } from "@polyth/contracts";
 import type { RenderModel } from "../reduce.ts";
 import { fmtCost, fmtTokens } from "../format.ts";
 import { Icon } from "../icons.tsx";
-import { setUiSettings, useUiSettings, type HeaderMetricId } from "../uiPrefs.ts";
+import { useUiSettings, type HeaderMetricId } from "../uiPrefs.ts";
 import { tr } from "../i18n/index.ts";
 
 export function formatMetricDuration(ms: number): string {
@@ -63,17 +63,6 @@ export default function ChatMetrics({
           key={id}
           title={`${metric.label}: ${metric.value}`}
           data-metric={id}
-          draggable
-            onDragStart={(event) => event.dataTransfer.setData("text/polyth-metric", id)}
-            onDragOver={(event) => event.preventDefault()}
-            onDrop={(event) => {
-              event.preventDefault();
-              const dragged = event.dataTransfer.getData("text/polyth-metric") as HeaderMetricId;
-              if (!headerMetrics.includes(dragged) || dragged === id) return;
-              const next = headerMetrics.filter((candidate) => candidate !== dragged);
-              next.splice(next.indexOf(id), 0, dragged);
-              setUiSettings({ headerMetrics: next });
-            }}
         >
           <span className="chat-metric-icon" aria-hidden="true">{metric.icon}</span>
           <span>

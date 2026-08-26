@@ -110,7 +110,11 @@ async function openApp(opts: OpenOpts): Promise<Page> {
     serviceWorkers: "block",
   });
   contexts.push(context);
-  const storage = { "polyth.prefs": PERSONA_SEED, ...(opts.storage ?? {}) };
+  const storage = {
+    "polyth.prefs": PERSONA_SEED,
+    [`polyth.projectSetup.v1.${PROJECT}`]: "completed",
+    ...(opts.storage ?? {}),
+  };
   await context.addInitScript((entries: Record<string, string>) => {
     for (const [k, v] of Object.entries(entries)) localStorage.setItem(k, v);
   }, storage);
@@ -333,7 +337,7 @@ const STATES: StateSpec[] = [
 ];
 
 const VIEWPORTS: Array<[number, number]> = [
-  [320, 900], [390, 900], [768, 900], [1280, 900], [390, 844], [844, 390],
+  [320, 900], [375, 812], [390, 900], [768, 900], [1280, 900], [390, 844], [844, 390],
 ];
 
 // =============================================================================
@@ -430,7 +434,118 @@ test("geometry gate across viewports and shell states", async () => {
 });
 
 // =============================================================================
-// 2. Message editor: multiline draft keeps Send enabled and inside the viewport
+// 2. Exact launch viewport: full-width shell + fixed, functional bottom nav
+// =============================================================================
+
+test("375x812 phone shell keeps full-width chat and functional bottom navigation", async () => {
+  const page = await openApp({
+    width: 375,
+    height: 812,
+    path: `/p/${PROJECT}/s/${S_LOADED}`,
+    ready: ".timeline .msg",
+  });
+
+  const geometry = await page.evaluate(() => {
+    const rect = (selector: string) => {
+      const element = document.querySelector<HTMLElement>(selector);
+      if (!element) return null;
+      const box = element.getBoundingClientRect();
+      const style = getComputedStyle(element);
+      return {
+        left: box.left,
+        right: box.right,
+        top: box.top,
+        bottom: box.bottom,
+        width: box.width,
+        height: box.height,
+        display: style.display,
+        visibility: style.visibility,
+      };
+    };
+    return {
+      viewport: { width: window.innerWidth, documentWidth: document.documentElement.scrollWidth },
+      sidebar: rect("#polyth-session-drawer"),
+      rail: rect(".railbar"),
+      main: rect(".main"),
+      composer: rect(".composer"),
+      nav: rect(".session-bottom-nav"),
+      navTargets: Array.from(document.querySelectorAll<HTMLElement>(".session-bottom-nav button"))
+        .map((button) => {
+          const box = button.getBoundingClientRect();
+          return { width: box.width, height: box.height };
+        }),
+      undersizedTargets: Array.from(document.querySelectorAll<HTMLElement>(
+        'button, summary, select, textarea, input:not([type="hidden"]):not([type="checkbox"]):not([type="radio"]), '
+        + '[role="button"], [role="menuitem"], [role="tab"], [role="option"], [role="switch"]',
+      )).flatMap((element) => {
+        // Inline file references use a 44px absolutely positioned ::after
+        // target so prose line-height does not expand; sourceControlLayout
+        // verifies that effective target directly.
+        if (element.matches(".file-ref")) return [];
+        const box = element.getBoundingClientRect();
+        const style = getComputedStyle(element);
+        const visible = box.width > 0
+          && box.height > 0
+          && style.display !== "none"
+          && style.visibility !== "hidden"
+          && box.bottom > 0
+          && box.top < window.innerHeight
+          && box.right > 0
+          && box.left < window.innerWidth;
+        if (!visible || (box.width >= 44 && box.height >= 44)) return [];
+        return [{
+          name: element.getAttribute("aria-label")
+            ?? element.getAttribute("title")
+            ?? element.textContent?.trim().slice(0, 40)
+            ?? element.tagName,
+          width: box.width,
+          height: box.height,
+        }];
+      }),
+    };
+  });
+
+  assert.deepEqual(geometry.viewport, { width: 375, documentWidth: 375 });
+  assert.ok(geometry.main && geometry.main.left <= 1 && geometry.main.right >= 374,
+    `chat is not full-width: ${JSON.stringify(geometry.main)}`);
+  assert.ok(
+    geometry.sidebar
+      && (geometry.sidebar.visibility === "hidden" || geometry.sidebar.right <= 0),
+    `closed sidebar consumes the 375px layout: ${JSON.stringify(geometry.sidebar)}`,
+  );
+  assert.ok(
+    geometry.rail
+      && (geometry.rail.display === "none" || geometry.rail.width === 0 || geometry.rail.left >= 375),
+    `desktop rail consumes the 375px layout: ${JSON.stringify(geometry.rail)}`,
+  );
+  assert.ok(geometry.nav && geometry.nav.display === "flex" && geometry.nav.width === 375,
+    `bottom navigation is not visible: ${JSON.stringify(geometry.nav)}`);
+  assert.ok(geometry.composer && geometry.composer.bottom <= geometry.nav!.top + 0.5,
+    `composer overlaps bottom navigation: ${JSON.stringify({ composer: geometry.composer, nav: geometry.nav })}`);
+  assert.equal(geometry.navTargets.length, 3, "session bottom navigation exposes history, sessions, and new chat");
+  for (const target of geometry.navTargets) {
+    assert.ok(target.width >= 44 && target.height >= 44,
+      `bottom-navigation target is ${target.width}x${target.height}`);
+  }
+  assert.deepEqual(geometry.undersizedTargets, [], "every visible standalone control has a 44x44 hit box");
+
+  await page.click(".session-nav-current");
+  await page.waitForSelector("#polyth-session-drawer.open", { state: "visible" });
+  await page.keyboard.press("Escape");
+  await page.waitForFunction(() => !document.querySelector("#polyth-session-drawer")?.classList.contains("open"));
+
+  await page.locator(".session-nav-round").first().click();
+  await page.waitForSelector(".palette", { state: "visible" });
+  await page.keyboard.press("Escape");
+  await page.waitForSelector(".palette", { state: "detached" });
+
+  await page.screenshot({ path: join(ARTIFACTS, "shot-375-loaded-bottom-nav.png") });
+  await page.context().close();
+  contexts.pop();
+});
+
+// =============================================================================
+// 3. Message editor: multiline draft keeps Send enabled and inside the viewport
 // =============================================================================
 
 test("multiline editor and Send placement at 320 and 390", async () => {
@@ -547,10 +662,16 @@ test("session drawer modal contract at 390", async () => {
 
 test("panel sheet contract at 390", async () => {
   const page = await openApp({ width: 390, height: 900, path: `/p/${PROJECT}/s/${S_LOADED}`, ready: ".timeline .msg" });
+  const openContextPanel = async () => {
+    await page.click(".header-view-picker .picker-chip");
+    await page.waitForSelector(".picker-sheet", { state: "visible" });
+    await page.getByRole("option", { name: /context/i }).click();
+    await page.waitForSelector(".panel-sheet .rail-body:not([hidden])", { state: "visible" });
+  };
 
-  // Open panels via the header trigger (registry-backed).
-  await page.click(".narrow-panel-trigger");
-  await page.waitForSelector(".panel-sheet .rail-body", { state: "visible" });
+  // Open a panel through the phone workspace picker. The former compact-only
+  // trigger is intentionally absent from the dedicated phone header.
+  await openContextPanel();
   const sheet = await page.evaluate(() => {
     const el = document.querySelector("#polyth-panel-sheet")!;
     const r = el.getBoundingClientRect();
@@ -559,9 +680,9 @@ test("panel sheet contract at 390", async () => {
   assert.ok(sheet.width <= 390, `sheet wider than viewport: ${sheet.width}`);
   assert.equal(sheet.role, "dialog");
   assert.equal(sheet.modal, "true");
-  assert.match(sheet.name ?? "", /panel$/i);
+  assert.equal(sheet.name, "Context");
 
-  // Pressed truth + keyed host reuse across Files → Changes → Context → Files.
+  // Pressed truth + keyed host reuse across Context → Usage → Knowledge → Context.
   const pressedTruth = () =>
     page.evaluate(() => {
       const btns = Array.from(document.querySelectorAll<HTMLElement>(".sheet-strip .strip-btn[aria-pressed]"));
@@ -572,19 +693,25 @@ test("panel sheet contract at 390", async () => {
     });
 
   let t = await pressedTruth();
-  assert.deepEqual(t.pressed, ["Files"], `expected Files pressed, got ${t.pressed}`);
+  assert.deepEqual(t.pressed, ["Context"], `expected Context pressed, got ${t.pressed}`);
   assert.equal(t.visibleBodies, 1, "exactly one panel host visible");
 
-  // Tag the Files host DOM node, then switch away and back: the keyed host must
+  // Tag the Context host DOM node, then switch away and back: the keyed host must
   // be the same node (no remount of a visited panel).
   await page.evaluate(() => {
     const body = document.querySelector<HTMLElement>(".panel-sheet .rail-body");
-    body!.dataset.a390Keep = "files-host";
+    body!.dataset.a390Keep = "context-host";
   });
-  await page.click('.sheet-strip .strip-btn[title="Changes"]');
-  await page.waitForFunction(() => document.querySelector('.sheet-strip .strip-btn[title="Changes"]')?.getAttribute("aria-pressed") === "true");
+  await page.click('.sheet-strip .strip-btn[title="Usage"]');
+  await page.waitForFunction(() => document.querySelector('.sheet-strip .strip-btn[title="Usage"]')?.getAttribute("aria-pressed") === "true");
   t = await pressedTruth();
-  assert.deepEqual(t.pressed, ["Changes"]);
+  assert.deepEqual(t.pressed, ["Usage"]);
+  assert.equal(t.visibleBodies, 1);
+
+  await page.click('.sheet-strip .strip-btn[title="Knowledge"]');
+  await page.waitForFunction(() => document.querySelector('.sheet-strip .strip-btn[title="Knowledge"]')?.getAttribute("aria-pressed") === "true");
+  t = await pressedTruth();
+  assert.deepEqual(t.pressed, ["Knowledge"]);
   assert.equal(t.visibleBodies, 1);
 
   await page.click('.sheet-strip .strip-btn[title="Context"]');
@@ -593,8 +720,8 @@ test("panel sheet contract at 390", async () => {
   assert.deepEqual(t.pressed, ["Context"]);
   assert.equal(t.totalBodies >= 3, true, "visited panels stay mounted (keep-alive)");
 
-  const filesHostKept = await page.evaluate(() => document.querySelector('[data-a390-keep="files-host"]') !== null);
-  assert.ok(filesHostKept, "Files host was remounted while switching panels");
+  const contextHostKept = await page.evaluate(() => document.querySelector('[data-a390-keep="context-host"]') !== null);
+  assert.ok(contextHostKept, "Context host was remounted while switching panels");
 
   // Escape closes the sheet and restores the panels trigger.
   await page.keyboard.press("Escape");
@@ -602,13 +729,12 @@ test("panel sheet contract at 390", async () => {
     const el = document.querySelector("#polyth-panel-sheet");
     return el === null || (el as HTMLElement).style.display === "none";
   });
-  const back = await page.evaluate(() => document.activeElement?.classList.contains("narrow-panel-trigger") === true);
-  assert.ok(back, "Escape did not restore focus to the panels trigger");
+  const back = await page.evaluate(() => document.activeElement?.classList.contains("picker-chip") === true);
+  assert.ok(back, "Escape did not restore focus to the workspace picker");
 
   // Backdrop close: at phone width the sheet is full-bleed (no exposed
   // backdrop), so exercise the pointer path at 768 where the scrim is visible.
-  await page.click(".narrow-panel-trigger");
-  await page.waitForSelector(".panel-sheet .rail-body", { state: "visible" });
+  await openContextPanel();
   await page.setViewportSize({ width: 768, height: 900 });
   await page.waitForTimeout(200);
   await page.mouse.click(100, 450);
@@ -630,8 +756,7 @@ test("panel sheet contract at 390", async () => {
   assert.equal(withDrawer.sheetOpen, false, "sheet open while the drawer is the active modal");
   await page.keyboard.press("Escape");
   await page.waitForFunction(() => !document.querySelector(".sidebar")?.classList.contains("open"));
-  await page.click(".narrow-panel-trigger");
-  await page.waitForSelector(".panel-sheet .rail-body", { state: "visible" });
+  await openContextPanel();
   const withSheet = await page.evaluate(() => ({
     sheetOpen: (() => { const el = document.querySelector("#polyth-panel-sheet"); return el !== null && (el as HTMLElement).style.display !== "none"; })(),
     drawerOpen: document.querySelector(".sidebar")?.classList.contains("open") === true,

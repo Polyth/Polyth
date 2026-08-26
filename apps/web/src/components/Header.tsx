@@ -1,14 +1,11 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { formatCombo } from "@polyth/hotkeys";
 import {
   closeWorkspacePane, getState, setActiveView, useActiveModel, useStore,
-  openSettingsPage, setOverlay, setRailPlugin, setSidebarOpen, setUiError,
+  openSettingsPage, setOverlay, setRailPlugin, setSidebarOpen,
   toggleWorkspacePane, type AppView,
 } from "../store.ts";
-import { refreshSessions } from "../init.ts";
 import { displaySessionTitle, MOD } from "../format.ts";
-import { friendlyError } from "../settings.ts";
-import { contextGauge, type ContextGauge } from "../reduce.ts";
 import { useShellMode, type ShellMode } from "../responsiveShell.ts";
 import Picker from "./Picker.tsx";
 import type { PickerItem } from "../picker.ts";
@@ -21,9 +18,10 @@ import SlotHost from "./slots/SlotHost.ts";
 import { Icon } from "../icons.tsx";
 import { setWorkspaceMode, useWorkspaceMode } from "../widgets/workspaceMode.ts";
 import { useDismissibleMenu } from "./a11y/Menu.ts";
-import { setUiSettings, useUiSettings } from "../uiPrefs.ts";
+import { useUiSettings } from "../uiPrefs.ts";
 import { dismissKeyboard } from "../mobileViewport.ts";
 import SessionMenu from "./mobile/SessionMenu.tsx";
+import Sheet, { SheetSection } from "./mobile/Sheet.tsx";
 import { useSheetTrigger } from "./mobile/sheetTrigger.ts";
 import { api, type GithubStatusDto } from "../api.ts";
 import { tr } from "../i18n/index.ts";
@@ -152,36 +150,6 @@ function CapabilityNav() {
   );
 }
 
-function ContextRing({ gauge }: { gauge: ContextGauge }) {
-  const r = 13;
-  const c = 2 * Math.PI * r;
-  const pct = gauge.known ? gauge.percent : 0;
-  const dash = (pct / 100) * c;
-  const label = gauge.known
-    ? tr("header.valueContextEstimateValueOfValueTokens", { pct: pct, inputTokens: gauge.inputTokens, contextTokens: gauge.contextTokens })
-    : tr("header.contextEstimateUnknownModelMetadataUnavailable");
-  return (
-    <svg className={`ctx-ring ${gauge.level}`} width="30" height="30" viewBox="0 0 36 36" aria-label={label}>
-      <title>{label}</title>
-      <circle cx="18" cy="18" r={r} fill="none" stroke="var(--border)" strokeWidth="2.6" />
-      <circle
-        cx="18"
-        cy="18"
-        r={r}
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2.6"
-        strokeLinecap="round"
-        strokeDasharray={`${dash} ${c}`}
-        transform="rotate(-90 18 18)"
-      />
-      <text x="18" y="19.5" textAnchor="middle" fontSize="8.5" fontWeight="700" fill="currentColor">
-        {gauge.known ? pct : "?"}
-      </text>
-    </svg>
-  );
-}
-
 /** One bounded workspace picker for compact layouts. Pane capabilities belong
  * here too: otherwise primary tools such as Browser disappear below 821px. */
 function CompactViewPicker({ view }: { view: AppView }) {
@@ -189,13 +157,16 @@ function CompactViewPicker({ view }: { view: AppView }) {
   const rail = useStore((s) => s.railPlugin);
   const destinations = resolved.filter((c) =>
     VIEW_OF_CAPABILITY[c.descriptor.id] !== undefined
-    || PANE_OF_CAPABILITY[c.descriptor.id] !== undefined);
+    || PANE_OF_CAPABILITY[c.descriptor.id] !== undefined
+    || PANEL_OF_CAPABILITY[c.descriptor.id] !== undefined);
   const items: PickerItem[] = destinations.map((c) => ({
     id: c.descriptor.id,
     label: c.descriptor.label,
     group: c.tier === "primary" ? "" : c.tier === "more" ? tr("header.moreTools") : TECHNICAL_GROUP_LABEL,
   }));
-  const currentId = destinations.find((c) => PANE_OF_CAPABILITY[c.descriptor.id] === rail)?.descriptor.id
+  const currentId = destinations.find((c) =>
+    PANE_OF_CAPABILITY[c.descriptor.id] === rail
+    || PANEL_OF_CAPABILITY[c.descriptor.id] === rail)?.descriptor.id
     ?? destinations.find((c) => VIEW_OF_CAPABILITY[c.descriptor.id] === view)?.descriptor.id
     ?? "session";
   const current = items.find((i) => i.id === currentId)?.label ?? tr("header.workspace");
@@ -318,79 +289,6 @@ function UserMenu({ githubUser }: { githubUser: GithubStatusDto["user"] }) {
   );
 }
 
-function MobileComposerControlsMenu() {
-  const ui = useUiSettings();
-  const [open, setOpen] = useState(false);
-  const menuRef = useRef<HTMLDivElement>(null);
-  const triggerRef = useRef<HTMLButtonElement>(null);
-  const onMenuKey = useDismissibleMenu({
-    open,
-    menuRef,
-    triggerRef,
-    onClose: () => setOpen(false),
-  });
-  const controls = [
-    {
-      id: "dictation",
-      label: tr("header.microphone"),
-      on: ui.showDictate,
-      icon: <Icon.mic />,
-      toggle: () => setUiSettings({ showDictate: !ui.showDictate }),
-    },
-  ];
-  return (
-    <div className="mobile-composer-menu">
-      <button
-        ref={triggerRef}
-        className="icon-btn mobile-header-action"
-        aria-label={tr("header.composerControls")}
-        title={tr("header.composerControls")}
-        aria-haspopup="menu"
-        aria-expanded={open}
-        onClick={() => setOpen((value) => !value)}
-      >
-        <Icon.sliders />
-      </button>
-      {open && (
-        <div
-          ref={menuRef}
-          className="menu-popup mobile-composer-popup"
-          role="menu"
-          aria-label={tr("header.composerControls")}
-          onKeyDown={onMenuKey}
-        >
-          <div className="mobile-composer-popup-title">{tr("header.composerControls")}</div>
-          {controls.map((control) => (
-            <button
-              key={control.id}
-              role="menuitemcheckbox"
-              aria-checked={control.on}
-              onClick={control.toggle}
-            >
-              <span className="mobile-control-icon" aria-hidden="true">{control.icon}</span>
-              <span>{control.label}</span>
-              <span className={`mobile-control-switch${control.on ? " on" : ""}`} aria-hidden="true">
-                <i />
-              </span>
-            </button>
-          ))}
-          <div className="menu-sep" />
-          <button
-            role="menuitem"
-            onClick={() => {
-              setOpen(false);
-              window.dispatchEvent(new CustomEvent("polyth:open-settings"));
-            }}
-          >
-            <span className="mobile-control-icon" aria-hidden="true"><Icon.gear /></span>
-            <span>{tr("header.allSettings")}</span>
-          </button>
-        </div>
-      )}
-    </div>
-  );
-}
-
 export default function Header() {
   const session = useStore((s) => s.sessions.find((x) => x.id === s.activeSessionId) ?? null);
   const project = useStore((s) => s.projectRegistry.projects.find((p) => p.id === s.activeProjectId) ?? null);
@@ -401,14 +299,19 @@ export default function Header() {
 
   const mode = useShellMode();
   const compact = mode !== "wide";
+  const chatSurface = workspaceMode === "chat" && view === "session";
   const [sessionMenuOpen, setSessionMenuOpen] = useState(false);
+  const [mobileActionsOpen, setMobileActionsOpen] = useState(false);
   // §22: pointer-down activation — a click can be lost to the keyboard-dismiss
   // reflow (see components/mobile/sheetTrigger.ts).
   const sessionMenuTrigger = useSheetTrigger(mode === "phone", () => {
     setSessionMenuOpen(true);
     void dismissKeyboard();
   });
-  const chatSurface = workspaceMode === "chat" && view === "session";
+  const mobileActionsTrigger = useSheetTrigger(mode === "phone" && chatSurface, () => {
+    setMobileActionsOpen(true);
+    void dismissKeyboard();
+  });
   const firstUserText = model.messages.find((message) => message.kind === "user")?.text;
   const mobileTitle = session
     ? displaySessionTitle(session.title, session.id, firstUserText)
@@ -455,22 +358,46 @@ export default function Header() {
         </button>
         {sessionMenuOpen && <SessionMenu onClose={() => setSessionMenuOpen(false)} />}
         <CompactViewPicker view={view} />
-        <span className="header-spacer" />
         <button
-          className="icon-btn mobile-header-action"
-          aria-label={tr("header.refreshSessions")}
-          title={tr("header.refreshSessions")}
-          disabled={!project}
-          onClick={() => {
-            if (!project) return;
-            void refreshSessions(project.id).catch((error) =>
-              setUiError(friendlyError(tr("common.error"), error)));
-          }}
+          type="button"
+          className="icon-btn mobile-header-action mobile-header-more"
+          title={tr("common.more")}
+          aria-label={tr("common.more")}
+          aria-haspopup="dialog"
+          aria-expanded={mobileActionsOpen}
+          {...mobileActionsTrigger}
         >
-          <Icon.refresh />
+          <Icon.more />
         </button>
-        <MobileComposerControlsMenu />
-        <UserMenu githubUser={githubUser} />
+        {mobileActionsOpen && (
+          <Sheet title={tr("common.more")} className="mobile-header-actions-sheet" onClose={() => setMobileActionsOpen(false)}>
+            <div
+              className="mobile-header-actions-list"
+              onClick={(event) => {
+                const target = event.target instanceof Element ? event.target.closest("button") : null;
+                // GoalAction can open a dialog owned by its slot component, so
+                // keep that host mounted. Global-overlay actions can dismiss
+                // the sheet after their own click handler has run.
+                if (target && !target.classList.contains("composer-goals")) setMobileActionsOpen(false);
+              }}
+            >
+              {session && (
+                <SheetSection title={tr("mobile.sessionmenu.sessionActions")}>
+                  <SlotHost
+                    slot="session.header.actions"
+                    context={{ sessionId: session.id, status: session.status, working: model.turn?.status === "working" }}
+                  />
+                </SheetSection>
+              )}
+              <SheetSection title={tr("header.application")}>
+                <SlotHost
+                  slot="app.header.actions"
+                  context={{ projectId: project?.id ?? null, sessionId: session?.id ?? null, workspaceMode }}
+                />
+              </SheetSection>
+            </div>
+          </Sheet>
+        )}
         <SlotHost slot="app.window.controls" />
       </header>
     );

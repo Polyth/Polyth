@@ -21,6 +21,8 @@ import { getLocaleSnapshot, subscribeLocale } from "./i18n/index.ts";
 import App from "./App.tsx";
 import LockScreen from "./components/LockScreen.tsx";
 import "./styles.css";
+import "./developerSurfaces.css";
+import "./featurePanels.css";
 
 applySettingsToDom(getState().settings);
 applyUiSettings();

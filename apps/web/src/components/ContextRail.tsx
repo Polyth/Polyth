@@ -233,19 +233,6 @@ export default function ContextRail() {
   const railButtons = openButton && !configuredRailButtons.some((button) => button.id === openButton.id)
     ? [openButton, ...configuredRailButtons]
     : configuredRailButtons;
-  const reorderRail = (draggedId: string, targetId: string) => {
-    if (!configuredRailButtons.some((button) => button.id === draggedId)
-      || !configuredRailButtons.some((button) => button.id === targetId)
-      || draggedId === targetId) return;
-    const ordered = configuredRailButtons
-      .map((button) => button.id)
-      .filter((buttonId) => buttonId !== draggedId);
-    ordered.splice(ordered.indexOf(targetId), 0, draggedId);
-    ordered.forEach((capabilityId, rank) => {
-      setPlacementOverride(capabilityId, { tier: "more", rank });
-    });
-  };
-
   // Keep-alive: panels stay mounted once visited so their state survives
   // switching surfaces; surfaces that lose content-driven visibility unmount.
   const [visited, setVisited] = useState<string[]>([]);
@@ -576,11 +563,14 @@ export default function ContextRail() {
     open: compactContext,
     onClose: () => setRailPlugin(null),
     containerRef: paneRef,
+    resolveRestoreFocus: (opener) => opener
+      ?? document.querySelector<HTMLElement>(".header-view-picker .picker-chip")
+      ?? document.querySelector<HTMLElement>(".narrow-panel-trigger"),
   });
 
   return (
     <>
-      {compactContext && <div className="menu-backdrop sheet-backdrop" onClick={() => setRailPlugin(null)} />}
+      {compactContext && <div className="menu-backdrop panel-sheet-backdrop" onClick={() => setRailPlugin(null)} />}
       <aside className={`railbar${open ? " railbar-open" : ""}`} ref={railbarRef}>
         {kept.length > 0 && (
         <div
@@ -651,13 +641,6 @@ export default function ContextRail() {
                   title={s.title}
                   aria-label={s.title}
                   aria-pressed={s.active}
-                  draggable
-                  onDragStart={(event) => event.dataTransfer.setData("text/polyth-rail", s.id)}
-                  onDragOver={(event) => event.preventDefault()}
-                  onDrop={(event) => {
-                    event.preventDefault();
-                    reorderRail(event.dataTransfer.getData("text/polyth-rail"), s.id);
-                  }}
                   {...(s.presentation ? { "data-pane-launcher": s.id } : {})}
                   onClick={s.activate}
                 >
@@ -695,13 +678,6 @@ export default function ContextRail() {
               title={s.title}
               aria-label={s.title}
               aria-pressed={s.active}
-              draggable
-              onDragStart={(event) => event.dataTransfer.setData("text/polyth-rail", s.id)}
-              onDragOver={(event) => event.preventDefault()}
-              onDrop={(event) => {
-                event.preventDefault();
-                reorderRail(event.dataTransfer.getData("text/polyth-rail"), s.id);
-              }}
               {...(s.presentation ? { "data-pane-launcher": s.id } : {})}
               onClick={s.activate}
             >

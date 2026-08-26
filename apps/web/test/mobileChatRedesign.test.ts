@@ -242,10 +242,10 @@ test("visual-viewport geometry is published as CSS variables and started at boot
   assert.ok(main.includes("startMobileViewport()"), "the seam is installed before first paint");
 });
 
-test("the mobile viewport is fixed-scale and requests keyboard content resizing", async () => {
+test("the mobile viewport allows zoom and requests keyboard content resizing", async () => {
   const html = await read("../src/index.html");
-  assert.match(html, /maximum-scale=1/, "pinch and focus zoom are disabled");
-  assert.match(html, /user-scalable=no/, "the browser must keep the requested scale");
+  assert.doesNotMatch(html, /maximum-scale/, "pinch zoom remains available");
+  assert.doesNotMatch(html, /user-scalable/, "browser zoom is not disabled");
   assert.match(html, /interactive-widget=resizes-content/, "supporting browsers resize content for the keyboard");
 });
 
@@ -413,7 +413,9 @@ test("touch targets and design tokens are centralized", async () => {
   const tokens = css.slice(0, css.indexOf("/* F15: syntax roles"));
   for (const token of [
     "--space-4: 16px", "--tap: 44px", "--radius-sheet: 24px",
-    "--font-input: 16px", "--safe-bottom: env(safe-area-inset-bottom, 0px)",
+    "--font-input: 16px", "--safe-left: env(safe-area-inset-left, 0px)",
+    "--safe-right: env(safe-area-inset-right, 0px)",
+    "--safe-bottom: env(safe-area-inset-bottom, 0px)",
   ]) {
     assert.ok(tokens.includes(token), `${token} is a shared token`);
   }
@@ -427,9 +429,13 @@ test("touch targets and design tokens are centralized", async () => {
   }
 });
 
-test("the phone header keeps two actions and a real session menu", async () => {
+test("the phone header keeps navigation, slot actions, and a real session menu", async () => {
   const header = await read("../src/components/Header.tsx");
   const menu = await read("../src/components/mobile/SessionMenu.tsx");
+  const css = await read("../src/styles.css");
+  const phoneStart = header.indexOf('if (mode === "phone" && chatSurface)');
+  const phoneEnd = header.indexOf("\n  return (", phoneStart);
+  const phoneHeader = header.slice(phoneStart, phoneEnd);
   assert.ok(header.includes("<SessionMenu"), "the title opens the session menu");
   assert.ok(
     header.includes('aria-label={tr("header.valueSessionMenu", { mobileTitle: mobileTitle })}'),
@@ -439,6 +445,27 @@ test("the phone header keeps two actions and a real session menu", async () => {
     header.includes("useSheetTrigger(mode === \"phone\"")
     && header.includes("setSessionMenuOpen(true);"),
     "§22 again: the title opens on pointer-down, then dismisses the keyboard",
+  );
+  assert.match(phoneHeader, /<DrawerTrigger \/>/, "projects and sessions stay behind the hamburger");
+  assert.match(phoneHeader, /<CompactViewPicker view=\{view\} \/>/, "the trailing action switches workspace tools");
+  assert.match(phoneHeader, /className="icon-btn mobile-header-action mobile-header-more"/, "More opens the action overflow");
+  assert.match(phoneHeader, /slot="session\.header\.actions"/, "session actions remain reachable");
+  assert.match(phoneHeader, /slot="app\.header\.actions"/, "application actions remain reachable");
+  assert.match(phoneHeader, /<Sheet title=\{tr\("common\.more"\)\}/, "actions use the shared phone sheet");
+  assert.doesNotMatch(
+    phoneHeader,
+    /refreshSessions|MobileComposerControlsMenu|<UserMenu/,
+    "secondary utilities do not crowd or overlap the centered session title",
+  );
+  assert.match(
+    css,
+    /\.mobile-chat-header\s*\{[\s\S]*?display:\s*grid;[\s\S]*?grid-template-columns:\s*var\(--tap\) minmax\(0, 1fr\) var\(--tap\) var\(--tap\)/,
+    "the phone header reserves fixed navigation and action columns around one truncating title",
+  );
+  assert.match(
+    css,
+    /\.mobile-session-title\s*\{[\s\S]*?position:\s*static;[\s\S]*?width:\s*100%;[\s\S]*?min-width:\s*0;/,
+    "the session switcher participates in the grid instead of overlapping controls",
   );
   for (const key of [
     "mobile.sessionmenu.newSession",

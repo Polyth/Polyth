@@ -62,6 +62,7 @@ export default function EditorView() {
   const [ctx, setCtx] = useState<CtxMenu | null>(null);
   const [query, setQuery] = useState("");
   const [searchResults, setSearchResults] = useState<string[] | null>(null);
+  const [mobileStage, setMobileStage] = useState<"tree" | "editor">("tree");
 
   const paneRef = useRef<PaneHostHandle>(null);
   const [activeTab, setActiveTab] = useState<PaneTab | null>(null);
@@ -87,6 +88,7 @@ export default function EditorView() {
     setCtx(null);
     setSearchResults(null);
     setQuery("");
+    setMobileStage("tree");
     if (projectId) void loadDir("");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [projectId, sessionId]);
@@ -96,6 +98,7 @@ export default function EditorView() {
     if (!filePath) return;
     paneRef.current?.open("file", filePath, baseOf(filePath));
     setSel(filePath);
+    setMobileStage("editor");
   }, [filePath]);
 
   // Active tab drives the store channel + the project-scoped last resource.
@@ -105,7 +108,10 @@ export default function EditorView() {
     if (getState().editorFile !== next) openEditorFile(next);
     if (next !== null) {
       setSel(next);
+      setMobileStage("editor");
       if (projectId) setPaneLastResource(projectId, "files", `file:${next}`);
+    } else {
+      setMobileStage("tree");
     }
   };
 
@@ -147,6 +153,7 @@ export default function EditorView() {
 
   const openFile = (fp: string) => {
     setSel(fp);
+    setMobileStage("editor");
     openEditorFile(fp); // store channel → effect turns it into a tab
   };
 
@@ -285,7 +292,26 @@ export default function EditorView() {
   if (!projectId) return <EmptyState title={tr("editorview.noProjectSelected")} description={tr("editorview.openAProjectToBrowseAndEdit")} />;
 
   return (
-    <div className="editor-view">
+    <div className={`editor-view mobile-${mobileStage}`}>
+      <nav className="editor-mobile-tabs" aria-label={tr("workspace.panehost.openResources")}>
+        <button
+          type="button"
+          className={mobileStage === "tree" ? "active" : ""}
+          aria-current={mobileStage === "tree" ? "page" : undefined}
+          onClick={() => setMobileStage("tree")}
+        >
+          {tr("editorview.files")}
+        </button>
+        <button
+          type="button"
+          className={mobileStage === "editor" ? "active" : ""}
+          aria-current={mobileStage === "editor" ? "page" : undefined}
+          disabled={activeTab === null}
+          onClick={() => setMobileStage("editor")}
+        >
+          {activeTab?.title ?? tr("common.edit")}
+        </button>
+      </nav>
       <aside className="editor-tree" aria-label={tr("editorview.files")}>
         <div className="files-search">
           <input
@@ -310,20 +336,35 @@ export default function EditorView() {
             <div className="files-actions">
               <button className="small-btn icon-only" title={tr("editorview.backToTree")} aria-label={tr("editorview.backToTree")} onClick={() => { setSearchResults(null); setQuery(""); }}><Icon.back /></button>
             </div>
-            {searchResults.length === 0 && <div className="empty">{tr("editorview.noMatches")}</div>}
+            {searchResults.length === 0 && (
+              <EmptyState
+                title={tr("editorview.noMatches")}
+                description={tr("editorview.searchFiles")}
+              />
+            )}
             {searchResults.map((fp) => (
-              <div key={fp} className="files-row" onClick={() => openFile(fp)}>
-                <span className="files-file-icon ft-icon" data-ft={fileTypeKeyOf(baseOf(fp))} aria-hidden>
-                  <FileTypeGlyph type={fileTypeKeyOf(baseOf(fp))} />
-                </span>
-                <span className="files-file-name">{fp}</span>
+              <div
+                key={fp}
+                className="files-row"
+              >
+                <button className="files-row-main" onClick={() => openFile(fp)}>
+                  <span className="files-file-icon ft-icon" data-ft={fileTypeKeyOf(baseOf(fp))} aria-hidden>
+                    <FileTypeGlyph type={fileTypeKeyOf(baseOf(fp))} />
+                  </span>
+                  <span className="files-file-name">{fp}</span>
+                </button>
                 <FileRowActions projectId={projectId} path={fp} onOpen={() => openFile(fp)} />
               </div>
             ))}
           </div>
         ) : (
           <>
-            {rows.length === 0 && !treeErr && <div className="empty">{tr("editorview.emptyDirectory")}</div>}
+            {rows.length === 0 && !treeErr && (
+              <EmptyState
+                title={tr("editorview.emptyDirectory")}
+                description={tr("editorview.projectFiles")}
+              />
+            )}
             <div
               className="ft-tree"
               role="tree"
@@ -370,7 +411,6 @@ export default function EditorView() {
                         className="ft-at"
                         title={tr("editorview.addValueToChat", { path: e.path })}
                         aria-label={tr("editorview.addValueToChat", { path: e.path })}
-                        tabIndex={-1}
                         onClick={(ev) => {
                           ev.stopPropagation();
                           attachPath(e.path);
@@ -424,9 +464,10 @@ export default function EditorView() {
         onActiveChange={onActiveChange}
         emptyBody={
           <div className="editor-empty">
-            <p className="muted">{tr("editorview.selectAFileToViewOrEdit")}</p>
-            <p className="muted editor-empty-hint">
-              {tr("editorview.enterOpensAddsToChat")}{" "}{MOD}{tr("editorview.lSendsASelectionToTheSession")}</p>
+            <EmptyState
+              title={tr("editorview.selectAFileToViewOrEdit")}
+              description={`${tr("editorview.enterOpensAddsToChat")} ${MOD}${tr("editorview.lSendsASelectionToTheSession")}`}
+            />
           </div>
         }
       />

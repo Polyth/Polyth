@@ -35,9 +35,17 @@ export function Seg<T extends string | number>({ value, options, onChange }: {
   );
 }
 
-export function EmptyState({ title, body }: { title: string; body?: string }) {
+export function EmptyState({ title, body, busy = false }: { title: string; body?: string; busy?: boolean }) {
   return (
-    <div className="set-empty">
+    <div className="set-empty" role={busy ? "status" : undefined} aria-busy={busy || undefined}>
+      <span className="set-empty-mark" aria-hidden="true">
+        {busy ? <span className="spinner" /> : (
+          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="12" cy="12" r="9" />
+            <path d="M8.5 12h7M12 8.5v7" />
+          </svg>
+        )}
+      </span>
       <div className="set-empty-title">{title}</div>
       {body && <div className="set-empty-body">{body}</div>}
     </div>

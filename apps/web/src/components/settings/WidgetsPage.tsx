@@ -25,6 +25,7 @@ import "../../widgets/builtinWidgets.tsx";
 import { PageHead } from "./parts.tsx";
 import { RESPONSE_ACTION_IDS, setUiSettings, useUiSettings, type ResponseActionId } from "../../uiPrefs.ts";
 import { tr } from "../../i18n/index.ts";
+import MoveControls from "../MoveControls.tsx";
 
 type MiniPlaceId = "composer" | "session-footer" | "app-header";
 type InterfaceSurfaceId = "top-rail" | "right-rail" | "response-footer" | MiniPlaceId;
@@ -142,8 +143,9 @@ function OrderedToggleList<T extends string>({
     <div className="widget-order-list">
       {ordered.map((id) => {
         const visible = selected.includes(id);
+        const visibleIndex = selected.indexOf(id);
         return (
-          <label
+          <div
             key={id}
             className={`widget-order-chip${visible ? "" : " hidden"}`}
             draggable={visible}
@@ -153,15 +155,31 @@ function OrderedToggleList<T extends string>({
             onDrop={() => move(id)}
           >
             <span className="widget-drag-handle" aria-hidden="true">⋮⋮</span>
-            <input
-              type="checkbox"
-              checked={visible}
-              onChange={(event) => onChange(event.target.checked
-                ? [...selected, id]
-                : selected.filter((candidate) => candidate !== id))}
-            />
-            <span>{labels[id]}</span>
-          </label>
+            <label className="widget-order-toggle">
+              <input
+                type="checkbox"
+                checked={visible}
+                onChange={(event) => onChange(event.target.checked
+                  ? [...selected, id]
+                  : selected.filter((candidate) => candidate !== id))}
+              />
+              <span>{labels[id]}</span>
+            </label>
+            {visible && (
+              <MoveControls
+                label={labels[id]}
+                index={visibleIndex}
+                count={selected.length}
+                onMove={(nextIndex) => {
+                  const next = [...selected];
+                  next.splice(visibleIndex, 1);
+                  next.splice(nextIndex, 0, id);
+                  onChange(next);
+                }}
+                axis="horizontal"
+              />
+            )}
+          </div>
         );
       })}
     </div>
@@ -370,27 +388,28 @@ export default function WidgetsPage() {
               )}
               <div className="widget-place-chips">
                 {placed.length === 0 && <span className="widget-place-empty">{tr("settings.widgetspage.noButtonsPlaced")}</span>}
-                {placed.map((capability) => (
-                  <button
-                    type="button"
-                    className="widget-place-chip"
-                    key={capability.descriptor.id}
-                    draggable
-                    onDragStart={(event) => event.dataTransfer.setData("text/polyth-capability", capability.descriptor.id)}
-                    onDragOver={(event) => event.preventDefault()}
-                    onDrop={(event) => {
-                      event.preventDefault();
-                      const draggedId = event.dataTransfer.getData("text/polyth-capability");
-                      if (placed.some((item) => item.descriptor.id === draggedId)) {
-                        reorderCapabilities(placed, draggedId, capability.descriptor.id, place.id);
-                      }
-                    }}
-                    title={tr("settings.widgetspage.dragToReorderValueInTheValue", { label: capability.descriptor.label, value: place.title.toLowerCase() })}
-                    aria-label={tr("settings.widgetspage.valueToolValueDragToReorder", { title: place.title, label: capability.descriptor.label })}
-                    onClick={() => moveCapabilityToOtherRail(capability.descriptor.id, place.id)}
-                  >
-                    {capability.descriptor.label}<span aria-hidden="true">↔</span>
-                  </button>
+                {placed.map((capability, placedIndex) => (
+                  <span className="widget-place-chip-group" key={capability.descriptor.id}>
+                    <button
+                      type="button"
+                      className="widget-place-chip"
+                      title={tr("settings.widgetspage.dragToReorderValueInTheValue", { label: capability.descriptor.label, value: place.title.toLowerCase() })}
+                      aria-label={tr("settings.widgetspage.valueToolValueDragToReorder", { title: place.title, label: capability.descriptor.label })}
+                      onClick={() => moveCapabilityToOtherRail(capability.descriptor.id, place.id)}
+                    >
+                      {capability.descriptor.label}<span aria-hidden="true">↔</span>
+                    </button>
+                    <MoveControls
+                      label={capability.descriptor.label}
+                      index={placedIndex}
+                      count={placed.length}
+                      onMove={(nextIndex) => {
+                        const target = placed[nextIndex];
+                        if (target) reorderCapabilities(placed, capability.descriptor.id, target.descriptor.id, place.id);
+                      }}
+                      axis="horizontal"
+                    />
+                  </span>
                 ))}
               </div>
               {openPlace === place.id && (
@@ -442,36 +461,35 @@ export default function WidgetsPage() {
               </header>
               <div className="widget-place-chips">
                 {placed.length === 0 && <span className="widget-place-empty">{tr("settings.widgetspage.noButtonsPlaced")}</span>}
-                {placed.map((widget) => (
-                  <button
-                    type="button"
-                    className="widget-place-chip"
-                    key={widget.id}
-                    draggable
-                    onDragStart={(event) => event.dataTransfer.setData("text/polyth-widget", widget.id)}
-                    onDragOver={(event) => event.preventDefault()}
-                    onDrop={(event) => {
-                      event.preventDefault();
-                      const draggedId = event.dataTransfer.getData("text/polyth-widget");
-                      const index = placed.findIndex((candidate) => candidate.id === widget.id);
-                      if (placed.some((candidate) => candidate.id === draggedId) && index >= 0) {
+                {placed.map((widget, placedIndex) => (
+                  <span className="widget-place-chip-group" key={widget.id}>
+                    <button
+                      type="button"
+                      className="widget-place-chip"
+                      aria-label={widget.requiredVisible
+                        ? `${widget.title} is required in ${place.title}`
+                        : tr("settings.widgetspage.hideValueFromValue", { title: widget.title, title2: place.title })}
+                      title={widget.requiredVisible
+                        ? `${widget.title} is required while its package is enabled`
+                        : tr("settings.widgetspage.hideValueFromValue", { title: widget.title, title2: place.title })}
+                      aria-disabled={widget.requiredVisible || undefined}
+                      onClick={() => {
+                        if (!widget.requiredVisible) mutate({ type: "visibility", id: widget.id, visible: false });
+                      }}
+                    >
+                      {widget.title}<span aria-hidden="true">{widget.requiredVisible ? "Required" : "×"}</span>
+                    </button>
+                    <MoveControls
+                      label={widget.title}
+                      index={placedIndex}
+                      count={placed.length}
+                      onMove={(nextIndex) => {
                         const slot = widgetSlotOf(layout, widget.id);
-                        if (slot) mutate({ type: "place", id: draggedId, slot, index });
-                      }
-                    }}
-                    aria-label={widget.requiredVisible
-                      ? `${widget.title} is required in ${place.title}`
-                      : tr("settings.widgetspage.hideValueFromValue", { title: widget.title, title2: place.title })}
-                    title={widget.requiredVisible
-                      ? `${widget.title} is required while its package is enabled`
-                      : tr("settings.widgetspage.hideValueFromValue", { title: widget.title, title2: place.title })}
-                    aria-disabled={widget.requiredVisible || undefined}
-                    onClick={() => {
-                      if (!widget.requiredVisible) mutate({ type: "visibility", id: widget.id, visible: false });
-                    }}
-                  >
-                    {widget.title}<span aria-hidden="true">{widget.requiredVisible ? "Required" : "×"}</span>
-                  </button>
+                        if (slot) mutate({ type: "place", id: widget.id, slot, index: nextIndex });
+                      }}
+                      axis="horizontal"
+                    />
+                  </span>
                 ))}
               </div>
               {openPlace === place.id && (

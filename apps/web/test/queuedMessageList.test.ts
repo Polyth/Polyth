@@ -102,7 +102,24 @@ test("queued messages hand editing to the composer and drag-reorder through the 
     await act(async () => { click(edit); });
     assert.equal(editing?.id, "q1", "the parent composer owns the edit buffer");
     assert.equal(container.querySelector("textarea"), null, "queue rows never render an inline editor");
-    assert.equal(container.querySelector('[aria-label*="Move queued message"]'), null, "dragging replaces arrow reorder controls");
+    assert.equal(container.querySelectorAll(".reorder-control").length, 6, "every queued row exposes explicit move controls");
+    const moveFirstDown = container.querySelector<HTMLElement>('button[aria-label="Move queued message 1 down"]');
+    assert.ok(moveFirstDown);
+    await act(async () => {
+      click(moveFirstDown);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    assert.deepEqual(
+      [...container.querySelectorAll(".queue-text")].map((element) => element.textContent),
+      ["second", "first", "third"],
+      "touch/keyboard controls persist the same reorder operation as dragging",
+    );
+    const moveFirstBack = container.querySelector<HTMLElement>('button[aria-label="Move queued message 2 up"]');
+    assert.ok(moveFirstBack);
+    await act(async () => {
+      click(moveFirstBack);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
     await act(async () => {
       root.render(createElement(QueuedMessageList, {
         sessionId: "s1",

@@ -119,7 +119,17 @@ test("all mobile chat composers expose project and worktree targets", () => {
   assert.match(css, /\.composer-mobile\.composer-collapsed:not\(\.composer-has-draft\) \.composer-workflow \{ display: none; \}/);
   assert.match(css, /\.composer-mobile\.composer-has-draft \.composer-workflow \{ display: inline-flex; \}/);
   assert.match(header, /displaySessionTitle\(session\.title, session\.id, firstUserText\)/);
-  assert.match(header, /tr\("header\.composerControls"\)/);
+  const phoneStart = header.indexOf('if (mode === "phone" && chatSurface)');
+  const phoneEnd = header.indexOf("\n  return (", phoneStart);
+  const phoneHeader = header.slice(phoneStart, phoneEnd);
+  assert.match(phoneHeader, /<DrawerTrigger \/>/);
+  assert.match(phoneHeader, /className="mobile-session-title"/);
+  assert.match(phoneHeader, /<CompactViewPicker view=\{view\} \/>/);
+  assert.match(phoneHeader, /className="icon-btn mobile-header-action mobile-header-more"/);
+  assert.match(phoneHeader, /slot="session\.header\.actions"/);
+  assert.match(phoneHeader, /slot="app\.header\.actions"/);
+  assert.doesNotMatch(phoneHeader, /refreshSessions|MobileComposerControlsMenu|<UserMenu/,
+    "secondary utilities stay in the More sheet instead of crowding the top bar");
   assert.match(css, /\.polyth-gradient\s*\{[^}]*linear-gradient/s);
 });
 
@@ -140,5 +150,8 @@ test("source-control surfaces keep responsive and accessible audit contracts", (
   assert.match(pullRequest, /reviewBusy/);
   assert.match(pullRequest, /<MarkdownDoc/);
   assert.doesNotMatch(pending, /<details/);
-  assert.match(pending, /aria-haspopup="menu"/);
+  assert.match(
+    pending,
+    /aria-haspopup="menu"/,
+  );
 });

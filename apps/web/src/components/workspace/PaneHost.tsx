@@ -20,6 +20,8 @@ import {
 import { PaneVisibilityContext, usePaneVisible } from "../../workspace/paneVisibility.ts";
 import { tr } from "../../i18n/index.ts";
 import { confirmAlert } from "../../alerts.ts";
+import { Icon } from "../../icons.tsx";
+import MoveControls from "../MoveControls.tsx";
 
 export interface PaneHostHandle {
   open(kind: string, resource: string, title?: string): void;
@@ -191,14 +193,11 @@ const PaneHost = forwardRef<PaneHostHandle, PaneHostProps>(function PaneHost(
     <section className="editor-pane">
       {pane.tabs.length > 0 && (
         <div className="pane-tabs" role="tablist" aria-label={tr("workspace.panehost.openResources")}>
-          {pane.tabs.map((t) => (
+          {pane.tabs.map((t, index) => (
             <div
               key={t.id}
-              role="tab"
-              aria-selected={pane.activeId === t.id}
-              tabIndex={pane.activeId === t.id ? 0 : -1}
-              className={`pane-tab${pane.activeId === t.id ? " active" : ""}${t.unavailable ? " unavailable" : ""}`}
-              title={t.resource}
+              role="presentation"
+              className={`pane-tab-group${pane.activeId === t.id ? " active" : ""}`}
               draggable
               onDragStart={() => setDragTab(t.id)}
               onDragOver={(e) => e.preventDefault()}
@@ -209,22 +208,38 @@ const PaneHost = forwardRef<PaneHostHandle, PaneHostProps>(function PaneHost(
                 }
                 setDragTab(null);
               }}
-              onClick={() => setPane((p) => activateTab(p, t.id))}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" || e.key === " ") setPane((p) => activateTab(p, t.id));
-                else if (e.key === "Delete") requestClose(t.id);
-              }}
-              onAuxClick={(e) => { if (e.button === 1) requestClose(t.id); }}
             >
-              <span className="pane-tab-title">{t.title}</span>
-              {isDirty(t) && <span className="pane-tab-dirty" title={tr("workspace.panehost.unsavedChanges")}>•</span>}
+              <button
+                type="button"
+                role="tab"
+                aria-selected={pane.activeId === t.id}
+                tabIndex={pane.activeId === t.id ? 0 : -1}
+                className={`pane-tab${pane.activeId === t.id ? " active" : ""}${t.unavailable ? " unavailable" : ""}`}
+                title={t.resource}
+                onClick={() => setPane((p) => activateTab(p, t.id))}
+                onKeyDown={(e) => {
+                  if (e.key === "Delete") requestClose(t.id);
+                }}
+                onAuxClick={(e) => { if (e.button === 1) requestClose(t.id); }}
+              >
+                <span className="pane-tab-title">{t.title}</span>
+                {isDirty(t) && <span className="pane-tab-dirty" title={tr("workspace.panehost.unsavedChanges")}>•</span>}
+              </button>
+              <MoveControls
+                label={t.title}
+                index={index}
+                count={pane.tabs.length}
+                previousLabel={tr("mobile.herowidgets.moveValueUp", { value: t.title })}
+                nextLabel={tr("mobile.herowidgets.moveValueDown", { value: t.title })}
+                onMove={(targetIndex) => setPane((p) => moveTab(p, t.id, targetIndex))}
+              />
               <button
                 className="pane-tab-close"
                 title={tr("workspace.panehost.closeTab")}
                 aria-label={tr("workspace.panehost.closeValue", { title: t.title })}
-                onClick={(e) => { e.stopPropagation(); requestClose(t.id); }}
+                onClick={() => requestClose(t.id)}
               >
-                ✕
+                <Icon.close />
               </button>
             </div>
           ))}

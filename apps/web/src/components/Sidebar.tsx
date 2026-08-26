@@ -1,6 +1,7 @@
 import {
   useEffect, useMemo, useRef, useState, useSyncExternalStore,
   type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent,
+  type TouchEvent as ReactTouchEvent,
 } from "react";
 import {
   getState, useStore, activateProject, openWorkspacePane, openWorktreeSessionDialog, setOverlay,
@@ -29,6 +30,10 @@ import { announce } from "./a11y/live.tsx";
 import ProjectAppearanceDialog from "./ProjectAppearanceDialog.tsx";
 import { tr } from "../i18n/index.ts";
 import { confirmAlert } from "../alerts.ts";
+import { errorFeedback, tapFeedback } from "../haptics.ts";
+import {
+  PULL_REFRESH_DISTANCE, pullRefreshDistance, type GesturePoint,
+} from "../mobileGestures.ts";
 
 const EXPANDED_PROJECTS_KEY = "polyth.sidebar.expandedProjects";
 
@@ -78,6 +83,8 @@ export default function Sidebar() {
   const [globalMenuOpen, setGlobalMenuOpen] = useState(false);
   const [appearanceProjectId, setAppearanceProjectId] = useState<string | null>(null);
   const [attentionOnly, setAttentionOnly] = useState(false);
+  const [pullDistance, setPullDistance] = useState(0);
+  const [pullRefreshing, setPullRefreshing] = useState(false);
   const syncStatus = useSyncExternalStore(subscribeSyncStatus, getSyncStatus, () => "disconnected");
   const host = typeof location === "undefined" ? tr("sidebar.localServer") : location.host;
 
@@ -157,6 +164,10 @@ export default function Sidebar() {
   const filterRef = useRef<HTMLDivElement>(null);
   const connectionRef = useRef<HTMLDivElement>(null);
   const globalMenuRef = useRef<HTMLDivElement>(null);
+  const sideScrollRef = useRef<HTMLDivElement>(null);
+  const pullStartRef = useRef<GesturePoint | null>(null);
+  const pullDistanceRef = useRef(0);
+  const pullArmedRef = useRef(false);
   const onProjectMenuKey = useDismissibleMenu({
     open: projectMenu !== null,
     menuRef: projectMenuRef,
@@ -174,6 +185,49 @@ export default function Sidebar() {
     onClose: () => setSidebarOpen(false),
     containerRef: navRef,
   });
+  const setPull = (distance: number) => {
+    pullDistanceRef.current = distance;
+    setPullDistance(distance);
+    const armed = distance >= PULL_REFRESH_DISTANCE;
+    if (armed && !pullArmedRef.current) tapFeedback();
+    pullArmedRef.current = armed;
+  };
+  const startPull = (event: ReactTouchEvent<HTMLDivElement>) => {
+    const touch = event.touches[0];
+    if (!compact || pullRefreshing || !touch || (sideScrollRef.current?.scrollTop ?? 0) > 0) return;
+    pullStartRef.current = { x: touch.clientX, y: touch.clientY };
+  };
+  const movePull = (event: ReactTouchEvent<HTMLDivElement>) => {
+    const start = pullStartRef.current;
+    const touch = event.touches[0];
+    if (!start || !touch) return;
+    setPull(pullRefreshDistance(
+      start,
+      { x: touch.clientX, y: touch.clientY },
+      sideScrollRef.current?.scrollTop ?? 0,
+    ));
+  };
+  const refreshFromPull = async () => {
+    setPullRefreshing(true);
+    setPull(PULL_REFRESH_DISTANCE);
+    try {
+      await Promise.all(projects.map((candidate) => refreshSessions(candidate.id)));
+    } catch (error) {
+      errorFeedback();
+      setUiError(friendlyError(tr("common.error"), error));
+    } finally {
+      setPullRefreshing(false);
+      setPull(0);
+    }
+  };
+  const finishPull = () => {
+    pullStartRef.current = null;
+    if (pullDistanceRef.current >= PULL_REFRESH_DISTANCE) {
+      void refreshFromPull();
+      return;
+    }
+    setPull(0);
+  };
   useEffect(() => {
     if (!sortOpen && !filterOpen && !connectionOpen && !globalMenuOpen) return;
     const onPointerDown = (event: MouseEvent) => {
@@ -318,6 +372,23 @@ export default function Sidebar() {
           </div>
         )}
         {!collapsed && (<>
+        {compact && (
+          <div className="sidebar-drawer-header">
+            <div className="sidebar-drawer-identity">
+              <span className="sidebar-drawer-mark" aria-hidden="true">{tr("header.p")}</span>
+              <span className="sidebar-drawer-copy">
+                <strong>{tr("sidebar.projectsAndSessions")}</strong>
+                <small title={project?.path}>{project?.name || project?.path || tr("header.polyth")}</small>
+              </span>
+            </div>
+            <button
+              className="icon-btn drawer-close"
+              title={tr("sidebar.closeProjectsAndSessions")}
+              aria-label={tr("sidebar.closeProjectsAndSessions")}
+              onClick={() => setSidebarOpen(false)}
+            ><Icon.close /></button>
+          </div>
+        )}
         <div className="sidebar-service-bar">
           <div className="sidebar-search">
             <Icon.search />
@@ -388,14 +459,6 @@ export default function Sidebar() {
               </div>
             )}
           </div>
-          {compact && (
-            <button
-              className="sidebar-service-btn drawer-close"
-              title={tr("sidebar.closeProjectsAndSessions")}
-              aria-label={tr("sidebar.closeProjectsAndSessions")}
-              onClick={() => setSidebarOpen(false)}
-            >{tr("sidebar.message")}</button>
-          )}
         </div>
         <div className="sidebar-list-controls">
           <div className="sidebar-sort" ref={sortRef}>
@@ -451,7 +514,29 @@ export default function Sidebar() {
             )}
           </div>
         </div>
-        <div className="side-scroll">
+        <div
+          ref={sideScrollRef}
+          className={`side-scroll${pullDistance > 0 || pullRefreshing ? " pulling" : ""}`}
+          aria-busy={pullRefreshing || undefined}
+          onTouchStart={startPull}
+          onTouchMove={movePull}
+          onTouchEnd={finishPull}
+          onTouchCancel={() => { pullStartRef.current = null; setPull(0); }}
+          onScroll={(event) => {
+            if (event.currentTarget.scrollTop > 0 && pullDistanceRef.current > 0) setPull(0);
+          }}
+        >
+          {(pullDistance > 0 || pullRefreshing) && (
+            <div
+              className={`pull-refresh${pullDistance >= PULL_REFRESH_DISTANCE ? " armed" : ""}`}
+              style={{ height: pullRefreshing ? PULL_REFRESH_DISTANCE : pullDistance }}
+              role="status"
+              aria-live="polite"
+            >
+              <span className="spinner" aria-hidden="true" />
+              <span>{pullRefreshing ? tr("common.loading") : tr("common.refresh")}</span>
+            </div>
+          )}
           {selectMode && (
             <div className="session-bulk-actions" aria-label={tr("sidebar.selectedSessionActions")}>
               <span>{selectedSessionIds.size === 0 ? tr("sidebar.selectSessions") : tr("sidebar.valueSelected", { size: selectedSessionIds.size })}</span>

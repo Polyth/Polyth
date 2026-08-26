@@ -573,17 +573,6 @@ function AssistantAgentHeader({
               className={id === "pin" && pinned ? "active" : ""}
               aria-label={label}
               title={label}
-              draggable
-              onDragStart={(event) => event.dataTransfer.setData("text/polyth-response-action", id)}
-              onDragOver={(event) => event.preventDefault()}
-              onDrop={(event) => {
-                event.preventDefault();
-                const dragged = event.dataTransfer.getData("text/polyth-response-action") as typeof id;
-                if (!prefs.responseActions.includes(dragged) || dragged === id) return;
-                const next = prefs.responseActions.filter((candidate) => candidate !== dragged);
-                next.splice(next.indexOf(id), 0, dragged);
-                setUiSettings({ responseActions: next });
-              }}
               disabled={(id === "pin" && pinBusy) || ((id === "plan" || id === "session") && !projectId)}
               onClick={() => runAction(id)}
             ><Glyph /></button>

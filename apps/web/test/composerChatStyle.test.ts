@@ -10,7 +10,7 @@ test("working status is compact and does not claim repository indexing", () => {
   const css = read("../src/styles.css");
 
   assert.doesNotMatch(surface, /Scanning repositories|indexing|usually takes a few seconds/i);
-  assert.match(surface, /<span>\{tr\("workspace\.builtinsurfaces\.working"\)\}<\/span>/);
+  assert.match(surface, /tr\("workspace\.builtinsurfaces\.working"\)/);
   assert.match(css, /\.focus-working-spinner\s*\{[^}]*width:\s*7px;[^}]*animation:\s*focus-working-pulse/s);
 });
 

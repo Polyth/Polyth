@@ -16,6 +16,10 @@ test("sidebar uses contextual tree actions and no permanent footer", async () =>
   assert.match(sidebar, /className="project-new-session"/);
   assert.doesNotMatch(sidebar, /className="side-foot"/);
   assert.match(sidebar, /className="sidebar-service-bar"/);
+  assert.match(sidebar, /className="sidebar-drawer-header"/);
+  assert.match(sidebar, /className="sidebar-drawer-identity"/);
+  assert.match(sidebar, /project\?\.name \|\| project\?\.path \|\| tr\("header\.polyth"\)/);
+  assert.match(sidebar, /className="icon-btn drawer-close"/);
   assert.match(sidebar, /className="sidebar-list-controls"/);
   assert.match(sidebar, /tr\("sidebar\.clearSessionSearch"\)/);
   assert.match(sidebar, /tr\("sidebar\.serverConnectionValue"/);
@@ -36,6 +40,10 @@ test("sidebar uses contextual tree actions and no permanent footer", async () =>
   assert.match(styles, /\.session-worktree-head:hover \.session-worktree-actions,[\s\S]*?opacity: 1;/);
   assert.doesNotMatch(styles, /\.project-tree-sessions::before/);
   assert.match(styles, /\.session-btn::before\s*\{[\s\S]*?border-radius:\s*calc\(8px \* var\(--corner-radius-scale\)\)/);
+  assert.match(styles, /\.sidebar-drawer-header\s*\{[\s\S]*?var\(--safe-top\)/,
+    "the compact drawer has a safe-area-aware identity bar");
+  assert.match(styles, /\.sidebar \.project-card-shell\s*\{\s*grid-template-columns:\s*minmax\(0, 1fr\) repeat\(3, var\(--tap\)\)/,
+    "touch-sized project actions reserve explicit compact-drawer tracks");
 });
 
 test("header and composer controls are configurable and purpose-specific", async () => {

@@ -4,7 +4,7 @@ import { readFile } from "node:fs/promises";
 
 const source = (path: string) => readFile(new URL(path, import.meta.url), "utf8");
 
-test("session rows reserve one right status zone and have no ellipsis action", async () => {
+test("session rows reserve one status zone and expose a visible actions menu", async () => {
   const sessions = await source("../src/components/sidebar/SessionList.tsx");
   const rowStart = sessions.indexOf("function SessionRow(");
   const rowEnd = sessions.indexOf("export default function SessionList", rowStart);
@@ -15,8 +15,10 @@ test("session rows reserve one right status zone and have no ellipsis action", a
   assert.match(row, /className="session-status-zone"/);
   assert.match(row, /<AttentionBadges status=\{rowStatus\} \/>/);
   assert.match(row, /<StatusBadge status=\{rowStatus\} \/>/);
-  assert.doesNotMatch(row, /session-actions/);
-  assert.doesNotMatch(row, /<Icon\.more/);
+  assert.doesNotMatch(row, /className="session-actions/);
+  assert.match(row, /className="session-quick-btn session-more-btn"/);
+  assert.match(row, /aria-haspopup="menu"/);
+  assert.match(row, /<Icon\.more/);
   assert.doesNotMatch(row, /session-title-line/);
   assert.match(row, /onTouchStart=\{startLongPress\}/);
 });

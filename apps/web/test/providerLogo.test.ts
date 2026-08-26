@@ -159,6 +159,7 @@ test("provider surfaces use ProviderLogo without brand palette rules", () => {
     "agent-reply-mark",
     "model-chip-provider-logo",
     "model-provider-logo",
+    "model-row-provider-logo",
     "model-trigger-logo",
     "provider-logo",
     "provider-share-logo",

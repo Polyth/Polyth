@@ -1,0 +1,558 @@
+/* Slot-backed feature panels -------------------------------------------------
+   These rules sit after the shared shell stylesheet. They intentionally adapt
+   to the panel's own inline size: the same component can be a full workspace
+   view, a docked rail surface, or a small widget without consulting App.tsx. */
+.view-page:not(.github-page):not(.git-page),
+.rail-body,
+.settings-pane-body,
+.widget-card-body {
+  container: feature-panel / inline-size;
+}
+
+.view-page,
+.rail-body,
+.settings-pane-body,
+.widget-card-body,
+.permission-toast,
+.notification-centre {
+  min-width: 0;
+  max-width: 100%;
+}
+
+:is(.view-page, .rail-body, .settings-pane-body, .widget-card-body) :is(
+  input:not([type="checkbox"]):not([type="radio"]),
+  select,
+  textarea,
+  pre,
+  code
+) {
+  max-width: 100%;
+}
+
+:is(
+  .audit-list,
+  .event-list,
+  .gh-list,
+  .knowledge-panel,
+  .mcp-list,
+  .ntc-list,
+  .plugin-card-grid,
+  .provider-list,
+  .sched-runs,
+  .track-steps
+) {
+  min-width: 0;
+  overscroll-behavior: contain;
+}
+
+:is(
+  .audit-note,
+  .form-error,
+  .goal-card-objective,
+  .knowledge-snippet,
+  .plugin-log-line,
+  .prompt-echo,
+  .review-finding,
+  .sched-preview-runs,
+  .sched-run-error,
+  .walkthrough-stop-explain
+) {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+/* Empty states remain identifiable in dense rails and widgets instead of
+   looking like stray helper text. */
+:is(.empty-state, .set-empty, .rail-empty, .ha-empty, .usage-card-empty, .workflow-list-empty) {
+  width: min(100%, 430px);
+  min-width: 0;
+  margin: auto;
+  padding: clamp(20px, 7cqi, 48px) clamp(16px, 6cqi, 28px);
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-card);
+  background:
+    radial-gradient(circle at 50% 0, var(--accent-wash), transparent 62%),
+    color-mix(in srgb, var(--sunken) 88%, transparent);
+  color: var(--muted);
+  text-align: center;
+}
+.empty-state-mark {
+  box-shadow: var(--inset-hi), 0 12px 30px -24px var(--accent);
+}
+.empty-state-desc,
+.set-empty-body {
+  max-width: 36rem;
+  overflow-wrap: anywhere;
+}
+.empty-state-action { min-height: var(--tap); }
+
+/* Every independently scrolling feature owns its overflow. */
+:is(
+  .audit-list,
+  .event-list,
+  .gh-list,
+  .plugin-log,
+  .provider-list,
+  .run-card-body,
+  .usage-sessions-table,
+  .wt-diff
+) {
+  scrollbar-gutter: stable;
+  -webkit-overflow-scrolling: touch;
+}
+.permission-toast {
+  max-height: min(62dvh, 520px);
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+.permission-preview,
+.perm-patterns {
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: auto;
+  overscroll-behavior-inline: contain;
+}
+.permission-preview code,
+.perm-patterns code { overflow-wrap: anywhere; }
+
+/* Large workspace versions keep a readable measure. Widget versions may use
+   every available pixel and are governed by the container query below. */
+.goals-page,
+.walkthrough-page { width: 100%; }
+.goal-card,
+.run-card,
+.fusion-answer-card,
+.walkthrough-stage,
+.knowledge-card,
+.sched-card { min-width: 0; }
+.goal-card-objective,
+.prompt-echo > span:last-child,
+.weight-name,
+.walkthrough-stage-title { overflow-wrap: anywhere; }
+.run-card-body :is(pre, table),
+.fusion-answer-card :is(pre, table) {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+/* Settings contributions all use this shared responsive contract: Commands,
+   Models, Shortcuts, Packages, Voice, Usage, Agents, MCP, Integrations,
+   Plugins, Secure Safe, SSH, Git, Home Assistant, and desktop integration. */
+.settings-pane-body :is(
+  .set-row,
+  .set-row-text,
+  .set-row-control,
+  .set-add-form,
+  .mcp-form,
+  .mcp-form-row,
+  .plugin-library,
+  .provider-card,
+  .secure-safe-form,
+  .ha-settings
+) { min-width: 0; }
+.settings-pane-body .set-row-text { overflow-wrap: anywhere; }
+.settings-pane-body .set-row-hint.mono,
+.settings-pane-body .mcp-import-preview,
+.settings-pane-body .plugin-log { overflow-wrap: anywhere; }
+.settings-pane-body :is(.provider-list, .plugin-log, .set-model-list) {
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+
+/* Home Assistant is a slot-provided widget family as well as a settings page. */
+:is(.ha-connection, .ha-entity, .ha-light, .ha-climate, .ha-settings) {
+  min-width: 0;
+  max-width: 100%;
+}
+:is(.ha-connection, .ha-entity) > code,
+.ha-settings-message,
+.ha-error { overflow-wrap: anywhere; }
+
+/* Contextual rail contributions. */
+.rail-body > :is(.knowledge-panel, .knowledge-editor, .notification-centre, .tracks-panel) {
+  min-height: 0;
+}
+.ntc-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.ntc-toolbar,
+.knowledge-actions,
+.knowledge-card-head { min-width: 0; }
+.knowledge-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.event-row summary {
+  min-width: 0;
+  align-items: center;
+}
+.event-row .e-type {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@container feature-panel (max-width: 700px) {
+  /* Touch targets are based on the actual surface width, not the viewport.
+     Exclude switch tracks here; their dedicated rules below retain the visual
+     affordance while expanding the button box. */
+  :is(.view-page, .rail-body, .settings-pane-body, .widget-card-body) button:not(.switch):not(.package-toggle) {
+    min-width: var(--tap);
+    min-height: var(--tap);
+    touch-action: manipulation;
+  }
+  :is(.view-page, .rail-body, .settings-pane-body, .widget-card-body) :is(
+    input:not([type="checkbox"]):not([type="radio"]):not([type="range"]),
+    select
+  ) {
+    min-height: var(--tap);
+    font-size: var(--font-input);
+  }
+  :is(.view-page, .rail-body, .settings-pane-body, .widget-card-body) textarea {
+    min-height: calc(var(--tap) * 2);
+    font-size: var(--font-input);
+  }
+
+  .view-page {
+    gap: 14px;
+    padding: 18px max(14px, env(safe-area-inset-right, 0px))
+      max(24px, env(safe-area-inset-bottom, 0px))
+      max(14px, env(safe-area-inset-left, 0px));
+  }
+  .view-title { font-size: clamp(20px, 7cqi, 26px); line-height: 1.2; }
+  .view-sub { max-width: 60ch; overflow-wrap: anywhere; }
+
+  /* Goals */
+  .goals-head {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 12px;
+  }
+  .goals-head .header-spacer { display: none; }
+  .goals-head > .small-btn { width: 100%; }
+  .goal-card { gap: 14px; padding: 16px; }
+  .goal-card-row,
+  .goal-budget-row { flex-wrap: wrap; }
+  .goal-stat-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .goal-stat-cell { min-width: 0; padding: 10px; }
+  .goal-stat-v { overflow-wrap: anywhere; }
+  .goal-actions { display: grid; grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)); }
+  .goal-actions > button { width: 100%; }
+  .audit-row {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: 3px 10px;
+    align-items: start;
+  }
+  .audit-time,
+  .audit-verdict { width: auto; }
+  .audit-note { grid-column: 1 / -1; }
+  .goal-attach-row {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .goal-attach-label,
+  .goal-attach-submit { width: 100%; }
+
+  /* Schedules and workflows */
+  .sched-form .view-toolbar-row,
+  .workflow-run-options,
+  .workflow-node-selects {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    align-items: stretch;
+  }
+  .sched-form .view-toolbar-row > :is(input, select, label, button, .seg),
+  .sched-every,
+  .workflow-field { width: 100%; max-width: none; }
+  .sched-form .seg {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  .sched-card {
+    align-items: stretch;
+    flex-direction: column;
+    padding: 14px;
+  }
+  .sched-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .sched-actions > button { width: 100%; }
+  .sched-run { align-items: flex-start; flex-wrap: wrap; }
+  .sched-run-error { flex-basis: 100%; padding-left: 16px; }
+  .workflow-layout { grid-template-columns: minmax(0, 1fr); }
+  .workflow-sidebar { position: static; max-height: none; }
+  .workflow-page-header { align-items: flex-start; flex-wrap: wrap; }
+  .workflow-back-chat { width: 100%; margin-left: 0; }
+
+  /* Knowledge, tracks, and notifications */
+  .knowledge-panel > .view-toolbar-row,
+  .knowledge-editor > .view-toolbar-row,
+  .track-create-form .view-toolbar-row,
+  .ntc-toolbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .knowledge-panel > .view-toolbar-row > :is(input, button),
+  .knowledge-editor > .view-toolbar-row > :is(select, button),
+  .ntc-toolbar > button { width: 100%; }
+  .knowledge-panel .header-spacer,
+  .knowledge-editor .header-spacer,
+  .ntc-toolbar .header-spacer { display: none; }
+  .knowledge-kinds {
+    width: 100%;
+    max-width: 100%;
+    display: flex;
+    overflow-x: auto;
+    overscroll-behavior-inline: contain;
+    scrollbar-width: none;
+  }
+  .knowledge-kinds::-webkit-scrollbar { display: none; }
+  .knowledge-kinds button { flex: 1 0 auto; }
+  .knowledge-actions {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(88px, 1fr));
+  }
+  .knowledge-actions > button { width: 100%; }
+  .track-create-form :is(input, textarea) { width: 100%; }
+
+  /* Multi-run and Fusion */
+  .view-toolbar > .view-toolbar-row {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .view-toolbar > .view-toolbar-row > :is(select, button) {
+    width: 100%;
+    max-width: none;
+  }
+  .multirun-grid,
+  .fusion-layout { grid-template-columns: minmax(0, 1fr); }
+  .run-card-body { max-height: min(48dvh, 360px); }
+  .pick-btn { min-height: var(--tap); }
+  .fusion-model-picks {
+    max-height: min(36dvh, 300px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding: 2px;
+  }
+  .model-chip { flex: 1 1 min(100%, 180px); justify-content: flex-start; overflow-wrap: anywhere; }
+  .fusion-answer-card { padding: 14px; overflow: hidden; }
+  .weight-card-row { align-items: flex-start; gap: 8px; }
+  .weight-name { white-space: normal; }
+
+  /* Walkthrough */
+  .wt-header {
+    align-items: stretch;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .wt-header > .seg {
+    width: 100%;
+    margin-left: 0;
+  }
+  .wt-header > .seg button { flex: 1; }
+  .wt-header .header-spacer { display: none; }
+  .step-dots {
+    max-width: 100%;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    overscroll-behavior-inline: contain;
+    scrollbar-width: none;
+  }
+  .step-dots::-webkit-scrollbar { display: none; }
+  .step-dot {
+    position: relative;
+    width: var(--tap);
+    min-width: var(--tap);
+    height: var(--tap);
+    padding: 0;
+    border: 0;
+    background: transparent;
+  }
+  .step-dot::before {
+    content: "";
+    position: absolute;
+    inset: 16px;
+    border: 1px solid var(--border);
+    border-radius: 50%;
+    background: var(--elevated);
+  }
+  .step-dot.current::before { outline: 2px solid var(--accent); outline-offset: 2px; }
+  .step-dot.approved::before { border-color: var(--green); background: var(--green); }
+  .step-dot.rejected::before { border-color: var(--red); background: var(--red); }
+  .wt-diff { max-height: min(52dvh, 420px); }
+  .wt-footer {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+  .wt-footer > button,
+  .wt-footer-mid > button { width: 100%; }
+  .wt-footer-mid {
+    grid-column: 1 / -1;
+    grid-row: 1;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  .walkthrough-source {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .walkthrough-source > :is(.seg, input, button) {
+    width: 100%;
+    max-width: none;
+  }
+  .walkthrough-source .seg { display: grid; grid-template-columns: minmax(0, 1fr); }
+  .walkthrough-source .header-spacer { display: none; }
+  .auto-review-banner { align-items: stretch; flex-direction: column; }
+  .auto-review-banner .header-spacer { display: none; }
+  .review-finding { align-items: flex-start; flex-direction: column; }
+
+  /* Settings pages */
+  .settings-pane-body .set-row {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .settings-pane-body .set-row-control {
+    width: 100%;
+    max-width: none;
+    flex-wrap: wrap;
+    justify-content: flex-start;
+  }
+  .settings-pane-body .set-row-control > :is(input, select, textarea, .seg, .picker) {
+    width: 100%;
+    max-width: none;
+  }
+  .settings-pane-body .set-add-form:not(.set-add-col),
+  .settings-pane-body .mcp-form-row,
+  .settings-pane-body .secure-safe-form-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .settings-pane-body .set-add-form > :is(input, select, textarea, button),
+  .settings-pane-body .mcp-form-row > :is(input, select, textarea, button, .seg),
+  .settings-pane-body .secure-safe-form-actions > button {
+    width: 100%;
+    max-width: none;
+  }
+  .models-toolbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .models-toolbar > .seg { width: 100%; }
+  .models-toolbar > .seg button { flex: 1; }
+  .provider-chips {
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    overscroll-behavior-inline: contain;
+    padding-bottom: 4px;
+    scrollbar-width: none;
+  }
+  .provider-chips::-webkit-scrollbar { display: none; }
+  .provider-chip { flex: none; }
+  .provider-head { gap: 4px; padding-right: 5px; }
+  .provider-tag,
+  .set-model-meta { display: none; }
+  .provider-expand { min-width: 0; }
+  .set-model-row { min-height: var(--tap); }
+  .star-btn { width: var(--tap); min-width: var(--tap); }
+  .hotkey-capture { width: 100%; }
+  .hotkey-kbd { min-width: var(--tap); min-height: var(--tap); }
+  .settings-pane-body .package-grid,
+  .settings-pane-body .plugin-card-grid,
+  .role-card-grid,
+  .secure-safe-form-row { grid-template-columns: minmax(0, 1fr); }
+  .plugin-card-actions { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .plugin-card-actions button { width: 100%; height: auto; }
+  .plugin-card-actions .danger-btn { margin-left: 0; }
+  .plugin-library-head { align-items: flex-start; flex-wrap: wrap; }
+  .plugin-library-head > span { margin-left: 0; }
+  .plugin-toast { align-items: stretch; flex-direction: column; }
+  .plugin-toast button { width: 100%; }
+  .ha-settings > button { width: 100%; align-self: stretch; }
+
+  /* Preserve a familiar switch track while making its button a 44px target. */
+  .switch {
+    width: 48px;
+    min-width: 48px;
+    height: var(--tap);
+    display: flex;
+    align-items: center;
+    padding: 0 5px;
+  }
+  .switch[aria-checked="true"] i { transform: translateX(20px); }
+  .switch.switch-sm { width: 44px; min-width: 44px; height: var(--tap); padding-inline: 5px; }
+  .switch.switch-sm[aria-checked="true"] i { transform: translateX(22px); }
+  .package-toggle {
+    min-width: 48px;
+    height: var(--tap);
+  }
+  .package-toggle span { top: 11px; }
+
+  /* Home Assistant widgets */
+  :is(.ha-connection, .ha-entity) > button,
+  .ha-temperature button { min-width: var(--tap); min-height: var(--tap); }
+  .ha-climate > section { align-items: stretch; flex-direction: column; }
+  .ha-temperature { justify-content: space-between; }
+  .ha-sensors { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* Permissions are composer overlays rather than children of a named panel
+   container, so viewport/coarse-pointer fallbacks provide the same contract. */
+@media (max-width: 700px), (pointer: coarse) {
+  .permission-toast { padding-inline: 14px; }
+  .perm-row { align-items: stretch; flex-direction: column; }
+  .perm-desc { overflow-wrap: anywhere; }
+  .perm-actions {
+    width: 100%;
+    margin-left: 0;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .perm-actions > button,
+  .perm-actions .perm-always,
+  .perm-actions .perm-always > :is(button, select) {
+    min-width: var(--tap);
+    min-height: var(--tap);
+  }
+  .perm-actions > button,
+  .perm-actions .perm-always { width: 100%; }
+  .perm-always {
+    grid-column: 1 / -1;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .perm-always > :is(button, select) { width: 100%; font-size: var(--font-input); }
+}
+
+@container feature-panel (max-width: 420px) {
+  .goal-stat-grid,
+  .sched-actions,
+  .wt-footer,
+  .wt-footer-mid,
+  .plugin-card-actions { grid-template-columns: minmax(0, 1fr); }
+  .wt-footer-mid {
+    grid-column: 1;
+    grid-row: auto;
+  }
+  .usage-stat-grid,
+  .usage-cost-grid { grid-template-columns: minmax(0, 1fr); }
+  .usage-dashboard-toolbar { align-items: stretch; }
+  .usage-view-tabs,
+  .usage-range-control { width: 100%; }
+  .usage-view-tabs button,
+  .usage-range-control button { flex: 1; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .package-tile,
+  .plugin-card,
+  .provider-chevron { transition: none; }
+}

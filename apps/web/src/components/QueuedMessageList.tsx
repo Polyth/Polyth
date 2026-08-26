@@ -6,6 +6,7 @@ import { api } from "../api.ts";
 import { useStore } from "../store.ts";
 import { announce } from "./a11y/live.tsx";
 import { tr } from "../i18n/index.ts";
+import MoveControls from "./MoveControls.tsx";
 
 const QUEUE_DRAG_TYPE = "application/x-polyth-queued-message";
 
@@ -75,6 +76,12 @@ export default function QueuedMessageList({
     void persistOrder(moveQueuedItem(items, sourceId, targetId), sourceId);
   };
 
+  const moveToVisibleIndex = (id: string, targetIndex: number) => {
+    const target = visibleItems[targetIndex];
+    if (!target) return;
+    void persistOrder(moveQueuedItem(items, id, target.id), id);
+  };
+
   const remove = async (id: string) => {
     try {
       await api.queueRemove(sessionId, id);
@@ -86,7 +93,7 @@ export default function QueuedMessageList({
 
   return (
     <div className="queue-list" role="list" aria-label={tr("queuedmessagelist.valueQueuedMessages", { length: visibleItems.length })}>
-      {visibleItems.map((item) => (
+      {visibleItems.map((item, index) => (
         <div
           key={item.id}
           className={`queue-chip${draggedId === item.id ? " dragging" : ""}${dropTargetId === item.id ? " drag-over" : ""}`}
@@ -107,6 +114,14 @@ export default function QueuedMessageList({
           <span className="queue-pos">#{item.position + 1}</span>
           <span className="queue-text" title={item.text}>{item.text}</span>
           <span className="muted queue-delivery">{item.delivery === "steer" ? tr("queuedmessagelist.steer") : tr("queuedmessagelist.queued")}</span>
+          <MoveControls
+            label={item.text}
+            index={index}
+            count={visibleItems.length}
+            previousLabel={tr("queuedmessagelist.moveQueuedMessageValueUp", { value: item.position + 1 })}
+            nextLabel={tr("queuedmessagelist.moveQueuedMessageValueDown", { value: item.position + 1 })}
+            onMove={(targetIndex) => moveToVisibleIndex(item.id, targetIndex)}
+          />
           <button aria-label={tr("queuedmessagelist.editQueuedMessageValue", { value: item.position + 1 })} onClick={() => onEdit?.(item)}>✎</button>
           <button aria-label={tr("queuedmessagelist.removeQueuedMessageValue", { value: item.position + 1 })} onClick={() => void remove(item.id)}>✕</button>
         </div>

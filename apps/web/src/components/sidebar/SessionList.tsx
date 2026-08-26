@@ -1,7 +1,10 @@
 // Organized session list: worktree grouping, labels, attention badges,
 // inline rename, archived section, bulk archive/restore with partial-failure
 // reporting. All mutations go through the REST org endpoints.
-import { useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
+import {
+  useEffect, useMemo, useRef, useState, useSyncExternalStore,
+  type CSSProperties, type PointerEvent as ReactPointerEvent,
+} from "react";
 import type { SessionProjection, WorkspaceLabel } from "@polyth/contracts";
 import { api, type Worktree } from "../../api.ts";
 import {
@@ -24,6 +27,8 @@ import {
 } from "../../sidebarPrefs.ts";
 import { Icon } from "../../icons.tsx";
 import { formatRelativeTime, getLocale, tr } from "../../i18n/index.ts";
+import { errorFeedback, successFeedback, tapFeedback } from "../../haptics.ts";
+import { horizontalDistance, SESSION_SWIPE_REVEAL, type GesturePoint } from "../../mobileGestures.ts";
 
 const INITIAL_VISIBLE_SESSIONS = 6;
 
@@ -37,9 +42,9 @@ export function sessionActivityLabel(
   }
   const age = Math.max(0, now - s.updatedAt);
   if (age < 60_000) return formatRelativeTime(0, "second", { numeric: "auto", style: "narrow" });
-  if (age < 60 * 60_000) return formatRelativeTime(-Math.floor(age / 60_000), "minute", { style: "narrow" });
-  if (age < 24 * 60 * 60_000) return formatRelativeTime(-Math.floor(age / 3_600_000), "hour", { style: "narrow" });
-  if (age < 7 * 24 * 60 * 60_000) return formatRelativeTime(-Math.floor(age / 86_400_000), "day", { style: "narrow" });
+  if (age < 60 * 60_000) return formatRelativeTime(-Math.floor(age / 60_000), "minute", { numeric: "auto", style: "narrow" });
+  if (age < 24 * 60 * 60_000) return formatRelativeTime(-Math.floor(age / 3_600_000), "hour", { numeric: "auto", style: "narrow" });
+  if (age < 7 * 24 * 60 * 60_000) return formatRelativeTime(-Math.floor(age / 86_400_000), "day", { numeric: "auto", style: "narrow" });
   return new Date(s.updatedAt).toLocaleDateString(getLocale(), { month: "short", day: "numeric" });
 }
 
@@ -96,6 +101,7 @@ interface RowProps {
   activeSessionId: string | null;
   labels: WorkspaceLabel[];
   eventsTitle: string | undefined;
+  opening: boolean;
   relativeTime: boolean;
   selectMode: boolean;
   selected: boolean;
@@ -167,13 +173,15 @@ function useShiftArmed(): boolean {
 }
 
 function SessionRow({
-  s, activeSessionId, labels, eventsTitle, relativeTime, selectMode, selected,
+  s, activeSessionId, labels, eventsTitle, opening, relativeTime, selectMode, selected,
   onToggleSelect, onChanged, onOpen, onTogglePin, pinnedSection, onPinDragStart, onPinDrop,
   contextLabel, pinnedWorktreeLabel,
 }: RowProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [renaming, setRenaming] = useState(false);
   const [title, setTitle] = useState(s.title);
+  const [swipeRevealed, setSwipeRevealed] = useState(false);
+  const [swipeX, setSwipeX] = useState<number | null>(null);
   // Shift+hover arms the quick actions (they stay keyboard-reachable through
   // :focus-within regardless of the modifier).
   const [hovered, setHovered] = useState(false);
@@ -183,6 +191,8 @@ function SessionRow({
   const sessionBtnRef = useRef<HTMLButtonElement>(null);
   const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const longPressOpenedRef = useRef(false);
+  const swipeStartRef = useRef<GesturePoint | null>(null);
+  const swipeConsumedRef = useRef(false);
   const now = useNowTick(s.status === "working", 1_000);
   const rowStatus = sessionRowStatus(s, now);
 
@@ -207,6 +217,41 @@ function SessionRow({
       longPressOpenedRef.current = true;
       setMenuOpen(true);
     }, 550);
+  };
+  const startSwipe = (event: ReactPointerEvent<HTMLDivElement>) => {
+    if (event.pointerType !== "touch" || !event.isPrimary || renaming || selectMode) return;
+    swipeStartRef.current = { x: event.clientX, y: event.clientY };
+    swipeConsumedRef.current = false;
+  };
+  const moveSwipe = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const start = swipeStartRef.current;
+    if (!start || event.pointerType !== "touch") return;
+    const dx = horizontalDistance(start, { x: event.clientX, y: event.clientY });
+    if (dx === null) return;
+    cancelLongPress();
+    swipeConsumedRef.current = true;
+    const base = swipeRevealed ? -96 : 0;
+    setSwipeX(Math.max(-96, Math.min(0, base + dx)));
+  };
+  const finishSwipe = (event: ReactPointerEvent<HTMLDivElement>) => {
+    const start = swipeStartRef.current;
+    swipeStartRef.current = null;
+    if (!start || event.pointerType !== "touch") {
+      setSwipeX(null);
+      return;
+    }
+    const distance = horizontalDistance(start, { x: event.clientX, y: event.clientY });
+    const next = distance !== null
+      ? (swipeRevealed ? -96 : 0) + distance
+      : (swipeRevealed ? -96 : 0);
+    const revealed = next <= -SESSION_SWIPE_REVEAL;
+    if (revealed !== swipeRevealed) tapFeedback();
+    setSwipeRevealed(revealed);
+    setSwipeX(null);
+  };
+  const cancelSwipe = () => {
+    swipeStartRef.current = null;
+    setSwipeX(null);
   };
 
   useEffect(() => {
@@ -252,8 +297,16 @@ function SessionRow({
     if (needsDestructiveConfirm(s) && !await confirmAlert(tr("sidebar.sessionlist.archiveValueTheAgentIsStillRunning", { label: label }), { title: tr("sidebar.sessionlist.archiveActiveSession"), confirmLabel: tr("common.archive") })) return;
     if (!needsDestructiveConfirm(s) && getUiSettings().confirmSessionArchive && !await confirmAlert(tr("sidebar.sessionlist.archiveValue", { label: label }), { title: tr("sidebar.sessionlist.archiveSession"), confirmLabel: tr("common.archive") })) return;
     void archiveSession(s.id)
-      .then(() => { announce(tr("sidebar.sessionlist.archivedValue", { label: label })); onChanged(); })
-      .catch((e) => setUiError(friendlyError(tr("common.error"), e)));
+      .then(() => {
+        successFeedback();
+        setSwipeRevealed(false);
+        announce(tr("sidebar.sessionlist.archivedValue", { label: label }));
+        onChanged();
+      })
+      .catch((e) => {
+        errorFeedback();
+        setUiError(friendlyError(tr("common.error"), e));
+      });
   };
 
   const quickDelete = async () => {
@@ -261,8 +314,16 @@ function SessionRow({
     const activity = needsDestructiveConfirm(s) ? ` ${tr("sidebar.sessionlist.theAgentIsStillRunningOr")}` : "";
     if (!await confirmAlert(tr("sidebar.sessionlist.deleteValueValueThisPermanentlyRemovesThe", { label: label, activity: activity }), { title: tr("sidebar.sessionlist.deleteSession"), confirmLabel: tr("common.delete") })) return;
     void deleteSession(s.id)
-      .then(() => { announce(tr("sidebar.sessionlist.deletedValue", { label: label })); onChanged(); })
-      .catch((e) => setUiError(friendlyError(tr("common.error"), e)));
+      .then(() => {
+        successFeedback();
+        setSwipeRevealed(false);
+        announce(tr("sidebar.sessionlist.deletedValue", { label: label }));
+        onChanged();
+      })
+      .catch((e) => {
+        errorFeedback();
+        setUiError(friendlyError(tr("common.error"), e));
+      });
   };
 
   const doRename = async () => {
@@ -303,6 +364,8 @@ function SessionRow({
   return (
     <div
       className={`session-row ${rowStatus.kind}${contextLabel ? " search-result" : ""} ${s.id === activeSessionId ? "active" : ""} ${s.status === "archived" ? "archived" : ""}${quickArmed ? " quick-armed" : ""}${menuOpen ? " menu-open" : ""}`}
+      style={swipeX === null ? undefined : { "--session-swipe-x": `${swipeX}px` } as CSSProperties}
+      data-swipe={swipeX !== null ? "dragging" : swipeRevealed ? "revealed" : "closed"}
       draggable={pinnedSection}
       onDragStart={() => { if (pinnedSection) onPinDragStart(s.id); }}
       onDragOver={(event) => { if (pinnedSection) event.preventDefault(); }}
@@ -311,7 +374,10 @@ function SessionRow({
       onMouseMove={hoverUpdate}
       onMouseLeave={hoverEnd}
       onPointerEnter={hoverUpdate}
-      onPointerMove={hoverUpdate}
+      onPointerDown={startSwipe}
+      onPointerMove={(event) => { hoverUpdate(event); moveSwipe(event); }}
+      onPointerUp={finishSwipe}
+      onPointerCancel={cancelSwipe}
       onPointerLeave={hoverEnd}
       onContextMenu={(event) => { event.preventDefault(); setMenuOpen(true); }}
     >
@@ -341,12 +407,20 @@ function SessionRow({
           ref={sessionBtnRef}
           className="session-btn"
           aria-current={s.id === activeSessionId ? "true" : undefined}
+          aria-expanded={swipeRevealed}
+          aria-busy={opening || undefined}
           aria-label={tr("sidebar.sessionlist.openValue", { displayTitle: displayTitle })}
           title={hoverTitle}
           onClick={(event) => {
-            if (longPressOpenedRef.current) {
+            if (longPressOpenedRef.current || swipeConsumedRef.current) {
               event.preventDefault();
               longPressOpenedRef.current = false;
+              swipeConsumedRef.current = false;
+              return;
+            }
+            if (swipeRevealed) {
+              event.preventDefault();
+              setSwipeRevealed(false);
               return;
             }
             onOpen(s.id);
@@ -374,9 +448,17 @@ function SessionRow({
           </span>
           {contextLabel && <span className="session-search-context">{contextLabel}</span>}
           <span className="session-status-zone">
-            <AttentionBadges status={rowStatus} />
-            <StatusBadge status={rowStatus} />
-            {(rowStatus.kind === "regular" || rowStatus.kind === "unread") && activityLabel && (
+            {opening ? (
+              <span className="session-opening-indicator" title={tr("common.loading")} aria-label={tr("common.loading")}>
+                <span className="spinner" aria-hidden="true" />
+              </span>
+            ) : (
+              <>
+                <AttentionBadges status={rowStatus} />
+                <StatusBadge status={rowStatus} />
+              </>
+            )}
+            {!opening && (rowStatus.kind === "regular" || rowStatus.kind === "unread") && activityLabel && (
               <span className="session-time">{activityLabel}</span>
             )}
             <SlotHost
@@ -387,6 +469,20 @@ function SessionRow({
         </button>
       )}
       <span className="session-quick">
+        {!renaming && (
+          <button
+            type="button"
+            className="session-quick-btn session-more-btn"
+            aria-label={`${tr("common.more")}: ${displayTitle}`}
+            aria-haspopup="menu"
+            aria-expanded={menuOpen}
+            onClick={() => {
+              tapFeedback();
+              setSwipeRevealed(false);
+              setMenuOpen((open) => !open);
+            }}
+          ><Icon.more /></button>
+        )}
         {s.status !== "archived" && (
           <button
             className="session-quick-btn"
@@ -477,6 +573,7 @@ export default function SessionList({
 }) {
   const sessions = useStore((st) => st.sessions);
   const activeSessionId = useStore((st) => st.activeSessionId);
+  const openingSessionId = useStore((st) => st.openingSessionId);
   const eventsMap = useStore((st) => st.events);
   const expandArchived = useStore((st) => st.settings.showArchived);
   const relativeTime = useStore((st) => st.settings.relativeTime);
@@ -617,6 +714,7 @@ export default function SessionList({
       activeSessionId={activeSessionId}
       labels={labels}
       eventsTitle={firstUserText(eventsMap[s.id])}
+      opening={openingSessionId === s.id}
       relativeTime={relativeTime}
       selectMode={selectMode}
       selected={selectedSessionIds.has(s.id)}

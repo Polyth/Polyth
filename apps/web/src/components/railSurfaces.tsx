@@ -23,6 +23,7 @@ import GitView from "./GitView.tsx";
 import TerminalView from "./TerminalView.tsx";
 import PreviewView from "./PreviewView.tsx";
 import KnowledgePanel from "./KnowledgePanel.tsx";
+import EmptyState from "./EmptyState.tsx";
 import { getLocale, tr } from "../i18n/index.ts";
 
 const NO_EVENTS: SessionEvent[] = [];
@@ -99,7 +100,12 @@ function ContextView() {
         <span className="mono">{model.totals.cost > 0 ? fmtCost(model.totals.cost) : "—"}</span>
       </div>
       <div className="stat-label">{tr("railsurfaces.pinned")}</div>
-      {pinnedMessages.length === 0 && <div className="muted" style={{ fontSize: "calc(12.5px * var(--ui-font-scale, 1))" }}>{tr("railsurfaces.nothingPinnedYet")}</div>}
+      {pinnedMessages.length === 0 && (
+        <EmptyState
+          title={tr("railsurfaces.nothingPinnedYet")}
+          description={tr("railsurfaces.sessionStatusUsageAndPinnedContextWill")}
+        />
+      )}
       {pinnedMessages.map((event) => (
         <div key={event.seq} className="pinned-file">
           <span className="mono">#{event.seq}</span>{" "}
@@ -126,7 +132,14 @@ function UsagePanel() {
 
 function ActiveEventsView() {
   const events = useStore((s) => (s.activeSessionId ? s.events[s.activeSessionId] : undefined) ?? NO_EVENTS);
-  if (events.length === 0) return <div className="empty">{tr("railsurfaces.noEventsYet")}</div>;
+  if (events.length === 0) {
+    return (
+      <EmptyState
+        title={tr("railsurfaces.noEventsYet")}
+        description={tr("railsurfaces.sessionStatusUsageAndPinnedContextWill")}
+      />
+    );
+  }
   return (
     <div className="event-list">
       {[...events].reverse().map((e) => (

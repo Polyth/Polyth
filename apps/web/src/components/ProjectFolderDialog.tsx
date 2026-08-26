@@ -21,6 +21,7 @@ import { getProjectSetupState } from "../projectSetup.ts";
 import { ago, MOD } from "../format.ts";
 import { Icon } from "../icons.tsx";
 import { tr } from "../i18n/index.ts";
+import { errorFeedback, successFeedback, tapFeedback } from "../haptics.ts";
 
 const folderIcon = (
   <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -150,6 +151,7 @@ export default function ProjectFolderDialog({
 
   const enter = (entry: BrowseEntryDto) => {
     if (busy) return;
+    if (window.matchMedia?.("(pointer: coarse)").matches) tapFeedback();
     void load(entry.path);
   };
 
@@ -169,6 +171,7 @@ export default function ProjectFolderDialog({
         throw new Error(tr("projectfolderdialog.theProjectDidnTActivatePleaseTry"));
       }
       outcomeRef.current = "success";
+      successFeedback();
       announce(tr("projectfolderdialog.openedValue", { value: project.name || project.path }));
       onOpened?.(target);
       onClose();
@@ -177,6 +180,7 @@ export default function ProjectFolderDialog({
       // Failure restores interaction with path/selection intact and moves
       // focus to the alert; Retry submits the same target exactly once.
       setError(e instanceof Error ? e.message : String(e));
+      errorFeedback();
       queueFocusHandoff(() => errorRef.current);
     } finally {
       setBusy(false);
@@ -206,8 +210,10 @@ export default function ProjectFolderDialog({
       setNewName("");
       await load(path);
       setSelected(target);
+      successFeedback();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
+      errorFeedback();
     } finally {
       setBusy(false);
     }
@@ -309,7 +315,6 @@ export default function ProjectFolderDialog({
             aria-label={tr("projectfolderdialog.openParentFolder")}
             disabled={busy}
             onClick={() => void load(parent)}
-            onDoubleClick={() => void load(parent)}
           >
             <span className="folder-row-icon">{folderIcon}</span>
             <span className="folder-row-name mono">..</span>
@@ -337,6 +342,10 @@ export default function ProjectFolderDialog({
               aria-selected={selected === entry.path}
               onClick={() => {
                 if (busy) return;
+                if (window.matchMedia?.("(pointer: coarse)").matches) {
+                  enter(entry);
+                  return;
+                }
                 setSelected(entry.path);
                 listRef.current?.focus();
               }}
@@ -345,6 +354,7 @@ export default function ProjectFolderDialog({
               <span className="folder-row-icon">{folderIcon}</span>
               <span className="folder-row-name">{entry.name}</span>
               <span className="folder-row-meta mono">{entry.modifiedAt ? tr("projectfolderdialog.valueAgo", { value: ago(entry.modifiedAt) }) : ""}</span>
+              <span className="folder-row-enter" aria-hidden="true">{tr("projectfolderdialog.enterFolder")} <span>›</span></span>
             </div>
           ))}
           {entries.length === 0 && !error && <div className="folder-empty">{tr("projectfolderdialog.noSubFoldersHereOpenThisFolder")}</div>}
@@ -386,7 +396,12 @@ export default function ProjectFolderDialog({
           )}
           <span className="header-spacer" />
           <span className="folder-selected mono" title={selected ?? path}>{selected ?? path}</span>
-          <button className="primary-btn folder-open-btn" disabled={busy || (!selected && !path)} onClick={() => void openProject()}>
+          <button
+            className="primary-btn folder-open-btn"
+            disabled={busy || (!selected && !path)}
+            aria-busy={busy || undefined}
+            onClick={() => void openProject()}
+          >
             {busy ? tr("projectfolderdialog.opening") : tr("projectfolderdialog.openProject")}
           </button>
         </div>

@@ -93,7 +93,7 @@ export default function AgentProfileForm({ existing, seed, lockModel, onClose, o
       <div className="dialog-head">
         <span>{existing ? tr("agentprofileform.editProfile") : tr("agentprofileform.newAgentProfile")}</span>
         <span className="header-spacer" />
-        <button className="small-btn" onClick={onClose}>✕</button>
+        <button className="small-btn" aria-label={tr("common.close")} title={tr("common.close")} onClick={onClose}>✕</button>
       </div>
       <div className="profile-form-body">
         <label>

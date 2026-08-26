@@ -1,26 +1,40 @@
 // UX-A390: the single JavaScript breakpoint seam for the Ember command shelf.
-// Width alone selects the shell mode — pointer type, hover capability, user
-// agent, and device category must not participate. CSS uses the same literal
-// boundaries (820 / 480; the height-only "short" contract lives in CSS as
-// max-height: 600px). No durable state: viewport mode is never persisted.
+// Width selects the normal shell mode. A short viewport is also a phone only
+// when it has a coarse primary pointer, which catches landscape phones without
+// turning a short desktop window into the phone shell. No user-agent/device
+// sniffing and no durable state: viewport mode is never persisted.
 import { useSyncExternalStore } from "react";
 
 /** Widths at or below this are `compact` (drawer sidebar, sheet panels). */
 export const COMPACT_MAX_WIDTH = 820;
 /** Widths at or below this are `phone` (compact rules + phone header/composer). */
 export const PHONE_MAX_WIDTH = 480;
+/** Coarse-pointer viewports at or below this height use the landscape phone shell. */
+export const PHONE_LANDSCAPE_MAX_HEIGHT = 480;
 
 export type ShellMode = "wide" | "compact" | "phone";
 
-/** Pure width classifier shared by every shell-mode decision. */
-export function shellModeForWidth(width: number): ShellMode {
-  if (width <= PHONE_MAX_WIDTH) return "phone";
+/** Pure viewport classifier matching the media-query subscription below. */
+export function shellModeForViewport(
+  width: number,
+  height: number,
+  coarsePointer: boolean,
+): ShellMode {
+  if (
+    width <= PHONE_MAX_WIDTH
+    || (height <= PHONE_LANDSCAPE_MAX_HEIGHT && coarsePointer)
+  ) return "phone";
   if (width <= COMPACT_MAX_WIDTH) return "compact";
   return "wide";
 }
 
+/** Compatibility helper for width-only callers and boundary tests. */
+export function shellModeForWidth(width: number): ShellMode {
+  return shellModeForViewport(width, Number.POSITIVE_INFINITY, false);
+}
+
 // matchMedia-backed subscription. Both queries share one listener set so a
-// resize crossing either boundary produces exactly one snapshot change.
+// resize, rotation, or primary-pointer change produces one snapshot change.
 let queries: { compact: MediaQueryList; phone: MediaQueryList } | null = null;
 
 function ensureQueries(): { compact: MediaQueryList; phone: MediaQueryList } | null {
@@ -28,7 +42,10 @@ function ensureQueries(): { compact: MediaQueryList; phone: MediaQueryList } | n
   if (!queries) {
     queries = {
       compact: window.matchMedia(`(max-width: ${COMPACT_MAX_WIDTH}px)`),
-      phone: window.matchMedia(`(max-width: ${PHONE_MAX_WIDTH}px)`),
+      phone: window.matchMedia(
+        `(max-width: ${PHONE_MAX_WIDTH}px), `
+        + `(max-height: ${PHONE_LANDSCAPE_MAX_HEIGHT}px) and (pointer: coarse)`,
+      ),
     };
   }
   return queries;
@@ -53,7 +70,7 @@ function subscribe(onChange: () => void): () => void {
   };
 }
 
-/** Reactive shell mode; re-renders exactly when a width boundary is crossed. */
+/** Reactive shell mode; re-renders when a shell media boundary is crossed. */
 export function useShellMode(): ShellMode {
   return useSyncExternalStore(subscribe, snapshot, () => "wide" as ShellMode);
 }

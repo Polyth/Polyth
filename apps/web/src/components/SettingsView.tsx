@@ -3,7 +3,10 @@
 // (WP9) matches individual settings rows through the item registry and jumps
 // to the exact row; page-title filtering remains the fallback for plugin
 // pages without item metadata.
-import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import {
+  Fragment, useEffect, useMemo, useRef, useState,
+  type ReactNode, type TouchEvent as ReactTouchEvent,
+} from "react";
 import { consumePendingSettingsPage, setOverlay } from "../store.ts";
 import { listSlots } from "../slots.ts";
 import { isPackageEnabled, subscribePackages } from "../packages/registry.ts";
@@ -26,8 +29,11 @@ import WidgetsPage from "./settings/WidgetsPage.tsx";
 import PackageTourOverlay from "./PackageTourOverlay.tsx";
 import { maybeAutoShowPackageTour } from "../packages/onboarding/controller.ts";
 import { settingsPageToPackageId } from "../packages/onboarding/pageMap.ts";
+import { useModalScrollLock } from "./a11y/Dialog.tsx";
 import { Icon } from "../icons.tsx";
 import { tr } from "../i18n/index.ts";
+import { tapFeedback } from "../haptics.ts";
+import { isEdgeBackSwipe, type GesturePoint } from "../mobileGestures.ts";
 
 interface PageDef {
   id: string;
@@ -109,6 +115,7 @@ function SettingsNavIcon({ pageId }: { pageId: string }) {
 }
 
 export default function SettingsView({ onClose = () => setOverlay(null) }: { onClose?: () => void }) {
+  useModalScrollLock(true);
   const prefs = usePrefs();
   const mobile = useMobileSettings();
   // Deep link (e.g. "Change shortcut…" palette rows land on the Shortcuts page).
@@ -119,6 +126,7 @@ export default function SettingsView({ onClose = () => setOverlay(null) }: { onC
   const paneRef = useRef<HTMLDivElement>(null);
   const modalRef = useRef<HTMLDivElement>(null);
   const previousMobile = useRef(mobile);
+  const backSwipeStartRef = useRef<GesturePoint | null>(null);
 
   useEffect(() => {
     // A settings modal opened on mobile starts on the navigation stage, but
@@ -282,6 +290,19 @@ export default function SettingsView({ onClose = () => setOverlay(null) }: { onC
     setFilter("");
     setCursor(0);
   };
+  const startBackSwipe = (event: ReactTouchEvent<HTMLDivElement>) => {
+    const touch = event.touches[0];
+    if (!mobile || mobileStage !== "page" || !touch) return;
+    backSwipeStartRef.current = { x: touch.clientX, y: touch.clientY };
+  };
+  const finishBackSwipe = (event: ReactTouchEvent<HTMLDivElement>) => {
+    const start = backSwipeStartRef.current;
+    const touch = event.changedTouches[0];
+    backSwipeStartRef.current = null;
+    if (!start || !touch || !isEdgeBackSwipe(start, { x: touch.clientX, y: touch.clientY })) return;
+    tapFeedback();
+    setMobileStage("nav");
+  };
 
   const onSearchKey = (e: React.KeyboardEvent) => {
     if (!q) return;
@@ -308,18 +329,24 @@ export default function SettingsView({ onClose = () => setOverlay(null) }: { onC
   };
 
   return (
-    <div className="scrim settings-scrim" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+    <div className="scrim settings-scrim" onPointerDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
       <div
         className={`modal settings-shell settings-page-${current.id}${mobile ? ` settings-mobile-${mobileStage}` : ""}`}
         ref={modalRef}
         tabIndex={-1}
-        onMouseDown={(e) => e.stopPropagation()}
+        onPointerDown={(e) => e.stopPropagation()}
         role="dialog"
         aria-modal="true"
         aria-label={tr("common.settings")}
         aria-describedby={mobile ? undefined : "settings-close-hint"}
       >
         <nav className="modal-nav settings-nav">
+          <div className="settings-mobile-nav-head">
+            <strong>{tr("common.settings")}</strong>
+            <button type="button" className="close-btn" onClick={onClose} aria-label={tr("common.close")}>
+              <Icon.close />
+            </button>
+          </div>
           <input
             className="settings-nav-search"
             value={filter}
@@ -383,7 +410,12 @@ export default function SettingsView({ onClose = () => setOverlay(null) }: { onC
             <SlotHost slot="settings.footer" />
           </div>
         </nav>
-        <div className="modal-main settings-pane">
+        <div
+          className="modal-main settings-pane"
+          onTouchStart={startBackSwipe}
+          onTouchEnd={finishBackSwipe}
+          onTouchCancel={() => { backSwipeStartRef.current = null; }}
+        >
           <div className="modal-head settings-pane-head">
             {mobile ? (
               <div className="settings-pane-head-bar">
@@ -394,6 +426,7 @@ export default function SettingsView({ onClose = () => setOverlay(null) }: { onC
                   aria-label={tr("settingsview.backToSettings")}
                 >
                   <span aria-hidden="true">←</span> {tr("common.back")}</button>
+                <span className="settings-mobile-title">{tr("common.settings")}</span>
                 <button className="close-btn" onClick={onClose} aria-label={tr("common.close")}>{tr("settingsview.message")}</button>
               </div>
             ) : (

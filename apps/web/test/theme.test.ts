@@ -34,17 +34,26 @@ const validTheme = (): Record<string, unknown> => ({
   tokens: { ...PRESET_THEMES[0]!.tokens },
 });
 
-test("preset set: thirty themes, unique stable ids, balanced native appearances, valid tokens", () => {
-  assert.equal(PRESET_THEMES.length, 30);
+test("preset set: built-ins have unique stable ids and valid tokens", () => {
+  assert.equal(PRESET_THEMES.length, 31);
   assert.equal(new Set(PRESET_THEMES.map((t) => t.id)).size, PRESET_THEMES.length);
   // pre-F15 settings values keep resolving
   assert.ok(PRESET_THEMES.some((t) => t.id === "dark" && t.appearance === "dark"));
   assert.ok(PRESET_THEMES.some((t) => t.id === "light" && t.appearance === "light"));
-  assert.equal(PRESET_THEMES.filter((t) => t.appearance === "dark").length, 15);
+  assert.equal(PRESET_THEMES.filter((t) => t.appearance === "dark").length, 16);
   assert.equal(PRESET_THEMES.filter((t) => t.appearance === "light").length, 15);
   for (const preset of PRESET_THEMES) {
     for (const key of TOKEN_KEYS) assert.match(preset.tokens[key], HEX, `${preset.id}.${key}`);
   }
+});
+
+test("OLED Black is a true-black, contrast-validated dark option", () => {
+  const oled = PRESET_THEMES.find((theme) => theme.id === "oled");
+  assert.ok(oled);
+  assert.equal(oled.appearance, "dark");
+  assert.equal(oled.tokens.bg, "#000000");
+  assert.equal(oled.tokens.sunken, "#000000");
+  assert.ok(contrast(oled.tokens.text, oled.tokens.bg) >= 7);
 });
 
 test("every bundled theme's primary-action pair meets 4.5:1 at both gradient endpoints", () => {

@@ -1,0 +1,131 @@
+/* Mobile-first layout refinements for terminal, files, editor, and diffs.
+   These override the shared surface defaults without changing desktop panes. */
+
+/* Terminal tabs own their horizontal scrollport so they can never widen the
+   workspace. The action cluster remains reachable at the trailing edge. */
+.term-view,
+.term-tabs,
+.term-pane { min-width: 0; max-width: 100%; }
+.term-view { overflow: hidden; }
+.term-tabs { overflow: hidden; }
+.term-tab-list {
+  display: flex; align-items: stretch; gap: 4px; flex: 1; min-width: 0;
+  overflow-x: auto; overflow-y: hidden; overscroll-behavior-inline: contain;
+  scrollbar-width: none; touch-action: pan-x;
+}
+.term-tab-list::-webkit-scrollbar { display: none; }
+.term-tab-group { flex: none; }
+.term-actions { flex: none; }
+.term-body {
+  max-width: 100%; overflow-x: auto; overscroll-behavior: contain;
+  touch-action: pan-x pan-y;
+}
+.term-sizer { min-width: 100%; }
+.term-row { right: auto; width: max-content; min-width: 100%; }
+
+/* Code, file, and diff content scroll inside their own surface. */
+.editor-view,
+.editor-pane,
+.pane-body,
+.editor-edit,
+.editor-edit-surface,
+.copy-wrap { min-width: 0; max-width: 100%; }
+.editor-body,
+.files-viewer-wrap,
+.git-diff,
+.split-diff {
+  max-width: 100%; overscroll-behavior-inline: contain;
+}
+.editor-ta { max-width: 100%; overflow: auto; overscroll-behavior: contain; }
+.code-lines:not(.wrap),
+.editor-plain { width: max-content; min-width: 100%; }
+.git-page .copy-wrap,
+.git-page .git-diff,
+.git-page .split-diff { width: 100%; max-width: 100%; }
+
+/* The Files surface switches between its tree and editor on compact screens.
+   Desktop docks keep the productive side-by-side view, even when resized. */
+.editor-mobile-tabs { display: none; }
+@media (max-width: 820px) {
+  .editor-view { flex-direction: column; overflow: hidden; }
+  .editor-mobile-tabs {
+    display: flex; align-items: stretch; flex: none; min-height: var(--tap);
+    padding: 3px; border-bottom: 1px solid var(--hair-strong); background: var(--panel);
+  }
+  .editor-mobile-tabs button {
+    flex: 1; min-width: 0; min-height: var(--tap); padding: 0 10px;
+    overflow: hidden; border: 0; border-radius: var(--radius-sm); background: transparent;
+    color: var(--muted); font-size: 12.5px; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .editor-mobile-tabs button.active { background: var(--accent-wash); color: var(--text); }
+  .editor-mobile-tabs button:disabled { opacity: .45; }
+  .editor-view.mobile-tree .editor-tree {
+    display: block; width: 100%; min-width: 0; flex: 1;
+    border-right: 0; border-bottom: 0;
+  }
+  .editor-view.mobile-tree .editor-pane { display: none; }
+  .editor-view.mobile-editor .editor-tree { display: none; }
+  .editor-view.mobile-editor .editor-pane { display: flex; width: 100%; }
+  .ft-row { min-height: var(--tap); }
+  .pane-tabs {
+    overscroll-behavior-inline: contain; scrollbar-width: none; touch-action: pan-x;
+  }
+  .pane-tabs::-webkit-scrollbar { display: none; }
+  .pane-tab {
+    flex: 0 0 auto; min-height: var(--tap); max-width: min(72vw, 260px);
+    padding-block: 4px;
+  }
+  .pane-tab-close {
+    width: var(--tap); min-width: var(--tap); height: var(--tap); min-height: var(--tap);
+    display: inline-grid; place-items: center; padding: 0;
+  }
+}
+
+/* A stacked split diff keeps before/after content readable on narrow source
+   surfaces while the diff itself remains the only horizontal scrollport. */
+@container source-surface (max-width: 700px) {
+  .git-detail-pane,
+  .git-detail-title,
+  .diff-prefs,
+  .copy-wrap { max-width: 100%; }
+  .split-diff { overflow-x: auto; overflow-y: visible; }
+  .split-diff-row { display: block; min-width: 100%; }
+  .split-diff-row code {
+    display: block; width: max-content; min-width: 100%; min-height: 22px;
+    border-right: 0; border-bottom: 1px solid var(--hair);
+  }
+  .split-diff-row code:last-child { border-bottom: 0; }
+}
+
+@container (max-width: 520px) {
+  .term-tabs { padding-inline: 6px; }
+  .term-tab,
+  .term-tab-x,
+  .term-actions button { min-height: var(--tap); }
+  .term-tab { max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .term-tab-x { width: var(--tap); padding: 0; }
+  .term-actions button { width: var(--tap); height: var(--tap); }
+  .term-search {
+    left: 8px; right: 8px; display: grid;
+    grid-template-columns: minmax(var(--tap), 1fr) repeat(5, var(--tap)); gap: 2px;
+  }
+  .term-search input {
+    grid-column: 1 / -1; width: 100%; min-width: 0; min-height: var(--tap);
+  }
+  .term-search .term-search-count { min-width: 0; }
+  .term-search button { width: var(--tap); height: var(--tap); }
+}
+
+/* Drag separators are a desktop pointer affordance. Touch layouts already
+   choose a full-screen pane and keep keyboard/tab navigation available. */
+@media (pointer: coarse) {
+  .sidebar-resize,
+  .rail-resize { display: none; }
+  .term-tab,
+  .term-tab-x,
+  .term-actions button,
+  .pane-tab { min-height: var(--tap); }
+  .term-tab-x,
+  .term-actions button { width: var(--tap); height: var(--tap); }
+  .files-row .file-row-actions { opacity: 1; pointer-events: auto; }
+}

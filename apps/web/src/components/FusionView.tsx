@@ -163,7 +163,12 @@ export default function FusionView() {
                 </div>
               );
             })}
-            {weights.length === 0 && <div className="empty" style={{ padding: 8 }}>{tr("fusionview.waitingForWeights")}</div>}
+            {weights.length === 0 && (
+              <EmptyState
+                title={tr("fusionview.waitingForWeights")}
+                description={tr("fusionview.contributors")}
+              />
+            )}
           </section>
 
           <section className="fusion-answer">
@@ -196,7 +201,10 @@ export default function FusionView() {
           <section className="fusion-disagreements">
             <div className="stat-label">{tr("fusionview.disagreements")}</div>
             {shown.disagreements.length === 0 ? (
-              <div className="muted" style={{ fontSize: "calc(12.5px * var(--ui-font-scale, 1))" }}>{tr("fusionview.noDisagreementsRecorded")}</div>
+              <EmptyState
+                title={tr("fusionview.noDisagreementsRecorded")}
+                description={tr("fusionview.disagreements")}
+              />
             ) : (
               shown.disagreements.map((d, i) => (
                 <div key={i} className="disagree-card">{d}</div>

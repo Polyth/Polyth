@@ -86,8 +86,8 @@ const lightPreset = (id: string, name: string, palette: PresetPalette): ThemeSpe
     muted: "#46505c",
     faint: "#525c68",
     accentInk: "#ffffff",
-    green: "#337c3e",
-    amber: "#946800",
+    green: "#245f2b",
+    amber: "#684900",
     red: "#b83d37",
     blue: "#28679f",
     purple: "#704aa2",
@@ -186,6 +186,10 @@ export const PRESET_THEMES: ThemeSpec[] = [
   darkPreset("contrast-dark", "High Contrast Dark", {
     bg: "#050505", panel: "#0c0c0c", elevated: "#151515", raised: "#202020", sunken: "#000000", inputBg: "#090909",
     border: "#4b4b4b", borderSoft: "#323232", accent: "#ffd447", accentHi: "#ffe074",
+  }),
+  darkPreset("oled", "OLED Black", {
+    bg: "#000000", panel: "#050505", elevated: "#0d0d0d", raised: "#181818", sunken: "#000000", inputBg: "#080808",
+    border: "#3f3f3f", borderSoft: "#292929", accent: "#f49b5b", accentHi: "#f8a869",
   }),
   darkPreset("rose-night", "Rose Night", {
     bg: "#180f14", panel: "#21151c", elevated: "#2b1d25", raised: "#36252e", sunken: "#10090d", inputBg: "#1d1118",
@@ -563,6 +567,12 @@ export function themeCssVars(spec: ThemeSpec): Record<string, string> {
     "--shadow-lg": dark
       ? "0 40px 90px -24px rgba(0, 0, 0, 0.72), 0 8px 28px -12px rgba(0, 0, 0, 0.6)"
       : "0 40px 90px -24px rgba(60, 45, 25, 0.35), 0 8px 28px -12px rgba(60, 45, 25, 0.25)",
+    "--shadow-sm": dark
+      ? "0 4px 14px -10px rgba(0, 0, 0, 0.55)"
+      : "0 4px 14px -10px rgba(60, 45, 25, 0.28)",
+    "--shadow-md": dark
+      ? "0 14px 36px -22px rgba(0, 0, 0, 0.66)"
+      : "0 14px 36px -22px rgba(60, 45, 25, 0.32)",
     "--inset-hi": dark ? "inset 0 1px 0 rgba(255, 255, 255, 0.045)" : "inset 0 1px 0 rgba(255, 255, 255, 0.6)",
     "--bubble-user-bg": blend(t.accent, t.panel, 0.13),
     "--bubble-user-line": blend(t.accent, t.panel, 0.33),
@@ -646,6 +656,10 @@ export function applyTheme(spec: ThemeSpec): void {
   html.dataset.theme = spec.id;
   html.dataset.appearance = spec.appearance;
   html.style.colorScheme = spec.appearance;
+  document.querySelector<HTMLMetaElement>('meta[name="theme-color"]')
+    ?.setAttribute("content", spec.tokens.bg);
+  document.querySelector<HTMLMetaElement>('meta[name="apple-mobile-web-app-status-bar-style"]')
+    ?.setAttribute("content", spec.appearance === "dark" ? "black-translucent" : "default");
   window.dispatchEvent(new Event("polyth:theme"));
 }
 

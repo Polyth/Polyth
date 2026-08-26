@@ -16,6 +16,7 @@ import { api, type ProviderCatalogDto, type VisibilityStateDto } from "../../api
 import { EmptyState, PageHead, Seg, Toggle } from "./parts.tsx";
 import { modelDisplayName } from "../../composer/discovery.ts";
 import ProviderLogo from "../ProviderLogo.tsx";
+import MoveControls from "../MoveControls.tsx";
 import { tr } from "../../i18n/index.ts";
 
 type Scope = "connected" | "all";
@@ -120,7 +121,7 @@ export default function ModelsPage() {
   const isOpen = (id: string) => query.length > 0 || prefs.expandedProviders.includes(id);
 
   if (providers === null && !error) {
-    return <><PageHead title={tr("settings.modelspage.providersModels")} /><EmptyState title={tr("settings.modelspage.loadingCatalog")} /></>;
+    return <><PageHead title={tr("settings.modelspage.providersModels")} /><EmptyState title={tr("settings.modelspage.loadingCatalog")} busy /></>;
   }
   if (providers !== null && providers.length === 0) {
     return (
@@ -176,7 +177,7 @@ export default function ModelsPage() {
       {error && <div className="form-error" role="alert">{error}</div>}
 
       <div className="provider-list">
-        {shown.map((p) => {
+        {shown.map((p, index) => {
           const enabledCount = p.models.filter((m) => m.enabled).length;
           const expanded = isOpen(p.id);
           return (
@@ -210,6 +211,17 @@ export default function ModelsPage() {
                   {!p.connected && <span className="tag provider-tag">{tr("settings.modelspage.notConnected")}</span>}
                   <span className="provider-count mono">{enabledCount}/{p.models.length}</span>
                 </button>
+                {!query && (
+                  <MoveControls
+                    label={p.name}
+                    index={index}
+                    count={shown.length}
+                    onMove={(nextIndex) => {
+                      const target = shown[nextIndex];
+                      if (target) reorderModelProviders(shown.map((provider) => provider.id), p.id, target.id);
+                    }}
+                  />
+                )}
                 <Toggle
                   on={p.enabled}
                   label={tr("settings.modelspage.valueProviderValue", {

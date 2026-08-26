@@ -888,11 +888,16 @@ function GitPersonas({ projectId }: { projectId: string }) {
           </div>
         );
       })}
-      {personas.length === 0 && <p className="muted">{tr("settings.pages.addAWorkPersonalOrBotIdentity")}</p>}
+      {personas.length === 0 && (
+        <EmptyState
+          title={tr("settings.pages.gitPersonas")}
+          body={tr("settings.pages.addAWorkPersonalOrBotIdentity")}
+        />
+      )}
       {error && <div className="form-error">{error}</div>}
       {draft && (
         <Dialog title={draft.label ? tr("settings.pages.editValue", { label: draft.label }) : tr("settings.pages.newGitPersona")} onClose={() => setDraft(null)} className="profile-form" initialFocus="input">
-          <div className="dialog-head"><span>{draft.label ? tr("settings.pages.editValue", { label: draft.label }) : tr("settings.pages.newGitPersona")}</span><span className="header-spacer" /><button className="small-btn" onClick={() => setDraft(null)}>✕</button></div>
+          <div className="dialog-head"><span>{draft.label ? tr("settings.pages.editValue", { label: draft.label }) : tr("settings.pages.newGitPersona")}</span><span className="header-spacer" /><button className="small-btn" aria-label={tr("common.close")} title={tr("common.close")} onClick={() => setDraft(null)}>✕</button></div>
           <div className="profile-form-body">
             <label>{tr("settings.pages.label")}<input value={draft.label} placeholder={tr("settings.pages.work")} onChange={(event) => setDraft({ ...draft, label: event.target.value })} /></label>
             <label>{tr("settings.pages.commitAuthorName")}<input value={draft.name} placeholder={tr("settings.pages.adaLovelace")} onChange={(event) => setDraft({ ...draft, name: event.target.value })} /></label>
@@ -1001,7 +1006,7 @@ function RoleEditor({ role, onClose }: { role: AgentDescriptor; onClose: () => v
   };
   return (
     <Dialog title={tr("settings.pages.editValue2", { name: role.name })} onClose={onClose} className="role-editor" initialFocus="textarea">
-      <div className="dialog-head"><span>{tr("settings.pages.editRole")}{" "}{role.name}</span><span className="header-spacer" /><button className="small-btn" onClick={onClose}>✕</button></div>
+      <div className="dialog-head"><span>{tr("settings.pages.editRole")}{" "}{role.name}</span><span className="header-spacer" /><button className="small-btn" aria-label={tr("common.close")} title={tr("common.close")} onClick={onClose}>✕</button></div>
       <div className="role-editor-body">
         <label>
           <span>{tr("settings.pages.usage")}</span>
@@ -1158,12 +1163,12 @@ function McpServerForm({ existing, onDone }: { existing?: McpServerDto; onDone: 
   return (
     <div className="mcp-form">
       <div className="mcp-form-row">
-        <input value={name} placeholder={tr("settings.pages.name")} style={{ maxWidth: 140 }} onChange={(e) => setName(e.target.value)} aria-label={tr("settings.pages.serverName")} />
+        <input value={name} placeholder={tr("settings.pages.name")} className="mcp-server-name" onChange={(e) => setName(e.target.value)} aria-label={tr("settings.pages.serverName")} />
         <Seg value={kind} options={[["stdio", "stdio"], ["http", "HTTP"]]} onChange={setKind} />
       </div>
       {kind === "stdio" ? (
         <div className="mcp-form-row">
-          <input value={command} placeholder={tr("settings.pages.commandNoShell")} style={{ maxWidth: 200 }} onChange={(e) => setCommand(e.target.value)} aria-label={tr("settings.pages.command")} />
+          <input value={command} placeholder={tr("settings.pages.commandNoShell")} className="mcp-command" onChange={(e) => setCommand(e.target.value)} aria-label={tr("settings.pages.command")} />
           <input value={args} placeholder={tr("settings.pages.argsSpaceSeparated")} onChange={(e) => setArgs(e.target.value)} aria-label={tr("settings.pages.arguments")} />
         </div>
       ) : (
@@ -1175,11 +1180,11 @@ function McpServerForm({ existing, onDone }: { existing?: McpServerDto; onDone: 
         <div className="stat-label">{kind === "stdio" ? tr("settings.pages.environmentSecrets") : tr("settings.pages.headerSecrets")} <span className="muted">{tr("settings.pages.valuesStoredServerSideNeverShownAgain")}</span></div>
         {secretRows.map((row, i) => (
           <div key={i} className="mcp-form-row">
-            <input value={row.key} placeholder={kind === "stdio" ? tr("settings.pages.envKey") : tr("settings.pages.headerName")} style={{ maxWidth: 160 }}
+            <input value={row.key} placeholder={kind === "stdio" ? tr("settings.pages.envKey") : tr("settings.pages.headerName")} className="mcp-secret-key"
               onChange={(e) => setSecretRows((rs) => rs.map((r, j) => j === i ? { ...r, key: e.target.value } : r))} />
             <input type="password" value={row.value} placeholder={tr("settings.pages.value")}
               onChange={(e) => setSecretRows((rs) => rs.map((r, j) => j === i ? { ...r, value: e.target.value } : r))} />
-            <button className="small-btn" onClick={() => setSecretRows((rs) => rs.filter((_, j) => j !== i))}>✕</button>
+            <button className="small-btn" aria-label={`${tr("common.remove")} ${tr("settings.pages.secret")}`} title={`${tr("common.remove")} ${tr("settings.pages.secret")}`} onClick={() => setSecretRows((rs) => rs.filter((_, j) => j !== i))}>✕</button>
           </div>
         ))}
         <button className="ghost-link" onClick={() => setSecretRows((rs) => [...rs, { key: "", value: "" }])}>{tr("settings.pages.secret")}</button>
@@ -1685,7 +1690,7 @@ export function AboutPage() {
     );
   };
   if (err) return <><PageHead title={tr("settings.pages.about")} /><EmptyState title={tr("settings.pages.serverUnreachable")} body={err} /></>;
-  if (!info) return <><PageHead title={tr("settings.pages.about")} /><EmptyState title={tr("common.loading")} /></>;
+  if (!info) return <><PageHead title={tr("settings.pages.about")} /><EmptyState title={tr("common.loading")} busy /></>;
   return (
     <>
       <PageHead title={tr("settings.pages.about")} blurb={tr("settings.pages.connectionDetailsForThisPolythServer")} />
@@ -1702,7 +1707,7 @@ export function AboutPage() {
         </Row>
         <Row label={tr("settings.pages.dataDirectory")}><span className="mono">{info.dataDirLabel}</span></Row>
         <Row label={tr("settings.pages.capabilities")}>
-          <span className="muted" style={{ maxWidth: 360, textAlign: "right" }}>{info.capabilities.join(", ")}</span>
+          <span className="muted about-capabilities">{info.capabilities.join(", ")}</span>
         </Row>
         {copied && <div className="muted" role="status">{copied === "copy blocked by the browser" ? copied : tr("settings.pages.valueCopied", { copied: copied })}</div>}
       </div>

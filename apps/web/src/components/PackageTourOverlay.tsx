@@ -14,6 +14,7 @@ import {
   previousPackageTourStep, setPackageTourStep, subscribePackageTour,
 } from "../packages/onboarding/controller.ts";
 import { tr } from "../i18n/index.ts";
+import { useModalScrollLock } from "./a11y/Dialog.tsx";
 
 /** Caption for the highlight card, keyed by where the control actually lives
  * (a settings row, a full workspace view, a docked pane, the strip above the
@@ -138,6 +139,7 @@ export default function PackageTourOverlay() {
   const state = useSyncExternalStore(subscribePackageTour, getPackageTourState);
   const dialogRef = useRef<HTMLDivElement>(null);
   const open = state !== null;
+  useModalScrollLock(open);
 
   useEffect(() => {
     if (!open) return;
@@ -192,7 +194,7 @@ export default function PackageTourOverlay() {
   return (
     <div
       className="scrim package-tour-scrim"
-      onMouseDown={(event) => { if (event.target === event.currentTarget) closePackageTour("dismiss"); }}
+      onPointerDown={(event) => { if (event.target === event.currentTarget) closePackageTour("dismiss"); }}
     >
       <div
         className="package-tour"
@@ -202,7 +204,7 @@ export default function PackageTourOverlay() {
         aria-modal="true"
         aria-labelledby="package-tour-title"
         aria-describedby="package-tour-copy"
-        onMouseDown={(event) => event.stopPropagation()}
+        onPointerDown={(event) => event.stopPropagation()}
       >
         <div className="package-tour-media" aria-hidden="true">
           <TourMedia media={current.media} seed={tour.title} />

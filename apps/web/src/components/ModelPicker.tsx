@@ -260,6 +260,13 @@ export default function ModelPicker({
       key={`${group}:${modelKey(model)}`}
       title={model.name}
       meta={modelMetaLine(model)}
+      icon={(
+        <ProviderLogo
+          providerID={model.providerID}
+          providerName={model.providerName}
+          className="model-row-provider-logo"
+        />
+      )}
       selected={isSelected(model)}
       onClick={() => choose(model)}
       ariaLabel={tr("modelpicker.useValue", { name: model.name })}
