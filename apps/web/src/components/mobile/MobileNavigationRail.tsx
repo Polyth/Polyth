@@ -36,15 +36,20 @@ function navigationGroup(id: string, hasView: boolean): NavigationGroup {
   return "workspace";
 }
 
-function focusDestinationHeading(): void {
-  requestAnimationFrame(() => requestAnimationFrame(() => {
+function focusDestinationHeading(attempt = 0): void {
+  requestAnimationFrame(() => {
     const heading = document.querySelector<HTMLElement>(
       ".rail-fullscreen .rail-title, .main .view-title, .main h1",
     );
-    if (!heading) return;
-    heading.tabIndex = -1;
-    heading.focus();
-  }));
+    if (heading) {
+      heading.tabIndex = -1;
+      heading.focus();
+      return;
+    }
+    // External-store updates may commit after the click's first animation
+    // frame. Retry briefly instead of dropping the required focus handoff.
+    if (attempt < 3) focusDestinationHeading(attempt + 1);
+  });
 }
 
 /** The compact shell's single navigation entry point. It mirrors the desktop
