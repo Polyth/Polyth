@@ -10259,7 +10259,8 @@ html[data-sheet="open"], html[data-sheet="open"] body { overflow: hidden; }
     min-inline-size: var(--tap);
     min-height: var(--tap);
     box-sizing: border-box;
-    display: inline-flex;
+    display: inline-grid;
+    grid-template-columns: minmax(var(--tap), max-content);
     align-items: center;
     justify-content: center;
     margin-block: calc((1em - var(--tap)) / 2);
