@@ -220,6 +220,77 @@ const topAnchor = (page: Page) => page.evaluate(() => {
   return { id: "", offset: 0 };
 });
 
+test("mobile response actions wrap inside the timeline and remain operable", async () => {
+  for (const width of [390, 320]) {
+    const lp = await openApp({ width, height: 844, session: SESSIONS.rich, ready: ".agent-reply-actions button" });
+    const { page } = lp;
+    await page.evaluate(() => {
+      const timeline = document.querySelector<HTMLElement>(".timeline")!;
+      timeline.scrollTop = timeline.scrollHeight;
+    });
+    await page.waitForTimeout(150);
+
+    const geometry = await page.evaluate(() => {
+      const timeline = document.querySelector<HTMLElement>(".timeline")!;
+      const port = timeline.getBoundingClientRect();
+      const groups = Array.from(document.querySelectorAll<HTMLElement>(".agent-reply-actions"));
+      const buttons = groups.flatMap((group) => Array.from(group.querySelectorAll<HTMLButtonElement>("button")));
+      const overflows = buttons.flatMap((button) => {
+        const rect = button.getBoundingClientRect();
+        return rect.left < port.left - 1 || rect.right > port.right + 1
+          ? [button.getAttribute("aria-label") ?? "unnamed response action"]
+          : [];
+      });
+      const undersized = buttons.flatMap((button) => {
+        const rect = button.getBoundingClientRect();
+        return rect.width < 43.5 || rect.height < 43.5
+          ? [button.getAttribute("aria-label") ?? "unnamed response action"]
+          : [];
+      });
+      const sharedRows = groups.filter((actions) => {
+        const header = actions.closest<HTMLElement>(".agent-reply-header")!;
+        const metadataBottom = Array.from(
+          header.querySelectorAll<HTMLElement>(":scope > .agent-reply-mark, :scope > .agent-reply-item"),
+        ).reduce((bottom, item) => Math.max(bottom, item.getBoundingClientRect().bottom), 0);
+        return actions.getBoundingClientRect().top < metadataBottom - 1;
+      }).length;
+      const inactive = groups.filter((actions) => {
+        const style = getComputedStyle(actions);
+        return style.opacity !== "1" || style.pointerEvents === "none";
+      }).length;
+      return {
+        buttonCount: buttons.length,
+        documentOverflow: document.documentElement.scrollWidth - innerWidth,
+        groupOverflow: groups.some((group) => group.scrollWidth > group.clientWidth + 1),
+        overflows,
+        undersized,
+        sharedRows,
+        inactive,
+      };
+    });
+
+    assert.ok(geometry.buttonCount >= 6, `${width}px: expected configured response actions`);
+    assert.ok(geometry.documentOverflow <= 1, `${width}px: document overflows by ${geometry.documentOverflow}px`);
+    assert.equal(geometry.groupOverflow, false, `${width}px: response action group overflows`);
+    assert.deepEqual(geometry.overflows, [], `${width}px: response action buttons leave the timeline`);
+    assert.deepEqual(geometry.undersized, [], `${width}px: response action touch targets are smaller than 44px`);
+    assert.equal(geometry.sharedRows, 0, `${width}px: response actions still share the metadata row`);
+    assert.equal(geometry.inactive, 0, `${width}px: response actions are not touch-operable`);
+
+    await page.screenshot({ path: join(ARTIFACTS, `fix_timeline_overflow_${width}.png`) });
+
+    if (width === 390) {
+      const action = page.getByRole("button", { name: "Start new multi-run from this answer" }).last();
+      const seededAnswer = await action.evaluate((button) =>
+        button.closest(".msg")?.querySelector<HTMLElement>(".bubble")?.innerText ?? "");
+      await action.click();
+      await page.waitForSelector(".multirun-prompt", { state: "visible" });
+      assert.equal(await page.locator(".multirun-prompt").inputValue(), seededAnswer);
+    }
+    await closePage(lp);
+  }
+});
+
 // =============================================================================
 // 1. Geometry matrix (spec 9.1 item 3): centered measure, zero document
 //    overflow, disjoint reserved chrome, tail clearance, pointer-center hits —
@@ -303,33 +374,6 @@ test("geometry: centered measure, disjoint reserved chrome, tail clearance at al
 
       const msgs = Array.from(document.querySelectorAll<HTMLElement>(".timeline > .msg"));
       const lastBottom = contentRects.reduce((max, r) => Math.max(max, r.bottom), port.top);
-      const responseActionButtons = Array.from(
-        document.querySelectorAll<HTMLButtonElement>(".agent-reply-actions button"),
-      );
-      const responseActionOverflows = responseActionButtons.flatMap((button) => {
-        const r = button.getBoundingClientRect();
-        return r.left < port.left - 1 || r.right > port.right + 1
-          ? [button.getAttribute("aria-label") ?? "unnamed response action"]
-          : [];
-      });
-      const responseActionTouchMisses = innerWidth <= 820
-        ? responseActionButtons.flatMap((button) => {
-            const r = button.getBoundingClientRect();
-            return r.width < 43.5 || r.height < 43.5
-              ? [button.getAttribute("aria-label") ?? "unnamed response action"]
-              : [];
-          })
-        : [];
-      const responseActionRowOverlaps = Array.from(
-        document.querySelectorAll<HTMLElement>(".agent-reply-header"),
-      ).filter((header) => {
-        const actions = header.querySelector<HTMLElement>(":scope > .agent-reply-actions");
-        if (!actions) return false;
-        const metadataBottom = Array.from(
-          header.querySelectorAll<HTMLElement>(":scope > .agent-reply-mark, :scope > .agent-reply-item"),
-        ).reduce((bottom, item) => Math.max(bottom, item.getBoundingClientRect().bottom), 0);
-        return actions.getBoundingClientRect().top < metadataBottom - 1;
-      }).length;
 
       // Pointer centers of visible utility controls + persistent action entries.
       const centerMisses: string[] = [];
@@ -370,9 +414,6 @@ test("geometry: centered measure, disjoint reserved chrome, tail clearance at al
         tailClearance: port.bottom - lastBottom,
         portHeight: el.clientHeight,
         centerMisses,
-        responseActionOverflows,
-        responseActionTouchMisses,
-        responseActionRowOverlaps,
         timelineName: `${el.getAttribute("role")}:${el.getAttribute("aria-label")}`,
         navName: document.querySelector(".prompt-nav")?.getAttribute("aria-label") ?? "",
         firstChipName: document.querySelector(".prompt-nav-item")?.getAttribute("aria-label") ?? "",
@@ -394,11 +435,6 @@ test("geometry: centered measure, disjoint reserved chrome, tail clearance at al
       assert.ok(g.portHeight >= 120, `${ctx}: usable timeline height ${g.portHeight}px below 120px at 200% zoom`);
     }
     assert.deepEqual(g.centerMisses, [], `${ctx}: covered pointer centers`);
-    assert.deepEqual(g.responseActionOverflows, [], `${ctx}: response actions overflow the timeline`);
-    assert.deepEqual(g.responseActionTouchMisses, [], `${ctx}: response actions are smaller than 44px`);
-    if (w <= 820) {
-      assert.equal(g.responseActionRowOverlaps, 0, `${ctx}: response actions share the metadata row`);
-    }
     assert.equal(g.timelineName, "region:Conversation timeline", `${ctx}: scroll root is not the named region`);
     assert.equal(g.navName, "Prompts in this session", `${ctx}: prompt nav name "${g.navName}"`);
     assert.match(g.firstChipName, /^Jump to prompt 1 of 6: /, `${ctx}: chip name "${g.firstChipName}"`);
@@ -407,13 +443,7 @@ test("geometry: centered measure, disjoint reserved chrome, tail clearance at al
     const state = await scrollState(page);
     assert.deepEqual(state.duplicateIds, [], `${ctx}: duplicate visible message ids`);
     if (label === "1440") await page.screenshot({ path: join(ARTIFACTS, "layout-rich-1440.png") });
-    if (label === "390") {
-      await page.screenshot({ path: join(ARTIFACTS, "layout-rich-390.png") });
-      await page.screenshot({ path: join(ARTIFACTS, "fix_timeline_overflow_390.png") });
-    }
-    if (label === "320") {
-      await page.screenshot({ path: join(ARTIFACTS, "fix_timeline_overflow_320.png") });
-    }
+    if (label === "390") await page.screenshot({ path: join(ARTIFACTS, "layout-rich-390.png") });
     if (label === "zoom200") await page.screenshot({ path: join(ARTIFACTS, "layout-rich-zoom200.png") });
     await closePage(lp);
   }
@@ -950,10 +980,9 @@ test("initial replay: delayed events present as loading, never the fresh-session
     serviceWorkers: "block",
   });
   contexts.push(context);
-  await context.addInitScript(({ seed, projectId }: { seed: string; projectId: string }) => {
+  await context.addInitScript((seed: string) => {
     localStorage.setItem("polyth.prefs", seed);
-    localStorage.setItem(`polyth.projectSetup.v1.${projectId}`, "completed");
-  }, { seed: PERSONA_SEED, projectId: PROJECT_ID });
+  }, PERSONA_SEED);
   // Record ANY fresh-session hero appearance, however brief, from document
   // start (init scripts run before <html> exists, so the document itself is
   // observed). The registry's "Loading your projects…" hero is an HONEST

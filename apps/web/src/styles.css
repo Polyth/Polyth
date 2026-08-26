@@ -11848,6 +11848,8 @@ body[data-density="comfortable"] .header { min-height: 60px; }
     flex-wrap: wrap;
     justify-content: flex-end;
     margin-left: 0;
+    opacity: 1;
+    pointer-events: auto;
   }
 }
 
