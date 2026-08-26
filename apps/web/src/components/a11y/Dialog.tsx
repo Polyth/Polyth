@@ -26,6 +26,9 @@ export interface ModalSurfaceOptions {
   /** Resolve the unmount focus target from the recorded opener. Returning
    *  null delegates focus to a caller-owned handoff. */
   resolveRestoreFocus?: (opener: HTMLElement | null) => HTMLElement | null;
+  /** Runs after focus restoration so a caller can repair scroll anchoring
+   *  disturbed by the browser bringing the opener back into view. */
+  onAfterRestoreFocus?: () => void;
 }
 
 const visible = (el: HTMLElement): boolean => el.getClientRects().length > 0;
@@ -82,11 +85,14 @@ export function useModalSurface({
   isolationRootRef,
   initialFocus,
   resolveRestoreFocus,
+  onAfterRestoreFocus,
 }: ModalSurfaceOptions): void {
   const closeRef = useRef(onClose);
   closeRef.current = onClose;
   const resolverRef = useRef(resolveRestoreFocus);
   resolverRef.current = resolveRestoreFocus;
+  const afterRestoreRef = useRef(onAfterRestoreFocus);
+  afterRestoreRef.current = onAfterRestoreFocus;
 
   // Hidden-but-mounted surfaces (keep-alive drawer/sheet) must not be
   // reachable by focus, pointer, or assistive technology.
@@ -157,6 +163,7 @@ export function useModalSurface({
         : null;
       const target = resolverRef.current ? resolverRef.current(connectedOpener) : connectedOpener;
       target?.focus();
+      afterRestoreRef.current?.();
     };
   }, [enabled, open, initialFocus, containerRef, isolationRootRef]);
 }
@@ -176,6 +183,8 @@ export interface DialogProps {
    *  Default behavior (no prop) restores the opener. `BODY` is never a valid
    *  destination. */
   resolveRestoreFocus?: (opener: HTMLElement | null) => HTMLElement | null;
+  /** Runs after the opener regains focus. */
+  onAfterRestoreFocus?: () => void;
   ariaDescribedBy?: string;
 }
 
@@ -189,6 +198,7 @@ export default function Dialog({
   initialFocus,
   ariaDescribedBy,
   resolveRestoreFocus,
+  onAfterRestoreFocus,
 }: DialogProps) {
   const backdropRef = useRef<HTMLDivElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
@@ -199,6 +209,7 @@ export default function Dialog({
     isolationRootRef: backdropRef,
     initialFocus,
     resolveRestoreFocus,
+    onAfterRestoreFocus,
   });
 
   return (

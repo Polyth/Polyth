@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import type { JsonObject } from "@polyth/contracts";
 import { fmtMs } from "../format.ts";
@@ -11,7 +11,7 @@ import {
 } from "../execution.ts";
 import { Icon } from "../icons.tsx";
 import { openSession } from "../init.ts";
-import { openEditorFile, setUiError } from "../store.ts";
+import { openEditorFile, setUiError, useStore } from "../store.ts";
 import { parseDiffLines } from "../utils.ts";
 import type { SubagentState, ToolMsg } from "../reduce.ts";
 import CopyButton from "./CopyButton.tsx";
@@ -35,6 +35,21 @@ function ExecutionIcon({ kind }: { kind: ExecutionKind }) {
 }
 
 type DisplayStatus = "pending" | "running" | "done" | "error" | "cancelled";
+export const EXECUTION_COLLAPSE_MS = 170;
+
+export function useCollapsePresence(open: boolean): boolean {
+  const [present, setPresent] = useState(open);
+  useEffect(() => {
+    if (open) {
+      setPresent(true);
+      return;
+    }
+    if (!present) return;
+    const timer = window.setTimeout(() => setPresent(false), EXECUTION_COLLAPSE_MS);
+    return () => window.clearTimeout(timer);
+  }, [open, present]);
+  return present;
+}
 
 function displayStatus(message: ToolMsg, childStatus?: string): DisplayStatus {
   if (childStatus && /^(?:queued|pending)$/i.test(childStatus)) return "pending";
@@ -63,7 +78,7 @@ function StatusMark({ message, childStatus }: { message: ToolMsg; childStatus?: 
     <span className={`execution-status ${status}`} aria-label={`${label} in ${elapsed}`}>
       <span className="execution-duration">{elapsed}</span>
       <span className="execution-status-icon" aria-hidden="true">
-        {status === "pending" ? "○" : status === "running" ? "◌" : status === "done" ? "✓" : status === "error" ? "×" : "—"}
+        {status === "pending" ? "○" : status === "running" ? <span className="spinner" /> : status === "done" ? "✓" : status === "error" ? "×" : "—"}
       </span>
     </span>
   );
@@ -200,6 +215,22 @@ function McpResult({ output }: { output: string }) {
 type Subagent = SubagentState["agents"][number];
 
 function SubagentDetail({ subagent }: { subagent: Subagent }) {
+  const sessions = useStore((state) => state.sessions);
+  const activeSessionId = useStore((state) => state.activeSessionId);
+  const models = useStore((state) => state.models);
+  const childSession = sessions.find((session) => session.id === subagent.sessionId);
+  const activeSession = sessions.find((session) => session.id === activeSessionId);
+  const parentSession = childSession?.parentId
+    ? sessions.find((session) => session.id === childSession.parentId) ?? activeSession
+    : activeSession;
+  const model = childSession?.model ?? parentSession?.model;
+  const descriptor = model
+    ? models.find((candidate) =>
+        candidate.providerID === model.providerID && candidate.modelID === model.modelID)
+    : undefined;
+  const modelLabel = descriptor?.name ?? model?.modelID ?? "Default model";
+  const inheritedModel = childSession?.model === undefined;
+  const parentLabel = parentSession?.title ?? "Current session";
   const openChild = () => {
     void openSession(subagent.sessionId).catch((error) =>
       setUiError(error instanceof Error ? error.message : String(error)));
@@ -218,13 +249,27 @@ function SubagentDetail({ subagent }: { subagent: Subagent }) {
         <strong>{subagent.label}</strong>
         <span className={`execution-subagent-state ${status.toLowerCase()}`}>{status}</span>
         {subagent.currentTask && <p>{subagent.currentTask}</p>}
+        <dl className="execution-subagent-meta">
+          <div><dt>Model</dt><dd>{modelLabel}{inheritedModel ? " · inherited" : ""}</dd></div>
+          <div><dt>Parent</dt><dd>{parentLabel}</dd></div>
+        </dl>
       </div>
       <button type="button" onClick={openChild}>Open child session <Icon.external /></button>
     </section>
   );
 }
 
-function FullOutputViewer({ title, text, onClose }: { title: string; text: string; onClose: () => void }) {
+interface TimelineScrollAnchor {
+  element: HTMLElement;
+  scrollTop: number;
+}
+
+function FullOutputViewer({ title, text, scrollAnchor, onClose }: {
+  title: string;
+  text: string;
+  scrollAnchor?: TimelineScrollAnchor;
+  onClose: () => void;
+}) {
   const [query, setQuery] = useState("");
   const [wrap, setWrap] = useState(true);
   const filtered = useMemo(() => {
@@ -240,6 +285,9 @@ function FullOutputViewer({ title, text, onClose }: { title: string; text: strin
       initialFocus='input[type="search"]'
       className="execution-viewer"
       backdropClassName="execution-viewer-backdrop"
+      onAfterRestoreFocus={() => {
+        if (scrollAnchor?.element.isConnected) scrollAnchor.element.scrollTop = scrollAnchor.scrollTop;
+      }}
     >
       <header>
         <strong>{title}</strong>
@@ -269,7 +317,13 @@ export function ExecutionRow({ message, subagent }: { message: ToolMsg; subagent
   const status = displayStatus(message, subagent?.status);
   const done = status === "done" || status === "error" || status === "cancelled";
   const [open, setOpen] = useState(!done);
-  const [viewer, setViewer] = useState<{ title: string; text: string } | null>(null);
+  const detailsPresent = useCollapsePresence(open);
+  const rowRef = useRef<HTMLDivElement>(null);
+  const [viewer, setViewer] = useState<{
+    title: string;
+    text: string;
+    scrollAnchor?: TimelineScrollAnchor;
+  } | null>(null);
   const presentation = executionPresentation(message);
   const inputEntries = normalizedInputEntries(message.input);
   const inputJson = JSON.stringify(message.input, null, 2);
@@ -291,10 +345,18 @@ export function ExecutionRow({ message, subagent }: { message: ToolMsg; subagent
   const openFile = () => {
     if (presentation.path) openEditorFile(presentation.path);
   };
+  const openViewer = (title: string, text: string) => {
+    const timeline = rowRef.current?.closest<HTMLElement>(".timeline");
+    setViewer({
+      title,
+      text,
+      ...(timeline ? { scrollAnchor: { element: timeline, scrollTop: timeline.scrollTop } } : {}),
+    });
+  };
 
   return (
     <>
-      <div className={`tool-card execution-row${open ? " open" : ""}${status === "pending" || status === "running" ? " current" : ""}${status === "error" ? " error" : ""}${presentation.kind === "subagent" ? " execution-subagent" : ""}`} data-execution-kind={presentation.kind}>
+      <div ref={rowRef} className={`tool-card execution-row${open ? " open" : ""}${status === "pending" || status === "running" ? " current" : ""}${status === "error" ? " error" : ""}${presentation.kind === "subagent" ? " execution-subagent" : ""}`} data-execution-kind={presentation.kind}>
         <button
           type="button"
           className="tool-disclosure execution-summary"
@@ -311,7 +373,8 @@ export function ExecutionRow({ message, subagent }: { message: ToolMsg; subagent
           <span className="tool-chevron" aria-hidden="true">{open ? <Icon.chevronUp /> : <Icon.chevronRight />}</span>
         </button>
         <div className="execution-expand-shell" aria-hidden={!open}>
-          {open && (
+          <div className="execution-collapse-content">
+          {detailsPresent && (
             <div className="tool-body execution-details">
               {presentation.command && <CommandDetail command={presentation.command} />}
               {subagent && <SubagentDetail subagent={subagent} />}
@@ -328,7 +391,7 @@ export function ExecutionRow({ message, subagent }: { message: ToolMsg; subagent
               {presentation.diff && (
                 <DiffPreview
                   diff={presentation.diff}
-                  onOpenFull={() => setViewer({ title: `${presentation.label} full diff`, text: presentation.diff ?? "" })}
+                  onOpenFull={() => openViewer(`${presentation.label} full diff`, presentation.diff ?? "")}
                 />
               )}
               {inputEntries.length > 0 && (
@@ -340,28 +403,29 @@ export function ExecutionRow({ message, subagent }: { message: ToolMsg; subagent
                 </section>
               )}
               {message.error !== undefined && (
-                <OutputPreview text={message.error} error onOpenFull={() => setViewer({ title: `${presentation.label} error`, text: message.error ?? "" })} />
+                <OutputPreview text={message.error} error onOpenFull={() => openViewer(`${presentation.label} error`, message.error ?? "")} />
               )}
               {message.output !== undefined && (
                 presentation.kind === "search"
-                  ? <SearchResults text={message.output} onOpenFull={() => setViewer({ title: `${presentation.label} results`, text: message.output ?? "" })} />
+                  ? <SearchResults text={message.output} onOpenFull={() => openViewer(`${presentation.label} results`, message.output ?? "")} />
                   : presentation.kind === "mcp"
                     ? <McpResult output={message.output} />
-                  : <OutputPreview text={message.output} onOpenFull={() => setViewer({ title: `${presentation.label} output`, text: message.output ?? "" })} />
+                  : <OutputPreview text={message.output} onOpenFull={() => openViewer(`${presentation.label} output`, message.output ?? "")} />
               )}
               <footer className="execution-metadata">
                 {exitCode !== undefined && <span>Exit code {exitCode}</span>}
                 <span>{elapsed}</span>
                 {cwd && <span>cwd {cwd}</span>}
                 {webUrl && <a href={webUrl} target="_blank" rel="noreferrer">Open link <Icon.external /></a>}
-                <button type="button" onClick={() => setViewer({ title: `${presentation.label} raw result`, text: raw })}>View raw result</button>
+                <button type="button" onClick={() => openViewer(`${presentation.label} raw result`, raw)}>View raw result</button>
                 {!presentation.command && inputJson !== "{}" && <CopyButton text={inputJson} label="Copy tool input" />}
               </footer>
             </div>
           )}
+          </div>
         </div>
       </div>
-      {viewer && <FullOutputViewer title={viewer.title} text={viewer.text} onClose={() => setViewer(null)} />}
+      {viewer && <FullOutputViewer title={viewer.title} text={viewer.text} scrollAnchor={viewer.scrollAnchor} onClose={() => setViewer(null)} />}
     </>
   );
 }

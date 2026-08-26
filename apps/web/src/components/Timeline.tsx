@@ -77,7 +77,7 @@ import ProviderLogo from "./ProviderLogo.tsx";
 import { seedMultiRunPrompt } from "../multirunSeed.ts";
 import WorkflowTimelineCard from "./WorkflowTimelineCard.tsx";
 import { tr } from "../i18n/index.ts";
-import ExecutionRow from "./ExecutionRow.tsx";
+import ExecutionRow, { useCollapsePresence } from "./ExecutionRow.tsx";
 
 /** One announcement per copy/mutation outcome; text is the accessible record,
  *  checkmarks only supplement it. Screen readers ignore repeats, so identical
@@ -756,6 +756,7 @@ export function WorkedGroup({ g, subagents }: { g: WorkGroup; subagents: Subagen
   const failed = g.tools.some((t) => t.status === "error") || g.tasks.some((task) => task.action === "failed");
   const running = g.tools.some((t) => t.status === "pending" || t.status === "running") || g.tasks.some((task) => task.action === "started");
   const [open, setOpen] = useState(running || failed);
+  const itemsPresent = useCollapsePresence(open);
   const previousRunning = useRef(running);
   const userExpanded = useRef(false);
   useEffect(() => {
@@ -789,15 +790,19 @@ export function WorkedGroup({ g, subagents }: { g: WorkGroup; subagents: Subagen
         </span>
         <span className="execution-group-chevron" aria-hidden="true">{open ? <Icon.chevronUp /> : <Icon.chevronRight />}</span>
       </button>
-      {open && (
-        <div className="execution-group-items">
-          {g.items.map((item) => (
-            item.kind === "tool"
-              ? <ExecutionRow key={item.id} message={item} subagent={childForTool(item, subagents)} />
-              : <TaskActivityRow key={item.id} activity={item} />
-          ))}
+      <div className="execution-group-expand-shell" aria-hidden={!open}>
+        <div className="execution-group-collapse-content">
+          {itemsPresent && (
+            <div className="execution-group-items">
+              {g.items.map((item) => (
+                item.kind === "tool"
+                  ? <ExecutionRow key={item.id} message={item} subagent={childForTool(item, subagents)} />
+                  : <TaskActivityRow key={item.id} activity={item} />
+              ))}
+            </div>
+          )}
         </div>
-      )}
+      </div>
     </div>
   );
 }

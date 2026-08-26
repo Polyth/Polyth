@@ -174,6 +174,8 @@ test("execution code surfaces override the global prose font preference", async 
   const css = await readFile(new URL("../src/styles.css", import.meta.url), "utf8");
   const override = css.match(/html\[data-font\] body :is\([\s\S]*?execution-viewer > pre[\s\S]*?\)\s*\{\s*font-family:\s*var\(--mono\);\s*\}/);
   assert.ok(override, "commands, output, diffs, and the full viewer retain the monospace font");
+  assert.match(css, /\.execution-group-items\s*\{[\s\S]*?width:\s*100%;[\s\S]*?justify-self:\s*stretch;/);
+  assert.match(css, /grid-template-rows 170ms[\s\S]*?opacity 160ms/);
 });
 
 const dom = new Window({ url: "http://localhost/" });
@@ -200,11 +202,14 @@ const { createRoot } = await import("react-dom/client");
 const { default: ExecutionRow } = await import("../src/components/ExecutionRow.tsx");
 const { WorkedGroup } = await import("../src/components/Timeline.tsx");
 const { default: PermissionBanner } = await import("../src/components/PermissionBanner.tsx");
-const { getState } = await import("../src/store.ts");
+const { activateSession, getState, setSessions } = await import("../src/store.ts");
 
 test("execution row renders collapsed value first, expands inline, and opens level three on demand", async () => {
+  const timeline = document.createElement("div");
+  timeline.className = "timeline";
   const container = document.createElement("div");
-  document.body.appendChild(container);
+  timeline.appendChild(container);
+  document.body.appendChild(timeline);
   const root = createRoot(container);
   const output = Array.from({ length: 18 }, (_, index) => `line ${index + 1}`).join("\n");
   try {
@@ -225,6 +230,13 @@ test("execution row renders collapsed value first, expands inline, and opens lev
     const full = [...container.querySelectorAll<HTMLButtonElement>(".execution-output-actions button")]
       .find((button) => button.textContent === "Open full output");
     assert.ok(full);
+    timeline.scrollTop = 640;
+    full.focus();
+    const focusFull = full.focus.bind(full);
+    full.focus = () => {
+      timeline.scrollTop = 881;
+      focusFull();
+    };
     await act(async () => full.click());
     const viewer = document.body.querySelector<HTMLElement>(".execution-viewer");
     assert.ok(viewer, "large output opens in the explicit level-three viewer");
@@ -247,9 +259,17 @@ test("execution row renders collapsed value first, expands inline, and opens lev
     assert.equal(document.body.style.overflow, "", "closing restores page scrolling");
     assert.equal(container.hasAttribute("aria-hidden"), false, "closing restores background accessibility");
     assert.equal(container.hasAttribute("inert"), false, "closing restores background interactivity");
+    assert.equal(timeline.scrollTop, 640, "closing restores the timeline anchor after opener focus");
+
+    await act(async () => disclosure.click());
+    assert.ok(container.querySelector(".execution-details"), "details remain mounted for the exit transition");
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 190));
+    });
+    assert.equal(container.querySelector(".execution-details"), null, "details unmount after the 170ms collapse");
   } finally {
     await act(async () => root.unmount());
-    container.remove();
+    timeline.remove();
   }
 });
 
@@ -294,7 +314,7 @@ test("pending and running execution states stay visually and accessibly distinct
       message: tool({ status: "running", output: undefined, finishTime: undefined }),
     })));
     assert.match(container.querySelector(".execution-status")?.getAttribute("aria-label") ?? "", /^Running in /);
-    assert.equal(container.querySelector(".execution-status-icon")?.textContent, "◌");
+    assert.ok(container.querySelector(".execution-status-icon .spinner"), "running status uses an animated spinner");
   } finally {
     await act(async () => root.unmount());
     container.remove();
@@ -344,6 +364,28 @@ test("MCP and subagent executions render normalized first-class details", async 
   document.body.appendChild(container);
   const root = createRoot(container);
   try {
+    setSessions("execution-ui-test", [
+      {
+        id: "parent-1",
+        projectId: "execution-ui-test",
+        title: "Root implementation",
+        status: "idle",
+        model: { providerID: "openai", modelID: "gpt-5" },
+        createdAt: 1,
+        updatedAt: 1,
+      },
+      {
+        id: "child-1",
+        projectId: "execution-ui-test",
+        parentId: "parent-1",
+        title: "Responsive UI reviewer",
+        status: "idle",
+        model: { providerID: "anthropic", modelID: "claude-sonnet" },
+        createdAt: 2,
+        updatedAt: 2,
+      },
+    ]);
+    activateSession("parent-1");
     await act(async () => root.render(createElement(ExecutionRow, {
       message: tool({
         tool: "mcp__github__get_pull_request",
@@ -379,9 +421,11 @@ test("MCP and subagent executions render normalized first-class details", async 
     }
     assert.match(
       container.querySelector(".execution-subagent-detail")?.textContent ?? "",
-      /Responsive UI reviewer.*Completed.*Checked 390px and 1280px.*Open child session/s,
+      /Responsive UI reviewer.*Completed.*Checked 390px and 1280px.*Model.*claude-sonnet.*Parent.*Root implementation.*Open child session/s,
     );
   } finally {
+    activateSession(null);
+    setSessions("execution-ui-test", []);
     await act(async () => root.unmount());
     container.remove();
   }
