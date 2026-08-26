@@ -286,7 +286,16 @@ function FullOutputViewer({ title, text, scrollAnchor, onClose }: {
       className="execution-viewer"
       backdropClassName="execution-viewer-backdrop"
       onAfterRestoreFocus={() => {
-        if (scrollAnchor?.element.isConnected) scrollAnchor.element.scrollTop = scrollAnchor.scrollTop;
+        if (!scrollAnchor) return;
+        const restore = () => {
+          if (scrollAnchor.element.isConnected) scrollAnchor.element.scrollTop = scrollAnchor.scrollTop;
+        };
+        // Chromium may defer the opener's focus scroll until the next frame.
+        // Reapply once after that scroll and once after the resulting layout.
+        requestAnimationFrame(() => {
+          restore();
+          requestAnimationFrame(restore);
+        });
       }}
     >
       <header>

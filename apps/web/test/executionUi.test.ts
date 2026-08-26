@@ -254,7 +254,10 @@ test("execution row renders collapsed value first, expands inline, and opens lev
     const tab = new dom.KeyboardEvent("keydown", { key: "Tab", bubbles: true, cancelable: true });
     lastControl.dispatchEvent(tab as unknown as Event);
     assert.equal(tab.defaultPrevented, true, "Tab is contained by the modal focus trap");
-    await act(async () => close.click());
+    await act(async () => {
+      close.click();
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    });
     assert.equal(document.body.querySelector(".execution-viewer"), null);
     assert.equal(document.body.style.overflow, "", "closing restores page scrolling");
     assert.equal(timeline.hasAttribute("aria-hidden"), false, "closing restores background accessibility");
