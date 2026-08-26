@@ -1,6 +1,6 @@
-import type { WidgetContributionDescriptor } from "@polyth/contracts";
+import type { JsonObject, WidgetContributionDescriptor } from "@polyth/contracts";
 
-const BOARD_SETTINGS = {
+const BOARD_SETTINGS: JsonObject = {
   type: "object",
   properties: {
     defaultView: {
@@ -15,7 +15,7 @@ const BOARD_SETTINGS = {
       default: false,
     },
   },
-} as const;
+};
 
 export const TASK_TRACKER_WIDGETS: readonly WidgetContributionDescriptor[] = [
   {

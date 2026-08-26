@@ -26,7 +26,6 @@ import {
   type WidgetRenderContext,
   type WidgetSettingsContext,
 } from "./catalog.ts";
-import "./taskTrackers.css";
 
 type BoardView = "kanban" | "list";
 
