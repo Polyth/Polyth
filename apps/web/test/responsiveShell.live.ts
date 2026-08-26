@@ -216,12 +216,21 @@ test("mobile shortcut settings support touch and keyboard sorting", async () => 
   for (const box of [sourceBox!, targetBox!]) {
     assert.ok(box.y >= 0 && box.y + box.height <= 900, "touch sort endpoint is outside the viewport");
   }
-  const sourceHit = await page.evaluate(({ x, y }: { x: number; y: number }) =>
-    document.elementFromPoint(x, y)?.closest(".widget-drag-handle")?.getAttribute("aria-label") ?? null, {
+  const sourceHit = await page.evaluate(({ x, y }: { x: number; y: number }) => {
+    const hit = document.elementFromPoint(x, y);
+    return {
+      label: hit?.closest(".widget-drag-handle")?.getAttribute("aria-label") ?? null,
+      description: hit ? `${hit.tagName}.${(hit as HTMLElement).className}` : "none",
+    };
+  }, {
     x: sourceBox!.x + sourceBox!.width / 2,
     y: sourceBox!.y + sourceBox!.height / 2,
   });
-  assert.match(sourceHit ?? "", /^Reorder /, "touch starts outside the reorder handle");
+  assert.match(
+    sourceHit.label ?? "",
+    /^Reorder /,
+    `touch starts outside the reorder handle (${sourceHit.description}; box=${JSON.stringify(sourceBox)})`,
+  );
   await page.evaluate(() => {
     const events: string[] = [];
     (window as typeof window & { __polythPointerEvents?: string[] }).__polythPointerEvents = events;
