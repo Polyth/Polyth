@@ -11934,8 +11934,10 @@ body[data-density="comfortable"] .header { min-height: 60px; }
   cursor: pointer;
   text-align: left;
   touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
 }
 .execution-summary.tool-disclosure:hover { background: color-mix(in srgb, var(--text) 3%, transparent); }
+.execution-summary.tool-disclosure:active { background: color-mix(in srgb, var(--text) 4%, transparent); }
 .execution-icon.tool-icon {
   width: 18px;
   height: 18px;
