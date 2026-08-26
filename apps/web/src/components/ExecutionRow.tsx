@@ -356,7 +356,7 @@ export function ExecutionRow({ message, subagent }: { message: ToolMsg; subagent
 
   return (
     <>
-      <div ref={rowRef} className={`tool-card execution-row${open ? " open" : ""}${status === "pending" || status === "running" ? " current" : ""}${status === "error" ? " error" : ""}${presentation.kind === "subagent" ? " execution-subagent" : ""}`} data-execution-kind={presentation.kind}>
+      <div className={`tool-card execution-row${open ? " open" : ""}${status === "pending" || status === "running" ? " current" : ""}${status === "error" ? " error" : ""}${presentation.kind === "subagent" ? " execution-subagent" : ""}`} ref={rowRef} data-execution-kind={presentation.kind}>
         <button
           type="button"
           className="tool-disclosure execution-summary"
