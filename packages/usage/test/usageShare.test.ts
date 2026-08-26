@@ -102,7 +102,7 @@ test("Usage settings keeps the Polyth shell and offers rich dashboard views", as
   assert.equal(quota.match(/setInterval/g)?.length, 1, "quota polling has one shared timer");
   assert.doesNotMatch(api, /usageQuotas:[\s\S]{0,120}\.catch\(/);
   assert.match(registration, /component: UsageDashboard/);
-  assert.match(registration, /id: "usage.dashboard"/);
+  assert.match(registration, /host\.widgets\.registerPlugin\(USAGE_WIDGET_PLUGIN\)/);
   assert.doesNotMatch(styles, /\.settings-page-usage > \.settings-nav \{ display: flex; \}/);
   assert.match(styles, /\.settings-mobile-page \.settings-nav \{ display: none; \}/);
   assert.match(styles, /--usage-bg: var\(--bg\)/);

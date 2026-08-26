@@ -107,7 +107,11 @@ function CapabilityNav() {
     const pane = PANE_OF_CAPABILITY[c.descriptor.id];
     if (pane) return rail === pane;
     const panel = PANEL_OF_CAPABILITY[c.descriptor.id];
-    return panel !== undefined && rail === panel;
+    if (panel) return rail === panel;
+    // Package-owned capabilities conventionally share their id with the
+    // workspace view or rail surface they register. This keeps active state
+    // manifest-driven without restoring a shell-owned feature lookup table.
+    return view === c.descriptor.id || rail === c.descriptor.id;
   };
 
   const eligiblePrimaries = resolved.filter((c) =>
