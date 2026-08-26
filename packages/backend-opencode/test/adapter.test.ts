@@ -168,6 +168,7 @@ const startFake = async () => {
   const sseClients: http.ServerResponse[] = [];
   let posted = false;
   const postedBodies: Array<Record<string, unknown>> = [];
+  const sessionCreateBodies: Array<Record<string, unknown>> = [];
   const permissionReplies: unknown[] = [];
   const questionReplies: unknown[] = [];
   let aborts = 0;
@@ -183,8 +184,14 @@ const startFake = async () => {
     if (req.method === "GET" && path === "/provider") return json(200, providerBody);
     if (req.method === "GET" && path === "/agent") return json(200, agentsBody);
     if (req.method === "POST" && path === "/session") {
-      sessionSeq += 1;
-      return json(200, { id: `ses_fake_${sessionSeq}`, title: "t", directory: "/tmp" });
+      let raw = "";
+      req.on("data", (chunk) => (raw += chunk));
+      req.on("end", () => {
+        sessionCreateBodies.push(JSON.parse(raw || "{}") as Record<string, unknown>);
+        sessionSeq += 1;
+        json(200, { id: `ses_fake_${sessionSeq}`, title: "t", directory: "/tmp" });
+      });
+      return;
     }
     if (req.method === "GET" && path === "/session") return json(200, []);
     if (req.method === "GET" && path.match(/^\/session\/[^/]+\/message$/)) return json(200, []);
@@ -263,6 +270,7 @@ const startFake = async () => {
       return posted;
     },
     postedBodies,
+    sessionCreateBodies,
     permissionReplies,
     questionReplies,
     get aborts() {
@@ -302,6 +310,36 @@ test("models/agents flatten from verified /provider and /agent shapes", async ()
     assert.equal(caps.questions, true);
     assert.deepEqual(await runtime.sessions(), []);
     assert.deepEqual(await runtime.history("ses_fake_1"), []);
+  } finally {
+    await runtime.dispose();
+    fake.server.close();
+  }
+});
+
+test("placeholder titles are omitted so OpenCode can generate a semantic title", async () => {
+  const fake = await startFake();
+  const client = createOpenCodeClient(fake.baseUrl);
+  const runtime = createOpenCodeRuntimeWithClient(client, {});
+  try {
+    await runtime.ensureSession({
+      sessionId: "77a19c0e-8ead-42f7-aa2c-eb31dcbbcf98",
+      projectId: "p",
+      cwd: "/tmp",
+      title: "New session",
+    });
+    await runtime.ensureSession({
+      sessionId: "custom",
+      projectId: "p",
+      cwd: "/tmp",
+      title: "Release checklist",
+    });
+    await runtime.ensureSession({
+      sessionId: "stale-placeholder",
+      projectId: "p",
+      cwd: "/tmp",
+      title: "New session - 2026-08-26T05:00:55.897Z",
+    });
+    assert.deepEqual(fake.sessionCreateBodies, [{}, { title: "Release checklist" }, {}]);
   } finally {
     await runtime.dispose();
     fake.server.close();
@@ -756,6 +794,29 @@ test("a text part followed by stop yields exactly one finalized answer", () => {
     properties: { sessionID: "s", messageID: "m_a", partID: "prt_unknown", delta: "???" },
   }, st);
   assert.deepEqual(flushAssistantOnIdle(st), []);
+});
+
+test("session.updated exposes OpenCode's generated title and ignores malformed updates", () => {
+  const state = createTranslateState();
+  assert.deepEqual(
+    translateOcEvent({
+      type: "session.updated",
+      properties: {
+        info: {
+          id: "ses_1",
+          title: "  Why WebSocket reconnect test misses events  ",
+        },
+      },
+    }, state),
+    [{ type: "session/title-generated", title: "Why WebSocket reconnect test misses events" }],
+  );
+  assert.deepEqual(
+    translateOcEvent({
+      type: "session.updated",
+      properties: { info: { id: "ses_1", title: "   " } },
+    }, state),
+    [],
+  );
 });
 
 test("session compaction and compaction parts translate to canonical runtime events", () => {

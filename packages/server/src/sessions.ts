@@ -160,29 +160,16 @@ export function createSessionService(deps: {
   const turnReply = new Map<string, Map<string, string>>();
   const replyText = (sessionId: string): string =>
     [...(turnReply.get(sessionId)?.values() ?? [])].filter((t) => t.trim()).join("\n\n");
+  // The web preference arrives with the first prompt. Keep that intent until
+  // OpenCode publishes the semantic title it generated from the prompt.
+  const autoTitleRequested = new Set<string>();
 
   const isPlaceholderTitle = (title: string, sessionId: string): boolean => {
     const value = title.trim().toLowerCase();
     return value === "" || value === "new session" || value === "untitled session"
       || value === "untitled" || value === "(untitled)" || value === "(untitled session)"
+      || /^new session - \d{4}-\d{2}-\d{2}t/.test(value)
       || title.trim() === sessionId || title.trim().startsWith("ses_") || /^[0-9a-f-]{8,}$/i.test(title.trim());
-  };
-
-  const titleFromPrompt = (text: string): string => {
-    const line = text.split("\n").find((candidate) => candidate.trim() !== "") ?? "";
-    const title = line.replace(/\s+/g, " ").trim();
-    return title.length <= 48 ? title : `${title.slice(0, 47).trimEnd()}…`;
-  };
-
-  /** Metadata is durable too: a projection broadcast must never erase a
-   * client-only title update after the first turn starts. */
-  const autoTitle = async (sessionId: string, text: string): Promise<void> => {
-    const title = titleFromPrompt(text);
-    if (!title) return;
-    const current = await store.projection(sessionId);
-    if (!current || !isPlaceholderTitle(current.title, sessionId)) return;
-    await appendAndBroadcast(sessionId, "session/metadata-changed", { title }, { ignorable: true });
-    await updateProjection(sessionId, { title });
   };
 
   const secureSafeKind = (value: unknown): SecureSafeKind | undefined =>
@@ -297,12 +284,32 @@ export function createSessionService(deps: {
         await appendAndBroadcast(sessionId, "turn/started", { turnId: ev.turnId }, { ignorable: true });
         await updateProjection(sessionId, { status: "working", lastTurnAt: Date.now() });
         break;
+      case "session/title-generated": {
+        if (!autoTitleRequested.has(sessionId)) break;
+        const current = await store.projection(sessionId);
+        if (!current || !isPlaceholderTitle(current.title, sessionId)) {
+          autoTitleRequested.delete(sessionId);
+          break;
+        }
+        const title = ev.title.trim().slice(0, 200);
+        if (!title || isPlaceholderTitle(title, sessionId)) break;
+        autoTitleRequested.delete(sessionId);
+        await appendAndBroadcast(
+          sessionId,
+          "session/metadata-changed",
+          { title, source: "opencode" },
+          { ignorable: true, producerPlugin: "backend-opencode" },
+        );
+        await updateProjection(sessionId, { title });
+        break;
+      }
       case "turn/stopped":
         await appendAndBroadcast(sessionId, "turn/stopped", {
           turnId: lastTurnId.get(sessionId) ?? ev.type, reason: ev.reason, ...(ev.error ? { error: ev.error } : {}),
         }, { ignorable: true });
         lastTurnId.delete(sessionId);
         admitting.delete(sessionId);
+        autoTitleRequested.delete(sessionId);
         await updateProjection(sessionId, { status: ev.reason === "error" ? "failed" : "idle" });
         deps.notify?.turnStopped(sessionId, ev.reason);
         if (ev.reason === "completed") hooks.onTurnCompleted?.(sessionId, replyText(sessionId));
@@ -454,6 +461,7 @@ export function createSessionService(deps: {
     sessionRuntime.delete(sessionId);
     turnReply.delete(sessionId);
     behaviorLogged.delete(sessionId);
+    autoTitleRequested.delete(sessionId);
     for (const wired of sessionRuntime.values()) if (wired === rt) return;
     runtimeSubs.get(rt)?.dispose();
     runtimeSubs.delete(rt);
@@ -802,7 +810,8 @@ export function createSessionService(deps: {
           ...(agent ? { resolvedAgent: agent } : {}),
         } : {}),
       });
-      if (input.autoTitle) await autoTitle(sessionId, raw);
+      if (input.autoTitle && isPlaceholderTitle(proj.title, sessionId)) autoTitleRequested.add(sessionId);
+      else autoTitleRequested.delete(sessionId);
       await rt.startTurn({
         sessionId,
         text: recoveredUserText(text, decoration?.recoveryContext),
@@ -825,6 +834,7 @@ export function createSessionService(deps: {
       }
     } catch (err) {
       admitting.delete(sessionId);
+      autoTitleRequested.delete(sessionId);
       await appendAndBroadcast(sessionId, "turn/failed", { error: String(err) }, { ignorable: true });
       await updateProjection(sessionId, { status: "failed" });
       throw err;

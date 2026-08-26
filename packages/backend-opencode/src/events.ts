@@ -174,6 +174,13 @@ export const translateOcEvent = (ev: OcEvent, state: TranslateState): RuntimeEve
   const p = ev.properties ?? {};
   const type = ev.type ?? "";
 
+  if (type === "session.updated") {
+    const info = asRecord(p.info);
+    const title = typeof info?.title === "string" ? info.title.trim() : "";
+    if (title) out.push({ type: "session/title-generated", title });
+    return out;
+  }
+
   if (type === "session.compacted") {
     out.push({
       type: "session/compacted",

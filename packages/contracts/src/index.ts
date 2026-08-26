@@ -357,7 +357,7 @@ export interface UserTurnInput {
   text: string;
   /** Keep this model-visible prompt out of ordinary user chat bubbles. */
   githubConflictResolution?: boolean;
-  /** Request a durable title derived from this first prompt when the session
+  /** Accept OpenCode's generated title for this first prompt when the session
    *  still has a placeholder title. The client owns the user preference; the
    *  server owns the append + projection update. */
   autoTitle?: boolean;
@@ -587,6 +587,7 @@ export interface RuntimeBranchRequest {
 // Runtime events the adapter yields; session service translates + persists them.
 export type RuntimeEvent =
   | { type: "turn/started"; turnId: string }
+  | { type: "session/title-generated"; title: string }
   | { type: "assistant/chunk"; partId: string; text: string }
   | { type: "assistant/reasoning-chunk"; partId: string; text: string }
   | { type: "assistant/message"; partId: string; text: string; reasoning?: string; tokens?: TokenUsage; cost?: number }

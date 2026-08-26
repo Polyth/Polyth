@@ -12,7 +12,7 @@ import { createSessionService, type Broadcaster } from "../src/sessions.ts";
 import { createProjectService } from "../src/projects.ts";
 import type { PermissionService } from "@polyth/permissions";
 
-function fakeRuntime(): AgentRuntime {
+function fakeRuntime(generatedTitle?: string): AgentRuntime {
   const listeners = new Set<(sessionId: string, ev: RuntimeEvent) => void>();
   return {
     capabilities: async () => ({ streaming: true, permissions: true, questions: true, compaction: false, subagents: false }),
@@ -21,7 +21,18 @@ function fakeRuntime(): AgentRuntime {
     ensureSession: async (c) => `be_${c.sessionId}`,
     sessions: async () => [],
     history: async () => [],
-    startTurn: async (req) => { for (const l of listeners) l(req.sessionId, { type: "turn/started", turnId: "t1" }); },
+    startTurn: async (req) => {
+      for (const listener of listeners) {
+        listener(req.sessionId, { type: "turn/started", turnId: "t1" });
+        if (generatedTitle) {
+          listener(req.sessionId, {
+            type: "session/title-generated",
+            title: "New session - 2026-08-26T05:00:55.897Z",
+          });
+          listener(req.sessionId, { type: "session/title-generated", title: generatedTitle });
+        }
+      }
+    },
     abort: async () => {},
     replyPermission: async () => {},
     replyQuestion: async () => {},
@@ -33,6 +44,7 @@ function fakeRuntime(): AgentRuntime {
 function makeService(opts: {
   worktrees?: { list(root: string): Promise<Array<{ path: string; branch: string | null }>> };
   onRuntimeCwd?: (cwd: string | undefined) => void;
+  generatedTitle?: string;
 } = {}) {
   const dir = mkdtempSync(join(tmpdir(), "polyth-orgsvc-"));
   const store = createStore(join(dir, "s.db"));
@@ -52,11 +64,23 @@ function makeService(opts: {
     runtimes: {
       forProject: async (_projectId, cwd) => {
         opts.onRuntimeCwd?.(cwd);
-        return fakeRuntime();
+        return fakeRuntime(opts.generatedTitle);
       },
     },
   });
   return { sessions, store, dir };
+}
+
+async function waitForTitle(
+  sessions: ReturnType<typeof makeService>["sessions"],
+  sessionId: string,
+  title: string,
+): Promise<void> {
+  const started = Date.now();
+  while ((await sessions.snapshot(sessionId)).title !== title) {
+    if (Date.now() - started > 1_000) throw new Error(`timed out waiting for title: ${title}`);
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
 }
 
 test("rename validates and appends session/metadata-changed before projection", async () => {
@@ -75,24 +99,28 @@ test("rename validates and appends session/metadata-changed before projection", 
   await assert.rejects(() => sessions.rename!("nope", "x"), /not found/);
 });
 
-test("auto title persists the first prompt before turn projections can overwrite it", async () => {
-  const { sessions, store } = makeService();
+test("auto title persists OpenCode's generated title after its source prompt", async () => {
+  const generatedTitle = "Stabilize intermittent login test";
+  const { sessions, store } = makeService({ generatedTitle });
   const { id } = await sessions.create({ projectId: "p1" });
 
   await sessions.send(id, { text: "  Fix the intermittent login test\nwith a deterministic clock", autoTitle: true });
+  await waitForTitle(sessions, id, generatedTitle);
 
   const snapshot = await sessions.snapshot(id);
-  assert.equal(snapshot.title, "Fix the intermittent login test");
+  assert.equal(snapshot.title, generatedTitle);
   const events = await store.events(id);
   const userIndex = events.findIndex((event) => event.type === "user/message");
   const titleIndex = events.findIndex((event) => event.type === "session/metadata-changed");
   assert.ok(userIndex >= 0, "the prompt is durable");
   assert.ok(titleIndex > userIndex, "the durable title follows its source prompt");
-  assert.equal((events[titleIndex]!.data as { title?: string }).title, "Fix the intermittent login test");
+  assert.equal(events.filter((event) => event.type === "session/metadata-changed").length, 1);
+  assert.deepEqual(events[titleIndex]!.data, { title: generatedTitle, source: "opencode" });
+  assert.equal(events[titleIndex]!.producerPlugin, "backend-opencode");
 });
 
 test("auto title preserves an explicit title and respects the client preference", async () => {
-  const { sessions, store } = makeService();
+  const { sessions, store } = makeService({ generatedTitle: "Generated replacement" });
   const explicit = await sessions.create({ projectId: "p1", title: "Release checklist" });
   const disabled = await sessions.create({ projectId: "p1" });
 

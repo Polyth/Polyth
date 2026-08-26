@@ -189,6 +189,21 @@ interface OpenCodeMessage {
   parts?: Array<{ type?: string; text?: string }>;
 }
 
+/** OpenCode only generates a semantic title when session creation omits the
+ * title. Polyth placeholders are UI state, not user-authored backend titles. */
+const sessionCreateBody = (
+  canonical: Pick<CreateSessionInput, "title"> & { sessionId: string },
+): JsonObject => {
+  const title = canonical.title?.trim() ?? "";
+  const value = title.toLowerCase();
+  const placeholder = !title || title === canonical.sessionId
+    || value === "new session" || value === "untitled" || value === "untitled session"
+    || value === "(untitled)" || value === "(untitled session)"
+    || /^new session - \d{4}-\d{2}-\d{2}t/.test(value)
+    || title.startsWith("ses_") || /^[0-9a-f-]{8,}$/i.test(title);
+  return placeholder ? {} : { title };
+};
+
 interface HistoryEntry {
   role: "user" | "assistant";
   text: string;
@@ -635,7 +650,7 @@ export const createOpenCodeRuntimeWithClient = (
         return canonical.backendSessionId;
       }
       const created = await client.post<CreatedSession>("/session", {
-        title: canonical.title ?? canonical.sessionId,
+        ...sessionCreateBody(canonical),
       });
       maps.forward.set(canonical.sessionId, created.id);
       maps.reverse.set(created.id, canonical.sessionId);
@@ -648,7 +663,7 @@ export const createOpenCodeRuntimeWithClient = (
       translate.delete(canonical.sessionId);
       activeTurn.delete(canonical.sessionId);
       const created = await client.post<CreatedSession>("/session", {
-        title: canonical.title ?? canonical.sessionId,
+        ...sessionCreateBody(canonical),
       });
       maps.forward.set(canonical.sessionId, created.id);
       maps.reverse.set(created.id, canonical.sessionId);
@@ -665,7 +680,7 @@ export const createOpenCodeRuntimeWithClient = (
       if (wanted.length === 0) {
         // an empty prefix is just a fresh backend session — nothing to fork
         const created = await client.post<CreatedSession>("/session", {
-          title: request.target.title ?? request.target.sessionId,
+          ...sessionCreateBody(request.target),
         });
         const prev = maps.forward.get(request.target.sessionId);
         if (prev && prev !== created.id) maps.reverse.delete(prev);
