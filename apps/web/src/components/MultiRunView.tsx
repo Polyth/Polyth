@@ -175,6 +175,7 @@ export default function MultiRunView() {
       </div>
       <div className="view-toolbar">
         <textarea
+          className="multirun-prompt"
           rows={2}
           value={text}
           placeholder={tr("multirunview.promptToSendToEveryRun")}

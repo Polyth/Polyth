@@ -132,13 +132,30 @@ test("Multi-Run controls use an intentional desktop grid and collapse on mobile"
   const view = read("../src/components/MultiRunView.tsx");
   const css = read("../src/styles.css");
 
+  assert.match(view, /className="multirun-prompt"/);
   assert.match(view, /className="view-toolbar-row multirun-controls"/);
+  assert.match(css, /\.multirun-prompt\s*\{[^}]*min-height:\s*68px;[^}]*flex:\s*none;/s);
+  assert.match(
+    css,
+    /\.view-toolbar > \.model-filter-input\s*\{[^}]*height:\s*var\(--tap\);[^}]*min-height:\s*var\(--tap\);[^}]*flex-basis:\s*auto;/s,
+  );
   assert.match(css, /\.multirun-controls > select\s*\{[^}]*min-width:\s*0;[^}]*max-width:\s*100%;/s);
   assert.match(css, /\.multirun-controls\s*\{[^}]*grid-template-columns:\s*repeat\(3,\s*minmax\(0,\s*1fr\)\);/s);
   assert.match(css, /\.multirun-controls > select:nth-of-type\(4\)\s*\{\s*grid-column:\s*span 2;/);
   assert.match(
     css,
     /@media \(max-width: 820px\)[\s\S]*?\.multirun-controls\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\);[\s\S]*?\.multirun-controls > select:nth-of-type\(4\)\s*\{\s*grid-column:\s*auto;/s,
+  );
+});
+
+test("compact panels and timeline actions use current mobile geometry", () => {
+  const css = read("../src/styles.css");
+  const finalMobile = css.slice(css.lastIndexOf("@media (max-width: 820px)"));
+
+  assert.match(finalMobile, /\.panel-sheet\s*\{[^}]*top:\s*60px;[^}]*bottom:\s*0;/s);
+  assert.match(
+    finalMobile,
+    /\.msg\.assistant \.msg-action-btn,[\s\S]*?\.agent-reply-actions button,[\s\S]*?\.assistant-gallery-shortcut\s*\{[^}]*width:\s*var\(--tap\);[^}]*min-width:\s*var\(--tap\);[^}]*height:\s*var\(--tap\);[^}]*min-height:\s*var\(--tap\);/s,
   );
 });
 

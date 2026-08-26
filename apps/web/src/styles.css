@@ -2199,6 +2199,17 @@ input.notification-preview { font-family: var(--mono); font-size: 12.5px; min-wi
 }
 .multirun-controls > select:nth-of-type(4) { grid-column: span 2; }
 .multirun-controls > .primary-btn { width: 100%; }
+.multirun-prompt {
+  min-height: 68px;
+  flex: none;
+  line-height: 1.4;
+}
+.view-toolbar > .model-filter-input {
+  height: var(--tap);
+  min-height: var(--tap);
+  flex: none;
+  flex-basis: auto;
+}
 .run-card {
   display: flex; flex-direction: column;
   border: 1px solid var(--border-soft); border-radius: var(--radius); background: var(--panel);
@@ -3369,6 +3380,13 @@ html[data-density="compact"] .set-row { padding: 9px 0; }
   width: 212px; min-width: 212px; display: flex; flex-direction: column;
   background: var(--sunken); border-right: 1px solid var(--border-soft);
 }
+.settings-nav-title {
+  margin: 14px 14px 8px;
+  color: var(--text);
+  font-size: 15px;
+  font-weight: 650;
+  letter-spacing: -.02em;
+}
 .settings-nav-head { padding: 14px 14px 8px; }
 .settings-nav-head h2 { margin: 0; font-size: 15px; letter-spacing: -0.02em; }
 .settings-nav-search { margin: 0 10px 8px; font-size: 12px; padding: 5px 8px; }
@@ -3381,7 +3399,7 @@ html[data-density="compact"] .set-row { padding: 9px 0; }
   display: flex; align-items: center; justify-content: space-between;
   padding: 12px 18px 10px; border-bottom: 1px solid var(--border-soft);
 }
-.settings-pane-title { font-weight: 650; font-size: 14px; }
+.settings-pane-title { margin: 0; font-weight: 650; font-size: 14px; }
 .dialog-hint { margin-left: auto; padding: 0 8px; color: var(--muted); font-size: 10.5px; }
 .settings-pane-body { flex: 1; overflow-x: hidden; overflow-y: auto; padding: 6px 18px 18px; }
 .settings-pane-body::-webkit-scrollbar { width: 10px; }
@@ -5011,7 +5029,7 @@ body[data-chatwidth="wide"] .bubble, body[data-chatwidth="wide"] .reasoning, bod
   /* Registered panel sheet: overlays the workspace above the status bar;
      the strip lives inside it and reserves zero inline width. */
   .panel-sheet {
-    position: fixed; top: 0; right: 0; bottom: 28px; z-index: 120;
+    position: fixed; top: 0; right: 0; bottom: 0; z-index: 120;
     width: min(380px, 100vw);
     display: flex; flex-direction: column; min-height: 0;
     background: var(--panel); border-left: 1px solid var(--border);
@@ -6772,6 +6790,7 @@ html[dir="rtl"] input[type="number"] {
     width: 100%; min-width: 0; min-height: 0; flex: 1; display: flex; flex-direction: column; padding-bottom: 0;
     border-right: none;
   }
+  .settings-nav-title { flex: none; margin: 14px 14px 8px; font-size: 18px; }
   .settings-mobile-nav.settings-shell .settings-nav { height: 100%; }
   .settings-nav-head, .settings-nav > .nav-foot { display: none; }
   .settings-nav-search { flex: none; margin: 12px 12px 8px; }
@@ -6794,6 +6813,10 @@ html[dir="rtl"] input[type="number"] {
   }
   .settings-pane-head-bar {
     width: 100%; min-height: 36px; display: flex; align-items: center; justify-content: space-between;
+  }
+  .settings-pane-head-bar .settings-pane-title {
+    min-width: 0; flex: 1; overflow: hidden; padding-inline: 8px;
+    text-align: center; text-overflow: ellipsis; white-space: nowrap;
   }
   .settings-mobile-page .settings-pane-head .modal-desc,
   .settings-mobile-page .settings-pane-head .dialog-hint { display: none; }
@@ -11770,6 +11793,10 @@ body[data-density="comfortable"] .header { min-height: 60px; }
     right: 0;
     bottom: 0;
   }
+  .panel-sheet {
+    top: 60px;
+    bottom: 0;
+  }
   .rail-head { min-height: 60px; }
   .pane-back { min-height: var(--tap); padding-inline: 12px; }
 
@@ -11802,10 +11829,21 @@ body[data-density="comfortable"] .header { min-height: 60px; }
     max-width: none;
   }
   .multirun-controls > select:nth-of-type(4) { grid-column: auto; }
+  .msg.assistant .msg-action-btn,
+  .msg.assistant .msg-actions-entry,
+  .focus-conversation .msg .msg-action-btn,
+  .agent-reply-actions button,
+  .assistant-gallery-shortcut {
+    width: var(--tap);
+    min-width: var(--tap);
+    height: var(--tap);
+    min-height: var(--tap);
+  }
 }
 
 @media (max-width: 480px) {
   .rail-fullscreen { top: calc(60px + env(safe-area-inset-top, 0px)); }
+  .panel-sheet { top: calc(60px + env(safe-area-inset-top, 0px)); }
   .mobile-view-title { cursor: default; }
 
   /* Model, reasoning and mode occupy distinct rows at phone width; long

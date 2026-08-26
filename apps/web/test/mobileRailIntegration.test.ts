@@ -151,6 +151,25 @@ test("mobile app header focuses workspace destinations without escaping a destin
       "Multi-run",
       "focus never moves to the obscured workspace heading",
     );
+    await act(async () => {
+      closePackageTour("dismiss");
+    });
+    assert.equal(
+      document.activeElement,
+      container.querySelector(".settings-nav-title"),
+      "dismissing onboarding restores focus to the visible Settings heading",
+    );
+    assert.notEqual(document.activeElement, document.body, "tour dismissal never orphans focus on body");
+
+    await act(async () => {
+      setOverlay(null);
+    });
+    assert.equal(
+      document.activeElement?.getAttribute("aria-label"),
+      "Application",
+      "closing Settings restores the permanent mobile rail trigger",
+    );
+    assert.notEqual(document.activeElement, document.body, "Settings dismissal never orphans focus on body");
   } finally {
     await act(async () => {
       closePackageTour("dismiss");

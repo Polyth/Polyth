@@ -3,7 +3,7 @@
 // (WP9) matches individual settings rows through the item registry and jumps
 // to the exact row; page-title filtering remains the fallback for plugin
 // pages without item metadata.
-import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { consumePendingSettingsPage, setOverlay } from "../store.ts";
 import { listSlots } from "../slots.ts";
 import { isPackageEnabled, subscribePackages } from "../packages/registry.ts";
@@ -109,6 +109,13 @@ function SettingsNavIcon({ pageId }: { pageId: string }) {
 }
 
 export default function SettingsView({ onClose = () => setOverlay(null) }: { onClose?: () => void }) {
+  const returnFocusRef = useRef<HTMLElement | null>(
+    typeof document !== "undefined"
+      && document.activeElement instanceof HTMLElement
+      && document.activeElement !== document.body
+      ? document.activeElement
+      : null,
+  );
   const prefs = usePrefs();
   const mobile = useMobileSettings();
   // Deep link (e.g. "Change shortcut…" palette rows land on the Shortcuts page).
@@ -119,6 +126,17 @@ export default function SettingsView({ onClose = () => setOverlay(null) }: { onC
   const paneRef = useRef<HTMLDivElement>(null);
   const modalRef = useRef<HTMLDivElement>(null);
   const previousMobile = useRef(mobile);
+
+  useLayoutEffect(() => () => {
+    const opener = returnFocusRef.current;
+    const fallbackSelector = window.matchMedia("(max-width: 820px)").matches
+      ? ".mobile-navigation-trigger"
+      : ".header-profile";
+    const target = opener?.isConnected
+      ? opener
+      : document.querySelector<HTMLElement>(fallbackSelector);
+    if (target?.isConnected) target.focus();
+  }, []);
 
   useEffect(() => {
     // A settings modal opened on mobile starts on the navigation stage, but
@@ -320,6 +338,9 @@ export default function SettingsView({ onClose = () => setOverlay(null) }: { onC
         aria-describedby={mobile ? undefined : "settings-close-hint"}
       >
         <nav className="modal-nav settings-nav">
+          <h1 className="settings-nav-title" data-settings-focus-target tabIndex={-1}>
+            {tr("common.settings")}
+          </h1>
           <input
             className="settings-nav-search"
             value={filter}
@@ -394,12 +415,17 @@ export default function SettingsView({ onClose = () => setOverlay(null) }: { onC
                   aria-label={tr("settingsview.backToSettings")}
                 >
                   <span aria-hidden="true">←</span> {tr("common.back")}</button>
+                <h1 className="settings-pane-title" data-settings-focus-target tabIndex={-1}>
+                  {current.label}
+                </h1>
                 <button className="close-btn" onClick={onClose} aria-label={tr("common.close")}>{tr("settingsview.message")}</button>
               </div>
             ) : (
               <>
                 <div className="settings-pane-head-copy">
-                  <div className="modal-title settings-pane-title">{current.label}</div>
+                  <h1 className="modal-title settings-pane-title" data-settings-focus-target tabIndex={-1}>
+                    {current.label}
+                  </h1>
                 </div>
                 <span className="dialog-hint" id="settings-close-hint"><kbd>{tr("settingsview.esc")}</kbd> {tr("settingsview.close")}</span>
                 <button className="close-btn" onClick={onClose} aria-label={tr("common.close")}>{tr("settingsview.message")}</button>

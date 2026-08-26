@@ -4,7 +4,7 @@
 // screenshot or a designed SVG pattern so no stock assets are needed.
 // Esc dismisses WITHOUT persisting (the tour returns next session); the
 // explicit skip buttons persist through packages/onboarding/prefs.ts.
-import { useEffect, useRef, useSyncExternalStore } from "react";
+import { useLayoutEffect, useRef, useSyncExternalStore } from "react";
 import type {
   PackageOnboardingHighlightWhere,
   PackageOnboardingMedia,
@@ -29,6 +29,16 @@ const HIGHLIGHT_WHERE_LABELS: Record<PackageOnboardingHighlightWhere, string> = 
 const WAVE_BARS = [16, 34, 22, 52, 78, 44, 96, 118, 66, 104, 82, 48, 70, 36, 24, 14];
 const WAVE_ACCENT = new Set([5, 6, 7, 8, 9]);
 const TILE_ACCENT = new Set([3, 9, 14, 20]);
+const CONTROL_SELECTOR = "button, input, select, textarea, a[href], [tabindex]:not([tabindex=\"-1\"])";
+
+function settingsFocusTarget(): HTMLElement | null {
+  const shell = document.querySelector<HTMLElement>(".settings-shell");
+  if (!shell) return null;
+  const selector = shell.classList.contains("settings-mobile-nav")
+    ? ".settings-nav-title"
+    : ".settings-pane-title";
+  return shell.querySelector<HTMLElement>(selector);
+}
 
 function BranchesArt() {
   return (
@@ -139,8 +149,11 @@ export default function PackageTourOverlay() {
   const dialogRef = useRef<HTMLDivElement>(null);
   const open = state !== null;
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!open) return;
+    const opener = document.activeElement instanceof HTMLElement && document.activeElement !== document.body
+      ? document.activeElement
+      : null;
     dialogRef.current?.focus();
     const onKey = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
@@ -181,7 +194,15 @@ export default function PackageTourOverlay() {
     // window-level capture fires before SettingsView's document-level capture
     // handler, so Esc closes only the tour while it is stacked on top.
     window.addEventListener("keydown", onKey, true);
-    return () => window.removeEventListener("keydown", onKey, true);
+    return () => {
+      window.removeEventListener("keydown", onKey, true);
+      // A first-visit tour usually opens while focus is on the Settings shell,
+      // not a control. Restore an explicit heading in that case; previews
+      // return to the still-mounted control that launched them.
+      const control = opener?.matches(CONTROL_SELECTOR) && opener.isConnected ? opener : null;
+      const target = control ?? settingsFocusTarget();
+      if (target?.isConnected) target.focus();
+    };
   }, [open]);
 
   if (!state) return null;
