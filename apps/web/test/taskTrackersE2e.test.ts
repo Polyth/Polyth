@@ -270,7 +270,7 @@ function journeyHarness(provider: TaskTrackerProvider): JourneyHarness {
         path: url.pathname,
         method: init?.method ?? "GET",
         body: async () => init?.body ? JSON.parse(String(init.body)) as Record<string, unknown> : {},
-        json: (code, value) => {
+        json: (code: number, value: unknown) => {
           status = code;
           payload = value;
         },

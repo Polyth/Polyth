@@ -233,14 +233,18 @@ test("task board completes browse, filter, link, status, complete, and refresh j
     assert.equal(jiraTab.tabIndex, 0);
     assert.equal(trelloTab.tabIndex, -1);
     await act(async () => {
-      jiraTab.dispatchEvent(new dom.KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
+      jiraTab.dispatchEvent(
+        new dom.KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }) as unknown as Event,
+      );
     });
     await settle();
     assert.equal(trelloTab.getAttribute("aria-selected"), "true");
     assert.equal(document.activeElement, trelloTab);
     assert.match(container.textContent ?? "", /TRELLO_API_KEY, TRELLO_API_TOKEN/);
     await act(async () => {
-      trelloTab.dispatchEvent(new dom.KeyboardEvent("keydown", { key: "ArrowLeft", bubbles: true }));
+      trelloTab.dispatchEvent(
+        new dom.KeyboardEvent("keydown", { key: "ArrowLeft", bubbles: true }) as unknown as Event,
+      );
     });
     await settle(4);
     assert.equal(jiraTab.getAttribute("aria-selected"), "true");
