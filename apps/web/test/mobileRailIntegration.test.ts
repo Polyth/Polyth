@@ -125,6 +125,29 @@ test("mobile app header focuses workspace destinations without escaping a destin
 
     navigation = await openNavigation();
     assert.equal(navigation?.parentElement, document.body, "navigation stays portalled above the Files pane");
+    const compare = [...navigation!.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')]
+      .find((button) => button.textContent?.trim() === "Compare responses");
+    assert.ok(compare, "Compare responses destination is present");
+    await act(async () => {
+      compare!.click();
+      // Pane focus restoration is deferred. Wait beyond that handoff so this
+      // catches a delayed reset from Multi-Run back to Chat.
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    });
+    assert.equal(getState().railPlugin, null, "Compare responses closes Project files");
+    assert.equal(getState().activeView, "multirun", "Compare responses remains on Multi-Run");
+
+    navigation = await openNavigation();
+    const filesAgain = [...navigation!.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')]
+      .find((button) => button.textContent?.trim() === "Project files");
+    assert.ok(filesAgain, "Files remains reachable after visiting Multi-Run");
+    await act(async () => {
+      filesAgain!.click();
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    });
+
+    navigation = await openNavigation();
+    assert.equal(navigation?.parentElement, document.body, "navigation stays portalled above the Files pane");
     const browser = [...navigation!.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')]
       .find((button) => button.textContent?.trim() === "Browser");
     assert.ok(browser, "Browser destination remains reachable above the open Files pane");
