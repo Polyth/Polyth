@@ -28,9 +28,14 @@ import { loadDraft, saveDraft, type AutocompleteItem } from "../utils.ts";
 import SlotHost from "./slots/SlotHost.ts";
 import { dragKind, dropIntoSession } from "../dnd.ts";
 import {
-  addAttachment, attachGithubLink, attachUpload, parseGithubUrl, removeAttachment,
-  takeAttachments, tryAttachGithubUrl, usePendingAttachments, type GithubAttachResult,
+  addAttachment, attachUpload, removeAttachment, takeAttachments, usePendingAttachments,
 } from "../attachments.ts";
+import {
+  attachGithubLink,
+  parseGithubUrl,
+  tryAttachGithubUrl,
+  type GithubAttachResult,
+} from "@polyth/github/attachments";
 import AttachmentPills from "./AttachmentPills.tsx";
 import {
   COMPOSER_INSERT,

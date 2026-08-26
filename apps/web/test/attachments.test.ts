@@ -1,5 +1,5 @@
-// F2: composer attachment pills — draft store round-trip, GitHub URL pills,
-// and timeline reducer rendering. DOM-free (localStorage shimmed).
+// F2: composer attachment pills and timeline reducer rendering.
+// DOM-free (localStorage shimmed).
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { AttachmentRef, JsonObject, SessionEvent } from "@polyth/contracts";
@@ -12,8 +12,8 @@ const mem = new Map<string, string>();
 };
 
 const {
-  addAttachment, clearAttachments, githubUrlMatchesRepo, githubUrlRef,
-  MAX_PENDING_ATTACHMENTS, parseGithubUrl, pendingAttachments, removeAttachment, takeAttachments,
+  addAttachment, clearAttachments, MAX_PENDING_ATTACHMENTS, pendingAttachments,
+  removeAttachment, takeAttachments,
 } = await import("../src/attachments.ts");
 const { buildModel } = await import("../src/reduce.ts");
 
@@ -62,30 +62,6 @@ test("no-session pills stay in memory only", () => {
   assert.equal(pendingAttachments(null).length, 1);
   assert.ok(![...mem.keys()].some((k) => k === "polyth.draft.att."));
   assert.equal(takeAttachments(null)[0]?.id, "hero");
-});
-
-test("parseGithubUrl accepts PR/issue URLs and rejects everything else", () => {
-  const pr = parseGithubUrl("https://github.com/octo/repo/pull/42");
-  assert.deepEqual(pr, { owner: "octo", repo: "repo", kind: "pull", number: 42, url: "https://github.com/octo/repo/pull/42" });
-  const issue = parseGithubUrl("  https://github.com/octo/repo/issues/7#issuecomment-1 ");
-  assert.equal(issue?.kind, "issues");
-  assert.equal(issue?.number, 7);
-  assert.equal(parseGithubUrl("https://github.com/octo/repo"), null);
-  assert.equal(parseGithubUrl("https://gitlab.com/octo/repo/pull/42"), null);
-  assert.equal(parseGithubUrl("http://github.com/octo/repo/pull/42"), null);
-  assert.equal(parseGithubUrl("check https://github.com/octo/repo/pull/42 out"), null);
-});
-
-test("github pill requires the repo to match; ref is link-only", () => {
-  const parts = parseGithubUrl("https://github.com/Octo/Repo/pull/9")!;
-  assert.ok(githubUrlMatchesRepo(parts, { owner: "octo", name: "repo" }));
-  assert.ok(!githubUrlMatchesRepo(parts, { owner: "octo", name: "other" }));
-  assert.ok(!githubUrlMatchesRepo(parts, null));
-  const pill = githubUrlRef(parts);
-  assert.equal(pill.kind, "url");
-  assert.equal(pill.name, "PR #9");
-  assert.equal(pill.url, "https://github.com/Octo/Repo/pull/9");
-  assert.equal(pill.size, 0);
 });
 
 test("reducer surfaces attachments on user messages; junk rows are dropped", () => {

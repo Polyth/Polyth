@@ -137,6 +137,7 @@ test("feature widgets import only the documented generic web shell", () => {
 const GENERIC_PACKAGE_IMPORTERS = new Set([
   "components/AgentProfileForm.tsx",
   "components/Composer.tsx",
+  "components/ComposerAddMenu.tsx",
   "components/ContextRail.tsx",
   "components/Header.tsx",
   "components/Timeline.tsx",

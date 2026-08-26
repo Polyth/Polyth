@@ -4,6 +4,7 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
+    "./attachments": "./widgets/attachments.ts",
     "./i18n": "./src/i18n/index.ts",
     "./widgets": "./widgets/index.tsx"
   },
