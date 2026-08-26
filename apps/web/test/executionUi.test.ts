@@ -242,8 +242,8 @@ test("execution row renders collapsed value first, expands inline, and opens lev
     assert.ok(viewer, "large output opens in the explicit level-three viewer");
     assert.ok(viewer.classList.contains("dialog-full"), "viewer uses the shared accessible Dialog primitive");
     assert.equal(document.body.style.overflow, "hidden", "modal locks page scrolling");
-    assert.equal(container.getAttribute("aria-hidden"), "true", "modal hides background content from assistive technology");
-    assert.equal(container.hasAttribute("inert"), true, "modal makes background content inert");
+    assert.equal(timeline.getAttribute("aria-hidden"), "true", "modal hides background content from assistive technology");
+    assert.equal(timeline.hasAttribute("inert"), true, "modal makes background content inert");
     assert.equal(document.activeElement, viewer.querySelector('input[type="search"]'), "search receives initial focus");
     assert.match(viewer.textContent ?? "", /line 18/);
     const close = viewer.querySelector<HTMLButtonElement>(".execution-viewer-close");
@@ -257,8 +257,8 @@ test("execution row renders collapsed value first, expands inline, and opens lev
     await act(async () => close.click());
     assert.equal(document.body.querySelector(".execution-viewer"), null);
     assert.equal(document.body.style.overflow, "", "closing restores page scrolling");
-    assert.equal(container.hasAttribute("aria-hidden"), false, "closing restores background accessibility");
-    assert.equal(container.hasAttribute("inert"), false, "closing restores background interactivity");
+    assert.equal(timeline.hasAttribute("aria-hidden"), false, "closing restores background accessibility");
+    assert.equal(timeline.hasAttribute("inert"), false, "closing restores background interactivity");
     assert.equal(timeline.scrollTop, 640, "closing restores the timeline anchor after opener focus");
 
     await act(async () => disclosure.click());
@@ -364,28 +364,30 @@ test("MCP and subagent executions render normalized first-class details", async 
   document.body.appendChild(container);
   const root = createRoot(container);
   try {
-    setSessions("execution-ui-test", [
-      {
-        id: "parent-1",
-        projectId: "execution-ui-test",
-        title: "Root implementation",
-        status: "idle",
-        model: { providerID: "openai", modelID: "gpt-5" },
-        createdAt: 1,
-        updatedAt: 1,
-      },
-      {
-        id: "child-1",
-        projectId: "execution-ui-test",
-        parentId: "parent-1",
-        title: "Responsive UI reviewer",
-        status: "idle",
-        model: { providerID: "anthropic", modelID: "claude-sonnet" },
-        createdAt: 2,
-        updatedAt: 2,
-      },
-    ]);
-    activateSession("parent-1");
+    await act(async () => {
+      setSessions("execution-ui-test", [
+        {
+          id: "parent-1",
+          projectId: "execution-ui-test",
+          title: "Root implementation",
+          status: "idle",
+          model: { providerID: "openai", modelID: "gpt-5" },
+          createdAt: 1,
+          updatedAt: 1,
+        },
+        {
+          id: "child-1",
+          projectId: "execution-ui-test",
+          parentId: "parent-1",
+          title: "Responsive UI reviewer",
+          status: "idle",
+          model: { providerID: "anthropic", modelID: "claude-sonnet" },
+          createdAt: 2,
+          updatedAt: 2,
+        },
+      ]);
+      activateSession("parent-1");
+    });
     await act(async () => root.render(createElement(ExecutionRow, {
       message: tool({
         tool: "mcp__github__get_pull_request",
@@ -424,8 +426,10 @@ test("MCP and subagent executions render normalized first-class details", async 
       /Responsive UI reviewer.*Completed.*Checked 390px and 1280px.*Model.*claude-sonnet.*Parent.*Root implementation.*Open child session/s,
     );
   } finally {
-    activateSession(null);
-    setSessions("execution-ui-test", []);
+    await act(async () => {
+      activateSession(null);
+      setSessions("execution-ui-test", []);
+    });
     await act(async () => root.unmount());
     container.remove();
   }
