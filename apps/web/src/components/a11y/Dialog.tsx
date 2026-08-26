@@ -46,8 +46,7 @@ function lockBodyScroll(): () => void {
 
 function isolateDocumentSiblings(root: HTMLElement | null): () => void {
   if (!root) return () => {};
-  const siblings = [...document.body.children].filter((element): element is HTMLElement =>
-    element instanceof HTMLElement && element !== root);
+  const siblings = [...document.body.children].filter((element) => element !== root);
   const previous = siblings.map((element) => ({
     element,
     ariaHidden: element.getAttribute("aria-hidden"),
