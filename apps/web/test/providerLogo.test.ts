@@ -40,6 +40,7 @@ function providerLogoClassNames(): string[] {
     resolve(import.meta.dirname, "../../../packages/models/widgets"),
     resolve(import.meta.dirname, "../../../packages/usage/widgets"),
     resolve(import.meta.dirname, "../../../packages/fusion/widgets"),
+    resolve(import.meta.dirname, "../../../packages/multirun/widgets"),
   ]) {
     visit(directory);
   }
