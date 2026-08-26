@@ -84,3 +84,13 @@ test("top rail alignment defaults to center and accepts only supported positions
   assert.equal(ui.parseUiSettings(JSON.stringify({ topRailAlignment: "left" })).topRailAlignment, "left");
   assert.equal(ui.parseUiSettings(JSON.stringify({ topRailAlignment: "floating" })).topRailAlignment, "center");
 });
+
+test("mobile shortcut settings preserve order and reject unknown or duplicate ids", () => {
+  assert.deepEqual(ui.parseUiSettings(null).mobileShortcuts, ui.UI_DEFAULTS.mobileShortcuts);
+  assert.deepEqual(
+    ui.parseUiSettings(JSON.stringify({
+      mobileShortcuts: ["settings", "files", "bogus", "files", "notification-centre"],
+    })).mobileShortcuts,
+    ["settings", "files", "notification-centre"],
+  );
+});

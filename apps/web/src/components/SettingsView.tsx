@@ -130,7 +130,7 @@ export default function SettingsView({ onClose = () => setOverlay(null) }: { onC
   const returnFocusTarget = () => {
     const opener = returnFocusRef.current;
     const fallbackSelector = window.matchMedia("(max-width: 820px)").matches
-      ? ".mobile-navigation-trigger"
+      ? ".mobile-shortcut-settings"
       : ".header-profile";
     return opener?.isConnected
       ? opener

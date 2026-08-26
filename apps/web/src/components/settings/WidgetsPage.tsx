@@ -23,7 +23,10 @@ import {
 import { supportedWidgetSlots } from "../../widgets/widgetLibrary.ts";
 import "../../widgets/builtinWidgets.tsx";
 import { PageHead } from "./parts.tsx";
-import { RESPONSE_ACTION_IDS, setUiSettings, useUiSettings, type ResponseActionId } from "../../uiPrefs.ts";
+import {
+  MOBILE_SHORTCUT_IDS, RESPONSE_ACTION_IDS, setUiSettings, useUiSettings,
+  type MobileShortcutId, type ResponseActionId,
+} from "../../uiPrefs.ts";
 import { tr } from "../../i18n/index.ts";
 
 type MiniPlaceId = "composer" | "session-footer" | "app-header";
@@ -191,6 +194,19 @@ export default function WidgetsPage() {
   const availableCapabilities = capabilities.filter(
     (capability) => capability.descriptor.id !== "session" && capability.descriptor.available(),
   );
+  const mobileShortcutOptions = MOBILE_SHORTCUT_IDS.filter((id) =>
+    id === "notification-centre"
+    || id === "settings"
+    || capabilities.some((capability) =>
+      capability.descriptor.id === id && capability.descriptor.available()));
+  const mobileShortcutLabels = Object.fromEntries(mobileShortcutOptions.map((id) => {
+    if (id === "notification-centre") return [id, tr("notificationcentre.notifications")];
+    if (id === "settings") return [id, tr("common.settings")];
+    return [
+      id,
+      capabilities.find((capability) => capability.descriptor.id === id)?.descriptor.label ?? id,
+    ];
+  })) as Record<MobileShortcutId, string>;
 
   const placeCapability = (id: string, tier: CapabilityTier) => {
     const rank = Math.max(
@@ -318,6 +334,20 @@ export default function WidgetsPage() {
       </section>
 
       <div className="widget-place-grid widget-inline-config">
+        <section className="widget-place-card" data-widget-surface="top-rail" data-settings-item="widgets.mobileShortcuts">
+          <header>
+            <div>
+              <h3>Mobile shortcut rail</h3>
+              <p>Choose and order the icons in the swipeable top rail on phones and tablets.</p>
+            </div>
+          </header>
+          <OrderedToggleList
+            all={mobileShortcutOptions}
+            selected={ui.mobileShortcuts}
+            labels={mobileShortcutLabels}
+            onChange={(mobileShortcuts) => setUiSettings({ mobileShortcuts })}
+          />
+        </section>
         <section className="widget-place-card" data-widget-surface="response-footer" data-settings-item="widgets.responseActions">
           <header><div><h3>{tr("settings.widgetspage.responseActions")}</h3><p>{tr("settings.widgetspage.chooseAndOrderActionsShownAfterA")}</p></div></header>
           <OrderedToggleList

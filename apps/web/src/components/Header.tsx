@@ -2,12 +2,10 @@ import { useEffect, useRef, useState } from "react";
 import { formatCombo } from "@polyth/hotkeys";
 import {
   closeWorkspacePane, getState, setActiveView, useActiveModel, useStore,
-  openSettingsPage, setOverlay, setRailPlugin, setSidebarOpen, setUiError,
+  openSettingsPage, setOverlay, setRailPlugin, setSidebarOpen,
   toggleWorkspacePane, type AppView,
 } from "../store.ts";
-import { refreshSessions } from "../init.ts";
-import { displaySessionTitle, MOD } from "../format.ts";
-import { friendlyError } from "../settings.ts";
+import { MOD } from "../format.ts";
 import { contextGauge, type ContextGauge } from "../reduce.ts";
 import { useShellMode, type ShellMode } from "../responsiveShell.ts";
 import {
@@ -20,10 +18,8 @@ import { Icon } from "../icons.tsx";
 import { setWorkspaceMode, useWorkspaceMode } from "../widgets/workspaceMode.ts";
 import { useDismissibleMenu } from "./a11y/Menu.ts";
 import { useUiSettings } from "../uiPrefs.ts";
-import { dismissKeyboard } from "../mobileViewport.ts";
-import SessionMenu from "./mobile/SessionMenu.tsx";
 import MobileNavigationRail from "./mobile/MobileNavigationRail.tsx";
-import { useSheetTrigger } from "./mobile/sheetTrigger.ts";
+import WorkspaceBottomNav from "./workspace/WorkspaceBottomNav.tsx";
 import { api, type GithubStatusDto } from "../api.ts";
 import { tr } from "../i18n/index.ts";
 import { useKeymap } from "../hotkeys.ts";
@@ -292,26 +288,11 @@ export default function Header() {
   const model = useActiveModel();
   const view = useStore((s) => s.activeView);
   const workspaceMode = useWorkspaceMode();
-  const resolvedCapabilities = useResolvedCapabilities();
   const [githubUser, setGithubUser] = useState<GithubStatusDto["user"]>(null);
 
   const mode = useShellMode();
   const compact = mode !== "wide";
-  const [sessionMenuOpen, setSessionMenuOpen] = useState(false);
-  // §22: pointer-down activation — a click can be lost to the keyboard-dismiss
-  // reflow (see components/mobile/sheetTrigger.ts).
-  const sessionMenuTrigger = useSheetTrigger(mode === "phone", () => {
-    setSessionMenuOpen(true);
-    void dismissKeyboard();
-  });
   const chatSurface = workspaceMode === "chat" && view === "session";
-  const firstUserText = model.messages.find((message) => message.kind === "user")?.text;
-  const mobileTitle = session
-    ? displaySessionTitle(session.title, session.id, firstUserText)
-    : tr("header.newSession");
-  const mobileViewTitle = resolvedCapabilities.find((capability) =>
-    VIEW_OF_CAPABILITY[capability.descriptor.id] === view)?.descriptor.label
-    ?? tr("header.polyth");
   useResizeFocusHandoff(mode);
   const switchWorkspaceMode = (next: "chat" | "widgets" | "edit") => {
     closeWorkspacePane();
@@ -337,49 +318,13 @@ export default function Header() {
   // tablets (481–820px) keep the compact header with metrics and overflow.
   if (mode === "phone") {
     return (
-      <header className="header header-compact header-chat mobile-chat-header">
-        <DrawerTrigger />
-        {chatSurface ? (
-          <>
-            {/* UX-MOBILE-01 §21: the whole title is the target and it opens a real
-                session menu (new / rename / fork / archive / recent). */}
-            <button
-              className="mobile-session-title"
-              title={mobileTitle}
-              aria-label={tr("header.valueSessionMenu", { mobileTitle: mobileTitle })}
-              aria-haspopup="dialog"
-              aria-expanded={sessionMenuOpen}
-              {...sessionMenuTrigger}
-            >
-              <span>{mobileTitle}</span>
-              <Icon.chevronDown />
-            </button>
-            {sessionMenuOpen && <SessionMenu onClose={() => setSessionMenuOpen(false)} />}
-          </>
-        ) : (
-          <div className="mobile-session-title mobile-view-title" title={mobileViewTitle}>
-            <span>{mobileViewTitle}</span>
-          </div>
-        )}
-        <span className="header-spacer" />
-        {chatSurface && (
-          <button
-            className="icon-btn mobile-header-action"
-            aria-label={tr("header.refreshSessions")}
-            title={tr("header.refreshSessions")}
-            disabled={!project}
-            onClick={() => {
-              if (!project) return;
-              void refreshSessions(project.id).catch((error) =>
-                setUiError(friendlyError(tr("common.error"), error)));
-            }}
-          >
-            <Icon.refresh />
-          </button>
-        )}
-        <MobileNavigationRail />
-        <SlotHost slot="app.window.controls" />
-      </header>
+      <>
+        <header className="header header-compact header-chat mobile-chat-header">
+          <MobileNavigationRail />
+          <SlotHost slot="app.window.controls" />
+        </header>
+        <WorkspaceBottomNav />
+      </>
     );
   }
 
@@ -437,6 +382,7 @@ export default function Header() {
         {(!compact || !chatSurface) && <UserMenu githubUser={githubUser} />}
         <SlotHost slot="app.window.controls" />
       </header>
+      {compact && <WorkspaceBottomNav />}
     </>
   );
 }

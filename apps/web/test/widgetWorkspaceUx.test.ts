@@ -120,6 +120,9 @@ test("widget settings exposes a persistent Chat top rail position", async () => 
   assert.match(source, /Chat top rail position/);
   assert.match(source, /Left of center/);
   assert.match(source, /topRailAlignment/);
+  assert.match(source, /Mobile shortcut rail/);
+  assert.match(source, /ui\.mobileShortcuts/);
+  assert.match(source, /setUiSettings\(\{ mobileShortcuts \}\)/);
 });
 
 test("widget library searches capabilities and combines plugin, size, zone, and tab filters", () => {

@@ -427,48 +427,25 @@ test("touch targets and design tokens are centralized", async () => {
   }
 });
 
-test("the phone header keeps two actions and a real session menu", async () => {
+test("the phone shell restores session navigation below a swipeable shortcut rail", async () => {
   const header = await read("../src/components/Header.tsx");
-  const menu = await read("../src/components/mobile/SessionMenu.tsx");
-  assert.ok(header.includes("<SessionMenu"), "the title opens the session menu");
-  assert.ok(
-    header.includes('aria-label={tr("header.valueSessionMenu", { mobileTitle: mobileTitle })}'),
-    "the whole title is the target",
-  );
-  assert.ok(
-    header.includes("useSheetTrigger(mode === \"phone\"")
-    && header.includes("setSessionMenuOpen(true);"),
-    "§22 again: the title opens on pointer-down, then dismisses the keyboard",
-  );
-  for (const key of [
-    "mobile.sessionmenu.newSession",
-    "mobile.sessionmenu.rename",
-    "mobile.sessionmenu.duplicateAsANewSession",
-    "common.archive",
-    "mobile.sessionmenu.recentSessions",
-    "common.settings",
-  ]) {
-    assert.ok(menu.includes(`tr("${key}")`), `${key} is reachable from the session menu`);
-  }
-  assert.ok(menu.includes('from "./Sheet.tsx"'), "the session menu is the same sheet");
-});
-
-test("compact views use the top capability rail without a fixed bottom menu", async () => {
-  const header = await read("../src/components/Header.tsx");
+  const bottom = await read("../src/components/workspace/WorkspaceBottomNav.tsx");
   const navigation = await read("../src/components/mobile/MobileNavigationRail.tsx");
-  const app = await read("../src/App.tsx");
   const css = await read("../src/styles.css");
 
-  assert.equal(
-    header.match(/<MobileNavigationRail \/>/g)?.length,
-    2,
-    "chat and general compact headers both render the same rail trigger",
-  );
+  assert.ok(header.includes("<MobileNavigationRail />"), "the phone header is the shortcut rail");
+  assert.equal(header.match(/<WorkspaceBottomNav \/>/g)?.length, 2, "phone and tablet shells mount the session bar");
+  assert.ok(bottom.includes("Recents"), "recent conversations are one tap away");
+  assert.ok(bottom.includes("New chat"), "new chat is one tap away");
+  assert.ok(bottom.includes("Projects &amp; sessions"), "the title button identifies the projects and sessions drawer");
+  assert.ok(bottom.includes("displaySessionTitle"), "the projects and sessions button shows the current session title");
+  assert.match(css, /\.workspace-bottom-nav\s*\{\s*position:\s*fixed;/, "the session bar is fixed to the compact shell bottom");
+  assert.match(css, /\.mobile-shortcut-rail\s*\{[^}]*overflow-x:\s*auto;/s, "extra top icons reveal with horizontal swipe");
+  assert.match(css, /\.mobile-shortcut\s*\{[^}]*var\(--tap\)/s, "every shortcut keeps a 44px touch target");
   assert.ok(navigation.includes("useResolvedCapabilities()"), "the rail follows configured capabilities");
   assert.ok(navigation.includes("useRailSurfaceModel()"), "notification and plugin surfaces stay reachable");
-  assert.ok(navigation.includes("setUiSettings({ showDictate:"), "the replaced controls menu loses no dictation setting");
-  assert.doesNotMatch(app, /WorkspaceBottomNav/, "the shell does not mount a second navigation bar");
-  assert.doesNotMatch(css, /\.workspace-bottom-nav|\.session-bottom-nav/, "obsolete bottom-nav geometry is removed");
+  assert.ok(navigation.includes("ui.mobileShortcuts"), "the rail follows the ordered Settings preference");
+  assert.doesNotMatch(navigation, /mobile-navigation-grid|header\.application/, "the grouped Application menu is gone");
 });
 
 test("haptics are opt-in, bounded, and respect reduced motion", async () => {

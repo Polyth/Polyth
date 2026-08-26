@@ -14,6 +14,13 @@ export type WorkingIndicator = "pulse" | "keyboard" | "cat" | "activity";
 
 export const HEADER_METRIC_IDS: readonly HeaderMetricId[] = ["tokens", "messages", "duration", "cost"];
 export const RESPONSE_ACTION_IDS: readonly ResponseActionId[] = ["copy", "image", "plan", "pin", "session", "multirun"];
+export const MOBILE_SHORTCUT_IDS = [
+  "session", "files", "browser", "goals", "git", "terminal",
+  "notification-centre", "multirun", "workflow", "fusion", "walkthrough",
+  "schedule", "usage", "github", "knowledge", "context", "voice",
+  "models-agents", "events", "diagnostics", "settings",
+] as const;
+export type MobileShortcutId = typeof MOBILE_SHORTCUT_IDS[number];
 
 export interface UiSettings {
   density: "comfortable" | "balanced" | "compact";
@@ -56,6 +63,8 @@ export interface UiSettings {
   responseActions: ResponseActionId[];
   /** Placement of the configured Chat top rail in the application header. */
   topRailAlignment: TopRailAlignment;
+  /** Ordered shortcuts in the swipeable compact-shell top rail. */
+  mobileShortcuts: MobileShortcutId[];
   /** JSON tree viewer defaults (WP4). */
   jsonTreeDefault: "tree" | "raw";
   jsonTreeDepth: number;
@@ -102,6 +111,10 @@ export const UI_DEFAULTS: UiSettings = {
   headerMetrics: [...HEADER_METRIC_IDS],
   responseActions: [...RESPONSE_ACTION_IDS],
   topRailAlignment: "center",
+  mobileShortcuts: [
+    "session", "files", "git", "terminal", "browser",
+    "notification-centre", "goals", "settings",
+  ],
   jsonTreeDefault: "tree",
   jsonTreeDepth: 2,
   editorAutosave: true,
@@ -128,7 +141,13 @@ function orderedIds<T extends string>(value: unknown, allowed: readonly T[]): T[
 }
 
 export function parseUiSettings(raw: string | null): UiSettings {
-  const d: UiSettings = { ...UI_DEFAULTS, mcpServers: [], notifyKinds: [...UI_DEFAULTS.notifyKinds], workStatusHiddenSections: [] };
+  const d: UiSettings = {
+    ...UI_DEFAULTS,
+    mcpServers: [],
+    notifyKinds: [...UI_DEFAULTS.notifyKinds],
+    workStatusHiddenSections: [],
+    mobileShortcuts: [...UI_DEFAULTS.mobileShortcuts],
+  };
   try {
     const data = JSON.parse(raw ?? "") as Partial<UiSettings>;
     const fontPx = Number(data.editorFontSize);
@@ -160,6 +179,9 @@ export function parseUiSettings(raw: string | null): UiSettings {
       headerMetrics: orderedIds(data.headerMetrics, HEADER_METRIC_IDS),
       responseActions: orderedIds(data.responseActions, RESPONSE_ACTION_IDS),
       topRailAlignment: data.topRailAlignment === "left" ? "left" : "center",
+      mobileShortcuts: Array.isArray(data.mobileShortcuts)
+        ? orderedIds(data.mobileShortcuts, MOBILE_SHORTCUT_IDS)
+        : [...UI_DEFAULTS.mobileShortcuts],
       jsonTreeDefault: data.jsonTreeDefault === "raw" ? "raw" : "tree",
       jsonTreeDepth: Number.isFinite(Number(data.jsonTreeDepth)) && Number(data.jsonTreeDepth) >= 0 ? Math.min(8, Math.round(Number(data.jsonTreeDepth))) : 2,
       editorAutosave: data.editorAutosave !== false,

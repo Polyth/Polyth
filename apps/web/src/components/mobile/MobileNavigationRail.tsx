@@ -1,5 +1,3 @@
-import { useRef, useState } from "react";
-import { createPortal } from "react-dom";
 import {
   PANEL_OF_CAPABILITY, PANE_OF_CAPABILITY, VIEW_OF_CAPABILITY,
 } from "../../builtinCapabilities.ts";
@@ -8,27 +6,19 @@ import { Icon } from "../../icons.tsx";
 import { tr } from "../../i18n/index.ts";
 import { railIconFor } from "../../railIcons.ts";
 import {
-  openSettingsPage, setRailPlugin, toggleRailPlugin, useStore,
+  setRailPlugin, toggleRailPlugin, useStore,
 } from "../../store.ts";
-import { setUiSettings, useUiSettings } from "../../uiPrefs.ts";
-import { useDismissibleMenu } from "../a11y/Menu.ts";
+import { useUiSettings } from "../../uiPrefs.ts";
 import { useRailSurfaceModel } from "../ContextRail.tsx";
 
-interface NavigationItem {
+interface ShortcutItem {
   id: string;
   label: string;
   icon: () => React.JSX.Element;
   active: boolean;
-  group: NavigationGroup;
   open: () => void;
 }
 
-type NavigationGroup = "views" | "workspace" | "automation" | "settings";
-
-const AUTOMATION_ITEMS = new Set([
-  "goals", "multirun", "workflow", "fusion", "walkthrough", "schedule",
-]);
-const SETTINGS_ITEMS = new Set(["models-agents", "diagnostics"]);
 const MODAL_FOCUS_TARGET = [
   "[data-focus-destination]",
   "[autofocus]",
@@ -38,13 +28,6 @@ const MODAL_FOCUS_TARGET = [
   "textarea:not([disabled])",
   "a[href]",
 ].join(", ");
-
-function navigationGroup(id: string, hasView: boolean): NavigationGroup {
-  if (SETTINGS_ITEMS.has(id)) return "settings";
-  if (AUTOMATION_ITEMS.has(id)) return "automation";
-  if (hasView) return "views";
-  return "workspace";
-}
 
 function focusDestinationHeading(attempt = 0): void {
   requestAnimationFrame(() => {
@@ -85,173 +68,81 @@ function focusDestinationHeading(attempt = 0): void {
   });
 }
 
-/** The compact shell's single navigation entry point. It mirrors the desktop
- * top/right rails from the shared capability and surface registries instead
- * of maintaining another hard-coded mobile destination list. */
+/** Phone-first shortcut rail. Settings owns the selected/order list; this
+ * component resolves those durable ids against the live capability and
+ * surface registries. Overflow is intentionally horizontal so a thumb swipe
+ * reveals every configured shortcut without turning navigation into a modal. */
 export default function MobileNavigationRail() {
-  const [open, setOpen] = useState(false);
-  const menuRef = useRef<HTMLElement>(null);
-  const triggerRef = useRef<HTMLButtonElement>(null);
   const resolved = useResolvedCapabilities();
   const { rail, surfaces } = useRailSurfaceModel();
   const view = useStore((state) => state.activeView);
   const ui = useUiSettings();
-  const onMenuKey = useDismissibleMenu({
-    open,
-    menuRef,
-    triggerRef,
-    onClose: () => setOpen(false),
+  const capabilityById = new Map(resolved
+    .filter((capability) => capability.descriptor.available())
+    .map((capability) => [capability.descriptor.id, capability]));
+  const notificationSurface = surfaces.find((surface) =>
+    (surface.capabilityId ?? surface.id).includes("notification-centre"));
+
+  const items = ui.mobileShortcuts.flatMap((id): ShortcutItem[] => {
+    if (id === "settings") {
+      return [{
+        id,
+        label: tr("common.settings"),
+        icon: Icon.gear,
+        active: false,
+        open: () => {
+          setRailPlugin(null);
+          window.dispatchEvent(new CustomEvent("polyth:open-settings"));
+        },
+      }];
+    }
+    if (id === "notification-centre") {
+      if (!notificationSurface) return [];
+      return [{
+        id,
+        label: notificationSurface.title,
+        icon: notificationSurface.icon ?? railIconFor(id),
+        active: rail === notificationSurface.id,
+        open: () => toggleRailPlugin(notificationSurface.id),
+      }];
+    }
+    const capability = capabilityById.get(id);
+    if (!capability) return [];
+    const destinationView = VIEW_OF_CAPABILITY[id];
+    const pane = PANE_OF_CAPABILITY[id];
+    const panel = PANEL_OF_CAPABILITY[id];
+    return [{
+      id,
+      label: capability.descriptor.label,
+      icon: railIconFor(id),
+      active: destinationView !== undefined
+        ? view === destinationView && rail === null
+        : pane !== undefined
+          ? rail === pane
+          : panel !== undefined && rail === panel,
+      open: capability.descriptor.open,
+    }];
   });
 
-  const items: NavigationItem[] = resolved
-    .filter((capability) => capability.descriptor.available())
-    .map((capability) => {
-      const id = capability.descriptor.id;
-      const destinationView = VIEW_OF_CAPABILITY[id];
-      const pane = PANE_OF_CAPABILITY[id];
-      const panel = PANEL_OF_CAPABILITY[id];
-      return {
-        id,
-        label: capability.descriptor.label,
-        icon: railIconFor(id),
-        group: navigationGroup(id, destinationView !== undefined),
-        active: destinationView !== undefined
-          ? view === destinationView && rail === null
-          : pane !== undefined
-            ? rail === pane
-            : panel !== undefined && rail === panel,
-        open: capability.descriptor.open,
-      };
-    });
-
-  // Slot-contributed surfaces (notably Notifications) may not own a
-  // capability descriptor. They still belong in the same mobile rail.
-  for (const surface of surfaces) {
-    const id = surface.capabilityId ?? surface.id;
-    if (items.some((item) => item.id === id)) continue;
-    items.push({
-      id,
-      label: surface.title,
-      icon: surface.icon ?? railIconFor(id),
-      group: "workspace",
-      active: rail === surface.id,
-      open: () => toggleRailPlugin(surface.id),
-    });
-  }
-
-  const activate = (item: NavigationItem) => {
-    setOpen(false);
-    item.open();
-    focusDestinationHeading();
-  };
-  const groups: Array<{ id: NavigationGroup; label: string }> = [
-    { id: "views", label: "Views" },
-    { id: "workspace", label: tr("header.workspace") },
-    { id: "automation", label: "Automation" },
-    { id: "settings", label: tr("common.settings") },
-  ];
-  const navigationLabel = tr("header.application");
-  const menu = open ? (
-    <>
-      <div className="mobile-navigation-backdrop" aria-hidden="true" onClick={() => setOpen(false)} />
-      <nav
-        ref={menuRef}
-        className="mobile-navigation-rail"
-        aria-label={navigationLabel}
-        onKeyDown={onMenuKey}
-      >
-        <div className="mobile-navigation-title">{navigationLabel}</div>
-        <div role="menu">
-          {groups.map((group) => {
-            const groupItems = items.filter((item) => item.group === group.id);
-            if (groupItems.length === 0 && group.id !== "settings") return null;
-            return (
-              <section className="mobile-navigation-section" key={group.id}>
-                <h2>{group.label}</h2>
-                {groupItems.length > 0 && (
-                  <div className="mobile-navigation-grid">
-                    {groupItems.map((item) => (
-                      <button
-                        key={item.id}
-                        className={item.active ? "active" : ""}
-                        role="menuitem"
-                        aria-current={item.active ? "page" : undefined}
-                        onClick={() => activate(item)}
-                      >
-                        <span className="mobile-navigation-icon" aria-hidden="true"><item.icon /></span>
-                        <span>{item.label}</span>
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </section>
-            );
-          })}
-        </div>
-        <div className="mobile-navigation-utilities" role="menu" aria-label={tr("common.settings")}>
-          <button
-            role="menuitemcheckbox"
-            aria-checked={ui.showDictate}
-            onClick={() => setUiSettings({ showDictate: !ui.showDictate })}
-          >
-            <Icon.mic />
-            <span>{tr("header.microphone")}</span>
-            <span className={`mobile-control-switch${ui.showDictate ? " on" : ""}`} aria-hidden="true"><i /></span>
-          </button>
-          <button
-            role="menuitem"
-            onClick={() => {
-              setOpen(false);
-              setRailPlugin(null);
-              openSettingsPage("access");
-            }}
-          >
-            <Icon.shield />
-            <span>{tr("header.accessAmpSecurity")}</span>
-          </button>
-          <button
-            role="menuitem"
-            onClick={() => {
-              setOpen(false);
-              setRailPlugin(null);
-              openSettingsPage("about");
-            }}
-          >
-            <Icon.session />
-            <span>{tr("header.aboutPolyth")}</span>
-          </button>
-          <button
-            role="menuitem"
-            onClick={() => {
-              setOpen(false);
-              setRailPlugin(null);
-              window.dispatchEvent(new CustomEvent("polyth:open-settings"));
-            }}
-          >
-            <Icon.gear />
-            <span>{tr("header.allSettings")}</span>
-          </button>
-        </div>
-      </nav>
-    </>
-  ) : null;
-
   return (
-    <div className="mobile-navigation-menu">
-      <button
-        ref={triggerRef}
-        className={`icon-btn mobile-header-action mobile-navigation-trigger${open ? " active" : ""}`}
-        aria-label={navigationLabel}
-        title={navigationLabel}
-        aria-haspopup="menu"
-        aria-expanded={open}
-        onClick={() => setOpen((value) => !value)}
-      >
-        <Icon.widgets />
-      </button>
-      {menu && typeof document !== "undefined" && document.body
-        ? createPortal(menu, document.body)
-        : menu}
-    </div>
+    <nav className="mobile-shortcut-rail" aria-label="Quick navigation">
+      <div className="mobile-shortcut-track">
+        {items.map((item) => (
+          <button
+            key={item.id}
+            className={`rail-icon mobile-shortcut${item.active ? " active" : ""}${item.id === "settings" ? " mobile-shortcut-settings" : ""}`}
+            title={item.label}
+            aria-label={item.label}
+            aria-current={item.active ? "page" : undefined}
+            onClick={() => {
+              item.open();
+              focusDestinationHeading();
+            }}
+          >
+            <item.icon />
+          </button>
+        ))}
+      </div>
+    </nav>
   );
 }

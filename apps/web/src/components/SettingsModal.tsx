@@ -9,7 +9,7 @@ export default function SettingsModal({ open, onClose }: { open: boolean; onClos
       // SettingsView's close callback. Restore after that commit so removing
       // the focused dialog cannot leave BODY as the final active element.
       const selector = window.matchMedia("(max-width: 820px)").matches
-        ? ".mobile-navigation-trigger"
+        ? ".mobile-shortcut-settings"
         : ".header-profile";
       document.querySelector<HTMLElement>(selector)?.focus();
     }

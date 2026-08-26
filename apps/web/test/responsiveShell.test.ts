@@ -104,7 +104,7 @@ test("header owns the drawer trigger and registry-backed compact navigation rail
   assert.ok(navigation.includes("VIEW_OF_CAPABILITY[id]"), "mobile rail maps capability descriptors to views");
   assert.ok(navigation.includes("PANE_OF_CAPABILITY[id]"), "mobile rail keeps pane tools such as Browser reachable");
   assert.ok(navigation.includes("useRailSurfaceModel()"), "slot-backed surfaces such as Notifications join the same rail");
-  assert.ok(navigation.includes('className="mobile-navigation-grid"'), "compact navigation is an icon rail instead of a select menu");
+  assert.ok(navigation.includes('className="mobile-shortcut-track"'), "compact navigation is a swipeable icon rail instead of a select menu");
   assert.ok(!header.includes("const VIEW_GROUPS"), "no duplicate hard-coded view list");
   assert.ok(
     actions.includes('tr("widgets.builtinminiwidgets.turnOffAutoApprove")')

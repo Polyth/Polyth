@@ -96,25 +96,13 @@ test("mobile app header focuses workspace destinations without escaping a destin
       root.render(createElement(MountedShell));
     });
 
-    const openNavigation = async () => {
-      const trigger = container.querySelector<HTMLButtonElement>(
-        '.mobile-navigation-trigger[aria-label="Application"]',
-      );
-      assert.ok(trigger, "permanent mobile header navigation trigger is mounted");
-      await act(async () => { trigger!.click(); });
-      return document.querySelector<HTMLElement>('.mobile-navigation-rail[aria-label="Application"]');
-    };
+    const navigation = container.querySelector<HTMLElement>('.mobile-shortcut-rail[aria-label="Quick navigation"]');
+    assert.ok(navigation, "permanent mobile shortcut rail is mounted");
+    const shortcut = (label: string) =>
+      navigation!.querySelector<HTMLButtonElement>(`button[aria-label="${label}"]`);
 
-    let navigation = await openNavigation();
-    assert.ok(navigation, "grouped destination rail opens");
-    assert.equal(
-      navigation!.parentElement,
-      document.body,
-      "navigation escapes the header stacking context through a body portal",
-    );
-    const files = [...navigation!.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')]
-      .find((button) => button.textContent?.trim() === "Project files");
-    assert.ok(files, "Files destination is present");
+    const files = shortcut("Project files");
+    assert.ok(files, "Files shortcut is present");
     await act(async () => {
       files!.click();
       await new Promise((resolve) => setTimeout(resolve, 10));
@@ -123,33 +111,7 @@ test("mobile app header focuses workspace destinations without escaping a destin
     assert.equal(container.querySelector('.rail-fullscreen')?.getAttribute("aria-label"), "Project files");
     assert.equal(document.activeElement?.textContent, "Project files", "Files heading receives focus");
 
-    navigation = await openNavigation();
-    assert.equal(navigation?.parentElement, document.body, "navigation stays portalled above the Files pane");
-    const compare = [...navigation!.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')]
-      .find((button) => button.textContent?.trim() === "Compare responses");
-    assert.ok(compare, "Compare responses destination is present");
-    await act(async () => {
-      compare!.click();
-      // Pane focus restoration is deferred. Wait beyond that handoff so this
-      // catches a delayed reset from Multi-Run back to Chat.
-      await new Promise((resolve) => setTimeout(resolve, 25));
-    });
-    assert.equal(getState().railPlugin, null, "Compare responses closes Project files");
-    assert.equal(getState().activeView, "multirun", "Compare responses remains on Multi-Run");
-
-    navigation = await openNavigation();
-    const filesAgain = [...navigation!.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')]
-      .find((button) => button.textContent?.trim() === "Project files");
-    assert.ok(filesAgain, "Files remains reachable after visiting Multi-Run");
-    await act(async () => {
-      filesAgain!.click();
-      await new Promise((resolve) => setTimeout(resolve, 10));
-    });
-
-    navigation = await openNavigation();
-    assert.equal(navigation?.parentElement, document.body, "navigation stays portalled above the Files pane");
-    const browser = [...navigation!.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')]
-      .find((button) => button.textContent?.trim() === "Browser");
+    const browser = shortcut("Browser");
     assert.ok(browser, "Browser destination remains reachable above the open Files pane");
     await act(async () => {
       browser!.click();
@@ -159,45 +121,51 @@ test("mobile app header focuses workspace destinations without escaping a destin
     assert.equal(container.querySelector('.rail-fullscreen')?.getAttribute("aria-label"), "Browser");
     assert.equal(document.activeElement?.textContent, "Browser", "Browser heading receives focus");
 
-    navigation = await openNavigation();
-    assert.equal(navigation?.parentElement, document.body, "navigation stays portalled above the Browser pane");
-    const models = [...navigation!.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')]
-      .find((button) => button.textContent?.trim() === "Models & agents");
-    assert.ok(models, "Models & agents destination is present");
+    const notifications = shortcut("Notifications");
+    assert.ok(notifications, "notification centre is a top shortcut");
     await act(async () => {
-      models!.click();
-      await new Promise((resolve) => setTimeout(resolve, 25));
+      notifications!.click();
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    });
+    assert.equal(getState().railPlugin, "slot:notification-centre");
+    assert.ok(container.querySelector(".panel-sheet .sheet-strip"), "notifications reuse the compact horizontal panel rail");
+
+    const bottom = container.querySelector<HTMLElement>(".workspace-bottom-nav");
+    assert.ok(bottom, "restored bottom session bar is mounted");
+    const recents = bottom!.querySelector<HTMLButtonElement>('[aria-label="Session history"]');
+    assert.ok(recents);
+    await act(async () => { recents!.click(); });
+    assert.equal(getState().overlay, "search", "Recents opens session search");
+    await act(async () => { setOverlay(null); });
+
+    const current = bottom!.querySelector<HTMLButtonElement>('[aria-controls="polyth-session-drawer"]');
+    assert.ok(current);
+    await act(async () => { current!.click(); });
+    assert.equal(getState().sidebarOpen, true, "current session button opens projects and sessions");
+
+    const newChat = bottom!.querySelector<HTMLButtonElement>('[aria-label="New session"]');
+    assert.ok(newChat);
+    await act(async () => { newChat!.click(); });
+    assert.equal(getState().activeSessionId, null);
+    assert.equal(getState().newSessionIntent?.projectId, "p1", "New chat creates a project-scoped session intent");
+
+    const settingsButton = shortcut("Settings");
+    assert.ok(settingsButton, "Settings is reachable without the grouped Application menu");
+    await act(async () => {
+      settingsButton!.click();
+      await new Promise((resolve) => setTimeout(resolve, 10));
     });
     const settings = container.querySelector<HTMLElement>('[role="dialog"][aria-label="Settings"]');
-    const onboarding = container.querySelector<HTMLElement>('.package-tour[role="dialog"]');
-    assert.ok(settings, "Models & agents opens Settings");
-    assert.ok(onboarding, "first visit opens the Models onboarding dialog above Settings");
-    assert.ok(
-      onboarding!.contains(document.activeElement),
-      "focus remains inside the topmost onboarding dialog",
-    );
-    assert.notEqual(
-      document.activeElement?.textContent,
-      "Multi-run",
-      "focus never moves to the obscured workspace heading",
-    );
-    await act(async () => {
-      closePackageTour("dismiss");
-    });
-    assert.equal(
-      document.activeElement,
-      container.querySelector(".settings-nav-title"),
-      "dismissing onboarding restores focus to the visible Settings heading",
-    );
-    assert.notEqual(document.activeElement, document.body, "tour dismissal never orphans focus on body");
+    assert.ok(settings, "Settings shortcut opens Settings");
+    assert.ok(settings!.contains(document.activeElement), "focus moves inside Settings");
 
     await act(async () => {
       setOverlay(null);
     });
     assert.equal(
       document.activeElement?.getAttribute("aria-label"),
-      "Application",
-      "closing Settings restores the permanent mobile rail trigger",
+      "Settings",
+      "closing Settings restores the permanent top-rail shortcut",
     );
     assert.notEqual(document.activeElement, document.body, "Settings dismissal never orphans focus on body");
   } finally {
