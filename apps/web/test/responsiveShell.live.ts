@@ -168,14 +168,14 @@ test("top rail and bottom bar open their current destinations", async () => {
   await files.click();
   await page.waitForSelector('.rail-fullscreen[aria-label="Project files"]', { state: "visible" });
   assert.equal(await files.getAttribute("aria-current"), "page");
-  await page.click('.rail-fullscreen[aria-label="Project files"] .sheet-close');
+  await page.click('.rail-fullscreen[aria-label="Project files"] button[aria-label="Close panel"]');
   await page.waitForSelector('.rail-fullscreen[aria-label="Project files"]', { state: "hidden" });
 
   const notifications = page.locator('.mobile-shortcut[aria-label="Notifications"]');
   await notifications.click();
   await page.waitForSelector('.panel-sheet[aria-label="Notifications"]', { state: "visible" });
   assert.ok(await page.locator(".panel-sheet .sheet-strip").isVisible(), "notification secondary rail is missing");
-  await page.click('.panel-sheet[aria-label="Notifications"] .sheet-close');
+  await page.click('.panel-sheet[aria-label="Notifications"] button[aria-label="Close panel"]');
   await page.waitForSelector('.panel-sheet[aria-label="Notifications"]', { state: "hidden" });
 
   await page.click(".session-nav-current");
@@ -209,10 +209,13 @@ test("mobile shortcut settings support touch and keyboard sorting", async () => 
 
   const source = card.locator(`[data-widget-order-id="${selectedIds[1]}"] .widget-drag-handle`);
   const target = card.locator(`[data-widget-order-id="${selectedIds[0]}"]`);
-  await source.scrollIntoViewIfNeeded();
+  await target.scrollIntoViewIfNeeded();
   const sourceBox = await source.boundingBox();
   const targetBox = await target.boundingBox();
   assert.ok(sourceBox && targetBox, "touch sort endpoints are not visible");
+  for (const box of [sourceBox!, targetBox!]) {
+    assert.ok(box.y >= 0 && box.y + box.height <= 900, "touch sort endpoint is outside the viewport");
+  }
 
   const cdp = await page.context().newCDPSession(page);
   await cdp.send("Input.dispatchTouchEvent", {
@@ -220,11 +223,20 @@ test("mobile shortcut settings support touch and keyboard sorting", async () => 
     touchPoints: [{ id: 1, x: sourceBox!.x + sourceBox!.width / 2, y: sourceBox!.y + sourceBox!.height / 2 }],
   });
   await page.waitForTimeout(450);
+  await card.locator(`[data-widget-order-id="${selectedIds[1]}"].dragging`).waitFor({ state: "visible" });
+  await cdp.send("Input.dispatchTouchEvent", {
+    type: "touchMove",
+    touchPoints: [{
+      id: 1,
+      x: (sourceBox!.x + targetBox!.x) / 2,
+      y: (sourceBox!.y + targetBox!.y) / 2,
+    }],
+  });
   await cdp.send("Input.dispatchTouchEvent", {
     type: "touchMove",
     touchPoints: [{ id: 1, x: targetBox!.x + targetBox!.width / 2, y: targetBox!.y + targetBox!.height / 2 }],
   });
-  await page.waitForTimeout(80);
+  await card.locator(`[data-widget-order-id="${selectedIds[0]}"].drag-over`).waitFor({ state: "visible" });
   await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
 
   const cardSelector = '[data-settings-item="widgets.mobileShortcuts"]';
