@@ -4,6 +4,7 @@ import { register } from "node:module";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { formatList, tr } from "../src/i18n/index.ts";
+import { readWebStylesSync } from "./webStyles.ts";
 
 register("./tsxHooks.mjs", import.meta.url);
 
@@ -101,7 +102,7 @@ test("all mobile chat composers expose project and worktree targets", () => {
   ].join("\n");
   const workflowLauncher = read("../../../packages/workflow/widgets/WorkflowLauncher.tsx");
   const header = read("../src/components/Header.tsx");
-  const css = read("../src/styles.css");
+  const css = readWebStylesSync();
 
   // UX-MOBILE-01 §5: the compact context bar belongs to the shared composer,
   // so fresh and existing chats cannot assemble different control sets.
@@ -116,11 +117,11 @@ test("all mobile chat composers expose project and worktree targets", () => {
   assert.match(actions, /composer-auto-approve/);
   assert.match(actions, /composer-goals/);
   assert.match(workflowLauncher, /composer-workflow/);
-  assert.match(css, /\.composer-mobile \.composer-workflow,/);
+  assert.match(css, /\.composer-mobile \.composer-workflow\s*\{/);
   assert.match(css, /\.composer-mobile \.composer-workflow:active,/);
   assert.match(css, /\.composer\.composer-mobile \.composer-mobile-extensions \.composer-workflow\s*\{[^}]*width:\s*var\(--tap\);[^}]*min-width:\s*var\(--tap\);/s);
-  assert.match(css, /\.composer-mobile\.composer-collapsed:not\(\.composer-has-draft\) \.composer-workflow \{ display: none; \}/);
-  assert.match(css, /\.composer-mobile\.composer-has-draft \.composer-workflow \{ display: inline-flex; \}/);
+  assert.match(css, /\.composer-mobile\.composer-collapsed:not\(\.composer-has-draft\) \.composer-workflow\s*\{\s*display:\s*none;/);
+  assert.match(css, /\.composer-mobile\.composer-has-draft \.composer-workflow\s*\{\s*display:\s*inline-flex;/);
   assert.match(header, /displaySessionTitle\(session\.title, session\.id, firstUserText\)/);
   const phoneStart = header.indexOf('if (mode === "phone" && chatSurface)');
   const phoneEnd = header.indexOf("\n  return (", phoneStart);
@@ -143,7 +144,7 @@ test("source-control surfaces keep responsive and accessible audit contracts", (
   const github = read("../../../packages/github/widgets/GithubView.tsx");
   const pullRequest = read("../../../packages/github/widgets/PullRequestView.tsx");
   const pending = read("../../../packages/git/widgets/PendingChangesBar.tsx");
-  const css = read("../src/styles.css");
+  const css = readWebStylesSync();
 
   assert.match(css, /container:\s*source-surface\s*\/\s*inline-size/);
   assert.match(css, /@container source-surface \(max-width: 700px\)[\s\S]*\.git-master-detail/);

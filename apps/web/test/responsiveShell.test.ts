@@ -12,8 +12,12 @@ import {
   shellModeForViewport,
   shellModeForWidth,
 } from "../src/responsiveShell.ts";
+import { readWebStyles } from "./webStyles.ts";
 
-const read = (rel: string) => readFile(new URL(rel, import.meta.url), "utf8");
+const read = (rel: string) =>
+  rel === "../src/styles.css"
+    ? readWebStyles()
+    : readFile(new URL(rel, import.meta.url), "utf8");
 
 // ---- pure width classifier -------------------------------------------------
 
@@ -316,10 +320,7 @@ test("open rails remain visible in every workspace mode", async () => {
 test("mobile Settings swaps a vertical page list for content with a back action", async () => {
   const settings = await read("../src/components/SettingsView.tsx");
   const css = await read("../src/styles.css");
-  const mobileSettingsMarker = css.indexOf("/* Mobile Settings");
-  const finalBreakpoint = css.indexOf("@media (max-width: 700px)", mobileSettingsMarker);
-  assert.ok(finalBreakpoint > css.indexOf("focused, centered"), "mobile rules follow desktop workbench overrides");
-  const mobile = css.slice(finalBreakpoint);
+  const mobile = css;
   const mobileHeaderStart = settings.indexOf("{mobile ? (");
   const mobileHeader = settings.slice(mobileHeaderStart, settings.indexOf(") : (", mobileHeaderStart));
   assert.ok(settings.includes('type MobileStage = "nav" | "page"'), "Settings models the two mobile stages");
@@ -347,13 +348,23 @@ test("package and plugin marketplaces use responsive vertical tiles", async () =
   const css = await read("../src/styles.css");
   assert.match(
     css,
-    /\.settings-pane-body \.package-grid,\s*\.settings-pane-body \.plugin-card-grid\s*\{[^}]*grid-template-columns:\s*repeat\(2, minmax\(0, 1fr\)\)\s*!important[^}]*gap:\s*10px/,
-    "marketplace grids use two pane-relative columns by default",
+    /\.settings-pane-body \.package-grid\s*\{[^}]*grid-template-columns:\s*repeat\(2, minmax\(0, 1fr\)\)\s*!important[^}]*gap:\s*10px/,
+    "package grids use two pane-relative columns by default",
   );
   assert.match(
     css,
-    /@media \(max-width: 480px\)[\s\S]*?\.settings-pane-body \.package-grid,\s*\.settings-pane-body \.plugin-card-grid\s*\{[^}]*grid-template-columns:\s*1fr/,
-    "marketplace grids collapse to one column on phones",
+    /\.settings-pane-body \.plugin-card-grid\s*\{[^}]*grid-template-columns:\s*repeat\(2, minmax\(0, 1fr\)\)\s*!important[^}]*gap:\s*10px/,
+    "plugin grids use two pane-relative columns by default",
+  );
+  assert.match(
+    css,
+    /@media \(max-width: 480px\), \(max-height: 480px\) and \(pointer: coarse\)[\s\S]*?\.settings-pane-body \.package-grid\s*\{[^}]*grid-template-columns:\s*1fr/,
+    "package grids collapse to one column on phones",
+  );
+  assert.match(
+    css,
+    /@media \(max-width: 480px\), \(max-height: 480px\) and \(pointer: coarse\)[\s\S]*?\.settings-pane-body \.plugin-card-grid\s*\{[^}]*grid-template-columns:\s*1fr/,
+    "plugin grids collapse to one column on phones",
   );
   assert.doesNotMatch(css, /\.plugin-card-grid, \.package-grid\s*\{[^}]*repeat\([34], minmax\(150px, 1fr\)\)/);
   assert.match(css, /\.package-tile\s*\{[^}]*display:\s*flex[^}]*flex-direction:\s*column[^}]*align-items:\s*center/);

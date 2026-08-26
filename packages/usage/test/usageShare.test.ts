@@ -73,7 +73,10 @@ test("Usage settings keeps the Polyth shell and offers rich dashboard views", as
   const quota = await readFile(new URL("../widgets/usage/quotaUi.tsx", import.meta.url), "utf8");
   const api = await readFile(new URL("../../session/src/webApi.ts", import.meta.url), "utf8");
   const registration = await readFile(new URL("../widgets/index.tsx", import.meta.url), "utf8");
-  const styles = await readFile(new URL("../../../apps/web/src/styles.css", import.meta.url), "utf8");
+  const styles = [
+    await readFile(new URL("../../../apps/web/src/styles.css", import.meta.url), "utf8"),
+    await readFile(new URL("../widgets/styles.css", import.meta.url), "utf8"),
+  ].join("\n");
   assert.match(source, /function ProviderSpendDonut/);
   assert.match(source, /className="usage-spend-donut"[\s\S]*?<svg/);
   assert.match(source, /function ModelBreakdown/);
@@ -113,7 +116,7 @@ test("Usage settings keeps the Polyth shell and offers rich dashboard views", as
   assert.match(styles, /\.usage-spend-legend > \.usage-card-empty \{[\s\S]*?width: 100%;[\s\S]*?min-width: 0;[\s\S]*?align-self: stretch;/);
   assert.match(styles, /\.usage-spend-legend > \.usage-card-empty strong \{[\s\S]*?overflow-wrap: normal;[\s\S]*?word-break: normal;[\s\S]*?white-space: normal;/);
   assert.match(styles, /\.usage-provider-error \{[\s\S]*?padding: 9px 10px;/);
-  assert.match(styles, /@media \(min-width: 701px\) and \(max-width: 760px\) \{[\s\S]*?\.usage-view-tabs \{ width: 100%; margin: 0; \}/);
+  assert.match(styles, /@media \(min-width: 701px\) and \(max-width: 760px\)\s*\{[\s\S]*?\.usage-view-tabs\s*\{[^}]*width:\s*100%;\s*margin:\s*0;/);
 
   const usageMobileStart = styles.indexOf(
     "@media (max-width: 480px), (max-height: 480px) and (pointer: coarse) {",
@@ -121,8 +124,8 @@ test("Usage settings keeps the Polyth shell and offers rich dashboard views", as
   );
   const usageMobileEnd = styles.indexOf("@media (prefers-reduced-motion: reduce)", usageMobileStart);
   const usageMobileStyles = styles.slice(usageMobileStart, usageMobileEnd);
-  assert.match(usageMobileStyles, /\.usage-eyebrow \{ font-size: 9\.5px; letter-spacing: \.075em; line-height: 1\.35; \}/);
+  assert.match(usageMobileStyles, /\.usage-eyebrow\s*\{\s*font-size:\s*9\.5px;\s*letter-spacing:\s*\.075em;\s*line-height:\s*1\.35;/);
   assert.match(usageMobileStyles, /\.usage-spend-legend \{[\s\S]*?width: 100%;[\s\S]*?min-width: 0;[\s\S]*?max-width: none;/);
-  assert.match(styles, /\.usage-view-tabs button \{ flex: 1; min-height: var\(--tap\); \}/);
-  assert.match(styles, /\.usage-layout-compact \.usage-cohort-chart \{ height: 174px; \}/);
+  assert.match(styles, /\.usage-view-tabs button\s*\{\s*flex:\s*1;\s*min-height:\s*var\(--tap\);/);
+  assert.match(styles, /\.usage-layout-compact \.usage-cohort-chart\s*\{\s*height:\s*174px;/);
 });

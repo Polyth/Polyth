@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
+import { readWebStyles } from "./webStyles.ts";
 
 const read = (relative: string) => readFile(new URL(relative, import.meta.url), "utf8");
 
@@ -15,7 +16,7 @@ test("compact bottom navigation caps direct destinations and discloses overflow"
 });
 
 test("horizontal tabs and chips retain a visible scroll affordance", async () => {
-  const css = await read("../src/styles.css");
+  const css = await readWebStyles();
 
   assert.match(css, /--scroll-affordance:\s*18px/);
   assert.match(
@@ -25,7 +26,7 @@ test("horizontal tabs and chips retain a visible scroll affordance", async () =>
 });
 
 test("mobile widget library preview is viewport-bounded without a 420px floor", async () => {
-  const css = await read("../src/styles.css");
+  const css = await readWebStyles();
 
   assert.doesNotMatch(css, /\.widget-library-preview\s*\{\s*min-height:\s*420px/);
   assert.match(

@@ -3,6 +3,9 @@ import { fileURLToPath } from "node:url";
 import { transform } from "esbuild";
 
 export async function load(url, context, nextLoad) {
+  if (url.endsWith(".css")) {
+    return { format: "module", source: "export default {};", shortCircuit: true };
+  }
   if (!url.endsWith(".tsx")) return nextLoad(url, context);
   const file = fileURLToPath(url);
   const source = await readFile(file, "utf8");

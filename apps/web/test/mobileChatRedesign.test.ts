@@ -9,6 +9,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { register } from "node:module";
 import { readFile } from "node:fs/promises";
+import { readWebStyles } from "./webStyles.ts";
 
 // TSX loader: the metadata line is asserted against the real component module.
 register("./tsxHooks.mjs", import.meta.url);
@@ -372,7 +373,7 @@ test("reasoning effort stays reachable on phones, beside the model name", async 
     "engagement ends on a pointer press outside the composer",
   );
 
-  const css = await read("../src/styles.css");
+  const css = await readWebStyles();
   const section = css.slice(css.indexOf("UX-MOBILE-01 — mobile-first new chat"));
   const at = section.search(/\.composer-mobile \.composer-agent-badge,\s*\n\s*\.composer-mobile \.composer-thinking-badge/);
   assert.ok(at > 0, "the thinking control shares the mode chip's touch box");
@@ -380,7 +381,7 @@ test("reasoning effort stays reachable on phones, beside the model name", async 
 });
 
 test("phone CSS keeps the layout inside the visible viewport", async () => {
-  const css = await read("../src/styles.css");
+  const css = await readWebStyles();
   const start = css.indexOf("UX-MOBILE-01 — mobile-first new chat");
   assert.ok(start > 0, "the redesign section exists");
   const section = css.slice(start);
@@ -394,15 +395,15 @@ test("phone CSS keeps the layout inside the visible viewport", async () => {
   assert.match(phone, /body\[data-keyboard="open"\]/, "§43: the empty state yields to the keyboard");
   assert.match(phone, /body\[data-band="short"\] \.hero-body \{ display: none; \}/, "a short band drops the empty state entirely");
   assert.match(phone, /composer-mobile:not\(\.composer-has-draft\) \.composer-primary \.send \{ display: none; \}/);
-  assert.match(phone, /composer-mobile\.composer-has-draft \.composer-mobile-extensions \.mic-btn \{ display: none; \}/);
+  assert.match(phone, /composer-mobile\.composer-has-draft \.composer-mobile-extensions \.mic-btn\s*\{\s*display:\s*none;/);
   assert.match(
     phone,
-    /composer-mobile\.composer-collapsed:not\(\.composer-has-draft\) \.composer-workflow \{ display: none; \}/,
+    /composer-mobile\.composer-collapsed:not\(\.composer-has-draft\) \.composer-workflow\s*\{\s*display:\s*none;/,
     "only an empty resting composer may hide the workflow action",
   );
   assert.match(
     phone,
-    /composer-mobile\.composer-has-draft \.composer-workflow \{ display: inline-flex; \}/,
+    /composer-mobile\.composer-has-draft \.composer-workflow\s*\{\s*display:\s*inline-flex;/,
     "a draft keeps Run workflow visible during narrow-layout transitions",
   );
   assert.match(phone, /max-height: 42dvh/, "§20: the input stops growing and scrolls");
@@ -413,7 +414,7 @@ test("phone CSS keeps the layout inside the visible viewport", async () => {
 });
 
 test("touch targets and design tokens are centralized", async () => {
-  const css = await read("../src/styles.css");
+  const css = await readWebStyles();
   const tokens = css.slice(0, css.indexOf("/* F15: syntax roles"));
   for (const token of [
     "--space-4: 16px", "--tap: 44px", "--radius-sheet: 24px",
@@ -436,7 +437,7 @@ test("touch targets and design tokens are centralized", async () => {
 test("the phone header keeps navigation, slot actions, and a real session menu", async () => {
   const header = await read("../src/components/Header.tsx");
   const menu = await read("../src/components/mobile/SessionMenu.tsx");
-  const css = await read("../src/styles.css");
+  const css = await readWebStyles();
   const phoneStart = header.indexOf('if (mode === "phone" && chatSurface)');
   const phoneEnd = header.indexOf("\n  return (", phoneStart);
   const phoneHeader = header.slice(phoneStart, phoneEnd);
@@ -512,7 +513,7 @@ test("the fresh-session screen is three zones with a sticky interaction dock", a
   assert.ok(surface.includes('registerSlot("session.empty.widgets", "builtin.hero-starters"'), "starters register as a widget");
   assert.ok(surface.includes('registerSlot("session.empty.widgets", "builtin.hero-recent"'), "recents register as a widget");
 
-  const css = await read("../src/styles.css");
+  const css = await readWebStyles();
   const section = css.slice(css.indexOf("UX-MOBILE-01 — mobile-first new chat"));
   const dock = section.slice(section.indexOf(".hero-dock {"));
   assert.match(dock.slice(0, dock.indexOf("}")), /var\(--safe-bottom\)/, "§30: the dock respects the home indicator");

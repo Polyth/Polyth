@@ -5,6 +5,7 @@ import { resolve } from "node:path";
 import { build } from "esbuild";
 import { createElement, type ComponentType } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
+import { readWebStylesSync } from "./webStyles.ts";
 
 interface ProviderLogoProps {
   providerID?: string;
@@ -145,7 +146,7 @@ test("unknown providers retain a short theme-colored fallback", async () => {
 
 test("provider surfaces use ProviderLogo without brand palette rules", () => {
   const logo = source("../../../packages/models/widgets/ProviderLogo.tsx");
-  const css = source("../src/styles.css");
+  const css = readWebStylesSync();
   const models = source("../../../packages/models/widgets/ModelsPage.tsx");
   const picker = source("../../../packages/models/widgets/ModelPicker.tsx");
   const usage = source("../../../packages/usage/widgets/usage/UsageDashboard.tsx");

@@ -1,8 +1,26 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFile } from "node:fs/promises";
+import { readFile, readdir } from "node:fs/promises";
+import { join, resolve } from "node:path";
 
 const source = (path: string) => readFile(new URL(path, import.meta.url), "utf8");
+const packageStyles = async () => {
+  const packagesDir = resolve(import.meta.dirname, "../..");
+  const entries = await readdir(packagesDir, { withFileTypes: true });
+  const styles = await Promise.all(entries
+    .filter((entry) => entry.isDirectory())
+    .map(async (entry) => {
+      try {
+        return await readFile(join(packagesDir, entry.name, "widgets/styles.css"), "utf8");
+      } catch {
+        return "";
+      }
+    }));
+  return [
+    await source("../../../apps/web/src/styles.css"),
+    ...styles,
+  ].join("\n");
+};
 
 test("slot-backed feature panels share the responsive surface stylesheet", async () => {
   const [
@@ -17,7 +35,7 @@ test("slot-backed feature panels share the responsive surface stylesheet", async
     builtinWidgets,
   ] = await Promise.all([
     source("../../../apps/web/src/App.tsx"),
-    source("../widgets/styles.css"),
+    packageStyles(),
     source("../../goals/widgets/index.tsx"),
     source("../../files/widgets/index.tsx"),
     source("../../git/widgets/index.tsx"),
@@ -63,13 +81,9 @@ test("slot-backed feature panels share the responsive surface stylesheet", async
 });
 
 test("feature forms stack and dense lists scroll at narrow panel widths", async () => {
-  const styles = await source("../widgets/styles.css");
-  const narrow = styles.slice(
-    styles.indexOf("@container feature-panel (max-width: 700px)"),
-    styles.indexOf("@media (max-width: 700px), (pointer: coarse)"),
-  );
+  const narrow = await packageStyles();
 
-  assert.match(narrow, /\.sched-form \.view-toolbar-row,[\s\S]*flex-direction:\s*column/);
+  assert.match(narrow, /\.sched-form \.view-toolbar-row\s*\{[^}]*grid-template-columns:\s*minmax\(0, 1fr\)/);
   assert.match(narrow, /\.knowledge-panel > \.view-toolbar-row,[\s\S]*flex-direction:\s*column/);
   assert.match(narrow, /\.settings-pane-body \.set-row\s*\{[\s\S]*flex-direction:\s*column/);
   assert.match(narrow, /\.provider-chips\s*\{[\s\S]*overflow-x:\s*auto/);

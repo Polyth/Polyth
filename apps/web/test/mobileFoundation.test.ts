@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
+import { readWebStyles } from "./webStyles.ts";
 
 const read = (relative: string) => readFile(new URL(relative, import.meta.url), "utf8");
 
@@ -26,7 +27,7 @@ test("document viewport exposes safe areas without disabling user zoom", async (
 });
 
 test("global CSS provides mobile-first sizing, touch, overflow, and focus contracts", async () => {
-  const css = await read("../src/styles.css");
+  const css = await readWebStyles();
   const foundation = css.slice(0, css.indexOf("/* Electron desktop chrome."));
 
   assert.match(foundation, /\*,\s*\n\*::before,\s*\n\*::after\s*\{\s*box-sizing:\s*border-box/);
@@ -45,8 +46,8 @@ test("global CSS provides mobile-first sizing, touch, overflow, and focus contra
 });
 
 test("specific phone and coarse-pointer fields retain the 16px iOS input guard", async () => {
-  const css = await read("../src/styles.css");
-  const guard = css.slice(css.indexOf("/* iOS focus-zoom guard."));
+  const css = await readWebStyles();
+  const guard = css;
 
   assert.match(guard, /@media \(max-width: 480px\), \(pointer: coarse\)/);
   for (const selector of [
@@ -63,7 +64,7 @@ test("specific phone and coarse-pointer fields retain the 16px iOS input guard",
 });
 
 test("safe-area utilities cover every viewport edge", async () => {
-  const css = await read("../src/styles.css");
+  const css = await readWebStyles();
 
   for (const [token, inset] of [
     ["--safe-top", "top"],
@@ -83,7 +84,7 @@ test("safe-area utilities cover every viewport edge", async () => {
 });
 
 test("latest-message control remains a full coarse-pointer target", async () => {
-  const css = await read("../src/styles.css");
+  const css = await readWebStyles();
   assert.match(
     css,
     /@media \(pointer: coarse\), \(max-width: 480px\)\s*\{[\s\S]*?\.jump-latest\s*\{\s*min-width:\s*44px;\s*min-height:\s*44px;/,
@@ -101,7 +102,7 @@ test("compact shell keeps drawer and bottom navigation reachable", async () => {
     read("../src/components/Header.tsx"),
     read("../src/components/Sidebar.tsx"),
     read("../src/components/workspace/WorkspaceBottomNav.tsx"),
-    read("../src/styles.css"),
+    readWebStyles(),
   ]);
 
   assert.match(header, /aria-controls="polyth-session-drawer"/);
@@ -113,8 +114,8 @@ test("compact shell keeps drawer and bottom navigation reachable", async () => {
 });
 
 test("375px chat keeps a safe-area-aware bottom navigator and docked composer", async () => {
-  const css = await read("../src/styles.css");
-  const contract = css.slice(css.indexOf("/* P0 mobile shell contract."));
+  const css = await readWebStyles();
+  const contract = css;
 
   assert.match(
     contract,
@@ -136,8 +137,8 @@ test("375px chat keeps a safe-area-aware bottom navigator and docked composer", 
 });
 
 test("phone and coarse-pointer standalone controls share the 44px hit-box floor", async () => {
-  const css = await read("../src/styles.css");
-  const contract = css.slice(css.indexOf("/* Every standalone interactive control"));
+  const css = await readWebStyles();
+  const contract = css;
 
   assert.match(contract, /@media \(max-width: 480px\), \(pointer: coarse\)/);
   assert.match(contract, /button:not\(\.file-ref\),[\s\S]*?\[role="switch"\][\s\S]*?min-height:\s*var\(--tap\)\s*!important/);
@@ -145,12 +146,9 @@ test("phone and coarse-pointer standalone controls share the 44px hit-box floor"
 });
 
 test("phone touch targets and bottom sheets retain audit geometry", async () => {
-  const [css, developerCss] = await Promise.all([
-    read("../src/styles.css"),
-    read("../../../packages/files/widgets/styles.css"),
-  ]);
-  const auditPhoneStart = css.indexOf(
-    "@media (max-width: 480px), (max-height: 480px) and (pointer: coarse) {\n  .question-copy-btn,",
+  const css = await readWebStyles();
+  const auditPhoneStart = css.search(
+    /@media \(max-width: 480px\), \(max-height: 480px\) and \(pointer: coarse\)\s*\{\s*\.question-copy-btn,/,
   );
   assert.ok(auditPhoneStart >= 0, "the phone audit rules exist");
   const finalPhoneRules = css.slice(auditPhoneStart);
@@ -165,5 +163,5 @@ test("phone touch targets and bottom sheets retain audit geometry", async () => 
   assert.match(css, /@media \(pointer: coarse\)\s*\{[\s\S]*?\.thinking-slider input\s*\{[^}]*min-height:\s*var\(--tap\)/);
   assert.match(css, /\.panel-sheet \.rail-body\s*\{[^}]*padding-bottom:\s*calc\(10px \+ env\(safe-area-inset-bottom, 0px\)\)/s);
   assert.match(css, /\.package-tour-skips\s*\{[^}]*padding:[^;]*env\(safe-area-inset-bottom, 0px\)/s);
-  assert.match(developerCss, /@media \(max-width: 820px\)[\s\S]*?\.pane-tab-close\s*\{[^}]*min-width:\s*var\(--tap\)[^}]*min-height:\s*var\(--tap\)/s);
+  assert.match(css, /@media \(max-width: 820px\)[\s\S]*?\.pane-tab-close\s*\{[^}]*min-width:\s*var\(--tap\)[^}]*min-height:\s*var\(--tap\)/s);
 });

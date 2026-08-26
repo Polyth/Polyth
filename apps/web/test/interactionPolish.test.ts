@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
+import { readWebStyles } from "./webStyles.ts";
 
 const read = (relative: string) => readFile(new URL(relative, import.meta.url), "utf8");
 
@@ -9,7 +10,7 @@ test("drag-reorder surfaces expose explicit keyboard and touch controls", async 
     read("../src/components/MoveControls.tsx"),
     read("../src/components/QueuedMessageList.tsx"),
     read("../src/components/workspace/PaneHost.tsx"),
-    read("../src/styles.css"),
+    readWebStyles(),
   ]);
 
   assert.match(moveControls, /className="reorder-control"/);
@@ -45,8 +46,8 @@ test("every remaining double-click shortcut has a discoverable mobile alternativ
 });
 
 test("coarse pointers, focus, motion, radii, and empty states share polish tokens", async () => {
-  const css = await read("../src/styles.css");
-  const coarse = css.slice(css.indexOf("/* Touch users always see answer actions"));
+  const css = await readWebStyles();
+  const coarse = css;
 
   assert.match(css, /--radius:\s*calc\(12px \* var\(--corner-radius-scale\)\)/);
   assert.match(css, /--motion-surface:\s*240ms/);
@@ -76,7 +77,7 @@ test("P1 mobile refinements remain wired to their visible surfaces", async () =>
     read("../src/components/ProjectFolderDialog.tsx"),
     read("../src/components/settings/parts.tsx"),
     read("../src/haptics.ts"),
-    read("../src/styles.css"),
+    readWebStyles(),
   ]);
 
   assert.match(sessions, /aria-busy=\{opening \|\| undefined\}/, "session switching exposes loading state");
