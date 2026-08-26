@@ -89,7 +89,7 @@ test(
       );
       for (const model of models) {
         await t.test(model, async () => {
-          assert.match(model, /^opencode\/.+(?:-free|big-pickle)$/);
+          assert.match(model, /^opencode\/(?:big-pickle|.+-free)$/);
           const result = await runOpenCode(cwd, model, prompt);
           assert.equal(result.timedOut, false, `${model} timed out\n${result.stderr}`);
           assert.equal(result.code, 0, `${model} exited ${result.code}\n${result.stderr}`);
