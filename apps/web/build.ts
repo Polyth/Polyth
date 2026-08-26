@@ -52,8 +52,20 @@ await build({
   define: { "process.env.NODE_ENV": '"production"' },
   logLevel: "info",
 });
+const webPackages = await discoverWebPackages(join(here, "..", "..", "packages"));
+const browserEntries: Record<string, string> = {
+  main: join(here, "src/main.tsx"),
+};
+for (const pkg of webPackages) {
+  browserEntries[`web-packages/${pkg.id}/entry`] = pkg.entryFile;
+}
+
+// Build the shell and package entries as one split graph. Feature components
+// still consume generic shell seams such as the store and i18n; a shared graph
+// guarantees those stateful modules are singletons instead of silently
+// cloning them once per dynamically loaded package.
 await build({
-  entryPoints: [join(here, "src/main.tsx")],
+  entryPoints: browserEntries,
   bundle: true,
   platform: "browser",
   format: "esm",
@@ -63,7 +75,7 @@ await build({
   sourcemap: true,
   minify: true,
   outdir: dist,
-  entryNames: "[name]",
+  entryNames: "[dir]/[name]",
   chunkNames: "chunks/[name]-[hash]",
   assetNames: "assets/[name]-[hash]",
   loader: { ".css": "css" },
@@ -71,7 +83,6 @@ await build({
   define: { "process.env.NODE_ENV": '"production"' },
   logLevel: "info",
 });
-const webPackages = await discoverWebPackages(join(here, "..", "..", "packages"));
 const webPackageManifest: Array<{
   id: string;
   module: string;
@@ -79,25 +90,6 @@ const webPackageManifest: Array<{
 }> = [];
 for (const pkg of webPackages) {
   const outdir = join(dist, "web-packages", pkg.id);
-  await build({
-    entryPoints: [pkg.entryFile],
-    bundle: true,
-    platform: "browser",
-    format: "esm",
-    splitting: true,
-    jsx: "automatic",
-    external: reactExternals,
-    sourcemap: true,
-    minify: true,
-    outdir,
-    entryNames: "entry",
-    chunkNames: "chunks/[name]-[hash]",
-    assetNames: "assets/[name]-[hash]",
-    loader: { ".css": "css" },
-    plugins: [uiFontScalePlugin],
-    define: { "process.env.NODE_ENV": '"production"' },
-    logLevel: "info",
-  });
   const outputs = await readdir(outdir);
   webPackageManifest.push({
     id: pkg.id,
