@@ -9,7 +9,16 @@
   },
   "polyth": {
     "serverEntry": "./src/serverEntry.ts",
-    "webEntry": "./widgets/index.tsx"
+    "webEntry": "./widgets/index.tsx",
+    "descriptor": {
+      "name": "Plugins",
+      "description": "Managed plugin installation and configuration.",
+      "core": false,
+      "enabled": true,
+      "settingsGroup": "Customize",
+      "icon": "🧩",
+      "hasSettings": true
+    }
   },
   "dependencies": {
     "@polyth/contracts": "0.1.0",

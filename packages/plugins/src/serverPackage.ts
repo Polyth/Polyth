@@ -1,9 +1,10 @@
 // Autonomous server-package discovery. Workspace feature packages opt in with
-// a `"polyth": { "serverEntry": "./src/serverEntry.ts" }` marker in their
-// package.json; the entry default-exports a `registerPackage(host)` factory
-// returning a `ServerPackage` (routes + enable/disable hooks). The server
-// scans packages/*, loads every marked entry, and wires it into the package
-// lifecycle — no static imports or manual registration in the composition root.
+// a `"polyth": { "serverEntry": "./src/serverEntry.ts", "descriptor": ... }`
+// marker in package.json; the entry default-exports a `registerPackage(host)`
+// factory returning a `ServerPackage` (routes + enable/disable hooks). The
+// server scans packages/*, loads every marked entry, and wires it into the
+// package lifecycle — no static imports, descriptors, or manual registration
+// in the composition root.
 import { readdir, readFile, realpath, stat } from "node:fs/promises";
 import { isAbsolute, join, resolve, sep, win32 } from "node:path";
 import { pathToFileURL } from "node:url";
@@ -187,6 +188,8 @@ export interface DiscoveredServerPackage {
   dir: string;
   /** The polyth.serverEntry marker value, relative to `dir`. */
   entryPath: string;
+  /** Package-owned settings/lifecycle metadata from polyth.descriptor. */
+  descriptor: PackageDescriptorDto;
 }
 
 const validEntryPath = (entry: string): boolean =>
@@ -195,6 +198,55 @@ const validEntryPath = (entry: string): boolean =>
   && !isAbsolute(entry)
   && !win32.isAbsolute(entry)
   && !entry.split("/").includes("..");
+
+const SETTINGS_GROUPS = new Set(["Workspace", "Engineering", "Customize", "System"]);
+
+function packageDescriptor(id: string, value: unknown): PackageDescriptorDto {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw err("invalid-input", `package "${id}" must declare a polyth.descriptor object`);
+  }
+  const descriptor = value as Record<string, unknown>;
+  if (
+    typeof descriptor.name !== "string" || !descriptor.name.trim()
+    || typeof descriptor.description !== "string" || !descriptor.description.trim()
+    || typeof descriptor.core !== "boolean"
+    || typeof descriptor.enabled !== "boolean"
+    || typeof descriptor.hasSettings !== "boolean"
+  ) {
+    throw err(
+      "invalid-input",
+      `package "${id}" polyth.descriptor requires name, description, core, enabled, and hasSettings`,
+    );
+  }
+  if (
+    descriptor.settingsGroup !== undefined
+    && (typeof descriptor.settingsGroup !== "string"
+      || !SETTINGS_GROUPS.has(descriptor.settingsGroup))
+  ) {
+    throw err("invalid-input", `package "${id}" polyth.descriptor.settingsGroup is invalid`);
+  }
+  if (
+    descriptor.icon !== undefined
+    && (typeof descriptor.icon !== "string" || !descriptor.icon.trim())
+  ) {
+    throw err("invalid-input", `package "${id}" polyth.descriptor.icon must be a non-empty string`);
+  }
+  if (descriptor.core && !descriptor.enabled) {
+    throw err("invalid-input", `core package "${id}" must be enabled by default`);
+  }
+  return {
+    id,
+    name: descriptor.name,
+    description: descriptor.description,
+    core: descriptor.core,
+    enabled: descriptor.enabled,
+    hasSettings: descriptor.hasSettings,
+    ...(typeof descriptor.settingsGroup === "string"
+      ? { settingsGroup: descriptor.settingsGroup as PackageDescriptorDto["settingsGroup"] }
+      : {}),
+    ...(typeof descriptor.icon === "string" ? { icon: descriptor.icon } : {}),
+  };
+}
 
 /** Scan `packagesDir` for workspace packages that opt in to server discovery
  *  via a `polyth.serverEntry` package.json marker. Unmarked and unreadable
@@ -219,7 +271,10 @@ export async function discoverServerPackages(
     } catch {
       continue; // no package.json (or unparseable) — cannot opt in
     }
-    const pkg = parsed as { name?: unknown; polyth?: { serverEntry?: unknown } } | null;
+    const pkg = parsed as {
+      name?: unknown;
+      polyth?: { serverEntry?: unknown; descriptor?: unknown };
+    } | null;
     const entryPath = pkg?.polyth?.serverEntry;
     if (entryPath === undefined) continue;
     if (INFRASTRUCTURE_PACKAGE_DIRS.has(entry.name)) {
@@ -239,6 +294,7 @@ export async function discoverServerPackages(
       packageName: typeof pkg?.name === "string" ? pkg.name : `@polyth/${entry.name}`,
       dir,
       entryPath,
+      descriptor: packageDescriptor(entry.name, pkg?.polyth?.descriptor),
     });
   }
   return discovered.sort((a, b) => a.id.localeCompare(b.id));

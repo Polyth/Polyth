@@ -9,7 +9,16 @@
   },
   "polyth": {
     "serverEntry": "./src/serverEntry.ts",
-    "webEntry": "./widgets/index.tsx"
+    "webEntry": "./widgets/index.tsx",
+    "descriptor": {
+      "name": "Home Assistant",
+      "description": "Home Assistant entities and controls.",
+      "core": false,
+      "enabled": false,
+      "settingsGroup": "Customize",
+      "icon": "🏠",
+      "hasSettings": true
+    }
   },
   "dependencies": {
     "@polyth/contracts": "0.1.0",

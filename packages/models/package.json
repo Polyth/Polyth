@@ -9,7 +9,15 @@
   },
   "polyth": {
     "serverEntry": "./src/serverEntry.ts",
-    "webEntry": "./widgets/index.tsx"
+    "webEntry": "./widgets/index.tsx",
+    "descriptor": {
+      "name": "Providers & Models",
+      "description": "Model providers, visibility, and defaults.",
+      "core": true,
+      "enabled": true,
+      "settingsGroup": "Engineering",
+      "hasSettings": true
+    }
   },
   "dependencies": {
     "@polyth/contracts": "0.1.0",

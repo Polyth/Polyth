@@ -9,7 +9,16 @@
   },
   "polyth": {
     "serverEntry": "./src/serverEntry.ts",
-    "webEntry": "./widgets/index.tsx"
+    "webEntry": "./widgets/index.tsx",
+    "descriptor": {
+      "name": "Voice & Dictation",
+      "description": "Speech-to-text dictation and spoken replies.",
+      "core": false,
+      "enabled": true,
+      "settingsGroup": "Workspace",
+      "icon": "🎤",
+      "hasSettings": true
+    }
   },
   "dependencies": {
     "@polyth/contracts": "0.1.0",

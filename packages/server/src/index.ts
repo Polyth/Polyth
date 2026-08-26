@@ -28,6 +28,7 @@ import {
 } from "@polyth/backend-opencode";
 import {
   createServerServiceRegistry,
+  discoverServerPackages,
   serverServiceKey,
   type HttpServerContext,
   type ServerPackageHost,
@@ -118,6 +119,8 @@ type DictationForWs = NonNullable<Parameters<typeof attachWs>[3]>;
 export async function boot(opts: BootOptions = {}) {
   const port = opts.port ?? Number(process.env.PORT ?? 4400);
   const dataDir = resolve(opts.dataDir ?? process.env.POLYTH_DATA_DIR ?? "./data");
+  const packagesDir = opts.packagesDir ?? resolve(__dirname, "../..");
+  const discoveredPackageManifests = await discoverServerPackages(packagesDir);
   mkdirSync(dataDir, { recursive: true });
   const routeRegistry = createRouteRegistry();
   const packageLifecycle = createPackageLifecycle(routeRegistry);
@@ -134,6 +137,7 @@ export async function boot(opts: BootOptions = {}) {
   };
   const packageRegistry = createPackageRegistry({
     file: `${dataDir}/packages.json`,
+    descriptors: discoveredPackageManifests.map((pkg) => pkg.descriptor),
     onSetEnabled: (id, enabled) => enabled
       ? packageLifecycle.enable(id)
       : packageLifecycle.disable(id),
@@ -528,7 +532,8 @@ export async function boot(opts: BootOptions = {}) {
     onHttpServer,
   };
   const discoveredPackages = await registerDiscoveredPackages({
-    packagesDir: opts.packagesDir ?? resolve(__dirname, "../.."),
+    packagesDir,
+    discovered: discoveredPackageManifests,
     host: packageHost,
     lifecycle: packageLifecycle,
     routes: routeRegistry,

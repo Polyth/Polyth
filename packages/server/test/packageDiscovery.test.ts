@@ -20,7 +20,16 @@ const writePackage = (
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, "package.json"), JSON.stringify({
     name: `@polyth/${dirName}`,
-    polyth: { serverEntry: "./server.mjs" },
+    polyth: {
+      serverEntry: "./server.mjs",
+      descriptor: {
+        name: dirName,
+        description: `${dirName} test package`,
+        core: false,
+        enabled: true,
+        hasSettings: false,
+      },
+    },
   }));
   writeFileSync(join(dir, "server.mjs"), entrySource);
 };
@@ -91,7 +100,7 @@ test("each package receives its own pluginId on the shared host", async () => {
   assert.equal(await routes.handler(request("/api/id/second")), true);
 });
 
-test("every server feature package is discoverable and has a matching descriptor", async () => {
+test("every server feature package owns its discoverable descriptor", async () => {
   const packagesDir = join(import.meta.dirname, "../..");
   const discovered = await discoverServerPackages(packagesDir);
   const expected = [
@@ -121,11 +130,14 @@ test("every server feature package is discoverable and has a matching descriptor
     "workflow",
   ];
   assert.deepEqual(discovered.map((pkg) => pkg.id), expected);
-  const descriptorIds = new Set<string>(
-    BUILTIN_PACKAGES.map((descriptor) => descriptor.id),
-  );
   assert.deepEqual(
-    discovered.filter((pkg) => !descriptorIds.has(pkg.id)).map((pkg) => pkg.id),
+    discovered.map((pkg) => pkg.descriptor.id),
+    expected,
+  );
+  const shellDescriptorIds = new Set(BUILTIN_PACKAGES.map((descriptor) => descriptor.id));
+  assert.deepEqual(
+    expected.filter((id) => shellDescriptorIds.has(id)),
     [],
+    "feature descriptors do not remain in server composition",
   );
 });

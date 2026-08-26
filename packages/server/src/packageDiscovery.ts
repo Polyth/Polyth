@@ -7,6 +7,7 @@ import {
   discoverServerPackages,
   loadServerPackage,
   type ServerPackage,
+  type DiscoveredServerPackage,
   type ServerPackageHost,
 } from "@polyth/plugins";
 import type { PackageLifecycle } from "./packageLifecycle.ts";
@@ -15,6 +16,8 @@ import type { RouteRegistry } from "./routeRegistry.ts";
 export interface PackageDiscoveryDeps {
   /** The workspace packages/ directory to scan. */
   packagesDir: string;
+  /** Pre-discovered manifests when the registry already scanned at boot. */
+  discovered?: readonly DiscoveredServerPackage[];
   /** Shared host template; each package receives it with its own pluginId. */
   host: Omit<ServerPackageHost, "pluginId">;
   lifecycle: PackageLifecycle;
@@ -53,7 +56,8 @@ export async function registerDiscoveredPackages(
   deps: PackageDiscoveryDeps,
 ): Promise<string[]> {
   const registered: string[] = [];
-  for (const discovered of await discoverServerPackages(deps.packagesDir)) {
+  const packages = deps.discovered ?? await discoverServerPackages(deps.packagesDir);
+  for (const discovered of packages) {
     try {
       const pkg = await loadServerPackage(discovered, { ...deps.host, pluginId: discovered.id });
       registerServerPackage(deps, discovered.id, pkg);

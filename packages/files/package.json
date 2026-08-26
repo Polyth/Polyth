@@ -9,7 +9,14 @@
   },
   "polyth": {
     "serverEntry": "./src/serverEntry.ts",
-    "webEntry": "./widgets/index.tsx"
+    "webEntry": "./widgets/index.tsx",
+    "descriptor": {
+      "name": "Files",
+      "description": "Workspace file access and attachments.",
+      "core": true,
+      "enabled": true,
+      "hasSettings": false
+    }
   },
   "dependencies": {
     "@polyth/contracts": "0.1.0",

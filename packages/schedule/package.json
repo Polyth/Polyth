@@ -9,7 +9,16 @@
   },
   "polyth": {
     "serverEntry": "./src/serverEntry.ts",
-    "webEntry": "./widgets/index.tsx"
+    "webEntry": "./widgets/index.tsx",
+    "descriptor": {
+      "name": "Schedule",
+      "description": "Schedule recurring and one-time agent tasks.",
+      "core": false,
+      "enabled": true,
+      "settingsGroup": "Engineering",
+      "icon": "⏱",
+      "hasSettings": false
+    }
   },
   "dependencies": {
     "@polyth/contracts": "0.1.0",
