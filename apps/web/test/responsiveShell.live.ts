@@ -202,6 +202,11 @@ test("mobile shortcut settings support touch and keyboard sorting", async () => 
     await page.waitForSelector(".package-tour", { state: "hidden" });
   }
   await page.getByRole("button", { name: "Widgets & Layout", exact: true }).click();
+  await page.waitForTimeout(300);
+  if (await page.locator(".package-tour-scrim").isVisible().catch(() => false)) {
+    await page.keyboard.press("Escape");
+    await page.waitForSelector(".package-tour-scrim", { state: "hidden" });
+  }
   const card = page.locator('[data-settings-item="widgets.mobileShortcuts"]');
   await card.waitFor({ state: "visible" });
 
