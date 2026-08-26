@@ -264,7 +264,11 @@ test("every redesigned overlay uses the one sheet system", async () => {
     ["agent/mode picker", "../src/components/Picker.tsx"],
   ] as const) {
     const src = await read(rel);
-    assert.ok(src.includes('from "./mobile/Sheet.tsx"') || src.includes('from "./Sheet.tsx"'), `${name} renders the shared sheet`);
+    assert.match(
+      src,
+      /from "(?:[^"]*\/)?(?:mobile\/)?Sheet\.tsx"/,
+      `${name} renders the shared sheet`,
+    );
   }
 });
 

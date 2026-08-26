@@ -70,10 +70,10 @@ test("provider usage distribution clamps invalid counters before drawing shares"
 
 test("Usage settings keeps the Polyth shell and offers rich dashboard views", async () => {
   const source = await readFile(new URL("../widgets/usage/UsageDashboard.tsx", import.meta.url), "utf8");
-  const quota = await readFile(new URL("../src/usage/quotaUi.tsx", import.meta.url), "utf8");
-  const api = await readFile(new URL("../src/api.ts", import.meta.url), "utf8");
-  const registration = await readFile(new URL("../src/packages/usage.ts", import.meta.url), "utf8");
-  const styles = await readFile(new URL("../src/styles.css", import.meta.url), "utf8");
+  const quota = await readFile(new URL("../widgets/usage/quotaUi.tsx", import.meta.url), "utf8");
+  const api = await readFile(new URL("../../session/src/webApi.ts", import.meta.url), "utf8");
+  const registration = await readFile(new URL("../widgets/index.tsx", import.meta.url), "utf8");
+  const styles = await readFile(new URL("../../../apps/web/src/styles.css", import.meta.url), "utf8");
   assert.match(source, /function ProviderSpendDonut/);
   assert.match(source, /className="usage-spend-donut"[\s\S]*?<svg/);
   assert.match(source, /function ModelBreakdown/);
