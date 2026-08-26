@@ -126,7 +126,7 @@ function harness() {
       path: url.pathname,
       method,
       body: async () => requestBody,
-      json: (code, value) => {
+      json: (code: number, value: unknown) => {
         calls.push({ kind: "json" });
         status = code;
         payload = value;

@@ -124,11 +124,13 @@ interface JiraIssue {
   };
 }
 
-const jiraStatus = (
-  value: JiraIssue["fields"] extends infer Fields
-    ? Fields extends { status?: infer Status } ? Status : never
-    : never,
-): TaskTrackerStatusDto => ({
+interface JiraStatus {
+  id?: string;
+  name?: string;
+  statusCategory?: { key?: string };
+}
+
+const jiraStatus = (value: JiraStatus | undefined): TaskTrackerStatusDto => ({
   id: String(value?.id ?? ""),
   name: String(value?.name ?? "Unknown"),
   category: statusCategory(value?.statusCategory?.key),

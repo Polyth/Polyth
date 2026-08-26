@@ -41,7 +41,7 @@ test("provider discovery reports env names without exposing credential values", 
   assert.doesNotMatch(JSON.stringify(service.providers()), /secret-token|public-key|dev@example/);
 
   const empty = createTaskTrackerService({ env: {} });
-  await assert.rejects(
+  assert.throws(
     () => empty.listBoards("jira"),
     (cause: Error & { code?: string }) =>
       cause.code === "unavailable" && /JIRA_BASE_URL/.test(cause.message),
