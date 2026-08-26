@@ -1,9 +1,22 @@
 import type { WidgetContributionDescriptor } from "@polyth/contracts";
 
-/**
- * Phase 2 can bind these descriptors to allowlisted React renderers without
- * changing the server package or adding feature code to App.tsx.
- */
+const BOARD_SETTINGS = {
+  type: "object",
+  properties: {
+    defaultView: {
+      type: "string",
+      title: "Default board view",
+      enum: ["kanban", "list"],
+      default: "kanban",
+    },
+    hideCompleted: {
+      type: "boolean",
+      title: "Hide completed tasks",
+      default: false,
+    },
+  },
+} as const;
+
 export const TASK_TRACKER_WIDGETS: readonly WidgetContributionDescriptor[] = [
   {
     id: "task-trackers.board",
@@ -28,6 +41,7 @@ export const TASK_TRACKER_WIDGETS: readonly WidgetContributionDescriptor[] = [
     resizable: true,
     recommended: true,
     defaultVisible: false,
+    settingsSchema: BOARD_SETTINGS,
   },
   {
     id: "task-trackers.linked-task",

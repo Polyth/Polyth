@@ -8,6 +8,7 @@ import type {
   TaskTrackerProjectDto,
   TaskTrackerProvider,
   TaskTrackerProviderDto,
+  TaskTrackerSessionTaskDto,
   TaskTrackerService,
   TaskTrackerStatusCategory,
   TaskTrackerStatusDto,
@@ -554,17 +555,7 @@ export function buildTaskWorkPrompt(task: TaskTrackerTaskDto, instructions = "")
   ].join("\n");
 }
 
-export interface TaskLifecycleState {
-  provider: TaskTrackerProvider;
-  taskId: string;
-  taskKey: string;
-  title: string;
-  statusId: string;
-  statusName: string;
-  completed: boolean;
-  selectedAtSeq: number;
-  updatedAtSeq: number;
-}
+export type TaskLifecycleState = TaskTrackerSessionTaskDto;
 
 /** Replays package events without assuming every session event is known. */
 export function reduceTaskLifecycle(events: readonly SessionEvent[]): TaskLifecycleState[] {

@@ -11,6 +11,7 @@ import { installModelsPackage } from "./models.ts";
 import { installPluginsPackage } from "./plugins.ts";
 import { installSecureSafePackage } from "./secure-safe.ts";
 import { installSshPackage } from "./ssh.ts";
+import { installTaskTrackersPackage } from "./task-trackers.ts";
 import { combineUnregister } from "./settingsPage.ts";
 import { installUsagePackage } from "./usage.ts";
 import { installVoicePackage } from "./voice.ts";
@@ -39,6 +40,7 @@ const installers = new Map<string, PackageInstaller>([
   ["secure-safe", installSecureSafePackage],
   ["home-assistant", installHomeAssistantPackage],
   ["ssh", installSshPackage],
+  ["task-trackers", installTaskTrackersPackage],
   ["workflow", installWorkflowPackage],
 ]);
 

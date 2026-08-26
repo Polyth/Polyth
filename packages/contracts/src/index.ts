@@ -1019,6 +1019,19 @@ export interface TaskTrackerTaskQuery {
   limit?: number;
 }
 
+/** Durable task-link projection returned for one Polyth session. */
+export interface TaskTrackerSessionTaskDto {
+  provider: TaskTrackerProvider;
+  taskId: string;
+  taskKey: string;
+  title: string;
+  statusId: string;
+  statusName: string;
+  completed: boolean;
+  selectedAtSeq: number;
+  updatedAtSeq: number;
+}
+
 export interface TaskTrackerService {
   providers(): TaskTrackerProviderDto[];
   listProjects(provider: TaskTrackerProvider): Promise<TaskTrackerProjectDto[]>;
