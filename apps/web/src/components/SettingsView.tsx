@@ -4,7 +4,7 @@
 // to the exact row; page-title filtering remains the fallback for plugin
 // pages without item metadata.
 import {
-  Fragment, useEffect, useMemo, useRef, useState,
+  Fragment, useEffect, useLayoutEffect, useMemo, useRef, useState,
   type ReactNode, type TouchEvent as ReactTouchEvent,
 } from "react";
 import { consumePendingSettingsPage, setOverlay } from "../store.ts";
@@ -116,6 +116,13 @@ function SettingsNavIcon({ pageId }: { pageId: string }) {
 
 export default function SettingsView({ onClose = () => setOverlay(null) }: { onClose?: () => void }) {
   useModalScrollLock(true);
+  const returnFocusRef = useRef<HTMLElement | null>(
+    typeof document !== "undefined"
+      && document.activeElement instanceof HTMLElement
+      && document.activeElement !== document.body
+      ? document.activeElement
+      : null,
+  );
   const prefs = usePrefs();
   const mobile = useMobileSettings();
   // Deep link (e.g. "Change shortcut…" palette rows land on the Shortcuts page).
@@ -127,6 +134,28 @@ export default function SettingsView({ onClose = () => setOverlay(null) }: { onC
   const modalRef = useRef<HTMLDivElement>(null);
   const previousMobile = useRef(mobile);
   const backSwipeStartRef = useRef<GesturePoint | null>(null);
+
+  const returnFocusTarget = () => {
+    const opener = returnFocusRef.current;
+    const fallbackSelector = window.matchMedia("(max-width: 820px)").matches
+      ? ".mobile-shortcut-settings"
+      : ".header-profile";
+    return opener?.isConnected
+      ? opener
+      : document.querySelector<HTMLElement>(fallbackSelector);
+  };
+  const closeSettings = () => {
+    const target = returnFocusTarget();
+    onClose();
+    // Move focus before React removes the dialog. The layout-effect cleanup
+    // below repeats the handoff for callers that close Settings externally.
+    if (target?.isConnected) target.focus();
+  };
+
+  useLayoutEffect(() => () => {
+    const target = returnFocusTarget();
+    if (target?.isConnected) target.focus();
+  }, []);
 
   useEffect(() => {
     // A settings modal opened on mobile starts on the navigation stage, but
@@ -145,7 +174,7 @@ export default function SettingsView({ onClose = () => setOverlay(null) }: { onC
         if (mobile && mobileStage === "page") {
           setMobileStage("nav");
         } else {
-          onClose();
+          closeSettings();
         }
         return;
       }
@@ -329,7 +358,7 @@ export default function SettingsView({ onClose = () => setOverlay(null) }: { onC
   };
 
   return (
-    <div className="scrim settings-scrim" onPointerDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+    <div className="scrim settings-scrim" onPointerDown={(e) => { if (e.target === e.currentTarget) closeSettings(); }}>
       <div
         className={`modal settings-shell settings-page-${current.id}${mobile ? ` settings-mobile-${mobileStage}` : ""}`}
         ref={modalRef}
@@ -342,11 +371,14 @@ export default function SettingsView({ onClose = () => setOverlay(null) }: { onC
       >
         <nav className="modal-nav settings-nav">
           <div className="settings-mobile-nav-head">
-            <strong>{tr("common.settings")}</strong>
-            <button type="button" className="close-btn" onClick={onClose} aria-label={tr("common.close")}>
+            <strong data-settings-focus-target tabIndex={-1}>{tr("common.settings")}</strong>
+            <button type="button" className="close-btn" onClick={closeSettings} aria-label={tr("common.close")}>
               <Icon.close />
             </button>
           </div>
+          <h1 className="settings-nav-title" data-settings-focus-target tabIndex={-1}>
+            {tr("common.settings")}
+          </h1>
           <input
             className="settings-nav-search"
             value={filter}
@@ -427,15 +459,17 @@ export default function SettingsView({ onClose = () => setOverlay(null) }: { onC
                 >
                   <span aria-hidden="true">←</span> {tr("common.back")}</button>
                 <span className="settings-mobile-title">{tr("common.settings")}</span>
-                <button className="close-btn" onClick={onClose} aria-label={tr("common.close")}>{tr("settingsview.message")}</button>
+                <button className="close-btn" onClick={closeSettings} aria-label={tr("common.close")}>{tr("settingsview.message")}</button>
               </div>
             ) : (
               <>
                 <div className="settings-pane-head-copy">
-                  <div className="modal-title settings-pane-title">{current.label}</div>
+                  <h1 className="modal-title settings-pane-title" data-settings-focus-target tabIndex={-1}>
+                    {current.label}
+                  </h1>
                 </div>
                 <span className="dialog-hint" id="settings-close-hint"><kbd>{tr("settingsview.esc")}</kbd> {tr("settingsview.close")}</span>
-                <button className="close-btn" onClick={onClose} aria-label={tr("common.close")}>{tr("settingsview.message")}</button>
+                <button className="close-btn" onClick={closeSettings} aria-label={tr("common.close")}>{tr("settingsview.message")}</button>
               </>
             )}
           </div>

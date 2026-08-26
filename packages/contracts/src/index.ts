@@ -617,7 +617,8 @@ export type RuntimeEvent =
   | { type: "assistant/chunk"; partId: string; text: string }
   | { type: "assistant/reasoning-chunk"; partId: string; text: string }
   | { type: "assistant/message"; partId: string; text: string; reasoning?: string; tokens?: TokenUsage; cost?: number }
-  | { type: "tool/call"; callId: string; tool: string; input: JsonObject }
+  | { type: "tool/call"; callId: string; tool: string; input: JsonObject; status: "pending" | "running" }
+  | { type: "tool/started"; callId: string; tool: string; input: JsonObject }
   | { type: "tool/result"; callId: string; tool: string; output: string; title?: string; metadata?: JsonObject; input?: JsonObject }
   | { type: "tool/error"; callId: string; tool: string; error: string; input?: JsonObject }
   | { type: "permission/requested"; requestId: string; permission: string; patterns: string[]; metadata?: JsonObject; tool?: string }

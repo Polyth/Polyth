@@ -98,6 +98,8 @@ test("all mobile chat composers expose project and worktree targets", () => {
   const actions = read("../src/widgets/builtinMiniWidgets.tsx");
   const workflowLauncher = read("../src/components/WorkflowLauncher.tsx");
   const header = read("../src/components/Header.tsx");
+  const bottomNavigation = read("../src/components/workspace/WorkspaceBottomNav.tsx");
+  const mobileNavigation = read("../src/components/mobile/MobileNavigationRail.tsx");
   const css = read("../src/styles.css");
 
   // UX-MOBILE-01 §5: the compact context bar belongs to the shared composer,
@@ -115,24 +117,67 @@ test("all mobile chat composers expose project and worktree targets", () => {
   assert.match(workflowLauncher, /composer-workflow/);
   assert.match(css, /\.composer-mobile \.composer-workflow,/);
   assert.match(css, /\.composer-mobile \.composer-workflow:active,/);
-  assert.match(css, /\.composer\.composer-mobile \.composer-mobile-extensions \.composer-workflow\s*\{[^}]*width:\s*var\(--tap\);[^}]*min-width:\s*var\(--tap\);/s);
+  assert.match(
+    css,
+    /\.composer\.composer-mobile \.composer-mobile-extensions \.composer-auto-approve,[\s\S]*?\.composer\.composer-mobile \.composer-mobile-extensions \.composer-goals,[\s\S]*?\.composer\.composer-mobile \.composer-mobile-extensions \.composer-workflow\s*\{[^}]*width:\s*var\(--tap\);[^}]*min-width:\s*var\(--tap\);[^}]*height:\s*var\(--tap\);[^}]*min-height:\s*var\(--tap\);/s,
+  );
   assert.match(css, /\.composer-mobile\.composer-collapsed:not\(\.composer-has-draft\) \.composer-workflow \{ display: none; \}/);
   assert.match(css, /\.composer-mobile\.composer-has-draft \.composer-workflow \{ display: inline-flex; \}/);
-  assert.match(header, /displaySessionTitle\(session\.title, session\.id, firstUserText\)/);
-  const phoneStart = header.indexOf('if (mode === "phone" && chatSurface)');
-  const phoneEnd = header.indexOf("\n  return (", phoneStart);
-  const phoneHeader = header.slice(phoneStart, phoneEnd);
-  assert.match(phoneHeader, /<DrawerTrigger \/>/);
-  assert.match(phoneHeader, /className="mobile-session-title"/);
-  assert.match(phoneHeader, /<CompactViewPicker view=\{view\} \/>/);
-  assert.match(phoneHeader, /className="icon-btn mobile-header-action mobile-header-more"/);
-  assert.match(phoneHeader, /slot="session\.header\.actions"/);
-  assert.match(phoneHeader, /slot="app\.header\.actions"/);
-  assert.doesNotMatch(phoneHeader, /refreshSessions|MobileComposerControlsMenu|<UserMenu/,
-    "secondary utilities stay in the More sheet instead of crowding the top bar");
-  assert.doesNotMatch(header, /MobileComposerControlsMenu/);
-  assert.match(header, /triggerIcon=\{<Icon\.widgets \/>\}/);
+  assert.match(bottomNavigation, /displaySessionTitle\(session\?\.title \?\? "", session\?\.id\)/);
+  assert.match(header, /<MobileNavigationRail \/>/);
+  assert.match(header, /<WorkspaceBottomNav \/>/);
+  assert.match(mobileNavigation, /ui\.mobileShortcuts/);
   assert.match(css, /\.polyth-gradient\s*\{[^}]*linear-gradient/s);
+});
+
+test("Multi-Run controls use an intentional desktop grid and collapse on mobile", () => {
+  const view = read("../src/components/MultiRunView.tsx");
+  const css = read("../src/styles.css");
+
+  assert.match(view, /className="multirun-prompt"/);
+  assert.match(view, /className="view-toolbar-row multirun-controls"/);
+  assert.match(css, /\.multirun-prompt\s*\{[^}]*min-height:\s*68px;[^}]*flex:\s*none;/s);
+  assert.match(
+    css,
+    /\.view-toolbar > \.model-filter-input\s*\{[^}]*height:\s*var\(--tap\);[^}]*min-height:\s*var\(--tap\);[^}]*flex-basis:\s*auto;/s,
+  );
+  assert.match(css, /\.multirun-controls > select\s*\{[^}]*min-width:\s*0;[^}]*max-width:\s*100%;/s);
+  assert.match(css, /\.multirun-controls\s*\{[^}]*grid-template-columns:\s*repeat\(3,\s*minmax\(0,\s*1fr\)\);/s);
+  assert.match(css, /\.multirun-controls > select:nth-of-type\(4\)\s*\{\s*grid-column:\s*span 2;/);
+  assert.match(
+    css,
+    /@media \(max-width: 820px\)[\s\S]*?\.multirun-controls\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\);[\s\S]*?\.multirun-controls > select:nth-of-type\(4\)\s*\{\s*grid-column:\s*auto;/s,
+  );
+});
+
+test("compact panels and timeline actions use current mobile geometry", () => {
+  const css = read("../src/styles.css");
+  const finalMobile = css.slice(css.lastIndexOf("@media (max-width: 820px)"));
+
+  assert.match(finalMobile, /\.panel-sheet\s*\{[^}]*top:\s*60px;[^}]*bottom:\s*0;[^}]*z-index:\s*30;/s);
+  assert.match(
+    finalMobile,
+    /\.app:has\(> \.workspace-bottom-nav\) :is\(\.rail-fullscreen, \.panel-sheet\)\s*\{[^}]*bottom:\s*calc\(72px \+ var\(--safe-bottom\)\);/s,
+  );
+  assert.match(finalMobile, /\.panel-sheet-backdrop\s*\{\s*z-index:\s*29;/);
+  assert.match(
+    finalMobile,
+    /\.msg\.assistant \.msg-action-btn,[\s\S]*?\.agent-reply-actions button,[\s\S]*?\.assistant-gallery-shortcut\s*\{[^}]*width:\s*var\(--tap\);[^}]*min-width:\s*var\(--tap\);[^}]*height:\s*var\(--tap\);[^}]*min-height:\s*var\(--tap\);/s,
+  );
+  assert.match(finalMobile, /\.msg\.assistant \.agent-reply-header\s*\{\s*flex-wrap:\s*wrap;/);
+  assert.match(
+    finalMobile,
+    /\.msg\.assistant \.agent-reply-actions\s*\{[^}]*width:\s*100%;[^}]*max-width:\s*100%;[^}]*flex:\s*1 0 100%;[^}]*flex-wrap:\s*wrap;[^}]*justify-content:\s*flex-end;[^}]*margin-left:\s*0;[^}]*opacity:\s*1;[^}]*pointer-events:\s*auto;/s,
+  );
+});
+
+test("Files empty-state helper copy keeps horizontal viewport breathing room", () => {
+  const css = read("../src/styles.css");
+
+  assert.match(
+    css,
+    /\.editor-empty\s*\{[^}]*width:\s*100%;[^}]*box-sizing:\s*border-box;[^}]*padding-inline:\s*24px;/s,
+  );
 });
 
 test("source-control surfaces keep responsive and accessible audit contracts", () => {
@@ -152,8 +197,5 @@ test("source-control surfaces keep responsive and accessible audit contracts", (
   assert.match(pullRequest, /reviewBusy/);
   assert.match(pullRequest, /<MarkdownDoc/);
   assert.doesNotMatch(pending, /<details/);
-  assert.match(
-    pending,
-    /aria-haspopup="menu"/,
-  );
+  assert.match(pending, /aria-haspopup="menu"/);
 });

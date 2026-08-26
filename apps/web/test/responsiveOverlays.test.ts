@@ -43,7 +43,7 @@ test("modal primitives lock background scroll and retain touch dismissal", async
   assert.match(settings, /useModalScrollLock\(true\)/);
   assert.match(settings, /className="settings-mobile-nav-head"/);
   assert.match(settings, /className="settings-mobile-title"/);
-  assert.match(settings, /className="close-btn" onClick=\{onClose\}/);
+  assert.match(settings, /className="close-btn" onClick=\{closeSettings\}/);
   assert.match(palette, /className="scrim palette-overlay" onPointerDown=/);
   assert.match(projectSetup, /className="project-setup-scrim" onPointerDown=/);
   assert.match(packageTour, /useModalScrollLock\(open\)/);

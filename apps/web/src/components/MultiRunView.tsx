@@ -175,6 +175,7 @@ export default function MultiRunView() {
       </div>
       <div className="view-toolbar">
         <textarea
+          className="multirun-prompt"
           rows={2}
           value={text}
           placeholder={tr("multirunview.promptToSendToEveryRun")}
@@ -187,7 +188,7 @@ export default function MultiRunView() {
           value={modelFilter}
           onChange={(e) => setModelFilter(e.target.value)}
         />
-        <div className="view-toolbar-row">
+        <div className="view-toolbar-row multirun-controls">
           {slots.map((v, i) => (
             <select key={i} value={v} onChange={(e) => setSlots((s) => s.map((x, j) => (j === i ? e.target.value : x)))}>
               <option value="">{tr("multirunview.model")}{" "}{i + 1}</option>

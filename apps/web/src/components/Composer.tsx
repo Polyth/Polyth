@@ -363,7 +363,6 @@ function ThinkingSlider({
   return (
     <label className={`thinking-slider${className ? ` ${className}` : ""}`}>
       <span className="thinking-slider-label">
-        <span className="thinking-glyph" aria-hidden="true">◌</span>
         <output>{label}</output>
       </span>
       <span className="thinking-slider-track">

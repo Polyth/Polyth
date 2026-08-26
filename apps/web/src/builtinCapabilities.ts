@@ -7,7 +7,7 @@ import {
   BUILTIN_CAPABILITY_META, registerCapability, type CapabilityMeta,
 } from "./capabilities.ts";
 import {
-  openSettingsPage, openWorkspacePane, setActiveView, setRailPlugin, setSidebarOpen, type AppView,
+  closeWorkspacePane, openSettingsPage, openWorkspacePane, setActiveView, setRailPlugin, setSidebarOpen, type AppView,
 } from "./store.ts";
 import { speechSupport } from "@polyth/dictation";
 import { tr } from "./i18n/index.ts";
@@ -57,6 +57,10 @@ function openOf(meta: CapabilityMeta): () => void {
     return () => {
       // Primary destinations must become the visible workspace, not merely
       // update underneath a pane, compact rail sheet, or sidebar drawer.
+      // Navigation owns the next focus target, so a covering workspace pane
+      // must not schedule its normal composer-focus restoration: that delayed
+      // restoration would reset the selected primary view back to Chat.
+      closeWorkspacePane({ restoreFocus: false });
       setRailPlugin(null);
       setSidebarOpen(false);
       setWorkspaceMode("chat");

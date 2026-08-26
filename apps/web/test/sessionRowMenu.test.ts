@@ -19,6 +19,19 @@ Object.assign(globalThis, {
 Object.defineProperty(globalThis, "navigator", { value: dom.navigator, configurable: true });
 Object.defineProperty(globalThis, "localStorage", { value: dom.localStorage, configurable: true });
 Object.defineProperty(globalThis, "isSecureContext", { value: true, configurable: true });
+Object.defineProperty(dom, "matchMedia", {
+  configurable: true,
+  value: (query: string) => ({
+    matches: true,
+    media: query,
+    onchange: null,
+    addEventListener() {},
+    removeEventListener() {},
+    addListener() {},
+    removeListener() {},
+    dispatchEvent: () => true,
+  }),
+});
 let copiedText = "";
 Object.defineProperty(dom.navigator, "clipboard", {
   value: { writeText: async (text: string) => { copiedText = text; } },
@@ -43,8 +56,11 @@ register("./tsxHooks.mjs", import.meta.url);
 
 const { act, createElement } = await import("react");
 const { createRoot } = await import("react-dom/client");
-const { activateProject, setSessions } = await import("../src/store.ts");
+const {
+  activateProject, applyProjectUpsert, setSessions, setSidebarOpen,
+} = await import("../src/store.ts");
 const { default: SessionList } = await import("../src/components/sidebar/SessionList.tsx");
+const { default: Sidebar } = await import("../src/components/Sidebar.tsx");
 const { default: AlertDialog } = await import("../src/components/AlertDialog.tsx");
 
 const session = (over: Partial<SessionProjection>): SessionProjection => ({
@@ -119,6 +135,68 @@ test("right-click opens the row-scoped menu with delete/archive/pin and menu ARI
     assert.equal(document.activeElement?.getAttribute("aria-label"), "Open Idle session");
   } finally {
     await unmount();
+  }
+});
+
+test("the visible session ellipsis opens the same menu and receives returned focus", async () => {
+  const { container, unmount } = await mountList();
+  try {
+    const row = rowOf(container, "Idle session");
+    const trigger = row.querySelector<HTMLButtonElement>(".session-menu-btn");
+    assert.ok(trigger, "session actions have a discoverable ellipsis trigger");
+    assert.equal(trigger!.getAttribute("aria-haspopup"), "menu");
+    await act(async () => { trigger!.click(); });
+    assert.ok(row.querySelector('[role="menu"]'), "ellipsis opens the row menu");
+    assert.equal(trigger!.getAttribute("aria-expanded"), "true");
+
+    await act(async () => {
+      document.activeElement!.dispatchEvent(new KeyboardEventCtor("keydown", {
+        key: "Escape", bubbles: true, cancelable: true,
+      }));
+    });
+    assert.equal(row.querySelector('[role="menu"]'), null);
+    assert.equal(document.activeElement, trigger, "focus returns to the ellipsis opener");
+  } finally {
+    await unmount();
+  }
+});
+
+test("Escape closes a session menu inside the real mobile Sidebar, not the drawer", async () => {
+  applyProjectUpsert({ id: "p1", name: "Project one", path: "/workspace", createdAt: Date.now() });
+  activateProject("p1");
+  setSessions("p1", [session({ id: "s-mobile", title: "Mobile session" })]);
+  setSidebarOpen(true);
+  const container = document.createElement("div");
+  document.body.appendChild(container);
+  const root = createRoot(container);
+  try {
+    await act(async () => { root.render(createElement(Sidebar)); });
+    const drawer = container.querySelector<HTMLElement>("#polyth-session-drawer");
+    const trigger = container.querySelector<HTMLButtonElement>(
+      '.session-menu-btn[aria-label="Actions for Mobile session"]',
+    );
+    assert.ok(drawer?.classList.contains("open"), "real compact Sidebar drawer is open");
+    assert.ok(trigger, "session ellipsis is rendered in the Sidebar");
+
+    await act(async () => { trigger!.click(); });
+    assert.ok(container.querySelector('[role="menu"][aria-label="Actions for Mobile session"]'));
+    await act(async () => {
+      document.activeElement!.dispatchEvent(new KeyboardEventCtor("keydown", {
+        key: "Escape", bubbles: true, cancelable: true,
+      }));
+    });
+
+    assert.equal(
+      container.querySelector('[role="menu"][aria-label="Actions for Mobile session"]'),
+      null,
+      "Escape closes only the nested menu",
+    );
+    assert.ok(drawer!.classList.contains("open"), "Sidebar drawer remains open");
+    assert.equal(document.activeElement, trigger, "focus returns to the session ellipsis");
+  } finally {
+    await act(async () => { root.unmount(); });
+    container.remove();
+    setSidebarOpen(false);
   }
 });
 

@@ -5,12 +5,11 @@ import {
   openSettingsPage, setOverlay, setRailPlugin, setSidebarOpen,
   toggleWorkspacePane, type AppView,
 } from "../store.ts";
-import { displaySessionTitle, MOD } from "../format.ts";
+import { MOD } from "../format.ts";
+import { contextGauge, type ContextGauge } from "../reduce.ts";
 import { useShellMode, type ShellMode } from "../responsiveShell.ts";
-import Picker from "./Picker.tsx";
-import type { PickerItem } from "../picker.ts";
 import {
-  TECHNICAL_GROUP_LABEL, useResolvedCapabilities,
+  useResolvedCapabilities,
   type ResolvedCapability,
 } from "../capabilities.ts";
 import { PANEL_OF_CAPABILITY, PANE_OF_CAPABILITY, VIEW_OF_CAPABILITY } from "../builtinCapabilities.ts";
@@ -19,10 +18,8 @@ import { Icon } from "../icons.tsx";
 import { setWorkspaceMode, useWorkspaceMode } from "../widgets/workspaceMode.ts";
 import { useDismissibleMenu } from "./a11y/Menu.ts";
 import { useUiSettings } from "../uiPrefs.ts";
-import { dismissKeyboard } from "../mobileViewport.ts";
-import SessionMenu from "./mobile/SessionMenu.tsx";
-import Sheet, { SheetSection } from "./mobile/Sheet.tsx";
-import { useSheetTrigger } from "./mobile/sheetTrigger.ts";
+import MobileNavigationRail from "./mobile/MobileNavigationRail.tsx";
+import WorkspaceBottomNav from "./workspace/WorkspaceBottomNav.tsx";
 import { api, type GithubStatusDto } from "../api.ts";
 import { tr } from "../i18n/index.ts";
 import { useKeymap } from "../hotkeys.ts";
@@ -110,23 +107,8 @@ function CapabilityNav() {
     return panel !== undefined && rail === panel;
   };
 
-  const eligiblePrimaries = resolved.filter((c) =>
-    (c.tier === "primary" || c.descriptor.id === "workflow")
-    && c.descriptor.id !== "terminal"
-    && c.descriptor.available());
-  // Workflows is package-owned and may retain its default "more" placement.
-  // Keep it beside Chat instead of at the clipped end of a busy session
-  // header, so enabling the package always creates a discoverable top-rail
-  // destination before the user has visited the builder.
-  const workflow = eligiblePrimaries.find((c) => c.descriptor.id === "workflow");
-  const primaries = workflow
-    ? [
-        ...eligiblePrimaries.filter((c) => c.descriptor.id === "session"),
-        workflow,
-        ...eligiblePrimaries.filter((c) =>
-          c.descriptor.id !== "session" && c.descriptor.id !== "workflow"),
-      ]
-    : eligiblePrimaries;
+  const primaries = resolved.filter((c) =>
+    c.tier === "primary" && c.descriptor.id !== "terminal" && c.descriptor.available());
   const terminal = resolved.find((c) =>
     c.descriptor.id === "terminal" && c.descriptor.available());
   const filesIndex = primaries.findIndex((c) => c.descriptor.id === "files");
@@ -165,51 +147,33 @@ function CapabilityNav() {
   );
 }
 
-/** One bounded workspace picker for compact layouts. Pane capabilities belong
- * here too: otherwise primary tools such as Browser disappear below 821px. */
-function CompactViewPicker({ view }: { view: AppView }) {
-  const resolved = useResolvedCapabilities();
-  const rail = useStore((s) => s.railPlugin);
-  const eligibleDestinations = resolved.filter((c) =>
-    c.descriptor.available()
-    && (VIEW_OF_CAPABILITY[c.descriptor.id] !== undefined
-      || PANE_OF_CAPABILITY[c.descriptor.id] !== undefined
-      || PANEL_OF_CAPABILITY[c.descriptor.id] !== undefined));
-  // Match the desktop rail's discoverability guarantee: Workflows is
-  // package-owned and normally belongs to More, but compact layouts have only
-  // this picker. Keep it immediately after Chat so phones and tablets never
-  // lose the destination among lower-priority tools.
-  const workflow = eligibleDestinations.find((c) => c.descriptor.id === "workflow");
-  const destinations = workflow
-    ? [
-        ...eligibleDestinations.filter((c) => c.descriptor.id === "session"),
-        workflow,
-        ...eligibleDestinations.filter((c) =>
-          c.descriptor.id !== "session" && c.descriptor.id !== "workflow"),
-      ]
-    : eligibleDestinations;
-  const items: PickerItem[] = destinations.map((c) => ({
-    id: c.descriptor.id,
-    label: c.descriptor.label,
-    group: c.tier === "primary" ? "" : c.tier === "more" ? tr("header.moreTools") : TECHNICAL_GROUP_LABEL,
-  }));
-  const currentId = destinations.find((c) =>
-    PANE_OF_CAPABILITY[c.descriptor.id] === rail
-    || PANEL_OF_CAPABILITY[c.descriptor.id] === rail)?.descriptor.id
-    ?? destinations.find((c) => VIEW_OF_CAPABILITY[c.descriptor.id] === view)?.descriptor.id
-    ?? "session";
-  const current = items.find((i) => i.id === currentId)?.label ?? tr("header.workspace");
+function ContextRing({ gauge }: { gauge: ContextGauge }) {
+  const r = 13;
+  const c = 2 * Math.PI * r;
+  const pct = gauge.known ? gauge.percent : 0;
+  const dash = (pct / 100) * c;
+  const label = gauge.known
+    ? tr("header.valueContextEstimateValueOfValueTokens", { pct: pct, inputTokens: gauge.inputTokens, contextTokens: gauge.contextTokens })
+    : tr("header.contextEstimateUnknownModelMetadataUnavailable");
   return (
-    <Picker
-      className="header-view-picker"
-      label={tr("header.view")}
-      ariaLabel={tr("header.changeWorkspaceViewCurrentValue", { current: current })}
-      triggerIcon={<Icon.widgets />}
-      items={items}
-      value={currentId}
-      onPick={(id) => destinations.find((c) => c.descriptor.id === id)?.descriptor.open()}
-      mobileSheet
-    />
+    <svg className={`ctx-ring ${gauge.level}`} width="30" height="30" viewBox="0 0 36 36" aria-label={label}>
+      <title>{label}</title>
+      <circle cx="18" cy="18" r={r} fill="none" stroke="var(--border)" strokeWidth="2.6" />
+      <circle
+        cx="18"
+        cy="18"
+        r={r}
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="2.6"
+        strokeLinecap="round"
+        strokeDasharray={`${dash} ${c}`}
+        transform="rotate(-90 18 18)"
+      />
+      <text x="18" y="19.5" textAnchor="middle" fontSize="8.5" fontWeight="700" fill="currentColor">
+        {gauge.known ? pct : "?"}
+      </text>
+    </svg>
   );
 }
 
@@ -329,22 +293,6 @@ export default function Header() {
   const mode = useShellMode();
   const compact = mode !== "wide";
   const chatSurface = workspaceMode === "chat" && view === "session";
-  const [sessionMenuOpen, setSessionMenuOpen] = useState(false);
-  const [mobileActionsOpen, setMobileActionsOpen] = useState(false);
-  // §22: pointer-down activation — a click can be lost to the keyboard-dismiss
-  // reflow (see components/mobile/sheetTrigger.ts).
-  const sessionMenuTrigger = useSheetTrigger(mode === "phone", () => {
-    setSessionMenuOpen(true);
-    void dismissKeyboard();
-  });
-  const mobileActionsTrigger = useSheetTrigger(mode === "phone" && chatSurface, () => {
-    setMobileActionsOpen(true);
-    void dismissKeyboard();
-  });
-  const firstUserText = model.messages.find((message) => message.kind === "user")?.text;
-  const mobileTitle = session
-    ? displaySessionTitle(session.title, session.id, firstUserText)
-    : tr("header.newSession");
   useResizeFocusHandoff(mode);
   const switchWorkspaceMode = (next: "chat" | "widgets" | "edit") => {
     closeWorkspacePane();
@@ -368,73 +316,21 @@ export default function Header() {
 
   // The mock's phone header replaces the compact header only at phone widths;
   // tablets (481–820px) keep the compact header with metrics and overflow.
-  if (mode === "phone" && chatSurface) {
+  if (mode === "phone") {
     return (
-      <header className="header header-compact header-chat mobile-chat-header">
-        <DrawerTrigger />
-        {/* UX-MOBILE-01 §21: the whole title is the target and it opens a real
-            session menu (new / rename / fork / archive / recent). */}
-        <button
-          className="mobile-session-title"
-          title={mobileTitle}
-          aria-label={tr("header.valueSessionMenu", { mobileTitle: mobileTitle })}
-          aria-haspopup="dialog"
-          aria-expanded={sessionMenuOpen}
-          {...sessionMenuTrigger}
-        >
-          <span>{mobileTitle}</span>
-          <Icon.chevronDown />
-        </button>
-        {sessionMenuOpen && <SessionMenu onClose={() => setSessionMenuOpen(false)} />}
-        <CompactViewPicker view={view} />
-        <button
-          type="button"
-          className="icon-btn mobile-header-action mobile-header-more"
-          title={tr("common.more")}
-          aria-label={tr("common.more")}
-          aria-haspopup="dialog"
-          aria-expanded={mobileActionsOpen}
-          {...mobileActionsTrigger}
-        >
-          <Icon.more />
-        </button>
-        {mobileActionsOpen && (
-          <Sheet title={tr("common.more")} className="mobile-header-actions-sheet" onClose={() => setMobileActionsOpen(false)}>
-            <div
-              className="mobile-header-actions-list"
-              onClick={(event) => {
-                const target = event.target instanceof Element ? event.target.closest("button") : null;
-                // GoalAction can open a dialog owned by its slot component, so
-                // keep that host mounted. Global-overlay actions can dismiss
-                // the sheet after their own click handler has run.
-                if (target && !target.classList.contains("composer-goals")) setMobileActionsOpen(false);
-              }}
-            >
-              {session && (
-                <SheetSection title={tr("mobile.sessionmenu.sessionActions")}>
-                  <SlotHost
-                    slot="session.header.actions"
-                    context={{ sessionId: session.id, status: session.status, working: model.turn?.status === "working" }}
-                  />
-                </SheetSection>
-              )}
-              <SheetSection title={tr("header.application")}>
-                <SlotHost
-                  slot="app.header.actions"
-                  context={{ projectId: project?.id ?? null, sessionId: session?.id ?? null, workspaceMode }}
-                />
-              </SheetSection>
-            </div>
-          </Sheet>
-        )}
-        <SlotHost slot="app.window.controls" />
-      </header>
+      <>
+        <header className="header header-compact header-chat mobile-chat-header">
+          <MobileNavigationRail />
+          <SlotHost slot="app.window.controls" />
+        </header>
+        <WorkspaceBottomNav />
+      </>
     );
   }
 
   return (
     <>
-      <header className={`header${compact ? " header-compact" : ""}${chatSurface ? " header-chat" : " header-tool-view"}`}>
+      <header className={`header${compact ? " header-compact" : ""}${chatSurface ? " header-chat" : ""}`}>
         {compact && <DrawerTrigger />}
         {compact && chatSurface && (
           <button
@@ -446,7 +342,6 @@ export default function Header() {
             <Icon.files />
           </button>
         )}
-        {compact && <CompactViewPicker view={view} />}
         {(!compact || !chatSurface) && (
           <button className="header-brand" aria-label={tr("header.polythHome")} onClick={() => switchWorkspaceMode("chat")}>
             <span className="polyth-mark">{tr("header.p")}</span>
@@ -483,9 +378,11 @@ export default function Header() {
             />
           </div>
         )}
+        {compact && <MobileNavigationRail />}
         {(!compact || !chatSurface) && <UserMenu githubUser={githubUser} />}
         <SlotHost slot="app.window.controls" />
       </header>
+      {compact && <WorkspaceBottomNav />}
     </>
   );
 }

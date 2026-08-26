@@ -189,6 +189,8 @@ function SessionRow({
   const quickArmed = hovered && shiftHeld;
   const menuRef = useRef<HTMLDivElement>(null);
   const sessionBtnRef = useRef<HTMLButtonElement>(null);
+  const menuTriggerRef = useRef<HTMLButtonElement>(null);
+  const menuReturnRef = useRef<HTMLButtonElement | null>(null);
   const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const longPressOpenedRef = useRef(false);
   const swipeStartRef = useRef<GesturePoint | null>(null);
@@ -215,6 +217,7 @@ function SessionRow({
     longPressTimerRef.current = setTimeout(() => {
       longPressTimerRef.current = null;
       longPressOpenedRef.current = true;
+      menuReturnRef.current = sessionBtnRef.current;
       setMenuOpen(true);
     }, 550);
   };
@@ -257,7 +260,12 @@ function SessionRow({
   useEffect(() => {
     if (!menuOpen) return;
     const h = (e: MouseEvent) => {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuOpen(false);
+      const target = e.target as Node;
+      if (
+        menuRef.current
+        && !menuRef.current.contains(target)
+        && !menuTriggerRef.current?.contains(target)
+      ) setMenuOpen(false);
     };
     document.addEventListener("mousedown", h);
     return () => document.removeEventListener("mousedown", h);
@@ -276,7 +284,7 @@ function SessionRow({
       e.preventDefault();
       e.stopPropagation();
       setMenuOpen(false);
-      sessionBtnRef.current?.focus();
+      menuReturnRef.current?.focus();
       return;
     }
     if (e.key !== "ArrowDown" && e.key !== "ArrowUp" && e.key !== "Home" && e.key !== "End") return;
@@ -379,7 +387,11 @@ function SessionRow({
       onPointerUp={finishSwipe}
       onPointerCancel={cancelSwipe}
       onPointerLeave={hoverEnd}
-      onContextMenu={(event) => { event.preventDefault(); setMenuOpen(true); }}
+      onContextMenu={(event) => {
+        event.preventDefault();
+        menuReturnRef.current = sessionBtnRef.current;
+        setMenuOpen(true);
+      }}
     >
       {selectMode && (
         <input
@@ -433,6 +445,7 @@ function SessionRow({
           onKeyDown={(event) => {
             if (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10")) {
               event.preventDefault();
+              menuReturnRef.current = sessionBtnRef.current;
               setMenuOpen(true);
             }
           }}
@@ -466,6 +479,22 @@ function SessionRow({
               context={{ sessionId: s.id, questions: s.attention?.questions ?? 0, permissions: s.attention?.permissions ?? 0 }}
             />
           </span>
+        </button>
+      )}
+      {!renaming && (
+        <button
+          ref={menuTriggerRef}
+          className="session-menu-btn"
+          title={tr("sidebar.sessionlist.actionsForValue", { value: s.title || tr("sidebar.sessionlist.session") })}
+          aria-label={tr("sidebar.sessionlist.actionsForValue", { value: s.title || tr("sidebar.sessionlist.session") })}
+          aria-haspopup="menu"
+          aria-expanded={menuOpen}
+          onClick={() => {
+            menuReturnRef.current = menuTriggerRef.current;
+            setMenuOpen((current) => !current);
+          }}
+        >
+          <Icon.more />
         </button>
       )}
       <span className="session-quick">
@@ -517,6 +546,7 @@ function SessionRow({
           <button role="menuitem" onClick={() => { setMenuOpen(false); onTogglePin(s); }}>
             {s.pinned ? tr("sidebar.sessionlist.unpin") : tr("sidebar.sessionlist.pinToTop")}
           </button>
+          <div className="session-menu-danger-separator" role="separator" />
           {s.status === "archived" ? (
             <button role="menuitem" onClick={() => {
               setMenuOpen(false);

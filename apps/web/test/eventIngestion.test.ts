@@ -215,5 +215,5 @@ test("duplicate tool callIds keep first-wins routing (index matches the old scan
   const tools = m.messages.filter((x) => x.kind === "tool");
   assert.equal(tools.length, 2);
   assert.equal(tools[0]!.kind === "tool" ? tools[0]!.status : "", "done"); // first gets the result
-  assert.equal(tools[1]!.kind === "tool" ? tools[1]!.status : "", "pending");
+  assert.equal(tools[1]!.kind === "tool" ? tools[1]!.status : "", "running");
 });

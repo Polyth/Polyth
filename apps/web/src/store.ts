@@ -503,13 +503,14 @@ export function openWorkspacePane(surfaceId: string, resource?: string): boolean
   return true;
 }
 
-export function closeWorkspacePane(): void {
+export function closeWorkspacePane({ restoreFocus = true }: { restoreFocus?: boolean } = {}): void {
   const open = paneSurfaceOf(state.railPlugin);
   if (open === null) return;
   const projectId = state.activeProjectId;
   if (projectId !== null) setPaneOpenSurface(projectId, null);
   set({ railPlugin: null, paneExpanded: false, paneFullscreen: false });
-  restorePaneFocus(open.id);
+  if (restoreFocus) restorePaneFocus(open.id);
+  else paneInvoker = null;
 }
 
 /** Rail-launcher semantic: activating the already-open surface closes it. */

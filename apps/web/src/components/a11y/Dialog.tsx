@@ -38,14 +38,54 @@ export interface ModalSurfaceOptions {
   enabled?: boolean;
   onClose: () => void;
   containerRef: RefObject<HTMLElement | null>;
+  /** Optional root whose document siblings must be hidden while open. */
+  isolationRootRef?: RefObject<HTMLElement | null>;
   /** CSS selector inside the container to receive initial focus. */
   initialFocus?: string;
   /** Resolve the unmount focus target from the recorded opener. Returning
    *  null delegates focus to a caller-owned handoff. */
   resolveRestoreFocus?: (opener: HTMLElement | null) => HTMLElement | null;
+  /** Runs after focus restoration so a caller can repair scroll anchoring
+   *  disturbed by the browser bringing the opener back into view. */
+  onAfterRestoreFocus?: () => void;
 }
 
 const visible = (el: HTMLElement): boolean => el.getClientRects().length > 0;
+let bodyScrollLocks = 0;
+let bodyOverflowBeforeLock = "";
+
+function lockBodyScroll(): () => void {
+  if (bodyScrollLocks === 0) {
+    bodyOverflowBeforeLock = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+  }
+  bodyScrollLocks++;
+  return () => {
+    bodyScrollLocks = Math.max(0, bodyScrollLocks - 1);
+    if (bodyScrollLocks === 0) document.body.style.overflow = bodyOverflowBeforeLock;
+  };
+}
+
+function isolateDocumentSiblings(root: HTMLElement | null): () => void {
+  if (!root) return () => {};
+  const siblings = [...document.body.children].filter((element) => element !== root);
+  const previous = siblings.map((element) => ({
+    element,
+    ariaHidden: element.getAttribute("aria-hidden"),
+    inert: element.hasAttribute("inert"),
+  }));
+  for (const { element } of previous) {
+    element.setAttribute("aria-hidden", "true");
+    element.setAttribute("inert", "");
+  }
+  return () => {
+    for (const { element, ariaHidden, inert } of previous) {
+      if (ariaHidden === null) element.removeAttribute("aria-hidden");
+      else element.setAttribute("aria-hidden", ariaHidden);
+      if (!inert) element.removeAttribute("inert");
+    }
+  };
+}
 
 /**
  * Shared modal-surface focus contract:
@@ -61,14 +101,18 @@ export function useModalSurface({
   enabled = true,
   onClose,
   containerRef,
+  isolationRootRef,
   initialFocus,
   resolveRestoreFocus,
+  onAfterRestoreFocus,
 }: ModalSurfaceOptions): void {
   useModalScrollLock(enabled && open);
   const closeRef = useRef(onClose);
   closeRef.current = onClose;
   const resolverRef = useRef(resolveRestoreFocus);
   resolverRef.current = resolveRestoreFocus;
+  const afterRestoreRef = useRef(onAfterRestoreFocus);
+  afterRestoreRef.current = onAfterRestoreFocus;
 
   // Hidden-but-mounted surfaces (keep-alive drawer/sheet) must not be
   // reachable by focus, pointer, or assistive technology.
@@ -92,14 +136,21 @@ export function useModalSurface({
     if (!enabled || !open) return;
     const el = containerRef.current;
     if (!el) return;
+    const unlockBodyScroll = lockBodyScroll();
     const opener = document.activeElement as HTMLElement | null;
     const target = (initialFocus ? el.querySelector<HTMLElement>(initialFocus) : null)
       ?? el.querySelector<HTMLElement>(FOCUSABLE)
       ?? el;
     target.focus();
+    const restoreBackground = isolateDocumentSiblings(isolationRootRef?.current ?? null);
 
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
+        // Nested menus own their first Escape. In particular, a session-row
+        // menu inside the compact project drawer must close back to its
+        // ellipsis without dismissing the drawer around it.
+        const eventTarget = e.target instanceof Element ? e.target : null;
+        if (eventTarget?.closest('[role="menu"]')) return;
         e.stopPropagation();
         closeRef.current();
         return;
@@ -125,13 +176,16 @@ export function useModalSurface({
     el.addEventListener("keydown", onKeyDown);
     return () => {
       el.removeEventListener("keydown", onKeyDown);
+      unlockBodyScroll();
+      restoreBackground();
       const connectedOpener = opener && opener !== document.body && opener.isConnected && visible(opener)
         ? opener
         : null;
       const target = resolverRef.current ? resolverRef.current(connectedOpener) : connectedOpener;
       target?.focus();
+      afterRestoreRef.current?.();
     };
-  }, [enabled, open, initialFocus, containerRef]);
+  }, [enabled, open, initialFocus, containerRef, isolationRootRef]);
 }
 
 export interface DialogProps {
@@ -149,6 +203,8 @@ export interface DialogProps {
    *  Default behavior (no prop) restores the opener. `BODY` is never a valid
    *  destination. */
   resolveRestoreFocus?: (opener: HTMLElement | null) => HTMLElement | null;
+  /** Runs after the opener regains focus. */
+  onAfterRestoreFocus?: () => void;
   ariaDescribedBy?: string;
 }
 
@@ -162,18 +218,23 @@ export default function Dialog({
   initialFocus,
   ariaDescribedBy,
   resolveRestoreFocus,
+  onAfterRestoreFocus,
 }: DialogProps) {
+  const backdropRef = useRef<HTMLDivElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   useModalSurface({
     open: true,
     onClose,
     containerRef: panelRef,
+    isolationRootRef: backdropRef,
     initialFocus,
     resolveRestoreFocus,
+    onAfterRestoreFocus,
   });
 
   return (
     <div
+      ref={backdropRef}
       className={`dialog-backdrop${backdropClassName ? ` ${backdropClassName}` : ""}`}
       onPointerDown={(e) => { if (e.target === e.currentTarget) onClose(); }}
     >
