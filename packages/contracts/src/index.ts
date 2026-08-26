@@ -1914,3 +1914,41 @@ export const CAP = {
   taskTrackers: cap<TaskTrackerService>("polyth.taskTrackers"),
   ui: cap<UiContributionRegistry>("polyth.ui"),
 } as const;
+
+/** Capability ids exposed by the composed server to clients and agent
+ * sessions. Keeping this normative list in contracts prevents the composition
+ * root from accumulating feature-specific declarations. */
+export const SERVER_CAPABILITY_IDS = [
+  "polyth.sessions",
+  "polyth.sessionPersistence",
+  "polyth.projects",
+  "polyth.agentRuntime",
+  "polyth.goals",
+  "polyth.files",
+  "polyth.commands",
+  "polyth.git",
+  "polyth.worktrees",
+  "polyth.terminal",
+  "polyth.multirun",
+  "polyth.workflow",
+  "polyth.fusion",
+  "polyth.walkthrough",
+  "polyth.schedule",
+  "polyth.tracks",
+  "polyth.github",
+  "polyth.taskTrackers",
+  "polyth.control",
+  "polyth.agentProfiles",
+  "polyth.settings",
+  "polyth.mcp",
+  "polyth.plugins",
+  "polyth.knowledge",
+  "polyth.review",
+  "polyth.usage",
+  "polyth.browser",
+  "polyth.voice",
+  "polyth.assist",
+  "polyth.homeAssistant",
+  "polyth.secureSafe",
+  "polyth.ssh",
+] as const;

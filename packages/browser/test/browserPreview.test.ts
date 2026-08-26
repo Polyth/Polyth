@@ -12,7 +12,7 @@ import {
   devicePresetForViewport,
   normalizedPointInImage,
   normalizedRectInImage,
-} from "../../../apps/web/src/browserPreview.ts";
+} from "../widgets/browserPreview.ts";
 
 test("browser device presets expose distinct phone, tablet, laptop, and desktop viewports", () => {
   assert.deepEqual(

@@ -1,4 +1,4 @@
-// Reactive wrapper around @polyth/models prefs. Persists polyth.modelPrefs.
+// Reactive browser wrapper around model prefs. Persists polyth.modelPrefs.
 import { useSyncExternalStore } from "react";
 import {
   MODEL_PREFS_KEY,

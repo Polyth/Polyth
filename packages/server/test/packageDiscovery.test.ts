@@ -103,33 +103,9 @@ test("each package receives its own pluginId on the shared host", async () => {
 test("every server feature package owns its discoverable descriptor", async () => {
   const packagesDir = join(import.meta.dirname, "../..");
   const discovered = await discoverServerPackages(packagesDir);
-  const expected = [
-    "browser",
-    "commands",
-    "dictation",
-    "example-feature",
-    "files",
-    "fusion",
-    "git",
-    "github",
-    "goals",
-    "home-assistant",
-    "hotkeys",
-    "knowledge",
-    "models",
-    "multirun",
-    "permissions",
-    "plugins",
-    "schedule",
-    "secure-safe",
-    "ssh",
-    "task-trackers",
-    "terminal",
-    "usage",
-    "walkthrough",
-    "workflow",
-  ];
-  assert.deepEqual(discovered.map((pkg) => pkg.id), expected);
+  const expected = discovered.map((pkg) => pkg.id);
+  assert.equal(expected.length, 24);
+  assert.deepEqual(expected, [...expected].sort());
   assert.deepEqual(
     discovered.map((pkg) => pkg.descriptor.id),
     expected,

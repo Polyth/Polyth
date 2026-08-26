@@ -1,5 +1,6 @@
+import { tr } from "../../../apps/web/src/i18n/index.ts";
 
-import { tr } from "./i18n/index.ts";export const BROWSER_DEVICE_PRESETS = [
+export const BROWSER_DEVICE_PRESETS = [
   { id: "responsive", label: tr("browserpreview.responsive"), width: 1280, height: 800 },
   { id: "iphone-14", label: tr("browserpreview.iphone14"), width: 390, height: 844 },
   { id: "pixel-7", label: tr("browserpreview.pixel7"), width: 412, height: 915 },

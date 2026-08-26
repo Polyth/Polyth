@@ -16,7 +16,7 @@ import {
   workflowTimelineNodes,
 } from "./workflowRun.ts";
 import { tr } from "../../../apps/web/src/i18n/index.ts";
-import WorkflowButtonContent from "../../../apps/web/src/components/WorkflowButtonContent.tsx";
+import WorkflowButtonContent from "./WorkflowButtonContent.tsx";
 
 const needsHuman = (node: WorkflowRunNodeDto): boolean => workflowHumanWait(node) !== null;
 

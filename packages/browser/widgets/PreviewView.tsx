@@ -22,7 +22,7 @@ import {
   type BrowserInspectorTab,
   type BrowserPointedElement,
   type ImageRect,
-} from "../../../apps/web/src/browserPreview.ts";
+} from "./browserPreview.ts";
 import { sendMessage } from "../../../apps/web/src/init.ts";
 import { useStore } from "../../../apps/web/src/store.ts";
 import EmptyState from "../../../apps/web/src/components/EmptyState.tsx";

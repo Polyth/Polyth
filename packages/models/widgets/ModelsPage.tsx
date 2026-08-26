@@ -10,7 +10,7 @@ import {
   setModelProviderExpanded,
   toggleModelFavorite,
   useModelPrefs,
-} from "../../../apps/web/src/modelPrefs.ts";
+} from "./modelPrefs.ts";
 import { setModels, useStore } from "../../../apps/web/src/store.ts";
 import { api, type ProviderCatalogDto, type VisibilityStateDto } from "@polyth/session/web-api";
 import { EmptyState, PageHead, Seg, Toggle } from "../../../apps/web/src/components/settings/parts.tsx";

@@ -31,7 +31,7 @@ import { tr } from "../../../apps/web/src/i18n/index.ts";
 import { confirmAlert } from "../../../apps/web/src/alerts.ts";
 import { useDismissibleMenu } from "../../../apps/web/src/components/a11y/Menu.ts";
 import { useShellMode } from "../../../apps/web/src/responsiveShell.ts";
-import WorkflowButtonContent from "../../../apps/web/src/components/WorkflowButtonContent.tsx";
+import WorkflowButtonContent from "./WorkflowButtonContent.tsx";
 
 const uid = (): string =>
   typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"

@@ -6,7 +6,7 @@ import { fmtCost, fmtTokens } from "../../../apps/web/src/format.ts";
 import { renderMarkdown } from "../../../apps/web/src/markdown.tsx";
 import EmptyState from "../../../apps/web/src/components/EmptyState.tsx";
 import { modelDisplayName, modelSupportsTextWorkflow } from "../../../apps/web/src/composer/discovery.ts";
-import { consumeMultiRunPrompt } from "../../../apps/web/src/multirunSeed.ts";
+import { consumeMultiRunPrompt } from "./multirunSeed.ts";
 import ProviderLogo from "../../models/widgets/ProviderLogo.tsx";
 import { tr } from "../../../apps/web/src/i18n/index.ts";
 

@@ -7,7 +7,7 @@ import {
   setModelProviderExpanded,
   toggleModelFavorite,
   useModelPrefs,
-} from "../../../apps/web/src/modelPrefs.ts";
+} from "./modelPrefs.ts";
 import { useEscape } from "../../../apps/web/src/useEscape.ts";
 import { useShellMode } from "../../../apps/web/src/responsiveShell.ts";
 import { dismissKeyboard } from "../../../apps/web/src/mobileViewport.ts";

@@ -74,7 +74,7 @@ import ComposerFocusDialog from "./ComposerFocusDialog.tsx";
 import QueuedMessageList from "./QueuedMessageList.tsx";
 import { GoalAttachForm } from "../../../../packages/goals/widgets/GoalStrip.tsx";
 import { announce } from "./a11y/live.tsx";
-import { noteModelUsed } from "../modelPrefs.ts";
+import { noteModelUsed } from "@polyth/models/web-prefs";
 import { getUiSettings, useUiSettings } from "../uiPrefs.ts";
 import { migrateFavoritesOnce, profilesLoaded, useProfiles } from "../profiles.ts";
 import AgentProfileForm from "./AgentProfileForm.tsx";

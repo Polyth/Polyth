@@ -33,7 +33,12 @@ import { PATH_MIME, dragKind, getDragPath, setDragPath } from "../src/dnd.ts";
 import { formatFileChat, formatSelectionChat, lineRangeOf } from "../src/chatclip.ts";
 import { filterPickerItems, type PickerItem } from "../src/picker.ts";
 import { MODEL_PREFS_KEY, parseModelPrefs } from "@polyth/models";
-import { getModelPrefs, noteModelUsed, setModelSort, toggleModelFavorite } from "../src/modelPrefs.ts";
+import {
+  getModelPrefs,
+  noteModelUsed,
+  setModelSort,
+  toggleModelFavorite,
+} from "@polyth/models/web-prefs";
 import {
   UI_DEFAULTS,
   UI_SETTINGS_KEY,

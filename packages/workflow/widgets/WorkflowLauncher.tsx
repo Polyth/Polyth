@@ -12,7 +12,7 @@ import { Icon } from "../../../apps/web/src/icons.tsx";
 import Dialog from "../../../apps/web/src/components/a11y/Dialog.tsx";
 import { tr } from "../../../apps/web/src/i18n/index.ts";
 import { workflowNodeCount } from "./workflowRun.ts";
-import WorkflowButtonContent from "../../../apps/web/src/components/WorkflowButtonContent.tsx";
+import WorkflowButtonContent from "./WorkflowButtonContent.tsx";
 
 export interface WorkflowLauncherProps {
   projectId?: string;

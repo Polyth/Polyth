@@ -73,7 +73,7 @@ import type {
 import { Icon } from "../icons.tsx";
 import "./messagePinAction.tsx";
 import ProviderLogo from "../../../../packages/models/widgets/ProviderLogo.tsx";
-import { seedMultiRunPrompt } from "../multirunSeed.ts";
+import { seedMultiRunPrompt } from "@polyth/multirun/prompt-seed";
 import WorkflowTimelineCard from "../../../../packages/workflow/widgets/WorkflowTimelineCard.tsx";
 import { tr } from "../i18n/index.ts";
 
