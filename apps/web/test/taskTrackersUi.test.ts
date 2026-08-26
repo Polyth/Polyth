@@ -76,6 +76,20 @@ const clickByText = (container: Element, text: string): HTMLButtonElement => {
   return button as HTMLButtonElement;
 };
 
+const setControlValue = (
+  control: HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement,
+  value: string,
+  event = "input",
+): void => {
+  const prototype = control instanceof dom.HTMLInputElement
+    ? dom.HTMLInputElement.prototype
+    : control instanceof dom.HTMLTextAreaElement
+      ? dom.HTMLTextAreaElement.prototype
+      : dom.HTMLSelectElement.prototype;
+  Object.getOwnPropertyDescriptor(prototype, "value")?.set?.call(control, value);
+  control.dispatchEvent(new Event(event, { bubbles: true }));
+};
+
 const settle = async (turns = 2): Promise<void> => {
   for (let index = 0; index < turns; index++) {
     await act(async () => {
@@ -175,8 +189,7 @@ test("task board completes browse, filter, link, status, complete, and refresh j
     const search = container.querySelector<HTMLInputElement>('input[type="search"]');
     assert.ok(search);
     await act(async () => {
-      search.value = "no match";
-      search.dispatchEvent(new Event("input", { bubbles: true }));
+      setControlValue(search, "no match");
     });
     assert.match(container.textContent ?? "", /No matching tasks/);
     await act(async () => { clickByText(container, "Clear filters").click(); });
@@ -190,8 +203,7 @@ test("task board completes browse, filter, link, status, complete, and refresh j
     const instructions = container.querySelector<HTMLTextAreaElement>(".tt-detail textarea");
     assert.ok(instructions);
     await act(async () => {
-      instructions.value = "Preserve swipe gestures.";
-      instructions.dispatchEvent(new Event("input", { bubbles: true }));
+      setControlValue(instructions, "Preserve swipe gestures.");
       clickByText(container, "Link & start agent").click();
     });
     await settle();
@@ -203,8 +215,7 @@ test("task board completes browse, filter, link, status, complete, and refresh j
     const status = container.querySelector<HTMLSelectElement>(".tt-status-row select");
     assert.ok(status);
     await act(async () => {
-      status.value = "review";
-      status.dispatchEvent(new Event("change", { bubbles: true }));
+      setControlValue(status, "review", "change");
     });
     await act(async () => { clickByText(container, "Update status").click(); });
     await settle();
