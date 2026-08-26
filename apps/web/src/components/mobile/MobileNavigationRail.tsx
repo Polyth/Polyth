@@ -28,6 +28,15 @@ const AUTOMATION_ITEMS = new Set([
   "goals", "multirun", "workflow", "fusion", "walkthrough", "schedule",
 ]);
 const SETTINGS_ITEMS = new Set(["models-agents", "diagnostics"]);
+const MODAL_FOCUS_TARGET = [
+  "[data-focus-destination]",
+  "[autofocus]",
+  "button:not([disabled])",
+  "input:not([disabled])",
+  "select:not([disabled])",
+  "textarea:not([disabled])",
+  "a[href]",
+].join(", ");
 
 function navigationGroup(id: string, hasView: boolean): NavigationGroup {
   if (SETTINGS_ITEMS.has(id)) return "settings";
@@ -38,6 +47,26 @@ function navigationGroup(id: string, hasView: boolean): NavigationGroup {
 
 function focusDestinationHeading(attempt = 0): void {
   requestAnimationFrame(() => {
+    // Destination activation can synchronously open Settings and then layer a
+    // package tour over it. Never move focus through either modal to an
+    // obscured workspace heading. The last active modal is the topmost one in
+    // the app's overlay render order (Settings renders its tour last).
+    const activeModals = [...document.querySelectorAll<HTMLElement>(
+      '[role="dialog"][aria-modal="true"]',
+    )].filter((modal) =>
+      !modal.hidden
+      && modal.getAttribute("aria-hidden") !== "true"
+      && !modal.closest('[aria-hidden="true"], [inert], [hidden]'));
+    const modal = activeModals.at(-1);
+    if (modal) {
+      if (!modal.contains(document.activeElement)) {
+        const target = modal.matches("[tabindex], button, input, select, textarea, a[href]")
+          ? modal
+          : modal.querySelector<HTMLElement>(MODAL_FOCUS_TARGET);
+        target?.focus();
+      }
+      return;
+    }
     const heading = document.querySelector<HTMLElement>(
       ".rail-fullscreen .rail-title, .main .view-title, .main h1",
     );

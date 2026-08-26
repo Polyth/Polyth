@@ -35,6 +35,8 @@ Object.defineProperty(dom, "matchMedia", {
     ? { branch: "main", ahead: 0, behind: 0, staged: [], unstaged: [], untracked: [], conflicted: [] }
     : url.startsWith("/api/github/status")
       ? { installed: false, authenticated: false, user: null }
+      : url === "/api/packages"
+        ? { packages: [{ id: "models", name: "Providers & Models", description: "Model configuration.", core: true, enabled: true, hasSettings: true }] }
       : [];
   return {
     ok: true,
@@ -52,11 +54,35 @@ const { act, createElement } = await import("react");
 const { createRoot } = await import("react-dom/client");
 const {
   activateProject, applyProjectUpsert, closeWorkspacePane, getState, setActiveView,
+  setOverlay, useStore,
 } = await import("../src/store.ts");
 const { default: Header } = await import("../src/components/Header.tsx");
 const { default: ContextRail } = await import("../src/components/ContextRail.tsx");
+const { default: SettingsModal } = await import("../src/components/SettingsModal.tsx");
+const { bootPackages } = await import("../src/packages/registry.ts");
+const { closePackageTour } = await import("../src/packages/onboarding/controller.ts");
 
-test("mobile app header navigates between full-screen workspace panes and focuses each heading", async () => {
+function MountedShell() {
+  const overlay = useStore((state) => state.overlay);
+  return createElement("div", { className: "app mode-chat view-session" },
+    createElement(Header),
+    createElement("div", { className: "app-shell" },
+      createElement("div", { className: "workspace" },
+        createElement("main", { className: "main" },
+          createElement("h1", { className: "view-title" }, "Multi-run"),
+        ),
+      ),
+      createElement(ContextRail),
+    ),
+    createElement(SettingsModal, {
+      open: overlay === "settings",
+      onClose: () => setOverlay(null),
+    }),
+  );
+}
+
+test("mobile app header focuses workspace destinations without escaping a destination modal", async () => {
+  await bootPackages();
   applyProjectUpsert({ id: "p1", name: "Project one", path: "/workspace", createdAt: Date.now() });
   activateProject("p1");
   setActiveView("session");
@@ -67,13 +93,7 @@ test("mobile app header navigates between full-screen workspace panes and focuse
   const root = createRoot(container);
   try {
     await act(async () => {
-      root.render(createElement("div", { className: "app mode-chat view-session" },
-        createElement(Header),
-        createElement("div", { className: "app-shell" },
-          createElement("div", { className: "workspace" }),
-          createElement(ContextRail),
-        ),
-      ));
+      root.render(createElement(MountedShell));
     });
 
     const openNavigation = async () => {
@@ -109,7 +129,31 @@ test("mobile app header navigates between full-screen workspace panes and focuse
     assert.equal(getState().railPlugin, "browser");
     assert.equal(container.querySelector('.rail-fullscreen')?.getAttribute("aria-label"), "Browser");
     assert.equal(document.activeElement?.textContent, "Browser", "Browser heading receives focus");
+
+    navigation = await openNavigation();
+    const models = [...navigation!.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')]
+      .find((button) => button.textContent?.trim() === "Models & agents");
+    assert.ok(models, "Models & agents destination is present");
+    await act(async () => {
+      models!.click();
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    });
+    const settings = container.querySelector<HTMLElement>('[role="dialog"][aria-label="Settings"]');
+    const onboarding = container.querySelector<HTMLElement>('.package-tour[role="dialog"]');
+    assert.ok(settings, "Models & agents opens Settings");
+    assert.ok(onboarding, "first visit opens the Models onboarding dialog above Settings");
+    assert.ok(
+      onboarding!.contains(document.activeElement),
+      "focus remains inside the topmost onboarding dialog",
+    );
+    assert.notEqual(
+      document.activeElement?.textContent,
+      "Multi-run",
+      "focus never moves to the obscured workspace heading",
+    );
   } finally {
+    closePackageTour("dismiss");
+    setOverlay(null);
     await act(async () => { root.unmount(); });
     container.remove();
     closeWorkspacePane();

@@ -116,7 +116,10 @@ test("all mobile chat composers expose project and worktree targets", () => {
   assert.match(workflowLauncher, /composer-workflow/);
   assert.match(css, /\.composer-mobile \.composer-workflow,/);
   assert.match(css, /\.composer-mobile \.composer-workflow:active,/);
-  assert.match(css, /\.composer\.composer-mobile \.composer-mobile-extensions \.composer-workflow\s*\{[^}]*width:\s*var\(--tap\);[^}]*min-width:\s*var\(--tap\);/s);
+  assert.match(
+    css,
+    /\.composer\.composer-mobile \.composer-mobile-extensions \.composer-auto-approve,[\s\S]*?\.composer\.composer-mobile \.composer-mobile-extensions \.composer-goals,[\s\S]*?\.composer\.composer-mobile \.composer-mobile-extensions \.composer-workflow\s*\{[^}]*width:\s*var\(--tap\);[^}]*min-width:\s*var\(--tap\);[^}]*height:\s*var\(--tap\);[^}]*min-height:\s*var\(--tap\);/s,
+  );
   assert.match(css, /\.composer-mobile\.composer-collapsed:not\(\.composer-has-draft\) \.composer-workflow \{ display: none; \}/);
   assert.match(css, /\.composer-mobile\.composer-has-draft \.composer-workflow \{ display: inline-flex; \}/);
   assert.match(header, /displaySessionTitle\(session\.title, session\.id, firstUserText\)/);
@@ -125,12 +128,27 @@ test("all mobile chat composers expose project and worktree targets", () => {
   assert.match(css, /\.polyth-gradient\s*\{[^}]*linear-gradient/s);
 });
 
-test("Multi-Run model controls may shrink below native option widths", () => {
+test("Multi-Run controls use an intentional desktop grid and collapse on mobile", () => {
   const view = read("../src/components/MultiRunView.tsx");
   const css = read("../src/styles.css");
 
   assert.match(view, /className="view-toolbar-row multirun-controls"/);
   assert.match(css, /\.multirun-controls > select\s*\{[^}]*min-width:\s*0;[^}]*max-width:\s*100%;/s);
+  assert.match(css, /\.multirun-controls\s*\{[^}]*grid-template-columns:\s*repeat\(3,\s*minmax\(0,\s*1fr\)\);/s);
+  assert.match(css, /\.multirun-controls > select:nth-of-type\(4\)\s*\{\s*grid-column:\s*span 2;/);
+  assert.match(
+    css,
+    /@media \(max-width: 820px\)[\s\S]*?\.multirun-controls\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\);[\s\S]*?\.multirun-controls > select:nth-of-type\(4\)\s*\{\s*grid-column:\s*auto;/s,
+  );
+});
+
+test("Files empty-state helper copy keeps horizontal viewport breathing room", () => {
+  const css = read("../src/styles.css");
+
+  assert.match(
+    css,
+    /\.editor-empty\s*\{[^}]*width:\s*100%;[^}]*box-sizing:\s*border-box;[^}]*padding-inline:\s*24px;/s,
+  );
 });
 
 test("source-control surfaces keep responsive and accessible audit contracts", () => {
