@@ -1,4 +1,5 @@
 import { useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import {
   PANEL_OF_CAPABILITY, PANE_OF_CAPABILITY, VIEW_OF_CAPABILITY,
 } from "../../builtinCapabilities.ts";
@@ -150,6 +151,90 @@ export default function MobileNavigationRail() {
     { id: "settings", label: tr("common.settings") },
   ];
   const navigationLabel = tr("header.application");
+  const menu = open ? (
+    <>
+      <div className="mobile-navigation-backdrop" aria-hidden="true" onClick={() => setOpen(false)} />
+      <nav
+        ref={menuRef}
+        className="mobile-navigation-rail"
+        aria-label={navigationLabel}
+        onKeyDown={onMenuKey}
+      >
+        <div className="mobile-navigation-title">{navigationLabel}</div>
+        <div role="menu">
+          {groups.map((group) => {
+            const groupItems = items.filter((item) => item.group === group.id);
+            if (groupItems.length === 0 && group.id !== "settings") return null;
+            return (
+              <section className="mobile-navigation-section" key={group.id}>
+                <h2>{group.label}</h2>
+                {groupItems.length > 0 && (
+                  <div className="mobile-navigation-grid">
+                    {groupItems.map((item) => (
+                      <button
+                        key={item.id}
+                        className={item.active ? "active" : ""}
+                        role="menuitem"
+                        aria-current={item.active ? "page" : undefined}
+                        onClick={() => activate(item)}
+                      >
+                        <span className="mobile-navigation-icon" aria-hidden="true"><item.icon /></span>
+                        <span>{item.label}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </section>
+            );
+          })}
+        </div>
+        <div className="mobile-navigation-utilities" role="menu" aria-label={tr("common.settings")}>
+          <button
+            role="menuitemcheckbox"
+            aria-checked={ui.showDictate}
+            onClick={() => setUiSettings({ showDictate: !ui.showDictate })}
+          >
+            <Icon.mic />
+            <span>{tr("header.microphone")}</span>
+            <span className={`mobile-control-switch${ui.showDictate ? " on" : ""}`} aria-hidden="true"><i /></span>
+          </button>
+          <button
+            role="menuitem"
+            onClick={() => {
+              setOpen(false);
+              setRailPlugin(null);
+              openSettingsPage("access");
+            }}
+          >
+            <Icon.shield />
+            <span>{tr("header.accessAmpSecurity")}</span>
+          </button>
+          <button
+            role="menuitem"
+            onClick={() => {
+              setOpen(false);
+              setRailPlugin(null);
+              openSettingsPage("about");
+            }}
+          >
+            <Icon.session />
+            <span>{tr("header.aboutPolyth")}</span>
+          </button>
+          <button
+            role="menuitem"
+            onClick={() => {
+              setOpen(false);
+              setRailPlugin(null);
+              window.dispatchEvent(new CustomEvent("polyth:open-settings"));
+            }}
+          >
+            <Icon.gear />
+            <span>{tr("header.allSettings")}</span>
+          </button>
+        </div>
+      </nav>
+    </>
+  ) : null;
 
   return (
     <div className="mobile-navigation-menu">
@@ -164,90 +249,9 @@ export default function MobileNavigationRail() {
       >
         <Icon.widgets />
       </button>
-      {open && (
-        <>
-          <div className="mobile-navigation-backdrop" aria-hidden="true" onClick={() => setOpen(false)} />
-          <nav
-            ref={menuRef}
-            className="mobile-navigation-rail"
-            aria-label={navigationLabel}
-            onKeyDown={onMenuKey}
-          >
-            <div className="mobile-navigation-title">{navigationLabel}</div>
-            <div role="menu">
-              {groups.map((group) => {
-                const groupItems = items.filter((item) => item.group === group.id);
-                if (groupItems.length === 0 && group.id !== "settings") return null;
-                return (
-                  <section className="mobile-navigation-section" key={group.id}>
-                    <h2>{group.label}</h2>
-                    {groupItems.length > 0 && (
-                      <div className="mobile-navigation-grid">
-                        {groupItems.map((item) => (
-                          <button
-                            key={item.id}
-                            className={item.active ? "active" : ""}
-                            role="menuitem"
-                            aria-current={item.active ? "page" : undefined}
-                            onClick={() => activate(item)}
-                          >
-                            <span className="mobile-navigation-icon" aria-hidden="true"><item.icon /></span>
-                            <span>{item.label}</span>
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                  </section>
-                );
-              })}
-            </div>
-            <div className="mobile-navigation-utilities" role="menu" aria-label={tr("common.settings")}>
-              <button
-                role="menuitemcheckbox"
-                aria-checked={ui.showDictate}
-                onClick={() => setUiSettings({ showDictate: !ui.showDictate })}
-              >
-                <Icon.mic />
-                <span>{tr("header.microphone")}</span>
-                <span className={`mobile-control-switch${ui.showDictate ? " on" : ""}`} aria-hidden="true"><i /></span>
-              </button>
-              <button
-                role="menuitem"
-                onClick={() => {
-                  setOpen(false);
-                  setRailPlugin(null);
-                  openSettingsPage("access");
-                }}
-              >
-                <Icon.shield />
-                <span>{tr("header.accessAmpSecurity")}</span>
-              </button>
-              <button
-                role="menuitem"
-                onClick={() => {
-                  setOpen(false);
-                  setRailPlugin(null);
-                  openSettingsPage("about");
-                }}
-              >
-                <Icon.session />
-                <span>{tr("header.aboutPolyth")}</span>
-              </button>
-              <button
-                role="menuitem"
-                onClick={() => {
-                  setOpen(false);
-                  setRailPlugin(null);
-                  window.dispatchEvent(new CustomEvent("polyth:open-settings"));
-                }}
-              >
-                <Icon.gear />
-                <span>{tr("header.allSettings")}</span>
-              </button>
-            </div>
-          </nav>
-        </>
-      )}
+      {menu && typeof document !== "undefined" && document.body
+        ? createPortal(menu, document.body)
+        : menu}
     </div>
   );
 }

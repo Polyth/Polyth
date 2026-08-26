@@ -102,11 +102,16 @@ test("mobile app header focuses workspace destinations without escaping a destin
       );
       assert.ok(trigger, "permanent mobile header navigation trigger is mounted");
       await act(async () => { trigger!.click(); });
-      return container.querySelector<HTMLElement>('.mobile-navigation-rail[aria-label="Application"]');
+      return document.querySelector<HTMLElement>('.mobile-navigation-rail[aria-label="Application"]');
     };
 
     let navigation = await openNavigation();
     assert.ok(navigation, "grouped destination rail opens");
+    assert.equal(
+      navigation!.parentElement,
+      document.body,
+      "navigation escapes the header stacking context through a body portal",
+    );
     const files = [...navigation!.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')]
       .find((button) => button.textContent?.trim() === "Project files");
     assert.ok(files, "Files destination is present");
@@ -119,6 +124,7 @@ test("mobile app header focuses workspace destinations without escaping a destin
     assert.equal(document.activeElement?.textContent, "Project files", "Files heading receives focus");
 
     navigation = await openNavigation();
+    assert.equal(navigation?.parentElement, document.body, "navigation stays portalled above the Files pane");
     const browser = [...navigation!.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')]
       .find((button) => button.textContent?.trim() === "Browser");
     assert.ok(browser, "Browser destination remains reachable above the open Files pane");
@@ -131,6 +137,7 @@ test("mobile app header focuses workspace destinations without escaping a destin
     assert.equal(document.activeElement?.textContent, "Browser", "Browser heading receives focus");
 
     navigation = await openNavigation();
+    assert.equal(navigation?.parentElement, document.body, "navigation stays portalled above the Browser pane");
     const models = [...navigation!.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')]
       .find((button) => button.textContent?.trim() === "Models & agents");
     assert.ok(models, "Models & agents destination is present");
