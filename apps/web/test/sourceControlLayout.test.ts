@@ -69,6 +69,7 @@ test("320px source-control layout keeps repository metadata clear of tabs", { sk
 
 test("320px source controls expose 44px tabs, copy actions, and chips", { skip: !CHROME }, async () => {
   assert.ok(page);
+  await page.setViewportSize({ width: 320, height: 720 });
   await page.setContent(`
     <style>${css}</style>
     <main class="view-page git-page">
