@@ -1314,6 +1314,13 @@
 }
 
 @container task-tracker (max-width: 820px) {
+  .tt-board.has-detail > .tt-board-header,
+  .tt-board.has-detail .tt-demo-banner,
+  .tt-board.has-detail .tt-board-picker,
+  .tt-board.has-detail .tt-filters {
+    display: none;
+  }
+
   .tt-board-content.has-detail {
     grid-template-columns: minmax(0, 1fr);
   }

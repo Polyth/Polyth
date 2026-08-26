@@ -663,7 +663,7 @@ export function TaskTrackerBoard({
   }
 
   return (
-    <div className="tt-board" aria-busy={loading !== null}>
+    <div className={`tt-board${selected ? " has-detail" : ""}`} aria-busy={loading !== null}>
       <header className="tt-board-header">
         <div className="tt-provider-tabs" role="tablist" aria-label="Task tracker provider">
           {(["jira", "trello"] as const).map((id) => {
