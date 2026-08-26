@@ -142,8 +142,8 @@ test("provider failures stay explicit and offer recovery instead of masquerading
     attempts++;
     if (attempts === 1) throw new Error("gateway unavailable");
     return [
-      { provider: "jira", configured: false, requiredEnv: ["JIRA_BASE_URL", "JIRA_EMAIL", "JIRA_API_TOKEN"] },
-      { provider: "trello", configured: false, requiredEnv: ["TRELLO_API_KEY", "TRELLO_API_TOKEN"] },
+      { provider: "jira", mode: "live", configured: false, requiredEnv: ["JIRA_BASE_URL", "JIRA_EMAIL", "JIRA_API_TOKEN"] },
+      { provider: "trello", mode: "live", configured: false, requiredEnv: ["TRELLO_API_KEY", "TRELLO_API_TOKEN"] },
     ];
   };
   const container = document.createElement("div");
@@ -171,6 +171,77 @@ test("provider failures stay explicit and offer recovery instead of masquerading
   }
 });
 
+test("credential-free demo providers render populated, switchable sandbox boards", async () => {
+  const originals = {
+    providers: api.taskTrackerProviders,
+    projects: api.taskTrackerProjects,
+    boards: api.taskTrackerBoards,
+    tasks: api.taskTrackerTasks,
+    task: api.taskTrackerTask,
+  };
+  const taskLoads: string[] = [];
+  api.taskTrackerProviders = async () => [
+    { provider: "jira", mode: "demo", configured: false, requiredEnv: ["JIRA_BASE_URL", "JIRA_EMAIL", "JIRA_API_TOKEN"] },
+    { provider: "trello", mode: "demo", configured: false, requiredEnv: ["TRELLO_API_KEY", "TRELLO_API_TOKEN"] },
+  ];
+  api.taskTrackerProjects = async (provider) => [
+    { provider, id: `${provider}-workspace`, key: "DEMO", name: `${provider} sandbox` },
+  ];
+  api.taskTrackerBoards = async (provider) => [
+    { provider, id: `${provider}-board`, name: `${provider} planning`, type: "kanban" },
+  ];
+  api.taskTrackerTasks = async (provider) => {
+    taskLoads.push(provider);
+    return [{
+      ...taskWith(),
+      provider,
+      id: `${provider}-task`,
+      key: provider === "jira" ? "POL-101" : "TR-21",
+      title: provider === "jira" ? "Refine the command palette" : "Collect launch feedback",
+    }];
+  };
+  api.taskTrackerTask = async (provider) => ({
+    ...taskWith(),
+    provider,
+    id: `${provider}-task`,
+    key: provider === "jira" ? "POL-101" : "TR-21",
+  });
+
+  const container = document.createElement("div");
+  document.body.appendChild(container);
+  const root = createRoot(container);
+  try {
+    await act(async () => {
+      root.render(createElement(TaskTrackerBoard, {
+        sessionId: null,
+        config: {},
+        updateConfig: () => undefined,
+      }));
+    });
+    await settle(5);
+    assert.match(container.textContent ?? "", /Demo sandbox/);
+    assert.match(container.textContent ?? "", /Changes stay in memory/);
+    assert.match(container.textContent ?? "", /Refine the command palette/);
+    assert.doesNotMatch(container.textContent ?? "", /Connect Jira/);
+    assert.equal(container.querySelector('[data-provider="jira"] i')?.className, "demo");
+
+    await act(async () => {
+      container.querySelector<HTMLButtonElement>('[data-provider="trello"]')?.click();
+    });
+    await settle(5);
+    assert.match(container.textContent ?? "", /Collect launch feedback/);
+    assert.deepEqual(taskLoads, ["jira", "trello"]);
+  } finally {
+    await act(async () => { root.unmount(); });
+    container.remove();
+    api.taskTrackerProviders = originals.providers;
+    api.taskTrackerProjects = originals.projects;
+    api.taskTrackerBoards = originals.boards;
+    api.taskTrackerTasks = originals.tasks;
+    api.taskTrackerTask = originals.task;
+  }
+});
+
 test("task board completes browse, filter, link, status, complete, and refresh journey", async () => {
   const originals = {
     providers: api.taskTrackerProviders,
@@ -190,8 +261,8 @@ test("task board completes browse, filter, link, status, complete, and refresh j
   const configs: Array<Record<string, unknown>> = [];
 
   api.taskTrackerProviders = async () => [
-    { provider: "jira", configured: true, requiredEnv: ["JIRA_BASE_URL", "JIRA_EMAIL", "JIRA_API_TOKEN"] },
-    { provider: "trello", configured: false, requiredEnv: ["TRELLO_API_KEY", "TRELLO_API_TOKEN"] },
+    { provider: "jira", mode: "live", configured: true, requiredEnv: ["JIRA_BASE_URL", "JIRA_EMAIL", "JIRA_API_TOKEN"] },
+    { provider: "trello", mode: "live", configured: false, requiredEnv: ["TRELLO_API_KEY", "TRELLO_API_TOKEN"] },
   ];
   api.taskTrackerProjects = async () => [
     { provider: "jira", id: "polyth", key: "POL", name: "Polyth" },

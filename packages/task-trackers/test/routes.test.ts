@@ -50,8 +50,8 @@ function harness() {
   let seq = 0;
   const service: TaskTrackerService = {
     providers: () => [
-      { provider: "jira", configured: true, requiredEnv: ["JIRA_BASE_URL", "JIRA_EMAIL", "JIRA_API_TOKEN"] },
-      { provider: "trello", configured: false, requiredEnv: ["TRELLO_API_KEY", "TRELLO_API_TOKEN"] },
+      { provider: "jira", mode: "live", configured: true, requiredEnv: ["JIRA_BASE_URL", "JIRA_EMAIL", "JIRA_API_TOKEN"] },
+      { provider: "trello", mode: "demo", configured: false, requiredEnv: ["TRELLO_API_KEY", "TRELLO_API_TOKEN"] },
     ],
     listProjects: async (provider) => {
       calls.push({ kind: "service", action: `projects:${provider}` });

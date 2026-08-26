@@ -960,11 +960,14 @@ export interface RemoteHost {
 // ---------------------------------------------------------------- task trackers
 
 export type TaskTrackerProvider = "jira" | "trello";
+export type TaskTrackerProviderMode = "live" | "demo";
 export type TaskTrackerBoardType = "kanban" | "scrum" | "simple" | "unknown";
 export type TaskTrackerStatusCategory = "todo" | "in_progress" | "done" | "unknown";
 
 export interface TaskTrackerProviderDto {
   provider: TaskTrackerProvider;
+  /** Live uses configured credentials; demo is an in-memory credential-free sandbox. */
+  mode: TaskTrackerProviderMode;
   configured: boolean;
   /** Environment-variable names only. Credential values are never returned. */
   requiredEnv: string[];

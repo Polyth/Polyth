@@ -6,6 +6,9 @@
 .tt-board {
   --tt-blue: #5b8cff;
   --tt-violet: #9b7bff;
+  --tt-radius-control: 10px;
+  --tt-radius-card: 12px;
+  --tt-radius-panel: 14px;
   position: relative;
   display: flex;
   flex: 1;
@@ -44,10 +47,11 @@
   min-width: 0;
   max-width: 100%;
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: var(--tt-radius-control);
   color: var(--text);
   background: color-mix(in srgb, var(--elevated) 92%, transparent);
   outline: none;
+  transition: border-color 140ms ease, box-shadow 140ms ease, background 140ms ease;
 }
 
 .tt-board :is(select, input, textarea):focus-visible,
@@ -65,6 +69,7 @@
   padding: 12px 14px;
   border-bottom: 1px solid var(--border);
   background: color-mix(in srgb, var(--elevated) 78%, transparent);
+  box-shadow: 0 1px 0 color-mix(in srgb, var(--text) 3%, transparent);
   backdrop-filter: blur(16px);
 }
 
@@ -99,6 +104,19 @@
   font-size: 12px;
   font-weight: 650;
   cursor: pointer;
+  transition: color 140ms ease, background 140ms ease, box-shadow 140ms ease, transform 100ms ease;
+}
+
+.tt-provider-tabs button:hover:not(.active),
+.tt-view-toggle button:hover:not(.active) {
+  color: var(--text);
+  background: color-mix(in srgb, var(--elevated) 52%, transparent);
+}
+
+.tt-provider-tabs button:active,
+.tt-view-toggle button:active,
+.tt-icon-btn:active:not(:disabled) {
+  transform: scale(.97);
 }
 
 .tt-provider-tabs button {
@@ -128,6 +146,12 @@
   background: var(--green);
   opacity: 1;
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--green) 15%, transparent);
+}
+
+.tt-provider-tabs button > i.demo {
+  background: var(--amber);
+  opacity: 1;
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--amber) 16%, transparent);
 }
 
 .tt-provider-mark {
@@ -198,6 +222,73 @@
   min-width: 0;
   min-height: 0;
   flex-direction: column;
+}
+
+.tt-demo-banner {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  margin: 12px 14px 0;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--amber) 32%, var(--border));
+  border-radius: var(--tt-radius-card);
+  color: var(--text);
+  background:
+    linear-gradient(110deg, color-mix(in srgb, var(--amber) 9%, transparent), transparent 62%),
+    color-mix(in srgb, var(--elevated) 88%, transparent);
+  box-shadow: 0 8px 24px -24px var(--shadow-color);
+  animation: tt-rise 180ms ease-out both;
+}
+
+.tt-demo-icon {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border-radius: var(--tt-radius-control);
+  color: color-mix(in srgb, var(--amber) 82%, var(--text));
+  background: color-mix(in srgb, var(--amber) 12%, transparent);
+}
+
+.tt-demo-icon svg {
+  width: 16px;
+  height: 16px;
+}
+
+.tt-demo-banner > span:nth-child(2) {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.tt-demo-banner strong {
+  font-size: 12px;
+}
+
+.tt-demo-banner small {
+  overflow-wrap: anywhere;
+  color: var(--muted);
+  font-size: 10.5px;
+  line-height: 1.4;
+}
+
+.tt-demo-badge,
+.tt-eyebrow i {
+  display: inline-flex;
+  min-height: 24px;
+  align-items: center;
+  padding: 0 8px;
+  border-radius: 999px;
+  color: color-mix(in srgb, var(--amber) 78%, var(--text));
+  background: color-mix(in srgb, var(--amber) 11%, transparent);
+  font-size: 9px;
+  font-style: normal;
+  font-weight: 800;
+  letter-spacing: .05em;
+  text-transform: uppercase;
+  white-space: nowrap;
 }
 
 .tt-board-picker {
@@ -289,6 +380,7 @@
   overscroll-behavior: contain;
   -webkit-overflow-scrolling: touch;
   scrollbar-gutter: stable;
+  scrollbar-color: color-mix(in srgb, var(--muted) 40%, transparent) transparent;
 }
 
 .tt-kanban {
@@ -309,8 +401,10 @@
   max-height: 100%;
   flex-direction: column;
   border: 1px solid color-mix(in srgb, var(--border) 82%, transparent);
-  border-radius: 14px;
+  border-radius: var(--tt-radius-panel);
   background: color-mix(in srgb, var(--sunken) 80%, transparent);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--text) 3%, transparent);
+  animation: tt-rise 180ms ease-out both;
 }
 
 .tt-column > header {
@@ -374,7 +468,7 @@
   padding: 11px;
   overflow: hidden;
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: var(--tt-radius-card);
   background: var(--elevated);
   box-shadow: 0 7px 22px -21px var(--shadow-color);
   text-align: left;
@@ -399,6 +493,12 @@
   background:
     linear-gradient(140deg, color-mix(in srgb, var(--tt-violet) 7%, transparent), transparent 48%),
     var(--elevated);
+}
+
+.tt-task-card.selected,
+.tt-list-row.selected {
+  border-color: color-mix(in srgb, var(--accent) 68%, var(--border));
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent) 12%, transparent);
 }
 
 .tt-card-top,
@@ -554,6 +654,12 @@
 .tt-list-row:hover {
   border-color: color-mix(in srgb, var(--accent) 46%, var(--border));
   background: color-mix(in srgb, var(--accent) 4%, var(--elevated));
+  transform: translateY(-1px);
+}
+
+.tt-list-row:active,
+.tt-task-card:active {
+  transform: scale(.992);
 }
 
 .tt-list-title {
@@ -612,6 +718,7 @@
   border-left: 1px solid var(--border);
   background: var(--bg);
   box-shadow: -16px 0 34px -32px var(--shadow-color);
+  animation: tt-detail-in 180ms cubic-bezier(.2, .8, .2, 1) both;
 }
 
 .tt-detail-header {
@@ -637,6 +744,13 @@
   font-weight: 720;
   letter-spacing: .06em;
   text-transform: uppercase;
+}
+
+.tt-eyebrow i {
+  min-height: 20px;
+  margin-left: 2px;
+  padding: 0 6px;
+  font-size: 8px;
 }
 
 .tt-eyebrow .tt-provider-mark {
@@ -1020,6 +1134,20 @@
   to { transform: rotate(360deg); }
 }
 
+@keyframes tt-rise {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+
+@keyframes tt-detail-in {
+  from {
+    opacity: 0;
+    transform: translateX(8px);
+  }
+}
+
 .tt-linked-widget,
 .tt-linked-widget * {
   box-sizing: border-box;
@@ -1257,10 +1385,20 @@
   }
 
   .tt-board-header,
+  .tt-demo-banner,
   .tt-board-picker,
   .tt-filters {
     padding-right: max(10px, env(safe-area-inset-right, 0px));
     padding-left: max(10px, env(safe-area-inset-left, 0px));
+  }
+
+  .tt-demo-banner {
+    grid-template-columns: auto minmax(0, 1fr);
+    margin-top: 10px;
+  }
+
+  .tt-demo-badge {
+    display: none;
   }
 
   .tt-board-picker,
@@ -1338,8 +1476,16 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .tt-task-card {
+  .tt-task-card,
+  .tt-list-row,
+  .tt-detail,
+  .tt-column,
+  .tt-demo-banner,
+  .tt-provider-tabs button,
+  .tt-view-toggle button,
+  .tt-icon-btn {
     transition: none;
+    animation: none;
   }
 
   .tt-spinner,

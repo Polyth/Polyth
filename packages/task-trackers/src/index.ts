@@ -473,6 +473,188 @@ export function createTrelloClient(options: TrelloClientOptions): ProviderClient
   };
 }
 
+const DEMO_STATUSES: readonly TaskTrackerStatusDto[] = [
+  { id: "demo-todo", name: "To do", category: "todo" },
+  { id: "demo-progress", name: "In progress", category: "in_progress" },
+  { id: "demo-done", name: "Done", category: "done" },
+];
+
+interface DemoTaskSeed {
+  id: string;
+  key: string;
+  title: string;
+  description: string;
+  statusId: string;
+  labels: string[];
+  assignees: string[];
+  dueAt?: string;
+}
+
+const DEMO_TASKS: Record<TaskTrackerProvider, readonly DemoTaskSeed[]> = {
+  jira: [
+    {
+      id: "demo-jira-101",
+      key: "POL-101",
+      title: "Refine the project command palette",
+      description: "Make high-frequency project actions faster to find and fully keyboard accessible.",
+      statusId: "demo-todo",
+      labels: ["UX", "Accessibility"],
+      assignees: ["Maya Chen"],
+      dueAt: "2026-08-29",
+    },
+    {
+      id: "demo-jira-102",
+      key: "POL-102",
+      title: "Add retry guidance to failed runs",
+      description: "Show a concise recovery path when an agent run fails before producing output.",
+      statusId: "demo-todo",
+      labels: ["Reliability"],
+      assignees: [],
+      dueAt: "2026-09-02",
+    },
+    {
+      id: "demo-jira-103",
+      key: "POL-103",
+      title: "Polish task tracker responsive layout",
+      description: "Keep kanban columns, filters, and task details comfortable from phone to desktop.",
+      statusId: "demo-progress",
+      labels: ["Frontend", "Mobile"],
+      assignees: ["Alex Rivera"],
+      dueAt: "2026-08-27",
+    },
+    {
+      id: "demo-jira-104",
+      key: "POL-104",
+      title: "Document session event retention",
+      description: "Clarify retention, export, and deletion behavior for project-scoped session events.",
+      statusId: "demo-progress",
+      labels: ["Docs"],
+      assignees: ["Sam Okafor"],
+    },
+    {
+      id: "demo-jira-105",
+      key: "POL-105",
+      title: "Ship accessible theme presets",
+      description: "Validate theme contrast and expose appearance choices without changing palette identity.",
+      statusId: "demo-done",
+      labels: ["Themes", "Accessibility"],
+      assignees: ["Priya Shah"],
+    },
+  ],
+  trello: [
+    {
+      id: "demo-trello-21",
+      key: "TR-21",
+      title: "Collect launch feedback",
+      description: "Group early feedback by workflow and turn repeated friction into actionable cards.",
+      statusId: "demo-todo",
+      labels: ["Research"],
+      assignees: ["Jordan Lee"],
+      dueAt: "2026-08-31",
+    },
+    {
+      id: "demo-trello-22",
+      key: "TR-22",
+      title: "Prepare onboarding checklist",
+      description: "Create a concise first-project checklist for connecting tools and starting a session.",
+      statusId: "demo-todo",
+      labels: ["Onboarding"],
+      assignees: [],
+    },
+    {
+      id: "demo-trello-23",
+      key: "TR-23",
+      title: "Review empty-state copy",
+      description: "Make every empty state explain what happened and provide one clear next action.",
+      statusId: "demo-progress",
+      labels: ["Content", "UX"],
+      assignees: ["Nina Patel"],
+      dueAt: "2026-08-28",
+    },
+    {
+      id: "demo-trello-24",
+      key: "TR-24",
+      title: "Verify tablet touch targets",
+      description: "Confirm primary controls remain at least 44 pixels across compact workspace layouts.",
+      statusId: "demo-done",
+      labels: ["QA", "Mobile"],
+      assignees: ["Theo Martin"],
+    },
+  ],
+};
+
+function createDemoClient(provider: TaskTrackerProvider): ProviderClient {
+  const projectId = `demo-${provider}-workspace`;
+  const boardId = `demo-${provider}-board`;
+  const statuses = DEMO_STATUSES.map((status) => ({ ...status }));
+  const tasks = DEMO_TASKS[provider].map((seed): TaskTrackerTaskDto => ({
+    provider,
+    id: seed.id,
+    key: seed.key,
+    title: seed.title,
+    description: seed.description,
+    boardId,
+    projectId,
+    projectKey: provider === "jira" ? "POL" : "DEMO",
+    status: { ...statuses.find((status) => status.id === seed.statusId)! },
+    availableStatuses: statuses.map((status) => ({ ...status })),
+    labels: [...seed.labels],
+    assignees: [...seed.assignees],
+    ...(seed.dueAt ? { dueAt: seed.dueAt } : {}),
+  }));
+  const clone = (task: TaskTrackerTaskDto): TaskTrackerTaskDto => ({
+    ...task,
+    status: { ...task.status },
+    availableStatuses: task.availableStatuses?.map((status) => ({ ...status })),
+    labels: [...task.labels],
+    assignees: [...task.assignees],
+  });
+  const taskById = (taskId: string): TaskTrackerTaskDto => {
+    const task = tasks.find((item) => item.id === taskId || item.key === taskId);
+    if (!task) throw error(`${provider} demo task was not found`, "not-found");
+    return task;
+  };
+  return {
+    async listProjects() {
+      return [{
+        provider,
+        id: projectId,
+        key: provider === "jira" ? "POL" : "DEMO",
+        name: provider === "jira" ? "Polyth Sandbox" : "Product Sandbox",
+      }];
+    },
+    async listBoards(selectedProjectId) {
+      if (selectedProjectId && selectedProjectId !== projectId) return [];
+      return [{
+        provider,
+        id: boardId,
+        name: provider === "jira" ? "Product delivery" : "Launch planning",
+        type: "kanban",
+        projectId,
+        ...(provider === "jira" ? { projectKey: "POL" } : {}),
+      }];
+    },
+    async listTasks(query) {
+      if (
+        (query.boardId && query.boardId !== boardId)
+        || (query.projectId && query.projectId !== projectId)
+      ) return [];
+      return tasks.slice(0, limitOf(query.limit)).map(clone);
+    },
+    async getTask(taskId) {
+      return clone(taskById(taskId));
+    },
+    async updateStatus(taskId, statusId) {
+      const task = taskById(taskId);
+      const status = statuses.find((item) => item.id === identifier(statusId, "statusId"));
+      if (!status) throw error("demo status was not found", "not-found");
+      task.status = { ...status };
+      task.updatedAt = new Date().toISOString();
+      return clone(task);
+    },
+  };
+}
+
 export interface TaskTrackerServiceOptions {
   env?: NodeJS.ProcessEnv;
   fetchImpl?: FetchFn;
@@ -498,6 +680,8 @@ export function createTaskTrackerService(
       apiToken: env.JIRA_API_TOKEN!,
       ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
     });
+  } else {
+    clients.jira = createDemoClient("jira");
   }
   if (configured.trello) {
     clients.trello = createTrelloClient({
@@ -505,25 +689,26 @@ export function createTaskTrackerService(
       apiToken: env.TRELLO_API_TOKEN!,
       ...(options.fetchImpl ? { fetchImpl: options.fetchImpl } : {}),
     });
+  } else {
+    clients.trello = createDemoClient("trello");
   }
   const providerInfo: TaskTrackerProviderDto[] = [
     {
       provider: "jira",
+      mode: configured.jira ? "live" : "demo",
       configured: configured.jira,
       requiredEnv: ["JIRA_BASE_URL", "JIRA_EMAIL", "JIRA_API_TOKEN"],
     },
     {
       provider: "trello",
+      mode: configured.trello ? "live" : "demo",
       configured: configured.trello,
       requiredEnv: ["TRELLO_API_KEY", "TRELLO_API_TOKEN"],
     },
   ];
   const client = (provider: TaskTrackerProvider): ProviderClient => {
     const value = clients[provider];
-    if (!value) {
-      const names = providerInfo.find((item) => item.provider === provider)?.requiredEnv.join(", ");
-      throw error(`${provider} is not configured; set ${names}`, "unavailable");
-    }
+    if (!value) throw error(`${provider} is unavailable`, "unavailable");
     return value;
   };
   return {

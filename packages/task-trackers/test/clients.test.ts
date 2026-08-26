@@ -29,11 +29,13 @@ test("provider discovery reports env names without exposing credential values", 
   assert.deepEqual(service.providers(), [
     {
       provider: "jira",
+      mode: "live",
       configured: true,
       requiredEnv: ["JIRA_BASE_URL", "JIRA_EMAIL", "JIRA_API_TOKEN"],
     },
     {
       provider: "trello",
+      mode: "live",
       configured: true,
       requiredEnv: ["TRELLO_API_KEY", "TRELLO_API_TOKEN"],
     },
@@ -41,11 +43,53 @@ test("provider discovery reports env names without exposing credential values", 
   assert.doesNotMatch(JSON.stringify(service.providers()), /secret-token|public-key|dev@example/);
 
   const empty = createTaskTrackerService({ env: {} });
-  assert.throws(
-    () => empty.listBoards("jira"),
-    (cause: Error & { code?: string }) =>
-      cause.code === "unavailable" && /JIRA_BASE_URL/.test(cause.message),
-  );
+  assert.deepEqual(empty.providers().map(({ provider, mode, configured }) => ({
+    provider,
+    mode,
+    configured,
+  })), [
+    { provider: "jira", mode: "demo", configured: false },
+    { provider: "trello", mode: "demo", configured: false },
+  ]);
+  assert.doesNotMatch(JSON.stringify(empty.providers()), /secret-token|public-key|dev@example/);
+});
+
+test("credential-free demo mode exposes mutable sample kanban data without external requests", async () => {
+  let fetchCalls = 0;
+  const service = createTaskTrackerService({
+    env: {},
+    fetchImpl: (async () => {
+      fetchCalls++;
+      throw new Error("demo mode must not use the network");
+    }) as typeof fetch,
+  });
+
+  for (const provider of ["jira", "trello"] as const) {
+    const projects = await service.listProjects(provider);
+    assert.equal(projects.length, 1);
+    const boards = await service.listBoards(provider, projects[0]?.id);
+    assert.equal(boards.length, 1);
+    assert.equal(boards[0]?.type, "kanban");
+
+    const tasks = await service.listTasks(provider, { boardId: boards[0]?.id, limit: 100 });
+    assert.ok(tasks.length >= 4, `${provider} demo has a populated board`);
+    assert.deepEqual(
+      [...new Set(tasks.map((task) => task.status.category))].sort(),
+      ["done", "in_progress", "todo"],
+    );
+    const todo = tasks.find((task) => task.status.category === "todo");
+    assert.ok(todo);
+    assert.equal(todo.availableStatuses?.length, 3);
+
+    const updated = await service.updateStatus(provider, todo.id, "demo-done");
+    assert.equal(updated.status.category, "done");
+    assert.equal((await service.getTask(provider, todo.id)).status.category, "done");
+  }
+  assert.equal(fetchCalls, 0);
+
+  const fresh = createTaskTrackerService({ env: {} });
+  const freshTasks = await fresh.listTasks("jira", { boardId: "demo-jira-board" });
+  assert.ok(freshTasks.some((task) => task.status.category === "todo"), "demo state resets with the service");
 });
 
 test("Jira client normalizes projects, kanban tasks, details, and transitions", async () => {

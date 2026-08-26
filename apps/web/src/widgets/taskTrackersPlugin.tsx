@@ -139,18 +139,21 @@ function TaskMeta({ task }: { task: TaskTrackerTaskDto }) {
 function TaskCard({
   task,
   linked,
+  selected,
   onOpen,
 }: {
   task: TaskTrackerTaskDto;
   linked: boolean;
+  selected: boolean;
   onOpen: (task: TaskTrackerTaskDto, trigger: HTMLElement) => void;
 }) {
   return (
     <button
       type="button"
-      className={`tt-task-card${linked ? " linked" : ""}`}
+      className={`tt-task-card${linked ? " linked" : ""}${selected ? " selected" : ""}`}
       onClick={(event) => onOpen(task, event.currentTarget)}
       aria-label={`Open ${task.key}: ${task.title}`}
+      aria-pressed={selected}
     >
       <span className="tt-card-top">
         <StatusPill status={task.status} />
@@ -187,6 +190,7 @@ function TaskDetail({
   task,
   sessionId,
   linked,
+  demo,
   loading,
   onClose,
   onTaskChanged,
@@ -194,6 +198,7 @@ function TaskDetail({
   task: TaskTrackerTaskDto;
   sessionId: string | null;
   linked: boolean;
+  demo: boolean;
   loading: boolean;
   onClose: () => void;
   onTaskChanged: (task: TaskTrackerTaskDto, linked?: boolean) => void;
@@ -273,7 +278,10 @@ function TaskDetail({
     >
       <header className="tt-detail-header">
         <div>
-          <span className="tt-eyebrow">{providerMark(task.provider)} {PROVIDER_LABELS[task.provider]} · {task.key}</span>
+          <span className="tt-eyebrow">
+            {providerMark(task.provider)} {PROVIDER_LABELS[task.provider]} · {task.key}
+            {demo && <i>Demo</i>}
+          </span>
           <h3>{task.title}</h3>
         </div>
         <button type="button" className="tt-icon-btn" onClick={onClose} aria-label="Close task details">
@@ -304,7 +312,10 @@ function TaskDetail({
         <section className="tt-detail-section">
           <div className="tt-section-heading">
             <span className="tt-step">1</span>
-            <div><strong>Hand off to the agent</strong><small>Task context is logged before work starts.</small></div>
+            <div>
+              <strong>Hand off to the agent</strong>
+              <small>{demo ? "Sample task context is logged before work starts." : "Task context is logged before work starts."}</small>
+            </div>
           </div>
           <textarea
             value={instructions}
@@ -340,7 +351,10 @@ function TaskDetail({
         <section className="tt-detail-section">
           <div className="tt-section-heading">
             <span className="tt-step">2</span>
-            <div><strong>Update the tracker</strong><small>Move the task when the work is ready.</small></div>
+            <div>
+              <strong>{demo ? "Update the sandbox" : "Update the tracker"}</strong>
+              <small>{demo ? "Try status changes without touching an external tracker." : "Move the task when the work is ready."}</small>
+            </div>
           </div>
           {statuses.length > 0 ? (
             <>
@@ -422,7 +436,9 @@ export function TaskTrackerBoard({
   const detailRequestRef = useRef(0);
 
   const providerInfo = providers?.find((item) => item.provider === provider);
-  const board = boards.find((item) => item.id === boardId) ?? null;
+  const providerReady = providerInfo?.configured === true || providerInfo?.mode === "demo";
+  const demoMode = providerInfo?.mode === "demo";
+  const board = boards.find((item) => item.provider === provider && item.id === boardId) ?? null;
 
   useEffect(() => {
     let active = true;
@@ -433,8 +449,8 @@ export function TaskTrackerBoard({
         if (!active) return;
         setError("");
         setProviders(items);
-        const firstConfigured = items.find((item) => item.configured);
-        if (firstConfigured) setProvider(firstConfigured.provider);
+        const firstLive = items.find((item) => item.mode === "live" || item.configured);
+        if (firstLive) setProvider(firstLive.provider);
       })
       .catch((cause) => {
         if (active) setError(messageOf("Couldn’t load task tracker providers", cause));
@@ -446,7 +462,7 @@ export function TaskTrackerBoard({
   }, [loadEpoch]);
 
   useEffect(() => {
-    if (!providerInfo?.configured) {
+    if (!providerReady) {
       setProjects([]);
       setBoards([]);
       setBoardId("");
@@ -462,10 +478,10 @@ export function TaskTrackerBoard({
       .then((items) => { if (active) setProjects(items); })
       .catch((cause) => { if (active) setError(messageOf("Couldn’t load projects", cause)); });
     return () => { active = false; };
-  }, [loadEpoch, provider, providerInfo?.configured]);
+  }, [loadEpoch, provider, providerReady]);
 
   useEffect(() => {
-    if (!providerInfo?.configured) return;
+    if (!providerReady) return;
     let active = true;
     setLoading("boards");
     setError("");
@@ -485,14 +501,14 @@ export function TaskTrackerBoard({
         if (active) setLoading((current) => current === "boards" ? null : current);
       });
     return () => { active = false; };
-  }, [loadEpoch, provider, projectId, providerInfo?.configured]);
+  }, [loadEpoch, provider, projectId, providerReady]);
 
   useEffect(() => {
-    if (!boardId || !providerInfo?.configured) return;
+    if (!board || !providerReady) return;
     let active = true;
     setLoading("tasks");
     setError("");
-    void api.taskTrackerTasks(provider, { boardId, limit: 100 })
+    void api.taskTrackerTasks(provider, { boardId: board.id, limit: 100 })
       .then((items) => { if (active) setTasks(items); })
       .catch((cause) => {
         if (active) setError(messageOf("Couldn’t load tasks", cause));
@@ -501,7 +517,7 @@ export function TaskTrackerBoard({
         if (active) setLoading((current) => current === "tasks" ? null : current);
       });
     return () => { active = false; };
-  }, [boardId, loadEpoch, provider, providerInfo?.configured, refreshKey]);
+  }, [board?.id, loadEpoch, provider, providerReady, refreshKey]);
 
   useEffect(() => {
     if (!sessionId) {
@@ -668,8 +684,10 @@ export function TaskTrackerBoard({
               >
                 {providerMark(id)}
                 <span>{PROVIDER_LABELS[id]}</span>
-                <i className={info?.configured ? "configured" : ""} aria-hidden="true" />
-                <span className="sr-only">{info?.configured ? "Configured" : "Not configured"}</span>
+                <i className={info?.mode === "demo" ? "demo" : info?.configured ? "configured" : ""} aria-hidden="true" />
+                <span className="sr-only">
+                  {info?.mode === "demo" ? "Demo sandbox" : info?.configured ? "Configured" : "Not configured"}
+                </span>
               </button>
             );
           })}
@@ -695,7 +713,7 @@ export function TaskTrackerBoard({
             type="button"
             className="tt-icon-btn"
             onClick={() => setRefreshKey((value) => value + 1)}
-            disabled={!boardId || loading !== null}
+            disabled={!board || loading !== null}
             aria-label="Refresh tasks"
           >
             <span className={loading === "tasks" ? "tt-refreshing" : ""}><Icon.refresh /></span>
@@ -709,7 +727,7 @@ export function TaskTrackerBoard({
         role="tabpanel"
         aria-labelledby={`${providerPanelId}-${provider}`}
       >
-        {!providerInfo?.configured ? (
+        {!providerReady ? (
           <BoardEmpty
             icon={providerMark(provider)}
             title={`Connect ${PROVIDER_LABELS[provider]}`}
@@ -717,6 +735,13 @@ export function TaskTrackerBoard({
           />
         ) : (
           <>
+          {demoMode && (
+            <div className="tt-demo-banner" role="note">
+              <span className="tt-demo-icon"><Icon.widgets /></span>
+              <span><strong>Demo sandbox</strong><small>Explore sample data safely. Changes stay in memory and never reach Jira or Trello.</small></span>
+              <span className="tt-demo-badge">No credentials</span>
+            </div>
+          )}
           <div className="tt-board-picker">
             <label>
               <span>Workspace</span>
@@ -751,7 +776,7 @@ export function TaskTrackerBoard({
             </label>
           </div>
 
-          {boardId && (
+          {board && (
             <div className="tt-filters">
               <label className="tt-search">
                 <Icon.search />
@@ -784,7 +809,7 @@ export function TaskTrackerBoard({
                 <div className="tt-loading-state" role="status"><span className="tt-spinner" /> Loading tasks…</div>
               ) : boards.length === 0 && loading !== "boards" ? (
                 <BoardEmpty icon={<Icon.widgets />} title="No boards found" body="Try another workspace or provider." />
-              ) : tasks.length === 0 && boardId ? (
+              ) : tasks.length === 0 && board ? (
                 <BoardEmpty icon={<Icon.check />} title="Board is clear" body="There are no open tasks on this board." />
               ) : visibleTasks.length === 0 ? (
                 <BoardEmpty
@@ -808,6 +833,7 @@ export function TaskTrackerBoard({
                             key={task.id}
                             task={task}
                             linked={linkedIds.has(`${task.provider}:${task.id}`)}
+                            selected={selected?.id === task.id}
                             onOpen={openTask}
                           />
                         ))}
@@ -823,10 +849,11 @@ export function TaskTrackerBoard({
                   {visibleTasks.map((task) => (
                     <button
                       type="button"
-                      className="tt-list-row"
+                      className={`tt-list-row${selected?.id === task.id ? " selected" : ""}`}
                       key={task.id}
                       onClick={(event) => openTask(task, event.currentTarget)}
                       aria-label={`Open ${task.key}: ${task.title}`}
+                      aria-pressed={selected?.id === task.id}
                     >
                       <span className="tt-list-title">
                         <small>{task.key}</small>
@@ -845,6 +872,7 @@ export function TaskTrackerBoard({
                 task={selected}
                 sessionId={sessionId}
                 linked={linkedIds.has(`${selected.provider}:${selected.id}`)}
+                demo={demoMode}
                 loading={detailLoading}
                 onClose={closeTask}
                 onTaskChanged={updateTask}
