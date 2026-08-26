@@ -1,10 +1,9 @@
 // The simpler settings pages: General, Appearance, Chat, Notifications,
-// Behavior, Usage, Projects, Git, Agents, MCP, Plugins.
+// Behavior, Projects, Agents, MCP, and About.
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import {
   activateProject,
   applyProjectUpsert,
-  openWorkspacePane,
   setAgents,
   setOverlay,
   setUiError,
@@ -15,7 +14,7 @@ import { UI_DEFAULTS, setUiSettings, useUiSettings } from "../../uiPrefs.ts";
 import { DEFAULT_SETTINGS, friendlyError, INTERFACE_FONTS } from "../../settings.ts";
 import { requestNotifyPermission } from "../../notify.ts";
 import { disablePush, enablePush, pushSubscription, pushUnsupportedReason } from "../../push.ts";
-import { api, type GitStatus } from "@polyth/session/web-api";
+import { api } from "@polyth/session/web-api";
 import { confirmAlert } from "../../alerts.ts";
 import { EmptyState, PageHead, Row, Seg, Toggle } from "./parts.tsx";
 import { refreshProfiles, useProfiles } from "../../profiles.ts";
@@ -23,7 +22,6 @@ import { removeProject } from "../../init.ts";
 import AgentProfileForm from "../AgentProfileForm.tsx";
 import ProjectFolderDialog from "../ProjectFolderDialog.tsx";
 import { parseMcpServersJson, type McpImportResult } from "../../mcpImport.ts";
-import { describePluginSpec, parseOpenCodePluginJson } from "../../pluginImport.ts";
 import {
   PRESET_THEMES, addCustomTheme, applyTheme, loadCustomThemes, parseThemeJson,
   reapplyTheme, removeCustomTheme, resolveTheme, type AppearanceMode, type ThemeSpec,
@@ -32,21 +30,14 @@ import type { AssistSettingsDto } from "@polyth/session/web-api";
 import type {
   AgentDescriptor,
   AgentProfile,
-  InstalledPluginDto,
   McpServerDto,
   McpTransport,
   ModelRef,
-  OpenCodePluginConfigEntry,
-  OpenCodePluginEntryDto,
-  OpenCodePluginPreviewDto,
   SystemInfoDto,
 } from "@polyth/contracts";
-import { useWidgetCatalog } from "../../widgets/catalog.ts";
-import { useWidgetLayout } from "../../widgets/widgetLayout.ts";
 import ModelPicker from "../../../../../packages/models/widgets/ModelPicker.tsx";
 import Dialog from "../a11y/Dialog.tsx";
 import { modelSupportsTextWorkflow } from "../../composer/discovery.ts";
-import { removeGitPersona, saveGitPersona, useGitPersonas, type GitPersona } from "../../../../../packages/git/widgets/gitPersonas.ts";
 import { getLocale, LOCALES, LOCALE_NAMES, setLocale, tr, type Locale } from "../../i18n/index.ts";
 import {
   projectRemembersModelSelection,
@@ -849,138 +840,6 @@ export function ProjectsPage() {
   );
 }
 
-function GitPersonas({ projectId }: { projectId: string }) {
-  const personas = useGitPersonas();
-  const [identity, setIdentity] = useState({ name: "", email: "" });
-  const [draft, setDraft] = useState<GitPersona | null>(null);
-  const [error, setError] = useState("");
-  useEffect(() => {
-    void api.gitIdentity(projectId).then(setIdentity).catch(() => setIdentity({ name: "", email: "" }));
-  }, [projectId]);
-  const apply = async (persona: GitPersona) => {
-    try {
-      setError("");
-      setIdentity(await api.gitIdentitySet(projectId, persona));
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : String(cause));
-    }
-  };
-  return (
-    <section className="git-personas" data-settings-item="git.personas">
-      <div className="settings-section-head">
-        <div><strong>{tr("settings.pages.gitPersonas")}</strong><span>{tr("settings.pages.savedIdentitiesYouCanApplyToThis")}</span></div>
-        <button className="small-btn" onClick={() => setDraft({ id: crypto.randomUUID(), label: "", name: "", email: "" })}>{tr("settings.pages.persona")}</button>
-      </div>
-      <div className="git-current-identity">
-        {tr("settings.pages.currentRepositoryIdentity")}{" "}<strong>{identity.name || tr("settings.pages.notSet")}</strong>
-        <span className="mono">{identity.email || "—"}</span>
-      </div>
-      {personas.map((persona) => {
-        const active = persona.name === identity.name && persona.email === identity.email;
-        return (
-          <div key={persona.id} className={`git-persona-row${active ? " active" : ""}`}>
-            <span className="profile-avatar">{persona.label.slice(0, 1).toUpperCase()}</span>
-            <span><strong>{persona.label}</strong><small>{persona.name} · {persona.email}</small></span>
-            {active && <span className="tag">{tr("settings.pages.inUse")}</span>}
-            <button className="small-btn" disabled={active} onClick={() => void apply(persona)}>{tr("settings.pages.use")}</button>
-            <button className="small-btn" onClick={() => setDraft(persona)}>{tr("common.edit")}</button>
-            <button className="small-btn danger-btn" onClick={() => removeGitPersona(persona.id)}>{tr("common.delete")}</button>
-          </div>
-        );
-      })}
-      {personas.length === 0 && (
-        <EmptyState
-          title={tr("settings.pages.gitPersonas")}
-          body={tr("settings.pages.addAWorkPersonalOrBotIdentity")}
-        />
-      )}
-      {error && <div className="form-error">{error}</div>}
-      {draft && (
-        <Dialog title={draft.label ? tr("settings.pages.editValue", { label: draft.label }) : tr("settings.pages.newGitPersona")} onClose={() => setDraft(null)} className="profile-form" initialFocus="input">
-          <div className="dialog-head"><span>{draft.label ? tr("settings.pages.editValue", { label: draft.label }) : tr("settings.pages.newGitPersona")}</span><span className="header-spacer" /><button className="small-btn" aria-label={tr("common.close")} title={tr("common.close")} onClick={() => setDraft(null)}>✕</button></div>
-          <div className="profile-form-body">
-            <label>{tr("settings.pages.label")}<input value={draft.label} placeholder={tr("settings.pages.work")} onChange={(event) => setDraft({ ...draft, label: event.target.value })} /></label>
-            <label>{tr("settings.pages.commitAuthorName")}<input value={draft.name} placeholder={tr("settings.pages.adaLovelace")} onChange={(event) => setDraft({ ...draft, name: event.target.value })} /></label>
-            <label>{tr("settings.pages.commitEmail")}<input type="email" value={draft.email} placeholder={tr("settings.pages.adaExampleCom")} onChange={(event) => setDraft({ ...draft, email: event.target.value })} /></label>
-          </div>
-          <div className="dialog-foot">
-            <button className="small-btn" onClick={() => setDraft(null)}>{tr("common.cancel")}</button>
-            <span className="header-spacer" />
-            <button className="primary-btn" disabled={!draft.label.trim() || !draft.name.trim() || !draft.email.trim()} onClick={() => { saveGitPersona({ ...draft, label: draft.label.trim(), name: draft.name.trim(), email: draft.email.trim() }); setDraft(null); }}>{tr("settings.pages.savePersona")}</button>
-          </div>
-        </Dialog>
-      )}
-    </section>
-  );
-}
-
-export function GitPage() {
-  const projectId = useStore((s) => s.activeProjectId);
-  const settings = useStore((s) => s.settings);
-  const [status, setStatus] = useState<GitStatus | null>(null);
-  useEffect(() => {
-    if (!projectId) { setStatus(null); return; }
-    void api.gitStatus(projectId).then(setStatus);
-  }, [projectId]);
-  if (!projectId) return <><PageHead title={tr("settings.pages.git")} /><EmptyState title={tr("settings.pages.noActiveProject")} /></>;
-  const changes = status ? status.staged.length + status.unstaged.length + status.untracked.length + status.conflicted.length : 0;
-  return (
-    <>
-      <PageHead title={tr("settings.pages.git")} blurb={tr("settings.pages.repositoryStateForTheActiveProject")} />
-      {!status?.branch ? (
-        <EmptyState title={tr("settings.pages.notAGitRepository")} body={tr("settings.pages.initializeARepoToUseTheGit")} />
-      ) : (
-        <>
-          <Row label={tr("settings.pages.branch")}><span className="mono">{status.branch}</span></Row>
-          <Row label={tr("settings.pages.workingTree")}><span className="mono">{changes === 0
-            ? tr("settings.pages.clean")
-            : changes === 1
-              ? tr("settings.pages.oneChangedFile")
-              : tr("settings.pages.valueChangedFiles", { count: changes })}</span></Row>
-          <Row label={tr("settings.pages.aheadBehind")}><span className="mono">↑{status.ahead} ↓{status.behind}</span></Row>
-          <GitPersonas projectId={projectId} />
-          <Row label={tr("settings.pages.branchNameTemplate")} hint={tr("settings.pages.tokensValueAndValueStoredLocally")} itemId="git.branchTemplate">
-            <input
-              className="inp inp-mono"
-              value={settings.branchTemplate}
-              onChange={(e) => updateSettings({ branchTemplate: e.target.value })}
-            />
-          </Row>
-          <Row
-            label={tr("settings.pages.conflictAgentPrompt")}
-            hint={tr("settings.pages.conflictAgentPromptHint")}
-            itemId="git.conflictAgentPrompt"
-          >
-            <textarea
-              className="inp git-conflict-agent-prompt"
-              rows={4}
-              value={settings.conflictAgentPrompt}
-              onChange={(event) => updateSettings({ conflictAgentPrompt: event.target.value })}
-            />
-          </Row>
-          <Row
-            label={tr("settings.pages.conflictAgentTarget")}
-            hint={tr("settings.pages.conflictAgentTargetHint")}
-            itemId="git.conflictAgentTarget"
-          >
-            <Seg
-              value={settings.conflictAgentTarget}
-              options={[
-                ["new-session", tr("settings.pages.newSession")],
-                ["current-session", tr("settings.pages.currentSession")],
-              ]}
-              onChange={(conflictAgentTarget) => updateSettings({ conflictAgentTarget })}
-            />
-          </Row>
-          <Row label={tr("settings.pages.fullView")} hint={tr("settings.pages.stageCommitBranchAndManageWorktrees")}>
-            <button className="small-btn" onClick={() => { setOverlay(null); openWorkspacePane("git"); }}>{tr("settings.pages.openGitView")}</button>
-          </Row>
-        </>
-      )}
-    </>
-  );
-}
-
 function RoleEditor({ role, onClose }: { role: AgentDescriptor; onClose: () => void }) {
   const models = useStore((state) => state.models).filter(modelSupportsTextWorkflow);
   const agents = useStore((state) => state.agents);
@@ -1337,341 +1196,6 @@ export function McpPage() {
           <button className="small-btn" onClick={() => setImporting(true)}>{tr("settings.pages.importJson2")}</button>
         </div>
       )}
-    </>
-  );
-}
-
-const OTTO_PLUGIN_EXAMPLE = `{
-  "$schema": "https://opencode.ai/config.json",
-  "plugin": ["@otto-assistant/opencode-claude"]
-}`;
-
-function OpenCodePluginsSection() {
-  const [plugins, setPlugins] = useState<OpenCodePluginEntryDto[]>([]);
-  const [text, setText] = useState("");
-  const [preview, setPreview] = useState<OpenCodePluginPreviewDto | null>(null);
-  const [error, setError] = useState("");
-  const [notice, setNotice] = useState("");
-  const [busy, setBusy] = useState(false);
-
-  const refresh = async () => {
-    try {
-      const result = await api.opencodePluginsList();
-      setPlugins(result.plugins);
-      setError("");
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    }
-  };
-  useEffect(() => { void refresh(); }, []);
-
-  const importPlugins = async () => {
-    if (!preview || preview.errors.length > 0 || preview.entries.length === 0) return;
-    setBusy(true);
-    setError("");
-    setNotice("");
-    const entries: OpenCodePluginConfigEntry[] = preview.entries.map((entry) =>
-      entry.options ? [entry.spec, entry.options] : entry.spec);
-    try {
-      const result = await api.opencodePluginsImport({ plugins: entries });
-      setPlugins(result.plugins);
-      setText("");
-      setPreview(null);
-      setNotice(
-        `${result.imported.length} OpenCode plugin${result.imported.length === 1 ? "" : "s"} staged.`,
-      );
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  const remove = async (plugin: OpenCodePluginEntryDto) => {
-    if (!window.confirm(`Remove OpenCode plugin "${plugin.spec}" from opencode.json?`)) return;
-    setBusy(true);
-    setError("");
-    setNotice("");
-    try {
-      const result = await api.opencodePluginRemove(plugin.spec);
-      setPlugins(result.plugins);
-      if (result.removed) setNotice(`${plugin.spec} removal staged.`);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    } finally {
-      setBusy(false);
-    }
-  };
-
-  return (
-    <section className="opencode-plugin-section" data-settings-item="plugins.opencode">
-      <div className="plugin-library-head">
-        <div>
-          <strong>OpenCode plugins</strong>
-          <span>Paste a package spec, plugin array, or OpenCode config. Only the plugin array is merged into opencode.json.</span>
-        </div>
-        <span>{plugins.length} configured</span>
-      </div>
-      <div className="mcp-list">
-        {plugins.length === 0 && (
-          <EmptyState title="No OpenCode plugins configured" body="Paste JSON below to add one without changing providers, MCP servers, agents, or other config." />
-        )}
-        {plugins.map((plugin) => {
-          const info = describePluginSpec(plugin.spec);
-          return (
-            <div className="set-row" key={plugin.spec}>
-              <div className="set-row-text">
-                <div className="set-row-label">{info.name}</div>
-                <div className="set-row-hint mono">{info.path}</div>
-                <div className="set-row-hint">
-                  {info.description}
-                  {plugin.options && ` · Options: ${JSON.stringify(plugin.options)}`}
-                </div>
-              </div>
-              <div className="set-row-control">
-                <button className="small-btn danger-btn" disabled={busy} onClick={() => void remove(plugin)}>Remove</button>
-              </div>
-            </div>
-          );
-        })}
-      </div>
-      <div className="mcp-form">
-        <div className="stat-label">
-          Import OpenCode plugin JSON <span className="muted">(string entries and [spec, options] tuples are supported)</span>
-        </div>
-        <textarea
-          rows={7}
-          className="mono"
-          aria-label="OpenCode plugin JSON"
-          placeholder={OTTO_PLUGIN_EXAMPLE}
-          value={text}
-          onChange={(event) => {
-            setText(event.target.value);
-            setPreview(null);
-            setError("");
-            setNotice("");
-          }}
-        />
-        {preview && (
-          <div className="mcp-import-preview" aria-live="polite">
-            {preview.entries.map((entry) => {
-              const existing = plugins.some((plugin) => plugin.spec === entry.spec);
-              return (
-                <div key={entry.spec} className="set-row-hint mono">
-                  {existing ? "↻" : "+"} {entry.spec}
-                  {entry.options && ` · ${JSON.stringify(entry.options)}`}
-                  {existing && <span> — existing entry will be updated</span>}
-                </div>
-              );
-            })}
-            {preview.ignoredKeys.length > 0 && (
-              <div className="set-row-hint">
-                Not imported: {preview.ignoredKeys.join(", ")}. Those config keys remain unchanged.
-              </div>
-            )}
-            {preview.errors.map((message, index) => <div className="form-error" key={index}>{message}</div>)}
-          </div>
-        )}
-        <div className="mcp-form-row">
-          <button
-            className="small-btn"
-            disabled={busy || !text.trim()}
-            onClick={() => setPreview(parseOpenCodePluginJson(text))}
-          >
-            Preview
-          </button>
-          <button
-            className="small-btn"
-            disabled={busy || !preview || preview.entries.length === 0 || preview.errors.length > 0}
-            onClick={() => void importPlugins()}
-          >
-            {busy ? "Importing…" : `Import ${preview?.entries.length ?? 0} plugin${(preview?.entries.length ?? 0) === 1 ? "" : "s"}`}
-          </button>
-        </div>
-      </div>
-      {error && <div className="form-error">{error}</div>}
-      {notice && <div className="plugin-toast" role="status"><span>{notice}</span><button type="button" onClick={() => setNotice("")}>Dismiss</button></div>}
-    </section>
-  );
-}
-
-function PluginLogViewer({ id }: { id: string }) {
-  const [lines, setLines] = useState<Array<{ at: number; line: string }>>([]);
-  useEffect(() => { void api.pluginsLogs(id).then(setLines).catch(() => setLines([])); }, [id]);
-  return (
-    <div className="plugin-log" role="log" aria-label={tr("settings.pages.logsForValue", { id: id })}>
-      {lines.length === 0 && <span className="muted">{tr("settings.pages.noLogOutput")}</span>}
-      {lines.map((l, i) => <div key={i} className="mono plugin-log-line">{l.line}</div>)}
-    </div>
-  );
-}
-
-export function ManagedPluginsSection() {
-  const [plugins, setPlugins] = useState<InstalledPluginDto[]>([]);
-  const [source, setSource] = useState("");
-  const [error, setError] = useState("");
-  const [logsFor, setLogsFor] = useState<string | null>(null);
-  const [selected, setSelected] = useState<string | null>(null);
-  const [detailTab, setDetailTab] = useState<"overview" | "widgets" | "commands" | "tools" | "settings" | "permissions" | "contributions">("overview");
-  const [toast, setToast] = useState("");
-  const widgets = useWidgetCatalog();
-  const layout = useWidgetLayout();
-  const sourceValid = /^(?:npm|file):\S+$/.test(source.trim());
-  const refresh = () => void api.pluginsList().then(setPlugins);
-  useEffect(() => { refresh(); }, []);
-
-  const install = async () => {
-    if (!sourceValid) return;
-    setError("");
-    try {
-      const installed = await api.pluginsInstall(source.trim());
-      setSource("");
-      setToast(tr("settings.pages.pluginInstalledContributionsAvailable", { name: installed.name }));
-      refresh();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    }
-  };
-
-  const op = async (id: string, what: "enable" | "disable" | "reload") => {
-    setError("");
-    try {
-      const plugin = await api.pluginsOp(id, what);
-      setToast(what === "disable"
-        ? tr("settings.pages.pluginDisabledPlacementsKept", { name: plugin.name })
-        : what === "enable"
-          ? tr("settings.pages.pluginEnabledSeeContributions", { name: plugin.name })
-          : tr("settings.pages.pluginReloaded", { name: plugin.name }));
-    } catch (e) {
-      setError(e instanceof Error ? e.message : String(e));
-    }
-    refresh();
-  };
-
-  const remove = async (plugin: InstalledPluginDto) => {
-    const active = Object.values(layout.widgets).filter((placement) =>
-      placement.visible
-      && (placement.pluginId === plugin.id
-        || widgets.some((widget) => widget.id === placement.definitionId && widget.pluginId === plugin.id)));
-    const warning = active.length > 0
-      ? tr("settings.pages.pluginWidgetsInLayoutUninstallWarning", {
-          count: active.length,
-          name: plugin.name,
-        })
-      : tr("settings.pages.removePluginValue", { name: plugin.name });
-    if (!await confirmAlert(warning, { title: tr("settings.pages.removePlugin"), confirmLabel: tr("common.remove") })) return;
-    await api.pluginsRemove(plugin.id);
-    setToast(tr("settings.pages.pluginRemoved", { name: plugin.name }));
-    if (selected === plugin.id) setSelected(null);
-    refresh();
-  };
-
-  const selectedPlugin = plugins.find((plugin) => plugin.id === selected);
-  const contributionCount = (plugin: InstalledPluginDto, prefix: string) =>
-    plugin.contributions.filter((item) => item.slot.startsWith(prefix)).length;
-
-  return (
-    <div className="plugin-library" data-settings-item="plugins.managed">
-      <div className="plugin-library-head">
-        <div><strong>{tr("settings.pages.managedPolythPlugins")}</strong><span>{tr("settings.pages.extensionsWithAPolythPlugin")}</span></div>
-        <span>{plugins.length} {tr("settings.pages.installed")}</span>
-      </div>
-      {plugins.length === 0 && (
-        <EmptyState
-          title={tr("settings.pages.noManagedPluginsInstalled")}
-          body={tr("settings.pages.installManagedPluginHint")}
-        />
-      )}
-      <div className="plugin-card-grid">
-        {plugins.map((p) => {
-          const widgetCount = contributionCount(p, "widget.");
-          const commandCount = contributionCount(p, "command");
-          const toolCount = p.capabilities.length;
-          return (
-            <article key={p.id} className={`plugin-card ${p.enabled ? "enabled" : "disabled"}`}>
-              <button type="button" className="plugin-card-main" onClick={() => setSelected(p.id)}>
-                <span className="plugin-card-icon">{p.name.slice(0, 1).toUpperCase()}</span>
-                <span className="plugin-card-copy">
-                  <strong>{p.name}</strong>
-                  <small>{p.source}</small>
-                </span>
-                <span className={`tag mcp-status ${p.status === "ready" ? "connected" : p.status === "error" ? "error" : "disabled"}`}>
-                  {p.status === "ready"
-                    ? tr("settings.pages.ready")
-                    : p.status === "error"
-                      ? tr("common.error")
-                      : p.status === "disabled"
-                        ? tr("settings.packagespage.disabled")
-                        : p.status}
-                </span>
-                <p>{p.lastError || tr("settings.pages.pluginContributionsCount", {
-                  name: p.name,
-                  count: p.contributions.length,
-                })}</p>
-                <span className="plugin-card-counts">
-                  <b>{widgetCount} {tr("settings.pages.widgets")}</b><b>{commandCount} {tr("settings.pages.commands")}</b><b>{toolCount} {tr("settings.pages.tools")}</b>
-                </span>
-              </button>
-              <div className="plugin-card-actions">
-                {p.update && <button type="button" onClick={() => void op(p.id, "reload")}>{tr("settings.pages.updateTo")}{" "}{p.update.version}</button>}
-                <button type="button" onClick={() => void op(p.id, p.enabled ? "disable" : "enable")}>{p.enabled ? tr("settings.pages.disable") : tr("settings.pages.enable")}</button>
-                <button type="button" onClick={() => setLogsFor(logsFor === p.id ? null : p.id)}>{tr("settings.pages.logs")}</button>
-                <button type="button" className="danger-btn" onClick={() => void remove(p)}>{tr("settings.pages.uninstall")}</button>
-              </div>
-            </article>
-          );
-        })}
-      </div>
-      {selectedPlugin && (
-        <section className="plugin-detail">
-          <header>
-            <span className="plugin-card-icon">{selectedPlugin.name.slice(0, 1).toUpperCase()}</span>
-            <div><strong>{selectedPlugin.name}</strong><small>{tr("settings.pages.v")}{selectedPlugin.version} · {selectedPlugin.source}</small></div>
-            <button type="button" onClick={() => setSelected(null)} aria-label={tr("settings.pages.closePluginDetails")}>{tr("settings.pages.message")}</button>
-          </header>
-          <div className="plugin-detail-tabs" role="tablist">
-            {(["overview", "widgets", "commands", "tools", "settings", "permissions", "contributions"] as const).map((tab) => (
-              <button type="button" role="tab" aria-selected={detailTab === tab} className={detailTab === tab ? "active" : ""} key={tab} onClick={() => setDetailTab(tab)}>
-                {tab[0]!.toUpperCase() + tab.slice(1)}
-              </button>
-            ))}
-          </div>
-          <div className="plugin-detail-body">
-            {detailTab === "overview" && <p>{selectedPlugin.enabled ? tr("settings.pages.enabledAndReadyToContributeToYour") : tr("settings.pages.disabledExistingLayoutPlacementsAreKeptUntil")}</p>}
-            {detailTab === "widgets" && <p>{contributionCount(selectedPlugin, "widget.")} {tr("settings.pages.widgetContributionsInstallingAPluginNeverInserts")}</p>}
-            {detailTab === "commands" && <p>{contributionCount(selectedPlugin, "command")} {tr("settings.pages.commandContributions")}</p>}
-            {detailTab === "tools" && <p>{selectedPlugin.capabilities.length ? selectedPlugin.capabilities.join(", ") : tr("settings.pages.noDeclaredTools")}</p>}
-            {detailTab === "settings" && <p>{contributionCount(selectedPlugin, "settings.")} {tr("settings.pages.settingsPagesOrControls")}</p>}
-            {detailTab === "permissions" && <p><span className={`tag plugin-trust trust-${selectedPlugin.trust}`}>{selectedPlugin.trust}</span> {tr("settings.pages.permissionsAreRequestedWhenThePluginNeeds")}</p>}
-            {detailTab === "contributions" && (
-              <ul>{selectedPlugin.contributions.map((item) => <li key={`${item.slot}:${item.id}`}><code>{item.slot}</code> {item.id}</li>)}</ul>
-            )}
-          </div>
-        </section>
-      )}
-      {logsFor && <PluginLogViewer id={logsFor} />}
-      <div className="set-add-form">
-        <input
-          value={source}
-          placeholder={tr("settings.pages.npmScopeName100Or")}
-          aria-invalid={source.length > 0 && !sourceValid ? true : undefined}
-          onChange={(e) => setSource(e.target.value)}
-          onKeyDown={(e) => { if (e.key === "Enter" && sourceValid) void install(); }}
-        />
-        <button className="small-btn" disabled={!sourceValid} onClick={() => void install()}>{tr("settings.pages.install")}</button>
-      </div>
-      {error && <div className="form-error">{error}</div>}
-      {toast && <div className="plugin-toast" role="status"><span>{toast}</span><button type="button" onClick={() => setToast("")}>{tr("settings.pages.dismiss")}</button></div>}
-    </div>
-  );
-}
-
-export function PluginsPage() {
-  return (
-    <>
-      <PageHead title="Plugins" blurb="Configure OpenCode runtime plugins or install managed Polyth UI extensions." />
-      <OpenCodePluginsSection />
-      <ManagedPluginsSection />
     </>
   );
 }

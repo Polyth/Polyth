@@ -377,7 +377,7 @@ test("shared menu, destructive, failed-turn, and header-action contracts stay wi
   const header = await read("../src/components/Header.tsx");
   const actions = await read("../src/widgets/builtinMiniWidgets.tsx");
   const sessions = await read("../src/components/sidebar/SessionList.tsx");
-  const plugins = await read("../src/components/settings/pages.tsx");
+  const plugins = await read("../../../packages/plugins/widgets/PluginsPage.tsx");
   const css = await read("../src/styles.css");
   assert.ok(sidebar.includes("useDismissibleMenu"), "project actions consume the shared menu contract");
   assert.ok(header.includes("useDismissibleMenu"), "the user menu consumes the shared menu contract");

@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { describePluginSpec, parseOpenCodePluginJson } from "../src/pluginImport.ts";
+import { describePluginSpec, parseOpenCodePluginJson } from "../widgets/pluginImport.ts";
 
 test("extracts plugins from the exact Otto OpenCode config", () => {
   const result = parseOpenCodePluginJson(JSON.stringify({
