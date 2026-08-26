@@ -119,6 +119,8 @@ register("./tsxHooks.mjs", import.meta.url);
 const { act, createElement } = await import("react");
 const { createRoot } = await import("react-dom/client");
 const { default: ExecutionRow } = await import("../src/components/ExecutionRow.tsx");
+const { default: PermissionBanner } = await import("../src/components/PermissionBanner.tsx");
+const { getState } = await import("../src/store.ts");
 
 test("execution row renders collapsed value first, expands inline, and opens level three on demand", async () => {
   const container = document.createElement("div");
@@ -151,6 +153,64 @@ test("execution row renders collapsed value first, expands inline, and opens lev
     assert.ok(close);
     await act(async () => close.click());
     assert.equal(document.body.querySelector(".execution-viewer"), null);
+  } finally {
+    await act(async () => root.unmount());
+    container.remove();
+  }
+});
+
+test("search results open the matching file and line from inline detail", async () => {
+  const container = document.createElement("div");
+  document.body.appendChild(container);
+  const root = createRoot(container);
+  try {
+    await act(async () => root.render(createElement(ExecutionRow, {
+      message: tool({
+        tool: "grep",
+        input: { pattern: "ExecutionRow" },
+        output: "apps/web/src/components/ExecutionRow.tsx:42:function ExecutionIcon",
+      }),
+    })));
+    await act(async () => container.querySelector<HTMLButtonElement>(".execution-summary")!.click());
+    const result = container.querySelector<HTMLButtonElement>(".execution-search-list button");
+    assert.ok(result);
+    assert.match(result.textContent ?? "", /ExecutionRow\.tsx:42.*ExecutionIcon/s);
+    await act(async () => result.click());
+    assert.equal(getState().editorFile, "apps/web/src/components/ExecutionRow.tsx");
+    assert.deepEqual(getState().editorLocation, {
+      path: "apps/web/src/components/ExecutionRow.tsx",
+      startLine: 42,
+    });
+  } finally {
+    await act(async () => root.unmount());
+    container.remove();
+  }
+});
+
+test("approval starts as a compact execution row and reveals decisions inline", async () => {
+  const container = document.createElement("div");
+  document.body.appendChild(container);
+  const root = createRoot(container);
+  try {
+    await act(async () => root.render(createElement(PermissionBanner, {
+      permissions: [{
+        requestId: "permission-1",
+        permission: "bash",
+        tool: "Shell",
+        patterns: ["rm -rf apps/web/dist"],
+        status: "pending",
+        time: 1,
+        preview: { title: "Delete build artifacts", lines: ["apps/web/dist"], risk: "medium" },
+      }],
+    })));
+    const summary = container.querySelector<HTMLButtonElement>(".permission-execution-summary");
+    assert.ok(summary);
+    assert.equal(summary.getAttribute("aria-expanded"), "false");
+    assert.match(summary.textContent ?? "", /Shell.*Delete build artifacts.*Approval required.*Review/s);
+    assert.equal(container.querySelector(".perm-actions"), null);
+    await act(async () => summary.click());
+    assert.equal(summary.getAttribute("aria-expanded"), "true");
+    assert.match(container.querySelector(".perm-actions")?.textContent ?? "", /Allow once.*Always.*Deny/s);
   } finally {
     await act(async () => root.unmount());
     container.remove();

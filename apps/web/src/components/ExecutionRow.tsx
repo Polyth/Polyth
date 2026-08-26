@@ -120,6 +120,39 @@ function OutputPreview({ text, error = false, onOpenFull }: {
   );
 }
 
+function SearchResults({ text, onOpenFull }: { text: string; onOpenFull: () => void }) {
+  const results = text.split(/\r?\n/).filter(Boolean).slice(0, 8).map((line) => {
+    const match = line.match(/^(.+?):(\d+)(?::(.*))?$/);
+    return match
+      ? { raw: line, path: match[1]!, line: Number(match[2]), context: match[3]?.trim() ?? "" }
+      : { raw: line };
+  });
+  return (
+    <section className="execution-detail-section execution-search-results">
+      <DetailHeading label="Results" copy={text} />
+      <div className="execution-search-list">
+        {results.map((result, index) => (
+          result.path ? (
+            <button
+              type="button"
+              key={`${index}:${result.raw}`}
+              onClick={() => openEditorFile(result.path ?? null, { path: result.path!, startLine: result.line })}
+            >
+              <span><code>{result.path}</code><small>:{result.line}</small></span>
+              {result.context && <span>{result.context}</span>}
+            </button>
+          ) : <div key={`${index}:${result.raw}`}><code>{result.raw}</code></div>
+        ))}
+      </div>
+      {outputLineCount(text) > results.length && (
+        <div className="execution-output-actions">
+          <button type="button" onClick={onOpenFull}>Open all {outputLineCount(text)} results</button>
+        </div>
+      )}
+    </section>
+  );
+}
+
 function FullOutputViewer({ title, text, onClose }: { title: string; text: string; onClose: () => void }) {
   const [query, setQuery] = useState("");
   const [wrap, setWrap] = useState(true);
@@ -235,7 +268,9 @@ export function ExecutionRow({ message }: { message: ToolMsg }) {
                 <OutputPreview text={message.error} error onOpenFull={() => setViewer({ title: `${presentation.label} error`, text: message.error ?? "" })} />
               )}
               {message.output !== undefined && (
-                <OutputPreview text={message.output} onOpenFull={() => setViewer({ title: `${presentation.label} output`, text: message.output ?? "" })} />
+                presentation.kind === "search"
+                  ? <SearchResults text={message.output} onOpenFull={() => setViewer({ title: `${presentation.label} results`, text: message.output ?? "" })} />
+                  : <OutputPreview text={message.output} onOpenFull={() => setViewer({ title: `${presentation.label} output`, text: message.output ?? "" })} />
               )}
               <footer className="execution-metadata">
                 {exitCode !== undefined && <span>Exit code {exitCode}</span>}
