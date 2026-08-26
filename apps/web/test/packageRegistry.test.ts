@@ -50,11 +50,13 @@ const descriptors = new Map<string, PackageDescriptorDto>([
 
 Object.defineProperty(globalThis, "fetch", {
   configurable: true,
-  value: async () => ({
+  value: async (input: string | URL | Request) => ({
     ok: true,
     status: 200,
     statusText: "OK",
-    json: async () => ({ packages: [...descriptors.values()] }),
+    json: async () => String(input).endsWith("/web-packages/manifest.json")
+      ? { packages: [] }
+      : { packages: [...descriptors.values()] },
     text: async () => "",
   }),
 });
