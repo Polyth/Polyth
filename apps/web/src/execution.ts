@@ -279,6 +279,21 @@ const humanKey = (key: string): string => key
   .replace(/[_-]+/g, " ")
   .replace(/\b\w/g, (letter) => letter.toUpperCase());
 
+function semanticResultValue(value: JsonValue): string {
+  if (Array.isArray(value)) return `${value.length} ${value.length === 1 ? "item" : "items"}`;
+  if (value !== null && typeof value === "object") {
+    for (const key of ["name", "login", "title", "label", "id"]) {
+      const nested = value[key];
+      if (nested !== undefined && (typeof nested === "string" || typeof nested === "number")) {
+        return compactValue(nested);
+      }
+    }
+    const count = Object.keys(value).length;
+    return `${count} ${count === 1 ? "field" : "fields"}`;
+  }
+  return compactValue(value);
+}
+
 function unwrapMcpValue(value: JsonValue): JsonValue {
   if (Array.isArray(value)) {
     if (value.length === 1) return unwrapMcpValue(value[0] ?? null);
@@ -322,10 +337,10 @@ export function normalizedMcpResult(output: string): NormalizedResultEntry[] | n
   });
   const remaining = entries.filter(([key]) => !preferred.some(([used]) => used === key));
   return [...preferred, ...remaining]
-    .filter(([, value]) => value !== undefined && value !== null && typeof value !== "object")
+    .filter(([, value]) => value !== undefined && value !== null)
     .slice(0, 8)
     .map(([key, value]) => {
-      const display = compactValue(value);
+      const display = semanticResultValue(value);
       const href = typeof value === "string" && /^https?:\/\//i.test(value) ? value : undefined;
       return { key: humanKey(key), value: display, ...(href ? { href } : {}) };
     });

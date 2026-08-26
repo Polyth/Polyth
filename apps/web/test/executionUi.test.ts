@@ -102,7 +102,8 @@ test("MCP results expose human fields without rendering inline JSON", () => {
       status: "open",
       number: 42,
       html_url: "https://github.com/otto-assistant/polyth/pull/42",
-      nested: { raw: true },
+      author: { login: "octocat" },
+      files: [{ filename: "ExecutionRow.tsx" }],
     },
   })), [
     { key: "Title", value: "Fix execution UI" },
@@ -113,6 +114,8 @@ test("MCP results expose human fields without rendering inline JSON", () => {
       value: "https://github.com/otto-assistant/polyth/pull/42",
       href: "https://github.com/otto-assistant/polyth/pull/42",
     },
+    { key: "Author", value: "octocat" },
+    { key: "Files", value: "1 item" },
   ]);
 });
 
