@@ -82,4 +82,6 @@ export const Icon = {
   plan: () => <svg {...s}><rect x="4" y="3" width="16" height="18" rx="2"/><path d="m8 8 1.5 1.5L12 7M14 9h3M8 14h9M8 17h6"/></svg>,
   newSession: () => <svg {...s}><path d="M4 5h11a3 3 0 0 1 3 3v8H9l-5 4V5Z"/><path d="M19 2v6M16 5h6"/></svg>,
   multirun: () => <svg {...s}><path d="M4 5h5M4 12h5M4 19h5M15 5h5M15 12h5M15 19h5"/><path d="M9 5c4 0 2 7 6 7M9 19c4 0 2-7 6-7"/></svg>,
+  video: () => <svg {...s}><rect x="2.5" y="5.5" width="13" height="13" rx="2.5"/><path d="m15.5 10 6-3.5v11l-6-3.5"/></svg>,
+  file: () => <svg {...s}><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9Z"/><path d="M14 3v6h6"/></svg>,
 };

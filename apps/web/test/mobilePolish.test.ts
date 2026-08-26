@@ -130,6 +130,8 @@ test("all mobile chat composers expose project and worktree targets", () => {
   assert.match(phoneHeader, /slot="app\.header\.actions"/);
   assert.doesNotMatch(phoneHeader, /refreshSessions|MobileComposerControlsMenu|<UserMenu/,
     "secondary utilities stay in the More sheet instead of crowding the top bar");
+  assert.doesNotMatch(header, /MobileComposerControlsMenu/);
+  assert.match(header, /triggerIcon=\{<Icon\.widgets \/>\}/);
   assert.match(css, /\.polyth-gradient\s*\{[^}]*linear-gradient/s);
 });
 

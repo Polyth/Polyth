@@ -70,6 +70,11 @@ test("sidebar geometry scales type from ui font size and density controls rows",
     "the status column only takes the width its content needs");
   assert.match(css, /\.session-quick\s*\{[\s\S]*?right:\s*8px/,
     "Shift quick actions align with the session row's right content inset");
+  const mobile = css.slice(css.indexOf("@media (max-width: 820px) {"));
+  assert.match(mobile, /--nav-session-size:\s*calc\(var\(--ui-font-size,\s*14px\)\s*\*\s*1\.143\)/,
+    "the drawer reads session titles one interface-scale step up (Large at the default)");
+  assert.match(mobile, /\[data-density="comfortable"\] \.sidebar\s*\{[\s\S]*?--nav-row-session:\s*32px/,
+    "the normal density packs drawer rows tighter than the desktop compact rows");
   assert.doesNotMatch(css, /\.session-actions\b/);
   assert.doesNotMatch(css, /\.session-sync-icon\b/);
 });

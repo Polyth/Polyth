@@ -33,7 +33,7 @@ import { useGitStatus } from "../../gitStatusStore.ts";
 import { useShellMode } from "../../responsiveShell.ts";
 import { tapFeedback } from "../../haptics.ts";
 import { dismissKeyboard } from "../../mobileViewport.ts";
-import { useUiSettings } from "../../uiPrefs.ts";
+import { nextWorkingActivity, useUiSettings } from "../../uiPrefs.ts";
 import { useSheetTrigger } from "../mobile/sheetTrigger.ts";
 import { HeroWidget, HeroWidgetSettings } from "../mobile/HeroWidgets.tsx";
 import { ago, displaySessionTitle } from "../../format.ts";
@@ -284,20 +284,21 @@ function SessionSurface() {
 function WorkingIndicator() {
   const { workingIndicator } = useUiSettings();
   const [activityStep, setActivityStep] = useState(0);
+  const activityLabels = tr("workspace.builtinsurfaces.activityItems").split("|");
   useEffect(() => {
     if (workingIndicator !== "activity") return;
-    const timer = window.setInterval(() => setActivityStep((step) => (step + 1) % 3), 1800);
+    setActivityStep((step) => nextWorkingActivity(step, activityLabels.length));
+    const timer = window.setInterval(
+      () => setActivityStep((step) => nextWorkingActivity(step, activityLabels.length)),
+      2400,
+    );
     return () => window.clearInterval(timer);
-  }, [workingIndicator]);
-  const activityLabel = [
-    tr("workspace.builtinsurfaces.readingContext"),
-    tr("workspace.builtinsurfaces.checkingDetails"),
-    tr("workspace.builtinsurfaces.preparingReply"),
-  ][activityStep]!;
+  }, [activityLabels.length, workingIndicator]);
+  const activityLabel = activityLabels[activityStep] ?? tr("workspace.builtinsurfaces.working");
   return (
     <div className={`focus-working focus-working--${workingIndicator}`} role="status">
       {workingIndicator === "pulse" && <span className="focus-working-spinner" aria-hidden="true" />}
-      {workingIndicator === "keyboard" && <span className="focus-working-icon" aria-hidden="true"><Icon.keyboard /></span>}
+      {workingIndicator === "cursor" && <span className="focus-working-cursor" aria-hidden="true" />}
       {workingIndicator === "cat" && (
         <svg className="focus-working-cat" viewBox="0 0 32 16" aria-hidden="true">
           <path d="M4 10V5l3 2 3-3 3 3 4 1c3 0 5 2 5 4v1H7c-2 0-3-1-3-3Z" />

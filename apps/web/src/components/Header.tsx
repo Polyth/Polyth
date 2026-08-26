@@ -175,7 +175,7 @@ function CompactViewPicker({ view }: { view: AppView }) {
       className="header-view-picker"
       label={tr("header.view")}
       ariaLabel={tr("header.changeWorkspaceViewCurrentValue", { current: current })}
-      triggerIcon={capabilityIcon(currentId)}
+      triggerIcon={<Icon.widgets />}
       items={items}
       value={currentId}
       onPick={(id) => destinations.find((c) => c.descriptor.id === id)?.descriptor.open()}

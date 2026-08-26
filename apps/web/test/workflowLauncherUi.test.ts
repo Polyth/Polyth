@@ -24,7 +24,7 @@ register("./tsxHooks.mjs", import.meta.url);
 const { act, createElement } = await import("react");
 const { createRoot } = await import("react-dom/client");
 const { api } = await import("../src/api.ts");
-const { activateProject, getState, setActiveView, setModels } = await import("../src/store.ts");
+const { activateProject, getState, setActiveView, setModels, startNewSession } = await import("../src/store.ts");
 const { setWorkspaceMode } = await import("../src/widgets/workspaceMode.ts");
 const { installBuiltinMiniWidgets, WORKFLOW_WIDGET_PLUGIN } =
   await import("../src/widgets/builtinMiniWidgets.tsx");
@@ -92,6 +92,88 @@ test("chat composer keeps the Run workflow launcher mounted after project activa
   } finally {
     api.composerCatalog = originalComposerCatalog;
     api.listWorkflows = originalListWorkflows;
+    await act(async () => { root.unmount(); });
+    container.remove();
+  }
+});
+
+test("new-session creation immediately replaces the empty composer with loading feedback", async () => {
+  const originalComposerCatalog = api.composerCatalog;
+  const originalCreateSession = api.createSession;
+  const originalGetSession = api.getSession;
+  const originalGetEvents = api.getEvents;
+  const originalSendMessage = api.sendMessage;
+  const originalListSessions = api.listSessions;
+  let releaseCreate!: () => void;
+  const creationGate = new Promise<void>((resolve) => { releaseCreate = resolve; });
+  let markCreateStarted!: () => void;
+  const createStarted = new Promise<void>((resolve) => { markCreateStarted = resolve; });
+  let markSent!: () => void;
+  const sent = new Promise<void>((resolve) => { markSent = resolve; });
+  api.composerCatalog = async () => ({
+    commands: { ok: true, items: [] },
+    snippets: { ok: true, items: [] },
+  });
+  api.createSession = async () => {
+    markCreateStarted();
+    await creationGate;
+    return { id: "opening" };
+  };
+  api.getSession = async () => ({
+    id: "opening", projectId: "opening-project", title: "New session", status: "idle", createdAt: 1, updatedAt: 1,
+  });
+  api.getEvents = async () => [];
+  api.sendMessage = async () => {
+    markSent();
+    return { turnId: "turn-opening" };
+  };
+  api.listSessions = async () => [];
+  startNewSession("opening-project");
+  setWorkspaceMode("chat");
+  setModels([{
+    providerID: "test",
+    modelID: "chat",
+    name: "Chat",
+    connected: true,
+  }]);
+
+  const container = document.createElement("div");
+  document.body.appendChild(container);
+  const root = createRoot(container);
+  try {
+    await act(async () => {
+      root.render(createElement(Composer));
+      await Promise.resolve();
+    });
+    const input = container.querySelector<HTMLTextAreaElement>('[aria-label="Message"]');
+    assert.ok(input);
+    await act(async () => {
+      input.value = "Start a slow session";
+      input.dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    await act(async () => {
+      const send = container.querySelector<HTMLButtonElement>("button.send");
+      assert.ok(send);
+      send.click();
+      await createStarted;
+    });
+
+    assert.equal(container.querySelector(".session-loading")?.textContent?.trim(), "Loading session…");
+    assert.equal(container.querySelector('[aria-label="Message"]'), null, "a second draft cannot be lost while creation is pending");
+
+    await act(async () => {
+      releaseCreate();
+      await sent;
+      await Promise.resolve();
+    });
+  } finally {
+    releaseCreate();
+    api.composerCatalog = originalComposerCatalog;
+    api.createSession = originalCreateSession;
+    api.getSession = originalGetSession;
+    api.getEvents = originalGetEvents;
+    api.sendMessage = originalSendMessage;
+    api.listSessions = originalListSessions;
     await act(async () => { root.unmount(); });
     container.remove();
   }

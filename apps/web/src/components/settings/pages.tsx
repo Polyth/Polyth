@@ -449,7 +449,7 @@ export function ChatPage() {
       <Row label={tr("settings.pages.workingIndicator")} hint={tr("settings.pages.workingIndicatorHint")} itemId="chat.workingIndicator">
         <Seg value={ui.workingIndicator} options={[
           ["pulse", tr("settings.pages.workingIndicatorPulse")],
-          ["keyboard", tr("settings.pages.workingIndicatorKeyboard")],
+          ["cursor", tr("settings.pages.workingIndicatorKeyboard")],
           ["cat", tr("settings.pages.workingIndicatorCat")],
           ["activity", tr("settings.pages.workingIndicatorActivity")],
         ]} onChange={(workingIndicator) => setUiSettings({ workingIndicator })} />

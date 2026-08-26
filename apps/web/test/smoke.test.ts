@@ -39,6 +39,7 @@ import {
   UI_SETTINGS_KEY,
   applyUiSettings,
   getUiSettings,
+  nextWorkingActivity,
   parseUiSettings,
   setUiSettings,
 } from "../src/uiPrefs.ts";
@@ -428,8 +429,16 @@ test("parseUiSettings defaults invalid values and sanitizes MCP servers", () => 
   assert.deepEqual(parsed.mcpServers[0], servers[0]);
   assert.equal(parseUiSettings(JSON.stringify({ messageCopyFormat: "xml" })).messageCopyFormat, "markdown");
   assert.equal(parseUiSettings(JSON.stringify({ workingIndicator: "cat" })).workingIndicator, "cat");
+  assert.equal(parseUiSettings(JSON.stringify({ workingIndicator: "keyboard" })).workingIndicator, "cursor");
   assert.equal(parseUiSettings(JSON.stringify({ workingIndicator: "dog" })).workingIndicator, "pulse");
 });
+
+test("working activities change without repeating the current item", () => {
+  assert.equal(nextWorkingActivity(2, 5, () => 0), 3);
+  assert.equal(nextWorkingActivity(2, 5, () => 0.99), 1);
+  assert.equal(nextWorkingActivity(0, 1), 0);
+});
+
 
 test("setUiSettings persists and applies visual data attributes", () => {
   const values = new Map<string, string>();

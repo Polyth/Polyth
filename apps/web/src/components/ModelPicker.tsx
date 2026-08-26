@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState, type DragEvent } from "react";
+import { useMemo, useRef, useState, type DragEvent, type ReactNode } from "react";
 import type { ModelDescriptor, ModelRef } from "@polyth/contracts";
 import { isFavorite, modelKey, orderProviders } from "@polyth/models";
 import {
@@ -58,7 +58,7 @@ export function modelContextLabel(context?: number): string {
  *  Reported capabilities only — nothing is inferred. */
 const MODALITY_ORDER = ["text", "image", "audio", "video", "pdf"];
 
-export function modelModalityLabels(model: ModelDescriptor): string[] {
+export function modelModalityValues(model: ModelDescriptor): string[] {
   const raw = (model.capabilities ?? [])
     .filter((capability) =>
       (capability.startsWith("input:") || capability.startsWith("output:"))
@@ -71,22 +71,53 @@ export function modelModalityLabels(model: ModelDescriptor): string[] {
     return (ra < 0 ? MODALITY_ORDER.length : ra) - (rb < 0 ? MODALITY_ORDER.length : rb)
       || a.localeCompare(b);
   });
-  return unique.map(modalityLabel);
+  return unique;
+}
+
+export function modelModalityLabels(model: ModelDescriptor): string[] {
+  return modelModalityValues(model).map(modalityLabel);
+}
+
+const MODALITY_ICONS: Record<string, () => ReactNode> = {
+  text: Icon.text,
+  image: Icon.image,
+  audio: Icon.speaker,
+  video: Icon.video,
+  pdf: Icon.file,
+};
+
+function shortContext(context?: number): string | null {
+  if (!context) return null;
+  if (context >= 1_000_000) return `${formatNumber(context / 1_000_000, { maximumFractionDigits: 1 })}M`;
+  if (context >= 1_000) return `${formatNumber(Math.round(context / 1_000))}K`;
+  return formatNumber(context);
+}
+
+/** Compact modality icons + context for mobile rows and the trigger —
+ *  reported capabilities only, same source as modelMetaLine. */
+export function ModelMetaIcons({ model }: { model: ModelDescriptor }) {
+  const context = shortContext(model.context);
+  return (
+    <span className="model-meta-icons">
+      {modelModalityValues(model).map((value) => {
+        const Glyph = MODALITY_ICONS[value] ?? Icon.text;
+        return (
+          <span key={value} className="model-modality-icon" title={modalityLabel(value)}>
+            <Glyph />
+          </span>
+        );
+      })}
+      {context && <span className="model-meta-context">{context}</span>}
+    </span>
+  );
 }
 
 /** UX-MOBILE-01 §13/§40: one calm metadata line — `Text · Image · 500K` —
  *  instead of a mixed bag of glyphs. Reported capabilities only, no guesses. */
 export function modelMetaLine(model?: ModelDescriptor): string {
   if (!model) return "";
-  const modalities = modelModalityLabels(model);
-  const context = model.context
-    ? model.context >= 1_000_000
-      ? `${formatNumber(model.context / 1_000_000, { maximumFractionDigits: 1 })}M`
-      : model.context >= 1_000
-        ? `${formatNumber(Math.round(model.context / 1_000))}K`
-        : formatNumber(model.context)
-    : null;
-  return [...modalities, ...(context ? [context] : [])].join(" · ");
+  const context = shortContext(model.context);
+  return [...modelModalityLabels(model), ...(context ? [context] : [])].join(" · ");
 }
 
 export function modelSupportsThinking(model: ModelDescriptor | undefined): boolean {
@@ -308,9 +339,11 @@ export default function ModelPicker({
           className="model-trigger-logo"
         />
       )}
-      <span className={composerMeta ? "model-trigger-copy" : "model-trigger-name"}>
+      <span className="model-trigger-copy">
         <span className="model-trigger-name">{label}</span>
-        {composerMeta && <span className="composer-model-meta">{composerMeta}</span>}
+        {selectedModel && (
+          <span className="composer-model-meta"><ModelMetaIcons model={selectedModel} /></span>
+        )}
       </span>
     </button>
   ) : (

@@ -10,10 +10,15 @@ export type MessageCopyFormat = "markdown" | "json";
 export type HeaderMetricId = "tokens" | "messages" | "duration" | "cost";
 export type ResponseActionId = "copy" | "image" | "plan" | "pin" | "session" | "multirun";
 export type TopRailAlignment = "center" | "left";
-export type WorkingIndicator = "pulse" | "keyboard" | "cat" | "activity";
+export type WorkingIndicator = "pulse" | "cursor" | "cat" | "activity";
 
 export const HEADER_METRIC_IDS: readonly HeaderMetricId[] = ["tokens", "messages", "duration", "cost"];
 export const RESPONSE_ACTION_IDS: readonly ResponseActionId[] = ["copy", "image", "plan", "pin", "session", "multirun"];
+
+/** Pick a random list item without immediately repeating the previous one. */
+export function nextWorkingActivity(previous: number, count: number, random = Math.random): number {
+  return count < 2 ? 0 : (previous + 1 + Math.floor(random() * (count - 1))) % count;
+}
 
 export interface UiSettings {
   density: "comfortable" | "balanced" | "compact";
@@ -132,6 +137,7 @@ export function parseUiSettings(raw: string | null): UiSettings {
   try {
     const data = JSON.parse(raw ?? "") as Partial<UiSettings>;
     const fontPx = Number(data.editorFontSize);
+    const workingIndicator = data.workingIndicator as string | undefined;
     return {
       density: data.density === "compact" || data.density === "balanced" ? data.density : "comfortable",
       fontSize: data.fontSize === "s" || data.fontSize === "l" ? data.fontSize : "m",
@@ -153,7 +159,9 @@ export function parseUiSettings(raw: string | null): UiSettings {
       followUpBehavior: data.followUpBehavior === "steer" || data.followUpBehavior === "interrupt" ? data.followUpBehavior : "queue",
       collapsibleThinkingBlocks: data.collapsibleThinkingBlocks !== false,
       thinkingDefaultExpanded: data.thinkingDefaultExpanded === true,
-      workingIndicator: data.workingIndicator === "keyboard" || data.workingIndicator === "cat" || data.workingIndicator === "activity" ? data.workingIndicator : "pulse",
+      workingIndicator: workingIndicator === "keyboard" || workingIndicator === "cursor"
+        ? "cursor"
+        : workingIndicator === "cat" || workingIndicator === "activity" ? workingIndicator : "pulse",
       promptNavigator: data.promptNavigator === "on" || data.promptNavigator === "off" ? data.promptNavigator : "auto",
       showMessageActions: data.showMessageActions !== false,
       messageCopyFormat: data.messageCopyFormat === "json" ? "json" : "markdown",

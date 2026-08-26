@@ -206,13 +206,16 @@ function useComposerLocation(session: SessionProjection | null): {
   useEffect(() => {
     let active = true;
     setSelectedBranchId(intendedWorktree ? `worktree:${intendedWorktree}` : "main");
-    if (!projectId) {
+    const sessionId = session?.id;
+    const sessionBranch = session?.branch;
+    // The context bar is hidden while a session is open, so its data is unused.
+    if (session || !projectId) {
       setWorktrees([]);
       setBranches({ current: "", branches: [] });
       return () => { active = false; };
     }
     setBranchLoading(true);
-    void Promise.all([api.listWorktrees(projectId), api.gitBranches(projectId, session?.id)])
+    void Promise.all([api.listWorktrees(projectId), api.gitBranches(projectId, sessionId)])
       .then(([nextWorktrees, nextBranches]) => {
         if (!active) return;
         setWorktrees(nextWorktrees);
@@ -220,7 +223,7 @@ function useComposerLocation(session: SessionProjection | null): {
         const currentWorktree = intendedWorktree
           ? nextWorktrees.find((worktree) => worktree.path === intendedWorktree)
           : nextWorktrees.find((worktree) =>
-              worktree.branch === (nextBranches.current || session?.branch || branch));
+              worktree.branch === (nextBranches.current || sessionBranch || branch));
         setSelectedBranchId(currentWorktree?.isMain
           ? "main"
           : currentWorktree
@@ -1291,12 +1294,35 @@ export default function Composer({
     ? ` composer-mobile ${expanded ? "composer-expanded" : "composer-collapsed"}${hasDraft ? " composer-has-draft" : ""}`
     : "";
 
+  // Creating a canonical session can cold-start OpenCode. Replace the empty
+  // new-chat composer immediately, rather than leaving a sent prompt looking
+  // like it disappeared until the server responds.
+  if (creatingSession) {
+    return (
+      <div
+        ref={rootRef}
+        className={`composer ${widgetMode ? "composer-widget" : "composer-chat"}${simpleMode ? " composer-simple" : " composer-power"}${lightFocusComposer ? " composer-focus-light" : ""}${stateClass}`}
+        aria-busy="true"
+      >
+        <div className="composer-card">
+          <div className="session-loading" role="status">
+            <span className="spinner" aria-hidden="true" />
+            <span>{tr("workspace.builtinsurfaces.loadingSession")}</span>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div
       ref={rootRef}
       className={`composer ${widgetMode ? "composer-widget" : "composer-chat"}${simpleMode ? " composer-simple" : " composer-power"}${lightFocusComposer ? " composer-focus-light" : ""}${stateClass}`}
     >
-      <SessionContextBar {...contextBar} />
+      {/* The project/worktree pickers only make sense before a session exists:
+          in an open session the location is fixed, and picking here silently
+          switched project or spawned a new session instead of retargeting. */}
+      {!session && <SessionContextBar {...contextBar} />}
       <div
         className="composer-card"
         onDragOver={(e) => { const k = dragKind(e.dataTransfer); if (k) { e.preventDefault(); setDropHint(k); } }}
