@@ -167,8 +167,11 @@ function OrderedToggleList<T extends string>({
   };
   const moveBy = (item: T, delta: -1 | 1) => {
     const index = selected.indexOf(item);
-    const target = selected[index + delta];
-    if (index >= 0 && target) move(item, target);
+    const targetIndex = index + delta;
+    if (index < 0 || targetIndex < 0 || targetIndex >= selected.length) return;
+    const next = [...selected];
+    [next[index], next[targetIndex]] = [next[targetIndex]!, next[index]!];
+    onChange(next);
   };
   const finishPointerDrag = (
     event: React.PointerEvent<HTMLButtonElement>,
