@@ -152,9 +152,11 @@ test("mobile app header focuses workspace destinations without escaping a destin
       "focus never moves to the obscured workspace heading",
     );
   } finally {
-    closePackageTour("dismiss");
-    setOverlay(null);
-    await act(async () => { root.unmount(); });
+    await act(async () => {
+      closePackageTour("dismiss");
+      setOverlay(null);
+      root.unmount();
+    });
     container.remove();
     closeWorkspacePane();
   }
