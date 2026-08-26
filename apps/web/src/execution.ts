@@ -423,10 +423,10 @@ export function executionGroupLabel(tools: readonly ToolMsg[]): string {
 export function reasoningMilestones(reasoning: string): string[] {
   const safeCategories = [
     { pattern: /\b(?:debug|diagnos|investigat|reproduc)\w*/i, label: "Investigating the issue" },
-    { pattern: /\b(?:inspect|read|search|explore|review|find|locate)\w*/i, label: "Inspecting relevant code" },
+    { pattern: /\b(?:inspect|read|search|explor|review|find|found|locat)\w*/i, label: "Inspecting relevant code" },
     { pattern: /\b(?:plan|approach|design)\w*/i, label: "Planning the implementation" },
-    { pattern: /\b(?:implement|update|change|edit|write|create|fix|add|remove|refactor)\w*/i, label: "Implementing changes" },
-    { pattern: /\b(?:test|build|typecheck|verify|validate)\w*/i, label: "Verifying the implementation" },
+    { pattern: /\b(?:implement|updat|chang|edit|writ|creat|fix|add|remov|refactor)\w*/i, label: "Implementing changes" },
+    { pattern: /\b(?:test|build|typecheck|verif|validat)\w*/i, label: "Verifying the implementation" },
   ] as const;
   const milestones = safeCategories
     .map(({ pattern, label }) => ({ index: reasoning.search(pattern), label }))
