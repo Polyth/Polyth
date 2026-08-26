@@ -12028,6 +12028,11 @@ body[data-density="comfortable"] .header { min-height: 60px; }
   opacity: 0;
   transition: grid-template-rows 170ms cubic-bezier(.4,0,.2,1), opacity 160ms ease;
 }
+.execution-group-expand-shell {
+  width: 100%;
+  min-width: 0;
+  align-self: stretch;
+}
 .execution-row.open > .execution-expand-shell,
 .execution-group.open > .execution-group-expand-shell {
   grid-template-rows: 1fr;
