@@ -331,6 +331,7 @@ export function ExecutionRow({ message, subagent }: { message: ToolMsg; subagent
   const [open, setOpen] = useState(!done);
   const detailsPresent = useCollapsePresence(open);
   const rowRef = useRef<HTMLDivElement>(null);
+  const pointerScrollAnchor = useRef<(TimelineScrollAnchor & { capturedAt: number }) | null>(null);
   const [viewer, setViewer] = useState<{
     title: string;
     text: string;
@@ -360,20 +361,36 @@ export function ExecutionRow({ message, subagent }: { message: ToolMsg; subagent
   };
   const openViewer = (title: string, text: string) => {
     const timeline = rowRef.current?.closest<HTMLElement>(".timeline");
+    const pointerAnchor = pointerScrollAnchor.current;
+    pointerScrollAnchor.current = null;
+    const scrollAnchor = pointerAnchor && Date.now() - pointerAnchor.capturedAt < 1_000
+      ? { element: pointerAnchor.element, scrollTop: pointerAnchor.scrollTop }
+      : timeline
+        ? { element: timeline, scrollTop: timeline.scrollTop }
+        : undefined;
     const restoreTarget = document.activeElement instanceof HTMLElement
       ? document.activeElement
       : undefined;
     setViewer({
       title,
       text,
-      ...(timeline ? { scrollAnchor: { element: timeline, scrollTop: timeline.scrollTop } } : {}),
+      ...(scrollAnchor ? { scrollAnchor } : {}),
       ...(restoreTarget ? { restoreTarget } : {}),
     });
   };
 
   return (
     <>
-      <div className={`tool-card execution-row${open ? " open" : ""}${status === "pending" || status === "running" ? " current" : ""}${status === "error" ? " error" : ""}${presentation.kind === "subagent" ? " execution-subagent" : ""}`} ref={rowRef} data-execution-kind={presentation.kind}>
+      <div className={`tool-card execution-row${open ? " open" : ""}${status === "pending" || status === "running" ? " current" : ""}${status === "error" ? " error" : ""}${presentation.kind === "subagent" ? " execution-subagent" : ""}`}
+        ref={rowRef}
+        data-execution-kind={presentation.kind}
+        onPointerDownCapture={() => {
+          const timeline = rowRef.current?.closest<HTMLElement>(".timeline");
+          pointerScrollAnchor.current = timeline
+            ? { element: timeline, scrollTop: timeline.scrollTop, capturedAt: Date.now() }
+            : null;
+        }}
+      >
         <button
           type="button"
           className="tool-disclosure execution-summary"

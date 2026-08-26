@@ -187,6 +187,7 @@ Object.assign(globalThis, {
   Element: dom.Element,
   Event: dom.Event,
   MouseEvent: dom.MouseEvent,
+  PointerEvent: dom.PointerEvent,
   KeyboardEvent: dom.KeyboardEvent,
   requestAnimationFrame: (callback: FrameRequestCallback) =>
     setTimeout(() => callback(Date.now()), 0) as unknown as number,
@@ -231,7 +232,9 @@ test("execution row renders collapsed value first, expands inline, and opens lev
       .find((button) => button.textContent === "Open full output");
     assert.ok(full);
     timeline.scrollTop = 640;
+    full.dispatchEvent(new dom.PointerEvent("pointerdown", { bubbles: true }) as unknown as Event);
     full.focus();
+    timeline.scrollTop = 881;
     const focusFull = full.focus.bind(full);
     full.focus = () => {
       timeline.scrollTop = 881;
