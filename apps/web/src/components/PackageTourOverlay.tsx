@@ -36,7 +36,9 @@ function settingsFocusTarget(): HTMLElement | null {
   if (!shell) return null;
   const selector = shell.classList.contains("settings-mobile-nav")
     ? ".settings-nav-title"
-    : ".settings-pane-title";
+    : shell.classList.contains("settings-mobile-page")
+      ? ".settings-mobile-back"
+      : ".settings-pane-title";
   return shell.querySelector<HTMLElement>(selector);
 }
 

@@ -127,14 +127,25 @@ export default function SettingsView({ onClose = () => setOverlay(null) }: { onC
   const modalRef = useRef<HTMLDivElement>(null);
   const previousMobile = useRef(mobile);
 
-  useLayoutEffect(() => () => {
+  const returnFocusTarget = () => {
     const opener = returnFocusRef.current;
     const fallbackSelector = window.matchMedia("(max-width: 820px)").matches
       ? ".mobile-navigation-trigger"
       : ".header-profile";
-    const target = opener?.isConnected
+    return opener?.isConnected
       ? opener
       : document.querySelector<HTMLElement>(fallbackSelector);
+  };
+  const closeSettings = () => {
+    const target = returnFocusTarget();
+    onClose();
+    // Move focus before React removes the dialog. The layout-effect cleanup
+    // below repeats the handoff for callers that close Settings externally.
+    if (target?.isConnected) target.focus();
+  };
+
+  useLayoutEffect(() => () => {
+    const target = returnFocusTarget();
     if (target?.isConnected) target.focus();
   }, []);
 
@@ -155,7 +166,7 @@ export default function SettingsView({ onClose = () => setOverlay(null) }: { onC
         if (mobile && mobileStage === "page") {
           setMobileStage("nav");
         } else {
-          onClose();
+          closeSettings();
         }
         return;
       }
@@ -326,7 +337,7 @@ export default function SettingsView({ onClose = () => setOverlay(null) }: { onC
   };
 
   return (
-    <div className="scrim settings-scrim" onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}>
+    <div className="scrim settings-scrim" onMouseDown={(e) => { if (e.target === e.currentTarget) closeSettings(); }}>
       <div
         className={`modal settings-shell settings-page-${current.id}${mobile ? ` settings-mobile-${mobileStage}` : ""}`}
         ref={modalRef}
@@ -415,10 +426,7 @@ export default function SettingsView({ onClose = () => setOverlay(null) }: { onC
                   aria-label={tr("settingsview.backToSettings")}
                 >
                   <span aria-hidden="true">←</span> {tr("common.back")}</button>
-                <h1 className="settings-pane-title" data-settings-focus-target tabIndex={-1}>
-                  {current.label}
-                </h1>
-                <button className="close-btn" onClick={onClose} aria-label={tr("common.close")}>{tr("settingsview.message")}</button>
+                <button className="close-btn" onClick={closeSettings} aria-label={tr("common.close")}>{tr("settingsview.message")}</button>
               </div>
             ) : (
               <>
@@ -428,7 +436,7 @@ export default function SettingsView({ onClose = () => setOverlay(null) }: { onC
                   </h1>
                 </div>
                 <span className="dialog-hint" id="settings-close-hint"><kbd>{tr("settingsview.esc")}</kbd> {tr("settingsview.close")}</span>
-                <button className="close-btn" onClick={onClose} aria-label={tr("common.close")}>{tr("settingsview.message")}</button>
+                <button className="close-btn" onClick={closeSettings} aria-label={tr("common.close")}>{tr("settingsview.message")}</button>
               </>
             )}
           </div>

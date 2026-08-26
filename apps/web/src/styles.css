@@ -6814,10 +6814,6 @@ html[dir="rtl"] input[type="number"] {
   .settings-pane-head-bar {
     width: 100%; min-height: 36px; display: flex; align-items: center; justify-content: space-between;
   }
-  .settings-pane-head-bar .settings-pane-title {
-    min-width: 0; flex: 1; overflow: hidden; padding-inline: 8px;
-    text-align: center; text-overflow: ellipsis; white-space: nowrap;
-  }
   .settings-mobile-page .settings-pane-head .modal-desc,
   .settings-mobile-page .settings-pane-head .dialog-hint { display: none; }
   .settings-mobile-back {
