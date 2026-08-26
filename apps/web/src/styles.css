@@ -10256,7 +10256,9 @@ html[data-sheet="open"], html[data-sheet="open"] body { overflow: hidden; }
      margin keeps prose rhythm compact while the clickable element is 44px. */
   .file-ref {
     min-width: var(--tap);
+    min-inline-size: var(--tap);
     min-height: var(--tap);
+    box-sizing: border-box;
     display: inline-flex;
     align-items: center;
     justify-content: center;
