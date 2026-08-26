@@ -10,6 +10,7 @@ export type MessageCopyFormat = "markdown" | "json";
 export type HeaderMetricId = "tokens" | "messages" | "duration" | "cost";
 export type ResponseActionId = "copy" | "image" | "plan" | "pin" | "session" | "multirun";
 export type TopRailAlignment = "center" | "left";
+export type WorkingIndicator = "pulse" | "keyboard" | "cat" | "activity";
 
 export const HEADER_METRIC_IDS: readonly HeaderMetricId[] = ["tokens", "messages", "duration", "cost"];
 export const RESPONSE_ACTION_IDS: readonly ResponseActionId[] = ["copy", "image", "plan", "pin", "session", "multirun"];
@@ -41,6 +42,8 @@ export interface UiSettings {
   /** Merged thinking display (WP4). */
   collapsibleThinkingBlocks: boolean;
   thinkingDefaultExpanded: boolean;
+  /** Visual shown below the timeline during an active turn. */
+  workingIndicator: WorkingIndicator;
   /** Prompt navigator rail (WP4). */
   promptNavigator: "auto" | "on" | "off";
   /** Hover/focus controls below user and assistant messages. */
@@ -92,6 +95,7 @@ export const UI_DEFAULTS: UiSettings = {
   followUpBehavior: "queue",
   collapsibleThinkingBlocks: true,
   thinkingDefaultExpanded: false,
+  workingIndicator: "pulse",
   promptNavigator: "auto",
   showMessageActions: true,
   messageCopyFormat: "markdown",
@@ -149,6 +153,7 @@ export function parseUiSettings(raw: string | null): UiSettings {
       followUpBehavior: data.followUpBehavior === "steer" || data.followUpBehavior === "interrupt" ? data.followUpBehavior : "queue",
       collapsibleThinkingBlocks: data.collapsibleThinkingBlocks !== false,
       thinkingDefaultExpanded: data.thinkingDefaultExpanded === true,
+      workingIndicator: data.workingIndicator === "keyboard" || data.workingIndicator === "cat" || data.workingIndicator === "activity" ? data.workingIndicator : "pulse",
       promptNavigator: data.promptNavigator === "on" || data.promptNavigator === "off" ? data.promptNavigator : "auto",
       showMessageActions: data.showMessageActions !== false,
       messageCopyFormat: data.messageCopyFormat === "json" ? "json" : "markdown",

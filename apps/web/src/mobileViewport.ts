@@ -10,6 +10,9 @@
 // Published on <html>:
 //   --visual-vh       visible height in CSS px (use instead of 100vh/100dvh
 //                     when the keyboard must not push content offscreen)
+//   --visual-bottom   visible viewport's lower edge in layout coordinates;
+//                     use for a full app frame when Safari pans the page
+//                     instead of resizing it for the keyboard
 //   --keyboard-inset  height hidden behind the keyboard, 0 when closed
 //   --visual-offset   visual viewport top offset (page pinch/scroll)
 // Published on <body>: data-keyboard="open" | "closed".
@@ -46,15 +49,6 @@ export const KEYBOARD_MIN_INSET = 96;
 export const SHORT_VISUAL_BAND = 420;
 
 /**
- * The app frame is moved by this much (negative = up). mobileViewport keeps
- * it in the --viewport-shift custom property so a transform on the frame can
- * never fight the layout for the same geometry.
- */
-export function viewportShiftFrom(offsetTop: number): number {
-  const shifted = Math.round(offsetTop);
-  return shifted > 0 ? -shifted : 0;
-}
-
 /** Pure geometry: how much of the layout viewport the keyboard covers. */
 export function keyboardInsetFrom(
   layoutHeight: number,
@@ -102,13 +96,13 @@ function publish(next: ViewportMetrics): void {
   metrics = next;
   const root = document.documentElement;
   root.style.setProperty("--visual-vh", `${next.height}px`);
+  // On iOS Safari the keyboard can pan the visual viewport down while leaving
+  // the layout viewport full-height. A flow-layout app whose height is only
+  // `visualViewport.height` then ends hundreds of pixels ABOVE the keyboard.
+  // Its bottom must instead follow the visible viewport's bottom edge.
+  root.style.setProperty("--visual-bottom", `${next.height + next.offsetTop}px`);
   root.style.setProperty("--keyboard-inset", `${next.keyboardInset}px`);
   root.style.setProperty("--visual-offset", `${next.offsetTop}px`);
-  // The whole frame counter-shifts (not just the composer): with the layout
-  // scrolled past the header, moving the dock alone would push it into the
-  // header; and a transform on the dock is also what let a sheet over it
-  // capture fixed positioning.
-  root.style.setProperty("--viewport-shift", `${viewportShiftFrom(next.offsetTop)}px`);
   if (document.body) {
     document.body.dataset.keyboard = next.covering ? "open" : "closed";
     document.body.dataset.band = next.height > 0 && next.height < SHORT_VISUAL_BAND ? "short" : "tall";

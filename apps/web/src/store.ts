@@ -64,6 +64,40 @@ export interface NewSessionIntent {
   worktreePath?: string;
 }
 
+// A new chat is intentionally not a session yet, so keep its work locally
+// rather than creating a visible empty session. One shelf per project lets the
+// user return via New session after visiting another surface.
+const NEW_SESSION_DRAFT = "polyth.new-session-draft.";
+
+function loadNewSessionDraft(projectId: string): NewSessionIntent | null {
+  try {
+    const value = JSON.parse(localStorage.getItem(NEW_SESSION_DRAFT + projectId) ?? "null") as unknown;
+    if (!value || typeof value !== "object") return null;
+    const draft = value as Partial<NewSessionIntent>;
+    return draft.projectId === projectId && typeof draft.draft === "string"
+      ? { projectId, draft: draft.draft, ...(typeof draft.title === "string" ? { title: draft.title } : {}), ...(typeof draft.worktreePath === "string" ? { worktreePath: draft.worktreePath } : {}) }
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function saveNewSessionDraft(intent: NewSessionIntent): void {
+  try { localStorage.setItem(NEW_SESSION_DRAFT + intent.projectId, JSON.stringify(intent)); } catch { /* best-effort */ }
+}
+
+/** Save text typed into the invisible new-session shelf without rerendering the composer. */
+export function saveNewSessionDraftText(projectId: string, draft: string): void {
+  const current = state.newSessionIntent?.projectId === projectId
+    ? state.newSessionIntent
+    : loadNewSessionDraft(projectId);
+  saveNewSessionDraft({ projectId, draft, ...(current?.title ? { title: current.title } : {}), ...(current?.worktreePath ? { worktreePath: current.worktreePath } : {}) });
+}
+
+export function clearNewSessionDraft(projectId: string): void {
+  try { localStorage.removeItem(NEW_SESSION_DRAFT + projectId); } catch { /* best-effort */ }
+}
+
 export interface AppState {
   /** Canonical project-registry truth (UX-ONBOARDING): loading, failed, and
    *  ready are distinct; `projects` has this one owner. */
@@ -543,16 +577,21 @@ export function startNewSession(
   options: Omit<NewSessionIntent, "projectId" | "draft"> & { draft?: string } = {},
 ): void {
   if (state.activeProjectId !== projectId) activateProject(projectId);
+  const saved = options.draft === undefined && !options.title && !options.worktreePath
+    ? loadNewSessionDraft(projectId)
+    : null;
+  const intent: NewSessionIntent = {
+    projectId,
+    draft: options.draft ?? saved?.draft ?? "",
+    ...(options.title ?? saved?.title ? { title: options.title ?? saved?.title } : {}),
+    ...(options.worktreePath ?? saved?.worktreePath ? { worktreePath: options.worktreePath ?? saved?.worktreePath } : {}),
+  };
+  saveNewSessionDraft(intent);
   localStorage.setItem("polyth.activeSessionId", "");
   set({
     activeSessionId: null,
     openingSessionId: null,
-    newSessionIntent: {
-      projectId,
-      draft: options.draft ?? "",
-      ...(options.title ? { title: options.title } : {}),
-      ...(options.worktreePath ? { worktreePath: options.worktreePath } : {}),
-    },
+    newSessionIntent: intent,
   });
   showSessionChat();
 }

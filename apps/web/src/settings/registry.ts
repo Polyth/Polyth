@@ -74,6 +74,7 @@ const BUILTIN_ITEMS: SettingsSearchItem[] = [
   { id: "chat.width", pageId: "chat", label: tr("settings.registry.conversationWidth"), keywords: ["wide", "layout"], focusTarget: "chat.width" },
   { id: "chat.followUp", pageId: "chat", label: tr("settings.registry.whileTheAgentIsWorking"), description: tr("settings.registry.steerQueueOrInterrupt"), keywords: ["delivery", "steer", "queue", "interrupt"], focusTarget: "chat.followUp" },
   { id: "chat.thinking", pageId: "chat", label: tr("settings.registry.thinkingBlocks"), keywords: ["reasoning", "collapse"], focusTarget: "chat.thinking" },
+  { id: "chat.workingIndicator", pageId: "chat", label: tr("settings.pages.workingIndicator"), keywords: ["working", "typing", "cat", "animation"], focusTarget: "chat.workingIndicator" },
   { id: "chat.messageActions", pageId: "chat", label: tr("settings.registry.messageActions"), description: tr("settings.registry.showOrHideCopyRevertAndFork"), keywords: ["hover", "quick actions", "buttons"], focusTarget: "chat.messageActions" },
   { id: "chat.copyFormat", pageId: "chat", label: tr("settings.registry.copyFormat"), description: tr("settings.registry.copyMessagesAsMarkdownOrJson"), keywords: ["clipboard", "markdown", "json"], focusTarget: "chat.copyFormat" },
   { id: "notifications.desktop", pageId: "notifications", label: tr("settings.registry.desktopNotification"), keywords: ["alert", "browser"], focusTarget: "notifications.desktop" },

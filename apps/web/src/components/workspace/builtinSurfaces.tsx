@@ -4,7 +4,7 @@
 // built-ins once. Every built-in requires a project; the host renders the
 // standard project empty state when none is open. None require an open
 // session: the session surface shows its hero until one exists.
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Timeline from "../Timeline.tsx";
 import Composer from "../Composer.tsx";
 import PermissionBanner from "../PermissionBanner.tsx";
@@ -33,6 +33,7 @@ import { useGitStatus } from "../../gitStatusStore.ts";
 import { useShellMode } from "../../responsiveShell.ts";
 import { tapFeedback } from "../../haptics.ts";
 import { dismissKeyboard } from "../../mobileViewport.ts";
+import { useUiSettings } from "../../uiPrefs.ts";
 import { useSheetTrigger } from "../mobile/sheetTrigger.ts";
 import { HeroWidget, HeroWidgetSettings } from "../mobile/HeroWidgets.tsx";
 import { ago, displaySessionTitle } from "../../format.ts";
@@ -262,12 +263,7 @@ function SessionSurface() {
       <div className="timeline-wrap">
         <Timeline model={model} latestRevealTarget={latestRevealAnchor} />
       </div>
-      {model.turn?.status === "working" && (
-        <div className="focus-working" role="status">
-          <span className="focus-working-spinner" aria-hidden="true" />
-          <span>{tr("workspace.builtinsurfaces.working")}</span>
-        </div>
-      )}
+      {model.turn?.status === "working" && <WorkingIndicator />}
       {pendingQuestions.length > 0 && <QuestionCards questions={pendingQuestions} />}
       {pendingSecrets.length > 0 && <SecureSafeCard secrets={pendingSecrets} />}
       {pendingPermissions.length > 0 && <PermissionBanner permissions={pendingPermissions} />}
@@ -281,6 +277,36 @@ function SessionSurface() {
       />
       <div ref={setLatestRevealAnchor} className="timeline-latest-reveal-anchor" />
       {archived && sessionId ? <ArchivedComposerGuard sessionId={sessionId} /> : <Composer />}
+    </div>
+  );
+}
+
+function WorkingIndicator() {
+  const { workingIndicator } = useUiSettings();
+  const [activityStep, setActivityStep] = useState(0);
+  useEffect(() => {
+    if (workingIndicator !== "activity") return;
+    const timer = window.setInterval(() => setActivityStep((step) => (step + 1) % 3), 1800);
+    return () => window.clearInterval(timer);
+  }, [workingIndicator]);
+  const activityLabel = [
+    tr("workspace.builtinsurfaces.readingContext"),
+    tr("workspace.builtinsurfaces.checkingDetails"),
+    tr("workspace.builtinsurfaces.preparingReply"),
+  ][activityStep]!;
+  return (
+    <div className={`focus-working focus-working--${workingIndicator}`} role="status">
+      {workingIndicator === "pulse" && <span className="focus-working-spinner" aria-hidden="true" />}
+      {workingIndicator === "keyboard" && <span className="focus-working-icon" aria-hidden="true"><Icon.keyboard /></span>}
+      {workingIndicator === "cat" && (
+        <svg className="focus-working-cat" viewBox="0 0 32 16" aria-hidden="true">
+          <path d="M4 10V5l3 2 3-3 3 3 4 1c3 0 5 2 5 4v1H7c-2 0-3-1-3-3Z" />
+          <path d="M22 9c4-4 6 1 3 3M9 13v2M17 13v2" />
+          <circle cx="11" cy="9" r=".7" fill="currentColor" stroke="none" />
+        </svg>
+      )}
+      {workingIndicator === "activity" && <span className="focus-working-activity" aria-hidden="true"><i /><i /><i /></span>}
+      <span>{workingIndicator === "activity" ? activityLabel : tr("workspace.builtinsurfaces.working")}</span>
     </div>
   );
 }

@@ -203,3 +203,15 @@ test("starting a new chat records only UI intent until the first send", () => {
   assert.equal(state.activeView, "session");
   assert.equal(getWorkspaceMode(), "chat");
 });
+
+test("new session restores its hidden project draft after navigation", () => {
+  store.startNewSession("p1");
+  store.saveNewSessionDraftText("p1", "Keep this work");
+  store.activateProject("p2");
+  store.startNewSession("p1");
+
+  const state = store.getState();
+  assert.equal(state.activeSessionId, null);
+  assert.equal(state.newSessionIntent?.draft, "Keep this work");
+  assert.equal(state.sessions.some((session) => session.title === "Keep this work"), false);
+});

@@ -231,16 +231,22 @@ test("model metadata reads as one ordered line, with acronyms spelled right", as
 
 test("visual-viewport geometry is published as CSS variables and started at boot", async () => {
   const viewport = await read("../src/mobileViewport.ts");
-  for (const variable of ["--visual-vh", "--keyboard-inset", "--visual-offset"]) {
+  for (const variable of ["--visual-vh", "--visual-bottom", "--keyboard-inset", "--visual-offset"]) {
     assert.ok(viewport.includes(variable), `${variable} is published`);
   }
   assert.ok(viewport.includes("window.visualViewport"), "measurement reads the visual viewport");
   assert.ok(viewport.includes('dataset.keyboard = next.covering ? "open" : "closed"'), "CSS can see the keyboard state");
-  assert.ok(viewport.includes("--viewport-shift"), "the frame counter-shift is published");
   assert.ok(viewport.includes("SHORT_VISUAL_BAND"), "CSS can see a band too short for both zones");
   assert.ok(!/localStorage|sessionStorage/.test(viewport), "viewport geometry is never persisted");
   const main = await read("../src/main.tsx");
   assert.ok(main.includes("startMobileViewport()"), "the seam is installed before first paint");
+});
+
+test("the mobile viewport is fixed-scale and requests keyboard content resizing", async () => {
+  const html = await read("../src/index.html");
+  assert.match(html, /maximum-scale=1/, "pinch and focus zoom are disabled");
+  assert.match(html, /user-scalable=no/, "the browser must keep the requested scale");
+  assert.match(html, /interactive-widget=resizes-content/, "supporting browsers resize content for the keyboard");
 });
 
 test("every redesigned overlay uses the one sheet system", async () => {
@@ -376,8 +382,8 @@ test("phone CSS keeps the layout inside the visible viewport", async () => {
   const section = css.slice(start);
   const phone = section.slice(section.indexOf("@media (max-width: 480px)"));
 
-  assert.match(phone, /\.app,\n\s+\.app\.mode-chat\.view-session \{\n\s+height: var\(--visual-vh, 100dvh\);/, "the shell tracks the visible viewport");
-  assert.ok(phone.includes("Do NOT add a compensating translate/margin"), "Safari native focus scroll is not double-compensated");
+  assert.match(phone, /\.app,\n\s+\.app\.mode-chat\.view-session \{\n\s+height: var\(--visual-bottom, 100dvh\);/, "the shell bottom tracks the visible viewport");
+  assert.ok(phone.includes("--visual-bottom includes that offset"), "Safari's visual-viewport pan is included once, in the shell height");
   assert.match(phone, /overflow-x: hidden/, "§33: no horizontal scrolling");
   assert.match(phone, /input, textarea, select \{ font-size: max\(16px, 1em\); \}/, "§32: no Safari auto-zoom");
   assert.match(phone, /touch-action: manipulation/, "§28: no accidental double-tap zoom on controls");

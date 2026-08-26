@@ -1,9 +1,11 @@
 import { useState, useRef, useEffect, useCallback, useMemo, type ClipboardEvent, type KeyboardEvent } from "react";
 import {
   activateProject,
+  clearNewSessionDraft,
   getState,
   openSettingsPage,
   setUiError,
+  saveNewSessionDraftText,
   startNewSession,
   useActiveModel,
   useStore,
@@ -468,7 +470,7 @@ export default function Composer({
   const rootRef = useRef<HTMLDivElement>(null);
 
   // UX-MOBILE-01 §31/§45: keyboard geometry is one source of truth —
-  // mobileViewport.ts publishes --visual-vh / --keyboard-inset / --viewport-shift
+  // mobileViewport.ts publishes --visual-vh / --visual-bottom / --keyboard-inset
   // and the phone CSS keeps the frame on the visible band. The composer reads
   // the metrics for auto-grow; it never re-derives its own transform.
   const isPhone = shellLayout === "phone";
@@ -873,6 +875,7 @@ export default function Composer({
           ...(newSessionIntent?.title ? { title: newSessionIntent.title } : {}),
           ...(worktreePath ? { worktreePath } : {}),
         });
+        clearNewSessionDraft(activeProjectId);
         const created = getState().activeSessionId;
         if (!created) throw new Error(tr("composer.theNewSessionDidNotBecomeActive"));
         if (newSessionAutoApprove) await api.autoAcceptSet(created, "on");
@@ -1028,6 +1031,7 @@ export default function Composer({
   const onTextChange = useCallback(
     (val: string) => {
       setText(val);
+      if (sessionIdRef.current === null && activeProjectId) saveNewSessionDraftText(activeProjectId, val);
       if (!applyingHistory.current) historyCursor.current = emptyPromptHistoryCursor();
       applyingHistory.current = false;
       const caret = inputRef.current?.getSelection().end ?? val.length;

@@ -427,6 +427,8 @@ test("parseUiSettings defaults invalid values and sanitizes MCP servers", () => 
   assert.equal(parsed.mcpServers.length, 32);
   assert.deepEqual(parsed.mcpServers[0], servers[0]);
   assert.equal(parseUiSettings(JSON.stringify({ messageCopyFormat: "xml" })).messageCopyFormat, "markdown");
+  assert.equal(parseUiSettings(JSON.stringify({ workingIndicator: "cat" })).workingIndicator, "cat");
+  assert.equal(parseUiSettings(JSON.stringify({ workingIndicator: "dog" })).workingIndicator, "pulse");
 });
 
 test("setUiSettings persists and applies visual data attributes", () => {

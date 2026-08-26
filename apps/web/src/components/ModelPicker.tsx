@@ -1,4 +1,4 @@
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState, type DragEvent } from "react";
 import type { ModelDescriptor, ModelRef } from "@polyth/contracts";
 import { isFavorite, modelKey, orderProviders } from "@polyth/models";
 import {
@@ -116,6 +116,7 @@ export default function ModelPicker({
   const [query, setQuery] = useState("");
   const [editing, setEditing] = useState(false);
   const [draggedProvider, setDraggedProvider] = useState<string | null>(null);
+  const [draggedFavorite, setDraggedFavorite] = useState<string | null>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const popoverRef = useRef<HTMLDivElement>(null);
   const direction = usePopoverPlacement(open && !phone, triggerRef, popoverRef);
@@ -208,11 +209,12 @@ export default function ModelPicker({
     );
   };
 
-  const row = (model: ModelDescriptor) => {
+  const row = (model: ModelDescriptor, favoriteDrag = false) => {
     const selected = isSelected(model);
+    const key = modelKey(model);
     return (
       <div
-        key={modelKey(model)}
+        key={key}
         className={`model-picker-row${selected ? " current" : ""}`}
         role="option"
         aria-selected={selected}
@@ -224,7 +226,18 @@ export default function ModelPicker({
           event.preventDefault();
           choose(model);
         }}
+        {...(favoriteDrag ? {
+          draggable: !q,
+          onDragStart: () => setDraggedFavorite(key),
+          onDragOver: (event: DragEvent) => event.preventDefault(),
+          onDrop: (event: DragEvent) => {
+            event.preventDefault();
+            if (draggedFavorite) reorderModelFavorites(draggedFavorite, key);
+            setDraggedFavorite(null);
+          },
+        } : {})}
       >
+        {favoriteDrag && <span className="model-picker-grip" aria-hidden="true">⠿</span>}
         <span className="model-picker-check" aria-hidden="true">{selected ? "✓" : ""}</span>
         <span className="model-picker-copy">
           <strong>{model.name}</strong>
@@ -401,7 +414,7 @@ export default function ModelPicker({
               {favorites.length > 0 && (
                 <section className="model-provider-section favorites">
                   <div className="model-provider-head static"><span>★</span><strong>{tr("modelpicker.favorites")}</strong><small>{favorites.length}</small></div>
-                  <div>{favorites.map(row)}</div>
+                  <div>{favorites.map((model) => row(model, true))}</div>
                 </section>
               )}
               {providers.map((provider) => {
@@ -436,7 +449,7 @@ export default function ModelPicker({
                       <small>{items.length}</small>
                       <span aria-hidden="true">{expanded ? "⌄" : "›"}</span>
                     </button>
-                    {expanded && <div>{items.map(row)}</div>}
+                    {expanded && <div>{items.map((model) => row(model))}</div>}
                   </section>
                 );
               })}
