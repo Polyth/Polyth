@@ -146,7 +146,7 @@ export default defineWebPackage((host) => () => {
     }),
     host.capabilities.register({
       id: "workflow",
-      label: tr("workflowview.workflows"),
+      label: tr("capabilities.workflows"),
       technicalLabel: "DAG orchestration",
       plainDescription: "Coordinate agent roles in dependency-based pipelines.",
       keywords: ["workflow", "dag", "orchestration"],
