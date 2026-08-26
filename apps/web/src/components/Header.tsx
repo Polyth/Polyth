@@ -107,8 +107,22 @@ function CapabilityNav() {
     return panel !== undefined && rail === panel;
   };
 
-  const primaries = resolved.filter((c) =>
-    c.tier === "primary" && c.descriptor.id !== "terminal" && c.descriptor.available());
+  const eligiblePrimaries = resolved.filter((c) =>
+    (c.tier === "primary" || c.descriptor.id === "workflow")
+    && c.descriptor.id !== "terminal"
+    && c.descriptor.available());
+  // Workflows is package-owned and may retain its default "more" placement.
+  // Keep it beside Chat so enabling the package always creates a discoverable
+  // destination without relying on the configurable right rail.
+  const workflow = eligiblePrimaries.find((c) => c.descriptor.id === "workflow");
+  const primaries = workflow
+    ? [
+        ...eligiblePrimaries.filter((c) => c.descriptor.id === "session"),
+        workflow,
+        ...eligiblePrimaries.filter((c) =>
+          c.descriptor.id !== "session" && c.descriptor.id !== "workflow"),
+      ]
+    : eligiblePrimaries;
   const terminal = resolved.find((c) =>
     c.descriptor.id === "terminal" && c.descriptor.available());
   const filesIndex = primaries.findIndex((c) => c.descriptor.id === "files");

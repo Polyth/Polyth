@@ -117,7 +117,7 @@ export const UI_DEFAULTS: UiSettings = {
   responseActions: [...RESPONSE_ACTION_IDS],
   topRailAlignment: "center",
   mobileShortcuts: [
-    "session", "files", "git", "terminal", "browser",
+    "session", "workflow", "files", "git", "terminal", "browser",
     "notification-centre", "goals", "settings",
   ],
   jsonTreeDefault: "tree",

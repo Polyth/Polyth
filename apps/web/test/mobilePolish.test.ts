@@ -152,7 +152,7 @@ test("Multi-Run controls use an intentional desktop grid and collapse on mobile"
 
 test("compact panels and timeline actions use current mobile geometry", () => {
   const css = read("../src/styles.css");
-  const finalMobile = css.slice(css.lastIndexOf("@media (max-width: 820px)"));
+  const finalMobile = css.slice(css.indexOf("/* ---------- mobile shell audit fixes"));
 
   assert.match(finalMobile, /\.panel-sheet\s*\{[^}]*top:\s*60px;[^}]*bottom:\s*0;[^}]*z-index:\s*30;/s);
   assert.match(

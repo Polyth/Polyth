@@ -46,12 +46,13 @@ test("classifier is monotonic: growing width never returns to a narrower mode", 
 
 // ---- source-independent shell state rules ----------------------------------
 
-test("width alone selects shell mode: no pointer/hover/UA/touch signals, no persistence", async () => {
+test("shell mode uses width plus a coarse-pointer short-height fallback without device sniffing", async () => {
   const raw = await read("../src/responsiveShell.ts");
   const src = raw.replace(/\/\*[\s\S]*?\*\//g, "").replace(/\/\/[^\n]*/g, "");
-  for (const banned of ["pointer", "hover", "userAgent", "maxTouchPoints", "ontouch", "localStorage", "sessionStorage"]) {
+  for (const banned of ["hover", "userAgent", "maxTouchPoints", "ontouch", "localStorage", "sessionStorage"]) {
     assert.ok(!src.toLowerCase().includes(banned.toLowerCase()), `responsiveShell.ts must not use ${banned}`);
   }
+  assert.ok(src.includes("(pointer: coarse)"), "short landscape layouts require a coarse primary pointer");
   assert.ok(src.includes("matchMedia"), "useShellMode subscribes through matchMedia");
   assert.ok(src.includes("useSyncExternalStore"), "useShellMode is a useSyncExternalStore subscription");
 });
@@ -384,7 +385,7 @@ test("header renders configured primary capabilities and permanent Terminal laun
   assert.ok(!rail.includes("CapabilityMenu"), "rail creates no duplicate More-tools picker");
   assert.ok(rail.includes("configuredRailButtons"), "rail renders only configured tool buttons");
   assert.ok(rail.includes('capability.descriptor.id === "terminal"'), "Terminal remains a guaranteed rail launcher");
-  assert.ok(rail.includes("reorderRail"), "rail arranges surfaces by drag-reorder instead");
+  assert.ok(rail.includes("positionOf"), "rail follows the resolved capability placement order");
   assert.ok(!store.includes("moreOpen:"), "dead global More-tools state stays removed");
   assert.ok(!store.includes("setMoreOpen"), "dead global More-tools action stays removed");
 });

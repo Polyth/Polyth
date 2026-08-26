@@ -242,10 +242,10 @@ test("visual-viewport geometry is published as CSS variables and started at boot
   assert.ok(main.includes("startMobileViewport()"), "the seam is installed before first paint");
 });
 
-test("the mobile viewport is fixed-scale and requests keyboard content resizing", async () => {
+test("the mobile viewport preserves zoom and requests keyboard content resizing", async () => {
   const html = await read("../src/index.html");
-  assert.match(html, /maximum-scale=1/, "pinch and focus zoom are disabled");
-  assert.match(html, /user-scalable=no/, "the browser must keep the requested scale");
+  assert.doesNotMatch(html, /maximum-scale=1/, "pinch zoom remains available");
+  assert.doesNotMatch(html, /user-scalable=no/, "the viewport does not disable user scaling");
   assert.match(html, /interactive-widget=resizes-content/, "supporting browsers resize content for the keyboard");
 });
 
