@@ -695,6 +695,8 @@ test("complete workflow journey remains synchronized, accessible, and responsive
   await page.waitForFunction(() =>
     (document.querySelector(".workflow-name-field input") as HTMLInputElement | null)?.value === "Approval review");
   await workflowName.fill("Approval review draft");
+  await page.waitForFunction(() =>
+    document.querySelector(".workflow-save-state")?.textContent?.trim() === "Unsaved");
   await page.locator(".workflow-definition").filter({ hasText: "Release pipeline" }).click();
   const discardDialog = page.getByRole("dialog", { name: "Discard unsaved changes?" });
   await discardDialog.waitFor({ state: "visible" });
@@ -929,8 +931,12 @@ test("workflow visual quality matrix uses computed geometry across themes, motio
       (document.querySelector(".workflow-name-field input") as HTMLInputElement | null)?.value === "Release pipeline");
     assert.equal(await page.locator(".workflow-page").count(), 1, `workflow switcher failed at ${viewport.width}px`);
     if (viewport.width <= 820) {
-      assert.equal(await page.locator(".header-view-picker .picker-chip").isVisible(), true,
-        `compact view switcher is hidden at ${viewport.width}px`);
+      assert.equal(
+        await page.locator(".mobile-shortcut-rail")
+          .getByRole("button", { name: "Workflows", exact: true }).isVisible(),
+        true,
+        `compact workflow shortcut is hidden at ${viewport.width}px`,
+      );
     } else {
       assert.equal(await page.locator(".view-switcher").getByRole("button", { name: "Workflows" }).isVisible(), true,
         `desktop workflow view button is hidden at ${viewport.width}px`);
@@ -1254,9 +1260,8 @@ test("workflow visual quality matrix uses computed geometry across themes, motio
       sessionId: SESSIONS.main,
       storage: { "polyth.locale": locale.id },
     });
-    const picker = localized.locator(".header-view-picker .picker-chip");
-    await picker.click();
-    await localized.getByRole("option", { name: locale.label, exact: true }).click();
+    await localized.locator(".mobile-shortcut-rail")
+      .getByRole("button", { name: locale.label, exact: true }).click();
     await localized.waitForSelector(".workflow-page", { state: "visible" });
     await localized.locator(".workflow-definition").filter({ hasText: "Release pipeline" }).click();
     await localized.waitForFunction(() =>
