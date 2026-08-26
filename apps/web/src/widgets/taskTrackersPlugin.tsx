@@ -202,9 +202,13 @@ function TaskDetail({
   const [error, setError] = useState("");
 
   useEffect(() => {
-    setStatusId(task.status.id);
     setNotice("");
     setError("");
+    setInstructions("");
+  }, [task.id]);
+
+  useEffect(() => {
+    setStatusId(task.status.id);
   }, [task.id, task.status.id]);
 
   const statuses = task.availableStatuses ?? [];
