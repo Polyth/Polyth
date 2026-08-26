@@ -60,6 +60,7 @@ export interface ToolMsg {
   output?: string;
   error?: string;
   title?: string;
+  metadata?: JsonObject;
   status: "pending" | "done" | "error";
   undone?: boolean;
   rewindMarkerSeq?: number;
@@ -474,6 +475,8 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
         t.output = str(d, "output") ?? "";
         const title = str(d, tr("reduce.title"));
         if (title !== undefined) t.title = title;
+        const metadata = obj(d, "metadata");
+        if (metadata !== undefined) t.metadata = metadata;
         const lateInput = obj(d, "input");
         if (lateInput && Object.keys(t.input).length === 0) t.input = lateInput; // opencode fills input late
         const changedFiles = extractChangedFiles(t.tool, lateInput ?? t.input, obj(d, "metadata"));
