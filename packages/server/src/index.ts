@@ -998,6 +998,11 @@ export async function boot(opts: BootOptions = {}) {
   }));
   registerPackageRoute("github", githubRoutes({
     projects, github, append: appendLogged,
+    sessions: {
+      create: (input) => sessions.create(input),
+      snapshot: (sessionId) => sessions.snapshot(sessionId),
+      send: (sessionId, input) => sessions.send(sessionId, input),
+    },
     describe: async (root, base) => {
       let baseRef = base;
       if (!baseRef) {

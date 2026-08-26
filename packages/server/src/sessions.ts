@@ -784,6 +784,7 @@ export function createSessionService(deps: {
       // explicit clear (null) is recorded too — omitted means inherited.
       const message = await appendAndBroadcast(sessionId, "user/message", {
         text, ...(raw !== text ? { raw } : {}),
+        ...(input.githubConflictResolution === true ? { githubConflictResolution: true } : {}),
         ...(input.attachments ? { attachments: input.attachments as unknown as JsonObject[] } : {}),
         ...(decoration ? {
           recoveryContext: decoration.recoveryContext,

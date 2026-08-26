@@ -139,6 +139,9 @@ export function mergeThinking(messages: RenderMessage[]): RenderMessage[] {
 
 /** Message as Markdown for the copy action. */
 export function messageMarkdown(m: RenderMessage): string {
+  if (m.kind === "github-conflict") {
+    return `### Fixing merge conflicts for pull request #${m.prNumber}\n\n${m.title}\n\n\`${m.baseRefName} ← ${m.headRefName}\`\n\n${m.url}`;
+  }
   if (m.kind === "task") {
     return tr("utils.taskValueValue", { action: m.action, text: m.text });
   }
@@ -164,6 +167,21 @@ export function messageJson(m: RenderMessage): string {
   if (m.kind === "tool") {
     return JSON.stringify(
       { role: "tool", tool: m.tool, input: m.input, output: m.output, error: m.error, status: m.status, time: m.time },
+      null,
+      2,
+    );
+  }
+  if (m.kind === "github-conflict") {
+    return JSON.stringify(
+      {
+        role: "github-conflict",
+        prNumber: m.prNumber,
+        title: m.title,
+        url: m.url,
+        baseRefName: m.baseRefName,
+        headRefName: m.headRefName,
+        time: m.time,
+      },
       null,
       2,
     );

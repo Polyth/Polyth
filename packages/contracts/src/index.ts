@@ -54,10 +54,19 @@ export interface CompactionRecoveryMetadata {
 export interface UserMessageData {
   text: string;
   attachments?: AttachmentRef[];
+  /** Agent handoff prompt shown as a semantic GitHub card, not a user bubble. */
+  githubConflictResolution?: boolean;
   /** Model-visible recovery instructions kept separate from the visible bubble. */
   recoveryContext?: string;
   /** Durable dedup key proving this compaction was handled by this turn. */
   compactionRecovery?: CompactionRecoveryMetadata;
+}
+export interface GithubConflictResolutionStartedData {
+  prNumber: number;
+  title: string;
+  url: string;
+  baseRefName: string;
+  headRefName: string;
 }
 export interface AssistantChunkData { partId: string; text: string }
 export interface AssistantReasoningChunkData { partId: string; text: string }
@@ -346,6 +355,8 @@ export interface SessionRef { id: string }
 export interface TurnRef { turnId: string }
 export interface UserTurnInput {
   text: string;
+  /** Keep this model-visible prompt out of ordinary user chat bubbles. */
+  githubConflictResolution?: boolean;
   /** Request a durable title derived from this first prompt when the session
    *  still has a placeholder title. The client owns the user preference; the
    *  server owns the append + projection update. */

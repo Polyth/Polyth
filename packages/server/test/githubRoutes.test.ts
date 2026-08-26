@@ -4,12 +4,26 @@
 // response, and describe never runs when the seam is not wired.
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import type { JsonObject, ProjectService, SessionEvent } from "@polyth/contracts";
+import type {
+  CreateSessionInput,
+  JsonObject,
+  ProjectService,
+  SessionEvent,
+  SessionProjection,
+  UserTurnInput,
+} from "@polyth/contracts";
 import { createGithubService, type ExecFn } from "@polyth/github";
 import { githubRoutes } from "../src/routes/github.ts";
 import type { RouteRequest } from "../src/http.ts";
 
-interface Call { kind: "append" | "gh"; type?: string; data?: JsonObject; args?: string[] }
+interface Call {
+  kind: "append" | "gh" | "create" | "snapshot" | "send";
+  type?: string;
+  data?: JsonObject;
+  args?: string[];
+  sessionId?: string;
+  input?: CreateSessionInput | UserTurnInput;
+}
 
 function makeHarness(opts: { exec?: ExecFn; describe?: (root: string, base?: string) => Promise<{ title: string; body: string }> } = {}) {
   const calls: Call[] = [];
@@ -25,11 +39,33 @@ function makeHarness(opts: { exec?: ExecFn; describe?: (root: string, base?: str
     list: async () => [],
   } as unknown as ProjectService;
   const append = async (sessionId: string, type: string, data: JsonObject): Promise<SessionEvent> => {
-    calls.push({ kind: "append", type, data });
+    calls.push({ kind: "append", type, data, sessionId });
     return { sessionId, seq: ++seq, ts: Date.now(), type, data } as SessionEvent;
   };
+  const sessions = {
+    create: async (input: CreateSessionInput) => {
+      calls.push({ kind: "create", input });
+      return { id: "s-new" };
+    },
+    snapshot: async (sessionId: string): Promise<SessionProjection> => {
+      calls.push({ kind: "snapshot", sessionId });
+      if (sessionId === "missing") throw Object.assign(new Error("session not found"), { code: "not-found" });
+      return {
+        id: sessionId,
+        projectId: sessionId === "foreign" ? "p2" : "p1",
+        title: "Session",
+        status: "idle",
+        createdAt: 1,
+        updatedAt: 1,
+      };
+    },
+    send: async (sessionId: string, input: UserTurnInput) => {
+      calls.push({ kind: "send", sessionId, input });
+      return { turnId: "turn-1" };
+    },
+  };
   const routes = githubRoutes({
-    projects, github: createGithubService({ exec }), append,
+    projects, github: createGithubService({ exec }), append, sessions,
     ...(opts.describe ? { describe: opts.describe } : {}),
   });
 
@@ -49,6 +85,114 @@ function makeHarness(opts: { exec?: ExecFn; describe?: (root: string, base?: str
 
   return { calls, call };
 }
+
+const conflictingDetail = {
+  number: 23,
+  title: "Resolve routing changes",
+  state: "OPEN",
+  isDraft: false,
+  author: { login: "kat" },
+  url: "https://github.com/a/r/pull/23",
+  body: "",
+  baseRefName: "main",
+  headRefName: "feat/routing",
+  headRefOid: "abc123",
+  additions: 10,
+  deletions: 2,
+  changedFiles: 3,
+  mergeable: "CONFLICTING",
+  createdAt: "2026-01-01",
+  updatedAt: "2026-01-02",
+};
+
+test("conflict agent creates a session, logs the semantic event, then sends the hidden prompt", async () => {
+  const { calls, call } = makeHarness({
+    exec: async (_bin, args) => {
+      assert.deepEqual(args.slice(0, 3), ["pr", "view", "23"]);
+      return { stdout: JSON.stringify(conflictingDetail), stderr: "" };
+    },
+  });
+
+  const response = await call("POST", "/api/github/pr/conflict-agent", {
+    projectId: "p1",
+    number: 23,
+    prompt: "Keep the incoming router API.",
+    target: "new-session",
+  });
+
+  assert.equal(response.status, 200);
+  assert.deepEqual(response.payload, { ok: true, data: { sessionId: "s-new" } });
+  assert.deepEqual(calls.map((entry) => entry.kind), ["gh", "create", "append", "send"]);
+  assert.deepEqual(calls[1]?.input, { projectId: "p1", title: "PR #23 conflicts" });
+  assert.equal(calls[2]?.type, "github/conflict-resolution-started");
+  assert.deepEqual(calls[2]?.data, {
+    prNumber: 23,
+    title: "Resolve routing changes",
+    url: "https://github.com/a/r/pull/23",
+    baseRefName: "main",
+    headRefName: "feat/routing",
+  });
+  assert.equal(calls[3]?.sessionId, "s-new");
+  const sent = calls[3]?.input as UserTurnInput;
+  assert.equal(sent.githubConflictResolution, true);
+  assert.match(sent.text, /Keep the incoming router API/);
+  assert.match(sent.text, /Do not merge the pull request or push any commits/);
+});
+
+test("conflict agent validates a current session belongs to the project", async () => {
+  const { calls, call } = makeHarness({
+    exec: async () => ({ stdout: JSON.stringify(conflictingDetail), stderr: "" }),
+  });
+
+  const missingId = await call("POST", "/api/github/pr/conflict-agent", {
+    projectId: "p1", number: 23, prompt: "", target: "current-session",
+  });
+  assert.equal(missingId.status, 400);
+
+  const foreign = await call("POST", "/api/github/pr/conflict-agent", {
+    projectId: "p1", number: 23, prompt: "", target: "current-session", sessionId: "foreign",
+  });
+  assert.equal(foreign.status, 400);
+  assert.match(String((foreign.payload as { reason: string }).reason), /another project/);
+  assert.equal(calls.some((entry) => entry.kind === "append"), false);
+  assert.equal(calls.some((entry) => entry.kind === "send"), false);
+
+  calls.length = 0;
+  const current = await call("POST", "/api/github/pr/conflict-agent", {
+    projectId: "p1", number: 23, prompt: "", target: "current-session", sessionId: "s-current",
+  });
+  assert.equal(current.status, 200);
+  assert.deepEqual(current.payload, { ok: true, data: { sessionId: "s-current" } });
+  assert.deepEqual(calls.map((entry) => entry.kind), ["gh", "snapshot", "append", "send"]);
+});
+
+test("conflict agent rejects invalid input and a PR without conflicts before handoff", async () => {
+  const { calls, call } = makeHarness({
+    exec: async () => ({
+      stdout: JSON.stringify({ ...conflictingDetail, mergeable: "MERGEABLE" }),
+      stderr: "",
+    }),
+  });
+
+  const badNumber = await call("POST", "/api/github/pr/conflict-agent", {
+    projectId: "p1", number: 0, prompt: "", target: "new-session",
+  });
+  assert.equal(badNumber.status, 400);
+  assert.equal(calls.length, 0);
+
+  const badTarget = await call("POST", "/api/github/pr/conflict-agent", {
+    projectId: "p1", number: 23, prompt: "", target: "some-session",
+  });
+  assert.equal(badTarget.status, 400);
+  assert.equal(calls.length, 0);
+
+  const mergeable = await call("POST", "/api/github/pr/conflict-agent", {
+    projectId: "p1", number: 23, prompt: "", target: "new-session",
+  });
+  assert.equal(mergeable.status, 409);
+  assert.match(String((mergeable.payload as { reason: string }).reason), /not currently conflicting/);
+  assert.deepEqual(calls.map((entry) => entry.kind), ["gh"]);
+});
 
 test("pr/create validates title and project, then appends pr/created before responding", async () => {
   const { calls, call } = makeHarness();

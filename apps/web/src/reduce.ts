@@ -80,7 +80,21 @@ export interface TaskActivityMsg {
   time: number;
 }
 
-export type RenderMessage = UserMsg | AssistantMsg | ToolMsg | TaskActivityMsg;
+export interface GithubConflictMsg {
+  kind: "github-conflict";
+  id: string;
+  eventSeq: number;
+  prNumber: number;
+  title: string;
+  url: string;
+  baseRefName: string;
+  headRefName: string;
+  undone?: boolean;
+  rewindMarkerSeq?: number;
+  time: number;
+}
+
+export type RenderMessage = UserMsg | AssistantMsg | ToolMsg | TaskActivityMsg | GithubConflictMsg;
 
 export interface PendingPermission {
   requestId: string;
@@ -338,21 +352,39 @@ function pushTool(m: RenderModel, msg: ToolMsg): void {
 export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
   const d = ev.data;
   switch (ev.type) {
+    case "github/conflict-resolution-started": {
+      const prNumber = num(d, "prNumber");
+      if (prNumber === undefined || !Number.isSafeInteger(prNumber) || prNumber <= 0) break;
+      model.messages.push({
+        kind: "github-conflict",
+        id: ev.id,
+        eventSeq: ev.seq,
+        prNumber,
+        title: str(d, "title") ?? "",
+        url: str(d, "url") ?? "",
+        baseRefName: str(d, "baseRefName") ?? "",
+        headRefName: str(d, "headRefName") ?? "",
+        time: ev.time,
+      });
+      break;
+    }
     case "user/message": {
       const text = str(d, "text") ?? "";
       const raw = str(d, "raw");
-      const msg: UserMsg = { kind: "user", id: ev.id, eventSeq: ev.seq, text, time: ev.time };
-      if (raw !== undefined && raw !== text) msg.raw = raw;
-      // Attachment pills on the message (F2): keep only well-formed refs.
-      const atts = (d as { attachments?: unknown }).attachments;
-      if (Array.isArray(atts)) {
-        const refs = atts.filter((a): a is AttachmentRef =>
-          typeof a === "object" && a !== null
-          && typeof (a as { name?: unknown }).name === "string"
-          && typeof (a as { mime?: unknown }).mime === "string");
-        if (refs.length > 0) msg.attachments = refs;
+      if (d.githubConflictResolution !== true) {
+        const msg: UserMsg = { kind: "user", id: ev.id, eventSeq: ev.seq, text, time: ev.time };
+        if (raw !== undefined && raw !== text) msg.raw = raw;
+        // Attachment pills on the message (F2): keep only well-formed refs.
+        const atts = (d as { attachments?: unknown }).attachments;
+        if (Array.isArray(atts)) {
+          const refs = atts.filter((a): a is AttachmentRef =>
+            typeof a === "object" && a !== null
+            && typeof (a as { name?: unknown }).name === "string"
+            && typeof (a as { mime?: unknown }).mime === "string");
+          if (refs.length > 0) msg.attachments = refs;
+        }
+        model.messages.push(msg);
       }
-      model.messages.push(msg);
       model.changedFiles = [];
       // A child-origin prompt after the fork marker proves the seed was sent
       // (or replaced) — reload must not re-seed the composer.

@@ -140,6 +140,9 @@ export function modelToMarkdown(model: RenderModel): string {
       lines.push(`\nInput:\n\`\`\`json\n${JSON.stringify(m.input, null, 2)}\n\`\`\``);
       if (m.output !== undefined) lines.push(`\nOutput:\n\n${m.output}`);
       if (m.error !== undefined) lines.push(`\nError:\n\n${m.error}`);
+    } else if (m.kind === "github-conflict") {
+      lines.push(`### Fixing merge conflicts for pull request #${m.prNumber}`);
+      lines.push(`\n${m.title}\n\n\`${m.baseRefName} ← ${m.headRefName}\`\n\n${m.url}`);
     } else {
       lines.push(`### Task ${m.action}: ${m.text}`);
     }

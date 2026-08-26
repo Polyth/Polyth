@@ -1,10 +1,30 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { createGithubService, type ExecFn } from "@polyth/github";
+import { buildConflictResolutionPrompt, createGithubService, type ExecFn } from "@polyth/github";
 
 const enoent = (): never => {
   throw Object.assign(new Error("spawn gh ENOENT"), { code: "ENOENT" });
 };
+
+test("buildConflictResolutionPrompt includes PR context, custom instructions, and safety boundaries", () => {
+  const prompt = buildConflictResolutionPrompt({
+    number: 42,
+    title: "Rework session routing",
+    url: "https://github.com/acme/polyth/pull/42",
+    baseRefName: "main",
+    headRefName: "feat/session-routing",
+  }, "Prefer the incoming database migration when both sides changed the schema.");
+
+  assert.match(prompt, /pull request #42/i);
+  assert.match(prompt, /Rework session routing/);
+  assert.match(prompt, /https:\/\/github\.com\/acme\/polyth\/pull\/42/);
+  assert.match(prompt, /Base branch: main/);
+  assert.match(prompt, /Head branch: feat\/session-routing/);
+  assert.match(prompt, /Prefer the incoming database migration/);
+  assert.match(prompt, /Run the relevant tests or checks/);
+  assert.match(prompt, /Commit the completed conflict resolution locally/);
+  assert.match(prompt, /Do not merge the pull request or push any commits without explicit user approval/);
+});
 
 test("fails soft when gh is missing", async () => {
   const svc = createGithubService({ exec: async () => enoent() });

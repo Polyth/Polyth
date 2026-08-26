@@ -6,6 +6,7 @@ import {
 import { highlight, langOf } from "../highlight.ts";
 import { getLocale, tr } from "../i18n/index.ts";
 import { Icon } from "../icons.tsx";
+import { openSession } from "../init.ts";
 import { MarkdownDoc } from "../markdown.tsx";
 import { parsePrDiffLines, splitPrDiff } from "../prDiff.ts";
 import { friendlyError } from "../settings.ts";
@@ -118,6 +119,7 @@ const initials = (name: string): string => name.split(/[\s-]+/).slice(0, 2).map(
 export default function PullRequestView({ number, onClose }: { number: number; onClose: () => void }) {
   const projectId = useStore((state) => state.activeProjectId);
   const sessionId = useStore((state) => state.activeSessionId);
+  const settings = useStore((state) => state.settings);
   const [tab, setTab] = useState<Tab>("overview");
   const [detail, setDetail] = useState<PrDetailDto | null>(null);
   const [files, setFiles] = useState<PrFileDto[]>([]);
@@ -140,6 +142,9 @@ export default function PullRequestView({ number, onClose }: { number: number; o
   const [mergeBusy, setMergeBusy] = useState(false);
   const [mergeMsg, setMergeMsg] = useState("");
   const [mergeFailed, setMergeFailed] = useState(false);
+  const [conflictAgentBusy, setConflictAgentBusy] = useState(false);
+  const [conflictAgentMsg, setConflictAgentMsg] = useState("");
+  const [conflictAgentFailed, setConflictAgentFailed] = useState(false);
   const [editing, setEditing] = useState(false);
   const [editTitle, setEditTitle] = useState("");
   const [editBody, setEditBody] = useState("");
@@ -277,6 +282,44 @@ export default function PullRequestView({ number, onClose }: { number: number; o
     } else {
       setMergeFailed(true);
       setMergeMsg(tr("pullrequestview.mergeFailedValue", { reason: result.reason }));
+    }
+  };
+
+  const startConflictAgent = async () => {
+    if (conflictAgentBusy) return;
+    if (settings.conflictAgentTarget === "current-session" && !sessionId) {
+      setConflictAgentFailed(true);
+      setConflictAgentMsg(tr("pullrequestview.conflictAgentNeedsCurrentSession"));
+      return;
+    }
+    setConflictAgentBusy(true);
+    setConflictAgentMsg("");
+    setConflictAgentFailed(false);
+    try {
+      const result = await api.githubConflictAgent({
+        projectId,
+        number,
+        prompt: settings.conflictAgentPrompt,
+        target: settings.conflictAgentTarget,
+        ...(settings.conflictAgentTarget === "current-session" && sessionId ? { sessionId } : {}),
+      });
+      if (!result.ok) {
+        setConflictAgentFailed(true);
+        setConflictAgentMsg(result.reason);
+        return;
+      }
+      if (
+        settings.conflictAgentTarget === "new-session"
+        || result.data.sessionId !== sessionId
+      ) {
+        await openSession(result.data.sessionId);
+      }
+      setConflictAgentMsg(tr("pullrequestview.conflictAgentStarted"));
+    } catch (cause) {
+      setConflictAgentFailed(true);
+      setConflictAgentMsg(friendlyError(tr("pullrequestview.conflictAgentFailed"), cause));
+    } finally {
+      setConflictAgentBusy(false);
     }
   };
 
@@ -433,6 +476,36 @@ export default function PullRequestView({ number, onClose }: { number: number; o
                 <div className="pr-body markdown-body">
                   {detail.body ? <MarkdownDoc text={stripCursorMarkers(detail.body)} keyBase={`pr-${detail.number}-body`} /> : <p>{tr("pullrequestview.noDescriptionWasProvided")}</p>}
                 </div>
+              )}
+
+              {detail.state === "OPEN" && detail.mergeable === "CONFLICTING" && (
+                <section className="pr-conflict-agent-area">
+                  <div>
+                    <strong>{tr("pullrequestview.fixConflictsWithAgent")}</strong>
+                    <span className="muted">
+                      {tr("settings.pages.conflictAgentTarget")}:{" "}
+                      {settings.conflictAgentTarget === "new-session"
+                        ? tr("settings.pages.newSession")
+                        : tr("settings.pages.currentSession")}
+                    </span>
+                  </div>
+                  <button
+                    className="primary-btn"
+                    disabled={conflictAgentBusy}
+                    onClick={() => void startConflictAgent()}
+                  >
+                    <Icon.pullRequest />
+                    {tr("pullrequestview.fixConflictsWithAgent")}
+                  </button>
+                  {conflictAgentMsg && (
+                    <div
+                      className={conflictAgentFailed ? "form-error" : "knowledge-notice"}
+                      role={conflictAgentFailed ? "alert" : "status"}
+                    >
+                      {conflictAgentMsg}
+                    </div>
+                  )}
+                </section>
               )}
 
               {detail.state === "OPEN" && (

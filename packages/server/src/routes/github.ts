@@ -2,8 +2,22 @@
 // (ok/reason) so missing binary/auth renders honestly. The two write
 // operations (submit review, publish labels) are explicit, confirmed actions —
 // nothing else on the server may write to GitHub.
-import type { JsonObject, ProjectService, SessionEvent } from "@polyth/contracts";
-import { summarizeChecks, type GithubService, type MergeStrategy, type ReviewCommentInput } from "@polyth/github";
+import type {
+  CreateSessionInput,
+  JsonObject,
+  ProjectService,
+  SessionEvent,
+  SessionProjection,
+  SessionRef,
+  UserTurnInput,
+} from "@polyth/contracts";
+import {
+  buildConflictResolutionPrompt,
+  summarizeChecks,
+  type GithubService,
+  type MergeStrategy,
+  type ReviewCommentInput,
+} from "@polyth/github";
 import type { RouteHandler } from "../http.ts";
 
 const MERGE_STRATEGIES = ["squash", "merge", "rebase"] as const;
@@ -13,6 +27,12 @@ export function githubRoutes(deps: {
   github: GithubService;
   /** logs review/submitted and pr/* lifecycle events to the originating session before responding */
   append?: (sessionId: string, type: string, data: JsonObject) => Promise<SessionEvent>;
+  /** Session handoff seam for conflict resolution; optional in minimal deployments. */
+  sessions?: {
+    create: (input: CreateSessionInput) => Promise<SessionRef>;
+    snapshot: (sessionId: string) => Promise<SessionProjection>;
+    send: (sessionId: string, input: UserTurnInput & { githubConflictResolution?: boolean }) => Promise<unknown>;
+  };
   /** F7: small-model PR title+body from `git diff base...HEAD` — wired in boot,
    *  absent in minimal deployments. Never submits anything itself. */
   describe?: (root: string, base?: string) => Promise<{ title: string; body: string }>;
@@ -97,6 +117,73 @@ export function githubRoutes(deps: {
     }
 
     // ---- PR lifecycle (F7): create / update / merge / describe ---------------
+    if (path === "/api/github/pr/conflict-agent" && method === "POST") {
+      const b = await body();
+      const projectId = String(b.projectId ?? "").trim();
+      const root = await rootOf(projectId || null);
+      const number = Number(b.number ?? 0);
+      if (!Number.isSafeInteger(number) || number <= 0) {
+        json(400, { ok: false, reason: "a positive PR number is required" });
+        return true;
+      }
+      const target = String(b.target ?? "");
+      if (target !== "new-session" && target !== "current-session") {
+        json(400, { ok: false, reason: "target must be new-session or current-session" });
+        return true;
+      }
+      if (!deps.sessions || !deps.append) {
+        json(503, { ok: false, reason: "conflict resolution agent handoff is not available on this server" });
+        return true;
+      }
+      const detailResult = await deps.github.prDetail(root, number);
+      if (!detailResult.ok) {
+        json(200, detailResult);
+        return true;
+      }
+      const detail = detailResult.data;
+      if (detail.mergeable !== "CONFLICTING") {
+        json(409, { ok: false, reason: `pull request #${number} is not currently conflicting` });
+        return true;
+      }
+
+      let sessionId: string;
+      if (target === "new-session") {
+        sessionId = (await deps.sessions.create({
+          projectId,
+          title: `PR #${number} conflicts`,
+        })).id;
+      } else {
+        sessionId = String(b.sessionId ?? "").trim();
+        if (!sessionId) {
+          json(400, { ok: false, reason: "sessionId is required for current-session" });
+          return true;
+        }
+        let session: SessionProjection;
+        try {
+          session = await deps.sessions.snapshot(sessionId);
+        } catch {
+          json(404, { ok: false, reason: "target session not found" });
+          return true;
+        }
+        if (session.projectId !== projectId) {
+          json(400, { ok: false, reason: "target session belongs to another project" });
+          return true;
+        }
+      }
+
+      const prompt = buildConflictResolutionPrompt(detail, String(b.prompt ?? ""));
+      await deps.append(sessionId, "github/conflict-resolution-started", {
+        prNumber: detail.number,
+        title: detail.title,
+        url: detail.url,
+        baseRefName: detail.baseRefName,
+        headRefName: detail.headRefName,
+      });
+      await deps.sessions.send(sessionId, { text: prompt, githubConflictResolution: true });
+      json(200, { ok: true, data: { sessionId } });
+      return true;
+    }
+
     if (path === "/api/github/pr/create" && method === "POST") {
       const b = await body();
       const root = await rootOf(b.projectId ? String(b.projectId) : null);
