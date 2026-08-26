@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { register } from "node:module";
 import { Window } from "happy-dom";
 import type { ReactNode } from "react";
-import type { ProviderCatalogDto } from "../src/api.ts";
+import type { ProviderCatalogDto } from "@polyth/session/web-api";
 
 const dom = new Window({ url: "http://127.0.0.1:4400/" });
 Object.assign(globalThis, {
@@ -93,8 +93,17 @@ const { default: Header } = await import("../src/components/Header.tsx");
 const { default: ContextRail } = await import("../src/components/ContextRail.tsx");
 const { default: CommandPalette } = await import("../src/components/CommandPalette.tsx");
 const { default: SessionSearch } = await import("../src/components/SessionSearch.tsx");
-const { default: ModelsPage } = await import("../src/components/settings/ModelsPage.tsx");
+const { default: ModelsPage } = await import("../../../packages/models/widgets/ModelsPage.tsx");
 installBuiltinMiniWidgets();
+const { webPackageHost } = await import("../src/packages/webHost.ts");
+for (const entry of [
+  (await import("../../../packages/files/widgets/index.tsx")).default,
+  (await import("../../../packages/terminal/widgets/index.tsx")).default,
+  (await import("../../../packages/browser/widgets/index.tsx")).default,
+  (await import("../../../packages/goals/widgets/index.tsx")).default,
+]) {
+  entry(webPackageHost)();
+}
 
 async function mounted(component: ReactNode) {
   const container = document.createElement("div");

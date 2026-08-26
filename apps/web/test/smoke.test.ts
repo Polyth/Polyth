@@ -33,7 +33,12 @@ import { PATH_MIME, dragKind, getDragPath, setDragPath } from "../src/dnd.ts";
 import { formatFileChat, formatSelectionChat, lineRangeOf } from "../src/chatclip.ts";
 import { filterPickerItems, type PickerItem } from "../src/picker.ts";
 import { MODEL_PREFS_KEY, parseModelPrefs } from "@polyth/models";
-import { getModelPrefs, noteModelUsed, setModelSort, toggleModelFavorite } from "../src/modelPrefs.ts";
+import {
+  getModelPrefs,
+  noteModelUsed,
+  setModelSort,
+  toggleModelFavorite,
+} from "@polyth/models/web-prefs";
 import {
   UI_DEFAULTS,
   UI_SETTINGS_KEY,
@@ -43,7 +48,7 @@ import {
   parseUiSettings,
   setUiSettings,
 } from "../src/uiPrefs.ts";
-import { normalizeScheduleList } from "../src/scheduleData.ts";
+import { normalizeScheduleList } from "../../../packages/schedule/widgets/scheduleData.ts";
 import { agentPickerDefaultLabel, modelPickerDefaultLabel } from "../src/composerDefaults.ts";
 import { extractChangedFiles, selectPendingChanges } from "../src/pendingChanges.ts";
 import { sessionSurfaceKind, type SurfaceModel } from "../src/sessionSurface.ts";

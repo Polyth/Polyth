@@ -1,0 +1,198 @@
+/* Package-owned schedule web styles. */
+:is(
+  .audit-note,
+  .form-error,
+  .goal-card-objective,
+  .knowledge-snippet,
+  .plugin-log-line,
+  .prompt-echo,
+  .review-finding,
+  .sched-preview-runs,
+  .sched-run-error,
+  .walkthrough-stop-explain
+) {
+min-width: 0;
+  overflow-wrap: anywhere;
+}
+@container feature-panel (max-width: 700px) {
+.sched-form .view-toolbar-row {
+display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    align-items: stretch;
+}
+
+.sched-form .view-toolbar-row > :is(input, select, label, button, .seg) {
+width: 100%; max-width: none;
+}
+}
+:is(
+  .audit-list,
+  .event-list,
+  .gh-list,
+  .knowledge-panel,
+  .mcp-list,
+  .ntc-list,
+  .plugin-card-grid,
+  .provider-list,
+  .sched-runs,
+  .track-steps
+) {
+min-width: 0;
+  overscroll-behavior: contain;
+}
+.loop-error-row {
+display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 2px 0;
+}
+.sched-form {
+display: flex; flex-direction: column; gap: 8px; border: 1px solid var(--hair-strong); border-radius: var(--radius-lg); background: var(--elevated); padding: 14px 16px; box-shadow: var(--inset-hi);
+}
+.sched-form textarea {
+width: 100%; resize: vertical;
+}
+.sched-every {
+display: inline-flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12.5px;
+}
+.sched-card {
+display: flex; gap: 12px; align-items: flex-start; justify-content: space-between;
+  border: 1px solid var(--hair-strong); border-radius: var(--radius-lg); background: var(--elevated); padding: 14px 16px; box-shadow: var(--inset-hi);
+}
+.sched-card.paused {
+opacity: 0.6;
+}
+.sched-card-main {
+min-width: 0; display: flex; flex-direction: column; gap: 4px;
+}
+.sched-prompt {
+font-size: 13.5px; line-height: 1.5; overflow-wrap: anywhere;
+}
+.sched-meta {
+display: flex; flex-wrap: wrap; gap: 6px; color: var(--muted); font-size: 11.5px;
+}
+.sched-actions {
+display: flex; gap: 6px; flex-shrink: 0;
+}
+.sched-preview {
+border: 1px solid var(--hair-strong); border-radius: var(--radius-sm); padding: 9px 11px;
+  background: var(--sunken); display: flex; flex-direction: column; gap: 3px; font-size: 12px;
+}
+.sched-preview-desc {
+color: var(--text);
+}
+.sched-preview-runs {
+color: var(--muted); font-family: var(--mono); font-size: 11.5px;
+}
+.sched-loop-badge {
+display: inline-block; margin-right: 6px; padding: 1px 6px; border-radius: 999px;
+  font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em;
+  color: var(--accent); border: 1px solid var(--accent);
+}
+.sched-runs {
+display: flex; flex-direction: column; gap: 3px; margin-top: 6px;
+}
+.sched-run {
+display: flex; align-items: center; gap: 8px; font-size: 12px;
+}
+.sched-run-dot {
+width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex: none;
+}
+.sched-run-dot.ok {
+background: var(--green);
+}
+.sched-run-dot.failed {
+background: var(--red);
+}
+.sched-run-dot.running {
+background: var(--amber);
+}
+.sched-run-dot.skipped {
+background: var(--muted);
+}
+.sched-run-error {
+color: var(--red); font-size: 11.5px;
+}
+.sched-every-value {
+width: min(100%, 96px);
+}
+.sched-cron-expression {
+width: min(100%, 240px);
+}
+.sched-time-zone {
+max-width: min(100%, 280px);
+}
+.sched-runs-empty .empty-state {
+min-height: 0;
+  padding: 16px;
+}
+.sched-runs-empty .empty-state-title {
+font-size: var(--font-label);
+}
+.sched-card {
+min-width: 0;
+}
+@container feature-panel (max-width: 700px) {
+.sched-form .view-toolbar-row {
+display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    align-items: stretch;
+}
+
+.sched-form .view-toolbar-row > :is(input, select, label, button, .seg),
+.sched-every {
+width: 100%; max-width: none;
+}
+
+.sched-form .seg {
+display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.sched-card {
+align-items: stretch;
+    flex-direction: column;
+    padding: 14px;
+}
+
+.sched-actions {
+display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.sched-actions > button {
+width: 100%;
+}
+
+.sched-run {
+align-items: flex-start; flex-wrap: wrap;
+}
+
+.sched-run-error {
+flex-basis: 100%; padding-left: 16px;
+}
+}
+@container feature-panel (max-width: 420px) {
+.sched-actions {
+grid-template-columns: minmax(0, 1fr);
+}
+}
+@container feature-panel (max-width: 700px) {
+.sched-form .view-toolbar-row {
+display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    align-items: stretch;
+}
+
+.sched-form .view-toolbar-row > :is(input, select, label, button, .seg) {
+width: 100%; max-width: none;
+}
+
+.sched-form .seg {
+display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.sched-card {
+align-items: stretch;
+    flex-direction: column;
+    padding: 14px;
+}
+}

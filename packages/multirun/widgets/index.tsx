@@ -1,0 +1,5 @@
+import "./styles.css";
+import { createElement } from "react";
+import { defineWebPackage } from "@polyth/web-sdk";
+import MultiRunView from "./MultiRunView.tsx";
+export default defineWebPackage((host) => () => { const off = [host.workspaceSurfaces.register({ id: "multirun", title: "Multi-run", order: 21, plugin: "multirun", requires: "project", component: () => createElement(MultiRunView) }), host.capabilities.register({ id: "multirun", label: "Compare responses", plainDescription: "Ask several models and compare their responses.", keywords: ["multirun"], standardTier: "more", standardRank: 10, open: () => host.navigation.setActiveView("multirun"), available: () => true }), host.widgets.registerPlugin({ id: "multirun", name: "Multi-run", widgets: [{ id: "multirun.main", title: "Multi-run", description: "Ask several models and compare their responses.", defaultSlot: "workspace.main", supportedSlots: ["workspace.main", "workspace.bottom"], defaultSize: { w: 12, h: 6 }, render: () => createElement(MultiRunView) }] })]; return () => off.toReversed().forEach((dispose) => dispose()); });

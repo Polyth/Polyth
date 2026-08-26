@@ -22,7 +22,7 @@ export {
   mappolythUsage,
 } from "./providers/index.ts";
 export type { QuotaDiscoveryOptions, QuotaDiscoveryPaths } from "./providers/index.ts";
-export { USAGE_WIDGETS } from "../widgets/index.ts";
+export { USAGE_WIDGETS } from "../widgets/catalog.ts";
 
 export interface QuotaProvider {
   id: string;

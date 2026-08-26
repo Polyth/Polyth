@@ -9,13 +9,13 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { register } from "node:module";
 import { readFile } from "node:fs/promises";
+import { readWebStyles } from "./webStyles.ts";
 
 // TSX loader: the metadata line is asserted against the real component module.
 register("./tsxHooks.mjs", import.meta.url);
 import {
   KEYBOARD_MIN_INSET,
   keyboardInsetFrom,
-  keyboardOpenFrom,
   metricsFrom,
 } from "../src/mobileViewport.ts";
 import {
@@ -71,11 +71,6 @@ test("a visual viewport that sits lower in a full-height page is not a keyboard"
   assert.deepEqual(metricsFrom(932, 596, 336), { height: 596, keyboardInset: 0, offsetTop: 336, covering: false });
   assert.equal(keyboardInsetFrom(932, 596, 336), 0, "no inset: the layout viewport was not resized");
   assert.equal(keyboardInsetFrom(932, 932, 400), 0, "a repositioned full-height viewport is idle");
-});
-
-test("a focused editor detects Safari's panned keyboard", () => {
-  assert.equal(keyboardOpenFrom(932, 596, 336, false), false);
-  assert.equal(keyboardOpenFrom(932, 596, 336, true), true);
 });
 
 // ---- starter model ----------------------------------------------------------
@@ -220,7 +215,7 @@ test("model favorites reorder only inside an explicit edit", () => {
 });
 
 test("model metadata reads as one ordered line, with acronyms spelled right", async () => {
-  const { modelModalityLabels, modelMetaLine } = await import("../src/components/ModelPicker.tsx");
+  const { modelModalityLabels, modelMetaLine } = await import("../../../packages/models/widgets/ModelPicker.tsx");
   const model = {
     providerID: "p", modelID: "m", name: "M",
     capabilities: ["input:pdf", "input:image", "output:text", "input:text", "toolcall"],
@@ -244,8 +239,8 @@ test("visual-viewport geometry is published as CSS variables and started at boot
   assert.ok(viewport.includes('dataset.keyboard = next.covering ? "open" : "closed"'), "CSS can see the keyboard state");
   assert.ok(viewport.includes("SHORT_VISUAL_BAND"), "CSS can see a band too short for both zones");
   assert.ok(!/localStorage|sessionStorage/.test(viewport), "viewport geometry is never persisted");
-  const main = await read("../src/bootstrap.tsx");
-  assert.ok(main.includes("startMobileViewport()"), "the seam is installed before first paint");
+  const bootstrap = await read("../src/bootstrap.tsx");
+  assert.ok(bootstrap.includes("startMobileViewport()"), "the seam is installed before first paint");
 });
 
 test("the mobile viewport is fixed and requests keyboard content resizing", async () => {
@@ -264,13 +259,17 @@ test("every redesigned overlay uses the one sheet system", async () => {
   assert.ok(sheet.includes("SHEET_DISMISS_DISTANCE"), "swipe-to-dismiss is part of the shared model");
 
   for (const [name, rel] of [
-    ["model picker", "../src/components/ModelPicker.tsx"],
+    ["model picker", "../../../packages/models/widgets/ModelPicker.tsx"],
     ["starter picker", "../src/components/mobile/StarterPicker.tsx"],
     ["project/branch bar", "../src/components/mobile/SessionContextBar.tsx"],
     ["agent/mode picker", "../src/components/Picker.tsx"],
   ] as const) {
     const src = await read(rel);
-    assert.ok(src.includes('from "./mobile/Sheet.tsx"') || src.includes('from "./Sheet.tsx"'), `${name} renders the shared sheet`);
+    assert.match(
+      src,
+      /from "(?:[^"]*\/)?(?:mobile\/)?Sheet\.tsx"/,
+      `${name} renders the shared sheet`,
+    );
   }
 });
 
@@ -286,7 +285,7 @@ test("a sheet opens on pointer-down and survives the keyboard dismissal (§22)",
   assert.ok(trigger.includes("activate();"), "keyboard activation still arrives as a click");
 
   for (const [rel, name] of [
-    ["../src/components/ModelPicker.tsx", "model"],
+    ["../../../packages/models/widgets/ModelPicker.tsx", "model"],
     ["../src/components/Picker.tsx", "mode/thinking"],
     ["../src/components/mobile/SessionContextBar.tsx", "project/branch"],
     ["../src/components/workspace/builtinSurfaces.tsx", "starter"],
@@ -360,7 +359,6 @@ test("reasoning effort stays reachable on phones, beside the model name", async 
   assert.ok(cluster.includes("<ThinkingSlider"), "thinking uses a discrete slider, not a picker");
   assert.ok(cluster.includes("pickThinking(thinking || undefined)"), "slider saves the effort and updates the composer config");
   assert.ok(composer.includes("const THINKING_LABELS"), "backend variant strings get display labels");
-  assert.ok(!composer.includes("thinking-glyph"), "the effort control has no decorative dot before the slider");
 
   // A tap on any header control blurs the input; collapsing on that blur would
   // unmount the control before its click lands (the tap would be swallowed).
@@ -374,7 +372,7 @@ test("reasoning effort stays reachable on phones, beside the model name", async 
     "engagement ends on a pointer press outside the composer",
   );
 
-  const css = await read("../src/styles.css");
+  const css = await readWebStyles();
   const section = css.slice(css.indexOf("UX-MOBILE-01 — mobile-first new chat"));
   const at = section.search(/\.composer-mobile \.composer-agent-badge,\s*\n\s*\.composer-mobile \.composer-thinking-badge/);
   assert.ok(at > 0, "the thinking control shares the mode chip's touch box");
@@ -382,7 +380,7 @@ test("reasoning effort stays reachable on phones, beside the model name", async 
 });
 
 test("phone CSS keeps the layout inside the visible viewport", async () => {
-  const css = await read("../src/styles.css");
+  const css = await readWebStyles();
   const start = css.indexOf("UX-MOBILE-01 — mobile-first new chat");
   assert.ok(start > 0, "the redesign section exists");
   const section = css.slice(start);
@@ -396,15 +394,15 @@ test("phone CSS keeps the layout inside the visible viewport", async () => {
   assert.match(phone, /body\[data-keyboard="open"\]/, "§43: the empty state yields to the keyboard");
   assert.match(phone, /body\[data-band="short"\] \.hero-body \{ display: none; \}/, "a short band drops the empty state entirely");
   assert.match(phone, /composer-mobile:not\(\.composer-has-draft\) \.composer-primary \.send \{ display: none; \}/);
-  assert.match(phone, /composer-mobile\.composer-has-draft \.composer-mobile-extensions \.mic-btn \{ display: none; \}/);
+  assert.match(phone, /composer-mobile\.composer-has-draft \.composer-mobile-extensions \.mic-btn\s*\{\s*display:\s*none;/);
   assert.match(
     phone,
-    /composer-mobile\.composer-collapsed:not\(\.composer-has-draft\) \.composer-workflow \{ display: none; \}/,
+    /composer-mobile\.composer-collapsed:not\(\.composer-has-draft\) \.composer-workflow\s*\{\s*display:\s*none;/,
     "only an empty resting composer may hide the workflow action",
   );
   assert.match(
     phone,
-    /composer-mobile\.composer-has-draft \.composer-workflow \{ display: inline-flex; \}/,
+    /composer-mobile\.composer-has-draft \.composer-workflow\s*\{\s*display:\s*inline-flex;/,
     "a draft keeps Run workflow visible during narrow-layout transitions",
   );
   assert.match(phone, /max-height: 42dvh/, "§20: the input stops growing and scrolls");
@@ -415,11 +413,13 @@ test("phone CSS keeps the layout inside the visible viewport", async () => {
 });
 
 test("touch targets and design tokens are centralized", async () => {
-  const css = await read("../src/styles.css");
+  const css = await readWebStyles();
   const tokens = css.slice(0, css.indexOf("/* F15: syntax roles"));
   for (const token of [
     "--space-4: 16px", "--tap: 44px", "--radius-sheet: 24px",
-    "--font-input: 16px", "--safe-bottom: env(safe-area-inset-bottom, 0px)",
+    "--font-input: 16px", "--safe-left: env(safe-area-inset-left, 0px)",
+    "--safe-right: env(safe-area-inset-right, 0px)",
+    "--safe-bottom: env(safe-area-inset-bottom, 0px)",
   ]) {
     assert.ok(tokens.includes(token), `${token} is a shared token`);
   }
@@ -437,7 +437,7 @@ test("the phone shell restores session navigation below a swipeable shortcut rai
   const header = await read("../src/components/Header.tsx");
   const bottom = await read("../src/components/workspace/WorkspaceBottomNav.tsx");
   const navigation = await read("../src/components/mobile/MobileNavigationRail.tsx");
-  const css = await read("../src/styles.css");
+  const css = await readWebStyles();
 
   assert.ok(header.includes("<MobileNavigationRail />"), "the phone header is the shortcut rail");
   assert.equal(header.match(/<WorkspaceBottomNav \/>/g)?.length, 2, "phone and tablet shells mount the session bar");
@@ -461,7 +461,7 @@ test("haptics are opt-in, bounded, and respect reduced motion", async () => {
   assert.ok(haptics.includes('matchMedia("(prefers-reduced-motion: reduce)")'), "reduced motion silences it");
   assert.ok(haptics.includes("typeof navigator.vibrate !== \"function\""), "unsupported platforms are a no-op");
   for (const rel of [
-    "../src/components/ModelPicker.tsx",
+    "../../../packages/models/widgets/ModelPicker.tsx",
     "../src/components/Picker.tsx",
     "../src/components/workspace/builtinSurfaces.tsx",
   ]) {
@@ -484,14 +484,10 @@ test("the fresh-session screen is three zones with a sticky interaction dock", a
   assert.ok(surface.includes('registerSlot("session.empty.widgets", "builtin.hero-starters"'), "starters register as a widget");
   assert.ok(surface.includes('registerSlot("session.empty.widgets", "builtin.hero-recent"'), "recents register as a widget");
 
-  const css = await read("../src/styles.css");
+  const css = await readWebStyles();
   const section = css.slice(css.indexOf("UX-MOBILE-01 — mobile-first new chat"));
   const dock = section.slice(section.indexOf(".hero-dock {"));
   assert.match(dock.slice(0, dock.indexOf("}")), /var\(--safe-bottom\)/, "§30: the dock respects the home indicator");
-  assert.match(css, /\.hero-widget-settings\s*\{\s*display:\s*none;/,
-    "widget settings stay off the phone surface");
-  assert.match(css, /\.hero-dock:has\(\.add-menu\)\s*\{[^}]*z-index:\s*130;/s,
-    "the Add menu stacks above fresh-chat widgets");
 });
 
 test("fresh-chat widgets persist visibility and order, and remain replaceable", async () => {

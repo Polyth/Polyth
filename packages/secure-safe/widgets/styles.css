@@ -1,0 +1,130 @@
+/* Package-owned secure-safe web styles. */
+.settings-pane-body :is(
+  .set-row,
+  .set-row-text,
+  .set-row-control,
+  .set-add-form,
+  .mcp-form,
+  .mcp-form-row,
+  .plugin-library,
+  .provider-card,
+  .secure-safe-form,
+  .ha-settings
+) {
+min-width: 0;
+}
+.secure-safe-card {
+border-top: 1px solid color-mix(in srgb, var(--green) 45%, var(--border));
+  background: color-mix(in srgb, var(--elevated) 88%, var(--green));
+  padding: 12px var(--gutter);
+  display: flex; flex-direction: column; gap: 10px;
+}
+.secure-safe-title {
+color: var(--green); font-weight: 600; font-size: 12.5px;
+}
+.secure-safe-request {
+display: grid; grid-template-columns: minmax(180px, 1fr) minmax(240px, 1.5fr) auto;
+  align-items: end; gap: 12px;
+  padding: 10px 12px; border: 1px solid var(--hair-strong);
+  border-radius: var(--radius-lg); background: var(--elevated);
+}
+.secure-safe-details {
+display: flex; flex-direction: column; gap: 4px; min-width: 0;
+}
+.secure-safe-details > div {
+display: flex; align-items: baseline; gap: 8px; font-size: 12px;
+}
+.secure-safe-details span,
+.secure-safe-value > span {
+color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: 0.04em;
+}
+.secure-safe-details strong,
+.secure-safe-details code,
+.secure-safe-details p {
+overflow-wrap: anywhere; margin: 0;
+}
+.secure-safe-existing {
+color: var(--amber); font-weight: 600;
+}
+.secure-safe-value {
+display: flex; flex-direction: column; gap: 5px; min-width: 0;
+}
+.secure-safe-value input {
+width: 100%; min-width: 180px; background: var(--sunken); color: var(--text);
+  border: 1px solid var(--border); border-radius: calc(7px * var(--corner-radius-scale)); padding: 7px 9px;
+}
+.secure-safe-value input:focus {
+border-color: var(--accent); outline: none;
+}
+.secure-safe-actions {
+display: flex; gap: 6px; white-space: nowrap;
+}
+.secure-safe-actions .primary {
+font-weight: 600;
+}
+.secure-safe-note {
+padding: 10px 12px; margin-bottom: 14px; border: 1px solid var(--accent-line);
+  border-radius: var(--radius-lg); background: color-mix(in srgb, var(--accent) 7%, var(--sunken));
+  color: var(--muted); font-size: 12.5px; line-height: 1.5;
+}
+.secure-safe-settings-list {
+display: flex; flex-direction: column; gap: 4px;
+}
+.secure-safe-form {
+display: flex; flex-direction: column; gap: 9px; margin-top: 16px; padding: 12px;
+  border: 1px dashed var(--border); border-radius: var(--radius-lg); background: var(--sunken);
+}
+.secure-safe-form-row {
+display: grid; grid-template-columns: 1fr 1fr; gap: 9px;
+}
+.secure-safe-form label {
+display: flex; flex-direction: column; gap: 4px; color: var(--muted); font-size: 11.5px;
+}
+.secure-safe-form input {
+width: 100%; background: var(--elevated); color: var(--text); border: 1px solid var(--border);
+  border-radius: calc(7px * var(--corner-radius-scale)); padding: 7px 9px; font-size: 12.5px;
+}
+.secure-safe-form input:focus {
+border-color: var(--accent); outline: none;
+}
+.secure-safe-form-actions {
+display: flex; align-items: center; gap: 9px;
+}
+@media (max-width: 760px) {
+.secure-safe-request {
+grid-template-columns: 1fr; align-items: stretch;
+}
+
+.secure-safe-actions {
+justify-content: flex-end;
+}
+
+.secure-safe-form-row {
+grid-template-columns: 1fr;
+}
+
+.secure-safe-form-actions {
+align-items: flex-start; flex-direction: column;
+}
+}
+@media (max-width: 700px) {
+.secure-safe-form-actions {
+align-items: stretch;
+    flex-direction: column;
+}
+}
+@container feature-panel (max-width: 700px) {
+.settings-pane-body .secure-safe-form-actions {
+align-items: stretch;
+    flex-direction: column;
+}
+
+.settings-pane-body .secure-safe-form-actions > button {
+width: 100%;
+    max-width: none;
+}
+
+.secure-safe-form-row {
+grid-template-columns: minmax(0, 1fr);
+}
+}

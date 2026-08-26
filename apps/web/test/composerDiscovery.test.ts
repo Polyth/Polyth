@@ -1,10 +1,10 @@
 // UX-COMPOSER-DISC pure gates: four-state catalog truth, safe token
 // insertion, stable autocomplete ids + honest status copy, contract-bounded
-// model detail, GitHub link classification, and the per-session execution
-// configuration record. DOM-free (localStorage shimmed).
+// model detail, and the per-session execution configuration record.
+// DOM-free (localStorage shimmed).
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import type { SlashCommand, SnippetDef, StrictListResult } from "../src/api.ts";
+import type { SlashCommand, SnippetDef, StrictListResult } from "@polyth/session/web-api";
 import { tr } from "../src/i18n/index.ts";
 
 const mem = new Map<string, string>();
@@ -22,7 +22,6 @@ const {
   planSigilInsert, snippetAutocomplete,
 } = await import("../src/composer/discovery.ts");
 const { activeToken, composerMode } = await import("../src/composer/language.ts");
-const { classifyGithubAttach, parseGithubUrl } = await import("../src/attachments.ts");
 const {
   configEquals, consumeComposerConfig, emptyComposerConfig, isDefaultComposerConfig,
   loadComposerConfig, parseComposerConfig, saveComposerConfig, serializeComposerConfig,
@@ -259,29 +258,6 @@ test("text workflows reject reported non-text modalities and distinguish duplica
   assert.equal(modelDisplayName(catalog[0]!, catalog), "Nano Banana · google/nano-v1");
   assert.equal(modelDisplayName(catalog[1]!, catalog), "nano   banana · vertex/nano-v2-preview");
   assert.equal(modelDisplayName(catalog[2]!, catalog), "GPT");
-});
-
-// ---------------------------------------------------------------- GitHub links
-
-test("github classification separates invalid, no-repo, mismatch, failure, and match", () => {
-  const repo = { ok: true as const, repo: { owner: "acme", name: "app" } };
-  assert.equal(classifyGithubAttach(null, repo).code, "invalid-url");
-  const issue = parseGithubUrl("https://github.com/acme/app/issues/12");
-  const pr = parseGithubUrl("https://github.com/acme/app/pull/9");
-  assert.ok(issue && pr);
-  assert.equal(classifyGithubAttach(issue, repo).code, "ok");
-  assert.equal(classifyGithubAttach(pr, repo).code, "ok");
-  const other = parseGithubUrl("https://github.com/oss/lib/issues/3");
-  const mismatch = classifyGithubAttach(other!, repo);
-  assert.equal(mismatch.code, "repo-mismatch");
-  assert.match(mismatch.code === "repo-mismatch" ? mismatch.reason : "", /oss\/lib/);
-  const noRepo = classifyGithubAttach(issue!, { ok: true, repo: null });
-  assert.equal(noRepo.code, "no-repo");
-  const failed = classifyGithubAttach(issue!, { ok: false, reason: "socket hang up" });
-  assert.equal(failed.code, "request-failed");
-  assert.match(failed.code === "request-failed" ? failed.reason : "", /socket hang up/);
-  // a probe failure is never conflated with a mismatch or missing repo
-  assert.notEqual(failed.code, noRepo.code);
 });
 
 // ---------------------------------------------------------------- configuration

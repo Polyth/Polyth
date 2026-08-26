@@ -1157,7 +1157,10 @@ export function ensureWidgets(definitions: readonly WidgetLayoutDefinition[]): v
       changed = true;
     }
   }
-  if (changed) commit({ ...state, zones, slotPlacements, widgets }, false);
+  // Definitions can arrive after project layout hydration through a package
+  // webEntry. Persist required-visibility repairs immediately so a stale
+  // hidden control cannot return on reload before the debounce fires.
+  if (changed) commit({ ...state, zones, slotPlacements, widgets }, false, true);
 }
 
 export function resetWidgetLayout(

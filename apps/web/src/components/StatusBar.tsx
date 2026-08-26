@@ -2,14 +2,14 @@ import { Fragment, useEffect, useState } from "react";
 import type { WorkflowRunDto } from "@polyth/contracts";
 import { setActiveView, useStore, type AppView } from "../store.ts";
 import { isWorkspaceSurface, listSurfaces } from "../surfaces.ts";
-import { api } from "../api.ts";
+import { api } from "@polyth/session/web-api";
 import {
   prioritizeWorkflowRuns,
   workflowFinishedCount,
   workflowHumanWait,
-} from "../workflowRun.ts";
-import { handOffWorkflowLaunch } from "../workflowLaunch.ts";
-import { subscribeWorkflowRuns } from "../workflowMonitor.ts";
+} from "../../../../packages/workflow/widgets/workflowRun.ts";
+import { handOffWorkflowLaunch } from "../../../../packages/workflow/widgets/workflowLaunch.ts";
+import { subscribeWorkflowRuns } from "../../../../packages/workflow/widgets/workflowMonitor.ts";
 import { tr } from "../i18n/index.ts";
 
 // UX-PANE-MODEL: Files/Git/Terminal/Preview are workspace panes beside Chat,

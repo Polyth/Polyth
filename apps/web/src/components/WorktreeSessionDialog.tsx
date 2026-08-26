@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { api, type GitBranches, type Worktree } from "../api.ts";
+import { api, type GitBranches, type Worktree } from "@polyth/session/web-api";
 import { setOverlay, setSidebarOpen, startNewSession, useStore } from "../store.ts";
 import { friendlyError } from "../settings.ts";
 import { randomWorktreeSlug, suggestWorktreeBranch } from "../worktreeSessions.ts";

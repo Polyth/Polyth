@@ -39,7 +39,9 @@ Object.defineProperty(dom, "matchMedia", {
       ? { installed: false, authenticated: false, user: null }
       : url === "/api/packages"
         ? { packages: [{ id: "models", name: "Providers & Models", description: "Model configuration.", core: true, enabled: true, hasSettings: true }] }
-      : [];
+        : url === "/web-packages/manifest.json"
+          ? { packages: [] }
+          : [];
   return {
     ok: true,
     status: 200,
@@ -62,7 +64,9 @@ const { default: Header } = await import("../src/components/Header.tsx");
 const { default: ContextRail } = await import("../src/components/ContextRail.tsx");
 const { default: SettingsModal } = await import("../src/components/SettingsModal.tsx");
 const { installNotificationCentre } = await import("../src/components/NotificationCentre.tsx");
-const { bootPackages } = await import("../src/packages/registry.ts");
+const { webPackageHost } = await import("../src/packages/webHost.ts");
+const { default: installFilesPackage } = await import("../../../packages/files/widgets/index.tsx");
+const { default: installBrowserPackage } = await import("../../../packages/browser/widgets/index.tsx");
 const { closePackageTour } = await import("../src/packages/onboarding/controller.ts");
 
 function MountedShell() {
@@ -86,7 +90,8 @@ function MountedShell() {
 
 test("mobile app header focuses workspace destinations without escaping a destination modal", async () => {
   installNotificationCentre();
-  await bootPackages();
+  installFilesPackage(webPackageHost)();
+  installBrowserPackage(webPackageHost)();
   applyProjectUpsert({ id: "p1", name: "Project one", path: "/workspace", createdAt: Date.now() });
   activateProject("p1");
   setActiveView("session");

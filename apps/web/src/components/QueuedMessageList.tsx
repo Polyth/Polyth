@@ -2,7 +2,7 @@
 // in the main composer, which keeps the queued item's original position.
 import { type DragEvent as ReactDragEvent, useCallback, useEffect, useState } from "react";
 import type { QueueItemDto } from "@polyth/contracts";
-import { api } from "../api.ts";
+import { api } from "@polyth/session/web-api";
 import { useStore } from "../store.ts";
 import { announce } from "./a11y/live.tsx";
 import { tr } from "../i18n/index.ts";

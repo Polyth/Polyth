@@ -1,5 +1,5 @@
 import type { JsonObject } from "@polyth/contracts";
-import type { GitStatus } from "./api.ts";
+import type { GitStatus } from "@polyth/session/web-api";
 
 const WRITE_TOOL = /(^|[./:_-])(apply[_-]?patch|create[_-]?file|delete[_-]?file|edit|multiedit|patch|write)([./:_-]|$)/i;
 const PATH_KEY = /^(changedFiles|file|filePath|filename|files|path|paths|target)$/i;

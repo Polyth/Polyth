@@ -1,6 +1,6 @@
 import { useEffect, useSyncExternalStore } from "react";
 import type { OpenCodePendingResponseDto } from "@polyth/contracts";
-import { api } from "./api.ts";
+import { api } from "@polyth/session/web-api";
 
 const EMPTY: OpenCodePendingResponseDto = { changes: [], count: 0 };
 let snapshot = EMPTY;

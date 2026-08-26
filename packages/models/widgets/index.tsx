@@ -1,0 +1,4 @@
+import "./styles.css";
+import { defineWebPackage } from "@polyth/web-sdk";
+import ModelsPage from "./ModelsPage.tsx";
+export default defineWebPackage((host) => () => { const off = [host.settings.registerPage({ id: "models", packageId: "models", label: "Providers & Models", group: "Engineering", icon: "◈", order: 20, component: ModelsPage }), host.capabilities.register({ id: "models-agents", label: "Models & agents", plainDescription: "Choose which model and agent Polyth uses.", keywords: ["model", "agent", "profile", "provider"], standardTier: "technical", standardRank: 32, open: () => host.navigation.openSettingsPage("models"), available: () => true })]; return () => off.toReversed().forEach((dispose) => dispose()); });

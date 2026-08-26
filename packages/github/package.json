@@ -1,1 +1,35 @@
-{"name":"@polyth/github","version":"0.1.0","type":"module","exports":{".":"./src/index.ts","./i18n":"./src/i18n/index.ts","./i18n/*":"./src/i18n/*.ts"},"polyth":{"serverEntry":"./src/serverEntry.ts"},"dependencies":{"@polyth/contracts":"0.1.0","@polyth/git":"0.1.0","@polyth/plugins":"0.1.0"}}
+{
+  "name": "@polyth/github",
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./attachments": "./widgets/attachments.ts",
+    "./i18n": "./src/i18n/index.ts",
+    "./widgets": "./widgets/index.tsx",
+    "./i18n/*": "./src/i18n/*.ts"
+  },
+  "polyth": {
+    "serverEntry": "./src/serverEntry.ts",
+    "webEntry": "./widgets/index.tsx",
+    "descriptor": {
+      "name": "GitHub",
+      "description": "GitHub pull request and check integration.",
+      "core": false,
+      "enabled": true,
+      "settingsGroup": "Engineering",
+      "icon": "⎇",
+      "hasSettings": false
+    }
+  },
+  "dependencies": {
+    "@polyth/contracts": "0.1.0",
+    "@polyth/git": "0.1.0",
+    "@polyth/plugins": "0.1.0",
+    "@polyth/session": "0.1.0",
+    "@polyth/web-sdk": "0.1.0"
+  },
+  "peerDependencies": {
+    "react": "^19.0.0"
+  }
+}

@@ -1,0 +1,194 @@
+/* Package-owned permissions web styles. */
+.perm-banner {
+border-top: 1px solid var(--accent-line);
+  background: color-mix(in srgb, var(--elevated) 82%, var(--amber));
+  padding: 12px var(--gutter);
+  display: flex; flex-direction: column; gap: 8px;
+}
+.perm-banner .perm-title {
+color: var(--amber); font-weight: 600; font-size: 12.5px;
+}
+.perm-row {
+display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+}
+.perm-desc {
+font-family: var(--mono); font-size: 12.5px;
+}
+.perm-patterns {
+display: flex; gap: 4px; flex-wrap: wrap;
+}
+.perm-actions {
+margin-left: auto; display: flex; gap: 6px;
+}
+.perm-actions .danger {
+color: var(--red);
+}
+.permission-mode-icon {
+margin-right: 6px; vertical-align: -2px; opacity: 0.85;
+}
+.permission-risk {
+margin-left: 8px; padding: 1px 6px; border-radius: calc(8px * var(--corner-radius-scale));
+  font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.04em;
+}
+.permission-risk.risk-low {
+background: color-mix(in srgb, var(--green) 18%, transparent); color: var(--green-on-wash);
+}
+.permission-risk.risk-medium {
+background: color-mix(in srgb, var(--amber) 18%, transparent); color: var(--amber-on-wash);
+}
+.permission-risk.risk-high {
+background: color-mix(in srgb, var(--red) 20%, transparent); color: var(--red);
+}
+.permission-preview {
+display: flex; flex-direction: column; gap: 2px;
+  font-family: var(--mono); font-size: 12px; max-width: 100%; overflow: hidden;
+}
+.permission-preview code {
+white-space: pre-wrap; word-break: break-all;
+}
+.perm-always {
+display: inline-flex; align-items: center; gap: 4px;
+}
+.perm-always select {
+font-size: 12px;
+}
+.auto-accept-chip {
+display: inline-flex; align-items: center; gap: 5px; flex: none;
+  padding: 4px 9px; font-size: 11.5px; font-weight: 650;
+  color: var(--muted); background: transparent;
+  border: 1px solid var(--border-soft); border-radius: 999px;
+  cursor: pointer; white-space: nowrap;
+}
+.auto-accept-chip:hover {
+color: var(--text); border-color: var(--border);
+}
+.auto-accept-chip.on {
+color: var(--amber, var(--accent)); border-color: currentColor;
+  background: color-mix(in srgb, currentColor 12%, transparent);
+  animation: auto-accept-pulse 2.4s ease-in-out infinite;
+}
+@media (max-width: 820px) {
+.auto-accept-chip {
+min-height: 44px;
+}
+}
+@media (max-width: 480px), (max-height: 480px) and (pointer: coarse) {
+.auto-accept-chip {
+width: 44px; height: 44px; min-width: 44px; padding: 0; justify-content: center;
+}
+
+.auto-accept-chip svg {
+width: 16px; height: 16px;
+}
+
+.auto-accept-chip .auto-accept-text {
+display: none;
+}
+}
+html[dir="rtl"] .perm-actions {
+margin-left: 0;
+  margin-right: auto;
+}
+.composer .composer-mobile-extensions .composer-auto-approve.on {
+color: var(--green);
+  background: color-mix(in srgb, var(--green) 11%, transparent);
+}
+.composer-auto-approve > svg {
+width: 20px; height: 20px;
+}
+@media (max-width: 480px), (max-height: 480px) and (pointer: coarse) {
+.composer-mobile.composer-collapsed:not(.composer-has-draft) .composer-auto-approve {
+display: none;
+}
+
+.composer-mobile .composer-auto-approve {
+width: var(--tap);
+    min-width: var(--tap);
+    height: var(--tap);
+    min-height: var(--tap);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    border: 0;
+    border-radius: var(--radius-control);
+    background: transparent;
+    color: var(--muted);
+}
+
+.composer-mobile .composer-auto-approve:active,
+.composer-mobile .composer-auto-approve:focus-visible {
+color: var(--text);
+    background: color-mix(in srgb, var(--text) 8%, transparent);
+}
+
+.composer-mobile .composer-auto-approve.on {
+color: var(--green);
+    background: color-mix(in srgb, var(--green) 11%, transparent);
+}
+}
+.composer-auto-approve > svg {
+transform: none;
+}
+.permission-toast {
+min-width: 0;
+  max-width: 100%;
+}
+.permission-toast {
+max-height: min(62dvh, 520px);
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+.permission-preview,
+.perm-patterns {
+min-width: 0;
+  max-width: 100%;
+  overflow-x: auto;
+  overscroll-behavior-inline: contain;
+}
+.permission-preview code,
+.perm-patterns code {
+overflow-wrap: anywhere;
+}
+@media (max-width: 700px), (pointer: coarse) {
+.permission-toast {
+padding-inline: 14px;
+}
+
+.perm-row {
+align-items: stretch; flex-direction: column;
+}
+
+.perm-desc {
+overflow-wrap: anywhere;
+}
+
+.perm-actions {
+width: 100%;
+    margin-left: 0;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.perm-actions > button,
+.perm-actions .perm-always,
+.perm-actions .perm-always > :is(button, select) {
+min-width: var(--tap);
+    min-height: var(--tap);
+}
+
+.perm-actions > button,
+.perm-actions .perm-always {
+width: 100%;
+}
+
+.perm-always {
+grid-column: 1 / -1;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+}
+
+.perm-always > :is(button, select) {
+width: 100%; font-size: var(--font-input);
+}
+}

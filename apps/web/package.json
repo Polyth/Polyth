@@ -1,1 +1,9 @@
-{"name":"@polyth/web","version":"0.1.0","type":"module"}
+{
+  "name": "@polyth/web",
+  "version": "0.1.0",
+  "type": "module",
+  "dependencies": {
+    "@polyth/session": "0.1.0",
+    "@polyth/web-sdk": "0.1.0"
+  }
+}

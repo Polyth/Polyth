@@ -21,7 +21,23 @@ const writePackage = (
 ): string => {
   const dir = join(packagesDir, dirName);
   mkdirSync(dir, { recursive: true });
-  writeFileSync(join(dir, "package.json"), JSON.stringify(manifest));
+  const polyth = manifest.polyth as Record<string, unknown> | undefined;
+  const withDescriptor = polyth?.serverEntry !== undefined && polyth.descriptor === undefined
+    ? {
+        ...manifest,
+        polyth: {
+          ...polyth,
+          descriptor: {
+            name: dirName,
+            description: `${dirName} test package`,
+            core: false,
+            enabled: true,
+            hasSettings: false,
+          },
+        },
+      }
+    : manifest;
+  writeFileSync(join(dir, "package.json"), JSON.stringify(withDescriptor));
   if (entrySource !== undefined) writeFileSync(join(dir, "server.mjs"), entrySource);
   return dir;
 };
@@ -51,6 +67,7 @@ test("discovery collects only packages with a polyth.serverEntry marker, sorted 
   assert.deepEqual(discovered.map((d) => d.id), ["alpha", "zeta"]);
   assert.deepEqual(discovered.map((d) => d.packageName), ["@polyth/alpha", "@polyth/zeta"]);
   assert.equal(discovered[0]!.entryPath, "./server.mjs");
+  assert.equal(discovered[0]!.descriptor.name, "alpha");
 });
 
 test("discovery rejects marked infrastructure packages and invalid entry paths", async () => {

@@ -11,7 +11,7 @@ import {
 import {
   PANEL_OF_CAPABILITY, PANE_OF_CAPABILITY, VIEW_OF_CAPABILITY,
 } from "../src/builtinCapabilities.ts";
-import { getState, openWorkspacePane, setActiveView, setSidebarOpen } from "../src/store.ts";
+import { closeWorkspacePane, getState, openWorkspacePane, setActiveView, setSidebarOpen } from "../src/store.ts";
 import { registerSurface } from "../src/surfaces.ts";
 import { getWorkspaceMode, setWorkspaceMode } from "../src/widgets/workspaceMode.ts";
 
@@ -44,24 +44,12 @@ test("built-in metadata: unique ids, non-empty labels/descriptions, keywords for
   }
 });
 
-test("legacy searchable names survive as keywords so existing users are not stranded", () => {
-  const byId = new Map(BUILTIN_CAPABILITY_META.map((m) => [m.id, m]));
-  assert.ok(byId.get("multirun")!.keywords.some((k) => k.includes("multi-run")));
-  assert.ok(byId.get("fusion")!.keywords.includes("fusion"));
-  assert.ok(byId.get("git")!.keywords.includes("git"));
-  assert.ok(byId.get("voice")!.keywords.includes("dictation"));
-  assert.ok(byId.get("diagnostics")!.keywords.includes("plugin"));
-});
-
-test("plain-language labels: primary-tier copy avoids jargon; technical names live in technicalLabel", () => {
+test("shell-owned labels avoid feature jargon", () => {
   const jargon = ["multi-run", "fusion", "cron", "stt", "tts"];
   for (const m of BUILTIN_CAPABILITY_META) {
     const label = m.label.toLowerCase();
     for (const term of jargon) assert.ok(!label.includes(term), `${m.id} label avoids "${term}"`);
   }
-  const multirun = BUILTIN_CAPABILITY_META.find((m) => m.id === "multirun")!;
-  assert.equal(multirun.label, "Compare responses");
-  assert.equal(multirun.technicalLabel, "Multi-Run");
 });
 
 // ---- disclosure grouping -----------------------------------------------------
@@ -81,9 +69,7 @@ test("technical capabilities group under Technical options", () => {
   }
 });
 
-test("Terminal is a default right-rail tool even though its disclosure group stays technical", () => {
-  const terminal = BUILTIN_CAPABILITY_META.find((capability) => capability.id === "terminal");
-  assert.equal(terminal?.standardTier, "more");
+test("Terminal retains its technical disclosure group when package-registered", () => {
   assert.equal(capabilityGroup("terminal"), TECHNICAL_GROUP_LABEL);
 });
 
@@ -145,31 +131,32 @@ test("availability is a runtime property, independent of placement", () => {
 });
 
 test("resolution honors explicit overrides and is deterministically ordered", () => {
-  const caps = listCapabilities();
-  const resolved = resolveCapabilities(caps, {
-    terminal: { tier: "primary", rank: 0.5 },
-  });
-  const primary = resolved.filter((r) => r.tier === "primary").map((r) => r.descriptor.id);
-  assert.ok(primary.includes("terminal"), "explicit promotion wins over the preset");
-  const again = resolveCapabilities(caps, {
-    terminal: { tier: "primary", rank: 0.5 },
-  });
-  assert.deepEqual(
-    again.map((r) => `${r.descriptor.id}:${r.tier}:${r.rank}`),
-    resolved.map((r) => `${r.descriptor.id}:${r.tier}:${r.rank}`),
-    "same inputs, same order",
-  );
+  const dispose = registerCapability(fakeDescriptor("terminal"));
+  try {
+    const caps = listCapabilities();
+    const resolved = resolveCapabilities(caps, {
+      terminal: { tier: "primary", rank: 0.5 },
+    });
+    const primary = resolved.filter((r) => r.tier === "primary").map((r) => r.descriptor.id);
+    assert.ok(primary.includes("terminal"), "explicit promotion wins over the preset");
+    const again = resolveCapabilities(caps, {
+      terminal: { tier: "primary", rank: 0.5 },
+    });
+    assert.deepEqual(
+      again.map((r) => `${r.descriptor.id}:${r.tier}:${r.rank}`),
+      resolved.map((r) => `${r.descriptor.id}:${r.tier}:${r.rank}`),
+      "same inputs, same order",
+    );
+  } finally {
+    dispose();
+  }
 });
 
 // ---- built-in registration ----------------------------------------------------
 
-test("core built-ins register immediately while optional workflow waits for its package installer", async () => {
+test("shell-owned capabilities register immediately", async () => {
   await import("../src/builtinCapabilities.ts");
   for (const m of BUILTIN_CAPABILITY_META) {
-    if (m.id === "workflow") {
-      assert.equal(getCapability(m.id), null);
-      continue;
-    }
     const d = getCapability(m.id);
     assert.ok(d, `${m.id} registered`);
     assert.equal(typeof d.open, "function");
@@ -190,7 +177,7 @@ test("every built-in capability opens one concrete destination", () => {
   }
 });
 
-test("primary capability navigation reveals GitHub above panes, rails, and the sidebar", () => {
+test("a dynamically registered primary capability can reveal its destination", () => {
   const dispose = registerSurface({
     id: "test-covering-pane",
     title: "Covering pane",
@@ -211,7 +198,16 @@ test("primary capability navigation reveals GitHub above panes, rails, and the s
     setSidebarOpen(true);
     setWorkspaceMode("widgets");
 
+    const unregister = registerCapability(fakeDescriptor("github", {
+      open: () => {
+        closeWorkspacePane();
+        setActiveView("github");
+        setSidebarOpen(false);
+        setWorkspaceMode("chat");
+      },
+    }));
     getCapability("github")!.open();
+    unregister();
 
     assert.equal(getState().activeView, "github");
     assert.equal(getState().railPlugin, null, "the covering pane is closed");

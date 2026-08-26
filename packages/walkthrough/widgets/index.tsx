@@ -1,0 +1,5 @@
+import "./styles.css";
+import { createElement } from "react";
+import { defineWebPackage } from "@polyth/web-sdk";
+import WalkthroughView from "./WalkthroughView.tsx";
+export default defineWebPackage((host) => () => { const off = [host.workspaceSurfaces.register({ id: "walkthrough", title: "Walkthrough", order: 24, plugin: "walkthrough", requires: "project", component: () => createElement(WalkthroughView) }), host.capabilities.register({ id: "walkthrough", label: "Guided walkthrough", plainDescription: "Review changed files in guided stages.", keywords: ["walkthrough"], standardTier: "more", standardRank: 13, open: () => host.navigation.setActiveView("walkthrough"), available: () => true }), host.widgets.registerPlugin({ id: "walkthrough", name: "Walkthrough", widgets: [{ id: "walkthrough.main", title: "Walkthrough", description: "Review changed files in guided stages.", defaultSlot: "workspace.main", supportedSlots: ["workspace.main", "workspace.bottom"], defaultSize: { w: 12, h: 6 }, render: () => createElement(WalkthroughView) }] })]; return () => off.toReversed().forEach((dispose) => dispose()); });

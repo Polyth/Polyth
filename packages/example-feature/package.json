@@ -2,8 +2,21 @@
   "name": "@polyth/example-feature",
   "version": "0.1.0",
   "type": "module",
-  "exports": { ".": "./src/index.ts" },
-  "polyth": { "serverEntry": "./src/serverEntry.ts" },
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "polyth": {
+    "serverEntry": "./src/serverEntry.ts",
+    "descriptor": {
+      "name": "Example Feature",
+      "description": "Proof-of-concept package registered via package discovery.",
+      "core": false,
+      "enabled": true,
+      "settingsGroup": "Customize",
+      "icon": "🧪",
+      "hasSettings": false
+    }
+  },
   "dependencies": {
     "@polyth/contracts": "0.1.0",
     "@polyth/plugins": "0.1.0"

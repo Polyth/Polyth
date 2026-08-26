@@ -2,5 +2,11 @@
   "name": "@polyth/session",
   "version": "0.1.0",
   "type": "module",
-  "exports": { ".": "./src/index.ts" }
+  "exports": {
+    ".": "./src/index.ts",
+    "./web-api": "./src/webApi.ts"
+  },
+  "dependencies": {
+    "@polyth/contracts": "0.1.0"
+  }
 }

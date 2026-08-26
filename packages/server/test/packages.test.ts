@@ -6,22 +6,36 @@ import { join } from "node:path";
 import type { RouteRequest } from "../src/http.ts";
 import { BUILTIN_PACKAGES, createPackageRegistry } from "../src/packages.ts";
 import { packageRoutes } from "../src/routes/packages.ts";
+import type { PackageDescriptorDto } from "@polyth/contracts";
 
 const temporaryFile = (): string =>
   join(mkdtempSync(join(tmpdir(), "polyth-packages-")), "packages.json");
 
-test("list returns every built-in package with core packages always enabled", () => {
-  const file = temporaryFile();
-  const registry = createPackageRegistry({ file });
-  const packages = registry.list();
+const FEATURE_PACKAGES: PackageDescriptorDto[] = [
+  { id: "git", name: "Git", description: "Git test package.", core: false, enabled: true, hasSettings: true },
+  { id: "terminal", name: "Terminal", description: "Terminal test package.", core: false, enabled: true, hasSettings: false },
+  { id: "browser", name: "Browser", description: "Browser test package.", core: false, enabled: true, hasSettings: false },
+  { id: "home-assistant", name: "Home Assistant", description: "Home Assistant test package.", core: false, enabled: false, hasSettings: true },
+];
 
-  assert.equal(packages.length, BUILTIN_PACKAGES.length);
-  assert.deepEqual(packages.map((descriptor) => descriptor.id), BUILTIN_PACKAGES.map((descriptor) => descriptor.id));
+const registry = (file = temporaryFile()) =>
+  createPackageRegistry({ file, descriptors: FEATURE_PACKAGES });
+
+test("list combines shell and manifest packages with core packages always enabled", () => {
+  const file = temporaryFile();
+  const packageRegistry = registry(file);
+  const packages = packageRegistry.list();
+
+  assert.equal(packages.length, BUILTIN_PACKAGES.length + FEATURE_PACKAGES.length);
+  assert.deepEqual(
+    packages.map((descriptor) => descriptor.id),
+    [...BUILTIN_PACKAGES, ...FEATURE_PACKAGES].map((descriptor) => descriptor.id),
+  );
   assert.ok(packages.filter((descriptor) => descriptor.core).every((descriptor) => descriptor.enabled));
-  assert.equal(registry.get("home-assistant")?.enabled, false);
-  assert.equal(registry.get("git")?.enabled, true);
-  assert.equal(registry.get("missing"), null);
-  assert.equal(registry.isEnabled("missing"), false);
+  assert.equal(packageRegistry.get("home-assistant")?.enabled, false);
+  assert.equal(packageRegistry.get("git")?.enabled, true);
+  assert.equal(packageRegistry.get("missing"), null);
+  assert.equal(packageRegistry.isEnabled("missing"), false);
 
   const stored = JSON.parse(readFileSync(file, "utf8")) as Record<string, boolean>;
   assert.ok(!("session" in stored), "core package state is not persisted");
@@ -32,46 +46,46 @@ test("list returns every built-in package with core packages always enabled", ()
 });
 
 test("setEnabled toggles a non-core package", async () => {
-  const registry = createPackageRegistry({ file: temporaryFile() });
+  const packageRegistry = registry();
 
-  const disabled = await registry.setEnabled("git", false);
+  const disabled = await packageRegistry.setEnabled("git", false);
   assert.equal(disabled.enabled, false);
   assert.equal(disabled.status, "disabled");
-  assert.equal(registry.get("git")?.enabled, false);
-  assert.equal(registry.isEnabled("git"), false);
+  assert.equal(packageRegistry.get("git")?.enabled, false);
+  assert.equal(packageRegistry.isEnabled("git"), false);
 
-  const enabled = await registry.setEnabled("git", true);
+  const enabled = await packageRegistry.setEnabled("git", true);
   assert.equal(enabled.enabled, true);
   assert.equal(enabled.status, "ready");
-  assert.equal(registry.isEnabled("git"), true);
+  assert.equal(packageRegistry.isEnabled("git"), true);
 });
 
 test("setEnabled rejects core packages", async () => {
-  const registry = createPackageRegistry({ file: temporaryFile() });
+  const packageRegistry = registry();
 
   await assert.rejects(
-    registry.setEnabled("session", false),
+    packageRegistry.setEnabled("session", false),
     (error: Error & { code?: string }) =>
       error.code === "invalid-input" && /core package/.test(error.message),
   );
-  assert.equal(registry.isEnabled("session"), true);
+  assert.equal(packageRegistry.isEnabled("session"), true);
 });
 
 test("non-core state persists across registry reopen", async () => {
   const file = temporaryFile();
-  const first = createPackageRegistry({ file });
+  const first = registry(file);
   await first.setEnabled("terminal", false);
   await first.setEnabled("home-assistant", true);
 
-  const reopened = createPackageRegistry({ file });
+  const reopened = registry(file);
   assert.equal(reopened.isEnabled("terminal"), false);
   assert.equal(reopened.isEnabled("home-assistant"), true);
   assert.equal(reopened.isEnabled("session"), true);
 });
 
 test("package routes list packages and update enablement", async () => {
-  const registry = createPackageRegistry({ file: temporaryFile() });
-  const route = packageRoutes(registry);
+  const packageRegistry = registry();
+  const route = packageRoutes(packageRegistry);
 
   const call = async (method: string, path: string, body: Record<string, unknown> = {}) => {
     let status = 0;
@@ -95,11 +109,14 @@ test("package routes list packages and update enablement", async () => {
   const listed = await call("GET", "/api/packages");
   assert.equal(listed.handled, true);
   assert.equal(listed.status, 200);
-  assert.equal((listed.payload as { packages: unknown[] }).packages.length, BUILTIN_PACKAGES.length);
+  assert.equal(
+    (listed.payload as { packages: unknown[] }).packages.length,
+    BUILTIN_PACKAGES.length + FEATURE_PACKAGES.length,
+  );
 
   const updated = await call("PATCH", "/api/packages/browser", { enabled: false });
   assert.equal(updated.handled, true);
   assert.equal(updated.status, 200);
   assert.equal((updated.payload as { enabled: boolean }).enabled, false);
-  assert.equal(registry.isEnabled("browser"), false);
+  assert.equal(packageRegistry.isEnabled("browser"), false);
 });

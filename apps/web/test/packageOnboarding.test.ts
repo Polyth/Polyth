@@ -130,11 +130,13 @@ const descriptors = new Map<string, PackageDescriptorDto>([
 
 Object.defineProperty(globalThis, "fetch", {
   configurable: true,
-  value: async () => ({
+  value: async (input: string | URL | Request) => ({
     ok: true,
     status: 200,
     statusText: "OK",
-    json: async () => ({ packages: [...descriptors.values()] }),
+    json: async () => String(input).endsWith("/web-packages/manifest.json")
+      ? { packages: [] }
+      : { packages: [...descriptors.values()] },
     text: async () => "",
   }),
 });
@@ -336,17 +338,17 @@ test("every built-in package surface has a substantial onboarding tour", async (
   assert.equal(getPackageOnboarding("dictation"), undefined, "voice is the only canonical dictation tour id");
 });
 
-test("package boot registers installer tours; disabling removes them; builtin tours stay", async () => {
+test("package tour catalog remains available while package state changes", async () => {
   assert.ok(getPackageOnboarding("packages"), "builtin Packages tour registered at registry import");
 
   await bootPackages();
-  assert.ok(getPackageOnboarding("git"), "git installer registered its tour");
+  assert.ok(getPackageOnboarding("git"), "Git tour is registered");
   assert.ok(getPackageOnboarding("voice"), "dictation aliases to the voice tour");
 
   descriptors.get("git")!.enabled = false;
   descriptors.get("dictation")!.enabled = false;
   await bootPackages();
-  assert.equal(getPackageOnboarding("git"), undefined, "disable disposes the tour with the package");
-  assert.equal(getPackageOnboarding("voice"), undefined);
+  assert.ok(getPackageOnboarding("git"), "tour metadata stays available for package previews");
+  assert.ok(getPackageOnboarding("voice"));
   assert.ok(getPackageOnboarding("packages"), "builtin tours are independent of package sync");
 });

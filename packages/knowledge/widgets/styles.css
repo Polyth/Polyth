@@ -1,0 +1,254 @@
+/* Package-owned knowledge web styles. */
+.knowledge-notice {
+color: var(--green); font-size: 12px;
+}
+.pr-conflict-agent-area > .knowledge-notice {
+grid-column: 1 / -1; margin: 0;
+}
+:is(
+  .audit-note,
+  .form-error,
+  .goal-card-objective,
+  .knowledge-snippet,
+  .plugin-log-line,
+  .prompt-echo,
+  .review-finding,
+  .sched-preview-runs,
+  .sched-run-error,
+  .walkthrough-stop-explain
+) {
+min-width: 0;
+  overflow-wrap: anywhere;
+}
+@container feature-panel (max-width: 700px) {
+.knowledge-panel > .view-toolbar-row,
+.knowledge-editor > .view-toolbar-row,
+.track-create-form .view-toolbar-row {
+align-items: stretch;
+    flex-direction: column;
+}
+
+.knowledge-panel > .view-toolbar-row > :is(input, button),
+.knowledge-editor > .view-toolbar-row > :is(select, button) {
+width: 100%;
+}
+}
+:is(
+  .audit-list,
+  .event-list,
+  .gh-list,
+  .knowledge-panel,
+  .mcp-list,
+  .ntc-list,
+  .plugin-card-grid,
+  .provider-list,
+  .sched-runs,
+  .track-steps
+) {
+min-width: 0;
+  overscroll-behavior: contain;
+}
+.knowledge-panel,
+.knowledge-editor {
+display: flex; flex-direction: column; gap: 8px;
+}
+.knowledge-search {
+flex: 1; background: var(--elevated); color: var(--text); border: 1px solid var(--border);
+  border-radius: calc(7px * var(--corner-radius-scale)); padding: 6px 8px; font-size: 12.5px;
+}
+.knowledge-kinds {
+align-self: flex-start;
+}
+.knowledge-card {
+border: 1px solid var(--hair-strong); border-radius: var(--radius-lg); padding: 10px 11px;
+  background: var(--elevated); box-shadow: var(--inset-hi); display: flex; flex-direction: column; gap: 5px;
+}
+.knowledge-card-head {
+display: flex; align-items: center; gap: 6px;
+}
+.knowledge-kind {
+padding: 1px 6px; border-radius: 999px; font-size: 10px; text-transform: uppercase;
+  letter-spacing: 0.05em; border: 1px solid var(--border); color: var(--muted); flex: none;
+}
+.knowledge-kind.kind-plan {
+color: var(--accent); border-color: var(--accent);
+}
+.knowledge-kind.kind-memory {
+color: var(--amber); border-color: var(--amber);
+}
+.knowledge-title {
+font-weight: 600; font-size: 12.5px;
+}
+.knowledge-snippet {
+color: var(--muted); font-size: 12px; white-space: pre-wrap;
+}
+.knowledge-meta {
+display: flex; gap: 5px; color: var(--muted); font-size: 11px; flex-wrap: wrap;
+}
+.knowledge-actions {
+display: flex; gap: 6px;
+}
+.knowledge-editor input,
+.knowledge-editor textarea {
+background: var(--elevated); color: var(--text); border: 1px solid var(--border);
+  border-radius: calc(7px * var(--corner-radius-scale)); padding: 6px 8px; font-size: 12.5px; width: 100%;
+}
+.knowledge-editor textarea {
+font-family: var(--mono); font-size: var(--editor-font-size, 13px); resize: vertical;
+}
+.track-create-form,
+.track-card {
+display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--border-soft);
+  border-radius: calc(10px * var(--corner-radius-scale));
+  background: var(--surface-raised);
+}
+.track-create-form label {
+display: flex;
+  flex-direction: column;
+  gap: 5px;
+  color: var(--muted);
+  font-size: 12px;
+}
+.track-status {
+padding: 2px 6px;
+  border: 1px solid var(--border-soft);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+.track-status-running {
+color: var(--blue); border-color: color-mix(in srgb, var(--blue) 45%, var(--border-soft));
+}
+.track-status-blocked {
+color: var(--red); border-color: color-mix(in srgb, var(--red) 45%, var(--border-soft));
+}
+.track-status-completed {
+color: var(--green); border-color: color-mix(in srgb, var(--green) 45%, var(--border-soft));
+}
+.track-progress,
+.track-docs {
+color: var(--muted);
+  font-size: 11px;
+}
+.track-progress {
+display: flex; gap: 5px;
+}
+.track-steps {
+display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.track-step {
+display: flex; align-items: flex-start; gap: 8px;
+}
+.track-step-marker {
+display: inline-grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  flex: 0 0 20px;
+  border-radius: 50%;
+  background: var(--surface);
+  color: var(--muted);
+  font-size: 11px;
+}
+.track-step-completed .track-step-marker {
+color: var(--green);
+}
+.track-step-running .track-step-marker {
+color: var(--blue);
+}
+.track-step-failed .track-step-marker {
+color: var(--red);
+}
+.track-step-content {
+display: flex;
+  min-width: 0;
+  flex: 1;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 12px;
+}
+.track-step-content small {
+overflow-wrap: anywhere; color: var(--muted);
+}
+.track-step-content details pre {
+max-height: 160px;
+  overflow: auto;
+  white-space: pre-wrap;
+  font-size: 10px;
+}
+.knowledge-card {
+min-width: 0;
+}
+.rail-body > :is(.knowledge-panel, .knowledge-editor, .notification-centre, .tracks-panel) {
+min-height: 0;
+}
+.knowledge-actions,
+.knowledge-card-head {
+min-width: 0;
+}
+.knowledge-title {
+min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+@container feature-panel (max-width: 700px) {
+.knowledge-panel > .view-toolbar-row,
+.knowledge-editor > .view-toolbar-row,
+.track-create-form .view-toolbar-row {
+align-items: stretch;
+    flex-direction: column;
+}
+
+.knowledge-panel > .view-toolbar-row > :is(input, button),
+.knowledge-editor > .view-toolbar-row > :is(select, button) {
+width: 100%;
+}
+
+.knowledge-panel .header-spacer,
+.knowledge-editor .header-spacer {
+display: none;
+}
+
+.knowledge-kinds {
+width: 100%;
+    max-width: 100%;
+    display: flex;
+    overflow-x: auto;
+    overscroll-behavior-inline: contain;
+    scrollbar-width: none;
+}
+
+.knowledge-kinds::-webkit-scrollbar {
+display: none;
+}
+
+.knowledge-kinds button {
+flex: 1 0 auto;
+}
+
+.knowledge-actions {
+display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(88px, 1fr));
+}
+
+.knowledge-actions > button {
+width: 100%;
+}
+
+.track-create-form :is(input, textarea) {
+width: 100%;
+}
+}

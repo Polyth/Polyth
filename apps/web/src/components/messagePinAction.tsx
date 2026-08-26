@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { api } from "../api.ts";
+import { api } from "@polyth/session/web-api";
 import { registerSlot } from "../slots.ts";
 import { applyEvent, setUiError, useStore } from "../store.ts";
 import { Icon } from "../icons.tsx";

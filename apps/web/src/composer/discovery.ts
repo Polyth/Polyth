@@ -3,7 +3,7 @@
 // safe token-insertion decisions for the Add menu, stable autocomplete option
 // ids plus honest status copy, and contract-bounded model detail formatting.
 // No DOM, no fetch, no send path — components project this module's decisions.
-import type { SlashCommand, SnippetDef, StrictListResult } from "../api.ts";
+import type { SlashCommand, SnippetDef, StrictListResult } from "@polyth/session/web-api";
 import { filterCommands, filterSnippets, type AutocompleteItem } from "../utils.ts";
 import { tr } from "../i18n/index.ts";
 

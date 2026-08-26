@@ -2,7 +2,7 @@
 // Mod+P opens file-focused mode; `is:archived` reveals archived sessions.
 import { Fragment, useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { commandHint, filterPalette, listCommands, type PaletteCommand } from "../commands.ts";
-import { api, type FileSearchHitDto, type WorkspaceSearchItemDto } from "../api.ts";
+import { api, type FileSearchHitDto, type WorkspaceSearchItemDto } from "@polyth/session/web-api";
 import { activateProject, openEditorFile, setOverlay, setUiError, useStore } from "../store.ts";
 import { openSession } from "../init.ts";
 import { announce } from "./a11y/live.tsx";

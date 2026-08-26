@@ -1,1 +1,31 @@
-{"name":"@polyth/hotkeys","version":"0.1.0","type":"module","exports":{".":"./src/index.ts","./i18n":"./src/i18n/index.ts","./i18n/*":"./src/i18n/*.ts"},"polyth":{"serverEntry":"./src/serverEntry.ts"},"dependencies":{"@polyth/plugins":"0.1.0"}}
+{
+  "name": "@polyth/hotkeys",
+  "version": "0.1.0",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./i18n": "./src/i18n/index.ts",
+    "./widgets": "./widgets/index.tsx",
+    "./i18n/*": "./src/i18n/*.ts"
+  },
+  "polyth": {
+    "serverEntry": "./src/serverEntry.ts",
+    "webEntry": "./widgets/index.tsx",
+    "descriptor": {
+      "name": "Shortcuts",
+      "description": "Keyboard shortcut configuration and runtime registration.",
+      "core": true,
+      "enabled": true,
+      "settingsGroup": "Workspace",
+      "icon": "⌨",
+      "hasSettings": true
+    }
+  },
+  "dependencies": {
+    "@polyth/plugins": "0.1.0",
+    "@polyth/web-sdk": "0.1.0"
+  },
+  "peerDependencies": {
+    "react": "^19.0.0"
+  }
+}

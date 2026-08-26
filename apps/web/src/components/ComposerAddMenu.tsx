@@ -5,8 +5,8 @@
 // every activation delegates to an existing composer seam.
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import { addMenuRows, type AddMenuAction, type CatalogState } from "../composer/discovery.ts";
-import type { SlashCommand, SnippetDef } from "../api.ts";
-import { parseGithubUrl, type GithubAttachResult } from "../attachments.ts";
+import type { SlashCommand, SnippetDef } from "@polyth/session/web-api";
+import { parseGithubUrl, type GithubAttachResult } from "@polyth/github/attachments";
 import { useEscape } from "../useEscape.ts";
 import Dialog from "./a11y/Dialog.tsx";
 import { Icon } from "../icons.tsx";

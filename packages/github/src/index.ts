@@ -9,7 +9,7 @@ import { normalizeCheck, type RollupEntry } from "./checks.ts";
 
 export { anyCheckPending, normalizeCheck, summarizeChecks } from "./checks.ts";
 export type { ChecksGroup, ChecksSummary, RollupEntry } from "./checks.ts";
-export { GITHUB_WIDGETS } from "../widgets/index.ts";
+export { GITHUB_WIDGETS } from "../widgets/catalog.ts";
 
 export type ExecFn = (
   bin: string,

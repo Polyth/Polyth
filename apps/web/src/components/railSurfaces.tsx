@@ -16,13 +16,7 @@ import { RAIL_ICONS } from "../railIcons.ts";
 import {
   registerSurface,
   type RailSurfaceComponentProps,
-  type WorkspacePanePresentation,
 } from "../surfaces.ts";
-import EditorView from "./EditorView.tsx";
-import GitView from "./GitView.tsx";
-import TerminalView from "./TerminalView.tsx";
-import PreviewView from "./PreviewView.tsx";
-import KnowledgePanel from "./KnowledgePanel.tsx";
 import EmptyState from "./EmptyState.tsx";
 import { getLocale, tr } from "../i18n/index.ts";
 
@@ -116,20 +110,6 @@ function ContextView() {
   );
 }
 
-function UsagePanel() {
-  const model = useActiveModel();
-  const total = model.totals.input + model.totals.output;
-  return (
-    <div>
-      <div className="stat-row"><span className="k">{tr("railsurfaces.input")}</span><span className="mono">{fmtTokens(model.totals.input)}</span></div>
-      <div className="stat-row"><span className="k">{tr("railsurfaces.output")}</span><span className="mono">{fmtTokens(model.totals.output)}</span></div>
-      <div className="stat-row"><span className="k">{tr("railsurfaces.total")}</span><span className="mono">{fmtTokens(total)}</span></div>
-      <div className="stat-row"><span className="k">{tr("railsurfaces.cost")}</span><span className="mono">{model.totals.cost > 0 ? fmtCost(model.totals.cost) : "—"}</span></div>
-      {total === 0 && <div className="rail-empty">{tr("railsurfaces.tokenAndCostTotalsAppearOnceThe")}</div>}
-    </div>
-  );
-}
-
 function ActiveEventsView() {
   const events = useStore((s) => (s.activeSessionId ? s.events[s.activeSessionId] : undefined) ?? NO_EVENTS);
   if (events.length === 0) {
@@ -158,42 +138,11 @@ function ActiveEventsView() {
   );
 }
 
-// Canonical workspace surfaces (spec starting values). Layout policy lives in
-// the host; these components never decide dock versus full-screen geometry.
-const pane = (over: Partial<WorkspacePanePresentation>): WorkspacePanePresentation => ({
-  kind: "workspace", defaultRatio: 0.6, minWidth: 380, preferredMaxWidth: 760,
-  keepAlive: true, escape: "close", ...over,
-});
-
 function EventsView(props?: RailSurfaceComponentProps) {
   return props?.active !== false ? <ActiveEventsView /> : null;
 }
 
-registerSurface({
-  id: "files", title: tr("railsurfaces.projectFiles"), shortLabel: tr("prefs.files"), capabilityId: "files", order: 1, icon: RAIL_ICONS.files,
-  component: EditorView, presentation: pane({ defaultRatio: 0.6, minWidth: 380, preferredMaxWidth: 760 }),
-});
-registerSurface({
-  id: "git", title: tr("railsurfaces.sourceControl"), shortLabel: tr("prefs.git"), capabilityId: "git", order: 2, icon: RAIL_ICONS.git,
-  component: GitView, badge: (ctx) => ctx.changeCount,
-  presentation: pane({ defaultRatio: 0.4, minWidth: 340, preferredMaxWidth: 640 }),
-});
-registerSurface({
-  id: "terminal", title: tr("railsurfaces.terminal"), shortLabel: tr("prefs.terminal"), capabilityId: "terminal", order: 3, icon: RAIL_ICONS.terminal,
-  component: TerminalView,
-  presentation: pane({ defaultRatio: 0.6, minWidth: 380, preferredMaxWidth: 760, escape: "content" }),
-});
-registerSurface({
-  id: "browser", title: tr("railsurfaces.browser"), shortLabel: tr("prefs.preview"), capabilityId: "browser", order: 4, icon: RAIL_ICONS.browser,
-  component: PreviewView, presentation: pane({ defaultRatio: 0.45, minWidth: 380, preferredMaxWidth: 760 }),
-});
-
 registerSurface({ id: "context", title: tr("railsurfaces.context"), capabilityId: "context", order: 30, icon: RAIL_ICONS.context, component: ContextView });
-registerSurface({ id: "knowledge", title: tr("railsurfaces.knowledge"), capabilityId: "knowledge", order: 40, icon: RAIL_ICONS.knowledge, component: KnowledgePanel });
-registerSurface({
-  id: "usage", title: tr("railsurfaces.usage"), capabilityId: "usage", order: 50, icon: RAIL_ICONS.usage,
-  component: UsagePanel,
-});
 registerSurface({
   id: "events", title: tr("railsurfaces.events"), capabilityId: "events", order: 60, icon: RAIL_ICONS.events,
   component: EventsView, badge: (ctx) => ctx.eventCount,

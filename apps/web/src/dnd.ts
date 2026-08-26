@@ -1,6 +1,6 @@
 // Drag-and-drop helpers: the polyth path mime carries tree→composer drags;
 // desktop-file drops upload through the binary API and become attachment pills.
-import { api } from "./api.ts";
+import { api } from "@polyth/session/web-api";
 import { attachProjectFile, attachUpload } from "./attachments.ts";
 
 export const PATH_MIME = "application/x-polyth-path";

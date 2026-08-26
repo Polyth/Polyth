@@ -7,16 +7,7 @@
 import { useEffect, useMemo, useState } from "react";
 import Timeline from "../Timeline.tsx";
 import Composer from "../Composer.tsx";
-import PermissionBanner from "../PermissionBanner.tsx";
 import QuestionCards from "../QuestionCards.tsx";
-import SecureSafeCard from "../SecureSafeCard.tsx";
-import MultiRunView from "../MultiRunView.tsx";
-import WorkflowView from "../WorkflowView.tsx";
-import FusionView from "../FusionView.tsx";
-import GoalsView from "../GoalsView.tsx";
-import WalkthroughView from "../WalkthroughView.tsx";
-import ScheduleView from "../ScheduleView.tsx";
-import GithubView from "../GithubView.tsx";
 import { setUiError, useActiveModel, useStore } from "../../store.ts";
 import { openSession, restoreSession } from "../../init.ts";
 import { friendlyError } from "../../settings.ts";
@@ -29,7 +20,7 @@ import SlotHost from "../slots/SlotHost.ts";
 import { Icon } from "../../icons.tsx";
 import StarterPicker, { StarterIcon } from "../mobile/StarterPicker.tsx";
 import { requestComposerInsert } from "../../composerInsert.ts";
-import { useGitStatus } from "../../gitStatusStore.ts";
+import { useGitStatus } from "../../../../../packages/git/widgets/gitStatusStore.ts";
 import { useShellMode } from "../../responsiveShell.ts";
 import { tapFeedback } from "../../haptics.ts";
 import { dismissKeyboard } from "../../mobileViewport.ts";
@@ -275,8 +266,10 @@ function SessionSurface() {
       </div>
       {showFallbackWorking && <WorkingIndicator />}
       {pendingQuestions.length > 0 && <QuestionCards questions={pendingQuestions} />}
-      {pendingSecrets.length > 0 && <SecureSafeCard secrets={pendingSecrets} />}
-      {pendingPermissions.length > 0 && <PermissionBanner permissions={pendingPermissions} />}
+      <SlotHost
+        slot="session.timeline.after"
+        context={{ projectId, sessionId, permissions: pendingPermissions, secrets: pendingSecrets }}
+      />
       <SlotHost
         slot="session.composer.before"
         context={{ projectId, sessionId, editing: false }}
@@ -343,10 +336,3 @@ registerSlot("session.empty.widgets", "builtin.hero-recent", (context) => (
 // they are canonical workspace panes registered in railSurfaces.tsx and
 // opened through openWorkspacePane() beside a still-mounted Chat.
 registerWorkspaceSurface({ id: "session", title: tr("workspace.builtinsurfaces.session"), order: 0, plugin: "session", requires: "project", component: SessionSurface });
-registerWorkspaceSurface({ id: "goals", title: tr("workspace.builtinsurfaces.goals"), order: 20, plugin: "goals", requires: "project", component: GoalsView });
-registerWorkspaceSurface({ id: "multirun", title: tr("workspace.builtinsurfaces.multiRun"), order: 21, plugin: "multirun", requires: "project", component: MultiRunView });
-registerWorkspaceSurface({ id: "workflow", title: tr("workspace.builtinsurfaces.workflows"), order: 22, plugin: "workflow", requires: "project", component: WorkflowView });
-registerWorkspaceSurface({ id: "fusion", title: tr("workspace.builtinsurfaces.fusion"), order: 23, plugin: "fusion", requires: "project", component: FusionView });
-registerWorkspaceSurface({ id: "walkthrough", title: tr("workspace.builtinsurfaces.walkthrough"), order: 24, plugin: "walkthrough", requires: "project", component: WalkthroughView });
-registerWorkspaceSurface({ id: "schedule", title: tr("workspace.builtinsurfaces.schedule"), order: 25, plugin: "schedule", requires: "project", component: ScheduleView });
-registerWorkspaceSurface({ id: "github", title: tr("workspace.builtinsurfaces.github"), order: 26, plugin: "github", requires: "project", component: GithubView });

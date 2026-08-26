@@ -20,9 +20,11 @@ import { useDismissibleMenu } from "./a11y/Menu.ts";
 import { useUiSettings } from "../uiPrefs.ts";
 import MobileNavigationRail from "./mobile/MobileNavigationRail.tsx";
 import WorkspaceBottomNav from "./workspace/WorkspaceBottomNav.tsx";
-import { api, type GithubStatusDto } from "../api.ts";
+import { api, type GithubStatusDto } from "@polyth/session/web-api";
 import { tr } from "../i18n/index.ts";
-import { useKeymap } from "../hotkeys.ts";
+import { useKeymap } from "../../../../packages/hotkeys/widgets/hotkeys.ts";
+import { listSurfaces } from "../surfaces.ts";
+import { getWorkspaceSurface } from "../workspace/surfaceRegistry.ts";
 
 const STROKE = { fill: "none", stroke: "currentColor", strokeWidth: 1.5, strokeLinecap: "round", strokeLinejoin: "round" } as const;
 
@@ -104,7 +106,12 @@ function CapabilityNav() {
     const pane = PANE_OF_CAPABILITY[c.descriptor.id];
     if (pane) return rail === pane;
     const panel = PANEL_OF_CAPABILITY[c.descriptor.id];
-    return panel !== undefined && rail === panel;
+    if (panel) return rail === panel;
+    const packageSurface = listSurfaces().find((surface) =>
+      (surface.capabilityId ?? surface.id) === c.descriptor.id);
+    if (packageSurface) return rail === packageSurface.id;
+    return getWorkspaceSurface(c.descriptor.id) !== undefined
+      && view === c.descriptor.id;
   };
 
   const eligiblePrimaries = resolved.filter((c) =>

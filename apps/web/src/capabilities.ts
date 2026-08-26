@@ -47,24 +47,8 @@ export interface CapabilityMeta {
  *  so existing users are not stranded. */
 export const BUILTIN_CAPABILITY_META: CapabilityMeta[] = [
   { id: "session", label: tr("capabilities.chat"), plainDescription: tr("capabilities.talkWithPolythAboutYourProject"), keywords: ["session", "conversation", "chat"], standardTier: "primary", standardRank: 0 },
-  { id: "files", label: tr("capabilities.projectFiles"), plainDescription: tr("capabilities.browseAndEditTheFilesInYour"), keywords: ["files", "editor", "tree", "quick open"], standardTier: "primary", standardRank: 1 },
-  { id: "browser", label: tr("capabilities.browser"), plainDescription: tr("capabilities.browseWithAgentsAndPointAt"), keywords: ["browser", "element picker", "agent browser", "app"], standardTier: "primary", standardRank: 2 },
-  { id: "goals", label: tr("capabilities.goalsProgress"), plainDescription: tr("capabilities.trackGoalsAndHowTheWorkIs"), keywords: ["goals", "progress", "status"], standardTier: "primary", standardRank: 3 },
-  { id: "multirun", label: tr("capabilities.compareResponses"), technicalLabel: "Multi-Run", plainDescription: tr("capabilities.askSeveralWaysAtOnceAndCompare"), keywords: ["multi-run", "multirun", "compare models"], standardTier: "more", standardRank: 10 },
-  { id: "workflow", label: tr("capabilities.workflows"), technicalLabel: "DAG orchestration", plainDescription: tr("capabilities.coordinateAgentRolesInDependencyBasedPipelines"), keywords: ["workflow", "dag", "orchestration", "multi-agent"], standardTier: "more", standardRank: 11 },
-  { id: "fusion", label: tr("capabilities.combineDrafts"), technicalLabel: "Fusion", plainDescription: tr("capabilities.mergeTheBestPartsOfSeveralDrafts"), keywords: ["fusion", "fuse models", "merge"], standardTier: "more", standardRank: 12 },
-  { id: "walkthrough", label: tr("capabilities.guidedWalkthrough"), plainDescription: tr("capabilities.aStepByStepGuidedReviewOf"), keywords: ["walkthrough", "guide", "tour"], standardTier: "more", standardRank: 13 },
-  { id: "schedule", label: tr("capabilities.schedule"), technicalLabel: "Scheduled prompts", plainDescription: tr("capabilities.runPromptsOnASchedule"), keywords: ["schedule", "scheduled prompts", "cron"], standardTier: "more", standardRank: 14 },
-  { id: "usage", label: tr("capabilities.usageCost"), plainDescription: tr("capabilities.seeWhatTheWorkIsUsingAnd"), keywords: ["usage", "cost", "tokens", "quota"], standardTier: "more", standardRank: 15 },
-  { id: "github", label: tr("capabilities.github"), plainDescription: tr("capabilities.browseIssuesAndPullRequestsForThis"), keywords: ["github", "issues", "pull requests", "pr"], standardTier: "more", standardRank: 16 },
-  { id: "knowledge", label: tr("capabilities.knowledge"), plainDescription: tr("capabilities.notesAndReferencesPolythCanUse"), keywords: ["knowledge", "notes", "docs"], standardTier: "more", standardRank: 17 },
   { id: "context", label: tr("capabilities.context"), plainDescription: tr("capabilities.whatPolythIsCurrentlyLookingAt"), keywords: ["context", "pinned", "session status"], standardTier: "more", standardRank: 18 },
-  { id: "voice", label: tr("capabilities.voiceInput"), technicalLabel: "Dictation", plainDescription: tr("capabilities.talkInsteadOfTyping"), keywords: ["voice", "dictation", "microphone", "speech"], standardTier: "more", standardRank: 19 },
-  { id: "git", label: tr("capabilities.sourceControl"), technicalLabel: "Git", plainDescription: tr("capabilities.reviewAndManageChangesToTheCode"), keywords: ["git", "worktrees", "branch", "diff", "changes"], standardTier: "technical", standardRank: 30 },
-  { id: "terminal", label: tr("capabilities.terminal"), plainDescription: tr("capabilities.runCommandsInTheProjectWorkspace"), keywords: ["terminal", "shell", "console"], standardTier: "more", standardRank: 20 },
-  { id: "models-agents", label: tr("capabilities.modelsAgents"), plainDescription: tr("capabilities.chooseWhichModelAndAgentPolythUses"), keywords: ["model", "agent", "profile", "provider"], standardTier: "technical", standardRank: 32 },
   { id: "events", label: tr("capabilities.eventLog"), plainDescription: tr("capabilities.theRawRecordOfEverythingInA"), keywords: ["events", "log", "debug"], standardTier: "technical", standardRank: 33 },
-  { id: "diagnostics", label: tr("capabilities.extensionDiagnostics"), technicalLabel: "Plugins", plainDescription: tr("capabilities.inspectInstalledExtensionsAndTheirLogs"), keywords: ["plugin", "extension", "install", "logs"], standardTier: "technical", standardRank: 34 },
 ];
 
 // ---- plain-language disclosure groups -----------------------------------------

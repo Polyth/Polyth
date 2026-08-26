@@ -21,7 +21,6 @@ import {
   NotificationsPage, ProjectsPage,
 } from "./settings/pages.tsx";
 import ViewErrorBoundary from "./ViewErrorBoundary.ts";
-import ShortcutsPage from "./settings/ShortcutsPage.tsx";
 import SessionsPage from "./settings/SessionsPage.tsx";
 import AccessPage from "./settings/AccessPage.tsx";
 import PackagesPage from "./settings/PackagesPage.tsx";
@@ -68,7 +67,6 @@ const BUILTIN: PageDef[] = [
   { id: "chat", label: tr("settingsview.chat"), group: "Workspace", render: () => <ChatPage /> },
   { id: "notifications", label: tr("settingsview.notifications"), group: "Workspace", render: () => <NotificationsPage /> },
   { id: "sessions", label: tr("settingsview.sessions"), group: "Workspace", render: () => <SessionsPage /> },
-  { id: "shortcuts", label: tr("settingsview.shortcuts"), group: "Workspace", render: () => <ShortcutsPage /> },
   { id: "projects", label: tr("settingsview.projects"), group: "Engineering", render: () => <ProjectsPage /> },
   { id: "behavior", label: tr("settingsview.behavior"), group: "Engineering", render: () => <BehaviorPage /> },
   { id: "widgets", label: tr("settingsview.widgetsLayout"), group: "Customize", icon: "◇", render: () => <WidgetsPage /> },

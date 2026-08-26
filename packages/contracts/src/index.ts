@@ -958,6 +958,114 @@ export interface RemoteHost {
   forward(remotePort: number): Promise<RemoteForwardHandle>;
 }
 
+// ---------------------------------------------------------------- task trackers
+
+export type TaskTrackerProvider = "jira" | "trello";
+export type TaskTrackerProviderMode = "live" | "demo";
+export type TaskTrackerBoardType = "kanban" | "scrum" | "simple" | "unknown";
+export type TaskTrackerStatusCategory = "todo" | "in_progress" | "done" | "unknown";
+
+export interface TaskTrackerProviderDto {
+  provider: TaskTrackerProvider;
+  /** Live uses configured credentials; demo is an in-memory credential-free sandbox. */
+  mode: TaskTrackerProviderMode;
+  configured: boolean;
+  /** Environment-variable names only. Credential values are never returned. */
+  requiredEnv: string[];
+}
+
+export interface TaskTrackerProjectDto {
+  provider: TaskTrackerProvider;
+  id: string;
+  key: string;
+  name: string;
+  url?: string;
+  avatarUrl?: string;
+}
+
+export interface TaskTrackerBoardDto {
+  provider: TaskTrackerProvider;
+  id: string;
+  name: string;
+  type: TaskTrackerBoardType;
+  projectId?: string;
+  projectKey?: string;
+  url?: string;
+}
+
+export interface TaskTrackerStatusDto {
+  id: string;
+  name: string;
+  category: TaskTrackerStatusCategory;
+}
+
+export interface TaskTrackerTaskDto {
+  provider: TaskTrackerProvider;
+  id: string;
+  key: string;
+  title: string;
+  description: string;
+  url?: string;
+  boardId?: string;
+  projectId?: string;
+  projectKey?: string;
+  status: TaskTrackerStatusDto;
+  availableStatuses?: TaskTrackerStatusDto[];
+  labels: string[];
+  assignees: string[];
+  dueAt?: string;
+  updatedAt?: string;
+}
+
+export interface TaskTrackerTaskQuery {
+  boardId?: string;
+  projectId?: string;
+  limit?: number;
+}
+
+/** Durable task-link projection returned for one Polyth session. */
+export interface TaskTrackerSessionTaskDto {
+  provider: TaskTrackerProvider;
+  taskId: string;
+  taskKey: string;
+  title: string;
+  statusId: string;
+  statusName: string;
+  completed: boolean;
+  selectedAtSeq: number;
+  updatedAtSeq: number;
+}
+
+export interface TaskTrackerService {
+  providers(): TaskTrackerProviderDto[];
+  listProjects(provider: TaskTrackerProvider): Promise<TaskTrackerProjectDto[]>;
+  listBoards(provider: TaskTrackerProvider, projectId?: string): Promise<TaskTrackerBoardDto[]>;
+  listTasks(provider: TaskTrackerProvider, query: TaskTrackerTaskQuery): Promise<TaskTrackerTaskDto[]>;
+  getTask(provider: TaskTrackerProvider, taskId: string): Promise<TaskTrackerTaskDto>;
+  updateStatus(
+    provider: TaskTrackerProvider,
+    taskId: string,
+    statusId: string,
+  ): Promise<TaskTrackerTaskDto>;
+}
+
+export interface TaskSelectedData {
+  provider: TaskTrackerProvider;
+  taskId: string;
+  taskKey: string;
+  title: string;
+  url?: string;
+  statusId: string;
+  statusName: string;
+}
+
+export interface TaskStatusChangedData extends TaskSelectedData {
+  previousStatusId: string;
+  previousStatusName: string;
+}
+
+export interface TaskCompletedData extends TaskSelectedData {}
+
 // ---------------------------------------------------------------- UI contributions (host + client shared shapes)
 
 /** Canonical slot vocabulary — the runtime list backs `UiSlot` so the
@@ -1804,5 +1912,44 @@ export const CAP = {
   sessionPersistence: cap<SessionPersistence>("polyth.sessionPersistence"),
   runtime: cap<AgentRuntime>("polyth.agentRuntime"),
   projects: cap<ProjectService>("polyth.projects"),
+  taskTrackers: cap<TaskTrackerService>("polyth.taskTrackers"),
   ui: cap<UiContributionRegistry>("polyth.ui"),
 } as const;
+
+/** Capability ids exposed by the composed server to clients and agent
+ * sessions. Keeping this normative list in contracts prevents the composition
+ * root from accumulating feature-specific declarations. */
+export const SERVER_CAPABILITY_IDS = [
+  "polyth.sessions",
+  "polyth.sessionPersistence",
+  "polyth.projects",
+  "polyth.agentRuntime",
+  "polyth.goals",
+  "polyth.files",
+  "polyth.commands",
+  "polyth.git",
+  "polyth.worktrees",
+  "polyth.terminal",
+  "polyth.multirun",
+  "polyth.workflow",
+  "polyth.fusion",
+  "polyth.walkthrough",
+  "polyth.schedule",
+  "polyth.tracks",
+  "polyth.github",
+  "polyth.taskTrackers",
+  "polyth.control",
+  "polyth.agentProfiles",
+  "polyth.settings",
+  "polyth.mcp",
+  "polyth.plugins",
+  "polyth.knowledge",
+  "polyth.review",
+  "polyth.usage",
+  "polyth.browser",
+  "polyth.voice",
+  "polyth.assist",
+  "polyth.homeAssistant",
+  "polyth.secureSafe",
+  "polyth.ssh",
+] as const;

@@ -3,7 +3,7 @@
 // everywhere. The password itself is configured server-side (POLYTH_UI_PASSWORD
 // or a hash in data/auth.json) — it never transits this page.
 import { useCallback, useEffect, useState } from "react";
-import { api, type AuthDeviceDto, type AuthStatusDto } from "../../api.ts";
+import { api, type AuthDeviceDto, type AuthStatusDto } from "@polyth/session/web-api";
 import { confirmAlert } from "../../alerts.ts";
 import { EmptyState, PageHead, Row } from "./parts.tsx";
 import { getLocale, tr } from "../../i18n/index.ts";

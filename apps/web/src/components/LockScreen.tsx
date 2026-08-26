@@ -3,7 +3,7 @@
 // assets are public, so this shell always renders; every /api call behind it
 // stays 401 until login mints the polyth_auth cookie.
 import { useEffect, useRef, useState } from "react";
-import { api } from "../api.ts";
+import { api } from "@polyth/session/web-api";
 import { tr } from "../i18n/index.ts";
 
 export default function LockScreen({ onUnlocked }: { onUnlocked: () => void }) {

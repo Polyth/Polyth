@@ -3,6 +3,7 @@ import { build } from "esbuild";
 import { copyFile, cp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { scaleUiFontSizes } from "./fontScaleCss.ts";
+import { discoverWebPackages } from "./webPackages.ts";
 
 const here = import.meta.dirname;
 const dist = join(here, "dist");
@@ -51,8 +52,20 @@ await build({
   define: { "process.env.NODE_ENV": '"production"' },
   logLevel: "info",
 });
+const webPackages = await discoverWebPackages(join(here, "..", "..", "packages"));
+const browserEntries: Record<string, string> = {
+  main: join(here, "src/main.tsx"),
+};
+for (const pkg of webPackages) {
+  browserEntries[`web-packages/${pkg.id}/entry`] = pkg.entryFile;
+}
+
+// Build the shell and package entries as one split graph. Feature components
+// still consume generic shell seams such as the store and i18n; a shared graph
+// guarantees those stateful modules are singletons instead of silently
+// cloning them once per dynamically loaded package.
 await build({
-  entryPoints: [join(here, "src/main.tsx")],
+  entryPoints: browserEntries,
   bundle: true,
   platform: "browser",
   format: "esm",
@@ -62,7 +75,7 @@ await build({
   sourcemap: true,
   minify: true,
   outdir: dist,
-  entryNames: "[name]",
+  entryNames: "[dir]/[name]",
   chunkNames: "chunks/[name]-[hash]",
   assetNames: "assets/[name]-[hash]",
   loader: { ".css": "css" },
@@ -70,6 +83,28 @@ await build({
   define: { "process.env.NODE_ENV": '"production"' },
   logLevel: "info",
 });
+const webPackageManifest: Array<{
+  id: string;
+  module: string;
+  styles: string[];
+}> = [];
+for (const pkg of webPackages) {
+  const outdir = join(dist, "web-packages", pkg.id);
+  const outputs = await readdir(outdir);
+  webPackageManifest.push({
+    id: pkg.id,
+    module: `/web-packages/${pkg.id}/entry.js`,
+    styles: outputs
+      .filter((name) => name.endsWith(".css"))
+      .sort()
+      .map((name) => `/web-packages/${pkg.id}/${name}`),
+  });
+}
+await mkdir(join(dist, "web-packages"), { recursive: true });
+await writeFile(
+  join(dist, "web-packages", "manifest.json"),
+  JSON.stringify({ packages: webPackageManifest }),
+);
 await copyFile(join(here, "src/index.html"), join(dist, "index.html"));
 const projectIconNames = (await readdir(projectIcons))
   .filter((name) => name.endsWith(".svg"))

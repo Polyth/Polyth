@@ -23,14 +23,19 @@ import {
   type SlashCommand,
   type SnippetDef,
   type Worktree,
-} from "../api.ts";
+} from "@polyth/session/web-api";
 import { loadDraft, saveDraft, type AutocompleteItem } from "../utils.ts";
 import SlotHost from "./slots/SlotHost.ts";
 import { dragKind, dropIntoSession } from "../dnd.ts";
 import {
-  addAttachment, attachGithubLink, attachUpload, parseGithubUrl, removeAttachment,
-  takeAttachments, tryAttachGithubUrl, usePendingAttachments, type GithubAttachResult,
+  addAttachment, attachUpload, removeAttachment, takeAttachments, usePendingAttachments,
 } from "../attachments.ts";
+import {
+  attachGithubLink,
+  parseGithubUrl,
+  tryAttachGithubUrl,
+  type GithubAttachResult,
+} from "@polyth/github/attachments";
 import AttachmentPills from "./AttachmentPills.tsx";
 import {
   COMPOSER_INSERT,
@@ -72,9 +77,9 @@ import AdaptiveTextInput, { type TextInputHandle } from "./input/AdaptiveTextInp
 import ComposerAddMenu from "./ComposerAddMenu.tsx";
 import ComposerFocusDialog from "./ComposerFocusDialog.tsx";
 import QueuedMessageList from "./QueuedMessageList.tsx";
-import { GoalAttachForm } from "./GoalStrip.tsx";
+import { GoalAttachForm } from "../../../../packages/goals/widgets/GoalStrip.tsx";
 import { announce } from "./a11y/live.tsx";
-import { noteModelUsed } from "../modelPrefs.ts";
+import { noteModelUsed } from "@polyth/models/web-prefs";
 import { getUiSettings, useUiSettings } from "../uiPrefs.ts";
 import { migrateFavoritesOnce, profilesLoaded, useProfiles } from "../profiles.ts";
 import AgentProfileForm from "./AgentProfileForm.tsx";
@@ -89,7 +94,7 @@ import { agentPickerDefaultLabel } from "../composerDefaults.ts";
 import { friendlyError, matchesSendShortcut, modKeyLabel, parseModelRef } from "../settings.ts";
 import { Icon } from "../icons.tsx";
 import { useWorkspaceMode } from "../widgets/workspaceMode.ts";
-import ModelPicker, { modelContextLabel, modelMetaLine, modelSupportsThinking } from "./ModelPicker.tsx";
+import ModelPicker, { modelContextLabel, modelMetaLine, modelSupportsThinking } from "../../../../packages/models/widgets/ModelPicker.tsx";
 import { resolveProjectModelDefault, useSessionDefaults } from "../sessionDefaults.ts";
 import { getModelThinking, setModelThinking } from "../thinkingPrefs.ts";
 import { roleKind, useRolePrefs } from "../rolePrefs.ts";

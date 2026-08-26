@@ -17,7 +17,7 @@ import {
   deriveMessages,
   unrestoredCompactionSeq,
 } from "@polyth/session";
-import { CAP, type AgentRuntime, type Disposable, type RemoteHost, type RuntimeEvent, type SessionEvent, type SessionProjection, type SessionService } from "@polyth/contracts";
+import { CAP, SERVER_CAPABILITY_IDS, type AgentRuntime, type Disposable, type RemoteHost, type RuntimeEvent, type SessionEvent, type SessionProjection, type SessionService } from "@polyth/contracts";
 import {
   createBrowserToolBridge,
   createConfigApplier,
@@ -28,6 +28,7 @@ import {
 } from "@polyth/backend-opencode";
 import {
   createServerServiceRegistry,
+  discoverServerPackages,
   serverServiceKey,
   type HttpServerContext,
   type ServerPackageHost,
@@ -119,6 +120,8 @@ export async function boot(opts: BootOptions = {}) {
   const port = opts.port ?? Number(process.env.PORT ?? 4400);
   opts.hostname ??= process.env.HOST;
   const dataDir = resolve(opts.dataDir ?? process.env.POLYTH_DATA_DIR ?? "./data");
+  const packagesDir = opts.packagesDir ?? resolve(__dirname, "../..");
+  const discoveredPackageManifests = await discoverServerPackages(packagesDir);
   mkdirSync(dataDir, { recursive: true });
   const routeRegistry = createRouteRegistry();
   const packageLifecycle = createPackageLifecycle(routeRegistry);
@@ -135,6 +138,7 @@ export async function boot(opts: BootOptions = {}) {
   };
   const packageRegistry = createPackageRegistry({
     file: `${dataDir}/packages.json`,
+    descriptors: discoveredPackageManifests.map((pkg) => pkg.descriptor),
     onSetEnabled: (id, enabled) => enabled
       ? packageLifecycle.enable(id)
       : packageLifecycle.disable(id),
@@ -529,7 +533,8 @@ export async function boot(opts: BootOptions = {}) {
     onHttpServer,
   };
   const discoveredPackages = await registerDiscoveredPackages({
-    packagesDir: opts.packagesDir ?? resolve(__dirname, "../.."),
+    packagesDir,
+    discovered: discoveredPackageManifests,
     host: packageHost,
     lifecycle: packageLifecycle,
     routes: routeRegistry,
@@ -785,7 +790,7 @@ export async function boot(opts: BootOptions = {}) {
   ];
   const routes: RouteHandler[] = [...staticCoreRoutes, routeRegistry.handler];
 
-  const allCapabilities = () => ["polyth.sessions", "polyth.sessionPersistence", "polyth.projects", "polyth.agentRuntime", "polyth.goals", "polyth.files", "polyth.commands", "polyth.git", "polyth.worktrees", "polyth.terminal", "polyth.multirun", "polyth.workflow", "polyth.fusion", "polyth.walkthrough", "polyth.schedule", "polyth.tracks", "polyth.github", "polyth.control", "polyth.agentProfiles", "polyth.settings", "polyth.mcp", "polyth.plugins", "polyth.knowledge", "polyth.review", "polyth.usage", "polyth.browser", "polyth.voice", "polyth.assist", "polyth.homeAssistant", "polyth.secureSafe", "polyth.ssh"];
+  const allCapabilities = () => [...SERVER_CAPABILITY_IDS];
 
   await packageLifecycle.startEnabled(packageRegistry);
 
