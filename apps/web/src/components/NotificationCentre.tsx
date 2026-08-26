@@ -16,6 +16,7 @@ import {
 } from "../notificationCentre.ts";
 import { defineWidgetPlugin, registerWidgetPlugin } from "../widgets/catalog.ts";
 import { getLocale, tr } from "../i18n/index.ts";
+import { RAIL_ICONS } from "../railIcons.ts";
 
 /** The rail-surface id the workspace.right.tabs slot bridge derives for the
  *  panel — what the bell toggles and hosts persist as the open surface. */
@@ -198,6 +199,9 @@ export function installNotificationCentre(): void {
     "notification-centre",
     () => <NotificationCentrePanel />,
     0,
-    { title: tr("notificationcentre.notifications") },
+    {
+      title: tr("notificationcentre.notifications"),
+      icon: RAIL_ICONS["notification-centre"],
+    },
   );
 }

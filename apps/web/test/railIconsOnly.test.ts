@@ -38,8 +38,31 @@ test("ContextRail has no JUMPS rows — every placed capability gets a launcher"
 
 test("right-rail utilities use distinct semantic icons", async () => {
   const src = await readFile(new URL("../src/components/railSurfaces.tsx", import.meta.url), "utf8");
-  assert.match(src, /id: "context"[\s\S]*?icon: Icon\.context/);
-  assert.match(src, /id: "knowledge"[\s\S]*?icon: Icon\.book/);
-  assert.match(src, /id: "usage"[\s\S]*?icon: Icon\.usage/);
-  assert.match(src, /id: "events"[\s\S]*?icon: Icon\.events/);
+  assert.match(src, /id: "context"[\s\S]*?icon: RAIL_ICONS\.context/);
+  assert.match(src, /id: "knowledge"[\s\S]*?icon: RAIL_ICONS\.knowledge/);
+  assert.match(src, /id: "usage"[\s\S]*?icon: RAIL_ICONS\.usage/);
+  assert.match(src, /id: "events"[\s\S]*?icon: RAIL_ICONS\.events/);
+});
+
+test("every built-in rail item has a unique rendered icon", async () => {
+  const [mappingSource, iconsSource] = await Promise.all([
+    readFile(new URL("../src/railIcons.ts", import.meta.url), "utf8"),
+    readFile(new URL("../src/icons.tsx", import.meta.url), "utf8"),
+  ]);
+  const entries = [...mappingSource.matchAll(/^\s{2}(?:"([^"]+)"|([\w-]+)): Icon\.(\w+),$/gm)]
+    .map((match) => ({ item: match[1] ?? match[2]!, icon: match[3]! }));
+  assert.deepEqual(entries.map((entry) => entry.item), [
+    "session", "files", "git", "terminal", "browser", "goals", "multirun",
+    "workflow", "fusion", "walkthrough", "schedule", "usage", "github",
+    "knowledge", "context", "voice", "models-agents", "events", "diagnostics",
+    "tracks", "notification-centre",
+  ]);
+  assert.equal(new Set(entries.map((entry) => entry.icon)).size, entries.length);
+
+  const markup = entries.map((entry) => {
+    const match = iconsSource.match(new RegExp(`^\\s{2}${entry.icon}: \\(\\) => (.+),$`, "m"));
+    assert.ok(match, `missing Icon.${entry.icon}`);
+    return match[1]!;
+  });
+  assert.equal(new Set(markup).size, markup.length, "rail icons must render different SVG markup");
 });

@@ -22,7 +22,6 @@ import {
   closeWorkspacePane, collapseWorkspacePane, expandWorkspacePane, setPaneFullscreen,
   getState, setRailPlugin, setSidebarOpen, toggleRailPlugin, useActiveModel, useStore,
 } from "../store.ts";
-import { Icon } from "../icons.tsx";
 import { useGitStatus } from "../gitStatusStore.ts";
 import { gitChangedFiles } from "../pendingChanges.ts";
 import {
@@ -42,6 +41,7 @@ import { setPlacementOverride } from "../capabilityLayout.ts";
 import { tr } from "../i18n/index.ts";
 import { MOD } from "../format.ts";
 import { useKeymap } from "../hotkeys.ts";
+import { railIconFor } from "../railIcons.ts";
 
 const NO_EVENTS: never[] = [];
 /** Fallback separator chrome before the real element is measured. */
@@ -86,29 +86,12 @@ interface RailButton {
   id: string;
   capabilityId: string;
   title: string;
-  icon?: RailSurface["icon"];
+  icon: NonNullable<RailSurface["icon"]>;
   badge: number;
   presentation?: RailSurface["presentation"];
   active: boolean;
   activate: () => void;
 }
-
-const capabilityIcon = (id: string): RailSurface["icon"] => {
-  switch (id) {
-    case "session": return Icon.chat;
-    case "goals": return Icon.target;
-    case "multirun": return Icon.compare;
-    case "workflow": return Icon.hierarchy;
-    case "fusion": return Icon.fuse;
-    case "walkthrough": return Icon.list;
-    case "schedule": return Icon.clock;
-    case "github": return Icon.github;
-    case "voice": return Icon.mic;
-    case "models-agents": return Icon.gear;
-    case "diagnostics": return Icon.shield;
-    default: return Icon.context;
-  }
-};
 
 /** Shared surface model: the header trigger and the rail/sheet host derive
  *  from the same registry + visibility result, so they can never disagree.
@@ -209,7 +192,7 @@ export default function ContextRail() {
     title: surface.id === "terminal"
       ? tr("terminalview.openTerminalShortcut", { shortcut: terminalShortcut })
       : surface.title,
-    icon: surface.icon,
+    icon: surface.icon ?? railIconFor(surface.capabilityId ?? surface.id),
     badge: badgeOf(surface),
     presentation: surface.presentation,
     active: rail === surface.id,
@@ -229,7 +212,7 @@ export default function ContextRail() {
         id: capability.descriptor.id,
         capabilityId: capability.descriptor.id,
         title: capability.descriptor.label,
-        icon: capabilityIcon(capability.descriptor.id),
+        icon: railIconFor(capability.descriptor.id),
         badge: 0,
         active: activeCapability(capability),
         activate: () => {
@@ -678,7 +661,7 @@ export default function ContextRail() {
                   {...(s.presentation ? { "data-pane-launcher": s.id } : {})}
                   onClick={s.activate}
                 >
-                  {s.icon ? <s.icon /> : <Icon.context />}
+                  <s.icon />
                   <Badge n={s.badge} />
                 </button>
               ))}
@@ -722,7 +705,7 @@ export default function ContextRail() {
               {...(s.presentation ? { "data-pane-launcher": s.id } : {})}
               onClick={s.activate}
             >
-              {s.icon ? <s.icon /> : <Icon.context />}
+              <s.icon />
               <Badge n={s.badge} />
             </button>
             ))}

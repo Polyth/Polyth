@@ -7,6 +7,7 @@ import { registerPackageOnboarding } from "./onboarding/registry.ts";
 import { KNOWLEDGE_TOUR } from "./onboarding/tours/installed.ts";
 import { combineUnregister } from "./settingsPage.ts";
 import { tr } from "../i18n/index.ts";
+import { RAIL_ICONS } from "../railIcons.ts";
 
 export function installKnowledgePackage(): () => void {
   const unregisterPanel = registerSlot(
@@ -14,7 +15,11 @@ export function installKnowledgePackage(): () => void {
     "tracks",
     () => createElement(TracksPanel),
     1,
-    { title: tr("packages.knowledge.tracks") },
+    {
+      title: tr("packages.knowledge.tracks"),
+      capabilityId: "tracks",
+      icon: RAIL_ICONS.tracks,
+    },
   );
   const unregisterCapability = registerCapability({
     id: "tracks",

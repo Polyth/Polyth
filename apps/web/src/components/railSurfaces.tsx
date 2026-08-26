@@ -10,9 +10,9 @@
 // switching changes presentation, never implementation identity.
 import { useActiveModel, useStore } from "../store.ts";
 import { fmtCost, fmtTokens } from "../format.ts";
-import { Icon } from "../icons.tsx";
 import type { SessionEvent } from "@polyth/contracts";
 import { contextGauge } from "../reduce.ts";
+import { RAIL_ICONS } from "../railIcons.ts";
 import {
   registerSurface,
   type RailSurfaceComponentProps,
@@ -157,31 +157,31 @@ function EventsView(props?: RailSurfaceComponentProps) {
 }
 
 registerSurface({
-  id: "files", title: tr("railsurfaces.projectFiles"), capabilityId: "files", order: 1, icon: Icon.files,
+  id: "files", title: tr("railsurfaces.projectFiles"), capabilityId: "files", order: 1, icon: RAIL_ICONS.files,
   component: EditorView, presentation: pane({ defaultRatio: 0.6, minWidth: 380, preferredMaxWidth: 760 }),
 });
 registerSurface({
-  id: "git", title: tr("railsurfaces.sourceControl"), capabilityId: "git", order: 2, icon: Icon.tree,
+  id: "git", title: tr("railsurfaces.sourceControl"), capabilityId: "git", order: 2, icon: RAIL_ICONS.git,
   component: GitView, badge: (ctx) => ctx.changeCount,
   presentation: pane({ defaultRatio: 0.4, minWidth: 340, preferredMaxWidth: 640 }),
 });
 registerSurface({
-  id: "terminal", title: tr("railsurfaces.terminal"), capabilityId: "terminal", order: 3, icon: Icon.term,
+  id: "terminal", title: tr("railsurfaces.terminal"), capabilityId: "terminal", order: 3, icon: RAIL_ICONS.terminal,
   component: TerminalView,
   presentation: pane({ defaultRatio: 0.6, minWidth: 380, preferredMaxWidth: 760, escape: "content" }),
 });
 registerSurface({
-  id: "browser", title: tr("railsurfaces.browser"), capabilityId: "browser", order: 4, icon: Icon.globe,
+  id: "browser", title: tr("railsurfaces.browser"), capabilityId: "browser", order: 4, icon: RAIL_ICONS.browser,
   component: PreviewView, presentation: pane({ defaultRatio: 0.45, minWidth: 380, preferredMaxWidth: 760 }),
 });
 
-registerSurface({ id: "context", title: tr("railsurfaces.context"), capabilityId: "context", order: 30, icon: Icon.context, component: ContextView });
-registerSurface({ id: "knowledge", title: tr("railsurfaces.knowledge"), capabilityId: "knowledge", order: 40, icon: Icon.book, component: KnowledgePanel });
+registerSurface({ id: "context", title: tr("railsurfaces.context"), capabilityId: "context", order: 30, icon: RAIL_ICONS.context, component: ContextView });
+registerSurface({ id: "knowledge", title: tr("railsurfaces.knowledge"), capabilityId: "knowledge", order: 40, icon: RAIL_ICONS.knowledge, component: KnowledgePanel });
 registerSurface({
-  id: "usage", title: tr("railsurfaces.usage"), capabilityId: "usage", order: 50, icon: Icon.usage,
+  id: "usage", title: tr("railsurfaces.usage"), capabilityId: "usage", order: 50, icon: RAIL_ICONS.usage,
   component: UsagePanel,
 });
 registerSurface({
-  id: "events", title: tr("railsurfaces.events"), capabilityId: "events", order: 60, icon: Icon.events,
+  id: "events", title: tr("railsurfaces.events"), capabilityId: "events", order: 60, icon: RAIL_ICONS.events,
   component: EventsView, badge: (ctx) => ctx.eventCount,
 });

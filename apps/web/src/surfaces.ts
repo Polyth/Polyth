@@ -104,12 +104,18 @@ export function useSurfaceVersion(): number {
  *  RailSurfaceContext is the bounded context every bridged renderer receives
  *  (EXT-SEAMS-V2) so contributed panels never spin up independent fetchers. */
 export function slotSurfaces(ctx: RailSurfaceContext): RailSurface[] {
-  return listSlots("workspace.right.tabs").map((item) => ({
-    id: `slot:${item.id}`,
-    title: typeof item.meta?.title === "string" ? (item.meta.title as string) : item.id,
-    order: 100 + item.order,
-    component: () => item.render({ ...ctx }) as ReactNode,
-  }));
+  return listSlots("workspace.right.tabs").map((item) => {
+    const icon = item.meta?.icon;
+    const capabilityId = item.meta?.capabilityId;
+    return {
+      id: `slot:${item.id}`,
+      title: typeof item.meta?.title === "string" ? item.meta.title : item.id,
+      ...(typeof capabilityId === "string" ? { capabilityId } : {}),
+      ...(typeof icon === "function" ? { icon: icon as NonNullable<RailSurface["icon"]> } : {}),
+      order: 100 + item.order,
+      component: () => item.render({ ...ctx }) as ReactNode,
+    };
+  });
 }
 
 /** Pure gate: content-driven visibility only. The old plugin allow-list is

@@ -56,13 +56,22 @@ test("visibleSurfaces gates on content-driven visibility only — no plugin allo
 });
 
 test("workspace.right.tabs slot items become surfaces without registry edits", () => {
-  const off = registerSlot("workspace.right.tabs", "my-plugin", () => null, 2, { title: "My plugin" });
+  const PluginIcon = () => null;
+  const off = registerSlot("workspace.right.tabs", "my-plugin", () => null, 2, {
+    title: "My plugin",
+    capabilityId: "my-capability",
+    icon: PluginIcon,
+  });
   const off2 = registerSlot("workspace.right.tabs", "bare", () => null, 1);
   try {
     const bridged = slotSurfaces(ctx());
     assert.deepEqual(bridged.map((s) => s.id), ["slot:bare", "slot:my-plugin"]);
     assert.equal(bridged[1]!.title, "My plugin");
+    assert.equal(bridged[1]!.capabilityId, "my-capability");
+    assert.equal(bridged[1]!.icon, PluginIcon);
     assert.equal(bridged[0]!.title, "bare"); // falls back to the slot id
+    assert.equal(bridged[0]!.capabilityId, undefined);
+    assert.equal(bridged[0]!.icon, undefined);
     assert.ok(bridged.every((s) => s.order >= 100)); // plugins sort after built-ins
   } finally {
     off();
