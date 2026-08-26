@@ -155,10 +155,10 @@ test("390px and 1280px shells render the current navigation contracts", async ()
       };
     }
 
-    await page.screenshot({ path: join(ARTIFACTS, `fix_redesign_shell_${width}.png`) });
+    await page.screenshot({ path: join(ARTIFACTS, `fix_redesign_final_shell_${width}.png`) });
     await closePage(page);
   }
-  await writeFile(join(ARTIFACTS, "fix_redesign_geometry.json"), JSON.stringify(geometry, null, 2));
+  await writeFile(join(ARTIFACTS, "fix_redesign_final_geometry.json"), JSON.stringify(geometry, null, 2));
 });
 
 test("top rail and bottom bar open their current destinations", async () => {
@@ -293,6 +293,6 @@ test("mobile shortcut settings support touch and keyboard sorting", async () => 
 
   const controls = await boxesOf(page, `${cardSelector} button, ${cardSelector} input`);
   assertTouchTargets(controls, "mobile shortcut settings");
-  await page.screenshot({ path: join(ARTIFACTS, "fix_redesign_sorting_390.png") });
+  await page.screenshot({ path: join(ARTIFACTS, "fix_redesign_final_sorting_390.png") });
   await closePage(page);
 });
