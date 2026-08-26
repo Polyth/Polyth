@@ -2186,6 +2186,7 @@ input.notification-preview { font-family: var(--mono); font-size: 12.5px; min-wi
 
 /* ---------- multi-run ---------- */
 .multirun-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px; }
+.multirun-controls > select { min-width: 0; max-width: 100%; }
 .run-card {
   display: flex; flex-direction: column;
   border: 1px solid var(--border-soft); border-radius: var(--radius); background: var(--panel);

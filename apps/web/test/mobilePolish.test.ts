@@ -125,6 +125,14 @@ test("all mobile chat composers expose project and worktree targets", () => {
   assert.match(css, /\.polyth-gradient\s*\{[^}]*linear-gradient/s);
 });
 
+test("Multi-Run model controls may shrink below native option widths", () => {
+  const view = read("../src/components/MultiRunView.tsx");
+  const css = read("../src/styles.css");
+
+  assert.match(view, /className="view-toolbar-row multirun-controls"/);
+  assert.match(css, /\.multirun-controls > select\s*\{[^}]*min-width:\s*0;[^}]*max-width:\s*100%;/s);
+});
+
 test("source-control surfaces keep responsive and accessible audit contracts", () => {
   const git = read("../src/components/GitView.tsx");
   const github = read("../src/components/GithubView.tsx");
