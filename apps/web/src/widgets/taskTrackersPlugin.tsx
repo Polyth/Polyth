@@ -742,7 +742,7 @@ export function TaskTrackerBoard({
   );
 }
 
-function LinkedTaskWidget({ sessionId }: Pick<WidgetRenderContext, "sessionId">) {
+export function LinkedTaskWidget({ sessionId }: Pick<WidgetRenderContext, "sessionId">) {
   const [linked, setLinked] = useState<TaskTrackerSessionTaskDto | null>(null);
   const [task, setTask] = useState<TaskTrackerTaskDto | null>(null);
   const [statusId, setStatusId] = useState("");

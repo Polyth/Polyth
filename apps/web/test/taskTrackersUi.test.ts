@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { register } from "node:module";
+import { readFile } from "node:fs/promises";
 import { Window } from "happy-dom";
 import type {
   TaskTrackerSessionTaskDto,
@@ -29,6 +30,7 @@ const { act, createElement } = await import("react");
 const { createRoot } = await import("react-dom/client");
 const { api } = await import("../src/api.ts");
 const {
+  LinkedTaskWidget,
   TaskTrackerBoard,
   defaultViewForBoard,
   groupTasksByStatus,
@@ -110,6 +112,18 @@ test("task board utilities choose sensible views and stable status columns", () 
     ]).map((group) => [group.name, group.tasks.length]),
     [["To do", 1], ["Review", 1], ["Done", 1]],
   );
+});
+
+test("task tracker surfaces enforce mobile containment, touch, zoom, and safe-area rules", async () => {
+  const css = await readFile(new URL("../src/widgets/taskTrackers.css", import.meta.url), "utf8");
+  assert.match(css, /\.tt-board button,[\s\S]*min-height:\s*44px/);
+  assert.match(css, /@container task-tracker \(max-width: 480px\)[\s\S]*font-size:\s*16px/);
+  assert.match(css, /\.tt-task-surface[\s\S]*overflow:\s*auto/);
+  assert.match(css, /\.tt-board-content[\s\S]*overflow:\s*hidden/);
+  assert.match(css, /env\(safe-area-inset-bottom/);
+
+  const html = await readFile(new URL("../src/index.html", import.meta.url), "utf8");
+  assert.match(html, /width=device-width, initial-scale=1, viewport-fit=cover/);
 });
 
 test("task board completes browse, filter, link, status, complete, and refresh journey", async () => {
@@ -212,6 +226,11 @@ test("task board completes browse, filter, link, status, complete, and refresh j
     assert.equal(links[0]?.instructions, "Preserve swipe gestures.");
     assert.match(container.textContent ?? "", /Linked to session/);
 
+    await act(async () => { clickByText(container, "Link again").click(); });
+    await settle();
+    assert.equal(links.length, 2);
+    assert.equal(links[1]?.startAgent, false);
+
     const status = container.querySelector<HTMLSelectElement>(".tt-status-row select");
     assert.ok(status);
     await act(async () => {
@@ -243,6 +262,47 @@ test("task board completes browse, filter, link, status, complete, and refresh j
     api.taskTrackerTask = originals.task;
     api.taskTrackerSessionTasks = originals.sessionTasks;
     api.taskTrackerLink = originals.link;
+    api.taskTrackerUpdateStatus = originals.update;
+  }
+});
+
+test("linked-task mini widget updates and completes the active session task", async () => {
+  const originals = {
+    task: api.taskTrackerTask,
+    sessionTasks: api.taskTrackerSessionTasks,
+    update: api.taskTrackerUpdateStatus,
+  };
+  let currentTask = taskWith(statuses[1]);
+  const updates: string[] = [];
+  api.taskTrackerSessionTasks = async () => [linkedTask(currentTask)];
+  api.taskTrackerTask = async () => currentTask;
+  api.taskTrackerUpdateStatus = async (_provider, _taskId, input) => {
+    updates.push(input.statusId);
+    currentTask = taskWith(statuses.find((status) => status.id === input.statusId)!);
+    return currentTask;
+  };
+
+  const container = document.createElement("div");
+  document.body.appendChild(container);
+  const root = createRoot(container);
+  try {
+    await act(async () => {
+      root.render(createElement(LinkedTaskWidget, { sessionId: "session-1" }));
+    });
+    await settle(3);
+    assert.match(container.textContent ?? "", /POL-7/);
+    assert.match(container.textContent ?? "", /Fix mobile overflow/);
+    assert.ok(container.querySelector<HTMLAnchorElement>('a[href*="/browse/POL-7"]'));
+
+    await act(async () => { clickByText(container, "Complete").click(); });
+    await settle();
+    assert.deepEqual(updates, ["done"]);
+    assert.match(container.textContent ?? "", /Completed/);
+  } finally {
+    await act(async () => { root.unmount(); });
+    container.remove();
+    api.taskTrackerTask = originals.task;
+    api.taskTrackerSessionTasks = originals.sessionTasks;
     api.taskTrackerUpdateStatus = originals.update;
   }
 });
