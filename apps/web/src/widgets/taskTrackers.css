@@ -1385,7 +1385,7 @@
 }
 
 @container task-tracker (max-width: 480px) {
-  .tt-board.has-detail {
+  .tt-board.has-detail .tt-provider-panel {
     min-height: min(500px, 70svh);
   }
 
