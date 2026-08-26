@@ -195,7 +195,9 @@ test("mobile shortcut settings support touch and keyboard sorting", async () => 
   const page = await openApp(390, `/p/${PROJECT}/s/${S_LOADED}`, ".timeline .msg");
   await page.click(".mobile-shortcut-settings");
   await page.waitForSelector('[role="dialog"][aria-label="Settings"]', { state: "visible" });
-  if (await page.locator(".package-tour").count()) {
+  // Package onboarding is scheduled after Settings mounts.
+  await page.waitForTimeout(500);
+  if (await page.locator(".package-tour").isVisible().catch(() => false)) {
     await page.keyboard.press("Escape");
     await page.waitForSelector(".package-tour", { state: "hidden" });
   }
