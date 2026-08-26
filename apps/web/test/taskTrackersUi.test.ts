@@ -118,12 +118,50 @@ test("task tracker surfaces enforce mobile containment, touch, zoom, and safe-ar
   const css = await readFile(new URL("../src/widgets/taskTrackers.css", import.meta.url), "utf8");
   assert.match(css, /\.tt-board button,[\s\S]*min-height:\s*44px/);
   assert.match(css, /@container task-tracker \(max-width: 480px\)[\s\S]*font-size:\s*16px/);
+  assert.match(css, /@container task-tracker \(max-width: 820px\)[\s\S]*\.tt-detail[\s\S]*position:\s*absolute/);
+  assert.match(css, /@container task-tracker \(max-width: 560px\)[\s\S]*\.tt-board-header[\s\S]*flex-direction:\s*column/);
   assert.match(css, /\.tt-task-surface[\s\S]*overflow:\s*auto/);
   assert.match(css, /\.tt-board-content[\s\S]*overflow:\s*hidden/);
   assert.match(css, /env\(safe-area-inset-bottom/);
 
   const html = await readFile(new URL("../src/index.html", import.meta.url), "utf8");
   assert.match(html, /width=device-width, initial-scale=1, viewport-fit=cover/);
+});
+
+test("provider failures stay explicit and offer recovery instead of masquerading as setup", async () => {
+  const original = api.taskTrackerProviders;
+  let attempts = 0;
+  api.taskTrackerProviders = async () => {
+    attempts++;
+    if (attempts === 1) throw new Error("gateway unavailable");
+    return [
+      { provider: "jira", configured: false, requiredEnv: ["JIRA_BASE_URL", "JIRA_EMAIL", "JIRA_API_TOKEN"] },
+      { provider: "trello", configured: false, requiredEnv: ["TRELLO_API_KEY", "TRELLO_API_TOKEN"] },
+    ];
+  };
+  const container = document.createElement("div");
+  document.body.appendChild(container);
+  const root = createRoot(container);
+  try {
+    await act(async () => {
+      root.render(createElement(TaskTrackerBoard, {
+        sessionId: "session-1",
+        config: {},
+        updateConfig: () => undefined,
+      }));
+    });
+    await settle(3);
+    assert.match(container.textContent ?? "", /Task trackers didn’t load/);
+    assert.doesNotMatch(container.textContent ?? "", /Connect Jira/);
+    await act(async () => { clickByText(container, "Try again").click(); });
+    await settle(3);
+    assert.equal(attempts, 2);
+    assert.match(container.textContent ?? "", /Connect Jira/);
+  } finally {
+    await act(async () => { root.unmount(); });
+    container.remove();
+    api.taskTrackerProviders = original;
+  }
 });
 
 test("task board completes browse, filter, link, status, complete, and refresh journey", async () => {
@@ -188,11 +226,24 @@ test("task board completes browse, filter, link, status, complete, and refresh j
     assert.match(container.textContent ?? "", /Fix mobile overflow/);
     assert.ok(container.querySelector(".tt-kanban"), "scrum board starts in kanban view");
 
-    await act(async () => { clickByText(container, "Trello").click(); });
+    const jiraTab = container.querySelector<HTMLButtonElement>('[role="tab"][data-provider="jira"]');
+    const trelloTab = container.querySelector<HTMLButtonElement>('[role="tab"][data-provider="trello"]');
+    assert.ok(jiraTab);
+    assert.ok(trelloTab);
+    assert.equal(jiraTab.tabIndex, 0);
+    assert.equal(trelloTab.tabIndex, -1);
+    await act(async () => {
+      jiraTab.dispatchEvent(new dom.KeyboardEvent("keydown", { key: "ArrowRight", bubbles: true }));
+    });
     await settle();
+    assert.equal(trelloTab.getAttribute("aria-selected"), "true");
+    assert.equal(document.activeElement, trelloTab);
     assert.match(container.textContent ?? "", /TRELLO_API_KEY, TRELLO_API_TOKEN/);
-    await act(async () => { clickByText(container, "Jira").click(); });
+    await act(async () => {
+      trelloTab.dispatchEvent(new dom.KeyboardEvent("keydown", { key: "ArrowLeft", bubbles: true }));
+    });
     await settle(4);
+    assert.equal(jiraTab.getAttribute("aria-selected"), "true");
 
     await act(async () => {
       container.querySelector<HTMLButtonElement>('button[title="List view"]')?.click();
@@ -209,9 +260,13 @@ test("task board completes browse, filter, link, status, complete, and refresh j
     await act(async () => { clickByText(container, "Clear filters").click(); });
     assert.ok(container.querySelector(".tt-list-row"));
 
-    await act(async () => { container.querySelector<HTMLButtonElement>(".tt-list-row")?.click(); });
+    const selectedRow = container.querySelector<HTMLButtonElement>(".tt-list-row");
+    assert.ok(selectedRow);
+    await act(async () => { selectedRow.click(); });
     await settle();
     assert.match(container.querySelector(".tt-detail")?.textContent ?? "", /Hand off to the agent/);
+    assert.equal(container.querySelector(".tt-detail")?.getAttribute("role"), "dialog");
+    assert.equal(document.activeElement, container.querySelector(".tt-detail"));
     assert.ok(container.querySelector<HTMLAnchorElement>(".tt-external")?.href.includes("/browse/POL-7"));
 
     const instructions = container.querySelector<HTMLTextAreaElement>(".tt-detail textarea");
@@ -226,7 +281,7 @@ test("task board completes browse, filter, link, status, complete, and refresh j
     assert.equal(links[0]?.instructions, "Preserve swipe gestures.");
     assert.match(container.textContent ?? "", /Linked to session/);
 
-    await act(async () => { clickByText(container, "Link again").click(); });
+    await act(async () => { clickByText(container, "Refresh link").click(); });
     await settle();
     assert.equal(links.length, 2);
     assert.equal(links[1]?.startAgent, false);
@@ -248,6 +303,10 @@ test("task board completes browse, filter, link, status, complete, and refresh j
 
     await act(async () => {
       container.querySelector<HTMLButtonElement>('button[aria-label="Close task details"]')?.click();
+    });
+    await settle();
+    assert.equal(document.activeElement, selectedRow, "closing details restores focus to the selected task");
+    await act(async () => {
       container.querySelector<HTMLButtonElement>('button[aria-label="Refresh tasks"]')?.click();
     });
     await settle();

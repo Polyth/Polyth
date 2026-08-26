@@ -1,7 +1,10 @@
 import {
   useEffect,
+  useId,
   useMemo,
+  useRef,
   useState,
+  type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
 } from "react";
 import type {
@@ -140,13 +143,13 @@ function TaskCard({
 }: {
   task: TaskTrackerTaskDto;
   linked: boolean;
-  onOpen: (task: TaskTrackerTaskDto) => void;
+  onOpen: (task: TaskTrackerTaskDto, trigger: HTMLElement) => void;
 }) {
   return (
     <button
       type="button"
       className={`tt-task-card${linked ? " linked" : ""}`}
-      onClick={() => onOpen(task)}
+      onClick={(event) => onOpen(task, event.currentTarget)}
       aria-label={`Open ${task.key}: ${task.title}`}
     >
       <span className="tt-card-top">
@@ -195,6 +198,7 @@ function TaskDetail({
   onClose: () => void;
   onTaskChanged: (task: TaskTrackerTaskDto, linked?: boolean) => void;
 }) {
+  const detailRef = useRef<HTMLElement>(null);
   const [instructions, setInstructions] = useState("");
   const [statusId, setStatusId] = useState(task.status.id);
   const [busy, setBusy] = useState<"link" | "select" | "status" | "complete" | null>(null);
@@ -210,6 +214,10 @@ function TaskDetail({
   useEffect(() => {
     setStatusId(task.status.id);
   }, [task.id, task.status.id]);
+
+  useEffect(() => {
+    detailRef.current?.focus();
+  }, [task.id]);
 
   const statuses = task.availableStatuses ?? [];
   const doneStatus = statuses.find((status) => status.category === "done");
@@ -252,7 +260,17 @@ function TaskDetail({
   };
 
   return (
-    <aside className="tt-detail" aria-label={`${task.key} task details`}>
+    <aside
+      ref={detailRef}
+      className="tt-detail"
+      role="dialog"
+      aria-label={`${task.key} task details`}
+      aria-busy={loading || busy !== null}
+      tabIndex={-1}
+      onKeyDown={(event) => {
+        if (event.key === "Escape") onClose();
+      }}
+    >
       <header className="tt-detail-header">
         <div>
           <span className="tt-eyebrow">{providerMark(task.provider)} {PROVIDER_LABELS[task.provider]} · {task.key}</span>
@@ -269,6 +287,8 @@ function TaskDetail({
           {linked && <span className="tt-linked-chip"><Icon.link /> Linked to session</span>}
           {loading && <span className="tt-detail-loading" role="status">Refreshing…</span>}
         </div>
+        {notice && <p className="tt-notice" role="status" aria-live="polite">{notice}</p>}
+        {error && <p className="tt-error" role="alert">{error}</p>}
         {task.description
           ? <p className="tt-description">{task.description}</p>
           : <p className="tt-description muted">No description provided.</p>}
@@ -290,6 +310,8 @@ function TaskDetail({
             value={instructions}
             onChange={(event) => setInstructions(event.target.value)}
             placeholder="Optional instructions for the agent…"
+            aria-label="Additional instructions for the agent"
+            maxLength={2000}
             rows={3}
             disabled={busy !== null}
           />
@@ -300,14 +322,16 @@ function TaskDetail({
               disabled={!sessionId || busy !== null}
               onClick={() => void link(true)}
             >
-              <Icon.send /> {busy === "link" ? "Starting…" : linked ? "Start agent" : "Link & start agent"}
+              {busy === "link" ? <span className="tt-button-spinner" aria-hidden="true" /> : <Icon.send />}
+              {busy === "link" ? "Starting…" : linked ? "Start agent" : "Link & start agent"}
             </button>
             <button
               type="button"
               disabled={!sessionId || busy !== null}
               onClick={() => void link(false)}
             >
-              <Icon.link /> {busy === "select" ? "Linking…" : linked ? "Link again" : "Link only"}
+              {busy === "select" ? <span className="tt-button-spinner" aria-hidden="true" /> : <Icon.link />}
+              {busy === "select" ? "Linking…" : linked ? "Refresh link" : "Link only"}
             </button>
           </div>
           {!sessionId && <small className="tt-inline-hint">Open a session to link this task.</small>}
@@ -339,6 +363,7 @@ function TaskDetail({
                   disabled={!sessionId || busy !== null || statusId === task.status.id}
                   onClick={() => void mutate("status", statusId)}
                 >
+                  {busy === "status" && <span className="tt-button-spinner" aria-hidden="true" />}
                   {busy === "status" ? "Updating…" : "Update status"}
                 </button>
               </div>
@@ -349,7 +374,8 @@ function TaskDetail({
                   disabled={!sessionId || busy !== null}
                   onClick={() => void mutate("complete", doneStatus.id)}
                 >
-                  <Icon.check /> {busy === "complete" ? "Completing…" : "Mark complete"}
+                  {busy === "complete" ? <span className="tt-button-spinner" aria-hidden="true" /> : <Icon.check />}
+                  {busy === "complete" ? "Completing…" : "Mark complete"}
                 </button>
               )}
             </>
@@ -363,8 +389,6 @@ function TaskDetail({
             Open in {PROVIDER_LABELS[task.provider]} <Icon.external />
           </a>
         )}
-        {notice && <p className="tt-notice" role="status">{notice}</p>}
-        {error && <p className="tt-error" role="alert">{error}</p>}
       </div>
     </aside>
   );
@@ -375,6 +399,7 @@ export function TaskTrackerBoard({
   config,
   updateConfig,
 }: Pick<WidgetRenderContext, "sessionId" | "config" | "updateConfig">) {
+  const providerPanelId = useId();
   const configuredDefault = config.defaultView === "list" ? "list" : "kanban";
   const [providers, setProviders] = useState<TaskTrackerProviderDto[] | null>(null);
   const [provider, setProvider] = useState<TaskTrackerProvider>("jira");
@@ -392,6 +417,9 @@ export function TaskTrackerBoard({
   const [loading, setLoading] = useState<"providers" | "boards" | "tasks" | null>("providers");
   const [error, setError] = useState("");
   const [refreshKey, setRefreshKey] = useState(0);
+  const [loadEpoch, setLoadEpoch] = useState(0);
+  const selectedTriggerRef = useRef<HTMLElement | null>(null);
+  const detailRequestRef = useRef(0);
 
   const providerInfo = providers?.find((item) => item.provider === provider);
   const board = boards.find((item) => item.id === boardId) ?? null;
@@ -403,6 +431,7 @@ export function TaskTrackerBoard({
     void api.taskTrackerProviders()
       .then((items) => {
         if (!active) return;
+        setError("");
         setProviders(items);
         const firstConfigured = items.find((item) => item.configured);
         if (firstConfigured) setProvider(firstConfigured.provider);
@@ -414,7 +443,7 @@ export function TaskTrackerBoard({
         if (active) setLoading((current) => current === "providers" ? null : current);
       });
     return () => { active = false; };
-  }, []);
+  }, [loadEpoch]);
 
   useEffect(() => {
     if (!providerInfo?.configured) {
@@ -433,7 +462,7 @@ export function TaskTrackerBoard({
       .then((items) => { if (active) setProjects(items); })
       .catch((cause) => { if (active) setError(messageOf("Couldn’t load projects", cause)); });
     return () => { active = false; };
-  }, [provider, providerInfo?.configured]);
+  }, [loadEpoch, provider, providerInfo?.configured]);
 
   useEffect(() => {
     if (!providerInfo?.configured) return;
@@ -456,7 +485,7 @@ export function TaskTrackerBoard({
         if (active) setLoading((current) => current === "boards" ? null : current);
       });
     return () => { active = false; };
-  }, [provider, projectId, providerInfo?.configured]);
+  }, [loadEpoch, provider, projectId, providerInfo?.configured]);
 
   useEffect(() => {
     if (!boardId || !providerInfo?.configured) return;
@@ -472,7 +501,7 @@ export function TaskTrackerBoard({
         if (active) setLoading((current) => current === "tasks" ? null : current);
       });
     return () => { active = false; };
-  }, [boardId, provider, providerInfo?.configured, refreshKey]);
+  }, [boardId, loadEpoch, provider, providerInfo?.configured, refreshKey]);
 
   useEffect(() => {
     if (!sessionId) {
@@ -517,15 +546,63 @@ export function TaskTrackerBoard({
   }, [config.hideCompleted, query, statusFilter, tasks]);
   const visibleGroups = useMemo(() => groupTasksByStatus(visibleTasks), [visibleTasks]);
 
-  const openTask = (task: TaskTrackerTaskDto) => {
+  const openTask = (task: TaskTrackerTaskDto, trigger?: HTMLElement) => {
+    if (trigger) selectedTriggerRef.current = trigger;
+    const requestId = ++detailRequestRef.current;
     setSelected(task);
     setDetailLoading(true);
+    setError("");
     void api.taskTrackerTask(task.provider, task.id)
       .then((detail) => {
-        setSelected((current) => current?.id === task.id ? detail : current);
+        if (detailRequestRef.current === requestId) {
+          setSelected((current) => current?.id === task.id ? detail : current);
+        }
       })
-      .catch((cause) => setError(messageOf(`Couldn’t refresh ${task.key}`, cause)))
-      .finally(() => setDetailLoading(false));
+      .catch((cause) => {
+        if (detailRequestRef.current === requestId) {
+          setError(messageOf(`Couldn’t refresh ${task.key}`, cause));
+        }
+      })
+      .finally(() => {
+        if (detailRequestRef.current === requestId) setDetailLoading(false);
+      });
+  };
+  const closeTask = () => {
+    detailRequestRef.current++;
+    setSelected(null);
+    setDetailLoading(false);
+    const trigger = selectedTriggerRef.current;
+    window.requestAnimationFrame(() => trigger?.focus());
+  };
+  const chooseProvider = (next: TaskTrackerProvider) => {
+    if (next === provider) return;
+    closeTask();
+    setProvider(next);
+    setQuery("");
+    setStatusFilter("all");
+  };
+  const handleProviderKeys = (
+    event: ReactKeyboardEvent<HTMLButtonElement>,
+    current: TaskTrackerProvider,
+  ) => {
+    const order: TaskTrackerProvider[] = ["jira", "trello"];
+    const index = order.indexOf(current);
+    const nextIndex = event.key === "ArrowRight"
+      ? (index + 1) % order.length
+      : event.key === "ArrowLeft"
+        ? (index - 1 + order.length) % order.length
+        : event.key === "Home"
+          ? 0
+          : event.key === "End"
+            ? order.length - 1
+            : -1;
+    if (nextIndex < 0) return;
+    event.preventDefault();
+    const next = order[nextIndex]!;
+    chooseProvider(next);
+    event.currentTarget.parentElement
+      ?.querySelector<HTMLButtonElement>(`[data-provider="${next}"]`)
+      ?.focus();
   };
   const updateTask = (updated: TaskTrackerTaskDto, linked = false) => {
     setTasks((current) => current.map((task) => task.id === updated.id ? updated : task));
@@ -556,8 +633,21 @@ export function TaskTrackerBoard({
     return <div className="tt-board tt-loading-state" role="status"><span className="tt-spinner" /> Loading task trackers…</div>;
   }
 
+  if (providers === null) {
+    return (
+      <div className="tt-board">
+        <BoardEmpty
+          icon={<Icon.refresh />}
+          title="Task trackers didn’t load"
+          body={error || "The server didn’t return provider information."}
+          action={<button type="button" onClick={() => setLoadEpoch((value) => value + 1)}>Try again</button>}
+        />
+      </div>
+    );
+  }
+
   return (
-    <div className="tt-board">
+    <div className="tt-board" aria-busy={loading !== null}>
       <header className="tt-board-header">
         <div className="tt-provider-tabs" role="tablist" aria-label="Task tracker provider">
           {(["jira", "trello"] as const).map((id) => {
@@ -567,13 +657,19 @@ export function TaskTrackerBoard({
                 key={id}
                 type="button"
                 role="tab"
+                id={`${providerPanelId}-${id}`}
+                aria-controls={providerPanelId}
                 aria-selected={provider === id}
+                tabIndex={provider === id ? 0 : -1}
+                data-provider={id}
                 className={provider === id ? "active" : ""}
-                onClick={() => setProvider(id)}
+                onClick={() => chooseProvider(id)}
+                onKeyDown={(event) => handleProviderKeys(event, id)}
               >
                 {providerMark(id)}
                 <span>{PROVIDER_LABELS[id]}</span>
-                <i className={info?.configured ? "configured" : ""} title={info?.configured ? "Configured" : "Not configured"} />
+                <i className={info?.configured ? "configured" : ""} aria-hidden="true" />
+                <span className="sr-only">{info?.configured ? "Configured" : "Not configured"}</span>
               </button>
             );
           })}
@@ -601,22 +697,37 @@ export function TaskTrackerBoard({
             onClick={() => setRefreshKey((value) => value + 1)}
             disabled={!boardId || loading !== null}
             aria-label="Refresh tasks"
-          ><Icon.refresh /></button>
+          >
+            <span className={loading === "tasks" ? "tt-refreshing" : ""}><Icon.refresh /></span>
+          </button>
         </div>
       </header>
 
-      {!providerInfo?.configured ? (
-        <BoardEmpty
-          icon={providerMark(provider)}
-          title={`Connect ${PROVIDER_LABELS[provider]}`}
-          body={`Restart Polyth after setting ${providerInfo?.requiredEnv.join(", ") || "the required environment variables"}. Credential values never appear in the app.`}
-        />
-      ) : (
-        <>
+      <div
+        id={providerPanelId}
+        className="tt-provider-panel"
+        role="tabpanel"
+        aria-labelledby={`${providerPanelId}-${provider}`}
+      >
+        {!providerInfo?.configured ? (
+          <BoardEmpty
+            icon={providerMark(provider)}
+            title={`Connect ${PROVIDER_LABELS[provider]}`}
+            body={`Restart Polyth after setting ${providerInfo?.requiredEnv.join(", ") || "the required environment variables"}. Credential values never appear in the app.`}
+          />
+        ) : (
+          <>
           <div className="tt-board-picker">
             <label>
               <span>Workspace</span>
-              <select value={projectId} onChange={(event) => setProjectId(event.target.value)}>
+              <select
+                value={projectId}
+                onChange={(event) => {
+                  setProjectId(event.target.value);
+                  setStatusFilter("all");
+                  closeTask();
+                }}
+              >
                 <option value="">All workspaces</option>
                 {projects.map((project) => <option key={project.id} value={project.id}>{project.name}</option>)}
               </select>
@@ -625,7 +736,11 @@ export function TaskTrackerBoard({
               <span>Board</span>
               <select
                 value={boardId}
-                onChange={(event) => setBoardId(event.target.value)}
+                onChange={(event) => {
+                  setBoardId(event.target.value);
+                  setStatusFilter("all");
+                  closeTask();
+                }}
                 disabled={loading === "boards" || boards.length === 0}
               >
                 {boards.length === 0 && <option value="">No boards found</option>}
@@ -664,7 +779,7 @@ export function TaskTrackerBoard({
           )}
 
           <div className={`tt-board-content${selected ? " has-detail" : ""}`}>
-            <main className="tt-task-surface">
+            <main className="tt-task-surface" aria-busy={loading === "tasks"}>
               {loading === "tasks" && tasks.length === 0 ? (
                 <div className="tt-loading-state" role="status"><span className="tt-spinner" /> Loading tasks…</div>
               ) : boards.length === 0 && loading !== "boards" ? (
@@ -710,7 +825,8 @@ export function TaskTrackerBoard({
                       type="button"
                       className="tt-list-row"
                       key={task.id}
-                      onClick={() => openTask(task)}
+                      onClick={(event) => openTask(task, event.currentTarget)}
+                      aria-label={`Open ${task.key}: ${task.title}`}
                     >
                       <span className="tt-list-title">
                         <small>{task.key}</small>
@@ -730,14 +846,28 @@ export function TaskTrackerBoard({
                 sessionId={sessionId}
                 linked={linkedIds.has(`${selected.provider}:${selected.id}`)}
                 loading={detailLoading}
-                onClose={() => setSelected(null)}
+                onClose={closeTask}
                 onTaskChanged={updateTask}
               />
             )}
           </div>
-        </>
-      )}
-      {error && <div className="tt-board-error" role="alert"><span>{error}</span><button type="button" onClick={() => setError("")}>Dismiss</button></div>}
+          </>
+        )}
+      </div>
+      {error && <div className="tt-board-error" role="alert">
+        <span>{error}</span>
+        <div>
+          <button
+            type="button"
+            onClick={() => {
+              setError("");
+              if (selected) openTask(selected);
+              else setLoadEpoch((value) => value + 1);
+            }}
+          >Try again</button>
+          <button type="button" onClick={() => setError("")}>Dismiss</button>
+        </div>
+      </div>}
     </div>
   );
 }
@@ -748,6 +878,7 @@ export function LinkedTaskWidget({ sessionId }: Pick<WidgetRenderContext, "sessi
   const [statusId, setStatusId] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
+  const [reloadKey, setReloadKey] = useState(0);
 
   useEffect(() => {
     if (!sessionId) {
@@ -785,7 +916,7 @@ export function LinkedTaskWidget({ sessionId }: Pick<WidgetRenderContext, "sessi
       active = false;
       window.removeEventListener("polyth:task-tracker-changed", load);
     };
-  }, [sessionId]);
+  }, [reloadKey, sessionId]);
 
   const update = async (nextStatusId: string) => {
     if (!sessionId || !task || !nextStatusId || nextStatusId === task.status.id) return;
@@ -814,6 +945,10 @@ export function LinkedTaskWidget({ sessionId }: Pick<WidgetRenderContext, "sessi
 
   if (!sessionId) return <div className="tt-linked-empty"><Icon.link /><span>Open a session to link a Jira or Trello task.</span></div>;
   if (loading && !linked) return <div className="tt-linked-empty" role="status"><span className="tt-spinner" /> Loading linked task…</div>;
+  if (!linked && error) return <div className="tt-linked-empty tt-linked-load-error" role="alert">
+    <span>{error}</span>
+    <button type="button" onClick={() => setReloadKey((value) => value + 1)}>Try again</button>
+  </div>;
   if (!linked) return <div className="tt-linked-empty"><Icon.link /><span>No task is linked to this session yet.</span></div>;
 
   const status: TaskTrackerStatusDto = task?.status ?? {
@@ -824,7 +959,7 @@ export function LinkedTaskWidget({ sessionId }: Pick<WidgetRenderContext, "sessi
   const statuses = task?.availableStatuses ?? [];
   const doneStatus = statuses.find((item) => item.category === "done");
   return (
-    <div className="tt-linked-widget">
+    <div className="tt-linked-widget" aria-busy={loading}>
       <div className="tt-linked-main">
         {providerMark(linked.provider)}
         <div>
@@ -862,7 +997,18 @@ export function LinkedTaskWidget({ sessionId }: Pick<WidgetRenderContext, "sessi
           </a>}
         </div>
       )}
-      {linked.completed && <div className="tt-linked-done"><Icon.check /> Completed</div>}
+      {loading && linked && <div className="tt-linked-updating" role="status">
+        <span className="tt-button-spinner" aria-hidden="true" /> Updating tracker…
+      </div>}
+      {linked.completed && <div className="tt-linked-done">
+        <span><Icon.check /> Completed</span>
+        {task?.url && <a
+          href={task.url}
+          target="_blank"
+          rel="noreferrer"
+          aria-label={`Open ${task.key} in ${PROVIDER_LABELS[task.provider]}`}
+        ><Icon.external /></a>}
+      </div>}
       {error && <p className="tt-error" role="alert">{error}</p>}
     </div>
   );
