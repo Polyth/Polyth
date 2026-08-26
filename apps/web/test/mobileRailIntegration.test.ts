@@ -95,8 +95,8 @@ test("mobile app header navigates between full-screen workspace panes and focuse
       await new Promise((resolve) => setTimeout(resolve, 10));
     });
     assert.equal(getState().railPlugin, "files");
-    assert.equal(container.querySelector('.rail-fullscreen')?.getAttribute("aria-label"), "Files");
-    assert.equal(document.activeElement?.textContent, "Files", "Files heading receives focus");
+    assert.equal(container.querySelector('.rail-fullscreen')?.getAttribute("aria-label"), "Project files");
+    assert.equal(document.activeElement?.textContent, "Project files", "Files heading receives focus");
 
     navigation = await openNavigation();
     const browser = [...navigation!.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')]
