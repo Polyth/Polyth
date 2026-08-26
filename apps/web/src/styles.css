@@ -11792,9 +11792,9 @@ body[data-density="comfortable"] .header { min-height: 60px; }
   .panel-sheet {
     top: 60px;
     bottom: 0;
-    z-index: 70;
+    z-index: 30;
   }
-  .panel-sheet-backdrop { z-index: 69; }
+  .panel-sheet-backdrop { z-index: 29; }
   .rail-head { min-height: 60px; }
   .pane-back { min-height: var(--tap); padding-inline: 12px; }
 
