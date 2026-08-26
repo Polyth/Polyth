@@ -4,15 +4,18 @@ import type { JsonObject } from "@polyth/contracts";
 import { fmtMs } from "../format.ts";
 import {
   executionPresentation,
+  normalizedMcpResult,
   normalizedInputEntries,
   outputLineCount,
   type ExecutionKind,
 } from "../execution.ts";
 import { Icon } from "../icons.tsx";
-import { openEditorFile } from "../store.ts";
+import { openSession } from "../init.ts";
+import { openEditorFile, setUiError } from "../store.ts";
 import { parseDiffLines } from "../utils.ts";
-import type { ToolMsg } from "../reduce.ts";
+import type { SubagentState, ToolMsg } from "../reduce.ts";
 import CopyButton from "./CopyButton.tsx";
+import Dialog from "./a11y/Dialog.tsx";
 
 function ExecutionIcon({ kind }: { kind: ExecutionKind }) {
   const Glyph = kind === "shell" ? Icon.term
@@ -31,23 +34,28 @@ function ExecutionIcon({ kind }: { kind: ExecutionKind }) {
   return <Glyph />;
 }
 
-type DisplayStatus = "pending" | "done" | "error" | "cancelled";
+type DisplayStatus = "pending" | "running" | "done" | "error" | "cancelled";
 
-function displayStatus(message: ToolMsg): DisplayStatus {
+function displayStatus(message: ToolMsg, childStatus?: string): DisplayStatus {
+  if (childStatus && /^(?:queued|pending)$/i.test(childStatus)) return "pending";
+  if (childStatus && /^(?:running|active|working)$/i.test(childStatus)) return "running";
+  if (childStatus && /^(?:done|completed|success|succeeded)$/i.test(childStatus)) return "done";
+  if (childStatus && /^(?:failed|error)$/i.test(childStatus)) return "error";
   if (message.status === "error" && /cancel(?:led|ed)|aborted|stopped/i.test(message.error ?? "")) return "cancelled";
   return message.status;
 }
 
-function StatusMark({ message }: { message: ToolMsg }) {
+function StatusMark({ message, childStatus }: { message: ToolMsg; childStatus?: string }) {
   const [now, setNow] = useState(() => Date.now());
-  const status = displayStatus(message);
+  const status = displayStatus(message, childStatus);
   useEffect(() => {
-    if (status !== "pending") return;
+    if (status !== "pending" && status !== "running") return;
     const timer = window.setInterval(() => setNow(Date.now()), 500);
     return () => window.clearInterval(timer);
   }, [status]);
   const elapsed = fmtMs(Math.max(0, (message.finishTime ?? now) - message.time));
-  const label = status === "pending" ? "Running"
+  const label = status === "pending" ? "Pending"
+    : status === "running" ? "Running"
     : status === "error" ? "Failed"
       : status === "cancelled" ? "Cancelled"
         : "Succeeded";
@@ -55,7 +63,7 @@ function StatusMark({ message }: { message: ToolMsg }) {
     <span className={`execution-status ${status}`} aria-label={`${label} in ${elapsed}`}>
       <span className="execution-duration">{elapsed}</span>
       <span className="execution-status-icon" aria-hidden="true">
-        {status === "pending" ? <span className="spinner" /> : status === "done" ? "✓" : status === "error" ? "×" : "—"}
+        {status === "pending" ? "○" : status === "running" ? "◌" : status === "done" ? "✓" : status === "error" ? "×" : "—"}
       </span>
     </span>
   );
@@ -153,6 +161,62 @@ function SearchResults({ text, onOpenFull }: { text: string; onOpenFull: () => v
   );
 }
 
+function McpResult({ output }: { output: string }) {
+  const entries = normalizedMcpResult(output);
+  if (entries === null) {
+    return (
+      <section className="execution-detail-section execution-mcp-result">
+        <DetailHeading label="Result" copy={output} />
+        <p>{output.replace(/\s+/g, " ").trim() || "No result"}</p>
+      </section>
+    );
+  }
+  return (
+    <section className="execution-detail-section execution-mcp-result">
+      <DetailHeading label="Result" />
+      {entries.length > 0 ? (
+        <dl>
+          {entries.map((entry) => (
+            <div key={entry.key}>
+              <dt>{entry.key}</dt>
+              <dd>{entry.href
+                ? <a href={entry.href} target="_blank" rel="noreferrer">{entry.value} <Icon.external /></a>
+                : entry.value}</dd>
+            </div>
+          ))}
+        </dl>
+      ) : <p>Structured result available</p>}
+    </section>
+  );
+}
+
+type Subagent = SubagentState["agents"][number];
+
+function SubagentDetail({ subagent }: { subagent: Subagent }) {
+  const openChild = () => {
+    void openSession(subagent.sessionId).catch((error) =>
+      setUiError(error instanceof Error ? error.message : String(error)));
+  };
+  const status = /^(?:done|completed|success|succeeded)$/i.test(subagent.status)
+    ? "Completed"
+    : /^(?:failed|error)$/i.test(subagent.status)
+      ? "Failed"
+      : /^(?:queued|pending)$/i.test(subagent.status)
+        ? "Pending"
+        : "Running";
+  return (
+    <section className="execution-detail-section execution-subagent-detail" aria-label={`Child agent ${subagent.label}`}>
+      <span className="execution-subagent-branch" aria-hidden="true"><Icon.hierarchy /></span>
+      <div>
+        <strong>{subagent.label}</strong>
+        <span className={`execution-subagent-state ${status.toLowerCase()}`}>{status}</span>
+        {subagent.currentTask && <p>{subagent.currentTask}</p>}
+      </div>
+      <button type="button" onClick={openChild}>Open child session <Icon.external /></button>
+    </section>
+  );
+}
+
 function FullOutputViewer({ title, text, onClose }: { title: string; text: string; onClose: () => void }) {
   const [query, setQuery] = useState("");
   const [wrap, setWrap] = useState(true);
@@ -161,29 +225,27 @@ function FullOutputViewer({ title, text, onClose }: { title: string; text: strin
     const needle = query.toLowerCase();
     return text.split(/\r?\n/).filter((line) => line.toLowerCase().includes(needle)).join("\n");
   }, [query, text]);
-  useEffect(() => {
-    const onKey = (event: KeyboardEvent) => { if (event.key === "Escape") onClose(); };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [onClose]);
   const viewer = (
-    <div className="execution-viewer-backdrop" role="presentation" onMouseDown={(event) => {
-      if (event.target === event.currentTarget) onClose();
-    }}>
-      <section className="execution-viewer" role="dialog" aria-modal="true" aria-label={title}>
-        <header>
-          <strong>{title}</strong>
-          <span>{outputLineCount(text)} lines</span>
-          <CopyButton text={text} label="Copy full output" />
-          <button type="button" className="execution-viewer-close" onClick={onClose} aria-label="Close output viewer"><Icon.close /></button>
-        </header>
-        <div className="execution-viewer-tools">
-          <label><Icon.search /><input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search output" /></label>
-          <button type="button" aria-pressed={wrap} onClick={() => setWrap((value) => !value)}>Wrap {wrap ? "on" : "off"}</button>
-        </div>
-        <pre className={wrap ? "wrap" : ""}>{filtered || "No matching lines"}</pre>
-      </section>
-    </div>
+    <Dialog
+      title={title}
+      onClose={onClose}
+      size="full"
+      initialFocus='input[type="search"]'
+      className="execution-viewer"
+      backdropClassName="execution-viewer-backdrop"
+    >
+      <header>
+        <strong>{title}</strong>
+        <span>{outputLineCount(text)} lines</span>
+        <CopyButton text={text} label="Copy full output" />
+        <button type="button" className="execution-viewer-close" onClick={onClose} aria-label="Close output viewer"><Icon.close /></button>
+      </header>
+      <div className="execution-viewer-tools">
+        <label><Icon.search /><input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search output" /></label>
+        <button type="button" aria-pressed={wrap} onClick={() => setWrap((value) => !value)}>Wrap {wrap ? "on" : "off"}</button>
+      </div>
+      <pre className={wrap ? "wrap" : ""}>{filtered || "No matching lines"}</pre>
+    </Dialog>
   );
   return createPortal(viewer, document.body);
 }
@@ -196,8 +258,9 @@ function metadataValue(metadata: JsonObject | undefined, keys: readonly string[]
   return undefined;
 }
 
-export function ExecutionRow({ message }: { message: ToolMsg }) {
-  const done = message.status !== "pending";
+export function ExecutionRow({ message, subagent }: { message: ToolMsg; subagent?: Subagent }) {
+  const status = displayStatus(message, subagent?.status);
+  const done = status === "done" || status === "error" || status === "cancelled";
   const [open, setOpen] = useState(!done);
   const [viewer, setViewer] = useState<{ title: string; text: string } | null>(null);
   const presentation = executionPresentation(message);
@@ -210,7 +273,6 @@ export function ExecutionRow({ message }: { message: ToolMsg }) {
     ...(message.error !== undefined ? { error: message.error } : {}),
     ...(message.metadata !== undefined ? { metadata: message.metadata } : {}),
   }, null, 2);
-  const status = displayStatus(message);
   const exitCode = metadataValue(message.metadata, ["exit", "exitCode", "exit_code"]);
   const cwd = metadataValue(message.metadata, ["cwd"])
     ?? (typeof message.input.cwd === "string" ? message.input.cwd : undefined);
@@ -225,7 +287,7 @@ export function ExecutionRow({ message }: { message: ToolMsg }) {
 
   return (
     <>
-      <div className={`tool-card execution-row${open ? " open" : ""}${status === "pending" ? " current" : ""}${status === "error" ? " error" : ""}`} data-execution-kind={presentation.kind}>
+      <div className={`tool-card execution-row${open ? " open" : ""}${status === "pending" || status === "running" ? " current" : ""}${status === "error" ? " error" : ""}${presentation.kind === "subagent" ? " execution-subagent" : ""}`} data-execution-kind={presentation.kind}>
         <button
           type="button"
           className="tool-disclosure execution-summary"
@@ -238,13 +300,14 @@ export function ExecutionRow({ message }: { message: ToolMsg }) {
             <span className="tool-name">{presentation.label}</span>
             <span className={`tool-preview${presentation.kind === "shell" || presentation.kind === "test" ? " command" : ""}`}>{presentation.preview}</span>
           </span>
-          <StatusMark message={message} />
+          <StatusMark message={message} childStatus={subagent?.status} />
           <span className="tool-chevron" aria-hidden="true">{open ? <Icon.chevronUp /> : <Icon.chevronRight />}</span>
         </button>
         <div className="execution-expand-shell" aria-hidden={!open}>
           {open && (
             <div className="tool-body execution-details">
               {presentation.command && <CommandDetail command={presentation.command} />}
+              {subagent && <SubagentDetail subagent={subagent} />}
               {presentation.path && (
                 <section className="execution-detail-section execution-file-summary">
                   <DetailHeading label="File" copy={presentation.path} />
@@ -270,6 +333,8 @@ export function ExecutionRow({ message }: { message: ToolMsg }) {
               {message.output !== undefined && (
                 presentation.kind === "search"
                   ? <SearchResults text={message.output} onOpenFull={() => setViewer({ title: `${presentation.label} results`, text: message.output ?? "" })} />
+                  : presentation.kind === "mcp"
+                    ? <McpResult output={message.output} />
                   : <OutputPreview text={message.output} onOpenFull={() => setViewer({ title: `${presentation.label} output`, text: message.output ?? "" })} />
               )}
               <footer className="execution-metadata">

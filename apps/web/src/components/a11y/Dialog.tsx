@@ -27,6 +27,20 @@ export interface ModalSurfaceOptions {
 }
 
 const visible = (el: HTMLElement): boolean => el.getClientRects().length > 0;
+let bodyScrollLocks = 0;
+let bodyOverflowBeforeLock = "";
+
+function lockBodyScroll(): () => void {
+  if (bodyScrollLocks === 0) {
+    bodyOverflowBeforeLock = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+  }
+  bodyScrollLocks++;
+  return () => {
+    bodyScrollLocks = Math.max(0, bodyScrollLocks - 1);
+    if (bodyScrollLocks === 0) document.body.style.overflow = bodyOverflowBeforeLock;
+  };
+}
 
 /**
  * Shared modal-surface focus contract:
@@ -72,6 +86,7 @@ export function useModalSurface({
     if (!enabled || !open) return;
     const el = containerRef.current;
     if (!el) return;
+    const unlockBodyScroll = lockBodyScroll();
     const opener = document.activeElement as HTMLElement | null;
     const target = (initialFocus ? el.querySelector<HTMLElement>(initialFocus) : null)
       ?? el.querySelector<HTMLElement>(FOCUSABLE)
@@ -110,6 +125,7 @@ export function useModalSurface({
     el.addEventListener("keydown", onKeyDown);
     return () => {
       el.removeEventListener("keydown", onKeyDown);
+      unlockBodyScroll();
       const connectedOpener = opener && opener !== document.body && opener.isConnected && visible(opener)
         ? opener
         : null;

@@ -61,7 +61,8 @@ export interface ToolMsg {
   error?: string;
   title?: string;
   metadata?: JsonObject;
-  status: "pending" | "done" | "error";
+  /** `pending` is queued but not started; `running` begins at `tool/call`. */
+  status: "pending" | "running" | "done" | "error";
   undone?: boolean;
   rewindMarkerSeq?: number;
   time: number;
@@ -463,7 +464,7 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
         eventSeq: ev.seq,
         tool: str(d, "tool") ?? "",
         input: obj(d, "input") ?? {},
-        status: "pending",
+        status: "running",
         time: ev.time,
       });
       break;

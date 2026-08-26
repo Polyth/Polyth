@@ -133,7 +133,7 @@ test("tool call → result fills the card; call → error marks it failed", () =
   ]);
   const t0 = m.messages[0] as { kind: string; status: string };
   assert.equal(t0.kind, "tool");
-  assert.equal(t0.status, "pending");
+  assert.equal(t0.status, "running");
 
   const withResult = reduceEvent(m, ev("tool/result", { callId: "c1", tool: "read_file", output: "export const x = 1", title: "a.ts" }));
   const t1 = withResult.messages[0] as { status: string; output: string; finishTime?: number };

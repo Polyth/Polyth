@@ -39,11 +39,67 @@ const firstString = (input: JsonObject, keys: readonly string[]): string | undef
 
 const lineCount = (text: string): number => text === "" ? 0 : text.split(/\r?\n/).length;
 
+function shellSegments(command: string): string[] {
+  const segments: string[] = [];
+  let start = 0;
+  let quote = "";
+  let escaped = false;
+  for (let index = 0; index < command.length; index++) {
+    const char = command[index]!;
+    if (escaped) {
+      escaped = false;
+      continue;
+    }
+    if (char === "\\") {
+      escaped = true;
+      continue;
+    }
+    if (quote) {
+      if (char === quote) quote = "";
+      continue;
+    }
+    if (char === "'" || char === '"') {
+      quote = char;
+      continue;
+    }
+    if (char === ";" || (char === "&" && command[index + 1] === "&")) {
+      segments.push(command.slice(start, index).trim());
+      if (char === "&") index++;
+      start = index + 1;
+    }
+  }
+  segments.push(command.slice(start).trim());
+  return segments.filter(Boolean);
+}
+
+function stripEnvironmentPrefix(segment: string): string {
+  return segment
+    .replace(/^env(?:\s+(?:-[A-Za-z]+|--[A-Za-z-]+(?:=\S+)?))*\s+/i, "")
+    .replace(/^(?:(?:export\s+)?[A-Za-z_][A-Za-z0-9_]*=(?:"[^"]*"|'[^']*'|[^\s]+)\s+)+/i, "")
+    .trim();
+}
+
+function compactCommandPaths(command: string): string {
+  return command.replace(/(?:"[^"\n]*[\\/][^"\n]*"|'[^'\n]*[\\/][^'\n]*'|[^\s"'`;|&]+[\\/][^\s"'`;|&]+)/g, (token) => {
+    const quote = token[0] === '"' || token[0] === "'" ? token[0] : "";
+    const value = quote ? token.slice(1, -1) : token;
+    if (/^[a-z]+:\/\//i.test(value) || value.length <= 52) return token;
+    const compact = middleTruncatePath(value, 52);
+    return quote ? `${quote}${compact}${quote}` : compact;
+  });
+}
+
 export function cleanShellCommand(command: string): string {
-  return command
-    .trim()
-    .replace(/^(?:cd\s+(?:"[^"]+"|'[^']+'|[^;&]+?)\s*(?:&&|;)\s*)+/i, "")
-    .replace(/\s+/g, " ");
+  const segments = shellSegments(command);
+  let operative = "";
+  for (const candidate of segments) {
+    if (/^(?:cd|pushd|popd)\b/i.test(candidate)) continue;
+    if (/^(?:export|unset)\s+[A-Za-z_][A-Za-z0-9_]*(?:=|$)/i.test(candidate)) continue;
+    const stripped = stripEnvironmentPrefix(candidate);
+    if (stripped) operative = stripped;
+  }
+  const cleaned = operative || stripEnvironmentPrefix(segments.at(-1) ?? command.trim()) || command.trim();
+  return compactCommandPaths(cleaned.replace(/\s+/g, " "));
 }
 
 export function middleTruncatePath(path: string, max = 58): string {
@@ -206,6 +262,75 @@ function compactValue(value: JsonValue): string {
   return endTruncate(JSON.stringify(value), 180);
 }
 
+export interface NormalizedResultEntry {
+  key: string;
+  value: string;
+  href?: string;
+}
+
+const RESULT_KEYS = [
+  "title", "name", "status", "state", "number", "id", "url", "html_url",
+  "owner", "repo", "repository", "summary", "message", "count", "total",
+  "created_at", "updated_at",
+] as const;
+
+const humanKey = (key: string): string => key
+  .replace(/([a-z])([A-Z])/g, "$1 $2")
+  .replace(/[_-]+/g, " ")
+  .replace(/\b\w/g, (letter) => letter.toUpperCase());
+
+function unwrapMcpValue(value: JsonValue): JsonValue {
+  if (Array.isArray(value)) {
+    if (value.length === 1) return unwrapMcpValue(value[0] ?? null);
+    const text = value.find((item) =>
+      item !== null && typeof item === "object" && !Array.isArray(item) && typeof item.text === "string");
+    if (text && !Array.isArray(text) && typeof text.text === "string") {
+      try {
+        return unwrapMcpValue(JSON.parse(text.text) as JsonValue);
+      } catch {
+        return text.text;
+      }
+    }
+    return value;
+  }
+  if (value === null || typeof value !== "object") return value;
+  for (const key of ["data", "result"]) {
+    const nested = value[key];
+    if (nested !== undefined && Object.keys(value).length <= 3) return unwrapMcpValue(nested);
+  }
+  if (Array.isArray(value.content)) return unwrapMcpValue(value.content);
+  return value;
+}
+
+export function normalizedMcpResult(output: string): NormalizedResultEntry[] | null {
+  let parsed: JsonValue;
+  try {
+    parsed = unwrapMcpValue(JSON.parse(output) as JsonValue);
+  } catch {
+    return null;
+  }
+  if (parsed === null || typeof parsed !== "object") {
+    return [{ key: "Result", value: compactValue(parsed) }];
+  }
+  if (Array.isArray(parsed)) {
+    return [{ key: "Result", value: `${parsed.length} ${parsed.length === 1 ? "item" : "items"}` }];
+  }
+  const entries = Object.entries(parsed);
+  const preferred = RESULT_KEYS.flatMap((key) => {
+    const entry = entries.find(([candidate]) => candidate.toLowerCase() === key);
+    return entry ? [entry] : [];
+  });
+  const remaining = entries.filter(([key]) => !preferred.some(([used]) => used === key));
+  return [...preferred, ...remaining]
+    .filter(([, value]) => value !== undefined && value !== null && typeof value !== "object")
+    .slice(0, 8)
+    .map(([key, value]) => {
+      const display = compactValue(value);
+      const href = typeof value === "string" && /^https?:\/\//i.test(value) ? value : undefined;
+      return { key: humanKey(key), value: display, ...(href ? { href } : {}) };
+    });
+}
+
 const LARGE_INPUT_KEYS = new Set([
   "command", "cmd", "content", "oldString", "old_string", "newString", "new_string",
   "patch", "diff", "prompt",
@@ -239,12 +364,21 @@ export function executionGroupLabel(tools: readonly ToolMsg[]): string {
 
 export function reasoningMilestones(reasoning: string): string[] {
   const paragraphs = reasoning
+    .replace(/```[\s\S]*?```/g, " ")
     .split(/\n{2,}|\n(?=(?:[-*]\s+|\d+[.)]\s+))/)
-    .map((part) => part.replace(/^[-*]\s+/, "").replace(/\s+/g, " ").trim())
+    .flatMap((part) => part.split(/(?<=[.!?])\s+(?=[A-Z0-9])/))
+    .map((part) => part
+      .replace(/^(?:[-*]|\d+[.)])\s+/, "")
+      .replace(/^(?:(?:i|we)\s+(?:need|want|should|will|can|could|am going)\s+to|let me)\s+/i, "")
+      .replace(/^(?:thinking|analysis|hmm|okay|ok|note to self)\b[.:,\s-]*/i, "")
+      .replace(/\s+/g, " ")
+      .trim())
     .filter(Boolean);
-  const useful = paragraphs.filter((part) =>
-    !/^(?:we need|i need|let me|thinking|analysis|hmm|okay|ok)\b[.:,\s-]*/i.test(part) || part.length > 48);
+  const useful = paragraphs.filter((part) => {
+    if (part.length < 12) return false;
+    return !/^(?:perhaps|maybe|probably|i think|i wonder|the user|we need|i need)\b/i.test(part);
+  });
   return (useful.length > 0 ? useful : paragraphs)
-    .slice(-6)
-    .map((part) => endTruncate(part, 240));
+    .slice(-5)
+    .map((part) => endTruncate(part, 120));
 }

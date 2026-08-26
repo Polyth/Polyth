@@ -33,6 +33,7 @@ function PermissionRow({ p }: { p: PendingPermission }) {
         <span className="permission-execution-preview">{p.preview?.title ?? p.patterns[0] ?? p.permission}</span>
         <span className="permission-execution-status">Approval required</span>
         <span className="permission-execution-review">Review</span>
+        <span className="permission-execution-mobile-status">Approval<br />Review</span>
         <span aria-hidden="true">{open ? <Icon.chevronUp /> : <Icon.chevronRight />}</span>
       </button>
       {open && (

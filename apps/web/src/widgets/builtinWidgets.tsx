@@ -177,17 +177,20 @@ function AgentActionsWidget() {
           <div><span className="action-dot active">●</span><p><strong>{tr("widgets.builtinwidgets.waitingForATask")}</strong><small>{tr("widgets.builtinwidgets.agentActionsWillStreamHere")}</small></p></div>
         </>
       )}
-      {actions.map((action) => (
+      {actions.map((action) => {
+        const active = action.kind === "tool" && (action.status === "pending" || action.status === "running");
+        return (
         <div key={action.id}>
-          <span className={`action-dot ${action.kind === "tool" && action.status === "error" ? "failed" : action.kind === "tool" && action.status === "pending" ? "active" : "done"}`}>
-            {action.kind === "tool" && action.status === "pending" ? "●" : action.kind === "tool" && action.status === "error" ? "!" : "✓"}
+          <span className={`action-dot ${action.kind === "tool" && action.status === "error" ? "failed" : active ? "active" : "done"}`}>
+            {action.kind === "tool" && action.status === "pending" ? "○" : action.kind === "tool" && action.status === "running" ? "◌" : action.kind === "tool" && action.status === "error" ? "!" : "✓"}
           </span>
           <p>
             <strong>{action.kind === "tool" ? action.title || action.tool : action.text}</strong>
             <small>{action.kind === "tool" ? action.status : action.action}</small>
           </p>
         </div>
-      ))}
+        );
+      })}
     </div>
   );
 }

@@ -66,6 +66,7 @@ import type {
   GithubConflictMsg,
   RenderMessage,
   RenderModel,
+  SubagentState,
   TaskActivityMsg,
   ToolMsg,
   UserMsg,
@@ -740,16 +741,45 @@ function GithubConflictCard({ message }: { message: GithubConflictMsg }) {
 
 // Consecutive tool calls share one lightweight execution milestone. Completed
 // history folds by default; active and failed work stays visible.
-function WorkedGroup({ g }: { g: WorkGroup }) {
+function childForTool(tool: ToolMsg, subagents: SubagentState | null): SubagentState["agents"][number] | undefined {
+  if (!subagents || executionPresentation(tool).kind !== "subagent") return undefined;
+  const metadataId = ["sessionId", "sessionID", "childSessionId", "child_session_id"]
+    .map((key) => tool.metadata?.[key])
+    .find((value): value is string => typeof value === "string");
+  if (metadataId) return subagents.agents.find((agent) => agent.sessionId === metadataId);
+  const description = typeof tool.input.description === "string" ? tool.input.description : undefined;
+  return subagents.agents.find((agent) =>
+    agent.label === description || agent.currentTask === tool.input.prompt);
+}
+
+export function WorkedGroup({ g, subagents }: { g: WorkGroup; subagents: SubagentState | null }) {
   const failed = g.tools.some((t) => t.status === "error") || g.tasks.some((task) => task.action === "failed");
-  const running = g.tools.some((t) => t.status === "pending") || g.tasks.some((task) => task.action === "started");
+  const running = g.tools.some((t) => t.status === "pending" || t.status === "running") || g.tasks.some((task) => task.action === "started");
   const [open, setOpen] = useState(running || failed);
+  const previousRunning = useRef(running);
+  const userExpanded = useRef(false);
+  useEffect(() => {
+    if (!previousRunning.current && running) {
+      userExpanded.current = false;
+      setOpen(true);
+    }
+    if (previousRunning.current && !running && !failed && !userExpanded.current) setOpen(false);
+    if (failed) setOpen(true);
+    previousRunning.current = running;
+  }, [failed, running]);
   const label = executionGroupLabel(g.tools);
   const files = new Set(g.tools.flatMap((tool) => tool.changedFiles ?? [])).size;
   const actionCount = g.tools.length + g.tasks.length;
   return (
     <div className={`msg assistant execution-group${open ? " open" : ""}${running ? " current" : ""}`}>
-      <button className="execution-group-toggle" aria-expanded={open} onClick={() => setOpen((v) => !v)}>
+      <button
+        className="execution-group-toggle"
+        aria-expanded={open}
+        onClick={() => setOpen((value) => {
+          userExpanded.current = !value;
+          return !value;
+        })}
+      >
         <span className={`execution-group-mark ${running ? "running" : failed ? "error" : "done"}`} aria-hidden="true">
           {running ? <span className="spinner" /> : failed ? "×" : "✓"}
         </span>
@@ -763,7 +793,7 @@ function WorkedGroup({ g }: { g: WorkGroup }) {
         <div className="execution-group-items">
           {g.items.map((item) => (
             item.kind === "tool"
-              ? <ExecutionRow key={item.id} message={item} />
+              ? <ExecutionRow key={item.id} message={item} subagent={childForTool(item, subagents)} />
               : <TaskActivityRow key={item.id} activity={item} />
           ))}
         </div>
@@ -1084,6 +1114,8 @@ export default function Timeline({
   // per-session lock, so a raced action returns a typed conflict, not a lie.
   const archived = useStore((s) => s.sessions.find((x) => x.id === s.activeSessionId)?.status === "archived");
   const pendingQuestion = model.questions.some((question) => question.status === "pending");
+  const pendingPermission = model.permissions.some((permission) => permission.status === "pending");
+  const pendingSecret = model.secrets.some((secret) => secret.status === "pending");
   const emptyCopy = archived
     ? tr("timeline.archivedSessionNoMessages")
     : pendingQuestion
@@ -1222,7 +1254,7 @@ export default function Timeline({
     target.tabIndex = -1;
     target.focus({ preventScroll: true });
   };
-  const latestReveal = showJump && !pendingQuestion ? (
+  const latestReveal = showJump && !pendingQuestion && !pendingPermission && !pendingSecret ? (
     <div className="timeline-reveal">
       <button className={`jump-latest${model.turn?.status === "working" ? " agent-working" : ""}`} aria-label={JUMP_TO_LATEST_NAME} title={JUMP_TO_LATEST_NAME} onClick={jumpToLatest}>
         ↓{model.turn?.status === "working" && <span>Agent is working</span>}
@@ -1336,7 +1368,7 @@ export default function Timeline({
         )}
         {shownRows.map((r) => (
           r.kind === "work"
-            ? <WorkedGroup key={r.id} g={r} />
+            ? <WorkedGroup key={r.id} g={r} subagents={model.subagents} />
             : (
               <MessageView
                 key={r.id}
@@ -1388,7 +1420,7 @@ export default function Timeline({
             <div className="rewound-tail-body">
               {undoneRows.map((row) => (
                 row.kind === "work"
-                  ? <WorkedGroup key={row.id} g={row} />
+                  ? <WorkedGroup key={row.id} g={row} subagents={model.subagents} />
                   : <MessageView key={row.id} m={row} announce={announce} />
               ))}
             </div>
