@@ -216,6 +216,22 @@ test("mobile shortcut settings support touch and keyboard sorting", async () => 
   for (const box of [sourceBox!, targetBox!]) {
     assert.ok(box.y >= 0 && box.y + box.height <= 900, "touch sort endpoint is outside the viewport");
   }
+  const sourceHit = await page.evaluate(({ x, y }: { x: number; y: number }) =>
+    document.elementFromPoint(x, y)?.closest(".widget-drag-handle")?.getAttribute("aria-label") ?? null, {
+    x: sourceBox!.x + sourceBox!.width / 2,
+    y: sourceBox!.y + sourceBox!.height / 2,
+  });
+  assert.match(sourceHit ?? "", /^Reorder /, "touch starts outside the reorder handle");
+  await page.evaluate(() => {
+    const events: string[] = [];
+    (window as typeof window & { __polythPointerEvents?: string[] }).__polythPointerEvents = events;
+    for (const type of ["pointerdown", "pointermove", "pointerup", "pointercancel"]) {
+      document.addEventListener(type, (event) => {
+        const pointer = event as PointerEvent;
+        events.push(`${type}:${pointer.pointerType}:${pointer.isPrimary}`);
+      }, { capture: true });
+    }
+  });
 
   const cdp = await page.context().newCDPSession(page);
   await cdp.send("Input.dispatchTouchEvent", {
@@ -223,7 +239,11 @@ test("mobile shortcut settings support touch and keyboard sorting", async () => 
     touchPoints: [{ id: 1, x: sourceBox!.x + sourceBox!.width / 2, y: sourceBox!.y + sourceBox!.height / 2 }],
   });
   await page.waitForTimeout(450);
-  await card.locator(`[data-widget-order-id="${selectedIds[1]}"].dragging`).waitFor({ state: "visible" });
+  const dragStarted = await page.evaluate((id: string) => ({
+    dragging: document.querySelector(`[data-widget-order-id="${id}"]`)?.classList.contains("dragging") === true,
+    events: (window as typeof window & { __polythPointerEvents?: string[] }).__polythPointerEvents ?? [],
+  }), selectedIds[1]!);
+  assert.ok(dragStarted.dragging, `long press did not start dragging; events=${dragStarted.events.join(",")}`);
   await cdp.send("Input.dispatchTouchEvent", {
     type: "touchMove",
     touchPoints: [{
