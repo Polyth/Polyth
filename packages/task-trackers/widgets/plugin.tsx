@@ -19,18 +19,55 @@ import type {
   TaskTrackerStatusDto,
   TaskTrackerTaskDto,
 } from "@polyth/contracts";
-import { api } from "../api.ts";
-import { Icon } from "../icons.tsx";
-import { friendlyError } from "../settings.ts";
-import {
-  defineWidgetPlugin,
-  registerWidgetPlugin,
-  type PluginWidgetDef,
-  type WidgetRenderContext,
-  type WidgetSettingsContext,
-} from "./catalog.ts";
+import type {
+  WebPackageHost,
+  WidgetDefinition,
+  WidgetPlugin,
+  WidgetRenderContext,
+  WidgetSettingsContext,
+} from "@polyth/web-sdk";
+import { friendlyError } from "@polyth/web-sdk";
+import { api } from "./api.ts";
 
 type BoardView = "kanban" | "list";
+
+type TaskTrackerIcons = Record<
+  "check" | "close" | "external" | "filter" | "link" | "list" | "refresh" | "search" | "send" | "widgets",
+  () => ReactNode
+>;
+
+const EmptyIcon = (): ReactNode => null;
+let Icon: TaskTrackerIcons = {
+  check: EmptyIcon,
+  close: EmptyIcon,
+  external: EmptyIcon,
+  filter: EmptyIcon,
+  link: EmptyIcon,
+  list: EmptyIcon,
+  refresh: EmptyIcon,
+  search: EmptyIcon,
+  send: EmptyIcon,
+  widgets: EmptyIcon,
+};
+let formatError = friendlyError;
+
+export function configureTaskTrackerHost(host: WebPackageHost): void {
+  const icon = (name: keyof TaskTrackerIcons): (() => ReactNode) =>
+    host.ui.icons[name] ?? EmptyIcon;
+  Icon = {
+    check: icon("check"),
+    close: icon("close"),
+    external: icon("external"),
+    filter: icon("filter"),
+    link: icon("link"),
+    list: icon("list"),
+    refresh: icon("refresh"),
+    search: icon("search"),
+    send: icon("send"),
+    widgets: icon("widgets"),
+  };
+  formatError = host.errors.friendly;
+}
 
 const PROVIDER_LABELS: Record<TaskTrackerProvider, string> = {
   jira: "Jira",
@@ -75,7 +112,7 @@ const changed = (): void => {
 };
 
 const messageOf = (action: string, cause: unknown): string =>
-  friendlyError(action, cause);
+  formatError(action, cause);
 
 export const defaultViewForBoard = (type: TaskTrackerBoardType): BoardView =>
   type === "simple" || type === "unknown" ? "list" : "kanban";
@@ -1072,7 +1109,7 @@ const RENDERERS: Record<string, (context: WidgetRenderContext) => ReactNode> = {
   "task-trackers.linked-task": (context) => <LinkedTaskWidget sessionId={context.sessionId} />,
 };
 
-export const TASK_TRACKER_WIDGET_PLUGIN = defineWidgetPlugin({
+export const TASK_TRACKER_WIDGET_PLUGIN: WidgetPlugin = {
   id: "task-trackers",
   name: "Jira & Trello",
   widgets: [
@@ -1122,18 +1159,20 @@ export const TASK_TRACKER_WIDGET_PLUGIN = defineWidgetPlugin({
         </div>
       ),
     },
-  ] satisfies readonly PluginWidgetDef[],
-});
+  ] satisfies readonly WidgetDefinition[],
+};
 
-let uninstall: (() => void) | null = null;
-
-export function installTaskTrackerPlugin(): () => void {
-  if (uninstall) return uninstall;
-  const unregister = registerWidgetPlugin(TASK_TRACKER_WIDGET_PLUGIN);
-  const current = () => {
-    unregister();
-    if (uninstall === current) uninstall = null;
+export function createTaskTrackerInstaller(host: WebPackageHost): () => () => void {
+  configureTaskTrackerHost(host);
+  let uninstall: (() => void) | null = null;
+  return () => {
+    if (uninstall) return uninstall;
+    const unregister = host.widgets.registerPlugin(TASK_TRACKER_WIDGET_PLUGIN);
+    const current = () => {
+      unregister();
+      if (uninstall === current) uninstall = null;
+    };
+    uninstall = current;
+    return current;
   };
-  uninstall = current;
-  return current;
 }

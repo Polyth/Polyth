@@ -11,7 +11,7 @@ import type {
   TaskTrackerStatusDto,
 } from "@polyth/contracts";
 import { createTaskTrackerService, reduceTaskLifecycle } from "@polyth/task-trackers";
-import { taskTrackerRoutes } from "../../../packages/task-trackers/src/serverEntry.ts";
+import { taskTrackerRoutes } from "../src/serverEntry.ts";
 
 const dom = new Window({ url: "http://127.0.0.1:4400/" });
 Object.assign(globalThis, {
@@ -32,8 +32,8 @@ register("./tsxHooks.mjs", import.meta.url);
 
 const { act, createElement } = await import("react");
 const { createRoot } = await import("react-dom/client");
-const { api } = await import("../src/api.ts");
-const { TaskTrackerBoard } = await import("../src/widgets/taskTrackersPlugin.tsx");
+const { api } = await import("../widgets/api.ts");
+const { TaskTrackerBoard } = await import("../widgets/plugin.tsx");
 
 const response = (body: unknown, status = 200): Response =>
   status === 204

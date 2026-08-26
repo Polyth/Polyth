@@ -23,7 +23,6 @@ import LockScreen from "./components/LockScreen.tsx";
 import "./styles.css";
 import "./developerSurfaces.css";
 import "./featurePanels.css";
-import "./widgets/taskTrackers.css";
 
 applySettingsToDom(getState().settings);
 applyUiSettings();

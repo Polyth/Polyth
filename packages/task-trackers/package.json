@@ -4,13 +4,18 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./widgets": "./widgets/index.ts"
+    "./widgets": "./widgets/index.tsx"
   },
   "polyth": {
-    "serverEntry": "./src/serverEntry.ts"
+    "serverEntry": "./src/serverEntry.ts",
+    "webEntry": "./widgets/index.tsx"
   },
   "dependencies": {
     "@polyth/contracts": "0.1.0",
-    "@polyth/plugins": "0.1.0"
+    "@polyth/plugins": "0.1.0",
+    "@polyth/web-sdk": "0.1.0"
+  },
+  "peerDependencies": {
+    "react": "^19.0.0"
   }
 }

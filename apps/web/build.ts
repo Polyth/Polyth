@@ -3,6 +3,7 @@ import { build } from "esbuild";
 import { copyFile, cp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { scaleUiFontSizes } from "./fontScaleCss.ts";
+import { discoverWebPackages } from "./webPackages.ts";
 
 const here = import.meta.dirname;
 const dist = join(here, "dist");
@@ -70,6 +71,48 @@ await build({
   define: { "process.env.NODE_ENV": '"production"' },
   logLevel: "info",
 });
+const webPackages = await discoverWebPackages(join(here, "..", "..", "packages"));
+const webPackageManifest: Array<{
+  id: string;
+  module: string;
+  styles: string[];
+}> = [];
+for (const pkg of webPackages) {
+  const outdir = join(dist, "web-packages", pkg.id);
+  await build({
+    entryPoints: [pkg.entryFile],
+    bundle: true,
+    platform: "browser",
+    format: "esm",
+    splitting: true,
+    jsx: "automatic",
+    external: reactExternals,
+    sourcemap: true,
+    minify: true,
+    outdir,
+    entryNames: "entry",
+    chunkNames: "chunks/[name]-[hash]",
+    assetNames: "assets/[name]-[hash]",
+    loader: { ".css": "css" },
+    plugins: [uiFontScalePlugin],
+    define: { "process.env.NODE_ENV": '"production"' },
+    logLevel: "info",
+  });
+  const outputs = await readdir(outdir);
+  webPackageManifest.push({
+    id: pkg.id,
+    module: `/web-packages/${pkg.id}/entry.js`,
+    styles: outputs
+      .filter((name) => name.endsWith(".css"))
+      .sort()
+      .map((name) => `/web-packages/${pkg.id}/${name}`),
+  });
+}
+await mkdir(join(dist, "web-packages"), { recursive: true });
+await writeFile(
+  join(dist, "web-packages", "manifest.json"),
+  JSON.stringify({ packages: webPackageManifest }),
+);
 await copyFile(join(here, "src/index.html"), join(dist, "index.html"));
 const projectIconNames = (await readdir(projectIcons))
   .filter((name) => name.endsWith(".svg"))

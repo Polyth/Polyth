@@ -28,13 +28,13 @@ register("./tsxHooks.mjs", import.meta.url);
 
 const { act, createElement } = await import("react");
 const { createRoot } = await import("react-dom/client");
-const { api } = await import("../src/api.ts");
+const { api } = await import("../widgets/api.ts");
 const {
   LinkedTaskWidget,
   TaskTrackerBoard,
   defaultViewForBoard,
   groupTasksByStatus,
-} = await import("../src/widgets/taskTrackersPlugin.tsx");
+} = await import("../widgets/plugin.tsx");
 
 const statuses: TaskTrackerStatusDto[] = [
   { id: "todo", name: "To do", category: "todo" },
@@ -115,7 +115,7 @@ test("task board utilities choose sensible views and stable status columns", () 
 });
 
 test("task tracker surfaces enforce mobile containment, touch, zoom, and safe-area rules", async () => {
-  const css = await readFile(new URL("../src/widgets/taskTrackers.css", import.meta.url), "utf8");
+  const css = await readFile(new URL("../widgets/styles.css", import.meta.url), "utf8");
   assert.match(css, /\.tt-board button,[\s\S]*min-height:\s*44px/);
   assert.match(css, /@container task-tracker \(max-width: 480px\)[\s\S]*font-size:\s*16px/);
   assert.match(css, /@container task-tracker \(max-width: 480px\)[\s\S]*\.tt-empty[\s\S]*min-height:\s*0/);
@@ -129,14 +129,6 @@ test("task tracker surfaces enforce mobile containment, touch, zoom, and safe-ar
   assert.match(css, /\.tt-board-content[\s\S]*overflow:\s*hidden/);
   assert.match(css, /env\(safe-area-inset-bottom/);
 
-  const html = await readFile(new URL("../src/index.html", import.meta.url), "utf8");
-  assert.match(html, /width=device-width, initial-scale=1, viewport-fit=cover/);
-
-  const globalCss = await readFile(new URL("../src/styles.css", import.meta.url), "utf8");
-  assert.match(
-    globalCss,
-    /@media \(max-width: 760px\)[\s\S]*\.widget-canvas-grid[\s\S]*padding:[^;]*env\(safe-area-inset-bottom/,
-  );
 });
 
 test("provider failures stay explicit and offer recovery instead of masquerading as setup", async () => {

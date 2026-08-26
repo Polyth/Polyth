@@ -17,6 +17,7 @@ import type {
 } from "@polyth/contracts";
 import { extractChangedFiles } from "./pendingChanges.ts";
 import { tr } from "./i18n/index.ts";
+import { runWebReducers } from "./packages/reducers.ts";
 
 export interface UserMsg {
   kind: "user";
@@ -948,7 +949,8 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
       break;
     }
     default:
-      break; // session/*, context/*, compaction/*, git/snapshot, walkthrough/*, etc: ignore
+      runWebReducers(model, ev);
+      break; // Unregistered session/*, context/*, compaction/*, etc. are ignored.
   }
   model.version += 1;
   return model;

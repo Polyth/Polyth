@@ -16,8 +16,6 @@ import type {
   TaskTrackerTaskQuery,
 } from "@polyth/contracts";
 
-export { TASK_TRACKER_WIDGETS } from "../widgets/index.ts";
-
 export type FetchFn = typeof fetch;
 
 interface ProviderClient {

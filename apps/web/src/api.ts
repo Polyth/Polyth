@@ -29,12 +29,6 @@ import type {
   OpenCodePluginRemoveResponseDto,
   PackageDescriptorDto,
   SystemInfoDto,
-  TaskTrackerBoardDto,
-  TaskTrackerProjectDto,
-  TaskTrackerProvider,
-  TaskTrackerProviderDto,
-  TaskTrackerSessionTaskDto,
-  TaskTrackerTaskDto,
   TrackCreateInput,
   TrackDto,
   Project,
@@ -1007,53 +1001,6 @@ export const api = {
     jfetch<TrackDto>(`/api/tracks/${encodeURIComponent(id)}/retry`, json("POST", { sessionId })),
   trackCompleteStep: (id: string) =>
     jfetch<TrackDto>(`/api/tracks/${encodeURIComponent(id)}/complete-step`, { method: "POST" }),
-
-  // ---- Jira / Trello task trackers -------------------------------------------
-  taskTrackerProviders: () =>
-    jfetch<TaskTrackerProviderDto[]>("/api/task-trackers/providers"),
-  taskTrackerProjects: (provider: TaskTrackerProvider) =>
-    jfetch<TaskTrackerProjectDto[]>(
-      `/api/task-trackers/projects?provider=${encodeURIComponent(provider)}`,
-    ),
-  taskTrackerBoards: (provider: TaskTrackerProvider, projectId?: string) => {
-    const query = new URLSearchParams({ provider });
-    if (projectId) query.set("projectId", projectId);
-    return jfetch<TaskTrackerBoardDto[]>(`/api/task-trackers/boards?${query}`);
-  },
-  taskTrackerTasks: (
-    provider: TaskTrackerProvider,
-    input: { boardId?: string; projectId?: string; limit?: number },
-  ) => {
-    const query = new URLSearchParams({ provider });
-    if (input.boardId) query.set("boardId", input.boardId);
-    if (input.projectId) query.set("projectId", input.projectId);
-    if (input.limit !== undefined) query.set("limit", String(input.limit));
-    return jfetch<TaskTrackerTaskDto[]>(`/api/task-trackers/tasks?${query}`);
-  },
-  taskTrackerTask: (provider: TaskTrackerProvider, taskId: string) =>
-    jfetch<TaskTrackerTaskDto>(
-      `/api/task-trackers/${provider}/tasks/${encodeURIComponent(taskId)}`,
-    ),
-  taskTrackerSessionTasks: (sessionId: string) =>
-    jfetch<TaskTrackerSessionTaskDto[]>(
-      `/api/task-trackers/sessions/${encodeURIComponent(sessionId)}/tasks`,
-    ),
-  taskTrackerLink: (
-    provider: TaskTrackerProvider,
-    taskId: string,
-    input: { sessionId: string; instructions?: string; startAgent?: boolean },
-  ) => jfetch<{ ok: true; task: TaskTrackerTaskDto; sessionId: string; turn?: unknown }>(
-    `/api/task-trackers/${provider}/tasks/${encodeURIComponent(taskId)}/link`,
-    json("POST", input),
-  ),
-  taskTrackerUpdateStatus: (
-    provider: TaskTrackerProvider,
-    taskId: string,
-    input: { sessionId: string; statusId: string },
-  ) => jfetch<TaskTrackerTaskDto>(
-    `/api/task-trackers/${provider}/tasks/${encodeURIComponent(taskId)}`,
-    json("PATCH", input),
-  ),
 
   // ---- github (gh CLI; fail-soft) --------------------------------------------
   githubStatus: (projectId: string) =>

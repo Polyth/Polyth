@@ -3,7 +3,6 @@ import assert from "node:assert/strict";
 import { register } from "node:module";
 import { USAGE_WIDGETS } from "@polyth/usage";
 import { GITHUB_WIDGETS } from "@polyth/github";
-import { TASK_TRACKER_WIDGETS } from "@polyth/task-trackers";
 import { listSlots, registerSlot } from "../src/slots.ts";
 
 register("./tsxHooks.mjs", import.meta.url);
@@ -14,8 +13,6 @@ const { installBuiltinMiniWidgets, WORKFLOW_WIDGET_PLUGIN } =
   await import("../src/widgets/builtinMiniWidgets.tsx");
 const { installUsagePlugin, USAGE_WIDGET_PLUGIN } = await import("../src/widgets/usagePlugin.tsx");
 const { installGithubPlugin, GITHUB_WIDGET_PLUGIN } = await import("../src/widgets/githubPlugin.tsx");
-const { installTaskTrackerPlugin, TASK_TRACKER_WIDGET_PLUGIN } =
-  await import("../src/widgets/taskTrackersPlugin.tsx");
 
 installBuiltinMiniWidgets();
 
@@ -125,27 +122,6 @@ test("GitHub plugin owns its package-declared current PR widget", () => {
   assert.equal(typeof widget?.render, "function");
   assert.equal(typeof widget?.settingsRender, "function");
   assert.ok(widget?.settingsSchema);
-});
-
-test("Task tracker plugin owns every package-declared widget and slot", () => {
-  const client = TASK_TRACKER_WIDGET_PLUGIN.widgets ?? [];
-  assert.deepEqual(
-    client.map(({ render: _render, settingsRender: _settingsRender, ...widget }) => widget),
-    TASK_TRACKER_WIDGETS.map(({ module: _module, ...widget }) => widget),
-  );
-  installTaskTrackerPlugin();
-  const widgets = listWidgets().filter((item) => item.pluginId === "task-trackers");
-  assert.deepEqual(widgets.map((widget) => widget.id).sort(), [
-    "task-trackers.board",
-    "task-trackers.linked-task",
-  ]);
-  assert.equal(widgets.find((widget) => widget.id === "task-trackers.board")?.defaultSlot, "workspace.main");
-  assert.equal(
-    widgets.find((widget) => widget.id === "task-trackers.linked-task")?.defaultSlot,
-    "session.composer.before",
-  );
-  assert.ok(widgets.every((widget) => typeof widget.render === "function"));
-  assert.ok(widgets.every((widget) => typeof widget.settingsRender === "function"));
 });
 
 test("plugin catalog and settings slots merge into one widget definition", () => {

@@ -11,7 +11,6 @@ import { installModelsPackage } from "./models.ts";
 import { installPluginsPackage } from "./plugins.ts";
 import { installSecureSafePackage } from "./secure-safe.ts";
 import { installSshPackage } from "./ssh.ts";
-import { installTaskTrackersPackage } from "./task-trackers.ts";
 import { combineUnregister } from "./settingsPage.ts";
 import { installUsagePackage } from "./usage.ts";
 import { installVoicePackage } from "./voice.ts";
@@ -19,6 +18,8 @@ import { installWorkflowPackage } from "./workflow.ts";
 import { configurePackageReconcile, reconcilePackage } from "./reconcile.ts";
 import { registerBuiltinPackageTours } from "./onboarding/builtinTours.ts";
 import { getState, setActiveView } from "../store.ts";
+import { loadWebPackageInstallers } from "./webEntries.ts";
+import { webPackageHost } from "./webHost.ts";
 
 // Tours for surfaces without an installer (built-in settings pages) exist for
 // the whole app session, independent of package enable/disable syncing.
@@ -40,7 +41,6 @@ const installers = new Map<string, PackageInstaller>([
   ["secure-safe", installSecureSafePackage],
   ["home-assistant", installHomeAssistantPackage],
   ["ssh", installSshPackage],
-  ["task-trackers", installTaskTrackersPackage],
   ["workflow", installWorkflowPackage],
 ]);
 
@@ -55,6 +55,7 @@ let enabled = new Set<string>();
 const packageStates = new Map<string, boolean>();
 const listeners = new Set<() => void>();
 let bootQueue = Promise.resolve();
+let webEntriesLoaded: Promise<void> | null = null;
 
 const canonicalId = (id: string): string => aliases.get(id) ?? id;
 
@@ -86,6 +87,15 @@ configurePackageReconcile({
 });
 
 async function syncPackages(): Promise<void> {
+  webEntriesLoaded ??= loadWebPackageInstallers(webPackageHost).then((discovered) => {
+    for (const [id, install] of discovered) {
+      if (installers.has(id)) {
+        throw new Error(`web package installer already registered: ${id}`);
+      }
+      installers.set(id, install);
+    }
+  });
+  await webEntriesLoaded;
   const response = await api.packagesList();
   const next = new Set<string>();
   packageStates.clear();
