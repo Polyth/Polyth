@@ -125,8 +125,8 @@ test("all mobile chat composers expose project and worktree targets", () => {
     css,
     /\.composer\.composer-mobile \.composer-mobile-extensions \.composer-auto-approve,[\s\S]*?\.composer\.composer-mobile \.composer-mobile-extensions \.composer-goals,[\s\S]*?\.composer\.composer-mobile \.composer-mobile-extensions \.composer-workflow\s*\{[^}]*width:\s*var\(--tap\);[^}]*min-width:\s*var\(--tap\);[^}]*height:\s*var\(--tap\);[^}]*min-height:\s*var\(--tap\);/s,
   );
-  assert.match(css, /\.composer-mobile\.composer-collapsed:not\(\.composer-has-draft\) \.composer-workflow \{ display: none; \}/);
-  assert.match(css, /\.composer-mobile\.composer-has-draft \.composer-workflow \{ display: inline-flex; \}/);
+  assert.match(css, /\.composer-mobile\.composer-collapsed:not\(\.composer-has-draft\) \.composer-workflow\s*\{\s*display:\s*none;/);
+  assert.match(css, /\.composer-mobile\.composer-has-draft \.composer-workflow\s*\{\s*display:\s*inline-flex;/);
   assert.match(bottomNavigation, /displaySessionTitle\(session\?\.title \?\? "", session\?\.id\)/);
   assert.match(header, /<MobileNavigationRail \/>/);
   assert.match(header, /<WorkspaceBottomNav \/>/);
