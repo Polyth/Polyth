@@ -152,7 +152,8 @@ test("compact panels and timeline actions use current mobile geometry", () => {
   const css = read("../src/styles.css");
   const finalMobile = css.slice(css.lastIndexOf("@media (max-width: 820px)"));
 
-  assert.match(finalMobile, /\.panel-sheet\s*\{[^}]*top:\s*60px;[^}]*bottom:\s*0;/s);
+  assert.match(finalMobile, /\.panel-sheet\s*\{[^}]*top:\s*60px;[^}]*bottom:\s*0;[^}]*z-index:\s*70;/s);
+  assert.match(finalMobile, /\.panel-sheet-backdrop\s*\{\s*z-index:\s*69;/);
   assert.match(
     finalMobile,
     /\.msg\.assistant \.msg-action-btn,[\s\S]*?\.agent-reply-actions button,[\s\S]*?\.assistant-gallery-shortcut\s*\{[^}]*width:\s*var\(--tap\);[^}]*min-width:\s*var\(--tap\);[^}]*height:\s*var\(--tap\);[^}]*min-height:\s*var\(--tap\);/s,
