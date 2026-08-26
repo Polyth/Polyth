@@ -41,7 +41,14 @@ import {
   type MutationGuards,
 } from "../messageActions.ts";
 import { applyComposerSeed, discardComposerSeed, loadSeedRecord } from "../drafts.ts";
-import { TIMELINE_CHUNK, TIMELINE_WINDOW, grownLimit, limitToInclude, windowStart } from "../timelineWindow.ts";
+import {
+  LOW_RESOURCE_TIMELINE_WINDOW,
+  TIMELINE_CHUNK,
+  grownLimit,
+  initialTimelineWindow,
+  limitToInclude,
+  windowStart,
+} from "../timelineWindow.ts";
 import {
   RAIL_PANEL_ROWS,
   activePromptIndex,
@@ -1017,7 +1024,23 @@ export default function Timeline({
   const prefs = useUiSettings();
   const sessionId = useStore((s) => s.activeSessionId);
   // L13 windowing: only the last `limit` rows render (see timelineWindow.ts).
-  const [limit, setLimit] = useState(TIMELINE_WINDOW);
+  const initialLimit = initialTimelineWindow(
+    typeof document !== "undefined" && document.body.dataset.desktopLowResource === "true",
+  );
+  const [limit, setLimit] = useState(initialLimit);
+  useEffect(() => {
+    // Desktop settings arrive over IPC and can race the first React render.
+    // Re-read the DOM marker after subscribing so low-resource startup always
+    // releases the extra Markdown/tool subtrees even when IPC resolves late.
+    const applyResourceMode = () => {
+      if (document.body.dataset.desktopLowResource === "true") {
+        setLimit((current) => Math.min(current, LOW_RESOURCE_TIMELINE_WINDOW));
+      }
+    };
+    window.addEventListener("polyth:desktop-performance-changed", applyResourceMode);
+    applyResourceMode();
+    return () => window.removeEventListener("polyth:desktop-performance-changed", applyResourceMode);
+  }, []);
   const anchor = useRef<{ scrollTop: number; scrollHeight: number } | null>(null);
   const pendingJump = useRef<string | null>(null);
   const pendingJumpFocus = useRef(false);
@@ -1037,7 +1060,7 @@ export default function Timeline({
       saveTimelineAnchor(anchorSession, captureTimelineAnchor(el, atBottom.current));
     }
     setAnchorSession(sessionId);
-    setLimit(TIMELINE_WINDOW);
+    setLimit(initialLimit);
     const stored = sessionId !== null ? loadTimelineAnchor(sessionId) : null;
     restoreRef.current = stored !== null && !stored.atBottom ? stored : null;
     atBottom.current = stored?.atBottom ?? true;

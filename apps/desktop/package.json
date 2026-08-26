@@ -1,0 +1,114 @@
+{
+  "name": "@polyth/desktop",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Polyth desktop application",
+  "author": "Max",
+  "desktopName": "polyth.desktop",
+  "main": "dist/main.js",
+  "scripts": {
+    "build": "node build.ts",
+    "download:opencode": "node download-opencode.mjs",
+    "start": "electron .",
+    "dist": "npm run build && electron-builder --publish never",
+    "dist:linux": "npm run build && electron-builder --linux AppImage --publish never",
+    "dist:mac": "npm run build && electron-builder --mac dmg zip --publish never",
+    "dist:win": "npm run build && electron-builder --win nsis --publish never"
+  },
+  "dependencies": {
+    "electron-updater": "6.8.9",
+    "esbuild": "0.28.2",
+    "node-pty": "^1.1.0",
+    "playwright-core": "1.62.1"
+  },
+  "devDependencies": {
+    "electron": "44.0.0",
+    "electron-builder": "26.15.3",
+    "yauzl": "3.4.0"
+  },
+  "build": {
+    "appId": "com.polyth.desktop",
+    "productName": "Polyth",
+    "asar": true,
+    "artifactName": "${productName}-${version}-${os}-${arch}.${ext}",
+    "directories": {
+      "output": "release",
+      "buildResources": "build"
+    },
+    "files": [
+      "dist/**/*",
+      "build/icon.png",
+      "opencode.json",
+      "package.json"
+    ],
+    "extraResources": [
+      {
+        "from": "../web/dist",
+        "to": "web",
+        "filter": [
+          "**/*"
+        ]
+      },
+      {
+        "from": "resources/opencode",
+        "to": "opencode",
+        "filter": [
+          "**/opencode",
+          "**/opencode.exe"
+        ]
+      },
+      {
+        "from": "build/icon.png",
+        "to": "icon.png"
+      }
+    ],
+    "linux": {
+      "target": [
+        "AppImage"
+      ],
+      "category": "Development",
+      "executableName": "polyth",
+      "icon": "build/icon.png",
+      "syncDesktopName": true
+    },
+    "mac": {
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "category": "public.app-category.developer-tools",
+      "hardenedRuntime": true,
+      "gatekeeperAssess": false,
+      "notarize": true,
+      "icon": "build/icon.png",
+      "entitlements": "build/entitlements.mac.plist",
+      "entitlementsInherit": "build/entitlements.mac.plist",
+      "x64ArchFiles": "{**/node_modules/{esbuild,@esbuild/*,node-pty/prebuilds/*}/**,**/Resources/opencode/darwin-*/opencode}",
+      "extendInfo": {
+        "NSMicrophoneUsageDescription": "Polyth uses the microphone only when you start dictation."
+      }
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ],
+      "icon": "build/icon.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowElevation": true,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "Polyth"
+    },
+    "publish": {
+      "provider": "github",
+      "owner": "otto-assistant",
+      "repo": "polyth",
+      "releaseType": "release"
+    }
+  }
+}

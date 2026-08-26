@@ -14,6 +14,7 @@ import { getState } from "./store.ts";
 import { installBuiltinMiniWidgets } from "./widgets/builtinMiniWidgets.tsx";
 import { installNotificationCentre } from "./components/NotificationCentre.tsx";
 import { installOpenCodeRestartControl } from "./components/OpenCodeRestartControl.tsx";
+import { installDesktopIntegration } from "./desktop.tsx";
 import { exposeWidgets } from "./widgets/catalog.ts";
 import { bootPackages } from "./packages/registry.ts";
 import { getLocaleSnapshot, subscribeLocale } from "./i18n/index.ts";
@@ -35,6 +36,9 @@ installBuiltinMiniWidgets();
 // NTF-01: bell + panel arrive through the slot registry, never via App.tsx.
 installNotificationCentre();
 installOpenCodeRestartControl();
+// No-op in browsers; Electron's preload exposes the bridge that enables the
+// desktop settings page and custom titlebar controls through existing slots.
+installDesktopIntegration();
 // Palette commands + keyboard shortcuts: one install, synced with the
 // capability registry from then on (UX-PERSONAS: search sees every tool).
 installShell();

@@ -4,7 +4,16 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
-import { grownLimit, hiddenCount, limitToInclude, windowStart, TIMELINE_CHUNK, TIMELINE_WINDOW } from "../src/timelineWindow.ts";
+import {
+  LOW_RESOURCE_TIMELINE_WINDOW,
+  TIMELINE_CHUNK,
+  TIMELINE_WINDOW,
+  grownLimit,
+  hiddenCount,
+  initialTimelineWindow,
+  limitToInclude,
+  windowStart,
+} from "../src/timelineWindow.ts";
 
 // The integration assertion below exercises timelineAnchor.ts against window
 // growth; its usable-edge helpers read computed styles.
@@ -31,6 +40,14 @@ test("windowStart/hiddenCount: suffix window, nothing hidden for short sessions"
   assert.equal(windowStart(500, 0), 500);
   assert.equal(windowStart(500, -5), 500);
   assert.equal(windowStart(0, 150), 0);
+});
+
+test("low-resource mode halves the initial mounted chat window without changing reveal math", () => {
+  assert.equal(initialTimelineWindow(false), TIMELINE_WINDOW);
+  assert.equal(initialTimelineWindow(true), LOW_RESOURCE_TIMELINE_WINDOW);
+  assert.equal(LOW_RESOURCE_TIMELINE_WINDOW, 75);
+  assert.equal(windowStart(1_000, initialTimelineWindow(true)), 925);
+  assert.equal(grownLimit(1_000, initialTimelineWindow(true)), 225);
 });
 
 test("grownLimit grows by a chunk and caps at everything", () => {

@@ -130,6 +130,10 @@ const BUILTIN_SERVER_PLUGINS: Record<string, ServerPluginFactory> = {
 export interface BootOptions {
   port?: number;
   dataDir?: string;
+  /** Optional listen address. The desktop host pins this to loopback. */
+  hostname?: string;
+  /** Static SPA directory override for packaged hosts. */
+  webDist?: string;
   opencode?: Partial<OpenCodeAdapterOptions>;
 }
 
@@ -364,9 +368,13 @@ export async function boot(opts: BootOptions = {}) {
   const git = createGitService();
   const commands = createCommandService();
   // POLYTH_TERM_REPLAY_BYTES caps per-PTY scrollback replay (default 200 KB).
+  // POLYTH_MAX_TERMINALS optionally bounds concurrent terminal processes.
   const terminals = createTerminalService({
     ...(Number(process.env.POLYTH_TERM_REPLAY_BYTES) > 0
       ? { replayBytes: Number(process.env.POLYTH_TERM_REPLAY_BYTES) }
+      : {}),
+    ...(Number(process.env.POLYTH_MAX_TERMINALS) > 0
+      ? { maxSessions: Number(process.env.POLYTH_MAX_TERMINALS) }
       : {}),
   });
 
@@ -863,7 +871,7 @@ export async function boot(opts: BootOptions = {}) {
     },
     systemInfo: (local) => ({
       version: "0.1.0",
-      applicationUrl: `http://127.0.0.1:${port}`,
+      applicationUrl: `http://${opts.hostname ?? "127.0.0.1"}:${port}`,
       tunnelUrl: process.env.POLYTH_TUNNEL_URL ?? null,
       dataDirLabel: local ? dataDir : "Polyth data directory",
       capabilities: allCapabilities(),
@@ -1088,7 +1096,7 @@ export async function boot(opts: BootOptions = {}) {
   const server = createHttpServer({
     sessions, projects, runtimes, routes, visibility, auth, catalog: runtimeCatalog,
     capabilities: allCapabilities,
-    webDist: resolve(__dirname, "../../../apps/web/dist"),
+    webDist: resolve(opts.webDist ?? resolve(__dirname, "../../../apps/web/dist")),
     version: "0.1.0",
   });
   // order matters: /ws (session gateway) aborts upgrades whose path it does
@@ -1097,8 +1105,10 @@ export async function boot(opts: BootOptions = {}) {
   attachTerminalWs(server, { terminals, authorize: wsAuthorize });
   live = attachWs(server, sessions, browser, dictation, wsAuthorize);
 
-  await new Promise<void>((res) => server.listen(port, res));
-  console.log(`[polyth] server on http://127.0.0.1:${port}  data=${dataDir}`);
+  await new Promise<void>((res) => opts.hostname
+    ? server.listen(port, opts.hostname, res)
+    : server.listen(port, res));
+  console.log(`[polyth] server on http://${opts.hostname ?? "127.0.0.1"}:${port}  data=${dataDir}`);
 
   const shutdown = async () => {
     schedule.stop();

@@ -19,6 +19,7 @@ import FileRowActions from "./FileRowActions.tsx";
 import { ChevronGlyph, FileTypeGlyph, FolderGlyph, fileTypeKeyOf } from "../editor/fileTreeIcons.tsx";
 import { Icon } from "../icons.tsx";
 import { confirmAlert, promptAlert } from "../alerts.ts";
+import { desktopBridge } from "../desktopBridge.ts";
 import "./editor/FilePane.tsx"; // registers the "file" pane provider
 import "../workspace/mainSlotPanes.ts";
 import { tr } from "../i18n/index.ts"; // registers the "plugin" slot bridge
@@ -44,9 +45,11 @@ interface CtxMenu {
 
 export default function EditorView() {
   const projectId = useStore((s) => s.activeProjectId);
+  const project = useStore((s) => s.projectRegistry.projects.find((candidate) => candidate.id === s.activeProjectId));
   // Files must follow the ACTIVE SESSION's worktree, not the project root
   // (UX-FIXTURE-VISUAL P0): every files call carries the session id.
   const sessionId = useStore((s) => s.activeSessionId);
+  const session = useStore((s) => s.sessions.find((candidate) => candidate.id === s.activeSessionId));
   const sid = sessionId ?? undefined;
   const filePath = useStore((s) => s.editorFile);
   const visible = usePaneVisible();
@@ -205,6 +208,20 @@ export default function EditorView() {
       if (kind === "file") openFile(rel);
     } catch (err) {
       setTreeErr(msg(err));
+    }
+  };
+
+  const revealNative = async (entry: FileEntry) => {
+    const desktop = desktopBridge();
+    const root = session?.worktreePath ?? project?.path;
+    if (!desktop || !root || project?.remote) return;
+    const separator = root.includes("\\") ? "\\" : "/";
+    const absolute = `${root.replace(/[\\/]$/, "")}${separator}${entry.path.replaceAll("/", separator)}`;
+    try {
+      if (entry.dir) await desktop.openPath(absolute);
+      else await desktop.revealPath(absolute);
+    } catch (error) {
+      setTreeErr(msg(error));
     }
   };
 
@@ -383,6 +400,11 @@ export default function EditorView() {
             )}
             <button role="menuitem" onClick={() => { attachPath(ctx.entry.path); setCtx(null); }}>{tr("editorview.addToChat")}</button>
             <button role="menuitem" onClick={() => { void navigator.clipboard?.writeText(ctx.entry.path); setCtx(null); }}>{tr("editorview.copyPath")}</button>
+            {desktopBridge() && !project?.remote && (
+              <button role="menuitem" onClick={() => { void revealNative(ctx.entry); setCtx(null); }}>
+                {tr(ctx.entry.dir ? "editorview.openInFileManager" : "editorview.revealInFileManager")}
+              </button>
+            )}
             {ctx.entry.dir && (
               <>
                 <button role="menuitem" onClick={() => { void ctxNew(ctx.entry.path, "file"); setCtx(null); }}>{tr("editorview.newFile")}</button>

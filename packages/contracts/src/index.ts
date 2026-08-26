@@ -882,7 +882,7 @@ export interface RemoteHost {
 /** Canonical slot vocabulary — the runtime list backs `UiSlot` so the
  *  server-managed manifest boundary can reject unknown slot names. */
 export const UI_SLOTS = [
-  "app.nav", "app.header.actions", "session.header.actions", "session.list.badges",
+  "app.nav", "app.header.actions", "app.window.controls", "session.header.actions", "session.list.badges",
   "sidebar.footer",
   "composer.leading", "composer.trailing", "contextRail.tabs",
   "settings.pages", "settings.footer", "commandPalette.commands",

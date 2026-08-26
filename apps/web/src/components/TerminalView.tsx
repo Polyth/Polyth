@@ -101,7 +101,7 @@ export default function TerminalView() {
       emu = createTerminalEmulator({
         cols: lastSize.current.cols,
         rows: lastSize.current.rows,
-        scrollback: 5000,
+        scrollback: document.body.dataset.desktopLowResource === "true" ? 1000 : 5000,
         queryFg: themeVar("--term-fg"),
         queryBg: themeVar("--term-bg"),
       });

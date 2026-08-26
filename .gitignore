@@ -1,5 +1,11 @@
 node_modules
 apps/web/dist
+apps/desktop/dist
+apps/desktop/release
+apps/desktop/build/icon.png
+apps/desktop/resources/opencode/*/opencode
+apps/desktop/resources/opencode/*/opencode.exe
+apps/desktop/resources/opencode/*/provenance.json
 *.db
 *.db-wal
 *.db-shm
