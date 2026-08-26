@@ -86,19 +86,22 @@ test("320px source controls expose 44px tabs, copy actions, and chips", { skip: 
       return { width: box.width, height: box.height, left: box.left, top: box.top };
     };
     const file = rect("#file-ref");
-    const hit = document.elementFromPoint(file.left + file.width / 2, file.top - 8);
     return {
       log: rect("#log-tab"),
       copy: rect(".copy-btn"),
       chip: rect("#all-chip"),
-      expandedFileRefHit: Boolean(hit?.closest("#file-ref")),
+      file,
     };
   });
-  for (const [name, target] of Object.entries({ log: targets.log, copy: targets.copy, chip: targets.chip })) {
+  for (const [name, target] of Object.entries({
+    log: targets.log,
+    copy: targets.copy,
+    chip: targets.chip,
+    file: targets.file,
+  })) {
     assert.ok(target.width >= 44, `${name} width is ${target.width}px`);
     assert.ok(target.height >= 44, `${name} height is ${target.height}px`);
   }
-  assert.equal(targets.expandedFileRefHit, true, "file reference has an expanded 44px hit area");
 });
 
 test("narrow source-control shell keeps every change group above the commit composer", { skip: !CHROME }, async () => {
