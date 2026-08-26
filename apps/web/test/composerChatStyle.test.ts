@@ -18,6 +18,14 @@ test("working status is compact and does not claim repository indexing", () => {
   assert.match(css, /\.focus-working-spinner\s*\{[^}]*width:\s*7px;[^}]*animation:\s*focus-working-pulse/s);
 });
 
+test("composer radius uses the shared corner setting", () => {
+  const css = read("../src/styles.css");
+
+  assert.match(css, /\.composer-card\s*\{[^}]*border-radius:\s*var\(--radius-composer\)/s);
+  assert.match(css, /\.composer-simple \.composer-card\s*\{[^}]*border-radius:\s*var\(--radius-composer\)/s);
+  assert.match(css, /\.composer-mobile \.composer-card\s*\{[^}]*border-radius:\s*var\(--radius-composer\)/s);
+});
+
 test("conversation rows omit role chrome and keep assistant prose unboxed", () => {
   const timeline = read("../src/components/Timeline.tsx");
   const css = read("../src/styles.css");

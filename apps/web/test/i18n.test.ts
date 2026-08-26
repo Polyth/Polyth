@@ -376,9 +376,9 @@ test("reviewed workflow locale copy keeps operational terms unambiguous", () => 
   );
 });
 
-test("runtime switches locale, resolves package keys, and marks only Arabic RTL", () => {
+test("runtime switches locale, resolves package keys, and marks only Arabic RTL", async () => {
   for (const locale of LOCALES) {
-    setLocale(locale);
+    await setLocale(locale);
     assert.equal(tr("questionserializers.questionValue", { number: 7 }).includes("7"), true);
     // Package-owned keys must resolve through the merged catalog.
     assert.equal(tr("gitview.branch", {}).trim().length > 0, true);
@@ -387,7 +387,7 @@ test("runtime switches locale, resolves package keys, and marks only Arabic RTL"
     assert.equal(tr("usage.usagedashboard.dashboardDensity", {}).trim().length > 0, true);
     assert.equal(isRtl(), locale === "ar");
   }
-  setLocale("en");
+  await setLocale("en");
 });
 
 test("European and Brazilian Portuguese remain distinct catalogs", () => {

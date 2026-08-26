@@ -1397,6 +1397,8 @@ export const ar: AppMessages = {
   "settings.pages.secret": "+ سر",
   "settings.pages.secrets": "· أسرار:",
   "settings.pages.sendOnEnter": "إرسال عند الدخول",
+  "settings.pages.desktopSendShortcut": "اختصار الإرسال على سطح المكتب",
+  "settings.pages.mobileSendShortcut": "اختصار الإرسال على الجوال",
   "settings.pages.sendsATestNotificationThroughThePush": "يرسل إشعارًا تجريبيًا عبر خدمة الإشعارات الفورية (قم بإخفاء علامة التبويب لرؤيته).",
   "settings.pages.sendTest": "أرسل اختبارًا",
   "settings.pages.sentToOneDevice": "تم الإرسال إلى جهاز واحد",

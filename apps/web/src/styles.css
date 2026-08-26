@@ -74,6 +74,7 @@
   --radius-card: 16px;
   --radius-surface: 20px;
   --radius-sheet: 24px;
+  --radius-composer: var(--radius-xl);
   /* Fixed-value component radii use this scale too; it keeps the corner
      setting effective while preserving inherently circular/pill shapes. */
   --corner-radius-scale: 1;
@@ -779,14 +780,10 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
 .project-card > * { position: relative; z-index: 1; }
 .project-card:hover { background: transparent; }
 .project-card:hover::before { background: var(--elevated); opacity: 1; }
-.project-tree-toggle-sign {
-  width: 14px;
-  flex: none;
-  color: var(--muted);
-  font-size: calc(var(--ui-font-size, 14px) * 1.3);
-  font-weight: 450;
-  line-height: 1;
-  text-align: center;
+.project-card.active::before {
+  background: color-mix(in srgb, var(--accent) 15%, var(--elevated));
+  box-shadow: 0 0 14px color-mix(in srgb, var(--accent) 28%, transparent);
+  opacity: 1;
 }
 .project-new-session,
 .project-worktree-btn,
@@ -1467,7 +1464,7 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
 .archived-restore-btn { height: 32px; padding: 0 14px; border-radius: calc(9px * var(--corner-radius-scale)); font-size: 12.5px; }
 .composer-card {
   background: linear-gradient(180deg, var(--elevated), var(--panel));
-  border: 1px solid var(--border); border-radius: var(--radius-xl);
+  border: 1px solid var(--border); border-radius: var(--radius-composer);
   box-shadow: var(--shadow-lg), var(--inset-hi);
   transition: border-color 160ms ease, box-shadow 160ms ease;
 }
@@ -1576,7 +1573,7 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
 .composer-card textarea:focus-visible { outline: none; }
 .composer-bar {
   display: flex; align-items: center; gap: 7px; padding: 9px 10px 10px 12px;
-  border-top: 1px solid var(--hair);
+  border: 0;
   /* Groups stay on one row at normal wide widths; when an open rail squeezes
      the chat column they tier instead of overflowing the workspace. */
   flex-wrap: wrap;
@@ -3143,6 +3140,9 @@ input.notification-preview { font-family: var(--mono); font-size: 12.5px; min-wi
   min-height: 24px; height: auto; padding: 4px 12px; border: none; border-radius: calc(7px * var(--corner-radius-scale));
   font-size: 12px; font-weight: 520; color: var(--muted); background: transparent;
 }
+/* Settings keep their compact segmented-control padding, while the options
+   on the right remain legible at the default (Medium) interface scale. */
+.settings-pane-body .set-row-control > .seg button { font-size: 13px; }
 .seg button:hover { color: var(--text); background: transparent; border-color: transparent; }
 .seg button.active, .seg button.on {
   background: var(--raised); color: var(--text);
@@ -4480,7 +4480,7 @@ body[data-chatwidth="wide"] .bubble, body[data-chatwidth="wide"] .reasoning, bod
 
 /* ---------- WP3: queued message chips ---------- */
 .queue-list {
-  width: 100%;
+  width: 100%; max-width: 100%; overflow: hidden;
   min-width: 0;
   display: flex;
   flex-direction: column;
@@ -4492,7 +4492,7 @@ body[data-chatwidth="wide"] .bubble, body[data-chatwidth="wide"] .reasoning, bod
   min-width: 0;
   box-sizing: border-box;
   display: grid;
-  grid-template-columns: 12px auto minmax(0, 1fr) auto auto auto auto;
+  grid-template-columns: 12px auto minmax(0, 1fr) auto auto auto;
   align-items: center;
   gap: 8px;
   font-size: 12.5px;
@@ -4506,8 +4506,6 @@ body[data-chatwidth="wide"] .bubble, body[data-chatwidth="wide"] .reasoning, bod
 .queue-chip .queue-pos { color: var(--muted); font-variant-numeric: tabular-nums; }
 .queue-chip .queue-text { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .queue-chip .queue-delivery { font-size: 10.5px; }
-.queue-chip .reorder-controls { gap: 1px; }
-.queue-chip .reorder-control { width: 26px; min-width: 26px; height: 26px; min-height: 26px; }
 .queue-chip button { background: none; border: 0; color: var(--muted); cursor: pointer; padding: 2px 4px; }
 .queue-chip button:hover { color: inherit; }
 .queue-chip button:disabled { opacity: 0.35; cursor: default; }
@@ -5745,31 +5743,6 @@ body[data-chatwidth="wide"] .bubble, body[data-chatwidth="wide"] .reasoning, bod
   }
 }
 
-@media (min-width: 1101px) {
-  .plugin-strip {
-    width: 112px;
-    min-width: 112px;
-    align-items: stretch;
-    padding-inline: 6px;
-  }
-  .strip-btn {
-    width: 100%;
-    grid-template-columns: 20px minmax(0, 1fr);
-    justify-content: start;
-    gap: 7px;
-    padding-inline: 8px;
-  }
-  .strip-btn::after {
-    content: attr(aria-label);
-    overflow: hidden;
-    color: var(--text-dim);
-    font-size: var(--font-meta);
-    font-weight: 560;
-    text-align: start;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-}
 /* ================== end UX-COMPOSER-DISC ================================== */
 
 /* ========= UX-TIMELINE-LAYOUT-01 §2.6: short-viewport height allocation =====
@@ -6364,8 +6337,8 @@ body[data-density="balanced"] .composer { padding-block: 10px; }
 @media (prefers-reduced-motion: reduce) { .focus-working-spinner, .focus-working-cursor, .focus-working-cat, .focus-working-activity i { animation: none; } }
 .composer-chat { border: 0; padding: 12px max(var(--gutter), calc((100% - 768px) / 2)) 24px; background: var(--elevated); }
 .focus-conversation > .archived-guard { padding-inline: max(var(--gutter), calc((100% - 768px) / 2)); }
-.composer-simple .composer-card { border-radius: calc(22px * var(--corner-radius-scale)); border-color: var(--border); background: var(--elevated); box-shadow: 0 14px 36px -28px rgba(30,25,20,.45); }
-.composer-simple .composer-card textarea { min-height: 92px; padding: 19px 20px 8px; font-size: 13.5px; }
+.composer-simple .composer-card { border-radius: var(--radius-composer); border-color: var(--border); background: var(--elevated); box-shadow: 0 14px 36px -28px rgba(30,25,20,.45); }
+.composer-simple .composer-card textarea { min-height: 92px; padding: 19px 20px 8px; font-size: 13.5px; box-shadow: none; }
 .composer-simple .composer-bar { min-height: 58px; padding: 8px 10px 10px; border: 0; flex-wrap: nowrap; }
 .composer-simple .composer-actions { display: contents; }
 .composer-simple .composer-selectors { order: 4; margin-left: auto; flex-wrap: nowrap; }
@@ -8971,7 +8944,7 @@ html[dir="rtl"] input[type="number"] {
   display: flex;
   flex-direction: column;
   overflow: visible;
-  border-radius: calc(18px * var(--corner-radius-scale));
+  border-radius: var(--radius-composer);
   background: var(--chat-surface);
   box-shadow: none;
 }
@@ -9217,7 +9190,6 @@ html[dir="rtl"] input[type="number"] {
   .header-chat .chat-metric small { font-size: 7.5px; }
   .header-chat .chat-metric strong { font-size: 9px; }
   .pending-changes-location { display: inline; }
-  .composer-simple .composer-card { border-radius: calc(17px * var(--corner-radius-scale)); }
   .composer-simple .composer-selectors {
     grid-template-columns: minmax(0, 1.45fr) minmax(100px, .8fr);
     padding: 8px 8px 0;
@@ -9613,31 +9585,30 @@ html[dir="rtl"] input[type="number"] {
     bottom: 0;
     left: 0;
     z-index: 82;
-    height: calc(72px + var(--safe-bottom));
+    height: calc(60px + var(--safe-bottom));
     display: grid;
-    grid-template-columns: 48px minmax(0, 1fr) 48px;
-    align-items: start;
+    grid-template-columns: var(--tap) minmax(0, 1fr) var(--tap);
+    align-items: center;
     gap: 8px;
     padding: 8px 10px max(8px, var(--safe-bottom));
-    border-top: 1px solid var(--border-soft);
-    background: color-mix(in srgb, var(--chat-bg) 88%, transparent);
-    box-shadow: 0 -10px 30px -28px color-mix(in srgb, var(--text) 70%, transparent);
-    backdrop-filter: blur(18px);
+    border: 0;
+    background: transparent;
+    box-shadow: none;
   }
   .session-nav-action,
   .session-nav-current {
     min-width: 0;
-    height: 48px;
-    min-height: 48px;
+    height: var(--tap);
+    min-height: var(--tap);
     border: 1px solid var(--chat-border);
-    background: var(--chat-surface);
+    background: var(--elevated);
     color: var(--text-dim);
   }
   .session-nav-action {
     display: grid;
     place-items: center;
     padding: 0;
-    border-radius: 50%;
+    border-radius: var(--radius-control);
   }
   .session-nav-action svg { width: 19px; height: 19px; }
   .session-nav-current {
@@ -9647,7 +9618,7 @@ html[dir="rtl"] input[type="number"] {
     align-content: center;
     gap: 0 5px;
     padding: 4px 12px;
-    border-radius: calc(15px * var(--corner-radius-scale));
+    border-radius: var(--radius-control);
     text-align: left;
   }
   .session-nav-current-kicker {
@@ -9691,8 +9662,7 @@ html[dir="rtl"] input[type="number"] {
   html, body, #root { min-height: 100%; min-height: 100dvh; }
   .app.mode-chat.view-session { min-height: 100dvh; background: var(--bg); }
   .mobile-chat-header {
-    display: grid;
-    grid-template-columns: var(--tap) minmax(0, 1fr) var(--tap) var(--tap);
+    display: flex;
     align-items: center;
     height: calc(60px + var(--safe-top));
     min-height: calc(60px + var(--safe-top));
@@ -9702,6 +9672,7 @@ html[dir="rtl"] input[type="number"] {
     background: color-mix(in srgb, var(--bg) 90%, var(--elevated));
     box-shadow: 0 1px 0 var(--border-soft);
   }
+  .mobile-chat-header .mobile-shortcut-rail { flex: 1; min-width: 0; }
   .mobile-chat-header svg { width: 18px; height: 18px; }
 
   .app.mode-chat.view-session .statusbar { display: none; }
@@ -10730,7 +10701,7 @@ html[data-sheet="open"], html[data-sheet="open"] body { overflow: hidden; }
   display: flex;
   flex-direction: column;
   gap: var(--space-2);
-  padding: var(--space-2) 0 max(var(--space-3), var(--safe-bottom));
+  padding: var(--space-2) 0 max(var(--space-1), var(--safe-bottom));
   background: linear-gradient(180deg, transparent, var(--dock-bg) 26%);
 }
 .hero-dock > * { width: 100%; margin-inline: auto; }
@@ -10886,6 +10857,8 @@ html[data-sheet="open"], html[data-sheet="open"] body { overflow: hidden; }
   body[data-keyboard="open"] .hero-sub,
   body[data-keyboard="open"] .hero-recent { display: none; }
   body[data-keyboard="open"] .stage-new .hero h2 { font-size: 21px; line-height: 1.25; }
+  .hero-widget-settings { display: none; }
+  .hero-dock:has(.add-menu) { position: relative; z-index: 130; }
 
   /* ---- header: two actions, ≥44px targets (§19/§21/§37) ---- */
   .mobile-chat-header .header-drawer-btn {
@@ -10918,7 +10891,7 @@ html[data-sheet="open"], html[data-sheet="open"] body { overflow: hidden; }
     overflow: visible;
     min-height: 0;
     border: 1px solid var(--border-soft);
-    border-radius: var(--radius-surface);
+    border-radius: var(--radius-composer);
     background: var(--elevated);
     box-shadow: 0 10px 30px -26px color-mix(in srgb, var(--text) 55%, transparent);
     transition: border-color 160ms ease, box-shadow 160ms ease;
@@ -10938,16 +10911,6 @@ html[data-sheet="open"], html[data-sheet="open"] body { overflow: hidden; }
     overflow-y: auto;
   }
   body[data-band="short"] .composer-mobile .composer-input { min-height: 0; overflow: hidden; }
-
-  /* §11/§15: the gradient is a focus / active-run accent, never permanent
-     chrome that turns the composer into an advertisement. */
-  .composer-mobile .composer-card:focus-within,
-  .composer-mobile .composer-card:has(.composer-stop-primary) {
-    border-color: transparent;
-    background:
-      linear-gradient(var(--elevated), var(--elevated)) padding-box,
-      linear-gradient(110deg, var(--blue), var(--purple), var(--red), var(--amber)) border-box;
-  }
 
   /* Collapsed (§10): one 56px row — add · placeholder · voice. */
   .composer-mobile.composer-collapsed .composer-card {
@@ -11136,7 +11099,23 @@ html[data-sheet="open"], html[data-sheet="open"] body { overflow: hidden; }
 
   /* Fresh and in-conversation chats use this same composer gutter. */
   .composer-chat.composer-mobile {
-    padding: var(--space-1) var(--screen-gutter) max(var(--space-2), var(--safe-bottom));
+    /* The surrounding dock/nav owns the safe area. Keeping it here too put
+       both resting and expanded composers needlessly high. */
+    padding: var(--space-1) var(--screen-gutter);
+  }
+
+  /* The shell follows visualViewport directly, so it stays glued to the
+     keyboard. This only smooths the card's own collapsed → expanded growth. */
+  @media (prefers-reduced-motion: no-preference) {
+    @supports (interpolate-size: allow-keywords) {
+    .composer-mobile .composer-card {
+      height: 56px;
+      interpolate-size: allow-keywords;
+      transition: height var(--motion-surface) var(--motion-ease),
+        border-color 160ms ease, box-shadow 160ms ease;
+    }
+    .composer-mobile.composer-expanded .composer-card { height: auto; }
+    }
   }
 }
 
@@ -13150,10 +13129,10 @@ html[data-modal-surface="open"] body {
   .session-menu button { min-width: var(--tap); min-height: var(--tap); }
 }
 
-/* No pointer or trackpad has to acquire a 7px/12px/32px target. */
+/* Keep desktop rail actions compact; coarse-pointer layouts expand them below. */
 .sidebar-resize { right: -6px; width: 12px; }
-.plugin-strip { width: 52px; min-width: 52px; gap: 4px; }
-.strip-btn { width: 40px; height: 40px; }
+.plugin-strip { width: 44px; min-width: 44px; gap: 3px; }
+.strip-btn { width: 32px; height: 32px; }
 .prompt-nav { width: 44px; }
 .prompt-nav-tick { width: 44px; height: 24px; }
 .prompt-nav-page { height: 32px; }
@@ -13615,8 +13594,8 @@ button[aria-busy="true"] { position: relative; }
 }
 
 /* ================= final critic collision closure =================
-   Keep model identity, transcript chrome, and labelled desktop navigation in
-   disjoint layout tracks at the exact critic viewports. */
+   Keep model identity and transcript chrome in disjoint layout tracks at the
+   exact critic viewports. */
 @media (max-width: 480px) {
   .composer-mobile .composer-model-header {
     grid-template-columns: minmax(0, 1fr);
@@ -13633,24 +13612,6 @@ button[aria-busy="true"] { position: relative; }
 @media (max-width: 480px), (max-height: 480px) and (pointer: coarse) {
   body[data-keyboard="open"][data-band="short"] .timeline {
     padding-block: 0;
-  }
-}
-
-@media (min-width: 1101px) {
-  .rail-icon-col.plugin-strip {
-    box-sizing: border-box;
-    width: 112px;
-    min-width: 112px;
-    align-items: stretch;
-    padding-inline: 6px;
-    overflow-x: hidden;
-  }
-  .rail-icon-col.plugin-strip .strip-btn {
-    box-sizing: border-box;
-    width: 100%;
-    min-width: 0;
-    grid-template-columns: 20px minmax(0, 1fr);
-    overflow: hidden;
   }
 }
 
@@ -13693,6 +13654,50 @@ button[aria-busy="true"] { position: relative; }
   .composer-mobile .composer-thinking-badge { flex: 0 1 92px; }
   .composer-mobile .composer-agent-badge { flex: none; }
   .composer-mobile .composer-agent-badge .picker-chip { max-width: 118px; }
+}
+
+/* The editor stays borderless inside one continuous rainbow composer frame. */
+.composer-card,
+.composer-simple .composer-card,
+.composer-mobile .composer-card {
+  border-color: transparent;
+  background:
+    linear-gradient(var(--elevated), var(--elevated)) padding-box,
+    linear-gradient(110deg, var(--blue), var(--purple), var(--red), var(--amber)) border-box;
+}
+.composer-card:focus-within { border-color: transparent; box-shadow: var(--shadow-lg); }
+.composer-mode-cluster { align-items: center; flex-wrap: nowrap; }
+@media (max-width: 480px) {
+  .composer-mobile .composer-model-header {
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-rows: none;
+    gap: 0 var(--space-1);
+  }
+  .composer-mobile .composer-model-header .model-picker { grid-column: 1; }
+  .composer-mobile .composer-mode-cluster {
+    grid-column: 2;
+    width: auto;
+    max-width: none;
+    justify-content: center;
+    gap: var(--space-1);
+  }
+  .composer-mobile .composer-thinking-badge { flex: none; }
+  .composer-mobile .agent-type-badge { min-height: var(--tap); padding-inline: 12px; font-size: 12px; }
+}
+@media (max-width: 820px) {
+  /* Only the keyboard moves session navigation out of the visible viewport. */
+  body[data-keyboard="open"] .workspace-bottom-nav {
+    transform: translateY(calc(100% + var(--safe-bottom)));
+    visibility: hidden;
+    pointer-events: none;
+  }
+  body[data-keyboard="open"] .app.mode-chat.view-session .workspace { padding-bottom: 0; }
+  .composer-mobile .composer-bar .send {
+    background: var(--composer-green);
+    color: var(--accent-ink);
+    box-shadow: 0 5px 14px -7px color-mix(in srgb, var(--composer-green) 80%, transparent);
+  }
+  .composer-mobile .send-plane { color: var(--accent-ink); }
 }
 
 /* Agent execution language -------------------------------------------------

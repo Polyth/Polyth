@@ -54,6 +54,18 @@ test("merge conflict agent settings default safely and accept supported targets"
   assert.equal(product.normalizeSettings({ conflictAgentTarget: "other" }).conflictAgentTarget, "new-session");
 });
 
+test("send shortcuts default safely, preserve legacy behavior, and match only their configured key", () => {
+  const defaults = product.normalizeSettings({});
+  assert.equal(defaults.desktopSendShortcut, "enter");
+  assert.equal(defaults.mobileSendShortcut, "none");
+  assert.equal(product.normalizeSettings({ sendOnEnter: false }).desktopSendShortcut, "shift-enter");
+  const configured = product.normalizeSettings({ desktopSendShortcut: "shift-enter", mobileSendShortcut: "enter" });
+  assert.equal(product.matchesSendShortcut(configured.desktopSendShortcut, true), true);
+  assert.equal(product.matchesSendShortcut(configured.desktopSendShortcut, false), false);
+  assert.equal(product.matchesSendShortcut(configured.mobileSendShortcut, false), true);
+  assert.equal(product.matchesSendShortcut(defaults.mobileSendShortcut, false), false);
+});
+
 test("saving either settings domain preserves the other domain byte-for-byte", () => {
   const uiBefore = stored.get(ui.UI_SETTINGS_KEY);
   product.saveSettings({ ...product.loadSettings(), productName: "Product only" });

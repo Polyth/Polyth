@@ -186,6 +186,16 @@ test("header primary rail exposes a permanent Terminal toggle after project acti
   } finally {
     await historySurface.unmount();
   }
+
+  const matchMedia = window.matchMedia;
+  window.matchMedia = () => ({ matches: true }) as MediaQueryList;
+  const mobileHistorySurface = await mounted(createElement(SessionSearch));
+  try {
+    assert.equal(document.activeElement, mobileHistorySurface.container.querySelector(".palette-heading"));
+  } finally {
+    window.matchMedia = matchMedia;
+    await mobileHistorySurface.unmount();
+  }
 });
 
 test("Providers & Models disambiguates colliding names in the expanded provider list", async () => {
@@ -211,4 +221,3 @@ test("Providers & Models disambiguates colliding names in the expanded provider 
     await page.unmount();
   }
 });
-

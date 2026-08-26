@@ -14,7 +14,7 @@ test("slot-backed feature panels share the responsive surface stylesheet", async
     settingsView,
     builtinWidgets,
   ] = await Promise.all([
-    source("../src/main.tsx"),
+    source("../src/bootstrap.tsx"),
     source("../src/App.tsx"),
     source("../src/featurePanels.css"),
     source("../src/components/workspace/builtinSurfaces.tsx"),

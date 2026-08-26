@@ -7,10 +7,21 @@ import { readFile } from "node:fs/promises";
 
 const railSource = () =>
   readFile(new URL("../src/components/ContextRail.tsx", import.meta.url), "utf8");
+const stylesSource = () =>
+  readFile(new URL("../src/styles.css", import.meta.url), "utf8");
 
 test("ContextRail renders no visible strip labels", async () => {
   const src = await railSource();
   assert.ok(!src.includes("strip-label"), "rail must stay icons-only (no strip-label spans)");
+});
+
+test("ContextRail never exposes aria labels as visible desktop rail text", async () => {
+  const css = await stylesSource();
+  assert.doesNotMatch(
+    css,
+    /\.strip-btn::after\s*\{[^}]*content:\s*attr\(aria-label\)/s,
+    "accessible labels must remain tooltip and screen-reader text, not rail chrome",
+  );
 });
 
 test("ContextRail strip buttons keep title + aria-label for hover/accessibility", async () => {

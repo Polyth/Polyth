@@ -1397,6 +1397,8 @@ export const zhCN: AppMessages = {
   "settings.pages.secret": "+ 秘密",
   "settings.pages.secrets": "· 秘密：",
   "settings.pages.sendOnEnter": "发送回车键",
+  "settings.pages.desktopSendShortcut": "桌面发送快捷键",
+  "settings.pages.mobileSendShortcut": "移动端发送快捷键",
   "settings.pages.sendsATestNotificationThroughThePush": "通过推送服务发送测试通知（隐藏标签页即可查看）。",
   "settings.pages.sendTest": "发送测试",
   "settings.pages.sentToOneDevice": "已发送至1台设备",

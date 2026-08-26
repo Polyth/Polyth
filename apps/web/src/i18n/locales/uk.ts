@@ -1397,6 +1397,8 @@ export const uk: AppMessages = {
   "settings.pages.secret": "+ секрет",
   "settings.pages.secrets": "· секрети:",
   "settings.pages.sendOnEnter": "Надіслати при введенні",
+  "settings.pages.desktopSendShortcut": "Клавіша надсилання на комп’ютері",
+  "settings.pages.mobileSendShortcut": "Клавіша надсилання на мобільному",
   "settings.pages.sendsATestNotificationThroughThePush": "Надсилає тестове сповіщення через push-сервіс (сховайте вкладку, щоб його побачити).",
   "settings.pages.sendTest": "Надіслати тест",
   "settings.pages.sentToOneDevice": "Надіслано на 1 пристрій",

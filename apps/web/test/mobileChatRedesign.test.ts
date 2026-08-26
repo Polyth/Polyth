@@ -15,6 +15,7 @@ register("./tsxHooks.mjs", import.meta.url);
 import {
   KEYBOARD_MIN_INSET,
   keyboardInsetFrom,
+  keyboardOpenFrom,
   metricsFrom,
 } from "../src/mobileViewport.ts";
 import {
@@ -70,6 +71,11 @@ test("a visual viewport that sits lower in a full-height page is not a keyboard"
   assert.deepEqual(metricsFrom(932, 596, 336), { height: 596, keyboardInset: 0, offsetTop: 336, covering: false });
   assert.equal(keyboardInsetFrom(932, 596, 336), 0, "no inset: the layout viewport was not resized");
   assert.equal(keyboardInsetFrom(932, 932, 400), 0, "a repositioned full-height viewport is idle");
+});
+
+test("a focused editor detects Safari's panned keyboard", () => {
+  assert.equal(keyboardOpenFrom(932, 596, 336, false), false);
+  assert.equal(keyboardOpenFrom(932, 596, 336, true), true);
 });
 
 // ---- starter model ----------------------------------------------------------
@@ -238,14 +244,14 @@ test("visual-viewport geometry is published as CSS variables and started at boot
   assert.ok(viewport.includes('dataset.keyboard = next.covering ? "open" : "closed"'), "CSS can see the keyboard state");
   assert.ok(viewport.includes("SHORT_VISUAL_BAND"), "CSS can see a band too short for both zones");
   assert.ok(!/localStorage|sessionStorage/.test(viewport), "viewport geometry is never persisted");
-  const main = await read("../src/main.tsx");
+  const main = await read("../src/bootstrap.tsx");
   assert.ok(main.includes("startMobileViewport()"), "the seam is installed before first paint");
 });
 
-test("the mobile viewport preserves zoom and requests keyboard content resizing", async () => {
+test("the mobile viewport is fixed and requests keyboard content resizing", async () => {
   const html = await read("../src/index.html");
-  assert.doesNotMatch(html, /maximum-scale=1/, "pinch zoom remains available");
-  assert.doesNotMatch(html, /user-scalable=no/, "the viewport does not disable user scaling");
+  assert.match(html, /maximum-scale=1/, "pinch zoom is disabled");
+  assert.match(html, /user-scalable=no/, "the browser cannot pan a zoomed chat sideways");
   assert.match(html, /interactive-widget=resizes-content/, "supporting browsers resize content for the keyboard");
 });
 
@@ -482,6 +488,10 @@ test("the fresh-session screen is three zones with a sticky interaction dock", a
   const section = css.slice(css.indexOf("UX-MOBILE-01 — mobile-first new chat"));
   const dock = section.slice(section.indexOf(".hero-dock {"));
   assert.match(dock.slice(0, dock.indexOf("}")), /var\(--safe-bottom\)/, "§30: the dock respects the home indicator");
+  assert.match(css, /\.hero-widget-settings\s*\{\s*display:\s*none;/,
+    "widget settings stay off the phone surface");
+  assert.match(css, /\.hero-dock:has\(\.add-menu\)\s*\{[^}]*z-index:\s*130;/s,
+    "the Add menu stacks above fresh-chat widgets");
 });
 
 test("fresh-chat widgets persist visibility and order, and remain replaceable", async () => {

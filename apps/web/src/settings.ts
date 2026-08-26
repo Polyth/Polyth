@@ -51,7 +51,10 @@ export interface PolythSettings {
   fontFamily: InterfaceFont;
   productName: string; // brand label in the sidebar + document title
   relativeTime: boolean; // "2m ago" vs absolute times in the session list
-  sendOnEnter: boolean; // Enter sends; off → Enter is newline, Mod+Enter sends
+  /** @deprecated Migrated to desktopSendShortcut. */
+  sendOnEnter: boolean;
+  desktopSendShortcut: "enter" | "shift-enter";
+  mobileSendShortcut: "none" | "enter" | "shift-enter";
   defaultModel: string; // "providerID/modelID", or "" for server default
   autoTitleSessions: boolean; // derive a title from the first prompt
   showArchived: boolean; // show archived sessions in the sidebar
@@ -72,6 +75,8 @@ export const DEFAULT_SETTINGS: PolythSettings = {
   productName: "Polyth",
   relativeTime: true,
   sendOnEnter: true,
+  desktopSendShortcut: "enter",
+  mobileSendShortcut: "none",
   defaultModel: "",
   autoTitleSessions: true,
   showArchived: true,
@@ -113,6 +118,14 @@ export function normalizeSettings(raw: unknown): PolythSettings {
     productName: pickString(r.productName, d.productName).trim() || d.productName,
     relativeTime: pickBool(r.relativeTime, d.relativeTime),
     sendOnEnter: pickBool(r.sendOnEnter, d.sendOnEnter),
+    desktopSendShortcut: r.desktopSendShortcut === "shift-enter"
+      ? "shift-enter"
+      : r.desktopSendShortcut === "enter" || pickBool(r.sendOnEnter, d.sendOnEnter)
+        ? "enter"
+        : "shift-enter",
+    mobileSendShortcut: r.mobileSendShortcut === "enter" || r.mobileSendShortcut === "shift-enter"
+      ? r.mobileSendShortcut
+      : "none",
     defaultModel: pickString(r.defaultModel, d.defaultModel),
     autoTitleSessions: pickBool(r.autoTitleSessions, d.autoTitleSessions),
     showArchived: pickBool(r.showArchived, d.showArchived),
@@ -120,6 +133,10 @@ export function normalizeSettings(raw: unknown): PolythSettings {
     conflictAgentPrompt: pickString(r.conflictAgentPrompt, d.conflictAgentPrompt),
     conflictAgentTarget: r.conflictAgentTarget === "current-session" ? "current-session" : "new-session",
   };
+}
+
+export function matchesSendShortcut(shortcut: PolythSettings["desktopSendShortcut"] | PolythSettings["mobileSendShortcut"], shiftKey: boolean): boolean {
+  return shortcut === (shiftKey ? "shift-enter" : "enter");
 }
 
 export function parseSettings(json: string | null | undefined): PolythSettings {

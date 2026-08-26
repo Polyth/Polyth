@@ -32,8 +32,8 @@ export interface UiSettings {
   fontSize: "s" | "m" | "l";
   /** Editor/composer font size in px (WP2/WP9 font tokens). */
   editorFontSize: number;
-  /** Shared corner treatment for controls, panels, and overlays. */
-  rounding: "square" | "compact" | "rounded";
+  /** Shared corner treatment for controls, panels, and overlays (0 = square, 10 = rounded). */
+  rounding: number;
   chatWidth: "normal" | "wide";
   /** Browser notification when a turn finishes in a hidden tab. */
   notifyOnComplete: boolean;
@@ -96,7 +96,7 @@ export const UI_DEFAULTS: UiSettings = {
   density: "comfortable",
   fontSize: "m",
   editorFontSize: 14,
-  rounding: "compact",
+  rounding: 5,
   chatWidth: "normal",
   notifyOnComplete: false,
   notifySound: false,
@@ -145,6 +145,15 @@ function orderedIds<T extends string>(value: unknown, allowed: readonly T[]): T[
   });
 }
 
+function parseRounding(value: unknown): number {
+  // Keep the three pre-slider values working for existing local preferences.
+  if (value === "square") return 0;
+  if (value === "compact") return 5;
+  if (value === "rounded") return 10;
+  const rounded = Math.round(Number(value));
+  return Number.isFinite(rounded) && rounded >= 0 && rounded <= 10 ? rounded : UI_DEFAULTS.rounding;
+}
+
 export function parseUiSettings(raw: string | null): UiSettings {
   const d: UiSettings = {
     ...UI_DEFAULTS,
@@ -161,7 +170,7 @@ export function parseUiSettings(raw: string | null): UiSettings {
       density: data.density === "compact" || data.density === "balanced" ? data.density : "comfortable",
       fontSize: data.fontSize === "s" || data.fontSize === "l" ? data.fontSize : "m",
       editorFontSize: Number.isFinite(fontPx) && fontPx >= 11 && fontPx <= 24 ? Math.round(fontPx) : 14,
-      rounding: data.rounding === "square" || data.rounding === "rounded" ? data.rounding : "compact",
+      rounding: parseRounding(data.rounding),
       chatWidth: data.chatWidth === "wide" ? "wide" : "normal",
       notifyOnComplete: data.notifyOnComplete === true,
       notifySound: data.notifySound === true,
@@ -238,7 +247,7 @@ export function applyUiSettings(s: UiSettings = settings): void {
   if (typeof document === "undefined") return;
   const b = document.body;
   b.dataset.density = s.density;
-  b.dataset.rounding = s.rounding;
+  b.dataset.rounding = String(s.rounding);
   b.dataset.chatwidth = s.chatWidth;
   b.dataset.technical = String(s.showTechnicalButtons);
   b.dataset.dictate = String(s.showDictate);
@@ -246,18 +255,15 @@ export function applyUiSettings(s: UiSettings = settings): void {
   b.dataset.goals = String(s.showGoals);
   b.dataset.quickActions = String(s.showQuickActions);
   b.style?.setProperty("--editor-font-size", `${s.editorFontSize}px`);
-  const radii = s.rounding === "square"
-    ? ["0px", "0px", "0px", "0px", "0px"]
-    : s.rounding === "rounded"
-      ? ["12px", "14px", "16px", "20px", "24px"]
-      : ["8px", "10px", "10px", "12px", "16px"];
-  b.style?.setProperty("--corner-radius-scale", s.rounding === "square" ? "0" : s.rounding === "rounded" ? "1.5" : "1");
+  const radii = [8, 10, 10, 12, 16].map((px) => `${px * s.rounding / 5}px`);
+  b.style?.setProperty("--corner-radius-scale", String(s.rounding / 5));
   ["--radius-sm", "--radius", "--radius-md", "--radius-lg", "--radius-xl"]
     .forEach((name, index) => b.style?.setProperty(name, radii[index]!));
   b.style?.setProperty("--radius-control", radii[1]!);
   b.style?.setProperty("--radius-card", radii[3]!);
   b.style?.setProperty("--radius-surface", radii[4]!);
   b.style?.setProperty("--radius-sheet", radii[4]!);
+  b.style?.setProperty("--radius-composer", radii[4]!);
 }
 
 export function getUiSettings(): UiSettings {

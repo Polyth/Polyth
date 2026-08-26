@@ -411,7 +411,7 @@ test("parseUiSettings defaults invalid values and sanitizes MCP servers", () => 
   const parsed = parseUiSettings(JSON.stringify({
     density: "compact",
     fontSize: "l",
-    rounding: "rounded",
+    rounding: 10,
     chatWidth: "wide",
     notifyOnComplete: true,
     notifySound: "yes",
@@ -438,7 +438,7 @@ test("parseUiSettings defaults invalid values and sanitizes MCP servers", () => 
     {
       density: "compact",
       fontSize: "l",
-      rounding: "rounded",
+      rounding: 10,
       chatWidth: "wide",
       notifyOnComplete: true,
       notifySound: false,
@@ -450,6 +450,8 @@ test("parseUiSettings defaults invalid values and sanitizes MCP servers", () => 
   );
   assert.equal(parsed.mcpServers.length, 32);
   assert.deepEqual(parsed.mcpServers[0], servers[0]);
+  assert.equal(parseUiSettings(JSON.stringify({ rounding: "rounded" })).rounding, 10);
+  assert.equal(parseUiSettings(JSON.stringify({ rounding: 11 })).rounding, UI_DEFAULTS.rounding);
   assert.equal(parseUiSettings(JSON.stringify({ messageCopyFormat: "xml" })).messageCopyFormat, "markdown");
   assert.equal(parseUiSettings(JSON.stringify({ workingIndicator: "cat" })).workingIndicator, "cat");
   assert.equal(parseUiSettings(JSON.stringify({ workingIndicator: "keyboard" })).workingIndicator, "cursor");
@@ -479,10 +481,10 @@ test("setUiSettings persists and applies visual data attributes", () => {
     value: { body: { dataset, style: { setProperty: (name: string, value: string) => styles.set(name, value) } } },
   });
 
-  setUiSettings({ density: "compact", fontSize: "s", rounding: "rounded", chatWidth: "wide" });
+  setUiSettings({ density: "compact", fontSize: "s", rounding: 10, chatWidth: "wide" });
   assert.deepEqual(dataset, {
     density: "compact",
-    rounding: "rounded",
+    rounding: "10",
     chatwidth: "wide",
     technical: "true",
     dictate: "true",
@@ -491,10 +493,10 @@ test("setUiSettings persists and applies visual data attributes", () => {
     quickActions: "true",
   });
   assert.deepEqual(parseUiSettings(values.get(UI_SETTINGS_KEY) ?? null), getUiSettings());
-  assert.equal(styles.get("--corner-radius-scale"), "1.5");
-  assert.equal(styles.get("--radius-control"), "14px");
+  assert.equal(styles.get("--corner-radius-scale"), "2");
+  assert.equal(styles.get("--radius-control"), "20px");
 
-  setUiSettings({ rounding: "square" });
+  setUiSettings({ rounding: 0 });
   assert.equal(styles.get("--corner-radius-scale"), "0");
   assert.equal(styles.get("--radius-control"), "0px");
 

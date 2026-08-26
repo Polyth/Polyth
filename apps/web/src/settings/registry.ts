@@ -77,6 +77,7 @@ const BUILTIN_ITEMS: SettingsSearchItem[] = [
   { id: "chat.workingIndicator", pageId: "chat", label: tr("settings.pages.workingIndicator"), keywords: ["working", "typing", "cat", "animation"], focusTarget: "chat.workingIndicator" },
   { id: "chat.messageActions", pageId: "chat", label: tr("settings.registry.messageActions"), description: tr("settings.registry.showOrHideCopyRevertAndFork"), keywords: ["hover", "quick actions", "buttons"], focusTarget: "chat.messageActions" },
   { id: "chat.copyFormat", pageId: "chat", label: tr("settings.registry.copyFormat"), description: tr("settings.registry.copyMessagesAsMarkdownOrJson"), keywords: ["clipboard", "markdown", "json"], focusTarget: "chat.copyFormat" },
+  { id: "chat.mobileSendShortcut", pageId: "chat", label: tr("settings.pages.mobileSendShortcut"), keywords: ["mobile", "phone", "enter", "shift", "send"], focusTarget: "chat.mobileSendShortcut" },
   { id: "notifications.desktop", pageId: "notifications", label: tr("settings.registry.desktopNotification"), keywords: ["alert", "browser"], focusTarget: "notifications.desktop" },
   { id: "notifications.sound", pageId: "notifications", label: tr("settings.registry.completionSound"), keywords: ["beep", "audio"], focusTarget: "notifications.sound" },
   { id: "notifications.centreHistory", pageId: "notifications", label: tr("settings.registry.centreHistory"), description: tr("settings.registry.keepReadNotificationsVisibleInTheNotification"), keywords: ["inbox", "bell", "read", "notification centre"], focusTarget: "notifications.centreHistory" },

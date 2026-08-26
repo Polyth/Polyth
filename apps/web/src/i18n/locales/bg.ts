@@ -1397,6 +1397,8 @@ export const bg: AppMessages = {
   "settings.pages.secret": "+ тайна",
   "settings.pages.secrets": "· тайни:",
   "settings.pages.sendOnEnter": "Изпращане при влизане",
+  "settings.pages.desktopSendShortcut": "Клавишна комбинация за изпращане на компютър",
+  "settings.pages.mobileSendShortcut": "Клавишна комбинация за изпращане на мобилно устройство",
   "settings.pages.sendsATestNotificationThroughThePush": "Изпраща тестово известие чрез push услугата (скрийте раздела, за да го видите).",
   "settings.pages.sendTest": "Изпрати тест",
   "settings.pages.sentToOneDevice": "Изпратено на 1 устройство",

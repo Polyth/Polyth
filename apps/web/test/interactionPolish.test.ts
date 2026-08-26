@@ -4,7 +4,7 @@ import { readFile } from "node:fs/promises";
 
 const read = (relative: string) => readFile(new URL(relative, import.meta.url), "utf8");
 
-test("drag-reorder surfaces expose explicit keyboard and touch controls", async () => {
+test("queue reorders by dragging while pane tabs retain keyboard controls", async () => {
   const [moveControls, queue, pane, css] = await Promise.all([
     read("../src/components/MoveControls.tsx"),
     read("../src/components/QueuedMessageList.tsx"),
@@ -15,9 +15,8 @@ test("drag-reorder surfaces expose explicit keyboard and touch controls", async 
   assert.match(moveControls, /className="reorder-control"/);
   assert.match(moveControls, /disabled=\{index <= 0\}/);
   assert.match(moveControls, /disabled=\{index >= count - 1\}/);
-  assert.match(queue, /<MoveControls/);
-  assert.match(queue, /moveQueuedMessageValueUp/);
-  assert.match(queue, /moveQueuedMessageValueDown/);
+  assert.match(queue, /draggable/);
+  assert.doesNotMatch(queue, /<MoveControls/);
   assert.match(pane, /<MoveControls/);
   assert.match(pane, /moveTab\(p, t\.id, targetIndex\)/);
   assert.match(css, /@media \(pointer: coarse\), \(max-width: 480px\)[\s\S]*?\.pane-tab-group\.active > \.reorder-controls\s*\{\s*display:\s*inline-flex/);
