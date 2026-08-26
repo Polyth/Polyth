@@ -127,6 +127,12 @@ test("task tracker surfaces enforce mobile containment, touch, zoom, and safe-ar
 
   const html = await readFile(new URL("../src/index.html", import.meta.url), "utf8");
   assert.match(html, /width=device-width, initial-scale=1, viewport-fit=cover/);
+
+  const globalCss = await readFile(new URL("../src/styles.css", import.meta.url), "utf8");
+  assert.match(
+    globalCss,
+    /@media \(max-width: 760px\)[\s\S]*\.widget-canvas-grid[\s\S]*padding:[^;]*env\(safe-area-inset-bottom/,
+  );
 });
 
 test("provider failures stay explicit and offer recovery instead of masquerading as setup", async () => {

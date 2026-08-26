@@ -7544,7 +7544,11 @@ html[dir="rtl"] input[type="number"] {
 .usage-quota-summary .warn strong { color: var(--amber); }
 
 @media (max-width: 760px) {
-  .widget-canvas-grid { display: flex; flex-direction: column; padding: 18px 12px; }
+  .widget-canvas-grid {
+    display: flex;
+    flex-direction: column;
+    padding: 18px 12px max(104px, calc(82px + env(safe-area-inset-bottom, 0px)));
+  }
   .widget-canvas-grid .widget-card { min-height: 320px; }
   .widget-canvas-empty { min-height: 150px; }
   .usage-overview-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
