@@ -354,6 +354,7 @@ test("reasoning effort stays reachable on phones, beside the model name", async 
   assert.ok(cluster.includes("<ThinkingSlider"), "thinking uses a discrete slider, not a picker");
   assert.ok(cluster.includes("pickThinking(thinking || undefined)"), "slider saves the effort and updates the composer config");
   assert.ok(composer.includes("const THINKING_LABELS"), "backend variant strings get display labels");
+  assert.ok(!composer.includes("thinking-glyph"), "the effort control has no decorative dot before the slider");
 
   // A tap on any header control blurs the input; collapsing on that blur would
   // unmount the control before its click lands (the tap would be swallowed).
@@ -434,8 +435,10 @@ test("the phone shell restores session navigation below a swipeable shortcut rai
 
   assert.ok(header.includes("<MobileNavigationRail />"), "the phone header is the shortcut rail");
   assert.equal(header.match(/<WorkspaceBottomNav \/>/g)?.length, 2, "phone and tablet shells mount the session bar");
-  assert.ok(bottom.includes("Recents"), "recent conversations are one tap away");
-  assert.ok(bottom.includes("New chat"), "new chat is one tap away");
+  assert.doesNotMatch(bottom, />Recents</, "the Recents action is icon-only");
+  assert.doesNotMatch(bottom, />New chat</, "the New chat action is icon-only");
+  assert.ok(bottom.includes("workspace.workspacebottomnav.sessionHistory"), "Recents keeps an accessible name");
+  assert.ok(bottom.includes("workspace.workspacebottomnav.newSession"), "New chat keeps an accessible name");
   assert.ok(bottom.includes("Projects &amp; sessions"), "the title button identifies the projects and sessions drawer");
   assert.ok(bottom.includes("displaySessionTitle"), "the projects and sessions button shows the current session title");
   assert.match(css, /\.workspace-bottom-nav\s*\{\s*position:\s*fixed;/, "the session bar is fixed to the compact shell bottom");

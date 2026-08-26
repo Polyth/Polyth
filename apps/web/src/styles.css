@@ -8899,12 +8899,12 @@ html[dir="rtl"] input[type="number"] {
   align-items: center;
   justify-content: center;
   padding: 2px 9px;
-  border: 1px solid color-mix(in srgb, var(--green) 34%, transparent);
+  border: 1px solid var(--border-soft);
   border-radius: 999px;
-  background: color-mix(in srgb, var(--green) 12%, transparent);
-  color: var(--green);
+  background: transparent;
+  color: var(--muted);
   font-size: 10px;
-  font-weight: 720;
+  font-weight: 620;
   line-height: 1;
   text-transform: capitalize;
 }
@@ -8948,7 +8948,7 @@ html[dir="rtl"] input[type="number"] {
   padding: 4px 7px; border: 1px solid var(--border); border-radius: calc(6px * var(--corner-radius-scale));
   background: var(--elevated); color: var(--text); box-shadow: var(--shadow-lg); font-size: 10px; font-weight: 600; white-space: nowrap; pointer-events: none;
 }
-.composer-thinking-badge { grid-template-columns: auto minmax(62px, 92px); gap: var(--space-2); }
+.composer-thinking-badge { grid-template-columns: minmax(62px, 92px); gap: 0; }
 .composer-thinking-badge .thinking-slider-label { font-size: 10px; }
 .composer-thinking-badge .thinking-slider-label output { display: none; }
 .composer-model-meta {
@@ -9037,7 +9037,7 @@ html[dir="rtl"] input[type="number"] {
     z-index: 82;
     height: calc(72px + var(--safe-bottom));
     display: grid;
-    grid-template-columns: 64px minmax(0, 1fr) 64px;
+    grid-template-columns: 48px minmax(0, 1fr) 48px;
     align-items: start;
     gap: 8px;
     padding: 8px 10px max(8px, var(--safe-bottom));
@@ -9056,16 +9056,12 @@ html[dir="rtl"] input[type="number"] {
     color: var(--text-dim);
   }
   .session-nav-action {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: 2px;
-    padding: 2px;
-    border-radius: calc(14px * var(--corner-radius-scale));
+    display: grid;
+    place-items: center;
+    padding: 0;
+    border-radius: 50%;
   }
-  .session-nav-action svg { width: 17px; height: 17px; }
-  .session-nav-action span { font-size: 9px; font-weight: 650; white-space: nowrap; }
+  .session-nav-action svg { width: 19px; height: 19px; }
   .session-nav-current {
     display: grid;
     grid-template-columns: minmax(0, 1fr) 16px;
@@ -9595,10 +9591,9 @@ html[dir="rtl"] input[type="number"] {
   width: var(--control-h); min-width: var(--control-h); height: var(--control-h);
   display: grid; place-items: center; padding: 0;
   border-radius: var(--radius-control); color: var(--accent);
-  transform: translate(2px, 3px);
 }
-.composer-add-files:hover { transform: translate(2px, 3px); }
-.composer-mobile .composer-add { transform: translate(2px, 3px); }
+.composer-add-files:hover { transform: none; }
+.composer-mobile .composer-add { transform: none; }
 .composer-mobile .composer-add-trigger:hover { transform: none; }
 .composer-add-files svg { width: 15px; height: 15px; }
 /* Keep the compact composer controls easy to scan without changing their
@@ -9610,7 +9605,7 @@ html[dir="rtl"] input[type="number"] {
 .composer-auto-approve > svg { width: 20px; height: 20px; }
 .mic-icon > svg,
 .composer-goals > svg,
-.composer-auto-approve > svg { transform: translateY(1px); }
+.composer-auto-approve > svg { transform: none; }
 .run-provider-logo { width: 22px; height: 22px; }
 
 .widget-inline-config { margin-bottom: 14px; }
@@ -10422,9 +10417,8 @@ html[data-sheet="open"], html[data-sheet="open"] body { overflow: hidden; }
     display: inline-flex;
     align-items: center;
   }
-  .composer-mobile .composer-thinking-badge { grid-template-columns: auto minmax(62px, 92px); }
+  .composer-mobile .composer-thinking-badge { grid-template-columns: minmax(62px, 92px); }
   .composer-mobile .composer-thinking-badge .thinking-slider-label { min-height: var(--tap); font-size: 11px; }
-  .composer-mobile .composer-thinking-badge .thinking-glyph { font-size: 12px; }
   .composer-mobile .composer-thinking-badge .thinking-slider-track,
   .composer-mobile .composer-thinking-badge input[type="range"] {
     height: var(--tap);
@@ -10435,7 +10429,7 @@ html[data-sheet="open"], html[data-sheet="open"] body { overflow: hidden; }
     max-width: 132px;
     gap: 3px;
     padding: 0 10px 0 12px;
-    font-size: 13px;
+    font-size: 12px;
   }
   .composer-mobile .composer-agent-badge .picker-caret {
     display: inline-flex;
@@ -11884,8 +11878,8 @@ body[data-density="comfortable"] .header { min-height: 60px; }
   .panel-sheet { top: calc(60px + env(safe-area-inset-top, 0px)); }
   .mobile-view-title { cursor: default; }
 
-  /* Model, reasoning and mode occupy distinct rows at phone width; long
-     model labels can no longer paint underneath the slider or Build control. */
+  /* Model identity keeps its own row at phone width. Reasoning and mode form
+     one compact, right-aligned control group below it. */
   .composer-mobile .composer-model-header {
     grid-template-columns: minmax(0, 1fr);
     gap: 2px;
@@ -11895,10 +11889,10 @@ body[data-density="comfortable"] .header { min-height: 60px; }
     grid-column: 1;
     width: 100%;
     display: flex;
-    justify-content: space-between;
+    justify-content: flex-end;
     gap: var(--space-1);
   }
-  .composer-mobile .composer-thinking-badge { flex: 1 1 auto; }
+  .composer-mobile .composer-thinking-badge { flex: 0 1 92px; }
   .composer-mobile .composer-agent-badge { flex: none; }
   .composer-mobile .composer-agent-badge .picker-chip { max-width: 118px; }
 }

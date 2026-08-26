@@ -138,6 +138,7 @@ test("mobile app header focuses workspace destinations without escaping a destin
     assert.ok(bottom, "restored bottom session bar is mounted");
     const recents = bottom!.querySelector<HTMLButtonElement>('[aria-label="Session history"]');
     assert.ok(recents);
+    assert.equal(recents!.textContent, "", "Recents stays icon-only");
     await act(async () => { recents!.click(); });
     assert.equal(getState().overlay, "search", "Recents opens session search");
     await act(async () => { setOverlay(null); });
@@ -149,6 +150,7 @@ test("mobile app header focuses workspace destinations without escaping a destin
 
     const newChat = bottom!.querySelector<HTMLButtonElement>('[aria-label="New session"]');
     assert.ok(newChat);
+    assert.equal(newChat!.textContent, "", "New chat stays icon-only");
     await act(async () => { newChat!.click(); });
     assert.equal(getState().activeSessionId, null);
     assert.equal(getState().newSessionIntent?.projectId, "p1", "New chat creates a project-scoped session intent");

@@ -27,7 +27,6 @@ export default function WorkspaceBottomNav() {
         onClick={() => setOverlay("search")}
       >
         <Icon.rewind />
-        <span>Recents</span>
       </button>
       <button
         className="session-nav-current"
@@ -48,7 +47,6 @@ export default function WorkspaceBottomNav() {
         }}
       >
         <Icon.plus />
-        <span>New chat</span>
       </button>
     </nav>
   );
