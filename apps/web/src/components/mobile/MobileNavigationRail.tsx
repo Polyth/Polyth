@@ -67,9 +67,12 @@ function focusDestinationHeading(attempt = 0): void {
       }
       return;
     }
-    const heading = document.querySelector<HTMLElement>(
-      ".rail-fullscreen .rail-title, .main .view-title, .main h1",
-    );
+    const heading = [
+      ".rail-fullscreen .rail-title",
+      ".main .view-title",
+      ".main h1",
+    ].map((selector) => document.querySelector<HTMLElement>(selector))
+      .find((candidate): candidate is HTMLElement => candidate !== null);
     if (heading) {
       heading.tabIndex = -1;
       heading.focus();
