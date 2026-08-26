@@ -121,6 +121,7 @@ test("task tracker surfaces enforce mobile containment, touch, zoom, and safe-ar
   assert.match(css, /@container task-tracker \(max-width: 480px\)[\s\S]*\.tt-empty[\s\S]*min-height:\s*0/);
   assert.match(css, /@container task-tracker \(max-width: 480px\)[\s\S]*\.tt-board-header[\s\S]*flex-direction:\s*row/);
   assert.match(css, /@container task-tracker \(max-width: 480px\)[\s\S]*\.tt-board-picker,[\s\S]*grid-template-columns:\s*repeat\(2/);
+  assert.match(css, /@container task-tracker \(max-width: 480px\)[\s\S]*\.tt-board\.has-detail[\s\S]*min-height:\s*min\(500px,\s*70svh\)/);
   assert.match(css, /@container task-tracker \(max-width: 820px\)[\s\S]*\.tt-detail[\s\S]*position:\s*absolute/);
   assert.match(css, /@container task-tracker \(max-width: 820px\)[\s\S]*\.tt-board\.has-detail[\s\S]*\.tt-filters[\s\S]*display:\s*none/);
   assert.match(css, /@container task-tracker \(max-width: 560px\)[\s\S]*\.tt-board-header[\s\S]*flex-direction:\s*column/);
