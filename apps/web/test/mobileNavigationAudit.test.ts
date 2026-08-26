@@ -5,14 +5,18 @@ import { readWebStyles } from "./webStyles.ts";
 
 const read = (relative: string) => readFile(new URL(relative, import.meta.url), "utf8");
 
-test("compact bottom navigation caps direct destinations and discloses overflow", async () => {
-  const source = await read("../src/components/workspace/WorkspaceBottomNav.tsx");
+test("compact navigation separates swipeable workspace shortcuts from session actions", async () => {
+  const [shortcuts, sessions] = await Promise.all([
+    read("../src/components/mobile/MobileNavigationRail.tsx"),
+    read("../src/components/workspace/WorkspaceBottomNav.tsx"),
+  ]);
 
-  assert.match(source, /const MAX_PRIMARY_NAV_ITEMS = 4/);
-  assert.match(source, /panes\.slice\(0, MAX_PRIMARY_NAV_ITEMS - 1\)/);
-  assert.match(source, /panes\.slice\(MAX_PRIMARY_NAV_ITEMS - 1\)/);
-  assert.match(source, /aria-haspopup="dialog"/);
-  assert.match(source, /<Sheet[\s\S]*?<SheetRow/);
+  assert.match(shortcuts, /ui\.mobileShortcuts\.flatMap/);
+  assert.match(shortcuts, /className="mobile-shortcut-track"/);
+  assert.match(shortcuts, /capability\.descriptor\.open/);
+  assert.doesNotMatch(shortcuts, /<Sheet/);
+  assert.match(sessions, /workspace\.workspacebottomnav\.sessionHistory/);
+  assert.match(sessions, /workspace\.workspacebottomnav\.newSession/);
 });
 
 test("horizontal tabs and chips retain a visible scroll affordance", async () => {

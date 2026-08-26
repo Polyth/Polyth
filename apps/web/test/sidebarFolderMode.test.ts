@@ -18,6 +18,10 @@ Object.defineProperty(globalThis, "HTMLElement", {
   value: (dom as unknown as { HTMLElement: typeof HTMLElement }).HTMLElement,
   configurable: true,
 });
+Object.defineProperty(globalThis, "requestAnimationFrame", {
+  value: (callback: FrameRequestCallback) => { callback(0); return 0; },
+  configurable: true,
+});
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 const sessionsByProject: Record<string, SessionProjection[]> = {
@@ -144,7 +148,7 @@ test("tree mode nests sessions under project worktrees", async () => {
   }
 });
 
-test("header selection keeps one multi-session selection across projects", async () => {
+test("project menu selection keeps one multi-session selection across projects", async () => {
   const ticket = store.beginProjectListRequest();
   store.publishProjectList(ticket, [project("alpha"), project("beta")]);
   store.activateProject("alpha");
@@ -159,11 +163,11 @@ test("header selection keeps one multi-session selection across projects", async
     await act(async () => { root.render(createElement(Sidebar)); });
 
     const serviceBar = container.querySelector<HTMLElement>(".sidebar-service-bar");
-    const more = serviceBar?.querySelector<HTMLButtonElement>('[aria-label="More sidebar actions"]');
-    assert.ok(more, "the service bar exposes global actions");
-    await act(async () => { click(more!); });
+    const menu = container.querySelector<HTMLButtonElement>('[aria-label="Actions for alpha"]');
+    assert.ok(menu, "the project row exposes its own actions");
+    await act(async () => { click(menu!); });
     const select = container.querySelector<HTMLButtonElement>('[role="menuitemcheckbox"]');
-    assert.ok(select, "session selection lives in the global overflow menu");
+    assert.ok(select, "session selection lives in the project action menu");
     assert.equal(serviceBar?.querySelector(".sidebar-title"), null, "the service bar has no visible Sessions title");
     assert.equal(container.querySelector(".sr-only")?.textContent, "Projects and sessions", "the sidebar retains its accessible heading");
 
@@ -189,6 +193,25 @@ test("header selection keeps one multi-session selection across projects", async
       1,
       "the visible project reflects its selected session while the first selection remains retained",
     );
+  } finally {
+    await act(async () => { root.unmount(); });
+    container.remove();
+  }
+});
+
+test("settings is only exposed while Shift is held", async () => {
+  const container = document.createElement("div");
+  document.body.appendChild(container);
+  const root = createRoot(container);
+  try {
+    await act(async () => { root.render(createElement(Sidebar)); });
+    assert.equal(container.querySelector('[aria-label="Settings"]'), null);
+
+    await act(async () => { (dom as unknown as EventTarget).dispatchEvent(new dom.KeyboardEvent("keydown", { key: "Shift", shiftKey: true }) as unknown as Event); });
+    assert.ok(container.querySelector('[aria-label="Settings"]'));
+
+    await act(async () => { (dom as unknown as EventTarget).dispatchEvent(new dom.KeyboardEvent("keyup", { key: "Shift" }) as unknown as Event); });
+    assert.equal(container.querySelector('[aria-label="Settings"]'), null);
   } finally {
     await act(async () => { root.unmount(); });
     container.remove();

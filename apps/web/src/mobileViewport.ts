@@ -62,6 +62,18 @@ export function keyboardInsetFrom(
   return layoutGap >= KEYBOARD_MIN_INSET ? layoutGap : 0;
 }
 
+/** Safari can pan the visual viewport for a focused editor instead of adding a
+ * layout inset. The viewport reduction still means the keyboard is visible. */
+export function keyboardOpenFrom(
+  layoutHeight: number,
+  visualHeight: number,
+  offsetTop: number,
+  textEntryFocused: boolean,
+): boolean {
+  return keyboardInsetFrom(layoutHeight, visualHeight, offsetTop) > 0
+    || (textEntryFocused && layoutHeight - visualHeight >= KEYBOARD_MIN_INSET);
+}
+
 /** Pure projection of one measurement into the published metrics. */
 export function metricsFrom(
   layoutHeight: number,
@@ -72,11 +84,12 @@ export function metricsFrom(
     height: Math.round(visualHeight),
     keyboardInset: keyboardInsetFrom(layoutHeight, visualHeight, offsetTop),
     offsetTop: Math.round(offsetTop),
-    covering: Math.round(layoutHeight - visualHeight - offsetTop) >= KEYBOARD_MIN_INSET,
+    covering: keyboardOpenFrom(layoutHeight, visualHeight, offsetTop, false),
   };
 }
 
 const INITIAL: ViewportMetrics = { height: 0, keyboardInset: 0, offsetTop: 0, covering: false };
+const TEXT_ENTRY = "input, textarea, [contenteditable=\"true\"]";
 
 let metrics: ViewportMetrics = INITIAL;
 let started = false;
@@ -116,11 +129,18 @@ function measure(): void {
   if (!visual) return;
   const publishNow = () => {
     const layoutHeight = window.innerHeight || visual.height || 0;
-    publish(metricsFrom(
+    const next = metricsFrom(
       layoutHeight,
       visual.height ?? layoutHeight,
       visual.offsetTop ?? 0,
-    ));
+    );
+    next.covering = keyboardOpenFrom(
+      layoutHeight,
+      visual.height ?? layoutHeight,
+      visual.offsetTop ?? 0,
+      document.activeElement?.matches?.(TEXT_ENTRY) ?? false,
+    );
+    publish(next);
   };
   // Reading visualViewport synchronously after its own resize event races the
   // browser's scroll of the layout viewport; one frame later both values are
@@ -141,6 +161,8 @@ export function startMobileViewport(): void {
   const onChange = () => measure();
   window.addEventListener("resize", onChange);
   window.addEventListener("orientationchange", onChange);
+  document.addEventListener("focusin", onChange);
+  document.addEventListener("focusout", onChange);
   const visual = window.visualViewport;
   visual?.addEventListener("resize", onChange);
   visual?.addEventListener("scroll", onChange);
@@ -161,8 +183,6 @@ export function useViewportMetrics(): ViewportMetrics {
 export function useKeyboardOpen(): boolean {
   return useViewportMetrics().covering;
 }
-
-const TEXT_ENTRY = "input, textarea, [contenteditable=\"true\"]";
 
 /**
  * Close the on-screen keyboard before opening an overlay (§22): the picker

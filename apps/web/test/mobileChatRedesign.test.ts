@@ -434,55 +434,27 @@ test("touch targets and design tokens are centralized", async () => {
   }
 });
 
-test("the phone header keeps navigation, slot actions, and a real session menu", async () => {
+test("the phone shell restores session navigation below a swipeable shortcut rail", async () => {
   const header = await read("../src/components/Header.tsx");
-  const menu = await read("../src/components/mobile/SessionMenu.tsx");
+  const bottom = await read("../src/components/workspace/WorkspaceBottomNav.tsx");
+  const navigation = await read("../src/components/mobile/MobileNavigationRail.tsx");
   const css = await readWebStyles();
-  const phoneStart = header.indexOf('if (mode === "phone" && chatSurface)');
-  const phoneEnd = header.indexOf("\n  return (", phoneStart);
-  const phoneHeader = header.slice(phoneStart, phoneEnd);
-  assert.ok(header.includes("<SessionMenu"), "the title opens the session menu");
-  assert.ok(
-    header.includes('aria-label={tr("header.valueSessionMenu", { mobileTitle: mobileTitle })}'),
-    "the whole title is the target",
-  );
-  assert.ok(
-    header.includes("useSheetTrigger(mode === \"phone\"")
-    && header.includes("setSessionMenuOpen(true);"),
-    "§22 again: the title opens on pointer-down, then dismisses the keyboard",
-  );
-  assert.match(phoneHeader, /<DrawerTrigger \/>/, "projects and sessions stay behind the hamburger");
-  assert.match(phoneHeader, /<CompactViewPicker view=\{view\} \/>/, "the trailing action switches workspace tools");
-  assert.match(phoneHeader, /className="icon-btn mobile-header-action mobile-header-more"/, "More opens the action overflow");
-  assert.match(phoneHeader, /slot="session\.header\.actions"/, "session actions remain reachable");
-  assert.match(phoneHeader, /slot="app\.header\.actions"/, "application actions remain reachable");
-  assert.match(phoneHeader, /<Sheet title=\{tr\("common\.more"\)\}/, "actions use the shared phone sheet");
-  assert.doesNotMatch(
-    phoneHeader,
-    /refreshSessions|MobileComposerControlsMenu|<UserMenu/,
-    "secondary utilities do not crowd or overlap the centered session title",
-  );
-  assert.match(
-    css,
-    /\.mobile-chat-header\s*\{[\s\S]*?display:\s*grid;[\s\S]*?grid-template-columns:\s*var\(--tap\) minmax\(0, 1fr\) var\(--tap\) var\(--tap\)/,
-    "the phone header reserves fixed navigation and action columns around one truncating title",
-  );
-  assert.match(
-    css,
-    /\.mobile-session-title\s*\{[\s\S]*?position:\s*static;[\s\S]*?width:\s*100%;[\s\S]*?min-width:\s*0;/,
-    "the session switcher participates in the grid instead of overlapping controls",
-  );
-  for (const key of [
-    "mobile.sessionmenu.newSession",
-    "mobile.sessionmenu.rename",
-    "mobile.sessionmenu.duplicateAsANewSession",
-    "common.archive",
-    "mobile.sessionmenu.recentSessions",
-    "common.settings",
-  ]) {
-    assert.ok(menu.includes(`tr("${key}")`), `${key} is reachable from the session menu`);
-  }
-  assert.ok(menu.includes('from "./Sheet.tsx"'), "the session menu is the same sheet");
+
+  assert.ok(header.includes("<MobileNavigationRail />"), "the phone header is the shortcut rail");
+  assert.equal(header.match(/<WorkspaceBottomNav \/>/g)?.length, 2, "phone and tablet shells mount the session bar");
+  assert.doesNotMatch(bottom, />Recents</, "the Recents action is icon-only");
+  assert.doesNotMatch(bottom, />New chat</, "the New chat action is icon-only");
+  assert.ok(bottom.includes("workspace.workspacebottomnav.sessionHistory"), "Recents keeps an accessible name");
+  assert.ok(bottom.includes("workspace.workspacebottomnav.newSession"), "New chat keeps an accessible name");
+  assert.ok(bottom.includes("Projects &amp; sessions"), "the title button identifies the projects and sessions drawer");
+  assert.ok(bottom.includes("displaySessionTitle"), "the projects and sessions button shows the current session title");
+  assert.match(css, /\.workspace-bottom-nav\s*\{\s*position:\s*fixed;/, "the session bar is fixed to the compact shell bottom");
+  assert.match(css, /\.mobile-shortcut-rail\s*\{[^}]*overflow-x:\s*auto;/s, "extra top icons reveal with horizontal swipe");
+  assert.match(css, /\.mobile-shortcut\s*\{[^}]*var\(--tap\)/s, "every shortcut keeps a 44px touch target");
+  assert.ok(navigation.includes("useResolvedCapabilities()"), "the rail follows configured capabilities");
+  assert.ok(navigation.includes("useRailSurfaceModel()"), "notification and plugin surfaces stay reachable");
+  assert.ok(navigation.includes("ui.mobileShortcuts"), "the rail follows the ordered Settings preference");
+  assert.doesNotMatch(navigation, /mobile-navigation-grid|header\.application/, "the grouped Application menu is gone");
 });
 
 test("haptics are opt-in, bounded, and respect reduced motion", async () => {

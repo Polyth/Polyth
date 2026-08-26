@@ -20,7 +20,7 @@ import { useModalSurface } from "./a11y/Dialog.tsx";
 import { useDismissibleMenu } from "./a11y/Menu.ts";
 import SlotHost from "./slots/SlotHost.ts";
 import { useSidebarExpanded } from "../sidebarPresentation.ts";
-import { setSidebarViewMode, useSidebarViewMode } from "../sidebarPrefs.ts";
+import { useSidebarViewMode } from "../sidebarPrefs.ts";
 import {
   SIDEBAR_COLLAPSED_WIDTH, SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH,
   clampSidebarWidth, setSidebarLayout, useSidebarLayout,
@@ -80,13 +80,26 @@ export default function Sidebar() {
   const [sortOpen, setSortOpen] = useState(false);
   const [filterOpen, setFilterOpen] = useState(false);
   const [connectionOpen, setConnectionOpen] = useState(false);
-  const [globalMenuOpen, setGlobalMenuOpen] = useState(false);
+  const [shiftHeld, setShiftHeld] = useState(false);
   const [appearanceProjectId, setAppearanceProjectId] = useState<string | null>(null);
   const [attentionOnly, setAttentionOnly] = useState(false);
   const [pullDistance, setPullDistance] = useState(0);
   const [pullRefreshing, setPullRefreshing] = useState(false);
   const syncStatus = useSyncExternalStore(subscribeSyncStatus, getSyncStatus, () => "disconnected");
   const host = typeof location === "undefined" ? tr("sidebar.localServer") : location.host;
+
+  useEffect(() => {
+    const updateShift = (event: globalThis.KeyboardEvent) => setShiftHeld(event.shiftKey);
+    const clearShift = () => setShiftHeld(false);
+    window.addEventListener("keydown", updateShift);
+    window.addEventListener("keyup", updateShift);
+    window.addEventListener("blur", clearShift);
+    return () => {
+      window.removeEventListener("keydown", updateShift);
+      window.removeEventListener("keyup", updateShift);
+      window.removeEventListener("blur", clearShift);
+    };
+  }, []);
 
   // Persisted view mode: list shows the active project; tree expands projects
   // into worktrees and sessions. Expansion is per-project UI state.
@@ -163,7 +176,6 @@ export default function Sidebar() {
   const sortRef = useRef<HTMLDivElement>(null);
   const filterRef = useRef<HTMLDivElement>(null);
   const connectionRef = useRef<HTMLDivElement>(null);
-  const globalMenuRef = useRef<HTMLDivElement>(null);
   const sideScrollRef = useRef<HTMLDivElement>(null);
   const pullStartRef = useRef<GesturePoint | null>(null);
   const pullDistanceRef = useRef(0);
@@ -229,20 +241,18 @@ export default function Sidebar() {
     setPull(0);
   };
   useEffect(() => {
-    if (!sortOpen && !filterOpen && !connectionOpen && !globalMenuOpen) return;
+    if (!sortOpen && !filterOpen && !connectionOpen) return;
     const onPointerDown = (event: MouseEvent) => {
       const target = event.target as Node;
       if (sortOpen && !sortRef.current?.contains(target)) setSortOpen(false);
       if (filterOpen && !filterRef.current?.contains(target)) setFilterOpen(false);
       if (connectionOpen && !connectionRef.current?.contains(target)) setConnectionOpen(false);
-      if (globalMenuOpen && !globalMenuRef.current?.contains(target)) setGlobalMenuOpen(false);
     };
     const onKeyDown = (event: globalThis.KeyboardEvent) => {
       if (event.key !== "Escape") return;
       setSortOpen(false);
       setFilterOpen(false);
       setConnectionOpen(false);
-      setGlobalMenuOpen(false);
     };
     document.addEventListener("mousedown", onPointerDown);
     document.addEventListener("keydown", onKeyDown);
@@ -250,7 +260,7 @@ export default function Sidebar() {
       document.removeEventListener("mousedown", onPointerDown);
       document.removeEventListener("keydown", onKeyDown);
     };
-  }, [connectionOpen, filterOpen, globalMenuOpen, sortOpen]);
+  }, [connectionOpen, filterOpen, sortOpen]);
   const toggleSelectMode = () => {
     setSelectMode((current) => {
       if (current) setSelectedSessionIds(new Set());
@@ -425,40 +435,14 @@ export default function Sidebar() {
               </div>
             )}
           </div>
-          <button
-            className="sidebar-service-btn"
-            aria-label={tr("common.settings")}
-            title={tr("sidebar.settingsValue", { MOD: MOD })}
-            onClick={() => setOverlay("settings")}
-          ><Icon.gear /></button>
-          <div className="sidebar-popover-anchor" ref={globalMenuRef}>
+          {shiftHeld && (
             <button
               className="sidebar-service-btn"
-              aria-label={tr("sidebar.moreSidebarActions")}
-              title={tr("sidebar.moreSidebarActions")}
-              aria-haspopup="menu"
-              aria-expanded={globalMenuOpen}
-              onClick={() => setGlobalMenuOpen((open) => !open)}
-            ><Icon.more /></button>
-            {globalMenuOpen && (
-              <div className="sidebar-service-popover sidebar-global-menu" role="menu">
-                <button role="menuitem" disabled={registry.status === "loading"} onClick={() => {
-                  setGlobalMenuOpen(false);
-                  setOverlay("project-picker");
-                }}>{tr("sidebar.addProject")}</button>
-                <button role="menuitemcheckbox" aria-checked={selectMode} onClick={() => {
-                  toggleSelectMode();
-                  setGlobalMenuOpen(false);
-                }}>{selectMode ? tr("sidebar.cancelSessionSelection") : tr("sidebar.selectSessions")}</button>
-                {!compact && (
-                  <button role="menuitem" onClick={() => {
-                    setSidebarViewMode(viewMode === "tree" ? "list" : "tree");
-                    setGlobalMenuOpen(false);
-                  }}>{viewMode === "tree" ? tr("sidebar.useProjectList") : tr("sidebar.useProjectTree")}</button>
-                )}
-              </div>
-            )}
-          </div>
+              aria-label={tr("common.settings")}
+              title={tr("sidebar.settingsValue", { MOD: MOD })}
+              onClick={() => setOverlay("settings")}
+            ><Icon.gear /></button>
+          )}
         </div>
         <div className="sidebar-list-controls">
           <div className="sidebar-sort" ref={sortRef}>
@@ -608,9 +592,6 @@ export default function Sidebar() {
                   }}
                   onDoubleClick={() => { setRenamingProject(p.id); setProjectName(p.name); }}
                 >
-                  {effectiveViewMode === "tree" && (
-                    <span className="project-tree-toggle-sign" aria-hidden="true">{expandedTrees.has(p.id) ? "−" : "+"}</span>
-                  )}
                   <span className="project-glyph" style={p.color ? { color: p.color } : undefined}>
                     {p.icon
                       ? p.icon.startsWith("/assets/project-icons/")
@@ -662,6 +643,10 @@ export default function Sidebar() {
                     ref={projectMenuRef}
                     onKeyDown={onProjectMenuKey}
                   >
+                    <button role="menuitemcheckbox" aria-checked={selectMode} onClick={() => {
+                      toggleSelectMode();
+                      setProjectMenu(null);
+                    }}>{selectMode ? tr("sidebar.cancelSessionSelection") : tr("sidebar.selectSessions")}</button>
                     <button role="menuitem" onClick={() => {
                       setProjectMenu(null);
                       openWorktreeSessionDialog(p.id);

@@ -1397,6 +1397,8 @@ export const pl: AppMessages = {
   "settings.pages.secret": "+ sekret",
   "settings.pages.secrets": "· sekrety:",
   "settings.pages.sendOnEnter": "Wyślij po naciśnięciu Enter",
+  "settings.pages.desktopSendShortcut": "Skrót wysyłania na komputerze",
+  "settings.pages.mobileSendShortcut": "Skrót wysyłania na telefonie",
   "settings.pages.sendsATestNotificationThroughThePush": "Wysyła powiadomienie testowe poprzez usługę push (ukryj kartę, aby je zobaczyć).",
   "settings.pages.sendTest": "Wyślij test",
   "settings.pages.sentToOneDevice": "Wysłano do 1 urządzenia",

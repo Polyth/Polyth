@@ -1,101 +1,65 @@
-import { LOCALES, type Locale, type LocaleBundle } from "@polyth/contracts";
-import { browserLocales } from "@polyth/browser/i18n";
-import { commandsLocales } from "@polyth/commands/i18n";
-import { dictationLocales } from "@polyth/dictation/i18n";
-import { filesLocales } from "@polyth/files/i18n";
-import { fusionLocales } from "@polyth/fusion/i18n";
-import { gitLocales } from "@polyth/git/i18n";
-import { githubLocales } from "@polyth/github/i18n";
-import { goalsLocales } from "@polyth/goals/i18n";
-import { homeAssistantLocales } from "@polyth/home-assistant/i18n";
-import { hotkeysLocales } from "@polyth/hotkeys/i18n";
-import { knowledgeLocales } from "@polyth/knowledge/i18n";
-import { modelsLocales } from "@polyth/models/i18n";
-import { multirunLocales } from "@polyth/multirun/i18n";
-import { permissionsLocales } from "@polyth/permissions/i18n";
-import { pluginsLocales } from "@polyth/plugins/i18n";
-import { scheduleLocales } from "@polyth/schedule/i18n";
-import { secureSafeLocales } from "@polyth/secure-safe/i18n";
-import { sshLocales } from "@polyth/ssh/i18n";
-import { terminalLocales } from "@polyth/terminal/i18n";
-import { usageLocales } from "@polyth/usage/i18n";
-import { walkthroughLocales } from "@polyth/walkthrough/i18n";
-import { workflowLocales } from "@polyth/workflow/i18n";
-import { ar } from "./locales/ar.ts";
-import { bg } from "./locales/bg.ts";
-import { de } from "./locales/de.ts";
-import { en, type AppMessageKey } from "./locales/en.ts";
-import { es } from "./locales/es.ts";
-import { fr } from "./locales/fr.ts";
-import { it } from "./locales/it.ts";
-import { pl } from "./locales/pl.ts";
-import { pt } from "./locales/pt.ts";
-import { ptBR } from "./locales/pt-BR.ts";
-import { uk } from "./locales/uk.ts";
-import { zhCN } from "./locales/zh-CN.ts";
+import { LOCALES, type Locale } from "@polyth/contracts";
+// English is the fallback every tr() read can reach synchronously, so it is
+// the only locale statically bundled. Every other locale loads on demand as
+// its own chunk (PR #51 bundled all 12 eagerly — ~4.9MB of the 6MB main.js).
+import { en as appEn } from "./locales/en.ts";
+import { en as browserEn } from "@polyth/browser/i18n/en";
+import { en as commandsEn } from "@polyth/commands/i18n/en";
+import { en as dictationEn } from "@polyth/dictation/i18n/en";
+import { en as filesEn } from "@polyth/files/i18n/en";
+import { en as fusionEn } from "@polyth/fusion/i18n/en";
+import { en as gitEn } from "@polyth/git/i18n/en";
+import { en as githubEn } from "@polyth/github/i18n/en";
+import { en as goalsEn } from "@polyth/goals/i18n/en";
+import { en as homeAssistantEn } from "@polyth/home-assistant/i18n/en";
+import { en as hotkeysEn } from "@polyth/hotkeys/i18n/en";
+import { en as knowledgeEn } from "@polyth/knowledge/i18n/en";
+import { en as modelsEn } from "@polyth/models/i18n/en";
+import { en as multirunEn } from "@polyth/multirun/i18n/en";
+import { en as permissionsEn } from "@polyth/permissions/i18n/en";
+import { en as pluginsEn } from "@polyth/plugins/i18n/en";
+import { en as scheduleEn } from "@polyth/schedule/i18n/en";
+import { en as secureSafeEn } from "@polyth/secure-safe/i18n/en";
+import { en as sshEn } from "@polyth/ssh/i18n/en";
+import { en as terminalEn } from "@polyth/terminal/i18n/en";
+import { en as usageEn } from "@polyth/usage/i18n/en";
+import { en as walkthroughEn } from "@polyth/walkthrough/i18n/en";
+import { en as workflowEn } from "@polyth/workflow/i18n/en";
 import { LOCALE_NAMES, type TranslationCatalog, type TranslationKey } from "./types.ts";
 
 const STORAGE_KEY = "polyth.locale";
 const RTL_LOCALES = new Set<Locale>(["ar"]);
 
-/** Strings owned by the app shell itself (chrome, composer, settings shell). */
-const appLocales: LocaleBundle<AppMessageKey> = {
-  uk,
-  en,
-  de,
-  fr,
-  pl,
-  "pt-BR": ptBR,
-  it,
-  es,
-  "zh-CN": zhCN,
-  bg,
-  ar,
-  pt,
+// Catalog ownership is a partition of the key space (asserted by the i18n
+// integrity test), so merge order cannot matter.
+const catalogs: Partial<Record<Locale, TranslationCatalog>> = {
+  en: Object.assign(
+    {},
+    appEn,
+    browserEn,
+    commandsEn,
+    dictationEn,
+    filesEn,
+    fusionEn,
+    gitEn,
+    githubEn,
+    goalsEn,
+    homeAssistantEn,
+    hotkeysEn,
+    knowledgeEn,
+    modelsEn,
+    multirunEn,
+    permissionsEn,
+    pluginsEn,
+    scheduleEn,
+    secureSafeEn,
+    sshEn,
+    terminalEn,
+    usageEn,
+    walkthroughEn,
+    workflowEn,
+  ) as TranslationCatalog,
 };
-
-// Feature strings live in their packages; the shell only assembles them.
-// Ownership is a partition of the key space, so merge order cannot matter —
-// the integrity test asserts bundles never overlap.
-const bundles = [
-  appLocales,
-  browserLocales,
-  commandsLocales,
-  dictationLocales,
-  filesLocales,
-  fusionLocales,
-  gitLocales,
-  githubLocales,
-  goalsLocales,
-  homeAssistantLocales,
-  hotkeysLocales,
-  knowledgeLocales,
-  modelsLocales,
-  multirunLocales,
-  permissionsLocales,
-  pluginsLocales,
-  scheduleLocales,
-  secureSafeLocales,
-  sshLocales,
-  terminalLocales,
-  usageLocales,
-  walkthroughLocales,
-  workflowLocales,
-] as const;
-
-function mergeCatalogs(): Record<Locale, TranslationCatalog> {
-  const merged = {} as Record<Locale, TranslationCatalog>;
-  for (const locale of LOCALES) {
-    const catalog: Record<string, string> = {};
-    for (const bundle of bundles) Object.assign(catalog, bundle[locale]);
-    // Complete by construction: TranslationKey is the union of every bundle's
-    // key set and each bundle is typed complete per locale.
-    merged[locale] = catalog as TranslationCatalog;
-  }
-  return merged;
-}
-
-const catalogs: Record<Locale, TranslationCatalog> = mergeCatalogs();
 
 const isLocale = (value: unknown): value is Locale =>
   typeof value === "string" && (LOCALES as readonly string[]).includes(value);
@@ -124,6 +88,31 @@ function applyLocaleToDocument(locale: Locale): void {
 
 applyLocaleToDocument(currentLocale);
 
+/** Load one locale's catalog chunk (idempotent). Static specifiers keep
+ *  esbuild code-splitting honest — a dynamic template would not resolve. */
+export function ensureLocale(locale: Locale): Promise<void> {
+  if (catalogs[locale]) return Promise.resolve();
+  const load = (): Promise<{ catalog: Record<string, string> }> => {
+    switch (locale) {
+      case "uk": return import("./catalogs/uk.ts");
+      case "de": return import("./catalogs/de.ts");
+      case "fr": return import("./catalogs/fr.ts");
+      case "pl": return import("./catalogs/pl.ts");
+      case "pt-BR": return import("./catalogs/pt-BR.ts");
+      case "it": return import("./catalogs/it.ts");
+      case "es": return import("./catalogs/es.ts");
+      case "zh-CN": return import("./catalogs/zh-CN.ts");
+      case "bg": return import("./catalogs/bg.ts");
+      case "ar": return import("./catalogs/ar.ts");
+      case "pt": return import("./catalogs/pt.ts");
+      default: return Promise.resolve({ catalog: {} });
+    }
+  };
+  return load().then((mod) => {
+    catalogs[locale] = mod.catalog as TranslationCatalog;
+  });
+}
+
 export { LOCALES, LOCALE_NAMES };
 export type { Locale, TranslationKey };
 
@@ -140,8 +129,11 @@ export function subscribeLocale(listener: () => void): () => void {
   return () => listeners.delete(listener);
 }
 
-export function setLocale(locale: Locale): void {
+export async function setLocale(locale: Locale): Promise<void> {
   if (locale === currentLocale) return;
+  // The catalog must be merged BEFORE listeners fire: subscribers re-render
+  // synchronously and tr() reads must already resolve in the new locale.
+  await ensureLocale(locale);
   currentLocale = locale;
   try {
     localStorage.setItem(STORAGE_KEY, locale);
@@ -156,7 +148,9 @@ type TranslationValue = string | number | boolean | null | undefined;
 export type TranslationParams = Record<string, TranslationValue>;
 
 export function tr(key: TranslationKey, params: TranslationParams = {}): string {
-  const template = catalogs[currentLocale][key] || catalogs.en[key];
+  // The en catalog is always present; a still-loading locale degrades to en
+  // until its chunk lands (callers re-render once setLocale resolves).
+  const template = catalogs[currentLocale]?.[key] || catalogs.en![key];
   return template.replace(/\{(\w+)\}/g, (match, name: string) => {
     const value = params[name];
     return value === undefined || value === null ? match : String(value);

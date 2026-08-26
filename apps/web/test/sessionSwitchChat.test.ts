@@ -29,7 +29,7 @@ let blockedSession: string | null = null;
 let blockedSessionGate: Promise<void> | null = null;
 let releaseBlockedSession: (() => void) | null = null;
 let requestedPaths: string[] = [];
-(globalThis as { fetch?: unknown }).fetch = async (url: string) => {
+(globalThis as { fetch?: unknown }).fetch = async (url: string, init?: RequestInit) => {
   const u = new URL(String(url), "http://localhost:3000");
   requestedPaths.push(`${u.pathname}${u.search}`);
   if (requestGate) await requestGate;
@@ -39,6 +39,8 @@ let requestedPaths: string[] = [];
   const m = /^\/api\/sessions\/([^/]+)$/.exec(u.pathname);
   const body: unknown = m
     ? { id: m[1], projectId: "p1", title: "T", status: "idle", createdAt: 1, updatedAt: 1 }
+    : u.pathname === "/api/sessions" && init?.method === "POST"
+      ? { id: "precache" }
     : /^\/api\/sessions\/[^/]+\/events$/.test(u.pathname)
       ? []
       : [];
@@ -52,7 +54,7 @@ let requestedPaths: string[] = [];
 };
 
 const store = await import("../src/store.ts");
-const { openSession } = await import("../src/init.ts");
+const { createSession, openSession } = await import("../src/init.ts");
 const { registerSurface } = await import("../src/surfaces.ts");
 const { getWorkspacePanePrefs } = await import("../src/workspace/panePrefs.ts");
 const { getWorkspaceMode, setWorkspaceMode } = await import("../src/widgets/workspaceMode.ts");
@@ -167,6 +169,24 @@ test("a hydrated session renders from cache while its suffix revalidates", async
 
   unblockFetches();
   await revalidating;
+});
+
+test("first-message session creation precaches chat while its replay loads", async () => {
+  requestedPaths = [];
+  blockSession("precache");
+
+  const sessionId = await createSession("p1", { precache: true });
+
+  assert.equal(sessionId, "precache");
+  assert.equal(store.getState().openingSessionId, "precache");
+  assert.deepEqual(requestedPaths.slice(0, 3), [
+    "/api/sessions",
+    "/api/sessions/precache",
+    "/api/sessions/precache/events?afterSeq=0",
+  ]);
+
+  unblockSession();
+  await new Promise<void>((resolve) => setTimeout(resolve, 0));
 });
 
 test("a slower earlier open cannot replace a newer selected session", async () => {

@@ -1400,6 +1400,8 @@ export const en = {
   "settings.pages.secret": "+ secret",
   "settings.pages.secrets": "· secrets:",
   "settings.pages.sendOnEnter": "Send on Enter",
+  "settings.pages.desktopSendShortcut": "Desktop send shortcut",
+  "settings.pages.mobileSendShortcut": "Mobile send shortcut",
   "settings.pages.sendsATestNotificationThroughThePush": "Sends a test notification through the push service (hide the tab to see it).",
   "settings.pages.sendTest": "Send test",
   "settings.pages.sentToOneDevice": "Sent to 1 device",

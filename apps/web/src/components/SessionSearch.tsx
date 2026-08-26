@@ -20,6 +20,7 @@ export default function SessionSearch() {
   const [searchFailed, setSearchFailed] = useState(false);
   const [retry, setRetry] = useState(0);
   const searchSequence = useRef(0);
+  const mobile = typeof window !== "undefined" && window.matchMedia("(max-width: 700px)").matches;
 
   // Debounced server search: metadata/branch/labels/message text with snippets.
   useEffect(() => {
@@ -85,9 +86,9 @@ export default function SessionSearch() {
       onClose={() => setOverlay(null)}
       className="palette"
       backdropClassName="palette-overlay"
-      initialFocus=".palette-input"
+      initialFocus={mobile ? ".palette-heading" : ".palette-input"}
     >
-      <div className="palette-heading">
+      <div className="palette-heading" tabIndex={-1}>
         <span className="palette-heading-title">{tr("sessionsearch.sessionHistory")}</span>
         <span className="palette-heading-description">
           {tr("sessionsearch.recentSessionsAndConversationContent")}</span>

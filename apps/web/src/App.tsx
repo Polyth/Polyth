@@ -15,7 +15,6 @@ import { useProjectSetupState } from "./projectSetup.ts";
 import { LiveRegion } from "./components/a11y/live.tsx";
 import WorktreeSessionDialog from "./components/WorktreeSessionDialog.tsx";
 import "./builtinCapabilities.ts";
-import WorkspaceBottomNav from "./components/workspace/WorkspaceBottomNav.tsx";
 import Header from "./components/Header.tsx";
 import AlertDialog from "./components/AlertDialog.tsx";
 import { useWorkspaceMode } from "./widgets/workspaceMode.ts";
@@ -95,7 +94,6 @@ export default function App() {
       </div>
       <ErrorBanner />
       <AlertDialog />
-      <WorkspaceBottomNav />
       {overlay === "palette" && <CommandPalette />}
       {overlay === "search" && <SessionSearch />}
       {overlay === "project-picker" && <ProjectFolderDialog onClose={() => setOverlay(null)} />}

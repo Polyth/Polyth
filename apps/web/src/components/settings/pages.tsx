@@ -67,8 +67,9 @@ export function GeneralPage() {
           value={getLocale()}
           aria-label={tr("common.language")}
           onChange={(event) => {
-            setLocale(event.target.value as Locale);
-            window.location.reload();
+            // Persist happens after the catalog chunk loads; reload only once
+            // the new locale is durable, else the reload races the write.
+            void setLocale(event.target.value as Locale).then(() => window.location.reload());
           }}
         >
           {LOCALES.map((locale) => <option key={locale} value={locale}>{LOCALE_NAMES[locale]}</option>)}
@@ -393,11 +394,16 @@ export function AppearancePage() {
         <button className="small-btn" type="button" onClick={resetFontSizes}>{tr("settings.pages.resetToDefaults")}</button>
       </Row>
       <Row label={tr("settings.pages.cornerRounding")} hint={tr("settings.pages.applySquareCompactOrGenerouslyRoundedCorners")} itemId="appearance.rounding">
-        <Seg value={ui.rounding} options={[
-          ["square", tr("settings.pages.square")],
-          ["compact", tr("settings.pages.compact")],
-          ["rounded", tr("settings.pages.rounded")],
-        ]} onChange={(rounding) => setUiSettings({ rounding })} />
+        <div className="rng rounding-range">
+          <span>{tr("settings.pages.square")}</span>
+          <input
+            type="range" min={0} max={10} step={1} value={ui.rounding}
+            aria-label={tr("settings.pages.cornerRounding")}
+            style={{ "--p": `${ui.rounding * 10}%` } as CSSProperties}
+            onChange={(e) => setUiSettings({ rounding: Number(e.target.value) })}
+          />
+          <span>{tr("settings.pages.rounded")}</span>
+        </div>
       </Row>
       <Row label={tr("settings.pages.optionalActions")} hint={tr("settings.pages.chooseWhichOptionalActionsAppearWhileYou")} itemId="appearance.menuItems">
         <div className="appearance-menu-items">
@@ -455,8 +461,11 @@ export function ChatPage() {
           onChange={(messageCopyFormat) => setUiSettings({ messageCopyFormat })}
         />
       </Row>
-      <Row label={tr("settings.pages.sendOnEnter")} hint={tr("settings.pages.whenOffEnterInsertsANewlineAnd")} itemId="chat.sendOnEnter">
-        <Toggle on={settings.sendOnEnter} onChange={(sendOnEnter) => updateSettings({ sendOnEnter })} label={tr("settings.pages.sendOnEnter")} />
+      <Row label={tr("settings.pages.desktopSendShortcut")} itemId="chat.sendOnEnter">
+        <Seg value={settings.desktopSendShortcut} options={[["enter", "Enter"], ["shift-enter", "Shift+Enter"]]} onChange={(desktopSendShortcut) => updateSettings({ desktopSendShortcut, sendOnEnter: desktopSendShortcut === "enter" })} />
+      </Row>
+      <Row label={tr("settings.pages.mobileSendShortcut")} itemId="chat.mobileSendShortcut">
+        <Seg value={settings.mobileSendShortcut} options={[["none", tr("common.none")], ["enter", "Enter"], ["shift-enter", "Shift+Enter"]]} onChange={(mobileSendShortcut) => updateSettings({ mobileSendShortcut })} />
       </Row>
       {assist && (
         <Row

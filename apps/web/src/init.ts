@@ -509,6 +509,8 @@ export interface CreateSessionOptions {
   model?: ModelRef;
   agent?: string;
   worktreePath?: string;
+  /** Start loading the chat without waiting for its initial replay. */
+  precache?: boolean;
 }
 
 async function createDefaultWorktree(projectId: string, title?: string): Promise<string> {
@@ -528,7 +530,8 @@ async function createDefaultWorktree(projectId: string, title?: string): Promise
   return (await api.createWorktree(projectId, branch)).path;
 }
 
-export async function createSession(projectId: string, opts: CreateSessionOptions = {}): Promise<void> {
+export async function createSession(projectId: string, opts: CreateSessionOptions = {}): Promise<string> {
+  const { precache = false, ...input } = opts;
   const project = store.getState().projectRegistry.projects.find((candidate) => candidate.id === projectId);
   const defaults = getSessionDefaults();
   const model = opts.model ?? resolveProjectModelDefault(
@@ -542,13 +545,22 @@ export async function createSession(projectId: string, opts: CreateSessionOption
       : undefined);
   const { id: sessionId } = await api.createSession({
     projectId,
-    ...opts,
+    ...input,
     ...(model ? { model } : {}),
     ...(agent ? { agent } : {}),
     ...(worktreePath ? { worktreePath } : {}),
   });
-  await openSession(sessionId);
+  const opening = openSession(sessionId);
+  if (precache) {
+    void opening.catch((error) => {
+      console.error("precache session failed", error);
+      store.setUiError(friendlyError(tr("common.error"), error));
+    });
+  } else {
+    await opening;
+  }
   void refreshSessions(projectId);
+  return sessionId;
 }
 
 export async function forkSession(sessionId: string, atSeq?: number): Promise<void> {

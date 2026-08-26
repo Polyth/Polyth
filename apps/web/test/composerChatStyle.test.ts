@@ -10,8 +10,20 @@ test("working status is compact and does not claim repository indexing", () => {
   const css = read("../src/styles.css");
 
   assert.doesNotMatch(surface, /Scanning repositories|indexing|usually takes a few seconds/i);
-  assert.match(surface, /tr\("workspace\.builtinsurfaces\.working"\)/);
+  assert.match(
+    surface,
+    /workingIndicator === "activity" \? activityLabel : tr\("workspace\.builtinsurfaces\.working"\)/,
+    "the configured activity indicator may use a specific step while compact modes say Working",
+  );
   assert.match(css, /\.focus-working-spinner\s*\{[^}]*width:\s*7px;[^}]*animation:\s*focus-working-pulse/s);
+});
+
+test("composer radius uses the shared corner setting", () => {
+  const css = read("../src/styles.css");
+
+  assert.match(css, /\.composer-card\s*\{[^}]*border-radius:\s*var\(--radius-composer\)/s);
+  assert.match(css, /\.composer-simple \.composer-card\s*\{[^}]*border-radius:\s*var\(--radius-composer\)/s);
+  assert.match(css, /\.composer-mobile \.composer-card\s*\{[^}]*border-radius:\s*var\(--radius-composer\)/s);
 });
 
 test("conversation rows omit role chrome and keep assistant prose unboxed", () => {
@@ -51,12 +63,13 @@ test("message actions use one lightweight copy control and local hover zones", (
   assert.match(timeline, /tr\("timeline\.startNewMultiRunFromThisAnswer"\)/);
 });
 
-test("thinking stays unboxed while command output keeps a light boundary", () => {
+test("thinking and execution rows stay unboxed in the conversation", () => {
   const timeline = read("../src/components/Timeline.tsx");
+  const execution = read("../src/components/ExecutionRow.tsx");
   const css = read("../src/styles.css");
 
   assert.match(timeline, /<details className="reasoning" open=\{open\}>/);
-  assert.match(timeline, /<div className=\{`tool-card/);
+  assert.match(execution, /<div className=\{`tool-card execution-row/);
   assert.match(css, /\.reasoning\s*\{[^}]*border:\s*0;[^}]*background:\s*transparent;/s);
-  assert.match(css, /\.tool-card\s*\{[^}]*border-color:\s*var\(--border-soft\);[^}]*background:\s*color-mix/s);
+  assert.match(css, /\.tool-card\.execution-row\s*\{[^}]*border:\s*0;[^}]*background:\s*transparent;/s);
 });

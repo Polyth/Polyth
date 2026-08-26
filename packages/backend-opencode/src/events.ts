@@ -69,7 +69,7 @@ const tokensOf = (info: Record<string, unknown> | undefined): TokenUsage | undef
 
 export interface TranslateState {
   userMessageIds: Set<string>;
-  toolCalls: Set<string>;
+  toolCalls: Map<string, "pending" | "running">;
   partText: Map<string, string>;
   partReasoning: Map<string, string>;
   // UX-MSG-ACTIONS: one-time part classification. A part is text OR reasoning
@@ -93,7 +93,7 @@ export interface TranslateState {
 
 export const createTranslateState = (): TranslateState => ({
   userMessageIds: new Set(),
-  toolCalls: new Set(),
+  toolCalls: new Map(),
   partText: new Map(),
   partReasoning: new Map(),
   partKind: new Map(),
@@ -333,7 +333,13 @@ export const translateOcEvent = (ev: OcEvent, state: TranslateState): RuntimeEve
           typeof meta?.sessionID === "string" ? String(meta.sessionID)
           : typeof meta?.sessionId === "string" ? String(meta.sessionId) : callId;
         const prev = state.subagents.get(callId);
-        const nextStatus = status === "completed" ? "done" : status === "error" ? "failed" : "running";
+        const nextStatus = status === "completed"
+          ? "done"
+          : status === "error"
+            ? "failed"
+            : status === "pending"
+              ? "pending"
+              : "running";
         if (!prev || prev.status !== nextStatus || prev.sessionId !== childSession) {
           state.subagents.set(callId, {
             sessionId: childSession,
@@ -346,14 +352,23 @@ export const translateOcEvent = (ev: OcEvent, state: TranslateState): RuntimeEve
           out.push(subagentSnapshot(state));
         }
       }
-      if ((status === "pending" || status === "running") && !state.toolCalls.has(callId)) {
-        state.toolCalls.add(callId);
-        out.push({ type: "tool/call", callId, tool, input });
+      const previousToolStatus = state.toolCalls.get(callId);
+      if (status === "pending" && previousToolStatus === undefined) {
+        state.toolCalls.set(callId, "pending");
+        out.push({ type: "tool/call", callId, tool, input, status: "pending" });
+      }
+      if (status === "running" && previousToolStatus !== "running") {
+        state.toolCalls.set(callId, "running");
+        if (previousToolStatus === "pending") {
+          out.push({ type: "tool/started", callId, tool, input });
+        } else {
+          out.push({ type: "tool/call", callId, tool, input, status: "running" });
+        }
       }
       if (status === "completed") {
         if (!state.toolCalls.has(callId)) {
-          state.toolCalls.add(callId);
-          out.push({ type: "tool/call", callId, tool, input });
+          state.toolCalls.set(callId, "running");
+          out.push({ type: "tool/call", callId, tool, input, status: "running" });
         }
         out.push({
           type: "tool/result",
@@ -367,8 +382,8 @@ export const translateOcEvent = (ev: OcEvent, state: TranslateState): RuntimeEve
       }
       if (status === "error") {
         if (!state.toolCalls.has(callId)) {
-          state.toolCalls.add(callId);
-          out.push({ type: "tool/call", callId, tool, input });
+          state.toolCalls.set(callId, "running");
+          out.push({ type: "tool/call", callId, tool, input, status: "running" });
         }
         out.push({
           type: "tool/error",

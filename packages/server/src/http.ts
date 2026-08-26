@@ -1,7 +1,8 @@
 // REST per docs/PLAN.md §5 + static web bundle serving. node:http only.
 import { createServer, type IncomingMessage, type ServerResponse, type Server } from "node:http";
 import { readFile } from "node:fs/promises";
-import { existsSync } from "node:fs";
+import { existsSync, statSync } from "node:fs";
+import { gzipSync } from "node:zlib";
 import { extname, join, normalize } from "node:path";
 import type {
   AgentRuntime,
@@ -24,6 +25,13 @@ const MIME: Record<string, string> = {
 };
 
 const HASHED_ASSET = /-[A-Z0-9]{8,}(?:\.[^./]+){1,2}$/;
+
+// Text payloads above a kilobyte compress well; everything else (png, woff2)
+// is already compressed on disk.
+const COMPRESSIBLE = /^(?:text\/|application\/(?:json|javascript))/;
+
+/** Gzip cache keyed by path+mtime so a rebuilt dist never serves stale bytes. */
+const gzipCache = new Map<string, { mtimeMs: number; gz: Buffer }>();
 
 const json = (res: ServerResponse, code: number, body: unknown) => {
   res.writeHead(code, { "content-type": "application/json" });
@@ -312,12 +320,33 @@ export function createHttpServer(deps: HttpDeps): Server {
         filePath = join(deps.webDist, "index.html");
       }
       const data = await readFile(filePath);
-      res.writeHead(200, {
-        "content-type": MIME[extname(filePath)] ?? "application/octet-stream",
+      const contentType = MIME[extname(filePath)] ?? "application/octet-stream";
+      const headers: Record<string, string> = {
+        "content-type": contentType,
         "cache-control": HASHED_ASSET.test(filePath)
           ? "public, max-age=31536000, immutable"
           : "no-cache",
-      });
+      };
+      // ponytail: in-process gzip, no reverse proxy assumed. The 6MB bundle
+      // transfers as ~1.6MB; parse cost is unchanged and handled separately.
+      if (
+        data.length > 1024
+        && COMPRESSIBLE.test(contentType)
+        && (req.headers["accept-encoding"] ?? "").includes("gzip")
+      ) {
+        const mtimeMs = statSync(filePath).mtimeMs;
+        const hit = gzipCache.get(filePath);
+        const gz = hit && hit.mtimeMs === mtimeMs ? hit.gz : gzipSync(data);
+        if (gz !== hit?.gz) {
+          if (gzipCache.size > 500) gzipCache.clear();
+          gzipCache.set(filePath, { mtimeMs, gz });
+        }
+        headers["content-encoding"] = "gzip";
+        headers.vary = "accept-encoding";
+        res.writeHead(200, headers);
+        return res.end(gz);
+      }
+      res.writeHead(200, headers);
       res.end(data);
     } catch (err) {
       const e = err as Error & { code?: string; cause?: unknown; field?: unknown };

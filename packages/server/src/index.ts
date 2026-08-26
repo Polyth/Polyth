@@ -118,6 +118,7 @@ type DictationForWs = NonNullable<Parameters<typeof attachWs>[3]>;
 
 export async function boot(opts: BootOptions = {}) {
   const port = opts.port ?? Number(process.env.PORT ?? 4400);
+  opts.hostname ??= process.env.HOST;
   const dataDir = resolve(opts.dataDir ?? process.env.POLYTH_DATA_DIR ?? "./data");
   const packagesDir = opts.packagesDir ?? resolve(__dirname, "../..");
   const discoveredPackageManifests = await discoverServerPackages(packagesDir);

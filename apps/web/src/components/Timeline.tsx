@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import { renderMarkdown } from "../markdown.tsx";
-import { fmtDuration, fmtMs, fmtTokens } from "../format.ts";
-import { groupWork, mergeThinking, promptIndex, toolSummary, copyText, loadDraft, type WorkGroup } from "../utils.ts";
+import { fmtDuration, fmtTokens } from "../format.ts";
+import { groupWork, mergeThinking, promptIndex, copyText, loadDraft, type WorkGroup } from "../utils.ts";
+import { executionGroupLabel, executionPresentation, reasoningMilestones } from "../execution.ts";
 import { setUiSettings, useUiSettings } from "../uiPrefs.ts";
 import { forkSession, sendMessage } from "../init.ts";
 import { requestComposerReplace } from "../composerInsert.ts";
@@ -57,7 +58,6 @@ import {
   tickWidth,
 } from "../promptRail.ts";
 import { captureTimelineAnchor, loadTimelineAnchor, restoreScrollDelta, saveTimelineAnchor, type TimelineAnchor } from "../timelineAnchor.ts";
-import CopyButton from "./CopyButton.tsx";
 import AttachmentPills from "./AttachmentPills.tsx";
 import SelectionMenu from "./SelectionMenu.tsx";
 import SlotHost from "./slots/SlotHost.ts";
@@ -66,6 +66,7 @@ import type {
   GithubConflictMsg,
   RenderMessage,
   RenderModel,
+  SubagentState,
   TaskActivityMsg,
   ToolMsg,
   UserMsg,
@@ -76,6 +77,7 @@ import ProviderLogo from "../../../../packages/models/widgets/ProviderLogo.tsx";
 import { seedMultiRunPrompt } from "@polyth/multirun/prompt-seed";
 import WorkflowTimelineCard from "../../../../packages/workflow/widgets/WorkflowTimelineCard.tsx";
 import { tr } from "../i18n/index.ts";
+import ExecutionRow, { useCollapsePresence } from "./ExecutionRow.tsx";
 
 /** One announcement per copy/mutation outcome; text is the accessible record,
  *  checkmarks only supplement it. Screen readers ignore repeats, so identical
@@ -89,9 +91,15 @@ type Announce = (text: string) => void;
 function Thinking({ m }: { m: AssistantMsg }) {
   const prefs = useUiSettings();
   const [open, setOpen] = useState(!m.finalized || prefs.thinkingDefaultExpanded);
-  const preview = m.reasoning.split("\n").find((l) => l.trim()) ?? "";
+  const milestones = reasoningMilestones(m.reasoning);
+  const preview = milestones.at(-1) ?? "";
   if (!prefs.collapsibleThinkingBlocks) {
-    return <div className="reasoning reasoning-flat"><div className="reasoning-body" dir="auto">{m.reasoning}</div></div>;
+    return (
+      <div className="reasoning reasoning-flat">
+        <div className="reasoning-heading"><span className={m.finalized ? "reasoning-mark done" : "reasoning-mark running"}>{m.finalized ? "✓" : <span className="spinner" />}</span><strong>{m.finalized ? "Reasoning complete" : "Thinking"}</strong></div>
+        <ol className="reasoning-milestones">{milestones.map((item, index) => <li key={`${index}:${item}`}>{item}</li>)}</ol>
+      </div>
+    );
   }
   return (
     <details className="reasoning" open={open}>
@@ -99,14 +107,18 @@ function Thinking({ m }: { m: AssistantMsg }) {
         aria-label={reasoningToggleName(open)}
         aria-expanded={open}
         onClick={(e) => { e.preventDefault(); setOpen((v) => !v); }}
-        style={{ display: "flex", gap: 8, alignItems: "baseline" }}
       >
-        <span className="reasoning-brain" aria-hidden="true" title={tr("timeline.thinking")}>🧠</span>
-        <span className="sr-only">{tr("timeline.thinking")}{m.finalized ? "" : "…"}</span>
-        {!open && <span className="muted reasoning-preview">{preview}</span>}
+        <span className={m.finalized ? "reasoning-mark done" : "reasoning-mark running"} aria-hidden="true">
+          {m.finalized ? "✓" : <span className="spinner" />}
+        </span>
+        <strong>{m.finalized ? "Reasoning complete" : tr("timeline.thinking")}</strong>
+        <span className="muted reasoning-preview">{preview}</span>
+        <span className="reasoning-chevron" aria-hidden="true">{open ? <Icon.chevronUp /> : <Icon.chevronRight />}</span>
       </summary>
       {open && (
-        <div className="reasoning-body" dir="auto">{m.reasoning}</div>
+        <ol className="reasoning-milestones" dir="auto">
+          {milestones.map((item, index) => <li key={`${index}:${item}`}>{item}</li>)}
+        </ol>
       )}
     </details>
   );
@@ -583,6 +595,47 @@ function AssistantAgentHeader({
   );
 }
 
+function TaskList({ plan }: { plan: NonNullable<RenderModel["tasks"]> }) {
+  const completed = plan.items.filter((item) => item.status === "done").length;
+  const allDone = completed === plan.items.length;
+  const active = plan.items.find((item) => item.status === "active");
+  const [open, setOpen] = useState(!allDone);
+  useEffect(() => {
+    if (allDone) setOpen(false);
+  }, [allDone]);
+  const revealTask = (id: string) => {
+    const row = document.querySelector<HTMLElement>(`[data-task-id="${CSS.escape(id)}"]`);
+    if (!row) return;
+    row.scrollIntoView({ block: "center", behavior: "smooth" });
+    row.classList.add("execution-highlight");
+    window.setTimeout(() => row.classList.remove("execution-highlight"), 1200);
+  };
+  return (
+    <section className={`message-plan-card task-list${open ? " open" : ""}`} aria-label={tr("timeline.currentTaskPlan")}>
+      <button type="button" className="task-list-summary" aria-expanded={open} onClick={() => setOpen((value) => !value)}>
+        <span className={allDone ? "task-list-mark done" : "task-list-mark"}>{allDone ? "✓" : <Icon.plan />}</span>
+        <span className="task-list-title">
+          <strong>{allDone ? `${plan.items.length} tasks completed` : "Tasks"}</strong>
+          {!allDone && <small>{completed}/{plan.items.length} completed{active ? ` · ${active.text}` : ""}</small>}
+        </span>
+        <span className="task-list-chevron" aria-hidden="true">{open ? <Icon.chevronUp /> : <Icon.chevronDown />}</span>
+      </button>
+      {open && (
+        <ul>
+          {plan.items.map((item) => (
+            <li key={item.id} className={item.status}>
+              <button type="button" onClick={() => revealTask(item.id)}>
+                <span>{item.status === "done" ? "✓" : item.status === "active" ? "◌" : "○"}</span>
+                <span>{item.text}</span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+    </section>
+  );
+}
+
 function AssistantView({
   m,
   announce,
@@ -614,26 +667,7 @@ function AssistantView({
       {hasAnswer && (
         <div className="bubble" dir="auto">{renderMarkdown(m.text || "", m.id)}{!m.finalized && <span className="caret" />}</div>
       )}
-      {plan && plan.items.length > 0 && (
-        <section className="message-plan-card" aria-label={tr("timeline.currentTaskPlan")}>
-          <div className="message-plan-head">
-            <span className="message-plan-icon">✓</span>
-            <strong>{tr("timeline.plan2")}</strong>
-            <span>{plan.items.filter((item) => item.status === "done").length} {tr("timeline.of")}{" "}{plan.items.length}</span>
-          </div>
-          <div className="message-plan-progress">
-            <i style={{ width: `${Math.round((plan.items.filter((item) => item.status === "done").length / plan.items.length) * 100)}%` }} />
-          </div>
-          <ul>
-            {plan.items.slice(0, 5).map((item) => (
-              <li key={item.id} className={item.status}>
-                <span>{item.status === "done" ? "✓" : item.status === "active" ? "●" : "○"}</span>
-                {item.text}
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
+      {plan && plan.items.length > 0 && <TaskList plan={plan} />}
       {m.finalized && m.text !== "" && announce && galleryAvailable && (
         <button className="assistant-gallery-shortcut" onClick={openGallery}><Icon.image /> {tr("timeline.openAnswerImages")}</button>
       )}
@@ -642,86 +676,8 @@ function AssistantView({
   );
 }
 
-// Long tool output stays clamped until "Show all" (UX-37).
-function ShellOutput({ text }: { text: string }) {
-  let pidValuePending = false;
-  return (
-    <>
-      {text.split(/(\bstarted\b|\bpid\b|\b\d+\b)/gi).map((part, index) => {
-        const normalized = part.toLowerCase();
-        let className: string | undefined;
-        if (normalized === "started") className = "shell-started";
-        else if (normalized === "pid") {
-          className = "shell-pid";
-          pidValuePending = true;
-        } else if (/^\d+$/.test(part)) {
-          if (pidValuePending) className = "shell-pid";
-          pidValuePending = false;
-        } else if (pidValuePending && part.trim() && !/^[\s:=#-]+$/.test(part)) {
-          pidValuePending = false;
-        }
-        return <span key={`${index}:${part}`} className={className}>{part}</span>;
-      })}
-    </>
-  );
-}
-
-function ClampedPre({ cls, text, shell = false, maxLines = 24 }: { cls: string; text: string; shell?: boolean; maxLines?: number }) {
-  const [full, setFull] = useState(false);
-  const long = text.split("\n").length > maxLines || text.length > 2400;
-  return (
-    <div className="copy-wrap">
-      <pre className={`${cls}${shell ? " shell-output" : ""}${maxLines === 5 ? " clamp-five" : ""}${full ? " full" : ""}`}>
-        {shell ? <ShellOutput text={text} /> : text}
-      </pre>
-      {long && (
-        <button className="small-btn show-all" onClick={() => setFull((v) => !v)}>
-          {full ? tr("timeline.collapse") : tr("timeline.showAll")}
-        </button>
-      )}
-    </div>
-  );
-}
-
 function shellCommandText(input: ToolMsg["input"]): string {
   return typeof input.command === "string" ? input.command : JSON.stringify(input, null, 2);
-}
-
-function ToolStatus({ m }: { m: ToolMsg }) {
-  const [now, setNow] = useState(() => Date.now());
-  const pending = m.status === "pending";
-  useEffect(() => {
-    if (!pending) return;
-    const timer = window.setInterval(() => setNow(Date.now()), 500);
-    return () => window.clearInterval(timer);
-  }, [pending]);
-
-  const elapsed = fmtMs(Math.max(0, (m.finishTime ?? now) - m.time));
-  if (pending) {
-    return <span className="tool-status running"><span className="spinner" aria-hidden="true" />Running · {elapsed}</span>;
-  }
-  if (m.status === "error") {
-    return <span className="tool-status error"><span aria-hidden="true">×</span> Failed · {elapsed}</span>;
-  }
-  return <span className="tool-status done"><span aria-hidden="true">✓</span> Completed · {elapsed}</span>;
-}
-
-function ToolSection({ label, text, cls, shell = false, maxLines }: {
-  label: string;
-  text: string;
-  cls: string;
-  shell?: boolean;
-  maxLines?: number;
-}) {
-  return (
-    <div className={`tool-section${label === "Error" ? " error" : ""}`}>
-      <div className="tool-section-head">
-        <div className="tool-label">{label}</div>
-        <CopyButton text={text} label={`Copy ${label.toLowerCase()}`} />
-      </div>
-      <ClampedPre cls={cls} text={text} shell={shell} maxLines={maxLines} />
-    </div>
-  );
 }
 
 export function shellCardCopyText(
@@ -733,50 +689,6 @@ export function shellCardCopyText(
   return [command, output, error].filter((part): part is string => typeof part === "string" && part.length > 0).join("\n\n");
 }
 
-function ToolCard({ m }: { m: ToolMsg }) {
-  const done = m.status !== "pending";
-  const [open, setOpen] = useState(!done);
-  const inputJson = JSON.stringify(m.input, null, 2);
-  const summary = toolSummary(m.input);
-  const shell = /^(bash|shell|shell_command|run_shell)$/i.test(m.tool);
-  const command = shellCommandText(m.input);
-  useEffect(() => setOpen(!done), [done]);
-  return (
-    <div className={`tool-card${open ? " open" : ""}${shell ? " shell-command-card" : ""}${m.status === "error" ? " error" : ""}`}>
-      <div className="tool-head">
-        <button
-          type="button"
-          className="tool-disclosure"
-          aria-expanded={open}
-          onClick={() => setOpen((value) => !value)}
-        >
-          <span className="tool-chevron" aria-hidden="true"><Icon.chevronRight /></span>
-          <span className="tool-icon" aria-hidden="true">{shell ? <Icon.term /> : <Icon.events />}</span>
-          <span className="tool-name">{shell ? tr("timeline.shellCommand") : m.title || m.tool}</span>
-          {summary && <span className="tool-preview">{summary}</span>}
-          <ToolStatus m={m} />
-        </button>
-        {shell && (
-          <span className="tool-card-copy">
-            <CopyButton text={command} label="Copy command" />
-          </span>
-        )}
-      </div>
-      {open && <div className="tool-body">
-        <ToolSection label={shell ? "Command" : `${m.tool} input`} text={shell ? command : inputJson} cls={shell ? "tool-command" : "json"} maxLines={shell ? 5 : undefined} />
-        {m.error !== undefined && (
-          <ToolSection label="Error" text={m.error} cls="out" shell={shell} />
-        )}
-        {m.output !== undefined && (
-          m.output.trim()
-            ? <ToolSection label="Output" text={m.output} cls="out" shell={shell} />
-            : <div className="tool-section"><div className="tool-label">Output</div><div className="tool-empty">No output</div></div>
-        )}
-      </div>}
-    </div>
-  );
-}
-
 function TaskActivityRow({ activity }: { activity: TaskActivityMsg }) {
   const label = activity.action === "created"
     ? tr("timeline.taskCreated")
@@ -786,7 +698,7 @@ function TaskActivityRow({ activity }: { activity: TaskActivityMsg }) {
         ? tr("timeline.taskCompleted")
         : tr("timeline.taskFailed");
   return (
-    <div className={`task-activity ${activity.action}`}>
+    <div className={`task-activity ${activity.action}`} data-task-id={activity.taskId}>
       <span className="task-activity-mark" aria-hidden="true">
         {activity.action === "completed" ? "✓" : activity.action === "failed" ? "✕" : "•"}
       </span>
@@ -816,26 +728,70 @@ function GithubConflictCard({ message }: { message: GithubConflictMsg }) {
   );
 }
 
-// Consecutive tool calls fold behind one "Worked for 3m 1s · 4 steps" row.
-function WorkedGroup({ g }: { g: WorkGroup }) {
+// Consecutive tool calls share one lightweight execution milestone. Completed
+// history folds by default; active and failed work stays visible.
+function childForTool(tool: ToolMsg, subagents: SubagentState | null): SubagentState["agents"][number] | undefined {
+  if (!subagents || executionPresentation(tool).kind !== "subagent") return undefined;
+  const metadataId = ["sessionId", "sessionID", "childSessionId", "child_session_id"]
+    .map((key) => tool.metadata?.[key])
+    .find((value): value is string => typeof value === "string");
+  if (metadataId) return subagents.agents.find((agent) => agent.sessionId === metadataId);
+  const description = typeof tool.input.description === "string" ? tool.input.description : undefined;
+  return subagents.agents.find((agent) =>
+    agent.label === description || agent.currentTask === tool.input.prompt);
+}
+
+export function WorkedGroup({ g, subagents }: { g: WorkGroup; subagents: SubagentState | null }) {
   const failed = g.tools.some((t) => t.status === "error") || g.tasks.some((task) => task.action === "failed");
-  const running = g.tools.some((t) => t.status === "pending") || g.tasks.some((task) => task.action === "started");
+  const running = g.tools.some((t) => t.status === "pending" || t.status === "running") || g.tasks.some((task) => task.action === "started");
   const [open, setOpen] = useState(running || failed);
-  const updates = g.tasks.length > 0
-    ? ` · ${tr("timeline.taskUpdatesCount", { count: g.tasks.length })}`
-    : "";
+  const itemsPresent = useCollapsePresence(open);
+  const previousRunning = useRef(running);
+  const userExpanded = useRef(false);
+  useEffect(() => {
+    if (!previousRunning.current && running) {
+      userExpanded.current = false;
+      setOpen(true);
+    }
+    if (previousRunning.current && !running && !failed && !userExpanded.current) setOpen(false);
+    if (failed) setOpen(true);
+    previousRunning.current = running;
+  }, [failed, running]);
+  const label = executionGroupLabel(g.tools);
+  const files = new Set(g.tools.flatMap((tool) => tool.changedFiles ?? [])).size;
+  const actionCount = g.tools.length + g.tasks.length;
   return (
-    <div className="msg assistant">
-      <button className="goal-toggle muted" style={{ fontSize: "calc(11.5px * var(--ui-font-scale, 1))", marginBottom: 6 }} onClick={() => setOpen((v) => !v)}>
-        <span className="goal-chevron">{open ? "▾" : "▸"}</span>
-        {running ? tr("timeline.working") : tr("timeline.worked")} {tr("timeline.for")}{" "}{fmtDuration(g.ms)} · {g.tools.length} {tr("timeline.steps")}{updates}
-        {failed && <span style={{ color: "var(--red)" }}>· {g.tools.filter((t) => t.status === "error").length} {tr("timeline.failed")}</span>}
+    <div className={`msg assistant execution-group${open ? " open" : ""}${running ? " current" : ""}`}>
+      <button
+        className="execution-group-toggle"
+        aria-expanded={open}
+        onClick={() => setOpen((value) => {
+          userExpanded.current = !value;
+          return !value;
+        })}
+      >
+        <span className={`execution-group-mark ${running ? "running" : failed ? "error" : "done"}`} aria-hidden="true">
+          {running ? <span className="spinner" /> : failed ? "×" : "✓"}
+        </span>
+        <span className="execution-group-copy">
+          <strong>{running ? `Working · ${label}` : label}</strong>
+          <small>{actionCount} {actionCount === 1 ? "action" : "actions"}{files > 0 ? ` · ${files} ${files === 1 ? "file" : "files"} changed` : ""} · {fmtDuration(g.ms)}</small>
+        </span>
+        <span className="execution-group-chevron" aria-hidden="true">{open ? <Icon.chevronUp /> : <Icon.chevronRight />}</span>
       </button>
-      {open && g.items.map((item) => (
-        item.kind === "tool"
-          ? <ToolCard key={item.id} m={item} />
-          : <TaskActivityRow key={item.id} activity={item} />
-      ))}
+      <div className="execution-group-expand-shell" aria-hidden={!open}>
+        <div className="execution-group-collapse-content">
+          {itemsPresent && (
+            <div className="execution-group-items">
+              {g.items.map((item) => (
+                item.kind === "tool"
+                  ? <ExecutionRow key={item.id} message={item} subagent={childForTool(item, subagents)} />
+                  : <TaskActivityRow key={item.id} activity={item} />
+              ))}
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
@@ -877,7 +833,7 @@ function MessageView({ m, announce, plan, regeneratePrompt, turn, preliminary, o
   }
   if (m.kind === "github-conflict") return <GithubConflictCard message={m} />;
   if (m.kind === "task") return <TaskActivityRow activity={m} />;
-  return <ToolCard m={m} />;
+  return <ExecutionRow message={m} />;
 }
 
 // Right-edge prompt rail (WP4, restyled after polyth PromptNavigatorRail):
@@ -1152,6 +1108,8 @@ export default function Timeline({
   // per-session lock, so a raced action returns a typed conflict, not a lie.
   const archived = useStore((s) => s.sessions.find((x) => x.id === s.activeSessionId)?.status === "archived");
   const pendingQuestion = model.questions.some((question) => question.status === "pending");
+  const pendingPermission = model.permissions.some((permission) => permission.status === "pending");
+  const pendingSecret = model.secrets.some((secret) => secret.status === "pending");
   const emptyCopy = archived
     ? tr("timeline.archivedSessionNoMessages")
     : pendingQuestion
@@ -1290,9 +1248,11 @@ export default function Timeline({
     target.tabIndex = -1;
     target.focus({ preventScroll: true });
   };
-  const latestReveal = showJump && !pendingQuestion ? (
+  const latestReveal = showJump && !pendingQuestion && !pendingPermission && !pendingSecret ? (
     <div className="timeline-reveal">
-      <button className="jump-latest" aria-label={JUMP_TO_LATEST_NAME} title={JUMP_TO_LATEST_NAME} onClick={jumpToLatest}>↓</button>
+      <button className={`jump-latest${model.turn?.status === "working" ? " agent-working" : ""}`} aria-label={JUMP_TO_LATEST_NAME} title={JUMP_TO_LATEST_NAME} onClick={jumpToLatest}>
+        ↓{model.turn?.status === "working" && <span>Agent is working</span>}
+      </button>
     </div>
   ) : null;
   // Revert and edit: append the marker, then seed the composer with the exact
@@ -1402,7 +1362,7 @@ export default function Timeline({
         )}
         {shownRows.map((r) => (
           r.kind === "work"
-            ? <WorkedGroup key={r.id} g={r} />
+            ? <WorkedGroup key={r.id} g={r} subagents={model.subagents} />
             : (
               <MessageView
                 key={r.id}
@@ -1454,7 +1414,7 @@ export default function Timeline({
             <div className="rewound-tail-body">
               {undoneRows.map((row) => (
                 row.kind === "work"
-                  ? <WorkedGroup key={row.id} g={row} />
+                  ? <WorkedGroup key={row.id} g={row} subagents={model.subagents} />
                   : <MessageView key={row.id} m={row} announce={announce} />
               ))}
             </div>

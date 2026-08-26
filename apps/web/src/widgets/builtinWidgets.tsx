@@ -39,7 +39,10 @@ function AgentActionsWidget() {
   const actions = model.messages.filter((message) => message.kind === "tool" || message.kind === "task").slice(-8).reverse();
   return <div className="widget-agent-actions">
     {actions.length === 0 && <><div><span className="action-dot done">✓</span><p><strong>{tr("widgets.builtinwidgets.workspaceReady")}</strong><small>{tr("widgets.builtinwidgets.projectContextLoaded")}</small></p></div><div><span className="action-dot active">●</span><p><strong>{tr("widgets.builtinwidgets.waitingForATask")}</strong><small>{tr("widgets.builtinwidgets.agentActionsWillStreamHere")}</small></p></div></>}
-    {actions.map((action) => <div key={action.id}><span className={`action-dot ${action.kind === "tool" && action.status === "error" ? "failed" : action.kind === "tool" && action.status === "pending" ? "active" : "done"}`}>{action.kind === "tool" && action.status === "pending" ? "●" : action.kind === "tool" && action.status === "error" ? "!" : "✓"}</span><p><strong>{action.kind === "tool" ? action.title || action.tool : action.text}</strong><small>{action.kind === "tool" ? action.status : action.action}</small></p></div>)}
+    {actions.map((action) => {
+      const active = action.kind === "tool" && (action.status === "pending" || action.status === "running");
+      return <div key={action.id}><span className={`action-dot ${action.kind === "tool" && action.status === "error" ? "failed" : active ? "active" : "done"}`}>{action.kind === "tool" && action.status === "pending" ? "○" : action.kind === "tool" && action.status === "running" ? "◌" : action.kind === "tool" && action.status === "error" ? "!" : "✓"}</span><p><strong>{action.kind === "tool" ? action.title || action.tool : action.text}</strong><small>{action.kind === "tool" ? action.status : action.action}</small></p></div>;
+    })}
   </div>;
 }
 

@@ -248,13 +248,23 @@ function SessionSurface() {
   const pendingQuestions = model.questions.filter((q) => q.status === "pending");
   const pendingSecrets = model.secrets.filter((secret) => secret.status === "pending");
   const archived = composerBlockedByArchive(session);
+  const hasPrimaryProgress = model.messages.some((message) =>
+    (message.kind === "tool" && (message.status === "pending" || message.status === "running"))
+    || (message.kind === "assistant" && !message.finalized))
+    || model.tasks?.items.some((item) => item.status === "active")
+    || model.subagents?.agents.some((agent) => agent.status === "running");
+  const showFallbackWorking = model.turn?.status === "working"
+    && !hasPrimaryProgress
+    && pendingQuestions.length === 0
+    && pendingSecrets.length === 0
+    && pendingPermissions.length === 0;
 
   return (
     <div className="focus-conversation">
       <div className="timeline-wrap">
         <Timeline model={model} latestRevealTarget={latestRevealAnchor} />
       </div>
-      {model.turn?.status === "working" && <WorkingIndicator />}
+      {showFallbackWorking && <WorkingIndicator />}
       {pendingQuestions.length > 0 && <QuestionCards questions={pendingQuestions} />}
       <SlotHost
         slot="session.timeline.after"

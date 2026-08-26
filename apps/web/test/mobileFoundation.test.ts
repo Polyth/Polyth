@@ -5,7 +5,7 @@ import { readWebStyles } from "./webStyles.ts";
 
 const read = (relative: string) => readFile(new URL(relative, import.meta.url), "utf8");
 
-test("document viewport exposes safe areas without disabling user zoom", async () => {
+test("document viewport exposes safe areas with a fixed chat scale", async () => {
   const html = await read("../src/index.html");
   const viewport = html.match(/<meta name="viewport" content="([^"]+)" \/>/)?.[1] ?? "";
 
@@ -17,8 +17,8 @@ test("document viewport exposes safe areas without disabling user zoom", async (
   ]) {
     assert.ok(viewport.includes(directive), `viewport includes ${directive}`);
   }
-  assert.ok(!viewport.includes("maximum-scale"), "pinch zoom is not capped");
-  assert.ok(!viewport.includes("user-scalable"), "user zoom is not disabled");
+  assert.ok(viewport.includes("maximum-scale=1"), "pinch zoom is capped");
+  assert.ok(viewport.includes("user-scalable=no"), "user zoom is disabled");
   assert.match(
     html,
     /<meta name="mobile-web-app-capable" content="yes" \/>/,

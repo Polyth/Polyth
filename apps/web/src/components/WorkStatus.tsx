@@ -7,6 +7,9 @@ import { useMemo } from "react";
 import type { RenderModel } from "../reduce.ts";
 import { setUiSettings, useUiSettings } from "../uiPrefs.ts";
 import { fmtCost, fmtTokens } from "../format.ts";
+import { openSession } from "../init.ts";
+import { Icon } from "../icons.tsx";
+import { setUiError } from "../store.ts";
 import SlotHost from "./slots/SlotHost.ts";
 import { tr } from "../i18n/index.ts";
 
@@ -103,7 +106,7 @@ export default function WorkStatus({ model }: { model: RenderModel }) {
             {model.tasks.items.map((t) => (
               <div key={t.id} className={`ws-task ${t.status}`}>
                 <span className="ws-task-mark">
-                  {t.status === "done" ? "✓" : t.status === "active" ? "●" : t.status === "failed" ? "✗" : "○"}
+                  {t.status === "done" ? "✓" : t.status === "active" ? "◌" : t.status === "failed" ? "✗" : "○"}
                 </span>
                 <span className="ws-task-text">{t.text}</span>
               </div>
@@ -120,10 +123,20 @@ export default function WorkStatus({ model }: { model: RenderModel }) {
           <div className="ws-body">
             {model.subagents.agents.map((a) => (
               <div key={a.sessionId} className={`ws-agent ${a.status}`}>
-                <span className={`tracker-dot agent${a.status === "running" ? "" : " idle"}`} />
-                <span className="ws-agent-label">{a.label}</span>
+                <span className="ws-agent-branch" aria-hidden="true"><Icon.hierarchy /></span>
+                <span className="ws-agent-copy">
+                  <span className="ws-agent-label">{a.label}</span>
+                  {a.currentTask && <span className="muted ws-agent-task">{a.currentTask}</span>}
+                </span>
                 <span className="tag">{a.status}</span>
-                {a.currentTask && <span className="muted ws-agent-task">{a.currentTask}</span>}
+                <button
+                  className="ws-agent-open"
+                  onClick={() => void openSession(a.sessionId).catch((error) =>
+                    setUiError(error instanceof Error ? error.message : String(error)))}
+                  aria-label={`Open child session ${a.label}`}
+                >
+                  Open <Icon.external />
+                </button>
               </div>
             ))}
           </div>

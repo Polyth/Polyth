@@ -459,7 +459,9 @@ async function assertNoOverflow(page: Page, label: string): Promise<void> {
       .filter((element) => {
         if (element.closest('[inert], [aria-hidden="true"]')) return false;
         const box = element.getBoundingClientRect();
-        const carousel = element.closest<HTMLElement>(".workflow-definition-list");
+        const carousel = element.closest<HTMLElement>(
+          ".workflow-definition-list, .mobile-shortcut-rail",
+        );
         if (carousel) {
           const clip = carousel.getBoundingClientRect();
           const intentionallyClipped = clip.left >= -0.5
@@ -543,10 +545,10 @@ async function openWorkflowFromSwitcher(page: Page): Promise<void> {
   if (await desktopButton.isVisible().catch(() => false)) {
     await desktopButton.click();
   } else {
-    const compactPicker = page.locator(".header-view-picker .picker-chip");
-    await compactPicker.waitFor({ state: "visible" });
-    await compactPicker.click();
-    await page.getByRole("option", { name: "Workflows", exact: true }).click();
+    const compactShortcut = page.locator(".mobile-shortcut-rail")
+      .getByRole("button", { name: "Workflows", exact: true });
+    await compactShortcut.waitFor({ state: "visible" });
+    await compactShortcut.click();
   }
   await page.waitForSelector(".workflow-page", { state: "visible" });
 }
@@ -585,33 +587,30 @@ test("enabled workflow package is discoverable from Chat and Goals", async () =>
   await page.context().close();
 });
 
-test("compact view picker exposes Workflows on phones and tablets", async () => {
+test("compact shortcut rail exposes Workflows on phones and tablets", async () => {
   for (const viewport of [
     { width: 320, height: 700 },
     { width: 375, height: 812 },
     { width: 768, height: 900 },
   ]) {
     const page = await openApp({ ...viewport, sessionId: SESSIONS.main });
-    const picker = page.locator(".header-view-picker .picker-chip");
-    await picker.waitFor({ state: "visible" });
-    await picker.click();
-    const option = page.getByRole("option", { name: "Workflows", exact: true });
-    await option.waitFor({ state: "visible" });
-    const firstDestinations = await page.locator('[role="option"]').evaluateAll((options) =>
-      options.slice(0, 2).map((option) =>
-        option.getAttribute("aria-label")
-          ?? option.querySelector(".palette-label, strong")?.textContent?.trim()));
+    const rail = page.locator(".mobile-shortcut-rail");
+    await rail.waitFor({ state: "visible" });
+    const workflow = rail.getByRole("button", { name: "Workflows", exact: true });
+    await workflow.waitFor({ state: "visible" });
+    const firstDestinations = await rail.locator(".mobile-shortcut").evaluateAll((shortcuts) =>
+      shortcuts.slice(0, 2).map((shortcut) => shortcut.getAttribute("aria-label")));
     assert.deepEqual(
       firstDestinations,
       ["Chat", "Workflows"],
-      `compact picker must keep Workflows beside Chat at ${viewport.width}px`,
+      `compact rail must keep Workflows beside Chat at ${viewport.width}px`,
     );
-    await option.click();
+    await workflow.click();
     await page.waitForSelector(".workflow-page", { state: "visible" });
     assert.equal(
-      await page.locator(".header-view-picker .picker-chip").getAttribute("title"),
-      "Change workspace view, current: Workflows",
-      `compact picker did not activate Workflows at ${viewport.width}px`,
+      await workflow.getAttribute("aria-current"),
+      "page",
+      `compact shortcut did not activate Workflows at ${viewport.width}px`,
     );
     await page.context().close();
   }
@@ -698,6 +697,8 @@ test("complete workflow journey remains synchronized, accessible, and responsive
   await page.waitForFunction(() =>
     (document.querySelector(".workflow-name-field input") as HTMLInputElement | null)?.value === "Approval review");
   await workflowName.fill("Approval review draft");
+  await page.waitForFunction(() =>
+    document.querySelector(".workflow-save-state")?.textContent?.trim() === "Unsaved changes");
   await page.locator(".workflow-definition").filter({ hasText: "Release pipeline" }).click();
   const discardDialog = page.getByRole("dialog", { name: "Discard unsaved changes?" });
   await discardDialog.waitFor({ state: "visible" });
@@ -932,8 +933,12 @@ test("workflow visual quality matrix uses computed geometry across themes, motio
       (document.querySelector(".workflow-name-field input") as HTMLInputElement | null)?.value === "Release pipeline");
     assert.equal(await page.locator(".workflow-page").count(), 1, `workflow switcher failed at ${viewport.width}px`);
     if (viewport.width <= 820) {
-      assert.equal(await page.locator(".header-view-picker .picker-chip").isVisible(), true,
-        `compact view switcher is hidden at ${viewport.width}px`);
+      assert.equal(
+        await page.locator(".mobile-shortcut-rail")
+          .getByRole("button", { name: "Workflows", exact: true }).isVisible(),
+        true,
+        `compact workflow shortcut is hidden at ${viewport.width}px`,
+      );
     } else {
       assert.equal(await page.locator(".view-switcher").getByRole("button", { name: "Workflows" }).isVisible(), true,
         `desktop workflow view button is hidden at ${viewport.width}px`);
@@ -1257,9 +1262,8 @@ test("workflow visual quality matrix uses computed geometry across themes, motio
       sessionId: SESSIONS.main,
       storage: { "polyth.locale": locale.id },
     });
-    const picker = localized.locator(".header-view-picker .picker-chip");
-    await picker.click();
-    await localized.getByRole("option", { name: locale.label, exact: true }).click();
+    await localized.locator(".mobile-shortcut-rail")
+      .getByRole("button", { name: locale.label, exact: true }).click();
     await localized.waitForSelector(".workflow-page", { state: "visible" });
     await localized.locator(".workflow-definition").filter({ hasText: "Release pipeline" }).click();
     await localized.waitForFunction(() =>

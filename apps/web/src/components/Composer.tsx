@@ -91,7 +91,7 @@ import type {
   SessionProjection,
 } from "@polyth/contracts";
 import { agentPickerDefaultLabel } from "../composerDefaults.ts";
-import { friendlyError, modKeyLabel, parseModelRef } from "../settings.ts";
+import { friendlyError, matchesSendShortcut, modKeyLabel, parseModelRef } from "../settings.ts";
 import { Icon } from "../icons.tsx";
 import { useWorkspaceMode } from "../widgets/workspaceMode.ts";
 import ModelPicker, { modelContextLabel, modelMetaLine, modelSupportsThinking } from "../../../../packages/models/widgets/ModelPicker.tsx";
@@ -354,11 +354,13 @@ function ThinkingSlider({
   variants,
   value,
   onPick,
+  preserveKeyboard,
 }: {
   className?: string;
   variants: readonly string[];
   value?: string;
   onPick: (thinking: string | undefined) => void;
+  preserveKeyboard?: () => void;
 }) {
   const [dragging, setDragging] = useState(false);
   const options = ["", ...variants];
@@ -368,7 +370,6 @@ function ThinkingSlider({
   return (
     <label className={`thinking-slider${className ? ` ${className}` : ""}`}>
       <span className="thinking-slider-label">
-        <span className="thinking-glyph" aria-hidden="true">◌</span>
         <output>{label}</output>
       </span>
       <span className="thinking-slider-track">
@@ -379,7 +380,10 @@ function ThinkingSlider({
           step={1}
           value={selected}
           aria-label={tr("composer.thinkingEffortValue", { value: label })}
-          onChange={(event) => onPick(options[Number(event.target.value)] || undefined)}
+          onChange={(event) => {
+            onPick(options[Number(event.target.value)] || undefined);
+            preserveKeyboard?.();
+          }}
           onPointerDown={() => setDragging(true)}
           onPointerUp={() => setDragging(false)}
           onPointerCancel={() => setDragging(false)}
@@ -482,6 +486,8 @@ export default function Composer({
   // and the phone CSS keeps the frame on the visible band. The composer reads
   // the metrics for auto-grow; it never re-derives its own transform.
   const isPhone = shellLayout === "phone";
+  const sendShortcut = isPhone ? settings.mobileSendShortcut : settings.desktopSendShortcut;
+  const sendKey = sendShortcut === "none" ? `${modKeyLabel()}↵` : sendShortcut === "shift-enter" ? "⇧↵" : "↵";
 
   const historyCursor = useRef(emptyPromptHistoryCursor());
   const applyingHistory = useRef(false);
@@ -680,6 +686,7 @@ export default function Composer({
   // the cap depends on it, so a text-only trigger is not enough. Reactive —
   // reading getViewportMetrics() during render never re-fires on change.
   const bandHeight = useViewportMetrics().height;
+  const keyboardOpen = useViewportMetrics().covering;
   useEffect(() => {
     const el = inputRef.current?.element();
     if (!el) return;
@@ -879,13 +886,12 @@ export default function Composer({
         } else if (newSessionTarget.kind === "branch") {
           worktreePath = (await api.createWorktree(activeProjectId, newSessionTarget.branch)).path;
         }
-        await createSession(activeProjectId, {
+        const created = await createSession(activeProjectId, {
           ...(newSessionIntent?.title ? { title: newSessionIntent.title } : {}),
           ...(worktreePath ? { worktreePath } : {}),
+          precache: true,
         });
         clearNewSessionDraft(activeProjectId);
-        const created = getState().activeSessionId;
-        if (!created) throw new Error(tr("composer.theNewSessionDidNotBecomeActive"));
         if (newSessionAutoApprove) await api.autoAcceptSet(created, "on");
         if (newSessionGoal) await api.goalAttach(created, t);
         await deliver(created);
@@ -1025,7 +1031,7 @@ export default function Composer({
         send();
         return true;
       }
-      if (settings.sendOnEnter && !e.shiftKey) {
+      if (matchesSendShortcut(sendShortcut, e.shiftKey)) {
         send();
         return true;
       }
@@ -1219,6 +1225,9 @@ export default function Composer({
     if (selectedModel) setModelThinking(selectedModel, thinking);
     updateCfg(withExplicitThinking(cfg, thinking));
   };
+  const preserveKeyboard = isPhone && keyboardOpen
+    ? () => inputRef.current?.focus()
+    : undefined;
   const activeAgent = cfg.agent ?? session?.agent ?? sessionDefaults.defaultAgent ?? chatAgents[0]?.name ?? "build";
   const autoApproveOn = session ? session.autoAccept === true : newSessionAutoApprove;
   const toggleAutoApprove = () => {
@@ -1391,6 +1400,7 @@ export default function Composer({
                 variants={thinkingVariants}
                 value={selectedThinking}
                 onPick={(thinking) => pickThinking(thinking || undefined)}
+                preserveKeyboard={preserveKeyboard}
               />
             )}
             {chatAgents.length > 0 ? (
@@ -1537,6 +1547,7 @@ export default function Composer({
               variants={thinkingVariants}
               value={selectedThinking}
               onPick={(thinking) => pickThinking(thinking || undefined)}
+              preserveKeyboard={preserveKeyboard}
             />
           )}
           {!simpleMode && ui.showTechnicalButtons && techOpen && (
@@ -1653,7 +1664,7 @@ export default function Composer({
                 disabled={sendDisabled}>
                 {simpleMode
                   ? <span className="send-plane" aria-hidden="true"><Icon.send /></span>
-                  : <>{shellMode ? tr("common.run") : tr("composer.sendNow")} <span className="send-key">{settings.sendOnEnter ? "↵" : `${modKeyLabel()}↵`}</span></>}
+                  : <>{shellMode ? tr("common.run") : tr("composer.sendNow")} <span className="send-key">{sendKey}</span></>}
               </button>
             )}
           </span>

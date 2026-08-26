@@ -1397,6 +1397,8 @@ export const de: AppMessages = {
   "settings.pages.secret": "+ Geheimnis",
   "settings.pages.secrets": "• Geheimnisse:",
   "settings.pages.sendOnEnter": "Senden beim Betreten",
+  "settings.pages.desktopSendShortcut": "Desktop-Sendetastenkürzel",
+  "settings.pages.mobileSendShortcut": "Mobiles Sendetastenkürzel",
   "settings.pages.sendsATestNotificationThroughThePush": "Sendet eine Testbenachrichtigung über den Push-Dienst (blenden Sie den Tab aus, um sie zu sehen).",
   "settings.pages.sendTest": "Test senden",
   "settings.pages.sentToOneDevice": "An 1 Gerät gesendet",

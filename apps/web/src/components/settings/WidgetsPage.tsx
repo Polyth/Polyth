@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { UiSlot } from "@polyth/contracts";
 import { listCapabilities, useResolvedCapabilities } from "../../capabilities.ts";
 import { activateProject, useStore } from "../../store.ts";
@@ -23,9 +23,11 @@ import {
 import { supportedWidgetSlots } from "../../widgets/widgetLibrary.ts";
 import "../../widgets/builtinWidgets.tsx";
 import { PageHead } from "./parts.tsx";
-import { RESPONSE_ACTION_IDS, setUiSettings, useUiSettings, type ResponseActionId } from "../../uiPrefs.ts";
+import {
+  MOBILE_SHORTCUT_IDS, RESPONSE_ACTION_IDS, setUiSettings, useUiSettings,
+  type MobileShortcutId, type ResponseActionId,
+} from "../../uiPrefs.ts";
 import { tr } from "../../i18n/index.ts";
-import MoveControls from "../MoveControls.tsx";
 
 type MiniPlaceId = "composer" | "session-footer" | "app-header";
 type InterfaceSurfaceId = "top-rail" | "right-rail" | "response-footer" | MiniPlaceId;
@@ -119,6 +121,19 @@ const RESPONSE_ACTION_LABELS: Record<ResponseActionId, string> = {
   multirun: tr("settings.widgetspage.newMultiRunFromAnswer"),
 };
 
+export function moveOrderedSelection<T extends string>(
+  selected: readonly T[],
+  item: T,
+  target: T,
+): T[] {
+  if (item === target || !selected.includes(item) || !selected.includes(target)) return [...selected];
+  const reordered = selected.filter((id) => id !== item);
+  reordered.splice(reordered.indexOf(target), 0, item);
+  return reordered;
+}
+
+const LONG_PRESS_MS = 350;
+
 function OrderedToggleList<T extends string>({
   all,
   selected,
@@ -131,53 +146,142 @@ function OrderedToggleList<T extends string>({
   onChange: (ids: T[]) => void;
 }) {
   const [dragged, setDragged] = useState<T | null>(null);
+  const [dragOver, setDragOver] = useState<T | null>(null);
+  const pointerDrag = useRef<{ id: T; pointerId: number; active: boolean; target: T } | null>(null);
+  const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const ordered = [...selected, ...all.filter((id) => !selected.includes(id))];
-  const move = (target: T) => {
-    if (!dragged || dragged === target) return;
-    const visible = selected.filter((id) => id !== dragged);
-    if (!selected.includes(dragged) || !selected.includes(target)) return;
-    visible.splice(visible.indexOf(target), 0, dragged);
-    onChange(visible);
+  const clearPointerDrag = () => {
+    if (longPressTimer.current !== null) clearTimeout(longPressTimer.current);
+    longPressTimer.current = null;
+    pointerDrag.current = null;
+    setDragged(null);
+    setDragOver(null);
+  };
+  useEffect(() => () => {
+    if (longPressTimer.current !== null) clearTimeout(longPressTimer.current);
+  }, []);
+
+  const move = (item: T, target: T) => {
+    const next = moveOrderedSelection(selected, item, target);
+    if (next.some((id, index) => id !== selected[index])) onChange(next);
+  };
+  const moveBy = (item: T, delta: -1 | 1) => {
+    const index = selected.indexOf(item);
+    const targetIndex = index + delta;
+    if (index < 0 || targetIndex < 0 || targetIndex >= selected.length) return;
+    const next = [...selected];
+    [next[index], next[targetIndex]] = [next[targetIndex]!, next[index]!];
+    onChange(next);
+  };
+  const finishPointerDrag = (
+    event: React.PointerEvent<HTMLButtonElement>,
+    cancelled = false,
+  ) => {
+    const current = pointerDrag.current;
+    if (!current || current.pointerId !== event.pointerId) return;
+    if (current.active) {
+      event.preventDefault();
+      if (!cancelled) move(current.id, current.target);
+    }
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    clearPointerDrag();
   };
   return (
     <div className="widget-order-list">
       {ordered.map((id) => {
         const visible = selected.includes(id);
-        const visibleIndex = selected.indexOf(id);
+        const index = selected.indexOf(id);
         return (
           <div
             key={id}
-            className={`widget-order-chip${visible ? "" : " hidden"}`}
+            className={`widget-order-chip${visible ? "" : " hidden"}${dragged === id ? " dragging" : ""}${dragOver === id ? " drag-over" : ""}`}
+            data-widget-order-id={id}
             draggable={visible}
-            onDragStart={() => setDragged(id)}
-            onDragEnd={() => setDragged(null)}
+            onDragStart={(event) => {
+              setDragged(id);
+              event.dataTransfer.setData("text/polyth-order-item", id);
+            }}
+            onDragEnd={() => {
+              setDragged(null);
+              setDragOver(null);
+            }}
             onDragOver={(event) => { if (visible) event.preventDefault(); }}
-            onDrop={() => move(id)}
+            onDragEnter={() => { if (visible && dragged !== id) setDragOver(id); }}
+            onDrop={(event) => {
+              event.preventDefault();
+              if (dragged) move(dragged, id);
+              setDragged(null);
+              setDragOver(null);
+            }}
           >
-            <span className="widget-drag-handle" aria-hidden="true">⋮⋮</span>
-            <label className="widget-order-toggle">
-              <input
-                type="checkbox"
-                checked={visible}
-                onChange={(event) => onChange(event.target.checked
-                  ? [...selected, id]
-                  : selected.filter((candidate) => candidate !== id))}
-              />
-              <span>{labels[id]}</span>
-            </label>
+            <button
+              type="button"
+              className="widget-drag-handle"
+              aria-label={`Reorder ${labels[id]}. Long press and drag, or use arrow keys.`}
+              disabled={!visible}
+              onKeyDown={(event) => {
+                if (event.key === "ArrowLeft" || event.key === "ArrowUp") {
+                  event.preventDefault();
+                  moveBy(id, -1);
+                } else if (event.key === "ArrowRight" || event.key === "ArrowDown") {
+                  event.preventDefault();
+                  moveBy(id, 1);
+                }
+              }}
+              onPointerDown={(event) => {
+                if (!visible || !event.isPrimary) return;
+                event.currentTarget.setPointerCapture(event.pointerId);
+                pointerDrag.current = { id, pointerId: event.pointerId, active: false, target: id };
+                longPressTimer.current = setTimeout(() => {
+                  if (!pointerDrag.current || pointerDrag.current.pointerId !== event.pointerId) return;
+                  pointerDrag.current.active = true;
+                  setDragged(id);
+                  setDragOver(id);
+                }, LONG_PRESS_MS);
+              }}
+              onPointerMove={(event) => {
+                const current = pointerDrag.current;
+                if (!current || current.pointerId !== event.pointerId || !current.active) return;
+                event.preventDefault();
+                const target = document.elementFromPoint(event.clientX, event.clientY)
+                  ?.closest<HTMLElement>("[data-widget-order-id]")
+                  ?.dataset.widgetOrderId as T | undefined;
+                if (target && selected.includes(target)) {
+                  current.target = target;
+                  setDragOver(target);
+                }
+              }}
+              onPointerUp={(event) => finishPointerDrag(event)}
+              onPointerCancel={(event) => finishPointerDrag(event, true)}
+            >
+              <span aria-hidden="true">⋮⋮</span>
+            </button>
+            <input
+              type="checkbox"
+              aria-label={`${visible ? "Hide" : "Show"} ${labels[id]}`}
+              checked={visible}
+              onChange={(event) => onChange(event.target.checked
+                ? [...selected, id]
+                : selected.filter((candidate) => candidate !== id))}
+            />
+            <span className="widget-order-label">{labels[id]}</span>
             {visible && (
-              <MoveControls
-                label={labels[id]}
-                index={visibleIndex}
-                count={selected.length}
-                onMove={(nextIndex) => {
-                  const next = [...selected];
-                  next.splice(visibleIndex, 1);
-                  next.splice(nextIndex, 0, id);
-                  onChange(next);
-                }}
-                axis="horizontal"
-              />
+              <span className="widget-order-controls">
+                <button
+                  type="button"
+                  aria-label={`Move ${labels[id]} earlier`}
+                  disabled={index <= 0}
+                  onClick={() => moveBy(id, -1)}
+                >←</button>
+                <button
+                  type="button"
+                  aria-label={`Move ${labels[id]} later`}
+                  disabled={index < 0 || index >= selected.length - 1}
+                  onClick={() => moveBy(id, 1)}
+                >→</button>
+              </span>
             )}
           </div>
         );
@@ -209,6 +313,19 @@ export default function WidgetsPage() {
   const availableCapabilities = capabilities.filter(
     (capability) => capability.descriptor.id !== "session" && capability.descriptor.available(),
   );
+  const mobileShortcutOptions = MOBILE_SHORTCUT_IDS.filter((id) =>
+    id === "notification-centre"
+    || id === "settings"
+    || capabilities.some((capability) =>
+      capability.descriptor.id === id && capability.descriptor.available()));
+  const mobileShortcutLabels = Object.fromEntries(mobileShortcutOptions.map((id) => {
+    if (id === "notification-centre") return [id, tr("notificationcentre.notifications")];
+    if (id === "settings") return [id, tr("common.settings")];
+    return [
+      id,
+      capabilities.find((capability) => capability.descriptor.id === id)?.descriptor.label ?? id,
+    ];
+  })) as Record<MobileShortcutId, string>;
 
   const placeCapability = (id: string, tier: CapabilityTier) => {
     const rank = Math.max(
@@ -336,6 +453,20 @@ export default function WidgetsPage() {
       </section>
 
       <div className="widget-place-grid widget-inline-config">
+        <section className="widget-place-card" data-widget-surface="top-rail" data-settings-item="widgets.mobileShortcuts">
+          <header>
+            <div>
+              <h3>Mobile shortcut rail</h3>
+              <p>Choose and order the icons in the swipeable top rail on phones and tablets.</p>
+            </div>
+          </header>
+          <OrderedToggleList
+            all={mobileShortcutOptions}
+            selected={ui.mobileShortcuts}
+            labels={mobileShortcutLabels}
+            onChange={(mobileShortcuts) => setUiSettings({ mobileShortcuts })}
+          />
+        </section>
         <section className="widget-place-card" data-widget-surface="response-footer" data-settings-item="widgets.responseActions">
           <header><div><h3>{tr("settings.widgetspage.responseActions")}</h3><p>{tr("settings.widgetspage.chooseAndOrderActionsShownAfterA")}</p></div></header>
           <OrderedToggleList
@@ -388,28 +519,27 @@ export default function WidgetsPage() {
               )}
               <div className="widget-place-chips">
                 {placed.length === 0 && <span className="widget-place-empty">{tr("settings.widgetspage.noButtonsPlaced")}</span>}
-                {placed.map((capability, placedIndex) => (
-                  <span className="widget-place-chip-group" key={capability.descriptor.id}>
-                    <button
-                      type="button"
-                      className="widget-place-chip"
-                      title={tr("settings.widgetspage.dragToReorderValueInTheValue", { label: capability.descriptor.label, value: place.title.toLowerCase() })}
-                      aria-label={tr("settings.widgetspage.valueToolValueDragToReorder", { title: place.title, label: capability.descriptor.label })}
-                      onClick={() => moveCapabilityToOtherRail(capability.descriptor.id, place.id)}
-                    >
-                      {capability.descriptor.label}<span aria-hidden="true">↔</span>
-                    </button>
-                    <MoveControls
-                      label={capability.descriptor.label}
-                      index={placedIndex}
-                      count={placed.length}
-                      onMove={(nextIndex) => {
-                        const target = placed[nextIndex];
-                        if (target) reorderCapabilities(placed, capability.descriptor.id, target.descriptor.id, place.id);
-                      }}
-                      axis="horizontal"
-                    />
-                  </span>
+                {placed.map((capability) => (
+                  <button
+                    type="button"
+                    className="widget-place-chip"
+                    key={capability.descriptor.id}
+                    draggable
+                    onDragStart={(event) => event.dataTransfer.setData("text/polyth-capability", capability.descriptor.id)}
+                    onDragOver={(event) => event.preventDefault()}
+                    onDrop={(event) => {
+                      event.preventDefault();
+                      const draggedId = event.dataTransfer.getData("text/polyth-capability");
+                      if (placed.some((item) => item.descriptor.id === draggedId)) {
+                        reorderCapabilities(placed, draggedId, capability.descriptor.id, place.id);
+                      }
+                    }}
+                    title={tr("settings.widgetspage.dragToReorderValueInTheValue", { label: capability.descriptor.label, value: place.title.toLowerCase() })}
+                    aria-label={tr("settings.widgetspage.valueToolValueDragToReorder", { title: place.title, label: capability.descriptor.label })}
+                    onClick={() => moveCapabilityToOtherRail(capability.descriptor.id, place.id)}
+                  >
+                    {capability.descriptor.label}<span aria-hidden="true">↔</span>
+                  </button>
                 ))}
               </div>
               {openPlace === place.id && (
@@ -461,35 +591,36 @@ export default function WidgetsPage() {
               </header>
               <div className="widget-place-chips">
                 {placed.length === 0 && <span className="widget-place-empty">{tr("settings.widgetspage.noButtonsPlaced")}</span>}
-                {placed.map((widget, placedIndex) => (
-                  <span className="widget-place-chip-group" key={widget.id}>
-                    <button
-                      type="button"
-                      className="widget-place-chip"
-                      aria-label={widget.requiredVisible
-                        ? `${widget.title} is required in ${place.title}`
-                        : tr("settings.widgetspage.hideValueFromValue", { title: widget.title, title2: place.title })}
-                      title={widget.requiredVisible
-                        ? `${widget.title} is required while its package is enabled`
-                        : tr("settings.widgetspage.hideValueFromValue", { title: widget.title, title2: place.title })}
-                      aria-disabled={widget.requiredVisible || undefined}
-                      onClick={() => {
-                        if (!widget.requiredVisible) mutate({ type: "visibility", id: widget.id, visible: false });
-                      }}
-                    >
-                      {widget.title}<span aria-hidden="true">{widget.requiredVisible ? "Required" : "×"}</span>
-                    </button>
-                    <MoveControls
-                      label={widget.title}
-                      index={placedIndex}
-                      count={placed.length}
-                      onMove={(nextIndex) => {
+                {placed.map((widget) => (
+                  <button
+                    type="button"
+                    className="widget-place-chip"
+                    key={widget.id}
+                    draggable
+                    onDragStart={(event) => event.dataTransfer.setData("text/polyth-widget", widget.id)}
+                    onDragOver={(event) => event.preventDefault()}
+                    onDrop={(event) => {
+                      event.preventDefault();
+                      const draggedId = event.dataTransfer.getData("text/polyth-widget");
+                      const index = placed.findIndex((candidate) => candidate.id === widget.id);
+                      if (placed.some((candidate) => candidate.id === draggedId) && index >= 0) {
                         const slot = widgetSlotOf(layout, widget.id);
-                        if (slot) mutate({ type: "place", id: widget.id, slot, index: nextIndex });
-                      }}
-                      axis="horizontal"
-                    />
-                  </span>
+                        if (slot) mutate({ type: "place", id: draggedId, slot, index });
+                      }
+                    }}
+                    aria-label={widget.requiredVisible
+                      ? `${widget.title} is required in ${place.title}`
+                      : tr("settings.widgetspage.hideValueFromValue", { title: widget.title, title2: place.title })}
+                    title={widget.requiredVisible
+                      ? `${widget.title} is required while its package is enabled`
+                      : tr("settings.widgetspage.hideValueFromValue", { title: widget.title, title2: place.title })}
+                    aria-disabled={widget.requiredVisible || undefined}
+                    onClick={() => {
+                      if (!widget.requiredVisible) mutate({ type: "visibility", id: widget.id, visible: false });
+                    }}
+                  >
+                    {widget.title}<span aria-hidden="true">{widget.requiredVisible ? "Required" : "×"}</span>
+                  </button>
                 ))}
               </div>
               {openPlace === place.id && (

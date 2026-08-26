@@ -11,7 +11,8 @@ test("sidebar uses contextual tree actions and no permanent footer", async () =>
     source("../src/styles.css"),
   ]);
   assert.doesNotMatch(sidebar, /className="sidebar-title">Sessions/);
-  assert.match(sidebar, /project-tree-toggle-sign/);
+  assert.doesNotMatch(sidebar, /project-tree-toggle-sign/);
+  assert.doesNotMatch(sidebar, /globalMenuOpen|sidebar-global-menu/);
   assert.doesNotMatch(sidebar, /project-count/);
   assert.match(sidebar, /className="project-new-session"/);
   assert.doesNotMatch(sidebar, /className="side-foot"/);
@@ -44,6 +45,8 @@ test("sidebar uses contextual tree actions and no permanent footer", async () =>
     "the compact drawer has a safe-area-aware identity bar");
   assert.match(styles, /\.sidebar \.project-card-shell\s*\{\s*grid-template-columns:\s*minmax\(0, 1fr\) repeat\(3, var\(--tap\)\)/,
     "touch-sized project actions reserve explicit compact-drawer tracks");
+  assert.match(styles, /\.project-card\.active::before\s*\{[\s\S]*?box-shadow:/,
+    "the active project has a distinct but subtle glow");
 });
 
 test("header and composer controls are configurable and purpose-specific", async () => {

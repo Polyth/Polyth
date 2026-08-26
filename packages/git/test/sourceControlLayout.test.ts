@@ -74,6 +74,7 @@ test("320px source-control layout keeps repository metadata clear of tabs", { sk
 
 test("320px source controls expose 44px tabs, copy actions, and chips", { skip: !CHROME }, async () => {
   assert.ok(page);
+  await page.setViewportSize({ width: 320, height: 720 });
   await page.setContent(`
     <style>${css}</style>
     <main class="view-page git-page">
@@ -91,19 +92,31 @@ test("320px source controls expose 44px tabs, copy actions, and chips", { skip: 
       return { width: box.width, height: box.height, left: box.left, top: box.top };
     };
     const file = rect("#file-ref");
-    const hit = document.elementFromPoint(file.left + file.width / 2, file.top - 8);
+    const fileStyle = getComputedStyle(document.querySelector("#file-ref")!);
     return {
       log: rect("#log-tab"),
       copy: rect(".copy-btn"),
       chip: rect("#all-chip"),
-      expandedFileRefHit: Boolean(hit?.closest("#file-ref")),
+      file,
+      viewport: window.innerWidth,
+      phoneMedia: matchMedia("(max-width: 480px)").matches,
+      fileMinWidth: fileStyle.minWidth,
+      fileMinHeight: fileStyle.minHeight,
+      fileDisplay: fileStyle.display,
     };
   });
-  for (const [name, target] of Object.entries({ log: targets.log, copy: targets.copy, chip: targets.chip })) {
-    assert.ok(target.width >= 44, `${name} width is ${target.width}px`);
-    assert.ok(target.height >= 44, `${name} height is ${target.height}px`);
+  for (const [name, target] of Object.entries({
+    log: targets.log,
+    copy: targets.copy,
+    chip: targets.chip,
+    file: targets.file,
+  })) {
+    const detail = name === "file"
+      ? ` (viewport=${targets.viewport}, media=${targets.phoneMedia}, min=${targets.fileMinWidth}×${targets.fileMinHeight}, display=${targets.fileDisplay})`
+      : "";
+    assert.ok(target.width >= 44, `${name} width is ${target.width}px${detail}`);
+    assert.ok(target.height >= 44, `${name} height is ${target.height}px${detail}`);
   }
-  assert.equal(targets.expandedFileRefHit, true, "file reference has an expanded 44px hit area");
 });
 
 test("narrow source-control shell keeps every change group above the commit composer", { skip: !CHROME }, async () => {

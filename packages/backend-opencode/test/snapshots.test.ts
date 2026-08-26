@@ -19,6 +19,31 @@ const toolEvent = (tool: string, status: string, input: Record<string, unknown>,
   },
 });
 
+test("tool lifecycle emits pending call then a distinct running transition", () => {
+  const state = createTranslateState();
+  const pending = translateOcEvent(toolEvent("bash", "pending", { command: "npm test" }), state);
+  assert.deepEqual(pending, [{
+    type: "tool/call",
+    callId: "call-bash",
+    tool: "bash",
+    input: { command: "npm test" },
+    status: "pending",
+  }]);
+
+  const running = translateOcEvent(toolEvent("bash", "running", { command: "npm test" }), state);
+  assert.deepEqual(running, [{
+    type: "tool/started",
+    callId: "call-bash",
+    tool: "bash",
+    input: { command: "npm test" },
+  }]);
+  assert.deepEqual(
+    translateOcEvent(toolEvent("bash", "running", { command: "npm test" }), state),
+    [],
+    "repeated running updates do not duplicate lifecycle events",
+  );
+});
+
 test("todowrite emits a full task snapshot with normalized statuses", () => {
   const state = createTranslateState();
   const evs = translateOcEvent(toolEvent("todowrite", "running", {

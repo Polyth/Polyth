@@ -61,7 +61,9 @@ export interface ToolMsg {
   output?: string;
   error?: string;
   title?: string;
-  status: "pending" | "done" | "error";
+  metadata?: JsonObject;
+  /** `pending` is queued but not started; `running` begins at `tool/started`. */
+  status: "pending" | "running" | "done" | "error";
   undone?: boolean;
   rewindMarkerSeq?: number;
   time: number;
@@ -456,16 +458,52 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
     }
     case "tool/call": {
       const callId = str(d, "callId") ?? "";
-      pushTool(model, {
-        kind: "tool",
-        id: callId,
-        callId,
-        eventSeq: ev.seq,
-        tool: str(d, "tool") ?? "",
-        input: obj(d, "input") ?? {},
-        status: "pending",
-        time: ev.time,
-      });
+      const lifecycleStatus = str(d, "status");
+      const status = lifecycleStatus === "pending" ? "pending" : "running";
+      const existing = lifecycleStatus ? findTool(model, callId) : undefined;
+      if (existing) {
+        if (existing.status === "pending" && status === "running") {
+          existing.status = "running";
+          existing.time = ev.time;
+        }
+        const input = obj(d, "input");
+        if (input && Object.keys(input).length > 0) existing.input = input;
+      } else {
+        pushTool(model, {
+          kind: "tool",
+          id: callId,
+          callId,
+          eventSeq: ev.seq,
+          tool: str(d, "tool") ?? "",
+          input: obj(d, "input") ?? {},
+          status,
+          time: ev.time,
+        });
+      }
+      break;
+    }
+    case "tool/started": {
+      const callId = str(d, "callId") ?? "";
+      const existing = findTool(model, callId);
+      if (existing) {
+        if (existing.status === "pending") {
+          existing.status = "running";
+          existing.time = ev.time;
+        }
+        const input = obj(d, "input");
+        if (input && Object.keys(input).length > 0) existing.input = input;
+      } else {
+        pushTool(model, {
+          kind: "tool",
+          id: callId,
+          callId,
+          eventSeq: ev.seq,
+          tool: str(d, "tool") ?? "",
+          input: obj(d, "input") ?? {},
+          status: "running",
+          time: ev.time,
+        });
+      }
       break;
     }
     case "tool/result": {
@@ -475,6 +513,8 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
         t.output = str(d, "output") ?? "";
         const title = str(d, tr("reduce.title"));
         if (title !== undefined) t.title = title;
+        const metadata = obj(d, "metadata");
+        if (metadata !== undefined) t.metadata = metadata;
         const lateInput = obj(d, "input");
         if (lateInput && Object.keys(t.input).length === 0) t.input = lateInput; // opencode fills input late
         const changedFiles = extractChangedFiles(t.tool, lateInput ?? t.input, obj(d, "metadata"));

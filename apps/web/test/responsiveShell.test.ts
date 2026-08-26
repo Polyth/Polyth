@@ -112,26 +112,22 @@ test("compact sidebar is a drawer, never display:none with no way back", async (
   assert.ok(css.includes("min(380px, 100vw)"), "sheet width contract");
 });
 
-test("header owns the drawer trigger and pane-aware compact view picker", async () => {
+test("header owns the drawer trigger and registry-backed compact navigation rail", async () => {
   const header = await read("../src/components/Header.tsx");
+  const navigation = await read("../src/components/mobile/MobileNavigationRail.tsx");
   const actions = await read("../../../packages/permissions/widgets/index.tsx");
   assert.ok(header.includes('aria-controls="polyth-session-drawer"'), "drawer trigger targets the drawer");
   assert.ok(header.includes('tr("header.openProjectsAndSessions")'), "drawer trigger accessible name");
-  assert.ok(header.includes('tr("header.changeWorkspaceViewCurrentValue"'), "compact view trigger keeps the current label in its name");
-  assert.ok(header.includes("const resolved = useResolvedCapabilities()"), "compact picker consumes the shared capability model");
-  assert.ok(header.includes("VIEW_OF_CAPABILITY[c.descriptor.id]"), "compact picker maps capability descriptors to views");
-  assert.ok(header.includes("PANE_OF_CAPABILITY[c.descriptor.id]"), "compact picker keeps pane tools such as Browser reachable");
-  assert.ok(
-    header.includes('c.descriptor.id === "workflow"')
-      && header.includes('c.descriptor.id === "session"'),
-    "compact picker keeps package-owned Workflows beside Chat",
-  );
-  assert.ok(header.includes("PANEL_OF_CAPABILITY[c.descriptor.id]"), "compact picker keeps panels such as Context reachable");
-  assert.ok(header.includes("mobileSheet"), "compact picker uses the touch-friendly mobile sheet");
+  assert.ok(header.includes("<MobileNavigationRail />"), "compact headers expose the shared top rail");
+  assert.ok(navigation.includes("const resolved = useResolvedCapabilities()"), "mobile rail consumes the shared capability model");
+  assert.ok(navigation.includes("VIEW_OF_CAPABILITY[id]"), "mobile rail maps capability descriptors to views");
+  assert.ok(navigation.includes("PANE_OF_CAPABILITY[id]"), "mobile rail keeps pane tools such as Browser reachable");
+  assert.ok(navigation.includes("useRailSurfaceModel()"), "slot-backed surfaces such as Notifications join the same rail");
+  assert.ok(navigation.includes('className="mobile-shortcut-track"'), "compact navigation is a swipeable icon rail instead of a select menu");
   assert.ok(!header.includes("const VIEW_GROUPS"), "no duplicate hard-coded view list");
   assert.ok(
-    actions.includes('"Turn off auto-approve"')
-      && actions.includes('"Turn on auto-approve"'),
+    actions.includes('tr("widgets.builtinminiwidgets.turnOffAutoApprove")')
+      && actions.includes('tr("widgets.builtinminiwidgets.turnOnAutoApprove")'),
     "placeable auto-approve control exposes the resulting action in its accessible name",
   );
 });

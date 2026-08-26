@@ -139,7 +139,7 @@ test("tool call → result fills the card; call → error marks it failed", () =
   ]);
   const t0 = m.messages[0] as { kind: string; status: string };
   assert.equal(t0.kind, "tool");
-  assert.equal(t0.status, "pending");
+  assert.equal(t0.status, "running");
 
   const withResult = reduceEvent(m, ev("tool/result", { callId: "c1", tool: "read_file", output: "export const x = 1", title: "a.ts" }));
   const t1 = withResult.messages[0] as { status: string; output: string; finishTime?: number };
@@ -152,6 +152,29 @@ test("tool call → result fills the card; call → error marks it failed", () =
   const t2 = withError.messages[0] as { status: string; error: string };
   assert.equal(t2.status, "error");
   assert.equal(t2.error, "permission denied");
+});
+
+test("pending tool calls transition to running without duplicating the execution row", () => {
+  const pending = ev("tool/call", {
+    callId: "queued",
+    tool: "bash",
+    input: { command: "npm test" },
+    status: "pending",
+  });
+  const started = ev("tool/started", {
+    callId: "queued",
+    tool: "bash",
+    input: { command: "npm test -- --test-name-pattern execution" },
+  });
+  const model = buildModel([pending]);
+  const queued = model.messages[0];
+  assert.equal(queued?.kind === "tool" ? queued.status : "", "pending");
+  reduceEvent(model, started);
+  const executions = model.messages.filter((message) => message.kind === "tool");
+  assert.equal(executions.length, 1);
+  assert.equal(executions[0]?.status, "running");
+  assert.deepEqual(executions[0]?.input, { command: "npm test -- --test-name-pattern execution" });
+  assert.equal(executions[0]?.time, started.time, "running duration starts at the lifecycle transition");
 });
 
 test("edit tool results derive changed files and a new prompt clears the turn summary", () => {
@@ -393,7 +416,7 @@ test("parseUiSettings defaults invalid values and sanitizes MCP servers", () => 
   const parsed = parseUiSettings(JSON.stringify({
     density: "compact",
     fontSize: "l",
-    rounding: "rounded",
+    rounding: 10,
     chatWidth: "wide",
     notifyOnComplete: true,
     notifySound: "yes",
@@ -420,7 +443,7 @@ test("parseUiSettings defaults invalid values and sanitizes MCP servers", () => 
     {
       density: "compact",
       fontSize: "l",
-      rounding: "rounded",
+      rounding: 10,
       chatWidth: "wide",
       notifyOnComplete: true,
       notifySound: false,
@@ -432,6 +455,8 @@ test("parseUiSettings defaults invalid values and sanitizes MCP servers", () => 
   );
   assert.equal(parsed.mcpServers.length, 32);
   assert.deepEqual(parsed.mcpServers[0], servers[0]);
+  assert.equal(parseUiSettings(JSON.stringify({ rounding: "rounded" })).rounding, 10);
+  assert.equal(parseUiSettings(JSON.stringify({ rounding: 11 })).rounding, UI_DEFAULTS.rounding);
   assert.equal(parseUiSettings(JSON.stringify({ messageCopyFormat: "xml" })).messageCopyFormat, "markdown");
   assert.equal(parseUiSettings(JSON.stringify({ workingIndicator: "cat" })).workingIndicator, "cat");
   assert.equal(parseUiSettings(JSON.stringify({ workingIndicator: "keyboard" })).workingIndicator, "cursor");
@@ -461,10 +486,10 @@ test("setUiSettings persists and applies visual data attributes", () => {
     value: { body: { dataset, style: { setProperty: (name: string, value: string) => styles.set(name, value) } } },
   });
 
-  setUiSettings({ density: "compact", fontSize: "s", rounding: "rounded", chatWidth: "wide" });
+  setUiSettings({ density: "compact", fontSize: "s", rounding: 10, chatWidth: "wide" });
   assert.deepEqual(dataset, {
     density: "compact",
-    rounding: "rounded",
+    rounding: "10",
     chatwidth: "wide",
     technical: "true",
     dictate: "true",
@@ -473,10 +498,10 @@ test("setUiSettings persists and applies visual data attributes", () => {
     quickActions: "true",
   });
   assert.deepEqual(parseUiSettings(values.get(UI_SETTINGS_KEY) ?? null), getUiSettings());
-  assert.equal(styles.get("--corner-radius-scale"), "1.5");
-  assert.equal(styles.get("--radius-control"), "14px");
+  assert.equal(styles.get("--corner-radius-scale"), "2");
+  assert.equal(styles.get("--radius-control"), "20px");
 
-  setUiSettings({ rounding: "square" });
+  setUiSettings({ rounding: 0 });
   assert.equal(styles.get("--corner-radius-scale"), "0");
   assert.equal(styles.get("--radius-control"), "0px");
 
