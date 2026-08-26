@@ -220,6 +220,76 @@ const topAnchor = (page: Page) => page.evaluate(() => {
   return { id: "", offset: 0 };
 });
 
+test("user message actions wrap without making the timeline horizontally pannable", async () => {
+  for (const width of [390, 1280]) {
+    const lp = await openApp({ width, height: width === 390 ? 844 : 900, session: SESSIONS.rich, ready: ".msg.user .msg-actions button" });
+    const { page } = lp;
+    const lastUser = page.locator(".timeline > .msg.user").last();
+    await lastUser.scrollIntoViewIfNeeded();
+    if (width > 480) await lastUser.hover();
+    await page.waitForTimeout(150);
+
+    const geometry = await page.evaluate(() => {
+      const timeline = document.querySelector<HTMLElement>(".timeline")!;
+      const port = timeline.getBoundingClientRect();
+      const messages = Array.from(timeline.querySelectorAll<HTMLElement>(":scope > .msg.user"));
+      const rows = messages.map((message) => message.querySelector<HTMLElement>(".msg-actions")!).filter(Boolean);
+      const buttons = rows.flatMap((row) => Array.from(row.querySelectorAll<HTMLButtonElement>("button")));
+      const outside = (node: HTMLElement) => {
+        const rect = node.getBoundingClientRect();
+        return rect.left < port.left - 1 || rect.right > port.right + 1;
+      };
+      return {
+        buttonCount: buttons.length,
+        timelineOverflow: timeline.scrollWidth - timeline.clientWidth,
+        documentOverflow: document.documentElement.scrollWidth - innerWidth,
+        overflowingMessages: messages.filter(outside).length,
+        overflowingRows: rows.filter(outside).length,
+        overflowingButtons: buttons.flatMap((button) =>
+          outside(button) ? [button.getAttribute("aria-label") ?? "unnamed user action"] : []),
+        nonWrappingRows: rows.filter((row) => getComputedStyle(row).flexWrap !== "wrap").length,
+      };
+    });
+
+    assert.ok(geometry.buttonCount >= 3, `${width}px: expected user message actions`);
+    assert.ok(geometry.timelineOverflow <= 1, `${width}px: timeline pans by ${geometry.timelineOverflow}px`);
+    assert.ok(geometry.documentOverflow <= 1, `${width}px: document overflows by ${geometry.documentOverflow}px`);
+    assert.equal(geometry.overflowingMessages, 0, `${width}px: user messages leave the timeline`);
+    assert.equal(geometry.overflowingRows, 0, `${width}px: user action rows leave the timeline`);
+    assert.deepEqual(geometry.overflowingButtons, [], `${width}px: user action buttons leave the timeline`);
+    assert.equal(geometry.nonWrappingRows, 0, `${width}px: user action rows cannot wrap`);
+
+    await page.screenshot({ path: join(ARTIFACTS, `fix_round6_user_actions_${width}.png`) });
+    await closePage(lp);
+  }
+});
+
+test("Compare responses leaves Project files and opens Multi-Run", async () => {
+  const lp = await openApp({ width: 390, height: 844, session: SESSIONS.rich, ready: ".mobile-navigation-trigger" });
+  const { page } = lp;
+
+  await page.getByRole("button", { name: "Application" }).click();
+  await page.getByRole("menuitem", { name: "Project files", exact: true }).click();
+  await page.waitForSelector('.rail-fullscreen[aria-label="Project files"]', { state: "visible", timeout: 10_000 });
+
+  await page.getByRole("button", { name: "Application" }).click();
+  await page.getByRole("menuitem", { name: "Compare responses", exact: true }).click();
+  await page.waitForSelector(".multirun-prompt", { state: "visible", timeout: 10_000 });
+  await page.waitForTimeout(250);
+
+  const state = await page.evaluate(() => ({
+    multiRun: document.querySelector(".app.view-multirun .multirun-prompt") !== null,
+    filesOpen: document.querySelector('.rail-fullscreen[aria-label="Project files"]') !== null,
+    title: document.querySelector(".view-title")?.textContent?.trim() ?? "",
+  }));
+  assert.equal(state.multiRun, true, "Compare responses did not remain on Multi-Run");
+  assert.equal(state.filesOpen, false, "Project files stayed open over Multi-Run");
+  assert.match(state.title, /Multi-Run/i, `unexpected destination title "${state.title}"`);
+
+  await page.screenshot({ path: join(ARTIFACTS, "fix_round6_compare_responses_390.png") });
+  await closePage(lp);
+});
+
 test("mobile response actions wrap inside the timeline and remain operable", async () => {
   for (const width of [390, 320]) {
     const lp = await openApp({ width, height: 844, session: SESSIONS.rich, ready: ".agent-reply-actions button" });
@@ -274,7 +344,9 @@ test("mobile response actions wrap inside the timeline and remain operable", asy
     assert.equal(geometry.unwrappedRows, 0, `${width}px: response actions still share the metadata row`);
     assert.equal(geometry.inactive, 0, `${width}px: response actions are not touch-operable`);
 
-    await page.screenshot({ path: join(ARTIFACTS, `fix_timeline_overflow_${width}.png`) });
+    if (width === 390) {
+      await page.screenshot({ path: join(ARTIFACTS, "fix_round6_assistant_actions_390.png") });
+    }
 
     if (width === 390) {
       const action = page.getByRole("button", { name: "Start new multi-run from this answer" }).last();

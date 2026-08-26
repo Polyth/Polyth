@@ -1198,13 +1198,13 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
    at narrow widths (§2.2). Bottom padding is the ≥32px (target 40px) tail
    clearance between the last surface and the composer boundary. */
 .timeline {
-  flex: 1; min-height: 0; overflow-y: auto;
+  flex: 1; min-height: 0; overflow-x: hidden; overflow-y: auto;
   padding-block: var(--gutter) 40px;
   padding-inline: max(var(--gutter), calc((100% - 768px) / 2));
   display: flex; flex-direction: column; gap: 16px;
 }
 
-.msg { display: flex; flex-direction: column; max-width: 100%; }
+.msg { display: flex; flex-direction: column; min-inline-size: 0; max-width: 100%; }
 /* flex alignment is writing-mode aware: user turns sit at the logical end. */
 .msg.user { align-items: flex-end; }
 .bubble {
@@ -4251,6 +4251,26 @@ body[data-chatwidth="wide"] .bubble, body[data-chatwidth="wide"] .reasoning, bod
   outline: 2px solid var(--accent-line);
   outline-offset: 2px;
 }
+.msg.user .msg-meta {
+  max-inline-size: 100%;
+  flex-wrap: wrap;
+}
+.msg.user .msg-actions {
+  max-inline-size: 100%;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+/* Right-aligned action tooltips grow into the message instead of extending
+   the timeline's scrollable inline area. Native title text remains available
+   when the custom tooltip is clipped by a very narrow viewport. */
+.msg.user .msg-action-btn::after {
+  inset-inline-start: auto;
+  inset-inline-end: 0;
+  max-width: min(220px, calc(100vw - 32px));
+  transform: translateY(3px);
+}
+.msg.user .msg-action-btn:hover::after,
+.msg.user .msg-action-btn:focus-visible::after { transform: none; }
 .msg.user .msg-bookmark-action[aria-pressed="true"] { background: transparent; }
 /* Persistent named phone entry (≥44px) + its ≥44px menu rows. Coarse tablet
    pointers keep the inline action set visible with enlarged targets. */
