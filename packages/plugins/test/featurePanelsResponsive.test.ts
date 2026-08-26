@@ -6,42 +6,33 @@ const source = (path: string) => readFile(new URL(path, import.meta.url), "utf8"
 
 test("slot-backed feature panels share the responsive surface stylesheet", async () => {
   const [
-    main,
     app,
     styles,
-    workspaceSurfaces,
-    railSurfaces,
+    goals,
+    files,
+    git,
+    terminal,
+    browser,
     settingsView,
     builtinWidgets,
   ] = await Promise.all([
-    source("../src/main.tsx"),
-    source("../src/App.tsx"),
-    source("../src/featurePanels.css"),
-    source("../src/components/workspace/builtinSurfaces.tsx"),
-    source("../src/components/railSurfaces.tsx"),
-    source("../src/components/SettingsView.tsx"),
-    source("../src/widgets/builtinWidgets.tsx"),
+    source("../../../apps/web/src/App.tsx"),
+    source("../widgets/styles.css"),
+    source("../../goals/widgets/index.tsx"),
+    source("../../files/widgets/index.tsx"),
+    source("../../git/widgets/index.tsx"),
+    source("../../terminal/widgets/index.tsx"),
+    source("../../browser/widgets/index.tsx"),
+    source("../../../apps/web/src/components/SettingsView.tsx"),
+    source("../../../apps/web/src/widgets/builtinWidgets.tsx"),
   ]);
 
-  assert.match(main, /import "\.\/featurePanels\.css";/);
+  assert.match(await source("../widgets/index.tsx"), /import "\.\/styles\.css";/);
   assert.doesNotMatch(app, /registerSlot\(|registerWorkspaceSurface\(|registerSurface\(/);
-
-  for (const panel of [
-    "GoalsView",
-    "MultiRunView",
-    "WorkflowView",
-    "FusionView",
-    "WalkthroughView",
-    "ScheduleView",
-    "GithubView",
-  ]) {
-    assert.match(workspaceSurfaces, new RegExp(`component: ${panel}`), `${panel} remains registry-backed`);
-  }
-  for (const panel of ["EditorView", "GitView", "TerminalView", "PreviewView", "KnowledgePanel"]) {
-    assert.match(railSurfaces, new RegExp(`component: ${panel}`), `${panel} remains surface-registry-backed`);
-  }
+  assert.match(goals, /host\.workspaceSurfaces\.register/);
+  for (const entry of [files, git, terminal, browser]) assert.match(entry, /host\.surfaces\.register/);
   assert.match(settingsView, /listSlots\("settings\.pages"\)/);
-  assert.match(builtinWidgets, /registerSlot\(\s*"widget\.catalog"/s);
+  assert.doesNotMatch(builtinWidgets, /GoalsView|GitView|TerminalView|GithubView/);
 
   assert.match(styles, /container:\s*feature-panel\s*\/\s*inline-size/);
   assert.match(styles, /@container feature-panel \(max-width: 700px\)/);
@@ -72,7 +63,7 @@ test("slot-backed feature panels share the responsive surface stylesheet", async
 });
 
 test("feature forms stack and dense lists scroll at narrow panel widths", async () => {
-  const styles = await source("../src/featurePanels.css");
+  const styles = await source("../widgets/styles.css");
   const narrow = styles.slice(
     styles.indexOf("@container feature-panel (max-width: 700px)"),
     styles.indexOf("@media (max-width: 700px), (pointer: coarse)"),

@@ -258,7 +258,7 @@ test("every redesigned overlay uses the one sheet system", async () => {
   assert.ok(sheet.includes("SHEET_DISMISS_DISTANCE"), "swipe-to-dismiss is part of the shared model");
 
   for (const [name, rel] of [
-    ["model picker", "../src/components/ModelPicker.tsx"],
+    ["model picker", "../../../packages/models/widgets/ModelPicker.tsx"],
     ["starter picker", "../src/components/mobile/StarterPicker.tsx"],
     ["project/branch bar", "../src/components/mobile/SessionContextBar.tsx"],
     ["agent/mode picker", "../src/components/Picker.tsx"],
@@ -280,7 +280,7 @@ test("a sheet opens on pointer-down and survives the keyboard dismissal (§22)",
   assert.ok(trigger.includes("activate();"), "keyboard activation still arrives as a click");
 
   for (const [rel, name] of [
-    ["../src/components/ModelPicker.tsx", "model"],
+    ["../../../packages/models/widgets/ModelPicker.tsx", "model"],
     ["../src/components/Picker.tsx", "mode/thinking"],
     ["../src/components/mobile/SessionContextBar.tsx", "project/branch"],
     ["../src/components/Header.tsx", "session menu"],
@@ -485,7 +485,7 @@ test("haptics are opt-in, bounded, and respect reduced motion", async () => {
   assert.ok(haptics.includes('matchMedia("(prefers-reduced-motion: reduce)")'), "reduced motion silences it");
   assert.ok(haptics.includes("typeof navigator.vibrate !== \"function\""), "unsupported platforms are a no-op");
   for (const rel of [
-    "../src/components/ModelPicker.tsx",
+    "../../../packages/models/widgets/ModelPicker.tsx",
     "../src/components/Picker.tsx",
     "../src/components/workspace/builtinSurfaces.tsx",
   ]) {

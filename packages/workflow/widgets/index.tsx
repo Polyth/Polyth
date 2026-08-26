@@ -27,6 +27,16 @@ export const WORKFLOW_WIDGET_PLUGIN: WidgetPlugin = {
         ? context.consumeWorkflowDraft as () => void
         : () => {},
     }),
+  }, {
+    id: "workflow.active-run",
+    title: "Active workflow",
+    description: "Show active workflow progress in the session header.",
+    kind: "mini-widget",
+    defaultSlot: "session.header.actions",
+    supportedSlots: ["session.header.actions", "app.header.actions"],
+    defaultVisible: true,
+    order: 45,
+    render: () => null,
   }],
 };
 

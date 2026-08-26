@@ -95,6 +95,15 @@ const { default: CommandPalette } = await import("../src/components/CommandPalet
 const { default: SessionSearch } = await import("../src/components/SessionSearch.tsx");
 const { default: ModelsPage } = await import("../../../packages/models/widgets/ModelsPage.tsx");
 installBuiltinMiniWidgets();
+const { webPackageHost } = await import("../src/packages/webHost.ts");
+for (const entry of [
+  (await import("../../../packages/files/widgets/index.tsx")).default,
+  (await import("../../../packages/terminal/widgets/index.tsx")).default,
+  (await import("../../../packages/browser/widgets/index.tsx")).default,
+  (await import("../../../packages/goals/widgets/index.tsx")).default,
+]) {
+  entry(webPackageHost)();
+}
 
 async function mounted(component: ReactNode) {
   const container = document.createElement("div");

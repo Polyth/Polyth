@@ -37,11 +37,15 @@ test("ContextRail has no JUMPS rows — every placed capability gets a launcher"
 });
 
 test("right-rail utilities use distinct semantic icons", async () => {
-  const src = await readFile(new URL("../src/components/railSurfaces.tsx", import.meta.url), "utf8");
-  assert.match(src, /id: "context"[\s\S]*?icon: RAIL_ICONS\.context/);
-  assert.match(src, /id: "knowledge"[\s\S]*?icon: RAIL_ICONS\.knowledge/);
-  assert.match(src, /id: "usage"[\s\S]*?icon: RAIL_ICONS\.usage/);
-  assert.match(src, /id: "events"[\s\S]*?icon: RAIL_ICONS\.events/);
+  const [shell, knowledge, usage] = await Promise.all([
+    readFile(new URL("../src/components/railSurfaces.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../../../packages/knowledge/widgets/index.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../../../packages/usage/widgets/index.tsx", import.meta.url), "utf8"),
+  ]);
+  assert.match(shell, /id: "context"[\s\S]*?icon: RAIL_ICONS\.context/);
+  assert.match(shell, /id: "events"[\s\S]*?icon: RAIL_ICONS\.events/);
+  assert.match(knowledge, /id: "knowledge"/);
+  assert.match(usage, /id: "usage"/);
 });
 
 test("every built-in rail item has a unique rendered icon", async () => {

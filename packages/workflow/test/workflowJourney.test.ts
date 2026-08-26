@@ -196,13 +196,13 @@ test("long workflow timelines follow the node that currently needs attention", (
 
 test("workflow journey surfaces expose task launch, chat progress, HITL, stop, and retry", async () => {
   const [launcher, composer, timeline, workflow, miniWidgets, status, styles] = await Promise.all([
-    source("../src/components/WorkflowLauncher.tsx"),
-    source("../src/components/Composer.tsx"),
-    source("../src/components/Timeline.tsx"),
-    source("../src/components/WorkflowView.tsx"),
-    source("../src/widgets/builtinMiniWidgets.tsx"),
-    source("../src/components/StatusBar.tsx"),
-    source("../src/styles.css"),
+    source("../widgets/WorkflowLauncher.tsx"),
+    source("../../../apps/web/src/components/Composer.tsx"),
+    source("../../../apps/web/src/components/Timeline.tsx"),
+    source("../widgets/WorkflowView.tsx"),
+    source("../widgets/index.tsx"),
+    source("../../../apps/web/src/components/StatusBar.tsx"),
+    source("../../../apps/web/src/styles.css"),
   ]);
   assert.match(launcher, /tr\("workflowlauncher\.chooseSavedPipeline"\)/);
   assert.match(launcher, /api\.runWorkflow/);
@@ -228,7 +228,7 @@ test("workflow journey surfaces expose task launch, chat progress, HITL, stop, a
   assert.match(composer, /activeSessionId === target\) requestComposerReplace\(""\)/);
   assert.match(timeline, /<WorkflowTimelineCard run=\{model\.workflowRun\}/);
   assert.match(timeline, /model\.messages\.length === 0 && !model\.workflowRun/);
-  assert.match(await source("../src/components/WorkflowTimelineCard.tsx"), /handOffWorkflowLaunch/);
+  assert.match(await source("../widgets/WorkflowTimelineCard.tsx"), /handOffWorkflowLaunch/);
   assert.match(workflow, /tr\("workflowview\.reviewAndRespond"\)/);
   assert.match(workflow, /tr\("workflowview\.retryFull"\)/);
   assert.match(workflow, /tr\("workflowview\.stopRun"\)/);

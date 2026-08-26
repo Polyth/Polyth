@@ -6,9 +6,9 @@ import { resolve } from "node:path";
 const read = (path: string) => readFileSync(resolve(import.meta.dirname, path), "utf8");
 
 test("developer surfaces keep narrow layouts and monospace overflow contained", () => {
-  const editor = read("../src/components/EditorView.tsx");
-  const terminal = read("../src/components/TerminalView.tsx");
-  const refinement = read("../src/developerSurfaces.css");
+  const editor = read("../../files/widgets/EditorView.tsx");
+  const terminal = read("../../terminal/widgets/TerminalView.tsx");
+  const refinement = read("../../files/widgets/styles.css");
 
   assert.match(editor, /mobileStage/);
   assert.match(editor, /className="editor-mobile-tabs"/);

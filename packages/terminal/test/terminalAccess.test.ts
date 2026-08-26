@@ -24,6 +24,9 @@ const { listCommands, runCommand } = await import("../../../apps/web/src/command
 const { installShell } = await import("../../../apps/web/src/shell.ts");
 const { getState, closeWorkspacePane } = await import("../../../apps/web/src/store.ts");
 const { registerSurface } = await import("../../../apps/web/src/surfaces.ts");
+const { webPackageHost } = await import("../../../apps/web/src/packages/webHost.ts");
+const { default: terminalEntry } = await import("../widgets/index.tsx");
+terminalEntry(webPackageHost)();
 
 const unregisterTerminal = registerSurface({
   id: "terminal",

@@ -25,11 +25,11 @@ test("drag-reorder surfaces expose explicit keyboard and touch controls", async 
 
 test("every remaining double-click shortcut has a discoverable mobile alternative", async () => {
   const [terminal, sessions, sidebar, folder, ssh] = await Promise.all([
-    read("../src/components/TerminalView.tsx"),
+    read("../../../packages/terminal/widgets/TerminalView.tsx"),
     read("../src/components/sidebar/SessionList.tsx"),
     read("../src/components/Sidebar.tsx"),
     read("../src/components/ProjectFolderDialog.tsx"),
-    read("../src/components/ssh/SshProjectSource.tsx"),
+    read("../../../packages/ssh/widgets/ssh/SshProjectSource.tsx"),
   ]);
 
   assert.match(terminal, /onDoubleClick=\{\(\) => startRename\(t\)\}/);
@@ -72,7 +72,7 @@ test("P1 mobile refinements remain wired to their visible surfaces", async () =>
     read("../src/components/sidebar/SessionList.tsx"),
     read("../src/components/Sidebar.tsx"),
     read("../src/components/SettingsView.tsx"),
-    read("../src/components/ModelPicker.tsx"),
+    read("../../../packages/models/widgets/ModelPicker.tsx"),
     read("../src/components/ProjectFolderDialog.tsx"),
     read("../src/components/settings/parts.tsx"),
     read("../src/haptics.ts"),

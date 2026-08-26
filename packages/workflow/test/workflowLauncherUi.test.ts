@@ -31,6 +31,8 @@ const { installBuiltinMiniWidgets } =
 const { WORKFLOW_WIDGET_PLUGIN } = await import("../widgets/index.tsx");
 const { default: Composer } = await import("../../../apps/web/src/components/Composer.tsx");
 const { default: WorkflowTimelineCard } = await import("../widgets/WorkflowTimelineCard.tsx");
+const { registerWidgetPlugin } = await import("../../../apps/web/src/widgets/catalog.ts");
+registerWidgetPlugin(WORKFLOW_WIDGET_PLUGIN);
 
 const workflow: WorkflowDto = {
   id: "release",

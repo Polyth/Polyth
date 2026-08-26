@@ -40,7 +40,7 @@ function providerLogoClassNames(): string[] {
 }
 
 const component = build({
-  entryPoints: [resolve(import.meta.dirname, "../src/components/ProviderLogo.tsx")],
+  entryPoints: [resolve(import.meta.dirname, "../../../packages/models/widgets/ProviderLogo.tsx")],
   bundle: true,
   platform: "node",
   format: "esm",
@@ -136,15 +136,15 @@ test("unknown providers retain a short theme-colored fallback", async () => {
 });
 
 test("provider surfaces use ProviderLogo without brand palette rules", () => {
-  const logo = source("../src/components/ProviderLogo.tsx");
+  const logo = source("../../../packages/models/widgets/ProviderLogo.tsx");
   const css = source("../src/styles.css");
-  const models = source("../src/components/settings/ModelsPage.tsx");
-  const picker = source("../src/components/ModelPicker.tsx");
-  const usage = source("../src/usage/UsageDashboard.tsx");
-  const quota = source("../src/usage/quotaUi.tsx");
-  const projectUsage = source("../src/usage/projectUi.tsx");
-  const usageWidget = source("../src/widgets/usagePlugin.tsx");
-  const fusion = source("../src/components/FusionView.tsx");
+  const models = source("../../../packages/models/widgets/ModelsPage.tsx");
+  const picker = source("../../../packages/models/widgets/ModelPicker.tsx");
+  const usage = source("../../../packages/usage/widgets/usage/UsageDashboard.tsx");
+  const quota = source("../../../packages/usage/widgets/usage/quotaUi.tsx");
+  const projectUsage = source("../../../packages/usage/widgets/usage/projectUi.tsx");
+  const usageWidget = source("../../../packages/usage/widgets/usagePlugin.tsx");
+  const fusion = source("../../../packages/fusion/widgets/FusionView.tsx");
 
   assert.doesNotMatch(logo, /#[\da-f]{3,8}\b/i);
   assert.doesNotMatch(

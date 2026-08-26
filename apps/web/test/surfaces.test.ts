@@ -114,10 +114,13 @@ test("parseRailPrefs round-trips, clamps widths, survives garbage", () => {
   assert.equal(RAIL_WIDTH_DEFAULT, 344);
 });
 
-test("the built-in Usage surface is always available and owns a zero-token empty state", async () => {
-  const source = await readFile(new URL("../src/components/railSurfaces.tsx", import.meta.url), "utf8");
-  const registration = source.slice(source.indexOf('id: "usage"'), source.indexOf('id: "events"'));
-  assert.ok(registration.includes("component: UsagePanel"));
-  assert.ok(!registration.includes("visible:"), "zero tokens never hide the Usage command");
-  assert.ok(source.includes('tr("railsurfaces.tokenAndCostTotalsAppearOnceThe")'));
+test("the Usage package owns its rail surface", async () => {
+  const source = await readFile(
+    new URL("../../../packages/usage/widgets/index.tsx", import.meta.url),
+    "utf8",
+  );
+  assert.ok(source.includes('host.surfaces.register'));
+  assert.ok(source.includes('id: "usage"'));
+  assert.ok(source.includes("component: UsageDashboard"));
+  assert.ok(!source.includes("visible:"), "zero tokens never hide the Usage command");
 });

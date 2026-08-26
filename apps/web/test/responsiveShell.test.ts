@@ -110,7 +110,7 @@ test("compact sidebar is a drawer, never display:none with no way back", async (
 
 test("header owns the drawer trigger and pane-aware compact view picker", async () => {
   const header = await read("../src/components/Header.tsx");
-  const actions = await read("../src/widgets/builtinMiniWidgets.tsx");
+  const actions = await read("../../../packages/permissions/widgets/index.tsx");
   assert.ok(header.includes('aria-controls="polyth-session-drawer"'), "drawer trigger targets the drawer");
   assert.ok(header.includes('tr("header.openProjectsAndSessions")'), "drawer trigger accessible name");
   assert.ok(header.includes('tr("header.changeWorkspaceViewCurrentValue"'), "compact view trigger keeps the current label in its name");
@@ -126,8 +126,8 @@ test("header owns the drawer trigger and pane-aware compact view picker", async 
   assert.ok(header.includes("mobileSheet"), "compact picker uses the touch-friendly mobile sheet");
   assert.ok(!header.includes("const VIEW_GROUPS"), "no duplicate hard-coded view list");
   assert.ok(
-    actions.includes('tr("widgets.builtinminiwidgets.turnOffAutoApprove")')
-      && actions.includes('tr("widgets.builtinminiwidgets.turnOnAutoApprove")'),
+    actions.includes('"Turn off auto-approve"')
+      && actions.includes('"Turn on auto-approve"'),
     "placeable auto-approve control exposes the resulting action in its accessible name",
   );
 });
@@ -207,7 +207,7 @@ test("composer bar exposes the two-tier semantic groups without forking send", a
 test("composer active-run controls and mobile actions stay direct", async () => {
   const composer = await read("../src/components/Composer.tsx");
   const timeline = await read("../src/components/Timeline.tsx");
-  const goal = await read("../src/components/GoalStrip.tsx");
+  const goal = await read("../../../packages/goals/widgets/GoalStrip.tsx");
   const css = await read("../src/styles.css");
   assert.ok(composer.includes("<Icon.sendClock />"), "queue mode uses the clock-send icon");
   assert.ok(composer.includes('tr("composer.sendNow")'), "queue options expose immediate delivery");
@@ -220,11 +220,12 @@ test("composer active-run controls and mobile actions stay direct", async () => 
 
 test("Focus uses compact mobile composer controls without editor chrome", async () => {
   const composer = await read("../src/components/Composer.tsx");
-  const actions = await read("../src/widgets/builtinMiniWidgets.tsx");
+  const permissions = await read("../../../packages/permissions/widgets/index.tsx");
+  const goals = await read("../../../packages/goals/widgets/index.tsx");
   assert.ok(composer.includes("simpleMode && !widgetMode"), "light controls are shared by fresh and existing chats");
   assert.ok(composer.includes('className="composer-extensions composer-mobile-extensions"'), "Focus exposes slotted mobile actions");
-  assert.ok(actions.includes('"permissions.auto-approve-composer-action"'), "auto-approve is a placeable composer action");
-  assert.ok(actions.includes('"session.goal-composer-action"'), "goals are a placeable composer action");
+  assert.ok(permissions.includes('"permissions.auto-approve-composer-action"'), "auto-approve is a placeable composer action");
+  assert.ok(goals.includes('"session.goal-composer-action"'), "goals are a placeable composer action");
   // UX-MOBILE-01 §17/§19: phones expose ONE `+` (the Add menu owns Upload);
   // wider layouts keep the direct upload chip beside it.
   assert.ok(composer.includes('aria-label={tr("composer.addFiles")}'), "wider layouts keep a direct upload control");
@@ -233,8 +234,8 @@ test("Focus uses compact mobile composer controls without editor chrome", async 
     "the phone add menu is the single plus control",
   );
   assert.ok(!composer.includes("<Icon.focus />"), "Focus removes the focused-editor header action");
-  assert.ok(actions.includes("<Icon.shield />"), "Focus exposes the auto-approve shield");
-  assert.ok(actions.includes("<Icon.target />"), "Focus exposes the goals target");
+  assert.ok(permissions.includes("<ShieldIcon />"), "Focus exposes the auto-approve shield");
+  assert.ok(goals.includes("<TargetIcon />"), "Focus exposes the goals target");
   assert.ok(composer.includes("<Icon.send />"), "Focus uses a paper-plane send icon");
   const css = await read("../src/styles.css");
   assert.ok(css.includes(".composer-focus-light .chip-k { display: none; }"), "technical picker keys are hidden");

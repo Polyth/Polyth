@@ -205,7 +205,7 @@ test("390px audited actions expose 44px targets and scrolling question tabs", { 
   assert.ok(page);
   const [css, developerCss] = await Promise.all([
     read("../src/styles.css"),
-    read("../src/developerSurfaces.css"),
+    read("../../../packages/files/widgets/styles.css"),
   ]);
   const tabs = Array.from({ length: 8 }, (_, index) =>
     `<button class="question-tab">${index + 1}</button>`).join("");

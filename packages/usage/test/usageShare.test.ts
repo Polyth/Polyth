@@ -69,7 +69,7 @@ test("provider usage distribution clamps invalid counters before drawing shares"
 });
 
 test("Usage settings keeps the Polyth shell and offers rich dashboard views", async () => {
-  const source = await readFile(new URL("../src/usage/UsageDashboard.tsx", import.meta.url), "utf8");
+  const source = await readFile(new URL("../widgets/usage/UsageDashboard.tsx", import.meta.url), "utf8");
   const quota = await readFile(new URL("../src/usage/quotaUi.tsx", import.meta.url), "utf8");
   const api = await readFile(new URL("../src/api.ts", import.meta.url), "utf8");
   const registration = await readFile(new URL("../src/packages/usage.ts", import.meta.url), "utf8");

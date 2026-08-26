@@ -10,7 +10,7 @@ const CHROME = [
   "/usr/bin/google-chrome-stable",
   "/usr/bin/chromium",
 ].find((candidate): candidate is string => Boolean(candidate && existsSync(candidate)));
-const css = readFileSync(new URL("../src/styles.css", import.meta.url), "utf8");
+const css = readFileSync(new URL("../../../apps/web/src/styles.css", import.meta.url), "utf8");
 let browser: Browser | null = null;
 let page: Page | null = null;
 

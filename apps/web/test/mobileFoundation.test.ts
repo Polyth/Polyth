@@ -147,7 +147,7 @@ test("phone and coarse-pointer standalone controls share the 44px hit-box floor"
 test("phone touch targets and bottom sheets retain audit geometry", async () => {
   const [css, developerCss] = await Promise.all([
     read("../src/styles.css"),
-    read("../src/developerSurfaces.css"),
+    read("../../../packages/files/widgets/styles.css"),
   ]);
   const auditPhoneStart = css.indexOf(
     "@media (max-width: 480px), (max-height: 480px) and (pointer: coarse) {\n  .question-copy-btn,",

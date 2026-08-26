@@ -95,8 +95,11 @@ test("all mobile chat composers expose project and worktree targets", () => {
   const surface = read("../src/components/workspace/builtinSurfaces.tsx");
   const contextBar = read("../src/components/mobile/SessionContextBar.tsx");
   const composer = read("../src/components/Composer.tsx");
-  const actions = read("../src/widgets/builtinMiniWidgets.tsx");
-  const workflowLauncher = read("../src/components/WorkflowLauncher.tsx");
+  const actions = [
+    read("../../../packages/permissions/widgets/index.tsx"),
+    read("../../../packages/goals/widgets/index.tsx"),
+  ].join("\n");
+  const workflowLauncher = read("../../../packages/workflow/widgets/WorkflowLauncher.tsx");
   const header = read("../src/components/Header.tsx");
   const css = read("../src/styles.css");
 
@@ -136,10 +139,10 @@ test("all mobile chat composers expose project and worktree targets", () => {
 });
 
 test("source-control surfaces keep responsive and accessible audit contracts", () => {
-  const git = read("../src/components/GitView.tsx");
-  const github = read("../src/components/GithubView.tsx");
-  const pullRequest = read("../src/components/PullRequestView.tsx");
-  const pending = read("../src/components/PendingChangesBar.tsx");
+  const git = read("../../../packages/git/widgets/GitView.tsx");
+  const github = read("../../../packages/github/widgets/GithubView.tsx");
+  const pullRequest = read("../../../packages/github/widgets/PullRequestView.tsx");
+  const pending = read("../../../packages/git/widgets/PendingChangesBar.tsx");
   const css = read("../src/styles.css");
 
   assert.match(css, /container:\s*source-surface\s*\/\s*inline-size/);
