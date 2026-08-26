@@ -1,3 +1,4 @@
+import "./styles.css";
 import { defineWebPackage } from "@polyth/web-sdk";
 import { UsageDashboard } from "./usage/UsageDashboard.tsx";
 import { USAGE_WIDGET_PLUGIN } from "./usagePlugin.tsx";

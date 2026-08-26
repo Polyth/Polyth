@@ -1,0 +1,213 @@
+/* Package-owned home-assistant web styles. */
+.ha-empty {
+margin: auto; padding: 18px; color: var(--muted); font-size: 11px; text-align: center;
+}
+.ha-connection {
+min-height: 100%; display: flex; flex-direction: column; gap: 10px; padding: 13px;
+}
+.ha-connection > code {
+overflow: hidden; color: var(--muted); font-size: 9px; text-overflow: ellipsis; white-space: nowrap;
+}
+.ha-connection > button,
+.ha-entity > button {
+align-self: flex-start; margin-top: auto; font-size: 9.5px;
+}
+.ha-status {
+display: flex; align-items: center; gap: 9px;
+}
+.ha-status > i,
+.ha-mini > i {
+flex: none; width: 9px; height: 9px; border-radius: 50%; background: var(--faint); box-shadow: 0 0 0 3px color-mix(in srgb, var(--faint) 15%, transparent);
+}
+.ha-status-connected > i {
+background: var(--green); box-shadow: 0 0 0 3px color-mix(in srgb, var(--green) 16%, transparent);
+}
+.ha-status-unavailable > i {
+background: var(--red); box-shadow: 0 0 0 3px color-mix(in srgb, var(--red) 15%, transparent);
+}
+.ha-status > div {
+min-width: 0; display: flex; flex-direction: column;
+}
+.ha-status strong {
+font-size: 12px;
+}
+.ha-status span {
+overflow: hidden; color: var(--muted); font-size: 9.5px; text-overflow: ellipsis; white-space: nowrap;
+}
+.ha-entity {
+min-height: 100%; display: flex; flex-direction: column; gap: 10px; padding: 12px;
+}
+.ha-entity-primary {
+display: flex; flex-direction: column; gap: 2px; padding: 10px; border: 1px solid var(--border-soft); border-radius: calc(10px * var(--corner-radius-scale)); background: var(--sunken);
+}
+.ha-entity-primary > span {
+color: var(--muted); font-size: 9.5px;
+}
+.ha-entity-primary > strong {
+font-size: 20px;
+}
+.ha-entity-primary > code {
+color: var(--faint); font-size: 8.5px;
+}
+.ha-entity dl {
+display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 5px; margin: 0;
+}
+.ha-entity dl > div {
+min-width: 0; padding: 6px; border-bottom: 1px solid var(--border-soft);
+}
+.ha-entity dt {
+overflow: hidden; color: var(--muted); font-size: 8.5px; text-overflow: ellipsis; white-space: nowrap;
+}
+.ha-entity dd {
+overflow: hidden; margin: 2px 0 0; font-size: 10px; text-overflow: ellipsis; white-space: nowrap;
+}
+.ha-light {
+min-height: 100%; padding: 9px;
+}
+.ha-light > button {
+width: 100%; height: 100%; min-height: 85px; display: flex; flex-direction: column; align-items: flex-start; justify-content: center; gap: 3px; padding: 12px; border-color: var(--border-soft); background: var(--sunken);
+}
+.ha-light > button > span {
+color: var(--faint); font-size: 22px;
+}
+.ha-light.is-on > button {
+border-color: color-mix(in srgb, var(--amber) 50%, var(--border)); background: var(--amber-wash);
+}
+.ha-light.is-on > button > span {
+color: var(--amber-on-wash); text-shadow: 0 0 10px color-mix(in srgb, var(--amber) 50%, transparent);
+}
+.ha-light strong {
+font-size: 11.5px;
+}
+.ha-light small {
+color: var(--muted); font-size: 9px;
+}
+.ha-climate {
+min-height: 100%; display: flex; flex-direction: column; gap: 9px; padding: 11px;
+}
+.ha-climate > section {
+display: flex; align-items: center; gap: 10px; padding: 10px; border: 1px solid var(--border-soft); border-radius: calc(10px * var(--corner-radius-scale)); background: var(--sunken);
+}
+.ha-climate > section > div:first-child {
+min-width: 0; display: flex; flex: 1; flex-direction: column;
+}
+.ha-climate > section span {
+color: var(--muted); font-size: 9px;
+}
+.ha-climate > section strong {
+font-size: 19px;
+}
+.ha-temperature {
+display: flex; align-items: center; gap: 5px;
+}
+.ha-temperature button {
+width: 25px; height: 25px; padding: 0;
+}
+.ha-temperature > span {
+display: flex; flex-direction: column; align-items: center;
+}
+.ha-temperature b {
+color: var(--text); font-size: 11px;
+}
+.ha-sensors {
+display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px;
+}
+.ha-sensors > div {
+min-width: 0; display: flex; flex-direction: column; padding: 8px; border: 1px solid var(--border-soft); border-radius: calc(8px * var(--corner-radius-scale));
+}
+.ha-sensors span {
+overflow: hidden; color: var(--muted); font-size: 8.5px; text-overflow: ellipsis; white-space: nowrap;
+}
+.ha-sensors strong {
+margin-top: 2px; font-size: 12px;
+}
+.ha-error,
+.ha-settings-message {
+margin: 0; color: var(--red); font-size: 9px;
+}
+.ha-loading {
+color: var(--muted); font-size: 9px;
+}
+.ha-settings {
+display: flex; flex-direction: column; gap: 8px;
+}
+.ha-settings > label {
+display: flex; flex-direction: column; gap: 3px; color: var(--muted); font-size: 9px;
+}
+.ha-settings > label input {
+width: 100%; min-width: 0;
+}
+.ha-settings > small {
+color: var(--faint); font-size: 8.5px; line-height: 1.4;
+}
+.ha-settings > button {
+align-self: flex-start;
+}
+.placed-mini-widget:has(.ha-mini),
+.placed-mini-widget:has(.ha-mini-light) {
+display: inline-flex;
+}
+.ha-mini i {
+width: 7px; height: 7px;
+}
+.ha-mini-light.is-on {
+border-color: color-mix(in srgb, var(--amber) 48%, var(--border)); color: var(--amber-on-wash); background: var(--amber-wash);
+}
+:is(.empty-state, .set-empty, .rail-empty, .ha-empty, .usage-card-empty, .workflow-list-empty) {
+width: min(100%, 430px);
+  min-width: 0;
+  margin: auto;
+  padding: clamp(20px, 7cqi, 48px) clamp(16px, 6cqi, 28px);
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-card);
+  background:
+    radial-gradient(circle at 50% 0, var(--accent-wash), transparent 62%),
+    color-mix(in srgb, var(--sunken) 88%, transparent);
+  color: var(--muted);
+  text-align: center;
+}
+.settings-pane-body :is(
+  .set-row,
+  .set-row-text,
+  .set-row-control,
+  .set-add-form,
+  .mcp-form,
+  .mcp-form-row,
+  .plugin-library,
+  .provider-card,
+  .secure-safe-form,
+  .ha-settings
+) {
+min-width: 0;
+}
+:is(.ha-connection, .ha-entity, .ha-light, .ha-climate, .ha-settings) {
+min-width: 0;
+  max-width: 100%;
+}
+:is(.ha-connection, .ha-entity) > code,
+.ha-settings-message,
+.ha-error {
+overflow-wrap: anywhere;
+}
+@container feature-panel (max-width: 700px) {
+.ha-settings > button {
+width: 100%; align-self: stretch;
+}
+
+:is(.ha-connection, .ha-entity) > button,
+.ha-temperature button {
+min-width: var(--tap); min-height: var(--tap);
+}
+
+.ha-climate > section {
+align-items: stretch; flex-direction: column;
+}
+
+.ha-temperature {
+justify-content: space-between;
+}
+
+.ha-sensors {
+grid-template-columns: minmax(0, 1fr);
+}
+}

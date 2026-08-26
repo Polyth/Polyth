@@ -1,0 +1,1363 @@
+/* Package-owned github web styles. */
+.pr-conflict-agent-area > .knowledge-notice {
+grid-column: 1 / -1; margin: 0;
+}
+.github-page .small-btn.icon-only,
+.pr-surface .small-btn.icon-only {
+width: 44px; min-width: 44px; height: 44px; padding: 0;
+}
+@container source-surface (max-width: 599px) {
+.gh-card-overflow > .icon-only {
+width: var(--tap); min-width: var(--tap); padding: 0 !important;
+}
+}
+.github-head .view-title {
+margin-bottom: 3px;
+}
+.view-page:not(.github-page):not(.git-page) {
+container: feature-panel / inline-size;
+}
+.pr-surface .git-diff {
+max-height: none; min-height: 160px; margin: 10px 0 0; border-color: var(--hair-strong);
+}
+.pr-surface .git-diff-line {
+min-height: 20px; line-height: 20px;
+}
+:is(
+  .pane-tabs,
+  .term-tab-list,
+  .source-tabs,
+  .pr-tabbar,
+  .plugin-detail-tabs,
+  .widget-library-tabs,
+  .provider-chips,
+  .git-ref-chips,
+  .gh-filter-chips
+) {
+--scroll-affordance: 18px;
+  padding-inline: var(--scroll-affordance);
+  scroll-padding-inline: var(--scroll-affordance);
+  -webkit-mask-image: linear-gradient(
+    to right,
+    transparent,
+    #000 var(--scroll-affordance),
+    #000 calc(100% - var(--scroll-affordance)),
+    transparent
+  );
+  mask-image: linear-gradient(
+    to right,
+    transparent,
+    #000 var(--scroll-affordance),
+    #000 calc(100% - var(--scroll-affordance)),
+    transparent
+  );
+}
+@media (forced-colors: active) {
+:is(
+    .pane-tabs,
+    .term-tab-list,
+    .source-tabs,
+    .pr-tabbar,
+    .plugin-detail-tabs,
+    .widget-library-tabs,
+    .provider-chips,
+    .git-ref-chips,
+    .gh-filter-chips
+  ) {
+-webkit-mask-image: none;
+    mask-image: none;
+}
+}
+.pr-diff .diff-meta {
+color: var(--muted); background: var(--sunken);
+}
+.gh-repo-card {
+display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  border: 1px solid var(--hair-strong); border-radius: var(--radius-lg); background: var(--elevated); padding: 14px 16px; box-shadow: var(--inset-hi);
+}
+.gh-repo-name {
+font-weight: 700; font-size: 15px; color: var(--text); text-decoration: none;
+}
+.gh-repo-name:hover {
+color: var(--accent);
+}
+.gh-repo-meta {
+display: flex; gap: 6px; flex-shrink: 0;
+}
+.gh-list {
+display: flex; flex-direction: column; gap: 2px;
+}
+.gh-row {
+display: flex; align-items: center; gap: 10px;
+  border: 1px solid var(--hair); border-radius: var(--radius-sm); background: var(--elevated); padding: 8px 11px; font-size: 12.5px;
+}
+.gh-state {
+flex-shrink: 0; width: 52px; text-align: center; font-size: 10px; font-weight: 700; text-transform: uppercase; border-radius: calc(8px * var(--corner-radius-scale)); padding: 1px 0;
+}
+.gh-state.open {
+background: var(--green-wash); color: var(--green-on-wash);
+}
+.gh-state.closed,
+.gh-state.merged {
+background: var(--purple-wash); color: var(--purple);
+}
+.gh-state.draft {
+background: var(--surface-overlay-strong); color: var(--muted);
+}
+.gh-title {
+flex: 1; min-width: 0; color: var(--text); text-decoration: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.gh-title:hover {
+color: var(--accent);
+}
+.gh-number {
+color: var(--muted);
+}
+.gh-branch {
+color: var(--muted); font-size: 11px; max-width: 160px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.gh-meta {
+color: var(--muted); font-size: 11px; flex-shrink: 0;
+}
+.pr-surface {
+display: flex; flex-direction: column; gap: 12px;
+}
+.pr-state {
+flex: none;
+}
+.pr-tabbar {
+align-self: flex-start;
+}
+.pr-overview {
+display: flex; flex-direction: column; gap: 8px;
+}
+.pr-body {
+background: var(--elevated); border: 1px solid var(--hair-strong); border-radius: var(--radius-lg);
+  padding: 12px 14px; white-space: pre-wrap; font-size: 13px; font-family: inherit; box-shadow: var(--inset-hi);
+}
+.pr-files {
+display: flex; flex-direction: column; gap: 2px;
+}
+.pr-file-row {
+display: flex; align-items: center; gap: 10px; padding: 4px 6px; border-radius: calc(6px * var(--corner-radius-scale)); font-size: 12.5px;
+}
+.pr-file-row:hover {
+background: var(--raised);
+}
+.pr-file-path {
+flex: 1; overflow: hidden; text-overflow: ellipsis;
+}
+.check-row {
+display: flex; align-items: center; gap: 8px; padding: 4px 6px; border-radius: calc(6px * var(--corner-radius-scale)); font-size: 12.5px;
+}
+.check-row:hover {
+background: var(--raised);
+}
+.check-name {
+font-weight: 500;
+}
+.check-status {
+color: var(--muted); font-size: 11.5px;
+}
+.check-dot {
+width: 8px; height: 8px; border-radius: 50%; background: var(--muted); flex: none;
+}
+.check-dot.st-success {
+background: var(--green);
+}
+.check-dot.st-failure,
+.check-dot.st-timed_out,
+.check-dot.st-action_required {
+background: var(--red);
+}
+.check-dot.st-queued,
+.check-dot.st-in_progress {
+background: var(--amber);
+}
+.pr-comments {
+display: flex; flex-direction: column; gap: 8px;
+}
+.pr-comment {
+border: 1px solid var(--hair-strong); border-radius: var(--radius-lg); background: var(--elevated); padding: 10px 12px; display: flex; flex-direction: column; gap: 4px; box-shadow: var(--inset-hi);
+}
+.pr-comment-head {
+display: flex; align-items: center; gap: 8px; font-size: 12px;
+}
+.pr-comment-body {
+font-size: 13px; white-space: pre-wrap;
+}
+.pr-review-form {
+border: 1px dashed var(--border); border-radius: var(--radius-lg); background: var(--sunken); padding: 12px; display: flex; flex-direction: column; gap: 7px;
+}
+.pr-review-form textarea {
+width: 100%; background: var(--elevated); color: var(--text); border: 1px solid var(--border);
+  border-radius: calc(7px * var(--corner-radius-scale)); padding: 7px 9px; font-size: 13px; resize: vertical;
+}
+.pr-create-panel,
+.pr-merge-area,
+.pr-edit-form {
+border: 1px dashed var(--border); border-radius: var(--radius-lg); background: var(--sunken);
+  padding: 12px; display: flex; flex-direction: column; gap: 7px;
+}
+.pr-create-panel input,
+.pr-edit-form input {
+background: var(--elevated); color: var(--text); border: 1px solid var(--border);
+  border-radius: calc(7px * var(--corner-radius-scale)); padding: 6px 9px; font-size: 13px;
+}
+.pr-create-panel textarea,
+.pr-edit-form textarea {
+width: 100%; background: var(--elevated); color: var(--text); border: 1px solid var(--border);
+  border-radius: calc(7px * var(--corner-radius-scale)); padding: 7px 9px; font-size: 13px; resize: vertical;
+}
+.pr-merge-area select {
+background: var(--elevated); color: var(--text); border: 1px solid var(--border);
+  border-radius: calc(7px * var(--corner-radius-scale)); padding: 5px 8px; font-size: 12.5px;
+}
+.github-link-dialog {
+display: flex; flex-direction: column; gap: 10px; padding: 14px 16px; width: min(440px, calc(100vw - 32px));
+}
+.github-link-title {
+margin: 0; font-size: 14px;
+}
+.github-link-copy {
+margin: 0; font-size: 12px; color: var(--muted);
+}
+.github-link-dialog input {
+width: 100%; padding: 8px 10px; font-size: 12.5px;
+  background: var(--sunken); color: var(--text);
+  border: 1px solid var(--border); border-radius: var(--radius-sm);
+}
+.github-link-error {
+font-size: 12px; color: var(--red);
+}
+.github-link-actions {
+display: flex; justify-content: flex-end; gap: 8px;
+}
+.github-pr-summary {
+display: flex; align-items: stretch; gap: 12px; padding: 10px 12px;
+}
+.github-pr-summary > a {
+min-width: 0; flex: 1; display: flex; flex-direction: column; justify-content: center; text-decoration: none;
+}
+.github-pr-summary > a span {
+color: var(--muted); font-size: 9.5px;
+}
+.github-pr-summary > a strong {
+overflow: hidden; color: var(--text); font-size: 12px; text-overflow: ellipsis; white-space: nowrap;
+}
+.github-pr-summary-metrics {
+display: flex; align-items: stretch; gap: 6px;
+}
+.github-pr-summary-metrics > div {
+min-width: 58px; display: flex; flex-direction: column; justify-content: center; padding: 5px 8px; border-left: 1px solid var(--hair);
+}
+.github-pr-summary-metrics span {
+color: var(--muted); font-size: 9px;
+}
+.github-pr-summary-metrics strong {
+font: 650 13px var(--mono);
+}
+.github-pr-summary-metrics .positive {
+color: var(--green);
+}
+.github-pr-summary-metrics .negative {
+color: var(--red);
+}
+.github-conflict-card {
+width: min(100%, 700px); display: grid; grid-template-columns: 36px minmax(0, 1fr) auto;
+  align-items: center; gap: 12px; padding: 13px 14px;
+  border: 1px solid var(--accent-line); border-radius: var(--radius-lg);
+  background: color-mix(in srgb, var(--accent-wash) 58%, var(--elevated));
+  box-shadow: var(--inset-hi);
+}
+.github-conflict-icon {
+width: 36px; height: 36px; display: grid; place-items: center;
+  border-radius: 10px; background: var(--accent-wash); color: var(--accent);
+}
+.github-conflict-icon svg {
+width: 18px; height: 18px;
+}
+.github-conflict-copy {
+min-width: 0; display: flex; flex-direction: column; gap: 3px;
+}
+.github-conflict-copy strong {
+color: var(--text); font-size: 13px;
+}
+.github-conflict-copy > span {
+overflow: hidden; color: var(--text-dim); font-size: 12px; text-overflow: ellipsis; white-space: nowrap;
+}
+.github-conflict-copy code {
+width: fit-content; max-width: 100%; overflow: hidden; color: var(--muted);
+  font-size: 10.5px; text-overflow: ellipsis; white-space: nowrap;
+}
+.github-conflict-card > .small-btn {
+justify-self: end; white-space: nowrap;
+}
+.github-page {
+width: 100%; max-width: 1440px; margin-inline: auto;
+  padding: 20px clamp(14px, 2vw, 28px); gap: 14px;
+}
+.github-page .small-btn,
+.github-page .primary-btn,
+.pr-surface .small-btn,
+.pr-surface .primary-btn {
+min-height: 44px; padding: 0 13px; display: inline-flex; align-items: center; justify-content: center; gap: 7px;
+  font-size: 12.5px;
+}
+.github-page input,
+.pr-surface input,
+.pr-surface textarea,
+.pr-surface select {
+font-size: 14px;
+}
+.github-head {
+display: flex; align-items: center; gap: 14px; min-width: 0;
+}
+.gh-filter-chips {
+display: flex; gap: 6px; padding: 9px 0; overflow-x: auto; scrollbar-width: none;
+}
+.gh-filter-chips::-webkit-scrollbar {
+display: none;
+}
+.gh-filter-chips button {
+min-width: var(--tap); min-height: var(--tap); padding: 0 11px; border: 1px solid var(--hair-strong);
+  border-radius: 999px; background: transparent; color: var(--muted); font-size: 11.5px;
+}
+.gh-filter-chips button.active {
+border-color: var(--accent-line); background: var(--accent-wash); color: var(--accent);
+}
+.github-head {
+justify-content: space-between;
+}
+.gh-repo-card {
+min-height: 76px; padding: 13px 15px;
+}
+.gh-repo-icon {
+width: 42px; height: 42px; display: grid; place-items: center; flex: none;
+  border-radius: 12px; background: var(--surface-overlay-strong); color: var(--text);
+}
+.gh-repo-icon svg {
+width: 21px; height: 21px;
+}
+.gh-repo-copy {
+display: flex; flex: 1; min-width: 0; max-width: 100%; flex-direction: column; gap: 4px; overflow: hidden;
+}
+.gh-repo-copy .muted {
+overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px;
+}
+.gh-repo-meta {
+min-width: 0; max-width: 100%; flex-wrap: wrap; justify-content: flex-end;
+}
+.gh-default-branch {
+display: inline-flex; align-items: center; gap: 4px; max-width: 100%;
+}
+.gh-default-branch > span {
+overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.gh-list-controls {
+display: grid; grid-template-columns: auto minmax(220px, 1fr) auto; align-items: center; gap: 12px;
+}
+.gh-tabs {
+border-bottom: 0;
+}
+.gh-tabs > button {
+border: 0; border-radius: var(--radius-md);
+}
+.gh-tabs > button.active {
+background: var(--raised); box-shadow: var(--inset-hi);
+}
+.gh-search {
+width: min(100%, 520px); justify-self: center;
+}
+.gh-filter-chips {
+padding: 0;
+}
+.gh-list {
+gap: 8px;
+}
+.gh-card {
+display: flex; align-items: center; gap: 16px; padding: 13px 14px;
+  border: 1px solid var(--hair-strong); border-radius: var(--radius-lg); background: var(--elevated); box-shadow: var(--inset-hi);
+}
+.gh-card:hover {
+border-color: var(--border); background: var(--raised);
+}
+.gh-card-main {
+display: flex; flex: 1; min-width: 0; flex-direction: column; gap: 7px;
+}
+.gh-card-kicker,
+.gh-card-meta {
+display: flex; align-items: center; flex-wrap: wrap; gap: 7px; color: var(--muted); font-size: 11px;
+}
+.gh-state {
+width: auto; min-width: 50px; min-height: 20px; display: inline-grid; place-items: center; padding: 2px 7px;
+}
+.gh-card-kicker .gh-meta {
+margin-left: auto;
+}
+.gh-card-title {
+width: fit-content; max-width: 100%; padding: 0; border: 0; background: transparent;
+  color: var(--text); text-decoration: none; font: inherit; font-size: 14px; line-height: 1.35;
+  font-weight: 620; overflow-wrap: anywhere; text-align: left; cursor: pointer;
+}
+.gh-card-title:hover {
+color: var(--accent);
+}
+.gh-card-meta strong {
+color: var(--text-dim); font-weight: 560;
+}
+.gh-card .gh-branch {
+display: inline-flex; align-items: center; gap: 4px; max-width: min(48vw, 340px); overflow: hidden;
+}
+.gh-card .gh-branch > span {
+overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.gh-card-actions {
+display: flex; align-items: center; justify-content: flex-end; gap: 6px; flex-wrap: wrap; max-width: 390px;
+}
+.gh-connect-state {
+min-height: 190px; display: flex; align-items: center; gap: 18px; padding: 22px;
+  border: 1px solid var(--hair-strong); border-radius: var(--radius-lg); background: var(--elevated);
+}
+.gh-connect-icon {
+width: 54px; height: 54px; display: grid; place-items: center; flex: none; border-radius: 16px; background: var(--surface-overlay-strong);
+}
+.gh-connect-icon svg {
+width: 28px; height: 28px;
+}
+.gh-connect-state > div {
+flex: 1;
+}
+.gh-connect-state h2 {
+margin: 0 0 5px; font-size: 16px;
+}
+.gh-connect-state p {
+margin: 0 0 10px; max-width: 650px; color: var(--muted); font-size: 13px;
+}
+.gh-connect-state code {
+display: inline-block; padding: 5px 8px; border-radius: 6px; background: var(--sunken); color: var(--text-dim);
+}
+.gh-skeleton-list {
+display: flex; flex-direction: column; gap: 8px;
+}
+.gh-skeleton {
+height: 92px;
+}
+.pr-surface {
+gap: 14px; min-width: 0;
+}
+.pr-head {
+display: flex; align-items: center; gap: 14px; min-width: 0;
+}
+.pr-back {
+flex: none;
+}
+.pr-title-block {
+display: flex; flex: 1; min-width: 0; flex-direction: column; gap: 5px;
+}
+.pr-title-block > div {
+display: flex; align-items: center; gap: 7px;
+}
+.pr-title-block > a {
+overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); text-decoration: none; font-size: 15px; font-weight: 650;
+}
+.pr-title-block > a:hover {
+color: var(--accent);
+}
+.pr-title-block > .muted {
+font-size: 11.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.pr-check-pill {
+min-height: 42px; display: inline-flex; align-items: center; gap: 8px; padding: 0 12px; flex: none; border: 1px solid var(--hair-strong); border-radius: 999px; background: var(--surface-overlay);
+}
+.pr-tabbar {
+display: flex; align-items: stretch; align-self: stretch; gap: 0; min-height: 46px;
+  overflow-x: auto; border-bottom: 1px solid var(--hair-strong); scrollbar-width: none;
+}
+.pr-tabbar::-webkit-scrollbar {
+display: none;
+}
+.pr-tabbar button {
+min-width: max-content; min-height: 44px; display: inline-flex; align-items: center; gap: 7px; padding: 0 16px;
+  border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: transparent; color: var(--muted); font-size: 12.5px;
+}
+.pr-tabbar button.active {
+border-bottom-color: var(--accent); color: var(--text);
+}
+.pr-tabbar button span {
+min-width: 20px; height: 20px; display: inline-grid; place-items: center; padding: 0 5px; border-radius: 999px; background: var(--surface-overlay-strong); font-size: 10.5px;
+}
+.pr-overview {
+gap: 14px;
+}
+.pr-summary-cards,
+.check-summary-cards {
+display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px;
+}
+.pr-summary-cards > div,
+.check-summary-cards > div {
+min-height: 78px; display: flex; flex-direction: column; justify-content: center; gap: 7px; padding: 11px 13px;
+  border: 1px solid var(--hair-strong); border-radius: var(--radius-lg); background: var(--elevated);
+}
+.pr-summary-cards span,
+.check-summary-cards span {
+color: var(--muted); font-size: 11px;
+}
+.pr-summary-cards strong,
+.check-summary-cards strong {
+overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 17px; text-transform: capitalize;
+}
+.check-summary-cards .success {
+border-color: color-mix(in srgb, var(--green) 35%, var(--hair));
+}
+.check-summary-cards .failure {
+border-color: color-mix(in srgb, var(--red) 35%, var(--hair));
+}
+.check-summary-cards .pending {
+border-color: color-mix(in srgb, var(--amber) 35%, var(--hair));
+}
+.pr-overview-head {
+display: flex; align-items: center; gap: 10px;
+}
+.pr-overview-head > div {
+display: flex; flex: 1; flex-direction: column; gap: 3px;
+}
+.pr-overview-head h2 {
+margin: 0; font-size: 15px;
+}
+.pr-overview-head .muted {
+font-size: 11px;
+}
+.pr-body {
+min-height: 100px; margin: 0; padding: 16px; font-size: 13.5px; line-height: 1.55;
+}
+.pr-edit-form label,
+.pr-create-field {
+display: flex; flex-direction: column; gap: 6px; color: var(--muted); font-size: 12px; font-weight: 620;
+}
+.pr-edit-form input,
+.pr-create-panel input {
+min-height: 44px;
+}
+.pr-edit-form textarea,
+.pr-create-panel textarea {
+min-height: 120px;
+}
+.pr-merge-area {
+border-style: solid; padding: 14px;
+}
+.pr-merge-area > div:first-child {
+display: flex; flex-direction: column; gap: 4px;
+}
+.pr-conflict-agent-area {
+display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 10px;
+  padding: 14px; border: 1px solid var(--accent-line); border-radius: var(--radius-lg);
+  background: color-mix(in srgb, var(--accent-wash) 48%, var(--elevated)); box-shadow: var(--inset-hi);
+}
+.pr-conflict-agent-area > div:first-child {
+display: flex; flex-direction: column; gap: 4px;
+}
+.pr-conflict-agent-area > .form-error,
+.pr-conflict-agent-area > .knowledge-notice {
+grid-column: 1 / -1; margin: 0;
+}
+.pr-merge-controls {
+display: flex; align-items: center; gap: 9px; flex-wrap: wrap;
+}
+.pr-merge-controls select,
+.pr-review-actions select {
+min-height: 44px; padding: 0 10px;
+}
+.pr-create-panel {
+gap: 12px; padding: 14px; border-style: solid;
+}
+.pr-create-head {
+display: flex; align-items: flex-start; gap: 10px;
+}
+.pr-create-head > div {
+display: flex; flex: 1; flex-direction: column; gap: 4px;
+}
+.pr-create-head .muted {
+font-size: 11.5px;
+}
+.pr-create-options {
+display: flex; align-items: end; gap: 14px;
+}
+.pr-create-field.compact {
+width: min(260px, 100%);
+}
+.pr-create-actions {
+display: flex; align-items: center; gap: 7px; flex-wrap: wrap;
+}
+.pr-files {
+gap: 8px;
+}
+.pr-files-toolbar {
+min-height: 54px; display: flex; align-items: center; gap: 8px; padding: 7px 10px;
+  border: 1px solid var(--hair-strong); border-radius: var(--radius-lg); background: var(--elevated);
+}
+.pr-files-toolbar > div {
+display: flex; flex-direction: column; gap: 3px; font-size: 12.5px;
+}
+.pr-file-card {
+overflow: hidden; border: 1px solid var(--hair-strong); border-radius: var(--radius-lg); background: var(--elevated);
+}
+.pr-file-card.expanded {
+border-color: var(--border);
+}
+.pr-file-head {
+width: 100%; min-height: 48px; display: flex; align-items: center; gap: 8px; padding: 0 12px;
+  border: 0; border-radius: 0; background: var(--surface-overlay); color: var(--text); text-align: left;
+}
+.pr-file-head:hover {
+background: var(--raised); border-color: transparent;
+}
+.pr-file-head.static:hover {
+background: var(--surface-overlay);
+}
+.pr-file-path {
+min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12px;
+}
+.pr-file-stat {
+display: inline-flex; align-items: center; gap: 8px; font: 600 11px var(--mono);
+}
+.pr-diff {
+margin: 0 !important; border-width: 1px 0 0 !important; border-radius: 0 !important; min-height: 0 !important;
+}
+.pr-diff-ln {
+width: 78px; display: inline-grid; grid-template-columns: 1fr 1fr; flex: 0 0 78px; margin-right: 8px; border-right: 1px solid var(--hair); color: var(--faint); user-select: none;
+}
+.pr-diff-ln i {
+padding-right: 7px; font-style: normal; text-align: right;
+}
+.pr-surface .check-row {
+min-height: 52px; padding: 7px 10px; border-radius: 0; border-bottom: 1px solid var(--hair);
+}
+.pr-surface .check-row:last-child {
+border-bottom: 0;
+}
+.check-copy {
+display: flex; flex: 1; min-width: 0; flex-direction: column; gap: 3px;
+}
+.check-copy .muted {
+font-size: 10.5px;
+}
+.check-status {
+text-transform: capitalize;
+}
+.pr-comments {
+gap: 14px;
+}
+.pr-thread {
+display: flex; flex-direction: column; gap: 10px;
+}
+.pr-surface .pr-comment {
+display: grid; grid-template-columns: 38px minmax(0, 1fr); gap: 9px; padding: 0; border: 0; background: transparent; box-shadow: none;
+}
+.pr-comment-avatar {
+width: 38px; height: 38px; display: grid; place-items: center; border: 1px solid var(--hair-strong); border-radius: 50%; background: var(--surface-overlay-strong); color: var(--text-dim); font-size: 11px; font-weight: 700;
+}
+.pr-comment-card {
+overflow: hidden; border: 1px solid var(--hair-strong); border-radius: var(--radius-lg); background: var(--elevated);
+}
+.pr-surface .pr-comment-head {
+min-height: 42px; padding: 6px 11px; border-bottom: 1px solid var(--hair); background: var(--surface-overlay); flex-wrap: wrap;
+}
+.pr-comment-head a {
+margin-left: auto; text-decoration: none;
+}
+.pr-comment-location {
+padding: 7px 11px; border-bottom: 1px solid var(--hair); background: var(--sunken); color: var(--muted); font-size: 11px; overflow-wrap: anywhere;
+}
+.pr-surface .pr-comment-body {
+padding: 12px; font-size: 13.5px; line-height: 1.5; overflow-wrap: anywhere;
+}
+.pr-review-form {
+padding: 14px; border-style: solid; gap: 10px;
+}
+.pr-review-form > div:first-child {
+display: flex; flex-direction: column; gap: 3px;
+}
+.pr-review-form textarea {
+min-height: 108px; font-size: 14px;
+}
+.pr-review-actions {
+display: flex; align-items: center; gap: 9px; flex-wrap: wrap;
+}
+.pr-external-link {
+margin-left: auto; flex: none; text-decoration: none;
+}
+.issue-detail-layout {
+display: flex; flex-direction: column; gap: 14px;
+}
+.issue-description-card,
+.issue-conversation {
+overflow: hidden; border: 1px solid var(--hair-strong); border-radius: var(--radius-lg);
+  background: var(--elevated); box-shadow: var(--inset-hi);
+}
+.issue-description-card > header,
+.issue-section-heading {
+min-height: 56px; display: flex; align-items: center; padding: 10px 14px;
+  border-bottom: 1px solid var(--hair); background: var(--surface-overlay);
+}
+.issue-description-card h2,
+.issue-section-heading h2 {
+margin: 0; font-size: 14px;
+}
+.issue-description-card > header > div,
+.issue-section-heading > div {
+display: flex; flex-direction: column; gap: 3px;
+}
+.issue-description-card .pr-body {
+min-height: 110px; padding: 16px;
+}
+.issue-conversation {
+padding-bottom: 14px;
+}
+.issue-conversation .pr-thread {
+padding: 14px 14px 0;
+}
+.issue-conversation > .empty-state {
+margin: 14px;
+}
+.gh-reply-panel {
+position: relative; overflow: hidden; padding: 14px; border: 1px solid var(--accent-line);
+  border-radius: var(--radius-lg); background:
+    radial-gradient(circle at 0 0, color-mix(in srgb, var(--accent) 10%, transparent), transparent 44%),
+    var(--elevated);
+  box-shadow: var(--inset-hi); display: flex; flex-direction: column; gap: 10px;
+}
+.gh-reply-heading,
+.gh-reply-actions,
+.gh-agent-send {
+display: flex; align-items: center; gap: 9px;
+}
+.gh-reply-heading > div {
+display: flex; flex: 1; flex-direction: column; gap: 3px;
+}
+.gh-reply-panel > textarea {
+width: 100%; min-height: 108px; padding: 10px 12px; resize: vertical;
+  border: 1px solid var(--hair-strong); border-radius: var(--radius-md);
+  background: var(--sunken); color: var(--text); line-height: 1.5;
+  transition: border-color 160ms ease, box-shadow 160ms ease;
+}
+.gh-reply-panel > textarea:focus {
+outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-wash);
+}
+.gh-agent-drawer {
+display: grid; grid-template-rows: 0fr; opacity: 0; transform: translateY(-10px);
+  transition: grid-template-rows 280ms ease, opacity 220ms ease, transform 280ms ease;
+}
+.gh-reply-panel.agent-open .gh-agent-drawer {
+grid-template-rows: 1fr; opacity: 1; transform: translateY(0);
+}
+.gh-agent-drawer-inner {
+min-height: 0; overflow: hidden; display: flex; flex-direction: column; gap: 10px;
+}
+.gh-agent-drawer-inner > header {
+display: flex; align-items: center; gap: 10px; padding-top: 12px;
+  border-top: 1px solid var(--accent-line);
+}
+.gh-agent-drawer-inner > header > div {
+display: flex; flex-direction: column; gap: 2px;
+}
+.gh-agent-orb {
+width: 30px; height: 30px; flex: none; border-radius: 10px;
+  background: radial-gradient(circle at 35% 30%, white 0 7%, var(--accent) 9% 35%, color-mix(in srgb, var(--accent) 38%, var(--elevated)) 70%);
+  box-shadow: 0 0 0 1px var(--accent-line), 0 7px 18px color-mix(in srgb, var(--accent) 22%, transparent);
+}
+.gh-agent-orb.working {
+animation: gh-agent-pulse 1.6s ease-in-out infinite;
+}
+.gh-agent-thinking {
+min-height: 64px; display: flex; align-items: center; justify-content: center; gap: 5px;
+  border: 1px dashed var(--accent-line); border-radius: var(--radius-md); background: var(--accent-wash);
+  color: var(--muted); font-size: 12px;
+}
+.gh-agent-thinking i {
+width: 6px; height: 6px; border-radius: 50%; background: var(--accent);
+  animation: gh-thinking-dot 1.2s ease-in-out infinite;
+}
+.gh-agent-thinking i:nth-child(2) {
+animation-delay: 120ms;
+}
+.gh-agent-thinking i:nth-child(3) {
+animation-delay: 240ms; margin-right: 4px;
+}
+.gh-agent-response {
+max-height: 380px; overflow: auto; padding: 14px; border: 1px solid var(--hair-strong);
+  border-radius: var(--radius-md); background: var(--sunken); font-size: 13.5px; line-height: 1.55;
+}
+.gh-agent-send {
+justify-content: flex-end; padding-top: 2px;
+}
+.gh-agent-send .muted {
+margin-right: auto;
+}
+@media (prefers-reduced-motion: reduce) {
+.gh-agent-drawer,
+.gh-agent-orb.working,
+.gh-agent-thinking i {
+transition: none; animation: none;
+}
+}
+@media (max-width: 1000px) {
+.gh-list-controls {
+grid-template-columns: 1fr 1fr;
+}
+
+.gh-filter-chips {
+grid-column: 1 / -1;
+}
+
+.gh-card {
+align-items: flex-start;
+}
+
+.gh-card-actions {
+max-width: 240px;
+}
+}
+@media (max-width: 820px) {
+.github-page {
+max-width: none; padding: 10px 10px calc(10px + env(safe-area-inset-bottom, 0px)); gap: 10px;
+}
+
+.github-head {
+align-items: flex-start; flex-wrap: wrap;
+}
+
+.github-head > div {
+flex: 1;
+}
+
+.gh-repo-card {
+align-items: flex-start; flex-wrap: wrap;
+}
+
+.gh-repo-copy {
+min-width: calc(100% - 58px);
+}
+
+.gh-repo-meta {
+width: 100%; justify-content: flex-start; padding-left: 56px;
+}
+
+.gh-list-controls {
+display: flex; align-items: stretch; flex-direction: column; gap: 8px;
+}
+
+.gh-tabs {
+width: 100%; position: static; margin: 0; padding: 2px; border: 1px solid var(--hair); border-radius: var(--radius-md); background: var(--sunken);
+}
+
+.gh-tabs > button {
+flex: 1;
+}
+
+.gh-search {
+width: 100%;
+}
+
+.gh-filter-chips {
+padding-bottom: 2px;
+}
+
+.gh-filter-chips button {
+min-height: 44px;
+}
+
+.gh-card {
+align-items: stretch; flex-direction: column; gap: 12px; padding: 13px;
+}
+
+.gh-card-kicker .gh-meta {
+margin-left: 0;
+}
+
+.gh-card-title {
+font-size: 14.5px;
+}
+
+.gh-card-actions {
+display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); max-width: none;
+}
+
+.gh-card-actions > * {
+width: 100%; padding-inline: 7px !important;
+}
+
+.gh-card-actions .primary-btn:first-child {
+grid-column: 1 / -1;
+}
+
+.gh-connect-state {
+align-items: flex-start; flex-direction: column;
+}
+
+.gh-connect-state .primary-btn {
+width: 100%;
+}
+
+.pr-head {
+align-items: flex-start; flex-wrap: wrap;
+}
+
+.pr-back {
+order: 0;
+}
+
+.pr-title-block {
+order: 2; flex-basis: 100%;
+}
+
+.pr-title-block > a,
+.pr-title-block > .muted {
+white-space: normal;
+}
+
+.pr-check-pill {
+margin-left: auto; max-width: calc(100% - 150px);
+}
+
+.pr-tabbar {
+position: sticky; top: 0; z-index: 8; margin-inline: -10px; padding-inline: 8px;
+    background: color-mix(in srgb, var(--bg) 94%, transparent); backdrop-filter: blur(14px);
+}
+
+.pr-tabbar button {
+flex: 1 0 auto; padding-inline: 13px;
+}
+
+.pr-summary-cards,
+.check-summary-cards {
+grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.pr-merge-controls {
+align-items: stretch; flex-direction: column;
+}
+
+.pr-merge-controls select,
+.pr-merge-controls .primary-btn {
+width: 100%;
+}
+
+.pr-create-options {
+align-items: stretch; flex-direction: column;
+}
+
+.pr-create-field.compact {
+width: 100%;
+}
+
+.pr-create-actions {
+display: grid; grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.pr-create-actions .header-spacer {
+display: none;
+}
+
+.pr-create-actions > * {
+width: 100%;
+}
+
+.pr-create-actions .primary-btn {
+grid-column: 1 / -1;
+}
+
+.pr-files-toolbar {
+align-items: flex-start; flex-wrap: wrap;
+}
+
+.pr-files-toolbar > div {
+flex-basis: 100%;
+}
+
+.pr-files-toolbar .header-spacer {
+display: none;
+}
+
+.pr-files-toolbar .small-btn {
+flex: 1;
+}
+
+.pr-file-head {
+min-height: 52px;
+}
+
+.pr-file-stat {
+flex-direction: column; align-items: flex-end; gap: 1px;
+}
+
+.pr-diff {
+font-size: 12px;
+}
+
+.pr-diff-ln {
+width: 62px; flex-basis: 62px;
+}
+
+.pr-surface .check-row {
+align-items: flex-start; flex-wrap: wrap;
+}
+
+.check-copy {
+min-width: calc(100% - 100px);
+}
+
+.check-status {
+order: 3; margin-left: 16px;
+}
+
+.check-row .small-btn {
+order: 4; margin-left: auto;
+}
+
+.pr-surface .pr-comment {
+grid-template-columns: 30px minmax(0, 1fr); gap: 7px;
+}
+
+.pr-comment-avatar {
+width: 30px; height: 30px; font-size: 9px;
+}
+
+.pr-comment-head a {
+flex-basis: 100%; margin-left: 0;
+}
+
+.pr-review-actions {
+align-items: stretch; flex-direction: column;
+}
+
+.pr-review-actions select,
+.pr-review-actions .primary-btn {
+width: 100%;
+}
+
+.pr-review-actions .header-spacer {
+display: none;
+}
+
+.github-page input,
+.pr-surface input,
+.pr-surface textarea,
+.pr-surface select {
+font-size: 16px;
+}
+}
+@media (max-width: 430px) {
+.pr-check-pill {
+order: 1;
+}
+
+.gh-card-actions {
+grid-template-columns: 1fr;
+}
+
+.gh-card-actions .primary-btn:first-child {
+grid-column: auto;
+}
+}
+.github-page {
+min-width: 0;
+  container: source-surface / inline-size;
+}
+.github-page *,
+.pr-surface * {
+min-width: 0;
+}
+.gh-filter-chips button {
+min-height: var(--tap);
+}
+.pr-surface .copy-wrap > .copy-btn {
+min-width: var(--tap); width: var(--tap); min-height: var(--tap); height: var(--tap);
+  display: inline-grid; place-items: center; padding: 0;
+}
+.gh-tabs {
+border-bottom: 1px solid var(--hair-strong); border-radius: 0; background: transparent;
+}
+.gh-tabs > button,
+.pr-tabbar > button {
+border-radius: 0; border-bottom: 2px solid transparent; background: transparent;
+}
+.gh-tabs > button.active,
+.pr-tabbar > button.active {
+border-bottom-color: var(--accent); background: transparent; box-shadow: none; color: var(--text);
+}
+.gh-card-title {
+display: inline-flex; align-items: flex-start; gap: 6px;
+}
+.gh-card-title > span:first-child {
+min-width: 0;
+}
+.gh-card-title > svg,
+.gh-repo-name svg {
+width: 13px; height: 13px; flex: none; margin-top: 3px;
+}
+.gh-repo-name {
+display: inline-flex; align-items: center; gap: 5px; max-width: 100%; overflow: hidden;
+}
+.gh-repo-name > span:first-child {
+min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.gh-card-overflow {
+position: relative; display: none;
+}
+.gh-card-menu {
+position: absolute; right: 0; top: calc(100% + 6px); z-index: 20;
+  width: 190px; padding: 5px; border: 1px solid var(--border);
+  border-radius: var(--radius-md); background: var(--elevated); box-shadow: var(--shadow-lg);
+}
+.gh-card-menu > button,
+.gh-card-menu > a {
+width: 100%; min-height: var(--tap); display: flex; align-items: center; gap: 8px;
+  padding: 0 9px; border: 0; border-radius: var(--radius-sm); background: transparent;
+  color: var(--text-dim); font-size: 12px; text-align: left; text-decoration: none;
+}
+.gh-card-menu > :hover {
+background: var(--raised); color: var(--text);
+}
+.pr-title-block h1 {
+margin: 0; font-size: clamp(17px, 2.2cqi, 23px); line-height: 1.3; overflow-wrap: anywhere;
+}
+.pr-title-block h1 a {
+color: var(--text); text-decoration: none;
+}
+.pr-title-block h1 a:hover {
+color: var(--accent);
+}
+.pr-title-block h1 svg {
+width: 14px; height: 14px; vertical-align: 1px;
+}
+.pr-title-block > .muted {
+white-space: normal; overflow-wrap: anywhere;
+}
+.pr-tabbar {
+position: relative;
+  mask-image: linear-gradient(to right, transparent 0, black 12px, black calc(100% - 12px), transparent 100%);
+  -webkit-mask-image: linear-gradient(to right, transparent 0, black 12px, black calc(100% - 12px), transparent 100%);
+  padding-inline: 8px;
+}
+.merge-status-badge {
+align-self: flex-start; width: auto; padding: 3px 8px; border-radius: 999px;
+  font-size: 12px !important; line-height: 1.4;
+}
+.merge-status-badge.st-mergeable {
+color: var(--green-on-wash); background: var(--green-wash);
+}
+.merge-status-badge.st-conflicting {
+color: var(--red); background: var(--red-wash);
+}
+.merge-status-badge:not(.st-mergeable):not(.st-conflicting) {
+color: var(--amber-on-wash); background: var(--amber-wash);
+}
+.pr-body {
+overflow-wrap: anywhere;
+}
+.pr-body > :first-child,
+.pr-comment-body > :first-child {
+margin-top: 0;
+}
+.pr-body > :last-child,
+.pr-comment-body > :last-child {
+margin-bottom: 0;
+}
+.pr-body .md-table,
+.pr-comment-body .md-table {
+display: block; max-width: 100%; overflow-x: auto;
+}
+.pr-diff code {
+flex: 1; border: 0; padding: 0; background: transparent; color: inherit;
+  font: inherit; white-space: pre;
+}
+.pr-review-kind {
+display: flex; align-items: center; gap: 8px; color: var(--text-dim); font-size: 12px;
+}
+.pr-review-kind > span {
+flex: none;
+}
+.pr-compare-summary {
+min-height: 64px; display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  align-items: center; gap: 10px; padding: 10px 12px;
+  border: 1px solid var(--hair-strong); border-radius: var(--radius-md); background: var(--surface-overlay);
+}
+.pr-compare-summary > span:not(.pr-compare-arrow) {
+display: flex; flex-direction: column; gap: 3px; overflow: hidden;
+}
+.pr-compare-summary small {
+color: var(--muted); font-size: 12px;
+}
+.pr-compare-summary strong {
+overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 12.5px;
+}
+.pr-compare-arrow {
+color: var(--muted);
+}
+.github-page .muted,
+.pr-surface .muted,
+.gh-card-kicker,
+.gh-card-meta,
+.pr-comment-location,
+.check-copy .muted {
+font-size: max(12px, 1em);
+}
+.pr-tabbar button span {
+font-size: 12px;
+}
+@container source-surface (max-width: 700px) {
+.github-head {
+align-items: flex-start; flex-wrap: wrap;
+}
+
+.gh-repo-card {
+width: 100%; display: grid; grid-template-columns: var(--tap) minmax(0, 1fr);
+    align-items: start; overflow: hidden;
+}
+
+.gh-repo-icon {
+grid-column: 1;
+}
+
+.gh-repo-copy {
+grid-column: 2; width: 100%;
+}
+
+.gh-repo-meta {
+grid-column: 1 / -1; width: 100%; padding-left: 0; justify-content: flex-start;
+}
+
+.gh-repo-meta .tag {
+max-width: 100%;
+}
+
+.gh-list-controls {
+display: flex; align-items: stretch; flex-direction: column; gap: 8px;
+}
+
+.gh-tabs,
+.gh-search {
+width: 100%;
+}
+
+.gh-filter-chips {
+padding-bottom: 2px;
+}
+
+.gh-card {
+align-items: stretch; flex-direction: column; gap: 12px;
+}
+
+.gh-card-actions {
+max-width: none;
+}
+
+.pr-head {
+align-items: flex-start; flex-wrap: wrap;
+}
+
+.pr-title-block {
+order: 2; flex-basis: 100%;
+}
+
+.pr-check-pill {
+margin-left: auto;
+}
+}
+@container source-surface (min-width: 600px) and (max-width: 820px) {
+.gh-list-controls {
+display: grid; grid-template-columns: minmax(0, 1fr) minmax(220px, 1fr);
+}
+
+.gh-filter-chips {
+grid-column: 1 / -1;
+}
+
+.gh-card {
+display: grid; grid-template-columns: minmax(0, 1fr) minmax(190px, auto); align-items: start;
+}
+
+.gh-card-actions {
+display: grid; grid-template-columns: 1fr; max-width: 230px;
+}
+
+.gh-card-actions > * {
+width: 100%;
+}
+}
+@container source-surface (max-width: 599px) {
+.gh-card-actions {
+display: grid; grid-template-columns: minmax(0, 1fr) var(--tap);
+}
+
+.gh-card-primary {
+width: 100%;
+}
+
+.gh-action-secondary {
+display: none !important;
+}
+
+.gh-card-overflow {
+display: block;
+}
+
+.gh-card-overflow > .icon-only {
+width: var(--tap); min-width: var(--tap); padding: 0 !important;
+}
+}
+@media (max-width: 430px) {
+.pr-compare-summary {
+grid-template-columns: minmax(0, 1fr);
+}
+
+.pr-compare-arrow {
+transform: rotate(90deg); justify-self: center;
+}
+}
+@media (max-width: 700px) {
+.github-conflict-card {
+grid-template-columns: 36px minmax(0, 1fr);
+}
+
+.github-conflict-card > .small-btn {
+grid-column: 1 / -1; width: 100%;
+}
+
+.pr-conflict-agent-area {
+grid-template-columns: 1fr;
+}
+
+.pr-conflict-agent-area > .primary-btn {
+width: 100%;
+}
+}
+:is(
+  .audit-list,
+  .event-list,
+  .gh-list,
+  .knowledge-panel,
+  .mcp-list,
+  .ntc-list,
+  .plugin-card-grid,
+  .provider-list,
+  .sched-runs,
+  .track-steps
+) {
+min-width: 0;
+  overscroll-behavior: contain;
+}
+:is(
+  .audit-list,
+  .event-list,
+  .gh-list,
+  .plugin-log,
+  .provider-list,
+  .run-card-body,
+  .usage-sessions-table,
+  .wt-diff
+) {
+scrollbar-gutter: stable;
+  -webkit-overflow-scrolling: touch;
+}

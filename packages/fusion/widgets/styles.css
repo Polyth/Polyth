@@ -1,0 +1,80 @@
+/* Package-owned fusion web styles. */
+.fusion-model-picks {
+display: flex; flex-wrap: wrap; gap: 6px;
+}
+.fusion-layout {
+display: grid; grid-template-columns: 260px 1fr 260px; gap: 16px; min-height: 0; align-items: start;
+}
+.weight-card {
+border: 1px solid var(--border-soft); border-radius: var(--radius-sm); background: var(--panel);
+  padding: 10px 12px; margin-bottom: 10px;
+}
+.weight-card-row {
+display: flex; justify-content: space-between; font-size: 12.5px; margin-bottom: 6px;
+}
+.weight-name {
+display: flex; align-items: center; gap: 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.weight-track {
+height: 5px; background: var(--elevated); border-radius: calc(3px * var(--corner-radius-scale)); overflow: hidden;
+}
+.weight-fill {
+height: 100%; border-radius: calc(3px * var(--corner-radius-scale));
+}
+.weight-pct {
+font-family: var(--mono); font-size: 11px; color: var(--muted);
+}
+.fusion-answer {
+display: flex; flex-direction: column; gap: 10px; min-width: 0;
+}
+.fusion-answer-card {
+border: 1px solid var(--border); border-radius: var(--radius); background: var(--panel); padding: 18px 20px; min-height: 120px;
+  font-size: 14px; line-height: 1.7;
+}
+@media (max-width: 1100px) {
+.fusion-layout {
+grid-template-columns: 1fr;
+}
+}
+.fusion-layout .empty-state {
+min-height: 0;
+  padding: 16px;
+}
+.fusion-layout .empty-state-title {
+font-size: var(--font-label);
+}
+.fusion-answer-card {
+min-width: 0;
+}
+.weight-name {
+overflow-wrap: anywhere;
+}
+.fusion-answer-card :is(pre, table) {
+display: block;
+  max-width: 100%;
+  overflow-x: auto;
+}
+@container feature-panel (max-width: 700px) {
+.fusion-layout {
+grid-template-columns: minmax(0, 1fr);
+}
+
+.fusion-model-picks {
+max-height: min(36dvh, 300px);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding: 2px;
+}
+
+.fusion-answer-card {
+padding: 14px; overflow: hidden;
+}
+
+.weight-card-row {
+align-items: flex-start; gap: 8px;
+}
+
+.weight-name {
+white-space: normal;
+}
+}

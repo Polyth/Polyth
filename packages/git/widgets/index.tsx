@@ -1,3 +1,4 @@
+import "./styles.css";
 import { createElement } from "react";
 import { defineWebPackage } from "@polyth/web-sdk";
 import GitView from "./GitView.tsx";

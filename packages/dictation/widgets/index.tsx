@@ -1,3 +1,4 @@
+import "./styles.css";
 import { defineWebPackage } from "@polyth/web-sdk";
 import VoicePage from "./VoicePage.tsx";
 import { installVoice } from "./voice.tsx";

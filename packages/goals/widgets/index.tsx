@@ -1,3 +1,4 @@
+import "./styles.css";
 import { createElement, useState, type ComponentType } from "react";
 import { defineWebPackage, type WidgetRenderContext } from "@polyth/web-sdk";
 import { GoalAttachForm } from "./GoalStrip.tsx";

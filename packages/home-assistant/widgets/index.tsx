@@ -1,3 +1,4 @@
+import "./styles.css";
 import { defineWebPackage } from "@polyth/web-sdk";
 import { HomeAssistantSettings, HOME_ASSISTANT_WIDGET_PLUGIN } from "./homeAssistantPlugin.tsx";
 

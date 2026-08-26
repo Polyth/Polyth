@@ -1,3 +1,4 @@
+import "./styles.css";
 import { createElement, useEffect, useState } from "react";
 import type { WorkflowRunDto } from "@polyth/contracts";
 import { defineWebPackage, type WidgetPlugin } from "@polyth/web-sdk";
