@@ -19,6 +19,8 @@ export interface ModalSurfaceOptions {
   enabled?: boolean;
   onClose: () => void;
   containerRef: RefObject<HTMLElement | null>;
+  /** Optional root whose document siblings must be hidden while open. */
+  isolationRootRef?: RefObject<HTMLElement | null>;
   /** CSS selector inside the container to receive initial focus. */
   initialFocus?: string;
   /** Resolve the unmount focus target from the recorded opener. Returning
@@ -42,6 +44,28 @@ function lockBodyScroll(): () => void {
   };
 }
 
+function isolateDocumentSiblings(root: HTMLElement | null): () => void {
+  if (!root) return () => {};
+  const siblings = [...document.body.children].filter((element): element is HTMLElement =>
+    element instanceof HTMLElement && element !== root);
+  const previous = siblings.map((element) => ({
+    element,
+    ariaHidden: element.getAttribute("aria-hidden"),
+    inert: element.hasAttribute("inert"),
+  }));
+  for (const { element } of previous) {
+    element.setAttribute("aria-hidden", "true");
+    element.setAttribute("inert", "");
+  }
+  return () => {
+    for (const { element, ariaHidden, inert } of previous) {
+      if (ariaHidden === null) element.removeAttribute("aria-hidden");
+      else element.setAttribute("aria-hidden", ariaHidden);
+      if (!inert) element.removeAttribute("inert");
+    }
+  };
+}
+
 /**
  * Shared modal-surface focus contract:
  * - focuses the requested initial target or first enabled control on open;
@@ -56,6 +80,7 @@ export function useModalSurface({
   enabled = true,
   onClose,
   containerRef,
+  isolationRootRef,
   initialFocus,
   resolveRestoreFocus,
 }: ModalSurfaceOptions): void {
@@ -92,6 +117,7 @@ export function useModalSurface({
       ?? el.querySelector<HTMLElement>(FOCUSABLE)
       ?? el;
     target.focus();
+    const restoreBackground = isolateDocumentSiblings(isolationRootRef?.current ?? null);
 
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
@@ -126,13 +152,14 @@ export function useModalSurface({
     return () => {
       el.removeEventListener("keydown", onKeyDown);
       unlockBodyScroll();
+      restoreBackground();
       const connectedOpener = opener && opener !== document.body && opener.isConnected && visible(opener)
         ? opener
         : null;
       const target = resolverRef.current ? resolverRef.current(connectedOpener) : connectedOpener;
       target?.focus();
     };
-  }, [enabled, open, initialFocus, containerRef]);
+  }, [enabled, open, initialFocus, containerRef, isolationRootRef]);
 }
 
 export interface DialogProps {
@@ -164,17 +191,20 @@ export default function Dialog({
   ariaDescribedBy,
   resolveRestoreFocus,
 }: DialogProps) {
+  const backdropRef = useRef<HTMLDivElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   useModalSurface({
     open: true,
     onClose,
     containerRef: panelRef,
+    isolationRootRef: backdropRef,
     initialFocus,
     resolveRestoreFocus,
   });
 
   return (
     <div
+      ref={backdropRef}
       className={`dialog-backdrop${backdropClassName ? ` ${backdropClassName}` : ""}`}
       onMouseDown={(e) => { if (e.target === e.currentTarget) onClose(); }}
     >

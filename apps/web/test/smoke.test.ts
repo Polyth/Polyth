@@ -148,6 +148,29 @@ test("tool call → result fills the card; call → error marks it failed", () =
   assert.equal(t2.error, "permission denied");
 });
 
+test("pending tool calls transition to running without duplicating the execution row", () => {
+  const pending = ev("tool/call", {
+    callId: "queued",
+    tool: "bash",
+    input: { command: "npm test" },
+    status: "pending",
+  });
+  const started = ev("tool/started", {
+    callId: "queued",
+    tool: "bash",
+    input: { command: "npm test -- --test-name-pattern execution" },
+  });
+  const model = buildModel([pending]);
+  const queued = model.messages[0];
+  assert.equal(queued?.kind === "tool" ? queued.status : "", "pending");
+  reduceEvent(model, started);
+  const executions = model.messages.filter((message) => message.kind === "tool");
+  assert.equal(executions.length, 1);
+  assert.equal(executions[0]?.status, "running");
+  assert.deepEqual(executions[0]?.input, { command: "npm test -- --test-name-pattern execution" });
+  assert.equal(executions[0]?.time, started.time, "running duration starts at the lifecycle transition");
+});
+
 test("edit tool results derive changed files and a new prompt clears the turn summary", () => {
   const model = buildModel([
     ev("tool/call", { callId: "read", tool: "read_file", input: { path: "src/read.ts" } }),

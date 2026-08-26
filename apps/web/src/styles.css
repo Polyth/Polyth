@@ -12093,6 +12093,10 @@ body[data-density="comfortable"] .header { min-height: 60px; }
 .execution-output-actions button:hover,
 .execution-inline-actions button:hover,
 .execution-metadata button:hover { color: var(--text); background: transparent; }
+.execution-output-actions > span {
+  color: var(--faint);
+  font-size: calc(11.75px * var(--ui-font-scale, 1));
+}
 .execution-file-summary > code {
   display: block;
   overflow: hidden;
@@ -12255,6 +12259,19 @@ body[data-density="comfortable"] .header { min-height: 60px; }
   user-select: text;
 }
 .execution-viewer > pre.wrap { white-space: pre-wrap; overflow-wrap: anywhere; }
+
+/* The global font preference intentionally follows prose, but execution
+   payloads remain code: commands, logs, diffs, paths, and the full viewer. */
+html[data-font] body :is(
+  .execution-command,
+  .execution-output,
+  .execution-diff,
+  .execution-diff code,
+  .execution-file-summary > code,
+  .execution-search-list code,
+  .execution-input dd,
+  .execution-viewer > pre
+) { font-family: var(--mono); }
 
 .reasoning {
   width: 100%;

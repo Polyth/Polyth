@@ -87,8 +87,9 @@ function CommandDetail({ command }: { command: string }) {
   );
 }
 
-function DiffPreview({ diff }: { diff: string }) {
-  const lines = parseDiffLines(diff).slice(0, 14);
+function DiffPreview({ diff, onOpenFull }: { diff: string; onOpenFull: () => void }) {
+  const allLines = parseDiffLines(diff);
+  const lines = allLines.slice(0, 14);
   return (
     <section className="execution-detail-section">
       <DetailHeading label="Changes" copy={diff} />
@@ -99,6 +100,12 @@ function DiffPreview({ diff }: { diff: string }) {
           </div>
         ))}
       </div>
+      {allLines.length > lines.length && (
+        <div className="execution-output-actions">
+          <button type="button" onClick={onOpenFull}>View full diff</button>
+          <span>{allLines.length} lines</span>
+        </div>
+      )}
     </section>
   );
 }
@@ -238,7 +245,7 @@ function FullOutputViewer({ title, text, onClose }: { title: string; text: strin
         <strong>{title}</strong>
         <span>{outputLineCount(text)} lines</span>
         <CopyButton text={text} label="Copy full output" />
-        <button type="button" className="execution-viewer-close" onClick={onClose} aria-label="Close output viewer"><Icon.close /></button>
+        <button type="button" className="execution-viewer-close" onClick={onClose} aria-label={`Close ${title}`}><Icon.close /></button>
       </header>
       <div className="execution-viewer-tools">
         <label><Icon.search /><input type="search" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search output" /></label>
@@ -318,7 +325,12 @@ export function ExecutionRow({ message, subagent }: { message: ToolMsg; subagent
                   </div>
                 </section>
               )}
-              {presentation.diff && <DiffPreview diff={presentation.diff} />}
+              {presentation.diff && (
+                <DiffPreview
+                  diff={presentation.diff}
+                  onOpenFull={() => setViewer({ title: `${presentation.label} full diff`, text: presentation.diff ?? "" })}
+                />
+              )}
               {inputEntries.length > 0 && (
                 <section className="execution-detail-section execution-input">
                   <DetailHeading label="Details" />

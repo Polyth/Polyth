@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { register } from "node:module";
+import { readFile } from "node:fs/promises";
 import { Window } from "happy-dom";
 import {
   cleanShellCommand,
@@ -37,7 +38,7 @@ test("shell previews remove setup noise without losing the useful command", () =
   );
   assert.equal(
     cleanShellCommand("FOO=bar node /workspace/apps/web/src/components/a/very/long/directory/ExecutionRow.tsx"),
-    "node /workspace…/ExecutionRow.tsx",
+    "node /workspace/apps/web/src/…/ExecutionRow.tsx",
   );
   assert.equal(
     executionPresentation(tool()).preview,
@@ -48,7 +49,7 @@ test("shell previews remove setup noise without losing the useful command", () =
 test("file, URL, edit, search, MCP, and subagent previews are semantic", () => {
   assert.equal(
     middleTruncatePath("apps/web/src/components/workspace/very/deep/Composer.tsx", 38),
-    "apps…/Composer.tsx",
+    "apps/web/src/…/Composer.tsx",
   );
   assert.equal(
     compactUrl("https://github.com/otto-assistant/polyth/pull/2693?tab=files"),
@@ -60,6 +61,16 @@ test("file, URL, edit, search, MCP, and subagent previews are semantic", () => {
   }));
   assert.equal(edit.label, "Edit");
   assert.match(edit.preview, /Composer\.tsx · \+3 −2$/);
+  const create = executionPresentation(tool({
+    tool: "create",
+    input: { filePath: "apps/web/src/new.ts", content: "one\ntwo" },
+  }));
+  assert.equal(create.preview, "apps/web/src/new.ts · +2 −0");
+  const write = executionPresentation(tool({
+    tool: "write",
+    input: { filePath: "apps/web/src/new.ts", newString: "one\ntwo" },
+  }));
+  assert.equal(write.preview, "apps/web/src/new.ts · +2 −0");
 
   const search = executionPresentation(tool({
     tool: "grep",
@@ -116,6 +127,23 @@ test("MCP results expose human fields without rendering inline JSON", () => {
     },
     { key: "Author", value: "octocat" },
     { key: "Files", value: "1 item" },
+    { key: "Files 1", value: "ExecutionRow.tsx" },
+  ]);
+  assert.deepEqual(normalizedMcpResult(JSON.stringify([
+    { title: "Fix execution UI", html_url: "https://github.com/polyth/pull/42" },
+    { name: "Responsive polish", url: "https://linear.app/polyth/issue/UX-7" },
+  ])), [
+    { key: "Items", value: "2 items" },
+    {
+      key: "Item 1",
+      value: "Fix execution UI",
+      href: "https://github.com/polyth/pull/42",
+    },
+    {
+      key: "Item 2",
+      value: "Responsive polish",
+      href: "https://linear.app/polyth/issue/UX-7",
+    },
   ]);
 });
 
@@ -126,16 +154,26 @@ test("groups and thinking expose useful milestones, not debug-prefixed chatter",
   ]), "Repository inspection");
   assert.deepEqual(
     reasoningMilestones("Thinking...\n\nFound the event reducer and timeline renderer.\n\nUpdating the compact execution rows now."),
-    ["Found the event reducer and timeline renderer.", "Updating the compact execution rows now."],
+    ["Inspecting relevant code", "Implementing changes"],
   );
   const semantic = reasoningMilestones(
     "I need to inspect the event reducer before changing anything.\n\n"
       + "Maybe there is another approach.\n\n"
       + "Implemented distinct pending and running lifecycle states with bounded labels that remain readable on compact screens and do not expose internal diagnostic chatter to users.",
   );
-  assert.equal(semantic[0], "Inspect the event reducer before changing anything.");
-  assert.ok(semantic.every((item) => item.length <= 120));
+  assert.deepEqual(semantic, [
+    "Inspecting relevant code",
+    "Planning the implementation",
+    "Implementing changes",
+  ]);
+  assert.ok(semantic.every((item) => !item.includes("diagnostic chatter")));
   assert.ok(semantic.length <= 5);
+});
+
+test("execution code surfaces override the global prose font preference", async () => {
+  const css = await readFile(new URL("../src/styles.css", import.meta.url), "utf8");
+  const override = css.match(/html\[data-font\] body :is\([\s\S]*?execution-viewer > pre[\s\S]*?\)\s*\{\s*font-family:\s*var\(--mono\);\s*\}/);
+  assert.ok(override, "commands, output, diffs, and the full viewer retain the monospace font");
 });
 
 const dom = new Window({ url: "http://localhost/" });
@@ -192,6 +230,8 @@ test("execution row renders collapsed value first, expands inline, and opens lev
     assert.ok(viewer, "large output opens in the explicit level-three viewer");
     assert.ok(viewer.classList.contains("dialog-full"), "viewer uses the shared accessible Dialog primitive");
     assert.equal(document.body.style.overflow, "hidden", "modal locks page scrolling");
+    assert.equal(container.getAttribute("aria-hidden"), "true", "modal hides background content from assistive technology");
+    assert.equal(container.hasAttribute("inert"), true, "modal makes background content inert");
     assert.equal(document.activeElement, viewer.querySelector('input[type="search"]'), "search receives initial focus");
     assert.match(viewer.textContent ?? "", /line 18/);
     const close = viewer.querySelector<HTMLButtonElement>(".execution-viewer-close");
@@ -205,6 +245,35 @@ test("execution row renders collapsed value first, expands inline, and opens lev
     await act(async () => close.click());
     assert.equal(document.body.querySelector(".execution-viewer"), null);
     assert.equal(document.body.style.overflow, "", "closing restores page scrolling");
+    assert.equal(container.hasAttribute("aria-hidden"), false, "closing restores background accessibility");
+    assert.equal(container.hasAttribute("inert"), false, "closing restores background interactivity");
+  } finally {
+    await act(async () => root.unmount());
+    container.remove();
+  }
+});
+
+test("long edit previews provide a full diff viewer", async () => {
+  const container = document.createElement("div");
+  document.body.appendChild(container);
+  const root = createRoot(container);
+  const content = Array.from({ length: 18 }, (_, index) => `line ${index + 1}`).join("\n");
+  try {
+    await act(async () => root.render(createElement(ExecutionRow, {
+      message: tool({
+        tool: "create",
+        input: { filePath: "apps/web/src/generated.ts", content },
+      }),
+    })));
+    await act(async () => container.querySelector<HTMLButtonElement>(".execution-summary")!.click());
+    assert.equal(container.querySelectorAll(".execution-diff-line").length, 14);
+    const fullDiff = [...container.querySelectorAll<HTMLButtonElement>(".execution-output-actions button")]
+      .find((button) => button.textContent === "View full diff");
+    assert.ok(fullDiff);
+    await act(async () => fullDiff.click());
+    const viewer = document.body.querySelector<HTMLElement>(".execution-viewer");
+    assert.match(viewer?.textContent ?? "", /Create full diff.*18 lines.*line 18/s);
+    await act(async () => viewer?.querySelector<HTMLButtonElement>(".execution-viewer-close")?.click());
   } finally {
     await act(async () => root.unmount());
     container.remove();

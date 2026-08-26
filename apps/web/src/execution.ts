@@ -108,9 +108,18 @@ export function middleTruncatePath(path: string, max = 58): string {
   const parts = normalized.split("/").filter(Boolean);
   const tail = parts.at(-1) ?? normalized;
   if (tail.length >= max - 4) return `…/${tail.slice(-(max - 2))}`;
-  const head = normalized.startsWith("/") ? `/${parts[0] ?? ""}` : (parts[0] ?? "");
-  const available = Math.max(4, max - head.length - tail.length - 3);
-  return `${head.slice(0, available)}…/${tail}`;
+  const prefix = parts.slice(0, Math.min(normalized.startsWith("/") ? 4 : 3, Math.max(1, parts.length - 1)));
+  const leadingSlash = normalized.startsWith("/") ? "/" : "";
+  while (prefix.length > 1) {
+    const candidate = `${leadingSlash}${prefix.join("/")}/…/${tail}`;
+    if (candidate.length <= max) return candidate;
+    prefix.pop();
+  }
+  const head = `${leadingSlash}${prefix[0] ?? ""}`;
+  const candidate = `${head}/…/${tail}`;
+  if (candidate.length <= max) return candidate;
+  const tailRoom = Math.max(4, max - head.length - 3);
+  return `${head}/…/${tail.slice(-tailRoom)}`;
 }
 
 export function compactUrl(raw: string, max = 62): string {
@@ -138,8 +147,8 @@ function editDiff(input: JsonObject): string | undefined {
   const after = firstString(input, ["newString", "new_string", "after", "content"]);
   if (before === undefined && after === undefined) return undefined;
   return [
-    ...(before ?? "").split(/\r?\n/).map((line) => `-${line}`),
-    ...(after ?? "").split(/\r?\n/).map((line) => `+${line}`),
+    ...(before === undefined ? [] : before.split(/\r?\n/).map((line) => `-${line}`)),
+    ...(after === undefined ? [] : after.split(/\r?\n/).map((line) => `+${line}`)),
   ].join("\n");
 }
 
@@ -297,8 +306,13 @@ function semanticResultValue(value: JsonValue): string {
 function unwrapMcpValue(value: JsonValue): JsonValue {
   if (Array.isArray(value)) {
     if (value.length === 1) return unwrapMcpValue(value[0] ?? null);
-    const text = value.find((item): item is JsonObject =>
-      item !== null && typeof item === "object" && !Array.isArray(item) && typeof item.text === "string");
+    const contentBlocks = value.every((item) =>
+      item !== null
+      && typeof item === "object"
+      && !Array.isArray(item)
+      && item.type === "text"
+      && typeof item.text === "string");
+    const text = contentBlocks ? value[0] as JsonObject : undefined;
     if (text && typeof text.text === "string") {
       try {
         return unwrapMcpValue(JSON.parse(text.text) as JsonValue);
@@ -317,6 +331,34 @@ function unwrapMcpValue(value: JsonValue): JsonValue {
   return value;
 }
 
+function mcpArrayEntries(value: JsonValue[], label = "Item"): NormalizedResultEntry[] {
+  const summary = {
+    key: label === "Item" ? "Items" : label,
+    value: `${value.length} ${value.length === 1 ? "item" : "items"}`,
+  };
+  const items = value.slice(0, 5).map((item, index): NormalizedResultEntry => {
+    if (item !== null && typeof item === "object" && !Array.isArray(item)) {
+      const href = ["html_url", "url", "href", "web_url"].map((key) => item[key])
+        .find((candidate): candidate is string => typeof candidate === "string" && /^https?:\/\//i.test(candidate));
+      const title = ["title", "name", "label", "summary", "filename", "path", "login"].map((key) => item[key])
+        .find((candidate): candidate is string | number =>
+          typeof candidate === "string" || typeof candidate === "number");
+      const identity = title ?? ["number", "id"].map((key) => item[key])
+        .find((candidate): candidate is string | number =>
+          typeof candidate === "string" || typeof candidate === "number");
+      return {
+        key: `${label} ${index + 1}`,
+        value: identity === undefined ? (href ?? "Structured item") : compactValue(identity),
+        ...(href ? { href } : {}),
+      };
+    }
+    const display = semanticResultValue(item);
+    const href = typeof item === "string" && /^https?:\/\//i.test(item) ? item : undefined;
+    return { key: `${label} ${index + 1}`, value: display, ...(href ? { href } : {}) };
+  });
+  return [summary, ...items];
+}
+
 export function normalizedMcpResult(output: string): NormalizedResultEntry[] | null {
   let parsed: JsonValue;
   try {
@@ -328,7 +370,7 @@ export function normalizedMcpResult(output: string): NormalizedResultEntry[] | n
     return [{ key: "Result", value: compactValue(parsed) }];
   }
   if (Array.isArray(parsed)) {
-    return [{ key: "Result", value: `${parsed.length} ${parsed.length === 1 ? "item" : "items"}` }];
+    return mcpArrayEntries(parsed);
   }
   const entries = Object.entries(parsed);
   const preferred = RESULT_KEYS.flatMap((key) => {
@@ -338,12 +380,13 @@ export function normalizedMcpResult(output: string): NormalizedResultEntry[] | n
   const remaining = entries.filter(([key]) => !preferred.some(([used]) => used === key));
   return [...preferred, ...remaining]
     .filter(([, value]) => value !== undefined && value !== null)
-    .slice(0, 8)
-    .map(([key, value]) => {
+    .flatMap(([key, value]) => {
+      if (Array.isArray(value)) return mcpArrayEntries(value, humanKey(key));
       const display = semanticResultValue(value);
       const href = typeof value === "string" && /^https?:\/\//i.test(value) ? value : undefined;
-      return { key: humanKey(key), value: display, ...(href ? { href } : {}) };
-    });
+      return [{ key: humanKey(key), value: display, ...(href ? { href } : {}) }];
+    })
+    .slice(0, 8);
 }
 
 const LARGE_INPUT_KEYS = new Set([
@@ -378,23 +421,17 @@ export function executionGroupLabel(tools: readonly ToolMsg[]): string {
 }
 
 export function reasoningMilestones(reasoning: string): string[] {
-  const paragraphs = reasoning
-    .replace(/```[\s\S]*?```/g, " ")
-    .split(/\n{2,}|\n(?=(?:[-*]\s+|\d+[.)]\s+))/)
-    .flatMap((part) => part.split(/(?<=[.!?])\s+(?=[A-Z0-9])/))
-    .map((part) => part
-      .replace(/^(?:[-*]|\d+[.)])\s+/, "")
-      .replace(/^(?:(?:i|we)\s+(?:need|want|should|will|can|could|am going)\s+to|let me)\s+/i, "")
-      .replace(/^(?:thinking|analysis|hmm|okay|ok|note to self)\b[.:,\s-]*/i, "")
-      .replace(/\s+/g, " ")
-      .trim())
-    .map((part) => part ? `${part[0]!.toUpperCase()}${part.slice(1)}` : part)
-    .filter(Boolean);
-  const useful = paragraphs.filter((part) => {
-    if (part.length < 12) return false;
-    return !/^(?:perhaps|maybe|probably|i think|i wonder|the user|we need|i need)\b/i.test(part);
-  });
-  return (useful.length > 0 ? useful : paragraphs)
-    .slice(-5)
-    .map((part) => endTruncate(part, 120));
+  const safeCategories = [
+    { pattern: /\b(?:debug|diagnos|investigat|reproduc)\w*/i, label: "Investigating the issue" },
+    { pattern: /\b(?:inspect|read|search|explore|review|find|locate)\w*/i, label: "Inspecting relevant code" },
+    { pattern: /\b(?:plan|approach|design)\w*/i, label: "Planning the implementation" },
+    { pattern: /\b(?:implement|update|change|edit|write|create|fix|add|remove|refactor)\w*/i, label: "Implementing changes" },
+    { pattern: /\b(?:test|build|typecheck|verify|validate)\w*/i, label: "Verifying the implementation" },
+  ] as const;
+  const milestones = safeCategories
+    .map(({ pattern, label }) => ({ index: reasoning.search(pattern), label }))
+    .filter(({ index }) => index >= 0)
+    .sort((a, b) => a.index - b.index)
+    .map(({ label }) => label);
+  return milestones.length > 0 ? milestones : ["Working through the request"];
 }
