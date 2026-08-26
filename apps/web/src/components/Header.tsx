@@ -292,6 +292,7 @@ export default function Header() {
   const model = useActiveModel();
   const view = useStore((s) => s.activeView);
   const workspaceMode = useWorkspaceMode();
+  const resolvedCapabilities = useResolvedCapabilities();
   const [githubUser, setGithubUser] = useState<GithubStatusDto["user"]>(null);
 
   const mode = useShellMode();
@@ -308,6 +309,9 @@ export default function Header() {
   const mobileTitle = session
     ? displaySessionTitle(session.title, session.id, firstUserText)
     : tr("header.newSession");
+  const mobileViewTitle = resolvedCapabilities.find((capability) =>
+    VIEW_OF_CAPABILITY[capability.descriptor.id] === view)?.descriptor.label
+    ?? tr("header.polyth");
   useResizeFocusHandoff(mode);
   const switchWorkspaceMode = (next: "chat" | "widgets" | "edit") => {
     closeWorkspacePane();
@@ -331,38 +335,48 @@ export default function Header() {
 
   // The mock's phone header replaces the compact header only at phone widths;
   // tablets (481–820px) keep the compact header with metrics and overflow.
-  if (mode === "phone" && chatSurface) {
+  if (mode === "phone") {
     return (
       <header className="header header-compact header-chat mobile-chat-header">
         <DrawerTrigger />
-        {/* UX-MOBILE-01 §21: the whole title is the target and it opens a real
-            session menu (new / rename / fork / archive / recent). */}
-        <button
-          className="mobile-session-title"
-          title={mobileTitle}
-          aria-label={tr("header.valueSessionMenu", { mobileTitle: mobileTitle })}
-          aria-haspopup="dialog"
-          aria-expanded={sessionMenuOpen}
-          {...sessionMenuTrigger}
-        >
-          <span>{mobileTitle}</span>
-          <Icon.chevronDown />
-        </button>
-        {sessionMenuOpen && <SessionMenu onClose={() => setSessionMenuOpen(false)} />}
+        {chatSurface ? (
+          <>
+            {/* UX-MOBILE-01 §21: the whole title is the target and it opens a real
+                session menu (new / rename / fork / archive / recent). */}
+            <button
+              className="mobile-session-title"
+              title={mobileTitle}
+              aria-label={tr("header.valueSessionMenu", { mobileTitle: mobileTitle })}
+              aria-haspopup="dialog"
+              aria-expanded={sessionMenuOpen}
+              {...sessionMenuTrigger}
+            >
+              <span>{mobileTitle}</span>
+              <Icon.chevronDown />
+            </button>
+            {sessionMenuOpen && <SessionMenu onClose={() => setSessionMenuOpen(false)} />}
+          </>
+        ) : (
+          <div className="mobile-session-title mobile-view-title" title={mobileViewTitle}>
+            <span>{mobileViewTitle}</span>
+          </div>
+        )}
         <span className="header-spacer" />
-        <button
-          className="icon-btn mobile-header-action"
-          aria-label={tr("header.refreshSessions")}
-          title={tr("header.refreshSessions")}
-          disabled={!project}
-          onClick={() => {
-            if (!project) return;
-            void refreshSessions(project.id).catch((error) =>
-              setUiError(friendlyError(tr("common.error"), error)));
-          }}
-        >
-          <Icon.refresh />
-        </button>
+        {chatSurface && (
+          <button
+            className="icon-btn mobile-header-action"
+            aria-label={tr("header.refreshSessions")}
+            title={tr("header.refreshSessions")}
+            disabled={!project}
+            onClick={() => {
+              if (!project) return;
+              void refreshSessions(project.id).catch((error) =>
+                setUiError(friendlyError(tr("common.error"), error)));
+            }}
+          >
+            <Icon.refresh />
+          </button>
+        )}
         <MobileNavigationRail />
         <SlotHost slot="app.window.controls" />
       </header>

@@ -11692,3 +11692,116 @@ body[data-density="comfortable"] .header { min-height: 60px; }
   .widget-toolbar-actions { justify-content: stretch; }
   .widget-toolbar-actions button { flex: 1; }
 }
+
+/* ---------- mobile shell audit fixes ------------------------------------ */
+.rail-head > .rail-toggle {
+  min-width: var(--tap);
+  min-height: var(--tap);
+  display: inline-grid;
+  place-items: center;
+}
+.rail-head > .rail-toggle svg { width: 18px; height: 18px; }
+.rail-title:focus { outline: 2px solid var(--focus-ring); outline-offset: 3px; }
+.session-menu {
+  box-shadow: 0 8px 24px color-mix(in srgb, black 24%, transparent);
+}
+.session-menu button { min-height: 36px; }
+.session-menu-danger-separator {
+  height: 1px;
+  margin: 5px 7px;
+  background: var(--hair-strong);
+}
+.multirun-controls > select,
+.multirun-controls > .primary-btn {
+  min-height: var(--tap);
+  height: var(--tap);
+}
+
+.mobile-navigation-section + .mobile-navigation-section { margin-top: 7px; }
+.mobile-navigation-section > h2 {
+  margin: 0;
+  padding: 7px 7px 5px;
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 720;
+  letter-spacing: .055em;
+  text-transform: uppercase;
+}
+.mobile-navigation-grid button > span:last-child {
+  display: -webkit-box;
+  overflow: hidden;
+  text-overflow: clip;
+  white-space: normal;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+@media (max-width: 820px) {
+  /* Every full-screen workspace surface starts below the permanent app
+     header, leaving both project and destination navigation reachable. */
+  .app > .header {
+    position: relative;
+    z-index: 80;
+    height: 60px;
+    min-height: 60px;
+  }
+  .rail-fullscreen {
+    top: 60px;
+    right: 0;
+    bottom: 0;
+  }
+  .rail-head { min-height: 60px; }
+  .pane-back { min-height: var(--tap); padding-inline: 12px; }
+
+  .sidebar .session-row,
+  .sidebar .session-btn {
+    min-height: var(--tap);
+  }
+  .sidebar .session-btn { align-self: stretch; }
+  .sidebar .session-menu button { min-height: var(--tap); }
+  .sidebar .session-quick-btn {
+    width: var(--tap);
+    height: var(--tap);
+  }
+  .sidebar .session-menu-btn,
+  .sidebar .project-menu-btn {
+    color: var(--text-dim);
+    opacity: 1;
+  }
+
+  .view-page > :first-child { flex: none; }
+  .multirun-controls {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    align-items: stretch;
+    gap: 8px;
+  }
+  .multirun-controls > select,
+  .multirun-controls > .primary-btn {
+    width: 100%;
+    max-width: none;
+  }
+}
+
+@media (max-width: 480px) {
+  .rail-fullscreen { top: calc(60px + env(safe-area-inset-top, 0px)); }
+  .mobile-view-title { cursor: default; }
+
+  /* Model, reasoning and mode occupy distinct rows at phone width; long
+     model labels can no longer paint underneath the slider or Build control. */
+  .composer-mobile .composer-model-header {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 2px;
+  }
+  .composer-mobile .composer-model-header .model-picker { grid-column: 1; }
+  .composer-mobile .composer-mode-cluster {
+    grid-column: 1;
+    width: 100%;
+    display: flex;
+    justify-content: space-between;
+    gap: var(--space-1);
+  }
+  .composer-mobile .composer-thinking-badge { flex: 1 1 auto; }
+  .composer-mobile .composer-agent-badge { flex: none; }
+  .composer-mobile .composer-agent-badge .picker-chip { max-width: 118px; }
+}

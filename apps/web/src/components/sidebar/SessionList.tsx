@@ -450,6 +450,7 @@ function SessionRow({
           <button role="menuitem" onClick={() => { setMenuOpen(false); onTogglePin(s); }}>
             {s.pinned ? tr("sidebar.sessionlist.unpin") : tr("sidebar.sessionlist.pinToTop")}
           </button>
+          <div className="session-menu-danger-separator" role="separator" />
           {s.status === "archived" ? (
             <button role="menuitem" onClick={() => {
               setMenuOpen(false);

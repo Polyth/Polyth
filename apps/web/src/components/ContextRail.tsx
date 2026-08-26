@@ -42,6 +42,7 @@ import { tr } from "../i18n/index.ts";
 import { MOD } from "../format.ts";
 import { useKeymap } from "../hotkeys.ts";
 import { railIconFor } from "../railIcons.ts";
+import { Icon } from "../icons.tsx";
 
 const NO_EVENTS: never[] = [];
 /** Fallback separator chrome before the real element is measured. */
@@ -621,7 +622,7 @@ export default function ContextRail() {
               >
                 {tr("contextrail.backToChat")}</button>
             )}
-            <span className="rail-title">{open?.title ?? ""}</span>
+            <span className="rail-title" tabIndex={-1}>{open?.title ?? ""}</span>
             <span className="header-spacer" />
             {!isWorkspacePane && (
               <div className="rail-tabs"><SlotHost slot="contextRail.tabs" context={{ tab: rail, onSelect: toggleRailPlugin }} /></div>
@@ -640,7 +641,7 @@ export default function ContextRail() {
               onClick={() => (isWorkspacePane ? closeWorkspacePane() : setRailPlugin(null))}
               title={tr("contextrail.closePanel")}
               aria-label={tr("contextrail.closePanel")}
-            >{compactContext ? tr("contextrail.message") : "»"}</button>
+            ><Icon.close /></button>
           </div>
           {compactContext && (
             <div className="plugin-strip sheet-strip" aria-label={tr("contextrail.workspacePanels")}>

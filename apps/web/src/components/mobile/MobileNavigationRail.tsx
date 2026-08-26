@@ -18,7 +18,33 @@ interface NavigationItem {
   label: string;
   icon: () => React.JSX.Element;
   active: boolean;
+  group: NavigationGroup;
   open: () => void;
+}
+
+type NavigationGroup = "views" | "workspace" | "automation" | "settings";
+
+const AUTOMATION_ITEMS = new Set([
+  "goals", "multirun", "workflow", "fusion", "walkthrough", "schedule",
+]);
+const SETTINGS_ITEMS = new Set(["models-agents", "diagnostics"]);
+
+function navigationGroup(id: string, hasView: boolean): NavigationGroup {
+  if (SETTINGS_ITEMS.has(id)) return "settings";
+  if (AUTOMATION_ITEMS.has(id)) return "automation";
+  if (hasView) return "views";
+  return "workspace";
+}
+
+function focusDestinationHeading(): void {
+  requestAnimationFrame(() => requestAnimationFrame(() => {
+    const heading = document.querySelector<HTMLElement>(
+      ".rail-fullscreen .rail-title, .main .view-title, .main h1",
+    );
+    if (!heading) return;
+    heading.tabIndex = -1;
+    heading.focus();
+  }));
 }
 
 /** The compact shell's single navigation entry point. It mirrors the desktop
@@ -50,6 +76,7 @@ export default function MobileNavigationRail() {
         id,
         label: capability.descriptor.label,
         icon: railIconFor(id),
+        group: navigationGroup(id, destinationView !== undefined),
         active: destinationView !== undefined
           ? view === destinationView && rail === null
           : pane !== undefined
@@ -68,6 +95,7 @@ export default function MobileNavigationRail() {
       id,
       label: surface.title,
       icon: surface.icon ?? railIconFor(id),
+      group: "workspace",
       active: rail === surface.id,
       open: () => toggleRailPlugin(surface.id),
     });
@@ -76,15 +104,23 @@ export default function MobileNavigationRail() {
   const activate = (item: NavigationItem) => {
     setOpen(false);
     item.open();
+    focusDestinationHeading();
   };
+  const groups: Array<{ id: NavigationGroup; label: string }> = [
+    { id: "views", label: "Views" },
+    { id: "workspace", label: tr("header.workspace") },
+    { id: "automation", label: "Automation" },
+    { id: "settings", label: tr("common.settings") },
+  ];
+  const navigationLabel = tr("header.application");
 
   return (
     <div className="mobile-navigation-menu">
       <button
         ref={triggerRef}
         className={`icon-btn mobile-header-action mobile-navigation-trigger${open ? " active" : ""}`}
-        aria-label={tr("contextrail.workspacePanels")}
-        title={tr("contextrail.workspacePanels")}
+        aria-label={navigationLabel}
+        title={navigationLabel}
         aria-haspopup="menu"
         aria-expanded={open}
         onClick={() => setOpen((value) => !value)}
@@ -97,25 +133,38 @@ export default function MobileNavigationRail() {
           <nav
             ref={menuRef}
             className="mobile-navigation-rail"
-            aria-label={tr("contextrail.workspacePanels")}
+            aria-label={navigationLabel}
             onKeyDown={onMenuKey}
           >
-            <div className="mobile-navigation-title">{tr("contextrail.workspacePanels")}</div>
-            <div className="mobile-navigation-grid" role="menu">
-              {items.map((item) => (
-                <button
-                  key={item.id}
-                  className={item.active ? "active" : ""}
-                  role="menuitem"
-                  aria-current={item.active ? "page" : undefined}
-                  onClick={() => activate(item)}
-                >
-                  <span className="mobile-navigation-icon" aria-hidden="true"><item.icon /></span>
-                  <span>{item.label}</span>
-                </button>
-              ))}
+            <div className="mobile-navigation-title">{navigationLabel}</div>
+            <div role="menu">
+              {groups.map((group) => {
+                const groupItems = items.filter((item) => item.group === group.id);
+                if (groupItems.length === 0 && group.id !== "settings") return null;
+                return (
+                  <section className="mobile-navigation-section" key={group.id}>
+                    <h2>{group.label}</h2>
+                    {groupItems.length > 0 && (
+                      <div className="mobile-navigation-grid">
+                        {groupItems.map((item) => (
+                          <button
+                            key={item.id}
+                            className={item.active ? "active" : ""}
+                            role="menuitem"
+                            aria-current={item.active ? "page" : undefined}
+                            onClick={() => activate(item)}
+                          >
+                            <span className="mobile-navigation-icon" aria-hidden="true"><item.icon /></span>
+                            <span>{item.label}</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
+                  </section>
+                );
+              })}
             </div>
-            <div className="mobile-navigation-utilities" role="menu">
+            <div className="mobile-navigation-utilities" role="menu" aria-label={tr("common.settings")}>
               <button
                 role="menuitemcheckbox"
                 aria-checked={ui.showDictate}

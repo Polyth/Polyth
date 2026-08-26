@@ -80,6 +80,11 @@ export function useModalSurface({
 
     const onKeyDown = (e: KeyboardEvent) => {
       if (e.key === "Escape") {
+        // Nested menus own their first Escape. In particular, a session-row
+        // menu inside the compact project drawer must close back to its
+        // ellipsis without dismissing the drawer around it.
+        const eventTarget = e.target instanceof Element ? e.target : null;
+        if (eventTarget?.closest('[role="menu"]')) return;
         e.stopPropagation();
         closeRef.current();
         return;
