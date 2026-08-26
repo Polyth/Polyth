@@ -1386,9 +1386,32 @@
 
 @container task-tracker (max-width: 480px) {
   .tt-board-header {
-    gap: 8px;
+    align-items: center;
+    gap: 7px;
+    flex-direction: row;
     padding-top: 8px;
     padding-bottom: 8px;
+  }
+
+  .tt-provider-tabs {
+    width: auto;
+    flex: 1 1 auto;
+  }
+
+  .tt-header-actions,
+  .tt-view-toggle {
+    width: auto;
+    flex: none;
+  }
+
+  .tt-view-toggle button {
+    width: 44px;
+    flex: 0 0 44px;
+    padding: 0;
+  }
+
+  .tt-view-toggle button > span {
+    display: none;
   }
 
   .tt-board-header,
@@ -1410,7 +1433,7 @@
 
   .tt-board-picker,
   .tt-filters {
-    grid-template-columns: minmax(0, 1fr);
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .tt-board-picker select,
