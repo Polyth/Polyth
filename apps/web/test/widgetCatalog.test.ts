@@ -50,7 +50,7 @@ test("workflow package registers its own composer widget", () => {
   const widgets = listWidgets().filter((widget) => widget.pluginId === WORKFLOW_WIDGET_PLUGIN.id);
   assert.deepEqual(
     widgets.map((widget) => widget.id).sort(),
-    ["workflow.composer-action"],
+    ["workflow.active-run", "workflow.composer-action"],
   );
   assert.ok(widgets.every((widget) => typeof widget.render === "function"));
   unregister();

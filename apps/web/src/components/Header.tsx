@@ -26,6 +26,8 @@ import { useSheetTrigger } from "./mobile/sheetTrigger.ts";
 import { api, type GithubStatusDto } from "@polyth/session/web-api";
 import { tr } from "../i18n/index.ts";
 import { useKeymap } from "../../../../packages/hotkeys/widgets/hotkeys.ts";
+import { listSurfaces } from "../surfaces.ts";
+import { getWorkspaceSurface } from "../workspace/surfaceRegistry.ts";
 
 const STROKE = { fill: "none", stroke: "currentColor", strokeWidth: 1.5, strokeLinecap: "round", strokeLinejoin: "round" } as const;
 
@@ -108,10 +110,11 @@ function CapabilityNav() {
     if (pane) return rail === pane;
     const panel = PANEL_OF_CAPABILITY[c.descriptor.id];
     if (panel) return rail === panel;
-    // Package-owned capabilities conventionally share their id with the
-    // workspace view or rail surface they register. This keeps active state
-    // manifest-driven without restoring a shell-owned feature lookup table.
-    return view === c.descriptor.id || rail === c.descriptor.id;
+    const packageSurface = listSurfaces().find((surface) =>
+      (surface.capabilityId ?? surface.id) === c.descriptor.id);
+    if (packageSurface) return rail === packageSurface.id;
+    return getWorkspaceSurface(c.descriptor.id) !== undefined
+      && view === c.descriptor.id;
   };
 
   const eligiblePrimaries = resolved.filter((c) =>
@@ -174,11 +177,21 @@ function CapabilityNav() {
 function CompactViewPicker({ view }: { view: AppView }) {
   const resolved = useResolvedCapabilities();
   const rail = useStore((s) => s.railPlugin);
+  const destination = (capability: ResolvedCapability):
+    { kind: "view" | "rail"; id: string } | null => {
+    const id = capability.descriptor.id;
+    const builtInView = VIEW_OF_CAPABILITY[id];
+    if (builtInView) return { kind: "view", id: builtInView };
+    const builtInRail = PANE_OF_CAPABILITY[id] ?? PANEL_OF_CAPABILITY[id];
+    if (builtInRail) return { kind: "rail", id: builtInRail };
+    if (getWorkspaceSurface(id)) return { kind: "view", id };
+    const packageSurface = listSurfaces().find((surface) =>
+      (surface.capabilityId ?? surface.id) === id);
+    return packageSurface ? { kind: "rail", id: packageSurface.id } : null;
+  };
   const eligibleDestinations = resolved.filter((c) =>
     c.descriptor.available()
-    && (VIEW_OF_CAPABILITY[c.descriptor.id] !== undefined
-      || PANE_OF_CAPABILITY[c.descriptor.id] !== undefined
-      || PANEL_OF_CAPABILITY[c.descriptor.id] !== undefined));
+    && destination(c) !== null);
   // Match the desktop rail's discoverability guarantee: Workflows is
   // package-owned and normally belongs to More, but compact layouts have only
   // this picker. Keep it immediately after Chat so phones and tablets never
@@ -197,10 +210,10 @@ function CompactViewPicker({ view }: { view: AppView }) {
     label: c.descriptor.label,
     group: c.tier === "primary" ? "" : c.tier === "more" ? tr("header.moreTools") : TECHNICAL_GROUP_LABEL,
   }));
-  const currentId = destinations.find((c) =>
-    PANE_OF_CAPABILITY[c.descriptor.id] === rail
-    || PANEL_OF_CAPABILITY[c.descriptor.id] === rail)?.descriptor.id
-    ?? destinations.find((c) => VIEW_OF_CAPABILITY[c.descriptor.id] === view)?.descriptor.id
+  const currentId = destinations.find((capability) => {
+    const target = destination(capability);
+    return target?.kind === "rail" ? target.id === rail : target?.id === view;
+  })?.descriptor.id
     ?? "session";
   const current = items.find((i) => i.id === currentId)?.label ?? tr("header.workspace");
   return (

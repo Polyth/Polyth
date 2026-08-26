@@ -35,7 +35,14 @@ function providerLogoClassNames(): string[] {
       }
     }
   };
-  visit(resolve(import.meta.dirname, "../src"));
+  for (const directory of [
+    resolve(import.meta.dirname, "../src"),
+    resolve(import.meta.dirname, "../../../packages/models/widgets"),
+    resolve(import.meta.dirname, "../../../packages/usage/widgets"),
+    resolve(import.meta.dirname, "../../../packages/fusion/widgets"),
+  ]) {
+    visit(directory);
+  }
   return [...classes].sort();
 }
 
