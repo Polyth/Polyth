@@ -264,10 +264,11 @@ interface TimelineScrollAnchor {
   scrollTop: number;
 }
 
-function FullOutputViewer({ title, text, scrollAnchor, onClose }: {
+function FullOutputViewer({ title, text, scrollAnchor, restoreTarget, onClose }: {
   title: string;
   text: string;
   scrollAnchor?: TimelineScrollAnchor;
+  restoreTarget?: HTMLElement;
   onClose: () => void;
 }) {
   const [query, setQuery] = useState("");
@@ -285,7 +286,9 @@ function FullOutputViewer({ title, text, scrollAnchor, onClose }: {
       initialFocus='input[type="search"]'
       className="execution-viewer"
       backdropClassName="execution-viewer-backdrop"
+      resolveRestoreFocus={() => null}
       onAfterRestoreFocus={() => {
+        if (restoreTarget?.isConnected) restoreTarget.focus({ preventScroll: true });
         if (!scrollAnchor) return;
         const restore = () => {
           if (scrollAnchor.element.isConnected) scrollAnchor.element.scrollTop = scrollAnchor.scrollTop;
@@ -332,6 +335,7 @@ export function ExecutionRow({ message, subagent }: { message: ToolMsg; subagent
     title: string;
     text: string;
     scrollAnchor?: TimelineScrollAnchor;
+    restoreTarget?: HTMLElement;
   } | null>(null);
   const presentation = executionPresentation(message);
   const inputEntries = normalizedInputEntries(message.input);
@@ -356,10 +360,14 @@ export function ExecutionRow({ message, subagent }: { message: ToolMsg; subagent
   };
   const openViewer = (title: string, text: string) => {
     const timeline = rowRef.current?.closest<HTMLElement>(".timeline");
+    const restoreTarget = document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : undefined;
     setViewer({
       title,
       text,
       ...(timeline ? { scrollAnchor: { element: timeline, scrollTop: timeline.scrollTop } } : {}),
+      ...(restoreTarget ? { restoreTarget } : {}),
     });
   };
 
@@ -434,7 +442,7 @@ export function ExecutionRow({ message, subagent }: { message: ToolMsg; subagent
           </div>
         </div>
       </div>
-      {viewer && <FullOutputViewer title={viewer.title} text={viewer.text} scrollAnchor={viewer.scrollAnchor} onClose={() => setViewer(null)} />}
+      {viewer && <FullOutputViewer title={viewer.title} text={viewer.text} scrollAnchor={viewer.scrollAnchor} restoreTarget={viewer.restoreTarget} onClose={() => setViewer(null)} />}
     </>
   );
 }
