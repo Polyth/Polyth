@@ -114,6 +114,7 @@ test("every server feature package is discoverable and has a matching descriptor
     "schedule",
     "secure-safe",
     "ssh",
+    "task-trackers",
     "terminal",
     "usage",
     "walkthrough",

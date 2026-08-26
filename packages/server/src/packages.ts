@@ -37,6 +37,7 @@ export const BUILTIN_PACKAGES = [
   { id: "schedule", name: "Schedule", description: "Schedule recurring and one-time agent tasks.", core: false, enabled: true, settingsGroup: "Engineering", icon: "⏱", hasSettings: false },
   { id: "usage", name: "Usage", description: "Model quota and usage reporting.", core: false, enabled: true, settingsGroup: "Workspace", icon: "📊", hasSettings: true },
   { id: "github", name: "GitHub", description: "GitHub pull request and check integration.", core: false, enabled: true, settingsGroup: "Engineering", icon: "⎇", hasSettings: false },
+  { id: "task-trackers", name: "Jira & Trello", description: "Jira and Trello boards, tasks, agent handoffs, and status updates.", core: false, enabled: true, settingsGroup: "Engineering", icon: "▦", hasSettings: false },
   { id: "knowledge", name: "Knowledge", description: "Project notes, plans, and reusable context.", core: false, enabled: true, settingsGroup: "Workspace", icon: "📚", hasSettings: false },
   { id: "dictation", name: "Voice & Dictation", description: "Speech-to-text dictation and spoken replies.", core: false, enabled: true, settingsGroup: "Workspace", icon: "🎤", hasSettings: true },
   { id: "home-assistant", name: "Home Assistant", description: "Home Assistant entities and controls.", core: false, enabled: false, settingsGroup: "Customize", icon: "🏠", hasSettings: true },
