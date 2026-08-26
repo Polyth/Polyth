@@ -1,7 +1,17 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import type { JsonObject } from "@polyth/contracts";
-import { createMultirunService, type RunOneFn } from "../src/index.ts";
+import type {
+  AgentRuntime,
+  CreateSessionInput,
+  JsonObject,
+  RuntimeEvent,
+} from "@polyth/contracts";
+import {
+  createMultirunService,
+  type RunOneFn,
+  type RunUpdate,
+} from "../src/index.ts";
+import { createMultirunRunOne } from "../src/runner.ts";
 
 interface Harness {
   events: Array<{ sessionId: string; type: string; data: JsonObject }>;
@@ -103,4 +113,60 @@ test("snapshot maps to the wire DTO shape", async () => {
   assert.equal(dto.runs[0]!.status, "completed");
   assert.equal(dto.runs[0]!.agent, "build");
   assert.deepEqual(dto.runs[0]!.model, { providerID: "p", modelID: "m" });
+});
+
+test("runner creates and streams a throwaway session in the resolved cwd", async () => {
+  const listeners = new Set<(sessionId: string, event: RuntimeEvent) => void>();
+  let created: (CreateSessionInput & { sessionId: string; cwd: string }) | undefined;
+  const runtime = {
+    ensureSession: async (input: CreateSessionInput & { sessionId: string; cwd: string }) => {
+      created = input;
+      return "backend-session";
+    },
+    startTurn: async (input: { sessionId: string; text: string }) => {
+      for (const listener of listeners) {
+        listener(input.sessionId, { type: "assistant/chunk", partId: "part-1", text: "partial" });
+        listener(input.sessionId, {
+          type: "assistant/message",
+          partId: "part-1",
+          text: "final",
+          tokens: { input: 2, output: 3 },
+          cost: 0.01,
+        });
+        listener(input.sessionId, { type: "turn/stopped", reason: "completed" });
+      }
+    },
+    onEvent: (listener: (sessionId: string, event: RuntimeEvent) => void) => {
+      listeners.add(listener);
+      return { dispose: () => listeners.delete(listener) };
+    },
+  } as unknown as AgentRuntime;
+  const updates: RunUpdate[] = [];
+  const runOne = createMultirunRunOne(async () => ({
+    rt: runtime,
+    cwd: "/repos/demo-worktrees/fix",
+  }));
+
+  await runOne({
+    sessionId: "parent-session",
+    multirunId: "multi-1",
+    runId: "run-1",
+    prompt: "Compare approaches",
+  }, (patch) => updates.push(patch));
+
+  assert.deepEqual(created, {
+    sessionId: "multirun-run-1",
+    cwd: "/repos/demo-worktrees/fix",
+    projectId: "multirun",
+    title: "polyth multirun",
+  });
+  assert.deepEqual(updates, [
+    { output: "partial" },
+    {
+      output: "final",
+      tokens: { input: 2, output: 3 },
+      cost: 0.01,
+    },
+  ]);
+  assert.equal(listeners.size, 0, "the runtime subscription is disposed");
 });

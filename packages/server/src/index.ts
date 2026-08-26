@@ -36,6 +36,7 @@ import { createProjectService } from "./projects.ts";
 import { projectRoutes } from "./routes/projects.ts";
 import { createPackageRegistry } from "./packages.ts";
 import { createSessionService, type Broadcaster, type RuntimePool } from "./sessions.ts";
+import { resolveSessionRuntimeBinding } from "./sessionRuntime.ts";
 import { createRuntimeCatalog } from "./runtimeCatalog.ts";
 import { createHttpServer, type RouteHandler } from "./http.ts";
 import { packageRoutes } from "./routes/packages.ts";
@@ -467,12 +468,8 @@ export async function boot(opts: BootOptions = {}) {
 
   // --- multirun/fusion/goals resolve the parent session's project/runtime
   // lazily through this binding, so they work for any session.
-  const resolveSessionRuntime = async (sessionId: string) => {
-    const proj = await store.projection(sessionId);
-    const project = proj ? await projects.get(proj.projectId) : null;
-    const rt = await runtimes.forProject(proj?.projectId ?? "__default__");
-    return { rt, cwd: project?.path ?? process.cwd(), model: proj?.model, agent: proj?.agent };
-  };
+  const resolveSessionRuntime = (sessionId: string) =>
+    resolveSessionRuntimeBinding(sessionId, { store, projects, runtimes });
 
   // --- autonomous package discovery. The session service is composed AFTER
   // the packages load (it consumes their services: permissions, git

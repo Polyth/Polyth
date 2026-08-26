@@ -339,7 +339,22 @@ test("placeholder titles are omitted so OpenCode can generate a semantic title",
       cwd: "/tmp",
       title: "New session - 2026-08-26T05:00:55.897Z",
     });
-    assert.deepEqual(fake.sessionCreateBodies, [{}, { title: "Release checklist" }, {}]);
+    await runtime.ensureSession({
+      sessionId: "multirun-placeholder",
+      projectId: "p",
+      cwd: "/tmp",
+      title: "polyth multirun",
+    });
+    await runtime.ensureSession({
+      sessionId: "oneshot-placeholder",
+      projectId: "p",
+      cwd: "/tmp",
+      title: "polyth small-model task",
+    });
+    assert.deepEqual(
+      fake.sessionCreateBodies,
+      [{}, { title: "Release checklist" }, {}, {}, {}],
+    );
   } finally {
     await runtime.dispose();
     fake.server.close();

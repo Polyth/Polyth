@@ -199,6 +199,7 @@ const sessionCreateBody = (
   const placeholder = !title || title === canonical.sessionId
     || value === "new session" || value === "untitled" || value === "untitled session"
     || value === "(untitled)" || value === "(untitled session)"
+    || value === "polyth multirun" || value === "polyth small-model task"
     || /^new session - \d{4}-\d{2}-\d{2}t/.test(value)
     || title.startsWith("ses_") || /^[0-9a-f-]{8,}$/i.test(title);
   return placeholder ? {} : { title };
