@@ -580,7 +580,7 @@ export default function ContextRail() {
 
   return (
     <>
-      {compactContext && <div className="menu-backdrop sheet-backdrop" onClick={() => setRailPlugin(null)} />}
+      {compactContext && <div className="menu-backdrop panel-sheet-backdrop" onClick={() => setRailPlugin(null)} />}
       <aside className={`railbar${open ? " railbar-open" : ""}`} ref={railbarRef}>
         {kept.length > 0 && (
         <div

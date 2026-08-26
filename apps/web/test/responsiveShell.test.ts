@@ -80,12 +80,17 @@ test("CSS carries the same literal width/height contracts", async () => {
 
 test("compact sidebar is a drawer, never display:none with no way back", async () => {
   const css = await read("../src/styles.css");
+  const rail = await read("../src/components/ContextRail.tsx");
   assert.ok(!/\.sidebar\s*\{\s*display:\s*none/.test(css), "the old unrecoverable .sidebar{display:none} must stay dead");
   assert.ok(!/\.rail\s*\{\s*display:\s*none/.test(css), "the old .rail{display:none} strip lie must stay dead");
   assert.ok(css.includes(".sidebar.open"), "drawer open state styled");
   assert.ok(css.includes("min(320px, calc(100vw - 24px))"), "drawer width contract");
   assert.ok(css.includes(".panel-sheet"), "registered panel sheet styled");
   assert.ok(css.includes("min(380px, 100vw)"), "sheet width contract");
+  assert.ok(
+    css.includes(".panel-sheet-backdrop") && rail.includes("menu-backdrop panel-sheet-backdrop"),
+    "panel backdrop has an isolated stack layer below its sheet controls",
+  );
 });
 
 test("header owns the drawer trigger and registry-backed compact navigation rail", async () => {
