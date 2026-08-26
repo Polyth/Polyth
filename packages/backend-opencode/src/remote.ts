@@ -65,6 +65,13 @@ const shortHash = (value: string): string => {
 const PID_LINE_RE = /POLYTH_REMOTE_PID=(\d+)/;
 const IN_USE_RE = /EADDRINUSE|address already in use/i;
 
+/** Non-interactive SSH shells never source the rc files where the opencode
+ *  installer appends its PATH entry, so a healthy install at ~/.opencode/bin
+ *  (or ~/.local/bin) probes as "not installed" and every remote session start
+ *  fails. Prefix each remote invocation with the standard install locations
+ *  instead of trusting the login PATH. */
+const REMOTE_PATH = 'PATH="$HOME/.opencode/bin:$HOME/.local/bin:$PATH"';
+
 /** Cheap capability probe: is the agent binary installed on the remote? */
 export const probeRemoteOpenCode = async (
   host: RemoteHost,
@@ -72,7 +79,7 @@ export const probeRemoteOpenCode = async (
 ): Promise<RemoteOpenCodeProbe> => {
   const safeBin = checkBin(bin);
   const result = await host.exec(
-    `command -v ${safeBin} >/dev/null 2>&1 && ${safeBin} --version 2>/dev/null || echo POLYTH_OC_MISSING`,
+    `${REMOTE_PATH}; command -v ${safeBin} >/dev/null 2>&1 && ${safeBin} --version 2>/dev/null || echo POLYTH_OC_MISSING`,
     { timeoutMs: 20_000 },
   );
   const out = result.stdout.trim();
@@ -107,6 +114,7 @@ const startServe = async (
   // kills its predecessor instead of leaking one process per restart.
   const pidFileExpr = `"\${XDG_CACHE_HOME:-$HOME/.cache}/polyth/serve-${hash}.pid"`;
   const command = [
+    REMOTE_PATH,
     `PF=${pidFileExpr}`,
     'mkdir -p "$(dirname "$PF")"',
     '[ -f "$PF" ] && kill "$(cat "$PF")" 2>/dev/null',

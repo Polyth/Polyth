@@ -41,7 +41,14 @@ import {
   type MutationGuards,
 } from "../messageActions.ts";
 import { applyComposerSeed, discardComposerSeed, loadSeedRecord } from "../drafts.ts";
-import { TIMELINE_CHUNK, TIMELINE_WINDOW, grownLimit, limitToInclude, windowStart } from "../timelineWindow.ts";
+import {
+  LOW_RESOURCE_TIMELINE_WINDOW,
+  TIMELINE_CHUNK,
+  grownLimit,
+  initialTimelineWindow,
+  limitToInclude,
+  windowStart,
+} from "../timelineWindow.ts";
 import {
   RAIL_PANEL_ROWS,
   activePromptIndex,
@@ -54,7 +61,15 @@ import CopyButton from "./CopyButton.tsx";
 import AttachmentPills from "./AttachmentPills.tsx";
 import SelectionMenu from "./SelectionMenu.tsx";
 import SlotHost from "./slots/SlotHost.ts";
-import type { RenderModel, RenderMessage, ToolMsg, AssistantMsg, TaskActivityMsg, UserMsg } from "../reduce.ts";
+import type {
+  AssistantMsg,
+  GithubConflictMsg,
+  RenderMessage,
+  RenderModel,
+  TaskActivityMsg,
+  ToolMsg,
+  UserMsg,
+} from "../reduce.ts";
 import { Icon } from "../icons.tsx";
 import "./messagePinAction.tsx";
 import ProviderLogo from "./ProviderLogo.tsx";
@@ -791,6 +806,27 @@ function TaskActivityRow({ activity }: { activity: TaskActivityMsg }) {
   );
 }
 
+function GithubConflictCard({ message }: { message: GithubConflictMsg }) {
+  const label = tr("pullrequestview.fixingPullRequestConflictsValue", { number: message.prNumber });
+  return (
+    <article
+      className="msg github-conflict-card"
+      data-msg-id={message.id}
+      aria-label={label}
+    >
+      <span className="github-conflict-icon" aria-hidden="true"><Icon.pullRequest /></span>
+      <div className="github-conflict-copy">
+        <strong>{label}</strong>
+        <span>{message.title}</span>
+        <code>{message.baseRefName} ← {message.headRefName}</code>
+      </div>
+      <a className="small-btn" href={message.url} target="_blank" rel="noreferrer">
+        {tr("githubview.openOnGithub")} <Icon.external />
+      </a>
+    </article>
+  );
+}
+
 // Consecutive tool calls fold behind one "Worked for 3m 1s · 4 steps" row.
 function WorkedGroup({ g }: { g: WorkGroup }) {
   const failed = g.tools.some((t) => t.status === "error") || g.tasks.some((task) => task.action === "failed");
@@ -850,6 +886,7 @@ function MessageView({ m, announce, plan, regeneratePrompt, turn, preliminary, o
   if (m.kind === "assistant") {
     return <AssistantView m={m} announce={announce} plan={plan} regeneratePrompt={regeneratePrompt} turn={turn} preliminary={preliminary} />;
   }
+  if (m.kind === "github-conflict") return <GithubConflictCard message={m} />;
   if (m.kind === "task") return <TaskActivityRow activity={m} />;
   return <ToolCard m={m} />;
 }
@@ -1017,7 +1054,23 @@ export default function Timeline({
   const prefs = useUiSettings();
   const sessionId = useStore((s) => s.activeSessionId);
   // L13 windowing: only the last `limit` rows render (see timelineWindow.ts).
-  const [limit, setLimit] = useState(TIMELINE_WINDOW);
+  const initialLimit = initialTimelineWindow(
+    typeof document !== "undefined" && document.body.dataset.desktopLowResource === "true",
+  );
+  const [limit, setLimit] = useState(initialLimit);
+  useEffect(() => {
+    // Desktop settings arrive over IPC and can race the first React render.
+    // Re-read the DOM marker after subscribing so low-resource startup always
+    // releases the extra Markdown/tool subtrees even when IPC resolves late.
+    const applyResourceMode = () => {
+      if (document.body.dataset.desktopLowResource === "true") {
+        setLimit((current) => Math.min(current, LOW_RESOURCE_TIMELINE_WINDOW));
+      }
+    };
+    window.addEventListener("polyth:desktop-performance-changed", applyResourceMode);
+    applyResourceMode();
+    return () => window.removeEventListener("polyth:desktop-performance-changed", applyResourceMode);
+  }, []);
   const anchor = useRef<{ scrollTop: number; scrollHeight: number } | null>(null);
   const pendingJump = useRef<string | null>(null);
   const pendingJumpFocus = useRef(false);
@@ -1037,7 +1090,7 @@ export default function Timeline({
       saveTimelineAnchor(anchorSession, captureTimelineAnchor(el, atBottom.current));
     }
     setAnchorSession(sessionId);
-    setLimit(TIMELINE_WINDOW);
+    setLimit(initialLimit);
     const stored = sessionId !== null ? loadTimelineAnchor(sessionId) : null;
     restoreRef.current = stored !== null && !stored.atBottom ? stored : null;
     atBottom.current = stored?.atBottom ?? true;
@@ -1139,13 +1192,16 @@ export default function Timeline({
     let lastUserText: string | undefined;
     for (const message of visibleMessages) {
       if (message.kind === "user") lastUserText = message.text;
+      else if (message.kind === "github-conflict") lastUserText = undefined;
       else if (message.kind === "assistant" && lastUserText !== undefined) bySeq.set(message.eventSeq, lastUserText);
     }
     return bySeq;
   }, [visibleMessages]);
   const turn = model.turn;
   const turnBroken = turn && (turn.status === "failed" || turn.status === "aborted");
-  const lastUser = [...model.messages].reverse().find((m) => m.kind === "user");
+  const lastPromptBoundary = [...model.messages].reverse()
+    .find((message) => message.kind === "user" || message.kind === "github-conflict");
+  const lastUser = lastPromptBoundary?.kind === "user" ? lastPromptBoundary : undefined;
 
   // L13 windowing: rows render as a suffix; revealing earlier rows keeps the
   // viewport anchored (scrollTop compensates for the height that appeared

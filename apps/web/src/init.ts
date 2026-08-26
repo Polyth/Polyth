@@ -1,7 +1,6 @@
 // Bootstrapping + user actions: REST load, WS wiring, session lifecycle.
 import { api } from "./api.ts";
 import { SyncClient, type SyncStatus } from "./sync.ts";
-import { buildModel } from "./reduce.ts";
 import { displaySessionTitle, isPlaceholderTitle, modelToMarkdown } from "./format.ts";
 import { friendlyError } from "./settings.ts";
 import { formatAppUrl, parseAppUrl } from "./router.ts";
@@ -21,6 +20,7 @@ import {
 import { initPluginBridge } from "./pluginBridge.ts";
 import { reconcilePackage } from "./packages/reconcile.ts";
 import { tr } from "./i18n/index.ts";
+import { desktopBridge } from "./desktopBridge.ts";
 
 let sync: SyncClient | null = null;
 let syncStatus: SyncStatus = "disconnected";
@@ -28,6 +28,30 @@ const syncStatusListeners = new Set<() => void>();
 let lastSubSession: string | undefined;
 let lastProject: string | null | undefined;
 let branchFetchedFor: string | null = null;
+let runtimeCatalogHydrated = false;
+let runtimeCatalogPolicy: "browser" | "pending" | "project" | "interaction" = "browser";
+let openSessionGeneration = 0;
+const hydratedSessions = new Set<string>();
+
+function hydrateRuntimeCatalog(): void {
+  if (runtimeCatalogHydrated) return;
+  runtimeCatalogHydrated = true;
+  void refreshModels();
+  void refreshAgents();
+}
+
+function deferRuntimeCatalogUntilInteraction(): void {
+  const hydrate = () => {
+    if (!store.getState().activeProjectId) return;
+    window.removeEventListener("pointerdown", hydrate, true);
+    window.removeEventListener("keydown", hydrate, true);
+    window.removeEventListener("polyth:hydrate-runtime-catalog", hydrate);
+    hydrateRuntimeCatalog();
+  };
+  window.addEventListener("pointerdown", hydrate, true);
+  window.addEventListener("keydown", hydrate, true);
+  window.addEventListener("polyth:hydrate-runtime-catalog", hydrate);
+}
 
 // Branch is resolved per (project, session): a session attached to a git
 // worktree reports that worktree's branch, never the primary checkout's
@@ -130,8 +154,25 @@ export function init(): void {
   // Promise.all/allSettled before publishing any result is forbidden — a slow
   // or failed catalog request can never delay, erase, or roll back projects.
   void refreshProjects("initial");
-  void refreshModels();
-  void refreshAgents();
+  const desktop = desktopBridge();
+  if (desktop) {
+    runtimeCatalogPolicy = "pending";
+    void desktop.getSettings()
+      .then((settings) => {
+        runtimeCatalogPolicy = settings.lowResourceMode ? "interaction" : "project";
+        if (settings.lowResourceMode) {
+          deferRuntimeCatalogUntilInteraction();
+        } else if (store.getState().activeProjectId) {
+          hydrateRuntimeCatalog();
+        }
+      })
+      .catch(() => {
+        runtimeCatalogPolicy = "project";
+        if (store.getState().activeProjectId) hydrateRuntimeCatalog();
+      });
+  } else {
+    hydrateRuntimeCatalog();
+  }
   startSync();
   // F18: notification clicks from the service worker land here when a tab
   // already exists (postMessage instead of a second window).
@@ -145,6 +186,7 @@ export function init(): void {
     if (s.activeProjectId !== lastProject) {
       lastProject = s.activeProjectId;
       if (s.activeProjectId) {
+        if (runtimeCatalogPolicy === "project") hydrateRuntimeCatalog();
         void refreshSessions(s.activeProjectId);
         fetchBranch(s.activeProjectId, s.activeSessionId);
       } else {
@@ -270,23 +312,30 @@ function startSync(): void {
   const proto = location.protocol === "https:" ? "wss" : "ws";
   sync = new SyncClient();
   sync.onStatus(publishSyncStatus);
-  // Micro-batched ingestion: a WS burst (reconnect gap-fill, fast streaming)
-  // queues one browser task per message. A 0ms timer runs after every task
-  // already in the queue, so the whole burst folds into a single applyEvents
-  // (one store update + one render) instead of one render per event. Dropped
-  // or reordered flushes are harmless — applyEvents sorts and dedupes by seq.
+  // Frame-batched ingestion: streaming and gap-fill bursts fold into at most
+  // one store update per paint. The timeout keeps hidden/background windows
+  // ingesting when requestAnimationFrame is paused.
   let pending: SessionEvent[] = [];
   let flushTimer: ReturnType<typeof setTimeout> | null = null;
+  let flushFrame: number | null = null;
   const flush = (): void => {
+    if (flushTimer !== null) clearTimeout(flushTimer);
+    if (flushFrame !== null && typeof cancelAnimationFrame === "function") cancelAnimationFrame(flushFrame);
     flushTimer = null;
+    flushFrame = null;
     const batch = pending;
     pending = [];
     if (batch.length > 0) store.applyEvents(batch);
   };
+  const scheduleFlush = (): void => {
+    if (flushTimer !== null || flushFrame !== null) return;
+    flushTimer = setTimeout(flush, 32);
+    if (typeof requestAnimationFrame === "function") flushFrame = requestAnimationFrame(flush);
+  };
   sync.onEvent((msg) => {
     if (msg.type === "event") {
       pending.push(msg.event);
-      flushTimer ??= setTimeout(flush, 0);
+      scheduleFlush();
     } else if (msg.type === "projection") {
       store.upsertSession(msg.session);
     } else if (msg.type === "notification/added") {
@@ -321,21 +370,46 @@ export async function openSession(
     showChat?: boolean;
   } = {},
 ): Promise<void> {
-  // Claim the in-flight open BEFORE the first await: the session surface must
-  // represent an unresolved canonical replay as loading, never flash the
-  // fresh-session hero over a populated session (UX-TIMELINE-LAYOUT-01 §8).
-  store.setOpeningSession(sessionId);
+  const generation = ++openSessionGeneration;
+  const before = store.getState();
+  const cachedSession = before.sessions.find((session) => session.id === sessionId);
+  const useCachedView = hydratedSessions.has(sessionId) && cachedSession !== undefined;
+  const afterSeq = hydratedSessions.has(sessionId) ? store.lastSeq(sessionId) : 0;
+
+  // Revisited sessions render their canonical cached history immediately while
+  // metadata and the append-only suffix revalidate. A first open remains in
+  // the loading state so an incomplete WS fragment can never masquerade as the
+  // full log.
+  if (useCachedView) {
+    if (cachedSession.projectId !== before.activeProjectId) store.activateProject(cachedSession.projectId);
+    store.activateSession(sessionId);
+    if (opts.showChat !== false) store.showSessionChat();
+  } else {
+    store.setOpeningSession(sessionId);
+  }
   try {
-    const session = await api.getSession(sessionId);
+    // Metadata and history are independent reads. Starting both together saves
+    // one full round trip on high-latency links and old-session deep links.
+    const [session, events] = await Promise.all([
+      api.getSession(sessionId),
+      api.getEvents(sessionId, afterSeq),
+    ]);
+    if (generation !== openSessionGeneration) return;
+    store.upsertSession(session);
     if (session.projectId !== store.getState().activeProjectId) store.activateProject(session.projectId);
-    const events = await api.getEvents(sessionId, 0);
-    store.applyEvents(events); // one store update for the whole history
+    store.applyEvents(events); // one store update for the whole history/suffix
+    hydratedSessions.add(sessionId);
     maybeSeedFromReplay(sessionId);
     store.activateSession(sessionId);
     if (opts.showChat !== false) store.showSessionChat();
   } finally {
-    // A newer concurrent open owns the claim; only this open's claim clears.
-    if (store.getState().openingSessionId === sessionId) store.setOpeningSession(null);
+    // A newer concurrent open owns the claim and active-session transition.
+    if (
+      generation === openSessionGeneration
+      && store.getState().openingSessionId === sessionId
+    ) {
+      store.setOpeningSession(null);
+    }
   }
 }
 
@@ -346,7 +420,9 @@ export async function openSession(
 function maybeSeedFromReplay(sessionId: string): void {
   const events = store.getState().events[sessionId] ?? [];
   if (events.length === 0) return;
-  const model = buildModel(events);
+  // Prime/reuse the shared incremental reducer cache. Timeline's first render
+  // now receives this model instead of replaying a large history a second time.
+  const model = store.reduceSessionModel(sessionId, events);
   if (model.rewind?.draft) {
     applyComposerSeed(sessionId, rewindSeedKey(model.rewind.markerSeq), model.rewind.draft);
   } else if (model.fork?.draft && !model.fork.seedConsumed) {
@@ -600,7 +676,7 @@ export async function replySecret(requestId: string, action: "save" | "dismiss",
 export function exportSessionMarkdown(): void {
   const s = store.getState();
   if (!s.activeSessionId) return;
-  const model = buildModel(s.events[s.activeSessionId] ?? []);
+  const model = store.reduceSessionModel(s.activeSessionId, s.events[s.activeSessionId] ?? []);
   const stored = s.sessions.find((x) => x.id === s.activeSessionId)?.title ?? "";
   const firstUser = model.messages.find((m) => m.kind === "user");
   const title = displaySessionTitle(stored, s.activeSessionId, firstUser?.kind === "user" ? firstUser.text : undefined);

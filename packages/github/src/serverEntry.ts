@@ -1,8 +1,12 @@
 import type {
+  CreateSessionInput,
   JsonObject,
   ProjectService,
   RouteHandler,
   SessionEvent,
+  SessionProjection,
+  SessionRef,
+  UserTurnInput,
 } from "@polyth/contracts";
 import {
   serverServiceKey,
@@ -11,6 +15,7 @@ import {
 } from "@polyth/plugins";
 import type { GitService } from "@polyth/git";
 import {
+  buildConflictResolutionPrompt,
   createGithubService,
   summarizeChecks,
   type GithubService,
@@ -24,6 +29,12 @@ export function githubRoutes(deps: {
   projects: ProjectService;
   github: GithubService;
   append?: (sessionId: string, type: string, data: JsonObject) => Promise<SessionEvent>;
+  /** Session handoff seam for conflict resolution; optional in minimal deployments. */
+  sessions?: {
+    create: (input: CreateSessionInput) => Promise<SessionRef>;
+    snapshot: (sessionId: string) => Promise<SessionProjection>;
+    send: (sessionId: string, input: UserTurnInput & { githubConflictResolution?: boolean }) => Promise<unknown>;
+  };
   describe?: (root: string, base?: string) => Promise<{ title: string; body: string }>;
 }): RouteHandler {
   const rootOf = async (projectId: string | null): Promise<string> => {
@@ -37,7 +48,31 @@ export function githubRoutes(deps: {
 
   return async ({ path, method, url, json, body }) => {
     if (!path.startsWith("/api/github")) return false;
-    let match = path.match(/^\/api\/github\/pr\/(\d+)\/reviews$/);
+    let match = path.match(/^\/api\/github\/(issue|pr)\/(\d+)\/comments$/);
+    if (match && method === "POST") {
+      const kind = match[1] as "issue" | "pr";
+      const number = Number(match[2]);
+      const input = await body();
+      const root = await rootOf(input.projectId ? String(input.projectId) : null);
+      const comment = String(input.body ?? "").trim();
+      if (!comment) {
+        json(400, { ok: false, reason: "comment body is required" });
+        return true;
+      }
+      const result = kind === "issue"
+        ? await deps.github.addIssueComment(root, number, comment)
+        : await deps.github.addPrComment(root, number, comment);
+      // Agent-generated text and the external write become durable before the
+      // success is exposed to the panel that initiated the publish.
+      if (result.ok && input.sessionId && deps.append) {
+        await deps.append(String(input.sessionId), `${kind}/commented`, {
+          number, body: comment, url: result.data.url,
+        });
+      }
+      json(200, result);
+      return true;
+    }
+    match = path.match(/^\/api\/github\/pr\/(\d+)\/reviews$/);
     if (match && method === "POST") {
       const number = Number(match[1]);
       const input = await body();
@@ -88,6 +123,73 @@ export function githubRoutes(deps: {
       json(200, await deps.github.addLabels(root, Number(match[1]), labels));
       return true;
     }
+    if (path === "/api/github/pr/conflict-agent" && method === "POST") {
+      const input = await body();
+      const projectId = String(input.projectId ?? "").trim();
+      const root = await rootOf(projectId || null);
+      const number = Number(input.number ?? 0);
+      if (!Number.isSafeInteger(number) || number <= 0) {
+        json(400, { ok: false, reason: "a positive PR number is required" });
+        return true;
+      }
+      const target = String(input.target ?? "");
+      if (target !== "new-session" && target !== "current-session") {
+        json(400, { ok: false, reason: "target must be new-session or current-session" });
+        return true;
+      }
+      if (!deps.sessions || !deps.append) {
+        json(503, { ok: false, reason: "conflict resolution agent handoff is not available on this server" });
+        return true;
+      }
+      const detailResult = await deps.github.prDetail(root, number);
+      if (!detailResult.ok) {
+        json(200, detailResult);
+        return true;
+      }
+      const detail = detailResult.data;
+      if (detail.mergeable !== "CONFLICTING") {
+        json(409, { ok: false, reason: `pull request #${number} is not currently conflicting` });
+        return true;
+      }
+
+      let sessionId: string;
+      if (target === "new-session") {
+        sessionId = (await deps.sessions.create({
+          projectId,
+          title: `PR #${number} conflicts`,
+        })).id;
+      } else {
+        sessionId = String(input.sessionId ?? "").trim();
+        if (!sessionId) {
+          json(400, { ok: false, reason: "sessionId is required for current-session" });
+          return true;
+        }
+        let session: SessionProjection;
+        try {
+          session = await deps.sessions.snapshot(sessionId);
+        } catch {
+          json(404, { ok: false, reason: "target session not found" });
+          return true;
+        }
+        if (session.projectId !== projectId) {
+          json(400, { ok: false, reason: "target session belongs to another project" });
+          return true;
+        }
+      }
+
+      const prompt = buildConflictResolutionPrompt(detail, String(input.prompt ?? ""));
+      await deps.append(sessionId, "github/conflict-resolution-started", {
+        prNumber: detail.number,
+        title: detail.title,
+        url: detail.url,
+        baseRefName: detail.baseRefName,
+        headRefName: detail.headRefName,
+      });
+      await deps.sessions.send(sessionId, { text: prompt, githubConflictResolution: true });
+      json(200, { ok: true, data: { sessionId } });
+      return true;
+    }
+
     if (path === "/api/github/pr/create" && method === "POST") {
       const input = await body();
       const root = await rootOf(input.projectId ? String(input.projectId) : null);
@@ -203,6 +305,14 @@ export function githubRoutes(deps: {
       json(200, await deps.github.issues(root, limit));
       return true;
     }
+    if (path === "/api/github/issue") {
+      json(200, await deps.github.getIssue(root, number));
+      return true;
+    }
+    if (path === "/api/github/issue/comments") {
+      json(200, await deps.github.getIssueComments(root, number));
+      return true;
+    }
     if (path === "/api/github/prs") {
       json(200, await deps.github.prs(root, limit));
       return true;
@@ -257,6 +367,11 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
           data,
           { ignorable: true, producerPlugin: "review" },
         ),
+        sessions: {
+          create: (input) => host.sessions.create(input),
+          snapshot: (sessionId) => host.sessions.snapshot(sessionId),
+          send: (sessionId, input) => host.sessions.send(sessionId, input),
+        },
         describe: async (root, base) => {
           let baseRef = base;
           if (!baseRef) {

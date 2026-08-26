@@ -139,6 +139,9 @@ export function mergeThinking(messages: RenderMessage[]): RenderMessage[] {
 
 /** Message as Markdown for the copy action. */
 export function messageMarkdown(m: RenderMessage): string {
+  if (m.kind === "github-conflict") {
+    return `### Fixing merge conflicts for pull request #${m.prNumber}\n\n${m.title}\n\n\`${m.baseRefName} ← ${m.headRefName}\`\n\n${m.url}`;
+  }
   if (m.kind === "task") {
     return tr("utils.taskValueValue", { action: m.action, text: m.text });
   }
@@ -164,6 +167,21 @@ export function messageJson(m: RenderMessage): string {
   if (m.kind === "tool") {
     return JSON.stringify(
       { role: "tool", tool: m.tool, input: m.input, output: m.output, error: m.error, status: m.status, time: m.time },
+      null,
+      2,
+    );
+  }
+  if (m.kind === "github-conflict") {
+    return JSON.stringify(
+      {
+        role: "github-conflict",
+        prNumber: m.prNumber,
+        title: m.title,
+        url: m.url,
+        baseRefName: m.baseRefName,
+        headRefName: m.headRefName,
+        time: m.time,
+      },
       null,
       2,
     );
@@ -236,16 +254,53 @@ export function saveDraft(sessionId: string, text: string): void {
   }
 }
 
+function copyTextFallback(text: string): boolean {
+  if (typeof document === "undefined" || !document.body || typeof document.execCommand !== "function") {
+    return false;
+  }
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.setAttribute("readonly", "");
+  textarea.setAttribute("aria-hidden", "true");
+  textarea.style.position = "fixed";
+  textarea.style.inset = "0 auto auto 0";
+  textarea.style.opacity = "0";
+  textarea.style.pointerEvents = "none";
+  document.body.appendChild(textarea);
+  try {
+    textarea.select();
+    textarea.setSelectionRange(0, text.length);
+    return document.execCommand("copy");
+  } catch {
+    return false;
+  } finally {
+    textarea.remove();
+  }
+}
+
 /** Copy text to the clipboard; injectable for tests. Returns success. */
-export async function copyText(
+export function copyText(
   text: string,
   clip?: { writeText(t: string): Promise<void> },
 ): Promise<boolean> {
+  const clipboard = clip ?? (
+    typeof navigator !== "undefined"
+      && globalThis.isSecureContext === true
+      && typeof navigator.clipboard?.writeText === "function"
+      ? navigator.clipboard
+      : undefined
+  );
+  if (!clipboard) {
+    // Keep the legacy operation in the original user-gesture call stack.
+    return Promise.resolve(copyTextFallback(text));
+  }
   try {
-    await (clip ?? navigator.clipboard).writeText(text);
-    return true;
+    return clipboard.writeText(text).then(
+      () => true,
+      () => copyTextFallback(text),
+    );
   } catch {
-    return false;
+    return Promise.resolve(copyTextFallback(text));
   }
 }
 

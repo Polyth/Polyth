@@ -81,6 +81,10 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 export interface BootOptions {
   port?: number;
   dataDir?: string;
+  /** Optional listen address. The desktop host pins this to loopback. */
+  hostname?: string;
+  /** Static SPA directory override for packaged hosts. */
+  webDist?: string;
   opencode?: Partial<OpenCodeAdapterOptions>;
   /** Workspace packages/ directory scanned for polyth.serverEntry markers. */
   packagesDir?: string;
@@ -731,7 +735,7 @@ export async function boot(opts: BootOptions = {}) {
     },
     systemInfo: (local) => ({
       version: "0.1.0",
-      applicationUrl: `http://127.0.0.1:${port}`,
+      applicationUrl: `http://${opts.hostname ?? "127.0.0.1"}:${port}`,
       tunnelUrl: process.env.POLYTH_TUNNEL_URL ?? null,
       dataDirLabel: local ? dataDir : "Polyth data directory",
       capabilities: allCapabilities(),
@@ -781,7 +785,7 @@ export async function boot(opts: BootOptions = {}) {
   const server = createHttpServer({
     sessions, projects, runtimes, routes, visibility, auth, catalog: runtimeCatalog,
     capabilities: allCapabilities,
-    webDist: resolve(__dirname, "../../../apps/web/dist"),
+    webDist: resolve(opts.webDist ?? resolve(__dirname, "../../../apps/web/dist")),
     version: "0.1.0",
   });
   // order matters: /ws (session gateway) aborts upgrades whose path it does
@@ -792,8 +796,10 @@ export async function boot(opts: BootOptions = {}) {
   for (const cb of httpServerCallbacks.splice(0)) cb(httpServerContext);
   live = attachWs(server, sessions, svc<BrowserForWs>("browser"), svc<DictationForWs>("dictation"), wsAuthorize);
 
-  await new Promise<void>((res) => server.listen(port, res));
-  console.log(`[polyth] server on http://127.0.0.1:${port}  data=${dataDir}`);
+  await new Promise<void>((res) => opts.hostname
+    ? server.listen(port, opts.hostname, res)
+    : server.listen(port, res));
+  console.log(`[polyth] server on http://${opts.hostname ?? "127.0.0.1"}:${port}  data=${dataDir}`);
 
   const shutdown = async () => {
     for (const descriptor of packageRegistry.list().toReversed()) {

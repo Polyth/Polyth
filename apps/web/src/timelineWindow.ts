@@ -7,6 +7,13 @@
 // already far below the raw event count.
 export const TIMELINE_WINDOW = 150;
 export const TIMELINE_CHUNK = 150;
+export const LOW_RESOURCE_TIMELINE_WINDOW = 75;
+
+/** Low-resource desktop mode keeps fewer Markdown/tool subtrees mounted while
+ * preserving the same suffix-window and reveal controls. */
+export function initialTimelineWindow(lowResource = false): number {
+  return lowResource ? LOW_RESOURCE_TIMELINE_WINDOW : TIMELINE_WINDOW;
+}
 
 /** Index of the first rendered row when the last `limit` of `total` rows show. */
 export function windowStart(total: number, limit: number): number {

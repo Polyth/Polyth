@@ -154,12 +154,19 @@ const toInfo = (s: TermSession): TerminalInfo => ({
   ...(s.exitCode !== undefined ? { exitCode: s.exitCode } : {}),
 });
 
-export function createTerminalService(opts: { replayBytes?: number; forcePipe?: boolean } = {}): TerminalService {
+export function createTerminalService(opts: {
+  replayBytes?: number;
+  forcePipe?: boolean;
+  maxSessions?: number;
+} = {}): TerminalService {
   const sessions = new Map<string, TermSession>();
   const dataCbs = new Set<(id: string, data: string) => void>();
   const exitCbs = new Set<(id: string, exitCode: number | null) => void>();
   const replayBytes = opts.replayBytes ?? DEFAULT_REPLAY_BYTES;
   const usePty = !opts.forcePipe && nodePty !== null && process.env.POLYTH_NO_PTY !== "1";
+  const maxSessions = Number.isFinite(opts.maxSessions)
+    ? Math.max(1, Math.min(100, Math.floor(opts.maxSessions!)))
+    : Number.POSITIVE_INFINITY;
 
   const killGroup = (s: TermSession, signal: NodeJS.Signals) => {
     // node-pty children are session leaders, pipe children get detached=false —
@@ -183,6 +190,10 @@ export function createTerminalService(opts: { replayBytes?: number; forcePipe?: 
 
   const service: TerminalService = {
     async create(input) {
+      const activeSessions = [...sessions.values()].filter((session) => session.running).length;
+      if (activeSessions >= maxSessions) {
+        throw Object.assign(new Error(`terminal limit reached (${maxSessions})`), { code: "resource-limit" });
+      }
       const id = randomUUID();
       const cwd = input.cwd ?? input.projectId; // route resolves projectId -> path
       const title = basename(cwd) || cwd;

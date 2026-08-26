@@ -471,6 +471,7 @@ export default function Header() {
         </button>
         <MobileComposerControlsMenu />
         <UserMenu githubUser={githubUser} />
+        <SlotHost slot="app.window.controls" />
       </header>
     );
   }
@@ -527,6 +528,7 @@ export default function Header() {
           </div>
         )}
         {(!compact || !chatSurface) && <UserMenu githubUser={githubUser} />}
+        <SlotHost slot="app.window.controls" />
       </header>
     </>
   );

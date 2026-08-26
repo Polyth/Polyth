@@ -402,7 +402,11 @@ export interface GithubRepoDto {
   defaultBranch: string; isPrivate: boolean;
 }
 export interface GithubIssueDto {
-  number: number; title: string; state: string; author: string; updatedAt: string; url: string;
+  number: number; title: string; state: string; author: string; updatedAt: string; url: string; body?: string;
+}
+export interface GithubIssueDetailDto extends GithubIssueDto { body: string; createdAt: string }
+export interface GithubIssueCommentDto {
+  id: string; author: string; body: string; createdAt: string; url: string;
 }
 export interface GithubPrDto extends GithubIssueDto { isDraft: boolean; headRefName: string }
 export interface CurrentPrSummaryDto {
@@ -1017,6 +1021,14 @@ export const api = {
     jfetch<GhListResult<GithubIssueDto[]>>(`/api/github/issues?projectId=${encodeURIComponent(projectId)}&limit=${limit}`).catch(
       (): GhListResult<GithubIssueDto[]> => ({ ok: false, reason: tr("settings.pages.serverUnreachable") }),
     ),
+  githubIssueDetail: (projectId: string, number: number) =>
+    jfetch<GhListResult<GithubIssueDetailDto>>(`/api/github/issue?projectId=${encodeURIComponent(projectId)}&number=${number}`).catch(
+      (): GhListResult<GithubIssueDetailDto> => ({ ok: false, reason: tr("settings.pages.serverUnreachable") }),
+    ),
+  githubIssueComments: (projectId: string, number: number) =>
+    jfetch<GhListResult<GithubIssueCommentDto[]>>(`/api/github/issue/comments?projectId=${encodeURIComponent(projectId)}&number=${number}`).catch(
+      (): GhListResult<GithubIssueCommentDto[]> => ({ ok: false, reason: tr("settings.pages.serverUnreachable") }),
+    ),
   githubPrs: (projectId: string, limit = 30) =>
     jfetch<GhListResult<GithubPrDto[]>>(`/api/github/prs?projectId=${encodeURIComponent(projectId)}&limit=${limit}`).catch(
       (): GhListResult<GithubPrDto[]> => ({ ok: false, reason: tr("settings.pages.serverUnreachable") }),
@@ -1059,6 +1071,10 @@ export const api = {
     commitSha?: string; confirm?: boolean; sessionId?: string;
   }) =>
     jfetch<GhListResult<{ id: string; url?: string }>>(`/api/github/pr/${number}/reviews`, json("POST", input)),
+  githubAddComment: (kind: "issue" | "pr", number: number, input: {
+    projectId: string; body: string; sessionId?: string;
+  }) =>
+    jfetch<GhListResult<{ url: string }>>(`/api/github/${kind}/${number}/comments`, json("POST", input)),
   githubAddLabels: (number: number, projectId: string, labels: string[]) =>
     jfetch<GhListResult<{ labels: string[] }>>(`/api/github/pr/${number}/labels`, json("POST", { projectId, labels })),
 
@@ -1069,6 +1085,14 @@ export const api = {
     jfetch<GhListResult<{ number: number }>>(`/api/github/pr/update`, json("POST", input)),
   githubPrMerge: (input: { projectId: string; number: number; strategy: "squash" | "merge" | "rebase"; sessionId?: string }) =>
     jfetch<GhListResult<{ number: number; strategy: string }>>(`/api/github/pr/merge`, json("POST", { ...input, confirm: true })),
+  githubConflictAgent: (input: {
+    projectId: string;
+    number: number;
+    prompt: string;
+    target: "new-session" | "current-session";
+    sessionId?: string;
+  }) =>
+    jfetch<GhListResult<{ sessionId: string }>>(`/api/github/pr/conflict-agent`, json("POST", input)),
   githubPrDescribe: (projectId: string, base?: string) =>
     jfetch<GhListResult<{ title: string; body: string }>>(`/api/github/pr/describe`, json("POST", { projectId, ...(base ? { base } : {}) })).catch(
       (e: unknown): GhListResult<{ title: string; body: string }> => ({ ok: false, reason: e instanceof Error ? e.message : String(e) }),

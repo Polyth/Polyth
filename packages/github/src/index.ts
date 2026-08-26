@@ -52,6 +52,21 @@ export interface GithubIssue {
   author: string;
   updatedAt: string;
   url: string;
+  /** Included by detail reads; list reads may omit it to keep payloads small. */
+  body?: string;
+}
+
+export interface GithubIssueDetail extends GithubIssue {
+  body: string;
+  createdAt: string;
+}
+
+export interface GithubIssueComment {
+  id: string;
+  author: string;
+  body: string;
+  createdAt: string;
+  url: string;
 }
 
 export interface GithubPr extends GithubIssue {
@@ -97,6 +112,31 @@ export interface PrDetail {
   mergeable: string;
   createdAt: string;
   updatedAt: string;
+}
+
+export function buildConflictResolutionPrompt(
+  detail: Pick<PrDetail, "number" | "title" | "url" | "baseRefName" | "headRefName">,
+  userPrompt: string,
+): string {
+  const instructions = userPrompt.trim();
+  return [
+    `Resolve the merge conflicts for pull request #${detail.number}.`,
+    "",
+    "Pull request context:",
+    `- Title: ${detail.title}`,
+    `- URL: ${detail.url}`,
+    `- Base branch: ${detail.baseRefName}`,
+    `- Head branch: ${detail.headRefName}`,
+    "",
+    "User instructions:",
+    instructions || "Inspect and resolve every merge conflict in the current worktree.",
+    "",
+    "Required safety and completion steps:",
+    "- Resolve the conflicts carefully and explain each non-obvious decision.",
+    "- Run the relevant tests or checks after resolving the conflicts.",
+    "- Commit the completed conflict resolution locally with a descriptive commit message.",
+    "- Do not merge the pull request or push any commits without explicit user approval.",
+  ].join("\n");
 }
 
 export interface PrFile {
@@ -153,7 +193,11 @@ export interface GithubService {
   status(cwd: string): Promise<GithubStatus>;
   repo(cwd: string): Promise<GhResult<GithubRepo>>;
   issues(cwd: string, limit?: number): Promise<GhResult<GithubIssue[]>>;
+  getIssue(cwd: string, number: number): Promise<GhResult<GithubIssueDetail>>;
+  getIssueComments(cwd: string, number: number): Promise<GhResult<GithubIssueComment[]>>;
+  addIssueComment(cwd: string, number: number, body: string): Promise<GhResult<{ url: string }>>;
   prs(cwd: string, limit?: number): Promise<GhResult<GithubPr[]>>;
+  addPrComment(cwd: string, number: number, body: string): Promise<GhResult<{ url: string }>>;
   currentPrSummary(cwd: string): Promise<GhResult<CurrentPrSummary>>;
   prDetail(cwd: string, number: number): Promise<GhResult<PrDetail>>;
   prFiles(cwd: string, number: number): Promise<GhResult<PrFile[]>>;
@@ -282,6 +326,65 @@ export function createGithubService(deps: { exec?: ExecFn } = {}): GithubService
       };
     },
 
+    async getIssue(cwd, number) {
+      const r = await ghJson<{
+        number: number; title: string; state: string; author: { login: string } | null;
+        updatedAt: string; createdAt: string; url: string; body: string | null;
+      }>(cwd, [
+        "issue", "view", String(number), "--json",
+        "number,title,state,author,updatedAt,createdAt,url,body",
+      ]);
+      if (!r.ok) return r;
+      return {
+        ok: true,
+        data: {
+          number: r.data.number,
+          title: r.data.title,
+          state: r.data.state,
+          author: r.data.author?.login ?? "",
+          updatedAt: r.data.updatedAt,
+          createdAt: r.data.createdAt,
+          url: r.data.url,
+          body: r.data.body ?? "",
+        },
+      };
+    },
+
+    async getIssueComments(cwd, number) {
+      const r = await ghJson<{
+        comments?: Array<{
+          id?: string; author: { login: string } | null; body: string;
+          createdAt: string; url: string;
+        }>;
+      }>(cwd, ["issue", "view", String(number), "--json", "comments"]);
+      if (!r.ok) return r;
+      return {
+        ok: true,
+        data: (r.data.comments ?? []).map((comment, index) => ({
+          id: comment.id || `comment-${index}`,
+          author: comment.author?.login ?? "",
+          body: comment.body ?? "",
+          createdAt: comment.createdAt ?? "",
+          url: comment.url ?? "",
+        })),
+      };
+    },
+
+    async addIssueComment(cwd, number, body) {
+      const text = body.trim();
+      if (!text) return { ok: false, reason: "comment body is required" };
+      try {
+        const { stdout } = await exec(
+          "gh",
+          ["issue", "comment", String(number), "--body-file", "-"],
+          { cwd, input: text },
+        );
+        return { ok: true, data: { url: stdout.trim() } };
+      } catch (e) {
+        return { ok: false, reason: reasonOf(e) };
+      }
+    },
+
     async prs(cwd, limit = 30) {
       const r = await ghJson<Array<{ number: number; title: string; state: string; author: { login: string } | null; updatedAt: string; url: string; isDraft: boolean; headRefName: string }>>(
         cwd,
@@ -296,6 +399,21 @@ export function createGithubService(deps: { exec?: ExecFn } = {}): GithubService
           isDraft: p.isDraft === true, headRefName: p.headRefName,
         })),
       };
+    },
+
+    async addPrComment(cwd, number, body) {
+      const text = body.trim();
+      if (!text) return { ok: false, reason: "comment body is required" };
+      try {
+        const { stdout } = await exec(
+          "gh",
+          ["pr", "comment", String(number), "--body-file", "-"],
+          { cwd, input: text },
+        );
+        return { ok: true, data: { url: stdout.trim() } };
+      } catch (e) {
+        return { ok: false, reason: reasonOf(e) };
+      }
     },
 
     async currentPrSummary(cwd) {

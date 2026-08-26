@@ -215,11 +215,15 @@ export function attachTerminalWs(server: Server, deps: {
 
 export default function registerPackage(host: ServerPackageHost): ServerPackage {
   // POLYTH_TERM_REPLAY_BYTES caps per-PTY scrollback replay (default 200 KB).
+  // POLYTH_MAX_TERMINALS optionally bounds concurrent terminal processes.
   // Shared with the session service (composer shell) and tracks — published at
   // load time so it exists even while this package's routes are disabled.
   const terminals = createTerminalService({
     ...(Number(process.env.POLYTH_TERM_REPLAY_BYTES) > 0
       ? { replayBytes: Number(process.env.POLYTH_TERM_REPLAY_BYTES) }
+      : {}),
+    ...(Number(process.env.POLYTH_MAX_TERMINALS) > 0
+      ? { maxSessions: Number(process.env.POLYTH_MAX_TERMINALS) }
       : {}),
   });
   host.services.provide(serverServiceKey<TerminalService>("terminal"), terminals);

@@ -89,6 +89,7 @@ const SETTINGS_ICON_BY_PAGE: Record<string, keyof typeof Icon> = {
   behavior: "pencil",
   widgets: "widgets",
   packages: "package",
+  desktop: "sliders",
   voice: "mic",
   usage: "usage",
   git: "branch",

@@ -56,6 +56,8 @@ export interface PolythSettings {
   autoTitleSessions: boolean; // derive a title from the first prompt
   showArchived: boolean; // show archived sessions in the sidebar
   branchTemplate: string; // git preference, e.g. "feat/{slug}"
+  conflictAgentPrompt: string; // hidden model prompt used for PR conflict handoffs
+  conflictAgentTarget: "new-session" | "current-session";
 }
 
 export const SETTINGS_KEY = "polyth.productSettings.v1";
@@ -74,6 +76,8 @@ export const DEFAULT_SETTINGS: PolythSettings = {
   autoTitleSessions: true,
   showArchived: true,
   branchTemplate: "feat/{slug}",
+  conflictAgentPrompt: "Walk through the merge conflicts in this worktree and resolve them, explaining each decision.",
+  conflictAgentTarget: "new-session",
 };
 
 function pickNumber(v: unknown, fallback: number, min: number, max: number): number {
@@ -113,6 +117,8 @@ export function normalizeSettings(raw: unknown): PolythSettings {
     autoTitleSessions: pickBool(r.autoTitleSessions, d.autoTitleSessions),
     showArchived: pickBool(r.showArchived, d.showArchived),
     branchTemplate: pickString(r.branchTemplate, d.branchTemplate),
+    conflictAgentPrompt: pickString(r.conflictAgentPrompt, d.conflictAgentPrompt),
+    conflictAgentTarget: r.conflictAgentTarget === "current-session" ? "current-session" : "new-session",
   };
 }
 

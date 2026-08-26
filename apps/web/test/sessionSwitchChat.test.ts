@@ -23,8 +23,19 @@ Object.defineProperty(globalThis, "HTMLElement", {
 
 // Deterministic sessions API: any session id resolves to project p1 with an
 // empty event log — openSession's store transition is the unit under test.
+let requestGate: Promise<void> | null = null;
+let releaseRequests: (() => void) | null = null;
+let blockedSession: string | null = null;
+let blockedSessionGate: Promise<void> | null = null;
+let releaseBlockedSession: (() => void) | null = null;
+let requestedPaths: string[] = [];
 (globalThis as { fetch?: unknown }).fetch = async (url: string) => {
   const u = new URL(String(url), "http://localhost:3000");
+  requestedPaths.push(`${u.pathname}${u.search}`);
+  if (requestGate) await requestGate;
+  if (blockedSession && u.pathname.startsWith(`/api/sessions/${blockedSession}`)) {
+    await blockedSessionGate;
+  }
   const m = /^\/api\/sessions\/([^/]+)$/.exec(u.pathname);
   const body: unknown = m
     ? { id: m[1], projectId: "p1", title: "T", status: "idle", createdAt: 1, updatedAt: 1 }
@@ -45,6 +56,32 @@ const { openSession } = await import("../src/init.ts");
 const { registerSurface } = await import("../src/surfaces.ts");
 const { getWorkspacePanePrefs } = await import("../src/workspace/panePrefs.ts");
 const { getWorkspaceMode, setWorkspaceMode } = await import("../src/widgets/workspaceMode.ts");
+
+function blockFetches(): void {
+  requestGate = new Promise<void>((resolve) => {
+    releaseRequests = resolve;
+  });
+}
+
+function unblockFetches(): void {
+  releaseRequests?.();
+  requestGate = null;
+  releaseRequests = null;
+}
+
+function blockSession(sessionId: string): void {
+  blockedSession = sessionId;
+  blockedSessionGate = new Promise<void>((resolve) => {
+    releaseBlockedSession = resolve;
+  });
+}
+
+function unblockSession(): void {
+  releaseBlockedSession?.();
+  blockedSession = null;
+  blockedSessionGate = null;
+  releaseBlockedSession = null;
+}
 
 // A minimal canonical workspace surface so openWorkspacePane admits "files"
 // without mounting the real component tree.
@@ -96,6 +133,53 @@ test("boot restoration keeps the restored workspace pane open", async () => {
   assert.equal(s.railPlugin, "files", "boot path must not close the restored pane");
   assert.equal(s.activeView, "session");
   assert.equal(getWorkspaceMode(), "widgets", "boot restoration preserves the saved workspace mode");
+});
+
+test("session metadata and history start in parallel on a cold open", async () => {
+  requestedPaths = [];
+  blockFetches();
+  const opening = openSession("parallel");
+  await Promise.resolve();
+
+  assert.deepEqual(requestedPaths, [
+    "/api/sessions/parallel",
+    "/api/sessions/parallel/events?afterSeq=0",
+  ]);
+
+  unblockFetches();
+  await opening;
+  assert.equal(store.getState().activeSessionId, "parallel");
+});
+
+test("a hydrated session renders from cache while its suffix revalidates", async () => {
+  store.activateSession(null);
+  store.setActiveView("goals");
+  requestedPaths = [];
+  blockFetches();
+
+  const revalidating = openSession("parallel");
+  assert.equal(store.getState().activeSessionId, "parallel", "cached session activates synchronously");
+  assert.equal(store.getState().activeView, "session", "cached chat is immediately usable");
+  assert.deepEqual(requestedPaths, [
+    "/api/sessions/parallel",
+    "/api/sessions/parallel/events?afterSeq=0",
+  ]);
+
+  unblockFetches();
+  await revalidating;
+});
+
+test("a slower earlier open cannot replace a newer selected session", async () => {
+  blockSession("slow");
+  const slow = openSession("slow");
+  await Promise.resolve();
+
+  await openSession("newer");
+  assert.equal(store.getState().activeSessionId, "newer");
+
+  unblockSession();
+  await slow;
+  assert.equal(store.getState().activeSessionId, "newer");
 });
 
 test("starting a new chat records only UI intent until the first send", () => {

@@ -933,6 +933,32 @@ export function GitPage() {
               onChange={(e) => updateSettings({ branchTemplate: e.target.value })}
             />
           </Row>
+          <Row
+            label={tr("settings.pages.conflictAgentPrompt")}
+            hint={tr("settings.pages.conflictAgentPromptHint")}
+            itemId="git.conflictAgentPrompt"
+          >
+            <textarea
+              className="inp git-conflict-agent-prompt"
+              rows={4}
+              value={settings.conflictAgentPrompt}
+              onChange={(event) => updateSettings({ conflictAgentPrompt: event.target.value })}
+            />
+          </Row>
+          <Row
+            label={tr("settings.pages.conflictAgentTarget")}
+            hint={tr("settings.pages.conflictAgentTargetHint")}
+            itemId="git.conflictAgentTarget"
+          >
+            <Seg
+              value={settings.conflictAgentTarget}
+              options={[
+                ["new-session", tr("settings.pages.newSession")],
+                ["current-session", tr("settings.pages.currentSession")],
+              ]}
+              onChange={(conflictAgentTarget) => updateSettings({ conflictAgentTarget })}
+            />
+          </Row>
           <Row label={tr("settings.pages.fullView")} hint={tr("settings.pages.stageCommitBranchAndManageWorktrees")}>
             <button className="small-btn" onClick={() => { setOverlay(null); openWorkspacePane("git"); }}>{tr("settings.pages.openGitView")}</button>
           </Row>

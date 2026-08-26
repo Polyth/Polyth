@@ -1,0 +1,160 @@
+name: Desktop builds
+
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - "apps/desktop/**"
+      - "apps/web/**"
+      - "packages/**"
+      - "package*.json"
+      - ".github/workflows/desktop-release.yml"
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  package:
+    name: ${{ matrix.label }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: Linux AppImage x64
+            os: ubuntu-24.04
+            platform: linux
+            arch: x64
+            builder: --linux AppImage --x64
+          - label: Linux AppImage arm64
+            os: ubuntu-24.04-arm
+            platform: linux
+            arch: arm64
+            builder: --linux AppImage --arm64
+          - label: macOS universal DMG + update ZIP
+            os: macos-14
+            platform: darwin
+            arch: universal
+            builder: --mac dmg zip --universal
+          - label: Windows NSIS x64
+            os: windows-2025
+            platform: win32
+            arch: x64
+            builder: --win nsis --x64
+          - label: Windows NSIS arm64
+            os: windows-2025
+            platform: win32
+            arch: arm64
+            builder: --win nsis --arm64 --config.publish.channel=latest-arm64
+    runs-on: ${{ matrix.os }}
+    env:
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      CSC_LINK: ${{ secrets.CSC_LINK }}
+      CSC_KEY_PASSWORD: ${{ secrets.CSC_KEY_PASSWORD }}
+      APPLE_ID: ${{ secrets.APPLE_ID }}
+      APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+      APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+      WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+      WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.22.0
+          cache: npm
+
+      - name: Validate release tag matches desktop version
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: bash
+        run: |
+          VERSION="$(node -p "require('./apps/desktop/package.json').version")"
+          test "$GITHUB_REF_NAME" = "v$VERSION" || {
+            echo "Release tag $GITHUB_REF_NAME does not match desktop version $VERSION" >&2
+            exit 1
+          }
+
+      - name: Validate macOS release signing and notarization secrets
+        if: startsWith(github.ref, 'refs/tags/v') && matrix.platform == 'darwin'
+        shell: bash
+        run: |
+          for NAME in CSC_LINK CSC_KEY_PASSWORD APPLE_ID APPLE_APP_SPECIFIC_PASSWORD APPLE_TEAM_ID; do
+            test -n "${!NAME}" || {
+              echo "Required macOS release secret $NAME is not configured" >&2
+              exit 1
+            }
+          done
+
+      - name: Validate Windows release signing secrets
+        if: startsWith(github.ref, 'refs/tags/v') && matrix.platform == 'win32'
+        shell: bash
+        run: |
+          for NAME in WIN_CSC_LINK WIN_CSC_KEY_PASSWORD; do
+            test -n "${!NAME}" || {
+              echo "Required Windows release secret $NAME is not configured" >&2
+              exit 1
+            }
+          done
+
+      - name: Install workspace dependencies
+        run: npm ci
+
+      - name: Install both esbuild binaries for universal macOS
+        if: matrix.arch == 'universal'
+        shell: bash
+        run: |
+          ESBUILD_VERSION="$(node -p "require('./node_modules/esbuild/package.json').version")"
+          npm install --ignore-scripts --no-save --package-lock=false --force \
+            "@esbuild/darwin-x64@$ESBUILD_VERSION" \
+            "@esbuild/darwin-arm64@$ESBUILD_VERSION"
+
+      - name: Build web and desktop bundles
+        run: npm run build:desktop
+
+      - name: Download pinned OpenCode
+        if: matrix.arch != 'universal'
+        shell: bash
+        run: POLYTH_TARGET_PLATFORM=${{ matrix.platform }} POLYTH_TARGET_ARCH=${{ matrix.arch }} npm run desktop:download-opencode
+
+      - name: Download both pinned OpenCode binaries for universal macOS
+        if: matrix.arch == 'universal'
+        shell: bash
+        run: |
+          POLYTH_TARGET_PLATFORM=darwin POLYTH_TARGET_ARCH=x64 npm run desktop:download-opencode
+          POLYTH_TARGET_PLATFORM=darwin POLYTH_TARGET_ARCH=arm64 npm run desktop:download-opencode
+
+      - name: Package unsigned validation artifact
+        if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+        working-directory: apps/desktop
+        run: npx electron-builder ${{ matrix.builder }} --publish never
+
+      - name: Package and publish release artifact
+        if: startsWith(github.ref, 'refs/tags/v')
+        working-directory: apps/desktop
+        run: npx electron-builder ${{ matrix.builder }} --publish always
+
+      - name: End-to-end test packaged AppImage
+        if: matrix.platform == 'linux'
+        shell: bash
+        run: |
+          APPIMAGE="$(ls apps/desktop/release/*.AppImage | sed -n '1p')"
+          xvfb-run -a node apps/desktop/test/appimage-e2e.mjs \
+            "$APPIMAGE" \
+            "apps/desktop/release/appimage-e2e.png" \
+            "apps/desktop/release/appimage-e2e.log" \
+            "$GITHUB_WORKSPACE"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: polyth-desktop-${{ matrix.platform }}-${{ matrix.arch }}
+          path: |
+            apps/desktop/release/*.AppImage
+            apps/desktop/release/*.dmg
+            apps/desktop/release/*.zip
+            apps/desktop/release/*.exe
+            apps/desktop/release/*.blockmap
+            apps/desktop/release/latest*.yml
+            apps/desktop/release/appimage-e2e.*
+          if-no-files-found: error

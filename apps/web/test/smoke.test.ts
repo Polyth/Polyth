@@ -1009,11 +1009,82 @@ test("firstUserText finds the first non-empty user message", () => {
   assert.equal(firstUserText([]), undefined);
 });
 
-test("copyText reports success and failure via injected clipboard", async () => {
+test("copyText supports an injected clipboard and reports failure without a fallback", async () => {
   let copied = "";
   assert.equal(await copyText("abc", { writeText: async (t) => void (copied = t) }), true);
   assert.equal(copied, "abc");
   assert.equal(await copyText("abc", { writeText: async () => { throw new Error("denied"); } }), false);
+});
+
+test("copyText uses the secure Clipboard API then falls back to execCommand", async () => {
+  const documentDescriptor = Object.getOwnPropertyDescriptor(globalThis, "document");
+  const navigatorDescriptor = Object.getOwnPropertyDescriptor(globalThis, "navigator");
+  const secureDescriptor = Object.getOwnPropertyDescriptor(globalThis, "isSecureContext");
+  let textareaValue = "";
+  let selected = false;
+  let removed = false;
+  let execCalls = 0;
+  let execResult = true;
+  const textarea = {
+    value: "",
+    style: {} as Record<string, string>,
+    setAttribute() {},
+    select() { selected = true; },
+    setSelectionRange() {},
+    remove() { removed = true; },
+  };
+  const restore = (key: "document" | "navigator" | "isSecureContext", descriptor: PropertyDescriptor | undefined) => {
+    if (descriptor) Object.defineProperty(globalThis, key, descriptor);
+    else delete (globalThis as Record<string, unknown>)[key];
+  };
+
+  try {
+    Object.defineProperty(globalThis, "document", {
+      configurable: true,
+      value: {
+        body: { appendChild() { textareaValue = textarea.value; } },
+        createElement(tag: string) {
+          assert.equal(tag, "textarea");
+          return textarea;
+        },
+        execCommand(command: string) {
+          assert.equal(command, "copy");
+          execCalls += 1;
+          return execResult;
+        },
+      },
+    });
+
+    let nativeText = "";
+    Object.defineProperty(globalThis, "isSecureContext", { configurable: true, value: true });
+    Object.defineProperty(globalThis, "navigator", {
+      configurable: true,
+      value: { clipboard: { writeText: async (text: string) => void (nativeText = text) } },
+    });
+    assert.equal(await copyText("native"), true);
+    assert.equal(nativeText, "native");
+    assert.equal(execCalls, 0);
+
+    Object.defineProperty(globalThis, "isSecureContext", { configurable: true, value: false });
+    Object.defineProperty(globalThis, "navigator", { configurable: true, value: {} });
+    const fallback = copyText("legacy");
+    assert.equal(execCalls, 1, "fallback runs in the user-gesture call stack");
+    assert.equal(await fallback, true);
+    assert.equal(textareaValue, "legacy");
+    assert.equal(selected, true);
+    assert.equal(removed, true);
+
+    assert.equal(await copyText("rejected", { writeText: async () => { throw new Error("denied"); } }), true);
+    assert.equal(textareaValue, "rejected");
+    assert.equal(execCalls, 2);
+
+    execResult = false;
+    assert.equal(await copyText("blocked"), false);
+  } finally {
+    restore("document", documentDescriptor);
+    restore("navigator", navigatorDescriptor);
+    restore("isSecureContext", secureDescriptor);
+  }
 });
 
 test("composer insert queue holds inserts until drained", () => {

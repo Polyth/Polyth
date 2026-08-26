@@ -4,7 +4,8 @@ This is the working contract for adding features to Polyth. It describes the sea
 feature must use, the invariants it must keep, and the checklist that makes a change
 mergeable. Read `architecture.md` for the system as it exists, `parity.md` for what is
 missing, `new-features.md` for the implement-now catalog, `tracks.md` for the
-spec-driven track lifecycle, and `implementation-order.md` for sequencing.
+spec-driven track lifecycle, `desktop.md` for Electron packaging and release
+operations, and `implementation-order.md` for sequencing.
 
 ## The one-paragraph mental model
 
@@ -58,6 +59,7 @@ WebSocket. Only `packages/backend-opencode` may talk to the OpenCode process.
 | Web client state | `apps/web/src/store.ts` (+ `reduce.ts` render model) |
 | Client API wrappers | `apps/web/src/api.ts` |
 | UI slot registrations | `registerSlot()` from `apps/web/src/slots.ts` |
+| Electron host / native IPC / packaging | `apps/desktop` |
 | Tests | `packages/<feature>/test/*.test.ts`, `apps/web/test/*.test.ts` |
 
 ## Step-by-step: adding a feature

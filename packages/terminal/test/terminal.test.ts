@@ -57,6 +57,19 @@ test("list filters by projectId", async () => {
   assert.equal(t.list().length, 2);
 });
 
+test("optional terminal limit bounds concurrent child processes", async () => {
+  const t = createTerminalService({ maxSessions: 2 });
+  services.push(t);
+  const first = await t.create({ projectId: "p", cwd, cmd: "cat" });
+  await t.create({ projectId: "p", cwd, cmd: "cat" });
+  await assert.rejects(
+    t.create({ projectId: "p", cwd, cmd: "cat" }),
+    /terminal limit reached \(2\)/,
+  );
+  await t.close(first.id);
+  await assert.doesNotReject(t.create({ projectId: "p", cwd, cmd: "cat" }));
+});
+
 test("exit is reported when the child exits by itself", async () => {
   const t = newService();
   const { id } = await t.create({ projectId: "p", cwd, cmd: "echo done" }); // exits immediately

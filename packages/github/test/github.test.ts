@@ -1,10 +1,30 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { createGithubService, type ExecFn } from "@polyth/github";
+import { buildConflictResolutionPrompt, createGithubService, type ExecFn } from "@polyth/github";
 
 const enoent = (): never => {
   throw Object.assign(new Error("spawn gh ENOENT"), { code: "ENOENT" });
 };
+
+test("buildConflictResolutionPrompt includes PR context, custom instructions, and safety boundaries", () => {
+  const prompt = buildConflictResolutionPrompt({
+    number: 42,
+    title: "Rework session routing",
+    url: "https://github.com/acme/polyth/pull/42",
+    baseRefName: "main",
+    headRefName: "feat/session-routing",
+  }, "Prefer the incoming database migration when both sides changed the schema.");
+
+  assert.match(prompt, /pull request #42/i);
+  assert.match(prompt, /Rework session routing/);
+  assert.match(prompt, /https:\/\/github\.com\/acme\/polyth\/pull\/42/);
+  assert.match(prompt, /Base branch: main/);
+  assert.match(prompt, /Head branch: feat\/session-routing/);
+  assert.match(prompt, /Prefer the incoming database migration/);
+  assert.match(prompt, /Run the relevant tests or checks/);
+  assert.match(prompt, /Commit the completed conflict resolution locally/);
+  assert.match(prompt, /Do not merge the pull request or push any commits without explicit user approval/);
+});
 
 test("fails soft when gh is missing", async () => {
   const svc = createGithubService({ exec: async () => enoent() });
@@ -289,6 +309,79 @@ test("prComments merges issue comments and reviews sorted by time", async () => 
     assert.equal(r.data[0]?.reviewState, "APPROVED");
     assert.equal(r.data[1]?.kind, "issue");
   }
+});
+
+test("issue detail and comments preserve Markdown and author metadata", async () => {
+  const calls: string[][] = [];
+  const exec: ExecFn = async (_bin, args) => {
+    calls.push(args);
+    const fields = args[args.indexOf("--json") + 1];
+    if (fields === "comments") {
+      return {
+        stdout: JSON.stringify({
+          comments: [
+            { id: "IC_1", author: { login: "sam" }, body: "Looks **good**", createdAt: "2026-08-03", url: "c1" },
+            { author: null, body: "Follow-up", createdAt: "2026-08-04", url: "c2" },
+          ],
+        }),
+        stderr: "",
+      };
+    }
+    return {
+      stdout: JSON.stringify({
+        number: 17, title: "Broken button", state: "OPEN", author: { login: "kat" },
+        updatedAt: "2026-08-02", createdAt: "2026-08-01", url: "issue-url",
+        body: "## Reproduction\n\nClick it.",
+      }),
+      stderr: "",
+    };
+  };
+  const svc = createGithubService({ exec });
+
+  const detail = await svc.getIssue("/repo", 17);
+  assert.deepEqual(detail, {
+    ok: true,
+    data: {
+      number: 17, title: "Broken button", state: "OPEN", author: "kat",
+      updatedAt: "2026-08-02", createdAt: "2026-08-01", url: "issue-url",
+      body: "## Reproduction\n\nClick it.",
+    },
+  });
+  const comments = await svc.getIssueComments("/repo", 17);
+  assert.ok(comments.ok);
+  if (comments.ok) {
+    assert.equal(comments.data[0]?.id, "IC_1");
+    assert.equal(comments.data[0]?.body, "Looks **good**");
+    assert.equal(comments.data[1]?.id, "comment-1");
+    assert.equal(comments.data[1]?.author, "");
+  }
+  assert.deepEqual(calls, [
+    ["issue", "view", "17", "--json", "number,title,state,author,updatedAt,createdAt,url,body"],
+    ["issue", "view", "17", "--json", "comments"],
+  ]);
+});
+
+test("issue and PR comments use stdin and reject empty bodies", async () => {
+  const calls: Array<{ args: string[]; input?: string }> = [];
+  const svc = createGithubService({
+    exec: async (_bin, args, opts) => {
+      calls.push({ args, ...(opts.input !== undefined ? { input: opts.input } : {}) });
+      return { stdout: `https://github.com/a/r/${args[0]}/7#comment\n`, stderr: "" };
+    },
+  });
+
+  assert.equal((await svc.addIssueComment("/repo", 7, "  ")).ok, false);
+  assert.equal((await svc.addPrComment("/repo", 7, "\n")).ok, false);
+  assert.equal(calls.length, 0);
+
+  const issue = await svc.addIssueComment("/repo", 7, "  issue reply  ");
+  const pr = await svc.addPrComment("/repo", 8, "PR reply");
+  assert.ok(issue.ok);
+  assert.ok(pr.ok);
+  assert.deepEqual(calls, [
+    { args: ["issue", "comment", "7", "--body-file", "-"], input: "issue reply" },
+    { args: ["pr", "comment", "8", "--body-file", "-"], input: "PR reply" },
+  ]);
 });
 
 test("submitReview posts JSON via stdin and is idempotent per content digest", async () => {

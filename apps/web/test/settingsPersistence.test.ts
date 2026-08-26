@@ -43,6 +43,17 @@ test("interface font catalog accepts programmer fonts and rejects unknown values
   assert.ok(product.INTERFACE_FONTS.filter((font) => font.mono).length >= 15);
 });
 
+test("merge conflict agent settings default safely and accept supported targets", () => {
+  const defaults = product.normalizeSettings({});
+  assert.match(defaults.conflictAgentPrompt, /resolve them, explaining each decision/);
+  assert.equal(defaults.conflictAgentTarget, "new-session");
+  assert.equal(
+    product.normalizeSettings({ conflictAgentTarget: "current-session", conflictAgentPrompt: "Custom" }).conflictAgentTarget,
+    "current-session",
+  );
+  assert.equal(product.normalizeSettings({ conflictAgentTarget: "other" }).conflictAgentTarget, "new-session");
+});
+
 test("saving either settings domain preserves the other domain byte-for-byte", () => {
   const uiBefore = stored.get(ui.UI_SETTINGS_KEY);
   product.saveSettings({ ...product.loadSettings(), productName: "Product only" });
