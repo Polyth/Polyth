@@ -1,5 +1,5 @@
 // Bootstrapping + user actions: REST load, WS wiring, session lifecycle.
-import { api } from "./api.ts";
+import { api } from "@polyth/session/web-api";
 import { SyncClient, type SyncStatus } from "./sync.ts";
 import { displaySessionTitle, isPlaceholderTitle, modelToMarkdown } from "./format.ts";
 import { friendlyError } from "./settings.ts";

@@ -4,15 +4,24 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./i18n": "./src/i18n/index.ts"
+    "./i18n": "./src/i18n/index.ts",
+    "./widgets": "./widgets/index.tsx"
   },
-  "polyth": { "serverEntry": "./src/serverEntry.ts" },
+  "polyth": {
+    "serverEntry": "./src/serverEntry.ts",
+    "webEntry": "./widgets/index.tsx"
+  },
   "dependencies": {
     "@polyth/contracts": "0.1.0",
     "@polyth/plugins": "0.1.0",
+    "@polyth/session": "0.1.0",
+    "@polyth/web-sdk": "0.1.0",
     "ws": "^8.18.0"
   },
   "optionalDependencies": {
     "node-pty": "^1.1.0"
+  },
+  "peerDependencies": {
+    "react": "^19.0.0"
   }
 }

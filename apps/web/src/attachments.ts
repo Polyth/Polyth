@@ -3,7 +3,7 @@
 // Key "" holds the no-session (hero) composer's pills until a session exists.
 import { useCallback, useSyncExternalStore } from "react";
 import type { AttachmentRef } from "@polyth/contracts";
-import { api } from "./api.ts";
+import { api } from "@polyth/session/web-api";
 import { tr } from "./i18n/index.ts";
 
 export const MAX_PENDING_ATTACHMENTS = 16;

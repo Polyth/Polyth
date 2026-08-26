@@ -4,7 +4,7 @@
 import { useEffect, useState } from "react";
 import type { AgentProfile } from "@polyth/contracts";
 import { THINKING_LEVELS } from "@polyth/models";
-import { api } from "../api.ts";
+import { api } from "@polyth/session/web-api";
 import { useStore } from "../store.ts";
 import { refreshProfiles } from "../profiles.ts";
 import Dialog from "./a11y/Dialog.tsx";

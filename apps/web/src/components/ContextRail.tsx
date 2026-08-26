@@ -22,7 +22,7 @@ import {
   closeWorkspacePane, collapseWorkspacePane, expandWorkspacePane, setPaneFullscreen,
   getState, setRailPlugin, setSidebarOpen, toggleRailPlugin, useActiveModel, useStore,
 } from "../store.ts";
-import { useGitStatus } from "../gitStatusStore.ts";
+import { useGitStatus } from "../../../../packages/git/widgets/gitStatusStore.ts";
 import { gitChangedFiles } from "../pendingChanges.ts";
 import {
   CHAT_FLOOR, clampDockWidth, decideDock, listSurfaces, slotSurfaces, useSurfaceVersion, visibleSurfaces,
@@ -40,7 +40,7 @@ import "./railSurfaces.tsx";
 import { setPlacementOverride } from "../capabilityLayout.ts";
 import { tr } from "../i18n/index.ts";
 import { MOD } from "../format.ts";
-import { useKeymap } from "../hotkeys.ts";
+import { useKeymap } from "../../../../packages/hotkeys/widgets/hotkeys.ts";
 import { railIconFor } from "../railIcons.ts";
 
 const NO_EVENTS: never[] = [];

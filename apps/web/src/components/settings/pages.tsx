@@ -15,7 +15,7 @@ import { UI_DEFAULTS, setUiSettings, useUiSettings } from "../../uiPrefs.ts";
 import { DEFAULT_SETTINGS, friendlyError, INTERFACE_FONTS } from "../../settings.ts";
 import { requestNotifyPermission } from "../../notify.ts";
 import { disablePush, enablePush, pushSubscription, pushUnsupportedReason } from "../../push.ts";
-import { api, type GitStatus } from "../../api.ts";
+import { api, type GitStatus } from "@polyth/session/web-api";
 import { confirmAlert } from "../../alerts.ts";
 import { EmptyState, PageHead, Row, Seg, Toggle } from "./parts.tsx";
 import { refreshProfiles, useProfiles } from "../../profiles.ts";
@@ -28,7 +28,7 @@ import {
   PRESET_THEMES, addCustomTheme, applyTheme, loadCustomThemes, parseThemeJson,
   reapplyTheme, removeCustomTheme, resolveTheme, type AppearanceMode, type ThemeSpec,
 } from "../../theme.ts";
-import type { AssistSettingsDto } from "../../api.ts";
+import type { AssistSettingsDto } from "@polyth/session/web-api";
 import type {
   AgentDescriptor,
   AgentProfile,
@@ -43,10 +43,10 @@ import type {
 } from "@polyth/contracts";
 import { useWidgetCatalog } from "../../widgets/catalog.ts";
 import { useWidgetLayout } from "../../widgets/widgetLayout.ts";
-import ModelPicker from "../ModelPicker.tsx";
+import ModelPicker from "../../../../../packages/models/widgets/ModelPicker.tsx";
 import Dialog from "../a11y/Dialog.tsx";
 import { modelSupportsTextWorkflow } from "../../composer/discovery.ts";
-import { removeGitPersona, saveGitPersona, useGitPersonas, type GitPersona } from "../../gitPersonas.ts";
+import { removeGitPersona, saveGitPersona, useGitPersonas, type GitPersona } from "../../../../../packages/git/widgets/gitPersonas.ts";
 import { getLocale, LOCALES, LOCALE_NAMES, setLocale, tr, type Locale } from "../../i18n/index.ts";
 import {
   projectRemembersModelSelection,

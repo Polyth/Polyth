@@ -6,7 +6,7 @@
 // None of this state belongs in the main session store, URLs, or localStorage.
 import { useSyncExternalStore } from "react";
 import type { NotificationKind, NotificationRecord } from "@polyth/contracts";
-import { api } from "./api.ts";
+import { api } from "@polyth/session/web-api";
 import { tr } from "./i18n/index.ts";
 
 /** Mirror of the server's retention cap (newest 200 FIFO). */

@@ -6,7 +6,7 @@ import {
   type CSSProperties, type PointerEvent as ReactPointerEvent,
 } from "react";
 import type { SessionProjection, WorkspaceLabel } from "@polyth/contracts";
-import { api, type Worktree } from "../../api.ts";
+import { api, type Worktree } from "@polyth/session/web-api";
 import {
   getState, setSidebarOpen, setUiError, startNewSession, useStore,
 } from "../../store.ts";

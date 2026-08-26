@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import type { PackageDescriptorDto } from "@polyth/contracts";
-import { api } from "../../api.ts";
+import { api } from "@polyth/session/web-api";
 import { bootPackages, isPackageEnabled, subscribePackages } from "../../packages/registry.ts";
 import { maybeAutoShowPackageTour, openPackageTour } from "../../packages/onboarding/controller.ts";
 import { canonicalTourPackageId } from "../../packages/onboarding/pageMap.ts";

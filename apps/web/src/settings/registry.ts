@@ -88,7 +88,6 @@ const BUILTIN_ITEMS: SettingsSearchItem[] = [
   { id: "about.info", pageId: "about", label: tr("settings.registry.applicationUrl"), description: tr("settings.registry.serverAddressDataDirectoryAndCapabilities"), keywords: ["about", "version", "health", "url"], focusTarget: "about.info" },
   { id: "sessions.defaultModel", pageId: "sessions", label: tr("settings.registry.globalDefaultModel"), description: tr("settings.registry.defaultModelForNewSessionsAndProjects"), keywords: ["session", "provider", "model"], focusTarget: "sessions.defaultModel" },
   { id: "projects.modelMemory", pageId: "projects", label: tr("settings.registry.rememberProjectModelSelection"), description: tr("settings.registry.useTheLastSelectedModelForNew"), keywords: ["session", "project", "model", "default", "memory"], focusTarget: "projects.modelMemory" },
-  { id: "git.personas", pageId: "git", label: tr("settings.registry.gitPersonas"), description: tr("settings.registry.repositoryLocalCommitAuthorIdentities"), keywords: ["author", "email", "identity"], focusTarget: "git.personas" },
   { id: "sessions.worktree", pageId: "sessions", label: tr("settings.registry.worktreeBehavior"), keywords: ["session", "fresh worktree", "project root"], focusTarget: "sessions.worktree" },
 ];
 

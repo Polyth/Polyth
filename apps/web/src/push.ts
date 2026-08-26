@@ -3,7 +3,7 @@
 // subscription list in sync. Push needs a secure context — https or the
 // loopback fallback (localhost counts as secure), otherwise it reports
 // unsupported and the in-page notifier remains the only channel.
-import { api } from "./api.ts";
+import { api } from "@polyth/session/web-api";
 import { tr } from "./i18n/index.ts";
 
 export function pushSupported(): boolean {

@@ -214,7 +214,7 @@ test("model favorites reorder only inside an explicit edit", () => {
 });
 
 test("model metadata reads as one ordered line, with acronyms spelled right", async () => {
-  const { modelModalityLabels, modelMetaLine } = await import("../src/components/ModelPicker.tsx");
+  const { modelModalityLabels, modelMetaLine } = await import("../../../packages/models/widgets/ModelPicker.tsx");
   const model = {
     providerID: "p", modelID: "m", name: "M",
     capabilities: ["input:pdf", "input:image", "output:text", "input:text", "toolcall"],

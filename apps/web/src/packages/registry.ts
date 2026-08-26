@@ -1,20 +1,6 @@
-import { api } from "../api.ts";
-import { installAgentsPackage } from "./agents.ts";
-import { installCommandsPackage } from "./commands.ts";
-import { installGitPackage } from "./git.ts";
-import { installGithubPackage } from "./github.ts";
-import { installHomeAssistantPackage } from "./home-assistant.ts";
+import { api } from "@polyth/session/web-api";
 import { installIntegrationsPackage } from "./integrations.ts";
-import { installKnowledgePackage } from "./knowledge.ts";
 import { installMcpPackage } from "./mcp.ts";
-import { installModelsPackage } from "./models.ts";
-import { installPluginsPackage } from "./plugins.ts";
-import { installSecureSafePackage } from "./secure-safe.ts";
-import { installSshPackage } from "./ssh.ts";
-import { combineUnregister } from "./settingsPage.ts";
-import { installUsagePackage } from "./usage.ts";
-import { installVoicePackage } from "./voice.ts";
-import { installWorkflowPackage } from "./workflow.ts";
 import { configurePackageReconcile, reconcilePackage } from "./reconcile.ts";
 import { registerBuiltinPackageTours } from "./onboarding/builtinTours.ts";
 import { getState, setActiveView } from "../store.ts";
@@ -28,20 +14,8 @@ registerBuiltinPackageTours();
 type PackageInstaller = () => () => void;
 
 const installers = new Map<string, PackageInstaller>([
-  ["voice", installVoicePackage],
-  ["git", installGitPackage],
-  ["github", installGithubPackage],
-  ["usage", installUsagePackage],
-  ["models", () => combineUnregister(installModelsPackage(), installAgentsPackage())],
   ["mcp", installMcpPackage],
-  ["commands", installCommandsPackage],
   ["integrations", installIntegrationsPackage],
-  ["plugins", installPluginsPackage],
-  ["knowledge", installKnowledgePackage],
-  ["secure-safe", installSecureSafePackage],
-  ["home-assistant", installHomeAssistantPackage],
-  ["ssh", installSshPackage],
-  ["workflow", installWorkflowPackage],
 ]);
 
 // Some backend package names describe the implementation package rather than
@@ -89,10 +63,11 @@ configurePackageReconcile({
 async function syncPackages(): Promise<void> {
   webEntriesLoaded ??= loadWebPackageInstallers(webPackageHost).then((discovered) => {
     for (const [id, install] of discovered) {
-      if (installers.has(id)) {
-        throw new Error(`web package installer already registered: ${id}`);
+      const canonical = canonicalId(id);
+      if (installers.has(canonical)) {
+        throw new Error(`web package installer already registered: ${canonical}`);
       }
-      installers.set(id, install);
+      installers.set(canonical, install);
     }
   });
   await webEntriesLoaded;

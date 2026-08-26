@@ -1,6 +1,6 @@
 import type { InstalledPluginDto } from "@polyth/contracts";
 import { createElement } from "react";
-import { api } from "./api.ts";
+import { api } from "@polyth/session/web-api";
 import {
   loadPluginModule,
   resolveModule,

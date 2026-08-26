@@ -108,6 +108,22 @@ export interface SurfaceDefinition {
   presentation?: SurfacePresentation;
 }
 
+export type WorkspaceSurfaceRequirement = "none" | "project" | "session";
+
+export interface WorkspaceSurfaceContext {
+  projectId: string | null;
+  sessionId: string | null;
+}
+
+export interface WorkspaceSurfaceDefinition {
+  id: string;
+  title: string;
+  order: number;
+  plugin?: string;
+  requires?: WorkspaceSurfaceRequirement;
+  component: (context: WorkspaceSurfaceContext) => ReactNode;
+}
+
 export interface CapabilityDefinition {
   id: string;
   label: string;
@@ -180,6 +196,9 @@ export interface WebPackageHost {
   surfaces: {
     register(definition: SurfaceDefinition): Unregister;
   };
+  workspaceSurfaces: {
+    register(definition: WorkspaceSurfaceDefinition): Unregister;
+  };
   capabilities: {
     register(definition: CapabilityDefinition): Unregister;
   };
@@ -200,6 +219,7 @@ export interface WebPackageHost {
     openSettingsPage(pageId: string): void;
     openWorkspacePane(surfaceId: string, resource?: string): boolean;
     closeWorkspacePane(): void;
+    openRailSurface(surfaceId: string): void;
     setOverlay(overlay: string | null): void;
   };
   ui: {

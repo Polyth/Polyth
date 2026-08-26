@@ -1,5 +1,5 @@
 // DOM-free pure helpers extracted from components for testability.
-import type { SlashCommand, SnippetDef } from "./api.ts";
+import type { SlashCommand, SnippetDef } from "@polyth/session/web-api";
 import type { JsonObject, SessionEvent } from "@polyth/contracts";
 import type { RenderMessage, TaskActivityMsg, ToolMsg, UserMsg } from "./reduce.ts";
 import { tr } from "./i18n/index.ts";

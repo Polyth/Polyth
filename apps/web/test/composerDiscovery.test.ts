@@ -4,7 +4,7 @@
 // configuration record. DOM-free (localStorage shimmed).
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import type { SlashCommand, SnippetDef, StrictListResult } from "../src/api.ts";
+import type { SlashCommand, SnippetDef, StrictListResult } from "@polyth/session/web-api";
 import { tr } from "../src/i18n/index.ts";
 
 const mem = new Map<string, string>();

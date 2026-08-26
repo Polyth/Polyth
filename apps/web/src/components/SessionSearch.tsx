@@ -2,7 +2,7 @@
 // metadata, branch, labels and message text — results carry bounded snippets.
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import { useStore, setOverlay } from "../store.ts";
-import { api, type SessionSearchResult } from "../api.ts";
+import { api, type SessionSearchResult } from "@polyth/session/web-api";
 import { openSession } from "../init.ts";
 import { ago, deriveSessionTitle } from "../format.ts";
 import { firstUserText } from "../utils.ts";

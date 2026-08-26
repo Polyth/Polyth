@@ -14,7 +14,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import Dialog from "./a11y/Dialog.tsx";
 import SlotHost from "./slots/SlotHost.ts";
 import { announce } from "./a11y/live.tsx";
-import { api, type BrowseEntryDto } from "../api.ts";
+import { api, type BrowseEntryDto } from "@polyth/session/web-api";
 import { addProject } from "../init.ts";
 import { COMPOSER_INPUT_SELECTOR, focusComposer, getState } from "../store.ts";
 import { getProjectSetupState } from "../projectSetup.ts";

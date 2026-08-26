@@ -2,7 +2,7 @@
 // fails soft with the reason when gh is missing, unauthenticated, or the
 // project has no GitHub remote.
 import { useEffect, useState } from "react";
-import { api, type GithubStatusDto } from "../../api.ts";
+import { api, type GithubStatusDto } from "@polyth/session/web-api";
 import { setActiveView, setOverlay, useStore } from "../../store.ts";
 import { EmptyState, PageHead, Row } from "./parts.tsx";
 import { tr } from "../../i18n/index.ts";

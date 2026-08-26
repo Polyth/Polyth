@@ -25,7 +25,7 @@ import {
   SIDEBAR_COLLAPSED_WIDTH, SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH,
   clampSidebarWidth, setSidebarLayout, useSidebarLayout,
 } from "../sidebarLayout.ts";
-import { api } from "../api.ts";
+import { api } from "@polyth/session/web-api";
 import { announce } from "./a11y/live.tsx";
 import ProjectAppearanceDialog from "./ProjectAppearanceDialog.tsx";
 import { tr } from "../i18n/index.ts";

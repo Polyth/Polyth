@@ -4,7 +4,7 @@
 import { useSyncExternalStore } from "react";
 import type { AgentProfile, ModelDescriptor } from "@polyth/contracts";
 import { planFavoriteMigration } from "@polyth/models";
-import { api } from "./api.ts";
+import { api } from "@polyth/session/web-api";
 import { getModelPrefs } from "./modelPrefs.ts";
 
 let profiles: AgentProfile[] = [];

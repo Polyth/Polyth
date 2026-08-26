@@ -9,7 +9,7 @@ import { requestComposerReplace } from "../composerInsert.ts";
 import {
   applyEvent, setActiveView, setUiError, startNewSession, useStore,
 } from "../store.ts";
-import { api } from "../api.ts";
+import { api } from "@polyth/session/web-api";
 import {
   JUMP_TO_LATEST_NAME,
   PROMPT_NAV_NAME,
@@ -72,9 +72,9 @@ import type {
 } from "../reduce.ts";
 import { Icon } from "../icons.tsx";
 import "./messagePinAction.tsx";
-import ProviderLogo from "./ProviderLogo.tsx";
+import ProviderLogo from "../../../../packages/models/widgets/ProviderLogo.tsx";
 import { seedMultiRunPrompt } from "../multirunSeed.ts";
-import WorkflowTimelineCard from "./WorkflowTimelineCard.tsx";
+import WorkflowTimelineCard from "../../../../packages/workflow/widgets/WorkflowTimelineCard.tsx";
 import { tr } from "../i18n/index.ts";
 
 /** One announcement per copy/mutation outcome; text is the accessible record,

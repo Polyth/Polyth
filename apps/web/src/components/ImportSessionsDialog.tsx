@@ -4,7 +4,7 @@
 // hydrated lazily the first time an imported session is opened.
 import { useEffect, useState } from "react";
 import type { RuntimeSession } from "@polyth/contracts";
-import { api } from "../api.ts";
+import { api } from "@polyth/session/web-api";
 import { refreshSessions } from "../init.ts";
 import { friendlyError } from "../settings.ts";
 import { ago } from "../format.ts";

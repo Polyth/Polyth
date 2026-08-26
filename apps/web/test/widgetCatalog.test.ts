@@ -11,8 +11,8 @@ const { defineWidgetPlugin, listWidgets, registerWidgetPlugin } = await import("
 const { BUILTIN_WIDGET_PLUGINS } = await import("../src/widgets/builtinWidgets.tsx");
 const { installBuiltinMiniWidgets, WORKFLOW_WIDGET_PLUGIN } =
   await import("../src/widgets/builtinMiniWidgets.tsx");
-const { installUsagePlugin, USAGE_WIDGET_PLUGIN } = await import("../src/widgets/usagePlugin.tsx");
-const { installGithubPlugin, GITHUB_WIDGET_PLUGIN } = await import("../src/widgets/githubPlugin.tsx");
+const { installUsagePlugin, USAGE_WIDGET_PLUGIN } = await import("../../../packages/usage/widgets/usagePlugin.tsx");
+const { installGithubPlugin, GITHUB_WIDGET_PLUGIN } = await import("../../../packages/github/widgets/githubPlugin.tsx");
 
 installBuiltinMiniWidgets();
 

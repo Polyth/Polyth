@@ -1,6 +1,6 @@
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { createRoot } from "react-dom/client";
-import { api } from "./api.ts";
+import { api } from "@polyth/session/web-api";
 import { init } from "./init.ts";
 import { exposeSlots } from "./slots.ts";
 import { exposeSurfaces } from "./surfaces.ts";
@@ -21,8 +21,6 @@ import { getLocaleSnapshot, subscribeLocale } from "./i18n/index.ts";
 import App from "./App.tsx";
 import LockScreen from "./components/LockScreen.tsx";
 import "./styles.css";
-import "./developerSurfaces.css";
-import "./featurePanels.css";
 
 applySettingsToDom(getState().settings);
 applyUiSettings();

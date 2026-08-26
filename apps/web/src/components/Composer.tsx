@@ -23,7 +23,7 @@ import {
   type SlashCommand,
   type SnippetDef,
   type Worktree,
-} from "../api.ts";
+} from "@polyth/session/web-api";
 import { loadDraft, saveDraft, type AutocompleteItem } from "../utils.ts";
 import SlotHost from "./slots/SlotHost.ts";
 import { dragKind, dropIntoSession } from "../dnd.ts";
@@ -72,7 +72,7 @@ import AdaptiveTextInput, { type TextInputHandle } from "./input/AdaptiveTextInp
 import ComposerAddMenu from "./ComposerAddMenu.tsx";
 import ComposerFocusDialog from "./ComposerFocusDialog.tsx";
 import QueuedMessageList from "./QueuedMessageList.tsx";
-import { GoalAttachForm } from "./GoalStrip.tsx";
+import { GoalAttachForm } from "../../../../packages/goals/widgets/GoalStrip.tsx";
 import { announce } from "./a11y/live.tsx";
 import { noteModelUsed } from "../modelPrefs.ts";
 import { getUiSettings, useUiSettings } from "../uiPrefs.ts";
@@ -89,7 +89,7 @@ import { agentPickerDefaultLabel } from "../composerDefaults.ts";
 import { friendlyError, modKeyLabel, parseModelRef } from "../settings.ts";
 import { Icon } from "../icons.tsx";
 import { useWorkspaceMode } from "../widgets/workspaceMode.ts";
-import ModelPicker, { modelContextLabel, modelMetaLine, modelSupportsThinking } from "./ModelPicker.tsx";
+import ModelPicker, { modelContextLabel, modelMetaLine, modelSupportsThinking } from "../../../../packages/models/widgets/ModelPicker.tsx";
 import { resolveProjectModelDefault, useSessionDefaults } from "../sessionDefaults.ts";
 import { getModelThinking, setModelThinking } from "../thinkingPrefs.ts";
 import { roleKind, useRolePrefs } from "../rolePrefs.ts";

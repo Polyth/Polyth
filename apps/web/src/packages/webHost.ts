@@ -5,6 +5,7 @@ import type {
   SurfaceDefinition,
   WebPackageHost,
   WebStoreSnapshot,
+  WorkspaceSurfaceDefinition,
   WidgetDefinition,
   WidgetPlugin,
 } from "@polyth/web-sdk";
@@ -18,6 +19,7 @@ import {
   closeWorkspacePane,
   setActiveView,
   setOverlay,
+  setRailPlugin,
   subscribeStore,
 } from "../store.ts";
 import { registerSlot } from "../slots.ts";
@@ -32,6 +34,7 @@ import {
   type WidgetPlugin as HostWidgetPlugin,
 } from "../widgets/catalog.ts";
 import { registerWebReducer } from "./reducers.ts";
+import { registerWorkspaceSurface } from "../workspace/surfaceRegistry.ts";
 
 const snapshot = (): WebStoreSnapshot => {
   const state = getState();
@@ -60,6 +63,10 @@ export const webPackageHost: WebPackageHost = {
     register: (definition: SurfaceDefinition) =>
       registerSurface(definition as unknown as RailSurface),
   },
+  workspaceSurfaces: {
+    register: (definition: WorkspaceSurfaceDefinition) =>
+      registerWorkspaceSurface(definition),
+  },
   capabilities: {
     register: (definition: CapabilityDefinition) =>
       registerCapability(definition as CapabilityDescriptor),
@@ -83,6 +90,7 @@ export const webPackageHost: WebPackageHost = {
     openSettingsPage,
     openWorkspacePane,
     closeWorkspacePane,
+    openRailSurface: setRailPlugin,
     setOverlay: (overlay) => setOverlay(overlay as never),
   },
   ui: {

@@ -43,7 +43,7 @@ import {
   parseUiSettings,
   setUiSettings,
 } from "../src/uiPrefs.ts";
-import { normalizeScheduleList } from "../src/scheduleData.ts";
+import { normalizeScheduleList } from "../../../packages/schedule/widgets/scheduleData.ts";
 import { agentPickerDefaultLabel, modelPickerDefaultLabel } from "../src/composerDefaults.ts";
 import { extractChangedFiles, selectPendingChanges } from "../src/pendingChanges.ts";
 import { sessionSurfaceKind, type SurfaceModel } from "../src/sessionSurface.ts";

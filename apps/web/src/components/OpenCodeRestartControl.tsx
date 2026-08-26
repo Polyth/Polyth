@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { createPortal } from "react-dom";
-import { api } from "../api.ts";
+import { api } from "@polyth/session/web-api";
 import { refreshOpenCodePending, useOpenCodePending } from "../opencodeRestart.ts";
 import { registerSlot } from "../slots.ts";
 import { setUiError } from "../store.ts";

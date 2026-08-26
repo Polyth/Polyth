@@ -2,8 +2,8 @@ import { HOTKEY_ACTIONS, matchAction, formatCombo, type HotkeyAction } from "@po
 import { registerCommand } from "./commands.ts";
 import { exportSessionMarkdown, forkSession, abortSession } from "./init.ts";
 import { MOD } from "./format.ts";
-import { getKeymap } from "./hotkeys.ts";
-import { readLastReply, stopSpeaking } from "./voice.tsx";
+import { getKeymap } from "../../../packages/hotkeys/widgets/hotkeys.ts";
+import { readLastReply, stopSpeaking } from "../../../packages/dictation/widgets/voice.tsx";
 import {
   focusComposer, getState, openPalette, openSettingsPage, openWorktreeSessionDialog, setOverlay, startNewSession,
   toggleRailPlugin, toggleWorkspacePane,

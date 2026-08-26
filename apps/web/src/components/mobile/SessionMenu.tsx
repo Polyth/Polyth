@@ -3,7 +3,7 @@
 // sessions, and the route to everything else — on the shared sheet system.
 import { useState } from "react";
 import Sheet, { SheetRow, SheetSection } from "./Sheet.tsx";
-import { api } from "../../api.ts";
+import { api } from "@polyth/session/web-api";
 import { openSession, refreshSessions } from "../../init.ts";
 import {
   setOverlay, setSidebarOpen, setUiError, startNewSession, useStore,

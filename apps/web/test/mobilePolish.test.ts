@@ -7,10 +7,10 @@ import { formatList, tr } from "../src/i18n/index.ts";
 
 register("./tsxHooks.mjs", import.meta.url);
 
-const { summarizeUnifiedDiff } = await import("../src/components/PendingChangesBar.tsx");
-const { reviewMessageTone, stripCursorMarkers } = await import("../src/components/PullRequestView.tsx");
+const { summarizeUnifiedDiff } = await import("../../../packages/git/widgets/PendingChangesBar.tsx");
+const { reviewMessageTone, stripCursorMarkers } = await import("../../../packages/github/widgets/PullRequestView.tsx");
 const { shellCardCopyText } = await import("../src/components/Timeline.tsx");
-const { modelModalities } = await import("../src/components/ModelPicker.tsx");
+const { modelModalities } = await import("../../../packages/models/widgets/ModelPicker.tsx");
 const { parseMarkdown } = await import("../src/markdown/parse.ts");
 const { renderBlocks } = await import("../src/markdown/render.tsx");
 const { createElement, Fragment } = await import("react");

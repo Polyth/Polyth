@@ -23,9 +23,9 @@ import { dismissKeyboard } from "../mobileViewport.ts";
 import SessionMenu from "./mobile/SessionMenu.tsx";
 import Sheet, { SheetSection } from "./mobile/Sheet.tsx";
 import { useSheetTrigger } from "./mobile/sheetTrigger.ts";
-import { api, type GithubStatusDto } from "../api.ts";
+import { api, type GithubStatusDto } from "@polyth/session/web-api";
 import { tr } from "../i18n/index.ts";
-import { useKeymap } from "../hotkeys.ts";
+import { useKeymap } from "../../../../packages/hotkeys/widgets/hotkeys.ts";
 
 const STROKE = { fill: "none", stroke: "currentColor", strokeWidth: 1.5, strokeLinecap: "round", strokeLinejoin: "round" } as const;
 

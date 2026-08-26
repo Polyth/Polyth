@@ -1,12 +1,12 @@
 import { useEffect, useMemo, useState } from "react";
-import { api } from "../../api.ts";
+import { api } from "@polyth/session/web-api";
 import { setUiError, updateSettings, useStore } from "../../store.ts";
 import { friendlyError } from "../../settings.ts";
 import { setGlobalDefaultModel, setSessionDefaults, useSessionDefaults } from "../../sessionDefaults.ts";
 import { PageHead, Row } from "./parts.tsx";
 import { modelSupportsTextWorkflow } from "../../composer/discovery.ts";
 import { roleKind, useRolePrefs } from "../../rolePrefs.ts";
-import ModelPicker from "../ModelPicker.tsx";
+import ModelPicker from "../../../../../packages/models/widgets/ModelPicker.tsx";
 import { tr } from "../../i18n/index.ts";
 
 export default function SessionsPage() {
