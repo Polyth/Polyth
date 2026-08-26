@@ -10,7 +10,11 @@ test("working status is compact and does not claim repository indexing", () => {
   const css = read("../src/styles.css");
 
   assert.doesNotMatch(surface, /Scanning repositories|indexing|usually takes a few seconds/i);
-  assert.match(surface, /<span>\{tr\("workspace\.builtinsurfaces\.working"\)\}<\/span>/);
+  assert.match(
+    surface,
+    /workingIndicator === "activity" \? activityLabel : tr\("workspace\.builtinsurfaces\.working"\)/,
+    "the configured activity indicator may use a specific step while compact modes say Working",
+  );
   assert.match(css, /\.focus-working-spinner\s*\{[^}]*width:\s*7px;[^}]*animation:\s*focus-working-pulse/s);
 });
 

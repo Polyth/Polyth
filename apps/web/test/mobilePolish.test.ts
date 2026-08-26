@@ -98,6 +98,7 @@ test("all mobile chat composers expose project and worktree targets", () => {
   const actions = read("../src/widgets/builtinMiniWidgets.tsx");
   const workflowLauncher = read("../src/components/WorkflowLauncher.tsx");
   const header = read("../src/components/Header.tsx");
+  const mobileNavigation = read("../src/components/mobile/MobileNavigationRail.tsx");
   const css = read("../src/styles.css");
 
   // UX-MOBILE-01 §5: the compact context bar belongs to the shared composer,
@@ -119,7 +120,8 @@ test("all mobile chat composers expose project and worktree targets", () => {
   assert.match(css, /\.composer-mobile\.composer-collapsed:not\(\.composer-has-draft\) \.composer-workflow \{ display: none; \}/);
   assert.match(css, /\.composer-mobile\.composer-has-draft \.composer-workflow \{ display: inline-flex; \}/);
   assert.match(header, /displaySessionTitle\(session\.title, session\.id, firstUserText\)/);
-  assert.match(header, /tr\("header\.composerControls"\)/);
+  assert.match(header, /<MobileNavigationRail \/>/);
+  assert.match(mobileNavigation, /tr\("header\.microphone"\)/);
   assert.match(css, /\.polyth-gradient\s*\{[^}]*linear-gradient/s);
 });
 
