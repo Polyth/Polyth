@@ -459,7 +459,9 @@ async function assertNoOverflow(page: Page, label: string): Promise<void> {
       .filter((element) => {
         if (element.closest('[inert], [aria-hidden="true"]')) return false;
         const box = element.getBoundingClientRect();
-        const carousel = element.closest<HTMLElement>(".workflow-definition-list");
+        const carousel = element.closest<HTMLElement>(
+          ".workflow-definition-list, .mobile-shortcut-rail",
+        );
         if (carousel) {
           const clip = carousel.getBoundingClientRect();
           const intentionallyClipped = clip.left >= -0.5
@@ -696,7 +698,7 @@ test("complete workflow journey remains synchronized, accessible, and responsive
     (document.querySelector(".workflow-name-field input") as HTMLInputElement | null)?.value === "Approval review");
   await workflowName.fill("Approval review draft");
   await page.waitForFunction(() =>
-    document.querySelector(".workflow-save-state")?.textContent?.trim() === "Unsaved");
+    document.querySelector(".workflow-save-state")?.textContent?.trim() === "Unsaved changes");
   await page.locator(".workflow-definition").filter({ hasText: "Release pipeline" }).click();
   const discardDialog = page.getByRole("dialog", { name: "Discard unsaved changes?" });
   await discardDialog.waitFor({ state: "visible" });
