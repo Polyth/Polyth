@@ -158,6 +158,11 @@ test("compact panels and timeline actions use current mobile geometry", () => {
     finalMobile,
     /\.msg\.assistant \.msg-action-btn,[\s\S]*?\.agent-reply-actions button,[\s\S]*?\.assistant-gallery-shortcut\s*\{[^}]*width:\s*var\(--tap\);[^}]*min-width:\s*var\(--tap\);[^}]*height:\s*var\(--tap\);[^}]*min-height:\s*var\(--tap\);/s,
   );
+  assert.match(finalMobile, /\.msg\.assistant \.agent-reply-header\s*\{\s*flex-wrap:\s*wrap;/);
+  assert.match(
+    finalMobile,
+    /\.msg\.assistant \.agent-reply-actions\s*\{[^}]*width:\s*100%;[^}]*max-width:\s*100%;[^}]*flex:\s*1 0 100%;[^}]*flex-wrap:\s*wrap;[^}]*justify-content:\s*flex-end;[^}]*margin-left:\s*0;/s,
+  );
 });
 
 test("Files empty-state helper copy keeps horizontal viewport breathing room", () => {

@@ -302,6 +302,33 @@ test("geometry: centered measure, disjoint reserved chrome, tail clearance at al
 
       const msgs = Array.from(document.querySelectorAll<HTMLElement>(".timeline > .msg"));
       const lastBottom = contentRects.reduce((max, r) => Math.max(max, r.bottom), port.top);
+      const responseActionButtons = Array.from(
+        document.querySelectorAll<HTMLButtonElement>(".agent-reply-actions button"),
+      );
+      const responseActionOverflows = responseActionButtons.flatMap((button) => {
+        const r = button.getBoundingClientRect();
+        return r.left < port.left - 1 || r.right > port.right + 1
+          ? [button.getAttribute("aria-label") ?? "unnamed response action"]
+          : [];
+      });
+      const responseActionTouchMisses = innerWidth <= 820
+        ? responseActionButtons.flatMap((button) => {
+            const r = button.getBoundingClientRect();
+            return r.width < 43.5 || r.height < 43.5
+              ? [button.getAttribute("aria-label") ?? "unnamed response action"]
+              : [];
+          })
+        : [];
+      const responseActionRowOverlaps = Array.from(
+        document.querySelectorAll<HTMLElement>(".agent-reply-header"),
+      ).filter((header) => {
+        const actions = header.querySelector<HTMLElement>(":scope > .agent-reply-actions");
+        if (!actions) return false;
+        const metadataBottom = Array.from(
+          header.querySelectorAll<HTMLElement>(":scope > .agent-reply-mark, :scope > .agent-reply-item"),
+        ).reduce((bottom, item) => Math.max(bottom, item.getBoundingClientRect().bottom), 0);
+        return actions.getBoundingClientRect().top < metadataBottom - 1;
+      }).length;
 
       // Pointer centers of visible utility controls + persistent action entries.
       const centerMisses: string[] = [];
@@ -342,6 +369,9 @@ test("geometry: centered measure, disjoint reserved chrome, tail clearance at al
         tailClearance: port.bottom - lastBottom,
         portHeight: el.clientHeight,
         centerMisses,
+        responseActionOverflows,
+        responseActionTouchMisses,
+        responseActionRowOverlaps,
         timelineName: `${el.getAttribute("role")}:${el.getAttribute("aria-label")}`,
         navName: document.querySelector(".prompt-nav")?.getAttribute("aria-label") ?? "",
         firstChipName: document.querySelector(".prompt-nav-item")?.getAttribute("aria-label") ?? "",
@@ -363,6 +393,11 @@ test("geometry: centered measure, disjoint reserved chrome, tail clearance at al
       assert.ok(g.portHeight >= 120, `${ctx}: usable timeline height ${g.portHeight}px below 120px at 200% zoom`);
     }
     assert.deepEqual(g.centerMisses, [], `${ctx}: covered pointer centers`);
+    assert.deepEqual(g.responseActionOverflows, [], `${ctx}: response actions overflow the timeline`);
+    assert.deepEqual(g.responseActionTouchMisses, [], `${ctx}: response actions are smaller than 44px`);
+    if (w <= 820) {
+      assert.equal(g.responseActionRowOverlaps, 0, `${ctx}: response actions share the metadata row`);
+    }
     assert.equal(g.timelineName, "region:Conversation timeline", `${ctx}: scroll root is not the named region`);
     assert.equal(g.navName, "Prompts in this session", `${ctx}: prompt nav name "${g.navName}"`);
     assert.match(g.firstChipName, /^Jump to prompt 1 of 6: /, `${ctx}: chip name "${g.firstChipName}"`);
@@ -371,7 +406,13 @@ test("geometry: centered measure, disjoint reserved chrome, tail clearance at al
     const state = await scrollState(page);
     assert.deepEqual(state.duplicateIds, [], `${ctx}: duplicate visible message ids`);
     if (label === "1440") await page.screenshot({ path: join(ARTIFACTS, "layout-rich-1440.png") });
-    if (label === "390") await page.screenshot({ path: join(ARTIFACTS, "layout-rich-390.png") });
+    if (label === "390") {
+      await page.screenshot({ path: join(ARTIFACTS, "layout-rich-390.png") });
+      await page.screenshot({ path: join(ARTIFACTS, "fix_timeline_overflow_390.png") });
+    }
+    if (label === "320") {
+      await page.screenshot({ path: join(ARTIFACTS, "fix_timeline_overflow_320.png") });
+    }
     if (label === "zoom200") await page.screenshot({ path: join(ARTIFACTS, "layout-rich-zoom200.png") });
     await closePage(lp);
   }
