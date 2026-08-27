@@ -3,6 +3,7 @@ import { readFileSync, readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
 
 const workspaceRoot = resolve(import.meta.dirname, "../../..");
+const coreTokens = join(workspaceRoot, "apps/web/src/tokens.css");
 const coreStyles = join(workspaceRoot, "apps/web/src/styles.css");
 const packagesDir = join(workspaceRoot, "packages");
 
@@ -38,11 +39,16 @@ export async function readWebStyles(): Promise<string> {
       return "";
     }
   }));
-  return [await readFile(coreStyles, "utf8"), ...packageStyles].join("\n");
+  return [
+    await readFile(coreTokens, "utf8"),
+    await readFile(coreStyles, "utf8"),
+    ...packageStyles,
+  ].join("\n");
 }
 
 export function readWebStylesSync(): string {
   return [
+    readFileSync(coreTokens, "utf8"),
     readFileSync(coreStyles, "utf8"),
     ...packageStylePathsSync().map((path) => readFileSync(path, "utf8")),
   ].join("\n");

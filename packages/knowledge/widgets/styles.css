@@ -5,21 +5,6 @@ color: var(--green); font-size: 12px;
 .pr-conflict-agent-area > .knowledge-notice {
 grid-column: 1 / -1; margin: 0;
 }
-:is(
-  .audit-note,
-  .form-error,
-  .goal-card-objective,
-  .knowledge-snippet,
-  .plugin-log-line,
-  .prompt-echo,
-  .review-finding,
-  .sched-preview-runs,
-  .sched-run-error,
-  .walkthrough-stop-explain
-) {
-min-width: 0;
-  overflow-wrap: anywhere;
-}
 @container feature-panel (max-width: 700px) {
 .knowledge-panel > .view-toolbar-row,
 .knowledge-editor > .view-toolbar-row,
@@ -32,21 +17,6 @@ align-items: stretch;
 .knowledge-editor > .view-toolbar-row > :is(select, button) {
 width: 100%;
 }
-}
-:is(
-  .audit-list,
-  .event-list,
-  .gh-list,
-  .knowledge-panel,
-  .mcp-list,
-  .ntc-list,
-  .plugin-card-grid,
-  .provider-list,
-  .sched-runs,
-  .track-steps
-) {
-min-width: 0;
-  overscroll-behavior: contain;
 }
 .knowledge-panel,
 .knowledge-editor {

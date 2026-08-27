@@ -12,6 +12,16 @@ Polyth is a local web app for project-scoped OpenCode coding-agent sessions: a N
 - `packages/server` — composition root: HTTP/WS gateway, `RouteHandler` chain, per-project runtime pool, broadcast, auth, static web.
 - Feature packages (one dir each under `packages/`): permissions, goals, files, git, commands, terminal, multirun, fusion, walkthrough, schedule, knowledge, github, usage, browser, dictation, models, hotkeys, plugins.
 
+## Styling (non-negotiable)
+
+- Read `docs/dev/styles.md` before editing UI styles.
+- Canonical web tokens live in `apps/web/src/tokens.css`; the main web app owns this contract and packages inherit it.
+- Package widget CSS extends the token contract only with package-scoped additions. Do not hardcode a color, spacing, radius, type, motion, or control value when a canonical token exists.
+- Scope package selectors under the package root. Never add cross-package selectors or redefine canonical tokens in a package.
+- Shared UI primitives such as empty states, buttons, cards, and control geometry live in core `apps/web/src/styles.css`; do not duplicate them in package CSS.
+- Embedded panel and card content responds to container queries. Viewport media queries are reserved for shell-level behavior.
+- Never add styles to `packages/server/src/http.ts` or edit `App.tsx` for styling.
+
 ## Non-negotiable rules
 
 - Erasable TS only (Node >= 22.18 type stripping; earlier 22.x fails): no enums, no namespaces, no parameter properties.

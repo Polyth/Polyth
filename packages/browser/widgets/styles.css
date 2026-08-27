@@ -579,25 +579,6 @@ width: 100%; min-height: 44px;
 grid-template-columns: 1fr; padding: 16px;
 }
 }
-@media (max-width: 700px) {
-.dialog-panel > :is(
-    .alert-dialog-body,
-    .browser-dialog-body,
-    .goal-attach,
-    .import-sessions-body,
-    .profile-form-body,
-    .project-appearance-body,
-    .role-editor-body,
-    .source-confirm-dialog,
-    .worktree-remove-options,
-    .worktree-session-body
-  ) {
-min-width: 0;
-    min-height: 0;
-    overflow-y: auto;
-    overscroll-behavior: contain;
-}
-}
 @media (max-width: 480px), (pointer: coarse) {
 .browser-address input {
 font-size: 16px;

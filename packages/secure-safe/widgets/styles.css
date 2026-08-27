@@ -1,18 +1,4 @@
 /* Package-owned secure-safe web styles. */
-.settings-pane-body :is(
-  .set-row,
-  .set-row-text,
-  .set-row-control,
-  .set-add-form,
-  .mcp-form,
-  .mcp-form-row,
-  .plugin-library,
-  .provider-card,
-  .secure-safe-form,
-  .ha-settings
-) {
-min-width: 0;
-}
 .secure-safe-card {
 border-top: 1px solid color-mix(in srgb, var(--green) 45%, var(--border));
   background: color-mix(in srgb, var(--elevated) 88%, var(--green));

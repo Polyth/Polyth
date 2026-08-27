@@ -1,19 +1,4 @@
 /* Package-owned schedule web styles. */
-:is(
-  .audit-note,
-  .form-error,
-  .goal-card-objective,
-  .knowledge-snippet,
-  .plugin-log-line,
-  .prompt-echo,
-  .review-finding,
-  .sched-preview-runs,
-  .sched-run-error,
-  .walkthrough-stop-explain
-) {
-min-width: 0;
-  overflow-wrap: anywhere;
-}
 @container feature-panel (max-width: 700px) {
 .sched-form .view-toolbar-row {
 display: grid;
@@ -24,21 +9,6 @@ display: grid;
 .sched-form .view-toolbar-row > :is(input, select, label, button, .seg) {
 width: 100%; max-width: none;
 }
-}
-:is(
-  .audit-list,
-  .event-list,
-  .gh-list,
-  .knowledge-panel,
-  .mcp-list,
-  .ntc-list,
-  .plugin-card-grid,
-  .provider-list,
-  .sched-runs,
-  .track-steps
-) {
-min-width: 0;
-  overscroll-behavior: contain;
 }
 .loop-error-row {
 display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 2px 0;

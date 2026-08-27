@@ -4,7 +4,12 @@ import { existsSync } from "node:fs";
 import { readFile } from "node:fs/promises";
 import type { Browser, Page } from "playwright-core";
 
-const read = (relative: string) => readFile(new URL(relative, import.meta.url), "utf8");
+const read = async (relative: string): Promise<string> => {
+  const content = await readFile(new URL(relative, import.meta.url), "utf8");
+  if (relative !== "../src/styles.css") return content;
+  const tokens = await readFile(new URL("../src/tokens.css", import.meta.url), "utf8");
+  return `${tokens}\n${content}`;
+};
 const CHROME = [
   process.env.POLYTH_CHROMIUM_PATH,
   "/usr/local/bin/google-chrome",
@@ -245,4 +250,67 @@ test("390px audited actions expose 44px targets and scrolling question tabs", { 
     assert.ok(target.height >= 44, `${target.name} is at least 44px tall`);
   }
   assert.ok(geometry.tabsScrollWidth > geometry.tabsClientWidth, "question tabs scroll instead of clipping");
+});
+
+test("Usage dashboard responds to a docked panel instead of the viewport", { skip: !CHROME }, async () => {
+  assert.ok(page);
+  const [coreCss, usageCss] = await Promise.all([
+    read("../src/styles.css"),
+    read("../../../packages/usage/widgets/styles.css"),
+  ]);
+
+  for (const width of [280, 344]) {
+    await page.setContent(`
+      <style>${coreCss}\n${usageCss}</style>
+      <main class="usage-dashboard" style="width:${width}px">
+        <section class="usage-dashboard-hero">
+          <div class="usage-hero-mark">U</div>
+          <div>
+            <span class="usage-eyebrow">Workspace telemetry</span>
+            <h2>Understand the sessions behind every token</h2>
+            <p>Ranges use each session's recorded activity.</p>
+          </div>
+          <div class="usage-hero-status"><span class="neutral"><i></i>Session data only</span><small>30 days</small></div>
+        </section>
+        <div class="usage-dashboard-toolbar">
+          <div class="usage-view-tabs"><button>Overview</button><button>Providers</button></div>
+          <span class="usage-toolbar-spacer"></span>
+          <div class="usage-range-control"><button>7d</button><button>30d</button><button>90d</button></div>
+          <div class="usage-layout-control"><button>Grid</button></div>
+          <button class="usage-refresh-button">R</button>
+        </div>
+      </main>
+    `);
+
+    const layout: {
+      clientWidth: number;
+      scrollWidth: number;
+      copyBottom: number;
+      statusTop: number;
+      statusMinWidth: string;
+      overflowWrap: string;
+      wordBreak: string;
+    } = await page.evaluate(() => {
+      const dashboard = document.querySelector<HTMLElement>(".usage-dashboard")!;
+      const copy = document.querySelector<HTMLElement>(".usage-dashboard-hero > div:nth-child(2)")!;
+      const title = document.querySelector<HTMLElement>(".usage-dashboard-hero h2")!;
+      const status = document.querySelector<HTMLElement>(".usage-hero-status")!;
+      const titleStyle = getComputedStyle(title);
+      return {
+        clientWidth: dashboard.clientWidth,
+        scrollWidth: dashboard.scrollWidth,
+        copyBottom: copy.getBoundingClientRect().bottom,
+        statusTop: status.getBoundingClientRect().top,
+        statusMinWidth: getComputedStyle(status).minWidth,
+        overflowWrap: titleStyle.overflowWrap,
+        wordBreak: titleStyle.wordBreak,
+      };
+    });
+
+    assert.ok(layout.scrollWidth <= layout.clientWidth + 1, `${width}px dashboard has no horizontal overflow`);
+    assert.ok(layout.statusTop >= layout.copyBottom, `${width}px status stacks below the title`);
+    assert.equal(layout.statusMinWidth, "0px");
+    assert.equal(layout.overflowWrap, "normal");
+    assert.equal(layout.wordBreak, "normal");
+  }
 });

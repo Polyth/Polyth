@@ -188,6 +188,22 @@ test("themeCssVars maps roles, derives washes/rgb, and honors syntax overrides",
   assert.equal(vars["--syntax-str"], PRESET_THEMES[0]!.tokens.green); // others keep defaults
 });
 
+test("semantic control borders remain recognizable on every theme", () => {
+  for (const preset of PRESET_THEMES) {
+    for (const appearance of ["dark", "light"] as const) {
+      const theme = adaptThemeAppearance(preset, appearance);
+      const border = themeCssVars(theme)["--control-border"]!;
+      assert.match(border, HEX);
+      if (appearance === "light") {
+        assert.ok(
+          contrast(border, theme.tokens.elevated) >= 3,
+          `${preset.id}/${appearance} control border must reach 3:1 on elevated`,
+        );
+      }
+    }
+  }
+});
+
 test("signal foregrounds meet 4.5:1 on their actual 18% tinted washes", () => {
   for (const preset of PRESET_THEMES) {
     for (const appearance of ["dark", "light"] as const) {

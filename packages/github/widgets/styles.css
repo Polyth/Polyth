@@ -14,59 +14,11 @@ width: var(--tap); min-width: var(--tap); padding: 0 !important;
 .github-head .view-title {
 margin-bottom: 3px;
 }
-.view-page:not(.github-page):not(.git-page) {
-container: feature-panel / inline-size;
-}
 .pr-surface .git-diff {
 max-height: none; min-height: 160px; margin: 10px 0 0; border-color: var(--hair-strong);
 }
 .pr-surface .git-diff-line {
 min-height: 20px; line-height: 20px;
-}
-:is(
-  .pane-tabs,
-  .term-tab-list,
-  .source-tabs,
-  .pr-tabbar,
-  .plugin-detail-tabs,
-  .widget-library-tabs,
-  .provider-chips,
-  .git-ref-chips,
-  .gh-filter-chips
-) {
---scroll-affordance: 18px;
-  padding-inline: var(--scroll-affordance);
-  scroll-padding-inline: var(--scroll-affordance);
-  -webkit-mask-image: linear-gradient(
-    to right,
-    transparent,
-    #000 var(--scroll-affordance),
-    #000 calc(100% - var(--scroll-affordance)),
-    transparent
-  );
-  mask-image: linear-gradient(
-    to right,
-    transparent,
-    #000 var(--scroll-affordance),
-    #000 calc(100% - var(--scroll-affordance)),
-    transparent
-  );
-}
-@media (forced-colors: active) {
-:is(
-    .pane-tabs,
-    .term-tab-list,
-    .source-tabs,
-    .pr-tabbar,
-    .plugin-detail-tabs,
-    .widget-library-tabs,
-    .provider-chips,
-    .git-ref-chips,
-    .gh-filter-chips
-  ) {
--webkit-mask-image: none;
-    mask-image: none;
-}
 }
 .pr-diff .diff-meta {
 color: var(--muted); background: var(--sunken);
@@ -1332,32 +1284,4 @@ grid-template-columns: 1fr;
 .pr-conflict-agent-area > .primary-btn {
 width: 100%;
 }
-}
-:is(
-  .audit-list,
-  .event-list,
-  .gh-list,
-  .knowledge-panel,
-  .mcp-list,
-  .ntc-list,
-  .plugin-card-grid,
-  .provider-list,
-  .sched-runs,
-  .track-steps
-) {
-min-width: 0;
-  overscroll-behavior: contain;
-}
-:is(
-  .audit-list,
-  .event-list,
-  .gh-list,
-  .plugin-log,
-  .provider-list,
-  .run-card-body,
-  .usage-sessions-table,
-  .wt-diff
-) {
-scrollbar-gutter: stable;
-  -webkit-overflow-scrolling: touch;
 }

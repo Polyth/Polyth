@@ -153,33 +153,6 @@ width: 7px; height: 7px;
 .ha-mini-light.is-on {
 border-color: color-mix(in srgb, var(--amber) 48%, var(--border)); color: var(--amber-on-wash); background: var(--amber-wash);
 }
-:is(.empty-state, .set-empty, .rail-empty, .ha-empty, .usage-card-empty, .workflow-list-empty) {
-width: min(100%, 430px);
-  min-width: 0;
-  margin: auto;
-  padding: clamp(20px, 7cqi, 48px) clamp(16px, 6cqi, 28px);
-  border: 1px dashed var(--border);
-  border-radius: var(--radius-card);
-  background:
-    radial-gradient(circle at 50% 0, var(--accent-wash), transparent 62%),
-    color-mix(in srgb, var(--sunken) 88%, transparent);
-  color: var(--muted);
-  text-align: center;
-}
-.settings-pane-body :is(
-  .set-row,
-  .set-row-text,
-  .set-row-control,
-  .set-add-form,
-  .mcp-form,
-  .mcp-form-row,
-  .plugin-library,
-  .provider-card,
-  .secure-safe-form,
-  .ha-settings
-) {
-min-width: 0;
-}
 :is(.ha-connection, .ha-entity, .ha-light, .ha-climate, .ha-settings) {
 min-width: 0;
   max-width: 100%;

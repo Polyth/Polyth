@@ -15,7 +15,7 @@ export default function EmptyState({
   mark?: ReactNode;
 }) {
   return (
-    <div className="empty-state">
+    <div className="empty-state empty-state--page">
       <span className="empty-state-mark" aria-hidden>
         {mark ?? (
           <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">

@@ -6,9 +6,6 @@
 .tt-board {
   --tt-blue: #5b8cff;
   --tt-violet: #9b7bff;
-  --tt-radius-control: 10px;
-  --tt-radius-card: 12px;
-  --tt-radius-panel: 14px;
   position: relative;
   display: flex;
   flex: 1;
@@ -31,7 +28,7 @@
 .tt-linked-widget button,
 .tt-linked-widget select,
 .tt-linked-widget a {
-  min-height: 44px;
+  min-height: var(--tap);
   touch-action: manipulation;
 }
 
@@ -47,7 +44,7 @@
   min-width: 0;
   max-width: 100%;
   border: 1px solid var(--border);
-  border-radius: var(--tt-radius-control);
+  border-radius: var(--radius-control);
   color: var(--text);
   background: color-mix(in srgb, var(--elevated) 92%, transparent);
   outline: none;
@@ -233,7 +230,7 @@
   margin: 12px 14px 0;
   padding: 10px 12px;
   border: 1px solid color-mix(in srgb, var(--amber) 32%, var(--border));
-  border-radius: var(--tt-radius-card);
+  border-radius: var(--radius-card);
   color: var(--text);
   background:
     linear-gradient(110deg, color-mix(in srgb, var(--amber) 9%, transparent), transparent 62%),
@@ -247,7 +244,7 @@
   width: 34px;
   height: 34px;
   place-items: center;
-  border-radius: var(--tt-radius-control);
+  border-radius: var(--radius-control);
   color: color-mix(in srgb, var(--amber) 82%, var(--text));
   background: color-mix(in srgb, var(--amber) 12%, transparent);
 }
@@ -401,7 +398,7 @@
   max-height: 100%;
   flex-direction: column;
   border: 1px solid color-mix(in srgb, var(--border) 82%, transparent);
-  border-radius: var(--tt-radius-panel);
+  border-radius: var(--radius-surface);
   background: color-mix(in srgb, var(--sunken) 80%, transparent);
   box-shadow: inset 0 1px 0 color-mix(in srgb, var(--text) 3%, transparent);
   animation: tt-rise 180ms ease-out both;
@@ -468,7 +465,7 @@
   padding: 11px;
   overflow: hidden;
   border: 1px solid var(--border);
-  border-radius: var(--tt-radius-card);
+  border-radius: var(--radius-card);
   background: var(--elevated);
   box-shadow: 0 7px 22px -21px var(--shadow-color);
   text-align: left;

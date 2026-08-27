@@ -255,15 +255,9 @@ export function applyUiSettings(s: UiSettings = settings): void {
   b.dataset.goals = String(s.showGoals);
   b.dataset.quickActions = String(s.showQuickActions);
   b.style?.setProperty("--editor-font-size", `${s.editorFontSize}px`);
-  const radii = [8, 10, 10, 12, 16].map((px) => `${px * s.rounding / 5}px`);
+  // Every radius derives from the one scale in tokens.css. Do not publish a
+  // second runtime radius vocabulary here.
   b.style?.setProperty("--corner-radius-scale", String(s.rounding / 5));
-  ["--radius-sm", "--radius", "--radius-md", "--radius-lg", "--radius-xl"]
-    .forEach((name, index) => b.style?.setProperty(name, radii[index]!));
-  b.style?.setProperty("--radius-control", radii[1]!);
-  b.style?.setProperty("--radius-card", radii[3]!);
-  b.style?.setProperty("--radius-surface", radii[4]!);
-  b.style?.setProperty("--radius-sheet", radii[4]!);
-  b.style?.setProperty("--radius-composer", radii[4]!);
 }
 
 export function getUiSettings(): UiSettings {

@@ -1,165 +1,4 @@
-/* Polyth web — warm dark workbench. Layered surfaces, hairline borders,
-   12–16px radii, one accent. Tokens follow the visual target sample. */
-:root {
-  /* surfaces */
-  --bg: #121110;
-  --panel: #191816;
-  --elevated: #221f1c;
-  --raised: #2a2724;
-  --sunken: #0e0d0c;
-
-  /* lines */
-  --border: #35322c;
-  --border-soft: #2a2723;
-  --hair: rgba(255, 255, 255, 0.055);
-  --hair-strong: rgba(255, 255, 255, 0.09);
-
-  /* ink — faint labels meaningful status metadata, so it holds ≥4.5:1 against
-     the accent-wash selected row, the worst-case surface (UX-FIXTURE-VISUAL) */
-  --text: #f0eee8;
-  --text-dim: #cbc6bc;
-  --muted: #9c9890;
-  --faint: #96928a;
-
-  /* accent + signals */
-  --accent: #f49b5b;
-  --accent-ink: #1c1109;
-  --accent-hi: #f8a869;
-  --accent-wash: rgba(244, 155, 91, 0.13);
-  --accent-line: rgba(244, 155, 91, 0.32);
-  --focus-wash: rgba(244, 155, 91, 0.1);
-  --accent-rgb: 244, 155, 91;
-  --green: #8bcf6b;
-  --amber: #e4bb62;
-  --green-on-wash: #a9e68e;
-  --amber-on-wash: #f3cf7c;
-  --amber-rgb: 228, 187, 98;
-  --red: #f07c71;
-  --red-ink: #101216;
-  --blue: #82bff4;
-  --purple: #c4a7ee;
-  --surface-overlay: rgba(255, 255, 255, 0.022);
-  --surface-overlay-hover: rgba(255, 255, 255, 0.045);
-  --surface-overlay-strong: rgba(255, 255, 255, 0.09);
-  --green-wash: rgba(139, 207, 107, 0.18);
-  --amber-wash: rgba(228, 187, 98, 0.18);
-  --red-wash: rgba(240, 124, 113, 0.18);
-  --blue-wash: rgba(130, 191, 244, 0.18);
-  --purple-wash: rgba(196, 167, 238, 0.18);
-
-  /* One radius vocabulary: controls → cards → surfaces → sheets. Legacy
-     aliases resolve to the same four values while older selectors migrate. */
-  --radius: calc(12px * var(--corner-radius-scale));
-  --radius-sm: var(--radius);
-  --radius-md: calc(16px * var(--corner-radius-scale));
-  --radius-lg: var(--radius-md);
-  --radius-xl: calc(20px * var(--corner-radius-scale));
-  --gutter: 24px;
-
-  /* UX-MOBILE-01 §35/§36/§37/§57: one set of mobile-first layout tokens.
-     Spacing is a 4/8 rhythm, radii follow geometry (small controls → cards →
-     surfaces → sheets), and every interactive box is at least --tap. */
-  --space-1: 4px;
-  --space-2: 8px;
-  --space-3: 12px;
-  --space-4: 16px;
-  --space-5: 24px;
-  --space-6: 32px;
-  --screen-gutter: 16px;
-  --tap: 44px;
-  --control-h-sm: 32px;
-  --control-h: 40px;
-  --control-h-lg: 48px;
-  --radius-control: 12px;
-  --radius-card: 16px;
-  --radius-surface: 20px;
-  --radius-sheet: 24px;
-  --radius-composer: var(--radius-xl);
-  /* Fixed-value component radii use this scale too; it keeps the corner
-     setting effective while preserving inherently circular/pill shapes. */
-  --corner-radius-scale: 1;
-  /* 16px minimum for anything focusable: below it iOS Safari zooms the page
-     on focus, which is the real cause of the "layout falls apart" bug (§32). */
-  --font-input: 16px;
-  --font-body: clamp(var(--ui-font-size, 14px), calc(var(--ui-font-size, 14px) + .15vw), calc(var(--ui-font-size, 14px) + 2px));
-  --font-title: clamp(28px, calc(24px + 2vw), 36px);
-  --font-title-lh: 1.18;
-  --font-heading: clamp(20px, calc(18px + .7vw), 26px);
-  --font-label: clamp(14px, calc(13.5px + .15vw), 15px);
-  --font-meta: clamp(12px, calc(11.5px + .15vw), 13px);
-  --font-meta-lh: 1.4;
-  /* Published by mobileViewport.ts; the literals are the pre-JS fallback. */
-  --visual-vh: 100dvh;
-  --visual-bottom: 100dvh;
-  --keyboard-inset: 0px;
-  --visual-offset: 0px;
-  --safe-top: env(safe-area-inset-top, 0px);
-  --safe-right: env(safe-area-inset-right, 0px);
-  --safe-bottom: env(safe-area-inset-bottom, 0px);
-  --safe-left: env(safe-area-inset-left, 0px);
-  --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
-  --ui-font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-  /* semantic token aliases (WP9): migrate components gradually, old names stay */
-  --surface-0: var(--bg);
-  --surface-1: var(--panel);
-  --surface-raised: var(--elevated);
-  --surface: var(--panel);
-  --fg: var(--text);
-  --text-primary: var(--text);
-  --text-muted: var(--muted);
-  --danger: var(--red);
-  --warning: var(--amber);
-  --success: var(--green);
-  --info: var(--blue);
-  --border-subtle: var(--border-soft);
-  --focus-ring: var(--text);
-  --editor-font-size: 14px;
-  --input-bg: #161513;
-  --scrim: rgba(9, 8, 7, 0.62);
-  --shadow-sm: 0 4px 14px -10px rgba(0, 0, 0, 0.55);
-  --shadow-md: 0 14px 36px -22px rgba(0, 0, 0, 0.66);
-  --shadow-lg: 0 40px 90px -24px rgba(0, 0, 0, 0.72), 0 8px 28px -12px rgba(0, 0, 0, 0.6);
-  --inset-hi: inset 0 1px 0 rgba(255, 255, 255, 0.045);
-  --motion-fast: 120ms;
-  --motion-normal: 180ms;
-  --motion-surface: 240ms;
-  --motion-ease: cubic-bezier(0.2, 0.8, 0.3, 1);
-  --ui-font-size: 14px;
-  --ui-font-scale: 1;
-  /* F15 theme roles: user bubble surface + syntax colors. theme.ts overrides
-     these per theme; the literals here are the pre-JS fallback. */
-  --bubble-user-bg: #35261d;
-  --bubble-user-line: #62442d;
-  --syntax-kw: var(--purple);
-  --syntax-str: var(--green);
-  --syntax-cmt: var(--faint);
-  --syntax-num: var(--amber);
-  --syntax-punc: var(--muted);
-  /* Terminal palette (theme.ts overrides per theme; Ember Dark fallback). */
-  --term-bg: #0e0d0c;
-  --term-fg: #f0eee8;
-  --term-cursor: #f49b5b;
-  --term-sel: rgba(244, 155, 91, 0.34);
-  --term-find: rgba(228, 187, 98, 0.4);
-  --term-find-cur: rgba(244, 155, 91, 0.55);
-  --term-link: #82bff4;
-  --term-a0: #565552;
-  --term-a1: #f07c71;
-  --term-a2: #8bcf6b;
-  --term-a3: #e4bb62;
-  --term-a4: #82bff4;
-  --term-a5: #c4a7ee;
-  --term-a6: #87c7b0;
-  --term-a7: #cbc6bc;
-  --term-a8: #7f7e7a;
-  --term-a9: #f4a29b;
-  --term-a10: #a6da8e;
-  --term-a11: #ebcc89;
-  --term-a12: #acd5f8;
-  --term-a13: #decdf5;
-  --term-a14: #a6d6c5;
-  --term-a15: #f9f8f6;
-}
+@import "./tokens.css";
 
 *,
 *::before,
@@ -230,8 +69,8 @@ button {
   font: inherit;
   color: var(--text);
   background: transparent;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
+  border: 1px solid var(--control-border);
+  border-radius: var(--radius-control);
   padding: 4px 10px;
   cursor: pointer;
   transition:
@@ -395,8 +234,8 @@ input, select, textarea {
   font-size: max(var(--font-input), 1em);
   color: var(--text);
   background: var(--input-bg);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
+  border: 1px solid var(--control-border);
+  border-radius: var(--radius-control);
   padding: 6px 8px;
   transition: border-color var(--motion-fast) var(--motion-ease);
 }
@@ -1407,6 +1246,21 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
   text-align: center; padding: 48px 24px; margin: auto; max-width: 400px;
   animation: empty-state-enter var(--motion-surface) var(--motion-ease) both;
 }
+.empty-state--compact,
+.empty-state--panel {
+  width: min(100%, 430px);
+  min-width: 0;
+  margin: auto;
+  border: 1px dashed var(--border);
+  border-radius: var(--radius-card);
+  background:
+    radial-gradient(circle at 50% 0, var(--accent-wash), transparent 62%),
+    color-mix(in srgb, var(--sunken) 88%, transparent);
+  color: var(--muted);
+  text-align: center;
+}
+.empty-state--compact { padding: var(--space-4); }
+.empty-state--panel { padding: clamp(var(--space-5), 7cqi, 48px) clamp(var(--space-4), 6cqi, 28px); }
 .empty-state-mark {
   position: relative; display: grid; place-items: center; width: 52px; height: 52px; margin-bottom: 16px;
   border-radius: var(--radius-lg);
@@ -3289,6 +3143,51 @@ body[data-chatwidth="wide"] .bubble, body[data-chatwidth="wide"] .reasoning, bod
   background: var(--panel); padding: 0 4px;
 }
 .pane-tabs::-webkit-scrollbar { display: none; }
+:is(
+  .pane-tabs,
+  .term-tab-list,
+  .source-tabs,
+  .pr-tabbar,
+  .plugin-detail-tabs,
+  .widget-library-tabs,
+  .provider-chips,
+  .git-ref-chips,
+  .gh-filter-chips
+) {
+  --scroll-affordance: 18px;
+  padding-inline: var(--scroll-affordance);
+  scroll-padding-inline: var(--scroll-affordance);
+  -webkit-mask-image: linear-gradient(
+    to right,
+    transparent,
+    #000 var(--scroll-affordance),
+    #000 calc(100% - var(--scroll-affordance)),
+    transparent
+  );
+  mask-image: linear-gradient(
+    to right,
+    transparent,
+    #000 var(--scroll-affordance),
+    #000 calc(100% - var(--scroll-affordance)),
+    transparent
+  );
+}
+@media (forced-colors: active) {
+  :is(
+    .pane-tabs,
+    .term-tab-list,
+    .source-tabs,
+    .pr-tabbar,
+    .plugin-detail-tabs,
+    .widget-library-tabs,
+    .provider-chips,
+    .git-ref-chips,
+    .gh-filter-chips
+  ) {
+    -webkit-mask-image: none;
+    mask-image: none;
+  }
+}
 .pane-tab-group {
   display: inline-flex; align-items: stretch; flex: none;
   border-radius: var(--radius-sm); overflow: hidden;
@@ -5420,6 +5319,15 @@ grid-template-columns: 1fr !important;
   }
   .widget-canvas-grid .widget-card { min-height: 320px; }
   .widget-canvas-empty { min-height: 150px; }
+  .widget-card-more,
+  .widget-drag,
+  .widget-resize-handle {
+    width: var(--tap);
+    min-width: var(--tap);
+    height: var(--tap);
+    min-height: var(--tap);
+  }
+  .widget-menu-trigger { min-height: var(--tap); }
 }
 
 
@@ -8882,6 +8790,7 @@ max-width: 100%;
 min-height: var(--tap);
 }
 }
+.view-page,
 .rail-body,
 .settings-pane-body,
 .widget-card-body {
@@ -8894,6 +8803,89 @@ container: feature-panel / inline-size;
 .notification-centre {
 min-width: 0;
   max-width: 100%;
+}
+
+/* Shared resilience rules for slot-contributed content. These live in core so
+   enabling or disabling one package cannot change another package's layout. */
+:is(
+  .audit-note,
+  .form-error,
+  .goal-card-objective,
+  .knowledge-snippet,
+  .plugin-log-line,
+  .prompt-echo,
+  .review-finding,
+  .sched-preview-runs,
+  .sched-run-error,
+  .walkthrough-stop-explain
+) {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+:is(
+  .audit-list,
+  .event-list,
+  .gh-list,
+  .knowledge-panel,
+  .mcp-list,
+  .ntc-list,
+  .plugin-card-grid,
+  .provider-list,
+  .sched-runs,
+  .track-steps
+) {
+  min-width: 0;
+  overscroll-behavior: contain;
+}
+:is(
+  .audit-list,
+  .event-list,
+  .gh-list,
+  .plugin-log,
+  .provider-list,
+  .run-card-body,
+  .usage-sessions-table,
+  .wt-diff
+) {
+  scrollbar-gutter: stable;
+  -webkit-overflow-scrolling: touch;
+}
+.settings-pane-body :is(
+  .set-row,
+  .set-row-text,
+  .set-row-control,
+  .set-add-form,
+  .mcp-form,
+  .mcp-form-row,
+  .plugin-library,
+  .provider-card,
+  .secure-safe-form,
+  .ha-settings
+) {
+  min-width: 0;
+}
+.settings-pane-body :is(.provider-list, .plugin-log, .set-model-list) {
+  overscroll-behavior: contain;
+  -webkit-overflow-scrolling: touch;
+}
+@media (max-width: 700px) {
+  .dialog-panel > :is(
+    .alert-dialog-body,
+    .browser-dialog-body,
+    .goal-attach,
+    .import-sessions-body,
+    .profile-form-body,
+    .project-appearance-body,
+    .role-editor-body,
+    .source-confirm-dialog,
+    .worktree-remove-options,
+    .worktree-session-body
+  ) {
+    min-width: 0;
+    min-height: 0;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
 }
 
 .empty-state-mark {

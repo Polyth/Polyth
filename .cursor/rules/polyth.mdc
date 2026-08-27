@@ -1,0 +1,6 @@
+---
+description: Polyth agent rules — read AGENTS.md before any change
+globs: **/*
+alwaysApply: true
+---
+Read and follow `/workspace/AGENTS.md` for all work. For UI/CSS changes, also read `docs/dev/styles.md`.
