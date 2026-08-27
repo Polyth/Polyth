@@ -3,7 +3,7 @@ import { createServer, type IncomingMessage, type ServerResponse, type Server } 
 import { readFile } from "node:fs/promises";
 import { existsSync, statSync } from "node:fs";
 import { gzipSync } from "node:zlib";
-import { extname, join, normalize } from "node:path";
+import { extname, join, normalize, resolve, sep } from "node:path";
 import type {
   AgentRuntime,
   JsonObject,
@@ -36,6 +36,45 @@ const gzipCache = new Map<string, { mtimeMs: number; gz: Buffer }>();
 const json = (res: ServerResponse, code: number, body: unknown) => {
   res.writeHead(code, { "content-type": "application/json" });
   res.end(JSON.stringify(body));
+};
+
+const inside = (base: string, candidate: string): boolean =>
+  candidate === base || candidate.startsWith(base + sep);
+
+const sendStaticFile = async (
+  req: IncomingMessage,
+  res: ServerResponse,
+  filePath: string,
+): Promise<void> => {
+  const data = await readFile(filePath);
+  const contentType = MIME[extname(filePath)] ?? "application/octet-stream";
+  const headers: Record<string, string> = {
+    "content-type": contentType,
+    "cache-control": HASHED_ASSET.test(filePath)
+      ? "public, max-age=31536000, immutable"
+      : "no-cache",
+  };
+  // ponytail: in-process gzip, no reverse proxy assumed.
+  if (
+    data.length > 1024
+    && COMPRESSIBLE.test(contentType)
+    && (req.headers["accept-encoding"] ?? "").includes("gzip")
+  ) {
+    const mtimeMs = statSync(filePath).mtimeMs;
+    const hit = gzipCache.get(filePath);
+    const gz = hit && hit.mtimeMs === mtimeMs ? hit.gz : gzipSync(data);
+    if (gz !== hit?.gz) {
+      if (gzipCache.size > 500) gzipCache.clear();
+      gzipCache.set(filePath, { mtimeMs, gz });
+    }
+    headers["content-encoding"] = "gzip";
+    headers.vary = "accept-encoding";
+    res.writeHead(200, headers);
+    res.end(gz);
+    return;
+  }
+  res.writeHead(200, headers);
+  res.end(data);
 };
 
 // Buffered-body ceiling: headroom over the 20MB MAX_RAW_BYTES attachment cap
@@ -83,6 +122,8 @@ export interface HttpDeps {
   runtimes: RuntimePool;
   capabilities(): string[];
   webDist: string;
+  /** Workspace packages root containing each package's dist/web assets. */
+  packagesDir?: string;
   version: string;
   routes?: RouteHandler[];
   /** Provider/model visibility toggles (Providers & Models settings). */
@@ -308,6 +349,39 @@ export function createHttpServer(deps: HttpDeps): Server {
 
       if (path.startsWith("/api/")) return json(res, 404, { error: "not-found", path });
 
+      if (path.startsWith("/packages/")) {
+        const asset = path.match(/^\/packages\/([a-z0-9][a-z0-9-]*)\/(.+)$/);
+        if (!asset) { res.writeHead(404); return res.end(); }
+        let relativeAsset: string;
+        try {
+          relativeAsset = decodeURIComponent(asset[2]!);
+        } catch {
+          res.writeHead(400);
+          return res.end();
+        }
+        const packageRoot = resolve(
+          deps.packagesDir ?? resolve(import.meta.dirname, "../.."),
+          asset[1]!,
+          "dist",
+          "web",
+        );
+        const filePath = resolve(packageRoot, relativeAsset);
+        if (
+          relativeAsset.includes("\0")
+          || relativeAsset.includes("\\")
+          || !inside(packageRoot, filePath)
+        ) {
+          res.writeHead(403);
+          return res.end();
+        }
+        if (!existsSync(filePath) || !statSync(filePath).isFile()) {
+          res.writeHead(404, { "content-type": "text/plain" });
+          return res.end("not found");
+        }
+        await sendStaticFile(req, res, filePath);
+        return;
+      }
+
       // static web bundle
       let filePath = normalize(join(deps.webDist, path === "/" ? "index.html" : path));
       if (!filePath.startsWith(normalize(deps.webDist))) { res.writeHead(403); return res.end(); }
@@ -319,35 +393,7 @@ export function createHttpServer(deps: HttpDeps): Server {
         if (extname(path) !== "") { res.writeHead(404, { "content-type": "text/plain" }); return res.end("not found"); }
         filePath = join(deps.webDist, "index.html");
       }
-      const data = await readFile(filePath);
-      const contentType = MIME[extname(filePath)] ?? "application/octet-stream";
-      const headers: Record<string, string> = {
-        "content-type": contentType,
-        "cache-control": HASHED_ASSET.test(filePath)
-          ? "public, max-age=31536000, immutable"
-          : "no-cache",
-      };
-      // ponytail: in-process gzip, no reverse proxy assumed. The 6MB bundle
-      // transfers as ~1.6MB; parse cost is unchanged and handled separately.
-      if (
-        data.length > 1024
-        && COMPRESSIBLE.test(contentType)
-        && (req.headers["accept-encoding"] ?? "").includes("gzip")
-      ) {
-        const mtimeMs = statSync(filePath).mtimeMs;
-        const hit = gzipCache.get(filePath);
-        const gz = hit && hit.mtimeMs === mtimeMs ? hit.gz : gzipSync(data);
-        if (gz !== hit?.gz) {
-          if (gzipCache.size > 500) gzipCache.clear();
-          gzipCache.set(filePath, { mtimeMs, gz });
-        }
-        headers["content-encoding"] = "gzip";
-        headers.vary = "accept-encoding";
-        res.writeHead(200, headers);
-        return res.end(gz);
-      }
-      res.writeHead(200, headers);
-      res.end(data);
+      await sendStaticFile(req, res, filePath);
     } catch (err) {
       const e = err as Error & { code?: string; cause?: unknown; field?: unknown };
       // A dead OpenCode transport is transient: the runtime pool respawns on

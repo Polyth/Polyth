@@ -1,37 +1,52 @@
 // Bundle apps/web to dist/ — runnable from repo root: node apps/web/build.ts
 import { build } from "esbuild";
 import { copyFile, cp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
-import { join } from "node:path";
-import { scaleUiFontSizes } from "./fontScaleCss.ts";
+import { join, resolve } from "node:path";
+import {
+  browserBuildOptions,
+  shellModuleName,
+  uiFontScalePlugin,
+} from "./buildConfig.ts";
 import { discoverWebPackages } from "./webPackages.ts";
 
 const here = import.meta.dirname;
 const dist = join(here, "dist");
+const repositoryRoot = resolve(here, "../..");
+const packagesDir = resolve(repositoryRoot, "packages");
 const projectIcons = join(here, "src", "assets", "project-icons");
+const webPackages = await discoverWebPackages(packagesDir);
+const packageManifests = await Promise.all(webPackages.map(async (pkg) => {
+  const parsed = JSON.parse(
+    await readFile(resolve(pkg.dir, "dist", "web", "package-manifest.json"), "utf8"),
+  ) as {
+    id?: unknown;
+    module?: unknown;
+    styles?: unknown;
+    shellEntries?: unknown;
+  };
+  if (
+    parsed.id !== pkg.id
+    || typeof parsed.module !== "string"
+    || !Array.isArray(parsed.styles)
+    || !parsed.styles.every((style) => typeof style === "string")
+    || !Array.isArray(parsed.shellEntries)
+    || !parsed.shellEntries.every((entry) => typeof entry === "string")
+  ) {
+    throw new Error(`invalid package web manifest for "${pkg.id}"`);
+  }
+  return {
+    id: pkg.id,
+    module: parsed.module,
+    styles: parsed.styles as string[],
+    shellEntries: parsed.shellEntries as string[],
+  };
+}));
 
 await rm(dist, { recursive: true, force: true });
 await mkdir(dist, { recursive: true });
 const shared = join(dist, "shared");
-const reactExternals = [
-  "react",
-  "react-dom",
-  "react-dom/client",
-  "react/jsx-runtime",
-  "react/jsx-dev-runtime",
-];
 
-const uiFontScalePlugin = {
-  name: "ui-font-scale",
-  setup(buildApi: { onLoad(options: { filter: RegExp }, callback: (args: { path: string }) => Promise<{ contents: string; loader: "css" }>): void }) {
-    buildApi.onLoad({ filter: /styles\.css$/ }, async (args) => ({
-      contents: scaleUiFontSizes(await readFile(args.path, "utf8")),
-      loader: "css",
-    }));
-  },
-};
-
-// Plugin bundles leave React external. These entries are built together with
-// splitting so the shell and every hot-loaded plugin resolve one React graph.
+// React stays shell-owned. Package bundles import these same browser modules.
 await build({
   entryPoints: {
     react: join(here, "src/shared/react.ts"),
@@ -52,58 +67,27 @@ await build({
   define: { "process.env.NODE_ENV": '"production"' },
   logLevel: "info",
 });
-const webPackages = await discoverWebPackages(join(here, "..", "..", "packages"));
-const browserEntries: Record<string, string> = {
+
+const shellEntries: Record<string, string> = {
   main: join(here, "src/main.tsx"),
 };
-for (const pkg of webPackages) {
-  browserEntries[`web-packages/${pkg.id}/entry`] = pkg.entryFile;
+for (const source of new Set(packageManifests.flatMap((manifest) => manifest.shellEntries))) {
+  shellEntries[shellModuleName(source)] = resolve(repositoryRoot, source);
 }
 
-// Build the shell and package entries as one split graph. Feature components
-// still consume generic shell seams such as the store and i18n; a shared graph
-// guarantees those stateful modules are singletons instead of silently
-// cloning them once per dynamically loaded package.
+// This graph contains only shell-owned entries. Explicit shell API entries let
+// independently emitted packages consume stateful shell seams as singletons.
 await build({
-  entryPoints: browserEntries,
-  bundle: true,
-  platform: "browser",
-  format: "esm",
-  splitting: true,
-  jsx: "automatic",
-  external: reactExternals,
-  sourcemap: true,
-  minify: true,
+  ...browserBuildOptions,
+  entryPoints: shellEntries,
   outdir: dist,
-  entryNames: "[dir]/[name]",
-  chunkNames: "chunks/[name]-[hash]",
-  assetNames: "assets/[name]-[hash]",
-  loader: { ".css": "css" },
   plugins: [uiFontScalePlugin],
-  define: { "process.env.NODE_ENV": '"production"' },
-  logLevel: "info",
 });
-const webPackageManifest: Array<{
-  id: string;
-  module: string;
-  styles: string[];
-}> = [];
-for (const pkg of webPackages) {
-  const outdir = join(dist, "web-packages", pkg.id);
-  const outputs = await readdir(outdir);
-  webPackageManifest.push({
-    id: pkg.id,
-    module: `/web-packages/${pkg.id}/entry.js`,
-    styles: outputs
-      .filter((name) => name.endsWith(".css"))
-      .sort()
-      .map((name) => `/web-packages/${pkg.id}/${name}`),
-  });
-}
-await mkdir(join(dist, "web-packages"), { recursive: true });
 await writeFile(
-  join(dist, "web-packages", "manifest.json"),
-  JSON.stringify({ packages: webPackageManifest }),
+  join(dist, "packages-manifest.json"),
+  `${JSON.stringify({
+    packages: packageManifests.map(({ id, module, styles }) => ({ id, module, styles })),
+  })}\n`,
 );
 await copyFile(join(here, "src/index.html"), join(dist, "index.html"));
 const projectIconNames = (await readdir(projectIcons))

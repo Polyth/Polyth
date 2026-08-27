@@ -22,14 +22,18 @@ export interface WebEntryLoaderOptions {
 
 const validAsset = (value: unknown): value is WebPackageAsset => {
   const asset = value as Partial<WebPackageAsset> | null;
+  const packageRoot = typeof asset?.id === "string"
+    ? `/packages/${asset.id}/`
+    : "";
   return !!asset
     && typeof asset === "object"
     && typeof asset.id === "string"
+    && /^[a-z0-9][a-z0-9-]*$/.test(asset.id)
     && typeof asset.module === "string"
-    && asset.module.startsWith("/web-packages/")
+    && asset.module.startsWith(packageRoot)
     && Array.isArray(asset.styles)
     && asset.styles.every((style) =>
-      typeof style === "string" && style.startsWith("/web-packages/"));
+      typeof style === "string" && style.startsWith(packageRoot));
 };
 
 function installStyles(asset: WebPackageAsset, documentRef: Document | undefined): void {
@@ -57,7 +61,7 @@ export async function loadWebPackageInstallers(
   const fetchImpl = options.fetch ?? globalThis.fetch;
   const importModule = options.importModule
     ?? ((url: string) => import(url) as Promise<unknown>);
-  const response = await fetchImpl("/web-packages/manifest.json");
+  const response = await fetchImpl("/packages-manifest.json");
   if (!response.ok) {
     throw new Error(`web package manifest failed: HTTP ${response.status}`);
   }

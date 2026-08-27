@@ -51,6 +51,13 @@
         ]
       },
       {
+        "from": "../../packages",
+        "to": "packages",
+        "filter": [
+          "*/dist/web/**/*"
+        ]
+      },
+      {
         "from": "resources/opencode",
         "to": "opencode",
         "filter": [

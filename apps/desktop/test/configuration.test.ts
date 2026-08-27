@@ -44,6 +44,7 @@ test("desktop packaging covers each supported updater target", async () => {
     releaseType: "release",
   });
   assert.equal(pkg.build.extraResources.some(({ to }) => to === "opencode"), true);
+  assert.equal(pkg.build.extraResources.some(({ to }) => to === "packages"), true);
 });
 
 test("release workflow builds all platforms and uploads updater metadata", async () => {

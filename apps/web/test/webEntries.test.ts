@@ -14,7 +14,7 @@ test("runtime web-entry loading creates package lifecycle installers", async () 
     fetch: (async () => new Response(JSON.stringify({
       packages: [{
         id: "sample",
-        module: "/web-packages/sample/entry.js",
+        module: "/packages/sample/entry.js",
         styles: [],
       }],
     }))) as typeof fetch,
@@ -32,7 +32,7 @@ test("runtime web-entry loading creates package lifecycle installers", async () 
     },
   });
 
-  assert.deepEqual(imported, ["/web-packages/sample/entry.js"]);
+  assert.deepEqual(imported, ["/packages/sample/entry.js"]);
   assert.deepEqual(factoryHosts, [host]);
   const uninstall = installers.get("sample")?.();
   assert.equal(installs, 1);

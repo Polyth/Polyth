@@ -1,5 +1,6 @@
 node_modules
 apps/web/dist
+packages/*/dist
 apps/desktop/dist
 apps/desktop/release
 apps/desktop/build/icon.png

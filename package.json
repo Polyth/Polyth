@@ -14,7 +14,7 @@
     "check:node": "node scripts/check-node.mjs",
     "preinstall": "node scripts/check-node.mjs",
     "prebuild": "node scripts/check-node.mjs",
-    "build:web": "node apps/web/build.ts",
+    "build:web": "node apps/web/buildPackages.ts && node apps/web/build.ts",
     "build:desktop": "npm run build:web && npm --workspace @polyth/desktop run build",
     "build": "npm run build:web",
     "prestart": "node scripts/check-node.mjs",

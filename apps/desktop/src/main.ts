@@ -126,6 +126,10 @@ const webDistPath = (): string => app.isPackaged
   ? packagedResource("web")
   : resolve(app.getAppPath(), "../web/dist");
 
+const webPackagesPath = (): string => app.isPackaged
+  ? packagedResource("packages")
+  : resolve(app.getAppPath(), "../../packages");
+
 const readSavedWindowState = (): SavedWindowState => {
   try {
     const raw = JSON.parse(readFileSync(windowStatePath, "utf8")) as SavedWindowState;
@@ -665,6 +669,7 @@ const startServer = async (): Promise<void> => {
     hostname: "127.0.0.1",
     dataDir,
     webDist,
+    webPackagesDir: webPackagesPath(),
     opencode: { bin: binary },
   });
   log(`Polyth server started at ${baseUrl}`);
