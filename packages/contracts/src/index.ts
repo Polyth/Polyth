@@ -481,7 +481,9 @@ export interface SessionService {
   list(projectId?: string): Promise<SessionProjection[]>;
   sync(projectId: string): Promise<SessionProjection[]>;
   snapshot(sessionId: string): Promise<SessionProjection>;
-  events(sessionId: string, afterSeq?: number): Promise<SessionEvent[]>;
+  /** `page` (beforeSeq/limit) selects the newest events in the window so deep
+   *  logs hydrate incrementally; implementations may ignore it. */
+  events(sessionId: string, afterSeq?: number, page?: EventPage): Promise<SessionEvent[]>;
   /** Read-only troubleshooting state. Does not attach or wake a runtime. */
   debug?(sessionId: string): Promise<SessionDebugDto>;
   replyPermission(sessionId: string, requestId: string, reply: "once" | "always" | "reject", scope?: "session" | "project"): Promise<void>;

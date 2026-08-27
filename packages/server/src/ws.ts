@@ -22,7 +22,11 @@ interface Sub {
   busy: boolean; // a subscribe is already being processed for this socket
   // Latest subscribe that arrived while busy; processed after the in-flight
   // gap-fill finishes so rapid session switches never lose their gap-fill.
-  pendingSubscribe: { sessionId: string | null; afterSeq: number } | null;
+  pendingSubscribe: { sessionId: string | null; afterSeq: number; projectId: string | null } | null;
+  // Scope ("*" or a projectId) whose projection snapshot this socket already
+  // received. Live projection broadcasts keep it current afterwards, so a
+  // session switch within the same project skips the redundant snapshot.
+  snapshotScope: string | null;
   // Live events broadcast while gap-fill is awaiting the DB; their seqs sit
   // above the gap-fill boundary, so they are flushed (seq-deduped) afterwards
   // instead of being dropped.
@@ -46,6 +50,9 @@ const MAX_MESSAGES_PER_SECOND = 20;
 const MAX_AUDIO_PER_SECOND = 100;
 // Above this many buffered bytes, hold frames (newest only) until drained.
 const FRAME_HIGH_WATER = 1_000_000;
+// Gap-fill events travel in batched frames: one JSON envelope + one socket
+// write per chunk instead of one per event.
+const GAP_FILL_CHUNK = 500;
 
 export function attachWs(
   server: Server,
@@ -124,7 +131,7 @@ export function attachWs(
   wss.on("connection", (ws) => {
     const sub: Sub = {
       sessionId: null, afterSeq: 0, caughtUp: true,
-      busy: false, pendingSubscribe: null, liveBuffer: [],
+      busy: false, pendingSubscribe: null, snapshotScope: null, liveBuffer: [],
       windowStart: Date.now(), windowCount: 0,
       browserSessionId: null, browserAfterRevision: 0, pendingFrame: null,
       audioCount: 0,
@@ -132,7 +139,7 @@ export function attachWs(
     clients.set(ws, sub);
     ws.on("message", async (raw) => {
       let msg: {
-        type?: string; sessionId?: string; afterSeq?: number;
+        type?: string; sessionId?: string; afterSeq?: number; projectId?: string;
         browserSessionId?: string; afterRevision?: number;
         dictationId?: string; seq?: number; pcm?: string;
       };
@@ -201,7 +208,11 @@ export function attachWs(
       // DB reads that pile up faster than they can complete. Requests that
       // land while busy are not dropped — the latest one is kept and processed
       // after the in-flight gap-fill finishes.
-      sub.pendingSubscribe = { sessionId: msg.sessionId ?? null, afterSeq: Number(msg.afterSeq ?? 0) };
+      sub.pendingSubscribe = {
+        sessionId: msg.sessionId ?? null,
+        afterSeq: Number(msg.afterSeq ?? 0),
+        projectId: typeof msg.projectId === "string" && msg.projectId ? msg.projectId : null,
+      };
       if (sub.busy) return;
       sub.busy = true;
       try {
@@ -215,7 +226,10 @@ export function attachWs(
             sub.caughtUp = false;
             try {
               const gap = await sessions.events(sub.sessionId, sub.afterSeq);
-              for (const ev of gap) send(ws, { type: "event", event: ev });
+              // Batched frames: one envelope per chunk, not one per event.
+              for (let i = 0; i < gap.length; i += GAP_FILL_CHUNK) {
+                send(ws, { type: "events", events: gap.slice(i, i + GAP_FILL_CHUNK) });
+              }
               sub.afterSeq = gap.length ? gap[gap.length - 1]!.seq : sub.afterSeq;
             } catch (err) {
               send(ws, { type: "error", code: "gap-fill", message: String(err) });
@@ -234,10 +248,20 @@ export function attachWs(
           } else {
             sub.caughtUp = true;
           }
-          // projections snapshot so UI can paint sidebar immediately
-          try {
-            for (const p of await sessions.list()) send(ws, { type: "projection", session: p });
-          } catch { /* non-fatal */ }
+          // Projection snapshot so the UI can paint the sidebar immediately —
+          // scoped to the subscribed project when the client names one, and
+          // skipped when this socket already holds the same scope (live
+          // projection broadcasts keep it current afterwards).
+          const scope = cur.projectId ?? "*";
+          if (sub.snapshotScope !== scope) {
+            try {
+              const list = await sessions.list(cur.projectId ?? undefined);
+              for (let i = 0; i < list.length; i += GAP_FILL_CHUNK) {
+                send(ws, { type: "projections", sessions: list.slice(i, i + GAP_FILL_CHUNK) });
+              }
+              sub.snapshotScope = scope;
+            } catch { /* non-fatal */ }
+          }
         }
       } finally {
         sub.busy = false;

@@ -56,7 +56,14 @@ function controllableSessions() {
   return { sessions, nextGap, seen };
 }
 
-interface WsMsg { type: string; event?: SessionEvent; session?: { id: string }; code?: string }
+interface WsMsg {
+  type: string;
+  event?: SessionEvent;
+  events?: SessionEvent[];
+  session?: { id: string };
+  sessions?: Array<{ id: string }>;
+  code?: string;
+}
 
 function connect(port: number): Promise<{ ws: WebSocket; next: () => Promise<WsMsg> }> {
   const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`);
@@ -110,17 +117,24 @@ test("live events during gap-fill are buffered and flushed seq-deduped, not drop
     broadcast.event(mkEv("other", 9));
     gap.resolve([mkEv("s1", 1), mkEv("s1", 2)]);
 
-    // gap-fill (1,2) then flushed live buffer (3,4); dup seq 2 sent only once
+    // gap-fill (1,2) arrives as ONE batched frame, then the flushed live
+    // buffer (3,4) as single-event frames; dup seq 2 sent only once
+    const batch = await c.next();
+    assert.equal(batch.type, "events");
+    assert.deepEqual(batch.events!.map((e) => e.seq), [1, 2]);
+    assert.ok(batch.events!.every((e) => e.sessionId === "s1"));
     const seqs: number[] = [];
-    for (let i = 0; i < 4; i++) {
+    for (let i = 0; i < 2; i++) {
       const m = await c.next();
       assert.equal(m.type, "event");
       assert.equal(m.event!.sessionId, "s1");
       seqs.push(m.event!.seq);
     }
-    assert.deepEqual(seqs, [1, 2, 3, 4]);
-    // projections fan-out follows the flush — nothing else was queued between
-    assert.equal((await c.next()).type, "projection");
+    assert.deepEqual(seqs, [3, 4]);
+    // projections snapshot (batched frame) follows the flush
+    const snap = await c.next();
+    assert.equal(snap.type, "projections");
+    assert.deepEqual(snap.sessions!.map((s) => s.id), ["s1"]);
 
     // live path resumes: seq 4 already flushed (deduped), seq 5 delivered
     broadcast.event(mkEv("s1", 4));
@@ -165,15 +179,18 @@ test("subscribe during in-flight gap-fill is processed after it (latest wins)", 
     broadcast.event(mkEv("s-c", 2));
     gapC.resolve([mkEv("s-c", 1)]);
 
-    // client sees: a1, projection, c1, c2 (flushed), projection
+    // client sees: a1 (batched), projections snapshot, c1 (batched), c2
+    // (flushed). The second snapshot is SKIPPED: same scope ("*"), and live
+    // projection broadcasts keep it current after the first snapshot.
     const m1 = await c.next();
-    assert.deepEqual({ type: m1.type, sid: m1.event!.sessionId, seq: m1.event!.seq }, { type: "event", sid: "s-a", seq: 1 });
-    assert.equal((await c.next()).type, "projection");
+    assert.equal(m1.type, "events");
+    assert.deepEqual(m1.events!.map((e) => ({ sid: e.sessionId, seq: e.seq })), [{ sid: "s-a", seq: 1 }]);
+    assert.equal((await c.next()).type, "projections");
     const m2 = await c.next();
-    assert.deepEqual({ type: m2.type, sid: m2.event!.sessionId, seq: m2.event!.seq }, { type: "event", sid: "s-c", seq: 1 });
+    assert.equal(m2.type, "events");
+    assert.deepEqual(m2.events!.map((e) => ({ sid: e.sessionId, seq: e.seq })), [{ sid: "s-c", seq: 1 }]);
     const m3 = await c.next();
     assert.deepEqual({ type: m3.type, sid: m3.event!.sessionId, seq: m3.event!.seq }, { type: "event", sid: "s-c", seq: 2 });
-    assert.equal((await c.next()).type, "projection");
 
     // the sub now targets s-c: old-session live events filtered, s-c delivered
     broadcast.event(mkEv("s-a", 2));

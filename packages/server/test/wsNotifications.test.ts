@@ -53,6 +53,7 @@ function controllableSessions() {
 interface WsMsg {
   type: string;
   event?: SessionEvent;
+  events?: SessionEvent[];
   session?: { id: string };
   notification?: NotificationRecord;
 }
@@ -97,7 +98,7 @@ test("notification/added reaches every socket, bypassing the active-session filt
     open.push(a.ws, b.ws);
     a.ws.send(JSON.stringify({ type: "subscribe", sessionId: "s1", afterSeq: 0 }));
     (await nextGap()).resolve([]);
-    assert.equal((await a.next()).type, "projection"); // post-gap-fill snapshot
+    assert.equal((await a.next()).type, "projections"); // post-gap-fill snapshot (batched)
 
     // A notification for a THIRD session must reach both sockets unfiltered.
     const record = mkRecord("n1", "s3");
@@ -148,14 +149,15 @@ test("notification/added is delivered immediately during a pending gap-fill, nev
     assert.equal(first.type, "notification/added");
     assert.deepEqual(first.notification, record);
 
-    // Then the normal order: gap-fill event, flushed live event, projections.
+    // Then the normal order: batched gap-fill frame, flushed live event,
+    // batched projections snapshot.
     const e1 = await c.next();
-    assert.equal(e1.type, "event");
-    assert.equal(e1.event!.seq, 1);
+    assert.equal(e1.type, "events");
+    assert.deepEqual(e1.events!.map((e) => e.seq), [1]);
     const e2 = await c.next();
     assert.equal(e2.type, "event");
     assert.equal(e2.event!.seq, 2);
-    assert.equal((await c.next()).type, "projection");
+    assert.equal((await c.next()).type, "projections");
   } finally {
     for (const ws of open) ws.close();
     server.close();
