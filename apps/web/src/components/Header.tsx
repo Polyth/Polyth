@@ -16,7 +16,9 @@ import { PANEL_OF_CAPABILITY, PANE_OF_CAPABILITY, VIEW_OF_CAPABILITY } from "../
 import SlotHost from "./slots/SlotHost.ts";
 import { Icon } from "../icons.tsx";
 import { setWorkspaceMode, useWorkspaceMode } from "../widgets/workspaceMode.ts";
-import { useDismissibleMenu } from "./a11y/Menu.ts";
+import {
+  FolderIcon, IconButton, InfoIcon, LockIcon, Menu, MenuIcon, SettingsIcon,
+} from "./ui/index.ts";
 import { useUiSettings } from "../uiPrefs.ts";
 import MobileNavigationRail from "./mobile/MobileNavigationRail.tsx";
 import WorkspaceBottomNav from "./workspace/WorkspaceBottomNav.tsx";
@@ -204,10 +206,11 @@ function ContextRing({ gauge }: { gauge: ContextGauge }) {
 function DrawerTrigger() {
   const open = useStore((s) => s.sidebarOpen);
   return (
-    <button
-      className="icon-btn header-drawer-btn"
-      title={tr("header.openProjectsAndSessions")}
-      aria-label={tr("header.openProjectsAndSessions")}
+    <IconButton
+      icon={MenuIcon}
+      label={tr("header.openProjectsAndSessions")}
+      size="lg"
+      className="header-drawer-btn"
       aria-controls="polyth-session-drawer"
       aria-expanded={open}
       onClick={() => {
@@ -218,11 +221,7 @@ function DrawerTrigger() {
         if (getState().railPlugin !== null) setRailPlugin(null);
         setSidebarOpen(true);
       }}
-    >
-      <svg width="16" height="16" viewBox="0 0 16 16" {...STROKE}>
-        <path d="M2.5 4.5h11M2.5 8h11M2.5 11.5h11" />
-      </svg>
-    </button>
+    />
   );
 }
 
@@ -261,44 +260,33 @@ function useResizeFocusHandoff(mode: ShellMode) {
 }
 
 function UserMenu({ githubUser }: { githubUser: GithubStatusDto["user"] }) {
-  const [open, setOpen] = useState(false);
-  const menuRef = useRef<HTMLDivElement>(null);
-  const triggerRef = useRef<HTMLButtonElement>(null);
-  const onMenuKey = useDismissibleMenu({
-    open,
-    menuRef,
-    triggerRef,
-    onClose: () => setOpen(false),
-  });
-  const go = (page: "access" | "about") => {
-    setOpen(false);
-    openSettingsPage(page);
-  };
   return (
     <div className="header-user-menu">
-      <button
-        ref={triggerRef}
-        className="header-profile"
-        aria-label={githubUser ? tr("header.valueSUserMenu", { login: githubUser.login }) : tr("header.userMenu")}
-        aria-haspopup="menu"
-        aria-expanded={open}
-        onClick={() => setOpen((value) => !value)}
+      <Menu
+        label={tr("header.userAndSystem")}
+        align="end"
+        entries={[
+          { id: "access", label: tr("header.accessAmpSecurity"), icon: LockIcon, onSelect: () => openSettingsPage("access") },
+          { id: "about", label: tr("header.aboutPolyth"), icon: InfoIcon, onSelect: () => openSettingsPage("about") },
+          "separator",
+          { id: "settings", label: tr("header.allSettings"), icon: SettingsIcon, onSelect: () => setOverlay("settings") },
+        ]}
       >
-        <span className="header-profile-avatar">
-          {githubUser
-            ? <img src={githubUser.avatarUrl} alt="" referrerPolicy="no-referrer" />
-            : <Icon.session />}
-        </span>
-        <b aria-hidden="true">⌄</b>
-      </button>
-      {open && (
-        <div className="menu-popup user-menu-popup" role="menu" aria-label={tr("header.userAndSystem")} ref={menuRef} onKeyDown={onMenuKey}>
-          <button role="menuitem" onClick={() => go("access")}>{tr("header.accessAmpSecurity")}</button>
-          <button role="menuitem" onClick={() => go("about")}>{tr("header.aboutPolyth")}</button>
-          <div className="menu-sep" />
-          <button role="menuitem" onClick={() => { setOpen(false); setOverlay("settings"); }}>{tr("header.allSettings")}</button>
-        </div>
-      )}
+        {(trigger) => (
+          <button
+            className="header-profile"
+            aria-label={githubUser ? tr("header.valueSUserMenu", { login: githubUser.login }) : tr("header.userMenu")}
+            {...trigger}
+          >
+            <span className="header-profile-avatar">
+              {githubUser
+                ? <img src={githubUser.avatarUrl} alt="" referrerPolicy="no-referrer" />
+                : <Icon.session />}
+            </span>
+            <b aria-hidden="true">⌄</b>
+          </button>
+        )}
+      </Menu>
     </div>
   );
 }
@@ -354,14 +342,14 @@ export default function Header() {
       <header className={`header${compact ? " header-compact" : ""}${chatSurface ? " header-chat" : ""}`}>
         {compact && <DrawerTrigger />}
         {compact && chatSurface && (
-          <button
-            className="icon-btn header-project-btn"
-            aria-label={compact ? tr("header.openProjectsAndSessions") : tr("header.addOrOpenAProject")}
-            title={compact ? project?.name || tr("settings.pages.projects") : tr("header.addOrOpenAProject")}
-            onClick={() => compact ? setSidebarOpen(true) : setOverlay("project-picker")}
-          >
-            <Icon.files />
-          </button>
+          <IconButton
+            icon={FolderIcon}
+            label={tr("header.openProjectsAndSessions")}
+            size="lg"
+            className="header-project-btn"
+            title={project?.name || tr("settings.pages.projects")}
+            onClick={() => setSidebarOpen(true)}
+          />
         )}
         {(!compact || !chatSurface) && (
           <button className="header-brand" aria-label={tr("header.polythHome")} onClick={() => switchWorkspaceMode("chat")}>

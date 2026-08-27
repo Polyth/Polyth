@@ -1056,9 +1056,23 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
 .view-group { display: flex; align-items: center; gap: 2px; }
 .view-group + .view-group { margin-left: 4px; padding-left: 5px; border-left: 1px solid var(--hair-strong); }
 .view-icon {
+  position: relative;
   display: grid; place-items: center; width: 30px; height: 26px; padding: 0;
   border: none; border-radius: var(--radius-sm); color: var(--muted); background: transparent;
 }
+/* Hit-area floor on coarse pointers (--hit-min is 0px on fine pointers):
+   the visual pill stays compact while the touch target reaches --tap. */
+.view-icon::after,
+.workspace-mode-switch button::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: max(100%, var(--hit-min));
+  height: max(100%, var(--hit-min));
+  transform: translate(-50%, -50%);
+}
+.workspace-mode-switch button { position: relative; }
 .view-icon > svg { width: 16px; height: 16px; }
 .view-icon:hover { color: var(--text); background: var(--elevated); border-color: transparent; }
 .view-icon.active {
@@ -4089,8 +4103,8 @@ body[data-density="balanced"] .composer { padding-block: 10px; }
 .widget-place-picker p { margin: 4px 0; color: var(--faint); font-size: 9.5px; }
 .header-action:hover { color: var(--text); background: var(--bg); }
 .header-user-menu { position: relative; flex: none; }
+/* User menu content renders through ui/Menu (portal .ui-menu). */
 .header-profile { display: flex; align-items: center; gap: 6px; padding: 0 4px; border: 0; background: transparent; }
-.user-menu-popup { top: calc(100% + 7px); min-width: 180px; }
 .header-profile-avatar {
   display: grid; place-items: center; width: 31px; height: 31px; border-radius: 50%;
   background: var(--raised); color: var(--text); font-size: 10px; font-weight: 700;
@@ -4297,11 +4311,6 @@ html[dir="rtl"] .rail-resize {
 html[dir="rtl"] .settings-nav {
   border-right: 0;
   border-left: 1px solid var(--border-soft);
-}
-html[dir="rtl"] .user-menu-popup {
-  right: auto;
-  left: 0;
-  transform-origin: top left;
 }
 html[dir="rtl"] .menu-popup button {
   text-align: right;
@@ -5485,15 +5494,18 @@ min-height: var(--tap);
 .session-list-empty { padding: 10px 8px; font-size: 11px; }
 /* Chat header + metrics ---------------------------------------------------- */
 .header-chat { border-color: var(--chat-border); background: var(--chat-surface); }
-.header-project-btn {
-  width: 44px;
-  height: 44px;
+/* Both header nav triggers are ui/IconButtons; these rules only add the
+   context tint (specificity beats the later .ui-icon-btn base rules). */
+.ui-icon-btn.header-project-btn {
   flex: none;
-  border-radius: calc(10px * var(--corner-radius-scale));
   color: var(--session-blue);
   background: var(--session-blue-soft);
 }
-.header-project-btn svg { width: 18px; height: 18px; }
+.ui-icon-btn.header-project-btn:hover:not(:disabled) {
+  color: var(--session-blue);
+  background: color-mix(in srgb, var(--session-blue) 14%, transparent);
+}
+.ui-icon-btn.header-drawer-btn { color: var(--text-dim); }
 .chat-metrics {
   min-width: 0;
   display: flex;

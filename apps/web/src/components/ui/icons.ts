@@ -15,6 +15,7 @@ export {
   Info as InfoIcon,
   CircleHelp as HelpIcon,
   // navigation
+  Menu as MenuIcon,
   ChevronDown as ChevronDownIcon,
   ChevronUp as ChevronUpIcon,
   ChevronRight as ChevronRightIcon,
