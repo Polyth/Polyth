@@ -98,7 +98,10 @@ export interface WorkGroup {
  *  off by a tool call (or end of log) keeps its own block. */
 export function mergeThinking(messages: RenderMessage[]): RenderMessage[] {
   const out: RenderMessage[] = [];
-  let pending: { texts: string[]; time: number; id: string; eventSeq: number; finalized: boolean } | null = null;
+  // `rev` accumulates every source message's mutation counter plus a +1 per
+  // merged source, so a merged row's rev changes whenever any of its sources
+  // mutates OR a new source joins the run (row memoization contract).
+  let pending: { texts: string[]; time: number; id: string; eventSeq: number; finalized: boolean; rev: number } | null = null;
   const flush = (midLog: boolean) => {
     if (!pending) return;
     out.push({
@@ -111,6 +114,7 @@ export function mergeThinking(messages: RenderMessage[]): RenderMessage[] {
       // A later message proves this thinking finished even without a part-final.
       finalized: midLog ? true : pending.finalized,
       time: pending.time,
+      rev: pending.rev + (midLog ? 1 : 0),
     });
     pending = null;
   };
@@ -119,14 +123,15 @@ export function mergeThinking(messages: RenderMessage[]): RenderMessage[] {
       if (pending) {
         pending.texts.push(m.reasoning);
         pending.finalized = m.finalized;
+        pending.rev += (m.rev ?? 0) + 1;
       } else {
-        pending = { texts: [m.reasoning], time: m.time, id: m.id, eventSeq: m.eventSeq, finalized: m.finalized };
+        pending = { texts: [m.reasoning], time: m.time, id: m.id, eventSeq: m.eventSeq, finalized: m.finalized, rev: (m.rev ?? 0) + 1 };
       }
       continue;
     }
     if (m.kind === "assistant" && pending) {
       const merged = [...pending.texts, m.reasoning].filter(Boolean).join("\n\n");
-      out.push({ ...m, reasoning: merged });
+      out.push({ ...m, reasoning: merged, rev: (m.rev ?? 0) + pending.rev });
       pending = null;
       continue;
     }

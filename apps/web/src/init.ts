@@ -181,7 +181,15 @@ export function init(): void {
     const s = store.getState();
     if (s.activeSessionId !== lastSubSession) {
       lastSubSession = s.activeSessionId ?? undefined;
-      if (sync) sync.setSubscription(s.activeSessionId ?? undefined, s.activeSessionId ? store.lastSeq(s.activeSessionId) : 0);
+      // projectId scopes the server's projection snapshot; the server skips
+      // it entirely when this socket already holds the same scope.
+      if (sync) {
+        sync.setSubscription(
+          s.activeSessionId ?? undefined,
+          s.activeSessionId ? store.lastSeq(s.activeSessionId) : 0,
+          s.activeProjectId ?? undefined,
+        );
+      }
     }
     if (s.activeProjectId !== lastProject) {
       lastProject = s.activeProjectId;
@@ -336,8 +344,14 @@ function startSync(): void {
     if (msg.type === "event") {
       pending.push(msg.event);
       scheduleFlush();
+    } else if (msg.type === "events") {
+      // Batched gap-fill frame: the whole chunk joins one store update.
+      pending.push(...msg.events);
+      scheduleFlush();
     } else if (msg.type === "projection") {
       store.upsertSession(msg.session);
+    } else if (msg.type === "projections") {
+      store.upsertSessions(msg.sessions);
     } else if (msg.type === "notification/added") {
       // NTF-01: global inbox rows bypass the session event batch entirely —
       // they are derived state, never part of any session's log or reducer.
@@ -360,6 +374,60 @@ function startSync(): void {
 
 // ---- session / project actions --------------------------------------------
 
+// ---- paginated hydration (P0 perf) ------------------------------------------
+// A first open fetches only the NEWEST window and renders immediately; older
+// history backfills in the background (and further on scroll-up), so a
+// 300k-event session paints as fast as a fresh one. `deriveMessages`/rewind
+// stay correct: active rewind markers are recent by construction (they sit at
+// the log tail), and the auto-backfill below extends the window past the
+// rewind TARGET so undone-range marking is complete.
+const INITIAL_EVENT_WINDOW = 500;
+const BACKFILL_CHUNK = 2000;
+/** Background backfill stops here; scroll-up keeps loading beyond on demand. */
+const AUTO_BACKFILL_TARGET = 4000;
+const backfillInFlight = new Set<string>();
+
+/** Fetch one chunk of history older than the cached window. Returns true when
+ *  events were added, false at log start / while another fetch is in flight. */
+export async function loadOlderEvents(sessionId: string, chunk = BACKFILL_CHUNK): Promise<boolean> {
+  if (backfillInFlight.has(sessionId)) return false;
+  const oldest = store.oldestSeq(sessionId);
+  if (oldest <= 1) return false; // nothing cached yet, or already at seq 1
+  backfillInFlight.add(sessionId);
+  try {
+    const older = await api.getEvents(sessionId, 0, { beforeSeq: oldest, limit: chunk });
+    if (older.length === 0) return false;
+    store.applyEvents(older);
+    return true;
+  } finally {
+    backfillInFlight.delete(sessionId);
+  }
+}
+
+/** True while more history should stream in without user interaction. */
+function wantsAutoBackfill(sessionId: string): boolean {
+  if (store.hasFullHistory(sessionId)) return false;
+  const events = store.getState().events[sessionId];
+  if (!events || events.length === 0) return false;
+  if (events.length < AUTO_BACKFILL_TARGET) return true;
+  // Rewind correctness: the undone range spans [atSeq, marker]; when the
+  // marker is loaded but its target is older than the window, keep going.
+  const model = store.reduceSessionModel(sessionId, events);
+  return model.rewind !== null && model.rewind.atSeq < events[0]!.seq;
+}
+
+function scheduleAutoBackfill(sessionId: string, generation: number): void {
+  const step = async (): Promise<void> => {
+    if (generation !== openSessionGeneration) return; // another open took over
+    if (store.getState().activeSessionId !== sessionId) return;
+    if (!wantsAutoBackfill(sessionId)) return;
+    const added = await loadOlderEvents(sessionId).catch(() => false);
+    if (!added) return;
+    setTimeout(() => void step(), 50); // yield between chunks; UI stays fluid
+  };
+  setTimeout(() => void step(), 200); // let the fresh window paint first
+}
+
 export async function openSession(
   sessionId: string,
   opts: {
@@ -373,8 +441,11 @@ export async function openSession(
   const generation = ++openSessionGeneration;
   const before = store.getState();
   const cachedSession = before.sessions.find((session) => session.id === sessionId);
-  const useCachedView = hydratedSessions.has(sessionId) && cachedSession !== undefined;
-  const afterSeq = hydratedSessions.has(sessionId) ? store.lastSeq(sessionId) : 0;
+  // The events entry can be LRU-evicted while the id stays in hydratedSessions;
+  // an evicted session re-hydrates exactly like a first open.
+  const cachedEvents = before.events[sessionId];
+  const useCachedView = hydratedSessions.has(sessionId) && cachedSession !== undefined && cachedEvents !== undefined;
+  const afterSeq = useCachedView ? store.lastSeq(sessionId) : 0;
 
   // Revisited sessions render their canonical cached history immediately while
   // metadata and the append-only suffix revalidate. A first open remains in
@@ -390,18 +461,23 @@ export async function openSession(
   try {
     // Metadata and history are independent reads. Starting both together saves
     // one full round trip on high-latency links and old-session deep links.
+    // First opens fetch only the newest window; older history backfills below.
     const [session, events] = await Promise.all([
       api.getSession(sessionId),
-      api.getEvents(sessionId, afterSeq),
+      useCachedView
+        ? api.getEvents(sessionId, afterSeq)
+        : api.getEvents(sessionId, 0, { limit: INITIAL_EVENT_WINDOW }),
     ]);
     if (generation !== openSessionGeneration) return;
     store.upsertSession(session);
     if (session.projectId !== store.getState().activeProjectId) store.activateProject(session.projectId);
-    store.applyEvents(events); // one store update for the whole history/suffix
+    store.applyEvents(events); // one store update for the whole window/suffix
+    store.ensureEventCache(sessionId); // empty logs still count as cached
     hydratedSessions.add(sessionId);
     maybeSeedFromReplay(sessionId);
     store.activateSession(sessionId);
     if (opts.showChat !== false) store.showSessionChat();
+    scheduleAutoBackfill(sessionId, generation);
   } finally {
     // A newer concurrent open owns the claim and active-session transition.
     if (
@@ -550,6 +626,27 @@ export async function createSession(projectId: string, opts: CreateSessionOption
     ...(agent ? { agent } : {}),
     ...(worktreePath ? { worktreePath } : {}),
   });
+  // Instant spawn (UX): the id is authoritative and the session is seconds
+  // old, so publish an optimistic projection + empty canonical event window
+  // and open the chat NOW. openSession() then revalidates through its cached
+  // path in the background (metadata + any suffix), and refreshSessions
+  // reconciles the projection — zero blocking round trips after the POST.
+  const now = Date.now();
+  store.seedSessionCache({
+    id: sessionId,
+    projectId,
+    title: input.title ?? "",
+    status: "idle",
+    createdAt: now,
+    updatedAt: now,
+    ...(model ? { model } : {}),
+    ...(agent ? { agent } : {}),
+    ...(worktreePath ? { worktreePath } : {}),
+  });
+  hydratedSessions.add(sessionId);
+  if (projectId !== store.getState().activeProjectId) store.activateProject(projectId);
+  store.activateSession(sessionId);
+  store.showSessionChat();
   const opening = openSession(sessionId);
   if (precache) {
     void opening.catch((error) => {

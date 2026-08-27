@@ -29,6 +29,10 @@ export interface UserMsg {
   undone?: boolean;
   rewindMarkerSeq?: number;
   time: number;
+  /** Mutation counter: reduceEvent updates messages IN PLACE, so identity
+   *  checks can't see changes. Every in-place mutation bumps `rev`; row
+   *  memoization captures it as a scalar prop at render time. */
+  rev?: number;
 }
 
 export interface AssistantMsg {
@@ -49,6 +53,8 @@ export interface AssistantMsg {
   /** Final `assistant/message.time` — the semantic completion time, distinct
    *  from `time` (the first streamed chunk) per UX-MSG-ACTIONS. */
   completedAt?: number;
+  /** See UserMsg.rev. */
+  rev?: number;
 }
 
 export interface ToolMsg {
@@ -69,6 +75,8 @@ export interface ToolMsg {
   time: number;
   finishTime?: number;
   changedFiles?: string[];
+  /** See UserMsg.rev. */
+  rev?: number;
 }
 
 export interface TaskActivityMsg {
@@ -81,6 +89,8 @@ export interface TaskActivityMsg {
   undone?: boolean;
   rewindMarkerSeq?: number;
   time: number;
+  /** See UserMsg.rev. */
+  rev?: number;
 }
 
 export interface GithubConflictMsg {
@@ -95,6 +105,8 @@ export interface GithubConflictMsg {
   undone?: boolean;
   rewindMarkerSeq?: number;
   time: number;
+  /** See UserMsg.rev. */
+  rev?: number;
 }
 
 export type RenderMessage = UserMsg | AssistantMsg | ToolMsg | TaskActivityMsg | GithubConflictMsg;
@@ -250,6 +262,9 @@ export interface RenderModel {
   /** Lineage of a `session/forked` child (per-message forks carry a draft). */
   fork: ForkState | null;
   version: number; // bumps on every applied event (cheap change signal)
+  /** Bumps only on queue-affecting events (queue/*, delivery/fallback-queued)
+   *  so the queue badge refetches per queue change, not per streamed chunk. */
+  queueVersion: number;
 }
 
 export function emptyModel(): RenderModel {
@@ -272,6 +287,7 @@ export function emptyModel(): RenderModel {
     rewind: null,
     fork: null,
     version: 0,
+    queueVersion: 0,
   };
 }
 
@@ -352,8 +368,18 @@ function pushTool(m: RenderModel, msg: ToolMsg): void {
   if (!idx.tools.has(msg.callId)) idx.tools.set(msg.callId, msg);
 }
 
+/** In-place message mutation marker (see UserMsg.rev). */
+function touch(m: RenderMessage): void {
+  m.rev = (m.rev ?? 0) + 1;
+}
+
 export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
   const d = ev.data;
+  // Queue events carry no message payload (the durable queue is REST-read);
+  // this counter is the refetch signal. They still reach package reducers.
+  if (ev.type.startsWith("queue/") || ev.type === "delivery/fallback-queued") {
+    model.queueVersion += 1;
+  }
   switch (ev.type) {
     case "github/conflict-resolution-started": {
       const prNumber = num(d, "prNumber");
@@ -418,6 +444,7 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
       const text = str(d, "text") ?? "";
       if (ev.type === "assistant/chunk") m.text += text;
       else m.reasoning += text;
+      touch(m);
       break;
     }
     case "assistant/message": {
@@ -454,6 +481,7 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
       if (tokens !== undefined) m.tokens = tokens;
       const cost = num(d, "cost");
       if (cost !== undefined) m.cost = cost;
+      touch(m);
       break;
     }
     case "tool/call": {
@@ -468,6 +496,7 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
         }
         const input = obj(d, "input");
         if (input && Object.keys(input).length > 0) existing.input = input;
+        touch(existing);
       } else {
         pushTool(model, {
           kind: "tool",
@@ -492,6 +521,7 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
         }
         const input = obj(d, "input");
         if (input && Object.keys(input).length > 0) existing.input = input;
+        touch(existing);
       } else {
         pushTool(model, {
           kind: "tool",
@@ -523,6 +553,7 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
           model.changedFiles = [...new Set([...model.changedFiles, ...changedFiles])];
         }
         t.finishTime = ev.time;
+        touch(t);
       }
       break;
     }
@@ -533,6 +564,7 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
         t.status = "error";
         t.error = str(d, "error") ?? "";
         t.finishTime = ev.time;
+        touch(t);
       } else {
         pushTool(model, {
           kind: "tool",
@@ -561,6 +593,7 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
         if (!message.undone && message.eventSeq >= atSeq) {
           message.undone = true;
           message.rewindMarkerSeq = ev.seq;
+          touch(message);
         }
       }
       const restoredText = str(d, "restoredText"); // legacy markers only
@@ -590,6 +623,7 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
           if (message.rewindMarkerSeq === model.rewind.markerSeq) {
             delete message.undone;
             delete message.rewindMarkerSeq;
+            touch(message);
           }
         }
       }
@@ -1032,6 +1066,8 @@ export interface ModelCache {
    *  new tail is folded via reduceEvent; otherwise a full buildModel replay
    *  runs. The same array in → the same model out (stable references). */
   get(sessionId: string, events: readonly SessionEvent[]): RenderModel;
+  /** Release a session's cached model (store eviction of non-active sessions). */
+  drop(sessionId: string): void;
 }
 
 interface ModelCacheEntry {
@@ -1068,6 +1104,9 @@ export function createModelCache(): ModelCache {
       const lastSeq = events.length > 0 ? events[events.length - 1]!.seq : 0;
       bySession.set(sessionId, { events, lastSeq, model });
       return model;
+    },
+    drop(sessionId) {
+      bySession.delete(sessionId);
     },
   };
 }

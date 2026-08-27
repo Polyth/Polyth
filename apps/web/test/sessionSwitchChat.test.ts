@@ -143,9 +143,11 @@ test("session metadata and history start in parallel on a cold open", async () =
   const opening = openSession("parallel");
   await Promise.resolve();
 
+  // Cold opens fetch only the NEWEST event window (paginated hydration);
+  // older history backfills in the background after first paint.
   assert.deepEqual(requestedPaths, [
     "/api/sessions/parallel",
-    "/api/sessions/parallel/events?afterSeq=0",
+    "/api/sessions/parallel/events?afterSeq=0&limit=500",
   ]);
 
   unblockFetches();
@@ -171,14 +173,19 @@ test("a hydrated session renders from cache while its suffix revalidates", async
   await revalidating;
 });
 
-test("first-message session creation precaches chat while its replay loads", async () => {
+test("first-message session creation opens the chat instantly while revalidating", async () => {
   requestedPaths = [];
   blockSession("precache");
 
   const sessionId = await createSession("p1", { precache: true });
 
   assert.equal(sessionId, "precache");
-  assert.equal(store.getState().openingSessionId, "precache");
+  // Instant spawn: the optimistic projection + empty canonical log open the
+  // chat with no awaited request and no blocking loading claim; metadata and
+  // the (empty) suffix revalidate in the background.
+  assert.equal(store.getState().activeSessionId, "precache");
+  assert.equal(store.getState().openingSessionId, null);
+  assert.equal(store.getState().activeView, "session");
   assert.deepEqual(requestedPaths.slice(0, 3), [
     "/api/sessions",
     "/api/sessions/precache",
