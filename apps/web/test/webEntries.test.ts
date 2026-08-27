@@ -102,7 +102,7 @@ test("package styles start loading without waiting for package modules", async (
   });
 
   await importStarted;
-  const style = dom.document.querySelector<HTMLLinkElement>(
+  const style = dom.document.querySelector(
     "link[data-polyth-web-package-style]",
   );
   assert.equal(style?.getAttribute("href"), "/packages/sample/entry.css");
