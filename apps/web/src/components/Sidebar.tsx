@@ -435,6 +435,7 @@ export default function Sidebar() {
               label={tr("sidebar.sortSessionsCurrentlyValue", {
                 value: sort === "recent" ? tr("sidebar.recentActivity") : tr("sidebar.projectName"),
               })}
+              title={tr("sidebar.sortSessions")}
               entries={[
                 {
                   id: "recent",

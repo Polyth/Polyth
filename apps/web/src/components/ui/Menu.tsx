@@ -32,8 +32,13 @@ export interface MenuTriggerProps {
 }
 
 export interface MenuProps {
-  /** Accessible name of the menu and title of the phone sheet. */
+  /** Accessible name of the menu; also the phone-sheet title unless `title`
+   *  provides a more concise heading. */
   label: string;
+  /** Optional short heading for the phone sheet. Labels often carry extra
+   *  screen-reader context ("Sort sessions, currently Recent activity") that
+   *  truncates badly as a visible one-line title. */
+  title?: string;
   entries: readonly MenuEntry[];
   /** Render prop for the trigger; spread the props onto a button. */
   children: (trigger: MenuTriggerProps) => ReactNode;
@@ -41,7 +46,7 @@ export interface MenuProps {
   className?: string;
 }
 
-export default function Menu({ label, entries, children, align = "start", className }: MenuProps) {
+export default function Menu({ label, title, entries, children, align = "start", className }: MenuProps) {
   const [open, setOpen] = useState(false);
   const asSheet = useShellMode() === "phone";
   const triggerRef = useRef<HTMLButtonElement>(null);
@@ -73,7 +78,7 @@ export default function Menu({ label, entries, children, align = "start", classN
     <>
       {trigger}
       {open && asSheet && (
-        <Sheet title={label} onClose={() => setOpen(false)} className="ui-menu-sheet">
+        <Sheet title={title ?? label} onClose={() => setOpen(false)} className="ui-menu-sheet">
           <div className="ui-menu-sheet-list">
             {entries.map((entry, index) =>
               entry === "separator"

@@ -467,8 +467,11 @@ min-height: 0;
 .editor-empty .empty-state-title {
 font-size: var(--font-label);
 }
+/* Touch-target floor for files-package controls only. Scoped under the
+   package root (.editor-view): a global :where() version of this rule leaked
+   into the app shell and inflated unrelated controls (e.g. tour step dots). */
 @media (max-width: 480px), (pointer: coarse) {
-:where(
+.editor-view :where(
     button:not(.file-ref),
     summary,
     select,
@@ -483,7 +486,7 @@ font-size: var(--font-label);
 min-height: var(--tap) !important;
 }
 
-:where(
+.editor-view :where(
     button:not(.file-ref),
     summary,
     [role="button"],

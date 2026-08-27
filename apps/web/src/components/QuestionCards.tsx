@@ -190,7 +190,7 @@ function QuestionStepper({ q }: { q: PendingQuestion }) {
         {!last && <button onClick={() => setStep((s) => Math.min(items.length - 1, s + 1))}>{tr("common.next")}</button>}
         {last && (
           <button className="primary" disabled={!canSubmit} onClick={submit}>
-            {tr("common.submit")}{items.length > 1 ? tr("questioncards.all") : ""}
+            {items.length > 1 ? tr("questioncards.submitAll") : tr("common.submit")}
           </button>
         )}
         <button className="danger" onClick={reject}>{tr("questioncards.reject")}</button>

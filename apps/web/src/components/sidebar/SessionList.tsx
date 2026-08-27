@@ -209,6 +209,7 @@ function SessionRow({
   const menuRef = useRef<HTMLDivElement>(null);
   const sessionBtnRef = useRef<HTMLButtonElement>(null);
   const menuTriggerRef = useRef<HTMLButtonElement>(null);
+  const moreBtnRef = useRef<HTMLButtonElement>(null);
   const menuReturnRef = useRef<HTMLButtonElement | null>(null);
   const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const longPressOpenedRef = useRef(false);
@@ -284,6 +285,7 @@ function SessionRow({
         menuRef.current
         && !menuRef.current.contains(target)
         && !menuTriggerRef.current?.contains(target)
+        && !moreBtnRef.current?.contains(target)
       ) setMenuOpen(false);
     };
     document.addEventListener("mousedown", h);
@@ -520,11 +522,13 @@ function SessionRow({
         {!renaming && (
           <button
             type="button"
+            ref={moreBtnRef}
             className="session-quick-btn session-more-btn"
             aria-label={`${tr("common.more")}: ${displayTitle}`}
             aria-haspopup="menu"
             aria-expanded={menuOpen}
             onClick={() => {
+              menuReturnRef.current = moreBtnRef.current;
               tapFeedback();
               setSwipeRevealed(false);
               setMenuOpen((open) => !open);

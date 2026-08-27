@@ -142,10 +142,22 @@ export function useModalSurface({
     if (!el) return;
     const unlockBodyScroll = lockBodyScroll();
     const opener = document.activeElement as HTMLElement | null;
-    const target = (initialFocus ? el.querySelector<HTMLElement>(initialFocus) : null)
-      ?? el.querySelector<HTMLElement>(FOCUSABLE)
-      ?? el;
-    target.focus();
+    // Surfaces that animate in from visibility:hidden (compact drawer/sheet)
+    // silently swallow a focus() issued before the transition flips them
+    // visible. Retry across a few frames until focus actually lands inside.
+    let focusRaf = 0;
+    let focusTries = 0;
+    const claimFocus = () => {
+      const target = (initialFocus ? el.querySelector<HTMLElement>(initialFocus) : null)
+        ?? el.querySelector<HTMLElement>(FOCUSABLE)
+        ?? el;
+      target.focus();
+      if (!el.contains(document.activeElement) && focusTries < 20) {
+        focusTries += 1;
+        focusRaf = requestAnimationFrame(claimFocus);
+      }
+    };
+    claimFocus();
     const restoreBackground = isolateDocumentSiblings(isolationRootRef?.current ?? null);
 
     const onKeyDown = (e: KeyboardEvent) => {
@@ -179,6 +191,7 @@ export function useModalSurface({
     };
     el.addEventListener("keydown", onKeyDown);
     return () => {
+      cancelAnimationFrame(focusRaf);
       el.removeEventListener("keydown", onKeyDown);
       unlockBodyScroll();
       restoreBackground();
