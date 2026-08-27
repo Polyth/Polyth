@@ -105,6 +105,9 @@ import SessionContextBar, {
   type ContextChoice,
   type SessionContextBarProps,
 } from "./mobile/SessionContextBar.tsx";
+import {
+  AddIcon, Button, IconButton, Menu, Popover, SendIcon, StopIcon,
+} from "./ui/index.ts";
 
 // Per-project command/snippet catalog cache: the composer remounts on every
 // session change (including a fresh spawn), and each mount refetched both
@@ -140,30 +143,16 @@ function modelRefFromValue(value: string): { providerID: string; modelID: string
 
 function ContextWindowPicker({ limit, used }: { limit?: number; used?: number }) {
   const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
   const value = limit
     ? modelContextLabel(limit).replace(/\s+context$/, "").toUpperCase()
     : tr("composer.unknown");
   const usage = Math.max(0, used ?? 0);
   const percent = limit ? Math.min(100, Math.round((usage / limit) * 100)) : null;
-  useEffect(() => {
-    if (!open) return;
-    const onPointerDown = (event: PointerEvent) => {
-      if (!ref.current?.contains(event.target as Node)) setOpen(false);
-    };
-    const onKeyDown = (event: globalThis.KeyboardEvent) => {
-      if (event.key === "Escape") setOpen(false);
-    };
-    document.addEventListener("pointerdown", onPointerDown);
-    document.addEventListener("keydown", onKeyDown);
-    return () => {
-      document.removeEventListener("pointerdown", onPointerDown);
-      document.removeEventListener("keydown", onKeyDown);
-    };
-  }, [open]);
   return (
-    <div className={`context-window-picker${open ? " open" : ""}`} ref={ref}>
+    <div className={`context-window-picker${open ? " open" : ""}`}>
       <button
+        ref={triggerRef}
         type="button"
         className="context-window-chip"
         title={limit ? tr("composer.modelContextWindowValueTokens", { value: limit.toLocaleString(getLocale()) }) : tr("composer.contextWindowUnavailable")}
@@ -177,7 +166,14 @@ function ContextWindowPicker({ limit, used }: { limit?: number; used?: number })
         </span>
         <Icon.chevronDown />
       </button>
-      {open && <div className="context-window-pop" role="dialog" aria-label={tr("composer.contextWindowDetails")}>
+      <Popover
+        open={open}
+        onClose={() => setOpen(false)}
+        anchorRef={triggerRef}
+        side="up"
+        ariaLabel={tr("composer.contextWindowDetails")}
+        className="context-window-pop"
+      >
         <div>
           <span>{tr("composer.modelLimit")}</span>
           <strong>{limit ? limit.toLocaleString(getLocale()) : tr("common.unavailable")}</strong>
@@ -191,7 +187,7 @@ function ContextWindowPicker({ limit, used }: { limit?: number; used?: number })
             <i style={{ width: `${percent}%` }} />
           </div>
         )}
-      </div>}
+      </Popover>
     </div>
   );
 }
@@ -452,8 +448,6 @@ export default function Composer({
   const [newSessionAutoApprove, setNewSessionAutoApprove] = useState(false);
   const [newSessionGoal, setNewSessionGoal] = useState(false);
   const [creatingSession, setCreatingSession] = useState(false);
-  const [deliveryMenuOpen, setDeliveryMenuOpen] = useState(false);
-  const deliveryMenuRef = useRef<HTMLDivElement>(null);
   const profiles = useProfiles();
   const models = useStore((s) => s.models);
   const chatModels = models.filter(modelSupportsTextWorkflow);
@@ -565,22 +559,6 @@ export default function Composer({
     document.addEventListener("pointerdown", onPointerDown, true);
     return () => document.removeEventListener("pointerdown", onPointerDown, true);
   }, [inputFocused]);
-
-  useEffect(() => {
-    if (!deliveryMenuOpen) return;
-    const close = (event: PointerEvent) => {
-      if (!deliveryMenuRef.current?.contains(event.target as Node)) setDeliveryMenuOpen(false);
-    };
-    const escape = (event: globalThis.KeyboardEvent) => {
-      if (event.key === "Escape") setDeliveryMenuOpen(false);
-    };
-    document.addEventListener("pointerdown", close);
-    document.addEventListener("keydown", escape);
-    return () => {
-      document.removeEventListener("pointerdown", close);
-      document.removeEventListener("keydown", escape);
-    };
-  }, [deliveryMenuOpen]);
 
   // Pane and session transitions must not depend on the debounce. Flush the
   // canonical draft synchronously on pagehide and unmount.
@@ -1511,12 +1489,12 @@ export default function Composer({
               <div className="ac-status" id="composer-autocomplete-list">
                 <span>{acView.status?.text}</span>
                 {acView.status?.createSnippet && (
-                  <button
-                    type="button"
-                    className="small-btn ac-create-snippet"
+                  <Button
+                    size="sm"
+                    className="ac-create-snippet"
                     onClick={() => { setAcToken(null); openSettingsPage("commands"); }}
                   >
-                    {tr("composer.createASnippet")}</button>
+                    {tr("composer.createASnippet")}</Button>
                 )}
               </div>
             )}
@@ -1607,14 +1585,15 @@ export default function Composer({
           {/* §17/§19: phones get ONE `+` (the Add menu, which owns Upload).
               Wider layouts keep the direct upload chip beside it. */}
           {!phoneLayout && (
-            <button
-              type="button"
-              className="chip composer-add-files"
-              aria-label={tr("composer.addFiles")}
-              title={tr("composer.addFiles")}
+            <IconButton
+              icon={AddIcon}
+              label={tr("composer.addFiles")}
+              variant="quiet"
+              size="lg"
+              className="composer-add-files"
               disabled={!activeProjectId}
               onClick={() => fileInputRef.current?.click()}
-            ><Icon.plus /></button>
+            />
           )}
           <ComposerAddMenu
             hasProject={!!activeProjectId}
@@ -1642,7 +1621,7 @@ export default function Composer({
           <span className="composer-primary">
             {working ? (
               (queueEdit || (followUp === "queue" && !sendDisabled)) ? (
-                <div className="composer-send-split" ref={deliveryMenuRef}>
+                <div className="composer-send-split">
                   <button
                     className="send composer-delivery composer-queue"
                     onClick={() => send()}
@@ -1652,26 +1631,37 @@ export default function Composer({
                   >
                     <Icon.sendClock /><span className="composer-action-label">{queueEdit ? tr("common.save") : tr("composer.queue")}</span>
                   </button>
-                  <button
-                    className="composer-send-options"
-                    aria-label={tr("composer.moreActiveRunActions")}
-                    aria-haspopup="menu"
-                    aria-expanded={deliveryMenuOpen}
-                    onClick={() => setDeliveryMenuOpen((open) => !open)}
-                    disabled={queueEdit ? queueEditSaving || !text.trim() : false}
+                  <Menu
+                    label={tr("composer.moreActiveRunActions")}
+                    align="end"
+                    entries={[
+                      {
+                        id: "send-now",
+                        label: queueEdit ? tr("composer.saveQueuedMessage") : tr("composer.sendNow"),
+                        icon: SendIcon,
+                        detail: queueEdit ? tr("composer.keepItInItsCurrent") : tr("composer.stopTheCurrentResponseAndSend"),
+                        onSelect: () => send(undefined, queueEdit ? undefined : "interrupt"),
+                      },
+                      {
+                        id: "stop",
+                        label: tr("common.stop"),
+                        icon: StopIcon,
+                        detail: tr("composer.stopWithoutSendingThisDraft"),
+                        onSelect: () => void abortSession(),
+                      },
+                    ]}
                   >
-                    <Icon.chevronDown />
-                  </button>
-                  {deliveryMenuOpen && (
-                    <div className="composer-send-menu" role="menu">
-                      <button role="menuitem" onClick={() => { setDeliveryMenuOpen(false); send(undefined, queueEdit ? undefined : "interrupt"); }}>
-                        <Icon.send /><span><strong>{queueEdit ? tr("composer.saveQueuedMessage") : tr("composer.sendNow")}</strong><small>{queueEdit ? tr("composer.keepItInItsCurrent") : tr("composer.stopTheCurrentResponseAndSend")}</small></span>
+                    {(trigger) => (
+                      <button
+                        className="composer-send-options"
+                        aria-label={tr("composer.moreActiveRunActions")}
+                        disabled={queueEdit ? queueEditSaving || !text.trim() : false}
+                        {...trigger}
+                      >
+                        <Icon.chevronDown />
                       </button>
-                      <button role="menuitem" onClick={() => { setDeliveryMenuOpen(false); void abortSession(); }}>
-                        <Icon.stop /><span><strong>{tr("common.stop")}</strong><small>{tr("composer.stopWithoutSendingThisDraft")}</small></span>
-                      </button>
-                    </div>
-                  )}
+                    )}
+                  </Menu>
                 </div>
               ) : (
                 <button

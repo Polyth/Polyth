@@ -115,7 +115,8 @@ test("all mobile chat composers expose project and worktree targets", () => {
   assert.match(composer, /target: \{ kind: "branch", branch: candidate\.name \}/);
   assert.match(composer, /newSessionTarget\.kind === "branch"/);
   assert.doesNotMatch(composer, /Modalities:/);
-  assert.match(composer, /aria-label=\{tr\("composer\.addFiles"\)\}/);
+  // The upload chip is a ui/IconButton; `label` is its mandatory accessible name.
+  assert.match(composer, /label=\{tr\("composer\.addFiles"\)\}/);
   assert.match(actions, /composer-auto-approve/);
   assert.match(actions, /composer-goals/);
   assert.match(workflowLauncher, /composer-workflow/);

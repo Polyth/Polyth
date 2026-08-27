@@ -227,8 +227,9 @@ test("Focus uses compact mobile composer controls without editor chrome", async 
   assert.ok(permissions.includes('"permissions.auto-approve-composer-action"'), "auto-approve is a placeable composer action");
   assert.ok(goals.includes('"session.goal-composer-action"'), "goals are a placeable composer action");
   // UX-MOBILE-01 §17/§19: phones expose ONE `+` (the Add menu owns Upload);
-  // wider layouts keep the direct upload chip beside it.
-  assert.ok(composer.includes('aria-label={tr("composer.addFiles")}'), "wider layouts keep a direct upload control");
+  // wider layouts keep the direct upload chip beside it (a ui/IconButton whose
+  // `label` prop is the mandatory accessible name).
+  assert.ok(composer.includes('label={tr("composer.addFiles")}'), "wider layouts keep a direct upload control");
   assert.ok(
     composer.includes('trigger={phoneLayout ? "add" : "tools"}'),
     "the phone add menu is the single plus control",
@@ -376,7 +377,11 @@ test("shared menu, destructive, failed-turn, and header-action contracts stay wi
   const plugins = await read("../../../packages/plugins/widgets/PluginsPage.tsx");
   const css = await read("../src/styles.css");
   assert.ok(sidebar.includes("useDismissibleMenu"), "project actions consume the shared menu contract");
-  assert.ok(header.includes("useDismissibleMenu"), "the user menu consumes the shared menu contract");
+  // The user menu renders through the ui/Menu primitive, which itself owns the
+  // shared dismissible-menu semantics — one contract, consumed once.
+  assert.ok(header.includes("<Menu"), "the user menu consumes the shared menu primitive");
+  const menuPrimitive = await read("../src/components/ui/Menu.tsx");
+  assert.ok(menuPrimitive.includes("useDismissibleMenu"), "the menu primitive consumes the shared menu contract");
   assert.ok(actions.includes('setOverlay("palette")'), "Search opens the command/action palette");
   assert.ok(actions.includes('setOverlay("search")'), "History opens session history search");
   assert.ok(
