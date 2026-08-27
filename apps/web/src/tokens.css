@@ -1,0 +1,166 @@
+/* Polyth canonical web token contract.
+   Keep this file to one :root custom-property block. Theme values are
+   runtime-overridden by theme.ts; these values are the Ember Dark fallback. */
+:root {
+  /* surfaces */
+  --bg: #121110;
+  --panel: #191816;
+  --elevated: #221f1c;
+  --raised: #2a2724;
+  --sunken: #0e0d0c;
+  --input-bg: #161513;
+
+  /* lines */
+  --border: #35322c;
+  --border-soft: #2a2723;
+  --control-border: var(--border);
+  --surface-divider: var(--border-soft);
+  --hair: rgba(255, 255, 255, 0.055);
+  --hair-strong: rgba(255, 255, 255, 0.09);
+
+  /* ink */
+  --text: #f0eee8;
+  --text-dim: #cbc6bc;
+  --muted: #9c9890;
+  --faint: #96928a;
+
+  /* accent + signals */
+  --accent: #f49b5b;
+  --accent-ink: #1c1109;
+  --accent-hi: #f8a869;
+  --accent-wash: rgba(244, 155, 91, 0.13);
+  --accent-line: rgba(244, 155, 91, 0.32);
+  --focus-wash: rgba(244, 155, 91, 0.1);
+  --accent-rgb: 244, 155, 91;
+  --green: #8bcf6b;
+  --amber: #e4bb62;
+  --green-on-wash: #a9e68e;
+  --amber-on-wash: #f3cf7c;
+  --amber-rgb: 228, 187, 98;
+  --red: #f07c71;
+  --red-ink: #101216;
+  --blue: #82bff4;
+  --purple: #c4a7ee;
+  --surface-overlay: rgba(255, 255, 255, 0.022);
+  --surface-overlay-hover: rgba(255, 255, 255, 0.045);
+  --surface-overlay-strong: rgba(255, 255, 255, 0.09);
+  --green-wash: rgba(139, 207, 107, 0.18);
+  --amber-wash: rgba(228, 187, 98, 0.18);
+  --red-wash: rgba(240, 124, 113, 0.18);
+  --blue-wash: rgba(130, 191, 244, 0.18);
+  --purple-wash: rgba(196, 167, 238, 0.18);
+
+  /* spacing + control geometry */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 32px;
+  --gutter: var(--space-5);
+  --screen-gutter: var(--space-4);
+  --tap: 44px;
+  --control-h-sm: 32px;
+  --control-h: 40px;
+  --control-h-lg: 48px;
+
+  /* One scalable radius vocabulary: controls → cards → surfaces → sheets. */
+  --corner-radius-scale: 1;
+  --radius-control: calc(12px * var(--corner-radius-scale));
+  --radius-card: calc(16px * var(--corner-radius-scale));
+  --radius-surface: calc(20px * var(--corner-radius-scale));
+  --radius-sheet: calc(24px * var(--corner-radius-scale));
+  --radius-composer: var(--radius-surface);
+
+  /* Deprecated radius aliases. Do not use in new CSS. */
+  --radius: var(--radius-control);
+  --radius-sm: var(--radius-control);
+  --radius-md: var(--radius-card);
+  --radius-lg: var(--radius-card);
+  --radius-xl: var(--radius-surface);
+
+  /* typography */
+  --ui-font-size: 14px;
+  --ui-font-scale: 1;
+  --font-input: 16px;
+  --font-body: clamp(var(--ui-font-size, 14px), calc(var(--ui-font-size, 14px) + .15vw), calc(var(--ui-font-size, 14px) + 2px));
+  --font-title: clamp(28px, calc(24px + 2vw), 36px);
+  --font-title-lh: 1.18;
+  --font-heading: clamp(20px, calc(18px + .7vw), 26px);
+  --font-label: clamp(14px, calc(13.5px + .15vw), 15px);
+  --font-meta: clamp(12px, calc(11.5px + .15vw), 13px);
+  --font-meta-lh: 1.4;
+  --editor-font-size: 14px;
+  --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  --ui-font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+
+  /* visual viewport + safe-area layout */
+  --visual-vh: 100dvh;
+  --visual-bottom: 100dvh;
+  --keyboard-inset: 0px;
+  --visual-offset: 0px;
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
+
+  /* Deprecated semantic aliases. Do not use in new CSS. */
+  --surface-0: var(--bg);
+  --surface-1: var(--panel);
+  --surface-raised: var(--elevated);
+  --surface: var(--panel);
+  --fg: var(--text);
+  --text-primary: var(--text);
+  --text-muted: var(--muted);
+  --danger: var(--red);
+  --warning: var(--amber);
+  --success: var(--green);
+  --info: var(--blue);
+  --border-subtle: var(--border-soft);
+
+  /* focus, elevation, and motion */
+  --focus-ring: var(--text);
+  --scrim: rgba(9, 8, 7, 0.62);
+  --shadow-sm: 0 4px 14px -10px rgba(0, 0, 0, 0.55);
+  --shadow-md: 0 14px 36px -22px rgba(0, 0, 0, 0.66);
+  --shadow-lg: 0 40px 90px -24px rgba(0, 0, 0, 0.72), 0 8px 28px -12px rgba(0, 0, 0, 0.6);
+  --inset-hi: inset 0 1px 0 rgba(255, 255, 255, 0.045);
+  --motion-fast: 120ms;
+  --motion-normal: 180ms;
+  --motion-surface: 240ms;
+  --motion-ease: cubic-bezier(0.2, 0.8, 0.3, 1);
+
+  /* chat + syntax roles */
+  --bubble-user-bg: #35261d;
+  --bubble-user-line: #62442d;
+  --syntax-kw: var(--purple);
+  --syntax-str: var(--green);
+  --syntax-cmt: var(--faint);
+  --syntax-num: var(--amber);
+  --syntax-punc: var(--muted);
+
+  /* Terminal palette; theme.ts overrides these with the active theme. */
+  --term-bg: #0e0d0c;
+  --term-fg: #f0eee8;
+  --term-cursor: #f49b5b;
+  --term-sel: rgba(244, 155, 91, 0.34);
+  --term-find: rgba(228, 187, 98, 0.4);
+  --term-find-cur: rgba(244, 155, 91, 0.55);
+  --term-link: #82bff4;
+  --term-a0: #565552;
+  --term-a1: #f07c71;
+  --term-a2: #8bcf6b;
+  --term-a3: #e4bb62;
+  --term-a4: #82bff4;
+  --term-a5: #c4a7ee;
+  --term-a6: #87c7b0;
+  --term-a7: #cbc6bc;
+  --term-a8: #7f7e7a;
+  --term-a9: #f4a29b;
+  --term-a10: #a6da8e;
+  --term-a11: #ebcc89;
+  --term-a12: #acd5f8;
+  --term-a13: #decdf5;
+  --term-a14: #a6d6c5;
+  --term-a15: #f9f8f6;
+}

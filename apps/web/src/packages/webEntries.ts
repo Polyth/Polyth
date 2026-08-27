@@ -22,14 +22,18 @@ export interface WebEntryLoaderOptions {
 
 const validAsset = (value: unknown): value is WebPackageAsset => {
   const asset = value as Partial<WebPackageAsset> | null;
+  const packageRoot = typeof asset?.id === "string"
+    ? `/packages/${asset.id}/`
+    : "";
   return !!asset
     && typeof asset === "object"
     && typeof asset.id === "string"
+    && /^[a-z0-9][a-z0-9-]*$/.test(asset.id)
     && typeof asset.module === "string"
-    && asset.module.startsWith("/web-packages/")
+    && asset.module.startsWith(packageRoot)
     && Array.isArray(asset.styles)
     && asset.styles.every((style) =>
-      typeof style === "string" && style.startsWith("/web-packages/"));
+      typeof style === "string" && style.startsWith(packageRoot));
 };
 
 function installStyles(asset: WebPackageAsset, documentRef: Document | undefined): void {
@@ -57,7 +61,7 @@ export async function loadWebPackageInstallers(
   const fetchImpl = options.fetch ?? globalThis.fetch;
   const importModule = options.importModule
     ?? ((url: string) => import(url) as Promise<unknown>);
-  const response = await fetchImpl("/web-packages/manifest.json");
+  const response = await fetchImpl("/packages-manifest.json");
   if (!response.ok) {
     throw new Error(`web package manifest failed: HTTP ${response.status}`);
   }
@@ -66,23 +70,37 @@ export async function loadWebPackageInstallers(
     throw new Error("web package manifest is invalid");
   }
 
-  // Modules download in parallel (they are independent split-graph entries);
+  // Modules download in parallel (they are independent per-package bundles);
   // factories still run sequentially in manifest order afterwards so install
-  // order stays deterministic.
+  // order stays deterministic. Per-package isolation: the manifest is baked
+  // into the shell dist while each bundle lives in its own
+  // packages/{id}/dist/web, so one stale or missing bundle must degrade to a
+  // logged skip — never abort the loop and take every remaining package down
+  // with it.
   const loadedModules = await Promise.all(parsed.packages.map(async (asset) => {
-    installStyles(asset, options.document ?? globalThis.document);
-    return { asset, loaded: await importModule(asset.module) as { default?: unknown } };
+    try {
+      return { asset, loaded: await importModule(asset.module) as { default?: unknown } };
+    } catch (error) {
+      console.error(`[polyth] web package "${asset.id}" failed to load`, error);
+      return { asset, loaded: null };
+    }
   }));
   const installers = new Map<string, WebPackageInstaller>();
   for (const { asset, loaded } of loadedModules) {
-    if (typeof loaded.default !== "function") {
-      throw new Error(`web entry for "${asset.id}" must default-export a package factory`);
+    if (loaded === null) continue;
+    try {
+      if (typeof loaded.default !== "function") {
+        throw new Error(`web entry for "${asset.id}" must default-export a package factory`);
+      }
+      const installer = (loaded.default as WebPackageEntry)(host);
+      if (typeof installer !== "function") {
+        throw new Error(`web entry for "${asset.id}" must return an installer`);
+      }
+      installStyles(asset, options.document ?? globalThis.document);
+      installers.set(asset.id, installer);
+    } catch (error) {
+      console.error(`[polyth] web package "${asset.id}" failed to load`, error);
     }
-    const installer = (loaded.default as WebPackageEntry)(host);
-    if (typeof installer !== "function") {
-      throw new Error(`web entry for "${asset.id}" must return an installer`);
-    }
-    installers.set(asset.id, installer);
   }
   return installers;
 }

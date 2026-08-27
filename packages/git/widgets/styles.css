@@ -40,9 +40,6 @@ flex: none;
 font-size: 18px;
 }
 }
-.view-page:not(.github-page):not(.git-page) {
-container: feature-panel / inline-size;
-}
 .pending-changes-bar {
 position: relative; display: flex; align-items: center; gap: 7px; margin: 0 0 8px;
   min-height: 34px; padding: 4px 6px; border: 1px solid var(--accent-line);
@@ -664,51 +661,6 @@ display: flex; gap: 6px; padding: 9px 0; overflow-x: auto; scrollbar-width: none
 }
 .git-ref-chips::-webkit-scrollbar {
 display: none;
-}
-:is(
-  .pane-tabs,
-  .term-tab-list,
-  .source-tabs,
-  .pr-tabbar,
-  .plugin-detail-tabs,
-  .widget-library-tabs,
-  .provider-chips,
-  .git-ref-chips,
-  .gh-filter-chips
-) {
---scroll-affordance: 18px;
-  padding-inline: var(--scroll-affordance);
-  scroll-padding-inline: var(--scroll-affordance);
-  -webkit-mask-image: linear-gradient(
-    to right,
-    transparent,
-    #000 var(--scroll-affordance),
-    #000 calc(100% - var(--scroll-affordance)),
-    transparent
-  );
-  mask-image: linear-gradient(
-    to right,
-    transparent,
-    #000 var(--scroll-affordance),
-    #000 calc(100% - var(--scroll-affordance)),
-    transparent
-  );
-}
-@media (forced-colors: active) {
-:is(
-    .pane-tabs,
-    .term-tab-list,
-    .source-tabs,
-    .pr-tabbar,
-    .plugin-detail-tabs,
-    .widget-library-tabs,
-    .provider-chips,
-    .git-ref-chips,
-    .gh-filter-chips
-  ) {
--webkit-mask-image: none;
-    mask-image: none;
-}
 }
 .git-ref-chips button {
 min-width: var(--tap); min-height: var(--tap); padding: 0 11px; border: 1px solid var(--hair-strong);

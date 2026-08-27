@@ -124,7 +124,7 @@ function useConnection(): {
 }
 
 function Empty({ children }: { children: ReactNode }) {
-  return <div className="ha-empty">{children}</div>;
+  return <div className="ha-empty empty-state--compact">{children}</div>;
 }
 
 function ConnectionWidget() {

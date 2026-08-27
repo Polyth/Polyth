@@ -134,7 +134,7 @@ Object.defineProperty(globalThis, "fetch", {
     ok: true,
     status: 200,
     statusText: "OK",
-    json: async () => String(input).endsWith("/web-packages/manifest.json")
+    json: async () => String(input).endsWith("/packages-manifest.json")
       ? { packages: [] }
       : { packages: [...descriptors.values()] },
     text: async () => "",

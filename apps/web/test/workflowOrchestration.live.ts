@@ -954,10 +954,15 @@ test("workflow visual quality matrix uses computed geometry across themes, motio
       `every node must expose one progressive dependency editor at ${viewport.width}px`);
     const deleteRadius = await page.locator(".workflow-node-delete").first().evaluate((element) => {
       const style = getComputedStyle(element);
-      return { actual: style.borderRadius, token: style.getPropertyValue("--radius-control").trim() };
+      const probe = document.createElement("span");
+      probe.style.cssText = "position:absolute;visibility:hidden;border-radius:var(--radius-control)";
+      document.body.append(probe);
+      const canonical = getComputedStyle(probe).borderRadius;
+      probe.remove();
+      return { actual: style.borderRadius, canonical };
     });
-    assert.equal(deleteRadius.actual, deleteRadius.token,
-      `node delete radius does not use the workflow control token at ${viewport.width}px`);
+    assert.equal(deleteRadius.actual, deleteRadius.canonical,
+      `node delete radius does not use the canonical control token at ${viewport.width}px`);
     await assertNoOverflow(page, `workflow matrix@${viewport.width}`);
     if (viewport.width <= 620) {
       await assertCarouselGeometry(page, `workflow matrix carousel@${viewport.width}`);
@@ -1050,9 +1055,14 @@ test("workflow visual quality matrix uses computed geometry across themes, motio
       const rootStyle = getComputedStyle(document.documentElement);
       const disabled = element.querySelector<HTMLButtonElement>(".primary-btn:disabled");
       const disabledStyle = disabled ? getComputedStyle(disabled) : null;
+      const probe = document.createElement("span");
+      probe.style.cssText = "position:absolute;visibility:hidden;border-radius:var(--radius-sheet)";
+      document.body.append(probe);
+      const sheetRadius = getComputedStyle(probe).borderRadius;
+      probe.remove();
       return {
         radius: dialogStyle.borderRadius,
-        sheetRadius: dialogStyle.getPropertyValue("--radius-sheet").trim(),
+        sheetRadius,
         animation: dialogStyle.animationName,
         disabledOpacity: disabledStyle?.opacity,
         disabledBackground: disabledStyle?.backgroundColor,

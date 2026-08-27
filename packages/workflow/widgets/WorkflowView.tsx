@@ -582,7 +582,7 @@ export default function WorkflowView() {
             </div>
           )}
           {!loading && !loadFailed && workflows.length === 0 && (
-            <div className="workflow-list-empty">
+            <div className="workflow-list-empty empty-state--compact">
               <Icon.workflow />
               <strong>{tr("workflowview.noWorkflowsYet")}</strong>
               <span>{tr("workflowview.createOneHelp")}</span>

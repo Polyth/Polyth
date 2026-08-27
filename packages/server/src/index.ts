@@ -91,6 +91,8 @@ export interface BootOptions {
   opencode?: Partial<OpenCodeAdapterOptions>;
   /** Workspace packages/ directory scanned for polyth.serverEntry markers. */
   packagesDir?: string;
+  /** Optional packages root override used only for built web assets. */
+  webPackagesDir?: string;
 }
 
 export { isPackageEnabled } from "./packages.ts";
@@ -798,6 +800,7 @@ export async function boot(opts: BootOptions = {}) {
     sessions, projects, runtimes, routes, visibility, auth, catalog: runtimeCatalog,
     capabilities: allCapabilities,
     webDist: resolve(opts.webDist ?? resolve(__dirname, "../../../apps/web/dist")),
+    packagesDir: resolve(opts.webPackagesDir ?? packagesDir),
     version: "0.1.0",
   });
   // order matters: /ws (session gateway) aborts upgrades whose path it does

@@ -506,7 +506,7 @@ function ProviderSpendDonut({
             </div>
           ))}
           {arcs.length === 0 && (
-            <div className="usage-card-empty">
+            <div className="usage-card-empty empty-state--compact">
               <strong>{hiddenSpend ? tr("usage.usagedashboard.allSpendIsHidden") : tr("usage.usagedashboard.noSpendRecorded")}</strong>
               <span>{hiddenSpend
                 ? tr("usage.usagedashboard.showAProviderToIncludeSpend")
@@ -565,7 +565,7 @@ function ModelBreakdown({
           </div>
         ))}
         {shown.length === 0 && (
-          <div className="usage-card-empty">
+          <div className="usage-card-empty empty-state--compact">
             <strong>{hiddenActivity ? tr("usage.usagedashboard.allModelActivityIsHidden") : tr("usage.usagedashboard.noModelActivityYet")}</strong>
             <span>{hiddenActivity
               ? tr("usage.usagedashboard.showAProviderToIncludeModels")

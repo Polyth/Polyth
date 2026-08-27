@@ -11,6 +11,7 @@ const CHROME = [
   "/usr/bin/chromium",
 ].find((candidate): candidate is string => Boolean(candidate && existsSync(candidate)));
 const css = [
+  "../../../apps/web/src/tokens.css",
   "../../../apps/web/src/styles.css",
   "../widgets/styles.css",
   "../../github/widgets/styles.css",

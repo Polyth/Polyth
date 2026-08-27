@@ -1,34 +1,6 @@
 /* Package-owned walkthrough web styles. */
-:is(
-  .audit-note,
-  .form-error,
-  .goal-card-objective,
-  .knowledge-snippet,
-  .plugin-log-line,
-  .prompt-echo,
-  .review-finding,
-  .sched-preview-runs,
-  .sched-run-error,
-  .walkthrough-stop-explain
-) {
-min-width: 0;
-  overflow-wrap: anywhere;
-}
 .wt-card {
 border: 1px solid var(--border-soft); border-radius: var(--radius); background: var(--panel); overflow: hidden;
-}
-:is(
-  .audit-list,
-  .event-list,
-  .gh-list,
-  .plugin-log,
-  .provider-list,
-  .run-card-body,
-  .usage-sessions-table,
-  .wt-diff
-) {
-scrollbar-gutter: stable;
-  -webkit-overflow-scrolling: touch;
 }
 .walkthrough-page {
 padding: 28px max(28px, calc((100% - 900px) / 2));

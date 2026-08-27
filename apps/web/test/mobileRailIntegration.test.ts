@@ -39,7 +39,7 @@ Object.defineProperty(dom, "matchMedia", {
       ? { installed: false, authenticated: false, user: null }
       : url === "/api/packages"
         ? { packages: [{ id: "models", name: "Providers & Models", description: "Model configuration.", core: true, enabled: true, hasSettings: true }] }
-        : url === "/web-packages/manifest.json"
+        : url === "/packages-manifest.json"
           ? { packages: [] }
           : [];
   return {

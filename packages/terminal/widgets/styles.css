@@ -1,49 +1,4 @@
 /* Package-owned terminal web styles. */
-:is(
-  .pane-tabs,
-  .term-tab-list,
-  .source-tabs,
-  .pr-tabbar,
-  .plugin-detail-tabs,
-  .widget-library-tabs,
-  .provider-chips,
-  .git-ref-chips,
-  .gh-filter-chips
-) {
---scroll-affordance: 18px;
-  padding-inline: var(--scroll-affordance);
-  scroll-padding-inline: var(--scroll-affordance);
-  -webkit-mask-image: linear-gradient(
-    to right,
-    transparent,
-    #000 var(--scroll-affordance),
-    #000 calc(100% - var(--scroll-affordance)),
-    transparent
-  );
-  mask-image: linear-gradient(
-    to right,
-    transparent,
-    #000 var(--scroll-affordance),
-    #000 calc(100% - var(--scroll-affordance)),
-    transparent
-  );
-}
-@media (forced-colors: active) {
-:is(
-    .pane-tabs,
-    .term-tab-list,
-    .source-tabs,
-    .pr-tabbar,
-    .plugin-detail-tabs,
-    .widget-library-tabs,
-    .provider-chips,
-    .git-ref-chips,
-    .gh-filter-chips
-  ) {
--webkit-mask-image: none;
-    mask-image: none;
-}
-}
 .term-view {
 flex: 1; min-height: 0; display: flex; flex-direction: column;
 }

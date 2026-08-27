@@ -23,7 +23,11 @@ test("session rows reserve one status zone and expose an aligned action menu", a
 });
 
 test("sidebar geometry scales type from ui font size and density controls rows", async () => {
-  const css = await source("../src/styles.css");
+  const [tokens, styles] = await Promise.all([
+    source("../src/tokens.css"),
+    source("../src/styles.css"),
+  ]);
+  const css = `${tokens}\n${styles}`;
   for (const variable of [
     "--nav-project-size",
     "--nav-branch-size",

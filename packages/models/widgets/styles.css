@@ -30,93 +30,6 @@ width: 100%; height: 100%; display: block;
 flex: 1 1 min(100%, 180px); justify-content: flex-start; overflow-wrap: anywhere;
 }
 }
-:is(
-  .pane-tabs,
-  .term-tab-list,
-  .source-tabs,
-  .pr-tabbar,
-  .plugin-detail-tabs,
-  .widget-library-tabs,
-  .provider-chips,
-  .git-ref-chips,
-  .gh-filter-chips
-) {
---scroll-affordance: 18px;
-  padding-inline: var(--scroll-affordance);
-  scroll-padding-inline: var(--scroll-affordance);
-  -webkit-mask-image: linear-gradient(
-    to right,
-    transparent,
-    #000 var(--scroll-affordance),
-    #000 calc(100% - var(--scroll-affordance)),
-    transparent
-  );
-  mask-image: linear-gradient(
-    to right,
-    transparent,
-    #000 var(--scroll-affordance),
-    #000 calc(100% - var(--scroll-affordance)),
-    transparent
-  );
-}
-@media (forced-colors: active) {
-:is(
-    .pane-tabs,
-    .term-tab-list,
-    .source-tabs,
-    .pr-tabbar,
-    .plugin-detail-tabs,
-    .widget-library-tabs,
-    .provider-chips,
-    .git-ref-chips,
-    .gh-filter-chips
-  ) {
--webkit-mask-image: none;
-    mask-image: none;
-}
-}
-:is(
-  .audit-list,
-  .event-list,
-  .gh-list,
-  .knowledge-panel,
-  .mcp-list,
-  .ntc-list,
-  .plugin-card-grid,
-  .provider-list,
-  .sched-runs,
-  .track-steps
-) {
-min-width: 0;
-  overscroll-behavior: contain;
-}
-:is(
-  .audit-list,
-  .event-list,
-  .gh-list,
-  .plugin-log,
-  .provider-list,
-  .run-card-body,
-  .usage-sessions-table,
-  .wt-diff
-) {
-scrollbar-gutter: stable;
-  -webkit-overflow-scrolling: touch;
-}
-.settings-pane-body :is(
-  .set-row,
-  .set-row-text,
-  .set-row-control,
-  .set-add-form,
-  .mcp-form,
-  .mcp-form-row,
-  .plugin-library,
-  .provider-card,
-  .secure-safe-form,
-  .ha-settings
-) {
-min-width: 0;
-}
 .set-model-list {
 display: flex; flex-direction: column; gap: 1px; max-height: 52vh; overflow-y: auto;
 }
@@ -593,10 +506,6 @@ width: 28px;
   border: 1px solid var(--border-soft);
   border-radius: 9px;
   background: var(--elevated);
-}
-.settings-pane-body :is(.provider-list, .plugin-log, .set-model-list) {
-overscroll-behavior: contain;
-  -webkit-overflow-scrolling: touch;
 }
 @container feature-panel (max-width: 700px) {
 .model-chip {

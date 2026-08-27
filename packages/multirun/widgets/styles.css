@@ -1,17 +1,4 @@
 /* Package-owned multirun web styles. */
-:is(
-  .audit-list,
-  .event-list,
-  .gh-list,
-  .plugin-log,
-  .provider-list,
-  .run-card-body,
-  .usage-sessions-table,
-  .wt-diff
-) {
-scrollbar-gutter: stable;
-  -webkit-overflow-scrolling: touch;
-}
 .multirun-grid {
 display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 14px;
 }

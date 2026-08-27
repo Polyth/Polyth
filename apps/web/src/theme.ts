@@ -541,6 +541,8 @@ export function themeCssVars(spec: ThemeSpec): Record<string, string> {
     "--bg": t.bg, "--panel": t.panel, "--elevated": t.elevated, "--raised": t.raised,
     "--sunken": t.sunken, "--input-bg": t.inputBg,
     "--border": t.border, "--border-soft": t.borderSoft,
+    "--control-border": dark ? t.border : blend(t.text, t.elevated, 0.6),
+    "--surface-divider": t.borderSoft,
     "--hair": rgba(t.text, dark ? 0.055 : 0.07),
     "--hair-strong": rgba(t.text, dark ? 0.09 : 0.12),
     "--text": t.text, "--text-dim": t.textDim, "--muted": t.muted, "--faint": t.faint,

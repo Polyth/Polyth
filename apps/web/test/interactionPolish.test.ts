@@ -48,7 +48,8 @@ test("coarse pointers, focus, motion, radii, and empty states share polish token
   const css = await readWebStyles();
   const coarse = css;
 
-  assert.match(css, /--radius:\s*calc\(12px \* var\(--corner-radius-scale\)\)/);
+  assert.match(css, /--radius-control:\s*calc\(12px \* var\(--corner-radius-scale\)\)/);
+  assert.match(css, /--radius:\s*var\(--radius-control\)/);
   assert.match(css, /--motion-surface:\s*240ms/);
   assert.match(css, /--focus-ring:\s*var\(--text\)/);
   assert.match(css, /:focus-visible\s*\{[^}]*outline:\s*2px solid var\(--focus-ring\)/s);

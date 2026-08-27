@@ -1,66 +1,4 @@
 /* Package-owned goals web styles. */
-@media (max-width: 700px) {
-.dialog-panel > :is(
-    .alert-dialog-body,
-    .browser-dialog-body,
-    .goal-attach,
-    .import-sessions-body,
-    .profile-form-body,
-    .project-appearance-body,
-    .role-editor-body,
-    .source-confirm-dialog,
-    .worktree-remove-options,
-    .worktree-session-body
-  ) {
-min-width: 0;
-    min-height: 0;
-    overflow-y: auto;
-    overscroll-behavior: contain;
-}
-}
-:is(
-  .audit-note,
-  .form-error,
-  .goal-card-objective,
-  .knowledge-snippet,
-  .plugin-log-line,
-  .prompt-echo,
-  .review-finding,
-  .sched-preview-runs,
-  .sched-run-error,
-  .walkthrough-stop-explain
-) {
-min-width: 0;
-  overflow-wrap: anywhere;
-}
-:is(
-  .audit-list,
-  .event-list,
-  .gh-list,
-  .knowledge-panel,
-  .mcp-list,
-  .ntc-list,
-  .plugin-card-grid,
-  .provider-list,
-  .sched-runs,
-  .track-steps
-) {
-min-width: 0;
-  overscroll-behavior: contain;
-}
-:is(
-  .audit-list,
-  .event-list,
-  .gh-list,
-  .plugin-log,
-  .provider-list,
-  .run-card-body,
-  .usage-sessions-table,
-  .wt-diff
-) {
-scrollbar-gutter: stable;
-  -webkit-overflow-scrolling: touch;
-}
 .goals-head.workspace-toolbar {
 align-items: center;
 }
@@ -314,24 +252,6 @@ grid-template-columns: 1fr;
 }
 }
 @media (max-width: 700px) {
-.dialog-panel > :is(
-    .alert-dialog-body,
-    .browser-dialog-body,
-    .goal-attach,
-    .import-sessions-body,
-    .profile-form-body,
-    .project-appearance-body,
-    .role-editor-body,
-    .source-confirm-dialog,
-    .worktree-remove-options,
-    .worktree-session-body
-  ) {
-min-width: 0;
-    min-height: 0;
-    overflow-y: auto;
-    overscroll-behavior: contain;
-}
-
 .goal-dialog-actions button {
 min-height: var(--tap);
 }
