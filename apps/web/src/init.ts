@@ -53,11 +53,20 @@ function deferRuntimeCatalogUntilInteraction(): void {
   window.addEventListener("polyth:hydrate-runtime-catalog", hydrate);
 }
 
-// Branch is resolved per (project, session): a session attached to a git
+// Branch is resolved per (project, worktree): a session attached to a git
 // worktree reports that worktree's branch, never the primary checkout's
 // (UX-FIXTURE-VISUAL P0 — header/status must derive from the resolved root).
-const branchKey = (projectId: string, sessionId: string | null): string =>
-  `${projectId}\0${sessionId ?? ""}`;
+// Sessions WITHOUT a worktree share the project's primary checkout, so
+// switching among them — or to the new-chat surface — reuses the fetched
+// branch instead of refetching git status on every session change (P0 perf:
+// spawning a session issues zero extra git requests).
+const branchScope = (sessionId: string | null): string => {
+  if (!sessionId) return "";
+  const session = store.getState().sessions.find((candidate) => candidate.id === sessionId);
+  return session?.worktreePath ?? "";
+};
+const branchKey = (projectId: string, scope: string): string =>
+  `${projectId}\0${scope}`;
 
 export function getSyncStatus(): SyncStatus {
   return syncStatus;
@@ -79,28 +88,22 @@ function publishSyncStatus(status: SyncStatus): void {
 }
 
 function fetchBranch(projectId: string, sessionId: string | null): void {
-  const key = branchKey(projectId, sessionId);
+  const key = branchKey(projectId, branchScope(sessionId));
   branchFetchedFor = key;
+  // A late response only publishes when the same (project, worktree) scope is
+  // still active — a newer scope's fetch owns the branch label by then.
+  const stillCurrent = (): boolean => {
+    const current = store.getState();
+    return branchFetchedFor === key
+      && current.activeProjectId === projectId
+      && branchKey(projectId, branchScope(current.activeSessionId)) === key;
+  };
   void api.gitStatus(projectId, sessionId ?? undefined)
     .then((st) => {
-      const current = store.getState();
-      if (
-        branchFetchedFor === key
-        && current.activeProjectId === projectId
-        && current.activeSessionId === sessionId
-      ) {
-        store.setGitBranch(st.branch ?? "");
-      }
+      if (stillCurrent()) store.setGitBranch(st.branch ?? "");
     })
     .catch(() => {
-      const current = store.getState();
-      if (
-        branchFetchedFor === key
-        && current.activeProjectId === projectId
-        && current.activeSessionId === sessionId
-      ) {
-        store.setGitBranch("");
-      }
+      if (stillCurrent()) store.setGitBranch("");
     });
 }
 
@@ -181,7 +184,15 @@ export function init(): void {
     const s = store.getState();
     if (s.activeSessionId !== lastSubSession) {
       lastSubSession = s.activeSessionId ?? undefined;
-      if (sync) sync.setSubscription(s.activeSessionId ?? undefined, s.activeSessionId ? store.lastSeq(s.activeSessionId) : 0);
+      // projectId scopes the server's projection snapshot; the server skips
+      // it entirely when this socket already holds the same scope.
+      if (sync) {
+        sync.setSubscription(
+          s.activeSessionId ?? undefined,
+          s.activeSessionId ? store.lastSeq(s.activeSessionId) : 0,
+          s.activeProjectId ?? undefined,
+        );
+      }
     }
     if (s.activeProjectId !== lastProject) {
       lastProject = s.activeProjectId;
@@ -193,9 +204,13 @@ export function init(): void {
         branchFetchedFor = null;
         store.setGitBranch("");
       }
-    } else if (s.activeProjectId && branchFetchedFor !== branchKey(s.activeProjectId, s.activeSessionId)) {
-      // Session switch (worktree may differ) or an earlier fetch failed —
-      // refetch once per (project, session) pair (UX-04, UX-FIXTURE-VISUAL).
+    } else if (
+      s.activeProjectId
+      && branchFetchedFor !== branchKey(s.activeProjectId, branchScope(s.activeSessionId))
+    ) {
+      // Worktree scope changed (or an earlier fetch failed) — refetch once per
+      // (project, worktree) pair (UX-04, UX-FIXTURE-VISUAL). Switches between
+      // sessions of the same checkout reuse the label without a request.
       fetchBranch(s.activeProjectId, s.activeSessionId);
     }
   });
@@ -291,12 +306,61 @@ async function restoreSelectionAfterReady(): Promise<void> {
   }
 }
 
+// An empty model catalog blocks the composer ("No models available" +
+// disabled send), and a backend that is still starting — or restarting under
+// the page — legitimately answers empty/with an error for a while. Latching
+// that first answer bricked session creation until a manual reload (QA P0).
+// Retry with capped backoff until a non-empty catalog lands; a WS (re)connect
+// also re-checks immediately, so recovery follows the backend, not a timer.
+const MODEL_RETRY_BASE_MS = 2_000;
+const MODEL_RETRY_MAX_MS = 30_000;
+let modelRetryTimer: ReturnType<typeof setTimeout> | undefined;
+let modelRetryDelay = MODEL_RETRY_BASE_MS;
+
+function scheduleModelRetry(): void {
+  if (modelRetryTimer !== undefined) return;
+  modelRetryTimer = setTimeout(() => {
+    modelRetryTimer = undefined;
+    void refreshModels();
+    void refreshAgents();
+  }, modelRetryDelay);
+  modelRetryDelay = Math.min(modelRetryDelay * 2, MODEL_RETRY_MAX_MS);
+}
+
+/** Backend churn healed: an empty published catalog re-checks right away. */
+export function recheckRuntimeCatalog(): void {
+  if (!runtimeCatalogHydrated) return;
+  if (modelsFetchInFlight || store.getState().models.length > 0) return;
+  if (modelRetryTimer !== undefined) {
+    clearTimeout(modelRetryTimer);
+    modelRetryTimer = undefined;
+  }
+  modelRetryDelay = MODEL_RETRY_BASE_MS;
+  void refreshModels();
+  void refreshAgents();
+}
+
+let modelsFetchInFlight = false;
+
 async function refreshModels(): Promise<void> {
+  if (modelsFetchInFlight) return;
+  modelsFetchInFlight = true;
   try {
-    store.setModels(await api.listModels());
+    const models = await api.listModels();
+    store.setModels(models);
+    if (models.length > 0) {
+      if (modelRetryTimer !== undefined) clearTimeout(modelRetryTimer);
+      modelRetryTimer = undefined;
+      modelRetryDelay = MODEL_RETRY_BASE_MS;
+      return;
+    }
+    scheduleModelRetry();
   } catch (err) {
     // Project onboarding continues; the composer catalog owns its own state.
     console.error("list models failed", err);
+    scheduleModelRetry();
+  } finally {
+    modelsFetchInFlight = false;
   }
 }
 
@@ -336,8 +400,14 @@ function startSync(): void {
     if (msg.type === "event") {
       pending.push(msg.event);
       scheduleFlush();
+    } else if (msg.type === "events") {
+      // Batched gap-fill frame: the whole chunk joins one store update.
+      pending.push(...msg.events);
+      scheduleFlush();
     } else if (msg.type === "projection") {
       store.upsertSession(msg.session);
+    } else if (msg.type === "projections") {
+      store.upsertSessions(msg.sessions);
     } else if (msg.type === "notification/added") {
       // NTF-01: global inbox rows bypass the session event batch entirely —
       // they are derived state, never part of any session's log or reducer.
@@ -350,6 +420,9 @@ function startSync(): void {
   // the initial bootstrap fetch safe. No polling.
   sync.onOpen(() => {
     void notificationCentre.catchUp();
+    // A reconnect after backend churn is the moment an empty model catalog
+    // becomes fetchable again — heal it now instead of waiting out a backoff.
+    recheckRuntimeCatalog();
   });
   void initPluginBridge(sync).catch((error) => {
     console.error("plugin bridge initialization failed", error);
@@ -359,6 +432,60 @@ function startSync(): void {
 }
 
 // ---- session / project actions --------------------------------------------
+
+// ---- paginated hydration (P0 perf) ------------------------------------------
+// A first open fetches only the NEWEST window and renders immediately; older
+// history backfills in the background (and further on scroll-up), so a
+// 300k-event session paints as fast as a fresh one. `deriveMessages`/rewind
+// stay correct: active rewind markers are recent by construction (they sit at
+// the log tail), and the auto-backfill below extends the window past the
+// rewind TARGET so undone-range marking is complete.
+const INITIAL_EVENT_WINDOW = 500;
+const BACKFILL_CHUNK = 2000;
+/** Background backfill stops here; scroll-up keeps loading beyond on demand. */
+const AUTO_BACKFILL_TARGET = 4000;
+const backfillInFlight = new Set<string>();
+
+/** Fetch one chunk of history older than the cached window. Returns true when
+ *  events were added, false at log start / while another fetch is in flight. */
+export async function loadOlderEvents(sessionId: string, chunk = BACKFILL_CHUNK): Promise<boolean> {
+  if (backfillInFlight.has(sessionId)) return false;
+  const oldest = store.oldestSeq(sessionId);
+  if (oldest <= 1) return false; // nothing cached yet, or already at seq 1
+  backfillInFlight.add(sessionId);
+  try {
+    const older = await api.getEvents(sessionId, 0, { beforeSeq: oldest, limit: chunk });
+    if (older.length === 0) return false;
+    store.applyEvents(older);
+    return true;
+  } finally {
+    backfillInFlight.delete(sessionId);
+  }
+}
+
+/** True while more history should stream in without user interaction. */
+function wantsAutoBackfill(sessionId: string): boolean {
+  if (store.hasFullHistory(sessionId)) return false;
+  const events = store.getState().events[sessionId];
+  if (!events || events.length === 0) return false;
+  if (events.length < AUTO_BACKFILL_TARGET) return true;
+  // Rewind correctness: the undone range spans [atSeq, marker]; when the
+  // marker is loaded but its target is older than the window, keep going.
+  const model = store.reduceSessionModel(sessionId, events);
+  return model.rewind !== null && model.rewind.atSeq < events[0]!.seq;
+}
+
+function scheduleAutoBackfill(sessionId: string, generation: number): void {
+  const step = async (): Promise<void> => {
+    if (generation !== openSessionGeneration) return; // another open took over
+    if (store.getState().activeSessionId !== sessionId) return;
+    if (!wantsAutoBackfill(sessionId)) return;
+    const added = await loadOlderEvents(sessionId).catch(() => false);
+    if (!added) return;
+    setTimeout(() => void step(), 50); // yield between chunks; UI stays fluid
+  };
+  setTimeout(() => void step(), 200); // let the fresh window paint first
+}
 
 export async function openSession(
   sessionId: string,
@@ -373,8 +500,11 @@ export async function openSession(
   const generation = ++openSessionGeneration;
   const before = store.getState();
   const cachedSession = before.sessions.find((session) => session.id === sessionId);
-  const useCachedView = hydratedSessions.has(sessionId) && cachedSession !== undefined;
-  const afterSeq = hydratedSessions.has(sessionId) ? store.lastSeq(sessionId) : 0;
+  // The events entry can be LRU-evicted while the id stays in hydratedSessions;
+  // an evicted session re-hydrates exactly like a first open.
+  const cachedEvents = before.events[sessionId];
+  const useCachedView = hydratedSessions.has(sessionId) && cachedSession !== undefined && cachedEvents !== undefined;
+  const afterSeq = useCachedView ? store.lastSeq(sessionId) : 0;
 
   // Revisited sessions render their canonical cached history immediately while
   // metadata and the append-only suffix revalidate. A first open remains in
@@ -384,24 +514,48 @@ export async function openSession(
     if (cachedSession.projectId !== before.activeProjectId) store.activateProject(cachedSession.projectId);
     store.activateSession(sessionId);
     if (opts.showChat !== false) store.showSessionChat();
+    // Claim takeover: this open owns navigation now. A superseded first
+    // open's loading claim must not survive it — a leaked claim renders every
+    // hero-eligible surface (fresh spawn included) as an endless loading row.
+    store.setOpeningSession(null);
   } else {
     store.setOpeningSession(sessionId);
   }
+  // Navigation baseline, captured after the synchronous cached-path
+  // transition: when the user moves elsewhere while this fetch is in flight
+  // (new-chat intent, project switch, another session), the resolved open
+  // still lands its data in the cache but never steals the surface back.
+  // The intent compares by identity — an open STARTED from the new-chat
+  // surface still activates; only an intent created during the flight blocks.
+  const baseline = store.getState();
+  const userNavigatedAway = (): boolean => {
+    const now = store.getState();
+    return now.newSessionIntent !== baseline.newSessionIntent
+      || now.activeProjectId !== baseline.activeProjectId
+      || now.activeSessionId !== baseline.activeSessionId;
+  };
   try {
     // Metadata and history are independent reads. Starting both together saves
     // one full round trip on high-latency links and old-session deep links.
+    // First opens fetch only the newest window; older history backfills below.
     const [session, events] = await Promise.all([
       api.getSession(sessionId),
-      api.getEvents(sessionId, afterSeq),
+      useCachedView
+        ? api.getEvents(sessionId, afterSeq)
+        : api.getEvents(sessionId, 0, { limit: INITIAL_EVENT_WINDOW }),
     ]);
     if (generation !== openSessionGeneration) return;
     store.upsertSession(session);
-    if (session.projectId !== store.getState().activeProjectId) store.activateProject(session.projectId);
-    store.applyEvents(events); // one store update for the whole history/suffix
+    store.applyEvents(events); // one store update for the whole window/suffix
+    store.ensureEventCache(sessionId); // empty logs still count as cached
     hydratedSessions.add(sessionId);
     maybeSeedFromReplay(sessionId);
-    store.activateSession(sessionId);
-    if (opts.showChat !== false) store.showSessionChat();
+    if (!userNavigatedAway()) {
+      if (session.projectId !== store.getState().activeProjectId) store.activateProject(session.projectId);
+      store.activateSession(sessionId);
+      if (opts.showChat !== false) store.showSessionChat();
+      scheduleAutoBackfill(sessionId, generation);
+    }
   } finally {
     // A newer concurrent open owns the claim and active-session transition.
     if (
@@ -550,6 +704,27 @@ export async function createSession(projectId: string, opts: CreateSessionOption
     ...(agent ? { agent } : {}),
     ...(worktreePath ? { worktreePath } : {}),
   });
+  // Instant spawn (UX): the id is authoritative and the session is seconds
+  // old, so publish an optimistic projection + empty canonical event window
+  // and open the chat NOW. openSession() then revalidates through its cached
+  // path in the background (metadata + any suffix), and refreshSessions
+  // reconciles the projection — zero blocking round trips after the POST.
+  const now = Date.now();
+  store.seedSessionCache({
+    id: sessionId,
+    projectId,
+    title: input.title ?? "",
+    status: "idle",
+    createdAt: now,
+    updatedAt: now,
+    ...(model ? { model } : {}),
+    ...(agent ? { agent } : {}),
+    ...(worktreePath ? { worktreePath } : {}),
+  });
+  hydratedSessions.add(sessionId);
+  if (projectId !== store.getState().activeProjectId) store.activateProject(projectId);
+  store.activateSession(sessionId);
+  store.showSessionChat();
   const opening = openSession(sessionId);
   if (precache) {
     void opening.catch((error) => {

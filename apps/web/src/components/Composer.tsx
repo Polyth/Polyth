@@ -106,6 +106,25 @@ import SessionContextBar, {
   type SessionContextBarProps,
 } from "./mobile/SessionContextBar.tsx";
 
+// Per-project command/snippet catalog cache: the composer remounts on every
+// session change (including a fresh spawn), and each mount refetched both
+// catalogs. Slash commands and snippets change rarely — a short TTL removes
+// two requests from every session switch/spawn while staying fresh enough
+// for editing workflows. Only fully successful results are cached so an
+// `unavailable` outcome retries on the next mount.
+const COMPOSER_CATALOG_TTL_MS = 30_000;
+const composerCatalogCache = new Map<string, { at: number; result: ComposerCatalogResult }>();
+
+async function loadComposerCatalog(projectId: string): Promise<ComposerCatalogResult> {
+  const hit = composerCatalogCache.get(projectId);
+  if (hit && Date.now() - hit.at < COMPOSER_CATALOG_TTL_MS) return hit.result;
+  const result = await api.composerCatalog(projectId);
+  if (result.commands.ok && result.snippets.ok) {
+    composerCatalogCache.set(projectId, { at: Date.now(), result });
+  }
+  return result;
+}
+
 function modelRefFromValue(value: string): { providerID: string; modelID: string } | undefined {
   if (!value) return undefined;
   try {
@@ -651,7 +670,7 @@ export default function Composer({
     const seq = ++catalogSeq.current;
     setCatalog(null);
     if (!activeProjectId) return;
-    void api.composerCatalog(activeProjectId).then((r) => {
+    void loadComposerCatalog(activeProjectId).then((r) => {
       if (seq === catalogSeq.current) setCatalog(r);
     });
   }, [activeProjectId]);
@@ -821,7 +840,14 @@ export default function Composer({
     }
     const command = shellCommand(t);
     const hasPills = command === null && attachments.length > 0;
-    if ((!t && !hasPills) || (command === null && noModels) || command === "") return;
+    if ((!t && !hasPills) || command === "") return;
+    if (command === null && noModels) {
+      // Never a silent no-op: pressing Enter while the model catalog is empty
+      // (backend still starting / restarting) surfaces the same guidance as
+      // the composer banner instead of appearing to swallow the message.
+      setUiError(tr("composer.noModelsAvailableCheckThatTheBackend"));
+      return;
+    }
     if (command === null && profileMissing) return;
     // Capture the target session at send time — project/session switches must
     // never reroute a send (delivery admission handles active turns server-side).

@@ -224,6 +224,112 @@ export function createSessionService(deps: {
     return ev;
   };
 
+  // ---------------------------------------------------------------- log facts
+  // Derived per-session facts (open requests, rewind marker, error tail, log
+  // shape) folded incrementally from the durable log. Every read first folds
+  // the tail appended since the last fold — an indexed, usually-empty query —
+  // so hot paths (send, permission replies, debug) never replay whole logs.
+  // Correctness holds because the log is append-only per session and other
+  // plugins' appends are picked up by the same tail read.
+  interface LogFacts {
+    seq: number;
+    eventCount: number;
+    lastEvent?: { seq: number; time: number; type: string };
+    requestedPermissions: Set<string>;
+    askedQuestions: Set<string>;
+    requestedSecrets: Set<string>;
+    openPermissions: Map<string, SessionEvent>;
+    openQuestions: Map<string, SessionEvent>;
+    openSecrets: Map<string, SessionEvent>;
+    rewind: { markerSeq: number; atSeq: number } | null;
+    recentErrors: SessionDebugDto["recentErrors"];
+  }
+
+  const FACTS_CACHE_MAX = 256;
+  const factsCache = new Map<string, LogFacts>();
+
+  const emptyFacts = (): LogFacts => ({
+    seq: 0,
+    eventCount: 0,
+    requestedPermissions: new Set(),
+    askedQuestions: new Set(),
+    requestedSecrets: new Set(),
+    openPermissions: new Map(),
+    openQuestions: new Map(),
+    openSecrets: new Map(),
+    rewind: null,
+    recentErrors: [],
+  });
+
+  const foldFacts = (facts: LogFacts, events: readonly SessionEvent[]): void => {
+    for (const ev of events) {
+      if (ev.seq <= facts.seq) continue;
+      facts.seq = ev.seq;
+      facts.eventCount += 1;
+      facts.lastEvent = { seq: ev.seq, time: ev.time, type: ev.type };
+      const data = ev.data as Record<string, unknown>;
+      const rid = typeof data.requestId === "string" && data.requestId ? data.requestId : undefined;
+      switch (ev.type) {
+        case "permission/requested":
+          if (rid) { facts.requestedPermissions.add(rid); facts.openPermissions.set(rid, ev); }
+          break;
+        case "permission/resolved":
+          if (rid) facts.openPermissions.delete(rid);
+          break;
+        case "question/asked":
+          if (rid) { facts.askedQuestions.add(rid); facts.openQuestions.set(rid, ev); }
+          break;
+        case "question/answered":
+          if (rid) facts.openQuestions.delete(rid);
+          break;
+        case "secret/requested":
+          if (rid) { facts.requestedSecrets.add(rid); facts.openSecrets.set(rid, ev); }
+          break;
+        case "secret/resolved":
+          if (rid) facts.openSecrets.delete(rid);
+          break;
+        case "session/rewound": {
+          const atSeq = Number(data.atSeq);
+          if (Number.isSafeInteger(atSeq) && atSeq > 0) facts.rewind = { markerSeq: ev.seq, atSeq };
+          break;
+        }
+        case "session/rewind-cleared": {
+          if (!facts.rewind) break;
+          const rewindSeq = Number(data.rewindSeq);
+          if (!Number.isSafeInteger(rewindSeq) || rewindSeq === facts.rewind.markerSeq) facts.rewind = null;
+          break;
+        }
+      }
+      const failedStop = ev.type === "turn/stopped" && data.reason === "error";
+      const failedType = ev.type === "turn/failed" || ev.type === "tool/error" || ev.type.endsWith("/failed");
+      if (failedStop || failedType) {
+        const raw = data.error ?? data.message ?? data.reason ?? "unknown error";
+        facts.recentErrors.push({
+          seq: ev.seq, time: ev.time, type: ev.type,
+          message: typeof raw === "string" ? raw : JSON.stringify(raw),
+        });
+        if (facts.recentErrors.length > 20) facts.recentErrors.splice(0, facts.recentErrors.length - 20);
+      }
+    }
+  };
+
+  const logFacts = async (sessionId: string): Promise<LogFacts> => {
+    let facts = factsCache.get(sessionId);
+    if (facts) factsCache.delete(sessionId); // re-insert for LRU recency
+    else facts = emptyFacts();
+    factsCache.set(sessionId, facts);
+    if (factsCache.size > FACTS_CACHE_MAX) {
+      const oldest = factsCache.keys().next().value;
+      if (oldest !== undefined && oldest !== sessionId) factsCache.delete(oldest);
+    }
+    const tail = await store.events(sessionId, facts.seq);
+    if (tail.length > 0) foldFacts(facts, tail);
+    return facts;
+  };
+
+  const openRequestTotal = (facts: LogFacts): number =>
+    facts.openPermissions.size + facts.openQuestions.size + facts.openSecrets.size;
+
   // Projection patches operate on the latest committed row (one store
   // transaction when the store supports it) and broadcast the exact committed
   // projection — a callback can no longer read, await, and then overwrite
@@ -506,49 +612,6 @@ export function createSessionService(deps: {
     return questions.size + perms.size + secrets.size;
   };
 
-  const pendingRequestIds = (events: readonly SessionEvent[]): SessionDebugDto["pending"] => {
-    const questions = new Set<string>();
-    const permissions = new Set<string>();
-    const secrets = new Set<string>();
-    for (const event of events) {
-      const requestId = (event.data as { requestId?: unknown }).requestId;
-      if (typeof requestId !== "string" || !requestId) continue;
-      if (event.type === "question/asked") questions.add(requestId);
-      else if (event.type === "question/answered") questions.delete(requestId);
-      else if (event.type === "permission/requested") permissions.add(requestId);
-      else if (event.type === "permission/resolved") permissions.delete(requestId);
-      else if (event.type === "secret/requested") secrets.add(requestId);
-      else if (event.type === "secret/resolved") secrets.delete(requestId);
-    }
-    return {
-      permissions: [...permissions],
-      questions: [...questions],
-      secrets: [...secrets],
-    };
-  };
-
-  const recentSessionErrors = (
-    events: readonly SessionEvent[],
-  ): SessionDebugDto["recentErrors"] => {
-    const errors: SessionDebugDto["recentErrors"] = [];
-    for (const event of events) {
-      const data = event.data as Record<string, unknown>;
-      const failedStop = event.type === "turn/stopped" && data.reason === "error";
-      const failedType = event.type === "turn/failed"
-        || event.type === "tool/error"
-        || event.type.endsWith("/failed");
-      if (!failedStop && !failedType) continue;
-      const raw = data.error ?? data.message ?? data.reason ?? "unknown error";
-      errors.push({
-        seq: event.seq,
-        time: event.time,
-        type: event.type,
-        message: typeof raw === "string" ? raw : JSON.stringify(raw),
-      });
-    }
-    return errors.slice(-20);
-  };
-
   /** OpenCode's question endpoint accepts answers by question position
    * (`string[][]`), while the UI keeps an ID-keyed answer map so drafts remain
    * stable when questions are rendered as a stepper. Preserve the latter in
@@ -663,42 +726,25 @@ export function createSessionService(deps: {
    *  permissions of this exact session before the new message is admitted.
    *  Resolution events precede the queue/user events in the durable log. */
   const dismissPendingRequests = async (sessionId: string, rt: AgentRuntime): Promise<void> => {
-    const evs = await store.events(sessionId);
-    const resolvedPerms = new Set<string>();
-    const answeredQs = new Set<string>();
-    const resolvedSecrets = new Set<string>();
-    for (const e of evs) {
-      const rid = (e.data as { requestId?: string }).requestId;
-      if (!rid) continue;
-      if (e.type === "permission/resolved") resolvedPerms.add(rid);
-      if (e.type === "question/answered") answeredQs.add(rid);
-      if (e.type === "secret/resolved") resolvedSecrets.add(rid);
+    const facts = await logFacts(sessionId);
+    for (const rid of [...facts.openPermissions.keys()]) {
+      await appendAndBroadcast(sessionId, "permission/resolved", { requestId: rid, reply: "reject" }, { ignorable: true });
+      await rt.replyPermission(sessionId, rid, "reject").catch(() => {});
     }
-    for (const e of evs) {
-      const rid = (e.data as { requestId?: string }).requestId;
-      if (!rid) continue;
-      if (e.type === "permission/requested" && !resolvedPerms.has(rid)) {
-        resolvedPerms.add(rid);
-        await appendAndBroadcast(sessionId, "permission/resolved", { requestId: rid, reply: "reject" }, { ignorable: true });
-        await rt.replyPermission(sessionId, rid, "reject").catch(() => {});
-      }
-      if (e.type === "question/asked" && !answeredQs.has(rid)) {
-        answeredQs.add(rid);
-        await appendAndBroadcast(sessionId, "question/answered", { requestId: rid, rejected: true }, { ignorable: true });
-        await rt.replyQuestion(sessionId, rid, { action: "reject" }).catch(() => {});
-      }
-      if (e.type === "secret/requested" && !resolvedSecrets.has(rid)) {
-        resolvedSecrets.add(rid);
-        const handle = (e.data as { handle?: string }).handle;
-        const result: SecretResolvedData = {
-          requestId: rid,
-          action: "dismissed",
-          ...(handle ? { handle } : {}),
-        };
-        await appendAndBroadcast(sessionId, "secret/resolved", result as unknown as JsonObject, { ignorable: true });
-        if (rt.replySecret) await rt.replySecret(sessionId, rid, result).catch(() => {});
-        else await rt.replyQuestion(sessionId, rid, { action: "reject" }).catch(() => {});
-      }
+    for (const rid of [...facts.openQuestions.keys()]) {
+      await appendAndBroadcast(sessionId, "question/answered", { requestId: rid, rejected: true }, { ignorable: true });
+      await rt.replyQuestion(sessionId, rid, { action: "reject" }).catch(() => {});
+    }
+    for (const [rid, requested] of [...facts.openSecrets]) {
+      const handle = (requested.data as { handle?: string }).handle;
+      const result: SecretResolvedData = {
+        requestId: rid,
+        action: "dismissed",
+        ...(handle ? { handle } : {}),
+      };
+      await appendAndBroadcast(sessionId, "secret/resolved", result as unknown as JsonObject, { ignorable: true });
+      if (rt.replySecret) await rt.replySecret(sessionId, rid, result).catch(() => {});
+      else await rt.replyQuestion(sessionId, rid, { action: "reject" }).catch(() => {});
     }
   };
 
@@ -982,8 +1028,10 @@ export function createSessionService(deps: {
       // either. Prepare a backend branch that holds the exact canonical
       // effective history before the target, then resolve the marker and admit
       // the new tail. If branch preparation fails the rewind and draft remain
-      // active and no event is appended.
-      if (activeRewind(await store.events(sessionId))) {
+      // active and no event is appended. The facts cache answers "is a rewind
+      // active" with a tail read; the full log is only replayed on the rare
+      // rewound path below.
+      if ((await logFacts(sessionId)).rewind) {
         proj = await withSessionLock(sessionId, async () => {
           const events = await store.events(sessionId);
           const rewind = activeRewind(events);
@@ -1450,6 +1498,7 @@ export function createSessionService(deps: {
         admitting.delete(sessionId);
         if (active && rt) await rt.abort(sessionId).catch(() => {});
         await store.deleteSession(sessionId);
+        factsCache.delete(sessionId);
       });
     },
 
@@ -1575,7 +1624,7 @@ export function createSessionService(deps: {
       if (!p) throw Object.assign(new Error("session not found"), { code: "not-found" });
       return p;
     },
-    async events(sessionId, afterSeq) {
+    async events(sessionId, afterSeq, page) {
       // Restart recovery: opening an idle session with persisted queued
       // messages resumes FIFO dispatch (never into an active stream).
       if (afterSeq === 0 && deps.queue && !turnActive(sessionId)) {
@@ -1590,9 +1639,20 @@ export function createSessionService(deps: {
       if (afterSeq === 0) {
         const proj = await store.projection(sessionId);
         if (proj?.backendSessionId) {
-          const all = await store.events(sessionId);
-          const imported = all.some((e) => e.type === "session/imported");
-          const fetched = all.some((e) => e.type === "session/history-imported");
+          // Indexed existence checks; scanning the whole log to answer two
+          // booleans made every session open O(events).
+          let imported: boolean;
+          let fetched: boolean;
+          if (store.hasEventOfType) {
+            [imported, fetched] = await Promise.all([
+              store.hasEventOfType(sessionId, "session/imported"),
+              store.hasEventOfType(sessionId, "session/history-imported"),
+            ]);
+          } else {
+            const all = await store.events(sessionId);
+            imported = all.some((e) => e.type === "session/imported");
+            fetched = all.some((e) => e.type === "session/history-imported");
+          }
           if (imported && !fetched) {
             try {
               const rt = await ensureWired(sessionId, proj);
@@ -1611,22 +1671,19 @@ export function createSessionService(deps: {
           }
         }
       }
-      return store.events(sessionId, afterSeq);
+      return store.events(sessionId, afterSeq, page);
     },
 
     async debug(sessionId) {
       const projection = await store.projection(sessionId);
       if (!projection) throw Object.assign(new Error("session not found"), { code: "not-found" });
-      const events = await store.events(sessionId);
-      const lastEvent = events.at(-1);
+      const facts = await logFacts(sessionId);
       const turnId = lastTurnId.get(sessionId);
       return {
         status: projection.status,
-        eventCount: events.length,
-        latestSeq: lastEvent?.seq ?? 0,
-        ...(lastEvent ? {
-          lastEvent: { seq: lastEvent.seq, time: lastEvent.time, type: lastEvent.type },
-        } : {}),
+        eventCount: facts.eventCount,
+        latestSeq: facts.lastEvent?.seq ?? 0,
+        ...(facts.lastEvent ? { lastEvent: { ...facts.lastEvent } } : {}),
         runtime: {
           attached: sessionRuntime.has(sessionId),
           activeTurn: turnActive(sessionId),
@@ -1636,8 +1693,12 @@ export function createSessionService(deps: {
           ...(projection.worktreePath ? { worktreePath: projection.worktreePath } : {}),
         },
         queue: deps.queue ? await deps.queue.queueList(sessionId) : [],
-        pending: pendingRequestIds(events),
-        recentErrors: recentSessionErrors(events),
+        pending: {
+          permissions: [...facts.openPermissions.keys()],
+          questions: [...facts.openQuestions.keys()],
+          secrets: [...facts.openSecrets.keys()],
+        },
+        recentErrors: [...facts.recentErrors],
       };
     },
 
@@ -1646,15 +1707,13 @@ export function createSessionService(deps: {
         if (reply !== "once" && reply !== "always" && reply !== "reject") {
           throw Object.assign(new Error("permission reply must be once, always, or reject"), { code: "invalid-input" });
         }
-        const priorEvents = await store.events(sessionId);
-        const original = priorEvents.find(
-          (e) => e.type === "permission/requested" && (e.data as { requestId?: string }).requestId === requestId,
-        );
-        if (!original) throw Object.assign(new Error("permission request not found"), { code: "not-found" });
-        if (priorEvents.some(
-          (e) => e.type === "permission/resolved" && (e.data as { requestId?: string }).requestId === requestId,
-        )) {
-          throw Object.assign(new Error("permission request already resolved"), { code: "conflict" });
+        const facts = await logFacts(sessionId);
+        const original = facts.openPermissions.get(requestId);
+        if (!original) {
+          if (facts.requestedPermissions.has(requestId)) {
+            throw Object.assign(new Error("permission request already resolved"), { code: "conflict" });
+          }
+          throw Object.assign(new Error("permission request not found"), { code: "not-found" });
         }
         const proj = await store.projection(sessionId);
         if (!proj) throw Object.assign(new Error("session not found"), { code: "not-found" });
@@ -1665,7 +1724,7 @@ export function createSessionService(deps: {
         // Reattach to the original backend before recording the response so a
         // missing in-memory runtime can never turn a click into a log-only lie.
         const rt = shellRequest ? undefined : await ensureWired(sessionId, proj);
-        const resolved = await appendAndBroadcast(
+        await appendAndBroadcast(
           sessionId,
           "permission/resolved",
           { requestId, reply, ...(scope ? { scope } : {}) },
@@ -1694,7 +1753,8 @@ export function createSessionService(deps: {
         } else {
           await rt!.replyPermission(sessionId, requestId, reply);
         }
-        if (proj.status === "waiting" && openRequestCount([...priorEvents, resolved]) === 0) {
+        // Re-read the facts (tail fold picks up the resolution just appended).
+        if (proj.status === "waiting" && openRequestTotal(await logFacts(sessionId)) === 0) {
           await updateProjection(sessionId, { status: shellRequest ? "idle" : "working" });
         }
       });
@@ -1702,22 +1762,18 @@ export function createSessionService(deps: {
 
     async replyQuestion(sessionId, requestId, answers) {
       await withSessionLock(sessionId, async () => {
-        const priorEvents = await store.events(sessionId);
-        const original = priorEvents.find(
-          (event) => event.type === "question/asked"
-            && (event.data as { requestId?: string }).requestId === requestId,
-        );
-        if (!original) throw Object.assign(new Error("question request not found"), { code: "not-found" });
-        if (priorEvents.some(
-          (event) => event.type === "question/answered"
-            && (event.data as { requestId?: string }).requestId === requestId,
-        )) {
-          throw Object.assign(new Error("question request already answered"), { code: "conflict" });
+        const facts = await logFacts(sessionId);
+        const original = facts.openQuestions.get(requestId);
+        if (!original) {
+          if (facts.askedQuestions.has(requestId)) {
+            throw Object.assign(new Error("question request already answered"), { code: "conflict" });
+          }
+          throw Object.assign(new Error("question request not found"), { code: "not-found" });
         }
         const proj = await store.projection(sessionId);
         if (!proj) throw Object.assign(new Error("session not found"), { code: "not-found" });
         const rt = await ensureWired(sessionId, proj);
-        const answered = await appendAndBroadcast(
+        await appendAndBroadcast(
           sessionId,
           "question/answered",
           { requestId, answers },
@@ -1731,7 +1787,7 @@ export function createSessionService(deps: {
             : [];
           await rt.replyQuestion(sessionId, requestId, openCodeQuestionReply(questions, answers));
         }
-        if (proj.status === "waiting" && openRequestCount([...priorEvents, answered]) === 0) {
+        if (proj.status === "waiting" && openRequestTotal(await logFacts(sessionId)) === 0) {
           await updateProjection(sessionId, { status: "working" });
         }
       });
@@ -1739,17 +1795,13 @@ export function createSessionService(deps: {
 
     async replySecret(sessionId, requestId, reply) {
       await withSessionLock(sessionId, async () => {
-        const priorEvents = await store.events(sessionId);
-        const requested = priorEvents.find(
-          (event) => event.type === "secret/requested"
-            && (event.data as { requestId?: string }).requestId === requestId,
-        );
-        if (!requested) throw Object.assign(new Error("secret request not found"), { code: "not-found" });
-        if (priorEvents.some(
-          (event) => event.type === "secret/resolved"
-            && (event.data as { requestId?: string }).requestId === requestId,
-        )) {
-          throw Object.assign(new Error("secret request already resolved"), { code: "conflict" });
+        const facts = await logFacts(sessionId);
+        const requested = facts.openSecrets.get(requestId);
+        if (!requested) {
+          if (facts.requestedSecrets.has(requestId)) {
+            throw Object.assign(new Error("secret request already resolved"), { code: "conflict" });
+          }
+          throw Object.assign(new Error("secret request not found"), { code: "not-found" });
         }
 
         const data = requested.data as unknown as SecretRequestData;
@@ -1816,34 +1868,16 @@ export function createSessionService(deps: {
    *  of the session with an auto "once". Composer-shell confirmations are
    *  skipped — those confirm a command the USER typed and must stay manual. */
   const reconcilePendingPermissions = async (sessionId: string): Promise<void> => {
-    const evs = await store.events(sessionId);
-    const resolved = new Set<string>();
-    const answeredQs = new Set<string>();
-    const resolvedSecrets = new Set<string>();
-    for (const e of evs) {
-      const rid = (e.data as { requestId?: string }).requestId;
-      if (!rid) continue;
-      if (e.type === "permission/resolved") resolved.add(rid);
-      if (e.type === "question/answered") answeredQs.add(rid);
-      if (e.type === "secret/resolved") resolvedSecrets.add(rid);
-    }
-    let openQuestions = 0;
-    let openSecrets = 0;
+    const facts = await logFacts(sessionId);
     let resolvedAny = false;
-    for (const e of evs) {
-      const rid = (e.data as { requestId?: string }).requestId;
-      if (!rid) continue;
-      if (e.type === "question/asked" && !answeredQs.has(rid)) openQuestions++;
-      if (e.type === "secret/requested" && !resolvedSecrets.has(rid)) openSecrets++;
-      if (e.type !== "permission/requested" || resolved.has(rid)) continue;
-      if (e.producerPlugin === "composer-shell") continue;
-      resolved.add(rid);
+    for (const [rid, requested] of [...facts.openPermissions]) {
+      if (requested.producerPlugin === "composer-shell") continue;
       resolvedAny = true;
       await appendAndBroadcast(sessionId, "permission/resolved", { requestId: rid, reply: "once", auto: true }, { ignorable: true });
       await sessionRuntime.get(sessionId)?.replyPermission(sessionId, rid, "once").catch(() => {});
     }
     // The turn resumes once its blocker is answered; questions keep it waiting.
-    if (resolvedAny && openQuestions === 0 && openSecrets === 0) {
+    if (resolvedAny && facts.openQuestions.size === 0 && facts.openSecrets.size === 0) {
       const proj = await store.projection(sessionId);
       if (proj?.status === "waiting") await updateProjection(sessionId, { status: "working" });
     }

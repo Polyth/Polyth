@@ -1938,6 +1938,8 @@ export const zhCN: AppMessages = {
   "timeline.items": "项目",
   "timeline.jumpRevertOrBranchFromAnyPrompt": "从任何提示符跳转、回退或分支。",
   "timeline.keepEditingTheDraft": "继续修改草稿",
+  "timeline.loadEarlierHistory": "加载更早的历史记录",
+  "timeline.loadingEarlierHistory": "正在加载更早的历史记录…",
   "timeline.manageTurns": "管理轮次",
   "timeline.message": "×",
   "timeline.msgAssistant": ".msg.assistant",

@@ -563,8 +563,36 @@ export function openEditorFile(path: string | null, location?: EditorLocation): 
 export function clearEditorLocation(): void {
   if (state.editorLocation !== null) set({ editorLocation: null });
 }
+// ---- cached-history LRU (P2 perf) -------------------------------------------
+// Every opened session leaves its full event window in `state.events`; without
+// a cap a long browsing spree pins hundreds of logs (plus their render models)
+// in memory. Activation touches the session; the least-recently-activated
+// entries beyond the cap are dropped — an evicted session simply refetches its
+// newest window on the next open, exactly like a first visit.
+const MAX_CACHED_SESSIONS = 12;
+const sessionTouchOrder: string[] = [];
+
+function touchSessionCache(id: string): void {
+  const at = sessionTouchOrder.indexOf(id);
+  if (at >= 0) sessionTouchOrder.splice(at, 1);
+  sessionTouchOrder.push(id);
+  if (sessionTouchOrder.length <= MAX_CACHED_SESSIONS) return;
+  const victims = sessionTouchOrder.splice(0, sessionTouchOrder.length - MAX_CACHED_SESSIONS);
+  let next: Record<string, SessionEvent[]> | null = null;
+  for (const victim of victims) {
+    if (victim === id) continue;
+    activeModelCache.drop(victim);
+    if (state.events[victim] !== undefined) {
+      next ??= { ...state.events };
+      delete next[victim];
+    }
+  }
+  if (next) state = { ...state, events: next }; // folded into the caller's set()
+}
+
 export function activateSession(id: string | null): void {
   localStorage.setItem("polyth.activeSessionId", id ?? "");
+  if (id !== null) touchSessionCache(id);
   set({
     activeSessionId: id,
     ...(id !== null ? { newSessionIntent: null } : {}),
@@ -641,6 +669,20 @@ export function upsertSession(p: SessionProjection): void {
   set({ sessions });
 }
 
+/** Batched projection snapshot (WS `projections` frame): one store update —
+ *  and one render pass — for the whole page instead of one per session. */
+export function upsertSessions(list: readonly SessionProjection[]): void {
+  if (list.length === 0) return;
+  const byId = new Map(list.map((p) => [p.id, p]));
+  const sessions = state.sessions.map((s) => {
+    const next = byId.get(s.id);
+    if (next) byId.delete(s.id);
+    return next ?? s;
+  });
+  for (const p of byId.values()) sessions.push(p);
+  set({ sessions });
+}
+
 /** First index whose seq >= target (list sorted by seq ascending). */
 function seqLowerBound(list: readonly SessionEvent[], seq: number): number {
   let lo = 0;
@@ -654,10 +696,21 @@ function seqLowerBound(list: readonly SessionEvent[], seq: number): number {
 }
 
 /** Merge incoming events into a seq-sorted list, copy-on-write. Live events
- *  arrive in order → O(1) append; out-of-order gap-fill binary-inserts; events
+ *  arrive in order → O(1) append; a backfill batch strictly older than the
+ *  list prepends in one splice; out-of-order stragglers binary-insert; events
  *  whose seq is already present are dropped (WS replay can re-deliver the
  *  boundary event). Returns the original array when nothing new arrived. */
 function mergeEvents(list: SessionEvent[], incoming: readonly SessionEvent[]): SessionEvent[] {
+  // Backfill fast path: an already-sorted batch that ends before the list
+  // starts (older-history pages) concatenates without per-event inserts.
+  if (
+    list.length > 0
+    && incoming.length > 0
+    && incoming[incoming.length - 1]!.seq < list[0]!.seq
+    && incoming.every((ev, i) => i === 0 || ev.seq > incoming[i - 1]!.seq)
+  ) {
+    return [...incoming, ...list];
+  }
   let out: SessionEvent[] | null = null;
   for (const ev of incoming) {
     const cur = out ?? list;
@@ -703,4 +756,40 @@ export function applyEvents(evs: readonly SessionEvent[]): void {
 export function lastSeq(sessionId: string): number {
   const list = state.events[sessionId];
   return list && list.length > 0 ? list[list.length - 1]!.seq : 0;
+}
+
+/** Smallest cached seq, or 0 when nothing is cached for the session. */
+export function oldestSeq(sessionId: string): number {
+  const list = state.events[sessionId];
+  return list && list.length > 0 ? list[0]!.seq : 0;
+}
+
+/** True when the cached window reaches the very first event (seq 1). Paginated
+ *  hydration loads the newest window first, so a session can be open and live
+ *  while older history is still on the server. */
+export function hasFullHistory(sessionId: string): boolean {
+  const list = state.events[sessionId];
+  return list !== undefined && list.length > 0 && list[0]!.seq === 1;
+}
+
+/** Materialize the (possibly empty) canonical event entry after hydration.
+ *  An empty server log yields no applyEvents entry, but "hydrated with zero
+ *  events" must be distinguishable from "never loaded / LRU-evicted". */
+export function ensureEventCache(sessionId: string): void {
+  if (state.events[sessionId] !== undefined) return;
+  set({ events: { ...state.events, [sessionId]: [] } });
+}
+
+/** Instant session spawn (UX): publish the optimistic projection AND an empty
+ *  canonical event window in one store transition, so the new session opens
+ *  with zero awaited requests. The server projection broadcast / refresh
+ *  reconciles moments later; an empty log for a session that has no events
+ *  yet is canonical, not a placeholder (event-log-before-UI holds). */
+export function seedSessionCache(p: SessionProjection): void {
+  const i = state.sessions.findIndex((s) => s.id === p.id);
+  const sessions = i >= 0 ? state.sessions.map((s, j) => (j === i ? p : s)) : [...state.sessions, p];
+  const events = state.events[p.id] !== undefined
+    ? state.events
+    : { ...state.events, [p.id]: [] };
+  set({ sessions, events });
 }

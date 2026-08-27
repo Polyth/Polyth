@@ -481,7 +481,9 @@ export interface SessionService {
   list(projectId?: string): Promise<SessionProjection[]>;
   sync(projectId: string): Promise<SessionProjection[]>;
   snapshot(sessionId: string): Promise<SessionProjection>;
-  events(sessionId: string, afterSeq?: number): Promise<SessionEvent[]>;
+  /** `page` (beforeSeq/limit) selects the newest events in the window so deep
+   *  logs hydrate incrementally; implementations may ignore it. */
+  events(sessionId: string, afterSeq?: number, page?: EventPage): Promise<SessionEvent[]>;
   /** Read-only troubleshooting state. Does not attach or wake a runtime. */
   debug?(sessionId: string): Promise<SessionDebugDto>;
   replyPermission(sessionId: string, requestId: string, reply: "once" | "always" | "reject", scope?: "session" | "project"): Promise<void>;
@@ -553,9 +555,21 @@ export interface ChildSnapshotResult {
   marker: SessionEvent;
 }
 
+/** Keyset pagination for event reads. `limit` returns the NEWEST matching
+ *  events (still in ascending seq order); `beforeSeq` bounds the window from
+ *  above so older history pages backward without offset scans. */
+export interface EventPage {
+  /** Exclusive upper bound: only events with seq < beforeSeq. */
+  beforeSeq?: number;
+  /** Maximum number of events; the newest ones in the window are returned. */
+  limit?: number;
+}
+
 export interface SessionPersistence {
   append(sessionId: string, type: string, data: JsonObject, opts?: Partial<Pick<SessionEvent, "ignorable" | "surfaceOp" | "sourceEventSeqs" | "producerPlugin">>): Promise<SessionEvent>;
-  events(sessionId: string, afterSeq?: number): Promise<SessionEvent[]>;
+  events(sessionId: string, afterSeq?: number, page?: EventPage): Promise<SessionEvent[]>;
+  /** Indexed existence check (no full-log scan). Optional so fakes stay valid. */
+  hasEventOfType?(sessionId: string, type: string): Promise<boolean>;
   latestSeq(sessionId: string): Promise<number>;
   copyTo(srcSessionId: string, dstSessionId: string, upToSeq?: number): Promise<void>;
   upsertProjection(p: SessionProjection): Promise<void>;

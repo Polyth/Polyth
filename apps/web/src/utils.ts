@@ -11,6 +11,20 @@ export function firstUserText(events: readonly SessionEvent[] | undefined): stri
   return typeof t === "string" && t.trim() ? t : undefined;
 }
 
+// Event arrays are replaced (never mutated) on change, so the derived title is
+// cached per array identity. Hot render paths (sidebar rows, store selectors)
+// call this once per store notification per session; without the cache each
+// call re-scanned the log.
+const firstUserTextCache = new WeakMap<readonly SessionEvent[], string | undefined>();
+
+export function firstUserTextCached(events: readonly SessionEvent[] | undefined): string | undefined {
+  if (events === undefined) return undefined;
+  if (firstUserTextCache.has(events)) return firstUserTextCache.get(events);
+  const text = firstUserText(events);
+  firstUserTextCache.set(events, text);
+  return text;
+}
+
 export interface AutocompleteItem {
   label: string;
   detail: string;
@@ -98,7 +112,10 @@ export interface WorkGroup {
  *  off by a tool call (or end of log) keeps its own block. */
 export function mergeThinking(messages: RenderMessage[]): RenderMessage[] {
   const out: RenderMessage[] = [];
-  let pending: { texts: string[]; time: number; id: string; eventSeq: number; finalized: boolean } | null = null;
+  // `rev` accumulates every source message's mutation counter plus a +1 per
+  // merged source, so a merged row's rev changes whenever any of its sources
+  // mutates OR a new source joins the run (row memoization contract).
+  let pending: { texts: string[]; time: number; id: string; eventSeq: number; finalized: boolean; rev: number } | null = null;
   const flush = (midLog: boolean) => {
     if (!pending) return;
     out.push({
@@ -111,6 +128,7 @@ export function mergeThinking(messages: RenderMessage[]): RenderMessage[] {
       // A later message proves this thinking finished even without a part-final.
       finalized: midLog ? true : pending.finalized,
       time: pending.time,
+      rev: pending.rev + (midLog ? 1 : 0),
     });
     pending = null;
   };
@@ -119,14 +137,15 @@ export function mergeThinking(messages: RenderMessage[]): RenderMessage[] {
       if (pending) {
         pending.texts.push(m.reasoning);
         pending.finalized = m.finalized;
+        pending.rev += (m.rev ?? 0) + 1;
       } else {
-        pending = { texts: [m.reasoning], time: m.time, id: m.id, eventSeq: m.eventSeq, finalized: m.finalized };
+        pending = { texts: [m.reasoning], time: m.time, id: m.id, eventSeq: m.eventSeq, finalized: m.finalized, rev: (m.rev ?? 0) + 1 };
       }
       continue;
     }
     if (m.kind === "assistant" && pending) {
       const merged = [...pending.texts, m.reasoning].filter(Boolean).join("\n\n");
-      out.push({ ...m, reasoning: merged });
+      out.push({ ...m, reasoning: merged, rev: (m.rev ?? 0) + pending.rev });
       pending = null;
       continue;
     }

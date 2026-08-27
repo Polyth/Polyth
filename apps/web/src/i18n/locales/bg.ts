@@ -1938,6 +1938,8 @@ export const bg: AppMessages = {
   "timeline.items": "артикули",
   "timeline.jumpRevertOrBranchFromAnyPrompt": "Прескачане, връщане или разклоняване от произволен ред.",
   "timeline.keepEditingTheDraft": "Продължете да редактирате черновата",
+  "timeline.loadEarlierHistory": "Зареди по-ранна история",
+  "timeline.loadingEarlierHistory": "Зареждане на по-ранна история…",
   "timeline.manageTurns": "УПРАВЛЯВАЙТЕ ЗАВОЙВАНИЯТА",
   "timeline.message": "×",
   "timeline.msgAssistant": ".msg.assistant",

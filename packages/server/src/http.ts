@@ -2,7 +2,7 @@
 import { createServer, type IncomingMessage, type ServerResponse, type Server } from "node:http";
 import { readFile } from "node:fs/promises";
 import { existsSync, statSync } from "node:fs";
-import { gzipSync } from "node:zlib";
+import { constants as zlibConstants, gzip, gzipSync } from "node:zlib";
 import { extname, join, normalize, resolve, sep } from "node:path";
 import type {
   AgentRuntime,
@@ -33,9 +33,37 @@ const COMPRESSIBLE = /^(?:text\/|application\/(?:json|javascript))/;
 /** Gzip cache keyed by path+mtime so a rebuilt dist never serves stale bytes. */
 const gzipCache = new Map<string, { mtimeMs: number; gz: Buffer }>();
 
-const json = (res: ServerResponse, code: number, body: unknown) => {
+// JSON payloads above a kilobyte gzip in-process (no reverse proxy assumed):
+// event logs and projection lists shrink ~10x on the wire.
+const JSON_GZIP_MIN_BYTES = 1024;
+// Above this, compression moves to the libuv threadpool at best-speed level:
+// a full-log export (100MB+) must never block the event loop for seconds.
+const JSON_GZIP_SYNC_MAX_BYTES = 256 * 1024;
+
+const writeJson = (req: IncomingMessage, res: ServerResponse, code: number, body: unknown) => {
+  const payload = JSON.stringify(body);
+  if (
+    payload.length > JSON_GZIP_MIN_BYTES
+    && String(req.headers["accept-encoding"] ?? "").includes("gzip")
+  ) {
+    const buf = Buffer.from(payload, "utf8");
+    res.writeHead(code, {
+      "content-type": "application/json",
+      "content-encoding": "gzip",
+      vary: "accept-encoding",
+    });
+    if (buf.length <= JSON_GZIP_SYNC_MAX_BYTES) {
+      res.end(gzipSync(buf));
+    } else {
+      gzip(buf, { level: zlibConstants.Z_BEST_SPEED }, (err, gz) => {
+        if (err) { res.destroy(err); return; }
+        res.end(gz);
+      });
+    }
+    return;
+  }
   res.writeHead(code, { "content-type": "application/json" });
-  res.end(JSON.stringify(body));
+  res.end(payload);
 };
 
 const inside = (base: string, candidate: string): boolean =>
@@ -151,6 +179,10 @@ export function createHttpServer(deps: HttpDeps): Server {
     const url = new URL(req.url ?? "/", "http://x");
     const path = url.pathname;
     const method = req.method ?? "GET";
+    // Request-bound so every JSON answer (feature routes included) can honor
+    // the client's accept-encoding.
+    const json = (target: ServerResponse, code: number, body: unknown) =>
+      writeJson(req, target, code, body);
     try {
       // F16: one gate before all routing. Static assets stay public (the SPA
       // shell renders the lock screen); every /api answer needs a session.
@@ -201,7 +233,19 @@ export function createHttpServer(deps: HttpDeps): Server {
       m = path.match(/^\/api\/sessions\/([^/]+)\/events$/);
       if (m && method === "GET") {
         const afterSeq = Number(url.searchParams.get("afterSeq") ?? 0);
-        return json(res, 200, await sessions.events(m[1]!, afterSeq));
+        // Keyset paging: limit returns the NEWEST events in the window,
+        // beforeSeq pages older history backward without offset scans.
+        const beforeSeqRaw = url.searchParams.get("beforeSeq");
+        const limitRaw = url.searchParams.get("limit");
+        const beforeSeq = beforeSeqRaw === null ? undefined : Number(beforeSeqRaw);
+        const limit = limitRaw === null ? undefined : Number(limitRaw);
+        const page = (Number.isSafeInteger(beforeSeq) && beforeSeq! > 0) || (Number.isSafeInteger(limit) && limit! > 0)
+          ? {
+              ...(Number.isSafeInteger(beforeSeq) && beforeSeq! > 0 ? { beforeSeq: beforeSeq! } : {}),
+              ...(Number.isSafeInteger(limit) && limit! > 0 ? { limit: limit! } : {}),
+            }
+          : undefined;
+        return json(res, 200, await sessions.events(m[1]!, afterSeq, page));
       }
       m = path.match(/^\/api\/sessions\/([^/]+)\/message$/);
       if (m && method === "POST") {

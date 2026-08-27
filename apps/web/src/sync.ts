@@ -6,7 +6,11 @@ import type { InstalledPluginDto, NotificationKind, NotificationRecord, PackageD
 
 export type SyncInbound =
   | { type: "event"; event: SessionEvent }
+  /** Batched gap-fill frame: many events, one envelope (already deduped). */
+  | { type: "events"; events: SessionEvent[] }
   | { type: "projection"; session: SessionProjection }
+  /** Batched projection snapshot frame (project-scoped on subscribe). */
+  | { type: "projections"; sessions: SessionProjection[] }
   | { type: "notification/added"; notification: NotificationRecord }
   | { type: "plugin/changed"; plugin: InstalledPluginDto }
   | { type: "package/changed"; package: PackageDescriptorDto }
@@ -34,17 +38,23 @@ export function createSeqDedupe(): SeqDedupe {
 
 const NOTIFICATION_KINDS: readonly NotificationKind[] = ["completed", "failed", "question", "permission", "subagent"];
 
+const isEventShape = (e: unknown): boolean => {
+  const ev = e as Record<string, unknown> | undefined | null;
+  return !!ev && typeof ev === "object" && typeof ev.sessionId === "string" && typeof ev.seq === "number";
+};
+
+const isProjectionShape = (s: unknown): boolean => {
+  const p = s as Record<string, unknown> | undefined | null;
+  return !!p && typeof p === "object" && typeof p.id === "string" && typeof p.status === "string";
+};
+
 export function isSyncInbound(raw: unknown): raw is SyncInbound {
   if (typeof raw !== "object" || raw === null) return false;
   const m = raw as Record<string, unknown>;
-  if (m.type === "event") {
-    const e = m.event as Record<string, unknown> | undefined;
-    return !!e && typeof e.sessionId === "string" && typeof e.seq === "number";
-  }
-  if (m.type === "projection") {
-    const s = m.session as Record<string, unknown> | undefined;
-    return !!s && typeof s.id === "string" && typeof s.status === "string";
-  }
+  if (m.type === "event") return isEventShape(m.event);
+  if (m.type === "events") return Array.isArray(m.events) && m.events.every(isEventShape);
+  if (m.type === "projection") return isProjectionShape(m.session);
+  if (m.type === "projections") return Array.isArray(m.sessions) && m.sessions.every(isProjectionShape);
   if (m.type === "notification/added") {
     // NTF-01: every required record field is validated; a malformed envelope
     // is dropped silently like any other unknown message.
@@ -84,7 +94,7 @@ export class SyncClient {
   private status: SyncStatus = "disconnected";
   private dedupe = createSeqDedupe();
   private seenSeq = new Map<string, number>(); // sessionId -> last applied seq
-  private sub: { sessionId?: string; afterSeq: number } | null = null;
+  private sub: { sessionId?: string; afterSeq: number; projectId?: string } | null = null;
   private backoff = 500; // ms, 500 → 5000
   private timer: ReturnType<typeof setTimeout> | null = null;
   private closed = false;
@@ -119,8 +129,10 @@ export class SyncClient {
   }
 
 
-  setSubscription(sessionId: string | undefined, afterSeq = 0): void {
-    this.sub = { sessionId, afterSeq };
+  /** `projectId` scopes the server's projection snapshot; the server skips
+   *  redundant snapshots for a scope the socket already received. */
+  setSubscription(sessionId: string | undefined, afterSeq = 0, projectId?: string): void {
+    this.sub = { sessionId, afterSeq, ...(projectId ? { projectId } : {}) };
     this.sendSubscribe();
   }
 
@@ -192,9 +204,21 @@ export class SyncClient {
   private sendSubscribe(): void {
     const ws = this.ws;
     if (!ws || ws.readyState !== WebSocket.OPEN || !this.sub) return;
-    const { sessionId } = this.sub;
+    const { sessionId, projectId } = this.sub;
     const afterSeq = sessionId ? (this.seenSeq.get(sessionId) ?? this.sub.afterSeq) : this.sub.afterSeq;
-    ws.send(JSON.stringify({ type: "subscribe", ...(sessionId ? { sessionId } : {}), afterSeq }));
+    ws.send(JSON.stringify({
+      type: "subscribe",
+      ...(sessionId ? { sessionId } : {}),
+      afterSeq,
+      ...(projectId ? { projectId } : {}),
+    }));
+  }
+
+  private track(ev: SessionEvent): boolean {
+    if (this.dedupe.has(ev.sessionId, ev.seq)) return false;
+    this.dedupe.add(ev.sessionId, ev.seq);
+    this.seenSeq.set(ev.sessionId, Math.max(this.seenSeq.get(ev.sessionId) ?? 0, ev.seq));
+    return true;
   }
 
   private handle(raw: string): void {
@@ -206,11 +230,12 @@ export class SyncClient {
     }
     if (!isSyncInbound(parsed)) return;
     if (parsed.type === "event") {
-      const ev = parsed.event;
-      if (this.dedupe.has(ev.sessionId, ev.seq)) return;
-      this.dedupe.add(ev.sessionId, ev.seq);
-      this.seenSeq.set(ev.sessionId, Math.max(this.seenSeq.get(ev.sessionId) ?? 0, ev.seq));
+      if (!this.track(parsed.event)) return;
+    } else if (parsed.type === "events") {
+      const fresh = parsed.events.filter((ev) => this.track(ev));
+      if (fresh.length === 0) return;
+      parsed = { type: "events", events: fresh } satisfies SyncInbound;
     }
-    for (const l of [...this.listeners]) l(parsed);
+    for (const l of [...this.listeners]) l(parsed as SyncInbound);
   }
 }

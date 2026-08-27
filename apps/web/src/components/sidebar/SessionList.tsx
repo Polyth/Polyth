@@ -16,7 +16,7 @@ import { deriveSessionTitle, fullSessionTitle } from "../../format.ts";
 import { friendlyError } from "../../settings.ts";
 import { getUiSettings } from "../../uiPrefs.ts";
 import { confirmAlert } from "../../alerts.ts";
-import { copyText, firstUserText } from "../../utils.ts";
+import { copyText, firstUserTextCached } from "../../utils.ts";
 import { announce } from "../a11y/live.tsx";
 import { worktreeLabel } from "../../worktreeSessions.ts";
 import SlotHost from "../slots/SlotHost.ts";
@@ -72,16 +72,35 @@ function AttentionBadges({ status }: { status: SessionRowStatus }) {
   return null;
 }
 
-/** Re-render clock for the running badge's elapsed label (paused when off). */
-function useNowTick(enabled: boolean, intervalMs = 30_000): number {
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    if (!enabled) return;
-    setNow(Date.now());
-    const timer = setInterval(() => setNow(Date.now()), intervalMs);
-    return () => clearInterval(timer);
-  }, [enabled, intervalMs]);
-  return now;
+// Re-render clock for the running badge's elapsed label. ONE shared interval
+// drives every subscribed row (previously each working row scheduled its own
+// 1s timer); the interval stops as soon as the last working row unsubscribes.
+let tickerTimer: ReturnType<typeof setInterval> | null = null;
+let tickerNow = Date.now();
+const tickerSubscribers = new Set<() => void>();
+
+function subscribeTicker(onChange: () => void): () => void {
+  tickerSubscribers.add(onChange);
+  if (tickerTimer === null) {
+    tickerNow = Date.now();
+    tickerTimer = setInterval(() => {
+      tickerNow = Date.now();
+      for (const notify of tickerSubscribers) notify();
+    }, 1_000);
+  }
+  return () => {
+    tickerSubscribers.delete(onChange);
+    if (tickerSubscribers.size === 0 && tickerTimer !== null) {
+      clearInterval(tickerTimer);
+      tickerTimer = null;
+    }
+  };
+}
+
+const subscribeNothing = () => () => {};
+
+function useNowTick(enabled: boolean): number {
+  return useSyncExternalStore(enabled ? subscribeTicker : subscribeNothing, () => tickerNow);
 }
 
 function StatusBadge({ status }: { status: SessionRowStatus }) {
@@ -195,7 +214,7 @@ function SessionRow({
   const longPressOpenedRef = useRef(false);
   const swipeStartRef = useRef<GesturePoint | null>(null);
   const swipeConsumedRef = useRef(false);
-  const now = useNowTick(s.status === "working", 1_000);
+  const now = useNowTick(s.status === "working");
   const rowStatus = sessionRowStatus(s, now);
 
   // Both mouse and pointer flavors are wired (idempotent, so duplicates are
@@ -604,7 +623,28 @@ export default function SessionList({
   const sessions = useStore((st) => st.sessions);
   const activeSessionId = useStore((st) => st.activeSessionId);
   const openingSessionId = useStore((st) => st.openingSessionId);
-  const eventsMap = useStore((st) => st.events);
+  // Narrow subscription: rows only need each session's derived title (its
+  // first user message). Selecting the whole events map re-rendered the whole
+  // list on EVERY streamed chunk of every session; this fingerprint changes
+  // only when a derived title appears or changes (the per-array WeakMap cache
+  // keeps the selector cheap, and the store LRU bounds the entry count).
+  const titlesFingerprint = useStore((st) => {
+    let out = "";
+    for (const id in st.events) {
+      const text = firstUserTextCached(st.events[id]);
+      if (text !== undefined) out += `${id}\u0000${text}\u0001`;
+    }
+    return out;
+  });
+  const eventsTitles = useMemo(() => {
+    const events = getState().events;
+    const titles = new Map<string, string>();
+    for (const id in events) {
+      const text = firstUserTextCached(events[id]);
+      if (text !== undefined) titles.set(id, text);
+    }
+    return titles;
+  }, [titlesFingerprint]);
   const expandArchived = useStore((st) => st.settings.showArchived);
   const relativeTime = useStore((st) => st.settings.relativeTime);
   const [labels, setLabels] = useState<WorkspaceLabel[]>([]);
@@ -743,7 +783,7 @@ export default function SessionList({
       s={s}
       activeSessionId={activeSessionId}
       labels={labels}
-      eventsTitle={firstUserText(eventsMap[s.id])}
+      eventsTitle={eventsTitles.get(s.id)}
       opening={openingSessionId === s.id}
       relativeTime={relativeTime}
       selectMode={selectMode}

@@ -105,7 +105,14 @@ export function useRailSurfaceModel(): RailSurfaceModel {
   const events = useStore((s) => (s.activeSessionId ? s.events[s.activeSessionId] : undefined) ?? NO_EVENTS);
   const resolved = useResolvedCapabilities();
 
-  const gitStatus = useGitStatus(projectId, model.turn?.status === "working", session?.id);
+  // Sessions without a worktree resolve to the project's primary checkout, so
+  // they share the project-scoped status entry (already fetched by the hero)
+  // instead of fetching a fresh per-session copy on every spawn/switch.
+  const gitStatus = useGitStatus(
+    projectId,
+    model.turn?.status === "working",
+    session?.worktreePath ? session.id : null,
+  );
   const ctx: RailSurfaceContext = {
     changeCount: gitStatus ? gitChangedFiles(gitStatus).length : 0,
     eventCount: events.length,

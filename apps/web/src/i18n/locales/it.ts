@@ -1938,6 +1938,8 @@ export const it: AppMessages = {
   "timeline.items": "elementi",
   "timeline.jumpRevertOrBranchFromAnyPrompt": "Salta, torna indietro o diramati da qualsiasi prompt.",
   "timeline.keepEditingTheDraft": "Continua a modificare la bozza",
+  "timeline.loadEarlierHistory": "Carica cronologia precedente",
+  "timeline.loadingEarlierHistory": "Caricamento della cronologia precedente…",
   "timeline.manageTurns": "GESTIRE I TURNI",
   "timeline.message": "×",
   "timeline.msgAssistant": ".msg.assistant",

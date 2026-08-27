@@ -1,6 +1,7 @@
 import { useEffect, useState, useSyncExternalStore } from "react";
 import { createRoot } from "react-dom/client";
 import { api } from "@polyth/session/web-api";
+import { consumeAuthPrefetch } from "./authPrefetch.ts";
 import { init } from "./init.ts";
 import { exposeSlots } from "./slots.ts";
 import { exposeSurfaces } from "./surfaces.ts";
@@ -60,7 +61,9 @@ function Root() {
 
   useEffect(() => {
     let cancelled = false;
-    void api.authStatus()
+    // main.tsx started this fetch before the app graph downloaded; falling
+    // back to a fresh call covers re-mounts (locale switches remount Root).
+    void (consumeAuthPrefetch() ?? api.authStatus())
       .then((s) => { if (!cancelled) setPhase(s.required && !s.authorized ? "locked" : "ready"); })
       // Status unreachable → proceed; init()'s own error banner reports it.
       .catch(() => { if (!cancelled) setPhase("ready"); });

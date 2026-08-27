@@ -338,16 +338,19 @@ export function ExecutionRow({ message, subagent }: { message: ToolMsg; subagent
     scrollAnchor?: TimelineScrollAnchor;
     restoreTarget?: HTMLElement;
   } | null>(null);
-  const presentation = executionPresentation(message);
-  const inputEntries = normalizedInputEntries(message.input);
-  const inputJson = JSON.stringify(message.input, null, 2);
-  const raw = JSON.stringify({
+  // Tool messages mutate in place; `rev` bumps on every mutation, so these
+  // derivations (JSON.stringify of potentially large outputs) run once per
+  // actual change instead of on every parent render.
+  const presentation = useMemo(() => executionPresentation(message), [message, message.rev]);
+  const inputEntries = useMemo(() => normalizedInputEntries(message.input), [message, message.rev]);
+  const inputJson = useMemo(() => JSON.stringify(message.input, null, 2), [message, message.rev]);
+  const raw = useMemo(() => JSON.stringify({
     tool: message.tool,
     input: message.input,
     ...(message.output !== undefined ? { output: message.output } : {}),
     ...(message.error !== undefined ? { error: message.error } : {}),
     ...(message.metadata !== undefined ? { metadata: message.metadata } : {}),
-  }, null, 2);
+  }, null, 2), [message, message.rev]);
   const exitCode = metadataValue(message.metadata, ["exit", "exitCode", "exit_code"]);
   const cwd = metadataValue(message.metadata, ["cwd"])
     ?? (typeof message.input.cwd === "string" ? message.input.cwd : undefined);

@@ -1938,6 +1938,8 @@ export const ptBR: AppMessages = {
   "timeline.items": "Unid",
   "timeline.jumpRevertOrBranchFromAnyPrompt": "Saltar, reverter ou ramificar a partir de qualquer prompt.",
   "timeline.keepEditingTheDraft": "Continue editando o rascunho",
+  "timeline.loadEarlierHistory": "Carregar histórico anterior",
+  "timeline.loadingEarlierHistory": "Carregando histórico anterior…",
   "timeline.manageTurns": "GERENCIAR TURNOS",
   "timeline.message": "×",
   "timeline.msgAssistant": ".msg.assistante",

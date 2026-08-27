@@ -29,6 +29,9 @@ export const browserBuildOptions = {
   external: reactExternals,
   sourcemap: true,
   minify: true,
+  // Escaped \uXXXX sequences bloat non-ASCII strings 6x; every response is
+  // served as UTF-8 anyway.
+  charset: "utf8",
   entryNames: "[dir]/[name]",
   chunkNames: "chunks/[name]-[hash]",
   assetNames: "assets/[name]-[hash]",

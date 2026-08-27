@@ -54,7 +54,13 @@ export function summarizeUnifiedDiff(diff: string): DiffLineStats {
 export default function PendingChangesBar() {
   const model = useActiveModel();
   const projectId = useStore((state) => state.activeProjectId);
-  const sessionId = useStore((state) => state.activeSessionId);
+  // Sessions without a worktree resolve to the project's primary checkout —
+  // scope status/diff reads to the project entry so spawning or switching such
+  // sessions never triggers an extra git fetch (worktree sessions stay scoped).
+  const sessionId = useStore((state) => {
+    const session = state.sessions.find((candidate) => candidate.id === state.activeSessionId);
+    return session?.worktreePath ? session.id : null;
+  });
   const working = model.turn?.status === "working";
   const status = useGitStatus(projectId, working, sessionId);
   const selected = useMemo(
