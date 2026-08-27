@@ -22,6 +22,9 @@ import SlotHost from "./slots/SlotHost.ts";
 import { useSidebarExpanded } from "../sidebarPresentation.ts";
 import { useSidebarViewMode } from "../sidebarPrefs.ts";
 import {
+  Button, CheckIcon, CloseIcon, IconButton, Menu, Popover,
+} from "./ui/index.ts";
+import {
   SIDEBAR_COLLAPSED_WIDTH, SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH,
   clampSidebarWidth, setSidebarLayout, useSidebarLayout,
 } from "../sidebarLayout.ts";
@@ -77,8 +80,6 @@ export default function Sidebar() {
   const [selectedSessionIds, setSelectedSessionIds] = useState<ReadonlySet<string>>(new Set());
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState<"recent" | "name">("recent");
-  const [sortOpen, setSortOpen] = useState(false);
-  const [filterOpen, setFilterOpen] = useState(false);
   const [connectionOpen, setConnectionOpen] = useState(false);
   const [shiftHeld, setShiftHeld] = useState(false);
   const [appearanceProjectId, setAppearanceProjectId] = useState<string | null>(null);
@@ -173,9 +174,7 @@ export default function Sidebar() {
   const navRef = useRef<HTMLElement>(null);
   const projectMenuRef = useRef<HTMLDivElement>(null);
   const projectMenuTriggerRef = useRef<HTMLButtonElement>(null);
-  const sortRef = useRef<HTMLDivElement>(null);
-  const filterRef = useRef<HTMLDivElement>(null);
-  const connectionRef = useRef<HTMLDivElement>(null);
+  const connectionTriggerRef = useRef<HTMLButtonElement>(null);
   const sideScrollRef = useRef<HTMLDivElement>(null);
   const pullStartRef = useRef<GesturePoint | null>(null);
   const pullDistanceRef = useRef(0);
@@ -240,27 +239,6 @@ export default function Sidebar() {
     }
     setPull(0);
   };
-  useEffect(() => {
-    if (!sortOpen && !filterOpen && !connectionOpen) return;
-    const onPointerDown = (event: MouseEvent) => {
-      const target = event.target as Node;
-      if (sortOpen && !sortRef.current?.contains(target)) setSortOpen(false);
-      if (filterOpen && !filterRef.current?.contains(target)) setFilterOpen(false);
-      if (connectionOpen && !connectionRef.current?.contains(target)) setConnectionOpen(false);
-    };
-    const onKeyDown = (event: globalThis.KeyboardEvent) => {
-      if (event.key !== "Escape") return;
-      setSortOpen(false);
-      setFilterOpen(false);
-      setConnectionOpen(false);
-    };
-    document.addEventListener("mousedown", onPointerDown);
-    document.addEventListener("keydown", onKeyDown);
-    return () => {
-      document.removeEventListener("mousedown", onPointerDown);
-      document.removeEventListener("keydown", onKeyDown);
-    };
-  }, [connectionOpen, filterOpen, sortOpen]);
   const toggleSelectMode = () => {
     setSelectMode((current) => {
       if (current) setSelectedSessionIds(new Set());
@@ -391,12 +369,13 @@ export default function Sidebar() {
                 <small title={project?.path}>{project?.name || project?.path || tr("header.polyth")}</small>
               </span>
             </div>
-            <button
-              className="icon-btn drawer-close"
-              title={tr("sidebar.closeProjectsAndSessions")}
-              aria-label={tr("sidebar.closeProjectsAndSessions")}
+            <IconButton
+              icon={CloseIcon}
+              label={tr("sidebar.closeProjectsAndSessions")}
+              size="lg"
+              className="drawer-close"
               onClick={() => setSidebarOpen(false)}
-            ><Icon.close /></button>
+            />
           </div>
         )}
         <div className="sidebar-service-bar">
@@ -418,8 +397,9 @@ export default function Sidebar() {
               >{tr("sidebar.message")}</button>
             )}
           </div>
-          <div className="sidebar-popover-anchor" ref={connectionRef}>
+          <div className="sidebar-popover-anchor">
             <button
+              ref={connectionTriggerRef}
               className={`sidebar-service-btn sidebar-connection-dot ${syncStatus}`}
               aria-label={tr("sidebar.serverConnectionValue", { syncStatus: syncStatus })}
               title={tr("sidebar.serverConnectionValue", { syncStatus: syncStatus })}
@@ -427,13 +407,18 @@ export default function Sidebar() {
               aria-expanded={connectionOpen}
               onClick={() => setConnectionOpen((open) => !open)}
             ><span aria-hidden="true" /></button>
-            {connectionOpen && (
-              <div className="sidebar-service-popover sidebar-connection-popover" role="dialog" aria-label={tr("sidebar.serverConnectionDetails")}>
-                <strong>{syncStatus === "connected" ? tr("sidebar.connected") : syncStatus === "connecting" ? tr("sidebar.connecting") : tr("sidebar.connectionProblem")}</strong>
-                <span>{host}</span>
-                <button onClick={() => { reconnectSync(); setConnectionOpen(false); }}>{tr("sidebar.reconnect")}</button>
-              </div>
-            )}
+            <Popover
+              open={connectionOpen}
+              onClose={() => setConnectionOpen(false)}
+              anchorRef={connectionTriggerRef}
+              align="end"
+              ariaLabel={tr("sidebar.serverConnectionDetails")}
+              className="sidebar-connection-popover"
+            >
+              <strong>{syncStatus === "connected" ? tr("sidebar.connected") : syncStatus === "connecting" ? tr("sidebar.connecting") : tr("sidebar.connectionProblem")}</strong>
+              <span>{host}</span>
+              <Button size="sm" onClick={() => { reconnectSync(); setConnectionOpen(false); }}>{tr("sidebar.reconnect")}</Button>
+            </Popover>
           </div>
           {shiftHeld && (
             <button
@@ -445,57 +430,66 @@ export default function Sidebar() {
           )}
         </div>
         <div className="sidebar-list-controls">
-          <div className="sidebar-sort" ref={sortRef}>
-            <button
-              className="sidebar-sort-trigger"
-              aria-label={tr("sidebar.sortSessionsCurrentlyValue", {
+          <div className="sidebar-sort">
+            <Menu
+              label={tr("sidebar.sortSessionsCurrentlyValue", {
                 value: sort === "recent" ? tr("sidebar.recentActivity") : tr("sidebar.projectName"),
               })}
-              aria-haspopup="menu"
-              aria-expanded={sortOpen}
-              onClick={() => setSortOpen((open) => !open)}
+              entries={[
+                {
+                  id: "recent",
+                  label: tr("sidebar.recentActivity"),
+                  icon: sort === "recent" ? CheckIcon : undefined,
+                  onSelect: () => setSort("recent"),
+                },
+                {
+                  id: "name",
+                  label: tr("sidebar.projectName"),
+                  icon: sort === "name" ? CheckIcon : undefined,
+                  onSelect: () => setSort("name"),
+                },
+              ]}
             >
-              <span>{sort === "recent" ? tr("sidebar.recentActivity") : tr("sidebar.projectName")}</span>
-              <span aria-hidden="true">▾</span>
-            </button>
-            {sortOpen && (
-              <div className="sidebar-sort-menu" role="menu">
-                <button role="menuitemradio" aria-checked={sort === "recent"} onClick={() => { setSort("recent"); setSortOpen(false); }}>
-                  {tr("sidebar.recentActivity")}{" "}{sort === "recent" ? "✓" : ""}
+              {(trigger) => (
+                <button className="sidebar-sort-trigger" {...trigger}>
+                  <span>{sort === "recent" ? tr("sidebar.recentActivity") : tr("sidebar.projectName")}</span>
+                  <span aria-hidden="true">▾</span>
                 </button>
-                <button role="menuitemradio" aria-checked={sort === "name"} onClick={() => { setSort("name"); setSortOpen(false); }}>
-                  {tr("sidebar.projectName")}{" "}{sort === "name" ? "✓" : ""}
-                </button>
-              </div>
-            )}
+              )}
+            </Menu>
           </div>
           <span className="sidebar-controls-spacer" />
-          <div className="sidebar-filter" ref={filterRef}>
-            <button
-              className={attentionOnly ? "active" : ""}
-              aria-label={tr("sidebar.filterSessions")}
-              aria-pressed={attentionOnly}
-              aria-haspopup="menu"
-              aria-expanded={filterOpen}
-              onClick={() => setFilterOpen((open) => !open)}
+          <div className="sidebar-filter">
+            <Menu
+              label={tr("sidebar.filterSessions")}
+              align="end"
+              entries={[
+                {
+                  id: "attention",
+                  label: tr("sidebar.needsAttention"),
+                  icon: attentionOnly ? CheckIcon : undefined,
+                  onSelect: () => setAttentionOnly((value) => !value),
+                },
+                ...(attentionOnly
+                  ? [{
+                      id: "clear",
+                      label: tr("sidebar.clearFilters"),
+                      onSelect: () => setAttentionOnly(false),
+                    }]
+                  : []),
+              ]}
             >
-              <Icon.filter />
-              <span>{tr("sidebar.filter")}</span>
-            </button>
-            {filterOpen && (
-              <div className="sidebar-filter-menu" role="menu">
+              {(trigger) => (
                 <button
-                  role="menuitemcheckbox"
-                  aria-checked={attentionOnly}
-                  onClick={() => setAttentionOnly((value) => !value)}
+                  className={attentionOnly ? "active" : ""}
+                  aria-pressed={attentionOnly}
+                  {...trigger}
                 >
-                  <span aria-hidden="true">{attentionOnly ? "✓" : ""}</span>
-                  {tr("sidebar.needsAttention")}</button>
-                {attentionOnly && (
-                  <button role="menuitem" onClick={() => { setAttentionOnly(false); setFilterOpen(false); }}>{tr("sidebar.clearFilters")}</button>
-                )}
-              </div>
-            )}
+                  <Icon.filter />
+                  <span>{tr("sidebar.filter")}</span>
+                </button>
+              )}
+            </Menu>
           </div>
         </div>
         <div
@@ -524,8 +518,8 @@ export default function Sidebar() {
           {selectMode && (
             <div className="session-bulk-actions" aria-label={tr("sidebar.selectedSessionActions")}>
               <span>{selectedSessionIds.size === 0 ? tr("sidebar.selectSessions") : tr("sidebar.valueSelected", { size: selectedSessionIds.size })}</span>
-              <button className="small-btn" disabled={selectedSessionIds.size === 0} onClick={() => void runBulk("archive")}>{tr("common.archive")}</button>
-              <button className="small-btn" disabled={selectedSessionIds.size === 0} onClick={() => void runBulk("restore")}>{tr("common.restore")}</button>
+              <Button size="sm" disabled={selectedSessionIds.size === 0} onClick={() => void runBulk("archive")}>{tr("common.archive")}</Button>
+              <Button size="sm" disabled={selectedSessionIds.size === 0} onClick={() => void runBulk("restore")}>{tr("common.restore")}</Button>
             </div>
           )}
           {registry.status === "loading" && (

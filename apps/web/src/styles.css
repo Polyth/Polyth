@@ -414,42 +414,15 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
   background: var(--red);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--red) 13%, transparent);
 }
-.sidebar-service-popover,
-.sidebar-sort-menu,
-.sidebar-filter-menu {
-  position: absolute;
-  z-index: 80;
-  top: calc(100% + 5px);
-  min-width: 180px;
+/* Sidebar sort/filter menus render through ui/Menu; the connection popover
+   renders through ui/Popover (chrome from .ui-popover, content rules below). */
+.ui-popover.sidebar-connection-popover {
+  width: min(230px, calc(100vw - 20px));
   display: flex;
   flex-direction: column;
-  gap: 2px;
-  padding: 6px;
-  border: 1px solid var(--border);
-  border-radius: calc(10px * var(--corner-radius-scale));
-  background: var(--elevated);
-  box-shadow: var(--shadow-lg);
+  gap: 4px;
+  padding: 10px;
 }
-.sidebar-service-popover { right: 0; }
-.sidebar-service-popover button,
-.sidebar-sort-menu button,
-.sidebar-filter-menu button {
-  min-height: 34px;
-  display: flex;
-  align-items: center;
-  gap: 7px;
-  padding: 6px 9px;
-  border: 0;
-  border-radius: calc(7px * var(--corner-radius-scale));
-  background: transparent;
-  color: var(--text-dim);
-  text-align: left;
-}
-.sidebar-service-popover button:hover,
-.sidebar-sort-menu button:hover,
-.sidebar-filter-menu button:hover { background: var(--raised); color: var(--text); }
-.sidebar-service-popover button:disabled { color: var(--faint); }
-.sidebar-connection-popover { width: min(230px, calc(100vw - 20px)); gap: 4px; padding: 10px; }
 .sidebar-connection-popover strong { color: var(--text); font-size: var(--nav-meta-size); }
 .sidebar-connection-popover > span {
   overflow: hidden;
@@ -458,7 +431,7 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.sidebar-connection-popover button { margin-top: 4px; justify-content: center; border: 1px solid var(--border-soft); }
+.sidebar-connection-popover .ui-btn { margin-top: 4px; }
 .sidebar-list-controls {
   position: relative;
   z-index: 10;
@@ -495,8 +468,6 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
 .sidebar-filter > button.active { color: var(--accent); background: var(--accent-wash); }
 .sidebar-filter svg { width: 14px; height: 14px; }
 .sidebar-controls-spacer { flex: 1; }
-.sidebar-sort-menu { left: 0; }
-.sidebar-filter-menu { right: 0; }
 .brand { display: flex; align-items: center; gap: 9px; font-weight: 650; letter-spacing: -0.022em; font-size: 15.5px; }
 .brand i {
   display: grid; place-items: center; width: 24px; height: 24px; border-radius: calc(8px * var(--corner-radius-scale));
@@ -4315,10 +4286,7 @@ html[dir="rtl"] .settings-nav {
 html[dir="rtl"] .menu-popup button {
   text-align: right;
 }
-html[dir="rtl"] .settings-nav-item,
-html[dir="rtl"] .sidebar-service-popover button,
-html[dir="rtl"] .sidebar-sort-menu button,
-html[dir="rtl"] .sidebar-filter-menu button {
+html[dir="rtl"] .settings-nav-item {
   text-align: right;
 }
 html[dir="rtl"] .sidebar-search > svg,
@@ -4329,18 +4297,6 @@ html[dir="rtl"] .side-search svg {
 html[dir="rtl"] .sidebar-search .sidebar-search-clear {
   right: auto;
   left: 3px;
-}
-html[dir="rtl"] .sidebar-service-popover {
-  right: auto;
-  left: 0;
-}
-html[dir="rtl"] .sidebar-sort-menu {
-  left: auto;
-  right: 0;
-}
-html[dir="rtl"] .sidebar-filter-menu {
-  right: auto;
-  left: 0;
 }
 html[dir="rtl"] .pill-chev,
 html[dir="rtl"] .sel svg {
@@ -8336,6 +8292,11 @@ opacity: 1;
 @media (pointer: coarse) {
 .session-quick-btn,
   .session-menu button { min-width: var(--tap); min-height: var(--tap); }
+  /* The persistent More chip is --tap wide at right: 8px; reserve its real
+     footprint so the timestamp never slides beneath it, and give the status
+     column enough width for a full "59m ago" label. */
+  .session-row .session-btn { padding-right: calc(var(--tap) + 12px); }
+  .sidebar { --nav-status-width: 62px; }
 }
 
 
