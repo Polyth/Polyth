@@ -1938,6 +1938,8 @@ export const de: AppMessages = {
   "timeline.items": "Artikel",
   "timeline.jumpRevertOrBranchFromAnyPrompt": "Von jeder Eingabeaufforderung aus springen, zurückkehren oder verzweigen.",
   "timeline.keepEditingTheDraft": "Bearbeiten Sie den Entwurf weiter.",
+  "timeline.loadEarlierHistory": "Früheren Verlauf laden",
+  "timeline.loadingEarlierHistory": "Früherer Verlauf wird geladen…",
   "timeline.manageTurns": "RUNDEN VERWALTEN",
   "timeline.message": "×",
   "timeline.msgAssistant": ".msg.assistant",

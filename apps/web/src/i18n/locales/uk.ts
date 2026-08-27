@@ -1938,6 +1938,8 @@ export const uk: AppMessages = {
   "timeline.items": "предмети",
   "timeline.jumpRevertOrBranchFromAnyPrompt": "Перехід, повернення або розгалуження з будь-якого запиту.",
   "timeline.keepEditingTheDraft": "Продовжуйте редагувати чернетку",
+  "timeline.loadEarlierHistory": "Завантажити попередню історію",
+  "timeline.loadingEarlierHistory": "Завантаження попередньої історії…",
   "timeline.manageTurns": "КЕРУВАННЯ ПОВОРОТАМИ",
   "timeline.message": "×",
   "timeline.msgAssistant": ".msg.assistant",

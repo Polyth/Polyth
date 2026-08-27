@@ -1938,6 +1938,8 @@ export const ar: AppMessages = {
   "timeline.items": "أغراض",
   "timeline.jumpRevertOrBranchFromAnyPrompt": "انتقل، أو ارجع، أو تفرع من أي موجه أوامر.",
   "timeline.keepEditingTheDraft": "استمر في تحرير المسودة",
+  "timeline.loadEarlierHistory": "تحميل السجل الأقدم",
+  "timeline.loadingEarlierHistory": "جارٍ تحميل السجل الأقدم…",
   "timeline.manageTurns": "إدارة الأدوار",
   "timeline.message": "×",
   "timeline.msgAssistant": ".msg.assistant",

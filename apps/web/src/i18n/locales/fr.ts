@@ -1938,6 +1938,8 @@ export const fr: AppMessages = {
   "timeline.items": "articles",
   "timeline.jumpRevertOrBranchFromAnyPrompt": "Sauter, revenir en arrière ou créer un embranchement à partir de n'importe quelle invite.",
   "timeline.keepEditingTheDraft": "Continuez à modifier le brouillon",
+  "timeline.loadEarlierHistory": "Charger l'historique précédent",
+  "timeline.loadingEarlierHistory": "Chargement de l'historique précédent…",
   "timeline.manageTurns": "GÉRER LES TOURS",
   "timeline.message": "×",
   "timeline.msgAssistant": ".msg.assistant",

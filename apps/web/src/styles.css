@@ -1269,6 +1269,17 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
   display: flex; flex-direction: column; gap: 16px;
 }
 
+/* Session-open transition: compositor-only (opacity + transform, no layout or
+   paint properties) so a switch stays smooth even while a large log hydrates.
+   Gated on no-preference so reduced-motion readers get an instant cut. */
+@media (prefers-reduced-motion: no-preference) {
+  .timeline.session-entering { animation: session-enter 160ms ease-out; }
+  @keyframes session-enter {
+    from { opacity: 0; transform: translateY(6px); }
+    to { opacity: 1; transform: none; }
+  }
+}
+
 .msg { display: flex; flex-direction: column; min-inline-size: 0; max-width: 100%; }
 /* flex alignment is writing-mode aware: user turns sit at the logical end. */
 .msg.user { align-items: flex-end; }

@@ -1938,6 +1938,8 @@ export const pl: AppMessages = {
   "timeline.items": "rzeczy",
   "timeline.jumpRevertOrBranchFromAnyPrompt": "Przeskocz, cofnij lub rozgałęzij się w dowolnym wierszu poleceń.",
   "timeline.keepEditingTheDraft": "Kontynuuj edycję wersji roboczej",
+  "timeline.loadEarlierHistory": "Załaduj wcześniejszą historię",
+  "timeline.loadingEarlierHistory": "Ładowanie wcześniejszej historii…",
   "timeline.manageTurns": "ZARZĄDZAJ ZWROTAMI",
   "timeline.message": "×",
   "timeline.msgAssistant": ".msg.assistant",

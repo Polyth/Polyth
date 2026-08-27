@@ -11,6 +11,20 @@ export function firstUserText(events: readonly SessionEvent[] | undefined): stri
   return typeof t === "string" && t.trim() ? t : undefined;
 }
 
+// Event arrays are replaced (never mutated) on change, so the derived title is
+// cached per array identity. Hot render paths (sidebar rows, store selectors)
+// call this once per store notification per session; without the cache each
+// call re-scanned the log.
+const firstUserTextCache = new WeakMap<readonly SessionEvent[], string | undefined>();
+
+export function firstUserTextCached(events: readonly SessionEvent[] | undefined): string | undefined {
+  if (events === undefined) return undefined;
+  if (firstUserTextCache.has(events)) return firstUserTextCache.get(events);
+  const text = firstUserText(events);
+  firstUserTextCache.set(events, text);
+  return text;
+}
+
 export interface AutocompleteItem {
   label: string;
   detail: string;

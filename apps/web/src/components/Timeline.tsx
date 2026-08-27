@@ -1,11 +1,12 @@
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react";
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { createPortal } from "react-dom";
+import type { SessionEvent } from "@polyth/contracts";
 import { renderMarkdown } from "../markdown.tsx";
 import { fmtDuration, fmtTokens } from "../format.ts";
 import { groupWork, mergeThinking, promptIndex, copyText, loadDraft, type WorkGroup } from "../utils.ts";
 import { executionGroupLabel, executionPresentation, reasoningMilestones } from "../execution.ts";
 import { setUiSettings, useUiSettings } from "../uiPrefs.ts";
-import { forkSession, sendMessage } from "../init.ts";
+import { forkSession, loadOlderEvents, sendMessage } from "../init.ts";
 import { requestComposerReplace } from "../composerInsert.ts";
 import {
   applyEvent, setActiveView, setUiError, startNewSession, useStore,
@@ -469,6 +470,28 @@ function downloadAnswerImage(text: string, title: string): boolean {
   return true;
 }
 
+// Pin state per event array, computed once per applied batch and shared by
+// every assistant header (previously each header re-scanned the WHOLE log on
+// every store change). Selectors then return a primitive, so headers stop
+// re-rendering on unrelated streamed events.
+const pinnedBySource = new WeakMap<readonly SessionEvent[], Map<number, boolean>>();
+
+function pinnedState(events: readonly SessionEvent[] | undefined, seq: number): boolean {
+  if (!events) return false;
+  let map = pinnedBySource.get(events);
+  if (!map) {
+    map = new Map();
+    for (const event of events) {
+      if (event.type !== "context/pinned" && event.type !== "context/unpinned") continue;
+      const src = Number((event.data as { sourceEventSeq?: unknown }).sourceEventSeq);
+      if (!Number.isFinite(src)) continue;
+      map.set(src, event.type === "context/pinned");
+    }
+    pinnedBySource.set(events, map);
+  }
+  return map.get(seq) === true;
+}
+
 function AssistantAgentHeader({
   m,
   announce,
@@ -485,7 +508,8 @@ function AssistantAgentHeader({
   const session = useStore((state) =>
     state.sessions.find((candidate) => candidate.id === state.activeSessionId) ?? null);
   const projectId = useStore((state) => state.activeProjectId);
-  const events = useStore((state) => session ? state.events[session.id] ?? [] : []);
+  const pinned = useStore((state) =>
+    pinnedState(session ? state.events[session.id] : undefined, m.eventSeq));
   const models = useStore((state) => state.models);
   const prefs = useUiSettings();
   const [pinBusy, setPinBusy] = useState(false);
@@ -505,12 +529,6 @@ function AssistantAgentHeader({
       : null;
   const usage = turn?.usage?.tokens;
   const hasUsage = usage !== undefined && (usage.input > 0 || usage.output > 0);
-  let pinned = false;
-  for (const event of events) {
-    if (Number((event.data as { sourceEventSeq?: unknown }).sourceEventSeq) !== m.eventSeq) continue;
-    if (event.type === "context/pinned") pinned = true;
-    if (event.type === "context/unpinned") pinned = false;
-  }
   const runAction = (id: (typeof prefs.responseActions)[number]) => {
     if (id === "copy") {
       void copyText(m.text).then((ok) => announce?.(ok ? tr("timeline.answerCopied") : tr("timeline.couldnTCopyAnswer")));
@@ -836,6 +854,80 @@ function MessageView({ m, announce, plan, regeneratePrompt, turn, preliminary, o
   return <ExecutionRow message={m} />;
 }
 
+// ---- memoized rows -----------------------------------------------------------
+// reduceEvent mutates message objects IN PLACE, so identity checks cannot see
+// changes: each row captures a scalar `rev` prop at render time (bumped by
+// every in-place mutation, accumulated by mergeThinking for merged rows) and
+// falls back to snapshot-field comparison for rows that merge re-creates.
+// Net effect: a streamed chunk re-renders ONE row instead of the whole log.
+
+function availabilityEqual(a?: ActionAvailability, b?: ActionAvailability): boolean {
+  if (a === b) return true;
+  if (!a || !b) return false;
+  if (a.enabled && b.enabled) return true;
+  if (!a.enabled && !b.enabled) return a.reason === b.reason;
+  return false;
+}
+
+function sameMessage(a: RenderMessage, b: RenderMessage): boolean {
+  if (a.kind !== b.kind || a.id !== b.id || a.eventSeq !== b.eventSeq || a.time !== b.time) return false;
+  if (a.undone !== b.undone || a.rewindMarkerSeq !== b.rewindMarkerSeq) return false;
+  if (a === b) return true; // same object → the rev prop covers mutations
+  if (a.kind === "user" && b.kind === "user") {
+    return a.text === b.text && a.raw === b.raw && a.attachments === b.attachments;
+  }
+  if (a.kind === "assistant" && b.kind === "assistant") {
+    return a.text === b.text && a.reasoning === b.reasoning && a.finalized === b.finalized
+      && a.completedAt === b.completedAt && a.tokens === b.tokens && a.cost === b.cost
+      && a.model === b.model && a.agent === b.agent;
+  }
+  if (a.kind === "tool" && b.kind === "tool") {
+    return a.status === b.status && a.output === b.output && a.error === b.error
+      && a.title === b.title && a.metadata === b.metadata && a.input === b.input
+      && a.finishTime === b.finishTime && a.changedFiles === b.changedFiles;
+  }
+  if (a.kind === "task" && b.kind === "task") {
+    return a.action === b.action && a.text === b.text;
+  }
+  return true; // github-conflict: immutable after creation
+}
+
+const MessageRow = memo(function MessageRow(props: Parameters<typeof MessageView>[0] & { rev: number }) {
+  const { rev: _rev, ...rest } = props;
+  return <MessageView {...rest} />;
+}, (prev, next) =>
+  prev.rev === next.rev
+  && sameMessage(prev.m, next.m)
+  && prev.plan === next.plan
+  // model.turn mutates in place: any row holding it must always re-render
+  && prev.turn === undefined && next.turn === undefined
+  && prev.preliminary === next.preliminary
+  && prev.regeneratePrompt === next.regeneratePrompt
+  && prev.announce === next.announce
+  && prev.onRevert === next.onRevert
+  && prev.onFork === next.onFork
+  && availabilityEqual(prev.revert, next.revert)
+  && availabilityEqual(prev.fork, next.fork));
+
+/** Sum of item revs + count: strictly grows on any member mutation/addition. */
+function workRev(g: WorkGroup): number {
+  let rev = g.items.length;
+  for (const item of g.items) rev += item.rev ?? 0;
+  return rev;
+}
+
+function sameGroup(a: WorkGroup, b: WorkGroup): boolean {
+  if (a.id !== b.id || a.ms !== b.ms || a.items.length !== b.items.length) return false;
+  for (let i = 0; i < a.items.length; i += 1) {
+    if (!sameMessage(a.items[i]!, b.items[i]!)) return false;
+  }
+  return true;
+}
+
+const WorkRow = memo(function WorkRow({ g, subagents }: { rev: number; g: WorkGroup; subagents: SubagentState | null }) {
+  return <WorkedGroup g={g} subagents={subagents} />;
+}, (prev, next) => prev.rev === next.rev && sameGroup(prev.g, next.g) && prev.subagents === next.subagents);
+
 // Right-edge prompt rail (WP4, restyled after polyth PromptNavigatorRail):
 // a thin vertical tape of ticks in a 28px gutter hugging the right edge of the
 // chat viewport, vertically centered. It is a SIBLING of the .timeline scroller
@@ -1042,6 +1134,23 @@ export default function Timeline({
     setShowJump(stored !== null && !stored.atBottom);
   }
 
+  // Session-open animation: replayed per switch by re-adding the class on the
+  // next frame. The keyframes are opacity/transform only and sit behind a
+  // prefers-reduced-motion gate in styles.css; here we only toggle the class.
+  useEffect(() => {
+    const el = ref.current;
+    if (el === null || sessionId === null) return;
+    el.classList.remove("session-entering");
+    const raf = requestAnimationFrame(() => el.classList.add("session-entering"));
+    const onEnd = () => el.classList.remove("session-entering");
+    el.addEventListener("animationend", onEnd);
+    return () => {
+      cancelAnimationFrame(raf);
+      el.removeEventListener("animationend", onEnd);
+      el.classList.remove("session-entering");
+    };
+  }, [sessionId]);
+
   // Tail follow (§2.4): at/near the tail the timeline follows growth; a reader
   // who scrolled up keeps the chosen position and sees the reveal control.
   useEffect(() => {
@@ -1062,6 +1171,9 @@ export default function Timeline({
     const near = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
     atBottom.current = near;
     setShowJump(!near);
+    // Scroll-up lazy loading: nearing the top with every cached row already
+    // rendered pulls the next page of older history from the server.
+    if (el.scrollTop < 160 && canLoadOlder && start === 0 && !olderBusy) void loadOlder();
     if (sessionId === null) return;
     if (saveTimer.current !== null) clearTimeout(saveTimer.current);
     saveTimer.current = setTimeout(() => {
@@ -1107,6 +1219,14 @@ export default function Timeline({
   // model plus the authoritative queue; the server re-validates inside the
   // per-session lock, so a raced action returns a typed conflict, not a lie.
   const archived = useStore((s) => s.sessions.find((x) => x.id === s.activeSessionId)?.status === "archived");
+  // Paginated hydration caches only the newest window; true while the server
+  // still holds events OLDER than the cached window (primitive selector, so
+  // streamed appends don't re-render the shell through this subscription).
+  const canLoadOlder = useStore((s) => {
+    if (s.activeSessionId === null) return false;
+    const list = s.events[s.activeSessionId];
+    return list !== undefined && list.length > 0 && list[0]!.seq > 1;
+  });
   const pendingQuestion = model.questions.some((question) => question.status === "pending");
   const pendingPermission = model.permissions.some((permission) => permission.status === "pending");
   const pendingSecret = model.secrets.some((secret) => secret.status === "pending");
@@ -1116,18 +1236,20 @@ export default function Timeline({
       ? tr("timeline.answerPendingQuestion")
       : tr("timeline.noMessagesYet");
   const [queuedCount, setQueuedCount] = useState(0);
+  // model.queueVersion bumps only on queue-affecting events, so this REST
+  // read runs per session switch / queue change — not per streamed chunk.
   useEffect(() => {
     if (!sessionId) { setQueuedCount(0); return; }
     let cancelled = false;
     void api.queueList(sessionId).then((items) => { if (!cancelled) setQueuedCount(items.length); });
     return () => { cancelled = true; };
-  }, [sessionId, model.version]);
+  }, [sessionId, model.queueVersion]);
   const guards: MutationGuards = guardsFromModel(model, { queuedCount, archived });
   const revertOk = revertAvailability(guards);
   const forkOk = forkAvailability(guards);
 
-  const visibleMessages = useMemo(() => model.messages.filter((message) => !message.undone), [model.version]);
-  const undoneMessages = useMemo(() => model.messages.filter((message) => message.undone), [model.version]);
+  const visibleMessages = useMemo(() => model.messages.filter((message) => !message.undone), [model]);
+  const undoneMessages = useMemo(() => model.messages.filter((message) => message.undone), [model]);
   const rows = useMemo(() => groupWork(mergeThinking(visibleMessages)), [visibleMessages]);
   const undoneRows = useMemo(() => groupWork(mergeThinking(undoneMessages)), [undoneMessages]);
   const prompts = useMemo(() => promptIndex(visibleMessages), [visibleMessages]);
@@ -1193,6 +1315,31 @@ export default function Timeline({
     }
   }, [limit]);
 
+  // Scroll-up lazy loading: once every cached row is rendered (start === 0)
+  // but older history remains on the server, fetch the next page backward.
+  // The prepended events first land WITHOUT changing the visible suffix
+  // (windowStart absorbs them); the effect below then grows the window over
+  // the new rows via reveal(), whose anchor keeps the viewport pinned to the
+  // previously-visible content.
+  const [olderBusy, setOlderBusy] = useState(false);
+  const revealAfterLoad = useRef(false);
+  useEffect(() => {
+    if (!revealAfterLoad.current || start === 0) return;
+    revealAfterLoad.current = false;
+    reveal(rows.length);
+  });
+  const loadOlder = useCallback(async () => {
+    if (sessionId === null) return;
+    setOlderBusy(true);
+    try {
+      revealAfterLoad.current = true;
+      const loaded = await loadOlderEvents(sessionId);
+      if (!loaded) revealAfterLoad.current = false;
+    } finally {
+      setOlderBusy(false);
+    }
+  }, [sessionId]);
+
   // Reapply the stored stable anchor once its row exists: grow the window to
   // include it if needed, then align the row to the remembered usable-edge
   // offset (timelineAnchor.ts owns the inset invariant). Runs every commit
@@ -1257,7 +1404,8 @@ export default function Timeline({
   ) : null;
   // Revert and edit: append the marker, then seed the composer with the exact
   // raw prompt + attachments (marker-owned; replay derives the same draft).
-  const revert = (message: UserMsg) => {
+  // Stable identity (useCallback) so memoized rows don't re-render per commit.
+  const revert = useCallback((message: UserMsg) => {
     if (!sessionId) return;
     void api.rewind(sessionId, message.eventSeq).then((marker) => {
       applyEvent(marker); // WS re-delivery dedupes by seq
@@ -1274,17 +1422,17 @@ export default function Timeline({
       announce(text);
       setUiError(text);
     });
-  };
+  }, [sessionId, announce]);
   // Fork and edit: navigation happens only after the child is published; a
   // failure keeps the source selected with a bounded explanation (spec).
-  const fork = (message: UserMsg) => {
+  const fork = useCallback((message: UserMsg) => {
     if (!sessionId) return;
     void forkSession(sessionId, message.eventSeq).catch((err) => {
       const text = mutationErrorMessage("fork", err);
       announce(text);
       setUiError(text);
     });
-  };
+  }, [sessionId, announce]);
   // Restore original timeline. An untouched seed is cleared silently; an
   // edited draft asks first (both outcomes named in the dock confirmation).
   // Focus lands on the invoking control when it survives, otherwise on the
@@ -1360,18 +1508,25 @@ export default function Timeline({
               {tr("timeline.showAll2")}{start} {tr("timeline.hidden")}</button>
           </div>
         )}
+        {start === 0 && canLoadOlder && (
+          <div className="timeline-earlier">
+            <button className="small-btn" onClick={() => void loadOlder()} disabled={olderBusy}>
+              {olderBusy ? tr("timeline.loadingEarlierHistory") : tr("timeline.loadEarlierHistory")}</button>
+          </div>
+        )}
         {shownRows.map((r) => (
           r.kind === "work"
-            ? <WorkedGroup key={r.id} g={r} subagents={model.subagents} />
+            ? <WorkRow key={r.id} rev={workRev(r)} g={r} subagents={model.subagents} />
             : (
-              <MessageView
+              <MessageRow
                 key={r.id}
+                rev={r.rev ?? 0}
                 m={r}
                 plan={r.kind === "assistant" && r.id === latestAssistantId && model.tasks ? model.tasks : undefined}
-                    regeneratePrompt={r.kind === "assistant" ? regenerateSources.get(r.eventSeq) : undefined}
-                    turn={r.kind === "assistant" && r.id === latestAssistantId && turn?.status !== "working" ? turn : undefined}
-                    preliminary={r.kind === "assistant" && turn?.status === "working"
-                      && (turn.startedAt === undefined || r.time >= turn.startedAt)}
+                regeneratePrompt={r.kind === "assistant" ? regenerateSources.get(r.eventSeq) : undefined}
+                turn={r.kind === "assistant" && r.id === latestAssistantId && turn?.status !== "working" ? turn : undefined}
+                preliminary={r.kind === "assistant" && turn?.status === "working"
+                  && (turn.startedAt === undefined || r.time >= turn.startedAt)}
                 announce={announce}
                 onRevert={revert}
                 onFork={fork}
@@ -1414,8 +1569,8 @@ export default function Timeline({
             <div className="rewound-tail-body">
               {undoneRows.map((row) => (
                 row.kind === "work"
-                  ? <WorkedGroup key={row.id} g={row} subagents={model.subagents} />
-                  : <MessageView key={row.id} m={row} announce={announce} />
+                  ? <WorkRow key={row.id} rev={workRev(row)} g={row} subagents={model.subagents} />
+                  : <MessageRow key={row.id} rev={row.rev ?? 0} m={row} announce={announce} />
               ))}
             </div>
           </details>

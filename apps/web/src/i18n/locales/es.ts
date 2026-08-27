@@ -1938,6 +1938,8 @@ export const es: AppMessages = {
   "timeline.items": "elementos",
   "timeline.jumpRevertOrBranchFromAnyPrompt": "Salta, revierte o bifurca desde cualquier indicación.",
   "timeline.keepEditingTheDraft": "Sigue editando el borrador",
+  "timeline.loadEarlierHistory": "Cargar historial anterior",
+  "timeline.loadingEarlierHistory": "Cargando historial anterior…",
   "timeline.manageTurns": "GESTIONAR TURNOS",
   "timeline.message": "×",
   "timeline.msgAssistant": "Asistente de mensajes",

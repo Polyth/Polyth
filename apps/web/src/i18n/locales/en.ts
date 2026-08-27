@@ -1941,6 +1941,8 @@ export const en = {
   "timeline.items": "items",
   "timeline.jumpRevertOrBranchFromAnyPrompt": "Jump, revert, or branch from any prompt.",
   "timeline.keepEditingTheDraft": "Keep editing the draft",
+  "timeline.loadEarlierHistory": "Load earlier history",
+  "timeline.loadingEarlierHistory": "Loading earlier history…",
   "timeline.manageTurns": "MANAGE TURNS",
   "timeline.message": "×",
   "timeline.msgAssistant": ".msg.assistant",
