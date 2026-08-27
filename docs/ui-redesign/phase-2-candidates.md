@@ -41,6 +41,9 @@ direction / Requires product decision.
   distinct from `label` (accessible name), with copy guidelines in
   design-system.md.
 - **Requires product decision:** copy conventions only; API change is mechanical.
+- **Status (Wave 4):** the `title` prop shipped and the sidebar sort sheet uses
+  it ("Sort sessions"). Remaining: copy guidelines in design-system.md and an
+  audit of future `Menu` adopters.
 
 ## 3. Menus lost `menuitemradio` / `menuitemcheckbox` semantics
 
@@ -73,6 +76,11 @@ direction / Requires product decision.
   (hover reveal on fine pointers, persistent chip on coarse), with swipe as an
   accelerator only; drop the Shift-hover layer.
 - **Requires product decision:** yes — which affordances survive.
+- **Status (Wave 4):** the acute overlap is fixed — exactly one menu trigger
+  renders per input mode (hover-revealed button on fine pointers, persistent
+  More chip on touch/drawer layouts), and the duplicate tab stop is gone.
+  The Shift-hover quick-action layer and swipe actions still coexist and
+  still need the product decision above.
 
 ## 5. Tablet band (481–820 px) shows desktop chrome with phone interactions
 
@@ -115,3 +123,42 @@ direction / Requires product decision.
   rows inside the existing picker sheet.
 - **Requires product decision:** yes — which controls deserve permanent
   visibility on phones.
+
+## 8. Session-row menu is hand-rolled instead of using `ui/Menu`
+
+- **Problem:** `SessionList.tsx` implements its own anchored row menu —
+  outside-press dismissal, Escape handling, arrow-key traversal, focus return,
+  long-press and context-menu opening — as ~80 lines of bespoke logic per
+  concern, while `ui/Menu` already provides the anchored-menu/sheet dual
+  presentation with `useDismissibleMenu` semantics.
+- **Current behavior:** the row menu works, but every fix (Wave 4 repaired the
+  focus-return path and the outside-click toggle for the persistent More chip)
+  lands in duplicated code that `ui/Menu` adopters get for free.
+- **Why problematic:** two menu implementations drift: the hand-rolled one has
+  no phone-sheet presentation, its own z-index/positioning rules, and separate
+  keyboard-navigation code to keep accessible.
+- **Proposed direction:** migrate the session-row menu to `ui/Menu` once the
+  primitive supports the row's extra entry points (long-press, contextmenu,
+  Shift+F10) and submenu-like label toggles; fold the swipe-reveal actions into
+  the same entry list.
+- **Requires product decision:** no — engineering migration, but sequenced
+  after item 3 (checkbox semantics) since label toggles need `aria-checked`.
+
+## 9. Package CSS carried app-global styling policy
+
+- **Problem:** `packages/files/widgets/styles.css` shipped an unscoped
+  `:where(button, …) { min-height/min-width: var(--tap) !important }` rule for
+  coarse pointers, silently imposing a 44 px floor on every control in the app.
+- **Current behavior:** Wave 4 scoped the rule under the package root
+  (`.editor-view`); the leak that inflated the package-tour step dots into
+  44 px pills is fixed.
+- **Why problematic:** the tap-target *policy* is an app-shell concern; the
+  files package was the wrong owner, and `!important` made the leak win over
+  every component's intended geometry. The package also still carries dead
+  selectors (`.files-panel`, `.files-viewer*`) with no rendering component.
+- **Proposed direction:** define the canonical coarse-pointer hit-area
+  strategy in core `styles.css`/`tokens.css` (e.g. the `::after` hit-extension
+  pattern already used by `.view-icon`), then delete per-package floors and
+  prune dead files-package selectors.
+- **Requires product decision:** no — styling-contract enforcement; needs a
+  sweep of all package stylesheets for similar unscoped rules.
