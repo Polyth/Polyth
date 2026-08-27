@@ -417,7 +417,7 @@ test("touch targets and design tokens are centralized", async () => {
   const tokens = css.slice(0, css.indexOf("/* F15: syntax roles"));
   for (const token of [
     "--space-4: 16px", "--tap: 44px",
-    "--radius-sheet: calc(24px * var(--corner-radius-scale))",
+    "--radius-sheet: calc(16px * var(--corner-radius-scale))",
     "--font-input: 16px", "--safe-left: env(safe-area-inset-left, 0px)",
     "--safe-right: env(safe-area-inset-right, 0px)",
     "--safe-bottom: env(safe-area-inset-bottom, 0px)",
