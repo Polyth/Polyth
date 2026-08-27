@@ -66,10 +66,15 @@ export async function loadWebPackageInstallers(
     throw new Error("web package manifest is invalid");
   }
 
-  const installers = new Map<string, WebPackageInstaller>();
-  for (const asset of parsed.packages) {
+  // Modules download in parallel (they are independent split-graph entries);
+  // factories still run sequentially in manifest order afterwards so install
+  // order stays deterministic.
+  const loadedModules = await Promise.all(parsed.packages.map(async (asset) => {
     installStyles(asset, options.document ?? globalThis.document);
-    const loaded = await importModule(asset.module) as { default?: unknown };
+    return { asset, loaded: await importModule(asset.module) as { default?: unknown } };
+  }));
+  const installers = new Map<string, WebPackageInstaller>();
+  for (const { asset, loaded } of loadedModules) {
     if (typeof loaded.default !== "function") {
       throw new Error(`web entry for "${asset.id}" must default-export a package factory`);
     }
