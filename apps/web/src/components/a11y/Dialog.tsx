@@ -145,6 +145,7 @@ export function useModalSurface({
     // Surfaces that animate in from visibility:hidden (compact drawer/sheet)
     // silently swallow a focus() issued before the transition flips them
     // visible. Retry across a few frames until focus actually lands inside.
+    // (rAF is feature-detected: the node:test DOM shim does not provide it.)
     let focusRaf = 0;
     let focusTries = 0;
     const claimFocus = () => {
@@ -152,7 +153,11 @@ export function useModalSurface({
         ?? el.querySelector<HTMLElement>(FOCUSABLE)
         ?? el;
       target.focus();
-      if (!el.contains(document.activeElement) && focusTries < 20) {
+      if (
+        !el.contains(document.activeElement)
+        && focusTries < 20
+        && typeof requestAnimationFrame === "function"
+      ) {
         focusTries += 1;
         focusRaf = requestAnimationFrame(claimFocus);
       }
@@ -191,7 +196,7 @@ export function useModalSurface({
     };
     el.addEventListener("keydown", onKeyDown);
     return () => {
-      cancelAnimationFrame(focusRaf);
+      if (focusRaf !== 0 && typeof cancelAnimationFrame === "function") cancelAnimationFrame(focusRaf);
       el.removeEventListener("keydown", onKeyDown);
       unlockBodyScroll();
       restoreBackground();
