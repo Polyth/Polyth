@@ -11,6 +11,7 @@ import type {
   ChildSnapshotInput,
   ChildSnapshotResult,
   DeliveryMode,
+  EventPage,
   JsonObject,
   ModelMessage,
   QueueItemDto,
@@ -265,6 +266,40 @@ export function createStore(dbPath: string): Store {
     () => {
       db.exec("CREATE INDEX IF NOT EXISTS idx_events_type_time ON events (type, time)");
     },
+    // v6: instant-load read paths — project-scoped projection listing via an
+    // indexed generated column, indexed per-session type lookups, and
+    // append-maintained open-attention counters replacing full log scans.
+    () => {
+      db.exec(
+        "ALTER TABLE projections ADD COLUMN project_id TEXT GENERATED ALWAYS AS (json_extract(data, '$.projectId')) VIRTUAL",
+      );
+      db.exec("CREATE INDEX IF NOT EXISTS idx_projections_project ON projections (project_id)");
+      db.exec("CREATE INDEX IF NOT EXISTS idx_events_session_type ON events (session_id, type)");
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS attention_open (
+          session_id TEXT NOT NULL,
+          kind       TEXT NOT NULL,
+          request_id TEXT NOT NULL,
+          PRIMARY KEY (session_id, kind, request_id)
+        )
+      `);
+      // Backfill from the durable log so counters on old databases stay honest.
+      db.exec(`
+        INSERT OR IGNORE INTO attention_open (session_id, kind, request_id)
+        SELECT e.session_id,
+               CASE WHEN e.type = 'permission/requested' THEN 'permission' ELSE 'question' END,
+               json_extract(e.data, '$.requestId')
+        FROM events e
+        WHERE e.type IN ('permission/requested','question/asked')
+          AND json_extract(e.data, '$.requestId') IS NOT NULL
+          AND NOT EXISTS (
+            SELECT 1 FROM events r
+            WHERE r.session_id = e.session_id
+              AND r.type = CASE WHEN e.type = 'permission/requested' THEN 'permission/resolved' ELSE 'question/answered' END
+              AND json_extract(r.data, '$.requestId') = json_extract(e.data, '$.requestId')
+          )
+      `);
+    },
   ];
   {
     const current = getVersion();
@@ -290,6 +325,42 @@ export function createStore(dbPath: string): Store {
     if (!s) { s = db.prepare(sql); stmts.set(sql, s); }
     return s;
   };
+
+  // ------------------------------------------------------------- attention bookkeeping
+
+  // attention_open mirrors unresolved permission/question requests so list
+  // views never scan whole event logs. Rows are maintained inside the same
+  // transaction as every event write (append/copy/child-snapshot/delete).
+  const ATTENTION_OPS: Record<string, { kind: "permission" | "question"; op: "open" | "close" }> = {
+    "permission/requested": { kind: "permission", op: "open" },
+    "permission/resolved": { kind: "permission", op: "close" },
+    "question/asked": { kind: "question", op: "open" },
+    "question/answered": { kind: "question", op: "close" },
+  };
+
+  function applyAttention(sessionId: string, type: string, data: JsonObject): void {
+    const spec = ATTENTION_OPS[type];
+    if (!spec) return;
+    const requestId = (data as { requestId?: unknown }).requestId;
+    if (typeof requestId !== "string" || !requestId) return;
+    if (spec.op === "open") {
+      prep("INSERT OR IGNORE INTO attention_open (session_id, kind, request_id) VALUES (?, ?, ?)")
+        .run(sessionId, spec.kind, requestId);
+    } else {
+      prep("DELETE FROM attention_open WHERE session_id = ? AND kind = ? AND request_id = ?")
+        .run(sessionId, spec.kind, requestId);
+    }
+  }
+
+  /** Raw-row variant: parses data only for the four attention event types. */
+  function applyAttentionRaw(sessionId: string, type: string, dataRaw: string): void {
+    if (!ATTENTION_OPS[type]) return;
+    try {
+      applyAttention(sessionId, type, JSON.parse(dataRaw) as JsonObject);
+    } catch {
+      // Malformed payloads never break a copy transaction.
+    }
+  }
 
   // ------------------------------------------------------------- append
 
@@ -324,6 +395,7 @@ export function createStore(dbPath: string): Store {
         opts.sourceEventSeqs ? JSON.stringify(opts.sourceEventSeqs) : null,
         opts.producerPlugin ?? null,
       );
+      applyAttention(sessionId, type, data);
       db.exec("COMMIT");
     } catch (err) {
       db.exec("ROLLBACK");
@@ -347,10 +419,32 @@ export function createStore(dbPath: string): Store {
 
   // ------------------------------------------------------------- reads
 
-  function events(sessionId: string, afterSeq = 0): Promise<SessionEvent[]> {
-    const rows = prep("SELECT * FROM events WHERE session_id = ? AND seq > ? ORDER BY seq")
-      .all(sessionId, afterSeq) as unknown as Row[];
+  function events(sessionId: string, afterSeq = 0, page?: EventPage): Promise<SessionEvent[]> {
+    const beforeSeq = page?.beforeSeq;
+    const limit = page?.limit;
+    if (limit !== undefined && Number.isSafeInteger(limit) && limit >= 0) {
+      // Keyset page: the NEWEST `limit` events in the window, returned in
+      // ascending order. The (session_id, seq) primary key drives both scans.
+      const rows = (beforeSeq !== undefined
+        ? prep("SELECT * FROM events WHERE session_id = ? AND seq > ? AND seq < ? ORDER BY seq DESC LIMIT ?")
+            .all(sessionId, afterSeq, beforeSeq, limit)
+        : prep("SELECT * FROM events WHERE session_id = ? AND seq > ? ORDER BY seq DESC LIMIT ?")
+            .all(sessionId, afterSeq, limit)) as unknown as Row[];
+      rows.reverse();
+      return Promise.resolve(rows.map(rowToEvent));
+    }
+    const rows = (beforeSeq !== undefined
+      ? prep("SELECT * FROM events WHERE session_id = ? AND seq > ? AND seq < ? ORDER BY seq")
+          .all(sessionId, afterSeq, beforeSeq)
+      : prep("SELECT * FROM events WHERE session_id = ? AND seq > ? ORDER BY seq")
+          .all(sessionId, afterSeq)) as unknown as Row[];
     return Promise.resolve(rows.map(rowToEvent));
+  }
+
+  function hasEventOfType(sessionId: string, type: string): Promise<boolean> {
+    const row = prep("SELECT 1 AS one FROM events WHERE session_id = ? AND type = ? LIMIT 1")
+      .get(sessionId, type) as { one: number } | undefined;
+    return Promise.resolve(row !== undefined);
   }
 
   function latestSeq(sessionId: string): Promise<number> {
@@ -391,6 +485,7 @@ export function createStore(dbPath: string): Store {
           r.producer,
           r.v,
         );
+        applyAttentionRaw(dstSessionId, r.type, r.data);
       }
       db.exec("COMMIT");
     } catch (err) {
@@ -433,6 +528,7 @@ export function createStore(dbPath: string): Store {
           e.sourceSeq !== undefined ? JSON.stringify([e.sourceSeq]) : null,
           e.producerPlugin ?? null,
         );
+        applyAttention(childId, e.type, e.data);
         out.push({
           id, sessionId: childId, seq, time: e.time, type: e.type, data: e.data,
           ...(e.ignorable ? { ignorable: true } : {}),
@@ -510,9 +606,11 @@ export function createStore(dbPath: string): Store {
   }
 
   function projections(projectId?: string): Promise<SessionProjection[]> {
+    // project_id is a generated column backed by idx_projections_project, so
+    // scoped listing never json_extracts every row.
     const rows = projectId === undefined
       ? (prep("SELECT data FROM projections").all() as { data: string }[])
-      : (prep("SELECT data FROM projections WHERE json_extract(data, '$.projectId') = ?")
+      : (prep("SELECT data FROM projections WHERE project_id = ?")
           .all(projectId) as { data: string }[]);
     return Promise.resolve(rows.map((r) => JSON.parse(r.data) as SessionProjection));
   }
@@ -655,6 +753,7 @@ export function createStore(dbPath: string): Store {
       prep("DELETE FROM events WHERE session_id = ?").run(sessionId);
       prep("DELETE FROM projections WHERE session_id = ?").run(sessionId);
       prep("DELETE FROM session_queue WHERE session_id = ?").run(sessionId);
+      prep("DELETE FROM attention_open WHERE session_id = ?").run(sessionId);
       db.exec("COMMIT");
     } catch (err) {
       db.exec("ROLLBACK");
@@ -963,27 +1062,21 @@ export function createStore(dbPath: string): Store {
   async function attentionFor(sessionIds: string[]): Promise<Record<string, AttentionCounts>> {
     const out: Record<string, AttentionCounts> = {};
     if (sessionIds.length === 0) return out;
+    for (const id of sessionIds) out[id] = { questions: 0, permissions: 0 };
+    // Counters come from the append-maintained attention_open table — a
+    // primary-key range count per session instead of replaying event logs.
     const placeholders = sessionIds.map(() => "?").join(",");
     const rows = db
       .prepare(
-        `SELECT session_id, type, json_extract(data, '$.requestId') AS rid FROM events
-         WHERE type IN ('permission/requested','permission/resolved','question/asked','question/answered')
-           AND session_id IN (${placeholders}) ORDER BY seq`,
+        `SELECT session_id, kind, COUNT(*) AS n FROM attention_open
+         WHERE session_id IN (${placeholders}) GROUP BY session_id, kind`,
       )
-      .all(...sessionIds) as Array<{ session_id: string; type: string; rid: string | null }>;
-    const open = new Map<string, { q: Set<string>; p: Set<string> }>();
+      .all(...sessionIds) as Array<{ session_id: string; kind: string; n: number }>;
     for (const r of rows) {
-      if (!r.rid) continue;
-      let s = open.get(r.session_id);
-      if (!s) open.set(r.session_id, (s = { q: new Set(), p: new Set() }));
-      if (r.type === "permission/requested") s.p.add(r.rid);
-      else if (r.type === "permission/resolved") s.p.delete(r.rid);
-      else if (r.type === "question/asked") s.q.add(r.rid);
-      else if (r.type === "question/answered") s.q.delete(r.rid);
-    }
-    for (const id of sessionIds) {
-      const s = open.get(id);
-      out[id] = { questions: s?.q.size ?? 0, permissions: s?.p.size ?? 0 };
+      const slot = out[r.session_id];
+      if (!slot) continue;
+      if (r.kind === "question") slot.questions = Number(r.n);
+      else if (r.kind === "permission") slot.permissions = Number(r.n);
     }
     return out;
   }
@@ -1028,6 +1121,7 @@ export function createStore(dbPath: string): Store {
   return {
     append,
     events,
+    hasEventOfType,
     latestSeq,
     copyTo,
     publishChildSession,

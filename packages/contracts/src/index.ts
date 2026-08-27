@@ -553,9 +553,21 @@ export interface ChildSnapshotResult {
   marker: SessionEvent;
 }
 
+/** Keyset pagination for event reads. `limit` returns the NEWEST matching
+ *  events (still in ascending seq order); `beforeSeq` bounds the window from
+ *  above so older history pages backward without offset scans. */
+export interface EventPage {
+  /** Exclusive upper bound: only events with seq < beforeSeq. */
+  beforeSeq?: number;
+  /** Maximum number of events; the newest ones in the window are returned. */
+  limit?: number;
+}
+
 export interface SessionPersistence {
   append(sessionId: string, type: string, data: JsonObject, opts?: Partial<Pick<SessionEvent, "ignorable" | "surfaceOp" | "sourceEventSeqs" | "producerPlugin">>): Promise<SessionEvent>;
-  events(sessionId: string, afterSeq?: number): Promise<SessionEvent[]>;
+  events(sessionId: string, afterSeq?: number, page?: EventPage): Promise<SessionEvent[]>;
+  /** Indexed existence check (no full-log scan). Optional so fakes stay valid. */
+  hasEventOfType?(sessionId: string, type: string): Promise<boolean>;
   latestSeq(sessionId: string): Promise<number>;
   copyTo(srcSessionId: string, dstSessionId: string, upToSeq?: number): Promise<void>;
   upsertProjection(p: SessionProjection): Promise<void>;
