@@ -21,6 +21,7 @@ import { dirname, join, resolve } from "node:path";
 import { boot } from "@polyth/server";
 import { setLinuxAutostartEnabled } from "./linuxAutostart.ts";
 import { validateAbsoluteLocalPath } from "./localPath.ts";
+import { desktopServerPackages } from "./serverPackages.ts";
 import {
   normalizeDesktopSettings,
   readDesktopSettings,
@@ -670,6 +671,7 @@ const startServer = async (): Promise<void> => {
     dataDir,
     webDist,
     webPackagesDir: webPackagesPath(),
+    serverPackages: desktopServerPackages,
     opencode: { bin: binary },
   });
   log(`Polyth server started at ${baseUrl}`);

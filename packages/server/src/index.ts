@@ -17,7 +17,7 @@ import {
   deriveMessages,
   unrestoredCompactionSeq,
 } from "@polyth/session";
-import { CAP, SERVER_CAPABILITY_IDS, type AgentRuntime, type Disposable, type RemoteHost, type RuntimeEvent, type SessionEvent, type SessionProjection, type SessionService } from "@polyth/contracts";
+import { CAP, SERVER_CAPABILITY_IDS, type AgentRuntime, type Disposable, type PackageDescriptorDto, type RemoteHost, type RuntimeEvent, type SessionEvent, type SessionProjection, type SessionService } from "@polyth/contracts";
 import {
   createBrowserToolBridge,
   createConfigApplier,
@@ -31,6 +31,7 @@ import {
   discoverServerPackages,
   serverServiceKey,
   type HttpServerContext,
+  type ServerPackageFactory,
   type ServerPackageHost,
 } from "@polyth/plugins";
 import { createProjectService } from "./projects.ts";
@@ -54,7 +55,7 @@ import { createPushNotifier, createPushService } from "./push.ts";
 import { pushRoutes } from "./routes/push.ts";
 import { createNotificationStore } from "./notifications.ts";
 import { notificationRoutes } from "./routes/notifications.ts";
-import { registerDiscoveredPackages } from "./packageDiscovery.ts";
+import { registerDiscoveredPackages, registerServerPackage } from "./packageDiscovery.ts";
 import { queueRoutes } from "./routes/queue.ts";
 import { createBehaviorService } from "./behavior.ts";
 import { createMcpConfigService, mcpEntriesFromBackendConfig } from "./mcp.ts";
@@ -93,6 +94,19 @@ export interface BootOptions {
   packagesDir?: string;
   /** Optional packages root override used only for built web assets. */
   webPackagesDir?: string;
+  /**
+   * Statically bundled feature entries. Packaged hosts use this because their
+   * server code lives in one bundle and cannot be found through filesystem
+   * discovery. Omit it for the normal workspace package scan.
+   */
+  serverPackages?: readonly ServerPackageRegistration[];
+}
+
+/** A feature package entry supplied by a bundled host such as Electron. */
+export interface ServerPackageRegistration {
+  id: string;
+  descriptor: PackageDescriptorDto;
+  factory: ServerPackageFactory;
 }
 
 export { isPackageEnabled } from "./packages.ts";
@@ -123,7 +137,12 @@ export async function boot(opts: BootOptions = {}) {
   opts.hostname ??= process.env.HOST;
   const dataDir = resolve(opts.dataDir ?? process.env.POLYTH_DATA_DIR ?? "./data");
   const packagesDir = opts.packagesDir ?? resolve(__dirname, "../..");
-  const discoveredPackageManifests = await discoverServerPackages(packagesDir);
+  const bundledServerPackages = opts.serverPackages;
+  const discoveredPackageManifests = bundledServerPackages
+    ? []
+    : await discoverServerPackages(packagesDir);
+  const packageDescriptors = bundledServerPackages?.map((pkg) => pkg.descriptor)
+    ?? discoveredPackageManifests.map((pkg) => pkg.descriptor);
   mkdirSync(dataDir, { recursive: true });
   const routeRegistry = createRouteRegistry();
   const packageLifecycle = createPackageLifecycle(routeRegistry);
@@ -140,7 +159,7 @@ export async function boot(opts: BootOptions = {}) {
   };
   const packageRegistry = createPackageRegistry({
     file: `${dataDir}/packages.json`,
-    descriptors: discoveredPackageManifests.map((pkg) => pkg.descriptor),
+    descriptors: packageDescriptors,
     onSetEnabled: (id, enabled) => enabled
       ? packageLifecycle.enable(id)
       : packageLifecycle.disable(id),
@@ -534,14 +553,28 @@ export async function boot(opts: BootOptions = {}) {
     loadPlugin: (plugin) => loadPlugin(root, plugin, {}),
     onHttpServer,
   };
-  const discoveredPackages = await registerDiscoveredPackages({
-    packagesDir,
-    discovered: discoveredPackageManifests,
-    host: packageHost,
-    lifecycle: packageLifecycle,
-    routes: routeRegistry,
-    onError: (id, error) => console.error(`[polyth] server package "${id}" failed to load`, error),
-  });
+  const discoveredPackages = await (bundledServerPackages
+    ? (async () => {
+      const registered: string[] = [];
+      for (const source of bundledServerPackages) {
+        try {
+          const pkg = await source.factory({ ...packageHost, pluginId: source.id });
+          registerServerPackage({ lifecycle: packageLifecycle, routes: routeRegistry }, source.id, pkg);
+          registered.push(source.id);
+        } catch (error) {
+          console.error(`[polyth] server package "${source.id}" failed to load`, error);
+        }
+      }
+      return registered;
+    })()
+    : registerDiscoveredPackages({
+      packagesDir,
+      discovered: discoveredPackageManifests,
+      host: packageHost,
+      lifecycle: packageLifecycle,
+      routes: routeRegistry,
+      onError: (id, error) => console.error(`[polyth] server package "${id}" failed to load`, error),
+    }));
   if (discoveredPackages.length > 0) {
     console.log(`[polyth] discovered server packages: ${discoveredPackages.join(", ")}`);
   }

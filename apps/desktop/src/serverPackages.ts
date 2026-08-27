@@ -1,0 +1,65 @@
+// Electron bundles server code into main.js, so runtime filesystem discovery
+// cannot see individual package entries. Keep the feature entry points static
+// here; esbuild then includes them in the desktop main-process bundle.
+import type { PackageDescriptorDto } from "@polyth/contracts";
+import type { ServerPackageFactory } from "@polyth/plugins";
+import type { ServerPackageRegistration } from "@polyth/server";
+import browser from "../../../packages/browser/src/serverEntry.ts";
+import commands from "../../../packages/commands/src/serverEntry.ts";
+import dictation from "../../../packages/dictation/src/serverEntry.ts";
+import exampleFeature from "../../../packages/example-feature/src/serverEntry.ts";
+import files from "../../../packages/files/src/serverEntry.ts";
+import fusion from "../../../packages/fusion/src/serverEntry.ts";
+import git from "../../../packages/git/src/serverEntry.ts";
+import github from "../../../packages/github/src/serverEntry.ts";
+import goals from "../../../packages/goals/src/serverEntry.ts";
+import homeAssistant from "../../../packages/home-assistant/src/serverEntry.ts";
+import hotkeys from "../../../packages/hotkeys/src/serverEntry.ts";
+import knowledge from "../../../packages/knowledge/src/serverEntry.ts";
+import models from "../../../packages/models/src/serverEntry.ts";
+import multirun from "../../../packages/multirun/src/serverEntry.ts";
+import permissions from "../../../packages/permissions/src/serverEntry.ts";
+import plugins from "../../../packages/plugins/src/serverEntry.ts";
+import schedule from "../../../packages/schedule/src/serverEntry.ts";
+import secureSafe from "../../../packages/secure-safe/src/serverEntry.ts";
+import ssh from "../../../packages/ssh/src/serverEntry.ts";
+import taskTrackers from "../../../packages/task-trackers/src/serverEntry.ts";
+import terminal from "../../../packages/terminal/src/serverEntry.ts";
+import usage from "../../../packages/usage/src/serverEntry.ts";
+import walkthrough from "../../../packages/walkthrough/src/serverEntry.ts";
+import workflow from "../../../packages/workflow/src/serverEntry.ts";
+
+type Descriptor = Omit<PackageDescriptorDto, "id">;
+
+const entry = (
+  id: string,
+  descriptor: Descriptor,
+  factory: ServerPackageFactory,
+): ServerPackageRegistration => ({ id, descriptor: { id, ...descriptor }, factory });
+
+export const desktopServerPackages = [
+  entry("browser", { name: "Browser", description: "A shared internal browser for users, agents, and element context.", core: false, enabled: true, settingsGroup: "Engineering", icon: "🌐", hasSettings: false }, browser),
+  entry("commands", { name: "Commands", description: "Reusable project command definitions.", core: false, enabled: true, settingsGroup: "Engineering", icon: "/", hasSettings: true }, commands),
+  entry("dictation", { name: "Voice & Dictation", description: "Speech-to-text dictation and spoken replies.", core: false, enabled: true, settingsGroup: "Workspace", icon: "🎤", hasSettings: true }, dictation),
+  entry("example-feature", { name: "Example Feature", description: "Proof-of-concept package registered via package discovery.", core: false, enabled: true, settingsGroup: "Customize", icon: "🧪", hasSettings: false }, exampleFeature),
+  entry("files", { name: "Files", description: "Workspace file access and attachments.", core: true, enabled: true, hasSettings: false }, files),
+  entry("fusion", { name: "Fusion", description: "Synthesize multiple model responses.", core: false, enabled: true, settingsGroup: "Engineering", icon: "⧉", hasSettings: false }, fusion),
+  entry("git", { name: "Git", description: "Source control status, diffs, commits, and worktrees.", core: false, enabled: true, settingsGroup: "Engineering", icon: "⎇", hasSettings: true }, git),
+  entry("github", { name: "GitHub", description: "GitHub pull request and check integration.", core: false, enabled: true, settingsGroup: "Engineering", icon: "⎇", hasSettings: false }, github),
+  entry("goals", { name: "Goals", description: "Goal tracking and completion audits.", core: false, enabled: true, settingsGroup: "Workspace", icon: "◎", hasSettings: false }, goals),
+  entry("home-assistant", { name: "Home Assistant", description: "Home Assistant entities and controls.", core: false, enabled: false, settingsGroup: "Customize", icon: "🏠", hasSettings: true }, homeAssistant),
+  entry("hotkeys", { name: "Shortcuts", description: "Keyboard shortcut configuration and runtime registration.", core: true, enabled: true, settingsGroup: "Workspace", icon: "⌨", hasSettings: true }, hotkeys),
+  entry("knowledge", { name: "Knowledge", description: "Project notes, plans, and reusable context.", core: false, enabled: true, settingsGroup: "Workspace", icon: "📚", hasSettings: false }, knowledge),
+  entry("models", { name: "Providers & Models", description: "Model providers, visibility, and defaults.", core: true, enabled: true, settingsGroup: "Engineering", hasSettings: true }, models),
+  entry("multirun", { name: "Multirun", description: "Run prompts across multiple models.", core: false, enabled: true, settingsGroup: "Engineering", icon: "⑂", hasSettings: false }, multirun),
+  entry("permissions", { name: "Permissions", description: "Tool permission review and policy enforcement.", core: true, enabled: true, hasSettings: false }, permissions),
+  entry("plugins", { name: "Plugins", description: "Managed plugin installation and configuration.", core: false, enabled: true, settingsGroup: "Customize", icon: "🧩", hasSettings: true }, plugins),
+  entry("schedule", { name: "Schedule", description: "Schedule recurring and one-time agent tasks.", core: false, enabled: true, settingsGroup: "Engineering", icon: "⏱", hasSettings: false }, schedule),
+  entry("secure-safe", { name: "Secure Safe", description: "Write-only credential handles and secret policy.", core: false, enabled: true, settingsGroup: "Engineering", icon: "🔒", hasSettings: true }, secureSafe),
+  entry("ssh", { name: "SSH Remotes", description: "SSH connections and remote projects whose agent runs on the host.", core: false, enabled: true, settingsGroup: "Engineering", icon: "🖧", hasSettings: true }, ssh),
+  entry("task-trackers", { name: "Jira & Trello", description: "Jira and Trello boards, tasks, agent handoffs, and status updates.", core: false, enabled: true, settingsGroup: "Engineering", icon: "▦", hasSettings: false }, taskTrackers),
+  entry("terminal", { name: "Terminal", description: "Project-scoped terminal sessions.", core: false, enabled: true, settingsGroup: "Engineering", icon: "⌨", hasSettings: false }, terminal),
+  entry("usage", { name: "Usage", description: "Model quota and usage reporting.", core: false, enabled: true, settingsGroup: "Workspace", icon: "📊", hasSettings: true }, usage),
+  entry("walkthrough", { name: "Walkthrough", description: "Generate and review code walkthroughs.", core: false, enabled: true, settingsGroup: "Engineering", icon: "→", hasSettings: false }, walkthrough),
+  entry("workflow", { name: "Workflows", description: "Orchestrate multi-agent DAG pipelines.", core: false, enabled: true, settingsGroup: "Engineering", icon: "◇", hasSettings: false }, workflow),
+] as const satisfies readonly ServerPackageRegistration[];
