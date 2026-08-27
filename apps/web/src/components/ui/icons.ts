@@ -1,0 +1,81 @@
+// P1-W2 icon system: every UI *action* glyph comes from Lucide through this
+// curated map, so one action always uses one icon at a token-driven size.
+// Domain/project identity marks (provider logos, project icons, the legacy
+// domain set in src/icons.tsx) keep their existing assets.
+//
+// Import icons from here — not from "lucide-react" directly — so the set
+// stays reviewable and swap-outs happen in one place.
+export {
+  // dismiss / confirm
+  X as CloseIcon,
+  Check as CheckIcon,
+  CircleCheck as SuccessIcon,
+  CircleAlert as ErrorIcon,
+  TriangleAlert as WarningIcon,
+  Info as InfoIcon,
+  CircleHelp as HelpIcon,
+  // navigation
+  ChevronDown as ChevronDownIcon,
+  ChevronUp as ChevronUpIcon,
+  ChevronRight as ChevronRightIcon,
+  ChevronLeft as ChevronLeftIcon,
+  ArrowLeft as BackIcon,
+  ExternalLink as ExternalLinkIcon,
+  // common actions
+  Plus as AddIcon,
+  Pencil as EditIcon,
+  SquarePen as ComposeIcon,
+  Trash2 as DeleteIcon,
+  Copy as CopyIcon,
+  ClipboardCheck as CopiedIcon,
+  Download as DownloadIcon,
+  Upload as UploadIcon,
+  RefreshCw as RefreshIcon,
+  RotateCcw as UndoIcon,
+  Search as SearchIcon,
+  ListFilter as FilterIcon,
+  ArrowUpDown as SortIcon,
+  Ellipsis as MoreIcon,
+  EllipsisVertical as MoreVerticalIcon,
+  GripVertical as DragHandleIcon,
+  Eye as ShowIcon,
+  EyeOff as HideIcon,
+  Pin as PinIcon,
+  Star as FavoriteIcon,
+  Send as SendIcon,
+  Mic as MicIcon,
+  Play as PlayIcon,
+  Square as StopIcon,
+  Pause as PauseIcon,
+  Settings as SettingsIcon,
+  LogOut as SignOutIcon,
+  Lock as LockIcon,
+  Unlock as UnlockIcon,
+  PanelLeft as SidebarIcon,
+  Maximize2 as ExpandIcon,
+  Minimize2 as CollapseIcon,
+  CornerDownLeft as EnterIcon,
+  // workspace objects that appear inside action controls
+  Folder as FolderIcon,
+  File as FileIcon,
+  Terminal as TerminalIcon,
+  GitBranch as BranchIcon,
+  Globe as GlobeIcon,
+  Bell as BellIcon,
+  Clock as ClockIcon,
+  CalendarClock as ScheduleIcon,
+  MessageSquare as ChatIcon,
+  MessageSquarePlus as NewChatIcon,
+  BookOpen as DocsIcon,
+  Sparkles as AssistIcon,
+  Layers as LayersIcon,
+  Package as PackageIcon,
+  Puzzle as PluginIcon,
+  KeyRound as KeyIcon,
+  ShieldCheck as ShieldIcon,
+  Server as ServerIcon,
+  Database as DatabaseIcon,
+  Loader as LoaderIcon,
+} from "lucide-react";
+
+export type { LucideIcon } from "lucide-react";

@@ -78,6 +78,9 @@ Read this guide before editing UI or CSS.
 | `--surface-overlay` | Subtle theme-aware overlay. |
 | `--surface-overlay-hover` | Hover-strength theme-aware overlay. |
 | `--surface-overlay-strong` | Selected/pressed theme-aware overlay. |
+| `--overlay-bg` | Floating overlay surface (popover, menu, dialog, sheet). |
+| `--overlay-border` | Floating overlay boundary. |
+| `--overlay-shadow` | Floating overlay elevation. |
 
 ### Spacing and control geometry
 
@@ -95,11 +98,27 @@ Read this guide before editing UI or CSS.
 | `--control-h-sm` | Compact 32px control visual. |
 | `--control-h` | Standard 40px control visual. |
 | `--control-h-lg` | Large 48px control visual. |
+| `--control-pad-x-sm` | Horizontal padding for compact controls. |
+| `--control-pad-x` | Horizontal padding for standard controls. |
+| `--control-gap` | Gap between a control's glyph and its label. |
+| `--hit-min` | Density seam: extra hit-area floor. 0px on fine pointers; core raises it to `--tap` under coarse pointers. Use in `max()` with the control's visual size. |
 
 Controls use the smallest visual height appropriate to their density while
 retaining a `--tap` hit area on phone/coarse-pointer surfaces. Do not enlarge
 switch tracks or glyphs to create the hit area; enlarge the transparent
-interactive box around them.
+interactive box around them — the `--hit-min` seam and the `.ui-icon-btn`
+pattern in core `styles.css` show the sanctioned mechanism.
+
+### Icon sizes
+
+UI action glyphs use the icon scale; never hardcode svg dimensions in new CSS.
+
+| Token | Purpose |
+| --- | --- |
+| `--icon-sm` | 16px compact/dense-row glyph. |
+| `--icon-md` | 18px standard control glyph. |
+| `--icon-lg` | 20px prominent control or mobile glyph. |
+| `--icon-xl` | 24px mobile-emphasis or hero glyph. |
 
 ### Radius
 
@@ -118,7 +137,9 @@ interactive box around them.
 | `--radius-xl` | Deprecated alias of `--radius-surface`. |
 
 Use only the semantic radius roles in new CSS. `50%` and `999px` are reserved
-for circles and pills.
+for circles and pills. The Phase 1 calm scale is 8/10/12/16px before the user
+multiplier: controls 8, cards 10, substantial surfaces 12, sheets/dialogs and
+the composer 16.
 
 ### Typography
 
@@ -134,6 +155,7 @@ for circles and pills.
 | `--font-label` | Control and emphasized label role. |
 | `--font-meta` | Readable metadata role. |
 | `--font-meta-lh` | Metadata line height. |
+| `--font-code` | Inline code / code-in-UI role (pairs with `--mono`). |
 | `--editor-font-size` | User-selected editor/composer size. |
 | `--mono` | Monospace stack. |
 | `--ui-font-family` | Active application font stack. |
@@ -153,6 +175,19 @@ tertiary decorative labels, never instructions or state.
 | `--safe-right` | Right safe-area inset. |
 | `--safe-bottom` | Bottom safe-area inset. |
 | `--safe-left` | Left safe-area inset. |
+
+### Layering
+
+New overlay CSS layers through the z-scale; legacy hardcoded z-indexes migrate
+to it during the Phase 1 cleanup.
+
+| Token | Purpose |
+| --- | --- |
+| `--z-shell` | Shell chrome (sticky headers, rails, bottom navigation). |
+| `--z-overlay` | Modal surfaces (dialogs, sheets, full-screen overlays). |
+| `--z-toast` | Transient toasts and error banners, above modals. |
+| `--z-popover` | Anchored transient surfaces (menus, popovers) above any opener. |
+| `--z-tooltip` | Tooltips, topmost. |
 
 ### Focus, elevation, and motion
 
@@ -228,6 +263,17 @@ the purpose column.
 | `--success` | Deprecated alias of `--green`. |
 | `--info` | Deprecated alias of `--blue`. |
 | `--border-subtle` | Deprecated alias of `--border-soft`. |
+
+## Core UI primitives
+
+`apps/web/src/components/ui/` owns the shared component primitives (Button,
+IconButton, inputs, Switch, Tabs, Badge, Spinner, Skeleton, Popover, Menu,
+Tooltip, ResponsiveOverlay, …). Their styles live in one `P1-W2` section of
+core `styles.css` under the `.ui-` prefix. New core UI composes these
+components instead of minting new button/menu/dialog classes; packages adopt
+them per-package during Phase 1c. UI action icons come from `ui/icons.ts`
+(Lucide) sized by the icon tokens; domain/project identity marks keep their
+existing assets. `docs/ui-redesign/design-system.md` is the usage guide.
 
 ## Shared empty states
 

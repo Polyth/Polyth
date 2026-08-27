@@ -1,0 +1,103 @@
+// One overlay, every form factor. Callers describe the content once; the
+// presentation adapts to the shell mode:
+//   * phone            → bottom Sheet (swipe dismiss, keyboard-safe);
+//   * desktop, anchored → Popover (collision + keyboard-inset aware);
+//   * desktop, modal    → Dialog (focus trap, scrim).
+// This is the pattern Picker proved (popover ⇄ sheet) promoted to a reusable
+// primitive so features never fork business logic per breakpoint.
+import type { ReactNode, RefObject } from "react";
+import { useShellMode } from "../../responsiveShell.ts";
+import Sheet, { type SheetSearch } from "../mobile/Sheet.tsx";
+import Popover from "./Popover.tsx";
+import Dialog, { type DialogSize } from "./Dialog.tsx";
+import type { AnchoredAlign } from "./useAnchoredPosition.ts";
+
+export interface ResponsiveOverlayProps {
+  open: boolean;
+  onClose: () => void;
+  /** Sheet/dialog title and popover accessible name. */
+  title: string;
+  children: ReactNode;
+  /**
+   * Desktop presentation. Defaults to "popover" when an anchor is provided,
+   * "dialog" otherwise.
+   */
+  desktop?: "popover" | "dialog";
+  /** Required for the popover presentation. */
+  anchorRef?: RefObject<HTMLElement | null>;
+  align?: AnchoredAlign;
+  className?: string;
+  initialFocus?: string;
+  /** Sheet options (phone only). */
+  sheetSize?: "auto" | "tall";
+  sheetSearch?: SheetSearch;
+  sheetFooter?: ReactNode;
+  /** Dialog options (desktop modal only). */
+  dialogSize?: DialogSize;
+  dialogFooter?: ReactNode;
+}
+
+export default function ResponsiveOverlay({
+  open,
+  onClose,
+  title,
+  children,
+  desktop,
+  anchorRef,
+  align = "start",
+  className,
+  initialFocus,
+  sheetSize = "auto",
+  sheetSearch,
+  sheetFooter,
+  dialogSize = "md",
+  dialogFooter,
+}: ResponsiveOverlayProps) {
+  const phone = useShellMode() === "phone";
+  if (!open) return null;
+
+  if (phone) {
+    return (
+      <Sheet
+        title={title}
+        onClose={onClose}
+        size={sheetSize}
+        {...(sheetSearch !== undefined ? { search: sheetSearch } : {})}
+        {...(sheetFooter !== undefined ? { footer: sheetFooter } : {})}
+        {...(className !== undefined ? { className } : {})}
+      >
+        {children}
+      </Sheet>
+    );
+  }
+
+  const mode = desktop ?? (anchorRef ? "popover" : "dialog");
+  if (mode === "popover" && anchorRef) {
+    return (
+      <Popover
+        open
+        onClose={onClose}
+        anchorRef={anchorRef}
+        align={align}
+        ariaLabel={title}
+        {...(initialFocus !== undefined ? { initialFocus } : {})}
+        {...(className !== undefined ? { className } : {})}
+      >
+        {children}
+      </Popover>
+    );
+  }
+
+  return (
+    <Dialog
+      title={title}
+      onClose={onClose}
+      size={dialogSize}
+      {...(dialogFooter !== undefined ? { footer: dialogFooter } : {})}
+      {...(initialFocus !== undefined ? { initialFocus } : {})}
+      {...(className !== undefined ? { className } : {})}
+    >
+      {children}
+    </Dialog>
+  );
+}

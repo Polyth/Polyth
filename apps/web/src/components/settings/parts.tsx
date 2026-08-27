@@ -1,5 +1,6 @@
 // Shared building blocks for settings pages.
 import type { ReactNode } from "react";
+import Switch from "../ui/Switch.tsx";
 
 export function Row({ label, hint, itemId, children }: { label: string; hint?: string; itemId?: string; children: ReactNode }) {
   return (
@@ -14,11 +15,7 @@ export function Row({ label, hint, itemId, children }: { label: string; hint?: s
 }
 
 export function Toggle({ on, onChange, label }: { on: boolean; onChange: (v: boolean) => void; label?: string }) {
-  return (
-    <button className="switch set-toggle" role="switch" aria-checked={on} aria-label={label} onClick={() => onChange(!on)}>
-      <i />
-    </button>
-  );
+  return <Switch checked={on} onChange={onChange} className="set-toggle" {...(label !== undefined ? { label } : {})} />;
 }
 
 export function Seg<T extends string | number>({ value, options, onChange }: {
