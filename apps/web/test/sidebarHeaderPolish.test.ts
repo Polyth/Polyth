@@ -20,7 +20,7 @@ test("sidebar uses contextual tree actions and no permanent footer", async () =>
   assert.match(sidebar, /className="sidebar-drawer-header"/);
   assert.match(sidebar, /className="sidebar-drawer-identity"/);
   assert.match(sidebar, /project\?\.name \|\| project\?\.path \|\| tr\("header\.polyth"\)/);
-  assert.match(sidebar, /className="icon-btn drawer-close"/);
+  assert.match(sidebar, /className="drawer-close"/);
   assert.match(sidebar, /className="sidebar-list-controls"/);
   assert.match(sidebar, /tr\("sidebar\.clearSessionSearch"\)/);
   assert.match(sidebar, /tr\("sidebar\.serverConnectionValue"/);
@@ -62,7 +62,8 @@ test("header and composer controls are configurable and purpose-specific", async
   assert.doesNotMatch(header, /const rest = /);
   assert.doesNotMatch(header, /visibleIds|rest\.length > 0/);
   assert.doesNotMatch(composer, /Modalities:/);
-  assert.match(composer, /aria-label=\{tr\("composer\.addFiles"\)\}/);
+  // The upload chip is a ui/IconButton; `label` is its mandatory accessible name.
+  assert.match(composer, /label=\{tr\("composer\.addFiles"\)\}/);
   assert.doesNotMatch(widgets, /Session header stats|Response hover actions|Technical menu/);
   assert.match(widgets, /tr\("settings\.widgetspage\.responseActions"\)/);
   assert.match(widgets, /tr\("settings\.widgetspage\.whereButtonsAppear"\)/);

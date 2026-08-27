@@ -417,7 +417,7 @@ export default function Sidebar() {
             >
               <strong>{syncStatus === "connected" ? tr("sidebar.connected") : syncStatus === "connecting" ? tr("sidebar.connecting") : tr("sidebar.connectionProblem")}</strong>
               <span>{host}</span>
-              <Button size="sm" onClick={() => { reconnectSync(); setConnectionOpen(false); }}>{tr("sidebar.reconnect")}</Button>
+              <Button size="sm" className="sidebar-reconnect" onClick={() => { reconnectSync(); setConnectionOpen(false); }}>{tr("sidebar.reconnect")}</Button>
             </Popover>
           </div>
           {shiftHeld && (
