@@ -437,7 +437,10 @@ transform: translateY(1px);
 font-size: 8px; gap: 3px; transform: translateY(-1px);
 }
 .model-trigger-name {
-min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+/* Column-flex parent with align-items: flex-start sizes children to their
+   content; the explicit max-width keeps long model names truncating inside
+   the trigger instead of painting over adjacent controls. */
+min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .model-meta-icons {
 display: inline-flex; align-items: center; gap: 3px; min-width: 0;

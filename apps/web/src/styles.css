@@ -7291,14 +7291,24 @@ display: none;
 
   /* Expanded (§11/§42): model + mode header, metadata microtext, actions. */
   .composer-mobile.composer-expanded .composer-card { flex-direction: column; padding: 0; }
+  /* One wrapping row instead of a fixed two-column grid: the model trigger
+     keeps a readable minimum and truncates; when the thinking/mode cluster
+     no longer fits beside it, the cluster wraps onto its own right-aligned
+     line rather than cramming everything into one row. */
   .composer-mobile .composer-model-header {
     order: 1;
     min-width: 0;
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
+    display: flex;
+    flex-wrap: wrap;
     align-items: center;
     gap: 0 var(--space-2);
     padding: var(--space-1) var(--space-3) 0;
+  }
+  .composer-mobile .composer-mode-cluster {
+    flex: none;
+    max-width: 100%;
+    margin-left: auto;
+    justify-content: flex-end;
   }
   .composer-mobile .composer-input { order: 2; }
   .composer-mobile .composer-actions { order: 3; }
@@ -7311,7 +7321,7 @@ display: none;
     letter-spacing: .01em;
   }
   /* §9: the whole model name is the target, not a 12px chevron. */
-  .composer-mobile .composer-model-header .model-picker { width: 100%; min-width: 0; }
+  .composer-mobile .composer-model-header .model-picker { flex: 1 1 200px; width: auto; min-width: 0; }
   .composer-mobile .composer-model-header .model-trigger-mobile {
     width: 100%;
     min-height: var(--tap);
@@ -8754,18 +8764,8 @@ color: var(--muted);
 /* ================= final critic collision closure =================
    Keep model identity and transcript chrome in disjoint layout tracks at the
    exact critic viewports. */
-@media (max-width: 480px), (max-height: 480px) and (pointer: coarse) {
-.composer-mobile .composer-model-header {
-    grid-template-columns: minmax(0, 1fr);
-    grid-template-rows: auto auto;
-    row-gap: 0;
-  }
-  .composer-mobile .composer-mode-cluster {
-    width: 100%;
-    max-width: 100%;
-    justify-content: flex-end;
-  }
-}
+/* (model-header narrow layout is owned by the UX-MOBILE-01 phone section:
+   one wrapping flex definition replaces the former grid re-declarations.) */
 
 @media (max-width: 480px), (max-height: 480px) and (pointer: coarse) {
 body[data-keyboard="open"][data-band="short"] .timeline {
@@ -10115,19 +10115,6 @@ color: var(--text);
 .composer-card:focus-within { border-color: transparent; box-shadow: var(--shadow-lg); }
 .composer-mode-cluster { align-items: center; flex-wrap: nowrap; }
 @media (max-width: 480px), (max-height: 480px) and (pointer: coarse) {
-  .composer-mobile .composer-model-header {
-    grid-template-columns: minmax(0, 1fr) auto;
-    grid-template-rows: none;
-    gap: 0 var(--space-1);
-  }
-  .composer-mobile .composer-model-header .model-picker { grid-column: 1; }
-  .composer-mobile .composer-mode-cluster {
-    grid-column: 2;
-    width: auto;
-    max-width: none;
-    justify-content: center;
-    gap: var(--space-1);
-  }
   .composer-mobile .composer-thinking-badge { flex: none; }
   .composer-mobile .agent-type-badge { min-height: var(--tap); padding-inline: 12px; font-size: 12px; }
 }
