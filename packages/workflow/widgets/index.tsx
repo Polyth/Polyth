@@ -31,6 +31,17 @@ function WorkflowRunIndicator() {
     }
     setWorkflowState((current) => current?.projectId === projectId ? current : null);
     let active = true;
+    // Two-tier cadence: fast polling (progress % updates) only while a run is
+    // active; an idle header costs one slow heartbeat. WS pushes wake the fast
+    // poll the moment a run starts.
+    const ACTIVE_POLL_MS = 1_200;
+    const IDLE_POLL_MS = 30_000;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const schedule = (hasActiveRuns: boolean) => {
+      if (!active) return;
+      if (timer !== null) clearTimeout(timer);
+      timer = setTimeout(refresh, hasActiveRuns ? ACTIVE_POLL_MS : IDLE_POLL_MS);
+    };
     const refresh = () => {
       void api.listWorkflowRuns(projectId)
         .then((nextRuns) => {
@@ -39,11 +50,11 @@ function WorkflowRunIndicator() {
           setWorkflowState(prioritized.length > 0
             ? { projectId, runs: prioritized }
             : null);
+          schedule(prioritized.length > 0);
         })
-        .catch(() => {});
+        .catch(() => schedule(false));
     };
     refresh();
-    const timer = setInterval(refresh, 1_200);
     const unsubscribe = subscribeWorkflowRuns((updated) => {
       if (updated.projectId && updated.projectId !== projectId) return;
       setWorkflowState((current) => {
@@ -52,12 +63,13 @@ function WorkflowRunIndicator() {
           updated,
           ...existing.filter((candidate) => candidate.id !== updated.id),
         ]);
+        schedule(prioritized.length > 0);
         return prioritized.length > 0 ? { projectId, runs: prioritized } : null;
       });
     });
     return () => {
       active = false;
-      clearInterval(timer);
+      if (timer !== null) clearTimeout(timer);
       unsubscribe();
     };
   }, [projectId]);

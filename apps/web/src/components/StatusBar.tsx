@@ -50,18 +50,29 @@ export default function StatusBar() {
     }
     setWorkflowState((current) => current?.projectId === project.id ? current : null);
     let mounted = true;
+    // Two-tier cadence: the 1.2s poll only runs while a workflow is actually
+    // active (progress % updates); an idle project costs one slow heartbeat.
+    // WS pushes (subscribeWorkflowRuns) wake the fast poll the moment a run
+    // starts, so responsiveness never depends on the slow tier.
+    const ACTIVE_POLL_MS = 1_200;
+    const IDLE_POLL_MS = 30_000;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const schedule = (hasActiveRuns: boolean) => {
+      if (!mounted) return;
+      if (timer !== null) clearTimeout(timer);
+      timer = setTimeout(refresh, hasActiveRuns ? ACTIVE_POLL_MS : IDLE_POLL_MS);
+    };
     const refresh = () => {
       void api.listWorkflowRuns(project.id)
         .then((runs) => {
-          if (mounted) {
-            const activeRuns = prioritizeWorkflowRuns(runs);
-            setWorkflowState(activeRuns.length > 0 ? { projectId: project.id, runs: activeRuns } : null);
-          }
+          if (!mounted) return;
+          const activeRuns = prioritizeWorkflowRuns(runs);
+          setWorkflowState(activeRuns.length > 0 ? { projectId: project.id, runs: activeRuns } : null);
+          schedule(activeRuns.length > 0);
         })
-        .catch(() => {});
+        .catch(() => schedule(false));
     };
     refresh();
-    const timer = setInterval(refresh, 1_200);
     const unsubscribe = subscribeWorkflowRuns((updated) => {
       if (updated.projectId && updated.projectId !== project.id) return;
       setWorkflowState((current) => {
@@ -70,12 +81,13 @@ export default function StatusBar() {
           updated,
           ...existing.filter((run) => run.id !== updated.id),
         ]);
+        schedule(activeRuns.length > 0);
         return activeRuns.length > 0 ? { projectId: project.id, runs: activeRuns } : null;
       });
     });
     return () => {
       mounted = false;
-      clearInterval(timer);
+      if (timer !== null) clearTimeout(timer);
       unsubscribe();
     };
   }, [project?.id]);
