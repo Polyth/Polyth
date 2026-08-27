@@ -209,6 +209,51 @@ test("a slower earlier open cannot replace a newer selected session", async () =
   assert.equal(store.getState().activeSessionId, "newer");
 });
 
+// Regression (QA P0): a first open claims the loading row; when a CACHED open
+// superseded it, neither open cleared the claim — every hero-eligible surface
+// (a fresh spawn's empty chat included) rendered as an endless loading row.
+test("a superseded first open never leaves a stale loading claim", async () => {
+  await openSession("cached-take"); // hydrate so the next open is cached
+  store.activateSession(null);
+
+  blockSession("slow-claim");
+  const slow = openSession("slow-claim");
+  await Promise.resolve();
+  assert.equal(store.getState().openingSessionId, "slow-claim", "first open claims the loading row");
+
+  const cached = openSession("cached-take");
+  assert.equal(store.getState().activeSessionId, "cached-take", "cached open activates synchronously");
+  assert.equal(store.getState().openingSessionId, null, "cached open takes over the stale claim");
+
+  unblockSession();
+  await slow;
+  await cached;
+  const s = store.getState();
+  assert.equal(s.openingSessionId, null, "no claim survives once every open settled");
+  assert.equal(s.activeSessionId, "cached-take", "the superseded open does not steal the surface");
+});
+
+// Regression (QA P0): an open resolving AFTER the user moved to the new-chat
+// surface re-activated its session, discarding the intent — "+" appeared to
+// do nothing and the fresh chat never showed.
+test("an open resolving after the user starts a new chat keeps the new-chat surface", async () => {
+  blockSession("slow-steal");
+  const slow = openSession("slow-steal");
+  await Promise.resolve();
+  assert.equal(store.getState().openingSessionId, "slow-steal");
+
+  store.startNewSession("p1", { draft: "typed while loading" });
+  assert.equal(store.getState().activeSessionId, null);
+  assert.notEqual(store.getState().newSessionIntent, null);
+
+  unblockSession();
+  await slow;
+  const s = store.getState();
+  assert.equal(s.activeSessionId, null, "resolved open must not steal the new-chat surface");
+  assert.equal(s.newSessionIntent?.draft, "typed while loading", "new-chat intent survives");
+  assert.equal(s.openingSessionId, null, "loading claim is cleared");
+});
+
 test("starting a new chat records only UI intent until the first send", () => {
   const before = store.getState().sessions.map((session) => session.id);
   store.startNewSession("p1", {
