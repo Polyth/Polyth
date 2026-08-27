@@ -49,7 +49,8 @@ let booted = false;
 const bootOnce = (): void => {
   if (booted) return;
   booted = true;
-  void bootPackages().catch(() => undefined);
+  void bootPackages().catch((error: unknown) =>
+    console.error("[polyth] web package boot failed", error));
   init();
 };
 

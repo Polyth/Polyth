@@ -72,16 +72,24 @@ export async function loadWebPackageInstallers(
 
   const installers = new Map<string, WebPackageInstaller>();
   for (const asset of parsed.packages) {
-    installStyles(asset, options.document ?? globalThis.document);
-    const loaded = await importModule(asset.module) as { default?: unknown };
-    if (typeof loaded.default !== "function") {
-      throw new Error(`web entry for "${asset.id}" must default-export a package factory`);
+    // Per-package isolation: the manifest is baked into the shell dist while
+    // each bundle lives in its own packages/{id}/dist/web, so one stale or
+    // missing bundle must degrade to a logged skip — never abort the loop and
+    // take every remaining package down with it.
+    try {
+      const loaded = await importModule(asset.module) as { default?: unknown };
+      if (typeof loaded.default !== "function") {
+        throw new Error(`web entry for "${asset.id}" must default-export a package factory`);
+      }
+      const installer = (loaded.default as WebPackageEntry)(host);
+      if (typeof installer !== "function") {
+        throw new Error(`web entry for "${asset.id}" must return an installer`);
+      }
+      installStyles(asset, options.document ?? globalThis.document);
+      installers.set(asset.id, installer);
+    } catch (error) {
+      console.error(`[polyth] web package "${asset.id}" failed to load`, error);
     }
-    const installer = (loaded.default as WebPackageEntry)(host);
-    if (typeof installer !== "function") {
-      throw new Error(`web entry for "${asset.id}" must return an installer`);
-    }
-    installers.set(asset.id, installer);
   }
   return installers;
 }
