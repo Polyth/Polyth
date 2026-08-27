@@ -2,7 +2,7 @@
 import { createServer, type IncomingMessage, type ServerResponse, type Server } from "node:http";
 import { readFile } from "node:fs/promises";
 import { existsSync, statSync } from "node:fs";
-import { gzipSync } from "node:zlib";
+import { constants as zlibConstants, gzip, gzipSync } from "node:zlib";
 import { extname, join, normalize } from "node:path";
 import type {
   AgentRuntime,
@@ -36,6 +36,9 @@ const gzipCache = new Map<string, { mtimeMs: number; gz: Buffer }>();
 // JSON payloads above a kilobyte gzip in-process (no reverse proxy assumed):
 // event logs and projection lists shrink ~10x on the wire.
 const JSON_GZIP_MIN_BYTES = 1024;
+// Above this, compression moves to the libuv threadpool at best-speed level:
+// a full-log export (100MB+) must never block the event loop for seconds.
+const JSON_GZIP_SYNC_MAX_BYTES = 256 * 1024;
 
 const writeJson = (req: IncomingMessage, res: ServerResponse, code: number, body: unknown) => {
   const payload = JSON.stringify(body);
@@ -43,13 +46,20 @@ const writeJson = (req: IncomingMessage, res: ServerResponse, code: number, body
     payload.length > JSON_GZIP_MIN_BYTES
     && String(req.headers["accept-encoding"] ?? "").includes("gzip")
   ) {
-    const gz = gzipSync(Buffer.from(payload, "utf8"));
+    const buf = Buffer.from(payload, "utf8");
     res.writeHead(code, {
       "content-type": "application/json",
       "content-encoding": "gzip",
       vary: "accept-encoding",
     });
-    res.end(gz);
+    if (buf.length <= JSON_GZIP_SYNC_MAX_BYTES) {
+      res.end(gzipSync(buf));
+    } else {
+      gzip(buf, { level: zlibConstants.Z_BEST_SPEED }, (err, gz) => {
+        if (err) { res.destroy(err); return; }
+        res.end(gz);
+      });
+    }
     return;
   }
   res.writeHead(code, { "content-type": "application/json" });
