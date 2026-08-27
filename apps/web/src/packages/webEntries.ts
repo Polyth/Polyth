@@ -70,14 +70,17 @@ export async function loadWebPackageInstallers(
     throw new Error("web package manifest is invalid");
   }
 
-  // Modules download in parallel (they are independent per-package bundles);
-  // factories still run sequentially in manifest order afterwards so install
-  // order stays deterministic. Per-package isolation: the manifest is baked
-  // into the shell dist while each bundle lives in its own
-  // packages/{id}/dist/web, so one stale or missing bundle must degrade to a
-  // logged skip — never abort the loop and take every remaining package down
+  // Styles start downloading before package modules. The shell renders before
+  // this Promise settles, so gating CSS on the slowest module produces an
+  // unstyled first paint. Modules download in parallel (they are independent
+  // per-package bundles); factories still run sequentially in manifest order
+  // afterwards so install order stays deterministic. Per-package isolation:
+  // the manifest is baked into the shell dist while each bundle lives in its
+  // own packages/{id}/dist/web, so one stale or missing bundle must degrade to
+  // a logged skip — never abort the loop and take every remaining package down
   // with it.
   const loadedModules = await Promise.all(parsed.packages.map(async (asset) => {
+    installStyles(asset, options.document ?? globalThis.document);
     try {
       return { asset, loaded: await importModule(asset.module) as { default?: unknown } };
     } catch (error) {
@@ -96,7 +99,6 @@ export async function loadWebPackageInstallers(
       if (typeof installer !== "function") {
         throw new Error(`web entry for "${asset.id}" must return an installer`);
       }
-      installStyles(asset, options.document ?? globalThis.document);
       installers.set(asset.id, installer);
     } catch (error) {
       console.error(`[polyth] web package "${asset.id}" failed to load`, error);

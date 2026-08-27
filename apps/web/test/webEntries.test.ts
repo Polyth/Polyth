@@ -1,5 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { Window } from "happy-dom";
 import type { WebPackageHost } from "@polyth/web-sdk";
 import { loadWebPackageInstallers } from "../src/packages/webEntries.ts";
 
@@ -75,4 +76,37 @@ test("runtime loader rejects executable URLs outside the generated package root"
     }),
     /manifest is invalid/,
   );
+});
+
+test("package styles start loading without waiting for package modules", async () => {
+  const dom = new Window({ url: "http://localhost/" });
+  let markImportStarted!: () => void;
+  const importStarted = new Promise<void>((resolve) => { markImportStarted = resolve; });
+  let resolveModule!: (value: unknown) => void;
+  const pendingModule = new Promise<unknown>((resolve) => { resolveModule = resolve; });
+
+  const loading = loadWebPackageInstallers(host, {
+    fetch: (async () => new Response(JSON.stringify({
+      packages: [{
+        id: "sample",
+        module: "/packages/sample/entry.js",
+        styles: ["/packages/sample/entry.css"],
+      }],
+    }))) as typeof fetch,
+    importModule: (url) => {
+      assert.equal(url, "/packages/sample/entry.js");
+      markImportStarted();
+      return pendingModule;
+    },
+    document: dom.document as unknown as Document,
+  });
+
+  await importStarted;
+  const style = dom.document.querySelector<HTMLLinkElement>(
+    "link[data-polyth-web-package-style]",
+  );
+  assert.equal(style?.getAttribute("href"), "/packages/sample/entry.css");
+
+  resolveModule({ default: () => () => () => {} });
+  assert.equal((await loading).has("sample"), true);
 });
