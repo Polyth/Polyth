@@ -83,6 +83,41 @@ const legacyDocument = {
   },
 };
 
+test("auto negotiation prefers legacy when the document advertises both contracts", async () => {
+  const fake = transportDouble({
+    query: () => ({
+      paths: {
+        ...legacyDocument.paths,
+        "/api/session": { post: {} },
+        "/api/session/{id}/prompt": { post: {} },
+      },
+    }),
+    mutate: () => ({ kind: "response", status: 204, headers: {}, body: undefined }),
+  });
+  const adapter = await createProtocolAdapter({
+    protocol: "auto",
+    transport: fake.transport,
+    endpoint: endpoint(),
+  });
+
+  assert.equal(adapter.protocol, "legacy");
+  const outcome = await adapter.submit(
+    {
+      session: binding(),
+      text: "use the supported contract",
+      model: { providerID: "opencode", modelID: "model-a" },
+    },
+    "operation-mixed-document",
+  );
+  assert.equal(outcome.kind, "confirmed");
+  assert.equal(fake.mutations.length, 1);
+  assert.match(fake.mutations[0]!.path, /^\/session\/session-a\/prompt_async\?/);
+  assert.deepEqual(fake.mutations[0]!.body, {
+    parts: [{ type: "text", text: "use the supported contract" }],
+    model: { providerID: "opencode", modelID: "model-a" },
+  });
+});
+
 test("read-only negotiation selects one prompt endpoint and never falls through", async () => {
   let attempts = 0;
   const fake = transportDouble({

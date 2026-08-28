@@ -101,6 +101,9 @@ const performProbe = async (
 ): Promise<ProtocolProbe> => {
   const document = await queryOptional(transport, endpoint, "/doc", deadlineMs);
   const legacyPromptPaths = legacyPromptPathsFromDocument(document);
+  if (hasV2ProtocolDocument(document) && legacyPromptPaths.length > 0) {
+    return { protocol: "legacy", legacyPromptPaths };
+  }
   if (hasV2ProtocolDocument(document)) return { protocol: "v2", legacyPromptPaths };
   if (legacyPromptPaths.length > 0) return { protocol: "legacy", legacyPromptPaths };
 

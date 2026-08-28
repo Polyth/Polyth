@@ -687,10 +687,12 @@ export function createSessionService(deps: {
         ?? "legacy";
       const persisted = proj.runtimeBinding;
       if (persisted) {
+        const supportedProtocolMigration =
+          persisted.protocol === "v2" && protocol === "legacy";
         const sameIdentity =
           persisted.backendSessionId === proj.backendSessionId
           && persisted.authorityId === endpoint.authorityId
-          && persisted.protocol === protocol
+          && (persisted.protocol === protocol || supportedProtocolMigration)
           && persisted.location.directory === endpoint.location.directory
           && (persisted.location.workspace ?? "") === (endpoint.location.workspace ?? "");
         if (!sameIdentity) {
@@ -699,6 +701,10 @@ export function createSessionService(deps: {
             { code: "binding-mismatch" },
           );
         }
+        // Mixed OpenCode documents previously selected V2 even when the
+        // underlying session store exposed the supported legacy contract.
+        // Preserve the exact backend identity while migrating that stale
+        // protocol label; all other protocol changes remain binding failures.
         if (
           persisted.generation !== endpoint.generation
           && endpoint.control.kind !== "owned"
@@ -730,6 +736,7 @@ export function createSessionService(deps: {
         !persisted
         || persisted.generation !== currentBinding.generation
         || persisted.continuity !== currentBinding.continuity
+        || persisted.protocol !== currentBinding.protocol
       ) {
         await applyProjection(proj.id, (current) => ({
           ...current,
