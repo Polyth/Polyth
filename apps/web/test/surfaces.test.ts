@@ -111,7 +111,7 @@ test("parseRailPrefs round-trips, clamps widths, survives garbage", () => {
   assert.equal(parseRailPrefs(JSON.stringify({ lastOpen: "" })).lastOpen, null);
   assert.equal(clampRailWidth(10), 240);
   assert.equal(clampRailWidth(10_000), 640);
-  assert.equal(RAIL_WIDTH_DEFAULT, 344);
+  assert.equal(RAIL_WIDTH_DEFAULT, 300);
 });
 
 test("the Usage package owns its rail surface", async () => {

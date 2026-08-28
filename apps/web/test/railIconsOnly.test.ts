@@ -37,6 +37,74 @@ test("ContextRail omits the bottom add and More button group", async () => {
   assert.ok(!src.includes("moreToolsPicker"), "the old bottom button group is gone");
 });
 
+test("desktop rail width and header geometry use the configured icon strip", async () => {
+  const css = await stylesSource();
+  assert.match(
+    css,
+    /\.rail\s*\{[^}]*width:\s*var\(--rail-w,\s*300px\)[^}]*flex:\s*0 1 var\(--rail-w,\s*300px\)/s,
+    "the panel leaves room for the icon strip inside the 344px rail host",
+  );
+  assert.match(
+    css,
+    /\.rail-icon-col\.plugin-strip\s*\{[^}]*width:\s*var\(--rail-strip-width-right[^}]*min-width:\s*var\(--rail-strip-width-right[^}]*padding-inline:\s*var\(--space-1\)/s,
+    "the icon strip is the configured button width plus token padding",
+  );
+  assert.doesNotMatch(
+    css,
+    /\.plugin-strip\s*\{[^}]*width:\s*var\(--tap\)/s,
+    "the desktop strip must not reserve a fixed tap-width column",
+  );
+  assert.match(
+    css,
+    /\.strip-btn\s*\{[^}]*width:\s*var\(--rail-icon-size-right[^}]*height:\s*var\(--rail-icon-size-right/s,
+    "right-rail buttons use the configured visual size",
+  );
+  assert.match(
+    css,
+    /\.rail-fullscreen\s*\{[^}]*right:\s*var\(--rail-strip-width-right/s,
+    "the full-screen pane leaves exactly the configured strip width",
+  );
+  assert.match(
+    css,
+    /\.rail-icon-col\s*\{[^}]*margin-top:\s*0/s,
+    "the desktop strip reaches the header boundary without a top gap",
+  );
+  assert.match(
+    css,
+    /\.rail-head\s*\{[^}]*min-height:\s*60px/s,
+    "the panel head aligns with the desktop application header",
+  );
+  assert.doesNotMatch(
+    css,
+    /body\[data-density="compact"\] \.rail-head/,
+    "desktop density preferences must not break shell header alignment",
+  );
+});
+
+test("top-rail buttons and glyphs use their configured sizes", async () => {
+  const css = await stylesSource();
+  assert.match(
+    css,
+    /\.view-icon\s*\{[^}]*width:\s*var\(--rail-icon-size-top[^}]*height:\s*var\(--rail-icon-size-top/s,
+  );
+  assert.match(
+    css,
+    /\.view-icon > svg\s*\{[^}]*width:\s*var\(--rail-icon-glyph-top[^}]*height:\s*var\(--rail-icon-glyph-top/s,
+  );
+});
+
+test("coarse pointers expand rail hit areas without widening visual buttons", async () => {
+  const css = await stylesSource();
+  assert.match(
+    css,
+    /\.strip-btn::after\s*\{[^}]*width:\s*max\(100%,\s*var\(--hit-min\)\)[^}]*height:\s*max\(100%,\s*var\(--hit-min\)\)/s,
+  );
+  assert.doesNotMatch(
+    css,
+    /@media\s*\(pointer:\s*coarse\)\s*\{[^}]*\.strip-btn\s*\{[^}]*width:\s*var\(--tap\)/s,
+  );
+});
+
 // UX-PANE-MODEL: registered panes and capabilities without a panel body use
 // the same strip launcher contract.
 test("ContextRail has no JUMPS rows — every placed capability gets a launcher", async () => {

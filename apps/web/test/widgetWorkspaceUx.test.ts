@@ -117,8 +117,8 @@ test("chat top rail is configured directly without a More tools overflow", async
 
 test("widget settings exposes a persistent Chat top rail position", async () => {
   const source = await readFile(new URL("../src/components/settings/WidgetsPage.tsx", import.meta.url), "utf8");
-  assert.match(source, /Chat top rail position/);
-  assert.match(source, /Left of center/);
+  assert.match(source, /settings\.widgetspage\.chatTopRailPosition/);
+  assert.match(source, /settings\.widgetspage\.leftOfCenter/);
   assert.match(source, /topRailAlignment/);
   assert.match(source, /Mobile shortcut rail/);
   assert.match(source, /ui\.mobileShortcuts/);

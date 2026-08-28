@@ -10,6 +10,7 @@ export type MessageCopyFormat = "markdown" | "json";
 export type HeaderMetricId = "tokens" | "messages" | "duration" | "cost";
 export type ResponseActionId = "copy" | "image" | "plan" | "pin" | "session" | "multirun";
 export type TopRailAlignment = "center" | "left";
+export type RailIconSize = "sm" | "md" | "lg";
 export type WorkingIndicator = "pulse" | "cursor" | "cat" | "activity";
 
 export const HEADER_METRIC_IDS: readonly HeaderMetricId[] = ["tokens", "messages", "duration", "cost"];
@@ -68,6 +69,10 @@ export interface UiSettings {
   responseActions: ResponseActionId[];
   /** Placement of the configured Chat top rail in the application header. */
   topRailAlignment: TopRailAlignment;
+  /** Visual button and glyph scale for workspace tools in the application header. */
+  topRailIconSize: RailIconSize;
+  /** Visual button and glyph scale for launchers in the right rail. */
+  rightRailIconSize: RailIconSize;
   /** Ordered shortcuts in the swipeable compact-shell top rail. */
   mobileShortcuts: MobileShortcutId[];
   /** JSON tree viewer defaults (WP4). */
@@ -116,6 +121,8 @@ export const UI_DEFAULTS: UiSettings = {
   headerMetrics: [...HEADER_METRIC_IDS],
   responseActions: [...RESPONSE_ACTION_IDS],
   topRailAlignment: "center",
+  topRailIconSize: "md",
+  rightRailIconSize: "md",
   mobileShortcuts: [
     "session", "workflow", "files", "git", "terminal", "browser",
     "notification-centre", "goals", "settings",
@@ -152,6 +159,10 @@ function parseRounding(value: unknown): number {
   if (value === "rounded") return 10;
   const rounded = Math.round(Number(value));
   return Number.isFinite(rounded) && rounded >= 0 && rounded <= 10 ? rounded : UI_DEFAULTS.rounding;
+}
+
+function parseRailIconSize(value: unknown): RailIconSize {
+  return value === "sm" || value === "lg" ? value : "md";
 }
 
 export function parseUiSettings(raw: string | null): UiSettings {
@@ -196,6 +207,8 @@ export function parseUiSettings(raw: string | null): UiSettings {
       headerMetrics: orderedIds(data.headerMetrics, HEADER_METRIC_IDS),
       responseActions: orderedIds(data.responseActions, RESPONSE_ACTION_IDS),
       topRailAlignment: data.topRailAlignment === "left" ? "left" : "center",
+      topRailIconSize: parseRailIconSize(data.topRailIconSize),
+      rightRailIconSize: parseRailIconSize(data.rightRailIconSize),
       mobileShortcuts: Array.isArray(data.mobileShortcuts)
         ? orderedIds(data.mobileShortcuts, MOBILE_SHORTCUT_IDS)
         : [...UI_DEFAULTS.mobileShortcuts],
@@ -242,6 +255,21 @@ const write = (v: string): void => {
 let settings: UiSettings = parseUiSettings(read());
 const listeners = new Set<() => void>();
 
+const RAIL_ICON_GEOMETRY: Record<RailIconSize, { box: string; glyph: string }> = {
+  sm: {
+    box: "calc(var(--control-h-sm) - var(--space-1))",
+    glyph: "var(--icon-sm)",
+  },
+  md: {
+    box: "var(--control-h-sm)",
+    glyph: "var(--icon-md)",
+  },
+  lg: {
+    box: "calc(var(--control-h-sm) + var(--space-1))",
+    glyph: "var(--icon-lg)",
+  },
+};
+
 /** Reflect visual prefs onto <body> data attributes (CSS reads them). */
 export function applyUiSettings(s: UiSettings = settings): void {
   if (typeof document === "undefined") return;
@@ -255,6 +283,14 @@ export function applyUiSettings(s: UiSettings = settings): void {
   b.dataset.goals = String(s.showGoals);
   b.dataset.quickActions = String(s.showQuickActions);
   b.style?.setProperty("--editor-font-size", `${s.editorFontSize}px`);
+  const topRail = RAIL_ICON_GEOMETRY[s.topRailIconSize];
+  const rightRail = RAIL_ICON_GEOMETRY[s.rightRailIconSize];
+  b.style?.setProperty("--rail-icon-size-top", topRail.box);
+  b.style?.setProperty("--rail-icon-glyph-top", topRail.glyph);
+  b.style?.setProperty("--rail-strip-width-top", "calc(var(--rail-icon-size-top) + var(--space-2))");
+  b.style?.setProperty("--rail-icon-size-right", rightRail.box);
+  b.style?.setProperty("--rail-icon-glyph-right", rightRail.glyph);
+  b.style?.setProperty("--rail-strip-width-right", "calc(var(--rail-icon-size-right) + var(--space-2))");
   // Every radius derives from the one scale in tokens.css. Do not publish a
   // second runtime radius vocabulary here.
   b.style?.setProperty("--corner-radius-scale", String(s.rounding / 5));

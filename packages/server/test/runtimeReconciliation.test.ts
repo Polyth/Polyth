@@ -366,6 +366,64 @@ test("first wire rebinds a verified durable session to the current generation", 
   await store.close();
 });
 
+test("first wire migrates a stale V2 binding to the selected legacy protocol", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "polyth-reconciliation-protocol-migration-"));
+  const endpoint = endpointFor(dir);
+  let reconciliations = 0;
+  const runtime = runtimeWithSnapshot(endpoint, (binding) => {
+    reconciliations += 1;
+    return {
+      authorityId: binding.authorityId,
+      generation: binding.generation,
+      location: binding.location,
+      backendSessionId: binding.backendSessionId!,
+      reconciliationOrdinal: binding.reconciliationOrdinal ?? 1,
+      state: {
+        value: "idle",
+        watermark: "1",
+        comparison: { domain: "test-status", order: 1 },
+      },
+      completeness: {
+        events: "partial",
+        permissions: "partial",
+        questions: "partial",
+      },
+      permissions: [],
+      questions: [],
+      events: [],
+    };
+  });
+  runtime.protocol = async () => "legacy";
+  const { sessions, store, project } = makeHarness(runtime, dir);
+  const sessionId = "session-stale-v2-binding";
+  await store.upsertProjection({
+    id: sessionId,
+    projectId: project.id,
+    backendSessionId: "backend-shared-store",
+    runtimeBinding: {
+      backendSessionId: "backend-shared-store",
+      authorityId: endpoint.authorityId,
+      generation: endpoint.generation,
+      continuity: endpoint.continuity,
+      protocol: "v2",
+      location: endpoint.location,
+    },
+    title: "Mixed protocol session",
+    status: "idle",
+    createdAt: 1,
+    updatedAt: 1,
+  });
+
+  await sessions.events(sessionId, 0);
+
+  const recovered = await store.projection(sessionId);
+  assert.equal(reconciliations, 1);
+  assert.equal(recovered?.runtimeBinding?.backendSessionId, "backend-shared-store");
+  assert.equal(recovered?.runtimeBinding?.protocol, "legacy");
+  assert.equal(recovered?.status, "idle");
+  await store.close();
+});
+
 test("first wire upgrades a legacy protocol binding for the same owned endpoint", async () => {
   const dir = mkdtempSync(join(tmpdir(), "polyth-reconciliation-protocol-upgrade-"));
   const endpoint: RuntimeEndpoint = {
