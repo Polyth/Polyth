@@ -62,7 +62,10 @@ export default function registerPackage(host: ServerPackageHost): ServerPackage 
   const multirun = createMultirunService({
     append: (sessionId, type, data) =>
       host.events.append(sessionId, type, data, { ignorable: true }),
-    runOne: createMultirunRunOne((sessionId) => host.resolveSessionRuntime(sessionId)),
+    runOne: createMultirunRunOne(
+      (sessionId) => host.resolveSessionRuntime(sessionId),
+      { store: host.store },
+    ),
   });
   host.services.provide(serverServiceKey<MultirunService>("multirun"), multirun);
   return { routes: multirunRoutes(multirun) };

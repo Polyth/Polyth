@@ -92,7 +92,17 @@ test("auto-accept on: request resolves with auto:true, runtime replied, no notif
   const res = evs.find((e) => e.type === "permission/resolved");
   assert.ok(req, "requested stays in the log — it must remain truthful");
   assert.ok(res);
-  assert.equal(res!.seq, req!.seq + 1); // both events land at once
+  const durableIntent = evs.filter((event) => event.seq > req!.seq && event.seq < res!.seq);
+  assert.deepEqual(
+    durableIntent.map((event) => event.type),
+    [
+      "permission/response-intended",
+      "mutation/prepared",
+      "mutation/claimed",
+      "mutation/confirmed",
+    ],
+  );
+  assert.equal(durableIntent.every((event) => event.ignorable === true), true);
   assert.deepEqual(res!.data, { requestId: "per_1", reply: "once", auto: true });
   assert.deepEqual(fake.permissionReplies, [{ requestId: "per_1", reply: "once" }]);
   assert.notEqual((await store.projection(id))?.status, "waiting");

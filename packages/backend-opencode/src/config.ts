@@ -1,13 +1,28 @@
-// Backend configuration applier (WP9). This module is the ONLY place that may
-// write OpenCode-facing configuration: global behavior instructions (AGENTS.md)
-// and MCP server entries (opencode.json "mcp" block). The server owns the
-// canonical revisioned copies; this applier projects them into the backend's
-// config directory with atomic writes so a crash never leaves a torn file.
+// Backend configuration applier (WP9, hardened in P1). This module is the ONLY
+// place that may write OpenCode-facing configuration: global behavior
+// instructions (AGENTS.md) and owned fragments of opencode.json. The server
+// owns the canonical revisioned copies; this applier projects them into the
+// backend's config directory with atomic writes so a crash never leaves a torn
+// file.
+//
+// Preservation contract (invariants 11/14, plan P1):
+// - Every operation patches only the fields Polyth owns and preserves every
+//   unowned key at every nesting level, including unsupported MCP entries and
+//   unknown provider/model/agent/plugin properties.
+// - Reads/imports never write; a semantically no-op apply performs zero writes
+//   so untouched files keep their exact bytes.
+// - SEMANTIC preservation is guaranteed; FORMATTING is not: OpenCode treats
+//   the file as JSONC, and a real write re-serializes strict JSON, so comments
+//   and layout may be lost on the first genuine mutation. Comment-preserving
+//   edits would need a JSONC rewriter dependency this package does not have.
+// - When a RuntimeConfigAuthority is supplied, writes require a writable
+//   authority whose targetId exactly matches this applier's target.
 import { existsSync, mkdirSync } from "node:fs";
 import { readFile, rename, writeFile, unlink } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
-import type { JsonObject, JsonValue, OpenCodePluginConfigEntry } from "@polyth/contracts";
+import { isDeepStrictEqual } from "node:util";
+import type { JsonObject, JsonValue, OpenCodePluginConfigEntry, RuntimeConfigAuthority } from "@polyth/contracts";
 
 export interface McpApplyEntry {
   name: string;
@@ -15,7 +30,25 @@ export interface McpApplyEntry {
     | { kind: "stdio"; command: string; args: string[]; env: Record<string, string> }
     | { kind: "http"; url: string; headers: Record<string, string> };
   enabled: boolean;
+  /** Opaque unowned fields retained for this managed entry (captured when the
+   * entry was imported from the backend config). Used as the patch base when
+   * the entry is absent from the file — e.g. re-enabling after a disable
+   * removed it — so unknown metadata survives the round trip. */
+  raw?: Record<string, unknown>;
 }
+
+/** Entries plus batch-level management metadata. The metadata rides on the
+ * array itself because intermediate appliers forward and structuredClone a
+ * single argument. */
+export type McpApplyBatch = McpApplyEntry[] & {
+  /** Every Polyth-managed entry name (enabled or not, including names retired
+   * by rename/removal). A managed name absent from the entries list is
+   * removed from the config block (disabled servers are represented as
+   * absent). Names NOT listed here are never touched, so unsupported and
+   * unknown entries survive every managed edit. Defaults to the entry names,
+   * which makes a plain-array call patch-only. */
+  managedNames?: string[];
+};
 
 export interface ProviderVisibilityApply {
   /** OpenCode `disabled_providers`: providers hidden entirely. */
@@ -27,8 +60,9 @@ export interface ProviderVisibilityApply {
 export interface BackendConfigApplier {
   /** Overwrite the backend's global instruction file. Returns the applied byte length. */
   applyBehavior(text: string): Promise<number>;
-  /** Replace the "mcp" block of the backend config, preserving all other keys. */
-  applyMcp(entries: McpApplyEntry[]): Promise<void>;
+  /** Patch managed entries of the "mcp" block, preserving unsupported entries
+   *  and every unowned field of managed entries. */
+  applyMcp(entries: McpApplyBatch): Promise<void>;
   /** Read valid entries from OpenCode's `plugin` array. */
   listPlugins(): Promise<OpenCodePluginConfigEntry[]>;
   /** Merge entries into OpenCode's `plugin` array, deduplicated by package spec. */
@@ -54,6 +88,26 @@ export interface BackendConfigApplier {
   behaviorPath(): string;
   /** Where the backend JSON config lives (opencode.json). */
   configPath(): string;
+  /** Exact writable-target identity of this applier, matched against a
+   *  writable RuntimeConfigAuthority's targetId before any write. Optional so
+   *  existing decorating appliers remain structurally valid. */
+  configTargetId?(): string;
+  /** Current independent write authority. Decorating/deferred appliers must
+   * forward this rather than silently widening access. */
+  configAuthority?(): RuntimeConfigAuthority;
+}
+
+export interface ConfigApplierOptions {
+  configDir?: string;
+  /** Independent config authority (invariant 14). When provided, every write
+   *  requires kind "writable" with a targetId exactly equal to this applier's
+   *  target; a read-only authority refuses all writes. Reads never require
+   *  authority. When omitted (legacy wiring without an endpoint lease), writes
+   *  are permitted as before. */
+  authority?: RuntimeConfigAuthority | (() => RuntimeConfigAuthority);
+  /** Exact target identity of this applier; defaults to the resolved backend
+   *  config file path. */
+  targetId?: string;
 }
 
 const defaultConfigDir = (): string =>
@@ -172,7 +226,54 @@ export function normalizePluginEntries(raw: unknown): OpenCodePluginConfigEntry[
   return order.map((spec) => bySpec.get(spec)!);
 }
 
-export function createConfigApplier(opts: { configDir?: string } = {}): BackendConfigApplier {
+/** MCP entry fields Polyth owns; everything else is opaque and preserved. */
+const MCP_OWNED_FIELDS = ["type", "command", "environment", "url", "headers", "enabled"] as const;
+
+/** Owned string map (environment/headers) merged over opaque leftovers: keys
+ * Polyth could never have imported (non-string values) are preserved; string
+ * keys are fully owned, so a key the user removed through Polyth is dropped. */
+const mergedStringMap = (
+  existingRaw: unknown,
+  desired: Record<string, string>,
+): Record<string, unknown> => {
+  const opaque = existingRaw && typeof existingRaw === "object" && !Array.isArray(existingRaw)
+    ? Object.fromEntries(Object.entries(existingRaw as Record<string, unknown>)
+        .filter(([key, value]) => typeof value !== "string" && !(key in desired)))
+    : {};
+  return { ...opaque, ...desired };
+};
+
+/** Patch one managed MCP entry: owned fields are regenerated, every other
+ * field of the existing fragment (or the retained import fragment) survives. */
+const patchedMcpEntry = (existingRaw: unknown, e: McpApplyEntry): Record<string, unknown> => {
+  const source = existingRaw && typeof existingRaw === "object" && !Array.isArray(existingRaw)
+    ? (existingRaw as Record<string, unknown>)
+    : (e.raw ?? {});
+  const base: Record<string, unknown> = { ...source };
+  const existingEnv = base.environment;
+  const existingHeaders = base.headers;
+  for (const key of MCP_OWNED_FIELDS) delete base[key];
+  if (e.transport.kind === "stdio") {
+    const environment = mergedStringMap(existingEnv, e.transport.env);
+    return {
+      ...base,
+      type: "local",
+      command: [e.transport.command, ...e.transport.args],
+      enabled: e.enabled,
+      ...(Object.keys(environment).length ? { environment } : {}),
+    };
+  }
+  const headers = mergedStringMap(existingHeaders, e.transport.headers);
+  return {
+    ...base,
+    type: "remote",
+    url: e.transport.url,
+    enabled: e.enabled,
+    ...(Object.keys(headers).length ? { headers } : {}),
+  };
+};
+
+export function createConfigApplier(opts: ConfigApplierOptions = {}): BackendConfigApplier {
   const dir = opts.configDir ?? defaultConfigDir();
   mkdirSync(dir, { recursive: true });
   const agentsPath = join(dir, "AGENTS.md");
@@ -181,7 +282,31 @@ export function createConfigApplier(opts: { configDir?: string } = {}): BackendC
   // OpenCode supports both spellings. Update the file the user already owns so
   // plugin entries (including commandcode) remain in the effective config.
   const configPath = existsSync(jsoncPath) ? jsoncPath : jsonPath;
+  const targetId = opts.targetId ?? configPath;
   let pluginWrite = Promise.resolve();
+
+  // Invariant 14: config authority is separate from process ownership and is
+  // read-only unless explicitly proven writable for exactly this target.
+  const assertWritable = (operation: string): void => {
+    const authority = typeof opts.authority === "function"
+      ? opts.authority()
+      : opts.authority;
+    if (!authority) return;
+    if (authority.kind === "read-only") {
+      throw Object.assign(
+        new Error(`${operation} refused: config authority is read-only`),
+        { code: "config-read-only" },
+      );
+    }
+    if (authority.targetId !== targetId) {
+      throw Object.assign(
+        new Error(
+          `${operation} refused: writable target "${authority.targetId}" does not match config target "${targetId}"`,
+        ),
+        { code: "config-target-mismatch" },
+      );
+    }
+  };
 
   // Missing file is fine (fresh install); a corrupt one must not be
   // silently clobbered — callers roll their stores back on throw.
@@ -199,6 +324,18 @@ export function createConfigApplier(opts: { configDir?: string } = {}): BackendC
     }
   };
 
+  // Zero-write no-op guard: a semantically unchanged document keeps its exact
+  // bytes (and therefore its JSONC comments/formatting). A real change is
+  // re-serialized as strict JSON — semantic fields are preserved, formatting
+  // and comments are not (documented limitation; no JSONC-rewriter dependency).
+  const writeConfigIfChanged = async (
+    existing: Record<string, unknown>,
+    next: Record<string, unknown>,
+  ): Promise<void> => {
+    if (isDeepStrictEqual(existing, next)) return;
+    await atomicWrite(configPath, `${JSON.stringify(next, null, 2)}\n`);
+  };
+
   const pluginsFrom = (config: Record<string, unknown>): OpenCodePluginConfigEntry[] =>
     config.plugin === undefined ? [] : normalizePluginEntries(config.plugin);
 
@@ -213,9 +350,17 @@ export function createConfigApplier(opts: { configDir?: string } = {}): BackendC
   return {
     behaviorPath: () => agentsPath,
     configPath: () => configPath,
+    configTargetId: () => targetId,
+    configAuthority: () => {
+      const authority = typeof opts.authority === "function"
+        ? opts.authority()
+        : opts.authority;
+      return authority ?? { kind: "writable", targetId };
+    },
     readConfig: readExisting,
 
     async applyBehavior(text: string): Promise<number> {
+      assertWritable("applyBehavior");
       await atomicWrite(agentsPath, text);
       return Buffer.byteLength(text, "utf8");
     },
@@ -225,6 +370,7 @@ export function createConfigApplier(opts: { configDir?: string } = {}): BackendC
     },
 
     async applyPlugins(raw: unknown[]): Promise<OpenCodePluginConfigEntry[]> {
+      assertWritable("applyPlugins");
       const imported = normalizePluginEntries(raw);
       return mutatePlugins(async () => {
         const existing = await readExisting();
@@ -245,24 +391,26 @@ export function createConfigApplier(opts: { configDir?: string } = {}): BackendC
             merged[position] = entry;
           }
         }
-        await atomicWrite(configPath, `${JSON.stringify({ ...existing, plugin: merged }, null, 2)}\n`);
+        await writeConfigIfChanged(existing, { ...existing, plugin: merged });
         return merged;
       });
     },
 
     async replacePlugins(raw: unknown[]): Promise<OpenCodePluginConfigEntry[]> {
+      assertWritable("replacePlugins");
       const plugins = normalizePluginEntries(raw);
       return mutatePlugins(async () => {
         const existing = await readExisting();
         const next = { ...existing };
         if (plugins.length > 0) next.plugin = plugins;
         else delete next.plugin;
-        await atomicWrite(configPath, `${JSON.stringify(next, null, 2)}\n`);
+        await writeConfigIfChanged(existing, next);
         return plugins;
       });
     },
 
     async removePlugin(rawSpec: string): Promise<{ plugins: OpenCodePluginConfigEntry[]; removed: boolean }> {
+      assertWritable("removePlugin");
       const spec = normalizePluginSpec(rawSpec);
       return mutatePlugins(async () => {
         const existing = await readExisting();
@@ -273,13 +421,14 @@ export function createConfigApplier(opts: { configDir?: string } = {}): BackendC
           const next = { ...existing };
           if (plugins.length > 0) next.plugin = plugins;
           else delete next.plugin;
-          await atomicWrite(configPath, `${JSON.stringify(next, null, 2)}\n`);
+          await writeConfigIfChanged(existing, next);
         }
         return { plugins, removed };
       });
     },
 
     async applyProviderVisibility(v: ProviderVisibilityApply): Promise<void> {
+      assertWritable("applyProviderVisibility");
       const existing = await readExisting();
       const next: Record<string, unknown> = { ...existing };
 
@@ -310,10 +459,11 @@ export function createConfigApplier(opts: { configDir?: string } = {}): BackendC
       if (Object.keys(provider).length > 0) next.provider = provider;
       else delete next.provider;
 
-      await atomicWrite(configPath, `${JSON.stringify(next, null, 2)}\n`);
+      await writeConfigIfChanged(existing, next);
     },
 
     async applyAgent(name, role): Promise<void> {
+      assertWritable("applyAgent");
       if (!name.trim()) throw new Error("agent name required");
       const existing = await readExisting();
       const agentsRaw = existing.agent;
@@ -332,29 +482,31 @@ export function createConfigApplier(opts: { configDir?: string } = {}): BackendC
       if (role.model) current.model = `${role.model.providerID}/${role.model.modelID}`;
       else delete current.model;
       agents[name] = current;
-      await atomicWrite(configPath, `${JSON.stringify({ ...existing, agent: agents }, null, 2)}\n`);
+      await writeConfigIfChanged(existing, { ...existing, agent: agents });
     },
 
-    async applyMcp(entries: McpApplyEntry[]): Promise<void> {
+    // Patch, never regenerate: unsupported entries and unmanaged names are
+    // untouched; managed entries keep every unowned field; a managed name
+    // absent from the desired list is removed (disabled = absent, F10).
+    async applyMcp(entries: McpApplyBatch): Promise<void> {
+      assertWritable("applyMcp");
       const existing = await readExisting();
+      const blockRaw = existing.mcp;
+      const block: Record<string, unknown> =
+        blockRaw && typeof blockRaw === "object" && !Array.isArray(blockRaw)
+          ? { ...(blockRaw as Record<string, unknown>) }
+          : {};
 
-      const mcp: Record<string, unknown> = {};
-      for (const e of entries) {
-        mcp[e.name] = e.transport.kind === "stdio"
-          ? {
-              type: "local",
-              command: [e.transport.command, ...e.transport.args],
-              enabled: e.enabled,
-              ...(Object.keys(e.transport.env).length ? { environment: e.transport.env } : {}),
-            }
-          : {
-              type: "remote",
-              url: e.transport.url,
-              enabled: e.enabled,
-              ...(Object.keys(e.transport.headers).length ? { headers: e.transport.headers } : {}),
-            };
+      const desiredNames = new Set(entries.map((e) => e.name));
+      for (const name of entries.managedNames ?? []) {
+        if (!desiredNames.has(name)) delete block[name];
       }
-      await atomicWrite(configPath, `${JSON.stringify({ ...existing, mcp }, null, 2)}\n`);
+      for (const e of entries) block[e.name] = patchedMcpEntry(block[e.name], e);
+
+      const next: Record<string, unknown> = { ...existing };
+      if (Object.keys(block).length > 0) next.mcp = block;
+      else delete next.mcp;
+      await writeConfigIfChanged(existing, next);
     },
   };
 }

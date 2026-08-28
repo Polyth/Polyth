@@ -279,6 +279,15 @@ const server = createServer((req, res) => {
     if (method === "GET" && (path === "/global/health" || path === "/api/health")) {
       return json(res, 200, { healthy: true, version: "1.18.18-msgact-fake" });
     }
+    if (method === "GET" && path === "/doc") {
+      return json(res, 200, {
+        openapi: "3.1.0",
+        paths: {
+          "/session/{sessionID}/prompt_async": { post: {} },
+          "/session/{sessionID}/message": { post: {} },
+        },
+      });
+    }
     if (method === "GET" && path === "/provider") {
       return json(res, 200, catalog?.providers ?? {
         all: [{

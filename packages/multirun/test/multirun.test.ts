@@ -1,11 +1,15 @@
 import test from "node:test";
 import assert from "node:assert/strict";
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type {
   AgentRuntime,
   CreateSessionInput,
   JsonObject,
   RuntimeEvent,
 } from "@polyth/contracts";
+import { createStore } from "@polyth/session";
 import {
   createMultirunService,
   type RunOneFn,
@@ -116,14 +120,20 @@ test("snapshot maps to the wire DTO shape", async () => {
 });
 
 test("runner creates and streams a throwaway session in the resolved cwd", async () => {
+  const store = createStore(join(mkdtempSync(join(tmpdir(), "polyth-multirun-runner-")), "sessions.db"));
   const listeners = new Set<(sessionId: string, event: RuntimeEvent) => void>();
   let created: (CreateSessionInput & { sessionId: string; cwd: string }) | undefined;
   const runtime = {
-    ensureSession: async (input: CreateSessionInput & { sessionId: string; cwd: string }) => {
+    createSessionOperation: async (
+      input: CreateSessionInput & { sessionId: string; cwd: string },
+    ) => {
       created = input;
-      return "backend-session";
+      return {
+        kind: "confirmed" as const,
+        value: { backendSessionId: "backend-session" },
+      };
     },
-    startTurn: async (input: { sessionId: string; text: string }) => {
+    startTurnOperation: async (input: { sessionId: string; text: string }) => {
       for (const listener of listeners) {
         listener(input.sessionId, { type: "assistant/chunk", partId: "part-1", text: "partial" });
         listener(input.sessionId, {
@@ -135,6 +145,7 @@ test("runner creates and streams a throwaway session in the resolved cwd", async
         });
         listener(input.sessionId, { type: "turn/stopped", reason: "completed" });
       }
+      return { kind: "confirmed" as const, value: {} };
     },
     onEvent: (listener: (sessionId: string, event: RuntimeEvent) => void) => {
       listeners.add(listener);
@@ -145,7 +156,7 @@ test("runner creates and streams a throwaway session in the resolved cwd", async
   const runOne = createMultirunRunOne(async () => ({
     rt: runtime,
     cwd: "/repos/demo-worktrees/fix",
-  }));
+  }), { store });
 
   await runOne({
     sessionId: "parent-session",
@@ -169,4 +180,57 @@ test("runner creates and streams a throwaway session in the resolved cwd", async
     },
   ]);
   assert.equal(listeners.size, 0, "the runtime subscription is disposed");
+  await store.close();
+});
+
+test("multirun response loss retains one durable operation and never executes twice", async () => {
+  const store = createStore(join(mkdtempSync(join(tmpdir(), "polyth-multirun-loss-")), "sessions.db"));
+  let creates = 0;
+  let compatibilityEnsures = 0;
+  let submissions = 0;
+  const runtime = {
+    createSessionOperation: async () => {
+      creates += 1;
+      return {
+        kind: "confirmed" as const,
+        value: { backendSessionId: "backend-run" },
+      };
+    },
+    ensureSession: async () => {
+      compatibilityEnsures += 1;
+      return "backend-run";
+    },
+    startTurnOperation: async (_input: unknown, operationId: string) => {
+      submissions += 1;
+      return {
+        kind: "unknown" as const,
+        operationId,
+        message: "accepted response was lost",
+      };
+    },
+    onEvent: () => ({ dispose() {} }),
+  } as unknown as AgentRuntime;
+  const runOne = createMultirunRunOne(async () => ({
+    rt: runtime,
+    cwd: "/repos/demo",
+  }), { store });
+  const context = {
+    sessionId: "parent-session",
+    multirunId: "multi-loss",
+    runId: "run-loss",
+    prompt: "run once",
+  };
+
+  await assert.rejects(() => runOne(context, () => undefined), /accepted response was lost/);
+  await assert.rejects(() => runOne(context, () => undefined), /accepted response was lost/);
+
+  assert.equal(creates, 1);
+  assert.equal(compatibilityEnsures, 0, "confirmed create is not followed by an untracked ensure");
+  assert.equal(submissions, 1);
+  const operations = await store.operations("multirun-run-loss");
+  assert.deepEqual(
+    operations.map((operation) => [operation.mutationKind, operation.state]),
+    [["session-create", "confirmed"], ["turn-submit", "unknown"]],
+  );
+  await store.close();
 });

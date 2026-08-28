@@ -126,8 +126,11 @@ test("remote runtime boots serve on the host, attaches through the forward, and 
     // serve was started with the right cwd, port, and pidfile reaping
     assert.equal(fake.startCommands.length, 1);
     const cmd = fake.startCommands[0]!;
-    assert.ok(cmd.includes("cd '/home/dev/app' && exec opencode serve --hostname 127.0.0.1 --port 37001"), cmd);
-    assert.ok(cmd.includes('kill "$(cat "$PF")"'), "must reap an orphaned predecessor");
+    assert.ok(cmd.includes("cd '/home/dev/app'; opencode serve --hostname 127.0.0.1 --port 37001"), cmd);
+    assert.ok(cmd.includes('oc_start "$OLD_PID"'), "must verify the recorded child start identity");
+    assert.ok(cmd.includes('oc_exe "$OLD_PID"'), "must verify the recorded executable");
+    assert.ok(cmd.includes('oc_cmd "$OLD_PID"'), "must verify the recorded command");
+    assert.match(cmd, /printf .*POLYTH_REMOTE_PID/s, "must record an exact instance token");
     // the forward targets the actual listen port
     assert.deepEqual(fake.forwards.map((f) => f.remotePort), [37001]);
     // the adapter talks through the forwarded local port
@@ -140,8 +143,11 @@ test("remote runtime boots serve on the host, attaches through the forward, and 
     stub.server.close();
   }
   // dispose kills the remote pid, removes the pidfile, closes the channel and forward
-  const killExec = fake.execCalls.find((c) => c.includes("kill 4242"));
+  const killExec = fake.execCalls.find((c) => c.includes('kill "$PID"'));
   assert.ok(killExec, `expected a remote kill, got: ${fake.execCalls.join(" | ")}`);
+  assert.ok(killExec!.includes('oc_start "$PID"'));
+  assert.ok(killExec!.includes('oc_exe "$PID"'));
+  assert.ok(killExec!.includes('oc_cmd "$PID"'));
   assert.ok(killExec!.includes('rm -f "$PF"'));
   assert.deepEqual(fake.killedHandles, [0]);
   assert.equal(fake.forwards[0]!.cancelled, true);

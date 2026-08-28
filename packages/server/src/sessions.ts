@@ -3,9 +3,12 @@
 import { randomUUID } from "node:crypto";
 import { resolve } from "node:path";
 import type {
-  AgentProfile, AgentRuntime, AttachmentRef, AutoAcceptSetting, ChildSnapshotResult, CreateSessionInput, DeliveryMode,
-  Disposable, ForkDraft, ForkResult, JsonObject, NotificationRecord,
+  AgentProfile, AgentRuntime, AttachmentRef, AutoAcceptSetting, CanonicalEventInput, ChildSnapshotResult, CreateSessionInput, DeliveryMode,
+  Disposable, DurableOperation, ForkDraft, ForkResult, JsonObject, MutationOutcome, NotificationRecord,
+  PersistedRuntimeBinding,
   InstalledPluginDto, PackageDescriptorDto, QueueItemDto, RuntimeEvent,
+  RuntimeEndpoint, RuntimeLifecycleNotification, RuntimeMutationKind, RuntimeObservation,
+  RuntimeSessionBinding, RuntimeSnapshot,
   SecretRequestData, SecretResolvedData, SecureSafeKind, SecureSafeService,
   RuntimeSession, SendResult, SessionDebugDto, SessionEvent, SessionFolderDto, SessionForkedData, SessionOrganizePatch, SessionProjection, SessionRef,
   SessionService, SessionPersistence, UserTurnInput,
@@ -13,9 +16,16 @@ import type {
 import type { ProjectService } from "@polyth/contracts";
 import type { AutoAcceptStore, PermissionService } from "@polyth/permissions";
 import { resolveAutoAccept } from "@polyth/permissions";
-import { activeRewind, deriveMessages, effectiveHistory, recoveredUserText } from "@polyth/session";
+import {
+  activeRewind,
+  deriveMessages,
+  effectiveHistory,
+  recoveredUserText,
+  type Store as DurableSessionStore,
+} from "@polyth/session";
 import { buildPermissionPreview, PERMISSION_ALLOWED_SCOPES } from "./permissionPreview.ts";
 import { sanitizeAttachments } from "./attachments.ts";
+import { settleAllOrThrow } from "./settle.ts";
 
 export interface Broadcaster {
   event(ev: SessionEvent): void;
@@ -35,7 +45,20 @@ export interface QueueStore {
   queueEdit(sessionId: string, queueId: string, text: string): Promise<QueueItemDto | undefined>;
   queueReorder(sessionId: string, ids: string[]): Promise<QueueItemDto[]>;
   queueRemove(sessionId: string, queueId: string): Promise<boolean>;
-  queueShift(sessionId: string): Promise<QueueItemDto | undefined>;
+  reserveQueueHead(input: {
+    sessionId: string;
+    mutationKind?: "turn-submit" | "turn-steer";
+  }): ReturnType<DurableSessionStore["reserveQueueHead"]>;
+  confirmQueueReservation(
+    operationId: string,
+    receipt?: string,
+  ): ReturnType<DurableSessionStore["confirmQueueReservation"]>;
+  releaseQueueReservation(
+    operationId: string,
+    settlement:
+      | { kind: "rejected"; code: string; message: string }
+      | { kind: "not-applied"; code?: string; message: string },
+  ): ReturnType<DurableSessionStore["releaseQueueReservation"]>;
 }
 
 export interface RuntimePool {
@@ -43,7 +66,63 @@ export interface RuntimePool {
   forProject(projectId: string, cwd?: string): Promise<AgentRuntime>;
   /** Restart all currently live runtime facades in place. */
   restartAll?(): Promise<number>;
+  /** Generation replacement notification. Resolves only after every wired
+   * session listener has finished its admission-barrier reconciliation. */
+  onRestart?(listener: (runtime: AgentRuntime) => Promise<void>): Disposable;
 }
+
+export interface RuntimeRestartFingerprint {
+  authorityId: string;
+  generation: number;
+}
+
+export type RuntimeRestartSafety =
+  | { safe: true }
+  | { safe: false; reason: string };
+
+export interface RestartSafetySessionService extends SessionService {
+  /** Force fresh authoritative status evidence for one affected binding.
+   * Callers hold the global admission barrier for this method's lifetime. */
+  reconcileForRuntimeRestart(
+    sessionId: string,
+    runtime: AgentRuntime,
+    expected: RuntimeRestartFingerprint,
+  ): Promise<RuntimeRestartSafety>;
+}
+
+type RuntimeDurability = Pick<
+  DurableSessionStore,
+  | "prepareOperation"
+  | "prepareSessionCreate"
+  | "operation"
+  | "operations"
+  | "queueReservation"
+  | "claimOperation"
+  | "settleOperation"
+  | "chooseResponseIntent"
+  | "responseIntent"
+  | "settleResponseIntent"
+  | "ingestObservation"
+  | "ingestSnapshot"
+  | "observationCheckpoint"
+  | "observationCursor"
+  | "startReconciliation"
+  | "reconciliation"
+  | "settleReconciliation"
+  | "prepareSessionDeletion"
+  | "deletionTombstone"
+  | "hasDeletionTombstone"
+  | "retireDeletionTombstone"
+>;
+
+type ReliabilityRuntime = AgentRuntime & {
+  endpoint?(): Promise<RuntimeEndpoint>;
+  protocol?(): Promise<"legacy" | "v2">;
+  reconcile?(
+    binding: RuntimeSessionBinding & { reconciliationOrdinal?: number },
+    after?: string,
+  ): Promise<RuntimeSnapshot>;
+};
 
 /** Organization seams implemented by @polyth/session's Store (WP5). */
 export interface OrgStore {
@@ -82,6 +161,12 @@ export function createSessionService(deps: {
   permissions: PermissionService;
   runtimes: RuntimePool;
   broadcast: Broadcaster;
+  /** Config/runtime replacement admission gate. `admit` atomically joins the
+   * active-admission set or rejects while an exclusive restart is fenced. */
+  admission?: {
+    fenced(): boolean;
+    admit<T>(action: () => Promise<T>): Promise<T>;
+  };
   hooks?: TurnHooks;
   expand?: ExpandInput;
   queue?: QueueStore;
@@ -120,14 +205,43 @@ export function createSessionService(deps: {
     attention(sessionId: string, kind: "permission" | "question", requestId?: string, questions?: JsonObject[]): void;
     turnStopped(sessionId: string, reason: "completed" | "aborted" | "error"): void;
   };
-}): SessionService {
+}): RestartSafetySessionService {
   const { store, projects, permissions, runtimes, broadcast } = deps;
+  const durable = store as SessionPersistence & RuntimeDurability;
+  const requiredDurableMethods: Array<keyof RuntimeDurability> = [
+    "prepareOperation",
+    "prepareSessionCreate",
+    "operation",
+    "operations",
+    "queueReservation",
+    "claimOperation",
+    "settleOperation",
+    "chooseResponseIntent",
+    "responseIntent",
+    "settleResponseIntent",
+    "ingestObservation",
+    "ingestSnapshot",
+    "observationCheckpoint",
+    "observationCursor",
+    "startReconciliation",
+    "reconciliation",
+    "settleReconciliation",
+    "prepareSessionDeletion",
+    "deletionTombstone",
+    "hasDeletionTombstone",
+    "retireDeletionTombstone",
+  ];
+  for (const method of requiredDurableMethods) {
+    if (typeof durable[method] !== "function") {
+      throw new Error(`session persistence is missing durable runtime API: ${method}`);
+    }
+  }
   const hooks = deps.hooks ?? {};
   const sessionRuntime = new Map<string, AgentRuntime>(); // sessionId -> runtime
   // One onEvent subscription per runtime (not per session): events dispatch
   // through sessionRuntime, so wiring N sessions to a runtime costs a single
   // listener that unwire() disposes once the last session leaves it.
-  const runtimeSubs = new Map<AgentRuntime, Disposable>();
+  const runtimeSubs = new Map<AgentRuntime, Disposable[]>();
   const lastTurnId = new Map<string, string>();           // sessionId -> active turnId
   // sessions whose turn admission is in flight (startTurn sent, turn/started
   // not yet observed) — a concurrent send must treat these as active
@@ -163,6 +277,152 @@ export function createSessionService(deps: {
   // The web preference arrives with the first prompt. Keep that intent until
   // OpenCode publishes the semantic title it generated from the prompt.
   const autoTitleRequested = new Set<string>();
+
+  const broadcastTail = async <T>(
+    sessionId: string,
+    action: () => Promise<T>,
+  ): Promise<T> => {
+    const afterSeq = await store.latestSeq(sessionId);
+    const result = await action();
+    for (const event of await store.events(sessionId, afterSeq)) broadcast.event(event);
+    return result;
+  };
+
+  const isMutationOutcome = <T,>(value: unknown): value is MutationOutcome<T> => {
+    if (!value || typeof value !== "object") return false;
+    const kind = (value as { kind?: unknown }).kind;
+    return kind === "confirmed" || kind === "rejected" || kind === "unknown";
+  };
+
+  const knownRejection = (error: unknown): { code: string; message: string } | null => {
+    const code = typeof error === "object" && error !== null
+      && typeof (error as { code?: unknown }).code === "string"
+      ? (error as { code: string }).code
+      : "";
+    if (!["invalid-input", "unsupported", "not-found", "conflict", "history-mismatch"].includes(code)) {
+      return null;
+    }
+    return {
+      code,
+      message: error instanceof Error ? error.message : "runtime rejected the mutation",
+    };
+  };
+
+  const RUNTIME_AWAIT_MS = 30_000;
+  const boundedRuntimeAwait = async <T,>(
+    promise: Promise<T>,
+    operationId: string,
+  ): Promise<T> => {
+    let timer: NodeJS.Timeout | undefined;
+    try {
+      return await Promise.race([
+        promise,
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(() => {
+            reject(Object.assign(
+              new Error(`runtime operation ${operationId} exceeded ${RUNTIME_AWAIT_MS}ms`),
+              { code: "runtime-timeout" },
+            ));
+          }, RUNTIME_AWAIT_MS);
+        }),
+      ]);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  };
+
+  const claimOperation = async (operation: DurableOperation): Promise<void> => {
+    const claim = await broadcastTail(
+      operation.sessionId,
+      () => durable.claimOperation(operation.operationId),
+    );
+    if (claim.kind !== "claimed") {
+      throw Object.assign(new Error(`operation is already ${claim.operation?.state ?? "unavailable"}`), {
+        code: "conflict",
+        operationId: operation.operationId,
+      });
+    }
+  };
+
+  const settleOperation = async <T,>(
+    operation: DurableOperation,
+    outcome: MutationOutcome<T>,
+  ): Promise<void> => {
+    if (outcome.kind === "confirmed") {
+      await broadcastTail(operation.sessionId, () => durable.settleOperation(operation.operationId, {
+        kind: "confirmed",
+        ...(outcome.receipt ? { receipt: outcome.receipt } : {}),
+      }));
+      return;
+    }
+    if (outcome.kind === "rejected") {
+      await broadcastTail(operation.sessionId, () => durable.settleOperation(operation.operationId, {
+        kind: "rejected",
+        code: outcome.code,
+        message: outcome.message,
+      }));
+      return;
+    }
+    await broadcastTail(operation.sessionId, () => durable.settleOperation(operation.operationId, {
+      kind: "unknown",
+      code: "runtime-outcome-unknown",
+      message: outcome.message,
+    }));
+  };
+
+  /** One claim and exactly one runtime call. Legacy runtime values are
+   * confirmed responses; thrown failures are conservative unknowns unless the
+   * facade supplies a typed, operation-specific non-application rejection. */
+  const runPreparedOperation = async <T, R>(
+    operation: DurableOperation,
+    call: (operationId: string) => Promise<R | MutationOutcome<T>>,
+    confirmed: (value: R) => T,
+    settle: (outcome: MutationOutcome<T>) => Promise<void> = (outcome) =>
+      settleOperation(operation, outcome),
+  ): Promise<MutationOutcome<T>> => {
+    await claimOperation(operation);
+    let outcome: MutationOutcome<T>;
+    try {
+      const value = await boundedRuntimeAwait(
+        call(operation.operationId),
+        operation.operationId,
+      );
+      outcome = isMutationOutcome<T>(value)
+        ? value
+        : { kind: "confirmed", value: confirmed(value as R) };
+    } catch (error) {
+      const rejected = knownRejection(error);
+      outcome = rejected
+        ? { kind: "rejected", ...rejected }
+        : {
+            kind: "unknown",
+            operationId: operation.operationId,
+            message: "the runtime did not provide a definitive mutation outcome",
+          };
+    }
+    await settle(outcome);
+    return outcome;
+  };
+
+  const outcomeError = <T,>(outcome: Exclude<MutationOutcome<T>, { kind: "confirmed" }>): Error => {
+    if (outcome.kind === "rejected") {
+      return Object.assign(new Error(outcome.message), {
+        code: outcome.code,
+      });
+    }
+    return Object.assign(new Error("upstream outcome is unknown; reconciliation is required"), {
+      code: "outcome-unknown",
+      operationId: outcome.operationId,
+    });
+  };
+
+  const blockingOperation = async (
+    sessionId: string,
+    exceptOperationId?: string,
+  ): Promise<DurableOperation | undefined> =>
+    (await durable.operations(sessionId)).find((operation) =>
+      operation.operationId !== exceptOperationId
+      && (operation.state === "prepared" || operation.state === "executing" || operation.state === "unknown"));
 
   const isPlaceholderTitle = (title: string, sessionId: string): boolean => {
     const value = title.trim().toLowerCase();
@@ -207,12 +467,21 @@ export function createSessionService(deps: {
   // Revert/Fork validation + publication run under the same serialization, so
   // an apparently idle message row can never race a newly admitted turn.
   // A failed link is logged and contained without breaking the chain.
-  const chains = new Map<string, Promise<unknown>>();
-  const withSessionLock = <T>(sessionId: string, fn: () => Promise<T>): Promise<T> => {
-    const prev = chains.get(sessionId) ?? Promise.resolve();
-    const run = prev.then(fn, fn);
-    chains.set(sessionId, run.then(() => undefined, () => undefined));
-    return run;
+  const chains = new Map<string, Promise<void>>();
+  const withSessionLock = async <T>(sessionId: string, fn: () => Promise<T>): Promise<T> => {
+    const previous = chains.get(sessionId) ?? Promise.resolve();
+    let release!: () => void;
+    const current = new Promise<void>((resolveCurrent) => {
+      release = resolveCurrent;
+    });
+    chains.set(sessionId, current);
+    await previous;
+    try {
+      return await fn();
+    } finally {
+      release();
+      if (chains.get(sessionId) === current) chains.delete(sessionId);
+    }
   };
 
   const appendAndBroadcast = async (
@@ -354,6 +623,792 @@ export function createSessionService(deps: {
     await applyProjection(sessionId, (current) => ({ ...current, ...patch, updatedAt: Date.now() }));
   };
 
+  const applyRuntimeProjection = async (
+    sessionId: string,
+    runtimeEventSeq: number | undefined,
+    patch: (current: SessionProjection) => SessionProjection,
+  ): Promise<boolean> => {
+    let applied = false;
+    await applyProjection(sessionId, (current) => {
+      if (
+        runtimeEventSeq !== undefined
+        && (current.runtimeObservationSeq ?? 0) >= runtimeEventSeq
+      ) {
+        return current;
+      }
+      applied = true;
+      const next = patch(current);
+      return runtimeEventSeq === undefined
+        ? next
+        : { ...next, runtimeObservationSeq: runtimeEventSeq };
+    });
+    return applied;
+  };
+
+  const newRuntimeBinding = async (
+    runtime: AgentRuntime,
+    backendSessionId: string,
+    cwd: string,
+    historyBaseline: PersistedRuntimeBinding["historyBaseline"],
+  ): Promise<PersistedRuntimeBinding> => {
+    const endpoint = await (runtime as ReliabilityRuntime).endpoint?.();
+    if (!endpoint) {
+      return {
+        backendSessionId,
+        authorityId: `legacy:unmanaged:${cwd}`,
+        generation: 0,
+        continuity: "generation-only",
+        protocol: "legacy",
+        location: { directory: cwd },
+        ...(historyBaseline ? { historyBaseline } : {}),
+      };
+    }
+    return {
+      backendSessionId,
+      authorityId: endpoint.authorityId,
+      generation: endpoint.generation,
+      continuity: endpoint.continuity,
+      protocol: await (runtime as ReliabilityRuntime).protocol?.() ?? "legacy",
+      location: endpoint.location,
+      ...(historyBaseline ? { historyBaseline } : {}),
+    };
+  };
+
+  const runtimeBinding = async (
+    rt: AgentRuntime,
+    proj: SessionProjection,
+    cwd: string,
+  ): Promise<RuntimeSessionBinding | undefined> => {
+    if (!proj.backendSessionId) return undefined;
+    const endpoint = await (rt as ReliabilityRuntime).endpoint?.();
+    if (endpoint) {
+      const protocol = await (rt as ReliabilityRuntime).protocol?.()
+        ?? proj.runtimeBinding?.protocol
+        ?? "legacy";
+      const persisted = proj.runtimeBinding;
+      if (persisted) {
+        const sameIdentity =
+          persisted.backendSessionId === proj.backendSessionId
+          && persisted.authorityId === endpoint.authorityId
+          && persisted.protocol === protocol
+          && persisted.location.directory === endpoint.location.directory
+          && (persisted.location.workspace ?? "") === (endpoint.location.workspace ?? "");
+        if (!sameIdentity) {
+          throw Object.assign(
+            new Error("persisted backend binding does not match the current endpoint"),
+            { code: "binding-mismatch" },
+          );
+        }
+        if (
+          persisted.generation !== endpoint.generation
+          && (persisted.continuity !== "verified" || endpoint.continuity !== "verified")
+        ) {
+          throw Object.assign(
+            new Error("backend session binding cannot cross an unverified endpoint generation"),
+            { code: "binding-mismatch" },
+          );
+        }
+      }
+      const currentBinding = {
+        backendSessionId: proj.backendSessionId,
+        authorityId: endpoint.authorityId,
+        generation: endpoint.generation,
+        continuity: endpoint.continuity,
+        protocol,
+        location: endpoint.location,
+        ...(persisted?.historyBaseline
+          ? { historyBaseline: persisted.historyBaseline }
+          : {}),
+      };
+      if (
+        !persisted
+        || persisted.generation !== currentBinding.generation
+        || persisted.continuity !== currentBinding.continuity
+      ) {
+        await applyProjection(proj.id, (current) => ({
+          ...current,
+          runtimeBinding: currentBinding,
+          updatedAt: Date.now(),
+        }));
+      }
+      return {
+        canonicalSessionId: proj.id,
+        backendSessionId: proj.backendSessionId,
+        authorityId: endpoint.authorityId,
+        generation: endpoint.generation,
+        continuity: endpoint.continuity,
+        location: endpoint.location,
+      };
+    }
+    const compatibilityBinding = proj.runtimeBinding ?? {
+      backendSessionId: proj.backendSessionId,
+      authorityId: `legacy:${proj.projectId}:${cwd}`,
+      generation: 0,
+      continuity: "generation-only" as const,
+      protocol: "legacy" as const,
+      location: { directory: cwd },
+    };
+    if (!proj.runtimeBinding) {
+      await applyProjection(proj.id, (current) => ({
+        ...current,
+        runtimeBinding: compatibilityBinding,
+        updatedAt: Date.now(),
+      }));
+    }
+    return {
+      canonicalSessionId: proj.id,
+      backendSessionId: proj.backendSessionId,
+      authorityId: compatibilityBinding.authorityId,
+      generation: compatibilityBinding.generation,
+      continuity: compatibilityBinding.continuity,
+      location: compatibilityBinding.location,
+    };
+  };
+
+  const canonicalRuntimeEvent = (event: RuntimeEvent): {
+    artifactKind: "message" | "part" | "tool" | "permission" | "question" | "status" | "turn";
+    events: Array<{ type: string; data: JsonObject; ignorable?: boolean }>;
+  } => {
+    const { type, ...data } = event;
+    if (event.type === "permission/requested") {
+      return {
+        artifactKind: "permission",
+        events: [{
+          type,
+          data: {
+            ...(data as unknown as JsonObject),
+            preview: buildPermissionPreview({
+              permission: event.permission,
+              patterns: event.patterns,
+              ...(event.metadata ? { metadata: event.metadata } : {}),
+              ...(event.tool ? { tool: event.tool } : {}),
+            }) as unknown as JsonObject,
+            allowedScopes: [...PERMISSION_ALLOWED_SCOPES],
+          },
+          ignorable: true,
+        }],
+      };
+    }
+    if (event.type === "question/asked" || event.type === "secret/requested") {
+      return {
+        artifactKind: "question",
+        events: [{ type, data: data as unknown as JsonObject, ignorable: true }],
+      };
+    }
+    if (event.type === "turn/started" || event.type === "turn/stopped") {
+      return {
+        artifactKind: "turn",
+        events: [{ type, data: data as unknown as JsonObject, ignorable: true }],
+      };
+    }
+    if (event.type.startsWith("tool/")) {
+      return { artifactKind: "tool", events: [{ type, data: data as unknown as JsonObject }] };
+    }
+    if (event.type === "assistant/chunk" || event.type === "assistant/reasoning-chunk") {
+      return { artifactKind: "part", events: [{ type, data: data as unknown as JsonObject }] };
+    }
+    return {
+      artifactKind: "message",
+      events: [{
+        type,
+        data: data as unknown as JsonObject,
+        ...(event.type === "usage/recorded"
+          || event.type === "session/title-generated"
+          || event.type === "session/compacted"
+          || event.type === "compaction/part-recorded"
+          ? { ignorable: true }
+          : {}),
+      }],
+    };
+  };
+
+  const settleProvenOperationNonapplications = async (
+    sessionId: string,
+    snapshot: RuntimeSnapshot,
+    facts: LogFacts,
+  ): Promise<void> => {
+    for (const evidence of snapshot.nonAppliedOperations ?? []) {
+      if (evidence.backendSessionId && evidence.backendSessionId !== snapshot.backendSessionId) {
+        continue;
+      }
+      const operation = await durable.operation(evidence.operationId);
+      if (
+        !operation
+        || operation.sessionId !== sessionId
+        || operation.state !== "unknown"
+        || operation.mutationKind !== evidence.mutationKind
+      ) {
+        continue;
+      }
+      const settlement = {
+        kind: "not-applied" as const,
+        code: "protocol-nonapplication-proof",
+        message: "the runtime supplied protocol-proven evidence that the operation was not applied",
+      };
+      const reservation = await durable.queueReservation(operation.operationId);
+      if (reservation) {
+        await broadcastTail(sessionId, () =>
+          deps.queue!.releaseQueueReservation(operation.operationId, settlement));
+        continue;
+      }
+
+      const response:
+        | { kind: "permission" | "question" | "secret"; requestIds: Iterable<string> }
+        | undefined =
+        operation.mutationKind === "permission-reply"
+          ? { kind: "permission", requestIds: facts.openPermissions.keys() }
+          : operation.mutationKind === "question-reply"
+              || operation.mutationKind === "question-reject"
+            ? { kind: "question", requestIds: facts.openQuestions.keys() }
+            : operation.mutationKind === "secret-reply"
+              ? { kind: "secret", requestIds: facts.openSecrets.keys() }
+              : undefined;
+      let settledResponse = false;
+      if (response) {
+        for (const requestId of response.requestIds) {
+          if (evidence.requestId && evidence.requestId !== requestId) continue;
+          const intent = await durable.responseIntent(
+            sessionId,
+            response.kind,
+            requestId,
+          );
+          if (intent?.operationId !== operation.operationId) continue;
+          await broadcastTail(sessionId, () => durable.settleResponseIntent(
+            operation.operationId,
+            settlement,
+          ));
+          settledResponse = true;
+          break;
+        }
+        if (!settledResponse) continue;
+      }
+      if (!response) {
+        await broadcastTail(sessionId, () =>
+          durable.settleOperation(operation.operationId, settlement));
+      }
+    }
+  };
+
+  const settleAcceptedOperations = async (
+    sessionId: string,
+    snapshot: RuntimeSnapshot,
+    facts: LogFacts,
+  ): Promise<void> => {
+    for (const evidence of snapshot.acceptedOperations ?? []) {
+      if (evidence.backendSessionId && evidence.backendSessionId !== snapshot.backendSessionId) {
+        continue;
+      }
+      const operation = await durable.operation(evidence.operationId);
+      if (
+        !operation
+        || operation.sessionId !== sessionId
+        || operation.state !== "unknown"
+        || operation.mutationKind !== evidence.mutationKind
+      ) {
+        continue;
+      }
+
+      const reservation = await durable.queueReservation(operation.operationId);
+      if (reservation) {
+        await broadcastTail(sessionId, () =>
+          deps.queue!.confirmQueueReservation(operation.operationId, evidence.receipt));
+        continue;
+      }
+
+      let settledResponse = false;
+      const responseCandidates: Array<{
+        kind: "permission" | "question" | "secret";
+        requestIds: Iterable<string>;
+      }> = [
+        { kind: "permission", requestIds: facts.openPermissions.keys() },
+        { kind: "question", requestIds: facts.openQuestions.keys() },
+        { kind: "secret", requestIds: facts.openSecrets.keys() },
+      ];
+      for (const candidate of responseCandidates) {
+        for (const requestId of candidate.requestIds) {
+          const intent = await durable.responseIntent(sessionId, candidate.kind, requestId);
+          if (intent?.operationId !== operation.operationId) continue;
+          const completionEvent: CanonicalEventInput = candidate.kind === "permission"
+            ? {
+                type: "permission/resolved",
+                data: {
+                  requestId,
+                  reply: String(intent.payload.reply ?? "once"),
+                  ...(intent.payload.auto === true ? { auto: true } : {}),
+                },
+                ignorable: true,
+              }
+            : candidate.kind === "question"
+              ? {
+                  type: "question/answered",
+                  data: {
+                    requestId,
+                    answers: (intent.payload.answers ?? {}) as JsonObject,
+                  },
+                  ignorable: true,
+                }
+              : {
+                  type: "secret/resolved",
+                  data: {
+                    requestId,
+                    action: String(intent.payload.action ?? "dismiss"),
+                    ...(typeof intent.payload.handle === "string"
+                      ? { handle: intent.payload.handle }
+                      : {}),
+                  },
+                  ignorable: true,
+                };
+          await broadcastTail(sessionId, () => durable.settleResponseIntent(
+            operation.operationId,
+            {
+              kind: "confirmed",
+              ...(evidence.receipt ? { receipt: evidence.receipt } : {}),
+              completionEvent,
+            },
+          ));
+          settledResponse = true;
+          break;
+        }
+        if (settledResponse) break;
+      }
+      if (settledResponse) continue;
+
+      await broadcastTail(sessionId, () => durable.settleOperation(
+        operation.operationId,
+        {
+          kind: "confirmed",
+          ...(evidence.receipt ? { receipt: evidence.receipt } : {}),
+        },
+      ));
+    }
+  };
+
+  const stateComparison = (
+    value: unknown,
+  ): { domain: string; order: number } | undefined => {
+    if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+    const comparison = (value as { comparison?: unknown }).comparison;
+    if (!comparison || typeof comparison !== "object" || Array.isArray(comparison)) {
+      return undefined;
+    }
+    const { domain, order } = comparison as { domain?: unknown; order?: unknown };
+    return typeof domain === "string"
+      && domain.length > 0
+      && typeof order === "number"
+      && Number.isFinite(order)
+      ? { domain, order }
+      : undefined;
+  };
+
+  const causalTerminalStateIsAuthoritative = async (
+    sessionId: string,
+    snapshot: RuntimeSnapshot,
+    operationId: string,
+  ): Promise<boolean> => {
+    const operation = await durable.operation(operationId);
+    if (
+      !operation
+      || operation.state !== "confirmed"
+      || operation.receipt !== snapshot.backendSessionId
+    ) {
+      return false;
+    }
+    let related = operation.sessionId === sessionId
+      && (
+        operation.mutationKind === "session-create"
+        || operation.mutationKind === "session-reset"
+        || operation.mutationKind === "session-revert"
+      );
+    if (!related && operation.mutationKind === "session-fork" && operation.ownerEventSeq) {
+      const owner = (await store.events(operation.sessionId))
+        .find((event) => event.seq === operation.ownerEventSeq);
+      related = owner?.type === "session/fork-intended"
+        && (owner.data as { childSessionId?: unknown }).childSessionId === sessionId;
+    }
+    if (!related) return false;
+
+    // The receipt proves only the state immediately created by this operation.
+    // Fork ordinals belong to the source session and are not comparable with
+    // child ordinals, so any child mutation invalidates a fork receipt.
+    const targetOperations = await durable.operations(sessionId);
+    return operation.sessionId === sessionId
+      ? !targetOperations.some((candidate) => candidate.ordinal > operation.ordinal)
+      : targetOperations.length === 0;
+  };
+
+  const authoritativeSnapshotState = async (
+    sessionId: string,
+    snapshot: RuntimeSnapshot,
+    binding: RuntimeSessionBinding,
+    projection: SessionProjection | undefined,
+  ): Promise<RuntimeSnapshot["state"]> => {
+    const state = snapshot.state;
+    if (state.value === "running") return state;
+    if (
+      state.value === "unknown"
+      && projection?.runtimeBinding?.historyBaseline === "empty"
+    ) {
+      const operations = await durable.operations(sessionId);
+      const create = operations.find((operation) =>
+        operation.mutationKind === "session-create"
+        && operation.state === "confirmed"
+        && operation.receipt === snapshot.backendSessionId);
+      if (
+        create
+        && !operations.some((candidate) => candidate.ordinal > create.ordinal)
+      ) {
+        return { value: "idle", causalOperationId: create.operationId };
+      }
+    }
+    if (state.value === "unknown") return state;
+    const prior = await durable.observationCheckpoint({
+      authorityId: binding.authorityId,
+      location: binding.location,
+      backendSessionId: binding.backendSessionId!,
+      artifactKind: "status",
+      entityId: binding.backendSessionId!,
+    });
+    if (state.value === "idle" && state.causalOperationId) {
+      const sameDurableCause = !prior
+        || (
+          prior.value.state === "idle"
+          && prior.value.causalOperationId === state.causalOperationId
+        );
+      if (
+        sameDurableCause
+        && await causalTerminalStateIsAuthoritative(
+          sessionId,
+          snapshot,
+          state.causalOperationId,
+        )
+      ) {
+        return state;
+      }
+      return { value: "unknown" };
+    }
+
+    const next = state.comparison;
+    if (!next) return { value: "unknown" };
+    if (!prior) return state;
+    const previous = stateComparison(prior.value);
+    if (!previous) {
+      return prior.value.causalOperationId ? state : { value: "unknown" };
+    }
+    if (previous.domain !== next.domain || next.order < previous.order) {
+      return { value: "unknown" };
+    }
+    if (
+      next.order === previous.order
+      && prior.value.state !== state.value
+    ) {
+      return { value: "unknown" };
+    }
+    return state;
+  };
+
+  const reconcileFlights = new Map<string, Promise<void>>();
+  const reconcileSession = (
+    sessionId: string,
+    proj: SessionProjection,
+    rt: AgentRuntime,
+    reason: string,
+    ignoredOperationId?: string,
+  ): Promise<void> => {
+    const existing = reconcileFlights.get(sessionId);
+    if (existing) return existing;
+    const run = (async () => {
+      const started = await broadcastTail(sessionId, () => durable.startReconciliation(sessionId));
+      await updateProjection(sessionId, { status: "reconciling" });
+      try {
+        const project = await projects.get(proj.projectId);
+        const cwd = proj.worktreePath ?? project?.path ?? process.cwd();
+        const binding = await runtimeBinding(rt, proj, cwd);
+        const reconcile = (rt as ReliabilityRuntime).reconcile;
+        if (!binding || !binding.backendSessionId || !reconcile) {
+          await broadcastTail(sessionId, () => durable.settleReconciliation(
+            sessionId,
+            started.ordinal,
+            "unknown",
+            !binding ? "backend session binding is unavailable" : "runtime reconciliation is unavailable",
+          ));
+          await updateProjection(sessionId, { status: "unknown" });
+          return;
+        }
+        const cursor = await durable.observationCursor({
+          authorityId: binding.authorityId,
+          location: binding.location,
+          backendSessionId: binding.backendSessionId,
+          channel: "runtime",
+        });
+        const snapshot = await reconcile.call(
+          rt,
+          { ...binding, reconciliationOrdinal: started.ordinal },
+          cursor,
+        );
+        const current = await durable.reconciliation(sessionId);
+        if (current?.ordinal !== started.ordinal) return;
+        if (
+          snapshot.authorityId !== binding.authorityId
+          || snapshot.generation !== binding.generation
+          || snapshot.backendSessionId !== binding.backendSessionId
+          || snapshot.location.directory !== binding.location.directory
+          || (snapshot.location.workspace ?? "") !== (binding.location.workspace ?? "")
+          || snapshot.reconciliationOrdinal !== started.ordinal
+        ) {
+          throw Object.assign(new Error("runtime reconciliation returned stale or mismatched evidence"), {
+            code: "stale-evidence",
+          });
+        }
+        const currentProjection = await store.projection(sessionId);
+        const authoritativeState = await authoritativeSnapshotState(
+          sessionId,
+          snapshot,
+          binding,
+          currentProjection,
+        );
+
+        const historyBaseline = currentProjection?.runtimeBinding?.historyBaseline;
+        const observations: Parameters<RuntimeDurability["ingestSnapshot"]>[0]["observations"] = [];
+        for (const observed of snapshot.events) {
+          const normalized = canonicalRuntimeEvent(observed.event);
+          observations.push({
+            sessionId,
+            identity: {
+              authorityId: binding.authorityId,
+              generation: binding.generation,
+              location: binding.location,
+              backendSessionId: binding.backendSessionId,
+              artifactKind: normalized.artifactKind,
+              entityId: observed.entityKey,
+              revision: observed.revision,
+            },
+            reconciliationOrdinal: started.ordinal,
+            // A verified fork already copied this exact backend history into
+            // the child log. Claim entity mappings without appending it again.
+            events: historyBaseline === "copied" ? [] : normalized.events,
+          });
+        }
+        for (const permission of snapshot.permissions) {
+          observations.push({
+            sessionId,
+            identity: {
+              authorityId: binding.authorityId,
+              generation: binding.generation,
+              location: binding.location,
+              backendSessionId: binding.backendSessionId,
+              artifactKind: "permission",
+              entityId: permission.requestId,
+              revision: permission.revision ?? "pending",
+            },
+            reconciliationOrdinal: started.ordinal,
+            events: [{
+              type: "permission/requested",
+              data: {
+                requestId: permission.requestId,
+                permission: permission.permission,
+                patterns: permission.patterns,
+                preview: buildPermissionPreview(permission) as unknown as JsonObject,
+                allowedScopes: [...PERMISSION_ALLOWED_SCOPES],
+              },
+              ignorable: true,
+            }],
+          });
+        }
+        for (const question of snapshot.questions) {
+          observations.push({
+            sessionId,
+            identity: {
+              authorityId: binding.authorityId,
+              generation: binding.generation,
+              location: binding.location,
+              backendSessionId: binding.backendSessionId,
+              artifactKind: "question",
+              entityId: question.requestId,
+              revision: question.revision ?? "pending",
+            },
+            reconciliationOrdinal: started.ordinal,
+            events: [{
+              type: "question/asked",
+              data: { requestId: question.requestId, questions: question.questions },
+              ignorable: true,
+            }],
+          });
+        }
+        observations.push({
+          sessionId,
+          identity: {
+            authorityId: binding.authorityId,
+            generation: binding.generation,
+            location: binding.location,
+            backendSessionId: binding.backendSessionId,
+            artifactKind: "status",
+            entityId: binding.backendSessionId,
+            revision: authoritativeState.comparison
+              ? `${authoritativeState.comparison.domain}:${authoritativeState.comparison.order}`
+              : authoritativeState.causalOperationId
+                ? `causal:${authoritativeState.causalOperationId}`
+                : authoritativeState.watermark ?? `unversioned:${authoritativeState.value}`,
+          },
+          reconciliationOrdinal: started.ordinal,
+          events: [{
+            type: "runtime/status-observed",
+            data: {
+              state: authoritativeState.value,
+              ...(authoritativeState.watermark ? { watermark: authoritativeState.watermark } : {}),
+              ...(authoritativeState.comparison
+                ? { comparison: authoritativeState.comparison as unknown as JsonObject }
+                : {}),
+              ...(authoritativeState.causalOperationId
+                ? { causalOperationId: authoritativeState.causalOperationId }
+                : {}),
+              authorityId: binding.authorityId,
+              generation: binding.generation,
+              reason,
+            },
+            ignorable: true,
+          }],
+          ...(authoritativeState.value !== "unknown"
+            ? {
+                checkpoint: {
+                  value: {
+                    state: authoritativeState.value,
+                    ...(authoritativeState.watermark
+                      ? { watermark: authoritativeState.watermark }
+                      : {}),
+                    ...(authoritativeState.comparison
+                      ? { comparison: authoritativeState.comparison as unknown as JsonObject }
+                      : {}),
+                    ...(authoritativeState.causalOperationId
+                      ? { causalOperationId: authoritativeState.causalOperationId }
+                      : {}),
+                  },
+                },
+              }
+            : {}),
+        });
+        if (snapshot.cursorAfter) {
+          const finalObservation = observations.at(-1)!;
+          finalObservation.cursor = {
+            key: {
+              authorityId: binding.authorityId,
+              location: binding.location,
+              backendSessionId: binding.backendSessionId,
+              channel: "runtime",
+            },
+            after: snapshot.cursorAfter,
+          };
+        }
+        const snapshotIngestion = await durable.ingestSnapshot({
+          sessionId,
+          observations,
+        });
+        for (const result of snapshotIngestion.observations) {
+          if (result.kind !== "applied") continue;
+          for (const event of result.events) broadcast.event(event);
+        }
+        if (historyBaseline) {
+          await applyProjection(sessionId, (current) => {
+            if (!current.runtimeBinding) return current;
+            const runtimeBinding = { ...current.runtimeBinding };
+            delete runtimeBinding.historyBaseline;
+            return { ...current, runtimeBinding, updatedAt: Date.now() };
+          });
+          if (historyBaseline === "import") {
+            await appendAndBroadcast(
+              sessionId,
+              "session/history-imported",
+              {},
+              { ignorable: true },
+            );
+          }
+        }
+
+        let facts = await logFacts(sessionId);
+        await settleAcceptedOperations(sessionId, snapshot, facts);
+        facts = await logFacts(sessionId);
+        await settleProvenOperationNonapplications(sessionId, snapshot, facts);
+        facts = await logFacts(sessionId);
+        const unresolved = await blockingOperation(sessionId, ignoredOperationId);
+        const nextStatus = unresolved
+          ? "unknown"
+          : authoritativeState.value === "running"
+            ? (openRequestTotal(facts) > 0 ? "waiting" : "working")
+            : authoritativeState.value === "idle"
+              ? (openRequestTotal(facts) > 0 ? "waiting" : "idle")
+              : authoritativeState.value === "unknown"
+                ? "unknown"
+                : "failed";
+        const barrierState = unresolved
+          ? "blocked"
+          : authoritativeState.value === "unknown"
+            ? "unknown"
+            : "ready";
+        await broadcastTail(sessionId, () => durable.settleReconciliation(
+          sessionId,
+          started.ordinal,
+          barrierState,
+          unresolved
+            ? `operation ${unresolved.operationId} remains ${unresolved.state}`
+            : authoritativeState.value === "unknown"
+              ? "runtime status evidence is insufficient"
+              : undefined,
+        ));
+        await updateProjection(sessionId, { status: nextStatus });
+      } catch (error) {
+        const current = await durable.reconciliation(sessionId);
+        if (current?.ordinal === started.ordinal) {
+          await broadcastTail(sessionId, () => durable.settleReconciliation(
+            sessionId,
+            started.ordinal,
+            "unknown",
+            error instanceof Error ? error.message : "runtime reconciliation failed",
+          ));
+          await updateProjection(sessionId, { status: "unknown" });
+        }
+      }
+    })().finally(() => {
+      reconcileFlights.delete(sessionId);
+    });
+    reconcileFlights.set(sessionId, run);
+    return run;
+  };
+  const reconcileUnderLock = (
+    sessionId: string,
+    projection: SessionProjection,
+    runtime: AgentRuntime,
+    reason: string,
+  ): Promise<void> =>
+    withSessionLock(sessionId, () =>
+      reconcileSession(sessionId, projection, runtime, reason));
+  const scheduleReconciliation = (
+    sessionId: string,
+    projection: SessionProjection,
+    runtime: AgentRuntime,
+    reason: string,
+  ): void => {
+    queueMicrotask(() => {
+      void reconcileUnderLock(sessionId, projection, runtime, reason).catch((error) => {
+        console.error(`[polyth] runtime reconciliation failed for ${sessionId}`, error);
+      });
+    });
+  };
+  runtimes.onRestart?.(async (runtime) => {
+    const reconciliations: Promise<void>[] = [];
+    for (const [sessionId, wired] of sessionRuntime) {
+      if (wired !== runtime) continue;
+      const projection = await store.projection(sessionId);
+      if (projection) {
+        reconciliations.push(reconcileUnderLock(
+          sessionId,
+          projection,
+          runtime,
+          "runtime-generation-replaced",
+        ));
+      }
+    }
+    await settleAllOrThrow(reconciliations);
+  });
+
   // UX-COMPOSER-DISC: the projection records the selected profile id or its
   // explicit clear; spread-merge cannot delete a key, so this owns removal.
   const setProjectionProfile = async (sessionId: string, id: string | undefined) => {
@@ -380,48 +1435,90 @@ export function createSessionService(deps: {
     return resolveAutoAccept(sessionId, (x) => deps.autoAccept!.get(x), (x) => parents.get(x));
   };
 
-  const onRuntimeEvent = async (sessionId: string, ev: RuntimeEvent) => {
+  const onRuntimeEvent = async (
+    sessionId: string,
+    ev: RuntimeEvent,
+    options: {
+      persist?: typeof appendAndBroadcast;
+      sideEffects?: boolean;
+      runtimeEventSeq?: number;
+    } = {},
+  ) => {
+    const persist = options.persist ?? appendAndBroadcast;
+    const sideEffects = options.sideEffects ?? true;
+    const runtimeEventSeq = options.runtimeEventSeq;
     // invariant: model-visible content hits the log before any UI sees it
     switch (ev.type) {
       case "turn/started":
-        lastTurnId.set(sessionId, ev.turnId);
-        admitting.delete(sessionId);
-        turnReply.set(sessionId, new Map());
-        await appendAndBroadcast(sessionId, "turn/started", { turnId: ev.turnId }, { ignorable: true });
-        await updateProjection(sessionId, { status: "working", lastTurnAt: Date.now() });
+        await persist(sessionId, "turn/started", { turnId: ev.turnId }, { ignorable: true });
+        if (sideEffects) {
+          const applied = await applyRuntimeProjection(
+            sessionId,
+            runtimeEventSeq,
+            (current) => ({
+              ...current,
+              status: "working",
+              lastTurnAt: Date.now(),
+              updatedAt: Date.now(),
+            }),
+          );
+          if (applied) {
+            lastTurnId.set(sessionId, ev.turnId);
+            admitting.delete(sessionId);
+            turnReply.set(sessionId, new Map());
+          }
+        }
         break;
       case "session/title-generated": {
         if (!autoTitleRequested.has(sessionId)) break;
         const current = await store.projection(sessionId);
         if (!current || !isPlaceholderTitle(current.title, sessionId)) {
-          autoTitleRequested.delete(sessionId);
+          if (sideEffects) autoTitleRequested.delete(sessionId);
           break;
         }
         const title = ev.title.trim().slice(0, 200);
         if (!title || isPlaceholderTitle(title, sessionId)) break;
-        autoTitleRequested.delete(sessionId);
-        await appendAndBroadcast(
+        await persist(
           sessionId,
           "session/metadata-changed",
           { title, source: "opencode" },
           { ignorable: true, producerPlugin: "backend-opencode" },
         );
-        await updateProjection(sessionId, { title });
+        if (sideEffects) {
+          const applied = await applyRuntimeProjection(
+            sessionId,
+            runtimeEventSeq,
+            (current) => ({ ...current, title, updatedAt: Date.now() }),
+          );
+          if (applied) autoTitleRequested.delete(sessionId);
+        }
         break;
       }
       case "turn/stopped":
-        await appendAndBroadcast(sessionId, "turn/stopped", {
+        await persist(sessionId, "turn/stopped", {
           turnId: lastTurnId.get(sessionId) ?? ev.type, reason: ev.reason, ...(ev.error ? { error: ev.error } : {}),
         }, { ignorable: true });
-        lastTurnId.delete(sessionId);
-        admitting.delete(sessionId);
-        autoTitleRequested.delete(sessionId);
-        await updateProjection(sessionId, { status: ev.reason === "error" ? "failed" : "idle" });
-        deps.notify?.turnStopped(sessionId, ev.reason);
-        if (ev.reason === "completed") hooks.onTurnCompleted?.(sessionId, replyText(sessionId));
-        // FIFO dispatch of queued follow-ups; never into an error state (a
-        // failing session would silently burn the whole queue otherwise).
-        if (ev.reason !== "error") void dispatchQueue(sessionId);
+        if (sideEffects) {
+          const applied = await applyRuntimeProjection(
+            sessionId,
+            runtimeEventSeq,
+            (current) => ({
+              ...current,
+              status: ev.reason === "error" ? "failed" : "idle",
+              updatedAt: Date.now(),
+            }),
+          );
+          if (applied) {
+            lastTurnId.delete(sessionId);
+            admitting.delete(sessionId);
+            autoTitleRequested.delete(sessionId);
+            deps.notify?.turnStopped(sessionId, ev.reason);
+            if (ev.reason === "completed") hooks.onTurnCompleted?.(sessionId, replyText(sessionId));
+            // FIFO dispatch of queued follow-ups; never into an error state (a
+            // failing session would silently burn the whole queue otherwise).
+            if (ev.reason !== "error") void dispatchQueue(sessionId);
+          }
+        }
         break;
       case "permission/requested": {
         const { type: _t, ...reqData } = ev;
@@ -436,21 +1533,28 @@ export function createSessionService(deps: {
           }) as unknown as JsonObject,
           allowedScopes: [...PERMISSION_ALLOWED_SCOPES],
         };
-        await appendAndBroadcast(sessionId, "permission/requested", enriched, { ignorable: true });
-        const proj = await store.projection(sessionId);
-        const verdict = permissions.evaluate(ev.permission, ev.patterns, proj?.projectId, sessionId);
-        if (verdict === "allow" || verdict === "deny") {
-          const reply = verdict === "allow" ? "once" : "reject";
-          await appendAndBroadcast(sessionId, "permission/resolved", { requestId: ev.requestId, reply }, { ignorable: true });
-          await sessionRuntime.get(sessionId)?.replyPermission(sessionId, ev.requestId, reply);
-        } else if (await effectiveAutoAccept(sessionId)) {
-          // F18: policy-approved. Both events land at once so the log stays
-          // truthful while the UI never shows a banner; deny rules above win.
-          await appendAndBroadcast(sessionId, "permission/resolved", { requestId: ev.requestId, reply: "once", auto: true }, { ignorable: true });
-          await sessionRuntime.get(sessionId)?.replyPermission(sessionId, ev.requestId, "once");
-        } else {
-          await updateProjection(sessionId, { status: "waiting" });
-          deps.notify?.attention(sessionId, "permission", ev.requestId);
+        await persist(sessionId, "permission/requested", enriched, { ignorable: true });
+        if (sideEffects) {
+          const applied = await applyRuntimeProjection(
+            sessionId,
+            runtimeEventSeq,
+            (current) => ({ ...current, status: "waiting", updatedAt: Date.now() }),
+          );
+          if (!applied) break;
+          const proj = await store.projection(sessionId);
+          const verdict = permissions.evaluate(ev.permission, ev.patterns, proj?.projectId, sessionId);
+          if (verdict === "allow" || verdict === "deny") {
+            const reply = verdict === "allow" ? "once" : "reject";
+            await replyPermissionCore(sessionId, ev.requestId, reply).catch((error) => {
+              console.warn(`[polyth] policy permission response remains unresolved for ${sessionId}`, error);
+            });
+          } else if (await effectiveAutoAccept(sessionId)) {
+            await replyPermissionCore(sessionId, ev.requestId, "once", undefined, true).catch((error) => {
+              console.warn(`[polyth] auto-accept permission remains unresolved for ${sessionId}`, error);
+            });
+          } else {
+            deps.notify?.attention(sessionId, "permission", ev.requestId);
+          }
         }
         break;
       }
@@ -459,20 +1563,34 @@ export function createSessionService(deps: {
           .map((question) => secureRequest(ev.requestId, question))
           .find((candidate): candidate is SecretRequestData => candidate !== null);
         if (request) {
-          await appendAndBroadcast(
+          await persist(
             sessionId,
             "secret/requested",
             request as unknown as JsonObject,
             { ignorable: true },
           );
-          await updateProjection(sessionId, { status: "waiting" });
-          deps.notify?.attention(sessionId, "question");
+          if (sideEffects) {
+            const applied = await applyRuntimeProjection(
+              sessionId,
+              runtimeEventSeq,
+              (current) => ({ ...current, status: "waiting", updatedAt: Date.now() }),
+            );
+            if (applied) deps.notify?.attention(sessionId, "question");
+          }
           break;
         }
         const { type: _t, ...qData } = ev;
-        await appendAndBroadcast(sessionId, "question/asked", qData as unknown as JsonObject, { ignorable: true });
-        await updateProjection(sessionId, { status: "waiting" });
-        deps.notify?.attention(sessionId, "question", ev.requestId, ev.questions);
+        await persist(sessionId, "question/asked", qData as unknown as JsonObject, { ignorable: true });
+        if (sideEffects) {
+          const applied = await applyRuntimeProjection(
+            sessionId,
+            runtimeEventSeq,
+            (current) => ({ ...current, status: "waiting", updatedAt: Date.now() }),
+          );
+          if (applied) {
+            deps.notify?.attention(sessionId, "question", ev.requestId, ev.questions);
+          }
+        }
         break;
       }
       case "secret/requested": {
@@ -484,37 +1602,49 @@ export function createSessionService(deps: {
           ...(ev.kind ? { kind: ev.kind } : {}),
           existing: deps.secureSafe?.hasHandle(ev.handle) ?? ev.existing ?? false,
         };
-        await appendAndBroadcast(
+        await persist(
           sessionId,
           "secret/requested",
           request as unknown as JsonObject,
           { ignorable: true },
         );
-        await updateProjection(sessionId, { status: "waiting" });
-        deps.notify?.attention(sessionId, "question");
+        if (sideEffects) {
+          const applied = await applyRuntimeProjection(
+            sessionId,
+            runtimeEventSeq,
+            (current) => ({ ...current, status: "waiting", updatedAt: Date.now() }),
+          );
+          if (applied) deps.notify?.attention(sessionId, "question");
+        }
         break;
       }
       case "usage/recorded": {
         const { type: _t, ...uData } = ev;
-        await appendAndBroadcast(sessionId, "usage/recorded", uData as unknown as JsonObject, { ignorable: true });
+        await persist(sessionId, "usage/recorded", uData as unknown as JsonObject, { ignorable: true });
         // Token/cost increments are read-modify-written inside one projection
         // patch so back-to-back callbacks apply exactly once each.
-        await applyProjection(sessionId, (proj) => ({
-          ...proj,
-          tokenTotals: {
-            input: (proj.tokenTotals?.input ?? 0) + ev.tokens.input,
-            output: (proj.tokenTotals?.output ?? 0) + ev.tokens.output,
-            ...(ev.tokens.reasoning ? { reasoning: (proj.tokenTotals?.reasoning ?? 0) + ev.tokens.reasoning } : {}),
-          },
-          costTotal: (proj.costTotal ?? 0) + (ev.cost ?? 0),
-          updatedAt: Date.now(),
-        }));
-        hooks.onUsage?.(sessionId, ev.tokens);
+        if (sideEffects) {
+          const applied = await applyRuntimeProjection(
+            sessionId,
+            runtimeEventSeq,
+            (proj) => ({
+              ...proj,
+              tokenTotals: {
+                input: (proj.tokenTotals?.input ?? 0) + ev.tokens.input,
+                output: (proj.tokenTotals?.output ?? 0) + ev.tokens.output,
+                ...(ev.tokens.reasoning ? { reasoning: (proj.tokenTotals?.reasoning ?? 0) + ev.tokens.reasoning } : {}),
+              },
+              costTotal: (proj.costTotal ?? 0) + (ev.cost ?? 0),
+              updatedAt: Date.now(),
+            }),
+          );
+          if (applied) hooks.onUsage?.(sessionId, ev.tokens);
+        }
         break;
       }
       case "session/compacted": {
         const { type: _t, ...data } = ev;
-        await appendAndBroadcast(
+        await persist(
           sessionId,
           "session/compacted",
           data as unknown as JsonObject,
@@ -524,7 +1654,7 @@ export function createSessionService(deps: {
       }
       case "compaction/part-recorded": {
         const { type: _t, ...data } = ev;
-        await appendAndBroadcast(
+        await persist(
           sessionId,
           "compaction/part-recorded",
           data as unknown as JsonObject,
@@ -535,13 +1665,111 @@ export function createSessionService(deps: {
       default: {
         // model-visible payloads pass through verbatim (minus the envelope `type`)
         const { type: _t, ...rest } = ev;
-        if (ev.type === "assistant/message" && ev.text.trim()) {
+        if (sideEffects && ev.type === "assistant/message" && ev.text.trim()) {
           let parts = turnReply.get(sessionId);
           if (!parts) turnReply.set(sessionId, (parts = new Map()));
           parts.set(ev.partId, ev.text);
         }
-        await appendAndBroadcast(sessionId, ev.type, rest as unknown as JsonObject);
+        await persist(sessionId, ev.type, rest as unknown as JsonObject);
       }
+    }
+  };
+
+  const captureRuntimeEvent = async (
+    sessionId: string,
+    event: RuntimeEvent,
+  ): Promise<CanonicalEventInput[]> => {
+    const captured: CanonicalEventInput[] = [];
+    await onRuntimeEvent(sessionId, event, {
+      sideEffects: false,
+      persist: async (_sessionId, type, data, options) => {
+        captured.push({ type, data, ...options });
+        return undefined as unknown as SessionEvent;
+      },
+    });
+    return captured;
+  };
+
+  const ingestRuntimeObservation = async (
+    sessionId: string,
+    observation: RuntimeObservation,
+  ): Promise<void> => {
+    const batches: CanonicalEventInput[][] = [];
+    for (const event of observation.events) {
+      batches.push(await captureRuntimeEvent(sessionId, event));
+    }
+    const canonicalEvents = batches.flat();
+    if (observation.uncertainty) {
+      canonicalEvents.push({
+        type: "reconciliation/uncertainty-recorded",
+        data: {
+          entityKey: observation.entityKey,
+          code: observation.uncertainty.code,
+          message: observation.uncertainty.message,
+        },
+        ignorable: true,
+        producerPlugin: "backend-opencode",
+      });
+    }
+    const ingested = await durable.ingestObservation({
+      sessionId,
+      identity: observation.identity,
+      reconciliationOrdinal: observation.reconciliationOrdinal,
+      events: canonicalEvents,
+      ...(observation.checkpoint ? { checkpoint: observation.checkpoint } : {}),
+      ...(observation.cursorAfter
+        ? {
+            cursor: {
+              key: {
+                authorityId: observation.identity.authorityId,
+                location: observation.identity.location,
+                backendSessionId: observation.identity.backendSessionId,
+                channel: observation.channel,
+              },
+              after: observation.cursorAfter,
+            },
+          }
+        : {}),
+    });
+
+    let persistedIndex = 0;
+    for (let index = 0; index < observation.events.length; index += 1) {
+      const expectedCount = batches[index]!.length;
+      if (expectedCount === 0) continue;
+      const runtimeEventSeq = Math.max(
+        ...ingested.events
+          .slice(persistedIndex, persistedIndex + expectedCount)
+          .map((event) => event.seq),
+      );
+      let used = 0;
+      await onRuntimeEvent(sessionId, observation.events[index]!, {
+        persist: async (_sessionId, type) => {
+          const persisted = ingested.events[persistedIndex++];
+          if (!persisted || persisted.type !== type || used >= expectedCount) {
+            throw new Error("runtime observation canonical batch did not match its persisted events");
+          }
+          used += 1;
+          if (ingested.kind === "applied") broadcast.event(persisted);
+          return persisted;
+        },
+        runtimeEventSeq,
+      });
+      if (used !== expectedCount) {
+        throw new Error("runtime observation did not consume its complete canonical batch");
+      }
+    }
+    const uncertainty = observation.uncertainty
+      ? ingested.events[persistedIndex++]
+      : undefined;
+    if (
+      observation.uncertainty
+      && uncertainty?.type !== "reconciliation/uncertainty-recorded"
+    ) {
+      throw new Error("runtime observation uncertainty did not match its persisted event");
+    }
+    if (uncertainty && ingested.kind === "applied") broadcast.event(uncertainty);
+    if (persistedIndex !== ingested.events.length) {
+      throw new Error("runtime observation left persisted events unconsumed");
     }
   };
 
@@ -549,7 +1777,8 @@ export function createSessionService(deps: {
     if (sessionRuntime.has(sessionId)) return;
     sessionRuntime.set(sessionId, rt);
     if (runtimeSubs.has(rt)) return;
-    runtimeSubs.set(rt, rt.onEvent((sid, ev) => {
+    const subscriptions: Disposable[] = [];
+    subscriptions.push(rt.onEvent((sid, ev) => {
       // deliver only to sessions currently wired to this runtime — the same
       // filter the old per-session closures applied, minus the listener pile-up.
       if (sessionRuntime.get(sid) !== rt) return;
@@ -559,6 +1788,32 @@ export function createSessionService(deps: {
         console.error(`[polyth] runtime event handling failed for ${sid}`, err);
       });
     }));
+    if (rt.onObservation) {
+      subscriptions.push(rt.onObservation((sid, observation) => {
+        if (sessionRuntime.get(sid) !== rt) return;
+        void withSessionLock(sid, () => ingestRuntimeObservation(sid, observation)).catch((err) => {
+          console.error(`[polyth] runtime observation handling failed for ${sid}`, err);
+        });
+      }));
+    }
+    if (rt.onLifecycle) {
+      subscriptions.push(rt.onLifecycle((notification: RuntimeLifecycleNotification) => {
+        if (notification.type !== "stream-disconnected"
+          && notification.type !== "stream-connected"
+          && notification.type !== "endpoint-replaced") return;
+        for (const [sid, wired] of sessionRuntime) {
+          if (wired !== rt) continue;
+          void (async () => {
+            const projection = await store.projection(sid);
+            if (!projection) return;
+            await reconcileUnderLock(sid, projection, rt, notification.type);
+          })().catch((err) => {
+            console.error(`[polyth] runtime lifecycle reconciliation failed for ${sid}`, err);
+          });
+        }
+      }));
+    }
+    runtimeSubs.set(rt, subscriptions);
   };
 
   const unwire = (sessionId: string) => {
@@ -569,24 +1824,88 @@ export function createSessionService(deps: {
     behaviorLogged.delete(sessionId);
     autoTitleRequested.delete(sessionId);
     for (const wired of sessionRuntime.values()) if (wired === rt) return;
-    runtimeSubs.get(rt)?.dispose();
+    for (const subscription of runtimeSubs.get(rt) ?? []) subscription.dispose();
     runtimeSubs.delete(rt);
   };
 
-  const ensureWired = async (sessionId: string, proj: SessionProjection): Promise<AgentRuntime> => {
+  const ensureWired = async (
+    sessionId: string,
+    proj: SessionProjection,
+    admittedPreparedOperationId?: string,
+  ): Promise<AgentRuntime> => {
     let rt = sessionRuntime.get(sessionId);
     if (!rt) {
-      // server restarted: recreate the backend session; canonical log remains UI truth.
-      // ponytail: model-side history is not replayed into the backend here (M2: summary injection).
       const project = await projects.get(proj.projectId);
       const cwd = proj.worktreePath ?? project?.path ?? process.cwd();
       rt = await runtimes.forProject(proj.projectId, cwd);
-      await rt.ensureSession({
-        projectId: proj.projectId, title: proj.title, sessionId, cwd,
-        ...(proj.backendSessionId ? { backendSessionId: proj.backendSessionId } : {}),
-        ...(proj.model ? { model: proj.model } : {}), ...(proj.agent ? { agent: proj.agent } : {}),
-      });
+      let attachedProjection = proj;
+      // A missing binding after an unknown create is recovered only from an
+      // exact protocol receipt. Listing/title similarity is deliberately not
+      // enough and this path never issues another create.
+      if (!attachedProjection.backendSessionId) {
+        const createOperation = (await durable.operations(sessionId)).find((operation) =>
+          operation.mutationKind === "session-create"
+          && (operation.state === "unknown" || operation.state === "confirmed"));
+        const confirmedBackendId =
+          createOperation?.state === "confirmed" ? createOperation.receipt : undefined;
+        const matches = createOperation?.state === "unknown"
+          ? (await boundedRuntimeAwait(rt.sessions(), `recover-create:${sessionId}`))
+              .filter((candidate) => candidate.operationId === createOperation.operationId)
+          : [];
+        const recoveredBackendId = confirmedBackendId
+          ?? (matches.length === 1 ? matches[0]!.id : undefined);
+        if (createOperation && recoveredBackendId) {
+          if (createOperation.state === "unknown") {
+            await broadcastTail(sessionId, () => durable.settleOperation(
+              createOperation.operationId,
+              { kind: "confirmed", receipt: recoveredBackendId },
+            ));
+          }
+          attachedProjection = {
+            ...attachedProjection,
+            backendSessionId: recoveredBackendId,
+            status: "reconciling",
+            updatedAt: Date.now(),
+          };
+          await store.upsertProjection(attachedProjection);
+          broadcast.projection(attachedProjection);
+        } else {
+          await updateProjection(sessionId, { status: "unknown" });
+          throw Object.assign(new Error("backend session creation outcome is unknown"), {
+            code: "outcome-unknown",
+          });
+        }
+      }
+      // Validate/persist the durable endpoint binding before the facade is
+      // allowed to register an existing backend ID in its in-memory map.
+      await runtimeBinding(rt, attachedProjection, cwd);
+      try {
+        await boundedRuntimeAwait(
+          rt.ensureSession({
+            projectId: attachedProjection.projectId,
+            title: attachedProjection.title,
+            sessionId,
+            cwd,
+            backendSessionId: attachedProjection.backendSessionId,
+            ...(attachedProjection.model ? { model: attachedProjection.model } : {}),
+            ...(attachedProjection.agent ? { agent: attachedProjection.agent } : {}),
+          }),
+          `reattach:${sessionId}`,
+        );
+      } catch (error) {
+        await updateProjection(sessionId, { status: "unknown" });
+        throw error;
+      }
       wire(sessionId, rt);
+      if (typeof (rt as ReliabilityRuntime).reconcile === "function") {
+        await reconcileSession(
+          sessionId,
+          attachedProjection,
+          rt,
+          "session-reattached",
+          admittedPreparedOperationId,
+        );
+      }
     }
     return rt;
   };
@@ -646,6 +1965,24 @@ export function createSessionService(deps: {
     if (!proj) throw Object.assign(new Error("session not found"), { code: "not-found" });
     if (proj.status === "archived") {
       throw Object.assign(new Error("unavailable while the session is archived"), { code: "conflict" });
+    }
+    if (proj.status === "reconciling" || proj.status === "unknown") {
+      throw Object.assign(new Error(`unavailable while the session is ${proj.status}`), { code: "conflict" });
+    }
+    const reconciliation = await durable.reconciliation(sessionId);
+    if (reconciliation?.state === "reconciling"
+      || reconciliation?.state === "blocked"
+      || reconciliation?.state === "unknown") {
+      throw Object.assign(new Error(`unavailable while reconciliation is ${reconciliation.state}`), {
+        code: "conflict",
+      });
+    }
+    const unresolvedOperation = await blockingOperation(sessionId);
+    if (unresolvedOperation) {
+      throw Object.assign(
+        new Error(`unavailable while operation ${unresolvedOperation.operationId} is ${unresolvedOperation.state}`),
+        { code: "conflict" },
+      );
     }
     if (turnActive(sessionId)) {
       throw Object.assign(new Error("unavailable while a turn is running"), { code: "conflict" });
@@ -722,18 +2059,102 @@ export function createSessionService(deps: {
     }
   };
 
+  const runResponseOperation = async <T, R>(
+    operation: DurableOperation,
+    call: (operationId: string) => Promise<R | MutationOutcome<T>>,
+    confirmed: (value: R) => T,
+    completionEvent: { type: string; data: JsonObject; ignorable?: boolean },
+  ): Promise<MutationOutcome<T>> =>
+    runPreparedOperation(operation, call, confirmed, async (outcome) => {
+      if (outcome.kind === "confirmed") {
+        await broadcastTail(operation.sessionId, () => durable.settleResponseIntent(
+          operation.operationId,
+          {
+            kind: "confirmed",
+            ...(outcome.receipt ? { receipt: outcome.receipt } : {}),
+            completionEvent,
+          },
+        ));
+      } else if (outcome.kind === "rejected") {
+        await broadcastTail(operation.sessionId, () => durable.settleResponseIntent(
+          operation.operationId,
+          { kind: "rejected", code: outcome.code, message: outcome.message },
+        ));
+      } else {
+        await broadcastTail(operation.sessionId, () => durable.settleResponseIntent(
+          operation.operationId,
+          {
+            kind: "unknown",
+            code: "runtime-outcome-unknown",
+            message: outcome.message,
+          },
+        ));
+      }
+    });
+
+  const assertChosenIntent = (
+    choice: Awaited<ReturnType<RuntimeDurability["chooseResponseIntent"]>>,
+    expected: JsonObject,
+  ): DurableOperation => {
+    if (choice.kind === "chosen") return choice.operation;
+    if (JSON.stringify(choice.intent.payload) !== JSON.stringify(expected)) {
+      throw Object.assign(new Error("a different response already won this request"), {
+        code: "conflict",
+        operationId: choice.operation.operationId,
+      });
+    }
+    if (choice.operation.state !== "prepared") {
+      throw Object.assign(new Error(`response is already ${choice.operation.state}`), {
+        code: "conflict",
+        operationId: choice.operation.operationId,
+      });
+    }
+    // A crash before claim leaves a prepared response intent that is safe to
+    // resume with the same durable operation identity.
+    return choice.operation;
+  };
+
   /** Atomic send-time arbitration: reject open questions and deny open
    *  permissions of this exact session before the new message is admitted.
    *  Resolution events precede the queue/user events in the durable log. */
   const dismissPendingRequests = async (sessionId: string, rt: AgentRuntime): Promise<void> => {
     const facts = await logFacts(sessionId);
     for (const rid of [...facts.openPermissions.keys()]) {
-      await appendAndBroadcast(sessionId, "permission/resolved", { requestId: rid, reply: "reject" }, { ignorable: true });
-      await rt.replyPermission(sessionId, rid, "reject").catch(() => {});
+      const choice = await broadcastTail(sessionId, () => durable.chooseResponseIntent({
+        kind: "permission",
+        sessionId,
+        requestId: rid,
+        reply: "reject",
+      }));
+      const operation = assertChosenIntent(choice, { reply: "reject" });
+      const outcome = await runResponseOperation<Record<string, never>, void>(
+        operation,
+        (operationId) => rt.replyPermissionOperation
+          ? rt.replyPermissionOperation(sessionId, rid, "reject", operationId)
+          : rt.replyPermission(sessionId, rid, "reject"),
+        () => ({}),
+        { type: "permission/resolved", data: { requestId: rid, reply: "reject" }, ignorable: true },
+      );
+      if (outcome.kind !== "confirmed") throw outcomeError(outcome);
     }
     for (const rid of [...facts.openQuestions.keys()]) {
-      await appendAndBroadcast(sessionId, "question/answered", { requestId: rid, rejected: true }, { ignorable: true });
-      await rt.replyQuestion(sessionId, rid, { action: "reject" }).catch(() => {});
+      const choice = await broadcastTail(sessionId, () => durable.chooseResponseIntent({
+        kind: "question",
+        sessionId,
+        requestId: rid,
+        answers: {},
+        reject: true,
+      }));
+      const operation = assertChosenIntent(choice, { answers: {}, reject: true });
+      const outcome = await runResponseOperation<Record<string, never>, void>(
+        operation,
+        (operationId) => rt.replyQuestionOperation
+          ? rt.replyQuestionOperation(sessionId, rid, { action: "reject" }, operationId)
+          : rt.replyQuestion(sessionId, rid, { action: "reject" }),
+        () => ({}),
+        { type: "question/answered", data: { requestId: rid, rejected: true }, ignorable: true },
+      );
+      if (outcome.kind !== "confirmed") throw outcomeError(outcome);
     }
     for (const [rid, requested] of [...facts.openSecrets]) {
       const handle = (requested.data as { handle?: string }).handle;
@@ -742,9 +2163,170 @@ export function createSessionService(deps: {
         action: "dismissed",
         ...(handle ? { handle } : {}),
       };
-      await appendAndBroadcast(sessionId, "secret/resolved", result as unknown as JsonObject, { ignorable: true });
-      if (rt.replySecret) await rt.replySecret(sessionId, rid, result).catch(() => {});
-      else await rt.replyQuestion(sessionId, rid, { action: "reject" }).catch(() => {});
+      const choice = await broadcastTail(sessionId, () => durable.chooseResponseIntent({
+        kind: "secret",
+        sessionId,
+        requestId: rid,
+        action: "dismiss",
+        ...(handle ? { handle } : {}),
+      }));
+      const operation = assertChosenIntent(choice, {
+        action: "dismiss",
+        ...(handle ? { handle } : {}),
+      });
+      const outcome = await runResponseOperation<Record<string, never>, void>(
+        operation,
+        (operationId) => rt.replySecret
+          ? (rt.replySecretOperation
+              ? rt.replySecretOperation(sessionId, rid, result, operationId)
+              : rt.replySecret(sessionId, rid, result))
+          : (rt.replyQuestionOperation
+              ? rt.replyQuestionOperation(sessionId, rid, { action: "reject" }, operationId)
+              : rt.replyQuestion(sessionId, rid, { action: "reject" })),
+        () => ({}),
+        { type: "secret/resolved", data: result as unknown as JsonObject, ignorable: true },
+      );
+      if (outcome.kind !== "confirmed") throw outcomeError(outcome);
+    }
+  };
+
+  const replyPermissionCore = async (
+    sessionId: string,
+    requestId: string,
+    reply: "once" | "always" | "reject",
+    scope?: "session" | "project",
+    auto = false,
+  ): Promise<void> => {
+    if (reply !== "once" && reply !== "always" && reply !== "reject") {
+      throw Object.assign(new Error("permission reply must be once, always, or reject"), { code: "invalid-input" });
+    }
+    const facts = await logFacts(sessionId);
+    const original = facts.openPermissions.get(requestId);
+    if (!original) {
+      if (facts.requestedPermissions.has(requestId)) {
+        throw Object.assign(new Error("permission request already resolved"), { code: "conflict" });
+      }
+      throw Object.assign(new Error("permission request not found"), { code: "not-found" });
+    }
+    const proj = await store.projection(sessionId);
+    if (!proj) throw Object.assign(new Error("session not found"), { code: "not-found" });
+    const shellRequest = (original.data as { permission?: string }).permission === "shell"
+      ? original
+      : undefined;
+    const rt = shellRequest ? undefined : await ensureWired(sessionId, proj);
+    const expected: JsonObject = { reply, ...(scope ? { scope } : {}) };
+    const choice = await broadcastTail(sessionId, () => durable.chooseResponseIntent({
+      kind: "permission",
+      sessionId,
+      requestId,
+      reply,
+      ...(scope ? { scope } : {}),
+    }));
+    const operation = assertChosenIntent(choice, expected);
+    const completion = {
+      type: "permission/resolved",
+      data: { requestId, reply, ...(scope ? { scope } : {}), ...(auto ? { auto: true } : {}) },
+      ignorable: true,
+    };
+    const outcome = shellRequest
+      ? await runResponseOperation<Record<string, never>, void>(
+          operation,
+          async () => {
+            const data = shellRequest.data as { patterns?: string[]; callId?: string };
+            const command = data.patterns?.[0] ?? "";
+            const callId = data.callId ?? `shell_${randomUUID()}`;
+            await finishShell(sessionId, proj, command, callId, reply === "reject");
+          },
+          () => ({}),
+          completion,
+        )
+      : await runResponseOperation<Record<string, never>, void>(
+          operation,
+          (operationId) => rt!.replyPermissionOperation
+            ? rt!.replyPermissionOperation(sessionId, requestId, reply, operationId)
+            : rt!.replyPermission(sessionId, requestId, reply),
+          () => ({}),
+          completion,
+        );
+    if (outcome.kind !== "confirmed") {
+      if (outcome.kind === "unknown") {
+        await updateProjection(sessionId, { status: "unknown" });
+        if (rt) {
+          scheduleReconciliation(sessionId, proj, rt, "permission-outcome-unknown");
+        }
+      }
+      throw outcomeError(outcome);
+    }
+    if (reply === "always") {
+      const data = original.data as { permission?: string; patterns?: string[] };
+      for (const pattern of data.patterns?.length ? data.patterns : ["*"]) {
+        if (scope === "session") {
+          permissions.addRule({ permission: data.permission ?? "*", pattern, action: "allow", scope: "session", sessionId });
+        } else if (scope === "project") {
+          permissions.addRule({ permission: data.permission ?? "*", pattern, action: "allow", scope: "project", projectId: proj.projectId });
+        } else {
+          permissions.addRule({ permission: data.permission ?? "*", pattern, action: "allow", scope: "user" });
+        }
+      }
+    }
+    if (proj.status === "waiting" && openRequestTotal(await logFacts(sessionId)) === 0) {
+      await updateProjection(sessionId, { status: shellRequest ? "idle" : "working" });
+    }
+  };
+
+  const replyQuestionCore = async (
+    sessionId: string,
+    requestId: string,
+    answers: JsonObject,
+  ): Promise<void> => {
+    const facts = await logFacts(sessionId);
+    const original = facts.openQuestions.get(requestId);
+    if (!original) {
+      if (facts.askedQuestions.has(requestId)) {
+        throw Object.assign(new Error("question request already answered"), { code: "conflict" });
+      }
+      throw Object.assign(new Error("question request not found"), { code: "not-found" });
+    }
+    const proj = await store.projection(sessionId);
+    if (!proj) throw Object.assign(new Error("session not found"), { code: "not-found" });
+    const rt = await ensureWired(sessionId, proj);
+    const reject = Boolean((answers as { __reject?: boolean }).__reject);
+    const expected: JsonObject = { answers, ...(reject ? { reject: true } : {}) };
+    const choice = await broadcastTail(sessionId, () => durable.chooseResponseIntent({
+      kind: "question",
+      sessionId,
+      requestId,
+      answers,
+      ...(reject ? { reject: true } : {}),
+    }));
+    const operation = assertChosenIntent(choice, expected);
+    const questions = Array.isArray((original.data as { questions?: unknown }).questions)
+      ? (original.data as { questions: JsonObject[] }).questions
+      : [];
+    const runtimeAnswer: JsonObject = reject
+      ? { action: "reject" }
+      : openCodeQuestionReply(questions, answers);
+    const outcome = await runResponseOperation<Record<string, never>, void>(
+      operation,
+      (operationId) => rt.replyQuestionOperation
+        ? rt.replyQuestionOperation(sessionId, requestId, runtimeAnswer, operationId)
+        : rt.replyQuestion(sessionId, requestId, runtimeAnswer),
+      () => ({}),
+      {
+        type: "question/answered",
+        data: { requestId, ...(reject ? { rejected: true } : { answers }) },
+        ignorable: true,
+      },
+    );
+    if (outcome.kind !== "confirmed") {
+      if (outcome.kind === "unknown") {
+        await updateProjection(sessionId, { status: "unknown" });
+        scheduleReconciliation(sessionId, proj, rt, "question-outcome-unknown");
+      }
+      throw outcomeError(outcome);
+    }
+    if (proj.status === "waiting" && openRequestTotal(await logFacts(sessionId)) === 0) {
+      await updateProjection(sessionId, { status: "working" });
     }
   };
 
@@ -782,7 +2364,7 @@ export function createSessionService(deps: {
 
   const enqueueMessage = async (
     sessionId: string, text: string, delivery: DeliveryMode, fallbackReason?: string,
-    attachments?: AttachmentRef[],
+    attachments?: AttachmentRef[], sourceOperationId?: string,
   ): Promise<SendResult> => {
     if (!deps.queue) throw Object.assign(new Error("delivery queue unavailable"), { code: "unsupported" });
     const item = await deps.queue.enqueue(sessionId, text, delivery, attachments);
@@ -792,6 +2374,7 @@ export function createSessionService(deps: {
     await appendAndBroadcast(sessionId, "queue/enqueued", {
       queueId: item.id, text, delivery,
       ...(attachments?.length ? { attachments: attachments as unknown as JsonObject[] } : {}),
+      ...(sourceOperationId ? { sourceOperationId } : {}),
     }, { ignorable: true });
     return { queueId: item.id, queued: true };
   };
@@ -800,42 +2383,52 @@ export function createSessionService(deps: {
    *  active stream: re-checked after every await. */
   const dispatchQueue = async (sessionId: string): Promise<void> => {
     if (!deps.queue) return;
-    if (turnActive(sessionId)) return;
-    const proj = await store.projection(sessionId);
-    if (!proj || proj.status === "archived") return;
-    if (turnActive(sessionId)) return;
-    const queued = await deps.queue.queueList(sessionId);
-    if (queued[0] && queueEditHeld(sessionId, queued[0].id)) return;
-    const item = await deps.queue.queueShift(sessionId);
-    if (!item) return;
-    if (turnActive(sessionId)) {
-      // a send raced us between shift and dispatch: put the item back at the front
-      const restored = await deps.queue.enqueue(sessionId, item.text, item.delivery, item.attachments);
-      const rest = await deps.queue.queueList(sessionId);
-      const ids = [restored.id, ...rest.filter((i) => i.id !== restored.id).map((i) => i.id)];
-      if (ids.length > 1) await deps.queue.queueReorder(sessionId, ids);
-      return;
-    }
-    await appendAndBroadcast(sessionId, "queue/dispatched", { queueId: item.id }, { ignorable: true });
     try {
-      // direct admission: dispatch bypasses the FIFO-preservation branch in
-      // send() (which would re-enqueue behind the remaining items forever)
-      const proj2 = await store.projection(sessionId);
-      if (!proj2) return;
-      const rt = await ensureWired(sessionId, proj2);
-      await admitTurn(sessionId, proj2, rt, {
-        text: item.text,
-        ...(item.attachments?.length ? { attachments: item.attachments } : {}),
+      await withSessionLock(sessionId, async () => {
+        if (turnActive(sessionId)) return;
+        const proj = await store.projection(sessionId);
+        if (!proj || proj.status !== "idle") return;
+        const reconciliation = await durable.reconciliation(sessionId);
+        if (reconciliation?.state === "reconciling"
+          || reconciliation?.state === "blocked"
+          || reconciliation?.state === "unknown") return;
+        const queued = await deps.queue!.queueList(sessionId);
+        if (queued[0] && queueEditHeld(sessionId, queued[0].id)) return;
+        const reserved = await broadcastTail(
+          sessionId,
+          () => deps.queue!.reserveQueueHead({ sessionId, mutationKind: "turn-submit" }),
+        );
+        if (reserved.kind === "empty") return;
+        if (reserved.kind === "blocked" && reserved.reservation.operation.state !== "prepared") return;
+        const rt = await ensureWired(
+          sessionId,
+          proj,
+          reserved.reservation.operation.operationId,
+        );
+        const current = await store.projection(sessionId);
+        if (!current || current.status !== "idle" || turnActive(sessionId)) return;
+        await admitTurnCore(sessionId, current, rt, {
+          text: reserved.reservation.queueItem.text,
+          ...(reserved.reservation.queueItem.attachments?.length
+            ? { attachments: reserved.reservation.queueItem.attachments }
+            : {}),
+        }, {
+          operation: reserved.reservation.operation,
+          queueId: reserved.reservation.queueItem.id,
+        });
       });
     } catch (err) {
-      console.error(`[polyth] queued dispatch failed for ${sessionId}`, err);
+      if ((err as { code?: unknown }).code !== "outcome-unknown") {
+        console.error(`[polyth] queued dispatch failed for ${sessionId}`, err);
+      }
     }
   };
 
   /** Expansion + user/message append + startTurn. Callers already decided
    *  admission; this is the single place a text enters the model stream. */
-  const admitTurnCore = async (
+  const admitTurnCoreUnfenced = async (
     sessionId: string, proj: SessionProjection, rt: AgentRuntime, input: UserTurnInput,
+    reserved?: { operation: DurableOperation; queueId: string },
   ): Promise<SendResult> => {
     // /command and #snippet expansion happens before anything is logged, so the
     // durable log holds exactly what the model saw (plus `raw` for the UI).
@@ -857,86 +2450,200 @@ export function createSessionService(deps: {
         ...(input.agent ? { agent: input.agent } : {}),
       });
     }
-    admitting.add(sessionId);
-    try {
-      const model = input.model ?? cmdModel ?? proj.model;
-      const agent = input.agent ?? cmdAgent ?? proj.agent;
-      // Model-visible behavior instructions are logged BEFORE the turn that
-      // first runs under a new revision (worst case after restart: one benign
-      // re-append, which replay tooling dedupes by revision).
-      if (deps.behavior) {
-        const cur = await deps.behavior.current().catch(() => null);
-        if (cur && behaviorLogged.get(sessionId) !== cur.revision) {
-          await appendAndBroadcast(sessionId, "behavior/instructions-applied", {
-            revision: cur.revision, digest: cur.digest, scope: "global",
-          }, { ignorable: true });
-          behaviorLogged.set(sessionId, cur.revision);
-        }
+    const model = input.model ?? cmdModel ?? proj.model;
+    const agent = input.agent ?? cmdAgent ?? proj.agent;
+    // Model-visible behavior instructions are logged BEFORE the turn that
+    // first runs under a new revision (worst case after restart: one benign
+    // re-append, which replay tooling dedupes by revision).
+    if (deps.behavior) {
+      const cur = await deps.behavior.current().catch(() => null);
+      if (cur && behaviorLogged.get(sessionId) !== cur.revision) {
+        await appendAndBroadcast(sessionId, "behavior/instructions-applied", {
+          revision: cur.revision, digest: cur.digest, scope: "global",
+        }, { ignorable: true });
+        behaviorLogged.set(sessionId, cur.revision);
       }
-      const decoration = hooks.beforeTurn
-        ? await hooks.beforeTurn(sessionId, await store.events(sessionId))
-        : null;
-      // Resolved turn configuration lands in the durable log (not just the
-      // mutable profile id), so replay is stable across profile edits. An
-      // explicit clear (null) is recorded too — omitted means inherited.
-      const message = await appendAndBroadcast(sessionId, "user/message", {
-        text, ...(raw !== text ? { raw } : {}),
-        ...(input.githubConflictResolution === true ? { githubConflictResolution: true } : {}),
-        ...(input.attachments ? { attachments: input.attachments as unknown as JsonObject[] } : {}),
-        ...(decoration ? {
-          recoveryContext: decoration.recoveryContext,
-          compactionRecovery: {
-            compactionSeq: decoration.compactionSeq,
-            ...(decoration.goalRestored ? { goalRestored: true } : {}),
-            ...(decoration.pinnedSourceSeqs.length
-              ? { pinnedSourceSeqs: decoration.pinnedSourceSeqs }
-              : {}),
-          },
-        } : {}),
-        ...(input.agentProfileId !== undefined ? { agentProfileId: input.agentProfileId } : {}),
-        ...(input.agentProfileId ? {
-          ...(model ? { resolvedModel: model as unknown as JsonObject } : {}),
-          ...(agent ? { resolvedAgent: agent } : {}),
-        } : {}),
-      });
-      if (input.autoTitle && isPlaceholderTitle(proj.title, sessionId)) autoTitleRequested.add(sessionId);
-      else autoTitleRequested.delete(sessionId);
-      await rt.startTurn({
+    }
+    const decoration = hooks.beforeTurn
+      ? await hooks.beforeTurn(sessionId, await store.events(sessionId))
+      : null;
+    const messageData: JsonObject = {
+      text, ...(raw !== text ? { raw } : {}),
+      ...(reserved ? { queueId: reserved.queueId } : {}),
+      ...(input.githubConflictResolution === true ? { githubConflictResolution: true } : {}),
+      ...(input.attachments ? { attachments: input.attachments as unknown as JsonObject[] } : {}),
+      ...(decoration ? {
+        recoveryContext: decoration.recoveryContext,
+        compactionRecovery: {
+          compactionSeq: decoration.compactionSeq,
+          ...(decoration.goalRestored ? { goalRestored: true } : {}),
+          ...(decoration.pinnedSourceSeqs.length
+            ? { pinnedSourceSeqs: decoration.pinnedSourceSeqs }
+            : {}),
+        },
+      } : {}),
+      ...(input.agentProfileId !== undefined ? { agentProfileId: input.agentProfileId } : {}),
+      ...(input.agentProfileId ? {
+        ...(model ? { resolvedModel: model as unknown as JsonObject } : {}),
+        ...(agent ? { resolvedAgent: agent } : {}),
+      } : {}),
+    };
+    let operation = reserved?.operation;
+    const existingEvents = reserved ? await store.events(sessionId) : [];
+    let message = reserved
+      ? existingEvents.find((event) =>
+          event.type === "user/message"
+          && (event.data as { queueId?: unknown }).queueId === reserved.queueId)
+      : undefined;
+    if (reserved && !message) {
+      const queued = existingEvents.findLast((event) =>
+        event.type === "queue/enqueued"
+        && (event.data as { queueId?: unknown }).queueId === reserved.queueId);
+      const sourceOperationId = (queued?.data as { sourceOperationId?: unknown } | undefined)
+        ?.sourceOperationId;
+      if (typeof sourceOperationId === "string") {
+        const source = await durable.operation(sourceOperationId);
+        message = existingEvents.find((event) =>
+          event.type === "user/message" && event.seq === source?.ownerEventSeq);
+      }
+    }
+    if (!operation) {
+      const prepared = await broadcastTail(sessionId, () => durable.prepareOperation({
         sessionId,
-        text: recoveredUserText(text, decoration?.recoveryContext),
-        ...(input.attachments?.length ? { attachments: input.attachments } : {}),
-        ...(model ? { model } : {}),
-        ...(agent ? { agent } : {}),
-      });
-      if (decoration?.goalRestored) {
-        await appendAndBroadcast(sessionId, "goal/context-restored", {
-          compactionSeq: decoration.compactionSeq,
-          sourceMessageSeq: message.seq,
-        }, { ignorable: true });
-      }
-      if (decoration?.pinnedSourceSeqs.length) {
-        await appendAndBroadcast(sessionId, "context/restored", {
-          compactionSeq: decoration.compactionSeq,
-          sourceMessageSeq: message.seq,
-          pinnedSourceSeqs: decoration.pinnedSourceSeqs,
-        }, { ignorable: true });
-      }
-    } catch (err) {
+        mutationKind: "turn-submit",
+        intentEvent: { type: "user/message", data: messageData },
+      }));
+      operation = prepared.operation;
+      message = prepared.intentEvent;
+    } else if (!message) {
+      // The queue reservation is the transactionally-owned durable intent.
+      // The model-visible message still lands before the claimed network call.
+      message = await appendAndBroadcast(sessionId, "user/message", messageData);
+    }
+
+    admitting.add(sessionId);
+    if (input.autoTitle && isPlaceholderTitle(proj.title, sessionId)) autoTitleRequested.add(sessionId);
+    else autoTitleRequested.delete(sessionId);
+    const outcome = await runPreparedOperation<{ admissionId?: string }, void>(
+      operation,
+      (operationId) => {
+        const request = {
+          sessionId,
+          text: recoveredUserText(text, decoration?.recoveryContext),
+          ...(input.attachments?.length ? { attachments: input.attachments } : {}),
+          ...(model ? { model } : {}),
+          ...(agent ? { agent } : {}),
+        };
+        return rt.startTurnOperation
+          ? rt.startTurnOperation(request, operationId)
+          : rt.startTurn(request);
+      },
+      () => ({}),
+      reserved
+        ? async (settled) => {
+            if (settled.kind === "confirmed") {
+              await broadcastTail(sessionId, () => deps.queue!.confirmQueueReservation(
+                operation!.operationId,
+                settled.receipt,
+              ));
+            } else if (settled.kind === "rejected") {
+              await broadcastTail(sessionId, () => deps.queue!.releaseQueueReservation(
+                operation!.operationId,
+                { kind: "rejected", code: settled.code, message: settled.message },
+              ));
+            } else {
+              await settleOperation(operation!, settled);
+            }
+          }
+        : undefined,
+    );
+    if (outcome.kind !== "confirmed") {
       admitting.delete(sessionId);
       autoTitleRequested.delete(sessionId);
-      await appendAndBroadcast(sessionId, "turn/failed", { error: String(err) }, { ignorable: true });
-      await updateProjection(sessionId, { status: "failed" });
-      throw err;
+      if (outcome.kind === "rejected") {
+        await appendAndBroadcast(sessionId, "turn/failed", {
+          error: outcome.message,
+          operationId: operation.operationId,
+        }, { ignorable: true });
+        await updateProjection(sessionId, { status: "failed" });
+      } else {
+        await updateProjection(sessionId, { status: "unknown" });
+        scheduleReconciliation(sessionId, proj, rt, "mutation-outcome-unknown");
+      }
+      throw outcomeError(outcome);
+    }
+    if (decoration?.goalRestored) {
+      await appendAndBroadcast(sessionId, "goal/context-restored", {
+        compactionSeq: decoration.compactionSeq,
+        sourceMessageSeq: message!.seq,
+      }, { ignorable: true });
+    }
+    if (decoration?.pinnedSourceSeqs.length) {
+      await appendAndBroadcast(sessionId, "context/restored", {
+        compactionSeq: decoration.compactionSeq,
+        sourceMessageSeq: message!.seq,
+        pinnedSourceSeqs: decoration.pinnedSourceSeqs,
+      }, { ignorable: true });
     }
     return { turnId: randomUUID() };
+  };
+
+  const admitTurnCore = (
+    sessionId: string, proj: SessionProjection, rt: AgentRuntime, input: UserTurnInput,
+    reserved?: { operation: DurableOperation; queueId: string },
+  ): Promise<SendResult> => {
+    const admit = () => admitTurnCoreUnfenced(sessionId, proj, rt, input, reserved);
+    return deps.admission ? deps.admission.admit(admit) : admit();
   };
 
   /** Admission joins the same per-session serialization as runtime callbacks
    *  and Revert/Fork, closing the idle-row-vs-new-turn activation race. */
   const admitTurn = (
     sessionId: string, proj: SessionProjection, rt: AgentRuntime, input: UserTurnInput,
+    reserved?: { operation: DurableOperation; queueId: string },
   ): Promise<SendResult> =>
-    withSessionLock(sessionId, () => admitTurnCore(sessionId, proj, rt, input));
+    withSessionLock(sessionId, async () => {
+      const current = (await store.projection(sessionId)) ?? proj;
+      const active = turnActive(sessionId);
+      const unsafeStatus = current.status === "reconciling"
+        || current.status === "unknown";
+      const reconciliation = await durable.reconciliation(sessionId);
+      const barrier = reconciliation?.state === "reconciling"
+        || reconciliation?.state === "blocked"
+        || reconciliation?.state === "unknown";
+      const unresolved = await blockingOperation(
+        sessionId,
+        reserved?.operation.operationId,
+      );
+      const requestsWaiting = openRequestTotal(await logFacts(sessionId)) > 0;
+      if (active || unsafeStatus || barrier || unresolved || requestsWaiting) {
+        if (!deps.queue || reserved) {
+          throw Object.assign(new Error("turn admission changed while the request was waiting"), {
+            code: "conflict",
+          });
+        }
+        const delivery = input.delivery === "steer" || input.delivery === "interrupt"
+          ? input.delivery
+          : "queue";
+        const reason = active
+          ? "turn-active"
+          : barrier
+            ? "reconciliation-active"
+            : unresolved
+              ? "mutation-active"
+              : requestsWaiting
+                ? "request-waiting"
+                : `session-${current.status}`;
+        return enqueueMessage(
+          sessionId,
+          input.text,
+          delivery,
+          reason,
+          input.attachments,
+        );
+      }
+      return admitTurnCore(sessionId, current, rt, input, reserved);
+    });
 
   // F14 import half: one scan shared by browse/import/sync — backend sessions
   // deduped by id, already-adopted ones filtered out, most recent first.
@@ -954,13 +2661,76 @@ export function createSessionService(deps: {
       seen.add(remote.id);
       total += 1;
       if (adopted.has(remote.id)) continue;
+      const binding = await runtimeBinding(runtime, {
+        id: `candidate:${remote.id}`,
+        projectId,
+        title: remote.title,
+        status: "idle",
+        backendSessionId: remote.id,
+        createdAt: remote.createdAt,
+        updatedAt: remote.updatedAt,
+      }, project.path);
+      if (binding && await durable.hasDeletionTombstone({
+        canonicalSessionId: binding.canonicalSessionId,
+        authorityId: binding.authorityId,
+        generation: binding.generation,
+        location: binding.location,
+        backendSessionId: remote.id,
+      })) continue;
       items.push(remote);
     }
     items.sort((a, b) => b.updatedAt - a.updatedAt);
     return { project, runtime, items, total };
   };
 
-  const service: SessionService = {
+  const service: RestartSafetySessionService = {
+    async reconcileForRuntimeRestart(sessionId, runtime, expected) {
+      const endpointOf = async (): Promise<RuntimeEndpoint | undefined> =>
+        await (runtime as ReliabilityRuntime).endpoint?.().catch(() => undefined);
+      const matchesExpected = (endpoint: RuntimeEndpoint | undefined): boolean =>
+        endpoint?.authorityId === expected.authorityId
+        && endpoint.generation === expected.generation;
+
+      if (!matchesExpected(await endpointOf())) {
+        return {
+          safe: false,
+          reason: `session ${sessionId} endpoint generation changed before safe-idle reconciliation`,
+        };
+      }
+      const projection = await store.projection(sessionId);
+      if (!projection) {
+        return { safe: false, reason: `session ${sessionId} projection is unavailable` };
+      }
+
+      await reconcileUnderLock(
+        sessionId,
+        projection,
+        runtime,
+        "config-restart-safe-idle",
+      );
+
+      if (!matchesExpected(await endpointOf())) {
+        return {
+          safe: false,
+          reason: `session ${sessionId} endpoint generation changed during safe-idle reconciliation`,
+        };
+      }
+      const current = await store.projection(sessionId);
+      if (turnActive(sessionId) || current?.status !== "idle") {
+        return {
+          safe: false,
+          reason: `session ${sessionId} is ${current?.status ?? "unknown"} after authoritative reconciliation`,
+        };
+      }
+      const operation = await blockingOperation(sessionId);
+      if (operation) {
+        return {
+          safe: false,
+          reason: `session ${sessionId} has ${operation.state} operation ${operation.operationId}`,
+        };
+      }
+      return { safe: true };
+    },
     async create(input: CreateSessionInput): Promise<SessionRef> {
       const project = await projects.get(input.projectId);
       if (!project) throw Object.assign(new Error("project not found"), { code: "not-found" });
@@ -976,9 +2746,6 @@ export function createSessionService(deps: {
       }
       const sessionId = randomUUID();
       const cwd = input.worktreePath ?? project.path;
-      const rt = await runtimes.forProject(project.id, cwd);
-      const backendSessionId = await rt.ensureSession({ ...input, sessionId, cwd });
-      wire(sessionId, rt);
       const now = Date.now();
       // F18: a subagent/fork child starts under the nearest parent's policy —
       // the indicator must be honest from the first projection broadcast.
@@ -987,7 +2754,7 @@ export function createSessionService(deps: {
         id: sessionId, projectId: project.id,
         ...(input.parentId ? { parentId: input.parentId } : {}),
         ...(inheritedAutoAccept ? { autoAccept: true } : {}),
-        title: input.title || "New session", status: "idle",
+        title: input.title || "New session",
         ...(input.worktreePath ? {
           worktreePath: input.worktreePath,
           worktreeId: input.worktreePath,
@@ -996,17 +2763,83 @@ export function createSessionService(deps: {
         } : {}),
         ...(input.model ? { model: input.model } : {}),
         ...(input.agent ? { agent: input.agent } : {}),
-        backendSessionId,
         createdAt: now, updatedAt: now,
+        status: "reconciling",
       };
-      await store.upsertProjection(projection);
-      await appendAndBroadcast(sessionId, "session/created", {
-        title: projection.title, projectId: project.id,
-        ...(input.worktreePath ? { worktreePath: input.worktreePath } : {}),
-        ...(input.model ? { model: input.model as unknown as JsonObject } : {}),
-        ...(input.agent ? { agent: input.agent } : {}),
-      }, { ignorable: true });
+      const prepared = await broadcastTail(sessionId, () => durable.prepareSessionCreate({
+        projection,
+        createdEvent: {
+          type: "session/created",
+          data: {
+            title: projection.title, projectId: project.id,
+            ...(input.worktreePath ? { worktreePath: input.worktreePath } : {}),
+            ...(input.model ? { model: input.model as unknown as JsonObject } : {}),
+            ...(input.agent ? { agent: input.agent } : {}),
+          },
+          ignorable: true,
+        },
+      }));
       broadcast.projection(projection);
+      let rt: AgentRuntime;
+      try {
+        rt = await runtimes.forProject(project.id, cwd);
+      } catch (error) {
+        await broadcastTail(sessionId, () => durable.settleOperation(prepared.operation.operationId, {
+          kind: "rejected",
+          code: "runtime-unavailable",
+          message: "runtime could not be started before session creation",
+        }));
+        await updateProjection(sessionId, { status: "failed" });
+        throw error;
+      }
+      const outcome = await runPreparedOperation<{ backendSessionId: string }, string>(
+        prepared.operation,
+        (operationId) => {
+          const request = { ...input, sessionId, cwd };
+          return rt.createSessionOperation
+            ? rt.createSessionOperation(request, operationId)
+            : rt.ensureSession(request);
+        },
+        (backendSessionId) => ({ backendSessionId }),
+      );
+      if (outcome.kind !== "confirmed") {
+        await updateProjection(sessionId, {
+          status: outcome.kind === "unknown" ? "unknown" : "failed",
+        });
+        throw outcomeError(outcome);
+      }
+      const completed: SessionProjection = {
+        ...projection,
+        backendSessionId: outcome.value.backendSessionId,
+        runtimeBinding: await newRuntimeBinding(
+          rt,
+          outcome.value.backendSessionId,
+          cwd,
+          "empty",
+        ),
+        status: "reconciling",
+        updatedAt: Date.now(),
+      };
+      await store.upsertProjection(completed);
+      wire(sessionId, rt);
+      broadcast.projection(completed);
+      if (typeof (rt as ReliabilityRuntime).reconcile === "function") {
+        await reconcileSession(
+          sessionId,
+          completed,
+          rt,
+          "session-created",
+          prepared.operation.operationId,
+        );
+      } else if (typeof (rt as ReliabilityRuntime).endpoint !== "function") {
+        // Provider-neutral test/compatibility runtimes predate endpoint
+        // evidence. A confirmed create remains their admission boundary;
+        // managed OpenCode runtimes always expose endpoint + reconcile and
+        // cannot take this compatibility path.
+        await updateProjection(sessionId, { status: "idle" });
+      } else {
+        await updateProjection(sessionId, { status: "unknown" });
+      }
       return { id: sessionId };
     },
 
@@ -1021,7 +2854,34 @@ export function createSessionService(deps: {
         if (verified) input.attachments = verified;
         else delete input.attachments;
       }
+      if (proj.status === "reconciling" || proj.status === "unknown") {
+        throw Object.assign(new Error(`cannot send while the session is ${proj.status}`), {
+          code: "conflict",
+        });
+      }
+      const existingReconciliation = await durable.reconciliation(sessionId);
+      if (existingReconciliation?.state === "reconciling"
+        || existingReconciliation?.state === "blocked"
+        || existingReconciliation?.state === "unknown") {
+        throw Object.assign(
+          new Error(`cannot send while reconciliation is ${existingReconciliation.state}`),
+          { code: "conflict" },
+        );
+      }
+      const existingOperation = await blockingOperation(sessionId);
+      if (existingOperation) {
+        throw Object.assign(
+          new Error(`cannot send while operation ${existingOperation.operationId} is ${existingOperation.state}`),
+          { code: "conflict" },
+        );
+      }
       const rt = await ensureWired(sessionId, proj);
+      proj = (await store.projection(sessionId)) ?? proj;
+      if (proj.status === "reconciling" || proj.status === "unknown") {
+        throw Object.assign(new Error(`cannot send while the session is ${proj.status}`), {
+          code: "conflict",
+        });
+      }
 
       // A replacement send after rewind must not continue in the backend's
       // stale conversation — and it must not reset into an EMPTY backend
@@ -1044,7 +2904,7 @@ export function createSessionService(deps: {
           const cwd = current.worktreePath ?? project?.path ?? process.cwd();
           // deriveMessages already applies the active marker, so this is the
           // exact effective model history before the reverted prompt.
-          const backendSessionId = await rt.branchSession({
+          const request = {
             sourceSessionId: sessionId,
             target: {
               projectId: current.projectId,
@@ -1055,7 +2915,31 @@ export function createSessionService(deps: {
               ...(current.agent ? { agent: current.agent } : {}),
             },
             history: deriveMessages(events),
-          });
+          };
+          const prepared = await broadcastTail(sessionId, () => durable.prepareOperation({
+            sessionId,
+            mutationKind: "session-revert",
+            intentEvent: {
+              type: "session/replacement-intended",
+              data: { rewindSeq: rewind.markerSeq, atSeq: rewind.atSeq },
+              ignorable: true,
+            },
+          }));
+          const outcome = await runPreparedOperation<{ backendSessionId: string }, string>(
+            prepared.operation,
+            (operationId) => rt.branchSessionOperation
+              ? rt.branchSessionOperation(request, operationId)
+              : rt.branchSession!(request),
+            (backendSessionId) => ({ backendSessionId }),
+          );
+          if (outcome.kind !== "confirmed") {
+            if (outcome.kind === "unknown") {
+              await updateProjection(sessionId, { status: "unknown" });
+              scheduleReconciliation(sessionId, current, rt, "revert-outcome-unknown");
+            }
+            throw outcomeError(outcome);
+          }
+          const backendSessionId = outcome.value.backendSessionId;
           await updateProjection(sessionId, { backendSessionId, status: "idle" });
           current = { ...current, backendSessionId, status: "idle" };
           await appendAndBroadcast(sessionId, "session/rewind-cleared", {
@@ -1120,12 +3004,51 @@ export function createSessionService(deps: {
           if (input.attachments?.length) {
             return enqueueMessage(sessionId, input.text, "steer", "steer-attachments", input.attachments);
           }
-          // Deliver first, then log: a failed steer must fall back to queue
-          // without leaving a dangling user/message the model never saw.
-          const ok = await rt.steer(sessionId, input.text).catch(() => false);
-          if (!ok) return enqueueMessage(sessionId, input.text, "steer", "steer-rejected");
+          const prepared = await broadcastTail(sessionId, () => durable.prepareOperation({
+            sessionId,
+            mutationKind: "turn-steer",
+            intentEvent: {
+              type: "user/message",
+              data: { text: input.text, delivery: "steer" },
+            },
+          }));
+          const outcome = await runPreparedOperation<Record<string, never>, boolean>(
+            prepared.operation,
+            async (operationId) => {
+              try {
+                const value = await (rt.steerOperation
+                  ? rt.steerOperation(sessionId, input.text, operationId)
+                  : rt.steer!(sessionId, input.text));
+                if (isMutationOutcome<Record<string, never>>(value)) return value;
+                return value
+                  ? { kind: "confirmed" as const, value: {} }
+                  : {
+                      kind: "rejected" as const,
+                      code: "steer-not-admitted",
+                      message: "runtime rejected live steering",
+                    };
+              } catch (error) {
+                throw error;
+              }
+            },
+            () => ({}),
+          );
+          if (outcome.kind === "rejected") {
+            return enqueueMessage(
+              sessionId,
+              input.text,
+              "steer",
+              "steer-rejected",
+              undefined,
+              prepared.operation.operationId,
+            );
+          }
+          if (outcome.kind === "unknown") {
+            await updateProjection(sessionId, { status: "unknown" });
+            scheduleReconciliation(sessionId, proj!, rt, "steer-outcome-unknown");
+            throw outcomeError(outcome);
+          }
           await appendAndBroadcast(sessionId, "delivery/steered", { text: input.text }, { ignorable: true });
-          await appendAndBroadcast(sessionId, "user/message", { text: input.text });
           return { turnId: lastTurnId.get(sessionId) ?? randomUUID() };
         }
         if (delivery === "interrupt") {
@@ -1138,7 +3061,28 @@ export function createSessionService(deps: {
             queueId: item.id, text: input.text, delivery,
             ...(input.attachments?.length ? { attachments: input.attachments as unknown as JsonObject[] } : {}),
           }, { ignorable: true });
-          await rt.abort(sessionId).catch(() => {});
+          const prepared = await broadcastTail(sessionId, () => durable.prepareOperation({
+            sessionId,
+            mutationKind: "turn-abort",
+            intentEvent: {
+              type: "turn/abort-requested",
+              data: { reason: "interrupt", queueId: item.id },
+              ignorable: true,
+            },
+          }));
+          const outcome = await runPreparedOperation<Record<string, never>, void>(
+            prepared.operation,
+            (operationId) => rt.abortOperation
+              ? rt.abortOperation(sessionId, operationId)
+              : rt.abort(sessionId),
+            () => ({}),
+          );
+          if (outcome.kind === "unknown") {
+            await updateProjection(sessionId, { status: "unknown" });
+            scheduleReconciliation(sessionId, proj!, rt, "abort-outcome-unknown");
+          } else if (outcome.kind === "rejected") {
+            throw outcomeError(outcome);
+          }
           return { queueId: item.id, queued: true };
         }
       }
@@ -1249,16 +3193,33 @@ export function createSessionService(deps: {
     },
 
     async abort(sessionId) {
-      const projection = await store.projection(sessionId);
-      if (!projection) throw Object.assign(new Error("session not found"), { code: "not-found" });
-      let runtime = sessionRuntime.get(sessionId);
-      // A persisted working/waiting projection may outlive the server process
-      // that originally attached it. Reattach before cancelling so an agent
-      // never receives a false-success no-op after a Polyth restart.
-      if (!runtime && (projection.status === "working" || projection.status === "waiting")) {
-        runtime = await ensureWired(sessionId, projection);
-      }
-      await runtime?.abort(sessionId);
+      await withSessionLock(sessionId, async () => {
+        const projection = await store.projection(sessionId);
+        if (!projection) throw Object.assign(new Error("session not found"), { code: "not-found" });
+        const runtime = sessionRuntime.get(sessionId) ?? await ensureWired(sessionId, projection);
+        const prepared = await broadcastTail(sessionId, () => durable.prepareOperation({
+          sessionId,
+          mutationKind: "turn-abort",
+          intentEvent: {
+            type: "turn/abort-requested",
+            data: { reason: "user" },
+            ignorable: true,
+          },
+        }));
+        const outcome = await runPreparedOperation<Record<string, never>, void>(
+          prepared.operation,
+          (operationId) => runtime.abortOperation
+            ? runtime.abortOperation(sessionId, operationId)
+            : runtime.abort(sessionId),
+          () => ({}),
+        );
+        if (outcome.kind === "unknown") {
+          await updateProjection(sessionId, { status: "unknown" });
+          scheduleReconciliation(sessionId, projection, runtime, "abort-outcome-unknown");
+        } else if (outcome.kind === "rejected") {
+          throw outcomeError(outcome);
+        }
+      });
     },
 
     // UX-MSG-ACTIONS Fork: backend branch is prepared FIRST; the canonical
@@ -1317,19 +3278,58 @@ export function createSessionService(deps: {
         // An empty prefix needs no branch — a fresh backend session already
         // represents the same (empty) history. Anything else requires exact
         // branching; approximating with a hidden prompt is forbidden.
-        let backendSessionId: string;
-        if (history.length === 0) {
-          backendSessionId = await rt.ensureSession(target);
-        } else if (rt.branchSession) {
-          backendSessionId = await rt.branchSession({ sourceSessionId: sessionId, target, history });
-        } else {
+        if (history.length > 0 && !rt.branchSession) {
           throw Object.assign(new Error("runtime cannot branch exact history"), { code: "unsupported" });
         }
+        const prepared = await broadcastTail(sessionId, () => durable.prepareOperation({
+          sessionId,
+          mutationKind: "session-fork",
+          intentEvent: {
+            type: "session/fork-intended",
+            data: {
+              childSessionId: forkId,
+              copiedThroughSeq,
+              ...(atSeq !== undefined ? { sourceAtSeq: atSeq } : {}),
+            },
+            ignorable: true,
+          },
+        }));
+        const outcome = await runPreparedOperation<{ backendSessionId: string }, string>(
+          prepared.operation,
+          (operationId) => history.length === 0
+            ? (rt.createSessionOperation
+                ? rt.createSessionOperation(target, operationId)
+                : rt.ensureSession(target))
+            : (rt.branchSessionOperation
+                ? rt.branchSessionOperation({
+                    sourceSessionId: sessionId,
+                    target,
+                    history,
+                  }, operationId)
+                : rt.branchSession!({
+                    sourceSessionId: sessionId,
+                    target,
+                    history,
+                  })),
+          (backendSessionId) => ({ backendSessionId }),
+        );
+        if (outcome.kind !== "confirmed") {
+          if (outcome.kind === "unknown") {
+            await updateProjection(sessionId, { status: "unknown" });
+            scheduleReconciliation(sessionId, proj, rt, "fork-outcome-unknown");
+          }
+          throw outcomeError(outcome);
+        }
+        const backendSessionId = outcome.value.backendSessionId;
 
         const now = Date.now();
         const projection: SessionProjection = {
           ...proj, id: forkId, parentId: sessionId, title,
-          status: "idle", createdAt: now, updatedAt: now, backendSessionId,
+          status: "reconciling",
+          createdAt: now,
+          updatedAt: now,
+          backendSessionId,
+          runtimeBinding: await newRuntimeBinding(rt, backendSessionId, forkCwd, "copied"),
         };
         const markerData: SessionForkedData = {
           fromSessionId: sessionId,
@@ -1370,11 +3370,8 @@ export function createSessionService(deps: {
             published = { events: copied, marker };
           }
         } catch (err) {
-          // Canonical publication failed: best-effort discard of the now
-          // unreferenced backend branch; the source stays untouched.
-          if (rt.discardSession && backendSessionId !== proj.backendSessionId) {
-            await rt.discardSession(backendSessionId).catch(() => {});
-          }
+          // The branch mutation is confirmed and durably identified. Do not
+          // issue an unowned best-effort delete outside the outcome machine.
           throw err;
         }
         wire(forkId, rt);
@@ -1383,6 +3380,18 @@ export function createSessionService(deps: {
         for (const ev of published.events) broadcast.event(ev);
         broadcast.event(published.marker);
         broadcast.projection(projection);
+        if (typeof (rt as ReliabilityRuntime).reconcile === "function") {
+          await reconcileSession(
+            forkId,
+            projection,
+            rt,
+            "session-forked",
+          );
+        } else if (typeof (rt as ReliabilityRuntime).endpoint !== "function") {
+          await updateProjection(forkId, { status: "idle" });
+        } else {
+          await updateProjection(forkId, { status: "unknown" });
+        }
         return {
           id: forkId,
           fromSessionId: sessionId,
@@ -1486,19 +3495,97 @@ export function createSessionService(deps: {
       return withSessionLock(sessionId, async () => {
         const proj = await store.projection(sessionId);
         if (!proj) throw Object.assign(new Error("session not found"), { code: "not-found" });
-        if (!store.deleteSession) {
-          throw Object.assign(new Error("session deletion unavailable"), { code: "unsupported" });
-        }
         const active = turnActive(sessionId);
-        const rt = sessionRuntime.get(sessionId);
-        // Unwire BEFORE aborting: the abort's own turn/stopped must be dropped
-        // by the dispatch filter, never re-appended to the just-deleted log.
+        const project = await projects.get(proj.projectId);
+        const cwd = proj.worktreePath ?? project?.path ?? process.cwd();
+        const rt = sessionRuntime.get(sessionId) ?? (proj.backendSessionId
+          ? await runtimes.forProject(proj.projectId, cwd)
+          : undefined);
+        // Drop callbacks before abort/delete I/O. A synchronous turn/stopped
+        // emitted by abort must never be queued for the soon-tombstoned log.
         unwire(sessionId);
         lastTurnId.delete(sessionId);
         admitting.delete(sessionId);
-        if (active && rt) await rt.abort(sessionId).catch(() => {});
-        await store.deleteSession(sessionId);
+        if (active && rt) {
+          const abortPrepared = await broadcastTail(sessionId, () => durable.prepareOperation({
+            sessionId,
+            mutationKind: "turn-abort",
+            intentEvent: {
+              type: "turn/abort-requested",
+              data: { reason: "session-delete" },
+              ignorable: true,
+            },
+          }));
+          await runPreparedOperation<Record<string, never>, void>(
+            abortPrepared.operation,
+            (operationId) => rt.abortOperation
+              ? rt.abortOperation(sessionId, operationId)
+              : rt.abort(sessionId),
+            () => ({}),
+          );
+        }
+        const binding = rt
+          ? await runtimeBinding(rt, proj, cwd)
+          : proj.backendSessionId
+            ? {
+                canonicalSessionId: sessionId,
+                backendSessionId: proj.backendSessionId,
+                authorityId: `legacy:${proj.projectId}:${cwd}`,
+                generation: 0,
+                continuity: "generation-only" as const,
+                location: { directory: cwd },
+              }
+            : undefined;
+        const deletion = await durable.prepareSessionDeletion({
+          binding: {
+            canonicalSessionId: sessionId,
+            authorityId: binding?.authorityId ?? `legacy:${proj.projectId}:${cwd}`,
+            generation: binding?.generation ?? 0,
+            location: binding?.location ?? { directory: cwd },
+            // An unknown create has no protocol-proven backend id. Retaining
+            // the canonical id still prevents canonical resurrection; Agent F
+            // must supply operation lookup to bind an unknown backend child.
+            backendSessionId: binding?.backendSessionId ?? `unknown:${sessionId}`,
+          },
+        });
         factsCache.delete(sessionId);
+        await claimOperation(deletion.operation);
+        let outcome: MutationOutcome<Record<string, never>>;
+        if ((!rt?.discardSession && !rt?.discardSessionOperation) || !proj.backendSessionId) {
+          outcome = {
+            kind: "unknown",
+            operationId: deletion.operation.operationId,
+            message: "runtime cannot prove upstream session deletion",
+          };
+        } else {
+          try {
+            const value = await boundedRuntimeAwait<
+              void | MutationOutcome<Record<string, never>>
+            >(
+              rt.discardSessionOperation
+                ? rt.discardSessionOperation(sessionId, deletion.operation.operationId)
+                : rt.discardSession!(sessionId),
+              deletion.operation.operationId,
+            );
+            outcome = isMutationOutcome<Record<string, never>>(value)
+              ? value
+              : {
+                  kind: "unknown",
+                  operationId: deletion.operation.operationId,
+                  message: "legacy best-effort deletion has no authoritative receipt",
+                };
+          } catch {
+            outcome = {
+              kind: "unknown",
+              operationId: deletion.operation.operationId,
+              message: "runtime did not provide a definitive deletion outcome",
+            };
+          }
+        }
+        await settleOperation(deletion.operation, outcome);
+        if (outcome.kind === "confirmed") {
+          await durable.retireDeletionTombstone(sessionId, { kind: "confirmed" });
+        }
       });
     },
 
@@ -1604,18 +3691,23 @@ export function createSessionService(deps: {
         if (!wanted.has(remote.id)) continue;
         const id = randomUUID();
         const projection: SessionProjection = {
-          id, projectId, title: remote.title, status: "idle", backendSessionId: remote.id,
-          createdAt: remote.createdAt, updatedAt: remote.updatedAt,
+          id,
+          projectId,
+          title: remote.title,
+          status: "reconciling",
+          backendSessionId: remote.id,
+          runtimeBinding: await newRuntimeBinding(runtime, remote.id, project.path, "import"),
+          createdAt: remote.createdAt,
+          updatedAt: remote.updatedAt,
         };
         // History is NOT fetched here — importing full histories for every
         // remote session at once is what OOM'd the server. It is imported
         // lazily in events() the first time the session is opened.
-        await runtime.ensureSession({ projectId, title: remote.title, sessionId: id, cwd: project.path, backendSessionId: remote.id });
-        wire(id, runtime);
         await store.upsertProjection(projection);
         await appendAndBroadcast(id, "session/imported", { backendSessionId: remote.id }, { ignorable: true });
         broadcast.projection(projection);
-        out.push(projection);
+        await ensureWired(id, projection);
+        out.push((await store.projection(id)) ?? projection);
       }
       return out;
     },
@@ -1625,6 +3717,16 @@ export function createSessionService(deps: {
       return p;
     },
     async events(sessionId, afterSeq, page) {
+      if (afterSeq === 0 && !sessionRuntime.has(sessionId)) {
+        const projection = await store.projection(sessionId);
+        if (projection && (projection.backendSessionId || projection.status === "unknown")) {
+          try {
+            await ensureWired(sessionId, projection);
+          } catch (error) {
+            console.warn(`[polyth] failed to materialize runtime session ${sessionId}`, error);
+          }
+        }
+      }
       // Restart recovery: opening an idle session with persisted queued
       // messages resumes FIFO dispatch (never into an active stream).
       if (afterSeq === 0 && deps.queue && !turnActive(sessionId)) {
@@ -1662,11 +3764,9 @@ export function createSessionService(deps: {
                   ...(message.reasoning ? { reasoning: message.reasoning } : {}),
                 });
               }
+              await appendAndBroadcast(sessionId, "session/history-imported", {}, { ignorable: true });
             } catch (err) {
               console.warn(`[polyth] failed to import history for ${sessionId}`, err);
-            } finally {
-              // marker even on failure so we never retry in a hot loop
-              await appendAndBroadcast(sessionId, "session/history-imported", {}, { ignorable: true });
             }
           }
         }
@@ -1703,94 +3803,13 @@ export function createSessionService(deps: {
     },
 
     async replyPermission(sessionId, requestId, reply, scope) {
-      await withSessionLock(sessionId, async () => {
-        if (reply !== "once" && reply !== "always" && reply !== "reject") {
-          throw Object.assign(new Error("permission reply must be once, always, or reject"), { code: "invalid-input" });
-        }
-        const facts = await logFacts(sessionId);
-        const original = facts.openPermissions.get(requestId);
-        if (!original) {
-          if (facts.requestedPermissions.has(requestId)) {
-            throw Object.assign(new Error("permission request already resolved"), { code: "conflict" });
-          }
-          throw Object.assign(new Error("permission request not found"), { code: "not-found" });
-        }
-        const proj = await store.projection(sessionId);
-        if (!proj) throw Object.assign(new Error("session not found"), { code: "not-found" });
-        const shellRequest = (original.data as { permission?: string }).permission === "shell"
-          ? original
-          : undefined;
-        // A background notification may be answered after a server restart.
-        // Reattach to the original backend before recording the response so a
-        // missing in-memory runtime can never turn a click into a log-only lie.
-        const rt = shellRequest ? undefined : await ensureWired(sessionId, proj);
-        await appendAndBroadcast(
-          sessionId,
-          "permission/resolved",
-          { requestId, reply, ...(scope ? { scope } : {}) },
-          { ignorable: true },
-        );
-        if (reply === "always") {
-          // Persist an allow rule derived from the original request. Scope is
-          // explicit (WP15): session/project confine the rule; old clients that
-          // send no scope keep the pre-existing user-wide behavior.
-          const d = original.data as { permission?: string; patterns?: string[] };
-          for (const pattern of d.patterns?.length ? d.patterns : ["*"]) {
-            if (scope === "session") {
-              permissions.addRule({ permission: d.permission ?? "*", pattern, action: "allow", scope: "session", sessionId });
-            } else if (scope === "project") {
-              permissions.addRule({ permission: d.permission ?? "*", pattern, action: "allow", scope: "project", projectId: proj.projectId });
-            } else {
-              permissions.addRule({ permission: d.permission ?? "*", pattern, action: "allow", scope: "user" });
-            }
-          }
-        }
-        if (shellRequest) {
-          const d = shellRequest.data as { patterns?: string[]; callId?: string };
-          const command = d.patterns?.[0] ?? "";
-          const callId = d.callId ?? `shell_${randomUUID()}`;
-          await finishShell(sessionId, proj, command, callId, reply === "reject");
-        } else {
-          await rt!.replyPermission(sessionId, requestId, reply);
-        }
-        // Re-read the facts (tail fold picks up the resolution just appended).
-        if (proj.status === "waiting" && openRequestTotal(await logFacts(sessionId)) === 0) {
-          await updateProjection(sessionId, { status: shellRequest ? "idle" : "working" });
-        }
-      });
+      await withSessionLock(sessionId, () =>
+        replyPermissionCore(sessionId, requestId, reply, scope));
     },
 
     async replyQuestion(sessionId, requestId, answers) {
-      await withSessionLock(sessionId, async () => {
-        const facts = await logFacts(sessionId);
-        const original = facts.openQuestions.get(requestId);
-        if (!original) {
-          if (facts.askedQuestions.has(requestId)) {
-            throw Object.assign(new Error("question request already answered"), { code: "conflict" });
-          }
-          throw Object.assign(new Error("question request not found"), { code: "not-found" });
-        }
-        const proj = await store.projection(sessionId);
-        if (!proj) throw Object.assign(new Error("session not found"), { code: "not-found" });
-        const rt = await ensureWired(sessionId, proj);
-        await appendAndBroadcast(
-          sessionId,
-          "question/answered",
-          { requestId, answers },
-          { ignorable: true },
-        );
-        if (answers && (answers as { __reject?: boolean }).__reject) {
-          await rt.replyQuestion(sessionId, requestId, { action: "reject" });
-        } else {
-          const questions = Array.isArray((original.data as { questions?: unknown }).questions)
-            ? (original.data as { questions: JsonObject[] }).questions
-            : [];
-          await rt.replyQuestion(sessionId, requestId, openCodeQuestionReply(questions, answers));
-        }
-        if (proj.status === "waiting" && openRequestTotal(await logFacts(sessionId)) === 0) {
-          await updateProjection(sessionId, { status: "working" });
-        }
-      });
+      await withSessionLock(sessionId, () =>
+        replyQuestionCore(sessionId, requestId, answers));
     },
 
     async replySecret(sessionId, requestId, reply) {
@@ -1805,35 +3824,83 @@ export function createSessionService(deps: {
         }
 
         const data = requested.data as unknown as SecretRequestData;
+        const proj = await store.projection(sessionId);
+        if (!proj) throw Object.assign(new Error("session not found"), { code: "not-found" });
+        const rt = await ensureWired(sessionId, proj);
+        const intentAction = reply.action === "save" ? "save" : "dismiss";
+        const expected: JsonObject = { action: intentAction, handle: data.handle };
+        const choice = await broadcastTail(sessionId, () => durable.chooseResponseIntent({
+          kind: "secret",
+          sessionId,
+          requestId,
+          action: intentAction,
+          handle: data.handle,
+        }));
+        const operation = assertChosenIntent(choice, expected);
         let result: SecretResolvedData;
         if (reply.action === "save") {
-          if (!deps.secureSafe) throw Object.assign(new Error("Secure Safe unavailable"), { code: "unsupported" });
+          if (!deps.secureSafe) {
+            await broadcastTail(sessionId, () => durable.settleResponseIntent(operation.operationId, {
+              kind: "rejected",
+              code: "unsupported",
+              message: "Secure Safe unavailable",
+            }));
+            throw Object.assign(new Error("Secure Safe unavailable"), { code: "unsupported" });
+          }
           if (typeof reply.value !== "string" || !reply.value.trim()) {
+            await broadcastTail(sessionId, () => durable.settleResponseIntent(operation.operationId, {
+              kind: "rejected",
+              code: "invalid-input",
+              message: "value is required",
+            }));
             throw Object.assign(new Error("value is required"), { code: "invalid-input" });
           }
-          const saved = await deps.secureSafe.upsertByHandle({
-            handle: data.handle,
-            label: data.label,
-            ...(data.purpose ? { purpose: data.purpose } : {}),
-            ...(data.kind ? { kind: data.kind } : {}),
-            value: reply.value,
-          });
+          let saved: Awaited<ReturnType<SecureSafeService["upsertByHandle"]>>;
+          try {
+            saved = await deps.secureSafe.upsertByHandle({
+              handle: data.handle,
+              label: data.label,
+              ...(data.purpose ? { purpose: data.purpose } : {}),
+              ...(data.kind ? { kind: data.kind } : {}),
+              value: reply.value,
+            });
+          } catch (error) {
+            await broadcastTail(sessionId, () => durable.settleResponseIntent(operation.operationId, {
+              kind: "rejected",
+              code: "secure-safe-failed",
+              message: "secret could not be saved before the runtime response",
+            }));
+            throw error;
+          }
           result = { requestId, action: "saved", handle: saved.handle };
         } else {
           result = { requestId, action: "dismissed", handle: data.handle };
         }
 
-        await appendAndBroadcast(
-          sessionId,
-          "secret/resolved",
-          result as unknown as JsonObject,
-          { ignorable: true },
+        const outcome = await runResponseOperation<Record<string, never>, void>(
+          operation,
+          (operationId) => rt.replySecret
+            ? (rt.replySecretOperation
+                ? rt.replySecretOperation(sessionId, requestId, result, operationId)
+                : rt.replySecret(sessionId, requestId, result))
+            : (rt.replyQuestionOperation
+                ? rt.replyQuestionOperation(sessionId, requestId, { action: "reject" }, operationId)
+                : rt.replyQuestion(sessionId, requestId, { action: "reject" })),
+          () => ({}),
+          {
+            type: "secret/resolved",
+            data: result as unknown as JsonObject,
+            ignorable: true,
+          },
         );
-        const rt = sessionRuntime.get(sessionId);
-        if (rt?.replySecret) await rt.replySecret(sessionId, requestId, result);
-        else await rt?.replyQuestion(sessionId, requestId, { action: "reject" });
-        const proj = await store.projection(sessionId);
-        if (proj?.status === "waiting") await updateProjection(sessionId, { status: "working" });
+        if (outcome.kind !== "confirmed") {
+          if (outcome.kind === "unknown") {
+            await updateProjection(sessionId, { status: "unknown" });
+            scheduleReconciliation(sessionId, proj, rt, "secret-outcome-unknown");
+          }
+          throw outcomeError(outcome);
+        }
+        if (proj.status === "waiting") await updateProjection(sessionId, { status: "working" });
       });
     },
 
@@ -1868,19 +3935,13 @@ export function createSessionService(deps: {
    *  of the session with an auto "once". Composer-shell confirmations are
    *  skipped — those confirm a command the USER typed and must stay manual. */
   const reconcilePendingPermissions = async (sessionId: string): Promise<void> => {
-    const facts = await logFacts(sessionId);
-    let resolvedAny = false;
-    for (const [rid, requested] of [...facts.openPermissions]) {
-      if (requested.producerPlugin === "composer-shell") continue;
-      resolvedAny = true;
-      await appendAndBroadcast(sessionId, "permission/resolved", { requestId: rid, reply: "once", auto: true }, { ignorable: true });
-      await sessionRuntime.get(sessionId)?.replyPermission(sessionId, rid, "once").catch(() => {});
-    }
-    // The turn resumes once its blocker is answered; questions keep it waiting.
-    if (resolvedAny && facts.openQuestions.size === 0 && facts.openSecrets.size === 0) {
-      const proj = await store.projection(sessionId);
-      if (proj?.status === "waiting") await updateProjection(sessionId, { status: "working" });
-    }
+    await withSessionLock(sessionId, async () => {
+      const facts = await logFacts(sessionId);
+      for (const [rid, requested] of [...facts.openPermissions]) {
+        if (requested.producerPlugin === "composer-shell") continue;
+        await replyPermissionCore(sessionId, rid, "once", undefined, true);
+      }
+    });
   };
 
   return service;

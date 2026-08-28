@@ -6,8 +6,9 @@
 // (serverServiceKey). This file only composes infrastructure (session store,
 // runtime pool, HTTP/WS gateway) plus the few genuinely cross-cutting seams
 // (session service wiring, track workflow, browser-tool bridge).
-import { mkdirSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
+import { mkdirSync, realpathSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createContext, loadPlugin } from "@polyth/kernel";
 import {
@@ -17,7 +18,21 @@ import {
   deriveMessages,
   unrestoredCompactionSeq,
 } from "@polyth/session";
-import { CAP, SERVER_CAPABILITY_IDS, type AgentRuntime, type Disposable, type PackageDescriptorDto, type RemoteHost, type RuntimeEvent, type SessionEvent, type SessionProjection, type SessionService } from "@polyth/contracts";
+import {
+  CAP,
+  SERVER_CAPABILITY_IDS,
+  type AgentRuntime,
+  type Disposable,
+  type PackageDescriptorDto,
+  type RemoteHost,
+  type RuntimeEndpoint,
+  type RuntimeEvent,
+  type RuntimeSessionBinding,
+  type RuntimeSnapshot,
+  type SessionEvent,
+  type SessionProjection,
+  type SessionService,
+} from "@polyth/contracts";
 import {
   createBrowserToolBridge,
   createConfigApplier,
@@ -71,6 +86,7 @@ import { createRouteRegistry } from "./routeRegistry.ts";
 import { createPackageLifecycle } from "./packageLifecycle.ts";
 import { createDeferredConfigApplier, createOpenCodePendingService } from "./opencodePending.ts";
 import { agentSessionRoutes, type AgentGoalService } from "./routes/agentSessions.ts";
+import { settleAllOrThrow } from "./settle.ts";
 
 /** POLYTH_SMALL_MODEL="provider/model-id" — cheap model for auditors/commit messages. */
 const smallModel = (): { providerID: string; modelID: string } | undefined => {
@@ -111,6 +127,150 @@ export interface ServerPackageRegistration {
 
 export { isPackageEnabled } from "./packages.ts";
 
+export interface DataDirectoryLease {
+  canonicalDataDir: string;
+  release(): Promise<void>;
+}
+
+export interface RuntimeAdmissionBarrier {
+  fenced(): boolean;
+  admit<T>(action: () => Promise<T>): Promise<T>;
+  run<T>(action: () => Promise<T>): Promise<T>;
+}
+
+/** Reader/exclusive gate for turn admission versus config replacement.
+ * Admissions join synchronously before their first await. An exclusive caller
+ * fences new admissions, waits for current admissions to settle, then holds
+ * the fence through its complete critical section. */
+export function createRuntimeAdmissionBarrier(): RuntimeAdmissionBarrier {
+  let fenceDepth = 0;
+  let activeAdmissions = 0;
+  let exclusiveTail = Promise.resolve();
+  const idleWaiters = new Set<() => void>();
+
+  const waitForIdle = (): Promise<void> => {
+    if (activeAdmissions === 0) return Promise.resolve();
+    return new Promise<void>((resolveIdle) => {
+      idleWaiters.add(resolveIdle);
+    });
+  };
+
+  return {
+    fenced: () => fenceDepth > 0,
+    async admit<T>(action: () => Promise<T>): Promise<T> {
+      if (fenceDepth > 0) {
+        throw Object.assign(
+          new Error("runtime admission is fenced for configuration restart"),
+          { code: "restart-deferred" },
+        );
+      }
+      activeAdmissions += 1;
+      try {
+        return await action();
+      } finally {
+        activeAdmissions -= 1;
+        if (activeAdmissions === 0) {
+          for (const resolveIdle of idleWaiters) resolveIdle();
+          idleWaiters.clear();
+        }
+      }
+    },
+    async run<T>(action: () => Promise<T>): Promise<T> {
+      const previous = exclusiveTail;
+      let releaseExclusive!: () => void;
+      exclusiveTail = new Promise<void>((resolveExclusive) => {
+        releaseExclusive = resolveExclusive;
+      });
+      fenceDepth += 1;
+      try {
+        await previous;
+        await waitForIdle();
+        return await action();
+      } finally {
+        fenceDepth -= 1;
+        releaseExclusive();
+      }
+    },
+  };
+}
+
+/** Hold a kernel advisory lock through a tiny child whose stdin is owned by
+ * this process. A stale file is harmless: exclusivity belongs to flock's open
+ * file description and is released by the kernel when the process exits. */
+export async function acquireDataDirectoryLease(dataDir: string): Promise<DataDirectoryLease> {
+  mkdirSync(dataDir, { recursive: true });
+  const canonicalDataDir = realpathSync.native(dataDir);
+  const lockPath = join(canonicalDataDir, ".polyth-writer.lock");
+  const holder: ChildProcessWithoutNullStreams = spawn(
+    "flock",
+    [
+      "--exclusive",
+      "--nonblock",
+      lockPath,
+      process.execPath,
+      "-e",
+      "process.stdout.write('locked\\n');process.stdin.resume()",
+    ],
+    { stdio: ["pipe", "pipe", "pipe"] },
+  );
+
+  await new Promise<void>((resolveLock, rejectLock) => {
+    let output = "";
+    let errorOutput = "";
+    let settled = false;
+    const finish = (error?: Error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (error) rejectLock(error);
+      else resolveLock();
+    };
+    const timer = setTimeout(() => {
+      holder.kill();
+      finish(new Error(`timed out acquiring the Polyth writer lease for ${canonicalDataDir}`));
+    }, 5_000);
+    holder.stdout.setEncoding("utf8");
+    holder.stderr.setEncoding("utf8");
+    holder.stdout.on("data", (chunk: string) => {
+      output += chunk;
+      if (output.includes("locked\n")) finish();
+    });
+    holder.stderr.on("data", (chunk: string) => {
+      if (errorOutput.length < 4_096) errorOutput += chunk;
+    });
+    holder.once("error", (error) => {
+      finish(new Error(`OS advisory locking is unavailable: ${error.message}`));
+    });
+    holder.once("exit", (code) => {
+      if (!settled) {
+        finish(Object.assign(
+          new Error(
+            code === 1
+              ? `another Polyth server already owns data directory ${canonicalDataDir}`
+              : `failed to acquire the Polyth writer lease for ${canonicalDataDir}${errorOutput.trim() ? `: ${errorOutput.trim()}` : ""}`,
+          ),
+          { code: "data-directory-locked" },
+        ));
+      }
+    });
+  });
+
+  let released = false;
+  return {
+    canonicalDataDir,
+    async release() {
+      if (released) return;
+      released = true;
+      if (holder.exitCode !== null || holder.signalCode !== null) return;
+      const exited = new Promise<void>((resolveExit) => {
+        holder.once("exit", () => resolveExit());
+      });
+      holder.stdin.end();
+      await exited;
+    },
+  };
+}
+
 // ---- structural views of package-owned services -----------------------------------
 // The composition root never imports feature packages; where it consumes their
 // services it declares only the surface it calls. Richer types flow through
@@ -135,7 +295,10 @@ type DictationForWs = NonNullable<Parameters<typeof attachWs>[3]>;
 export async function boot(opts: BootOptions = {}) {
   const port = opts.port ?? Number(process.env.PORT ?? 4400);
   opts.hostname ??= process.env.HOST;
-  const dataDir = resolve(opts.dataDir ?? process.env.POLYTH_DATA_DIR ?? "./data");
+  const requestedDataDir = resolve(opts.dataDir ?? process.env.POLYTH_DATA_DIR ?? "./data");
+  const writerLease = await acquireDataDirectoryLease(requestedDataDir);
+  const dataDir = writerLease.canonicalDataDir;
+  try {
   const packagesDir = opts.packagesDir ?? resolve(__dirname, "../..");
   const bundledServerPackages = opts.serverPackages;
   const discoveredPackageManifests = bundledServerPackages
@@ -143,7 +306,6 @@ export async function boot(opts: BootOptions = {}) {
     : await discoverServerPackages(packagesDir);
   const packageDescriptors = bundledServerPackages?.map((pkg) => pkg.descriptor)
     ?? discoveredPackageManifests.map((pkg) => pkg.descriptor);
-  mkdirSync(dataDir, { recursive: true });
   const routeRegistry = createRouteRegistry();
   const packageLifecycle = createPackageLifecycle(routeRegistry);
 
@@ -169,7 +331,19 @@ export async function boot(opts: BootOptions = {}) {
   // --- kernel composition root
   const root = createContext("root");
   const store = createStore(`${dataDir}/sessions.db`);
+  await store.recoverExecutingOperations();
+  for (const projection of await store.projections()) {
+    const interrupted = (await store.operations(projection.id))
+      .some((operation) => operation.state === "unknown");
+    if (!interrupted || projection.status === "unknown" || projection.status === "archived") continue;
+    await store.upsertProjection({
+      ...projection,
+      status: "unknown",
+      updatedAt: Date.now(),
+    });
+  }
   root.provide(CAP.sessionPersistence, store);
+  const admissionBarrier = createRuntimeAdmissionBarrier();
   const projects = createProjectService(dataDir);
   root.provide(CAP.projects, projects);
 
@@ -184,8 +358,31 @@ export async function boot(opts: BootOptions = {}) {
 
   // --- per-project opencode runtime pool (lazy spawn, one serve process per project)
   const runtimesByProject = new Map<string, Promise<AgentRuntime>>();
-  const runtimeRestarters = new Map<string, () => Promise<void>>();
+  const runtimeRestarters = new Map<string, {
+    runtime: AgentRuntime;
+    restart(): Promise<void>;
+    withConfigRestart<T>(
+      action: (restart: () => Promise<void>) => Promise<T>,
+    ): Promise<T>;
+  }>();
+  const runtimeRestartListeners = new Set<(runtime: AgentRuntime) => Promise<void>>();
+  let runtimeCreationFenceDepth = 0;
   const sessionIdMap = new Map<string, string>(); // canonical -> backend
+  const configDir = opts.opencode?.dataDir;
+  const configIdentityProbe = createConfigApplier({
+    ...(configDir ? { configDir } : {}),
+  });
+  const localConfigTargetId =
+    opts.opencode?.configTargetId ?? configIdentityProbe.configTargetId!();
+  const directConfigApplier = createConfigApplier({
+    ...(configDir ? { configDir } : {}),
+    targetId: localConfigTargetId,
+    // Local configuration is writable only while an exact owned-local lease
+    // for this target is live. SSH/borrowed-only pools remain read-only.
+    authority: () => runtimeRestarters.size > 0
+      ? { kind: "writable", targetId: localConfigTargetId }
+      : { kind: "read-only" },
+  });
 
   const isTransportError = (err: unknown): boolean =>
     /fetch failed|terminated|ECONNRESET|ECONNREFUSED/i.test(
@@ -229,6 +426,15 @@ export async function boot(opts: BootOptions = {}) {
         ...(opts.opencode?.port ? { port: opts.opencode.port } : {}),
         ...(opts.opencode?.bin ? { bin: opts.opencode.bin } : {}),
         ...(opts.opencode?.hostname ? { hostname: opts.opencode.hostname } : {}),
+        ...(opts.opencode?.dataDir ? { dataDir: opts.opencode.dataDir } : {}),
+        ...(opts.opencode?.protocol ? { protocol: opts.opencode.protocol } : {}),
+        ...(opts.opencode?.startupDeadlineMs
+          ? { startupDeadlineMs: opts.opencode.startupDeadlineMs }
+          : {}),
+        ...(opts.opencode?.probeDeadlineMs
+          ? { probeDeadlineMs: opts.opencode.probeDeadlineMs }
+          : {}),
+        configTargetId: localConfigTargetId,
         ...(browserTool ? {
           browserTool: {
             endpoint: `http://127.0.0.1:${port}/internal/opencode/browser-tool`,
@@ -249,81 +455,270 @@ export async function boot(opts: BootOptions = {}) {
     }
   };
 
-  // Stable facade per pool key: when ensureSession dies with a transport error
-  // (serve process gone / poisoned socket), drop the cached promise, respawn,
-  // and retry once. Callers keep the same handle, so listeners wired against
-  // it keep receiving events from the fresh runtime.
-  const facadeFor = (key: string, projectId: string, cwd: string, first: AgentRuntime): AgentRuntime => {
+  // Stable facade per pool key. Neither queries nor mutations destructively
+  // respawn it: owned replacement is admitted only through the pool restart
+  // barrier, while lifecycle disconnect handling owns natural-death recovery.
+  const facadeFor = (
+    key: string,
+    projectId: string,
+    cwd: string,
+    first: AgentRuntime,
+    configRestartable: boolean,
+  ): AgentRuntime => {
     let inner = first;
     const listeners = new Set<(sessionId: string, ev: RuntimeEvent) => void>();
+    const observationListeners = new Set<
+      Parameters<NonNullable<AgentRuntime["onObservation"]>>[0]
+    >();
+    const lifecycleListeners = new Set<
+      Parameters<NonNullable<AgentRuntime["onLifecycle"]>>[0]
+    >();
     const fanout = (sessionId: string, ev: RuntimeEvent) => { for (const cb of listeners) cb(sessionId, ev); };
-    let innerSub = inner.onEvent(fanout);
+    const fanoutObservation: Parameters<NonNullable<AgentRuntime["onObservation"]>>[0] =
+      (sessionId, observation) => {
+        for (const cb of observationListeners) cb(sessionId, observation);
+      };
+    const fanoutLifecycle: Parameters<NonNullable<AgentRuntime["onLifecycle"]>>[0] =
+      (notification) => {
+        for (const cb of lifecycleListeners) cb(notification);
+      };
+    const subscribeInner = (): Disposable[] => [
+      inner.onEvent(fanout),
+      ...(inner.onObservation ? [inner.onObservation(fanoutObservation)] : []),
+      ...(inner.onLifecycle ? [inner.onLifecycle(fanoutLifecycle)] : []),
+    ];
+    let innerSubs = subscribeInner();
     let restarting: Promise<void> | null = null;
 
+    type RuntimeReliabilityBridge = {
+      endpoint(): Promise<RuntimeEndpoint>;
+      protocol?(): Promise<"legacy" | "v2">;
+      reconcile(
+        binding: RuntimeSessionBinding & {
+          protocol?: "legacy" | "v2";
+          reconciliationOrdinal?: number;
+        },
+        after?: string,
+      ): Promise<RuntimeSnapshot>;
+    };
+    const directReliability = (): Partial<RuntimeReliabilityBridge> =>
+      inner as AgentRuntime & Partial<RuntimeReliabilityBridge>;
+    const lifecycleReliability = (): Partial<RuntimeReliabilityBridge> | undefined =>
+      (inner as AgentRuntime & { lifecycle?: Partial<RuntimeReliabilityBridge> }).lifecycle;
+    const endpoint = async (): Promise<RuntimeEndpoint> => {
+      const direct = directReliability();
+      if (typeof direct.endpoint === "function") return direct.endpoint();
+      const lifecycle = lifecycleReliability();
+      if (typeof lifecycle?.endpoint === "function") return lifecycle.endpoint();
+      throw Object.assign(new Error("runtime endpoint identity is unavailable"), {
+        code: "unsupported",
+      });
+    };
+    const reconcile = async (
+      binding: RuntimeSessionBinding & { reconciliationOrdinal?: number },
+      after?: string,
+    ): Promise<RuntimeSnapshot> => {
+      const direct = directReliability();
+      if (typeof direct.reconcile === "function") return direct.reconcile(binding, after);
+      const lifecycle = lifecycleReliability();
+      if (typeof lifecycle?.reconcile !== "function") {
+        throw Object.assign(new Error("runtime reconciliation is unavailable"), {
+          code: "unsupported",
+        });
+      }
+      const protocol = await lifecycle.protocol?.();
+      if (!protocol) {
+        throw Object.assign(new Error("runtime protocol identity is unavailable"), {
+          code: "unsupported",
+        });
+      }
+      return lifecycle.reconcile({ ...binding, protocol }, after);
+    };
+
     const respawnOnce = async (): Promise<void> => {
-      innerSub.dispose();
+      for (const subscription of innerSubs) subscription.dispose();
       await inner.dispose().catch(() => {});
       inner = await spawnRuntime(projectId, cwd);
-      innerSub = inner.onEvent(fanout);
+      innerSubs = subscribeInner();
       runtimesByProject.set(key, Promise.resolve(facade));
+      await settleAllOrThrow(
+        [...runtimeRestartListeners].map((listener) => listener(facade)),
+      );
     };
-    const respawn = (): Promise<void> => {
+    const replaceGeneration = async (): Promise<void> => {
+      const lifecycle = (
+        inner as AgentRuntime & {
+          lifecycle?: {
+            control: RuntimeEndpoint["control"];
+            restart?(reason: "crash" | "config" | "manual"): Promise<RuntimeEndpoint>;
+          };
+        }
+      ).lifecycle;
+      if (lifecycle?.control.kind === "owned" && lifecycle.restart) {
+        await lifecycle.restart("config");
+        await settleAllOrThrow(
+          [...runtimeRestartListeners].map((listener) => listener(facade)),
+        );
+        return;
+      }
+      // Compatibility runtimes without the lifecycle seam are replaced as a
+      // unit. Production OpenCode runtimes always take the generation path.
+      await respawnOnce();
+    };
+    const withConfigRestart = async <T,>(
+      action: (restart: () => Promise<void>) => Promise<T>,
+    ): Promise<T> => {
+      const lifecycle = (
+        inner as AgentRuntime & {
+          lifecycle?: {
+            control: RuntimeEndpoint["control"];
+            withConfigRestart?<R>(
+              action: (restart: () => Promise<RuntimeEndpoint>) => Promise<R>,
+            ): Promise<R>;
+          };
+        }
+      ).lifecycle;
+      if (lifecycle?.control.kind === "owned" && lifecycle.withConfigRestart) {
+        return lifecycle.withConfigRestart(async (restartGeneration) =>
+          action(async () => {
+            await restartGeneration();
+            await settleAllOrThrow(
+              [...runtimeRestartListeners].map((listener) => listener(facade)),
+            );
+          }));
+      }
+      // Compatibility runtimes have no autonomous lifecycle replacement path,
+      // so the server-owned facade restart itself is the complete interlock.
+      return action(restart);
+    };
+    const restart = (): Promise<void> => {
       if (!restarting) {
-        restarting = respawnOnce().finally(() => { restarting = null; });
+        restarting = replaceGeneration().finally(() => { restarting = null; });
       }
       return restarting;
     };
 
-    // Read-only lookups are idempotent, so they get the same respawn-once
-    // recovery as ensureSession: a serve process that died between requests
-    // must not blank the model/agent pickers until the next session start.
-    const reviving = async <T>(what: string, call: () => Promise<T>): Promise<T> => {
-      try {
-        return await call();
-      } catch (err) {
-        if (!isTransportError(err)) throw err;
-        console.warn(`[polyth] opencode transport error for ${key} (${what}); respawning`, err);
-        await respawn();
-        return call();
-      }
-    };
-
     const facade: AgentRuntime = {
       capabilities: () => inner.capabilities(),
-      models: () => reviving("models", () => inner.models()),
-      agents: () => reviving("agents", () => inner.agents()),
-      sessions: () => reviving("sessions", () => inner.sessions()),
-      history: (sessionId) => reviving("history", () => inner.history(sessionId)),
-      ensureSession: (canonical) => reviving("ensureSession", () => inner.ensureSession(canonical)),
+      models: () => inner.models(),
+      agents: () => inner.agents(),
+      sessions: () => inner.sessions(),
+      history: (sessionId) => inner.history(sessionId),
+      ensureSession: (canonical) => inner.ensureSession(canonical),
+      createSessionOperation: (canonical, operationId) =>
+        inner.createSessionOperation
+          ? inner.createSessionOperation(canonical, operationId)
+          : Promise.resolve({
+              kind: "unknown",
+              operationId,
+              message: "runtime lacks operation-aware session creation",
+            }),
       async resetSession(canonical) {
         if (!inner.resetSession) throw Object.assign(new Error("runtime cannot reset session history"), { code: "unsupported" });
-        return reviving("resetSession", () => {
-          if (!inner.resetSession) throw Object.assign(new Error("runtime cannot reset session history"), { code: "unsupported" });
-          return inner.resetSession(canonical);
-        });
+        return inner.resetSession(canonical);
       },
+      resetSessionOperation: (canonical, operationId) =>
+        inner.resetSessionOperation
+          ? inner.resetSessionOperation(canonical, operationId)
+          : Promise.resolve({
+              kind: "rejected",
+              code: "capability-unsupported",
+              message: "runtime lacks operation-aware session reset",
+            }),
       // UX-MSG-ACTIONS: exact-history branching passes through the facade so
       // the session service never learns backend/OpenCode details.
       async branchSession(request) {
         if (!inner.branchSession) throw Object.assign(new Error("runtime cannot branch exact history"), { code: "unsupported" });
-        return reviving("branchSession", () => {
-          if (!inner.branchSession) throw Object.assign(new Error("runtime cannot branch exact history"), { code: "unsupported" });
-          return inner.branchSession(request);
-        });
+        return inner.branchSession(request);
       },
+      branchSessionOperation: (request, operationId) =>
+        inner.branchSessionOperation
+          ? inner.branchSessionOperation(request, operationId)
+          : Promise.resolve({
+              kind: "rejected",
+              code: "capability-unsupported",
+              message: "runtime lacks operation-aware session branching",
+            }),
       async discardSession(sessionId) {
-        // best-effort by contract: an unreachable backend must not turn a
-        // clean fork failure into a second error.
-        await inner.discardSession?.(sessionId).catch(() => {});
+        await inner.discardSession?.(sessionId);
       },
+      discardSessionOperation: (sessionId, operationId) =>
+        inner.discardSessionOperation
+          ? inner.discardSessionOperation(sessionId, operationId)
+          : Promise.resolve({
+              kind: "unknown",
+              operationId,
+              message: "runtime lacks operation-aware session deletion",
+            }),
       startTurn: (req) => inner.startTurn(req),
+      startTurnOperation: (req, operationId) =>
+        inner.startTurnOperation
+          ? inner.startTurnOperation(req, operationId)
+          : Promise.resolve({
+              kind: "unknown",
+              operationId,
+              message: "runtime lacks operation-aware turn submission",
+            }),
+      steer: (sessionId, text) => inner.steer?.(sessionId, text) ?? Promise.resolve(false),
+      steerOperation: (sessionId, text, operationId) =>
+        inner.steerOperation
+          ? inner.steerOperation(sessionId, text, operationId)
+          : Promise.resolve({
+              kind: "unknown",
+              operationId,
+              message: "runtime lacks operation-aware steering",
+            }),
       abort: (sessionId) => inner.abort(sessionId),
+      abortOperation: (sessionId, operationId) =>
+        inner.abortOperation
+          ? inner.abortOperation(sessionId, operationId)
+          : Promise.resolve({
+              kind: "unknown",
+              operationId,
+              message: "runtime lacks operation-aware abort",
+            }),
       replyPermission: (sessionId, requestId, reply) => inner.replyPermission(sessionId, requestId, reply),
+      replyPermissionOperation: (sessionId, requestId, reply, operationId) =>
+        inner.replyPermissionOperation
+          ? inner.replyPermissionOperation(sessionId, requestId, reply, operationId)
+          : Promise.resolve({
+              kind: "unknown",
+              operationId,
+              message: "runtime lacks operation-aware permission reply",
+            }),
       replyQuestion: (sessionId, requestId, answers) => inner.replyQuestion(sessionId, requestId, answers),
+      replyQuestionOperation: (sessionId, requestId, answers, operationId) =>
+        inner.replyQuestionOperation
+          ? inner.replyQuestionOperation(sessionId, requestId, answers, operationId)
+          : Promise.resolve({
+              kind: "unknown",
+              operationId,
+              message: "runtime lacks operation-aware question reply",
+            }),
       ...(inner.replySecret
         ? { replySecret: (sessionId: string, requestId: string, result: Parameters<NonNullable<AgentRuntime["replySecret"]>>[2]) =>
             inner.replySecret!(sessionId, requestId, result) }
         : {}),
+      ...(inner.replySecretOperation
+        ? {
+            replySecretOperation: (
+              sessionId: string,
+              requestId: string,
+              result: Parameters<NonNullable<AgentRuntime["replySecretOperation"]>>[2],
+              operationId: string,
+            ) => inner.replySecretOperation!(sessionId, requestId, result, operationId),
+          }
+        : {}),
+      endpoint,
+      reconcile,
+      onObservation(cb) {
+        observationListeners.add(cb);
+        return { dispose: () => { observationListeners.delete(cb); } };
+      },
+      onLifecycle(cb) {
+        lifecycleListeners.add(cb);
+        return { dispose: () => { lifecycleListeners.delete(cb); } };
+      },
       onEvent(cb) {
         listeners.add(cb);
         return { dispose: () => { listeners.delete(cb); } };
@@ -331,12 +726,133 @@ export async function boot(opts: BootOptions = {}) {
       dispose: () => {
         runtimesByProject.delete(key);
         runtimeRestarters.delete(key);
-        innerSub.dispose();
+        for (const subscription of innerSubs) subscription.dispose();
         return inner.dispose();
       },
     };
-    runtimeRestarters.set(key, respawn);
+    if (configRestartable) {
+      runtimeRestarters.set(key, {
+        runtime: facade,
+        restart,
+        withConfigRestart,
+      });
+    }
     return facade;
+  };
+
+  type RuntimeRestartFingerprint = {
+    authorityId: string;
+    generation: number;
+  };
+  type RuntimeRestartState = Map<string, RuntimeRestartFingerprint>;
+  let reconcileRuntimeForConfigRestart = async (
+    sessionId: string,
+    _runtime: AgentRuntime,
+    _expected: RuntimeRestartFingerprint,
+  ): Promise<{ safe: true } | { safe: false; reason: string }> => ({
+    safe: false,
+    reason: `session ${sessionId} restart reconciliation is not initialized`,
+  });
+
+  const captureRuntimeRestartState = async (): Promise<RuntimeRestartState> => {
+    const state: RuntimeRestartState = new Map();
+    await settleAllOrThrow([...runtimeRestarters].map(async ([key, restarter]) => {
+      const endpoint = await restarter.runtime.endpoint?.();
+      if (!endpoint) {
+        throw Object.assign(
+          new Error(`runtime ${key} endpoint identity is unavailable for config restart`),
+          { code: "restart-deferred" },
+        );
+      }
+      state.set(key, {
+        authorityId: endpoint.authorityId,
+        generation: endpoint.generation,
+      });
+    }));
+    return state;
+  };
+
+  const restartRuntimeEntries = async (
+    expected?: RuntimeRestartState,
+  ): Promise<number> => {
+    const entries = [...runtimeRestarters];
+    const restarted = await settleAllOrThrow(entries.map(async ([key, restarter]) => {
+      const prior = expected?.get(key);
+      if (expected && !prior) {
+        throw Object.assign(
+          new Error(`runtime ${key} materialized after config restart capture`),
+          { code: "restart-deferred" },
+        );
+      }
+      if (prior) {
+        const current = await restarter.runtime.endpoint?.().catch(() => undefined);
+        if (
+          current
+          && (
+            current.authorityId !== prior.authorityId
+            || current.generation !== prior.generation
+          )
+        ) {
+          // The config transaction holds every owned lifecycle replacement
+          // lock, so drift here means the interlock was not established. A
+          // generation number alone cannot prove which config was loaded.
+          throw Object.assign(
+            new Error(`runtime ${key} changed generation during config apply`),
+            { code: "restart-deferred" },
+          );
+        }
+      }
+      const restart = activeConfigRestartCapabilities?.get(key);
+      if (activeConfigRestartCapabilities && !restart) {
+        throw Object.assign(
+          new Error(`runtime ${key} is outside the config replacement interlock`),
+          { code: "restart-deferred" },
+        );
+      }
+      await (restart ?? restarter.restart)();
+      return true;
+    }));
+    return restarted.filter(Boolean).length;
+  };
+
+  let activeConfigRestartCapabilities: ReadonlyMap<
+    string,
+    () => Promise<void>
+  > | null = null;
+  const withRuntimeReplacementInterlock = async <T,>(
+    action: () => Promise<T>,
+  ): Promise<T> => {
+    runtimeCreationFenceDepth += 1;
+    try {
+      // A pool promise created before the synchronous fence may still be
+      // installing its facade. Let it finish so it is included below.
+      await Promise.allSettled([...runtimesByProject.values()]);
+      const entries = [...runtimeRestarters];
+      const capabilities = new Map<string, () => Promise<void>>();
+      const acquire = async (index: number): Promise<T> => {
+        const entry = entries[index];
+        if (!entry) {
+          activeConfigRestartCapabilities = capabilities;
+          try {
+            return await action();
+          } finally {
+            activeConfigRestartCapabilities = null;
+          }
+        }
+        const [key, restarter] = entry;
+        return restarter.withConfigRestart(async (restart) => {
+          capabilities.set(key, restart);
+          try {
+            return await acquire(index + 1);
+          } finally {
+            capabilities.delete(key);
+          }
+        });
+      };
+      return await acquire(0);
+    } finally {
+      runtimeCreationFenceDepth -= 1;
+    }
   };
 
   const runtimes: RuntimePool = {
@@ -345,12 +861,31 @@ export async function boot(opts: BootOptions = {}) {
       const key = `${projectId}::${dir}`;
       let p = runtimesByProject.get(key);
       if (!p) {
+        if (runtimeCreationFenceDepth > 0) {
+          throw Object.assign(
+            new Error("runtime creation is fenced for configuration restart"),
+            { code: "restart-deferred" },
+          );
+        }
         p = (async () => {
+          const configRestartable = !(await projects.get(projectId))?.remote;
           try {
-            return facadeFor(key, projectId, dir, await spawnRuntime(projectId, dir));
+            return facadeFor(
+              key,
+              projectId,
+              dir,
+              await spawnRuntime(projectId, dir),
+              configRestartable,
+            );
           } catch (err) {
             if (!isTransportError(err)) throw err;
-            return facadeFor(key, projectId, dir, await spawnRuntime(projectId, dir)); // one respawn retry
+            return facadeFor(
+              key,
+              projectId,
+              dir,
+              await spawnRuntime(projectId, dir),
+              configRestartable,
+            ); // one spawn retry before any mutation exists
           }
         })();
         runtimesByProject.set(key, p);
@@ -359,9 +894,11 @@ export async function boot(opts: BootOptions = {}) {
       return p;
     },
     async restartAll() {
-      const restarters = [...runtimeRestarters.values()];
-      await Promise.all(restarters.map((restart) => restart()));
-      return restarters.length;
+      return restartRuntimeEntries();
+    },
+    onRestart(listener) {
+      runtimeRestartListeners.add(listener);
+      return { dispose: () => { runtimeRestartListeners.delete(listener); } };
     },
   };
   const runtimeCatalog = createRuntimeCatalog({ projects, runtimes });
@@ -393,9 +930,36 @@ export async function boot(opts: BootOptions = {}) {
   provideService("voice.settings", voiceSettings);
 
   // --- WP9: behavior instructions, MCP config, managed plugins (adapter-applied)
-  const directConfigApplier = createConfigApplier();
   const pendingOpenCode = createOpenCodePendingService({
-    restart: () => runtimes.restartAll?.() ?? Promise.resolve(0),
+    canRestart: async (captured) => {
+      const expected = captured as RuntimeRestartState | undefined;
+      const assessments = await settleAllOrThrow((await store.projections()).map(async (projection) => {
+        const project = await projects.get(projection.projectId);
+        const cwd = projection.worktreePath ?? project?.path ?? process.cwd();
+        const key = `${projection.projectId}::${cwd}`;
+        const restarter = runtimeRestarters.get(key);
+        if (!restarter) return { safe: true as const };
+        const fingerprint = expected?.get(key);
+        if (!fingerprint) {
+          return {
+            safe: false as const,
+            reason: `runtime ${key} was not captured before config restart`,
+          };
+        }
+        return reconcileRuntimeForConfigRestart(
+          projection.id,
+          restarter.runtime,
+          fingerprint,
+        );
+      }));
+      const unsafe = assessments.find((assessment) => !assessment.safe);
+      if (unsafe && !unsafe.safe) return unsafe;
+      return { safe: true as const };
+    },
+    withAdmissionBarrier: (action) =>
+      admissionBarrier.run(() => withRuntimeReplacementInterlock(action)),
+    captureRestartState: captureRuntimeRestartState,
+    restart: (state) => restartRuntimeEntries(state as RuntimeRestartState | undefined),
   });
   const configApplier = createDeferredConfigApplier(directConfigApplier, pendingOpenCode);
   let refreshSafeBehavior: () => Promise<void> = async () => {};
@@ -547,7 +1111,7 @@ export async function boot(opts: BootOptions = {}) {
         return ev;
       },
     },
-    oneShot,
+    oneShot: (runtime, options) => oneShot(runtime, options, store),
     smallModel,
     resolveSessionRuntime,
     loadPlugin: (plugin) => loadPlugin(root, plugin, {}),
@@ -607,6 +1171,7 @@ export async function boot(opts: BootOptions = {}) {
 
   const sessions = createSessionService({
     store, projects, runtimes, broadcast, queue: store, org: store, profiles: store, behavior, secureSafe,
+    admission: admissionBarrier,
     permissions: requireSvc<SessionDeps["permissions"]>("permissions"),
     ...(gitService ? { worktrees: gitService.worktrees } : {}),
     ...(terminalService ? { shell: terminalService } : {}),
@@ -658,6 +1223,8 @@ export async function boot(opts: BootOptions = {}) {
     },
   });
   sessionsImpl = sessions;
+  reconcileRuntimeForConfigRestart = (sessionId, runtime, expected) =>
+    sessions.reconcileForRuntimeRestart(sessionId, runtime, expected);
   root.provide(CAP.sessions, sessions);
 
   // --- F9 idle assist: after N quiet seconds past turn/stopped, a small-model
@@ -683,7 +1250,7 @@ export async function boot(opts: BootOptions = {}) {
     return oneShot(rt, {
       cwd: project?.path ?? process.cwd(), prompt,
       ...(smallModel() ? { model: smallModel()! } : proj?.model ? { model: proj.model } : {}),
-    });
+    }, store);
   };
   assist = createAssistService({
     settings: () => assistSettings.get(),
@@ -869,10 +1436,15 @@ export async function boot(opts: BootOptions = {}) {
     await root.dispose();
     await store.close();
     server.close();
+    await writerLease.release();
   };
   process.on("SIGINT", () => void shutdown().then(() => process.exit(0)));
   process.on("SIGTERM", () => void shutdown().then(() => process.exit(0)));
   return { server, sessions, shutdown };
+  } catch (error) {
+    await writerLease.release();
+    throw error;
+  }
 }
 
 if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])) {

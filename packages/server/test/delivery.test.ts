@@ -8,7 +8,8 @@ import { join } from "node:path";
 
 import { createStore, deriveMessages, rewindDraft } from "@polyth/session";
 import type {
-  AgentRuntime, JsonObject, ModelMessage, Project, ProjectService, RuntimeBranchRequest, RuntimeEvent,
+  AgentRuntime, JsonObject, ModelMessage, Project, ProjectService, RuntimeBranchRequest,
+  RuntimeEndpoint, RuntimeEvent, RuntimeSessionBinding, RuntimeSnapshot,
 } from "@polyth/contracts";
 import { createSessionService, type Broadcaster } from "../src/sessions.ts";
 import type { PermissionService } from "@polyth/permissions";
@@ -28,7 +29,12 @@ function fakeRuntime(opts: { steering?: boolean; steerResult?: boolean } = {}) {
   const emit = (sessionId: string, ev: RuntimeEvent) => {
     for (const l of listeners) l(sessionId, ev);
   };
-  const rt: AgentRuntime = {
+  const rt: AgentRuntime & {
+    endpoint(): Promise<RuntimeEndpoint>;
+    reconcile(
+      binding: RuntimeSessionBinding & { reconciliationOrdinal?: number },
+    ): Promise<RuntimeSnapshot>;
+  } = {
     capabilities: async () => ({
       streaming: true, permissions: true, questions: true, compaction: false, subagents: false,
       steering: opts.steering ?? false,
@@ -70,6 +76,36 @@ function fakeRuntime(opts: { steering?: boolean; steerResult?: boolean } = {}) {
     },
     replyPermission: async (_s, requestId, reply) => { permissionReplies.push({ requestId, reply }); },
     replyQuestion: async (_s, requestId, answers) => { questionReplies.push({ requestId, answers }); },
+    endpoint: async () => ({
+      authorityId: "fake-runtime",
+      continuity: "verified",
+      generation: 1,
+      url: "http://fake.invalid",
+      location: { directory: "/fake" },
+      control: { kind: "borrowed", source: "external" },
+      config: { kind: "read-only" },
+      authentication: { kind: "none" },
+    }),
+    reconcile: async (binding) => ({
+      authorityId: binding.authorityId,
+      generation: binding.generation,
+      location: binding.location,
+      backendSessionId: binding.backendSessionId!,
+      reconciliationOrdinal: binding.reconciliationOrdinal ?? 1,
+      state: {
+        value: "idle",
+        watermark: "1",
+        comparison: { domain: "test-status", order: 1 },
+      },
+      completeness: {
+        events: "partial",
+        permissions: "partial",
+        questions: "partial",
+      },
+      permissions: [],
+      questions: [],
+      events: [],
+    }),
     onEvent(cb) {
       listeners.add(cb);
       return { dispose: () => listeners.delete(cb) };
@@ -165,7 +201,30 @@ test("normal send racing an active turn falls back to queue with reason", async 
   await store.close();
 });
 
-test("steer delivers into the active turn and logs delivery/steered before user/message", async () => {
+test("two concurrent idle sends admit once and durably queue the loser", async () => {
+  const fake = fakeRuntime();
+  const { sessions, store } = makeService(fake);
+  const { id } = await sessions.create({ projectId: "p1", title: "T" });
+
+  const results = await Promise.all([
+    sessions.send(id, { text: "first contender" }),
+    sessions.send(id, { text: "second contender" }),
+  ]);
+  await flush();
+
+  assert.equal(fake.startedTexts.length, 1);
+  assert.equal(results.filter((result) => result.queued).length, 1);
+  assert.equal((await store.queueList(id)).length, 1);
+  const events = await store.events(id);
+  assert.equal(events.filter((event) => event.type === "user/message").length, 1);
+  assert.equal(events.filter((event) => event.type === "queue/enqueued").length, 1);
+  assert.equal(events.filter((event) =>
+    event.type === "delivery/fallback-queued"
+    && (event.data as { reason?: string }).reason === "turn-active").length, 1);
+  await store.close();
+});
+
+test("steer persists user intent before I/O and records confirmed delivery afterward", async () => {
   const fake = fakeRuntime({ steering: true });
   const { sessions, store } = makeService(fake);
   const { id } = await sessions.create({ projectId: "p1", title: "T" });
@@ -178,7 +237,7 @@ test("steer delivers into the active turn and logs delivery/steered before user/
   const types = evs.map((e) => e.type);
   const steered = types.indexOf("delivery/steered");
   const um = types.lastIndexOf("user/message");
-  assert.ok(steered >= 0 && um > steered);
+  assert.ok(um >= 0 && steered > um);
   await store.close();
 });
 
@@ -211,9 +270,10 @@ test("unsupported/rejected steer falls back to queue", async () => {
     (evs.find((e) => e.type === "delivery/fallback-queued")?.data as { reason?: string }).reason,
     "steer-rejected",
   );
-  // no dangling user/message for the failed steer
+  // The rejected steer remains as durable user intent; later queue admission
+  // reuses its owning event rather than creating a duplicate model message.
   const userMsgs = evs.filter((e) => e.type === "user/message");
-  assert.equal(userMsgs.length, 1);
+  assert.equal(userMsgs.length, 2);
   await b.store.close();
 });
 
@@ -440,7 +500,7 @@ test("composer shell waits for shell-family permission then appends call before 
   const resolvedIndex = types.indexOf("permission/resolved");
   const callIndex = types.indexOf("tool/call");
   const resultIndex = types.indexOf("tool/result");
-  assert.ok(resolvedIndex >= 0 && callIndex > resolvedIndex && resultIndex > callIndex);
+  assert.ok(callIndex >= 0 && resultIndex > callIndex && resolvedIndex > resultIndex);
   assert.equal(events[callIndex]!.producerPlugin, "composer-shell");
   assert.equal(events[resultIndex]!.producerPlugin, "composer-shell");
   const modelMessages = deriveMessages(events);

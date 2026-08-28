@@ -1,8 +1,12 @@
-// Server-owned MCP configuration (WP9). Entries persist in the data dir as two
-// files: mcp.json (structure, safe to read back) and mcp-secrets.json (values,
-// never returned by any API and never logged). The backend adapter is the only
-// component that applies entries to the runtime; a failed apply rolls the
-// stored list back so config and runtime never diverge.
+// Server-owned MCP configuration (WP9, hardened in P1). Entries persist in the
+// data dir as two files: mcp.json (structure, safe to read back) and
+// mcp-secrets.json (values, never returned by any API and never logged). The
+// backend adapter is the only component that applies entries to the runtime; a
+// failed apply rolls the stored list back so config and runtime never diverge.
+// Importing entries from an existing backend config is READ-ONLY discovery: it
+// never triggers a backend write. User mutations apply a patch batch that
+// names exactly the Polyth-managed entries, so unsupported entries and unknown
+// fields in the backend config always survive.
 import { mkdirSync } from "node:fs";
 import { readFileSync, writeFileSync, renameSync, unlinkSync } from "node:fs";
 import { access } from "node:fs/promises";
@@ -18,7 +22,13 @@ export interface McpApplier {
       | { kind: "stdio"; command: string; args: string[]; env: Record<string, string> }
       | { kind: "http"; url: string; headers: Record<string, string> };
     enabled: boolean;
-  }>): Promise<void>;
+    /** Opaque unowned fields retained from an imported backend entry. */
+    raw?: Record<string, unknown>;
+  }> & {
+    /** All managed names (enabled, disabled, and retired). Rides on the array
+     * so intermediate appliers that forward/clone one argument keep it. */
+    managedNames?: string[];
+  }): Promise<void>;
 }
 
 export interface McpCreateInput {
@@ -27,6 +37,12 @@ export interface McpCreateInput {
   /** Secret values keyed by env key / header name. Stored, never returned. */
   secrets?: Record<string, string>;
   enabled?: boolean;
+  /** "backend-import" marks discovery of an entry that already exists in the
+   * backend config: adopting it is READ-ONLY and must not write that config. */
+  origin?: "backend-import";
+  /** Opaque unowned fields of the imported backend entry (owned/secret-bearing
+   * fields are stripped before this ever reaches the store). */
+  raw?: Record<string, unknown>;
 }
 
 export interface McpPatchInput {
@@ -45,10 +61,20 @@ export interface McpConfigService {
   test(id: string): Promise<{ ok: boolean; message: string }>;
 }
 
+/** MCP entry fields Polyth owns; every other field of an imported entry is
+ *  retained as an opaque fragment so managed edits can restore it. Owned
+ *  fields carry the secret values (environment/headers), so the retained
+ *  fragment never holds secrets. */
+const MCP_OWNED_ENTRY_FIELDS = new Set(["type", "command", "environment", "enabled", "url", "headers"]);
+
+const opaqueMcpFragment = (entry: Record<string, unknown>): Record<string, unknown> =>
+  Object.fromEntries(Object.entries(entry).filter(([key]) => !MCP_OWNED_ENTRY_FIELDS.has(key)));
+
 /** Parse the `mcp` block of an opencode.json into creatable entries so a
  *  fresh Polyth store can seed from what OpenCode already has configured.
  *  Env/header values become write-only secrets — they are stored server-side
- *  and never leave through any DTO. */
+ *  and never leave through any DTO. Entries are marked "backend-import" so
+ *  adopting them stays READ-ONLY: discovery never writes the backend config. */
 export function mcpEntriesFromBackendConfig(cfg: Record<string, unknown>): McpCreateInput[] {
   const block = cfg.mcp;
   if (!block || typeof block !== "object" || Array.isArray(block)) return [];
@@ -57,6 +83,12 @@ export function mcpEntriesFromBackendConfig(cfg: Record<string, unknown>): McpCr
     if (!name || !raw || typeof raw !== "object" || Array.isArray(raw)) continue;
     const entry = raw as Record<string, unknown>;
     const enabled = entry.enabled !== false;
+    const opaque = opaqueMcpFragment(entry);
+    const common = {
+      enabled,
+      origin: "backend-import" as const,
+      ...(Object.keys(opaque).length ? { raw: opaque } : {}),
+    };
     if (entry.type === "local") {
       const command = Array.isArray(entry.command) ? entry.command.map(String).filter(Boolean) : [];
       if (command.length === 0) continue;
@@ -67,7 +99,7 @@ export function mcpEntriesFromBackendConfig(cfg: Record<string, unknown>): McpCr
         name,
         transport: { kind: "stdio", command: command[0]!, args: command.slice(1), envKeys: Object.keys(env) },
         ...(Object.keys(env).length ? { secrets: env } : {}),
-        enabled,
+        ...common,
       });
     } else if (entry.type === "remote") {
       const url = typeof entry.url === "string" ? entry.url : "";
@@ -79,7 +111,7 @@ export function mcpEntriesFromBackendConfig(cfg: Record<string, unknown>): McpCr
         name,
         transport: { kind: "http", url, headersSecretRefs: Object.keys(headers) },
         ...(Object.keys(headers).length ? { secrets: headers } : {}),
-        enabled,
+        ...common,
       });
     }
   }
@@ -94,6 +126,9 @@ interface StoredServer {
   status: McpStatus;
   lastError?: string;
   revision: number;
+  /** Opaque unowned fields retained from a backend import; never in a DTO and
+   * secret-free by construction (owned fields are stripped before storage). */
+  raw?: Record<string, unknown>;
 }
 
 const err = (code: string, message: string) => Object.assign(new Error(message), { code });
@@ -156,6 +191,10 @@ export function createMcpConfigService(opts: { file: string; applier?: McpApplie
   let servers: StoredServer[] = load<StoredServer[]>(opts.file, []);
   // secrets: { [serverId]: { [keyName]: value } }
   let secrets: Record<string, Record<string, string>> = load(secretsFile, {});
+  // Names retired by rename/removal this process: the applier must still drop
+  // them from the backend config even though they are no longer stored. Kept
+  // in managedNames (not as entries) so only owned names are ever touched.
+  const retired = new Set<string>();
 
   const persist = () => {
     atomicWriteSync(opts.file, JSON.stringify(servers, null, 2));
@@ -176,9 +215,12 @@ export function createMcpConfigService(opts: { file: string; applier?: McpApplie
     if (!opts.applier) return;
     // F10: disabled servers are REMOVED from the applied config (not written
     // with enabled:false) so the backend cannot start or list them at all.
-    await opts.applier.applyMcp(servers.filter((s) => s.enabled).map((s) => ({
+    // The applier patches only the names listed in managedNames — unsupported
+    // entries and unknown fields in the backend config are never touched.
+    const entries = servers.filter((s) => s.enabled).map((s) => ({
       name: s.name,
       enabled: s.enabled,
+      ...(s.raw && Object.keys(s.raw).length ? { raw: structuredClone(s.raw) } : {}),
       transport: s.transport.kind === "stdio"
         ? {
             kind: "stdio" as const,
@@ -191,7 +233,9 @@ export function createMcpConfigService(opts: { file: string; applier?: McpApplie
             url: s.transport.url,
             headers: Object.fromEntries(s.transport.headersSecretRefs.map((k) => [k, secrets[s.id]?.[k] ?? ""])),
           },
-    })));
+    }));
+    const managedNames = [...new Set([...servers.map((s) => s.name), ...retired])];
+    await opts.applier.applyMcp(Object.assign(entries, { managedNames }));
   };
 
   /** Mutate under a snapshot; failed apply restores stored state exactly. */
@@ -226,7 +270,17 @@ export function createMcpConfigService(opts: { file: string; applier?: McpApplie
         enabled: input.enabled !== false,
         status: input.enabled !== false ? "starting" : "disabled",
         revision: 1,
+        ...(input.raw && Object.keys(input.raw).length ? { raw: structuredClone(input.raw) } : {}),
       };
+      if (input.origin === "backend-import") {
+        // Import/seed is READ-ONLY discovery (invariant 11): the entry already
+        // exists in the backend config, so adopting it must not write that
+        // config back — no applyMcp, only the Polyth store is updated.
+        servers.push(row);
+        if (input.secrets) secrets[row.id] = { ...input.secrets };
+        persist();
+        return toDto(row);
+      }
       return commit(() => {
         servers.push(row);
         if (input.secrets) secrets[row.id] = { ...input.secrets };
@@ -245,7 +299,10 @@ export function createMcpConfigService(opts: { file: string; applier?: McpApplie
       }
       if (patch.transport !== undefined) validateTransport(patch.transport);
       return commit(() => {
-        if (patch.name !== undefined) row.name = patch.name.trim();
+        if (patch.name !== undefined && patch.name.trim() !== row.name) {
+          retired.add(row.name);
+          row.name = patch.name.trim();
+        }
         if (patch.transport !== undefined) row.transport = patch.transport;
         if (patch.enabled !== undefined) {
           row.enabled = patch.enabled;
@@ -261,6 +318,7 @@ export function createMcpConfigService(opts: { file: string; applier?: McpApplie
       const i = servers.findIndex((s) => s.id === id);
       if (i < 0) return false;
       return commit(() => {
+        retired.add(servers[i]!.name);
         servers.splice(i, 1);
         delete secrets[id];
         return true;

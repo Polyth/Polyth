@@ -45,6 +45,12 @@ test("unread maps to the compact unread state", () => {
   );
 });
 
+test("reconciling and unknown are honest non-running states", () => {
+  assert.deepEqual(sessionRowStatus(s({ status: "reconciling" }), NOW), { kind: "reconciling" });
+  assert.deepEqual(sessionRowStatus(s({ status: "unknown" }), NOW), { kind: "unknown" });
+  assert.notEqual(sessionRowStatus(s({ status: "unknown" }), NOW).kind, "working");
+});
+
 test("read idle, finished, failed, archived, and worktree sessions are regular", () => {
   for (const session of [
     s({ status: "idle" }),

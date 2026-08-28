@@ -138,6 +138,8 @@ export default function Sidebar() {
       && session.status !== "archived"
       && (session.status === "working"
         || session.status === "waiting"
+        || session.status === "reconciling"
+        || session.status === "unknown"
         || (session.attention?.questions ?? 0) > 0
         || (session.attention?.permissions ?? 0) > 0));
     const filtered = projects.filter((candidate) => {

@@ -8,17 +8,47 @@ import { MODEL_VISIBLE_TYPES } from "@polyth/contracts";
 import type {
   AgentProfile,
   AttachmentRef,
+  CanonicalEventInput,
   ChildSnapshotInput,
   ChildSnapshotResult,
+  DeletionTombstone,
+  DeletionTombstoneBinding,
   DeliveryMode,
+  DurableOperation,
+  DurableReconciliation,
+  DurableResponseIntent,
   EventPage,
   JsonObject,
   ModelMessage,
+  MutationOutcome,
+  ObservationCheckpoint,
+  ObservationEntityKey,
+  ObservationIngestionInput,
+  ObservationIngestionResult,
+  ObservationCursorKey,
+  OperationClaimResult,
+  OperationSettlement,
+  PrepareDeletionTombstoneInput,
+  PreparedDeletionTombstoneResult,
+  PrepareOperationInput,
+  PreparedOperationResult,
+  PrepareSessionCreateInput,
+  PreparedSessionCreateResult,
   QueueItemDto,
+  QueueReservation,
+  QueueReservationInput,
+  QueueReservationResult,
+  ReplayPolicy,
+  ResponseIntentChoice,
+  ResponseIntentInput,
+  ResponseIntentSettlement,
+  RuntimeMutationKind,
   SessionEvent,
   SessionFolderDto,
   SessionPersistence,
   SessionProjection,
+  SnapshotIngestionInput,
+  SnapshotIngestionResult,
   WorkspaceLabel,
 } from "@polyth/contracts";
 
@@ -108,6 +138,19 @@ export const recoveredUserText = (text: string, recoveryContext?: string): strin
 
 export interface Store extends SessionPersistence {
   exportJsonl(sessionId: string): Promise<string>;
+  // -- durable runtime operations --
+  prepareOperation(input: PrepareOperationInput): Promise<PreparedOperationResult>;
+  prepareSessionCreate(input: PrepareSessionCreateInput): Promise<PreparedSessionCreateResult>;
+  operation(operationId: string): Promise<DurableOperation | undefined>;
+  operations(sessionId: string): Promise<DurableOperation[]>;
+  claimOperation(operationId: string): Promise<OperationClaimResult>;
+  /** The only unknown -> executing path. The exact pinned contract must match
+   * the replay contract captured at preparation. */
+  replayUnknownOperation(operationId: string, contract: string): Promise<OperationClaimResult>;
+  settleOperation(operationId: string, settlement: OperationSettlement): Promise<DurableOperation>;
+  /** Startup runs this automatically; the explicit API is useful before
+   * handing an already-open database to a recovered scheduler. */
+  recoverExecutingOperations(sessionId?: string): Promise<DurableOperation[]>;
   // -- durable delivery queue (WP3) --
   enqueue(sessionId: string, text: string, delivery: DeliveryMode, attachments?: AttachmentRef[]): Promise<QueueItemDto>;
   queueList(sessionId: string): Promise<QueueItemDto[]>;
@@ -116,8 +159,52 @@ export interface Store extends SessionPersistence {
   /** Validates ids are an exact permutation for the session; positions update transactionally. */
   queueReorder(sessionId: string, ids: string[]): Promise<QueueItemDto[]>;
   queueRemove(sessionId: string, queueId: string): Promise<boolean>;
-  /** Pop the first item (FIFO); undefined when the queue is empty. */
+  /** @deprecated Compatibility-only destructive pop. Runtime dispatch must
+   * use reserveQueueHead/confirmQueueReservation/releaseQueueReservation. */
   queueShift(sessionId: string): Promise<QueueItemDto | undefined>;
+  /** Reserve the FIFO head and create its prepared operation atomically. */
+  reserveQueueHead(input: QueueReservationInput): Promise<QueueReservationResult>;
+  queueReservation(operationId: string): Promise<QueueReservation | undefined>;
+  /** Confirmed admission removes the row and records queue/dispatched in the
+   * same transaction as the operation confirmation. */
+  confirmQueueReservation(operationId: string, receipt?: string): Promise<QueueItemDto>;
+  /** Only a proven rejection-before-admission or not-applied resolution can
+   * clear a reservation for a future fresh operation. */
+  releaseQueueReservation(
+    operationId: string,
+    settlement:
+      | { kind: "rejected"; code: string; message: string }
+      | { kind: "not-applied"; code?: string; message: string },
+  ): Promise<QueueItemDto>;
+  // -- attention response compare-and-set --
+  chooseResponseIntent(input: ResponseIntentInput, replay?: ReplayPolicy): Promise<ResponseIntentChoice>;
+  responseIntent(sessionId: string, kind: ResponseIntentInput["kind"], requestId: string): Promise<DurableResponseIntent | undefined>;
+  settleResponseIntent(operationId: string, settlement: ResponseIntentSettlement): Promise<DurableOperation>;
+  // -- atomic observation ingestion --
+  ingestObservation(input: ObservationIngestionInput): Promise<ObservationIngestionResult>;
+  ingestSnapshot(input: SnapshotIngestionInput): Promise<SnapshotIngestionResult>;
+  observationCheckpoint(key: ObservationEntityKey): Promise<ObservationCheckpoint | undefined>;
+  observationCursor(key: ObservationCursorKey): Promise<string | undefined>;
+  // -- durable admission barrier --
+  startReconciliation(sessionId: string): Promise<DurableReconciliation>;
+  reconciliation(sessionId: string): Promise<DurableReconciliation | undefined>;
+  settleReconciliation(
+    sessionId: string,
+    ordinal: number,
+    state: "ready" | "blocked" | "unknown",
+    reason?: string,
+  ): Promise<
+    | { kind: "accepted"; reconciliation: DurableReconciliation }
+    | { kind: "superseded"; reconciliation: DurableReconciliation }
+  >;
+  // -- deletion negative state, stored outside session-scoped rows --
+  prepareSessionDeletion(input: PrepareDeletionTombstoneInput): Promise<PreparedDeletionTombstoneResult>;
+  deletionTombstone(canonicalSessionId: string): Promise<DeletionTombstone | undefined>;
+  hasDeletionTombstone(binding: DeletionTombstoneBinding): Promise<boolean>;
+  retireDeletionTombstone(
+    canonicalSessionId: string,
+    retirement: { kind: "confirmed" } | { kind: "purged"; policy: string },
+  ): Promise<DeletionTombstone>;
   deleteProjection(sessionId: string): Promise<void>;
   /** Hard delete: events + projection + queued messages, one transaction. */
   deleteSession(sessionId: string): Promise<void>;
@@ -143,6 +230,152 @@ export interface Store extends SessionPersistence {
   /** Stale expectedRevision → conflict. providerID/modelID stay immutable per profile. */
   profileUpdate(id: string, patch: Partial<Omit<AgentProfile, "id" | "revision" | "createdAt" | "updatedAt">>, expectedRevision: number): Promise<AgentProfile>;
   profileRemove(id: string): Promise<boolean>;
+}
+
+export type RuntimeMutationStore = Pick<
+  Store,
+  "prepareOperation" | "operations" | "claimOperation" | "settleOperation"
+>;
+
+export interface ExecuteDurableRuntimeMutationInput<T> {
+  store: RuntimeMutationStore;
+  sessionId: string;
+  mutationKind: RuntimeMutationKind;
+  intentEvent: CanonicalEventInput;
+  call(operationId: string): Promise<MutationOutcome<T>>;
+  receipt?(value: T): string | undefined;
+  recoverConfirmed?(operation: DurableOperation): T | undefined;
+}
+
+/**
+ * Durable prepare/claim/settle for non-canonical background runtime work.
+ * A stable synthetic session id lets a retried worker observe the original
+ * unknown operation instead of issuing the mutation again.
+ */
+const executeDurableRuntimeMutationCore = async <T,>(
+  input: ExecuteDurableRuntimeMutationInput<T>,
+): Promise<MutationOutcome<T>> => {
+  const matches = (await input.store.operations(input.sessionId))
+    .filter((operation) => operation.mutationKind === input.mutationKind);
+  if (matches.length > 1) {
+    return {
+      kind: "rejected",
+      code: "durable-operation-conflict",
+      message: `multiple ${input.mutationKind} operations exist for ${input.sessionId}`,
+    };
+  }
+
+  let operation = matches[0];
+  if (!operation) {
+    operation = (await input.store.prepareOperation({
+      sessionId: input.sessionId,
+      mutationKind: input.mutationKind,
+      intentEvent: input.intentEvent,
+    })).operation;
+  }
+
+  if (operation.state === "confirmed") {
+    const recovered = input.recoverConfirmed?.(operation);
+    return recovered === undefined
+      ? {
+          kind: "rejected",
+          code: "already-confirmed",
+          message: `${input.mutationKind} was already confirmed`,
+        }
+      : {
+          kind: "confirmed",
+          value: recovered,
+          ...(operation.receipt ? { receipt: operation.receipt } : {}),
+        };
+  }
+  if (operation.state === "unknown" || operation.state === "executing") {
+    return {
+      kind: "unknown",
+      operationId: operation.operationId,
+      message: operation.message
+        ?? `${input.mutationKind} is already ${operation.state}; it will not be replayed`,
+    };
+  }
+  if (operation.state === "rejected" || operation.state === "not-applied") {
+    return {
+      kind: "rejected",
+      code: operation.code ?? operation.state,
+      message: operation.message ?? `${input.mutationKind} is ${operation.state}`,
+    };
+  }
+
+  const claim = await input.store.claimOperation(operation.operationId);
+  if (claim.kind !== "claimed") {
+    const current = claim.operation;
+    return {
+      kind: "unknown",
+      operationId: operation.operationId,
+      message: current?.message
+        ?? `${input.mutationKind} is owned by another executor`,
+    };
+  }
+
+  let outcome: MutationOutcome<T>;
+  try {
+    outcome = await input.call(operation.operationId);
+  } catch (error) {
+    outcome = {
+      kind: "unknown",
+      operationId: operation.operationId,
+      message: error instanceof Error ? error.message : String(error),
+    };
+  }
+
+  if (outcome.kind === "confirmed") {
+    const receipt = outcome.receipt ?? input.receipt?.(outcome.value);
+    await input.store.settleOperation(operation.operationId, {
+      kind: "confirmed",
+      ...(receipt ? { receipt } : {}),
+    });
+  } else if (outcome.kind === "rejected") {
+    await input.store.settleOperation(operation.operationId, {
+      kind: "rejected",
+      code: outcome.code,
+      message: outcome.message,
+    });
+  } else {
+    await input.store.settleOperation(operation.operationId, {
+      kind: "unknown",
+      message: outcome.message,
+    });
+    outcome = { ...outcome, operationId: operation.operationId };
+  }
+  return outcome;
+};
+
+const runtimeMutationTails = new WeakMap<
+  RuntimeMutationStore,
+  Map<string, Promise<void>>
+>();
+
+export async function executeDurableRuntimeMutation<T>(
+  input: ExecuteDurableRuntimeMutationInput<T>,
+): Promise<MutationOutcome<T>> {
+  let tails = runtimeMutationTails.get(input.store);
+  if (!tails) {
+    tails = new Map();
+    runtimeMutationTails.set(input.store, tails);
+  }
+  const key = `${input.sessionId}\0${input.mutationKind}`;
+  const prior = tails.get(key) ?? Promise.resolve();
+  let release!: () => void;
+  const gate = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const current = prior.catch(() => {}).then(() => gate);
+  tails.set(key, current);
+  await prior.catch(() => {});
+  try {
+    return await executeDurableRuntimeMutationCore(input);
+  } finally {
+    release();
+    if (tails.get(key) === current) tails.delete(key);
+  }
 }
 
 const EVENTS_COLS = [
@@ -300,6 +533,134 @@ export function createStore(dbPath: string): Store {
           )
       `);
     },
+    // v7: OpenCode reliability hardening. Operation state is authoritative;
+    // queue leases, semantic observation identity, response CAS, restart
+    // barriers, and deletion negative state are durable across process restart.
+    () => {
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS runtime_operations (
+          operation_id    TEXT PRIMARY KEY,
+          session_id      TEXT NOT NULL,
+          ordinal         INTEGER NOT NULL,
+          mutation_kind   TEXT NOT NULL,
+          state           TEXT NOT NULL CHECK (
+            state IN ('prepared','executing','confirmed','rejected','unknown','not-applied')
+          ),
+          replay_kind     TEXT NOT NULL CHECK (replay_kind IN ('never','same-operation-id')),
+          replay_contract TEXT,
+          created_at      INTEGER NOT NULL,
+          updated_at      INTEGER NOT NULL,
+          code            TEXT,
+          message         TEXT,
+          receipt         TEXT,
+          owner_event_seq INTEGER,
+          UNIQUE (session_id, ordinal)
+        )
+      `);
+      db.exec("CREATE INDEX IF NOT EXISTS idx_runtime_operations_session ON runtime_operations (session_id, ordinal)");
+      db.exec("CREATE INDEX IF NOT EXISTS idx_runtime_operations_state ON runtime_operations (state)");
+
+      db.exec("ALTER TABLE session_queue ADD COLUMN reservation_operation_id TEXT");
+      db.exec(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_queue_reservation_operation ON session_queue (reservation_operation_id) WHERE reservation_operation_id IS NOT NULL",
+      );
+
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS response_intents (
+          session_id   TEXT NOT NULL,
+          kind         TEXT NOT NULL CHECK (kind IN ('permission','question','secret')),
+          request_id   TEXT NOT NULL,
+          operation_id TEXT NOT NULL UNIQUE,
+          payload      TEXT NOT NULL,
+          created_at   INTEGER NOT NULL,
+          PRIMARY KEY (session_id, kind, request_id)
+        )
+      `);
+
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS observations (
+          authority_id          TEXT NOT NULL,
+          directory             TEXT NOT NULL,
+          workspace             TEXT NOT NULL,
+          backend_session_id    TEXT NOT NULL,
+          artifact_kind         TEXT NOT NULL,
+          entity_id             TEXT NOT NULL,
+          revision              TEXT NOT NULL,
+          session_id            TEXT NOT NULL,
+          observed_generation   INTEGER NOT NULL,
+          reconciliation_ordinal INTEGER NOT NULL,
+          canonical_seqs        TEXT NOT NULL,
+          observed_at           INTEGER NOT NULL,
+          PRIMARY KEY (
+            authority_id, directory, workspace, backend_session_id,
+            artifact_kind, entity_id, revision
+          )
+        )
+      `);
+      db.exec("CREATE INDEX IF NOT EXISTS idx_observations_session ON observations (session_id)");
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS observation_checkpoints (
+          authority_id       TEXT NOT NULL,
+          directory          TEXT NOT NULL,
+          workspace          TEXT NOT NULL,
+          backend_session_id TEXT NOT NULL,
+          artifact_kind      TEXT NOT NULL,
+          entity_id          TEXT NOT NULL,
+          revision           TEXT NOT NULL,
+          state_rank         INTEGER,
+          value              TEXT NOT NULL,
+          updated_at         INTEGER NOT NULL,
+          PRIMARY KEY (
+            authority_id, directory, workspace, backend_session_id,
+            artifact_kind, entity_id
+          )
+        )
+      `);
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS observation_cursors (
+          authority_id       TEXT NOT NULL,
+          directory          TEXT NOT NULL,
+          workspace          TEXT NOT NULL,
+          backend_session_id TEXT NOT NULL,
+          channel            TEXT NOT NULL,
+          cursor_after       TEXT NOT NULL,
+          updated_at         INTEGER NOT NULL,
+          PRIMARY KEY (authority_id, directory, workspace, backend_session_id, channel)
+        )
+      `);
+
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS session_reconciliations (
+          session_id TEXT PRIMARY KEY,
+          ordinal    INTEGER NOT NULL,
+          state      TEXT NOT NULL CHECK (state IN ('reconciling','ready','blocked','unknown')),
+          reason     TEXT,
+          updated_at INTEGER NOT NULL
+        )
+      `);
+
+      db.exec(`
+        CREATE TABLE IF NOT EXISTS deletion_tombstones (
+          canonical_session_id TEXT PRIMARY KEY,
+          authority_id         TEXT NOT NULL,
+          endpoint_generation  INTEGER NOT NULL,
+          directory            TEXT NOT NULL,
+          workspace            TEXT NOT NULL,
+          backend_session_id   TEXT NOT NULL,
+          operation_id         TEXT NOT NULL UNIQUE,
+          created_at           INTEGER NOT NULL,
+          retired_at           INTEGER,
+          retirement_kind      TEXT CHECK (retirement_kind IN ('confirmed','purged')),
+          retirement_policy    TEXT
+        )
+      `);
+      db.exec(
+        `CREATE INDEX IF NOT EXISTS idx_deletion_tombstone_binding
+         ON deletion_tombstones (
+           authority_id, directory, workspace, backend_session_id, retired_at
+         )`,
+      );
+    },
   ];
   {
     const current = getVersion();
@@ -362,6 +723,427 @@ export function createStore(dbPath: string): Store {
     }
   }
 
+  // ------------------------------------------------------------- transaction helpers
+
+  function transaction<T>(run: () => T): T {
+    db.exec("BEGIN IMMEDIATE");
+    try {
+      const value = run();
+      db.exec("COMMIT");
+      return value;
+    } catch (err) {
+      db.exec("ROLLBACK");
+      throw err;
+    }
+  }
+
+  function appendInTransaction(
+    sessionId: string,
+    type: string,
+    data: JsonObject,
+    opts: Partial<
+      Pick<SessionEvent, "ignorable" | "surfaceOp" | "sourceEventSeqs" | "producerPlugin">
+    > = {},
+  ): SessionEvent {
+    const row = prep("SELECT COALESCE(MAX(seq), 0) + 1 AS next FROM events WHERE session_id = ?")
+      .get(sessionId) as { next: number };
+    const event: SessionEvent = {
+      id: randomUUID(),
+      sessionId,
+      seq: Number(row.next),
+      time: Date.now(),
+      type,
+      data,
+      ...(opts.ignorable ? { ignorable: true } : {}),
+      ...(opts.surfaceOp ? { surfaceOp: opts.surfaceOp } : {}),
+      ...(opts.sourceEventSeqs ? { sourceEventSeqs: opts.sourceEventSeqs } : {}),
+      ...(opts.producerPlugin ? { producerPlugin: opts.producerPlugin } : {}),
+      v: 1,
+    };
+    prep(
+      `INSERT INTO events (session_id, seq, id, time, type, data, ignorable, surface_op, source_seqs, producer, v)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`,
+    ).run(
+      sessionId,
+      event.seq,
+      event.id,
+      event.time,
+      type,
+      JSON.stringify(data),
+      opts.ignorable ? 1 : 0,
+      opts.surfaceOp ?? null,
+      opts.sourceEventSeqs ? JSON.stringify(opts.sourceEventSeqs) : null,
+      opts.producerPlugin ?? null,
+    );
+    applyAttention(sessionId, type, data);
+    return event;
+  }
+
+  function appendInputInTransaction(sessionId: string, event: CanonicalEventInput): SessionEvent {
+    return appendInTransaction(sessionId, event.type, event.data, {
+      ignorable: event.ignorable,
+      surfaceOp: event.surfaceOp,
+      sourceEventSeqs: event.sourceEventSeqs,
+      producerPlugin: event.producerPlugin,
+    });
+  }
+
+  // ------------------------------------------------------------- durable operations
+
+  interface OperationRow {
+    operation_id: string;
+    session_id: string;
+    ordinal: number;
+    mutation_kind: string;
+    state: string;
+    replay_kind: string;
+    replay_contract: string | null;
+    created_at: number;
+    updated_at: number;
+    code: string | null;
+    message: string | null;
+    receipt: string | null;
+    owner_event_seq: number | null;
+  }
+
+  const rowToOperation = (row: OperationRow): DurableOperation => ({
+    operationId: row.operation_id,
+    sessionId: row.session_id,
+    ordinal: Number(row.ordinal),
+    mutationKind: row.mutation_kind as RuntimeMutationKind,
+    state: row.state as DurableOperation["state"],
+    replay: row.replay_kind === "same-operation-id"
+      ? { kind: "same-operation-id", contract: row.replay_contract ?? "" }
+      : { kind: "never" },
+    createdAt: Number(row.created_at),
+    updatedAt: Number(row.updated_at),
+    ...(row.code !== null ? { code: row.code } : {}),
+    ...(row.message !== null ? { message: row.message } : {}),
+    ...(row.receipt !== null ? { receipt: row.receipt } : {}),
+    ...(row.owner_event_seq !== null ? { ownerEventSeq: Number(row.owner_event_seq) } : {}),
+  });
+
+  const operationRow = (operationId: string): OperationRow | undefined =>
+    prep("SELECT * FROM runtime_operations WHERE operation_id = ?")
+      .get(operationId) as unknown as OperationRow | undefined;
+
+  function assertReplayPolicy(replay: ReplayPolicy): void {
+    if (replay.kind === "same-operation-id" && replay.contract.trim() === "") {
+      throw Object.assign(new Error("same-operation-id replay requires a pinned contract"), {
+        code: "invalid-input",
+      });
+    }
+  }
+
+  function insertPreparedOperation(
+    sessionId: string,
+    mutationKind: RuntimeMutationKind,
+    replay: ReplayPolicy = { kind: "never" },
+  ): DurableOperation {
+    assertReplayPolicy(replay);
+    const next = prep(
+      "SELECT COALESCE(MAX(ordinal), 0) + 1 AS next FROM runtime_operations WHERE session_id = ?",
+    ).get(sessionId) as { next: number };
+    const operationId = randomUUID();
+    const now = Date.now();
+    prep(
+      `INSERT INTO runtime_operations (
+         operation_id, session_id, ordinal, mutation_kind, state,
+         replay_kind, replay_contract, created_at, updated_at
+       ) VALUES (?, ?, ?, ?, 'prepared', ?, ?, ?, ?)`,
+    ).run(
+      operationId,
+      sessionId,
+      Number(next.next),
+      mutationKind,
+      replay.kind,
+      replay.kind === "same-operation-id" ? replay.contract : null,
+      now,
+      now,
+    );
+    return rowToOperation(operationRow(operationId)!);
+  }
+
+  const mutationStateData = (
+    operation: DurableOperation,
+    extra: { code?: string; message?: string } = {},
+  ): JsonObject => ({
+    operationId: operation.operationId,
+    ordinal: operation.ordinal,
+    mutationKind: operation.mutationKind,
+    ...(extra.code ? { code: extra.code } : {}),
+    ...(extra.message ? { message: extra.message } : {}),
+  });
+
+  function appendMutationState(
+    operation: DurableOperation,
+    type:
+      | "mutation/prepared"
+      | "mutation/claimed"
+      | "mutation/confirmed"
+      | "mutation/rejected"
+      | "mutation/uncertainty-recorded"
+      | "mutation/nonapplication-confirmed",
+    extra: { code?: string; message?: string } = {},
+  ): SessionEvent | undefined {
+    const tombstoned = prep(
+      `SELECT 1 AS one FROM deletion_tombstones
+       WHERE canonical_session_id = ? AND retired_at IS NULL`,
+    ).get(operation.sessionId);
+    if (tombstoned) return undefined;
+    return appendInTransaction(
+      operation.sessionId,
+      type,
+      mutationStateData(operation, extra),
+      { ignorable: true },
+    );
+  }
+
+  async function prepareOperation(input: PrepareOperationInput): Promise<PreparedOperationResult> {
+    return transaction(() => {
+      const operation = insertPreparedOperation(
+        input.sessionId,
+        input.mutationKind,
+        input.replay ?? { kind: "never" },
+      );
+      const intentEvent = appendInputInTransaction(input.sessionId, input.intentEvent);
+      prep("UPDATE runtime_operations SET owner_event_seq = ? WHERE operation_id = ?")
+        .run(intentEvent.seq, operation.operationId);
+      const updated = rowToOperation(operationRow(operation.operationId)!);
+      const stateEvent = appendMutationState(updated, "mutation/prepared");
+      if (!stateEvent) {
+        throw Object.assign(new Error("session is deletion-tombstoned"), {
+          code: "tombstoned",
+        });
+      }
+      return { operation: updated, intentEvent, stateEvent };
+    });
+  }
+
+  async function prepareSessionCreate(
+    input: PrepareSessionCreateInput,
+  ): Promise<PreparedSessionCreateResult> {
+    if (input.createdEvent.type !== "session/created") {
+      throw Object.assign(
+        new Error("prepared session create requires a session/created owner event"),
+        { code: "invalid-input" },
+      );
+    }
+    return transaction(() => {
+      const sessionId = input.projection.id;
+      if (prep("SELECT 1 AS one FROM projections WHERE session_id = ?").get(sessionId)) {
+        throw Object.assign(new Error("session already exists"), { code: "conflict" });
+      }
+      const operation = insertPreparedOperation(
+        sessionId,
+        "session-create",
+        input.replay ?? { kind: "never" },
+      );
+      prep("INSERT INTO projections (session_id, data) VALUES (?, ?)")
+        .run(sessionId, JSON.stringify(input.projection));
+      const createdEvent = appendInputInTransaction(sessionId, input.createdEvent);
+      prep("UPDATE runtime_operations SET owner_event_seq = ? WHERE operation_id = ?")
+        .run(createdEvent.seq, operation.operationId);
+      const updated = rowToOperation(operationRow(operation.operationId)!);
+      const stateEvent = appendMutationState(updated, "mutation/prepared");
+      if (!stateEvent) {
+        throw Object.assign(new Error("session is deletion-tombstoned"), {
+          code: "tombstoned",
+        });
+      }
+      return {
+        operation: updated,
+        createdEvent,
+        stateEvent,
+        projection: input.projection,
+      };
+    });
+  }
+
+  function operation(operationId: string): Promise<DurableOperation | undefined> {
+    const row = operationRow(operationId);
+    return Promise.resolve(row ? rowToOperation(row) : undefined);
+  }
+
+  function operations(sessionId: string): Promise<DurableOperation[]> {
+    const rows = prep(
+      "SELECT * FROM runtime_operations WHERE session_id = ? ORDER BY ordinal",
+    ).all(sessionId) as unknown as OperationRow[];
+    return Promise.resolve(rows.map(rowToOperation));
+  }
+
+  async function claimOperation(operationId: string): Promise<OperationClaimResult> {
+    return transaction(() => {
+      const before = operationRow(operationId);
+      if (!before || before.state !== "prepared") {
+        return {
+          kind: "not-claimed",
+          ...(before ? { operation: rowToOperation(before) } : {}),
+        };
+      }
+      const now = Date.now();
+      const changed = prep(
+        `UPDATE runtime_operations SET state = 'executing', updated_at = ?
+         WHERE operation_id = ? AND state = 'prepared'`,
+      ).run(now, operationId);
+      if (Number(changed.changes) !== 1) {
+        const current = operationRow(operationId);
+        return {
+          kind: "not-claimed",
+          ...(current ? { operation: rowToOperation(current) } : {}),
+        };
+      }
+      const claimed = rowToOperation(operationRow(operationId)!);
+      return {
+        kind: "claimed",
+        operation: claimed,
+        event: appendMutationState(claimed, "mutation/claimed"),
+      };
+    });
+  }
+
+  async function replayUnknownOperation(
+    operationId: string,
+    contract: string,
+  ): Promise<OperationClaimResult> {
+    return transaction(() => {
+      const before = operationRow(operationId);
+      if (
+        !before
+        || before.state !== "unknown"
+        || before.replay_kind !== "same-operation-id"
+        || before.replay_contract !== contract
+      ) {
+        return {
+          kind: "not-claimed",
+          ...(before ? { operation: rowToOperation(before) } : {}),
+        };
+      }
+      const changed = prep(
+        `UPDATE runtime_operations SET state = 'executing', updated_at = ?
+         WHERE operation_id = ? AND state = 'unknown'
+           AND replay_kind = 'same-operation-id' AND replay_contract = ?`,
+      ).run(Date.now(), operationId, contract);
+      if (Number(changed.changes) !== 1) {
+        const current = operationRow(operationId);
+        return {
+          kind: "not-claimed",
+          ...(current ? { operation: rowToOperation(current) } : {}),
+        };
+      }
+      const claimed = rowToOperation(operationRow(operationId)!);
+      return {
+        kind: "claimed",
+        operation: claimed,
+        event: appendMutationState(claimed, "mutation/claimed"),
+      };
+    });
+  }
+
+  function transitionOperation(
+    operationId: string,
+    settlement: OperationSettlement,
+  ): { operation: DurableOperation; event?: SessionEvent } {
+    const before = operationRow(operationId);
+    if (!before) throw Object.assign(new Error("operation not found"), { code: "not-found" });
+    const allowed =
+      (settlement.kind === "confirmed" && ["executing", "unknown"].includes(before.state))
+      || (settlement.kind === "rejected" && ["prepared", "executing"].includes(before.state))
+      || (settlement.kind === "unknown" && before.state === "executing")
+      || (settlement.kind === "not-applied" && before.state === "unknown");
+    if (!allowed) {
+      throw Object.assign(
+        new Error(`invalid operation transition ${before.state} -> ${settlement.kind}`),
+        { code: "invalid-transition" },
+      );
+    }
+    const code = "code" in settlement ? settlement.code ?? null : null;
+    const message = "message" in settlement ? settlement.message : null;
+    const receipt = settlement.kind === "confirmed" ? settlement.receipt ?? null : null;
+    prep(
+      `UPDATE runtime_operations
+       SET state = ?, updated_at = ?, code = ?, message = ?, receipt = ?
+       WHERE operation_id = ?`,
+    ).run(settlement.kind, Date.now(), code, message, receipt, operationId);
+    const updated = rowToOperation(operationRow(operationId)!);
+    const type = settlement.kind === "confirmed"
+      ? "mutation/confirmed"
+      : settlement.kind === "rejected"
+        ? "mutation/rejected"
+        : settlement.kind === "unknown"
+          ? "mutation/uncertainty-recorded"
+          : "mutation/nonapplication-confirmed";
+    return {
+      operation: updated,
+      event: appendMutationState(updated, type, {
+        ...(code ? { code } : {}),
+        ...(message ? { message } : {}),
+      }),
+    };
+  }
+
+  async function settleOperation(
+    operationId: string,
+    settlement: OperationSettlement,
+  ): Promise<DurableOperation> {
+    return transaction(() => {
+      if (settlement.kind !== "unknown") {
+        const queued = prep(
+          "SELECT 1 AS one FROM session_queue WHERE reservation_operation_id = ?",
+        ).get(operationId);
+        if (queued) {
+          throw Object.assign(
+            new Error("settle queue reservations with confirmQueueReservation or releaseQueueReservation"),
+            { code: "specialized-settlement-required" },
+          );
+        }
+        const response = prep(
+          "SELECT 1 AS one FROM response_intents WHERE operation_id = ?",
+        ).get(operationId);
+        if (response) {
+          throw Object.assign(
+            new Error("settle response intents with settleResponseIntent"),
+            { code: "specialized-settlement-required" },
+          );
+        }
+      }
+      return transitionOperation(operationId, settlement).operation;
+    });
+  }
+
+  function recoverExecutingInTransaction(sessionId?: string): DurableOperation[] {
+    const rows = (sessionId === undefined
+      ? prep("SELECT * FROM runtime_operations WHERE state = 'executing' ORDER BY session_id, ordinal")
+          .all()
+      : prep(
+          "SELECT * FROM runtime_operations WHERE state = 'executing' AND session_id = ? ORDER BY ordinal",
+        ).all(sessionId)) as unknown as OperationRow[];
+    const recovered: DurableOperation[] = [];
+    for (const row of rows) {
+      prep(
+        `UPDATE runtime_operations
+         SET state = 'unknown', updated_at = ?, code = ?, message = ?
+         WHERE operation_id = ? AND state = 'executing'`,
+      ).run(
+        Date.now(),
+        "process-restarted",
+        "execution was interrupted before its outcome was durably recorded",
+        row.operation_id,
+      );
+      const updated = rowToOperation(operationRow(row.operation_id)!);
+      recovered.push(updated);
+      appendMutationState(updated, "mutation/uncertainty-recorded", {
+        code: "process-restarted",
+        message: "execution was interrupted before its outcome was durably recorded",
+      });
+    }
+    return recovered;
+  }
+
+  async function recoverExecutingOperations(sessionId?: string): Promise<DurableOperation[]> {
+    return transaction(() => recoverExecutingInTransaction(sessionId));
+  }
+
   // ------------------------------------------------------------- append
 
   function append(
@@ -372,49 +1154,8 @@ export function createStore(dbPath: string): Store {
       Pick<SessionEvent, "ignorable" | "surfaceOp" | "sourceEventSeqs" | "producerPlugin">
     > = {},
   ): Promise<SessionEvent> {
-    const id = randomUUID();
-    const time = Date.now();
-    let seq = 0;
-    db.exec("BEGIN IMMEDIATE");
-    try {
-      const row = prep("SELECT COALESCE(MAX(seq), 0) + 1 AS next FROM events WHERE session_id = ?")
-        .get(sessionId) as { next: number };
-      seq = Number(row.next);
-      prep(
-        `INSERT INTO events (session_id, seq, id, time, type, data, ignorable, surface_op, source_seqs, producer, v)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)`,
-      ).run(
-        sessionId,
-        seq,
-        id,
-        time,
-        type,
-        JSON.stringify(data),
-        opts.ignorable ? 1 : 0,
-        opts.surfaceOp ?? null,
-        opts.sourceEventSeqs ? JSON.stringify(opts.sourceEventSeqs) : null,
-        opts.producerPlugin ?? null,
-      );
-      applyAttention(sessionId, type, data);
-      db.exec("COMMIT");
-    } catch (err) {
-      db.exec("ROLLBACK");
-      throw err;
-    }
-    const event: SessionEvent = {
-      id,
-      sessionId,
-      seq,
-      time,
-      type,
-      data,
-      ignorable: opts.ignorable,
-      surfaceOp: opts.surfaceOp,
-      sourceEventSeqs: opts.sourceEventSeqs,
-      producerPlugin: opts.producerPlugin,
-      v: 1,
-    };
-    return Promise.resolve(event);
+    return Promise.resolve(transaction(() =>
+      appendInTransaction(sessionId, type, data, opts)));
   }
 
   // ------------------------------------------------------------- reads
@@ -634,6 +1375,7 @@ export function createStore(dbPath: string): Store {
     delivery: string;
     created_at: number;
     attachments: string | null;
+    reservation_operation_id: string | null;
   }
 
   const parseAttachments = (raw: string | null): AttachmentRef[] | undefined => {
@@ -689,7 +1431,10 @@ export function createStore(dbPath: string): Store {
   }
 
   function queueEdit(sessionId: string, queueId: string, text: string): Promise<QueueItemDto | undefined> {
-    const result = prep("UPDATE session_queue SET text = ? WHERE session_id = ? AND queue_id = ?")
+    const result = prep(
+      `UPDATE session_queue SET text = ?
+       WHERE session_id = ? AND queue_id = ? AND reservation_operation_id IS NULL`,
+    )
       .run(text, sessionId, queueId);
     if (Number(result.changes) === 0) return Promise.resolve(undefined);
     const row = prep("SELECT * FROM session_queue WHERE session_id = ? AND queue_id = ?")
@@ -701,7 +1446,15 @@ export function createStore(dbPath: string): Store {
     db.exec("BEGIN IMMEDIATE");
     try {
       const rows = prep("SELECT queue_id FROM session_queue WHERE session_id = ?")
-        .all(sessionId) as { queue_id: string }[];
+        .all(sessionId) as Array<{ queue_id: string; reservation_operation_id?: string | null }>;
+      const reserved = prep(
+        "SELECT 1 AS one FROM session_queue WHERE session_id = ? AND reservation_operation_id IS NOT NULL LIMIT 1",
+      ).get(sessionId);
+      if (reserved) {
+        throw Object.assign(new Error("a reserved queue cannot be reordered"), {
+          code: "queue-reserved",
+        });
+      }
       const existing = new Set(rows.map((r) => r.queue_id));
       const submitted = new Set(ids);
       if (existing.size !== submitted.size || ids.length !== submitted.size || [...existing].some((id) => !submitted.has(id))) {
@@ -718,7 +1471,10 @@ export function createStore(dbPath: string): Store {
   }
 
   function queueRemove(sessionId: string, queueId: string): Promise<boolean> {
-    const res = prep("DELETE FROM session_queue WHERE session_id = ? AND queue_id = ?")
+    const res = prep(
+      `DELETE FROM session_queue
+       WHERE session_id = ? AND queue_id = ? AND reservation_operation_id IS NULL`,
+    )
       .run(sessionId, queueId);
     return Promise.resolve(Number(res.changes) > 0);
   }
@@ -729,7 +1485,7 @@ export function createStore(dbPath: string): Store {
     try {
       const row = prep("SELECT * FROM session_queue WHERE session_id = ? ORDER BY position LIMIT 1")
         .get(sessionId) as QueueRow | undefined;
-      if (row) {
+      if (row && row.reservation_operation_id === null) {
         prep("DELETE FROM session_queue WHERE queue_id = ?").run(row.queue_id);
         item = rowToQueueItem(row);
       }
@@ -739,6 +1495,878 @@ export function createStore(dbPath: string): Store {
       throw err;
     }
     return Promise.resolve(item);
+  }
+
+  const queueReservationInDatabase = (operationId: string): QueueReservation | undefined => {
+    const row = prep(
+      "SELECT * FROM session_queue WHERE reservation_operation_id = ?",
+    ).get(operationId) as unknown as QueueRow | undefined;
+    const op = operationRow(operationId);
+    if (!row || !op) return undefined;
+    const operation = rowToOperation(op);
+    return {
+      queueItem: rowToQueueItem(row),
+      operation,
+      reservedAt: operation.createdAt,
+    };
+  };
+
+  function queueReservation(operationId: string): Promise<QueueReservation | undefined> {
+    return Promise.resolve(queueReservationInDatabase(operationId));
+  }
+
+  async function reserveQueueHead(input: QueueReservationInput): Promise<QueueReservationResult> {
+    return transaction(() => {
+      const row = prep(
+        "SELECT * FROM session_queue WHERE session_id = ? ORDER BY position LIMIT 1",
+      ).get(input.sessionId) as unknown as QueueRow | undefined;
+      if (!row) return { kind: "empty" };
+      if (row.reservation_operation_id !== null) {
+        const reservation = queueReservationInDatabase(row.reservation_operation_id);
+        if (!reservation) {
+          throw Object.assign(new Error("queue reservation references a missing operation"), {
+            code: "integrity-error",
+          });
+        }
+        return { kind: "blocked", reservation };
+      }
+      const operation = insertPreparedOperation(
+        input.sessionId,
+        input.mutationKind ?? "turn-submit",
+        input.replay ?? { kind: "never" },
+      );
+      const changed = prep(
+        `UPDATE session_queue SET reservation_operation_id = ?
+         WHERE queue_id = ? AND session_id = ? AND reservation_operation_id IS NULL`,
+      ).run(operation.operationId, row.queue_id, input.sessionId);
+      if (Number(changed.changes) !== 1) {
+        throw Object.assign(new Error("queue head was reserved concurrently"), {
+          code: "conflict",
+        });
+      }
+      appendMutationState(operation, "mutation/prepared");
+      return {
+        kind: "reserved",
+        reservation: {
+          queueItem: rowToQueueItem(row),
+          operation,
+          reservedAt: operation.createdAt,
+        },
+      };
+    });
+  }
+
+  async function confirmQueueReservation(
+    operationId: string,
+    receipt?: string,
+  ): Promise<QueueItemDto> {
+    return transaction(() => {
+      const reservation = queueReservationInDatabase(operationId);
+      if (!reservation) {
+        throw Object.assign(new Error("queue reservation not found"), { code: "not-found" });
+      }
+      transitionOperation(operationId, {
+        kind: "confirmed",
+        ...(receipt ? { receipt } : {}),
+      });
+      appendInTransaction(
+        reservation.queueItem.sessionId,
+        "queue/dispatched",
+        { queueId: reservation.queueItem.id },
+        { ignorable: true },
+      );
+      prep(
+        "DELETE FROM session_queue WHERE queue_id = ? AND reservation_operation_id = ?",
+      ).run(reservation.queueItem.id, operationId);
+      return reservation.queueItem;
+    });
+  }
+
+  async function releaseQueueReservation(
+    operationId: string,
+    settlement:
+      | { kind: "rejected"; code: string; message: string }
+      | { kind: "not-applied"; code?: string; message: string },
+  ): Promise<QueueItemDto> {
+    return transaction(() => {
+      const reservation = queueReservationInDatabase(operationId);
+      if (!reservation) {
+        throw Object.assign(new Error("queue reservation not found"), { code: "not-found" });
+      }
+      transitionOperation(operationId, settlement);
+      const changed = prep(
+        `UPDATE session_queue SET reservation_operation_id = NULL
+         WHERE queue_id = ? AND reservation_operation_id = ?`,
+      ).run(reservation.queueItem.id, operationId);
+      if (Number(changed.changes) !== 1) {
+        throw Object.assign(new Error("queue reservation changed concurrently"), {
+          code: "conflict",
+        });
+      }
+      return reservation.queueItem;
+    });
+  }
+
+  // ------------------------------------------------------------- attention response CAS
+
+  interface ResponseIntentRow {
+    session_id: string;
+    kind: "permission" | "question" | "secret";
+    request_id: string;
+    operation_id: string;
+    payload: string;
+    created_at: number;
+  }
+
+  const rowToResponseIntent = (row: ResponseIntentRow): DurableResponseIntent => ({
+    kind: row.kind,
+    sessionId: row.session_id,
+    requestId: row.request_id,
+    operationId: row.operation_id,
+    payload: JSON.parse(row.payload) as JsonObject,
+    createdAt: Number(row.created_at),
+  });
+
+  const responseIntentRow = (
+    sessionId: string,
+    kind: ResponseIntentInput["kind"],
+    requestId: string,
+  ): ResponseIntentRow | undefined => prep(
+    `SELECT * FROM response_intents
+     WHERE session_id = ? AND kind = ? AND request_id = ?`,
+  ).get(sessionId, kind, requestId) as unknown as ResponseIntentRow | undefined;
+
+  function responseIntent(
+    sessionId: string,
+    kind: ResponseIntentInput["kind"],
+    requestId: string,
+  ): Promise<DurableResponseIntent | undefined> {
+    const row = responseIntentRow(sessionId, kind, requestId);
+    return Promise.resolve(row ? rowToResponseIntent(row) : undefined);
+  }
+
+  async function chooseResponseIntent(
+    input: ResponseIntentInput,
+    replay: ReplayPolicy = { kind: "never" },
+  ): Promise<ResponseIntentChoice> {
+    return transaction(() => {
+      const existing = responseIntentRow(input.sessionId, input.kind, input.requestId);
+      if (existing) {
+        const operation = operationRow(existing.operation_id);
+        if (!operation) {
+          throw Object.assign(new Error("response intent references a missing operation"), {
+            code: "integrity-error",
+          });
+        }
+        return {
+          kind: "existing",
+          intent: rowToResponseIntent(existing),
+          operation: rowToOperation(operation),
+        };
+      }
+      if (input.kind !== "secret") {
+        const attentionKind = input.kind === "permission" ? "permission" : "question";
+        const open = prep(
+          `SELECT 1 AS one FROM attention_open
+           WHERE session_id = ? AND kind = ? AND request_id = ?`,
+        ).get(input.sessionId, attentionKind, input.requestId);
+        if (!open) {
+          throw Object.assign(new Error("request is not actionable"), { code: "not-found" });
+        }
+      }
+      const mutationKind: RuntimeMutationKind = input.kind === "permission"
+        ? "permission-reply"
+        : input.kind === "secret"
+          ? "secret-reply"
+          : input.reject
+            ? "question-reject"
+            : "question-reply";
+      const operation = insertPreparedOperation(input.sessionId, mutationKind, replay);
+      const payload: JsonObject = input.kind === "permission"
+        ? {
+            reply: input.reply,
+            ...(input.scope ? { scope: input.scope } : {}),
+          }
+        : input.kind === "question"
+          ? {
+              answers: input.answers,
+              ...(input.reject ? { reject: true } : {}),
+            }
+          : {
+              action: input.action,
+              ...(input.handle ? { handle: input.handle } : {}),
+            };
+      const createdAt = Date.now();
+      prep(
+        `INSERT INTO response_intents (
+           session_id, kind, request_id, operation_id, payload, created_at
+         ) VALUES (?, ?, ?, ?, ?, ?)`,
+      ).run(
+        input.sessionId,
+        input.kind,
+        input.requestId,
+        operation.operationId,
+        JSON.stringify(payload),
+        createdAt,
+      );
+      const type = input.kind === "permission"
+        ? "permission/response-intended"
+        : input.kind === "question"
+          ? "question/response-intended"
+          : "secret/response-intended";
+      const intended = appendInTransaction(input.sessionId, type, {
+        requestId: input.requestId,
+        ...payload,
+      }, { ignorable: true });
+      prep("UPDATE runtime_operations SET owner_event_seq = ? WHERE operation_id = ?")
+        .run(intended.seq, operation.operationId);
+      const updated = rowToOperation(operationRow(operation.operationId)!);
+      appendMutationState(updated, "mutation/prepared");
+      return {
+        kind: "chosen",
+        intent: {
+          kind: input.kind,
+          sessionId: input.sessionId,
+          requestId: input.requestId,
+          operationId: operation.operationId,
+          payload,
+          createdAt,
+        },
+        operation: updated,
+      };
+    });
+  }
+
+  async function settleResponseIntent(
+    operationId: string,
+    settlement: ResponseIntentSettlement,
+  ): Promise<DurableOperation> {
+    return transaction(() => {
+      const row = prep(
+        "SELECT * FROM response_intents WHERE operation_id = ?",
+      ).get(operationId) as unknown as ResponseIntentRow | undefined;
+      if (!row) {
+        throw Object.assign(new Error("response intent not found"), { code: "not-found" });
+      }
+      let result: DurableOperation;
+      if (settlement.kind === "confirmed") {
+        const expectedType = row.kind === "permission"
+          ? "permission/resolved"
+          : row.kind === "question"
+            ? "question/answered"
+            : "secret/resolved";
+        if (settlement.completionEvent.type !== expectedType) {
+          throw Object.assign(
+            new Error(`confirmed ${row.kind} response requires ${expectedType}`),
+            { code: "invalid-input" },
+          );
+        }
+        result = transitionOperation(operationId, {
+          kind: "confirmed",
+          ...(settlement.receipt ? { receipt: settlement.receipt } : {}),
+        }).operation;
+        appendInputInTransaction(row.session_id, settlement.completionEvent);
+      } else if (settlement.kind === "unknown") {
+        result = transitionOperation(operationId, settlement).operation;
+      } else {
+        result = transitionOperation(operationId, settlement).operation;
+        appendInTransaction(
+          row.session_id,
+          `${row.kind}/response-failed`,
+          {
+            requestId: row.request_id,
+            operationId,
+            ...(settlement.code ? { code: settlement.code } : {}),
+            message: settlement.message,
+          },
+          { ignorable: true },
+        );
+        prep("DELETE FROM response_intents WHERE operation_id = ?").run(operationId);
+      }
+      return result;
+    });
+  }
+
+  // ------------------------------------------------------------- semantic observation ingestion
+
+  interface CheckpointRow {
+    authority_id: string;
+    directory: string;
+    workspace: string;
+    backend_session_id: string;
+    artifact_kind: string;
+    entity_id: string;
+    revision: string;
+    state_rank: number | null;
+    value: string;
+    updated_at: number;
+  }
+
+  const entityKeyArgs = (key: ObservationEntityKey): [
+    string,
+    string,
+    string,
+    string,
+    string,
+    string,
+  ] => [
+    key.authorityId,
+    key.location.directory,
+    key.location.workspace ?? "",
+    key.backendSessionId,
+    key.artifactKind,
+    key.entityId,
+  ];
+
+  const checkpointRow = (key: ObservationEntityKey): CheckpointRow | undefined =>
+    prep(
+      `SELECT * FROM observation_checkpoints
+       WHERE authority_id = ? AND directory = ? AND workspace = ?
+         AND backend_session_id = ? AND artifact_kind = ? AND entity_id = ?`,
+    ).get(...entityKeyArgs(key)) as unknown as CheckpointRow | undefined;
+
+  const rowToCheckpoint = (row: CheckpointRow): ObservationCheckpoint => ({
+    key: {
+      authorityId: row.authority_id,
+      location: {
+        directory: row.directory,
+        ...(row.workspace ? { workspace: row.workspace } : {}),
+      },
+      backendSessionId: row.backend_session_id,
+      artifactKind: row.artifact_kind as ObservationEntityKey["artifactKind"],
+      entityId: row.entity_id,
+    },
+    revision: row.revision,
+    ...(row.state_rank !== null ? { stateRank: Number(row.state_rank) } : {}),
+    value: JSON.parse(row.value) as JsonObject,
+    updatedAt: Number(row.updated_at),
+  });
+
+  function observationCheckpoint(
+    key: ObservationEntityKey,
+  ): Promise<ObservationCheckpoint | undefined> {
+    const row = checkpointRow(key);
+    return Promise.resolve(row ? rowToCheckpoint(row) : undefined);
+  }
+
+  const cursorKeyArgs = (key: ObservationCursorKey): [
+    string,
+    string,
+    string,
+    string,
+    string,
+  ] => [
+    key.authorityId,
+    key.location.directory,
+    key.location.workspace ?? "",
+    key.backendSessionId,
+    key.channel,
+  ];
+
+  function observationCursor(key: ObservationCursorKey): Promise<string | undefined> {
+    const row = prep(
+      `SELECT cursor_after FROM observation_cursors
+       WHERE authority_id = ? AND directory = ? AND workspace = ?
+         AND backend_session_id = ? AND channel = ?`,
+    ).get(...cursorKeyArgs(key)) as { cursor_after: string } | undefined;
+    return Promise.resolve(row?.cursor_after);
+  }
+
+  function upsertObservationCursor(key: ObservationCursorKey, after: string): void {
+    prep(
+      `INSERT INTO observation_cursors (
+         authority_id, directory, workspace, backend_session_id,
+         channel, cursor_after, updated_at
+       ) VALUES (?, ?, ?, ?, ?, ?, ?)
+       ON CONFLICT(authority_id, directory, workspace, backend_session_id, channel)
+       DO UPDATE SET cursor_after = excluded.cursor_after, updated_at = excluded.updated_at`,
+    ).run(...cursorKeyArgs(key), after, Date.now());
+  }
+
+  const eventsAtSeqs = (sessionId: string, seqs: readonly number[]): SessionEvent[] => {
+    if (seqs.length === 0) return [];
+    const placeholders = seqs.map(() => "?").join(",");
+    const rows = db.prepare(
+      `SELECT * FROM events
+       WHERE session_id = ? AND seq IN (${placeholders}) ORDER BY seq`,
+    ).all(sessionId, ...seqs) as unknown as Row[];
+    return rows.map(rowToEvent);
+  };
+
+  const validateObservationInput = (input: ObservationIngestionInput): void => {
+    if (!Number.isSafeInteger(input.reconciliationOrdinal) || input.reconciliationOrdinal <= 0) {
+      throw Object.assign(
+        new Error("reconciliation ordinal must be a positive safe integer"),
+        { code: "invalid-input" },
+      );
+    }
+    if (!Number.isSafeInteger(input.identity.generation) || input.identity.generation < 0) {
+      throw Object.assign(new Error("endpoint generation must be a non-negative safe integer"), {
+        code: "invalid-input",
+      });
+    }
+  };
+
+  const assertObservationFence = (input: ObservationIngestionInput): void => {
+    const projectionRow = prep("SELECT data FROM projections WHERE session_id = ?")
+      .get(input.sessionId) as { data: string } | undefined;
+    const projection = projectionRow
+      ? JSON.parse(projectionRow.data) as SessionProjection
+      : undefined;
+    const binding = projection?.runtimeBinding;
+    if (
+      !binding
+      || projection.backendSessionId !== binding.backendSessionId
+      || binding.authorityId !== input.identity.authorityId
+      || binding.generation !== input.identity.generation
+      || binding.location.directory !== input.identity.location.directory
+      || (binding.location.workspace ?? "") !== (input.identity.location.workspace ?? "")
+      || binding.backendSessionId !== input.identity.backendSessionId
+    ) {
+      throw Object.assign(
+        new Error("observation does not match the durable current runtime binding"),
+        { code: "stale-evidence" },
+      );
+    }
+    const active = reconciliationRow(input.sessionId);
+    if (!active || Number(active.ordinal) !== input.reconciliationOrdinal) {
+      throw Object.assign(
+        new Error("observation belongs to a superseded reconciliation request"),
+        { code: "stale-evidence" },
+      );
+    }
+  };
+
+  const ingestObservationInTransaction = (
+    input: ObservationIngestionInput,
+  ): ObservationIngestionResult => {
+    const key: ObservationEntityKey = {
+      authorityId: input.identity.authorityId,
+      location: input.identity.location,
+      backendSessionId: input.identity.backendSessionId,
+      artifactKind: input.identity.artifactKind,
+      entityId: input.identity.entityId,
+    };
+      const tombstone = prep(
+        `SELECT 1 AS one FROM deletion_tombstones
+         WHERE authority_id = ? AND directory = ? AND workspace = ?
+           AND backend_session_id = ? AND retired_at IS NULL`,
+      ).get(
+        input.identity.authorityId,
+        input.identity.location.directory,
+        input.identity.location.workspace ?? "",
+        input.identity.backendSessionId,
+      );
+      if (tombstone) {
+        throw Object.assign(new Error("backend binding is deletion-tombstoned"), {
+          code: "tombstoned",
+        });
+      }
+      assertObservationFence(input);
+
+      const identityArgs = [
+        ...entityKeyArgs(key),
+        input.identity.revision,
+      ] as const;
+      const existing = prep(
+        `SELECT session_id, canonical_seqs FROM observations
+         WHERE authority_id = ? AND directory = ? AND workspace = ?
+           AND backend_session_id = ? AND artifact_kind = ? AND entity_id = ?
+           AND revision = ?`,
+      ).get(...identityArgs) as { session_id: string; canonical_seqs: string } | undefined;
+      if (existing) {
+        if (input.cursor) upsertObservationCursor(input.cursor.key, input.cursor.after);
+        const seqs = JSON.parse(existing.canonical_seqs) as number[];
+        const checkpoint = checkpointRow(key);
+        return {
+          kind: "duplicate",
+          events: eventsAtSeqs(existing.session_id, seqs),
+          ...(checkpoint ? { checkpoint: rowToCheckpoint(checkpoint) } : {}),
+        };
+      }
+
+      const priorCheckpoint = checkpointRow(key);
+      if (
+        input.checkpoint?.stateRank !== undefined
+        && priorCheckpoint?.state_rank !== null
+        && priorCheckpoint !== undefined
+      ) {
+        if (input.checkpoint.stateRank < Number(priorCheckpoint.state_rank)) {
+          throw Object.assign(new Error("observation state rank regressed"), {
+            code: "observation-regressive",
+          });
+        }
+        if (input.checkpoint.stateRank === Number(priorCheckpoint.state_rank)) {
+          const same = JSON.stringify(input.checkpoint.value) === priorCheckpoint.value;
+          if (!same) {
+            throw Object.assign(
+              new Error("observation payload changed at an already-emitted state rank"),
+              { code: "observation-uncertain" },
+            );
+          }
+          const latest = prep(
+            `SELECT session_id, canonical_seqs FROM observations
+             WHERE authority_id = ? AND directory = ? AND workspace = ?
+               AND backend_session_id = ? AND artifact_kind = ? AND entity_id = ?
+             ORDER BY observed_at DESC LIMIT 1`,
+          ).get(...entityKeyArgs(key)) as {
+            session_id: string;
+            canonical_seqs: string;
+          } | undefined;
+          const seqs = latest ? JSON.parse(latest.canonical_seqs) as number[] : [];
+          prep(
+            `INSERT INTO observations (
+               authority_id, directory, workspace, backend_session_id,
+               artifact_kind, entity_id, revision, session_id,
+               observed_generation, reconciliation_ordinal, canonical_seqs, observed_at
+             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          ).run(
+            ...identityArgs,
+            input.sessionId,
+            input.identity.generation,
+            input.reconciliationOrdinal,
+            JSON.stringify(seqs),
+            Date.now(),
+          );
+          if (input.cursor) upsertObservationCursor(input.cursor.key, input.cursor.after);
+          return {
+            kind: "duplicate",
+            events: latest ? eventsAtSeqs(latest.session_id, seqs) : [],
+            checkpoint: rowToCheckpoint(priorCheckpoint),
+          };
+        }
+      }
+
+      prep(
+        `INSERT INTO observations (
+           authority_id, directory, workspace, backend_session_id,
+           artifact_kind, entity_id, revision, session_id,
+           observed_generation, reconciliation_ordinal, canonical_seqs, observed_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '[]', ?)`,
+      ).run(
+        ...identityArgs,
+        input.sessionId,
+        input.identity.generation,
+        input.reconciliationOrdinal,
+        Date.now(),
+      );
+      const appended = input.events.map((event) =>
+        appendInputInTransaction(input.sessionId, event));
+      if (input.checkpoint) {
+        prep(
+          `INSERT INTO observation_checkpoints (
+             authority_id, directory, workspace, backend_session_id,
+             artifact_kind, entity_id, revision, state_rank, value, updated_at
+           ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+           ON CONFLICT(
+             authority_id, directory, workspace, backend_session_id, artifact_kind, entity_id
+           ) DO UPDATE SET
+             revision = excluded.revision,
+             state_rank = excluded.state_rank,
+             value = excluded.value,
+             updated_at = excluded.updated_at`,
+        ).run(
+          ...entityKeyArgs(key),
+          input.identity.revision,
+          input.checkpoint.stateRank ?? null,
+          JSON.stringify(input.checkpoint.value),
+          Date.now(),
+        );
+      }
+      if (input.cursor) upsertObservationCursor(input.cursor.key, input.cursor.after);
+      prep(
+        `UPDATE observations SET canonical_seqs = ?
+         WHERE authority_id = ? AND directory = ? AND workspace = ?
+           AND backend_session_id = ? AND artifact_kind = ? AND entity_id = ?
+           AND revision = ?`,
+      ).run(JSON.stringify(appended.map((event) => event.seq)), ...identityArgs);
+      const checkpoint = checkpointRow(key);
+      return {
+        kind: "applied",
+        events: appended,
+        ...(checkpoint ? { checkpoint: rowToCheckpoint(checkpoint) } : {}),
+      };
+  };
+
+  async function ingestObservation(
+    input: ObservationIngestionInput,
+  ): Promise<ObservationIngestionResult> {
+    validateObservationInput(input);
+    return transaction(() => ingestObservationInTransaction(input));
+  }
+
+  async function ingestSnapshot(
+    input: SnapshotIngestionInput,
+  ): Promise<SnapshotIngestionResult> {
+    if (input.observations.some((observation) => observation.sessionId !== input.sessionId)) {
+      throw Object.assign(new Error("snapshot observations must belong to one session"), {
+        code: "invalid-input",
+      });
+    }
+    for (const observation of input.observations) validateObservationInput(observation);
+    return transaction(() => ({
+      observations: input.observations.map(ingestObservationInTransaction),
+    }));
+  }
+
+  // ------------------------------------------------------------- reconciliation barrier
+
+  interface ReconciliationRow {
+    session_id: string;
+    ordinal: number;
+    state: string;
+    reason: string | null;
+    updated_at: number;
+  }
+
+  const rowToReconciliation = (row: ReconciliationRow): DurableReconciliation => ({
+    sessionId: row.session_id,
+    ordinal: Number(row.ordinal),
+    state: row.state as DurableReconciliation["state"],
+    ...(row.reason !== null ? { reason: row.reason } : {}),
+    updatedAt: Number(row.updated_at),
+  });
+
+  const reconciliationRow = (sessionId: string): ReconciliationRow | undefined =>
+    prep("SELECT * FROM session_reconciliations WHERE session_id = ?")
+      .get(sessionId) as unknown as ReconciliationRow | undefined;
+
+  function reconciliation(sessionId: string): Promise<DurableReconciliation | undefined> {
+    const row = reconciliationRow(sessionId);
+    return Promise.resolve(row ? rowToReconciliation(row) : undefined);
+  }
+
+  async function startReconciliation(sessionId: string): Promise<DurableReconciliation> {
+    return transaction(() => {
+      const prior = reconciliationRow(sessionId);
+      const ordinal = prior ? Number(prior.ordinal) + 1 : 1;
+      const now = Date.now();
+      prep(
+        `INSERT INTO session_reconciliations (session_id, ordinal, state, reason, updated_at)
+         VALUES (?, ?, 'reconciling', NULL, ?)
+         ON CONFLICT(session_id) DO UPDATE SET
+           ordinal = excluded.ordinal,
+           state = excluded.state,
+           reason = NULL,
+           updated_at = excluded.updated_at`,
+      ).run(sessionId, ordinal, now);
+      appendInTransaction(
+        sessionId,
+        "reconciliation/started",
+        { ordinal },
+        { ignorable: true },
+      );
+      return rowToReconciliation(reconciliationRow(sessionId)!);
+    });
+  }
+
+  async function settleReconciliation(
+    sessionId: string,
+    ordinal: number,
+    state: "ready" | "blocked" | "unknown",
+    reason?: string,
+  ): Promise<
+    | { kind: "accepted"; reconciliation: DurableReconciliation }
+    | { kind: "superseded"; reconciliation: DurableReconciliation }
+  > {
+    return transaction(() => {
+      const current = reconciliationRow(sessionId);
+      if (!current) {
+        throw Object.assign(new Error("reconciliation not started"), { code: "not-found" });
+      }
+      if (Number(current.ordinal) !== ordinal) {
+        return {
+          kind: "superseded",
+          reconciliation: rowToReconciliation(current),
+        };
+      }
+      prep(
+        `UPDATE session_reconciliations
+         SET state = ?, reason = ?, updated_at = ?
+         WHERE session_id = ? AND ordinal = ?`,
+      ).run(state, reason ?? null, Date.now(), sessionId, ordinal);
+      appendInTransaction(
+        sessionId,
+        state === "ready" ? "reconciliation/completed" : "reconciliation/blocked",
+        {
+          ordinal,
+          state,
+          ...(reason ? { reason } : {}),
+        },
+        { ignorable: true },
+      );
+      return {
+        kind: "accepted",
+        reconciliation: rowToReconciliation(reconciliationRow(sessionId)!),
+      };
+    });
+  }
+
+  // ------------------------------------------------------------- deletion tombstones
+
+  interface TombstoneRow {
+    canonical_session_id: string;
+    authority_id: string;
+    endpoint_generation: number;
+    directory: string;
+    workspace: string;
+    backend_session_id: string;
+    operation_id: string;
+    created_at: number;
+    retired_at: number | null;
+    retirement_kind: "confirmed" | "purged" | null;
+    retirement_policy: string | null;
+  }
+
+  const rowToTombstone = (row: TombstoneRow): DeletionTombstone => ({
+    binding: {
+      canonicalSessionId: row.canonical_session_id,
+      authorityId: row.authority_id,
+      generation: Number(row.endpoint_generation),
+      location: {
+        directory: row.directory,
+        ...(row.workspace ? { workspace: row.workspace } : {}),
+      },
+      backendSessionId: row.backend_session_id,
+    },
+    operationId: row.operation_id,
+    createdAt: Number(row.created_at),
+    ...(row.retired_at !== null ? { retiredAt: Number(row.retired_at) } : {}),
+    ...(row.retirement_kind === "confirmed"
+      ? { retirement: { kind: "confirmed" as const } }
+      : row.retirement_kind === "purged"
+        ? {
+            retirement: {
+              kind: "purged" as const,
+              policy: row.retirement_policy ?? "",
+            },
+          }
+        : {}),
+  });
+
+  const tombstoneRow = (canonicalSessionId: string): TombstoneRow | undefined =>
+    prep("SELECT * FROM deletion_tombstones WHERE canonical_session_id = ?")
+      .get(canonicalSessionId) as unknown as TombstoneRow | undefined;
+
+  function deletionTombstone(
+    canonicalSessionId: string,
+  ): Promise<DeletionTombstone | undefined> {
+    const row = tombstoneRow(canonicalSessionId);
+    return Promise.resolve(row ? rowToTombstone(row) : undefined);
+  }
+
+  function hasDeletionTombstone(binding: DeletionTombstoneBinding): Promise<boolean> {
+    const row = prep(
+      `SELECT 1 AS one FROM deletion_tombstones
+       WHERE authority_id = ? AND directory = ? AND workspace = ?
+         AND backend_session_id = ? AND retired_at IS NULL
+       LIMIT 1`,
+    ).get(
+      binding.authorityId,
+      binding.location.directory,
+      binding.location.workspace ?? "",
+      binding.backendSessionId,
+    );
+    return Promise.resolve(row !== undefined);
+  }
+
+  async function prepareSessionDeletion(
+    input: PrepareDeletionTombstoneInput,
+  ): Promise<PreparedDeletionTombstoneResult> {
+    return transaction(() => {
+      if (tombstoneRow(input.binding.canonicalSessionId)) {
+        throw Object.assign(new Error("deletion tombstone already exists"), {
+          code: "conflict",
+        });
+      }
+      const operation = insertPreparedOperation(
+        input.binding.canonicalSessionId,
+        "session-delete",
+        input.replay ?? { kind: "never" },
+      );
+      const createdAt = Date.now();
+      prep(
+        `INSERT INTO deletion_tombstones (
+           canonical_session_id, authority_id, endpoint_generation,
+           directory, workspace, backend_session_id, operation_id, created_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).run(
+        input.binding.canonicalSessionId,
+        input.binding.authorityId,
+        input.binding.generation,
+        input.binding.location.directory,
+        input.binding.location.workspace ?? "",
+        input.binding.backendSessionId,
+        operation.operationId,
+        createdAt,
+      );
+
+      prep("DELETE FROM events WHERE session_id = ?").run(input.binding.canonicalSessionId);
+      prep("DELETE FROM projections WHERE session_id = ?").run(input.binding.canonicalSessionId);
+      prep("DELETE FROM session_queue WHERE session_id = ?").run(input.binding.canonicalSessionId);
+      prep("DELETE FROM attention_open WHERE session_id = ?").run(input.binding.canonicalSessionId);
+      prep("DELETE FROM response_intents WHERE session_id = ?").run(input.binding.canonicalSessionId);
+      prep("DELETE FROM observations WHERE session_id = ?").run(input.binding.canonicalSessionId);
+      prep("DELETE FROM session_reconciliations WHERE session_id = ?")
+        .run(input.binding.canonicalSessionId);
+      prep(
+        `DELETE FROM observation_checkpoints
+         WHERE authority_id = ? AND directory = ? AND workspace = ?
+           AND backend_session_id = ?`,
+      ).run(
+        input.binding.authorityId,
+        input.binding.location.directory,
+        input.binding.location.workspace ?? "",
+        input.binding.backendSessionId,
+      );
+      prep(
+        `DELETE FROM observation_cursors
+         WHERE authority_id = ? AND directory = ? AND workspace = ?
+           AND backend_session_id = ?`,
+      ).run(
+        input.binding.authorityId,
+        input.binding.location.directory,
+        input.binding.location.workspace ?? "",
+        input.binding.backendSessionId,
+      );
+      const tombstone = rowToTombstone(tombstoneRow(input.binding.canonicalSessionId)!);
+      return { tombstone, operation };
+    });
+  }
+
+  async function retireDeletionTombstone(
+    canonicalSessionId: string,
+    retirement: { kind: "confirmed" } | { kind: "purged"; policy: string },
+  ): Promise<DeletionTombstone> {
+    return transaction(() => {
+      const row = tombstoneRow(canonicalSessionId);
+      if (!row) throw Object.assign(new Error("deletion tombstone not found"), { code: "not-found" });
+      if (row.retired_at !== null) return rowToTombstone(row);
+      if (retirement.kind === "confirmed") {
+        const operation = operationRow(row.operation_id);
+        if (!operation || operation.state !== "confirmed") {
+          throw Object.assign(
+            new Error("upstream deletion is not durably confirmed"),
+            { code: "invalid-transition" },
+          );
+        }
+      } else if (retirement.policy.trim() === "") {
+        throw Object.assign(new Error("explicit purge policy is required"), {
+          code: "invalid-input",
+        });
+      }
+      prep(
+        `UPDATE deletion_tombstones
+         SET retired_at = ?, retirement_kind = ?, retirement_policy = ?
+         WHERE canonical_session_id = ? AND retired_at IS NULL`,
+      ).run(
+        Date.now(),
+        retirement.kind,
+        retirement.kind === "purged" ? retirement.policy : null,
+        canonicalSessionId,
+      );
+      return rowToTombstone(tombstoneRow(canonicalSessionId)!);
+    });
   }
 
   function deleteProjection(sessionId: string): Promise<void> {
@@ -754,6 +2382,9 @@ export function createStore(dbPath: string): Store {
       prep("DELETE FROM projections WHERE session_id = ?").run(sessionId);
       prep("DELETE FROM session_queue WHERE session_id = ?").run(sessionId);
       prep("DELETE FROM attention_open WHERE session_id = ?").run(sessionId);
+      prep("DELETE FROM response_intents WHERE session_id = ?").run(sessionId);
+      prep("DELETE FROM observations WHERE session_id = ?").run(sessionId);
+      prep("DELETE FROM session_reconciliations WHERE session_id = ?").run(sessionId);
       db.exec("COMMIT");
     } catch (err) {
       db.exec("ROLLBACK");
@@ -1118,6 +2749,11 @@ export function createStore(dbPath: string): Store {
     return Promise.resolve();
   }
 
+  // A process cannot know whether a previously executing operation reached
+  // the network. Recover every stranded claim to durable uncertainty before
+  // exposing the store to callers.
+  transaction(() => recoverExecutingInTransaction());
+
   return {
     append,
     events,
@@ -1130,12 +2766,38 @@ export function createStore(dbPath: string): Store {
     projection,
     projections,
     exportJsonl,
+    prepareOperation,
+    prepareSessionCreate,
+    operation,
+    operations,
+    claimOperation,
+    replayUnknownOperation,
+    settleOperation,
+    recoverExecutingOperations,
     enqueue,
     queueList,
     queueEdit,
     queueReorder,
     queueRemove,
     queueShift,
+    reserveQueueHead,
+    queueReservation,
+    confirmQueueReservation,
+    releaseQueueReservation,
+    chooseResponseIntent,
+    responseIntent,
+    settleResponseIntent,
+    ingestObservation,
+    ingestSnapshot,
+    observationCheckpoint,
+    observationCursor,
+    startReconciliation,
+    reconciliation,
+    settleReconciliation,
+    prepareSessionDeletion,
+    deletionTombstone,
+    hasDeletionTombstone,
+    retireDeletionTombstone,
     deleteProjection,
     deleteSession,
     folderList,

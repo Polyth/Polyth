@@ -112,6 +112,17 @@ function StatusBadge({ status }: { status: SessionRowStatus }) {
       </span>
     );
   }
+  if (status.kind === "reconciling" || status.kind === "unknown") {
+    return (
+      <span
+        className={`session-status-indicator ${status.kind}`}
+        title={status.kind}
+        aria-label={status.kind}
+      >
+        {status.kind}
+      </span>
+    );
+  }
   return null;
 }
 
@@ -139,6 +150,7 @@ interface RowProps {
  *  question/permission is waiting; otherwise act immediately. */
 function needsDestructiveConfirm(s: SessionProjection): boolean {
   return s.status === "working" || s.status === "waiting"
+    || s.status === "reconciling" || s.status === "unknown"
     || (s.attention?.questions ?? 0) > 0 || (s.attention?.permissions ?? 0) > 0;
 }
 
@@ -567,6 +579,8 @@ export default function SessionList({
     if (!attentionOnly) return true;
     return session.status === "working"
       || session.status === "waiting"
+      || session.status === "reconciling"
+      || session.status === "unknown"
       || (session.attention?.questions ?? 0) > 0
       || (session.attention?.permissions ?? 0) > 0;
   };

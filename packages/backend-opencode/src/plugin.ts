@@ -3,6 +3,7 @@ import {
   createOpenCodeRuntime,
   type OpenCodeAdapterOptions,
 } from "./index.ts";
+import type { ProtocolSelection } from "./protocol.ts";
 
 export interface BackendOpenCodePluginConfig {
   cwd?: string;
@@ -11,6 +12,10 @@ export interface BackendOpenCodePluginConfig {
   bin?: string;
   dataDir?: string;
   sessionIdMap?: Map<string, string>;
+  protocol?: ProtocolSelection;
+  configTargetId?: string;
+  startupDeadlineMs?: number;
+  probeDeadlineMs?: number;
 }
 
 const plugin: Plugin<BackendOpenCodePluginConfig> = {
@@ -29,6 +34,14 @@ const plugin: Plugin<BackendOpenCodePluginConfig> = {
       bin: typeof config.bin === "string" ? config.bin : undefined,
       dataDir: typeof config.dataDir === "string" ? config.dataDir : undefined,
       sessionIdMap: config.sessionIdMap,
+      protocol: config.protocol,
+      configTargetId: typeof config.configTargetId === "string" ? config.configTargetId : undefined,
+      startupDeadlineMs: typeof config.startupDeadlineMs === "number"
+        ? config.startupDeadlineMs
+        : undefined,
+      probeDeadlineMs: typeof config.probeDeadlineMs === "number"
+        ? config.probeDeadlineMs
+        : undefined,
     };
     const runtime = await createOpenCodeRuntime(opts);
     ctx.provide(CAP.runtime, runtime);

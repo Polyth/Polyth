@@ -108,6 +108,26 @@ async function seedTwoTurns(fake: ReturnType<typeof fakeRuntime>, sessions: Retu
   await flush();
 }
 
+const assertForkOperationTail = (
+  before: Awaited<ReturnType<ReturnType<typeof createStore>["events"]>>,
+  after: Awaited<ReturnType<ReturnType<typeof createStore>["events"]>>,
+  terminal: "mutation/confirmed" | "mutation/rejected",
+): void => {
+  assert.deepEqual(after.slice(0, before.length), before);
+  const tail = after.slice(before.length);
+  assert.deepEqual(tail.map((event) => event.type), [
+    "session/fork-intended",
+    "mutation/prepared",
+    "mutation/claimed",
+    terminal,
+  ]);
+  assert.equal(tail.every((event) => event.ignorable === true), true);
+  const operationIds = tail.slice(1).map((event) =>
+    (event.data as { operationId?: string }).operationId);
+  assert.equal(operationIds.every((id) => id === operationIds[0]), true);
+  assert.equal((tail[1]!.data as { mutationKind?: string }).mutationKind, "session-fork");
+};
+
 test("per-message fork excludes the prompt, seeds the draft, and branches exact history", async () => {
   const fake = fakeRuntime();
   const { sessions, store } = makeService(fake);
@@ -160,8 +180,9 @@ test("per-message fork excludes the prompt, seeds the draft, and branches exact 
   assert.equal(childProj?.backendSessionId, "branch_1");
   assert.equal(childProj?.status, "idle");
 
-  // source unchanged
-  assert.deepEqual(await store.events(id), sourceEvents);
+  // The source history is unchanged; the durable fork intent and operation
+  // outcome are appended as ignorable audit facts.
+  assertForkOperationTail(sourceEvents, await store.events(id), "mutation/confirmed");
   assert.deepEqual(deriveMessages(childEvents), [
     { role: "user", parts: [{ type: "text", text: "first" }] },
     { role: "assistant", parts: [{ type: "text", text: "one" }] },
@@ -217,14 +238,14 @@ test("backend branch failure creates no canonical child and keeps the source int
     assert.equal(err.code, "history-mismatch");
     return true;
   });
-  assert.deepEqual(await store.events(id), before);
+  assertForkOperationTail(before, await store.events(id), "mutation/rejected");
   const others = (await store.projections("p1")).filter((p) => p.id !== id);
   assert.deepEqual(others, []);
   assert.deepEqual(fake.discarded, []); // nothing to discard: backend was never created
   await store.close();
 });
 
-test("canonical publication failure discards the orphan backend branch", async () => {
+test("canonical publication failure does not issue an untracked backend delete", async () => {
   const fake = fakeRuntime();
   const { sessions, store } = makeService(fake, (raw) => ({
     ...raw,
@@ -237,7 +258,7 @@ test("canonical publication failure discards the orphan backend branch", async (
   const second = (await store.events(id)).filter((e) => e.type === "user/message")[1]!;
 
   await assert.rejects(() => sessions.fork(id, second.seq), /disk full/);
-  assert.deepEqual(fake.discarded, ["branch_1"]);
+  assert.deepEqual(fake.discarded, []);
   const others = (await store.projections("p1")).filter((p) => p.id !== id);
   assert.deepEqual(others, []);
   await store.close();

@@ -107,8 +107,11 @@ test("mobile interventions reattach, stay session-bound, and resolve each reques
   await sessions.replyPermission("original", "per_1", "once");
   assert.deepEqual(ensureCalls, [{ sessionId: "original", backendSessionId: "backend-original" }]);
   assert.deepEqual(permissionReplies, [{
-    sessionId: "original", requestId: "per_1", reply: "once", logged: true,
+    sessionId: "original", requestId: "per_1", reply: "once", logged: false,
   }]);
+  assert.equal((await store.events("original")).filter((event) =>
+    event.type === "permission/resolved"
+    && (event.data as { requestId?: string }).requestId === "per_1").length, 1);
   assert.equal((await store.projection("original"))?.status, "waiting", "the open question still blocks the session");
   await assert.rejects(
     () => sessions.replyPermission("original", "per_1", "reject"),
@@ -123,7 +126,7 @@ test("mobile interventions reattach, stay session-bound, and resolve each reques
   const rejected = results.find((result): result is PromiseRejectedResult => result.status === "rejected");
   assert.equal((rejected?.reason as { code?: string }).code, "conflict");
   assert.equal(questionReplies.length, 1);
-  assert.equal(questionReplies[0]!.logged, true, "durable answer precedes the runtime reply");
+  assert.equal(questionReplies[0]!.logged, false, "answer closes only after the runtime confirms");
   assert.deepEqual(questionReplies[0]!.answers, { answers: [["yes"], ["Proceed carefully"]] });
   assert.equal((await store.events("original")).filter((event) => event.type === "question/answered").length, 1);
   assert.equal((await store.projection("original"))?.status, "working");

@@ -7,6 +7,8 @@ export type SessionRowStatus =
   | { kind: "needs-approval" }
   | { kind: "needs-reply" }
   | { kind: "working"; elapsedMs: number }
+  | { kind: "reconciling" }
+  | { kind: "unknown" }
   | { kind: "unread" }
   | { kind: "regular" };
 
@@ -18,6 +20,8 @@ export function sessionRowStatus(s: SessionProjection, now: number): SessionRowS
   if (s.status === "working") {
     return { kind: "working", elapsedMs: Math.max(0, now - (s.lastTurnAt ?? s.updatedAt)) };
   }
+  if (s.status === "reconciling") return { kind: "reconciling" };
+  if (s.status === "unknown") return { kind: "unknown" };
   if ((s.attention?.unread ?? 0) > 0) return { kind: "unread" };
   return { kind: "regular" };
 }

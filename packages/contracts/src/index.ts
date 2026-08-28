@@ -45,6 +45,26 @@ export interface SessionEvent<T extends JsonObject = JsonObject> {
   v: 1;
 }
 
+/** Protocol-neutral durable events emitted when mutation state becomes
+ * externally observable. These events are ignorable canonical facts; the
+ * operations table remains authoritative for execution state. */
+export const CANONICAL_MUTATION_EVENT_TYPES = [
+  "mutation/prepared",
+  "mutation/claimed",
+  "mutation/confirmed",
+  "mutation/rejected",
+  "mutation/uncertainty-recorded",
+  "mutation/nonapplication-confirmed",
+] as const;
+export type CanonicalMutationEventType = (typeof CANONICAL_MUTATION_EVENT_TYPES)[number];
+
+export const CANONICAL_RECONCILIATION_EVENT_TYPES = [
+  "reconciliation/started",
+  "reconciliation/completed",
+  "reconciliation/blocked",
+] as const;
+export type CanonicalReconciliationEventType = (typeof CANONICAL_RECONCILIATION_EVENT_TYPES)[number];
+
 // Data payloads for the M1 vocabulary (all must stay JSON-serializable)
 export interface CompactionRecoveryMetadata {
   compactionSeq: number;
@@ -375,7 +395,15 @@ export interface UserTurnInput {
   agentProfileId?: string | null;
 }
 
-export type SessionStatus = "idle" | "working" | "waiting" | "finished" | "failed" | "archived";
+export type SessionStatus =
+  | "idle"
+  | "working"
+  | "waiting"
+  | "reconciling"
+  | "unknown"
+  | "finished"
+  | "failed"
+  | "archived";
 
 /** Derived unresolved-request counters; always computed from durable events. */
 export interface SessionAttention {
@@ -405,6 +433,12 @@ export interface SessionProjection {
   lastTurnAt?: number; tokenTotals?: TokenUsage; costTotal?: number;
   worktreePath?: string;
   backendSessionId?: string;
+  /** Durable identity of the endpoint generation that owns backendSessionId.
+   * A generation-only binding may not be silently carried to a replacement. */
+  runtimeBinding?: PersistedRuntimeBinding;
+  /** Highest canonical event sequence whose runtime-derived projection effects
+   * were applied. Makes post-ingestion projection repair idempotent. */
+  runtimeObservationSeq?: number;
   goal?: { objective: string; status: string };
   // -- optional parity metadata (backward compatible: absent on old records) --
   attention?: SessionAttention;
@@ -589,6 +623,554 @@ export interface SessionPersistence {
 
 // ---------------------------------------------------------------- agent runtime (backend seam)
 
+/** Runtime location is explicit in every binding; callers normalize directory
+ * before constructing it. */
+export interface RuntimeLocation {
+  directory: string;
+  workspace?: string;
+}
+
+export type RuntimeControl =
+  | { kind: "owned"; instanceToken: string }
+  | { kind: "borrowed"; source: "shared" | "external" };
+
+export type RuntimeConfigAuthority =
+  | { kind: "read-only" }
+  | { kind: "writable"; targetId: string };
+
+/** Environment variable names and resolvers are capabilities, not persisted
+ * credential values. */
+export type RuntimeAuthentication =
+  | { kind: "none" }
+  | { kind: "basic-env"; usernameEnv: string; passwordEnv: string }
+  | { kind: "endpoint-headers"; resolve: () => Promise<Record<string, string>> };
+
+export interface RuntimeEndpoint {
+  authorityId: string;
+  continuity: "verified" | "generation-only";
+  generation: number;
+  url: string;
+  location: RuntimeLocation;
+  control: RuntimeControl;
+  config: RuntimeConfigAuthority;
+  authentication: RuntimeAuthentication;
+}
+
+export interface BaseRuntimeEndpointLease {
+  endpoint(): Promise<RuntimeEndpoint>;
+  refresh(reason: "connect" | "disconnect" | "unauthorized"): Promise<RuntimeEndpoint>;
+  dispose(): Promise<void>;
+}
+
+export interface OwnedRuntimeEndpointLease extends BaseRuntimeEndpointLease {
+  readonly control: { kind: "owned"; instanceToken: string };
+  restart(reason: "crash" | "config" | "manual"): Promise<RuntimeEndpoint>;
+}
+
+export interface BorrowedRuntimeEndpointLease extends BaseRuntimeEndpointLease {
+  readonly control: { kind: "borrowed"; source: "shared" | "external" };
+}
+
+export type RuntimeEndpointLease = OwnedRuntimeEndpointLease | BorrowedRuntimeEndpointLease;
+
+export type ReplayPolicy =
+  | { kind: "never" }
+  | { kind: "same-operation-id"; contract: string };
+
+export type MutationOutcome<T> =
+  | { kind: "confirmed"; value: T; receipt?: string }
+  | { kind: "rejected"; code: string; message: string }
+  | { kind: "unknown"; operationId: string; message: string };
+
+export type MutationTransportResult<T> =
+  | {
+      kind: "response";
+      status: number;
+      headers: Readonly<Record<string, string>>;
+      body: T;
+    }
+  | { kind: "unknown"; operationId: string; message: string };
+
+/** Wire paths remain adapter-private values. No provider DTO crosses this
+ * query/mutation/stream safety boundary. */
+export interface OpenCodeTransport {
+  query<T>(request: {
+    method: "GET" | "HEAD";
+    path: string;
+    deadlineMs: number;
+  }): Promise<T>;
+  mutate<T>(request: {
+    method: "POST" | "PUT" | "PATCH" | "DELETE";
+    path: string;
+    body?: unknown;
+    operationId: string;
+    deadlineMs: number;
+    replay: ReplayPolicy;
+  }): Promise<MutationTransportResult<T>>;
+  stream(request: {
+    path: string;
+    after?: string;
+    signal: AbortSignal;
+    onEvent(value: unknown): void;
+  }): Promise<void>;
+}
+
+/** Normalized mutation names used in durable rows and canonical events. */
+export type RuntimeMutationKind =
+  | "session-create"
+  | "session-reset"
+  | "session-fork"
+  | "session-revert"
+  | "turn-submit"
+  | "turn-steer"
+  | "turn-abort"
+  | "session-delete"
+  | "permission-reply"
+  | "question-reply"
+  | "question-reject"
+  | "secret-reply";
+
+export interface RuntimeSessionBinding {
+  canonicalSessionId: string;
+  backendSessionId?: string;
+  authorityId: string;
+  generation: number;
+  continuity: "verified" | "generation-only";
+  location: RuntimeLocation;
+}
+
+export type RuntimeReconciliationBinding = RuntimeSessionBinding & {
+  reconciliationOrdinal?: number;
+};
+
+export interface PersistedRuntimeBinding {
+  backendSessionId: string;
+  authorityId: string;
+  generation: number;
+  continuity: "verified" | "generation-only";
+  protocol: "legacy" | "v2";
+  location: RuntimeLocation;
+  /** First-reconciliation handling for backend history already represented by
+   * canonical copied events, or intentionally imported from the backend. */
+  historyBaseline?: "empty" | "copied" | "import";
+}
+
+export interface RuntimeTurnBinding {
+  session: RuntimeSessionBinding;
+  text: string;
+  attachments?: AttachmentRef[];
+  model?: ModelRef;
+  agent?: string;
+}
+
+export interface RuntimeSnapshot {
+  authorityId: string;
+  generation: number;
+  location: RuntimeLocation;
+  backendSessionId: string;
+  reconciliationOrdinal: number;
+  state: {
+    value: "running" | "idle" | "failed" | "interrupted" | "unknown";
+    watermark?: string;
+    /** Provider-normalized monotonic evidence. A terminal state is destructive
+     * only when this order is comparable with the stored order for `domain`. */
+    comparison?: {
+      domain: string;
+      order: number;
+    };
+    /** Exact confirmed operation that makes a fresh-session idle state causal
+     * without pretending its unversioned status text is monotonic evidence. */
+    causalOperationId?: string;
+  };
+  completeness: {
+    events: "complete" | "partial" | "unverifiable";
+    permissions: "complete" | "partial" | "unverifiable";
+    questions: "complete" | "partial" | "unverifiable";
+  };
+  cursorAfter?: string;
+  permissions: Array<{
+    requestId: string;
+    permission: string;
+    patterns: string[];
+    /** Stable upstream entity revision when the protocol exposes one. */
+    revision?: string;
+  }>;
+  questions: Array<{
+    requestId: string;
+    questions: JsonObject[];
+    /** Stable upstream entity revision when the protocol exposes one. */
+    revision?: string;
+  }>;
+  events: Array<{
+    entityKey: string;
+    revision: string;
+    event: RuntimeEvent;
+  }>;
+  /** Protocol-proven links between durable Polyth operations and accepted
+   * upstream entities. Adapters omit this when the backend exposes no stable
+   * operation receipt; equal content is never evidence. */
+  acceptedOperations?: Array<{
+    operationId: string;
+    mutationKind: RuntimeMutationKind;
+    receipt?: string;
+    entityId?: string;
+    backendSessionId?: string;
+  }>;
+  /** Protocol-proven evidence that a specific durable operation had no
+   * upstream effect. Completeness alone is not causal proof; adapters omit
+   * this unless an operation lookup or pinned causally-newer snapshot contract
+   * proves non-application. */
+  nonAppliedOperations?: Array<{
+    operationId: string;
+    mutationKind: RuntimeMutationKind;
+    requestId?: string;
+    backendSessionId?: string;
+  }>;
+}
+
+/** A protocol-neutral, semantically identified runtime observation. SSE and
+ * pull/history producers use the same identity so the session store can claim
+ * the canonical event batch exactly once. */
+export interface RuntimeObservation {
+  channel: "sse" | "pull";
+  entityKey: string;
+  identity: ObservationIdentity;
+  reconciliationOrdinal: number;
+  events: RuntimeEvent[];
+  /** Explicit non-model-visible evidence that an identified upstream artifact
+   * cannot be merged with the durable checkpoint without guessing. */
+  uncertainty?: {
+    code: "divergent-content" | "terminal-payload-changed";
+    message: string;
+  };
+  checkpoint?: {
+    stateRank?: number;
+    value: JsonObject;
+  };
+  cursorAfter?: string;
+}
+
+/** Runtime connectivity notifications are evidence triggers, not mutation
+ * outcomes. Consumers reconcile durable sessions before reopening admission. */
+export type RuntimeLifecycleNotification =
+  | {
+      type: "stream-connected" | "stream-disconnected";
+      authorityId?: string;
+      generation?: number;
+      reason?: string;
+    }
+  | {
+      type: "endpoint-replaced";
+      authorityId: string;
+      generation: number;
+      reason: "connect" | "disconnect" | "unauthorized" | "crash" | "config" | "manual";
+    };
+
+export interface ProtocolCapabilities {
+  eventReplay: "none" | "contract-tested";
+  pendingSnapshot: "none" | "partial" | "complete-causal";
+  idempotentMutations: ReadonlySet<RuntimeMutationKind>;
+}
+
+export interface ProtocolAdapter {
+  readonly protocol: "legacy" | "v2";
+  capabilities(): Promise<ProtocolCapabilities>;
+  models(): Promise<ModelDescriptor[]>;
+  agents(): Promise<AgentDescriptor[]>;
+  sessions(): Promise<RuntimeSession[]>;
+  history(input: RuntimeSessionBinding): Promise<RuntimeSessionMessage[]>;
+  eventStreamPath(): string | undefined;
+  ensureSession(
+    input: RuntimeSessionBinding,
+    operationId: string,
+    title?: string,
+  ): Promise<MutationOutcome<{ backendSessionId: string }>>;
+  resetSession(
+    input: RuntimeSessionBinding,
+    title: string | undefined,
+    operationId: string,
+  ): Promise<MutationOutcome<{ backendSessionId: string }>>;
+  branchSession(
+    input: {
+      source: RuntimeSessionBinding;
+      target: RuntimeSessionBinding;
+      title?: string;
+      history: ModelMessage[];
+    },
+    operationId: string,
+  ): Promise<MutationOutcome<{ backendSessionId: string }>>;
+  submit(
+    input: RuntimeTurnBinding,
+    operationId: string,
+  ): Promise<MutationOutcome<{ admissionId?: string }>>;
+  steer(
+    input: RuntimeTurnBinding,
+    operationId: string,
+  ): Promise<MutationOutcome<Record<string, never>>>;
+  abort(
+    input: RuntimeSessionBinding,
+    operationId: string,
+  ): Promise<MutationOutcome<Record<string, never>>>;
+  deleteSession(
+    input: RuntimeSessionBinding,
+    operationId: string,
+  ): Promise<MutationOutcome<Record<string, never>>>;
+  replyPermission(
+    input: RuntimeSessionBinding,
+    requestId: string,
+    reply: "once" | "always" | "reject",
+    operationId: string,
+  ): Promise<MutationOutcome<Record<string, never>>>;
+  replyQuestion(
+    input: RuntimeSessionBinding,
+    requestId: string,
+    answers: JsonObject,
+    operationId: string,
+  ): Promise<MutationOutcome<Record<string, never>>>;
+  reconcile(input: RuntimeReconciliationBinding, after?: string): Promise<RuntimeSnapshot>;
+}
+
+// ------------------------------------------------ durable mutation/reconciliation vocabulary
+
+export type DurableOperationState =
+  | "prepared"
+  | "executing"
+  | "confirmed"
+  | "rejected"
+  | "unknown"
+  | "not-applied";
+export type OperationState = DurableOperationState;
+export type RuntimeOperationState = DurableOperationState;
+
+export interface DurableOperation {
+  operationId: string;
+  sessionId: string;
+  ordinal: number;
+  mutationKind: RuntimeMutationKind;
+  state: DurableOperationState;
+  replay: ReplayPolicy;
+  createdAt: number;
+  updatedAt: number;
+  code?: string;
+  message?: string;
+  receipt?: string;
+  ownerEventSeq?: number;
+}
+
+export interface CanonicalEventInput {
+  type: string;
+  data: JsonObject;
+  ignorable?: boolean;
+  surfaceOp?: "append" | "replace";
+  sourceEventSeqs?: number[];
+  producerPlugin?: string;
+}
+
+export interface PrepareOperationInput {
+  sessionId: string;
+  mutationKind: RuntimeMutationKind;
+  /** Every generic preparation has one owning intent event in the same
+   * transaction. Queue, create, response, and deletion use specialized APIs. */
+  intentEvent: CanonicalEventInput;
+  replay?: ReplayPolicy;
+}
+
+export interface PreparedOperationResult {
+  operation: DurableOperation;
+  intentEvent: SessionEvent;
+  stateEvent: SessionEvent;
+}
+
+export interface PrepareSessionCreateInput {
+  projection: SessionProjection;
+  createdEvent: CanonicalEventInput;
+  replay?: ReplayPolicy;
+}
+
+export interface PreparedSessionCreateResult {
+  operation: DurableOperation;
+  createdEvent: SessionEvent;
+  stateEvent: SessionEvent;
+  projection: SessionProjection;
+}
+
+export type OperationClaimResult =
+  | { kind: "claimed"; operation: DurableOperation; event?: SessionEvent }
+  | { kind: "not-claimed"; operation?: DurableOperation };
+
+export type OperationSettlement =
+  | { kind: "confirmed"; receipt?: string }
+  | { kind: "rejected"; code: string; message: string }
+  | { kind: "unknown"; code?: string; message: string }
+  | { kind: "not-applied"; code?: string; message: string };
+
+export interface QueueReservation {
+  queueItem: QueueItemDto;
+  operation: DurableOperation;
+  reservedAt: number;
+}
+
+export interface QueueReservationInput {
+  sessionId: string;
+  mutationKind?: "turn-submit" | "turn-steer";
+  replay?: ReplayPolicy;
+}
+
+export type QueueReservationResult =
+  | { kind: "empty" }
+  | { kind: "reserved"; reservation: QueueReservation }
+  | { kind: "blocked"; reservation: QueueReservation };
+
+export type ObservationArtifactKind =
+  | "message"
+  | "part"
+  | "tool"
+  | "permission"
+  | "question"
+  | "status"
+  | "turn";
+
+/** Generation is captured for audit/fencing but deliberately excluded from
+ * durable semantic uniqueness. */
+export interface ObservationIdentity {
+  authorityId: string;
+  generation: number;
+  location: RuntimeLocation;
+  backendSessionId: string;
+  artifactKind: ObservationArtifactKind;
+  entityId: string;
+  revision: string;
+}
+
+export interface ObservationEntityKey {
+  authorityId: string;
+  location: RuntimeLocation;
+  backendSessionId: string;
+  artifactKind: ObservationArtifactKind;
+  entityId: string;
+}
+
+export interface ObservationCheckpoint {
+  key: ObservationEntityKey;
+  revision: string;
+  stateRank?: number;
+  value: JsonObject;
+  updatedAt: number;
+}
+
+export interface ObservationCursorKey {
+  authorityId: string;
+  location: RuntimeLocation;
+  backendSessionId: string;
+  channel: string;
+}
+
+export interface ObservationIngestionInput {
+  sessionId: string;
+  identity: ObservationIdentity;
+  reconciliationOrdinal: number;
+  events: CanonicalEventInput[];
+  checkpoint?: {
+    stateRank?: number;
+    value: JsonObject;
+  };
+  cursor?: {
+    key: ObservationCursorKey;
+    after: string;
+  };
+}
+
+export interface SnapshotIngestionInput {
+  sessionId: string;
+  observations: ObservationIngestionInput[];
+}
+
+export interface SnapshotIngestionResult {
+  observations: ObservationIngestionResult[];
+}
+
+export type ObservationIngestionResult =
+  | { kind: "applied"; events: SessionEvent[]; checkpoint?: ObservationCheckpoint }
+  | { kind: "duplicate"; events: SessionEvent[]; checkpoint?: ObservationCheckpoint };
+
+export type DurableReconciliationState = "reconciling" | "ready" | "blocked" | "unknown";
+
+export interface DurableReconciliation {
+  sessionId: string;
+  ordinal: number;
+  state: DurableReconciliationState;
+  reason?: string;
+  updatedAt: number;
+}
+
+export interface DeletionTombstoneBinding {
+  canonicalSessionId: string;
+  authorityId: string;
+  generation: number;
+  location: RuntimeLocation;
+  backendSessionId: string;
+}
+
+export interface DeletionTombstone {
+  binding: DeletionTombstoneBinding;
+  operationId: string;
+  createdAt: number;
+  retiredAt?: number;
+  retirement?: { kind: "confirmed" } | { kind: "purged"; policy: string };
+}
+
+export interface PrepareDeletionTombstoneInput {
+  binding: DeletionTombstoneBinding;
+  replay?: ReplayPolicy;
+}
+
+export interface PreparedDeletionTombstoneResult {
+  tombstone: DeletionTombstone;
+  operation: DurableOperation;
+}
+
+export type ResponseIntentInput =
+  | {
+      kind: "permission";
+      sessionId: string;
+      requestId: string;
+      reply: "once" | "always" | "reject";
+      scope?: "session" | "project";
+    }
+  | {
+      kind: "question";
+      sessionId: string;
+      requestId: string;
+      answers: JsonObject;
+      reject?: boolean;
+    }
+  | {
+      kind: "secret";
+      sessionId: string;
+      requestId: string;
+      action: "save" | "dismiss";
+      handle?: string;
+    };
+
+export interface DurableResponseIntent {
+  kind: ResponseIntentInput["kind"];
+  sessionId: string;
+  requestId: string;
+  operationId: string;
+  payload: JsonObject;
+  createdAt: number;
+}
+
+export type ResponseIntentChoice =
+  | { kind: "chosen"; intent: DurableResponseIntent; operation: DurableOperation }
+  | { kind: "existing"; intent: DurableResponseIntent; operation: DurableOperation };
+
+export type ResponseIntentSettlement =
+  | { kind: "confirmed"; receipt?: string; completionEvent: CanonicalEventInput }
+  | { kind: "rejected"; code: string; message: string }
+  | { kind: "unknown"; code?: string; message: string }
+  | { kind: "not-applied"; code?: string; message: string };
+
 export interface ModelDescriptor { providerID: string; modelID: string; name: string; providerName?: string; context?: number; cost?: { input: number; output: number }; /** Normalized values include `input:text`, `output:image`, `input:none`, `toolcall`, and `attachment`. */ capabilities?: string[]; /** Named reasoning variants reported by OpenCode (for example low/medium/high). */ variants?: string[]; /** Provider has live credentials (backend `connected[]`); undefined = unknown/assume connected. */ connected?: boolean }
 export interface AgentDescriptor {
   name: string;
@@ -600,7 +1182,16 @@ export interface AgentDescriptor {
   model?: ModelRef;
 }
 export interface RuntimeCapabilities { streaming: boolean; permissions: boolean; questions: boolean; compaction: boolean; subagents: boolean; steering?: boolean }
-export interface RuntimeSession { id: string; title: string; parentId?: string; createdAt: number; updatedAt: number }
+export interface RuntimeSession {
+  id: string;
+  title: string;
+  parentId?: string;
+  createdAt: number;
+  updatedAt: number;
+  /** Present only when the protocol supplies a stable create-operation
+   * receipt. Used to recover an unknown create without issuing another POST. */
+  operationId?: string;
+}
 export interface RuntimeSessionMessage { role: "user" | "assistant"; text: string; reasoning?: string }
 
 export interface CanonicalTurnRequest {
@@ -651,27 +1242,87 @@ export interface AgentRuntime {
   models(): Promise<ModelDescriptor[]>;
   agents(): Promise<AgentDescriptor[]>;
   ensureSession(canonical: CreateSessionInput & { sessionId: string; cwd: string }): Promise<string>;
+  /** Operation-aware create. The supplied durable ID is used for this one
+   * attempt and ambiguity is returned instead of hidden replay. */
+  createSessionOperation?(
+    canonical: CreateSessionInput & { sessionId: string; cwd: string },
+    operationId: string,
+  ): Promise<MutationOutcome<{ backendSessionId: string }>>;
   /** Replace one canonical session's backend history with a fresh backend session. */
   resetSession?(canonical: CreateSessionInput & { sessionId: string; cwd: string }): Promise<string>;
+  resetSessionOperation?(
+    canonical: CreateSessionInput & { sessionId: string; cwd: string },
+    operationId: string,
+  ): Promise<MutationOutcome<{ backendSessionId: string }>>;
   /** Create a backend session holding EXACTLY the requested canonical history
    *  (native fork at the exact predecessor). Returns the backend child id.
    *  Rejects `history-mismatch` when the read-back child history differs and
    *  `unsupported` when the runtime cannot branch or hydrate exact history —
    *  never approximates with a hidden prompt, summary, or optimistic copy. */
   branchSession?(request: RuntimeBranchRequest): Promise<string>;
+  branchSessionOperation?(
+    request: RuntimeBranchRequest,
+    operationId: string,
+  ): Promise<MutationOutcome<{ backendSessionId: string }>>;
   /** Best-effort discard of an unreferenced backend branch after a failed
    *  canonical publication. Never throws for an unknown session. */
   discardSession?(sessionId: string): Promise<void>;
+  discardSessionOperation?(
+    sessionId: string,
+    operationId: string,
+  ): Promise<MutationOutcome<Record<string, never>>>;
   sessions(): Promise<RuntimeSession[]>;
   history(sessionId: string): Promise<RuntimeSessionMessage[]>;
   startTurn(req: CanonicalTurnRequest): Promise<void>; // events flow via onEvent
+  startTurnOperation?(
+    req: CanonicalTurnRequest,
+    operationId: string,
+  ): Promise<MutationOutcome<{ admissionId?: string }>>;
   /** Live steering of an active turn. Returns false when unsupported/rejected;
    *  callers must fall back to queueing. Optional so old fakes remain valid. */
   steer?(sessionId: string, text: string): Promise<boolean>;
+  steerOperation?(
+    sessionId: string,
+    text: string,
+    operationId: string,
+  ): Promise<MutationOutcome<Record<string, never>>>;
   abort(sessionId: string): Promise<void>;
+  abortOperation?(
+    sessionId: string,
+    operationId: string,
+  ): Promise<MutationOutcome<Record<string, never>>>;
   replyPermission(sessionId: string, requestId: string, reply: "once" | "always" | "reject"): Promise<void>;
+  replyPermissionOperation?(
+    sessionId: string,
+    requestId: string,
+    reply: "once" | "always" | "reject",
+    operationId: string,
+  ): Promise<MutationOutcome<Record<string, never>>>;
   replyQuestion(sessionId: string, requestId: string, answers: JsonObject): Promise<void>;
+  replyQuestionOperation?(
+    sessionId: string,
+    requestId: string,
+    answers: JsonObject,
+    operationId: string,
+  ): Promise<MutationOutcome<Record<string, never>>>;
   replySecret?(sessionId: string, requestId: string, result: SecretResolvedData): Promise<void>;
+  replySecretOperation?(
+    sessionId: string,
+    requestId: string,
+    result: SecretResolvedData,
+    operationId: string,
+  ): Promise<MutationOutcome<Record<string, never>>>;
+  endpoint?(): Promise<RuntimeEndpoint>;
+  protocol?(): Promise<ProtocolAdapter["protocol"]>;
+  reconcile?(
+    binding: RuntimeReconciliationBinding,
+    after?: string,
+  ): Promise<RuntimeSnapshot>;
+  /** Present on runtimes that can preserve semantic upstream identity. When a
+   * consumer subscribes here, identified events are delivered through this
+   * seam instead of the legacy unindexed onEvent path. */
+  onObservation?(cb: (sessionId: string, observation: RuntimeObservation) => void): Disposable;
+  onLifecycle?(cb: (notification: RuntimeLifecycleNotification) => void): Disposable;
   onEvent(cb: (sessionId: string, ev: RuntimeEvent) => void): Disposable;
   dispose(): Promise<void>;
 }

@@ -4,6 +4,11 @@
 // provider.<id>.blacklist) through the adapter's applier so OpenCode stays the
 // source of truth. On first boot the store seeds FROM that config, so
 // visibility already curated in OpenCode shows up in Polyth immediately.
+// Seeding is READ-ONLY (invariant 11): it only calls readConfig and writes the
+// Polyth-side store, never the backend config. Writes go through the applier's
+// applyProviderVisibility, which owns only disabled_providers and each
+// provider's blacklist — unknown provider/model metadata (reasoning,
+// modalities, limits, variants, future fields) is preserved by the applier.
 import { mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import type { ModelDescriptor } from "@polyth/contracts";

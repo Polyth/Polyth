@@ -23,7 +23,13 @@ export interface OpenCodePendingService {
 }
 
 export function createOpenCodePendingService(opts: {
-  restart(): Promise<number>;
+  canRestart?(state?: unknown): Promise<{ safe: true } | { safe: false; reason: string }>;
+  /** One critical section spanning safety, writes, replacement, and
+   * reconciliation. The server admission gate and owned lifecycle generation
+   * installation locks are held for its full lifetime. */
+  withAdmissionBarrier?<T>(action: () => Promise<T>): Promise<T>;
+  captureRestartState?(): Promise<unknown>;
+  restart(state?: unknown): Promise<number>;
 }): OpenCodePendingService {
   const tasks = new Map<string, PendingTask>();
   let applying = false;
@@ -46,14 +52,29 @@ export function createOpenCodePendingService(opts: {
       if (batch.length === 0) return { applied: 0, restarted: 0 };
       applying = true;
       try {
-        for (const task of batch) await task.apply();
-        const restarted = await opts.restart();
-        for (const task of batch) {
-          if (tasks.get(task.id) !== task) continue;
-          tasks.delete(task.id);
-          task.onApplied?.();
-        }
-        return { applied: batch.length, restarted };
+        const apply = async () => {
+          // Capture only after admission, runtime creation, and owned lifecycle
+          // generation installation are fenced. Generation inequality alone
+          // cannot prove whether a successor loaded pre- or post-write config.
+          const restartState = await opts.captureRestartState?.();
+          const safety = await opts.canRestart?.(restartState);
+          if (safety && !safety.safe) {
+            throw Object.assign(new Error(`OpenCode restart deferred: ${safety.reason}`), {
+              code: "restart-deferred",
+            });
+          }
+          for (const task of batch) await task.apply();
+          const restarted = await opts.restart(restartState);
+          for (const task of batch) {
+            if (tasks.get(task.id) !== task) continue;
+            tasks.delete(task.id);
+            task.onApplied?.();
+          }
+          return { applied: batch.length, restarted };
+        };
+        return opts.withAdmissionBarrier
+          ? await opts.withAdmissionBarrier(apply)
+          : await apply();
       } finally {
         applying = false;
       }
@@ -113,6 +134,12 @@ export function createDeferredConfigApplier(
     },
     behaviorPath: () => actual.behaviorPath(),
     configPath: () => actual.configPath(),
+    ...(actual.configTargetId
+      ? { configTargetId: () => actual.configTargetId!() }
+      : {}),
+    ...(actual.configAuthority
+      ? { configAuthority: () => actual.configAuthority!() }
+      : {}),
     readConfig: () => actual.readConfig(),
 
     // Behavior instructions are read for each turn and their revision is

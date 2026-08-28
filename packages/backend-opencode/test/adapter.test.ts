@@ -3,8 +3,10 @@ import http from "node:http";
 import { test } from "node:test";
 import type { ModelMessage, RuntimeEvent } from "@polyth/contracts";
 import {
-  createOpenCodeClient,
-  createOpenCodeRuntimeWithClient,
+  attachRuntimeLifecycle,
+  createBorrowedExternalEndpointLease,
+  createOpenCodeRuntimeFacade,
+  createOpenCodeRuntimeLifecycle,
   flattenModels,
 } from "../src/index.ts";
 import {
@@ -156,7 +158,7 @@ const scriptedSequence = (sessionID: string): ScriptedEvent[] => [
   {
     id: "evt_10",
     type: "session.idle",
-    properties: { sessionID },
+    properties: { sessionID, revision: 123 },
   },
 ];
 
@@ -181,6 +183,14 @@ const startFake = async () => {
       res.end(JSON.stringify(body));
     };
     if (req.method === "GET" && path === "/global/health") return json(200, { healthy: true, version: "fake" });
+    if (req.method === "GET" && path === "/doc") {
+      return json(200, {
+        paths: {
+          "/session/{sessionID}/prompt_async": { post: {} },
+          "/session/{sessionID}/message": { post: {} },
+        },
+      });
+    }
     if (req.method === "GET" && path === "/provider") return json(200, providerBody);
     if (req.method === "GET" && path === "/agent") return json(200, agentsBody);
     if (req.method === "POST" && path === "/session") {
@@ -291,10 +301,32 @@ const waitUntil = async (pred: () => boolean, ms = 2000) => {
   }
 };
 
+const createTestRuntime = async (baseUrl: string, cwd = "/tmp") => {
+  const lease = await createBorrowedExternalEndpointLease({
+    url: baseUrl,
+    location: { directory: cwd },
+    authorityId: `adapter-test:${baseUrl}`,
+  });
+  const lifecycle = await createOpenCodeRuntimeLifecycle({
+    lease,
+    protocol: "legacy",
+    protocolDeadlineMs: 500,
+    startupDeadlineMs: 500,
+    probeDeadlineMs: 100,
+    transport: { queryAttempts: 1 },
+  });
+  const facade = createOpenCodeRuntimeFacade({ cwd, lifecycle });
+  const disposeFacade = facade.dispose.bind(facade);
+  facade.dispose = async () => {
+    await disposeFacade();
+    await lifecycle.dispose();
+  };
+  return attachRuntimeLifecycle(facade, lifecycle);
+};
+
 test("models/agents flatten from verified /provider and /agent shapes", async () => {
   const fake = await startFake();
-  const client = createOpenCodeClient(fake.baseUrl);
-  const runtime = createOpenCodeRuntimeWithClient(client, {});
+  const runtime = await createTestRuntime(fake.baseUrl);
   try {
     const models = await runtime.models();
     assert.equal(models[0]?.providerID, "opencode");
@@ -318,8 +350,7 @@ test("models/agents flatten from verified /provider and /agent shapes", async ()
 
 test("placeholder titles are omitted so OpenCode can generate a semantic title", async () => {
   const fake = await startFake();
-  const client = createOpenCodeClient(fake.baseUrl);
-  const runtime = createOpenCodeRuntimeWithClient(client, {});
+  const runtime = await createTestRuntime(fake.baseUrl);
   try {
     await runtime.ensureSession({
       sessionId: "77a19c0e-8ead-42f7-aa2c-eb31dcbbcf98",
@@ -363,8 +394,7 @@ test("placeholder titles are omitted so OpenCode can generate a semantic title",
 
 test("translates chunks, tools, permission, question; turn started/stopped once", async () => {
   const fake = await startFake();
-  const client = createOpenCodeClient(fake.baseUrl);
-  const runtime = createOpenCodeRuntimeWithClient(client, {});
+  const runtime = await createTestRuntime(fake.baseUrl);
   const events: Array<{ sessionId: string; ev: RuntimeEvent }> = [];
   runtime.onEvent((sessionId, ev) => events.push({ sessionId, ev }));
   try {
@@ -415,8 +445,7 @@ test("translates chunks, tools, permission, question; turn started/stopped once"
 
 test("SSE reconnect dedups by event id", async () => {
   const fake = await startFake();
-  const client = createOpenCodeClient(fake.baseUrl);
-  const runtime = createOpenCodeRuntimeWithClient(client, {});
+  const runtime = await createTestRuntime(fake.baseUrl);
   const events: RuntimeEvent[] = [];
   runtime.onEvent((_s, ev) => events.push(ev));
   try {
@@ -495,8 +524,7 @@ test("flattenModels preserves reported input/output modalities including empty r
 
 test("startTurn maps attachments to file parts; url attachments stay text (F2)", async () => {
   const fake = await startFake();
-  const client = createOpenCodeClient(fake.baseUrl);
-  const runtime = createOpenCodeRuntimeWithClient(client, { cwd: "/workspace/demo" });
+  const runtime = await createTestRuntime(fake.baseUrl, "/workspace/demo");
   try {
     await runtime.ensureSession({ sessionId: "canon-att", projectId: "p", cwd: "/workspace/demo", title: "t" });
     await runtime.startTurn({
@@ -529,8 +557,7 @@ test("startTurn maps attachments to file parts; url attachments stay text (F2)",
 
 test("startTurn forwards a selected thinking variant", async () => {
   const fake = await startFake();
-  const client = createOpenCodeClient(fake.baseUrl);
-  const runtime = createOpenCodeRuntimeWithClient(client, { cwd: "/workspace/demo" });
+  const runtime = await createTestRuntime(fake.baseUrl, "/workspace/demo");
   try {
     await runtime.ensureSession({ sessionId: "canon-think", projectId: "p", cwd: "/workspace/demo", title: "t" });
     await runtime.startTurn({
@@ -576,6 +603,17 @@ const startForkFake = async () => {
       res.writeHead(code, { "content-type": "application/json" });
       res.end(JSON.stringify(body));
     };
+    if (req.method === "GET" && path === "/global/health") {
+      return json(200, { healthy: true, version: "fake" });
+    }
+    if (req.method === "GET" && path === "/doc") {
+      return json(200, {
+        paths: {
+          "/session/{sessionID}/prompt_async": { post: {} },
+          "/session/{sessionID}/message": { post: {} },
+        },
+      });
+    }
     const readBody = (cb: (body: Record<string, unknown>) => void) => {
       let raw = "";
       req.on("data", (c) => (raw += c));
@@ -641,8 +679,7 @@ const asstMsg = (text: string): ModelMessage => ({ role: "assistant", parts: [{ 
 
 test("branchSession forks strictly before the first excluded message and verifies the child", async () => {
   const fake = await startForkFake();
-  const client = createOpenCodeClient(fake.baseUrl);
-  const runtime = createOpenCodeRuntimeWithClient(client, {});
+  const runtime = await createTestRuntime(fake.baseUrl);
   try {
     fake.sessions.set("ses_src", [
       fakeMsg("msg_1", "user", "same"),
@@ -694,10 +731,9 @@ test("branchSession forks strictly before the first excluded message and verifie
   }
 });
 
-test("branchSession mismatch deletes the orphan child and keeps mappings untouched", async () => {
+test("branchSession history mismatches keep mappings untouched", async () => {
   const fake = await startForkFake();
-  const client = createOpenCodeClient(fake.baseUrl);
-  const runtime = createOpenCodeRuntimeWithClient(client, {});
+  const runtime = await createTestRuntime(fake.baseUrl);
   try {
     fake.sessions.set("ses_src", [
       fakeMsg("msg_1", "user", "hello"),
@@ -716,7 +752,9 @@ test("branchSession mismatch deletes the orphan child and keeps mappings untouch
     );
     assert.equal(fake.forkBodies.length, 0, "no fork attempted for an absent prefix");
 
-    // fork succeeds but the read-back child differs → delete + typed error
+    // Fork succeeds but the read-back child differs. The lifecycle facade
+    // must not issue an untracked best-effort delete; canonical orchestration
+    // owns any durable cleanup operation.
     fake.state.breakFork = true;
     await assert.rejects(
       () => runtime.branchSession!({
@@ -724,9 +762,9 @@ test("branchSession mismatch deletes the orphan child and keeps mappings untouch
         target: { projectId: "p", sessionId: "canon-src", cwd: "/tmp" }, // revert-style: same canonical id
         history: [userMsg("hello")],
       }),
-      (err: Error & { code?: string }) => err.code === "history-mismatch",
+      (err: Error & { code?: string }) => err.code === "outcome-unknown",
     );
-    assert.deepEqual(fake.deleted, ["ses_fork_1"]);
+    assert.equal(fake.deleted.length, 0);
     // mapping was NOT swapped: the canonical session still posts to ses_src
     await runtime.startTurn({ sessionId: "canon-src", text: "still original" });
     assert.ok(fake.promptPaths.some((p) => p.includes("ses_src")));

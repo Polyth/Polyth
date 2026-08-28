@@ -1,4 +1,16 @@
-import type { JsonObject, RuntimeEvent, TokenUsage } from "@polyth/contracts";
+import type {
+  CanonicalEventInput,
+  JsonObject,
+  ObservationArtifactKind,
+  ObservationCheckpoint,
+  ObservationIdentity,
+  ObservationIngestionResult,
+  RuntimeEvent,
+  RuntimeLocation,
+  RuntimeSnapshot,
+  TokenUsage,
+} from "@polyth/contracts";
+import type { Store as SessionStore } from "@polyth/session";
 
 export interface OcEvent {
   id?: string;
@@ -69,7 +81,7 @@ const tokensOf = (info: Record<string, unknown> | undefined): TokenUsage | undef
 
 export interface TranslateState {
   userMessageIds: Set<string>;
-  toolCalls: Map<string, "pending" | "running">;
+  toolCalls: Map<string, "pending" | "running" | "completed" | "error">;
   partText: Map<string, string>;
   partReasoning: Map<string, string>;
   // UX-MSG-ACTIONS: one-time part classification. A part is text OR reasoning
@@ -365,11 +377,12 @@ export const translateOcEvent = (ev: OcEvent, state: TranslateState): RuntimeEve
           out.push({ type: "tool/call", callId, tool, input, status: "running" });
         }
       }
-      if (status === "completed") {
+      if (status === "completed" && previousToolStatus !== "completed" && previousToolStatus !== "error") {
         if (!state.toolCalls.has(callId)) {
           state.toolCalls.set(callId, "running");
           out.push({ type: "tool/call", callId, tool, input, status: "running" });
         }
+        state.toolCalls.set(callId, "completed");
         out.push({
           type: "tool/result",
           callId,
@@ -380,11 +393,12 @@ export const translateOcEvent = (ev: OcEvent, state: TranslateState): RuntimeEve
           input, // may be richer than the call-time input (opencode fills it late)
         });
       }
-      if (status === "error") {
+      if (status === "error" && previousToolStatus !== "completed" && previousToolStatus !== "error") {
         if (!state.toolCalls.has(callId)) {
           state.toolCalls.set(callId, "running");
           out.push({ type: "tool/call", callId, tool, input, status: "running" });
         }
+        state.toolCalls.set(callId, "error");
         out.push({
           type: "tool/error",
           callId,
@@ -465,16 +479,28 @@ export const flushAssistantOnIdle = (state: TranslateState): RuntimeEvent[] => {
   return out;
 };
 
-export const isIdleEvent = (ev: OcEvent): boolean => {
-  if (ev.type === "session.idle") return true;
-  if (ev.type === "session.status") {
-    const status = ev.properties?.status;
-    if (status === "idle") return true;
-    if (status && typeof status === "object" && (status as Record<string, unknown>).type === "idle") {
-      return true;
-    }
+export const terminalStateEvidenceOf = (
+  ev: OcEvent,
+): (ComparableRuntimeRevision & {
+  state: "idle" | "failed" | "interrupted";
+}) | undefined => {
+  const properties = ev.properties ?? {};
+  const status = ev.type === "session.idle"
+    ? "idle"
+    : ev.type === "session.error"
+      ? "failed"
+      : ev.type === "session.status"
+        ? statusValue(properties.status)
+        : "";
+  if (status !== "idle" && status !== "failed" && status !== "interrupted") {
+    return undefined;
   }
-  return false;
+  const comparable = comparableStatusRevision(
+    properties,
+    asRecord(properties.status),
+    asRecord(properties.error),
+  );
+  return comparable ? { state: status, ...comparable } : undefined;
 };
 
 export const errorMessageOf = (ev: OcEvent): string | undefined => {
@@ -484,4 +510,580 @@ export const errorMessageOf = (ev: OcEvent): string | undefined => {
   if (typeof data?.message === "string") return data.message;
   if (typeof err?.message === "string") return err.message;
   return "session error";
+};
+
+// ------------------------------------------------ semantic observation ingestion
+
+export type ObservationChannel = "sse" | "pull";
+
+export interface ObservationBinding {
+  authorityId: string;
+  generation: number;
+  location: RuntimeLocation;
+  backendSessionId: string;
+  reconciliationOrdinal: number;
+}
+
+export interface NormalizeOcObservationInput {
+  data: unknown;
+  channel: ObservationChannel;
+  observed: ObservationBinding;
+  current: ObservationBinding;
+  state?: TranslateState;
+  checkpoint?: ObservationCheckpoint;
+  cursorAfter?: string;
+}
+
+export interface NormalizedOcObservation {
+  channel: ObservationChannel;
+  entityKey: string;
+  identity: ObservationIdentity;
+  reconciliationOrdinal: number;
+  events: RuntimeEvent[];
+  checkpoint?: {
+    stateRank?: number;
+    value: JsonObject;
+  };
+  cursorAfter?: string;
+  uncertainty?: {
+    code: "divergent-content" | "terminal-payload-changed";
+    message: string;
+  };
+}
+
+export type OcObservationNormalization =
+  | { kind: "accepted"; observation: NormalizedOcObservation }
+  | { kind: "stale" }
+  | {
+      kind: "suppressed";
+      code: "binding-missing" | "unidentified-recovery";
+      message: string;
+    };
+
+const sameLocation = (left: RuntimeLocation, right: RuntimeLocation): boolean =>
+  left.directory === right.directory
+  && (left.workspace ?? "") === (right.workspace ?? "");
+
+/** Fences are evaluated before event parsing or translation mutates state. */
+export const isCurrentObservation = (
+  observed: ObservationBinding,
+  current: ObservationBinding,
+): boolean =>
+  observed.authorityId === current.authorityId
+  && observed.generation === current.generation
+  && observed.backendSessionId === current.backendSessionId
+  && observed.reconciliationOrdinal === current.reconciliationOrdinal
+  && sameLocation(observed.location, current.location);
+
+export const isCurrentSnapshot = (
+  snapshot: RuntimeSnapshot,
+  current: ObservationBinding,
+): boolean =>
+  snapshot.authorityId === current.authorityId
+  && snapshot.generation === current.generation
+  && snapshot.backendSessionId === current.backendSessionId
+  && snapshot.reconciliationOrdinal === current.reconciliationOrdinal
+  && sameLocation(snapshot.location, current.location);
+
+/**
+ * Absence is usable only with a complete domain and a comparable, newer
+ * watermark. Opaque/unversioned watermarks deliberately require a comparator.
+ */
+export const snapshotAbsenceIsAuthoritative = (
+  snapshot: RuntimeSnapshot,
+  domain: "events" | "permissions" | "questions",
+  priorWatermark: string | undefined,
+  compareWatermarks?: (next: string, prior: string) => number,
+): boolean => {
+  if (snapshot.completeness[domain] !== "complete") return false;
+  const nextWatermark = snapshot.state.watermark;
+  if (!nextWatermark || !priorWatermark || !compareWatermarks) return false;
+  return compareWatermarks(nextWatermark, priorWatermark) > 0;
+};
+
+const valueRevision = (value: unknown): string | undefined => {
+  if (typeof value === "string" && value) return value;
+  if (typeof value === "number" && Number.isFinite(value)) return String(value);
+  return undefined;
+};
+
+export interface ComparableRuntimeRevision {
+  watermark: string;
+  comparison: {
+    domain: string;
+    order: number;
+  };
+}
+
+const orderedRevisionValue = (
+  value: unknown,
+): { watermark: string; order: number } | undefined => {
+  if (typeof value === "number" && Number.isSafeInteger(value)) {
+    return { watermark: String(value), order: value };
+  }
+  if (typeof value !== "string" || !/^(?:0|[1-9]\d*)$/.test(value)) return undefined;
+  const numeric = Number(value);
+  return Number.isSafeInteger(numeric)
+    ? { watermark: value, order: numeric }
+    : undefined;
+};
+
+/** Legacy status revisions are comparable only inside the same explicitly
+ * named field. Opaque or prefixed IDs are identity, not an ordering proof. */
+export const comparableStatusRevision = (
+  ...values: Array<Record<string, unknown> | undefined>
+): ComparableRuntimeRevision | undefined => {
+  for (const value of values) {
+    if (!value) continue;
+    for (const key of ["revision", "version", "seq", "sequence", "updatedAt"]) {
+      const ordered = orderedRevisionValue(value[key]);
+      if (!ordered) continue;
+      return {
+        watermark: ordered.watermark,
+        comparison: {
+          domain: `legacy-status:${key}`,
+          order: ordered.order,
+        },
+      };
+    }
+  }
+  return undefined;
+};
+
+const explicitRevision = (...values: Array<Record<string, unknown> | undefined>): string | undefined => {
+  for (const value of values) {
+    if (!value) continue;
+    for (const key of ["revision", "version", "seq", "sequence"]) {
+      const revision = valueRevision(value[key]);
+      if (revision) return revision;
+    }
+    const durable = asRecord(value.durable);
+    if (durable) {
+      const version = valueRevision(durable.version);
+      const seq = valueRevision(durable.seq);
+      if (version || seq) return `durable:${version ?? "?"}:${seq ?? "?"}`;
+    }
+  }
+  return undefined;
+};
+
+interface SemanticIdentity {
+  artifactKind: ObservationArtifactKind;
+  entityId: string;
+  revision: string;
+  stateRank?: number;
+  checkpoint?: JsonObject;
+}
+
+const statusValue = (value: unknown): string => {
+  if (typeof value === "string") return value;
+  return typeof asRecord(value)?.type === "string"
+    ? String(asRecord(value)?.type)
+    : "unknown";
+};
+
+const semanticIdentityOf = (ev: OcEvent): SemanticIdentity | undefined => {
+  const properties = ev.properties ?? {};
+  const info = asRecord(properties.info);
+  const part = asRecord(properties.part);
+  const directRevision = explicitRevision(
+    ev as unknown as Record<string, unknown>,
+    properties,
+    info,
+    part,
+  );
+
+  if (ev.type === "message.updated") {
+    if (typeof info?.id !== "string" || !info.id) return undefined;
+    const completed = asRecord(info.time)?.completed;
+    const revision = directRevision
+      ?? (typeof completed === "number" ? `completed:${completed}` : "snapshot");
+    return {
+      artifactKind: "message",
+      entityId: info.id,
+      revision,
+      checkpoint: {
+        role: typeof info.role === "string" ? info.role : "unknown",
+        completed: typeof completed === "number",
+      },
+    };
+  }
+
+  if (ev.type === "message.part.updated") {
+    if (typeof part?.id !== "string" || !part.id) return undefined;
+    const type = typeof part.type === "string" ? part.type : "unknown";
+    if (type === "tool") {
+      const toolState = asRecord(part.state);
+      const status = typeof toolState?.status === "string" ? toolState.status : "unknown";
+      const ranks: Record<string, number> = {
+        pending: 0,
+        running: 1,
+        completed: 2,
+        error: 2,
+      };
+      const callId = typeof part.callID === "string" && part.callID ? part.callID : part.id;
+      return {
+        artifactKind: "tool",
+        entityId: callId,
+        revision: directRevision ?? `state:${status}`,
+        ...(ranks[status] !== undefined ? { stateRank: ranks[status] } : {}),
+        checkpoint: {
+          status,
+          tool: typeof part.tool === "string" ? part.tool : "tool",
+          input: asJsonObject(toolState?.input),
+          ...(typeof toolState?.output === "string" ? { output: toolState.output } : {}),
+          ...(typeof toolState?.error === "string" ? { error: toolState.error } : {}),
+        },
+      };
+    }
+    const time = asRecord(part.time);
+    const complete = typeof time?.end === "number";
+    const text = typeof part.text === "string" ? part.text : "";
+    return {
+      artifactKind: "part",
+      entityId: part.id,
+      revision: directRevision
+        ?? (complete ? `complete:${String(time?.end)}` : "snapshot"),
+      stateRank: complete ? 2 : 1,
+      checkpoint: { type, text, complete },
+    };
+  }
+
+  if (ev.type === "message.part.delta") {
+    const partId = properties.partID;
+    if (typeof partId !== "string" || !partId || !directRevision) return undefined;
+    return {
+      artifactKind: "part",
+      entityId: partId,
+      revision: directRevision,
+    };
+  }
+
+  if (ev.type === "permission.asked" || ev.type === "permission.updated") {
+    const nested = asRecord(properties.permission);
+    const requestId =
+      typeof properties.id === "string" ? properties.id
+        : typeof properties.permissionID === "string" ? properties.permissionID
+          : typeof nested?.id === "string" ? nested.id
+            : "";
+    if (!requestId) return undefined;
+    return {
+      artifactKind: "permission",
+      entityId: requestId,
+      revision: directRevision ?? "pending",
+      stateRank: 1,
+      checkpoint: { pending: true },
+    };
+  }
+
+  if (ev.type === "question.asked" || ev.type === "question.v2.asked") {
+    const requestId =
+      typeof properties.id === "string" ? properties.id
+        : typeof properties.requestID === "string" ? properties.requestID
+          : "";
+    if (!requestId) return undefined;
+    return {
+      artifactKind: "question",
+      entityId: requestId,
+      revision: directRevision ?? "pending",
+      stateRank: 1,
+      checkpoint: { pending: true },
+    };
+  }
+
+  if (ev.type === "session.status" || ev.type === "session.idle" || ev.type === "session.error") {
+    const sessionId = backendSessionId(ev);
+    if (!sessionId) return undefined;
+    const statusRecord = asRecord(properties.status);
+    const errorRecord = asRecord(properties.error);
+    const rawStatus = ev.type === "session.idle"
+      ? "idle"
+      : ev.type === "session.error"
+        ? "failed"
+        : statusValue(properties.status);
+    const status = rawStatus === "busy" || rawStatus === "running"
+      ? "running"
+      : rawStatus;
+    const comparable = comparableStatusRevision(
+      properties,
+      statusRecord,
+      errorRecord,
+    );
+    const terminal =
+      status === "idle" || status === "failed" || status === "interrupted";
+    return {
+      artifactKind: "status",
+      entityId: sessionId,
+      revision: comparable
+        ? `${comparable.comparison.domain}:${comparable.comparison.order}`
+        : directRevision ?? `state:${status}`,
+      ...(!terminal || comparable
+        ? {
+            checkpoint: {
+              state: status,
+              ...(comparable ? {
+                watermark: comparable.watermark,
+                comparison: comparable.comparison,
+              } : {}),
+            },
+          }
+        : {}),
+    };
+  }
+
+  if (ev.type === "session.updated" || ev.type === "session.compacted") {
+    const sessionId = backendSessionId(ev);
+    if (!sessionId) return undefined;
+    return {
+      artifactKind: "turn",
+      entityId: sessionId,
+      revision: directRevision ?? (ev.type === "session.compacted" ? "compacted" : "snapshot"),
+      checkpoint: { type: ev.type },
+    };
+  }
+
+  return undefined;
+};
+
+const checkpointText = (
+  checkpoint: ObservationCheckpoint | undefined,
+): { type: "text" | "reasoning"; text: string; complete: boolean } | undefined => {
+  const type = checkpoint?.value.type;
+  const text = checkpoint?.value.text;
+  if ((type !== "text" && type !== "reasoning") || typeof text !== "string") return undefined;
+  return {
+    type,
+    text,
+    complete: checkpoint?.value.complete === true,
+  };
+};
+
+const prepareStateFromCheckpoint = (
+  state: TranslateState,
+  ev: OcEvent,
+  checkpoint: ObservationCheckpoint | undefined,
+): OcObservationNormalization | undefined => {
+  const part = asRecord(ev.properties?.part);
+  if (ev.type !== "message.part.updated" || typeof part?.id !== "string") return undefined;
+  const prior = checkpointText(checkpoint);
+  if (!prior) return undefined;
+  const nextText = typeof part.text === "string" ? part.text : "";
+  if (nextText && !nextText.startsWith(prior.text)) {
+    return {
+      kind: "suppressed",
+      code: "unidentified-recovery",
+      message: "recovered part diverges from its durable full-value checkpoint",
+    };
+  }
+  state.partKind.set(part.id, prior.type);
+  const values = prior.type === "reasoning" ? state.partReasoning : state.partText;
+  values.set(part.id, prior.text);
+  if (prior.complete) state.emittedAssistant.add(part.id);
+  return undefined;
+};
+
+const terminalPayloadChanged = (
+  identity: SemanticIdentity,
+  checkpoint: ObservationCheckpoint | undefined,
+): boolean =>
+  identity.artifactKind === "tool"
+  && identity.stateRank === 2
+  && checkpoint?.stateRank === 2
+  && JSON.stringify(identity.checkpoint ?? {}) !== JSON.stringify(checkpoint.value);
+
+/**
+ * Normalize either an SSE envelope or a pull/history reconstruction. Channel
+ * is intentionally absent from entity identity, so both paths claim the same
+ * durable entity/revision.
+ */
+export const normalizeOcObservation = (
+  input: NormalizeOcObservationInput,
+): OcObservationNormalization => {
+  if (!isCurrentObservation(input.observed, input.current)) return { kind: "stale" };
+  const ev = asOcEvent(input.data);
+  if (!ev) {
+    return {
+      kind: "suppressed",
+      code: "unidentified-recovery",
+      message: "observation is not a recognized OpenCode event",
+    };
+  }
+  const eventSessionId = backendSessionId(ev);
+  if (eventSessionId && eventSessionId !== input.observed.backendSessionId) {
+    return {
+      kind: "suppressed",
+      code: "binding-missing",
+      message: "observation belongs to a different backend session",
+    };
+  }
+  const semantic = semanticIdentityOf(ev);
+  if (!semantic) {
+    return {
+      kind: "suppressed",
+      code: "unidentified-recovery",
+      message: "observation has no stable semantic entity and revision",
+    };
+  }
+
+  const state = input.state ?? createTranslateState();
+  const prepared = prepareStateFromCheckpoint(state, ev, input.checkpoint);
+  const divergent = prepared?.kind === "suppressed";
+  const terminalChanged = terminalPayloadChanged(semantic, input.checkpoint);
+  let events: RuntimeEvent[] = [];
+  if (!divergent && !terminalChanged) {
+    const part = asRecord(ev.properties?.part);
+    const messageId = typeof part?.messageID === "string" ? part.messageID : "";
+    const explicitlyUser = ev.properties?.role === "user";
+    if (!explicitlyUser && (!messageId || !state.userMessageIds.has(messageId))) {
+      events = translateOcEvent(ev, state);
+    } else if (ev.type === "message.updated") {
+      translateOcEvent(ev, state);
+    }
+  }
+
+  const identity: ObservationIdentity = {
+    authorityId: input.observed.authorityId,
+    generation: input.observed.generation,
+    location: input.observed.location,
+    backendSessionId: input.observed.backendSessionId,
+    artifactKind: semantic.artifactKind,
+    entityId: semantic.entityId,
+    revision: divergent || terminalChanged
+      ? `${semantic.revision}:uncertainty`
+      : semantic.revision,
+  };
+  return {
+    kind: "accepted",
+    observation: {
+      channel: input.channel,
+      entityKey: semantic.entityId,
+      identity,
+      reconciliationOrdinal: input.observed.reconciliationOrdinal,
+      events,
+      ...(!divergent && !terminalChanged && semantic.checkpoint
+        ? {
+            checkpoint: {
+              ...(semantic.stateRank !== undefined ? { stateRank: semantic.stateRank } : {}),
+              value: semantic.checkpoint,
+            },
+          }
+        : {}),
+      ...(input.cursorAfter ? { cursorAfter: input.cursorAfter } : {}),
+      ...(divergent
+        ? {
+            uncertainty: {
+              code: "divergent-content" as const,
+              message: "recovered content diverges from the durable checkpoint",
+            },
+          }
+        : terminalChanged
+          ? {
+              uncertainty: {
+                code: "terminal-payload-changed" as const,
+                message: "tool payload changed at an already observed terminal rank",
+              },
+            }
+          : {}),
+    },
+  };
+};
+
+const runtimeEventInput = (event: RuntimeEvent): CanonicalEventInput => {
+  const { type, ...data } = event;
+  return {
+    type,
+    data: data as unknown as JsonObject,
+    ...(type === "permission/requested"
+      || type === "question/asked"
+      || type === "turn/started"
+      || type === "turn/stopped"
+      || type === "usage/recorded"
+      || type === "session/compacted"
+      || type === "compaction/part-recorded"
+      ? { ignorable: true }
+      : {}),
+    producerPlugin: "backend-opencode",
+  };
+};
+
+export interface IngestNormalizedObservationInput {
+  store: Pick<SessionStore, "ingestObservation">;
+  sessionId: string;
+  observation: NormalizedOcObservation;
+}
+
+/** Claim, append the complete canonical batch, checkpoint, and cursor through
+ * SessionStore's single ingestion transaction. */
+export const ingestNormalizedObservation = (
+  input: IngestNormalizedObservationInput,
+): Promise<ObservationIngestionResult> => {
+  const observation = input.observation;
+  const events = observation.events.map(runtimeEventInput);
+  if (observation.uncertainty) {
+    events.push({
+      type: "reconciliation/uncertainty-recorded",
+      data: {
+        entityKey: observation.entityKey,
+        code: observation.uncertainty.code,
+        message: observation.uncertainty.message,
+      },
+      ignorable: true,
+      producerPlugin: "backend-opencode",
+    });
+  }
+  return input.store.ingestObservation({
+    sessionId: input.sessionId,
+    identity: observation.identity,
+    reconciliationOrdinal: observation.reconciliationOrdinal,
+    events,
+    ...(observation.checkpoint ? { checkpoint: observation.checkpoint } : {}),
+    ...(observation.cursorAfter
+      ? {
+          cursor: {
+            key: {
+              authorityId: observation.identity.authorityId,
+              location: observation.identity.location,
+              backendSessionId: observation.identity.backendSessionId,
+              channel: observation.channel,
+            },
+            after: observation.cursorAfter,
+          },
+        }
+      : {}),
+  });
+};
+
+export interface NormalizeAndIngestOcObservationInput
+  extends Omit<NormalizeOcObservationInput, "checkpoint"> {
+  store: Pick<SessionStore, "ingestObservation" | "observationCheckpoint">;
+  sessionId: string;
+}
+
+export type OcObservationIngestion =
+  | OcObservationNormalization
+  | { kind: "ingested"; result: ObservationIngestionResult; observation: NormalizedOcObservation };
+
+export const normalizeAndIngestOcObservation = async (
+  input: NormalizeAndIngestOcObservationInput,
+): Promise<OcObservationIngestion> => {
+  if (!isCurrentObservation(input.observed, input.current)) return { kind: "stale" };
+  const ev = asOcEvent(input.data);
+  const semantic = ev ? semanticIdentityOf(ev) : undefined;
+  const checkpoint = semantic
+    ? await input.store.observationCheckpoint({
+        authorityId: input.observed.authorityId,
+        location: input.observed.location,
+        backendSessionId: input.observed.backendSessionId,
+        artifactKind: semantic.artifactKind,
+        entityId: semantic.entityId,
+      })
+    : undefined;
+  const normalized = normalizeOcObservation({ ...input, checkpoint });
+  if (normalized.kind !== "accepted") return normalized;
+  const result = await ingestNormalizedObservation({
+    store: input.store,
+    sessionId: input.sessionId,
+    observation: normalized.observation,
+  });
+  return { kind: "ingested", result, observation: normalized.observation };
 };

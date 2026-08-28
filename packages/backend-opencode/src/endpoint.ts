@@ -1,0 +1,753 @@
+import { spawn, type ChildProcess } from "node:child_process";
+import { createHash, randomUUID } from "node:crypto";
+import {
+  mkdir,
+  readFile,
+  readlink,
+  rename,
+  rm,
+  writeFile,
+} from "node:fs/promises";
+import { createServer as createNetServer } from "node:net";
+import { tmpdir } from "node:os";
+import { dirname, join, resolve } from "node:path";
+import type {
+  BorrowedRuntimeEndpointLease,
+  OwnedRuntimeEndpointLease,
+  RuntimeAuthentication,
+  RuntimeConfigAuthority,
+  RuntimeEndpoint,
+  RuntimeEndpointLease,
+  RuntimeLocation,
+} from "@polyth/contracts";
+import {
+  prepareBrowserToolEnvironment,
+  type OpenCodeBrowserToolConfig,
+} from "./browserTool.ts";
+
+export const LISTEN_RE = /opencode server listening on https?:\/\/[^\s:]+:(\d+)/i;
+const BIND_COLLISION_RE = /EADDRINUSE|address already in use/i;
+
+const sleep = (ms: number): Promise<void> =>
+  new Promise((resolveSleep) => setTimeout(resolveSleep, ms));
+
+const unavailable = (message: string): Error =>
+  Object.assign(new Error(message), { code: "unavailable" });
+
+const fingerprint = (value: unknown): string =>
+  createHash("sha256").update(JSON.stringify(value)).digest("hex");
+
+const normalizedHeaders = (headers: Readonly<Record<string, string>>): Array<[string, string]> =>
+  Object.entries(headers)
+    .map(([name, value]): [string, string] => [name.toLowerCase(), value])
+    .sort(([left], [right]) => left.localeCompare(right));
+
+const environmentCredentialFingerprint = (
+  authentication: RuntimeAuthentication,
+): string => {
+  if (authentication.kind !== "basic-env") return authentication.kind;
+  return fingerprint([
+    authentication.usernameEnv,
+    process.env[authentication.usernameEnv] ?? "",
+    authentication.passwordEnv,
+    process.env[authentication.passwordEnv] ?? "",
+  ]);
+};
+
+export interface ProcessIdentity {
+  startIdentity: string;
+  executable: string;
+  command: string;
+}
+
+export type ProcessIdentityReader = (pid: number) => Promise<ProcessIdentity | undefined>;
+export type ProcessSignaler = (pid: number, signal: NodeJS.Signals | 0) => void;
+
+/** Linux exposes a stable process start tick alongside the executable and
+ * command. If any field cannot be read, the PID is not safe to reap. */
+export const readProcessIdentity: ProcessIdentityReader = async (pid) => {
+  try {
+    const [stat, executable, commandBuffer] = await Promise.all([
+      readFile(`/proc/${pid}/stat`, "utf8"),
+      readlink(`/proc/${pid}/exe`),
+      readFile(`/proc/${pid}/cmdline`),
+    ]);
+    const close = stat.lastIndexOf(")");
+    if (close < 0) return undefined;
+    const fieldsFromState = stat.slice(close + 2).trim().split(/\s+/);
+    const startIdentity = fieldsFromState[19];
+    if (!startIdentity) return undefined;
+    const command = commandBuffer.toString("utf8").replaceAll("\0", " ").trim();
+    if (!command) return undefined;
+    return { startIdentity, executable, command };
+  } catch {
+    return undefined;
+  }
+};
+
+interface PidRecord {
+  version: 1;
+  ownerPid: number;
+  ownerInstanceToken: string;
+  child: {
+    pid: number;
+    startIdentity: string;
+    executable: string;
+    command: string;
+  };
+}
+
+const parsePidRecord = (raw: string): PidRecord | undefined => {
+  try {
+    const value = JSON.parse(raw) as Partial<PidRecord>;
+    const child = value.child;
+    if (
+      value.version !== 1
+      || !Number.isSafeInteger(value.ownerPid)
+      || typeof value.ownerInstanceToken !== "string"
+      || !value.ownerInstanceToken
+      || !child
+      || !Number.isSafeInteger(child.pid)
+      || child.pid <= 0
+      || typeof child.startIdentity !== "string"
+      || !child.startIdentity
+      || typeof child.executable !== "string"
+      || !child.executable
+      || typeof child.command !== "string"
+      || !child.command
+    ) {
+      return undefined;
+    }
+    return value as PidRecord;
+  } catch {
+    // Legacy numeric PID files are deliberately not trusted.
+    return undefined;
+  }
+};
+
+const processIdentityMatches = (
+  expected: PidRecord["child"],
+  actual: ProcessIdentity | undefined,
+): boolean =>
+  actual !== undefined
+  && actual.startIdentity === expected.startIdentity
+  && actual.executable === expected.executable
+  && actual.command === expected.command;
+
+export const pidFileForDirectory = (cwd: string): string => {
+  const key = createHash("sha256").update(resolve(cwd)).digest("hex").slice(0, 24);
+  return join(tmpdir(), "polyth-opencode", `${key}.pid.json`);
+};
+
+interface ReapPidFileOptions {
+  readIdentity: ProcessIdentityReader;
+  signal: ProcessSignaler;
+  graceMs: number;
+}
+
+const activeLocalInstanceTokens = new Set<string>();
+
+/** Reap only the exact process described by a versioned, identity-complete
+ * record. A stale/reused PID is never signalled. */
+const reapPidFile = async (
+  pidFile: string,
+  options: ReapPidFileOptions,
+): Promise<void> => {
+  let record: PidRecord | undefined;
+  try {
+    record = parsePidRecord(await readFile(pidFile, "utf8"));
+  } catch {
+    return;
+  }
+  if (!record) {
+    await rm(pidFile, { force: true });
+    return;
+  }
+
+  const firstIdentity = await options.readIdentity(record.child.pid);
+  if (!processIdentityMatches(record.child, firstIdentity)) {
+    await rm(pidFile, { force: true });
+    return;
+  }
+  if (activeLocalInstanceTokens.has(record.ownerInstanceToken)) {
+    throw Object.assign(
+      new Error(`an owned OpenCode child is already active for ${pidFile}`),
+      { code: "already-active" },
+    );
+  }
+
+  // Reading the private record transfers the orphan's exact instance token to
+  // this lease. Re-check identity before every signal so PID reuse during the
+  // grace period cannot target a replacement process.
+  const adoptedToken = record.ownerInstanceToken;
+  if (!adoptedToken) return;
+  try {
+    options.signal(record.child.pid, "SIGTERM");
+  } catch {
+    await rm(pidFile, { force: true });
+    return;
+  }
+  await sleep(options.graceMs);
+  const identityAfterGrace = await options.readIdentity(record.child.pid);
+  if (processIdentityMatches(record.child, identityAfterGrace)) {
+    try {
+      options.signal(record.child.pid, "SIGKILL");
+    } catch {
+      // It exited after the final identity check.
+    }
+  }
+  await rm(pidFile, { force: true });
+};
+
+const writePidRecord = async (
+  pidFile: string,
+  ownerInstanceToken: string,
+  child: ChildProcess,
+  readIdentity: ProcessIdentityReader,
+): Promise<void> => {
+  if (!child.pid) return;
+  const identity = await readIdentity(child.pid);
+  if (!identity) return;
+  const record: PidRecord = {
+    version: 1,
+    ownerPid: process.pid,
+    ownerInstanceToken,
+    child: { pid: child.pid, ...identity },
+  };
+  await mkdir(dirname(pidFile), { recursive: true });
+  const temporary = `${pidFile}.${process.pid}.${randomUUID()}.tmp`;
+  await writeFile(temporary, JSON.stringify(record), { mode: 0o600 });
+  await rename(temporary, pidFile);
+};
+
+const childExited = (child: ChildProcess): boolean =>
+  child.exitCode !== null || child.signalCode !== null;
+
+const terminateChild = async (
+  child: ChildProcess,
+  gracefulMs: number,
+): Promise<void> => {
+  if (childExited(child)) return;
+  const exited = new Promise<boolean>((resolveExit) => {
+    child.once("exit", () => resolveExit(true));
+  });
+  child.kill("SIGTERM");
+  if (await Promise.race([exited, sleep(gracefulMs).then(() => false)])) return;
+  if (!childExited(child)) child.kill("SIGKILL");
+  await Promise.race([exited, sleep(Math.min(gracefulMs, 1_000))]);
+};
+
+export const pickFreePort = (hostname: string): Promise<number> =>
+  new Promise((resolvePort, rejectPort) => {
+    const server = createNetServer();
+    server.once("error", rejectPort);
+    server.listen(0, hostname, () => {
+      const address = server.address();
+      const port = typeof address === "object" && address ? address.port : 0;
+      server.close(() => {
+        if (port) resolvePort(port);
+        else rejectPort(new Error("no free local port"));
+      });
+    });
+  });
+
+interface StartedOwnedInstance {
+  url: string;
+  instanceIdentity: string;
+  authentication: RuntimeAuthentication;
+  alive(): boolean;
+  stop(): Promise<void>;
+}
+
+interface OwnedLeaseOptions {
+  authorityId?: string;
+  continuity?: "verified" | "generation-only";
+  location: RuntimeLocation;
+  config: RuntimeConfigAuthority;
+  authentication: RuntimeAuthentication;
+  start(instanceToken: string): Promise<StartedOwnedInstance>;
+}
+
+const createOwnedLease = async (
+  options: OwnedLeaseOptions,
+): Promise<OwnedRuntimeEndpointLease> => {
+  const authorityId = options.authorityId ?? `owned:${randomUUID()}`;
+  let current:
+    | {
+        endpoint: RuntimeEndpoint;
+        instance: StartedOwnedInstance;
+        credentialFingerprint: string;
+      }
+    | undefined;
+  let generation = 0;
+  let replacement: Promise<RuntimeEndpoint> | undefined;
+  let disposal: Promise<void> | undefined;
+  let disposed = false;
+
+  const replace = async (): Promise<RuntimeEndpoint> => {
+    if (disposed) throw unavailable("runtime endpoint lease is disposed");
+    const previous = current;
+    current = undefined;
+    if (previous) await previous.instance.stop();
+    const instanceToken = randomUUID();
+    const instance = await options.start(instanceToken);
+    if (disposed) {
+      await instance.stop();
+      throw unavailable("runtime endpoint lease was disposed during startup");
+    }
+    generation += 1;
+    const endpoint: RuntimeEndpoint = {
+      authorityId,
+      continuity: options.continuity ?? "generation-only",
+      generation,
+      url: instance.url,
+      location: { ...options.location },
+      control: { kind: "owned", instanceToken },
+      config: options.config,
+      authentication: instance.authentication,
+    };
+    current = {
+      endpoint,
+      instance,
+      credentialFingerprint: environmentCredentialFingerprint(instance.authentication),
+    };
+    return endpoint;
+  };
+
+  const replaceSingleFlight = (): Promise<RuntimeEndpoint> => {
+    if (replacement) return replacement;
+    replacement = replace().finally(() => {
+      replacement = undefined;
+    });
+    return replacement;
+  };
+
+  await replaceSingleFlight();
+
+  const lease: OwnedRuntimeEndpointLease = {
+    get control() {
+      if (!current) {
+        throw unavailable("owned runtime endpoint has no active instance");
+      }
+      return current.endpoint.control as { kind: "owned"; instanceToken: string };
+    },
+    async endpoint() {
+      if (disposed) throw unavailable("runtime endpoint lease is disposed");
+      if (!current) return replaceSingleFlight();
+      return current.endpoint;
+    },
+    async refresh() {
+      if (disposed) throw unavailable("runtime endpoint lease is disposed");
+      if (!current) return replaceSingleFlight();
+      const credentialsChanged =
+        environmentCredentialFingerprint(current.endpoint.authentication)
+        !== current.credentialFingerprint;
+      if (!current.instance.alive() || credentialsChanged) return replaceSingleFlight();
+      return current.endpoint;
+    },
+    restart() {
+      return replaceSingleFlight();
+    },
+    async dispose() {
+      if (disposal) return disposal;
+      disposed = true;
+      disposal = (async () => {
+        try {
+          await replacement;
+        } catch {
+          // A failed replacement has no live instance to terminate.
+        }
+        const owned = current;
+        current = undefined;
+        if (owned) await owned.instance.stop();
+      })();
+      return disposal;
+    },
+  };
+  return lease;
+};
+
+export interface OwnedLocalEndpointOptions {
+  cwd: string;
+  port?: number;
+  hostname?: string;
+  bin?: string;
+  dataDir?: string;
+  browserTool?: OpenCodeBrowserToolConfig;
+  configTargetId?: string;
+  authorityId?: string;
+  usernameEnv?: string;
+  passwordEnv?: string;
+  listenTimeoutMs?: number;
+  gracefulStopMs?: number;
+  maxBindAttempts?: number;
+  pickPort?: (hostname: string) => Promise<number>;
+  spawn?: typeof spawn;
+  pidFile?: string;
+  readProcessIdentity?: ProcessIdentityReader;
+  signalProcess?: ProcessSignaler;
+  orphanGraceMs?: number;
+}
+
+interface StartedLocalChild {
+  child: ChildProcess;
+  port: number;
+  hostname: string;
+}
+
+const startLocalChildOnce = async (
+  options: OwnedLocalEndpointOptions,
+  instanceToken: string,
+  hostname: string,
+  port: number,
+  pidFile: string,
+  readIdentity: ProcessIdentityReader,
+): Promise<StartedLocalChild> => {
+  let env = { ...process.env };
+  if (options.dataDir) env.OPENCODE_CONFIG_DIR = options.dataDir;
+  if (options.browserTool) {
+    env = await prepareBrowserToolEnvironment(options.browserTool, env);
+  }
+  // The token is not an OpenCode credential. It lets child wrappers and
+  // diagnostics identify the exact Polyth-owned instance.
+  env.POLYTH_OPENCODE_INSTANCE_TOKEN = instanceToken;
+  const spawnProcess = options.spawn ?? spawn;
+  const child = spawnProcess(
+    options.bin ?? "opencode",
+    ["serve", "--hostname", hostname, "--port", String(port)],
+    {
+      cwd: resolve(options.cwd),
+      env,
+      stdio: ["ignore", "pipe", "pipe"],
+    },
+  );
+
+  let buffer = "";
+  let timer: NodeJS.Timeout | undefined;
+  const listenTimeoutMs = options.listenTimeoutMs ?? 20_000;
+  try {
+    const actualPort = await new Promise<number>((resolveListen, rejectListen) => {
+      let settled = false;
+      const finish = (error?: Error, listeningPort?: number) => {
+        if (settled) return;
+        settled = true;
+        if (timer) clearTimeout(timer);
+        child.stdout?.off("data", onChunk);
+        child.stderr?.off("data", onChunk);
+        if (error) rejectListen(error);
+        else resolveListen(listeningPort!);
+      };
+      const onChunk = (chunk: Buffer | string) => {
+        buffer += chunk.toString();
+        if (BIND_COLLISION_RE.test(buffer)) {
+          finish(Object.assign(new Error(`local port ${port} is in use`), { code: "port-in-use" }));
+          return;
+        }
+        const match = buffer.match(LISTEN_RE);
+        if (match) finish(undefined, Number(match[1]));
+      };
+      child.stdout?.on("data", onChunk);
+      child.stderr?.on("data", onChunk);
+      child.once("error", (error) => finish(error));
+      child.once("exit", (code) => {
+        const error = BIND_COLLISION_RE.test(buffer)
+          ? Object.assign(new Error(`local port ${port} is in use`), { code: "port-in-use" })
+          : unavailable(`opencode serve exited ${code}: ${buffer.slice(-400)}`);
+        finish(error);
+      });
+      timer = setTimeout(
+        () => finish(unavailable(`opencode serve listen timeout after ${listenTimeoutMs}ms`)),
+        listenTimeoutMs,
+      );
+    });
+    child.stdout?.resume();
+    child.stderr?.resume();
+    await writePidRecord(pidFile, instanceToken, child, readIdentity);
+    return { child, port: actualPort, hostname };
+  } catch (error) {
+    await terminateChild(child, options.gracefulStopMs ?? 3_000);
+    throw error;
+  }
+};
+
+/** Owned local mode. Bind collisions discard the failed exact child before a
+ * fresh port is selected, so no failed attempt leaks. */
+export const createOwnedLocalEndpointLease = async (
+  options: OwnedLocalEndpointOptions,
+): Promise<OwnedRuntimeEndpointLease> => {
+  const cwd = resolve(options.cwd);
+  const hostname = options.hostname ?? "127.0.0.1";
+  const pidFile = options.pidFile ?? pidFileForDirectory(cwd);
+  const readIdentity = options.readProcessIdentity ?? readProcessIdentity;
+  const signal = options.signalProcess ?? ((pid, processSignal) => process.kill(pid, processSignal));
+  const authentication: RuntimeAuthentication = {
+    kind: "basic-env",
+    usernameEnv: options.usernameEnv ?? "OPENCODE_SERVER_USERNAME",
+    passwordEnv: options.passwordEnv ?? "OPENCODE_SERVER_PASSWORD",
+  };
+  let firstStart = true;
+
+  return createOwnedLease({
+    authorityId: options.authorityId,
+    continuity: "generation-only",
+    location: { directory: cwd },
+    config: options.configTargetId
+      ? { kind: "writable", targetId: options.configTargetId }
+      : { kind: "read-only" },
+    authentication,
+    async start(instanceToken) {
+      if (firstStart) {
+        firstStart = false;
+        await reapPidFile(pidFile, {
+          readIdentity,
+          signal,
+          graceMs: options.orphanGraceMs ?? 250,
+        });
+      }
+      const attempts = Math.max(1, options.maxBindAttempts ?? 4);
+      let lastError: unknown;
+      for (let attempt = 0; attempt < attempts; attempt++) {
+        const port = attempt === 0 && options.port !== undefined
+          ? options.port
+          : await (options.pickPort ?? pickFreePort)(hostname);
+        try {
+          const started = await startLocalChildOnce(
+            { ...options, cwd },
+            instanceToken,
+            hostname,
+            port,
+            pidFile,
+            readIdentity,
+          );
+          let stopped = false;
+          activeLocalInstanceTokens.add(instanceToken);
+          return {
+            url: `http://${started.hostname}:${started.port}`,
+            instanceIdentity: `${instanceToken}:${started.child.pid ?? "unknown"}`,
+            authentication,
+            alive: () => !stopped && !childExited(started.child),
+            async stop() {
+              if (stopped) return;
+              stopped = true;
+              activeLocalInstanceTokens.delete(instanceToken);
+              let shouldRemove = true;
+              try {
+                const record = parsePidRecord(await readFile(pidFile, "utf8"));
+                shouldRemove = record?.ownerInstanceToken === instanceToken;
+              } catch {
+                // Missing record is already clean.
+              }
+              if (shouldRemove) await rm(pidFile, { force: true });
+              await terminateChild(started.child, options.gracefulStopMs ?? 3_000);
+            },
+          };
+        } catch (error) {
+          lastError = error;
+          if ((error as { code?: string }).code !== "port-in-use") throw error;
+        }
+      }
+      throw lastError ?? unavailable("could not bind an OpenCode local endpoint");
+    },
+  });
+};
+
+export interface OwnedSshEndpointOptions {
+  location: RuntimeLocation;
+  start(instanceToken: string): Promise<{
+    url: string;
+    instanceIdentity: string;
+    alive?(): boolean;
+    stop(): Promise<void>;
+  }>;
+  authorityId?: string;
+  authentication?: RuntimeAuthentication;
+}
+
+/** Owned SSH mode controls an exact remote child/forward token but never
+ * grants authority over the local OpenCode config. */
+export const createOwnedSshEndpointLease = async (
+  options: OwnedSshEndpointOptions,
+): Promise<OwnedRuntimeEndpointLease> => {
+  const authentication = options.authentication ?? {
+    kind: "basic-env",
+    usernameEnv: "OPENCODE_SERVER_USERNAME",
+    passwordEnv: "OPENCODE_SERVER_PASSWORD",
+  };
+  return createOwnedLease({
+    authorityId: options.authorityId,
+    continuity: "generation-only",
+    location: options.location,
+    config: { kind: "read-only" },
+    authentication,
+    async start(instanceToken) {
+      const started = await options.start(instanceToken);
+      return {
+        ...started,
+        authentication,
+        alive: started.alive ?? (() => true),
+      };
+    },
+  });
+};
+
+export interface BorrowedServiceDescriptor {
+  url: string;
+  authorityId?: string;
+  continuity?: "verified" | "generation-only";
+  instanceId?: string;
+  headers:
+    | Readonly<Record<string, string>>
+    | (() => Promise<Readonly<Record<string, string>>>);
+}
+
+export interface BorrowedServiceEndpointOptions {
+  location: RuntimeLocation;
+  discover(): Promise<BorrowedServiceDescriptor | undefined>;
+  ensure(): Promise<BorrowedServiceDescriptor>;
+  authorityId?: string;
+}
+
+const resolveDescriptorHeaders = async (
+  descriptor: BorrowedServiceDescriptor,
+): Promise<Record<string, string>> => ({
+  ...(typeof descriptor.headers === "function"
+    ? await descriptor.headers()
+    : descriptor.headers),
+});
+
+/** Borrowed discovered/ensured mode. `ensure` may cause the official service
+ * to exist, but does not grant Polyth a stop/restart/config capability. */
+export const createBorrowedServiceEndpointLease = async (
+  options: BorrowedServiceEndpointOptions,
+): Promise<BorrowedRuntimeEndpointLease> => {
+  const fallbackAuthorityId = options.authorityId ?? `borrowed-service:${randomUUID()}`;
+  let current: RuntimeEndpoint | undefined;
+  let currentFingerprint = "";
+  let generation = 0;
+  let refreshFlight: Promise<RuntimeEndpoint> | undefined;
+  let disposed = false;
+
+  const refreshOnce = async (): Promise<RuntimeEndpoint> => {
+    if (disposed) throw unavailable("runtime endpoint lease is disposed");
+    const descriptor = await options.discover() ?? await options.ensure();
+    const headers = await resolveDescriptorHeaders(descriptor);
+    const authorityId = descriptor.authorityId ?? fallbackAuthorityId;
+    const nextFingerprint = fingerprint([
+      descriptor.url,
+      authorityId,
+      descriptor.instanceId ?? "",
+      normalizedHeaders(headers),
+    ]);
+    if (!current || nextFingerprint !== currentFingerprint) generation += 1;
+    currentFingerprint = nextFingerprint;
+    const generationHeaders = { ...headers };
+    current = {
+      authorityId,
+      continuity: descriptor.continuity ?? "generation-only",
+      generation,
+      url: descriptor.url,
+      location: { ...options.location },
+      control: { kind: "borrowed", source: "shared" },
+      config: { kind: "read-only" },
+      authentication: {
+        kind: "endpoint-headers",
+        async resolve() {
+          return { ...generationHeaders };
+        },
+      },
+    };
+    return current;
+  };
+
+  const refresh = (): Promise<RuntimeEndpoint> => {
+    if (refreshFlight) return refreshFlight;
+    refreshFlight = refreshOnce().finally(() => {
+      refreshFlight = undefined;
+    });
+    return refreshFlight;
+  };
+
+  await refresh();
+  return {
+    control: { kind: "borrowed", source: "shared" },
+    async endpoint() {
+      if (disposed) throw unavailable("runtime endpoint lease is disposed");
+      return current ?? refresh();
+    },
+    refresh,
+    async dispose() {
+      // Deliberately no Service.stop(), config mutation, or process signal.
+      disposed = true;
+      current = undefined;
+    },
+  };
+};
+
+export interface BorrowedExternalEndpointOptions {
+  url: string;
+  location: RuntimeLocation;
+  authorityId?: string;
+  usernameEnv?: string;
+  passwordEnv?: string;
+}
+
+/** Borrowed external mode connects only. Credential values remain in the
+ * referenced environment and are used solely to detect refresh generations. */
+export const createBorrowedExternalEndpointLease = async (
+  options: BorrowedExternalEndpointOptions,
+): Promise<BorrowedRuntimeEndpointLease> => {
+  const authentication: RuntimeAuthentication = {
+    kind: "basic-env",
+    usernameEnv: options.usernameEnv ?? "OPENCODE_SERVER_USERNAME",
+    passwordEnv: options.passwordEnv ?? "OPENCODE_SERVER_PASSWORD",
+  };
+  const authorityId = options.authorityId ?? `external:${randomUUID()}`;
+  let generation = 0;
+  let credentialFingerprint = "";
+  let current: RuntimeEndpoint | undefined;
+  let disposed = false;
+  let refreshFlight: Promise<RuntimeEndpoint> | undefined;
+
+  const refreshOnce = async (): Promise<RuntimeEndpoint> => {
+    if (disposed) throw unavailable("runtime endpoint lease is disposed");
+    const nextCredentials = environmentCredentialFingerprint(authentication);
+    if (!current || nextCredentials !== credentialFingerprint) generation += 1;
+    credentialFingerprint = nextCredentials;
+    current = {
+      authorityId,
+      continuity: "generation-only",
+      generation,
+      url: options.url,
+      location: { ...options.location },
+      control: { kind: "borrowed", source: "external" },
+      config: { kind: "read-only" },
+      authentication,
+    };
+    return current;
+  };
+  const refresh = (): Promise<RuntimeEndpoint> => {
+    if (refreshFlight) return refreshFlight;
+    refreshFlight = refreshOnce().finally(() => {
+      refreshFlight = undefined;
+    });
+    return refreshFlight;
+  };
+  await refresh();
+  return {
+    control: { kind: "borrowed", source: "external" },
+    async endpoint() {
+      if (disposed) throw unavailable("runtime endpoint lease is disposed");
+      return current ?? refresh();
+    },
+    refresh,
+    async dispose() {
+      // Connect-only ownership: detach local references and nothing else.
+      disposed = true;
+      current = undefined;
+    },
+  };
+};
+
+export const isOwnedEndpointLease = (
+  lease: RuntimeEndpointLease,
+): lease is OwnedRuntimeEndpointLease => lease.control.kind === "owned";

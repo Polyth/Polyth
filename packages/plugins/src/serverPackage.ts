@@ -26,6 +26,7 @@ import type {
   SessionProjection,
   SessionService,
 } from "@polyth/contracts";
+import type { RuntimeMutationStore } from "@polyth/session";
 import type { TrustedServerPluginHost } from "./trustedServerEntry.ts";
 
 const err = (code: string, message: string) => Object.assign(new Error(message), { code });
@@ -78,6 +79,8 @@ export interface ServerOneShotOptions {
   model?: ModelRef;
   agent?: string;
   timeoutMs?: number;
+  /** Stable logical task identity for response-loss deduplication. */
+  taskId?: string;
 }
 
 export type AppendEventOptions = Partial<
@@ -139,7 +142,7 @@ export interface ServerPackageHost extends TrustedServerPluginHost {
   sessions: SessionService;
   /** Append-only session event store. Appends here are NOT broadcast; use
    *  `events.append` for the persist-then-broadcast pattern. */
-  store: SessionPersistence;
+  store: SessionPersistence & RuntimeMutationStore;
   broadcast: ServerBroadcast;
   runtimes: ServerRuntimePool;
   services: ServerServiceRegistry;

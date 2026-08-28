@@ -3,31 +3,13 @@ OpenCode 1.18.18 serve API (empirically verified 2026-08-17 against
 `opencode serve --port 4556 --hostname 127.0.0.1` + GET /doc + bundled SDK
 ~/.opencode/node_modules/@opencode-ai/sdk).
 
-Auth: when OPENCODE_SERVER_PASSWORD is set, HTTP Basic user `opencode`.
+Auth: when OPENCODE_SERVER_PASSWORD is set, HTTP Basic uses
+OPENCODE_SERVER_USERNAME (the direct legacy-client compatibility default is `opencode`).
 Listening line: `opencode server listening on http://127.0.0.1:<port>`
 
-Endpoint map (verified):
-  GET  /global/health                         → {healthy:true, version:"1.18.18"}
-  GET  /api/health                            → {healthy:true}
-  GET  /health                                → HTML SPA (not a JSON probe)
-  GET  /provider                              → {all:[{id,name,models:{[id]:{id,name,limit:{context,output},cost:{input,output}}}}], default, connected:string[]}
-  GET  /config/providers                      → {providers:[...], default}
-  GET  /agent                                 → [{name, description?, mode:"primary"|"subagent"|"all", ...}]
-  POST /session  {title?}                     → {id:"ses_...", projectID, directory, title, version, time:{created,updated}, tokens, cost, slug?}
-  GET  /session                               → Session[]
-  POST /session/{id}/message                  {parts:[{type:"text",text}], model?:{providerID,modelID}, agent?}
-  POST /session/{id}/prompt_async             same body; returns immediately (used for startTurn)
-  POST /session/{id}/abort
-  POST /session/{id}/fork
-  POST /session/{id}/permissions/{permissionID}  {response:"once"|"always"|"reject"}
-       permissionID pattern ^per  (SDK + live 400 if not)
-  GET  /question                              pending QuestionRequest[]
-  POST /question/{requestID}/reply            {answers: string[][]}  requestID ^que
-  POST /question/{requestID}/reject           (no body)
-  GET  /event                                 SSE text/event-stream
-  GET  /doc                                   OpenAPI
-
-NOT present: POST /session/{id}/questions/{requestID} (SPA HTML fallback).
+The verified legacy wire shapes live exclusively in `protocolLegacy.ts`.
+Protocol discovery is read-only and lives in `protocol.ts`; V2 remains
+capability-gated.
 
 SSE event names observed live (JSON `data:` objects, field `id` = evt_…; no SSE `id:` lines):
   server.connected
@@ -40,43 +22,51 @@ SSE event names observed live (JSON `data:` objects, field `id` = evt_…; no SS
   plugin.added, catalog.updated, … (ignored)
 */
 
-import { spawn, type ChildProcess } from "node:child_process";
-import { createServer as createNetServer } from "node:net";
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { isAbsolute, join, relative, resolve } from "node:path";
-import { pathToFileURL } from "node:url";
+import { randomUUID } from "node:crypto";
+import { resolve } from "node:path";
 import type {
-  AgentDescriptor,
   AgentRuntime,
-  AttachmentRef,
   CanonicalTurnRequest,
-  CreateSessionInput,
   Disposable,
   JsonObject,
-  ModelDescriptor,
-  ModelMessage,
+  MutationOutcome,
   RuntimeBranchRequest,
-  RuntimeSession,
-  RuntimeSessionMessage,
+  RuntimeEndpoint,
   RuntimeCapabilities,
+  RuntimeEndpointLease,
   RuntimeEvent,
+  RuntimeObservation,
 } from "@polyth/contracts";
-import { createOpenCodeClient, type OpenCodeClient } from "./client.ts";
-import {
-  prepareBrowserToolEnvironment,
-  type OpenCodeBrowserToolConfig,
-} from "./browserTool.ts";
+import type { OpenCodeBrowserToolConfig } from "./browserTool.ts";
 import {
   asOcEvent,
   backendSessionId,
   createTranslateState,
   errorMessageOf,
   flushAssistantOnIdle,
-  isIdleEvent,
+  normalizeOcObservation,
+  terminalStateEvidenceOf,
   translateOcEvent,
   type TranslateState,
 } from "./events.ts";
+import {
+  createOwnedLocalEndpointLease,
+  LISTEN_RE,
+} from "./endpoint.ts";
+import {
+  createRuntimeLifecycle,
+  waitForRuntimeReady,
+  type RuntimeLifecycle,
+  type RuntimeSessionBindingWithProtocol,
+} from "./runtime.ts";
+import {
+  createOpenCodeTransport,
+  type OpenCodeTransportOptions,
+} from "./transport.ts";
+import {
+  createProtocolAdapter,
+  type ProtocolSelection,
+} from "./protocol.ts";
 
 export interface OpenCodeAdapterOptions {
   cwd: string;
@@ -85,10 +75,12 @@ export interface OpenCodeAdapterOptions {
   bin?: string;
   dataDir?: string;
   browserTool?: OpenCodeBrowserToolConfig;
+  protocol?: ProtocolSelection;
+  configTargetId?: string;
+  startupDeadlineMs?: number;
+  probeDeadlineMs?: number;
 }
 
-export { createOpenCodeClient } from "./client.ts";
-export type { OpenCodeClient } from "./client.ts";
 export { createConfigApplier, normalizePluginEntries } from "./config.ts";
 export type {
   BackendConfigApplier,
@@ -112,6 +104,54 @@ export {
   probeRemoteOpenCode,
 } from "./remote.ts";
 export type { RemoteOpenCodeOptions, RemoteOpenCodeProbe } from "./remote.ts";
+export {
+  createBorrowedExternalEndpointLease,
+  createBorrowedServiceEndpointLease,
+  createOwnedLocalEndpointLease,
+  createOwnedSshEndpointLease,
+  isOwnedEndpointLease,
+  LISTEN_RE,
+  pickFreePort,
+  pidFileForDirectory,
+  readProcessIdentity,
+} from "./endpoint.ts";
+export type {
+  BorrowedExternalEndpointOptions,
+  BorrowedServiceDescriptor,
+  BorrowedServiceEndpointOptions,
+  OwnedLocalEndpointOptions,
+  OwnedSshEndpointOptions,
+  ProcessIdentity,
+  ProcessIdentityReader,
+  ProcessSignaler,
+} from "./endpoint.ts";
+export {
+  createRuntimeLifecycle,
+  waitForRuntimeReady,
+} from "./runtime.ts";
+export type {
+  BaseRuntimeLifecycle,
+  BorrowedRuntimeLifecycle,
+  OwnedRuntimeLifecycle,
+  RuntimeBranchBindingWithProtocol,
+  RuntimeLifecycle,
+  RuntimeLifecycleOptions,
+  RuntimeSessionBindingWithProtocol,
+  RuntimeStreamObservation,
+  RuntimeTurnBindingWithProtocol,
+} from "./runtime.ts";
+export { createOpenCodeTransport } from "./transport.ts";
+export type { OpenCodeTransportOptions } from "./transport.ts";
+export {
+  createProtocolAdapter,
+  probeProtocol,
+} from "./protocol.ts";
+export { flattenLegacyModels as flattenModels } from "./protocolLegacy.ts";
+export type {
+  CreateProtocolAdapterOptions,
+  ProtocolProbe,
+  ProtocolSelection,
+} from "./protocol.ts";
 
 const CAPABILITIES: RuntimeCapabilities = {
   streaming: true,
@@ -123,8 +163,6 @@ const CAPABILITIES: RuntimeCapabilities = {
   // steer() reports false on rejection so callers can fall back to queueing
   steering: true,
 };
-
-export const LISTEN_RE = /opencode server listening on https?:\/\/[^\s:]+:(\d+)/i;
 
 type Listener = (sessionId: string, ev: RuntimeEvent) => void;
 
@@ -140,376 +178,156 @@ const mapsFrom = (sessionIdMap?: Map<string, string>): SessionMaps => {
   return { forward, reverse };
 };
 
-interface ProviderList {
-  all?: Array<{
-    id: string;
-    name?: string;
-    models?: Record<
-      string,
-      {
-        id?: string;
-        name?: string;
-        limit?: { context?: number };
-        cost?: { input?: number; output?: number };
-        capabilities?: {
-          attachment?: boolean;
-          toolcall?: boolean;
-          input?: Record<string, boolean>;
-          output?: Record<string, boolean>;
-        };
-        variants?: Record<string, unknown>;
-      }
-    >;
-  }>;
-  /** Provider ids with live credentials. Empty/missing = unknown. */
-  connected?: string[];
-}
-
-interface AgentRow {
-  name: string;
-  description?: string;
-  mode?: string;
-  prompt?: string;
-  model?: { providerID?: string; modelID?: string };
-}
-
-interface CreatedSession {
-  id: string;
-}
-
-interface OpenCodeSession {
-  id: string;
-  title?: string;
-  parentID?: string;
-  time?: { created?: number; updated?: number };
-}
-
-interface OpenCodeMessage {
-  info?: { role?: string; id?: string };
-  parts?: Array<{ type?: string; text?: string }>;
-}
-
-/** OpenCode only generates a semantic title when session creation omits the
- * title. Polyth placeholders are UI state, not user-authored backend titles. */
-const sessionCreateBody = (
-  canonical: Pick<CreateSessionInput, "title"> & { sessionId: string },
-): JsonObject => {
-  const title = canonical.title?.trim() ?? "";
-  const value = title.toLowerCase();
-  const placeholder = !title || title === canonical.sessionId
-    || value === "new session" || value === "untitled" || value === "untitled session"
-    || value === "(untitled)" || value === "(untitled session)"
-    || value === "polyth multirun" || value === "polyth small-model task"
-    || /^new session - \d{4}-\d{2}-\d{2}t/.test(value)
-    || title.startsWith("ses_") || /^[0-9a-f-]{8,}$/i.test(title);
-  return placeholder ? {} : { title };
-};
-
-interface HistoryEntry {
-  role: "user" | "assistant";
-  text: string;
-}
-
-const mergeEntry = (out: HistoryEntry[], role: "user" | "assistant", text: string): void => {
-  if (!text) return;
-  const last = out[out.length - 1];
-  if (last && last.role === role) last.text = `${last.text}\n${text}`;
-  else out.push({ role, text });
-};
-
-/** Normalize canonical model history into the comparable view used to align a
- *  branch request against backend messages: only user/assistant text, merged
- *  across consecutive same-role records so a different part/message split of
- *  the same content still compares equal. Tool records are invisible here. */
-export const normalizeModelHistory = (history: ModelMessage[]): HistoryEntry[] => {
-  const out: HistoryEntry[] = [];
-  for (const message of history) {
-    if (message.role !== "user" && message.role !== "assistant") continue;
-    const text = message.parts
-      .filter((part) => part.type === "text")
-      .map((part) => ("text" in part && typeof part.text === "string" ? part.text : ""))
-      .join("\n")
-      .trim();
-    mergeEntry(out, message.role, text);
-  }
-  return out;
-};
-
-/** Per-backend-message view (id + normalized text) in list order. */
-const backendMessageEntries = (
-  rows: OpenCodeMessage[],
-): Array<{ id: string; role: "user" | "assistant"; text: string }> =>
-  (rows ?? []).flatMap((message) => {
-    const role = message.info?.role;
-    const id = message.info?.id;
-    if ((role !== "user" && role !== "assistant") || typeof id !== "string") return [];
-    const text = (message.parts ?? [])
-      .filter((part) => part.type === "text")
-      .map((part) => part.text ?? "")
-      .join("\n")
-      .trim();
-    return [{ id, role, text }];
-  });
-
-const mergedEntries = (
-  entries: Array<{ role: "user" | "assistant"; text: string }>,
-): HistoryEntry[] => {
-  const out: HistoryEntry[] = [];
-  for (const entry of entries) mergeEntry(out, entry.role, entry.text);
-  return out;
-};
-
-const sameHistory = (a: HistoryEntry[], b: HistoryEntry[]): boolean =>
-  a.length === b.length && a.every((entry, i) => entry.role === b[i]!.role && entry.text === b[i]!.text);
-
-export const flattenModels = (body: ProviderList): ModelDescriptor[] => {
-  const out: ModelDescriptor[] = [];
-  // When `connected` is empty or missing the backend gave us no signal —
-  // treat every provider as connected rather than hiding everything.
-  const connectedIds = new Set(body.connected ?? []);
-  const hasSignal = connectedIds.size > 0;
-  for (const provider of body.all ?? []) {
-    const models = provider.models ?? {};
-    for (const [key, model] of Object.entries(models)) {
-      const cost =
-        model.cost && typeof model.cost.input === "number" && typeof model.cost.output === "number"
-          ? { input: model.cost.input, output: model.cost.output }
-          : undefined;
-      const capabilities: string[] = [];
-      if (model.capabilities?.attachment) capabilities.push("attachment");
-      if (model.capabilities?.toolcall) capabilities.push("toolcall");
-      for (const direction of ["input", "output"] as const) {
-        const reported = model.capabilities?.[direction];
-        if (reported === undefined) continue;
-        const modalities = Object.entries(reported)
-          .filter(([, supported]) => supported)
-          .map(([modality]) => modality)
-          .sort();
-        if (modalities.length === 0) capabilities.push(`${direction}:none`);
-        else for (const modality of modalities) capabilities.push(`${direction}:${modality}`);
-      }
-      out.push({
-        providerID: provider.id,
-        modelID: model.id ?? key,
-        name: model.name ?? key,
-        ...(provider.name ? { providerName: provider.name } : {}),
-        context: model.limit?.context,
-        cost,
-        ...(model.capabilities ? { capabilities } : {}),
-        ...(model.variants && Object.keys(model.variants).length > 0
-          ? { variants: Object.keys(model.variants) }
-          : {}),
-        connected: hasSignal ? connectedIds.has(provider.id) : true,
-      });
-    }
-  }
-  return out;
-};
-
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-export const waitReady = async (client: OpenCodeClient, timeoutMs: number): Promise<void> => {
-  const start = Date.now();
-  let last = "";
-  while (Date.now() - start < timeoutMs) {
-    for (const path of ["/global/health", "/api/health", "/agent", "/provider"]) {
-      try {
-        await client.get(path);
-        return;
-      } catch (err) {
-        last = err instanceof Error ? err.message : String(err);
-      }
-    }
-    await sleep(200);
-  }
-  throw new Error(`opencode serve not ready within ${timeoutMs}ms (${last})`);
-};
-
-/** Ask the OS for a free port: one `opencode serve` per project/worktree means
- *  a fixed port would make the second runtime fail with EADDRINUSE. */
-const freePort = (hostname: string): Promise<number> =>
-  new Promise((resolve, reject) => {
-    const srv = createNetServer();
-    srv.once("error", reject);
-    srv.listen(0, hostname, () => {
-      const addr = srv.address();
-      const port = typeof addr === "object" && addr ? addr.port : 0;
-      srv.close(() => (port ? resolve(port) : reject(new Error("no free port"))));
-    });
-  });
-
-// One `opencode serve` per project cwd. A hard kill of the polyth process
-// (crash, SIGKILL) leaves the child reparented to init — it never dies on
-// its own. Track it in a pidfile keyed by cwd so the next spawn for that
-// cwd reaps its orphaned predecessor instead of leaking forever. The file
-// records `<owner pid> <child pid>`: only a *foreign* owner marks an orphan,
-// so a second spawn can never shoot down a live sibling of this process.
-const pidFileFor = (cwd: string): string => {
-  let h = 0;
-  for (let i = 0; i < cwd.length; i++) h = (h * 31 + cwd.charCodeAt(i)) | 0;
-  const dir = join(tmpdir(), "polyth-opencode");
-  mkdirSync(dir, { recursive: true });
-  return join(dir, `${(h >>> 0).toString(36)}.pid`);
-};
-
-const readPidFile = (pidFile: string): { owner: number; child: number } | undefined => {
-  let raw: string;
-  try {
-    raw = readFileSync(pidFile, "utf8");
-  } catch {
-    return undefined;
-  }
-  const parts = raw.trim().split(/\s+/).map(Number);
-  // Legacy single-pid files predate the owner column; treat them as foreign.
-  const [owner, child] = parts.length >= 2 ? parts : [0, parts[0]];
-  if (!Number.isFinite(child) || !child || child <= 0) return undefined;
-  return { owner: Number.isFinite(owner) ? owner! : 0, child: child! };
-};
-
-const alive = (pid: number): boolean => {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
-};
-
-const reapOrphan = (pidFile: string): void => {
-  const rec = readPidFile(pidFile);
-  if (!rec) {
-    rmSync(pidFile, { force: true });
-    return;
-  }
-  // Our own live child is in use by another runtime for this cwd, not an
-  // orphan — leave it running and let the caller overwrite the file.
-  if (rec.owner === process.pid && alive(rec.child)) return;
-  try {
-    process.kill(rec.child, "SIGKILL");
-  } catch {
-    /* already dead */
-  }
-  rmSync(pidFile, { force: true });
-};
-
-const spawnServe = async (
-  opts: OpenCodeAdapterOptions,
-): Promise<{ child: ChildProcess; port: number; hostname: string }> => {
-  const hostname = opts.hostname ?? "127.0.0.1";
-  const port = opts.port ?? (await freePort(hostname));
-  const pidFile = pidFileFor(opts.cwd);
-  reapOrphan(pidFile);
-  let env = { ...process.env };
-  if (opts.dataDir) env.OPENCODE_CONFIG_DIR = opts.dataDir;
-  if (opts.browserTool) env = await prepareBrowserToolEnvironment(opts.browserTool, env);
-  return new Promise((resolve, reject) => {
-    const bin = opts.bin ?? "opencode";
-    const child = spawn(bin, ["serve", "--hostname", hostname, "--port", String(port)], {
-      cwd: opts.cwd,
-      env,
-      stdio: ["ignore", "pipe", "pipe"],
-    });
-    let settled = false;
-    let buf = "";
-    const timeout = setTimeout(() => {
-      if (settled) return;
-      settled = true;
-      child.kill("SIGKILL");
-      reject(new Error("opencode serve listen timeout"));
-    }, 20_000);
-    const onChunk = (chunk: Buffer) => {
-      buf += chunk.toString();
-      const m = buf.match(LISTEN_RE);
-      if (m && !settled) {
-        settled = true;
-        clearTimeout(timeout);
-        if (child.pid) writeFileSync(pidFile, `${process.pid} ${child.pid}`);
-        resolve({ child, port: Number(m[1]), hostname });
-      }
-    };
-    child.stdout?.on("data", onChunk);
-    child.stderr?.on("data", onChunk);
-    child.on("error", (err) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timeout);
-      reject(err);
-    });
-    child.on("exit", (code) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timeout);
-      reject(new Error(`opencode serve exited ${code}: ${buf.slice(-400)}`));
-    });
-  });
-};
-
-const killChild = async (child: ChildProcess | undefined, cwd?: string): Promise<void> => {
-  // Only drop the pidfile if it still tracks *this* child: a later runtime for
-  // the same cwd may already own it, and that one still needs reaping later.
-  if (cwd) {
-    const pidFile = pidFileFor(cwd);
-    if (!child?.pid || readPidFile(pidFile)?.child === child.pid) rmSync(pidFile, { force: true });
-  }
-  if (!child || child.killed) return;
-  child.kill("SIGTERM");
-  const exited = await Promise.race([
-    new Promise<boolean>((r) => child.once("exit", () => r(true))),
-    sleep(3000).then(() => false),
-  ]);
-  if (!exited) child.kill("SIGKILL");
-};
-
 export interface OpenCodeRuntimeExtras {
-  client?: OpenCodeClient;
+  /** Generation-aware seam shared by production and socket-backed tests. */
+  lifecycle: RuntimeLifecycle;
   sessionIdMap?: Map<string, string>;
   log?: (level: "debug" | "info" | "warn" | "error", msg: string, data?: JsonObject) => void;
   cwd?: string;
+  /** Optional liveness policy for deployments whose endpoint promises
+   * heartbeats. Disabled by default because an idle legacy SSE may be quiet. */
+  sseStallMs?: number;
 }
 
-/** F2: canonical AttachmentRefs → OpenCode message parts.
- *  - file/image/range → `{type:"file", url:"file://…"}`; OpenCode reads the
- *    bytes locally (ranges via verified `?start=&end=` query params).
- *  - url → a plain text part carrying the link. Never a file part: the server
- *    side must not fetch foreign URLs (browser-package origin policy).
- *  Paths outside the session cwd are skipped — defense in depth on top of the
- *  server-side validation. */
-export const attachmentParts = (
-  attachments: AttachmentRef[] | undefined,
-  cwd: string | undefined,
-  log?: (level: "debug" | "info" | "warn" | "error", msg: string, data?: JsonObject) => void,
-): JsonObject[] => {
-  const parts: JsonObject[] = [];
-  for (const a of attachments ?? []) {
-    if (a.kind === "url") {
-      if (!a.url || !/^https?:\/\//i.test(a.url)) continue;
-      parts.push({ type: "text", text: `[Attached link: ${a.name}] ${a.url}` });
-      continue;
+export interface OpenCodeRuntimeLifecycleOptions {
+  lease: RuntimeEndpointLease;
+  protocol?: ProtocolSelection;
+  protocolDeadlineMs?: number;
+  startupDeadlineMs?: number;
+  probeDeadlineMs?: number;
+  transport?: Omit<OpenCodeTransportOptions, "baseUrl" | "headers" | "directory">;
+}
+
+/** Public wiring point: transport and protocol factories are generation-local
+ * and rebuilt together whenever the endpoint lease changes. */
+export const createOpenCodeRuntimeLifecycle = async (
+  options: OpenCodeRuntimeLifecycleOptions,
+): Promise<RuntimeLifecycle> =>
+  await createRuntimeLifecycle({
+    lease: options.lease,
+    createTransport(endpoint, headers) {
+      return createOpenCodeTransport({
+        ...options.transport,
+        baseUrl: endpoint.url,
+        headers,
+        directory: endpoint.location.directory,
+      });
+    },
+    async createProtocol(transport, endpoint) {
+      await waitForRuntimeReady(transport, {
+        startupDeadlineMs: options.startupDeadlineMs ?? 20_000,
+        probeDeadlineMs: options.probeDeadlineMs ?? 1_000,
+      });
+      return await createProtocolAdapter({
+        protocol: options.protocol ?? "auto",
+        transport,
+        endpoint,
+        deadlineMs: options.protocolDeadlineMs,
+      });
+    },
+  });
+
+export interface ManagedOpenCodeRuntime extends AgentRuntime {
+  readonly lifecycle: RuntimeLifecycle;
+}
+
+export const attachRuntimeLifecycle = (
+  facade: AgentRuntime,
+  lifecycle: RuntimeLifecycle,
+): ManagedOpenCodeRuntime => {
+  const lifecycleListeners = new Set<
+    Parameters<NonNullable<AgentRuntime["onLifecycle"]>>[0]
+  >();
+  const subscribeFacadeLifecycle = facade.onLifecycle?.bind(facade);
+  facade.onLifecycle = (callback) => {
+    lifecycleListeners.add(callback);
+    const subscription = subscribeFacadeLifecycle?.(callback);
+    return {
+      dispose() {
+        lifecycleListeners.delete(callback);
+        subscription?.dispose();
+      },
+    };
+  };
+  const emitEndpointReplacement = (
+    endpoint: RuntimeEndpoint,
+    reason: Parameters<RuntimeLifecycle["refresh"]>[0] | "crash" | "config" | "manual",
+  ): void => {
+    for (const callback of lifecycleListeners) {
+      callback({
+        type: "endpoint-replaced",
+        authorityId: endpoint.authorityId,
+        generation: endpoint.generation,
+        reason,
+      });
     }
-    if (!a.path || !cwd) continue;
-    const rootAbs = resolve(cwd);
-    const abs = resolve(rootAbs, a.path);
-    const rel = relative(rootAbs, abs);
-    if (rel.startsWith("..") || isAbsolute(rel)) {
-      log?.("warn", "attachment path escapes session cwd; skipped", { path: a.path });
-      continue;
+  };
+  const refresh = lifecycle.refresh.bind(lifecycle);
+  lifecycle.refresh = async (reason) => {
+    const previous = await lifecycle.endpoint();
+    const endpoint = await refresh(reason);
+    if (
+      endpoint.authorityId !== previous.authorityId
+      || endpoint.generation !== previous.generation
+    ) {
+      emitEndpointReplacement(endpoint, reason);
     }
-    let url = pathToFileURL(abs).href;
-    if (a.kind === "range" && a.range) url += `?start=${a.range[0]}&end=${a.range[1]}`;
-    parts.push({ type: "file", mime: a.mime, filename: a.name, url });
+    return endpoint;
+  };
+  if (lifecycle.control.kind === "owned" && "restart" in lifecycle) {
+    const restart = lifecycle.restart.bind(lifecycle);
+    lifecycle.restart = async (reason) => {
+      const previous = await lifecycle.endpoint();
+      const endpoint = await restart(reason);
+      if (
+        endpoint.authorityId !== previous.authorityId
+        || endpoint.generation !== previous.generation
+      ) {
+        emitEndpointReplacement(endpoint, reason);
+      }
+      return endpoint;
+    };
+    const withConfigRestart = lifecycle.withConfigRestart.bind(lifecycle);
+    lifecycle.withConfigRestart = async (action) =>
+      withConfigRestart(async (restartGeneration) => {
+        let previous = await lifecycle.endpoint();
+        return action(async () => {
+          const endpoint = await restartGeneration();
+          if (
+            endpoint.authorityId !== previous.authorityId
+            || endpoint.generation !== previous.generation
+          ) {
+            emitEndpointReplacement(endpoint, "config");
+          }
+          previous = endpoint;
+          return endpoint;
+        });
+      });
   }
-  return parts;
+  facade.endpoint ??= () => lifecycle.endpoint();
+  facade.protocol ??= () => lifecycle.protocol();
+  facade.reconcile ??= async (binding, after) => {
+    const protocol = await lifecycle.protocol();
+    return lifecycle.reconcile({ ...binding, protocol }, after);
+  };
+  return Object.assign(facade, { lifecycle });
 };
 
-export const createOpenCodeRuntimeWithClient = (
-  client: OpenCodeClient,
-  extras: OpenCodeRuntimeExtras = {},
-  child?: ChildProcess,
+/** Provider-neutral facade over one lifecycle. It owns translation/listeners
+ * only; every wire path is selected by the lifecycle's protocol adapter. */
+export const createOpenCodeRuntimeFacade = (
+  extras: OpenCodeRuntimeExtras,
 ): AgentRuntime => {
+  const lifecycle = extras.lifecycle;
   const maps = mapsFrom(extras.sessionIdMap);
   const listeners = new Set<Listener>();
+  const observationListeners = new Set<(sessionId: string, observation: RuntimeObservation) => void>();
+  const lifecycleListeners = new Set<Parameters<NonNullable<AgentRuntime["onLifecycle"]>>[0]>();
   const translate = new Map<string, TranslateState>();
   const activeTurn = new Map<string, { turnId: string; aborting: boolean }>();
+  const reconciliationOrdinals = new Map<string, number>();
   const seenEventIds = new Set<string>();
   const log = extras.log ?? ((level, msg, data) => {
     if (level === "debug") console.debug(msg, data ?? "");
@@ -522,6 +340,12 @@ export const createOpenCodeRuntimeWithClient = (
     for (const cb of listeners) cb(canonical, ev);
   };
 
+  const emitLifecycle = (
+    notification: Parameters<Parameters<NonNullable<AgentRuntime["onLifecycle"]>>[0]>[0],
+  ): void => {
+    for (const cb of lifecycleListeners) cb(notification);
+  };
+
   const stateFor = (canonical: string): TranslateState => {
     let s = translate.get(canonical);
     if (!s) {
@@ -531,13 +355,20 @@ export const createOpenCodeRuntimeWithClient = (
     return s;
   };
 
-  const handlePayload = (id: string | undefined, data: unknown) => {
+  const handlePayload = (
+    id: string | undefined,
+    data: unknown,
+    streamEndpoint?: Pick<RuntimeEndpoint, "authorityId" | "generation" | "location">,
+  ) => {
     const ev = asOcEvent(data);
     if (!ev) return;
     const eid = id ?? ev.id;
     if (eid) {
-      if (seenEventIds.has(eid)) return;
-      seenEventIds.add(eid);
+      const eventIdentity = streamEndpoint
+        ? `${streamEndpoint.authorityId}\0${streamEndpoint.generation}\0${eid}`
+        : eid;
+      if (seenEventIds.has(eventIdentity)) return;
+      seenEventIds.add(eventIdentity);
       if (seenEventIds.size > 8000) {
         const first = seenEventIds.values().next().value;
         if (first) seenEventIds.delete(first);
@@ -551,9 +382,61 @@ export const createOpenCodeRuntimeWithClient = (
       return;
     }
     const st = stateFor(canonical);
+    const observationEndpoint = streamEndpoint;
+    if (observationEndpoint && observationListeners.size > 0) {
+      const reconciliationOrdinal = reconciliationOrdinals.get(canonical);
+      if (reconciliationOrdinal === undefined) {
+        log("debug", "opencode event arrived before the session reconciliation barrier", {
+          canonical,
+          backendId,
+          type: ev.type ?? "",
+        });
+        return;
+      }
+      const observed = {
+        authorityId: observationEndpoint.authorityId,
+        generation: observationEndpoint.generation,
+        location: observationEndpoint.location,
+        backendSessionId: backendId,
+        reconciliationOrdinal,
+      };
+      const normalized = normalizeOcObservation({
+        data,
+        channel: "sse",
+        observed,
+        current: observed,
+        state: st,
+        ...(id ? { cursorAfter: id } : {}),
+      });
+      if (normalized.kind !== "accepted") return;
+      const events = [...normalized.observation.events];
+      const terminal = terminalStateEvidenceOf(ev);
+      const err = errorMessageOf(ev);
+      if (err && terminal?.state === "failed") {
+        const turn = activeTurn.get(canonical);
+        if (turn) {
+          activeTurn.delete(canonical);
+          events.push({ type: "turn/stopped", reason: "error", error: err });
+        }
+      } else if (terminal?.state === "idle") {
+        events.push(...flushAssistantOnIdle(st));
+        const turn = activeTurn.get(canonical);
+        if (turn) {
+          activeTurn.delete(canonical);
+          events.push({
+            type: "turn/stopped",
+            reason: turn.aborting ? "aborted" : "completed",
+          });
+        }
+      }
+      const observation = { ...normalized.observation, events };
+      for (const cb of observationListeners) cb(canonical, observation);
+      return;
+    }
     for (const runtimeEv of translateOcEvent(ev, st)) emit(canonical, runtimeEv);
+    const terminal = terminalStateEvidenceOf(ev);
     const err = errorMessageOf(ev);
-    if (err) {
+    if (err && terminal?.state === "failed") {
       const turn = activeTurn.get(canonical);
       if (turn) {
         activeTurn.delete(canonical);
@@ -561,7 +444,7 @@ export const createOpenCodeRuntimeWithClient = (
       }
       return;
     }
-    if (isIdleEvent(ev)) {
+    if (terminal?.state === "idle") {
       for (const runtimeEv of flushAssistantOnIdle(st)) emit(canonical, runtimeEv);
       const turn = activeTurn.get(canonical);
       if (turn) {
@@ -578,14 +461,71 @@ export const createOpenCodeRuntimeWithClient = (
     let delay = 500;
     while (!disposed) {
       sseAbort = new AbortController();
+      let stalled = false;
+      let stallTimer: NodeJS.Timeout | undefined;
+      const armStall = (): void => {
+        if (!extras.sseStallMs) return;
+        if (stallTimer) clearTimeout(stallTimer);
+        stallTimer = setTimeout(() => {
+          stalled = true;
+          sseAbort?.abort();
+        }, extras.sseStallMs);
+      };
+      let currentEndpoint: RuntimeEndpoint;
       try {
-        await client.streamEvents(sseAbort.signal, ({ id, data }) => handlePayload(id, data));
+        currentEndpoint = await lifecycle.endpoint();
+      } catch (error) {
+        if (disposed) return;
+        log("debug", "opencode endpoint unavailable for sse", { error: String(error) });
+        await sleep(delay);
+        delay = Math.min(delay * 2, 5000);
+        continue;
+      }
+      const endpointFields = {
+        authorityId: currentEndpoint.authorityId,
+        generation: currentEndpoint.generation,
+      };
+      emitLifecycle({ type: "stream-connected", ...endpointFields });
+      armStall();
+      let reason = "stream ended";
+      try {
+        await lifecycle.streamEvents({
+          signal: sseAbort.signal,
+          onEvent(observation) {
+            armStall();
+            const envelope = observation.value && typeof observation.value === "object"
+              ? observation.value as { id?: unknown; data?: unknown }
+              : { data: observation.value };
+            handlePayload(
+              typeof envelope.id === "string" ? envelope.id : undefined,
+              envelope.data,
+              observation,
+            );
+          },
+        });
       } catch (err) {
         if (disposed) return;
-        if ((err as { name?: string }).name === "AbortError") return;
+        if ((err as { code?: string }).code === "capability-unsupported") {
+          log("debug", "opencode event stream is capability-gated", { error: String(err) });
+          return;
+        }
+        if (
+          (err as { name?: string }).name === "AbortError"
+          && !stalled
+          && sseAbort.signal.aborted
+        ) return;
+        reason = stalled ? "stream liveness deadline elapsed" : String(err);
         log("debug", "opencode sse disconnected", { error: String(err) });
+      } finally {
+        if (stallTimer) clearTimeout(stallTimer);
       }
       if (disposed) return;
+      emitLifecycle({ type: "stream-disconnected", ...endpointFields, reason });
+      try {
+        await lifecycle.refresh("disconnect");
+      } catch (error) {
+        log("debug", "opencode endpoint refresh failed", { error: String(error) });
+      }
       await sleep(delay);
       delay = Math.min(delay * 2, 5000);
     }
@@ -593,82 +533,110 @@ export const createOpenCodeRuntimeWithClient = (
 
   void connectSse();
 
-  const backendOf = (sessionId: string): string => {
-    const id = maps.forward.get(sessionId);
-    if (!id) throw new Error(`no opencode session mapped for ${sessionId}`);
-    return id;
+  const setMapping = (canonicalSessionId: string, backendSessionId: string): void => {
+    const previous = maps.forward.get(canonicalSessionId);
+    if (previous && previous !== backendSessionId) maps.reverse.delete(previous);
+    maps.forward.set(canonicalSessionId, backendSessionId);
+    maps.reverse.set(backendSessionId, canonicalSessionId);
+  };
+
+  const removeMapping = (sessionId: string): string => {
+    const backendSessionId = maps.forward.get(sessionId) ?? sessionId;
+    for (const [canonical, backend] of maps.forward) {
+      if (backend === backendSessionId) {
+        maps.forward.delete(canonical);
+        reconciliationOrdinals.delete(canonical);
+      }
+    }
+    maps.reverse.delete(backendSessionId);
+    reconciliationOrdinals.delete(sessionId);
+    return backendSessionId;
+  };
+
+  const lifecycleBinding = async (
+    canonicalSessionId: string,
+    backendSessionId = maps.forward.get(canonicalSessionId),
+  ): Promise<RuntimeSessionBindingWithProtocol> => {
+    const endpoint = await lifecycle.endpoint();
+    return {
+      canonicalSessionId,
+      ...(backendSessionId ? { backendSessionId } : {}),
+      authorityId: endpoint.authorityId,
+      generation: endpoint.generation,
+      continuity: endpoint.continuity,
+      location: endpoint.location,
+      protocol: await lifecycle.protocol(),
+    };
+  };
+
+  const outcomeValue = <T,>(outcome: MutationOutcome<T>): T => {
+    if (outcome.kind === "confirmed") return outcome.value;
+    throw Object.assign(new Error(outcome.message), {
+      code: outcome.kind === "rejected" ? outcome.code : "outcome-unknown",
+      ...(outcome.kind === "unknown" ? { operationId: outcome.operationId } : {}),
+    });
   };
 
   return {
     capabilities: async () => CAPABILITIES,
-    async models() {
-      const body = await client.get<ProviderList>("/provider");
-      return flattenModels(body);
+    models: () => lifecycle.usingProtocol((protocol) => protocol.models()),
+    agents: () => lifecycle.usingProtocol((protocol) => protocol.agents()),
+    sessions: () => lifecycle.usingProtocol((protocol) => protocol.sessions()),
+    async history(sessionId) {
+      const canonicalSessionId = maps.reverse.get(sessionId) ?? sessionId;
+      const backendSessionId = maps.forward.get(canonicalSessionId) ?? sessionId;
+      const binding = await lifecycleBinding(canonicalSessionId, backendSessionId);
+      return lifecycle.usingProtocol((protocol) => protocol.history(binding));
     },
-    async agents() {
-      const rows = await client.get<AgentRow[]>("/agent");
-      return (rows ?? []).map(
-        (a): AgentDescriptor => ({
-          name: a.name,
-          description: a.description,
-          mode: a.mode === "subagent" || a.mode === "all" || a.mode === "primary" ? a.mode : "primary",
-          ...(a.prompt ? { prompt: a.prompt } : {}),
-          ...(a.model?.providerID && a.model.modelID
-            ? { model: { providerID: a.model.providerID, modelID: a.model.modelID } }
-            : {}),
-        }),
+    async ensureSession(canonical) {
+      const outcome = await lifecycle.ensureSession(
+        await lifecycleBinding(
+          canonical.sessionId,
+          maps.forward.get(canonical.sessionId) ?? canonical.backendSessionId,
+        ),
+        randomUUID(),
+        canonical.title,
       );
+      const value = outcomeValue(outcome);
+      setMapping(canonical.sessionId, value.backendSessionId);
+      return value.backendSessionId;
     },
-    async sessions(): Promise<RuntimeSession[]> {
-      const rows = await client.get<OpenCodeSession[]>("/session");
-      return (rows ?? []).map((session) => ({
-        id: session.id,
-        title: session.title || "Untitled session",
-        ...(session.parentID ? { parentId: session.parentID } : {}),
-        createdAt: session.time?.created ?? Date.now(),
-        updatedAt: session.time?.updated ?? session.time?.created ?? Date.now(),
-      }));
-    },
-    async history(sessionId: string): Promise<RuntimeSessionMessage[]> {
-      const rows = await client.get<OpenCodeMessage[]>(`/session/${sessionId}/message?limit=50`);
-      return (rows ?? []).flatMap((message) => {
-        const role = message.info?.role;
-        if (role !== "user" && role !== "assistant") return [];
-        const text = (message.parts ?? []).filter((part) => part.type === "text").map((part) => part.text ?? "").join("\n").slice(0, 20_000);
-        const reasoning = (message.parts ?? []).filter((part) => part.type === "reasoning").map((part) => part.text ?? "").join("\n").slice(0, 5_000);
-        return text || reasoning ? [{ role, text, ...(reasoning ? { reasoning } : {}) }] : [];
-      });
-    },
-    async ensureSession(canonical: CreateSessionInput & { sessionId: string; cwd: string }) {
-      const existing = maps.forward.get(canonical.sessionId);
-      if (existing) {
-        maps.reverse.set(existing, canonical.sessionId);
-        return existing;
+    async createSessionOperation(canonical, operationId) {
+      const outcome = await lifecycle.ensureSession(
+        await lifecycleBinding(
+          canonical.sessionId,
+          maps.forward.get(canonical.sessionId) ?? canonical.backendSessionId,
+        ),
+        operationId,
+        canonical.title,
+      );
+      if (outcome.kind === "confirmed") {
+        setMapping(canonical.sessionId, outcome.value.backendSessionId);
       }
-      if (canonical.backendSessionId) {
-        maps.forward.set(canonical.sessionId, canonical.backendSessionId);
-        maps.reverse.set(canonical.backendSessionId, canonical.sessionId);
-        return canonical.backendSessionId;
-      }
-      const created = await client.post<CreatedSession>("/session", {
-        ...sessionCreateBody(canonical),
-      });
-      maps.forward.set(canonical.sessionId, created.id);
-      maps.reverse.set(created.id, canonical.sessionId);
-      return created.id;
+      return outcome;
     },
-    async resetSession(canonical: CreateSessionInput & { sessionId: string; cwd: string }) {
-      const previous = maps.forward.get(canonical.sessionId);
-      if (previous) maps.reverse.delete(previous);
-      maps.forward.delete(canonical.sessionId);
+    async resetSession(canonical) {
+      const binding = await lifecycleBinding(canonical.sessionId);
+      const outcome = await lifecycle.resetSession(binding, canonical.title, randomUUID());
+      const value = outcomeValue(outcome);
+      setMapping(canonical.sessionId, value.backendSessionId);
       translate.delete(canonical.sessionId);
       activeTurn.delete(canonical.sessionId);
-      const created = await client.post<CreatedSession>("/session", {
-        ...sessionCreateBody(canonical),
-      });
-      maps.forward.set(canonical.sessionId, created.id);
-      maps.reverse.set(created.id, canonical.sessionId);
-      return created.id;
+      return value.backendSessionId;
+    },
+    async resetSessionOperation(canonical, operationId) {
+      const binding = await lifecycleBinding(canonical.sessionId);
+      const outcome = await lifecycle.resetSession(
+        binding,
+        canonical.title,
+        operationId,
+      );
+      if (outcome.kind === "confirmed") {
+        setMapping(canonical.sessionId, outcome.value.backendSessionId);
+        translate.delete(canonical.sessionId);
+        activeTurn.delete(canonical.sessionId);
+      }
+      return outcome;
     },
     // UX-MSG-ACTIONS: create a backend session holding EXACTLY the requested
     // canonical prefix via OpenCode's native /session/{id}/fork. The fork
@@ -677,138 +645,165 @@ export const createOpenCodeRuntimeWithClient = (
     // after verification — a mismatch or transport failure leaves every
     // existing mapping untouched.
     async branchSession(request: RuntimeBranchRequest): Promise<string> {
-      const wanted = normalizeModelHistory(request.history);
-      if (wanted.length === 0) {
-        // an empty prefix is just a fresh backend session — nothing to fork
-        const created = await client.post<CreatedSession>("/session", {
-          ...sessionCreateBody(request.target),
-        });
-        const prev = maps.forward.get(request.target.sessionId);
-        if (prev && prev !== created.id) maps.reverse.delete(prev);
-        maps.forward.set(request.target.sessionId, created.id);
-        maps.reverse.set(created.id, request.target.sessionId);
-        return created.id;
-      }
-      const sourceBackendId = maps.forward.get(request.sourceSessionId);
-      if (!sourceBackendId) {
-        throw Object.assign(new Error(`no opencode session mapped for ${request.sourceSessionId}`), { code: "not-found" });
-      }
-      const rows = await client.get<OpenCodeMessage[]>(`/session/${sourceBackendId}/message?limit=1000`);
-      const entries = backendMessageEntries(rows ?? []);
-      // Positional alignment: consume backend messages in order until the
-      // merged normalized view equals the requested prefix. Duplicate prompt
-      // text cannot select an earlier occurrence — the walk only ever stops at
-      // the FIRST index whose cumulative history matches the whole prefix.
-      let boundary = -1;
-      const acc: HistoryEntry[] = [];
-      for (let i = 0; i < entries.length; i++) {
-        mergeEntry(acc, entries[i]!.role, entries[i]!.text);
-        if (sameHistory(acc, wanted)) {
-          boundary = i + 1;
-          break;
-        }
-      }
-      if (boundary < 0) {
-        throw Object.assign(
-          new Error("requested history prefix is not present in the backend session"),
-          { code: "history-mismatch" },
-        );
-      }
-      // OpenCode copies messages strictly BEFORE messageID, so the boundary is
-      // the first EXCLUDED message; a full-history branch omits messageID.
-      const body: JsonObject = boundary < entries.length ? { messageID: entries[boundary]!.id } : {};
-      const forked = await client.post<CreatedSession>(`/session/${sourceBackendId}/fork`, body);
-      const childRows = await client.get<OpenCodeMessage[]>(`/session/${forked.id}/message?limit=1000`);
-      const got = mergedEntries(backendMessageEntries(childRows ?? []));
-      if (!sameHistory(got, wanted)) {
-        await client.del(`/session/${forked.id}`).catch(() => {});
-        throw Object.assign(
-          new Error("backend fork produced a different history than requested"),
-          { code: "history-mismatch" },
-        );
-      }
-      const prev = maps.forward.get(request.target.sessionId);
-      if (prev && prev !== forked.id) maps.reverse.delete(prev);
-      maps.forward.set(request.target.sessionId, forked.id);
-      maps.reverse.set(forked.id, request.target.sessionId);
+      const source = await lifecycleBinding(request.sourceSessionId);
+      const target = await lifecycleBinding(request.target.sessionId, undefined);
+      const outcome = await lifecycle.branchSession({
+        source,
+        target,
+        ...(request.target.title ? { title: request.target.title } : {}),
+        history: request.history,
+      }, randomUUID());
+      const value = outcomeValue(outcome);
+      setMapping(request.target.sessionId, value.backendSessionId);
       if (request.target.sessionId === request.sourceSessionId) {
-        // revert replacement of the same canonical session: reset stream state
         translate.delete(request.sourceSessionId);
         activeTurn.delete(request.sourceSessionId);
       }
-      return forked.id;
+      return value.backendSessionId;
+    },
+    async branchSessionOperation(request, operationId) {
+      const source = await lifecycleBinding(request.sourceSessionId);
+      const target = await lifecycleBinding(request.target.sessionId, undefined);
+      const outcome = await lifecycle.branchSession({
+        source,
+        target,
+        ...(request.target.title ? { title: request.target.title } : {}),
+        history: request.history,
+      }, operationId);
+      if (outcome.kind === "confirmed") {
+        setMapping(request.target.sessionId, outcome.value.backendSessionId);
+        if (request.target.sessionId === request.sourceSessionId) {
+          translate.delete(request.sourceSessionId);
+          activeTurn.delete(request.sourceSessionId);
+        }
+      }
+      return outcome;
     },
     async discardSession(sessionId: string): Promise<void> {
-      // best-effort cleanup of an unreferenced branch; accepts the backend id
-      // branchSession returned (or a canonical id that still maps to one)
       const backendId = maps.forward.get(sessionId) ?? sessionId;
-      for (const [canonical, backend] of maps.forward) {
-        if (backend === backendId) maps.forward.delete(canonical);
-      }
-      maps.reverse.delete(backendId);
-      await client.del(`/session/${backendId}`).catch(() => {});
+      const canonicalId = maps.reverse.get(backendId) ?? sessionId;
+      const binding = await lifecycleBinding(canonicalId, backendId);
+      const outcome = await lifecycle.deleteSession(binding, randomUUID());
+      outcomeValue(outcome);
+      removeMapping(sessionId);
+    },
+    async discardSessionOperation(sessionId, operationId) {
+      const backendId = maps.forward.get(sessionId) ?? sessionId;
+      const canonicalId = maps.reverse.get(backendId) ?? sessionId;
+      const binding = await lifecycleBinding(canonicalId, backendId);
+      const outcome = await lifecycle.deleteSession(binding, operationId);
+      if (outcome.kind === "confirmed") removeMapping(sessionId);
+      return outcome;
     },
     async startTurn(req: CanonicalTurnRequest) {
-      const backendId = backendOf(req.sessionId);
+      const outcome = await lifecycle.submit({
+        session: await lifecycleBinding(req.sessionId),
+        text: req.text,
+        ...(req.attachments ? { attachments: req.attachments } : {}),
+        ...(req.model ? { model: req.model } : {}),
+        ...(req.agent ? { agent: req.agent } : {}),
+      }, randomUUID());
+      outcomeValue(outcome);
       if (!activeTurn.has(req.sessionId)) {
         const turnId = `turn_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
         activeTurn.set(req.sessionId, { turnId, aborting: false });
         emit(req.sessionId, { type: "turn/started", turnId });
       }
-      const body: JsonObject = {
-        parts: [
-          { type: "text", text: req.text },
-          ...attachmentParts(req.attachments, extras.cwd, log),
-        ],
-      };
-      if (req.model) {
-        body.model = { providerID: req.model.providerID, modelID: req.model.modelID };
-        if (req.model.variant) body.variant = req.model.variant;
+    },
+    async startTurnOperation(req, operationId) {
+      const outcome = await lifecycle.submit({
+        session: await lifecycleBinding(req.sessionId),
+        text: req.text,
+        ...(req.attachments ? { attachments: req.attachments } : {}),
+        ...(req.model ? { model: req.model } : {}),
+        ...(req.agent ? { agent: req.agent } : {}),
+      }, operationId);
+      if (outcome.kind === "confirmed" && !activeTurn.has(req.sessionId)) {
+        const turnId = `turn_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+        activeTurn.set(req.sessionId, { turnId, aborting: false });
+        emit(req.sessionId, { type: "turn/started", turnId });
       }
-      if (req.agent) body.agent = req.agent;
-      try {
-        await client.post(`/session/${backendId}/prompt_async`, body);
-      } catch {
-        await client.post(`/session/${backendId}/message`, body);
-      }
+      return outcome;
     },
     async steer(sessionId: string, text: string): Promise<boolean> {
       // Only meaningful while a turn is active; posting to an idle session
       // would start a fresh turn instead of steering.
       if (!activeTurn.has(sessionId)) return false;
-      let backendId: string;
-      try {
-        backendId = backendOf(sessionId);
-      } catch {
-        return false;
+      const binding = await lifecycleBinding(sessionId);
+      const outcome = await lifecycle.steer({ session: binding, text }, randomUUID());
+      return outcome.kind === "confirmed";
+    },
+    async steerOperation(sessionId, text, operationId) {
+      if (!activeTurn.has(sessionId)) {
+        return {
+          kind: "rejected",
+          code: "steer-not-admitted",
+          message: "session has no active turn to steer",
+        };
       }
-      try {
-        await client.post(`/session/${backendId}/prompt_async`, {
-          parts: [{ type: "text", text }],
-        });
-        return true;
-      } catch {
-        return false; // backend rejected live steering — caller queues
-      }
+      const binding = await lifecycleBinding(sessionId);
+      return lifecycle.steer({ session: binding, text }, operationId);
     },
     async abort(sessionId: string) {
-      const backendId = backendOf(sessionId);
       const turn = activeTurn.get(sessionId);
+      const binding = await lifecycleBinding(sessionId);
+      const outcome = await lifecycle.abort(binding, randomUUID());
+      outcomeValue(outcome);
       if (turn) turn.aborting = true;
-      await client.post(`/session/${backendId}/abort`);
+    },
+    async abortOperation(sessionId, operationId) {
+      const binding = await lifecycleBinding(sessionId);
+      const outcome = await lifecycle.abort(binding, operationId);
+      if (outcome.kind === "confirmed") {
+        const turn = activeTurn.get(sessionId);
+        if (turn) turn.aborting = true;
+      }
+      return outcome;
     },
     async replyPermission(sessionId: string, requestId: string, reply: "once" | "always" | "reject") {
-      const backendId = backendOf(sessionId);
-      await client.post(`/session/${backendId}/permissions/${requestId}`, { response: reply });
+      const binding = await lifecycleBinding(sessionId);
+      outcomeValue(await lifecycle.replyPermission(binding, requestId, reply, randomUUID()));
+    },
+    async replyPermissionOperation(sessionId, requestId, reply, operationId) {
+      const binding = await lifecycleBinding(sessionId);
+      return lifecycle.replyPermission(binding, requestId, reply, operationId);
     },
     async replyQuestion(sessionId: string, requestId: string, answers: JsonObject) {
-      backendOf(sessionId);
-      if (answers.action === "reject") {
-        await client.post(`/question/${requestId}/reject`);
-        return;
+      const binding = await lifecycleBinding(sessionId);
+      outcomeValue(await lifecycle.replyQuestion(binding, requestId, answers, randomUUID()));
+    },
+    async replyQuestionOperation(sessionId, requestId, answers, operationId) {
+      const binding = await lifecycleBinding(sessionId);
+      return lifecycle.replyQuestion(binding, requestId, answers, operationId);
+    },
+    endpoint: () => lifecycle.endpoint(),
+    protocol: () => lifecycle.protocol(),
+    async reconcile(binding, after) {
+      const ordinal = binding.reconciliationOrdinal;
+      if (!Number.isSafeInteger(ordinal) || (ordinal ?? 0) <= 0) {
+        throw Object.assign(
+          new Error("runtime reconciliation requires a positive request ordinal"),
+          { code: "invalid-input" },
+        );
       }
-      const list = Array.isArray(answers.answers) ? answers.answers : [answers];
-      await client.post(`/question/${requestId}/reply`, { answers: list });
+      const prior = reconciliationOrdinals.get(binding.canonicalSessionId);
+      if (prior !== undefined && ordinal! < prior) {
+        throw Object.assign(
+          new Error("runtime reconciliation request ordinal is stale"),
+          { code: "stale-evidence" },
+        );
+      }
+      reconciliationOrdinals.set(binding.canonicalSessionId, ordinal!);
+      const protocol = await lifecycle.protocol();
+      return lifecycle.reconcile({ ...binding, protocol }, after);
+    },
+    onObservation(cb) {
+      observationListeners.add(cb);
+      return { dispose: () => { observationListeners.delete(cb); } };
+    },
+    onLifecycle(cb) {
+      lifecycleListeners.add(cb);
+      return { dispose: () => { lifecycleListeners.delete(cb); } };
     },
     onEvent(cb: Listener): Disposable {
       listeners.add(cb);
@@ -817,24 +812,47 @@ export const createOpenCodeRuntimeWithClient = (
     async dispose() {
       disposed = true;
       sseAbort?.abort();
-      await killChild(child, extras.cwd);
+      reconciliationOrdinals.clear();
     },
   };
 };
 
 export const createOpenCodeRuntime = async (
-  opts: OpenCodeAdapterOptions & OpenCodeRuntimeExtras,
+  opts: OpenCodeAdapterOptions & Omit<OpenCodeRuntimeExtras, "lifecycle">,
 ): Promise<AgentRuntime> => {
-  if (opts.client) {
-    return createOpenCodeRuntimeWithClient(opts.client, opts);
-  }
-  const { child, port, hostname } = await spawnServe(opts);
-  const client = createOpenCodeClient(`http://${hostname}:${port}`, { directory: opts.cwd });
+  const lease = await createOwnedLocalEndpointLease({
+    cwd: opts.cwd,
+    port: opts.port,
+    hostname: opts.hostname,
+    bin: opts.bin,
+    dataDir: opts.dataDir,
+    browserTool: opts.browserTool,
+    configTargetId: opts.configTargetId
+      ?? (opts.dataDir ? `opencode-config:${resolve(opts.dataDir)}` : undefined),
+  });
+  let lifecycle: RuntimeLifecycle;
   try {
-    await waitReady(client, 20_000);
+    lifecycle = await createOpenCodeRuntimeLifecycle({
+      lease,
+      protocol: opts.protocol,
+      startupDeadlineMs: opts.startupDeadlineMs,
+      probeDeadlineMs: opts.probeDeadlineMs,
+    });
   } catch (err) {
-    await killChild(child, opts.cwd);
+    await lease.dispose();
     throw err;
   }
-  return createOpenCodeRuntimeWithClient(client, opts, child);
+  const facade = createOpenCodeRuntimeFacade({
+    ...opts,
+    lifecycle,
+  });
+  const disposeFacade = facade.dispose.bind(facade);
+  let disposed = false;
+  facade.dispose = async () => {
+    if (disposed) return;
+    disposed = true;
+    await disposeFacade();
+    await lifecycle.dispose();
+  };
+  return attachRuntimeLifecycle(facade, lifecycle);
 };
