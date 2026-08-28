@@ -11,6 +11,7 @@ import type {
 } from "@polyth/contracts";
 import { createStore } from "@polyth/session";
 import {
+  admitTranslateTurn,
   claimTerminalStateEvidence,
   createTranslateState,
   isCurrentSnapshot,
@@ -400,6 +401,7 @@ test("OC-REAL-073: each durable assistant completion anchors one revision-less i
 
   try {
     observed = await persistObservationBinding(store, "canonical-a", observed);
+    admitTranslateTurn(state, "turn-1");
 
     const firstCompletion = await normalizeAndIngestOcObservation({
       store,
@@ -426,6 +428,7 @@ test("OC-REAL-073: each durable assistant completion anchors one revision-less i
     assert.equal(claimTerminalStateEvidence(idle, state), undefined);
     assert.equal((await ingestIdle(duplicateIdle)).kind, "duplicate");
 
+    admitTranslateTurn(state, "turn-2");
     const secondCompletion = await normalizeAndIngestOcObservation({
       store,
       sessionId: "canonical-a",

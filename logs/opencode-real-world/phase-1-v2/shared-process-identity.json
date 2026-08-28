@@ -1,9 +1,0 @@
-{
-  "capturedAt": "2026-08-28T03:26:20.281Z",
-  "pid": 4812,
-  "identity": {
-    "startIdentity": "69841",
-    "executable": "/home/ubuntu/.opencode/bin/opencode",
-    "command": "/home/ubuntu/.local/bin/opencode serve --pure --print-logs --log-level DEBUG --hostname 127.0.0.1 --port 45126"
-  }
-}

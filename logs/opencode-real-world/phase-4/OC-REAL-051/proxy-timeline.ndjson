@@ -1,3 +1,0 @@
-{"ts":"2026-08-28T06:29:22.158Z","event":"proxy-listening","proxyPort":42259,"realPort":4096,"wrapperPid":62030,"childPid":62038}
-{"ts":"2026-08-28T06:29:24.710Z","event":"fault-kill-real-child","pid":62038,"why":"swallow-kill POST /session/ses_fb8f0f03effeRtEILwfpIGzCBx/prompt_async?directory=%2Ftmp%2Focreal%2Fphase-4%2FOC-REAL-051%2Frun-mtckn2qq%2Fproject"}
-{"ts":"2026-08-28T06:29:24.734Z","event":"real-child-exit","pid":62038,"code":null,"signal":"SIGKILL"}

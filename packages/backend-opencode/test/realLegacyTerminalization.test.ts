@@ -1,23 +1,22 @@
-// Regression tests for OC-REAL-020 / OC-REAL-023.
-// See docs/opencode-hardening/FAILURE-REPORT-LEGACY-TERMINALIZATION.md.
-//
-// Real OpenCode 1.18.18 legacy payloads carry NO comparable revision field
-// (revision/version/seq/sequence/updatedAt). The payload literals below were
-// captured from a live `opencode serve` wire
-// (artifacts/opencode-real-world/phase-1-legacy/OC-REAL-020/completion.json).
+// OpenCode 1.18.18 legacy terminal payloads carry no comparable revision.
 import { test } from "node:test";
 import assert from "node:assert";
 import type { OpenCodeTransport, RuntimeEndpoint } from "@polyth/contracts";
-import { terminalStateEvidenceOf } from "../src/events.ts";
+import {
+  admitTranslateTurn,
+  claimTerminalStateEvidence,
+  createTranslateState,
+  normalizeOcObservation,
+  terminalStateEvidenceOf,
+  translateOcEvent,
+} from "../src/events.ts";
 import { createLegacyProtocolAdapter } from "../src/protocolLegacy.ts";
 
-// Exact live shape: session.idle carries only the session id.
 const REAL_SESSION_IDLE = {
   type: "session.idle",
   properties: { sessionID: "ses_fb92xxxxxxxxxxxxxxxxxxxxxx" },
 } as const;
 
-// Exact live shape: session.error carries name/data but no revision.
 const REAL_SESSION_ERROR = {
   type: "session.error",
   properties: {
@@ -25,6 +24,24 @@ const REAL_SESSION_ERROR = {
     error: { name: "APIError", data: { message: "API key not valid." } },
   },
 } as const;
+
+const assistantCompletion = (
+  state: ReturnType<typeof createTranslateState>,
+  messageId: string,
+  completed: number,
+): void => {
+  translateOcEvent({
+    type: "message.updated",
+    properties: {
+      sessionID: REAL_SESSION_IDLE.properties.sessionID,
+      info: {
+        id: messageId,
+        role: "assistant",
+        time: { created: completed - 10, completed },
+      },
+    },
+  }, state);
+};
 
 test("OC-REAL-020: real 1.18.18 session.idle (no revision) must yield terminal evidence", () => {
   const evidence = terminalStateEvidenceOf(REAL_SESSION_IDLE as never);
@@ -41,6 +58,59 @@ test("OC-REAL-021: real 1.18.18 session.error (no revision) must yield terminal 
     evidence && evidence.state === "failed",
     "real legacy session.error has no revision field, so failed turns are never terminalized locally",
   );
+});
+
+test("duplicate idle cannot terminate a later admitted turn", () => {
+  const state = createTranslateState();
+  admitTranslateTurn(state, "turn-1");
+  assistantCompletion(state, "assistant-1", 101);
+  assert.deepEqual(claimTerminalStateEvidence(REAL_SESSION_IDLE as never, state), {
+    state: "idle",
+  });
+
+  admitTranslateTurn(state, "turn-2");
+  assert.equal(claimTerminalStateEvidence(REAL_SESSION_IDLE as never, state), undefined);
+});
+
+test("old idle after reconnect has no admitted turn to terminate", () => {
+  const state = createTranslateState();
+  assistantCompletion(state, "assistant-before-reconnect", 101);
+  assert.equal(claimTerminalStateEvidence(REAL_SESSION_IDLE as never, state), undefined);
+  const binding = {
+    authorityId: "legacy-authority",
+    generation: 1,
+    location: { directory: "/project" },
+    backendSessionId: REAL_SESSION_IDLE.properties.sessionID,
+    reconciliationOrdinal: 1,
+  };
+  const normalized = normalizeOcObservation({
+    data: REAL_SESSION_IDLE,
+    channel: "sse",
+    observed: binding,
+    current: binding,
+    state,
+  });
+  assert.equal(normalized.kind, "accepted");
+  if (normalized.kind !== "accepted") assert.fail("old idle was not normalized");
+  assert.equal(normalized.observation.checkpoint, undefined);
+});
+
+test("assistant completion from a previous turn cannot terminate a new submit", () => {
+  const state = createTranslateState();
+  admitTranslateTurn(state, "turn-1");
+  assistantCompletion(state, "assistant-1", 101);
+
+  admitTranslateTurn(state, "turn-2");
+  assert.equal(claimTerminalStateEvidence(REAL_SESSION_IDLE as never, state), undefined);
+});
+
+test("revision-less error is consumed once by its admitted turn", () => {
+  const state = createTranslateState();
+  admitTranslateTurn(state, "turn-1");
+  assert.deepEqual(claimTerminalStateEvidence(REAL_SESSION_ERROR as never, state), {
+    state: "failed",
+  });
+  assert.equal(claimTerminalStateEvidence(REAL_SESSION_ERROR as never, state), undefined);
 });
 
 test("OC-REAL-023: status absence terminalizes only with durable assistant completion", async () => {
@@ -106,15 +176,50 @@ test("OC-REAL-023: status absence terminalizes only with durable assistant compl
       time: { start: 1787894839719, end: 1787894839746 },
     }],
   }];
-  assert.deepEqual(
-    (await adapter.reconcile({ ...binding, reconciliationOrdinal: 2 })).state,
-    {
-      value: "idle",
-      watermark: "1787894839755",
-      comparison: {
-        domain: "legacy-history:assistant-completed",
-        order: 1787894839755,
-      },
+  const pulledState = (await adapter.reconcile({
+    ...binding,
+    reconciliationOrdinal: 2,
+  })).state;
+  assert.deepEqual(pulledState, {
+    value: "idle",
+    watermark: "1787894839755",
+    comparison: {
+      domain: "legacy-history:assistant-completed",
+      order: 1787894839755,
     },
+  });
+
+  const state = createTranslateState();
+  admitTranslateTurn(state, "turn-1");
+  assistantCompletion(state, "msg_assistant", 1787894839755);
+  const live = normalizeOcObservation({
+    data: REAL_SESSION_IDLE,
+    channel: "sse",
+    observed: {
+      authorityId: binding.authorityId,
+      generation: binding.generation,
+      location: binding.location,
+      backendSessionId: binding.backendSessionId,
+      reconciliationOrdinal: 2,
+    },
+    current: {
+      authorityId: binding.authorityId,
+      generation: binding.generation,
+      location: binding.location,
+      backendSessionId: binding.backendSessionId,
+      reconciliationOrdinal: 2,
+    },
+    state,
+  });
+  assert.equal(live.kind, "accepted");
+  if (live.kind !== "accepted") assert.fail("live idle was not normalized");
+  assert.equal(
+    live.observation.identity.revision,
+    `${pulledState.comparison?.domain}:${pulledState.comparison?.order}`,
   );
+  assert.deepEqual(live.observation.checkpoint?.value, {
+    state: pulledState.value,
+    watermark: pulledState.watermark,
+    comparison: pulledState.comparison,
+  });
 });

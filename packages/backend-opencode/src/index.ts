@@ -39,12 +39,15 @@ import type {
 } from "@polyth/contracts";
 import type { OpenCodeBrowserToolConfig } from "./browserTool.ts";
 import {
+  admitTranslateTurn,
   asOcEvent,
   backendSessionId,
   claimTerminalStateEvidence,
   createTranslateState,
   errorMessageOf,
+  finishTranslateTurn,
   flushAssistantOnIdle,
+  markTranslateTurnAborting,
   normalizeOcObservation,
   splitNormalizedObservation,
   translateOcEvent,
@@ -75,6 +78,7 @@ export interface OpenCodeAdapterOptions {
   hostname?: string;
   bin?: string;
   dataDir?: string;
+  stateFile?: string;
   browserTool?: OpenCodeBrowserToolConfig;
   protocol?: ProtocolSelection;
   configTargetId?: string;
@@ -356,6 +360,44 @@ export const createOpenCodeRuntimeFacade = (
     return s;
   };
 
+  const admitTurn = (sessionId: string): void => {
+    if (activeTurn.has(sessionId)) return;
+    const turnId = `turn_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+    activeTurn.set(sessionId, { turnId, aborting: false });
+    admitTranslateTurn(stateFor(sessionId), turnId);
+    emit(sessionId, { type: "turn/started", turnId });
+  };
+
+  const terminalEvents = (
+    sessionId: string,
+    event: NonNullable<ReturnType<typeof asOcEvent>>,
+    state: TranslateState,
+  ): RuntimeEvent[] => {
+    const terminal = claimTerminalStateEvidence(event, state);
+    const turn = activeTurn.get(sessionId);
+    if (!terminal || !turn) return [];
+    const assistant = terminal.state === "idle" ? flushAssistantOnIdle(state) : [];
+    activeTurn.delete(sessionId);
+    finishTranslateTurn(state, turn.turnId);
+    if (terminal.state === "idle") {
+      return [
+        ...assistant,
+        {
+          type: "turn/stopped",
+          reason: turn.aborting ? "aborted" : "completed",
+        },
+      ];
+    }
+    if (terminal.state === "interrupted") {
+      return [{ type: "turn/stopped", reason: "aborted" }];
+    }
+    return [{
+      type: "turn/stopped",
+      reason: "error",
+      error: errorMessageOf(event) ?? "session failed",
+    }];
+  };
+
   const handlePayload = (
     id: string | undefined,
     data: unknown,
@@ -410,26 +452,10 @@ export const createOpenCodeRuntimeFacade = (
         ...(id ? { cursorAfter: id } : {}),
       });
       if (normalized.kind !== "accepted") return;
-      const events = [...normalized.observation.events];
-      const terminal = claimTerminalStateEvidence(ev, st);
-      const err = errorMessageOf(ev);
-      if (err && terminal?.state === "failed") {
-        const turn = activeTurn.get(canonical);
-        if (turn) {
-          activeTurn.delete(canonical);
-          events.push({ type: "turn/stopped", reason: "error", error: err });
-        }
-      } else if (terminal?.state === "idle") {
-        events.push(...flushAssistantOnIdle(st));
-        const turn = activeTurn.get(canonical);
-        if (turn) {
-          activeTurn.delete(canonical);
-          events.push({
-            type: "turn/stopped",
-            reason: turn.aborting ? "aborted" : "completed",
-          });
-        }
-      }
+      const events = [
+        ...normalized.observation.events,
+        ...terminalEvents(canonical, ev, st),
+      ];
       if (
         events.length === normalized.observation.events.length
         && normalized.observation.events.length > 1
@@ -444,27 +470,7 @@ export const createOpenCodeRuntimeFacade = (
       return;
     }
     for (const runtimeEv of translateOcEvent(ev, st)) emit(canonical, runtimeEv);
-    const terminal = claimTerminalStateEvidence(ev, st);
-    const err = errorMessageOf(ev);
-    if (err && terminal?.state === "failed") {
-      const turn = activeTurn.get(canonical);
-      if (turn) {
-        activeTurn.delete(canonical);
-        emit(canonical, { type: "turn/stopped", reason: "error", error: err });
-      }
-      return;
-    }
-    if (terminal?.state === "idle") {
-      for (const runtimeEv of flushAssistantOnIdle(st)) emit(canonical, runtimeEv);
-      const turn = activeTurn.get(canonical);
-      if (turn) {
-        activeTurn.delete(canonical);
-        emit(canonical, {
-          type: "turn/stopped",
-          reason: turn.aborting ? "aborted" : "completed",
-        });
-      }
-    }
+    for (const runtimeEv of terminalEvents(canonical, ev, st)) emit(canonical, runtimeEv);
   };
 
   const connectSse = async () => {
@@ -551,15 +557,15 @@ export const createOpenCodeRuntimeFacade = (
   };
 
   const removeMapping = (sessionId: string): string => {
-    const backendSessionId = maps.forward.get(sessionId) ?? sessionId;
-    for (const [canonical, backend] of maps.forward) {
-      if (backend === backendSessionId) {
-        maps.forward.delete(canonical);
-        reconciliationOrdinals.delete(canonical);
-      }
+    const canonicalSessionId = maps.forward.has(sessionId)
+      ? sessionId
+      : maps.reverse.get(sessionId) ?? sessionId;
+    const backendSessionId = maps.forward.get(canonicalSessionId) ?? sessionId;
+    maps.forward.delete(canonicalSessionId);
+    if (maps.reverse.get(backendSessionId) === canonicalSessionId) {
+      maps.reverse.delete(backendSessionId);
     }
-    maps.reverse.delete(backendSessionId);
-    reconciliationOrdinals.delete(sessionId);
+    reconciliationOrdinals.delete(canonicalSessionId);
     return backendSessionId;
   };
 
@@ -714,11 +720,7 @@ export const createOpenCodeRuntimeFacade = (
         ...(req.agent ? { agent: req.agent } : {}),
       }, randomUUID());
       outcomeValue(outcome);
-      if (!activeTurn.has(req.sessionId)) {
-        const turnId = `turn_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
-        activeTurn.set(req.sessionId, { turnId, aborting: false });
-        emit(req.sessionId, { type: "turn/started", turnId });
-      }
+      admitTurn(req.sessionId);
     },
     async startTurnOperation(req, operationId) {
       const outcome = await lifecycle.submit({
@@ -728,11 +730,7 @@ export const createOpenCodeRuntimeFacade = (
         ...(req.model ? { model: req.model } : {}),
         ...(req.agent ? { agent: req.agent } : {}),
       }, operationId);
-      if (outcome.kind === "confirmed" && !activeTurn.has(req.sessionId)) {
-        const turnId = `turn_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
-        activeTurn.set(req.sessionId, { turnId, aborting: false });
-        emit(req.sessionId, { type: "turn/started", turnId });
-      }
+      if (outcome.kind === "confirmed") admitTurn(req.sessionId);
       return outcome;
     },
     async steer(sessionId: string, text: string): Promise<boolean> {
@@ -759,14 +757,20 @@ export const createOpenCodeRuntimeFacade = (
       const binding = await lifecycleBinding(sessionId);
       const outcome = await lifecycle.abort(binding, randomUUID());
       outcomeValue(outcome);
-      if (turn) turn.aborting = true;
+      if (turn) {
+        turn.aborting = true;
+        markTranslateTurnAborting(stateFor(sessionId), turn.turnId);
+      }
     },
     async abortOperation(sessionId, operationId) {
       const binding = await lifecycleBinding(sessionId);
       const outcome = await lifecycle.abort(binding, operationId);
       if (outcome.kind === "confirmed") {
         const turn = activeTurn.get(sessionId);
-        if (turn) turn.aborting = true;
+        if (turn) {
+          turn.aborting = true;
+          markTranslateTurnAborting(stateFor(sessionId), turn.turnId);
+        }
       }
       return outcome;
     },
@@ -836,6 +840,7 @@ export const createOpenCodeRuntime = async (
     hostname: opts.hostname,
     bin: opts.bin,
     dataDir: opts.dataDir,
+    stateFile: opts.stateFile,
     browserTool: opts.browserTool,
     configTargetId: opts.configTargetId
       ?? (opts.dataDir ? `opencode-config:${resolve(opts.dataDir)}` : undefined),

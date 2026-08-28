@@ -426,6 +426,7 @@ export const createFakeOpenCode = async (
   let connectionCount = 0;
   let disconnectionCount = 0;
   let sseScriptCursor = 0;
+  let completionOrder = Date.now();
   let closed = false;
 
   const notifyWaiters = (): void => {
@@ -635,6 +636,26 @@ export const createFakeOpenCode = async (
       const current = session.messages.at(-1);
       if (current) current.finished = true;
       if (options.emit !== false) {
+        completionOrder = Math.max(completionOrder + 1, Date.now());
+        const assistantMessageId = `msg_assistant_${++messageSequence}`;
+        publish({
+          id: `evt_message_${assistantMessageId}`,
+          data: {
+            type: "message.updated",
+            properties: {
+              sessionID: sessionId,
+              info: {
+                id: assistantMessageId,
+                role: "assistant",
+                sessionID: sessionId,
+                time: {
+                  created: completionOrder - 1,
+                  completed: completionOrder,
+                },
+              },
+            },
+          },
+        });
         publish({
           data: {
             type: "session.idle",

@@ -1,7 +1,0 @@
-{
-  "id": "OC-REAL-067",
-  "verdict": "fail (polyth)",
-  "summary": "Two official V2 SDK clients and one Polyth borrowed facade durably admitted distinct queue markers, but Polyth history/reconcile exposed only the promoted first message and hid later external/Polyth admissions that official durable history retained. No permission request materialized.",
-  "limitation": "Normal Polyth composition still cannot select a borrowed/shared endpoint; OpenCode 1.18.18 exposes no authoritative discovery descriptor.",
-  "blocker5": false
-}

@@ -1,2 +1,0 @@
-{"at":"2026-08-28T08:12:10.410Z","type":"runtime-event","sessionId":"phase8-078","event":{"type":"turn/started","turnId":"turn_mtcobb55_v1k6q1"}}
-{"at":"2026-08-28T08:12:10.536Z","type":"runtime-event","sessionId":"phase8-078","event":{"type":"turn/stopped","reason":"error","error":"OpenAI Chat does not support media type text/plain"}}

@@ -32,6 +32,8 @@ import {
 
 export interface RemoteOpenCodeOptions {
   host: RemoteHost;
+  /** Stable SSH connection identity from project configuration. */
+  connectionIdentity?: string;
   /** Workspace path on the remote machine (becomes the serve cwd). */
   remotePath: string;
   /** Remote opencode binary (default "opencode" on the remote PATH). */
@@ -306,7 +308,14 @@ export const createRemoteOpenCodeRuntime = async (
   const lease = await createOwnedSshEndpointLease({
     location: { directory: remotePath },
     authentication,
-    stateFile: options.leaseStateFile ?? defaultLeaseStateFile(host.label, remotePath),
+    stateFile: options.leaseStateFile
+      ?? defaultLeaseStateFile(options.connectionIdentity ?? host.label, remotePath),
+    runtimeIdentity: JSON.stringify({
+      connection: options.connectionIdentity ?? host.label,
+      host: host.label,
+      remotePath,
+      binary: bin,
+    }),
     async start(instanceToken) {
       let started: StartedServe | null = null;
       let lastError: unknown;

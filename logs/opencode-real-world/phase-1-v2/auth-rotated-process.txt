@@ -1,1 +1,0 @@
-session=oc-phase1-v2-auth-rotated pane_pid=7266 command=opencode dead=0

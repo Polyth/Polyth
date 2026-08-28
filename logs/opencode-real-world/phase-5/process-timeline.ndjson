@@ -1,8 +1,0 @@
-{"at":"2026-08-28T08:05:02.837Z","event":"service-started","label":"shared-primary-1","pid":88876,"port":34945,"identity":{"pid":88876,"startIdentity":"1799397","executable":"/home/ubuntu/.opencode/bin/opencode","command":"/home/ubuntu/.local/bin/opencode serve --hostname 127.0.0.1 --port 34945"}}
-{"at":"2026-08-28T08:05:02.845Z","event":"external-stream-connected","label":"external-client-062","path":"/api/event","status":200}
-{"at":"2026-08-28T08:05:06.553Z","event":"borrowed-disposed","label":"joiner-062"}
-{"at":"2026-08-28T08:05:07.071Z","event":"exact-pid-signal","label":"shared-primary-1","pid":88876,"signal":"SIGTERM","identity":{"pid":88876,"startIdentity":"1799397","executable":"/home/ubuntu/.opencode/bin/opencode","command":"/home/ubuntu/.local/bin/opencode serve --hostname 127.0.0.1 --port 34945"}}
-{"at":"2026-08-28T08:05:07.109Z","event":"service-exited","label":"shared-primary-1","pid":88876,"code":null,"signal":"SIGTERM"}
-{"at":"2026-08-28T08:05:22.929Z","event":"service-started","label":"shared-primary-2","pid":88961,"port":37915,"identity":{"pid":88961,"startIdentity":"1801408","executable":"/home/ubuntu/.opencode/bin/opencode","command":"/home/ubuntu/.local/bin/opencode serve --hostname 127.0.0.1 --port 37915"}}
-{"at":"2026-08-28T08:05:29.383Z","event":"borrowed-disposed","label":"rotation-064"}
-{"at":"2026-08-28T08:05:29.417Z","event":"borrowed-disposed","label":"restart-rediscovery-064"}

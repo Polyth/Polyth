@@ -1,6 +1,0 @@
-{"ts":"2026-08-28T08:10:49.332Z","event":"polyth-started","label":"polyth","pid":103296,"port":15261}
-{"ts":"2026-08-28T08:10:57.147Z","event":"kill-exact","pid":103771,"signal":"SIGKILL","identity":{"startIdentity":"1835637","exe":"/home/ubuntu/.opencode/bin/opencode","cmdline":"/home/ubuntu/.local/bin/opencode serve --hostname 127.0.0.1 --port 0"}}
-{"ts":"2026-08-28T08:10:57.298Z","event":"kill-exact","pid":103296,"signal":"SIGKILL","identity":{"startIdentity":"1835597","exe":"/home/ubuntu/.nvm/versions/node/v22.22.2/bin/node","cmdline":"/home/ubuntu/.nvm/versions/node/v22.22.2/bin/node /tmp/ocreal/phase-4/tools/boot-polyth.mjs"}}
-{"ts":"2026-08-28T08:10:59.117Z","event":"polyth-started","label":"polyth-2","pid":107226,"port":15261}
-{"ts":"2026-08-28T08:11:01.664Z","event":"rerun-verdict","scenario":"061","pass":true,"failedChecks":[]}
-{"ts":"2026-08-28T08:11:01.712Z","event":"polyth-stopped","pid":107226,"how":"SIGTERM"}

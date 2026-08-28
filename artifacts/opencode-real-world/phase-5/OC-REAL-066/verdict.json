@@ -1,7 +1,0 @@
-{
-  "id": "OC-REAL-066",
-  "verdict": "fail (opencode)",
-  "summary": "Ordinary project-root/worktree catalogs stayed directory-isolated, but a client-supplied session ID collision in project B returned project A's session with HTTP 200. Real workspace discovery returned no identities, and normal product shared attach remains unavailable.",
-  "limitation": "Normal Polyth composition still cannot select a borrowed/shared endpoint; OpenCode 1.18.18 exposes no authoritative discovery descriptor.",
-  "blocker5": false
-}
