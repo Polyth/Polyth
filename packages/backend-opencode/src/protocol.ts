@@ -101,8 +101,13 @@ const performProbe = async (
 ): Promise<ProtocolProbe> => {
   const document = await queryOptional(transport, endpoint, "/doc", deadlineMs);
   const legacyPromptPaths = legacyPromptPathsFromDocument(document);
-  if (hasV2ProtocolDocument(document)) return { protocol: "v2", legacyPromptPaths };
+  // OpenCode 1.x can advertise its experimental V2 routes alongside the
+  // stable legacy session API. Its V2 session mutations may still target the
+  // unpopulated V2 store, while the legacy contract remains fully usable.
+  // Prefer that proven session contract whenever it is advertised; callers
+  // can explicitly select V2 when operating a V2-only endpoint.
   if (legacyPromptPaths.length > 0) return { protocol: "legacy", legacyPromptPaths };
+  if (hasV2ProtocolDocument(document)) return { protocol: "v2", legacyPromptPaths };
 
   const apiHealth = await queryOptional(transport, endpoint, "/api/health", deadlineMs);
   const apiMarker = protocolMarker(apiHealth);

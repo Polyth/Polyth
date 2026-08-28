@@ -6157,7 +6157,10 @@ font-style: normal; opacity: .65;
   .app:has(> .workspace-bottom-nav) :is(.rail-fullscreen, .panel-sheet) {
     bottom: calc(60px + var(--safe-bottom));
   }
-  body[data-keyboard="open"] .workspace-bottom-nav { display: none; }
+  body[data-keyboard="open"] .workspace-bottom-nav {
+    visibility: hidden;
+    pointer-events: none;
+  }
   body[data-keyboard="open"] .workspace { padding-bottom: 0; }
   body[data-keyboard="open"] :is(.rail-fullscreen, .panel-sheet) { bottom: 0; }
 }
@@ -7103,16 +7106,6 @@ html[data-sheet="open"], html[data-sheet="open"] body { overflow: hidden; }
 .context-trigger-caret svg { width: 15px; height: 15px; }
 .context-sep { display: none; }
 @media (max-width: 480px), (max-height: 480px) and (pointer: coarse) {
-/* §29/§31/§45: pin the shell's bottom to the browser's visual viewport.
-     `interactive-widget=resizes-content` asks supporting browsers to resize
-     the layout viewport too. Safari can instead pan the visual viewport down;
-     --visual-bottom includes that offset, keeping the composer at the visible
-     lower edge rather than ending an offset-height above the keyboard. */
-  .app,
-  .app.mode-chat.view-session {
-    height: var(--visual-bottom, 100dvh);
-    min-height: 0;
-  }
   .app.mode-chat.view-session .mobile-chat-header {
     position: sticky;
     top: 0;
@@ -8363,7 +8356,9 @@ body[data-keyboard="open"] .app.mode-chat.view-session .mobile-chat-header,
      visibility must follow the viewport seam, not textarea focus: iOS keeps
      a textarea focused after its keyboard is dismissed. */
   body[data-keyboard="open"] .app.mode-chat.view-session > .session-bottom-nav {
-    display: none;
+    display: flex;
+    visibility: hidden;
+    pointer-events: none;
   }
   .app.mode-chat.view-session .workspace {
     padding-bottom: 0;
@@ -8385,12 +8380,19 @@ body[data-keyboard="open"] .app.mode-chat.view-session .mobile-chat-header,
     padding-block: 0 var(--space-1);
   }
   body[data-keyboard="open"] .app.mode-chat.view-session > .session-bottom-nav {
-    display: none;
+    display: flex;
+    visibility: hidden;
+    pointer-events: none;
   }
   body[data-keyboard="open"] .app.mode-chat.view-session .workspace {
     padding-bottom: 0;
   }
   body[data-keyboard="open"] .app.mode-chat.view-session .composer-chat.composer-mobile {
+    position: fixed;
+    right: 0;
+    bottom: max(var(--keyboard-inset), var(--safe-bottom));
+    left: 0;
+    z-index: var(--z-shell);
     padding-bottom: max(var(--space-1), var(--safe-bottom));
   }
 }

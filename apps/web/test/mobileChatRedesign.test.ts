@@ -477,13 +477,13 @@ test("the phone shell restores session navigation below a swipeable shortcut rai
   assert.doesNotMatch(navigation, /mobile-navigation-grid|header\.application/, "the grouped Application menu is gone");
   assert.match(
     css,
-    /body\[data-keyboard="open"\] \.workspace-bottom-nav\s*\{\s*display:\s*none;/,
-    "keyboard entry hides the projects, sessions, and new-session bar",
+    /body\[data-keyboard="open"\] \.workspace-bottom-nav\s*\{\s*visibility:\s*hidden;/,
+    "keyboard entry hides the projects, sessions, and new-session bar without resizing the shell",
   );
   assert.match(
     css,
-    /body\[data-keyboard="open"\] \.app\.mode-chat\.view-session > \.session-bottom-nav\s*\{\s*display:\s*none;/,
-    "the real keyboard state overrides session-only display:flex and restores navigation after closing",
+    /body\[data-keyboard="open"\] \.app\.mode-chat\.view-session > \.session-bottom-nav\s*\{\s*display:\s*flex;\s*visibility:\s*hidden;/,
+    "the keyboard hides navigation without changing the shell's layout height",
   );
 });
 

@@ -83,6 +83,14 @@ const legacyDocument = {
   },
 };
 
+const dualProtocolDocument = {
+  paths: {
+    ...legacyDocument.paths,
+    "/api/session": { post: {} },
+    "/api/session/{sessionID}/prompt": { post: {} },
+  },
+};
+
 test("read-only negotiation selects one prompt endpoint and never falls through", async () => {
   let attempts = 0;
   const fake = transportDouble({
@@ -199,6 +207,23 @@ test("protocol probe cache is isolated by endpoint generation", async () => {
     endpoint: endpoint(2),
   });
   assert.equal(fake.queries.length, 2, "new generation is negotiated independently");
+});
+
+test("auto negotiation prefers the complete legacy contract when V2 is also advertised", async () => {
+  const fake = transportDouble({
+    query: () => dualProtocolDocument,
+    mutate: () => ({ kind: "response", status: 204, headers: {}, body: undefined }),
+  });
+  const adapter = await createProtocolAdapter({
+    protocol: "auto",
+    transport: fake.transport,
+    endpoint: endpoint(),
+  });
+
+  assert.equal(adapter.protocol, "legacy");
+  const outcome = await adapter.submit({ session: binding(), text: "use legacy" }, "operation-legacy");
+  assert.equal(outcome.kind, "confirmed");
+  assert.match(fake.mutations[0]!.path, /^\/session\/session-a\/prompt_async\?/);
 });
 
 test("V2 prompt admission uses the native session prompt contract", async () => {
