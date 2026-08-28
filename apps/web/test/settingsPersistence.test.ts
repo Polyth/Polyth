@@ -97,6 +97,47 @@ test("top rail alignment defaults to center and accepts only supported positions
   assert.equal(ui.parseUiSettings(JSON.stringify({ topRailAlignment: "floating" })).topRailAlignment, "center");
 });
 
+test("rail icon sizes default safely, validate values, and publish token geometry", () => {
+  const defaults = ui.parseUiSettings(null);
+  assert.equal(defaults.topRailIconSize, "md");
+  assert.equal(defaults.rightRailIconSize, "md");
+
+  const configured = ui.parseUiSettings(JSON.stringify({
+    topRailIconSize: "sm",
+    rightRailIconSize: "lg",
+  }));
+  assert.equal(configured.topRailIconSize, "sm");
+  assert.equal(configured.rightRailIconSize, "lg");
+  assert.equal(
+    ui.parseUiSettings(JSON.stringify({ topRailIconSize: "huge", rightRailIconSize: 32 })).topRailIconSize,
+    "md",
+  );
+
+  const properties = new Map<string, string>();
+  const documentBefore = (globalThis as { document?: unknown }).document;
+  (globalThis as { document?: unknown }).document = {
+    body: {
+      dataset: {},
+      style: { setProperty: (name: string, value: string) => properties.set(name, value) },
+    },
+  };
+  try {
+    ui.applyUiSettings(configured);
+  } finally {
+    if (documentBefore === undefined) delete (globalThis as { document?: unknown }).document;
+    else (globalThis as { document?: unknown }).document = documentBefore;
+  }
+
+  assert.equal(properties.get("--rail-icon-size-top"), "calc(var(--control-h-sm) - var(--space-1))");
+  assert.equal(properties.get("--rail-icon-glyph-top"), "var(--icon-sm)");
+  assert.equal(properties.get("--rail-icon-size-right"), "calc(var(--control-h-sm) + var(--space-1))");
+  assert.equal(properties.get("--rail-icon-glyph-right"), "var(--icon-lg)");
+  assert.equal(
+    properties.get("--rail-strip-width-right"),
+    "calc(var(--rail-icon-size-right) + var(--space-2))",
+  );
+});
+
 test("mobile shortcut settings preserve order and reject unknown or duplicate ids", () => {
   assert.deepEqual(ui.parseUiSettings(null).mobileShortcuts, ui.UI_DEFAULTS.mobileShortcuts);
   assert.deepEqual(

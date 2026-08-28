@@ -25,7 +25,7 @@ import "../../widgets/builtinWidgets.tsx";
 import { PageHead } from "./parts.tsx";
 import {
   MOBILE_SHORTCUT_IDS, RESPONSE_ACTION_IDS, setUiSettings, useUiSettings,
-  type MobileShortcutId, type ResponseActionId,
+  type MobileShortcutId, type RailIconSize, type ResponseActionId,
 } from "../../uiPrefs.ts";
 import { tr } from "../../i18n/index.ts";
 
@@ -120,6 +120,12 @@ const RESPONSE_ACTION_LABELS: Record<ResponseActionId, string> = {
   session: tr("settings.widgetspage.newSessionFromAnswer"),
   multirun: tr("settings.widgetspage.newMultiRunFromAnswer"),
 };
+
+const RAIL_ICON_SIZE_OPTIONS: Array<{ value: RailIconSize; label: string }> = [
+  { value: "sm", label: tr("settings.widgetspage.small") },
+  { value: "md", label: tr("settings.widgetspage.medium") },
+  { value: "lg", label: tr("settings.widgetspage.large") },
+];
 
 export function moveOrderedSelection<T extends string>(
   selected: readonly T[],
@@ -505,21 +511,42 @@ export default function WidgetsPage() {
                   onClick={() => setOpenPlace(openPlace === place.id ? null : place.id)}
                 >＋</button>
               </header>
-              {place.id === "primary" && (
-                <label className="widget-top-rail-position">
-                  <span>Position</span>
+              <div className="widget-rail-controls">
+                {place.id === "primary" && (
+                  <label className="widget-rail-control">
+                    <span>{tr("settings.widgetspage.position")}</span>
+                    <select
+                      aria-label={tr("settings.widgetspage.chatTopRailPosition")}
+                      value={ui.topRailAlignment}
+                      onChange={(event) => setUiSettings({
+                        topRailAlignment: event.target.value === "left" ? "left" : "center",
+                      })}
+                    >
+                      <option value="center">{tr("settings.widgetspage.centered")}</option>
+                      <option value="left">{tr("settings.widgetspage.leftOfCenter")}</option>
+                    </select>
+                  </label>
+                )}
+                <label className="widget-rail-control">
+                  <span>{tr("settings.widgetspage.iconSize")}</span>
                   <select
-                    aria-label="Chat top rail position"
-                    value={ui.topRailAlignment}
-                    onChange={(event) => setUiSettings({
-                      topRailAlignment: event.target.value === "left" ? "left" : "center",
-                    })}
+                    aria-label={place.id === "primary"
+                      ? tr("settings.widgetspage.topRailIconSize")
+                      : tr("settings.widgetspage.rightRailIconSize")}
+                    value={place.id === "primary" ? ui.topRailIconSize : ui.rightRailIconSize}
+                    onChange={(event) => {
+                      const size = event.target.value;
+                      if (size !== "sm" && size !== "md" && size !== "lg") return;
+                      if (place.id === "primary") setUiSettings({ topRailIconSize: size });
+                      else setUiSettings({ rightRailIconSize: size });
+                    }}
                   >
-                    <option value="center">Centered</option>
-                    <option value="left">Left of center</option>
+                    {RAIL_ICON_SIZE_OPTIONS.map((option) => (
+                      <option key={option.value} value={option.value}>{option.label}</option>
+                    ))}
                   </select>
                 </label>
-              )}
+              </div>
               <div className="widget-place-chips">
                 {placed.length === 0 && <span className="widget-place-empty">{tr("settings.widgetspage.noButtonsPlaced")}</span>}
                 {placed.map((capability) => (
