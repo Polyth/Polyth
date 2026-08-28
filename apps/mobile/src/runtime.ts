@@ -153,6 +153,15 @@ function decodedPathSegment(value: string): string | undefined {
   }
 }
 
+function canonicalProjectPath(pathname: string): string | undefined {
+  const match = /^\/p\/([^/]+)(?:\/s\/([^/]+))?\/?$/.exec(pathname);
+  if (!match) return undefined;
+  const projectId = decodedPathSegment(match[1]!);
+  const sessionId = match[2] ? decodedPathSegment(match[2]) : undefined;
+  if (!projectId || (match[2] && !sessionId)) return undefined;
+  return `/p/${encodeURIComponent(projectId)}${sessionId ? `/s/${encodeURIComponent(sessionId)}` : ""}`;
+}
+
 export function mobileDeepLinkPath(raw: string): string | undefined {
   let url: URL;
   try {
@@ -161,11 +170,12 @@ export function mobileDeepLinkPath(raw: string): string | undefined {
     return undefined;
   }
   if (url.protocol === "http:" || url.protocol === "https:") {
-    return /^\/p\/[^/]+(?:\/s\/[^/]+)?\/?$/.test(url.pathname)
+    const projectPath = canonicalProjectPath(url.pathname);
+    return projectPath
       // A universal/app link may carry tracking or credential-like query
       // parameters from another application. Canonical project/session paths
       // need none of them, so never copy that data to the selected Polyth host.
-      ? url.pathname
+      ? projectPath
       : url.searchParams.has("session")
         ? `/?session=${encodeURIComponent(url.searchParams.get("session") ?? "")}`
         : undefined;
@@ -183,8 +193,8 @@ export function mobileDeepLinkPath(raw: string): string | undefined {
     const id = decodedPathSegment(url.pathname.slice(1));
     return id ? `/p/${encodeURIComponent(id)}` : undefined;
   }
-  if (url.hostname === "open" && /^\/p\/[^/]+(?:\/s\/[^/]+)?\/?$/.test(url.pathname)) {
-    return url.pathname;
+  if (url.hostname === "open") {
+    return canonicalProjectPath(url.pathname);
   }
   return undefined;
 }

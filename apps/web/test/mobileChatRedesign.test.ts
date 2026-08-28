@@ -262,12 +262,18 @@ test("the mobile viewport is fixed and requests keyboard content resizing", asyn
 });
 
 test("every redesigned overlay uses the one sheet system", async () => {
-  const sheet = await read("../src/components/mobile/Sheet.tsx");
+  const [sheet, dialog] = await Promise.all([
+    read("../src/components/mobile/Sheet.tsx"),
+    read("../src/components/a11y/Dialog.tsx"),
+  ]);
   assert.ok(sheet.includes("useModalSurface"), "sheets share the focus contract");
   assert.ok(!/autoFocus/.test(sheet), "§25: opening a sheet never summons the keyboard");
   assert.ok(sheet.includes('data-sheet-focus'), "focus starts on the sheet, not the search field");
   assert.ok(sheet.includes('type="search"'), "the search row is a real search input");
   assert.ok(sheet.includes("SHEET_DISMISS_DISTANCE"), "swipe-to-dismiss is part of the shared model");
+  assert.ok(dialog.includes("el.matches(initialFocus)"), "the modal contract can focus the sheet panel itself");
+  assert.ok(dialog.includes("focusFrames >= 20"), "opening focus is guarded across multiple animation frames");
+  assert.ok(dialog.includes("guardOpeningFocus();"), "focus monitoring continues after the first successful frame");
 
   for (const [name, rel] of [
     ["model picker", "../../../packages/models/widgets/ModelPicker.tsx"],
@@ -293,6 +299,7 @@ test("a sheet opens on pointer-down and survives the keyboard dismissal (§22)",
   assert.ok(trigger.includes("onPointerDown"), "touch activates on pointer-down");
   assert.ok(trigger.includes("POINTER_ACTIVATION_WINDOW"), "the echo click is ignored by time, not by a one-shot flag");
   assert.ok(trigger.includes("event.isPrimary"), "secondary and extra pointers are ignored");
+  assert.ok(trigger.includes("event.currentTarget.focus"), "the modal records the pointer trigger as its opener");
   assert.ok(trigger.includes("activate();"), "keyboard activation still arrives as a click");
 
   for (const [rel, name] of [
@@ -398,9 +405,10 @@ test("reasoning effort stays reachable on phones, inside the config rail", async
     "blur alone never collapses the composer",
   );
   assert.ok(
-    composer.includes("if (rootRef.current?.contains(target)) return;")
+    composer.includes('document.addEventListener("click", onClick)')
+    && composer.includes("if (rootRef.current?.contains(target)) return;")
     && composer.includes("setInputFocused(false);"),
-    "engagement ends on a pointer press outside the composer",
+    "engagement ends after an outside click reaches its target",
   );
 
   const css = await readWebStyles();
@@ -417,8 +425,16 @@ test("phone CSS keeps the layout inside the visible viewport", async () => {
   const section = css.slice(start);
   const phone = section.slice(section.indexOf("@media (max-width: 480px)"));
 
-  assert.match(phone, /\.app,\n\s+\.app\.mode-chat\.view-session \{\n\s+height: var\(--visual-bottom, 100dvh\);/, "the shell bottom tracks the visible viewport");
-  assert.ok(phone.includes("--visual-bottom includes that offset"), "Safari's visual-viewport pan is included once, in the shell height");
+  assert.match(
+    css,
+    /\.app\.mode-chat\.view-session \{[^}]*min-height:\s*100dvh/,
+    "the phone shell fills the dynamic viewport while keyboard-open composition owns its inset",
+  );
+  assert.match(
+    css,
+    /body\[data-keyboard="open"\] \.app\.mode-chat\.view-session \.composer-chat\.composer-mobile\s*\{[^}]*bottom:\s*max\(var\(--keyboard-inset\), var\(--safe-bottom\)\)/s,
+    "the composer follows the keyboard instead of resizing the whole shell",
+  );
   assert.match(phone, /overflow-x: hidden/, "§33: no horizontal scrolling");
   assert.match(phone, /input, textarea, select \{ font-size: max\(16px, 1em\); \}/, "§32: no Safari auto-zoom");
   assert.match(phone, /touch-action: manipulation/, "§28: no accidental double-tap zoom on controls");
@@ -426,6 +442,11 @@ test("phone CSS keeps the layout inside the visible viewport", async () => {
   assert.match(phone, /body\[data-band="short"\] \.hero-body \{ display: none; \}/, "a short band drops the empty state entirely");
   assert.match(phone, /composer-mobile:not\(\.composer-has-draft\) \.composer-primary \.send \{ display: none; \}/);
   assert.match(phone, /composer-mobile\.composer-has-draft \.composer-mobile-extensions \.mic-btn\s*\{\s*display:\s*none;/);
+  assert.match(
+    phone,
+    /\.composer-mobile \.composer-mobile-extensions \{[^}]*max-width:\s*var\(--tap\);[^}]*overflow-x:\s*auto;/s,
+    "optional actions scroll inside one touch-width instead of covering model controls",
+  );
   assert.match(
     phone,
     /composer-mobile\.composer-collapsed:not\(\.composer-has-draft\) \.composer-workflow\s*\{\s*display:\s*none;/,
@@ -445,13 +466,15 @@ test("phone CSS keeps the layout inside the visible viewport", async () => {
 
 test("touch targets and design tokens are centralized", async () => {
   const css = await readWebStyles();
+  const dictationCss = await read("../../../packages/dictation/widgets/styles.css");
   const tokens = css.slice(0, css.indexOf("/* F15: syntax roles"));
   for (const token of [
     "--space-4: 16px", "--tap: 44px",
     "--radius-sheet: calc(16px * var(--corner-radius-scale))",
-    "--font-input: 16px", "--safe-left: env(safe-area-inset-left, 0px)",
-    "--safe-right: env(safe-area-inset-right, 0px)",
-    "--safe-bottom: env(safe-area-inset-bottom, 0px)",
+    "--font-input: 16px",
+    "--safe-left: var(--safe-area-inset-left, env(safe-area-inset-left, 0px))",
+    "--safe-right: var(--safe-area-inset-right, env(safe-area-inset-right, 0px))",
+    "--safe-bottom: var(--safe-area-inset-bottom, env(safe-area-inset-bottom, 0px))",
   ]) {
     assert.ok(tokens.includes(token), `${token} is a shared token`);
   }
@@ -463,6 +486,16 @@ test("touch targets and design tokens are centralized", async () => {
     const rule = section.slice(at, section.indexOf("}", at));
     assert.match(rule, /var\(--tap\)/, `${selector} is at least one tap target tall`);
   }
+  assert.match(
+    css,
+    /@media \(pointer: coarse\) \{\s*\.composer-simple \.composer-add-trigger \{[^}]*min-width:\s*var\(--tap\);/s,
+    "the compact Add control remains a full touch target on coarse pointers",
+  );
+  assert.match(
+    dictationCss,
+    /@media \(pointer: coarse\) \{\s*\.composer \.composer-mobile-extensions \.mic-btn \{[^}]*min-width:\s*var\(--tap\);/s,
+    "the compact Dictate control remains a full touch target on coarse pointers",
+  );
 });
 
 test("the phone shell restores session navigation below a swipeable shortcut rail", async () => {
@@ -493,7 +526,7 @@ test("the phone shell restores session navigation below a swipeable shortcut rai
   );
   assert.match(
     css,
-    /body\[data-keyboard="open"\] \.app\.mode-chat\.view-session > \.session-bottom-nav\s*\{\s*display:\s*flex;\s*visibility:\s*hidden;/,
+    /body\[data-keyboard="open"\] \.app\.mode-chat\.view-session > \.session-bottom-nav\s*\{\s*display:\s*grid;\s*visibility:\s*hidden;/,
     "the keyboard hides navigation without changing the shell's layout height",
   );
 });

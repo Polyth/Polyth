@@ -35,4 +35,12 @@ test("deep links discard unsupported query data and malformed path ids", () => {
   assert.doesNotThrow(() => mobileDeepLinkPath("polyth://session/%"));
   assert.equal(mobileDeepLinkPath("polyth://session/%"), undefined);
   assert.equal(mobileDeepLinkPath("polyth://project/%2Fsettings"), undefined);
+  assert.equal(mobileDeepLinkPath("polyth://open/p/%/s/session-1"), undefined);
+  assert.equal(mobileDeepLinkPath("polyth://open/p/%2Fsettings"), undefined);
+  assert.equal(mobileDeepLinkPath("https://links.example.test/p/project-1/s/%"), undefined);
+  assert.equal(mobileDeepLinkPath("https://links.example.test/p/%2Fsettings"), undefined);
+  assert.equal(
+    mobileDeepLinkPath("https://links.example.test/?session=session-1&password=secret#token"),
+    "/?session=session-1",
+  );
 });

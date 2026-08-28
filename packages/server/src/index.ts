@@ -232,7 +232,13 @@ export async function acquireDataDirectoryLease(dataDir: string): Promise<DataDi
       "-e",
       "process.stdout.write('locked\\n');process.stdin.resume()",
     ],
-    { stdio: ["pipe", "pipe", "pipe"] },
+    {
+      stdio: ["pipe", "pipe", "pipe"],
+      // Electron exposes its own binary as process.execPath. Running that
+      // binary with -e starts another desktop instance unless Node mode is
+      // explicit, causing the nested server to contend for this same lease.
+      env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" },
+    },
   );
 
   await new Promise<void>((resolveLock, rejectLock) => {

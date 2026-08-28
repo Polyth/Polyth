@@ -71,8 +71,9 @@ test("header and composer controls are configurable and purpose-specific", async
   assert.doesNotMatch(header, /visibleIds|rest\.length > 0/);
   assert.doesNotMatch(composer, /Modalities:/);
   // P2-W3A: the Add menu owns Upload on every layout; the composer wires it
-  // to the shared hidden file input.
-  assert.match(composer, /onUpload=\{\(\) => fileInputRef\.current\?\.click\(\)\}/);
+  // through the platform-aware picker callback.
+  assert.match(composer, /onUpload=\{openAttachmentPicker\}/);
+  assert.match(composer, /pickNativeFiles\(\)\.then/);
   assert.doesNotMatch(widgets, /Session header stats|Response hover actions|Technical menu/);
   assert.match(widgets, /tr\("settings\.widgetspage\.responseActions"\)/);
   assert.match(widgets, /tr\("settings\.widgetspage\.whereButtonsAppear"\)/);

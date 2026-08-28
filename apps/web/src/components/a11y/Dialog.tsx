@@ -144,25 +144,35 @@ export function useModalSurface({
     const opener = document.activeElement as HTMLElement | null;
     // Surfaces that animate in from visibility:hidden (compact drawer/sheet)
     // silently swallow a focus() issued before the transition flips them
-    // visible. Retry across a few frames until focus actually lands inside.
+    // visible. A completed pointer gesture can also return focus to its opener
+    // after the first successful focus frame, so guard several frames instead
+    // of stopping as soon as focus lands once.
     // (rAF is feature-detected: the node:test DOM shim does not provide it.)
     let focusRaf = 0;
-    let focusTries = 0;
+    let focusFrames = 0;
     const claimFocus = () => {
-      const target = (initialFocus ? el.querySelector<HTMLElement>(initialFocus) : null)
+      const target = (initialFocus
+        ? (el.matches(initialFocus) ? el : el.querySelector<HTMLElement>(initialFocus))
+        : null)
         ?? el.querySelector<HTMLElement>(FOCUSABLE)
         ?? el;
       target.focus();
-      if (
-        !el.contains(document.activeElement)
-        && focusTries < 20
-        && typeof requestAnimationFrame === "function"
-      ) {
-        focusTries += 1;
-        focusRaf = requestAnimationFrame(claimFocus);
-      }
     };
     claimFocus();
+    const guardOpeningFocus = () => {
+      if (focusFrames >= 20 || typeof requestAnimationFrame !== "function") return;
+      focusFrames += 1;
+      focusRaf = requestAnimationFrame(() => {
+        const active = document.activeElement;
+        // A pointer echo may return focus to the opener after the surface
+        // mounted. Reclaim that focus, but never steal it from a newer modal.
+        if (!el.contains(active) && (active === opener || active === document.body)) {
+          claimFocus();
+        }
+        guardOpeningFocus();
+      });
+    };
+    guardOpeningFocus();
     const restoreBackground = isolateDocumentSiblings(isolationRootRef?.current ?? null);
 
     const onKeyDown = (e: KeyboardEvent) => {

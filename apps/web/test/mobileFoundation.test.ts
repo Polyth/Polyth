@@ -113,7 +113,7 @@ test("compact shell keeps drawer navigation while phone owns the bottom bar", as
   assert.match(sidebar, /className=\{`sidebar \$\{drawerOpen \? "open" : ""\}/);
   assert.match(sidebar, /useModalSurface\(\{/);
   assert.match(bottomNav, /className="workspace-bottom-nav/);
-  assert.match(css, /@media \(max-width: 820px\)[\s\S]*?\.workspace-bottom-nav\s*\{[^}]*position:\s*fixed/s);
+  assert.match(css, /@media \(max-width: 820px\)[\s\S]*?\.workspace-bottom-nav\s*\{[^}]*position:\s*relative/s);
   assert.match(css, /\.sidebar\.open\s*\{\s*transform:\s*none;\s*visibility:\s*visible/);
 });
 
@@ -123,11 +123,11 @@ test("375px chat keeps a safe-area-aware bottom navigator and docked composer", 
 
   assert.match(
     contract,
-    /@media \(max-width: 480px\), \(max-height: 480px\) and \(pointer: coarse\)[\s\S]*?\.app\.mode-chat\.view-session > \.session-bottom-nav\s*\{\s*display:\s*flex/,
+    /@media \(max-width: 480px\), \(max-height: 480px\) and \(pointer: coarse\)[\s\S]*?\.app\.mode-chat\.view-session > \.session-bottom-nav\s*\{\s*display:\s*grid/,
   );
   assert.match(
     contract,
-    /\.app\.mode-chat\.view-session \.workspace\s*\{[^}]*padding-bottom:\s*calc\(68px \+ var\(--safe-bottom\)\)/s,
+    /\.app\.mode-chat\.view-session \.workspace\s*\{[^}]*padding-bottom:\s*0/s,
   );
   assert.match(
     contract,
@@ -135,14 +135,14 @@ test("375px chat keeps a safe-area-aware bottom navigator and docked composer", 
   );
   assert.match(
     contract,
-    /body\[data-keyboard="open"\] \.app\.mode-chat\.view-session > \.session-bottom-nav\s*\{[^}]*display:\s*none/s,
+    /body\[data-keyboard="open"\] \.app\.mode-chat\.view-session > \.session-bottom-nav\s*\{[^}]*visibility:\s*hidden/s,
     "the keyboard yields the navigation row's space to the composer",
   );
 });
 
 test("active mobile composition immediately obscures project and settings surfaces", async () => {
   const css = await readWebStyles();
-  const state = 'body:is([data-keyboard="open"], :has(.composer-mobile.composer-input-active))';
+  const state = ":has(.composer-mobile.composer-input-active)";
 
   assert.ok(css.includes(state), "keyboard geometry and focused-composer fallback share one visibility state");
   assert.match(
@@ -152,7 +152,7 @@ test("active mobile composition immediately obscures project and settings surfac
   );
   assert.match(
     css,
-    /body:is\(\[data-keyboard="open"\], :has\(\.composer-mobile\.composer-input-active\)\)\s*:is\(\.sidebar\.open, \.rail-fullscreen, \.panel-sheet, \.settings-scrim\),[\s\S]*?visibility:\s*hidden;[\s\S]*?pointer-events:\s*none;[\s\S]*?opacity:\s*0;/,
+    /body:not\(:has\(\.term-mobile-input:focus\)\):is\([\s\S]*?\[data-keyboard="open"\],[\s\S]*?:has\(\.composer-mobile\.composer-input-active\)[\s\S]*?\)\s*:is\(\.sidebar\.open, \.rail-fullscreen, \.panel-sheet, \.settings-scrim\),[\s\S]*?visibility:\s*hidden;[\s\S]*?pointer-events:\s*none;[\s\S]*?opacity:\s*0;/,
     "the panels become immediately invisible and inert while composing",
   );
 });

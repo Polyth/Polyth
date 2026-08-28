@@ -4434,6 +4434,13 @@ body[data-density="balanced"] .composer { padding-block: 10px; }
 .composer-simple .composer-add-trigger, .composer-simple .composer-actions > .icon-btn {
   width: 34px; min-width: 34px; height: 34px; padding: 0; justify-content: center; border-color: transparent; background: transparent;
 }
+@media (pointer: coarse) {
+  .composer-simple .composer-add-trigger {
+    width: var(--tap);
+    min-width: var(--tap);
+    height: var(--tap);
+  }
+}
 .composer-focus-light .composer-actions > .icon-btn:hover,
 .composer-focus-light .composer-add-trigger:hover { color: var(--text); background: var(--bg); }
 .send-plane { display: inline-grid; place-items: center; color: white; }
@@ -7298,7 +7305,19 @@ display: none;
   }
   .composer-mobile .composer-add { display: inline-flex; }
   .composer-mobile .composer-primary { margin-left: auto; }
-  .composer-mobile .composer-mobile-extensions { display: inline-flex; align-items: center; padding: 0; }
+  .composer-mobile .composer-mobile-extensions {
+    display: inline-flex;
+    align-items: center;
+    width: var(--tap);
+    max-width: var(--tap);
+    flex: 0 0 var(--tap);
+    padding: 0;
+    overflow-x: auto;
+    overflow-y: hidden;
+    overscroll-behavior-inline: contain;
+    scrollbar-width: none;
+  }
+  .composer-mobile .composer-mobile-extensions::-webkit-scrollbar { display: none; }
 .composer-mobile .composer-mobile-extensions .placed-mini-widget {
 display: contents;
 }
@@ -7650,7 +7669,7 @@ html[data-modal-surface="open"] body {
     min-height: var(--tap);
     touch-action: manipulation;
   }
-  :is(.settings-shell, .dialog-panel, .panel-sheet, .sidebar) button {
+  :is(.settings-shell, .dialog-panel, .panel-sheet, .sidebar) button:not(.widget-drag-handle) {
     touch-action: manipulation;
   }
 }
@@ -8345,12 +8364,12 @@ body[data-keyboard="open"] .app.mode-chat.view-session .mobile-chat-header,
 }
 
 @media (max-width: 480px), (max-height: 480px) and (pointer: coarse) {
-.app.mode-chat.view-session > .session-bottom-nav { display: flex; }
-  /* This deliberately beats the session-only display:flex above. Keyboard
+  .app.mode-chat.view-session > .session-bottom-nav { display: grid; }
+  /* This deliberately beats the session-only display:grid above. Keyboard
      visibility must follow the viewport seam, not textarea focus: iOS keeps
      a textarea focused after its keyboard is dismissed. */
   body[data-keyboard="open"] .app.mode-chat.view-session > .session-bottom-nav {
-    display: flex;
+    display: grid;
     visibility: hidden;
     pointer-events: none;
   }
@@ -8374,7 +8393,7 @@ body[data-keyboard="open"] .app.mode-chat.view-session .mobile-chat-header,
     padding-block: 0 var(--space-1);
   }
   body[data-keyboard="open"] .app.mode-chat.view-session > .session-bottom-nav {
-    display: flex;
+    display: grid;
     visibility: hidden;
     pointer-events: none;
   }
@@ -9007,7 +9026,7 @@ max-width: 100%;
 overflow-wrap: anywhere;
 }
 @container feature-panel (max-width: 700px) {
-:is(.view-page, .rail-body, .settings-pane-body, .widget-card-body) button:not(.switch):not(.package-toggle) {
+:is(.view-page, .rail-body, .settings-pane-body, .widget-card-body) button:not(.switch):not(.package-toggle):not(.widget-drag-handle) {
 min-width: var(--tap);
     min-height: var(--tap);
     touch-action: manipulation;
@@ -9323,7 +9342,7 @@ border-bottom: 0;
 }
 }
 @container feature-panel (max-width: 700px) {
-:is(.view-page, .rail-body, .settings-pane-body, .widget-card-body) button:not(.switch):not(.package-toggle) {
+:is(.view-page, .rail-body, .settings-pane-body, .widget-card-body) button:not(.switch):not(.package-toggle):not(.widget-drag-handle) {
 min-width: var(--tap);
     min-height: var(--tap);
     touch-action: manipulation;
@@ -9419,7 +9438,7 @@ flex: 1 1 auto; min-width: var(--tap); padding-inline: 4px; white-space: nowrap;
 }
 }
 @container feature-panel (max-width: 700px) {
-:is(.view-page, .rail-body, .settings-pane-body, .widget-card-body) button:not(.switch):not(.package-toggle) {
+:is(.view-page, .rail-body, .settings-pane-body, .widget-card-body) button:not(.switch):not(.package-toggle):not(.widget-drag-handle) {
 min-width: var(--tap);
     min-height: var(--tap);
     touch-action: manipulation;
@@ -9551,7 +9570,7 @@ transform: translateX(22px);
 }
 }
 @container feature-panel (max-width: 700px) {
-:is(.view-page, .rail-body, .settings-pane-body, .widget-card-body) button:not(.switch):not(.package-toggle) {
+:is(.view-page, .rail-body, .settings-pane-body, .widget-card-body) button:not(.switch):not(.package-toggle):not(.widget-drag-handle) {
 min-width: var(--tap);
     min-height: var(--tap);
     touch-action: manipulation;
@@ -9629,7 +9648,7 @@ color: var(--amber); border-color: var(--amber);
 color: var(--red); border-color: var(--red);
 }
 @container feature-panel (max-width: 700px) {
-:is(.view-page, .rail-body, .settings-pane-body, .widget-card-body) button:not(.switch):not(.package-toggle) {
+:is(.view-page, .rail-body, .settings-pane-body, .widget-card-body) button:not(.switch):not(.package-toggle):not(.widget-drag-handle) {
 min-width: var(--tap);
     min-height: var(--tap);
     touch-action: manipulation;
@@ -9813,20 +9832,32 @@ color: var(--text);
       visibility 0s linear;
   }
 
-  body[data-keyboard="open"]:not(:has(.term-mobile-input:focus))
+  body:not(:has(.term-mobile-input:focus)):is(
+    [data-keyboard="open"],
+    :has(.composer-mobile.composer-input-active)
+  )
     :is(.sidebar.open, .rail-fullscreen, .panel-sheet, .settings-scrim),
-  body[data-keyboard="open"]:not(:has(.term-mobile-input:focus))
+  body:not(:has(.term-mobile-input:focus)):is(
+    [data-keyboard="open"],
+    :has(.composer-mobile.composer-input-active)
+  )
     :is(.sidebar-backdrop, .panel-sheet-backdrop) {
     visibility: hidden;
     pointer-events: none;
     opacity: 0;
   }
 
-  body[data-keyboard="open"]:not(:has(.term-mobile-input:focus)) .sidebar.open {
+  body:not(:has(.term-mobile-input:focus)):is(
+    [data-keyboard="open"],
+    :has(.composer-mobile.composer-input-active)
+  ) .sidebar.open {
     transform: translateX(-102%);
   }
 
-  body[data-keyboard="open"]:not(:has(.term-mobile-input:focus))
+  body:not(:has(.term-mobile-input:focus)):is(
+    [data-keyboard="open"],
+    :has(.composer-mobile.composer-input-active)
+  )
     :is(.rail-fullscreen, .panel-sheet, .settings-scrim) {
     transform: translateY(var(--space-2));
   }

@@ -425,20 +425,21 @@ export default function Composer({
     setQueueEditSaving(false);
   }, [session?.id, newSessionIntent]);
 
-  // Disengage on the first pointer press outside the composer (including its
-  // sheets, which render inside this subtree).
+  // Disengage after an outside click has reached its target. Collapsing on
+  // pointer-down can move a timeline control before pointer-up and swallow the
+  // activation on short phone viewports.
   useEffect(() => {
     if (!inputFocused) return;
-    const onPointerDown = (event: PointerEvent) => {
+    const onClick = (event: MouseEvent) => {
       const target = event.target as HTMLElement | null;
       if (rootRef.current?.contains(target)) return;
-      // Sheets are portalled to <body>; a press inside one is still composer
+      // Sheets are portalled to <body>; an action inside one is still composer
       // interaction and must not collapse the surface behind it.
       if (target?.closest?.(".sheet-backdrop")) return;
       setInputFocused(false);
     };
-    document.addEventListener("pointerdown", onPointerDown, true);
-    return () => document.removeEventListener("pointerdown", onPointerDown, true);
+    document.addEventListener("click", onClick);
+    return () => document.removeEventListener("click", onClick);
   }, [inputFocused]);
 
   // Pane and session transitions must not depend on the debounce. Flush the

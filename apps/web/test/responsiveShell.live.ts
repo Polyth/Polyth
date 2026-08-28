@@ -139,7 +139,10 @@ test("390px and 1280px shells render the current navigation contracts", async ()
       await page.waitForSelector(".mobile-shortcut-rail", { state: "visible" });
       await page.waitForSelector(".workspace-bottom-nav", { state: "visible" });
       assert.equal(await page.locator(".header-actions").count(), 0, "phone shell restored the removed Application menu");
-      assert.equal(await page.locator(".session-nav-current strong").textContent(), "Loaded synthetic timeline");
+      assert.match(
+        await page.locator(".session-nav-current").getAttribute("aria-label") ?? "",
+        /Loaded synthetic timeline/,
+      );
       const top = await boxesOf(page, ".mobile-shortcut");
       const bottom = await boxesOf(page, ".workspace-bottom-nav > button");
       assertTouchTargets(top, "390px top shortcut rail");
@@ -185,8 +188,8 @@ test("top rail and bottom bar open their current destinations", async () => {
   await page.waitForFunction(() => !document.querySelector("#polyth-session-drawer")?.classList.contains("open"));
   assert.equal(await page.evaluate(() => document.activeElement?.classList.contains("session-nav-current")), true);
 
-  await page.getByRole("button", { name: "Session history" }).click();
-  await page.waitForSelector('[role="dialog"][aria-label="Search sessions"]', { state: "visible" });
+  await page.getByRole("button", { name: "Command palette" }).click();
+  await page.waitForSelector('[role="dialog"][aria-label="Search workspace"]', { state: "visible" });
   await page.keyboard.press("Escape");
   await closePage(page);
 });

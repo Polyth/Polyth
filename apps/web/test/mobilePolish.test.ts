@@ -102,7 +102,7 @@ test("model metadata reports deduplicated input and output modalities", () => {
   }), formatList([tr("modelpicker.text"), tr("modelpicker.image")]));
 });
 
-test("all mobile chat composers expose project and worktree targets", () => {
+test("fresh mobile chat exposes project targets and attachments use the platform picker", () => {
   const surface = read("../src/components/workspace/builtinSurfaces.tsx");
   const contextBar = read("../src/components/mobile/SessionContextBar.tsx");
   const composer = read("../src/components/Composer.tsx");
@@ -118,17 +118,19 @@ test("all mobile chat composers expose project and worktree targets", () => {
   const css = readWebStylesSync();
 
   // UX-MOBILE-01 §5: the compact context bar belongs to the shared composer,
-  // so fresh and existing chats cannot assemble different control sets.
+  // and appears only while its project/worktree target is still editable.
   assert.doesNotMatch(surface, /<SessionContextBar/);
-  assert.match(composer, /<SessionContextBar \{\.\.\.contextBar\} \/>/);
+  assert.match(composer, /\{!session && <SessionContextBar \{\.\.\.contextBar\} \/>\}/);
   assert.match(contextBar, /tr\("mobile\.sessioncontextbar\.projectCurrentValue"/);
   assert.match(contextBar, /tr\("mobile\.sessioncontextbar\.worktreeCurrentValue"/);
   assert.match(composer, /target: \{ kind: "branch", branch: candidate\.name \}/);
   assert.match(composer, /newSessionTarget\.kind === "branch"/);
   assert.doesNotMatch(composer, /Modalities:/);
   // P2-W3A: the Add menu owns Upload on every layout; the composer wires it
-  // to the shared hidden file input.
-  assert.match(composer, /onUpload=\{\(\) => fileInputRef\.current\?\.click\(\)\}/);
+  // to native scoped picking or the browser's shared hidden file input.
+  assert.match(composer, /if \(!isNativeMobile\(\)\) \{[\s\S]*?fileInputRef\.current\?\.click\(\)/);
+  assert.match(composer, /pickNativeFiles\(\)\.then/);
+  assert.match(composer, /onUpload=\{openAttachmentPicker\}/);
   assert.match(actions, /composer-auto-approve/);
   assert.match(actions, /composer-goals/);
   assert.match(workflowLauncher, /composer-workflow/);
