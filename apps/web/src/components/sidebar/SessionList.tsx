@@ -37,6 +37,8 @@ import { Icon } from "../../icons.tsx";
 import { formatRelativeTime, getLocale, tr } from "../../i18n/index.ts";
 import { errorFeedback, successFeedback, tapFeedback } from "../../haptics.ts";
 import { horizontalDistance, SESSION_SWIPE_REVEAL, type GesturePoint } from "../../mobileGestures.ts";
+import { useShiftArmed } from "../../useShiftArmed.ts";
+import { useShellMode } from "../../responsiveShell.ts";
 
 const INITIAL_VISIBLE_SESSIONS = 6;
 const INLINE_LABEL_LIMIT = 6;
@@ -153,12 +155,15 @@ interface RowProps {
   onPinDrop: (targetId: string) => void;
   contextLabel?: string;
   pinnedWorktreeLabel?: string;
+  /** Shift-key customization mode (desktop): hovering the row reveals the
+   *  Archive/Delete quick actions without opening the menu. */
+  shiftQuick: boolean;
 }
 
 function SessionRow({
   s, activeSessionId, labels, eventsTitle, opening, relativeTime, selectMode, selected,
   onToggleSelect, onChanged, onOpen, onTogglePin, pinnedSection, onPinDragStart, onPinDrop,
-  contextLabel, pinnedWorktreeLabel,
+  contextLabel, pinnedWorktreeLabel, shiftQuick,
 }: RowProps) {
   const [menuOpen, setMenuOpen] = useState(false);
   const [labelPickerOpen, setLabelPickerOpen] = useState(false);
@@ -247,10 +252,8 @@ function SessionRow({
       });
   };
 
-  const quickDelete = async () => {
+  const performDelete = () => {
     const label = s.title || tr("sidebar.sessionlist.session");
-    const activity = needsDestructiveConfirm(s) ? ` ${tr("sidebar.sessionlist.theAgentIsStillRunningOr")}` : "";
-    if (!await confirmAlert(tr("sidebar.sessionlist.deleteValueValueThisPermanentlyRemovesThe", { label: label, activity: activity }), { title: tr("sidebar.sessionlist.deleteSession"), confirmLabel: tr("common.delete") })) return;
     void deleteSession(s.id)
       .then(() => {
         successFeedback();
@@ -262,6 +265,24 @@ function SessionRow({
         errorFeedback();
         setUiError(friendlyError(tr("common.error"), e));
       });
+  };
+
+  const quickDelete = async () => {
+    const label = s.title || tr("sidebar.sessionlist.session");
+    const activity = needsDestructiveConfirm(s) ? ` ${tr("sidebar.sessionlist.theAgentIsStillRunningOr")}` : "";
+    if (!await confirmAlert(tr("sidebar.sessionlist.deleteValueValueThisPermanentlyRemovesThe", { label: label, activity: activity }), { title: tr("sidebar.sessionlist.deleteSession"), confirmLabel: tr("common.delete") })) return;
+    performDelete();
+  };
+
+  // Shift-hover quick delete: deliberate (modifier held), so it skips the
+  // confirmation unless the session is still active.
+  const shiftQuickDelete = async () => {
+    if (needsDestructiveConfirm(s)) {
+      const label = s.title || tr("sidebar.sessionlist.session");
+      const activity = ` ${tr("sidebar.sessionlist.theAgentIsStillRunningOr")}`;
+      if (!await confirmAlert(tr("sidebar.sessionlist.deleteValueValueThisPermanentlyRemovesThe", { label: label, activity: activity }), { title: tr("sidebar.sessionlist.deleteSession"), confirmLabel: tr("common.delete") })) return;
+    }
+    performDelete();
   };
 
   const doRename = async () => {
@@ -357,7 +378,7 @@ function SessionRow({
 
   return (
     <div
-      className={`session-row ${rowStatus.kind}${contextLabel ? " search-result" : ""} ${s.id === activeSessionId ? "active" : ""} ${s.status === "archived" ? "archived" : ""}${menuOpen ? " menu-open" : ""}`}
+      className={`session-row ${rowStatus.kind}${contextLabel ? " search-result" : ""} ${s.id === activeSessionId ? "active" : ""} ${s.status === "archived" ? "archived" : ""}${menuOpen ? " menu-open" : ""}${shiftQuick && !renaming ? " shift-quick" : ""}`}
       style={swipeX === null ? undefined : { "--session-swipe-x": `${swipeX}px` } as CSSProperties}
       data-swipe={swipeX !== null ? "dragging" : swipeRevealed ? "revealed" : "closed"}
       draggable={pinnedSection}
@@ -539,7 +560,7 @@ function SessionRow({
           />
         )}
       </ResponsiveOverlay>
-      {!renaming && (swipeX !== null || swipeRevealed) && (
+      {!renaming && (swipeX !== null || swipeRevealed || shiftQuick) && (
         <span className="session-quick">
           {s.status !== "archived" && (
             <button
@@ -553,7 +574,7 @@ function SessionRow({
             className="session-quick-btn danger"
             title={tr("sidebar.sessionlist.deleteValue", { value: s.title || tr("sidebar.sessionlist.session") })}
             aria-label={tr("sidebar.sessionlist.deleteValue", { value: s.title || tr("sidebar.sessionlist.session") })}
-            onClick={quickDelete}
+            onClick={shiftQuick && swipeX === null && !swipeRevealed ? shiftQuickDelete : quickDelete}
           >✕</button>
         </span>
       )}
@@ -616,6 +637,11 @@ export default function SessionList({
   const [removeTarget, setRemoveTarget] = useState<Worktree | null>(null);
   const [deleteBranch, setDeleteBranch] = useState(false);
   const [removeBusy, setRemoveBusy] = useState(false);
+  // Shift-key customization mode is a desktop affordance: shift+hover reveals
+  // Archive/Delete on a row. Compact/touch shells keep swipe + menu only.
+  const shiftArmed = useShiftArmed();
+  const shellMode = useShellMode();
+  const shiftQuick = shiftArmed && shellMode === "wide" && !selectMode;
 
   useEffect(() => {
     setShowArchived(expandArchived);
@@ -762,6 +788,7 @@ export default function SessionList({
       onPinDrop={(targetId) => void dropPin(targetId)}
       contextLabel={contextLabel}
       pinnedWorktreeLabel={pinnedWorktreeLabel}
+      shiftQuick={shiftQuick}
     />
   );
 

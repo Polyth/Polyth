@@ -1,0 +1,57 @@
+import { useSyncExternalStore } from "react";
+
+// One shared Shift-modifier store for every Shift+hover quick-action surface
+// (session rows, the new-chat hero, the right rail, the sidebar gear). Shift
+// is tracked at the window before any hover begins, so pressing Shift and
+// then pointing at a row still arms it; keyup or window blur disarms.
+let shiftKeyDown = false;
+let listening = false;
+const subscribers = new Set<() => void>();
+
+const snapshot = (): boolean => shiftKeyDown;
+
+// Chrome retroactively marks the pointer-focused element :focus-visible on
+// ANY keydown — including a bare Shift — which painted a stark focus ring
+// ("black borders") the instant the quick-action modifier was held. This body
+// flag lets core CSS suppress that repaint for the bare-Shift hold only; any
+// other key pressed during the hold clears it immediately, so Shift+Tab
+// keyboard navigation keeps its ring.
+function setBodyShiftFlag(on: boolean): void {
+  if (typeof document === "undefined") return;
+  if (on) document.body.dataset.shiftHeld = "true";
+  else delete document.body.dataset.shiftHeld;
+}
+
+function setKeyDown(down: boolean): void {
+  setBodyShiftFlag(down);
+  if (shiftKeyDown === down) return;
+  shiftKeyDown = down;
+  for (const notify of [...subscribers]) notify();
+}
+
+function ensureListeners(): void {
+  if (listening || typeof window === "undefined") return;
+  listening = true;
+  window.addEventListener("keydown", (event) => {
+    if (event.key === "Shift") setKeyDown(true);
+    else setBodyShiftFlag(false);
+  });
+  window.addEventListener("keyup", (event) => {
+    if (event.key === "Shift") setKeyDown(false);
+  });
+  window.addEventListener("blur", () => setKeyDown(false));
+}
+
+/** True while the Shift key is held. Arms the shift-hover customization
+ *  affordances (session quick actions, hero customize, rail customize). */
+export function useShiftArmed(): boolean {
+  return useSyncExternalStore(
+    (onChange) => {
+      ensureListeners();
+      subscribers.add(onChange);
+      return () => { subscribers.delete(onChange); };
+    },
+    snapshot,
+    () => false,
+  );
+}

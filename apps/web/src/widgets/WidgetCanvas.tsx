@@ -36,6 +36,8 @@ import {
 } from "./widgetLibrary.ts";
 import "./builtinWidgets.tsx";
 import { tr } from "../i18n/index.ts";
+import { useShiftArmed } from "../useShiftArmed.ts";
+import { useShellMode } from "../responsiveShell.ts";
 
 const GRID_GAP = 10;
 const GRID_ROW = 36;
@@ -464,6 +466,12 @@ export default function WidgetCanvas() {
   const sessionId = useStore((state) => state.activeSessionId);
   const [menuOpen, setMenuOpen] = useState(false);
   useEscape(menuOpen, () => setMenuOpen(false));
+  // Shift-key customization mode: on desktop the add/remove trigger stays
+  // hidden until Shift is held over the canvas; compact shells keep it
+  // persistent (there is no modifier key to hold on touch).
+  const shiftArmed = useShiftArmed();
+  const wide = useShellMode() === "wide";
+  const customizeVisible = !wide || shiftArmed || menuOpen;
 
   useEffect(() => {
     ensureWidgets(canvasWidgets);
@@ -482,14 +490,6 @@ export default function WidgetCanvas() {
 
   return (
     <div className="widget-workspace">
-      <button
-        className="widget-menu-trigger"
-        aria-label={tr("widgets.widgetcanvas.addWidgets")}
-        aria-expanded={menuOpen}
-        onClick={() => setMenuOpen((open) => !open)}
-      >
-        <Icon.plus /><span>{tr("widgets.widgetcanvas.widgets")}</span>
-      </button>
       <div className="widget-canvas-grid">
         {cards.map(({ instanceId, placement, widget }) => (
           <WidgetCard
@@ -510,6 +510,18 @@ export default function WidgetCanvas() {
           context={{ editing: true, visibleWidgetIds: cards.map((card) => card.instanceId) }}
         />
       </div>
+      {/* Shift-key customization mode: the customize trigger is the canvas's
+          LAST item; the menu applies add/remove instantly. */}
+      {customizeVisible && (
+        <button
+          className="widget-menu-trigger"
+          aria-label={tr("widgets.widgetcanvas.addWidgets")}
+          aria-expanded={menuOpen}
+          onClick={() => setMenuOpen((open) => !open)}
+        >
+          <Icon.plus /><span>{tr("widgets.widgetcanvas.widgets")}</span>
+        </button>
+      )}
       {menuOpen && <WidgetMenu widgets={canvasWidgets} onClose={() => setMenuOpen(false)} />}
     </div>
   );

@@ -43,6 +43,8 @@ import { MOD } from "../format.ts";
 import { useKeymap } from "../../../../packages/hotkeys/widgets/hotkeys.ts";
 import { railIconFor } from "../railIcons.ts";
 import { Icon } from "../icons.tsx";
+import { Menu, type MenuEntry } from "./ui/index.ts";
+import { useShiftArmed } from "../useShiftArmed.ts";
 
 const NO_EVENTS: never[] = [];
 /** Fallback separator chrome before the real element is measured. */
@@ -241,6 +243,40 @@ export default function ContextRail() {
   const railButtons = openButton && !configuredRailButtons.some((button) => button.id === openButton.id)
     ? [openButton, ...configuredRailButtons]
     : configuredRailButtons;
+
+  // Shift-key customization mode: holding Shift over the rail reveals one
+  // customize trigger as the strip's LAST item. Its checkbox menu adds or
+  // removes capability panels instantly (checkbox entries keep the menu
+  // open), by moving the capability between the `more` and `technical`
+  // tiers of the per-project placement layout.
+  const shiftArmed = useShiftArmed();
+  const [customizeOpen, setCustomizeOpen] = useState(false);
+  const railIds = new Set(railButtons.map((button) => button.id));
+  const rankAfter = (tier: "more" | "technical") =>
+    Math.max(-1, ...resolved.filter((capability) => capability.tier === tier)
+      .map((capability) => capability.rank)) + 1;
+  const customizeEntries: MenuEntry[] = resolved
+    .filter((capability) => capability.tier !== "primary" && capability.descriptor.available())
+    .map((capability): MenuEntry => {
+      const id = capability.descriptor.id;
+      const inRail = railIds.has(id);
+      return {
+        id,
+        label: capability.descriptor.label,
+        kind: "checkbox",
+        checked: inRail,
+        // Terminal is a guaranteed workspace launcher and cannot leave the rail.
+        disabled: id === "terminal",
+        onSelect: () => {
+          if (inRail && rail !== null && (surfaceByCapability.get(id)?.id === rail || id === rail)) {
+            setRailPlugin(null);
+          }
+          setPlacementOverride(id, inRail
+            ? { tier: "technical", rank: rankAfter("technical") }
+            : { tier: "more", rank: rankAfter("more") });
+        },
+      };
+    });
   // Keep-alive: panels stay mounted once visited so their state survives
   // switching surfaces; surfaces that lose content-driven visibility unmount.
   const [visited, setVisited] = useState<string[]>([]);
@@ -675,6 +711,24 @@ export default function ContextRail() {
               <Badge n={s.badge} />
             </button>
             ))}
+            {(shiftArmed || customizeOpen) && (
+              <Menu
+                label={tr("settingsview.customize")}
+                align="end"
+                open={customizeOpen}
+                onOpenChange={setCustomizeOpen}
+                entries={customizeEntries}
+              >
+                {(trigger) => (
+                  <button
+                    {...trigger}
+                    className="rail-icon strip-btn rail-customize"
+                    title={tr("settingsview.customize")}
+                    aria-label={tr("settingsview.customize")}
+                  ><Icon.sliders /></button>
+                )}
+              </Menu>
+            )}
           </div>
         )}
       </aside>

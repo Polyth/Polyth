@@ -255,6 +255,15 @@ select { background-color: var(--elevated); }
   box-shadow: 0 0 0 4px var(--focus-wash);
 }
 :where(input, select, textarea):focus-visible { border-color: var(--accent-line); }
+/* Shift-key quick-action mode: Chrome retroactively marks the last
+   pointer-focused element :focus-visible on ANY keydown — a bare Shift
+   included — which painted stark outlines the instant the modifier was held.
+   useShiftArmed.ts raises this flag only for a bare Shift hold and clears it
+   on any other key, so Shift+Tab keyboard navigation keeps its ring. */
+body[data-shift-held] :focus-visible {
+  outline: none;
+  box-shadow: none;
+}
 
 code {
   font-family: var(--mono);
@@ -2314,6 +2323,11 @@ border-color: var(--accent); color: var(--accent); background: var(--accent-wash
   border-radius: calc(7px * var(--corner-radius-scale)); background: var(--accent); color: var(--accent-ink);
   font: 700 9px/13px var(--mono); text-align: center;
 }
+/* Shift-key customization mode: the strip's LAST item while Shift is held —
+   borderless like every strip button, accent-tinted as a customize verb. */
+.rail-customize { color: var(--accent); }
+.rail-customize:hover,
+.rail-customize[aria-expanded="true"] { color: var(--accent); background: var(--accent-wash); }
 .strip-sep { width: 20px; margin: 4px 0; flex-shrink: 0; border-top: 1px solid var(--border-soft); }
 .strip-spacer { flex: 1; min-height: 8px; }
 .strip-picker {
@@ -8511,6 +8525,44 @@ button[aria-busy="true"] { position: relative; }
 .session-row[data-swipe="dragging"] .session-quick > .session-quick-btn.danger,
 .session-row[data-swipe="revealed"] .session-quick > .session-quick-btn.danger {
   color: var(--red);
+}
+/* Shift-key customization mode (desktop): while Shift is held the row mounts
+   the same Archive/Delete quick layer the touch swipe uses; hovering or
+   focusing the row reveals it over the faded status zone and menu trigger.
+   Buttons keep the quiet quick-btn chrome (transparent border) — never the
+   default control border. Opacity, not display, keeps them tabbable. */
+@media (hover: hover) and (pointer: fine) {
+  .session-row.shift-quick .session-quick {
+    position: absolute;
+    z-index: 3;
+    top: 50%;
+    right: 4px;
+    transform: translateY(-50%);
+    display: flex;
+    gap: var(--space-1);
+    opacity: 0;
+    pointer-events: none;
+  }
+  .session-row.shift-quick:hover .session-quick,
+  .session-row.shift-quick .session-quick:focus-within {
+    opacity: 1;
+    pointer-events: auto;
+  }
+  .session-row.shift-quick .session-quick > .session-quick-btn {
+    width: 26px;
+    min-width: 26px;
+    height: 26px;
+    display: inline-grid;
+    place-items: center;
+    color: var(--text-dim);
+  }
+  .session-row.shift-quick .session-quick > .session-quick-btn.danger { color: var(--red); }
+  .session-row.shift-quick:hover .session-menu-trigger,
+  .session-row.shift-quick:has(.session-quick:focus-within) .session-menu-trigger {
+    opacity: 0;
+    pointer-events: none;
+  }
+  .session-row.shift-quick:has(.session-quick:focus-within) .session-status-zone { opacity: 0; }
 }
 @media (pointer: coarse), (max-width: 480px) {
 .session-row { touch-action: pan-y; }

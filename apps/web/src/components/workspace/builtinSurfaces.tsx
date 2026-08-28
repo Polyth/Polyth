@@ -27,6 +27,7 @@ import { dismissKeyboard } from "../../mobileViewport.ts";
 import { nextWorkingActivity, useUiSettings } from "../../uiPrefs.ts";
 import { useSheetTrigger } from "../mobile/sheetTrigger.ts";
 import { HeroWidget, HeroWidgetSettings } from "../mobile/HeroWidgets.tsx";
+import { useShiftArmed } from "../../useShiftArmed.ts";
 import { ago, displaySessionTitle } from "../../format.ts";
 import {
   noteStarterUsed,
@@ -59,6 +60,7 @@ function SessionHero({ starterContext }: { starterContext: StarterContext }) {
   // one offers exploration and planning.
   const shell = useShellMode();
   const starterPrefs = useStarterPrefs();
+  const shiftArmed = useShiftArmed();
   const [heroWidgetsOpen, setHeroWidgetsOpen] = useState(false);
   // §22: pointer-down activation, like every other sheet trigger.
   const starterPickerTrigger = useSheetTrigger(shell === "phone", () => {
@@ -93,13 +95,18 @@ function SessionHero({ starterContext }: { starterContext: StarterContext }) {
               }}
             />
           </div>
-          <button
-            type="button"
-            className="hero-widget-settings"
-            aria-label={tr("workspace.builtinsurfaces.customizeNewChatWidgets")}
-            title={tr("workspace.builtinsurfaces.customizeNewChatWidgets")}
-            {...heroWidgetsTrigger}
-          ><Icon.sliders /></button>
+          {/* Shift-key customization mode: on desktop the customize entry
+              stays hidden until Shift is held (hover reveals nothing else).
+              Compact shells keep the always-visible sheet trigger. */}
+          {(shell !== "wide" || shiftArmed || heroWidgetsOpen) && (
+            <button
+              type="button"
+              className="hero-widget-settings"
+              aria-label={tr("workspace.builtinsurfaces.customizeNewChatWidgets")}
+              title={tr("workspace.builtinsurfaces.customizeNewChatWidgets")}
+              {...heroWidgetsTrigger}
+            ><Icon.sliders /></button>
+          )}
         </div>
         <div className="hero-dock">
           <Composer />

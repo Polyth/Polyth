@@ -3,10 +3,11 @@
 // a single ellipsis trigger (hover-revealed on fine pointers, persistent on
 // touch). The menu carries delete/archive/pin/labels with correct ARIA menu
 // roles and the keyboard contract (focus lands in the menu, arrows cycle,
-// Escape closes back to the opener). Every permanent deletion confirms, with
+// Escape closes back to the opener). Every menu/swipe deletion confirms, with
 // additional activity context for a running session. Quick archive/delete
-// buttons exist only while a touch swipe is in progress — there is no
-// Shift-hover layer and no duplicated always-on icon set.
+// buttons mount while a touch swipe is in progress or while Shift is held on
+// a desktop shell (shift-quick mode); Shift-quick delete skips confirmation
+// for background rows and keeps it for sessions with live agent activity.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { register } from "node:module";
@@ -383,11 +384,11 @@ test("every permanent delete confirms; running sessions include activity context
   }
 });
 
-test("quick actions are swipe-only; keyboard reaches the same menu via Shift+F10", async () => {
+test("quick actions absent at rest; keyboard reaches the same menu via Shift+F10", async () => {
   const { container, unmount } = await mountList();
   try {
     const row = rowOf(container, "Idle session");
-    // No Shift-hover layer and no resting quick buttons: at rest the row has
+    // No resting quick buttons: without a swipe or a held Shift the row has
     // exactly two interactive elements — open button and menu trigger.
     assert.equal(row.querySelector(".session-quick"), null, "quick actions absent at rest");
     assert.equal(row.getAttribute("data-swipe"), "closed");
@@ -406,6 +407,78 @@ test("quick actions are swipe-only; keyboard reaches the same menu via Shift+F10
     assert.equal(openMenu(), null);
     assert.equal(document.activeElement, open, "focus returns to the row button");
   } finally {
+    await unmount();
+  }
+});
+
+test("holding Shift mounts quick actions; delete skips confirm only for background rows", async () => {
+  const { container, unmount } = await mountList();
+  const pressShift = () => act(async () => {
+    (dom as unknown as EventTarget).dispatchEvent(
+      new KeyboardEventCtor("keydown", { key: "Shift", shiftKey: true }) as unknown as Event,
+    );
+  });
+  const releaseShift = () => act(async () => {
+    (dom as unknown as EventTarget).dispatchEvent(
+      new KeyboardEventCtor("keyup", { key: "Shift" }) as unknown as Event,
+    );
+  });
+  try {
+    const idleRow = rowOf(container, "Idle session");
+    assert.equal(idleRow.querySelector(".session-quick"), null, "no quick layer before Shift");
+
+    await pressShift();
+    assert.ok(idleRow.classList.contains("shift-quick"), "held Shift arms the row");
+    const quick = idleRow.querySelector<HTMLElement>(".session-quick");
+    assert.ok(quick, "quick layer mounts while Shift is held");
+    assert.equal(quick!.querySelectorAll(".session-quick-btn").length, 2, "archive + delete");
+
+    // Background idle row: Shift-quick delete is immediate — no dialog.
+    fetchCalls.length = 0;
+    const idleDelete = quick!.querySelector<HTMLButtonElement>(".session-quick-btn.danger");
+    assert.ok(idleDelete);
+    await act(async () => {
+      idleDelete!.click();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    });
+    assert.equal(
+      container.querySelector('[role="dialog"][aria-label="Delete session"]'),
+      null,
+      "background rows delete without a confirmation",
+    );
+    assert.ok(
+      fetchCalls.some((c) => c.method === "DELETE" && c.url === "/api/sessions/s-idle"),
+      `immediate DELETE issued (got: ${JSON.stringify(fetchCalls)})`,
+    );
+
+    // The refresh stub answered [] — re-seed so the running row stays visible.
+    await act(async () => {
+      setSessions("p1", [
+        session({ id: "s-run", title: "Running session", status: "working", lastTurnAt: Date.now() - 10_000 }),
+      ]);
+    });
+    await pressShift();
+
+    // A session with live agent activity keeps its confirmation even in
+    // shift-quick mode.
+    const runRow = rowOf(container, "Running session");
+    fetchCalls.length = 0;
+    const runDelete = runRow.querySelector<HTMLButtonElement>(".session-quick .session-quick-btn.danger");
+    assert.ok(runDelete, "running row also mounts the quick layer");
+    await act(async () => { runDelete!.click(); });
+    const dialog = container.querySelector<HTMLElement>('[role="dialog"][aria-label="Delete session"]');
+    assert.ok(dialog, "active work keeps the delete confirmation");
+    await act(async () => {
+      dialog!.querySelector<HTMLButtonElement>(".ui-btn--quiet")!.click();
+    });
+    assert.equal(fetchCalls.filter((c) => c.method === "DELETE").length, 0, "declined confirm deletes nothing");
+
+    // Releasing Shift disarms the quick layer.
+    await releaseShift();
+    assert.equal(runRow.querySelector(".session-quick"), null, "quick layer unmounts on release");
+    assert.ok(!runRow.classList.contains("shift-quick"));
+  } finally {
+    await releaseShift();
     await unmount();
   }
 });

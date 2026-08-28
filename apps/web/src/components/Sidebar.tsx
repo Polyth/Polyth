@@ -19,6 +19,7 @@ import { useShellMode } from "../responsiveShell.ts";
 import { useModalSurface } from "./a11y/Dialog.tsx";
 import SlotHost from "./slots/SlotHost.ts";
 import { useSidebarExpanded } from "../sidebarPresentation.ts";
+import { useShiftArmed } from "../useShiftArmed.ts";
 import { useSidebarViewMode } from "../sidebarPrefs.ts";
 import EmptyState from "./EmptyState.tsx";
 import {
@@ -81,26 +82,13 @@ export default function Sidebar() {
   const [query, setQuery] = useState("");
   const [sort, setSort] = useState<"recent" | "name">("recent");
   const [connectionOpen, setConnectionOpen] = useState(false);
-  const [shiftHeld, setShiftHeld] = useState(false);
+  const shiftHeld = useShiftArmed();
   const [appearanceProjectId, setAppearanceProjectId] = useState<string | null>(null);
   const [attentionOnly, setAttentionOnly] = useState(false);
   const [pullDistance, setPullDistance] = useState(0);
   const [pullRefreshing, setPullRefreshing] = useState(false);
   const syncStatus = useSyncExternalStore(subscribeSyncStatus, getSyncStatus, () => "disconnected");
   const host = typeof location === "undefined" ? tr("sidebar.localServer") : location.host;
-
-  useEffect(() => {
-    const updateShift = (event: globalThis.KeyboardEvent) => setShiftHeld(event.shiftKey);
-    const clearShift = () => setShiftHeld(false);
-    window.addEventListener("keydown", updateShift);
-    window.addEventListener("keyup", updateShift);
-    window.addEventListener("blur", clearShift);
-    return () => {
-      window.removeEventListener("keydown", updateShift);
-      window.removeEventListener("keyup", updateShift);
-      window.removeEventListener("blur", clearShift);
-    };
-  }, []);
 
   // Persisted view mode: list shows the active project; tree expands projects
   // into worktrees and sessions. Expansion is per-project UI state.
