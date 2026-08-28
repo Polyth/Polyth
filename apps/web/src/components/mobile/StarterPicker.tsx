@@ -12,6 +12,7 @@ import {
   noteStarterUsed,
   reorderStarters,
   setStarterHidden,
+  setStarterShared,
   starterCategories,
   saveCustomStarter,
   toggleStarterPinned,
@@ -21,7 +22,7 @@ import {
   type StarterIconId,
 } from "../../starters.ts";
 import { tr } from "../../i18n/index.ts";
-import { Button, ResponsiveOverlay } from "../ui/index.ts";
+import { Button, Checkbox, ResponsiveOverlay } from "../ui/index.ts";
 import { useShellMode } from "../../responsiveShell.ts";
 
 const ICONS: Record<StarterIconId, () => React.ReactElement> = {
@@ -300,6 +301,15 @@ export default function StarterPicker({ context, commands, skills, onPick, onClo
           >
             {editAction.label}
           </Button>
+        </div>
+      )}
+      {editing && (
+        <div className="starter-sharing">
+          <Checkbox
+            checked={prefs.shared}
+            onChange={setStarterShared}
+            label={tr("mobile.starterpicker.shareAcrossProjects")}
+          />
         </div>
       )}
       <div role="listbox" aria-label={tr("mobile.starterpicker.starters")}>

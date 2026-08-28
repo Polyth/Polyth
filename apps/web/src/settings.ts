@@ -79,7 +79,7 @@ export const DEFAULT_SETTINGS: PolythSettings = {
   mobileSendShortcut: "none",
   defaultModel: "",
   autoTitleSessions: true,
-  showArchived: true,
+  showArchived: false,
   branchTemplate: "feat/{slug}",
   conflictAgentPrompt: "Walk through the merge conflicts in this worktree and resolve them, explaining each decision.",
   conflictAgentTarget: "new-session",

@@ -703,11 +703,6 @@ pre code { background: none; border: none; padding: 0; display: block; white-spa
   text-align: center;
 }
 .session-worktree-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.session-worktree-empty {
-  min-height: var(--nav-row-session);
-  padding: 10px 0 10px var(--nav-indent-session);
-  font-size: var(--nav-meta-size);
-}
 .session-worktree-actions {
   position: relative;
   z-index: 1;
@@ -2425,8 +2420,6 @@ html[data-density="compact"] .sidebar .side-search,
 body[data-density="compact"] .sidebar .side-search { margin-top: 10px; margin-bottom: 4px; }
 html[data-density="compact"] .sidebar .side-label,
 body[data-density="compact"] .sidebar .side-label { padding-top: 8px; padding-bottom: 4px; }
-html[data-density="compact"] .sidebar .session-worktree-empty,
-body[data-density="compact"] .sidebar .session-worktree-empty { padding-block: 6px; }
 html[data-density="balanced"] .sidebar,
 body[data-density="balanced"] .sidebar {
   --nav-row-project: 42px;
@@ -6838,6 +6831,7 @@ html[data-sheet="open"], html[data-sheet="open"] body { overflow: hidden; }
 .sheet-empty { margin: 0; padding: var(--space-5) var(--space-4); color: var(--muted); font-size: var(--font-label); text-align: center; }
 
 /* Starter authoring form */
+.starter-sharing { padding: var(--space-2) var(--space-3); }
 .starter-form { display: flex; flex-direction: column; gap: var(--space-4); padding: var(--space-2) var(--space-3) var(--space-4); }
 .starter-field { display: flex; flex-direction: column; gap: var(--space-2); }
 .starter-field > span { color: var(--muted); font-size: var(--font-meta); font-weight: 650; letter-spacing: .04em; text-transform: uppercase; }

@@ -473,6 +473,7 @@ export const en = {
   "mobile.starterpicker.reviewMyChanges": "Review my changes",
   "mobile.starterpicker.saveStarter": "Save starter",
   "mobile.starterpicker.searchStartersCommandsSkills": "Search starters, commands, skills",
+  "mobile.starterpicker.shareAcrossProjects": "Share across projects",
   "mobile.starterpicker.showValueInSuggestions": "Show {label} in suggestions",
   "mobile.starterpicker.starterIcon": "Starter icon",
   "mobile.starterpicker.starters": "Starters",

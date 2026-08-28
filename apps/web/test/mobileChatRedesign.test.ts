@@ -30,6 +30,7 @@ import {
   setHidden,
   starterCategories,
   starterContextFrom,
+  starterPrefsStorageKey,
   STARTER_RECENTS_MAX,
   togglePinned,
   visibleStarters,
@@ -41,7 +42,7 @@ import { defaultModelPrefs, reorderFavorite } from "@polyth/models";
 
 const read = (rel: string) => readFile(new URL(rel, import.meta.url), "utf8");
 const prefs = (patch: Partial<StarterPrefs> = {}): StarterPrefs =>
-  ({ pinned: [], hidden: [], recents: [], custom: [], ...patch });
+  ({ shared: false, pinned: [], hidden: [], recents: [], custom: [], ...patch });
 
 // ---- visual viewport geometry ----------------------------------------------
 
@@ -169,7 +170,7 @@ test("prefs transitions are pure and total", () => {
   assert.deepEqual(state.pinned, []);
 
   state = setHidden(prefs({ pinned: ["builtin:debug"] }), "builtin:debug", true);
-  assert.deepEqual(state, { pinned: [], hidden: ["builtin:debug"], recents: [], custom: [] });
+  assert.deepEqual(state, { shared: false, pinned: [], hidden: ["builtin:debug"], recents: [], custom: [] });
   assert.deepEqual(setHidden(state, "builtin:debug", false).hidden, []);
 
   state = prefs();
@@ -196,8 +197,8 @@ test("custom starters round-trip and delete cleanly", () => {
 });
 
 test("corrupt or hostile stored prefs degrade to defaults", () => {
-  assert.deepEqual(parseStarterPrefs(null), { pinned: [], hidden: [], recents: [], custom: [] });
-  assert.deepEqual(parseStarterPrefs("{not json"), { pinned: [], hidden: [], recents: [], custom: [] });
+  assert.deepEqual(parseStarterPrefs(null), { shared: false, pinned: [], hidden: [], recents: [], custom: [] });
+  assert.deepEqual(parseStarterPrefs("{not json"), { shared: false, pinned: [], hidden: [], recents: [], custom: [] });
   const parsed = parseStarterPrefs(JSON.stringify({
     pinned: ["a", "a", 7],
     custom: [{ id: "custom:x", label: "x", prompt: "p", icon: "not-an-icon" }, { nope: true }],
@@ -205,6 +206,16 @@ test("corrupt or hostile stored prefs degrade to defaults", () => {
   assert.deepEqual(parsed.pinned, ["a"]);
   assert.equal(parsed.custom.length, 1);
   assert.equal(parsed.custom[0]?.icon, "bookmark");
+});
+
+test("starter prefs default to project scope and expose the shared picker control", async () => {
+  assert.equal(starterPrefsStorageKey("project-a"), "polyth.starters.v1.project-a");
+  assert.equal(parseStarterPrefs(JSON.stringify({ shared: true })).shared, true);
+  assert.equal(parseStarterPrefs(JSON.stringify({ shared: "yes" })).shared, false);
+
+  const picker = await read("../src/components/mobile/StarterPicker.tsx");
+  assert.ok(picker.includes("setStarterShared"), "the picker can change preference scope");
+  assert.ok(picker.includes('tr("mobile.starterpicker.shareAcrossProjects")'), "the shared control is translated");
 });
 
 test("model favorites reorder only inside an explicit edit", () => {

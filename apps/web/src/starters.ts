@@ -12,6 +12,7 @@
 // contract is testable without a DOM.
 import { useSyncExternalStore } from "react";
 import { tr } from "./i18n/index.ts";
+import { getState, subscribeStore } from "./store.ts";
 
 /** Icon ids are keys of the one shared icon set (icons.tsx) — never ad-hoc art. */
 export type StarterIconId =
@@ -233,6 +234,8 @@ export interface CustomStarter {
 }
 
 export interface StarterPrefs {
+  /** Apply this configuration to every project instead of only the active one. */
+  shared: boolean;
   /** Pinned starters, in the user's drag order. They lead the chip row. */
   pinned: string[];
   /** Built-ins the user removed from suggestions. Never deleted, only hidden. */
@@ -246,7 +249,11 @@ export const STARTER_PREFS_KEY = "polyth.starters.v1";
 export const STARTER_RECENTS_MAX = 8;
 export const STARTER_CUSTOM_MAX = 64;
 
-export const STARTER_PREFS_DEFAULTS: StarterPrefs = { pinned: [], hidden: [], recents: [], custom: [] };
+export const STARTER_PREFS_DEFAULTS: StarterPrefs = { shared: false, pinned: [], hidden: [], recents: [], custom: [] };
+
+export function starterPrefsStorageKey(projectId: string): string {
+  return `${STARTER_PREFS_KEY}.${projectId}`;
+}
 
 const ICON_IDS: readonly StarterIconId[] = [
   "target", "branch", "files", "plan", "book", "shield", "term",
@@ -279,6 +286,7 @@ export function parseStarterPrefs(raw: string | null): StarterPrefs {
           .slice(0, STARTER_CUSTOM_MAX)
       : [];
     return {
+      shared: data.shared === true,
       pinned: strings(data.pinned, 32),
       hidden: strings(data.hidden, 64),
       recents: strings(data.recents, STARTER_RECENTS_MAX),
@@ -438,21 +446,50 @@ export function matchesStarter(starter: Starter, query: string): boolean {
 
 // ---- reactive store ---------------------------------------------------------
 
-const read = (): string | null => {
-  try { return localStorage.getItem(STARTER_PREFS_KEY); } catch { return null; }
+function readStored(key: string): string | null {
+  try { return localStorage.getItem(key); } catch { return null; }
+}
+
+function read(projectId: string | null): StarterPrefs {
+  const globalRaw = readStored(STARTER_PREFS_KEY);
+  const globalPrefs = parseStarterPrefs(globalRaw);
+  if (globalRaw !== null && globalPrefs.shared) return globalPrefs;
+  if (projectId === null) return globalPrefs;
+
+  const projectRaw = readStored(starterPrefsStorageKey(projectId));
+  return projectRaw === null
+    ? globalPrefs
+    : { ...parseStarterPrefs(projectRaw), shared: false };
+}
+
+const write = (key: string, value: string): void => {
+  try { localStorage.setItem(key, value); } catch { /* private mode */ }
 };
-const write = (value: string): void => {
-  try { localStorage.setItem(STARTER_PREFS_KEY, value); } catch { /* private mode */ }
+const remove = (key: string): void => {
+  try { localStorage.removeItem(key); } catch { /* private mode */ }
 };
 
-let prefs: StarterPrefs = parseStarterPrefs(read());
+let activeProjectId = getState().activeProjectId;
+let prefs: StarterPrefs = read(activeProjectId);
 const listeners = new Set<() => void>();
 
 function commit(next: StarterPrefs): void {
   prefs = next;
-  write(serializeStarterPrefs(prefs));
+  if (prefs.shared) {
+    write(STARTER_PREFS_KEY, serializeStarterPrefs(prefs));
+  } else if (activeProjectId !== null) {
+    write(starterPrefsStorageKey(activeProjectId), serializeStarterPrefs(prefs));
+  }
   for (const listener of [...listeners]) listener();
 }
+
+subscribeStore(() => {
+  const nextProjectId = getState().activeProjectId;
+  if (nextProjectId === activeProjectId) return;
+  activeProjectId = nextProjectId;
+  prefs = read(activeProjectId);
+  for (const listener of [...listeners]) listener();
+});
 
 export function getStarterPrefs(): StarterPrefs {
   return prefs;
@@ -460,6 +497,12 @@ export function getStarterPrefs(): StarterPrefs {
 
 export function toggleStarterPinned(id: string): void {
   commit(togglePinned(prefs, id));
+}
+
+export function setStarterShared(shared: boolean): void {
+  if (prefs.shared === shared) return;
+  if (!shared) remove(STARTER_PREFS_KEY);
+  commit({ ...prefs, shared });
 }
 
 export function setStarterHidden(id: string, hidden: boolean): void {

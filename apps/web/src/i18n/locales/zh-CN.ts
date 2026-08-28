@@ -470,6 +470,7 @@ export const zhCN: AppMessages = {
   "mobile.starterpicker.reviewMyChanges": "查看我的更改",
   "mobile.starterpicker.saveStarter": "保存起始",
   "mobile.starterpicker.searchStartersCommandsSkills": "搜索起始词、命令、技能",
+  "mobile.starterpicker.shareAcrossProjects": "在项目间共享",
   "mobile.starterpicker.showValueInSuggestions": "在建议中显示{label}",
   "mobile.starterpicker.starterIcon": "启动器图标",
   "mobile.starterpicker.starters": "首发阵容",

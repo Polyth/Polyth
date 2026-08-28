@@ -470,6 +470,7 @@ export const bg: AppMessages = {
   "mobile.starterpicker.reviewMyChanges": "Преглед на промените ми",
   "mobile.starterpicker.saveStarter": "Запазване на стартера",
   "mobile.starterpicker.searchStartersCommandsSkills": "Търсене на начинаещи, команди, умения",
+  "mobile.starterpicker.shareAcrossProjects": "Споделяне между проекти",
   "mobile.starterpicker.showValueInSuggestions": "Показване на {label} в предложенията",
   "mobile.starterpicker.starterIcon": "Икона за начинаещи",
   "mobile.starterpicker.starters": "Стартери",
