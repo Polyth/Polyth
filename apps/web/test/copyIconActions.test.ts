@@ -9,9 +9,11 @@ test("copy and message actions are icon-only with hover and accessible names", a
   ]);
 
   assert.match(copy, /label = tr\("copybutton\.copyToClipboard"\)/);
-  assert.match(copy, /aria-label=\{actionLabel\}/);
+  assert.match(copy, /<IconButton/);
+  assert.match(copy, /icon=\{done \? CopiedIcon : CopyIcon\}/);
+  assert.match(copy, /label=\{actionLabel\}/);
   assert.match(copy, /title=\{actionLabel\}/);
-  assert.match(copy, /<Icon\.(?:check|copy)/);
+  assert.doesNotMatch(copy, /<button/);
 
   for (const icon of ["copy", "fork", "rewind"]) {
     assert.match(timeline, new RegExp(`<Icon\\.${icon}`));

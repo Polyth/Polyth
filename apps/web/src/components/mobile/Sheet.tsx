@@ -12,7 +12,7 @@
 //     summon the keyboard; focus starts on the sheet itself.
 import {
   useCallback, useEffect, useRef, useState,
-  type PointerEvent as ReactPointerEvent, type ReactNode,
+  type PointerEvent as ReactPointerEvent, type ReactNode, type RefObject,
 } from "react";
 import { createPortal } from "react-dom";
 import { useModalSurface } from "../a11y/Dialog.tsx";
@@ -42,6 +42,8 @@ export interface SheetProps {
   className?: string;
   /** `tall` reserves near-fullscreen height for long, searchable lists. */
   size?: "auto" | "tall";
+  /** Explicit focus destination after every close path. */
+  restoreFocusRef?: RefObject<HTMLElement | null>;
 }
 
 /** Body scroll lock: a sheet is modal, the page behind it must not scroll. */
@@ -56,6 +58,7 @@ export default function Sheet({
   footer,
   className,
   size = "auto",
+  restoreFocusRef,
 }: SheetProps) {
   const panelRef = useRef<HTMLDivElement>(null);
   const [drag, setDrag] = useState(0);
@@ -70,6 +73,7 @@ export default function Sheet({
     // The panel itself takes focus: sheets open silently, without raising the
     // keyboard through an autofocused search field.
     initialFocus: "[data-sheet-focus]",
+    ...(restoreFocusRef ? { resolveRestoreFocus: () => restoreFocusRef.current } : {}),
   });
 
   useEffect(() => {

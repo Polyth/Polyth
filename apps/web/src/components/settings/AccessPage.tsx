@@ -7,6 +7,7 @@ import { api, type AuthDeviceDto, type AuthStatusDto } from "@polyth/session/web
 import { confirmAlert } from "../../alerts.ts";
 import { EmptyState, PageHead, Row } from "./parts.tsx";
 import { getLocale, tr } from "../../i18n/index.ts";
+import { Button } from "../ui/index.ts";
 
 const when = (ts: number): string => new Date(ts).toLocaleString(getLocale());
 
@@ -79,13 +80,13 @@ export default function AccessPage() {
               : deviceLabel(d.label)}
             hint={tr("settings.accesspage.signedInValueLastSeenValue", { value: when(d.createdAt), value2: when(d.lastSeenAt) })}
           >
-            <button className="small-btn" onClick={() => revoke(d.id)}>
+            <Button size="sm" onClick={() => revoke(d.id)}>
               {d.current ? tr("settings.accesspage.signOut") : tr("settings.accesspage.revoke")}
-            </button>
+            </Button>
           </Row>
         ))}
       <Row label={tr("settings.accesspage.signOutEverywhere")} hint={tr("settings.accesspage.revokesEveryRememberedDeviceSessionIncludingThis")} itemId="access.logout-all">
-        <button className="small-btn danger" onClick={signOutAll}>{tr("settings.accesspage.signOutAllDevices")}</button>
+        <Button size="sm" variant="danger" onClick={() => void signOutAll()}>{tr("settings.accesspage.signOutAllDevices")}</Button>
       </Row>
     </>
   );

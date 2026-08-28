@@ -12,6 +12,7 @@ import { Icon } from "../icons.tsx";
 import { setUiError } from "../store.ts";
 import SlotHost from "./slots/SlotHost.ts";
 import { tr } from "../i18n/index.ts";
+import { Button, CloseIcon, ExternalLinkIcon, IconButton } from "./ui/index.ts";
 
 const SECTIONS = [tr("workstatus.usage"), tr("workstatus.tasks"), tr("workstatus.agents")] as const;
 type SectionId = typeof SECTIONS[number];
@@ -76,7 +77,7 @@ export default function WorkStatus({ model }: { model: RenderModel }) {
     return (
       <div className="work-status all-hidden">
         <span className="muted">{tr("workstatus.workStatusSectionsHidden")}</span>
-        <button className="small-btn" onClick={restoreAll}>{tr("workstatus.restoreSections")}</button>
+        <Button size="sm" onClick={restoreAll}>{tr("workstatus.restoreSections")}</Button>
       </div>
     );
   }
@@ -87,7 +88,7 @@ export default function WorkStatus({ model }: { model: RenderModel }) {
         <section className="work-status-section" id="ws-usage">
           <header>
             <span>{SECTION_LABEL.usage}</span>
-            <button className="ws-hide" title={tr("workstatus.hideSection")} onClick={() => hide("usage")}>✕</button>
+            <IconButton icon={CloseIcon} size="sm" className="ws-hide" label={tr("workstatus.hideSection")} onClick={() => hide("usage")} />
           </header>
           <div className="ws-body ws-usage">
             <span className="mono">{fmtTokens(model.totals.input + model.totals.output)} {tr("workstatus.tokens")}</span>
@@ -100,7 +101,7 @@ export default function WorkStatus({ model }: { model: RenderModel }) {
         <section className="work-status-section" id="ws-tasks">
           <header>
             <span>{SECTION_LABEL.tasks} ({model.tasks.items.filter((t) => t.status === "done").length}/{model.tasks.items.length})</span>
-            <button className="ws-hide" title={tr("workstatus.hideSection")} onClick={() => hide("tasks")}>✕</button>
+            <IconButton icon={CloseIcon} size="sm" className="ws-hide" label={tr("workstatus.hideSection")} onClick={() => hide("tasks")} />
           </header>
           <div className="ws-body">
             {model.tasks.items.map((t) => (
@@ -118,7 +119,7 @@ export default function WorkStatus({ model }: { model: RenderModel }) {
         <section className="work-status-section" id="ws-agents">
           <header>
             <span>{SECTION_LABEL.agents} ({model.subagents.agents.length})</span>
-            <button className="ws-hide" title={tr("workstatus.hideSection")} onClick={() => hide("agents")}>✕</button>
+            <IconButton icon={CloseIcon} size="sm" className="ws-hide" label={tr("workstatus.hideSection")} onClick={() => hide("agents")} />
           </header>
           <div className="ws-body">
             {model.subagents.agents.map((a) => (
@@ -129,14 +130,16 @@ export default function WorkStatus({ model }: { model: RenderModel }) {
                   {a.currentTask && <span className="muted ws-agent-task">{a.currentTask}</span>}
                 </span>
                 <span className="tag">{a.status}</span>
-                <button
+                <Button
+                  size="sm"
                   className="ws-agent-open"
+                  iconEnd={ExternalLinkIcon}
                   onClick={() => void openSession(a.sessionId).catch((error) =>
                     setUiError(error instanceof Error ? error.message : String(error)))}
                   aria-label={`Open child session ${a.label}`}
                 >
-                  Open <Icon.external />
-                </button>
+                  Open
+                </Button>
               </div>
             ))}
           </div>
@@ -152,7 +155,7 @@ export default function WorkStatus({ model }: { model: RenderModel }) {
         }}
       />
       {hidden.length > 0 && (
-        <button className="ghost-link ws-restore" onClick={restoreAll}>{tr("workstatus.restoreHiddenSections")}</button>
+        <Button size="sm" variant="ghost" className="ws-restore" onClick={restoreAll}>{tr("workstatus.restoreHiddenSections")}</Button>
       )}
     </div>
   );

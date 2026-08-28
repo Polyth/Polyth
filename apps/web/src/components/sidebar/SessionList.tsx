@@ -20,7 +20,7 @@ import { copyText, firstUserTextCached } from "../../utils.ts";
 import { announce } from "../a11y/live.tsx";
 import { worktreeLabel } from "../../worktreeSessions.ts";
 import SlotHost from "../slots/SlotHost.ts";
-import Dialog from "../a11y/Dialog.tsx";
+import { Button, Checkbox, Dialog, Menu, type MenuEntry } from "../ui/index.ts";
 import {
   reorderPinnedSessions,
   sortPinnedSessions,
@@ -135,60 +135,11 @@ interface RowProps {
   pinnedWorktreeLabel?: string;
 }
 
-/** Finding 4 guard: destructive quick actions confirm first while the agent
- *  is running or a question/permission is waiting; otherwise act immediately. */
+/** Destructive actions confirm first while the agent is running or a
+ *  question/permission is waiting; otherwise act immediately. */
 function needsDestructiveConfirm(s: SessionProjection): boolean {
   return s.status === "working" || s.status === "waiting"
     || (s.attention?.questions ?? 0) > 0 || (s.attention?.permissions ?? 0) > 0;
-}
-
-// Finding 4: Shift is tracked in a module-level store whose window listeners
-// attach on first row mount — not after a row is hovered — so pressing Shift
-// before pointing at a row still arms it. Pointer moves over rows also feed
-// the sampled `event.shiftKey` in, covering inputs whose key events never
-// reach the window (synthesized pointers). Either signal arms; releasing
-// Shift (keyup or window blur) disarms both.
-let shiftKeyDown = false;
-let shiftSampled = false;
-let shiftListening = false;
-const shiftSubscribers = new Set<() => void>();
-const isShiftArmed = () => shiftKeyDown || shiftSampled;
-
-function publishShift(prev: boolean) {
-  if (isShiftArmed() === prev) return;
-  for (const notify of shiftSubscribers) notify();
-}
-
-function sampleShiftModifier(shiftKey: boolean) {
-  const prev = isShiftArmed();
-  shiftSampled = shiftKey;
-  publishShift(prev);
-}
-
-function setShiftKeyDown(down: boolean) {
-  const prev = isShiftArmed();
-  shiftKeyDown = down;
-  if (!down) shiftSampled = false; // releasing Shift disarms immediately
-  publishShift(prev);
-}
-
-function ensureShiftListeners() {
-  if (shiftListening) return;
-  shiftListening = true;
-  window.addEventListener("keydown", (e) => { if (e.key === "Shift") setShiftKeyDown(true); });
-  window.addEventListener("keyup", (e) => { if (e.key === "Shift") setShiftKeyDown(false); });
-  window.addEventListener("blur", () => setShiftKeyDown(false));
-}
-
-function useShiftArmed(): boolean {
-  return useSyncExternalStore(
-    (onChange) => {
-      ensureShiftListeners();
-      shiftSubscribers.add(onChange);
-      return () => { shiftSubscribers.delete(onChange); };
-    },
-    isShiftArmed,
-  );
 }
 
 function SessionRow({
@@ -201,16 +152,11 @@ function SessionRow({
   const [title, setTitle] = useState(s.title);
   const [swipeRevealed, setSwipeRevealed] = useState(false);
   const [swipeX, setSwipeX] = useState<number | null>(null);
-  // Shift+hover arms the quick actions (they stay keyboard-reachable through
-  // :focus-within regardless of the modifier).
-  const [hovered, setHovered] = useState(false);
-  const shiftHeld = useShiftArmed();
-  const quickArmed = hovered && shiftHeld;
-  const menuRef = useRef<HTMLDivElement>(null);
   const sessionBtnRef = useRef<HTMLButtonElement>(null);
-  const menuTriggerRef = useRef<HTMLButtonElement>(null);
-  const moreBtnRef = useRef<HTMLButtonElement>(null);
-  const menuReturnRef = useRef<HTMLButtonElement | null>(null);
+  // Menus opened from the row itself (context menu, long-press, Shift+F10)
+  // return focus to the row button; trigger-opened menus fall back to the
+  // trigger inside ui/Menu.
+  const menuReturnRef = useRef<HTMLElement | null>(null);
   const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const longPressOpenedRef = useRef(false);
   const swipeStartRef = useRef<GesturePoint | null>(null);
@@ -218,15 +164,6 @@ function SessionRow({
   const now = useNowTick(s.status === "working");
   const rowStatus = sessionRowStatus(s, now);
 
-  // Both mouse and pointer flavors are wired (idempotent, so duplicates are
-  // harmless): pointer events cover inputs that never synthesize mouseenter,
-  // and every move re-samples the modifier so arming stays live even when the
-  // Shift keydown itself is missed.
-  const hoverUpdate = (event: { shiftKey: boolean }) => {
-    setHovered(true);
-    sampleShiftModifier(event.shiftKey);
-  };
-  const hoverEnd = () => setHovered(false);
   const cancelLongPress = () => {
     if (longPressTimerRef.current !== null) clearTimeout(longPressTimerRef.current);
     longPressTimerRef.current = null;
@@ -277,49 +214,7 @@ function SessionRow({
     setSwipeX(null);
   };
 
-  useEffect(() => {
-    if (!menuOpen) return;
-    const h = (e: MouseEvent) => {
-      const target = e.target as Node;
-      if (
-        menuRef.current
-        && !menuRef.current.contains(target)
-        && !menuTriggerRef.current?.contains(target)
-        && !moreBtnRef.current?.contains(target)
-      ) setMenuOpen(false);
-    };
-    document.addEventListener("mousedown", h);
-    return () => document.removeEventListener("mousedown", h);
-  }, [menuOpen]);
   useEffect(() => () => cancelLongPress(), []);
-
-  // Menu keyboard contract: focus lands on the first item on open; arrows
-  // cycle; Escape closes and returns focus to the session button.
-  useEffect(() => {
-    if (!menuOpen) return;
-    menuRef.current?.querySelector<HTMLButtonElement>('[role^="menuitem"]')?.focus();
-  }, [menuOpen]);
-
-  const onMenuKey = (e: React.KeyboardEvent<HTMLDivElement>) => {
-    if (e.key === "Escape") {
-      e.preventDefault();
-      e.stopPropagation();
-      setMenuOpen(false);
-      menuReturnRef.current?.focus();
-      return;
-    }
-    if (e.key !== "ArrowDown" && e.key !== "ArrowUp" && e.key !== "Home" && e.key !== "End") return;
-    const items = [...(menuRef.current?.querySelectorAll<HTMLButtonElement>('[role^="menuitem"]') ?? [])];
-    if (items.length === 0) return;
-    e.preventDefault();
-    const current = items.indexOf(document.activeElement as HTMLButtonElement);
-    const next =
-      e.key === "Home" ? 0
-      : e.key === "End" ? items.length - 1
-      : current < 0 ? (e.key === "ArrowDown" ? 0 : items.length - 1)
-      : (current + (e.key === "ArrowDown" ? 1 : -1) + items.length) % items.length;
-    items[next]?.focus();
-  };
 
   const quickArchive = async () => {
     const label = s.title || tr("sidebar.sessionlist.session");
@@ -389,29 +284,61 @@ function SessionRow({
   const displayTitle = deriveSessionTitle(s.title, eventsTitle);
   const hoverTitle = fullSessionTitle(s.title, eventsTitle);
   const activityLabel = sessionActivityLabel(s, relativeTime);
+  const actionsLabel = tr("sidebar.sessionlist.actionsForValue", { value: s.title || tr("sidebar.sessionlist.session") });
+  const checkedLabels = s.labelIds ?? [];
+  const menuEntries: MenuEntry[] = [
+    { id: "rename", label: tr("common.rename"), onSelect: () => { setTitle(s.title); setRenaming(true); } },
+    {
+      id: "fork",
+      label: tr("sidebar.sessionlist.fork"),
+      onSelect: () => void forkSession(s.id).catch((e) => setUiError(friendlyError(tr("common.error"), e))),
+    },
+    { id: "copy-id", label: tr("sidebar.sessionlist.copySessionId"), onSelect: () => void copySessionId() },
+    {
+      id: "pin",
+      label: s.pinned ? tr("sidebar.sessionlist.unpin") : tr("sidebar.sessionlist.pinToTop"),
+      onSelect: () => onTogglePin(s),
+    },
+    "separator",
+    s.status === "archived"
+      ? {
+          id: "restore",
+          label: tr("common.restore"),
+          onSelect: () => void restoreSession(s.id).then(onChanged).catch((e) => setUiError(friendlyError(tr("common.error"), e))),
+        }
+      : { id: "archive", label: tr("common.archive"), onSelect: () => void quickArchive() },
+    { id: "delete", label: tr("common.delete"), danger: true, onSelect: () => void quickDelete() },
+    ...(labels.length > 0 ? [{ heading: tr("sidebar.sessionlist.labels") }] : []),
+    ...labels.map((l): MenuEntry => ({
+      id: `label-${l.id}`,
+      label: l.name,
+      kind: "checkbox",
+      checked: checkedLabels.includes(l.id),
+      swatch: l.color,
+      onSelect: () => void toggleLabel(l.id),
+    })),
+  ];
+  const openRowMenu = () => {
+    menuReturnRef.current = sessionBtnRef.current;
+    setMenuOpen(true);
+  };
 
   return (
     <div
-      className={`session-row ${rowStatus.kind}${contextLabel ? " search-result" : ""} ${s.id === activeSessionId ? "active" : ""} ${s.status === "archived" ? "archived" : ""}${quickArmed ? " quick-armed" : ""}${menuOpen ? " menu-open" : ""}`}
+      className={`session-row ${rowStatus.kind}${contextLabel ? " search-result" : ""} ${s.id === activeSessionId ? "active" : ""} ${s.status === "archived" ? "archived" : ""}${menuOpen ? " menu-open" : ""}`}
       style={swipeX === null ? undefined : { "--session-swipe-x": `${swipeX}px` } as CSSProperties}
       data-swipe={swipeX !== null ? "dragging" : swipeRevealed ? "revealed" : "closed"}
       draggable={pinnedSection}
       onDragStart={() => { if (pinnedSection) onPinDragStart(s.id); }}
       onDragOver={(event) => { if (pinnedSection) event.preventDefault(); }}
       onDrop={(event) => { if (pinnedSection) { event.preventDefault(); onPinDrop(s.id); } }}
-      onMouseEnter={hoverUpdate}
-      onMouseMove={hoverUpdate}
-      onMouseLeave={hoverEnd}
-      onPointerEnter={hoverUpdate}
       onPointerDown={startSwipe}
-      onPointerMove={(event) => { hoverUpdate(event); moveSwipe(event); }}
+      onPointerMove={moveSwipe}
       onPointerUp={finishSwipe}
       onPointerCancel={cancelSwipe}
-      onPointerLeave={hoverEnd}
       onContextMenu={(event) => {
         event.preventDefault();
-        menuReturnRef.current = sessionBtnRef.current;
-        setMenuOpen(true);
+        openRowMenu();
       }}
     >
       {selectMode && (
@@ -466,8 +393,7 @@ function SessionRow({
           onKeyDown={(event) => {
             if (event.key === "ContextMenu" || (event.shiftKey && event.key === "F10")) {
               event.preventDefault();
-              menuReturnRef.current = sessionBtnRef.current;
-              setMenuOpen(true);
+              openRowMenu();
             }
           }}
         >
@@ -503,103 +429,52 @@ function SessionRow({
         </button>
       )}
       {!renaming && (
-        <button
-          ref={menuTriggerRef}
-          className="session-menu-btn"
-          title={tr("sidebar.sessionlist.actionsForValue", { value: s.title || tr("sidebar.sessionlist.session") })}
-          aria-label={tr("sidebar.sessionlist.actionsForValue", { value: s.title || tr("sidebar.sessionlist.session") })}
-          aria-haspopup="menu"
-          aria-expanded={menuOpen}
-          onClick={() => {
-            menuReturnRef.current = menuTriggerRef.current;
-            setMenuOpen((current) => !current);
-          }}
+        <Menu
+          label={actionsLabel}
+          title={displayTitle}
+          align="end"
+          open={menuOpen}
+          onOpenChange={setMenuOpen}
+          returnFocusRef={menuReturnRef}
+          entries={menuEntries}
+          footer={<SlotHost slot="sidebar.session.actions" context={{ sessionId: s.id, status: s.status }} />}
         >
-          <Icon.more />
-        </button>
-      )}
-      <span className="session-quick">
-        {!renaming && (
-          <button
-            type="button"
-            ref={moreBtnRef}
-            className="session-quick-btn session-more-btn"
-            aria-label={`${tr("common.more")}: ${displayTitle}`}
-            aria-haspopup="menu"
-            aria-expanded={menuOpen}
-            onClick={() => {
-              menuReturnRef.current = moreBtnRef.current;
-              tapFeedback();
-              setSwipeRevealed(false);
-              setMenuOpen((open) => !open);
-            }}
-          ><Icon.more /></button>
-        )}
-        {s.status !== "archived" && (
-          <button
-            className="session-quick-btn"
-            title={tr("sidebar.sessionlist.archiveValueShiftHoverQuickAction", { value: s.title || tr("sidebar.sessionlist.session") })}
-            aria-label={tr("sidebar.sessionlist.archiveValue2", { value: s.title || tr("sidebar.sessionlist.session") })}
-            onClick={quickArchive}
-          ><Icon.download /></button>
-        )}
-        <button
-          className="session-quick-btn danger"
-          title={tr("sidebar.sessionlist.deleteValueShiftHoverQuickAction", { value: s.title || tr("sidebar.sessionlist.session") })}
-          aria-label={tr("sidebar.sessionlist.deleteValue", { value: s.title || tr("sidebar.sessionlist.session") })}
-          onClick={quickDelete}
-        >✕</button>
-      </span>
-      {menuOpen && (
-        <div
-          className="session-menu"
-          role="menu"
-          aria-label={tr("sidebar.sessionlist.actionsForValue", { value: s.title || tr("sidebar.sessionlist.session") })}
-          ref={menuRef}
-          onKeyDown={onMenuKey}
-        >
-          <button role="menuitem" onClick={() => { setMenuOpen(false); setTitle(s.title); setRenaming(true); }}>{tr("common.rename")}</button>
-          <button role="menuitem" onClick={() => {
-            setMenuOpen(false);
-            void forkSession(s.id).catch((e) => setUiError(friendlyError(tr("common.error"), e)));
-          }}>{tr("sidebar.sessionlist.fork")}</button>
-          <button role="menuitem" onClick={() => { void copySessionId(); }}>
-            {tr("sidebar.sessionlist.copySessionId")}
-          </button>
-          <button role="menuitem" onClick={() => { setMenuOpen(false); onTogglePin(s); }}>
-            {s.pinned ? tr("sidebar.sessionlist.unpin") : tr("sidebar.sessionlist.pinToTop")}
-          </button>
-          <div className="session-menu-danger-separator" role="separator" />
-          {s.status === "archived" ? (
-            <button role="menuitem" onClick={() => {
-              setMenuOpen(false);
-              void restoreSession(s.id).then(onChanged).catch((e) => setUiError(friendlyError(tr("common.error"), e)));
-            }}>{tr("common.restore")}</button>
-          ) : (
+          {(trigger) => (
             <button
-              role="menuitem"
+              {...trigger}
+              type="button"
+              className="session-menu-trigger"
+              title={actionsLabel}
+              aria-label={actionsLabel}
               onClick={() => {
-                setMenuOpen(false);
-                quickArchive();
+                menuReturnRef.current = null;
+                tapFeedback();
+                setSwipeRevealed(false);
+                trigger.onClick();
               }}
-            >{tr("common.archive")}</button>
+            >
+              <Icon.more />
+            </button>
+          )}
+        </Menu>
+      )}
+      {!renaming && (swipeX !== null || swipeRevealed) && (
+        <span className="session-quick">
+          {s.status !== "archived" && (
+            <button
+              className="session-quick-btn"
+              title={tr("sidebar.sessionlist.archiveValue2", { value: s.title || tr("sidebar.sessionlist.session") })}
+              aria-label={tr("sidebar.sessionlist.archiveValue2", { value: s.title || tr("sidebar.sessionlist.session") })}
+              onClick={quickArchive}
+            ><Icon.download /></button>
           )}
           <button
-            role="menuitem"
-            className="danger"
-            onClick={() => {
-              setMenuOpen(false);
-              quickDelete();
-            }}
-          >{tr("common.delete")}</button>
-          {labels.length > 0 && <div className="session-menu-head">{tr("sidebar.sessionlist.labels")}</div>}
-          {labels.map((l) => (
-            <button key={l.id} role="menuitemcheckbox" aria-checked={(s.labelIds ?? []).includes(l.id)} onClick={() => void toggleLabel(l.id)}>
-              <span className="label-dot" style={{ background: l.color }} /> {l.name} {(s.labelIds ?? []).includes(l.id) ? "✓" : ""}
-            </button>
-          ))}
-          <SlotHost slot="sidebar.session.actions" context={{ sessionId: s.id, status: s.status }} />
-        </div>
+            className="session-quick-btn danger"
+            title={tr("sidebar.sessionlist.deleteValue", { value: s.title || tr("sidebar.sessionlist.session") })}
+            aria-label={tr("sidebar.sessionlist.deleteValue", { value: s.title || tr("sidebar.sessionlist.session") })}
+            onClick={quickDelete}
+          >✕</button>
+        </span>
       )}
     </div>
   );
@@ -919,36 +794,50 @@ export default function SessionList({
         </div>
       )}
       {removeTarget && (
-        <Dialog title={tr("sidebar.sessionlist.deleteValueWorktree", { value: worktreeLabel(removeTarget.branch, removeTarget.path) })} onClose={() => { if (!removeBusy) setRemoveTarget(null); }}>
-          <div className="dialog-head">
-            <div><h2>{tr("sidebar.sessionlist.deleteWorktreeAndItsSessions")}</h2><p className="muted">{removeTarget.path}</p></div>
-            <button className="icon-btn" aria-label={tr("common.close")} disabled={removeBusy} onClick={() => setRemoveTarget(null)}>{tr("sidebar.sessionlist.message")}</button>
-          </div>
+        <Dialog
+          title={tr("sidebar.sessionlist.deleteWorktreeAndItsSessions")}
+          onClose={() => { if (!removeBusy) setRemoveTarget(null); }}
+          footer={(
+            <>
+              <Button size="sm" disabled={removeBusy} onClick={() => setRemoveTarget(null)}>{tr("common.cancel")}</Button>
+              <span className="header-spacer" />
+              <Button
+                size="sm"
+                variant="danger"
+                busy={removeBusy}
+                onClick={() => {
+                  setRemoveBusy(true);
+                  void Promise.all(sessionsForRemoval.map((session) => deleteSession(session.id)))
+                    .then(() => api.removeWorktree(projectId, removeTarget.path, deleteBranch))
+                    .then(() => { setRemoveTarget(null); onChanged(); })
+                    .catch((error) => setUiError(friendlyError(tr("sidebar.sessionlist.couldnTRemoveTheWorktree"), error)))
+                    .finally(() => setRemoveBusy(false));
+                }}
+              >
+                {removeBusy ? tr("sidebar.sessionlist.deleting") : tr("sidebar.sessionlist.deleteWorktree")}
+              </Button>
+            </>
+          )}
+        >
+          <p className="muted worktree-remove-path">
+            {tr("sidebar.sessionlist.deleteValueWorktree", { value: worktreeLabel(removeTarget.branch, removeTarget.path) })}
+            <br />{removeTarget.path}
+          </p>
           <div className="worktree-remove-options">
-            <label><input type="checkbox" checked readOnly /> {tr("sidebar.sessionlist.deleteTheLocalWorktreeCheckout")}</label>
-            <label><input type="checkbox" checked readOnly /> {sessionsForRemoval.length === 1
-              ? tr("sidebar.sessionlist.permanentlyDeleteOneSessionIn")
-              : tr("sidebar.sessionlist.permanentlyDeleteValueSessionsIn", { count: sessionsForRemoval.length })}</label>
-            <label>
-              <input type="checkbox" checked={deleteBranch} onChange={(event) => setDeleteBranch(event.target.checked)} />
-              {tr("sidebar.sessionlist.alsoDeleteItsDedicatedBranch")}{removeTarget.branch ? ` (${removeTarget.branch})` : ""}
-            </label>
-          </div>
-          <div className="dialog-foot">
-            <button className="small-btn" disabled={removeBusy} onClick={() => setRemoveTarget(null)}>{tr("common.cancel")}</button>
-            <span className="header-spacer" />
-            <button
-              className="primary-btn danger-btn"
-              disabled={removeBusy}
-              onClick={() => {
-                setRemoveBusy(true);
-                void Promise.all(sessionsForRemoval.map((session) => deleteSession(session.id)))
-                  .then(() => api.removeWorktree(projectId, removeTarget.path, deleteBranch))
-                  .then(() => { setRemoveTarget(null); onChanged(); })
-                  .catch((error) => setUiError(friendlyError(tr("sidebar.sessionlist.couldnTRemoveTheWorktree"), error)))
-                  .finally(() => setRemoveBusy(false));
-              }}
-            >{removeBusy ? tr("sidebar.sessionlist.deleting") : tr("sidebar.sessionlist.deleteWorktree")}</button>
+            <Checkbox checked disabled onChange={() => {}} label={tr("sidebar.sessionlist.deleteTheLocalWorktreeCheckout")} />
+            <Checkbox
+              checked
+              disabled
+              onChange={() => {}}
+              label={sessionsForRemoval.length === 1
+                ? tr("sidebar.sessionlist.permanentlyDeleteOneSessionIn")
+                : tr("sidebar.sessionlist.permanentlyDeleteValueSessionsIn", { count: sessionsForRemoval.length })}
+            />
+            <Checkbox
+              checked={deleteBranch}
+              onChange={setDeleteBranch}
+              label={`${tr("sidebar.sessionlist.alsoDeleteItsDedicatedBranch")}${removeTarget.branch ? ` (${removeTarget.branch})` : ""}`}
+            />
           </div>
         </Dialog>
       )}

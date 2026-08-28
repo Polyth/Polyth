@@ -72,13 +72,14 @@ test("mounted host: late registration renders, disposal falls back deterministic
     assert.match(container.textContent ?? "", new RegExp(tr("workspace.workspacehost.nothingToShow")));
 
     // Registration after the initial React mount must trigger a render.
-    offs.push(probe("session", "session surface"));
-    await act(async () => {});
+    await act(async () => { offs.push(probe("session", "session surface")); });
     assert.match(container.textContent ?? "", /session surface/);
 
     // The active view's surface arrives late and takes over.
-    let offGoals = probe("goals", "goals surface", { order: 10 });
-    await act(async () => {});
+    let offGoals: Cleanup = () => {};
+    await act(async () => {
+      offGoals = probe("goals", "goals surface", { order: 10 });
+    });
     assert.match(container.textContent ?? "", /goals surface/);
 
     // Disposal selects the deterministic fallback (session) without touching
@@ -87,12 +88,13 @@ test("mounted host: late registration renders, disposal falls back deterministic
     assert.match(container.textContent ?? "", /session surface/);
 
     // Re-registration restores the still-active view — nothing was deleted.
-    offGoals = probe("goals", "goals surface", { order: 10 });
-    offs.push(offGoals);
-    await act(async () => {});
+    await act(async () => {
+      offGoals = probe("goals", "goals surface", { order: 10 });
+      offs.push(offGoals);
+    });
     assert.match(container.textContent ?? "", /goals surface/);
   } finally {
-    for (const off of offs) off();
+    await act(async () => { for (const off of offs) off(); });
     await unmount();
   }
 });
@@ -103,8 +105,9 @@ test("mounted host: project and session requirements render standard empty state
   const offs: Cleanup[] = [];
   const { container, unmount } = await mountHost();
   try {
-    offs.push(probe("goals", "goals surface", { requires: "session" }));
-    await act(async () => {});
+    await act(async () => {
+      offs.push(probe("goals", "goals surface", { requires: "session" }));
+    });
     // Unknown project truth never masquerades as a successful empty list.
     assert.match(container.textContent ?? "", new RegExp(tr("workspace.workspacehost.loadingProjects")));
 
@@ -135,8 +138,11 @@ test("mounted host: project and session requirements render standard empty state
     await act(async () => { activateSession("s1"); });
     assert.match(container.textContent ?? "", /goals surface/);
   } finally {
-    for (const off of offs) off();
-    await act(async () => { activateSession(null); activateProject(null); });
+    await act(async () => {
+      for (const off of offs) off();
+      activateSession(null);
+      activateProject(null);
+    });
     await unmount();
   }
 });
@@ -147,13 +153,16 @@ test("mounted host: legacy plugin metadata does not gate a surface", async () =>
   const offs: Cleanup[] = [];
   const { container, unmount } = await mountHost();
   try {
-    offs.push(probe("session", "session surface"));
-    offs.push(probe("github", "github surface", { order: 25, plugin: "github" }));
-    await act(async () => {});
+    await act(async () => {
+      offs.push(probe("session", "session surface"));
+      offs.push(probe("github", "github surface", { order: 25, plugin: "github" }));
+    });
     assert.match(container.textContent ?? "", /github surface/);
   } finally {
-    for (const off of offs) off();
-    await act(async () => { activateProject(null); });
+    await act(async () => {
+      for (const off of offs) off();
+      activateProject(null);
+    });
     await unmount();
   }
 });
@@ -179,8 +188,7 @@ test("mounted host: surfaces receive canonical projectId/sessionId props (EXT-SE
   try {
     // Late registration with nothing active: explicit nulls, not an empty
     // props object and not undefined.
-    offs.push(recorder("first"));
-    await act(async () => {});
+    await act(async () => { offs.push(recorder("first")); });
     assert.match(container.textContent ?? "", /first:null:null/);
     assert.deepEqual(received.at(-1), { projectId: null, sessionId: null });
 
@@ -194,8 +202,7 @@ test("mounted host: surfaces receive canonical projectId/sessionId props (EXT-SE
     // A late same-id replacement (the verification probe's shape) receives
     // the identical canonical context on its first render.
     received.length = 0;
-    offs.push(recorder("replacement"));
-    await act(async () => {});
+    await act(async () => { offs.push(recorder("replacement")); });
     assert.match(container.textContent ?? "", /replacement:p1:s1/);
     assert.deepEqual(received[0], { projectId: "p1", sessionId: "s1" });
 
@@ -205,8 +212,11 @@ test("mounted host: surfaces receive canonical projectId/sessionId props (EXT-SE
     assert.match(container.textContent ?? "", /replacement:p1:null/);
     assert.deepEqual(received.at(-1), { projectId: "p1", sessionId: null });
   } finally {
-    for (const off of offs) off();
-    await act(async () => { activateSession(null); activateProject(null); });
+    await act(async () => {
+      for (const off of offs) off();
+      activateSession(null);
+      activateProject(null);
+    });
     await unmount();
   }
 });
@@ -221,13 +231,14 @@ test("mounted host: a throwing surface fails inside its boundary and recovers on
   const offs: Cleanup[] = [];
   const { container, unmount } = await mountHost();
   try {
-    offs.push(registerWorkspaceSurface({
-      id: "session",
-      title: "Broken",
-      order: 0,
-      component: () => { throw new Error("broken surface"); },
-    }));
-    await act(async () => {});
+    await act(async () => {
+      offs.push(registerWorkspaceSurface({
+        id: "session",
+        title: "Broken",
+        order: 0,
+        component: () => { throw new Error("broken surface"); },
+      }));
+    });
     // The standard error state renders inside the host — the shell survives.
     assert.match(container.textContent ?? "", /This view couldn’t render/);
     assert.ok(errors.some((e) => e.includes("broken surface")));
@@ -236,13 +247,14 @@ test("mounted host: a throwing surface fails inside its boundary and recovers on
 
     // Same-id replacement (a fixed contribution) must visibly recover
     // without remounting the host.
-    offs.push(probe("session", "recovered surface"));
-    await act(async () => {});
+    await act(async () => { offs.push(probe("session", "recovered surface")); });
     assert.match(container.textContent ?? "", /recovered surface/);
   } finally {
     console.error = originalError;
-    for (const off of offs) off();
-    await act(async () => { activateProject(null); });
+    await act(async () => {
+      for (const off of offs) off();
+      activateProject(null);
+    });
     await unmount();
   }
 });

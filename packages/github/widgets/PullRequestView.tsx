@@ -13,6 +13,16 @@ import { friendlyError } from "../../../apps/web/src/settings.ts";
 import { useStore } from "../../../apps/web/src/store.ts";
 import EmptyState from "../../../apps/web/src/components/EmptyState.tsx";
 import GithubReplyPanel from "./GithubReplyPanel.tsx";
+import {
+  BackIcon,
+  Button,
+  Checkbox,
+  EditIcon,
+  Select,
+  Tabs,
+  Textarea,
+  TextInput,
+} from "../../../apps/web/src/components/ui/index.ts";
 
 type Tab = "overview" | "files" | "checks" | "comments";
 type PrSection = "detail" | "files" | "diff" | "checks" | "comments";
@@ -82,7 +92,7 @@ function CheckRow({ check }: { check: PrCheckDto }) {
         {check.workflow && <span className="muted">{check.workflow}</span>}
       </div>
       <span className="check-status">{check.status.replace(/_/g, " ")}</span>
-      {check.url && <a className="small-btn" href={check.url} target="_blank" rel="noreferrer">{tr("pullrequestview.viewLogs")}</a>}
+      {check.url && <a className="ui-btn ui-btn--quiet ui-btn--sm" href={check.url} target="_blank" rel="noreferrer">{tr("pullrequestview.viewLogs")}</a>}
     </article>
   );
 }
@@ -406,7 +416,7 @@ export default function PullRequestView({ number, onClose }: { number: number; o
   return (
     <div className="pr-surface">
       <header className="pr-head">
-        <button className="small-btn pr-back" onClick={onClose}><Icon.back /> {tr("pullrequestview.pullRequests")}</button>
+        <Button size="sm" className="pr-back" iconStart={BackIcon} onClick={onClose}>{tr("pullrequestview.pullRequests")}</Button>
         {detail && (
           <div className="pr-title-block">
             <div className="pr-title-meta">
@@ -424,18 +434,21 @@ export default function PullRequestView({ number, onClose }: { number: number; o
 
       {detail && (
         <>
-          <nav className="pr-tabbar" aria-label={tr("pullrequestview.pullRequestSections")}>
-            {([
+          <Tabs
+            className="pr-tabbar"
+            label={tr("pullrequestview.pullRequestSections")}
+            value={tab}
+            tabs={([
               ["overview", tr("pullrequestview.overview"), null],
               ["files", tr("pullrequestview.filesTab"), detail.changedFiles],
               ["checks", tr("pullrequestview.checksTab"), checks?.summary.total ?? 0],
               ["comments", tr("pullrequestview.commentsTab"), comments.length],
-            ] as const).map(([id, label, count]) => (
-              <button key={id} className={tab === id ? "active" : ""} aria-current={tab === id ? "page" : undefined} onClick={() => setTab(id)}>
-                {label}{count !== null && <span>{count}</span>}
-              </button>
-            ))}
-          </nav>
+            ] as const).map(([id, label, count]) => ({
+              id,
+              label: <>{label}{count !== null && <span>{count}</span>}</>,
+            }))}
+            onChange={(value) => setTab(value as Tab)}
+          />
 
           {tab === "overview" && (
             <div className="pr-overview">
@@ -455,21 +468,21 @@ export default function PullRequestView({ number, onClose }: { number: number; o
                   <h2>{tr("pullrequestview.descriptionHeading")}</h2>
                   <span className="muted">{tr("pullrequestview.updatedValue", { date: new Date(detail.updatedAt).toLocaleString(getLocale()) })}</span>
                 </div>
-                {detail.state === "OPEN" && !editing && <button className="small-btn" onClick={() => {
+                {detail.state === "OPEN" && !editing && <Button size="sm" iconStart={EditIcon} onClick={() => {
                   setEditTitle(detail.title);
                   setEditBody(detail.body);
                   setEditing(true);
-                }}><Icon.pencil /> {tr("common.edit")}</button>}
+                }}>{tr("common.edit")}</Button>}
               </div>
 
               {editing ? (
                 <div className="pr-edit-form">
-                  <label>{tr("pullrequestview.titleLabel")}<input value={editTitle} placeholder={tr("pullrequestview.title")} onChange={(event) => setEditTitle(event.target.value)} /></label>
-                  <label>{tr("pullrequestview.descriptionHeading")}<textarea rows={7} placeholder={tr("pullrequestview.description")} value={editBody} onChange={(event) => setEditBody(event.target.value)} /></label>
+                  <label>{tr("pullrequestview.titleLabel")}<TextInput value={editTitle} placeholder={tr("pullrequestview.title")} onChange={(event) => setEditTitle(event.target.value)} /></label>
+                  <label>{tr("pullrequestview.descriptionHeading")}<Textarea rows={7} placeholder={tr("pullrequestview.description")} value={editBody} onChange={(event) => setEditBody(event.target.value)} /></label>
                   <div className="view-toolbar-row">
                     <span className="header-spacer" />
-                    <button className="small-btn" disabled={editBusy} onClick={() => setEditing(false)}>{tr("common.cancel")}</button>
-                    <button className="primary-btn" disabled={editBusy || !editTitle.trim()} onClick={() => void saveEdit()}>{editBusy ? tr("common.saving") : tr("pullrequestview.saveChanges")}</button>
+                    <Button size="sm" disabled={editBusy} onClick={() => setEditing(false)}>{tr("common.cancel")}</Button>
+                    <Button size="sm" variant="primary" busy={editBusy} disabled={!editTitle.trim()} onClick={() => void saveEdit()}>{editBusy ? tr("common.saving") : tr("pullrequestview.saveChanges")}</Button>
                   </div>
                 </div>
               ) : (
@@ -489,14 +502,14 @@ export default function PullRequestView({ number, onClose }: { number: number; o
                         : tr("settings.pages.currentSession")}
                     </span>
                   </div>
-                  <button
-                    className="primary-btn"
-                    disabled={conflictAgentBusy}
+                  <Button
+                    variant="primary"
+                    busy={conflictAgentBusy}
                     onClick={() => void startConflictAgent()}
                   >
                     <Icon.pullRequest />
                     {tr("pullrequestview.fixConflictsWithAgent")}
-                  </button>
+                  </Button>
                   {conflictAgentMsg && (
                     <div
                       className={conflictAgentFailed ? "form-error" : "knowledge-notice"}
@@ -515,15 +528,22 @@ export default function PullRequestView({ number, onClose }: { number: number; o
                     <span className="muted">{mergeBlock ? tr("pullrequestview.unavailableValue", { reason: mergeBlock }) : tr("pullrequestview.thisUpdatesTheRepositoryOnGithub")}</span>
                   </div>
                   <div className="pr-merge-controls">
-                    <select value={mergeStrategy} disabled={!!mergeBlock || mergeBusy} aria-label={tr("pullrequestview.mergeStrategy")} onChange={(event) => setMergeStrategy(event.target.value as typeof mergeStrategy)}>
-                      <option value="squash">{tr("pullrequestview.squashAndMerge")}</option>
-                      <option value="merge">{tr("pullrequestview.createMergeCommit")}</option>
-                      <option value="rebase">{tr("pullrequestview.rebaseAndMerge")}</option>
-                    </select>
-                    {!mergeBlock && <label className="source-confirm"><input type="checkbox" checked={mergeConfirm} onChange={(event) => setMergeConfirm(event.target.checked)} /> {tr("pullrequestview.iConfirmThisMerge")}</label>}
-                    <button className="primary-btn" disabled={!!mergeBlock || !mergeConfirm || mergeBusy} title={mergeBlock ?? tr("pullrequestview.mergeNumberValue", { number: number })} onClick={() => void doMerge()}>
+                    <Select
+                      value={mergeStrategy}
+                      label={mergeStrategy === "squash" ? tr("pullrequestview.squashAndMerge") : mergeStrategy === "merge" ? tr("pullrequestview.createMergeCommit") : tr("pullrequestview.rebaseAndMerge")}
+                      disabled={!!mergeBlock || mergeBusy}
+                      ariaLabel={tr("pullrequestview.mergeStrategy")}
+                      options={[
+                        { value: "squash", label: tr("pullrequestview.squashAndMerge") },
+                        { value: "merge", label: tr("pullrequestview.createMergeCommit") },
+                        { value: "rebase", label: tr("pullrequestview.rebaseAndMerge") },
+                      ]}
+                      onChange={(value) => setMergeStrategy(value as typeof mergeStrategy)}
+                    />
+                    {!mergeBlock && <Checkbox className="source-confirm" checked={mergeConfirm} onChange={setMergeConfirm} label={tr("pullrequestview.iConfirmThisMerge")} />}
+                    <Button variant="primary" busy={mergeBusy} disabled={!!mergeBlock || !mergeConfirm} title={mergeBlock ?? tr("pullrequestview.mergeNumberValue", { number: number })} onClick={() => void doMerge()}>
                       {mergeBusy ? tr("pullrequestview.merging") : tr("pullrequestview.mergePullRequest")}
-                    </button>
+                    </Button>
                   </div>
                 </section>
               )}
@@ -539,19 +559,19 @@ export default function PullRequestView({ number, onClose }: { number: number; o
                   <span><span className="positive">+{detail.additions}</span> <span className="negative">−{detail.deletions}</span></span>
                 </div>
                 <span className="header-spacer" />
-                <button className="small-btn" disabled={diffFiles.length === 0} onClick={() => setExpandedFiles(new Set(diffFiles.map((file) => file.path)))}>{tr("pullrequestview.expandAll")}</button>
-                <button className="small-btn" disabled={expandedFiles.size === 0} onClick={() => setExpandedFiles(new Set())}>{tr("pullrequestview.collapseAll")}</button>
+                <Button size="sm" disabled={diffFiles.length === 0} onClick={() => setExpandedFiles(new Set(diffFiles.map((file) => file.path)))}>{tr("pullrequestview.expandAll")}</Button>
+                <Button size="sm" disabled={expandedFiles.size === 0} onClick={() => setExpandedFiles(new Set())}>{tr("pullrequestview.collapseAll")}</Button>
               </div>
               {sectionErrors.files && (
                 <div className="source-inline-status error" role="alert">
                   <span>{tr("pullrequestview.changedFileMetadataCouldNotBe", { reason: sectionErrors.files })}</span>
-                  <button className="small-btn" onClick={() => setReloadKey((key) => key + 1)}>{tr("common.retry")}</button>
+                  <Button size="sm" onClick={() => setReloadKey((key) => key + 1)}>{tr("common.retry")}</Button>
                 </div>
               )}
               {diffReason && (
                 <div className="source-inline-status error" role="alert">
                   <span>{tr("pullrequestview.thePatchCouldNotBeLoaded", { reason: diffReason })}</span>
-                  <button className="small-btn" onClick={() => setReloadKey((key) => key + 1)}>{tr("common.retry")}</button>
+                  <Button size="sm" onClick={() => setReloadKey((key) => key + 1)}>{tr("common.retry")}</Button>
                 </div>
               )}
               {files.length === 0 && diffFiles.length === 0 && <EmptyState title={tr("pullrequestview.noChangedFiles")} description={tr("pullrequestview.noFileListIsAvailableForThis")} />}
@@ -585,7 +605,7 @@ export default function PullRequestView({ number, onClose }: { number: number; o
               {sectionErrors.checks && (
                 <div className="source-inline-status error" role="alert">
                   <span>{tr("pullrequestview.checksCouldNotBeLoaded", { reason: sectionErrors.checks })}</span>
-                  <button className="small-btn" onClick={() => void loadChecks()}>{tr("common.retry")}</button>
+                  <Button size="sm" onClick={() => void loadChecks()}>{tr("common.retry")}</Button>
                 </div>
               )}
               {checks && checks.summary.total > 0 && (
@@ -611,7 +631,7 @@ export default function PullRequestView({ number, onClose }: { number: number; o
               {sectionErrors.comments && (
                 <div className="source-inline-status error" role="alert">
                   <span>{tr("pullrequestview.conversationCouldNotBeLoaded", { reason: sectionErrors.comments })}</span>
-                  <button className="small-btn" onClick={() => setReloadKey((key) => key + 1)}>{tr("common.retry")}</button>
+                  <Button size="sm" onClick={() => setReloadKey((key) => key + 1)}>{tr("common.retry")}</Button>
                 </div>
               )}
               {!sectionErrors.comments && comments.length === 0 && <EmptyState title={tr("pullrequestview.noConversationYet")} description={tr("pullrequestview.reviewsAndCommentsWillAppearHere")} />}
@@ -652,22 +672,29 @@ export default function PullRequestView({ number, onClose }: { number: number; o
                   <strong>{tr("pullrequestview.submitAReview")}</strong>
                   <span className="muted">{tr("pullrequestview.thisPostsDirectlyToGithub")}</span>
                 </div>
-                <textarea rows={4} placeholder={tr("pullrequestview.leaveAThoughtfulReview")} value={reviewBody} onChange={(event) => setReviewBody(event.target.value)} />
+                <Textarea rows={4} placeholder={tr("pullrequestview.leaveAThoughtfulReview")} value={reviewBody} onChange={(event) => setReviewBody(event.target.value)} />
                 <div className="pr-review-actions">
-                  <label className="pr-review-kind">
+                  <div className="pr-review-kind">
                     <span>{tr("pullrequestview.reviewType")}</span>
-                    <select aria-label={tr("pullrequestview.reviewType")} value={reviewEvent} disabled={reviewBusy} onChange={(event) => {
-                      setReviewEvent(event.target.value as typeof reviewEvent);
+                    <Select
+                      ariaLabel={tr("pullrequestview.reviewType")}
+                      label={reviewEvent === "COMMENT" ? tr("pullrequestview.comment") : reviewEvent === "APPROVE" ? tr("pullrequestview.approve") : tr("pullrequestview.requestChanges")}
+                      value={reviewEvent}
+                      disabled={reviewBusy}
+                      options={[
+                        { value: "COMMENT", label: tr("pullrequestview.comment") },
+                        { value: "APPROVE", label: tr("pullrequestview.approve") },
+                        { value: "REQUEST_CHANGES", label: tr("pullrequestview.requestChanges") },
+                      ]}
+                      onChange={(value) => {
+                      setReviewEvent(value as typeof reviewEvent);
                       setConfirmWrite(false);
-                    }}>
-                      <option value="COMMENT">{tr("pullrequestview.comment")}</option>
-                      <option value="APPROVE">{tr("pullrequestview.approve")}</option>
-                      <option value="REQUEST_CHANGES">{tr("pullrequestview.requestChanges")}</option>
-                    </select>
-                  </label>
-                  {reviewEvent !== "COMMENT" && <label className="source-confirm"><input type="checkbox" checked={confirmWrite} onChange={(event) => setConfirmWrite(event.target.checked)} /> {tr("pullrequestview.confirmValue", { value: reviewEvent === "APPROVE" ? tr("pullrequestview.approval") : tr("pullrequestview.changeRequest") })}</label>}
+                      }}
+                    />
+                  </div>
+                  {reviewEvent !== "COMMENT" && <Checkbox className="source-confirm" checked={confirmWrite} onChange={setConfirmWrite} label={tr("pullrequestview.confirmValue", { value: reviewEvent === "APPROVE" ? tr("pullrequestview.approval") : tr("pullrequestview.changeRequest") })} />}
                   <span className="header-spacer" />
-                  <button className="primary-btn" disabled={reviewBusy || (!reviewBody.trim() && reviewEvent !== "APPROVE")} onClick={() => void submitReview()}>{reviewBusy ? tr("pullrequestview.submitting") : tr("pullrequestview.submitReview")}</button>
+                  <Button variant="primary" busy={reviewBusy} disabled={!reviewBody.trim() && reviewEvent !== "APPROVE"} onClick={() => void submitReview()}>{reviewBusy ? tr("pullrequestview.submitting") : tr("pullrequestview.submitReview")}</Button>
                 </div>
                 {writeMsg && (
                   <div

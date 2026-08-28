@@ -30,31 +30,29 @@ async function ctxPage(width, height, mobile) {
   return { ctx, page };
 }
 
-// --- desktop 1280: sort menu, filter menu, connection popover -----------------
+// --- desktop 1280: merged sort/filter menu, connection popover ----------------
 {
   const { ctx, page } = await ctxPage(1280, 800, false);
-  // sort menu
-  await page.locator(".sidebar-sort-trigger").click();
+  // one merged sort + filter menu (P2-W1)
+  await page.locator(".sidebar-list-options").click();
   await page.waitForTimeout(350);
-  const sortItems = await page.locator(".ui-menu [role=menuitem]").allTextContents();
-  console.log("sort menu items:", sortItems);
-  await page.screenshot({ path: `${outDir}/desktop-sort-menu.png` });
-  // pick "Project name"
-  await page.locator(".ui-menu [role=menuitem]").nth(1).click();
+  const entries = await page.locator('.ui-menu [role^="menuitem"]').allTextContents();
+  console.log("list options entries:", entries);
+  await page.screenshot({ path: `${outDir}/desktop-list-options.png` });
+  // pick "Project name" (second radio), which closes the menu
+  await page.locator('.ui-menu [role="menuitemradio"]').nth(1).click();
   await page.waitForTimeout(300);
-  console.log("sort trigger now:", await page.locator(".sidebar-sort-trigger span").first().textContent());
-  // filter menu
-  await page.locator(".sidebar-filter > button").click();
-  await page.waitForTimeout(350);
-  console.log("filter items:", await page.locator(".ui-menu [role=menuitem]").allTextContents());
-  await page.screenshot({ path: `${outDir}/desktop-filter-menu.png` });
-  await page.locator(".ui-menu [role=menuitem]").first().click();
+  await page.locator(".sidebar-list-options").click();
   await page.waitForTimeout(300);
-  console.log("filter active:", await page.locator(".sidebar-filter > button").getAttribute("aria-pressed"));
-  // toggle back off
-  await page.locator(".sidebar-filter > button").click();
+  console.log("sort now:", await page.locator('.ui-menu [role="menuitemradio"]').evaluateAll(
+    (els) => els.map((e) => `${e.textContent?.trim()}:${e.getAttribute("aria-checked")}`)));
+  // filter checkbox toggles keep the menu open
+  await page.locator('.ui-menu [role="menuitemcheckbox"]').click();
   await page.waitForTimeout(250);
-  await page.locator(".ui-menu [role=menuitem]").first().click();
+  console.log("filter active:", await page.locator('.ui-menu [role="menuitemcheckbox"]').getAttribute("aria-checked"),
+    "menu still open:", await page.locator(".ui-menu").isVisible());
+  await page.locator('.ui-menu [role="menuitemcheckbox"]').click();
+  await page.locator('.ui-menu [role="menuitemradio"]').first().click();
   await page.waitForTimeout(200);
   // connection popover
   await page.locator(".sidebar-connection-dot").click();
@@ -69,17 +67,17 @@ async function ctxPage(width, height, mobile) {
   await ctx.close();
 }
 
-// --- phone 390: drawer sort menu becomes a sheet --------------------------------
+// --- phone 390: drawer sort/filter menu becomes a sheet -------------------------
 {
   const { ctx, page } = await ctxPage(390, 844, true);
   // open drawer via the session context bar / drawer trigger
   await page.locator(".session-nav-current").first().click().catch(() => {});
   await page.waitForTimeout(600);
-  await page.locator(".sidebar-sort-trigger").click().catch(() => {});
+  await page.locator(".sidebar-list-options").click().catch(() => {});
   await page.waitForTimeout(600);
   const sheet = page.locator(".ui-menu-sheet");
-  console.log("phone sort menu as sheet:", await sheet.isVisible().catch(() => false));
-  await page.screenshot({ path: `${outDir}/phone-sort-sheet.png` });
+  console.log("phone list options as sheet:", await sheet.isVisible().catch(() => false));
+  await page.screenshot({ path: `${outDir}/phone-list-options-sheet.png` });
   await ctx.close();
 }
 
@@ -90,7 +88,7 @@ async function ctxPage(width, height, mobile) {
   await page.waitForTimeout(600);
   const info = await page.evaluate(() => {
     const time = document.querySelector(".session-time");
-    const menuBtn = document.querySelector(".session-menu-btn");
+    const menuBtn = document.querySelector(".session-menu-trigger");
     const btn = document.querySelector(".session-btn");
     if (!time || !btn) return { found: false };
     const t = time.getBoundingClientRect();

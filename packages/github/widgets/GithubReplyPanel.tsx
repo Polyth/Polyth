@@ -5,6 +5,7 @@ import { tr } from "../../../apps/web/src/i18n/index.ts";
 import { MarkdownDoc } from "../../../apps/web/src/markdown.tsx";
 import { buildModel } from "../../../apps/web/src/reduce.ts";
 import { friendlyError } from "../../../apps/web/src/settings.ts";
+import { AssistIcon, Button, SendIcon, Textarea } from "../../../apps/web/src/components/ui/index.ts";
 
 export interface GithubReplyContext {
   kind: "issue" | "pr";
@@ -178,7 +179,7 @@ export default function GithubReplyPanel({
         </div>
         <span className="tag">#{context.number}</span>
       </div>
-      <textarea
+      <Textarea
         rows={4}
         value={draft}
         placeholder={tr("githubreply.writeReplyOrInstructions")}
@@ -186,17 +187,19 @@ export default function GithubReplyPanel({
         onChange={(event) => setDraft(event.target.value)}
       />
       <div className="gh-reply-actions">
-        <button
-          className="small-btn"
+        <Button
+          size="sm"
+          iconStart={AssistIcon}
+          busy={agentState === "working"}
           disabled={!draft.trim() || publishingDraft || agentState === "working"}
           onClick={() => void askAgent()}
         >
           {agentState === "working" ? tr("githubreply.agentWorking") : tr("githubreply.sendToAgent")}
-        </button>
+        </Button>
         <span className="header-spacer" />
-        <button className="primary-btn" disabled={!draft.trim() || publishingDraft} onClick={() => void publishDraft()}>
+        <Button size="sm" variant="primary" iconStart={SendIcon} busy={publishingDraft} disabled={!draft.trim()} onClick={() => void publishDraft()}>
           {publishingDraft ? tr("githubreply.publishing") : tr("githubreply.publish")}
-        </button>
+        </Button>
       </div>
 
       <div className="gh-agent-drawer" aria-hidden={!agentVisible}>
@@ -223,9 +226,9 @@ export default function GithubReplyPanel({
           {(agentState === "ready" || agentState === "publishing") && (
             <div className="gh-agent-send">
               <span className="muted">{tr("githubreply.publishesAgentResponse")}</span>
-              <button className="primary-btn" disabled={agentState === "publishing"} onClick={() => void publishAgentReply()}>
+              <Button size="sm" variant="primary" iconStart={SendIcon} busy={agentState === "publishing"} onClick={() => void publishAgentReply()}>
                 {agentState === "publishing" ? tr("githubreply.publishing") : tr("githubreply.send")}
-              </button>
+              </Button>
             </div>
           )}
         </div>

@@ -21,6 +21,7 @@ import {
   type StarterIconId,
 } from "../../starters.ts";
 import { tr } from "../../i18n/index.ts";
+import { Button } from "../ui/index.ts";
 
 const ICONS: Record<StarterIconId, () => React.ReactElement> = {
   target: Icon.target,
@@ -220,10 +221,10 @@ export default function StarterPicker({ context, commands, skills, onPick, onClo
             </div>
           </div>
           <div className="starter-form-actions">
-            <button type="button" className="ghost-btn" onClick={() => setForm(null)}>{tr("common.cancel")}</button>
-            <button
-              type="button"
-              className="primary-btn"
+            <Button size="sm" variant="ghost" onClick={() => setForm(null)}>{tr("common.cancel")}</Button>
+            <Button
+              size="sm"
+              variant="primary"
               disabled={!valid}
               onClick={() => {
                 saveCustomStarter({
@@ -234,7 +235,7 @@ export default function StarterPicker({ context, commands, skills, onPick, onClo
                 });
                 setForm(null);
               }}
-            >{tr("mobile.starterpicker.saveStarter")}</button>
+            >{tr("mobile.starterpicker.saveStarter")}</Button>
           </div>
         </div>
       </Sheet>

@@ -1,4 +1,19 @@
-import { useMemo, useRef, useState, type DragEvent, type ReactNode } from "react";
+// P2-W3A model picker: a quiet composer chip that opens one catalog surface —
+// an anchored popover on desktop (search, keyboard navigation, provider
+// groups, favorites with drag reorder) and the shared bottom Sheet on phones.
+// Every row stays calm (name + one meta line); the full technical card
+// (context, modalities, reasoning, tools, pricing, availability) lives behind
+// an explicit per-row details view, never on the row itself.
+import {
+  useEffect,
+  useMemo,
+  useReducer,
+  useRef,
+  useState,
+  type DragEvent,
+  type KeyboardEvent,
+  type ReactNode,
+} from "react";
 import type { ModelDescriptor, ModelRef } from "@polyth/contracts";
 import { isFavorite, modelKey, orderProviders } from "@polyth/models";
 import {
@@ -8,120 +23,113 @@ import {
   toggleModelFavorite,
   useModelPrefs,
 } from "./modelPrefs.ts";
-import { useEscape } from "../../../apps/web/src/useEscape.ts";
-import { useShellMode } from "../../../apps/web/src/responsiveShell.ts";
-import { dismissKeyboard } from "../../../apps/web/src/mobileViewport.ts";
-import { tapFeedback } from "../../../apps/web/src/haptics.ts";
-import Sheet, { SheetRow, SheetSection } from "../../../apps/web/src/components/mobile/Sheet.tsx";
-import { useSheetTrigger } from "../../../apps/web/src/components/mobile/sheetTrigger.ts";
-import { Icon } from "../../../apps/web/src/icons.tsx";
+import { useShellMode } from "@polyth/web/responsive-shell";
+import { dismissKeyboard } from "@polyth/web/mobile-viewport";
+import { tapFeedback } from "@polyth/web/haptics";
+import { useSheetTrigger } from "@polyth/web/sheet-trigger";
+import {
+  Icon as UiIcon,
+  InfoIcon,
+  ResponsiveOverlay,
+  SheetRow,
+  SheetSection,
+} from "@polyth/web/ui";
+import { Icon } from "@polyth/web/icons";
 import ProviderLogo from "./ProviderLogo.tsx";
-import { usePopoverPlacement } from "../../../apps/web/src/usePopoverPlacement.ts";
-import { formatList, formatNumber, tr } from "../../../apps/web/src/i18n/index.ts";
+import { getLocale, tr } from "@polyth/web/i18n";
+import {
+  modelDetailsPresentation,
+  modelMetaLine,
+  modelSupportsThinking,
+} from "./modelPresentation.ts";
+import {
+  initialModelPickerState,
+  modelPickerReducer,
+  providerIsExpanded,
+} from "./modelPickerState.ts";
 
-function modalityLabel(value: string): string {
-  const labels: Record<string, string> = {
-    text: tr("modelpicker.text"),
-    image: tr("modelpicker.image"),
-    audio: tr("modelpicker.audio"),
-    video: tr("modelpicker.video"),
-    pdf: tr("modelpicker.pdf"),
-  };
-  return labels[value.toLowerCase()] ?? value;
-}
+const MAX_RENDERED_MODELS = 200;
 
-export function modelModalities(model: ModelDescriptor): string {
-  const modalities = (model.capabilities ?? [])
-    .filter((capability) =>
-      (capability.startsWith("input:") || capability.startsWith("output:"))
-      && !capability.endsWith(":none"))
-    .map((capability) => capability.slice(capability.indexOf(":") + 1));
-  return modalities.length > 0
-    ? formatList([...new Set(modalities)].map(modalityLabel))
-    : tr("modelpicker.text");
-}
-
-export function modelContextLabel(context?: number): string {
-  if (!context) return tr("modelpicker.contextUnknown");
-  if (context >= 1_000_000) {
-    return tr("modelpicker.valueMContext", {
-      value: formatNumber(context / 1_000_000, { maximumFractionDigits: 1 }),
-    });
-  }
-  if (context >= 1_000) {
-    return tr("modelpicker.valueKContext", { value: formatNumber(Math.round(context / 1_000)) });
-  }
-  return tr("modelpicker.valueContext", { value: formatNumber(context) });
-}
-
-/** Modalities in a stable reading order, with the acronyms spelled properly.
- *  Reported capabilities only — nothing is inferred. */
-const MODALITY_ORDER = ["text", "image", "audio", "video", "pdf"];
-
-export function modelModalityValues(model: ModelDescriptor): string[] {
-  const raw = (model.capabilities ?? [])
-    .filter((capability) =>
-      (capability.startsWith("input:") || capability.startsWith("output:"))
-      && !capability.endsWith(":none"))
-    .map((capability) => capability.slice(capability.indexOf(":") + 1).toLowerCase());
-  const unique = [...new Set(raw)];
-  if (unique.length === 0) unique.push("text");
-  unique.sort((a, b) => {
-    const ra = MODALITY_ORDER.indexOf(a), rb = MODALITY_ORDER.indexOf(b);
-    return (ra < 0 ? MODALITY_ORDER.length : ra) - (rb < 0 ? MODALITY_ORDER.length : rb)
-      || a.localeCompare(b);
-  });
-  return unique;
-}
-
-export function modelModalityLabels(model: ModelDescriptor): string[] {
-  return modelModalityValues(model).map(modalityLabel);
-}
-
-const MODALITY_ICONS: Record<string, () => ReactNode> = {
-  text: Icon.text,
-  image: Icon.image,
-  audio: Icon.speaker,
-  video: Icon.video,
-  pdf: Icon.file,
-};
-
-function shortContext(context?: number): string | null {
-  if (!context) return null;
-  if (context >= 1_000_000) return `${formatNumber(context / 1_000_000, { maximumFractionDigits: 1 })}M`;
-  if (context >= 1_000) return `${formatNumber(Math.round(context / 1_000))}K`;
-  return formatNumber(context);
-}
-
-/** Compact modality icons + context for mobile rows and the trigger —
- *  reported capabilities only, same source as modelMetaLine. */
-export function ModelMetaIcons({ model }: { model: ModelDescriptor }) {
-  const context = shortContext(model.context);
+/** The compact technical card behind the per-row details affordance. Shared
+ *  verbatim by the desktop popover and the phone sheet. */
+function ModelDetails({
+  model,
+  selected,
+  usage,
+  onUse,
+  onBack,
+}: {
+  model: ModelDescriptor;
+  selected: boolean;
+  /** Current session input tokens — shown against this model's limit. */
+  usage?: number;
+  onUse: () => void;
+  onBack: () => void;
+}) {
+  const presentation = modelDetailsPresentation(model);
+  const percent = selected && usage && model.context
+    ? Math.min(100, Math.round((usage / model.context) * 100))
+    : null;
+  const rows: Array<[string, ReactNode]> = [
+    [tr("modelpicker.provider"), presentation.provider],
+    [tr("modelpicker.contextWindow"), presentation.context],
+    [tr("modelpicker.modalities"), presentation.modalities],
+    [tr("modelpicker.reasoning"), presentation.reasoning],
+    [tr("modelpicker.toolCalls"), presentation.tools],
+    ...(presentation.pricing
+      ? [[tr("modelpicker.pricing"), presentation.pricing] as [string, ReactNode]]
+      : []),
+    ...(presentation.availability
+      ? [[tr("modelpicker.availability"),
+          <span key="na" className="model-details-warn">{presentation.availability}</span>] as [string, ReactNode]]
+      : []),
+    ...(percent !== null
+      ? [[tr("modelpicker.contextUsed"),
+          <span key="ctx" className="model-details-usage">
+            {tr("modelpicker.contextUsedValue", {
+              used: (usage ?? 0).toLocaleString(getLocale()),
+              percent,
+            })}
+            <i className="model-details-meter" aria-hidden="true"><b style={{ width: `${percent}%` }} /></i>
+          </span>] as [string, ReactNode]]
+      : []),
+  ];
   return (
-    <span className="model-meta-icons">
-      {modelModalityValues(model).map((value) => {
-        const Glyph = MODALITY_ICONS[value] ?? Icon.text;
-        return (
-          <span key={value} className="model-modality-icon" title={modalityLabel(value)}>
-            <Glyph />
-          </span>
-        );
-      })}
-      {context && <span className="model-meta-context">{context}</span>}
-    </span>
+    <div className="model-details">
+      <button type="button" className="model-details-back" onClick={onBack}>
+        <span aria-hidden="true"><Icon.back /></span>
+        {tr("common.back")}
+      </button>
+      <div className="model-details-head">
+        <ProviderLogo
+          providerID={model.providerID}
+          providerName={model.providerName}
+          className="model-row-provider-logo"
+        />
+        <div className="model-details-title">
+          <strong>{model.name}</strong>
+          <small>{model.modelID}</small>
+        </div>
+      </div>
+      <dl className="model-details-grid">
+        {rows.map(([label, value]) => (
+          <div key={label}>
+            <dt>{label}</dt>
+            <dd>{value}</dd>
+          </div>
+        ))}
+      </dl>
+      <div className="model-details-actions">
+        {selected
+          ? <span className="model-details-current">{tr("modelpicker.currentModel")}</span>
+          : (
+            <button type="button" className="model-details-use" onClick={onUse}>
+              {tr("modelpicker.useThisModel")}
+            </button>
+          )}
+      </div>
+    </div>
   );
-}
-
-/** UX-MOBILE-01 §13/§40: one calm metadata line — `Text · Image · 500K` —
- *  instead of a mixed bag of glyphs. Reported capabilities only, no guesses. */
-export function modelMetaLine(model?: ModelDescriptor): string {
-  if (!model) return "";
-  const context = shortContext(model.context);
-  return [...modelModalityLabels(model), ...(context ? [context] : [])].join(" · ");
-}
-
-export function modelSupportsThinking(model: ModelDescriptor | undefined): boolean {
-  return (model?.variants?.length ?? 0) > 0;
 }
 
 interface ModelPickerProps {
@@ -129,8 +137,11 @@ interface ModelPickerProps {
   value?: ModelRef;
   recommended?: ModelRef;
   onPick: (model?: ModelRef) => void;
+  /** Preferred opening side for the desktop popover (collision may flip it). */
   direction?: "up" | "down";
-  composerMeta?: string;
+  /** Current session input tokens for the details context meter. */
+  usage?: number;
+  className?: string;
 }
 
 export default function ModelPicker({
@@ -138,23 +149,25 @@ export default function ModelPicker({
   value,
   recommended,
   onPick,
-  direction: _direction = "down",
-  composerMeta,
+  direction = "down",
+  usage,
+  className,
 }: ModelPickerProps) {
   const prefs = useModelPrefs();
   const phone = useShellMode() === "phone";
   const [open, setOpen] = useState(false);
-  const [query, setQuery] = useState("");
+  const [pickerState, dispatchPicker] = useReducer(
+    modelPickerReducer,
+    undefined,
+    initialModelPickerState,
+  );
   const [editing, setEditing] = useState(false);
+  const [detail, setDetail] = useState<ModelDescriptor | null>(null);
+  const [active, setActive] = useState(0);
   const [draggedProvider, setDraggedProvider] = useState<string | null>(null);
   const [draggedFavorite, setDraggedFavorite] = useState<string | null>(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
-  const popoverRef = useRef<HTMLDivElement>(null);
-  const direction = usePopoverPlacement(open && !phone, triggerRef, popoverRef);
-  useEscape(open && !phone, () => {
-    setOpen(false);
-    triggerRef.current?.focus();
-  });
+  const listRef = useRef<HTMLDivElement>(null);
 
   const current = value
     ? models.find((model) => model.providerID === value.providerID && model.modelID === value.modelID)
@@ -165,10 +178,21 @@ export default function ModelPicker({
     : undefined;
   const selectedModel = current ?? fallback ?? models[0];
   const label = selectedModel?.name ?? tr("modelpicker.noModel");
-  const q = query.trim().toLowerCase();
-  const filtered = models.filter((model) =>
-    !q || [model.name, model.modelID, model.providerID, model.providerName ?? ""]
-      .some((text) => text.toLowerCase().includes(q)));
+  const q = pickerState.query.trim().toLowerCase();
+  // Build normalized search text only when the catalog changes. Rapid typing
+  // scans one precomputed string per model instead of lowercasing four fields.
+  const searchIndex = useMemo(() => models.map((model) => ({
+    model,
+    text: [model.name, model.modelID, model.providerID, model.providerName ?? ""]
+      .join("\n")
+      .toLowerCase(),
+  })), [models]);
+  const filtered = useMemo(
+    () => searchIndex
+      .filter((entry) => !q || entry.text.includes(q))
+      .map((entry) => entry.model),
+    [searchIndex, q],
+  );
 
   const providers = useMemo(() => {
     const byId = new Map<string, { id: string; name: string; models: ModelDescriptor[] }>();
@@ -184,15 +208,72 @@ export default function ModelPicker({
     return orderProviders([...byId.values()], prefs);
   }, [filtered, prefs]);
   const providerIds = providers.map((provider) => provider.id);
-  const favoriteRank = new Map(prefs.favorites.map((key, index) => [key, index]));
-  const favorites = filtered
-    .filter((model) => isFavorite(prefs, modelKey(model)))
-    .sort((a, b) => (favoriteRank.get(modelKey(a)) ?? 0) - (favoriteRank.get(modelKey(b)) ?? 0));
+  const favorites = useMemo(() => {
+    const favoriteRank = new Map(prefs.favorites.map((key, index) => [key, index]));
+    return filtered
+      .filter((model) => favoriteRank.has(modelKey(model)))
+      .sort((left, right) =>
+        (favoriteRank.get(modelKey(left)) ?? 0) - (favoriteRank.get(modelKey(right)) ?? 0));
+  }, [filtered, prefs.favorites]);
+  const expandedProviders = useMemo(
+    () => new Set(prefs.expandedProviders),
+    [prefs.expandedProviders],
+  );
+  const isExpanded = (providerId: string) => providerIsExpanded({
+    query: pickerState.query,
+    sessionOverride: pickerState.expansion[providerId],
+    persistedExpanded: expandedProviders.has(providerId),
+    selectedProvider: providerId === selectedModel?.providerID,
+  });
+  const setExpanded = (providerId: string, expanded: boolean) => {
+    dispatchPicker({ type: "set-expanded", providerId, expanded });
+    setModelProviderExpanded(providerId, expanded);
+  };
+
+  // Flattened keyboard-navigable rows (favorites first, then every expanded
+  // provider's non-favorite models) — mirrors exactly what is rendered. The
+  // same bounded policy as the generic Picker prevents a 400+ model catalog
+  // from mounting hundreds of rows in one overlay; search reaches the rest.
+  const flatRows = useMemo(() => {
+    const rows: ModelDescriptor[] = favorites.slice(0, MAX_RENDERED_MODELS);
+    for (const provider of providers) {
+      if (!isExpanded(provider.id) || rows.length >= MAX_RENDERED_MODELS) continue;
+      for (const model of provider.models) {
+        if (!isFavorite(prefs, modelKey(model))) rows.push(model);
+        if (rows.length >= MAX_RENDERED_MODELS) break;
+      }
+    }
+    return rows;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [favorites, providers, prefs.favorites, pickerState, expandedProviders, selectedModel]);
+  const activeIndex = flatRows.length > 0 ? Math.min(active, flatRows.length - 1) : -1;
+  const activeKey = activeIndex >= 0 ? modelKey(flatRows[activeIndex]!) : null;
+  const flatRowIndex = useMemo(
+    () => new Map(flatRows.map((model, index) => [modelKey(model), index])),
+    [flatRows],
+  );
+  const visibleCandidateCount = favorites.length + providers.reduce((total, provider) => (
+    isExpanded(provider.id)
+      ? total + provider.models.filter((model) => !isFavorite(prefs, modelKey(model))).length
+      : total
+  ), 0);
+  const hiddenMatchCount = Math.max(0, visibleCandidateCount - flatRows.length);
+  const shownFavorites = favorites.filter((model) => flatRowIndex.has(modelKey(model)));
+
+  // Keyboard navigation keeps the active row visible inside the scroll area.
+  useEffect(() => {
+    if (!open || phone) return;
+    listRef.current
+      ?.querySelector(".model-picker-row.active")
+      ?.scrollIntoView({ block: "nearest" });
+  }, [open, phone, activeKey]);
 
   const close = () => {
     setOpen(false);
-    setQuery("");
+    dispatchPicker({ type: "reset" });
     setEditing(false);
+    setDetail(null);
+    setActive(0);
   };
   const choose = (model: ModelDescriptor) => {
     if (phone) tapFeedback();
@@ -211,27 +292,43 @@ export default function ModelPicker({
       close();
       return;
     }
-    if (phone) {
-      // Open immediately, then let the keyboard go: the sheet must never wait
-      // for a click that the keyboard-dismiss reflow can swallow.
-      setOpen(true);
-      void dismissKeyboard();
-    } else {
-      setOpen(true);
-    }
+    setOpen(true);
+    if (phone) void dismissKeyboard();
   };
   const triggerHandlers = useSheetTrigger(phone, toggleOpen);
+
+  const onSearchKey = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === "ArrowDown") {
+      event.preventDefault();
+      setActive((index) => Math.min(index + 1, Math.max(flatRows.length - 1, 0)));
+    } else if (event.key === "ArrowUp") {
+      event.preventDefault();
+      setActive((index) => Math.max(index - 1, 0));
+    } else if (event.key === "Home") {
+      event.preventDefault();
+      setActive(0);
+    } else if (event.key === "End") {
+      event.preventDefault();
+      setActive(Math.max(flatRows.length - 1, 0));
+    } else if (event.key === "Enter") {
+      event.preventDefault();
+      const model = flatRows[activeIndex];
+      if (model) choose(model);
+    }
+  };
 
   const star = (model: ModelDescriptor, variant: "row" | "sheet" = "row") => {
     const favorite = isFavorite(prefs, modelKey(model));
     return (
       <button
+        type="button"
         className={`${variant === "sheet" ? "sheet-row-star" : "star-btn"}${favorite ? " on" : ""}`}
         title={favorite ? tr("modelpicker.removeFavorite") : tr("modelpicker.addFavorite")}
         aria-label={favorite
           ? tr("modelpicker.removeValueFromFavorites", { name: model.name })
           : tr("modelpicker.addValueToFavorites", { name: model.name })}
         aria-pressed={favorite}
+        tabIndex={variant === "row" ? -1 : undefined}
         onClick={(event) => {
           event.stopPropagation();
           toggleModelFavorite(modelKey(model));
@@ -240,22 +337,45 @@ export default function ModelPicker({
     );
   };
 
-  const row = (model: ModelDescriptor, favoriteDrag = false) => {
+  const infoButton = (model: ModelDescriptor, variant: "row" | "sheet" = "row") => (
+    <button
+      type="button"
+      className={variant === "sheet" ? "sheet-row-info" : "model-row-info"}
+      title={tr("modelpicker.detailsForValue", { name: model.name })}
+      aria-label={tr("modelpicker.detailsForValue", { name: model.name })}
+      tabIndex={variant === "row" ? -1 : undefined}
+      onClick={(event) => {
+        event.stopPropagation();
+        setDetail(model);
+      }}
+    ><UiIcon icon={InfoIcon} size="sm" /></button>
+  );
+
+  /** Row meta: modality/context, plus provider identity in the favorites
+   *  group where rows from different providers sit side by side. */
+  const rowMeta = (model: ModelDescriptor, group: "favorites" | "provider") => {
+    const meta = modelMetaLine(model);
+    return group === "favorites"
+      ? [model.providerName ?? model.providerID, meta].filter(Boolean).join(" · ")
+      : meta;
+  };
+
+  const row = (model: ModelDescriptor, group: "favorites" | "provider") => {
     const selected = isSelected(model);
     const key = modelKey(model);
+    const favoriteDrag = group === "favorites";
     return (
       <div
         key={key}
-        className={`model-picker-row${selected ? " current" : ""}`}
+        id={`model-option-${key}`}
+        className={`model-picker-row${selected ? " current" : ""}${activeKey === key ? " active" : ""}`}
         role="option"
         aria-selected={selected}
-        tabIndex={0}
+        tabIndex={-1}
         onClick={() => choose(model)}
-        onKeyDown={(event) => {
-          if (event.target !== event.currentTarget) return;
-          if (event.key !== "Enter" && event.key !== " ") return;
-          event.preventDefault();
-          choose(model);
+        onMouseEnter={() => {
+          const index = flatRowIndex.get(key);
+          if (index !== undefined) setActive(index);
         }}
         {...(favoriteDrag ? {
           draggable: !q,
@@ -271,9 +391,15 @@ export default function ModelPicker({
         {favoriteDrag && <span className="model-picker-grip" aria-hidden="true">⠿</span>}
         <span className="model-picker-check" aria-hidden="true">{selected ? "✓" : ""}</span>
         <span className="model-picker-copy">
-          <strong>{model.name}</strong>
-          <small>{modelModalities(model)} · {modelContextLabel(model.context)}</small>
+          <strong>
+            {model.name}
+            {model.connected === false && (
+              <em className="model-row-offline">{tr("modelpicker.notConnected")}</em>
+            )}
+          </strong>
+          <small>{rowMeta(model, group)}</small>
         </span>
+        {infoButton(model)}
         {star(model)}
       </div>
     );
@@ -290,7 +416,7 @@ export default function ModelPicker({
     <SheetRow
       key={`${group}:${modelKey(model)}`}
       title={model.name}
-      meta={modelMetaLine(model)}
+      meta={rowMeta(model, group)}
       icon={(
         <ProviderLogo
           providerID={model.providerID}
@@ -318,16 +444,22 @@ export default function ModelPicker({
             onClick={() => moveFavorite(model, 1)}
           >↓</button>
         </span>
-      ) : star(model, "sheet")}
+      ) : (
+        <span className="sheet-row-tools">
+          {infoButton(model, "sheet")}
+          {star(model, "sheet")}
+        </span>
+      )}
     />
   );
 
-  const trigger = phone ? (
+  const trigger = (
     <button
       ref={triggerRef}
-      className="model-trigger-mobile"
       type="button"
-      aria-label={tr("modelpicker.selectModelCurrentValue", { label: label })}
+      className={`config-chip model-picker-trigger${className ? ` ${className}` : ""}`}
+      title={tr("modelpicker.selectModelCurrentValue", { label })}
+      aria-label={tr("modelpicker.selectModelCurrentValue", { label })}
       aria-haspopup="dialog"
       aria-expanded={open}
       {...triggerHandlers}
@@ -339,165 +471,180 @@ export default function ModelPicker({
           className="model-trigger-logo"
         />
       )}
-      <span className="model-trigger-copy">
-        <span className="model-trigger-name">{label}</span>
-        {selectedModel && (
-          <span className="composer-model-meta"><ModelMetaIcons model={selectedModel} /></span>
-        )}
-      </span>
-    </button>
-  ) : (
-    <button
-      ref={triggerRef}
-      className="chip picker-chip model-picker-trigger"
-      type="button"
-      title={tr("modelpicker.selectModelCurrentValue", { label: label })}
-      aria-label={tr("modelpicker.selectModelCurrentValue", { label: label })}
-      aria-haspopup="listbox"
-      aria-expanded={open}
-      onClick={toggleOpen}
-    >
-      {selectedModel && (
-        <ProviderLogo
-          providerID={selectedModel.providerID}
-          providerName={selectedModel.providerName}
-          className="model-trigger-logo"
-        />
-      )}
-      <span className="model-trigger-copy">
-        <small>{tr("modelpicker.model")}</small>
-        <strong className="picker-chip-text">{label}</strong>
-        {composerMeta && <span className="composer-model-meta">{composerMeta}</span>}
-      </span>
-      {selectedModel && (
-        <span className="model-trigger-meta">
-          {modelModalities(selectedModel)} · {modelContextLabel(selectedModel.context)}
-        </span>
-      )}
+      <span className="model-trigger-name">{label}</span>
+      <span className="config-chip-caret" aria-hidden="true"><Icon.chevronDown /></span>
     </button>
   );
 
+  const detailsView = detail && (
+    <ModelDetails
+      model={detail}
+      selected={isSelected(detail)}
+      {...(usage !== undefined ? { usage } : {})}
+      onUse={() => choose(detail)}
+      onBack={() => setDetail(null)}
+    />
+  );
+
   return (
-    <span className="picker picker-model model-picker">
+    <span className={`picker picker-model model-picker${open ? " open" : ""}`}>
       {trigger}
-      {open && phone && (
-        <Sheet
-          title={tr("modelpicker.model")}
-          size="tall"
-          className="model-sheet"
+      <ResponsiveOverlay
+          open={open}
+          title={detail ? detail.name : tr("modelpicker.model")}
           onClose={close}
-          search={{
-            value: query,
-            onChange: setQuery,
-            placeholder: tr("modelpicker.searchModels"),
-            ariaLabel: tr("modelpicker.searchModels"),
-          }}
-          {...(favorites.length > 1 ? {
-            action: {
+          anchorRef={triggerRef}
+          restoreFocusRef={triggerRef}
+          side={direction === "up" ? "up" : "down"}
+          align="start"
+          className={phone ? "model-sheet" : "model-pop"}
+          initialFocus={!phone && !detail ? ".model-pop-search input" : undefined}
+          sheetSize="tall"
+          {...(!detail ? {
+            sheetSearch: {
+              value: pickerState.query,
+              onChange: (query: string) => {
+                dispatchPicker({ type: "search", query });
+                setActive(0);
+              },
+              placeholder: tr("modelpicker.searchModels"),
+              ariaLabel: tr("modelpicker.searchModels"),
+            },
+          } : {})}
+          {...(!detail && favorites.length > 1 ? {
+            sheetAction: {
               label: editing ? tr("common.done") : tr("common.edit"),
               pressed: editing,
               onClick: () => setEditing((value) => !value),
             },
           } : {})}
         >
-          <div role="listbox" aria-label={tr("modelpicker.models")}>
-            {favorites.length > 0 && (
-              <SheetSection title={tr("modelpicker.favorites")} count={favorites.length}>
-                {favorites.map((model) => sheetRow(model, "favorites"))}
-              </SheetSection>
-            )}
-            {providers.map((provider) => {
-              const items = provider.models.filter((model) => !isFavorite(prefs, modelKey(model)));
-              if (items.length === 0) return null;
-              const expanded = q.length > 0 || prefs.expandedProviders.includes(provider.id);
-              return (
-                <section className="sheet-section" key={provider.id}>
-                  <h3 className="sheet-section-head">
-                    <button
-                      type="button"
-                      className="sheet-section-toggle"
-                      aria-expanded={expanded}
-                      onClick={() => setModelProviderExpanded(provider.id, !expanded)}
-                    >
-                      <ProviderLogo
-                        providerID={provider.id}
-                        providerName={provider.name}
-                        className="model-provider-logo"
-                      />
-                      <span>{provider.name}</span>
-                      <small>{items.length}</small>
-                      <span className={`sheet-section-caret${expanded ? " open" : ""}`} aria-hidden="true">
-                        <Icon.chevronDown />
-                      </span>
-                    </button>
-                  </h3>
-                  {expanded && items.map((model) => sheetRow(model, "provider"))}
-                </section>
-              );
-            })}
-            {filtered.length === 0 && <p className="sheet-empty">{tr("modelpicker.noModelsMatch")}{query}”.</p>}
-          </div>
-        </Sheet>
-      )}
-      {open && !phone && (
-        <>
-          <div className="menu-backdrop" onClick={close} />
-          <div ref={popoverRef} className={`picker-pop model-picker-pop ${direction}`}>
-            <input
-              autoFocus
-              value={query}
-              placeholder={tr("modelpicker.searchModels2")}
-              aria-label={tr("modelpicker.filterModels")}
-              onChange={(event) => setQuery(event.target.value)}
-            />
-            <div className="model-picker-list" role="listbox" aria-label={tr("modelpicker.models")}>
-              {favorites.length > 0 && (
-                <section className="model-provider-section favorites">
-                  <div className="model-provider-head static"><span>★</span><strong>{tr("modelpicker.favorites")}</strong><small>{favorites.length}</small></div>
-                  <div>{favorites.map((model) => row(model, true))}</div>
-                </section>
+        {detail ? detailsView : phone ? (
+            <div role="listbox" aria-label={tr("modelpicker.models")}>
+              {shownFavorites.length > 0 && (
+                <SheetSection title={tr("modelpicker.favorites")} count={favorites.length}>
+                  {shownFavorites.map((model) => sheetRow(model, "favorites"))}
+                </SheetSection>
               )}
               {providers.map((provider) => {
-                const expanded = q.length > 0 || prefs.expandedProviders.includes(provider.id);
                 const items = provider.models.filter((model) => !isFavorite(prefs, modelKey(model)));
                 if (items.length === 0) return null;
+                const expanded = isExpanded(provider.id);
+                const shown = items.filter((model) => flatRowIndex.has(modelKey(model)));
                 return (
-                  <section
-                    className="model-provider-section"
-                    key={provider.id}
-                    draggable={!q}
-                    onDragStart={() => setDraggedProvider(provider.id)}
-                    onDragOver={(event) => event.preventDefault()}
-                    onDrop={(event) => {
-                      event.preventDefault();
-                      if (draggedProvider) reorderModelProviders(providerIds, draggedProvider, provider.id);
-                      setDraggedProvider(null);
-                    }}
-                  >
-                    <button
-                      className="model-provider-head"
-                      aria-expanded={expanded}
-                      onClick={() => setModelProviderExpanded(provider.id, !expanded)}
-                    >
-                      <span className="model-provider-grip" aria-hidden="true">⠿</span>
-                      <ProviderLogo
-                        providerID={provider.id}
-                        providerName={provider.name}
-                        className="model-provider-logo"
-                      />
-                      <strong>{provider.name}</strong>
-                      <small>{items.length}</small>
-                      <span aria-hidden="true">{expanded ? "⌄" : "›"}</span>
-                    </button>
-                    {expanded && <div>{items.map((model) => row(model))}</div>}
+                  <section className="sheet-section" key={provider.id}>
+                    <h3 className="sheet-section-head">
+                      <button
+                        type="button"
+                        className="sheet-section-toggle"
+                        aria-expanded={expanded}
+                        onClick={() => setExpanded(provider.id, !expanded)}
+                      >
+                        <ProviderLogo
+                          providerID={provider.id}
+                          providerName={provider.name}
+                          className="model-provider-logo"
+                        />
+                        <span>{provider.name}</span>
+                        <small>{items.length}</small>
+                        <span className={`sheet-section-caret${expanded ? " open" : ""}`} aria-hidden="true">
+                          <Icon.chevronDown />
+                        </span>
+                      </button>
+                    </h3>
+                    {expanded && shown.map((model) => sheetRow(model, "provider"))}
                   </section>
                 );
               })}
-              {filtered.length === 0 && <div className="palette-empty">{tr("modelpicker.noModelsFound")}</div>}
+              {filtered.length === 0 && <p className="sheet-empty">{tr("modelpicker.noModelsFound")}</p>}
+              {hiddenMatchCount > 0 && (
+                <p className="picker-more">{hiddenMatchCount} {tr("picker.moreRefineTheFilter")}</p>
+              )}
             </div>
-          </div>
-        </>
-      )}
+        ) : (
+            <>
+              <div className="model-pop-search">
+                <input
+                  value={pickerState.query}
+                  placeholder={tr("modelpicker.searchModels2")}
+                  role="combobox"
+                  aria-label={tr("modelpicker.filterModels")}
+                  aria-autocomplete="list"
+                  aria-expanded="true"
+                  aria-controls="model-pop-listbox"
+                  aria-activedescendant={activeKey ? `model-option-${activeKey}` : undefined}
+                  onChange={(event) => {
+                    dispatchPicker({ type: "search", query: event.target.value });
+                    setActive(0);
+                  }}
+                  onKeyDown={onSearchKey}
+                />
+              </div>
+              <div
+                ref={listRef}
+                id="model-pop-listbox"
+                className="model-picker-list ui-scroll"
+                role="listbox"
+                aria-label={tr("modelpicker.models")}
+              >
+                {shownFavorites.length > 0 && (
+                  <section className="model-provider-section favorites">
+                    <div className="model-provider-head static">
+                      <span aria-hidden="true">★</span>
+                      <strong>{tr("modelpicker.favorites")}</strong>
+                      <small>{favorites.length}</small>
+                    </div>
+                    <div>{shownFavorites.map((model) => row(model, "favorites"))}</div>
+                  </section>
+                )}
+                {providers.map((provider) => {
+                  const expanded = isExpanded(provider.id);
+                  const items = provider.models.filter((model) => !isFavorite(prefs, modelKey(model)));
+                  if (items.length === 0) return null;
+                  const shown = items.filter((model) => flatRowIndex.has(modelKey(model)));
+                  return (
+                    <section
+                      className="model-provider-section"
+                      key={provider.id}
+                      draggable={!q}
+                      onDragStart={() => setDraggedProvider(provider.id)}
+                      onDragOver={(event) => event.preventDefault()}
+                      onDrop={(event) => {
+                        event.preventDefault();
+                        if (draggedProvider) reorderModelProviders(providerIds, draggedProvider, provider.id);
+                        setDraggedProvider(null);
+                      }}
+                    >
+                      <button
+                        type="button"
+                        className="model-provider-head"
+                        aria-expanded={expanded}
+                        onClick={() => setExpanded(provider.id, !expanded)}
+                      >
+                        <span className="model-provider-grip" aria-hidden="true">⠿</span>
+                        <ProviderLogo
+                          providerID={provider.id}
+                          providerName={provider.name}
+                          className="model-provider-logo"
+                        />
+                        <strong>{provider.name}</strong>
+                        <small>{items.length}</small>
+                        <span className={`model-provider-caret${expanded ? " open" : ""}`} aria-hidden="true">
+                          <Icon.chevronDown />
+                        </span>
+                      </button>
+                      {expanded && <div>{shown.map((model) => row(model, "provider"))}</div>}
+                    </section>
+                  );
+                })}
+                {filtered.length === 0 && <div className="palette-empty">{tr("modelpicker.noModelsFound")}</div>}
+                {hiddenMatchCount > 0 && (
+                  <div className="picker-more">{hiddenMatchCount} {tr("picker.moreRefineTheFilter")}</div>
+                )}
+              </div>
+            </>
+        )}
+      </ResponsiveOverlay>
     </span>
   );
 }

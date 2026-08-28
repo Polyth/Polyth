@@ -17,12 +17,12 @@ import type { PaneTab } from "../../../apps/web/src/workspace/paneStore.ts";
 import PaneHost, { type PaneHostHandle } from "../../../apps/web/src/components/workspace/PaneHost.tsx";
 import FileRowActions from "./FileRowActions.tsx";
 import { ChevronGlyph, FileTypeGlyph, FolderGlyph, fileTypeKeyOf } from "./editor/fileTreeIcons.tsx";
-import { Icon } from "../../../apps/web/src/icons.tsx";
 import { confirmAlert, promptAlert } from "../../../apps/web/src/alerts.ts";
 import { desktopBridge } from "../../../apps/web/src/desktopBridge.ts";
 import "./editor/FilePane.tsx"; // registers the "file" pane provider
 import "../../../apps/web/src/workspace/mainSlotPanes.ts";
 import { tr } from "../../../apps/web/src/i18n/index.ts"; // registers the "plugin" slot bridge
+import { BackIcon, IconButton, SearchIcon, Tabs, TextInput } from "../../../apps/web/src/components/ui/index.ts";
 
 interface Row {
   e: FileEntry;
@@ -293,29 +293,21 @@ export default function EditorView() {
 
   return (
     <div className={`editor-view mobile-${mobileStage}`}>
-      <nav className="editor-mobile-tabs" aria-label={tr("workspace.panehost.openResources")}>
-        <button
-          type="button"
-          className={mobileStage === "tree" ? "active" : ""}
-          aria-current={mobileStage === "tree" ? "page" : undefined}
-          onClick={() => setMobileStage("tree")}
-        >
-          {tr("editorview.files")}
-        </button>
-        <button
-          type="button"
-          className={mobileStage === "editor" ? "active" : ""}
-          aria-current={mobileStage === "editor" ? "page" : undefined}
-          disabled={activeTab === null}
-          onClick={() => setMobileStage("editor")}
-        >
-          {activeTab?.title ?? tr("common.edit")}
-        </button>
-      </nav>
+      <Tabs
+        className="editor-mobile-tabs"
+        size="sm"
+        label={tr("workspace.panehost.openResources")}
+        value={mobileStage}
+        tabs={[
+          { id: "tree", label: tr("editorview.files") },
+          { id: "editor", label: activeTab?.title ?? tr("common.edit"), disabled: activeTab === null },
+        ]}
+        onChange={(value) => setMobileStage(value as "tree" | "editor")}
+      />
       <aside className="editor-tree" aria-label={tr("editorview.files")}>
         <div className="files-search">
-          <input
-            type="text"
+          <TextInput
+            uiSize="sm"
             placeholder={tr("editorview.searchFiles")}
             value={query}
             onChange={(e) => setQuery(e.target.value)}
@@ -328,13 +320,13 @@ export default function EditorView() {
               }
             }}
           />
-          <button className="small-btn icon-only" title={tr("editorview.searchFiles2")} aria-label={tr("editorview.searchFiles2")} onClick={() => void search()}><Icon.search /></button>
+          <IconButton icon={SearchIcon} size="sm" label={tr("editorview.searchFiles2")} onClick={() => void search()} />
         </div>
         {treeErr && <div className="files-error">{treeErr}</div>}
         {searchResults !== null ? (
           <div className="files-list">
             <div className="files-actions">
-              <button className="small-btn icon-only" title={tr("editorview.backToTree")} aria-label={tr("editorview.backToTree")} onClick={() => { setSearchResults(null); setQuery(""); }}><Icon.back /></button>
+              <IconButton icon={BackIcon} size="sm" label={tr("editorview.backToTree")} onClick={() => { setSearchResults(null); setQuery(""); }} />
             </div>
             {searchResults.length === 0 && (
               <EmptyState

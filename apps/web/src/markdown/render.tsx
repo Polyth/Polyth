@@ -13,6 +13,7 @@ import MathTex from "./MathTex.tsx";
 import JsonTree, { tryParseJson } from "./JsonTree.tsx";
 import GalleryLightbox, { type GalleryImage } from "./Gallery.tsx";
 import { tr } from "../i18n/index.ts";
+import { Button } from "../components/ui/index.ts";
 
 interface DocContextValue {
   images: GalleryImage[];
@@ -122,9 +123,9 @@ function CodeBlock({ lang, text }: { lang: string; text: string }) {
     return (
       <div className="copy-wrap json-block">
         <div className="json-block-bar">
-          <button className="small-btn" aria-pressed={asTree} onClick={() => setAsTree((v) => !v)}>
+          <Button size="sm" aria-pressed={asTree} onClick={() => setAsTree((v) => !v)}>
             {asTree ? tr("markdown.render.raw") : tr("markdown.render.tree")}
-          </button>
+          </Button>
           <CopyButton text={text} />
         </div>
         {asTree

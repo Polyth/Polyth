@@ -47,6 +47,7 @@ register("./tsxHooks.mjs", import.meta.url);
 const { act, createElement, createRef, useState } = await import("react");
 const { createRoot } = await import("react-dom/client");
 const ui = await import("../src/components/ui/index.ts");
+const { useEscape } = await import("../src/useEscape.ts");
 
 const KeyboardEventCtor = (dom as unknown as { KeyboardEvent: typeof KeyboardEvent }).KeyboardEvent;
 
@@ -63,6 +64,44 @@ async function mount(element: ReturnType<typeof createElement>) {
     },
   };
 }
+
+test("Escape closes only the top-most transient overlay layer", async () => {
+  function Layers() {
+    const [outer, setOuter] = useState(true);
+    const [inner, setInner] = useState(true);
+    useEscape(outer, () => setOuter(false));
+    useEscape(inner, () => setInner(false));
+    return createElement("div", {
+      "data-outer": String(outer),
+      "data-inner": String(inner),
+    });
+  }
+
+  const view = await mount(createElement(Layers));
+  try {
+    const state = () => view.container.querySelector("div")!;
+    await act(async () => {
+      document.dispatchEvent(new KeyboardEventCtor("keydown", {
+        key: "Escape",
+        bubbles: true,
+        cancelable: true,
+      }));
+    });
+    assert.equal(state().dataset.inner, "false");
+    assert.equal(state().dataset.outer, "true");
+
+    await act(async () => {
+      document.dispatchEvent(new KeyboardEventCtor("keydown", {
+        key: "Escape",
+        bubbles: true,
+        cancelable: true,
+      }));
+    });
+    assert.equal(state().dataset.outer, "false");
+  } finally {
+    await view.unmount();
+  }
+});
 
 test("token contract: calm radius scale, overlay/icon/z/density tokens exist once", async () => {
   const [tokens, styles] = await Promise.all([read("../src/tokens.css"), read("../src/styles.css")]);
@@ -87,7 +126,8 @@ test("token contract: calm radius scale, overlay/icon/z/density tokens exist onc
   assert.match(styles, /@media \(pointer: coarse\)\s*\{\s*html:root \{ --hit-min: var\(--tap\); \}\s*\}/);
   // Primitives are defined once — no wave-layered duplicates.
   for (const selector of [".ui-btn {", ".ui-icon-btn {", ".ui-popover {", ".ui-menu-item {", ".ui-tabs {"]) {
-    assert.equal(styles.split(selector).length - 1, 1, `${selector} has a single definition`);
+    const exactSelector = new RegExp(`^${selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`, "gm");
+    assert.equal([...styles.matchAll(exactSelector)].length, 1, `${selector} has a single definition`);
   }
   // IconButton extends its hit area without growing the visual box.
   assert.match(styles, /\.ui-icon-btn::after\s*\{[^}]*width:\s*max\(100%, var\(--hit-min\)\)/s);
@@ -222,6 +262,97 @@ test("Menu (desktop): opens a role=menu popover, selects, and dismisses on Escap
       document.dispatchEvent(new KeyboardEventCtor("keydown", { key: "Escape", bubbles: true, cancelable: true }));
     });
     assert.equal(document.body.querySelector('[role="menu"]'), null, "Escape closes the menu");
+  } finally { await view.unmount(); }
+});
+
+test("Menu selection semantics: radio/checkbox roles, headings, swatches, stay-open checkboxes", async () => {
+  media.compact = false;
+  media.phone = false;
+  let sort = "recent";
+  let filtered = false;
+  function Host() {
+    const [, rerender] = useState(0);
+    return createElement(ui.Menu, {
+      label: "List options",
+      entries: [
+        { heading: "Sort" },
+        { id: "recent", label: "Recent", kind: "radio", checked: sort === "recent", onSelect: () => { sort = "recent"; rerender((n: number) => n + 1); } },
+        { id: "name", label: "Name", kind: "radio", checked: sort === "name", onSelect: () => { sort = "name"; rerender((n: number) => n + 1); } },
+        "separator",
+        { id: "attention", label: "Needs attention", kind: "checkbox", checked: filtered, swatch: "#e4bb62", onSelect: () => { filtered = !filtered; rerender((n: number) => n + 1); } },
+      ],
+      footer: createElement("div", { className: "menu-extra" }, "extras"),
+      children: (trigger: object) =>
+        createElement("button", { ...trigger, className: "menu-trigger" }, "Options"),
+    });
+  }
+  const view = await mount(createElement(Host));
+  try {
+    const trigger = view.container.querySelector<HTMLButtonElement>(".menu-trigger")!;
+    await act(async () => { trigger.click(); });
+    const menu = document.body.querySelector<HTMLElement>('[role="menu"]')!;
+
+    // Headings are non-interactive; radios and checkboxes carry aria-checked.
+    assert.equal(menu.querySelector(".ui-menu-heading")?.textContent, "Sort");
+    const radios = [...menu.querySelectorAll<HTMLElement>('[role="menuitemradio"]')];
+    assert.deepEqual(radios.map((r) => r.getAttribute("aria-checked")), ["true", "false"]);
+    assert.ok(radios[0]!.querySelector(".ui-menu-item-check svg"), "checked radio renders the leading check");
+    const checkbox = menu.querySelector<HTMLElement>('[role="menuitemcheckbox"]')!;
+    assert.equal(checkbox.getAttribute("aria-checked"), "false");
+    assert.ok(checkbox.querySelector(".ui-menu-item-swatch"), "label-style entries render their swatch");
+    assert.ok(menu.querySelector(".menu-extra"), "footer content renders after the entries");
+
+    // Checkbox selection toggles without closing; radio selection closes.
+    await act(async () => { checkbox.click(); });
+    assert.ok(document.body.querySelector('[role="menu"]'), "checkbox toggles keep the menu open");
+    assert.equal(filtered, true);
+    assert.equal(
+      document.body.querySelector<HTMLElement>('[role="menuitemcheckbox"]')!.getAttribute("aria-checked"),
+      "true",
+    );
+    await act(async () => {
+      document.body.querySelectorAll<HTMLElement>('[role="menuitemradio"]')[1]!.click();
+    });
+    assert.equal(sort, "name");
+    assert.equal(document.body.querySelector('[role="menu"]'), null, "radio selection closes the menu");
+  } finally { await view.unmount(); }
+});
+
+test("Menu controlled open: external state opens it and focus returns to returnFocusRef", async () => {
+  media.compact = false;
+  media.phone = false;
+  const returnRef = createRef<HTMLButtonElement>();
+  function Host() {
+    const [open, setOpen] = useState(false);
+    return createElement("div", null,
+      createElement("button", {
+        ref: returnRef,
+        className: "row-btn",
+        onContextMenu: (event: MouseEvent) => { event.preventDefault(); setOpen(true); },
+      }, "Row"),
+      createElement(ui.Menu, {
+        label: "Row actions",
+        open,
+        onOpenChange: setOpen,
+        returnFocusRef: returnRef,
+        entries: [{ id: "one", label: "One", onSelect: () => {} }],
+        children: (trigger: object) =>
+          createElement("button", { ...trigger, className: "menu-trigger" }, "More"),
+      }),
+    );
+  }
+  const view = await mount(createElement(Host));
+  try {
+    const row = view.container.querySelector<HTMLButtonElement>(".row-btn")!;
+    await act(async () => {
+      row.dispatchEvent(new (dom as unknown as { MouseEvent: typeof MouseEvent }).MouseEvent("contextmenu", { bubbles: true, cancelable: true }));
+    });
+    assert.ok(document.body.querySelector('[role="menu"]'), "controlled open renders the menu");
+    await act(async () => {
+      document.dispatchEvent(new KeyboardEventCtor("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+    });
+    assert.equal(document.body.querySelector('[role="menu"]'), null);
+    assert.equal(document.activeElement, row, "dismissal focuses the provided return target");
   } finally { await view.unmount(); }
 });
 

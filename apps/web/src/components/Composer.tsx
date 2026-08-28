@@ -62,7 +62,7 @@ import {
 } from "../composer/discovery.ts";
 import {
   loadComposerConfig, saveComposerConfig, consumeComposerConfig, wireProfileId,
-  withExplicitAgent, withExplicitModel, withExplicitThinking, withProfile, withProfileNone,
+  withExplicitAgent, withExplicitThinking, withModelForNextTurn,
   type ComposerConfig,
 } from "../composerConfig.ts";
 import {
@@ -75,17 +75,15 @@ import type { PickerItem } from "../picker.ts";
 import Picker from "./Picker.tsx";
 import AdaptiveTextInput, { type TextInputHandle } from "./input/AdaptiveTextInput.tsx";
 import ComposerAddMenu from "./ComposerAddMenu.tsx";
+import EffortMenu from "./EffortMenu.tsx";
 import ComposerFocusDialog from "./ComposerFocusDialog.tsx";
 import QueuedMessageList from "./QueuedMessageList.tsx";
 import { GoalAttachForm } from "../../../../packages/goals/widgets/GoalStrip.tsx";
 import { announce } from "./a11y/live.tsx";
 import { noteModelUsed } from "@polyth/models/web-prefs";
-import { getUiSettings, useUiSettings } from "../uiPrefs.ts";
+import { getUiSettings } from "../uiPrefs.ts";
 import { migrateFavoritesOnce, profilesLoaded, useProfiles } from "../profiles.ts";
-import AgentProfileForm from "./AgentProfileForm.tsx";
 import type {
-  AgentProfile,
-  ModelDescriptor,
   ModelRef,
   QueueItemDto,
   SessionProjection,
@@ -93,20 +91,20 @@ import type {
 import { agentPickerDefaultLabel } from "../composerDefaults.ts";
 import { friendlyError, matchesSendShortcut, modKeyLabel, parseModelRef } from "../settings.ts";
 import { Icon } from "../icons.tsx";
-import { useWorkspaceMode } from "../widgets/workspaceMode.ts";
-import ModelPicker, { modelContextLabel, modelMetaLine, modelSupportsThinking } from "../../../../packages/models/widgets/ModelPicker.tsx";
+import ModelPicker from "@polyth/models/model-picker";
+import { modelSupportsThinking } from "@polyth/models/model-presentation";
 import { resolveProjectModelDefault, useSessionDefaults } from "../sessionDefaults.ts";
 import { getModelThinking, setModelThinking } from "../thinkingPrefs.ts";
 import { roleKind, useRolePrefs } from "../rolePrefs.ts";
 import { useShellMode } from "../responsiveShell.ts";
-import { useViewportMetrics } from "../mobileViewport.ts";
-import { formatNumber, getLocale, tr } from "../i18n/index.ts";
+import { dismissKeyboard, useViewportMetrics } from "../mobileViewport.ts";
+import { tr } from "../i18n/index.ts";
 import SessionContextBar, {
   type ContextChoice,
   type SessionContextBarProps,
 } from "./mobile/SessionContextBar.tsx";
 import {
-  AddIcon, Button, IconButton, Menu, Popover, SendIcon, StopIcon,
+  Button, Menu, SendIcon, StopIcon,
 } from "./ui/index.ts";
 
 // Per-project command/snippet catalog cache: the composer remounts on every
@@ -126,70 +124,6 @@ async function loadComposerCatalog(projectId: string): Promise<ComposerCatalogRe
     composerCatalogCache.set(projectId, { at: Date.now(), result });
   }
   return result;
-}
-
-function modelRefFromValue(value: string): { providerID: string; modelID: string } | undefined {
-  if (!value) return undefined;
-  try {
-    const parsed = JSON.parse(value) as { providerID?: unknown; modelID?: unknown };
-    if (typeof parsed.providerID === "string" && typeof parsed.modelID === "string") {
-      return { providerID: parsed.providerID, modelID: parsed.modelID };
-    }
-  } catch {
-    // fall through
-  }
-  return undefined;
-}
-
-function ContextWindowPicker({ limit, used }: { limit?: number; used?: number }) {
-  const [open, setOpen] = useState(false);
-  const triggerRef = useRef<HTMLButtonElement>(null);
-  const value = limit
-    ? modelContextLabel(limit).replace(/\s+context$/, "").toUpperCase()
-    : tr("composer.unknown");
-  const usage = Math.max(0, used ?? 0);
-  const percent = limit ? Math.min(100, Math.round((usage / limit) * 100)) : null;
-  return (
-    <div className={`context-window-picker${open ? " open" : ""}`}>
-      <button
-        ref={triggerRef}
-        type="button"
-        className="context-window-chip"
-        title={limit ? tr("composer.modelContextWindowValueTokens", { value: limit.toLocaleString(getLocale()) }) : tr("composer.contextWindowUnavailable")}
-        aria-haspopup="dialog"
-        aria-expanded={open}
-        onClick={() => setOpen((valueOpen) => !valueOpen)}
-      >
-        <span>
-          <small>{tr("composer.contextWindow")}</small>
-          <strong>{value}</strong>
-        </span>
-        <Icon.chevronDown />
-      </button>
-      <Popover
-        open={open}
-        onClose={() => setOpen(false)}
-        anchorRef={triggerRef}
-        side="up"
-        ariaLabel={tr("composer.contextWindowDetails")}
-        className="context-window-pop"
-      >
-        <div>
-          <span>{tr("composer.modelLimit")}</span>
-          <strong>{limit ? limit.toLocaleString(getLocale()) : tr("common.unavailable")}</strong>
-        </div>
-        <div>
-          <span>{tr("composer.currentInput")}</span>
-          <strong>{usage.toLocaleString(getLocale())} {tr("composer.tokens")}</strong>
-        </div>
-        {percent !== null && (
-          <div className="context-window-meter" aria-label={tr("composer.valueOfContextWindowUsed", { percent: percent })}>
-            <i style={{ width: `${percent}%` }} />
-          </div>
-        )}
-      </Popover>
-    </div>
-  );
 }
 
 const PROFILE_MISSING_NOTE = tr("composer.profileUnavailableChooseAnother");
@@ -342,89 +276,9 @@ function useComposerLocation(session: SessionProjection | null): {
   };
 }
 
-function compactContext(context?: number): string {
-  if (!context) return tr("composer.unknown");
-  if (context >= 1_000_000) {
-    return `${formatNumber(context / 1_000_000, { maximumFractionDigits: 1 })}M`;
-  }
-  if (context >= 1_000) return `${formatNumber(Math.round(context / 1_000))}K`;
-  return formatNumber(context);
-}
-
-/** Reasoning-effort variants are backend strings ("low", "xhigh", "thinking").
- *  Display only — the id sent to the backend is always the raw variant. */
-const THINKING_LABELS: Record<string, string> = { xhigh: "X-High", none: tr("common.none") };
-
-function thinkingLabel(variant: string): string {
-  const known = THINKING_LABELS[variant.toLowerCase()];
-  if (known) return known;
-  const label = variant.replace(/[-_]+/g, " ").trim();
-  return label ? label[0]!.toUpperCase() + label.slice(1) : variant;
-}
-
-/** A discrete effort control: every model-reported variant is a fixed stop,
- * with Auto retained as the first stop so an explicit override can be cleared. */
-function ThinkingSlider({
-  className,
-  variants,
-  value,
-  onPick,
-  preserveKeyboard,
-}: {
-  className?: string;
-  variants: readonly string[];
-  value?: string;
-  onPick: (thinking: string | undefined) => void;
-  preserveKeyboard?: () => void;
-}) {
-  const [dragging, setDragging] = useState(false);
-  const options = ["", ...variants];
-  const selected = Math.max(0, options.indexOf(value ?? ""));
-  const selectedOption = options[selected] ?? "";
-  const label = selectedOption ? thinkingLabel(selectedOption) : tr("composer.auto");
-  return (
-    <label className={`thinking-slider${className ? ` ${className}` : ""}`}>
-      <span className="thinking-slider-label">
-        <output>{label}</output>
-      </span>
-      <span className="thinking-slider-track">
-        <input
-          type="range"
-          min={0}
-          max={options.length - 1}
-          step={1}
-          value={selected}
-          aria-label={tr("composer.thinkingEffortValue", { value: label })}
-          onChange={(event) => {
-            onPick(options[Number(event.target.value)] || undefined);
-            preserveKeyboard?.();
-          }}
-          onPointerDown={() => setDragging(true)}
-          onPointerUp={() => setDragging(false)}
-          onPointerCancel={() => setDragging(false)}
-          onBlur={() => setDragging(false)}
-        />
-        <span className="thinking-slider-stops" aria-hidden="true">
-          {options.map((option, index) => (
-            <i key={option || "auto"} className={index <= selected ? "active" : ""} />
-          ))}
-        </span>
-        {dragging && <span className="thinking-slider-tooltip" role="tooltip">{tr("composer.thinkingValue", { value: label })}</span>}
-      </span>
-    </label>
-  );
-}
-
 function agentBadgeLabel(agent?: string): string {
   const label = (agent || tr("composer.build")).replace(/[-_]+/g, " ").trim();
   return label ? label[0]!.toUpperCase() + label.slice(1) : tr("composer.build");
-}
-
-// UX-MOBILE-01 §13/§40/§41: one muted microtext line — `Text · Image · 500K`.
-// No mixed glyph set, no "Context:" label competing for primary space.
-function modelCapabilityMeta(model?: ModelDescriptor): string {
-  const line = modelMetaLine(model);
-  return line || tr("composer.contextValue", { value: compactContext(model?.context) });
 }
 
 type QueueEdit = {
@@ -439,9 +293,6 @@ export default function Composer({
 }: {
   variant?: "docked" | "widget";
 }) {
-  const [pinSeed, setPinSeed] = useState<{ providerID: string; modelID: string; name?: string } | null>(null);
-  const [pinEdit, setPinEdit] = useState<AgentProfile | null>(null);
-  const [createProfileOpen, setCreateProfileOpen] = useState(false);
   const [goalFormOpen, setGoalFormOpen] = useState(false);
   const [goalAttachBusy, setGoalAttachBusy] = useState(false);
   const [autoApproveBusy, setAutoApproveBusy] = useState(false);
@@ -460,13 +311,30 @@ export default function Composer({
   const { contextBar, newSessionTarget } = useComposerLocation(session);
   const model = useActiveModel();
   const working = model.turn?.status === "working";
-  const [techOpen, setTechOpen] = useState(false);
+  const abortPendingRef = useRef(false);
+  const [abortPending, setAbortPending] = useState(false);
+  useEffect(() => {
+    if (!working) {
+      abortPendingRef.current = false;
+      setAbortPending(false);
+    }
+  }, [working]);
+  const stopActiveTurn = useCallback(async () => {
+    // One stop intent per active turn. If the stream settles while the request
+    // is in flight, the idle Send state wins and the late response is ignored.
+    if (!working || abortPendingRef.current) return;
+    abortPendingRef.current = true;
+    setAbortPending(true);
+    try {
+      await abortSession();
+    } finally {
+      abortPendingRef.current = false;
+      setAbortPending(false);
+    }
+  }, [working]);
   const noModels = chatModels.length === 0;
   const widgetMode = variant === "widget";
-  const simpleMode = useWorkspaceMode() === "chat" || widgetMode;
-  const lightFocusComposer = simpleMode && !widgetMode;
   const shellLayout = useShellMode();
-  const ui = useUiSettings();
 
   // IME-safe input: the DOM owns live text; `text` tracks committed edits only.
   const inputRef = useRef<TextInputHandle>(null);
@@ -498,7 +366,9 @@ export default function Composer({
   // mobileViewport.ts publishes --visual-vh / --visual-bottom / --keyboard-inset
   // and the phone CSS keeps the frame on the visible band. The composer reads
   // the metrics for auto-grow; it never re-derives its own transform.
-  const isPhone = shellLayout === "phone";
+  // A widget composer responds to its host container below; viewport shell
+  // mode must not turn an embedded card into the docked-phone interaction.
+  const isPhone = shellLayout === "phone" && !widgetMode;
   const sendShortcut = isPhone ? settings.mobileSendShortcut : settings.desktopSendShortcut;
   const sendKey = sendShortcut === "none" ? `${modKeyLabel()}↵` : sendShortcut === "shift-enter" ? "⇧↵" : "↵";
 
@@ -1116,12 +986,6 @@ export default function Composer({
 
   // ---- execution configuration projections ------------------------------------
   const agentValue = cfg.agent ?? "";
-  const selectedProfileId = cfg.profile.kind === "id"
-    ? cfg.profile.id
-    : cfg.profile.kind === "none"
-    ? ""
-    : (session?.agentProfileId ?? "");
-
   const recommendedModel = session?.model && chatModels.some((candidate) =>
     candidate.providerID === session.model?.providerID && candidate.modelID === session.model?.modelID)
     ? session.model
@@ -1133,7 +997,7 @@ export default function Composer({
     if (!ref) return;
     // A pending effort belongs to the old model. The selected model's saved
     // value is derived at send/render time, so never carry this one across.
-    updateCfg(withExplicitThinking(withExplicitModel(cfg, ref), undefined));
+    updateCfg(withModelForNextTurn(cfg, ref));
     noteModelUsed(`${ref.providerID}/${ref.modelID}`);
     if (activeProjectId) {
       void rememberProjectModelSelection(activeProjectId, ref).catch((error) => {
@@ -1143,75 +1007,34 @@ export default function Composer({
   };
   const chatAgents = agents.filter((agent) =>
     roleKind(agent, rolePrefs) === "main" && agent.name.toLowerCase() !== "compaction");
+  const defaultAgentLabel = agentBadgeLabel(
+    agentPickerDefaultLabel(session?.agent, chatAgents).replace(/^Default:\s*/, ""),
+  );
+  // Agent rows carry the backend-reported purpose so choosing between modes
+  // is informed, not a guess from a one-word name.
   const agentItems: PickerItem[] = [
-    { id: "", label: agentPickerDefaultLabel(session?.agent, chatAgents).replace(/^Default:\s*/, ""), group: "" },
+    {
+      id: "",
+      label: defaultAgentLabel,
+      detail: tr("composer.letPolythUseYourCurrentWorkspaceDefault"),
+      group: "",
+    },
     ...chatAgents.map((a) => ({
       id: a.name,
-      label: a.name,
+      label: agentBadgeLabel(a.name),
+      ...(a.description ? { detail: a.description } : {}),
       group: "",
     })),
   ];
   const pickAgent = (id: string) => updateCfg(withExplicitAgent(cfg, id || undefined));
+  const activeAgent = cfg.agent
+    ?? session?.agent
+    ?? sessionDefaults.defaultAgent
+    ?? chatAgents[0]?.name
+    ?? "build";
+  const activeAgentLabel = agentItems.find((item) => item.id === agentValue)?.label
+    ?? agentBadgeLabel(activeAgent);
 
-  // Create/Edit profile from the model row: exactly one matching profile opens
-  // Edit, otherwise the form is seeded with the immutable provider/model pair.
-  const matchingProfiles = (ref: { providerID: string; modelID: string }) =>
-    profiles.filter((p) => p.providerID === ref.providerID && p.modelID === ref.modelID);
-  const pinModel = (value: string) => {
-    const ref = modelRefFromValue(value);
-    if (!ref) return;
-    const matching = matchingProfiles(ref);
-    if (matching.length === 1) setPinEdit(matching[0]!);
-    else {
-      const m = models.find((x) => x.providerID === ref.providerID && x.modelID === ref.modelID);
-      setPinSeed({ ...ref, name: m?.name || ref.modelID });
-    }
-  };
-  const modelRowAction = {
-    labelFor: (id: string) => {
-      const ref = modelRefFromValue(id);
-      return ref && matchingProfiles(ref).length === 1 ? tr("composer.editProfile") : tr("composer.createProfile");
-    },
-    nameFor: (id: string) => {
-      const ref = modelRefFromValue(id);
-      if (!ref) return tr("composer.createProfile");
-      const matching = matchingProfiles(ref);
-      if (matching.length === 1) return tr("composer.editProfileValue", { name: matching[0]!.name });
-      const m = models.find((x) => x.providerID === ref.providerID && x.modelID === ref.modelID);
-      return tr("composer.createProfileFromValue", { value: m?.name || ref.modelID });
-    },
-    onAction: pinModel,
-  };
-
-  const noneLabel = tr("common.none");
-  const profileItems: PickerItem[] = [
-    { id: "", label: noneLabel, group: "" },
-    ...profiles.map((p) => ({
-      id: p.id,
-      label: p.name,
-      group: "",
-      detail: `${p.providerID}/${p.modelID}${p.agent ? ` · ${p.agent}` : ""}`,
-    })),
-  ];
-  const pickProfile = (id: string) => {
-    updateCfg(id ? withProfile(cfg, id) : withProfileNone(cfg));
-  };
-  const currentProfileName = profileMissing
-    ? tr("composer.profileUnavailable")
-    : profiles.find((p) => p.id === selectedProfileId)?.name ?? noneLabel;
-  // Creation needs a connectable model; the reason is visible text with an
-  // operable settings route, never a silent hidden action.
-  const profileFooter = (label: string) => ({
-    label,
-    run: () => setCreateProfileOpen(true),
-    ...(noModels ? {
-      disabledReason: tr("composer.connectAModelBeforeCreatingAProfile"),
-      secondaryLabel: tr("composer.openModelSettings"),
-      secondaryRun: () => openSettingsPage("models"),
-    } : {}),
-  });
-
-  const currentAgentLabel = agentItems.find((i) => i.id === agentValue)?.label ?? agentItems[0]!.label;
   const selectedModel = cfg.model
     ? chatModels.find((candidate) =>
         candidate.providerID === cfg.model?.providerID && candidate.modelID === cfg.model?.modelID)
@@ -1232,7 +1055,6 @@ export default function Composer({
   const preserveKeyboard = isPhone && keyboardOpen
     ? () => inputRef.current?.focus()
     : undefined;
-  const activeAgent = cfg.agent ?? session?.agent ?? sessionDefaults.defaultAgent ?? chatAgents[0]?.name ?? "build";
   const autoApproveOn = session ? session.autoAccept === true : newSessionAutoApprove;
   const toggleAutoApprove = () => {
     if (autoApproveBusy) return;
@@ -1319,7 +1141,7 @@ export default function Composer({
     return (
       <div
         ref={rootRef}
-        className={`composer ${widgetMode ? "composer-widget" : "composer-chat"}${simpleMode ? " composer-simple" : " composer-power"}${lightFocusComposer ? " composer-focus-light" : ""}${stateClass}`}
+        className={`composer ${widgetMode ? "composer-widget" : "composer-chat"} composer-simple${widgetMode ? "" : " composer-focus-light"}${stateClass}`}
         aria-busy="true"
       >
         <div className="composer-card">
@@ -1335,7 +1157,7 @@ export default function Composer({
   return (
     <div
       ref={rootRef}
-      className={`composer ${widgetMode ? "composer-widget" : "composer-chat"}${simpleMode ? " composer-simple" : " composer-power"}${lightFocusComposer ? " composer-focus-light" : ""}${stateClass}`}
+      className={`composer ${widgetMode ? "composer-widget" : "composer-chat"} composer-simple${widgetMode ? "" : " composer-focus-light"}${stateClass}`}
     >
       {/* The project/worktree pickers only make sense before a session exists:
           in an open session the location is fixed, and picking here silently
@@ -1382,49 +1204,6 @@ export default function Composer({
       {attachments.length > 0 && !noModels && (
         <div className="composer-attach-note">{ATTACHMENT_COMPAT_NOTE}</div>
       )}
-      {simpleMode && (
-        <div className="composer-model-header">
-          {!noModels && (
-            <ModelPicker
-              models={chatModels}
-              value={cfg.model}
-              recommended={recommendedModel}
-              composerMeta={modelCapabilityMeta(selectedModel)}
-              direction="up"
-              onPick={pickComposerModel}
-            />
-          )}
-          {/* Reasoning effort stays reachable on phones as a compact slider
-              immediately right of the model name. It only exists for models
-              that actually report variants. */}
-          <span className="composer-mode-cluster">
-            {modelSupportsThinking(selectedModel) && (
-              <ThinkingSlider
-                className="composer-thinking-badge"
-                variants={thinkingVariants}
-                value={selectedThinking}
-                onPick={(thinking) => pickThinking(thinking || undefined)}
-                preserveKeyboard={preserveKeyboard}
-              />
-            )}
-            {chatAgents.length > 0 ? (
-              <Picker
-                className="composer-agent-badge"
-                label={tr("composer.mode")}
-                mobileSheet
-                direction="up"
-                items={agentItems}
-                value={agentValue}
-                onPick={pickAgent}
-                placeholder={agentBadgeLabel(activeAgent)}
-                ariaLabel={tr("composer.selectAgentModeCurrentValue", { value: agentBadgeLabel(activeAgent) })}
-              />
-            ) : (
-              <span className="agent-type-badge">{agentBadgeLabel(activeAgent)}</span>
-            )}
-          </span>
-        </div>
-      )}
       <div className="composer-input">
         {shellMode && <div className="composer-mode-label">{tr("composer.shellCommandPermissionCheckedOutputAddedTo")}</div>}
         <AdaptiveTextInput
@@ -1436,11 +1215,9 @@ export default function Composer({
           ariaLabel={tr("composer.message")}
           placeholder={shellMode
             ? tr("composer.enterAWorkspaceShellCommand")
-            : simpleMode
-              ? shellLayout === "phone"
-                ? tr("composer.useForHelpers")
-                : tr("composer.messageTheAgentTagFilesOrUse")
-              : tr("composer.askAnything")}
+            : shellLayout === "phone"
+              ? tr("composer.useForHelpers")
+              : tr("composer.messageTheAgentTagFilesOrUse")}
           {...(acView ? {
             role: "combobox",
             ariaAutocomplete: "list" as const,
@@ -1508,116 +1285,82 @@ export default function Composer({
           </div>
         )}
       </div>
-      {!simpleMode && techOpen && (
-        <div className="composer-tech-help" role="note">
-          {tr("composer.type")}{" "}<kbd>!</kbd> {tr("composer.forAShellCommand")}{" "}<kbd>/</kbd> {tr("composer.forCommands")}{" "}<kbd>#</kbd> {tr("composer.forSnippets")}{" "}<kbd>@</kbd> {tr("composer.toMentionFiles")}</div>
-      )}
-      <div className="composer-bar composer-row">
-        <div className="composer-selectors">
-          {!simpleMode && ui.showTechnicalButtons && <button
-            className="composer-tech-toggle"
-            aria-expanded={techOpen}
-            title={techOpen
-              ? tr("composer.hideModelAgentAndSyntaxOptions")
-              : tr("composer.showModelAgentAndSyntaxOptions")}
-            onClick={() => setTechOpen((open) => !open)}
-          >
-            {tr("composer.technicalOptions")}</button>}
-          {!simpleMode && !noModels && (
-            <>
-              <ModelPicker
-                models={chatModels}
-                value={cfg.model}
-                recommended={recommendedModel}
-                onPick={pickComposerModel}
-              />
-              <ContextWindowPicker
-                limit={selectedModel?.context}
-                used={model.contextUsage?.inputTokens}
-              />
-            </>
+      {/* P2-W3A rail: typing first, configuration second. One quiet row under
+          the editor — Add (attachments/context/tools), then the execution
+          config chips (model, agent, effort), then extensions and Send.
+          Send/Stop is the only filled control; everything else stays quiet. */}
+      <div className="composer-rail">
+        <input
+          ref={fileInputRef}
+          type="file"
+          multiple
+          hidden
+          onChange={(e) => {
+            const files = Array.from(e.currentTarget.files ?? []);
+            e.currentTarget.value = "";
+            attachFiles(files);
+          }}
+        />
+        <ComposerAddMenu
+          hasProject={!!activeProjectId}
+          hasSession={!!session?.id}
+          goalsEnabled
+          draftText={text}
+          commands={commandCatalog}
+          snippets={snippetCatalog}
+          direction="up"
+          onUpload={() => fileInputRef.current?.click()}
+          onInsertMention={menuMention}
+          onInsertCommand={menuCommand}
+          onInsertSnippet={menuSnippet}
+          onEnterShell={menuShell}
+          onAttachGoal={toggleGoal}
+          attachGithub={attachGithub}
+        />
+        <div className="composer-config">
+          {!noModels && (
+            <ModelPicker
+              models={chatModels}
+              value={cfg.model}
+              recommended={recommendedModel}
+              direction="up"
+              usage={model.contextUsage?.inputTokens}
+              onPick={pickComposerModel}
+            />
           )}
-          {!simpleMode && chatAgents.length > 0 && (
+          {chatAgents.length > 0 ? (
             <Picker
-              className="picker-agent"
-              label={tr("composer.agent")} direction="up" items={agentItems} value={agentValue} onPick={pickAgent}
-              ariaLabel={tr("composer.selectWorkModeCurrentValue", { value: currentAgentLabel })}
+              className="composer-agent-chip"
+              label={tr("composer.agent")}
+              mobileSheet
+              direction="up"
+              items={agentItems}
+              value={agentValue}
+              onPick={pickAgent}
+              placeholder={activeAgentLabel}
+              ariaLabel={tr("composer.selectAgentModeCurrentValue", { value: activeAgentLabel })}
               triggerIcon={<span className="agent-status-dot" />}
             />
+          ) : (
+            <span className="agent-type-badge">{activeAgentLabel}</span>
           )}
-          {!simpleMode && modelSupportsThinking(selectedModel) && (
-            <ThinkingSlider
-              className="picker-thinking"
+          {modelSupportsThinking(selectedModel) && (
+            <EffortMenu
               variants={thinkingVariants}
               value={selectedThinking}
-              onPick={(thinking) => pickThinking(thinking || undefined)}
-              preserveKeyboard={preserveKeyboard}
-            />
-          )}
-          {!simpleMode && ui.showTechnicalButtons && techOpen && (
-            <Picker
-              className="picker-profile"
-              label={tr("composer.profile")} direction="up" items={profileItems} value={selectedProfileId} onPick={pickProfile}
-              placeholder={profileMissing ? tr("composer.profileUnavailable") : tr("common.none")}
-              ariaLabel={tr("composer.selectProfileCurrentValue", { value: currentProfileName })}
-              footerAction={profileFooter(tr("composer.createAProfile"))}
+              onPick={(thinking) => {
+                pickThinking(thinking || undefined);
+                preserveKeyboard?.();
+              }}
+              onWillOpen={isPhone ? () => void dismissKeyboard() : undefined}
             />
           )}
         </div>
-        {!simpleMode && (
-          <div className="composer-extensions">
+        <div className="composer-actions">
+          <span className="composer-extensions composer-mobile-extensions">
             <SlotHost slot="composer.leading" context={slotContext} />
             <SlotHost slot="composer.trailing" context={slotContext} />
-          </div>
-        )}
-        <div className="composer-actions">
-          <input
-            ref={fileInputRef}
-            type="file"
-            multiple
-            hidden
-            onChange={(e) => {
-              const files = Array.from(e.currentTarget.files ?? []);
-              e.currentTarget.value = "";
-              attachFiles(files);
-            }}
-          />
-          {/* §17/§19: phones get ONE `+` (the Add menu, which owns Upload).
-              Wider layouts keep the direct upload chip beside it. */}
-          {!phoneLayout && (
-            <IconButton
-              icon={AddIcon}
-              label={tr("composer.addFiles")}
-              variant="quiet"
-              size="lg"
-              className="composer-add-files"
-              disabled={!activeProjectId}
-              onClick={() => fileInputRef.current?.click()}
-            />
-          )}
-          <ComposerAddMenu
-            hasProject={!!activeProjectId}
-            hasSession={!!session?.id}
-            goalsEnabled
-            draftText={text}
-            commands={commandCatalog}
-            snippets={snippetCatalog}
-            direction="up"
-            trigger={phoneLayout ? "add" : "tools"}
-            onUpload={() => fileInputRef.current?.click()}
-            onInsertMention={menuMention}
-            onInsertCommand={menuCommand}
-            onInsertSnippet={menuSnippet}
-            onEnterShell={menuShell}
-            onAttachGoal={toggleGoal}
-            attachGithub={attachGithub}
-          />
-          {simpleMode && (
-            <span className="composer-extensions composer-mobile-extensions">
-              <SlotHost slot="composer.leading" context={slotContext} />
-              <SlotHost slot="composer.trailing" context={slotContext} />
-            </span>
-          )}
+          </span>
           <span className="composer-primary">
             {working ? (
               (queueEdit || (followUp === "queue" && !sendDisabled)) ? (
@@ -1647,7 +1390,8 @@ export default function Composer({
                         label: tr("common.stop"),
                         icon: StopIcon,
                         detail: tr("composer.stopWithoutSendingThisDraft"),
-                        onSelect: () => void abortSession(),
+                        disabled: abortPending,
+                        onSelect: () => void stopActiveTurn(),
                       },
                     ]}
                   >
@@ -1668,19 +1412,19 @@ export default function Composer({
                   className="stop composer-stop-primary"
                   title={tr("composer.stopTheCurrentResponse")}
                   aria-label={tr("composer.stopTheCurrentResponse")}
-                  onClick={() => void abortSession()}
+                  aria-busy={abortPending}
+                  disabled={abortPending}
+                  onClick={() => void stopActiveTurn()}
                 >
                   <Icon.stop /><span className="composer-action-label">{tr("common.stop")}</span>
                 </button>
               )
             ) : (
               <button className="send" onClick={() => send()}
-                title={shellMode ? tr("composer.runShellCommand") : tr("composer.sendMessage")}
+                title={`${shellMode ? tr("composer.runShellCommand") : tr("composer.sendMessage")} (${sendKey})`}
                 aria-label={shellMode ? tr("composer.runShellCommand") : tr("composer.sendMessage")}
                 disabled={sendDisabled}>
-                {simpleMode
-                  ? <span className="send-plane" aria-hidden="true"><Icon.send /></span>
-                  : <>{shellMode ? tr("common.run") : tr("composer.sendNow")} <span className="send-key">{sendKey}</span></>}
+                <span className="send-plane" aria-hidden="true"><Icon.send /></span>
               </button>
             )}
           </span>
@@ -1695,21 +1439,6 @@ export default function Composer({
           }}
           onClose={() => setFocusMode(false)}
           onSend={(t) => send(t)}
-        />
-      )}
-      {(pinSeed || pinEdit) && (
-        <AgentProfileForm
-          {...(pinEdit ? { existing: pinEdit } : {})}
-          {...(pinSeed ? { seed: pinSeed } : {})}
-          lockModel
-          onClose={() => { setPinSeed(null); setPinEdit(null); }}
-          onSaved={(profile, use) => { if (use) updateCfg(withProfile(cfg, profile.id)); }}
-        />
-      )}
-      {createProfileOpen && (
-        <AgentProfileForm
-          onClose={() => setCreateProfileOpen(false)}
-          onSaved={(profile, use) => { if (use) updateCfg(withProfile(cfg, profile.id)); }}
         />
       )}
       {goalFormOpen && <GoalAttachForm onDone={() => setGoalFormOpen(false)} />}

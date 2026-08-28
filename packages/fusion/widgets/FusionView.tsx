@@ -8,6 +8,7 @@ import EmptyState from "../../../apps/web/src/components/EmptyState.tsx";
 import { modelDisplayName, modelSupportsTextWorkflow } from "../../../apps/web/src/composer/discovery.ts";
 import ProviderLogo from "../../models/widgets/ProviderLogo.tsx";
 import { tr } from "../../../apps/web/src/i18n/index.ts";
+import { Button, Textarea, TextInput } from "../../../apps/web/src/components/ui/index.ts";
 
 const providerIdFromModel = (model: string): string => {
   const slash = model.lastIndexOf("/");
@@ -95,16 +96,16 @@ export default function FusionView() {
         <p className="view-sub">{tr("fusionview.synthesizeSeveralModelOutputsIntoOneWeighted")}</p>
       </div>
       <div className="view-toolbar">
-        <textarea
+        <Textarea
           rows={2}
           value={text}
           placeholder={tr("fusionview.promptToFuseAcrossModels")}
           onChange={(e) => setText(e.target.value)}
         />
         <div className="fusion-model-picks">
-          <input
+          <TextInput
+            uiSize="sm"
             className="model-filter-input"
-            type="text"
             placeholder={tr("fusionview.filterModels")}
             value={modelFilter}
             onChange={(e) => setModelFilter(e.target.value)}
@@ -113,9 +114,12 @@ export default function FusionView() {
             const key = `${m.providerID}/${m.modelID}`;
             const on = picked.includes(key);
             return (
-              <button
+              <Button
+                size="sm"
+                variant="ghost"
                 key={key}
                 className={`model-chip ${on ? "on" : ""}`}
+                aria-pressed={on}
                 onClick={() => toggle(key)}
               >
                 <ProviderLogo
@@ -124,7 +128,7 @@ export default function FusionView() {
                   className="model-chip-provider-logo"
                 />
                 {modelDisplayName(m, textModels)}
-              </button>
+              </Button>
             );
           })}
           {filteredModels.length > MAX_CHIPS && (
@@ -132,9 +136,9 @@ export default function FusionView() {
           )}
         </div>
         <div className="view-toolbar-row">
-          <button className="primary-btn" onClick={() => void start()} disabled={busy || !text.trim() || picked.length === 0}>
+          <Button variant="primary" busy={busy || running} onClick={() => void start()} disabled={!text.trim() || picked.length === 0}>
             {busy || running ? tr("fusionview.fusing") : tr("fusionview.fuse")}
-          </button>
+          </Button>
         </div>
         {error && <div className="form-error">{error}</div>}
       </div>

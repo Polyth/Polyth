@@ -115,7 +115,20 @@ export function mergeThinking(messages: RenderMessage[]): RenderMessage[] {
   // `rev` accumulates every source message's mutation counter plus a +1 per
   // merged source, so a merged row's rev changes whenever any of its sources
   // mutates OR a new source joins the run (row memoization contract).
-  let pending: { texts: string[]; time: number; id: string; eventSeq: number; finalized: boolean; rev: number } | null = null;
+  let pending: {
+    texts: string[];
+    time: number;
+    id: string;
+    eventSeq: number;
+    finalized: boolean;
+    rev: number;
+    startedAt?: number;
+    endedAt?: number;
+  } | null = null;
+  const spanOf = (p: NonNullable<typeof pending>): { reasoningStartedAt?: number; reasoningEndedAt?: number } => ({
+    ...(p.startedAt !== undefined ? { reasoningStartedAt: p.startedAt } : {}),
+    ...(p.endedAt !== undefined ? { reasoningEndedAt: p.endedAt } : {}),
+  });
   const flush = (midLog: boolean) => {
     if (!pending) return;
     out.push({
@@ -125,6 +138,7 @@ export function mergeThinking(messages: RenderMessage[]): RenderMessage[] {
       eventSeq: pending.eventSeq,
       text: "",
       reasoning: pending.texts.join("\n\n"),
+      ...spanOf(pending),
       // A later message proves this thinking finished even without a part-final.
       finalized: midLog ? true : pending.finalized,
       time: pending.time,
@@ -138,14 +152,37 @@ export function mergeThinking(messages: RenderMessage[]): RenderMessage[] {
         pending.texts.push(m.reasoning);
         pending.finalized = m.finalized;
         pending.rev += (m.rev ?? 0) + 1;
+        if (m.reasoningStartedAt !== undefined && (pending.startedAt === undefined || m.reasoningStartedAt < pending.startedAt)) {
+          pending.startedAt = m.reasoningStartedAt;
+        }
+        if (m.reasoningEndedAt !== undefined && (pending.endedAt === undefined || m.reasoningEndedAt > pending.endedAt)) {
+          pending.endedAt = m.reasoningEndedAt;
+        }
       } else {
-        pending = { texts: [m.reasoning], time: m.time, id: m.id, eventSeq: m.eventSeq, finalized: m.finalized, rev: (m.rev ?? 0) + 1 };
+        pending = {
+          texts: [m.reasoning],
+          time: m.time,
+          id: m.id,
+          eventSeq: m.eventSeq,
+          finalized: m.finalized,
+          rev: (m.rev ?? 0) + 1,
+          ...(m.reasoningStartedAt !== undefined ? { startedAt: m.reasoningStartedAt } : {}),
+          ...(m.reasoningEndedAt !== undefined ? { endedAt: m.reasoningEndedAt } : {}),
+        };
       }
       continue;
     }
     if (m.kind === "assistant" && pending) {
       const merged = [...pending.texts, m.reasoning].filter(Boolean).join("\n\n");
-      out.push({ ...m, reasoning: merged, rev: (m.rev ?? 0) + pending.rev });
+      const startedAt = [pending.startedAt, m.reasoningStartedAt].filter((v): v is number => v !== undefined);
+      const endedAt = [pending.endedAt, m.reasoningEndedAt].filter((v): v is number => v !== undefined);
+      out.push({
+        ...m,
+        reasoning: merged,
+        ...(startedAt.length > 0 ? { reasoningStartedAt: Math.min(...startedAt) } : {}),
+        ...(endedAt.length > 0 ? { reasoningEndedAt: Math.max(...endedAt) } : {}),
+        rev: (m.rev ?? 0) + pending.rev,
+      });
       pending = null;
       continue;
     }

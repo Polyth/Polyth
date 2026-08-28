@@ -5,6 +5,7 @@ import { resetKeymap, setBinding, useKeymap } from "./hotkeys.ts";
 import { MOD } from "../../../apps/web/src/format.ts";
 import { PageHead } from "../../../apps/web/src/components/settings/parts.tsx";
 import { tr } from "../../../apps/web/src/i18n/index.ts";
+import { Button, TextInput } from "../../../apps/web/src/components/ui/index.ts";
 
 const IS_MAC = MOD === "⌘";
 
@@ -43,7 +44,8 @@ export default function ShortcutsPage() {
           </div>
           <div className="set-row-control">
             {editing === id ? (
-              <input
+              <TextInput
+                uiSize="sm"
                 autoFocus
                 data-hotkey-capture="true"
                 className="hotkey-capture"
@@ -54,15 +56,15 @@ export default function ShortcutsPage() {
                 readOnly
               />
             ) : (
-              <button className="hotkey-kbd" title={tr("settings.shortcutspage.clickToChange")} onClick={() => setEditing(id)}>
+              <Button size="sm" variant="ghost" className="hotkey-kbd" title={tr("settings.shortcutspage.clickToChange")} onClick={() => setEditing(id)}>
                 <kbd>{formatCombo(map[id], IS_MAC)}</kbd>
-              </button>
+              </Button>
             )}
           </div>
         </div>
         );
       })}
-      <button className="ghost-link" onClick={resetKeymap}>{tr("settings.shortcutspage.resetAllToDefaults")}</button>
+      <Button size="sm" variant="ghost" onClick={resetKeymap}>{tr("settings.shortcutspage.resetAllToDefaults")}</Button>
     </>
   );
 }

@@ -6,6 +6,9 @@ export interface DismissibleMenuOptions {
   triggerRef: RefObject<HTMLElement | null>;
   onClose: () => void;
   focusFirst?: boolean;
+  /** Where focus returns on dismissal when it is not the click trigger —
+   *  e.g. a context-menu opened from a row returns focus to the row. */
+  restoreRef?: RefObject<HTMLElement | null>;
 }
 
 /** Shared menu interaction contract: outside click and Escape dismiss, focus
@@ -16,6 +19,7 @@ export function useDismissibleMenu({
   triggerRef,
   onClose,
   focusFirst = true,
+  restoreRef,
 }: DismissibleMenuOptions): (event: ReactKeyboardEvent<HTMLElement>) => void {
   const onCloseRef = useRef(onClose);
   onCloseRef.current = onClose;
@@ -27,7 +31,7 @@ export function useDismissibleMenu({
     }
     const close = () => {
       onCloseRef.current();
-      requestAnimationFrame(() => triggerRef.current?.focus());
+      requestAnimationFrame(() => (restoreRef?.current ?? triggerRef.current)?.focus());
     };
     const onPointer = (event: MouseEvent) => {
       const target = event.target as Node;
@@ -45,7 +49,7 @@ export function useDismissibleMenu({
       document.removeEventListener("mousedown", onPointer);
       document.removeEventListener("keydown", onKey, true);
     };
-  }, [focusFirst, menuRef, open, triggerRef]);
+  }, [focusFirst, menuRef, open, restoreRef, triggerRef]);
 
   return (event) => {
     if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;

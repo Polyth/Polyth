@@ -1,9 +1,9 @@
 // Expanded focus editor (WP2): the same draft in a large dialog. Close commits
 // the text back to the inline editor; IME safety comes from AdaptiveTextInput.
 import { useRef } from "react";
-import Dialog from "./a11y/Dialog.tsx";
 import AdaptiveTextInput, { type TextInputHandle } from "./input/AdaptiveTextInput.tsx";
 import { tr } from "../i18n/index.ts";
+import { Dialog } from "./ui/index.ts";
 
 export default function ComposerFocusDialog({
   initialText,
@@ -24,11 +24,19 @@ export default function ComposerFocusDialog({
   };
 
   return (
-    <Dialog title={tr("composerfocusdialog.focusedEditor")} size="lg" onClose={close} className="composer-focus-dialog" initialFocus="textarea">
-      <div className="dialog-head">
-        <span>{tr("composerfocusdialog.focusedEditor")}</span>
-        <button className="icon-btn" aria-label={tr("composerfocusdialog.closeFocusedEditor")} onClick={close}>✕</button>
-      </div>
+    <Dialog
+      title={tr("composerfocusdialog.focusedEditor")}
+      size="lg"
+      onClose={close}
+      className="composer-focus-dialog"
+      initialFocus="textarea"
+      footer={(
+        <div className="composer-focus-help muted">
+          <span><kbd>{tr("composerfocusdialog.esc")}</kbd> {tr("composerfocusdialog.backToComposer")}</span>
+          <span><kbd>{tr("composerfocusdialog.mod")}</kbd> {tr("composerfocusdialog.send")}</span>
+        </div>
+      )}
+    >
       <AdaptiveTextInput
         ref={inputRef}
         initialText={initialText}
@@ -49,10 +57,6 @@ export default function ComposerFocusDialog({
           return false;
         }}
       />
-      <div className="dialog-foot muted">
-        <span><kbd>{tr("composerfocusdialog.esc")}</kbd> {tr("composerfocusdialog.backToComposer")}</span>
-        <span><kbd>{tr("composerfocusdialog.mod")}</kbd> {tr("composerfocusdialog.send")}</span>
-      </div>
     </Dialog>
   );
 }

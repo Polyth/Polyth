@@ -10,7 +10,7 @@ import { useShellMode } from "../../responsiveShell.ts";
 import Sheet, { type SheetSearch } from "../mobile/Sheet.tsx";
 import Popover from "./Popover.tsx";
 import Dialog, { type DialogSize } from "./Dialog.tsx";
-import type { AnchoredAlign } from "./useAnchoredPosition.ts";
+import type { AnchoredAlign, AnchoredSide } from "./useAnchoredPosition.ts";
 
 export interface ResponsiveOverlayProps {
   open: boolean;
@@ -26,11 +26,15 @@ export interface ResponsiveOverlayProps {
   /** Required for the popover presentation. */
   anchorRef?: RefObject<HTMLElement | null>;
   align?: AnchoredAlign;
+  side?: AnchoredSide;
   className?: string;
   initialFocus?: string;
+  /** Explicit focus destination after either presentation closes. */
+  restoreFocusRef?: RefObject<HTMLElement | null>;
   /** Sheet options (phone only). */
   sheetSize?: "auto" | "tall";
   sheetSearch?: SheetSearch;
+  sheetAction?: { label: string; onClick: () => void; pressed?: boolean };
   sheetFooter?: ReactNode;
   /** Dialog options (desktop modal only). */
   dialogSize?: DialogSize;
@@ -45,10 +49,13 @@ export default function ResponsiveOverlay({
   desktop,
   anchorRef,
   align = "start",
+  side = "down",
   className,
   initialFocus,
+  restoreFocusRef,
   sheetSize = "auto",
   sheetSearch,
+  sheetAction,
   sheetFooter,
   dialogSize = "md",
   dialogFooter,
@@ -63,8 +70,10 @@ export default function ResponsiveOverlay({
         onClose={onClose}
         size={sheetSize}
         {...(sheetSearch !== undefined ? { search: sheetSearch } : {})}
+        {...(sheetAction !== undefined ? { action: sheetAction } : {})}
         {...(sheetFooter !== undefined ? { footer: sheetFooter } : {})}
         {...(className !== undefined ? { className } : {})}
+        {...(restoreFocusRef !== undefined ? { restoreFocusRef } : {})}
       >
         {children}
       </Sheet>
@@ -79,6 +88,7 @@ export default function ResponsiveOverlay({
         onClose={onClose}
         anchorRef={anchorRef}
         align={align}
+        side={side}
         ariaLabel={title}
         {...(initialFocus !== undefined ? { initialFocus } : {})}
         {...(className !== undefined ? { className } : {})}

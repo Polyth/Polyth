@@ -10,6 +10,7 @@ import { requestComposerInsert } from "../composerInsert.ts";
 import { copyText } from "../utils.ts";
 import { startNewSession, useStore } from "../store.ts";
 import { tr } from "../i18n/index.ts";
+import { Button } from "./ui/index.ts";
 
 const MENU_W = 270;
 const MENU_H = 34;
@@ -109,9 +110,9 @@ export default function SelectionMenu({ container }: {
         ? <span className="selection-menu-flash">{flash}</span>
         : (
           <>
-            <button className="small-btn" title={tr("selectionmenu.quoteTheSelectionInTheComposer")} onClick={quote}>{tr("selectionmenu.quoteInReply")}</button>
-            <button className="small-btn" title={tr("selectionmenu.startANewSessionWithThisSelection")} onClick={newSession} disabled={!projectId}>{tr("selectionmenu.newSession")}</button>
-            <button className="small-btn" title={tr("selectionmenu.copyTheSelection")} onClick={() => void copy()}>{tr("common.copy")}</button>
+            <Button size="sm" title={tr("selectionmenu.quoteTheSelectionInTheComposer")} onClick={quote}>{tr("selectionmenu.quoteInReply")}</Button>
+            <Button size="sm" title={tr("selectionmenu.startANewSessionWithThisSelection")} onClick={newSession} disabled={!projectId}>{tr("selectionmenu.newSession")}</Button>
+            <Button size="sm" title={tr("selectionmenu.copyTheSelection")} onClick={() => void copy()}>{tr("common.copy")}</Button>
           </>
         )}
     </div>

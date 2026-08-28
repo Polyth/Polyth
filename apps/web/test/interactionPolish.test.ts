@@ -35,7 +35,10 @@ test("every remaining double-click shortcut has a discoverable mobile alternativ
   assert.match(terminal, /onDoubleClick=\{\(\) => startRename\(t\)\}/);
   assert.match(terminal, /className="term-tab-rename-action"/);
   assert.match(sessions, /onDoubleClick=\{\(\) => \{ setTitle/);
-  assert.match(sessions, /className="session-quick-btn session-more-btn"/);
+  // The rename shortcut's touch alternative is the persistent row menu
+  // trigger (Rename is the first entry of the row's ui/Menu).
+  assert.match(sessions, /className="session-menu-trigger"/);
+  assert.match(sessions, /id: "rename", label: tr\("common\.rename"\)/);
   assert.match(sidebar, /onDoubleClick=\{\(\) => \{ setRenamingProject/);
   assert.match(sidebar, /tr\("sidebar\.renameProject"\)/);
   assert.match(folder, /matchMedia\?\.\("\(pointer: coarse\)"\)/);
@@ -91,10 +94,93 @@ test("P1 mobile refinements remain wired to their visible surfaces", async () =>
   assert.match(haptics, /navigator\.vibrate\(PATTERNS\[kind\]\)/, "key touch outcomes use bounded native haptics");
   assert.match(css, /:is\(\.side-scroll, \.timeline, \.settings-pane-body, \.sheet-body, \.folder-list, \.rail-body\)/,
     "long mobile surfaces share scroll affordances");
-  assert.match(css, /\.session-row\[data-swipe="revealed"\] \.session-quick > \.session-more-btn\s*\{\s*display:\s*none/,
-    "swiping reveals the named archive/delete pair without crowding");
+  assert.match(css, /\.session-row\[data-swipe="revealed"\] \.session-quick > \.session-quick-btn\s*\{[\s\S]*?width:\s*var\(--tap\)/,
+    "swiping reveals the named archive/delete pair at full touch size");
   assert.match(css, /@media \(max-width: 700px\)[\s\S]*?\.settings-mobile-page \.settings-pane\s*\{[\s\S]*?animation:\s*settings-page-in/,
     "full-screen settings stages use a directional transition");
   assert.match(css, /\.composer-actions :is\([\s\S]*?\.composer-add-files,[\s\S]*?\)\s*\{[\s\S]*?width:\s*var\(--tap\)/,
     "composer attachments retain a 44px touch box");
+});
+
+test("agent questions use shared controls and complete tab semantics", async () => {
+  const [questions, css] = await Promise.all([
+    read("../src/components/QuestionCards.tsx"),
+    readWebStyles(),
+  ]);
+
+  assert.match(questions, /<IconButton[\s\S]*?icon=\{MarkdownIcon\}/);
+  assert.match(questions, /<Button size="sm" variant="primary"/);
+  assert.match(questions, /<Button size="sm" variant="danger"/);
+  assert.match(questions, /const groupName = useId\(\)/);
+  assert.match(questions, /name=\{groupName\}/, "radio names are scoped per rendered question");
+  assert.match(questions, /aria-controls=\{`\$\{id\}-panel`\}/);
+  assert.match(questions, /event\.key === "ArrowRight"/);
+  assert.match(questions, /tabIndex=\{i === step \? 0 : -1\}/);
+  assert.match(css, /\.question-card\s*\{[^}]*container-type:\s*inline-size[^}]*border-radius:\s*var\(--radius-card\)/s);
+  assert.match(css, /@container \(max-width: 420px\)[^}]*\.question-actions \.ui-btn/s);
+  assert.match(css, /\.scrim\.settings-scrim > \.settings-shell\s*\{[^}]*border-radius:\s*0/s,
+    "the full-screen settings geometry wins over user-selectable sheet rounding");
+});
+
+test("project picking and destructive confirmations use shared controls", async () => {
+  const [projectPicker, alertDialog, css] = await Promise.all([
+    read("../src/components/ProjectFolderDialog.tsx"),
+    read("../src/components/AlertDialog.tsx"),
+    readWebStyles(),
+  ]);
+
+  assert.match(projectPicker, /<IconButton icon=\{CloseIcon\}/);
+  assert.match(projectPicker, /<TextInput[\s\S]*?className="folder-path mono"/);
+  assert.match(projectPicker, /<Switch[\s\S]*?checked=\{hidden\}/);
+  assert.match(projectPicker, /<Button[\s\S]*?variant="primary"[\s\S]*?className="folder-open-btn"/);
+  assert.doesNotMatch(projectPicker, /className="(?:icon-btn|small-btn|primary-btn)/);
+  assert.match(alertDialog, /import \{ Button, Dialog, TextInput \} from "\.\/ui\/index\.ts"/);
+  assert.match(alertDialog, /variant=\{alert\.kind === "confirm" && alert\.destructive \? "danger" : "primary"\}/);
+  assert.doesNotMatch(alertDialog, /<(?:button|input)\b/);
+  assert.doesNotMatch(css, /\.alert-dialog-actions/);
+});
+
+test("secondary core dialogs and utility actions use shared primitives", async () => {
+  const sources = await Promise.all([
+    "../src/components/AgentProfileForm.tsx",
+    "../src/components/ComposerAddMenu.tsx",
+    "../src/components/ComposerFocusDialog.tsx",
+    "../src/components/ImportSessionsDialog.tsx",
+    "../src/components/ProjectAppearanceDialog.tsx",
+    "../src/components/WorktreeSessionDialog.tsx",
+    "../src/components/EmptyState.tsx",
+    "../src/components/CopyButton.tsx",
+  ].map(read));
+
+  for (const source of sources) {
+    assert.doesNotMatch(source, /className="(?:primary-btn|small-btn|danger-btn|icon-btn)(?:\s|")/);
+  }
+  for (const source of sources.slice(0, 6)) {
+    assert.match(source, /Dialog/);
+    assert.doesNotMatch(source, /import Dialog from "\.\/a11y\/Dialog\.tsx"/);
+  }
+  assert.match(sources[3]!, /<Checkbox/);
+  assert.match(sources[6]!, /<Button variant="primary"/);
+  assert.match(sources[7]!, /<IconButton/);
+});
+
+test("workspace fallbacks use shared actions and resize focus targets current controls", async () => {
+  const [workspaceHost, errorBoundary, header, css] = await Promise.all([
+    read("../src/components/workspace/WorkspaceHost.ts"),
+    read("../src/components/ViewErrorBoundary.ts"),
+    read("../src/components/Header.tsx"),
+    readWebStyles(),
+  ]);
+
+  assert.match(workspaceHost, /import \{ buttonClassName \} from "\.\.\/ui\/buttonClassName\.ts"/);
+  assert.match(workspaceHost, /className: buttonClassName\(\{ variant: "primary"/);
+  assert.doesNotMatch(workspaceHost, /primary-btn/);
+  assert.match(errorBoundary, /import \{ buttonClassName \} from "\.\/ui\/buttonClassName\.ts"/);
+  assert.match(errorBoundary, /className: buttonClassName\(\{ variant: "primary" \}\)/);
+  assert.doesNotMatch(errorBoundary, /primary-btn/);
+  assert.match(header, /q\("\.sidebar \.sidebar-expand"\) \?\? q\("\.sidebar \.sidebar-search input"\)/);
+  assert.match(header, /prev\.closest\("\.sidebar"\)\) target = q\("\.header-drawer-btn"\)/);
+  assert.match(header, /document\.activeElement !== target && typeof requestAnimationFrame === "function"/);
+  assert.doesNotMatch(header, /\.side-icons \.icon-btn/);
+  assert.match(css, /\.hero-open-project\s*\{\s*margin-top:\s*var\(--space-4\);\s*\}/);
 });

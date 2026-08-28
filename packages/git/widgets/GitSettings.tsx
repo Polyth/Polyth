@@ -7,8 +7,8 @@ import {
   useStore,
 } from "../../../apps/web/src/store.ts";
 import { EmptyState, PageHead, Row, Seg } from "../../../apps/web/src/components/settings/parts.tsx";
-import Dialog from "../../../apps/web/src/components/a11y/Dialog.tsx";
 import { tr } from "../../../apps/web/src/i18n/index.ts";
+import { Button, Dialog, Textarea, TextInput } from "../../../apps/web/src/components/ui/index.ts";
 import {
   removeGitPersona,
   saveGitPersona,
@@ -36,7 +36,7 @@ function GitPersonas({ projectId }: { projectId: string }) {
     <section className="git-personas" data-settings-item="git.personas">
       <div className="settings-section-head">
         <div><strong>{tr("settings.pages.gitPersonas")}</strong><span>{tr("settings.pages.savedIdentitiesYouCanApplyToThis")}</span></div>
-        <button className="small-btn" onClick={() => setDraft({ id: crypto.randomUUID(), label: "", name: "", email: "" })}>{tr("settings.pages.persona")}</button>
+        <Button size="sm" onClick={() => setDraft({ id: crypto.randomUUID(), label: "", name: "", email: "" })}>{tr("settings.pages.persona")}</Button>
       </div>
       <div className="git-current-identity">
         {tr("settings.pages.currentRepositoryIdentity")}{" "}<strong>{identity.name || tr("settings.pages.notSet")}</strong>
@@ -49,9 +49,9 @@ function GitPersonas({ projectId }: { projectId: string }) {
             <span className="profile-avatar">{persona.label.slice(0, 1).toUpperCase()}</span>
             <span><strong>{persona.label}</strong><small>{persona.name} · {persona.email}</small></span>
             {active && <span className="tag">{tr("settings.pages.inUse")}</span>}
-            <button className="small-btn" disabled={active} onClick={() => void apply(persona)}>{tr("settings.pages.use")}</button>
-            <button className="small-btn" onClick={() => setDraft(persona)}>{tr("common.edit")}</button>
-            <button className="small-btn danger-btn" onClick={() => removeGitPersona(persona.id)}>{tr("common.delete")}</button>
+            <Button size="sm" disabled={active} onClick={() => void apply(persona)}>{tr("settings.pages.use")}</Button>
+            <Button size="sm" onClick={() => setDraft(persona)}>{tr("common.edit")}</Button>
+            <Button size="sm" variant="danger" onClick={() => removeGitPersona(persona.id)}>{tr("common.delete")}</Button>
           </div>
         );
       })}
@@ -63,17 +63,29 @@ function GitPersonas({ projectId }: { projectId: string }) {
       )}
       {error && <div className="form-error">{error}</div>}
       {draft && (
-        <Dialog title={draft.label ? tr("settings.pages.editValue", { label: draft.label }) : tr("settings.pages.newGitPersona")} onClose={() => setDraft(null)} className="profile-form" initialFocus="input">
-          <div className="dialog-head"><span>{draft.label ? tr("settings.pages.editValue", { label: draft.label }) : tr("settings.pages.newGitPersona")}</span><span className="header-spacer" /><button className="small-btn" aria-label={tr("common.close")} title={tr("common.close")} onClick={() => setDraft(null)}>✕</button></div>
+        <Dialog
+          title={draft.label ? tr("settings.pages.editValue", { label: draft.label }) : tr("settings.pages.newGitPersona")}
+          onClose={() => setDraft(null)}
+          className="profile-form"
+          initialFocus=".git-persona-label"
+          footer={(
+            <>
+              <Button size="sm" onClick={() => setDraft(null)}>{tr("common.cancel")}</Button>
+              <Button
+                size="sm"
+                variant="primary"
+                disabled={!draft.label.trim() || !draft.name.trim() || !draft.email.trim()}
+                onClick={() => { saveGitPersona({ ...draft, label: draft.label.trim(), name: draft.name.trim(), email: draft.email.trim() }); setDraft(null); }}
+              >
+                {tr("settings.pages.savePersona")}
+              </Button>
+            </>
+          )}
+        >
           <div className="profile-form-body">
-            <label>{tr("settings.pages.label")}<input value={draft.label} placeholder={tr("settings.pages.work")} onChange={(event) => setDraft({ ...draft, label: event.target.value })} /></label>
-            <label>{tr("settings.pages.commitAuthorName")}<input value={draft.name} placeholder={tr("settings.pages.adaLovelace")} onChange={(event) => setDraft({ ...draft, name: event.target.value })} /></label>
-            <label>{tr("settings.pages.commitEmail")}<input type="email" value={draft.email} placeholder={tr("settings.pages.adaExampleCom")} onChange={(event) => setDraft({ ...draft, email: event.target.value })} /></label>
-          </div>
-          <div className="dialog-foot">
-            <button className="small-btn" onClick={() => setDraft(null)}>{tr("common.cancel")}</button>
-            <span className="header-spacer" />
-            <button className="primary-btn" disabled={!draft.label.trim() || !draft.name.trim() || !draft.email.trim()} onClick={() => { saveGitPersona({ ...draft, label: draft.label.trim(), name: draft.name.trim(), email: draft.email.trim() }); setDraft(null); }}>{tr("settings.pages.savePersona")}</button>
+            <label>{tr("settings.pages.label")}<TextInput className="git-persona-label" value={draft.label} placeholder={tr("settings.pages.work")} onChange={(event) => setDraft({ ...draft, label: event.target.value })} /></label>
+            <label>{tr("settings.pages.commitAuthorName")}<TextInput value={draft.name} placeholder={tr("settings.pages.adaLovelace")} onChange={(event) => setDraft({ ...draft, name: event.target.value })} /></label>
+            <label>{tr("settings.pages.commitEmail")}<TextInput type="email" value={draft.email} placeholder={tr("settings.pages.adaExampleCom")} onChange={(event) => setDraft({ ...draft, email: event.target.value })} /></label>
           </div>
         </Dialog>
       )}
@@ -107,8 +119,9 @@ export default function GitSettings() {
           <Row label={tr("settings.pages.aheadBehind")}><span className="mono">↑{status.ahead} ↓{status.behind}</span></Row>
           <GitPersonas projectId={projectId} />
           <Row label={tr("settings.pages.branchNameTemplate")} hint={tr("settings.pages.tokensValueAndValueStoredLocally")} itemId="git.branchTemplate">
-            <input
-              className="inp inp-mono"
+            <TextInput
+              uiSize="sm"
+              className="inp-mono"
               value={settings.branchTemplate}
               onChange={(e) => updateSettings({ branchTemplate: e.target.value })}
             />
@@ -118,8 +131,8 @@ export default function GitSettings() {
             hint={tr("settings.pages.conflictAgentPromptHint")}
             itemId="git.conflictAgentPrompt"
           >
-            <textarea
-              className="inp git-conflict-agent-prompt"
+            <Textarea
+              className="git-conflict-agent-prompt"
               rows={4}
               value={settings.conflictAgentPrompt}
               onChange={(event) => updateSettings({ conflictAgentPrompt: event.target.value })}
@@ -140,7 +153,7 @@ export default function GitSettings() {
             />
           </Row>
           <Row label={tr("settings.pages.fullView")} hint={tr("settings.pages.stageCommitBranchAndManageWorktrees")}>
-            <button className="small-btn" onClick={() => { setOverlay(null); openWorkspacePane("git"); }}>{tr("settings.pages.openGitView")}</button>
+            <Button size="sm" onClick={() => { setOverlay(null); openWorkspacePane("git"); }}>{tr("settings.pages.openGitView")}</Button>
           </Row>
         </>
       )}

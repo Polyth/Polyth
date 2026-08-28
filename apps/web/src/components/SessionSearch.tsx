@@ -8,6 +8,7 @@ import { ago, deriveSessionTitle } from "../format.ts";
 import { firstUserText } from "../utils.ts";
 import Dialog from "./a11y/Dialog.tsx";
 import { tr } from "../i18n/index.ts";
+import { Button } from "./ui/index.ts";
 
 export default function SessionSearch() {
   const sessions = useStore((s) => s.sessions);
@@ -98,7 +99,7 @@ export default function SessionSearch() {
         {loading && <div className="palette-empty" role="status">{tr("sessionsearch.searchingSessions")}</div>}
         {!loading && searchFailed && (
           <div className="palette-empty" role="status">
-            {tr("sessionsearch.couldnTSearchSessionContents")}<button className="small-btn palette-retry" onClick={() => setRetry((n) => n + 1)}>{tr("common.retry")}</button>
+            {tr("sessionsearch.couldnTSearchSessionContents")}<Button size="sm" className="palette-retry" onClick={() => setRetry((n) => n + 1)}>{tr("common.retry")}</Button>
           </div>
         )}
         {!loading && !searchFailed && items.length === 0 && <div className="palette-empty">{tr("sessionsearch.noSessions")}</div>}

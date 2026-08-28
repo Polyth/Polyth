@@ -8,6 +8,16 @@ import { ago } from "../../../apps/web/src/format.ts";
 import { normalizeScheduleList } from "./scheduleData.ts";
 import EmptyState from "../../../apps/web/src/components/EmptyState.tsx";
 import { getLocale, tr } from "../../../apps/web/src/i18n/index.ts";
+import {
+  Button,
+  CloseIcon,
+  DeleteIcon,
+  IconButton,
+  Select,
+  Tabs,
+  Textarea,
+  TextInput,
+} from "../../../apps/web/src/components/ui/index.ts";
 
 type CadenceKind = "at" | "every" | "cron";
 type TargetMode = "new-session-per-run" | "existing-session" | "dedicated-session";
@@ -222,49 +232,65 @@ export default function ScheduleView() {
       </div>
 
       <div className="sched-form">
-        <textarea rows={2} value={prompt} placeholder={tr("scheduleview.promptToSendEGSummarizeOvernight")} onChange={(e) => setPrompt(e.target.value)} />
+        <Textarea rows={2} value={prompt} placeholder={tr("scheduleview.promptToSendEGSummarizeOvernight")} onChange={(e) => setPrompt(e.target.value)} />
         <div className="view-toolbar-row">
-          <div className="seg">
-            <button className={kind === "at" ? "on" : ""} onClick={() => setKind("at")}>{tr("scheduleview.onceAt")}</button>
-            <button className={kind === "every" ? "on" : ""} onClick={() => setKind("every")}>{tr("scheduleview.every")}</button>
-            <button className={kind === "cron" ? "on" : ""} onClick={() => setKind("cron")}>{tr("scheduleview.cron")}</button>
-          </div>
-          {kind === "at" && <input type="datetime-local" value={at} onChange={(e) => setAt(e.target.value)} />}
+          <Tabs
+            size="sm"
+            label={tr("scheduleview.schedule")}
+            value={kind}
+            tabs={[
+              { id: "at", label: tr("scheduleview.onceAt") },
+              { id: "every", label: tr("scheduleview.every") },
+              { id: "cron", label: tr("scheduleview.cron") },
+            ]}
+            onChange={(value) => setKind(value as CadenceKind)}
+          />
+          {kind === "at" && <TextInput type="datetime-local" value={at} onChange={(e) => setAt(e.target.value)} />}
           {kind === "every" && (
             <label className="sched-every">
-              <input className="sched-every-value" type="number" min={1} value={every} onChange={(e) => setEvery(Math.max(1, Number(e.target.value)))} />
+              <TextInput className="sched-every-value" type="number" min={1} value={every} onChange={(e) => setEvery(Math.max(1, Number(e.target.value)))} />
               {tr("scheduleview.minutes")}</label>
           )}
           {kind === "cron" && (
             <>
-              <input className="mono sched-cron-expression" value={cronExpr} placeholder="0 9 * * 1-5" onChange={(e) => setCronExpr(e.target.value)} />
-              <select className="sched-time-zone" value={timeZone} onChange={(e) => setTimeZone(e.target.value)}>
-                {zones.map((z) => <option key={z} value={z}>{z}</option>)}
-              </select>
+              <TextInput className="mono sched-cron-expression" value={cronExpr} placeholder="0 9 * * 1-5" onChange={(e) => setCronExpr(e.target.value)} />
+              <Select className="sched-time-zone" value={timeZone} label={timeZone} options={zones.map((zone) => ({ value: zone, label: zone }))} onChange={setTimeZone} />
             </>
           )}
         </div>
         <div className="view-toolbar-row">
-          <select value={targetMode} onChange={(e) => { setTargetMode(e.target.value as TargetMode); if (e.target.value !== "existing-session") setSessionId(""); }}>
-            <option value="new-session-per-run">{tr("scheduleview.newSessionPerRun")}</option>
-            <option value="existing-session">{tr("scheduleview.existingSession")}</option>
-            <option value="dedicated-session">{tr("scheduleview.dedicatedSessionReusedAcrossRuns")}</option>
-          </select>
+          <Select
+            value={targetMode}
+            label={targetMode === "new-session-per-run" ? tr("scheduleview.newSessionPerRun") : targetMode === "existing-session" ? tr("scheduleview.existingSession") : tr("scheduleview.dedicatedSessionReusedAcrossRuns")}
+            options={[
+              { value: "new-session-per-run", label: tr("scheduleview.newSessionPerRun") },
+              { value: "existing-session", label: tr("scheduleview.existingSession") },
+              { value: "dedicated-session", label: tr("scheduleview.dedicatedSessionReusedAcrossRuns") },
+            ]}
+            onChange={(value) => { setTargetMode(value as TargetMode); if (value !== "existing-session") setSessionId(""); }}
+          />
           {targetMode === "existing-session" && (
-            <select value={sessionId} onChange={(e) => setSessionId(e.target.value)}>
-              <option value="">{tr("scheduleview.pickASession")}</option>
-              {sessions.map((s) => <option key={s.id} value={s.id}>{s.title || s.id}</option>)}
-            </select>
+            <Select
+              value={sessionId}
+              label={sessions.find((session) => session.id === sessionId)?.title || tr("scheduleview.pickASession")}
+              options={[{ value: "", label: tr("scheduleview.pickASession") }, ...sessions.map((session) => ({ value: session.id, label: session.title || session.id }))]}
+              onChange={setSessionId}
+            />
           )}
-          <label className="sched-every">
-            {tr("scheduleview.ifStillRunning")}<select value={overlap} onChange={(e) => setOverlap(e.target.value as Overlap)}>
-              <option value="skip">{tr("scheduleview.skipThisRun")}</option>
-              <option value="queue">{tr("scheduleview.queueAfter")}</option>
-              <option value="parallel">{tr("scheduleview.runInParallel")}</option>
-            </select>
-          </label>
+          <div className="sched-every">
+            {tr("scheduleview.ifStillRunning")}<Select
+              value={overlap}
+              label={overlap === "skip" ? tr("scheduleview.skipThisRun") : overlap === "queue" ? tr("scheduleview.queueAfter") : tr("scheduleview.runInParallel")}
+              options={[
+                { value: "skip", label: tr("scheduleview.skipThisRun") },
+                { value: "queue", label: tr("scheduleview.queueAfter") },
+                { value: "parallel", label: tr("scheduleview.runInParallel") },
+              ]}
+              onChange={(value) => setOverlap(value as Overlap)}
+            />
+          </div>
           <span className="header-spacer" />
-          <button className="primary-btn" disabled={!canCreate} onClick={create}>{tr("scheduleview.schedule")}</button>
+          <Button variant="primary" disabled={!canCreate} onClick={create}>{tr("scheduleview.schedule")}</Button>
         </div>
         {previewError && <div className="form-error">{previewError}</div>}
         {preview && (
@@ -283,21 +309,19 @@ export default function ScheduleView() {
       <div className="view-toolbar-row">
         <span className="stat-label" style={{ margin: 0 }}>{tr("scheduleview.tasks")}</span>
         <span className="header-spacer" />
-        <button className="small-btn" title={tr("scheduleview.rescanAgentsLoopsForMarkdownManagedTasks")} onClick={rescan}>{tr("scheduleview.rescanLoops")}</button>
+        <Button size="sm" title={tr("scheduleview.rescanAgentsLoopsForMarkdownManagedTasks")} onClick={rescan}>{tr("scheduleview.rescanLoops")}</Button>
       </div>
       {loopErrors.length > 0 && (
         <div className="form-error" role="alert">
           {loopErrors.map((e) => (
             <div key={e.path} className="loop-error-row">
               <span><span className="mono">{e.path}</span>: {e.error}</span>
-              <button
-                className="small-btn"
+              <IconButton
+                icon={CloseIcon}
                 title={tr("scheduleview.dismissUntilThisFileSErrorChanges")}
-                aria-label={tr("scheduleview.dismissLoopErrorForValue", { path: e.path })}
+                label={tr("scheduleview.dismissLoopErrorForValue", { path: e.path })}
                 onClick={() => void run(() => api.scheduleLoopErrorDismiss(projectId, e.path))}
-              >
-                ✕
-              </button>
+              />
             </div>
           ))}
         </div>
@@ -331,16 +355,16 @@ export default function ScheduleView() {
             {historyFor === t.id && <RunHistory taskId={t.id} />}
           </div>
           <div className="sched-actions">
-            <button className="small-btn" onClick={() => setHistoryFor(historyFor === t.id ? null : t.id)}>
+            <Button size="sm" onClick={() => setHistoryFor(historyFor === t.id ? null : t.id)}>
               {historyFor === t.id ? tr("scheduleview.hideRuns") : tr("scheduleview.runs")}
-            </button>
-            <button className="small-btn" onClick={() => void run(() => api.scheduleRun(t.id))}>{tr("scheduleview.runNow")}</button>
+            </Button>
+            <Button size="sm" onClick={() => void run(() => api.scheduleRun(t.id))}>{tr("scheduleview.runNow")}</Button>
             {t.source !== "loop-file" && (
               <>
-                <button className="small-btn" onClick={() => void run(() => api.schedulePause(t.id, t.enabled))}>
+                <Button size="sm" onClick={() => void run(() => api.schedulePause(t.id, t.enabled))}>
                   {t.enabled ? tr("common.pause") : tr("common.resume")}
-                </button>
-                <button className="small-btn danger-btn" onClick={() => void run(() => api.scheduleDelete(t.id))}>{tr("common.delete")}</button>
+                </Button>
+                <Button size="sm" variant="danger" iconStart={DeleteIcon} onClick={() => void run(() => api.scheduleDelete(t.id))}>{tr("common.delete")}</Button>
               </>
             )}
           </div>

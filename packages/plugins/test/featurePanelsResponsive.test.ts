@@ -57,7 +57,11 @@ test("slot-backed feature panels share the responsive surface stylesheet", async
   assert.match(styles, /min-height:\s*var\(--tap\)/);
   assert.match(styles, /font-size:\s*var\(--font-input\)/);
   assert.match(styles, /overscroll-behavior:\s*contain/);
-  assert.match(styles, /@media \(max-width: 700px\), \(pointer: coarse\)/);
+  // Coarse-pointer input still gets explicit treatment; embedded panel widths
+  // are handled by container queries (P2-W2 moved the last combined
+  // 700px+coarse viewport query in package CSS to an @container rule).
+  assert.match(styles, /\(pointer: coarse\)/);
+  assert.match(styles, /@container \(max-width: 480px\)/);
 
   for (const selector of [
     ".goals-head",

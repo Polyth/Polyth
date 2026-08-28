@@ -1744,6 +1744,7 @@ export const de: AppMessages = {
   "sidebar.filter": "Filter",
   "sidebar.filterSessions": "Filtersitzungen",
   "sidebar.importSessions": "Sitzungen importieren…",
+  "sidebar.listOptions": "Sortieren und Filtern",
   "sidebar.loadingProjects": "Projekte werden geladen…",
   "sidebar.localServer": "Lokaler Server",
   "sidebar.message": "×",

@@ -1,5 +1,8 @@
 // Shared building blocks for settings pages.
 import type { ReactNode } from "react";
+import Button from "../ui/Button.tsx";
+import CoreEmptyState from "../EmptyState.tsx";
+import Spinner from "../ui/Spinner.tsx";
 import Switch from "../ui/Switch.tsx";
 
 export function Row({ label, hint, itemId, children }: { label: string; hint?: string; itemId?: string; children: ReactNode }) {
@@ -26,7 +29,16 @@ export function Seg<T extends string | number>({ value, options, onChange }: {
   return (
     <div className="seg">
       {options.map(([id, label]) => (
-        <button key={id} className={value === id ? "on" : ""} onClick={() => onChange(id)}>{label}</button>
+        <Button
+          key={id}
+          variant="ghost"
+          size="sm"
+          className={value === id ? "on" : ""}
+          aria-pressed={value === id}
+          onClick={() => onChange(id)}
+        >
+          {label}
+        </Button>
       ))}
     </div>
   );
@@ -34,17 +46,13 @@ export function Seg<T extends string | number>({ value, options, onChange }: {
 
 export function EmptyState({ title, body, busy = false }: { title: string; body?: string; busy?: boolean }) {
   return (
-    <div className="set-empty" role={busy ? "status" : undefined} aria-busy={busy || undefined}>
-      <span className="set-empty-mark" aria-hidden="true">
-        {busy ? <span className="spinner" /> : (
-          <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round">
-            <circle cx="12" cy="12" r="9" />
-            <path d="M8.5 12h7M12 8.5v7" />
-          </svg>
-        )}
-      </span>
-      <div className="set-empty-title">{title}</div>
-      {body && <div className="set-empty-body">{body}</div>}
+    <div className="settings-empty" role={busy ? "status" : undefined} aria-busy={busy || undefined}>
+      <CoreEmptyState
+        variant="panel"
+        title={title}
+        {...(body ? { description: body } : {})}
+        {...(busy ? { mark: <Spinner label={title} /> } : {})}
+      />
     </div>
   );
 }

@@ -11,7 +11,7 @@ import {
   middleTruncatePath,
   normalizedMcpResult,
   normalizedInputEntries,
-  reasoningMilestones,
+  reasoningTail,
 } from "../src/execution.ts";
 import type { ToolMsg } from "../src/reduce.ts";
 
@@ -83,7 +83,7 @@ test("file, URL, edit, search, MCP, and subagent previews are semantic", () => {
     tool: "mcp__github__get_pull_request",
     input: { description: "Read pull request #2693", owner: "otto-assistant", repo: "polyth" },
   }));
-  assert.equal(mcp.label, "Github");
+  assert.equal(mcp.label, "GitHub");
   assert.equal(mcp.preview, "Read pull request #2693");
 
   const subagent = executionPresentation(tool({
@@ -147,27 +147,22 @@ test("MCP results expose human fields without rendering inline JSON", () => {
   ]);
 });
 
-test("groups and thinking expose useful milestones, not debug-prefixed chatter", () => {
+test("groups get semantic labels and streaming thinking previews the newest thought", () => {
   assert.equal(executionGroupLabel([
     tool({ tool: "read", input: { path: "a.ts" } }),
     tool({ tool: "grep", input: { pattern: "x" } }),
   ]), "Repository inspection");
-  assert.deepEqual(
-    reasoningMilestones("Thinking...\n\nFound the event reducer and timeline renderer.\n\nUpdating the compact execution rows now."),
-    ["Inspecting relevant code", "Implementing changes"],
+  // The live tail is the last non-empty line, stripped of markdown markers.
+  assert.equal(
+    reasoningTail("Found the event reducer.\n\n## Next step\n\n- Updating the *compact* execution rows now.\n\n"),
+    "Updating the compact execution rows now.",
   );
-  const semantic = reasoningMilestones(
-    "I need to inspect the event reducer before changing anything.\n\n"
-      + "Maybe there is another approach.\n\n"
-      + "Implemented distinct pending and running lifecycle states with bounded labels that remain readable on compact screens and do not expose internal diagnostic chatter to users.",
-  );
-  assert.deepEqual(semantic, [
-    "Inspecting relevant code",
-    "Planning the implementation",
-    "Implementing changes",
-  ]);
-  assert.ok(semantic.every((item) => !item.includes("diagnostic chatter")));
-  assert.ok(semantic.length <= 5);
+  assert.equal(reasoningTail(""), "");
+  assert.equal(reasoningTail("\n\n  \n"), "");
+  // Very long lines stay bounded for the one-line summary slot.
+  const long = reasoningTail(`start\n${"reasoning ".repeat(40)}end`);
+  assert.ok(long.length <= 111, `tail stays bounded, got ${long.length}`);
+  assert.ok(long.endsWith("…"));
 });
 
 test("execution code surfaces override the global prose font preference", async () => {
@@ -259,7 +254,9 @@ test("execution row renders collapsed value first, expands inline, and opens lev
     assert.equal(tab.defaultPrevented, true, "Tab is contained by the modal focus trap");
     await act(async () => {
       close.click();
-      await new Promise((resolve) => setTimeout(resolve, 10));
+      await new Promise<void>((resolve) => {
+        requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+      });
     });
     assert.equal(document.body.querySelector(".execution-viewer"), null);
     assert.equal(document.body.style.overflow, "", "closing restores page scrolling");
@@ -469,7 +466,7 @@ test("search results open the matching file and line from inline detail", async 
   }
 });
 
-test("approval starts as a compact execution row and reveals decisions inline", async () => {
+test("approval is always action-required: intent, target, risk, and decisions visible without disclosure", async () => {
   const container = document.createElement("div");
   document.body.appendChild(container);
   const root = createRoot(container);
@@ -485,15 +482,27 @@ test("approval starts as a compact execution row and reveals decisions inline", 
         preview: { title: "Delete build artifacts", lines: ["apps/web/dist"], risk: "medium" },
       }],
     })));
-    const summary = container.querySelector<HTMLButtonElement>(".permission-execution-summary");
-    assert.ok(summary);
-    assert.equal(summary.getAttribute("aria-expanded"), "false");
-    assert.match(summary.textContent ?? "", /Shell.*Delete build artifacts.*Approval required.*Review/s);
-    assert.match(container.querySelector(".permission-execution-mobile-status")?.textContent ?? "", /Approval.*Review/s);
-    assert.equal(container.querySelector(".perm-actions"), null);
-    await act(async () => summary.click());
-    assert.equal(summary.getAttribute("aria-expanded"), "true");
-    assert.match(container.querySelector(".perm-actions")?.textContent ?? "", /Allow once.*Always.*Deny/s);
+    const banner = container.querySelector(".perm-banner");
+    assert.ok(banner);
+    assert.equal(banner.getAttribute("role"), "alert");
+    // No expand step: intent, tool, target, and risk are readable immediately.
+    assert.match(container.querySelector(".perm-title")?.textContent ?? "", /Permission requested/);
+    assert.match(container.querySelector(".permission-request-title")?.textContent ?? "", /Delete build artifacts/);
+    assert.match(container.querySelector(".permission-request-tool")?.textContent ?? "", /via Shell/);
+    assert.match(container.querySelector(".permission-risk")?.textContent ?? "", /medium risk/);
+    assert.match(container.querySelector(".permission-preview")?.textContent ?? "", /apps\/web\/dist/);
+    // Decisions are rendered up front, in decision order.
+    const actions = container.querySelector(".perm-actions");
+    assert.ok(actions);
+    assert.match(actions.textContent ?? "", /Allow once.*Always.*Deny/s);
+    const allow = container.querySelector<HTMLButtonElement>(".perm-actions .permission-allow");
+    const deny = container.querySelector<HTMLButtonElement>(".perm-actions .permission-deny");
+    assert.ok(allow && allow.textContent?.includes("Allow once"));
+    assert.ok(deny && deny.textContent?.includes("Deny"));
+    // Always scope stays an explicit choice, never a silent global.
+    const scopeSelect = container.querySelector<HTMLSelectElement>(".perm-always select");
+    assert.ok(scopeSelect);
+    assert.equal(scopeSelect.value, "session");
   } finally {
     await act(async () => root.unmount());
     container.remove();

@@ -11,6 +11,15 @@ import {
 import ProviderLogo from "../../../models/widgets/ProviderLogo.tsx";
 import { fmtQuota, paceText, useQuotaSnapshots } from "./quotaUi.tsx";
 import {
+  AddIcon,
+  Button,
+  ChevronRightIcon,
+  EmptyState,
+  IconButton,
+  RefreshIcon,
+  Tabs,
+} from "../../../../apps/web/src/components/ui/index.ts";
+import {
   buildUsageDashboardData,
   type UsageChartMetric,
   type UsageChartSeries,
@@ -390,19 +399,17 @@ function SessionCohorts({
         title={tr("usage.usagedashboard.sessionCohortsByLatestTurn")}
         description={tr("usage.usagedashboard.valueEqualRollingBucketsValue", { count: data.chart.labels.length, hours: Math.round(data.chart.bucketHours) })}
         aside={(
-          <div className="usage-metric-toggle" role="group" aria-label={tr("usage.usagedashboard.chartMetric")}>
-            {(["tokens", "cost", "sessions"] as const).map((item) => (
-              <button
-                type="button"
-                className={metric === item ? "active" : ""}
-                aria-pressed={metric === item}
-                key={item}
-                onClick={() => setMetric(item)}
-              >
-                {item === "tokens" ? tr("usage.usagedashboard.tokens") : item === "cost" ? tr("usage.usagedashboard.cost") : tr("usage.usagedashboard.sessions")}
-              </button>
-            ))}
-          </div>
+          <Tabs
+            className="usage-metric-toggle"
+            size="sm"
+            label={tr("usage.usagedashboard.chartMetric")}
+            value={metric}
+            tabs={(["tokens", "cost", "sessions"] as const).map((item) => ({
+              id: item,
+              label: item === "tokens" ? tr("usage.usagedashboard.tokens") : item === "cost" ? tr("usage.usagedashboard.cost") : tr("usage.usagedashboard.sessions"),
+            }))}
+            onChange={(value) => setMetric(value as UsageChartMetric)}
+          />
         )}
       />
       <CohortChart
@@ -471,7 +478,7 @@ function ProviderSpendDonut({
       <SectionHeading
         title={tr("usage.usagedashboard.costByProvider")}
         description={tr("usage.usagedashboard.whereWorkspaceSpendIsGoing")}
-        aside={<button type="button" className="usage-icon-button" aria-label={tr("usage.usagedashboard.viewProviderDetails")} onClick={onViewProviders}><Icon.chevronRight /></button>}
+        aside={<IconButton icon={ChevronRightIcon} label={tr("usage.usagedashboard.viewProviderDetails")} onClick={onViewProviders} />}
       />
       <div className="usage-spend-content">
         <div className="usage-spend-donut" role="img" aria-label={tr("usage.usagedashboard.providerSpendTotalingValue", { total: formatMoney(total) })}>
@@ -506,12 +513,13 @@ function ProviderSpendDonut({
             </div>
           ))}
           {arcs.length === 0 && (
-            <div className="usage-card-empty empty-state--compact">
-              <strong>{hiddenSpend ? tr("usage.usagedashboard.allSpendIsHidden") : tr("usage.usagedashboard.noSpendRecorded")}</strong>
-              <span>{hiddenSpend
+            <EmptyState
+              variant="compact"
+              title={hiddenSpend ? tr("usage.usagedashboard.allSpendIsHidden") : tr("usage.usagedashboard.noSpendRecorded")}
+              description={hiddenSpend
                 ? tr("usage.usagedashboard.showAProviderToIncludeSpend")
-                : tr("usage.usagedashboard.costAppearsWhenTheActive")}</span>
-            </div>
+                : tr("usage.usagedashboard.costAppearsWhenTheActive")}
+            />
           )}
         </div>
       </div>
@@ -535,19 +543,17 @@ function ModelBreakdown({
         title={tr("usage.usagedashboard.modelBreakdown")}
         description={tr("usage.usagedashboard.highestUseModelsAmongSessions")}
         aside={(
-          <div className="usage-metric-toggle" role="group" aria-label={tr("usage.usagedashboard.modelBreakdownMetric")}>
-            {(["tokens", "cost"] as const).map((item) => (
-              <button
-                type="button"
-                className={metric === item ? "active" : ""}
-                aria-pressed={metric === item}
-                key={item}
-                onClick={() => setMetric(item)}
-              >
-                {item === "tokens" ? tr("usage.usagedashboard.tokens") : tr("usage.usagedashboard.cost")}
-              </button>
-            ))}
-          </div>
+          <Tabs
+            className="usage-metric-toggle"
+            size="sm"
+            label={tr("usage.usagedashboard.modelBreakdownMetric")}
+            value={metric}
+            tabs={(["tokens", "cost"] as const).map((item) => ({
+              id: item,
+              label: item === "tokens" ? tr("usage.usagedashboard.tokens") : tr("usage.usagedashboard.cost"),
+            }))}
+            onChange={(value) => setMetric(value as typeof metric)}
+          />
         )}
       />
       <div className="usage-model-list">
@@ -565,12 +571,13 @@ function ModelBreakdown({
           </div>
         ))}
         {shown.length === 0 && (
-          <div className="usage-card-empty empty-state--compact">
-            <strong>{hiddenActivity ? tr("usage.usagedashboard.allModelActivityIsHidden") : tr("usage.usagedashboard.noModelActivityYet")}</strong>
-            <span>{hiddenActivity
+          <EmptyState
+            variant="compact"
+            title={hiddenActivity ? tr("usage.usagedashboard.allModelActivityIsHidden") : tr("usage.usagedashboard.noModelActivityYet")}
+            description={hiddenActivity
               ? tr("usage.usagedashboard.showAProviderToIncludeModels")
-              : tr("usage.usagedashboard.modelsAppearAfterASession")}</span>
-          </div>
+              : tr("usage.usagedashboard.modelsAppearAfterASession")}
+          />
         )}
       </div>
     </article>
@@ -714,8 +721,8 @@ function UsageActionStrip({
           ? (hiddenCount === 1 ? tr("usage.usagedashboard.oneProviderIsHiddenFrom") : tr("usage.usagedashboard.valueProvidersAreHiddenFrom", { count: hiddenCount }))
           : tr("usage.usagedashboard.allDiscoveredProvidersAreIncluded")}</span>
       </div>
-      <button type="button" className="small-btn" onClick={onProviders}>{tr("usage.usagedashboard.providerVisibility")}</button>
-      <button type="button" className="small-btn" onClick={onAddProvider}><Icon.plus /> {tr("usage.usagedashboard.addProvider")}</button>
+      <Button size="sm" onClick={onProviders}>{tr("usage.usagedashboard.providerVisibility")}</Button>
+      <Button size="sm" iconStart={AddIcon} onClick={onAddProvider}>{tr("usage.usagedashboard.addProvider")}</Button>
     </section>
   );
 }
@@ -739,7 +746,7 @@ function ProviderDetails({
         <div><span>{tr("usage.usagedashboard.discovered")}</span><strong>{providers.length}</strong></div>
         <div><span>{tr("usage.usagedashboard.freshFeeds")}</span><strong>{providers.filter((provider) => provider.snapshot && !provider.stale).length}</strong></div>
         <div><span>{tr("usage.usagedashboard.visible")}</span><strong>{providers.filter((provider) => !hiddenProviders.includes(providerPreferenceId(provider))).length}</strong></div>
-        <button type="button" className="small-btn" onClick={onAddProvider}><Icon.plus /> {tr("usage.usagedashboard.addProvider")}</button>
+        <Button size="sm" variant="primary" iconStart={AddIcon} onClick={onAddProvider}>{tr("usage.usagedashboard.addProvider")}</Button>
       </section>
       <div className="usage-provider-detail-grid">
         {providers.map((provider, index) => {
@@ -802,36 +809,36 @@ function ProviderDetails({
                 )}
               </div>
               <footer>
-                <button
-                  type="button"
-                  className="small-btn"
+                <Button
+                  size="sm"
                   aria-label={hidden ? tr("usage.usagedashboard.showValueInBreakdowns", { label: provider.label }) : tr("usage.usagedashboard.hideValueInBreakdowns", { label: provider.label })}
                   onClick={() => setProviderHidden(preferenceId, !hidden)}
                 >
                   {hidden ? tr("usage.usagedashboard.showInBreakdowns") : tr("usage.usagedashboard.hideFromBreakdowns")}
-                </button>
+                </Button>
                 {provider.snapshot && (
-                  <button
-                    type="button"
-                    className="small-btn"
-                    disabled={quotaBusy}
+                  <Button
+                    size="sm"
+                    iconStart={RefreshIcon}
+                    busy={quotaBusy}
                     aria-label={tr("usage.usagedashboard.refreshValueQuotaFeed", { label: provider.label })}
                     onClick={() => void onRefresh(provider.snapshot!.providerId)}
                   >
-                    <Icon.refresh /> {tr("common.refresh")}
-                  </button>
+                    {tr("common.refresh")}
+                  </Button>
                 )}
               </footer>
             </article>
           );
         })}
         {providers.length === 0 && (
-          <article className="usage-provider-connect-empty">
-            <span><Icon.plus /></span>
-            <h3>{tr("usage.usagedashboard.connectYourFirstProvider")}</h3>
-            <p>{tr("usage.usagedashboard.polythDiscoversQuotaSources")}</p>
-            <button type="button" className="small-btn" onClick={onAddProvider}>{tr("usage.usagedashboard.openProviderSettings")}</button>
-          </article>
+          <EmptyState
+            variant="panel"
+            title={tr("usage.usagedashboard.connectYourFirstProvider")}
+            description={tr("usage.usagedashboard.polythDiscoversQuotaSources")}
+            actionLabel={tr("usage.usagedashboard.openProviderSettings")}
+            onAction={onAddProvider}
+          />
         )}
       </div>
     </div>
@@ -929,54 +936,52 @@ export function UsageDashboard(): ReactNode {
       </section>
 
       <div className="usage-dashboard-toolbar">
-        <div className="usage-view-tabs" role="group" aria-label={tr("usage.usagedashboard.usageView")}>
-          <button type="button" aria-pressed={view === "overview"} className={view === "overview" ? "active" : ""} onClick={() => setView("overview")}>
-            <Icon.widgets /> {tr("usage.usagedashboard.overview")}
-          </button>
-          <button type="button" aria-pressed={view === "providers"} className={view === "providers" ? "active" : ""} onClick={() => setView("providers")}>
-            <Icon.list /> {tr("usage.usagedashboard.providers")}
-          </button>
-        </div>
+        <Tabs
+          className="usage-view-tabs"
+          size="sm"
+          label={tr("usage.usagedashboard.usageView")}
+          value={view}
+          tabs={[
+            { id: "overview", label: <><Icon.widgets /> {tr("usage.usagedashboard.overview")}</> },
+            { id: "providers", label: <><Icon.list /> {tr("usage.usagedashboard.providers")}</> },
+          ]}
+          onChange={(value) => setView(value as typeof view)}
+        />
         <span className="usage-toolbar-spacer" />
-        <div className="usage-range-control" role="group" aria-label={tr("usage.usagedashboard.usageRange")}>
-          {([7, 30, 90] as const).map((days) => (
-            <button
-              type="button"
-              aria-pressed={rangeDays === days}
-              aria-label={tr("usage.usagedashboard.valueDayRange", { days: days })}
-              className={rangeDays === days ? "active" : ""}
-              key={days}
-              onClick={() => setRangeDays(days)}
-            >
-              {days}d
-            </button>
-          ))}
-        </div>
-        <div className="usage-layout-control" role="group" aria-label={tr("usage.usagedashboard.dashboardDensity")}>
-          <button type="button" className={layout === "expanded" ? "active" : ""} aria-label={tr("usage.usagedashboard.expandedWidgets")} aria-pressed={layout === "expanded"} onClick={() => setLayout("expanded")} title={tr("usage.usagedashboard.expandedWidgets")}>
-            <Icon.widgets /><span>{tr("usage.usagedashboard.expanded")}</span>
-          </button>
-          <button type="button" className={layout === "compact" ? "active" : ""} aria-label={tr("usage.usagedashboard.compactWidgets")} aria-pressed={layout === "compact"} onClick={() => setLayout("compact")} title={tr("usage.usagedashboard.compactWidgets")}>
-            <Icon.list /><span>{tr("usage.usagedashboard.compact")}</span>
-          </button>
-        </div>
-        <button
-          type="button"
-          className={`usage-refresh-button${quotaBusy ? " refreshing" : ""}`}
-          aria-label={quotaBusy ? tr("usage.usagedashboard.refreshingProviderQuotaFeeds") : tr("usage.usagedashboard.refreshProviderQuotaFeeds")}
+        <Tabs
+          className="usage-range-control"
+          size="sm"
+          label={tr("usage.usagedashboard.usageRange")}
+          value={String(rangeDays)}
+          tabs={([7, 30, 90] as const).map((days) => ({ id: String(days), label: `${days}d` }))}
+          onChange={(value) => setRangeDays(Number(value) as UsageRangeDays)}
+        />
+        <Tabs
+          className="usage-layout-control"
+          size="sm"
+          label={tr("usage.usagedashboard.dashboardDensity")}
+          value={layout}
+          tabs={[
+            { id: "expanded", label: <><Icon.widgets /><span>{tr("usage.usagedashboard.expanded")}</span></> },
+            { id: "compact", label: <><Icon.list /><span>{tr("usage.usagedashboard.compact")}</span></> },
+          ]}
+          onChange={(value) => setLayout(value as typeof layout)}
+        />
+        <IconButton
+          icon={RefreshIcon}
+          className={quotaBusy ? "refreshing" : undefined}
+          label={quotaBusy ? tr("usage.usagedashboard.refreshingProviderQuotaFeeds") : tr("usage.usagedashboard.refreshProviderQuotaFeeds")}
           title={quotaBusy ? tr("usage.usagedashboard.refreshingProviderQuotaFeeds") : tr("usage.usagedashboard.refreshProviderQuotaFeeds")}
           disabled={quotaBusy}
           onClick={() => void refreshAll()}
-        >
-          <Icon.refresh />
-        </button>
+        />
       </div>
 
       {quotaError && (
         <div className="usage-quota-alert" role="alert">
           <Icon.usage />
           <span><strong>{tr("usage.usagedashboard.quotaFeedsCouldNotBe")}</strong> {tr("usage.usagedashboard.sessionTotalsRemainAvailable")} {quotaError}</span>
-          <button type="button" className="small-btn" disabled={quotaBusy} onClick={() => void reload()}>{tr("common.retry")}</button>
+          <Button size="sm" busy={quotaBusy} onClick={() => void reload()}>{tr("common.retry")}</Button>
         </div>
       )}
 

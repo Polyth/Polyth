@@ -152,6 +152,19 @@ function editDiff(input: JsonObject): string | undefined {
   ].join("\n");
 }
 
+/** Known integration brand casing; title-case is only the fallback. */
+const INTEGRATION_BRANDS: Readonly<Record<string, string>> = {
+  github: "GitHub",
+  gitlab: "GitLab",
+  posthog: "PostHog",
+  mongodb: "MongoDB",
+  postgres: "Postgres",
+  postgresql: "PostgreSQL",
+  mysql: "MySQL",
+  graphql: "GraphQL",
+  openapi: "OpenAPI",
+};
+
 function displayIntegration(tool: string): string {
   const normalized = tool
     .replace(/^mcp(?:__|[_:/-])*/i, "")
@@ -159,7 +172,8 @@ function displayIntegration(tool: string): string {
     ?.replace(/[-_]+/g, " ")
     .trim();
   if (!normalized) return "MCP";
-  return normalized.replace(/\b\w/g, (letter) => letter.toUpperCase());
+  const brand = INTEGRATION_BRANDS[normalized.toLowerCase()];
+  return brand ?? normalized.replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
 export function classifyTool(tool: string, input: JsonObject): ExecutionKind {
@@ -246,7 +260,8 @@ export function executionPresentation(message: Pick<ToolMsg, "tool" | "input" | 
     preview = `${operation}${url ? ` · ${compactUrl(url, 48)}` : ""}`;
   } else if (kind === "mcp") {
     const action = description ?? tool.split(/__|[:/]/).at(-1)?.replace(/[-_]+/g, " ") ?? "Request";
-    preview = endTruncate(action.replace(/\b(pr|pull request)\s*#?(\d+)/i, "pull request #$2"), 82);
+    const humanized = action.replace(/\b(pr|pull request)\s*#?(\d+)/i, "pull request #$2");
+    preview = endTruncate(humanized.length > 0 ? humanized[0]!.toUpperCase() + humanized.slice(1) : humanized, 82);
   } else if (kind === "subagent") {
     preview = endTruncate(description ?? firstString(input, ["prompt"]) ?? "Delegated task", 86);
   } else {
@@ -420,16 +435,13 @@ export function executionGroupLabel(tools: readonly ToolMsg[]): string {
   return "Agent work";
 }
 
-export function reasoningMilestones(reasoning: string): string[] {
-  const safeCategories = [
-    { pattern: /\b(?:debug|investigat|reproduc)\w*/i, label: "Investigating the issue" },
-    { pattern: /\b(?:inspect|read|search|explor|review|find|found|locat)\w*/i, label: "Inspecting relevant code" },
-    { pattern: /\b(?:plan|approach|design)\w*/i, label: "Planning the implementation" },
-    { pattern: /\b(?:implement|updat|chang|edit|writ|creat|fix|add|remov|refactor)\w*/i, label: "Implementing changes" },
-    { pattern: /\b(?:test|build|typecheck|verif|validat)\w*/i, label: "Verifying the implementation" },
-  ] as const;
-  const milestones = safeCategories
-    .filter(({ pattern }) => pattern.test(reasoning))
-    .map(({ label }) => label);
-  return milestones.length > 0 ? milestones : ["Working through the request"];
+/** Newest meaningful reasoning line for the collapsed live preview: markdown
+ *  emphasis/heading/list markers are stripped so the tail reads as prose. */
+export function reasoningTail(reasoning: string): string {
+  const line = reasoning
+    .split(/\r?\n/)
+    .reverse()
+    .map((candidate) => candidate.replace(/^[\s#>*+-]+/, "").replace(/[*_`]+/g, "").trim())
+    .find((candidate) => candidate !== "");
+  return line === undefined ? "" : endTruncate(line, 110);
 }

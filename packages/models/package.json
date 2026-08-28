@@ -5,6 +5,9 @@
   "exports": {
     ".": "./src/index.ts",
     "./i18n": "./src/i18n/index.ts",
+    "./model-picker": "./widgets/ModelPicker.tsx",
+    "./model-picker-state": "./widgets/modelPickerState.ts",
+    "./model-presentation": "./widgets/modelPresentation.ts",
     "./web-prefs": "./widgets/modelPrefs.ts",
     "./widgets": "./widgets/index.tsx",
     "./i18n/*": "./src/i18n/*.ts"
@@ -25,6 +28,7 @@
     "@polyth/contracts": "0.1.0",
     "@polyth/plugins": "0.1.0",
     "@polyth/session": "0.1.0",
+    "@polyth/web": "0.1.0",
     "@polyth/web-sdk": "0.1.0"
   },
   "peerDependencies": {

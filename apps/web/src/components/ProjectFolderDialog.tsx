@@ -19,9 +19,18 @@ import { addProject } from "../init.ts";
 import { COMPOSER_INPUT_SELECTOR, focusComposer, getState } from "../store.ts";
 import { getProjectSetupState } from "../projectSetup.ts";
 import { ago, MOD } from "../format.ts";
-import { Icon } from "../icons.tsx";
 import { tr } from "../i18n/index.ts";
 import { errorFeedback, successFeedback, tapFeedback } from "../haptics.ts";
+import {
+  AddIcon,
+  Button,
+  CloseIcon,
+  HomeIcon,
+  IconButton,
+  ParentFolderIcon,
+  Switch,
+  TextInput,
+} from "./ui/index.ts";
 
 const folderIcon = (
   <svg width={16} height={16} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2} strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -136,7 +145,7 @@ export default function ProjectFolderDialog({
     if (opener && opener.isConnected) return opener;
     return (
       document.querySelector<HTMLElement>(".hero-open-project")
-      ?? document.querySelector<HTMLElement>(".side-open-project")
+      ?? document.querySelector<HTMLElement>(".sidebar .empty-state-action, .sidebar-add-project")
       ?? document.querySelector<HTMLElement>(COMPOSER_INPUT_SELECTOR)
     );
   };
@@ -275,14 +284,29 @@ export default function ProjectFolderDialog({
             <div className="folder-dialog-title">{title}</div>
             <div className="folder-dialog-subtitle">{subtitle}</div>
           </div>
-          <button className="icon-btn" aria-label={tr("common.close")} disabled={busy} onClick={requestClose}>✕</button>
+          <IconButton icon={CloseIcon} label={tr("common.close")} disabled={busy} onClick={requestClose} />
         </div>
 
         <div className="folder-toolbar">
-          <button className="small-btn" title={tr("projectfolderdialog.homeDirectory")} aria-label={tr("projectfolderdialog.goToHomeDirectory")} disabled={busy} onClick={() => void load(home || "~")}>~</button>
-          <button className="small-btn" title={tr("projectfolderdialog.parentFolder")} aria-label={tr("projectfolderdialog.goToParentFolder")} disabled={busy || !parent} onClick={() => parent && void load(parent)}>↑</button>
-          <input
+          <IconButton
+            icon={HomeIcon}
+            variant="quiet"
+            label={tr("projectfolderdialog.goToHomeDirectory")}
+            title={tr("projectfolderdialog.homeDirectory")}
+            disabled={busy}
+            onClick={() => void load(home || "~")}
+          />
+          <IconButton
+            icon={ParentFolderIcon}
+            variant="quiet"
+            label={tr("projectfolderdialog.goToParentFolder")}
+            title={tr("projectfolderdialog.parentFolder")}
+            disabled={busy || !parent}
+            onClick={() => parent && void load(parent)}
+          />
+          <TextInput
             ref={pathInputRef}
+            uiSize="sm"
             className="folder-path mono"
             value={pathInput}
             aria-label={tr("projectfolderdialog.currentPath")}
@@ -294,15 +318,15 @@ export default function ProjectFolderDialog({
             }}
             onBlur={() => setPathInput(path)}
           />
-          <button
-            className={`hidden-toggle ${hidden ? "on" : ""}`}
-            type="button"
-            aria-pressed={hidden}
-            disabled={busy}
-            onClick={toggleHidden}
-          >
-            <span className="toggle-track" aria-hidden="true" />
-            {tr("projectfolderdialog.hidden")}</button>
+          <span className="folder-hidden-toggle">
+            <span>{tr("projectfolderdialog.hidden")}</span>
+            <Switch
+              checked={hidden}
+              label={tr("projectfolderdialog.hidden")}
+              disabled={busy}
+              onChange={toggleHidden}
+            />
+          </span>
         </div>
 
         <div className="folder-cols" aria-hidden="true"><span>{tr("projectfolderdialog.name")}</span><span>{tr("projectfolderdialog.modified")}</span></div>
@@ -376,8 +400,9 @@ export default function ProjectFolderDialog({
           />
           {creating ? (
             <span className="folder-newname">
-              <input
+              <TextInput
                 autoFocus
+                uiSize="sm"
                 value={newName}
                 placeholder={tr("projectfolderdialog.newFolderName2")}
                 aria-label={tr("projectfolderdialog.newFolderName")}
@@ -389,21 +414,33 @@ export default function ProjectFolderDialog({
                   else if (e.key === "Escape") { e.stopPropagation(); setCreating(false); }
                 }}
               />
-              <button className="small-btn" disabled={busy || !newName.trim()} onClick={() => void createFolder()}>{tr("common.create")}</button>
+              <Button size="sm" disabled={busy || !newName.trim()} onClick={() => void createFolder()}>
+                {tr("common.create")}
+              </Button>
             </span>
           ) : (
-            <button className="ghost-link" disabled={busy} onClick={() => setCreating(true)}><Icon.plus /> {tr("projectfolderdialog.newFolder")}</button>
+            <Button
+              size="sm"
+              className="ghost-link"
+              iconStart={AddIcon}
+              disabled={busy}
+              onClick={() => setCreating(true)}
+            >
+              {tr("projectfolderdialog.newFolder")}
+            </Button>
           )}
           <span className="header-spacer" />
           <span className="folder-selected mono" title={selected ?? path}>{selected ?? path}</span>
-          <button
-            className="primary-btn folder-open-btn"
+          <Button
+            size="sm"
+            variant="primary"
+            className="folder-open-btn"
             disabled={busy || (!selected && !path)}
             aria-busy={busy || undefined}
             onClick={() => void openProject()}
           >
             {busy ? tr("projectfolderdialog.opening") : tr("projectfolderdialog.openProject")}
-          </button>
+          </Button>
         </div>
       </div>
     </Dialog>

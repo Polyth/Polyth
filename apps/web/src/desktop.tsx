@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { desktopBridge, type DesktopInfo, type DesktopSettings, type DesktopUpdateState, type DesktopWindowState } from "./desktopBridge.ts";
 import { registerSlot } from "./slots.ts";
 import { Row, Seg, Toggle } from "./components/settings/parts.tsx";
+import { Button, confirmAlert } from "./components/ui/index.ts";
 
 const DEFAULTS: DesktopSettings = {
   closeToTray: true,
@@ -206,9 +207,9 @@ function DesktopSettingsPage() {
       <Row label="Update status" hint={update.message} itemId="desktop.updates">
         <div className="desktop-update-action">
           {update.phase === "downloading" && <progress max={100} value={update.percent ?? 0} />}
-          <button
-            type="button"
-            className="small-btn"
+          <Button
+            size="sm"
+            busy={update.phase === "checking"}
             disabled={update.phase === "checking" || update.phase === "downloading" || update.phase === "disabled"}
             onClick={updateAction}
           >
@@ -219,21 +220,20 @@ function DesktopSettingsPage() {
                 : update.phase === "checking"
                   ? "Checking…"
                   : "Check now"}
-          </button>
+          </Button>
         </div>
       </Row>
       <Row label="Polyth data" hint={info?.dataDir ?? "Loading desktop paths…"} itemId="desktop.data">
-        <button type="button" className="small-btn" onClick={() => void api.openDataFolder()}>Open folder</button>
+        <Button size="sm" onClick={() => void api.openDataFolder()}>Open folder</Button>
       </Row>
       <Row label="Desktop log" hint={info?.logPath ?? "Loading log path…"}>
-        <button
-          type="button"
-          className="small-btn"
+        <Button
+          size="sm"
           disabled={!info}
           onClick={() => { if (info) void api.revealPath(info.logPath); }}
         >
           Reveal log
-        </button>
+        </Button>
       </Row>
       <Row label="Versions">
         <span className="mono">Polyth {info?.appVersion ?? "…"} · OpenCode {info?.opencodeVersion ?? "…"}</span>
@@ -242,15 +242,19 @@ function DesktopSettingsPage() {
         <span className={`tag ${info?.trayAvailable ? "connected" : ""}`}>{info?.trayAvailable ? "ready" : "unavailable"}</span>
       </Row>
       <Row label="Quit Polyth" hint="Stop the local server, active agents, and background desktop process." itemId="desktop.quit">
-        <button
-          type="button"
-          className="small-btn danger-btn"
-          onClick={() => {
-            if (window.confirm("Quit Polyth and stop all active desktop sessions?")) void api.quit();
-          }}
+        <Button
+          size="sm"
+          variant="danger"
+          onClick={() => void confirmAlert("Quit Polyth and stop all active desktop sessions?", {
+            title: "Quit Polyth?",
+            confirmLabel: "Quit Polyth",
+            destructive: true,
+          }).then((confirmed) => {
+            if (confirmed) void api.quit();
+          })}
         >
           Quit Polyth
-        </button>
+        </Button>
       </Row>
       {error && <div className="form-error" role="alert">{error}</div>}
     </div>

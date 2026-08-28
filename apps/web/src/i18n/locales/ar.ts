@@ -1744,6 +1744,7 @@ export const ar: AppMessages = {
   "sidebar.filter": "فلتر",
   "sidebar.filterSessions": "جلسات التصفية",
   "sidebar.importSessions": "استيراد الجلسات…",
+  "sidebar.listOptions": "الترتيب والتصفية",
   "sidebar.loadingProjects": "جارٍ تحميل المشاريع…",
   "sidebar.localServer": "محلي خادم",
   "sidebar.message": "×",

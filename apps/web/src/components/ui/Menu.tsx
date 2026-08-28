@@ -2,6 +2,11 @@
 // desktop (canonical useDismissibleMenu semantics: outside press, Escape,
 // arrow navigation, focus restore) and the shared bottom Sheet on phones —
 // one entry list, zero duplicated business logic.
+//
+// Entries can carry selection semantics: `kind: "radio"`/`"checkbox"` maps to
+// menuitemradio/menuitemcheckbox with aria-checked and a leading check glyph
+// rendered from `checked` (never a caller-passed icon). Checkbox entries keep
+// the menu open so several can be toggled in one visit.
 import { useRef, useState, type ReactNode, type Ref, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import { useDismissibleMenu } from "../a11y/Menu.ts";
@@ -9,7 +14,7 @@ import { useShellMode } from "../../responsiveShell.ts";
 import { tapFeedback } from "../../haptics.ts";
 import Sheet from "../mobile/Sheet.tsx";
 import Icon from "./Icon.tsx";
-import type { LucideIcon } from "./icons.ts";
+import { CheckIcon, type LucideIcon } from "./icons.ts";
 import { useAnchoredPosition, type AnchoredAlign } from "./useAnchoredPosition.ts";
 
 export interface MenuAction {
@@ -19,10 +24,21 @@ export interface MenuAction {
   detail?: string;
   danger?: boolean;
   disabled?: boolean;
+  /** Selection semantics: plain action (default), one-of radio, or checkbox. */
+  kind?: "action" | "radio" | "checkbox";
+  /** Selected state for radio/checkbox entries; renders the leading check. */
+  checked?: boolean;
+  /** Small color dot for label-style entries (a literal color is data). */
+  swatch?: string;
   onSelect: () => void;
 }
 
-export type MenuEntry = MenuAction | "separator";
+/** Non-interactive section heading inside the entry list. */
+export interface MenuHeading {
+  heading: string;
+}
+
+export type MenuEntry = MenuAction | MenuHeading | "separator";
 
 export interface MenuTriggerProps {
   ref: Ref<HTMLButtonElement>;
@@ -44,10 +60,37 @@ export interface MenuProps {
   children: (trigger: MenuTriggerProps) => ReactNode;
   align?: AnchoredAlign;
   className?: string;
+  /** Controlled open state for extra entry points (context menu, long-press,
+   *  Shift+F10). Omit for the default trigger-toggled behavior. */
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
+  /** Focus lands here on dismissal instead of the trigger — for menus opened
+   *  from a different element than their anchored trigger. */
+  returnFocusRef?: RefObject<HTMLElement | null>;
+  /** Extra content after the entries (e.g. plugin slot contributions). */
+  footer?: ReactNode;
 }
 
-export default function Menu({ label, title, entries, children, align = "start", className }: MenuProps) {
-  const [open, setOpen] = useState(false);
+function isHeading(entry: MenuEntry): entry is MenuHeading {
+  return typeof entry === "object" && "heading" in entry;
+}
+
+function roleOf(action: MenuAction): "menuitem" | "menuitemradio" | "menuitemcheckbox" {
+  if (action.kind === "radio") return "menuitemradio";
+  if (action.kind === "checkbox") return "menuitemcheckbox";
+  return "menuitem";
+}
+
+export default function Menu({
+  label, title, entries, children, align = "start", className,
+  open: controlledOpen, onOpenChange, returnFocusRef, footer,
+}: MenuProps) {
+  const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
+  const open = controlledOpen ?? uncontrolledOpen;
+  const setOpen = (next: boolean) => {
+    if (controlledOpen === undefined) setUncontrolledOpen(next);
+    onOpenChange?.(next);
+  };
   const asSheet = useShellMode() === "phone";
   const triggerRef = useRef<HTMLButtonElement>(null);
   const surfaceRef = useRef<HTMLDivElement>(null);
@@ -56,23 +99,76 @@ export default function Menu({ label, title, entries, children, align = "start",
     open: open && !asSheet,
     menuRef: surfaceRef,
     triggerRef,
+    restoreRef: returnFocusRef,
     onClose: () => setOpen(false),
   });
+
+  // Selection reserves a leading check column only when the list carries
+  // selectable entries, so plain action menus stay tight.
+  const checkable = entries.some((entry) =>
+    typeof entry === "object" && !isHeading(entry) && (entry.kind === "radio" || entry.kind === "checkbox"));
 
   const select = (action: MenuAction) => {
     if (action.disabled) return;
     if (asSheet) tapFeedback();
-    setOpen(false);
-    if (!asSheet) requestAnimationFrame(() => triggerRef.current?.focus());
+    // Checkbox entries stay open for multi-toggle; everything else closes.
+    if (action.kind !== "checkbox") {
+      setOpen(false);
+      if (!asSheet) {
+        requestAnimationFrame(() => (returnFocusRef?.current ?? triggerRef.current)?.focus());
+      }
+    }
     action.onSelect();
   };
 
   const trigger = children({
     ref: triggerRef,
-    onClick: () => setOpen((value) => !value),
+    onClick: () => setOpen(!open),
     "aria-haspopup": asSheet ? "dialog" : "menu",
     "aria-expanded": open,
   });
+
+  const itemContent = (entry: MenuAction, iconSize: "sm" | "lg") => (
+    <>
+      {checkable && (
+        <span className="ui-menu-item-check" aria-hidden="true">
+          {entry.checked ? <Icon icon={CheckIcon} size={iconSize} /> : null}
+        </span>
+      )}
+      {entry.swatch && <span className="ui-menu-item-swatch" style={{ background: entry.swatch }} aria-hidden="true" />}
+      {entry.icon && <Icon icon={entry.icon} size={iconSize} />}
+      <span className="ui-menu-item-copy">
+        <span className="ui-menu-item-label">{entry.label}</span>
+        {entry.detail && <span className="ui-menu-item-detail">{entry.detail}</span>}
+      </span>
+    </>
+  );
+
+  const renderEntry = (entry: MenuEntry, index: number, sheet: boolean) => {
+    if (entry === "separator") {
+      return sheet
+        ? <div key={`separator-${index}`} className="ui-separator ui-separator--horizontal" aria-hidden="true" />
+        : <div key={`separator-${index}`} className="ui-separator ui-separator--horizontal" role="separator" />;
+    }
+    if (isHeading(entry)) {
+      return <div key={`heading-${index}`} className="ui-menu-heading" aria-hidden="true">{entry.heading}</div>;
+    }
+    const role = roleOf(entry);
+    return (
+      <button
+        key={entry.id}
+        type="button"
+        role={sheet ? undefined : role}
+        aria-checked={!sheet && role !== "menuitem" ? entry.checked === true : undefined}
+        aria-pressed={sheet && role !== "menuitem" ? entry.checked === true : undefined}
+        className={`${sheet ? "ui-menu-sheet-item" : "ui-menu-item"}${entry.danger ? " ui-menu-item--danger" : ""}${entry.checked ? " ui-menu-item--checked" : ""}`}
+        disabled={entry.disabled}
+        onClick={() => select(entry)}
+      >
+        {itemContent(entry, sheet ? "lg" : "sm")}
+      </button>
+    );
+  };
 
   return (
     <>
@@ -80,24 +176,8 @@ export default function Menu({ label, title, entries, children, align = "start",
       {open && asSheet && (
         <Sheet title={title ?? label} onClose={() => setOpen(false)} className="ui-menu-sheet">
           <div className="ui-menu-sheet-list">
-            {entries.map((entry, index) =>
-              entry === "separator"
-                ? <div key={`separator-${index}`} className="ui-separator ui-separator--horizontal" aria-hidden="true" />
-                : (
-                  <button
-                    key={entry.id}
-                    type="button"
-                    className={`ui-menu-sheet-item${entry.danger ? " ui-menu-item--danger" : ""}`}
-                    disabled={entry.disabled}
-                    onClick={() => select(entry)}
-                  >
-                    {entry.icon && <Icon icon={entry.icon} size="lg" />}
-                    <span className="ui-menu-item-copy">
-                      <span className="ui-menu-item-label">{entry.label}</span>
-                      {entry.detail && <span className="ui-menu-item-detail">{entry.detail}</span>}
-                    </span>
-                  </button>
-                ))}
+            {entries.map((entry, index) => renderEntry(entry, index, true))}
+            {footer}
           </div>
         </Sheet>
       )}
@@ -116,25 +196,8 @@ export default function Menu({ label, title, entries, children, align = "start",
           data-side={position.side}
           onKeyDown={onMenuKeyDown}
         >
-          {entries.map((entry, index) =>
-            entry === "separator"
-              ? <div key={`separator-${index}`} className="ui-separator ui-separator--horizontal" role="separator" />
-              : (
-                <button
-                  key={entry.id}
-                  type="button"
-                  role="menuitem"
-                  className={`ui-menu-item${entry.danger ? " ui-menu-item--danger" : ""}`}
-                  disabled={entry.disabled}
-                  onClick={() => select(entry)}
-                >
-                  {entry.icon && <Icon icon={entry.icon} size="sm" />}
-                  <span className="ui-menu-item-copy">
-                    <span className="ui-menu-item-label">{entry.label}</span>
-                    {entry.detail && <span className="ui-menu-item-detail">{entry.detail}</span>}
-                  </span>
-                </button>
-              ))}
+          {entries.map((entry, index) => renderEntry(entry, index, false))}
+          {footer}
         </div>,
         document.body,
       )}

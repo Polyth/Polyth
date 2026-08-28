@@ -168,19 +168,22 @@ width: min(580px, calc(100vw - 28px));
     radial-gradient(circle at 8% 0%, color-mix(in srgb, var(--purple) 13%, transparent), transparent 35%),
     var(--elevated);
 }
-.goal-dialog-head {
+.goal-dialog .ui-dialog-body {
+padding: 0;
+}
+.goal-dialog-intro {
 display: grid;
-  grid-template-columns: 42px minmax(0, 1fr) 36px;
+  grid-template-columns: 42px minmax(0, 1fr);
   align-items: start;
-  gap: 12px;
-  padding: 20px 20px 16px;
+  gap: var(--space-3);
+  padding: var(--space-4);
   border-bottom: 1px solid var(--border-soft);
 }
-.goal-dialog-head h2 {
-margin: 1px 0 4px; font-size: 18px; letter-spacing: -.02em;
+.goal-dialog-intro strong {
+display: block; margin: 1px 0 var(--space-1); font-size: var(--font-label);
 }
-.goal-dialog-head p {
-margin: 0; color: var(--muted); font-size: 11.5px; line-height: 1.45;
+.goal-dialog-intro p {
+margin: 0; color: var(--muted); font-size: var(--font-meta); line-height: var(--font-meta-lh);
 }
 .goal-dialog-mark {
 width: 42px;
@@ -192,9 +195,6 @@ width: 42px;
   color: var(--purple);
   background: color-mix(in srgb, var(--purple) 12%, transparent);
   font-size: 23px;
-}
-.goal-dialog-head .icon-btn {
-width: 34px; height: 34px; border: 0; font-size: 20px;
 }
 .goal-dialog .goal-attach {
 gap: 16px;
@@ -225,18 +225,12 @@ display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px;
 .goal-dialog .goal-attach-row input {
 width: 100%; min-height: 42px; border-radius: calc(11px * var(--corner-radius-scale));
 }
-.goal-dialog-actions {
-display: flex; justify-content: flex-end; gap: 8px; padding-top: 2px;
-}
-.goal-dialog-actions button {
-min-height: 38px; padding-inline: 16px; border-radius: calc(10px * var(--corner-radius-scale));
-}
 .goal-dialog-error {
 padding: 9px 11px; border-radius: calc(9px * var(--corner-radius-scale)); background: var(--red-wash);
 }
 @media (max-width: 480px), (max-height: 480px) and (pointer: coarse) {
-.goal-dialog-head {
-grid-template-columns: 38px minmax(0, 1fr) 34px; padding: 16px 15px 13px;
+.goal-dialog-intro {
+grid-template-columns: 38px minmax(0, 1fr); padding: var(--space-3);
 }
 
 .goal-dialog-mark {
@@ -249,11 +243,6 @@ padding: 15px;
 
 .goal-dialog .goal-attach-row {
 grid-template-columns: 1fr;
-}
-}
-@media (max-width: 700px) {
-.goal-dialog-actions button {
-min-height: var(--tap);
 }
 }
 .goals-page {
@@ -276,7 +265,7 @@ align-items: stretch;
 display: none;
 }
 
-.goals-head > .small-btn {
+.goals-head > .ui-btn {
 width: 100%;
 }
 

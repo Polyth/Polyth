@@ -15,6 +15,7 @@ import { setOverlay, useStore } from "../../store.ts";
 import { refreshProjects } from "../../init.ts";
 import type { ProjectRegistryState } from "../../projectRegistry.ts";
 import ViewErrorBoundary from "../ViewErrorBoundary.ts";
+import { buttonClassName } from "../ui/buttonClassName.ts";
 import {
   listWorkspaceSurfaces,
   resolveWorkspaceSurface,
@@ -68,11 +69,11 @@ function ProjectEmptyState({ registry }: { registry: ProjectRegistryState }): Re
         createElement("div", { className: "hero-mark" }, "p"),
         createElement("h2", null, tr("workspace.workspacehost.loadingProjects")),
         createElement("p", { className: "hero-sub" }, tr("workspace.workspacehost.checkingSavedProjects")),
-        createElement(
-          "button",
-          { className: "primary-btn hero-open-project", disabled: true },
-          tr("workspace.workspacehost.chooseFolder"),
-        ),
+        createElement("button", {
+          type: "button",
+          className: buttonClassName({ variant: "primary", className: "hero-open-project" }),
+          disabled: true,
+        }, createElement("span", { className: "ui-btn-label" }, tr("workspace.workspacehost.chooseFolder"))),
       ),
     );
   }
@@ -86,14 +87,11 @@ function ProjectEmptyState({ registry }: { registry: ProjectRegistryState }): Re
         createElement("div", { className: "hero-mark" }, "p"),
         createElement("h2", null, tr("workspace.workspacehost.couldNotLoadProjects")),
         createElement("p", { className: "hero-sub" }, tr("workspace.workspacehost.projectListUnavailable")),
-        createElement(
-          "button",
-          {
-            className: "primary-btn hero-retry-projects",
-            onClick: () => { void refreshProjects("manual"); },
-          },
-          tr("common.retry"),
-        ),
+        createElement("button", {
+          type: "button",
+          className: buttonClassName({ variant: "primary", className: "hero-retry-projects" }),
+          onClick: () => { void refreshProjects("manual"); },
+        }, createElement("span", { className: "ui-btn-label" }, tr("common.retry"))),
         createElement("p", { className: "hero-status mono", role: "status" }, registry.error),
       ),
     );
@@ -111,11 +109,11 @@ function ProjectEmptyState({ registry }: { registry: ProjectRegistryState }): Re
         { className: "hero-sub" },
         tr("workspace.workspacehost.openLocalProject"),
       ),
-      createElement(
-        "button",
-        { className: "primary-btn hero-open-project", onClick: () => setOverlay("project-picker") },
-        tr("workspace.workspacehost.chooseFolder"),
-      ),
+      createElement("button", {
+        type: "button",
+        className: buttonClassName({ variant: "primary", className: "hero-open-project" }),
+        onClick: () => setOverlay("project-picker"),
+      }, createElement("span", { className: "ui-btn-label" }, tr("workspace.workspacehost.chooseFolder"))),
     ),
   );
 }

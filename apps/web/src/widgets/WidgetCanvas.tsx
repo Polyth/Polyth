@@ -13,6 +13,7 @@ import SlotHost from "../components/slots/SlotHost.ts";
 import ViewErrorBoundary from "../components/ViewErrorBoundary.ts";
 import { Icon } from "../icons.tsx";
 import { useEscape } from "../useEscape.ts";
+import { CloseIcon, IconButton, TextInput } from "../components/ui/index.ts";
 import { getWidget, useWidgetCatalog, type WidgetDef } from "./catalog.ts";
 import {
   applyWidgetLayoutMutations,
@@ -402,9 +403,9 @@ function WidgetMenu({ widgets, onClose }: { widgets: WidgetDef[]; onClose: () =>
     <aside className="widget-add-panel widget-menu-single" aria-label={tr("widgets.widgetcanvas.addWidgets")}>
       <div className="widget-add-head">
         <strong>{tr("widgets.widgetcanvas.addWidgets")}</strong>
-        <button className="icon-btn" aria-label={tr("widgets.widgetcanvas.closeWidgetMenu")} onClick={onClose}>{tr("widgets.widgetcanvas.message")}</button>
+        <IconButton icon={CloseIcon} size="sm" label={tr("widgets.widgetcanvas.closeWidgetMenu")} onClick={onClose} />
       </div>
-      <input
+      <TextInput
         className="widget-menu-search"
         value={query}
         placeholder={tr("widgets.widgetcanvas.searchWidgets")}

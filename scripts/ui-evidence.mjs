@@ -90,7 +90,7 @@ await shoot({
   height: 844,
   mobile: true,
   act: async (page) => {
-    await page.locator(".composer-model-header .model-trigger, .composer-model-header button").first().click().catch(() => {});
+    await page.locator(".model-picker-trigger").first().click().catch(() => {});
     await page.waitForTimeout(700);
   },
 });

@@ -12,8 +12,16 @@ import { usePaneVisible } from "../../../apps/web/src/workspace/paneVisibility.t
 import { createTerminalEmulator, type TerminalEmulator } from "./terminal/emulator.ts";
 import EmptyState from "../../../apps/web/src/components/EmptyState.tsx";
 import TermPane from "./TermPane.tsx";
-import { Icon } from "../../../apps/web/src/icons.tsx";
 import { tr } from "../../../apps/web/src/i18n/index.ts";
+import {
+  AddIcon,
+  CloseIcon,
+  DeleteIcon,
+  EditIcon,
+  IconButton,
+  SearchIcon,
+  TextInput,
+} from "../../../apps/web/src/components/ui/index.ts";
 
 type ConnectionState = "connecting" | "connected" | "reconnecting" | "disconnected";
 
@@ -321,7 +329,8 @@ export default function TerminalView() {
           {tabs.map((t) => (
             <span key={t.id} className={`term-tab-group ${t.id === tab?.id ? "active" : ""}`}>
               {renaming === t.id ? (
-                <input
+                <TextInput
+                  uiSize="sm"
                   className="term-tab-rename"
                   value={renameVal}
                   autoFocus
@@ -352,38 +361,58 @@ export default function TerminalView() {
                 </button>
               )}
               {renaming !== t.id && (
-                <button
+                <IconButton
+                  icon={EditIcon}
+                  size="sm"
+                  variant="ghost"
                   className="term-tab-rename-action"
                   title={`${tr("common.rename")}: ${t.title}`}
-                  aria-label={`${tr("common.rename")}: ${t.title}`}
+                  label={`${tr("common.rename")}: ${t.title}`}
                   onClick={() => startRename(t)}
-                ><Icon.pencil /></button>
+                />
               )}
-              <button
+              <IconButton
+                icon={CloseIcon}
+                size="sm"
+                variant="ghost"
                 className="term-tab-x"
                 title={tr("terminalview.closeValue", { title: t.title })}
-                aria-label={tr("terminalview.closeValue", { title: t.title })}
+                label={tr("terminalview.closeValue", { title: t.title })}
                 onClick={() => void closeTab(t.id)}
-              ><Icon.close /></button>
+              />
             </span>
           ))}
         </div>
         <span className="term-actions">
           {tab && (
             <>
-              <button
+              <IconButton
+                icon={SearchIcon}
+                size="sm"
+                variant="ghost"
                 title={tr("terminalview.findInTerminalShortcut")}
-                aria-label={tr("terminalview.findInTerminal")}
+                label={tr("terminalview.findInTerminal")}
                 onClick={() => setSearchSignal((n) => n + 1)}
-              ><Icon.search /></button>
-              <button
+              />
+              <IconButton
+                icon={DeleteIcon}
+                size="sm"
+                variant="ghost"
                 title={tr("terminalview.clearTerminalShortcut")}
-                aria-label={tr("terminalview.clearTerminal")}
+                label={tr("terminalview.clearTerminal")}
                 onClick={clearActive}
-              ><Icon.trash /></button>
+              />
             </>
           )}
-          <button className="term-new" title={tr("terminalview.newTerminal")} aria-label={tr("terminalview.newTerminal")} onClick={() => void spawn()} disabled={!projectId}><Icon.plus /></button>
+          <IconButton
+            icon={AddIcon}
+            size="sm"
+            variant="ghost"
+            className="term-new"
+            label={tr("terminalview.newTerminal")}
+            onClick={() => void spawn()}
+            disabled={!projectId}
+          />
         </span>
       </div>
 

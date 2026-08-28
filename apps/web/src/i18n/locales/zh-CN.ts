@@ -1744,6 +1744,7 @@ export const zhCN: AppMessages = {
   "sidebar.filter": "筛选",
   "sidebar.filterSessions": "筛选会话",
   "sidebar.importSessions": "导入会话…",
+  "sidebar.listOptions": "排序与筛选",
   "sidebar.loadingProjects": "正在加载项目…",
   "sidebar.localServer": "本地服务器",
   "sidebar.message": "×",

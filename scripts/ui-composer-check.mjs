@@ -26,67 +26,67 @@ async function ctxPage(width, height, mobile) {
     if (!pid) return;
     const id = decodeURIComponent(pid);
     localStorage.setItem(`polyth.projectSetup.v1.${id}`, "completed");
-    // Power composer (model/context/agent pickers) only shows outside chat mode.
-    localStorage.setItem(`polyth.workspaceMode.v1.${id}`, "widgets");
   });
   await page.goto(base + path, { waitUntil: "networkidle" }).catch(() => {});
   await page.waitForTimeout(900);
   return { ctx, page };
 }
 
-// --- desktop: context window popover (now ui/Popover) -------------------------
+// --- desktop: model picker responsive overlay ----------------------------------
 {
   const { ctx, page } = await ctxPage(1280, 800, false);
-  const chip = page.locator(".context-window-chip").first();
+  const chip = page.locator(".model-picker-trigger").first();
   if (await chip.count()) {
     await chip.click();
     await page.waitForTimeout(400);
-    const pop = page.locator(".ui-popover.context-window-pop");
+    const pop = page.locator(".model-pop");
     const visible = await pop.isVisible().catch(() => false);
     const box = visible ? await pop.boundingBox() : null;
     const chipBox = await chip.boundingBox();
-    console.log("context-window popover:", { visible, box, chipBox });
-    await page.screenshot({ path: `${outDir}/desktop-context-popover.png` });
+    console.log("model picker popover:", { visible, box, chipBox });
+    await page.screenshot({ path: `${outDir}/desktop-model-picker.png` });
     // Escape closes it
     await page.keyboard.press("Escape");
     await page.waitForTimeout(200);
     console.log("after Escape visible:", await pop.isVisible().catch(() => false));
   } else {
-    console.log("context-window chip not found");
+    console.log("model picker trigger not found");
   }
   await ctx.close();
 }
 
-// --- desktop: add-files icon button geometry ----------------------------------
+// --- desktop: Add menu trigger geometry ----------------------------------------
 {
   const { ctx, page } = await ctxPage(1280, 800, false);
-  const btn = page.locator(".ui-icon-btn.composer-add-files").first();
+  const btn = page.locator(".composer-add-trigger").first();
   if (await btn.count()) {
     const info = await btn.evaluate((el) => ({
       classes: el.className,
       rect: el.getBoundingClientRect().toJSON(),
       color: getComputedStyle(el).color,
     }));
-    console.log("add-files button:", info);
+    console.log("Add menu trigger:", info);
   } else {
-    console.log("add-files ui-icon-btn NOT found");
+    console.log("Add menu trigger not found");
   }
   await page.screenshot({ path: `${outDir}/desktop-composer.png` });
   await ctx.close();
 }
 
-// --- phone 390: context popover + add menu --------------------------------------
+// --- phone 390: responsive model picker -----------------------------------------
 {
   const { ctx, page } = await ctxPage(390, 844, true);
-  const chip = page.locator(".context-window-chip").first();
+  await page.locator("[data-composer-input]").click().catch(() => {});
+  await page.waitForTimeout(200);
+  const chip = page.locator(".model-picker-trigger").first();
   if (await chip.count() && await chip.isVisible()) {
     await chip.click();
     await page.waitForTimeout(400);
-    const pop = page.locator(".ui-popover.context-window-pop");
-    console.log("phone context popover visible:", await pop.isVisible().catch(() => false));
-    await page.screenshot({ path: `${outDir}/phone-context-popover.png` });
+    const overlay = page.locator(".model-sheet, .model-pop");
+    console.log("phone model picker visible:", await overlay.isVisible().catch(() => false));
+    await page.screenshot({ path: `${outDir}/phone-model-picker.png` });
   } else {
-    console.log("phone: context-window chip hidden (expected if phone hides it)");
+    console.log("phone: model picker trigger hidden");
     await page.screenshot({ path: `${outDir}/phone-composer.png` });
   }
   await ctx.close();

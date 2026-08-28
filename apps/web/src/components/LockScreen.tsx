@@ -5,6 +5,7 @@
 import { useEffect, useRef, useState } from "react";
 import { api } from "@polyth/session/web-api";
 import { tr } from "../i18n/index.ts";
+import { Button, TextInput } from "./ui/index.ts";
 
 export default function LockScreen({ onUnlocked }: { onUnlocked: () => void }) {
   const [password, setPassword] = useState("");
@@ -60,7 +61,7 @@ export default function LockScreen({ onUnlocked }: { onUnlocked: () => void }) {
         <span className="welcome-mark">{tr("lockscreen.p")}</span>
         <h1>{tr("lockscreen.polythIsLocked")}</h1>
         <p className="lock-hint">{tr("lockscreen.enterTheUiPasswordToContinue")}</p>
-        <input
+        <TextInput
           ref={inputRef}
           type="password"
           className="lock-input"
@@ -76,9 +77,9 @@ export default function LockScreen({ onUnlocked }: { onUnlocked: () => void }) {
             {error}{locked && ` Try again in ${secondsLeft}s.`}
           </p>
         )}
-        <button className="primary-btn lock-submit" type="submit" disabled={locked || busy || !password}>
+        <Button variant="primary" className="lock-submit" type="submit" busy={busy} disabled={locked || !password}>
           {busy ? tr("lockscreen.checking") : locked ? tr("lockscreen.lockedValueS", { secondsLeft: secondsLeft }) : tr("lockscreen.unlock")}
-        </button>
+        </Button>
       </form>
     </div>
   );

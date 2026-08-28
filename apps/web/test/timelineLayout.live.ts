@@ -881,7 +881,7 @@ test("zoom200 dynamic: disjoint composer controls, reachable strip, 120px floor 
 
   // --- composer bar geometry -------------------------------------------------
   const measureBar = () => page.evaluate(() => {
-    const bar = document.querySelector<HTMLElement>(".composer-bar")!;
+    const bar = document.querySelector<HTMLElement>(".composer-rail")!;
     const barRect = bar.getBoundingClientRect();
     const controls = Array.from(bar.querySelectorAll<HTMLElement>("button, select"))
       .flatMap((n) => {
@@ -906,7 +906,7 @@ test("zoom200 dynamic: disjoint composer controls, reachable strip, 120px floor 
       const g = document.querySelector(sel)?.getBoundingClientRect();
       return g ? { top: g.top, bottom: g.bottom, left: g.left, right: g.right } : null;
     };
-    const selectors = groupRect(".composer-selectors");
+    const selectors = groupRect(".composer-config");
     const actions = groupRect(".composer-actions");
     // Center hits for controls whose center is inside the bar's visible clip
     // (the strip scrolls; scrolled-out controls are reached by scrolling it).
@@ -936,7 +936,7 @@ test("zoom200 dynamic: disjoint composer controls, reachable strip, 120px floor 
   const settled = await measureBar();
   assert.ok(settled.controls >= 6, `expected the full control set, found ${settled.controls}`);
   assert.deepEqual(settled.overlaps, [], "composer controls intersect at 200%");
-  assert.equal(settled.groupsIntersect, false, "selector and action groups share paint area");
+  assert.equal(settled.groupsIntersect, false, "config and action groups share paint area");
   assert.deepEqual(settled.centerMisses, [], "visible composer control centers are covered");
 
   // Every control stays reachable through the internal horizontal scroll:
@@ -944,7 +944,7 @@ test("zoom200 dynamic: disjoint composer controls, reachable strip, 120px floor 
   // are visible and their centers hit themselves.
   if (settled.scrollable) {
     await page.evaluate(() => {
-      const bar = document.querySelector<HTMLElement>(".composer-bar")!;
+      const bar = document.querySelector<HTMLElement>(".composer-rail")!;
       bar.scrollLeft = bar.scrollWidth;
     });
     await page.waitForTimeout(100);
@@ -952,7 +952,7 @@ test("zoom200 dynamic: disjoint composer controls, reachable strip, 120px floor 
     assert.deepEqual(scrolled.overlaps, [], "composer controls intersect after strip scroll");
     assert.deepEqual(scrolled.centerMisses, [], "scrolled-in composer control centers are covered");
     const sendVisible = await page.evaluate(() => {
-      const bar = document.querySelector<HTMLElement>(".composer-bar")!;
+      const bar = document.querySelector<HTMLElement>(".composer-rail")!;
       const send = bar.querySelector<HTMLElement>(".send, .stop");
       if (!send) return false;
       const r = send.getBoundingClientRect();
@@ -962,7 +962,7 @@ test("zoom200 dynamic: disjoint composer controls, reachable strip, 120px floor 
     });
     assert.ok(sendVisible, "Send is not reachable at the end of the strip");
     await page.evaluate(() => {
-      const bar = document.querySelector<HTMLElement>(".composer-bar")!;
+      const bar = document.querySelector<HTMLElement>(".composer-rail")!;
       bar.scrollLeft = 0;
     });
   }

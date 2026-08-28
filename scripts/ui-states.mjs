@@ -69,7 +69,7 @@ const shot = (page, name) => page.screenshot({ path: `${outDir}/${label}-${name}
   const { ctx, page } = await ctxPage(390, 844, true);
   await page.locator("[data-composer-input]").click().catch(() => {});
   await page.waitForTimeout(500);
-  await page.locator(".composer-model-header .model-picker-trigger, .composer-model-header button").first().click().catch(() => {});
+  await page.locator(".model-picker-trigger").first().click().catch(() => {});
   await page.waitForTimeout(700);
   await shot(page, "phone-model-picker");
   await ctx.close();
@@ -80,7 +80,7 @@ const shot = (page, name) => page.screenshot({ path: `${outDir}/${label}-${name}
   const { ctx, page } = await ctxPage(390, 844, true);
   await page.locator("[data-composer-input]").click().catch(() => {});
   await page.waitForTimeout(500);
-  await page.locator(".composer-agent-badge button, .composer-agent-badge .picker-chip").first().click().catch(() => {});
+  await page.locator(".composer-agent-chip .picker-chip").first().click().catch(() => {});
   await page.waitForTimeout(700);
   await shot(page, "phone-agent-picker");
   await ctx.close();
@@ -89,7 +89,7 @@ const shot = (page, name) => page.screenshot({ path: `${outDir}/${label}-${name}
 // --- desktop model picker ------------------------------------------------------
 {
   const { ctx, page } = await ctxPage(1280, 800, false);
-  await page.locator(".composer-model-header .model-picker-trigger, .composer-model-header button").first().click().catch(() => {});
+  await page.locator(".model-picker-trigger").first().click().catch(() => {});
   await page.waitForTimeout(700);
   await shot(page, "desktop-model-picker");
   await ctx.close();

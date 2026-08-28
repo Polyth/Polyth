@@ -6,6 +6,7 @@ import { useStore } from "../../../apps/web/src/store.ts";
 import { EmptyState, PageHead } from "../../../apps/web/src/components/settings/parts.tsx";
 import { tr } from "../../../apps/web/src/i18n/index.ts";
 import { commandDescription } from "../../../apps/web/src/utils.ts";
+import { Button, Select, Textarea, TextInput } from "../../../apps/web/src/components/ui/index.ts";
 
 type Scope = "project" | "user";
 const snippetScopeLabel = (scope: Scope): string =>
@@ -66,14 +67,15 @@ export default function CommandsPage() {
             <span className="tag">{commandScopeLabel(c.scope)}</span>
             {c.scope !== "builtin" && (
               <>
-                <button
-                  className="small-btn"
+                <Button
+                  size="sm"
                   onClick={() => { setCName(c.name); setCDesc(c.description); setCPrompt(c.prompt); setCScope(c.scope as Scope); }}
-                >{tr("common.edit")}</button>
-                <button
-                  className="small-btn danger-btn"
+                >{tr("common.edit")}</Button>
+                <Button
+                  size="sm"
+                  variant="danger"
                   onClick={() => void run(() => api.deleteCommand(projectId, c.scope as Scope, c.name))}
-                >{tr("common.delete")}</button>
+                >{tr("common.delete")}</Button>
               </>
             )}
           </div>
@@ -81,17 +83,22 @@ export default function CommandsPage() {
       ))}
       <div className="set-add-form set-add-col">
         <div className="set-add-form">
-          <input value={cName} placeholder={tr("settings.commandspage.name")} style={{ maxWidth: 140 }} onChange={(e) => setCName(e.target.value)} />
-          <input value={cDesc} placeholder={tr("settings.commandspage.descriptionOptional")} onChange={(e) => setCDesc(e.target.value)} />
-          <select value={cScope} onChange={(e) => setCScope(e.target.value as Scope)}>
-            <option value="project">{tr("settings.commandspage.project")}</option>
-            <option value="user">{tr("settings.commandspage.user")}</option>
-          </select>
+          <TextInput uiSize="sm" value={cName} placeholder={tr("settings.commandspage.name")} onChange={(e) => setCName(e.target.value)} />
+          <TextInput uiSize="sm" value={cDesc} placeholder={tr("settings.commandspage.descriptionOptional")} onChange={(e) => setCDesc(e.target.value)} />
+          <Select
+            label={cScope === "project" ? tr("settings.commandspage.project") : tr("settings.commandspage.user")}
+            value={cScope}
+            options={[
+              { value: "project", label: tr("settings.commandspage.project") },
+              { value: "user", label: tr("settings.commandspage.user") },
+            ]}
+            onChange={(value) => setCScope(value as Scope)}
+          />
         </div>
-        <textarea value={cPrompt} rows={3} placeholder={tr("settings.commandspage.promptUseArgumentsForTheTextAfter")} onChange={(e) => setCPrompt(e.target.value)} />
+        <Textarea value={cPrompt} rows={3} placeholder={tr("settings.commandspage.promptUseArgumentsForTheTextAfter")} onChange={(e) => setCPrompt(e.target.value)} />
         <div className="set-add-form">
-          <button
-            className="small-btn"
+          <Button
+            size="sm"
             disabled={!cName.trim() || !cPrompt.trim()}
             onClick={() => void run(async () => {
               await api.saveCommand(projectId, cScope, {
@@ -101,7 +108,7 @@ export default function CommandsPage() {
               });
               setCName(""); setCDesc(""); setCPrompt("");
             })}
-          >{tr("settings.commandspage.saveCommand")}</button>
+          >{tr("settings.commandspage.saveCommand")}</Button>
         </div>
       </div>
 
@@ -115,29 +122,34 @@ export default function CommandsPage() {
           </div>
           <div className="set-row-control">
             <span className="tag">{snippetScopeLabel(s.scope as Scope)}</span>
-            <button className="small-btn" onClick={() => { setSAlias(s.alias); setSText(s.text); setSScope(s.scope as Scope); }}>{tr("common.edit")}</button>
-            <button className="small-btn danger-btn" onClick={() => void run(() => api.deleteSnippet(projectId, s.scope as Scope, s.alias))}>{tr("common.delete")}</button>
+            <Button size="sm" onClick={() => { setSAlias(s.alias); setSText(s.text); setSScope(s.scope as Scope); }}>{tr("common.edit")}</Button>
+            <Button size="sm" variant="danger" onClick={() => void run(() => api.deleteSnippet(projectId, s.scope as Scope, s.alias))}>{tr("common.delete")}</Button>
           </div>
         </div>
       ))}
       <div className="set-add-form set-add-col">
         <div className="set-add-form">
-          <input value={sAlias} placeholder={tr("settings.commandspage.alias")} style={{ maxWidth: 140 }} onChange={(e) => setSAlias(e.target.value)} />
-          <select value={sScope} onChange={(e) => setSScope(e.target.value as Scope)}>
-            <option value="project">{tr("settings.commandspage.projectSnippet")}</option>
-            <option value="user">{tr("settings.commandspage.generalSnippet")}</option>
-          </select>
+          <TextInput uiSize="sm" value={sAlias} placeholder={tr("settings.commandspage.alias")} onChange={(e) => setSAlias(e.target.value)} />
+          <Select
+            label={snippetScopeLabel(sScope)}
+            value={sScope}
+            options={[
+              { value: "project", label: tr("settings.commandspage.projectSnippet") },
+              { value: "user", label: tr("settings.commandspage.generalSnippet") },
+            ]}
+            onChange={(value) => setSScope(value as Scope)}
+          />
         </div>
-        <textarea value={sText} rows={2} placeholder={tr("settings.commandspage.snippetText")} onChange={(e) => setSText(e.target.value)} />
+        <Textarea value={sText} rows={2} placeholder={tr("settings.commandspage.snippetText")} onChange={(e) => setSText(e.target.value)} />
         <div className="set-add-form">
-          <button
-            className="small-btn"
+          <Button
+            size="sm"
             disabled={!sAlias.trim() || !sText.trim()}
             onClick={() => void run(async () => {
               await api.saveSnippet(projectId, sScope, { alias: sAlias.trim(), text: sText });
               setSAlias(""); setSText("");
             })}
-          >{tr("settings.commandspage.saveSnippet")}</button>
+          >{tr("settings.commandspage.saveSnippet")}</Button>
         </div>
       </div>
       {error && <div className="form-error">{error}</div>}

@@ -254,8 +254,21 @@ function useResizeFocusHandoff(mode: ShellMode) {
     else if (prev.closest(".railbar")) target = q(".narrow-panel-trigger");
     else if (prev.closest(".narrow-panel-trigger")) target = q(".plugin-strip .strip-btn.active") ?? q(".plugin-strip .strip-btn");
     else if (prev.closest(".panel-sheet")) target = q(".plugin-strip .strip-btn.active") ?? q(".rail-toggle");
-    else if (prev.closest(".header-drawer-btn")) target = q(".sidebar .side-icons .icon-btn");
-    if (target && target.getClientRects().length > 0) target.focus();
+    else if (prev.closest(".header-drawer-btn")) {
+      target = q(".sidebar .sidebar-expand") ?? q(".sidebar .sidebar-search input");
+    }
+    else if (prev.closest(".sidebar")) target = q(".header-drawer-btn");
+    if (!target || target.getClientRects().length === 0) return;
+    target.focus();
+    // The compact drawer removes `inert` in its own effect after this header
+    // effect runs. Retry once after that effect flushes if the first focus was
+    // suppressed by the still-inert ancestor.
+    if (document.activeElement !== target && typeof requestAnimationFrame === "function") {
+      const focusRaf = requestAnimationFrame(() => {
+        if (target?.isConnected && target.getClientRects().length > 0) target.focus();
+      });
+      return () => cancelAnimationFrame(focusRaf);
+    }
   }, [mode]);
 }
 

@@ -14,6 +14,7 @@ import Sheet, { SheetRow } from "./mobile/Sheet.tsx";
 import { useSheetTrigger } from "./mobile/sheetTrigger.ts";
 import { tr } from "../i18n/index.ts";
 import { usePopoverPlacement } from "../usePopoverPlacement.ts";
+import Button from "./ui/Button.tsx";
 
 const MAX_SHOWN = 200;
 
@@ -292,13 +293,12 @@ export default function Picker({
                   <div className="picker-footer-reason">
                     <span>{footerAction.disabledReason}</span>
                     {footerAction.secondaryLabel && footerAction.secondaryRun && (
-                      <button
-                        type="button"
-                        className="small-btn"
+                      <Button
+                        size="sm"
                         onClick={() => { close(); footerAction.secondaryRun!(); }}
                       >
                         {footerAction.secondaryLabel}
-                      </button>
+                      </Button>
                     )}
                   </div>
                 )}

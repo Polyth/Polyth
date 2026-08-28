@@ -1,10 +1,13 @@
-// Permission banner (WP15): redacted server-built preview, risk badge, mode
-// icons, and an explicit "always" scope — session or project, never silently
-// global from this UI.
+// Permission banner (WP15, redesigned P2-W2): an approval is ALWAYS
+// action-required UI. The card never hides its decision buttons behind a
+// disclosure — intent (server-built redacted preview title), target lines,
+// risk, and Allow/Always/Deny are all visible the moment the request lands.
+// Only the machine identity ("via <tool>") is secondary text.
 import { useState } from "react";
 import { replyPermission } from "../../../apps/web/src/init.ts";
 import type { PendingPermission } from "../../../apps/web/src/reduce.ts";
 import { Icon } from "../../../apps/web/src/icons.tsx";
+import Button from "../../../apps/web/src/components/ui/Button.tsx";
 import { tr } from "../../../apps/web/src/i18n/index.ts";
 
 type AlwaysScope = "session" | "project";
@@ -20,63 +23,53 @@ function modeIcon(permission: string) {
 
 function PermissionRow({ p }: { p: PendingPermission }) {
   const [scope, setScope] = useState<AlwaysScope>("session");
-  const [open, setOpen] = useState(false);
   const scopes = p.allowedScopes ?? ["once", "session", "project"];
   const canAlways = scopes.includes("session") || scopes.includes("project");
   const risk = p.preview?.risk;
+  const title = p.preview?.title ?? p.permission;
+  // The preview is server-built and secret-redacted; raw patterns are the
+  // fallback for old events. Either way the target is visible pre-decision.
+  const lines = p.preview !== undefined && p.preview.lines.length > 0 ? p.preview.lines : p.patterns;
   return (
-    <div className={`perm-row permission-execution${open ? " open" : ""}`}>
-      <button type="button" className="permission-execution-summary" aria-expanded={open} onClick={() => setOpen((value) => !value)}>
-        <span className="permission-execution-alert" aria-hidden="true">!</span>
+    <div className="perm-row permission-request">
+      <div className="permission-request-head">
         <span className="permission-mode-icon" aria-hidden="true">{modeIcon(p.permission)}</span>
-        <strong>{p.tool ?? p.permission}</strong>
-        <span className="permission-execution-preview">{p.preview?.title ?? p.patterns[0] ?? p.permission}</span>
-        <span className="permission-execution-status">Approval required</span>
-        <span className="permission-execution-review">Review</span>
-        <span className="permission-execution-mobile-status">Approval<br />Review</span>
-        <span aria-hidden="true">{open ? <Icon.chevronUp /> : <Icon.chevronRight />}</span>
-      </button>
-      {open && (
-        <div className="permission-execution-body">
-          <div className="perm-desc">
-            <strong>{p.preview?.title ?? p.permission}</strong>
-            {!p.preview && p.tool ? tr("permissionbanner.viaValue", { tool: p.tool }) : ""}
-            {risk && <span className={`permission-risk risk-${risk}`}>{risk} {tr("permissionbanner.risk")}</span>}
-          </div>
-          {p.preview && p.preview.lines.length > 0 ? (
-            <div className="permission-preview">
-              {p.preview.lines.map((line, i) => (
-                <code key={i}>{line}</code>
-              ))}
-            </div>
-          ) : (
-            p.patterns.length > 0 && (
-              <div className="perm-patterns">
-                {p.patterns.map((pat) => (
-                  <code key={pat}>{pat}</code>
-                ))}
-              </div>
-            )
-          )}
-          <div className="perm-actions">
-            <button onClick={() => replyPermission(p.requestId, "once")}>{tr("permissionbanner.allowOnce")}</button>
-            {canAlways && (
-              <span className="perm-always">
-                <button onClick={() => replyPermission(p.requestId, "always", scope)}>{tr("permissionbanner.always")}</button>
-                <select
-                  aria-label={tr("permissionbanner.alwaysScope")}
-                  value={scope}
-                  onChange={(e) => setScope(e.target.value === "project" ? "project" : "session")}
-                >
-                  {scopes.includes("session") && <option value="session">{tr("permissionbanner.thisSession")}</option>}
-                  {scopes.includes("project") && <option value="project">{tr("permissionbanner.thisProject")}</option>}
-                </select>
-              </span>
-            )}
-            <button className="danger" onClick={() => replyPermission(p.requestId, "reject")}>{tr("permissionbanner.deny")}</button>
-          </div>
+        <strong className="permission-request-title">{title}</strong>
+        {p.tool !== undefined && p.tool !== title && (
+          <span className="permission-request-tool">{tr("permissionbanner.viaValue", { tool: p.tool })}</span>
+        )}
+        {risk !== undefined && <span className={`permission-risk risk-${risk}`}>{risk} {tr("permissionbanner.risk")}</span>}
+      </div>
+      {lines.length > 0 && (
+        <div className="permission-preview">
+          {lines.map((line, index) => (
+            <code key={index}>{line}</code>
+          ))}
         </div>
       )}
+      <div className="perm-actions">
+        <Button variant="primary" className="permission-allow" onClick={() => replyPermission(p.requestId, "once")}>
+          {tr("permissionbanner.allowOnce")}
+        </Button>
+        {canAlways && (
+          <span className="perm-always">
+            <Button variant="quiet" onClick={() => replyPermission(p.requestId, "always", scope)}>
+              {tr("permissionbanner.always")}
+            </Button>
+            <select
+              aria-label={tr("permissionbanner.alwaysScope")}
+              value={scope}
+              onChange={(e) => setScope(e.target.value === "project" ? "project" : "session")}
+            >
+              {scopes.includes("session") && <option value="session">{tr("permissionbanner.thisSession")}</option>}
+              {scopes.includes("project") && <option value="project">{tr("permissionbanner.thisProject")}</option>}
+            </select>
+          </span>
+        )}
+        <Button variant="danger" className="permission-deny" onClick={() => replyPermission(p.requestId, "reject")}>
+          {tr("permissionbanner.deny")}
+        </Button>
+      </div>
     </div>
   );
 }
@@ -90,7 +83,10 @@ export default function PermissionBanner({ permissions }: { permissions: Pending
       aria-live="assertive"
       aria-relevant="additions text"
     >
-      <div className="perm-title sr-only">{tr("permissionbanner.permissionRequested")}</div>
+      <div className="perm-title">
+        <span className="permission-alert-mark" aria-hidden="true">!</span>
+        {tr("permissionbanner.permissionRequested")}
+      </div>
       {permissions.map((p) => (
         <PermissionRow key={p.requestId} p={p} />
       ))}

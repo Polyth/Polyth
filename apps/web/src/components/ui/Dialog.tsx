@@ -22,6 +22,7 @@ export interface DialogProps {
   /** Hide the visible header when the content owns its heading. */
   hideHeader?: boolean;
   resolveRestoreFocus?: A11yDialogProps["resolveRestoreFocus"];
+  ariaDescribedBy?: string;
 }
 
 export default function Dialog({
@@ -34,6 +35,7 @@ export default function Dialog({
   initialFocus,
   hideHeader = false,
   resolveRestoreFocus,
+  ariaDescribedBy,
 }: DialogProps) {
   return (
     <A11yDialog
@@ -43,6 +45,7 @@ export default function Dialog({
       className={`ui-dialog${size === "sm" ? " ui-dialog--sm" : ""}${className ? ` ${className}` : ""}`}
       {...(initialFocus !== undefined ? { initialFocus } : {})}
       {...(resolveRestoreFocus !== undefined ? { resolveRestoreFocus } : {})}
+      {...(ariaDescribedBy !== undefined ? { ariaDescribedBy } : {})}
     >
       {!hideHeader && (
         <header className="ui-dialog-head">

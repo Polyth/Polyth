@@ -21,7 +21,12 @@ test("sidebar uses contextual tree actions and no permanent footer", async () =>
   assert.match(sidebar, /className="sidebar-drawer-identity"/);
   assert.match(sidebar, /project\?\.name \|\| project\?\.path \|\| tr\("header\.polyth"\)/);
   assert.match(sidebar, /className="drawer-close"/);
-  assert.match(sidebar, /className="sidebar-list-controls"/);
+  // Sort and filter merged into one service-bar menu; the dedicated
+  // list-controls row is gone (P2-W1).
+  assert.doesNotMatch(sidebar, /className="sidebar-list-controls"/);
+  assert.match(sidebar, /tr\("sidebar\.listOptions"\)/);
+  assert.match(sidebar, /kind: "radio",\s*checked: sort === "recent"/);
+  assert.match(sidebar, /kind: "checkbox",\s*checked: attentionOnly/);
   assert.match(sidebar, /tr\("sidebar\.clearSessionSearch"\)/);
   assert.match(sidebar, /tr\("sidebar\.serverConnectionValue"/);
   assert.match(sidebar, /tr\("sidebar\.reconnect"\)/);
@@ -43,8 +48,8 @@ test("sidebar uses contextual tree actions and no permanent footer", async () =>
   assert.match(styles, /\.session-btn::before\s*\{[\s\S]*?border-radius:\s*calc\(8px \* var\(--corner-radius-scale\)\)/);
   assert.match(styles, /\.sidebar-drawer-header\s*\{[\s\S]*?var\(--safe-top\)/,
     "the compact drawer has a safe-area-aware identity bar");
-  assert.match(styles, /\.sidebar \.project-card-shell\s*\{\s*grid-template-columns:\s*minmax\(0, 1fr\) repeat\(3, var\(--tap\)\)/,
-    "touch-sized project actions reserve explicit compact-drawer tracks");
+  assert.match(styles, /\.sidebar \.project-new-session,\s*\.sidebar \.project-menu-btn\s*\{\s*width:\s*var\(--tap\);\s*height:\s*var\(--tap\);/,
+    "compact-drawer project actions grow to full touch size");
   assert.doesNotMatch(styles, /\.project-card\.active::before/,
     "the active project does not receive a competing row glow");
 });
@@ -62,8 +67,9 @@ test("header and composer controls are configurable and purpose-specific", async
   assert.doesNotMatch(header, /const rest = /);
   assert.doesNotMatch(header, /visibleIds|rest\.length > 0/);
   assert.doesNotMatch(composer, /Modalities:/);
-  // The upload chip is a ui/IconButton; `label` is its mandatory accessible name.
-  assert.match(composer, /label=\{tr\("composer\.addFiles"\)\}/);
+  // P2-W3A: the Add menu owns Upload on every layout; the composer wires it
+  // to the shared hidden file input.
+  assert.match(composer, /onUpload=\{\(\) => fileInputRef\.current\?\.click\(\)\}/);
   assert.doesNotMatch(widgets, /Session header stats|Response hover actions|Technical menu/);
   assert.match(widgets, /tr\("settings\.widgetspage\.responseActions"\)/);
   assert.match(widgets, /tr\("settings\.widgetspage\.whereButtonsAppear"\)/);

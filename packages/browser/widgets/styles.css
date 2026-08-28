@@ -16,11 +16,8 @@ flex: 1; min-width: 0; min-height: 0; background: var(--sunken); display: flex; 
 .inspector-tabs {
 display: flex; gap: 2px; padding: 6px; border-bottom: 1px solid var(--border-soft);
 }
-.inspector-tabs .tab {
-flex: 1; background: transparent; border: none; border-radius: var(--radius-sm); padding: 6px 4px; color: var(--muted);
-}
-.inspector-tabs .tab.active {
-color: var(--text); background: var(--accent-wash); box-shadow: inset 0 0 0 1px var(--accent-line);
+.inspector-tabs .ui-tab {
+flex: 1;
 }
 .inspector-body {
 padding: 10px 12px; font-family: var(--mono); font-size: 12px; overflow-y: auto;
@@ -56,12 +53,9 @@ border-color: transparent; background: transparent;
 .browser-icon-btn svg {
 width: 14px; height: 14px;
 }
-.browser-forward svg {
-transform: rotate(180deg);
-}
 .browser-address {
 flex: 1; min-width: 96px; height: 32px; display: flex; align-items: center;
-  border: 1px solid var(--border); border-radius: calc(9px * var(--corner-radius-scale));
+  border: 1px solid var(--border); border-radius: var(--radius-control);
   background: var(--input-bg); box-shadow: inset 0 1px 1px rgb(0 0 0 / .035);
 }
 .browser-address:focus-within {
@@ -99,12 +93,11 @@ width: 100%; min-width: 0; display: flex; align-items: center; gap: 4px;
 .browser-tools-row > * {
 flex: none;
 }
-.browser-tools-row select {
-height: 28px; max-width: 180px; padding: 3px 24px 3px 7px;
-  border-color: var(--border-soft); background-color: var(--elevated); font-size: 11px;
+.browser-tools-row .picker {
+max-width: 180px;
 }
-.browser-tools-row select:disabled {
-opacity: .5; cursor: default;
+.browser-tools-row .picker-chip {
+width: 100%;
 }
 .browser-device {
 width: 156px;
@@ -116,26 +109,11 @@ width: 112px;
 width: 1px; height: 18px; margin-inline: 2px; background: var(--border-soft);
 }
 .browser-tool-btn {
-min-height: 28px; display: inline-flex; align-items: center; gap: 5px; padding: 3px 8px;
-  border: 1px solid transparent; border-radius: var(--radius-sm);
-  background: transparent; color: var(--muted); font-size: 11px; white-space: nowrap;
-}
-.browser-tool-btn svg {
-width: 14px; height: 14px; flex: none;
-}
-.browser-tool-btn:hover:not(:disabled) {
-color: var(--text); border-color: var(--border); background: var(--elevated);
+flex: none;
 }
 .browser-tool-btn.active,
 .browser-tool-btn[aria-pressed="true"] {
 color: var(--accent); border-color: var(--accent-line); background: var(--accent-wash);
-}
-.browser-tool-btn.danger-btn {
-color: var(--red);
-}
-.browser-tool-btn.danger-btn:hover:not(:disabled) {
-color: var(--red); border-color: color-mix(in srgb, var(--red) 35%, var(--border));
-  background: var(--red-wash);
 }
 .browser-spinner {
 width: 13px; height: 13px; display: inline-block; flex: none;
@@ -304,8 +282,8 @@ width: 360px; min-width: 320px; min-height: 0; overflow: hidden;
 .browser-inspector .inspector-tabs {
 flex: none; padding: 6px 8px;
 }
-.browser-inspector .inspector-tabs .tab {
-min-height: 30px; font-size: 11px;
+.browser-inspector .inspector-tabs .ui-tab {
+flex: 1;
 }
 .browser-inspector .inspector-body {
 min-height: 0; padding: 8px 10px 12px;
@@ -373,6 +351,9 @@ margin: 8px 0 0; padding: 9px; max-height: 55vh; overflow: auto;
 .browser-confirm-dialog {
 overflow: hidden;
 }
+.browser-confirm-dialog .ui-dialog-body {
+padding: 0;
+}
 .browser-dialog-body {
 display: grid; grid-template-columns: 40px minmax(0, 1fr); gap: 12px; padding: 18px 18px 20px;
 }
@@ -401,17 +382,11 @@ cursor: pointer; color: var(--text-dim);
 .browser-dialog-body details p {
 margin-top: 6px; padding: 8px; border-radius: var(--radius-sm); background: var(--sunken); font: 10.5px/1.45 var(--mono);
 }
-.browser-confirm-dialog .dialog-foot {
+.browser-confirm-dialog .ui-dialog-foot {
 gap: 8px;
 }
 .browser-dialog-note {
 color: var(--muted); font-size: 10.5px;
-}
-.browser-close-confirm {
-color: #fff; border-color: var(--red); background: var(--red); font-weight: 700;
-}
-.browser-close-confirm:hover:not(:disabled) {
-color: #fff; border-color: var(--red); background: color-mix(in srgb, var(--red) 88%, #000);
 }
 @container browser-preview (max-width: 720px) {
 .preview-body {
@@ -453,7 +428,7 @@ display: grid; grid-template-columns: repeat(6, minmax(0, 1fr));
     gap: 4px; overflow: visible; padding-bottom: 1px;
 }
 
-.browser-tools-row select {
+.browser-tools-row .picker {
 width: auto; max-width: none;
 }
 
@@ -502,7 +477,7 @@ grid-template-columns: minmax(0, 1fr) auto;
 grid-column: 1 / -1;
 }
 
-.browser-annotation-row .primary-btn {
+.browser-annotation-row .ui-btn--primary {
 justify-self: stretch;
 }
 
@@ -527,7 +502,7 @@ height: 42px; font-size: 12px;
 width: 44px; height: 44px; min-width: 44px;
 }
 
-.browser-tools-row select,
+.browser-tools-row .picker-chip,
 .browser-tool-btn {
 min-height: 44px;
 }
@@ -562,16 +537,16 @@ flex-direction: column; gap: 1px; padding: 3px 2px; font-size: 9px; line-height:
 display: block; width: 100%; overflow: hidden; text-overflow: ellipsis;
 }
 
-.browser-confirm-dialog .dialog-foot {
+.browser-confirm-dialog .ui-dialog-foot {
 display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px;
 }
 
-.browser-confirm-dialog .dialog-foot .header-spacer,
+.browser-confirm-dialog .ui-dialog-foot .header-spacer,
 .browser-dialog-note {
 display: none;
 }
 
-.browser-confirm-dialog .dialog-foot button {
+.browser-confirm-dialog .ui-dialog-foot button {
 width: 100%; min-height: 44px;
 }
 

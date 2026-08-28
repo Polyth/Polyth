@@ -12,6 +12,9 @@ const dom = new Window();
 Object.assign(globalThis, {
   window: dom as unknown as typeof globalThis & Window,
   document: dom.document as unknown as Document,
+  requestAnimationFrame: (callback: FrameRequestCallback) =>
+    setTimeout(() => callback(Date.now()), 0) as unknown as number,
+  cancelAnimationFrame: (id: number) => clearTimeout(id),
 });
 Object.defineProperty(globalThis, "navigator", { value: dom.navigator, configurable: true });
 Object.defineProperty(globalThis, "localStorage", { value: dom.localStorage, configurable: true });
@@ -109,7 +112,10 @@ test("settings Sessions page renders defaults and never lists sessions", async (
     assert.doesNotMatch(text, /Fix the flaky test|Ship the release|Other project session/);
     assert.equal(container.querySelectorAll(".model-picker").length, 3);
     assert.equal(container.querySelectorAll(".model-picker-trigger").length, 3);
-    const agentOptions = [...container.querySelectorAll<HTMLOptionElement>('select[aria-label="Default Agent"] option')]
+    const agentPicker = container.querySelector<HTMLButtonElement>('button[aria-label="Default Agent"]');
+    assert.ok(agentPicker);
+    await act(async () => { agentPicker.click(); });
+    const agentOptions = [...container.querySelectorAll<HTMLElement>('[role="option"] .palette-label')]
       .map((option) => option.textContent);
     assert.deepEqual(agentOptions, ["OpenCode agent default", "review", "plan"]);
 

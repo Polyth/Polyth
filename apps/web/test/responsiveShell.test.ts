@@ -164,7 +164,7 @@ test("modal surfaces share the Dialog focus contract (no copied traps)", async (
   );
   assert.match(
     css,
-    /\.panel-sheet-backdrop\s*\{[^}]*z-index:\s*119[^}]*\}[\s\S]*?\.sheet-backdrop\s*\{[^}]*z-index:\s*220/s,
+    /\.panel-sheet-backdrop\s*\{[^}]*z-index:\s*119[^}]*\}[\s\S]*?\.sheet-backdrop\s*\{[^}]*z-index:\s*var\(--z-overlay\)/s,
     "the panel remains above its own backdrop while shared sheets stay topmost",
   );
   assert.ok(rail.includes("export function NarrowPanelTrigger"), "panel trigger exported for the header");
@@ -186,7 +186,7 @@ test("drawer opens existing sessions but new chat defers session creation", asyn
 test("composer bar exposes the two-tier semantic groups without forking send", async () => {
   const composer = await read("../src/components/Composer.tsx");
   const surfaces = await read("../src/components/workspace/builtinSurfaces.tsx");
-  for (const cls of ["composer-selectors", "composer-extensions", "composer-actions", "composer-primary"]) {
+  for (const cls of ["composer-rail", "composer-config", "composer-extensions", "composer-actions", "composer-primary"]) {
     assert.ok(composer.includes(cls), `composer bar renders .${cls}`);
   }
   assert.equal(composer.match(/const send = useCallback/g)?.length, 1, "exactly one send() path");
@@ -200,7 +200,9 @@ test("composer bar exposes the two-tier semantic groups without forking send", a
   assert.ok(!composer.includes("composer-hero"), "the composer has no fresh-session visual fork");
   assert.ok(!surfaces.includes('variant="hero"'), "the session surface does not request a fresh-session variant");
   const css = await read("../src/styles.css");
-  assert.ok(css.includes("repeat(2, minmax(0, 1fr))"), "phone selector grid contract");
+  // P2-W3A rail contract: config chips shrink and truncate; Send never leaves.
+  assert.match(css, /\.composer-config \{[^}]*flex: 0 1 auto/s, "config chips yield space first");
+  assert.match(css, /\.composer-actions \{[^}]*flex: none/s, "the action group never collapses");
   assert.ok(!css.includes(".composer-hero"), "fresh and existing sessions share one composer selector");
 });
 
@@ -215,31 +217,34 @@ test("composer active-run controls and mobile actions stay direct", async () => 
   assert.ok(composer.includes("composer-stop-primary"), "active sends become a primary stop control");
   assert.ok(timeline.includes('className="msg-actions"'), "message actions remain inline");
   assert.match(css, /Phone quick actions are immediately available[\s\S]*?\.focus-conversation \.msg \.msg-actions\s*\{[^}]*display:\s*flex/);
-  assert.ok(goal.includes('<Dialog title={tr("goalstrip.sessionGoal")}'), "goal parameters open in a focused modal");
+  assert.match(goal, /<Dialog\s+title=\{tr\("goalstrip\.sessionGoal"\)\}/, "goal parameters open in a focused modal");
 });
 
 test("Focus uses compact mobile composer controls without editor chrome", async () => {
   const composer = await read("../src/components/Composer.tsx");
   const permissions = await read("../../../packages/permissions/widgets/index.tsx");
   const goals = await read("../../../packages/goals/widgets/index.tsx");
-  assert.ok(composer.includes("simpleMode && !widgetMode"), "light controls are shared by fresh and existing chats");
+  assert.ok(
+    composer.includes('composer-simple${widgetMode ? "" : " composer-focus-light"}'),
+    "light controls are shared by fresh and existing chats",
+  );
   assert.ok(composer.includes('className="composer-extensions composer-mobile-extensions"'), "Focus exposes slotted mobile actions");
   assert.ok(permissions.includes('"permissions.auto-approve-composer-action"'), "auto-approve is a placeable composer action");
   assert.ok(goals.includes('"session.goal-composer-action"'), "goals are a placeable composer action");
-  // UX-MOBILE-01 §17/§19: phones expose ONE `+` (the Add menu owns Upload);
-  // wider layouts keep the direct upload chip beside it (a ui/IconButton whose
-  // `label` prop is the mandatory accessible name).
-  assert.ok(composer.includes('label={tr("composer.addFiles")}'), "wider layouts keep a direct upload control");
+  // P2-W3A: one `+` on every layout — the Add menu owns Upload; there is no
+  // second standalone upload chip anywhere.
+  assert.ok(composer.includes("<ComposerAddMenu"), "the Add menu is the single plus control");
   assert.ok(
-    composer.includes('trigger={phoneLayout ? "add" : "tools"}'),
-    "the phone add menu is the single plus control",
+    composer.includes("onUpload={() => fileInputRef.current?.click()}"),
+    "the Add menu drives the shared file input",
   );
+  assert.ok(!composer.includes('label={tr("composer.addFiles")}'), "no separate upload chip remains");
   assert.ok(!composer.includes("<Icon.focus />"), "Focus removes the focused-editor header action");
   assert.ok(permissions.includes("<ShieldIcon />"), "Focus exposes the auto-approve shield");
   assert.ok(goals.includes("<TargetIcon />"), "Focus exposes the goals target");
   assert.ok(composer.includes("<Icon.send />"), "Focus uses a paper-plane send icon");
   const css = await read("../src/styles.css");
-  assert.ok(css.includes(".composer-focus-light .chip-k { display: none; }"), "technical picker keys are hidden");
+  assert.ok(css.includes(".composer-agent-chip .chip-k { display: none; }"), "technical picker keys are hidden");
   assert.ok(css.includes('body[data-dictate="false"] .mic-btn'), "the microphone can be hidden without suppressing other slot items");
 });
 
@@ -324,7 +329,7 @@ test("mobile Settings swaps a vertical page list for content with a back action"
   assert.ok(settings.includes('window.matchMedia("(max-width: 700px)")'), "Settings tracks the mobile breakpoint");
   assert.ok(settings.includes('className="settings-mobile-back"'), "the page header renders a mobile back button");
   assert.ok(settings.includes('className="settings-pane-head-bar"'), "mobile back and close actions share a header bar");
-  assert.doesNotMatch(mobileHeader, /current\.label/, "the mobile shell header leaves the page title to PageHead");
+  assert.match(mobileHeader, /current\.label/, "the mobile detail header identifies the selected settings page");
   assert.match(mobile, /\.settings-nav-list\s*\{[^}]*flex-direction:\s*column/);
   assert.match(mobile, /\.settings-nav-list\s*\{[^}]*overflow-y:\s*auto/);
   assert.match(mobile, /\.settings-mobile-nav \.settings-pane\s*\{[^}]*display:\s*none/);
@@ -342,7 +347,10 @@ test("mobile Settings swaps a vertical page list for content with a back action"
 });
 
 test("package and plugin marketplaces use responsive vertical tiles", async () => {
-  const css = await read("../src/styles.css");
+  const css = [
+    await read("../src/styles.css"),
+    await read("../../../packages/plugins/widgets/styles.css"),
+  ].join("\n");
   assert.match(
     css,
     /\.settings-pane-body \.package-grid\s*\{[^}]*grid-template-columns:\s*repeat\(2, minmax\(0, 1fr\)\)\s*!important[^}]*gap:\s*10px/,
@@ -376,9 +384,11 @@ test("shared menu, destructive, failed-turn, and header-action contracts stay wi
   const sessions = await read("../src/components/sidebar/SessionList.tsx");
   const plugins = await read("../../../packages/plugins/widgets/PluginsPage.tsx");
   const css = await read("../src/styles.css");
-  assert.ok(sidebar.includes("useDismissibleMenu"), "project actions consume the shared menu contract");
-  // The user menu renders through the ui/Menu primitive, which itself owns the
-  // shared dismissible-menu semantics — one contract, consumed once.
+  // Project and session menus render through the ui/Menu primitive, which
+  // itself owns the shared dismissible-menu semantics — one contract,
+  // consumed once.
+  assert.ok(sidebar.includes("<Menu"), "project actions consume the shared menu primitive");
+  assert.ok(!sidebar.includes("useDismissibleMenu"), "the sidebar no longer hand-rolls menu semantics");
   assert.ok(header.includes("<Menu"), "the user menu consumes the shared menu primitive");
   const menuPrimitive = await read("../src/components/ui/Menu.tsx");
   assert.ok(menuPrimitive.includes("useDismissibleMenu"), "the menu primitive consumes the shared menu contract");

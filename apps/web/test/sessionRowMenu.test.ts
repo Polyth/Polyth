@@ -1,10 +1,12 @@
-// Findings 4+5 (UX-SHELL-CONSOLIDATION-02), mounted through a real React
-// root: right-clicking a session row opens that row's action menu (the same
-// menu available through right-click, long-press, and keyboard) with
-// delete/archive/pin items, correct ARIA
-// menu roles, and the keyboard contract (focus lands in the menu, arrows
-// cycle, Escape closes back to the button). Every permanent deletion confirms,
-// with additional activity context for a running session.
+// Session row actions (P2-W1), mounted through a real React root: every row
+// owns one ui/Menu reachable through right-click, long-press, Shift+F10, and
+// a single ellipsis trigger (hover-revealed on fine pointers, persistent on
+// touch). The menu carries delete/archive/pin/labels with correct ARIA menu
+// roles and the keyboard contract (focus lands in the menu, arrows cycle,
+// Escape closes back to the opener). Every permanent deletion confirms, with
+// additional activity context for a running session. Quick archive/delete
+// buttons exist only while a touch swipe is in progress — there is no
+// Shift-hover layer and no duplicated always-on icon set.
 import test from "node:test";
 import assert from "node:assert/strict";
 import { register } from "node:module";
@@ -19,18 +21,30 @@ Object.assign(globalThis, {
 Object.defineProperty(globalThis, "navigator", { value: dom.navigator, configurable: true });
 Object.defineProperty(globalThis, "localStorage", { value: dom.localStorage, configurable: true });
 Object.defineProperty(globalThis, "isSecureContext", { value: true, configurable: true });
+// Menus restore focus through requestAnimationFrame; run it synchronously.
+Object.defineProperty(globalThis, "requestAnimationFrame", {
+  configurable: true,
+  value: (callback: FrameRequestCallback) => { callback(0); return 1; },
+});
+Object.defineProperty(globalThis, "cancelAnimationFrame", { configurable: true, value: () => {} });
+
+// Deterministic shell mode: responsiveShell caches these MediaQueryLists on
+// first use, so the mutable `matches` flags steer wide vs compact per test.
+const media = { compact: false, phone: false };
+const mediaQueryList = (key: "compact" | "phone") => ({
+  get matches() { return media[key]; },
+  media: key,
+  onchange: null,
+  addEventListener() {},
+  removeEventListener() {},
+  addListener() {},
+  removeListener() {},
+  dispatchEvent: () => true,
+});
 Object.defineProperty(dom, "matchMedia", {
   configurable: true,
-  value: (query: string) => ({
-    matches: true,
-    media: query,
-    onchange: null,
-    addEventListener() {},
-    removeEventListener() {},
-    addListener() {},
-    removeListener() {},
-    dispatchEvent: () => true,
-  }),
+  value: (query: string) =>
+    mediaQueryList(query.includes("820") ? "compact" : "phone"),
 });
 let copiedText = "";
 Object.defineProperty(dom.navigator, "clipboard", {
@@ -71,8 +85,11 @@ const session = (over: Partial<SessionProjection>): SessionProjection => ({
 
 const MouseEventCtor = (dom as unknown as { MouseEvent: typeof MouseEvent }).MouseEvent;
 const KeyboardEventCtor = (dom as unknown as { KeyboardEvent: typeof KeyboardEvent }).KeyboardEvent;
-// Window-level dispatch target for global Shift keydown/keyup listeners.
-const windowTarget = dom as unknown as EventTarget;
+
+/** The row menu renders through a ui/Menu portal on document.body. */
+const openMenu = () => document.querySelector<HTMLElement>('[role="menu"]');
+const menuItems = () =>
+  [...document.querySelectorAll<HTMLElement>('[role^="menuitem"]')];
 
 async function mountList() {
   activateProject("p1");
@@ -112,12 +129,12 @@ test("right-click opens the row-scoped menu with delete/archive/pin and menu ARI
     await act(async () => {
       row.dispatchEvent(new MouseEventCtor("contextmenu", { bubbles: true, cancelable: true }));
     });
-    const menu = container.querySelector<HTMLElement>('[role="menu"]');
+    const menu = openMenu();
     assert.ok(menu, "context menu opened");
-    assert.ok(row.classList.contains("menu-open"), "open row is raised above subsequent sidebar rows");
+    assert.ok(row.classList.contains("menu-open"), "open row keeps its trigger revealed");
     // Scoped to the exact row that was right-clicked.
     assert.equal(menu!.getAttribute("aria-label"), "Actions for Idle session");
-    const items = [...menu!.querySelectorAll<HTMLElement>('[role^="menuitem"]')].map((b) => b.textContent?.trim());
+    const items = menuItems().map((b) => b.textContent?.trim());
     for (const expected of ["Rename", "Fork", "Copy session ID", "Pin to top", "Archive", "Delete"]) {
       assert.ok(items.some((t) => t?.startsWith(expected)), `menu offers ${expected} (got: ${items.join(", ")})`);
     }
@@ -131,22 +148,28 @@ test("right-click opens the row-scoped menu with delete/archive/pin and menu ARI
     await act(async () => {
       document.activeElement!.dispatchEvent(new KeyboardEventCtor("keydown", { key: "Escape", bubbles: true, cancelable: true }));
     });
-    assert.equal(container.querySelector('[role="menu"]'), null, "Escape closes the menu");
+    assert.equal(openMenu(), null, "Escape closes the menu");
+    // A context-menu open returns focus to the row itself, not the ellipsis.
     assert.equal(document.activeElement?.getAttribute("aria-label"), "Open Idle session");
   } finally {
     await unmount();
   }
 });
 
-test("the visible session ellipsis opens the same menu and receives returned focus", async () => {
+test("the session ellipsis trigger opens the same menu and receives returned focus", async () => {
   const { container, unmount } = await mountList();
   try {
     const row = rowOf(container, "Idle session");
-    const trigger = row.querySelector<HTMLButtonElement>(".session-menu-btn");
-    assert.ok(trigger, "session actions have a discoverable ellipsis trigger");
+    const trigger = row.querySelector<HTMLButtonElement>(".session-menu-trigger");
+    assert.ok(trigger, "session actions have a single discoverable trigger");
     assert.equal(trigger!.getAttribute("aria-haspopup"), "menu");
+    assert.equal(
+      row.querySelectorAll("button[aria-haspopup]").length,
+      1,
+      "exactly one menu trigger per row — no duplicated tab stop",
+    );
     await act(async () => { trigger!.click(); });
-    assert.ok(row.querySelector('[role="menu"]'), "ellipsis opens the row menu");
+    assert.ok(openMenu(), "the trigger opens the row menu");
     assert.equal(trigger!.getAttribute("aria-expanded"), "true");
 
     await act(async () => {
@@ -154,7 +177,7 @@ test("the visible session ellipsis opens the same menu and receives returned foc
         key: "Escape", bubbles: true, cancelable: true,
       }));
     });
-    assert.equal(row.querySelector('[role="menu"]'), null);
+    assert.equal(openMenu(), null);
     assert.equal(document.activeElement, trigger, "focus returns to the ellipsis opener");
   } finally {
     await unmount();
@@ -162,6 +185,7 @@ test("the visible session ellipsis opens the same menu and receives returned foc
 });
 
 test("Escape closes a session menu inside the real mobile Sidebar, not the drawer", async () => {
+  media.compact = true;
   applyProjectUpsert({ id: "p1", name: "Project one", path: "/workspace", createdAt: Date.now() });
   activateProject("p1");
   setSessions("p1", [session({ id: "s-mobile", title: "Mobile session" })]);
@@ -173,13 +197,13 @@ test("Escape closes a session menu inside the real mobile Sidebar, not the drawe
     await act(async () => { root.render(createElement(Sidebar)); });
     const drawer = container.querySelector<HTMLElement>("#polyth-session-drawer");
     const trigger = container.querySelector<HTMLButtonElement>(
-      '.session-menu-btn[aria-label="Actions for Mobile session"]',
+      '.session-menu-trigger[aria-label="Actions for Mobile session"]',
     );
     assert.ok(drawer?.classList.contains("open"), "real compact Sidebar drawer is open");
-    assert.ok(trigger, "session ellipsis is rendered in the Sidebar");
+    assert.ok(trigger, "session trigger is rendered in the Sidebar");
 
     await act(async () => { trigger!.click(); });
-    assert.ok(container.querySelector('[role="menu"][aria-label="Actions for Mobile session"]'));
+    assert.ok(document.querySelector('[role="menu"][aria-label="Actions for Mobile session"]'));
     await act(async () => {
       document.activeElement!.dispatchEvent(new KeyboardEventCtor("keydown", {
         key: "Escape", bubbles: true, cancelable: true,
@@ -187,16 +211,17 @@ test("Escape closes a session menu inside the real mobile Sidebar, not the drawe
     });
 
     assert.equal(
-      container.querySelector('[role="menu"][aria-label="Actions for Mobile session"]'),
+      document.querySelector('[role="menu"][aria-label="Actions for Mobile session"]'),
       null,
       "Escape closes only the nested menu",
     );
     assert.ok(drawer!.classList.contains("open"), "Sidebar drawer remains open");
-    assert.equal(document.activeElement, trigger, "focus returns to the session ellipsis");
+    assert.equal(document.activeElement, trigger, "focus returns to the session trigger");
   } finally {
     await act(async () => { root.unmount(); });
     container.remove();
     setSidebarOpen(false);
+    media.compact = false;
   }
 });
 
@@ -208,15 +233,14 @@ test("right-click Copy session ID writes the exact row id to the clipboard", asy
     await act(async () => {
       row.dispatchEvent(new MouseEventCtor("contextmenu", { bubbles: true, cancelable: true }));
     });
-    const copy = [...row.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')]
-      .find((button) => button.textContent?.trim() === "Copy session ID");
+    const copy = menuItems().find((button) => button.textContent?.trim() === "Copy session ID");
     assert.ok(copy, "copy action is available in the row context menu");
     await act(async () => {
       copy!.click();
       await new Promise((resolve) => setTimeout(resolve, 0));
     });
     assert.equal(copiedText, "s-idle");
-    assert.equal(row.querySelector('[role="menu"]'), null, "successful copy closes the menu");
+    assert.equal(openMenu(), null, "successful copy closes the menu");
   } finally {
     await unmount();
   }
@@ -249,7 +273,7 @@ test("pinned chats are first across worktrees and their menu offers Unpin", asyn
     await act(async () => {
       pinnedRow.dispatchEvent(new MouseEventCtor("contextmenu", { bubbles: true, cancelable: true }));
     });
-    const items = [...pinnedRow.querySelectorAll<HTMLElement>('[role^="menuitem"]')].map((item) => item.textContent?.trim());
+    const items = menuItems().map((item) => item.textContent?.trim());
     assert.ok(items.includes("Unpin"), `pinned row offers Unpin (got: ${items.join(", ")})`);
     assert.ok(!items.includes("Pin to top"), "pinned row does not offer Pin to top");
   } finally {
@@ -267,14 +291,14 @@ test("every permanent delete confirms; running sessions include activity context
       idleRow.dispatchEvent(new MouseEventCtor("contextmenu", { bubbles: true, cancelable: true }));
     });
     fetchCalls.length = 0;
-    const idleDelete = [...container.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')]
-      .find((b) => b.textContent?.trim() === "Delete");
+    const idleDelete = menuItems().find((b) => b.textContent?.trim() === "Delete");
+    assert.ok(idleDelete, "row menu offers Delete");
     await act(async () => { idleDelete!.click(); });
     const idleDialog = container.querySelector<HTMLElement>('[role="dialog"][aria-label="Delete session"]');
     assert.ok(idleDialog, "idle delete opens the themed confirmation first");
     assert.match(idleDialog.textContent ?? "", /permanently removes the session and its history/i);
     await act(async () => {
-      idleDialog.querySelector<HTMLButtonElement>(".small-btn")!.click();
+      idleDialog.querySelector<HTMLButtonElement>(".ui-btn--quiet")!.click();
     });
     assert.equal(fetchCalls.filter((c) => c.method === "DELETE").length, 0, "declined idle delete changes nothing");
 
@@ -282,8 +306,7 @@ test("every permanent delete confirms; running sessions include activity context
     await act(async () => {
       idleRow.dispatchEvent(new MouseEventCtor("contextmenu", { bubbles: true, cancelable: true }));
     });
-    const idleDelete2 = [...container.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')]
-      .find((b) => b.textContent?.trim() === "Delete");
+    const idleDelete2 = menuItems().find((b) => b.textContent?.trim() === "Delete");
     await act(async () => { idleDelete2!.click(); });
     const idleDialog2 = container.querySelector<HTMLElement>('[role="dialog"][aria-label="Delete session"]');
     assert.ok(idleDialog2);
@@ -310,14 +333,13 @@ test("every permanent delete confirms; running sessions include activity context
       runRow.dispatchEvent(new MouseEventCtor("contextmenu", { bubbles: true, cancelable: true }));
     });
     fetchCalls.length = 0;
-    const runDelete = [...container.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')]
-      .find((b) => b.textContent?.trim() === "Delete");
+    const runDelete = menuItems().find((b) => b.textContent?.trim() === "Delete");
     await act(async () => { runDelete!.click(); });
     const runDialog = container.querySelector<HTMLElement>('[role="dialog"][aria-label="Delete session"]');
     assert.ok(runDialog, "running delete opens the themed confirmation first");
     assert.match(runDialog.textContent ?? "", /still running|permanently/i);
     await act(async () => {
-      runDialog.querySelector<HTMLButtonElement>(".small-btn")!.click();
+      runDialog.querySelector<HTMLButtonElement>(".ui-btn--quiet")!.click();
     });
     assert.equal(fetchCalls.filter((c) => c.method === "DELETE").length, 0, "declined confirm deletes nothing");
 
@@ -325,8 +347,7 @@ test("every permanent delete confirms; running sessions include activity context
     await act(async () => {
       runRow.dispatchEvent(new MouseEventCtor("contextmenu", { bubbles: true, cancelable: true }));
     });
-    const runDelete2 = [...container.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')]
-      .find((b) => b.textContent?.trim() === "Delete");
+    const runDelete2 = menuItems().find((b) => b.textContent?.trim() === "Delete");
     await act(async () => { runDelete2!.click(); });
     const runDialog2 = container.querySelector<HTMLElement>('[role="dialog"][aria-label="Delete session"]');
     assert.ok(runDialog2);
@@ -340,58 +361,28 @@ test("every permanent delete confirms; running sessions include activity context
   }
 });
 
-test("shift-hover quick actions arm in every key/pointer order and stay labeled", async () => {
+test("quick actions are swipe-only; keyboard reaches the same menu via Shift+F10", async () => {
   const { container, unmount } = await mountList();
   try {
     const row = rowOf(container, "Idle session");
-    // Buttons live in the DOM regardless of the modifier (focus reveals them).
-    const archive = row.querySelector('[aria-label="Archive Idle session"]');
-    const del = row.querySelector('[aria-label="Delete Idle session"]');
-    assert.ok(archive && del, "quick actions rendered with per-session labels");
+    // No Shift-hover layer and no resting quick buttons: at rest the row has
+    // exactly two interactive elements — open button and menu trigger.
+    assert.equal(row.querySelector(".session-quick"), null, "quick actions absent at rest");
+    assert.equal(row.getAttribute("data-swipe"), "closed");
+    assert.equal(row.querySelectorAll("button").length, 2, "row = open button + menu trigger");
 
-    // (a) Modifier carried on the pointer event itself. React synthesizes
-    // enter/leave from bubbling mouseover/mouseout, so dispatch those with a
-    // relatedTarget outside the row.
+    // Shift+F10 on the row button opens the row menu (keyboard alternative to
+    // right-click/long-press) and Escape returns focus to the row.
+    const open = row.querySelector<HTMLButtonElement>(".session-btn")!;
     await act(async () => {
-      row.dispatchEvent(new MouseEventCtor("mouseover", { bubbles: true, shiftKey: true, relatedTarget: document.body }));
+      open.dispatchEvent(new KeyboardEventCtor("keydown", { key: "F10", shiftKey: true, bubbles: true, cancelable: true }));
     });
-    assert.ok(row.className.includes("quick-armed"), `row armed on shift-hover (${row.className})`);
+    assert.ok(openMenu(), "Shift+F10 opens the row menu");
     await act(async () => {
-      row.dispatchEvent(new MouseEventCtor("mouseout", { bubbles: true, relatedTarget: document.body }));
+      document.activeElement!.dispatchEvent(new KeyboardEventCtor("keydown", { key: "Escape", bubbles: true, cancelable: true }));
     });
-    assert.ok(!row.className.includes("quick-armed"), "row disarms on leave");
-
-    // (b) Hover first without the modifier, press Shift mid-hover.
-    await act(async () => {
-      row.dispatchEvent(new MouseEventCtor("mouseover", { bubbles: true, relatedTarget: document.body }));
-    });
-    assert.ok(!row.className.includes("quick-armed"), "plain hover stays disarmed");
-    await act(async () => {
-      windowTarget.dispatchEvent(new KeyboardEventCtor("keydown", { key: "Shift" }));
-    });
-    assert.ok(row.className.includes("quick-armed"), "Shift keydown mid-hover arms");
-    await act(async () => {
-      windowTarget.dispatchEvent(new KeyboardEventCtor("keyup", { key: "Shift" }));
-    });
-    assert.ok(!row.className.includes("quick-armed"), "Shift keyup disarms");
-    await act(async () => {
-      row.dispatchEvent(new MouseEventCtor("mouseout", { bubbles: true, relatedTarget: document.body }));
-    });
-
-    // (c) Stage-3 regression: Shift held down BEFORE hovering, while the
-    // pointer events themselves carry no modifier flag (synthesized input).
-    await act(async () => {
-      windowTarget.dispatchEvent(new KeyboardEventCtor("keydown", { key: "Shift" }));
-    });
-    await act(async () => {
-      row.dispatchEvent(new MouseEventCtor("mouseover", { bubbles: true, relatedTarget: document.body }));
-    });
-    assert.ok(row.className.includes("quick-armed"), "Shift-before-hover arms");
-    await act(async () => {
-      windowTarget.dispatchEvent(new KeyboardEventCtor("keyup", { key: "Shift" }));
-      row.dispatchEvent(new MouseEventCtor("mouseout", { bubbles: true, relatedTarget: document.body }));
-    });
-    assert.ok(!row.className.includes("quick-armed"), "release + leave disarms");
+    assert.equal(openMenu(), null);
+    assert.equal(document.activeElement, open, "focus returns to the row button");
   } finally {
     await unmount();
   }

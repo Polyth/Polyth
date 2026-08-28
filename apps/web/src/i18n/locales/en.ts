@@ -1747,6 +1747,7 @@ export const en = {
   "sidebar.filter": "Filter",
   "sidebar.filterSessions": "Filter sessions",
   "sidebar.importSessions": "Import sessions…",
+  "sidebar.listOptions": "Sort and filter",
   "sidebar.loadingProjects": "Loading projects…",
   "sidebar.localServer": "Local server",
   "sidebar.message": "×",

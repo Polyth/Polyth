@@ -6,6 +6,7 @@ import { api, type KnowledgeItemDto, type KnowledgeKindDto, type KnowledgeListIt
 import { useStore } from "../../../apps/web/src/store.ts";
 import { ago } from "../../../apps/web/src/format.ts";
 import { tr } from "../../../apps/web/src/i18n/index.ts";
+import { Button, EmptyState, Select, Tabs, Textarea, TextInput } from "../../../apps/web/src/components/ui/index.ts";
 
 const KINDS: Array<{ id: KnowledgeKindDto | ""; label: string }> = [
   { id: "", label: tr("knowledgepanel.all") },
@@ -47,7 +48,7 @@ export default function KnowledgePanel() {
   }, [projectId, kind, q]);
   useEffect(() => { reload(); }, [reload]);
 
-  if (!projectId) return <div className="rail-empty">{tr("knowledgepanel.openAProjectToKeepNotesPlans")}</div>;
+  if (!projectId) return <EmptyState title={tr("knowledgepanel.openAProjectToKeepNotesPlans")} />;
 
   const run = async (fn: () => Promise<unknown>, doneMsg = "") => {
     try {
@@ -85,19 +86,22 @@ export default function KnowledgePanel() {
     return (
       <div className="knowledge-editor">
         <div className="view-toolbar-row">
-          <select value={editor.kind} onChange={(e) => setEditor({ ...editor, kind: e.target.value as KnowledgeKindDto })}>
-            <option value="note">{tr("knowledgepanel.note")}</option>
-            <option value="spec">{tr("knowledgepanel.spec")}</option>
-            <option value="plan">{tr("knowledgepanel.plan")}</option>
-            <option value="memory">{tr("knowledgepanel.memory")}</option>
-          </select>
+          <Select
+            label={KINDS.find((candidate) => candidate.id === editor.kind)?.label ?? editor.kind}
+            value={editor.kind}
+            options={KINDS.filter((candidate) => candidate.id !== "").map((candidate) => ({
+              value: candidate.id,
+              label: candidate.label,
+            }))}
+            onChange={(value) => setEditor({ ...editor, kind: value as KnowledgeKindDto })}
+          />
           <span className="header-spacer" />
-          <button className="small-btn" onClick={() => setEditor(null)}>{tr("common.cancel")}</button>
-          <button className="small-btn primary-btn" disabled={!editor.title.trim()} onClick={save}>{tr("common.save")}</button>
+          <Button size="sm" variant="ghost" onClick={() => setEditor(null)}>{tr("common.cancel")}</Button>
+          <Button size="sm" variant="primary" disabled={!editor.title.trim()} onClick={save}>{tr("common.save")}</Button>
         </div>
-        <input placeholder={tr("knowledgepanel.title")} value={editor.title} onChange={(e) => setEditor({ ...editor, title: e.target.value })} />
-        <textarea rows={10} placeholder={tr("knowledgepanel.bodyMarkdownWelcome")} value={editor.body} onChange={(e) => setEditor({ ...editor, body: e.target.value })} />
-        <input placeholder={tr("knowledgepanel.tagsCommaSeparated")} value={editor.tags} onChange={(e) => setEditor({ ...editor, tags: e.target.value })} />
+        <TextInput placeholder={tr("knowledgepanel.title")} value={editor.title} onChange={(e) => setEditor({ ...editor, title: e.target.value })} />
+        <Textarea rows={10} placeholder={tr("knowledgepanel.bodyMarkdownWelcome")} value={editor.body} onChange={(e) => setEditor({ ...editor, body: e.target.value })} />
+        <TextInput placeholder={tr("knowledgepanel.tagsCommaSeparated")} value={editor.tags} onChange={(e) => setEditor({ ...editor, tags: e.target.value })} />
         {editor.id !== null && <div className="muted" style={{ fontSize: "calc(12px * var(--ui-font-scale, 1))" }}>{tr("knowledgepanel.editingRevision")}{" "}{editor.revision}{tr("knowledgepanel.savingBumpsIt")}</div>}
         {error && <div className="form-error">{error}</div>}
       </div>
@@ -107,10 +111,11 @@ export default function KnowledgePanel() {
   return (
     <div className="knowledge-panel">
       <div className="view-toolbar-row">
-        <input className="knowledge-search" placeholder={tr("knowledgepanel.searchKnowledge")} value={q} onChange={(e) => setQ(e.target.value)} />
+        <TextInput uiSize="sm" className="knowledge-search" placeholder={tr("knowledgepanel.searchKnowledge")} value={q} onChange={(e) => setQ(e.target.value)} />
         {sessionId && (
-          <button
-            className="small-btn"
+          <Button
+            size="sm"
+            busy={distilling}
             disabled={distilling}
             title={tr("knowledgepanel.distillTheCurrentSessionIntoANote")}
             onClick={() => {
@@ -120,18 +125,21 @@ export default function KnowledgePanel() {
                 setEditor({ ...EMPTY_EDITOR, title: draft.title, body: draft.body, sourceSessionId: sessionId });
               }).finally(() => setDistilling(false));
             }}
-          >{distilling ? tr("knowledgepanel.distilling") : tr("knowledgepanel.fromChat")}</button>
+          >{distilling ? tr("knowledgepanel.distilling") : tr("knowledgepanel.fromChat")}</Button>
         )}
-        <button className="small-btn" title={tr("knowledgepanel.newKnowledgeItem")} onClick={() => setEditor({ ...EMPTY_EDITOR })}>{tr("common.new")}</button>
+        <Button size="sm" title={tr("knowledgepanel.newKnowledgeItem")} onClick={() => setEditor({ ...EMPTY_EDITOR })}>{tr("common.new")}</Button>
       </div>
-      <div className="seg knowledge-kinds">
-        {KINDS.map((k) => (
-          <button key={k.id || "all"} className={kind === k.id ? "on" : ""} onClick={() => setKind(k.id)}>{k.label}</button>
-        ))}
-      </div>
+      <Tabs
+        className="knowledge-kinds"
+        size="sm"
+        label={tr("knowledgepanel.all")}
+        value={kind || "__all__"}
+        tabs={KINDS.map((item) => ({ id: item.id || "__all__", label: item.label }))}
+        onChange={(value) => setKind(value === "__all__" ? "" : value as KnowledgeKindDto)}
+      />
       {error && <div className="form-error">{error}</div>}
       {notice && <div className="knowledge-notice">{notice}</div>}
-      {items.length === 0 && <div className="rail-empty">{q ? tr("knowledgepanel.noMatches") : tr("knowledgepanel.noKnowledgeYetCaptureNotesPlansOr")}</div>}
+      {items.length === 0 && <EmptyState title={q ? tr("knowledgepanel.noMatches") : tr("knowledgepanel.noKnowledgeYetCaptureNotesPlansOr")} />}
       {items.map((it) => (
         <div key={it.id} className="knowledge-card">
           <div className="knowledge-card-head">
@@ -146,18 +154,18 @@ export default function KnowledgePanel() {
             {it.tags.length > 0 && <><span>·</span><span>{it.tags.join(", ")}</span></>}
           </div>
           <div className="knowledge-actions">
-            <button className="small-btn" onClick={() => openEdit(it.id)}>{tr("common.edit")}</button>
+            <Button size="sm" onClick={() => openEdit(it.id)}>{tr("common.edit")}</Button>
             {sessionId && (
-              <button
-                className="small-btn"
+              <Button
+                size="sm"
                 title={tr("knowledgepanel.logThisExactRevisionIntoTheCurrent")}
                 onClick={() => void run(
                   () => api.knowledgeAttach(sessionId, it.id, it.revision),
                   tr("knowledgepanel.attachedToSession"),
                 )}
-              >{tr("knowledgepanel.attach")}</button>
+              >{tr("knowledgepanel.attach")}</Button>
             )}
-            <button className="small-btn danger-btn" onClick={() => void run(() => api.knowledgeDelete(it.id))}>{tr("common.delete")}</button>
+            <Button size="sm" variant="danger" onClick={() => void run(() => api.knowledgeDelete(it.id))}>{tr("common.delete")}</Button>
           </div>
         </div>
       ))}

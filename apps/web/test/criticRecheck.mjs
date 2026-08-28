@@ -193,16 +193,12 @@ for (const view of views) {
     const intersects = (a, b) => !!a && !!b
       && Math.min(a.right, b.right) - Math.max(a.left, b.left) > 0.5
       && Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top) > 0.5;
-    const modelName = document.querySelector(".composer-model-header .model-trigger-name");
-    const modelMeta = document.querySelector(".composer-model-header .composer-model-meta");
-    const thinking = document.querySelector(".composer-model-header .composer-thinking-badge");
-    const thinkingTrack = document.querySelector(".composer-model-header .thinking-slider-track");
-    const mode = document.querySelector(".composer-model-header .composer-agent-badge");
-    const modelNameRect = modelName ? rectOf(modelName) : null;
-    const modelMetaRect = modelMeta ? rectOf(modelMeta) : null;
-    const thinkingRect = thinking ? rectOf(thinking) : null;
-    const thinkingTrackRect = thinkingTrack ? rectOf(thinkingTrack) : null;
-    const modeRect = mode ? rectOf(mode) : null;
+    const model = document.querySelector(".composer-config .model-picker-trigger");
+    const agent = document.querySelector(".composer-config .composer-agent-chip .picker-chip");
+    const effort = document.querySelector(".composer-config .composer-effort-chip");
+    const modelRect = model ? rectOf(model) : null;
+    const agentRect = agent ? rectOf(agent) : null;
+    const effortRect = effort ? rectOf(effort) : null;
     const rail = document.querySelector(".rail-icon-col.plugin-strip");
     const railButtons = rail
       ? Array.from(rail.querySelectorAll(".strip-btn")).map((button) => {
@@ -230,17 +226,13 @@ for (const view of views) {
       undersized,
       touchAnswerActions,
       portraitComposer: {
-        modelName: modelNameRect,
-        modelMeta: modelMetaRect,
-        thinking: thinkingRect,
-        thinkingTrack: thinkingTrackRect,
-        mode: modeRect,
+        model: modelRect,
+        agent: agentRect,
+        effort: effortRect,
         overlap: {
-          thinkingModelName: intersects(thinkingRect, modelNameRect),
-          thinkingModelMeta: intersects(thinkingRect, modelMetaRect),
-          trackModelName: intersects(thinkingTrackRect, modelNameRect),
-          trackModelMeta: intersects(thinkingTrackRect, modelMetaRect),
-          thinkingMode: intersects(thinkingRect, modeRect),
+          modelAgent: intersects(modelRect, agentRect),
+          modelEffort: intersects(modelRect, effortRect),
+          agentEffort: intersects(agentRect, effortRect),
         },
       },
       desktopRail: rail ? {
@@ -268,20 +260,17 @@ for (const view of views) {
     assert.ok(report.touchAnswerActions, `${view.id}: answer actions were not checked`);
   }
   if (view.id === "portrait_375x812") {
-    assert.ok(report.portraitComposer.modelName, "portrait: model name is missing");
-    assert.ok(report.portraitComposer.modelMeta, "portrait: model metadata is missing");
-    assert.ok(report.portraitComposer.thinking, "portrait: thinking control is missing");
-    assert.ok(report.portraitComposer.thinkingTrack, "portrait: thinking track is missing");
+    assert.ok(report.portraitComposer.model, "portrait: model control is missing");
+    assert.ok(report.portraitComposer.agent, "portrait: agent control is missing");
+    assert.ok(report.portraitComposer.effort, "portrait: effort control is missing");
     assert.deepEqual(
       report.portraitComposer.overlap,
       {
-        thinkingModelName: false,
-        thinkingModelMeta: false,
-        trackModelName: false,
-        trackModelMeta: false,
-        thinkingMode: false,
+        modelAgent: false,
+        modelEffort: false,
+        agentEffort: false,
       },
-      "portrait: model identity intersects thinking or mode controls",
+      "portrait: model, agent, or effort controls overlap",
     );
   }
   if (view.id === "desktop_1280x800") {

@@ -215,7 +215,7 @@ test("model favorites reorder only inside an explicit edit", () => {
 });
 
 test("model metadata reads as one ordered line, with acronyms spelled right", async () => {
-  const { modelModalityLabels, modelMetaLine } = await import("../../../packages/models/widgets/ModelPicker.tsx");
+  const { modelModalityLabels, modelMetaLine } = await import("@polyth/models/model-presentation");
   const model = {
     providerID: "p", modelID: "m", name: "M",
     capabilities: ["input:pdf", "input:image", "output:text", "input:text", "toolcall"],
@@ -267,7 +267,7 @@ test("every redesigned overlay uses the one sheet system", async () => {
     const src = await read(rel);
     assert.match(
       src,
-      /from "(?:[^"]*\/)?(?:mobile\/)?Sheet\.tsx"/,
+      /(?:from "(?:[^"]*\/)?(?:mobile\/)?Sheet\.tsx"|ResponsiveOverlay)/,
       `${name} renders the shared sheet`,
     );
   }
@@ -345,22 +345,26 @@ test("the composer is adaptive, with one primary action at a time", async () => 
   assert.ok(composer.includes("mobileSheet"), "the mode selector opens as a sheet on phones");
 });
 
-test("reasoning effort stays reachable on phones, beside the model name", async () => {
+test("reasoning effort stays reachable on phones, inside the config rail", async () => {
   const composer = await read("../src/components/Composer.tsx");
-  const header = composer.slice(composer.indexOf('<div className="composer-model-header">'));
-  const clusterStart = header.indexOf('<span className="composer-mode-cluster">');
-  const cluster = header.slice(clusterStart, header.indexOf("</span>\n        </div>", clusterStart));
-  assert.ok(cluster.includes("composer-thinking-badge"), "§59: the thinking control lives in the model header");
+  const effortMenu = await read("../src/components/EffortMenu.tsx");
+  const rail = composer.slice(composer.indexOf('<div className="composer-config">'));
+  const config = rail.slice(0, rail.indexOf('<div className="composer-actions">'));
+  assert.ok(config.includes("<EffortMenu"), "P2-W3A: the effort control lives beside model and agent");
   assert.ok(
-    cluster.indexOf("composer-thinking-badge") < cluster.indexOf("composer-agent-badge"),
-    "thinking sits between the model name and the mode chip",
+    config.indexOf("<ModelPicker") < config.indexOf("<EffortMenu"),
+    "effort follows the model it belongs to",
   );
-  assert.ok(cluster.includes("modelSupportsThinking(selectedModel)"), "it only exists for models that report variants");
-  assert.ok(cluster.includes("<ThinkingSlider"), "thinking uses a discrete slider, not a picker");
-  assert.ok(cluster.includes("pickThinking(thinking || undefined)"), "slider saves the effort and updates the composer config");
-  assert.ok(composer.includes("const THINKING_LABELS"), "backend variant strings get display labels");
+  assert.ok(config.includes("modelSupportsThinking(selectedModel)"), "it only exists for models that report variants");
+  assert.ok(effortMenu.includes('kind: "radio"'), "effort uses discrete radio entries, not a slider");
+  assert.ok(config.includes("pickThinking(thinking || undefined)"), "picking saves the effort and updates the composer config");
+  assert.ok(effortMenu.includes("thinkingVariantLabel"), "backend variant strings get display labels");
+  assert.ok(
+    composer.includes("onWillOpen={isPhone ? () => void dismissKeyboard() : undefined}"),
+    "§22: phones dismiss the keyboard before the effort sheet raises",
+  );
 
-  // A tap on any header control blurs the input; collapsing on that blur would
+  // A tap on any rail control blurs the input; collapsing on that blur would
   // unmount the control before its click lands (the tap would be swallowed).
   assert.ok(
     composer.includes("if (focused) setInputFocused(true);"),
@@ -374,8 +378,8 @@ test("reasoning effort stays reachable on phones, beside the model name", async 
 
   const css = await readWebStyles();
   const section = css.slice(css.indexOf("UX-MOBILE-01 — mobile-first new chat"));
-  const at = section.search(/\.composer-mobile \.composer-agent-badge,\s*\n\s*\.composer-mobile \.composer-thinking-badge/);
-  assert.ok(at > 0, "the thinking control shares the mode chip's touch box");
+  const at = section.search(/\.composer-mobile \.composer-config \.config-chip,\s*\n\s*\.composer-mobile \.composer-config \.picker-chip/);
+  assert.ok(at > 0, "every config chip shares the same touch box");
   assert.match(section.slice(at, section.indexOf("}", at)), /var\(--tap\)/);
 });
 
@@ -426,7 +430,7 @@ test("touch targets and design tokens are centralized", async () => {
   }
   const section = css.slice(css.indexOf("UX-MOBILE-01 — mobile-first new chat"));
   // Repeated controls size themselves from --tap rather than ad-hoc pixels.
-  for (const selector of [".starter-chip", ".context-trigger", ".model-trigger-mobile", ".sheet-row-star"]) {
+  for (const selector of [".starter-chip", ".context-trigger", ".config-chip", ".sheet-row-star"]) {
     const at = section.search(new RegExp(`\\${selector}\\s*[,{]`));
     assert.ok(at > 0, `${selector} is styled in the redesign section`);
     const rule = section.slice(at, section.indexOf("}", at));

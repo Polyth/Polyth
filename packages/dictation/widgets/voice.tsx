@@ -21,6 +21,7 @@ import { startStreamingDictation, type StreamingDictation } from "./dictationCli
 import { announce } from "../../../apps/web/src/components/a11y/live.tsx";
 import { Icon } from "../../../apps/web/src/icons.tsx";
 import { tr } from "../../../apps/web/src/i18n/index.ts";
+import { Button } from "@polyth/web/ui";
 
 // ---- voice prefs store ------------------------------------------------------
 
@@ -298,12 +299,12 @@ function MicButton() {
       </button>
       {status && <span className="mic-status">{status}</span>}
       {error !== null && (
-        <button type="button" className="small-btn mic-retry" onClick={start}>
-          {tr("voice.tryAgain")}</button>
+        <Button size="sm" className="mic-retry" onClick={start}>
+          {tr("voice.tryAgain")}</Button>
       )}
       {showSettings && (
-        <button type="button" className="small-btn mic-settings" onClick={() => openSettingsPage("voice")}>
-          {tr("voice.voiceSettings")}</button>
+        <Button size="sm" className="mic-settings" onClick={() => openSettingsPage("voice")}>
+          {tr("voice.voiceSettings")}</Button>
       )}
     </span>
   );

@@ -53,6 +53,8 @@ const google: ProviderCatalogDto = {
   const url = String(input);
   const body = url === "/api/providers"
     ? [google]
+    : url === "/api/terminals"
+      ? { terminalId: "audit-terminal" }
     : url.startsWith("/api/git/status")
       ? {
           branch: null,

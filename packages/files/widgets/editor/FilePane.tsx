@@ -19,8 +19,17 @@ import { useEscape } from "../../../../apps/web/src/useEscape.ts";
 import { clampMenuPosition } from "../../../../apps/web/src/selectionActions.ts";
 import { copyText } from "../../../../apps/web/src/utils.ts";
 import { getEditorPrefs, setEditorPreviewDefault, useUiSettings } from "../../../../apps/web/src/uiPrefs.ts";
-import { Icon } from "../../../../apps/web/src/icons.tsx";
 import { confirmAlert } from "../../../../apps/web/src/alerts.ts";
+import {
+  Button,
+  CheckIcon,
+  CloseIcon,
+  IconButton,
+  MoreIcon,
+  Spinner,
+  Switch,
+  TextInput,
+} from "../../../../apps/web/src/components/ui/index.ts";
 import {
   autosaveDelay,
   beginLiveFileSave,
@@ -42,6 +51,7 @@ import {
 import { registerPaneProvider, type PaneResourceContext } from "../../../../apps/web/src/workspace/paneProviders.ts";
 import { usePaneActions } from "../../../../apps/web/src/components/workspace/PaneHost.tsx";
 import { tr } from "../../../../apps/web/src/i18n/index.ts";
+import EmptyState from "../../../../apps/web/src/components/EmptyState.tsx";
 
 const baseOf = (p: string) => p.split("/").pop() ?? p;
 const msg = (err: unknown) => (err instanceof Error ? err.message : String(err));
@@ -495,13 +505,23 @@ export default function FilePane({ projectId, sessionId, resource: path, visible
   );
 
   if (td.loading || (!doc && !error)) {
-    return <div className="editor-empty"><p className="muted">{tr("editor.filepane.loading")}{" "}{path}…</p></div>;
+    return (
+      <div className="editor-empty">
+        <EmptyState
+          title={tr("editor.filepane.loading")}
+          description={`${path}…`}
+          mark={<Spinner />}
+        />
+      </div>
+    );
   }
   if (!doc) {
     return (
       <div className="editor-empty">
-        <p className="muted">{tr("editor.filepane.couldnTOpen")}{" "}{path}.</p>
-        {error && <div className="files-error">{error}</div>}
+        <EmptyState
+          title={`${tr("editor.filepane.couldnTOpen")} ${path}.`}
+          description={error}
+        />
       </div>
     );
   }
@@ -521,29 +541,31 @@ export default function FilePane({ projectId, sessionId, resource: path, visible
         {live?.kind === "saving" && <span className="editor-save-state">{tr("common.saving")}</span>}
         {live?.kind === "saved" && <span className="editor-save-state">{tr("common.saved")}</span>}
         {flash && <span className="editor-flash">{flash}</span>}
-        <button className="small-btn icon-only" title={tr("editor.filepane.closeFileEsc")} aria-label={tr("editor.filepane.closeFile")} onClick={() => actions?.closeSelf("file", path)}><Icon.close /></button>
+        <IconButton
+          icon={CloseIcon}
+          size="sm"
+          label={tr("editor.filepane.closeFile")}
+          title={tr("editor.filepane.closeFileEsc")}
+          onClick={() => actions?.closeSelf("file", path)}
+        />
       </div>
       <div className="editor-toolbar">
         {previewKind !== null && (
           <span className="editor-mode-switch">
             <span className={`editor-mode-label${editing ? " on" : ""}`}>{tr("common.edit")}</span>
-            <button
-              className="switch switch-sm"
-              role="switch"
-              aria-checked={!editing}
-              aria-label={tr("editor.filepane.valueMode", { previewName: previewName })}
-              title={editing ? tr("editor.filepane.showValue", { value: previewName.toLowerCase() }) : tr("editor.filepane.editSource")}
-              onClick={() => setPreviewMode(editing)}
-            >
-              <i />
-            </button>
+            <Switch
+              checked={!editing}
+              label={tr("editor.filepane.valueMode", { previewName: previewName })}
+              onChange={() => setPreviewMode(editing)}
+            />
             <span className={`editor-mode-label${!editing ? " on" : ""}`}>{previewName}</span>
           </span>
         )}
         <span className="header-spacer" />
         {gotoOpen && (
           <span className="editor-goto">
-            <input
+            <TextInput
+              uiSize="sm"
               autoFocus
               placeholder={tr("editor.filepane.lineEnd")}
               aria-label={tr("editor.filepane.goToLine")}
@@ -564,23 +586,28 @@ export default function FilePane({ projectId, sessionId, resource: path, visible
           </span>
         )}
         {!readOnly && (editing || dirty) && (
-          <button className="small-btn icon-only" disabled={live?.kind === "saving" || !dirty} title={tr("editor.filepane.saveValueS", { MOD: MOD })} aria-label={tr("editor.filepane.saveFile")} onClick={() => void save()}>
-            <Icon.check />
-          </button>
+          <IconButton
+            icon={CheckIcon}
+            size="sm"
+            disabled={live?.kind === "saving" || !dirty}
+            title={tr("editor.filepane.saveValueS", { MOD: MOD })}
+            label={tr("editor.filepane.saveFile")}
+            onClick={() => void save()}
+          />
         )}
-        <button
-          className="small-btn icon-only editor-more-btn"
+        <IconButton
+          icon={MoreIcon}
+          size="sm"
+          className="editor-more-btn"
           aria-haspopup="menu"
           aria-expanded={menu !== null}
-          aria-label={tr("editor.filepane.actionsForValue", { path: doc.path })}
+          label={tr("editor.filepane.actionsForValue", { path: doc.path })}
           title={tr("editor.filepane.fileActions")}
           onClick={(e) => {
             const r = e.currentTarget.getBoundingClientRect();
             openMenu(r.right - MENU_W, r.bottom + 4);
           }}
-        >
-          <Icon.more />
-        </button>
+        />
       </div>
       {menu && (
         <div className="ctx-backdrop" onClick={() => setMenu(null)} onContextMenu={(e) => { e.preventDefault(); setMenu(null); }}>
@@ -627,7 +654,8 @@ export default function FilePane({ projectId, sessionId, resource: path, visible
       )}
       {renameTo !== null && (
         <div className="files-create editor-rename">
-          <input
+          <TextInput
+            uiSize="sm"
             autoFocus
             value={renameTo}
             onChange={(e) => setRenameTo(e.target.value)}
@@ -636,16 +664,16 @@ export default function FilePane({ projectId, sessionId, resource: path, visible
               else if (e.key === "Escape") setRenameTo(null);
             }}
           />
-          <button className="small-btn" disabled={busy} onClick={() => void rename()}>{tr("common.rename")}</button>
-          <button className="small-btn" onClick={() => setRenameTo(null)}>{tr("common.cancel")}</button>
+          <Button size="sm" disabled={busy} onClick={() => void rename()}>{tr("common.rename")}</Button>
+          <Button size="sm" variant="ghost" onClick={() => setRenameTo(null)}>{tr("common.cancel")}</Button>
         </div>
       )}
       {confirmDel && (
         <div className="editor-banner editor-conflict" role="alert">
           <span>{tr("common.delete")}{" "}{doc.path}?</span>
-          <button className="small-btn danger-btn" disabled={busy} onClick={() => void remove()}>
-            {tr("editor.filepane.deletePermanently")}</button>
-          <button className="small-btn" onClick={() => setConfirmDel(false)}>{tr("common.cancel")}</button>
+          <Button size="sm" variant="danger" disabled={busy} onClick={() => void remove()}>
+            {tr("editor.filepane.deletePermanently")}</Button>
+          <Button size="sm" variant="ghost" onClick={() => setConfirmDel(false)}>{tr("common.cancel")}</Button>
         </div>
       )}
       {live && !live.noticeDismissed && (live.kind === "external-change" || live.kind === "conflict") && (
@@ -653,23 +681,23 @@ export default function FilePane({ projectId, sessionId, resource: path, visible
           <span>
             {tr("editor.filepane.fileChangedOnDisk")}{live.dirty ? tr("editor.filepane.yourUnsavedBufferIsPreserved") : tr("editor.filepane.reloadToViewTheReplacement")}
           </span>
-          <button className="small-btn" onClick={() => void reload()}>{tr("editor.filepane.reloadFromDisk")}</button>
-          {live.dirty && <button className="small-btn danger-btn" onClick={() => void save({ force: true })}>{tr("editor.filepane.overwrite")}</button>}
-          <button className="small-btn icon-only" title={tr("editor.filepane.dismissFileChangeNotice")} aria-label={tr("editor.filepane.dismissFileChangeNotice")} onClick={() => { if (td.live) td.live = dismissLiveFileNotice(td.live); bumpDocs(); }}><Icon.close /></button>
+          <Button size="sm" onClick={() => void reload()}>{tr("editor.filepane.reloadFromDisk")}</Button>
+          {live.dirty && <Button size="sm" variant="danger" onClick={() => void save({ force: true })}>{tr("editor.filepane.overwrite")}</Button>}
+          <IconButton icon={CloseIcon} size="sm" label={tr("editor.filepane.dismissFileChangeNotice")} onClick={() => { if (td.live) td.live = dismissLiveFileNotice(td.live); bumpDocs(); }} />
         </div>
       )}
       {live && !live.noticeDismissed && live.kind === "deleted" && (
         <div className="editor-banner editor-conflict" role="alert">
           <span>{tr("editor.filepane.fileWasDeletedOnDisk")}{live.dirty ? tr("editor.filepane.savingRecreatesItYourBufferIsPreserved") : ""}</span>
-          {live.dirty && <button className="small-btn danger-btn" onClick={() => void save({ force: true })}>{tr("editor.filepane.recreate")}</button>}
-          <button className="small-btn icon-only" title={tr("editor.filepane.dismissDeletedFileNotice")} aria-label={tr("editor.filepane.dismissDeletedFileNotice")} onClick={() => { if (td.live) td.live = dismissLiveFileNotice(td.live); bumpDocs(); }}><Icon.close /></button>
+          {live.dirty && <Button size="sm" variant="danger" onClick={() => void save({ force: true })}>{tr("editor.filepane.recreate")}</Button>}
+          <IconButton icon={CloseIcon} size="sm" label={tr("editor.filepane.dismissDeletedFileNotice")} onClick={() => { if (td.live) td.live = dismissLiveFileNotice(td.live); bumpDocs(); }} />
         </div>
       )}
       {live && !live.noticeDismissed && live.kind === "check-failed" && (
         <div className="editor-banner" role="alert">
           <span>{tr("editor.filepane.couldnTCheckForExternalChanges")}{" "}{live.message}</span>
-          <button className="small-btn" onClick={() => void checkFile()}>{tr("common.retry")}</button>
-          <button className="small-btn icon-only" title={tr("editor.filepane.dismissFileCheckNotice")} aria-label={tr("editor.filepane.dismissFileCheckNotice")} onClick={() => { if (td.live) td.live = dismissLiveFileNotice(td.live); bumpDocs(); }}><Icon.close /></button>
+          <Button size="sm" onClick={() => void checkFile()}>{tr("common.retry")}</Button>
+          <IconButton icon={CloseIcon} size="sm" label={tr("editor.filepane.dismissFileCheckNotice")} onClick={() => { if (td.live) td.live = dismissLiveFileNotice(td.live); bumpDocs(); }} />
         </div>
       )}
       {doc.truncated && <div className="editor-banner">{tr("editor.filepane.truncatedFileExceeds512KbReadOnly")}</div>}

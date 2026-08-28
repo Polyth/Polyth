@@ -15,9 +15,12 @@ test("session rows reserve one status zone and expose an aligned action menu", a
   assert.match(row, /className="session-status-zone"/);
   assert.match(row, /<AttentionBadges status=\{rowStatus\} \/>/);
   assert.match(row, /<StatusBadge status=\{rowStatus\} \/>/);
-  assert.match(row, /className="session-menu-btn"/);
+  // One trigger per row, wired to the shared ui/Menu with a controlled open
+  // state (context menu, long-press, Shift+F10) and dynamic focus return.
+  assert.match(row, /className="session-menu-trigger"/);
   assert.match(row, /<Icon\.more \/>/);
-  assert.match(row, /aria-haspopup="menu"/);
+  assert.match(row, /open=\{menuOpen\}/);
+  assert.match(row, /returnFocusRef=\{menuReturnRef\}/);
   assert.doesNotMatch(row, /session-title-line/);
   assert.match(row, /onTouchStart=\{startLongPress\}/);
 });
@@ -54,8 +57,8 @@ test("sidebar geometry scales type from ui font size and density controls rows",
     "session hover does not also receive the global button background");
   assert.match(css, /--ui-font-scale:\s*1;/,
     "the build applies the interface font scale to fixed-pixel text rules");
-  assert.match(css, /\.project-card-shell\s*\{[\s\S]*?grid-template-columns:\s*minmax\(0,\s*1fr\) repeat\(3,\s*36px\)/,
-    "each project action has a dedicated, equally sized grid cell");
+  assert.match(css, /\.project-card-shell\s*\{[\s\S]*?grid-template-columns:\s*minmax\(0,\s*1fr\) auto/,
+    "the project title keeps the flexible track; actions take only what they need");
   assert.match(css, /\.project-new-session,[\s\S]*?\.project-menu-btn\s*\{[\s\S]*?place-items:\s*center;/,
     "project action glyphs are centered inside their hover targets");
   assert.doesNotMatch(css, /#root\s*\{[^}]*\bzoom\s*:/,
@@ -71,12 +74,12 @@ test("sidebar geometry scales type from ui font size and density controls rows",
     "comfortable density adds only a small amount of breathing room");
   assert.match(css, /\.session-btn\s*\{[\s\S]*?grid-template-columns:\s*minmax\(0,\s*1fr\) fit-content\(var\(--nav-status-width\)\)/,
     "the status column only takes the width its content needs");
-  assert.match(css, /\.session-quick\s*\{[\s\S]*?right:\s*8px/,
-    "Shift quick actions align with the session row's right content inset");
-  assert.match(css, /\.session-menu-btn\s*\{[\s\S]*?right:\s*0;[\s\S]*?width:\s*36px;[\s\S]*?border:\s*0;/,
+  assert.match(css, /\.session-row\[data-swipe="dragging"\] \.session-quick,\s*\.session-row\[data-swipe="revealed"\] \.session-quick\s*\{[\s\S]*?right:\s*2px/,
+    "swipe-revealed quick actions align to the row's right edge");
+  assert.match(css, /\.session-menu-trigger\s*\{[\s\S]*?right:\s*4px;[\s\S]*?width:\s*32px;[\s\S]*?border:\s*0;/,
     "session and project action columns share a clean edge without a button outline");
-  assert.match(css, /@media \(max-width:\s*820px\)[\s\S]*?\.project-card-shell\s*\{[\s\S]*?repeat\(3,\s*var\(--tap\)\)/,
-    "mobile project actions use real grid tracks matching the session menu target");
+  assert.match(css, /@media \(max-width:\s*820px\)[\s\S]*?\.project-new-session,\s*\.project-menu-btn\s*\{\s*width:\s*var\(--tap\);\s*height:\s*var\(--tap\);/,
+    "mobile project actions grow to the session menu touch target");
   assert.doesNotMatch(css, /\.session-actions\b/);
   assert.doesNotMatch(css, /\.session-sync-icon\b/);
 });

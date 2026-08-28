@@ -22,6 +22,7 @@ Object.defineProperty(globalThis, "requestAnimationFrame", {
   value: (callback: FrameRequestCallback) => { callback(0); return 0; },
   configurable: true,
 });
+Object.defineProperty(globalThis, "cancelAnimationFrame", { value: () => {}, configurable: true });
 (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
 
 const sessionsByProject: Record<string, SessionProjection[]> = {
@@ -166,7 +167,9 @@ test("project menu selection keeps one multi-session selection across projects",
     const menu = container.querySelector<HTMLButtonElement>('[aria-label="Actions for alpha"]');
     assert.ok(menu, "the project row exposes its own actions");
     await act(async () => { click(menu!); });
-    const select = container.querySelector<HTMLButtonElement>('[role="menuitemcheckbox"]');
+    // The project menu renders through a ui/Menu portal on document.body.
+    const select = [...document.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')]
+      .find((item) => item.textContent?.trim() === "Select sessions");
     assert.ok(select, "session selection lives in the project action menu");
     assert.equal(serviceBar?.querySelector(".sidebar-title"), null, "the service bar has no visible Sessions title");
     assert.equal(container.querySelector(".sr-only")?.textContent, "Projects and sessions", "the sidebar retains its accessible heading");

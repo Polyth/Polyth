@@ -5,6 +5,7 @@
 import { Component, createElement, type ErrorInfo, type ReactNode } from "react";
 import { setActiveView } from "../store.ts";
 import { tr } from "../i18n/index.ts";
+import { buttonClassName } from "./ui/buttonClassName.ts";
 
 interface ViewErrorBoundaryProps {
   /** Optional in the type so createElement callers may pass children last. */
@@ -57,8 +58,16 @@ export default class ViewErrorBoundary extends Component<ViewErrorBoundaryProps,
       createElement(
         "div",
         { className: "surface-error-actions" },
-        createElement("button", { className: "primary-btn", onClick: this.retry }, tr("viewerrorboundary.tryAgain")),
-        createElement("button", { onClick: () => setActiveView("session") }, tr("viewerrorboundary.returnToSession")),
+        createElement(
+          "button",
+          { type: "button", className: buttonClassName({ variant: "primary" }), onClick: this.retry },
+          createElement("span", { className: "ui-btn-label" }, tr("viewerrorboundary.tryAgain")),
+        ),
+        createElement(
+          "button",
+          { type: "button", className: buttonClassName(), onClick: () => setActiveView("session") },
+          createElement("span", { className: "ui-btn-label" }, tr("viewerrorboundary.returnToSession")),
+        ),
       ),
     );
     return this.props.inline ? card : createElement("main", { className: "main" }, card);

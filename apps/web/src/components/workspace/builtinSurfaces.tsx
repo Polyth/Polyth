@@ -36,6 +36,7 @@ import {
   type Starter,
 } from "../../starters.ts";
 import { tr } from "../../i18n/index.ts";
+import { Button } from "../ui/index.ts";
 
 const NOOP_STARTER = (_prompt: string, _id?: string): void => {};
 
@@ -210,9 +211,10 @@ function ArchivedComposerGuard({ sessionId }: { sessionId: string }) {
     <div className="archived-guard" role="status">
       <span className="archived-guard-text">
         {tr("workspace.builtinsurfaces.thisSessionIsArchivedAndReadOnly")}</span>
-      <button
-        className="primary-btn archived-restore-btn"
-        disabled={busy}
+      <Button
+        variant="primary"
+        className="archived-restore-btn"
+        busy={busy}
         onClick={() => {
           setBusy(true);
           void restoreSession(sessionId)
@@ -220,7 +222,7 @@ function ArchivedComposerGuard({ sessionId }: { sessionId: string }) {
             .finally(() => setBusy(false));
         }}
       >
-        {tr("workspace.builtinsurfaces.restoreAndContinue")}</button>
+        {tr("workspace.builtinsurfaces.restoreAndContinue")}</Button>
     </div>
   );
 }

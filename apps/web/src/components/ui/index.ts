@@ -20,7 +20,7 @@ export { default as VisuallyHidden } from "./VisuallyHidden.tsx";
 export { default as Tabs, TabPanel, tabId, tabPanelId, type TabsProps, type TabItem, type TabPanelProps } from "./Tabs.tsx";
 export { default as Tooltip, type TooltipProps } from "./Tooltip.tsx";
 export { default as Popover, type PopoverProps } from "./Popover.tsx";
-export { default as Menu, type MenuProps, type MenuEntry, type MenuAction, type MenuTriggerProps } from "./Menu.tsx";
+export { default as Menu, type MenuProps, type MenuEntry, type MenuAction, type MenuHeading, type MenuTriggerProps } from "./Menu.tsx";
 export { default as Dialog, type DialogProps, type DialogSize } from "./Dialog.tsx";
 export { default as ResponsiveOverlay, type ResponsiveOverlayProps } from "./ResponsiveOverlay.tsx";
 export {

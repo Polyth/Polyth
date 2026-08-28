@@ -150,7 +150,7 @@ export function NarrowPanelTrigger() {
   const label = open ? tr("contextrail.closeValuePanel", { title: open.title }) : tr("contextrail.openWorkspacePanels");
   return (
     <button
-      className="icon-btn narrow-panel-trigger"
+      className="ui-icon-btn ui-icon-btn--ghost ui-icon-btn--md narrow-panel-trigger"
       title={label}
       aria-label={label}
       aria-expanded={open !== null}

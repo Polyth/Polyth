@@ -3,9 +3,9 @@ import { useState, useEffect, useCallback } from "react";
 import { api, type GoalState } from "@polyth/session/web-api";
 import { useStore } from "../../../apps/web/src/store.ts";
 import { goalChecklist } from "../../../apps/web/src/utils.ts";
-import Dialog from "../../../apps/web/src/components/a11y/Dialog.tsx";
 import EmptyState from "../../../apps/web/src/components/EmptyState.tsx";
 import { formatNumber, tr } from "../../../apps/web/src/i18n/index.ts";
+import { Button, Dialog, Textarea, TextInput } from "../../../apps/web/src/components/ui/index.ts";
 
 export function GoalStrip({ forceOpen = false }: { forceOpen?: boolean }) {
   const activeSessionId = useStore((s) => s.activeSessionId);
@@ -85,12 +85,12 @@ export function GoalStrip({ forceOpen = false }: { forceOpen?: boolean }) {
           </div>
           <div className="goal-actions">
             {isActive ? (
-              <button className="small-btn" onClick={() => void pause()} disabled={busy}>{tr("common.pause")}</button>
+              <Button size="sm" onClick={() => void pause()} disabled={busy}>{tr("common.pause")}</Button>
             ) : goal.status === "paused" ? (
-              <button className="small-btn" onClick={() => void resume()} disabled={busy}>{tr("common.resume")}</button>
+              <Button size="sm" onClick={() => void resume()} disabled={busy}>{tr("common.resume")}</Button>
             ) : null}
             {(isActive || goal.status === "paused") && (
-              <button className="small-btn danger-btn" onClick={() => void stop()} disabled={busy}>{tr("common.stop")}</button>
+              <Button size="sm" variant="danger" onClick={() => void stop()} disabled={busy}>{tr("common.stop")}</Button>
             )}
           </div>
         </>
@@ -135,19 +135,37 @@ export function GoalAttachForm({ onDone }: { onDone: () => void }) {
   };
 
   return (
-    <Dialog title={tr("goalstrip.sessionGoal")} onClose={onDone} className="goal-dialog" initialFocus="textarea">
-      <div className="goal-dialog-head">
+    <Dialog
+      title={tr("goalstrip.sessionGoal")}
+      onClose={onDone}
+      className="goal-dialog"
+      initialFocus="textarea"
+      footer={
+        <>
+          <Button onClick={onDone}>{tr("common.cancel")}</Button>
+          <Button
+            variant="primary"
+            className="goal-attach-submit"
+            busy={busy}
+            disabled={!objective.trim() || !!budgetError || !!continuationError}
+            onClick={() => void submit()}
+          >
+            {busy ? tr("goalstrip.attaching") : tr("goalstrip.attachGoal")}
+          </Button>
+        </>
+      }
+    >
+      <div className="goal-dialog-intro">
         <span className="goal-dialog-mark" aria-hidden="true">◎</span>
         <div>
-          <h2>{tr("goalstrip.setAClearSessionGoal")}</h2>
+          <strong>{tr("goalstrip.setAClearSessionGoal")}</strong>
           <p>{tr("goalstrip.polythWillKeepTheObjectiveAndIts")}</p>
         </div>
-        <button className="icon-btn" aria-label={tr("goalstrip.closeGoalDialog")} onClick={onDone}>{tr("goalstrip.message")}</button>
       </div>
       <div className="goal-attach">
         <label className="goal-attach-label goal-objective-field">
           <span>{tr("goalstrip.objective")}</span>
-          <textarea
+          <Textarea
             rows={4}
             placeholder={tr("goalstrip.whatShouldThisSessionAccomplishOneItem")}
             value={objective}
@@ -157,7 +175,7 @@ export function GoalAttachForm({ onDone }: { onDone: () => void }) {
         <div className="goal-attach-row">
           <label className="goal-attach-label">
             <span>{tr("goalstrip.tokenBudget")}{" "}<small>{tr("goalstrip.optional")}</small></span>
-            <input
+            <TextInput
               type="number"
               min={1}
               step={1}
@@ -171,7 +189,7 @@ export function GoalAttachForm({ onDone }: { onDone: () => void }) {
           </label>
           <label className="goal-attach-label">
             <span>{tr("goalstrip.maxContinuations")}{" "}<small>{tr("goalstrip.optional")}</small></span>
-            <input
+            <TextInput
               type="number"
               min={1}
               step={1}
@@ -185,12 +203,6 @@ export function GoalAttachForm({ onDone }: { onDone: () => void }) {
           </label>
         </div>
         {serverError && <div className="form-error goal-dialog-error" role="alert">{serverError}</div>}
-        <div className="goal-dialog-actions">
-          <button className="small-btn" onClick={onDone}>{tr("common.cancel")}</button>
-          <button className="primary-btn goal-attach-submit" onClick={() => void submit()} disabled={busy || !objective.trim() || !!budgetError || !!continuationError}>
-            {busy ? tr("goalstrip.attaching") : tr("goalstrip.attachGoal")}
-          </button>
-        </div>
       </div>
     </Dialog>
   );

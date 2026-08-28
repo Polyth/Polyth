@@ -148,19 +148,22 @@ test("phone and coarse-pointer standalone controls share the 44px hit-box floor"
 test("phone touch targets and bottom sheets retain audit geometry", async () => {
   const css = await readWebStyles();
   const auditPhoneStart = css.search(
-    /@media \(max-width: 480px\), \(max-height: 480px\) and \(pointer: coarse\)\s*\{\s*\.question-copy-btn,/,
+    /@media \(max-width: 480px\), \(max-height: 480px\) and \(pointer: coarse\)\s*\{\s*\.attachment-pill/,
   );
   assert.ok(auditPhoneStart >= 0, "the phone audit rules exist");
   const finalPhoneRules = css.slice(auditPhoneStart);
 
   assert.match(css, /\.question-tabs\s*\{[^}]*overflow-x:\s*auto[^}]*touch-action:\s*pan-x/s);
-  assert.match(finalPhoneRules, /\.question-copy-btn,[\s\S]*?\.question-actions button\s*\{[^}]*min-height:\s*var\(--tap\)/);
-  assert.match(finalPhoneRules, /\.question-option\s*\{\s*min-height:\s*var\(--tap\)/);
+  assert.match(css, /\.question-tab\s*\{[^}]*min-width:\s*max\(var\(--control-h-sm\), var\(--hit-min\)\)[^}]*height:\s*max\(var\(--control-h-sm\), var\(--hit-min\)\)/s);
+  assert.match(css, /\.question-option\s*\{[^}]*min-height:\s*max\(var\(--control-h-sm\), var\(--hit-min\)\)/s);
+  assert.match(css, /\.ui-btn\s*\{[^}]*min-height:\s*max\(var\(--control-h-sm\), var\(--hit-min\)\)/s);
+  assert.match(css, /\.ui-icon-btn::after\s*\{[^}]*width:\s*max\(100%, var\(--hit-min\)\)[^}]*height:\s*max\(100%, var\(--hit-min\)\)/s);
   assert.match(finalPhoneRules, /\.attachment-pill \.att-remove\s*\{[^}]*min-width:\s*var\(--tap\)[^}]*min-height:\s*var\(--tap\)/s);
   assert.match(finalPhoneRules, /\.queue-chip button\s*\{[^}]*min-width:\s*var\(--tap\)[^}]*min-height:\s*var\(--tap\)/s);
   assert.match(finalPhoneRules, /\.msg\.assistant \.msg-action-btn,[\s\S]*?\.msg\.assistant \.msg-actions-entry\s*\{[^}]*min-height:\s*var\(--tap\)/);
   assert.match(css, /\.sheet-search-clear\s*\{[^}]*width:\s*var\(--tap\)[^}]*height:\s*var\(--tap\)/s);
-  assert.match(css, /@media \(pointer: coarse\)\s*\{[\s\S]*?\.thinking-slider input\s*\{[^}]*min-height:\s*var\(--tap\)/);
+  // P2-W3A: config chips (model/agent/effort) share one phone touch box.
+  assert.match(css, /\.composer-mobile \.composer-config \.config-chip,[\s\S]*?\.composer-mobile \.composer-config \.picker-chip\s*\{[^}]*min-height:\s*var\(--tap\)/);
   assert.match(css, /\.panel-sheet \.rail-body\s*\{[^}]*padding-bottom:\s*calc\(10px \+ env\(safe-area-inset-bottom, 0px\)\)/s);
   assert.match(css, /\.package-tour-skips\s*\{[^}]*padding:[^;]*env\(safe-area-inset-bottom, 0px\)/s);
   assert.match(css, /@media \(max-width: 820px\)[\s\S]*?\.pane-tab-close\s*\{[^}]*min-width:\s*var\(--tap\)[^}]*min-height:\s*var\(--tap\)/s);

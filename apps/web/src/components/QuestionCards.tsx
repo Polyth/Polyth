@@ -1,7 +1,7 @@
 // Multi-question stepper (WP15): one visible question, numbered tabs,
 // Back/Next, Submit only on the final valid step. Draft answers live in a
 // module-level map so navigation, remounts, and reconnects never lose them.
-import { useMemo, useState } from "react";
+import { useId, useMemo, useRef, useState } from "react";
 import type { JsonObject, QuestionItem } from "@polyth/contracts";
 import { answerQuestion, rejectQuestion } from "../init.ts";
 import type { PendingQuestion } from "../reduce.ts";
@@ -12,8 +12,13 @@ import {
 import AdaptiveTextInput from "./input/AdaptiveTextInput.tsx";
 import { announce } from "./a11y/live.tsx";
 import { tr } from "../i18n/index.ts";
-import { Icon } from "../icons.tsx";
 import { copyText } from "../utils.ts";
+import {
+  Button,
+  IconButton,
+  JsonIcon,
+  MarkdownIcon,
+} from "./ui/index.ts";
 
 // Draft answers survive card remounts (tab switches, WS reconnect replays).
 const drafts = new Map<string, AnswerMap>();
@@ -33,6 +38,7 @@ function OptionField({ item, answer, onChange }: {
   answer: string | string[] | undefined;
   onChange: (a: string | string[]) => void;
 }) {
+  const groupName = useId();
   const options = item.options ?? [];
   const multi = item.type === "multi";
   const selected = new Set(Array.isArray(answer) ? answer : answer !== undefined ? [answer] : []);
@@ -56,14 +62,14 @@ function OptionField({ item, answer, onChange }: {
   };
 
   return (
-    <div role={multi ? "group" : "radiogroup"} aria-label={item.prompt}>
+    <div className="question-options" role={multi ? "group" : "radiogroup"} aria-label={item.prompt}>
       {options.map((o) => {
         const on = selected.has(o.value);
         return (
           <label key={o.value} className={`question-option ${on ? "selected" : ""}`}>
             <input
               type={multi ? "checkbox" : "radio"}
-              name={item.id}
+              name={groupName}
               checked={on}
               onChange={(e) => (multi ? toggleMulti(o.value, e.target.checked) : setSingle(o.value))}
             />
@@ -78,7 +84,7 @@ function OptionField({ item, answer, onChange }: {
         <label className={`question-option ${otherOn ? "selected" : ""}`}>
           <input
             type={multi ? "checkbox" : "radio"}
-            name={item.id}
+            name={groupName}
             checked={otherOn}
             onChange={(e) => {
               if (multi) { if (!e.target.checked) setOther(""); }
@@ -93,6 +99,7 @@ function OptionField({ item, answer, onChange }: {
           key={`${item.id}-other`}
           initialText={otherValue ?? ""}
           rows={1}
+          className="ui-textarea question-answer-input"
           placeholder={tr("questioncards.otherAnswer")}
           ariaLabel={tr("questioncards.otherAnswer2")}
           onTextChange={setOther}
@@ -103,6 +110,8 @@ function OptionField({ item, answer, onChange }: {
 }
 
 function QuestionStepper({ q }: { q: PendingQuestion }) {
+  const id = useId();
+  const tabRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const items = useMemo(() => normalizeQuestions(q.questions), [q.questions]);
   const [answers, setAnswers] = useState<AnswerMap>(() => drafts.get(q.requestId) ?? {});
   const [step, setStep] = useState(0);
@@ -130,26 +139,40 @@ function QuestionStepper({ q }: { q: PendingQuestion }) {
     drafts.delete(q.requestId);
     void rejectQuestion(q.requestId);
   };
+  const selectTabFromKeyboard = (index: number) => {
+    const next = (index + items.length) % items.length;
+    setStep(next);
+    tabRefs.current[next]?.focus();
+  };
 
   return (
-    <div className="question-card question-stepper">
-      <div className="q-title">
-        {tr("questioncards.questionFromTheAgent")}<span className="question-progress" aria-live="polite">
-          {items.length > 1 ? tr("questioncards.stepValueOfValue", { value: step + 1, length: items.length }) : ""}
+    <section className="question-card question-stepper" aria-labelledby={`${id}-title`}>
+      <div className="q-title" id={`${id}-title`}>
+        <span className="question-title-copy">
+          <strong>{tr("questioncards.questionFromTheAgent")}</strong>
+          <span className="question-progress" aria-live="polite">
+            {items.length > 1 ? tr("questioncards.stepValueOfValue", { value: step + 1, length: items.length }) : ""}
+          </span>
         </span>
         <span className="question-copy">
-          <button
+          <IconButton
+            icon={MarkdownIcon}
+            size="sm"
+            variant="ghost"
             className="question-copy-btn"
-            aria-label={tr("questioncards.copyQuestionsAsMarkdown")}
+            label={tr("questioncards.copyQuestionsAsMarkdown")}
             title={tr("questioncards.copyAsMarkdown")}
             onClick={() => copyQuestions(questionsToMarkdown(items, answers), "Markdown")}
-          ><Icon.markdown /></button>
-          <button
+          />
+          <IconButton
+            icon={JsonIcon}
+            size="sm"
+            variant="ghost"
             className="question-copy-btn"
-            aria-label={tr("questioncards.copyQuestionsAsJson")}
+            label={tr("questioncards.copyQuestionsAsJson")}
             title={tr("questioncards.copyAsJson")}
             onClick={() => copyQuestions(questionsToJson(q.requestId, items, answers), "JSON")}
-          ><Icon.json /></button>
+          />
         </span>
       </div>
       {items.length > 1 && (
@@ -157,24 +180,46 @@ function QuestionStepper({ q }: { q: PendingQuestion }) {
           {items.map((it, i) => (
             <button
               key={it.id}
+              ref={(node) => { tabRefs.current[i] = node; }}
+              id={`${id}-tab-${i}`}
               role="tab"
               aria-selected={i === step}
+              aria-controls={`${id}-panel`}
+              aria-label={`${i + 1}. ${it.title ?? it.prompt}`}
+              tabIndex={i === step ? 0 : -1}
               className={`question-tab ${i === step ? "active" : ""} ${answerValid(it, answers[it.id]) ? "done" : ""}`}
               onClick={() => setStep(i)}
+              onKeyDown={(event) => {
+                if (event.key === "ArrowRight") selectTabFromKeyboard(step + 1);
+                else if (event.key === "ArrowLeft") selectTabFromKeyboard(step - 1);
+                else if (event.key === "Home") selectTabFromKeyboard(0);
+                else if (event.key === "End") selectTabFromKeyboard(items.length - 1);
+                else return;
+                event.preventDefault();
+              }}
             >
               {i + 1}
             </button>
           ))}
         </div>
       )}
-      <div className="question-body">
+      <div
+        className="question-body"
+        id={`${id}-panel`}
+        role={items.length > 1 ? "tabpanel" : undefined}
+        aria-labelledby={items.length > 1 ? `${id}-tab-${step}` : undefined}
+      >
         {item.title && <div className="question-item-title">{item.title}</div>}
-        <label className="question-prompt">{item.prompt}{item.required ? "" : tr("questioncards.optional")}</label>
+        <div className="question-prompt">
+          {item.prompt}
+          {!item.required && <span className="question-optional"> {tr("questioncards.optional")}</span>}
+        </div>
         {item.type === "text" ? (
           <AdaptiveTextInput
             key={item.id}
             initialText={typeof answers[item.id] === "string" ? (answers[item.id] as string) : ""}
             rows={2}
+            className="ui-textarea question-answer-input"
             placeholder={tr("questioncards.answer")}
             ariaLabel={item.prompt}
             onTextChange={(t) => setAnswer(item.id, t)}
@@ -185,17 +230,25 @@ function QuestionStepper({ q }: { q: PendingQuestion }) {
       </div>
       <div className="question-actions">
         {items.length > 1 && (
-          <button disabled={step === 0} onClick={() => setStep((s) => Math.max(0, s - 1))}>{tr("common.back")}</button>
+          <Button size="sm" disabled={step === 0} onClick={() => setStep((s) => Math.max(0, s - 1))}>
+            {tr("common.back")}
+          </Button>
         )}
-        {!last && <button onClick={() => setStep((s) => Math.min(items.length - 1, s + 1))}>{tr("common.next")}</button>}
+        {!last && (
+          <Button size="sm" onClick={() => setStep((s) => Math.min(items.length - 1, s + 1))}>
+            {tr("common.next")}
+          </Button>
+        )}
         {last && (
-          <button className="primary" disabled={!canSubmit} onClick={submit}>
+          <Button size="sm" variant="primary" disabled={!canSubmit} onClick={submit}>
             {items.length > 1 ? tr("questioncards.submitAll") : tr("common.submit")}
-          </button>
+          </Button>
         )}
-        <button className="danger" onClick={reject}>{tr("questioncards.reject")}</button>
+        <Button size="sm" variant="danger" className="question-reject" onClick={reject}>
+          {tr("questioncards.reject")}
+        </Button>
       </div>
-    </div>
+    </section>
   );
 }
 

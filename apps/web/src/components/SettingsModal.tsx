@@ -8,10 +8,7 @@ export default function SettingsModal({ open, onClose }: { open: boolean; onClos
       // The owner can close Settings directly (route/store changes), bypassing
       // SettingsView's close callback. Restore after that commit so removing
       // the focused dialog cannot leave BODY as the final active element.
-      const selector = window.matchMedia("(max-width: 820px)").matches
-        ? ".mobile-shortcut-settings"
-        : ".header-profile";
-      document.querySelector<HTMLElement>(selector)?.focus();
+      document.querySelector<HTMLElement>(".mobile-shortcut-settings, .header-profile")?.focus();
     }
     previouslyOpen.current = open;
   }, [open]);

@@ -5,26 +5,12 @@ color: var(--green); font-size: 12px;
 .pr-conflict-agent-area > .knowledge-notice {
 grid-column: 1 / -1; margin: 0;
 }
-@container feature-panel (max-width: 700px) {
-.knowledge-panel > .view-toolbar-row,
-.knowledge-editor > .view-toolbar-row,
-.track-create-form .view-toolbar-row {
-align-items: stretch;
-    flex-direction: column;
-}
-
-.knowledge-panel > .view-toolbar-row > :is(input, button),
-.knowledge-editor > .view-toolbar-row > :is(select, button) {
-width: 100%;
-}
-}
 .knowledge-panel,
 .knowledge-editor {
 display: flex; flex-direction: column; gap: 8px;
 }
 .knowledge-search {
-flex: 1; background: var(--elevated); color: var(--text); border: 1px solid var(--border);
-  border-radius: calc(7px * var(--corner-radius-scale)); padding: 6px 8px; font-size: 12.5px;
+flex: 1;
 }
 .knowledge-kinds {
 align-self: flex-start;
@@ -58,12 +44,11 @@ display: flex; gap: 5px; color: var(--muted); font-size: 11px; flex-wrap: wrap;
 .knowledge-actions {
 display: flex; gap: 6px;
 }
-.knowledge-editor input,
-.knowledge-editor textarea {
-background: var(--elevated); color: var(--text); border: 1px solid var(--border);
-  border-radius: calc(7px * var(--corner-radius-scale)); padding: 6px 8px; font-size: 12.5px; width: 100%;
+.knowledge-editor .ui-text-input,
+.knowledge-editor .ui-textarea {
+width: 100%;
 }
-.knowledge-editor textarea {
+.knowledge-editor .ui-textarea {
 font-family: var(--mono); font-size: var(--editor-font-size, 13px); resize: vertical;
 }
 .track-create-form,
@@ -182,8 +167,8 @@ align-items: stretch;
     flex-direction: column;
 }
 
-.knowledge-panel > .view-toolbar-row > :is(input, button),
-.knowledge-editor > .view-toolbar-row > :is(select, button) {
+.knowledge-panel > .view-toolbar-row > :is(.ui-text-input, .ui-btn),
+.knowledge-editor > .view-toolbar-row > :is(.ui-picker, .ui-btn) {
 width: 100%;
 }
 
@@ -205,7 +190,7 @@ width: 100%;
 display: none;
 }
 
-.knowledge-kinds button {
+.knowledge-kinds .ui-tab {
 flex: 1 0 auto;
 }
 
@@ -218,7 +203,7 @@ display: grid;
 width: 100%;
 }
 
-.track-create-form :is(input, textarea) {
+.track-create-form :is(.ui-text-input, .ui-textarea) {
 width: 100%;
 }
 }

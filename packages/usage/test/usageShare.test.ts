@@ -81,7 +81,7 @@ test("Usage settings keeps the Polyth shell and offers rich dashboard views", as
   assert.match(source, /className="usage-spend-donut"[\s\S]*?<svg/);
   assert.match(source, /function ModelBreakdown/);
   assert.match(source, /function CostPulse/);
-  assert.match(source, /aria-label=\{tr\("usage\.usagedashboard\.dashboardDensity"\)\}/);
+  assert.match(source, /label=\{tr\("usage\.usagedashboard\.dashboardDensity"\)\}/);
   assert.match(source, /setUsageDashboardPrefs/);
   assert.match(source, /tr\("usage\.usagedashboard\.sessionCohortsByLatestTurn"\)/);
   assert.match(source, /tr\("usage\.usagedashboard\.eachSessionAppearsOnceInBucket"\)/);
@@ -113,8 +113,8 @@ test("Usage settings keeps the Polyth shell and offers rich dashboard views", as
   assert.doesNotMatch(styles, /--usage-bg: #0d0e10/);
   assert.match(styles, /\.usage-status-pill\.session-only/);
   assert.match(styles, /@container usage-dashboard \(max-width: 700px\)[\s\S]*?\.usage-providers-card tbody tr/);
-  assert.match(styles, /\.usage-spend-legend > \.usage-card-empty \{[\s\S]*?width: 100%;[\s\S]*?min-width: 0;[\s\S]*?align-self: stretch;/);
-  assert.match(styles, /\.usage-spend-legend > \.usage-card-empty strong \{[\s\S]*?overflow-wrap: normal;[\s\S]*?word-break: normal;[\s\S]*?white-space: normal;/);
+  assert.match(styles, /\.usage-spend-legend > \.empty-state \{[\s\S]*?width: 100%;[\s\S]*?min-width: 0;[\s\S]*?align-self: stretch;/);
+  assert.match(styles, /\.usage-spend-legend > \.empty-state \.empty-state-title \{[\s\S]*?overflow-wrap: normal;[\s\S]*?word-break: normal;[\s\S]*?white-space: normal;/);
   assert.match(styles, /\.usage-provider-error \{[\s\S]*?padding: 9px 10px;/);
   assert.match(styles, /@container usage-dashboard \(min-width: 701px\) and \(max-width: 760px\)\s*\{[\s\S]*?\.usage-view-tabs\s*\{[^}]*width:\s*100%;\s*margin:\s*0;/);
 
@@ -126,6 +126,6 @@ test("Usage settings keeps the Polyth shell and offers rich dashboard views", as
   const usageMobileStyles = styles.slice(usageMobileStart, usageMobileEnd);
   assert.match(usageMobileStyles, /\.usage-eyebrow\s*\{\s*font-size:\s*9\.5px;\s*letter-spacing:\s*\.075em;\s*line-height:\s*1\.35;/);
   assert.match(usageMobileStyles, /\.usage-spend-legend \{[\s\S]*?width: 100%;[\s\S]*?min-width: 0;[\s\S]*?max-width: none;/);
-  assert.match(styles, /\.usage-view-tabs button\s*\{\s*flex:\s*1;\s*min-height:\s*var\(--tap\);/);
+  assert.match(styles, /\.usage-view-tabs \.ui-tab\s*\{\s*flex:\s*1;\s*min-height:\s*var\(--tap\);/);
   assert.match(styles, /\.usage-layout-compact \.usage-cohort-chart\s*\{\s*height:\s*174px;/);
 });

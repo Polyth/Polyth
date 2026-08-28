@@ -453,6 +453,7 @@ export function ExecutionRow({ message, subagent }: { message: ToolMsg; subagent
                 {exitCode !== undefined && <span>Exit code {exitCode}</span>}
                 <span>{elapsed}</span>
                 {cwd && <span>cwd {cwd}</span>}
+                {presentation.kind === "mcp" && <code className="execution-tool-id">{message.tool}</code>}
                 {webUrl && <a href={webUrl} target="_blank" rel="noreferrer">Open link <Icon.external /></a>}
                 <button type="button" onClick={() => openViewer(`${presentation.label} raw result`, raw)}>View raw result</button>
                 {!presentation.command && inputJson !== "{}" && <CopyButton text={inputJson} label="Copy tool input" />}

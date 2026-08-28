@@ -9,6 +9,7 @@ import { modelDisplayName, modelSupportsTextWorkflow } from "../../../apps/web/s
 import { consumeMultiRunPrompt } from "./multirunSeed.ts";
 import ProviderLogo from "../../models/widgets/ProviderLogo.tsx";
 import { tr } from "../../../apps/web/src/i18n/index.ts";
+import { Button, Select, Textarea, TextInput } from "../../../apps/web/src/components/ui/index.ts";
 
 function modelRefFromValue(value: string): ModelRef | undefined {
   if (!value) return undefined;
@@ -52,13 +53,15 @@ function RunCard({
         <span>{tokens ? tr("multirunview.valueTok", { value: fmtTokens(tokens) }) : "—"}</span>
         <span>{run.cost ? fmtCost(run.cost) : "—"}</span>
       </div>
-      <button
+      <Button
+        size="sm"
+        variant={picked ? "primary" : "quiet"}
         className={`pick-btn ${picked ? "picked" : ""}`}
         disabled={run.status !== "completed" || picked}
         onClick={onPick}
       >
         {picked ? tr("multirunview.picked") : tr("multirunview.pickThisRun")}
-      </button>
+      </Button>
     </article>
   );
 }
@@ -174,44 +177,51 @@ export default function MultiRunView() {
         <p className="view-sub">{tr("multirunview.samePromptSeveralBackendsInParallelPick")}</p>
       </div>
       <div className="view-toolbar">
-        <textarea
+        <Textarea
           className="multirun-prompt"
           rows={2}
           value={text}
           placeholder={tr("multirunview.promptToSendToEveryRun")}
           onChange={(e) => setText(e.target.value)}
         />
-        <input
+        <TextInput
+          uiSize="sm"
           className="model-filter-input"
-          type="text"
           placeholder={tr("multirunview.filterModels")}
           value={modelFilter}
           onChange={(e) => setModelFilter(e.target.value)}
         />
         <div className="view-toolbar-row multirun-controls">
           {slots.map((v, i) => (
-            <select key={i} value={v} onChange={(e) => setSlots((s) => s.map((x, j) => (j === i ? e.target.value : x)))}>
-              <option value="">{tr("multirunview.model")}{" "}{i + 1}</option>
-              {[...groups.entries()].map(([provider, ms]) => (
-                <optgroup key={provider} label={provider}>
-                  {ms.map((m) => (
-                    <option key={`${m.providerID}/${m.modelID}`} value={JSON.stringify({ providerID: m.providerID, modelID: m.modelID })}>
-                      {modelDisplayName(m, textModels)}
-                    </option>
-                  ))}
-                </optgroup>
-              ))}
-            </select>
+            <Select
+              key={i}
+              value={v}
+              label={v ? modelLabelFor(modelRefFromValue(v)) : `${tr("multirunview.model")} ${i + 1}`}
+              placeholder={`${tr("multirunview.model")} ${i + 1}`}
+              options={[
+                { value: "", label: `${tr("multirunview.model")} ${i + 1}` },
+                ...[...groups.entries()].flatMap(([provider, providerModels]) =>
+                  providerModels.map((model) => ({
+                    value: JSON.stringify({ providerID: model.providerID, modelID: model.modelID }),
+                    label: modelDisplayName(model, textModels),
+                    group: provider,
+                  }))),
+              ]}
+              onChange={(value) => setSlots((current) => current.map((slot, slotIndex) => slotIndex === i ? value : slot))}
+            />
           ))}
-          <select value={agent} onChange={(e) => setAgent(e.target.value)}>
-            <option value="">{tr("multirunview.agentDefault")}</option>
-            {agents.map((a) => (
-              <option key={a.name} value={a.name}>{a.name}</option>
-            ))}
-          </select>
-          <button className="primary-btn" onClick={() => void start()} disabled={busy || !text.trim()}>
+          <Select
+            value={agent}
+            label={agent || tr("multirunview.agentDefault")}
+            options={[
+              { value: "", label: tr("multirunview.agentDefault") },
+              ...agents.map((candidate) => ({ value: candidate.name, label: candidate.name })),
+            ]}
+            onChange={setAgent}
+          />
+          <Button variant="primary" busy={busy} onClick={() => void start()} disabled={!text.trim()}>
             {busy ? tr("multirunview.starting") : tr("common.run")}
-          </button>
+          </Button>
         </div>
         {error && <div className="form-error">{error}</div>}
       </div>

@@ -83,7 +83,7 @@ test("320px source controls expose 44px tabs, copy actions, and chips", { skip: 
         <button>Changes 12</button><button id="log-tab">Log</button><button>Branches 4</button><button>Stashes 2</button>
       </nav>
       <div class="copy-wrap"><button class="copy-btn" aria-label="Copy">C</button></div>
-      <div class="gh-filter-chips"><button id="all-chip">All</button></div>
+      <div class="gh-filter-chips"><button class="ui-btn ui-btn--ghost ui-btn--sm" id="all-chip">All</button></div>
       <p>Open <button class="file-ref" id="file-ref">a.ts</button> now.</p>
     </main>
   `);

@@ -2,6 +2,15 @@
   "name": "@polyth/web",
   "version": "0.1.0",
   "type": "module",
+  "exports": {
+    "./haptics": "./src/haptics.ts",
+    "./i18n": "./src/i18n/index.ts",
+    "./icons": "./src/icons.tsx",
+    "./mobile-viewport": "./src/mobileViewport.ts",
+    "./responsive-shell": "./src/responsiveShell.ts",
+    "./sheet-trigger": "./src/components/mobile/sheetTrigger.ts",
+    "./ui": "./src/components/ui/index.ts"
+  },
   "dependencies": {
     "@polyth/session": "0.1.0",
     "@polyth/web-sdk": "0.1.0"

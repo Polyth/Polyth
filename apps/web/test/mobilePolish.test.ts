@@ -11,7 +11,7 @@ register("./tsxHooks.mjs", import.meta.url);
 const { summarizeUnifiedDiff } = await import("../../../packages/git/widgets/PendingChangesBar.tsx");
 const { reviewMessageTone, stripCursorMarkers } = await import("../../../packages/github/widgets/PullRequestView.tsx");
 const { shellCardCopyText } = await import("../src/components/Timeline.tsx");
-const { modelModalities } = await import("../../../packages/models/widgets/ModelPicker.tsx");
+const { modelModalities } = await import("@polyth/models/model-presentation");
 const { parseMarkdown } = await import("../src/markdown/parse.ts");
 const { renderBlocks } = await import("../src/markdown/render.tsx");
 const { createElement, Fragment } = await import("react");
@@ -115,8 +115,9 @@ test("all mobile chat composers expose project and worktree targets", () => {
   assert.match(composer, /target: \{ kind: "branch", branch: candidate\.name \}/);
   assert.match(composer, /newSessionTarget\.kind === "branch"/);
   assert.doesNotMatch(composer, /Modalities:/);
-  // The upload chip is a ui/IconButton; `label` is its mandatory accessible name.
-  assert.match(composer, /label=\{tr\("composer\.addFiles"\)\}/);
+  // P2-W3A: the Add menu owns Upload on every layout; the composer wires it
+  // to the shared hidden file input.
+  assert.match(composer, /onUpload=\{\(\) => fileInputRef\.current\?\.click\(\)\}/);
   assert.match(actions, /composer-auto-approve/);
   assert.match(actions, /composer-goals/);
   assert.match(workflowLauncher, /composer-workflow/);

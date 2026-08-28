@@ -110,6 +110,9 @@ test("assistant chunks stream into one message and finalize on assistant/message
   assert.equal((a as { text: string }).text, "Hello");
   assert.equal((a as { reasoning: string }).reasoning, "think hard");
   assert.equal((a as { finalized: boolean }).finalized, false);
+  // Reasoning wall-clock bounds power the collapsed "Thinking · Ns" label.
+  assert.equal((a as { reasoningStartedAt?: number }).reasoningStartedAt, events[4]!.time);
+  assert.equal((a as { reasoningEndedAt?: number }).reasoningEndedAt, events[5]!.time);
   assert.equal(streaming.turn?.status, "working");
 
   // Finalize: assistant/message replaces streamed text, turn stops, usage totals.

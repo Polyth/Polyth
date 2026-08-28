@@ -13,6 +13,7 @@ import {
 } from "../usagePrefs.ts";
 import ProviderLogo from "../../../models/widgets/ProviderLogo.tsx";
 import { formatNumber, getLocale, tr } from "../../../../apps/web/src/i18n/index.ts";
+import { Button, RefreshIcon } from "../../../../apps/web/src/components/ui/index.ts";
 
 export function fmtQuota(n: number, unit: QuotaWindowDto["unit"]): string {
   if (unit === "currency") {
@@ -150,7 +151,7 @@ export function QuotaCard({
         {snap.fetchedAt > 0 && (
           <span className="muted" style={{ fontSize: "calc(11px * var(--ui-font-scale, 1))" }}>{new Date(snap.fetchedAt).toLocaleTimeString(getLocale())}</span>
         )}
-        <button type="button" className="small-btn" onClick={() => onRefresh(snap.providerId)}>{tr("common.refresh")}</button>
+        <Button size="sm" iconStart={RefreshIcon} onClick={() => onRefresh(snap.providerId)}>{tr("common.refresh")}</Button>
       </div>
       {snap.stale && snap.error && <div className="quota-error">{snap.error.message}</div>}
       {snap.windows.length > 0 && <ProviderQuotaChart snap={snap} />}

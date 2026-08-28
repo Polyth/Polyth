@@ -3,8 +3,8 @@ import type { Project } from "@polyth/contracts";
 import { updateProjectAppearance } from "../init.ts";
 import { friendlyError } from "../settings.ts";
 import { setUiError } from "../store.ts";
-import Dialog from "./a11y/Dialog.tsx";
 import { tr } from "../i18n/index.ts";
+import { Button, Dialog, TextInput } from "./ui/index.ts";
 
 const DEFAULT_COLOR = "#9b4b2b";
 const MAX_ICON_BYTES = 512 * 1024;
@@ -68,13 +68,33 @@ export default function ProjectAppearanceDialog({ project, onClose }: { project:
     catch (error) { setUiError(friendlyError(tr("projectappearancedialog.couldnTUploadProjectIcon"), error)); }
   };
   return (
-    <Dialog title={tr("projectappearancedialog.projectAppearance")} onClose={onClose} size="md" className="project-appearance-dialog">
+    <Dialog
+      title={tr("projectappearancedialog.projectAppearance")}
+      onClose={onClose}
+      size="md"
+      className="project-appearance-dialog"
+      initialFocus="input"
+      footer={(
+        <>
+          <Button size="sm" onClick={onClose} disabled={saving}>{tr("common.cancel")}</Button>
+          <Button
+            size="sm"
+            variant="primary"
+            busy={saving}
+            onClick={() => void save()}
+            disabled={!name.trim()}
+          >
+            {saving ? tr("common.saving") : tr("common.save")}
+          </Button>
+        </>
+      )}
+    >
       <div className="project-appearance-body">
         <p>{tr("projectappearancedialog.setTheTitleAndMarkerShown")}</p>
-        <label>{tr("projectappearancedialog.projectTitle")}<input autoFocus value={name} maxLength={120} placeholder={tr("projectappearancedialog.projectTitle")} aria-label={tr("projectappearancedialog.projectTitle")} onChange={(event) => setName(event.target.value)} /></label>
+        <label>{tr("projectappearancedialog.projectTitle")}<TextInput value={name} maxLength={120} placeholder={tr("projectappearancedialog.projectTitle")} aria-label={tr("projectappearancedialog.projectTitle")} onChange={(event) => setName(event.target.value)} /></label>
         <div className="project-icon-picker">
           <span className="project-appearance-label">{tr("projectappearancedialog.icon")}</span>
-          <input className="project-icon-search" value={iconQuery} placeholder={tr("projectappearancedialog.searchItemIcons")} aria-label={tr("projectappearancedialog.searchProjectIcons")} onChange={(event) => setIconQuery(event.target.value)} />
+          <TextInput className="project-icon-search" value={iconQuery} placeholder={tr("projectappearancedialog.searchItemIcons")} aria-label={tr("projectappearancedialog.searchProjectIcons")} onChange={(event) => setIconQuery(event.target.value)} />
           <div className="project-icon-options" role="radiogroup" aria-label={tr("projectappearancedialog.projectIconLibrary")}>
             {visibleIcons.map((name) => {
               const value = iconPath(name);
@@ -85,17 +105,13 @@ export default function ProjectAppearanceDialog({ project, onClose }: { project:
           </div>
           <div className="project-icon-upload-row">
             {uploadedIcon(icon) && <img className="project-icon-preview" src={icon} alt={tr("projectappearancedialog.selectedProjectIcon")} />}
-            <button type="button" className="small-btn" onClick={() => uploadRef.current?.click()}>{tr("projectappearancedialog.uploadSvgIcoOrPng")}</button>
-            {icon && <button type="button" className="small-btn" onClick={() => setIcon("")}>{tr("projectappearancedialog.clear")}</button>}
+            <Button size="sm" onClick={() => uploadRef.current?.click()}>{tr("projectappearancedialog.uploadSvgIcoOrPng")}</Button>
+            {icon && <Button size="sm" onClick={() => setIcon("")}>{tr("projectappearancedialog.clear")}</Button>}
             <input ref={uploadRef} type="file" accept="image/png,image/svg+xml,image/x-icon,image/vnd.microsoft.icon,.png,.svg,.ico" hidden onChange={(event) => void upload(event)} />
           </div>
           <small>{assetIcon(icon) ? `${tr("projectappearancedialog.selectedValue", { name: iconLabel(icon.split("/").pop() ?? "") })} ` : ""}{tr("projectappearancedialog.chooseFromTheBundledIconLibrary")}</small>
         </div>
         <label>{tr("projectappearancedialog.color")}<span className="project-color-input"><input type="color" value={color} onChange={(event) => setColor(event.target.value)} /><code>{color}</code></span></label>
-        <div className="dialog-actions">
-          <button type="button" onClick={onClose} disabled={saving}>{tr("common.cancel")}</button>
-          <button type="button" className="primary-btn" onClick={() => void save()} disabled={saving || !name.trim()}>{saving ? tr("common.saving") : tr("common.save")}</button>
-        </div>
       </div>
     </Dialog>
   );

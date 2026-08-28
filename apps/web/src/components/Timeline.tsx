@@ -4,7 +4,7 @@ import type { SessionEvent } from "@polyth/contracts";
 import { renderMarkdown } from "../markdown.tsx";
 import { fmtDuration, fmtTokens } from "../format.ts";
 import { groupWork, mergeThinking, promptIndex, copyText, loadDraft, type WorkGroup } from "../utils.ts";
-import { executionGroupLabel, executionPresentation, reasoningMilestones } from "../execution.ts";
+import { executionGroupLabel, executionPresentation, reasoningTail } from "../execution.ts";
 import { setUiSettings, useUiSettings } from "../uiPrefs.ts";
 import { forkSession, loadOlderEvents, sendMessage } from "../init.ts";
 import { requestComposerReplace } from "../composerInsert.ts";
@@ -13,6 +13,7 @@ import {
 } from "../store.ts";
 import { api } from "@polyth/session/web-api";
 import {
+  COPY_REASONING_NAME,
   JUMP_TO_LATEST_NAME,
   PROMPT_NAV_NAME,
   actionsMenuName,
@@ -60,6 +61,7 @@ import {
 } from "../promptRail.ts";
 import { captureTimelineAnchor, loadTimelineAnchor, restoreScrollDelta, saveTimelineAnchor, type TimelineAnchor } from "../timelineAnchor.ts";
 import AttachmentPills from "./AttachmentPills.tsx";
+import CopyButton from "./CopyButton.tsx";
 import SelectionMenu from "./SelectionMenu.tsx";
 import SlotHost from "./slots/SlotHost.ts";
 import type {
@@ -79,26 +81,57 @@ import { seedMultiRunPrompt } from "@polyth/multirun/prompt-seed";
 import WorkflowTimelineCard from "../../../../packages/workflow/widgets/WorkflowTimelineCard.tsx";
 import { tr } from "../i18n/index.ts";
 import ExecutionRow, { useCollapsePresence } from "./ExecutionRow.tsx";
+import { Button } from "./ui/index.ts";
 
 /** One announcement per copy/mutation outcome; text is the accessible record,
  *  checkmarks only supplement it. Screen readers ignore repeats, so identical
  *  text gets an invisible nudge (same trick as a11y/live.tsx). */
 type Announce = (text: string) => void;
 
-// Merged thinking block (WP4): collapsible with a first-line preview, or a
-// plain block when the collapsible pref is off. UX-MSG-ACTIONS: the disclosure
-// is a native, keyboard-operable control with a purpose-and-target name and
-// truthful expanded state; expanding/collapsing appends no event.
+// Merged thinking block (P2-W2): progressive disclosure over the REAL
+// reasoning stream. Collapsed it is one quiet line — "Thinking · 18s" once
+// finished, a live tail of the newest thought while streaming. Expanded it
+// renders the reasoning as secondary-styled markdown inside a height-capped,
+// self-following scroll well, so long thinking never breaks the page.
+// UX-MSG-ACTIONS: the disclosure is a native, keyboard-operable control with
+// a purpose-and-target name and truthful expanded state; expanding/collapsing
+// appends no event.
 function Thinking({ m }: { m: AssistantMsg }) {
   const prefs = useUiSettings();
-  const [open, setOpen] = useState(!m.finalized || prefs.thinkingDefaultExpanded);
-  const milestones = reasoningMilestones(m.reasoning);
-  const preview = milestones.at(-1) ?? "";
+  const [open, setOpen] = useState(prefs.thinkingDefaultExpanded);
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const active = !m.finalized;
+  const span = m.reasoningStartedAt !== undefined && m.reasoningEndedAt !== undefined
+    ? Math.max(0, m.reasoningEndedAt - m.reasoningStartedAt)
+    : null;
+  const duration = !active && span !== null && span >= 500 ? fmtDuration(span) : null;
+  const label = duration ? `${tr("timeline.thinking")} · ${duration}` : tr("timeline.thinking");
+  const tail = active ? reasoningTail(m.reasoning) : "";
+  // Streaming follow: while thinking is still running and the well is open,
+  // keep the capped body pinned to the newest line (presentation only).
+  useEffect(() => {
+    if (!open || !active) return;
+    const el = bodyRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [open, active, m.reasoning]);
+  const body = (
+    <div className="reasoning-content">
+      <div className="reasoning-body" ref={bodyRef} dir="auto" tabIndex={0}>
+        {renderMarkdown(m.reasoning, `${m.id}-reasoning`)}
+      </div>
+      <div className="reasoning-foot">
+        <CopyButton text={m.reasoning} label={COPY_REASONING_NAME} />
+      </div>
+    </div>
+  );
   if (!prefs.collapsibleThinkingBlocks) {
     return (
       <div className="reasoning reasoning-flat">
-        <div className="reasoning-heading"><span className={m.finalized ? "reasoning-mark done" : "reasoning-mark running"}>{m.finalized ? "✓" : <span className="spinner" />}</span><strong>{m.finalized ? "Reasoning complete" : "Thinking"}</strong></div>
-        <ol className="reasoning-milestones">{milestones.map((item, index) => <li key={`${index}:${item}`}>{item}</li>)}</ol>
+        <div className="reasoning-heading">
+          {active && <span className="reasoning-mark running" aria-hidden="true"><span className="spinner" /></span>}
+          <strong>{label}</strong>
+        </div>
+        {body}
       </div>
     );
   }
@@ -109,18 +142,12 @@ function Thinking({ m }: { m: AssistantMsg }) {
         aria-expanded={open}
         onClick={(e) => { e.preventDefault(); setOpen((v) => !v); }}
       >
-        <span className={m.finalized ? "reasoning-mark done" : "reasoning-mark running"} aria-hidden="true">
-          {m.finalized ? "✓" : <span className="spinner" />}
-        </span>
-        <strong>{m.finalized ? "Reasoning complete" : tr("timeline.thinking")}</strong>
-        <span className="muted reasoning-preview">{preview}</span>
+        {active && <span className="reasoning-mark running" aria-hidden="true"><span className="spinner" /></span>}
+        <strong className={active ? "reasoning-label running" : "reasoning-label"}>{label}</strong>
+        {!open && tail !== "" && <span className="reasoning-preview">{tail}</span>}
         <span className="reasoning-chevron" aria-hidden="true">{open ? <Icon.chevronUp /> : <Icon.chevronRight />}</span>
       </summary>
-      {open && (
-        <ol className="reasoning-milestones" dir="auto">
-          {milestones.map((item, index) => <li key={`${index}:${item}`}>{item}</li>)}
-        </ol>
-      )}
+      {open && body}
     </details>
   );
 }
@@ -613,14 +640,18 @@ function AssistantAgentHeader({
   );
 }
 
+const TASK_MARK = { done: "✓", active: "●", failed: "×", pending: "○" } as const;
+
 function TaskList({ plan }: { plan: NonNullable<RenderModel["tasks"]> }) {
   const completed = plan.items.filter((item) => item.status === "done").length;
+  const failed = plan.items.filter((item) => item.status === "failed").length;
   const allDone = completed === plan.items.length;
+  const settled = plan.items.every((item) => item.status === "done" || item.status === "failed");
   const active = plan.items.find((item) => item.status === "active");
-  const [open, setOpen] = useState(!allDone);
+  const [open, setOpen] = useState(!settled);
   useEffect(() => {
-    if (allDone) setOpen(false);
-  }, [allDone]);
+    if (settled) setOpen(false);
+  }, [settled]);
   const revealTask = (id: string) => {
     const row = document.querySelector<HTMLElement>(`[data-task-id="${CSS.escape(id)}"]`);
     if (!row) return;
@@ -628,13 +659,20 @@ function TaskList({ plan }: { plan: NonNullable<RenderModel["tasks"]> }) {
     row.classList.add("execution-highlight");
     window.setTimeout(() => row.classList.remove("execution-highlight"), 1200);
   };
+  const detail = [
+    `${completed}/${plan.items.length} complete`,
+    ...(failed > 0 ? [`${failed} failed`] : []),
+    ...(active && !settled ? [active.text] : []),
+  ].join(" · ");
   return (
-    <section className={`message-plan-card task-list${open ? " open" : ""}`} aria-label={tr("timeline.currentTaskPlan")}>
+    <section className={`task-list${open ? " open" : ""}`} aria-label={tr("timeline.currentTaskPlan")}>
       <button type="button" className="task-list-summary" aria-expanded={open} onClick={() => setOpen((value) => !value)}>
-        <span className={allDone ? "task-list-mark done" : "task-list-mark"}>{allDone ? "✓" : <Icon.plan />}</span>
+        <span className={allDone ? "task-list-mark done" : failed > 0 ? "task-list-mark failed" : "task-list-mark"} aria-hidden="true">
+          {allDone ? "✓" : failed > 0 && settled ? "×" : <Icon.plan />}
+        </span>
         <span className="task-list-title">
-          <strong>{allDone ? `${plan.items.length} tasks completed` : "Tasks"}</strong>
-          {!allDone && <small>{completed}/{plan.items.length} completed{active ? ` · ${active.text}` : ""}</small>}
+          <strong>Tasks</strong>
+          <small>{detail}</small>
         </span>
         <span className="task-list-chevron" aria-hidden="true">{open ? <Icon.chevronUp /> : <Icon.chevronDown />}</span>
       </button>
@@ -643,8 +681,9 @@ function TaskList({ plan }: { plan: NonNullable<RenderModel["tasks"]> }) {
           {plan.items.map((item) => (
             <li key={item.id} className={item.status}>
               <button type="button" onClick={() => revealTask(item.id)}>
-                <span>{item.status === "done" ? "✓" : item.status === "active" ? "◌" : "○"}</span>
+                <span aria-hidden="true">{TASK_MARK[item.status]}</span>
                 <span>{item.text}</span>
+                {item.status !== "pending" && <VisuallyHiddenStatus status={item.status} />}
               </button>
             </li>
           ))}
@@ -652,6 +691,12 @@ function TaskList({ plan }: { plan: NonNullable<RenderModel["tasks"]> }) {
       )}
     </section>
   );
+}
+
+/** Text alternative for the task glyph so state never rides on shape alone. */
+function VisuallyHiddenStatus({ status }: { status: "done" | "active" | "failed" }) {
+  const label = status === "done" ? "completed" : status === "active" ? "in progress" : "failed";
+  return <span className="sr-only">({label})</span>;
 }
 
 function AssistantView({
@@ -739,7 +784,7 @@ function GithubConflictCard({ message }: { message: GithubConflictMsg }) {
         <span>{message.title}</span>
         <code>{message.baseRefName} ← {message.headRefName}</code>
       </div>
-      <a className="small-btn" href={message.url} target="_blank" rel="noreferrer">
+      <a className="ui-btn ui-btn--quiet ui-btn--sm" href={message.url} target="_blank" rel="noreferrer">
         {tr("githubview.openOnGithub")} <Icon.external />
       </a>
     </article>
@@ -1502,16 +1547,16 @@ export default function Timeline({
         )}
         {start > 0 && (
           <div className="timeline-earlier">
-            <button className="small-btn" onClick={() => reveal(grownLimit(rows.length, limit))}>
-              {tr("timeline.show")}{" "}{Math.min(TIMELINE_CHUNK, start)} {tr("timeline.earlier")}</button>
-            <button className="small-btn" onClick={() => reveal(rows.length)}>
-              {tr("timeline.showAll2")}{start} {tr("timeline.hidden")}</button>
+            <Button size="sm" onClick={() => reveal(grownLimit(rows.length, limit))}>
+              {tr("timeline.show")}{" "}{Math.min(TIMELINE_CHUNK, start)} {tr("timeline.earlier")}</Button>
+            <Button size="sm" onClick={() => reveal(rows.length)}>
+              {tr("timeline.showAll2")}{start} {tr("timeline.hidden")}</Button>
           </div>
         )}
         {start === 0 && canLoadOlder && (
           <div className="timeline-earlier">
-            <button className="small-btn" onClick={() => void loadOlder()} disabled={olderBusy}>
-              {olderBusy ? tr("timeline.loadingEarlierHistory") : tr("timeline.loadEarlierHistory")}</button>
+            <Button size="sm" busy={olderBusy} onClick={() => void loadOlder()}>
+              {olderBusy ? tr("timeline.loadingEarlierHistory") : tr("timeline.loadEarlierHistory")}</Button>
           </div>
         )}
         {shownRows.map((r) => (
@@ -1541,12 +1586,12 @@ export default function Timeline({
         {confirmRestore && model.rewind && undoneRows.length > 0 && (
           <div className="rewound-confirm" role="group" aria-label={tr("timeline.confirmRestore")}>
             <span>{tr("timeline.youEditedTheDraftRestoringTheOriginal")}</span>
-            <button
-              className="small-btn"
+            <Button
+              size="sm"
               onClick={(event) => restore({ confirmed: true, invoker: event.currentTarget })}
-            >{tr("timeline.restoreAndDiscardTheEditedDraft")}</button>
-            <button className="small-btn" onClick={() => setConfirmRestore(false)}>
-              {tr("timeline.keepEditingTheDraft")}</button>
+            >{tr("timeline.restoreAndDiscardTheEditedDraft")}</Button>
+            <Button size="sm" onClick={() => setConfirmRestore(false)}>
+              {tr("timeline.keepEditingTheDraft")}</Button>
           </div>
         )}
         {/* The collapsed tail exists only while the revert is ACTIVE. After a
@@ -1557,13 +1602,13 @@ export default function Timeline({
             <summary>
               <span>{undoneMessages.length} {tr("timeline.revertedTimeline")}{" "}{undoneMessages.length === 1 ? tr("timeline.item") : tr("timeline.items")}</span>
               {model.rewind && !confirmRestore && (
-                <button
-                  className="small-btn"
+                <Button
+                  size="sm"
                   onClick={(event) => {
                     event.preventDefault();
                     restore({ invoker: event.currentTarget });
                   }}
-                >{tr("timeline.restoreOriginalTimeline")}</button>
+                >{tr("timeline.restoreOriginalTimeline")}</Button>
               )}
             </summary>
             <div className="rewound-tail-body">

@@ -17,12 +17,13 @@ import SessionList from "./sidebar/SessionList.tsx";
 import ImportSessionsDialog from "./ImportSessionsDialog.tsx";
 import { useShellMode } from "../responsiveShell.ts";
 import { useModalSurface } from "./a11y/Dialog.tsx";
-import { useDismissibleMenu } from "./a11y/Menu.ts";
 import SlotHost from "./slots/SlotHost.ts";
 import { useSidebarExpanded } from "../sidebarPresentation.ts";
 import { useSidebarViewMode } from "../sidebarPrefs.ts";
+import EmptyState from "./EmptyState.tsx";
 import {
-  Button, CheckIcon, CloseIcon, IconButton, Menu, Popover,
+  Button, CloseIcon, ComposeIcon, FilterIcon, IconButton, Menu, Popover, SidebarIcon,
+  type MenuEntry,
 } from "./ui/index.ts";
 import {
   SIDEBAR_COLLAPSED_WIDTH, SIDEBAR_MAX_WIDTH, SIDEBAR_MIN_WIDTH,
@@ -74,7 +75,6 @@ export default function Sidebar() {
   const project = projects.find((p) => p.id === activeProjectId) ?? null;
   const [renamingProject, setRenamingProject] = useState<string | null>(null);
   const [projectName, setProjectName] = useState("");
-  const [projectMenu, setProjectMenu] = useState<string | null>(null);
   const [importingProject, setImportingProject] = useState<string | null>(null);
   const [selectMode, setSelectMode] = useState(false);
   const [selectedSessionIds, setSelectedSessionIds] = useState<ReadonlySet<string>>(new Set());
@@ -172,19 +172,11 @@ export default function Sidebar() {
   const [dragWidth, setDragWidth] = useState<number | null>(null);
   const width = dragWidth ?? layout.width;
   const navRef = useRef<HTMLElement>(null);
-  const projectMenuRef = useRef<HTMLDivElement>(null);
-  const projectMenuTriggerRef = useRef<HTMLButtonElement>(null);
   const connectionTriggerRef = useRef<HTMLButtonElement>(null);
   const sideScrollRef = useRef<HTMLDivElement>(null);
   const pullStartRef = useRef<GesturePoint | null>(null);
   const pullDistanceRef = useRef(0);
   const pullArmedRef = useRef(false);
-  const onProjectMenuKey = useDismissibleMenu({
-    open: projectMenu !== null,
-    menuRef: projectMenuRef,
-    triggerRef: projectMenuTriggerRef,
-    onClose: () => setProjectMenu(null),
-  });
   const prevCompact = useRef(compact);
   useEffect(() => {
     if (!prevCompact.current && compact) closeDrawer();
@@ -350,13 +342,13 @@ export default function Sidebar() {
         <h2 className="sr-only">{tr("sidebar.projectsAndSessions")}</h2>
         {collapsed && (
           <div className="sidebar-collapsed-rail">
-            <button
-              className="icon-btn sidebar-expand"
-              title={tr("sidebar.expandProjectsAndSessions")}
-              aria-label={tr("sidebar.expandProjectsAndSessions")}
+            <IconButton
+              icon={SidebarIcon}
+              className="sidebar-expand"
+              label={tr("sidebar.expandProjectsAndSessions")}
               aria-expanded="false"
               onClick={() => setSidebarLayout({ collapsed: false })}
-            >»</button>
+            />
           </div>
         )}
         {!collapsed && (<>
@@ -397,6 +389,61 @@ export default function Sidebar() {
               >{tr("sidebar.message")}</button>
             )}
           </div>
+          {project && (
+            <IconButton
+              icon={ComposeIcon}
+              label={tr("sidebar.newChatInValue", { value: project.name || project.path })}
+              className="sidebar-new-session"
+              onClick={() => {
+                startNewSession(project.id);
+                closeDrawer();
+              }}
+            />
+          )}
+          <div className="sidebar-filter">
+            <Menu
+              label={tr("sidebar.sortSessionsCurrentlyValue", {
+                value: sort === "recent" ? tr("sidebar.recentActivity") : tr("sidebar.projectName"),
+              })}
+              title={tr("sidebar.listOptions")}
+              align="end"
+              entries={[
+                { heading: tr("sidebar.sortSessions") },
+                {
+                  id: "recent",
+                  label: tr("sidebar.recentActivity"),
+                  kind: "radio",
+                  checked: sort === "recent",
+                  onSelect: () => setSort("recent"),
+                },
+                {
+                  id: "name",
+                  label: tr("sidebar.projectName"),
+                  kind: "radio",
+                  checked: sort === "name",
+                  onSelect: () => setSort("name"),
+                },
+                "separator",
+                { heading: tr("sidebar.filterSessions") },
+                {
+                  id: "attention",
+                  label: tr("sidebar.needsAttention"),
+                  kind: "checkbox",
+                  checked: attentionOnly,
+                  onSelect: () => setAttentionOnly((value) => !value),
+                },
+              ]}
+            >
+              {(trigger) => (
+                <IconButton
+                  icon={FilterIcon}
+                  label={tr("sidebar.listOptions")}
+                  className={`sidebar-list-options${attentionOnly ? " active" : ""}`}
+                  {...trigger}
+                />
+              )}
+            </Menu>
+          </div>
           <div className="sidebar-popover-anchor">
             <button
               ref={connectionTriggerRef}
@@ -428,70 +475,6 @@ export default function Sidebar() {
               onClick={() => setOverlay("settings")}
             ><Icon.gear /></button>
           )}
-        </div>
-        <div className="sidebar-list-controls">
-          <div className="sidebar-sort">
-            <Menu
-              label={tr("sidebar.sortSessionsCurrentlyValue", {
-                value: sort === "recent" ? tr("sidebar.recentActivity") : tr("sidebar.projectName"),
-              })}
-              title={tr("sidebar.sortSessions")}
-              entries={[
-                {
-                  id: "recent",
-                  label: tr("sidebar.recentActivity"),
-                  icon: sort === "recent" ? CheckIcon : undefined,
-                  onSelect: () => setSort("recent"),
-                },
-                {
-                  id: "name",
-                  label: tr("sidebar.projectName"),
-                  icon: sort === "name" ? CheckIcon : undefined,
-                  onSelect: () => setSort("name"),
-                },
-              ]}
-            >
-              {(trigger) => (
-                <button className="sidebar-sort-trigger" {...trigger}>
-                  <span>{sort === "recent" ? tr("sidebar.recentActivity") : tr("sidebar.projectName")}</span>
-                  <span aria-hidden="true">▾</span>
-                </button>
-              )}
-            </Menu>
-          </div>
-          <span className="sidebar-controls-spacer" />
-          <div className="sidebar-filter">
-            <Menu
-              label={tr("sidebar.filterSessions")}
-              align="end"
-              entries={[
-                {
-                  id: "attention",
-                  label: tr("sidebar.needsAttention"),
-                  icon: attentionOnly ? CheckIcon : undefined,
-                  onSelect: () => setAttentionOnly((value) => !value),
-                },
-                ...(attentionOnly
-                  ? [{
-                      id: "clear",
-                      label: tr("sidebar.clearFilters"),
-                      onSelect: () => setAttentionOnly(false),
-                    }]
-                  : []),
-              ]}
-            >
-              {(trigger) => (
-                <button
-                  className={attentionOnly ? "active" : ""}
-                  aria-pressed={attentionOnly}
-                  {...trigger}
-                >
-                  <Icon.filter />
-                  <span>{tr("sidebar.filter")}</span>
-                </button>
-              )}
-            </Menu>
-          </div>
         </div>
         <div
           ref={sideScrollRef}
@@ -530,8 +513,13 @@ export default function Sidebar() {
             <div className="empty side-projects-status" role="status">{tr("sidebar.couldnTLoadProjects")}</div>
           )}
           {registry.status === "ready" && projects.length === 0 && (
-            <button className="empty side-open-project" onClick={() => setOverlay("project-picker")}>
-              {tr("sidebar.noProjectsYet")}<br />{tr("sidebar.chooseAProjectPathToStart")}</button>
+            <EmptyState
+              variant="panel"
+              title={tr("sidebar.noProjectsYet")}
+              description={tr("sidebar.chooseAProjectPathToStart")}
+              actionLabel={tr("projectfolderdialog.openProject")}
+              onAction={() => setOverlay("project-picker")}
+            />
           )}
           {registry.status === "ready" && projects.length > 0 && visibleProjects.length === 0 && (
             <div className="empty side-projects-status" role="status">{tr("sidebar.noMatchingSessions")}</div>
@@ -601,80 +589,80 @@ export default function Sidebar() {
                     <span className="project-path">{p.path}</span>
                   </span>
                 </button>
-                <button
-                  className="project-new-session"
-                  title={tr("sidebar.newChatInValue", { value: p.name || p.path })}
-                  aria-label={tr("sidebar.newChatInValue", { value: p.name || p.path })}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    startNewSession(p.id);
-                    closeDrawer();
-                  }}
-                ><Icon.plus /></button>
-                <button
-                  className="project-worktree-btn"
-                  title={`Open or create a worktree for ${p.name || p.path}`}
-                  aria-label={`Open or create a worktree for ${p.name || p.path}`}
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    openWorktreeSessionDialog(p.id);
-                  }}
-                ><Icon.worktree /></button>
-                <button
-                  className="project-menu-btn"
-                  aria-label={tr("sidebar.actionsForValue", { value: p.name || p.path })}
-                  aria-haspopup="menu"
-                  aria-expanded={projectMenu === p.id}
-                  onClick={(event) => {
-                    projectMenuTriggerRef.current = event.currentTarget;
-                    setProjectMenu((current) => current === p.id ? null : p.id);
-                  }}
-                ><Icon.more /></button>
-                {projectMenu === p.id && (
-                  <div
-                    className="project-actions-menu"
-                    role="menu"
-                    aria-label={tr("sidebar.actionsForValue", { value: p.name || p.path })}
-                    ref={projectMenuRef}
-                    onKeyDown={onProjectMenuKey}
+                <span className="project-actions">
+                  <button
+                    className="project-new-session"
+                    title={tr("sidebar.newChatInValue", { value: p.name || p.path })}
+                    aria-label={tr("sidebar.newChatInValue", { value: p.name || p.path })}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      startNewSession(p.id);
+                      closeDrawer();
+                    }}
+                  ><Icon.plus /></button>
+                  <Menu
+                    label={tr("sidebar.actionsForValue", { value: p.name || p.path })}
+                    title={p.name || p.path}
+                    align="end"
+                    entries={[
+                      {
+                        id: "select",
+                        label: selectMode ? tr("sidebar.cancelSessionSelection") : tr("sidebar.selectSessions"),
+                        onSelect: toggleSelectMode,
+                      },
+                      {
+                        id: "worktree",
+                        label: tr("sidebar.newSessionInWorktree"),
+                        onSelect: () => openWorktreeSessionDialog(p.id),
+                      },
+                      {
+                        id: "import",
+                        label: tr("sidebar.importSessions"),
+                        onSelect: () => setImportingProject(p.id),
+                      },
+                      {
+                        id: "rename",
+                        label: tr("sidebar.renameProject"),
+                        onSelect: () => { setRenamingProject(p.id); setProjectName(p.name); },
+                      },
+                      {
+                        id: "appearance",
+                        label: tr("sidebar.projectAppearance"),
+                        onSelect: () => setAppearanceProjectId(p.id),
+                      },
+                      {
+                        id: "git",
+                        label: tr("sidebar.sourceControlGitAmpWorktrees"),
+                        onSelect: () => {
+                          if (p.id !== activeProjectId) activateProject(p.id);
+                          openWorkspacePane("git");
+                        },
+                      },
+                      "separator",
+                      {
+                        id: "close",
+                        label: tr("sidebar.closeProject"),
+                        danger: true,
+                        onSelect: () => {
+                          void confirmAlert(
+                            tr("sidebar.closeValueThisRemovesItFrom", { name: p.name || p.path }),
+                            { title: tr("sidebar.closeProject"), confirmLabel: tr("sidebar.closeProject") },
+                          ).then((ok) => { if (ok) void removeProject(p.id); });
+                        },
+                      },
+                    ] satisfies MenuEntry[]}
+                    footer={<SlotHost slot="sidebar.project.actions" context={{ projectId: p.id }} />}
                   >
-                    <button role="menuitemcheckbox" aria-checked={selectMode} onClick={() => {
-                      toggleSelectMode();
-                      setProjectMenu(null);
-                    }}>{selectMode ? tr("sidebar.cancelSessionSelection") : tr("sidebar.selectSessions")}</button>
-                    <button role="menuitem" onClick={() => {
-                      setProjectMenu(null);
-                      openWorktreeSessionDialog(p.id);
-                    }}>{tr("sidebar.newSessionInWorktree")}</button>
-                    <button role="menuitem" onClick={() => {
-                      setProjectMenu(null);
-                      setImportingProject(p.id);
-                    }}>{tr("sidebar.importSessions")}</button>
-                    <button role="menuitem" onClick={() => {
-                      setProjectMenu(null);
-                      setRenamingProject(p.id);
-                      setProjectName(p.name);
-                    }}>{tr("sidebar.renameProject")}</button>
-                    <button role="menuitem" onClick={() => {
-                      setProjectMenu(null);
-                      setAppearanceProjectId(p.id);
-                    }}>{tr("sidebar.projectAppearance")}</button>
-                    <button role="menuitem" onClick={() => {
-                      setProjectMenu(null);
-                      if (p.id !== activeProjectId) activateProject(p.id);
-                      openWorkspacePane("git");
-                    }}>{tr("sidebar.sourceControlGitAmpWorktrees")}</button>
-                    <div className="project-menu-separator" role="separator" />
-                    <button className="project-menu-close" role="menuitem" onClick={() => {
-                      setProjectMenu(null);
-                      void confirmAlert(
-                        tr("sidebar.closeValueThisRemovesItFrom", { name: p.name || p.path }),
-                        { title: tr("sidebar.closeProject"), confirmLabel: tr("sidebar.closeProject") },
-                      ).then((ok) => { if (ok) void removeProject(p.id); });
-                    }}>{tr("sidebar.closeProject")}</button>
-                    <SlotHost slot="sidebar.project.actions" context={{ projectId: p.id }} />
-                  </div>
-                )}
+                    {(trigger) => (
+                      <button
+                        {...trigger}
+                        className="project-menu-btn"
+                        title={tr("sidebar.actionsForValue", { value: p.name || p.path })}
+                        aria-label={tr("sidebar.actionsForValue", { value: p.name || p.path })}
+                      ><Icon.more /></button>
+                    )}
+                  </Menu>
+                </span>
               </div>
             );
             if (effectiveViewMode !== "tree") return <div key={p.id} className="project-entry">{card}</div>;
@@ -712,6 +700,12 @@ export default function Sidebar() {
                 onToggleSelected={toggleSelectedSession}
               />
             </div>
+          )}
+          {registry.status === "ready" && projects.length > 0 && query.trim() === "" && (
+            <button className="sidebar-add-project" onClick={() => setOverlay("project-picker")}>
+              <Icon.plus />
+              <span>{tr("sidebar.addProject")}</span>
+            </button>
           )}
           <SlotHost
             slot="app.nav"

@@ -4,6 +4,7 @@
 //   panel   — bounded state for a rail, card, or docked panel;
 //   compact — inline prerequisite or no-results message.
 import type { ReactNode } from "react";
+import Button from "./ui/Button.tsx";
 
 export type EmptyStateVariant = "page" | "panel" | "compact";
 
@@ -35,7 +36,7 @@ export default function EmptyState({
       <h2 className="empty-state-title">{title}</h2>
       {description && <p className="empty-state-desc">{description}</p>}
       {actionLabel && onAction && (
-        <button className="primary-btn empty-state-action" onClick={onAction}>{actionLabel}</button>
+        <Button variant="primary" className="empty-state-action" onClick={onAction}>{actionLabel}</Button>
       )}
     </div>
   );

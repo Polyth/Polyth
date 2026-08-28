@@ -4,6 +4,7 @@
 import { useEffect, useState } from "react";
 import { api } from "@polyth/session/web-api";
 import { tr } from "../../../apps/web/src/i18n/index.ts";
+import { Button, Checkbox, Textarea, TextInput } from "../../../apps/web/src/components/ui/index.ts";
 
 export default function PrCreatePanel({ projectId, sessionId, onClose, onCreated }: {
   projectId: string;
@@ -73,7 +74,7 @@ export default function PrCreatePanel({ projectId, sessionId, onClose, onCreated
           {tr("prcreatepanel.pullRequestCreatedNbsp")}{" "}<a href={created.url} target="_blank" rel="noreferrer" className="mono">#{created.number}</a>
         </div>
         <div className="commit-row">
-          <button className="small-btn" onClick={onClose}>{tr("common.close")}</button>
+          <Button size="sm" onClick={onClose}>{tr("common.close")}</Button>
         </div>
       </div>
     );
@@ -95,7 +96,7 @@ export default function PrCreatePanel({ projectId, sessionId, onClose, onCreated
       </div>
       <label className="pr-create-field">
         <span>{tr("prcreatepanel.title")}</span>
-        <input
+        <TextInput
           value={title}
           placeholder={tr("prcreatepanel.pullRequestTitle")}
           onChange={(e) => setTitle(e.target.value)}
@@ -103,7 +104,7 @@ export default function PrCreatePanel({ projectId, sessionId, onClose, onCreated
       </label>
       <label className="pr-create-field">
         <span>{tr("prcreatepanel.description")}</span>
-        <textarea
+        <Textarea
           rows={6}
           placeholder={tr("prcreatepanel.describeTheChangeInMarkdown")}
           value={body}
@@ -113,27 +114,29 @@ export default function PrCreatePanel({ projectId, sessionId, onClose, onCreated
       <div className="pr-create-options">
         <label className="pr-create-field compact">
           <span>{tr("prcreatepanel.baseBranch")}</span>
-          <input
+          <TextInput
             className="mono"
             value={base}
             placeholder={baseHint || tr("prcreatepanel.defaultBranch")}
             onChange={(e) => setBase(e.target.value)}
           />
         </label>
-        <label className="source-confirm">
-          <input type="checkbox" checked={draft} onChange={(e) => setDraft(e.target.checked)} />
-          {tr("prcreatepanel.createAsDraft")}
-        </label>
+        <Checkbox
+          className="source-confirm"
+          checked={draft}
+          onChange={setDraft}
+          label={tr("prcreatepanel.createAsDraft")}
+        />
       </div>
       <div className="pr-create-actions">
         <span className="header-spacer" />
-        <button className="small-btn" disabled={generating || creating} onClick={() => void generate()}>
+        <Button size="sm" busy={generating} disabled={creating} onClick={() => void generate()}>
           {generating ? tr("prcreatepanel.generating") : tr("prcreatepanel.generateWithAi")}
-        </button>
-        <button className="small-btn" disabled={creating} onClick={onClose}>{tr("common.cancel")}</button>
-        <button className="primary-btn" disabled={creating || !title.trim()} onClick={() => void create()}>
+        </Button>
+        <Button size="sm" disabled={creating} onClick={onClose}>{tr("common.cancel")}</Button>
+        <Button size="sm" variant="primary" busy={creating} disabled={!title.trim()} onClick={() => void create()}>
           {creating ? tr("prcreatepanel.creating") : tr("prcreatepanel.createPr")}
-        </button>
+        </Button>
       </div>
       {error && <div className="form-error" role="alert">{error}</div>}
     </div>

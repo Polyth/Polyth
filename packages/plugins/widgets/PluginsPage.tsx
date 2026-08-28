@@ -12,6 +12,8 @@ import { tr } from "../../../apps/web/src/i18n/index.ts";
 import { useWidgetCatalog } from "../../../apps/web/src/widgets/catalog.ts";
 import { useWidgetLayout } from "../../../apps/web/src/widgets/widgetLayout.ts";
 import { describePluginSpec, parseOpenCodePluginJson } from "./pluginImport.ts";
+import { Button, IconButton, Tabs, Textarea, TextInput } from "../../../apps/web/src/components/ui/index.ts";
+import { CloseIcon } from "../../../apps/web/src/components/ui/icons.ts";
 
 const OTTO_PLUGIN_EXAMPLE = `{
   "$schema": "https://opencode.ai/config.json",
@@ -60,7 +62,10 @@ function OpenCodePluginsSection() {
   };
 
   const remove = async (plugin: OpenCodePluginEntryDto) => {
-    if (!window.confirm(`Remove OpenCode plugin "${plugin.spec}" from opencode.json?`)) return;
+    if (!await confirmAlert(`Remove OpenCode plugin "${plugin.spec}" from opencode.json?`, {
+      title: "Remove OpenCode plugin",
+      confirmLabel: tr("common.remove"),
+    })) return;
     setBusy(true);
     setError("");
     setNotice("");
@@ -101,7 +106,7 @@ function OpenCodePluginsSection() {
                 </div>
               </div>
               <div className="set-row-control">
-                <button className="small-btn danger-btn" disabled={busy} onClick={() => void remove(plugin)}>Remove</button>
+                <Button size="sm" variant="danger" disabled={busy} onClick={() => void remove(plugin)}>Remove</Button>
               </div>
             </div>
           );
@@ -111,7 +116,7 @@ function OpenCodePluginsSection() {
         <div className="stat-label">
           Import OpenCode plugin JSON <span className="muted">(string entries and [spec, options] tuples are supported)</span>
         </div>
-        <textarea
+        <Textarea
           rows={7}
           className="mono"
           aria-label="OpenCode plugin JSON"
@@ -145,24 +150,25 @@ function OpenCodePluginsSection() {
           </div>
         )}
         <div className="mcp-form-row">
-          <button
-            className="small-btn"
+          <Button
+            size="sm"
             disabled={busy || !text.trim()}
             onClick={() => setPreview(parseOpenCodePluginJson(text))}
           >
             Preview
-          </button>
-          <button
-            className="small-btn"
-            disabled={busy || !preview || preview.entries.length === 0 || preview.errors.length > 0}
+          </Button>
+          <Button
+            size="sm"
+            busy={busy}
+            disabled={!preview || preview.entries.length === 0 || preview.errors.length > 0}
             onClick={() => void importPlugins()}
           >
             {busy ? "Importing…" : `Import ${preview?.entries.length ?? 0} plugin${(preview?.entries.length ?? 0) === 1 ? "" : "s"}`}
-          </button>
+          </Button>
         </div>
       </div>
       {error && <div className="form-error">{error}</div>}
-      {notice && <div className="plugin-toast" role="status"><span>{notice}</span><button type="button" onClick={() => setNotice("")}>Dismiss</button></div>}
+      {notice && <div className="plugin-toast" role="status"><span>{notice}</span><Button size="sm" variant="ghost" onClick={() => setNotice("")}>Dismiss</Button></div>}
     </section>
   );
 }
@@ -285,10 +291,10 @@ export function ManagedPluginsSection() {
                 </span>
               </button>
               <div className="plugin-card-actions">
-                {p.update && <button type="button" onClick={() => void op(p.id, "reload")}>{tr("settings.pages.updateTo")}{" "}{p.update.version}</button>}
-                <button type="button" onClick={() => void op(p.id, p.enabled ? "disable" : "enable")}>{p.enabled ? tr("settings.pages.disable") : tr("settings.pages.enable")}</button>
-                <button type="button" onClick={() => setLogsFor(logsFor === p.id ? null : p.id)}>{tr("settings.pages.logs")}</button>
-                <button type="button" className="danger-btn" onClick={() => void remove(p)}>{tr("settings.pages.uninstall")}</button>
+                {p.update && <Button size="sm" onClick={() => void op(p.id, "reload")}>{tr("settings.pages.updateTo")}{" "}{p.update.version}</Button>}
+                <Button size="sm" onClick={() => void op(p.id, p.enabled ? "disable" : "enable")}>{p.enabled ? tr("settings.pages.disable") : tr("settings.pages.enable")}</Button>
+                <Button size="sm" onClick={() => setLogsFor(logsFor === p.id ? null : p.id)}>{tr("settings.pages.logs")}</Button>
+                <Button size="sm" variant="danger" onClick={() => void remove(p)}>{tr("settings.pages.uninstall")}</Button>
               </div>
             </article>
           );
@@ -299,15 +305,19 @@ export function ManagedPluginsSection() {
           <header>
             <span className="plugin-card-icon">{selectedPlugin.name.slice(0, 1).toUpperCase()}</span>
             <div><strong>{selectedPlugin.name}</strong><small>{tr("settings.pages.v")}{selectedPlugin.version} · {selectedPlugin.source}</small></div>
-            <button type="button" onClick={() => setSelected(null)} aria-label={tr("settings.pages.closePluginDetails")}>{tr("settings.pages.message")}</button>
+            <IconButton icon={CloseIcon} size="sm" label={tr("settings.pages.closePluginDetails")} onClick={() => setSelected(null)} />
           </header>
-          <div className="plugin-detail-tabs" role="tablist">
-            {(["overview", "widgets", "commands", "tools", "settings", "permissions", "contributions"] as const).map((tab) => (
-              <button type="button" role="tab" aria-selected={detailTab === tab} className={detailTab === tab ? "active" : ""} key={tab} onClick={() => setDetailTab(tab)}>
-                {tab[0]!.toUpperCase() + tab.slice(1)}
-              </button>
-            ))}
-          </div>
+          <Tabs
+            size="sm"
+            className="plugin-detail-tabs"
+            label={tr("settings.pages.pluginContributionsCount", { name: selectedPlugin.name, count: selectedPlugin.contributions.length })}
+            value={detailTab}
+            tabs={(["overview", "widgets", "commands", "tools", "settings", "permissions", "contributions"] as const).map((tab) => ({
+              id: tab,
+              label: tab[0]!.toUpperCase() + tab.slice(1),
+            }))}
+            onChange={(tab) => setDetailTab(tab as typeof detailTab)}
+          />
           <div className="plugin-detail-body">
             {detailTab === "overview" && <p>{selectedPlugin.enabled ? tr("settings.pages.enabledAndReadyToContributeToYour") : tr("settings.pages.disabledExistingLayoutPlacementsAreKeptUntil")}</p>}
             {detailTab === "widgets" && <p>{contributionCount(selectedPlugin, "widget.")} {tr("settings.pages.widgetContributionsInstallingAPluginNeverInserts")}</p>}
@@ -323,17 +333,18 @@ export function ManagedPluginsSection() {
       )}
       {logsFor && <PluginLogViewer id={logsFor} />}
       <div className="set-add-form">
-        <input
+        <TextInput
+          uiSize="sm"
           value={source}
           placeholder={tr("settings.pages.npmScopeName100Or")}
           aria-invalid={source.length > 0 && !sourceValid ? true : undefined}
           onChange={(e) => setSource(e.target.value)}
           onKeyDown={(e) => { if (e.key === "Enter" && sourceValid) void install(); }}
         />
-        <button className="small-btn" disabled={!sourceValid} onClick={() => void install()}>{tr("settings.pages.install")}</button>
+        <Button size="sm" disabled={!sourceValid} onClick={() => void install()}>{tr("settings.pages.install")}</Button>
       </div>
       {error && <div className="form-error">{error}</div>}
-      {toast && <div className="plugin-toast" role="status"><span>{toast}</span><button type="button" onClick={() => setToast("")}>{tr("settings.pages.dismiss")}</button></div>}
+      {toast && <div className="plugin-toast" role="status"><span>{toast}</span><Button size="sm" variant="ghost" onClick={() => setToast("")}>{tr("settings.pages.dismiss")}</Button></div>}
     </div>
   );
 }

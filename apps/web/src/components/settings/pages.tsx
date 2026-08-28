@@ -36,7 +36,6 @@ import type {
   SystemInfoDto,
 } from "@polyth/contracts";
 import ModelPicker from "../../../../../packages/models/widgets/ModelPicker.tsx";
-import Dialog from "../a11y/Dialog.tsx";
 import { modelSupportsTextWorkflow } from "../../composer/discovery.ts";
 import { getLocale, LOCALES, LOCALE_NAMES, setLocale, tr, type Locale } from "../../i18n/index.ts";
 import {
@@ -44,6 +43,8 @@ import {
   resolveSessionDefaultModel,
   useSessionDefaults,
 } from "../../sessionDefaults.ts";
+import { Button, Checkbox, Dialog, IconButton, Select, Textarea, TextInput } from "../ui/index.ts";
+import { DeleteIcon } from "../ui/icons.ts";
 
 function ThemeSwatches({ theme }: { theme: ThemeSpec }) {
   return (
@@ -62,22 +63,21 @@ export function GeneralPage() {
     <>
       <PageHead title={tr("settings.pages.general")} blurb={tr("settings.pages.applicationBasicsAndBrowserLocalBehavior")} />
       <Row label={tr("common.language")} hint={tr("common.languageHint")} itemId="general.language">
-        <select
-          className="inp"
+        <Select
+          label={LOCALE_NAMES[getLocale()]}
           value={getLocale()}
-          aria-label={tr("common.language")}
-          onChange={(event) => {
+          ariaLabel={tr("common.language")}
+          options={LOCALES.map((locale) => ({ value: locale, label: LOCALE_NAMES[locale] }))}
+          onChange={(locale) => {
             // Persist happens after the catalog chunk loads; reload only once
             // the new locale is durable, else the reload races the write.
-            void setLocale(event.target.value as Locale).then(() => window.location.reload());
+            void setLocale(locale as Locale).then(() => window.location.reload());
           }}
-        >
-          {LOCALES.map((locale) => <option key={locale} value={locale}>{LOCALE_NAMES[locale]}</option>)}
-        </select>
+        />
       </Row>
       <Row label={tr("settings.pages.productName")} hint={tr("settings.pages.shownInTheSidebarAndWindowChrome")} itemId="general.productName">
-        <input
-          className="inp"
+        <TextInput
+          uiSize="sm"
           value={settings.productName}
           onChange={(e) => updateSettings({ productName: e.target.value })}
           onBlur={() => { if (!settings.productName.trim()) updateSettings({ productName: "Polyth" }); }}
@@ -282,13 +282,13 @@ function ThemeSection() {
               <span className="mono">{t.id}</span>
               <span className="muted">{t.name} {tr("settings.pages.adaptsTo")}{" "}{settings.appearanceMode}</span>
               <span className="header-spacer" />
-              <button className="small-btn danger-btn" onClick={() => removeCustom(t.id)}>{tr("common.delete")}</button>
+              <Button size="sm" variant="danger" onClick={() => removeCustom(t.id)}>{tr("common.delete")}</Button>
             </div>
           ))}
         </div>
       )}
       <div className="theme-import">
-        <textarea
+        <Textarea
           className="theme-import-input"
           rows={3}
           placeholder={tr("settings.pages.pasteThemeJsonExample")}
@@ -297,8 +297,8 @@ function ThemeSection() {
           aria-label={tr("settings.pages.customThemeJson")}
         />
         <div className="theme-import-actions">
-          <button className="small-btn" disabled={!json.trim()} onClick={importJson}>{tr("settings.pages.importTheme")}</button>
-          <button className="small-btn" onClick={copyCurrent} title={tr("settings.pages.copyTheActiveThemeAsJsonTo")}>{tr("settings.pages.copyCurrentAsJson")}</button>
+          <Button size="sm" disabled={!json.trim()} onClick={importJson}>{tr("settings.pages.importTheme")}</Button>
+          <Button size="sm" onClick={copyCurrent} title={tr("settings.pages.copyTheActiveThemeAsJsonTo")}>{tr("settings.pages.copyCurrentAsJson")}</Button>
         </div>
         {jsonError && <div className="form-error">{jsonError}</div>}
       </div>
@@ -337,27 +337,21 @@ export function AppearancePage() {
       </Row>
       <ThemeSection />
       <Row label={tr("settings.pages.interfaceFont")} hint={tr("settings.pages.chooseFromCleanUiFaces")} itemId="appearance.fontFamily">
-        <select
-          aria-label={tr("settings.pages.interfaceFont")}
+        <Select
+          label={INTERFACE_FONTS.find((font) => font.id === settings.fontFamily)?.label ?? settings.fontFamily}
+          ariaLabel={tr("settings.pages.interfaceFont")}
           value={settings.fontFamily}
-          onChange={(event) => updateSettings({ fontFamily: event.target.value as typeof settings.fontFamily })}
-        >
-          <optgroup label={tr("settings.pages.uiSansSerif")}>
-            {INTERFACE_FONTS.filter((font) => !font.mono && font.id !== "serif").map((font) => (
-              <option key={font.id} value={font.id}>{font.label}</option>
-            ))}
-          </optgroup>
-          <optgroup label={tr("settings.pages.serif")}>
-            {INTERFACE_FONTS.filter((font) => font.id === "serif").map((font) => (
-              <option key={font.id} value={font.id}>{font.label}</option>
-            ))}
-          </optgroup>
-          <optgroup label={tr("settings.pages.programmerMonospaceLigaturesOff")}>
-            {INTERFACE_FONTS.filter((font) => font.mono).map((font) => (
-              <option key={font.id} value={font.id}>{font.label}</option>
-            ))}
-          </optgroup>
-        </select>
+          options={INTERFACE_FONTS.map((font) => ({
+            value: font.id,
+            label: font.label,
+            group: font.mono
+              ? tr("settings.pages.programmerMonospaceLigaturesOff")
+              : font.id === "serif"
+                ? tr("settings.pages.serif")
+                : tr("settings.pages.uiSansSerif"),
+          }))}
+          onChange={(fontFamily) => updateSettings({ fontFamily: fontFamily as typeof settings.fontFamily })}
+        />
       </Row>
       <Row label={tr("settings.pages.density")} hint={tr("settings.pages.chooseAiryBalancedOrCompactSpacingAcross")} itemId="appearance.density">
         <Seg value={ui.density} options={[
@@ -391,7 +385,7 @@ export function AppearancePage() {
         </div>
       </Row>
       <Row label={tr("settings.pages.resetFontSizes")} hint={tr("settings.pages.restoreTheInterfaceAndTerminal")}>
-        <button className="small-btn" type="button" onClick={resetFontSizes}>{tr("settings.pages.resetToDefaults")}</button>
+        <Button size="sm" onClick={resetFontSizes}>{tr("settings.pages.resetToDefaults")}</Button>
       </Row>
       <Row label={tr("settings.pages.cornerRounding")} hint={tr("settings.pages.applySquareCompactOrGenerouslyRoundedCorners")} itemId="appearance.rounding">
         <div className="rng rounding-range">
@@ -479,7 +473,8 @@ export function ChatPage() {
       {assist?.enabled && (
         <Row label={tr("settings.pages.quietTime")} hint={tr("settings.pages.secondsOfInactivityAfterAReplyBefore")}>
           <div className="editor-font-control">
-            <input
+            <TextInput
+              uiSize="sm"
               type="number" min={10} max={3600} value={assist.idleSeconds}
               aria-label={tr("settings.pages.assistQuietTimeInSeconds")}
               onChange={(e) => setAssist({ ...assist, idleSeconds: Number(e.target.value) })}
@@ -530,14 +525,12 @@ export function NotificationsPage() {
       <Row label={tr("settings.pages.notifyAbout")} hint={tr("settings.pages.eachEventKindIsIndependent")} itemId="notifications.kinds">
         <div className="notification-kind-list">
           {NOTIFY_KIND_LABELS.map(([kind, label]) => (
-            <label key={kind}>
-              <input
-                type="checkbox"
+            <Checkbox
+                key={kind}
                 checked={ui.notifyKinds.includes(kind)}
-                onChange={(e) => toggleKind(kind, e.target.checked)}
+                onChange={(checked) => toggleKind(kind, checked)}
+                label={label}
               />
-              {label}
-            </label>
           ))}
         </div>
       </Row>
@@ -564,7 +557,8 @@ export function NotificationsPage() {
         hint={tr("settings.pages.variablesValueValueValueValueValuesAre")}
         itemId="notifications.template"
       >
-        <input
+        <TextInput
+          uiSize="sm"
           className="notification-preview"
           value={ui.notifyTemplate}
           onChange={(e) => setUiSettings({ notifyTemplate: e.target.value.slice(0, 200) })}
@@ -573,7 +567,7 @@ export function NotificationsPage() {
       </Row>
       {ui.notifyOnComplete && !granted && !denied && (
         <Row label={tr("settings.pages.permission2")} hint={tr("settings.pages.theBrowserWillAskForPermissionOnce")}>
-          <button className="small-btn" onClick={requestNotifyPermission}>{tr("settings.pages.grantPermission")}</button>
+          <Button size="sm" onClick={requestNotifyPermission}>{tr("settings.pages.grantPermission")}</Button>
         </Row>
       )}
       <PushRow />
@@ -616,9 +610,9 @@ function PushRow() {
       </Row>
       {on && !unsupported && (
         <Row label={tr("settings.pages.testPush")} hint={tr("settings.pages.sendsATestNotificationThroughThePush")}>
-          <button
-            className="small-btn"
-            disabled={busy}
+          <Button
+            size="sm"
+            busy={busy}
             onClick={() => {
               setTested("");
               void api.pushTest().then((r) => setTested(r.sent === 1
@@ -626,7 +620,7 @@ function PushRow() {
                 : tr("settings.pages.sentToValueDevices", { count: r.sent })))
                 .catch((e) => setErr(e instanceof Error ? e.message : String(e)));
             }}
-          >{tr("settings.pages.sendTest")}</button>
+          >{tr("settings.pages.sendTest")}</Button>
           {tested && <span className="muted">{tested}</span>}
         </Row>
       )}
@@ -677,7 +671,7 @@ function BehaviorInstructionsEditor() {
   return (
     <div className="behavior-editor" data-settings-item="behavior.instructions">
       <div className="stat-label">{tr("settings.pages.globalInstructions")}{" "}<span className="muted">({pathLabel || "…"})</span></div>
-      <textarea
+      <Textarea
         rows={8}
         value={text}
         placeholder={tr("settings.pages.instructionsAppliedToEveryAgentTurnE")}
@@ -689,15 +683,15 @@ function BehaviorInstructionsEditor() {
         {state === "conflict" ? (
           <div className="revision-conflict" role="alert">
             <span>{tr("settings.pages.changedElsewhereSinceYouLoadedIt")}</span>
-            <button className="small-btn" onClick={() => void load()}>{tr("settings.pages.reloadLatest")}</button>
+            <Button size="sm" onClick={() => void load()}>{tr("settings.pages.reloadLatest")}</Button>
           </div>
         ) : (
           <span className="muted">{message}</span>
         )}
         <span className="header-spacer" />
-        <button className="small-btn" disabled={!dirty || state === "saving"} onClick={() => void save()}>
+        <Button size="sm" busy={state === "saving"} disabled={!dirty} onClick={() => void save()}>
           {state === "saving" ? tr("common.saving") : tr("settings.pages.saveApply")}
-        </button>
+        </Button>
       </div>
     </div>
   );
@@ -776,17 +770,19 @@ export function ProjectsPage() {
               <div className="set-row-label">{p.name || p.path}{p.id === activeProjectId && <span className="tag">{tr("settings.pages.active")}</span>}</div>
               <div className="set-row-hint mono">{p.path}</div>
             </div>
-            <button
-              className="small-btn danger-btn"
+            <Button
+              size="sm"
+              variant="danger"
               onClick={() => { void confirmAlert(tr("settings.pages.removeProjectValueFromPolyth", { value: p.name || p.path }), { title: tr("settings.pages.removeProject"), confirmLabel: tr("common.remove") }).then((ok) => { if (ok) void removeProject(p.id); }); }}
-            >{tr("common.remove")}</button>
+            >{tr("common.remove")}</Button>
           </header>
           <div className="project-settings-options">
             <div>
               <strong>{tr("settings.pages.projectIcon")}</strong>
               <span>{tr("settings.pages.useAnEmojiOrShortSymbolIn")}</span>
             </div>
-            <input
+            <TextInput
+              uiSize="sm"
               className="project-icon-input"
               defaultValue={p.icon ?? ""}
               maxLength={16}
@@ -831,18 +827,18 @@ export function ProjectsPage() {
               <strong>{tr("settings.pages.canvasSetup")}</strong>
               <span>{tr("settings.pages.chooseAStartingLayoutWidgetsAndWorkspace")}</span>
             </div>
-            <button
-              className="small-btn"
+            <Button
+              size="sm"
               onClick={() => {
                 activateProject(p.id);
                 setOverlay("onboarding");
               }}
-            >{tr("settings.pages.configureCanvas")}</button>
+            >{tr("settings.pages.configureCanvas")}</Button>
           </div>
         </section>
       ))}
       <div className="set-add-form">
-        <button className="small-btn" onClick={() => setPicking(true)}>{tr("settings.pages.openProjectFolder")}</button>
+        <Button size="sm" onClick={() => setPicking(true)}>{tr("settings.pages.openProjectFolder")}</Button>
       </div>
       {picking && <ProjectFolderDialog onClose={() => setPicking(false)} />}
     </>
@@ -873,8 +869,18 @@ function RoleEditor({ role, onClose }: { role: AgentDescriptor; onClose: () => v
     }
   };
   return (
-    <Dialog title={tr("settings.pages.editValue2", { name: role.name })} onClose={onClose} className="role-editor" initialFocus="textarea">
-      <div className="dialog-head"><span>{tr("settings.pages.editRole")}{" "}{role.name}</span><span className="header-spacer" /><button className="small-btn" aria-label={tr("common.close")} title={tr("common.close")} onClick={onClose}>✕</button></div>
+    <Dialog
+      title={`${tr("settings.pages.editRole")} ${role.name}`}
+      onClose={onClose}
+      className="role-editor"
+      initialFocus="textarea"
+      footer={(
+        <>
+          <Button size="sm" onClick={onClose}>{tr("common.cancel")}</Button>
+          <Button size="sm" variant="primary" busy={busy} onClick={() => void save()}>{tr("settings.pages.saveRole")}</Button>
+        </>
+      )}
+    >
       <div className="role-editor-body">
         <label>
           <span>{tr("settings.pages.usage")}</span>
@@ -891,11 +897,10 @@ function RoleEditor({ role, onClose }: { role: AgentDescriptor; onClose: () => v
         </label>
         <label>
           <span>{tr("settings.pages.systemPrompt")}</span>
-          <textarea rows={12} value={prompt} placeholder={tr("settings.pages.instructionsThatDefineThisRoleSBehavior")} onChange={(event) => setPrompt(event.target.value)} />
+          <Textarea rows={12} value={prompt} placeholder={tr("settings.pages.instructionsThatDefineThisRoleSBehavior")} onChange={(event) => setPrompt(event.target.value)} />
         </label>
         {error && <div className="form-error">{error}</div>}
       </div>
-      <div className="dialog-foot"><button className="small-btn" onClick={onClose}>{tr("common.cancel")}</button><span className="header-spacer" /><button className="primary-btn" disabled={busy} onClick={() => void save()}>{busy ? tr("common.saving") : tr("settings.pages.saveRole")}</button></div>
     </Dialog>
   );
 }
@@ -940,7 +945,7 @@ export function AgentsPage() {
                 <span><b>{tr("settings.pages.model")}</b>{modelLabel(agent.model)}</span>
                 <span><b>{tr("settings.pages.prompt")}</b>{agent.prompt?.trim() ? `${agent.prompt.trim().slice(0, 72)}${agent.prompt.trim().length > 72 ? "…" : ""}` : tr("settings.pages.opencodeDefault")}</span>
               </div>
-              <button className="small-btn" onClick={() => setEditingRole(agent)}>{tr("settings.pages.editRole2")}</button>
+              <Button size="sm" onClick={() => setEditingRole(agent)}>{tr("settings.pages.editRole2")}</Button>
             </article>
           ))}
         </div>
@@ -949,7 +954,7 @@ export function AgentsPage() {
       <div className="stat-label" style={{ display: "flex", alignItems: "center", gap: 8 }} data-settings-item="agents.profiles">
         <span>{tr("settings.pages.agentProfiles")}{profiles.length})</span>
         <span className="header-spacer" />
-        <button className="small-btn" onClick={() => setCreating(true)}>{tr("settings.pages.profile")}</button>
+        <Button size="sm" onClick={() => setCreating(true)}>{tr("settings.pages.profile")}</Button>
       </div>
       {profiles.length === 0 && (
         <EmptyState title={tr("settings.pages.noProfilesYet")} body={tr("settings.pages.aProfileBundlesModelAgentAndOptions")} />
@@ -967,11 +972,11 @@ export function AgentsPage() {
             {repairsFor[p.id] && <div className="set-row-hint">{repairsFor[p.id]}</div>}
           </div>
           <div className="set-row-control">
-            <button className="small-btn" onClick={() => void checkProfile(p)}>{tr("settings.pages.validate")}</button>
-            <button className="small-btn" onClick={() => setEditing(p)}>{tr("common.edit")}</button>
-            <button className="small-btn danger-btn"
+            <Button size="sm" onClick={() => void checkProfile(p)}>{tr("settings.pages.validate")}</Button>
+            <Button size="sm" onClick={() => setEditing(p)}>{tr("common.edit")}</Button>
+            <Button size="sm" variant="danger"
               onClick={() => { void confirmAlert(tr("settings.pages.deleteProfileValue", { name: p.name }), { title: tr("settings.pages.deleteProfile"), confirmLabel: tr("common.delete") }).then((ok) => { if (ok) void api.deleteProfile(p.id).then(() => refreshProfiles()); }); }}>
-              {tr("common.delete")}</button>
+              {tr("common.delete")}</Button>
           </div>
         </div>
       ))}
@@ -1031,38 +1036,38 @@ function McpServerForm({ existing, onDone }: { existing?: McpServerDto; onDone: 
   return (
     <div className="mcp-form">
       <div className="mcp-form-row">
-        <input value={name} placeholder={tr("settings.pages.name")} className="mcp-server-name" onChange={(e) => setName(e.target.value)} aria-label={tr("settings.pages.serverName")} />
+        <TextInput uiSize="sm" value={name} placeholder={tr("settings.pages.name")} className="mcp-server-name" onChange={(e) => setName(e.target.value)} aria-label={tr("settings.pages.serverName")} />
         <Seg value={kind} options={[["stdio", "stdio"], ["http", "HTTP"]]} onChange={setKind} />
       </div>
       {kind === "stdio" ? (
         <div className="mcp-form-row">
-          <input value={command} placeholder={tr("settings.pages.commandNoShell")} className="mcp-command" onChange={(e) => setCommand(e.target.value)} aria-label={tr("settings.pages.command")} />
-          <input value={args} placeholder={tr("settings.pages.argsSpaceSeparated")} onChange={(e) => setArgs(e.target.value)} aria-label={tr("settings.pages.arguments")} />
+          <TextInput uiSize="sm" value={command} placeholder={tr("settings.pages.commandNoShell")} className="mcp-command" onChange={(e) => setCommand(e.target.value)} aria-label={tr("settings.pages.command")} />
+          <TextInput uiSize="sm" value={args} placeholder={tr("settings.pages.argsSpaceSeparated")} onChange={(e) => setArgs(e.target.value)} aria-label={tr("settings.pages.arguments")} />
         </div>
       ) : (
         <div className="mcp-form-row">
-          <input value={url} placeholder={tr("settings.pages.httpsHostMcp")} onChange={(e) => setUrl(e.target.value)} aria-label={tr("settings.pages.serverUrl")} />
+          <TextInput uiSize="sm" value={url} placeholder={tr("settings.pages.httpsHostMcp")} onChange={(e) => setUrl(e.target.value)} aria-label={tr("settings.pages.serverUrl")} />
         </div>
       )}
       <div className="mcp-secrets">
         <div className="stat-label">{kind === "stdio" ? tr("settings.pages.environmentSecrets") : tr("settings.pages.headerSecrets")} <span className="muted">{tr("settings.pages.valuesStoredServerSideNeverShownAgain")}</span></div>
         {secretRows.map((row, i) => (
           <div key={i} className="mcp-form-row">
-            <input value={row.key} placeholder={kind === "stdio" ? tr("settings.pages.envKey") : tr("settings.pages.headerName")} className="mcp-secret-key"
+            <TextInput uiSize="sm" value={row.key} placeholder={kind === "stdio" ? tr("settings.pages.envKey") : tr("settings.pages.headerName")} className="mcp-secret-key"
               onChange={(e) => setSecretRows((rs) => rs.map((r, j) => j === i ? { ...r, key: e.target.value } : r))} />
-            <input type="password" value={row.value} placeholder={tr("settings.pages.value")}
+            <TextInput uiSize="sm" type="password" value={row.value} placeholder={tr("settings.pages.value")}
               onChange={(e) => setSecretRows((rs) => rs.map((r, j) => j === i ? { ...r, value: e.target.value } : r))} />
-            <button className="small-btn" aria-label={`${tr("common.remove")} ${tr("settings.pages.secret")}`} title={`${tr("common.remove")} ${tr("settings.pages.secret")}`} onClick={() => setSecretRows((rs) => rs.filter((_, j) => j !== i))}>✕</button>
+            <IconButton icon={DeleteIcon} size="sm" variant="danger" label={`${tr("common.remove")} ${tr("settings.pages.secret")}`} onClick={() => setSecretRows((rs) => rs.filter((_, j) => j !== i))} />
           </div>
         ))}
-        <button className="ghost-link" onClick={() => setSecretRows((rs) => [...rs, { key: "", value: "" }])}>{tr("settings.pages.secret")}</button>
+        <Button size="sm" variant="ghost" onClick={() => setSecretRows((rs) => [...rs, { key: "", value: "" }])}>{tr("settings.pages.secret")}</Button>
       </div>
       {error && <div className="form-error">{error}</div>}
       <div className="mcp-form-row">
-        <button className="small-btn" disabled={busy || !name.trim() || (kind === "stdio" ? !command.trim() : !url.trim())} onClick={() => void submit()}>
+        <Button size="sm" busy={busy} disabled={!name.trim() || (kind === "stdio" ? !command.trim() : !url.trim())} onClick={() => void submit()}>
           {existing ? tr("settings.pages.saveChanges") : tr("settings.pages.addServer")}
-        </button>
-        {existing && <button className="small-btn" disabled={busy} onClick={onDone}>{tr("common.cancel")}</button>}
+        </Button>
+        {existing && <Button size="sm" disabled={busy} onClick={onDone}>{tr("common.cancel")}</Button>}
       </div>
     </div>
   );
@@ -1099,7 +1104,7 @@ function McpImportForm({ existingNames, onDone }: { existingNames: string[]; onD
   return (
     <div className="mcp-form" data-settings-item="mcp.import">
       <div className="stat-label">{tr("settings.pages.importJson")}{" "}<span className="muted">{tr("settings.pages.mcpserversBlockClaudeOrOpencodeShapeEnv")}</span></div>
-      <textarea
+      <Textarea
         rows={6}
         className="mono"
         placeholder={tr("settings.pages.valueNN")}
@@ -1128,16 +1133,16 @@ function McpImportForm({ existingNames, onDone }: { existingNames: string[]; onD
         <div key={i} className={line.startsWith("✗") ? "form-error" : "set-row-hint"}>{line}</div>
       ))}
       <div className="mcp-form-row">
-        <button className="small-btn" disabled={busy || !text.trim()} onClick={() => setPreview(parseMcpServersJson(text))}>
-          {tr("settings.pages.preview")}</button>
-        <button className="small-btn" disabled={busy || !preview || preview.entries.length === 0} onClick={() => void doImport()}>
+        <Button size="sm" disabled={busy || !text.trim()} onClick={() => setPreview(parseMcpServersJson(text))}>
+          {tr("settings.pages.preview")}</Button>
+        <Button size="sm" busy={busy} disabled={!preview || preview.entries.length === 0} onClick={() => void doImport()}>
           {busy
             ? tr("settings.pages.importing")
             : (preview?.entries.length ?? 0) === 1
               ? tr("settings.pages.importOneServer")
               : tr("settings.pages.importValueServers", { count: preview?.entries.length ?? 0 })}
-        </button>
-        <button className="small-btn" disabled={busy} onClick={onDone}>{tr("common.cancel")}</button>
+        </Button>
+        <Button size="sm" disabled={busy} onClick={onDone}>{tr("common.cancel")}</Button>
       </div>
     </div>
   );
@@ -1186,13 +1191,13 @@ export function McpPage() {
             </div>
             <div className="set-row-control">
               <span className={`tag mcp-status ${s.status}`}>{s.status}</span>
-              <button className="small-btn" title={tr("settings.pages.checkReachabilityAndStoreTheResult")} onClick={() => void probe(s)}>{tr("settings.pages.probe")}</button>
-              <button className="small-btn" onClick={() => setEditingId(s.id)}>{tr("common.edit")}</button>
-              <button className="small-btn" onClick={() => void api.mcpUpdate(s.id, { enabled: !s.enabled }, s.revision).then(refresh)}>
+              <Button size="sm" title={tr("settings.pages.checkReachabilityAndStoreTheResult")} onClick={() => void probe(s)}>{tr("settings.pages.probe")}</Button>
+              <Button size="sm" onClick={() => setEditingId(s.id)}>{tr("common.edit")}</Button>
+              <Button size="sm" onClick={() => void api.mcpUpdate(s.id, { enabled: !s.enabled }, s.revision).then(refresh)}>
                 {s.enabled ? tr("settings.pages.disable") : tr("settings.pages.enable")}
-              </button>
-              <button className="small-btn danger-btn" onClick={() => { void confirmAlert(tr("settings.pages.removeMcpServerValue", { name: s.name }), { title: tr("settings.pages.removeMcpServer"), confirmLabel: tr("common.remove") }).then((ok) => { if (ok) void api.mcpRemove(s.id).then(refresh); }); }}>
-                {tr("common.remove")}</button>
+              </Button>
+              <Button size="sm" variant="danger" onClick={() => { void confirmAlert(tr("settings.pages.removeMcpServerValue", { name: s.name }), { title: tr("settings.pages.removeMcpServer"), confirmLabel: tr("common.remove") }).then((ok) => { if (ok) void api.mcpRemove(s.id).then(refresh); }); }}>
+                {tr("common.remove")}</Button>
             </div>
           </div>
         ))}
@@ -1201,8 +1206,8 @@ export function McpPage() {
       {importing && <McpImportForm existingNames={servers.map((s) => s.name)} onDone={() => { setImporting(false); refresh(); }} />}
       {!adding && !importing && (
         <div className="mcp-form-row">
-          <button className="small-btn" onClick={() => setAdding(true)}>{tr("settings.pages.mcpServer")}</button>
-          <button className="small-btn" onClick={() => setImporting(true)}>{tr("settings.pages.importJson2")}</button>
+          <Button size="sm" onClick={() => setAdding(true)}>{tr("settings.pages.mcpServer")}</Button>
+          <Button size="sm" onClick={() => setImporting(true)}>{tr("settings.pages.importJson2")}</Button>
         </div>
       )}
     </>
@@ -1231,11 +1236,11 @@ export function AboutPage() {
         <Row label={tr("settings.pages.version")}><span className="mono">{info.version}</span></Row>
         <Row label={tr("settings.pages.applicationUrl")} hint={tr("settings.pages.theConfiguredLocalAddressNeverDerivedFrom")}>
           <span className="mono">{info.applicationUrl}</span>
-          <button className="small-btn" onClick={() => copy("URL", info.applicationUrl)}>{tr("common.copy")}</button>
+          <Button size="sm" onClick={() => copy("URL", info.applicationUrl)}>{tr("common.copy")}</Button>
         </Row>
         <Row label={tr("settings.pages.tunnel")} hint={info.tunnelUrl ? tr("settings.pages.publicTunnelIsConfigured") : tr("settings.pages.noTunnelConfigured")}>
           {info.tunnelUrl
-            ? <><span className="mono">{info.tunnelUrl}</span><button className="small-btn" onClick={() => copy("tunnel", info.tunnelUrl!)}>{tr("common.copy")}</button></>
+            ? <><span className="mono">{info.tunnelUrl}</span><Button size="sm" onClick={() => copy("tunnel", info.tunnelUrl!)}>{tr("common.copy")}</Button></>
             : <span className="tag">{tr("settings.pages.none")}</span>}
         </Row>
         <Row label={tr("settings.pages.dataDirectory")}><span className="mono">{info.dataDirLabel}</span></Row>

@@ -4,6 +4,7 @@ import { useActiveModel, useStore } from "../../../apps/web/src/store.ts";
 import { api } from "@polyth/session/web-api";
 import EmptyState from "../../../apps/web/src/components/EmptyState.tsx";
 import { formatNumber, getLocale, tr } from "../../../apps/web/src/i18n/index.ts";
+import { Button } from "../../../apps/web/src/components/ui/index.ts";
 
 function fmtK(n: number): string {
   if (n >= 1_000_000) {
@@ -60,7 +61,7 @@ export default function GoalsView() {
           <p className="view-sub">{tr("goalsview.attachAnObjectiveAndLetTheAuditor")}</p>
         </div>
         <span className="header-spacer" />
-        {!goal && !form && <button className="small-btn" onClick={() => setForm(true)}>{tr("goalsview.attachGoal")}</button>}
+        {!goal && !form && <Button size="sm" onClick={() => setForm(true)}>{tr("goalsview.attachGoal")}</Button>}
       </div>
 
       {form && <GoalAttachForm onDone={() => setForm(false)} />}
@@ -112,13 +113,13 @@ export default function GoalsView() {
             </div>
             <div className="goal-actions">
               {goal.status === "active" && (
-                <button className="small-btn" disabled={busy} onClick={() => void act(api.goalPause)}>{tr("common.pause")}</button>
+                <Button size="sm" disabled={busy} onClick={() => void act(api.goalPause)}>{tr("common.pause")}</Button>
               )}
               {goal.status === "paused" && (
-                <button className="small-btn" disabled={busy} onClick={() => void act(api.goalResume)}>{tr("common.resume")}</button>
+                <Button size="sm" disabled={busy} onClick={() => void act(api.goalResume)}>{tr("common.resume")}</Button>
               )}
               {(goal.status === "active" || goal.status === "paused") && (
-                <button className="small-btn danger-btn" disabled={busy} onClick={() => void act(api.goalStop)}>{tr("common.stop")}</button>
+                <Button size="sm" variant="danger" disabled={busy} onClick={() => void act(api.goalStop)}>{tr("common.stop")}</Button>
               )}
             </div>
           </div>

@@ -7,6 +7,7 @@ import { canonicalTourPackageId } from "../../packages/onboarding/pageMap.ts";
 import { getPackageOnboarding, subscribePackageOnboardings } from "../../packages/onboarding/registry.ts";
 import { EmptyState, PageHead } from "./parts.tsx";
 import { tr, type TranslationKey } from "../../i18n/index.ts";
+import { Button, Switch } from "../ui/index.ts";
 
 const PACKAGE_NAME_KEYS: Readonly<Record<string, TranslationKey>> = {
   git: "packages.git.git",
@@ -73,13 +74,15 @@ function PackageTourButton({ descriptor }: { descriptor: PackageDescriptorDto })
   if (!getPackageOnboarding(packageId)) return null;
   const name = packageName(descriptor);
   return (
-    <button
-      type="button"
+    <Button
+      size="sm"
+      variant="ghost"
       className="package-tour-btn"
       aria-label={tr("settings.packagespage.previewTheValueTour", { name })}
       onClick={() => openPackageTour(packageId, "preview")}
     >
-      {tr("settings.packagespage.tour")}</button>
+      {tr("settings.packagespage.tour")}
+    </Button>
   );
 }
 
@@ -133,7 +136,7 @@ export default function PackagesPage() {
     return (
       <>
         <PageHead title={tr("settings.packagespage.packages")} blurb={tr("settings.packagespage.enableOrDisableOptionalWorkspaceFeatures")} />
-        <p className="muted">{tr("settings.packagespage.loadingInstalledPolythPackages")}</p>
+        <EmptyState title={tr("settings.packagespage.loadingInstalledPolythPackages")} busy />
       </>
     );
   }
@@ -161,19 +164,14 @@ export default function PackagesPage() {
                   <div className="package-tile-control">
                     <PackageTourButton descriptor={descriptor} />
                     <span>{descriptor.enabled ? tr("settings.packagespage.enabled") : tr("settings.packagespage.disabled")}</span>
-                    <button
-                      type="button"
-                      className={`package-toggle ${descriptor.enabled ? "on" : ""}`}
-                      role="switch"
-                      aria-checked={descriptor.enabled}
-                      aria-label={descriptor.enabled
+                    <Switch
+                      checked={descriptor.enabled}
+                      label={descriptor.enabled
                         ? tr("settings.packagespage.disableValue", { value: packageName(descriptor) })
                         : tr("settings.packagespage.enableValue", { value: packageName(descriptor) })}
                       disabled={busy === descriptor.id}
-                      onClick={() => { void setEnabled(descriptor, !descriptor.enabled); }}
-                    >
-                      <span />
-                    </button>
+                      onChange={(enabled) => { void setEnabled(descriptor, enabled); }}
+                    />
                   </div>
                 </article>
               ))}
@@ -201,12 +199,14 @@ export default function PackagesPage() {
             </div>
           </section>
           {isPackageEnabled("plugins") && (
-            <button
-              type="button"
-              className="ghost-link packages-plugin-link"
+            <Button
+              variant="ghost"
+              size="sm"
+              className="packages-plugin-link"
               onClick={() => window.dispatchEvent(new CustomEvent("polyth:settings-page", { detail: "plugins" }))}
             >
-              {tr("settings.packagespage.manageThirdPartyPlugins")}</button>
+              {tr("settings.packagespage.manageThirdPartyPlugins")}
+            </Button>
           )}
         </div>
       )}

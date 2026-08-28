@@ -25,7 +25,8 @@ const { activeToken, composerMode } = await import("../src/composer/language.ts"
 const {
   configEquals, consumeComposerConfig, emptyComposerConfig, isDefaultComposerConfig,
   loadComposerConfig, parseComposerConfig, saveComposerConfig, serializeComposerConfig,
-  wireProfileId, withExplicitAgent, withExplicitModel, withProfile, withProfileNone,
+  wireProfileId, withExplicitAgent, withExplicitModel, withExplicitThinking,
+  withModelForNextTurn, withProfile, withProfileNone,
 } = await import("../src/composerConfig.ts");
 
 const cmd = (name: string, description = `${name} desc`): SlashCommand =>
@@ -300,6 +301,19 @@ test("profile selection and explicit overrides clear each other", () => {
   // clearing the model override keeps the profile choice
   const cleared = withExplicitModel(profiled, undefined);
   assert.deepEqual(cleared.profile, { kind: "id", id: "prof-1" });
+});
+
+test("agent switches preserve effort; model switches clear only the pending effort", () => {
+  const configured = withExplicitThinking(
+    withExplicitModel(emptyComposerConfig(), { providerID: "p", modelID: "reasoning" }),
+    "high",
+  );
+  const nextAgent = withExplicitAgent(configured, "review");
+  assert.equal(nextAgent.thinking, "high", "effort belongs to the current model, not the agent");
+
+  const nextModel = withModelForNextTurn(nextAgent, { providerID: "p", modelID: "plain" });
+  assert.equal(nextModel.thinking, undefined, "a model switch cannot carry an incompatible pending effort");
+  assert.equal(nextModel.agent, "review", "model and agent choices stay independent");
 });
 
 test("wire profile id: selected, explicit None, and inherited never conflate", () => {

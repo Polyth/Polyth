@@ -5,9 +5,13 @@ import type { ComponentProps, ReactNode } from "react";
 import type { LucideIcon } from "./icons.ts";
 import Icon from "./Icon.tsx";
 import Spinner from "./Spinner.tsx";
+import {
+  buttonClassName,
+  type ButtonSize,
+  type ButtonVariant,
+} from "./buttonClassName.ts";
 
-export type ButtonVariant = "primary" | "quiet" | "danger" | "ghost";
-export type ButtonSize = "sm" | "md" | "lg";
+export type { ButtonSize, ButtonVariant } from "./buttonClassName.ts";
 
 export interface ButtonProps extends ComponentProps<"button"> {
   /** `quiet` is the default bordered neutral action. */
@@ -41,13 +45,7 @@ export default function Button({
   return (
     <button
       type={type ?? "button"}
-      className={[
-        "ui-btn",
-        `ui-btn--${variant}`,
-        `ui-btn--${size}`,
-        block ? "ui-btn--block" : "",
-        className ?? "",
-      ].filter(Boolean).join(" ")}
+      className={buttonClassName({ variant, size, block, className })}
       disabled={disabled || busy}
       aria-busy={busy || undefined}
       {...rest}

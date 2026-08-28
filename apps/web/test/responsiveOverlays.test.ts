@@ -47,10 +47,11 @@ test("modal primitives lock background scroll and retain touch dismissal", async
   assert.match(dialog, /root\?\.parentElement/);
   assert.match(dialog, /\[\.\.\.parent\.children\]\.filter\(\(element\) => element !== root\)/);
   assert.match(dialog, /onPointerDown=\{\(e\) => \{ if \(e\.target === e\.currentTarget\) onClose\(\); \}\}/);
-  assert.match(settings, /useModalScrollLock\(true\)/);
+  assert.match(settings, /useModalSurface\(\{/);
+  assert.match(settings, /open:\s*true/);
   assert.match(settings, /className="settings-mobile-nav-head"/);
   assert.match(settings, /className="settings-mobile-title"/);
-  assert.match(settings, /className="close-btn" onClick=\{closeSettings\}/);
+  assert.match(settings, /<IconButton icon=\{CloseIcon\} label=\{tr\("common\.close"\)\} onClick=\{closeSettings\} \/>/);
   assert.match(palette, /className="scrim palette-overlay" onPointerDown=/);
   assert.match(projectSetup, /className="project-setup-scrim" onPointerDown=/);
   assert.match(packageTour, /useModalScrollLock\(open\)/);
@@ -64,7 +65,7 @@ test("project and configuration actions remain attached to their handlers", asyn
   const profile = await read("../src/components/AgentProfileForm.tsx");
   const widgetLibrary = await read("../src/components/settings/WidgetLibraryOverlay.tsx");
 
-  assert.match(project, /className="primary-btn folder-open-btn"[\s\S]*onClick=\{\(\) => void openProject\(\)\}/);
+  assert.match(project, /variant="primary"[\s\S]*className="folder-open-btn"[\s\S]*onClick=\{\(\) => void openProject\(\)\}/);
   assert.match(project, /slot="project\.create\.options"/);
   assert.match(worktree, /onClick=\{\(\) => void submit\(\)\}/);
   assert.match(profile, /onClick=\{\(\) => void save\(true\)\}/);
@@ -217,12 +218,12 @@ test("390px audited actions expose 44px targets and scrolling question tabs", { 
   const tabs = Array.from({ length: 8 }, (_, index) =>
     `<button class="question-tab">${index + 1}</button>`).join("");
   await page.setContent(`
-    <style>${css}\n${developerCss}</style>
+    <style>${css}\n${developerCss}\n:root { --hit-min: var(--tap); }</style>
     <main style="width: 180px">
-      <button class="question-copy-btn" data-audit="question-copy">Copy</button>
+      <button class="ui-icon-btn ui-icon-btn--sm question-copy-btn" data-audit="question-copy">Copy</button>
       <div class="question-tabs" data-audit-scroll>${tabs}</div>
       <label class="question-option" data-audit="question-option"><input type="radio">Option</label>
-      <div class="question-actions"><button data-audit="question-action">Next</button></div>
+      <div class="question-actions"><button class="ui-btn ui-btn--sm" data-audit="question-action">Next</button></div>
       <span class="attachment-pill"><button class="att-remove" data-audit="attachment-remove">×</button></span>
       <div class="queue-chip"><span></span><span></span><span></span><span></span><button data-audit="queue-edit">Edit</button><button>×</button></div>
       <article class="msg assistant"><div class="msg-meta"><div class="msg-actions"><button class="msg-action-btn" data-audit="assistant-action">Copy</button></div></div></article>
@@ -235,7 +236,14 @@ test("390px audited actions expose 44px targets and scrolling question tabs", { 
     const targets = [...document.querySelectorAll<HTMLElement>("[data-audit]")]
       .map((element) => {
         const rect = element.getBoundingClientRect();
-        return { name: element.dataset.audit, width: rect.width, height: rect.height };
+        const pseudo = getComputedStyle(element, "::after");
+        const pseudoWidth = Number.parseFloat(pseudo.width);
+        const pseudoHeight = Number.parseFloat(pseudo.height);
+        return {
+          name: element.dataset.audit,
+          width: Math.max(rect.width, Number.isFinite(pseudoWidth) ? pseudoWidth : 0),
+          height: Math.max(rect.height, Number.isFinite(pseudoHeight) ? pseudoHeight : 0),
+        };
       });
     const tabsElement = document.querySelector<HTMLElement>("[data-audit-scroll]")!;
     return {

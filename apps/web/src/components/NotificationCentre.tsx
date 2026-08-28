@@ -17,6 +17,7 @@ import {
 import { defineWidgetPlugin, registerWidgetPlugin } from "../widgets/catalog.ts";
 import { getLocale, tr } from "../i18n/index.ts";
 import { RAIL_ICONS } from "../railIcons.ts";
+import { Button } from "./ui/index.ts";
 
 /** The rail-surface id the workspace.right.tabs slot bridge derives for the
  *  panel — what the bell toggles and hosts persist as the open surface. */
@@ -113,32 +114,34 @@ export function NotificationCentrePanel({
   return (
     <div className="notification-centre">
       <div className="ntc-toolbar">
-        <button
-          className="small-btn"
+        <Button
+          size="sm"
           disabled={state.unread === 0}
           onClick={() => void centre.markAllRead()}
-        >{tr("notificationcentre.markAllRead")}</button>
+        >{tr("notificationcentre.markAllRead")}</Button>
         {!confirmClear && (
-          <button
-            className="small-btn"
+          <Button
+            size="sm"
             disabled={state.items.length === 0}
             onClick={() => setConfirmClear(true)}
-          >{tr("notificationcentre.clearNotifications")}</button>
+          >{tr("notificationcentre.clearNotifications")}</Button>
         )}
         {confirmClear && (
           <>
-            <button
-              className="small-btn ntc-confirm"
+            <Button
+              size="sm"
+              variant="danger"
+              className="ntc-confirm"
               onClick={() => { setConfirmClear(false); void centre.clear(); }}
-            >{tr("notificationcentre.confirmClear")}</button>
-            <button className="small-btn" onClick={() => setConfirmClear(false)}>{tr("common.cancel")}</button>
+            >{tr("notificationcentre.confirmClear")}</Button>
+            <Button size="sm" onClick={() => setConfirmClear(false)}>{tr("common.cancel")}</Button>
           </>
         )}
       </div>
       {state.error !== null && (
         <div className="ntc-error" role="alert">
           <span>{state.error}</span>
-          <button className="small-btn" onClick={() => void centre.catchUp()}>{tr("common.retry")}</button>
+          <Button size="sm" onClick={() => void centre.catchUp()}>{tr("common.retry")}</Button>
         </div>
       )}
       {state.loading && rows.length === 0 && <div className="rail-empty">{tr("notificationcentre.loadingNotifications")}</div>}

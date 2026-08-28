@@ -3,12 +3,12 @@
 flex: 1; min-height: 0; display: flex; flex-direction: column;
 }
 .term-tabs {
-display: flex; align-items: center; gap: 4px; padding: 6px 12px;
+display: flex; align-items: center; gap: var(--space-1); padding: var(--space-2) var(--space-3);
   background: var(--panel); border-bottom: 1px solid var(--border-soft);
 }
 .term-tab-group {
 display: inline-flex; align-items: stretch;
-  border: 1px solid var(--border); border-radius: calc(6px * var(--corner-radius-scale)); overflow: hidden;
+  border: 1px solid var(--border); border-radius: var(--radius-control); overflow: hidden;
 }
 .term-tab-group.active {
 border-color: var(--accent);
@@ -74,25 +74,10 @@ border: none; border-radius: 0; width: 120px;
 color: var(--muted); font-size: 10.5px;
 }
 .term-new {
-width: 28px; height: 28px; padding: 0;
-  display: inline-grid; place-items: center;
-  color: var(--muted); font-size: 12px;
+flex: none;
 }
 .term-actions {
-display: flex; align-items: center; gap: 2px;
-}
-.term-actions button {
-width: 28px; height: 28px; padding: 0; border: none; background: transparent;
-  display: inline-grid; place-items: center; color: var(--muted);
-}
-.term-actions button:hover {
-color: var(--text); background: var(--elevated);
-}
-.term-actions button.active {
-color: var(--accent); background: var(--accent-wash);
-}
-.term-actions svg {
-width: 15px; height: 15px;
+display: flex; align-items: center; gap: var(--space-1);
 }
 .term-pane {
 position: relative; flex: 1; min-height: 0; display: flex; flex-direction: column; background: var(--term-bg);
@@ -186,22 +171,13 @@ content: ""; position: absolute; inset: 0; background: var(--term-fg);
 }
 .term-follow {
 position: absolute; right: 16px; bottom: 14px; z-index: 3;
-  display: inline-flex; align-items: center; gap: 6px;
-  border: 1px solid var(--accent-line); border-radius: 999px;
-  background: var(--elevated); color: var(--text); font-size: 11.5px;
-  padding: 5px 12px; box-shadow: var(--shadow-lg); cursor: pointer;
-}
-.term-follow:hover {
-background: var(--raised);
-}
-.term-follow svg {
-width: 13px; height: 13px;
+box-shadow: var(--shadow-lg);
 }
 .term-search {
 position: absolute; top: 8px; right: 14px; z-index: 4;
-  display: flex; align-items: center; gap: 4px;
-  border: 1px solid var(--border); border-radius: calc(8px * var(--corner-radius-scale));
-  background: var(--elevated); padding: 4px 6px; box-shadow: var(--shadow-lg);
+  display: flex; align-items: center; gap: var(--space-1);
+  border: 1px solid var(--border); border-radius: var(--radius-popover);
+  background: var(--elevated); padding: var(--space-1); box-shadow: var(--shadow-lg);
 }
 .term-search input {
 width: 180px; border: none; background: transparent; color: var(--text);
@@ -213,18 +189,8 @@ color: var(--red);
 .term-search .term-search-count {
 color: var(--muted); font-size: 11px; min-width: 44px; text-align: center; font-variant-numeric: tabular-nums;
 }
-.term-search button {
-border: none; background: transparent; color: var(--muted); border-radius: calc(5px * var(--corner-radius-scale));
-  width: 24px; height: 24px; padding: 0; display: inline-grid; place-items: center; font-size: 11px;
-}
-.term-search button:hover {
-color: var(--text); background: var(--raised);
-}
-.term-search button.on {
+.term-search button[aria-pressed="true"] {
 color: var(--accent); background: var(--accent-wash);
-}
-.term-search button svg {
-width: 13px; height: 13px;
 }
 .term-context {
 position: fixed; z-index: 30; min-width: 144px;

@@ -1,8 +1,14 @@
 // Mermaid diagrams (WP4): lazy-loaded, strict security level, zoom controls
 // and a fullscreen dialog. Render errors degrade to the diagram source.
 import { useEffect, useId, useState } from "react";
-import Dialog from "../components/a11y/Dialog.tsx";
 import { tr } from "../i18n/index.ts";
+import {
+  ExpandIcon,
+  IconButton,
+  Dialog,
+  ZoomInIcon,
+  ZoomOutIcon,
+} from "../components/ui/index.ts";
 
 type MermaidApi = {
   initialize(cfg: Record<string, unknown>): void;
@@ -109,20 +115,18 @@ export default function Mermaid({ code }: { code: string }) {
   return (
     <div className="mermaid-wrap">
       <div className="mermaid-toolbar">
-        <button className="small-btn" aria-label={tr("markdown.mermaid.zoomOut")} disabled={zoomIdx === 0} onClick={() => setZoomIdx((i) => Math.max(0, i - 1))}>−</button>
+        <IconButton icon={ZoomOutIcon} size="sm" label={tr("markdown.mermaid.zoomOut")} disabled={zoomIdx === 0} onClick={() => setZoomIdx((i) => Math.max(0, i - 1))} />
         <span className="mermaid-zoom">{Math.round(zoom * 100)}%</span>
-        <button className="small-btn" aria-label={tr("markdown.mermaid.zoomIn")} disabled={zoomIdx === ZOOMS.length - 1} onClick={() => setZoomIdx((i) => Math.min(ZOOMS.length - 1, i + 1))}>+</button>
-        <button className="small-btn" onClick={() => setFull(true)}>{tr("markdown.mermaid.fullscreen")}</button>
+        <IconButton icon={ZoomInIcon} size="sm" label={tr("markdown.mermaid.zoomIn")} disabled={zoomIdx === ZOOMS.length - 1} onClick={() => setZoomIdx((i) => Math.min(ZOOMS.length - 1, i + 1))} />
+        <IconButton icon={ExpandIcon} size="sm" label={tr("markdown.mermaid.fullscreen")} onClick={() => setFull(true)} />
       </div>
       <SvgPane svg={svg} zoom={zoom} />
       {full && (
         <Dialog title={tr("markdown.mermaid.diagram")} size="full" onClose={() => setFull(false)}>
-          <div className="dialog-head">
-            <span className="dialog-title">{tr("markdown.mermaid.diagram")}</span>
-            <span className="header-spacer" />
-            <button className="small-btn" aria-label={tr("markdown.mermaid.zoomOut")} onClick={() => setZoomIdx((i) => Math.max(0, i - 1))}>−</button>
-            <button className="small-btn" aria-label={tr("markdown.mermaid.zoomIn")} onClick={() => setZoomIdx((i) => Math.min(ZOOMS.length - 1, i + 1))}>+</button>
-            <button className="small-btn" onClick={() => setFull(false)}>{tr("common.close")}</button>
+          <div className="mermaid-toolbar mermaid-toolbar--dialog">
+            <IconButton icon={ZoomOutIcon} size="sm" label={tr("markdown.mermaid.zoomOut")} disabled={zoomIdx === 0} onClick={() => setZoomIdx((i) => Math.max(0, i - 1))} />
+            <span className="mermaid-zoom">{Math.round(zoom * 100)}%</span>
+            <IconButton icon={ZoomInIcon} size="sm" label={tr("markdown.mermaid.zoomIn")} disabled={zoomIdx === ZOOMS.length - 1} onClick={() => setZoomIdx((i) => Math.min(ZOOMS.length - 1, i + 1))} />
           </div>
           <SvgPane svg={svg} zoom={zoom} />
         </Dialog>

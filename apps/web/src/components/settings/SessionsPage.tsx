@@ -8,6 +8,7 @@ import { modelSupportsTextWorkflow } from "../../composer/discovery.ts";
 import { roleKind, useRolePrefs } from "../../rolePrefs.ts";
 import ModelPicker from "../../../../../packages/models/widgets/ModelPicker.tsx";
 import { tr } from "../../i18n/index.ts";
+import { Button, Select, TextInput } from "../ui/index.ts";
 
 export default function SessionsPage() {
   const models = useStore((s) => s.models);
@@ -86,24 +87,28 @@ export default function SessionsPage() {
         />
       </Row>
       <Row label={tr("settings.sessionspage.defaultThinking")} hint={tr("settings.sessionspage.appliedToModelsThatOfferThinkingVariants")}>
-        <select
-          aria-label={tr("settings.sessionspage.defaultThinking")}
+        <Select
+          label={defaults.defaultThinking ?? tr("settings.sessionspage.default")}
+          ariaLabel={tr("settings.sessionspage.defaultThinking")}
           value={defaults.defaultThinking ?? ""}
-          onChange={(event) => setSessionDefaults({ defaultThinking: event.target.value || undefined })}
-        >
-          <option value="">{tr("settings.sessionspage.default")}</option>
-          {thinkingOptions.map((thinking) => <option key={thinking} value={thinking}>{thinking}</option>)}
-        </select>
+          options={[
+            { value: "", label: tr("settings.sessionspage.default") },
+            ...thinkingOptions.map((thinking) => ({ value: thinking, label: thinking })),
+          ]}
+          onChange={(value) => setSessionDefaults({ defaultThinking: value || undefined })}
+        />
       </Row>
       <Row label={tr("settings.sessionspage.defaultAgent")} hint={tr("settings.sessionspage.opencodeRoleUsedWhenNoProjectOr")}>
-        <select
-          aria-label={tr("settings.sessionspage.defaultAgent")}
+        <Select
+          label={defaultAgent || tr("settings.sessionspage.opencodeAgentDefault")}
+          ariaLabel={tr("settings.sessionspage.defaultAgent")}
           value={defaultAgent}
-          onChange={(event) => setSessionDefaults({ defaultAgent: event.target.value || undefined })}
-        >
-          <option value="">{tr("settings.sessionspage.opencodeAgentDefault")}</option>
-          {mainAgents.map((agent) => <option key={agent.name} value={agent.name}>{agent.name}</option>)}
-        </select>
+          options={[
+            { value: "", label: tr("settings.sessionspage.opencodeAgentDefault") },
+            ...mainAgents.map((agent) => ({ value: agent.name, label: agent.name })),
+          ]}
+          onChange={(value) => setSessionDefaults({ defaultAgent: value || undefined })}
+        />
       </Row>
       <Row label={tr("settings.sessionspage.smallModel")} hint={tr("settings.sessionspage.overrideModelForLightweightSummariesAndGenerated")}>
         <ModelPicker
@@ -127,7 +132,8 @@ export default function SessionsPage() {
       <div className="stat-label session-settings-heading">{tr("settings.sessionspage.sessionRetention")}</div>
       <Row label={tr("settings.sessionspage.retentionPeriod")} hint={tr("settings.sessionspage.idleCompletedSessionsOlderThanThisBecome")}>
         <label className="retention-days">
-          <input
+          <TextInput
+            uiSize="sm"
             type="number"
             min={1}
             max={3650}
@@ -141,9 +147,9 @@ export default function SessionsPage() {
       <p className="session-retention-note">
         {tr("settings.sessionspage.expiredSessionsAreArchivedOnlyWhenYou")}</p>
       <Row label={tr("settings.sessionspage.manualCleanup")} hint={tr("settings.sessionspage.archiveEverySessionThatCurrentlyMeetsThe")}>
-        <button className="small-btn" disabled={busy || !eligible} onClick={() => void cleanup()}>
+        <Button size="sm" busy={busy} disabled={!eligible} onClick={() => void cleanup()}>
           {busy ? tr("settings.sessionspage.archiving") : tr("settings.sessionspage.archiveEligibleSessions")}
-        </button>
+        </Button>
       </Row>
       <div className="retention-eligible" role="status">
         {tr("settings.sessionspage.eligibleForArchivingRightNow")}{" "}<strong>{eligible ?? "…"}</strong>

@@ -25,11 +25,6 @@ width: 100%; height: 100%; display: block;
   /* A single square canvas keeps every provider mark the same rendered size. */
   overflow: visible;
 }
-@container feature-panel (max-width: 700px) {
-.model-chip {
-flex: 1 1 min(100%, 180px); justify-content: flex-start; overflow-wrap: anywhere;
-}
-}
 .set-model-list {
 display: flex; flex-direction: column; gap: 1px; max-height: 52vh; overflow-y: auto;
 }
@@ -145,215 +140,254 @@ html[dir="rtl"] .provider-count {
 margin-left: 0;
   margin-right: auto;
 }
+/* ---- P2-W3A model picker: quiet chip trigger + one catalog surface ------- */
 .model-picker-trigger {
-max-width: 310px !important; gap: 7px;
+max-width: 310px; gap: 6px;
 }
 .model-trigger-logo {
-width: 22px; height: 22px;
+width: 16px; height: 16px; flex: none; color: var(--text-dim);
 }
-.composer-model-header .model-trigger-logo {
-display: none;
+/* Desktop popover (chrome from .ui-popover): search on top, one scroll list. */
+.model-pop {
+width: min(400px, calc(100vw - 28px)); padding: 6px; display: flex; flex-direction: column;
 }
-.model-trigger-meta {
-color: var(--muted); font-size: var(--picker-meta-size); white-space: nowrap;
+.model-pop-search {
+padding: 2px 2px 6px;
 }
-.model-picker-pop {
-width: min(430px, calc(100vw - 28px)); padding: 8px;
+.model-pop-search input {
+width: 100%; min-height: 32px; padding: 0 10px;
+  border: 1px solid var(--border-soft); border-radius: calc(8px * var(--corner-radius-scale));
+  background: var(--input-bg); color: var(--text); font-size: var(--picker-font-size);
 }
-.model-picker-pop > input {
-width: 100%; min-height: 34px; padding: 0 9px; margin-bottom: 6px;
+.model-pop-search input:focus-visible {
+outline: none; border-color: var(--accent-line);
 }
 .model-picker-list {
-max-height: min(440px, 60vh); overflow-y: auto;
+max-height: min(440px, 56vh); overflow-y: auto; min-height: 0;
 }
 .model-provider-section {
 border-top: 1px solid var(--border-soft);
 }
+.model-provider-section.favorites {
+border-top: 0;
+}
 .model-provider-head {
 width: 100%;
-  min-height: 35px;
+  min-height: 34px;
   display: flex;
   align-items: center;
   gap: 7px;
   padding: 0 8px;
   border: 0;
   background: transparent;
+  color: var(--muted);
   text-align: left;
+  cursor: pointer;
+}
+.model-provider-head.static {
+cursor: default;
 }
 .model-provider-head strong {
-flex: 1; font-size: var(--picker-font-size);
+flex: 1; overflow: hidden; color: var(--text-dim); font-size: var(--picker-meta-size);
+  font-weight: 640; letter-spacing: .02em; text-overflow: ellipsis; white-space: nowrap;
 }
 .model-provider-head small {
-color: var(--muted); font-size: var(--picker-meta-size);
+color: var(--faint); font-size: var(--picker-meta-size); font-variant-numeric: tabular-nums;
+}
+.model-provider-caret {
+display: inline-flex; color: var(--faint); transition: transform 140ms ease;
+}
+.model-provider-caret svg {
+width: 14px; height: 14px;
+}
+.model-provider-caret:not(.open) {
+transform: rotate(-90deg);
+}
+.model-provider-grip {
+color: var(--faint); font-size: 12px; cursor: grab;
 }
 .model-provider-logo {
-width: 20px; height: 20px;
+width: 18px; height: 18px;
 }
 .model-picker-row {
-min-height: 47px;
+min-height: 44px;
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 6px 8px;
+  padding: 5px 8px;
   border-radius: calc(8px * var(--corner-radius-scale));
   cursor: pointer;
 }
-.model-picker-row:hover,
+.model-picker-row.active {
+background: var(--surface-overlay);
+}
 .model-picker-row.current {
 background: var(--accent-wash);
 }
 .model-picker-check {
-width: 14px; color: var(--accent);
+width: 14px; flex: none; color: var(--accent);
 }
 .model-picker-grip {
-color: var(--muted); font-size: 14px; cursor: grab;
+color: var(--faint); font-size: 14px; cursor: grab;
 }
 .model-picker-copy {
-min-width: 0; flex: 1; display: flex; flex-direction: column;
+min-width: 0; flex: 1; display: flex; flex-direction: column; gap: 1px;
 }
 .model-picker-copy strong {
 overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: var(--picker-font-size); font-weight: 580;
 }
 .model-picker-copy small {
+overflow: hidden; color: var(--muted); font-size: var(--picker-meta-size); text-overflow: ellipsis; white-space: nowrap;
+}
+.model-row-offline {
+margin-inline-start: 6px; color: var(--amber); font-size: var(--picker-meta-size); font-style: normal; font-weight: 520;
+}
+/* Row tools stay invisible until the row is hovered or keyboard-active, so
+   the list reads as names, not as a button grid. */
+.model-row-info,
+.model-picker-row .star-btn {
+flex: none;
+  width: 26px;
+  height: 26px;
+  display: inline-grid;
+  place-items: center;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--faint);
+  opacity: 0;
+}
+.model-picker-row:hover .model-row-info,
+.model-picker-row.active .model-row-info,
+.model-picker-row:hover .star-btn,
+.model-picker-row.active .star-btn,
+.model-picker-row .star-btn.on {
+opacity: 1;
+}
+.model-row-info:hover,
+.model-picker-row .star-btn:hover {
+color: var(--text); background: var(--surface-overlay);
+}
+.model-row-info svg {
+width: 14px; height: 14px;
+}
+/* ---- model details card (shared by popover and sheet) -------------------- */
+.model-details {
+display: flex; flex-direction: column; gap: var(--space-2); padding: var(--space-1);
+}
+.model-sheet .model-details {
+min-height: 100%;
+  padding: var(--space-2) var(--space-4) var(--space-4);
+}
+.model-details-back {
+align-self: flex-start;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 28px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--muted);
+  font-size: var(--picker-meta-size);
+  cursor: pointer;
+}
+.model-sheet .model-details-back {
+min-height: var(--tap);
+}
+.model-details-back:hover {
+color: var(--text); background: var(--surface-overlay);
+}
+.model-details-back svg {
+width: 13px; height: 13px;
+}
+.model-details-head {
+display: flex; align-items: center; gap: var(--space-2); padding: 0 4px;
+}
+.model-details-title {
+min-width: 0; display: flex; flex-direction: column; gap: 1px;
+}
+.model-details-title strong {
+overflow: hidden; font-size: var(--picker-font-size); font-weight: 640; text-overflow: ellipsis; white-space: nowrap;
+}
+.model-details-title small {
+overflow: hidden; color: var(--faint); font-family: var(--mono); font-size: var(--picker-meta-size); text-overflow: ellipsis; white-space: nowrap;
+}
+.model-details-grid {
+margin: 0; padding: 0 4px; display: flex; flex-direction: column; gap: 7px;
+}
+.model-details-grid > div {
+display: grid; grid-template-columns: minmax(88px, 34%) minmax(0, 1fr); gap: var(--space-2); align-items: baseline;
+}
+.model-details-grid dt {
 color: var(--muted); font-size: var(--picker-meta-size);
 }
-.provider-share-card {
-display: grid;
-  grid-template-columns: minmax(150px, 1fr) 150px minmax(180px, 1fr);
-  align-items: center;
-  gap: 18px;
-  margin: 10px 0 18px;
-  padding: 14px 16px;
-  border: 1px solid var(--border-soft);
-  border-radius: calc(11px * var(--corner-radius-scale));
-  background: var(--elevated);
+.model-details-grid dd {
+margin: 0; min-width: 0; font-size: var(--picker-meta-size); overflow-wrap: anywhere;
 }
-.provider-share-card p {
-margin: 5px 0 0; color: var(--muted); font-size: 11px;
+.model-details-warn {
+color: var(--amber);
 }
-.provider-share-donut {
-position: relative; width: 138px; height: 138px; justify-self: center;
+.model-details-usage {
+display: flex; flex-direction: column; gap: 4px;
 }
-.provider-share-donut svg {
-width: 100%; height: 100%; transform: rotate(-90deg);
+.model-details-meter {
+display: block; height: 4px; border-radius: 999px; background: var(--surface-overlay); overflow: hidden;
 }
-.provider-share-donut circle {
-fill: none; stroke-width: 16;
+.model-details-meter b {
+display: block; height: 100%; border-radius: inherit; background: var(--accent);
 }
-.provider-share-track {
-stroke: var(--border-soft);
+.model-details-actions {
+padding: 2px 4px 4px;
 }
-.provider-share-arc {
-stroke-linecap: butt;
+.model-sheet .model-details-actions {
+  position: sticky;
+  bottom: 0;
+  margin-top: auto;
+  padding-block: var(--space-2);
+  background: var(--panel);
 }
-.provider-share-donut > div {
-position: absolute;
-  inset: 0;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  pointer-events: none;
-}
-.provider-share-donut strong {
-max-width: 82px; overflow: hidden; color: var(--text); font-size: 15px; text-overflow: ellipsis; white-space: nowrap;
-}
-.provider-share-donut span {
-color: var(--muted); font-size: 9px; text-transform: uppercase;
-}
-.provider-share-legend {
-display: flex; flex-direction: column; gap: 7px; min-width: 0;
-}
-.provider-share-legend > div {
-display: grid; grid-template-columns: 20px 9px minmax(0, 1fr) auto; align-items: center; gap: 7px; font-size: 11px;
-}
-.provider-share-logo {
-width: 20px; height: 20px;
-}
-.provider-share-legend i {
-width: 8px; height: 8px; border-radius: 50%;
-}
-.provider-share-legend span {
-overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-.provider-share-legend strong {
-font-variant-numeric: tabular-nums;
-}
-.provider-quota-chart {
-margin: 10px 0 12px; padding: 10px 10px 6px; border: 1px solid var(--border-soft); border-radius: calc(9px * var(--corner-radius-scale)); background: var(--bg);
-}
-.provider-quota-chart svg {
-width: 100%; height: 72px; overflow: visible;
-}
-.provider-quota-chart line {
-stroke: var(--border-soft); stroke-width: 1;
-}
-.provider-quota-chart rect {
-fill: var(--accent); opacity: .72;
-}
-.provider-quota-chart rect.warn {
-fill: var(--amber);
-}
-.provider-quota-chart-labels {
-display: flex; justify-content: space-around; color: var(--muted); font-size: 9px;
-}
-.usage-widget-panel > .provider-share-card {
-margin: 2px 0 0;
-}
-@media (max-width: 760px) {
-.provider-share-card {
-grid-template-columns: 1fr;
-}
-
-.model-trigger-meta {
-display: none;
-}
-}
-.composer-simple .model-picker-trigger {
+.model-details-use {
 width: 100%;
-  max-width: none !important;
-  min-width: 0;
-  min-height: 54px;
-  justify-content: flex-start;
-  padding: 7px 10px;
-  border: 1px solid var(--chat-border);
-  border-radius: calc(14px * var(--corner-radius-scale));
-  background: var(--chat-raised);
+  min-height: 32px;
+  border: 0;
+  border-radius: calc(8px * var(--corner-radius-scale));
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-size: var(--picker-font-size);
+  font-weight: 600;
+  cursor: pointer;
 }
-.model-trigger-copy {
-min-width: 0;
-  display: flex;
-  flex: 1;
-  flex-direction: column;
-  align-items: flex-start;
-  line-height: 1.2;
+.model-sheet .model-details-use {
+min-height: var(--tap);
 }
-.model-trigger-copy small {
-color: var(--muted);
-  font-size: 8.5px;
-  font-weight: 560;
+.model-details-use:hover {
+filter: brightness(1.06);
 }
-.model-trigger-copy strong {
-max-width: 100%;
-  overflow: hidden;
-  color: var(--text);
-  font-size: 10.5px;
-  font-weight: 650;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+.model-details-current {
+display: inline-flex; align-items: center; gap: 5px; min-height: 28px;
+  color: var(--muted); font-size: var(--picker-meta-size);
 }
-.composer-simple .model-trigger-meta {
-display: none;
+/* Sheet rows reuse core tools geometry; info matches the star's touch box. */
+.model-sheet .sheet-row-info {
+flex: none;
+  width: var(--tap);
+  height: var(--tap);
+  display: inline-grid;
+  place-items: center;
+  border: 0;
+  border-radius: var(--radius-control);
+  background: transparent;
+  color: var(--faint);
+  cursor: pointer;
+  touch-action: manipulation;
 }
-@media (max-width: 480px), (max-height: 480px) and (pointer: coarse) {
-.composer-simple .model-picker-trigger {
-min-height: 52px; border-radius: calc(13px * var(--corner-radius-scale));
+.model-sheet .sheet-row-info svg {
+width: 17px; height: 17px;
 }
-}
-@media (max-height: 560px) and (max-width: 480px), (max-height: 480px) and (pointer: coarse) {
-.composer-simple .model-picker-trigger {
-min-height: 42px;
-}
+.model-sheet .sheet-row-info:active {
+color: var(--text); background: var(--surface-overlay);
 }
 .project-settings-options .model-picker {
 flex: 0 1 280px;
@@ -361,98 +395,23 @@ flex: 0 1 280px;
 .project-settings-options .model-picker-trigger {
 width: 100%; justify-content: flex-start;
 }
-@media (max-width: 700px) {
+@container feature-panel (max-width: 700px) {
 .project-settings-options .model-picker {
 width: 100%; flex-basis: auto;
 }
 }
-.composer-model-header .model-picker {
-width: 100%;
-}
-.composer-model-header .model-picker-trigger {
-width: 100%;
-  min-height: 26px;
-  max-width: none;
-  justify-content: flex-start;
-  padding: 0 3px;
-  border: 0;
-  border-radius: calc(8px * var(--corner-radius-scale));
-  background: transparent;
-}
-.composer-model-header .model-picker-trigger:hover {
-transform: none;
-}
-.composer-model-header .model-trigger-logo {
-display: block;
-  width: 28px;
-  height: 28px;
-}
-.composer-model-header .model-trigger-copy {
-display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  gap: 2px;
-  text-align: left;
-  line-height: 1.2;
-}
-.composer-model-header .model-trigger-copy small,
-.composer-model-header .model-trigger-meta {
-display: none;
-}
-.composer-model-header .model-trigger-copy strong {
-font-size: 12.5px; font-weight: 690;
-}
 .provider-logo-fallback {
 font-family: var(--sans); font-size: 8px; font-weight: 780; letter-spacing: -.04em; line-height: 1;
+  white-space: nowrap;
 }
 .sheet-section-toggle .model-provider-logo {
 color: var(--text);
-}
-.model-trigger-mobile {
-min-width: 0;
-  min-height: var(--tap);
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  padding: 0 var(--space-1);
-  border: 0;
-  border-radius: var(--radius-control);
-  background: transparent;
-  color: var(--text);
-  font-size: 13.5px;
-  font-weight: 620;
-  cursor: pointer;
-  touch-action: manipulation;
-}
-.model-trigger-mobile:active {
-background: var(--raised);
-}
-.model-trigger-mobile .model-trigger-logo {
-width: 17.6px; height: 17.6px;
-}
-.model-trigger-mobile .model-trigger-name {
-transform: translateY(1px);
-}
-.model-trigger-mobile .composer-model-meta {
-font-size: 8px; gap: 3px; transform: translateY(-1px);
 }
 .model-trigger-name {
 /* Column-flex parent with align-items: flex-start sizes children to their
    content; the explicit max-width keeps long model names truncating inside
    the trigger instead of painting over adjacent controls. */
 min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
-}
-.model-meta-icons {
-display: inline-flex; align-items: center; gap: 3px; min-width: 0;
-}
-.model-modality-icon {
-display: inline-flex; color: var(--muted);
-}
-.model-modality-icon svg {
-width: 8.8px; height: 8.8px;
-}
-.model-meta-context {
-white-space: nowrap;
 }
 .model-sheet .model-provider-logo {
 width: 16px; height: 16px;
@@ -463,38 +422,15 @@ font-size: 10px;
 .model-sheet .sheet-row-copy small {
 font-size: 10px; line-height: 14px;
 }
-.model-trigger-caret {
-flex: none; display: inline-flex; color: var(--muted);
-}
-.model-trigger-caret svg {
-width: 16px; height: 16px;
-}
-@media (max-width: 480px), (max-height: 480px) and (pointer: coarse) {
-.composer-mobile .composer-model-header .model-picker {
-width: 100%; min-width: 0;
-}
-
-.composer-mobile .composer-model-header .model-trigger-mobile {
-width: 100%;
-    min-height: 26px;
-}
-}
-@media (max-width: 700px) {
-.settings-pane-body .set-row-control > :is(input, select, textarea, .inp, .sel, .picker, .model-picker, .seg) {
+@container feature-panel (max-width: 700px) {
+.model-picker {
 width: 100%;
     min-width: 0;
     max-width: 100%;
 }
 }
-.model-trigger-copy small,
-.model-trigger-copy strong,
 .provider-logo-fallback {
 font-size: var(--font-meta);
-}
-@media (max-width: 480px), (max-height: 480px) and (pointer: coarse) {
-.composer-mobile .composer-model-header .model-trigger-mobile {
-min-height: var(--tap);
-}
 }
 .model-row-provider-logo {
 width: 24px;
@@ -551,10 +487,5 @@ min-height: var(--tap);
 @media (prefers-reduced-motion: reduce) {
 .provider-chevron {
 transition: none;
-}
-}
-@media (max-width: 760px) {
-.provider-share-card {
-grid-template-columns: 1fr;
 }
 }

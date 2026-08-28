@@ -209,9 +209,6 @@ min-height: 100%;
   color: var(--text);
   container: usage-dashboard / inline-size;
 }
-.usage-dashboard button {
-font-family: inherit;
-}
 .usage-dashboard-hero {
 display: grid;
   grid-template-columns: 46px minmax(0, 1fr) auto;
@@ -340,93 +337,15 @@ position: sticky;
 .usage-toolbar-spacer {
 flex: 1;
 }
-.usage-view-tabs,
-.usage-range-control,
-.usage-layout-control,
-.usage-metric-toggle {
-display: flex;
-  align-items: center;
-  gap: 2px;
-  padding: 3px;
-  border: 1px solid var(--border-soft);
-  border-radius: calc(10px * var(--corner-radius-scale));
-  background: var(--sunken);
-}
-.usage-view-tabs button,
-.usage-range-control button,
-.usage-layout-control button,
-.usage-metric-toggle button {
-min-height: 30px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  padding: 0 9px;
-  border: 0;
-  border-radius: calc(7px * var(--corner-radius-scale));
-  background: transparent;
-  color: var(--muted);
-  font-size: 11px;
-}
-.usage-view-tabs button:hover,
-.usage-range-control button:hover,
-.usage-layout-control button:hover,
-.usage-metric-toggle button:hover {
-border-color: transparent;
-  background: var(--surface-overlay-hover);
-  color: var(--text);
-}
-.usage-view-tabs button.active,
-.usage-range-control button.active,
-.usage-layout-control button.active,
-.usage-metric-toggle button.active {
-background: var(--accent-wash);
-  color: var(--text);
-  font-weight: 650;
-  box-shadow: var(--inset-hi);
-}
 .usage-view-tabs svg,
 .usage-layout-control svg {
 width: 13px; height: 13px;
 }
-.usage-range-control button {
-min-width: 34px; padding-inline: 7px; font: 10.5px var(--mono);
+.usage-range-control .ui-tab {
+min-width: 34px; font-family: var(--mono);
 }
-.usage-refresh-button,
-.usage-icon-button {
-width: 38px;
-  height: 38px;
-  display: grid;
-  place-items: center;
-  padding: 0;
-  border: 1px solid var(--border-soft);
-  border-radius: calc(10px * var(--corner-radius-scale));
-  background: var(--elevated);
-  color: var(--muted);
-}
-.usage-refresh-button:hover,
-.usage-icon-button:hover {
-border-color: var(--accent-line);
-  background: var(--accent-wash);
-  color: var(--accent);
-}
-.usage-refresh-button svg,
-.usage-icon-button svg {
-width: 14px; height: 14px;
-}
-.usage-refresh-button.refreshing svg {
+.usage-dashboard-toolbar > .ui-icon-button.refreshing svg {
 animation: usage-spin .7s linear infinite;
-}
-.usage-refresh-button:disabled,
-.usage-icon-button:disabled {
-opacity: .55;
-  cursor: not-allowed;
-}
-.usage-refresh-button:disabled:hover,
-.usage-icon-button:disabled:hover {
-border-color: var(--border-soft);
-  background: var(--elevated);
-  color: var(--muted);
 }
 .usage-quota-alert {
 display: flex;
@@ -450,7 +369,7 @@ min-width: 0; flex: 1; overflow-wrap: anywhere;
 .usage-quota-alert strong {
 color: var(--text);
 }
-.usage-quota-alert .small-btn {
+.usage-quota-alert .ui-btn {
 flex: none; min-height: 30px;
 }
 .usage-dashboard-content {
@@ -777,18 +696,13 @@ margin-top: 2px; font-size: 15px; letter-spacing: -.03em;
 .usage-spend-legend {
 min-width: 0; display: flex; flex-direction: column; gap: 9px;
 }
-.usage-spend-legend > .usage-card-empty {
-width: 100%;
-  min-width: 0;
-  align-self: stretch;
+.usage-spend-legend > .empty-state {
+width: 100%; min-width: 0; align-self: stretch;
 }
-.usage-spend-legend > .usage-card-empty strong {
-max-width: 100%;
-  overflow-wrap: normal;
-  word-break: normal;
-  white-space: normal;
+.usage-spend-legend > .empty-state .empty-state-title {
+overflow-wrap: normal; word-break: normal; white-space: normal;
 }
-.usage-spend-legend > div:not(.usage-card-empty) {
+.usage-spend-legend > div:not(.empty-state) {
 display: grid;
   grid-template-columns: 17px 6px minmax(48px, 1fr) auto 24px;
   align-items: center;
@@ -816,23 +730,6 @@ width: 17px;
   border-radius: 50%;
   color: var(--faint);
   font-size: 10px;
-}
-.usage-card-empty {
-min-height: 110px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 4px;
-  padding: 14px;
-  color: var(--muted);
-  text-align: center;
-}
-.usage-card-empty strong {
-color: var(--text-dim); font-size: 11.5px;
-}
-.usage-card-empty span {
-max-width: 230px; color: var(--muted); font-size: 10px; white-space: normal;
 }
 .usage-model-list {
 display: flex; flex-direction: column; gap: 4px; padding: 0 14px 14px;
@@ -1040,10 +937,10 @@ font-size: 11.5px;
 .usage-action-strip > div span {
 color: var(--muted); font-size: 10px; line-height: 1.4;
 }
-.usage-action-strip button {
+.usage-action-strip .ui-btn {
 display: inline-flex; align-items: center; gap: 5px; white-space: nowrap;
 }
-.usage-action-strip button svg {
+.usage-action-strip .ui-btn svg {
 width: 12px; height: 12px;
 }
 .usage-provider-view {
@@ -1065,18 +962,10 @@ color: var(--muted); font-size: 9.5px; text-transform: uppercase;
 .usage-provider-view-intro strong {
 font-size: 16px;
 }
-.usage-provider-view-intro button {
-min-height: 32px;
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
+.usage-provider-view-intro .ui-btn {
   margin-left: auto;
-  border-color: var(--accent-line);
-  background: var(--accent-wash);
-  color: var(--text);
-  font-size: 10.5px;
 }
-.usage-provider-view-intro button svg {
+.usage-provider-view-intro .ui-btn svg {
 width: 12px; height: 12px;
 }
 .usage-provider-detail-grid {
@@ -1180,58 +1069,11 @@ font-size: 9px; line-height: 1.4;
 .usage-provider-detail-card > footer {
 display: flex; justify-content: flex-end; gap: 6px; margin-top: auto; padding-top: 13px;
 }
-.usage-provider-detail-card > footer button {
-min-height: 29px;
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  padding: 0 8px;
-  border: 1px solid var(--border-soft);
-  border-radius: calc(8px * var(--corner-radius-scale));
-  background: var(--bg);
-  color: var(--muted);
-  font-size: 9.5px;
-}
-.usage-provider-detail-card > footer button:hover {
-border-color: var(--accent-line); background: var(--accent-wash); color: var(--text);
-}
 .usage-provider-detail-card > footer svg {
 width: 11px; height: 11px;
 }
-.usage-provider-connect-empty {
-min-height: 250px;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  grid-column: 1 / -1;
-  padding: 28px;
-  border: 1px dashed var(--border);
-  border-radius: calc(13px * var(--corner-radius-scale));
-  background: var(--elevated);
-  text-align: center;
-}
-.usage-provider-connect-empty > span {
-width: 40px;
-  height: 40px;
-  display: grid;
-  place-items: center;
-  border: 1px solid var(--accent-line);
-  border-radius: calc(11px * var(--corner-radius-scale));
-  background: var(--accent-wash);
-  color: var(--accent);
-}
-.usage-provider-connect-empty > span svg {
-width: 16px; height: 16px;
-}
-.usage-provider-connect-empty h3 {
-margin: 12px 0 4px; font-size: 13px;
-}
-.usage-provider-connect-empty p {
-max-width: 390px; margin: 0; color: var(--muted); font-size: 10px; line-height: 1.5;
-}
-.usage-provider-connect-empty button {
-margin-top: 13px; border-color: var(--accent-line); color: var(--accent);
+.usage-provider-detail-grid > .empty-state {
+grid-column: 1 / -1;
 }
 .usage-layout-compact .usage-dashboard-content {
 gap: 10px;
@@ -1309,7 +1151,7 @@ display: none;
 margin-right: auto;
 }
 
-.usage-layout-control button span {
+.usage-layout-control .ui-tab span {
 display: none;
 }
 
@@ -1347,7 +1189,7 @@ padding: 8px 14px;
 width: 100%; margin: 0;
 }
 
-.usage-view-tabs button {
+.usage-view-tabs .ui-tab {
 flex: 1; min-height: var(--tap);
 }
 
@@ -1355,19 +1197,19 @@ flex: 1; min-height: var(--tap);
 flex: 1;
 }
 
-.usage-range-control button {
+.usage-range-control .ui-tab {
 flex: 1; min-height: var(--tap);
 }
 
-.usage-layout-control button {
+.usage-layout-control .ui-tab {
 width: var(--tap); height: var(--tap);
 }
 
-.usage-refresh-button {
+.usage-dashboard-toolbar > .ui-icon-button {
 width: var(--tap); height: var(--tap);
 }
 
-.usage-icon-button {
+.usage-card-heading > .ui-icon-button {
 width: var(--tap); height: var(--tap);
 }
 
@@ -1379,7 +1221,7 @@ align-items: flex-start; flex-wrap: wrap; margin: 10px 12px 0;
 flex-basis: calc(100% - 26px);
 }
 
-.usage-quota-alert .small-btn {
+.usage-quota-alert .ui-btn {
 min-height: var(--tap); margin-left: 24px;
 }
 
@@ -1401,7 +1243,7 @@ min-height: 61px; padding-inline: 12px;
 
 .usage-card-heading p,
 .usage-chart-legend > span,
-.usage-card-empty span {
+.usage-dashboard-card .empty-state-desc {
 font-size: 10.5px; line-height: 1.45;
 }
 
@@ -1417,7 +1259,7 @@ align-items: flex-start; flex-direction: column;
 width: 100%;
 }
 
-.usage-time-card .usage-metric-toggle button {
+.usage-time-card .usage-metric-toggle .ui-tab {
 flex: 1; min-height: var(--tap);
 }
 
@@ -1445,7 +1287,7 @@ align-items: stretch; flex-wrap: wrap;
 flex-basis: calc(100% - 44px);
 }
 
-.usage-action-strip button {
+.usage-action-strip .ui-btn {
 flex: 1; justify-content: center; min-height: var(--tap);
 }
 
@@ -1453,11 +1295,11 @@ flex: 1; justify-content: center; min-height: var(--tap);
 align-items: stretch; flex-wrap: wrap; gap: 12px 24px;
 }
 
-.usage-provider-view-intro button {
+.usage-provider-view-intro .ui-btn {
 width: 100%; min-height: var(--tap); justify-content: center; margin: 0;
 }
 
-.usage-provider-detail-card > footer button {
+.usage-provider-detail-card > footer .ui-btn {
 min-height: var(--tap);
 }
 
@@ -1608,7 +1450,7 @@ align-items: flex-start; flex-direction: column;
 width: 100%;
 }
 
-.usage-model-card .usage-metric-toggle button {
+.usage-model-card .usage-metric-toggle .ui-tab {
 flex: 1; min-height: var(--tap);
 }
 
@@ -1625,27 +1467,27 @@ padding: 7px;
 }
 }
 @media (pointer: coarse) {
-.usage-dashboard .small-btn,
-.usage-view-tabs button,
-.usage-range-control button,
-.usage-layout-control button,
-.usage-metric-toggle button {
+.usage-dashboard .ui-btn,
+.usage-view-tabs .ui-tab,
+.usage-range-control .ui-tab,
+.usage-layout-control .ui-tab,
+.usage-metric-toggle .ui-tab {
 min-height: var(--tap);
 }
 
-.usage-range-control button {
+.usage-range-control .ui-tab {
 min-width: var(--tap);
 }
 
-.usage-layout-control button,
-.usage-refresh-button,
-.usage-icon-button {
+.usage-layout-control .ui-tab,
+.usage-dashboard-toolbar > .ui-icon-button,
+.usage-card-heading > .ui-icon-button {
 width: var(--tap);
     height: var(--tap);
 }
 }
 @media (prefers-reduced-motion: reduce) {
-.usage-refresh-button.refreshing svg,
+.usage-dashboard-toolbar > .ui-icon-button.refreshing svg,
 .usage-hero-status > span.loading svg {
 animation: none;
 }
@@ -1670,8 +1512,8 @@ align-items: stretch;
 width: 100%;
 }
 
-.usage-view-tabs button,
-.usage-range-control button {
+.usage-view-tabs .ui-tab,
+.usage-range-control .ui-tab {
 flex: 1;
 }
 }

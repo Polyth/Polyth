@@ -5,6 +5,7 @@ import { ago } from "../../../apps/web/src/format.ts";
 import { useStore } from "../../../apps/web/src/store.ts";
 import { parseTrackSteps } from "../../../apps/web/src/trackForm.ts";
 import { tr } from "../../../apps/web/src/i18n/index.ts";
+import { Button, EmptyState, Textarea, TextInput } from "../../../apps/web/src/components/ui/index.ts";
 
 export default function TracksPanel() {
   const projectId = useStore((state) => state.activeProjectId);
@@ -35,7 +36,7 @@ export default function TracksPanel() {
   }, [reload, tracks]);
 
   if (!projectId) {
-    return <div className="rail-empty">{tr("trackspanel.openAProjectToCreateASpec")}</div>;
+    return <EmptyState title={tr("trackspanel.openAProjectToCreateASpec")} />;
   }
 
   const steps = parseTrackSteps(stepLines, testCommand);
@@ -79,18 +80,18 @@ export default function TracksPanel() {
           <div className="muted tracks-intro">{tr("trackspanel.eachVerifiedPlanStepBecomesOneGit")}</div>
         </div>
         <span className="header-spacer" />
-        <button className="small-btn" onClick={() => setCreating((value) => !value)}>
+        <Button size="sm" onClick={() => setCreating((value) => !value)}>
           {creating ? tr("common.cancel") : tr("trackspanel.newTrack")}
-        </button>
+        </Button>
       </div>
 
       {creating && (
         <div className="track-create-form">
           <label>
-            {tr("trackspanel.trackTitle")}<input value={title} placeholder={tr("trackspanel.addOfflineSync")} onChange={(event) => setTitle(event.target.value)} />
+            {tr("trackspanel.trackTitle")}<TextInput value={title} placeholder={tr("trackspanel.addOfflineSync")} onChange={(event) => setTitle(event.target.value)} />
           </label>
           <label>
-            {tr("trackspanel.featureSpec")}<textarea
+            {tr("trackspanel.featureSpec")}<Textarea
               rows={7}
               value={spec}
               placeholder={tr("trackspanel.problemDesiredBehaviorConstraintsAndAcceptanceCriteria")}
@@ -98,7 +99,7 @@ export default function TracksPanel() {
             />
           </label>
           <label>
-            {tr("trackspanel.planSteps")}<textarea
+            {tr("trackspanel.planSteps")}<Textarea
               rows={5}
               value={stepLines}
               placeholder={tr("trackspanel.oneStepPerLineOptionalTitleDetailed")}
@@ -106,7 +107,7 @@ export default function TracksPanel() {
             />
           </label>
           <label>
-            {tr("trackspanel.testCommandForEveryStep")}<input
+            {tr("trackspanel.testCommandForEveryStep")}<TextInput
               className="mono"
               value={testCommand}
               placeholder={tr("trackspanel.nodeTestPackagesExampleTestExampleTest")}
@@ -116,9 +117,9 @@ export default function TracksPanel() {
           <div className="view-toolbar-row">
             <span className="muted">{steps.length} {tr("trackspanel.step")}{steps.length === 1 ? "" : tr("trackspanel.s")}</span>
             <span className="header-spacer" />
-            <button className="primary-btn" disabled={!canCreate || busy === "create"} onClick={create}>
+            <Button variant="primary" busy={busy === "create"} disabled={!canCreate} onClick={create}>
               {busy === "create" ? tr("trackspanel.creating") : tr("trackspanel.createSpecPlan")}
-            </button>
+            </Button>
           </div>
         </div>
       )}
@@ -126,7 +127,7 @@ export default function TracksPanel() {
       {error && <div className="form-error" role="alert">{error}</div>}
       {notice && <div className="knowledge-notice" role="status">{notice}</div>}
       {tracks.length === 0 && !creating && (
-        <div className="rail-empty">{tr("trackspanel.noTracksYetCreateOneToSave")}</div>
+        <EmptyState title={tr("trackspanel.noTracksYetCreateOneToSave")} />
       )}
 
       {tracks.map((track) => {
@@ -169,32 +170,33 @@ export default function TracksPanel() {
             </div>
             <div className="knowledge-actions">
               {track.status === "draft" && (
-                <button
-                  className="small-btn primary-btn"
+                <Button
+                  size="sm"
+                  variant="primary"
                   disabled={!sessionId || busy === track.id}
                   title={sessionId ? tr("trackspanel.startValueInThisSession", {
                     value: active?.title ?? tr("trackspanel.nextStep"),
                   }) : tr("trackspanel.openASessionFirst")}
                   onClick={() => sessionId && void run(track.id, () => api.trackStart(track.id, sessionId), tr("trackspanel.trackStarted"))}
                 >
-                  {tr("trackspanel.startNextStep")}</button>
+                  {tr("trackspanel.startNextStep")}</Button>
               )}
               {track.status === "blocked" && (
-                <button
-                  className="small-btn"
+                <Button
+                  size="sm"
                   disabled={!sessionId || busy === track.id}
                   onClick={() => sessionId && void run(track.id, () => api.trackRetry(track.id, sessionId), tr("trackspanel.stepRetryStarted"))}
                 >
-                  {tr("trackspanel.retryStep")}</button>
+                  {tr("trackspanel.retryStep")}</Button>
               )}
               {track.status === "running" && (
-                <button
-                  className="small-btn"
+                <Button
+                  size="sm"
                   disabled={busy === track.id}
                   title={tr("trackspanel.normallyAutomaticAfterTheGoalAuditorReports")}
                   onClick={() => void run(track.id, () => api.trackCompleteStep(track.id), tr("trackspanel.stepVerifiedAndCommitted"))}
                 >
-                  {tr("trackspanel.finalizeCompletedGoal")}</button>
+                  {tr("trackspanel.finalizeCompletedGoal")}</Button>
               )}
             </div>
           </section>

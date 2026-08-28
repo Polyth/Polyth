@@ -19,8 +19,15 @@ import { encodeMouseEvent, encodePaste, keyEventToBytes } from "./terminal/keyma
 import { detectLinks } from "./terminal/linkify.ts";
 import { searchBuffer, type TermMatch } from "./terminal/search.ts";
 import { copyText } from "../../../apps/web/src/utils.ts";
-import { Icon } from "../../../apps/web/src/icons.tsx";
 import { tr } from "../../../apps/web/src/i18n/index.ts";
+import {
+  Button,
+  ChevronDownIcon,
+  ChevronUpIcon,
+  CloseIcon,
+  IconButton,
+  TextInput,
+} from "../../../apps/web/src/components/ui/index.ts";
 
 const raf: (cb: () => void) => number =
   typeof requestAnimationFrame === "function"
@@ -764,7 +771,8 @@ export default function TermPane(props: TermPaneProps) {
     <div className={`term-pane${bell ? " bell" : ""}`}>
       {searchOpen && (
         <div className="term-search" onKeyDown={(e) => e.stopPropagation()}>
-          <input
+          <TextInput
+            uiSize="sm"
             ref={searchInputRef}
             value={query}
             autoFocus
@@ -785,35 +793,48 @@ export default function TermPane(props: TermPaneProps) {
           <span className="term-search-count">
             {query ? (matches.length > 0 ? `${current + 1}/${matches.length}` : "0") : ""}
           </span>
-          <button
-            className={caseSensitive ? "on" : undefined}
+          <Button
+            size="sm"
+            variant="ghost"
+            aria-pressed={caseSensitive}
             title={tr("terminalview.matchCase")}
             aria-label={tr("terminalview.matchCase")}
             onClick={() => setCaseSensitive((v) => !v)}
-          >Aa</button>
-          <button
-            className={useRegex ? "on" : undefined}
+          >Aa</Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            aria-pressed={useRegex}
             title={tr("terminalview.useRegularExpression")}
             aria-label={tr("terminalview.useRegularExpression")}
             onClick={() => setUseRegex((v) => !v)}
-          >.*</button>
-          <button
+          >.*</Button>
+          <IconButton
+            icon={ChevronUpIcon}
+            size="sm"
+            variant="ghost"
             title={tr("terminalview.previousMatchShortcut")}
-            aria-label={tr("terminalview.previousMatch")}
+            label={tr("terminalview.previousMatch")}
             disabled={matches.length === 0}
             onClick={() => gotoMatch((current - 1 + matches.length) % matches.length)}
-          ><Icon.chevronUp /></button>
-          <button
+          />
+          <IconButton
+            icon={ChevronDownIcon}
+            size="sm"
+            variant="ghost"
             title={tr("terminalview.nextMatchShortcut")}
-            aria-label={tr("terminalview.nextMatch")}
+            label={tr("terminalview.nextMatch")}
             disabled={matches.length === 0}
             onClick={() => gotoMatch((current + 1) % matches.length)}
-          ><Icon.chevronDown /></button>
-          <button
+          />
+          <IconButton
+            icon={CloseIcon}
+            size="sm"
+            variant="ghost"
             title={tr("terminalview.closeSearchShortcut")}
-            aria-label={tr("terminalview.closeSearch")}
+            label={tr("terminalview.closeSearch")}
             onClick={closeSearch}
-          ><Icon.close /></button>
+          />
         </div>
       )}
 
@@ -896,13 +917,15 @@ export default function TermPane(props: TermPaneProps) {
       )}
 
       {behind && !followRef.current && (
-        <button
+        <Button
+          size="sm"
+          iconStart={ChevronDownIcon}
           className="term-follow"
           onClick={scrollToBottom}
           title={tr("terminalview.scrollToBottomShortcut")}
         >
-          <Icon.chevronDown /> {tr("terminalview.newOutput")}
-        </button>
+          {tr("terminalview.newOutput")}
+        </Button>
       )}
       {!running && (
         <span className="term-exit-note">

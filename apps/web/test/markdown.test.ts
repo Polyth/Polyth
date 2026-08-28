@@ -153,6 +153,22 @@ test("mergeThinking folds reasoning-only parts into the next answer", () => {
   assert.equal(a.reasoning, "step one\n\nstep two\n\nfinal");
 });
 
+test("mergeThinking keeps the earliest reasoning start and latest end across merges", () => {
+  const withSpan = (id: string, reasoning: string, startedAt: number, endedAt: number): AssistantMsg =>
+    ({ ...asst(id, "", reasoning), reasoningStartedAt: startedAt, reasoningEndedAt: endedAt });
+  const msgs: RenderMessage[] = [
+    withSpan("a1", "step one", 1_000, 4_000),
+    withSpan("a2", "step two", 5_000, 9_000),
+    { ...asst("a3", "answer", "final"), reasoningStartedAt: 10_000, reasoningEndedAt: 19_000 },
+  ];
+  const out = mergeThinking(msgs);
+  assert.equal(out.length, 1);
+  const a = out[0]!;
+  assert.ok(a.kind === "assistant");
+  assert.equal(a.reasoningStartedAt, 1_000);
+  assert.equal(a.reasoningEndedAt, 19_000);
+});
+
 test("mergeThinking: tool call cuts the run; trailing run keeps streaming state", () => {
   const msgs: RenderMessage[] = [asst("a1", "", "before tool"), tool("t1"), asst("a2", "", "still going", false)];
   const out = mergeThinking(msgs);

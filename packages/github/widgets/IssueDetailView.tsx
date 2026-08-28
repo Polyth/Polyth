@@ -11,6 +11,7 @@ import { friendlyError } from "../../../apps/web/src/settings.ts";
 import { useStore } from "../../../apps/web/src/store.ts";
 import EmptyState from "../../../apps/web/src/components/EmptyState.tsx";
 import GithubReplyPanel from "./GithubReplyPanel.tsx";
+import { BackIcon, Button } from "../../../apps/web/src/components/ui/index.ts";
 
 const initials = (name: string): string =>
   name.split(/[\s-]+/).slice(0, 2).map((part) => part[0]?.toUpperCase() ?? "").join("") || "?";
@@ -65,7 +66,7 @@ export default function IssueDetailView({ number, onClose }: { number: number; o
   return (
     <div className="pr-surface issue-surface">
       <header className="pr-head">
-        <button className="small-btn pr-back" onClick={onClose}><Icon.back /> {tr("issuedetail.issues")}</button>
+        <Button size="sm" className="pr-back" iconStart={BackIcon} onClick={onClose}>{tr("issuedetail.issues")}</Button>
         {detail && (
           <div className="pr-title-block">
             <div className="pr-title-meta">
@@ -80,7 +81,7 @@ export default function IssueDetailView({ number, onClose }: { number: number; o
           </div>
         )}
         {detail && (
-          <a className="small-btn pr-external-link" href={detail.url} target="_blank" rel="noreferrer">
+          <a className="ui-btn ui-btn--quiet ui-btn--sm pr-external-link" href={detail.url} target="_blank" rel="noreferrer">
             <Icon.external /> {tr("githubview.openOnGithub")}
           </a>
         )}

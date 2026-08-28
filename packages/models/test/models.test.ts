@@ -16,6 +16,17 @@ import {
   validateProfile,
   type ModelPrefs,
 } from "@polyth/models";
+import {
+  initialModelPickerState,
+  modelPickerReducer,
+  providerIsExpanded,
+} from "@polyth/models/model-picker-state";
+import {
+  modelDetailsPresentation,
+  modelMetaLine,
+  modelModalityLabels,
+  thinkingVariantLabel,
+} from "@polyth/models/model-presentation";
 
 test("model providers are collapsed by default and expansion/order persist", () => {
   const initial = defaultModelPrefs();
@@ -84,6 +95,76 @@ test("filterModels matches provider, id, and display name", () => {
   assert.equal(filterModels(MODELS, "ANTHROPIC").length, 2);
   assert.equal(filterModels(MODELS, "").length, 4);
   assert.equal(filterModels(MODELS, "zzz").length, 0);
+});
+
+test("model picker expansion has explicit, deterministic precedence", () => {
+  assert.equal(providerIsExpanded({
+    query: "opus",
+    sessionOverride: false,
+    persistedExpanded: false,
+    selectedProvider: false,
+  }), true, "search reveals matching groups");
+  assert.equal(providerIsExpanded({
+    query: "",
+    sessionOverride: false,
+    persistedExpanded: true,
+    selectedProvider: true,
+  }), false, "session collapse wins after search clears");
+  assert.equal(providerIsExpanded({
+    query: "",
+    sessionOverride: true,
+    persistedExpanded: false,
+    selectedProvider: false,
+  }), true, "session expansion wins");
+  assert.equal(providerIsExpanded({
+    query: "",
+    persistedExpanded: true,
+    selectedProvider: false,
+  }), true, "persisted expansion wins without a session choice");
+  assert.equal(providerIsExpanded({
+    query: "",
+    persistedExpanded: false,
+    selectedProvider: true,
+  }), true, "selected provider is the final fresh-state default");
+});
+
+test("clearing model search restores the prior manual collapse state", () => {
+  let state = initialModelPickerState();
+  state = modelPickerReducer(state, {
+    type: "set-expanded",
+    providerId: "anthropic",
+    expanded: false,
+  });
+  state = modelPickerReducer(state, { type: "search", query: "claude" });
+  assert.equal(providerIsExpanded({
+    query: state.query,
+    sessionOverride: state.expansion.anthropic,
+    persistedExpanded: true,
+    selectedProvider: true,
+  }), true);
+  state = modelPickerReducer(state, { type: "search", query: "" });
+  assert.equal(providerIsExpanded({
+    query: state.query,
+    sessionOverride: state.expansion.anthropic,
+    persistedExpanded: true,
+    selectedProvider: true,
+  }), false);
+});
+
+test("model presentation applies one fallback policy to missing catalog fields", () => {
+  const sparse = { providerID: "local", modelID: "unknown", name: "Unknown" };
+  assert.deepEqual(modelModalityLabels(sparse), ["Text"]);
+  assert.equal(modelMetaLine(sparse), "Text");
+  assert.equal(thinkingVariantLabel("xhigh"), "X-High");
+  assert.deepEqual(modelDetailsPresentation(sparse), {
+    provider: "local",
+    context: "Context unknown",
+    modalities: "Text",
+    reasoning: "Not reported",
+    tools: "Not reported",
+    pricing: null,
+    availability: null,
+  });
 });
 
 test("parseModelPrefs sanitizes, deduplicates, and caps persisted keys", () => {

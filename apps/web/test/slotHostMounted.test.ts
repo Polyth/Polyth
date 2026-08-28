@@ -73,8 +73,10 @@ test("mounted host: throw → same-id replacement → visible recovery, sibling 
     assert.equal(container.textContent, "recovered twicesibling");
   } finally {
     console.error = originalError;
-    for (const off of offs) off();
-    await act(async () => { root.unmount(); });
+    await act(async () => {
+      for (const off of offs) off();
+      root.unmount();
+    });
     container.remove();
   }
 });
@@ -89,9 +91,11 @@ test("mounted host: late registration and disposal re-render without remounting"
     });
     assert.equal(container.textContent, "");
 
-    const off = registerSlot("session.header.actions", "late",
-      () => createElement("button", null, "late action"));
-    await act(async () => {});
+    let off = () => {};
+    await act(async () => {
+      off = registerSlot("session.header.actions", "late",
+        () => createElement("button", null, "late action"));
+    });
     assert.equal(container.textContent, "late action");
 
     await act(async () => { off(); });

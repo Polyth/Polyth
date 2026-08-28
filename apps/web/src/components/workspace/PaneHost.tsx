@@ -22,6 +22,7 @@ import { tr } from "../../i18n/index.ts";
 import { confirmAlert } from "../../alerts.ts";
 import { Icon } from "../../icons.tsx";
 import MoveControls from "../MoveControls.tsx";
+import { Button } from "../ui/index.ts";
 
 export interface PaneHostHandle {
   open(kind: string, resource: string, title?: string): void;
@@ -251,7 +252,7 @@ const PaneHost = forwardRef<PaneHostHandle, PaneHostProps>(function PaneHost(
           <p className="muted">{tr("workspace.panehost.thisTabIsUnavailable")}</p>
           <p className="muted editor-empty-hint">
             {tr("workspace.panehost.itWasContributedByAPluginThat")}</p>
-          <button className="small-btn" onClick={() => requestClose(active.id)}>{tr("workspace.panehost.closeTab")}</button>
+          <Button size="sm" onClick={() => requestClose(active.id)}>{tr("workspace.panehost.closeTab")}</Button>
         </div>
       )}
 

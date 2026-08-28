@@ -113,6 +113,12 @@ export function withExplicitModel(cfg: ComposerConfig, model: ModelRef | undefin
   return next;
 }
 
+/** A pending effort belongs to the prior model. Model-specific saved effort
+ * remains in thinkingPrefs and is re-derived when that model is selected. */
+export function withModelForNextTurn(cfg: ComposerConfig, model: ModelRef): ComposerConfig {
+  return withExplicitThinking(withExplicitModel(cfg, model), undefined);
+}
+
 /** An explicit agent clears the selected profile, mirroring the model rule. */
 export function withExplicitAgent(cfg: ComposerConfig, agent: string | undefined): ComposerConfig {
   const next: ComposerConfig = {

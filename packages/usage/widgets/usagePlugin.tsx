@@ -29,6 +29,7 @@ import {
   type WidgetSettingsContext,
 } from "../../../apps/web/src/widgets/catalog.ts";
 import { tr } from "../../../apps/web/src/i18n/index.ts";
+import { Button, Checkbox, EmptyState } from "../../../apps/web/src/components/ui/index.ts";
 
 export type SessionUsageMetric =
   | "showContext"
@@ -137,10 +138,10 @@ function ProviderQuotasWidget() {
   const prefs = useUsagePrefs();
   const visible = snapshots.filter((snapshot) => !prefs.hiddenProviders.includes(snapshot.providerId));
   if (loading && snapshots.length === 0) {
-    return <div className="widget-empty" role="status">Loading provider quotas…</div>;
+    return <EmptyState variant="compact" title="Loading provider quotas…" />;
   }
   if (error && snapshots.length === 0) {
-    return <div className="widget-empty" role="alert">Provider quotas are unavailable. {error}</div>;
+    return <EmptyState variant="compact" title="Provider quotas are unavailable" description={error} />;
   }
   return (
     <div className="usage-widget-panel">
@@ -151,15 +152,13 @@ function ProviderQuotasWidget() {
       {snapshots.length > 0 && (
         <div className="quota-visibility" aria-label={tr("widgets.usageplugin.visibleQuotaProviders")}>
           {snapshots.map((snapshot) => (
-            <label key={snapshot.providerId} className="plugin-toggle">
-              <input
-                type="checkbox"
-                checked={!prefs.hiddenProviders.includes(snapshot.providerId)}
-                onChange={(event) => setProviderHidden(snapshot.providerId, !event.target.checked)}
-              />
-              <ProviderLogo providerID={snapshot.providerId} className="quota-provider-logo" />
-              {snapshot.providerId}
-            </label>
+            <Checkbox
+              key={snapshot.providerId}
+              className="plugin-toggle"
+              checked={!prefs.hiddenProviders.includes(snapshot.providerId)}
+              onChange={(checked) => setProviderHidden(snapshot.providerId, !checked)}
+              label={<><ProviderLogo providerID={snapshot.providerId} className="quota-provider-logo" />{snapshot.providerId}</>}
+            />
           ))}
         </div>
       )}
@@ -209,14 +208,14 @@ function SessionsTableWidget({ projectId }: { projectId: string | null }) {
           <tr>
             <th>{tr("widgets.usageplugin.session")}</th>
             <th>
-              <button type="button" className={sort === "tokens" ? "active" : ""} onClick={() => setSort("tokens")}>
+              <Button size="sm" variant="ghost" className={sort === "tokens" ? "active" : ""} onClick={() => setSort("tokens")}>
                 {tr("widgets.usageplugin.tokens")}{" "}{sort === "tokens" ? "↓" : ""}
-              </button>
+              </Button>
             </th>
             <th>
-              <button type="button" className={sort === "cost" ? "active" : ""} onClick={() => setSort("cost")}>
+              <Button size="sm" variant="ghost" className={sort === "cost" ? "active" : ""} onClick={() => setSort("cost")}>
                 {tr("widgets.usageplugin.cost")}{" "}{sort === "cost" ? "↓" : ""}
-              </button>
+              </Button>
             </th>
           </tr>
         </thead>
@@ -264,14 +263,12 @@ function SessionUsageWidgetSettings({ config, updateConfig }: WidgetSettingsCont
   return (
     <div className="widget-schema-settings" aria-label={tr("widgets.usageplugin.sessionUsageMetrics")}>
       {SESSION_USAGE_METRICS.map((metric) => (
-        <label key={metric.id}>
-          <input
-            type="checkbox"
-            checked={usageMetricVisible(config, metric.id)}
-            onChange={(event) => updateConfig({ ...config, [metric.id]: event.target.checked })}
-          />
-          <span><strong>{metric.label}</strong></span>
-        </label>
+        <Checkbox
+          key={metric.id}
+          checked={usageMetricVisible(config, metric.id)}
+          onChange={(checked) => updateConfig({ ...config, [metric.id]: checked })}
+          label={metric.label}
+        />
       ))}
     </div>
   );

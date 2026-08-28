@@ -1744,6 +1744,7 @@ export const ptBR: AppMessages = {
   "sidebar.filter": "Filtro",
   "sidebar.filterSessions": "Filtrar sessões",
   "sidebar.importSessions": "Importar sessões…",
+  "sidebar.listOptions": "Ordenar e filtrar",
   "sidebar.loadingProjects": "Carregando projetos…",
   "sidebar.localServer": "Servidor local",
   "sidebar.message": "×",

@@ -11,6 +11,10 @@
 //   MSGACT_OC_STATE  where to persist observable state after each mutation
 //                    (the live test reads this FILE — it never talks to this
 //                    process directly)
+//   MSGACT_OC_CATALOG JSON file overriding the served model/agent catalog:
+//                    { providers: <GET /provider body>, agents: <GET /agent
+//                    body> } — used by picker QA fixtures that need several
+//                    providers, variants, and agents.
 import { createServer } from "node:http";
 import { readFileSync, writeFileSync } from "node:fs";
 
@@ -33,6 +37,10 @@ const wireMessage = (sessionID, role, text, id) => ({
   info: { id, role, sessionID, time: { created: Date.now() } },
   parts: [{ id: `prt_${id}`, type: "text", text }],
 });
+
+const catalog = process.env.MSGACT_OC_CATALOG
+  ? JSON.parse(readFileSync(process.env.MSGACT_OC_CATALOG, "utf8"))
+  : null;
 
 const seedPath = process.env.MSGACT_OC_SEED;
 if (seedPath) {
@@ -134,6 +142,71 @@ const runTurn = (sess, promptText) => {
     }
     return;
   }
+  // "work": a full synthetic agent turn — streaming reasoning snapshots, a
+  // tool lifecycle (pending → running → completed), then streamed answer text.
+  // P2-W2 uses this to QA live thinking, tool appearance, and tail-follow.
+  if (sess.turnBehavior === "work") {
+    const n = ++counter;
+    const asId = `as_${n}`;
+    const started = Date.now();
+    const at = (ms, fn) => setTimeout(fn, ms);
+    const reasonId = `prt_rsn_${n}`;
+    const thought = (i) =>
+      `Considering step ${i} for "${promptText.slice(0, 32)}": the live tail preview should always show this newest line.\n\n`;
+    let reasoning = "";
+    for (let i = 1; i <= 5; i++) {
+      at(200 * i, () => {
+        reasoning += thought(i);
+        emit("message.part.updated", {
+          part: {
+            id: reasonId, messageID: asId, sessionID: sess.id,
+            type: "reasoning", text: reasoning,
+            time: i === 5 ? { start: started, end: Date.now() } : { start: started },
+          },
+        });
+      });
+    }
+    const callID = `call_w2_${n}`;
+    const toolPart = (status, extra = {}) => ({
+      part: {
+        id: `prt_tool_${n}`, messageID: asId, sessionID: sess.id,
+        type: "tool", callID, tool: "bash",
+        state: { status, input: { command: "npm test", description: "Synthetic verification run" }, ...extra },
+      },
+    });
+    at(1300, () => emit("message.part.updated", toolPart("pending")));
+    at(1600, () => emit("message.part.updated", toolPart("running")));
+    at(2400, () => emit("message.part.updated", toolPart("completed", { output: "84 tests passed\n0 failures", title: "npm test" })));
+    const textId = `prt_txt_${n}`;
+    let text = "";
+    const para = (i) => `Streamed answer paragraph ${i}: the synthetic turn covered thinking, one tool lifecycle, and this growing reply.\n\n`;
+    for (let i = 1; i <= 4; i++) {
+      at(2700 + 250 * i, () => {
+        text += para(i);
+        const done = i === 4;
+        emit("message.part.updated", {
+          part: {
+            id: textId, messageID: asId, sessionID: sess.id, type: "text", text,
+            time: done ? { start: started, end: Date.now() } : { start: started },
+          },
+        });
+        if (done) {
+          emit("message.updated", {
+            info: {
+              id: asId, sessionID: sess.id, role: "assistant",
+              time: { completed: Date.now() },
+              tokens: { input: 96, output: 210 }, cost: 0.008,
+              providerID: "synthetic", modelID: "fable-mini",
+            },
+          });
+          sess.messages.push(wireMessage(sess.id, "assistant", text, asId));
+          persistState();
+          emit("session.idle", { sessionID: sess.id });
+        }
+      });
+    }
+    return;
+  }
   const n = ++counter;
   const asId = `as_${n}`;
   const partId = `prt_as_${n}`;
@@ -207,7 +280,7 @@ const server = createServer((req, res) => {
       return json(res, 200, { healthy: true, version: "1.18.18-msgact-fake" });
     }
     if (method === "GET" && path === "/provider") {
-      return json(res, 200, {
+      return json(res, 200, catalog?.providers ?? {
         all: [{
           id: "synthetic",
           name: "Synthetic",
@@ -225,7 +298,8 @@ const server = createServer((req, res) => {
       return json(res, 200, { providers: [], default: {} });
     }
     if (method === "GET" && path === "/agent") {
-      return json(res, 200, [{ name: "build", description: "Synthetic build agent", mode: "primary" }]);
+      return json(res, 200, catalog?.agents
+        ?? [{ name: "build", description: "Synthetic build agent", mode: "primary" }]);
     }
     if (method === "GET" && path === "/session") {
       return json(res, 200, [...sessions.values()].map((s) => ({

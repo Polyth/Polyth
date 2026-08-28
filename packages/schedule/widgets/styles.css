@@ -1,22 +1,11 @@
 /* Package-owned schedule web styles. */
-@container feature-panel (max-width: 700px) {
-.sched-form .view-toolbar-row {
-display: grid;
-    grid-template-columns: minmax(0, 1fr);
-    align-items: stretch;
-}
-
-.sched-form .view-toolbar-row > :is(input, select, label, button, .seg) {
-width: 100%; max-width: none;
-}
-}
 .loop-error-row {
 display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 2px 0;
 }
 .sched-form {
 display: flex; flex-direction: column; gap: 8px; border: 1px solid var(--hair-strong); border-radius: var(--radius-lg); background: var(--elevated); padding: 14px 16px; box-shadow: var(--inset-hi);
 }
-.sched-form textarea {
+.sched-form .ui-textarea {
 width: 100%; resize: vertical;
 }
 .sched-every {
@@ -106,12 +95,12 @@ display: grid;
     align-items: stretch;
 }
 
-.sched-form .view-toolbar-row > :is(input, select, label, button, .seg),
+.sched-form .view-toolbar-row > :is(.ui-text-input, .ui-picker, .ui-tabs, .ui-btn, .sched-every),
 .sched-every {
 width: 100%; max-width: none;
 }
 
-.sched-form .seg {
+.sched-form .ui-tabs {
 display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
 }
@@ -127,7 +116,7 @@ display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
 }
 
-.sched-actions > button {
+.sched-actions > .ui-btn {
 width: 100%;
 }
 
@@ -142,27 +131,5 @@ flex-basis: 100%; padding-left: 16px;
 @container feature-panel (max-width: 420px) {
 .sched-actions {
 grid-template-columns: minmax(0, 1fr);
-}
-}
-@container feature-panel (max-width: 700px) {
-.sched-form .view-toolbar-row {
-display: grid;
-    grid-template-columns: minmax(0, 1fr);
-    align-items: stretch;
-}
-
-.sched-form .view-toolbar-row > :is(input, select, label, button, .seg) {
-width: 100%; max-width: none;
-}
-
-.sched-form .seg {
-display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-}
-
-.sched-card {
-align-items: stretch;
-    flex-direction: column;
-    padding: 14px;
 }
 }

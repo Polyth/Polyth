@@ -8,9 +8,9 @@ import { addMenuRows, type AddMenuAction, type CatalogState } from "../composer/
 import type { SlashCommand, SnippetDef } from "@polyth/session/web-api";
 import { parseGithubUrl, type GithubAttachResult } from "@polyth/github/attachments";
 import { useEscape } from "../useEscape.ts";
-import Dialog from "./a11y/Dialog.tsx";
 import { Icon } from "../icons.tsx";
 import { tr } from "../i18n/index.ts";
+import { Button, Dialog, TextInput } from "./ui/index.ts";
 
 export interface ComposerAddMenuProps {
   hasProject: boolean;
@@ -21,10 +21,6 @@ export interface ComposerAddMenuProps {
   snippets: CatalogState<SnippetDef>;
   /** Menu opens upward from the docked composer, downward from the hero. */
   direction: "up" | "down";
-  /** UX-MOBILE-01 §17/§19: on phones this IS the single `+` control — the
-   *  separate upload chip is not rendered, so `+` and `⋮` never sit side by
-   *  side as two abstract menus. */
-  trigger?: "tools" | "add";
   onUpload: () => void;
   onInsertMention: () => void;
   onInsertCommand: () => void;
@@ -98,16 +94,14 @@ export default function ComposerAddMenu(props: ComposerAddMenuProps) {
         ref={triggerRef}
         type="button"
         className="chip composer-add-trigger"
-        aria-label={props.trigger === "add" ? tr("composeraddmenu.addFilesContextAndTools") : tr("composeraddmenu.moreComposerTools")}
+        aria-label={tr("composeraddmenu.addFilesContextAndTools")}
         aria-haspopup="menu"
         aria-expanded={open}
         {...(open ? { "aria-controls": "composer-add-menu" } : {})}
         onClick={() => setOpen((v) => !v)}
       >
-        <span aria-hidden="true" className="composer-add-icon">
-          {props.trigger === "add" ? <Icon.plus /> : <Icon.more />}
-        </span>
-        <span className="composer-add-label">{props.trigger === "add" ? tr("common.add") : tr("composeraddmenu.tools")}</span>
+        <span aria-hidden="true" className="composer-add-icon"><Icon.plus /></span>
+        <span className="composer-add-label">{tr("common.add")}</span>
       </button>
       {open && (
         <>
@@ -179,11 +173,28 @@ function GithubLinkDialog({ attachGithub, onClose }: {
   };
 
   return (
-    <Dialog title={tr("composeraddmenu.linkGithubIssueOrPullRequest")} onClose={onClose} className="github-link-dialog" initialFocus="input">
-      <h3 className="github-link-title">{tr("composeraddmenu.linkGithubIssueOrPullRequest")}</h3>
+    <Dialog
+      title={tr("composeraddmenu.linkGithubIssueOrPullRequest")}
+      onClose={onClose}
+      className="github-link-dialog"
+      initialFocus="input"
+      footer={(
+        <>
+          <Button size="sm" onClick={onClose}>{tr("common.cancel")}</Button>
+          <Button
+            size="sm"
+            variant="primary"
+            disabled={!valid || busy}
+            onClick={() => void submit()}
+          >
+            {tr("composeraddmenu.addLink")}
+          </Button>
+        </>
+      )}
+    >
       <p className="github-link-copy">
         {tr("composeraddmenu.polythAddsAReferenceToTheMatching")}</p>
-      <input
+      <TextInput
         type="url"
         placeholder={tr("composeraddmenu.httpsGithubComOwnerRepoIssues123")}
         value={url}
@@ -192,16 +203,6 @@ function GithubLinkDialog({ attachGithub, onClose }: {
         aria-label={tr("composeraddmenu.githubIssueOrPullRequestUrl")}
       />
       {error && <div className="github-link-error" role="alert">{error}</div>}
-      <div className="github-link-actions">
-        <button type="button" className="small-btn" onClick={onClose}>{tr("common.cancel")}</button>
-        <button
-          type="button"
-          className="primary-btn"
-          disabled={!valid || busy}
-          onClick={() => void submit()}
-        >
-          {tr("composeraddmenu.addLink")}</button>
-      </div>
     </Dialog>
   );
 }

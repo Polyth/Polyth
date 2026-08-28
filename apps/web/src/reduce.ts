@@ -42,6 +42,11 @@ export interface AssistantMsg {
   eventSeq: number;
   text: string;
   reasoning: string;
+  /** Wall-clock bounds of the reasoning stream (first/last reasoning chunk),
+   *  used by the collapsed "Thought for …" label. Absent when the log carries
+   *  only a final assistant/message with pre-merged reasoning. */
+  reasoningStartedAt?: number;
+  reasoningEndedAt?: number;
   finalized: boolean; // assistant/message seen
   model?: ModelRef;
   agent?: string;
@@ -442,8 +447,13 @@ export function reduceEvent(model: RenderModel, ev: SessionEvent): RenderModel {
         pushAssistant(model, m);
       }
       const text = str(d, "text") ?? "";
-      if (ev.type === "assistant/chunk") m.text += text;
-      else m.reasoning += text;
+      if (ev.type === "assistant/chunk") {
+        m.text += text;
+      } else {
+        m.reasoning += text;
+        if (m.reasoningStartedAt === undefined) m.reasoningStartedAt = ev.time;
+        m.reasoningEndedAt = ev.time;
+      }
       touch(m);
       break;
     }

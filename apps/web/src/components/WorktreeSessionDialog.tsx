@@ -3,8 +3,8 @@ import { api, type GitBranches, type Worktree } from "@polyth/session/web-api";
 import { setOverlay, setSidebarOpen, startNewSession, useStore } from "../store.ts";
 import { friendlyError } from "../settings.ts";
 import { randomWorktreeSlug, suggestWorktreeBranch } from "../worktreeSessions.ts";
-import Dialog from "./a11y/Dialog.tsx";
 import { tr } from "../i18n/index.ts";
+import { Button, Dialog, Select, TextInput } from "./ui/index.ts";
 
 export default function WorktreeSessionDialog() {
   const request = useStore((state) => state.worktreeSessionRequest);
@@ -119,19 +119,35 @@ export default function WorktreeSessionDialog() {
 
   if (!request) return null;
   return (
-    <Dialog title={tr("worktreesessiondialog.newWorktree")} onClose={close} className="worktree-session-dialog" initialFocus="input">
-      <div className="dialog-head">
-        <div>
-          <h2>{tr("worktreesessiondialog.newWorktree")}</h2>
-          <p className="muted">{tr("worktreesessiondialog.createAnIsolatedCheckoutAnd")}</p>
-        </div>
-        <button className="icon-btn" aria-label={tr("worktreesessiondialog.closeDialog")} disabled={busy} onClick={close}>{tr("worktreesessiondialog.message")}</button>
-      </div>
-
+    <Dialog
+      title={tr("worktreesessiondialog.newWorktree")}
+      onClose={close}
+      className="worktree-session-dialog"
+      initialFocus="input"
+      footer={(
+        <>
+          <span className="muted">{progress || tr("worktreesessiondialog.aNewChatOpensAs")}</span>
+          <span className="header-spacer" />
+          <Button size="sm" disabled={busy} onClick={close}>{tr("common.cancel")}</Button>
+          <Button
+            size="sm"
+            variant="primary"
+            busy={busy}
+            disabled={loading || !branchName || branchAlreadyCheckedOut}
+            onClick={() => void submit()}
+          >
+            {busy ? progress || tr("worktreesessiondialog.creating") : tr("worktreesessiondialog.createWorktreeStartChat")}
+          </Button>
+        </>
+      )}
+    >
+      <p className="muted worktree-session-intro">
+        {tr("worktreesessiondialog.createAnIsolatedCheckoutAnd")}
+      </p>
       <div className="worktree-session-body">
         <label className="worktree-session-field">
           <span>{tr("worktreesessiondialog.chatName")} <span className="muted">{tr("worktreesessiondialog.optional")}</span></span>
-          <input value={title} placeholder={tr("worktreesessiondialog.workInValue", {
+          <TextInput value={title} placeholder={tr("worktreesessiondialog.workInValue", {
             value: project?.name ?? tr("permissionbanner.thisProject"),
           })} onChange={(event) => setTitle(event.target.value)} />
         </label>
@@ -139,7 +155,7 @@ export default function WorktreeSessionDialog() {
         {loading ? <div className="empty">{tr("worktreesessiondialog.loadingBranches")}</div> : <>
           <label className="worktree-session-field">
             <span>{tr("worktreesessiondialog.branch")}</span>
-            <input
+            <TextInput
               className="mono"
               value={branch}
               placeholder={suggestion}
@@ -155,9 +171,13 @@ export default function WorktreeSessionDialog() {
 
           {createsBranch && <label className="worktree-session-field">
             <span>{tr("worktreesessiondialog.baseBranch")}</span>
-            <select value={baseBranch} onChange={(event) => setBaseBranch(event.target.value)}>
-              {localBranches.map((item) => <option key={item.name} value={item.name}>{item.name}</option>)}
-            </select>
+            <Select
+              label={tr("worktreesessiondialog.baseBranch")}
+              value={baseBranch}
+              options={localBranches.map((item) => ({ value: item.name, label: item.name }))}
+              onChange={setBaseBranch}
+              ariaLabel={tr("worktreesessiondialog.baseBranch")}
+            />
             <small className="muted">{tr("worktreesessiondialog.theNewBranchStartsFrom")}</small>
           </label>}
 
@@ -165,15 +185,6 @@ export default function WorktreeSessionDialog() {
         </>}
 
         {error && <div className="inline-error" role="alert">{error}</div>}
-      </div>
-
-      <div className="dialog-foot">
-        <span className="muted">{progress || tr("worktreesessiondialog.aNewChatOpensAs")}</span>
-        <span className="header-spacer" />
-        <button className="small-btn" disabled={busy} onClick={close}>{tr("common.cancel")}</button>
-        <button className="primary-btn" disabled={busy || loading || !branchName || branchAlreadyCheckedOut} onClick={() => void submit()}>
-          {busy ? progress || tr("worktreesessiondialog.creating") : tr("worktreesessiondialog.createWorktreeStartChat")}
-        </button>
       </div>
     </Dialog>
   );

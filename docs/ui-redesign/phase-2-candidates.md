@@ -27,6 +27,12 @@ direction / Requires product decision.
   affordances (context-window meter) into the model header, or expose it behind
   an explicit density/pro setting.
 - **Requires product decision:** yes — remove vs. surface.
+- **Status (Phase 2 Wave 3A):** resolved — removed. The power row,
+  `ContextWindowPicker`, `ThinkingSlider`, and the `simpleMode` split are
+  deleted. The composer has one interaction model: a quiet config rail
+  (model/agent/effort chips) under the editor. Context-window surfacing is
+  recorded as a speculative note in `phase-2-wave-3a-handoff.md` (chip meter
+  when near the limit), not implemented.
 
 ## 2. `Menu` sheet titles reuse verbose accessibility labels
 
@@ -60,6 +66,12 @@ direction / Requires product decision.
   icons.
 - **Requires product decision:** no (accessibility parity), but scheduling —
   it touches every current `Menu` adopter.
+- **Status (Phase 2 Wave 1):** shipped. `MenuAction` carries
+  `kind: "action" | "radio" | "checkbox"` + `checked` (mapped to
+  `menuitemradio`/`menuitemcheckbox` with `aria-checked`), the check glyph
+  renders from `checked`, and checkbox entries keep the menu open for
+  multi-toggle. Adopted by the sidebar sort/filter menu and session-row
+  label toggles.
 
 ## 4. Session rows stack three overlapping action affordances
 
@@ -81,6 +93,12 @@ direction / Requires product decision.
   More chip on touch/drawer layouts), and the duplicate tab stop is gone.
   The Shift-hover quick-action layer and swipe actions still coexist and
   still need the product decision above.
+- **Status (Phase 2 Wave 1):** decided and shipped. One `.session-menu-trigger`
+  per row (hover/focus-revealed on fine pointers over the faded status zone,
+  persistent at 44px on coarse/drawer layouts); the Shift-hover layer is
+  removed; swipe survives as a touch-only accelerator whose Archive/Delete
+  buttons render only during the gesture. Keyboard reaches everything through
+  the row menu (Shift+F10 / ContextMenu key).
 
 ## 5. Tablet band (481–820 px) shows desktop chrome with phone interactions
 
@@ -123,6 +141,11 @@ direction / Requires product decision.
   rows inside the existing picker sheet.
 - **Requires product decision:** yes — which controls deserve permanent
   visibility on phones.
+- **Status (Phase 2 Wave 3A):** resolved — the model header row is gone
+  entirely. Model, agent, and effort are truncating chips in a single
+  horizontally scrollable config rail (collapsed composer shows no config at
+  all); nothing wraps at 320 px and the conversation area no longer pays a
+  permanent second control row.
 
 ## 8. Session-row menu is hand-rolled instead of using `ui/Menu`
 
@@ -143,6 +166,11 @@ direction / Requires product decision.
   the same entry list.
 - **Requires product decision:** no — engineering migration, but sequenced
   after item 3 (checkbox semantics) since label toggles need `aria-checked`.
+- **Status (Phase 2 Wave 1):** shipped. `ui/Menu` gained a controlled
+  `open`/`onOpenChange` state, a `returnFocusRef` (dynamic focus return for
+  context-menu/long-press/Shift+F10 openings), heading entries, swatches, and
+  a `footer` slot; the hand-rolled `.session-menu` and its CSS are deleted.
+  Labels render as `menuitemcheckbox` entries with color swatches.
 
 ## 9. Package CSS carried app-global styling policy
 
